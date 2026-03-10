@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Offline Map</title>
+    <link rel="stylesheet" href="leaflet.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; overflow: hidden; }
+        #map { width: 100%; height: 100%; background: #f2efe9; }
+        .map-info {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            background: rgba(255,255,255,0.85);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font: 11px/1.4 sans-serif;
+            color: #333;
+            z-index: 1000;
+            pointer-events: none;
+        }
+        .leaflet-control-attribution {
+            font-size: 10px !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="map-info" id="info"></div>
+    <script src="leaflet.js"></script>
+    <script>
+    (function() {
+        // Compute base URL for absolute resource paths (needed for Kiwix JS PWA)
+        var baseUrl = (function() {
+            var href = window.location.href;
+            return href.substring(0, href.lastIndexOf('/') + 1);
+        })();
+
+        // Load map configuration
+        fetch(baseUrl + 'map-config.json')
+            .then(function(r) { return r.json(); })
+            .then(function(config) { initMap(config); })
+            .catch(function(err) {
+                document.getElementById('info').textContent = 'Error loading map config: ' + err;
+                initMap({ center: [0, 0], zoom: 2, name: 'Offline Map' });
+            });
+
+        function initMap(config) {
+            var center = config.center || [0, 0];
+            var zoom = config.zoom || 10;
+            var minZoom = config.minZoom || 0;
+            var nativeMaxZoom = config.maxZoom || 14;
+
+            // Leaflet uses [lat, lng] not [lng, lat]
+            var map = L.map('map', {
+                center: [center[1], center[0]],
+                zoom: zoom,
+                minZoom: minZoom,
+                maxZoom: 19,
+                zoomControl: true,
+                attributionControl: true
+            });
+
+            // Constrain to bounds if available
+            if (config.bounds) {
+                var b = config.bounds; // [minlon, minlat, maxlon, maxlat]
+                var bounds = L.latLngBounds(
+                    L.latLng(b[1], b[0]),
+                    L.latLng(b[3], b[2])
+                );
+                map.setMaxBounds(bounds.pad(0.1));
+            }
+
+            // Add offline tile layer with absolute URLs
+            // Tiles are 512x512 (2x retina), so use tileSize: 512 and
+            // zoomOffset: -1 to map Leaflet's zoom levels correctly.
+            // maxNativeZoom = highest zoom with actual tiles
+            // maxZoom = 19 allows over-zooming (Leaflet scales up the tiles)
+            L.tileLayer(baseUrl + 'tiles/{z}/{x}/{y}.png', {
+                minZoom: minZoom,
+                maxNativeZoom: nativeMaxZoom,
+                maxZoom: 19,
+                tileSize: 512,
+                zoomOffset: -1,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                errorTileUrl: ''
+            }).addTo(map);
+
+            // Add scale control
+            L.control.scale({ imperial: true, metric: true }).addTo(map);
+
+            // Show info
+            var info = document.getElementById('info');
+            info.textContent = config.name || 'Offline Map';
+
+            // Update title
+            document.title = config.name || 'Offline Map';
+        }
+    })();
+    </script>
+</body>
+</html>

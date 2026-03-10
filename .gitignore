@@ -1,0 +1,5 @@
+*.osm.pbf
+*.mbtiles
+__pycache__/
+*.pyc
+*.zim
