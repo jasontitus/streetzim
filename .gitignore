@@ -2,3 +2,4 @@
 *.mbtiles
 __pycache__/
 *.pyc
+osm-virginia.zim
