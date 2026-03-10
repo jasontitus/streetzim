@@ -656,12 +656,13 @@ def create_zim(
     print(f"  Creating ZIM file: {output_path}")
 
     class MapItem(Item):
-        def __init__(self, path, title, mimetype, content, is_front=False):
+        def __init__(self, path, title, mimetype, content, is_front=False, compress=True):
             super().__init__()
             self._path = path
             self._title = title
             self._mimetype = mimetype
             self._is_front = is_front
+            self._compress = compress
             if isinstance(content, (str, Path)) and os.path.isfile(str(content)):
                 self._file_path = str(content)
                 self._data = None
@@ -684,7 +685,7 @@ def create_zim(
             return StringProvider(self._data)
 
         def get_hints(self):
-            return {Hint.FRONT_ARTICLE: self._is_front}
+            return {Hint.FRONT_ARTICLE: self._is_front, Hint.COMPRESS: self._compress}
 
     creator = Creator(str(output_path))
     creator.config_indexing(True, "en")
