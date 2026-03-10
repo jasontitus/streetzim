@@ -32,13 +32,18 @@
     <script src="leaflet.js"></script>
     <script>
     (function() {
+        // Compute base URL for absolute resource paths (needed for Kiwix JS PWA)
+        var baseUrl = (function() {
+            var href = window.location.href;
+            return href.substring(0, href.lastIndexOf('/') + 1);
+        })();
+
         // Load map configuration
-        fetch('map-config.json')
+        fetch(baseUrl + 'map-config.json')
             .then(function(r) { return r.json(); })
             .then(function(config) { initMap(config); })
             .catch(function(err) {
                 document.getElementById('info').textContent = 'Error loading map config: ' + err;
-                // Fallback: try to init with defaults
                 initMap({ center: [0, 0], zoom: 2, name: 'Offline Map' });
             });
 
@@ -46,7 +51,7 @@
             var center = config.center || [0, 0];
             var zoom = config.zoom || 10;
             var minZoom = config.minZoom || 0;
-            var maxZoom = config.maxZoom || 18;
+            var nativeMaxZoom = config.maxZoom || 14;
 
             // Leaflet uses [lat, lng] not [lng, lat]
             var map = L.map('map', {
@@ -68,12 +73,12 @@
                 map.setMaxBounds(bounds.pad(0.1));
             }
 
-            // Add offline tile layer
-            // maxNativeZoom = highest zoom with actual tiles (from config)
+            // Add offline tile layer with absolute URLs
+            // maxNativeZoom = highest zoom with actual tiles
             // maxZoom = 19 allows over-zooming (Leaflet scales up the tiles)
-            L.tileLayer('tiles/{z}/{x}/{y}.png', {
+            L.tileLayer(baseUrl + 'tiles/{z}/{x}/{y}.png', {
                 minZoom: minZoom,
-                maxNativeZoom: maxZoom,
+                maxNativeZoom: nativeMaxZoom,
                 maxZoom: 19,
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
                 errorTileUrl: ''

@@ -421,8 +421,25 @@ def render_tile_to_png(decoded_tile, zoom):
 
 
 def _render_labels(img, draw, decoded_tile, zoom):
-    """Render text labels for places, roads, and water features."""
+    """Render text labels for places, roads, and water features.
+
+    To avoid label repetition across tile boundaries, we only render
+    labels whose anchor point falls within the inner portion of the
+    tile (with margin). Features near tile edges are skipped — the
+    neighboring tile will render them instead.
+    """
     labels_drawn = []  # Track label bounding boxes to avoid overlap
+
+    # Margin: only render labels whose anchor is within this inner area.
+    # This prevents the same label from appearing on adjacent tiles.
+    # Use a margin that's ~15% of tile size on each side.
+    margin = int(TILE_SIZE * 0.15)
+    inner_min = margin
+    inner_max = TILE_SIZE - margin
+
+    def _in_tile_center(px, py):
+        """Check if a point is within the inner area of the tile."""
+        return inner_min <= px <= inner_max and inner_min <= py <= inner_max
 
     def _get_name(props):
         """Extract best label text from properties."""
@@ -437,7 +454,7 @@ def _render_labels(img, draw, decoded_tile, zoom):
         lx, ly = int(x - tw / 2), int(y - th / 2)
 
         # Check for overlap with existing labels (with padding)
-        pad = 2
+        pad = 4
         new_rect = (lx - pad, ly - pad, lx + tw + pad, ly + th + pad)
         for existing in labels_drawn:
             if (new_rect[0] < existing[2] and new_rect[2] > existing[0] and
@@ -479,6 +496,11 @@ def _render_labels(img, draw, decoded_tile, zoom):
                 continue
             px, py = coords[0] * scale, coords[1] * scale
 
+            # Only render if anchor is in the inner tile area
+            # (exception: cities/towns are important enough to always show)
+            if cls not in ("city", "town") and not _in_tile_center(px, py):
+                continue
+
             # Size and visibility by class and zoom
             if cls == "city" and zoom >= 5:
                 font = get_font(bold=True, size=min(14, 8 + zoom - 5))
@@ -499,11 +521,13 @@ def _render_labels(img, draw, decoded_tile, zoom):
         if layer:
             extent = layer.get("extent", 4096)
             scale = TILE_SIZE / extent
+            # Deduplicate: only label each road name once per tile
+            seen_road_names = set()
             for feat in layer.get("features", []):
                 props = feat.get("properties", {})
                 geom = feat.get("geometry", {})
                 name = _get_name(props)
-                if not name:
+                if not name or name in seen_road_names:
                     continue
                 gtype = geom.get("type", "")
                 if gtype not in ("LineString", "MultiLineString"):
@@ -519,8 +543,13 @@ def _render_labels(img, draw, decoded_tile, zoom):
                     mid = len(line_coords) // 2
                     px = line_coords[mid][0] * scale
                     py = line_coords[mid][1] * scale
+                    # Only render if midpoint is in inner tile area
+                    if not _in_tile_center(px, py):
+                        continue
                     font = get_font(bold=False, size=9)
                     _draw_label(px, py, name, font, (85, 85, 85), (255, 255, 255))
+                    seen_road_names.add(name)
+                    break  # One label per road name per tile
 
     # Water labels
     if zoom >= 10:
@@ -538,6 +567,8 @@ def _render_labels(img, draw, decoded_tile, zoom):
                 if not coords:
                     continue
                 px, py = coords[0] * scale, coords[1] * scale
+                if not _in_tile_center(px, py):
+                    continue
                 font = get_font(bold=False, size=10)
                 _draw_label(px, py, name, font, (93, 128, 180), (255, 255, 255))
 

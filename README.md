@@ -30,8 +30,8 @@ where WebGL (required by MapLibre) is not available.
 
 | Area | Vector ZIM | Raster ZIM | Ratio |
 |------|-----------|-----------|-------|
-| Monaco | 740 KB | 246 KB | 3.0x |
-| Washington, D.C. | 17.4 MB | 3.9 MB | 4.5x |
+| Monaco | 741 KB | 208 KB | 3.6x |
+| Washington, D.C. | 17.4 MB | 2.9 MB | 6.0x |
 
 **Why are the raster ZIMs still smaller?** See the [resolution comparison](#raster-vs-vector-tile-resolution) section below.
 
@@ -55,10 +55,10 @@ is misleading.** Here's why:
 
 ### Why the raster ZIMs appear smaller
 
-1. **No text labels or fonts.** The vector ZIM bundles MapLibre GL JS (~800 KB),
-   CSS, and SDF font glyph PBFs for text rendering. The raster ZIM bundles
-   Leaflet (~150 KB) and renders no text at all — labels, street names, place
-   names are absent from the raster tiles.
+1. **Lighter JS library and simpler fonts.** The vector ZIM bundles MapLibre GL JS
+   (~800 KB), CSS, and SDF font glyph PBFs for text rendering. The raster ZIM
+   bundles Leaflet (~150 KB) and pre-renders labels into the tile images using
+   system fonts — no font data needs to be shipped.
 
 2. **Simplified rendering.** Our Python-based raster renderer (Pillow +
    mapbox-vector-tile) draws basic shapes with flat colors — no anti-aliasing,
@@ -218,9 +218,9 @@ The repository includes pre-built ZIM files for quick testing:
 | File | Approach | Size |
 |------|----------|------|
 | `osm-monaco.zim` | Vector (MapLibre) | 740 KB |
-| `osm-monaco-leaflet.zim` | Raster (Leaflet) | 246 KB |
+| `osm-monaco-leaflet.zim` | Raster (Leaflet) | 208 KB |
 | `osm-washington-dc.zim` | Vector (MapLibre) | 17.4 MB |
-| `osm-washington-dc-leaflet.zim` | Raster (Leaflet) | 3.9 MB |
+| `osm-washington-dc-leaflet.zim` | Raster (Leaflet) | 2.9 MB |
 
 ### Testing with kiwix-serve
 

@@ -28,11 +28,32 @@
   <p>Vector tiles rendered client-side. Data from OpenStreetMap.</p>
 </div>
 <script>
+// Compute base URL for absolute resource paths.
+// This is critical for Kiwix JS PWA where MapLibre's Web Workers
+// make fetch requests that need absolute URLs to route through
+// the ServiceWorker correctly.
+var baseUrl = (function() {
+  var href = window.location.href;
+  return href.substring(0, href.lastIndexOf('/') + 1);
+})();
+
 // Read map config from embedded JSON
-fetch('map-config.json')
-  .then(r => r.json())
-  .then(config => {
-    const map = new maplibregl.Map({
+fetch(baseUrl + 'map-config.json')
+  .then(function(r) { return r.json(); })
+  .then(function(config) {
+    // Check WebGL support before initializing MapLibre
+    try {
+      var canvas = document.createElement('canvas');
+      var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (!gl) throw new Error('WebGL not available');
+    } catch (e) {
+      document.getElementById('info').innerHTML =
+        '<h3>WebGL Required</h3><p>This map needs WebGL support. ' +
+        'Try the Leaflet/raster version instead.</p>';
+      return;
+    }
+
+    var map = new maplibregl.Map({
       container: 'map',
       style: makeStyle(config),
       center: config.center,
@@ -43,34 +64,50 @@ fetch('map-config.json')
       maxBounds: config.bounds ? [
         [config.bounds[0], config.bounds[1]],
         [config.bounds[2], config.bounds[3]]
-      ] : undefined
+      ] : undefined,
+      // Ensure all resource requests use absolute URLs
+      transformRequest: function(url, resourceType) {
+        // If URL is already absolute, leave it alone
+        if (url.indexOf('://') !== -1) return { url: url };
+        // Make relative URLs absolute from the page's base
+        return { url: baseUrl + url };
+      }
     });
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }));
+
+    // Log tile errors for debugging
+    map.on('error', function(e) {
+      console.error('MapLibre error:', e.error ? e.error.message : e);
+    });
 
     // Update info box with area name
     if (config.name) {
       document.querySelector('#info h3').textContent = config.name;
     }
   })
-  .catch(err => {
+  .catch(function(err) {
     document.getElementById('info').innerHTML =
       '<h3>Error</h3><p>' + err.message + '</p>';
   });
 
 function makeStyle(config) {
+  // Use absolute URLs so MapLibre's Web Workers can fetch tiles/fonts
+  // through the ServiceWorker in Kiwix JS PWA
+  var tileUrl = baseUrl + "tiles/{z}/{x}/{y}.pbf";
+  var glyphUrl = baseUrl + "fonts/{fontstack}/{range}.pbf";
   return {
     "version": 8,
     "name": "OSM Offline",
     "sources": {
       "openmaptiles": {
         "type": "vector",
-        "tiles": ["tiles/{z}/{x}/{y}.pbf"],
+        "tiles": [tileUrl],
         "minzoom": config.minZoom || 0,
         "maxzoom": config.maxZoom || 14
       }
     },
-    "glyphs": "fonts/{fontstack}/{range}.pbf",
+    "glyphs": glyphUrl,
     "layers": [
       // Background
       {
