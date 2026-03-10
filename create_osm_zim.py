@@ -466,6 +466,7 @@ def create_zim(
     creator = Creator(str(output_path))
     creator.config_indexing(True, "en")
     creator.config_clustersize(cluster_size)
+    creator.config_nbworkers(os.cpu_count() or 4)
     creator.set_mainpath("index.html")
     with creator:
 
@@ -504,33 +505,43 @@ def create_zim(
             config_json.encode("utf-8"),
         ))
 
-        # Add vector tiles
+        # Add vector tiles — decompress in parallel for speed
+        import time
         print(f"    Adding {len(tiles)} vector tiles...")
-        tile_count = 0
-        for (z, x, y), data in sorted(tiles.items()):
-            path = f"tiles/{z}/{x}/{y}.pbf"
+        from concurrent.futures import ThreadPoolExecutor
 
-            # Tiles from MBTiles are typically gzip-compressed.
-            # We store them as-is since the browser can handle gzipped PBF.
-            # However, some MBTiles may store uncompressed tiles.
-            # Check if data is gzip and decompress for ZIM (ZIM does its own compression)
-            tile_data = data
+        def decompress_tile(item):
+            z, x, y, data = item
             if data[:2] == b"\x1f\x8b":  # gzip magic bytes
                 try:
-                    tile_data = gzip.decompress(data)
+                    data = gzip.decompress(data)
                 except Exception:
-                    pass  # Keep original if decompression fails
+                    pass
+            return z, x, y, data
 
-            creator.add_item(MapItem(
-                path, f"Tile {z}/{x}/{y}",
-                "application/x-protobuf",
-                tile_data,
-            ))
-            tile_count += 1
-            if tile_count % 5000 == 0:
-                print(f"\r    Added {tile_count}/{len(tiles)} tiles...", end="", flush=True)
+        tile_items = [(z, x, y, data) for (z, x, y), data in sorted(tiles.items())]
+        tile_count = 0
+        tile_start = time.time()
+        batch_size = 1000
+        for i in range(0, len(tile_items), batch_size):
+            batch = tile_items[i:i + batch_size]
+            with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
+                results = list(pool.map(decompress_tile, batch))
+            for z, x, y, tile_data in results:
+                creator.add_item(MapItem(
+                    f"tiles/{z}/{x}/{y}.pbf", f"Tile {z}/{x}/{y}",
+                    "application/x-protobuf",
+                    tile_data,
+                ))
+                tile_count += 1
+            if tile_count % 2000 == 0:
+                elapsed = time.time() - tile_start
+                rate = tile_count / elapsed if elapsed > 0 else 0
+                remaining = (len(tiles) - tile_count) / rate if rate > 0 else 0
+                print(f"\r    Added {tile_count}/{len(tiles)} tiles ({rate:.0f}/s, ~{remaining/60:.0f}m left)...", end="", flush=True)
 
-        print(f"\r    Added {tile_count} tiles")
+        elapsed = time.time() - tile_start
+        print(f"\r    Added {tile_count} tiles in {elapsed:.0f}s ({tile_count/elapsed:.0f}/s)                ")
 
         # Add font glyphs
         print(f"    Adding {len(fonts)} font glyph ranges...")
