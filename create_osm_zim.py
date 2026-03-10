@@ -261,6 +261,79 @@ def tile_to_lnglat(z, x, y, px, py, extent=4096):
     return lon, lat
 
 
+def _process_tile_for_search(args):
+    """Worker function for parallel search feature extraction."""
+    import mapbox_vector_tile
+    z, x, y, data, search_layers = args
+
+    tile_data = data
+    if data[:2] == b"\x1f\x8b":
+        try:
+            tile_data = gzip.decompress(data)
+        except Exception:
+            return []
+
+    try:
+        decoded = mapbox_vector_tile.decode(tile_data, y_coord_down=True)
+    except Exception:
+        return []
+
+    results = []
+    for layer_name, feature_type in search_layers.items():
+        layer = decoded.get(layer_name)
+        if not layer:
+            continue
+
+        extent = layer.get("extent", 4096)
+
+        for feature in layer.get("features", []):
+            props = feature.get("properties", {})
+            name = props.get("name:latin") or props.get("name", "")
+            if not name or len(name) < 2:
+                continue
+
+            geom = feature.get("geometry", {})
+            coords = geom.get("coordinates")
+            if not coords:
+                continue
+
+            geom_type = geom.get("type", "")
+            try:
+                if geom_type == "Point":
+                    px, py = coords[0], coords[1]
+                elif geom_type == "MultiPoint":
+                    px = sum(c[0] for c in coords) / len(coords)
+                    py = sum(c[1] for c in coords) / len(coords)
+                elif geom_type == "LineString":
+                    mid = coords[len(coords) // 2]
+                    px, py = mid[0], mid[1]
+                elif geom_type == "MultiLineString":
+                    longest = max(coords, key=len)
+                    mid = longest[len(longest) // 2]
+                    px, py = mid[0], mid[1]
+                elif geom_type in ("Polygon", "MultiPolygon"):
+                    ring = coords[0] if geom_type == "Polygon" else coords[0][0]
+                    px = sum(c[0] for c in ring) / len(ring)
+                    py = sum(c[1] for c in ring) / len(ring)
+                else:
+                    continue
+            except (IndexError, ZeroDivisionError, TypeError):
+                continue
+
+            lon, lat = tile_to_lnglat(z, x, y, px, py, extent)
+            subtype = props.get("class", "") or props.get("subclass", "")
+
+            results.append({
+                "name": name,
+                "type": feature_type,
+                "subtype": subtype,
+                "lat": round(lat, 6),
+                "lon": round(lon, 6),
+            })
+
+    return results
+
+
 def extract_searchable_features(tiles):
     """Extract named features from z14 vector tiles for search indexing.
 
@@ -296,84 +369,40 @@ def extract_searchable_features(tiles):
     features = []
     seen = set()  # Deduplicate by (name, type, rounded_coords)
 
-    for (z, x, y), data in z14_tiles.items():
-        # Decompress if gzipped
-        tile_data = data
-        if data[:2] == b"\x1f\x8b":
-            try:
-                tile_data = gzip.decompress(data)
-            except Exception:
-                continue
+    # Process tiles in parallel using multiprocessing for CPU-bound MVT decoding
+    from multiprocessing import Pool
+    import os as _os
 
-        try:
-            decoded = mapbox_vector_tile.decode(tile_data, y_coord_down=True)
-        except Exception:
+    tile_items = list(z14_tiles.items())
+    num_workers = _os.cpu_count() or 4
+    print(f"    Processing {len(tile_items)} z14 tiles with {num_workers} workers...")
+
+    chunk_size = max(1, len(tile_items) // (num_workers * 4))
+    processed = 0
+
+    with Pool(num_workers) as pool:
+        for batch_features in pool.imap_unordered(
+            _process_tile_for_search,
+            [(z, x, y, data, search_layers) for (z, x, y), data in tile_items],
+            chunksize=chunk_size,
+        ):
+            features.extend(batch_features)
+            processed += 1
+            if processed % 5000 == 0:
+                print(f"\r    Processed {processed}/{len(tile_items)} tiles, {len(features)} features so far...", end="", flush=True)
+
+    if processed > 5000:
+        print()  # Newline after progress
+
+    # Deduplicate across tiles
+    deduped = []
+    for f in features:
+        dedup_key = (f["name"].lower(), f["type"], round(f["lat"], 4), round(f["lon"], 4))
+        if dedup_key in seen:
             continue
-
-        for layer_name, feature_type in search_layers.items():
-            layer = decoded.get(layer_name)
-            if not layer:
-                continue
-
-            extent = layer.get("extent", 4096)
-
-            for feature in layer.get("features", []):
-                props = feature.get("properties", {})
-                name = props.get("name:latin") or props.get("name", "")
-                if not name or len(name) < 2:
-                    continue
-
-                # Get centroid from geometry
-                geom = feature.get("geometry", {})
-                coords = geom.get("coordinates")
-                if not coords:
-                    continue
-
-                # Compute centroid depending on geometry type
-                geom_type = geom.get("type", "")
-                try:
-                    if geom_type == "Point":
-                        px, py = coords[0], coords[1]
-                    elif geom_type == "MultiPoint":
-                        px = sum(c[0] for c in coords) / len(coords)
-                        py = sum(c[1] for c in coords) / len(coords)
-                    elif geom_type == "LineString":
-                        # Use midpoint of the line
-                        mid = coords[len(coords) // 2]
-                        px, py = mid[0], mid[1]
-                    elif geom_type == "MultiLineString":
-                        # Use midpoint of the longest line
-                        longest = max(coords, key=len)
-                        mid = longest[len(longest) // 2]
-                        px, py = mid[0], mid[1]
-                    elif geom_type in ("Polygon", "MultiPolygon"):
-                        # Use centroid of first ring
-                        ring = coords[0] if geom_type == "Polygon" else coords[0][0]
-                        px = sum(c[0] for c in ring) / len(ring)
-                        py = sum(c[1] for c in ring) / len(ring)
-                    else:
-                        continue
-                except (IndexError, ZeroDivisionError, TypeError):
-                    continue
-
-                lon, lat = tile_to_lnglat(z, x, y, px, py, extent)
-
-                # Deduplicate: round to ~10m precision
-                dedup_key = (name.lower(), feature_type, round(lat, 4), round(lon, 4))
-                if dedup_key in seen:
-                    continue
-                seen.add(dedup_key)
-
-                # Determine subtype for better search context
-                subtype = props.get("class", "") or props.get("subclass", "")
-
-                features.append({
-                    "name": name,
-                    "type": feature_type,
-                    "subtype": subtype,
-                    "lat": round(lat, 6),
-                    "lon": round(lon, 6),
-                })
+        seen.add(dedup_key)
+        deduped.append(f)
+    features = deduped
 
     # Sort by type priority then name
     type_order = {"place": 0, "airport": 1, "peak": 2, "park": 3, "water": 4, "poi": 5, "street": 6}
