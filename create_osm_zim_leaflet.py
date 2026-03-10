@@ -649,6 +649,7 @@ def create_zim(
     map_config,
     name,
     description="Offline OpenStreetMap (Raster)",
+    cluster_size=2048 * 1024,
 ):
     """Create a ZIM file containing the Leaflet map viewer and raster tiles."""
     from libzim.writer import Creator, Item, StringProvider, FileProvider, Hint
@@ -689,6 +690,7 @@ def create_zim(
 
     creator = Creator(str(output_path))
     creator.config_indexing(True, "en")
+    creator.config_clustersize(cluster_size)
     creator.set_mainpath("index.html")
     with creator:
         # Metadata
@@ -838,6 +840,11 @@ KNOWN_AREAS = {
         "bbox": "9.47,47.04,9.64,47.27",
         "name": "Liechtenstein",
     },
+    "virginia": {
+        "geofabrik": "north-america/us/virginia",
+        "bbox": "-83.68,36.54,-75.24,39.47",
+        "name": "Virginia",
+    },
 }
 
 
@@ -862,6 +869,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--output", "-o", help="Output ZIM file path")
     parser.add_argument("--keep-temp", action="store_true", help="Keep temporary files")
     parser.add_argument("--max-zoom", type=int, default=14, help="Maximum zoom level (default: 14)")
+    parser.add_argument("--cluster-size", type=int, default=2048,
+                        help="ZIM cluster size in KiB (default: 2048 = 2 MiB)")
 
     args = parser.parse_args()
 
@@ -968,6 +977,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             map_config=map_config,
             name=f"OSM - {name} (Leaflet)",
             description=f"Offline OpenStreetMap for {name}. Pre-rendered raster tiles with Leaflet.",
+            cluster_size=args.cluster_size * 1024,
         )
 
         print()

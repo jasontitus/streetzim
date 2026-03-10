@@ -262,6 +262,7 @@ def create_zim(
     map_config,
     name,
     description="Offline OpenStreetMap",
+    cluster_size=2048 * 1024,
 ):
     """Create a ZIM file containing the map viewer and all tiles."""
     from libzim.writer import Creator, Item, StringProvider, FileProvider
@@ -310,6 +311,7 @@ def create_zim(
     # config_indexing and set_mainpath must be called BEFORE __enter__
     creator = Creator(str(output_path))
     creator.config_indexing(True, "en")
+    creator.config_clustersize(cluster_size)
     creator.set_mainpath("index.html")
     with creator:
 
@@ -513,6 +515,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--output", "-o", help="Output ZIM file path")
     parser.add_argument("--keep-temp", action="store_true", help="Keep temporary files")
     parser.add_argument("--max-zoom", type=int, default=14, help="Maximum zoom level (default: 14)")
+    parser.add_argument("--cluster-size", type=int, default=2048,
+                        help="ZIM cluster size in KiB (default: 2048 = 2 MiB)")
 
     args = parser.parse_args()
 
@@ -625,6 +629,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             map_config=map_config,
             name=f"OSM - {name}",
             description=f"Offline OpenStreetMap for {name}. Vector tiles rendered client-side.",
+            cluster_size=args.cluster_size * 1024,
         )
 
         print()
