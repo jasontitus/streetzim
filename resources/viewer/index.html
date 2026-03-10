@@ -11,7 +11,7 @@
   body { margin: 0; padding: 0; }
   #map { position: absolute; top: 0; bottom: 0; width: 100%; }
   #info {
-    position: absolute; top: 10px; left: 10px; z-index: 1;
+    position: absolute; top: 54px; left: 10px; z-index: 1;
     background: rgba(255,255,255,0.9); padding: 8px 12px;
     border-radius: 6px; font-family: -apple-system, system-ui, sans-serif;
     font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,0.2);
@@ -861,6 +861,11 @@ function initSearch(map) {
     }
     if (items[activeIdx]) items[activeIdx].scrollIntoView({ block: 'nearest' });
   }
+
+  // Prevent input blur when tapping results (iOS Safari dismisses keyboard
+  // on the first tap instead of firing click, so we need preventDefault).
+  resultsEl.addEventListener('mousedown', function(e) { e.preventDefault(); });
+  resultsEl.addEventListener('touchstart', function(e) { e.preventDefault(); });
 
   resultsEl.addEventListener('click', function(e) {
     var el = e.target.closest('.search-result');
