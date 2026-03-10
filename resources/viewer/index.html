@@ -862,12 +862,26 @@ function initSearch(map) {
     if (items[activeIdx]) items[activeIdx].scrollIntoView({ block: 'nearest' });
   }
 
-  // Prevent input blur when tapping results (iOS Safari dismisses keyboard
-  // on the first tap instead of firing click, so we need preventDefault).
+  // Prevent input blur when tapping/clicking results so the keyboard
+  // doesn't dismiss before the selection registers.
   resultsEl.addEventListener('mousedown', function(e) { e.preventDefault(); });
-  resultsEl.addEventListener('touchstart', function(e) { e.preventDefault(); });
+
+  // On touch devices, use touchend for selection since preventDefault
+  // on touchstart blocks the click event on iOS.
+  var isTouching = false;
+  resultsEl.addEventListener('touchstart', function(e) {
+    isTouching = true;
+    e.preventDefault();
+  });
+  resultsEl.addEventListener('touchend', function(e) {
+    if (!isTouching) return;
+    isTouching = false;
+    var el = e.target.closest('.search-result');
+    if (el) selectResult(el);
+  });
 
   resultsEl.addEventListener('click', function(e) {
+    if (isTouching) return; // Already handled by touchend
     var el = e.target.closest('.search-result');
     if (el) selectResult(el);
   });
