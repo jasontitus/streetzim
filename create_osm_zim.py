@@ -718,6 +718,11 @@ KNOWN_AREAS = {
         "bbox": "-83.68,36.54,-75.17,39.47",
         "name": "Virginia",
     },
+    "washington": {
+        "geofabrik": "north-america/us/washington",
+        "bbox": "-124.85,45.54,-116.92,49.00",
+        "name": "Washington",
+    },
 }
 
 
