@@ -376,9 +376,9 @@ def create_zim(
         # Add font glyphs
         print(f"    Adding {len(fonts)} font glyph ranges...")
         for (font_name, range_key), data in fonts.items():
-            # URL-safe font name (spaces to %20 or use folder structure)
-            safe_name = font_name.replace(" ", "%20")
-            path = f"fonts/{safe_name}/{range_key}.pbf"
+            # Use actual spaces in ZIM paths — kiwix-serve URL-decodes
+            # browser requests, so %20-encoded paths cause 404s
+            path = f"fonts/{font_name}/{range_key}.pbf"
             creator.add_item(MapItem(
                 path, f"Font {font_name} {range_key}",
                 "application/x-protobuf",

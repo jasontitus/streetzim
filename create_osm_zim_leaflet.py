@@ -36,7 +36,7 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import mapbox_vector_tile
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -86,6 +86,26 @@ COLORS = {
     # Boundaries
     "boundary": (190, 140, 190),
 }
+
+# Font paths for label rendering
+FONT_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+# Cache loaded fonts at various sizes
+_font_cache = {}
+
+
+def get_font(bold=False, size=11):
+    """Get a cached PIL font at the requested size."""
+    key = (bold, size)
+    if key not in _font_cache:
+        path = FONT_BOLD if bold else FONT_REGULAR
+        try:
+            _font_cache[key] = ImageFont.truetype(path, size)
+        except (IOError, OSError):
+            _font_cache[key] = ImageFont.load_default()
+    return _font_cache[key]
+
 
 ROAD_WIDTHS = {
     "motorway": 3.0,
@@ -394,7 +414,132 @@ def render_tile_to_png(decoded_tile, zoom):
                     if projected and len(projected) >= 2:
                         draw.line(projected, fill=COLORS["boundary"], width=1)
 
+    # 6. Labels — place names, road names, water names
+    _render_labels(img, draw, decoded_tile, zoom)
+
     return img
+
+
+def _render_labels(img, draw, decoded_tile, zoom):
+    """Render text labels for places, roads, and water features."""
+    labels_drawn = []  # Track label bounding boxes to avoid overlap
+
+    def _get_name(props):
+        """Extract best label text from properties."""
+        return props.get("name:latin") or props.get("name") or ""
+
+    def _draw_label(x, y, text, font, color, halo_color=None):
+        """Draw a text label with optional halo, avoiding overlap."""
+        if not text:
+            return
+        bbox = font.getbbox(text)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        lx, ly = int(x - tw / 2), int(y - th / 2)
+
+        # Check for overlap with existing labels (with padding)
+        pad = 2
+        new_rect = (lx - pad, ly - pad, lx + tw + pad, ly + th + pad)
+        for existing in labels_drawn:
+            if (new_rect[0] < existing[2] and new_rect[2] > existing[0] and
+                    new_rect[1] < existing[3] and new_rect[3] > existing[1]):
+                return  # Skip — overlaps
+        labels_drawn.append(new_rect)
+
+        # Draw halo (outline) by drawing text offset in 8 directions
+        if halo_color:
+            for dx, dy in [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]:
+                draw.text((lx + dx, ly + dy), text, fill=halo_color, font=font)
+        draw.text((lx, ly), text, fill=color, font=font)
+
+    # Place labels (cities, towns, villages)
+    layer = decoded_tile.get("place")
+    if layer:
+        extent = layer.get("extent", 4096)
+        scale = TILE_SIZE / extent
+
+        # Sort by rank/class for priority (cities first)
+        class_order = {"city": 0, "town": 1, "village": 2, "suburb": 3,
+                       "quarter": 4, "neighbourhood": 5, "hamlet": 6}
+        features = sorted(
+            layer.get("features", []),
+            key=lambda f: class_order.get(f.get("properties", {}).get("class", ""), 99)
+        )
+
+        for feat in features:
+            props = feat.get("properties", {})
+            geom = feat.get("geometry", {})
+            name = _get_name(props)
+            cls = props.get("class", "")
+            gtype = geom.get("type", "")
+            if not name or gtype != "Point":
+                continue
+
+            coords = geom.get("coordinates", [])
+            if not coords:
+                continue
+            px, py = coords[0] * scale, coords[1] * scale
+
+            # Size and visibility by class and zoom
+            if cls == "city" and zoom >= 5:
+                font = get_font(bold=True, size=min(14, 8 + zoom - 5))
+                _draw_label(px, py, name, font, (51, 51, 68), (255, 255, 255))
+            elif cls == "town" and zoom >= 8:
+                font = get_font(bold=True, size=min(12, 8 + zoom - 8))
+                _draw_label(px, py, name, font, (68, 68, 68), (255, 255, 255))
+            elif cls == "village" and zoom >= 10:
+                font = get_font(bold=False, size=min(11, 8 + zoom - 10))
+                _draw_label(px, py, name, font, (85, 85, 85), (255, 255, 255))
+            elif cls in ("suburb", "quarter", "neighbourhood") and zoom >= 12:
+                font = get_font(bold=False, size=10)
+                _draw_label(px, py, name.upper(), font, (102, 102, 102), (255, 255, 255))
+
+    # Road labels (transportation_name layer)
+    if zoom >= 12:
+        layer = decoded_tile.get("transportation_name")
+        if layer:
+            extent = layer.get("extent", 4096)
+            scale = TILE_SIZE / extent
+            for feat in layer.get("features", []):
+                props = feat.get("properties", {})
+                geom = feat.get("geometry", {})
+                name = _get_name(props)
+                if not name:
+                    continue
+                gtype = geom.get("type", "")
+                if gtype not in ("LineString", "MultiLineString"):
+                    continue
+
+                coords_list = geom.get("coordinates", [])
+                if gtype == "LineString":
+                    coords_list = [coords_list]
+                for line_coords in coords_list:
+                    if len(line_coords) < 2:
+                        continue
+                    # Place label at midpoint of the line
+                    mid = len(line_coords) // 2
+                    px = line_coords[mid][0] * scale
+                    py = line_coords[mid][1] * scale
+                    font = get_font(bold=False, size=9)
+                    _draw_label(px, py, name, font, (85, 85, 85), (255, 255, 255))
+
+    # Water labels
+    if zoom >= 10:
+        layer = decoded_tile.get("water_name")
+        if layer:
+            extent = layer.get("extent", 4096)
+            scale = TILE_SIZE / extent
+            for feat in layer.get("features", []):
+                props = feat.get("properties", {})
+                geom = feat.get("geometry", {})
+                name = _get_name(props)
+                if not name or geom.get("type") != "Point":
+                    continue
+                coords = geom.get("coordinates", [])
+                if not coords:
+                    continue
+                px, py = coords[0] * scale, coords[1] * scale
+                font = get_font(bold=False, size=10)
+                _draw_label(px, py, name, font, (93, 128, 180), (255, 255, 255))
 
 
 def render_all_tiles(vector_tiles, output_dir):
