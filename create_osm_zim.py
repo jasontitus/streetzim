@@ -474,6 +474,11 @@ KNOWN_AREAS = {
         "bbox": "7.40,43.72,7.44,43.76",
         "name": "Monaco",
     },
+    "virginia": {
+        "geofabrik": "north-america/us/virginia",
+        "bbox": "-83.68,36.54,-75.17,39.47",
+        "name": "Virginia",
+    },
 }
 
 
