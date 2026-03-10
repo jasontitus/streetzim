@@ -19,10 +19,53 @@
   }
   #info h3 { margin: 0 0 4px 0; font-size: 14px; }
   #info p { margin: 0; color: #555; }
+
+  /* Search UI */
+  #search-container {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    z-index: 2; width: 320px; max-width: calc(100% - 120px);
+    font-family: -apple-system, system-ui, sans-serif;
+  }
+  #search-input {
+    width: 100%; box-sizing: border-box;
+    padding: 10px 36px 10px 14px; border: none; border-radius: 8px;
+    font-size: 15px; background: #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    outline: none;
+  }
+  #search-input:focus { box-shadow: 0 2px 12px rgba(0,0,0,0.35); }
+  #search-clear {
+    position: absolute; right: 10px; top: 10px;
+    background: none; border: none; font-size: 18px; color: #999;
+    cursor: pointer; padding: 0 4px; display: none;
+  }
+  #search-results {
+    margin-top: 4px; background: #fff; border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    max-height: 300px; overflow-y: auto; display: none;
+  }
+  .search-result {
+    padding: 8px 14px; cursor: pointer; border-bottom: 1px solid #eee;
+  }
+  .search-result:last-child { border-bottom: none; }
+  .search-result:hover, .search-result.active { background: #f0f4ff; }
+  .search-result-name { font-size: 14px; color: #222; }
+  .search-result-type {
+    font-size: 11px; color: #888; margin-left: 6px;
+    text-transform: capitalize;
+  }
+  .search-no-results {
+    padding: 12px 14px; color: #888; font-size: 13px; text-align: center;
+  }
 </style>
 </head>
 <body>
 <div id="map"></div>
+<div id="search-container">
+  <input id="search-input" type="text" placeholder="Search places, streets, POIs..." autocomplete="off">
+  <button id="search-clear" title="Clear">&times;</button>
+  <div id="search-results"></div>
+</div>
 <div id="info">
   <h3>Offline OSM Map</h3>
   <p>Vector tiles rendered client-side. Data from OpenStreetMap.</p>
@@ -98,6 +141,21 @@ fetch(baseUrl + 'map-config.json')
     if (config.name) {
       document.querySelector('#info h3').textContent = config.name;
     }
+
+    // Check for #map=zoom/lat/lon hash (used by search result redirects)
+    function applyHash() {
+      var hash = window.location.hash;
+      var m = hash.match(/map=(\d+\.?\d*)\/(-?\d+\.?\d*)\/(-?\d+\.?\d*)/);
+      if (m) {
+        var z = parseFloat(m[1]), lat = parseFloat(m[2]), lon = parseFloat(m[3]);
+        map.flyTo({ center: [lon, lat], zoom: z, duration: 1500 });
+      }
+    }
+    map.on('load', applyHash);
+    window.addEventListener('hashchange', applyHash);
+
+    // Initialize search
+    initSearch(map);
   })
   .catch(function(err) {
     document.getElementById('info').innerHTML =
@@ -592,6 +650,233 @@ function makeStyle(config) {
       }
     ]
   };
+}
+
+// --- Search functionality ---
+// Uses chunked index: search-data/manifest.json lists available prefix chunks,
+// and search-data/{prefix}.json files are loaded on demand. This keeps RAM
+// bounded even for world-scale datasets (millions of features).
+var searchMarker = null;
+
+function initSearch(map) {
+  var input = document.getElementById('search-input');
+  var resultsEl = document.getElementById('search-results');
+  var clearBtn = document.getElementById('search-clear');
+  var activeIdx = -1;
+
+  var manifest = null;       // {total: N, chunks: {prefix: count, ...}}
+  var chunkCache = {};       // prefix -> array of entries (LRU-ish)
+  var pendingFetches = {};   // prefix -> Promise
+
+  // Load manifest
+  fetch(baseUrl + 'search-data/manifest.json')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      manifest = data;
+      input.placeholder = 'Search ' + data.total.toLocaleString() + ' places...';
+    })
+    .catch(function() {
+      input.placeholder = 'Search unavailable';
+      input.disabled = true;
+    });
+
+  // Fetch a chunk by prefix, with caching
+  function fetchChunk(prefix) {
+    if (chunkCache[prefix]) return Promise.resolve(chunkCache[prefix]);
+    if (pendingFetches[prefix]) return pendingFetches[prefix];
+
+    var p = fetch(baseUrl + 'search-data/' + encodeURIComponent(prefix) + '.json')
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        chunkCache[prefix] = data;
+        delete pendingFetches[prefix];
+        // Evict old cache entries if too many (keep ~20 chunks in memory)
+        var keys = Object.keys(chunkCache);
+        while (keys.length > 20) {
+          delete chunkCache[keys.shift()];
+        }
+        return data;
+      })
+      .catch(function() {
+        delete pendingFetches[prefix];
+        return [];
+      });
+    pendingFetches[prefix] = p;
+    return p;
+  }
+
+  // Determine which chunk prefixes are needed for a query
+  function getPrefixes(query) {
+    var q = query.toLowerCase();
+    // Primary prefix: first 2 chars of query
+    var p = q.substring(0, 2).replace(/ /g, '_');
+    p = p.replace(/[^a-z0-9_]/g, '_');
+    if (p.length < 2) p = (p + '__').substring(0, 2);
+
+    var prefixes = [];
+    if (manifest.chunks[p] !== undefined) prefixes.push(p);
+
+    // For single-char queries, fetch all chunks starting with that char
+    if (q.length < 2) {
+      var c = q[0] || '';
+      for (var k in manifest.chunks) {
+        if (k[0] === c && prefixes.indexOf(k) === -1) prefixes.push(k);
+      }
+    }
+    return prefixes;
+  }
+
+  function scoreResults(entries, query) {
+    var q = query.toLowerCase();
+    var words = q.split(/\s+/);
+    var matches = [];
+
+    for (var i = 0; i < entries.length; i++) {
+      var item = entries[i];
+      var name = item.n.toLowerCase();
+
+      // All words must appear in the name
+      var allMatch = true;
+      var score = 0;
+      for (var w = 0; w < words.length; w++) {
+        var pos = name.indexOf(words[w]);
+        if (pos === -1) { allMatch = false; break; }
+        if (pos === 0 || name[pos - 1] === ' ') score += 10;
+        score += 1;
+      }
+      if (!allMatch) continue;
+
+      if (name === q) score += 100;
+      if (name.indexOf(q) === 0) score += 50;
+      var typeBonus = {place: 30, airport: 25, peak: 20, park: 15, water: 10, poi: 5, street: 0};
+      score += typeBonus[item.t] || 0;
+      matches.push({ item: item, score: score });
+    }
+
+    matches.sort(function(a, b) { return b.score - a.score; });
+    return matches.slice(0, 15);
+  }
+
+  function renderResults(matches) {
+    activeIdx = -1;
+    if (matches.length === 0) {
+      resultsEl.innerHTML = '<div class="search-no-results">No results found</div>';
+      resultsEl.style.display = 'block';
+      return;
+    }
+    var html = '';
+    for (var j = 0; j < matches.length; j++) {
+      var m = matches[j].item;
+      var label = m.s ? m.s.replace(/_/g, ' ') : m.t;
+      html += '<div class="search-result" data-idx="' + j +
+        '" data-lat="' + m.a + '" data-lon="' + m.o + '" data-type="' + m.t + '">' +
+        '<span class="search-result-name">' + escapeHtml(m.n) + '</span>' +
+        '<span class="search-result-type">' + escapeHtml(label) + '</span></div>';
+    }
+    resultsEl.innerHTML = html;
+    resultsEl.style.display = 'block';
+  }
+
+  var searchSeq = 0;  // Sequence counter to discard stale results
+
+  function doSearch(query) {
+    if (!manifest || query.length < 2) {
+      resultsEl.style.display = 'none';
+      return;
+    }
+
+    var seq = ++searchSeq;
+    var prefixes = getPrefixes(query);
+    if (prefixes.length === 0) {
+      renderResults([]);
+      return;
+    }
+
+    // Fetch all needed chunks in parallel, then score
+    Promise.all(prefixes.map(fetchChunk)).then(function(arrays) {
+      if (seq !== searchSeq) return;  // Stale query, discard
+      var all = [];
+      for (var i = 0; i < arrays.length; i++) {
+        all = all.concat(arrays[i]);
+      }
+      renderResults(scoreResults(all, query));
+    });
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function selectResult(el) {
+    var lat = parseFloat(el.getAttribute('data-lat'));
+    var lon = parseFloat(el.getAttribute('data-lon'));
+    var type = el.getAttribute('data-type');
+    var zoom = {place: 14, airport: 14, peak: 15, park: 15, water: 14, poi: 17, street: 16}[type] || 15;
+
+    if (searchMarker) { searchMarker.remove(); searchMarker = null; }
+    searchMarker = new maplibregl.Marker({ color: '#e74c3c' })
+      .setLngLat([lon, lat])
+      .addTo(map);
+
+    map.flyTo({ center: [lon, lat], zoom: zoom, duration: 1500 });
+    resultsEl.style.display = 'none';
+    input.blur();
+  }
+
+  // Input handler with debounce
+  var debounceTimer;
+  input.addEventListener('input', function() {
+    clearTimeout(debounceTimer);
+    var v = input.value.trim();
+    clearBtn.style.display = v ? 'block' : 'none';
+    debounceTimer = setTimeout(function() { doSearch(v); }, 200);
+  });
+
+  // Keyboard navigation
+  input.addEventListener('keydown', function(e) {
+    var items = resultsEl.querySelectorAll('.search-result');
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeIdx = Math.min(activeIdx + 1, items.length - 1);
+      updateActive(items);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeIdx = Math.max(activeIdx - 1, 0);
+      updateActive(items);
+    } else if (e.key === 'Enter' && activeIdx >= 0 && items[activeIdx]) {
+      e.preventDefault();
+      selectResult(items[activeIdx]);
+    } else if (e.key === 'Escape') {
+      resultsEl.style.display = 'none';
+      input.blur();
+    }
+  });
+
+  function updateActive(items) {
+    for (var i = 0; i < items.length; i++) {
+      items[i].classList.toggle('active', i === activeIdx);
+    }
+    if (items[activeIdx]) items[activeIdx].scrollIntoView({ block: 'nearest' });
+  }
+
+  resultsEl.addEventListener('click', function(e) {
+    var el = e.target.closest('.search-result');
+    if (el) selectResult(el);
+  });
+
+  clearBtn.addEventListener('click', function() {
+    input.value = '';
+    clearBtn.style.display = 'none';
+    resultsEl.style.display = 'none';
+    if (searchMarker) { searchMarker.remove(); searchMarker = null; }
+  });
+
+  map.on('click', function() {
+    resultsEl.style.display = 'none';
+  });
 }
 </script>
 </body>

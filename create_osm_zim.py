@@ -242,6 +242,153 @@ def _encode_font_pbf(name, range_str):
     return outer
 
 
+def tile_to_lnglat(z, x, y, px, py, extent=4096):
+    """Convert vector tile pixel coordinates to lng/lat.
+
+    Args:
+        z, x, y: Tile coordinates (XYZ scheme)
+        px, py: Pixel coordinates within the tile (0..extent)
+        extent: Tile extent (typically 4096)
+
+    Returns:
+        (longitude, latitude) tuple
+    """
+    import math
+    n = 2.0 ** z
+    lon = (x + px / extent) / n * 360.0 - 180.0
+    lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * (y + py / extent) / n)))
+    lat = math.degrees(lat_rad)
+    return lon, lat
+
+
+def extract_searchable_features(tiles):
+    """Extract named features from z14 vector tiles for search indexing.
+
+    Decodes the highest-zoom tiles and extracts features with names from
+    the place, poi, transportation_name, water_name, park, mountain_peak,
+    and aerodrome_label layers.
+
+    Returns a list of dicts: [{"name": str, "type": str, "lat": float, "lon": float}, ...]
+    """
+    import mapbox_vector_tile
+
+    print("  Extracting searchable features from tiles...")
+
+    # Only process z14 tiles (highest zoom = most detail)
+    z14_tiles = {(z, x, y): data for (z, x, y), data in tiles.items() if z == 14}
+    if not z14_tiles:
+        # Fallback: use highest zoom available
+        max_z = max(z for z, x, y in tiles.keys())
+        z14_tiles = {(z, x, y): data for (z, x, y), data in tiles.items() if z == max_z}
+        print(f"    No z14 tiles found, using z{max_z}")
+
+    # Layers that contain searchable named features
+    search_layers = {
+        "place": "place",
+        "poi": "poi",
+        "transportation_name": "street",
+        "water_name": "water",
+        "park": "park",
+        "mountain_peak": "peak",
+        "aerodrome_label": "airport",
+    }
+
+    features = []
+    seen = set()  # Deduplicate by (name, type, rounded_coords)
+
+    for (z, x, y), data in z14_tiles.items():
+        # Decompress if gzipped
+        tile_data = data
+        if data[:2] == b"\x1f\x8b":
+            try:
+                tile_data = gzip.decompress(data)
+            except Exception:
+                continue
+
+        try:
+            decoded = mapbox_vector_tile.decode(tile_data, y_coord_down=True)
+        except Exception:
+            continue
+
+        for layer_name, feature_type in search_layers.items():
+            layer = decoded.get(layer_name)
+            if not layer:
+                continue
+
+            extent = layer.get("extent", 4096)
+
+            for feature in layer.get("features", []):
+                props = feature.get("properties", {})
+                name = props.get("name:latin") or props.get("name", "")
+                if not name or len(name) < 2:
+                    continue
+
+                # Get centroid from geometry
+                geom = feature.get("geometry", {})
+                coords = geom.get("coordinates")
+                if not coords:
+                    continue
+
+                # Compute centroid depending on geometry type
+                geom_type = geom.get("type", "")
+                try:
+                    if geom_type == "Point":
+                        px, py = coords[0], coords[1]
+                    elif geom_type == "MultiPoint":
+                        px = sum(c[0] for c in coords) / len(coords)
+                        py = sum(c[1] for c in coords) / len(coords)
+                    elif geom_type == "LineString":
+                        # Use midpoint of the line
+                        mid = coords[len(coords) // 2]
+                        px, py = mid[0], mid[1]
+                    elif geom_type == "MultiLineString":
+                        # Use midpoint of the longest line
+                        longest = max(coords, key=len)
+                        mid = longest[len(longest) // 2]
+                        px, py = mid[0], mid[1]
+                    elif geom_type in ("Polygon", "MultiPolygon"):
+                        # Use centroid of first ring
+                        ring = coords[0] if geom_type == "Polygon" else coords[0][0]
+                        px = sum(c[0] for c in ring) / len(ring)
+                        py = sum(c[1] for c in ring) / len(ring)
+                    else:
+                        continue
+                except (IndexError, ZeroDivisionError, TypeError):
+                    continue
+
+                lon, lat = tile_to_lnglat(z, x, y, px, py, extent)
+
+                # Deduplicate: round to ~10m precision
+                dedup_key = (name.lower(), feature_type, round(lat, 4), round(lon, 4))
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+
+                # Determine subtype for better search context
+                subtype = props.get("class", "") or props.get("subclass", "")
+
+                features.append({
+                    "name": name,
+                    "type": feature_type,
+                    "subtype": subtype,
+                    "lat": round(lat, 6),
+                    "lon": round(lon, 6),
+                })
+
+    # Sort by type priority then name
+    type_order = {"place": 0, "airport": 1, "peak": 2, "park": 3, "water": 4, "poi": 5, "street": 6}
+    features.sort(key=lambda f: (type_order.get(f["type"], 99), f["name"]))
+
+    print(f"    Extracted {len(features)} searchable features")
+    type_counts = {}
+    for f in features:
+        type_counts[f["type"]] = type_counts.get(f["type"], 0) + 1
+    for t, c in sorted(type_counts.items()):
+        print(f"      {t}: {c}")
+
+    return features
+
+
 def download_maplibre(dest_dir):
     """Download MapLibre GL JS files for embedding in the ZIM."""
     print("  Downloading MapLibre GL JS...")
@@ -269,6 +416,7 @@ def create_zim(
     name,
     description="Offline OpenStreetMap",
     cluster_size=2048 * 1024,
+    search_features=None,
 ):
     """Create a ZIM file containing the map viewer and all tiles."""
     from libzim.writer import Creator, Item, StringProvider, FileProvider
@@ -395,6 +543,89 @@ def create_zim(
                 "application/x-protobuf",
                 data,
             ))
+
+        # Add search features
+        if search_features:
+            print(f"    Adding {len(search_features)} search entries...")
+
+            # Build chunked search index for scalable on-demand loading.
+            # Features are grouped by 2-character lowercase prefix of name.
+            # The viewer fetches only the chunk matching the user's query,
+            # so RAM usage stays bounded even for world-scale datasets.
+            from collections import defaultdict
+            chunks = defaultdict(list)
+            for f in search_features:
+                # Use first 2 chars of lowercased name as chunk key
+                prefix = f["name"].lower()[:2].replace(" ", "_")
+                # Normalize non-ascii to keep filenames safe
+                prefix = "".join(c if c.isalnum() or c == "_" else "_" for c in prefix)
+                if not prefix:
+                    prefix = "__"
+                prefix = prefix[:2].ljust(2, "_")
+                chunks[prefix].append(
+                    {"n": f["name"], "t": f["type"], "s": f.get("subtype", ""),
+                     "a": f["lat"], "o": f["lon"]}
+                )
+
+            # Add chunk manifest (list of available prefixes with counts)
+            manifest = {k: len(v) for k, v in sorted(chunks.items())}
+            total_features = sum(manifest.values())
+            creator.add_item(MapItem(
+                "search-data/manifest.json", "Search Manifest", "application/json",
+                json.dumps({"total": total_features, "chunks": manifest},
+                           separators=(",", ":")).encode("utf-8"),
+            ))
+
+            # Add each chunk as a separate JSON file
+            for prefix, entries in sorted(chunks.items()):
+                chunk_json = json.dumps(entries, separators=(",", ":"))
+                creator.add_item(MapItem(
+                    f"search-data/{prefix}.json",
+                    f"Search chunk {prefix}",
+                    "application/json",
+                    chunk_json.encode("utf-8"),
+                ))
+
+            print(f"    Added {len(chunks)} search chunks ({total_features} features)")
+
+            # Add individual HTML pages for each feature so Kiwix's native
+            # Xapian full-text search can find them. Each page redirects to
+            # the map viewer at the feature's coordinates.
+            for i, feat in enumerate(search_features):
+                slug = feat["name"].lower()
+                slug = "".join(c if c.isalnum() or c in "-_ " else "" for c in slug)
+                slug = slug.strip().replace(" ", "-")[:80]
+                # Add index to ensure uniqueness
+                slug = f"{slug}-{i}"
+
+                zoom = {"place": 14, "airport": 14, "peak": 15, "park": 15,
+                        "water": 14, "poi": 17, "street": 16}.get(feat["type"], 15)
+                map_hash = f"map={zoom}/{feat['lat']}/{feat['lon']}"
+                label = feat.get("subtype", feat["type"]).replace("_", " ").title()
+
+                html = (
+                    f'<!DOCTYPE html><html><head>'
+                    f'<meta charset="utf-8">'
+                    f'<meta http-equiv="refresh" content="0;url=index.html#{map_hash}">'
+                    f'<title>{feat["name"]}</title>'
+                    f'</head><body>'
+                    f'<h1>{feat["name"]}</h1>'
+                    f'<p>{label}</p>'
+                    f'<p><a href="index.html#{map_hash}">View on map</a></p>'
+                    f'</body></html>'
+                )
+                creator.add_item(MapItem(
+                    f"search/{slug}.html",
+                    feat["name"],
+                    "text/html",
+                    html.encode("utf-8"),
+                    is_front=False,
+                ))
+
+                if (i + 1) % 2000 == 0:
+                    print(f"\r    Added {i + 1}/{len(search_features)} search entries...", end="", flush=True)
+
+            print(f"\r    Added {len(search_features)} search entries")
 
     size_mb = os.path.getsize(output_path) / (1024 * 1024)
     print(f"    ZIM file created: {size_mb:.1f} MB")
@@ -566,7 +797,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     tmpdir = tempfile.mkdtemp(prefix="osm_zim_")
     try:
         # Step 1: Get OSM data
-        print("[1/5] Acquiring OSM data...")
+        print("[1/6] Acquiring OSM data...")
         if pbf_path:
             source_pbf = pbf_path
         else:
@@ -587,29 +818,34 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
 
         # Step 3: Generate vector tiles
         print()
-        print("[2/5] Generating vector tiles...")
+        print("[2/6] Generating vector tiles...")
         mbtiles_path = os.path.join(tmpdir, "tiles.mbtiles")
         generate_tiles(work_pbf, mbtiles_path, bbox=bbox_str,
                        fast=args.fast, store=args.store)
 
         # Step 4: Extract tiles from MBTiles
         print()
-        print("[3/5] Processing tiles...")
+        print("[3/6] Processing tiles...")
         tiles, tile_metadata = extract_tiles_from_mbtiles(mbtiles_path)
 
         # Generate font glyphs
         fonts = generate_sdf_font_glyphs()
 
-        # Step 5: Download MapLibre GL JS
+        # Step 5: Extract search features from tiles
         print()
-        print("[4/5] Downloading MapLibre GL JS...")
+        print("[4/6] Building search index...")
+        search_features = extract_searchable_features(tiles)
+
+        # Step 6: Download MapLibre GL JS
+        print()
+        print("[5/6] Downloading MapLibre GL JS...")
         maplibre_dir = os.path.join(tmpdir, "maplibre")
         os.makedirs(maplibre_dir, exist_ok=True)
         maplibre_js, maplibre_css = download_maplibre(maplibre_dir)
 
-        # Step 6: Create ZIM
+        # Step 7: Create ZIM
         print()
-        print("[5/5] Building ZIM file...")
+        print("[6/6] Building ZIM file...")
 
         # Build map config
         bbox = parse_bbox(bbox_str) if bbox_str else None
@@ -641,6 +877,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             name=f"OSM - {name}",
             description=f"Offline OpenStreetMap for {name}. Vector tiles rendered client-side.",
             cluster_size=args.cluster_size * 1024,
+            search_features=search_features,
         )
 
         print()
