@@ -51,7 +51,7 @@ LEAFLET_VERSION = "1.9.4"
 LEAFLET_CDN = f"https://unpkg.com/leaflet@{LEAFLET_VERSION}/dist"
 
 # Tile size in pixels
-TILE_SIZE = 256
+TILE_SIZE = 512  # 2x resolution for retina/HiDPI displays
 
 # ── Color scheme (OSM-like) ──────────────────────────────────────────────────
 
@@ -96,27 +96,31 @@ _font_cache = {}
 
 
 def get_font(bold=False, size=11):
-    """Get a cached PIL font at the requested size."""
-    key = (bold, size)
+    """Get a cached PIL font at the requested size, scaled for tile resolution."""
+    scaled_size = int(size * SCALE)
+    key = (bold, scaled_size)
     if key not in _font_cache:
         path = FONT_BOLD if bold else FONT_REGULAR
         try:
-            _font_cache[key] = ImageFont.truetype(path, size)
+            _font_cache[key] = ImageFont.truetype(path, scaled_size)
         except (IOError, OSError):
             _font_cache[key] = ImageFont.load_default()
     return _font_cache[key]
 
 
+# Scale factor: tile pixels / 256 (=1 for 256px tiles, =2 for 512px retina)
+SCALE = TILE_SIZE / 256
+
 ROAD_WIDTHS = {
-    "motorway": 3.0,
-    "trunk": 2.5,
-    "primary": 2.0,
-    "secondary": 1.5,
-    "tertiary": 1.2,
-    "minor": 0.8,
-    "service": 0.5,
-    "path": 0.5,
-    "rail": 1.0,
+    "motorway": 3.0 * SCALE,
+    "trunk": 2.5 * SCALE,
+    "primary": 2.0 * SCALE,
+    "secondary": 1.5 * SCALE,
+    "tertiary": 1.2 * SCALE,
+    "minor": 0.8 * SCALE,
+    "service": 0.5 * SCALE,
+    "path": 0.5 * SCALE,
+    "rail": 1.0 * SCALE,
 }
 
 
@@ -412,7 +416,7 @@ def render_tile_to_png(decoded_tile, zoom):
                 for line_coords in coords_list:
                     projected = project_coords(line_coords, extent)
                     if projected and len(projected) >= 2:
-                        draw.line(projected, fill=COLORS["boundary"], width=1)
+                        draw.line(projected, fill=COLORS["boundary"], width=max(1, int(SCALE)))
 
     # 6. Labels — place names, road names, water names
     _render_labels(img, draw, decoded_tile, zoom)
@@ -454,7 +458,7 @@ def _render_labels(img, draw, decoded_tile, zoom):
         lx, ly = int(x - tw / 2), int(y - th / 2)
 
         # Check for overlap with existing labels (with padding)
-        pad = 4
+        pad = int(4 * SCALE)
         new_rect = (lx - pad, ly - pad, lx + tw + pad, ly + th + pad)
         for existing in labels_drawn:
             if (new_rect[0] < existing[2] and new_rect[2] > existing[0] and

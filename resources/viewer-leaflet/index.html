@@ -74,12 +74,16 @@
             }
 
             // Add offline tile layer with absolute URLs
+            // Tiles are 512x512 (2x retina), so use tileSize: 512 and
+            // zoomOffset: -1 to map Leaflet's zoom levels correctly.
             // maxNativeZoom = highest zoom with actual tiles
             // maxZoom = 19 allows over-zooming (Leaflet scales up the tiles)
             L.tileLayer(baseUrl + 'tiles/{z}/{x}/{y}.png', {
                 minZoom: minZoom,
                 maxNativeZoom: nativeMaxZoom,
                 maxZoom: 19,
+                tileSize: 512,
+                zoomOffset: -1,
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
                 errorTileUrl: ''
             }).addTo(map);

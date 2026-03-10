@@ -30,8 +30,8 @@ where WebGL (required by MapLibre) is not available.
 
 | Area | Vector ZIM | Raster ZIM | Ratio |
 |------|-----------|-----------|-------|
-| Monaco | 741 KB | 208 KB | 3.6x |
-| Washington, D.C. | 17.4 MB | 2.9 MB | 6.0x |
+| Monaco | 1.7 MB | 390 KB | 4.4x |
+| Washington, D.C. | 19 MB | 7.2 MB | 2.6x |
 
 **Why are the raster ZIMs still smaller?** See the [resolution comparison](#raster-vs-vector-tile-resolution) section below.
 
@@ -217,10 +217,10 @@ The repository includes pre-built ZIM files for quick testing:
 
 | File | Approach | Size |
 |------|----------|------|
-| `osm-monaco.zim` | Vector (MapLibre) | 740 KB |
-| `osm-monaco-leaflet.zim` | Raster (Leaflet) | 208 KB |
+| `osm-monaco.zim` | Vector (MapLibre) | 1.7 MB |
+| `osm-monaco-leaflet.zim` | Raster (Leaflet) | 390 KB |
 | `osm-washington-dc.zim` | Vector (MapLibre) | 17.4 MB |
-| `osm-washington-dc-leaflet.zim` | Raster (Leaflet) | 2.9 MB |
+| `osm-washington-dc-leaflet.zim` | Raster (Leaflet) | 7.2 MB |
 
 ### Testing with kiwix-serve
 

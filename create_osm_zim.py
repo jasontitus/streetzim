@@ -160,44 +160,46 @@ def generate_sdf_font_glyphs():
 
     MapLibre GL JS requires SDF (Signed Distance Field) font glyphs in
     protocol buffer format. Each range covers 256 Unicode codepoints.
-    We generate minimal placeholder glyphs for basic Latin characters.
+    Downloads real SDF fonts from the openmaptiles font CDN.
     """
-    print("  Generating SDF font glyphs...")
+    print("  Downloading SDF font glyphs...")
     fonts = {}
 
-    # We need to generate actual PBF-encoded font glyphs
     # MapLibre expects: fonts/{fontstack}/{start}-{end}.pbf
-    # Each PBF contains a "glyphs" message with SDF bitmap data
+    # Use hyphenated names (no spaces) to avoid URL-encoding issues
+    # across different Kiwix implementations (kiwix-serve, Kiwix JS PWA, etc.)
+    #
+    # Map our style font names → openmaptiles CDN font names
+    font_map = {
+        "OpenSansRegular": "Open Sans Regular",
+        "OpenSansBold": "Open Sans Bold",
+        "OpenSansItalic": "Open Sans Italic",
+    }
 
-    # For a working prototype, we generate empty but valid PBF responses
-    # The map will still render - just without text labels if fonts fail
-    # In production, you'd bundle real font SDF PBFs from openmaptiles/fonts
+    font_cdn = "https://fonts.openmaptiles.org"
 
-    font_stacks = [
-        "Open Sans Regular",
-        "Open Sans Bold",
-        "Open Sans Italic",
-    ]
-
-    for font_name in font_stacks:
-        # Generate ranges 0-255 through 65280-65535 (covering basic multilingual plane)
-        # But for size efficiency, only generate ranges that contain common characters
+    for local_name, cdn_name in font_map.items():
+        # Download ranges covering Latin + common characters (0-1279)
         for start in range(0, 65536, 256):
             end = start + 255
             range_key = f"{start}-{end}"
 
-            # Generate a minimal valid protobuf for this glyph range
-            # Protocol buffer format for glyphs:
-            # message fontstack { repeated glyph glyphs = 3; string name = 1; string range = 2; }
-            # We create an empty fontstack with just the name and range
-            pbf_data = _encode_font_pbf(font_name, range_key)
-            fonts[(font_name, range_key)] = pbf_data
+            cdn_encoded = cdn_name.replace(" ", "%20")
+            url = f"{font_cdn}/{cdn_encoded}/{range_key}.pbf"
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
+                resp = urllib.request.urlopen(req)
+                pbf_data = resp.read()
+                fonts[(local_name, range_key)] = pbf_data
+            except Exception as e:
+                # Generate empty stub as fallback
+                fonts[(local_name, range_key)] = _encode_font_pbf(local_name, range_key)
 
-            # Only generate ranges with actual glyphs we need (Latin + common)
+            # Only need ranges with actual glyphs (Latin + common)
             if start >= 1024:
                 break
 
-    print(f"    Generated {len(fonts)} font range files")
+    print(f"    Downloaded {len(fonts)} font range files")
     return fonts
 
 
@@ -376,8 +378,8 @@ def create_zim(
         # Add font glyphs
         print(f"    Adding {len(fonts)} font glyph ranges...")
         for (font_name, range_key), data in fonts.items():
-            # Use actual spaces in ZIM paths — kiwix-serve URL-decodes
-            # browser requests, so %20-encoded paths cause 404s
+            # font_name has no spaces (e.g. "OpenSansRegular") to avoid
+            # URL-encoding issues across Kiwix implementations
             path = f"fonts/{font_name}/{range_key}.pbf"
             creator.add_item(MapItem(
                 path, f"Font {font_name} {range_key}",
