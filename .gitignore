@@ -1,4 +1,3 @@
-*.zim
 *.osm.pbf
 *.mbtiles
 __pycache__/

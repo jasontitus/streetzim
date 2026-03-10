@@ -1,8 +1,11 @@
 # StreetZIM - Offline OSM Maps in ZIM Files
 
-A prototype tool that packages OpenStreetMap vector tiles into ZIM files for
-offline viewing in the [Kiwix](https://kiwix.org) app (iOS, Android, desktop).
-Maps are rendered client-side using MapLibre GL JS — no tile server needed.
+A prototype tool that packages OpenStreetMap data into ZIM files for offline
+viewing in the [Kiwix](https://kiwix.org) app (iOS, Android, desktop). Two
+approaches are provided for comparison:
+
+1. **Vector tiles + MapLibre GL JS** — small files, client-side rendering
+2. **Raster tiles + Leaflet** — larger files, pre-rendered, wider compatibility
 
 ## The Idea
 
@@ -13,22 +16,93 @@ useful zoom levels can be multiple gigabytes.
 **Solution:** Store compact vector tiles in a ZIM file and render them on-the-fly
 in the browser using MapLibre GL JS. This gives you:
 
-- **50-200x smaller** files compared to raster tiles
+- **50-200x smaller** files compared to full raster tiles
 - **Arbitrary resolution** — vector tiles scale perfectly to any display density
 - **Runs in Kiwix** — the world's most popular offline content reader
 - **No server needed** — everything renders client-side in JavaScript
 
+A Leaflet/raster alternative is also provided for comparison and for environments
+where WebGL (required by MapLibre) is not available.
+
 ## Size Comparisons
 
-| Area | OSM PBF | Vector Tiles | ZIM File | Raster z0-18 (est.) |
+### Vector (MapLibre GL JS) vs Raster (Leaflet) ZIM Files
+
+| Area | Vector ZIM | Raster ZIM | Ratio |
+|------|-----------|-----------|-------|
+| Monaco | 740 KB | 168 KB | 4.4x |
+| Washington, D.C. | 17.4 MB | 1.8 MB | 9.7x |
+
+**Wait — why are the raster ZIMs _smaller_?** See the [resolution comparison](#raster-vs-vector-tile-resolution) section below.
+
+### Vector ZIM vs Full Raster (production-quality, all zoom levels)
+
+| Area | OSM PBF | Vector Tiles | Vector ZIM | Full Raster z0-18 (est.) |
 |------|---------|--------------|----------|---------------------|
 | Monaco | 0.6 MB | 0.3 MB | 0.7 MB | ~50 MB |
 | Washington, D.C. | 19.6 MB | 8.6 MB | 17.4 MB | ~2-5 GB |
 | US State (typical) | 200-600 MB | 50-200 MB | 60-250 MB | ~50-200 GB |
 | Entire Planet | ~85 GB | ~80-120 GB | ~100-150 GB | ~54 TB |
 
-The ZIM file includes MapLibre GL JS (~800 KB) and font glyphs, so it's slightly
-larger than raw vector tiles, but still dramatically smaller than raster.
+The vector ZIM file includes MapLibre GL JS (~800 KB) and font glyphs, so it's
+slightly larger than raw vector tiles, but dramatically smaller than
+production-quality raster.
+
+## Raster vs Vector Tile Resolution
+
+**The raster prototype ZIMs are currently smaller than the vector ZIMs, but this
+is misleading.** Here's why:
+
+### Why the raster ZIMs appear smaller
+
+1. **No text labels or fonts.** The vector ZIM bundles MapLibre GL JS (~800 KB),
+   CSS, and SDF font glyph PBFs for text rendering. The raster ZIM bundles
+   Leaflet (~150 KB) and renders no text at all — labels, street names, place
+   names are absent from the raster tiles.
+
+2. **Simplified rendering.** Our Python-based raster renderer (Pillow +
+   mapbox-vector-tile) draws basic shapes with flat colors — no anti-aliasing,
+   no road casings, no icons, no patterns. A production raster renderer (Mapnik,
+   TileMill) would produce much larger, higher-quality PNGs.
+
+3. **Same zoom levels, same tile count.** Both approaches generate tiles at
+   z0-14 from the same vector tile data. The raster tiles are 256x256 PNG images
+   rendered from those vector tiles. Since the rendering is so simple, the PNGs
+   compress well.
+
+4. **PNG compression favors simple images.** Our flat-color, label-free tiles
+   compress to very small PNGs. Production raster tiles with full cartography
+   (text, gradients, anti-aliasing) would be 10-50x larger per tile.
+
+### What production raster tiles would look like
+
+A production raster tile pipeline (like the official openzim/maps project or
+OpenStreetMap's tile servers) would:
+
+- Render at **256x256 or 512x512 pixels** per tile with full anti-aliasing
+- Include **text labels** for streets, places, water features, POIs
+- Render **icons and symbols** (hospital, parking, bus stop, etc.)
+- Use **complex cartographic styling** (road casings, halos, gradients)
+- Typically cover **z0-18** (vs our z0-14), adding 16x more tiles per extra zoom level
+- Result in files that are **50-200x larger** than the vector approach
+
+### The real tradeoff
+
+| Aspect | Vector (MapLibre) | Raster (Leaflet) |
+|--------|------------------|-----------------|
+| **File size** | Small (compact PBF data) | Large (pre-rendered pixels) |
+| **Resolution** | Infinite (vector scales to any DPI) | Fixed (256px per tile) |
+| **Retina displays** | Perfect — renders at device DPI | Blurry on 2x/3x screens |
+| **Text labels** | Yes (SDF font rendering) | Only if pre-rendered |
+| **Interactivity** | Can query features, hover, click | Static image only |
+| **Client requirements** | WebGL required | Basic JS only |
+| **Rendering cost** | GPU-intensive on client | Pre-computed, fast to display |
+| **Style flexibility** | Can change colors/styles at runtime | Baked into the image |
+
+**Bottom line:** Vector tiles are the superior approach for quality and file size.
+Raster tiles win only on compatibility (no WebGL needed) and rendering
+simplicity (no client-side GPU work). In a production comparison at equivalent
+quality and zoom levels, vector ZIMs would be 50-200x smaller than raster.
 
 ## How It Works
 
@@ -79,14 +153,17 @@ larger than raw vector tiles, but still dramatically smaller than raster.
 ### Prerequisites
 
 ```bash
-# Python packages
+# Python packages (vector approach)
 pip install libzim osmium
+
+# Python packages (raster approach - additional)
+pip install Pillow mapbox-vector-tile
 
 # System tools
 apt install tilemaker osmium-tool
 ```
 
-### Quick Start
+### Quick Start — Vector Tiles (MapLibre GL JS)
 
 ```bash
 # Create a ZIM for a well-known area
@@ -107,6 +184,21 @@ python3 create_osm_zim.py --pbf mydata.osm.pbf --name "My Area" \
     --bbox "-97.9,30.1,-97.5,30.5"
 ```
 
+### Quick Start — Raster Tiles (Leaflet)
+
+```bash
+# Create raster-tile ZIMs for comparison
+python3 create_osm_zim_leaflet.py --area monaco
+python3 create_osm_zim_leaflet.py --area dc
+
+# Same options as the vector script
+python3 create_osm_zim_leaflet.py --geofabrik europe/liechtenstein --name "Liechtenstein"
+```
+
+The Leaflet script uses the same tilemaker pipeline to generate vector tiles,
+then renders them to 256x256 PNG raster images using Python (Pillow +
+mapbox-vector-tile). Output files are named `osm-<area>-leaflet.zim`.
+
 ### Available Areas
 
 | Name | Description |
@@ -118,6 +210,17 @@ python3 create_osm_zim.py --pbf mydata.osm.pbf --name "My Area" \
 | `austin` | Austin, TX |
 | `portland` | Portland, OR |
 | `liechtenstein` | Liechtenstein (small country) |
+
+### Pre-built ZIM Files
+
+The repository includes pre-built ZIM files for quick testing:
+
+| File | Approach | Size |
+|------|----------|------|
+| `osm-monaco.zim` | Vector (MapLibre) | 740 KB |
+| `osm-monaco-leaflet.zim` | Raster (Leaflet) | 168 KB |
+| `osm-washington-dc.zim` | Vector (MapLibre) | 17.4 MB |
+| `osm-washington-dc-leaflet.zim` | Raster (Leaflet) | 1.8 MB |
 
 ### Testing with kiwix-serve
 
