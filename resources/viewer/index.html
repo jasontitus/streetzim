@@ -59,11 +59,11 @@ fetch(baseUrl + 'map-config.json')
       center: config.center,
       zoom: config.zoom,
       minZoom: config.minZoom || 0,
-      maxZoom: config.maxZoom || 14,
+      maxZoom: 20,  // Allow deep zoom; source maxzoom limits tile fetches
       attributionControl: true,
       maxBounds: config.bounds ? [
-        [config.bounds[0], config.bounds[1]],
-        [config.bounds[2], config.bounds[3]]
+        [config.bounds[0] - 0.01, config.bounds[1] - 0.01],
+        [config.bounds[2] + 0.01, config.bounds[3] + 0.01]
       ] : undefined,
       // Ensure all resource requests use absolute URLs
       transformRequest: function(url, resourceType) {
@@ -96,16 +96,21 @@ function makeStyle(config) {
   // through the ServiceWorker in Kiwix JS PWA
   var tileUrl = baseUrl + "tiles/{z}/{x}/{y}.pbf";
   var glyphUrl = baseUrl + "fonts/{fontstack}/{range}.pbf";
+  var sourceConfig = {
+    "type": "vector",
+    "tiles": [tileUrl],
+    "minzoom": config.minZoom || 0,
+    "maxzoom": config.maxZoom || 14
+  };
+  // Tell MapLibre the data extent so it doesn't request tiles outside it
+  if (config.bounds) {
+    sourceConfig.bounds = config.bounds;
+  }
   return {
     "version": 8,
     "name": "OSM Offline",
     "sources": {
-      "openmaptiles": {
-        "type": "vector",
-        "tiles": [tileUrl],
-        "minzoom": config.minZoom || 0,
-        "maxzoom": config.maxZoom || 14
-      }
+      "openmaptiles": sourceConfig
     },
     "glyphs": glyphUrl,
     "layers": [
