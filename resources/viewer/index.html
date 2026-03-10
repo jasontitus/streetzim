@@ -29,13 +29,38 @@
 </div>
 <script>
 // Compute base URL for absolute resource paths.
-// This is critical for Kiwix JS PWA where MapLibre's Web Workers
-// make fetch requests that need absolute URLs to route through
-// the ServiceWorker correctly.
 var baseUrl = (function() {
   var href = window.location.href;
   return href.substring(0, href.lastIndexOf('/') + 1);
 })();
+
+// Register a custom protocol that fetches with retry logic.
+// Kiwix JS PWA's ServiceWorker can drop requests under load,
+// so we retry failed fetches up to 3 times with backoff.
+maplibregl.addProtocol('zimtile', function(params, abortController) {
+  // Strip "zimtile://" prefix to get the real URL
+  var url = params.url.replace('zimtile://', '');
+
+  function attempt(n) {
+    return fetch(url, { signal: abortController.signal })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.arrayBuffer();
+      })
+      .then(function(buf) {
+        return { data: buf };
+      })
+      .catch(function(err) {
+        if (n < 3 && !abortController.signal.aborted) {
+          return new Promise(function(resolve) {
+            setTimeout(function() { resolve(attempt(n + 1)); }, 300 * n);
+          });
+        }
+        throw err;
+      });
+  }
+  return attempt(1);
+});
 
 // Read map config from embedded JSON
 fetch(baseUrl + 'map-config.json')
@@ -59,27 +84,15 @@ fetch(baseUrl + 'map-config.json')
       center: config.center,
       zoom: config.zoom,
       minZoom: config.minZoom || 0,
-      maxZoom: 20,  // Allow deep zoom; source maxzoom limits tile fetches
+      maxZoom: 20,
       attributionControl: true,
       maxBounds: config.bounds ? [
         [config.bounds[0] - 0.01, config.bounds[1] - 0.01],
         [config.bounds[2] + 0.01, config.bounds[3] + 0.01]
-      ] : undefined,
-      // Ensure all resource requests use absolute URLs
-      transformRequest: function(url, resourceType) {
-        // If URL is already absolute, leave it alone
-        if (url.indexOf('://') !== -1) return { url: url };
-        // Make relative URLs absolute from the page's base
-        return { url: baseUrl + url };
-      }
+      ] : undefined
     });
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }));
-
-    // Log tile errors for debugging
-    map.on('error', function(e) {
-      console.error('MapLibre error:', e.error ? e.error.message : e);
-    });
 
     // Update info box with area name
     if (config.name) {
@@ -92,17 +105,16 @@ fetch(baseUrl + 'map-config.json')
   });
 
 function makeStyle(config) {
-  // Use absolute URLs so MapLibre's Web Workers can fetch tiles/fonts
-  // through the ServiceWorker in Kiwix JS PWA
-  var tileUrl = baseUrl + "tiles/{z}/{x}/{y}.pbf";
-  var glyphUrl = baseUrl + "fonts/{fontstack}/{range}.pbf";
+  // Use zimtile:// protocol for tiles and fonts — this adds retry logic
+  // for Kiwix JS PWA where the ServiceWorker can drop requests under load
+  var tileUrl = "zimtile://" + baseUrl + "tiles/{z}/{x}/{y}.pbf";
+  var glyphUrl = "zimtile://" + baseUrl + "fonts/{fontstack}/{range}.pbf";
   var sourceConfig = {
     "type": "vector",
     "tiles": [tileUrl],
     "minzoom": config.minZoom || 0,
     "maxzoom": config.maxZoom || 14
   };
-  // Tell MapLibre the data extent so it doesn't request tiles outside it
   if (config.bounds) {
     sourceConfig.bounds = config.bounds;
   }
