@@ -152,15 +152,33 @@ quality and zoom levels, vector ZIMs would be 50-200x smaller than raster.
 
 ### Prerequisites
 
+**System tools:**
+
 ```bash
-# Python packages (vector approach)
-pip install libzim osmium
+# macOS (Homebrew)
+brew install osmium-tool
 
-# Python packages (raster approach - additional)
-pip install Pillow mapbox-vector-tile
+# tilemaker must be built from source on macOS:
+git clone https://github.com/systemed/tilemaker.git /tmp/tilemaker
+brew install boost lua rapidjson shapelib sqlite
+cd /tmp/tilemaker && mkdir build && cd build && cmake .. && make -j$(sysctl -n hw.ncpu)
+cp /tmp/tilemaker/build/tilemaker /opt/homebrew/bin/
 
-# System tools
+# Linux (Debian/Ubuntu)
 apt install tilemaker osmium-tool
+```
+
+**Python environment:**
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+
+# Vector approach (create_osm_zim.py)
+pip install -r requirements.txt   # libzim
+
+# Raster approach (create_osm_zim_leaflet.py) - additional
+pip install Pillow mapbox-vector-tile
 ```
 
 ### Quick Start — Vector Tiles (MapLibre GL JS)

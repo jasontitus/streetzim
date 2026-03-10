@@ -100,7 +100,7 @@ def extract_bbox_from_pbf(pbf_path, bbox, output_path):
     print(f"    Extracted: {size_mb:.1f} MB")
 
 
-def generate_tiles(pbf_path, mbtiles_path, bbox=None):
+def generate_tiles(pbf_path, mbtiles_path, bbox=None, fast=False, store=None):
     """Generate vector tiles from OSM PBF using tilemaker."""
     print("  Generating vector tiles with tilemaker...")
     cmd = [
@@ -113,6 +113,12 @@ def generate_tiles(pbf_path, mbtiles_path, bbox=None):
     ]
     if bbox:
         cmd.extend(["--bbox", bbox])
+    if fast:
+        cmd.append("--fast")
+        print("    Using --fast mode (trades RAM for speed)")
+    if store:
+        cmd.extend(["--store", str(store)])
+        print(f"    Using on-disk store: {store}")
     subprocess.run(cmd, check=True)
     size_mb = os.path.getsize(mbtiles_path) / (1024 * 1024)
     print(f"    Generated MBTiles: {size_mb:.1f} MB")
@@ -517,6 +523,10 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--max-zoom", type=int, default=14, help="Maximum zoom level (default: 14)")
     parser.add_argument("--cluster-size", type=int, default=2048,
                         help="ZIM cluster size in KiB (default: 2048 = 2 MiB)")
+    parser.add_argument("--fast", action="store_true",
+                        help="Trade RAM for speed in tilemaker (needs 32+ GB RAM)")
+    parser.add_argument("--store", metavar="PATH",
+                        help="Path for tilemaker on-disk temp storage (reduces RAM usage)")
 
     args = parser.parse_args()
 
@@ -579,7 +589,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         print()
         print("[2/5] Generating vector tiles...")
         mbtiles_path = os.path.join(tmpdir, "tiles.mbtiles")
-        generate_tiles(work_pbf, mbtiles_path, bbox=bbox_str)
+        generate_tiles(work_pbf, mbtiles_path, bbox=bbox_str,
+                       fast=args.fast, store=args.store)
 
         # Step 4: Extract tiles from MBTiles
         print()

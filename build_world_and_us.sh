@@ -20,6 +20,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CREATE_SCRIPT="$SCRIPT_DIR/create_osm_zim.py"
 
+# Activate venv if present
+VENV_DIR="$SCRIPT_DIR/venv"
+if [ -d "$VENV_DIR" ]; then
+    source "$VENV_DIR/bin/activate"
+fi
+
 # Output directory (current dir by default, override with OUT_DIR env var)
 OUT_DIR="${OUT_DIR:-$(pwd)}"
 
@@ -27,6 +33,10 @@ OUT_DIR="${OUT_DIR:-$(pwd)}"
 export ZSTD_CLEVEL="${ZSTD_CLEVEL:-22}"
 CLUSTER_SIZE_KIB="${CLUSTER_SIZE_KIB:-8192}"  # 8 MiB
 MAX_ZOOM="${MAX_ZOOM:-14}"
+
+# Tilemaker performance flags
+TILEMAKER_FAST="${TILEMAKER_FAST:-true}"    # Trade RAM for speed (needs 32+ GB)
+TILEMAKER_STORE="${TILEMAKER_STORE:-}"      # On-disk temp store path (reduces RAM)
 
 # Date stamp for filenames
 DATE_STAMP="$(date +%Y-%m-%d)"
@@ -47,6 +57,8 @@ for arg in "$@"; do
             echo "  ZSTD_CLEVEL     ZSTD compression level (default: 22)"
             echo "  CLUSTER_SIZE_KIB  ZIM cluster size in KiB (default: 8192 = 8 MiB)"
             echo "  MAX_ZOOM        Max tile zoom level (default: 14)"
+            echo "  TILEMAKER_FAST  Use --fast mode (default: true, needs 32+ GB RAM)"
+            echo "  TILEMAKER_STORE Path for on-disk temp store (reduces RAM for planet)"
             echo "  PLANET_PBF      Path to existing planet PBF (skip download)"
             echo "  US_PBF          Path to existing US PBF (skip download)"
             exit 0
@@ -125,13 +137,18 @@ if $BUILD_US; then
     fi
 
     echo "  Running create_osm_zim.py for US..."
+    TILEMAKER_ARGS=()
+    if [ "$TILEMAKER_FAST" = "true" ]; then TILEMAKER_ARGS+=(--fast); fi
+    if [ -n "$TILEMAKER_STORE" ]; then TILEMAKER_ARGS+=(--store "$TILEMAKER_STORE"); fi
+
     python3 "$CREATE_SCRIPT" \
         --pbf "$US_PBF" \
-        --bbox "$US_BBOX" \
+        --bbox="$US_BBOX" \
         --name "United States" \
         --max-zoom "$MAX_ZOOM" \
         --cluster-size "$CLUSTER_SIZE_KIB" \
         --keep-temp \
+        "${TILEMAKER_ARGS[@]}" \
         -o "$US_OUTPUT"
 
     echo ""
@@ -164,12 +181,17 @@ if $BUILD_WORLD; then
     fi
 
     echo "  Running create_osm_zim.py for World..."
+    TILEMAKER_ARGS=()
+    if [ "$TILEMAKER_FAST" = "true" ]; then TILEMAKER_ARGS+=(--fast); fi
+    if [ -n "$TILEMAKER_STORE" ]; then TILEMAKER_ARGS+=(--store "$TILEMAKER_STORE"); fi
+
     python3 "$CREATE_SCRIPT" \
         --pbf "$PLANET_PBF" \
         --name "World" \
         --max-zoom "$MAX_ZOOM" \
         --cluster-size "$CLUSTER_SIZE_KIB" \
         --keep-temp \
+        "${TILEMAKER_ARGS[@]}" \
         -o "$WORLD_OUTPUT"
 
     echo ""
