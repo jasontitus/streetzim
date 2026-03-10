@@ -11,14 +11,14 @@
   body { margin: 0; padding: 0; }
   #map { position: absolute; top: 0; bottom: 0; width: 100%; }
   #info {
-    position: absolute; top: 54px; left: 10px; z-index: 1;
-    background: rgba(255,255,255,0.9); padding: 8px 12px;
-    border-radius: 6px; font-family: -apple-system, system-ui, sans-serif;
-    font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,0.2);
-    max-width: 300px;
+    position: absolute; bottom: 28px; left: 10px; z-index: 1;
+    background: rgba(255,255,255,0.7); padding: 4px 8px;
+    border-radius: 4px; font-family: -apple-system, system-ui, sans-serif;
+    font-size: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    max-width: 250px;
   }
-  #info h3 { margin: 0 0 4px 0; font-size: 14px; }
-  #info p { margin: 0; color: #555; }
+  #info h3 { margin: 0; font-size: 10px; font-weight: 600; display: inline; }
+  #info p { margin: 0; color: #777; font-size: 9px; }
 
   /* Search UI */
   #search-container {
@@ -67,8 +67,8 @@
   <div id="search-results"></div>
 </div>
 <div id="info">
-  <h3>Offline OSM Map</h3>
-  <p>Vector tiles rendered client-side. Data from OpenStreetMap.</p>
+  <h3>Offline OSM</h3>
+  <p>Vector tiles &middot; OpenStreetMap data</p>
 </div>
 <script>
 // Compute base URL for absolute resource paths.
