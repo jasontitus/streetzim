@@ -3,7 +3,7 @@
 # build_world_and_us.sh - Build World and US-only ZIM files in one run.
 #
 # Downloads planet/US OSM data, generates vector tiles, and packages
-# into ZIM files optimized for Kiwix (ZSTD level 22, 32 MiB clusters).
+# into ZIM files optimized for Kiwix (ZSTD level 22, 8 MiB clusters).
 #
 # Requirements: tilemaker, python3, python-libzim
 # Disk space: ~80 GB free recommended (planet PBF is ~70 GB)
@@ -25,7 +25,7 @@ OUT_DIR="${OUT_DIR:-$(pwd)}"
 
 # Compression settings
 export ZSTD_CLEVEL="${ZSTD_CLEVEL:-22}"
-CLUSTER_SIZE_KIB="${CLUSTER_SIZE_KIB:-32768}"  # 32 MiB
+CLUSTER_SIZE_KIB="${CLUSTER_SIZE_KIB:-8192}"  # 8 MiB
 MAX_ZOOM="${MAX_ZOOM:-14}"
 
 # Date stamp for filenames
@@ -45,7 +45,7 @@ for arg in "$@"; do
             echo "Environment variables:"
             echo "  OUT_DIR         Output directory (default: current dir)"
             echo "  ZSTD_CLEVEL     ZSTD compression level (default: 22)"
-            echo "  CLUSTER_SIZE_KIB  ZIM cluster size in KiB (default: 32768 = 32 MiB)"
+            echo "  CLUSTER_SIZE_KIB  ZIM cluster size in KiB (default: 8192 = 8 MiB)"
             echo "  MAX_ZOOM        Max tile zoom level (default: 14)"
             echo "  PLANET_PBF      Path to existing planet PBF (skip download)"
             echo "  US_PBF          Path to existing US PBF (skip download)"
@@ -131,6 +131,7 @@ if $BUILD_US; then
         --name "United States" \
         --max-zoom "$MAX_ZOOM" \
         --cluster-size "$CLUSTER_SIZE_KIB" \
+        --keep-temp \
         -o "$US_OUTPUT"
 
     echo ""
@@ -168,6 +169,7 @@ if $BUILD_WORLD; then
         --name "World" \
         --max-zoom "$MAX_ZOOM" \
         --cluster-size "$CLUSTER_SIZE_KIB" \
+        --keep-temp \
         -o "$WORLD_OUTPUT"
 
     echo ""
