@@ -156,23 +156,9 @@ fetch(baseUrl + 'map-config.json')
       var toggleBtn = document.getElementById('layer-toggle');
       toggleBtn.style.display = 'block';
       var satelliteVisible = false;
+      var satelliteAdded = false;
 
-      map.on('load', function() {
-        // Add satellite as a single stitched image source
-        map.addSource('satellite', {
-          type: 'image',
-          url: baseUrl + 'satellite.webp',
-          coordinates: config.satelliteCoords
-        });
-        map.addLayer({
-          id: 'satellite-layer',
-          type: 'raster',
-          source: 'satellite',
-          paint: { 'raster-opacity': 0 }
-        }, map.getStyle().layers[0].id);
-      });
-
-      // All vector layers to hide when satellite is active
+      // Layers to hide when satellite is active
       var hiddenInSatellite = [
         'landcover-grass', 'landcover-wood', 'landcover-farmland',
         'landuse-residential', 'landuse-commercial', 'landuse-park',
@@ -180,57 +166,99 @@ fetch(baseUrl + 'map-config.json')
         'boundary-country', 'boundary-state', 'background'
       ];
 
+      function addSatelliteLayer() {
+        if (satelliteAdded) return;
+        // Use zimtile:// protocol for retry logic on Kiwix service worker
+        map.addSource('satellite', {
+          type: 'raster',
+          tiles: ['zimtile://' + baseUrl + 'satellite/{z}/{x}/{y}.webp'],
+          tileSize: 256,
+          minzoom: 0,
+          maxzoom: config.satelliteMaxZoom || 14
+        });
+        map.addLayer({
+          id: 'satellite-layer',
+          type: 'raster',
+          source: 'satellite',
+          paint: { 'raster-opacity': 1 }
+        }, map.getStyle().layers[0].id);
+        satelliteAdded = true;
+      }
+
+      function showSatellite() {
+        addSatelliteLayer();
+        map.setLayoutProperty('satellite-layer', 'visibility', 'visible');
+        map.setPaintProperty('satellite-layer', 'raster-opacity', 1);
+        hiddenInSatellite.forEach(function(id) {
+          try { map.setLayoutProperty(id, 'visibility', 'none'); } catch(e) {}
+        });
+        // White text with strong dark outline on all labels
+        ['road-label','water-label','place-city','place-town','place-village',
+         'place-hamlet','place-suburb','place-neighbourhood','poi-label'].forEach(function(id) {
+          try {
+            map.setPaintProperty(id, 'text-color', '#fff');
+            map.setPaintProperty(id, 'text-halo-color', 'rgba(0,0,0,0.85)');
+            map.setPaintProperty(id, 'text-halo-width', 2);
+          } catch(e) {}
+        });
+        try { map.setPaintProperty('water-label', 'text-color', '#aad3df'); } catch(e) {}
+        ['road-motorway','road-trunk','road-primary','road-secondary',
+         'road-tertiary','road-minor','road-path'].forEach(function(id) {
+          try { map.setPaintProperty(id, 'line-color', 'rgba(255,255,255,0.6)'); } catch(e) {}
+        });
+        ['road-motorway-casing','road-trunk-casing','road-primary-casing',
+         'road-secondary-casing'].forEach(function(id) {
+          try { map.setLayoutProperty(id, 'visibility', 'none'); } catch(e) {}
+        });
+        map.triggerRepaint();
+      }
+
+      function hideSatellite() {
+        if (satelliteAdded) {
+          map.setLayoutProperty('satellite-layer', 'visibility', 'none');
+        }
+        hiddenInSatellite.forEach(function(id) {
+          try { map.setLayoutProperty(id, 'visibility', 'visible'); } catch(e) {}
+        });
+        // Restore label colors and halos
+        var labelDefaults = {
+          'road-label': {c: '#555', hc: 'rgba(255,255,255,0.8)', hw: 1.5},
+          'water-label': {c: '#5d80b4', hc: 'rgba(255,255,255,0.7)', hw: 1},
+          'place-city': {c: '#333', hc: 'rgba(255,255,255,0.8)', hw: 1.5},
+          'place-town': {c: '#444', hc: 'rgba(255,255,255,0.7)', hw: 1.2},
+          'place-village': {c: '#555', hc: 'rgba(255,255,255,0.8)', hw: 1.5},
+          'place-hamlet': {c: '#666', hc: 'rgba(255,255,255,0.8)', hw: 1.2},
+          'place-suburb': {c: '#666', hc: 'rgba(255,255,255,0.8)', hw: 1},
+          'place-neighbourhood': {c: '#777', hc: 'rgba(255,255,255,0.7)', hw: 1},
+          'poi-label': {c: '#666', hc: 'rgba(255,255,255,0.7)', hw: 1}
+        };
+        Object.keys(labelDefaults).forEach(function(id) {
+          var d = labelDefaults[id];
+          try {
+            map.setPaintProperty(id, 'text-color', d.c);
+            map.setPaintProperty(id, 'text-halo-color', d.hc);
+            map.setPaintProperty(id, 'text-halo-width', d.hw);
+          } catch(e) {}
+        });
+        ['road-motorway-casing','road-trunk-casing','road-primary-casing',
+         'road-secondary-casing'].forEach(function(id) {
+          try { map.setLayoutProperty(id, 'visibility', 'visible'); } catch(e) {}
+        });
+        var roadColors = {
+          'road-motorway': '#ffa35c', 'road-trunk': '#ffd592',
+          'road-primary': '#fcd6a4', 'road-secondary': '#f5f5dc',
+          'road-tertiary': '#fff', 'road-minor': '#fff', 'road-path': '#ccc'
+        };
+        Object.keys(roadColors).forEach(function(id) {
+          try { map.setPaintProperty(id, 'line-color', roadColors[id]); } catch(e2) {}
+        });
+      }
+
       toggleBtn.addEventListener('click', function() {
         satelliteVisible = !satelliteVisible;
         toggleBtn.classList.toggle('satellite-active', satelliteVisible);
         toggleBtn.textContent = satelliteVisible ? 'Map' : 'Satellite';
-
-        if (satelliteVisible) {
-          map.setPaintProperty('satellite-layer', 'raster-opacity', 1);
-          // Hide fill/line layers so satellite shows through
-          hiddenInSatellite.forEach(function(id) {
-            try { map.setLayoutProperty(id, 'visibility', 'none'); } catch(e) {}
-          });
-          // Lighten roads and make labels white for contrast
-          try {
-            map.setPaintProperty('road-label', 'text-color', '#fff');
-            map.setPaintProperty('road-label', 'text-halo-color', 'rgba(0,0,0,0.7)');
-            map.setPaintProperty('water-label', 'text-color', '#aad3df');
-            ['road-motorway','road-trunk','road-primary','road-secondary',
-             'road-tertiary','road-minor','road-path'].forEach(function(id) {
-              try { map.setPaintProperty(id, 'line-color', 'rgba(255,255,255,0.6)'); } catch(e) {}
-            });
-            ['road-motorway-casing','road-trunk-casing','road-primary-casing',
-             'road-secondary-casing'].forEach(function(id) {
-              try { map.setLayoutProperty(id, 'visibility', 'none'); } catch(e) {}
-            });
-          } catch(e) {}
-        } else {
-          map.setPaintProperty('satellite-layer', 'raster-opacity', 0);
-          // Restore all hidden layers
-          hiddenInSatellite.forEach(function(id) {
-            try { map.setLayoutProperty(id, 'visibility', 'visible'); } catch(e) {}
-          });
-          // Restore road/label colors
-          try {
-            map.setPaintProperty('road-label', 'text-color', '#555');
-            map.setPaintProperty('road-label', 'text-halo-color', 'rgba(255,255,255,0.8)');
-            map.setPaintProperty('water-label', 'text-color', '#5d80b4');
-            ['road-motorway-casing','road-trunk-casing','road-primary-casing',
-             'road-secondary-casing'].forEach(function(id) {
-              try { map.setLayoutProperty(id, 'visibility', 'visible'); } catch(e) {}
-            });
-            // Restore road colors
-            var roadColors = {
-              'road-motorway': '#ffa35c', 'road-trunk': '#ffd592',
-              'road-primary': '#fcd6a4', 'road-secondary': '#f5f5dc',
-              'road-tertiary': '#fff', 'road-minor': '#fff', 'road-path': '#ccc'
-            };
-            Object.keys(roadColors).forEach(function(id) {
-              try { map.setPaintProperty(id, 'line-color', roadColors[id]); } catch(e2) {}
-            });
-          } catch(e) {}
-        }
+        if (satelliteVisible) { showSatellite(); } else { hideSatellite(); }
       });
     }
 

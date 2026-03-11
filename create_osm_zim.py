@@ -81,7 +81,7 @@ def download_file(url, dest, desc=None):
         raise
 
 
-def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=75):
+def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65):
     """Download Sentinel-2 Cloudless satellite tiles for a bounding box.
 
     Downloads JPEG tiles from the EOX Sentinel-2 Cloudless WMTS service,
@@ -643,7 +643,8 @@ def create_zim(
     description="Offline OpenStreetMap",
     cluster_size=2048 * 1024,
     search_features=None,
-    satellite_image_path=None,
+    satellite_dir=None,
+    satellite_max_zoom=None,
 ):
     """Create a ZIM file containing the map viewer and all tiles."""
     from libzim.writer import Creator, Item, StringProvider, FileProvider
@@ -836,16 +837,31 @@ def create_zim(
         print(f"\r    Added {tile_count} tiles in {elapsed:.0f}s ({rate_str})                ", flush=True)
         _watchdog_stop.set()  # stop watchdog after tiles
 
-        # Add stitched satellite image if provided
-        if satellite_image_path and os.path.isfile(satellite_image_path):
-            creator.add_item(MapItem(
-                "satellite.webp", "Satellite imagery",
-                "image/webp",
-                satellite_image_path,
-                compress=False,
-            ))
-            sat_size = os.path.getsize(satellite_image_path) / (1024 * 1024)
-            print(f"    Added satellite image ({sat_size:.1f} MB)")
+        # Add satellite tiles if provided
+        if satellite_dir and os.path.isdir(satellite_dir):
+            sat_count = 0
+            max_sz = satellite_max_zoom if satellite_max_zoom is not None else 99
+            for z in range(0, max_sz + 1):
+                z_dir = os.path.join(satellite_dir, str(z))
+                if not os.path.isdir(z_dir):
+                    continue
+                for root, dirs, files in os.walk(z_dir):
+                    for fname in files:
+                        if not fname.endswith(".webp"):
+                            continue
+                        fpath = os.path.join(root, fname)
+                        rel = os.path.relpath(fpath, satellite_dir)
+                        zim_path = f"satellite/{rel}"
+                        creator.add_item(MapItem(
+                            zim_path, f"Satellite {rel}",
+                            "image/webp",
+                            fpath,
+                            compress=False,
+                        ))
+                        sat_count += 1
+                        if sat_count % 2000 == 0:
+                            print(f"\r    Added {sat_count} satellite tiles...", end="", flush=True)
+            print(f"\r    Added {sat_count} satellite tiles")
 
         # Add font glyphs
         print(f"    Adding {len(fonts)} font glyph ranges...")
@@ -1186,8 +1202,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         search_features = extract_searchable_features(tiles)
 
         # Download satellite tiles if requested
-        satellite_image_path = None
-        satellite_coords = None
+        satellite_dir = None
         if include_satellite:
             print()
             print(f"[5/{total_steps}] Downloading satellite tiles...")
@@ -1197,9 +1212,6 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 # Use persistent cache dir so satellite tiles survive across builds
                 satellite_dir = os.path.join(SCRIPT_DIR, "satellite_cache")
                 download_satellite_tiles(bbox_str, satellite_dir, max_zoom=satellite_max_zoom)
-                satellite_image_path, satellite_coords = stitch_satellite_image(
-                    satellite_dir, satellite_max_zoom, bbox_str
-                )
 
         # Step 6: Download MapLibre GL JS
         step_maplibre = 6 if include_satellite else 5
@@ -1231,11 +1243,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         }
         if bbox:
             map_config["bounds"] = bbox
-        satellite_img = None
-        if include_satellite and satellite_image_path and os.path.isfile(satellite_image_path):
+        if satellite_dir and os.path.isdir(str(satellite_dir)):
             map_config["hasSatellite"] = True
-            map_config["satelliteCoords"] = satellite_coords
-            satellite_img = satellite_image_path
+            map_config["satelliteMaxZoom"] = satellite_max_zoom
 
         create_zim(
             output_path=output_path,
@@ -1250,7 +1260,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             description=f"Offline OpenStreetMap for {name}. Vector tiles rendered client-side.",
             cluster_size=args.cluster_size * 1024,
             search_features=search_features,
-            satellite_image_path=satellite_img,
+            satellite_dir=satellite_dir,
+            satellite_max_zoom=satellite_max_zoom,
         )
 
         print()
