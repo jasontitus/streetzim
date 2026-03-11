@@ -20,6 +20,19 @@
   #info h3 { margin: 0; font-size: 10px; font-weight: 600; display: inline; }
   #info p { margin: 0; color: #777; font-size: 9px; }
 
+  /* Layer toggle button */
+  #layer-toggle {
+    position: absolute; top: 10px; right: 50px; z-index: 2;
+    background: #fff; border: none; border-radius: 6px;
+    padding: 7px 12px; font-size: 13px; cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    font-family: -apple-system, system-ui, sans-serif;
+    display: none;
+  }
+  #layer-toggle:hover { background: #f0f0f0; }
+  #layer-toggle.satellite-active { background: #1a73e8; color: #fff; }
+  #layer-toggle.satellite-active:hover { background: #1557b0; }
+
   /* Search UI */
   #search-container {
     position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
@@ -61,6 +74,7 @@
 </head>
 <body>
 <div id="map"></div>
+<button id="layer-toggle" title="Toggle satellite imagery">Satellite</button>
 <div id="search-container">
   <input id="search-input" type="text" placeholder="Search places, streets, POIs..." autocomplete="off">
   <button id="search-clear" title="Clear">&times;</button>
@@ -136,6 +150,50 @@ fetch(baseUrl + 'map-config.json')
     });
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }));
+
+    // Satellite layer toggle
+    if (config.hasSatellite) {
+      var toggleBtn = document.getElementById('layer-toggle');
+      toggleBtn.style.display = 'block';
+      var satelliteVisible = false;
+
+      map.on('load', function() {
+        // Add satellite raster source
+        map.addSource('satellite', {
+          type: 'raster',
+          tiles: [baseUrl + 'satellite/{z}/{x}/{y}.webp'],
+          tileSize: 256,
+          minzoom: 0,
+          maxzoom: config.satelliteMaxZoom || config.maxZoom || 14
+        });
+        // Add satellite layer below all vector layers
+        map.addLayer({
+          id: 'satellite-layer',
+          type: 'raster',
+          source: 'satellite',
+          paint: { 'raster-opacity': 0 },
+          layout: { 'visibility': 'none' }
+        }, map.getStyle().layers[0].id);
+      });
+
+      toggleBtn.addEventListener('click', function() {
+        satelliteVisible = !satelliteVisible;
+        toggleBtn.classList.toggle('satellite-active', satelliteVisible);
+        toggleBtn.textContent = satelliteVisible ? 'Map' : 'Satellite';
+
+        if (satelliteVisible) {
+          map.setLayoutProperty('satellite-layer', 'visibility', 'visible');
+          map.setPaintProperty('satellite-layer', 'raster-opacity', 1);
+          map.setPaintProperty('background', 'background-color', '#000');
+        } else {
+          map.setPaintProperty('satellite-layer', 'raster-opacity', 0);
+          setTimeout(function() {
+            map.setLayoutProperty('satellite-layer', 'visibility', 'none');
+          }, 300);
+          map.setPaintProperty('background', 'background-color', '#f8f4f0');
+        }
+      });
+    }
 
     // Update info box with area name
     if (config.name) {

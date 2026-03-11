@@ -24,10 +24,22 @@
         .leaflet-control-attribution {
             font-size: 10px !important;
         }
+        #layer-toggle {
+            position: absolute; top: 10px; right: 10px; z-index: 1000;
+            background: #fff; border: none; border-radius: 4px;
+            padding: 6px 12px; font-size: 13px; cursor: pointer;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+            font-family: sans-serif;
+            display: none;
+        }
+        #layer-toggle:hover { background: #f0f0f0; }
+        #layer-toggle.satellite-active { background: #1a73e8; color: #fff; }
+        #layer-toggle.satellite-active:hover { background: #1557b0; }
     </style>
 </head>
 <body>
     <div id="map"></div>
+    <button id="layer-toggle" title="Toggle satellite imagery">Satellite</button>
     <div class="map-info" id="info"></div>
     <script src="leaflet.js"></script>
     <script>
@@ -90,6 +102,35 @@
 
             // Add scale control
             L.control.scale({ imperial: true, metric: true }).addTo(map);
+
+            // Satellite layer toggle
+            if (config.hasSatellite) {
+                var satMaxZoom = config.satelliteMaxZoom || nativeMaxZoom;
+                var satelliteLayer = L.tileLayer(baseUrl + 'satellite/{z}/{x}/{y}.webp', {
+                    minZoom: minZoom,
+                    maxNativeZoom: satMaxZoom,
+                    maxZoom: 19,
+                    tileSize: 256,
+                    attribution: '&copy; <a href="https://s2maps.eu">Sentinel-2 Cloudless</a> by EOX'
+                });
+
+                var toggleBtn = document.getElementById('layer-toggle');
+                toggleBtn.style.display = 'block';
+                var satelliteVisible = false;
+
+                toggleBtn.addEventListener('click', function() {
+                    satelliteVisible = !satelliteVisible;
+                    toggleBtn.classList.toggle('satellite-active', satelliteVisible);
+                    toggleBtn.textContent = satelliteVisible ? 'Map' : 'Satellite';
+
+                    if (satelliteVisible) {
+                        satelliteLayer.addTo(map);
+                        satelliteLayer.bringToBack();
+                    } else {
+                        map.removeLayer(satelliteLayer);
+                    }
+                });
+            }
 
             // Show info
             var info = document.getElementById('info');
