@@ -46,6 +46,9 @@ VIEWER_DIR = RESOURCES_DIR / "viewer"
 # Geofabrik base URL for downloading OSM extracts
 GEOFABRIK_BASE = "https://download.geofabrik.de"
 
+# Sentinel-2 Cloudless satellite tile service (EOX, CC BY 4.0 for 2016 vintage)
+SATELLITE_TILE_URL = "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/g/{z}/{y}/{x}.jpg"
+
 # MapLibre GL JS version to bundle
 MAPLIBRE_VERSION = "4.7.1"
 MAPLIBRE_CDN = f"https://unpkg.com/maplibre-gl@{MAPLIBRE_VERSION}/dist"
@@ -76,6 +79,89 @@ def download_file(url, dest, desc=None):
     except Exception as e:
         print(f"\n    Error downloading: {e}")
         raise
+
+
+def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=75):
+    """Download Sentinel-2 Cloudless satellite tiles for a bounding box.
+
+    Downloads JPEG tiles from the EOX Sentinel-2 Cloudless WMTS service,
+    converts them to WebP for better compression, and stores them as
+    {dest_dir}/{z}/{x}/{y}.webp.
+
+    Returns the number of tiles downloaded.
+    """
+    import io
+    import math
+    import time
+
+    from PIL import Image
+
+    bbox = parse_bbox(bbox_str)
+    minlon, minlat, maxlon, maxlat = bbox
+
+    os.makedirs(dest_dir, exist_ok=True)
+    total_downloaded = 0
+    total_skipped = 0
+    total_bytes_saved = 0
+
+    for z in range(0, max_zoom + 1):
+        n = 2 ** z
+        # Convert bbox to tile coordinates
+        x_min = int(n * (minlon + 180) / 360)
+        x_max = int(n * (maxlon + 180) / 360)
+        lat_rad_min = math.radians(minlat)
+        lat_rad_max = math.radians(maxlat)
+        y_max = int(n * (1 - math.log(math.tan(lat_rad_min) + 1 / math.cos(lat_rad_min)) / math.pi) / 2)
+        y_min = int(n * (1 - math.log(math.tan(lat_rad_max) + 1 / math.cos(lat_rad_max)) / math.pi) / 2)
+
+        # Clamp to valid range
+        x_min = max(0, x_min)
+        x_max = min(n - 1, x_max)
+        y_min = max(0, y_min)
+        y_max = min(n - 1, y_max)
+
+        tile_count = (x_max - x_min + 1) * (y_max - y_min + 1)
+        print(f"    z{z}: {tile_count} tiles ({x_max - x_min + 1}x{y_max - y_min + 1})")
+
+        for x in range(x_min, x_max + 1):
+            for y in range(y_min, y_max + 1):
+                tile_dir = os.path.join(dest_dir, str(z), str(x))
+                tile_path = os.path.join(tile_dir, f"{y}.webp")
+
+                # Skip if already downloaded
+                if os.path.exists(tile_path) and os.path.getsize(tile_path) > 0:
+                    total_skipped += 1
+                    continue
+
+                os.makedirs(tile_dir, exist_ok=True)
+                url = SATELLITE_TILE_URL.format(z=z, x=x, y=y)
+
+                for attempt in range(4):
+                    try:
+                        req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
+                        with urllib.request.urlopen(req, timeout=30) as resp:
+                            jpg_data = resp.read()
+
+                        # Convert JPEG to WebP
+                        img = Image.open(io.BytesIO(jpg_data))
+                        img.save(tile_path, "WEBP", quality=webp_quality)
+
+                        total_bytes_saved += len(jpg_data) - os.path.getsize(tile_path)
+                        total_downloaded += 1
+                        break
+                    except Exception as e:
+                        if attempt < 3:
+                            time.sleep(2 ** attempt)
+                        else:
+                            print(f"\n    Warning: failed to download z{z}/{x}/{y}: {e}")
+
+                if (total_downloaded + total_skipped) % 500 == 0:
+                    print(f"\r    Downloaded {total_downloaded} tiles ({total_skipped} cached)...", end="", flush=True)
+
+    saved_mb = total_bytes_saved / (1024 * 1024)
+    print(f"\r    Downloaded {total_downloaded} satellite tiles ({total_skipped} cached)")
+    print(f"    WebP compression saved {saved_mb:.1f} MB vs JPEG source")
+    return total_downloaded + total_skipped
 
 
 def download_osm_extract(geofabrik_path, dest):
@@ -417,6 +503,7 @@ def create_zim(
     description="Offline OpenStreetMap",
     cluster_size=2048 * 1024,
     search_features=None,
+    satellite_dir=None,
 ):
     """Create a ZIM file containing the map viewer and all tiles."""
     from libzim.writer import Creator, Item, StringProvider, FileProvider
@@ -531,6 +618,27 @@ def create_zim(
                 print(f"\r    Added {tile_count}/{len(tiles)} tiles...", end="", flush=True)
 
         print(f"\r    Added {tile_count} tiles")
+
+        # Add satellite tiles if provided
+        if satellite_dir and os.path.isdir(satellite_dir):
+            sat_count = 0
+            for root, dirs, files in os.walk(satellite_dir):
+                for fname in files:
+                    if not fname.endswith(".webp"):
+                        continue
+                    fpath = os.path.join(root, fname)
+                    rel = os.path.relpath(fpath, satellite_dir)
+                    zim_path = f"satellite/{rel}"
+                    creator.add_item(MapItem(
+                        zim_path, f"Satellite {rel}",
+                        "image/webp",
+                        fpath,
+                        compress=False,  # WebP is already compressed
+                    ))
+                    sat_count += 1
+                    if sat_count % 2000 == 0:
+                        print(f"\r    Added {sat_count} satellite tiles...", end="", flush=True)
+            print(f"\r    Added {sat_count} satellite tiles")
 
         # Add font glyphs
         print(f"    Adding {len(fonts)} font glyph ranges...")
@@ -763,6 +871,10 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Trade RAM for speed in tilemaker (needs 32+ GB RAM)")
     parser.add_argument("--store", metavar="PATH",
                         help="Path for tilemaker on-disk temp storage (reduces RAM usage)")
+    parser.add_argument("--satellite", action="store_true",
+                        help="Include Sentinel-2 Cloudless satellite imagery tiles")
+    parser.add_argument("--satellite-zoom", type=int, default=None,
+                        help="Max zoom for satellite tiles (default: same as --max-zoom)")
 
     args = parser.parse_args()
 
@@ -795,14 +907,22 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     safe_name = name.lower().replace(" ", "-").replace(",", "").replace(".", "")
     output_path = args.output or f"osm-{safe_name}.zim"
 
+    # Satellite options
+    include_satellite = args.satellite
+    satellite_max_zoom = args.satellite_zoom or args.max_zoom
+
+    total_steps = 7 if include_satellite else 6
+
     print(f"=== Creating Offline OSM ZIM: {name} ===")
+    if include_satellite:
+        print(f"  Including Sentinel-2 satellite imagery (z0-{satellite_max_zoom})")
     print()
 
     # Create temp directory
     tmpdir = tempfile.mkdtemp(prefix="osm_zim_")
     try:
         # Step 1: Get OSM data
-        print("[1/6] Acquiring OSM data...")
+        print(f"[1/{total_steps}] Acquiring OSM data...")
         if pbf_path:
             source_pbf = pbf_path
         else:
@@ -823,14 +943,14 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
 
         # Step 3: Generate vector tiles
         print()
-        print("[2/6] Generating vector tiles...")
+        print(f"[2/{total_steps}] Generating vector tiles...")
         mbtiles_path = os.path.join(tmpdir, "tiles.mbtiles")
         generate_tiles(work_pbf, mbtiles_path, bbox=bbox_str,
                        fast=args.fast, store=args.store)
 
         # Step 4: Extract tiles from MBTiles
         print()
-        print("[3/6] Processing tiles...")
+        print(f"[3/{total_steps}] Processing tiles...")
         tiles, tile_metadata = extract_tiles_from_mbtiles(mbtiles_path)
 
         # Generate font glyphs
@@ -838,19 +958,32 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
 
         # Step 5: Extract search features from tiles
         print()
-        print("[4/6] Building search index...")
+        print(f"[4/{total_steps}] Building search index...")
         search_features = extract_searchable_features(tiles)
 
+        # Download satellite tiles if requested
+        satellite_dir = None
+        if include_satellite:
+            print()
+            print(f"[5/{total_steps}] Downloading satellite tiles...")
+            if not bbox_str:
+                print("    Warning: no bbox specified, skipping satellite tiles")
+            else:
+                satellite_dir = os.path.join(tmpdir, "satellite")
+                download_satellite_tiles(bbox_str, satellite_dir, max_zoom=satellite_max_zoom)
+
         # Step 6: Download MapLibre GL JS
+        step_maplibre = 6 if include_satellite else 5
         print()
-        print("[5/6] Downloading MapLibre GL JS...")
+        print(f"[{step_maplibre}/{total_steps}] Downloading MapLibre GL JS...")
         maplibre_dir = os.path.join(tmpdir, "maplibre")
         os.makedirs(maplibre_dir, exist_ok=True)
         maplibre_js, maplibre_css = download_maplibre(maplibre_dir)
 
         # Step 7: Create ZIM
+        step_zim = 7 if include_satellite else 6
         print()
-        print("[6/6] Building ZIM file...")
+        print(f"[{step_zim}/{total_steps}] Building ZIM file...")
 
         # Build map config
         bbox = parse_bbox(bbox_str) if bbox_str else None
@@ -869,6 +1002,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         }
         if bbox:
             map_config["bounds"] = bbox
+        if satellite_dir and os.path.isdir(str(satellite_dir)):
+            map_config["hasSatellite"] = True
+            map_config["satelliteMaxZoom"] = satellite_max_zoom
 
         create_zim(
             output_path=output_path,
@@ -883,6 +1019,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             description=f"Offline OpenStreetMap for {name}. Vector tiles rendered client-side.",
             cluster_size=args.cluster_size * 1024,
             search_features=search_features,
+            satellite_dir=satellite_dir,
         )
 
         print()
