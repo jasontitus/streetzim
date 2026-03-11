@@ -369,8 +369,10 @@ def extract_searchable_features(tiles):
     features = []
     seen = set()  # Deduplicate by (name, type, rounded_coords)
 
-    # Process tiles in parallel using multiprocessing for CPU-bound MVT decoding
-    from multiprocessing import Pool
+    # Process tiles in parallel using multiprocessing for CPU-bound MVT decoding.
+    # Use "spawn" context on macOS to avoid fork-safety issues with C extensions
+    # (fork + threads from libraries like libzim can cause deadlocks later).
+    import multiprocessing
     import os as _os
 
     tile_items = list(z14_tiles.items())
@@ -380,7 +382,8 @@ def extract_searchable_features(tiles):
     chunk_size = max(1, len(tile_items) // (num_workers * 4))
     processed = 0
 
-    with Pool(num_workers) as pool:
+    ctx = multiprocessing.get_context("spawn")
+    with ctx.Pool(num_workers) as pool:
         for batch_features in pool.imap_unordered(
             _process_tile_for_search,
             [(z, x, y, data, search_layers) for (z, x, y), data in tile_items],
@@ -393,6 +396,10 @@ def extract_searchable_features(tiles):
 
     if processed > 5000:
         print()  # Newline after progress
+
+    # Ensure multiprocessing cleanup before libzim
+    import gc
+    gc.collect()
 
     # Deduplicate across tiles
     deduped = []
@@ -495,7 +502,9 @@ def create_zim(
     creator = Creator(str(output_path))
     creator.config_indexing(True, "en")
     creator.config_clustersize(cluster_size)
-    creator.config_nbworkers(os.cpu_count() or 4)
+    num_workers = os.cpu_count() or 4
+    print(f"    ZIM compression workers: {num_workers}", flush=True)
+    creator.config_nbworkers(num_workers)
     creator.set_mainpath("index.html")
     with creator:
 
@@ -534,9 +543,50 @@ def create_zim(
             config_json.encode("utf-8"),
         ))
 
+        # Watchdog thread: monitors progress and dumps all thread stacks on stall
+        import threading, sys, traceback
+        _watchdog_tile_count = [0]  # mutable container for thread access
+        _watchdog_stop = threading.Event()
+
+        def _watchdog():
+            last_count = 0
+            stall_seconds = 0
+            while not _watchdog_stop.is_set():
+                _watchdog_stop.wait(10)  # check every 10 seconds
+                current = _watchdog_tile_count[0]
+                if current == last_count and current > 0:
+                    stall_seconds += 10
+                    if stall_seconds >= 30:
+                        # Stall detected — dump everything
+                        print(f"\n\n=== WATCHDOG: No progress for {stall_seconds}s (stuck at tile {current}) ===", flush=True)
+                        print(f"    File size: {os.path.getsize(str(output_path)) / 1e9:.2f} GB", flush=True)
+                        import resource
+                        mem_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024**3)
+                        print(f"    RSS: {mem_gb:.1f} GB", flush=True)
+                        print(f"    Threads: {threading.active_count()}", flush=True)
+                        # Dump all thread stacks
+                        frames = sys._current_frames()
+                        for tid, frame in frames.items():
+                            tname = "unknown"
+                            for t in threading.enumerate():
+                                if t.ident == tid:
+                                    tname = t.name
+                                    break
+                            print(f"\n--- Thread {tid} ({tname}) ---", flush=True)
+                            traceback.print_stack(frame)
+                            sys.stdout.flush()
+                        print(f"=== END WATCHDOG DUMP ===\n", flush=True)
+                        stall_seconds = 0  # reset so we dump again if still stuck
+                else:
+                    stall_seconds = 0
+                last_count = current
+
+        watchdog_thread = threading.Thread(target=_watchdog, daemon=True)
+        watchdog_thread.start()
+
         # Add vector tiles — decompress in parallel for speed
         import time
-        print(f"    Adding {len(tiles)} vector tiles...")
+        print(f"    Adding {len(tiles)} vector tiles...", flush=True)
         from concurrent.futures import ThreadPoolExecutor
 
         def decompress_tile(item):
@@ -551,26 +601,49 @@ def create_zim(
         tile_items = [(z, x, y, data) for (z, x, y), data in sorted(tiles.items())]
         tile_count = 0
         tile_start = time.time()
+        batch_start = time.time()
         batch_size = 1000
+        stall_threshold = 60  # seconds — warn if a batch takes longer than this
         for i in range(0, len(tile_items), batch_size):
             batch = tile_items[i:i + batch_size]
+            decompress_start = time.time()
             with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
                 results = list(pool.map(decompress_tile, batch))
+            decompress_time = time.time() - decompress_start
+
+            add_start = time.time()
             for z, x, y, tile_data in results:
+                item_start = time.time()
                 creator.add_item(MapItem(
                     f"tiles/{z}/{x}/{y}.pbf", f"Tile {z}/{x}/{y}",
                     "application/x-protobuf",
                     tile_data,
                 ))
+                item_time = time.time() - item_start
+                if item_time > 5:
+                    print(f"\n    WARNING: add_item took {item_time:.1f}s for tile {z}/{x}/{y} (#{tile_count})", flush=True)
                 tile_count += 1
+                _watchdog_tile_count[0] = tile_count
+            add_time = time.time() - add_start
+
+            batch_elapsed = time.time() - batch_start
+            if batch_elapsed > stall_threshold and tile_count > 0:
+                print(f"\n    DEBUG: batch {i//batch_size} took {batch_elapsed:.1f}s (decompress={decompress_time:.1f}s, add={add_time:.1f}s, tiles={tile_count})", flush=True)
+
+            batch_start = time.time()
+
             if tile_count % 2000 == 0:
                 elapsed = time.time() - tile_start
                 rate = tile_count / elapsed if elapsed > 0 else 0
                 remaining = (len(tiles) - tile_count) / rate if rate > 0 else 0
-                print(f"\r    Added {tile_count}/{len(tiles)} tiles ({rate:.0f}/s, ~{remaining/60:.0f}m left)...", end="", flush=True)
+                import resource
+                mem_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024**3)
+                print(f"\r    Added {tile_count}/{len(tiles)} tiles ({rate:.0f}/s, ~{remaining/60:.0f}m left, {mem_gb:.1f}GB RSS)...", end="", flush=True)
 
         elapsed = time.time() - tile_start
-        print(f"\r    Added {tile_count} tiles in {elapsed:.0f}s ({tile_count/elapsed:.0f}/s)                ")
+        rate_str = f"{tile_count/elapsed:.0f}/s" if elapsed > 0 else "instant"
+        print(f"\r    Added {tile_count} tiles in {elapsed:.0f}s ({rate_str})                ", flush=True)
+        _watchdog_stop.set()  # stop watchdog after tiles
 
         # Add font glyphs
         print(f"    Adding {len(fonts)} font glyph ranges...")
@@ -628,14 +701,20 @@ def create_zim(
 
             print(f"    Added {len(chunks)} search chunks ({total_features} features)")
 
-            # Add individual HTML pages for each feature so Kiwix's native
-            # Xapian full-text search can find them. Each page redirects to
-            # the map viewer at the feature's coordinates.
-            for i, feat in enumerate(search_features):
+            # Add individual HTML redirect pages for Kiwix's native Xapian
+            # full-text search. Only include important features (places, airports,
+            # parks, peaks, water) to keep the ZIM manageable. Streets and POIs
+            # are still searchable via the JS chunked search but don't get
+            # individual pages (there can be millions of them).
+            xapian_types = {"place", "airport", "park", "peak", "water"}
+            xapian_features = [f for f in search_features if f["type"] in xapian_types]
+            print(f"    Adding {len(xapian_features)} Xapian search pages (of {len(search_features)} total)...", flush=True)
+
+            xapian_start = time.time()
+            for i, feat in enumerate(xapian_features):
                 slug = feat["name"].lower()
                 slug = "".join(c if c.isalnum() or c in "-_ " else "" for c in slug)
                 slug = slug.strip().replace(" ", "-")[:80]
-                # Add index to ensure uniqueness
                 slug = f"{slug}-{i}"
 
                 zoom = {"place": 14, "airport": 14, "peak": 15, "park": 15,
@@ -663,10 +742,18 @@ def create_zim(
                 ))
 
                 if (i + 1) % 2000 == 0:
-                    print(f"\r    Added {i + 1}/{len(search_features)} search entries...", end="", flush=True)
+                    elapsed = time.time() - xapian_start
+                    rate = (i + 1) / elapsed if elapsed > 0 else 0
+                    remaining = (len(xapian_features) - i - 1) / rate if rate > 0 else 0
+                    print(f"\r    Added {i + 1}/{len(xapian_features)} search pages ({rate:.0f}/s, ~{remaining/60:.0f}m left)...", end="", flush=True)
 
-            print(f"\r    Added {len(search_features)} search entries")
+            print(f"\r    Added {len(xapian_features)} search pages in {time.time() - xapian_start:.0f}s                ", flush=True)
 
+        print("    Finalizing ZIM (ZSTD compression + Xapian indexing)...", flush=True)
+        finalize_start = time.time()
+
+    finalize_elapsed = time.time() - finalize_start
+    print(f"    Finalized in {finalize_elapsed:.0f}s", flush=True)
     size_mb = os.path.getsize(output_path) / (1024 * 1024)
     print(f"    ZIM file created: {size_mb:.1f} MB")
 
@@ -798,6 +885,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Trade RAM for speed in tilemaker (needs 32+ GB RAM)")
     parser.add_argument("--store", metavar="PATH",
                         help="Path for tilemaker on-disk temp storage (reduces RAM usage)")
+    parser.add_argument("--mbtiles", metavar="PATH",
+                        help="Skip tilemaker and use existing MBTiles file")
 
     args = parser.parse_args()
 
@@ -818,8 +907,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         bbox_str = bbox_str or area.get("bbox")
         name = name or area["name"]
 
-    if not pbf_path and not geofabrik_path:
-        print("Error: Must specify --area, --geofabrik, or --pbf")
+    if not pbf_path and not geofabrik_path and not args.mbtiles:
+        print("Error: Must specify --area, --geofabrik, --pbf, or --mbtiles")
         parser.print_help()
         sys.exit(1)
 
@@ -836,32 +925,38 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     # Create temp directory
     tmpdir = tempfile.mkdtemp(prefix="osm_zim_")
     try:
-        # Step 1: Get OSM data
-        print("[1/6] Acquiring OSM data...")
-        if pbf_path:
-            source_pbf = pbf_path
+        if args.mbtiles:
+            # Skip OSM download and tilemaker — reuse existing MBTiles
+            print("[1/6] Skipping OSM data (using existing MBTiles)...")
+            print()
+            print("[2/6] Reusing existing MBTiles...")
+            mbtiles_path = args.mbtiles
+            print(f"  Using: {mbtiles_path} ({os.path.getsize(mbtiles_path) / 1e9:.1f} GB)")
         else:
-            source_pbf = os.path.join(tmpdir, "source.osm.pbf")
-            download_osm_extract(geofabrik_path, source_pbf)
+            # Step 1: Get OSM data
+            print("[1/6] Acquiring OSM data...")
+            if pbf_path:
+                source_pbf = pbf_path
+            else:
+                source_pbf = os.path.join(tmpdir, "source.osm.pbf")
+                download_osm_extract(geofabrik_path, source_pbf)
 
-        # Step 2: Extract bbox if needed
-        if bbox_str and not args.area:
-            # If using a large extract with a bbox, extract the subset
-            work_pbf = os.path.join(tmpdir, "area.osm.pbf")
-            extract_bbox_from_pbf(source_pbf, bbox_str, work_pbf)
-        elif bbox_str and args.area and geofabrik_path != KNOWN_AREAS.get(args.area.lower().replace(" ", "-"), {}).get("geofabrik"):
-            # Custom bbox with area
-            work_pbf = os.path.join(tmpdir, "area.osm.pbf")
-            extract_bbox_from_pbf(source_pbf, bbox_str, work_pbf)
-        else:
-            work_pbf = source_pbf
+            # Step 2: Extract bbox if needed
+            if bbox_str and not args.area:
+                work_pbf = os.path.join(tmpdir, "area.osm.pbf")
+                extract_bbox_from_pbf(source_pbf, bbox_str, work_pbf)
+            elif bbox_str and args.area and geofabrik_path != KNOWN_AREAS.get(args.area.lower().replace(" ", "-"), {}).get("geofabrik"):
+                work_pbf = os.path.join(tmpdir, "area.osm.pbf")
+                extract_bbox_from_pbf(source_pbf, bbox_str, work_pbf)
+            else:
+                work_pbf = source_pbf
 
-        # Step 3: Generate vector tiles
-        print()
-        print("[2/6] Generating vector tiles...")
-        mbtiles_path = os.path.join(tmpdir, "tiles.mbtiles")
-        generate_tiles(work_pbf, mbtiles_path, bbox=bbox_str,
-                       fast=args.fast, store=args.store)
+            # Step 3: Generate vector tiles
+            print()
+            print("[2/6] Generating vector tiles...")
+            mbtiles_path = os.path.join(tmpdir, "tiles.mbtiles")
+            generate_tiles(work_pbf, mbtiles_path, bbox=bbox_str,
+                           fast=args.fast, store=args.store)
 
         # Step 4: Extract tiles from MBTiles
         print()
