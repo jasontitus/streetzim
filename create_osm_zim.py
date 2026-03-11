@@ -1139,7 +1139,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             if not bbox_str:
                 print("    Warning: no bbox specified, skipping satellite tiles")
             else:
-                satellite_dir = os.path.join(tmpdir, "satellite")
+                # Use persistent cache dir so satellite tiles survive across builds
+                satellite_dir = os.path.join(SCRIPT_DIR, "satellite_cache")
                 download_satellite_tiles(bbox_str, satellite_dir, max_zoom=satellite_max_zoom)
 
         # Step 6: Download MapLibre GL JS

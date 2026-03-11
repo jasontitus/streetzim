@@ -22,7 +22,7 @@
 
   /* Layer toggle button */
   #layer-toggle {
-    position: absolute; top: 10px; right: 50px; z-index: 2;
+    position: absolute; top: 56px; left: 10px; z-index: 2;
     background: #fff; border: none; border-radius: 6px;
     padding: 7px 12px; font-size: 13px; cursor: pointer;
     box-shadow: 0 1px 4px rgba(0,0,0,0.3);
@@ -176,6 +176,13 @@ fetch(baseUrl + 'map-config.json')
         }, map.getStyle().layers[0].id);
       });
 
+      // Layers to hide when satellite is active (fills that obscure imagery)
+      var hiddenInSatellite = [
+        'landcover-grass', 'landcover-wood', 'landcover-farmland',
+        'landuse-residential', 'landuse-commercial', 'landuse-park',
+        'water', 'building', 'building-outline', 'background'
+      ];
+
       toggleBtn.addEventListener('click', function() {
         satelliteVisible = !satelliteVisible;
         toggleBtn.classList.toggle('satellite-active', satelliteVisible);
@@ -184,13 +191,29 @@ fetch(baseUrl + 'map-config.json')
         if (satelliteVisible) {
           map.setLayoutProperty('satellite-layer', 'visibility', 'visible');
           map.setPaintProperty('satellite-layer', 'raster-opacity', 1);
-          map.setPaintProperty('background', 'background-color', '#000');
+          // Hide fill layers so satellite shows through
+          hiddenInSatellite.forEach(function(id) {
+            try { map.setLayoutProperty(id, 'visibility', 'none'); } catch(e) {}
+          });
+          // Make road labels white for contrast on satellite
+          try {
+            map.setPaintProperty('road-label', 'text-color', '#fff');
+            map.setPaintProperty('road-label', 'text-halo-color', 'rgba(0,0,0,0.7)');
+          } catch(e) {}
         } else {
           map.setPaintProperty('satellite-layer', 'raster-opacity', 0);
           setTimeout(function() {
             map.setLayoutProperty('satellite-layer', 'visibility', 'none');
           }, 300);
-          map.setPaintProperty('background', 'background-color', '#f8f4f0');
+          // Restore fill layers
+          hiddenInSatellite.forEach(function(id) {
+            try { map.setLayoutProperty(id, 'visibility', 'visible'); } catch(e) {}
+          });
+          // Restore road label colors
+          try {
+            map.setPaintProperty('road-label', 'text-color', '#555');
+            map.setPaintProperty('road-label', 'text-halo-color', 'rgba(255,255,255,0.8)');
+          } catch(e) {}
         }
       });
     }

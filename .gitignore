@@ -6,3 +6,5 @@ __pycache__/
 venv/
 coastline/
 landcover/
+satellite_cache/
+world-data/
