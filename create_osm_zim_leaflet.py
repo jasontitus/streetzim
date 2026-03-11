@@ -154,7 +154,7 @@ def download_file(url, dest, desc=None):
         raise
 
 
-def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=75):
+def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65):
     """Download Sentinel-2 Cloudless satellite tiles, converting to WebP."""
     import io
     import time as _time
@@ -956,6 +956,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Include Sentinel-2 Cloudless satellite imagery tiles")
     parser.add_argument("--satellite-zoom", type=int, default=None,
                         help="Max zoom for satellite tiles (default: same as --max-zoom)")
+    parser.add_argument("--satellite-quality", type=int, default=65,
+                        help="WebP quality for satellite tiles, 1-100 (default: 65)")
 
     args = parser.parse_args()
 
@@ -1034,7 +1036,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 print("    Warning: no bbox specified, skipping satellite tiles")
             else:
                 satellite_dir = os.path.join(tmpdir, "satellite")
-                download_satellite_tiles(bbox_str, satellite_dir, max_zoom=satellite_max_zoom)
+                download_satellite_tiles(bbox_str, satellite_dir, max_zoom=satellite_max_zoom, webp_quality=args.satellite_quality)
 
         # Step 5: Download Leaflet
         step = 6 if include_satellite else 5
