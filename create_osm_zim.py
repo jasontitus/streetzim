@@ -79,8 +79,11 @@ def download_file(url, dest, desc=None):
 
 
 def download_osm_extract(geofabrik_path, dest):
-    """Download an OSM PBF extract from Geofabrik."""
-    url = f"{GEOFABRIK_BASE}/{geofabrik_path}-latest.osm.pbf"
+    """Download an OSM PBF extract from Geofabrik (or planet.osm.org for planet)."""
+    if geofabrik_path == "planet":
+        url = "https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf"
+    else:
+        url = f"{GEOFABRIK_BASE}/{geofabrik_path}-latest.osm.pbf"
     download_file(url, dest, f"OSM extract ({geofabrik_path})")
 
 
@@ -411,6 +414,43 @@ def extract_searchable_features(tiles):
         deduped.append(f)
     features = deduped
 
+    # Assign location context (nearest city/town) to each feature
+    print("    Assigning location context to features...")
+    places = [f for f in features if f["type"] == "place"]
+    if places:
+        # Build a coarse spatial grid of places for fast nearest-neighbor lookup
+        # Grid cells are ~0.5 degrees (~50km)
+        from collections import defaultdict
+        place_grid = defaultdict(list)
+        for p in places:
+            gx = int(p["lon"] * 2)
+            gy = int(p["lat"] * 2)
+            place_grid[(gx, gy)].append(p)
+
+        def find_nearest_place(lat, lon):
+            gx = int(lon * 2)
+            gy = int(lat * 2)
+            best = None
+            best_dist = float("inf")
+            # Search 3x3 grid neighborhood
+            for dx in range(-1, 2):
+                for dy in range(-1, 2):
+                    for p in place_grid.get((gx + dx, gy + dy), []):
+                        d = (p["lat"] - lat) ** 2 + (p["lon"] - lon) ** 2
+                        if d < best_dist:
+                            best_dist = d
+                            best = p
+            return best["name"] if best else None
+
+        assigned = 0
+        for f in features:
+            if f["type"] != "place":
+                loc = find_nearest_place(f["lat"], f["lon"])
+                if loc:
+                    f["location"] = loc
+                    assigned += 1
+        print(f"    Assigned location to {assigned}/{len(features)} features")
+
     # Sort by type priority then name
     type_order = {"place": 0, "airport": 1, "peak": 2, "park": 3, "water": 4, "poi": 5, "street": 6}
     features.sort(key=lambda f: (type_order.get(f["type"], 99), f["name"]))
@@ -677,7 +717,7 @@ def create_zim(
                 prefix = prefix[:2].ljust(2, "_")
                 chunks[prefix].append(
                     {"n": f["name"], "t": f["type"], "s": f.get("subtype", ""),
-                     "a": f["lat"], "o": f["lon"]}
+                     "a": f["lat"], "o": f["lon"], "l": f.get("location", "")}
                 )
 
             # Add chunk manifest (list of available prefixes with counts)

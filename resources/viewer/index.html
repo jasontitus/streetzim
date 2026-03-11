@@ -771,10 +771,11 @@ function initSearch(map) {
     for (var j = 0; j < matches.length; j++) {
       var m = matches[j].item;
       var label = m.s ? m.s.replace(/_/g, ' ') : m.t;
+      var loc = m.l ? ' &middot; ' + escapeHtml(m.l) : '';
       html += '<div class="search-result" data-idx="' + j +
         '" data-lat="' + m.a + '" data-lon="' + m.o + '" data-type="' + m.t + '">' +
         '<span class="search-result-name">' + escapeHtml(m.n) + '</span>' +
-        '<span class="search-result-type">' + escapeHtml(label) + '</span></div>';
+        '<span class="search-result-type">' + escapeHtml(label) + loc + '</span></div>';
     }
     resultsEl.innerHTML = html;
     resultsEl.style.display = 'block';
