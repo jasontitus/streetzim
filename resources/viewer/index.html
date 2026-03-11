@@ -158,29 +158,26 @@ fetch(baseUrl + 'map-config.json')
       var satelliteVisible = false;
 
       map.on('load', function() {
-        // Add satellite raster source
+        // Add satellite as a single stitched image source
         map.addSource('satellite', {
-          type: 'raster',
-          tiles: [baseUrl + 'satellite/{z}/{x}/{y}.webp'],
-          tileSize: 256,
-          minzoom: 0,
-          maxzoom: config.satelliteMaxZoom || config.maxZoom || 14
+          type: 'image',
+          url: baseUrl + 'satellite.webp',
+          coordinates: config.satelliteCoords
         });
-        // Add satellite layer below all vector layers
         map.addLayer({
           id: 'satellite-layer',
           type: 'raster',
           source: 'satellite',
-          paint: { 'raster-opacity': 0 },
-          layout: { 'visibility': 'none' }
+          paint: { 'raster-opacity': 0 }
         }, map.getStyle().layers[0].id);
       });
 
-      // Layers to hide when satellite is active (fills that obscure imagery)
+      // All vector layers to hide when satellite is active
       var hiddenInSatellite = [
         'landcover-grass', 'landcover-wood', 'landcover-farmland',
         'landuse-residential', 'landuse-commercial', 'landuse-park',
-        'water', 'building', 'building-outline', 'background'
+        'water', 'waterway', 'building', 'building-outline',
+        'boundary-country', 'boundary-state', 'background'
       ];
 
       toggleBtn.addEventListener('click', function() {
@@ -189,30 +186,49 @@ fetch(baseUrl + 'map-config.json')
         toggleBtn.textContent = satelliteVisible ? 'Map' : 'Satellite';
 
         if (satelliteVisible) {
-          map.setLayoutProperty('satellite-layer', 'visibility', 'visible');
           map.setPaintProperty('satellite-layer', 'raster-opacity', 1);
-          // Hide fill layers so satellite shows through
+          // Hide fill/line layers so satellite shows through
           hiddenInSatellite.forEach(function(id) {
             try { map.setLayoutProperty(id, 'visibility', 'none'); } catch(e) {}
           });
-          // Make road labels white for contrast on satellite
+          // Lighten roads and make labels white for contrast
           try {
             map.setPaintProperty('road-label', 'text-color', '#fff');
             map.setPaintProperty('road-label', 'text-halo-color', 'rgba(0,0,0,0.7)');
+            map.setPaintProperty('water-label', 'text-color', '#aad3df');
+            ['road-motorway','road-trunk','road-primary','road-secondary',
+             'road-tertiary','road-minor','road-path'].forEach(function(id) {
+              try { map.setPaintProperty(id, 'line-color', 'rgba(255,255,255,0.6)'); } catch(e) {}
+            });
+            ['road-motorway-casing','road-trunk-casing','road-primary-casing',
+             'road-secondary-casing'].forEach(function(id) {
+              try { map.setLayoutProperty(id, 'visibility', 'none'); } catch(e) {}
+            });
           } catch(e) {}
         } else {
           map.setPaintProperty('satellite-layer', 'raster-opacity', 0);
-          setTimeout(function() {
-            map.setLayoutProperty('satellite-layer', 'visibility', 'none');
-          }, 300);
-          // Restore fill layers
+          // Restore all hidden layers
           hiddenInSatellite.forEach(function(id) {
             try { map.setLayoutProperty(id, 'visibility', 'visible'); } catch(e) {}
           });
-          // Restore road label colors
+          // Restore road/label colors
           try {
             map.setPaintProperty('road-label', 'text-color', '#555');
             map.setPaintProperty('road-label', 'text-halo-color', 'rgba(255,255,255,0.8)');
+            map.setPaintProperty('water-label', 'text-color', '#5d80b4');
+            ['road-motorway-casing','road-trunk-casing','road-primary-casing',
+             'road-secondary-casing'].forEach(function(id) {
+              try { map.setLayoutProperty(id, 'visibility', 'visible'); } catch(e) {}
+            });
+            // Restore road colors
+            var roadColors = {
+              'road-motorway': '#ffa35c', 'road-trunk': '#ffd592',
+              'road-primary': '#fcd6a4', 'road-secondary': '#f5f5dc',
+              'road-tertiary': '#fff', 'road-minor': '#fff', 'road-path': '#ccc'
+            };
+            Object.keys(roadColors).forEach(function(id) {
+              try { map.setPaintProperty(id, 'line-color', roadColors[id]); } catch(e2) {}
+            });
           } catch(e) {}
         }
       });
