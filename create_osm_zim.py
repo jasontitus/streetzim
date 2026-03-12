@@ -88,14 +88,20 @@ def download_file(url, dest, desc=None):
         raise
 
 
-def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65):
+def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
+                              sat_format="webp", sat_quality=None, tile_size=256):
     """Download Sentinel-2 Cloudless satellite tiles for a bounding box.
 
     Downloads JPEG tiles from the EOX Sentinel-2 Cloudless WMTS service,
-    converts them to WebP for better compression, and stores them as
-    {dest_dir}/{z}/{x}/{y}.webp.
+    converts them to the specified format, and stores them as
+    {dest_dir}/{z}/{x}/{y}.{ext}.
 
-    Returns the number of tiles downloaded.
+    When tile_size=512, four 256px source tiles are stitched into one 512px
+    tile, halving the tile count and improving compression.
+
+    Supported formats: "webp", "avif".
+
+    Returns the number of output tiles produced.
     """
     import io
     import math
@@ -105,46 +111,119 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65):
 
     from PIL import Image
 
+    if sat_format == "avif":
+        try:
+            import pillow_avif  # noqa: F401 — registers AVIF codec with Pillow
+        except ImportError:
+            print("    Warning: pillow-avif-plugin not installed, falling back to webp")
+            sat_format = "webp"
+
+    quality = sat_quality if sat_quality is not None else webp_quality
+    ext = sat_format  # "webp" or "avif"
+
     bbox = parse_bbox(bbox_str)
     minlon, minlat, maxlon, maxlat = bbox
 
     os.makedirs(dest_dir, exist_ok=True)
     total_downloaded = 0
     total_skipped = 0
-    total_bytes_saved = 0
+    total_bytes_jpeg = 0
+    total_bytes_out = 0
     lock = threading.Lock()
 
-    def _download_tile(z, x, y):
-        """Download and convert a single tile. Returns (downloaded, bytes_saved)."""
-        tile_dir = os.path.join(dest_dir, str(z), str(x))
-        tile_path = os.path.join(tile_dir, f"{y}.webp")
-
-        if os.path.exists(tile_path) and os.path.getsize(tile_path) > 0:
-            return (False, 0)
-
-        os.makedirs(tile_dir, exist_ok=True)
+    def _fetch_source_tile(z, x, y):
+        """Download a single 256px JPEG tile from the WMTS source.
+        Returns (PIL.Image, jpeg_bytes_len)."""
         url = SATELLITE_TILE_URL.format(z=z, x=x, y=y)
-
         for attempt in range(4):
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
                 with urllib.request.urlopen(req, timeout=30) as resp:
                     jpg_data = resp.read()
-                img = Image.open(io.BytesIO(jpg_data))
-                img.save(tile_path, "WEBP", quality=webp_quality)
-                saved = len(jpg_data) - os.path.getsize(tile_path)
-                return (True, saved)
+                return Image.open(io.BytesIO(jpg_data)), len(jpg_data)
             except Exception as e:
                 if attempt < 3:
                     time.sleep(2 ** attempt)
                 else:
                     print(f"\n    Warning: failed to download z{z}/{x}/{y}: {e}")
-        return (False, 0)
+        return None, 0
+
+    def _save_image(img, path):
+        """Save image in the configured format. Returns output file size."""
+        if sat_format == "avif":
+            img.save(path, "AVIF", quality=quality, speed=6)
+        else:
+            img.save(path, "WEBP", quality=quality)
+        return os.path.getsize(path)
+
+    def _process_tile_256(z, x, y):
+        """Download and convert a single 256px tile. Returns (downloaded, jpeg_bytes, out_bytes)."""
+        tile_dir = os.path.join(dest_dir, str(z), str(x))
+        tile_path = os.path.join(tile_dir, f"{y}.{ext}")
+
+        if os.path.exists(tile_path) and os.path.getsize(tile_path) > 0:
+            return (False, 0, 0)
+
+        os.makedirs(tile_dir, exist_ok=True)
+        img, jpeg_size = _fetch_source_tile(z, x, y)
+        if img is None:
+            return (False, 0, 0)
+        out_size = _save_image(img, tile_path)
+        return (True, jpeg_size, out_size)
+
+    def _process_tile_512(z, x0, y0):
+        """Download four 256px source tiles at z+1 and stitch into one 512px tile.
+
+        The output tile is stored at coordinates (z, x0, y0) but contains the
+        pixel data of source tiles (z+1, x0*2..x0*2+1, y0*2..y0*2+1).
+
+        Returns (downloaded, jpeg_bytes, out_bytes).
+        """
+        tile_dir = os.path.join(dest_dir, str(z), str(x0))
+        tile_path = os.path.join(tile_dir, f"{y0}.{ext}")
+
+        if os.path.exists(tile_path) and os.path.getsize(tile_path) > 0:
+            return (False, 0, 0)
+
+        os.makedirs(tile_dir, exist_ok=True)
+
+        # Fetch 4 source tiles from one zoom level deeper
+        sz = z + 1
+        sx0, sy0 = x0 * 2, y0 * 2
+        stitched = Image.new("RGB", (512, 512))
+        total_jpeg = 0
+        for dy in range(2):
+            for dx in range(2):
+                img, jpeg_size = _fetch_source_tile(sz, sx0 + dx, sy0 + dy)
+                total_jpeg += jpeg_size
+                if img is not None:
+                    stitched.paste(img, (dx * 256, dy * 256))
+
+        if total_jpeg == 0:
+            return (False, 0, 0)
+
+        out_size = _save_image(stitched, tile_path)
+        return (True, total_jpeg, out_size)
 
     max_workers = min(32, (os.cpu_count() or 4) * 4)
 
+    if tile_size == 512:
+        print(f"    Mode: 512px tiles ({sat_format} q{quality})")
+        print(f"    Stitching 4x source 256px tiles per output tile")
+    else:
+        print(f"    Mode: 256px tiles ({sat_format} q{quality})")
+
     for z in range(0, max_zoom + 1):
-        n = 2 ** z
+        # Calculate tile range at this zoom level
+        if tile_size == 512:
+            # For 512px tiles, we need source tiles at z+1 but store at z.
+            # The output tile grid at zoom z covers the same area as the
+            # 256px grid at zoom z, but each tile has 4x the source pixels.
+            src_z = z + 1
+            n = 2 ** src_z
+        else:
+            n = 2 ** z
+
         x_min = int(n * (minlon + 180) / 360)
         x_max = int(n * (maxlon + 180) / 360)
         lat_rad_min = math.radians(minlat)
@@ -157,40 +236,57 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65):
         y_min = max(0, y_min)
         y_max = min(n - 1, y_max)
 
-        tile_count = (x_max - x_min + 1) * (y_max - y_min + 1)
-        print(f"    z{z}: {tile_count} tiles ({x_max - x_min + 1}x{y_max - y_min + 1})")
+        if tile_size == 512:
+            # Convert source tile range to output tile range (halve coordinates)
+            out_x_min = x_min // 2
+            out_x_max = x_max // 2
+            out_y_min = y_min // 2
+            out_y_max = y_max // 2
+            tile_count = (out_x_max - out_x_min + 1) * (out_y_max - out_y_min + 1)
+            print(f"    z{z}: {tile_count} tiles ({out_x_max - out_x_min + 1}x{out_y_max - out_y_min + 1}) [512px, src z{src_z}]")
+            process_fn = _process_tile_512
+            tile_coords = [(z, x, y) for x in range(out_x_min, out_x_max + 1)
+                           for y in range(out_y_min, out_y_max + 1)]
+        else:
+            tile_count = (x_max - x_min + 1) * (y_max - y_min + 1)
+            print(f"    z{z}: {tile_count} tiles ({x_max - x_min + 1}x{y_max - y_min + 1})")
+            process_fn = _process_tile_256
+            tile_coords = [(z, x, y) for x in range(x_min, x_max + 1)
+                           for y in range(y_min, y_max + 1)]
 
-        # Small zoom levels: download sequentially (few tiles)
+        # Small zoom levels: process sequentially
         if tile_count <= 10:
-            for x in range(x_min, x_max + 1):
-                for y in range(y_min, y_max + 1):
-                    downloaded, saved = _download_tile(z, x, y)
-                    if downloaded:
-                        total_downloaded += 1
-                        total_bytes_saved += saved
-                    else:
-                        total_skipped += 1
-            continue
-
-        # Larger zoom levels: download in parallel
-        tiles = [(z, x, y) for x in range(x_min, x_max + 1) for y in range(y_min, y_max + 1)]
-        completed = 0
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {pool.submit(_download_tile, *t): t for t in tiles}
-            for future in as_completed(futures):
-                downloaded, saved = future.result()
+            for coords in tile_coords:
+                downloaded, jpeg_bytes, out_bytes = process_fn(*coords)
                 if downloaded:
                     total_downloaded += 1
-                    total_bytes_saved += saved
+                    total_bytes_jpeg += jpeg_bytes
+                    total_bytes_out += out_bytes
+                else:
+                    total_skipped += 1
+            continue
+
+        # Larger zoom levels: process in parallel
+        completed = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(process_fn, *t): t for t in tile_coords}
+            for future in as_completed(futures):
+                downloaded, jpeg_bytes, out_bytes = future.result()
+                if downloaded:
+                    total_downloaded += 1
+                    total_bytes_jpeg += jpeg_bytes
+                    total_bytes_out += out_bytes
                 else:
                     total_skipped += 1
                 completed += 1
                 if completed % 500 == 0:
-                    print(f"\r    Downloaded {total_downloaded} tiles ({total_skipped} cached)...", end="", flush=True)
+                    print(f"\r    Processed {total_downloaded} tiles ({total_skipped} cached)...", end="", flush=True)
 
-    saved_mb = total_bytes_saved / (1024 * 1024)
-    print(f"\r    Downloaded {total_downloaded} satellite tiles ({total_skipped} cached)")
-    print(f"    WebP compression saved {saved_mb:.1f} MB vs JPEG source")
+    print(f"\r    Produced {total_downloaded} satellite tiles ({total_skipped} cached)")
+    if total_bytes_jpeg > 0:
+        saved_mb = (total_bytes_jpeg - total_bytes_out) / (1024 * 1024)
+        ratio = (1 - total_bytes_out / total_bytes_jpeg) * 100
+        print(f"    {sat_format.upper()} compression saved {saved_mb:.1f} MB ({ratio:.0f}% vs JPEG source)")
     return total_downloaded + total_skipped
 
 
@@ -962,6 +1058,7 @@ def extract_searchable_features(tiles=None, mbtiles_path=None):
     gc.collect()
 
     # Deduplicate across tiles
+    seen = set()
     deduped = []
     for f in features:
         dedup_key = (f["name"].lower(), f["type"], round(f["lat"], 4), round(f["lon"], 4))
@@ -1065,6 +1162,7 @@ def create_zim(
     search_features=None,
     satellite_dir=None,
     satellite_max_zoom=None,
+    satellite_format="webp",
     terrain_dir=None,
     terrain_max_zoom=None,
     zim_workers=None,
@@ -1287,6 +1385,8 @@ def create_zim(
 
         # Add satellite tiles if provided
         if satellite_dir and os.path.isdir(satellite_dir):
+            sat_ext = satellite_format  # "webp" or "avif"
+            sat_mime = "image/avif" if sat_ext == "avif" else "image/webp"
             sat_count = 0
             max_sz = satellite_max_zoom if satellite_max_zoom is not None else 99
             for z in range(0, max_sz + 1):
@@ -1295,21 +1395,21 @@ def create_zim(
                     continue
                 for root, dirs, files in os.walk(z_dir):
                     for fname in files:
-                        if not fname.endswith(".webp"):
+                        if not fname.endswith(f".{sat_ext}"):
                             continue
                         fpath = os.path.join(root, fname)
                         rel = os.path.relpath(fpath, satellite_dir)
                         zim_path = f"satellite/{rel}"
                         creator.add_item(MapItem(
                             zim_path, f"Satellite {rel}",
-                            "image/webp",
+                            sat_mime,
                             fpath,
                             compress=False,
                         ))
                         sat_count += 1
                         if sat_count % 2000 == 0:
                             print(f"\r    Added {sat_count} satellite tiles...", end="", flush=True)
-            print(f"\r    Added {sat_count} satellite tiles")
+            print(f"\r    Added {sat_count} satellite tiles ({sat_ext})")
 
         # Add terrain tiles if provided
         if terrain_dir and os.path.isdir(terrain_dir):
@@ -1598,6 +1698,12 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Include Sentinel-2 Cloudless satellite imagery tiles")
     parser.add_argument("--satellite-zoom", type=int, default=None,
                         help="Max zoom for satellite tiles (default: same as --max-zoom)")
+    parser.add_argument("--satellite-format", choices=["webp", "avif"], default="webp",
+                        help="Satellite tile image format (default: webp)")
+    parser.add_argument("--satellite-quality", type=int, default=None,
+                        help="Satellite tile compression quality (default: 65 for webp, 30 for avif)")
+    parser.add_argument("--satellite-tile-size", type=int, choices=[256, 512], default=256,
+                        help="Satellite tile pixel size (default: 256; 512 stitches 4 source tiles)")
     parser.add_argument("--terrain", action="store_true",
                         help="Include Copernicus GLO-30 terrain tiles for 3D/hillshade")
     parser.add_argument("--terrain-zoom", type=int, default=12,
@@ -1639,6 +1745,11 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     # Satellite options
     include_satellite = args.satellite
     satellite_max_zoom = args.satellite_zoom or args.max_zoom
+    satellite_format = args.satellite_format
+    satellite_quality = args.satellite_quality
+    satellite_tile_size = args.satellite_tile_size
+    if satellite_quality is None:
+        satellite_quality = 30 if satellite_format == "avif" else 65
 
     # Terrain options
     include_terrain = args.terrain
@@ -1648,7 +1759,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
 
     print(f"=== Creating Offline OSM ZIM: {name} ===")
     if include_satellite:
-        print(f"  Including Sentinel-2 satellite imagery (z0-{satellite_max_zoom})")
+        sat_desc = f"{satellite_format} q{satellite_quality} {satellite_tile_size}px"
+        print(f"  Including Sentinel-2 satellite imagery (z0-{satellite_max_zoom}, {sat_desc})")
     if include_terrain:
         print(f"  Including Copernicus GLO-30 terrain (z0-{terrain_max_zoom})")
     print()
@@ -1725,7 +1837,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         terrain_future = None
 
         if include_satellite and bbox_str:
-            satellite_dir = os.path.join(SCRIPT_DIR, "satellite_cache")
+            # Use format/size-specific cache dir to avoid mixing tile formats
+            sat_cache_suffix = f"_{satellite_format}_{satellite_tile_size}"
+            satellite_dir = os.path.join(SCRIPT_DIR, f"satellite_cache{sat_cache_suffix}")
         if include_terrain and bbox_str:
             terrain_dir = os.path.join(SCRIPT_DIR, "terrain_cache")
 
@@ -1736,7 +1850,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
 
             with StepPool(max_workers=2) as step_pool:
                 sat_future = step_pool.submit(
-                    download_satellite_tiles, bbox_str, satellite_dir, satellite_max_zoom)
+                    download_satellite_tiles, bbox_str, satellite_dir, satellite_max_zoom,
+                    sat_format=satellite_format, sat_quality=satellite_quality,
+                    tile_size=satellite_tile_size)
                 terrain_future = step_pool.submit(
                     generate_terrain_tiles, bbox_str, terrain_dir, terrain_max_zoom)
                 # Wait for both — exceptions will be raised on .result()
@@ -1751,7 +1867,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 if not bbox_str:
                     print("    Warning: no bbox specified, skipping satellite tiles")
                 else:
-                    download_satellite_tiles(bbox_str, satellite_dir, max_zoom=satellite_max_zoom)
+                    download_satellite_tiles(bbox_str, satellite_dir, max_zoom=satellite_max_zoom,
+                                             sat_format=satellite_format, sat_quality=satellite_quality,
+                                             tile_size=satellite_tile_size)
 
             if include_terrain:
                 step_terrain = 5 + (1 if include_satellite else 0)
@@ -1795,6 +1913,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         if satellite_dir and os.path.isdir(str(satellite_dir)):
             map_config["hasSatellite"] = True
             map_config["satelliteMaxZoom"] = satellite_max_zoom
+            map_config["satelliteFormat"] = satellite_format
+            map_config["satelliteTileSize"] = satellite_tile_size
         if terrain_dir and os.path.isdir(str(terrain_dir)):
             map_config["hasTerrain"] = True
             map_config["terrainMaxZoom"] = terrain_max_zoom
@@ -1814,6 +1934,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             search_features=search_features,
             satellite_dir=satellite_dir,
             satellite_max_zoom=satellite_max_zoom,
+            satellite_format=satellite_format,
             terrain_dir=terrain_dir,
             terrain_max_zoom=terrain_max_zoom,
             zim_workers=args.workers,

@@ -182,11 +182,13 @@ fetch(baseUrl + 'map-config.json')
 
       function addSatelliteLayer() {
         if (satelliteAdded) return;
+        var satExt = config.satelliteFormat || 'webp';
+        var satTileSize = config.satelliteTileSize || 256;
         // Use zimtile:// protocol for retry logic on Kiwix service worker
         map.addSource('satellite', {
           type: 'raster',
-          tiles: ['zimtile://' + baseUrl + 'satellite/{z}/{x}/{y}.webp'],
-          tileSize: 256,
+          tiles: ['zimtile://' + baseUrl + 'satellite/{z}/{x}/{y}.' + satExt],
+          tileSize: satTileSize,
           minzoom: 0,
           maxzoom: config.satelliteMaxZoom || 14
         });
