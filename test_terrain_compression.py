@@ -49,11 +49,26 @@ REGIONS = {
 }
 
 # Compression strategies
+#
+# IMPORTANT: Lossy WebP is NOT suitable for Mapbox terrain-RGB tiles.
+# The encoding packs elevation into a 24-bit integer across R/G/B channels.
+# A single-LSB change in R = 6,553.6m of elevation error because R is the
+# high byte (R * 65536 * 0.1). Lossy compression doesn't respect byte
+# boundaries, so even quality=99 produces catastrophic elevation errors.
+#
+# The effective compression lever is "round_meters": pre-rounding elevation
+# to a coarser precision before encoding. This reduces entropy in all three
+# channels (encoded values change more slowly), improving lossless WebP
+# compression significantly while remaining fully MapLibre-compatible.
+#
+# Source data is Copernicus GLO-30 (30m horizontal resolution), so sub-meter
+# vertical precision is already beyond what the data supports.
 STRATEGIES = {
-    "baseline": {"precision": 0.1, "lossless": True, "quality": None},
-    "quantized_1m": {"precision": 1.0, "lossless": True, "quality": None},
-    "lossy_q92": {"precision": 0.1, "lossless": False, "quality": 92},
-    "combined": {"precision": 1.0, "lossless": False, "quality": 92},
+    "baseline": {"round_meters": None, "lossless": True, "quality": None},
+    "quantized_1m": {"round_meters": 1, "lossless": True, "quality": None},
+    "quantized_2m": {"round_meters": 2, "lossless": True, "quality": None},
+    "quantized_5m": {"round_meters": 5, "lossless": True, "quality": None},
+    "quantized_10m": {"round_meters": 10, "lossless": True, "quality": None},
 }
 
 
@@ -121,16 +136,25 @@ def build_mosaic(tif_paths, cache_dir):
     return mosaic_path
 
 
-def encode_terrain_rgb(elevation, precision):
-    """Encode elevation array to terrain-RGB using given precision.
+def encode_terrain_rgb(elevation, round_meters=None):
+    """Encode elevation array to Mapbox terrain-RGB.
 
-    Mapbox terrain-RGB: encoded = (elevation + 10000) / precision
-    Then split into R (high byte), G (mid byte), B (low byte).
+    Always uses the standard Mapbox formula: encoded = (elevation + 10000) / 0.1
+    Then splits into R (high byte), G (mid byte), B (low byte).
 
-    With precision=1.0, the low byte is always 0, making it compress much better.
+    If round_meters is set, elevation is pre-rounded to that precision before
+    encoding. This reduces entropy in the RGB channels (fewer distinct values)
+    which improves both lossless and lossy compression, while remaining fully
+    compatible with MapLibre's Mapbox decoder.
+
+    For example, round_meters=1 means encoded values are always multiples of 10,
+    so the B channel only takes values 0,10,20,...,250 (26 values vs 256).
     """
-    elev = elevation[0]
-    encoded = ((elev + 10000.0) / precision).astype(np.uint32)
+    elev = elevation[0].copy()
+    if round_meters is not None:
+        elev = np.round(elev / round_meters) * round_meters
+
+    encoded = ((elev + 10000.0) / 0.1).astype(np.uint32)
     encoded = np.clip(encoded, 0, 16777215)
 
     r = ((encoded >> 16) & 0xFF).astype(np.uint8)
@@ -151,13 +175,27 @@ def save_tile_to_bytes(rgb_array, lossless, quality):
     return buf.getvalue()
 
 
+def decode_terrain_rgb(webp_bytes):
+    """Decode WebP terrain-RGB bytes back to elevation using Mapbox formula.
+
+    This simulates exactly what MapLibre does on the client:
+        elevation = (R * 65536 + G * 256 + B) * 0.1 - 10000
+    """
+    img = Image.open(BytesIO(webp_bytes))
+    rgb = np.array(img, dtype=np.float64)
+    r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
+    return (r * 65536 + g * 256 + b) * 0.1 - 10000.0
+
+
 def generate_tiles_for_strategy(mosaic_path, bbox, max_zoom, strategy_name, strategy_cfg):
     """Generate all tiles for a region+strategy combination.
 
-    Returns dict: {zoom_level: {"count": N, "total_bytes": B}}
+    Returns dict: {zoom_level: {"count": N, "total_bytes": B, "errors": {...}}}
+    Error stats measure round-trip elevation error: source elevation -> encode ->
+    WebP compress -> decompress -> decode via Mapbox formula -> compare.
     """
     minlon, minlat, maxlon, maxlat = bbox
-    precision = strategy_cfg["precision"]
+    round_meters = strategy_cfg["round_meters"]
     lossless = strategy_cfg["lossless"]
     quality = strategy_cfg["quality"]
 
@@ -169,6 +207,8 @@ def generate_tiles_for_strategy(mosaic_path, bbox, max_zoom, strategy_name, stra
             continue
 
         total_bytes = 0
+        all_abs_errors = []
+
         for tile in tiles_at_z:
             tb = mercantile.bounds(tile)
             tile_bounds_3857 = transform_bounds(
@@ -186,11 +226,29 @@ def generate_tiles_for_strategy(mosaic_path, bbox, max_zoom, strategy_name, stra
                     resampling=Resampling.cubic,
                 )
 
-            rgb = encode_terrain_rgb(elevation, precision)
+            rgb = encode_terrain_rgb(elevation, round_meters)
             tile_bytes = save_tile_to_bytes(rgb, lossless, quality)
             total_bytes += len(tile_bytes)
 
-        zoom_stats[z] = {"count": len(tiles_at_z), "total_bytes": total_bytes}
+            # Round-trip error: decode the WebP back and compare to source elevation
+            decoded_elev = decode_terrain_rgb(tile_bytes)
+            source_elev = elevation[0].astype(np.float64)
+            abs_error = np.abs(decoded_elev - source_elev)
+            all_abs_errors.append(abs_error)
+
+        # Aggregate error stats across all tiles at this zoom
+        combined_errors = np.concatenate([e.ravel() for e in all_abs_errors])
+        zoom_stats[z] = {
+            "count": len(tiles_at_z),
+            "total_bytes": total_bytes,
+            "errors": {
+                "mean": float(np.mean(combined_errors)),
+                "max": float(np.max(combined_errors)),
+                "p50": float(np.median(combined_errors)),
+                "p95": float(np.percentile(combined_errors, 95)),
+                "p99": float(np.percentile(combined_errors, 99)),
+            },
+        }
 
     return zoom_stats
 
@@ -236,7 +294,8 @@ def main():
         region_results = {}
         for strat_name, strat_cfg in STRATEGIES.items():
             desc = []
-            desc.append(f"precision={strat_cfg['precision']}m")
+            rm = strat_cfg["round_meters"]
+            desc.append(f"round={rm}m" if rm else "full precision")
             desc.append("lossless" if strat_cfg["lossless"] else f"lossy q{strat_cfg['quality']}")
             print(f"\n  Strategy: {strat_name} ({', '.join(desc)})")
 
@@ -318,6 +377,72 @@ def main():
                 base_total = baseline_z["total_bytes"]
                 savings = (1 - total / base_total) * 100 if base_total > 0 else 0
                 print(f"    {strat_name:<20} {format_bytes(total):>10} {format_bytes(int(avg)):>10} {savings:>9.1f}%")
+
+    # Elevation error analysis
+    print(f"\n\n{'='*70}")
+    print("ELEVATION ERROR vs LOSSLESS BASELINE (meters)")
+    print("(round-trip: source -> encode -> WebP -> decode via Mapbox formula)")
+    print(f"{'='*70}")
+
+    for region_key, region_cfg in REGIONS.items():
+        label = region_cfg["label"]
+        results = all_results.get(region_key)
+        if not results:
+            continue
+
+        print(f"\n  {label}")
+
+        # Show error stats at the max zoom (most tiles, most representative)
+        max_z = max(results["baseline"]["zoom_stats"].keys())
+
+        print(f"\n    All zoom levels aggregated:")
+        print(f"    {'Strategy':<20} {'Mean':>8} {'Median':>8} {'P95':>8} {'P99':>8} {'Max':>8}")
+        print(f"    {'-'*54}")
+
+        for strat_name in STRATEGIES:
+            # Aggregate errors across all zoom levels
+            all_means = []
+            all_maxes = []
+            all_p95s = []
+            all_p99s = []
+            all_medians = []
+            total_pixels = 0
+            weighted_mean = 0.0
+            worst_max = 0.0
+
+            for z, zs in results[strat_name]["zoom_stats"].items():
+                errs = zs["errors"]
+                n_pixels = zs["count"] * 256 * 256
+                weighted_mean += errs["mean"] * n_pixels
+                total_pixels += n_pixels
+                worst_max = max(worst_max, errs["max"])
+                all_p95s.append(errs["p95"])
+                all_p99s.append(errs["p99"])
+                all_medians.append(errs["p50"])
+
+            avg_mean = weighted_mean / total_pixels if total_pixels > 0 else 0
+            # Use max-zoom stats for percentiles (most representative)
+            max_z_errs = results[strat_name]["zoom_stats"][max_z]["errors"]
+
+            print(f"    {strat_name:<20} {avg_mean:>7.2f}m {max_z_errs['p50']:>7.2f}m "
+                  f"{max_z_errs['p95']:>7.2f}m {max_z_errs['p99']:>7.2f}m {worst_max:>7.2f}m")
+
+        # Per-zoom error detail for last few zoom levels
+        show_zooms = range(max(0, max_z - 3), max_z + 1)
+        print(f"\n    Per-zoom detail:")
+        print(f"    {'Zoom':<6} {'Strategy':<20} {'Mean':>8} {'P95':>8} {'Max':>8}")
+        print(f"    {'-'*54}")
+
+        for z in show_zooms:
+            for strat_name in STRATEGIES:
+                zs = results[strat_name]["zoom_stats"].get(z)
+                if not zs:
+                    continue
+                errs = zs["errors"]
+                print(f"    z{z:<5} {strat_name:<20} {errs['mean']:>7.2f}m "
+                      f"{errs['p95']:>7.2f}m {errs['max']:>7.2f}m")
+            if z < max_z:
+                print()
 
     print()
 

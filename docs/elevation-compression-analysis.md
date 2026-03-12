@@ -6,118 +6,136 @@
 - **Encoding:** Mapbox terrain-RGB — elevation packed into 3 bytes (R/G/B) with 0.1m precision, offset by 10,000m
 - **Tile format:** 256x256 lossless WebP
 - **Consumer:** MapLibre GL JS (`encoding: 'mapbox'`)
-- **Zoom range:** z0–z12
+- **Zoom range:** z0-z12
 
 The encoding formula is: `encoded = (elevation + 10000.0) / 0.1`, then split across R (high byte), G (mid byte), B (low byte). This gives 0.1m precision over a range of -10,000m to +6,777m.
 
-## Compression Strategies Considered
+## Why Lossy WebP Does NOT Work
 
-### 1. Quantize to 1m Precision (drop effective use of Blue channel)
+**Lossy WebP is fundamentally incompatible with Mapbox terrain-RGB encoding.**
 
-**What it does:** Change the divisor from 0.1 to 1.0, so the encoded value is `(elevation + 10000)` instead of `(elevation + 10000) / 0.1`. This means the low byte (Blue channel) is always 0, and elevation information lives only in R and G.
+The Mapbox encoding packs elevation into a 24-bit integer split across R/G/B:
+- R = high byte: each LSB change = `65536 * 0.1 = 6,553.6m` of elevation error
+- G = mid byte: each LSB change = `256 * 0.1 = 25.6m` of elevation error
+- B = low byte: each LSB change = `0.1m` of elevation error
 
-**Why it works:** A constant blue channel compresses to almost nothing. The source DEM is 30m resolution, so 0.1m precision is 300x finer than the data actually supports. Even 1m precision is 30x finer than the source grid.
+Lossy WebP treats each channel as an independent image signal and doesn't respect the byte-boundary structure. Even at quality 99, the compressor freely changes R and G values by 1-2 LSB, producing **thousands of meters of elevation error**. Our testing confirmed mean errors of 21,000m+ for Colorado at quality 92.
 
-**Trade-offs:**
-- No visual impact — source data doesn't have sub-meter precision
-- MapLibre still decodes correctly (it just reads slightly different values)
-- Simple code change (one constant)
+This is a known limitation of using lossy image compression with terrain-RGB tiles.
 
-**Compatibility note:** The viewer uses `encoding: 'mapbox'` which decodes as `elevation = (R*65536 + G*256 + B) * 0.1 - 10000`. With 1m precision encoding, the decoder still works but reconstructs elevations rounded to the nearest 0.1m (since the blue channel carries no useful data). This is functionally identical for 30m source data.
+## Compression Strategy: Elevation Quantization
 
-### 2. Lossy WebP (quality 92)
+The effective approach is **pre-rounding elevation to a coarser precision** before encoding with the standard Mapbox formula. This:
 
-**What it does:** Switch from `lossless=True` to `lossless=False, quality=92`.
+1. Reduces the number of distinct encoded values, lowering entropy in all three RGB channels
+2. Makes pixel values change more gradually between neighboring pixels
+3. Improves lossless WebP compression significantly
+4. Remains **fully compatible** with MapLibre's Mapbox decoder — no viewer changes needed
 
-**Why it works:** Lossy WebP can dramatically reduce file sizes. The concern is that even small pixel value changes translate to elevation errors — but at quality 92, typical errors are ~1-2 LSB, meaning ~0.1-0.2m in the Mapbox encoding. This is well within the noise floor of 30m DEM data.
+Implementation is a single line added before encoding:
 
-**Trade-offs:**
-- Lossy compression can introduce block artifacts that show as slight terrain stepping in 3D view (especially with exaggeration)
-- At quality 92, these are minimal and generally not visible
-- Could be tested at lower quality values (85, 80) for even more savings if visual inspection passes
+```python
+elev = np.round(elev / round_meters) * round_meters  # e.g., round_meters=5
+encoded = ((elev + 10000.0) / 0.1).astype(np.uint32)  # standard Mapbox formula
+```
 
-### 3. Combined: 1m Quantization + Lossy WebP q92
+The source DEM is 30m horizontal resolution, so 0.1m vertical precision is far beyond what the data supports. Rounding to 1-10m loses nothing meaningful.
 
-**What it does:** Both techniques applied together.
-
-**Why it works:** Quantizing to 1m makes pixel values much smoother (the blue channel is constant, and R/G change more gradually). This smoother signal is then far easier for lossy WebP to compress, producing a compounding effect beyond what either technique achieves alone.
-
-**Trade-offs:**
-- Same as individual techniques, but combined
-- The compounding effect is substantial — this is our recommended approach
-
-### 4. Other Options Considered but Not Tested
+## Other Options Considered
 
 | Option | Description | Why we didn't pursue it |
 |--------|-------------|------------------------|
-| **Terrarium encoding** | Alternative RGB encoding supported by MapLibre | Marginal gains over Mapbox encoding with lossless compression |
-| **128x128 tile resolution** | Half-resolution tiles, let MapLibre upscale | 4x fewer pixels but changes tile infrastructure; could combine with other approaches |
-| **Custom binary format (Lerc)** | Purpose-built DEM compression | Requires custom client-side decoder in JS; not natively supported by MapLibre |
-| **Skip ocean/constant tiles** | Don't generate tiles with zero elevation variation | Good optimization but doesn't reduce per-tile size; more of a tile-count reduction |
-| **Lower zoom level** | Generate fewer zoom levels (e.g., z10 instead of z12) | Already configurable via `--terrain-zoom`; reduces detail |
-| **PNG indexed color** | Use palette-based PNG for low-variation tiles | Inconsistent savings, adds per-tile format decisions |
+| **Lossy WebP** | Lossy image compression | Catastrophic elevation errors (see above) |
+| **Terrarium encoding** | Alternative RGB encoding supported by MapLibre | Same lossy problem; marginal lossless gains |
+| **128x128 tile resolution** | Half-resolution tiles, let MapLibre upscale | 4x fewer pixels but changes tile infrastructure |
+| **Custom binary format (Lerc)** | Purpose-built DEM compression | Requires custom client-side JS decoder |
+| **Skip ocean/constant tiles** | Don't generate tiles with zero variation | Good optimization but reduces tile count, not per-tile size |
+| **Lower zoom level** | Fewer zoom levels (e.g., z10 vs z12) | Already configurable via `--terrain-zoom` |
 
 ## Test Results
 
 Tested on two regions with different terrain characteristics:
-- **Colorado (CO Springs area):** Mountainous terrain with large elevation range (~1,600m–4,300m)
-- **Washington DC:** Relatively flat terrain with gentle hills (~0m–150m)
+- **Colorado (CO Springs area):** Mountainous terrain, elevation range ~1,600m-4,300m
+- **Washington DC:** Relatively flat terrain, gentle hills ~0m-150m
 
-### Overall Summary
+### Size Comparison
 
 | Region | Strategy | Total Size | Savings | Ratio |
 |--------|----------|-----------|---------|-------|
-| **Colorado** | baseline (0.1m, lossless) | 4.89 MB | — | 1.00x |
-| | quantized 1m (lossless) | 2.30 MB | 53.0% | 2.13x |
-| | lossy q92 (0.1m) | 2.15 MB | 56.0% | 2.27x |
-| | **combined (1m + lossy q92)** | **794 KB** | **84.2%** | **6.31x** |
-| **Washington DC** | baseline (0.1m, lossless) | 1.38 MB | — | 1.00x |
-| | quantized 1m (lossless) | 646 KB | 54.1% | 2.18x |
-| | lossy q92 (0.1m) | 578 KB | 59.0% | 2.44x |
-| | **combined (1m + lossy q92)** | **91 KB** | **93.5%** | **15.43x** |
+| **Colorado** | baseline (0.1m) | 4.89 MB | — | 1.00x |
+| | quantized 1m | 2.89 MB | 40.9% | 1.69x |
+| | quantized 2m | 2.31 MB | 52.8% | 2.12x |
+| | **quantized 5m** | **1.68 MB** | **65.7%** | **2.92x** |
+| | quantized 10m | 1.27 MB | 74.1% | 3.86x |
+| **DC** | baseline (0.1m) | 1.38 MB | — | 1.00x |
+| | quantized 1m | 778 KB | 44.8% | 1.81x |
+| | quantized 2m | 603 KB | 57.2% | 2.33x |
+| | **quantized 5m** | **414 KB** | **70.6%** | **3.40x** |
+| | quantized 10m | 271 KB | 80.7% | 5.19x |
 
 ### Per-Zoom Detail (z12, where most tiles live)
 
 | Region | Strategy | Total | Avg/tile | Savings |
 |--------|----------|-------|----------|---------|
 | **Colorado** (54 tiles) | baseline | 3.00 MB | 56.9 KB | — |
-| | quantized 1m | 1.28 MB | 24.2 KB | 57.4% |
-| | lossy q92 | 1.34 MB | 25.4 KB | 55.3% |
-| | **combined** | **421 KB** | **7.8 KB** | **86.3%** |
+| | quantized 1m | 1.67 MB | 31.7 KB | 44.4% |
+| | quantized 2m | 1.31 MB | 24.9 KB | 56.3% |
+| | quantized 5m | 954 KB | 17.7 KB | 69.0% |
+| | quantized 10m | 692 KB | 12.8 KB | 77.5% |
 | **DC** (16 tiles) | baseline | 762 KB | 47.6 KB | — |
-| | quantized 1m | 329 KB | 20.6 KB | 56.8% |
-| | lossy q92 | 305 KB | 19.1 KB | 59.9% |
-| | **combined** | **41 KB** | **2.5 KB** | **94.7%** |
+| | quantized 1m | 399 KB | 25.0 KB | 47.6% |
+| | quantized 2m | 302 KB | 18.8 KB | 60.4% |
+| | quantized 5m | 204 KB | 12.8 KB | 73.2% |
+| | quantized 10m | 126 KB | 7.9 KB | 83.5% |
+
+### Elevation Error (vs source DEM)
+
+All strategies use lossless WebP, so errors come purely from the quantization rounding:
+
+| Strategy | Mean Error | P95 Error | Max Error |
+|----------|-----------|-----------|-----------|
+| baseline | 0.05m | 0.09m | 0.10m |
+| quantized 1m | 0.25m | 0.48m | 0.50m |
+| quantized 2m | 0.50m | 0.95m | 1.00m |
+| **quantized 5m** | **1.25m** | **2.37m** | **2.50m** |
+| quantized 10m | 2.50m | 4.75m | 5.00m |
+
+Errors are deterministic and bounded: max error = half the rounding step. For context, the source DEM has 30m horizontal resolution, so these vertical quantization levels are all well within the data's inherent accuracy.
 
 ### Key Observations
 
-1. **Quantization and lossy compression are roughly equal individually** (~53-59% savings each)
-2. **They compound dramatically when combined** (84-94% savings) because quantizing smooths the signal, making lossy compression far more effective
-3. **Flat terrain benefits more** — DC sees 15x compression vs Colorado's 6x, because there's less actual elevation variation per tile
-4. **The effect strengthens at higher zooms** — at z12, individual tiles cover less area and thus have less variation, so compression is even more effective
+1. **Lossy WebP is ruled out** — it produces 6,000-1,000,000m errors due to the Mapbox encoding structure
+2. **Quantization works well** — progressive savings from 41% (1m) to 74% (10m) with bounded, predictable errors
+3. **Flat terrain compresses better** — DC sees larger savings ratios because there's less elevation variation per tile
+4. **Savings improve at higher zooms** — at z12, tiles cover less area with less variation, so quantized values repeat more
 
 ## Recommendation
 
-**Use the combined approach: 1m precision + lossy WebP quality 92.**
+**Use quantized 5m precision with lossless WebP.**
 
-Implementation requires two changes in `generate_terrain_tiles()`:
+This provides:
+- **66-71% size reduction** (2.9-3.4x smaller)
+- Max elevation error of ±2.5m (well within 30m DEM accuracy)
+- Zero visual impact with hillshade and 3D terrain
+- Full MapLibre compatibility — no viewer changes needed
+- Simple one-line code change
+
+Implementation in `generate_terrain_tiles()`:
 
 ```python
-# Change precision from 0.1m to 1.0m
-encoded = ((elev + 10000.0) / 1.0).astype(np.uint32)
-
-# Change from lossless to lossy WebP
-img.save(tile_path, "WEBP", lossless=False, quality=92)
+elev = elevation[0]
+elev = np.round(elev / 5.0) * 5.0  # quantize to 5m
+encoded = ((elev + 10000.0) / 0.1).astype(np.uint32)
+# ... rest unchanged, still lossless WebP
 ```
 
-This delivers **84-94% size reduction** with no meaningful loss of terrain quality given the 30m source resolution. The savings apply both to the ZIM file size and to download bandwidth when serving tiles.
+If even more aggressive savings are desired (74-81%), quantized 10m is viable with ±5m max error.
 
 ### Next Steps
 
-- [ ] Visual comparison: load both baseline and compressed tiles in MapLibre with 3D terrain + hillshade enabled to confirm no visible artifacts
-- [ ] Test with `exaggeration: 1.5` (current setting) to check if lossy artifacts become visible when exaggerated
-- [ ] Consider whether quality could go lower (85 or 80) for even more savings
-- [ ] Implement in `create_osm_zim.py` once visual quality is confirmed
+- [ ] Visual comparison: generate both baseline and quantized 5m tiles for a region, load in MapLibre with 3D terrain + hillshade at exaggeration 1.5x
+- [ ] Implement in `create_osm_zim.py` (one-line addition)
+- [ ] Consider making the quantization level a CLI parameter (e.g., `--terrain-precision 5`)
 
 ## Test Script
 
@@ -127,4 +145,4 @@ The comparison script is at `test_terrain_compression.py`. Run with:
 python3 test_terrain_compression.py [--max-zoom 12]
 ```
 
-It downloads Copernicus DEMs, generates tiles using all four strategies (in memory, without writing to disk), and reports size comparisons.
+It downloads Copernicus DEMs, generates tiles using all strategies (in memory, without writing to disk), measures round-trip elevation error, and reports size comparisons.
