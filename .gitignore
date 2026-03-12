@@ -3,8 +3,11 @@
 __pycache__/
 *.pyc
 *.zim
+*.png
+.DS_Store
 venv/
 coastline/
 landcover/
 satellite_cache/
+terrain_cache/
 world-data/

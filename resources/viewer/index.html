@@ -33,6 +33,19 @@
   #layer-toggle.satellite-active { background: #1a73e8; color: #fff; }
   #layer-toggle.satellite-active:hover { background: #1557b0; }
 
+  /* Terrain toggle button */
+  #terrain-toggle {
+    position: absolute; top: 120px; right: 10px; z-index: 2;
+    background: #fff; border: none; border-radius: 6px;
+    padding: 7px 12px; font-size: 13px; cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    font-family: -apple-system, system-ui, sans-serif;
+    display: none;
+  }
+  #terrain-toggle:hover { background: #f0f0f0; }
+  #terrain-toggle.terrain-active { background: #1a73e8; color: #fff; }
+  #terrain-toggle.terrain-active:hover { background: #1557b0; }
+
   /* Search UI */
   #search-container {
     position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
@@ -75,6 +88,7 @@
 <body>
 <div id="map"></div>
 <button id="layer-toggle" title="Toggle satellite imagery">Satellite</button>
+<button id="terrain-toggle" title="Toggle 3D terrain">3D</button>
 <div id="search-container">
   <input id="search-input" type="text" placeholder="Search places, streets, POIs..." autocomplete="off">
   <button id="search-clear" title="Clear">&times;</button>
@@ -259,6 +273,75 @@ fetch(baseUrl + 'map-config.json')
         toggleBtn.classList.toggle('satellite-active', satelliteVisible);
         toggleBtn.textContent = satelliteVisible ? 'Map' : 'Satellite';
         if (satelliteVisible) { showSatellite(); } else { hideSatellite(); }
+      });
+    }
+
+    // Terrain toggle (3D terrain + hillshade)
+    if (config.hasTerrain) {
+      var terrainToggle = document.getElementById('terrain-toggle');
+      terrainToggle.style.display = 'block';
+      var terrainMode = 0; // 0=off, 1=hillshade, 2=3D terrain
+      var terrainSourceAdded = false;
+      var terrainLabels = ['3D', 'Hillshade', '3D Terrain'];
+
+      function addTerrainSource() {
+        if (terrainSourceAdded) return;
+        map.addSource('terrain-dem', {
+          type: 'raster-dem',
+          tiles: ['zimtile://' + baseUrl + 'terrain/{z}/{x}/{y}.webp'],
+          tileSize: 512,
+          minzoom: 0,
+          maxzoom: config.terrainMaxZoom || 12,
+          encoding: 'mapbox'
+        });
+        terrainSourceAdded = true;
+      }
+
+      function setTerrainMode(mode) {
+        addTerrainSource();
+        // Remove existing hillshade layer if any
+        try { map.removeLayer('hillshade-layer'); } catch(e) {}
+
+        if (mode === 0) {
+          // Off
+          map.setTerrain(null);
+        } else if (mode === 1) {
+          // Hillshade only (flat 2D with shading)
+          map.setTerrain(null);
+          map.addLayer({
+            id: 'hillshade-layer',
+            type: 'hillshade',
+            source: 'terrain-dem',
+            paint: {
+              'hillshade-exaggeration': 0.4,
+              'hillshade-shadow-color': '#473B24',
+              'hillshade-highlight-color': '#fff',
+              'hillshade-illumination-direction': 315
+            }
+          }, map.getStyle().layers[1] ? map.getStyle().layers[1].id : undefined);
+        } else if (mode === 2) {
+          // Full 3D terrain + hillshade
+          map.addLayer({
+            id: 'hillshade-layer',
+            type: 'hillshade',
+            source: 'terrain-dem',
+            paint: {
+              'hillshade-exaggeration': 0.3,
+              'hillshade-shadow-color': '#473B24',
+              'hillshade-highlight-color': '#fff',
+              'hillshade-illumination-direction': 315
+            }
+          }, map.getStyle().layers[1] ? map.getStyle().layers[1].id : undefined);
+          map.setTerrain({ source: 'terrain-dem', exaggeration: 1.5 });
+        }
+        map.triggerRepaint();
+      }
+
+      terrainToggle.addEventListener('click', function() {
+        terrainMode = (terrainMode + 1) % 3;
+        terrainToggle.textContent = terrainLabels[terrainMode] || '3D';
+        terrainToggle.classList.toggle('terrain-active', terrainMode > 0);
+        setTerrainMode(terrainMode);
       });
     }
 

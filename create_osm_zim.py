@@ -49,6 +49,13 @@ GEOFABRIK_BASE = "https://download.geofabrik.de"
 # Sentinel-2 Cloudless satellite tile service (EOX, CC BY 4.0 for 2016 vintage)
 SATELLITE_TILE_URL = "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/g/{z}/{y}/{x}.jpg"
 
+# Copernicus GLO-30 DEM tile URL (public S3, no auth)
+COPERNICUS_DEM_URL = (
+    "https://copernicus-dem-30m.s3.amazonaws.com/"
+    "Copernicus_DSM_COG_10_{ns}{lat:02d}_00_{ew}{lon:03d}_00_DEM/"
+    "Copernicus_DSM_COG_10_{ns}{lat:02d}_00_{ew}{lon:03d}_00_DEM.tif"
+)
+
 # MapLibre GL JS version to bundle
 MAPLIBRE_VERSION = "5.20.0"
 MAPLIBRE_CDN = f"https://unpkg.com/maplibre-gl@{MAPLIBRE_VERSION}/dist"
@@ -93,6 +100,8 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65):
     import io
     import math
     import time
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     from PIL import Image
 
@@ -103,10 +112,39 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65):
     total_downloaded = 0
     total_skipped = 0
     total_bytes_saved = 0
+    lock = threading.Lock()
+
+    def _download_tile(z, x, y):
+        """Download and convert a single tile. Returns (downloaded, bytes_saved)."""
+        tile_dir = os.path.join(dest_dir, str(z), str(x))
+        tile_path = os.path.join(tile_dir, f"{y}.webp")
+
+        if os.path.exists(tile_path) and os.path.getsize(tile_path) > 0:
+            return (False, 0)
+
+        os.makedirs(tile_dir, exist_ok=True)
+        url = SATELLITE_TILE_URL.format(z=z, x=x, y=y)
+
+        for attempt in range(4):
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    jpg_data = resp.read()
+                img = Image.open(io.BytesIO(jpg_data))
+                img.save(tile_path, "WEBP", quality=webp_quality)
+                saved = len(jpg_data) - os.path.getsize(tile_path)
+                return (True, saved)
+            except Exception as e:
+                if attempt < 3:
+                    time.sleep(2 ** attempt)
+                else:
+                    print(f"\n    Warning: failed to download z{z}/{x}/{y}: {e}")
+        return (False, 0)
+
+    max_workers = min(32, (os.cpu_count() or 4) * 4)
 
     for z in range(0, max_zoom + 1):
         n = 2 ** z
-        # Convert bbox to tile coordinates
         x_min = int(n * (minlon + 180) / 360)
         x_max = int(n * (maxlon + 180) / 360)
         lat_rad_min = math.radians(minlat)
@@ -114,7 +152,6 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65):
         y_max = int(n * (1 - math.log(math.tan(lat_rad_min) + 1 / math.cos(lat_rad_min)) / math.pi) / 2)
         y_min = int(n * (1 - math.log(math.tan(lat_rad_max) + 1 / math.cos(lat_rad_max)) / math.pi) / 2)
 
-        # Clamp to valid range
         x_min = max(0, x_min)
         x_max = min(n - 1, x_max)
         y_min = max(0, y_min)
@@ -123,39 +160,32 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65):
         tile_count = (x_max - x_min + 1) * (y_max - y_min + 1)
         print(f"    z{z}: {tile_count} tiles ({x_max - x_min + 1}x{y_max - y_min + 1})")
 
-        for x in range(x_min, x_max + 1):
-            for y in range(y_min, y_max + 1):
-                tile_dir = os.path.join(dest_dir, str(z), str(x))
-                tile_path = os.path.join(tile_dir, f"{y}.webp")
-
-                # Skip if already downloaded
-                if os.path.exists(tile_path) and os.path.getsize(tile_path) > 0:
-                    total_skipped += 1
-                    continue
-
-                os.makedirs(tile_dir, exist_ok=True)
-                url = SATELLITE_TILE_URL.format(z=z, x=x, y=y)
-
-                for attempt in range(4):
-                    try:
-                        req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
-                        with urllib.request.urlopen(req, timeout=30) as resp:
-                            jpg_data = resp.read()
-
-                        # Convert JPEG to WebP
-                        img = Image.open(io.BytesIO(jpg_data))
-                        img.save(tile_path, "WEBP", quality=webp_quality)
-
-                        total_bytes_saved += len(jpg_data) - os.path.getsize(tile_path)
+        # Small zoom levels: download sequentially (few tiles)
+        if tile_count <= 10:
+            for x in range(x_min, x_max + 1):
+                for y in range(y_min, y_max + 1):
+                    downloaded, saved = _download_tile(z, x, y)
+                    if downloaded:
                         total_downloaded += 1
-                        break
-                    except Exception as e:
-                        if attempt < 3:
-                            time.sleep(2 ** attempt)
-                        else:
-                            print(f"\n    Warning: failed to download z{z}/{x}/{y}: {e}")
+                        total_bytes_saved += saved
+                    else:
+                        total_skipped += 1
+            continue
 
-                if (total_downloaded + total_skipped) % 500 == 0:
+        # Larger zoom levels: download in parallel
+        tiles = [(z, x, y) for x in range(x_min, x_max + 1) for y in range(y_min, y_max + 1)]
+        completed = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(_download_tile, *t): t for t in tiles}
+            for future in as_completed(futures):
+                downloaded, saved = future.result()
+                if downloaded:
+                    total_downloaded += 1
+                    total_bytes_saved += saved
+                else:
+                    total_skipped += 1
+                completed += 1
+                if completed % 500 == 0:
                     print(f"\r    Downloaded {total_downloaded} tiles ({total_skipped} cached)...", end="", flush=True)
 
     saved_mb = total_bytes_saved / (1024 * 1024)
@@ -228,6 +258,183 @@ def stitch_satellite_image(satellite_dir, max_zoom, bbox_str, webp_quality=80):
     return output_path, coordinates
 
 
+def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
+    """Download Copernicus GLO-30 DEM and generate terrain-RGB tiles.
+
+    Downloads 1-degree GeoTIFF tiles from AWS, mosaics them, then generates
+    Mapbox terrain-RGB tiles as lossless WebP using rasterio + mercantile.
+    Tiles are stored as {dest_dir}/{z}/{x}/{y}.webp.
+    """
+    import math
+    import io
+
+    bbox = parse_bbox(bbox_str)
+    minlon, minlat, maxlon, maxlat = bbox
+
+    os.makedirs(dest_dir, exist_ok=True)
+    dem_dir = os.path.join(dest_dir, "dem_sources")
+    os.makedirs(dem_dir, exist_ok=True)
+
+    # Check if tiles already generated for THIS bbox by sampling a few z-max tiles
+    import mercantile
+    z_max_tiles = list(mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=max_zoom))
+    if z_max_tiles:
+        sample = z_max_tiles[:5] + z_max_tiles[-5:]
+        all_cached = all(
+            os.path.isfile(os.path.join(dest_dir, str(max_zoom), str(t.x), f"{t.y}.webp"))
+            for t in sample
+        )
+        if all_cached:
+            total = sum(
+                len([f for f in files if f.endswith(".webp")])
+                for _, _, files in os.walk(dest_dir)
+                if "dem_sources" not in _
+            )
+            print(f"    Using {total} cached terrain tiles")
+            return total
+
+    # Determine which 1-degree Copernicus tiles we need
+    tif_paths = []
+    for lat in range(math.floor(minlat), math.floor(maxlat) + 1):
+        for lon in range(math.floor(minlon), math.floor(maxlon) + 1):
+            ns = "N" if lat >= 0 else "S"
+            ew = "E" if lon >= 0 else "W"
+            abs_lat = abs(lat)
+            abs_lon = abs(lon)
+            url = COPERNICUS_DEM_URL.format(ns=ns, lat=abs_lat, ew=ew, lon=abs_lon)
+            fname = f"dem_{ns}{abs_lat:02d}_{ew}{abs_lon:03d}.tif"
+            fpath = os.path.join(dem_dir, fname)
+
+            if not os.path.exists(fpath) or os.path.getsize(fpath) < 1000:
+                print(f"    Downloading {ns}{abs_lat:02d} {ew}{abs_lon:03d}...")
+                req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
+                try:
+                    with urllib.request.urlopen(req, timeout=120) as resp:
+                        with open(fpath, "wb") as f:
+                            while True:
+                                chunk = resp.read(1024 * 1024)
+                                if not chunk:
+                                    break
+                                f.write(chunk)
+                    size_mb = os.path.getsize(fpath) / (1024 * 1024)
+                    print(f"      {size_mb:.1f} MB")
+                except Exception as e:
+                    print(f"      Warning: failed to download: {e}")
+                    continue
+            else:
+                size_mb = os.path.getsize(fpath) / (1024 * 1024)
+                print(f"    Cached: {ns}{abs_lat:02d} {ew}{abs_lon:03d} ({size_mb:.1f} MB)")
+            tif_paths.append(fpath)
+
+    if not tif_paths:
+        print("    No DEM tiles downloaded, skipping terrain")
+        return 0
+
+    # Mosaic source DEMs using rasterio
+    print("    Mosaicing DEM tiles...")
+    import rasterio
+    from rasterio.merge import merge
+    from rasterio.warp import reproject, Resampling, transform_bounds
+    from rasterio.transform import from_bounds
+    import mercantile
+    import numpy as np
+    from PIL import Image
+
+    datasets = [rasterio.open(p) for p in tif_paths]
+    mosaic, mosaic_transform = merge(datasets)
+    mosaic_crs = datasets[0].crs
+    mosaic_meta = datasets[0].meta.copy()
+    for ds in datasets:
+        ds.close()
+
+    mosaic_meta.update({
+        "height": mosaic.shape[1],
+        "width": mosaic.shape[2],
+        "transform": mosaic_transform,
+        "count": 1,
+    })
+
+    # Write mosaic to temp file
+    mosaic_path = os.path.join(dem_dir, "mosaic_4326.tif")
+    with rasterio.open(mosaic_path, "w", **mosaic_meta) as dst:
+        dst.write(mosaic[0], 1)
+    del mosaic  # free memory
+
+    # Generate terrain-RGB tiles directly with rasterio + mercantile
+    # Each thread opens its own file handle to avoid loading the full raster into memory.
+    # For large areas (e.g. Iran = 20°x15° = ~14 GB at 30m), loading all into RAM OOMs.
+    print(f"    Generating terrain-RGB tiles (z0-{max_zoom})...")
+    count = 0
+
+    def _generate_one_terrain_tile(mosaic_file, tile_x, tile_y, z, dest_dir_local,
+                                    tb_west, tb_south, tb_east, tb_north):
+        """Generate a single terrain-RGB tile. Opens its own file handle."""
+        tile_bounds_3857 = transform_bounds(
+            "EPSG:4326", "EPSG:3857", tb_west, tb_south, tb_east, tb_north
+        )
+        tile_transform = from_bounds(*tile_bounds_3857, 256, 256)
+
+        elevation = np.zeros((1, 256, 256), dtype=np.float32)
+        with rasterio.open(mosaic_file) as src:
+            reproject(
+                source=rasterio.band(src, 1),
+                destination=elevation,
+                dst_transform=tile_transform,
+                dst_crs="EPSG:3857",
+                resampling=Resampling.cubic,
+            )
+
+        elev = elevation[0]
+        encoded = ((elev + 10000.0) / 0.1).astype(np.uint32)
+        encoded = np.clip(encoded, 0, 16777215)
+
+        r = ((encoded >> 16) & 0xFF).astype(np.uint8)
+        g = ((encoded >> 8) & 0xFF).astype(np.uint8)
+        b = (encoded & 0xFF).astype(np.uint8)
+
+        img = Image.fromarray(np.stack([r, g, b], axis=-1))
+        tile_dir_path = os.path.join(dest_dir_local, str(z), str(tile_x))
+        os.makedirs(tile_dir_path, exist_ok=True)
+        tile_path = os.path.join(tile_dir_path, f"{tile_y}.webp")
+        img.save(tile_path, "WEBP", lossless=True)
+
+    for z in range(0, max_zoom + 1):
+        tiles_at_z = list(mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z))
+        if not tiles_at_z:
+            continue
+
+        # Use ThreadPoolExecutor — rasterio/PIL release the GIL for the heavy C work.
+        # Each thread opens its own file handle for windowed reads (low memory).
+        if len(tiles_at_z) <= 10:
+            for tile in tiles_at_z:
+                tb = mercantile.bounds(tile)
+                _generate_one_terrain_tile(
+                    mosaic_path, tile.x, tile.y, z, dest_dir,
+                    tb.west, tb.south, tb.east, tb.north,
+                )
+                count += 1
+        else:
+            from concurrent.futures import ThreadPoolExecutor as TerrainPool
+            num_workers = min(os.cpu_count() or 4, len(tiles_at_z))
+            with TerrainPool(max_workers=num_workers) as pool:
+                futs = []
+                for tile in tiles_at_z:
+                    tb = mercantile.bounds(tile)
+                    futs.append(pool.submit(
+                        _generate_one_terrain_tile,
+                        mosaic_path, tile.x, tile.y, z, dest_dir,
+                        tb.west, tb.south, tb.east, tb.north,
+                    ))
+                for f in futs:
+                    f.result()
+                    count += 1
+
+        print(f"      z{z}: {len(tiles_at_z)} tiles")
+
+    print(f"    Generated {count} terrain tiles")
+    return count
+
+
 def download_osm_extract(geofabrik_path, dest):
     """Download an OSM PBF extract from Geofabrik (or planet.osm.org for planet)."""
     if geofabrik_path == "planet":
@@ -275,6 +482,46 @@ def generate_tiles(pbf_path, mbtiles_path, bbox=None, fast=False, store=None):
     subprocess.run(cmd, check=True)
     size_mb = os.path.getsize(mbtiles_path) / (1024 * 1024)
     print(f"    Generated MBTiles: {size_mb:.1f} MB")
+
+
+def get_mbtiles_info(mbtiles_path):
+    """Get metadata and tile count from MBTiles without loading tiles."""
+    conn = sqlite3.connect(str(mbtiles_path))
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT name, value FROM metadata")
+        metadata = dict(cursor.fetchall())
+    except sqlite3.OperationalError:
+        metadata = {}
+    cursor.execute("SELECT COUNT(*) FROM tiles")
+    tile_count = cursor.fetchone()[0]
+    conn.close()
+    return metadata, tile_count
+
+
+def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None):
+    """Yield (z, x, y, data) tuples from MBTiles, streaming from SQLite.
+
+    If zoom_level is specified, only yields tiles at that zoom.
+    Yields in (z, x, y) sorted order for deterministic ZIM insertion.
+    """
+    conn = sqlite3.connect(str(mbtiles_path))
+    cursor = conn.cursor()
+    if zoom_level is not None:
+        cursor.execute(
+            "SELECT zoom_level, tile_column, tile_row, tile_data "
+            "FROM tiles WHERE zoom_level = ? ORDER BY zoom_level, tile_column, tile_row",
+            (zoom_level,),
+        )
+    else:
+        cursor.execute(
+            "SELECT zoom_level, tile_column, tile_row, tile_data "
+            "FROM tiles ORDER BY zoom_level, tile_column, tile_row"
+        )
+    for z, x, tms_y, data in cursor:
+        y = (1 << z) - 1 - tms_y
+        yield z, x, y, data
+    conn.close()
 
 
 def extract_tiles_from_mbtiles(mbtiles_path):
@@ -414,6 +661,89 @@ def tile_to_lnglat(z, x, y, px, py, extent=4096):
     return lon, lat
 
 
+def _process_tile_partition(args):
+    """Worker: read a tile_column range from SQLite and extract search features."""
+    mbtiles_path, col_start, col_end, search_layers = args
+    import mapbox_vector_tile
+    import sqlite3 as _sqlite3
+
+    conn = _sqlite3.connect(str(mbtiles_path))
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT zoom_level, tile_column, tile_row, tile_data "
+        "FROM tiles WHERE zoom_level = 14 AND tile_column >= ? AND tile_column < ?",
+        (col_start, col_end),
+    )
+
+    results = []
+    count = 0
+    for z, x, tms_y, data in cursor:
+        y = (1 << z) - 1 - tms_y
+        tile_data = data
+        if data[:2] == b"\x1f\x8b":
+            try:
+                tile_data = gzip.decompress(data)
+            except Exception:
+                count += 1
+                continue
+
+        try:
+            decoded = mapbox_vector_tile.decode(tile_data, y_coord_down=True)
+        except Exception:
+            count += 1
+            continue
+
+        for layer_name, feature_type in search_layers.items():
+            layer = decoded.get(layer_name)
+            if not layer:
+                continue
+            extent = layer.get("extent", 4096)
+            for feature in layer.get("features", []):
+                props = feature.get("properties", {})
+                name = props.get("name:latin") or props.get("name", "")
+                if not name or len(name) < 2:
+                    continue
+                geom = feature.get("geometry", {})
+                coords = geom.get("coordinates")
+                if not coords:
+                    continue
+                geom_type = geom.get("type", "")
+                try:
+                    if geom_type == "Point":
+                        px, py = coords[0], coords[1]
+                    elif geom_type == "MultiPoint":
+                        px = sum(c[0] for c in coords) / len(coords)
+                        py = sum(c[1] for c in coords) / len(coords)
+                    elif geom_type == "LineString":
+                        mid = coords[len(coords) // 2]
+                        px, py = mid[0], mid[1]
+                    elif geom_type == "MultiLineString":
+                        longest = max(coords, key=len)
+                        mid = longest[len(longest) // 2]
+                        px, py = mid[0], mid[1]
+                    elif geom_type in ("Polygon", "MultiPolygon"):
+                        ring = coords[0] if geom_type == "Polygon" else coords[0][0]
+                        px = sum(c[0] for c in ring) / len(ring)
+                        py = sum(c[1] for c in ring) / len(ring)
+                    else:
+                        continue
+                except (IndexError, ZeroDivisionError, TypeError):
+                    continue
+                lon, lat = tile_to_lnglat(z, x, y, px, py, extent)
+                subtype = props.get("class", "") or props.get("subclass", "")
+                results.append({
+                    "name": name,
+                    "type": feature_type,
+                    "subtype": subtype,
+                    "lat": lat,
+                    "lon": lon,
+                })
+        count += 1
+
+    conn.close()
+    return results, count
+
+
 def _process_tile_for_search(args):
     """Worker function for parallel search feature extraction."""
     import mapbox_vector_tile
@@ -487,26 +817,53 @@ def _process_tile_for_search(args):
     return results
 
 
-def extract_searchable_features(tiles):
+# Module-level helpers for multiprocessing location assignment
+_place_grid = None
+
+
+def _init_location_worker(grid_dict):
+    global _place_grid
+    _place_grid = grid_dict
+
+
+def _assign_location_batch(batch):
+    """Assign nearest place to a batch of features (module-level for pickling)."""
+    results = []
+    for f in batch:
+        if f["type"] == "place":
+            results.append(None)
+            continue
+        gx = int(f["lon"] * 2)
+        gy = int(f["lat"] * 2)
+        best_name = None
+        best_dist = float("inf")
+        for dx in range(-1, 2):
+            for dy in range(-1, 2):
+                for p in _place_grid.get((gx + dx, gy + dy), []):
+                    d = (p["lat"] - f["lat"]) ** 2 + (p["lon"] - f["lon"]) ** 2
+                    if d < best_dist:
+                        best_dist = d
+                        best_name = p["name"]
+        results.append(best_name)
+    return results
+
+
+def extract_searchable_features(tiles=None, mbtiles_path=None):
     """Extract named features from z14 vector tiles for search indexing.
 
     Decodes the highest-zoom tiles and extracts features with names from
     the place, poi, transportation_name, water_name, park, mountain_peak,
     and aerodrome_label layers.
 
+    Can operate in two modes:
+    - tiles=dict: legacy mode, filters z14 from in-memory dict
+    - mbtiles_path=str: streaming mode, reads z14 directly from SQLite
+
     Returns a list of dicts: [{"name": str, "type": str, "lat": float, "lon": float}, ...]
     """
     import mapbox_vector_tile
 
     print("  Extracting searchable features from tiles...")
-
-    # Only process z14 tiles (highest zoom = most detail)
-    z14_tiles = {(z, x, y): data for (z, x, y), data in tiles.items() if z == 14}
-    if not z14_tiles:
-        # Fallback: use highest zoom available
-        max_z = max(z for z, x, y in tiles.keys())
-        z14_tiles = {(z, x, y): data for (z, x, y), data in tiles.items() if z == max_z}
-        print(f"    No z14 tiles found, using z{max_z}")
 
     # Layers that contain searchable named features
     search_layers = {
@@ -519,36 +876,85 @@ def extract_searchable_features(tiles):
         "aerodrome_label": "airport",
     }
 
-    features = []
-    seen = set()  # Deduplicate by (name, type, rounded_coords)
+    if mbtiles_path:
+        # Streaming mode: each worker reads its own partition from SQLite
+        conn = sqlite3.connect(str(mbtiles_path))
+        total_z14 = conn.execute(
+            "SELECT COUNT(*) FROM tiles WHERE zoom_level = 14"
+        ).fetchone()[0]
+        if total_z14 == 0:
+            conn.close()
+            print("    No z14 tiles found in mbtiles")
+            return []
+        # Get tile_column range for partitioning
+        row = conn.execute(
+            "SELECT MIN(tile_column), MAX(tile_column) FROM tiles WHERE zoom_level = 14"
+        ).fetchone()
+        col_min, col_max = row[0], row[1] + 1  # exclusive end
+        conn.close()
 
-    # Process tiles in parallel using multiprocessing for CPU-bound MVT decoding.
-    # Use "spawn" context on macOS to avoid fork-safety issues with C extensions
-    # (fork + threads from libraries like libzim can cause deadlocks later).
-    import multiprocessing
-    import os as _os
+        import multiprocessing
+        import os as _os
+        num_workers = _os.cpu_count() or 4
+        print(f"    Processing {total_z14} z14 tiles with {num_workers} workers (partitioned reads)...")
 
-    tile_items = list(z14_tiles.items())
-    num_workers = _os.cpu_count() or 4
-    print(f"    Processing {len(tile_items)} z14 tiles with {num_workers} workers...")
+        # Partition tile_column range across workers
+        col_range = col_max - col_min
+        partition_size = max(1, col_range // num_workers)
+        partitions = []
+        for i in range(num_workers):
+            c_start = col_min + i * partition_size
+            c_end = col_min + (i + 1) * partition_size if i < num_workers - 1 else col_max
+            partitions.append((mbtiles_path, c_start, c_end, search_layers))
 
-    chunk_size = max(1, len(tile_items) // (num_workers * 4))
-    processed = 0
+        features = []
+        processed = 0
+        ctx = multiprocessing.get_context("spawn")
+        with ctx.Pool(num_workers) as pool:
+            for batch_features, batch_count in pool.imap_unordered(
+                _process_tile_partition, partitions
+            ):
+                features.extend(batch_features)
+                processed += batch_count
+                print(f"\r    Processed {processed}/{total_z14} tiles, {len(features)} features so far...", end="", flush=True)
 
-    ctx = multiprocessing.get_context("spawn")
-    with ctx.Pool(num_workers) as pool:
-        for batch_features in pool.imap_unordered(
-            _process_tile_for_search,
-            [(z, x, y, data, search_layers) for (z, x, y), data in tile_items],
-            chunksize=chunk_size,
-        ):
-            features.extend(batch_features)
-            processed += 1
-            if processed % 5000 == 0:
-                print(f"\r    Processed {processed}/{len(tile_items)} tiles, {len(features)} features so far...", end="", flush=True)
+        print()
+    else:
+        # Legacy mode: filter from in-memory dict
+        z14_tiles = {(z, x, y): data for (z, x, y), data in tiles.items() if z == 14}
+        if not z14_tiles:
+            max_z = max(z for z, x, y in tiles.keys())
+            z14_tiles = {(z, x, y): data for (z, x, y), data in tiles.items() if z == max_z}
+            print(f"    No z14 tiles found, using z{max_z}")
 
-    if processed > 5000:
-        print()  # Newline after progress
+        features = []
+        import multiprocessing
+        import os as _os
+        num_workers = _os.cpu_count() or 4
+        total_tiles = len(z14_tiles)
+        print(f"    Processing {total_tiles} z14 tiles with {num_workers} workers...")
+
+        tile_iter = (
+            (z, x, y, data, search_layers)
+            for (z, x, y), data in z14_tiles.items()
+        )
+        chunk_size = max(1, total_tiles // (num_workers * 4))
+        processed = 0
+
+        ctx = multiprocessing.get_context("spawn")
+        with ctx.Pool(num_workers) as pool:
+            for batch_features in pool.imap_unordered(
+                _process_tile_for_search,
+                tile_iter,
+                chunksize=chunk_size,
+            ):
+                features.extend(batch_features)
+                processed += 1
+                if processed % 5000 == 0:
+                    print(f"\r    Processed {processed}/{total_tiles} tiles, {len(features)} features so far...", end="", flush=True)
+
+        if processed > 5000:
+            print()  # Newline after progress
 
     # Ensure multiprocessing cleanup before libzim
     import gc
@@ -577,28 +983,39 @@ def extract_searchable_features(tiles):
             gy = int(p["lat"] * 2)
             place_grid[(gx, gy)].append(p)
 
-        def find_nearest_place(lat, lon):
-            gx = int(lon * 2)
-            gy = int(lat * 2)
-            best = None
-            best_dist = float("inf")
-            # Search 3x3 grid neighborhood
-            for dx in range(-1, 2):
-                for dy in range(-1, 2):
-                    for p in place_grid.get((gx + dx, gy + dy), []):
-                        d = (p["lat"] - lat) ** 2 + (p["lon"] - lon) ** 2
-                        if d < best_dist:
-                            best_dist = d
-                            best = p
-            return best["name"] if best else None
+        # Convert to regular dict for pickling (multiprocessing)
+        place_grid_dict = dict(place_grid)
 
-        assigned = 0
-        for f in features:
-            if f["type"] != "place":
-                loc = find_nearest_place(f["lat"], f["lon"])
+        # For small feature sets, run directly; for large ones, use multiprocessing
+        if len(features) > 100_000:
+            from concurrent.futures import ProcessPoolExecutor
+            batch_size = max(10_000, len(features) // (os.cpu_count() or 4))
+            batches = [features[i:i + batch_size] for i in range(0, len(features), batch_size)]
+            num_workers = min(os.cpu_count() or 4, len(batches))
+
+            assigned = 0
+            with ProcessPoolExecutor(
+                max_workers=num_workers,
+                initializer=_init_location_worker,
+                initargs=(place_grid_dict,),
+            ) as pool:
+                for batch_idx, locs in enumerate(pool.map(_assign_location_batch, batches)):
+                    start_idx = batch_idx * batch_size
+                    for j, loc in enumerate(locs):
+                        if loc:
+                            features[start_idx + j]["location"] = loc
+                            assigned += 1
+        else:
+            # For small sets, set the global directly and run in-process
+            global _place_grid
+            _place_grid = place_grid_dict
+            assigned = 0
+            locs = _assign_location_batch(features)
+            for j, loc in enumerate(locs):
                 if loc:
-                    f["location"] = loc
+                    features[j]["location"] = loc
                     assigned += 1
+
         print(f"    Assigned location to {assigned}/{len(features)} features")
 
     # Sort by type priority then name
@@ -640,11 +1057,16 @@ def create_zim(
     viewer_html_path,
     map_config,
     name,
+    mbtiles_path=None,
+    tile_count=None,
     description="Offline OpenStreetMap",
     cluster_size=2048 * 1024,
     search_features=None,
     satellite_dir=None,
     satellite_max_zoom=None,
+    terrain_dir=None,
+    terrain_max_zoom=None,
+    zim_workers=None,
 ):
     """Create a ZIM file containing the map viewer and all tiles."""
     from libzim.writer import Creator, Item, StringProvider, FileProvider
@@ -694,8 +1116,11 @@ def create_zim(
     creator = Creator(str(output_path))
     creator.config_indexing(True, "en")
     creator.config_clustersize(cluster_size)
-    num_workers = os.cpu_count() or 4
-    print(f"    ZIM compression workers: {num_workers}", flush=True)
+    # Use half of available cores for compression workers. Combined with
+    # adaptive backpressure in the tile insertion loop, this prevents
+    # libzim's queue spin-locks from causing stalls on large builds.
+    num_workers = zim_workers or max(2, (os.cpu_count() or 4) // 2)
+    print(f"    ZIM compression workers: {num_workers} (tiles: {len(tiles)})", flush=True)
     creator.config_nbworkers(num_workers)
     creator.set_mainpath("index.html")
     with creator:
@@ -751,7 +1176,10 @@ def create_zim(
                     if stall_seconds >= 30:
                         # Stall detected — dump everything
                         print(f"\n\n=== WATCHDOG: No progress for {stall_seconds}s (stuck at tile {current}) ===", flush=True)
-                        print(f"    File size: {os.path.getsize(str(output_path)) / 1e9:.2f} GB", flush=True)
+                        try:
+                            print(f"    File size: {os.path.getsize(str(output_path)) / 1e9:.2f} GB", flush=True)
+                        except OSError:
+                            print(f"    File not yet created", flush=True)
                         import resource
                         mem_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024**3)
                         print(f"    RSS: {mem_gb:.1f} GB", flush=True)
@@ -778,7 +1206,7 @@ def create_zim(
 
         # Add vector tiles — decompress in parallel for speed
         import time
-        print(f"    Adding {len(tiles)} vector tiles...", flush=True)
+        import itertools
         from concurrent.futures import ThreadPoolExecutor
 
         def decompress_tile(item):
@@ -790,14 +1218,28 @@ def create_zim(
                     pass
             return z, x, y, data
 
-        tile_items = [(z, x, y, data) for (z, x, y), data in sorted(tiles.items())]
-        tile_count = 0
+        # Stream tiles from mbtiles or use in-memory dict
+        if mbtiles_path:
+            total_tiles = tile_count or 0
+            tile_source = iter_tiles_from_mbtiles(mbtiles_path)
+        else:
+            total_tiles = len(tiles)
+            tile_source = iter([(z, x, y, data) for (z, x, y), data in sorted(tiles.items())])
+
+        print(f"    Adding {total_tiles} vector tiles...", flush=True)
+        tiles_added = 0
         tile_start = time.time()
         batch_start = time.time()
         batch_size = 1000
-        stall_threshold = 60  # seconds — warn if a batch takes longer than this
-        for i in range(0, len(tile_items), batch_size):
-            batch = tile_items[i:i + batch_size]
+        # Adaptive backpressure: if a batch of add_item() calls slows down,
+        # sleep briefly to let libzim's compression workers drain the queue.
+        # This prevents the spin-lock death spiral in libzim's queue.h where
+        # the main thread and all workers busy-wait with microsleep().
+        backpressure_sleep = 0.0
+        while True:
+            batch = list(itertools.islice(tile_source, batch_size))
+            if not batch:
+                break
             decompress_start = time.time()
             with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
                 results = list(pool.map(decompress_tile, batch))
@@ -805,36 +1247,41 @@ def create_zim(
 
             add_start = time.time()
             for z, x, y, tile_data in results:
-                item_start = time.time()
                 creator.add_item(MapItem(
                     f"tiles/{z}/{x}/{y}.pbf", f"Tile {z}/{x}/{y}",
                     "application/x-protobuf",
                     tile_data,
                 ))
-                item_time = time.time() - item_start
-                if item_time > 5:
-                    print(f"\n    WARNING: add_item took {item_time:.1f}s for tile {z}/{x}/{y} (#{tile_count})", flush=True)
-                tile_count += 1
-                _watchdog_tile_count[0] = tile_count
+                tiles_added += 1
+                _watchdog_tile_count[0] = tiles_added
             add_time = time.time() - add_start
 
-            batch_elapsed = time.time() - batch_start
-            if batch_elapsed > stall_threshold and tile_count > 0:
-                print(f"\n    DEBUG: batch {i//batch_size} took {batch_elapsed:.1f}s (decompress={decompress_time:.1f}s, add={add_time:.1f}s, tiles={tile_count})", flush=True)
+            # Adaptive backpressure: measure add_item throughput per batch.
+            # If insertion rate drops below threshold, compression workers
+            # can't keep up — sleep to let them drain the queue.
+            batch_rate = batch_size / add_time if add_time > 0 else float("inf")
+            if batch_rate < 5000 and total_tiles > 100_000:
+                # Queue is backing up — increase sleep
+                backpressure_sleep = min(backpressure_sleep + 0.02, 0.2)
+                time.sleep(backpressure_sleep)
+            elif batch_rate > 15000:
+                # Queue is draining fine — reduce sleep
+                backpressure_sleep = max(backpressure_sleep - 0.01, 0.0)
 
             batch_start = time.time()
 
-            if tile_count % 2000 == 0:
+            if tiles_added % 2000 == 0:
                 elapsed = time.time() - tile_start
-                rate = tile_count / elapsed if elapsed > 0 else 0
-                remaining = (len(tiles) - tile_count) / rate if rate > 0 else 0
+                rate = tiles_added / elapsed if elapsed > 0 else 0
+                remaining = (total_tiles - tiles_added) / rate if rate > 0 else 0
                 import resource
                 mem_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024**3)
-                print(f"\r    Added {tile_count}/{len(tiles)} tiles ({rate:.0f}/s, ~{remaining/60:.0f}m left, {mem_gb:.1f}GB RSS)...", end="", flush=True)
+                bp_str = f" bp={backpressure_sleep*1000:.0f}ms" if backpressure_sleep > 0 else ""
+                print(f"\r    Added {tiles_added}/{total_tiles} tiles ({rate:.0f}/s, ~{remaining/60:.0f}m left, {mem_gb:.1f}GB RSS{bp_str})...", end="", flush=True)
 
         elapsed = time.time() - tile_start
-        rate_str = f"{tile_count/elapsed:.0f}/s" if elapsed > 0 else "instant"
-        print(f"\r    Added {tile_count} tiles in {elapsed:.0f}s ({rate_str})                ", flush=True)
+        rate_str = f"{tiles_added/elapsed:.0f}/s" if elapsed > 0 else "instant"
+        print(f"\r    Added {tiles_added} tiles in {elapsed:.0f}s ({rate_str})                ", flush=True)
         _watchdog_stop.set()  # stop watchdog after tiles
 
         # Add satellite tiles if provided
@@ -862,6 +1309,32 @@ def create_zim(
                         if sat_count % 2000 == 0:
                             print(f"\r    Added {sat_count} satellite tiles...", end="", flush=True)
             print(f"\r    Added {sat_count} satellite tiles")
+
+        # Add terrain tiles if provided
+        if terrain_dir and os.path.isdir(terrain_dir):
+            ter_count = 0
+            max_tz = terrain_max_zoom if terrain_max_zoom is not None else 99
+            for z in range(0, max_tz + 1):
+                z_dir = os.path.join(terrain_dir, str(z))
+                if not os.path.isdir(z_dir):
+                    continue
+                for root, dirs, files in os.walk(z_dir):
+                    for fname in files:
+                        if not fname.endswith(".webp"):
+                            continue
+                        fpath = os.path.join(root, fname)
+                        rel = os.path.relpath(fpath, terrain_dir)
+                        zim_path = f"terrain/{rel}"
+                        creator.add_item(MapItem(
+                            zim_path, f"Terrain {rel}",
+                            "image/webp",
+                            fpath,
+                            compress=False,
+                        ))
+                        ter_count += 1
+                        if ter_count % 2000 == 0:
+                            print(f"\r    Added {ter_count} terrain tiles...", end="", flush=True)
+            print(f"\r    Added {ter_count} terrain tiles")
 
         # Add font glyphs
         print(f"    Adding {len(fonts)} font glyph ranges...")
@@ -1058,10 +1531,25 @@ KNOWN_AREAS = {
         "bbox": "7.40,43.72,7.44,43.76",
         "name": "Monaco",
     },
+    "california": {
+        "geofabrik": "north-america/us/california",
+        "bbox": "-124.48,32.53,-114.13,42.01",
+        "name": "California",
+    },
+    "colorado": {
+        "geofabrik": "north-america/us/colorado",
+        "bbox": "-109.06,36.99,-102.04,41.00",
+        "name": "Colorado",
+    },
     "virginia": {
         "geofabrik": "north-america/us/virginia",
         "bbox": "-83.68,36.54,-75.17,39.47",
         "name": "Virginia",
+    },
+    "iran": {
+        "geofabrik": "asia/iran",
+        "bbox": "44.0,25.0,63.5,39.8",
+        "name": "Iran",
     },
 }
 
@@ -1109,12 +1597,18 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Include Sentinel-2 Cloudless satellite imagery tiles")
     parser.add_argument("--satellite-zoom", type=int, default=None,
                         help="Max zoom for satellite tiles (default: same as --max-zoom)")
+    parser.add_argument("--terrain", action="store_true",
+                        help="Include Copernicus GLO-30 terrain tiles for 3D/hillshade")
+    parser.add_argument("--terrain-zoom", type=int, default=12,
+                        help="Max zoom for terrain tiles (default: 12)")
+    parser.add_argument("--workers", type=int, default=None,
+                        help="Number of ZIM compression workers (default: CPU_count/2)")
 
     args = parser.parse_args()
 
     # Resolve area configuration
     geofabrik_path = args.geofabrik
-    bbox_str = args.bbox
+    bbox_str = args.bbox.strip() if args.bbox else args.bbox
     name = args.name
     pbf_path = args.pbf
 
@@ -1145,11 +1639,17 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     include_satellite = args.satellite
     satellite_max_zoom = args.satellite_zoom or args.max_zoom
 
-    total_steps = 7 if include_satellite else 6
+    # Terrain options
+    include_terrain = args.terrain
+    terrain_max_zoom = args.terrain_zoom
+
+    total_steps = 6 + (1 if include_satellite else 0) + (1 if include_terrain else 0)
 
     print(f"=== Creating Offline OSM ZIM: {name} ===")
     if include_satellite:
         print(f"  Including Sentinel-2 satellite imagery (z0-{satellite_max_zoom})")
+    if include_terrain:
+        print(f"  Including Copernicus GLO-30 terrain (z0-{terrain_max_zoom})")
     print()
 
     # Create temp directory
@@ -1191,7 +1691,19 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         # Step 4: Extract tiles from MBTiles
         print()
         print(f"[3/{total_steps}] Processing tiles...")
-        tiles, tile_metadata = extract_tiles_from_mbtiles(mbtiles_path)
+
+        # For large mbtiles (>5 GB), use streaming to avoid OOM
+        mbtiles_size_gb = os.path.getsize(mbtiles_path) / (1024**3)
+        use_streaming = mbtiles_size_gb > 5.0
+        if use_streaming:
+            tile_metadata, total_tile_count = get_mbtiles_info(mbtiles_path)
+            tiles = None  # Don't load into memory
+            print(f"  Streaming mode: {total_tile_count:,} tiles ({mbtiles_size_gb:.1f} GB)")
+            print(f"    Format: {tile_metadata.get('format', 'unknown')}")
+            print(f"    Name: {tile_metadata.get('name', 'unknown')}")
+        else:
+            tiles, tile_metadata = extract_tiles_from_mbtiles(mbtiles_path)
+            total_tile_count = len(tiles)
 
         # Generate font glyphs
         fonts = generate_sdf_font_glyphs()
@@ -1199,30 +1711,66 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         # Step 5: Extract search features from tiles
         print()
         print(f"[4/{total_steps}] Building search index...")
-        search_features = extract_searchable_features(tiles)
+        if use_streaming:
+            search_features = extract_searchable_features(mbtiles_path=mbtiles_path)
+        else:
+            search_features = extract_searchable_features(tiles=tiles)
 
-        # Download satellite tiles if requested
+        # Download satellite tiles and generate terrain tiles
+        # These are independent (satellite=I/O-bound, terrain=CPU-bound) so run in parallel
         satellite_dir = None
-        if include_satellite:
-            print()
-            print(f"[5/{total_steps}] Downloading satellite tiles...")
-            if not bbox_str:
-                print("    Warning: no bbox specified, skipping satellite tiles")
-            else:
-                # Use persistent cache dir so satellite tiles survive across builds
-                satellite_dir = os.path.join(SCRIPT_DIR, "satellite_cache")
-                download_satellite_tiles(bbox_str, satellite_dir, max_zoom=satellite_max_zoom)
+        terrain_dir = None
+        sat_future = None
+        terrain_future = None
 
-        # Step 6: Download MapLibre GL JS
-        step_maplibre = 6 if include_satellite else 5
+        if include_satellite and bbox_str:
+            satellite_dir = os.path.join(SCRIPT_DIR, "satellite_cache")
+        if include_terrain and bbox_str:
+            terrain_dir = os.path.join(SCRIPT_DIR, "terrain_cache")
+
+        if include_satellite and include_terrain and bbox_str:
+            from concurrent.futures import ThreadPoolExecutor as StepPool
+            print()
+            print(f"[5/{total_steps}] Downloading satellite tiles + generating terrain tiles (parallel)...")
+
+            with StepPool(max_workers=2) as step_pool:
+                sat_future = step_pool.submit(
+                    download_satellite_tiles, bbox_str, satellite_dir, satellite_max_zoom)
+                terrain_future = step_pool.submit(
+                    generate_terrain_tiles, bbox_str, terrain_dir, terrain_max_zoom)
+                # Wait for both — exceptions will be raised on .result()
+                terrain_future.result()
+                print("    Terrain generation complete (satellite download continuing...)")
+                sat_future.result()
+                print("    Satellite download complete")
+        else:
+            if include_satellite:
+                print()
+                print(f"[5/{total_steps}] Downloading satellite tiles...")
+                if not bbox_str:
+                    print("    Warning: no bbox specified, skipping satellite tiles")
+                else:
+                    download_satellite_tiles(bbox_str, satellite_dir, max_zoom=satellite_max_zoom)
+
+            if include_terrain:
+                step_terrain = 5 + (1 if include_satellite else 0)
+                print()
+                print(f"[{step_terrain}/{total_steps}] Generating terrain tiles...")
+                if not bbox_str:
+                    print("    Warning: no bbox specified, skipping terrain tiles")
+                else:
+                    generate_terrain_tiles(bbox_str, terrain_dir, max_zoom=terrain_max_zoom)
+
+        # Download MapLibre GL JS
+        step_maplibre = total_steps - 1
         print()
         print(f"[{step_maplibre}/{total_steps}] Downloading MapLibre GL JS...")
         maplibre_dir = os.path.join(tmpdir, "maplibre")
         os.makedirs(maplibre_dir, exist_ok=True)
         maplibre_js, maplibre_css = download_maplibre(maplibre_dir)
 
-        # Step 7: Create ZIM
-        step_zim = 7 if include_satellite else 6
+        # Create ZIM
+        step_zim = total_steps
         print()
         print(f"[{step_zim}/{total_steps}] Building ZIM file...")
 
@@ -1246,6 +1794,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         if satellite_dir and os.path.isdir(str(satellite_dir)):
             map_config["hasSatellite"] = True
             map_config["satelliteMaxZoom"] = satellite_max_zoom
+        if terrain_dir and os.path.isdir(str(terrain_dir)):
+            map_config["hasTerrain"] = True
+            map_config["terrainMaxZoom"] = terrain_max_zoom
 
         create_zim(
             output_path=output_path,
@@ -1262,13 +1813,18 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             search_features=search_features,
             satellite_dir=satellite_dir,
             satellite_max_zoom=satellite_max_zoom,
+            terrain_dir=terrain_dir,
+            terrain_max_zoom=terrain_max_zoom,
+            zim_workers=args.workers,
+            mbtiles_path=mbtiles_path if use_streaming else None,
+            tile_count=total_tile_count if use_streaming else None,
         )
 
         print()
         print("=" * 60)
         print(f"SUCCESS! Created: {output_path}")
         print(f"  Size: {os.path.getsize(output_path) / (1024 * 1024):.1f} MB")
-        print(f"  Tiles: {len(tiles)}")
+        print(f"  Tiles: {total_tile_count}")
         print(f"  Area: {name}")
         print()
         print("To use:")
