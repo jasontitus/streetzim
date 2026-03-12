@@ -385,6 +385,7 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
             )
 
         elev = elevation[0]
+        elev = np.round(elev / 10.0) * 10.0  # quantize to 10m for ~74% compression savings
         encoded = ((elev + 10000.0) / 0.1).astype(np.uint32)
         encoded = np.clip(encoded, 0, 16777215)
 
