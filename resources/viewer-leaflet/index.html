@@ -106,11 +106,14 @@
             // Satellite layer toggle
             if (config.hasSatellite) {
                 var satMaxZoom = config.satelliteMaxZoom || nativeMaxZoom;
-                var satelliteLayer = L.tileLayer(baseUrl + 'satellite/{z}/{x}/{y}.webp', {
+                var satExt = config.satelliteFormat || 'webp';
+                var satTileSize = config.satelliteTileSize || 256;
+                var satelliteLayer = L.tileLayer(baseUrl + 'satellite/{z}/{x}/{y}.' + satExt, {
                     minZoom: minZoom,
                     maxNativeZoom: satMaxZoom,
                     maxZoom: 19,
-                    tileSize: 256,
+                    tileSize: satTileSize,
+                    zoomOffset: satTileSize === 512 ? -1 : 0,
                     attribution: '&copy; <a href="https://s2maps.eu">Sentinel-2 Cloudless</a> by EOX'
                 });
 

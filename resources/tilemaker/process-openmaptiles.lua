@@ -16,6 +16,14 @@ default_language_attribute = "name_int"
 additional_languages = { }
 --------
 
+-- Compatibility shims for tilemaker v2/v3 API differences
+if not AttributeInteger then
+	AttributeInteger = function(key, val) AttributeNumeric(key, val) end
+end
+if not AttributeBoolean then
+	AttributeBoolean = function(key, val) Attribute(key, val and "true" or "false") end
+end
+
 -- Enter/exit Tilemaker
 function init_function(name,is_first)
 end
