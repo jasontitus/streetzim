@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Test terrain tile compression strategies for elevation data.
 
-Generates terrain-RGB tiles for two regions (Colorado and Washington DC) using
-four encoding strategies, then compares file sizes:
+Generates terrain tiles for two regions (Colorado and Washington DC) using
+multiple encoding strategies, then compares file sizes both raw and after
+zstd compression (simulating ZIM cluster compression).
 
-  1. baseline    — Current approach: 0.1m precision, lossless WebP
-  2. quantized   — 1m precision (blue channel zeroed), lossless WebP
-  3. lossy       — 0.1m precision, lossy WebP quality 92
-  4. combined    — 1m precision + lossy WebP quality 92
+Strategies tested:
+  - Mapbox terrain-RGB WebP (baseline, and quantized 1m/2m/5m/10m)
+  - Raw int16 binary (elevation as 16-bit integers)
+  - Raw int16 delta-encoded (store differences between adjacent pixels)
+  - LERC (Limited Error Raster Compression) at various max error tolerances
 
 Usage:
     python3 test_terrain_compression.py [--max-zoom 12]
@@ -16,16 +18,16 @@ Usage:
 import argparse
 import math
 import os
-import sys
+import struct
 import time
 import urllib.request
-from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
+import lerc
 import mercantile
 import numpy as np
 import rasterio
+import zstandard as zstd
 from PIL import Image
 from rasterio.merge import merge
 from rasterio.transform import from_bounds
@@ -39,41 +41,18 @@ COPERNICUS_DEM_URL = (
 
 REGIONS = {
     "colorado": {
-        "bbox": "-105.35,38.75,-104.65,39.05",  # Colorado Springs area (mountains + plains)
+        "bbox": "-105.35,38.75,-104.65,39.05",
         "label": "Colorado (CO Springs)",
     },
     "dc": {
-        "bbox": "-77.15,38.82,-76.90,38.98",  # Washington DC metro
+        "bbox": "-77.15,38.82,-76.90,38.98",
         "label": "Washington DC",
     },
 }
 
-# Compression strategies
-#
-# IMPORTANT: Lossy WebP is NOT suitable for Mapbox terrain-RGB tiles.
-# The encoding packs elevation into a 24-bit integer across R/G/B channels.
-# A single-LSB change in R = 6,553.6m of elevation error because R is the
-# high byte (R * 65536 * 0.1). Lossy compression doesn't respect byte
-# boundaries, so even quality=99 produces catastrophic elevation errors.
-#
-# The effective compression lever is "round_meters": pre-rounding elevation
-# to a coarser precision before encoding. This reduces entropy in all three
-# channels (encoded values change more slowly), improving lossless WebP
-# compression significantly while remaining fully MapLibre-compatible.
-#
-# Source data is Copernicus GLO-30 (30m horizontal resolution), so sub-meter
-# vertical precision is already beyond what the data supports.
-STRATEGIES = {
-    "baseline": {"round_meters": None, "lossless": True, "quality": None},
-    "quantized_1m": {"round_meters": 1, "lossless": True, "quality": None},
-    "quantized_2m": {"round_meters": 2, "lossless": True, "quality": None},
-    "quantized_5m": {"round_meters": 5, "lossless": True, "quality": None},
-    "quantized_10m": {"round_meters": 10, "lossless": True, "quality": None},
-}
-
 
 def download_dem_tiles(bbox, cache_dir):
-    """Download Copernicus DEM tiles needed for the bbox. Returns list of file paths."""
+    """Download Copernicus DEM tiles needed for the bbox."""
     minlon, minlat, maxlon, maxlat = bbox
     os.makedirs(cache_dir, exist_ok=True)
     tif_paths = []
@@ -110,7 +89,7 @@ def download_dem_tiles(bbox, cache_dir):
 
 
 def build_mosaic(tif_paths, cache_dir):
-    """Mosaic DEM tiles into a single GeoTIFF. Returns path to mosaic file."""
+    """Mosaic DEM tiles into a single GeoTIFF."""
     mosaic_path = os.path.join(cache_dir, "mosaic_4326.tif")
     if os.path.exists(mosaic_path) and os.path.getsize(mosaic_path) > 1000:
         print("  Using cached mosaic")
@@ -136,125 +115,131 @@ def build_mosaic(tif_paths, cache_dir):
     return mosaic_path
 
 
-def encode_terrain_rgb(elevation, round_meters=None):
-    """Encode elevation array to Mapbox terrain-RGB.
+def get_elevation_for_tile(mosaic_path, tile):
+    """Read elevation data for a single mercantile tile."""
+    tb = mercantile.bounds(tile)
+    tile_bounds_3857 = transform_bounds(
+        "EPSG:4326", "EPSG:3857", tb.west, tb.south, tb.east, tb.north
+    )
+    tile_transform = from_bounds(*tile_bounds_3857, 256, 256)
 
-    Always uses the standard Mapbox formula: encoded = (elevation + 10000) / 0.1
-    Then splits into R (high byte), G (mid byte), B (low byte).
+    elevation = np.zeros((1, 256, 256), dtype=np.float32)
+    with rasterio.open(mosaic_path) as src:
+        reproject(
+            source=rasterio.band(src, 1),
+            destination=elevation,
+            dst_transform=tile_transform,
+            dst_crs="EPSG:3857",
+            resampling=Resampling.cubic,
+        )
+    return elevation
 
-    If round_meters is set, elevation is pre-rounded to that precision before
-    encoding. This reduces entropy in the RGB channels (fewer distinct values)
-    which improves both lossless and lossy compression, while remaining fully
-    compatible with MapLibre's Mapbox decoder.
 
-    For example, round_meters=1 means encoded values are always multiples of 10,
-    so the B channel only takes values 0,10,20,...,250 (26 values vs 256).
-    """
-    elev = elevation[0].copy()
-    if round_meters is not None:
-        elev = np.round(elev / round_meters) * round_meters
+# --- Encoding strategies ---
 
+def encode_webp_baseline(elevation):
+    """Standard Mapbox terrain-RGB, 0.1m precision, lossless WebP."""
+    elev = elevation[0]
     encoded = ((elev + 10000.0) / 0.1).astype(np.uint32)
     encoded = np.clip(encoded, 0, 16777215)
-
     r = ((encoded >> 16) & 0xFF).astype(np.uint8)
     g = ((encoded >> 8) & 0xFF).astype(np.uint8)
     b = (encoded & 0xFF).astype(np.uint8)
-
-    return np.stack([r, g, b], axis=-1)
-
-
-def save_tile_to_bytes(rgb_array, lossless, quality):
-    """Save an RGB array to WebP and return the bytes (for size measurement)."""
-    img = Image.fromarray(rgb_array)
+    img = Image.fromarray(np.stack([r, g, b], axis=-1))
     buf = BytesIO()
-    if lossless:
-        img.save(buf, "WEBP", lossless=True)
-    else:
-        img.save(buf, "WEBP", lossless=False, quality=quality)
+    img.save(buf, "WEBP", lossless=True)
     return buf.getvalue()
 
 
-def decode_terrain_rgb(webp_bytes):
-    """Decode WebP terrain-RGB bytes back to elevation using Mapbox formula.
+def encode_webp_quantized(elevation, round_meters):
+    """Mapbox terrain-RGB with elevation pre-rounded, lossless WebP."""
+    elev = np.round(elevation[0] / round_meters) * round_meters
+    encoded = ((elev + 10000.0) / 0.1).astype(np.uint32)
+    encoded = np.clip(encoded, 0, 16777215)
+    r = ((encoded >> 16) & 0xFF).astype(np.uint8)
+    g = ((encoded >> 8) & 0xFF).astype(np.uint8)
+    b = (encoded & 0xFF).astype(np.uint8)
+    img = Image.fromarray(np.stack([r, g, b], axis=-1))
+    buf = BytesIO()
+    img.save(buf, "WEBP", lossless=True)
+    return buf.getvalue()
 
-    This simulates exactly what MapLibre does on the client:
-        elevation = (R * 65536 + G * 256 + B) * 0.1 - 10000
-    """
-    img = Image.open(BytesIO(webp_bytes))
+
+def encode_raw_int16(elevation):
+    """Raw 16-bit signed integers, 1m precision. 256x256 = 128 KB uncompressed."""
+    elev_int16 = np.clip(np.round(elevation[0]), -32768, 32767).astype(np.int16)
+    return elev_int16.tobytes()
+
+
+def encode_raw_int16_delta(elevation):
+    """Delta-encoded 16-bit integers: store row-wise differences.
+    First column stored as-is, rest as deltas from previous pixel.
+    Deltas have much lower magnitude -> compresses better with zstd."""
+    elev_int16 = np.clip(np.round(elevation[0]), -32768, 32767).astype(np.int16)
+    # Delta encode: first column stays, rest are diffs
+    delta = np.zeros_like(elev_int16)
+    delta[:, 0] = elev_int16[:, 0]
+    delta[:, 1:] = np.diff(elev_int16, axis=1)
+    return delta.tobytes()
+
+
+def encode_lerc(elevation, max_z_error):
+    """LERC compression with configurable max error tolerance.
+    LERC is purpose-built for raster elevation data."""
+    elev = elevation[0].astype(np.float32)
+    # First pass: get required buffer size
+    _, nb = lerc.encode(elev, 1, False, None, max_z_error, 0)
+    # Second pass: encode into buffer
+    _, _, buf = lerc.encode(elev, 1, False, None, max_z_error, nb)
+    return bytes(buf)
+
+
+def decode_webp_to_elevation(tile_bytes):
+    """Decode WebP terrain-RGB back to elevation via Mapbox formula."""
+    img = Image.open(BytesIO(tile_bytes))
     rgb = np.array(img, dtype=np.float64)
     r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
     return (r * 65536 + g * 256 + b) * 0.1 - 10000.0
 
 
-def generate_tiles_for_strategy(mosaic_path, bbox, max_zoom, strategy_name, strategy_cfg):
-    """Generate all tiles for a region+strategy combination.
+def decode_raw_int16(tile_bytes):
+    """Decode raw int16 back to elevation."""
+    return np.frombuffer(tile_bytes, dtype=np.int16).reshape(256, 256).astype(np.float64)
 
-    Returns dict: {zoom_level: {"count": N, "total_bytes": B, "errors": {...}}}
-    Error stats measure round-trip elevation error: source elevation -> encode ->
-    WebP compress -> decompress -> decode via Mapbox formula -> compare.
-    """
-    minlon, minlat, maxlon, maxlat = bbox
-    round_meters = strategy_cfg["round_meters"]
-    lossless = strategy_cfg["lossless"]
-    quality = strategy_cfg["quality"]
 
-    zoom_stats = {}
+def decode_raw_int16_delta(tile_bytes):
+    """Decode delta-encoded int16 back to elevation."""
+    delta = np.frombuffer(tile_bytes, dtype=np.int16).reshape(256, 256)
+    elev = np.cumsum(delta, axis=1)
+    return elev.astype(np.float64)
 
-    for z in range(0, max_zoom + 1):
-        tiles_at_z = list(mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z))
-        if not tiles_at_z:
-            continue
 
-        total_bytes = 0
-        all_abs_errors = []
+def decode_lerc(tile_bytes):
+    """Decode LERC back to elevation."""
+    _, arr, _ = lerc.decode(tile_bytes)
+    return arr.astype(np.float64)
 
-        for tile in tiles_at_z:
-            tb = mercantile.bounds(tile)
-            tile_bounds_3857 = transform_bounds(
-                "EPSG:4326", "EPSG:3857", tb.west, tb.south, tb.east, tb.north
-            )
-            tile_transform = from_bounds(*tile_bounds_3857, 256, 256)
 
-            elevation = np.zeros((1, 256, 256), dtype=np.float32)
-            with rasterio.open(mosaic_path) as src:
-                reproject(
-                    source=rasterio.band(src, 1),
-                    destination=elevation,
-                    dst_transform=tile_transform,
-                    dst_crs="EPSG:3857",
-                    resampling=Resampling.cubic,
-                )
-
-            rgb = encode_terrain_rgb(elevation, round_meters)
-            tile_bytes = save_tile_to_bytes(rgb, lossless, quality)
-            total_bytes += len(tile_bytes)
-
-            # Round-trip error: decode the WebP back and compare to source elevation
-            decoded_elev = decode_terrain_rgb(tile_bytes)
-            source_elev = elevation[0].astype(np.float64)
-            abs_error = np.abs(decoded_elev - source_elev)
-            all_abs_errors.append(abs_error)
-
-        # Aggregate error stats across all tiles at this zoom
-        combined_errors = np.concatenate([e.ravel() for e in all_abs_errors])
-        zoom_stats[z] = {
-            "count": len(tiles_at_z),
-            "total_bytes": total_bytes,
-            "errors": {
-                "mean": float(np.mean(combined_errors)),
-                "max": float(np.max(combined_errors)),
-                "p50": float(np.median(combined_errors)),
-                "p95": float(np.percentile(combined_errors, 95)),
-                "p99": float(np.percentile(combined_errors, 99)),
-            },
-        }
-
-    return zoom_stats
+# Strategy definitions: (name, encode_fn, decode_fn, description, needs_custom_decoder)
+STRATEGIES = [
+    # Mapbox terrain-RGB WebP variants (MapLibre compatible)
+    ("webp_baseline",     lambda e: encode_webp_baseline(e),         decode_webp_to_elevation,   "WebP lossless, 0.1m",    False),
+    ("webp_quant_1m",     lambda e: encode_webp_quantized(e, 1),     decode_webp_to_elevation,   "WebP lossless, round 1m",  False),
+    ("webp_quant_2m",     lambda e: encode_webp_quantized(e, 2),     decode_webp_to_elevation,   "WebP lossless, round 2m",  False),
+    ("webp_quant_5m",     lambda e: encode_webp_quantized(e, 5),     decode_webp_to_elevation,   "WebP lossless, round 5m",  False),
+    ("webp_quant_10m",    lambda e: encode_webp_quantized(e, 10),    decode_webp_to_elevation,   "WebP lossless, round 10m", False),
+    # Custom binary formats (need JS decoder via addProtocol)
+    ("raw_int16",         lambda e: encode_raw_int16(e),             decode_raw_int16,           "Raw int16, 1m",          True),
+    ("raw_int16_delta",   lambda e: encode_raw_int16_delta(e),       decode_raw_int16_delta,     "Raw int16 delta-enc",    True),
+    # LERC (need JS decoder)
+    ("lerc_0.1m",         lambda e: encode_lerc(e, 0.1),            decode_lerc,                "LERC, max err 0.1m",     True),
+    ("lerc_1m",           lambda e: encode_lerc(e, 1.0),            decode_lerc,                "LERC, max err 1m",       True),
+    ("lerc_5m",           lambda e: encode_lerc(e, 5.0),            decode_lerc,                "LERC, max err 5m",       True),
+    ("lerc_10m",          lambda e: encode_lerc(e, 10.0),           decode_lerc,                "LERC, max err 10m",      True),
+]
 
 
 def format_bytes(n):
-    """Format byte count as human-readable string."""
     if n < 1024:
         return f"{n} B"
     elif n < 1024 * 1024:
@@ -272,7 +257,9 @@ def main():
     cache_dir = os.path.join(os.path.dirname(__file__), "terrain_compression_test")
     os.makedirs(cache_dir, exist_ok=True)
 
-    # Results: {region: {strategy: {zoom: stats}}}
+    zstd_compressor = zstd.ZstdCompressor(level=3)  # ZIM default level
+
+    # Results: {region: {strategy_name: {zoom: stats}}}
     all_results = {}
 
     for region_key, region_cfg in REGIONS.items():
@@ -284,7 +271,6 @@ def main():
         print(f"Region: {label}  bbox={region_cfg['bbox']}")
         print(f"{'='*70}")
 
-        # Download and mosaic DEMs (shared across strategies)
         tif_paths = download_dem_tiles(bbox, dem_cache)
         if not tif_paths:
             print(f"  No DEM data for {label}, skipping")
@@ -292,35 +278,76 @@ def main():
         mosaic_path = build_mosaic(tif_paths, dem_cache)
 
         region_results = {}
-        for strat_name, strat_cfg in STRATEGIES.items():
-            desc = []
-            rm = strat_cfg["round_meters"]
-            desc.append(f"round={rm}m" if rm else "full precision")
-            desc.append("lossless" if strat_cfg["lossless"] else f"lossy q{strat_cfg['quality']}")
-            print(f"\n  Strategy: {strat_name} ({', '.join(desc)})")
+
+        for strat_name, encode_fn, decode_fn, desc, needs_decoder in STRATEGIES:
+            print(f"\n  {strat_name} ({desc})" +
+                  (" [needs custom JS decoder]" if needs_decoder else ""))
 
             t0 = time.time()
-            zoom_stats = generate_tiles_for_strategy(
-                mosaic_path, bbox, args.max_zoom, strat_name, strat_cfg
-            )
-            elapsed = time.time() - t0
+            zoom_stats = {}
 
+            for z in range(0, args.max_zoom + 1):
+                tiles_at_z = list(mercantile.tiles(*bbox, zooms=z))
+                if not tiles_at_z:
+                    continue
+
+                total_raw_bytes = 0
+                total_zstd_bytes = 0
+                all_abs_errors = []
+
+                for tile in tiles_at_z:
+                    elevation = get_elevation_for_tile(mosaic_path, tile)
+
+                    # Encode
+                    tile_bytes = encode_fn(elevation)
+                    total_raw_bytes += len(tile_bytes)
+
+                    # Simulate ZIM cluster: zstd compress
+                    zstd_bytes = zstd_compressor.compress(tile_bytes)
+                    total_zstd_bytes += len(zstd_bytes)
+
+                    # Round-trip error
+                    decoded_elev = decode_fn(tile_bytes)
+                    source_elev = elevation[0].astype(np.float64)
+                    abs_error = np.abs(decoded_elev - source_elev)
+                    all_abs_errors.append(abs_error)
+
+                combined_errors = np.concatenate([e.ravel() for e in all_abs_errors])
+                zoom_stats[z] = {
+                    "count": len(tiles_at_z),
+                    "raw_bytes": total_raw_bytes,
+                    "zstd_bytes": total_zstd_bytes,
+                    "errors": {
+                        "mean": float(np.mean(combined_errors)),
+                        "max": float(np.max(combined_errors)),
+                        "p95": float(np.percentile(combined_errors, 95)),
+                    },
+                }
+
+            elapsed = time.time() - t0
+            total_raw = sum(s["raw_bytes"] for s in zoom_stats.values())
+            total_zstd = sum(s["zstd_bytes"] for s in zoom_stats.values())
             total_tiles = sum(s["count"] for s in zoom_stats.values())
-            total_bytes = sum(s["total_bytes"] for s in zoom_stats.values())
-            print(f"    {total_tiles} tiles, {format_bytes(total_bytes)} total ({elapsed:.1f}s)")
+            print(f"    {total_tiles} tiles: raw={format_bytes(total_raw)}, "
+                  f"zstd={format_bytes(total_zstd)} ({elapsed:.1f}s)")
 
             region_results[strat_name] = {
                 "zoom_stats": zoom_stats,
                 "total_tiles": total_tiles,
-                "total_bytes": total_bytes,
+                "total_raw": total_raw,
+                "total_zstd": total_zstd,
             }
 
         all_results[region_key] = region_results
 
-    # Print summary report
-    print(f"\n\n{'='*70}")
+    # --- Summary Report ---
+
+    print(f"\n\n{'='*80}")
     print("COMPRESSION RESULTS SUMMARY")
-    print(f"{'='*70}")
+    print(f"{'='*80}")
+
+    strat_names = [s[0] for s in STRATEGIES]
+    strat_needs_decoder = {s[0]: s[4] for s in STRATEGIES}
 
     for region_key, region_cfg in REGIONS.items():
         label = region_cfg["label"]
@@ -328,24 +355,31 @@ def main():
         if not results:
             continue
 
-        baseline_bytes = results["baseline"]["total_bytes"]
+        baseline_raw = results["webp_baseline"]["total_raw"]
+        baseline_zstd = results["webp_baseline"]["total_zstd"]
 
         print(f"\n  {label}")
-        print(f"  {'Strategy':<20} {'Total Size':>12} {'Savings':>10} {'Ratio':>8}")
-        print(f"  {'-'*52}")
+        print(f"  {'Strategy':<22} {'Raw Size':>10} {'+ zstd':>10} {'Raw Svgs':>9} {'Zstd Svgs':>10} {'Decoder':>8}")
+        print(f"  {'-'*72}")
 
-        for strat_name in STRATEGIES:
-            r = results[strat_name]
-            total = r["total_bytes"]
-            savings_pct = (1 - total / baseline_bytes) * 100 if baseline_bytes > 0 else 0
-            ratio = baseline_bytes / total if total > 0 else float("inf")
-            marker = " (baseline)" if strat_name == "baseline" else ""
-            print(f"  {strat_name:<20} {format_bytes(total):>12} {savings_pct:>9.1f}% {ratio:>7.2f}x{marker}")
+        for sn in strat_names:
+            r = results[sn]
+            raw = r["total_raw"]
+            zs = r["total_zstd"]
+            raw_sav = (1 - raw / baseline_raw) * 100 if baseline_raw > 0 else 0
+            zstd_sav = (1 - zs / baseline_zstd) * 100 if baseline_zstd > 0 else 0
+            decoder = "custom" if strat_needs_decoder[sn] else "native"
+            base = " *" if sn == "webp_baseline" else ""
+            print(f"  {sn:<22} {format_bytes(raw):>10} {format_bytes(zs):>10} "
+                  f"{raw_sav:>8.1f}% {zstd_sav:>9.1f}% {decoder:>8}{base}")
 
-    # Per-zoom breakdown for the highest-impact zoom levels
-    print(f"\n\n{'='*70}")
-    print("PER-ZOOM BREAKDOWN (highest zoom levels)")
-    print(f"{'='*70}")
+        print(f"\n  * = current baseline")
+
+    # --- Per-zoom at max zoom ---
+
+    print(f"\n\n{'='*80}")
+    print(f"PER-ZOOM DETAIL AT Z{args.max_zoom}")
+    print(f"{'='*80}")
 
     for region_key, region_cfg in REGIONS.items():
         label = region_cfg["label"]
@@ -353,36 +387,57 @@ def main():
         if not results:
             continue
 
-        print(f"\n  {label}")
+        z = args.max_zoom
+        baseline_zstd_z = results["webp_baseline"]["zoom_stats"].get(z)
+        if not baseline_zstd_z:
+            continue
 
-        # Show last 4 zoom levels (where most data lives)
-        max_z = max(results["baseline"]["zoom_stats"].keys())
-        show_zooms = range(max(0, max_z - 3), max_z + 1)
+        n_tiles = baseline_zstd_z["count"]
+        print(f"\n  {label} — z{z} ({n_tiles} tiles)")
+        print(f"  {'Strategy':<22} {'Raw/tile':>10} {'Zstd/tile':>10} {'Zstd Svgs':>10} {'Zstd ratio':>11}")
+        print(f"  {'-'*66}")
 
-        for z in show_zooms:
-            baseline_z = results["baseline"]["zoom_stats"].get(z)
-            if not baseline_z:
+        base_zstd_total = baseline_zstd_z["zstd_bytes"]
+        for sn in strat_names:
+            zs = results[sn]["zoom_stats"].get(z)
+            if not zs:
                 continue
-            n_tiles = baseline_z["count"]
-            print(f"\n    Zoom {z} ({n_tiles} tiles):")
-            print(f"    {'Strategy':<20} {'Total':>10} {'Avg/tile':>10} {'Savings':>10}")
-            print(f"    {'-'*52}")
+            raw_avg = zs["raw_bytes"] / zs["count"]
+            zstd_avg = zs["zstd_bytes"] / zs["count"]
+            zstd_sav = (1 - zs["zstd_bytes"] / base_zstd_total) * 100 if base_zstd_total > 0 else 0
+            # How well does zstd compress this format?
+            zstd_ratio = zs["raw_bytes"] / zs["zstd_bytes"] if zs["zstd_bytes"] > 0 else 0
+            print(f"  {sn:<22} {format_bytes(int(raw_avg)):>10} {format_bytes(int(zstd_avg)):>10} "
+                  f"{zstd_sav:>9.1f}% {zstd_ratio:>10.2f}x")
 
-            for strat_name in STRATEGIES:
-                zs = results[strat_name]["zoom_stats"].get(z)
-                if not zs:
-                    continue
-                total = zs["total_bytes"]
-                avg = total / zs["count"] if zs["count"] else 0
-                base_total = baseline_z["total_bytes"]
-                savings = (1 - total / base_total) * 100 if base_total > 0 else 0
-                print(f"    {strat_name:<20} {format_bytes(total):>10} {format_bytes(int(avg)):>10} {savings:>9.1f}%")
+    # --- Error analysis ---
 
-    # Elevation error analysis
-    print(f"\n\n{'='*70}")
-    print("ELEVATION ERROR vs LOSSLESS BASELINE (meters)")
-    print("(round-trip: source -> encode -> WebP -> decode via Mapbox formula)")
-    print(f"{'='*70}")
+    print(f"\n\n{'='*80}")
+    print("ELEVATION ERROR (meters)")
+    print(f"{'='*80}")
+
+    for region_key, region_cfg in REGIONS.items():
+        label = region_cfg["label"]
+        results = all_results.get(region_key)
+        if not results:
+            continue
+
+        print(f"\n  {label} (z{args.max_zoom} tiles)")
+        print(f"  {'Strategy':<22} {'Mean':>8} {'P95':>8} {'Max':>8}")
+        print(f"  {'-'*48}")
+
+        for sn in strat_names:
+            zs = results[sn]["zoom_stats"].get(args.max_zoom)
+            if not zs:
+                continue
+            errs = zs["errors"]
+            print(f"  {sn:<22} {errs['mean']:>7.2f}m {errs['p95']:>7.2f}m {errs['max']:>7.2f}m")
+
+    # --- Best options summary ---
+
+    print(f"\n\n{'='*80}")
+    print("BEST OPTIONS (sorted by zstd-compressed size)")
+    print(f"{'='*80}")
 
     for region_key, region_cfg in REGIONS.items():
         label = region_cfg["label"]
@@ -391,58 +446,21 @@ def main():
             continue
 
         print(f"\n  {label}")
+        print(f"  {'Strategy':<22} {'In ZIM':>10} {'Savings':>9} {'Max Err':>8} {'Decoder':>8}")
+        print(f"  {'-'*60}")
 
-        # Show error stats at the max zoom (most tiles, most representative)
-        max_z = max(results["baseline"]["zoom_stats"].keys())
+        baseline_zstd = results["webp_baseline"]["total_zstd"]
+        sorted_strats = sorted(strat_names, key=lambda sn: results[sn]["total_zstd"])
 
-        print(f"\n    All zoom levels aggregated:")
-        print(f"    {'Strategy':<20} {'Mean':>8} {'Median':>8} {'P95':>8} {'P99':>8} {'Max':>8}")
-        print(f"    {'-'*54}")
-
-        for strat_name in STRATEGIES:
-            # Aggregate errors across all zoom levels
-            all_means = []
-            all_maxes = []
-            all_p95s = []
-            all_p99s = []
-            all_medians = []
-            total_pixels = 0
-            weighted_mean = 0.0
-            worst_max = 0.0
-
-            for z, zs in results[strat_name]["zoom_stats"].items():
-                errs = zs["errors"]
-                n_pixels = zs["count"] * 256 * 256
-                weighted_mean += errs["mean"] * n_pixels
-                total_pixels += n_pixels
-                worst_max = max(worst_max, errs["max"])
-                all_p95s.append(errs["p95"])
-                all_p99s.append(errs["p99"])
-                all_medians.append(errs["p50"])
-
-            avg_mean = weighted_mean / total_pixels if total_pixels > 0 else 0
-            # Use max-zoom stats for percentiles (most representative)
-            max_z_errs = results[strat_name]["zoom_stats"][max_z]["errors"]
-
-            print(f"    {strat_name:<20} {avg_mean:>7.2f}m {max_z_errs['p50']:>7.2f}m "
-                  f"{max_z_errs['p95']:>7.2f}m {max_z_errs['p99']:>7.2f}m {worst_max:>7.2f}m")
-
-        # Per-zoom error detail for last few zoom levels
-        show_zooms = range(max(0, max_z - 3), max_z + 1)
-        print(f"\n    Per-zoom detail:")
-        print(f"    {'Zoom':<6} {'Strategy':<20} {'Mean':>8} {'P95':>8} {'Max':>8}")
-        print(f"    {'-'*54}")
-
-        for z in show_zooms:
-            for strat_name in STRATEGIES:
-                zs = results[strat_name]["zoom_stats"].get(z)
-                if not zs:
-                    continue
-                errs = zs["errors"]
-                print(f"    z{z:<5} {strat_name:<20} {errs['mean']:>7.2f}m "
-                      f"{errs['p95']:>7.2f}m {errs['max']:>7.2f}m")
-            if z < max_z:
-                print()
+        for sn in sorted_strats:
+            r = results[sn]
+            zs = r["total_zstd"]
+            sav = (1 - zs / baseline_zstd) * 100 if baseline_zstd > 0 else 0
+            # Get max error from highest zoom
+            max_z = max(r["zoom_stats"].keys())
+            max_err = r["zoom_stats"][max_z]["errors"]["max"]
+            decoder = "custom" if strat_needs_decoder[sn] else "native"
+            print(f"  {sn:<22} {format_bytes(zs):>10} {sav:>8.1f}% {max_err:>7.2f}m {decoder:>8}")
 
     print()
 
