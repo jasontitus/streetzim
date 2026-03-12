@@ -1698,10 +1698,10 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Include Sentinel-2 Cloudless satellite imagery tiles")
     parser.add_argument("--satellite-zoom", type=int, default=None,
                         help="Max zoom for satellite tiles (default: same as --max-zoom)")
-    parser.add_argument("--satellite-format", choices=["webp", "avif"], default="webp",
-                        help="Satellite tile image format (default: webp)")
+    parser.add_argument("--satellite-format", choices=["webp", "avif"], default="avif",
+                        help="Satellite tile image format (default: avif)")
     parser.add_argument("--satellite-quality", type=int, default=None,
-                        help="Satellite tile compression quality (default: 65 for webp, 30 for avif)")
+                        help="Satellite tile compression quality (default: 30 for avif, 65 for webp)")
     parser.add_argument("--satellite-tile-size", type=int, choices=[256, 512], default=256,
                         help="Satellite tile pixel size (default: 256; 512 stitches 4 source tiles)")
     parser.add_argument("--terrain", action="store_true",
