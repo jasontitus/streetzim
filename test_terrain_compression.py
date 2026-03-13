@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Test terrain tile compression strategies for elevation data.
 
-Generates terrain tiles for two regions (Colorado and Washington DC) using
-multiple encoding strategies, then compares file sizes both raw and after
-zstd compression (simulating ZIM cluster compression).
+Generates terrain tiles for multiple regions using various encoding strategies,
+then compares file sizes both raw and after zstd compression (simulating ZIM
+cluster compression).
 
 Strategies tested:
   - Mapbox terrain-RGB WebP (baseline, and quantized 1m/2m/5m/10m)
+  - Mapbox terrain-RGB AVIF lossless (baseline, and quantized 1m/2m/5m/10m)
   - Raw int16 binary (elevation as 16-bit integers)
   - Raw int16 delta-encoded (store differences between adjacent pixels)
   - LERC (Limited Error Raster Compression) at various max error tolerances
@@ -19,6 +20,8 @@ import argparse
 import math
 import os
 import struct
+import subprocess
+import tempfile
 import time
 import urllib.request
 from io import BytesIO
@@ -33,6 +36,11 @@ from rasterio.merge import merge
 from rasterio.transform import from_bounds
 from rasterio.warp import Resampling, reproject, transform_bounds
 
+try:
+    import pillow_avif  # noqa: F401
+except ImportError:
+    pass
+
 COPERNICUS_DEM_URL = (
     "https://copernicus-dem-30m.s3.amazonaws.com/"
     "Copernicus_DSM_COG_10_{ns}{lat:02d}_00_{ew}{lon:03d}_00_DEM/"
@@ -43,6 +51,10 @@ REGIONS = {
     "colorado": {
         "bbox": "-105.35,38.75,-104.65,39.05",
         "label": "Colorado (CO Springs)",
+    },
+    "kansas": {
+        "bbox": "-97.00,38.50,-96.40,38.90",
+        "label": "Kansas (Flint Hills)",
     },
     "dc": {
         "bbox": "-77.15,38.82,-76.90,38.98",
@@ -194,6 +206,55 @@ def encode_lerc(elevation, max_z_error):
     return bytes(buf)
 
 
+def encode_avif_baseline(elevation):
+    """Standard Mapbox terrain-RGB, 0.1m precision, lossless AVIF."""
+    elev = elevation[0]
+    encoded = ((elev + 10000.0) / 0.1).astype(np.uint32)
+    encoded = np.clip(encoded, 0, 16777215)
+    r = ((encoded >> 16) & 0xFF).astype(np.uint8)
+    g = ((encoded >> 8) & 0xFF).astype(np.uint8)
+    b = (encoded & 0xFF).astype(np.uint8)
+    img = Image.fromarray(np.stack([r, g, b], axis=-1))
+    return _encode_avif_lossless(img)
+
+
+def encode_avif_quantized(elevation, round_meters):
+    """Mapbox terrain-RGB with elevation pre-rounded, lossless AVIF."""
+    elev = np.round(elevation[0] / round_meters) * round_meters
+    encoded = ((elev + 10000.0) / 0.1).astype(np.uint32)
+    encoded = np.clip(encoded, 0, 16777215)
+    r = ((encoded >> 16) & 0xFF).astype(np.uint8)
+    g = ((encoded >> 8) & 0xFF).astype(np.uint8)
+    b = (encoded & 0xFF).astype(np.uint8)
+    img = Image.fromarray(np.stack([r, g, b], axis=-1))
+    return _encode_avif_lossless(img)
+
+
+def _encode_avif_lossless(img):
+    """Encode a PIL Image to truly lossless AVIF using avifenc CLI.
+    Pillow's AVIF encoder has ±3 LSB errors even at quality=100,
+    so we shell out to avifenc --lossless for exact round-trip."""
+    with tempfile.TemporaryDirectory() as td:
+        png_path = os.path.join(td, "tile.png")
+        avif_path = os.path.join(td, "tile.avif")
+        img.save(png_path)
+        subprocess.run(
+            ["avifenc", "--lossless", "-s", "6", png_path, avif_path],
+            capture_output=True,
+            check=True,
+        )
+        with open(avif_path, "rb") as f:
+            return f.read()
+
+
+def decode_avif_to_elevation(tile_bytes):
+    """Decode AVIF terrain-RGB back to elevation via Mapbox formula."""
+    img = Image.open(BytesIO(tile_bytes))
+    rgb = np.array(img, dtype=np.float64)
+    r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
+    return (r * 65536 + g * 256 + b) * 0.1 - 10000.0
+
+
 def decode_webp_to_elevation(tile_bytes):
     """Decode WebP terrain-RGB back to elevation via Mapbox formula."""
     img = Image.open(BytesIO(tile_bytes))
@@ -228,6 +289,12 @@ STRATEGIES = [
     ("webp_quant_2m",     lambda e: encode_webp_quantized(e, 2),     decode_webp_to_elevation,   "WebP lossless, round 2m",  False),
     ("webp_quant_5m",     lambda e: encode_webp_quantized(e, 5),     decode_webp_to_elevation,   "WebP lossless, round 5m",  False),
     ("webp_quant_10m",    lambda e: encode_webp_quantized(e, 10),    decode_webp_to_elevation,   "WebP lossless, round 10m", False),
+    # AVIF lossless terrain-RGB variants (MapLibre compatible with addProtocol decoder)
+    ("avif_baseline",     lambda e: encode_avif_baseline(e),         decode_avif_to_elevation,   "AVIF lossless, 0.1m",    False),
+    ("avif_quant_1m",     lambda e: encode_avif_quantized(e, 1),     decode_avif_to_elevation,   "AVIF lossless, round 1m",  False),
+    ("avif_quant_2m",     lambda e: encode_avif_quantized(e, 2),     decode_avif_to_elevation,   "AVIF lossless, round 2m",  False),
+    ("avif_quant_5m",     lambda e: encode_avif_quantized(e, 5),     decode_avif_to_elevation,   "AVIF lossless, round 5m",  False),
+    ("avif_quant_10m",    lambda e: encode_avif_quantized(e, 10),    decode_avif_to_elevation,   "AVIF lossless, round 10m", False),
     # Custom binary formats (need JS decoder via addProtocol)
     ("raw_int16",         lambda e: encode_raw_int16(e),             decode_raw_int16,           "Raw int16, 1m",          True),
     ("raw_int16_delta",   lambda e: encode_raw_int16_delta(e),       decode_raw_int16_delta,     "Raw int16 delta-enc",    True),
