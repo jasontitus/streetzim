@@ -1275,6 +1275,7 @@ def create_zim(
     terrain_max_zoom=None,
     zim_workers=None,
     bbox=None,
+    wikidata_data=None,
 ):
     """Create a ZIM file containing the map viewer and all tiles."""
     from libzim.writer import Creator, Item, StringProvider, FileProvider
@@ -1569,6 +1570,44 @@ def create_zim(
                 data,
             ))
 
+        # Add Wikidata info
+        if wikidata_data:
+            print(f"    Adding Wikidata info for {len(wikidata_data)} features...")
+            from collections import defaultdict as _dd
+            wd_chunks = _dd(dict)
+            for qid, data in wikidata_data.items():
+                # Bucket by first 2 chars of Q-ID number for chunked loading
+                num = qid[1:]  # strip 'Q'
+                prefix = num[:2] if len(num) >= 2 else num.ljust(2, "0")
+                wd_chunks[prefix][qid] = data
+
+            # Write manifest
+            wd_manifest = {
+                "total": len(wikidata_data),
+                "chunks": {k: len(v) for k, v in sorted(wd_chunks.items())},
+            }
+            creator.add_item(MapItem(
+                "wikidata/manifest.json", "Wikidata Manifest", "application/json",
+                json.dumps(wd_manifest, separators=(",", ":")).encode("utf-8"),
+            ))
+
+            # Write each chunk
+            for prefix, chunk_entries in sorted(wd_chunks.items()):
+                chunk_json = json.dumps(chunk_entries, separators=(",", ":"),
+                                        ensure_ascii=False)
+                creator.add_item(MapItem(
+                    f"wikidata/{prefix}.json",
+                    f"Wikidata chunk {prefix}",
+                    "application/json",
+                    chunk_json.encode("utf-8"),
+                ))
+
+            total_bytes = sum(
+                len(json.dumps(v, separators=(",", ":"), ensure_ascii=False).encode())
+                for v in wd_chunks.values()
+            )
+            print(f"    Added {len(wd_chunks)} Wikidata chunks ({total_bytes / 1024:.0f} KB)")
+
         # Add search features
         if search_features:
             print(f"    Adding {len(search_features)} search entries...")
@@ -1842,6 +1881,12 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Directory for terrain tile cache (default: terrain_cache/)")
     parser.add_argument("--workers", type=int, default=None,
                         help="Number of ZIM compression workers (default: CPU_count/2)")
+    parser.add_argument("--wikidata", action="store_true",
+                        help="Include Wikidata info (population, description, etc.) for places/POIs")
+    parser.add_argument("--wikidata-cache", metavar="PATH", default=None,
+                        help="Wikidata cache directory (default: wikidata_cache/)")
+    parser.add_argument("--wikidata-no-extracts", action="store_true",
+                        help="Skip Wikipedia text extracts (smaller cache, faster)")
 
     args = parser.parse_args()
 
@@ -1887,7 +1932,11 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     include_terrain = args.terrain
     terrain_max_zoom = args.terrain_zoom
 
-    total_steps = 6 + (1 if include_satellite else 0) + (1 if include_terrain else 0)
+    # Wikidata options
+    include_wikidata = args.wikidata
+    wikidata_cache_dir = args.wikidata_cache
+
+    total_steps = 6 + (1 if include_satellite else 0) + (1 if include_terrain else 0) + (1 if include_wikidata else 0)
 
     print(f"=== Creating Offline OSM ZIM: {name} ===")
     if include_satellite:
@@ -1895,6 +1944,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         print(f"  Including Sentinel-2 satellite imagery (z0-{satellite_max_zoom}, {sat_desc})")
     if include_terrain:
         print(f"  Including Copernicus GLO-30 terrain (z0-{terrain_max_zoom})")
+    if include_wikidata:
+        print(f"  Including Wikidata info for places and POIs")
     print()
 
     # Create temp directory
@@ -1960,6 +2011,32 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             search_features = extract_searchable_features(mbtiles_path=mbtiles_path)
         else:
             search_features = extract_searchable_features(tiles=tiles)
+
+        # Build Wikidata cache if requested
+        wikidata_data = None
+        if include_wikidata:
+            step_wd = 5
+            print()
+            print(f"[{step_wd}/{total_steps}] Building Wikidata info cache...")
+            from wikidata_cache import build_cache as wd_build_cache, load_cache_for_zim
+
+            # Determine PBF path for Q-ID extraction
+            wd_pbf = None
+            if not args.mbtiles:
+                wd_pbf = locals().get('work_pbf') or pbf_path
+            wd_mbtiles = mbtiles_path if not wd_pbf else None
+
+            wd_cache_path = wd_build_cache(
+                pbf_path=wd_pbf,
+                mbtiles_path=wd_mbtiles,
+                cache_dir=wikidata_cache_dir,
+                skip_extracts=args.wikidata_no_extracts,
+            )
+            wikidata_data = load_cache_for_zim(wd_cache_path)
+            if wikidata_data:
+                print(f"    Loaded {len(wikidata_data)} Wikidata entries for ZIM")
+            else:
+                print("    No Wikidata entries available")
 
         # Download satellite tiles and generate terrain tiles
         # These are independent (satellite=I/O-bound, terrain=CPU-bound) so run in parallel
@@ -2050,6 +2127,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         if terrain_dir and os.path.isdir(str(terrain_dir)):
             map_config["hasTerrain"] = True
             map_config["terrainMaxZoom"] = terrain_max_zoom
+        if wikidata_data:
+            map_config["hasWikidata"] = True
 
         create_zim(
             output_path=output_path,
@@ -2073,6 +2152,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             mbtiles_path=mbtiles_path if use_streaming else None,
             tile_count=total_tile_count if use_streaming else None,
             bbox=parse_bbox(bbox_str) if bbox_str else None,
+            wikidata_data=wikidata_data,
         )
 
         print()
