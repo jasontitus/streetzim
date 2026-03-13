@@ -210,7 +210,7 @@ fetch(baseUrl + 'map-config.json')
         });
         // White text with strong dark outline on all labels
         ['road-label','water-label','place-city','place-town','place-village',
-         'place-hamlet','place-suburb','place-neighbourhood','poi-label'].forEach(function(id) {
+         'place-hamlet','place-suburb','poi-label'].forEach(function(id) {
           try {
             map.setPaintProperty(id, 'text-color', '#fff');
             map.setPaintProperty(id, 'text-halo-color', 'rgba(0,0,0,0.85)');
@@ -291,7 +291,7 @@ fetch(baseUrl + 'map-config.json')
         map.addSource('terrain-dem', {
           type: 'raster-dem',
           tiles: ['zimtile://' + baseUrl + 'terrain/{z}/{x}/{y}.webp'],
-          tileSize: 512,
+          tileSize: 256,
           minzoom: 0,
           maxzoom: config.terrainMaxZoom || 12,
           encoding: 'mapbox'
@@ -693,7 +693,7 @@ function makeStyle(config) {
         "minzoom": 12,
         "layout": {
           "symbol-placement": "line",
-          "text-field": "{name:latin}",
+          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansRegular"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 12, 10, 14, 13],
           "text-max-angle": 30,
@@ -712,7 +712,7 @@ function makeStyle(config) {
         "source": "openmaptiles",
         "source-layer": "water_name",
         "layout": {
-          "text-field": "{name:latin}",
+          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansItalic"],
           "text-size": 12
         },
@@ -731,7 +731,7 @@ function makeStyle(config) {
         "filter": ["==", "class", "country"],
         "maxzoom": 6,
         "layout": {
-          "text-field": "{name:latin}",
+          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansBold"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 1, 10, 6, 16],
           "text-transform": "uppercase"
@@ -751,7 +751,7 @@ function makeStyle(config) {
         "minzoom": 4,
         "maxzoom": 8,
         "layout": {
-          "text-field": "{name:latin}",
+          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansBold"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 4, 9, 8, 14],
           "text-transform": "uppercase",
@@ -771,7 +771,7 @@ function makeStyle(config) {
         "filter": ["==", "class", "city"],
         "minzoom": 5,
         "layout": {
-          "text-field": "{name:latin}",
+          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansBold"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 5, 10, 14, 18]
         },
@@ -789,7 +789,7 @@ function makeStyle(config) {
         "filter": ["==", "class", "town"],
         "minzoom": 8,
         "layout": {
-          "text-field": "{name:latin}",
+          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansRegular"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 8, 10, 14, 16]
         },
@@ -807,7 +807,7 @@ function makeStyle(config) {
         "filter": ["==", "class", "village"],
         "minzoom": 10,
         "layout": {
-          "text-field": "{name:latin}",
+          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansRegular"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 10, 9, 14, 14]
         },
@@ -825,7 +825,7 @@ function makeStyle(config) {
         "filter": ["in", "class", "suburb", "quarter", "neighbourhood"],
         "minzoom": 12,
         "layout": {
-          "text-field": "{name:latin}",
+          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansRegular"],
           "text-size": 12,
           "text-transform": "uppercase",
@@ -846,7 +846,7 @@ function makeStyle(config) {
         "minzoom": 14,
         "filter": ["<=", "rank", 4],
         "layout": {
-          "text-field": "{name:latin}",
+          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansRegular"],
           "text-size": 11,
           "text-offset": [0, 0.5],

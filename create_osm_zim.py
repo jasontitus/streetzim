@@ -25,6 +25,7 @@ Size comparison (typical city):
 """
 
 import argparse
+import glob
 import gzip
 import json
 import os
@@ -112,11 +113,14 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
     from PIL import Image
 
     if sat_format == "avif":
-        try:
-            import pillow_avif  # noqa: F401 — registers AVIF codec with Pillow
-        except ImportError:
-            print("    Warning: pillow-avif-plugin not installed, falling back to webp")
-            sat_format = "webp"
+        # Pillow >= 10.0 has native AVIF support; older versions need pillow-avif-plugin
+        from PIL import features
+        if not features.check("avif"):
+            try:
+                import pillow_avif  # noqa: F401 — registers AVIF codec with Pillow
+            except ImportError:
+                print("    Warning: AVIF not supported (need Pillow >= 10 or pillow-avif-plugin), falling back to webp")
+                sat_format = "webp"
 
     quality = sat_quality if sat_quality is not None else webp_quality
     ext = sat_format  # "webp" or "avif"
@@ -125,21 +129,60 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
     minlon, minlat, maxlon, maxlat = bbox
 
     os.makedirs(dest_dir, exist_ok=True)
+    # Shared source cache for original JPEG tiles (download once, encode to any format)
+    source_cache_dir = os.path.join(SCRIPT_DIR, "satellite_cache_sources")
+    os.makedirs(source_cache_dir, exist_ok=True)
     total_downloaded = 0
     total_skipped = 0
     total_bytes_jpeg = 0
     total_bytes_out = 0
     lock = threading.Lock()
 
+    # Collect existing format caches for transcoding fallback
+    _format_caches = []
+    for d in sorted(glob.glob(os.path.join(SCRIPT_DIR, "satellite_cache_*_*"))):
+        if os.path.isdir(d) and d != dest_dir and d != source_cache_dir:
+            # Extract extension from dir name (e.g. satellite_cache_webp_256 → webp)
+            parts = os.path.basename(d).replace("satellite_cache_", "").split("_")
+            if parts:
+                _format_caches.append((d, parts[0]))
+    # Also check the legacy satellite_cache/ (WebP tiles)
+    legacy_cache = os.path.join(SCRIPT_DIR, "satellite_cache")
+    if os.path.isdir(legacy_cache) and legacy_cache != dest_dir:
+        _format_caches.append((legacy_cache, "webp"))
+
     def _fetch_source_tile(z, x, y):
-        """Download a single 256px JPEG tile from the WMTS source.
-        Returns (PIL.Image, jpeg_bytes_len)."""
+        """Get a single 256px tile, using source cache if available.
+        Returns (PIL.Image, jpeg_bytes_len). Checks: JPEG source cache →
+        existing format caches (transcode) → network download."""
+        # Check JPEG source cache first
+        cache_path = os.path.join(source_cache_dir, str(z), str(x), f"{y}.jpg")
+        if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
+            try:
+                return Image.open(cache_path), os.path.getsize(cache_path)
+            except Exception:
+                pass  # Corrupted cache file, try next
+
+        # Check existing format caches (transcode from WebP/AVIF rather than re-download)
+        for cache_dir, cache_ext in _format_caches:
+            cached = os.path.join(cache_dir, str(z), str(x), f"{y}.{cache_ext}")
+            if os.path.exists(cached) and os.path.getsize(cached) > 0:
+                try:
+                    return Image.open(cached), 0
+                except Exception:
+                    pass
+
+        # Download from network
         url = SATELLITE_TILE_URL.format(z=z, x=x, y=y)
         for attempt in range(4):
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
                 with urllib.request.urlopen(req, timeout=30) as resp:
                     jpg_data = resp.read()
+                # Save to source cache
+                os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+                with open(cache_path, 'wb') as f:
+                    f.write(jpg_data)
                 return Image.open(io.BytesIO(jpg_data)), len(jpg_data)
             except Exception as e:
                 if attempt < 3:
@@ -368,7 +411,8 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
     minlon, minlat, maxlon, maxlat = bbox
 
     os.makedirs(dest_dir, exist_ok=True)
-    dem_dir = os.path.join(dest_dir, "dem_sources")
+    # Always use the shared DEM sources directory (large raw files, ~547 GB total)
+    dem_dir = os.path.join(SCRIPT_DIR, "terrain_cache", "dem_sources")
     os.makedirs(dem_dir, exist_ok=True)
 
     # Check if tiles already generated for THIS bbox by sampling a few z-max tiles
@@ -426,35 +470,42 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
         print("    No DEM tiles downloaded, skipping terrain")
         return 0
 
-    # Mosaic source DEMs using rasterio
-    print("    Mosaicing DEM tiles...")
+    # Build a VRT (Virtual Raster) instead of loading all DEMs into memory.
+    # A VRT is a lightweight XML file that references source tiles on disk.
+    # rasterio reads only the pixels needed for each terrain tile on demand.
+    print("    Building VRT from DEM tiles...")
     import rasterio
-    from rasterio.merge import merge
     from rasterio.warp import reproject, Resampling, transform_bounds
     from rasterio.transform import from_bounds
     import mercantile
     import numpy as np
     from PIL import Image
 
-    datasets = [rasterio.open(p) for p in tif_paths]
-    mosaic, mosaic_transform = merge(datasets)
-    mosaic_crs = datasets[0].crs
-    mosaic_meta = datasets[0].meta.copy()
-    for ds in datasets:
-        ds.close()
-
-    mosaic_meta.update({
-        "height": mosaic.shape[1],
-        "width": mosaic.shape[2],
-        "transform": mosaic_transform,
-        "count": 1,
-    })
-
-    # Write mosaic to temp file
-    mosaic_path = os.path.join(dem_dir, "mosaic_4326.tif")
-    with rasterio.open(mosaic_path, "w", **mosaic_meta) as dst:
-        dst.write(mosaic[0], 1)
-    del mosaic  # free memory
+    mosaic_path = os.path.join(dem_dir, "mosaic_4326.vrt")
+    try:
+        subprocess.run(
+            ["gdalbuildvrt", "-overwrite", mosaic_path] + tif_paths,
+            check=True, capture_output=True, text=True,
+        )
+    except FileNotFoundError:
+        # gdalbuildvrt not on PATH — fall back to in-memory merge
+        print("    Warning: gdalbuildvrt not found, falling back to in-memory merge")
+        from rasterio.merge import merge
+        datasets = [rasterio.open(p) for p in tif_paths]
+        mosaic_arr, mosaic_transform = merge(datasets)
+        mosaic_meta = datasets[0].meta.copy()
+        for ds in datasets:
+            ds.close()
+        mosaic_meta.update({
+            "height": mosaic_arr.shape[1],
+            "width": mosaic_arr.shape[2],
+            "transform": mosaic_transform,
+            "count": 1,
+        })
+        mosaic_path = os.path.join(dem_dir, "mosaic_4326.tif")
+        with rasterio.open(mosaic_path, "w", **mosaic_meta) as dst:
+            dst.write(mosaic_arr[0], 1)
+        del mosaic_arr
 
     # Generate terrain-RGB tiles directly with rasterio + mercantile
     # Each thread opens its own file handle to avoid loading the full raster into memory.
@@ -759,8 +810,11 @@ def tile_to_lnglat(z, x, y, px, py, extent=4096):
 
 
 def _process_tile_partition(args):
-    """Worker: read a tile_column range from SQLite and extract search features."""
-    mbtiles_path, col_start, col_end, search_layers = args
+    """Worker: read a tile_column range from SQLite, extract and dedup search features.
+
+    Writes deduplicated features to a temp file (JSON lines) to avoid sending
+    huge lists through multiprocessing IPC pipes."""
+    mbtiles_path, col_start, col_end, search_layers, output_file = args
     import mapbox_vector_tile
     import sqlite3 as _sqlite3
 
@@ -772,8 +826,10 @@ def _process_tile_partition(args):
         (col_start, col_end),
     )
 
-    results = []
+    seen = set()
     count = 0
+    feat_count = 0
+    out_f = open(output_file, "w")
     for z, x, tms_y, data in cursor:
         y = (1 << z) - 1 - tms_y
         tile_data = data
@@ -828,17 +884,19 @@ def _process_tile_partition(args):
                     continue
                 lon, lat = tile_to_lnglat(z, x, y, px, py, extent)
                 subtype = props.get("class", "") or props.get("subclass", "")
-                results.append({
-                    "name": name,
-                    "type": feature_type,
-                    "subtype": subtype,
-                    "lat": lat,
-                    "lon": lon,
-                })
+                dedup_key = (name.lower(), feature_type, round(lat, 4), round(lon, 4))
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+                json.dump({"name": name, "type": feature_type, "subtype": subtype,
+                           "lat": lat, "lon": lon}, out_f, separators=(",", ":"))
+                out_f.write("\n")
+                feat_count += 1
         count += 1
 
+    out_f.close()
     conn.close()
-    return results, count
+    return output_file, count, feat_count
 
 
 def _process_tile_for_search(args):
@@ -983,39 +1041,88 @@ def extract_searchable_features(tiles=None, mbtiles_path=None):
             conn.close()
             print("    No z14 tiles found in mbtiles")
             return []
-        # Get tile_column range for partitioning
-        row = conn.execute(
-            "SELECT MIN(tile_column), MAX(tile_column) FROM tiles WHERE zoom_level = 14"
-        ).fetchone()
-        col_min, col_max = row[0], row[1] + 1  # exclusive end
+
+        # Balanced partitioning: query tile counts per column and split evenly
+        print("    Querying tile distribution for balanced partitioning...")
+        col_counts = conn.execute(
+            "SELECT tile_column, COUNT(*) FROM tiles WHERE zoom_level = 14 "
+            "GROUP BY tile_column ORDER BY tile_column"
+        ).fetchall()
         conn.close()
 
         import multiprocessing
         import os as _os
-        num_workers = _os.cpu_count() or 4
-        print(f"    Processing {total_z14} z14 tiles with {num_workers} workers (partitioned reads)...")
+        import tempfile
+        num_workers = min(_os.cpu_count() or 4, len(col_counts))
+        # Use 4x more partitions than workers for dynamic load balancing —
+        # dense urban partitions take longer per tile, so small partitions let
+        # idle workers pick up the next chunk instead of waiting on one straggler.
+        num_partitions = min(num_workers * 4, len(col_counts))
+        print(f"    Processing {total_z14} z14 tiles across {len(col_counts)} columns "
+              f"with {num_workers} workers, {num_partitions} partitions...")
 
-        # Partition tile_column range across workers
-        col_range = col_max - col_min
-        partition_size = max(1, col_range // num_workers)
+        # Split columns into partitions with roughly equal tile counts
+        tiles_per_partition = total_z14 / num_partitions
         partitions = []
-        for i in range(num_workers):
-            c_start = col_min + i * partition_size
-            c_end = col_min + (i + 1) * partition_size if i < num_workers - 1 else col_max
-            partitions.append((mbtiles_path, c_start, c_end, search_layers))
+        tmp_dir = tempfile.mkdtemp(prefix="streetzim_search_")
+        current_start = col_counts[0][0]
+        current_count = 0
+        part_idx = 0
 
-        features = []
+        for col, cnt in col_counts:
+            current_count += cnt
+            if current_count >= tiles_per_partition and part_idx < num_partitions - 1:
+                tmp_file = os.path.join(tmp_dir, f"features_{part_idx}.jsonl")
+                partitions.append((mbtiles_path, current_start, col + 1, search_layers, tmp_file))
+                part_idx += 1
+                current_start = col + 1
+                current_count = 0
+
+        # Last partition gets the rest
+        if part_idx < num_partitions:
+            tmp_file = os.path.join(tmp_dir, f"features_{part_idx}.jsonl")
+            last_col = col_counts[-1][0]
+            partitions.append((mbtiles_path, current_start, last_col + 1, search_layers, tmp_file))
+
         processed = 0
+        total_features = 0
         ctx = multiprocessing.get_context("spawn")
         with ctx.Pool(num_workers) as pool:
-            for batch_features, batch_count in pool.imap_unordered(
+            for output_file, batch_count, batch_feats in pool.imap_unordered(
                 _process_tile_partition, partitions
             ):
-                features.extend(batch_features)
                 processed += batch_count
-                print(f"\r    Processed {processed}/{total_z14} tiles, {len(features)} features so far...", end="", flush=True)
+                total_features += batch_feats
+                print(f"\r    Processed {processed}/{total_z14} tiles, {total_features} features (pre-dedup)...", end="", flush=True)
 
         print()
+
+        # Stream features from temp JSONL files for cross-worker dedup
+        print(f"    Cross-worker deduplication from {len(partitions)} temp files...")
+        features = []
+        seen_global = set()
+        for part_args in partitions:
+            tmp_file = part_args[4]
+            if not os.path.exists(tmp_file):
+                continue
+            with open(tmp_file, "r") as f:
+                for line in f:
+                    feat = json.loads(line)
+                    dedup_key = (feat["name"].lower(), feat["type"],
+                                 round(feat["lat"], 4), round(feat["lon"], 4))
+                    if dedup_key not in seen_global:
+                        seen_global.add(dedup_key)
+                        features.append(feat)
+            os.unlink(tmp_file)
+        del seen_global
+
+        # Clean up temp dir
+        try:
+            os.rmdir(tmp_dir)
+        except OSError:
+            pass
+
+        print(f"    {len(features)} unique features after cross-worker dedup")
     else:
         # Legacy mode: filter from in-memory dict
         z14_tiles = {(z, x, y): data for (z, x, y), data in tiles.items() if z == 14}
@@ -1057,16 +1164,17 @@ def extract_searchable_features(tiles=None, mbtiles_path=None):
     import gc
     gc.collect()
 
-    # Deduplicate across tiles
-    seen = set()
-    deduped = []
-    for f in features:
-        dedup_key = (f["name"].lower(), f["type"], round(f["lat"], 4), round(f["lon"], 4))
-        if dedup_key in seen:
-            continue
-        seen.add(dedup_key)
-        deduped.append(f)
-    features = deduped
+    # Deduplicate across tiles (only needed for legacy path; mbtiles path dedups inline)
+    if not mbtiles_path:
+        seen = set()
+        deduped = []
+        for f in features:
+            dedup_key = (f["name"].lower(), f["type"], round(f["lat"], 4), round(f["lon"], 4))
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+            deduped.append(f)
+        features = deduped
 
     # Assign location context (nearest city/town) to each feature
     print("    Assigning location context to features...")
@@ -1166,6 +1274,7 @@ def create_zim(
     terrain_dir=None,
     terrain_max_zoom=None,
     zim_workers=None,
+    bbox=None,
 ):
     """Create a ZIM file containing the map viewer and all tiles."""
     from libzim.writer import Creator, Item, StringProvider, FileProvider
@@ -1383,59 +1492,70 @@ def create_zim(
         print(f"\r    Added {tiles_added} tiles in {elapsed:.0f}s ({rate_str})                ", flush=True)
         _watchdog_stop.set()  # stop watchdog after tiles
 
+        # Build bbox tile filter if bbox is provided (shared cache may have tiles from other areas)
+        def _tile_in_bbox(z, x, y, bbox_coords):
+            """Check if tile (z,x,y) overlaps with bbox. Uses mercantile for accuracy."""
+            import mercantile
+            tile_bounds = mercantile.bounds(mercantile.Tile(x, y, z))
+            minlon, minlat, maxlon, maxlat = bbox_coords
+            return not (tile_bounds.east < minlon or tile_bounds.west > maxlon or
+                        tile_bounds.north < minlat or tile_bounds.south > maxlat)
+
+        def _add_raster_tiles(source_dir, zim_prefix, max_zoom, label, ext="webp", mimetype="image/webp"):
+            """Walk a tile cache dir and add tiles to ZIM, filtering by bbox."""
+            count = 0
+            skipped = 0
+            suffix = f".{ext}"
+            strip_len = len(suffix)
+            for z in range(0, max_zoom + 1):
+                z_dir = os.path.join(source_dir, str(z))
+                if not os.path.isdir(z_dir):
+                    continue
+                for x_name in sorted(os.listdir(z_dir)):
+                    x_dir = os.path.join(z_dir, x_name)
+                    if not os.path.isdir(x_dir):
+                        continue
+                    try:
+                        x = int(x_name)
+                    except ValueError:
+                        continue
+                    for fname in os.listdir(x_dir):
+                        if not fname.endswith(suffix):
+                            continue
+                        try:
+                            y = int(fname[:-strip_len])
+                        except ValueError:
+                            continue
+                        if bbox and not _tile_in_bbox(z, x, y, bbox):
+                            skipped += 1
+                            continue
+                        fpath = os.path.join(x_dir, fname)
+                        zim_path = f"{zim_prefix}/{z}/{x_name}/{fname}"
+                        creator.add_item(MapItem(
+                            zim_path, f"{label} {z}/{x_name}/{fname}",
+                            mimetype,
+                            fpath,
+                            compress=False,
+                        ))
+                        count += 1
+                        if count % 2000 == 0:
+                            print(f"\r    Added {count} {label.lower()} tiles...", end="", flush=True)
+            print(f"\r    Added {count} {label.lower()} tiles" +
+                  (f" (skipped {skipped} outside bbox)" if skipped else ""))
+            return count
+
         # Add satellite tiles if provided
         if satellite_dir and os.path.isdir(satellite_dir):
             sat_ext = satellite_format  # "webp" or "avif"
             sat_mime = "image/avif" if sat_ext == "avif" else "image/webp"
-            sat_count = 0
             max_sz = satellite_max_zoom if satellite_max_zoom is not None else 99
-            for z in range(0, max_sz + 1):
-                z_dir = os.path.join(satellite_dir, str(z))
-                if not os.path.isdir(z_dir):
-                    continue
-                for root, dirs, files in os.walk(z_dir):
-                    for fname in files:
-                        if not fname.endswith(f".{sat_ext}"):
-                            continue
-                        fpath = os.path.join(root, fname)
-                        rel = os.path.relpath(fpath, satellite_dir)
-                        zim_path = f"satellite/{rel}"
-                        creator.add_item(MapItem(
-                            zim_path, f"Satellite {rel}",
-                            sat_mime,
-                            fpath,
-                            compress=False,
-                        ))
-                        sat_count += 1
-                        if sat_count % 2000 == 0:
-                            print(f"\r    Added {sat_count} satellite tiles...", end="", flush=True)
-            print(f"\r    Added {sat_count} satellite tiles ({sat_ext})")
+            _add_raster_tiles(satellite_dir, "satellite", max_sz, "Satellite",
+                              ext=sat_ext, mimetype=sat_mime)
 
         # Add terrain tiles if provided
         if terrain_dir and os.path.isdir(terrain_dir):
-            ter_count = 0
             max_tz = terrain_max_zoom if terrain_max_zoom is not None else 99
-            for z in range(0, max_tz + 1):
-                z_dir = os.path.join(terrain_dir, str(z))
-                if not os.path.isdir(z_dir):
-                    continue
-                for root, dirs, files in os.walk(z_dir):
-                    for fname in files:
-                        if not fname.endswith(".webp"):
-                            continue
-                        fpath = os.path.join(root, fname)
-                        rel = os.path.relpath(fpath, terrain_dir)
-                        zim_path = f"terrain/{rel}"
-                        creator.add_item(MapItem(
-                            zim_path, f"Terrain {rel}",
-                            "image/webp",
-                            fpath,
-                            compress=False,
-                        ))
-                        ter_count += 1
-                        if ter_count % 2000 == 0:
-                            print(f"\r    Added {ter_count} terrain tiles...", end="", flush=True)
-            print(f"\r    Added {ter_count} terrain tiles")
+            _add_raster_tiles(terrain_dir, "terrain", max_tz, "Terrain")
 
         # Add font glyphs
         print(f"    Adding {len(fonts)} font glyph ranges...")
@@ -1652,6 +1772,16 @@ KNOWN_AREAS = {
         "bbox": "44.0,25.0,63.5,39.8",
         "name": "Iran",
     },
+    "united-states": {
+        "geofabrik": "north-america/us",
+        "bbox": "-125.0,24.4,-66.9,49.4",
+        "name": "United States",
+    },
+    "us": {
+        "geofabrik": "north-america/us",
+        "bbox": "-125.0,24.4,-66.9,49.4",
+        "name": "United States",
+    },
 }
 
 
@@ -1708,6 +1838,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Include Copernicus GLO-30 terrain tiles for 3D/hillshade")
     parser.add_argument("--terrain-zoom", type=int, default=12,
                         help="Max zoom for terrain tiles (default: 12)")
+    parser.add_argument("--terrain-dir", metavar="PATH", default=None,
+                        help="Directory for terrain tile cache (default: terrain_cache/)")
     parser.add_argument("--workers", type=int, default=None,
                         help="Number of ZIM compression workers (default: CPU_count/2)")
 
@@ -1841,7 +1973,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             sat_cache_suffix = f"_{satellite_format}_{satellite_tile_size}"
             satellite_dir = os.path.join(SCRIPT_DIR, f"satellite_cache{sat_cache_suffix}")
         if include_terrain and bbox_str:
-            terrain_dir = os.path.join(SCRIPT_DIR, "terrain_cache")
+            terrain_dir = args.terrain_dir or os.path.join(SCRIPT_DIR, "terrain_cache")
 
         if include_satellite and include_terrain and bbox_str:
             from concurrent.futures import ThreadPoolExecutor as StepPool
@@ -1940,6 +2072,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             zim_workers=args.workers,
             mbtiles_path=mbtiles_path if use_streaming else None,
             tile_count=total_tile_count if use_streaming else None,
+            bbox=parse_bbox(bbox_str) if bbox_str else None,
         )
 
         print()
