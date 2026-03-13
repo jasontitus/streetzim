@@ -30,6 +30,14 @@ end
 function exit_function()
 end
 
+-- Write wikidata Q-ID attribute if present on the current feature
+function SetWikidataAttributes()
+	local wd = Find("wikidata")
+	if wd ~= "" then
+		Attribute("wikidata", wd)
+	end
+end
+
 -- Implement Sets in tables
 function Set(list)
 	local set = {}
@@ -134,6 +142,7 @@ function node_function()
 	if aeroway == "aerodrome" then
 		Layer("aerodrome_label", false)
 		SetNameAttributes()
+		SetWikidataAttributes()
 		Attribute("iata", Find("iata"))
 		SetEleAttributes()
 		Attribute("icao", Find("icao"))
@@ -199,6 +208,7 @@ function node_function()
 			Attribute("iso_a2", iso_a2)
 		end
 		SetNameAttributes()
+		SetWikidataAttributes()
 		return
 	end
 
@@ -214,11 +224,13 @@ function node_function()
 		AttributeInteger("rank", 1)
 		Attribute("class", natural)
 		SetNameAttributes()
+		SetWikidataAttributes()
 		return
 	end
 	if natural == "bay" then
 		Layer("water_name", false)
 		SetNameAttributes()
+		SetWikidataAttributes()
 		return
 	end
 end
@@ -408,6 +420,7 @@ function way_function()
 		local rank = calcRank(place, pop, nil)
 		if rank then AttributeInteger("rank", rank) end
 		SetNameAttributes()
+		SetWikidataAttributes()
 	end
 
 	-- Boundaries within relations
@@ -684,6 +697,7 @@ function way_function()
 		if Holds("name") and natural=="water" and water ~= "basin" and water ~= "wastewater" then
 			LayerAsCentroid("water_name_detail")
 			SetNameAttributes()
+			SetWikidataAttributes()
 			SetMinZoomByArea()
 			Attribute("class", class)
 		end
@@ -720,8 +734,8 @@ function way_function()
 
 	-- Parks
 	-- **** name?
-	if     boundary=="national_park" then Layer("park",true); Attribute("class",boundary); SetNameAttributes()
-	elseif leisure=="nature_reserve" then Layer("park",true); Attribute("class",leisure ); SetNameAttributes() end
+	if     boundary=="national_park" then Layer("park",true); Attribute("class",boundary); SetNameAttributes(); SetWikidataAttributes()
+	elseif leisure=="nature_reserve" then Layer("park",true); Attribute("class",leisure ); SetNameAttributes(); SetWikidataAttributes() end
 
 	-- POIs ('poi' and 'poi_detail')
 	local rank, class, subclass = GetPOIRank()
@@ -760,6 +774,7 @@ function WritePOI(class,subclass,rank)
 	if rank>4 then layer="poi_detail" end
 	LayerAsCentroid(layer)
 	SetNameAttributes()
+	SetWikidataAttributes()
 	AttributeInteger("rank", rank)
 	Attribute("class", class)
 	Attribute("subclass", subclass)

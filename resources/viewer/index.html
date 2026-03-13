@@ -366,6 +366,9 @@ fetch(baseUrl + 'map-config.json')
 
     // Initialize search
     initSearch(map);
+
+    // Initialize Wikidata info popups
+    initWikidataPopups(map, config);
   })
   .catch(function(err) {
     document.getElementById('info').innerHTML =
@@ -1106,6 +1109,168 @@ function initSearch(map) {
 
   map.on('click', function() {
     resultsEl.style.display = 'none';
+  });
+}
+
+// --- Wikidata info popup on feature click ---
+function initWikidataPopups(map, config) {
+  if (!config.hasWikidata) return;
+
+  // Cache for loaded Wikidata chunks: prefix -> {Q123: {...}, ...}
+  var wdCache = {};
+  var wdManifest = null;
+  var currentPopup = null;
+
+  // Layers to query for clickable features (order = priority)
+  var clickLayers = [
+    'place-city', 'place-town', 'place-village', 'place-hamlet',
+    'place-suburb', 'place-country', 'place-state',
+    'poi-label', 'park-label', 'water-label',
+    'aerodrome-label', 'mountain-peak'
+  ];
+
+  // Fallback: query all layers with wikidata attribute
+  var allQueryLayers = null;
+
+  function getQueryLayers() {
+    if (allQueryLayers) return allQueryLayers;
+    // Find which of our target layers actually exist in the style
+    var styleLayers = map.getStyle().layers.map(function(l) { return l.id; });
+    allQueryLayers = clickLayers.filter(function(id) {
+      return styleLayers.indexOf(id) >= 0;
+    });
+    // If none matched, query all layers
+    if (allQueryLayers.length === 0) allQueryLayers = null;
+    return allQueryLayers;
+  }
+
+  function fetchWdChunk(prefix) {
+    if (wdCache[prefix]) return Promise.resolve(wdCache[prefix]);
+    return fetch(baseUrl + 'wikidata/' + prefix + '.json')
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        wdCache[prefix] = data;
+        return data;
+      })
+      .catch(function() { return null; });
+  }
+
+  function getWdPrefix(qid) {
+    var num = qid.substring(1); // strip 'Q'
+    return num.length >= 2 ? num.substring(0, 2) : num + '0';
+  }
+
+  function formatNumber(n) {
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return n.toString();
+  }
+
+  function buildPopupHTML(name, wd) {
+    var h = '<div style="font-family:-apple-system,system-ui,sans-serif;max-width:280px;font-size:13px;">';
+    h += '<div style="font-size:16px;font-weight:600;margin-bottom:4px;">' + escapeHtml(name) + '</div>';
+
+    if (wd.d) {
+      h += '<div style="color:#555;font-size:12px;margin-bottom:6px;font-style:italic;">' + escapeHtml(wd.d) + '</div>';
+    }
+
+    // Info grid
+    var facts = [];
+    if (wd.p) facts.push(['Population', formatNumber(wd.p)]);
+    if (wd.a) facts.push(['Area', wd.a.toLocaleString() + ' km\u00B2']);
+    if (wd.e) facts.push(['Elevation', wd.e.toLocaleString() + ' m']);
+    if (wd.c) facts.push(['Country', wd.c]);
+    if (wd.cap) facts.push(['Capital', wd.cap]);
+    if (wd.tz) facts.push(['Timezone', wd.tz]);
+
+    if (facts.length > 0) {
+      h += '<table style="border-collapse:collapse;width:100%;margin-bottom:6px;">';
+      facts.forEach(function(f) {
+        h += '<tr><td style="color:#888;font-size:11px;padding:1px 8px 1px 0;white-space:nowrap;">' +
+             f[0] + '</td><td style="font-size:12px;padding:1px 0;">' + escapeHtml(String(f[1])) + '</td></tr>';
+      });
+      h += '</table>';
+    }
+
+    if (wd.x) {
+      h += '<div style="color:#444;font-size:12px;line-height:1.4;border-top:1px solid #eee;padding-top:6px;">' +
+           escapeHtml(wd.x) + '</div>';
+    }
+
+    if (wd.i) {
+      h += '<div style="color:#999;font-size:10px;margin-top:4px;">' + escapeHtml(wd.i) + '</div>';
+    }
+
+    h += '</div>';
+    return h;
+  }
+
+  function escapeHtml(s) {
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(s));
+    return d.innerHTML;
+  }
+
+  map.on('click', function(e) {
+    if (currentPopup) { currentPopup.remove(); currentPopup = null; }
+
+    // Query rendered features at click point
+    var queryOpts = {};
+    var layers = getQueryLayers();
+    if (layers) queryOpts.layers = layers;
+
+    var features = map.queryRenderedFeatures(e.point, queryOpts);
+    if (!features || features.length === 0) return;
+
+    // Find the first feature with a wikidata attribute
+    var feat = null;
+    var qid = null;
+    for (var i = 0; i < features.length; i++) {
+      var props = features[i].properties || {};
+      if (props.wikidata && props.wikidata.match(/^Q\d+$/)) {
+        feat = features[i];
+        qid = props.wikidata;
+        break;
+      }
+    }
+    if (!qid) return;
+
+    var name = feat.properties['name:latin'] || feat.properties.name || feat.properties.label || qid;
+    var prefix = getWdPrefix(qid);
+
+    fetchWdChunk(prefix).then(function(chunk) {
+      if (!chunk || !chunk[qid]) {
+        // No wikidata info available — show minimal popup
+        currentPopup = new maplibregl.Popup({ maxWidth: '300px' })
+          .setLngLat(e.lngLat)
+          .setHTML('<div style="font-family:-apple-system,system-ui,sans-serif;font-size:14px;font-weight:600;">' +
+                   escapeHtml(name) + '</div>')
+          .addTo(map);
+        return;
+      }
+
+      var wd = chunk[qid];
+      currentPopup = new maplibregl.Popup({ maxWidth: '320px' })
+        .setLngLat(e.lngLat)
+        .setHTML(buildPopupHTML(name, wd))
+        .addTo(map);
+    });
+  });
+
+  // Change cursor on hover over clickable features
+  map.on('mousemove', function(e) {
+    var queryOpts = {};
+    var layers = getQueryLayers();
+    if (layers) queryOpts.layers = layers;
+    var features = map.queryRenderedFeatures(e.point, queryOpts);
+    var hasWd = features && features.some(function(f) {
+      return f.properties && f.properties.wikidata;
+    });
+    map.getCanvas().style.cursor = hasWd ? 'pointer' : '';
   });
 }
 </script>
