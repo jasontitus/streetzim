@@ -840,14 +840,16 @@ function makeStyle(config) {
           "text-halo-width": 1
         }
       },
-      // POI Labels
+      // POI Labels — show more POIs as zoom increases
       {
         "id": "poi-label",
         "type": "symbol",
         "source": "openmaptiles",
         "source-layer": "poi",
         "minzoom": 14,
-        "filter": ["<=", "rank", 4],
+        "filter": ["<=", ["get", "rank"],
+          ["step", ["zoom"], 4, 15, 10, 16, 25]
+        ],
         "layout": {
           "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansRegular"],
@@ -1118,8 +1120,14 @@ function initWikidataPopups(map, config) {
 
   // Cache for loaded Wikidata chunks: prefix -> {Q123: {...}, ...}
   var wdCache = {};
-  var wdManifest = null;
+  var wdNameIndex = null; // lowercase name -> QID, for features without wikidata tags
   var currentPopup = null;
+
+  // Load name→QID index for fallback matching
+  fetch(baseUrl + 'wikidata/names.json')
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(d) { wdNameIndex = d; })
+    .catch(function() {});
 
   // Layers to query for clickable features (order = priority)
   var clickLayers = [
@@ -1226,7 +1234,7 @@ function initWikidataPopups(map, config) {
     var features = map.queryRenderedFeatures(e.point, queryOpts);
     if (!features || features.length === 0) return;
 
-    // Find the first feature with a wikidata attribute
+    // Find the first feature with a wikidata attribute or name match
     var feat = null;
     var qid = null;
     for (var i = 0; i < features.length; i++) {
@@ -1235,6 +1243,18 @@ function initWikidataPopups(map, config) {
         feat = features[i];
         qid = props.wikidata;
         break;
+      }
+    }
+    // Fallback: match by name using the name index
+    if (!qid && wdNameIndex) {
+      for (var i = 0; i < features.length; i++) {
+        var props = features[i].properties || {};
+        var fname = (props['name:latin'] || props.name || '').toLowerCase();
+        if (fname && wdNameIndex[fname]) {
+          feat = features[i];
+          qid = wdNameIndex[fname];
+          break;
+        }
       }
     }
     if (!qid) return;
@@ -1268,7 +1288,13 @@ function initWikidataPopups(map, config) {
     if (layers) queryOpts.layers = layers;
     var features = map.queryRenderedFeatures(e.point, queryOpts);
     var hasWd = features && features.some(function(f) {
-      return f.properties && f.properties.wikidata;
+      var p = f.properties || {};
+      if (p.wikidata) return true;
+      if (wdNameIndex) {
+        var n = (p['name:latin'] || p.name || '').toLowerCase();
+        if (n && wdNameIndex[n]) return true;
+      }
+      return false;
     });
     map.getCanvas().style.cursor = hasWd ? 'pointer' : '';
   });

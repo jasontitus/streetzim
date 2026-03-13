@@ -38,6 +38,13 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
+# Wrap print to auto-flush step/progress lines so monitoring never sees stale output.
+_builtin_print = print
+def print(*args, **kwargs):
+    kwargs.setdefault("flush", True)
+    _builtin_print(*args, **kwargs)
+
+
 SCRIPT_DIR = Path(__file__).parent.resolve()
 RESOURCES_DIR = SCRIPT_DIR / "resources"
 TILEMAKER_CONFIG = RESOURCES_DIR / "tilemaker" / "config-openmaptiles.json"
@@ -397,6 +404,49 @@ def stitch_satellite_image(satellite_dir, max_zoom, bbox_str, webp_quality=80):
     return output_path, coordinates
 
 
+def _generate_one_terrain_tile(args):
+    """Generate a single terrain-RGB tile. Module-level for multiprocessing.
+
+    Each process opens its own handle to the VRT/mosaic — GDAL reads only
+    the pixels needed from the underlying GeoTIFFs."""
+    mosaic_file, tile_x, tile_y, z, dest_dir_local, tb_west, tb_south, tb_east, tb_north = args
+    import rasterio
+    from rasterio.warp import reproject, Resampling, transform_bounds
+    from rasterio.transform import from_bounds
+    import numpy as np
+    from PIL import Image
+
+    tile_bounds_3857 = transform_bounds(
+        "EPSG:4326", "EPSG:3857", tb_west, tb_south, tb_east, tb_north
+    )
+    tile_transform = from_bounds(*tile_bounds_3857, 256, 256)
+
+    elevation = np.zeros((1, 256, 256), dtype=np.float32)
+    with rasterio.open(mosaic_file) as src:
+        reproject(
+            source=rasterio.band(src, 1),
+            destination=elevation,
+            dst_transform=tile_transform,
+            dst_crs="EPSG:3857",
+            resampling=Resampling.cubic,
+        )
+
+    elev = elevation[0]
+    elev = np.round(elev / 10.0) * 10.0  # quantize to 10m for ~74% compression savings
+    encoded = ((elev + 10000.0) / 0.1).astype(np.uint32)
+    encoded = np.clip(encoded, 0, 16777215)
+
+    r = ((encoded >> 16) & 0xFF).astype(np.uint8)
+    g = ((encoded >> 8) & 0xFF).astype(np.uint8)
+    b = (encoded & 0xFF).astype(np.uint8)
+
+    img = Image.fromarray(np.stack([r, g, b], axis=-1))
+    tile_dir_path = os.path.join(dest_dir_local, str(z), str(tile_x))
+    os.makedirs(tile_dir_path, exist_ok=True)
+    tile_path = os.path.join(tile_dir_path, f"{tile_y}.webp")
+    img.save(tile_path, "WEBP", lossless=True)
+
+
 def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
     """Download Copernicus GLO-30 DEM and generate terrain-RGB tiles.
 
@@ -475,11 +525,7 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
     # rasterio reads only the pixels needed for each terrain tile on demand.
     print("    Building VRT from DEM tiles...")
     import rasterio
-    from rasterio.warp import reproject, Resampling, transform_bounds
-    from rasterio.transform import from_bounds
     import mercantile
-    import numpy as np
-    from PIL import Image
 
     mosaic_path = os.path.join(dem_dir, "mosaic_4326.vrt")
     try:
@@ -507,77 +553,41 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
             dst.write(mosaic_arr[0], 1)
         del mosaic_arr
 
-    # Generate terrain-RGB tiles directly with rasterio + mercantile
-    # Each thread opens its own file handle to avoid loading the full raster into memory.
-    # For large areas (e.g. Iran = 20°x15° = ~14 GB at 30m), loading all into RAM OOMs.
+    # Generate terrain-RGB tiles using multiprocessing.
+    # Each process opens its own handle to the VRT file — GDAL reads only the
+    # pixels needed per tile from the underlying GeoTIFFs. No shared state.
     print(f"    Generating terrain-RGB tiles (z0-{max_zoom})...")
     count = 0
+    import multiprocessing
 
-    def _generate_one_terrain_tile(mosaic_file, tile_x, tile_y, z, dest_dir_local,
-                                    tb_west, tb_south, tb_east, tb_north):
-        """Generate a single terrain-RGB tile. Opens its own file handle."""
-        tile_bounds_3857 = transform_bounds(
-            "EPSG:4326", "EPSG:3857", tb_west, tb_south, tb_east, tb_north
-        )
-        tile_transform = from_bounds(*tile_bounds_3857, 256, 256)
-
-        elevation = np.zeros((1, 256, 256), dtype=np.float32)
-        with rasterio.open(mosaic_file) as src:
-            reproject(
-                source=rasterio.band(src, 1),
-                destination=elevation,
-                dst_transform=tile_transform,
-                dst_crs="EPSG:3857",
-                resampling=Resampling.cubic,
-            )
-
-        elev = elevation[0]
-        elev = np.round(elev / 10.0) * 10.0  # quantize to 10m for ~74% compression savings
-        encoded = ((elev + 10000.0) / 0.1).astype(np.uint32)
-        encoded = np.clip(encoded, 0, 16777215)
-
-        r = ((encoded >> 16) & 0xFF).astype(np.uint8)
-        g = ((encoded >> 8) & 0xFF).astype(np.uint8)
-        b = (encoded & 0xFF).astype(np.uint8)
-
-        img = Image.fromarray(np.stack([r, g, b], axis=-1))
-        tile_dir_path = os.path.join(dest_dir_local, str(z), str(tile_x))
-        os.makedirs(tile_dir_path, exist_ok=True)
-        tile_path = os.path.join(tile_dir_path, f"{tile_y}.webp")
-        img.save(tile_path, "WEBP", lossless=True)
+    num_workers = min(os.cpu_count() or 4, 16)  # cap at 16 to limit I/O contention
 
     for z in range(0, max_zoom + 1):
         tiles_at_z = list(mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z))
         if not tiles_at_z:
             continue
 
-        # Use ThreadPoolExecutor — rasterio/PIL release the GIL for the heavy C work.
-        # Each thread opens its own file handle for windowed reads (low memory).
+        tile_args = [
+            (mosaic_path, tile.x, tile.y, z, dest_dir,
+             mercantile.bounds(tile).west, mercantile.bounds(tile).south,
+             mercantile.bounds(tile).east, mercantile.bounds(tile).north)
+            for tile in tiles_at_z
+        ]
+
         if len(tiles_at_z) <= 10:
-            for tile in tiles_at_z:
-                tb = mercantile.bounds(tile)
-                _generate_one_terrain_tile(
-                    mosaic_path, tile.x, tile.y, z, dest_dir,
-                    tb.west, tb.south, tb.east, tb.north,
-                )
+            for args in tile_args:
+                _generate_one_terrain_tile(args)
                 count += 1
         else:
-            from concurrent.futures import ThreadPoolExecutor as TerrainPool
-            num_workers = min(os.cpu_count() or 4, len(tiles_at_z))
-            with TerrainPool(max_workers=num_workers) as pool:
-                futs = []
-                for tile in tiles_at_z:
-                    tb = mercantile.bounds(tile)
-                    futs.append(pool.submit(
-                        _generate_one_terrain_tile,
-                        mosaic_path, tile.x, tile.y, z, dest_dir,
-                        tb.west, tb.south, tb.east, tb.north,
-                    ))
-                for f in futs:
-                    f.result()
+            ctx = multiprocessing.get_context("spawn")
+            with ctx.Pool(num_workers) as pool:
+                for _ in pool.imap_unordered(_generate_one_terrain_tile, tile_args,
+                                              chunksize=max(1, len(tile_args) // (num_workers * 4))):
                     count += 1
+                    if count % 1000 == 0:
+                        print(f"\r      z{z}: {count} tiles generated...", end="", flush=True)
 
-        print(f"      z{z}: {len(tiles_at_z)} tiles")
+        print(f"\r      z{z}: {len(tiles_at_z)} tiles")
 
     print(f"    Generated {count} terrain tiles")
     return count
@@ -1601,6 +1611,20 @@ def create_zim(
                     "application/json",
                     chunk_json.encode("utf-8"),
                 ))
+
+            # Build name→QID index for features whose vector tiles lack
+            # wikidata tags (most POIs — tilemaker doesn't inherit relation tags).
+            name_index = {}
+            for qid, data in wikidata_data.items():
+                name = data.get("l", "")  # compact format: "l" = label
+                if name:
+                    name_index[name.lower()] = qid
+            creator.add_item(MapItem(
+                "wikidata/names.json", "Wikidata Name Index", "application/json",
+                json.dumps(name_index, separators=(",", ":"),
+                           ensure_ascii=False).encode("utf-8"),
+            ))
+            print(f"    Added name index ({len(name_index)} entries)")
 
             total_bytes = sum(
                 len(json.dumps(v, separators=(",", ":"), ensure_ascii=False).encode())
