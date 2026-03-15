@@ -1013,7 +1013,7 @@ def _assign_location_batch(batch):
     return results
 
 
-def extract_searchable_features(tiles=None, mbtiles_path=None):
+def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
     """Extract named features from z14 vector tiles for search indexing.
 
     Decodes the highest-zoom tiles and extracts features with names from
@@ -1024,7 +1024,8 @@ def extract_searchable_features(tiles=None, mbtiles_path=None):
     - tiles=dict: legacy mode, filters z14 from in-memory dict
     - mbtiles_path=str: streaming mode, reads z14 directly from SQLite
 
-    Returns a list of dicts: [{"name": str, "type": str, "lat": float, "lon": float}, ...]
+    If output_dir is set, writes features to a JSONL file on disk and returns
+    the file path (freeing the in-memory list). Otherwise returns a list of dicts.
     """
     import mapbox_vector_tile
 
@@ -1050,6 +1051,10 @@ def extract_searchable_features(tiles=None, mbtiles_path=None):
         if total_z14 == 0:
             conn.close()
             print("    No z14 tiles found in mbtiles")
+            if output_dir:
+                features_path = os.path.join(output_dir, "search_features.jsonl")
+                open(features_path, "w").close()
+                return features_path
             return []
 
         # Balanced partitioning: query tile counts per column and split evenly
@@ -1245,6 +1250,18 @@ def extract_searchable_features(tiles=None, mbtiles_path=None):
     for t, c in sorted(type_counts.items()):
         print(f"      {t}: {c}")
 
+    if output_dir:
+        features_path = os.path.join(output_dir, "search_features.jsonl")
+        with open(features_path, "w") as fout:
+            for feat in features:
+                fout.write(json.dumps(feat, separators=(",", ":")) + "\n")
+        count = len(features)
+        del features
+        import gc; gc.collect()
+        size_mb = os.path.getsize(features_path) / (1024 * 1024)
+        print(f"    Wrote {count} features to disk ({size_mb:.0f} MB)")
+        return features_path
+
     return features
 
 
@@ -1278,6 +1295,7 @@ def create_zim(
     description="Offline OpenStreetMap",
     cluster_size=2048 * 1024,
     search_features=None,
+    search_features_path=None,
     satellite_dir=None,
     satellite_max_zoom=None,
     satellite_format="webp",
@@ -1293,7 +1311,7 @@ def create_zim(
 
     print(f"  Creating ZIM file: {output_path}")
     print(f"    Name: {name}")
-    print(f"    Tiles: {len(tiles)}")
+    print(f"    Tiles: {tile_count if tiles is None else len(tiles)}")
     print(f"    Fonts: {len(fonts)}")
 
     class MapItem(Item):
@@ -1335,11 +1353,13 @@ def create_zim(
     creator = Creator(str(output_path))
     creator.config_indexing(True, "en")
     creator.config_clustersize(cluster_size)
-    # Use half of available cores for compression workers. Combined with
-    # adaptive backpressure in the tile insertion loop, this prevents
-    # libzim's queue spin-locks from causing stalls on large builds.
-    num_workers = zim_workers or max(2, (os.cpu_count() or 4) // 2)
-    print(f"    ZIM compression workers: {num_workers} (tiles: {len(tiles)})", flush=True)
+    # Use 2 compression workers for large builds to avoid libzim's
+    # spin-lock death spiral. With many workers + ZSTD level 22, all
+    # workers busy-wait in queue.h pushToQueue()/popFromQueue() and
+    # the build stalls permanently. 2 workers avoids contention while
+    # still allowing the main thread to fill the queue ahead.
+    num_workers = zim_workers or 2
+    print(f"    ZIM compression workers: {num_workers} (tiles: {tile_count if tiles is None else len(tiles)})", flush=True)
     creator.config_nbworkers(num_workers)
     creator.set_mainpath("index.html")
     with creator:
@@ -1396,7 +1416,11 @@ def create_zim(
                         # Stall detected — dump everything
                         print(f"\n\n=== WATCHDOG: No progress for {stall_seconds}s (stuck at tile {current}) ===", flush=True)
                         try:
-                            print(f"    File size: {os.path.getsize(str(output_path)) / 1e9:.2f} GB", flush=True)
+                            tmp_path = str(output_path) + ".tmp"
+                            if os.path.exists(tmp_path):
+                                print(f"    File size: {os.path.getsize(tmp_path) / 1e9:.2f} GB", flush=True)
+                            else:
+                                print(f"    File size: {os.path.getsize(str(output_path)) / 1e9:.2f} GB", flush=True)
                         except OSError:
                             print(f"    File not yet created", flush=True)
                         import resource
@@ -1465,26 +1489,31 @@ def create_zim(
             decompress_time = time.time() - decompress_start
 
             add_start = time.time()
-            for z, x, y, tile_data in results:
+            for i, (z, x, y, tile_data) in enumerate(results):
+                item_start = time.time()
                 creator.add_item(MapItem(
                     f"tiles/{z}/{x}/{y}.pbf", f"Tile {z}/{x}/{y}",
                     "application/x-protobuf",
                     tile_data,
                 ))
+                item_elapsed = time.time() - item_start
                 tiles_added += 1
                 _watchdog_tile_count[0] = tiles_added
+                # Per-item backpressure: if a single add_item() took over
+                # 100ms, the queue is full — sleep to let workers drain.
+                # This prevents the spin-lock stall where add_item blocks
+                # forever inside libzim's C++ queue.
+                if item_elapsed > 0.1:
+                    time.sleep(min(item_elapsed * 2, 2.0))
             add_time = time.time() - add_start
 
-            # Adaptive backpressure: measure add_item throughput per batch.
-            # If insertion rate drops below threshold, compression workers
-            # can't keep up — sleep to let them drain the queue.
+            # Batch-level backpressure: if overall rate is slow, add
+            # sleep between batches too.
             batch_rate = batch_size / add_time if add_time > 0 else float("inf")
             if batch_rate < 5000 and total_tiles > 100_000:
-                # Queue is backing up — increase sleep
-                backpressure_sleep = min(backpressure_sleep + 0.02, 0.2)
+                backpressure_sleep = min(backpressure_sleep + 0.05, 1.0)
                 time.sleep(backpressure_sleep)
             elif batch_rate > 15000:
-                # Queue is draining fine — reduce sleep
                 backpressure_sleep = max(backpressure_sleep - 0.01, 0.0)
 
             batch_start = time.time()
@@ -1612,40 +1641,157 @@ def create_zim(
                     chunk_json.encode("utf-8"),
                 ))
 
-            # Build name→QID index for features whose vector tiles lack
-            # wikidata tags (most POIs — tilemaker doesn't inherit relation tags).
-            name_index = {}
-            for qid, data in wikidata_data.items():
-                name = data.get("l", "")  # compact format: "l" = label
-                if name:
-                    name_index[name.lower()] = qid
-            creator.add_item(MapItem(
-                "wikidata/names.json", "Wikidata Name Index", "application/json",
-                json.dumps(name_index, separators=(",", ":"),
-                           ensure_ascii=False).encode("utf-8"),
-            ))
-            print(f"    Added name index ({len(name_index)} entries)")
-
             total_bytes = sum(
                 len(json.dumps(v, separators=(",", ":"), ensure_ascii=False).encode())
                 for v in wd_chunks.values()
             )
             print(f"    Added {len(wd_chunks)} Wikidata chunks ({total_bytes / 1024:.0f} KB)")
 
-        # Add search features
-        if search_features:
+        # Add search features — stream from disk if path provided, else use in-memory list
+        if search_features_path and os.path.isfile(search_features_path) and os.path.getsize(search_features_path) > 0:
+            import tempfile
+            chunk_tmp = tempfile.mkdtemp(prefix="streetzim_chunks_")
+            xapian_types = {"place", "airport", "park", "peak", "water"}
+
+            # Pass 1: stream JSONL -> per-prefix chunk files + xapian file
+            chunk_counts = {}
+            chunk_fds = {}  # prefix -> open file handle
+            xapian_path = os.path.join(chunk_tmp, "_xapian.jsonl")
+            total_features = 0
+            xapian_count = 0
+
+            print("    Streaming search features from disk...", flush=True)
+            with open(xapian_path, "w") as xf:
+                with open(search_features_path, "r") as sf:
+                    for line in sf:
+                        feat = json.loads(line)
+                        total_features += 1
+
+                        # Chunk key from first 2 chars of lowercased name
+                        prefix = feat["name"].lower()[:2].replace(" ", "_")
+                        prefix = "".join(c if c.isalnum() or c == "_" else "_" for c in prefix)
+                        if not prefix:
+                            prefix = "__"
+                        prefix = prefix[:2].ljust(2, "_")
+
+                        # Write abbreviated entry to per-prefix chunk file
+                        entry = json.dumps(
+                            {"n": feat["name"], "t": feat["type"], "s": feat.get("subtype", ""),
+                             "a": feat["lat"], "o": feat["lon"], "l": feat.get("location", "")},
+                            separators=(",", ":")
+                        )
+                        if prefix not in chunk_fds:
+                            chunk_fds[prefix] = open(os.path.join(chunk_tmp, f"{prefix}.jsonl"), "w")
+                            chunk_counts[prefix] = 0
+                        chunk_fds[prefix].write(entry + "\n")
+                        chunk_counts[prefix] += 1
+
+                        # Collect xapian-eligible features separately
+                        if feat["type"] in xapian_types:
+                            xf.write(line)
+                            xapian_count += 1
+
+                        if total_features % 500_000 == 0:
+                            print(f"\r    Bucketed {total_features} features into {len(chunk_counts)} chunks...", end="", flush=True)
+
+            # Close all chunk file handles
+            for fd in chunk_fds.values():
+                fd.close()
+            del chunk_fds
+
+            print(f"\r    Bucketed {total_features} features into {len(chunk_counts)} chunks, {xapian_count} xapian entries", flush=True)
+
+            # Add chunk manifest
+            manifest = {k: chunk_counts[k] for k in sorted(chunk_counts)}
+            creator.add_item(MapItem(
+                "search-data/manifest.json", "Search Manifest", "application/json",
+                json.dumps({"total": total_features, "chunks": manifest},
+                           separators=(",", ":")).encode("utf-8"),
+            ))
+
+            # Pass 2: read each chunk file, serialize to JSON, add to ZIM, delete file
+            chunks_added = 0
+            for prefix in sorted(chunk_counts):
+                chunk_path = os.path.join(chunk_tmp, f"{prefix}.jsonl")
+                entries = []
+                with open(chunk_path, "r") as cf:
+                    for cline in cf:
+                        entries.append(json.loads(cline))
+                os.unlink(chunk_path)
+
+                chunk_json = json.dumps(entries, separators=(",", ":"))
+                creator.add_item(MapItem(
+                    f"search-data/{prefix}.json",
+                    f"Search chunk {prefix}",
+                    "application/json",
+                    chunk_json.encode("utf-8"),
+                ))
+                chunks_added += 1
+                if chunks_added % 100 == 0:
+                    print(f"\r    Added {chunks_added}/{len(chunk_counts)} search chunks...", end="", flush=True)
+
+            print(f"\r    Added {len(chunk_counts)} search chunks ({total_features} features)          ", flush=True)
+
+            # Pass 3: stream xapian file -> HTML redirect pages
+            print(f"    Adding {xapian_count} Xapian search pages (of {total_features} total)...", flush=True)
+            xapian_start = time.time()
+            i = 0
+            with open(xapian_path, "r") as xf:
+                for line in xf:
+                    feat = json.loads(line)
+                    slug = feat["name"].lower()
+                    slug = "".join(c if c.isalnum() or c in "-_ " else "" for c in slug)
+                    slug = slug.strip().replace(" ", "-")[:80]
+                    slug = f"{slug}-{i}"
+
+                    zoom = {"place": 14, "airport": 14, "peak": 15, "park": 15,
+                            "water": 14, "poi": 17, "street": 16}.get(feat["type"], 15)
+                    map_hash = f"map={zoom}/{feat['lat']}/{feat['lon']}"
+                    label = feat.get("subtype", feat["type"]).replace("_", " ").title()
+
+                    html = (
+                        f'<!DOCTYPE html><html><head>'
+                        f'<meta charset="utf-8">'
+                        f'<meta http-equiv="refresh" content="0;url=index.html#{map_hash}">'
+                        f'<title>{feat["name"]}</title>'
+                        f'</head><body>'
+                        f'<h1>{feat["name"]}</h1>'
+                        f'<p>{label}</p>'
+                        f'<p><a href="index.html#{map_hash}">View on map</a></p>'
+                        f'</body></html>'
+                    )
+                    creator.add_item(MapItem(
+                        f"search/{slug}.html",
+                        feat["name"],
+                        "text/html",
+                        html.encode("utf-8"),
+                        is_front=False,
+                    ))
+
+                    i += 1
+                    if i % 2000 == 0:
+                        elapsed = time.time() - xapian_start
+                        rate = i / elapsed if elapsed > 0 else 0
+                        remaining = (xapian_count - i) / rate if rate > 0 else 0
+                        print(f"\r    Added {i}/{xapian_count} search pages ({rate:.0f}/s, ~{remaining/60:.0f}m left)...", end="", flush=True)
+
+            os.unlink(xapian_path)
+            print(f"\r    Added {i} search pages in {time.time() - xapian_start:.0f}s                ", flush=True)
+
+            # Clean up chunk temp dir
+            try:
+                os.rmdir(chunk_tmp)
+            except OSError:
+                pass
+
+        elif search_features:
             print(f"    Adding {len(search_features)} search entries...")
 
             # Build chunked search index for scalable on-demand loading.
-            # Features are grouped by 2-character lowercase prefix of name.
-            # The viewer fetches only the chunk matching the user's query,
-            # so RAM usage stays bounded even for world-scale datasets.
             from collections import defaultdict
             chunks = defaultdict(list)
             for f in search_features:
-                # Use first 2 chars of lowercased name as chunk key
                 prefix = f["name"].lower()[:2].replace(" ", "_")
-                # Normalize non-ascii to keep filenames safe
                 prefix = "".join(c if c.isalnum() or c == "_" else "_" for c in prefix)
                 if not prefix:
                     prefix = "__"
@@ -1655,7 +1801,6 @@ def create_zim(
                      "a": f["lat"], "o": f["lon"], "l": f.get("location", "")}
                 )
 
-            # Add chunk manifest (list of available prefixes with counts)
             manifest = {k: len(v) for k, v in sorted(chunks.items())}
             total_features = sum(manifest.values())
             creator.add_item(MapItem(
@@ -1664,7 +1809,6 @@ def create_zim(
                            separators=(",", ":")).encode("utf-8"),
             ))
 
-            # Add each chunk as a separate JSON file
             for prefix, entries in sorted(chunks.items()):
                 chunk_json = json.dumps(entries, separators=(",", ":"))
                 creator.add_item(MapItem(
@@ -1676,11 +1820,6 @@ def create_zim(
 
             print(f"    Added {len(chunks)} search chunks ({total_features} features)")
 
-            # Add individual HTML redirect pages for Kiwix's native Xapian
-            # full-text search. Only include important features (places, airports,
-            # parks, peaks, water) to keep the ZIM manageable. Streets and POIs
-            # are still searchable via the JS chunked search but don't get
-            # individual pages (there can be millions of them).
             xapian_types = {"place", "airport", "park", "peak", "water"}
             xapian_features = [f for f in search_features if f["type"] in xapian_types]
             print(f"    Adding {len(xapian_features)} Xapian search pages (of {len(search_features)} total)...", flush=True)
@@ -1894,7 +2033,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--satellite-format", choices=["webp", "avif"], default="avif",
                         help="Satellite tile image format (default: avif)")
     parser.add_argument("--satellite-quality", type=int, default=None,
-                        help="Satellite tile compression quality (default: 30 for avif, 65 for webp)")
+                        help="Satellite tile compression quality (default: 40 for avif, 65 for webp)")
     parser.add_argument("--satellite-tile-size", type=int, choices=[256, 512], default=256,
                         help="Satellite tile pixel size (default: 256; 512 stitches 4 source tiles)")
     parser.add_argument("--terrain", action="store_true",
@@ -1911,6 +2050,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Wikidata cache directory (default: wikidata_cache/)")
     parser.add_argument("--wikidata-no-extracts", action="store_true",
                         help="Skip Wikipedia text extracts (smaller cache, faster)")
+    parser.add_argument("--search-cache", metavar="PATH", default=None,
+                        help="Use pre-built search features JSONL instead of extracting from tiles. "
+                             "If bbox is set, features are filtered to the bounding box.")
 
     args = parser.parse_args()
 
@@ -1950,7 +2092,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     satellite_quality = args.satellite_quality
     satellite_tile_size = args.satellite_tile_size
     if satellite_quality is None:
-        satellite_quality = 30 if satellite_format == "avif" else 65
+        satellite_quality = 40 if satellite_format == "avif" else 65
 
     # Terrain options
     include_terrain = args.terrain
@@ -2028,13 +2170,46 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         # Generate font glyphs
         fonts = generate_sdf_font_glyphs()
 
-        # Step 5: Extract search features from tiles
+        # Step 5: Extract search features from tiles (or use cached)
         print()
         print(f"[4/{total_steps}] Building search index...")
-        if use_streaming:
-            search_features = extract_searchable_features(mbtiles_path=mbtiles_path)
+        if args.search_cache:
+            search_cache_path = args.search_cache
+            if not os.path.isfile(search_cache_path):
+                print(f"    Error: search cache not found: {search_cache_path}")
+                sys.exit(1)
+            cache_size = os.path.getsize(search_cache_path) / (1024 * 1024)
+            print(f"    Using cached search features: {search_cache_path} ({cache_size:.0f} MB)")
+            bbox = parse_bbox(bbox_str) if bbox_str else None
+            if bbox:
+                # Filter cached features to bbox
+                minlon, minlat, maxlon, maxlat = bbox
+                filtered_path = os.path.join(tmpdir, "search_features.jsonl")
+                total = 0
+                kept = 0
+                with open(search_cache_path, "r") as fin, open(filtered_path, "w") as fout:
+                    for line in fin:
+                        total += 1
+                        feat = json.loads(line)
+                        lat, lon = feat["lat"], feat["lon"]
+                        if minlat <= lat <= maxlat and minlon <= lon <= maxlon:
+                            fout.write(line)
+                            kept += 1
+                        if total % 5_000_000 == 0:
+                            print(f"\r    Filtered {total} features, kept {kept}...", end="", flush=True)
+                print(f"\r    Filtered {kept}/{total} features within bbox          ", flush=True)
+                search_features = filtered_path
+            else:
+                # No bbox — use the whole cache, copy to tmpdir
+                import shutil
+                filtered_path = os.path.join(tmpdir, "search_features.jsonl")
+                shutil.copy2(search_cache_path, filtered_path)
+                print(f"    Using all features (no bbox filter)")
+                search_features = filtered_path
+        elif use_streaming:
+            search_features = extract_searchable_features(mbtiles_path=mbtiles_path, output_dir=tmpdir)
         else:
-            search_features = extract_searchable_features(tiles=tiles)
+            search_features = extract_searchable_features(tiles=tiles, output_dir=tmpdir)
 
         # Build Wikidata cache if requested
         wikidata_data = None
@@ -2044,11 +2219,12 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             print(f"[{step_wd}/{total_steps}] Building Wikidata info cache...")
             from wikidata_cache import build_cache as wd_build_cache, load_cache_for_zim
 
-            # Determine PBF path for Q-ID extraction
-            wd_pbf = None
-            if not args.mbtiles:
-                wd_pbf = locals().get('work_pbf') or pbf_path
-            wd_mbtiles = mbtiles_path if not wd_pbf else None
+            # Determine PBF path for Q-ID extraction (PBF preferred — has wikidata tags)
+            wd_pbf = locals().get('work_pbf') or pbf_path or args.pbf
+            if not wd_pbf:
+                wd_mbtiles = mbtiles_path
+            else:
+                wd_mbtiles = None
 
             wd_cache_path = wd_build_cache(
                 pbf_path=wd_pbf,
@@ -2166,7 +2342,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             name=f"OSM - {name}",
             description=f"Offline OpenStreetMap for {name}. Vector tiles rendered client-side.",
             cluster_size=args.cluster_size * 1024,
-            search_features=search_features,
+            search_features_path=search_features if isinstance(search_features, str) else None,
+            search_features=search_features if not isinstance(search_features, str) else None,
             satellite_dir=satellite_dir,
             satellite_max_zoom=satellite_max_zoom,
             satellite_format=satellite_format,

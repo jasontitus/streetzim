@@ -140,7 +140,9 @@ def extract_qids_from_pbf(pbf_path):
             self._process(r, "relation")
 
     handler = WikidataHandler()
-    handler.apply_file(str(pbf_path), locations=True, idx="flex_mem")
+    # Only node locations are used (ways/relations don't extract lat/lon),
+    # so skip the expensive in-memory node location index.
+    handler.apply_file(str(pbf_path))
 
     print(f"    Found {len(qid_features)} unique Q-IDs")
     return qid_features
@@ -344,14 +346,17 @@ def _run_sparql(query, retries=3):
     return []
 
 
-def fetch_wikidata_batch(qids, batch_size=40):
+def fetch_wikidata_batch(qids, batch_size=40, cache_dir=None, save_interval=10000):
     """Fetch Wikidata properties for a list of Q-IDs using SPARQL.
 
     Returns a dict mapping Q-ID -> {label, description, population, area_km2, ...}.
+    If cache_dir is set, saves incrementally every save_interval Q-IDs so
+    progress is not lost if the process is killed.
     """
     results = {}
     total = len(qids)
     qid_list = list(qids)
+    last_save = 0
 
     print(f"  Fetching Wikidata properties for {total} Q-IDs...")
     start_time = time.time()
@@ -460,6 +465,11 @@ def fetch_wikidata_batch(qids, batch_size=40):
         remaining = (total - done) / rate if rate > 0 else 0
         print(f"\r    Fetched {done}/{total} ({rate:.0f}/s, ~{remaining:.0f}s left)...",
               end="", flush=True)
+
+        # Incremental save to avoid losing hours of progress on crash/kill
+        if cache_dir and done - last_save >= save_interval:
+            save_cache(cache_dir, results)
+            last_save = done
 
         # Rate limit: Wikidata SPARQL allows ~60 req/min for anonymous users
         time.sleep(1.0)
@@ -695,8 +705,8 @@ def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=
 
     print(f"  {len(new_qids)} new Q-IDs to fetch ({len(existing)} already cached)")
 
-    # Step 3: Fetch Wikidata properties
-    new_entries = fetch_wikidata_batch(new_qids)
+    # Step 3: Fetch Wikidata properties (with incremental saves)
+    new_entries = fetch_wikidata_batch(new_qids, cache_dir=cache_dir)
 
     # Step 4: Fetch Wikipedia extracts
     if not skip_extracts:

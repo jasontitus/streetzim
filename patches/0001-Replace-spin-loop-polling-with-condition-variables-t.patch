@@ -1,0 +1,365 @@
+From b8e10fd57bb862a0773c4fec697b69945087ee76 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 14 Mar 2026 08:42:54 +0000
+Subject: [PATCH] Replace spin-loop polling with condition variables to fix
+ threading hangs
+
+The writer pipeline used microsleep-based spin loops for all thread
+synchronization (taskRunner, clusterWriter, queue backpressure, and
+task completion waiting). With slow compression (e.g. zstd level 22),
+these spin loops wasted CPU cycles and could cause thread starvation,
+leading to hangs when building large ZIM files.
+
+Replace all four spin-loop sites with proper std::condition_variable
+waits:
+- Queue: CV-based blocking for push backpressure and pop notification
+- taskRunner: blocks on queue CV until a task is available
+- clusterWriter: blocks on dedicated CV until head cluster is closed
+- TrackableTask::waitNoMoreTask: blocks on CV until task count reaches 0
+
+Also fix meson.build icu dependency syntax (required:false as keyword).
+
+https://claude.ai/code/session_016EngQrr9sZrAtYxKKnD6eP
+---
+ meson.build                  |  6 ++--
+ src/writer/clusterWorker.cpp |  1 +
+ src/writer/creator.cpp       | 13 ++++++--
+ src/writer/creatordata.h     |  3 ++
+ src/writer/queue.h           | 60 +++++++++++++++++++++++-------------
+ src/writer/workers.cpp       | 60 ++++++++++++++++++++----------------
+ src/writer/workers.h         | 33 ++++++++++++++------
+ 7 files changed, 112 insertions(+), 64 deletions(-)
+
+diff --git a/meson.build b/meson.build
+index bce9c2f..1540769 100644
+--- a/meson.build
++++ b/meson.build
+@@ -80,9 +80,9 @@ if xapian_dep.found()
+         icu_dep = [icu_dep, dependency('icu-uc', static:static_linkage)]
+     endif
+ else
+-    icu_dep = dependency('icu-i18n', 'required:false', static:static_linkage)
+-    if icu_dep.version().version_compare('>= 76')
+-        icu_dep = [icu_dep, dependency('icu-uc', 'required:false', static:static_linkage)]
++    icu_dep = dependency('icu-i18n', required:false, static:static_linkage)
++    if icu_dep.found() and icu_dep.version().version_compare('>= 76')
++        icu_dep = [icu_dep, dependency('icu-uc', required:false, static:static_linkage)]
+     endif
+ endif
+ 
+diff --git a/src/writer/clusterWorker.cpp b/src/writer/clusterWorker.cpp
+index c10e5b0..f2744e0 100644
+--- a/src/writer/clusterWorker.cpp
++++ b/src/writer/clusterWorker.cpp
+@@ -28,6 +28,7 @@ namespace zim
+ 
+     void ClusterTask::run(CreatorData* data) {
+       cluster->close();
++      data->m_clusterClosedCV.notify_one();
+     };
+ 
+   }
+diff --git a/src/writer/creator.cpp b/src/writer/creator.cpp
+index 707f71f..1eca57e 100644
+--- a/src/writer/creator.cpp
++++ b/src/writer/creator.cpp
+@@ -492,10 +492,16 @@ namespace zim
+ 
+     void CreatorData::addError(const std::exception_ptr exception)
+     {
+-      std::lock_guard<std::mutex> l(m_exceptionLock);
+-      if (!m_exceptionSlot) {
+-        m_exceptionSlot = exception;
++      {
++        std::lock_guard<std::mutex> l(m_exceptionLock);
++        if (!m_exceptionSlot) {
++          m_exceptionSlot = exception;
++        }
+       }
++      // Wake up any threads that might be blocked waiting on CVs
++      m_clusterClosedCV.notify_all();
++      taskList.notifyWaiters();
++      clusterToWrite.notifyWaiters();
+     }
+ 
+     bool CreatorData::isErrored() const
+@@ -523,6 +529,7 @@ namespace zim
+       // Wait for writerThread to finish.
+       if (writerThread.joinable()) {
+         clusterToWrite.pushToQueue(nullptr);
++        m_clusterClosedCV.notify_one();
+         writerThread.join();
+       }
+     }
+diff --git a/src/writer/creatordata.h b/src/writer/creatordata.h
+index 987bc83..79420e7 100644
+--- a/src/writer/creatordata.h
++++ b/src/writer/creatordata.h
+@@ -32,6 +32,7 @@
+ #include <map>
+ #include <fstream>
+ #include <thread>
++#include <condition_variable>
+ #include "config.h"
+ 
+ #include "../fileheader.h"
+@@ -107,6 +108,8 @@ namespace zim
+         mutable std::mutex m_exceptionLock;
+         std::exception_ptr m_exceptionSlot;
+         std::atomic<bool> m_errored;
++        std::mutex m_clusterClosedMutex;
++        std::condition_variable m_clusterClosedCV;
+         const Compression compression;
+         std::string zimName;
+         std::string tmpFileName;
+diff --git a/src/writer/queue.h b/src/writer/queue.h
+index 454087e..39c420c 100644
+--- a/src/writer/queue.h
++++ b/src/writer/queue.h
+@@ -23,8 +23,8 @@
+ #define MAX_QUEUE_SIZE 10
+ 
+ #include <mutex>
++#include <condition_variable>
+ #include <queue>
+-#include "../tools.h"
+ 
+ template<typename T>
+ class Queue {
+@@ -36,10 +36,14 @@ class Queue {
+         virtual void pushToQueue(const T& element);
+         virtual bool getHead(T &element);
+         virtual bool popFromQueue(T &element);
++        virtual void waitAndPop(T &element);
++        void notifyWaiters();
+ 
+-    protected:
+-        std::queue<T>   m_realQueue;
+-        std::mutex      m_queueMutex;
++    public:
++        std::queue<T>               m_realQueue;
++        std::mutex                  m_queueMutex;
++        std::condition_variable     m_pushCV;
++        std::condition_variable     m_popCV;
+ 
+     private:
+         // Make this queue non copyable
+@@ -61,17 +65,12 @@ size_t Queue<T>::size() {
+ 
+ template<typename T>
+ void Queue<T>::pushToQueue(const T &element) {
+-    unsigned int wait = 0;
+-    unsigned int queueSize = 0;
+-
+-    do {
+-        zim::microsleep(wait);
+-        queueSize = size();
+-        wait += 10;
+-    } while (queueSize > MAX_QUEUE_SIZE);
+-
+-    std::lock_guard<std::mutex> l(m_queueMutex);
+-    m_realQueue.push(element);
++    {
++        std::unique_lock<std::mutex> l(m_queueMutex);
++        m_popCV.wait(l, [this]{ return m_realQueue.size() <= MAX_QUEUE_SIZE; });
++        m_realQueue.push(element);
++    }
++    m_pushCV.notify_one();
+ }
+ 
+ template<typename T>
+@@ -86,15 +85,34 @@ bool Queue<T>::getHead(T &element) {
+ 
+ template<typename T>
+ bool Queue<T>::popFromQueue(T &element) {
+-    std::lock_guard<std::mutex> l(m_queueMutex);
+-    if (m_realQueue.empty()) {
+-        return false;
++    {
++        std::lock_guard<std::mutex> l(m_queueMutex);
++        if (m_realQueue.empty()) {
++            return false;
++        }
++
++        element = m_realQueue.front();
++        m_realQueue.pop();
+     }
++    m_popCV.notify_one();
++    return true;
++}
+ 
+-    element = m_realQueue.front();
+-    m_realQueue.pop();
++template<typename T>
++void Queue<T>::waitAndPop(T &element) {
++    {
++        std::unique_lock<std::mutex> l(m_queueMutex);
++        m_pushCV.wait(l, [this]{ return !m_realQueue.empty(); });
++        element = m_realQueue.front();
++        m_realQueue.pop();
++    }
++    m_popCV.notify_one();
++}
+ 
+-  return true;
++template<typename T>
++void Queue<T>::notifyWaiters() {
++    m_pushCV.notify_all();
++    m_popCV.notify_all();
+ }
+ 
+ #endif // OPENZIM_LIBZIM_QUEUE_H
+diff --git a/src/writer/workers.cpp b/src/writer/workers.cpp
+index 3e26d35..7b40313 100644
+--- a/src/writer/workers.cpp
++++ b/src/writer/workers.cpp
+@@ -21,8 +21,6 @@
+ #include "cluster.h"
+ #include "creatordata.h"
+ 
+-#include "../tools.h"
+-
+ #ifdef _WIN32
+ #include <io.h>
+ #else
+@@ -36,19 +34,26 @@ namespace zim
+ 
+     void* taskRunner(void* arg) {
+       auto creatorData = static_cast<zim::writer::CreatorData*>(arg);
+-      unsigned int wait = 0;
+       try {
+-        while(!creatorData->isErrored()) {
++        while(true) {
+           std::shared_ptr<Task> task;
+-          microsleep(wait);
+-          wait += 100;
+-          if (creatorData->taskList.popFromQueue(task)) {
+-            if (!task) {
++          {
++            auto& q = creatorData->taskList;
++            std::unique_lock<std::mutex> lock(q.m_queueMutex);
++            q.m_pushCV.wait(lock, [&]() {
++              return !q.m_realQueue.empty() || creatorData->isErrored();
++            });
++            if (creatorData->isErrored()) {
+               return nullptr;
+             }
+-            task->run(creatorData);
+-            wait = 0;
++            task = q.m_realQueue.front();
++            q.m_realQueue.pop();
++          }
++          creatorData->taskList.m_popCV.notify_one();
++          if (!task) {
++            return nullptr;
+           }
++          task->run(creatorData);
+         }
+       } catch (...) {
+         creatorData->addError(std::current_exception());
+@@ -59,25 +64,26 @@ namespace zim
+     void* clusterWriter(void* arg) {
+       auto creatorData = static_cast<zim::writer::CreatorData*>(arg);
+       Cluster* cluster;
+-      unsigned int wait = 0;
+       try {
+-        while(!creatorData->isErrored()) {
+-          microsleep(wait);
+-          wait += 100;
+-          if(creatorData->clusterToWrite.getHead(cluster)) {
+-            if (cluster == nullptr) {
+-              // All cluster writen, we can quit
+-              return nullptr;
+-            }
+-            if (not cluster->isClosed()) {
+-              continue;
+-            }
+-            creatorData->clusterToWrite.popFromQueue(cluster);
+-            cluster->setOffset(offset_t(lseek(creatorData->out_fd, 0, SEEK_CUR)));
+-            cluster->write(creatorData->out_fd);
+-            cluster->clear_data();
+-            wait = 0;
++        while(true) {
++          {
++            std::unique_lock<std::mutex> lock(creatorData->m_clusterClosedMutex);
++            creatorData->m_clusterClosedCV.wait(lock, [&]() {
++              return creatorData->isErrored()
++                  || (creatorData->clusterToWrite.getHead(cluster)
++                      && (cluster == nullptr || cluster->isClosed()));
++            });
++          }
++          if (creatorData->isErrored()) {
++            return nullptr;
++          }
++          if (cluster == nullptr) {
++            return nullptr;
+           }
++          creatorData->clusterToWrite.popFromQueue(cluster);
++          cluster->setOffset(offset_t(lseek(creatorData->out_fd, 0, SEEK_CUR)));
++          cluster->write(creatorData->out_fd);
++          cluster->clear_data();
+         }
+       } catch(...) {
+         creatorData->addError(std::current_exception());
+diff --git a/src/writer/workers.h b/src/writer/workers.h
+index 62e165e..fe8a4b6 100644
+--- a/src/writer/workers.h
++++ b/src/writer/workers.h
+@@ -20,9 +20,12 @@
+ #ifndef OPENZIM_LIBZIM_WORKERS_H
+ #define OPENZIM_LIBZIM_WORKERS_H
+ 
+-#include "tools.h"
+ #include "creatordata.h"
+ 
++#include <atomic>
++#include <mutex>
++#include <condition_variable>
++
+ namespace zim {
+ namespace writer {
+ 
+@@ -40,21 +43,31 @@ class TrackableTask: public Task {
+     TrackableTask(const TrackableTask&) = delete;
+     TrackableTask& operator=(const TrackableTask&) = delete;
+     TrackableTask() { ++waitingTaskCount; }
+-    virtual ~TrackableTask() { --waitingTaskCount;}
++    virtual ~TrackableTask() {
++      if (--waitingTaskCount == 0) {
++        std::lock_guard<std::mutex> lock(taskCountMutex());
++        taskCountCV().notify_all();
++      }
++    }
+ 
+     static void waitNoMoreTask(const CreatorData* data) {
+-      // Wait for all tasks has been done
+-      // If we are in error state, threads have been stopped and waitingTaskCount
+-      // will never reach 0, so no need to wait.
+-      unsigned int wait = 0;
+-      do {
+-        microsleep(wait);
+-        wait += 10;
+-      } while(waitingTaskCount.load() > 0 && !data->isErrored());
++      std::unique_lock<std::mutex> lock(taskCountMutex());
++      taskCountCV().wait(lock, [data]() {
++        return waitingTaskCount.load() == 0 || data->isErrored();
++      });
+     }
+ 
+   private:
+     static std::atomic<unsigned long> waitingTaskCount;
++
++    static std::mutex& taskCountMutex() {
++      static std::mutex m;
++      return m;
++    }
++    static std::condition_variable& taskCountCV() {
++      static std::condition_variable cv;
++      return cv;
++    }
+ };
+ 
+ template<class T>
+-- 
+2.53.0
+

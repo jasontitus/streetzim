@@ -1,0 +1,71 @@
+From 60cf56bd38feb3694b810d103db59ca6d8a24db8 Mon Sep 17 00:00:00 2001
+From: Jason Titus <jason.titus@gmail.com>
+Date: Sun, 15 Mar 2026 15:27:47 -0700
+Subject: [PATCH] Fix infinite loop in Compressor::feed() when output buffer is
+ exactly full
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+When ZSTD_compressStream() consumes all input AND the compressed output
+exactly fills the output buffer (avail_in=0, avail_out=0),
+stream_run_encode() returns CompStatus::OK. The existing code handled
+this case with `continue`, which was correct for LZMA (which needs a
+second call to report BUF_ERROR) but causes an infinite loop with ZSTD.
+
+With ZSTD, when avail_in=0 and avail_out=0, subsequent calls to
+ZSTD_compressStream with zero-size buffers make no progress — ZSTD
+returns OK, nothing changes, and the while(true) loop spins forever
+at 100% CPU.
+
+This is a deterministic bug triggered by specific data patterns where
+the compressed output size exactly equals a power of 2 (the output
+buffer size, initially 1 MiB). In our case, compressing ~2 MiB clusters
+of Mapbox Vector Tiles at ZSTD level 19, cluster 193 of a US map build
+produced exactly 1,048,576 bytes of compressed output, triggering the
+infinite loop every time.
+
+Fix: when CompStatus::OK is returned with avail_out=0, check if
+avail_in is also 0. If so, expand the output buffer (like the
+BUF_ERROR handler does) instead of continuing. The LZMA case
+(avail_in > 0) still uses `continue` as before.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ src/compression.h | 19 ++++++++++++++-----
+ 1 file changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/src/compression.h b/src/compression.h
+index b27a865..c2d52f2 100644
+--- a/src/compression.h
++++ b/src/compression.h
+@@ -248,12 +248,21 @@ class Compressor
+         switch (errcode) {
+           case CompStatus::OK:
+             if (stream.avail_out == 0) {
+-              // lzma return a OK return status the first time it runs out of output memory.
+-              // The BUF_ERROR is returned only the second time we call a lzma_code.
+-              continue;
+-            } else {
+-              return RunnerStatus::NEED_MORE;
++              if (stream.avail_in > 0) {
++                // lzma return a OK return status the first time it runs out of output memory.
++                // The BUF_ERROR is returned only the second time we call a lzma_code.
++                continue;
++              }
++              // Output buffer full AND input consumed — expand buffer to prevent
++              // infinite loop (ZSTD returns OK with avail_in=0, avail_out=0).
++              ret_size *= 2;
++              std::unique_ptr<char[]> new_ret_data(new char[ret_size]);
++              memcpy(new_ret_data.get(), ret_data.get(), stream.total_out);
++              stream.next_out = (unsigned char*)(new_ret_data.get() + stream.total_out);
++              stream.avail_out = ret_size - stream.total_out;
++              ret_data = std::move(new_ret_data);
+             }
++            return RunnerStatus::NEED_MORE;
+           case CompStatus::STREAM_END:
+             return RunnerStatus::NEED_MORE;
+           case CompStatus::BUF_ERROR:
+-- 
+2.53.0
+

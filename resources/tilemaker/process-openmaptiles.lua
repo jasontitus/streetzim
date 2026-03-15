@@ -745,6 +745,7 @@ function way_function()
 	if (building~="" or write_name) and Holds("name") then
 		LayerAsCentroid("poi_detail")
 		SetNameAttributes()
+		SetWikidataAttributes()
 		if write_name then rank=6 else rank=25 end
 		AttributeInteger("rank", rank)
 	end
