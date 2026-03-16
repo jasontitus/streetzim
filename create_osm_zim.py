@@ -1667,9 +1667,10 @@ def create_zim(
                         feat = json.loads(line)
                         total_features += 1
 
-                        # Chunk key from first 2 chars of lowercased name
+                        # Chunk key from first 2 chars of lowercased name (ASCII only
+                        # to avoid macOS HFS+/APFS Unicode normalization mismatches)
                         prefix = feat["name"].lower()[:2].replace(" ", "_")
-                        prefix = "".join(c if c.isalnum() or c == "_" else "_" for c in prefix)
+                        prefix = "".join(c if c.isascii() and c.isalnum() else "_" for c in prefix)
                         if not prefix:
                             prefix = "__"
                         prefix = prefix[:2].ljust(2, "_")
