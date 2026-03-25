@@ -152,11 +152,36 @@ quality and zoom levels, vector ZIMs would be 50-200x smaller than raster.
 
 ### Prerequisites
 
+**CRITICAL: Patched libzim required.** The stock libzim from openzim.org has two bugs
+that hang large ZIM builds (US-scale and above):
+
+1. **Spin-lock stall** — `microsleep()` polling in queue.h causes 100% CPU with zero I/O
+2. **Compressor infinite loop** — ZSTD compression hangs deterministically at tile ~431,760
+
+Our patches fix both. The patched library must be built from source and installed into the
+Python venv. See `patches/README.md` for full build instructions and verification steps.
+
+**Quick verification:**
+```bash
+# Patched libzim has condition_variable symbols; stock does not
+nm venv312/lib/python3.12/site-packages/libzim/libzim.9.dylib | grep condition_variable
+# Should show 3+ symbols. If zero: YOU HAVE THE WRONG LIBRARY.
+
+# Patched build is ~789K; stock download is ~9.7M
+ls -lh venv312/lib/python3.12/site-packages/libzim/libzim.9.dylib
+```
+
+Key locations:
+- Patched C++ source: `/Users/jasontitus/experiments/libzim/` (patches pre-applied)
+- Installed patched dylib: `libzim-install/lib/libzim.9.dylib`
+- Active copy in venv: `venv312/lib/python3.12/site-packages/libzim/libzim.9.dylib`
+- Patch files: `patches/`
+
 **System tools:**
 
 ```bash
 # macOS (Homebrew)
-brew install osmium-tool
+brew install osmium-tool meson ninja
 
 # tilemaker must be built from source on macOS:
 git clone https://github.com/systemed/tilemaker.git /tmp/tilemaker
@@ -165,20 +190,17 @@ cd /tmp/tilemaker && mkdir build && cd build && cmake .. && make -j$(sysctl -n h
 cp /tmp/tilemaker/build/tilemaker /opt/homebrew/bin/
 
 # Linux (Debian/Ubuntu)
-apt install tilemaker osmium-tool
+apt install tilemaker osmium-tool meson ninja-build
 ```
 
 **Python environment:**
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv venv312
+source venv312/bin/activate
 
-# Vector approach (create_osm_zim.py)
-pip install -r requirements.txt   # libzim
-
-# Raster approach (create_osm_zim_leaflet.py) - additional
-pip install Pillow mapbox-vector-tile
+pip install -r requirements.txt
+# Then install patched python-libzim (see patches/README.md)
 ```
 
 ### Quick Start — Vector Tiles (MapLibre GL JS)

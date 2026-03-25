@@ -58,12 +58,54 @@ WIKIDATA_PROPERTIES = {
 USER_AGENT = "StreetZIM/1.0 (https://github.com/user/streetzim; wikidata cache builder)"
 
 
-def extract_qids_from_pbf(pbf_path):
+def _qid_cache_path(pbf_path, cache_dir):
+    """Return path for cached Q-ID extraction results, keyed by PBF file identity."""
+    pbf = Path(pbf_path)
+    stat = pbf.stat()
+    # Key by filename + size + mtime — avoids hashing multi-GB files
+    key = f"{pbf.name}_{stat.st_size}_{int(stat.st_mtime)}"
+    return Path(cache_dir) / f"qids_{key}.json"
+
+
+def _load_cached_qids(pbf_path, cache_dir):
+    """Load previously extracted Q-IDs if the PBF hasn't changed."""
+    cache_dir = Path(cache_dir or DEFAULT_CACHE_DIR)
+    cache_file = _qid_cache_path(pbf_path, cache_dir)
+    if cache_file.exists():
+        try:
+            with open(cache_file) as f:
+                data = json.load(f)
+            print(f"  Using cached Q-ID extraction ({len(data)} Q-IDs from {cache_file.name})")
+            return data
+        except (json.JSONDecodeError, OSError):
+            pass
+    return None
+
+
+def _save_cached_qids(pbf_path, cache_dir, qid_features):
+    """Save extracted Q-IDs for future reuse."""
+    cache_dir = Path(cache_dir or DEFAULT_CACHE_DIR)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = _qid_cache_path(pbf_path, cache_dir)
+    with open(cache_file, "w") as f:
+        json.dump(qid_features, f, separators=(",", ":"), ensure_ascii=False)
+    print(f"    Saved Q-ID extraction to {cache_file.name}")
+
+
+def extract_qids_from_pbf(pbf_path, cache_dir=None):
     """Extract all wikidata Q-IDs from an OSM PBF file.
 
     Returns a dict mapping Q-ID -> list of {name, type, lat, lon} for each
     OSM feature that references it.
+
+    Results are cached in cache_dir keyed by PBF filename+size+mtime,
+    so repeated builds with the same PBF skip the scan entirely.
     """
+    # Check for cached extraction first
+    cached = _load_cached_qids(pbf_path, cache_dir)
+    if cached is not None:
+        return cached
+
     try:
         import osmium
     except ImportError:
@@ -145,6 +187,7 @@ def extract_qids_from_pbf(pbf_path):
     handler.apply_file(str(pbf_path))
 
     print(f"    Found {len(qid_features)} unique Q-IDs")
+    _save_cached_qids(pbf_path, cache_dir, qid_features)
     return qid_features
 
 
@@ -577,6 +620,8 @@ def load_cache(cache_dir):
     for json_file in sorted(cache_dir.glob("*.json")):
         if json_file.name == "manifest.json":
             continue
+        if json_file.name.startswith("qids_"):
+            continue
         try:
             with open(json_file) as f:
                 bucket = json.load(f)
@@ -618,11 +663,19 @@ def save_cache(cache_dir, entries, qid_features=None):
     for bucket_key, bucket_entries in buckets.items():
         bucket_path = cache_dir / f"{bucket_key}.json"
         # Merge with existing bucket if present
+        # New entries take priority over existing (overwrites stubs with enriched data)
         if bucket_path.exists():
             try:
                 with open(bucket_path) as f:
                     existing = json.load(f)
-                existing.update(bucket_entries)
+                # Merge: start with existing, then overlay new entries on top
+                # But prefer entries with more data (don't let stubs overwrite enriched)
+                for qid, new_data in bucket_entries.items():
+                    old_data = existing.get(qid)
+                    if old_data and old_data.get("label") and not new_data.get("label"):
+                        # Keep the enriched existing entry, don't overwrite with stub
+                        continue
+                    existing[qid] = new_data
                 bucket_entries = existing
             except (json.JSONDecodeError, OSError):
                 pass
@@ -682,9 +735,9 @@ def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=
     """
     cache_dir = Path(cache_dir or DEFAULT_CACHE_DIR)
 
-    # Step 1: Extract Q-IDs from OSM data
+    # Step 1: Extract Q-IDs from OSM data (cached by PBF identity)
     if pbf_path:
-        qid_features = extract_qids_from_pbf(pbf_path)
+        qid_features = extract_qids_from_pbf(pbf_path, cache_dir=cache_dir)
     elif mbtiles_path:
         qid_features = extract_qids_from_mbtiles(mbtiles_path)
     else:

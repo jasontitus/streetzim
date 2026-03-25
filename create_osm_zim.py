@@ -465,8 +465,20 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
     dem_dir = os.path.join(SCRIPT_DIR, "terrain_cache", "dem_sources")
     os.makedirs(dem_dir, exist_ok=True)
 
-    # Check if tiles already generated for THIS bbox by sampling a few z-max tiles
+    # Check if terrain generation is already complete for this bbox.
+    # A COMPLETED marker file means all tiles (including ocean skips) have been processed.
     import mercantile
+    completed_marker = os.path.join(dest_dir, f"COMPLETED_z{max_zoom}")
+    if os.path.isfile(completed_marker):
+        total = sum(
+            len([f for f in files if f.endswith(".webp")])
+            for _, _, files in os.walk(dest_dir)
+            if "dem_sources" not in _
+        )
+        print(f"    Using {total} cached terrain tiles (generation complete)")
+        return total
+
+    # Fallback: sample a few z-max tiles to see if they're cached
     z_max_tiles = list(mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=max_zoom))
     if z_max_tiles:
         sample = z_max_tiles[:5] + z_max_tiles[-5:]
@@ -495,6 +507,11 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
             fname = f"dem_{ns}{abs_lat:02d}_{ew}{abs_lon:03d}.tif"
             fpath = os.path.join(dem_dir, fname)
 
+            # Check for a "no data" marker (empty file left by a previous 404)
+            nodata_marker = fpath + ".nodata"
+            if os.path.exists(nodata_marker):
+                continue
+
             if not os.path.exists(fpath) or os.path.getsize(fpath) < 1000:
                 print(f"    Downloading {ns}{abs_lat:02d} {ew}{abs_lon:03d}...")
                 req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
@@ -508,6 +525,12 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
                                 f.write(chunk)
                     size_mb = os.path.getsize(fpath) / (1024 * 1024)
                     print(f"      {size_mb:.1f} MB")
+                except urllib.error.HTTPError as e:
+                    if e.code == 404:
+                        # Mark as no-data so we don't retry ocean/missing tiles
+                        open(nodata_marker, "w").close()
+                    print(f"      Warning: failed to download: {e}")
+                    continue
                 except Exception as e:
                     print(f"      Warning: failed to download: {e}")
                     continue
@@ -529,15 +552,35 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
 
     mosaic_path = os.path.join(dem_dir, "mosaic_4326.vrt")
     try:
+        # Use -input_file_list to avoid "Argument list too long" with 24K+ files
+        import tempfile as _tmpfile
+        with _tmpfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as flist:
+            flist.write('\n'.join(tif_paths))
+            flist_path = flist.name
         subprocess.run(
-            ["gdalbuildvrt", "-overwrite", mosaic_path] + tif_paths,
+            ["gdalbuildvrt", "-overwrite", "-input_file_list", flist_path, mosaic_path],
             check=True, capture_output=True, text=True,
         )
+        os.unlink(flist_path)
     except FileNotFoundError:
         # gdalbuildvrt not on PATH — fall back to in-memory merge
         print("    Warning: gdalbuildvrt not found, falling back to in-memory merge")
         from rasterio.merge import merge
-        datasets = [rasterio.open(p) for p in tif_paths]
+        # Pre-validate DEMs by reading full band — corrupt files crash merge()
+        print(f"    Validating {len(tif_paths)} DEM tiles...")
+        valid_paths = []
+        for p in tif_paths:
+            try:
+                with rasterio.open(p) as _ds:
+                    _ds.read(1)
+                valid_paths.append(p)
+            except Exception as e:
+                print(f"    Warning: skipping corrupt DEM {os.path.basename(p)}: {e}")
+        if not valid_paths:
+            print("    No valid DEM tiles, skipping terrain")
+            return 0
+        print(f"    Merging {len(valid_paths)} validated DEM tiles...")
+        datasets = [rasterio.open(p) for p in valid_paths]
         mosaic_arr, mosaic_transform = merge(datasets)
         mosaic_meta = datasets[0].meta.copy()
         for ds in datasets:
@@ -556,41 +599,80 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
     # Generate terrain-RGB tiles using multiprocessing.
     # Each process opens its own handle to the VRT file — GDAL reads only the
     # pixels needed per tile from the underlying GeoTIFFs. No shared state.
+    # Uses a streaming generator so workers start immediately without building
+    # a multi-million element list in memory (world z12 = 16.7M tiles).
     print(f"    Generating terrain-RGB tiles (z0-{max_zoom})...")
     count = 0
+    cached = 0
     import multiprocessing
 
     num_workers = min(os.cpu_count() or 4, 16)  # cap at 16 to limit I/O contention
 
     for z in range(0, max_zoom + 1):
-        tiles_at_z = list(mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z))
-        if not tiles_at_z:
+        # Streaming generator — yields args one at a time, skipping cached tiles
+        def tile_arg_gen(zoom):
+            for tile in mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=zoom):
+                # Skip already-cached tiles
+                tile_path = os.path.join(dest_dir, str(zoom), str(tile.x), f"{tile.y}.webp")
+                if os.path.isfile(tile_path):
+                    continue
+                b = mercantile.bounds(tile)
+                yield (mosaic_path, tile.x, tile.y, zoom, dest_dir,
+                       b.west, b.south, b.east, b.north)
+
+        # Count total and cached for this zoom (estimate for large zooms)
+        if z <= 8:
+            all_tiles = list(mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z))
+            total_at_z = len(all_tiles)
+            cached_at_z = sum(1 for t in all_tiles
+                              if os.path.isfile(os.path.join(dest_dir, str(z), str(t.x), f"{t.y}.webp")))
+        else:
+            # For large zoom levels, estimate count from 4x previous zoom
+            import math
+            n = 2 ** z
+            x_min = int((minlon + 180) / 360 * n)
+            x_max = int((maxlon + 180) / 360 * n)
+            y_min = int((1 - math.log(math.tan(math.radians(maxlat)) + 1/math.cos(math.radians(maxlat))) / math.pi) / 2 * n)
+            y_max = int((1 - math.log(math.tan(math.radians(max(minlat, -85))) + 1/math.cos(math.radians(max(minlat, -85)))) / math.pi) / 2 * n)
+            total_at_z = (x_max - x_min + 1) * (y_max - y_min + 1)
+            # Count cached from existing directory
+            cached_at_z = sum(
+                len([f for f in files if f.endswith(".webp")])
+                for _, _, files in os.walk(os.path.join(dest_dir, str(z)))
+            ) if os.path.isdir(os.path.join(dest_dir, str(z))) else 0
+
+        need = total_at_z - cached_at_z
+        if need <= 0:
+            cached += cached_at_z
+            print(f"      z{z}: {total_at_z} tiles (all cached)")
             continue
 
-        tile_args = [
-            (mosaic_path, tile.x, tile.y, z, dest_dir,
-             mercantile.bounds(tile).west, mercantile.bounds(tile).south,
-             mercantile.bounds(tile).east, mercantile.bounds(tile).north)
-            for tile in tiles_at_z
-        ]
+        print(f"      z{z}: {total_at_z} tiles ({cached_at_z} cached, {need} to generate)")
+        z_count = 0
 
-        if len(tiles_at_z) <= 10:
-            for args in tile_args:
+        if total_at_z <= 10:
+            for args in tile_arg_gen(z):
                 _generate_one_terrain_tile(args)
+                z_count += 1
                 count += 1
         else:
             ctx = multiprocessing.get_context("spawn")
             with ctx.Pool(num_workers) as pool:
-                for _ in pool.imap_unordered(_generate_one_terrain_tile, tile_args,
-                                              chunksize=max(1, len(tile_args) // (num_workers * 4))):
+                for _ in pool.imap_unordered(_generate_one_terrain_tile,
+                                              tile_arg_gen(z), chunksize=256):
+                    z_count += 1
                     count += 1
-                    if count % 1000 == 0:
-                        print(f"\r      z{z}: {count} tiles generated...", end="", flush=True)
+                    if z_count % 5000 == 0:
+                        print(f"\r      z{z}: {z_count}/{need} generated...", end="", flush=True)
 
-        print(f"\r      z{z}: {len(tiles_at_z)} tiles")
+        cached += cached_at_z
+        print(f"\r      z{z}: {z_count} generated, {cached_at_z} cached          ")
 
-    print(f"    Generated {count} terrain tiles")
-    return count
+    print(f"    Terrain complete: {count} generated, {cached} cached")
+    # Write completion marker so future builds skip terrain entirely
+    with open(completed_marker, "w") as f:
+        f.write(f"{count + cached}\n")
+    return count + cached
 
 
 def download_osm_extract(geofabrik_path, dest):
@@ -657,28 +739,68 @@ def get_mbtiles_info(mbtiles_path):
     return metadata, tile_count
 
 
-def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None):
+def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None):
     """Yield (z, x, y, data) tuples from MBTiles, streaming from SQLite.
 
     If zoom_level is specified, only yields tiles at that zoom.
+    If bbox is specified as (minlon, minlat, maxlon, maxlat), only yields
+    tiles that intersect the bounding box.
     Yields in (z, x, y) sorted order for deterministic ZIM insertion.
     """
+    import math
+
     conn = sqlite3.connect(str(mbtiles_path))
     cursor = conn.cursor()
-    if zoom_level is not None:
-        cursor.execute(
-            "SELECT zoom_level, tile_column, tile_row, tile_data "
-            "FROM tiles WHERE zoom_level = ? ORDER BY zoom_level, tile_column, tile_row",
-            (zoom_level,),
-        )
+
+    if bbox:
+        import mercantile
+        minlon, minlat, maxlon, maxlat = bbox
+
+        # Query per zoom level with SQL-level column/row filtering
+        # This avoids reading 100+ GB of out-of-bbox tiles through Python
+        zoom_min = 0
+        zoom_max = zoom_level if zoom_level is not None else 14
+        if zoom_level is not None:
+            zoom_min = zoom_level
+
+        for z in range(zoom_min, zoom_max + 1):
+            # Get tile column/row bounds for this zoom
+            tiles_in_bbox = list(mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z))
+            if not tiles_in_bbox:
+                continue
+            min_col = min(t.x for t in tiles_in_bbox)
+            max_col = max(t.x for t in tiles_in_bbox)
+            # Convert XYZ y to TMS y for SQL filter
+            n = 1 << z
+            min_tms_row = min(n - 1 - t.y for t in tiles_in_bbox)
+            max_tms_row = max(n - 1 - t.y for t in tiles_in_bbox)
+
+            cursor.execute(
+                "SELECT zoom_level, tile_column, tile_row, tile_data "
+                "FROM tiles WHERE zoom_level = ? "
+                "AND tile_column >= ? AND tile_column <= ? "
+                "AND tile_row >= ? AND tile_row <= ? "
+                "ORDER BY tile_column, tile_row",
+                (z, min_col, max_col, min_tms_row, max_tms_row),
+            )
+            for zz, x, tms_y, data in cursor:
+                y = n - 1 - tms_y
+                yield zz, x, y, data
     else:
-        cursor.execute(
-            "SELECT zoom_level, tile_column, tile_row, tile_data "
-            "FROM tiles ORDER BY zoom_level, tile_column, tile_row"
-        )
-    for z, x, tms_y, data in cursor:
-        y = (1 << z) - 1 - tms_y
-        yield z, x, y, data
+        if zoom_level is not None:
+            cursor.execute(
+                "SELECT zoom_level, tile_column, tile_row, tile_data "
+                "FROM tiles WHERE zoom_level = ? ORDER BY zoom_level, tile_column, tile_row",
+                (zoom_level,),
+            )
+        else:
+            cursor.execute(
+                "SELECT zoom_level, tile_column, tile_row, tile_data "
+                "FROM tiles ORDER BY zoom_level, tile_column, tile_row"
+            )
+        for z, x, tms_y, data in cursor:
+            y = (1 << z) - 1 - tms_y
+            yield z, x, y, data
     conn.close()
 
 
@@ -817,6 +939,135 @@ def tile_to_lnglat(z, x, y, px, py, extent=4096):
     lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * (y + py / extent) / n)))
     lat = math.degrees(lat_rad)
     return lon, lat
+
+
+def build_location_index(mbtiles_path):
+    """Build a spatial index of state/country names from low-zoom place tiles.
+
+    Extracts state and country place features from z0-8 tiles and builds a
+    KD-tree for fast nearest-neighbor lookups. Returns a function that maps
+    (lat, lon) -> "State, Country" or "Country" string.
+    """
+    import mapbox_vector_tile
+    import math
+
+    places = []  # [(lat, lon, name, class)]
+
+    conn = sqlite3.connect(str(mbtiles_path))
+    for z in range(0, 9):
+        rows = conn.execute(
+            "SELECT tile_column, tile_row, tile_data FROM tiles WHERE zoom_level = ?",
+            (z,),
+        ).fetchall()
+        for col, tms_row, data in rows:
+            y = (1 << z) - 1 - tms_row
+            tile_data = data
+            if data[:2] == b"\x1f\x8b":
+                try:
+                    tile_data = gzip.decompress(data)
+                except Exception:
+                    continue
+            try:
+                decoded = mapbox_vector_tile.decode(tile_data, y_coord_down=True)
+            except Exception:
+                continue
+            layer = decoded.get("place")
+            if not layer:
+                continue
+            extent = layer.get("extent", 4096)
+            for feat in layer.get("features", []):
+                props = feat.get("properties", {})
+                cls = props.get("class", "")
+                if cls not in ("state", "country"):
+                    continue
+                name = props.get("name:latin") or props.get("name", "")
+                if not name:
+                    continue
+                geom = feat.get("geometry", {})
+                coords = geom.get("coordinates")
+                if not coords:
+                    continue
+                gtype = geom.get("type", "")
+                try:
+                    if gtype == "Point":
+                        px, py = coords[0], coords[1]
+                    else:
+                        continue
+                except (IndexError, TypeError):
+                    continue
+                n = 2.0 ** z
+                lon = (col + px / extent) / n * 360.0 - 180.0
+                lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * (y + py / extent) / n)))
+                lat = math.degrees(lat_rad)
+                places.append((lat, lon, name, cls))
+    conn.close()
+
+    if not places:
+        print("    No state/country places found for location index")
+        return None
+
+    # Separate states and countries
+    states = [(lat, lon, name) for lat, lon, name, cls in places if cls == "state"]
+    countries = [(lat, lon, name) for lat, lon, name, cls in places if cls == "country"]
+
+    # Deduplicate by name (keep first occurrence)
+    seen = set()
+    deduped_states = []
+    for lat, lon, name in states:
+        if name not in seen:
+            seen.add(name)
+            deduped_states.append((lat, lon, name))
+    states = deduped_states
+
+    seen = set()
+    deduped_countries = []
+    for lat, lon, name in countries:
+        if name not in seen:
+            seen.add(name)
+            deduped_countries.append((lat, lon, name))
+    countries = deduped_countries
+
+    print(f"    Location index: {len(states)} states, {len(countries)} countries")
+
+    # Grid-based spatial index for fast nearest-neighbor (no scipy needed).
+    # Bucket places into 1-degree grid cells for O(1) average lookup.
+    def _build_grid(items):
+        grid = {}
+        for lat, lon, name in items:
+            key = (int(lat), int(lon))
+            grid.setdefault(key, []).append((lat, lon, name))
+        return grid
+
+    def _nearest_grid(lat, lon, grid):
+        best = None
+        best_dist = float("inf")
+        cell_lat, cell_lon = int(lat), int(lon)
+        # Search 5x5 grid neighborhood (handles items near cell boundaries)
+        for dlat in range(-2, 3):
+            for dlon in range(-2, 3):
+                for plat, plon, name in grid.get((cell_lat + dlat, cell_lon + dlon), []):
+                    d = (plat - lat) ** 2 + (plon - lon) ** 2
+                    if d < best_dist:
+                        best_dist = d
+                        best = name
+        return best
+
+    state_grid = _build_grid(states) if states else {}
+    country_grid = _build_grid(countries) if countries else {}
+
+    def lookup(lat, lon):
+        parts = []
+        if state_grid:
+            s = _nearest_grid(lat, lon, state_grid)
+            if s:
+                parts.append(s)
+        if country_grid:
+            c = _nearest_grid(lat, lon, country_grid)
+            if c:
+                parts.append(c)
+        return ", ".join(parts) if parts else ""
+
+    return lookup
 
 
 def _process_tile_partition(args):
@@ -1358,7 +1609,7 @@ def create_zim(
     # workers busy-wait in queue.h pushToQueue()/popFromQueue() and
     # the build stalls permanently. 2 workers avoids contention while
     # still allowing the main thread to fill the queue ahead.
-    num_workers = zim_workers or 2
+    num_workers = zim_workers or min(os.cpu_count() or 4, 20)
     print(f"    ZIM compression workers: {num_workers} (tiles: {tile_count if tiles is None else len(tiles)})", flush=True)
     creator.config_nbworkers(num_workers)
     creator.set_mainpath("index.html")
@@ -1464,7 +1715,7 @@ def create_zim(
         # Stream tiles from mbtiles or use in-memory dict
         if mbtiles_path:
             total_tiles = tile_count or 0
-            tile_source = iter_tiles_from_mbtiles(mbtiles_path)
+            tile_source = iter_tiles_from_mbtiles(mbtiles_path, bbox=bbox)
         else:
             total_tiles = len(tiles)
             tile_source = iter([(z, x, y, data) for (z, x, y), data in sorted(tiles.items())])
@@ -1609,8 +1860,34 @@ def create_zim(
                 data,
             ))
 
-        # Add Wikidata info
+        # Add Wikidata info — filter to Q-IDs present in the bbox tiles
+        # Skip filtering for world bbox (all Q-IDs are relevant)
         if wikidata_data:
+            is_world_bbox = bbox and abs(bbox[0] - (-180)) < 1 and abs(bbox[2] - 180) < 1 and abs(bbox[1] - (-85)) < 2 and abs(bbox[3] - 85) < 2
+            if bbox and mbtiles_path and not is_world_bbox:
+                print(f"    Scanning tiles for Wikidata Q-IDs in bbox...")
+                import mapbox_vector_tile as _mvt
+                bbox_qids = set()
+                for z, x, y, data in iter_tiles_from_mbtiles(mbtiles_path, zoom_level=14, bbox=bbox):
+                    tile_data = data
+                    if data[:2] == b"\x1f\x8b":
+                        try:
+                            tile_data = gzip.decompress(data)
+                        except Exception:
+                            continue
+                    try:
+                        decoded = _mvt.decode(tile_data, y_coord_down=True)
+                    except Exception:
+                        continue
+                    for layer in decoded.values():
+                        for feat in layer.get("features", []):
+                            qid = (feat.get("properties") or {}).get("wikidata", "")
+                            if qid and qid.startswith("Q"):
+                                bbox_qids.add(qid)
+                filtered = {qid: data for qid, data in wikidata_data.items() if qid in bbox_qids}
+                print(f"    Filtered Wikidata: {len(filtered)} entries in bbox (from {len(wikidata_data)} total)")
+                wikidata_data = filtered
+
             print(f"    Adding Wikidata info for {len(wikidata_data)} features...")
             from collections import defaultdict as _dd
             wd_chunks = _dd(dict)
@@ -1647,6 +1924,12 @@ def create_zim(
             )
             print(f"    Added {len(wd_chunks)} Wikidata chunks ({total_bytes / 1024:.0f} KB)")
 
+        # Build location index for search feature enrichment
+        loc_lookup = None
+        if mbtiles_path:
+            print("    Building location index for search results...")
+            loc_lookup = build_location_index(mbtiles_path)
+
         # Add search features — stream from disk if path provided, else use in-memory list
         if search_features_path and os.path.isfile(search_features_path) and os.path.getsize(search_features_path) > 0:
             import tempfile
@@ -1666,6 +1949,10 @@ def create_zim(
                     for line in sf:
                         feat = json.loads(line)
                         total_features += 1
+
+                        # Enrich with location (state, country)
+                        if loc_lookup and not feat.get("location"):
+                            feat["location"] = loc_lookup(feat["lat"], feat["lon"])
 
                         # Chunk key from first 2 chars of lowercased name (ASCII only
                         # to avoid macOS HFS+/APFS Unicode normalization mismatches)
@@ -1787,6 +2074,12 @@ def create_zim(
 
         elif search_features:
             print(f"    Adding {len(search_features)} search entries...")
+
+            # Enrich with location if available
+            if loc_lookup:
+                for f in search_features:
+                    if not f.get("location"):
+                        f["location"] = loc_lookup(f["lat"], f["lon"])
 
             # Build chunked search index for scalable on-demand loading.
             from collections import defaultdict

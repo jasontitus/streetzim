@@ -8,87 +8,306 @@
 <link rel="stylesheet" href="maplibre-gl.css">
 <script src="maplibre-gl.js"></script>
 <style>
+  :root {
+    --ui-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --panel-bg: rgba(255,255,255,0.96);
+    --panel-shadow: 0 2px 12px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.04);
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --text-primary: #1a1a1a;
+    --text-secondary: #6b7280;
+    --text-tertiary: #9ca3af;
+    --border: rgba(0,0,0,0.06);
+    --hover-bg: rgba(37,99,235,0.04);
+    --radius: 10px;
+  }
+
   body { margin: 0; padding: 0; }
   #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+
+  /* --- Attribution / info tag --- */
   #info {
     position: absolute; bottom: 36px; left: 10px; z-index: 1;
-    background: rgba(255,255,255,0.7); padding: 4px 8px;
-    border-radius: 4px; font-family: -apple-system, system-ui, sans-serif;
-    font-size: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    background: rgba(255,255,255,0.65); padding: 3px 8px;
+    border-radius: 4px; font-family: var(--ui-font);
+    font-size: 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
     max-width: 250px;
   }
-  #info h3 { margin: 0; font-size: 10px; font-weight: 600; display: inline; }
-  #info p { margin: 0; color: #777; font-size: 9px; }
+  #info h3 { margin: 0; font-size: 10px; font-weight: 600; display: inline; color: var(--text-primary); }
+  #info p { margin: 0; color: var(--text-tertiary); font-size: 9px; }
 
-  /* Layer toggle button */
-  #layer-toggle {
-    position: absolute; top: 56px; left: 10px; z-index: 2;
-    background: #fff; border: none; border-radius: 6px;
-    padding: 7px 12px; font-size: 13px; cursor: pointer;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-    font-family: -apple-system, system-ui, sans-serif;
-    display: none;
-  }
-  #layer-toggle:hover { background: #f0f0f0; }
-  #layer-toggle.satellite-active { background: #1a73e8; color: #fff; }
-  #layer-toggle.satellite-active:hover { background: #1557b0; }
-
-  /* Terrain toggle button */
-  #terrain-toggle {
+  /* --- Unified control strip --- */
+  #controls {
     position: absolute; top: 120px; right: 10px; z-index: 2;
-    background: #fff; border: none; border-radius: 6px;
-    padding: 7px 12px; font-size: 13px; cursor: pointer;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-    font-family: -apple-system, system-ui, sans-serif;
-    display: none;
+    display: flex; flex-direction: column;
+    background: var(--panel-bg); border-radius: var(--radius);
+    box-shadow: var(--panel-shadow);
+    overflow: hidden; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
   }
-  #terrain-toggle:hover { background: #f0f0f0; }
-  #terrain-toggle.terrain-active { background: #1a73e8; color: #fff; }
-  #terrain-toggle.terrain-active:hover { background: #1557b0; }
+  #controls button {
+    background: transparent; border: none;
+    padding: 9px 14px; font-size: 12px; font-weight: 500;
+    cursor: pointer; font-family: var(--ui-font);
+    color: var(--text-secondary); display: none;
+    text-align: left; white-space: nowrap;
+    transition: background 0.2s, color 0.2s;
+    letter-spacing: -0.01em;
+  }
+  #controls button:hover { background: var(--hover-bg); color: var(--text-primary); }
+  #controls button.active-control {
+    background: var(--accent); color: #fff; font-weight: 600;
+  }
+  #controls button.active-control:hover {
+    background: var(--accent-hover);
+  }
+  #controls button + button { border-top: 1px solid var(--border); }
 
-  /* Search UI */
+  /* Pulse marker for wiki item clicks */
+  .pulse-marker {
+    width: 60px; height: 60px; position: relative;
+    pointer-events: none;
+  }
+  .pulse-marker::after {
+    content: ''; position: absolute; top: 50%; left: 50%;
+    width: 12px; height: 12px; margin: -6px 0 0 -6px;
+    border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 8px rgba(37,99,235,0.6);
+  }
+  .pulse-marker::before {
+    content: ''; position: absolute; top: 50%; left: 50%;
+    width: 12px; height: 12px; margin: -6px 0 0 -6px;
+    border-radius: 50%; background: transparent;
+    border: 2px solid var(--accent);
+    animation: pulse-ring 1.2s ease-out 0s 4;
+  }
+  @keyframes pulse-ring {
+    0% { transform: scale(1); opacity: 0.8; }
+    100% { transform: scale(4); opacity: 0; }
+  }
+
+  /* --- Search --- */
   #search-container {
     position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-    z-index: 2; width: 320px; max-width: calc(100% - 120px);
-    font-family: -apple-system, system-ui, sans-serif;
+    z-index: 2; width: 340px; max-width: calc(100% - 100px);
+    font-family: var(--ui-font);
   }
   #search-input {
     width: 100%; box-sizing: border-box;
-    padding: 10px 36px 10px 14px; border: none; border-radius: 8px;
-    font-size: 15px; background: #fff;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-    outline: none;
+    padding: 10px 36px 10px 14px; border: none; border-radius: var(--radius);
+    font-size: 14px; font-weight: 400; background: var(--panel-bg);
+    box-shadow: var(--panel-shadow);
+    outline: none; color: var(--text-primary);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    letter-spacing: -0.01em;
   }
-  #search-input:focus { box-shadow: 0 2px 12px rgba(0,0,0,0.35); }
+  #search-input::placeholder { color: var(--text-tertiary); font-weight: 400; }
+  #search-input:focus { box-shadow: 0 2px 16px rgba(37,99,235,0.15), 0 0 0 2px rgba(37,99,235,0.2); }
   #search-clear {
-    position: absolute; right: 10px; top: 10px;
-    background: none; border: none; font-size: 18px; color: #999;
+    position: absolute; right: 10px; top: 9px;
+    background: none; border: none; font-size: 18px; color: var(--text-tertiary);
     cursor: pointer; padding: 0 4px; display: none;
+    line-height: 1;
   }
+  #search-clear:hover { color: var(--text-secondary); }
   #search-results {
-    margin-top: 4px; background: #fff; border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-    max-height: 300px; overflow-y: auto; display: none;
+    margin-top: 6px; background: var(--panel-bg); border-radius: var(--radius);
+    box-shadow: var(--panel-shadow);
+    max-height: 320px; overflow-y: auto; display: none;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
   }
   .search-result {
-    padding: 8px 14px; cursor: pointer; border-bottom: 1px solid #eee;
+    padding: 10px 14px; cursor: pointer; border-bottom: 1px solid var(--border);
+    transition: background 0.12s;
   }
   .search-result:last-child { border-bottom: none; }
-  .search-result:hover, .search-result.active { background: #f0f4ff; }
-  .search-result-name { font-size: 14px; color: #222; }
+  .search-result:hover, .search-result.active { background: var(--hover-bg); }
+  .search-result-name { font-size: 13px; color: var(--text-primary); font-weight: 500; letter-spacing: -0.01em; }
   .search-result-type {
-    font-size: 11px; color: #888; margin-left: 6px;
-    text-transform: capitalize;
+    font-size: 11px; color: var(--text-tertiary); margin-left: 6px;
+    text-transform: capitalize; font-weight: 400;
   }
   .search-no-results {
-    padding: 12px 14px; color: #888; font-size: 13px; text-align: center;
+    padding: 16px 14px; color: var(--text-tertiary); font-size: 13px; text-align: center;
+  }
+
+  /* --- Wiki panel --- */
+  #wiki-panel {
+    position: absolute; top: 10px; left: 10px; bottom: 30px; width: 320px;
+    z-index: 3; background: var(--panel-bg); border-radius: var(--radius);
+    box-shadow: var(--panel-shadow);
+    font-family: var(--ui-font);
+    display: none; flex-direction: column; overflow: hidden;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    transition: opacity 0.2s, transform 0.2s;
+  }
+  #wiki-panel.wiki-visible {
+    display: flex;
+    animation: wiki-slide-in 0.25s ease-out;
+  }
+  @keyframes wiki-slide-in {
+    from { opacity: 0; transform: translateX(-12px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  /* Mobile: bottom sheet, half height, full width */
+  @media (max-width: 600px) {
+    #wiki-panel {
+      top: auto; left: 0; right: 0; bottom: 0;
+      width: 100%; max-height: 45vh;
+      border-radius: var(--radius) var(--radius) 0 0;
+    }
+    #wiki-panel.wiki-visible {
+      animation: wiki-slide-up 0.25s ease-out;
+    }
+    @keyframes wiki-slide-up {
+      from { opacity: 0; transform: translateY(40px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  }
+  #wiki-panel-header {
+    padding: 14px 16px 12px; border-bottom: 1px solid var(--border);
+    flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
+  }
+  #wiki-panel-header span {
+    font-size: 12px; font-weight: 600; color: var(--text-primary);
+    letter-spacing: 0.02em; text-transform: uppercase;
+  }
+  #wiki-panel-count {
+    font-size: 11px; font-weight: 500; color: var(--text-tertiary);
+    background: rgba(0,0,0,0.04); padding: 2px 8px; border-radius: 10px;
+  }
+  #wiki-panel-close {
+    background: none; border: none; font-size: 16px; color: var(--text-tertiary);
+    cursor: pointer; padding: 0 2px; line-height: 1;
+    margin-left: 8px;
+  }
+  #wiki-panel-close:hover { color: var(--text-primary); }
+  #wiki-panel-list {
+    flex: 1; overflow-y: auto; padding: 4px 0;
+    -webkit-overflow-scrolling: touch;
+  }
+  #wiki-panel-loading {
+    padding: 32px 16px; text-align: center;
+    color: var(--text-tertiary); font-size: 12px;
+    display: none;
+  }
+  .wiki-item {
+    padding: 10px 16px; cursor: pointer;
+    transition: background 0.12s;
+    border-left: 3px solid transparent;
+  }
+  .wiki-item:hover {
+    background: var(--hover-bg);
+    border-left-color: var(--accent);
+  }
+  .wiki-item + .wiki-item { border-top: 1px solid var(--border); }
+  .wiki-item-name {
+    font-size: 13px; font-weight: 600; color: var(--text-primary);
+    letter-spacing: -0.01em; line-height: 1.3;
+  }
+  .wiki-item-meta {
+    display: flex; align-items: baseline; gap: 6px;
+    margin-top: 2px;
+  }
+  .wiki-item-type {
+    font-size: 10px; color: var(--accent); text-transform: uppercase;
+    font-weight: 600; letter-spacing: 0.04em;
+  }
+  .wiki-item-pop {
+    font-size: 10px; color: var(--text-tertiary); font-weight: 500;
+  }
+  .wiki-item-desc {
+    font-size: 12px; color: var(--text-secondary); margin-top: 4px;
+    line-height: 1.45; letter-spacing: -0.005em;
+    overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  }
+  .wiki-item-nodesc .wiki-item-name { margin-bottom: 0; }
+  #wiki-refresh {
+    display: none; flex-shrink: 0;
+    padding: 10px 16px; border-top: 1px solid var(--border);
+    text-align: center;
+  }
+  #wiki-refresh button {
+    background: var(--accent); color: #fff; border: none;
+    border-radius: 6px; padding: 7px 16px; font-size: 12px;
+    font-weight: 600; cursor: pointer; font-family: var(--ui-font);
+    letter-spacing: 0.01em; width: 100%;
+    transition: background 0.15s;
+  }
+  #wiki-refresh button:hover { background: var(--accent-hover); }
+  /* Attribution dialog */
+  #attr-btn {
+    position: absolute; bottom: 36px; right: 10px; z-index: 2;
+    background: rgba(255,255,255,0.65); border: none; border-radius: 4px;
+    padding: 2px 7px; font-size: 11px; cursor: pointer;
+    font-family: var(--ui-font); color: var(--text-secondary);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  }
+  #attr-btn:hover { background: rgba(255,255,255,0.9); color: var(--text-primary); }
+  #attr-overlay {
+    display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 100; background: rgba(0,0,0,0.4);
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  }
+  #attr-dialog {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: #fff; border-radius: var(--radius); padding: 24px 28px;
+    max-width: 480px; width: calc(100% - 40px); max-height: 80vh; overflow-y: auto;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    font-family: var(--ui-font);
+  }
+  #attr-dialog h2 {
+    margin: 0 0 16px; font-size: 16px; font-weight: 700;
+    color: var(--text-primary); letter-spacing: -0.02em;
+  }
+  #attr-dialog section { margin-bottom: 14px; }
+  #attr-dialog h3 {
+    margin: 0 0 2px; font-size: 12px; font-weight: 700;
+    color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  #attr-dialog p {
+    margin: 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5;
+  }
+  #attr-dialog .license {
+    font-size: 11px; color: var(--text-tertiary); font-style: italic;
+  }
+  #attr-close {
+    position: absolute; top: 12px; right: 14px;
+    background: none; border: none; font-size: 20px; color: var(--text-tertiary);
+    cursor: pointer; line-height: 1;
+  }
+  #attr-close:hover { color: var(--text-primary); }
+
+  .wiki-empty-state {
+    padding: 40px 24px; text-align: center;
+  }
+  .wiki-empty-state-icon {
+    font-size: 28px; margin-bottom: 8px; opacity: 0.3;
+  }
+  .wiki-empty-state-text {
+    font-size: 13px; color: var(--text-tertiary); line-height: 1.5;
   }
 </style>
 </head>
 <body>
 <div id="map"></div>
-<button id="layer-toggle" title="Toggle satellite imagery">Satellite</button>
-<button id="terrain-toggle" title="Toggle 3D terrain">3D</button>
+<div id="controls">
+  <button id="layer-toggle" title="Toggle satellite imagery">Satellite</button>
+  <button id="terrain-toggle" title="Toggle 3D terrain">3D</button>
+  <button id="wiki-toggle" title="Show nearby Wikipedia entries">Explore</button>
+</div>
+<div id="wiki-panel">
+  <div id="wiki-panel-header">
+    <span>Nearby</span>
+    <div>
+      <span id="wiki-panel-count"></span>
+      <button id="wiki-panel-close" title="Close">&times;</button>
+    </div>
+  </div>
+  <div id="wiki-panel-loading">Loading entries...</div>
+  <div id="wiki-panel-list"></div>
+  <div id="wiki-refresh"><button>Show in this area</button></div>
+</div>
 <div id="search-container">
   <input id="search-input" type="text" placeholder="Search places, streets, POIs..." autocomplete="off">
   <button id="search-clear" title="Clear">&times;</button>
@@ -97,6 +316,48 @@
 <div id="info">
   <h3>Offline OSM</h3>
   <p>Vector tiles &middot; OpenStreetMap data</p>
+</div>
+<button id="attr-btn" title="Data sources &amp; licenses">Sources</button>
+<div id="attr-overlay">
+  <div id="attr-dialog">
+    <button id="attr-close" title="Close">&times;</button>
+    <h2>Data Sources &amp; Licenses</h2>
+    <section>
+      <h3>Map Data</h3>
+      <p>OpenStreetMap contributors</p>
+      <p class="license">Open Data Commons Open Database License (ODbL) &mdash; openstreetmap.org/copyright</p>
+    </section>
+    <section>
+      <h3>Vector Tile Schema</h3>
+      <p>OpenMapTiles</p>
+      <p class="license">Creative Commons Attribution 4.0 (CC-BY 4.0) &mdash; openmaptiles.org</p>
+    </section>
+    <section>
+      <h3>Satellite Imagery</h3>
+      <p>Sentinel-2 Cloudless by EOX IT Services GmbH</p>
+      <p class="license">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA 4.0) &mdash; s2maps.eu</p>
+    </section>
+    <section>
+      <h3>Terrain / Elevation</h3>
+      <p>Copernicus GLO-30 Digital Elevation Model</p>
+      <p class="license">Copernicus Programme, free and open access &mdash; provided by ESA / Airbus</p>
+    </section>
+    <section>
+      <h3>Place Information</h3>
+      <p>Wikidata &amp; Wikipedia</p>
+      <p class="license">Creative Commons CC0 (Wikidata) / Creative Commons Attribution-ShareAlike 3.0 (Wikipedia) &mdash; wikidata.org / wikipedia.org</p>
+    </section>
+    <section>
+      <h3>Map Renderer</h3>
+      <p>MapLibre GL JS</p>
+      <p class="license">BSD 3-Clause License &mdash; maplibre.org</p>
+    </section>
+    <section>
+      <h3>Offline Packaging</h3>
+      <p>ZIM file format by openZIM / Kiwix</p>
+      <p class="license">GNU General Public License v2 &mdash; openzim.org</p>
+    </section>
+  </div>
 </div>
 <script>
 // Compute base URL for absolute resource paths.
@@ -272,7 +533,7 @@ fetch(baseUrl + 'map-config.json')
 
       toggleBtn.addEventListener('click', function() {
         satelliteVisible = !satelliteVisible;
-        toggleBtn.classList.toggle('satellite-active', satelliteVisible);
+        toggleBtn.classList.toggle('active-control', satelliteVisible);
         toggleBtn.textContent = satelliteVisible ? 'Map' : 'Satellite';
         if (satelliteVisible) { showSatellite(); } else { hideSatellite(); }
       });
@@ -342,7 +603,7 @@ fetch(baseUrl + 'map-config.json')
       terrainToggle.addEventListener('click', function() {
         terrainMode = (terrainMode + 1) % 3;
         terrainToggle.textContent = terrainLabels[terrainMode] || '3D';
-        terrainToggle.classList.toggle('terrain-active', terrainMode > 0);
+        terrainToggle.classList.toggle('active-control', terrainMode > 0);
         setTerrainMode(terrainMode);
       });
     }
@@ -364,11 +625,24 @@ fetch(baseUrl + 'map-config.json')
     map.on('load', applyHash);
     window.addEventListener('hashchange', applyHash);
 
+    // Attribution dialog
+    var attrBtn = document.getElementById('attr-btn');
+    var attrOverlay = document.getElementById('attr-overlay');
+    var attrClose = document.getElementById('attr-close');
+    attrBtn.addEventListener('click', function() { attrOverlay.style.display = 'block'; });
+    attrClose.addEventListener('click', function() { attrOverlay.style.display = 'none'; });
+    attrOverlay.addEventListener('click', function(e) {
+      if (e.target === attrOverlay) attrOverlay.style.display = 'none';
+    });
+
     // Initialize search
     initSearch(map);
 
     // Initialize Wikidata info popups
     initWikidataPopups(map, config);
+
+    // Initialize Wiki sidebar
+    initWikiSidebar(map, config);
   })
   .catch(function(err) {
     document.getElementById('info').innerHTML =
@@ -698,7 +972,7 @@ function makeStyle(config) {
           "symbol-placement": "line",
           "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansRegular"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 12, 10, 14, 13],
+          "text-size": ["interpolate", ["linear"], ["zoom"], 12, 10, 14, 13, 18, 22],
           "text-max-angle": 30,
           "symbol-spacing": 250
         },
@@ -717,7 +991,7 @@ function makeStyle(config) {
         "layout": {
           "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansItalic"],
-          "text-size": 12
+          "text-size": ["interpolate", ["linear"], ["zoom"], 10, 10, 14, 12, 18, 20]
         },
         "paint": {
           "text-color": ["case", ["has", "wikidata"], "#3a60a0", "#5d80b4"],
@@ -776,7 +1050,7 @@ function makeStyle(config) {
         "layout": {
           "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansBold"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 5, 10, 14, 18]
+          "text-size": ["interpolate", ["linear"], ["zoom"], 5, 10, 14, 18, 18, 26]
         },
         "paint": {
           "text-color": ["case", ["has", "wikidata"], "#2a4a7a", "#333"],
@@ -794,7 +1068,7 @@ function makeStyle(config) {
         "layout": {
           "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansRegular"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 8, 10, 14, 16]
+          "text-size": ["interpolate", ["linear"], ["zoom"], 8, 10, 14, 16, 18, 24]
         },
         "paint": {
           "text-color": ["case", ["has", "wikidata"], "#3a5a8a", "#444"],
@@ -812,7 +1086,7 @@ function makeStyle(config) {
         "layout": {
           "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansRegular"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 10, 9, 14, 14]
+          "text-size": ["interpolate", ["linear"], ["zoom"], 10, 9, 14, 14, 18, 22]
         },
         "paint": {
           "text-color": ["case", ["has", "wikidata"], "#3a5a8a", "#555"],
@@ -830,7 +1104,7 @@ function makeStyle(config) {
         "layout": {
           "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansRegular"],
-          "text-size": 12,
+          "text-size": ["interpolate", ["linear"], ["zoom"], 12, 12, 18, 20],
           "text-transform": "uppercase",
           "text-letter-spacing": 0.05
         },
@@ -853,7 +1127,7 @@ function makeStyle(config) {
         "layout": {
           "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansRegular"],
-          "text-size": 11,
+          "text-size": ["interpolate", ["linear"], ["zoom"], 14, 11, 18, 18],
           "text-offset": [0, 0.5],
           "text-anchor": "top"
         },
@@ -1147,16 +1421,27 @@ function initWikidataPopups(map, config) {
 
   function fetchWdChunk(prefix) {
     if (wdCache[prefix]) return Promise.resolve(wdCache[prefix]);
-    return fetch(baseUrl + 'wikidata/' + prefix + '.json')
-      .then(function(r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      })
-      .then(function(data) {
-        wdCache[prefix] = data;
-        return data;
-      })
-      .catch(function() { return null; });
+    var url = baseUrl + 'wikidata/' + prefix + '.json';
+    function attempt(n) {
+      return fetch(url)
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function(data) {
+          wdCache[prefix] = data;
+          return data;
+        })
+        .catch(function(err) {
+          if (n < 3) {
+            return new Promise(function(resolve) {
+              setTimeout(function() { resolve(attempt(n + 1)); }, 300 * n);
+            });
+          }
+          return null;
+        });
+    }
+    return attempt(1);
   }
 
   function getWdPrefix(qid) {
@@ -1272,6 +1557,261 @@ function initWikidataPopups(map, config) {
       return !!(f.properties || {}).wikidata;
     });
     map.getCanvas().style.cursor = hasWd ? 'pointer' : '';
+  });
+}
+
+// --- Wiki sidebar: show Wikipedia entries in current viewport ---
+function initWikiSidebar(map, config) {
+  if (!config.hasWikidata) return;
+
+  var toggle = document.getElementById('wiki-toggle');
+  var panel = document.getElementById('wiki-panel');
+  var listEl = document.getElementById('wiki-panel-list');
+  var countEl = document.getElementById('wiki-panel-count');
+  var loadingEl = document.getElementById('wiki-panel-loading');
+  var closeBtn = document.getElementById('wiki-panel-close');
+  var refreshBar = document.getElementById('wiki-refresh');
+  var refreshBtn = refreshBar.querySelector('button');
+  toggle.style.display = 'block';
+
+  var active = false;
+  var debounceTimer = null;
+  var wdCache = {};
+  var wikiPulseMarker = null;
+  var pulseTimeout = null;
+  var staleView = false; // true after flying to an item (list is stale)
+
+  function fetchWdChunk(prefix) {
+    if (wdCache[prefix]) return Promise.resolve(wdCache[prefix]);
+    var url = baseUrl + 'wikidata/' + prefix + '.json';
+    function attempt(n) {
+      return fetch(url)
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function(data) { wdCache[prefix] = data; return data; })
+        .catch(function() {
+          if (n < 3) return new Promise(function(resolve) { setTimeout(function() { resolve(attempt(n + 1)); }, 300 * n); });
+          return null;
+        });
+    }
+    return attempt(1);
+  }
+
+  function getWdPrefix(qid) {
+    var num = qid.substring(1);
+    return num.length >= 2 ? num.substring(0, 2) : num + '0';
+  }
+
+  function makeTextNode(text) {
+    return document.createTextNode(text);
+  }
+
+  function createEl(tag, className, text) {
+    var el = document.createElement(tag);
+    if (className) el.className = className;
+    if (text) el.appendChild(makeTextNode(text));
+    return el;
+  }
+
+  function updateSidebar() {
+    if (!active) return;
+
+    loadingEl.style.display = 'block';
+    listEl.textContent = '';
+
+    var features = map.queryRenderedFeatures();
+    var seen = {};
+    var items = [];
+
+    for (var i = 0; i < features.length; i++) {
+      var props = features[i].properties || {};
+      var qid = props.wikidata;
+      if (!qid || !qid.match(/^Q\d+$/) || seen[qid]) continue;
+      seen[qid] = true;
+
+      var name = props['name:latin'] || props.name || props.label || '';
+      if (!name) continue;
+
+      var cls = props['class'] || '';
+      var layer = features[i].layer ? features[i].layer.id : '';
+      var priority = 0;
+      if (cls === 'country') priority = 100;
+      else if (cls === 'state') priority = 90;
+      else if (cls === 'city') priority = 80;
+      else if (cls === 'town') priority = 60;
+      else if (layer === 'poi-label') priority = 40;
+      else if (layer.indexOf('place') >= 0) priority = 50;
+      else priority = 30;
+
+      // Extract a single [lng, lat] point from any geometry type
+      var coords = null;
+      var geom = features[i].geometry;
+      if (geom && geom.coordinates) {
+        var c = geom.coordinates;
+        if (geom.type === 'Point') {
+          coords = c;
+        } else if (geom.type === 'MultiPoint') {
+          coords = c[0];
+        } else if (geom.type === 'LineString') {
+          coords = c[Math.floor(c.length / 2)];
+        } else if (geom.type === 'MultiLineString') {
+          var line = c[0]; coords = line[Math.floor(line.length / 2)];
+        } else if (geom.type === 'Polygon') {
+          // Centroid of first ring
+          var ring = c[0]; var sx = 0, sy = 0;
+          for (var ri = 0; ri < ring.length; ri++) { sx += ring[ri][0]; sy += ring[ri][1]; }
+          coords = [sx / ring.length, sy / ring.length];
+        } else if (geom.type === 'MultiPolygon') {
+          var ring = c[0][0]; var sx = 0, sy = 0;
+          for (var ri = 0; ri < ring.length; ri++) { sx += ring[ri][0]; sy += ring[ri][1]; }
+          coords = [sx / ring.length, sy / ring.length];
+        }
+      }
+      items.push({ qid: qid, name: name, cls: cls, layer: layer, priority: priority, coords: coords });
+    }
+
+    items.sort(function(a, b) { return b.priority - a.priority || a.name.localeCompare(b.name); });
+    if (items.length > 100) items = items.slice(0, 100);
+
+    if (items.length === 0) {
+      loadingEl.style.display = 'none';
+      countEl.textContent = '';
+      listEl.textContent = '';
+      var empty = createEl('div', 'wiki-empty-state');
+      empty.appendChild(createEl('div', 'wiki-empty-state-icon', '\uD83C\uDF0D'));
+      empty.appendChild(createEl('div', 'wiki-empty-state-text', 'No Wikipedia entries visible at this zoom level. Try zooming in to discover places.'));
+      listEl.appendChild(empty);
+      return;
+    }
+
+    var prefixes = {};
+    items.forEach(function(item) { prefixes[getWdPrefix(item.qid)] = true; });
+
+    Promise.all(Object.keys(prefixes).map(fetchWdChunk)).then(function() {
+      loadingEl.style.display = 'none';
+      listEl.textContent = '';
+
+      // Filter out items with no wikidata info at all
+      var enriched = items.filter(function(item) {
+        var chunk = wdCache[getWdPrefix(item.qid)];
+        return chunk && chunk[item.qid];
+      });
+
+      countEl.textContent = enriched.length;
+
+      if (enriched.length === 0) {
+        var empty = createEl('div', 'wiki-empty-state');
+        empty.appendChild(createEl('div', 'wiki-empty-state-icon', '\uD83D\uDCD6'));
+        empty.appendChild(createEl('div', 'wiki-empty-state-text', 'Features found but no Wikipedia data available for this area.'));
+        listEl.appendChild(empty);
+        return;
+      }
+
+      enriched.forEach(function(item) {
+        var chunk = wdCache[getWdPrefix(item.qid)];
+        var wd = chunk[item.qid];
+
+        var desc = wd.x || wd.d || '';
+        var div = createEl('div', 'wiki-item' + (desc ? '' : ' wiki-item-nodesc'));
+        if (item.coords) {
+          div.setAttribute('data-lng', item.coords[0]);
+          div.setAttribute('data-lat', item.coords[1]);
+        }
+
+        div.appendChild(createEl('div', 'wiki-item-name', item.name));
+
+        var metaDiv = createEl('div', 'wiki-item-meta');
+        var typeText = item.cls ? item.cls.replace(/_/g, ' ') : item.layer.replace(/-/g, ' ');
+        metaDiv.appendChild(createEl('span', 'wiki-item-type', typeText));
+        if (wd.p) {
+          var pop = wd.p >= 1e6 ? (wd.p/1e6).toFixed(1)+'M' : wd.p >= 1e3 ? (wd.p/1e3).toFixed(0)+'K' : String(wd.p);
+          metaDiv.appendChild(createEl('span', 'wiki-item-pop', 'pop. ' + pop));
+        }
+        div.appendChild(metaDiv);
+
+        if (desc) div.appendChild(createEl('div', 'wiki-item-desc', desc));
+
+        div.addEventListener('click', function() {
+          var lat = parseFloat(div.getAttribute('data-lat'));
+          var lng = parseFloat(div.getAttribute('data-lng'));
+          if (!isNaN(lat) && !isNaN(lng)) {
+            // Clean up previous
+            if (wikiPulseMarker) { wikiPulseMarker.remove(); wikiPulseMarker = null; }
+            if (pulseTimeout) { clearTimeout(pulseTimeout); pulseTimeout = null; }
+            // Place marker immediately at target
+            var el = document.createElement('div');
+            el.className = 'pulse-marker';
+            wikiPulseMarker = new maplibregl.Marker({ element: el, anchor: 'center' })
+              .setLngLat([lng, lat])
+              .addTo(map);
+            // Mark list as stale — show refresh button instead of auto-updating
+            staleView = true;
+            refreshBar.style.display = 'block';
+            // Fly to target — on mobile, offset so target appears above the bottom sheet
+            var targetZoom = Math.max(map.getZoom(), 14);
+            var isMobile = window.innerWidth <= 600;
+            if (isMobile && panel.style.display === 'flex') {
+              // Shift center upward by ~20% of viewport to account for bottom sheet
+              var offsetLat = (map.getBounds().getNorth() - map.getBounds().getSouth()) * 0.2;
+              map.flyTo({ center: [lng, lat - offsetLat], zoom: targetZoom, duration: 1200 });
+            } else {
+              map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 1200 });
+            }
+            // Remove marker after 5 seconds
+            pulseTimeout = setTimeout(function() {
+              if (wikiPulseMarker) { wikiPulseMarker.remove(); wikiPulseMarker = null; }
+            }, 5000);
+          }
+        });
+
+        listEl.appendChild(div);
+      });
+    });
+  }
+
+  function openPanel() {
+    active = true;
+    staleView = false;
+    refreshBar.style.display = 'none';
+    toggle.classList.add('active-control');
+    panel.classList.add('wiki-visible');
+    panel.style.display = 'flex';
+    updateSidebar();
+  }
+
+  function closePanel() {
+    active = false;
+    toggle.classList.remove('active-control');
+    panel.classList.remove('wiki-visible');
+    panel.style.display = 'none';
+    listEl.textContent = '';
+    countEl.textContent = '';
+  }
+
+  toggle.addEventListener('click', function() {
+    if (active) closePanel(); else openPanel();
+  });
+
+  closeBtn.addEventListener('click', closePanel);
+
+  // Refresh button — manual refresh after item click navigation
+  refreshBtn.addEventListener('click', function() {
+    staleView = false;
+    refreshBar.style.display = 'none';
+    updateSidebar();
+  });
+
+  map.on('moveend', function() {
+    if (!active) return;
+    if (staleView) {
+      // After an item click, show the refresh button but don't auto-update
+      refreshBar.style.display = 'block';
+      return;
+    }
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(updateSidebar, 400);
   });
 }
 </script>
