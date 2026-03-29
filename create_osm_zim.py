@@ -1267,6 +1267,220 @@ def _assign_location_batch(batch):
     return results
 
 
+def extract_routing_graph(pbf_path, output_dir):
+    """Extract road network from OSM PBF and build a compact routing graph.
+
+    Uses osmium to filter highway ways, then exports as GeoJSONSeq.
+    Builds a graph where intersections (and way endpoints) are nodes,
+    and road segments between them are edges with distance and geometry.
+
+    Returns the path to the output JSON file, or None if extraction fails.
+    """
+    import math
+
+    print("  Extracting routing graph from OSM data...")
+
+    # Step 1: Filter highway ways from PBF
+    highways_pbf = os.path.join(output_dir, "highways.osm.pbf")
+    cmd = [
+        "osmium", "tags-filter", str(pbf_path),
+        "w/highway",
+        "-o", highways_pbf, "--overwrite",
+    ]
+    print(f"    Filtering highway ways...")
+    subprocess.run(cmd, check=True)
+    size_mb = os.path.getsize(highways_pbf) / (1024 * 1024)
+    print(f"    Highway PBF: {size_mb:.1f} MB")
+
+    # Step 2: Export as GeoJSONSeq (newline-delimited GeoJSON)
+    highways_geojson = os.path.join(output_dir, "highways.geojsonseq")
+    cmd = [
+        "osmium", "export", highways_pbf,
+        "-f", "geojsonseq",
+        "-o", highways_geojson, "--overwrite",
+    ]
+    print(f"    Exporting to GeoJSON...")
+    subprocess.run(cmd, check=True)
+
+    # Step 3: Read features and build graph
+    SNAP = 6  # decimal places for coordinate snapping (~0.1m)
+
+    # Highway classes excluded from routing (non-navigable)
+    EXCLUDED = {
+        "proposed", "construction", "raceway", "bus_guideway",
+        "platform", "elevator", "razed", "abandoned",
+    }
+    # Speed estimates (km/h) by highway class for travel time
+    SPEED = {
+        "motorway": 100, "motorway_link": 60,
+        "trunk": 80, "trunk_link": 50,
+        "primary": 60, "primary_link": 40,
+        "secondary": 50, "secondary_link": 35,
+        "tertiary": 40, "tertiary_link": 30,
+        "residential": 30, "living_street": 20,
+        "unclassified": 40, "service": 20,
+        "track": 15, "path": 5, "footway": 5,
+        "cycleway": 15, "pedestrian": 5, "steps": 3,
+    }
+    DEFAULT_SPEED = 30
+
+    coord_count = {}  # snapped (lat, lon) -> count of ways containing it
+    ways = []  # [(coords, highway_class, oneway, speed)]
+
+    print(f"    Reading highway features...")
+    feat_count = 0
+    with open(highways_geojson) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            feat = json.loads(line)
+            geom = feat.get("geometry", {})
+            props = feat.get("properties", {})
+
+            if geom.get("type") != "LineString":
+                continue
+
+            highway = props.get("highway", "")
+            if highway in EXCLUDED or not highway:
+                continue
+
+            # Determine one-way direction
+            ow = props.get("oneway", "")
+            if ow in ("yes", "1", "true"):
+                oneway = 1   # forward only
+            elif ow == "-1":
+                oneway = -1  # reverse only
+            else:
+                oneway = 0   # bidirectional
+
+            speed = SPEED.get(highway, DEFAULT_SPEED)
+
+            coords = []
+            for c in geom["coordinates"]:
+                lat = round(c[1], SNAP)
+                lon = round(c[0], SNAP)
+                coords.append((lat, lon))
+
+            if len(coords) < 2:
+                continue
+
+            ways.append((coords, highway, oneway, speed))
+            feat_count += 1
+
+            for coord in coords:
+                coord_count[coord] = coord_count.get(coord, 0) + 1
+
+            if feat_count % 50000 == 0:
+                print(f"\r    Read {feat_count} features...", end="", flush=True)
+
+    print(f"\r    Read {feat_count} highway features, {len(coord_count)} unique coordinates")
+
+    if feat_count == 0:
+        print("    Warning: no highway features found, skipping routing graph")
+        return None
+
+    # Step 4: Identify graph nodes (intersections + endpoints)
+    graph_nodes = set()
+    for coords, _, _, _ in ways:
+        graph_nodes.add(coords[0])
+        graph_nodes.add(coords[-1])
+        for coord in coords[1:-1]:
+            if coord_count.get(coord, 0) >= 2:
+                graph_nodes.add(coord)
+
+    node_list = sorted(graph_nodes)
+    node_index = {coord: i for i, coord in enumerate(node_list)}
+    print(f"    Graph nodes: {len(node_list)} (intersections + endpoints)")
+
+    # Haversine distance in meters
+    R = 6371000.0
+    def _haversine(lat1, lon1, lat2, lon2):
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a = (math.sin(dlat / 2) ** 2 +
+             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+             math.sin(dlon / 2) ** 2)
+        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    # Step 5: Build edges by splitting ways at graph nodes
+    edges = []  # [from_idx, to_idx, dist_m, speed_kmh, [geometry]]
+    for coords, highway, oneway, speed in ways:
+        # Split into segments at graph nodes
+        seg_start = 0
+        for i in range(1, len(coords)):
+            if coords[i] in node_index:
+                seg = coords[seg_start:i + 1]
+                if len(seg) >= 2:
+                    from_idx = node_index[seg[0]]
+                    to_idx = node_index[seg[-1]]
+                    if from_idx != to_idx:
+                        dist = sum(
+                            _haversine(seg[j][0], seg[j][1], seg[j+1][0], seg[j+1][1])
+                            for j in range(len(seg) - 1)
+                        )
+                        dist = round(dist, 1)
+                        # Geometry: intermediate points only (endpoints are the nodes)
+                        geom = [[c[1], c[0]] for c in seg[1:-1]] if len(seg) > 2 else []
+
+                        # Add forward edge
+                        if oneway != -1:
+                            edges.append([from_idx, to_idx, dist, speed, geom])
+                        # Add reverse edge
+                        if oneway != 1:
+                            rev_geom = list(reversed(geom))
+                            edges.append([to_idx, from_idx, dist, speed, rev_geom])
+
+                seg_start = i
+
+    print(f"    Graph edges: {len(edges)}")
+
+    # Step 6: Serialize to compact JSON
+    # Nodes: flat array [lat0, lon0, lat1, lon1, ...]
+    nodes_flat = []
+    for lat, lon in node_list:
+        nodes_flat.append(lat)
+        nodes_flat.append(lon)
+
+    # Build adjacency list for efficient lookup: adj[node] = [[target, dist, speed, geomIdx], ...]
+    # Store geometries separately to allow dedup
+    geom_list = []
+    geom_map = {}  # tuple(geom) -> index
+    adj = [[] for _ in range(len(node_list))]
+
+    for from_idx, to_idx, dist, speed, geom in edges:
+        geom_key = tuple(tuple(c) for c in geom) if geom else ()
+        if geom_key in geom_map:
+            gi = geom_map[geom_key]
+        elif geom:
+            gi = len(geom_list)
+            geom_list.append(geom)
+            geom_map[geom_key] = gi
+        else:
+            gi = -1
+        adj[from_idx].append([to_idx, dist, speed, gi])
+
+    routing_data = {
+        "nodes": nodes_flat,
+        "adj": adj,
+        "geom": geom_list,
+    }
+
+    output_path = os.path.join(output_dir, "routing-graph.json")
+    with open(output_path, "w") as f:
+        json.dump(routing_data, f, separators=(",", ":"))
+
+    size_mb = os.path.getsize(output_path) / (1024 * 1024)
+    print(f"    Routing graph: {size_mb:.1f} MB ({len(node_list)} nodes, {len(edges)} edges)")
+
+    # Clean up temp files
+    for tmp in [highways_pbf, highways_geojson]:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+    return output_path
+
+
 def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
     """Extract named features from z14 vector tiles for search indexing.
 
@@ -1561,6 +1775,7 @@ def create_zim(
     zim_workers=None,
     bbox=None,
     wikidata_data=None,
+    routing_graph_path=None,
 ):
     """Create a ZIM file containing the map viewer and all tiles."""
     from libzim.writer import Creator, Item, StringProvider, FileProvider
@@ -1960,6 +2175,17 @@ def create_zim(
                 for v in wd_chunks.values()
             )
             print(f"    Added {len(wd_chunks)} Wikidata chunks ({total_bytes / 1024:.0f} KB)")
+
+        # Add routing graph data
+        if routing_graph_path and os.path.isfile(routing_graph_path):
+            size_mb = os.path.getsize(routing_graph_path) / (1024 * 1024)
+            print(f"    Adding routing graph ({size_mb:.1f} MB)...")
+            creator.add_item(MapItem(
+                "routing-data/graph.json",
+                "Routing Graph",
+                "application/json",
+                routing_graph_path,
+            ))
 
         # Build location index for search feature enrichment
         loc_lookup = None
@@ -2387,6 +2613,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--search-cache", metavar="PATH", default=None,
                         help="Use pre-built search features JSONL instead of extracting from tiles. "
                              "If bbox is set, features are filtered to the bounding box.")
+    parser.add_argument("--routing", action="store_true",
+                        help="Include offline routing graph for turn-by-turn directions")
 
     args = parser.parse_args()
 
@@ -2439,7 +2667,10 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     include_wikidata = args.wikidata
     wikidata_cache_dir = args.wikidata_cache
 
-    total_steps = 6 + (1 if include_satellite else 0) + (1 if include_terrain else 0) + (1 if include_wikidata else 0)
+    # Routing options
+    include_routing = args.routing
+
+    total_steps = 6 + (1 if include_satellite else 0) + (1 if include_terrain else 0) + (1 if include_wikidata else 0) + (1 if include_routing else 0)
 
     print(f"=== Creating Offline OSM ZIM: {name} ===")
     if include_satellite:
@@ -2449,6 +2680,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         print(f"  Including Copernicus GLO-30 terrain (z0-{terrain_max_zoom})")
     if include_wikidata:
         print(f"  Including Wikidata info for places and POIs")
+    if include_routing:
+        print(f"  Including offline routing graph")
     print()
 
     # Create temp directory
@@ -2574,6 +2807,19 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 print(f"    Loaded {len(wikidata_data)} Wikidata entries for ZIM")
             else:
                 print("    No Wikidata entries available")
+
+        # Extract routing graph if requested
+        routing_graph_path = None
+        if include_routing:
+            step_rt = 5 + (1 if include_wikidata else 0)
+            print()
+            print(f"[{step_rt}/{total_steps}] Extracting routing graph...")
+            rt_pbf = locals().get('work_pbf') or pbf_path or args.pbf
+            if not rt_pbf:
+                print("    Warning: no PBF file available, skipping routing graph")
+                print("    (routing requires a PBF file — not available with --mbtiles only)")
+            else:
+                routing_graph_path = extract_routing_graph(rt_pbf, tmpdir)
 
         # Download satellite tiles and generate terrain tiles
         # These are independent (satellite=I/O-bound, terrain=CPU-bound) so run in parallel
@@ -2728,6 +2974,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             map_config["terrainMaxZoom"] = terrain_max_zoom
         if wikidata_data:
             map_config["hasWikidata"] = True
+        if routing_graph_path:
+            map_config["hasRouting"] = True
 
         create_zim(
             output_path=output_path,
@@ -2753,6 +3001,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             tile_count=total_tile_count if use_streaming else None,
             bbox=parse_bbox(bbox_str) if bbox_str else None,
             wikidata_data=wikidata_data,
+            routing_graph_path=routing_graph_path,
         )
 
         print()
