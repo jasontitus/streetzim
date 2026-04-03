@@ -22,8 +22,8 @@
     --radius: 10px;
   }
 
-  body { margin: 0; padding: 0; }
-  #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
+  #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; width: 100%; height: 100%; }
 
   /* --- Attribution / info tag --- */
   #info {
@@ -425,6 +425,9 @@ fetch(baseUrl + 'map-config.json')
     });
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }));
+    // Force resize after load — Kiwix WebView may not have final dimensions at init
+    map.on('load', function() { map.resize(); });
+    window.addEventListener('resize', function() { map.resize(); });
     // "You are here" geolocation dot — placed bottom-right to avoid overlapping layer controls
     map.addControl(new maplibregl.GeolocateControl({
       positionOptions: { enableHighAccuracy: true },
