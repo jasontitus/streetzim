@@ -340,7 +340,7 @@
     <section>
       <h3>Terrain / Elevation</h3>
       <p>Copernicus GLO-30 Digital Elevation Model</p>
-      <p class="license">Copernicus Programme, free and open access &mdash; provided by ESA / Airbus</p>
+      <p class="license">&copy; DLR e.V. 2010-2014 and &copy; Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the European Union and ESA; all rights reserved</p>
     </section>
     <section>
       <h3>Place Information</h3>
@@ -658,7 +658,8 @@ function makeStyle(config) {
     "type": "vector",
     "tiles": [tileUrl],
     "minzoom": config.minZoom || 0,
-    "maxzoom": config.maxZoom || 14
+    "maxzoom": config.maxZoom || 14,
+    "attribution": '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors | <a href="https://openmaptiles.org/">OpenMapTiles</a>'
   };
   if (config.bounds) {
     sourceConfig.bounds = config.bounds;
