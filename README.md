@@ -353,7 +353,25 @@ The OpenMapTiles schema includes these layers:
 
 ## License
 
-- Tool code: MIT
-- Map data: [OpenStreetMap](https://www.openstreetmap.org/copyright) (ODbL)
-- Tile schema: [OpenMapTiles](https://openmaptiles.org/) (CC-BY 4.0)
-- MapLibre GL JS: BSD-3-Clause
+**Tool code:** MIT (see [LICENSE](LICENSE))
+
+**Data in ZIM files:**
+
+| Source | License | Attribution Required |
+|---|---|---|
+| [OpenStreetMap](https://www.openstreetmap.org/copyright) | ODbL 1.0 | (c) OpenStreetMap contributors |
+| [Sentinel-2 Cloudless](https://s2maps.eu) (satellite) | **CC BY-NC-SA 4.0** | Sentinel-2 cloudless by EOX (Contains modified Copernicus Sentinel data 2021) |
+| [Copernicus GLO-30 DEM](https://dataspace.copernicus.eu) (elevation) | Copernicus free & open | (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by EU and ESA |
+| [OpenMapTiles](https://openmaptiles.org/) (tile schema) | CC BY 4.0 | (c) OpenMapTiles contributors |
+| [Wikidata](https://www.wikidata.org/) (place info) | CC0 1.0 | None required |
+| [Wikipedia](https://en.wikipedia.org/) (extracts) | CC BY-SA 3.0 | Wikipedia contributors |
+
+**Bundled software:** [MapLibre GL JS](https://maplibre.org/) (BSD-3-Clause), [Leaflet](https://leafletjs.com/) (BSD-2-Clause)
+
+> **Note on commercial use:** The Sentinel-2 cloudless 2021 satellite imagery
+> is licensed CC BY-NC-SA 4.0, which **restricts commercial use**. ZIM files
+> containing satellite tiles may only be distributed for non-commercial
+> purposes. To distribute commercially, simply omit the `--satellite`
+> flag when building, or substitute imagery with a permissive license.
+> All other data sources permit commercial redistribution with proper
+> attribution.

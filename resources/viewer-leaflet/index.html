@@ -96,7 +96,7 @@
                 maxZoom: 19,
                 tileSize: 512,
                 zoomOffset: -1,
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors | <a href="https://openmaptiles.org/">OpenMapTiles</a>',
                 errorTileUrl: ''
             }).addTo(map);
 
@@ -114,7 +114,7 @@
                     maxZoom: 19,
                     tileSize: satTileSize,
                     zoomOffset: satTileSize === 512 ? -1 : 0,
-                    attribution: '&copy; <a href="https://s2maps.eu">Sentinel-2 Cloudless</a> by EOX'
+                    attribution: '&copy; <a href="https://s2maps.eu">Sentinel-2 Cloudless</a> by EOX (Contains modified Copernicus Sentinel data 2021)'
                 });
 
                 var toggleBtn = document.getElementById('layer-toggle');

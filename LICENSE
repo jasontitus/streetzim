@@ -1,0 +1,88 @@
+MIT License
+
+Copyright (c) 2026 StreetZIM contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+===============================================================================
+
+THIRD-PARTY DATA LICENSES
+
+The ZIM files produced by this tool contain data from the following sources,
+each subject to its own license terms:
+
+1. OpenStreetMap
+   License: Open Data Commons Open Database License (ODbL 1.0)
+   Attribution: (c) OpenStreetMap contributors
+   Details: https://www.openstreetmap.org/copyright
+
+2. Sentinel-2 Cloudless Satellite Imagery (2021)
+   Provider: EOX IT Services GmbH
+   License: Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+            International (CC BY-NC-SA 4.0)
+   Attribution: Sentinel-2 cloudless - https://s2maps.eu by EOX IT Services
+                GmbH (Contains modified Copernicus Sentinel data 2021)
+   Details: https://s2maps.eu
+   NOTE: This license restricts commercial use. See README for details.
+
+3. Copernicus GLO-30 Digital Elevation Model
+   License: Copernicus Programme free and open access
+   Attribution: (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH
+                2014-2018 provided under COPERNICUS by the European Union and
+                ESA; all rights reserved
+   Details: https://dataspace.copernicus.eu
+
+4. OpenMapTiles Vector Tile Schema
+   License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+   Attribution: (c) OpenMapTiles contributors
+   Details: https://openmaptiles.org/
+
+5. Wikidata
+   License: Creative Commons CC0 1.0 Universal (Public Domain Dedication)
+   Details: https://www.wikidata.org/wiki/Wikidata:Licensing
+
+6. Wikipedia Extracts
+   License: Creative Commons Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0)
+   Details: https://en.wikipedia.org/wiki/Wikipedia:Copyrights
+
+===============================================================================
+
+BUNDLED SOFTWARE LICENSES
+
+7. MapLibre GL JS
+   License: BSD 3-Clause License
+   Details: https://github.com/maplibre/maplibre-gl-js/blob/main/LICENSE.txt
+
+8. Leaflet.js (alternative viewer)
+   License: BSD 2-Clause License
+   Details: https://github.com/Leaflet/Leaflet/blob/main/LICENSE
+
+===============================================================================
+
+BUILD-TIME DEPENDENCIES (not included in ZIM output)
+
+9. libzim / python-libzim
+   License: GNU General Public License v2 (GPLv2)
+   Details: https://github.com/openzim/libzim
+   Note: Used as a build tool only. ZIM file output is data, not a
+         derivative work of libzim.
+
+10. Tilemaker
+    License: BSD 2-Clause License
+    Details: https://github.com/systemed/tilemaker
