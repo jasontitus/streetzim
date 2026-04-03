@@ -978,7 +978,7 @@ def build_location_index(mbtiles_path):
             for feat in layer.get("features", []):
                 props = feat.get("properties", {})
                 cls = props.get("class", "")
-                if cls not in ("state", "country"):
+                if cls not in ("state", "country", "city"):
                     continue
                 name = props.get("name:latin") or props.get("name", "")
                 if not name:
@@ -1006,28 +1006,26 @@ def build_location_index(mbtiles_path):
         print("    No state/country places found for location index")
         return None
 
-    # Separate states and countries
+    # Separate by class
     states = [(lat, lon, name) for lat, lon, name, cls in places if cls == "state"]
     countries = [(lat, lon, name) for lat, lon, name, cls in places if cls == "country"]
+    cities = [(lat, lon, name) for lat, lon, name, cls in places if cls == "city"]
 
     # Deduplicate by name (keep first occurrence)
-    seen = set()
-    deduped_states = []
-    for lat, lon, name in states:
-        if name not in seen:
-            seen.add(name)
-            deduped_states.append((lat, lon, name))
-    states = deduped_states
+    def _dedup(items):
+        seen = set()
+        result = []
+        for lat, lon, name in items:
+            if name not in seen:
+                seen.add(name)
+                result.append((lat, lon, name))
+        return result
 
-    seen = set()
-    deduped_countries = []
-    for lat, lon, name in countries:
-        if name not in seen:
-            seen.add(name)
-            deduped_countries.append((lat, lon, name))
-    countries = deduped_countries
+    states = _dedup(states)
+    countries = _dedup(countries)
+    cities = _dedup(cities)
 
-    print(f"    Location index: {len(states)} states, {len(countries)} countries")
+    print(f"    Location index: {len(states)} states, {len(countries)} countries, {len(cities)} cities")
 
     # Grid-based spatial index for fast nearest-neighbor (no scipy needed).
     # Bucket places into 1-degree grid cells for O(1) average lookup.
@@ -1054,18 +1052,21 @@ def build_location_index(mbtiles_path):
 
     state_grid = _build_grid(states) if states else {}
     country_grid = _build_grid(countries) if countries else {}
+    city_grid = _build_grid(cities) if cities else {}
 
     def lookup(lat, lon):
-        parts = []
-        if state_grid:
-            s = _nearest_grid(lat, lon, state_grid)
-            if s:
-                parts.append(s)
-        if country_grid:
-            c = _nearest_grid(lat, lon, country_grid)
-            if c:
-                parts.append(c)
-        return ", ".join(parts) if parts else ""
+        city = _nearest_grid(lat, lon, city_grid) if city_grid else None
+        state = _nearest_grid(lat, lon, state_grid) if state_grid else None
+        country = _nearest_grid(lat, lon, country_grid) if country_grid else None
+        # Format: "City, State" when we have both (most useful for disambiguation)
+        # Falls back to "State, Country" or just "Country"
+        if city and state:
+            return f"{city}, {state}"
+        elif state:
+            return state
+        elif country:
+            return country
+        return ""
 
     return lookup
 
@@ -1288,9 +1289,12 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
         "poi": "poi",
         "transportation_name": "street",
         "water_name": "water",
+        "waterway": "water",
         "park": "park",
         "mountain_peak": "peak",
         "aerodrome_label": "airport",
+        "building": "building",
+        "landuse": "area",
     }
 
     if mbtiles_path:
@@ -1615,14 +1619,37 @@ def create_zim(
     creator.set_mainpath("index.html")
     with creator:
 
-        # Add metadata
+        # Add metadata — Name and Illustration are required by Kiwix to register the ZIM
+        zim_name = name.lower().replace(" ", "_").replace(",", "").replace(".", "")
         creator.add_metadata("Title", name)
         creator.add_metadata("Description", description)
         creator.add_metadata("Language", "eng")
         creator.add_metadata("Publisher", "create_osm_zim")
         creator.add_metadata("Creator", "OpenStreetMap contributors")
-        creator.add_metadata("Date", "2026-03-10")
-        creator.add_metadata("Tags", "maps;osm;offline")
+        import time as _time
+        creator.add_metadata("Date", _time.strftime("%Y-%m-%d"))
+        creator.add_metadata("Tags", "maps;osm;offline;_pictures:yes;_ftindex:yes")
+        creator.add_metadata("Name", f"osm_{zim_name}")
+        creator.add_metadata("Flavour", "maxi")
+        creator.add_metadata("Scraper", "streetzim/1.0")
+
+        # Add 48x48 illustration (required by Kiwix to show in library)
+        # Generate a simple map icon as PNG
+        try:
+            from PIL import Image, ImageDraw
+            img = Image.new("RGBA", (48, 48), (37, 99, 235, 255))
+            draw = ImageDraw.Draw(img)
+            # Simple globe/map icon
+            draw.ellipse([8, 8, 40, 40], outline=(255, 255, 255, 200), width=2)
+            draw.line([24, 8, 24, 40], fill=(255, 255, 255, 120), width=1)
+            draw.line([8, 24, 40, 24], fill=(255, 255, 255, 120), width=1)
+            draw.arc([4, 8, 44, 40], 0, 360, fill=(255, 255, 255, 80), width=1)
+            import io
+            buf = io.BytesIO()
+            img.save(buf, "PNG")
+            creator.add_illustration(48, buf.getvalue())
+        except ImportError:
+            pass  # PIL not available, skip illustration
 
         # Add the viewer HTML (main page)
         print("    Adding viewer HTML...")

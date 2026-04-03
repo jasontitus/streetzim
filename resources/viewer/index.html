@@ -425,6 +425,12 @@ fetch(baseUrl + 'map-config.json')
     });
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }));
+    // "You are here" geolocation dot — placed bottom-right to avoid overlapping layer controls
+    map.addControl(new maplibregl.GeolocateControl({
+      positionOptions: { enableHighAccuracy: true },
+      trackUserLocation: true,
+      showUserHeading: true
+    }), 'bottom-right');
 
     // Satellite layer toggle
     if (config.hasSatellite) {
@@ -1223,26 +1229,60 @@ function initSearch(map) {
     var words = q.split(/\s+/);
     var matches = [];
 
+    // Get current map center and bounds for proximity scoring
+    var center = map.getCenter();
+    var clat = center.lat;
+    var clng = center.lng;
+    var bounds = map.getBounds();
+
     for (var i = 0; i < entries.length; i++) {
       var item = entries[i];
       var name = item.n.toLowerCase();
 
       // All words must appear in the name
       var allMatch = true;
-      var score = 0;
+      var textScore = 0;
       for (var w = 0; w < words.length; w++) {
         var pos = name.indexOf(words[w]);
         if (pos === -1) { allMatch = false; break; }
-        if (pos === 0 || name[pos - 1] === ' ') score += 10;
-        score += 1;
+        if (pos === 0 || name[pos - 1] === ' ') textScore += 10;
+        textScore += 1;
       }
       if (!allMatch) continue;
 
-      if (name === q) score += 100;
-      if (name.indexOf(q) === 0) score += 50;
-      var typeBonus = {place: 30, airport: 25, peak: 20, park: 15, water: 10, poi: 5, street: 0};
-      score += typeBonus[item.t] || 0;
-      matches.push({ item: item, score: score });
+      if (name === q) textScore += 50;
+      if (name.indexOf(q) === 0) textScore += 25;
+      var typeBonus = {place: 20, airport: 15, peak: 10, park: 10, water: 5, poi: 5, building: 3, street: 0};
+      textScore += typeBonus[item.t] || 0;
+
+      // Proximity is the PRIMARY signal — multiply text score by proximity factor
+      // This means a mediocre text match nearby always beats a perfect match far away
+      var proximityLabel = '';
+      var score = textScore; // fallback if no coordinates
+      if (item.a !== undefined && item.o !== undefined) {
+        var dlat = item.a - clat;
+        var dlng = item.o - clng;
+        var dist = Math.sqrt(dlat * dlat + dlng * dlng);
+        var viewSpan = Math.max(
+          bounds.getNorth() - bounds.getSouth(),
+          bounds.getEast() - bounds.getWest()
+        );
+        var ratio = dist / (viewSpan || 1);
+
+        // Proximity multiplier: on-screen = 10x, few viewports = 5x, far = 1x
+        var proxMultiplier = 1 + 9 * Math.exp(-ratio * 0.5);
+        score = textScore * proxMultiplier;
+
+        // Generate human-readable distance for display
+        var miles = dist * 69;
+        if (miles < 0.5) proximityLabel = 'nearby';
+        else if (miles < 5) proximityLabel = Math.round(miles) + ' mi';
+        else if (miles < 50) proximityLabel = Math.round(miles / 5) * 5 + ' mi';
+        else if (miles < 500) proximityLabel = Math.round(miles / 10) * 10 + ' mi';
+        else proximityLabel = Math.round(miles / 100) * 100 + ' mi';
+      }
+
+      matches.push({ item: item, score: score, dist: proximityLabel });
     }
 
     matches.sort(function(a, b) { return b.score - a.score; });
@@ -1261,10 +1301,11 @@ function initSearch(map) {
       var m = matches[j].item;
       var label = m.s ? m.s.replace(/_/g, ' ') : m.t;
       var loc = m.l ? ' &middot; ' + escapeHtml(m.l) : '';
+      var distLabel = matches[j].dist ? ' &middot; ' + escapeHtml(matches[j].dist) : '';
       html += '<div class="search-result" data-idx="' + j +
         '" data-lat="' + m.a + '" data-lon="' + m.o + '" data-type="' + m.t + '">' +
         '<span class="search-result-name">' + escapeHtml(m.n) + '</span>' +
-        '<span class="search-result-type">' + escapeHtml(label) + loc + '</span></div>';
+        '<span class="search-result-type">' + escapeHtml(label) + loc + distLabel + '</span></div>';
     }
     resultsEl.innerHTML = html;
     resultsEl.style.display = 'block';
@@ -1455,6 +1496,12 @@ function initWikidataPopups(map, config) {
     if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
     return n.toString();
   }
+
+  // Expose popup builder for use by wiki sidebar
+  map._buildWdPopup = buildPopupHTML;
+  map._wdCache = wdCache;
+  map._fetchWdChunk = fetchWdChunk;
+  map._getWdPrefix = getWdPrefix;
 
   function buildPopupHTML(name, wd) {
     var h = '<div style="font-family:-apple-system,system-ui,sans-serif;max-width:280px;font-size:13px;">';
@@ -1733,6 +1780,8 @@ function initWikiSidebar(map, config) {
 
         if (desc) div.appendChild(createEl('div', 'wiki-item-desc', desc));
 
+        var itemQid = item.qid;
+        var itemName = item.name;
         div.addEventListener('click', function() {
           var lat = parseFloat(div.getAttribute('data-lat'));
           var lng = parseFloat(div.getAttribute('data-lng'));
@@ -1753,11 +1802,28 @@ function initWikiSidebar(map, config) {
             var targetZoom = Math.max(map.getZoom(), 14);
             var isMobile = window.innerWidth <= 600;
             if (isMobile && panel.style.display === 'flex') {
-              // Shift center upward by ~20% of viewport to account for bottom sheet
               var offsetLat = (map.getBounds().getNorth() - map.getBounds().getSouth()) * 0.2;
               map.flyTo({ center: [lng, lat - offsetLat], zoom: targetZoom, duration: 1200 });
             } else {
               map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 1200 });
+            }
+            // Show wikidata popup offset above the point
+            if (map._buildWdPopup && map._wdCache) {
+              var prefix = getWdPrefix(itemQid);
+              var chunk = wdCache[prefix];
+              var wdEntry = chunk ? chunk[itemQid] : null;
+              if (wdEntry) {
+                // Remove any existing popup
+                if (map._wikiSidebarPopup) { map._wikiSidebarPopup.remove(); }
+                map._wikiSidebarPopup = new maplibregl.Popup({
+                  maxWidth: '320px',
+                  offset: [0, -30],
+                  closeOnClick: true
+                })
+                  .setLngLat([lng, lat])
+                  .setHTML(map._buildWdPopup(itemName, wdEntry))
+                  .addTo(map);
+              }
             }
             // Remove marker after 5 seconds
             pulseTimeout = setTimeout(function() {
