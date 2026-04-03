@@ -25,6 +25,7 @@ Size comparison (typical city):
 """
 
 import argparse
+import datetime
 import glob
 import gzip
 import json
@@ -54,7 +55,7 @@ VIEWER_DIR = RESOURCES_DIR / "viewer"
 # Geofabrik base URL for downloading OSM extracts
 GEOFABRIK_BASE = "https://download.geofabrik.de"
 
-# Sentinel-2 Cloudless satellite tile service (EOX, CC BY 4.0 for 2016 vintage)
+# Sentinel-2 Cloudless satellite tile service (EOX, CC BY-NC-SA 4.0 for 2021 vintage)
 SATELLITE_TILE_URL = "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/g/{z}/{y}/{x}.jpg"
 
 # Copernicus GLO-30 DEM tile URL (public S3, no auth)
@@ -1621,8 +1622,16 @@ def create_zim(
         creator.add_metadata("Language", "eng")
         creator.add_metadata("Publisher", "create_osm_zim")
         creator.add_metadata("Creator", "OpenStreetMap contributors")
-        creator.add_metadata("Date", "2026-03-10")
+        creator.add_metadata("Date", datetime.date.today().isoformat())
         creator.add_metadata("Tags", "maps;osm;offline")
+        creator.add_metadata("License", (
+            "Map data: ODbL (OpenStreetMap); "
+            "Tile schema: CC-BY 4.0 (OpenMapTiles); "
+            "Satellite imagery: CC BY-NC-SA 4.0 (Sentinel-2 cloudless by EOX); "
+            "Elevation: Copernicus GLO-30 DEM © DLR/Airbus, provided under COPERNICUS by EU and ESA; "
+            "Place info: CC0 (Wikidata) / CC BY-SA 3.0 (Wikipedia); "
+            "Tool code: MIT"
+        ))
 
         # Add the viewer HTML (main page)
         print("    Adding viewer HTML...")
