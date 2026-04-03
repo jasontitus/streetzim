@@ -619,6 +619,7 @@ fetch(baseUrl + 'map-config.json')
 
     // Update info box with area name
     if (config.name) {
+      document.title = config.name + ' — Offline Map';
       document.querySelector('#info h3').textContent = config.name;
     }
 
