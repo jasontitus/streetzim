@@ -843,11 +843,18 @@ def extract_tiles_from_mbtiles(mbtiles_path):
 
 
 def generate_sdf_font_glyphs():
-    """Generate minimal SDF font glyphs for MapLibre GL JS.
+    """Generate SDF font glyphs for MapLibre GL JS.
 
     MapLibre GL JS requires SDF (Signed Distance Field) font glyphs in
     protocol buffer format. Each range covers 256 Unicode codepoints.
     Downloads real SDF fonts from the openmaptiles font CDN.
+
+    Downloads every BMP range the CDN serves so that labels across all
+    European scripts render correctly — in particular the General
+    Punctuation block (8192-8447, includes U+2013 en dash used in names
+    like "Paris-Dakar") and Arabic (1536-1791), which are required for
+    continental Europe builds. Ranges that 404 on the CDN are skipped;
+    MapLibre falls back to local rendering for missing ranges.
     """
     print("  Downloading SDF font glyphs...")
     fonts = {}
@@ -865,62 +872,49 @@ def generate_sdf_font_glyphs():
 
     font_cdn = "https://fonts.openmaptiles.org"
 
+    # Build the full list of (local_name, cdn_name, range_key) tasks so
+    # we can parallelize the downloads.
+    tasks = []
     for local_name, cdn_name in font_map.items():
-        # Download ranges covering Latin + common characters (0-1279)
         for start in range(0, 65536, 256):
-            end = start + 255
-            range_key = f"{start}-{end}"
+            range_key = f"{start}-{start + 255}"
+            tasks.append((local_name, cdn_name, range_key))
 
-            cdn_encoded = cdn_name.replace(" ", "%20")
-            url = f"{font_cdn}/{cdn_encoded}/{range_key}.pbf"
-            try:
-                req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
-                resp = urllib.request.urlopen(req)
-                pbf_data = resp.read()
-                fonts[(local_name, range_key)] = pbf_data
-            except Exception as e:
-                # Generate empty stub as fallback
-                fonts[(local_name, range_key)] = _encode_font_pbf(local_name, range_key)
+    def fetch_one(task):
+        local_name, cdn_name, range_key = task
+        cdn_encoded = cdn_name.replace(" ", "%20")
+        url = f"{font_cdn}/{cdn_encoded}/{range_key}.pbf"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return (local_name, range_key, resp.read(), None)
+        except urllib.error.HTTPError as e:
+            # 404 means this range has no glyphs in this font — skip it.
+            # MapLibre falls back to local rendering on 404.
+            return (local_name, range_key, None, f"HTTP {e.code}")
+        except Exception as e:
+            return (local_name, range_key, None, str(e))
 
-            # Only need ranges with actual glyphs (Latin + common)
-            if start >= 1024:
-                break
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    skipped = 0
+    failed = 0
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        futures = [pool.submit(fetch_one, t) for t in tasks]
+        done = 0
+        for fut in as_completed(futures):
+            local_name, range_key, data, err = fut.result()
+            done += 1
+            if data is not None:
+                fonts[(local_name, range_key)] = data
+            elif err and err.startswith("HTTP 404"):
+                skipped += 1
+            else:
+                failed += 1
+            if done % 100 == 0:
+                print(f"\r    Downloaded {len(fonts)} ranges ({done}/{len(tasks)} checked, {skipped} empty, {failed} errors)...", end="", flush=True)
 
-    print(f"    Downloaded {len(fonts)} font range files")
+    print(f"\r    Downloaded {len(fonts)} font range files ({skipped} empty ranges skipped, {failed} errors)       ", flush=True)
     return fonts
-
-
-def _encode_font_pbf(name, range_str):
-    """Encode a minimal protobuf for a font glyph range.
-
-    This creates a valid but empty fontstack protobuf that MapLibre can parse
-    without errors (it just won't have bitmap data for the glyphs).
-    """
-    # Protobuf wire format:
-    # field 1 (fontstack message):
-    #   field 1 (name): string
-    #   field 2 (range): string
-
-    def encode_varint(value):
-        result = b""
-        while value > 0x7F:
-            result += bytes([(value & 0x7F) | 0x80])
-            value >>= 7
-        result += bytes([value])
-        return result
-
-    def encode_string_field(field_num, s):
-        tag = (field_num << 3) | 2  # wire type 2 = length-delimited
-        encoded = s.encode("utf-8")
-        return encode_varint(tag) + encode_varint(len(encoded)) + encoded
-
-    # Build inner fontstack message
-    inner = encode_string_field(1, name)  # name
-    inner += encode_string_field(2, range_str)  # range
-
-    # Wrap in outer stacks field (field 1, wire type 2)
-    outer = encode_varint((1 << 3) | 2) + encode_varint(len(inner)) + inner
-    return outer
 
 
 def tile_to_lnglat(z, x, y, px, py, extent=4096):
