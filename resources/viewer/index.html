@@ -366,6 +366,58 @@ var baseUrl = (function() {
   return href.substring(0, href.lastIndexOf('/') + 1);
 })();
 
+// Debug logging — enable by appending ?debug=1 to the URL.
+// Keeps a ring-buffer of the last 200 log lines so we can render them
+// into a visible panel if something goes wrong (consoles are often
+// unavailable inside the Kiwix WebView on Windows/iOS).
+var DEBUG = /[?&]debug=1/.test(window.location.search);
+var _debugLog = [];
+function dbg() {
+  var args = Array.prototype.slice.call(arguments);
+  var line = args.map(function(a) {
+    if (a instanceof Error) return (a.name || 'Error') + ': ' + a.message;
+    if (typeof a === 'object') {
+      try { return JSON.stringify(a); } catch (e) { return String(a); }
+    }
+    return String(a);
+  }).join(' ');
+  _debugLog.push('[' + new Date().toISOString().substr(11, 12) + '] ' + line);
+  if (_debugLog.length > 200) _debugLog.shift();
+  if (window.console && console.log) console.log.apply(console, ['[streetzim]'].concat(args));
+}
+function describeError(err) {
+  if (!err) return 'unknown error';
+  var parts = [];
+  if (err.name) parts.push(err.name);
+  if (err.message) parts.push(err.message);
+  if (err.code) parts.push('code=' + err.code);
+  return parts.join(': ') || String(err);
+}
+function showFatalError(title, err, url) {
+  var info = document.getElementById('info');
+  if (!info) return;
+  var html = '<h3>' + title + '</h3>';
+  html += '<p style="white-space:normal;word-break:break-word;">' + describeError(err) + '</p>';
+  if (url) html += '<p style="font-size:8px;opacity:0.7;word-break:break-all;">URL: ' + url + '</p>';
+  html += '<p style="font-size:8px;opacity:0.7;">UA: ' + (navigator.userAgent || '?').substring(0, 80) + '</p>';
+  html += '<p style="font-size:8px;opacity:0.7;">Base: ' + baseUrl + '</p>';
+  html += '<p style="font-size:9px;"><a href="#" id="debug-show" style="color:#2563eb;">Show debug log</a></p>';
+  info.innerHTML = html;
+  info.style.maxWidth = '420px';
+  var link = document.getElementById('debug-show');
+  if (link) {
+    link.addEventListener('click', function(e) {
+      e.preventDefault();
+      var pre = document.createElement('pre');
+      pre.style.cssText = 'max-height:200px;overflow:auto;font-size:9px;background:#fff;padding:6px;margin-top:6px;border:1px solid #ddd;white-space:pre-wrap;word-break:break-all;';
+      pre.textContent = _debugLog.join('\n') || '(empty)';
+      info.appendChild(pre);
+      link.style.display = 'none';
+    });
+  }
+}
+dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAgent });
+
 // Register a custom protocol that fetches with retry logic.
 // Kiwix JS PWA's ServiceWorker can drop requests under load,
 // so we retry failed fetches up to 3 times with backoff.
@@ -376,13 +428,14 @@ maplibregl.addProtocol('zimtile', function(params, abortController) {
   function attempt(n) {
     return fetch(url, { signal: abortController.signal })
       .then(function(r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + r.statusText);
         return r.arrayBuffer();
       })
       .then(function(buf) {
         return { data: buf };
       })
       .catch(function(err) {
+        dbg('tile fetch failed', 'attempt', n, url, describeError(err));
         if (n < 3 && !abortController.signal.aborted) {
           return new Promise(function(resolve) {
             setTimeout(function() { resolve(attempt(n + 1)); }, 300 * n);
@@ -394,9 +447,31 @@ maplibregl.addProtocol('zimtile', function(params, abortController) {
   return attempt(1);
 });
 
-// Read map config from embedded JSON
-fetch(baseUrl + 'map-config.json')
-  .then(function(r) { return r.json(); })
+// Read map config from embedded JSON (with retry — on Windows kiwix-desktop
+// the first fetch after ZIM load can occasionally fail before the internal
+// server is ready).
+function fetchConfig(n) {
+  var url = baseUrl + 'map-config.json';
+  dbg('fetch map-config.json', 'attempt', n, url);
+  return fetch(url)
+    .then(function(r) {
+      dbg('map-config.json response', r.status, r.statusText, 'type=' + r.type);
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + r.statusText);
+      return r.json();
+    })
+    .catch(function(err) {
+      dbg('map-config.json fetch failed', 'attempt', n, describeError(err));
+      if (n < 4) {
+        return new Promise(function(resolve) {
+          setTimeout(function() { resolve(fetchConfig(n + 1)); }, 400 * n);
+        });
+      }
+      // Re-throw with URL attached so the outer catch can show it.
+      err._url = url;
+      throw err;
+    });
+}
+fetchConfig(1)
   .then(function(config) {
     // Check WebGL support before initializing MapLibre
     try {
@@ -655,8 +730,8 @@ fetch(baseUrl + 'map-config.json')
     initWikiSidebar(map, config);
   })
   .catch(function(err) {
-    document.getElementById('info').innerHTML =
-      '<h3>Error</h3><p>' + err.message + '</p>';
+    dbg('fatal error loading map', describeError(err), err && err.stack);
+    showFatalError('Error loading map', err, err && err._url);
   });
 
 function makeStyle(config) {
