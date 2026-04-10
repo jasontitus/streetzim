@@ -147,6 +147,41 @@ ZIM_FILE="osm-${REGION_ID}.zim"
 ) &
 PERIODIC_PUSH_PID=$!
 
+# ----------------------------------------------------------------------------
+# Spot → on-demand handoff: if this is a spot VM, do the download-heavy steps
+# first, push caches, then self-stop. A local watcher converts the VM to
+# on-demand and restarts, at which point the build reruns but satellite/terrain
+# are fully cached so it goes straight to ZIM packaging.
+# On a non-spot (STANDARD) VM, skip this and run the full build.
+# ----------------------------------------------------------------------------
+IS_SPOT=$(curl -sf -H "Metadata-Flavor: Google" \
+  http://metadata.google.internal/computeMetadata/v1/instance/scheduling/preemptible || echo "FALSE")
+
+PHASE_FILE="/var/log/streetzim-phase"
+
+if [ "$IS_SPOT" = "TRUE" ] && [ ! -f "$PHASE_FILE" ]; then
+  echo "=== SPOT PHASE: downloading satellite + terrain (ZIM packaging will run on-demand) ==="
+  # Run with --satellite and --terrain to trigger downloads, but we expect
+  # the build to complete fully if not preempted. However, if we detect
+  # the build reached ZIM packaging, we'll stop ourselves for the handoff.
+  # Monitor in background for the packaging step.
+  (
+    while true; do
+      sleep 30
+      if grep -q "Building ZIM file" /var/log/streetzim-build.log 2>/dev/null; then
+        echo "=== ZIM packaging detected on SPOT — stopping for on-demand handoff ==="
+        kill $PERIODIC_PUSH_PID 2>/dev/null || true
+        push_caches
+        echo "READY_FOR_PACKAGING" > "$PHASE_FILE"
+        # Self-stop. The local watcher will convert to on-demand and restart.
+        gcloud compute instances stop "$INSTANCE_NAME" --zone="$ZONE" --quiet &
+        exit 0
+      fi
+    done
+  ) &
+  HANDOFF_WATCHER_PID=$!
+fi
+
 echo "=== Building $REGION_NAME ==="
 ZSTD_CLEVEL=22 python3 create_osm_zim.py \
   --mbtiles world-data/world-tiles-v2.mbtiles \
