@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StreetZim — Offline Maps for Kiwix</title>
+<meta name="description" content="Free, fully offline OpenStreetMap maps for the Kiwix reader. Vector tiles, satellite imagery, 3D terrain, and Wikipedia info — works without an internet connection on iOS, Android, Mac, Windows, and Linux.">
+<!-- Firebase Analytics -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+  import { getAnalytics, logEvent } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-analytics.js";
+  const firebaseConfig = {
+    apiKey: "AIzaSyAGolk6U9X4PgPEY4VIbPvIvLE4usE5c60",
+    authDomain: "streetzim.firebaseapp.com",
+    projectId: "streetzim",
+    storageBucket: "streetzim.firebasestorage.app",
+    messagingSenderId: "1056177608946",
+    appId: "1:1056177608946:web:c6abf5a817f346b317986b",
+    measurementId: "G-S46FWQ9EGY"
+  };
+  const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+
+  // Track clicks on download, torrent, and details links.
+  // Uses pointerdown so the event fires even when the browser navigates away.
+  document.addEventListener('pointerdown', function(e) {
+    var a = e.target.closest('a[data-track]');
+    if (!a) return;
+    try {
+      logEvent(analytics, 'map_link_click', {
+        region: a.getAttribute('data-region') || 'unknown',
+        link_type: a.getAttribute('data-track'),      // "download" | "torrent" | "details"
+        region_title: a.getAttribute('data-title') || ''
+      });
+    } catch (err) {}
+  });
+</script>
+<style>
+  :root {
+    --bg: #0b1220;
+    --bg-card: #131c2e;
+    --bg-card-hover: #182339;
+    --text: #e6edf7;
+    --text-dim: #94a3b8;
+    --text-faint: #64748b;
+    --accent: #3b82f6;
+    --accent-hover: #60a5fa;
+    --border: rgba(255,255,255,0.08);
+    --border-strong: rgba(255,255,255,0.16);
+    --max-w: 980px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container { max-width: var(--max-w); margin: 0 auto; padding: 0 24px; }
+
+  header {
+    padding: 40px 0 28px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(59,130,246,0.08) 0%, rgba(11,18,32,0) 100%);
+  }
+  h1 {
+    font-size: 38px; font-weight: 700; letter-spacing: -0.02em;
+    margin: 0 0 10px;
+  }
+  h1 .accent { color: var(--accent); }
+  .tagline {
+    font-size: 19px; color: var(--text-dim);
+    max-width: 640px; margin: 0;
+  }
+  .badges {
+    margin-top: 24px; display: flex; gap: 8px; flex-wrap: wrap;
+  }
+  .badge {
+    display: inline-block;
+    padding: 4px 10px; border-radius: 999px;
+    background: rgba(59,130,246,0.12);
+    border: 1px solid rgba(59,130,246,0.25);
+    color: var(--accent-hover);
+    font-size: 12px; font-weight: 500;
+  }
+
+  section {
+    padding: 40px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  section.maps-section { padding-top: 28px; }
+  section:last-of-type { border-bottom: none; }
+  h2 {
+    font-size: 26px; font-weight: 700; letter-spacing: -0.01em;
+    margin: 0 0 20px;
+  }
+  h3 {
+    font-size: 17px; font-weight: 600;
+    margin: 24px 0 8px;
+    color: var(--text);
+  }
+  p { margin: 0 0 16px; color: var(--text-dim); }
+  p.lead { color: var(--text); font-size: 17px; }
+  a { color: var(--accent-hover); text-decoration: none; }
+  a:hover { color: var(--accent); text-decoration: underline; }
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-top: 24px;
+  }
+  .feature {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+  .feature h4 {
+    margin: 0 0 6px;
+    font-size: 15px; font-weight: 600;
+  }
+  .feature p {
+    margin: 0;
+    font-size: 14px; color: var(--text-dim);
+  }
+
+  .maps {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 14px;
+    margin-top: 16px;
+  }
+  .map-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px;
+    transition: background 0.15s, border-color 0.15s, transform 0.15s;
+    display: flex; flex-direction: column;
+  }
+  .map-card:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--border-strong);
+  }
+  .map-card-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .map-card-title {
+    font-size: 17px; font-weight: 700;
+    color: var(--text);
+    line-height: 1.25;
+  }
+  .map-card-size {
+    font-size: 12px; font-weight: 500;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .map-card-desc {
+    font-size: 13px; color: var(--text-dim);
+    margin: 0 0 12px;
+    line-height: 1.45;
+  }
+  .map-card-links {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    margin-top: auto;
+  }
+  .btn {
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 11.5px; font-weight: 500;
+    text-decoration: none;
+    transition: all 0.15s;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: white;
+  }
+  .btn-primary:hover {
+    background: var(--accent-hover);
+    color: white; text-decoration: none;
+  }
+  .btn-secondary {
+    background: transparent;
+    color: var(--text-dim);
+    border-color: var(--border-strong);
+  }
+  .btn-secondary:hover {
+    color: var(--text);
+    border-color: var(--text-faint);
+    text-decoration: none;
+  }
+  .map-card.upcoming {
+    opacity: 0.55;
+  }
+  .map-card.upcoming .map-card-size {
+    color: var(--accent);
+  }
+
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin-top: 20px;
+  }
+  .step {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    position: relative;
+  }
+  .step-num {
+    display: inline-block;
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: rgba(59,130,246,0.15);
+    color: var(--accent-hover);
+    text-align: center; line-height: 26px;
+    font-size: 13px; font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .step h4 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+  .step p { margin: 0; font-size: 14px; }
+
+  .licenses {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 22px 24px;
+    margin-top: 16px;
+    font-size: 14px;
+  }
+  .licenses ul {
+    margin: 0; padding-left: 18px;
+    color: var(--text-dim);
+  }
+  .licenses li { margin: 6px 0; }
+  .licenses strong { color: var(--text); }
+
+  .updated {
+    text-align: right;
+    font-size: 12px;
+    color: var(--text-faint);
+    margin: 0 0 12px;
+  }
+
+  footer {
+    padding: 32px 0 48px;
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 13px;
+  }
+  footer a { color: var(--text-dim); }
+
+  @media (max-width: 600px) {
+    h1 { font-size: 34px; }
+    .tagline { font-size: 17px; }
+    section { padding: 36px 0; }
+    header { padding: 48px 0 32px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="container">
+    <h1>Street<span class="accent">Zim</span></h1>
+    <p class="tagline">Fully offline OpenStreetMap maps for the Kiwix reader. Vector tiles, satellite imagery, 3D terrain, and Wikipedia &mdash; no internet connection required.</p>
+    <div class="badges">
+      <span class="badge">iOS</span>
+      <span class="badge">Android</span>
+      <span class="badge">macOS</span>
+      <span class="badge">Windows</span>
+      <span class="badge">Linux</span>
+      <span class="badge">Free &amp; Open Source</span>
+    </div>
+  </div>
+</header>
+
+<section class="maps-section">
+  <div class="container">
+    <h2>Download a map</h2>
+    <p>Pick a region below, install <a href="https://kiwix.org" target="_blank" rel="noopener">Kiwix</a>, and open the .zim file. Hosted on the Internet Archive — each download includes a torrent.</p>
+    <p class="updated">Last updated: {{UPDATED}}</p>
+
+    <div class="maps">
+{{MAPS}}
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>What is it?</h2>
+    <p class="lead">StreetZim packages OpenStreetMap data &mdash; entire countries or continents &mdash; into a single ZIM file you can open in <a href="https://kiwix.org" target="_blank" rel="noopener">Kiwix</a>. It works completely offline: no servers, no API calls, no internet required after the initial download.</p>
+    <p>Unlike traditional offline map apps that ship raster tiles, StreetZim uses <strong>vector tiles rendered client-side</strong> with MapLibre GL JS. The result: smooth pan, zoom, rotation, and even 3D terrain &mdash; all from a single file on your device.</p>
+
+    <div class="features">
+      <div class="feature">
+        <h4>Vector Maps</h4>
+        <p>Smooth, sharp street-level maps with the OpenMapTiles schema, rendered live by MapLibre.</p>
+      </div>
+      <div class="feature">
+        <h4>Satellite Imagery</h4>
+        <p>10-meter resolution Sentinel-2 cloudless imagery for the entire mapped region.</p>
+      </div>
+      <div class="feature">
+        <h4>3D Terrain</h4>
+        <p>Hillshade and 3D elevation from the Copernicus GLO-30 global DEM.</p>
+      </div>
+      <div class="feature">
+        <h4>Wikipedia &amp; Wikidata</h4>
+        <p>Tap any city, mountain, or landmark for its Wikipedia article and key facts.</p>
+      </div>
+      <div class="feature">
+        <h4>Full-Text Search</h4>
+        <p>Search across millions of place names, streets, parks, peaks, airports, and POIs.</p>
+      </div>
+      <div class="feature">
+        <h4>Truly Offline</h4>
+        <p>Just one .zim file. No accounts, no telemetry, no network. Open and go.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>How to Use</h2>
+    <div class="steps">
+      <div class="step">
+        <span class="step-num">1</span>
+        <h4>Install Kiwix</h4>
+        <p>Free reader for iOS, Android, Mac, Windows, and Linux. Get it at <a href="https://kiwix.org" target="_blank" rel="noopener">kiwix.org</a>.</p>
+      </div>
+      <div class="step">
+        <span class="step-num">2</span>
+        <h4>Download a map</h4>
+        <p>Pick a region above and download the .zim file (or grab the torrent for faster speeds).</p>
+      </div>
+      <div class="step">
+        <span class="step-num">3</span>
+        <h4>Open in Kiwix</h4>
+        <p>Open the .zim file in the Kiwix app. That&rsquo;s it &mdash; the map runs entirely offline.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>Data Sources &amp; Licenses</h2>
+    <p>StreetZim is built entirely from open data. Each map ZIM bundles content from these sources:</p>
+    <div class="licenses">
+      <ul>
+        <li><strong>Map data:</strong> &copy; OpenStreetMap contributors, available under the <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">Open Database License (ODbL)</a>.</li>
+        <li><strong>Tile schema:</strong> <a href="https://openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> (CC-BY 4.0).</li>
+        <li><strong>Satellite imagery:</strong> Sentinel-2 cloudless by <a href="https://s2maps.eu/" target="_blank" rel="noopener">EOX IT Services GmbH</a> &mdash; CC BY-NC-SA 4.0.</li>
+        <li><strong>Elevation:</strong> Copernicus GLO-30 DEM &mdash; &copy; DLR / Airbus, provided under the COPERNICUS programme by the European Union and ESA.</li>
+        <li><strong>Place info:</strong> <a href="https://www.wikidata.org/" target="_blank" rel="noopener">Wikidata</a> (CC0) and <a href="https://en.wikipedia.org/" target="_blank" rel="noopener">Wikipedia</a> (CC BY-SA 3.0).</li>
+        <li><strong>Tool code:</strong> <a href="https://github.com/jasontitus/streetzim" target="_blank" rel="noopener">StreetZim</a> &mdash; MIT License.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    StreetZim is an open source project. Source on <a href="https://github.com/jasontitus/streetzim" target="_blank" rel="noopener">GitHub</a>. Maps hosted on the <a href="https://archive.org" target="_blank" rel="noopener">Internet Archive</a>.
+  </div>
+</footer>
+
+</body>
+</html>
