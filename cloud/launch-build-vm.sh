@@ -39,10 +39,10 @@ if [ $USE_BIG -eq 1 ]; then
   MACHINE_TYPE=n2-standard-16   # 16 vCPU, 64 GB RAM, $0.78/hr on-demand
   ZONES=(us-central1-a us-central1-b us-central1-c us-central1-f us-east1-b us-east1-c us-east1-d us-west1-a us-west1-b us-west1-c)
 else
-  # c3-standard-8: 8 vCPU, 32 GB RAM, $0.41/hr on-demand, Sapphire Rapids
-  MACHINE_TYPE=c3-standard-8
-  # c3 only available in specific zones
-  ZONES=(us-central1-a us-central1-b us-central1-c us-east1-b us-east1-c us-east1-d us-east4-a us-east4-b us-east4-c us-west1-a us-west1-b)
+  # n2-standard-8: 8 vCPU, 32 GB RAM, $0.39/hr on-demand
+  # (c3 doesn't support pd-standard disks; n2 is compatible and similar price)
+  MACHINE_TYPE=n2-standard-8
+  ZONES=(us-central1-a us-central1-b us-central1-c us-central1-f us-east1-b us-east1-c us-east1-d us-west1-a us-west1-b us-west1-c)
 fi
 
 DISK_SIZE=750                  # GB pd-standard — needs room for:
