@@ -19,18 +19,18 @@ echo ""
 while true; do
   any_alive=0
   for VM in "${WATCHED_VMS[@]}"; do
-    # Check VM status
-    STATUS=$(gcloud compute instances describe "$VM" --project="$PROJECT" \
-      --format="value(status)" 2>/dev/null || echo "DELETED")
+    # Check VM status + zone via list (doesn't require --zone)
+    VM_INFO=$(gcloud compute instances list --project="$PROJECT" \
+      --filter="name=$VM" --format="value(status,zone)" 2>/dev/null)
+    STATUS=$(echo "$VM_INFO" | awk '{print $1}')
+    ZONE=$(echo "$VM_INFO" | awk '{print $2}' | awk -F/ '{print $NF}')
+    [ -z "$STATUS" ] && STATUS="DELETED"
 
     case "$STATUS" in
       RUNNING)
         any_alive=1
         ;;
       TERMINATED|STOPPED)
-        # VM stopped itself — check if it has the phase marker
-        ZONE=$(gcloud compute instances describe "$VM" --project="$PROJECT" \
-          --format="value(zone)" 2>/dev/null | awk -F/ '{print $NF}')
 
         echo "[$(date '+%H:%M:%S')] $VM is $STATUS in $ZONE — converting to on-demand..."
 
@@ -48,8 +48,21 @@ while true; do
         any_alive=1
         ;;
       DELETED|"")
-        # VM self-deleted after successful build — done!
-        echo "[$(date '+%H:%M:%S')] $VM is gone (build complete or manually deleted)."
+        # VM is gone. Could be: (a) successful build + self-delete, or
+        # (b) spot preemption. Check Archive.org for the finished ZIM to
+        # decide. If not uploaded yet, it was preempted — relaunch.
+        REGION_ID="${VM#streetzim-build-}"
+        IA_CHECK=$(curl -sf "https://archive.org/metadata/streetzim-${REGION_ID}" 2>/dev/null \
+          | python3 -c "import sys,json; d=json.load(sys.stdin); fs=[f for f in d.get('files',[]) if f.get('name','').endswith('.zim')]; print('YES' if fs and int(fs[0].get('size',0))>1000000 else 'NO')" 2>/dev/null || echo "NO")
+
+        if [ "$IA_CHECK" = "YES" ]; then
+          echo "[$(date '+%H:%M:%S')] $VM: build complete (ZIM found on Archive.org). Done."
+        else
+          echo "[$(date '+%H:%M:%S')] $VM: preempted (no ZIM on Archive.org). Relaunching..."
+          LAUNCH_DIR="$(dirname "$0")"
+          bash "$LAUNCH_DIR/launch-build-vm.sh" "$REGION_ID" --fast --spot 2>&1 | tail -3
+          any_alive=1
+        fi
         ;;
       *)
         echo "[$(date '+%H:%M:%S')] $VM: unexpected status '$STATUS'"
