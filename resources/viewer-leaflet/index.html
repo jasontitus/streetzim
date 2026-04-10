@@ -50,12 +50,82 @@
             return href.substring(0, href.lastIndexOf('/') + 1);
         })();
 
-        // Load map configuration
-        fetch(baseUrl + 'map-config.json')
-            .then(function(r) { return r.json(); })
+        // Debug logging — enable with ?debug=1. Keeps a ring buffer so we
+        // can surface fetch failures even when the WebView has no console.
+        var DEBUG = /[?&]debug=1/.test(window.location.search);
+        var _debugLog = [];
+        function dbg() {
+            var args = Array.prototype.slice.call(arguments);
+            var line = args.map(function(a) {
+                if (a instanceof Error) return (a.name || 'Error') + ': ' + a.message;
+                if (typeof a === 'object') {
+                    try { return JSON.stringify(a); } catch (e) { return String(a); }
+                }
+                return String(a);
+            }).join(' ');
+            _debugLog.push('[' + new Date().toISOString().substr(11, 12) + '] ' + line);
+            if (_debugLog.length > 200) _debugLog.shift();
+            if (window.console && console.log) console.log.apply(console, ['[streetzim]'].concat(args));
+        }
+        function describeError(err) {
+            if (!err) return 'unknown error';
+            var parts = [];
+            if (err.name) parts.push(err.name);
+            if (err.message) parts.push(err.message);
+            if (err.code) parts.push('code=' + err.code);
+            return parts.join(': ') || String(err);
+        }
+        dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAgent });
+
+        // Load map configuration with retry — on Windows kiwix-desktop the
+        // first request after opening a large ZIM can fail before the
+        // internal server is fully up.
+        function fetchConfig(n) {
+            var url = baseUrl + 'map-config.json';
+            dbg('fetch map-config.json', 'attempt', n, url);
+            return fetch(url)
+                .then(function(r) {
+                    dbg('map-config.json response', r.status, r.statusText, 'type=' + r.type);
+                    if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + r.statusText);
+                    return r.json();
+                })
+                .catch(function(err) {
+                    dbg('map-config.json fetch failed', 'attempt', n, describeError(err));
+                    if (n < 4) {
+                        return new Promise(function(resolve) {
+                            setTimeout(function() { resolve(fetchConfig(n + 1)); }, 400 * n);
+                        });
+                    }
+                    err._url = url;
+                    throw err;
+                });
+        }
+        fetchConfig(1)
             .then(function(config) { initMap(config); })
             .catch(function(err) {
-                document.getElementById('info').textContent = 'Error loading map config: ' + err;
+                dbg('fatal error loading map config', describeError(err), err && err.stack);
+                var info = document.getElementById('info');
+                if (info) {
+                    info.innerHTML = '<strong>Error loading map config</strong><br>' +
+                        describeError(err) +
+                        '<br><span style="font-size:9px;opacity:0.75;">URL: ' + (err && err._url ? err._url : (baseUrl + 'map-config.json')) + '</span>' +
+                        '<br><span style="font-size:9px;opacity:0.75;">Base: ' + baseUrl + '</span>' +
+                        '<br><span style="font-size:9px;opacity:0.75;">UA: ' + (navigator.userAgent || '?').substring(0, 80) + '</span>' +
+                        '<br><a href="#" id="debug-show" style="font-size:10px;color:#1a73e8;">Show debug log</a>';
+                    info.style.pointerEvents = 'auto';
+                    info.style.maxWidth = '420px';
+                    var link = document.getElementById('debug-show');
+                    if (link) {
+                        link.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            var pre = document.createElement('pre');
+                            pre.style.cssText = 'max-height:220px;overflow:auto;font-size:9px;background:#fff;padding:6px;margin-top:6px;border:1px solid #ddd;white-space:pre-wrap;word-break:break-all;';
+                            pre.textContent = _debugLog.join('\n') || '(empty)';
+                            info.appendChild(pre);
+                            link.style.display = 'none';
+                        });
+                    }
+                }
                 initMap({ center: [0, 0], zoom: 2, name: 'Offline Map' });
             });
 
