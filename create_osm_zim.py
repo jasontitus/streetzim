@@ -2634,12 +2634,14 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             center = [0, 0]
             zoom = 2
 
+        import time as _time
         map_config = {
             "name": name,
             "center": center,
             "zoom": zoom,
             "minZoom": 0,
             "maxZoom": args.max_zoom,
+            "buildDate": _time.strftime("%Y/%m"),
         }
         if bbox:
             map_config["bounds"] = bbox
