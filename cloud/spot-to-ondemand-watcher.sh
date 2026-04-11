@@ -29,6 +29,17 @@ while true; do
     case "$STATUS" in
       RUNNING)
         any_alive=1
+        # Health check: is the build process actually alive inside the VM?
+        # A VM can be RUNNING but the build script may have crashed.
+        BUILD_ALIVE=$(gcloud compute ssh "$VM" --zone="$ZONE" --project="$PROJECT" \
+          --command='pgrep -f create_osm_zim > /dev/null && echo YES || echo NO' 2>/dev/null || echo "SSH_FAIL")
+        if [ "$BUILD_ALIVE" = "NO" ]; then
+          echo "[$(date '+%H:%M:%S')] $VM: VM running but build process DEAD. Deleting and relaunching..."
+          gcloud compute instances delete "$VM" --zone="$ZONE" --project="$PROJECT" --quiet 2>&1 || true
+          REGION_ID="${VM#streetzim-build-}"
+          LAUNCH_DIR="$(dirname "$0")"
+          bash "$LAUNCH_DIR/launch-build-vm.sh" "$REGION_ID" --fast --spot 2>&1 | tail -3
+        fi
         ;;
       TERMINATED|STOPPED)
 

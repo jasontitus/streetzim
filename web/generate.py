@@ -82,6 +82,30 @@ REGIONS = [
         "description": "The Caribbean island of Hispaniola &mdash; Haiti and the Dominican Republic.",
     },
     {
+        "id": "texas",
+        "title": "Texas",
+        "zim_file": "osm-texas.zim",
+        "description": "Texas, USA &mdash; from the Gulf Coast to the Rio Grande, including Houston, Dallas, San Antonio, Austin, Fort Worth, and El Paso.",
+    },
+    {
+        "id": "west-coast-us",
+        "title": "West Coast US",
+        "zim_file": "osm-west-coast-us.zim",
+        "description": "U.S. West Coast: Washington, Oregon, and California &mdash; Seattle, Portland, San Francisco, Los Angeles, San Diego, and everything in between.",
+    },
+    {
+        "id": "east-coast-us",
+        "title": "East Coast US",
+        "zim_file": "osm-east-coast-us.zim",
+        "description": "U.S. East Coast from Maine to Florida &mdash; New York, Boston, Philadelphia, Washington D.C., Atlanta, Miami, and the entire Eastern Seaboard.",
+    },
+    {
+        "id": "japan",
+        "title": "Japan",
+        "zim_file": "osm-japan.zim",
+        "description": "Japan &mdash; all four main islands (Honshu, Hokkaido, Kyushu, Shikoku), Okinawa, and the Ryukyu archipelago. Tokyo, Osaka, Kyoto, Nagoya, Sapporo, Fukuoka, Hiroshima, and more.",
+    },
+    {
         "id": "washington-dc",
         "title": "Washington, D.C.",
         "zim_file": "osm-washington-dc.zim",
