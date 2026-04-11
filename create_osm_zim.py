@@ -466,23 +466,28 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
     dem_dir = os.path.join(SCRIPT_DIR, "terrain_cache", "dem_sources")
     os.makedirs(dem_dir, exist_ok=True)
 
-    # Check if terrain generation is already complete for this bbox.
-    # A COMPLETED marker file means all tiles (including ocean skips) have been processed.
+    # Check if terrain generation is already complete for THIS SPECIFIC bbox.
+    # The marker encodes the bbox so a Europe build can't fool a US build.
     import mercantile
-    completed_marker = os.path.join(dest_dir, f"COMPLETED_z{max_zoom}")
+    bbox_key = f"{minlon:.1f}_{minlat:.1f}_{maxlon:.1f}_{maxlat:.1f}"
+    completed_marker = os.path.join(dest_dir, f"COMPLETED_z{max_zoom}_{bbox_key}")
     if os.path.isfile(completed_marker):
         total = sum(
             len([f for f in files if f.endswith(".webp")])
             for _, _, files in os.walk(dest_dir)
             if "dem_sources" not in _
         )
-        print(f"    Using {total} cached terrain tiles (generation complete)")
+        print(f"    Using {total} cached terrain tiles (generation complete for {bbox_key})")
         return total
 
-    # Fallback: sample a few z-max tiles to see if they're cached
+    # Fallback: sample z-max tiles at the CORNERS AND CENTER of this bbox
+    # to check if they're cached. More robust than just first/last.
     z_max_tiles = list(mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=max_zoom))
     if z_max_tiles:
-        sample = z_max_tiles[:5] + z_max_tiles[-5:]
+        # Sample corners + center of the bbox tile range
+        n_tiles = len(z_max_tiles)
+        sample_indices = [0, n_tiles//4, n_tiles//2, 3*n_tiles//4, n_tiles-1]
+        sample = [z_max_tiles[i] for i in sample_indices if i < n_tiles]
         all_cached = all(
             os.path.isfile(os.path.join(dest_dir, str(max_zoom), str(t.x), f"{t.y}.webp"))
             for t in sample
