@@ -366,6 +366,44 @@ var baseUrl = (function() {
   return href.substring(0, href.lastIndexOf('/') + 1);
 })();
 
+// Kiwix Desktop on Windows uses zim:// protocol which the Fetch API
+// can't handle. Fall back to XMLHttpRequest for zim:// URLs.
+var USE_XHR = baseUrl.indexOf('zim://') === 0;
+
+function zimFetch(url, opts) {
+  if (!USE_XHR) return fetch(url, opts);
+  return new Promise(function(resolve, reject) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.responseType = 'arraybuffer';
+    // Hook up AbortController signal if provided
+    if (opts && opts.signal) {
+      opts.signal.addEventListener('abort', function() { xhr.abort(); });
+      if (opts.signal.aborted) { reject(new DOMException('Aborted', 'AbortError')); return; }
+    }
+    xhr.onload = function() {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve({
+          ok: true, status: xhr.status, statusText: xhr.statusText,
+          arrayBuffer: function() { return Promise.resolve(xhr.response); },
+          json: function() {
+            var text = new TextDecoder().decode(xhr.response);
+            return Promise.resolve(JSON.parse(text));
+          },
+          text: function() {
+            return Promise.resolve(new TextDecoder().decode(xhr.response));
+          }
+        });
+      } else {
+        reject(new Error('HTTP ' + xhr.status + ' ' + xhr.statusText));
+      }
+    };
+    xhr.onerror = function() { reject(new TypeError('XHR failed for ' + url)); };
+    xhr.onabort = function() { reject(new DOMException('Aborted', 'AbortError')); };
+    xhr.send();
+  });
+}
+
 // Debug logging — enable by appending ?debug=1 to the URL.
 // Keeps a ring-buffer of the last 200 log lines so we can render them
 // into a visible panel if something goes wrong (consoles are often
@@ -437,7 +475,7 @@ dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAg
 
   function fetchWithRetry(url, signal) {
     function attempt(n) {
-      return fetch(url, { signal: signal })
+      return zimFetch(url, { signal: signal })
         .then(function(r) {
           if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + r.statusText);
           return r.arrayBuffer();
@@ -483,7 +521,7 @@ dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAg
 function fetchConfig(n) {
   var url = baseUrl + 'map-config.json';
   dbg('fetch map-config.json', 'attempt', n, url);
-  return fetch(url)
+  return zimFetch(url)
     .then(function(r) {
       dbg('map-config.json response', r.status, r.statusText, 'type=' + r.type);
       if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + r.statusText);
@@ -1286,7 +1324,7 @@ function initSearch(map) {
   var pendingFetches = {};   // prefix -> Promise
 
   // Load manifest
-  fetch(baseUrl + 'search-data/manifest.json')
+  zimFetch(baseUrl + 'search-data/manifest.json')
     .then(function(r) { return r.json(); })
     .then(function(data) {
       manifest = data;
@@ -1302,7 +1340,7 @@ function initSearch(map) {
     if (chunkCache[prefix]) return Promise.resolve(chunkCache[prefix]);
     if (pendingFetches[prefix]) return pendingFetches[prefix];
 
-    var p = fetch(baseUrl + 'search-data/' + encodeURIComponent(prefix) + '.json')
+    var p = zimFetch(baseUrl + 'search-data/' + encodeURIComponent(prefix) + '.json')
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -1586,7 +1624,7 @@ function initWikidataPopups(map, config) {
     if (wdCache[prefix]) return Promise.resolve(wdCache[prefix]);
     var url = baseUrl + 'wikidata/' + prefix + '.json';
     function attempt(n) {
-      return fetch(url)
+      return zimFetch(url)
         .then(function(r) {
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.json();
@@ -1754,7 +1792,7 @@ function initWikiSidebar(map, config) {
     if (wdCache[prefix]) return Promise.resolve(wdCache[prefix]);
     var url = baseUrl + 'wikidata/' + prefix + '.json';
     function attempt(n) {
-      return fetch(url)
+      return zimFetch(url)
         .then(function(r) {
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.json();
