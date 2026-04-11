@@ -92,7 +92,11 @@ mkdir -p world-data search_cache wikidata_cache satellite_cache_avif_256 terrain
 # script downloads only the DEM cells covering its bbox from the public
 # Copernicus S3 bucket on demand.
 gcloud storage cp gs://streetzim-cache/world-data/world-tiles-v2.mbtiles world-data/world-tiles-v2.mbtiles
-gcloud storage cp gs://streetzim-cache/world-data/planet-2026-03-10.osm.pbf world-data/planet-2026-03-10.osm.pbf
+
+# Skip downloading the 85 GB planet PBF — the wikidata Q-IDs are already
+# cached in wikidata_cache/qids_planet-*.json. Create a sparse file (zero
+# disk usage) with the correct size+mtime so the cache key matches.
+truncate -s 91646574601 world-data/planet-2026-03-10.osm.pbf
 gcloud storage cp gs://streetzim-cache/search_cache/world.jsonl            search_cache/world.jsonl
 gcloud storage rsync gs://streetzim-cache/wikidata_cache/                  wikidata_cache/ --recursive
 

@@ -124,9 +124,9 @@ fi
 IA_ACCESS=$(grep "^access" "$IA_INI" | awk -F= '{print $2}' | tr -d ' ')
 IA_SECRET=$(grep "^secret" "$IA_INI" | awk -F= '{print $2}' | tr -d ' ')
 
-SPOT_FLAGS=()
+SPOT_FLAGS=""
 if [ $USE_SPOT -eq 1 ]; then
-  SPOT_FLAGS=(--provisioning-model=SPOT --instance-termination-action=DELETE)
+  SPOT_FLAGS="--provisioning-model=SPOT --instance-termination-action=DELETE"
 fi
 
 echo "=== Launching VM: $INSTANCE_NAME ==="
@@ -172,7 +172,7 @@ for ZONE in "${ZONES[@]}"; do
       --boot-disk-type=pd-standard \
       --service-account="$SA" \
       --scopes=https://www.googleapis.com/auth/cloud-platform \
-      "${SPOT_FLAGS[@]}" \
+      $SPOT_FLAGS \
       --metadata-from-file="startup-script=build-vm-startup.sh,region-id=$TMPDIR/region-id,region-name=$TMPDIR/region-name,region-bbox=$TMPDIR/region-bbox,ia-access-key=$TMPDIR/ia-access-key,ia-secret-key=$TMPDIR/ia-secret-key,description=$TMPDIR/description" 2>&1; then
     SUCCESS=1
     LAUNCHED_ZONE=$ZONE
