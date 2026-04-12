@@ -2359,6 +2359,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Include Sentinel-2 Cloudless satellite imagery tiles")
     parser.add_argument("--satellite-zoom", type=int, default=None,
                         help="Max zoom for satellite tiles (default: same as --max-zoom)")
+    parser.add_argument("--satellite-download-zoom", type=int, default=None,
+                        help="Max zoom to DOWNLOAD new satellite tiles (default: same as --satellite-zoom). "
+                             "Cached tiles above this zoom are still included in the ZIM.")
     parser.add_argument("--satellite-format", choices=["webp", "avif"], default="avif",
                         help="Satellite tile image format (default: avif)")
     parser.add_argument("--satellite-quality", type=int, default=None,
@@ -2417,6 +2420,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     # Satellite options
     include_satellite = args.satellite
     satellite_max_zoom = args.satellite_zoom or args.max_zoom
+    satellite_download_zoom = args.satellite_download_zoom or satellite_max_zoom
     satellite_format = args.satellite_format
     satellite_quality = args.satellite_quality
     satellite_tile_size = args.satellite_tile_size
@@ -2588,7 +2592,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
 
             with StepPool(max_workers=2) as step_pool:
                 sat_future = step_pool.submit(
-                    download_satellite_tiles, bbox_str, satellite_dir, satellite_max_zoom,
+                    download_satellite_tiles, bbox_str, satellite_dir, satellite_download_zoom,
                     sat_format=satellite_format, sat_quality=satellite_quality,
                     tile_size=satellite_tile_size)
                 terrain_future = step_pool.submit(
@@ -2605,7 +2609,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 if not bbox_str:
                     print("    Warning: no bbox specified, skipping satellite tiles")
                 else:
-                    download_satellite_tiles(bbox_str, satellite_dir, max_zoom=satellite_max_zoom,
+                    download_satellite_tiles(bbox_str, satellite_dir, max_zoom=satellite_download_zoom,
                                              sat_format=satellite_format, sat_quality=satellite_quality,
                                              tile_size=satellite_tile_size)
 

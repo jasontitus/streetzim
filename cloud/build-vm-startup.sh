@@ -192,7 +192,7 @@ ZSTD_CLEVEL=22 python3 create_osm_zim.py \
   --pbf world-data/planet-2026-03-10.osm.pbf \
   --bbox="$REGION_BBOX" \
   --name "$REGION_NAME" \
-  --satellite --terrain --wikidata \
+  --satellite --satellite-download-zoom 12 --terrain --wikidata \
   --search-cache search_cache/world.jsonl \
   --keep-temp \
   --output "$ZIM_FILE"

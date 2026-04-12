@@ -31,7 +31,7 @@ REGIONS = [
         "id": "europe",
         "title": "Europe",
         "zim_file": "osm-europe.zim",
-        "description": "United Kingdom, Ireland, France, Spain, Portugal, Germany, Italy, Netherlands, Belgium, Switzerland, Austria, Poland, Greece, Sweden, Norway, Finland, Denmark, the Baltics, Ukraine, and dozens more.",
+        "description": "United Kingdom, Ireland, France, Spain, Portugal, Germany, Italy, Netherlands, Belgium, Switzerland, Austria, Poland, Greece, Sweden, Norway, Finland, Denmark, the Baltics, Ukraine, Georgia, Armenia, Azerbaijan, Cyprus, and dozens more.",
     },
     {
         "id": "united-states",
@@ -98,6 +98,12 @@ REGIONS = [
         "title": "East Coast US",
         "zim_file": "osm-east-coast-us.zim",
         "description": "U.S. East Coast from Maine to Florida &mdash; New York, Boston, Philadelphia, Washington D.C., Atlanta, Miami, and the entire Eastern Seaboard.",
+    },
+    {
+        "id": "australia-nz",
+        "title": "Australia &amp; New Zealand",
+        "zim_file": "osm-australia-nz.zim",
+        "description": "Australia and New Zealand &mdash; Sydney, Melbourne, Brisbane, Perth, Auckland, Wellington, the Great Barrier Reef, Outback, and Southern Alps.",
     },
     {
         "id": "japan",
