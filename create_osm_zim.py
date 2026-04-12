@@ -2413,9 +2413,11 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     if not name:
         name = args.area or args.geofabrik or "OpenStreetMap"
 
-    # Set output path
+    # Set output path — dated by default (e.g. osm-europe-2026-04.zim)
+    import time as _time
     safe_name = name.lower().replace(" ", "-").replace(",", "").replace(".", "")
-    output_path = args.output or f"osm-{safe_name}.zim"
+    date_suffix = _time.strftime("%Y-%m")
+    output_path = args.output or f"osm-{safe_name}-{date_suffix}.zim"
 
     # Satellite options
     include_satellite = args.satellite

@@ -210,17 +210,28 @@ def build_page():
     for region in REGIONS:
         item = archive_items.get(region["id"])
         if item:
-            # Get the actual ZIM file size (item_size includes torrent + xml overhead)
+            # Get the actual ZIM file name + size from Archive.org metadata.
+            # Filenames are now dated (e.g. osm-europe-2026-04.zim) so we
+            # find the .zim file dynamically rather than hardcoding.
             details = fetch_item_details(f"streetzim-{region['id']}")
             zim_size = None
+            zim_filename = None
             if details:
-                for f in details.get("files", []):
-                    if f.get("name") == region["zim_file"]:
-                        try:
-                            zim_size = int(f.get("size", 0))
-                        except (TypeError, ValueError):
-                            pass
-                        break
+                # Find the .zim file (may be dated like osm-europe-2026-04.zim
+                # or undated like osm-europe.zim). Pick the largest .zim.
+                zim_files = [f for f in details.get("files", [])
+                             if f.get("name", "").endswith(".zim")
+                             and "history/" not in f.get("name", "")]
+                if zim_files:
+                    best = max(zim_files, key=lambda f: int(f.get("size", 0)))
+                    zim_filename = best.get("name")
+                    try:
+                        zim_size = int(best.get("size", 0))
+                    except (TypeError, ValueError):
+                        pass
+            # Override the static zim_file with what's actually on Archive.org
+            if zim_filename:
+                region = {**region, "zim_file": zim_filename}
             if zim_size is None:
                 try:
                     zim_size = int(item.get("item_size", 0))

@@ -137,7 +137,8 @@ EOF
 # ----------------------------------------------------------------------------
 # Run the build
 # ----------------------------------------------------------------------------
-ZIM_FILE="osm-${REGION_ID}.zim"
+DATE_SUFFIX=$(date +%Y-%m)
+ZIM_FILE="osm-${REGION_ID}-${DATE_SUFFIX}.zim"
 
 # Periodic cache push — save progress every 15 minutes so a sudden
 # shutdown doesn't lose hours of satellite/terrain download work.
