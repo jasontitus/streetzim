@@ -101,7 +101,7 @@ REGIONS = [
     },
     {
         "id": "australia-nz",
-        "title": "Australia &amp; New Zealand",
+        "title": "Australia & New Zealand",
         "zim_file": "osm-australia-nz.zim",
         "description": "Australia and New Zealand &mdash; Sydney, Melbourne, Brisbane, Perth, Auckland, Wellington, the Great Barrier Reef, Outback, and Southern Alps.",
     },

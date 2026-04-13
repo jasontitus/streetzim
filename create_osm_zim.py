@@ -2624,6 +2624,53 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 else:
                     generate_terrain_tiles(bbox_str, terrain_dir, max_zoom=terrain_max_zoom)
 
+        # Verify terrain completeness — regen any missing tiles before packaging.
+        # This catches gaps from stale caches, deleted stubs, or incomplete prior runs.
+        if include_terrain and bbox_str and terrain_dir:
+            import mercantile
+            bbox_parsed = parse_bbox(bbox_str)
+            vrt_path = os.path.join(terrain_dir, "dem_sources", "mosaic_4326.vrt")
+            # Only verify if we have a VRT (skip if terrain was fully cached)
+            if not os.path.isfile(vrt_path):
+                # Build a quick VRT for verification
+                dem_dir = os.path.join(terrain_dir, "dem_sources")
+                tif_paths = sorted(
+                    p for p in glob.glob(os.path.join(dem_dir, "dem_*.tif"))
+                    if os.path.getsize(p) > 1000
+                )
+                if tif_paths:
+                    import tempfile as _tmpfile
+                    with _tmpfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as flist:
+                        flist.write('\n'.join(tif_paths))
+                        flist_path = flist.name
+                    subprocess.run(
+                        ["gdalbuildvrt", "-overwrite", "-input_file_list", flist_path, vrt_path],
+                        check=True, capture_output=True, text=True,
+                    )
+                    os.unlink(flist_path)
+
+            if os.path.isfile(vrt_path):
+                print("    Verifying terrain tile completeness...")
+                missing_tiles = []
+                for z in range(0, terrain_max_zoom + 1):
+                    for t in mercantile.tiles(*bbox_parsed, zooms=z):
+                        tile_path = os.path.join(terrain_dir, str(z), str(t.x), f"{t.y}.webp")
+                        if not os.path.isfile(tile_path):
+                            bounds = mercantile.bounds(t)
+                            missing_tiles.append(
+                                (vrt_path, t.x, t.y, z, terrain_dir,
+                                 bounds.west, bounds.south, bounds.east, bounds.north)
+                            )
+                if missing_tiles:
+                    print(f"    Regenerating {len(missing_tiles)} missing terrain tiles...")
+                    # Use 4 workers to avoid OOM
+                    from multiprocessing import Pool as _Pool
+                    with _Pool(min(4, os.cpu_count() or 4)) as pool:
+                        pool.map(_generate_one_terrain_tile, missing_tiles)
+                    print(f"    Repaired {len(missing_tiles)} terrain tiles")
+                else:
+                    print("    Terrain complete — no gaps found")
+
         # Download MapLibre GL JS
         step_maplibre = total_steps - 1
         print()
