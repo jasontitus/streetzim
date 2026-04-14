@@ -2640,6 +2640,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         # didn't include all neighboring cells.
         if include_terrain and bbox_str and terrain_dir:
             import mercantile
+            import math as _math
             bbox_parsed = parse_bbox(bbox_str)
             # Always use comprehensive VRT for verification/repair
             dem_dir_v = os.path.join(terrain_dir, "dem_sources")
@@ -2671,8 +2672,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                             needs_regen = True
                         elif z >= 10:
                             # Check if tile straddles a 1-degree boundary
-                            crosses_lon = math.floor(bounds.west) != math.floor(bounds.east)
-                            crosses_lat = math.floor(bounds.south) != math.floor(bounds.north)
+                            crosses_lon = _math.floor(bounds.west) != _math.floor(bounds.east)
+                            crosses_lat = _math.floor(bounds.south) != _math.floor(bounds.north)
                             if crosses_lon or crosses_lat:
                                 needs_regen = True
                         if needs_regen:
