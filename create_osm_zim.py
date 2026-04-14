@@ -2416,7 +2416,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     # Set output path — dated by default (e.g. osm-europe-2026-04.zim)
     import time as _time
     safe_name = name.lower().replace(" ", "-").replace(",", "").replace(".", "")
-    date_suffix = _time.strftime("%Y-%m")
+    date_suffix = _time.strftime("%Y-%m-%d")
     output_path = args.output or f"osm-{safe_name}-{date_suffix}.zim"
 
     # Satellite options

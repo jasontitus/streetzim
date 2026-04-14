@@ -228,7 +228,7 @@ def build_page():
                     import re as _re
                     def _sort_key(f):
                         name = f.get("name", "")
-                        dated = 1 if _re.search(r'-\d{4}-\d{2}\.zim$', name) else 0
+                        dated = 1 if _re.search(r'-\d{4}-\d{2}(-\d{2})?\.zim$', name) else 0
                         return (dated, int(f.get("size", 0)))
                     best = max(zim_files, key=_sort_key)
                     zim_filename = best.get("name")

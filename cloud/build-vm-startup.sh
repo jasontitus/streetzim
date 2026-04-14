@@ -137,7 +137,7 @@ EOF
 # ----------------------------------------------------------------------------
 # Run the build
 # ----------------------------------------------------------------------------
-DATE_SUFFIX=$(date +%Y-%m)
+DATE_SUFFIX=$(date +%Y-%m-%d)
 ZIM_FILE="osm-${REGION_ID}-${DATE_SUFFIX}.zim"
 
 # Periodic cache push — save progress every 15 minutes so a sudden
