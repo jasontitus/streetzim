@@ -501,10 +501,12 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
             print(f"    Using {total} cached terrain tiles")
             return total
 
-    # Determine which 1-degree Copernicus tiles we need
+    # Determine which 1-degree Copernicus tiles we need.
+    # Include a 1-degree BUFFER around the bbox so that tiles at degree
+    # boundaries get correct data from neighboring DEM cells.
     tif_paths = []
-    for lat in range(math.floor(minlat), math.floor(maxlat) + 1):
-        for lon in range(math.floor(minlon), math.floor(maxlon) + 1):
+    for lat in range(math.floor(minlat) - 1, math.floor(maxlat) + 2):
+        for lon in range(math.floor(minlon) - 1, math.floor(maxlon) + 2):
             ns = "N" if lat >= 0 else "S"
             ew = "E" if lon >= 0 else "W"
             abs_lat = abs(lat)
@@ -556,22 +558,12 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
     import rasterio
     import mercantile
 
-    # Use a COMPREHENSIVE VRT built from ALL available DEM sources, not just
-    # the current bbox. This prevents boundary artifacts when tiles straddle
-    # 1-degree DEM cell boundaries — without all neighboring cells in the VRT,
-    # rasterio's reproject produces zeros at the seams.
-    all_tifs = sorted(
-        p for p in glob.glob(os.path.join(dem_dir, "dem_*.tif"))
-        if os.path.getsize(p) > 1000
-    )
     mosaic_path = os.path.join(dem_dir, "mosaic_4326.vrt")
     try:
         # Use -input_file_list to avoid "Argument list too long" with 24K+ files
         import tempfile as _tmpfile
-        # Use ALL DEMs for the VRT (not just bbox) to avoid boundary seams
-        vrt_tifs = all_tifs if all_tifs else tif_paths
         with _tmpfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as flist:
-            flist.write('\n'.join(vrt_tifs))
+            flist.write('\n'.join(tif_paths))
             flist_path = flist.name
         subprocess.run(
             ["gdalbuildvrt", "-overwrite", "-input_file_list", flist_path, mosaic_path],
@@ -2642,13 +2634,17 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             import mercantile
             import math as _math
             bbox_parsed = parse_bbox(bbox_str)
-            # Always use comprehensive VRT for verification/repair
+            # Use buffered VRT for verification — bbox + 1 degree on each side
             dem_dir_v = os.path.join(terrain_dir, "dem_sources")
-            vrt_path = os.path.join(dem_dir_v, "comprehensive_verify.vrt")
-            all_tifs_v = sorted(
-                p for p in glob.glob(os.path.join(dem_dir_v, "dem_*.tif"))
-                if os.path.getsize(p) > 1000
-            )
+            vrt_path = os.path.join(dem_dir_v, "verify.vrt")
+            all_tifs_v = []
+            for _lat in range(_math.floor(bbox_parsed[1]) - 1, _math.floor(bbox_parsed[3]) + 2):
+                for _lon in range(_math.floor(bbox_parsed[0]) - 1, _math.floor(bbox_parsed[2]) + 2):
+                    _ns = "N" if _lat >= 0 else "S"
+                    _ew = "E" if _lon >= 0 else "W"
+                    _p = os.path.join(dem_dir_v, f"dem_{_ns}{abs(_lat):02d}_{_ew}{abs(_lon):03d}.tif")
+                    if os.path.isfile(_p) and os.path.getsize(_p) > 1000:
+                        all_tifs_v.append(_p)
             if all_tifs_v:
                 import tempfile as _tmpfile
                 with _tmpfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as flist:
