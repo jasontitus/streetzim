@@ -85,6 +85,16 @@
     color: var(--accent-hover);
     font-size: 12px; font-weight: 500;
   }
+  a.badge {
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  a.badge:hover {
+    background: rgba(59,130,246,0.22);
+    border-color: rgba(59,130,246,0.55);
+    color: var(--accent-hover);
+    text-decoration: none;
+  }
 
   section {
     padding: 40px 0;
@@ -246,6 +256,35 @@
   .licenses li { margin: 6px 0; }
   .licenses strong { color: var(--text); }
 
+  .source-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-top: 20px;
+  }
+  .source-list a {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex; flex-direction: column;
+    transition: background 0.15s, border-color 0.15s;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .source-list a:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--border-strong);
+    text-decoration: none;
+  }
+  .source-list .src-title {
+    font-size: 15px; font-weight: 600;
+  }
+  .source-list .src-sub {
+    font-size: 13px; color: var(--text-dim);
+    margin-top: 2px;
+  }
+
   .updated {
     text-align: right;
     font-size: 12px;
@@ -276,11 +315,11 @@
     <h1>Street<span class="accent">Zim</span></h1>
     <p class="tagline">Fully offline OpenStreetMap maps for the Kiwix reader. Vector tiles, satellite imagery, 3D terrain, and Wikipedia &mdash; no internet connection required.</p>
     <div class="badges">
-      <span class="badge">iOS</span>
-      <span class="badge">Android</span>
-      <span class="badge">macOS</span>
-      <span class="badge">Windows</span>
-      <span class="badge">Linux</span>
+      <a class="badge" href="https://apps.apple.com/us/app/kiwix/id997079563" target="_blank" rel="noopener" title="Kiwix on the App Store">iOS</a>
+      <a class="badge" href="https://play.google.com/store/apps/details?id=org.kiwix.kiwixmobile" target="_blank" rel="noopener" title="Kiwix on Google Play">Android</a>
+      <a class="badge" href="https://apps.apple.com/us/app/kiwix/id997079563" target="_blank" rel="noopener" title="Kiwix on the Mac App Store">macOS</a>
+      <a class="badge" href="https://pwa.kiwix.org/" target="_blank" rel="noopener" title="Kiwix PWA">Windows</a>
+      <a class="badge" href="https://pwa.kiwix.org/" target="_blank" rel="noopener" title="Kiwix PWA">Linux</a>
       <span class="badge">Free &amp; Open Source</span>
     </div>
   </div>
@@ -369,6 +408,35 @@
         <li><strong>Place info:</strong> <a href="https://www.wikidata.org/" target="_blank" rel="noopener">Wikidata</a> (CC0) and <a href="https://en.wikipedia.org/" target="_blank" rel="noopener">Wikipedia</a> (CC BY-SA 3.0).</li>
         <li><strong>Tool code:</strong> <a href="https://github.com/jasontitus/streetzim" target="_blank" rel="noopener">StreetZim</a> &mdash; MIT License.</li>
       </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>Open Source Projects</h2>
+    <p>StreetZim relies on the Kiwix reader apps to open .zim files. Each client is open source and developed on GitHub:</p>
+    <div class="source-list">
+      <a href="https://github.com/kiwix/kiwix-apple" target="_blank" rel="noopener">
+        <span class="src-title">Kiwix for iOS &amp; macOS</span>
+        <span class="src-sub">github.com/kiwix/kiwix-apple</span>
+      </a>
+      <a href="https://github.com/kiwix/kiwix-android" target="_blank" rel="noopener">
+        <span class="src-title">Kiwix for Android</span>
+        <span class="src-sub">github.com/kiwix/kiwix-android</span>
+      </a>
+      <a href="https://github.com/kiwix/kiwix-js-pwa" target="_blank" rel="noopener">
+        <span class="src-title">Kiwix PWA (Windows &amp; Linux)</span>
+        <span class="src-sub">github.com/kiwix/kiwix-js-pwa</span>
+      </a>
+      <a href="https://github.com/kiwix/kiwix-desktop" target="_blank" rel="noopener">
+        <span class="src-title">Kiwix Desktop</span>
+        <span class="src-sub">github.com/kiwix/kiwix-desktop</span>
+      </a>
+      <a href="https://github.com/jasontitus/streetzim" target="_blank" rel="noopener">
+        <span class="src-title">StreetZim</span>
+        <span class="src-sub">github.com/jasontitus/streetzim</span>
+      </a>
     </div>
   </div>
 </section>
