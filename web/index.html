@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StreetZim — Offline Maps for Kiwix</title>
+<meta name="description" content="Free, fully offline OpenStreetMap maps for the Kiwix reader. Vector tiles, satellite imagery, 3D terrain, and Wikipedia info — works without an internet connection on iOS, Android, Mac, Windows, and Linux.">
+<!-- Firebase Analytics -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+  import { getAnalytics, logEvent } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-analytics.js";
+  const firebaseConfig = {
+    apiKey: "AIzaSyAGolk6U9X4PgPEY4VIbPvIvLE4usE5c60",
+    authDomain: "streetzim.firebaseapp.com",
+    projectId: "streetzim",
+    storageBucket: "streetzim.firebasestorage.app",
+    messagingSenderId: "1056177608946",
+    appId: "1:1056177608946:web:c6abf5a817f346b317986b",
+    measurementId: "G-S46FWQ9EGY"
+  };
+  const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+
+  // Track clicks on download, torrent, and details links.
+  // Uses pointerdown so the event fires even when the browser navigates away.
+  document.addEventListener('pointerdown', function(e) {
+    var a = e.target.closest('a[data-track]');
+    if (!a) return;
+    try {
+      logEvent(analytics, 'map_link_click', {
+        region: a.getAttribute('data-region') || 'unknown',
+        link_type: a.getAttribute('data-track'),      // "download" | "torrent" | "details"
+        region_title: a.getAttribute('data-title') || ''
+      });
+    } catch (err) {}
+  });
+</script>
+<style>
+  :root {
+    --bg: #0b1220;
+    --bg-card: #131c2e;
+    --bg-card-hover: #182339;
+    --text: #e6edf7;
+    --text-dim: #94a3b8;
+    --text-faint: #64748b;
+    --accent: #3b82f6;
+    --accent-hover: #60a5fa;
+    --border: rgba(255,255,255,0.08);
+    --border-strong: rgba(255,255,255,0.16);
+    --max-w: 980px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container { max-width: var(--max-w); margin: 0 auto; padding: 0 24px; }
+
+  header {
+    padding: 40px 0 28px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(59,130,246,0.08) 0%, rgba(11,18,32,0) 100%);
+  }
+  h1 {
+    font-size: 38px; font-weight: 700; letter-spacing: -0.02em;
+    margin: 0 0 10px;
+  }
+  h1 .accent { color: var(--accent); }
+  .tagline {
+    font-size: 19px; color: var(--text-dim);
+    max-width: 640px; margin: 0;
+  }
+  .badges {
+    margin-top: 24px; display: flex; gap: 8px; flex-wrap: wrap;
+  }
+  .badge {
+    display: inline-block;
+    padding: 4px 10px; border-radius: 999px;
+    background: rgba(59,130,246,0.12);
+    border: 1px solid rgba(59,130,246,0.25);
+    color: var(--accent-hover);
+    font-size: 12px; font-weight: 500;
+  }
+  a.badge {
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  a.badge:hover {
+    background: rgba(59,130,246,0.22);
+    border-color: rgba(59,130,246,0.55);
+    color: var(--accent-hover);
+    text-decoration: none;
+  }
+
+  section {
+    padding: 40px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  section.maps-section { padding-top: 28px; }
+  section:last-of-type { border-bottom: none; }
+  h2 {
+    font-size: 26px; font-weight: 700; letter-spacing: -0.01em;
+    margin: 0 0 20px;
+  }
+  h3 {
+    font-size: 17px; font-weight: 600;
+    margin: 24px 0 8px;
+    color: var(--text);
+  }
+  p { margin: 0 0 16px; color: var(--text-dim); }
+  p.lead { color: var(--text); font-size: 17px; }
+  a { color: var(--accent-hover); text-decoration: none; }
+  a:hover { color: var(--accent); text-decoration: underline; }
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-top: 24px;
+  }
+  .feature {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+  .feature h4 {
+    margin: 0 0 6px;
+    font-size: 15px; font-weight: 600;
+  }
+  .feature p {
+    margin: 0;
+    font-size: 14px; color: var(--text-dim);
+  }
+
+  .maps {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 14px;
+    margin-top: 16px;
+  }
+  .map-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px;
+    transition: background 0.15s, border-color 0.15s, transform 0.15s;
+    display: flex; flex-direction: column;
+  }
+  .map-card:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--border-strong);
+  }
+  .map-card-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .map-card-title {
+    font-size: 17px; font-weight: 700;
+    color: var(--text);
+    line-height: 1.25;
+  }
+  .map-card-size {
+    font-size: 12px; font-weight: 500;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .map-card-desc {
+    font-size: 13px; color: var(--text-dim);
+    margin: 0 0 12px;
+    line-height: 1.45;
+  }
+  .map-card-links {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    margin-top: auto;
+  }
+  .btn {
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 11.5px; font-weight: 500;
+    text-decoration: none;
+    transition: all 0.15s;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: white;
+  }
+  .btn-primary:hover {
+    background: var(--accent-hover);
+    color: white; text-decoration: none;
+  }
+  .btn-secondary {
+    background: transparent;
+    color: var(--text-dim);
+    border-color: var(--border-strong);
+  }
+  .btn-secondary:hover {
+    color: var(--text);
+    border-color: var(--text-faint);
+    text-decoration: none;
+  }
+  .map-card.upcoming {
+    opacity: 0.55;
+  }
+  .map-card.upcoming .map-card-size {
+    color: var(--accent);
+  }
+
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin-top: 20px;
+  }
+  .step {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    position: relative;
+  }
+  .step-num {
+    display: inline-block;
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: rgba(59,130,246,0.15);
+    color: var(--accent-hover);
+    text-align: center; line-height: 26px;
+    font-size: 13px; font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .step h4 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+  .step p { margin: 0; font-size: 14px; }
+
+  .licenses {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 22px 24px;
+    margin-top: 16px;
+    font-size: 14px;
+  }
+  .licenses ul {
+    margin: 0; padding-left: 18px;
+    color: var(--text-dim);
+  }
+  .licenses li { margin: 6px 0; }
+  .licenses strong { color: var(--text); }
+
+  .source-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-top: 20px;
+  }
+  .source-list a {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex; flex-direction: column;
+    transition: background 0.15s, border-color 0.15s;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .source-list a:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--border-strong);
+    text-decoration: none;
+  }
+  .source-list .src-title {
+    font-size: 15px; font-weight: 600;
+  }
+  .source-list .src-sub {
+    font-size: 13px; color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  .updated {
+    text-align: right;
+    font-size: 12px;
+    color: var(--text-faint);
+    margin: 0 0 12px;
+  }
+
+  footer {
+    padding: 32px 0 48px;
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 13px;
+  }
+  footer a { color: var(--text-dim); }
+
+  @media (max-width: 600px) {
+    h1 { font-size: 34px; }
+    .tagline { font-size: 17px; }
+    section { padding: 36px 0; }
+    header { padding: 48px 0 32px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="container">
+    <h1>Street<span class="accent">Zim</span></h1>
+    <p class="tagline">Fully offline OpenStreetMap maps for the Kiwix reader. Vector tiles, satellite imagery, 3D terrain, and Wikipedia &mdash; no internet connection required.</p>
+    <div class="badges">
+      <a class="badge" href="https://apps.apple.com/us/app/kiwix/id997079563" target="_blank" rel="noopener" title="Kiwix on the App Store">iOS</a>
+      <a class="badge" href="https://play.google.com/store/apps/details?id=org.kiwix.kiwixmobile" target="_blank" rel="noopener" title="Kiwix on Google Play">Android</a>
+      <a class="badge" href="https://apps.apple.com/us/app/kiwix/id997079563" target="_blank" rel="noopener" title="Kiwix on the Mac App Store">macOS</a>
+      <a class="badge" href="https://pwa.kiwix.org/" target="_blank" rel="noopener" title="Kiwix PWA">Windows</a>
+      <a class="badge" href="https://pwa.kiwix.org/" target="_blank" rel="noopener" title="Kiwix PWA">Linux</a>
+      <span class="badge">Free &amp; Open Source</span>
+    </div>
+  </div>
+</header>
+
+<section class="maps-section">
+  <div class="container">
+    <h2>Download a map</h2>
+    <p>Pick a region below, install <a href="https://kiwix.org" target="_blank" rel="noopener">Kiwix</a>, and open the .zim file. Hosted on the Internet Archive — each download includes a torrent.</p>
+    <p class="updated">Last updated: 2026-04-15 14:35 UTC</p>
+
+    <div class="maps">
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Europe</div>
+          <div class="map-card-size">41.4 GB</div>
+        </div>
+        <p class="map-card-desc">United Kingdom, Ireland, France, Spain, Portugal, Germany, Italy, Netherlands, Belgium, Switzerland, Austria, Poland, Greece, Sweden, Norway, Finland, Denmark, the Baltics, Ukraine, Georgia, Armenia, Azerbaijan, Cyprus, and dozens more.</p>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-europe/osm-europe-2026-04.zim" data-track="download" data-region="europe" data-title="Europe">Download</a>
+          <a class="btn btn-secondary" href="https://archive.org/download/streetzim-europe/streetzim-europe_archive.torrent" data-track="torrent" data-region="europe" data-title="Europe">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-europe" data-track="details" data-region="europe" data-title="Europe">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">United States</div>
+          <div class="map-card-size">18.2 GB</div>
+        </div>
+        <p class="map-card-desc">Continental United States &mdash; all 48 contiguous states and Washington, D.C.</p>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-united-states/osm-united-states-2026-04-13.zim" data-track="download" data-region="united-states" data-title="United States">Download</a>
+          <a class="btn btn-secondary" href="https://archive.org/download/streetzim-united-states/streetzim-united-states_archive.torrent" data-track="torrent" data-region="united-states" data-title="United States">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-united-states" data-track="details" data-region="united-states" data-title="United States">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">West Asia</div>
+          <div class="map-card-size">8.6 GB</div>
+        </div>
+        <p class="map-card-desc">Turkey, Syria, Lebanon, Israel, Palestine, Jordan, Iraq, Iran, Kuwait, Saudi Arabia, Bahrain, Qatar, UAE, Oman, Yemen, and parts of Egypt, Afghanistan, and Pakistan.</p>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-west-asia/osm-west-asia-2026-04-14.zim" data-track="download" data-region="west-asia" data-title="West Asia">Download</a>
+          <a class="btn btn-secondary" href="https://archive.org/download/streetzim-west-asia/streetzim-west-asia_archive.torrent" data-track="torrent" data-region="west-asia" data-title="West Asia">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-west-asia" data-track="details" data-region="west-asia" data-title="West Asia">Info</a>
+        </div>
+      </div>
+      <div class="map-card upcoming">
+        <div class="map-card-head">
+          <div class="map-card-title">Indian Subcontinent</div>
+          <div class="map-card-size">building</div>
+        </div>
+        <p class="map-card-desc">India, Pakistan, Bangladesh, Sri Lanka, Nepal, Bhutan, and the Maldives.</p>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Midwest United States</div>
+          <div class="map-card-size">4.5 GB</div>
+        </div>
+        <p class="map-card-desc">Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, North Dakota, South Dakota, Nebraska, and Kansas.</p>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-midwest-us/osm-midwest-us-2026-04-15.zim" data-track="download" data-region="midwest-us" data-title="Midwest United States">Download</a>
+          <a class="btn btn-secondary" href="https://archive.org/download/streetzim-midwest-us/streetzim-midwest-us_archive.torrent" data-track="torrent" data-region="midwest-us" data-title="Midwest United States">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-midwest-us" data-track="details" data-region="midwest-us" data-title="Midwest United States">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">California</div>
+          <div class="map-card-size">1.7 GB</div>
+        </div>
+        <p class="map-card-desc">All of California &mdash; from the Oregon border to Mexico, the Pacific coast to the Sierra Nevada.</p>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-california/osm-california-2026-04-15.zim" data-track="download" data-region="california" data-title="California">Download</a>
+          <a class="btn btn-secondary" href="https://archive.org/download/streetzim-california/streetzim-california_archive.torrent" data-track="torrent" data-region="california" data-title="California">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-california" data-track="details" data-region="california" data-title="California">Info</a>
+        </div>
+      </div>
+      <div class="map-card upcoming">
+        <div class="map-card-head">
+          <div class="map-card-title">Colorado</div>
+          <div class="map-card-size">building</div>
+        </div>
+        <p class="map-card-desc">The Rocky Mountain state &mdash; Denver, Aspen, Vail, Rocky Mountain National Park, and the Continental Divide.</p>
+      </div>
+      <div class="map-card upcoming">
+        <div class="map-card-head">
+          <div class="map-card-title">Iran</div>
+          <div class="map-card-size">building</div>
+        </div>
+        <p class="map-card-desc">Iran &mdash; from the Caspian Sea to the Persian Gulf, including Tehran, Isfahan, Shiraz, and Mashhad.</p>
+      </div>
+      <div class="map-card upcoming">
+        <div class="map-card-head">
+          <div class="map-card-title">Hispaniola</div>
+          <div class="map-card-size">building</div>
+        </div>
+        <p class="map-card-desc">The Caribbean island of Hispaniola &mdash; Haiti and the Dominican Republic.</p>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Texas</div>
+          <div class="map-card-size">2.1 GB</div>
+        </div>
+        <p class="map-card-desc">Texas, USA &mdash; from the Gulf Coast to the Rio Grande, including Houston, Dallas, San Antonio, Austin, Fort Worth, and El Paso.</p>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-texas/osm-texas-2026-04-15.zim" data-track="download" data-region="texas" data-title="Texas">Download</a>
+          <a class="btn btn-secondary" href="https://archive.org/download/streetzim-texas/streetzim-texas_archive.torrent" data-track="torrent" data-region="texas" data-title="Texas">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-texas" data-track="details" data-region="texas" data-title="Texas">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">West Coast US</div>
+          <div class="map-card-size">3.0 GB</div>
+        </div>
+        <p class="map-card-desc">U.S. West Coast: Washington, Oregon, and California &mdash; Seattle, Portland, San Francisco, Los Angeles, San Diego, and everything in between.</p>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-west-coast-us/osm-west-coast-us-2026-04-15.zim" data-track="download" data-region="west-coast-us" data-title="West Coast US">Download</a>
+          <a class="btn btn-secondary" href="https://archive.org/download/streetzim-west-coast-us/streetzim-west-coast-us_archive.torrent" data-track="torrent" data-region="west-coast-us" data-title="West Coast US">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-west-coast-us" data-track="details" data-region="west-coast-us" data-title="West Coast US">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">East Coast US</div>
+          <div class="map-card-size">3.8 GB</div>
+        </div>
+        <p class="map-card-desc">U.S. East Coast from Maine to Florida &mdash; New York, Boston, Philadelphia, Washington D.C., Atlanta, Miami, and the entire Eastern Seaboard.</p>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-east-coast-us/osm-east-coast-us-2026-04-13.zim" data-track="download" data-region="east-coast-us" data-title="East Coast US">Download</a>
+          <a class="btn btn-secondary" href="https://archive.org/download/streetzim-east-coast-us/streetzim-east-coast-us_archive.torrent" data-track="torrent" data-region="east-coast-us" data-title="East Coast US">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-east-coast-us" data-track="details" data-region="east-coast-us" data-title="East Coast US">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Australia &amp; New Zealand</div>
+          <div class="map-card-size">5.9 GB</div>
+        </div>
+        <p class="map-card-desc">Australia and New Zealand &mdash; Sydney, Melbourne, Brisbane, Perth, Auckland, Wellington, the Great Barrier Reef, Outback, and Southern Alps.</p>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-australia-nz/osm-australia-and-new-zealand-2026-04-14.zim" data-track="download" data-region="australia-nz" data-title="Australia &amp; New Zealand">Download</a>
+          <a class="btn btn-secondary" href="https://archive.org/download/streetzim-australia-nz/streetzim-australia-nz_archive.torrent" data-track="torrent" data-region="australia-nz" data-title="Australia &amp; New Zealand">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-australia-nz" data-track="details" data-region="australia-nz" data-title="Australia &amp; New Zealand">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Japan</div>
+          <div class="map-card-size">3.6 GB</div>
+        </div>
+        <p class="map-card-desc">Japan &mdash; all four main islands (Honshu, Hokkaido, Kyushu, Shikoku), Okinawa, and the Ryukyu archipelago. Tokyo, Osaka, Kyoto, Nagoya, Sapporo, Fukuoka, Hiroshima, and more.</p>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-japan/osm-japan-2026-04-14.zim" data-track="download" data-region="japan" data-title="Japan">Download</a>
+          <a class="btn btn-secondary" href="https://archive.org/download/streetzim-japan/streetzim-japan_archive.torrent" data-track="torrent" data-region="japan" data-title="Japan">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-japan" data-track="details" data-region="japan" data-title="Japan">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Washington, D.C.</div>
+          <div class="map-card-size">19 MB</div>
+        </div>
+        <p class="map-card-desc">Washington, D.C. &mdash; the U.S. capital and surrounding metro area.</p>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-washington-dc/osm-washington-dc-2026-04.zim" data-track="download" data-region="washington-dc" data-title="Washington, D.C.">Download</a>
+          <a class="btn btn-secondary" href="https://archive.org/download/streetzim-washington-dc/streetzim-washington-dc_archive.torrent" data-track="torrent" data-region="washington-dc" data-title="Washington, D.C.">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-washington-dc" data-track="details" data-region="washington-dc" data-title="Washington, D.C.">Info</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>What is it?</h2>
+    <p class="lead">StreetZim packages OpenStreetMap data &mdash; entire countries or continents &mdash; into a single ZIM file you can open in <a href="https://kiwix.org" target="_blank" rel="noopener">Kiwix</a>. It works completely offline: no servers, no API calls, no internet required after the initial download.</p>
+    <p>Unlike traditional offline map apps that ship raster tiles, StreetZim uses <strong>vector tiles rendered client-side</strong> with MapLibre GL JS. The result: smooth pan, zoom, rotation, and even 3D terrain &mdash; all from a single file on your device.</p>
+
+    <div class="features">
+      <div class="feature">
+        <h4>Vector Maps</h4>
+        <p>Smooth, sharp street-level maps with the OpenMapTiles schema, rendered live by MapLibre.</p>
+      </div>
+      <div class="feature">
+        <h4>Satellite Imagery</h4>
+        <p>10-meter resolution Sentinel-2 cloudless imagery for the entire mapped region.</p>
+      </div>
+      <div class="feature">
+        <h4>3D Terrain</h4>
+        <p>Hillshade and 3D elevation from the Copernicus GLO-30 global DEM.</p>
+      </div>
+      <div class="feature">
+        <h4>Wikipedia &amp; Wikidata</h4>
+        <p>Tap any city, mountain, or landmark for its Wikipedia article and key facts.</p>
+      </div>
+      <div class="feature">
+        <h4>Full-Text Search</h4>
+        <p>Search across millions of place names, streets, parks, peaks, airports, and POIs.</p>
+      </div>
+      <div class="feature">
+        <h4>Truly Offline</h4>
+        <p>Just one .zim file. No accounts, no telemetry, no network. Open and go.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>How to Use</h2>
+    <div class="steps">
+      <div class="step">
+        <span class="step-num">1</span>
+        <h4>Install Kiwix</h4>
+        <p>Free reader for iOS, Android, Mac, Windows, and Linux. Get it at <a href="https://kiwix.org" target="_blank" rel="noopener">kiwix.org</a>.</p>
+      </div>
+      <div class="step">
+        <span class="step-num">2</span>
+        <h4>Download a map</h4>
+        <p>Pick a region above and download the .zim file (or grab the torrent for faster speeds).</p>
+      </div>
+      <div class="step">
+        <span class="step-num">3</span>
+        <h4>Open in Kiwix</h4>
+        <p>Open the .zim file in the Kiwix app. That&rsquo;s it &mdash; the map runs entirely offline.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>Data Sources &amp; Licenses</h2>
+    <p>StreetZim is built entirely from open data. Each map ZIM bundles content from these sources:</p>
+    <div class="licenses">
+      <ul>
+        <li><strong>Map data:</strong> &copy; OpenStreetMap contributors, available under the <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">Open Database License (ODbL)</a>.</li>
+        <li><strong>Tile schema:</strong> <a href="https://openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> (CC-BY 4.0).</li>
+        <li><strong>Satellite imagery:</strong> Sentinel-2 cloudless by <a href="https://s2maps.eu/" target="_blank" rel="noopener">EOX IT Services GmbH</a> &mdash; CC BY-NC-SA 4.0.</li>
+        <li><strong>Elevation:</strong> Copernicus GLO-30 DEM &mdash; &copy; DLR / Airbus, provided under the COPERNICUS programme by the European Union and ESA.</li>
+        <li><strong>Place info:</strong> <a href="https://www.wikidata.org/" target="_blank" rel="noopener">Wikidata</a> (CC0) and <a href="https://en.wikipedia.org/" target="_blank" rel="noopener">Wikipedia</a> (CC BY-SA 3.0).</li>
+        <li><strong>Tool code:</strong> <a href="https://github.com/jasontitus/streetzim" target="_blank" rel="noopener">StreetZim</a> &mdash; MIT License.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>Open Source Projects</h2>
+    <p>StreetZim relies on the Kiwix reader apps to open .zim files. Each client is open source and developed on GitHub:</p>
+    <div class="source-list">
+      <a href="https://github.com/kiwix/kiwix-apple" target="_blank" rel="noopener">
+        <span class="src-title">Kiwix for iOS &amp; macOS</span>
+        <span class="src-sub">github.com/kiwix/kiwix-apple</span>
+      </a>
+      <a href="https://github.com/kiwix/kiwix-android" target="_blank" rel="noopener">
+        <span class="src-title">Kiwix for Android</span>
+        <span class="src-sub">github.com/kiwix/kiwix-android</span>
+      </a>
+      <a href="https://github.com/kiwix/kiwix-js-pwa" target="_blank" rel="noopener">
+        <span class="src-title">Kiwix PWA (Windows &amp; Linux)</span>
+        <span class="src-sub">github.com/kiwix/kiwix-js-pwa</span>
+      </a>
+      <a href="https://github.com/kiwix/kiwix-desktop" target="_blank" rel="noopener">
+        <span class="src-title">Kiwix Desktop</span>
+        <span class="src-sub">github.com/kiwix/kiwix-desktop</span>
+      </a>
+      <a href="https://github.com/jasontitus/streetzim" target="_blank" rel="noopener">
+        <span class="src-title">StreetZim</span>
+        <span class="src-sub">github.com/jasontitus/streetzim</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    StreetZim is an open source project. Source on <a href="https://github.com/jasontitus/streetzim" target="_blank" rel="noopener">GitHub</a>. Maps hosted on the <a href="https://archive.org" target="_blank" rel="noopener">Internet Archive</a>.
+  </div>
+</footer>
+
+</body>
+</html>
