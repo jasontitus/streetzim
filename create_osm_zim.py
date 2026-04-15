@@ -558,7 +558,9 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
     import rasterio
     import mercantile
 
-    mosaic_path = os.path.join(dem_dir, "mosaic_4326.vrt")
+    # Use a UNIQUE VRT path per bbox to avoid race conditions when two
+    # builds run in parallel and overwrite each other's VRT.
+    mosaic_path = os.path.join(dem_dir, f"mosaic_{bbox_key}.vrt")
     try:
         # Use -input_file_list to avoid "Argument list too long" with 24K+ files
         import tempfile as _tmpfile
@@ -2882,7 +2884,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             bbox_parsed = parse_bbox(bbox_str)
             # Use buffered VRT for verification — bbox + 1 degree on each side
             dem_dir_v = os.path.join(terrain_dir, "dem_sources")
-            vrt_path = os.path.join(dem_dir_v, "verify.vrt")
+            _bbox_key_v = f"{bbox_parsed[0]:.1f}_{bbox_parsed[1]:.1f}_{bbox_parsed[2]:.1f}_{bbox_parsed[3]:.1f}"
+            vrt_path = os.path.join(dem_dir_v, f"verify_{_bbox_key_v}.vrt")
             all_tifs_v = []
             for _lat in range(_math.floor(bbox_parsed[1]) - 1, _math.floor(bbox_parsed[3]) + 2):
                 for _lon in range(_math.floor(bbox_parsed[0]) - 1, _math.floor(bbox_parsed[2]) + 2):
