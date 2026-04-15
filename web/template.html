@@ -84,6 +84,12 @@
     border: 1px solid rgba(59,130,246,0.25);
     color: var(--accent-hover);
     font-size: 12px; font-weight: 500;
+    text-decoration: none;
+  }
+  a.badge:hover {
+    background: rgba(59,130,246,0.22);
+    border-color: rgba(59,130,246,0.45);
+    text-decoration: none;
   }
 
   section {
@@ -276,11 +282,11 @@
     <h1>Street<span class="accent">Zim</span></h1>
     <p class="tagline">Fully offline OpenStreetMap maps for the Kiwix reader. Vector tiles, satellite imagery, 3D terrain, and Wikipedia &mdash; no internet connection required.</p>
     <div class="badges">
-      <span class="badge">iOS</span>
-      <span class="badge">Android</span>
-      <span class="badge">macOS</span>
-      <span class="badge">Windows</span>
-      <span class="badge">Linux</span>
+      <a class="badge" href="https://apps.apple.com/app/kiwix/id997079563" target="_blank" rel="noopener">iOS</a>
+      <a class="badge" href="https://play.google.com/store/apps/details?id=org.kiwix.kiwixmobile" target="_blank" rel="noopener">Android</a>
+      <a class="badge" href="https://apps.apple.com/app/kiwix/id1565531340" target="_blank" rel="noopener">macOS</a>
+      <a class="badge" href="https://pwa.kiwix.org/" target="_blank" rel="noopener">Windows</a>
+      <a class="badge" href="https://pwa.kiwix.org/" target="_blank" rel="noopener">Linux</a>
       <span class="badge">Free &amp; Open Source</span>
     </div>
   </div>
