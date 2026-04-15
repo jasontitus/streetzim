@@ -287,6 +287,75 @@
   .wiki-empty-state-text {
     font-size: 13px; color: var(--text-tertiary); line-height: 1.5;
   }
+
+  /* --- Routing --- */
+  #routing-panel {
+    display: none; position: absolute; top: 10px; left: 10px; z-index: 3;
+    width: 280px; max-width: calc(100% - 80px);
+    background: var(--panel-bg); border-radius: var(--radius);
+    box-shadow: var(--panel-shadow);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    font-family: var(--ui-font); font-size: 13px;
+    padding: 12px 14px;
+  }
+  #routing-panel h4 {
+    margin: 0 0 10px; font-size: 13px; font-weight: 600;
+    color: var(--text-primary); display: flex; justify-content: space-between; align-items: center;
+  }
+  #routing-panel h4 button {
+    background: none; border: none; font-size: 18px; cursor: pointer;
+    color: var(--text-tertiary); padding: 0 2px; line-height: 1;
+  }
+  #routing-panel h4 button:hover { color: var(--text-primary); }
+  .routing-field {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  }
+  .routing-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  }
+  .routing-dot.origin { background: #22c55e; }
+  .routing-dot.dest { background: #ef4444; }
+  .routing-field span {
+    color: var(--text-secondary); font-size: 12px; flex: 1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .routing-field span.set { color: var(--text-primary); font-weight: 500; }
+  #routing-result {
+    display: none; margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+  #routing-result .route-stat {
+    display: flex; justify-content: space-between; margin-bottom: 4px;
+  }
+  #routing-result .route-stat label {
+    color: var(--text-secondary); font-size: 11px;
+  }
+  #routing-result .route-stat value {
+    color: var(--text-primary); font-weight: 600; font-size: 13px;
+  }
+  #routing-clear {
+    display: none; margin-top: 8px; width: 100%;
+    padding: 6px; border: 1px solid var(--border); border-radius: 6px;
+    background: transparent; cursor: pointer; font-family: var(--ui-font);
+    font-size: 12px; color: var(--text-secondary);
+  }
+  #routing-clear:hover { background: var(--hover-bg); color: var(--text-primary); }
+  #routing-status {
+    color: var(--text-tertiary); font-size: 11px; margin-top: 6px;
+  }
+  .routing-marker {
+    width: 24px; height: 24px; cursor: pointer;
+  }
+  .routing-marker-origin {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #22c55e; border: 3px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+  .routing-marker-dest {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #ef4444; border: 3px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
 </style>
 </head>
 <body>
@@ -295,6 +364,24 @@
   <button id="layer-toggle" title="Toggle satellite imagery">Satellite</button>
   <button id="terrain-toggle" title="Toggle 3D terrain">3D</button>
   <button id="wiki-toggle" title="Show nearby Wikipedia entries">Explore</button>
+  <button id="route-toggle" title="Get directions between two points">Route</button>
+</div>
+<div id="routing-panel">
+  <h4>Directions <button id="routing-close" title="Close">&times;</button></h4>
+  <div class="routing-field">
+    <div class="routing-dot origin"></div>
+    <span id="routing-origin">Click map to set start</span>
+  </div>
+  <div class="routing-field">
+    <div class="routing-dot dest"></div>
+    <span id="routing-dest">Then click to set destination</span>
+  </div>
+  <div id="routing-status"></div>
+  <div id="routing-result">
+    <div class="route-stat"><label>Distance</label><value id="route-distance"></value></div>
+    <div class="route-stat"><label>Est. time</label><value id="route-time"></value></div>
+  </div>
+  <button id="routing-clear">Clear route</button>
 </div>
 <div id="wiki-panel">
   <div id="wiki-panel-header">
@@ -770,6 +857,9 @@ fetchConfig(1)
 
     // Initialize Wiki sidebar
     initWikiSidebar(map, config);
+
+    // Initialize routing
+    initRouting(map, config);
   })
   .catch(function(err) {
     dbg('fatal error loading map', describeError(err), err && err.stack);
@@ -2000,6 +2090,406 @@ function initWikiSidebar(map, config) {
     }
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(updateSidebar, 400);
+  });
+}
+
+// --- Routing with A* pathfinding ---
+function initRouting(map, config) {
+  if (!config.hasRouting) return;
+
+  var toggleBtn = document.getElementById('route-toggle');
+  var panel = document.getElementById('routing-panel');
+  var closeBtn = document.getElementById('routing-close');
+  var originLabel = document.getElementById('routing-origin');
+  var destLabel = document.getElementById('routing-dest');
+  var statusEl = document.getElementById('routing-status');
+  var resultEl = document.getElementById('routing-result');
+  var distEl = document.getElementById('route-distance');
+  var timeEl = document.getElementById('route-time');
+  var clearBtn = document.getElementById('routing-clear');
+
+  toggleBtn.style.display = 'block';
+
+  var active = false;
+  var graph = null;       // {nodes: Float64Array, adj: Array, geom: Array}
+  var originNode = -1;
+  var destNode = -1;
+  var originMarker = null;
+  var destMarker = null;
+  var routeDrawn = false;
+
+  // Toggle routing mode
+  toggleBtn.addEventListener('click', function() {
+    active = !active;
+    if (active) {
+      toggleBtn.classList.add('active-control');
+      panel.style.display = 'block';
+      map.getCanvas().style.cursor = 'crosshair';
+      loadGraph();
+    } else {
+      deactivate();
+    }
+  });
+
+  closeBtn.addEventListener('click', deactivate);
+
+  function deactivate() {
+    active = false;
+    toggleBtn.classList.remove('active-control');
+    panel.style.display = 'none';
+    map.getCanvas().style.cursor = '';
+    clearRoute();
+  }
+
+  clearBtn.addEventListener('click', function() {
+    clearRoute();
+    statusEl.textContent = '';
+  });
+
+  function clearRoute() {
+    originNode = -1;
+    destNode = -1;
+    originLabel.textContent = 'Click map to set start';
+    originLabel.classList.remove('set');
+    destLabel.textContent = 'Then click to set destination';
+    destLabel.classList.remove('set');
+    resultEl.style.display = 'none';
+    clearBtn.style.display = 'none';
+    if (originMarker) { originMarker.remove(); originMarker = null; }
+    if (destMarker) { destMarker.remove(); destMarker = null; }
+    if (routeDrawn) {
+      if (map.getLayer('route-line')) map.removeLayer('route-line');
+      if (map.getLayer('route-outline')) map.removeLayer('route-outline');
+      if (map.getSource('route')) map.removeSource('route');
+      routeDrawn = false;
+    }
+  }
+
+  // Load routing graph (lazy)
+  function loadGraph() {
+    if (graph) return;
+    statusEl.textContent = 'Loading routing data...';
+    fetch(baseUrl + 'routing-data/graph.json')
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        graph = data;
+        statusEl.textContent = 'Click map to set start point';
+      })
+      .catch(function(err) {
+        statusEl.textContent = 'Routing data unavailable';
+        console.error('Failed to load routing graph:', err);
+      });
+  }
+
+  // Find nearest graph node to a lat/lon
+  function nearestNode(lat, lon) {
+    var nodes = graph.nodes;
+    var best = -1;
+    var bestDist = Infinity;
+    for (var i = 0; i < nodes.length; i += 2) {
+      var dlat = nodes[i] - lat;
+      var dlon = nodes[i + 1] - lon;
+      var d = dlat * dlat + dlon * dlon;
+      if (d < bestDist) {
+        bestDist = d;
+        best = i / 2;
+      }
+    }
+    return best;
+  }
+
+  // Haversine distance in meters
+  function haversine(lat1, lon1, lat2, lon2) {
+    var R = 6371000;
+    var dLat = (lat2 - lat1) * Math.PI / 180;
+    var dLon = (lon2 - lon1) * Math.PI / 180;
+    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  // Binary min-heap for A* priority queue
+  function MinHeap() {
+    this.data = [];
+  }
+  MinHeap.prototype.push = function(item) {
+    this.data.push(item);
+    var i = this.data.length - 1;
+    while (i > 0) {
+      var p = (i - 1) >> 1;
+      if (this.data[p][0] <= this.data[i][0]) break;
+      var tmp = this.data[p];
+      this.data[p] = this.data[i];
+      this.data[i] = tmp;
+      i = p;
+    }
+  };
+  MinHeap.prototype.pop = function() {
+    var top = this.data[0];
+    var last = this.data.pop();
+    if (this.data.length > 0) {
+      this.data[0] = last;
+      var i = 0;
+      while (true) {
+        var l = 2 * i + 1, r = 2 * i + 2, smallest = i;
+        if (l < this.data.length && this.data[l][0] < this.data[smallest][0]) smallest = l;
+        if (r < this.data.length && this.data[r][0] < this.data[smallest][0]) smallest = r;
+        if (smallest === i) break;
+        var tmp = this.data[i];
+        this.data[i] = this.data[smallest];
+        this.data[smallest] = tmp;
+        i = smallest;
+      }
+    }
+    return top;
+  };
+  MinHeap.prototype.size = function() { return this.data.length; };
+
+  // A* pathfinding
+  function findRoute(startNode, endNode) {
+    var nodes = graph.nodes;
+    var adj = graph.adj;
+    var numNodes = nodes.length / 2;
+
+    var endLat = nodes[endNode * 2];
+    var endLon = nodes[endNode * 2 + 1];
+
+    // g[node] = best known cost to reach node (in seconds)
+    var g = new Float64Array(numNodes);
+    g.fill(Infinity);
+    g[startNode] = 0;
+
+    // Track predecessors for path reconstruction
+    var prev = new Int32Array(numNodes);
+    prev.fill(-1);
+    var prevEdge = new Int32Array(numNodes);  // which edge index in adj[prev[n]] leads to n
+    prevEdge.fill(-1);
+
+    var closed = new Uint8Array(numNodes);
+
+    var open = new MinHeap();
+    var h0 = haversine(nodes[startNode * 2], nodes[startNode * 2 + 1], endLat, endLon) / (100 / 3.6);
+    open.push([h0, startNode]);
+
+    while (open.size() > 0) {
+      var item = open.pop();
+      var current = item[1];
+
+      if (current === endNode) break;
+      if (closed[current]) continue;
+      closed[current] = 1;
+
+      var neighbors = adj[current];
+      if (!neighbors) continue;
+
+      for (var i = 0; i < neighbors.length; i++) {
+        var edge = neighbors[i];
+        var target = edge[0];
+        var dist = edge[1];    // meters
+        var speed = edge[2];   // km/h
+
+        if (closed[target]) continue;
+
+        var cost = dist / (speed / 3.6);  // time in seconds
+        var newG = g[current] + cost;
+
+        if (newG < g[target]) {
+          g[target] = newG;
+          prev[target] = current;
+          prevEdge[target] = i;
+          var tLat = nodes[target * 2];
+          var tLon = nodes[target * 2 + 1];
+          var h = haversine(tLat, tLon, endLat, endLon) / (100 / 3.6);
+          open.push([newG + h, target]);
+        }
+      }
+    }
+
+    if (g[endNode] === Infinity) return null;
+
+    // Reconstruct path
+    var path = [];
+    var totalDist = 0;
+    var totalTime = g[endNode];
+    var n = endNode;
+
+    while (n !== startNode) {
+      var p = prev[n];
+      var ei = prevEdge[n];
+      var edge = adj[p][ei];
+      totalDist += edge[1];
+
+      // Build segment geometry
+      var fromLat = nodes[p * 2], fromLon = nodes[p * 2 + 1];
+      var toLat = nodes[n * 2], toLon = nodes[n * 2 + 1];
+      var geomIdx = edge[3];
+      var segment = [[fromLon, fromLat]];
+      if (geomIdx >= 0 && graph.geom[geomIdx]) {
+        var pts = graph.geom[geomIdx];
+        for (var j = 0; j < pts.length; j++) {
+          segment.push(pts[j]);
+        }
+      }
+      segment.push([toLon, toLat]);
+      path.unshift(segment);
+
+      n = p;
+    }
+
+    // Flatten path segments into single coordinate array
+    var coords = [];
+    for (var s = 0; s < path.length; s++) {
+      var start = (s === 0) ? 0 : 1;  // skip duplicate junction points
+      for (var k = start; k < path[s].length; k++) {
+        coords.push(path[s][k]);
+      }
+    }
+
+    return {
+      coords: coords,
+      distance: totalDist,
+      time: totalTime
+    };
+  }
+
+  function drawRoute(coords) {
+    if (routeDrawn) {
+      map.getSource('route').setData({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: coords }
+      });
+    } else {
+      map.addSource('route', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: coords }
+        }
+      });
+      map.addLayer({
+        id: 'route-outline',
+        type: 'line',
+        source: 'route',
+        paint: {
+          'line-color': '#1e40af',
+          'line-width': 8,
+          'line-opacity': 0.4
+        }
+      });
+      map.addLayer({
+        id: 'route-line',
+        type: 'line',
+        source: 'route',
+        paint: {
+          'line-color': '#2563eb',
+          'line-width': 4,
+          'line-opacity': 0.9
+        }
+      });
+      routeDrawn = true;
+    }
+  }
+
+  function formatDistance(meters) {
+    if (meters < 1000) return Math.round(meters) + ' m';
+    return (meters / 1000).toFixed(1) + ' km';
+  }
+
+  function formatTime(seconds) {
+    if (seconds < 60) return Math.round(seconds) + ' sec';
+    var mins = Math.round(seconds / 60);
+    if (mins < 60) return mins + ' min';
+    var hrs = Math.floor(mins / 60);
+    var rem = mins % 60;
+    return hrs + ' hr ' + rem + ' min';
+  }
+
+  function coordLabel(lat, lon) {
+    return lat.toFixed(4) + ', ' + lon.toFixed(4);
+  }
+
+  function makeMarkerEl(cls) {
+    var el = document.createElement('div');
+    el.className = 'routing-marker';
+    var inner = document.createElement('div');
+    inner.className = cls;
+    el.appendChild(inner);
+    return el;
+  }
+
+  // Map click handler for routing
+  map.on('click', function(e) {
+    if (!active || !graph) return;
+
+    var lat = e.lngLat.lat;
+    var lon = e.lngLat.lng;
+
+    if (originNode === -1) {
+      // Set origin
+      originNode = nearestNode(lat, lon);
+      var oLat = graph.nodes[originNode * 2];
+      var oLon = graph.nodes[originNode * 2 + 1];
+      originLabel.textContent = coordLabel(oLat, oLon);
+      originLabel.classList.add('set');
+      statusEl.textContent = 'Click map to set destination';
+
+      if (originMarker) originMarker.remove();
+      originMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-origin'), anchor: 'center' })
+        .setLngLat([oLon, oLat])
+        .addTo(map);
+    } else if (destNode === -1) {
+      // Set destination
+      destNode = nearestNode(lat, lon);
+      var dLat = graph.nodes[destNode * 2];
+      var dLon = graph.nodes[destNode * 2 + 1];
+      destLabel.textContent = coordLabel(dLat, dLon);
+      destLabel.classList.add('set');
+      statusEl.textContent = 'Calculating route...';
+
+      if (destMarker) destMarker.remove();
+      destMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-dest'), anchor: 'center' })
+        .setLngLat([dLon, dLat])
+        .addTo(map);
+
+      // Calculate route
+      setTimeout(function() {
+        var result = findRoute(originNode, destNode);
+        if (result) {
+          drawRoute(result.coords);
+          distEl.textContent = formatDistance(result.distance);
+          timeEl.textContent = formatTime(result.time);
+          resultEl.style.display = 'block';
+          clearBtn.style.display = 'block';
+          statusEl.textContent = '';
+
+          // Fit map to route
+          var bounds = result.coords.reduce(function(b, c) {
+            return b.extend(c);
+          }, new maplibregl.LngLatBounds(result.coords[0], result.coords[0]));
+          map.fitBounds(bounds, { padding: 60, duration: 1000 });
+        } else {
+          statusEl.textContent = 'No route found';
+          clearBtn.style.display = 'block';
+        }
+      }, 10);
+    } else {
+      // Reset and set new origin
+      clearRoute();
+      originNode = nearestNode(lat, lon);
+      var nLat = graph.nodes[originNode * 2];
+      var nLon = graph.nodes[originNode * 2 + 1];
+      originLabel.textContent = coordLabel(nLat, nLon);
+      originLabel.classList.add('set');
+      statusEl.textContent = 'Click map to set destination';
+
+      originMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-origin'), anchor: 'center' })
+        .setLngLat([nLon, nLat])
+        .addTo(map);
+    }
   });
 }
 </script>
