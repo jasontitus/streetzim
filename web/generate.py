@@ -46,6 +46,12 @@ REGIONS = [
         "description": "Turkey, Syria, Lebanon, Israel, Palestine, Jordan, Iraq, Iran, Kuwait, Saudi Arabia, Bahrain, Qatar, UAE, Oman, Yemen, and parts of Egypt, Afghanistan, and Pakistan.",
     },
     {
+        "id": "africa",
+        "title": "Africa",
+        "zim_file": "osm-africa.zim",
+        "description": "All of Africa &mdash; Algeria, Egypt, Ethiopia, Kenya, Morocco, Nigeria, South Africa, Tanzania, and 40+ more countries.",
+    },
+    {
         "id": "indian-subcontinent",
         "title": "Indian Subcontinent",
         "zim_file": "osm-indian-subcontinent.zim",

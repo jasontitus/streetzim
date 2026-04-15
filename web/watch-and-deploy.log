@@ -1,0 +1,13 @@
+watch-and-deploy: polling Archive.org every 5 minutes (target: 10 live)
+[12:22:09] Archive.org item count: -1 -> 3, refreshing site...
+Querying Archive.org: https://archive.org/advancedsearch.php?q=identifier%3Astreetzim-*&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=item_size&fl%5B%5D=publicdate&rows=100&output=json
+Found 3 items on Archive.org
+Rendered 3 live, 7 upcoming
+Wrote /Users/jasontitus/experiments/streetzim/web/index.html
+Deploying to Firebase...
+[14:37:45] Archive.org item count: 3 -> 4, refreshing site...
+Querying Archive.org: https://archive.org/advancedsearch.php?q=identifier%3Astreetzim-*&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=item_size&fl%5B%5D=publicdate&rows=100&output=json
+Found 4 items on Archive.org
+Rendered 4 live, 6 upcoming
+Wrote /Users/jasontitus/experiments/streetzim/web/index.html
+Deploying to Firebase...
