@@ -1289,12 +1289,20 @@ def _assign_location_batch(batch):
     return results
 
 
-def extract_routing_graph(pbf_path, output_dir):
+def extract_routing_graph(pbf_path, output_dir, bbox=None):
     """Extract road network from OSM PBF and build a compact routing graph.
 
-    Uses osmium to filter highway ways, then exports as GeoJSONSeq.
-    Builds a graph where intersections (and way endpoints) are nodes,
-    and road segments between them are edges with distance and geometry.
+    Uses osmium to extract bbox, filter highway ways, then exports as
+    GeoJSONSeq. Builds a graph where intersections (and way endpoints)
+    are nodes, and road segments between them are edges with distance
+    and geometry.
+
+    Args:
+        pbf_path: Source OSM PBF file
+        output_dir: Where to write intermediates + final routing-graph.json
+        bbox: Optional (minlon, minlat, maxlon, maxlat) to bbox-filter first.
+              Critical for regional builds from a planet PBF — without this
+              we'd process world highways (~27 GB) for a Japan build.
 
     Returns the path to the output JSON file, or None if extraction fails.
     """
@@ -1302,10 +1310,27 @@ def extract_routing_graph(pbf_path, output_dir):
 
     print("  Extracting routing graph from OSM data...")
 
-    # Step 1: Filter highway ways from PBF
+    # Step 0: Bbox-filter the PBF first to avoid processing world highways
+    # for a regional build. This is MUCH faster than filtering tags from
+    # the full planet PBF and producing a ~27 GB intermediate.
+    source_pbf = str(pbf_path)
+    if bbox:
+        minlon, minlat, maxlon, maxlat = bbox
+        bbox_pbf = os.path.join(output_dir, "region.osm.pbf")
+        print(f"    Extracting bbox {minlon},{minlat},{maxlon},{maxlat} from planet PBF...")
+        subprocess.run([
+            "osmium", "extract",
+            "-b", f"{minlon},{minlat},{maxlon},{maxlat}",
+            source_pbf, "-o", bbox_pbf, "--overwrite",
+        ], check=True)
+        size_mb = os.path.getsize(bbox_pbf) / (1024 * 1024)
+        print(f"    Region PBF: {size_mb:.1f} MB")
+        source_pbf = bbox_pbf
+
+    # Step 1: Filter highway ways from (bbox-filtered) PBF
     highways_pbf = os.path.join(output_dir, "highways.osm.pbf")
     cmd = [
-        "osmium", "tags-filter", str(pbf_path),
+        "osmium", "tags-filter", source_pbf,
         "w/highway",
         "-o", highways_pbf, "--overwrite",
     ]
@@ -2841,7 +2866,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 print("    Warning: no PBF file available, skipping routing graph")
                 print("    (routing requires a PBF file — not available with --mbtiles only)")
             else:
-                routing_graph_path = extract_routing_graph(rt_pbf, tmpdir)
+                rt_bbox = parse_bbox(bbox_str) if bbox_str else None
+                routing_graph_path = extract_routing_graph(rt_pbf, tmpdir, bbox=rt_bbox)
 
         # Download satellite tiles and generate terrain tiles
         # These are independent (satellite=I/O-bound, terrain=CPU-bound) so run in parallel
