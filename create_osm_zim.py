@@ -65,6 +65,15 @@ COPERNICUS_DEM_URL = (
     "Copernicus_DSM_COG_10_{ns}{lat:02d}_00_{ew}{lon:03d}_00_DEM.tif"
 )
 
+# Copernicus GLO-90 DEM fallback — broader coverage than GLO-30 (includes
+# Georgia, Armenia, Azerbaijan and other restricted-region countries).
+# Used when GLO-30 returns 404. 90m resolution vs 30m but fine for hillshade.
+COPERNICUS_DEM_URL_GLO90 = (
+    "https://copernicus-dem-90m.s3.amazonaws.com/"
+    "Copernicus_DSM_COG_30_{ns}{lat:02d}_00_{ew}{lon:03d}_00_DEM/"
+    "Copernicus_DSM_COG_30_{ns}{lat:02d}_00_{ew}{lon:03d}_00_DEM.tif"
+)
+
 # MapLibre GL JS version to bundle
 MAPLIBRE_VERSION = "5.20.0"
 MAPLIBRE_CDN = f"https://unpkg.com/maplibre-gl@{MAPLIBRE_VERSION}/dist"
@@ -521,26 +530,37 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
                 continue
 
             if not os.path.exists(fpath) or os.path.getsize(fpath) < 1000:
-                print(f"    Downloading {ns}{abs_lat:02d} {ew}{abs_lon:03d}...")
-                req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
-                try:
-                    with urllib.request.urlopen(req, timeout=120) as resp:
-                        with open(fpath, "wb") as f:
-                            while True:
-                                chunk = resp.read(1024 * 1024)
-                                if not chunk:
-                                    break
-                                f.write(chunk)
-                    size_mb = os.path.getsize(fpath) / (1024 * 1024)
-                    print(f"      {size_mb:.1f} MB")
-                except urllib.error.HTTPError as e:
-                    if e.code == 404:
-                        # Mark as no-data so we don't retry ocean/missing tiles
-                        open(nodata_marker, "w").close()
-                    print(f"      Warning: failed to download: {e}")
-                    continue
-                except Exception as e:
-                    print(f"      Warning: failed to download: {e}")
+                # Try GLO-30 first, fall back to GLO-90 for restricted regions
+                # (Georgia, Armenia, Azerbaijan etc. that 404 on GLO-30).
+                glo90_url = COPERNICUS_DEM_URL_GLO90.format(ns=ns, lat=abs_lat, ew=ew, lon=abs_lon)
+                downloaded = False
+                for try_url, label in [(url, "GLO-30"), (glo90_url, "GLO-90 fallback")]:
+                    print(f"    Downloading {ns}{abs_lat:02d} {ew}{abs_lon:03d} ({label})...")
+                    req = urllib.request.Request(try_url, headers={"User-Agent": "streetzim/1.0"})
+                    try:
+                        with urllib.request.urlopen(req, timeout=120) as resp:
+                            with open(fpath, "wb") as f:
+                                while True:
+                                    chunk = resp.read(1024 * 1024)
+                                    if not chunk:
+                                        break
+                                    f.write(chunk)
+                        size_mb = os.path.getsize(fpath) / (1024 * 1024)
+                        print(f"      {size_mb:.1f} MB ({label})")
+                        downloaded = True
+                        break
+                    except urllib.error.HTTPError as e:
+                        if e.code == 404:
+                            print(f"      404 on {label}, trying next source...")
+                            continue
+                        print(f"      Warning: failed to download from {label}: {e}")
+                        break
+                    except Exception as e:
+                        print(f"      Warning: failed to download from {label}: {e}")
+                        break
+                if not downloaded:
+                    # Both GLO-30 and GLO-90 failed — mark as genuinely nodata (ocean)
+                    open(nodata_marker, "w").close()
                     continue
             else:
                 size_mb = os.path.getsize(fpath) / (1024 * 1024)
