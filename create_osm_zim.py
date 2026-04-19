@@ -1381,6 +1381,105 @@ def extract_addresses_pbf(pbf_path, output_path, bbox=None):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def extract_wiki_tags_pbf(pbf_path, bbox=None):
+    """Extract {wikipedia, wikidata} tags per OSM object with a name.
+
+    Used to enrich the search index so offline agents can cross-link
+    POI records to the Wikipedia ZIM (per the mcpzim contract doc).
+    Returns a dict keyed by (normalized_name, quantized_lat, quantized_lon):
+        { ("lincoln memorial", 3889018, -770358): {
+              "wikipedia": "en:Lincoln_Memorial",
+              "wikidata":  "Q162458",
+          },
+          ... }
+    Coord quantization is round(lat*1e4) / round(lon*1e4) ≈ 11 m grid,
+    which tolerates MVT-vs-PBF rounding without colliding unrelated POIs.
+    """
+    print("  Extracting wiki cross-ref tags from OSM data...")
+    source_pbf = str(pbf_path)
+    tmp = tempfile.mkdtemp(prefix="streetzim_wiki_")
+    try:
+        if bbox:
+            minlon, minlat, maxlon, maxlat = bbox
+            bbox_pbf = os.path.join(tmp, "region.osm.pbf")
+            subprocess.run([
+                "osmium", "extract",
+                "-b", f"{minlon},{minlat},{maxlon},{maxlat}",
+                source_pbf, "-o", bbox_pbf, "--overwrite",
+            ], check=True)
+            source_pbf = bbox_pbf
+
+        # osmium-tags-filter: anything with wikipedia OR wikidata tag.
+        wiki_pbf = os.path.join(tmp, "wiki.osm.pbf")
+        subprocess.run([
+            "osmium", "tags-filter", source_pbf,
+            "wikipedia", "wikidata",
+            "-o", wiki_pbf, "--overwrite",
+        ], check=True)
+
+        wiki_geojson = os.path.join(tmp, "wiki.geojsonseq")
+        subprocess.run([
+            "osmium", "export", wiki_pbf,
+            "-f", "geojsonseq",
+            "-o", wiki_geojson, "--overwrite",
+        ], check=True)
+
+        lookup = {}
+        count = 0
+        with open(wiki_geojson, "r", encoding="utf-8") as fin:
+            for line in fin:
+                line = line.strip().lstrip("\x1e")
+                if not line:
+                    continue
+                try:
+                    feat = json.loads(line)
+                except Exception:
+                    continue
+                props = feat.get("properties") or {}
+                name = (props.get("name") or props.get("name:latin") or "").strip()
+                if not name:
+                    continue
+                wikipedia = (props.get("wikipedia") or "").strip()
+                wikidata = (props.get("wikidata") or "").strip()
+                if not wikipedia and not wikidata:
+                    continue
+
+                geom = feat.get("geometry") or {}
+                gtype = geom.get("type")
+                coords = geom.get("coordinates")
+                if gtype == "Point" and coords:
+                    lon, lat = coords[0], coords[1]
+                elif gtype == "Polygon" and coords and coords[0]:
+                    ring = coords[0]
+                    lon = sum(c[0] for c in ring) / len(ring)
+                    lat = sum(c[1] for c in ring) / len(ring)
+                elif gtype == "LineString" and coords:
+                    mid = coords[len(coords) // 2]
+                    lon, lat = mid[0], mid[1]
+                else:
+                    continue
+
+                key = (name.lower(), int(round(lat * 1e4)), int(round(lon * 1e4)))
+                entry = {}
+                if wikipedia:
+                    entry["wikipedia"] = wikipedia
+                if wikidata:
+                    entry["wikidata"] = wikidata
+                # If we already have an entry for this coord+name, prefer the one
+                # with more fields (covers the case where a node and a way share
+                # the same name but only one has both tags).
+                existing = lookup.get(key)
+                if existing is None or len(entry) > len(existing):
+                    lookup[key] = entry
+                    count += 1
+                if count % 50000 == 0 and count:
+                    print(f"\r    Indexed {count} wiki cross-refs...", end="", flush=True)
+        print(f"\r    Indexed {len(lookup)} wiki cross-refs (from {count} raw)")
+        return lookup
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def extract_routing_graph(pbf_path, output_dir, bbox=None):
     """Extract road network from OSM PBF and build a compact routing graph.
 
@@ -2132,6 +2231,8 @@ def create_zim(
     bbox=None,
     wikidata_data=None,
     routing_graph_path=None,
+    wiki_cross_refs=None,
+    address_count=0,
 ):
     """Create a ZIM file containing the map viewer and all tiles."""
     from libzim.writer import Creator, Item, StringProvider, FileProvider
@@ -2598,26 +2699,65 @@ def create_zim(
                         keys.add(_prefix_key(m))
                 return keys
 
+            # Per-type counts for streetzim-meta.json, plus a parallel set of
+            # chunk files keyed by OSM top-level `type` (category-index).
+            # Category-index is a cheap O(1)-per-query alternative to
+            # near_places scanning every search-data chunk (mcpzim does that
+            # linearly today; see STREETZIM_CONSUMPTION.md).
+            type_counts = {}
+            wiki_fields_added = 0
+            cat_chunk_fds = {}
+            cat_chunk_counts = {}
+            cat_dir = os.path.join(chunk_tmp, "categories")
+            os.makedirs(cat_dir, exist_ok=True)
+            def _cat_slug(t):
+                s = "".join(c if c.isascii() and (c.isalnum() or c == "_") else "_" for c in t.lower())
+                return s[:40] or "_"
+
             print("    Streaming search features from disk...", flush=True)
             with open(xapian_path, "w") as xf:
                 with open(search_features_path, "r") as sf:
                     for line in sf:
                         feat = json.loads(line)
                         total_features += 1
+                        t = feat.get("type", "")
+                        type_counts[t] = type_counts.get(t, 0) + 1
 
                         # Enrich with location (state, country) if missing
                         if loc_lookup and not feat.get("location"):
                             feat["location"] = loc_lookup(feat["lat"], feat["lon"])
 
+                        # Enrich with wiki cross-refs if this POI has matching
+                        # (name, coord) in the OSM-tag lookup built from the PBF.
+                        wiki = None
+                        if wiki_cross_refs:
+                            wiki_key = (
+                                feat["name"].lower(),
+                                int(round(feat["lat"] * 1e4)),
+                                int(round(feat["lon"] * 1e4)),
+                            )
+                            wiki = wiki_cross_refs.get(wiki_key)
+                            if wiki:
+                                wiki_fields_added += 1
+
+                        # Canonical record shape consumed by mcpzim:
+                        #   n, t (type), s (subtype), a (lat), o (lon), l (location)
+                        # Optional additions (safe to forward through their parser):
+                        #   w  = wikipedia tag value(s)  (OSM format, e.g. "en:Lincoln_Memorial")
+                        #   q  = wikidata Q-ID
+                        rec = {"n": feat["name"], "t": t, "s": feat.get("subtype", ""),
+                               "a": feat["lat"], "o": feat["lon"], "l": feat.get("location", "")}
+                        if wiki:
+                            if wiki.get("wikipedia"):
+                                rec["w"] = wiki["wikipedia"]
+                            if wiki.get("wikidata"):
+                                rec["q"] = wiki["wikidata"]
+                        entry = json.dumps(rec, separators=(",", ":")) + "\n"
+
                         # Write abbreviated entry to per-prefix chunk file(s).
                         # Index under each word's prefix — duplicates entries
                         # across 1–4 chunks (avg ~2×) but enables substring
                         # hits like "cathedral" → "Washington National Cathedral".
-                        entry = json.dumps(
-                            {"n": feat["name"], "t": feat["type"], "s": feat.get("subtype", ""),
-                             "a": feat["lat"], "o": feat["lon"], "l": feat.get("location", "")},
-                            separators=(",", ":")
-                        ) + "\n"
                         for prefix in _prefixes_for(feat["name"]):
                             if prefix not in chunk_fds:
                                 chunk_fds[prefix] = open(
@@ -2626,6 +2766,17 @@ def create_zim(
                             chunk_fds[prefix].write(entry)
                             chunk_counts[prefix] += 1
 
+                        # Also write to the category-index (one file per type).
+                        # Same record shape so downstream consumers stay trivial.
+                        if t:
+                            cat_slug = _cat_slug(t)
+                            if cat_slug not in cat_chunk_fds:
+                                cat_chunk_fds[cat_slug] = open(
+                                    os.path.join(cat_dir, f"{cat_slug}.jsonl"), "w")
+                                cat_chunk_counts[cat_slug] = 0
+                            cat_chunk_fds[cat_slug].write(entry)
+                            cat_chunk_counts[cat_slug] += 1
+
                         # Collect xapian-eligible features separately
                         if feat["type"] in xapian_types:
                             xf.write(line)
@@ -2633,6 +2784,11 @@ def create_zim(
 
                         if total_features % 500_000 == 0:
                             print(f"\r    Bucketed {total_features} features into {len(chunk_counts)} chunks...", end="", flush=True)
+            for fd in cat_chunk_fds.values():
+                fd.close()
+            del cat_chunk_fds
+            if wiki_fields_added:
+                print(f"    Enriched {wiki_fields_added} entries with wiki cross-refs")
 
             # Close all chunk file handles
             for fd in chunk_fds.values():
@@ -2671,6 +2827,89 @@ def create_zim(
                     print(f"\r    Added {chunks_added}/{len(chunk_counts)} search chunks...", end="", flush=True)
 
             print(f"\r    Added {len(chunk_counts)} search chunks ({total_features} features)          ", flush=True)
+
+            # Pass 2b: category-index files (optional, mirrors search-data
+            # chunks but keyed by OSM top-level `type`). Lets consumers answer
+            # "all museums in this region" with one file read instead of a
+            # linear scan. Same canonical record shape as search-data chunks.
+            if cat_chunk_counts:
+                cat_total_records = 0
+                for cat_slug in sorted(cat_chunk_counts):
+                    cat_path = os.path.join(cat_dir, f"{cat_slug}.jsonl")
+                    entries = []
+                    with open(cat_path, "r") as cf:
+                        for cline in cf:
+                            entries.append(json.loads(cline))
+                    os.unlink(cat_path)
+                    chunk_json = json.dumps(entries, separators=(",", ":"))
+                    creator.add_item(MapItem(
+                        f"category-index/{cat_slug}.json",
+                        f"Category index {cat_slug}",
+                        "application/json",
+                        chunk_json.encode("utf-8"),
+                    ))
+                    cat_total_records += len(entries)
+                cat_manifest = {k: cat_chunk_counts[k] for k in sorted(cat_chunk_counts)}
+                creator.add_item(MapItem(
+                    "category-index/manifest.json",
+                    "Category Index Manifest",
+                    "application/json",
+                    json.dumps({"total": cat_total_records,
+                                "categories": cat_manifest},
+                               separators=(",", ":")).encode("utf-8"),
+                ))
+                print(f"    Added category-index: "
+                      f"{len(cat_chunk_counts)} categories, {cat_total_records} records")
+
+            # streetzim-meta.json — ZIM-level summary for offline LLM agents.
+            # Shape matches the mcpzim consumption contract (see
+            # docs/STREETZIM_CONSUMPTION.md) so they can expose a `zim_info`
+            # tool without inferring capabilities from filenames.
+            routing_stats = {}
+            if routing_graph_path and os.path.isfile(routing_graph_path):
+                try:
+                    import struct as _struct
+                    with open(routing_graph_path, "rb") as _rf:
+                        _magic = _rf.read(4)
+                        _hdr = _struct.unpack("<7I", _rf.read(28))
+                        if _magic == b"SZRG":
+                            routing_stats = {
+                                "version": int(_hdr[0]),
+                                "nodes": int(_hdr[1]),
+                                "edges": int(_hdr[2]),
+                                "geoms": int(_hdr[3]),
+                            }
+                except Exception:
+                    pass
+
+            meta = {
+                "name": map_config.get("name", name),
+                "buildDate": _time.strftime("%Y-%m-%d"),
+                "hasRouting": bool(routing_graph_path),
+                "hasSatellite": bool(map_config.get("hasSatellite")),
+                "hasTerrain": bool(map_config.get("hasTerrain")),
+                "hasWikidata": bool(map_config.get("hasWikidata")),
+                "hasAddresses": address_count > 0,
+                "counts": {
+                    "total": total_features,
+                    "addresses": int(address_count),
+                    "byType": type_counts,
+                    "wikiCrossRefs": int(wiki_fields_added),
+                    "wikidataEntries": int(len(wikidata_data) if wikidata_data else 0),
+                },
+            }
+            if bbox:
+                meta["bbox"] = list(bbox)  # [minLon, minLat, maxLon, maxLat]
+            if routing_stats:
+                meta["routingGraph"] = routing_stats
+            meta["wikipediaLang"] = "en"  # we emit OSM-raw `<lang>:<Title>`; en is the dominant edition we reference
+            creator.add_item(MapItem(
+                "streetzim-meta.json", "StreetZim Meta", "application/json",
+                json.dumps(meta, separators=(",", ":"),
+                           ensure_ascii=False).encode("utf-8"),
+            ))
+            print(f"    Added streetzim-meta.json (name={meta['name']}, "
+                  f"types={len(type_counts)}, addresses={address_count})")
 
             # Pass 3: stream xapian file -> HTML redirect pages
             print(f"    Adding {xapian_count} Xapian search pages (of {total_features} total)...", flush=True)
@@ -3173,11 +3412,21 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         # Append street addresses (addr:housenumber + addr:street) so users can
         # type "45 Brīvības gatve" in the routing UI. Requires a PBF — the MVT
         # tiles don't carry addr:* tags. Skipped silently when PBF is missing.
+        address_count = 0
+        wiki_cross_refs = None
         if isinstance(search_features, str) and os.path.isfile(search_features):
             addr_pbf = locals().get('work_pbf') or pbf_path or args.pbf
             if addr_pbf:
                 addr_bbox = parse_bbox(bbox_str) if bbox_str else None
-                extract_addresses_pbf(addr_pbf, search_features, bbox=addr_bbox)
+                address_count = extract_addresses_pbf(
+                    addr_pbf, search_features, bbox=addr_bbox) or 0
+                # Same PBF feeds the wiki-tag lookup so the chunker can enrich
+                # POI records with wikipedia/wikidata for offline cross-ref.
+                try:
+                    wiki_cross_refs = extract_wiki_tags_pbf(addr_pbf, bbox=addr_bbox)
+                except Exception as _e:
+                    print(f"    Warning: wiki cross-ref extraction failed: {_e}")
+                    wiki_cross_refs = None
 
         # Build Wikidata cache if requested
         wikidata_data = None
@@ -3402,6 +3651,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             bbox=parse_bbox(bbox_str) if bbox_str else None,
             wikidata_data=wikidata_data,
             routing_graph_path=routing_graph_path,
+            wiki_cross_refs=wiki_cross_refs,
+            address_count=address_count,
         )
 
         print()
