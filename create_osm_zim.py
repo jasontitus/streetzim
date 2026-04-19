@@ -1035,13 +1035,20 @@ def build_location_index(mbtiles_path):
     countries = [(lat, lon, name) for lat, lon, name, cls in places if cls == "country"]
     cities = [(lat, lon, name) for lat, lon, name, cls in places if cls == "city"]
 
-    # Deduplicate by name (keep first occurrence)
+    # Deduplicate by (coord, name) only — NOT by name alone. Many city names
+    # collide across regions (there are ~11 Washingtons, ~50 Springfields, etc.);
+    # dedup-by-name would drop all but the first occurrence, which would fool
+    # the nearest-neighbor lookup into labeling Dupont Circle as "Silver Spring,
+    # Maryland" just because the first Washington encountered happened to be
+    # in a different state. Keep one entry per physical place (coord rounded
+    # to ~11 m so near-duplicate tile entries across zoom levels collapse).
     def _dedup(items):
         seen = set()
         result = []
         for lat, lon, name in items:
-            if name not in seen:
-                seen.add(name)
+            key = (name, round(lat, 4), round(lon, 4))
+            if key not in seen:
+                seen.add(key)
                 result.append((lat, lon, name))
         return result
 
@@ -1074,14 +1081,29 @@ def build_location_index(mbtiles_path):
                         best = name
         return best
 
-    state_grid = _build_grid(states) if states else {}
-    country_grid = _build_grid(countries) if countries else {}
+    # Cities are dense (~40k worldwide) — grid indexing pays off. States and
+    # countries are sparse (a few thousand each) and their label points are
+    # often far from the feature's actual coverage (e.g. California's point
+    # is in Madera County, 4° east of Palo Alto — outside a 5×5 cell grid),
+    # so we scan them linearly.
     city_grid = _build_grid(cities) if cities else {}
+
+    def _nearest_linear(lat, lon, items):
+        best = None
+        best_dist = float("inf")
+        for plat, plon, name in items:
+            dlat = plat - lat
+            dlon = plon - lon
+            d = dlat * dlat + dlon * dlon
+            if d < best_dist:
+                best_dist = d
+                best = name
+        return best
 
     def lookup(lat, lon):
         city = _nearest_grid(lat, lon, city_grid) if city_grid else None
-        state = _nearest_grid(lat, lon, state_grid) if state_grid else None
-        country = _nearest_grid(lat, lon, country_grid) if country_grid else None
+        state = _nearest_linear(lat, lon, states) if states else None
+        country = _nearest_linear(lat, lon, countries) if countries else None
         # Format: "City, State" when we have both (most useful for disambiguation)
         # Falls back to "State, Country" or just "Country"
         if city and state:
