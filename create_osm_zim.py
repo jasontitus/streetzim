@@ -1384,27 +1384,40 @@ def extract_addresses_pbf(pbf_path, output_path, bbox=None):
 def extract_routing_graph(pbf_path, output_dir, bbox=None):
     """Extract road network from OSM PBF and build a compact routing graph.
 
-    Uses osmium to extract bbox, filter highway ways, then exports as
-    GeoJSONSeq. Builds a graph where intersections (and way endpoints)
-    are nodes, and road segments between them are edges with distance
-    and geometry.
+    Streams through the (bbox-filtered) PBF with pyosmium in two passes:
+      Pass 1 — collect highway-way node refs + endpoints to identify junctions
+              (intersection/terminus nodes, the graph vertices).
+      Pass 2 — re-scan ways, split each at junction nodes into edges, emit
+              edges incrementally into arrays + a geom varint blob.
+
+    The old implementation materialized all highway features in Python
+    objects (~5 KB/feature), peaking at ~67 GB RAM for Japan and would
+    need ~500 GB for Europe. Streaming + node-ref dedup + numpy/array.array
+    storage keeps peak RAM well under 100 GB for any continent-scale bbox.
 
     Args:
         pbf_path: Source OSM PBF file
-        output_dir: Where to write intermediates + final routing-graph.json
+        output_dir: Where to write the bbox-filtered PBF (intermediate)
+                    and the final routing-graph.bin.
         bbox: Optional (minlon, minlat, maxlon, maxlat) to bbox-filter first.
-              Critical for regional builds from a planet PBF — without this
-              we'd process world highways (~27 GB) for a Japan build.
+              Critical for regional builds from a planet PBF.
 
-    Returns the path to the output JSON file, or None if extraction fails.
+    Returns the path to the output routing-graph.bin, or None if no highways found.
     """
     import math
+    import array
+    import numpy as np
+    import struct
+
+    try:
+        import osmium
+    except ImportError:
+        raise RuntimeError("pyosmium is required for routing extraction "
+                           "(pip install osmium)")
 
     print("  Extracting routing graph from OSM data...")
 
-    # Step 0: Bbox-filter the PBF first to avoid processing world highways
-    # for a regional build. This is MUCH faster than filtering tags from
-    # the full planet PBF and producing a ~27 GB intermediate.
+    # Step 0: Bbox-filter the PBF first so we never read ways outside the region.
     source_pbf = str(pbf_path)
     if bbox:
         minlon, minlat, maxlon, maxlat = bbox
@@ -1419,36 +1432,11 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
         print(f"    Region PBF: {size_mb:.1f} MB")
         source_pbf = bbox_pbf
 
-    # Step 1: Filter highway ways from (bbox-filtered) PBF
-    highways_pbf = os.path.join(output_dir, "highways.osm.pbf")
-    cmd = [
-        "osmium", "tags-filter", source_pbf,
-        "w/highway",
-        "-o", highways_pbf, "--overwrite",
-    ]
-    print(f"    Filtering highway ways...")
-    subprocess.run(cmd, check=True)
-    size_mb = os.path.getsize(highways_pbf) / (1024 * 1024)
-    print(f"    Highway PBF: {size_mb:.1f} MB")
-
-    # Step 2: Export as GeoJSONSeq (newline-delimited GeoJSON)
-    highways_geojson = os.path.join(output_dir, "highways.geojsonseq")
-    cmd = [
-        "osmium", "export", highways_pbf,
-        "-f", "geojsonseq",
-        "-o", highways_geojson, "--overwrite",
-    ]
-    print(f"    Exporting to GeoJSON...")
-    subprocess.run(cmd, check=True)
-
-    # Step 3: Read features and build graph
-    SNAP = 6  # decimal places for coordinate snapping (~0.1m)
-
     # Highway classes excluded from routing (non-navigable)
-    EXCLUDED = {
+    EXCLUDED = frozenset({
         "proposed", "construction", "raceway", "bus_guideway",
         "platform", "elevator", "razed", "abandoned",
-    }
+    })
     # Speed estimates (km/h) by highway class for travel time
     SPEED = {
         "motorway": 100, "motorway_link": 60,
@@ -1463,94 +1451,96 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
     }
     DEFAULT_SPEED = 30
 
-    coord_count = {}  # snapped (lat, lon) -> count of ways containing it
-    ways = []  # [(coords, highway_class, oneway, speed, name_idx)]
-    name_table = [""]  # index 0 reserved as "no name"
-    name_map = {"": 0}
+    # Pass 1: Walk every highway way, record node refs. Junctions = nodes
+    # appearing in 2+ ways OR at way endpoints. Store interior refs in a
+    # compact int64 array and endpoint refs in a set; after the pass, sort
+    # the array to find the 2+ duplicates.
+    print("    Pass 1: scanning highway ways for junction nodes...")
 
-    print(f"    Reading highway features...")
-    feat_count = 0
-    with open(highways_geojson) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            feat = json.loads(line)
-            geom = feat.get("geometry", {})
-            props = feat.get("properties", {})
+    class _Pass1(osmium.SimpleHandler):
+        def __init__(self):
+            super().__init__()
+            self.endpoints = set()
+            self.interior_chunks = []   # list of numpy int64 arrays
+            self._interior_buf = []
+            self.way_count = 0
+            self.hw_count = 0
 
-            if geom.get("type") != "LineString":
-                continue
+        def way(self, w):
+            self.way_count += 1
+            hw = w.tags.get("highway")
+            if not hw or hw in EXCLUDED:
+                return
+            refs = [n.ref for n in w.nodes]
+            if len(refs) < 2:
+                return
+            self.endpoints.add(refs[0])
+            self.endpoints.add(refs[-1])
+            if len(refs) > 2:
+                self._interior_buf.extend(refs[1:-1])
+            self.hw_count += 1
+            if self.hw_count % 200000 == 0:
+                # Flush Python list into numpy (release Python-int overhead)
+                if self._interior_buf:
+                    self.interior_chunks.append(
+                        np.fromiter(self._interior_buf, dtype=np.int64,
+                                    count=len(self._interior_buf)))
+                    self._interior_buf = []
+                print(f"\r    Pass 1: {self.hw_count} highway ways...",
+                      end="", flush=True)
 
-            highway = props.get("highway", "")
-            if highway in EXCLUDED or not highway:
-                continue
+        def finalize(self):
+            if self._interior_buf:
+                self.interior_chunks.append(
+                    np.fromiter(self._interior_buf, dtype=np.int64,
+                                count=len(self._interior_buf)))
+                self._interior_buf = []
 
-            # Determine one-way direction
-            ow = props.get("oneway", "")
-            if ow in ("yes", "1", "true"):
-                oneway = 1   # forward only
-            elif ow == "-1":
-                oneway = -1  # reverse only
-            else:
-                oneway = 0   # bidirectional
+    p1 = _Pass1()
+    p1.apply_file(source_pbf)
+    p1.finalize()
+    print(f"\r    Pass 1: scanned {p1.hw_count} highway ways "
+          f"(of {p1.way_count} total)                    ")
 
-            speed = SPEED.get(highway, DEFAULT_SPEED)
-
-            # Build display label: prefer name, fall back to ref.
-            # Combine when both present (e.g. "Interstate 5 (I-5)").
-            name = (props.get("name") or "").strip()
-            ref = (props.get("ref") or "").strip()
-            if name and ref:
-                label = f"{name} ({ref})"
-            else:
-                label = name or ref
-            name_idx = name_map.get(label)
-            if name_idx is None:
-                name_idx = len(name_table)
-                name_table.append(label)
-                name_map[label] = name_idx
-
-            coords = []
-            for c in geom["coordinates"]:
-                lat = round(c[1], SNAP)
-                lon = round(c[0], SNAP)
-                coords.append((lat, lon))
-
-            if len(coords) < 2:
-                continue
-
-            ways.append((coords, highway, oneway, speed, name_idx))
-            feat_count += 1
-
-            for coord in coords:
-                coord_count[coord] = coord_count.get(coord, 0) + 1
-
-            if feat_count % 50000 == 0:
-                print(f"\r    Read {feat_count} features...", end="", flush=True)
-
-    print(f"\r    Read {feat_count} highway features, {len(coord_count)} unique coordinates")
-
-    if feat_count == 0:
+    if p1.hw_count == 0:
         print("    Warning: no highway features found, skipping routing graph")
         return None
 
-    # Step 4: Identify graph nodes (intersections + endpoints)
-    graph_nodes = set()
-    for coords, _, _, _, _ in ways:
-        graph_nodes.add(coords[0])
-        graph_nodes.add(coords[-1])
-        for coord in coords[1:-1]:
-            if coord_count.get(coord, 0) >= 2:
-                graph_nodes.add(coord)
+    # Find interior refs that appear in 2+ ways.
+    if p1.interior_chunks:
+        interior_arr = np.concatenate(p1.interior_chunks)
+        p1.interior_chunks = []  # free
+    else:
+        interior_arr = np.empty(0, dtype=np.int64)
+    interior_arr.sort()
+    # A ref is a "count>=2 junction" if it appears adjacent to an equal ref
+    # in the sorted array. Mark either side of each equal-pair.
+    if len(interior_arr) > 1:
+        dup = interior_arr[:-1] == interior_arr[1:]
+        mask = np.concatenate([dup, [False]]) | np.concatenate([[False], dup])
+        interior_junctions = np.unique(interior_arr[mask])
+    else:
+        interior_junctions = np.empty(0, dtype=np.int64)
+    del interior_arr
+    endpoint_arr = np.fromiter(p1.endpoints, dtype=np.int64, count=len(p1.endpoints))
+    junction_arr = np.unique(np.concatenate([interior_junctions, endpoint_arr]))
+    del interior_junctions, endpoint_arr
+    p1.endpoints = None
+    print(f"    Found {len(junction_arr)} junction nodes (graph vertices)")
 
-    node_list = sorted(graph_nodes)
-    node_index = {coord: i for i, coord in enumerate(node_list)}
-    print(f"    Graph nodes: {len(node_list)} (intersections + endpoints)")
+    # Map junction ref -> graph index (0-based, sorted for determinism).
+    # Dict lookup is hot in Pass 2 — Python dict is ~25 M lookups/s which is
+    # fine for tens of millions of ways.
+    ref_to_idx = {int(r): i for i, r in enumerate(junction_arr)}
+    num_nodes = len(junction_arr)
+    del junction_arr
 
-    # Haversine distance in meters
+    # Pass 2: stream ways again, this time with node locations. Split each
+    # highway way at junctions and emit edges + geoms directly into arrays.
+    print("    Pass 2: building edges + geometries...")
+
     R = 6371000.0
-    def _haversine(lat1, lon1, lat2, lon2):
+    def _hav(lat1, lon1, lat2, lon2):
         dlat = math.radians(lat2 - lat1)
         dlon = math.radians(lon2 - lon1)
         a = (math.sin(dlat / 2) ** 2 +
@@ -1558,159 +1548,239 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
              math.sin(dlon / 2) ** 2)
         return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-    # Step 5: Build edges by splitting ways at graph nodes
-    edges = []  # [from_idx, to_idx, dist_m, speed_kmh, [geometry], name_idx]
-    for coords, highway, oneway, speed, name_idx in ways:
-        # Split into segments at graph nodes
-        seg_start = 0
-        for i in range(1, len(coords)):
-            if coords[i] in node_index:
-                seg = coords[seg_start:i + 1]
-                if len(seg) >= 2:
-                    from_idx = node_index[seg[0]]
-                    to_idx = node_index[seg[-1]]
-                    if from_idx != to_idx:
-                        dist = sum(
-                            _haversine(seg[j][0], seg[j][1], seg[j+1][0], seg[j+1][1])
-                            for j in range(len(seg) - 1)
-                        )
-                        dist = round(dist, 1)
-                        # Geometry: intermediate points only (endpoints are the nodes)
-                        geom = [[c[1], c[0]] for c in seg[1:-1]] if len(seg) > 2 else []
-
-                        # Add forward edge
-                        if oneway != -1:
-                            edges.append([from_idx, to_idx, dist, speed, geom, name_idx])
-                        # Add reverse edge
-                        if oneway != 1:
-                            rev_geom = list(reversed(geom))
-                            edges.append([to_idx, from_idx, dist, speed, rev_geom, name_idx])
-
-                seg_start = i
-
-    print(f"    Graph edges: {len(edges)}")
-
-    # Step 6: Serialize to compact JSON
-    # Nodes: flat array [lat0, lon0, lat1, lon1, ...]
-    nodes_flat = []
-    for lat, lon in node_list:
-        nodes_flat.append(lat)
-        nodes_flat.append(lon)
-
-    # Build adjacency list for efficient lookup:
-    # adj[node] = [[target, dist, speed, geomIdx, nameIdx], ...]
-    # Geometries stored separately with dedup.
-    geom_list = []
-    geom_map = {}  # tuple(geom) -> index
-    adj = [[] for _ in range(len(node_list))]
-
-    for from_idx, to_idx, dist, speed, geom, name_idx in edges:
-        geom_key = tuple(tuple(c) for c in geom) if geom else ()
-        if geom_key in geom_map:
-            gi = geom_map[geom_key]
-        elif geom:
-            gi = len(geom_list)
-            geom_list.append(geom)
-            geom_map[geom_key] = gi
-        else:
-            gi = -1
-        adj[from_idx].append([to_idx, dist, speed, gi, name_idx])
-
-    # Step 6: Serialize to compact binary format (SZRG v2)
-    # Layout (all little-endian):
-    #   Header (32 B): magic "SZRG" + u32 version=2 + u32 num_nodes + u32 num_edges
-    #                  + u32 num_geoms + u32 geom_bytes + u32 num_names
-    #                  + u32 names_bytes
-    #   Nodes:         num_nodes * (i32 lat_e7, i32 lon_e7)        = 8 B/node
-    #   Adj offsets:   (num_nodes + 1) * u32                       = 4 B/node
-    #   Edges:         num_edges * (u32 target, u32 dist_dm,       = 16 B/edge
-    #                               u32 speed_geom, u32 name_idx)
-    #                  speed_geom = (speed << 24) | geom_idx24
-    #                  geom_idx24 = 0xFFFFFF means "no geometry"
-    #                  name_idx = 0 means "no name"
-    #   Geom offsets:  (num_geoms + 1) * u32 byte offsets into geom blob
-    #   Geom blob:     geom_bytes of mixed-encoding geometry data:
-    #                    per geom: [i32 lon0_e7, i32 lat0_e7] absolute first coord,
-    #                              then zigzag-varint pairs (dlon, dlat) for rest.
-    #                    Decoder reads until the next geom's offset.
-    #                    Deltas for road points are small (< 28 bits), so single
-    #                    JS int32 math works without BigInt.
-    #   Name offsets:  (num_names + 1) * u32 byte offsets into names_blob
-    #   Names blob:    names_bytes of UTF-8 (concatenated, no separators)
-    #
-    # Target: ~10x smaller than JSON. Bulk savings come from varint-encoded
-    # geom deltas (road points are typically 1-3 bytes each vs 8 fixed).
-    import numpy as np
-    import struct
-
-    def zigzag32(n):
-        # Standard protobuf zigzag for signed 32-bit
+    def _zigzag32(n):
         return ((n << 1) ^ (n >> 31)) & 0xFFFFFFFF
 
-    def varint_bytes(v):
-        out = bytearray()
+    def _varint(v, out):
         while v >= 0x80:
             out.append((v & 0x7F) | 0x80)
             v >>= 7
         out.append(v & 0x7F)
-        return out
 
-    output_path = os.path.join(output_dir, "routing-graph.bin")
-    total_edges = sum(len(a) for a in adj)
-    num_nodes = len(node_list)
-    num_geoms = len(geom_list)
+    def _encode_geom(lons_e7, lats_e7, out):
+        """Append a varint-encoded geom to `out`, return (start_byte, end_byte)."""
+        start = len(out)
+        out.extend(struct.pack('<ii', lons_e7[0], lats_e7[0]))
+        prev_lon = lons_e7[0]
+        prev_lat = lats_e7[0]
+        for k in range(1, len(lons_e7)):
+            _varint(_zigzag32(lons_e7[k] - prev_lon), out)
+            _varint(_zigzag32(lats_e7[k] - prev_lat), out)
+            prev_lon = lons_e7[k]
+            prev_lat = lats_e7[k]
+        return start, len(out)
+
+    # Output buffers (using array.array for 4-byte primitives — much more
+    # compact than Python lists of ints).
+    edges_from = array.array('I')
+    edges_to = array.array('I')
+    edges_dist_dm = array.array('I')
+    edges_speed_geom = array.array('I')
+    edges_name = array.array('I')
+
+    # Node coordinates indexed by graph idx (populated lazily as we see them).
+    node_coords = np.zeros((num_nodes, 2), dtype=np.int32)  # lat_e7, lon_e7
+
+    # Geom dedup: hash geom bytes → geom index. Geom blob accumulates.
+    geom_blob = bytearray()
+    # geom_offsets[k] = byte offset of geom k's start; geom_offsets[k+1] = end.
+    geom_offsets = array.array('I', [0])
+    geom_map = {}
+
+    # Name table — deduped street-name strings.
+    name_table = [""]
+    name_map = {"": 0}
+
+    class _Pass2(osmium.SimpleHandler):
+        def __init__(self):
+            super().__init__()
+            self.hw_count = 0
+            self.edge_count = 0
+
+        def way(self, w):
+            hw = w.tags.get("highway")
+            if not hw or hw in EXCLUDED:
+                return
+            try:
+                refs = []
+                lats_e7 = []
+                lons_e7 = []
+                for n in w.nodes:
+                    if not n.location.valid():
+                        return
+                    refs.append(n.ref)
+                    lats_e7.append(int(round(n.location.lat * 1e7)))
+                    lons_e7.append(int(round(n.location.lon * 1e7)))
+            except osmium.InvalidLocationError:
+                return
+            if len(refs) < 2:
+                return
+
+            # One-way direction
+            ow = w.tags.get("oneway", "")
+            if ow in ("yes", "1", "true"):
+                oneway = 1
+            elif ow == "-1":
+                oneway = -1
+            else:
+                oneway = 0
+            speed = SPEED.get(hw, DEFAULT_SPEED)
+
+            # Name label (same logic as before: prefer name, fall back to ref)
+            name = (w.tags.get("name") or "").strip()
+            refT = (w.tags.get("ref") or "").strip()
+            if name and refT:
+                label = f"{name} ({refT})"
+            else:
+                label = name or refT
+            name_idx = name_map.get(label)
+            if name_idx is None:
+                name_idx = len(name_table)
+                name_table.append(label)
+                name_map[label] = name_idx
+
+            # Walk through refs, splitting at graph nodes (junctions).
+            seg_start = 0
+            n = len(refs)
+            for i in range(1, n):
+                if i != n - 1 and refs[i] not in ref_to_idx:
+                    continue
+                # Segment refs[seg_start:i+1] is between two graph nodes.
+                a = seg_start
+                b = i
+                if b - a < 1:
+                    seg_start = i
+                    continue
+                from_idx = ref_to_idx[refs[a]]
+                to_idx = ref_to_idx[refs[b]]
+                if from_idx != to_idx:
+                    # Distance (haversine over all points in segment).
+                    dist_m = 0.0
+                    prev_lat = lats_e7[a] / 1e7
+                    prev_lon = lons_e7[a] / 1e7
+                    for j in range(a + 1, b + 1):
+                        lat = lats_e7[j] / 1e7
+                        lon = lons_e7[j] / 1e7
+                        dist_m += _hav(prev_lat, prev_lon, lat, lon)
+                        prev_lat = lat
+                        prev_lon = lon
+                    dist_dm = int(round(dist_m * 10))
+
+                    # Cache endpoint coordinates.
+                    if node_coords[from_idx, 0] == 0 and node_coords[from_idx, 1] == 0:
+                        node_coords[from_idx, 0] = lats_e7[a]
+                        node_coords[from_idx, 1] = lons_e7[a]
+                    if node_coords[to_idx, 0] == 0 and node_coords[to_idx, 1] == 0:
+                        node_coords[to_idx, 0] = lats_e7[b]
+                        node_coords[to_idx, 1] = lons_e7[b]
+
+                    # Geom: interior points only (endpoints are node vertices).
+                    interior_len = b - a - 1
+                    if interior_len > 0:
+                        i_lons = lons_e7[a + 1:b]
+                        i_lats = lats_e7[a + 1:b]
+                        fstart, fend = _encode_geom(i_lons, i_lats, geom_blob)
+                        key = bytes(geom_blob[fstart:fend])
+                        existing_gi = geom_map.get(key)
+                        if existing_gi is None:
+                            fgi = len(geom_offsets) - 1
+                            geom_offsets.append(fend)
+                            geom_map[key] = fgi
+                        else:
+                            # Undo append: we already had this geom, trim blob.
+                            del geom_blob[fstart:fend]
+                            fgi = existing_gi
+                    else:
+                        fgi = -1
+
+                    # Reverse geom (distinct encoding since deltas differ).
+                    if oneway != 1 and interior_len > 0:
+                        r_lons = list(reversed(i_lons))
+                        r_lats = list(reversed(i_lats))
+                        rstart, rend = _encode_geom(r_lons, r_lats, geom_blob)
+                        rkey = bytes(geom_blob[rstart:rend])
+                        existing_rgi = geom_map.get(rkey)
+                        if existing_rgi is None:
+                            rgi = len(geom_offsets) - 1
+                            geom_offsets.append(rend)
+                            geom_map[rkey] = rgi
+                        else:
+                            del geom_blob[rstart:rend]
+                            rgi = existing_rgi
+                    elif oneway != 1:
+                        rgi = -1
+
+                    if oneway != -1:
+                        edges_from.append(from_idx)
+                        edges_to.append(to_idx)
+                        edges_dist_dm.append(dist_dm)
+                        gi_packed = 0xFFFFFF if fgi < 0 else (fgi & 0xFFFFFF)
+                        edges_speed_geom.append(((speed & 0xFF) << 24) | gi_packed)
+                        edges_name.append(name_idx)
+                        self.edge_count += 1
+                    if oneway != 1:
+                        edges_from.append(to_idx)
+                        edges_to.append(from_idx)
+                        edges_dist_dm.append(dist_dm)
+                        rgi_packed = 0xFFFFFF if rgi < 0 else (rgi & 0xFFFFFF)
+                        edges_speed_geom.append(((speed & 0xFF) << 24) | rgi_packed)
+                        edges_name.append(name_idx)
+                        self.edge_count += 1
+
+                seg_start = i
+
+            self.hw_count += 1
+            if self.hw_count % 200000 == 0:
+                print(f"\r    Pass 2: {self.hw_count} ways, "
+                      f"{self.edge_count} edges, "
+                      f"{len(geom_offsets) - 1} geoms, "
+                      f"{len(geom_blob) // (1024 * 1024)} MB geom blob...",
+                      end="", flush=True)
+
+    p2 = _Pass2()
+    p2.apply_file(source_pbf, locations=True)
+    print(f"\r    Pass 2: {p2.hw_count} ways, {p2.edge_count} edges, "
+          f"{len(geom_offsets) - 1} geoms, "
+          f"{len(geom_blob) / (1024 * 1024):.1f} MB geom blob          ")
+
+    # Sort edges by from-node so adj_offsets is just a cumulative-count array.
+    num_edges = len(edges_from)
+    num_geoms = len(geom_offsets) - 1
     num_names = len(name_table)
 
-    nodes_arr = np.empty((num_nodes, 2), dtype='<i4')
-    for i, (lat, lon) in enumerate(node_list):
-        nodes_arr[i, 0] = int(round(lat * 1e7))
-        nodes_arr[i, 1] = int(round(lon * 1e7))
+    edges_from_np = np.frombuffer(edges_from, dtype=np.uint32)
+    sort_order = np.argsort(edges_from_np, kind='stable')
+    # Build final edges array in (target, dist_dm, speed_geom, name_idx) layout.
+    edges_arr = np.empty((num_edges, 4), dtype='<u4')
+    edges_arr[:, 0] = np.frombuffer(edges_to, dtype=np.uint32)[sort_order]
+    edges_arr[:, 1] = np.frombuffer(edges_dist_dm, dtype=np.uint32)[sort_order]
+    edges_arr[:, 2] = np.frombuffer(edges_speed_geom, dtype=np.uint32)[sort_order]
+    edges_arr[:, 3] = np.frombuffer(edges_name, dtype=np.uint32)[sort_order]
+    edges_from_sorted = edges_from_np[sort_order]
+    del edges_from, edges_to, edges_dist_dm, edges_speed_geom, edges_name
+    del edges_from_np, sort_order
 
-    adj_offsets = np.empty(num_nodes + 1, dtype='<u4')
-    cur = 0
-    for i, edge_list in enumerate(adj):
-        adj_offsets[i] = cur
-        cur += len(edge_list)
-    adj_offsets[num_nodes] = cur
+    adj_offsets = np.zeros(num_nodes + 1, dtype='<u4')
+    # Cumulative count of edges by from-node.
+    if num_edges > 0:
+        np.add.at(adj_offsets, edges_from_sorted.astype(np.int64) + 1, 1)
+    np.cumsum(adj_offsets, out=adj_offsets)
+    del edges_from_sorted
 
-    edges_arr = np.empty((total_edges, 4), dtype='<u4')
-    idx = 0
-    for edge_list in adj:
-        for target, dist, speed, gi, ni in edge_list:
-            edges_arr[idx, 0] = target
-            edges_arr[idx, 1] = int(round(dist * 10))  # meters → decimeters
-            gi_packed = 0xFFFFFF if gi < 0 else (gi & 0xFFFFFF)
-            edges_arr[idx, 2] = ((int(speed) & 0xFF) << 24) | gi_packed
-            edges_arr[idx, 3] = int(ni)
-            idx += 1
+    # Nodes array in (lat_e7, lon_e7) layout. node_coords is already shaped (N, 2).
+    nodes_arr = node_coords.astype('<i4', copy=False)
 
-    # Encode geoms: absolute int32 first coord, then zigzag-varint deltas
-    geom_blob = bytearray()
-    geom_offsets = np.empty(num_geoms + 1, dtype='<u4')
-    for k, geom in enumerate(geom_list):
-        geom_offsets[k] = len(geom_blob)
-        # geom is [[lon, lat], ...]; first coord stored as fixed int32 pair
-        lon0_e7 = int(round(geom[0][0] * 1e7))
-        lat0_e7 = int(round(geom[0][1] * 1e7))
-        geom_blob.extend(struct.pack('<ii', lon0_e7, lat0_e7))
-        prev_lon, prev_lat = lon0_e7, lat0_e7
-        for lon, lat in geom[1:]:
-            lon_e7 = int(round(lon * 1e7))
-            lat_e7 = int(round(lat * 1e7))
-            dlon = lon_e7 - prev_lon
-            dlat = lat_e7 - prev_lat
-            geom_blob.extend(varint_bytes(zigzag32(dlon)))
-            geom_blob.extend(varint_bytes(zigzag32(dlat)))
-            prev_lon, prev_lat = lon_e7, lat_e7
-    geom_offsets[num_geoms] = len(geom_blob)
-    # Pad blob to a multiple of 4 bytes so the following Uint32Array
-    # (name_offsets) stays 4-byte aligned in the typed-array view.
-    # Decoder never reads past geom_offsets[num_geoms], so padding is invisible.
+    # Geom offsets as numpy uint32; include the closing offset.
+    geom_offsets_np = np.frombuffer(geom_offsets, dtype=np.uint32).astype('<u4', copy=False)
+
+    # Pad geom blob to 4-byte alignment (else the following Uint32Array view
+    # of name_offsets lands at a non-aligned offset and the browser throws
+    # RangeError — cost us hours with Baltics; keep this).
     while len(geom_blob) % 4 != 0:
         geom_blob.append(0)
     geom_bytes_total = len(geom_blob)
 
-    # Encode name table to UTF-8, build byte-offset index
+    # Name table → UTF-8 blob + byte-offset index.
     name_blobs = [n.encode("utf-8") for n in name_table]
     names_bytes = sum(len(b) for b in name_blobs)
     name_offsets = np.empty(num_names + 1, dtype='<u4')
@@ -1720,14 +1790,16 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
         cur += len(b)
     name_offsets[num_names] = cur
 
+    # Serialize (SZRG v2 format — see the viewer parser for layout).
+    output_path = os.path.join(output_dir, "routing-graph.bin")
     with open(output_path, "wb") as f:
         f.write(b"SZRG")
-        np.array([2, num_nodes, total_edges, num_geoms, geom_bytes_total,
+        np.array([2, num_nodes, num_edges, num_geoms, geom_bytes_total,
                   num_names, names_bytes], dtype='<u4').tofile(f)
         nodes_arr.tofile(f)
         adj_offsets.tofile(f)
         edges_arr.tofile(f)
-        geom_offsets.tofile(f)
+        geom_offsets_np.tofile(f)
         f.write(bytes(geom_blob))
         name_offsets.tofile(f)
         for b in name_blobs:
@@ -1735,14 +1807,9 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
 
     size_mb = os.path.getsize(output_path) / (1024 * 1024)
     print(f"    Routing graph: {size_mb:.1f} MB ({num_nodes} nodes, "
-          f"{total_edges} edges, {num_geoms} geoms, {geom_bytes_total / (1024*1024):.1f} MB geom blob, "
+          f"{num_edges} edges, {num_geoms} geoms, "
+          f"{geom_bytes_total / (1024*1024):.1f} MB geom blob, "
           f"{num_names} names, {names_bytes / 1024:.0f} KB name text)")
-
-    # Clean up temp files
-    for tmp in [highways_pbf, highways_geojson]:
-        if os.path.exists(tmp):
-            os.remove(tmp)
-
     return output_path
 
 

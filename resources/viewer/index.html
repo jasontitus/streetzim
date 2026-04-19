@@ -342,14 +342,22 @@
   .routing-result-row {
     padding: 6px 10px; cursor: pointer; font-size: 12px;
     border-bottom: 1px solid var(--border); display: flex;
-    justify-content: space-between; gap: 8px;
+    justify-content: space-between; gap: 8px; align-items: baseline;
   }
   .routing-result-row:last-child { border-bottom: none; }
   .routing-result-row:hover,
   .routing-result-row.active { background: var(--hover-bg); }
+  .routing-result-text {
+    flex: 1; min-width: 0;
+  }
   .routing-result-name {
     color: var(--text-primary); overflow: hidden;
-    text-overflow: ellipsis; white-space: nowrap; flex: 1;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .routing-result-sub {
+    color: var(--text-tertiary); font-size: 11px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    margin-top: 1px;
   }
   .routing-result-meta {
     color: var(--text-tertiary); font-size: 11px; flex-shrink: 0;
@@ -2238,12 +2246,7 @@ function initRouting(map, config) {
     clearBtn.style.display = 'none';
     if (originMarker) { originMarker.remove(); originMarker = null; }
     if (destMarker) { destMarker.remove(); destMarker = null; }
-    if (routeDrawn) {
-      if (map.getLayer('route-line')) map.removeLayer('route-line');
-      if (map.getLayer('route-outline')) map.removeLayer('route-outline');
-      if (map.getSource('route')) map.removeSource('route');
-      routeDrawn = false;
-    }
+    removeRouteLine();
   }
 
   // Binary graph format (SZRG v2):
@@ -2688,10 +2691,26 @@ function initRouting(map, config) {
     }
   }
 
+  // Track the latest route-compute call so earlier (slower) calls can't
+  // overwrite results from a newer destination change.
+  var routeSeq = 0;
+
+  function removeRouteLine() {
+    if (!routeDrawn) return;
+    if (map.getLayer('route-line')) map.removeLayer('route-line');
+    if (map.getLayer('route-outline')) map.removeLayer('route-outline');
+    if (map.getSource('route')) map.removeSource('route');
+    routeDrawn = false;
+  }
+
   function computeAndDrawRoute() {
     statusEl.textContent = 'Calculating route...';
+    resultEl.style.display = 'none';
+    var seq = ++routeSeq;
     setTimeout(function() {
+      if (seq !== routeSeq) return;  // stale — a newer route is pending
       var result = findRoute(originNode, destNode);
+      if (seq !== routeSeq) return;  // user changed dest while routing
       if (result) {
         drawRoute(result.coords);
         distEl.textContent = formatDistance(result.distance);
@@ -2704,6 +2723,7 @@ function initRouting(map, config) {
           new maplibregl.LngLatBounds(result.coords[0], result.coords[0]));
         map.fitBounds(bounds, { padding: 60, duration: 1000 });
       } else {
+        removeRouteLine();
         statusEl.textContent = 'No route found';
         clearBtn.style.display = 'block';
       }
@@ -2736,14 +2756,37 @@ function initRouting(map, config) {
         (function(m) {
           var row = document.createElement('div');
           row.className = 'routing-result-row';
-          var nameSpan = document.createElement('span');
+
+          var textCol = document.createElement('div');
+          textCol.className = 'routing-result-text';
+
+          var nameSpan = document.createElement('div');
           nameSpan.className = 'routing-result-name';
           nameSpan.textContent = m.item.n;
-          var meta = document.createElement('span');
-          meta.className = 'routing-result-meta';
-          meta.textContent = (m.item.t === 'addr' ? 'address' : m.item.t) + (m.dist ? ' · ' + m.dist : '');
-          row.appendChild(nameSpan);
-          row.appendChild(meta);
+          textCol.appendChild(nameSpan);
+
+          // Secondary line: location (e.g. "Sacramento, California") + type,
+          // so ambiguous names like "Main St" reveal which city's they're in.
+          var subParts = [];
+          if (m.item.l) subParts.push(m.item.l);
+          var typeLabel = m.item.t === 'addr' ? 'address'
+                          : m.item.t === 'street' ? 'street'
+                          : m.item.t;
+          if (typeLabel) subParts.push(typeLabel);
+          if (subParts.length) {
+            var sub = document.createElement('div');
+            sub.className = 'routing-result-sub';
+            sub.textContent = subParts.join(' · ');
+            textCol.appendChild(sub);
+          }
+
+          row.appendChild(textCol);
+          if (m.dist) {
+            var meta = document.createElement('span');
+            meta.className = 'routing-result-meta';
+            meta.textContent = m.dist;
+            row.appendChild(meta);
+          }
           row.addEventListener('mousedown', function(e) { e.preventDefault(); pickMatch(m); });
           resultsEl.appendChild(row);
         })(matches[i]);
@@ -2819,22 +2862,17 @@ function initRouting(map, config) {
     );
   });
 
-  // Map click — still works as a picker. Fills origin first, then dest.
-  // After both are set, subsequent clicks replace the origin (start fresh).
+  // Map click — fallback picker. Fills origin if empty, else updates
+  // destination (preserving the origin so users can iterate on the target
+  // without wiping the route). Clear button resets both.
   map.on('click', function(e) {
     if (!active || !graph) return;
-    // If user is typing, don't hijack the click
-    if (document.activeElement === originInput || document.activeElement === destInput) return;
     var lat = e.lngLat.lat;
     var lon = e.lngLat.lng;
     if (originNode === -1) {
       setOriginFromLatLon(lat, lon);
-    } else if (destNode === -1) {
-      setDestFromLatLon(lat, lon);
     } else {
-      // Both set — reset and start over with this click as new origin
-      clearRoute();
-      setOriginFromLatLon(lat, lon);
+      setDestFromLatLon(lat, lon);
     }
   });
 }
