@@ -1486,31 +1486,58 @@ function initSearch(map) {
     return p;
   }
 
-  // Determine which chunk prefixes are needed for a query
+  // Lowercase + strip diacritics — so "cafe" matches "Café" and "sao" matches "São".
+  function normalizeText(s) {
+    return s.normalize ? s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase()
+                       : s.toLowerCase();
+  }
+
+  // Determine which chunk prefixes are needed for a query. With multi-word
+  // indexing on the server side, entries live in chunks keyed by each of
+  // their words' 2-char prefixes — so we fetch one chunk per query word to
+  // hit substring matches like "cathedral" → "Washington National Cathedral".
   function getPrefixes(query) {
-    var q = query.toLowerCase();
-    // Primary prefix: first 2 chars of query
-    var p = q.substring(0, 2).replace(/ /g, '_');
-    p = p.replace(/[^a-z0-9_]/g, '_');
-    if (p.length < 2) p = (p + '__').substring(0, 2);
+    var q = normalizeText(query);
+    var words = q.split(/[^\p{L}\p{N}]+/u).filter(function(w) { return w; });
 
+    function keyFor(word) {
+      var p = word.substring(0, 2);
+      // Server-side padding: first 2 chars of the word, each char mapped to
+      // [a-z0-9_] (anything else becomes '_'); short words pad to 2 chars.
+      p = p.replace(/[^a-z0-9_]/g, '_');
+      if (p.length < 2) p = (p + '__').substring(0, 2);
+      return p;
+    }
+
+    var seen = {};
     var prefixes = [];
-    if (manifest.chunks[p] !== undefined) prefixes.push(p);
-
-    // For single-char queries, fetch all chunks starting with that char
+    // Each word's prefix
+    for (var i = 0; i < words.length; i++) {
+      var k = keyFor(words[i]);
+      if (!seen[k] && manifest.chunks[k] !== undefined) {
+        seen[k] = true; prefixes.push(k);
+      }
+    }
+    // Also first-2-of-whole-query for legacy entries (e.g. "45 Broadway" → "45")
+    var kw = keyFor(q);
+    if (!seen[kw] && manifest.chunks[kw] !== undefined) {
+      seen[kw] = true; prefixes.push(kw);
+    }
+    // Single-char: fetch every chunk starting with that char.
     if (q.length < 2) {
       var c = q[0] || '';
-      for (var k in manifest.chunks) {
-        if (k[0] === c && prefixes.indexOf(k) === -1) prefixes.push(k);
+      for (var kk in manifest.chunks) {
+        if (kk[0] === c && !seen[kk]) { seen[kk] = true; prefixes.push(kk); }
       }
     }
     return prefixes;
   }
 
   function scoreResults(entries, query) {
-    var q = query.toLowerCase();
-    var words = q.split(/\s+/);
+    var q = normalizeText(query);
+    var words = q.split(/\s+/).filter(function(w) { return w; });
     var matches = [];
+    var seenKeys = {};  // dedup across chunks (entry may be in multiple)
 
     // Get current map center and bounds for proximity scoring
     var center = map.getCenter();
@@ -1520,7 +1547,12 @@ function initSearch(map) {
 
     for (var i = 0; i < entries.length; i++) {
       var item = entries[i];
-      var name = item.n.toLowerCase();
+      // Dedup: same entry may appear in multiple word-keyed chunks.
+      var dedupKey = item.n + '|' + item.a + '|' + item.o;
+      if (seenKeys[dedupKey]) continue;
+      seenKeys[dedupKey] = true;
+
+      var name = normalizeText(item.n);
 
       // All words must appear in the name
       var allMatch = true;

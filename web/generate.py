@@ -129,6 +129,12 @@ REGIONS = [
         "zim_file": "osm-baltics.zim",
         "description": "Estonia, Latvia, and Lithuania &mdash; Tallinn, Riga, Vilnius, and the Baltic Sea coast.",
     },
+    {
+        "id": "silicon-valley",
+        "title": "Silicon Valley",
+        "zim_file": "osm-silicon-valley.zim",
+        "description": "San Francisco Bay Area &mdash; San Francisco, Oakland, Palo Alto, Mountain View, Stanford, Cupertino, San Jose, and the Peninsula.",
+    },
 ]
 
 

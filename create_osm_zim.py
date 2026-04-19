@@ -2550,6 +2550,42 @@ def create_zim(
             total_features = 0
             xapian_count = 0
 
+            # Normalize (lowercase + ASCII-fold) so search matches across
+            # accented / diacritic variants: "Café" ↔ "cafe", "São" ↔ "sao".
+            import unicodedata
+            def _norm(s):
+                s = unicodedata.normalize("NFKD", s)
+                s = "".join(c for c in s if not unicodedata.combining(c))
+                return s.lower()
+
+            def _prefix_key(word):
+                """Two-char ASCII-alnum prefix, padded with '_' for non-alnum."""
+                pw = _norm(word).replace(" ", "_")
+                pw = "".join(c if c.isascii() and c.isalnum() else "_" for c in pw)
+                if not pw:
+                    return "__"
+                return pw[:2].ljust(2, "_")
+
+            # Word splitter: any run of non-alnum (unicode-aware) ends a word.
+            # Gives us each term in the name so "Washington National Cathedral"
+            # gets indexed under each of "wa", "na", "ca" (not just "wa").
+            # Without this, typing "cathedral" in a search box will miss it
+            # because the query prefix is "ca" but the entry lives under "wa".
+            import re as _re
+            _word_re = _re.compile(r"[^\W_]+", _re.UNICODE)
+
+            def _prefixes_for(name):
+                """Set of 2-char prefix keys this name should be indexed under."""
+                keys = set()
+                # First-2-of-whole-name (keeps backwards-compat for callers
+                # that computed it the old way: "45 Broadway" → "45").
+                keys.add(_prefix_key(name[:2]))
+                # Plus one key per word — this is what unlocks substring search.
+                for m in _word_re.findall(name):
+                    if len(m) >= 2:
+                        keys.add(_prefix_key(m))
+                return keys
+
             print("    Streaming search features from disk...", flush=True)
             with open(xapian_path, "w") as xf:
                 with open(search_features_path, "r") as sf:
@@ -2557,29 +2593,26 @@ def create_zim(
                         feat = json.loads(line)
                         total_features += 1
 
-                        # Enrich with location (state, country)
+                        # Enrich with location (state, country) if missing
                         if loc_lookup and not feat.get("location"):
                             feat["location"] = loc_lookup(feat["lat"], feat["lon"])
 
-                        # Chunk key from first 2 chars of lowercased name (ASCII only
-                        # to avoid macOS HFS+/APFS Unicode normalization mismatches)
-                        prefix = feat["name"].lower()[:2].replace(" ", "_")
-                        prefix = "".join(c if c.isascii() and c.isalnum() else "_" for c in prefix)
-                        if not prefix:
-                            prefix = "__"
-                        prefix = prefix[:2].ljust(2, "_")
-
-                        # Write abbreviated entry to per-prefix chunk file
+                        # Write abbreviated entry to per-prefix chunk file(s).
+                        # Index under each word's prefix — duplicates entries
+                        # across 1–4 chunks (avg ~2×) but enables substring
+                        # hits like "cathedral" → "Washington National Cathedral".
                         entry = json.dumps(
                             {"n": feat["name"], "t": feat["type"], "s": feat.get("subtype", ""),
                              "a": feat["lat"], "o": feat["lon"], "l": feat.get("location", "")},
                             separators=(",", ":")
-                        )
-                        if prefix not in chunk_fds:
-                            chunk_fds[prefix] = open(os.path.join(chunk_tmp, f"{prefix}.jsonl"), "w")
-                            chunk_counts[prefix] = 0
-                        chunk_fds[prefix].write(entry + "\n")
-                        chunk_counts[prefix] += 1
+                        ) + "\n"
+                        for prefix in _prefixes_for(feat["name"]):
+                            if prefix not in chunk_fds:
+                                chunk_fds[prefix] = open(
+                                    os.path.join(chunk_tmp, f"{prefix}.jsonl"), "w")
+                                chunk_counts[prefix] = 0
+                            chunk_fds[prefix].write(entry)
+                            chunk_counts[prefix] += 1
 
                         # Collect xapian-eligible features separately
                         if feat["type"] in xapian_types:
