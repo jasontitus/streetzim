@@ -1572,10 +1572,17 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
 
     # Output buffers (using array.array for 4-byte primitives — much more
     # compact than Python lists of ints).
+    # v3 edge layout (16 bytes/edge):
+    #   target (u32), dist_speed (u32: dist_dm in low 24 bits + speed in high 8),
+    #   geom_idx (u32 full; 0xFFFFFFFF = no geom), name_idx (u32)
+    # v2 had geom_idx packed into only 24 bits which truncates at 16.78M geoms —
+    # Japan has 19.87M, so ~16% of edges pointed at wrong geoms (Fukuoka-area
+    # geometry grafted onto Kyoto-area edges etc.). v3 moves geom_idx to its
+    # own full-width u32 field so continent-scale regions are correctly represented.
     edges_from = array.array('I')
     edges_to = array.array('I')
-    edges_dist_dm = array.array('I')
-    edges_speed_geom = array.array('I')
+    edges_dist_speed = array.array('I')
+    edges_geom = array.array('I')
     edges_name = array.array('I')
 
     # Geom offsets are stored as uint32 byte offsets into the blob — v2 format
@@ -1722,20 +1729,22 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
                     elif oneway != 1:
                         rgi = -1
 
+                    # dist_dm truncates at 24 bits = 1677 km; real road edges
+                    # don't come close, but clamp for safety.
+                    dist_dm_packed = min(dist_dm, 0xFFFFFF)
+                    dist_speed = ((speed & 0xFF) << 24) | dist_dm_packed
                     if oneway != -1:
                         edges_from.append(from_idx)
                         edges_to.append(to_idx)
-                        edges_dist_dm.append(dist_dm)
-                        gi_packed = 0xFFFFFF if fgi < 0 else (fgi & 0xFFFFFF)
-                        edges_speed_geom.append(((speed & 0xFF) << 24) | gi_packed)
+                        edges_dist_speed.append(dist_speed)
+                        edges_geom.append(0xFFFFFFFF if fgi < 0 else fgi)
                         edges_name.append(name_idx)
                         self.edge_count += 1
                     if oneway != 1:
                         edges_from.append(to_idx)
                         edges_to.append(from_idx)
-                        edges_dist_dm.append(dist_dm)
-                        rgi_packed = 0xFFFFFF if rgi < 0 else (rgi & 0xFFFFFF)
-                        edges_speed_geom.append(((speed & 0xFF) << 24) | rgi_packed)
+                        edges_dist_speed.append(dist_speed)
+                        edges_geom.append(0xFFFFFFFF if rgi < 0 else rgi)
                         edges_name.append(name_idx)
                         self.edge_count += 1
 
@@ -1762,14 +1771,17 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
 
     edges_from_np = np.frombuffer(edges_from, dtype=np.uint32)
     sort_order = np.argsort(edges_from_np, kind='stable')
-    # Build final edges array in (target, dist_dm, speed_geom, name_idx) layout.
+    # Build final edges array in v3 layout:
+    #   (target, dist_speed, geom_idx, name_idx)
+    # dist_speed = (speed << 24) | dist_dm24
+    # geom_idx is a full u32; 0xFFFFFFFF means "no geometry".
     edges_arr = np.empty((num_edges, 4), dtype='<u4')
     edges_arr[:, 0] = np.frombuffer(edges_to, dtype=np.uint32)[sort_order]
-    edges_arr[:, 1] = np.frombuffer(edges_dist_dm, dtype=np.uint32)[sort_order]
-    edges_arr[:, 2] = np.frombuffer(edges_speed_geom, dtype=np.uint32)[sort_order]
+    edges_arr[:, 1] = np.frombuffer(edges_dist_speed, dtype=np.uint32)[sort_order]
+    edges_arr[:, 2] = np.frombuffer(edges_geom, dtype=np.uint32)[sort_order]
     edges_arr[:, 3] = np.frombuffer(edges_name, dtype=np.uint32)[sort_order]
     edges_from_sorted = edges_from_np[sort_order]
-    del edges_from, edges_to, edges_dist_dm, edges_speed_geom, edges_name
+    del edges_from, edges_to, edges_dist_speed, edges_geom, edges_name
     del edges_from_np, sort_order
 
     adj_offsets = np.zeros(num_nodes + 1, dtype='<u4')
@@ -1802,11 +1814,11 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
         cur += len(b)
     name_offsets[num_names] = cur
 
-    # Serialize (SZRG v2 format — see the viewer parser for layout).
+    # Serialize (SZRG v3 format — see the viewer parser for layout).
     output_path = os.path.join(output_dir, "routing-graph.bin")
     with open(output_path, "wb") as f:
         f.write(b"SZRG")
-        np.array([2, num_nodes, num_edges, num_geoms, geom_bytes_total,
+        np.array([3, num_nodes, num_edges, num_geoms, geom_bytes_total,
                   num_names, names_bytes], dtype='<u4').tofile(f)
         nodes_arr.tofile(f)
         adj_offsets.tofile(f)
