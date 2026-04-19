@@ -2366,6 +2366,19 @@ function initRouting(map, config) {
       })
       .then(function(buffer) {
         graph = parseRoutingGraphBinary(buffer);
+        // Expose for DevTools so you can inspect graph.* from the
+        // articleContent frame console. Safe to leave in shipping builds.
+        window.__streetzim_graph = graph;
+        var g0 = graph.decodeGeom(0);
+        var gLast = graph.decodeGeom(graph.numGeoms - 1);
+        console.log('[streetzim] graph loaded', {
+          bufferBytes: buffer.byteLength,
+          numNodes: graph.numNodes,
+          numEdges: graph.numEdges,
+          numGeoms: graph.numGeoms,
+          geom0Sample: g0[0],
+          geomLastSample: gLast[0],
+        });
         statusEl.textContent = 'Enter start and destination';
       })
       .catch(function(err) {
@@ -2712,6 +2725,22 @@ function initRouting(map, config) {
       var result = findRoute(originNode, destNode);
       if (seq !== routeSeq) return;  // user changed dest while routing
       if (result) {
+        // Sanity check: any coord obviously off the map? Logs first
+        // offender — helps diagnose "crazy lines" bugs after the fact.
+        var bounds = map.getMaxBounds && map.getMaxBounds();
+        var bad = null;
+        for (var ci = 0; ci < result.coords.length; ci++) {
+          var c = result.coords[ci];
+          if (!isFinite(c[0]) || !isFinite(c[1])) { bad = { ci: ci, c: c, reason: 'NaN' }; break; }
+        }
+        if (bad) console.warn('[streetzim] route coord:', bad);
+        console.log('[streetzim] route', {
+          coords: result.coords.length,
+          km: (result.distance / 1000).toFixed(1),
+          first: result.coords[0],
+          mid: result.coords[Math.floor(result.coords.length / 2)],
+          last: result.coords[result.coords.length - 1],
+        });
         drawRoute(result.coords);
         distEl.textContent = formatDistance(result.distance);
         timeEl.textContent = formatTime(result.time);

@@ -1578,6 +1578,15 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
     edges_speed_geom = array.array('I')
     edges_name = array.array('I')
 
+    # Geom offsets are stored as uint32 byte offsets into the blob — v2 format
+    # caps geom_blob at 2^32 bytes. For continent-scale extracts (Europe) the
+    # naive blob can exceed 4 GB. When we detect we're close to the limit, we
+    # stop growing the blob and fall back to geom_idx=-1 for subsequent edges
+    # (they'll render as straight line-segments between their endpoint nodes).
+    # That's a graceful degradation — routing still works, just with fewer
+    # intermediate polyline points for very large regions.
+    GEOM_BLOB_CAP = 0xFFFF0000  # leave ~64 KB headroom before 2^32
+
     # Node coordinates indexed by graph idx (populated lazily as we see them).
     node_coords = np.zeros((num_nodes, 2), dtype=np.int32)  # lat_e7, lon_e7
 
@@ -1675,8 +1684,11 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
                         node_coords[to_idx, 1] = lons_e7[b]
 
                     # Geom: interior points only (endpoints are node vertices).
+                    # Skip encoding when near the uint32 blob-size cap —
+                    # downstream typed arrays use 4-byte offsets and must fit.
                     interior_len = b - a - 1
-                    if interior_len > 0:
+                    near_cap = len(geom_blob) >= GEOM_BLOB_CAP
+                    if interior_len > 0 and not near_cap:
                         i_lons = lons_e7[a + 1:b]
                         i_lats = lats_e7[a + 1:b]
                         fstart, fend = _encode_geom(i_lons, i_lats, geom_blob)
@@ -1694,7 +1706,7 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
                         fgi = -1
 
                     # Reverse geom (distinct encoding since deltas differ).
-                    if oneway != 1 and interior_len > 0:
+                    if oneway != 1 and interior_len > 0 and not near_cap:
                         r_lons = list(reversed(i_lons))
                         r_lats = list(reversed(i_lats))
                         rstart, rend = _encode_geom(r_lons, r_lats, geom_blob)
