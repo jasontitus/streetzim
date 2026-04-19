@@ -1100,14 +1100,48 @@ def build_location_index(mbtiles_path):
                 best = name
         return best
 
+    # City-state / federal-district bindings: places where the MVT `place`
+    # layer doesn't carry a matching state-class entry, so nearest-state
+    # would otherwise fall back to a neighboring US state, Russian oblast,
+    # etc. Keyed on the nearest-city name PLUS a bbox, so Silver Spring or
+    # Arlington (whose nearest city is themselves, not Washington) don't get
+    # mislabeled as D.C.
+    #
+    # `label` None means "this city IS its own admin region — suppress the
+    # state part entirely" (output "Tokyo" instead of "Tokyo, Tokyo").
+    _CITY_STATE_BINDINGS = {
+        # (min_lat, min_lon, max_lat, max_lon, state_label)
+        # DC is a federal district not in our state-class tiles.
+        "Washington": (38.79, -77.13, 39.00, -76.90, "D.C."),
+        # Each of these is a municipality / metro prefecture that is its own
+        # admin region; OMT doesn't carry a matching state entry.
+        "Tokyo":       (35.45, 138.95, 35.95, 139.95, None),
+        "Beijing":     (39.40, 115.40, 41.10, 117.50, None),
+        "Shanghai":    (30.60, 120.85, 31.90, 122.20, None),
+        "Hong Kong":   (22.15, 113.80, 22.58, 114.45, None),
+        "Delhi":       (28.40, 76.80, 28.90, 77.35, None),
+    }
+
     def lookup(lat, lon):
         city = _nearest_grid(lat, lon, city_grid) if city_grid else None
-        state = _nearest_linear(lat, lon, states) if states else None
+        state = None
+        state_suppressed = False
+        if city in _CITY_STATE_BINDINGS:
+            mn_lat, mn_lon, mx_lat, mx_lon, label = _CITY_STATE_BINDINGS[city]
+            if mn_lat <= lat <= mx_lat and mn_lon <= lon <= mx_lon:
+                if label is None:
+                    state_suppressed = True
+                else:
+                    state = label
+        if state is None and not state_suppressed:
+            state = _nearest_linear(lat, lon, states) if states else None
         country = _nearest_linear(lat, lon, countries) if countries else None
-        # Format: "City, State" when we have both (most useful for disambiguation)
-        # Falls back to "State, Country" or just "Country"
+        # Format: "City, State" when we have both (most useful for
+        # disambiguation). Falls back to "State, Country" or just "Country".
         if city and state:
             return f"{city}, {state}"
+        elif city and state_suppressed:
+            return city
         elif state:
             return state
         elif country:
