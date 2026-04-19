@@ -1289,6 +1289,98 @@ def _assign_location_batch(batch):
     return results
 
 
+def extract_addresses_pbf(pbf_path, output_path, bbox=None):
+    """Extract addr:housenumber + addr:street features from OSM PBF.
+
+    Appends address entries to the given JSONL output path in the same
+    schema used by the rest of the search index (name/type/lat/lon).
+    These feed the routing UI's typeahead so users can search by address.
+
+    Returns count of address entries written.
+    """
+    print("  Extracting address features from OSM data...")
+    source_pbf = str(pbf_path)
+    tmp = tempfile.mkdtemp(prefix="streetzim_addr_")
+    try:
+        if bbox:
+            minlon, minlat, maxlon, maxlat = bbox
+            bbox_pbf = os.path.join(tmp, "region.osm.pbf")
+            subprocess.run([
+                "osmium", "extract",
+                "-b", f"{minlon},{minlat},{maxlon},{maxlat}",
+                source_pbf, "-o", bbox_pbf, "--overwrite",
+            ], check=True)
+            source_pbf = bbox_pbf
+
+        # osmium tags-filter keeps any element with addr:housenumber.
+        # Covers address nodes and building ways/relations tagged directly.
+        addr_pbf = os.path.join(tmp, "addresses.osm.pbf")
+        subprocess.run([
+            "osmium", "tags-filter", source_pbf,
+            "addr:housenumber",
+            "-o", addr_pbf, "--overwrite",
+        ], check=True)
+
+        addr_geojson = os.path.join(tmp, "addresses.geojsonseq")
+        subprocess.run([
+            "osmium", "export", addr_pbf,
+            "-f", "geojsonseq",
+            "-o", addr_geojson, "--overwrite",
+        ], check=True)
+
+        count = 0
+        with open(addr_geojson, "r", encoding="utf-8") as fin, \
+             open(output_path, "a", encoding="utf-8") as fout:
+            for line in fin:
+                line = line.strip().lstrip("\x1e")
+                if not line:
+                    continue
+                try:
+                    feat = json.loads(line)
+                except Exception:
+                    continue
+                props = feat.get("properties") or {}
+                num = (props.get("addr:housenumber") or "").strip()
+                street = (props.get("addr:street") or "").strip()
+                city = (props.get("addr:city") or "").strip()
+                if not num or not street:
+                    continue  # skip orphan addresses that can't be typed
+
+                geom = feat.get("geometry") or {}
+                gtype = geom.get("type")
+                coords = geom.get("coordinates")
+                if gtype == "Point" and coords:
+                    lon, lat = coords[0], coords[1]
+                elif gtype == "Polygon" and coords:
+                    ring = coords[0]
+                    if not ring:
+                        continue
+                    lon = sum(c[0] for c in ring) / len(ring)
+                    lat = sum(c[1] for c in ring) / len(ring)
+                else:
+                    continue
+
+                display = f"{num} {street}"
+                if city:
+                    display = f"{display}, {city}"
+                entry = {
+                    "name": display,
+                    "type": "addr",
+                    "subtype": "",
+                    "lat": round(lat, 6),
+                    "lon": round(lon, 6),
+                }
+                fout.write(json.dumps(entry, separators=(",", ":"), ensure_ascii=False))
+                fout.write("\n")
+                count += 1
+                if count % 100000 == 0:
+                    print(f"\r    Wrote {count} addresses...", end="", flush=True)
+        print(f"\r    Wrote {count} address entries")
+        return count
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def extract_routing_graph(pbf_path, output_dir, bbox=None):
     """Extract road network from OSM PBF and build a compact routing graph.
 
@@ -1372,7 +1464,9 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
     DEFAULT_SPEED = 30
 
     coord_count = {}  # snapped (lat, lon) -> count of ways containing it
-    ways = []  # [(coords, highway_class, oneway, speed)]
+    ways = []  # [(coords, highway_class, oneway, speed, name_idx)]
+    name_table = [""]  # index 0 reserved as "no name"
+    name_map = {"": 0}
 
     print(f"    Reading highway features...")
     feat_count = 0
@@ -1403,6 +1497,20 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
 
             speed = SPEED.get(highway, DEFAULT_SPEED)
 
+            # Build display label: prefer name, fall back to ref.
+            # Combine when both present (e.g. "Interstate 5 (I-5)").
+            name = (props.get("name") or "").strip()
+            ref = (props.get("ref") or "").strip()
+            if name and ref:
+                label = f"{name} ({ref})"
+            else:
+                label = name or ref
+            name_idx = name_map.get(label)
+            if name_idx is None:
+                name_idx = len(name_table)
+                name_table.append(label)
+                name_map[label] = name_idx
+
             coords = []
             for c in geom["coordinates"]:
                 lat = round(c[1], SNAP)
@@ -1412,7 +1520,7 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
             if len(coords) < 2:
                 continue
 
-            ways.append((coords, highway, oneway, speed))
+            ways.append((coords, highway, oneway, speed, name_idx))
             feat_count += 1
 
             for coord in coords:
@@ -1429,7 +1537,7 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
 
     # Step 4: Identify graph nodes (intersections + endpoints)
     graph_nodes = set()
-    for coords, _, _, _ in ways:
+    for coords, _, _, _, _ in ways:
         graph_nodes.add(coords[0])
         graph_nodes.add(coords[-1])
         for coord in coords[1:-1]:
@@ -1451,8 +1559,8 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
         return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
     # Step 5: Build edges by splitting ways at graph nodes
-    edges = []  # [from_idx, to_idx, dist_m, speed_kmh, [geometry]]
-    for coords, highway, oneway, speed in ways:
+    edges = []  # [from_idx, to_idx, dist_m, speed_kmh, [geometry], name_idx]
+    for coords, highway, oneway, speed, name_idx in ways:
         # Split into segments at graph nodes
         seg_start = 0
         for i in range(1, len(coords)):
@@ -1472,11 +1580,11 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
 
                         # Add forward edge
                         if oneway != -1:
-                            edges.append([from_idx, to_idx, dist, speed, geom])
+                            edges.append([from_idx, to_idx, dist, speed, geom, name_idx])
                         # Add reverse edge
                         if oneway != 1:
                             rev_geom = list(reversed(geom))
-                            edges.append([to_idx, from_idx, dist, speed, rev_geom])
+                            edges.append([to_idx, from_idx, dist, speed, rev_geom, name_idx])
 
                 seg_start = i
 
@@ -1489,13 +1597,14 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
         nodes_flat.append(lat)
         nodes_flat.append(lon)
 
-    # Build adjacency list for efficient lookup: adj[node] = [[target, dist, speed, geomIdx], ...]
-    # Store geometries separately to allow dedup
+    # Build adjacency list for efficient lookup:
+    # adj[node] = [[target, dist, speed, geomIdx, nameIdx], ...]
+    # Geometries stored separately with dedup.
     geom_list = []
     geom_map = {}  # tuple(geom) -> index
     adj = [[] for _ in range(len(node_list))]
 
-    for from_idx, to_idx, dist, speed, geom in edges:
+    for from_idx, to_idx, dist, speed, geom, name_idx in edges:
         geom_key = tuple(tuple(c) for c in geom) if geom else ()
         if geom_key in geom_map:
             gi = geom_map[geom_key]
@@ -1505,20 +1614,129 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
             geom_map[geom_key] = gi
         else:
             gi = -1
-        adj[from_idx].append([to_idx, dist, speed, gi])
+        adj[from_idx].append([to_idx, dist, speed, gi, name_idx])
 
-    routing_data = {
-        "nodes": nodes_flat,
-        "adj": adj,
-        "geom": geom_list,
-    }
+    # Step 6: Serialize to compact binary format (SZRG v2)
+    # Layout (all little-endian):
+    #   Header (32 B): magic "SZRG" + u32 version=2 + u32 num_nodes + u32 num_edges
+    #                  + u32 num_geoms + u32 geom_bytes + u32 num_names
+    #                  + u32 names_bytes
+    #   Nodes:         num_nodes * (i32 lat_e7, i32 lon_e7)        = 8 B/node
+    #   Adj offsets:   (num_nodes + 1) * u32                       = 4 B/node
+    #   Edges:         num_edges * (u32 target, u32 dist_dm,       = 16 B/edge
+    #                               u32 speed_geom, u32 name_idx)
+    #                  speed_geom = (speed << 24) | geom_idx24
+    #                  geom_idx24 = 0xFFFFFF means "no geometry"
+    #                  name_idx = 0 means "no name"
+    #   Geom offsets:  (num_geoms + 1) * u32 byte offsets into geom blob
+    #   Geom blob:     geom_bytes of mixed-encoding geometry data:
+    #                    per geom: [i32 lon0_e7, i32 lat0_e7] absolute first coord,
+    #                              then zigzag-varint pairs (dlon, dlat) for rest.
+    #                    Decoder reads until the next geom's offset.
+    #                    Deltas for road points are small (< 28 bits), so single
+    #                    JS int32 math works without BigInt.
+    #   Name offsets:  (num_names + 1) * u32 byte offsets into names_blob
+    #   Names blob:    names_bytes of UTF-8 (concatenated, no separators)
+    #
+    # Target: ~10x smaller than JSON. Bulk savings come from varint-encoded
+    # geom deltas (road points are typically 1-3 bytes each vs 8 fixed).
+    import numpy as np
+    import struct
 
-    output_path = os.path.join(output_dir, "routing-graph.json")
-    with open(output_path, "w") as f:
-        json.dump(routing_data, f, separators=(",", ":"))
+    def zigzag32(n):
+        # Standard protobuf zigzag for signed 32-bit
+        return ((n << 1) ^ (n >> 31)) & 0xFFFFFFFF
+
+    def varint_bytes(v):
+        out = bytearray()
+        while v >= 0x80:
+            out.append((v & 0x7F) | 0x80)
+            v >>= 7
+        out.append(v & 0x7F)
+        return out
+
+    output_path = os.path.join(output_dir, "routing-graph.bin")
+    total_edges = sum(len(a) for a in adj)
+    num_nodes = len(node_list)
+    num_geoms = len(geom_list)
+    num_names = len(name_table)
+
+    nodes_arr = np.empty((num_nodes, 2), dtype='<i4')
+    for i, (lat, lon) in enumerate(node_list):
+        nodes_arr[i, 0] = int(round(lat * 1e7))
+        nodes_arr[i, 1] = int(round(lon * 1e7))
+
+    adj_offsets = np.empty(num_nodes + 1, dtype='<u4')
+    cur = 0
+    for i, edge_list in enumerate(adj):
+        adj_offsets[i] = cur
+        cur += len(edge_list)
+    adj_offsets[num_nodes] = cur
+
+    edges_arr = np.empty((total_edges, 4), dtype='<u4')
+    idx = 0
+    for edge_list in adj:
+        for target, dist, speed, gi, ni in edge_list:
+            edges_arr[idx, 0] = target
+            edges_arr[idx, 1] = int(round(dist * 10))  # meters → decimeters
+            gi_packed = 0xFFFFFF if gi < 0 else (gi & 0xFFFFFF)
+            edges_arr[idx, 2] = ((int(speed) & 0xFF) << 24) | gi_packed
+            edges_arr[idx, 3] = int(ni)
+            idx += 1
+
+    # Encode geoms: absolute int32 first coord, then zigzag-varint deltas
+    geom_blob = bytearray()
+    geom_offsets = np.empty(num_geoms + 1, dtype='<u4')
+    for k, geom in enumerate(geom_list):
+        geom_offsets[k] = len(geom_blob)
+        # geom is [[lon, lat], ...]; first coord stored as fixed int32 pair
+        lon0_e7 = int(round(geom[0][0] * 1e7))
+        lat0_e7 = int(round(geom[0][1] * 1e7))
+        geom_blob.extend(struct.pack('<ii', lon0_e7, lat0_e7))
+        prev_lon, prev_lat = lon0_e7, lat0_e7
+        for lon, lat in geom[1:]:
+            lon_e7 = int(round(lon * 1e7))
+            lat_e7 = int(round(lat * 1e7))
+            dlon = lon_e7 - prev_lon
+            dlat = lat_e7 - prev_lat
+            geom_blob.extend(varint_bytes(zigzag32(dlon)))
+            geom_blob.extend(varint_bytes(zigzag32(dlat)))
+            prev_lon, prev_lat = lon_e7, lat_e7
+    geom_offsets[num_geoms] = len(geom_blob)
+    # Pad blob to a multiple of 4 bytes so the following Uint32Array
+    # (name_offsets) stays 4-byte aligned in the typed-array view.
+    # Decoder never reads past geom_offsets[num_geoms], so padding is invisible.
+    while len(geom_blob) % 4 != 0:
+        geom_blob.append(0)
+    geom_bytes_total = len(geom_blob)
+
+    # Encode name table to UTF-8, build byte-offset index
+    name_blobs = [n.encode("utf-8") for n in name_table]
+    names_bytes = sum(len(b) for b in name_blobs)
+    name_offsets = np.empty(num_names + 1, dtype='<u4')
+    cur = 0
+    for i, b in enumerate(name_blobs):
+        name_offsets[i] = cur
+        cur += len(b)
+    name_offsets[num_names] = cur
+
+    with open(output_path, "wb") as f:
+        f.write(b"SZRG")
+        np.array([2, num_nodes, total_edges, num_geoms, geom_bytes_total,
+                  num_names, names_bytes], dtype='<u4').tofile(f)
+        nodes_arr.tofile(f)
+        adj_offsets.tofile(f)
+        edges_arr.tofile(f)
+        geom_offsets.tofile(f)
+        f.write(bytes(geom_blob))
+        name_offsets.tofile(f)
+        for b in name_blobs:
+            f.write(b)
 
     size_mb = os.path.getsize(output_path) / (1024 * 1024)
-    print(f"    Routing graph: {size_mb:.1f} MB ({len(node_list)} nodes, {len(edges)} edges)")
+    print(f"    Routing graph: {size_mb:.1f} MB ({num_nodes} nodes, "
+          f"{total_edges} edges, {num_geoms} geoms, {geom_bytes_total / (1024*1024):.1f} MB geom blob, "
+          f"{num_names} names, {names_bytes / 1024:.0f} KB name text)")
 
     # Clean up temp files
     for tmp in [highways_pbf, highways_geojson]:
@@ -2228,9 +2446,9 @@ def create_zim(
             size_mb = os.path.getsize(routing_graph_path) / (1024 * 1024)
             print(f"    Adding routing graph ({size_mb:.1f} MB)...")
             creator.add_item(MapItem(
-                "routing-data/graph.json",
+                "routing-data/graph.bin",
                 "Routing Graph",
-                "application/json",
+                "application/octet-stream",
                 routing_graph_path,
             ))
 
@@ -2827,6 +3045,15 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             search_features = extract_searchable_features(mbtiles_path=mbtiles_path, output_dir=tmpdir)
         else:
             search_features = extract_searchable_features(tiles=tiles, output_dir=tmpdir)
+
+        # Append street addresses (addr:housenumber + addr:street) so users can
+        # type "45 Brīvības gatve" in the routing UI. Requires a PBF — the MVT
+        # tiles don't carry addr:* tags. Skipped silently when PBF is missing.
+        if isinstance(search_features, str) and os.path.isfile(search_features):
+            addr_pbf = locals().get('work_pbf') or pbf_path or args.pbf
+            if addr_pbf:
+                addr_bbox = parse_bbox(bbox_str) if bbox_str else None
+                extract_addresses_pbf(addr_pbf, search_features, bbox=addr_bbox)
 
         # Build Wikidata cache if requested
         wikidata_data = None

@@ -123,6 +123,12 @@ REGIONS = [
         "zim_file": "osm-washington-dc.zim",
         "description": "Washington, D.C. &mdash; the U.S. capital and surrounding metro area.",
     },
+    {
+        "id": "baltics",
+        "title": "Baltics",
+        "zim_file": "osm-baltics.zim",
+        "description": "Estonia, Latvia, and Lithuania &mdash; Tallinn, Riga, Vilnius, and the Baltic Sea coast.",
+    },
 ]
 
 

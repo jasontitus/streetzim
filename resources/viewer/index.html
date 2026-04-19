@@ -320,6 +320,40 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .routing-field span.set { color: var(--text-primary); font-weight: 500; }
+  .routing-field-group { position: relative; margin-bottom: 6px; }
+  .routing-field-row { display: flex; align-items: center; gap: 6px; }
+  .routing-input {
+    flex: 1; min-width: 0; font: inherit; font-size: 12px;
+    padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px;
+    background: var(--panel-bg); color: var(--text-primary); outline: none;
+  }
+  .routing-input:focus { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
+  .routing-icon-btn {
+    flex-shrink: 0; background: none; border: 1px solid var(--border); border-radius: 4px;
+    padding: 3px 7px; cursor: pointer; font-size: 14px; color: var(--text-secondary);
+  }
+  .routing-icon-btn:hover { color: var(--text-primary); border-color: #2563eb; }
+  .routing-results {
+    display: none; position: absolute; top: 100%; left: 18px; right: 0;
+    max-height: 220px; overflow-y: auto; z-index: 20; margin-top: 2px;
+    background: var(--panel-bg); border: 1px solid var(--border); border-radius: 6px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  }
+  .routing-result-row {
+    padding: 6px 10px; cursor: pointer; font-size: 12px;
+    border-bottom: 1px solid var(--border); display: flex;
+    justify-content: space-between; gap: 8px;
+  }
+  .routing-result-row:last-child { border-bottom: none; }
+  .routing-result-row:hover,
+  .routing-result-row.active { background: var(--hover-bg); }
+  .routing-result-name {
+    color: var(--text-primary); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; flex: 1;
+  }
+  .routing-result-meta {
+    color: var(--text-tertiary); font-size: 11px; flex-shrink: 0;
+  }
   #routing-result {
     display: none; margin-top: 10px; padding-top: 10px;
     border-top: 1px solid var(--border);
@@ -332,6 +366,25 @@
   }
   #routing-result .route-stat value {
     color: var(--text-primary); font-weight: 600; font-size: 13px;
+  }
+  #route-roads {
+    margin-top: 8px; max-height: 180px; overflow-y: auto;
+    font-size: 12px;
+  }
+  #route-roads .road-row {
+    display: flex; justify-content: space-between; gap: 8px;
+    padding: 3px 0; border-bottom: 1px dashed var(--border);
+  }
+  #route-roads .road-row:last-child { border-bottom: none; }
+  #route-roads .road-name {
+    color: var(--text-primary); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  #route-roads .road-name.unnamed {
+    color: var(--text-secondary); font-style: italic;
+  }
+  #route-roads .road-dist {
+    color: var(--text-secondary); flex-shrink: 0;
   }
   #routing-clear {
     display: none; margin-top: 8px; width: 100%;
@@ -368,18 +421,28 @@
 </div>
 <div id="routing-panel">
   <h4>Directions <button id="routing-close" title="Close">&times;</button></h4>
-  <div class="routing-field">
-    <div class="routing-dot origin"></div>
-    <span id="routing-origin">Click map to set start</span>
+  <div class="routing-field-group">
+    <div class="routing-field-row">
+      <div class="routing-dot origin"></div>
+      <input type="text" class="routing-input" id="routing-origin-input"
+             placeholder="Start — type an address or place" autocomplete="off">
+      <button class="routing-icon-btn" id="routing-gps-btn" title="Use current location">&#x25CE;</button>
+    </div>
+    <div class="routing-results" id="routing-origin-results"></div>
   </div>
-  <div class="routing-field">
-    <div class="routing-dot dest"></div>
-    <span id="routing-dest">Then click to set destination</span>
+  <div class="routing-field-group">
+    <div class="routing-field-row">
+      <div class="routing-dot dest"></div>
+      <input type="text" class="routing-input" id="routing-dest-input"
+             placeholder="Destination — type an address or place" autocomplete="off">
+    </div>
+    <div class="routing-results" id="routing-dest-results"></div>
   </div>
   <div id="routing-status"></div>
   <div id="routing-result">
     <div class="route-stat"><label>Distance</label><value id="route-distance"></value></div>
     <div class="route-stat"><label>Est. time</label><value id="route-time"></value></div>
+    <div id="route-roads"></div>
   </div>
   <button id="routing-clear">Clear route</button>
 </div>
@@ -1639,6 +1702,20 @@ function initSearch(map) {
   map.on('click', function() {
     resultsEl.style.display = 'none';
   });
+
+  // Shared search API — used by routing panel's typeahead inputs so we
+  // don't duplicate the manifest/chunk/scoring infrastructure. Returns
+  // a Promise resolving to scored matches: [{item:{n,t,a,o,...}, score, dist}].
+  map._queryPlaces = function(query) {
+    if (!manifest || !query || query.length < 2) return Promise.resolve([]);
+    var prefixes = getPrefixes(query);
+    if (!prefixes.length) return Promise.resolve([]);
+    return Promise.all(prefixes.map(fetchChunk)).then(function(arrays) {
+      var all = [];
+      for (var i = 0; i < arrays.length; i++) all = all.concat(arrays[i]);
+      return scoreResults(all, query);
+    });
+  };
 }
 
 // --- Wikidata info popup on feature click ---
@@ -2100,12 +2177,16 @@ function initRouting(map, config) {
   var toggleBtn = document.getElementById('route-toggle');
   var panel = document.getElementById('routing-panel');
   var closeBtn = document.getElementById('routing-close');
-  var originLabel = document.getElementById('routing-origin');
-  var destLabel = document.getElementById('routing-dest');
+  var originInput = document.getElementById('routing-origin-input');
+  var destInput = document.getElementById('routing-dest-input');
+  var originResultsEl = document.getElementById('routing-origin-results');
+  var destResultsEl = document.getElementById('routing-dest-results');
+  var gpsBtn = document.getElementById('routing-gps-btn');
   var statusEl = document.getElementById('routing-status');
   var resultEl = document.getElementById('routing-result');
   var distEl = document.getElementById('route-distance');
   var timeEl = document.getElementById('route-time');
+  var roadsEl = document.getElementById('route-roads');
   var clearBtn = document.getElementById('routing-clear');
 
   toggleBtn.style.display = 'block';
@@ -2149,10 +2230,10 @@ function initRouting(map, config) {
   function clearRoute() {
     originNode = -1;
     destNode = -1;
-    originLabel.textContent = 'Click map to set start';
-    originLabel.classList.remove('set');
-    destLabel.textContent = 'Then click to set destination';
-    destLabel.classList.remove('set');
+    originInput.value = '';
+    destInput.value = '';
+    originResultsEl.style.display = 'none';
+    destResultsEl.style.display = 'none';
     resultEl.style.display = 'none';
     clearBtn.style.display = 'none';
     if (originMarker) { originMarker.remove(); originMarker = null; }
@@ -2165,18 +2246,124 @@ function initRouting(map, config) {
     }
   }
 
+  // Binary graph format (SZRG v2):
+  //   Header (32 B): "SZRG" magic, u32 version=2, u32 numNodes, u32 numEdges,
+  //                  u32 numGeoms, u32 geomBytes, u32 numNames, u32 namesBytes
+  //   Nodes:         Int32Array [lat_e7, lon_e7, ...] length numNodes*2
+  //   Adj offsets:   Uint32Array length numNodes+1
+  //   Edges:         Uint32Array [target, dist_dm, speed_geom, name_idx, ...] length numEdges*4
+  //                  speed_geom = (speed << 24) | geomIdx24  (0xFFFFFF = no geom)
+  //                  name_idx = 0 means "no name"
+  //   Geom offsets:  Uint32Array length numGeoms+1 (byte offsets into geomBlob)
+  //   Geom blob:     Uint8Array length geomBytes — per geom: i32 lon0, i32 lat0
+  //                  then zigzag-varint (dlon, dlat) pairs until next geom's offset.
+  //                  Decoded on-demand during path reconstruction only, so the
+  //                  compressed blob (rather than typed int32 array) lives in RAM.
+  //   Name offsets:  Uint32Array length numNames+1 (byte offsets into namesBlob)
+  //   Names blob:    Uint8Array length namesBytes (concatenated UTF-8)
+  function parseRoutingGraphBinary(buffer) {
+    var view = new DataView(buffer);
+    // Magic "SZRG" as big-endian bytes = 0x535A5247
+    if (view.getUint32(0, false) !== 0x535A5247) {
+      throw new Error('Invalid routing graph magic');
+    }
+    var version = view.getUint32(4, true);
+    if (version !== 2) throw new Error('Unsupported graph version: ' + version);
+    var numNodes = view.getUint32(8, true);
+    var numEdges = view.getUint32(12, true);
+    var numGeoms = view.getUint32(16, true);
+    var geomBytes = view.getUint32(20, true);
+    var numNames = view.getUint32(24, true);
+    var namesBytes = view.getUint32(28, true);
+
+    var offset = 32;
+    var nodesScaled = new Int32Array(buffer, offset, numNodes * 2);
+    offset += numNodes * 2 * 4;
+    var adjOffsets = new Uint32Array(buffer, offset, numNodes + 1);
+    offset += (numNodes + 1) * 4;
+    var edges = new Uint32Array(buffer, offset, numEdges * 4);
+    offset += numEdges * 4 * 4;
+    var geomOffsets = new Uint32Array(buffer, offset, numGeoms + 1);
+    offset += (numGeoms + 1) * 4;
+    var geomBlob = new Uint8Array(buffer, offset, geomBytes);
+    var geomBlobByteStart = offset;
+    offset += geomBytes;
+    var nameOffsets = new Uint32Array(buffer, offset, numNames + 1);
+    offset += (numNames + 1) * 4;
+    var namesBlob = new Uint8Array(buffer, offset, namesBytes);
+
+    var textDecoder = new TextDecoder('utf-8');
+
+    // Decode geom index `gi` to a [[lon, lat], ...] array (on-demand).
+    // First 8 bytes are absolute int32 (lon_e7, lat_e7); remaining bytes
+    // are zigzag-varint (dlon, dlat) pairs until the next geom's offset.
+    function decodeGeom(gi) {
+      var start = geomOffsets[gi];
+      var end = geomOffsets[gi + 1];
+      if (end <= start + 8) {
+        // Only first coord present (or empty — shouldn't happen, geoms have >=1 pt)
+        var lon0 = view.getInt32(geomBlobByteStart + start, true);
+        var lat0 = view.getInt32(geomBlobByteStart + start + 4, true);
+        return [[lon0 / 1e7, lat0 / 1e7]];
+      }
+      var lon = view.getInt32(geomBlobByteStart + start, true);
+      var lat = view.getInt32(geomBlobByteStart + start + 4, true);
+      var coords = [[lon / 1e7, lat / 1e7]];
+      var i = start + 8;
+      while (i < end) {
+        // zigzag varint for lon delta
+        var raw = 0, shift = 0, b;
+        do {
+          b = geomBlob[i++];
+          raw |= (b & 0x7F) << shift;
+          shift += 7;
+        } while (b & 0x80);
+        var dlon = (raw >>> 1) ^ -(raw & 1);
+        raw = 0; shift = 0;
+        do {
+          b = geomBlob[i++];
+          raw |= (b & 0x7F) << shift;
+          shift += 7;
+        } while (b & 0x80);
+        var dlat = (raw >>> 1) ^ -(raw & 1);
+        lon += dlon;
+        lat += dlat;
+        coords.push([lon / 1e7, lat / 1e7]);
+      }
+      return coords;
+    }
+
+    return {
+      numNodes: numNodes,
+      numEdges: numEdges,
+      numGeoms: numGeoms,
+      numNames: numNames,
+      nodesScaled: nodesScaled,
+      adjOffsets: adjOffsets,
+      edges: edges,
+      decodeGeom: decodeGeom,
+      getName: function(nameIdx) {
+        if (nameIdx <= 0 || nameIdx >= numNames) return '';
+        var start = nameOffsets[nameIdx];
+        var end = nameOffsets[nameIdx + 1];
+        if (end === start) return '';
+        return textDecoder.decode(namesBlob.subarray(start, end));
+      },
+    };
+  }
+
   // Load routing graph (lazy)
   function loadGraph() {
     if (graph) return;
     statusEl.textContent = 'Loading routing data...';
-    fetch(baseUrl + 'routing-data/graph.json')
+    fetch(baseUrl + 'routing-data/graph.bin')
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
+        return r.arrayBuffer();
       })
-      .then(function(data) {
-        graph = data;
-        statusEl.textContent = 'Click map to set start point';
+      .then(function(buffer) {
+        graph = parseRoutingGraphBinary(buffer);
+        statusEl.textContent = 'Enter start and destination';
       })
       .catch(function(err) {
         statusEl.textContent = 'Routing data unavailable';
@@ -2184,14 +2371,17 @@ function initRouting(map, config) {
       });
   }
 
-  // Find nearest graph node to a lat/lon
+  // Find nearest graph node to a lat/lon (operates on int32-scaled coords)
   function nearestNode(lat, lon) {
-    var nodes = graph.nodes;
+    var latE7 = Math.round(lat * 1e7);
+    var lonE7 = Math.round(lon * 1e7);
+    var nodes = graph.nodesScaled;
     var best = -1;
     var bestDist = Infinity;
     for (var i = 0; i < nodes.length; i += 2) {
-      var dlat = nodes[i] - lat;
-      var dlon = nodes[i + 1] - lon;
+      // Cast to float before squaring — int32 products can overflow
+      var dlat = (nodes[i] - latE7);
+      var dlon = (nodes[i + 1] - lonE7);
       var d = dlat * dlat + dlon * dlon;
       if (d < bestDist) {
         bestDist = d;
@@ -2249,14 +2439,15 @@ function initRouting(map, config) {
   };
   MinHeap.prototype.size = function() { return this.data.length; };
 
-  // A* pathfinding
+  // A* pathfinding (binary graph)
   function findRoute(startNode, endNode) {
-    var nodes = graph.nodes;
-    var adj = graph.adj;
-    var numNodes = nodes.length / 2;
+    var nodesScaled = graph.nodesScaled;
+    var adjOffsets = graph.adjOffsets;
+    var edges = graph.edges;
+    var numNodes = graph.numNodes;
 
-    var endLat = nodes[endNode * 2];
-    var endLon = nodes[endNode * 2 + 1];
+    var endLat = nodesScaled[endNode * 2] / 1e7;
+    var endLon = nodesScaled[endNode * 2 + 1] / 1e7;
 
     // g[node] = best known cost to reach node (in seconds)
     var g = new Float64Array(numNodes);
@@ -2266,13 +2457,18 @@ function initRouting(map, config) {
     // Track predecessors for path reconstruction
     var prev = new Int32Array(numNodes);
     prev.fill(-1);
-    var prevEdge = new Int32Array(numNodes);  // which edge index in adj[prev[n]] leads to n
+    // prevEdge[n] = absolute edge index in `edges` that leads to n
+    var prevEdge = new Int32Array(numNodes);
     prevEdge.fill(-1);
 
     var closed = new Uint8Array(numNodes);
 
     var open = new MinHeap();
-    var h0 = haversine(nodes[startNode * 2], nodes[startNode * 2 + 1], endLat, endLon) / (100 / 3.6);
+    var h0 = haversine(
+      nodesScaled[startNode * 2] / 1e7,
+      nodesScaled[startNode * 2 + 1] / 1e7,
+      endLat, endLon
+    ) / (100 / 3.6);
     open.push([h0, startNode]);
 
     while (open.size() > 0) {
@@ -2283,26 +2479,25 @@ function initRouting(map, config) {
       if (closed[current]) continue;
       closed[current] = 1;
 
-      var neighbors = adj[current];
-      if (!neighbors) continue;
+      var eStart = adjOffsets[current];
+      var eEnd = adjOffsets[current + 1];
 
-      for (var i = 0; i < neighbors.length; i++) {
-        var edge = neighbors[i];
-        var target = edge[0];
-        var dist = edge[1];    // meters
-        var speed = edge[2];   // km/h
+      for (var i = eStart; i < eEnd; i++) {
+        var target = edges[i * 4];
+        var distM = edges[i * 4 + 1] / 10;          // dm → m
+        var speed = edges[i * 4 + 2] >>> 24;        // upper 8 bits
 
         if (closed[target]) continue;
 
-        var cost = dist / (speed / 3.6);  // time in seconds
+        var cost = distM / (speed / 3.6);           // time in seconds
         var newG = g[current] + cost;
 
         if (newG < g[target]) {
           g[target] = newG;
           prev[target] = current;
           prevEdge[target] = i;
-          var tLat = nodes[target * 2];
-          var tLon = nodes[target * 2 + 1];
+          var tLat = nodesScaled[target * 2] / 1e7;
+          var tLon = nodesScaled[target * 2 + 1] / 1e7;
           var h = haversine(tLat, tLon, endLat, endLon) / (100 / 3.6);
           open.push([newG + h, target]);
         }
@@ -2317,27 +2512,43 @@ function initRouting(map, config) {
     var totalTime = g[endNode];
     var n = endNode;
 
+    // Accumulate segments in reverse (endNode→startNode); flipped later.
+    var segRev = [];  // [{nameIdx, distM}, ...]
     while (n !== startNode) {
       var p = prev[n];
       var ei = prevEdge[n];
-      var edge = adj[p][ei];
-      totalDist += edge[1];
+      var distM = edges[ei * 4 + 1] / 10;
+      var sg = edges[ei * 4 + 2];
+      var geomIdx = sg & 0xFFFFFF;
+      var nameIdx = edges[ei * 4 + 3];
+      totalDist += distM;
+      segRev.push({ nameIdx: nameIdx, distM: distM });
 
-      // Build segment geometry
-      var fromLat = nodes[p * 2], fromLon = nodes[p * 2 + 1];
-      var toLat = nodes[n * 2], toLon = nodes[n * 2 + 1];
-      var geomIdx = edge[3];
+      var fromLat = nodesScaled[p * 2] / 1e7;
+      var fromLon = nodesScaled[p * 2 + 1] / 1e7;
+      var toLat = nodesScaled[n * 2] / 1e7;
+      var toLon = nodesScaled[n * 2 + 1] / 1e7;
       var segment = [[fromLon, fromLat]];
-      if (geomIdx >= 0 && graph.geom[geomIdx]) {
-        var pts = graph.geom[geomIdx];
-        for (var j = 0; j < pts.length; j++) {
-          segment.push(pts[j]);
-        }
+      if (geomIdx !== 0xFFFFFF) {
+        var pts = graph.decodeGeom(geomIdx);
+        for (var j = 0; j < pts.length; j++) segment.push(pts[j]);
       }
       segment.push([toLon, toLat]);
       path.unshift(segment);
 
       n = p;
+    }
+
+    // Coalesce consecutive same-name segments into named roads.
+    // Goal: a human-readable list like "Broadway (1.2 km) → Main St (0.4 km)..."
+    var roads = [];
+    for (var si = segRev.length - 1; si >= 0; si--) {
+      var s = segRev[si];
+      if (roads.length > 0 && roads[roads.length - 1].nameIdx === s.nameIdx) {
+        roads[roads.length - 1].distM += s.distM;
+      } else {
+        roads.push({ nameIdx: s.nameIdx, distM: s.distM });
+      }
     }
 
     // Flatten path segments into single coordinate array
@@ -2352,7 +2563,8 @@ function initRouting(map, config) {
     return {
       coords: coords,
       distance: totalDist,
-      time: totalTime
+      time: totalTime,
+      roads: roads  // [{nameIdx, distM}, ...] in travel order, consecutive same-name coalesced
     };
   }
 
@@ -2408,6 +2620,27 @@ function initRouting(map, config) {
     return hrs + ' hr ' + rem + ' min';
   }
 
+  function renderRoads(roads) {
+    if (!roadsEl) return;
+    while (roadsEl.firstChild) roadsEl.removeChild(roadsEl.firstChild);
+    if (!roads || !roads.length) return;
+    for (var i = 0; i < roads.length; i++) {
+      var r = roads[i];
+      var name = graph.getName ? graph.getName(r.nameIdx) : '';
+      var row = document.createElement('div');
+      row.className = 'road-row';
+      var nameSpan = document.createElement('span');
+      nameSpan.className = 'road-name' + (name ? '' : ' unnamed');
+      nameSpan.textContent = name || 'unnamed road';
+      var distSpan = document.createElement('span');
+      distSpan.className = 'road-dist';
+      distSpan.textContent = formatDistance(r.distM);
+      row.appendChild(nameSpan);
+      row.appendChild(distSpan);
+      roadsEl.appendChild(row);
+    }
+  }
+
   function coordLabel(lat, lon) {
     return lat.toFixed(4) + ', ' + lon.toFixed(4);
   }
@@ -2421,74 +2654,187 @@ function initRouting(map, config) {
     return el;
   }
 
-  // Map click handler for routing
+  // Set origin from any source (map click, typeahead, GPS). `label` is what
+  // to show in the input; if omitted, a lat/lon coord label is used.
+  function setOriginFromLatLon(lat, lon, label) {
+    if (!graph) return;
+    originNode = nearestNode(lat, lon);
+    var oLat = graph.nodesScaled[originNode * 2] / 1e7;
+    var oLon = graph.nodesScaled[originNode * 2 + 1] / 1e7;
+    originInput.value = label || coordLabel(oLat, oLon);
+    if (originMarker) originMarker.remove();
+    originMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-origin'), anchor: 'center' })
+      .setLngLat([oLon, oLat]).addTo(map);
+    if (destNode !== -1) {
+      computeAndDrawRoute();
+    } else {
+      statusEl.textContent = 'Enter destination';
+    }
+  }
+
+  function setDestFromLatLon(lat, lon, label) {
+    if (!graph) return;
+    destNode = nearestNode(lat, lon);
+    var dLat = graph.nodesScaled[destNode * 2] / 1e7;
+    var dLon = graph.nodesScaled[destNode * 2 + 1] / 1e7;
+    destInput.value = label || coordLabel(dLat, dLon);
+    if (destMarker) destMarker.remove();
+    destMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-dest'), anchor: 'center' })
+      .setLngLat([dLon, dLat]).addTo(map);
+    if (originNode !== -1) {
+      computeAndDrawRoute();
+    } else {
+      statusEl.textContent = 'Enter start location';
+    }
+  }
+
+  function computeAndDrawRoute() {
+    statusEl.textContent = 'Calculating route...';
+    setTimeout(function() {
+      var result = findRoute(originNode, destNode);
+      if (result) {
+        drawRoute(result.coords);
+        distEl.textContent = formatDistance(result.distance);
+        timeEl.textContent = formatTime(result.time);
+        renderRoads(result.roads);
+        resultEl.style.display = 'block';
+        clearBtn.style.display = 'block';
+        statusEl.textContent = '';
+        var bounds = result.coords.reduce(function(b, c) { return b.extend(c); },
+          new maplibregl.LngLatBounds(result.coords[0], result.coords[0]));
+        map.fitBounds(bounds, { padding: 60, duration: 1000 });
+      } else {
+        statusEl.textContent = 'No route found';
+        clearBtn.style.display = 'block';
+      }
+    }, 10);
+  }
+
+  // Typeahead: wire each input to map._queryPlaces and render a dropdown.
+  // `target` is 'origin' or 'dest' — determines which handler runs on pick.
+  function attachTypeahead(inputEl, resultsEl, target) {
+    var timer;
+    var activeIdx = -1;
+    var lastMatches = [];
+
+    function pickMatch(m) {
+      resultsEl.style.display = 'none';
+      var lat = m.item.a;
+      var lon = m.item.o;
+      var label = m.item.n;
+      if (target === 'origin') setOriginFromLatLon(lat, lon, label);
+      else setDestFromLatLon(lat, lon, label);
+      inputEl.blur();
+    }
+
+    function renderDropdown(matches) {
+      while (resultsEl.firstChild) resultsEl.removeChild(resultsEl.firstChild);
+      lastMatches = matches;
+      activeIdx = -1;
+      if (!matches.length) { resultsEl.style.display = 'none'; return; }
+      for (var i = 0; i < matches.length; i++) {
+        (function(m) {
+          var row = document.createElement('div');
+          row.className = 'routing-result-row';
+          var nameSpan = document.createElement('span');
+          nameSpan.className = 'routing-result-name';
+          nameSpan.textContent = m.item.n;
+          var meta = document.createElement('span');
+          meta.className = 'routing-result-meta';
+          meta.textContent = (m.item.t === 'addr' ? 'address' : m.item.t) + (m.dist ? ' · ' + m.dist : '');
+          row.appendChild(nameSpan);
+          row.appendChild(meta);
+          row.addEventListener('mousedown', function(e) { e.preventDefault(); pickMatch(m); });
+          resultsEl.appendChild(row);
+        })(matches[i]);
+      }
+      resultsEl.style.display = 'block';
+    }
+
+    inputEl.addEventListener('input', function() {
+      clearTimeout(timer);
+      var q = inputEl.value.trim();
+      if (q.length < 2) { resultsEl.style.display = 'none'; return; }
+      if (!map._queryPlaces) return;
+      timer = setTimeout(function() {
+        map._queryPlaces(q).then(renderDropdown);
+      }, 150);
+    });
+
+    inputEl.addEventListener('keydown', function(e) {
+      var rows = resultsEl.querySelectorAll('.routing-result-row');
+      if (e.key === 'ArrowDown' && rows.length) {
+        e.preventDefault();
+        activeIdx = Math.min(activeIdx + 1, rows.length - 1);
+        updateActive(rows);
+      } else if (e.key === 'ArrowUp' && rows.length) {
+        e.preventDefault();
+        activeIdx = Math.max(activeIdx - 1, 0);
+        updateActive(rows);
+      } else if (e.key === 'Enter') {
+        if (activeIdx >= 0 && lastMatches[activeIdx]) {
+          e.preventDefault();
+          pickMatch(lastMatches[activeIdx]);
+        }
+      } else if (e.key === 'Escape') {
+        resultsEl.style.display = 'none';
+      }
+    });
+
+    function updateActive(rows) {
+      for (var i = 0; i < rows.length; i++) {
+        rows[i].classList.toggle('active', i === activeIdx);
+      }
+      if (activeIdx >= 0) rows[activeIdx].scrollIntoView({ block: 'nearest' });
+    }
+
+    inputEl.addEventListener('blur', function() {
+      // Delay so mousedown on row still fires
+      setTimeout(function() { resultsEl.style.display = 'none'; }, 150);
+    });
+  }
+
+  attachTypeahead(originInput, originResultsEl, 'origin');
+  attachTypeahead(destInput, destResultsEl, 'dest');
+
+  // Current location button (origin only). Uses the standard Geolocation API.
+  // Falls back gracefully if not available or permission denied.
+  gpsBtn.addEventListener('click', function() {
+    if (!navigator.geolocation) {
+      statusEl.textContent = 'Geolocation not available';
+      return;
+    }
+    statusEl.textContent = 'Getting location…';
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        var lat = pos.coords.latitude;
+        var lon = pos.coords.longitude;
+        setOriginFromLatLon(lat, lon, 'Current location');
+        map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 13), duration: 800 });
+      },
+      function(err) {
+        statusEl.textContent = 'Location denied or unavailable';
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  });
+
+  // Map click — still works as a picker. Fills origin first, then dest.
+  // After both are set, subsequent clicks replace the origin (start fresh).
   map.on('click', function(e) {
     if (!active || !graph) return;
-
+    // If user is typing, don't hijack the click
+    if (document.activeElement === originInput || document.activeElement === destInput) return;
     var lat = e.lngLat.lat;
     var lon = e.lngLat.lng;
-
     if (originNode === -1) {
-      // Set origin
-      originNode = nearestNode(lat, lon);
-      var oLat = graph.nodes[originNode * 2];
-      var oLon = graph.nodes[originNode * 2 + 1];
-      originLabel.textContent = coordLabel(oLat, oLon);
-      originLabel.classList.add('set');
-      statusEl.textContent = 'Click map to set destination';
-
-      if (originMarker) originMarker.remove();
-      originMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-origin'), anchor: 'center' })
-        .setLngLat([oLon, oLat])
-        .addTo(map);
+      setOriginFromLatLon(lat, lon);
     } else if (destNode === -1) {
-      // Set destination
-      destNode = nearestNode(lat, lon);
-      var dLat = graph.nodes[destNode * 2];
-      var dLon = graph.nodes[destNode * 2 + 1];
-      destLabel.textContent = coordLabel(dLat, dLon);
-      destLabel.classList.add('set');
-      statusEl.textContent = 'Calculating route...';
-
-      if (destMarker) destMarker.remove();
-      destMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-dest'), anchor: 'center' })
-        .setLngLat([dLon, dLat])
-        .addTo(map);
-
-      // Calculate route
-      setTimeout(function() {
-        var result = findRoute(originNode, destNode);
-        if (result) {
-          drawRoute(result.coords);
-          distEl.textContent = formatDistance(result.distance);
-          timeEl.textContent = formatTime(result.time);
-          resultEl.style.display = 'block';
-          clearBtn.style.display = 'block';
-          statusEl.textContent = '';
-
-          // Fit map to route
-          var bounds = result.coords.reduce(function(b, c) {
-            return b.extend(c);
-          }, new maplibregl.LngLatBounds(result.coords[0], result.coords[0]));
-          map.fitBounds(bounds, { padding: 60, duration: 1000 });
-        } else {
-          statusEl.textContent = 'No route found';
-          clearBtn.style.display = 'block';
-        }
-      }, 10);
+      setDestFromLatLon(lat, lon);
     } else {
-      // Reset and set new origin
+      // Both set — reset and start over with this click as new origin
       clearRoute();
-      originNode = nearestNode(lat, lon);
-      var nLat = graph.nodes[originNode * 2];
-      var nLon = graph.nodes[originNode * 2 + 1];
-      originLabel.textContent = coordLabel(nLat, nLon);
-      originLabel.classList.add('set');
-      statusEl.textContent = 'Click map to set destination';
-
-      originMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-origin'), anchor: 'center' })
-        .setLngLat([nLon, nLat])
-        .addTo(map);
+      setOriginFromLatLon(lat, lon);
     }
   });
 }
