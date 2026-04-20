@@ -966,12 +966,75 @@ def tile_to_lnglat(z, x, y, px, py, extent=4096):
 
 
 def build_location_index(mbtiles_path):
-    """Build a spatial index of state/country names from low-zoom place tiles.
+    """Build a spatial index that maps (lat, lon) to "City, State".
 
-    Extracts state and country place features from z0-8 tiles and builds a
-    KD-tree for fast nearest-neighbor lookups. Returns a function that maps
-    (lat, lon) -> "State, Country" or "Country" string.
+    Prefer the `reverse_geocoder` package (built on GeoNames data, ships a
+    ~30 MB city/admin1 dataset, KNN for fast lookup). It handles the nasty
+    cases the OMT-place-layer-based fallback can't — federal districts
+    (D.C.), cross-country proximity (Yokohama → Kanagawa, not Sakhalin),
+    subnational boundaries (NYC → New York, not New Jersey) — because the
+    GeoNames data has the right admin1 for every populated place.
+
+    Falls back to the original MVT-nearest-point approach if the package
+    isn't installed, so offline/stripped environments still get a best-
+    effort label.
     """
+    try:
+        import reverse_geocoder as _rg
+        # Country code → name lookup. GeoNames returns ISO 3166-1 alpha-2;
+        # we prefer the full name for the last-resort fallback.
+        _COUNTRY_NAMES = {
+            "US": "United States", "JP": "Japan", "CA": "Canada", "GB": "United Kingdom",
+            "DE": "Germany", "FR": "France", "ES": "Spain", "IT": "Italy",
+            "MX": "Mexico", "BR": "Brazil", "AR": "Argentina", "CN": "China",
+            "IN": "India", "RU": "Russia", "AU": "Australia", "NZ": "New Zealand",
+            "KR": "South Korea", "KP": "North Korea", "VN": "Vietnam", "TH": "Thailand",
+            "ID": "Indonesia", "PH": "Philippines", "MY": "Malaysia", "SG": "Singapore",
+            "PL": "Poland", "NL": "Netherlands", "BE": "Belgium", "CH": "Switzerland",
+            "AT": "Austria", "CZ": "Czechia", "SE": "Sweden", "NO": "Norway",
+            "FI": "Finland", "DK": "Denmark", "IE": "Ireland", "PT": "Portugal",
+            "GR": "Greece", "HU": "Hungary", "RO": "Romania", "BG": "Bulgaria",
+            "UA": "Ukraine", "TR": "Turkey", "IL": "Israel", "IR": "Iran",
+            "SA": "Saudi Arabia", "EG": "Egypt", "ZA": "South Africa", "NG": "Nigeria",
+            "KE": "Kenya", "MA": "Morocco", "LV": "Latvia", "LT": "Lithuania",
+            "EE": "Estonia", "HK": "Hong Kong", "TW": "Taiwan",
+        }
+        # Pre-load once — reverse_geocoder is lazy but has a noisy first-call
+        # log ("Loading formatted geocoded file..."), so trigger it here.
+        _ = _rg.search([(0.0, 0.0)], mode=1)
+
+        def _compose(entry):
+            """Produce 'City, State' (or 'City' when the city IS its own admin region)."""
+            if not entry:
+                return ""
+            name = (entry.get("name") or "").strip()
+            admin1 = (entry.get("admin1") or "").strip()
+            cc = (entry.get("cc") or "").strip()
+            if name and admin1:
+                # Collapse redundant "Tokyo, Tokyo" / "Moscow, Moscow" /
+                # "Mexico City, Mexico City". If admin1 is already contained
+                # in name (e.g. name="Washington, D.C.", admin1="Washington, D.C.")
+                # or equal to name, just use the name.
+                if admin1 == name or admin1 in name:
+                    return name
+                return f"{name}, {admin1}"
+            if name:
+                # Fall back to country when admin1 missing
+                country = _COUNTRY_NAMES.get(cc, cc)
+                return f"{name}, {country}" if country else name
+            return ""
+
+        def lookup(lat, lon):
+            results = _rg.search([(lat, lon)], mode=1)
+            return _compose(results[0]) if results else ""
+
+        print("    Location index: reverse_geocoder (GeoNames)")
+        return lookup
+    except ImportError:
+        # Fall through to the MVT-place-layer-based fallback below.
+        pass
+
+
     import mapbox_vector_tile
     import math
 
