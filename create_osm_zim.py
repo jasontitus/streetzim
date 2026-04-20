@@ -3822,26 +3822,32 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                     except Exception:
                         return None
 
-                # Sample the VRT at the tile's 3×3 grid of points. Any point
-                # with real elevation proves the tile "should" have non-zero
-                # output. This correctly handles coastal/island DEM cells
-                # (like the Channel Islands) where the DEM file exists but
-                # most pixels legitimately read as 0 (ocean).
+                # The real bug we're guarding against: tile decodes to ~0 m
+                # (all-zeros output from a VRT-race artifact) but the VRT
+                # itself would report real elevation at that location. If
+                # the TILE and the VRT agree (both 0, or both 20 m plateau,
+                # etc.) the tile is correct no matter how small its file size
+                # — 10 m elevation quantization can collapse any ±5 m region
+                # into a single RGB byte that compresses to 44 bytes.
                 import rasterio as _rio
                 _vrt_handle = _rio.open(vrt_path)
                 try:
                     _vrt_sample = _vrt_handle.sample
-                    def _vrt_has_elev(bnds):
+
+                    def _vrt_max_elev(bnds):
+                        """Max elev across 3×3 grid of samples inside bnds."""
                         pts = []
-                        for frac_lon in (0.25, 0.5, 0.75):
-                            for frac_lat in (0.25, 0.5, 0.75):
-                                lon = bnds.west + (bnds.east - bnds.west) * frac_lon
-                                lat = bnds.south + (bnds.north - bnds.south) * frac_lat
-                                pts.append((lon, lat))
+                        for fl in (0.25, 0.5, 0.75):
+                            for fla in (0.25, 0.5, 0.75):
+                                pts.append((bnds.west + (bnds.east - bnds.west) * fl,
+                                            bnds.south + (bnds.north - bnds.south) * fla))
+                        best = 0.0
                         for v in _vrt_sample(pts, indexes=1):
-                            if v and len(v) and abs(float(v[0])) > 5:
-                                return True
-                        return False
+                            if v and len(v):
+                                av = abs(float(v[0]))
+                                if av > best:
+                                    best = av
+                        return best
 
                     still_broken = []
                     for z in range(10, terrain_max_zoom + 1):
@@ -3852,15 +3858,17 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                                 continue
                             if os.path.getsize(tile_path) >= 500:
                                 continue
-                            elev = _center_elev(tile_path)
-                            if elev is None:
+                            tile_elev = _center_elev(tile_path)
+                            if tile_elev is None:
                                 continue
-                            if abs(elev) > 30:
-                                continue  # legit flat terrain at non-zero elevation
                             bnds = mercantile.bounds(t)
-                            if not _vrt_has_elev(bnds):
-                                continue  # legit: VRT itself reports ocean/0 here
-                            still_broken.append((z, t.x, t.y, tile_path))
+                            vrt_elev = _vrt_max_elev(bnds)
+                            # Broken iff VRT and tile disagree by >100 m AND
+                            # tile says near-zero. The VRT-race bug writes 0 m
+                            # where the VRT has real data; it never writes
+                            # "real elevation" where the VRT has 0.
+                            if abs(tile_elev) < 10 and vrt_elev > 100:
+                                still_broken.append((z, t.x, t.y, tile_path))
                 finally:
                     _vrt_handle.close()
                 if still_broken:
