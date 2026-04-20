@@ -62,12 +62,11 @@ build_region() {
     log "=== DONE ${id} ==="
 }
 
-log "Starting queue (purge already done, Central US v3 failed on old audit; retrying here with new z>=10 audit)."
+log "Starting queue (DC already rebuilt and uploaded cleanly; skipping)."
 
 # Worst-broken first, within-tier smallest-first for disk safety.
 build_region "central-us"        "Central US"              "-120.0,31.3,-104.0,49.0"
 build_region "colorado"          "Colorado"                "-109.1,36.9,-102.0,41.1"
-build_region "washington-dc"     "Washington, D.C."        "-77.5,38.5,-76.5,39.3"
 build_region "baltics"           "Baltics"                 "20.9,53.9,28.3,59.7"
 build_region "silicon-valley"    "Silicon Valley"          "-122.6,37.2,-121.7,37.9"
 
