@@ -3799,25 +3799,57 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 else:
                     print("    Terrain complete — no gaps or boundary issues")
 
-                # Strict post-repair audit: after regeneration, any tile under
-                # the "blank" threshold in the bbox is still broken, meaning
-                # the VRT/DEM didn't cover its area. Fail loudly rather than
-                # ship a ZIM with visible vertical stripes of missing terrain
-                # (cost us hours with Central US before this check existed).
+                # Strict post-repair audit: any tile at z>=10 that is both (a)
+                # under the blank-size threshold AND (b) decodes to near-zero
+                # elevation AND (c) sits over a DEM cell that IS on land (not
+                # a .nodata marker) is the VRT-race bug — we have real DEM
+                # data for this area but the tile says "0 m". Fail loudly
+                # rather than ship a ZIM with visible stripes of missing
+                # terrain.
                 #
-                # Only audit z >= 10 — at z<10 a single tile covers 0.7°+ and
-                # often includes large regions outside our bbox+1° buffer, so
-                # the repair legitimately produces partially-blank tiles that
-                # aren't user-visible (users only hit low zoom when viewing
-                # from far away, where edges outside our region are expected
-                # to be blank anyway). z=10 tiles are ~0.35° — small enough
-                # that any blank one within the bbox is visible corruption.
+                # The size filter alone isn't enough: a 44-byte tile can be a
+                # legit flat Colorado plateau at 2300 m (10 m quantization
+                # collapses a ±5 m variation into a single RGB). Elevation
+                # filter alone isn't enough either: genuine ocean tiles are
+                # also near-zero. The combination is the signal.
+                from PIL import Image as _PILImage
+                def _center_elev(path):
+                    try:
+                        im = _PILImage.open(path)
+                        px = im.convert("RGB").load()
+                        r, g, b = px[128, 128][:3]
+                        return -10000.0 + ((r * 65536 + g * 256 + b) * 0.1)
+                    except Exception:
+                        return None
+
+                def _dem_is_land(lat, lon):
+                    ilat = int(_math.floor(lat)); ilon = int(_math.floor(lon))
+                    ns = "N" if ilat >= 0 else "S"
+                    ew = "E" if ilon >= 0 else "W"
+                    tif = os.path.join(dem_dir_v,
+                                       f"dem_{ns}{abs(ilat):02d}_{ew}{abs(ilon):03d}.tif")
+                    return os.path.isfile(tif) and not os.path.isfile(tif + ".nodata")
+
                 still_broken = []
                 for z in range(10, terrain_max_zoom + 1):
                     for t in mercantile.tiles(*bbox_parsed, zooms=z):
-                        tile_path = os.path.join(terrain_dir, str(z), str(t.x), f"{t.y}.webp")
-                        if os.path.isfile(tile_path) and os.path.getsize(tile_path) < 500:
-                            still_broken.append((z, t.x, t.y, tile_path))
+                        tile_path = os.path.join(terrain_dir, str(z), str(t.x),
+                                                 f"{t.y}.webp")
+                        if not os.path.isfile(tile_path):
+                            continue
+                        if os.path.getsize(tile_path) >= 500:
+                            continue
+                        elev = _center_elev(tile_path)
+                        if elev is None:
+                            continue  # can't decode — leave it; next build's repair will retry
+                        if abs(elev) > 30:
+                            continue  # legit flat terrain at non-zero elevation
+                        bnds = mercantile.bounds(t)
+                        clat = (bnds.south + bnds.north) / 2
+                        clon = (bnds.west + bnds.east) / 2
+                        if not _dem_is_land(clat, clon):
+                            continue  # legit ocean near sea level
+                        still_broken.append((z, t.x, t.y, tile_path))
                 if still_broken:
                     sample = still_broken[:5]
                     raise RuntimeError(
