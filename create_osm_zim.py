@@ -3799,6 +3799,29 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 else:
                     print("    Terrain complete — no gaps or boundary issues")
 
+                # Strict post-repair audit: after regeneration, any tile under
+                # the "blank" threshold in the bbox is still broken, meaning
+                # the VRT/DEM didn't cover its area. Fail loudly rather than
+                # ship a ZIM with visible vertical stripes of missing terrain
+                # (cost us hours with Central US before this check existed).
+                still_broken = []
+                for z in range(0, terrain_max_zoom + 1):
+                    for t in mercantile.tiles(*bbox_parsed, zooms=z):
+                        tile_path = os.path.join(terrain_dir, str(z), str(t.x), f"{t.y}.webp")
+                        if os.path.isfile(tile_path) and os.path.getsize(tile_path) < 500:
+                            still_broken.append((z, t.x, t.y, tile_path))
+                if still_broken:
+                    sample = still_broken[:5]
+                    raise RuntimeError(
+                        f"Terrain build unhealthy: {len(still_broken)} tiles still "
+                        f"under 500 bytes after repair pass. Sample:\n  " +
+                        "\n  ".join(f"z={z} x={x} y={y} ({p})" for z, x, y, p in sample) +
+                        "\nLikely missing DEM sources for these tiles' bbox. "
+                        "Download the needed Copernicus DEMs or delete the broken "
+                        "tiles and rerun. Aborting before ZIM packaging."
+                    )
+                print("    Terrain audit passed — no blank tiles in bbox")
+
         # Download MapLibre GL JS
         step_maplibre = total_steps - 1
         print()
