@@ -3804,8 +3804,16 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 # the VRT/DEM didn't cover its area. Fail loudly rather than
                 # ship a ZIM with visible vertical stripes of missing terrain
                 # (cost us hours with Central US before this check existed).
+                #
+                # Only audit z >= 10 — at z<10 a single tile covers 0.7°+ and
+                # often includes large regions outside our bbox+1° buffer, so
+                # the repair legitimately produces partially-blank tiles that
+                # aren't user-visible (users only hit low zoom when viewing
+                # from far away, where edges outside our region are expected
+                # to be blank anyway). z=10 tiles are ~0.35° — small enough
+                # that any blank one within the bbox is visible corruption.
                 still_broken = []
-                for z in range(0, terrain_max_zoom + 1):
+                for z in range(10, terrain_max_zoom + 1):
                     for t in mercantile.tiles(*bbox_parsed, zooms=z):
                         tile_path = os.path.join(terrain_dir, str(z), str(t.x), f"{t.y}.webp")
                         if os.path.isfile(tile_path) and os.path.getsize(tile_path) < 500:
