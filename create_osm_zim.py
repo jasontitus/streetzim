@@ -3822,6 +3822,42 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                     )
                 print("    Terrain audit passed — no blank tiles in bbox")
 
+        # Satellite audit — mirror of the terrain audit, same failure mode:
+        # earlier builds cached tiny "blank" AVIF/WebP tiles from EOX fetch
+        # errors or incomplete downloads, and future builds would reuse them.
+        # Any tile under 500 bytes in the bbox means the satellite fetch for
+        # that coordinate never produced real imagery.
+        if include_satellite and bbox_str and satellite_dir and os.path.isdir(str(satellite_dir)):
+            import mercantile as _merc
+            import math as _math2
+            sat_bbox = parse_bbox(bbox_str)
+            sat_max_z = (satellite_max_zoom
+                         if satellite_max_zoom is not None
+                         else satellite_download_zoom)
+            sat_ext = satellite_format or "webp"
+            sat_broken = []
+            sat_scanned = 0
+            for z in range(0, (sat_max_z or 14) + 1):
+                for t in _merc.tiles(*sat_bbox, zooms=z):
+                    p = os.path.join(str(satellite_dir), str(z), str(t.x),
+                                     f"{t.y}.{sat_ext}")
+                    if not os.path.isfile(p):
+                        continue
+                    sat_scanned += 1
+                    if os.path.getsize(p) < 500:
+                        sat_broken.append((z, t.x, t.y, p))
+            if sat_broken:
+                sample = sat_broken[:5]
+                raise RuntimeError(
+                    f"Satellite build unhealthy: {len(sat_broken)} tiles under "
+                    f"500 bytes in bbox (scanned {sat_scanned}). Sample:\n  " +
+                    "\n  ".join(f"z={z} x={x} y={y} ({p})" for z, x, y, p in sample) +
+                    "\nDelete these tiny tiles from the satellite cache and rerun "
+                    "to re-download from EOX. Aborting before ZIM packaging."
+                )
+            if sat_scanned:
+                print(f"    Satellite audit passed — {sat_scanned} tiles checked, none blank")
+
         # Download MapLibre GL JS
         step_maplibre = total_steps - 1
         print()

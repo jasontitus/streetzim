@@ -1,40 +1,92 @@
 #!/bin/bash
-# Sequential rebuild queue — run after Europe build finishes
-# Usage: source venv312/bin/activate && bash rebuild-queue.sh 2>&1 | tee rebuild-queue.log
-set -e
-export ZSTD_CLEVEL=22
-PY="python3 /Users/jasontitus/experiments/streetzim/create_osm_zim.py"
-WORLD_TILES="world-data/world-tiles-v2.mbtiles"
-US_TILES="us-tiles.mbtiles"
-PBF="world-data/planet-2026-03-10.osm.pbf"
-SEARCH="search_cache/world.jsonl"
-COMMON="--pbf $PBF --satellite --terrain --wikidata --search-cache $SEARCH --keep-temp"
+# Sequential rebuild of regions known to have >10% broken terrain tiles
+# (see https://github.com/jasontitus/streetzim and docs/). Runs only after
+# the terrain-cache purge + Central US v3 build finish. Small-to-large
+# ordering so early wins free disk quickly; pauses if free disk < 30 GB.
 
-echo "=== Rebuild Queue Started: $(date) ==="
+set -u
+cd /Users/jasontitus/experiments/streetzim
 
-echo ">>> [1/5] Indian Subcontinent"
-$PY --mbtiles $WORLD_TILES $COMMON \
-  --bbox="60.0,5.0,97.5,37.0" --name "Indian Subcontinent" \
-  2>&1 | tee /Users/jasontitus/experiments/streetzim/indian-subcontinent-build.log
+log()            { echo "[$(date '+%H:%M:%S')] $*" | tee -a rebuild-queue.log ; }
+disk_free_gb()   { df -g /System/Volumes/Data | tail -1 | awk '{print $4}' ; }
 
-echo ">>> [2/5] California"
-$PY --mbtiles $US_TILES $COMMON \
-  --bbox="-124.48,32.53,-114.13,42.01" --name "California" \
-  2>&1 | tee /Users/jasontitus/experiments/streetzim/california-build-v6.log
+wait_for_disk() {
+    while :; do
+        local free
+        free=$(disk_free_gb)
+        if [ "$free" -ge 30 ]; then return; fi
+        log "Waiting — only ${free} GB free, need 30+"
+        sleep 120
+    done
+}
 
-echo ">>> [3/5] Colorado"
-$PY --mbtiles $US_TILES $COMMON \
-  --bbox="-109.06,36.99,-102.04,41.00" --name "Colorado" \
-  2>&1 | tee /Users/jasontitus/experiments/streetzim/colorado-build-v6.log
+build_region() {
+    local id="$1" name="$2" bbox="$3"
+    local logname="rebuild-${id}.log"
+    local out="osm-${id}-rebuild.zim"
 
-echo ">>> [4/5] Iran"
-$PY --mbtiles $WORLD_TILES $COMMON \
-  --bbox="44.0,25.0,63.5,39.8" --name "Iran" \
-  2>&1 | tee /Users/jasontitus/experiments/streetzim/iran-build-v2.log
+    wait_for_disk
+    log "=== ${id} (${name}) bbox=${bbox} ==="
+    # shellcheck disable=SC1091
+    source venv312/bin/activate
+    export ZSTD_CLEVEL=22
+    rm -f "$out"
+    if ! python3 create_osm_zim.py \
+          --mbtiles world-data/world-tiles-v2.mbtiles \
+          --pbf world-data/planet-2026-03-10.osm.pbf \
+          --bbox="$bbox" \
+          --name "$name" \
+          --satellite --satellite-download-zoom 12 \
+          --terrain --wikidata --routing \
+          --search-cache search_cache/world.jsonl \
+          --keep-temp \
+          --output "$out" > "$logname" 2>&1; then
+        log "FAILED ${id} — see ${logname}. Skipping upload."
+        return 1
+    fi
+    if [ ! -f "$out" ]; then
+        log "FAILED ${id} — no ZIM produced"
+        return 1
+    fi
 
-echo ">>> [5/5] Hispaniola"
-$PY --mbtiles $WORLD_TILES $COMMON \
-  --bbox="-74.5,17.5,-68.3,20.1" --name "Hispaniola" \
-  2>&1 | tee /Users/jasontitus/experiments/streetzim/hispaniola-build-v3.log
+    local date dated
+    date=$(date +%Y-%m-%d)
+    dated="osm-${id}-${date}.zim"
+    cp "$out" "$dated"
+    log "Uploading ${dated}..."
+    ia upload "streetzim-${id}" "$dated" --retries 5 >>"$logname" 2>&1 || \
+        log "Upload flagged issues — see ${logname}"
+    sleep 30
+    ia metadata "streetzim-${id}" --modify="date:${date}" >>"$logname" 2>&1 || true
+    python3 web/generate.py --deploy >>"$logname" 2>&1 || true
+    log "=== DONE ${id} ==="
+}
 
-echo "=== Rebuild Queue Complete: $(date) ==="
+log "Waiting for terrain-purge to finish..."
+until grep -q 'purge done' terrain-purge.log 2>/dev/null; do sleep 60; done
+log "Purge done."
+
+log "Waiting for Central US v3 to finish..."
+until grep -q 'Central US v3 done' central-us-v3-wrapper.log 2>/dev/null; do sleep 60; done
+log "Central US v3 done. Starting queue."
+
+# Small regions first (low disk pressure, worst-%-broken comes out first).
+build_region "colorado"          "Colorado"                "-109.1,36.9,-102.0,41.1"
+build_region "washington-dc"     "Washington, D.C."        "-77.5,38.5,-76.5,39.3"
+build_region "baltics"           "Baltics"                 "20.9,53.9,28.3,59.7"
+build_region "silicon-valley"    "Silicon Valley"          "-122.6,37.2,-121.7,37.9"
+
+# Medium
+build_region "iran"              "Iran"                    "44.0,25.0,63.0,40.0"
+build_region "west-coast-us"     "West Coast US"           "-125.0,32.0,-116.5,49.5"
+build_region "california"        "California"              "-125.0,32.0,-114.0,42.2"
+build_region "east-coast-us"     "East Coast US"           "-82.0,24.0,-66.5,47.6"
+build_region "west-asia"         "West Asia"               "25.0,12.0,63.0,45.0"
+build_region "japan"             "Japan"                   "122.9,24.0,146.0,45.6"
+
+# Large (last — require most disk headroom)
+build_region "australia-nz"      "Australia & New Zealand" "112.0,-48.0,179.0,-10.0"
+build_region "europe"            "Europe"                  "-25.0,34.0,50.5,72.0"
+build_region "united-states"     "United States"           "-125.0,24.0,-66.5,49.5"
+
+log "=== ALL REBUILDS COMPLETE ==="
