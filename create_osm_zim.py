@@ -3822,34 +3822,47 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                     except Exception:
                         return None
 
-                def _dem_is_land(lat, lon):
-                    ilat = int(_math.floor(lat)); ilon = int(_math.floor(lon))
-                    ns = "N" if ilat >= 0 else "S"
-                    ew = "E" if ilon >= 0 else "W"
-                    tif = os.path.join(dem_dir_v,
-                                       f"dem_{ns}{abs(ilat):02d}_{ew}{abs(ilon):03d}.tif")
-                    return os.path.isfile(tif) and not os.path.isfile(tif + ".nodata")
+                # Sample the VRT at the tile's 3×3 grid of points. Any point
+                # with real elevation proves the tile "should" have non-zero
+                # output. This correctly handles coastal/island DEM cells
+                # (like the Channel Islands) where the DEM file exists but
+                # most pixels legitimately read as 0 (ocean).
+                import rasterio as _rio
+                _vrt_handle = _rio.open(vrt_path)
+                try:
+                    _vrt_sample = _vrt_handle.sample
+                    def _vrt_has_elev(bnds):
+                        pts = []
+                        for frac_lon in (0.25, 0.5, 0.75):
+                            for frac_lat in (0.25, 0.5, 0.75):
+                                lon = bnds.west + (bnds.east - bnds.west) * frac_lon
+                                lat = bnds.south + (bnds.north - bnds.south) * frac_lat
+                                pts.append((lon, lat))
+                        for v in _vrt_sample(pts, indexes=1):
+                            if v and len(v) and abs(float(v[0])) > 5:
+                                return True
+                        return False
 
-                still_broken = []
-                for z in range(10, terrain_max_zoom + 1):
-                    for t in mercantile.tiles(*bbox_parsed, zooms=z):
-                        tile_path = os.path.join(terrain_dir, str(z), str(t.x),
-                                                 f"{t.y}.webp")
-                        if not os.path.isfile(tile_path):
-                            continue
-                        if os.path.getsize(tile_path) >= 500:
-                            continue
-                        elev = _center_elev(tile_path)
-                        if elev is None:
-                            continue  # can't decode — leave it; next build's repair will retry
-                        if abs(elev) > 30:
-                            continue  # legit flat terrain at non-zero elevation
-                        bnds = mercantile.bounds(t)
-                        clat = (bnds.south + bnds.north) / 2
-                        clon = (bnds.west + bnds.east) / 2
-                        if not _dem_is_land(clat, clon):
-                            continue  # legit ocean near sea level
-                        still_broken.append((z, t.x, t.y, tile_path))
+                    still_broken = []
+                    for z in range(10, terrain_max_zoom + 1):
+                        for t in mercantile.tiles(*bbox_parsed, zooms=z):
+                            tile_path = os.path.join(terrain_dir, str(z), str(t.x),
+                                                     f"{t.y}.webp")
+                            if not os.path.isfile(tile_path):
+                                continue
+                            if os.path.getsize(tile_path) >= 500:
+                                continue
+                            elev = _center_elev(tile_path)
+                            if elev is None:
+                                continue
+                            if abs(elev) > 30:
+                                continue  # legit flat terrain at non-zero elevation
+                            bnds = mercantile.bounds(t)
+                            if not _vrt_has_elev(bnds):
+                                continue  # legit: VRT itself reports ocean/0 here
+                            still_broken.append((z, t.x, t.y, tile_path))
+                finally:
+                    _vrt_handle.close()
                 if still_broken:
                     sample = still_broken[:5]
                     raise RuntimeError(
