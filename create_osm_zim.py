@@ -1100,6 +1100,83 @@ def build_location_index(mbtiles_path):
                 best = name
         return best
 
+    # Country bounding boxes for the geographies we serve. One country may
+    # contribute multiple rectangles — a single bbox per country captures
+    # ocean gaps (e.g. Japan's single rectangle would sweep in Primorsky Krai
+    # and Sakhalin because they fall in the Sea of Japan between Japan's
+    # island chain). Each row is
+    #   (min_lat, min_lon, max_lat, max_lon, country_name_as_in_OMT).
+    # Proper fix is admin boundary polygons; this table is the pragmatic 95%.
+    _COUNTRY_BBOXES = [
+        # Japan — archipelago, needs three rectangles to skip the Sea of Japan.
+        (30.0,  130.0,  41.6,  142.1,  "Japan"),   # Honshu + Kyushu + Shikoku
+        (41.0,  139.5,  45.6,  146.0,  "Japan"),   # Hokkaido
+        (24.0,  122.9,  30.0,  131.5,  "Japan"),   # Ryukyu (Okinawa)
+        # Korea — peninsula
+        (33.0,  125.0,  38.7,  131.9,  "South Korea"),
+        (37.5,  124.0,  43.0,  130.7,  "North Korea"),
+        # China — main landmass (Tibet on the south, Inner Mongolia top, etc.)
+        (18.0,   73.0,  54.0,  135.0,  "China"),
+        (22.1,  113.8,  22.6,  114.5,  "Hong Kong"),
+        # Russia — main landmass excludes Japanese exclusion zones by lat-split
+        (50.0,   19.0,  82.0,  180.0,  "Russia"),  # most of Russia
+        (41.0,   19.0,  50.0,  102.0,  "Russia"),  # southwest Russia, skirts China
+        (45.6,  131.5,  50.0,  180.0,  "Russia"),  # Far East mainland (Primorsky, Khabarovsk)
+        (45.6,  141.5,  54.5,  146.0,  "Russia"),  # Sakhalin
+        # North America
+        (24.0, -125.0,  49.5,  -66.5,  "United States"),
+        (49.0, -141.0,  72.0,  -52.0,  "Canada"),  # main landmass (south. Ontario overlaps US bbox; see note below)
+        (14.5, -118.5,  33.0,  -86.5,  "Mexico"),
+        # Europe
+        (41.0,   -5.5,  51.5,    9.8,  "France"),
+        (36.0,   -9.6,  44.0,    3.4,  "Spain"),
+        (36.0,    6.5,  47.2,   18.6,  "Italy"),
+        (47.2,    5.8,  55.1,   15.1,  "Germany"),
+        (49.8,   -7.7,  55.9,    1.9,  "United Kingdom"),
+        (51.5,    3.3,  53.8,    7.3,  "Netherlands"),
+        (49.5,    2.5,  51.6,    6.4,  "Belgium"),
+        (45.7,    5.9,  47.9,   10.6,  "Switzerland"),
+        (46.4,    9.5,  49.1,   17.2,  "Austria"),
+        (49.0,   14.0,  54.9,   24.2,  "Poland"),
+        (55.3,   20.8,  58.1,   28.3,  "Latvia"),
+        (57.5,   21.8,  59.8,   28.3,  "Estonia"),
+        (53.9,   20.9,  56.5,   26.9,  "Lithuania"),
+        # Asia additional
+        (6.0,    68.0,  37.1,   97.5,  "India"),
+        (23.5,   59.0,  38.0,   78.2,  "Iran"),
+        (22.0,   34.0,  31.7,   35.9,  "Egypt"),
+        (20.3,  102.0,  28.7,  109.5,  "Vietnam"),
+    ]
+    def _country_by_bbox(lat, lon):
+        for mn_lat, mn_lon, mx_lat, mx_lon, cname in _COUNTRY_BBOXES:
+            if mn_lat <= lat <= mx_lat and mn_lon <= lon <= mx_lon:
+                return cname
+        return None
+
+    # Pre-classify each state to its country (bbox lookup first, nearest-
+    # country fallback). Bucketing states per country means we only ever
+    # consider in-country candidates at lookup — that's what prevents
+    # Yokohama → Sakhalin Oblast even if Sakhalin's label point is closer.
+    states_by_country = {}
+    if states:
+        for s_lat, s_lon, s_name in states:
+            sc = _country_by_bbox(s_lat, s_lon)
+            if not sc and countries:
+                sc = _nearest_linear(s_lat, s_lon, countries)
+            states_by_country.setdefault(sc, []).append((s_lat, s_lon, s_name))
+    # Same treatment for cities — a point on the Russia/Ukraine border
+    # should pick up in-country cities even if another city is closer across
+    # the line. Grid lookup inside this dict keeps city lookups fast.
+    cities_by_country_grid = {}
+    if cities:
+        raw = {}
+        for c_lat, c_lon, c_name in cities:
+            cc = _country_by_bbox(c_lat, c_lon)
+            if not cc and countries:
+                cc = _nearest_linear(c_lat, c_lon, countries)
+            raw.setdefault(cc, []).append((c_lat, c_lon, c_name))
+        cities_by_country_grid = {k: _build_grid(v) for k, v in raw.items()}
+
     # City-state / federal-district bindings: places where the MVT `place`
     # layer doesn't carry a matching state-class entry, so nearest-state
     # would otherwise fall back to a neighboring US state, Russian oblast,
@@ -1123,7 +1200,15 @@ def build_location_index(mbtiles_path):
     }
 
     def lookup(lat, lon):
-        city = _nearest_grid(lat, lon, city_grid) if city_grid else None
+        # Pick country first so we can filter city/state candidates to only
+        # those whose label points are in the same country — that's what
+        # prevents Yokohama → Sakhalin Oblast / Primorsky Krai and similar
+        # cross-border bugs. Bbox table wins over nearest-country-label.
+        country = _country_by_bbox(lat, lon)
+        if not country and countries:
+            country = _nearest_linear(lat, lon, countries)
+        city_grid_local = cities_by_country_grid.get(country, city_grid)
+        city = _nearest_grid(lat, lon, city_grid_local) if city_grid_local else None
         state = None
         state_suppressed = False
         if city in _CITY_STATE_BINDINGS:
@@ -1134,13 +1219,20 @@ def build_location_index(mbtiles_path):
                 else:
                     state = label
         if state is None and not state_suppressed:
-            state = _nearest_linear(lat, lon, states) if states else None
-        country = _nearest_linear(lat, lon, countries) if countries else None
-        # Format: "City, State" when we have both (most useful for
-        # disambiguation). Falls back to "State, Country" or just "Country".
+            in_country_states = states_by_country.get(country, [])
+            state = _nearest_linear(lat, lon, in_country_states) if in_country_states else None
+        # Format: "City, State" when both are known (best disambiguation).
+        # If state is missing or suppressed but we have city + country, use
+        # "City, Country" — still more informative than country alone. Avoids
+        # "Yokohama" collapsing to just "Japan" because no Japanese prefecture
+        # is tagged class=state in OMT.
         if city and state:
             return f"{city}, {state}"
         elif city and state_suppressed:
+            return city
+        elif city and country:
+            return f"{city}, {country}"
+        elif city:
             return city
         elif state:
             return state
