@@ -62,17 +62,13 @@ build_region() {
     log "=== DONE ${id} ==="
 }
 
-log "Starting queue (DC already rebuilt and uploaded cleanly; skipping)."
+log "Starting queue (DC/Colorado/SV already rebuilt cleanly; retrying Iran/WCUS/Baltics/Central US that failed old audit)."
 
-# Worst-broken first, within-tier smallest-first for disk safety.
-build_region "central-us"        "Central US"              "-120.0,31.3,-104.0,49.0"
-build_region "colorado"          "Colorado"                "-109.1,36.9,-102.0,41.1"
-build_region "baltics"           "Baltics"                 "20.9,53.9,28.3,59.7"
-build_region "silicon-valley"    "Silicon Valley"          "-122.6,37.2,-121.7,37.9"
-
-# Medium
+# Retry regions that failed prior audits + remaining tier 2/3.
 build_region "iran"              "Iran"                    "44.0,25.0,63.0,40.0"
 build_region "west-coast-us"     "West Coast US"           "-125.0,32.0,-116.5,49.5"
+build_region "baltics"           "Baltics"                 "20.9,53.9,28.3,59.7"
+build_region "central-us"        "Central US"              "-120.0,31.3,-104.0,49.0"
 build_region "california"        "California"              "-125.0,32.0,-114.0,42.2"
 build_region "east-coast-us"     "East Coast US"           "-82.0,24.0,-66.5,47.6"
 build_region "west-asia"         "West Asia"               "25.0,12.0,63.0,45.0"
