@@ -3772,6 +3772,13 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         needs_regen = False
                         if not os.path.isfile(tile_path):
                             needs_regen = True
+                        elif os.path.getsize(tile_path) < 500:
+                            # 44-byte WebPs are a known failure mode: when an
+                            # earlier build's VRT didn't include the DEM for
+                            # this tile's area, lossless WebP compressed the
+                            # all-zeros fill down to ~44 bytes. Treat any tiny
+                            # tile as broken and regenerate from the full VRT.
+                            needs_regen = True
                         elif z >= 10:
                             # Check if tile straddles a 1-degree boundary
                             crosses_lon = _math.floor(bounds.west) != _math.floor(bounds.east)
