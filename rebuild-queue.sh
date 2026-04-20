@@ -62,15 +62,10 @@ build_region() {
     log "=== DONE ${id} ==="
 }
 
-log "Waiting for terrain-purge to finish..."
-until grep -q 'purge done' terrain-purge.log 2>/dev/null; do sleep 60; done
-log "Purge done."
+log "Starting queue (purge already done, Central US v3 failed on old audit; retrying here with new z>=10 audit)."
 
-log "Waiting for Central US v3 to finish..."
-until grep -q 'Central US v3 done' central-us-v3-wrapper.log 2>/dev/null; do sleep 60; done
-log "Central US v3 done. Starting queue."
-
-# Small regions first (low disk pressure, worst-%-broken comes out first).
+# Worst-broken first, within-tier smallest-first for disk safety.
+build_region "central-us"        "Central US"              "-120.0,31.3,-104.0,49.0"
 build_region "colorado"          "Colorado"                "-109.1,36.9,-102.0,41.1"
 build_region "washington-dc"     "Washington, D.C."        "-77.5,38.5,-76.5,39.3"
 build_region "baltics"           "Baltics"                 "20.9,53.9,28.3,59.7"
