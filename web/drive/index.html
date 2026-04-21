@@ -168,7 +168,11 @@
   let swRegistration = null;
 
   async function ensureSW() {
-    const reg = await navigator.serviceWorker.register('sw.js', { scope: './' });
+    // Use absolute /drive/sw.js rather than relative 'sw.js' — Firebase's
+    // cleanUrls serves /drive/index.html at /drive (no trailing slash), so
+    // a relative 'sw.js' resolves against /drive (treated as a filename)
+    // and the browser tries /sw.js which 404s.
+    const reg = await navigator.serviceWorker.register('/drive/sw.js', { scope: '/drive/' });
     // Wait until there's an active, controlling SW — fetch interception
     // only works once the page is controlled.
     if (!navigator.serviceWorker.controller) {
