@@ -14,8 +14,9 @@ terrain_compression_test/
 world-data/
 wikidata_cache/
 
-# PWA assets populated by scripts/sync-drive-viewer.sh (run via Firebase
-# predeploy hook). Keeping them out of git avoids drift with the
-# canonical viewer in resources/viewer/ and the CDN-hosted libraries.
-web/drive/viewer/
-web/drive/fzstd.js
+# web/drive/viewer/ and web/drive/fzstd.js are populated by
+# scripts/sync-drive-viewer.sh. We commit them (rather than generating
+# on deploy) so a plain `firebase deploy` works without relying on
+# predeploy hooks, and so cloning the repo gives a runnable PWA.
+# Re-run scripts/sync-drive-viewer.sh after changing resources/viewer/
+# or bumping the MapLibre / fzstd versions.

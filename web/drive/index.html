@@ -9,8 +9,8 @@
 <meta name="apple-mobile-web-app-title" content="StreetZim">
 <meta name="mobile-web-app-capable" content="yes">
 <title>StreetZim — Offline Maps</title>
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="/drive/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/drive/icon-192.png">
 <style>
   :root {
     --bg: #0b1220;
@@ -104,7 +104,7 @@
 <div class="card">
   <div class="row stack">
     <button id="pick-btn">Choose a ZIM file</button>
-    <a id="open-btn" class="btn btn-secondary" href="viewer/" style="display:none;">Open viewer</a>
+    <a id="open-btn" class="btn btn-secondary" href="/drive/viewer/" style="display:none;">Open viewer</a>
     <button id="clear-btn" class="btn-danger" style="display:none;">Remove loaded ZIM</button>
   </div>
   <div id="hint">
@@ -288,7 +288,7 @@
       if (!resp || !resp.ok) throw new Error(resp && resp.error || 'SW rejected file');
       await refreshStatus();
       // Small delay so the user sees the "ZIM loaded" flash before redirecting.
-      setTimeout(() => { window.location.href = 'viewer/'; }, 600);
+      setTimeout(() => { window.location.href = '/drive/viewer/'; }, 600);
     } catch (err) {
       setStatus('err', 'Failed to open ZIM', String(err && err.message || err));
     }
