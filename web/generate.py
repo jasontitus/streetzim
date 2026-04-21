@@ -135,6 +135,12 @@ REGIONS = [
         "zim_file": "osm-silicon-valley.zim",
         "description": "San Francisco Bay Area &mdash; San Francisco, Oakland, Palo Alto, Mountain View, Stanford, Cupertino, San Jose, and the Peninsula.",
     },
+    {
+        "id": "central-us",
+        "title": "Central US",
+        "zim_file": "osm-central-us.zim",
+        "description": "The Mountain West and surrounds &mdash; Utah, Colorado, Wyoming, Montana, Idaho, Nevada, Arizona, and New Mexico. Salt Lake City, Denver, Phoenix, Albuquerque, Yellowstone, Grand Canyon, and the Rockies.",
+    },
 ]
 
 
