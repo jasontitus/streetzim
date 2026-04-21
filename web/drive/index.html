@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Drive">
+<title>StreetZim Drive (preview)</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.23.0/dist/maplibre-gl.css">
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --fg: #f5f5f5;
+    --dim: #9a9a9a;
+    --accent: #3ea6ff;
+    --danger: #ff5a5a;
+    --card: rgba(18,18,20,0.92);
+    --border: rgba(255,255,255,0.10);
+    --safe-top: env(safe-area-inset-top,0px);
+    --safe-bot: env(safe-area-inset-bottom,0px);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font: 15px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden; overscroll-behavior: none; touch-action: none; }
+  #map { position: fixed; inset: 0; }
+
+  /* Bottom action panel (pre-driving) */
+  #panel {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    padding: 12px 14px calc(12px + var(--safe-bot));
+    background: var(--card);
+    border-top: 1px solid var(--border);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    display: flex; flex-direction: column; gap: 8px;
+    z-index: 10;
+  }
+  #panel.hidden { display: none; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .status { flex: 1; color: var(--dim); font-size: 13px; }
+  .status b { color: var(--fg); font-weight: 600; }
+  button {
+    appearance: none; border: 1px solid var(--border);
+    background: #1c1c1e; color: var(--fg);
+    padding: 10px 14px; border-radius: 10px;
+    font: inherit; font-weight: 600;
+    cursor: pointer;
+  }
+  button:active { background: #2a2a2d; }
+  button.primary { background: var(--accent); color: #001a33; border-color: transparent; }
+  button.danger  { background: transparent; color: var(--danger); border-color: var(--danger); }
+  button.ghost   { background: transparent; }
+  button[disabled] { opacity: .45; cursor: not-allowed; }
+
+  /* Top-right floating controls */
+  #fabs {
+    position: fixed; top: calc(10px + var(--safe-top)); right: 10px;
+    display: flex; flex-direction: column; gap: 8px; z-index: 11;
+  }
+  .fab {
+    width: 42px; height: 42px; border-radius: 21px;
+    background: var(--card); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--fg); font-size: 18px;
+  }
+
+  /* Driving HUD */
+  #hud {
+    position: fixed; top: calc(8px + var(--safe-top)); left: 8px; right: 8px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 12px 14px;
+    display: none;
+    z-index: 12;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 6px 22px rgba(0,0,0,.45);
+  }
+  #hud.on { display: block; }
+  .hud-top { display: flex; align-items: center; gap: 14px; }
+  .turn-glyph {
+    font-size: 40px; line-height: 1; width: 48px; text-align: center;
+    color: var(--accent);
+  }
+  .turn-meta { flex: 1; min-width: 0; }
+  .turn-dist { font-size: 30px; font-weight: 700; letter-spacing: -.02em; }
+  .turn-street {
+    font-size: 14px; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .hud-bot {
+    margin-top: 8px; padding-top: 8px;
+    border-top: 1px solid var(--border);
+    display: flex; justify-content: space-between; font-size: 13px; color: var(--dim);
+  }
+  .hud-bot b { color: var(--fg); font-weight: 600; }
+  #hud .exit {
+    position: absolute; top: 8px; right: 8px;
+    padding: 5px 10px; font-size: 12px; border-radius: 8px;
+    background: transparent; color: var(--danger); border-color: var(--danger);
+  }
+
+  /* Banner */
+  #banner {
+    position: fixed; top: calc(8px + var(--safe-top)); left: 8px; right: 8px;
+    background: #8a1a1a; color: #fff; padding: 8px 12px;
+    border-radius: 10px; font-size: 13px; display: none; z-index: 13;
+  }
+  #banner.on { display: block; }
+
+  /* Attribution pinned low-left, tiny */
+  .maplibregl-ctrl-attrib {
+    font-size: 10px !important;
+    background: rgba(0,0,0,.5) !important;
+    color: #ccc !important;
+  }
+  .maplibregl-ctrl-attrib a { color: #9cd7ff !important; }
+
+  /* Markers */
+  .pin {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--accent); border: 3px solid #fff;
+    box-shadow: 0 2px 6px rgba(0,0,0,.45);
+  }
+  .pin.dest { background: #ff8a3d; }
+  .pin.me {
+    width: 16px; height: 16px; background: #3ea6ff;
+    border: 3px solid #fff;
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="fabs">
+  <button class="fab" id="fab-locate" title="My location">◎</button>
+  <button class="fab" id="fab-unit" title="Toggle units">mi</button>
+</div>
+
+<div id="hud">
+  <button class="exit" id="hud-exit">EXIT</button>
+  <div class="hud-top">
+    <div class="turn-glyph" id="turn-glyph">↑</div>
+    <div class="turn-meta">
+      <div class="turn-dist" id="turn-dist">—</div>
+      <div class="turn-street" id="turn-street">arrive at destination</div>
+    </div>
+  </div>
+  <div class="hud-bot">
+    <span><b id="remain-dist">—</b> remaining</span>
+    <span><b id="remain-time">—</b></span>
+    <span>ETA <b id="eta-clock">—</b></span>
+  </div>
+</div>
+
+<div id="banner"></div>
+
+<div id="panel">
+  <div class="row">
+    <div class="status" id="status">Tap the map to set origin, then tap again to set destination. Or press <b>Use GPS</b>.</div>
+  </div>
+  <div class="row">
+    <button id="btn-use-gps">Use GPS as origin</button>
+    <button id="btn-clear" class="ghost">Clear</button>
+    <button id="btn-drive" class="primary" disabled>Drive</button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/maplibre-gl@5.23.0/dist/maplibre-gl.js"></script>
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ */
+/* Units                                                              */
+/* ------------------------------------------------------------------ */
+const UNITS = {
+  metric: { name: "km", short: "mi", },
+  imperial: { name: "mi", short: "km" },
+};
+let unit = localStorage.getItem("drive.unit") || "imperial"; // default miles
+
+function formatDistance(meters) {
+  if (!isFinite(meters)) return "—";
+  if (unit === "imperial") {
+    const ft = meters * 3.28084;
+    if (ft < 528) return Math.round(ft / 10) * 10 + " ft";   // <0.1 mi
+    const mi = meters / 1609.344;
+    return (mi < 10 ? mi.toFixed(1) : Math.round(mi)) + " mi";
+  }
+  if (meters < 950) return Math.round(meters / 10) * 10 + " m";
+  const km = meters / 1000;
+  return (km < 10 ? km.toFixed(1) : Math.round(km)) + " km";
+}
+function formatTime(sec) {
+  if (!isFinite(sec) || sec < 0) return "—";
+  if (sec < 60) return Math.round(sec) + " s";
+  const m = Math.round(sec / 60);
+  if (m < 60) return m + " min";
+  const h = Math.floor(m / 60), mm = m % 60;
+  return h + "h " + mm + "m";
+}
+function formatClock(ms) {
+  const d = new Date(ms);
+  let h = d.getHours(), m = d.getMinutes();
+  const am = h < 12;
+  h = h % 12 || 12;
+  return h + ":" + (m < 10 ? "0" : "") + m + (am ? " AM" : " PM");
+}
+
+/* ------------------------------------------------------------------ */
+/* Map                                                                */
+/* ------------------------------------------------------------------ */
+// OSM raster tiles. Usage policy: attribute, keep load low. Fine for preview.
+const style = {
+  version: 8,
+  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+  sources: {
+    osm: {
+      type: "raster",
+      tiles: [
+        "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      ],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+    },
+  },
+  layers: [{ id: "osm", type: "raster", source: "osm" }],
+};
+
+const map = new maplibregl.Map({
+  container: "map",
+  style,
+  center: [-122.4194, 37.7749],
+  zoom: 12,
+  pitch: 0,
+  bearing: 0,
+  attributionControl: { compact: true },
+  cooperativeGestures: false,
+});
+map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: true }), "bottom-right");
+map.addControl(new maplibregl.ScaleControl({ unit: unit === "imperial" ? "imperial" : "metric" }), "bottom-left");
+
+/* ------------------------------------------------------------------ */
+/* Route model (tap-driven straight line for the preview)             */
+/* ------------------------------------------------------------------ */
+const state = {
+  origin: null,       // [lng,lat]
+  dest: null,         // [lng,lat]
+  route: null,        // {coords:[[lng,lat]...], distance:m, duration:s}
+  originMarker: null,
+  destMarker: null,
+  meMarker: null,
+};
+
+function makeMarker(cls) {
+  const el = document.createElement("div");
+  el.className = "pin " + cls;
+  return new maplibregl.Marker({ element: el, anchor: "center" });
+}
+
+function setOrigin(ll) {
+  state.origin = ll;
+  if (!state.originMarker) state.originMarker = makeMarker("").setLngLat(ll).addTo(map);
+  else state.originMarker.setLngLat(ll);
+  recomputeRoute();
+}
+function setDest(ll) {
+  state.dest = ll;
+  if (!state.destMarker) state.destMarker = makeMarker("dest").setLngLat(ll).addTo(map);
+  else state.destMarker.setLngLat(ll);
+  recomputeRoute();
+}
+function clearAll() {
+  state.origin = null; state.dest = null; state.route = null;
+  if (state.originMarker) { state.originMarker.remove(); state.originMarker = null; }
+  if (state.destMarker)   { state.destMarker.remove();   state.destMarker   = null; }
+  if (map.getLayer("route-line")) map.removeLayer("route-line");
+  if (map.getSource("route"))     map.removeSource("route");
+  document.getElementById("btn-drive").disabled = true;
+  updateStatus();
+}
+
+function updateStatus() {
+  const s = document.getElementById("status");
+  if (!state.origin)      s.innerHTML = "Tap the map to set origin, then tap again to set destination. Or press <b>Use GPS</b>.";
+  else if (!state.dest)   s.innerHTML = "Origin set. Tap the map to set <b>destination</b>.";
+  else if (state.route)   s.innerHTML = "Route: <b>" + formatDistance(state.route.distance) + "</b>, ~<b>" + formatTime(state.route.duration) + "</b> at 40 km/h. Tap <b>Drive</b>.";
+}
+
+/* Haversine (meters) + bearing */
+function hav(a, b) {
+  const R = 6371000;
+  const toR = (d) => d * Math.PI / 180;
+  const [lng1, lat1] = a, [lng2, lat2] = b;
+  const dLat = toR(lat2 - lat1), dLng = toR(lng2 - lng1);
+  const s = Math.sin(dLat/2) ** 2 +
+            Math.cos(toR(lat1)) * Math.cos(toR(lat2)) * Math.sin(dLng/2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+function bearingBetween(a, b) {
+  const toR = (d) => d * Math.PI / 180, toD = (r) => r * 180 / Math.PI;
+  const [lng1, lat1] = a.map(toR), [lng2, lat2] = b.map(toR);
+  const y = Math.sin(lng2 - lng1) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lng2 - lng1);
+  return (toD(Math.atan2(y, x)) + 360) % 360;
+}
+
+function recomputeRoute() {
+  if (!state.origin || !state.dest) return;
+  const coords = [state.origin, state.dest];
+  const distance = hav(state.origin, state.dest);
+  const duration = distance / (40_000 / 3600); // 40 km/h nominal
+  state.route = { coords, distance, duration };
+
+  const geojson = { type: "Feature", geometry: { type: "LineString", coordinates: coords } };
+  if (map.getSource("route")) {
+    map.getSource("route").setData(geojson);
+  } else {
+    map.addSource("route", { type: "geojson", data: geojson });
+    map.addLayer({
+      id: "route-line",
+      type: "line",
+      source: "route",
+      paint: {
+        "line-color": "#3ea6ff",
+        "line-width": 6,
+        "line-opacity": 0.9,
+      },
+      layout: { "line-cap": "round", "line-join": "round" },
+    });
+  }
+  document.getElementById("btn-drive").disabled = false;
+  updateStatus();
+
+  const b = new maplibregl.LngLatBounds().extend(state.origin).extend(state.dest);
+  map.fitBounds(b, { padding: 80, maxZoom: 16, duration: 500 });
+}
+
+/* ------------------------------------------------------------------ */
+/* Map interaction                                                    */
+/* ------------------------------------------------------------------ */
+map.on("click", (e) => {
+  if (drive.active) return;
+  const ll = [e.lngLat.lng, e.lngLat.lat];
+  if (!state.origin) setOrigin(ll);
+  else setDest(ll);
+});
+
+/* ------------------------------------------------------------------ */
+/* Driving mode                                                       */
+/* ------------------------------------------------------------------ */
+const drive = {
+  active: false,
+  watchId: null,
+  origCam: null,
+  lastFix: null,
+  offRouteSince: 0,
+  ticker: null,
+
+  enter() {
+    if (!state.route) return;
+    this.active = true;
+    this.origCam = {
+      center: map.getCenter().toArray(),
+      zoom: map.getZoom(),
+      bearing: map.getBearing(),
+      pitch: map.getPitch(),
+    };
+    document.getElementById("panel").classList.add("hidden");
+    document.getElementById("hud").classList.add("on");
+    document.getElementById("btn-drive").textContent = "Exit drive";
+
+    if (!navigator.geolocation) {
+      banner("Geolocation not available in this browser.");
+      return;
+    }
+    this.watchId = navigator.geolocation.watchPosition(
+      (pos) => this.onFix(pos),
+      (err) => banner("GPS error: " + err.message),
+      { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 },
+    );
+    // fallback re-render every 500ms in case watchPosition is sparse
+    this.ticker = setInterval(() => { if (this.lastFix) this.render(); }, 500);
+  },
+
+  exit() {
+    this.active = false;
+    if (this.watchId != null) { navigator.geolocation.clearWatch(this.watchId); this.watchId = null; }
+    if (this.ticker) { clearInterval(this.ticker); this.ticker = null; }
+    document.getElementById("panel").classList.remove("hidden");
+    document.getElementById("hud").classList.remove("on");
+    document.getElementById("btn-drive").textContent = "Drive";
+    hideBanner();
+    if (state.meMarker) { state.meMarker.remove(); state.meMarker = null; }
+    if (this.origCam) {
+      map.easeTo({
+        center: this.origCam.center, zoom: this.origCam.zoom,
+        bearing: this.origCam.bearing, pitch: this.origCam.pitch,
+        duration: 400,
+      });
+      this.origCam = null;
+    }
+    this.lastFix = null;
+    this.offRouteSince = 0;
+  },
+
+  onFix(pos) {
+    this.lastFix = {
+      lng: pos.coords.longitude, lat: pos.coords.latitude,
+      heading: pos.coords.heading, speed: pos.coords.speed,
+      accuracy: pos.coords.accuracy, ts: pos.timestamp,
+    };
+    this.render();
+  },
+
+  render() {
+    const fix = this.lastFix;
+    if (!fix || !state.route) return;
+    const here = [fix.lng, fix.lat];
+
+    // Me-marker
+    if (!state.meMarker) state.meMarker = makeMarker("me").setLngLat(here).addTo(map);
+    else state.meMarker.setLngLat(here);
+
+    // Projection onto the (one-segment) route
+    const proj = projectOnRoute(here, state.route.coords);
+    const remain = state.route.distance - proj.alongMeters;
+    const speed = (fix.speed != null && fix.speed > 0.3) ? fix.speed : (40_000 / 3600); // m/s
+    const etaSec = remain / speed;
+
+    // HUD
+    document.getElementById("turn-dist").textContent = formatDistance(Math.max(0, remain));
+    document.getElementById("remain-dist").textContent = formatDistance(Math.max(0, remain));
+    document.getElementById("remain-time").textContent = formatTime(etaSec);
+    document.getElementById("eta-clock").textContent = formatClock(Date.now() + etaSec * 1000);
+    document.getElementById("turn-glyph").textContent = remain < 30 ? "⚑" : "↑";
+    document.getElementById("turn-street").textContent =
+      remain < 30 ? "you have arrived" : "continue to destination";
+
+    // Off-route
+    if (proj.crossMeters > 60) {
+      if (!this.offRouteSince) this.offRouteSince = Date.now();
+      if (Date.now() - this.offRouteSince > 6000) banner("Off route — reselect destination to recompute.");
+    } else {
+      this.offRouteSince = 0; hideBanner();
+    }
+
+    // Camera
+    let bearing = fix.heading;
+    if (bearing == null || isNaN(bearing) || (fix.speed != null && fix.speed < 1)) {
+      // heading unreliable at low speed — use route tangent
+      bearing = bearingBetween(here, state.route.coords[state.route.coords.length - 1]);
+    }
+    map.easeTo({
+      center: here,
+      zoom: 17,
+      pitch: 60,
+      bearing,
+      duration: 500,
+      essential: true,
+    });
+  },
+};
+
+function projectOnRoute(p, coords) {
+  // Project p onto the polyline; return {alongMeters, crossMeters}
+  let bestCross = Infinity, bestAlong = 0, cumul = 0;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const a = coords[i], b = coords[i + 1];
+    const segLen = hav(a, b);
+    if (segLen === 0) continue;
+    // Project in a local tangent plane (meters), approximate with equirectangular
+    const latRef = (a[1] + b[1]) / 2 * Math.PI / 180;
+    const mPerDegLat = 111320;
+    const mPerDegLng = 111320 * Math.cos(latRef);
+    const ax = a[0] * mPerDegLng, ay = a[1] * mPerDegLat;
+    const bx = b[0] * mPerDegLng, by = b[1] * mPerDegLat;
+    const px = p[0] * mPerDegLng, py = p[1] * mPerDegLat;
+    const dx = bx - ax, dy = by - ay;
+    const l2 = dx * dx + dy * dy;
+    let t = ((px - ax) * dx + (py - ay) * dy) / l2;
+    t = Math.max(0, Math.min(1, t));
+    const projX = ax + t * dx, projY = ay + t * dy;
+    const cross = Math.hypot(px - projX, py - projY);
+    if (cross < bestCross) {
+      bestCross = cross;
+      bestAlong = cumul + t * segLen;
+    }
+    cumul += segLen;
+  }
+  return { alongMeters: bestAlong, crossMeters: bestCross };
+}
+
+/* ------------------------------------------------------------------ */
+/* Banner                                                             */
+/* ------------------------------------------------------------------ */
+function banner(msg) {
+  const el = document.getElementById("banner");
+  el.textContent = msg;
+  el.classList.add("on");
+}
+function hideBanner() {
+  document.getElementById("banner").classList.remove("on");
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons                                                            */
+/* ------------------------------------------------------------------ */
+document.getElementById("btn-drive").addEventListener("click", () => {
+  if (drive.active) drive.exit();
+  else drive.enter();
+});
+document.getElementById("btn-clear").addEventListener("click", () => {
+  if (drive.active) drive.exit();
+  clearAll();
+});
+document.getElementById("hud-exit").addEventListener("click", () => drive.exit());
+
+document.getElementById("btn-use-gps").addEventListener("click", () => {
+  if (!navigator.geolocation) { banner("Geolocation not available."); return; }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const ll = [pos.coords.longitude, pos.coords.latitude];
+      setOrigin(ll);
+      map.easeTo({ center: ll, zoom: 14, duration: 400 });
+    },
+    (err) => banner("GPS error: " + err.message),
+    { enableHighAccuracy: true, timeout: 15000 },
+  );
+});
+
+document.getElementById("fab-locate").addEventListener("click", () => {
+  if (!navigator.geolocation) { banner("Geolocation not available."); return; }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => map.easeTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 15, duration: 400 }),
+    (err) => banner("GPS error: " + err.message),
+    { enableHighAccuracy: true, timeout: 15000 },
+  );
+});
+
+document.getElementById("fab-unit").addEventListener("click", (e) => {
+  unit = (unit === "imperial") ? "metric" : "imperial";
+  localStorage.setItem("drive.unit", unit);
+  e.target.textContent = unit === "imperial" ? "mi" : "km";
+  // Re-add scale control with new unit
+  // (MapLibre ScaleControl does not expose a setter, so recreate.)
+  updateStatus();
+});
+
+// Init unit button label
+document.getElementById("fab-unit").textContent = unit === "imperial" ? "mi" : "km";
+
+/* ------------------------------------------------------------------ */
+/* Service worker                                                     */
+/* ------------------------------------------------------------------ */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch((e) => console.warn("SW reg failed", e));
+  });
+}
+</script>
+</body>
+</html>
