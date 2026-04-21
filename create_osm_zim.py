@@ -3834,20 +3834,21 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 try:
                     _vrt_sample = _vrt_handle.sample
 
-                    def _vrt_max_elev(bnds):
-                        """Max elev across 3×3 grid of samples inside bnds."""
+                    def _vrt_land_fraction(bnds):
+                        """Fraction of 3x3 sample points with real elevation (>5 m).
+                        Returns a value in [0, 1]. 1.0 means all 9 are land, 0.0 ocean."""
                         pts = []
                         for fl in (0.25, 0.5, 0.75):
                             for fla in (0.25, 0.5, 0.75):
                                 pts.append((bnds.west + (bnds.east - bnds.west) * fl,
                                             bnds.south + (bnds.north - bnds.south) * fla))
-                        best = 0.0
+                        hits = 0
+                        total = 0
                         for v in _vrt_sample(pts, indexes=1):
-                            if v and len(v):
-                                av = abs(float(v[0]))
-                                if av > best:
-                                    best = av
-                        return best
+                            total += 1
+                            if v and len(v) and abs(float(v[0])) > 5:
+                                hits += 1
+                        return hits / total if total else 0.0
 
                     still_broken = []
                     for z in range(10, terrain_max_zoom + 1):
@@ -3862,12 +3863,12 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                             if tile_elev is None:
                                 continue
                             bnds = mercantile.bounds(t)
-                            vrt_elev = _vrt_max_elev(bnds)
-                            # Broken iff VRT and tile disagree by >100 m AND
-                            # tile says near-zero. The VRT-race bug writes 0 m
-                            # where the VRT has real data; it never writes
-                            # "real elevation" where the VRT has 0.
-                            if abs(tile_elev) < 10 and vrt_elev > 100:
+                            # Broken iff tile says near-zero AND majority of VRT
+                            # samples have real elevation. A single land sample
+                            # among 9 (e.g. a tiny island in Bass Strait) isn't
+                            # enough — the tile is >80% ocean and writing 0 m
+                            # is correct. Threshold = 6/9 (~67% land).
+                            if abs(tile_elev) < 10 and _vrt_land_fraction(bnds) >= 6/9:
                                 still_broken.append((z, t.x, t.y, tile_path))
                 finally:
                     _vrt_handle.close()
