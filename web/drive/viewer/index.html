@@ -446,13 +446,18 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     margin-top: 2px;
   }
-  #drive-exit {
+  #drive-exit,
+  #drive-fullscreen {
     flex-shrink: 0; background: rgba(255,255,255,0.12);
     border: none; border-radius: 8px; color: #fff;
     font-family: var(--ui-font); font-size: 12px; font-weight: 600;
     padding: 8px 12px; cursor: pointer; letter-spacing: 0.5px;
   }
-  #drive-exit:hover { background: rgba(255,255,255,0.22); }
+  #drive-exit:hover,
+  #drive-fullscreen:hover { background: rgba(255,255,255,0.22); }
+  #drive-fullscreen { font-size: 18px; padding: 4px 10px; line-height: 1; }
+  /* Fullscreen API unavailable → hide the button rather than no-op */
+  html.no-fullscreen #drive-fullscreen { display: none; }
   #drive-hud-eta {
     margin-top: 8px; padding-top: 8px;
     border-top: 1px solid rgba(255,255,255,0.12);
@@ -533,6 +538,7 @@
       <div id="drive-dist">—</div>
       <div id="drive-street">Getting location…</div>
     </div>
+    <button id="drive-fullscreen" title="Toggle fullscreen">&#x26F6;</button>
     <button id="drive-exit" title="Exit driving mode">EXIT</button>
   </div>
   <div id="drive-hud-eta">
@@ -3237,21 +3243,59 @@ function initRouting(map, config) {
     var streetEl = document.getElementById('drive-street');
     var arrowEl = document.getElementById('drive-arrow');
     var exitBtn = document.getElementById('drive-exit');
+    var fullscreenBtn = document.getElementById('drive-fullscreen');
     var remainEl = document.getElementById('drive-remaining');
     var etaEl = document.getElementById('drive-eta');
     var statusEl = document.getElementById('drive-status');
+
+    // Elements we hide while driving to reclaim map pixels. Resolved
+    // once — some (controls, search-container) are always present; the
+    // routing panel is always present too but in a different display
+    // state depending on whether the user opened it.
+    var controlsEl = document.getElementById('controls');
+    var searchEl = document.getElementById('search-container');
+    // panel (routing-panel) is already in this function's closure.
 
     var state = {
       active: false,
       mode: 'drive',
       route: null,
       savedCam: null,
+      savedUI: null,       // { panel, controls, search } — prior display values
       watchId: null,
       fallbackTimer: null,
       lastBearing: null,
       offRouteSince: 0,
       lastTick: 0
     };
+
+    // Fullscreen API support detection — iOS Safari doesn't expose
+    // requestFullscreen on Element/Document, so the button would no-op.
+    // Hide the button via CSS in that case so the user isn't confused.
+    var canFullscreen = !!(
+      document.documentElement.requestFullscreen ||
+      document.documentElement.webkitRequestFullscreen
+    );
+    if (!canFullscreen) {
+      document.documentElement.classList.add('no-fullscreen');
+    }
+
+    function isFullscreen() {
+      return !!(document.fullscreenElement || document.webkitFullscreenElement);
+    }
+    function enterFullscreen() {
+      var el = document.documentElement;
+      var fn = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (fn) { try { fn.call(el); } catch (e) { /* user gesture required, etc. */ } }
+    }
+    function exitFullscreen() {
+      var fn = document.exitFullscreen || document.webkitExitFullscreen;
+      if (fn) { try { fn.call(document); } catch (e) {} }
+    }
+    fullscreenBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (isFullscreen()) exitFullscreen(); else enterFullscreen();
+    });
 
     exitBtn.addEventListener('click', function() {
       api.exit();
@@ -3295,8 +3339,23 @@ function initRouting(map, config) {
       if (nextTurn) {
         var d = nextTurn.distM - proj.distAlong;
         distEl.textContent = formatDistanceLocalized(d, unit);
-        var name = graph && graph.getName ? graph.getName(nextTurn.nameIdx) : '';
-        streetEl.textContent = name ? ('onto ' + name) : 'next road';
+        // Prefer the name of the immediate next road; if it's unnamed,
+        // scan forward through later turns until we find a named one.
+        // Better to say "onto Bryant St" (even if we pass an unnamed sliver
+        // first) than just "next road".
+        var name = '';
+        if (graph && graph.getName) {
+          name = graph.getName(nextTurn.nameIdx) || '';
+          if (!name) {
+            for (var t = 0; t < state.route.turns.length; t++) {
+              var tt = state.route.turns[t];
+              if (tt.distM <= proj.distAlong + 2) continue;
+              var nm = graph.getName(tt.nameIdx);
+              if (nm) { name = nm; break; }
+            }
+          }
+        }
+        streetEl.textContent = name ? ('onto ' + name) : 'next turn';
         // Tangent just after the turn → rotate arrow relative to current bearing
         var nextCi = Math.min(nextTurn.coordIdx + 1, state.route.coords.length - 1);
         var nextTangent = bearingDeg(
@@ -3377,6 +3436,18 @@ function initRouting(map, config) {
           bearing: map.getBearing(),
           pitch: map.getPitch()
         };
+        // Hide the routing panel + top-right control cluster + search
+        // box so the driver sees as much map as possible. Save prior
+        // inline-display so exit() restores whatever was there.
+        state.savedUI = {
+          panel:    panel.style.display,
+          controls: controlsEl ? controlsEl.style.display : '',
+          search:   searchEl ? searchEl.style.display : ''
+        };
+        panel.style.display = 'none';
+        if (controlsEl) controlsEl.style.display = 'none';
+        if (searchEl)   searchEl.style.display = 'none';
+
         hudEl.classList.add('visible');
         hudEl.setAttribute('aria-hidden', 'false');
         distEl.textContent = '—';
@@ -3410,6 +3481,13 @@ function initRouting(map, config) {
         }
         hudEl.classList.remove('visible');
         hudEl.setAttribute('aria-hidden', 'true');
+        if (isFullscreen()) exitFullscreen();
+        if (state.savedUI) {
+          panel.style.display    = state.savedUI.panel;
+          if (controlsEl) controlsEl.style.display = state.savedUI.controls;
+          if (searchEl)   searchEl.style.display   = state.savedUI.search;
+          state.savedUI = null;
+        }
         if (state.savedCam) {
           map.easeTo({
             center: state.savedCam.center,
