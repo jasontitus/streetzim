@@ -2,611 +2,292 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b1220">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="StreetZim Drive">
+<meta name="apple-mobile-web-app-title" content="StreetZim">
 <meta name="mobile-web-app-capable" content="yes">
-<title>StreetZim Drive — test harness</title>
+<title>StreetZim — Offline Maps</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.23.0/dist/maplibre-gl.css">
-<script src="https://unpkg.com/maplibre-gl@5.23.0/dist/maplibre-gl.js"></script>
 <style>
   :root {
-    --ui-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-    --panel-bg: rgba(17,24,39,0.92);
-    --text: #fff;
-    --text-dim: rgba(255,255,255,0.78);
+    --bg: #0b1220;
+    --card: #131c2e;
+    --card-hover: #182339;
+    --text: #e6edf7;
+    --text-dim: #94a3b8;
     --accent: #2563eb;
     --accent-hover: #1d4ed8;
-    --warn-bg: rgba(234,179,8,0.18);
-    --warn-fg: #fde68a;
+    --border: rgba(255,255,255,0.08);
+    --ok: #22c55e;
+    --warn: #fbbf24;
   }
+  * { box-sizing: border-box; }
   html, body {
-    margin: 0; padding: 0; height: 100%;
-    background: #111; color: var(--text);
-    font-family: var(--ui-font);
-    overscroll-behavior: none;
+    margin: 0; padding: 0; min-height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    line-height: 1.55; -webkit-font-smoothing: antialiased;
   }
-  #map { position: absolute; inset: 0; }
-
-  /* Top status / help */
-  #banner {
-    position: absolute; top: 0; left: 0; right: 0;
-    padding: max(env(safe-area-inset-top), 10px) 12px 10px;
-    background: linear-gradient(180deg, rgba(17,24,39,0.88), rgba(17,24,39,0));
-    color: var(--text); font-size: 13px; line-height: 1.35;
-    pointer-events: none; z-index: 2;
+  body {
+    padding: max(env(safe-area-inset-top), 16px) 16px
+            max(env(safe-area-inset-bottom), 16px);
+    max-width: 620px; margin: 0 auto;
   }
-  #banner strong { font-weight: 600; }
-  #banner.hidden { display: none; }
-
-  /* Bottom action bar */
-  #actionbar {
-    position: absolute; left: 10px; right: 10px;
-    bottom: max(env(safe-area-inset-bottom), 10px);
-    z-index: 4; display: flex; gap: 8px;
-    pointer-events: none;
+  h1 {
+    font-size: 24px; font-weight: 700; margin: 24px 0 8px;
+    letter-spacing: -0.3px;
   }
-  #actionbar button {
-    flex: 1; pointer-events: auto;
-    font-family: var(--ui-font); font-size: 14px; font-weight: 600;
-    padding: 12px 14px; border-radius: 10px; border: none;
-    background: var(--panel-bg); color: var(--text);
-    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
-    cursor: pointer;
+  p { color: var(--text-dim); }
+  .muted { color: var(--text-dim); font-size: 13px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 16px; margin: 16px 0;
   }
-  #actionbar button:disabled { opacity: 0.5; }
-  #actionbar button.primary { background: var(--accent); }
-  #actionbar button.primary:hover { background: var(--accent-hover); }
-
-  /* Driving HUD — mirrors the ZIM viewer's style */
-  #drive-hud {
-    display: none; position: absolute;
-    top: max(env(safe-area-inset-top), 10px); left: 10px; right: 10px;
-    z-index: 5; pointer-events: auto;
-    background: var(--panel-bg); color: var(--text);
-    border-radius: 12px; padding: 12px 14px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
-    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  .card.ok { border-color: rgba(34,197,94,0.35); }
+  .card.warn { border-color: rgba(251,191,36,0.35); }
+  .row { display: flex; gap: 12px; align-items: center; }
+  .row.stack { flex-direction: column; align-items: stretch; }
+  button, .btn {
+    font-family: inherit; font-size: 15px; font-weight: 600;
+    padding: 12px 16px; border-radius: 10px; border: none;
+    background: var(--accent); color: #fff; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 8px; text-decoration: none;
   }
-  #drive-hud.visible { display: block; }
-  #drive-hud-row {
-    display: flex; align-items: center; gap: 12px;
+  button:hover, .btn:hover { background: var(--accent-hover); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .btn-secondary {
+    background: transparent; color: var(--text);
+    border: 1px solid var(--border);
   }
-  #drive-arrow {
-    width: 48px; height: 48px; flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center;
-    background: rgba(255,255,255,0.1); border-radius: 10px;
-    font-size: 30px; line-height: 1;
+  .btn-secondary:hover { background: var(--card-hover); }
+  .btn-danger {
+    background: transparent; color: #fca5a5;
+    border: 1px solid rgba(248,113,113,0.35);
   }
-  #drive-text { flex: 1; min-width: 0; }
-  #drive-dist { font-size: 24px; font-weight: 700; line-height: 1.1; }
-  #drive-street {
-    font-size: 13px; color: var(--text-dim);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    margin-top: 2px;
+  .btn-danger:hover { background: rgba(248,113,113,0.1); }
+  #status { font-size: 13px; color: var(--text-dim); margin-top: 6px; word-break: break-word; }
+  #status.err { color: #fca5a5; }
+  #status.ok { color: #86efac; }
+  #hint { font-size: 12px; color: var(--text-dim); margin-top: 10px; }
+  .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--text-dim); margin-right: 6px; vertical-align: middle;
   }
-  #drive-exit {
-    flex-shrink: 0; background: rgba(255,255,255,0.12);
-    border: none; border-radius: 8px; color: var(--text);
-    font-family: var(--ui-font); font-size: 12px; font-weight: 700;
-    padding: 10px 14px; cursor: pointer; letter-spacing: 0.5px;
+  .dot.ok { background: var(--ok); }
+  .dot.warn { background: var(--warn); }
+  input[type=file] { display: none; }
+  details { margin-top: 16px; }
+  details summary { cursor: pointer; color: var(--text-dim); font-size: 13px; }
+  details pre {
+    background: #0a0f1c; border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px; font-size: 11px; overflow-x: auto; color: var(--text-dim);
   }
-  #drive-hud-eta {
-    margin-top: 8px; padding-top: 8px;
-    border-top: 1px solid rgba(255,255,255,0.12);
-    display: flex; justify-content: space-between;
-    font-size: 12px; color: var(--text-dim);
-  }
-  #drive-hud-eta strong { color: var(--text); font-weight: 600; }
-  #drive-status {
-    display: none; margin-top: 8px; padding: 6px 8px;
-    background: var(--warn-bg); color: var(--warn-fg);
-    border-radius: 6px; font-size: 12px;
-  }
-  #drive-status.visible { display: block; }
-
-  /* Settings (unit toggle) */
-  #unit-toggle {
-    position: absolute; right: 10px;
-    bottom: calc(max(env(safe-area-inset-bottom), 10px) + 58px);
-    z-index: 3; pointer-events: auto;
-    background: var(--panel-bg); color: var(--text);
-    border: none; border-radius: 8px;
-    padding: 8px 12px; font-size: 12px; font-weight: 600;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
-    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-    cursor: pointer;
-  }
-
-  /* Hide default MapLibre controls a bit from the edges on mobile */
-  .maplibregl-ctrl-top-right { top: max(env(safe-area-inset-top), 10px); }
 </style>
 </head>
 <body>
-<div id="map"></div>
 
-<div id="banner">
-  <strong>Tap a map point to set origin</strong>, tap again for destination. Then hit <strong>Drive</strong>.
-</div>
+<h1>StreetZim</h1>
+<p>Offline maps — pick a <code>.zim</code> file you've downloaded and the viewer will render it with zero network needed.</p>
 
-<button id="unit-toggle" title="Toggle mi / km">mi</button>
-
-<div id="actionbar">
-  <button id="btn-locate" title="Center on me">📍 Me</button>
-  <button id="btn-reset" disabled>Reset</button>
-  <button id="btn-drive" class="primary" disabled>Drive ▶</button>
-</div>
-
-<div id="drive-hud" aria-hidden="true">
-  <div id="drive-hud-row">
-    <div id="drive-arrow">↑</div>
-    <div id="drive-text">
-      <div id="drive-dist">—</div>
-      <div id="drive-street">Getting location…</div>
-    </div>
-    <button id="drive-exit">EXIT</button>
+<div class="card" id="status-card">
+  <div class="row">
+    <span id="status-dot" class="dot"></span>
+    <strong id="status-title">Checking…</strong>
   </div>
-  <div id="drive-hud-eta">
-    <span>Remaining: <strong id="drive-remaining">—</strong></span>
-    <span>ETA: <strong id="drive-eta">—</strong></span>
-  </div>
-  <div id="drive-status"></div>
+  <div id="status" class="muted">Initializing service worker…</div>
 </div>
+
+<div class="card">
+  <div class="row stack">
+    <button id="pick-btn">Choose a ZIM file</button>
+    <a id="open-btn" class="btn btn-secondary" href="viewer/" style="display:none;">Open viewer</a>
+    <button id="clear-btn" class="btn-danger" style="display:none;">Remove loaded ZIM</button>
+  </div>
+  <div id="hint">
+    Pick any <code>osm-*.zim</code> produced by <code>create_osm_zim.py</code>
+    (or download one from <a href="/">streetzim.web.app</a>).
+    On Chrome / Edge the file handle is remembered across launches;
+    on Safari you may need to re-pick it after a reboot.
+  </div>
+</div>
+
+<details>
+  <summary>Advanced / diagnostics</summary>
+  <pre id="diag"></pre>
+</details>
+
+<!-- Hidden fallback picker for browsers without showOpenFilePicker -->
+<input type="file" id="file-fallback" accept=".zim,application/octet-stream">
 
 <script>
-// --- StreetZim Drive test harness ---
-// Self-contained page intended to live on Firebase hosting so you can test
-// the driving-mode UX on a phone without rebuilding a ZIM.
-//
-// Phase 2a: online raster OSM tiles + tap-to-plan fake route (straight line).
-// Phase 2b will swap the tap-fake route for a local-ZIM reader + real routing.
-
 (function() {
   'use strict';
 
-  // ---------- helpers shared with the ZIM viewer ----------
+  const pickBtn  = document.getElementById('pick-btn');
+  const openBtn  = document.getElementById('open-btn');
+  const clearBtn = document.getElementById('clear-btn');
+  const fileFallback = document.getElementById('file-fallback');
+  const statusEl = document.getElementById('status');
+  const statusTitle = document.getElementById('status-title');
+  const statusDot = document.getElementById('status-dot');
+  const statusCard = document.getElementById('status-card');
+  const diagEl = document.getElementById('diag');
 
-  function haversineMeters(lat1, lon1, lat2, lon2) {
-    var R = 6371000;
-    var toRad = Math.PI / 180;
-    var dLat = (lat2 - lat1) * toRad;
-    var dLon = (lon2 - lon1) * toRad;
-    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) *
-            Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+  const log = [];
+  function dbg() {
+    log.push('[' + new Date().toISOString().substr(11, 12) + '] ' +
+      [...arguments].map((a) => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '));
+    diagEl.textContent = log.slice(-60).join('\n');
+    if (window.console && console.log) console.log.apply(console, ['[streetzim]'].concat([...arguments]));
   }
 
-  function bearingDeg(lat1, lon1, lat2, lon2) {
-    var toRad = Math.PI / 180, toDeg = 180 / Math.PI;
-    var y = Math.sin((lon2 - lon1) * toRad) * Math.cos(lat2 * toRad);
-    var x = Math.cos(lat1 * toRad) * Math.sin(lat2 * toRad) -
-            Math.sin(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.cos((lon2 - lon1) * toRad);
-    return (Math.atan2(y, x) * toDeg + 360) % 360;
+  function setStatus(kind, title, msg) {
+    statusDot.classList.remove('ok', 'warn');
+    statusCard.classList.remove('ok', 'warn');
+    statusEl.classList.remove('ok', 'err');
+    if (kind === 'ok')   { statusDot.classList.add('ok');   statusCard.classList.add('ok');   statusEl.classList.add('ok'); }
+    if (kind === 'warn') { statusDot.classList.add('warn'); statusCard.classList.add('warn'); }
+    if (kind === 'err')  { statusEl.classList.add('err'); }
+    statusTitle.textContent = title;
+    statusEl.textContent = msg || '';
   }
 
-  // Cumulative distances per coord + synthetic turn boundaries.
-  // For a tap-fake route, we interpolate intermediate points so the
-  // camera has enough tangent samples for smooth bearing tracking.
-  function augmentRouteForDriving(coordsLngLat, speedMps) {
-    var cumM = new Float64Array(coordsLngLat.length);
-    for (var i = 1; i < coordsLngLat.length; i++) {
-      cumM[i] = cumM[i - 1] + haversineMeters(
-        coordsLngLat[i - 1][1], coordsLngLat[i - 1][0],
-        coordsLngLat[i][1],     coordsLngLat[i][0]
-      );
-    }
-    var total = cumM[cumM.length - 1];
-    var t = speedMps > 0 ? total / speedMps : 0;
-    return { coords: coordsLngLat, cumM: cumM, distance: total, time: t, turns: [] };
+  // ---------- Service worker registration ----------
+
+  if (!('serviceWorker' in navigator)) {
+    setStatus('err', 'Unsupported browser',
+      'This viewer needs a browser with Service Worker support.');
+    pickBtn.disabled = true;
+    return;
   }
 
-  function projectOnRoute(route, lat, lon) {
-    var coords = route.coords, cumM = route.cumM;
-    var best = { d2: Infinity, segIdx: 0, t: 0 };
-    var toRad = Math.PI / 180;
-    var cosLat = Math.cos(lat * toRad);
-    function xy(ll) { return [(ll[0] - lon) * cosLat, (ll[1] - lat)]; }
-    for (var i = 0; i < coords.length - 1; i++) {
-      var a = xy(coords[i]);
-      var b = xy(coords[i + 1]);
-      var px = -a[0], py = -a[1];
-      var vx = b[0] - a[0], vy = b[1] - a[1];
-      var len2 = vx * vx + vy * vy;
-      var tt = len2 > 0 ? (px * vx + py * vy) / len2 : 0;
-      if (tt < 0) tt = 0; else if (tt > 1) tt = 1;
-      var cx = a[0] + tt * vx, cy = a[1] + tt * vy;
-      var d2 = cx * cx + cy * cy;
-      if (d2 < best.d2) { best.d2 = d2; best.segIdx = i; best.t = tt; }
-    }
-    var si = best.segIdx;
-    var distAlong = cumM[si] + best.t * (cumM[si + 1] - cumM[si]);
-    var tangent = bearingDeg(
-      coords[si][1], coords[si][0],
-      coords[si + 1][1], coords[si + 1][0]
-    );
-    var offMeters = Math.sqrt(best.d2) * 111320;
-    return { distAlong: distAlong, segIdx: si, t: best.t, bearing: tangent, offMeters: offMeters };
-  }
+  let swRegistration = null;
 
-  var units = (localStorage.getItem('streetzim.units') || 'imperial');
-
-  function setUnits(u) {
-    units = u;
-    localStorage.setItem('streetzim.units', u);
-    unitBtn.textContent = (u === 'imperial') ? 'mi' : 'km';
-  }
-
-  function formatDistance(meters) {
-    if (units === 'imperial') {
-      var feet = meters * 3.28084;
-      if (feet < 1000) return Math.round(feet / 10) * 10 + ' ft';
-      var miles = meters / 1609.344;
-      if (miles < 10) return miles.toFixed(1) + ' mi';
-      return Math.round(miles) + ' mi';
-    }
-    if (meters < 1000) return Math.round(meters / 10) * 10 + ' m';
-    if (meters < 10000) return (meters / 1000).toFixed(1) + ' km';
-    return Math.round(meters / 1000) + ' km';
-  }
-
-  function formatDuration(seconds) {
-    if (!isFinite(seconds) || seconds < 0) return '—';
-    if (seconds < 60) return Math.round(seconds) + ' sec';
-    var mins = Math.round(seconds / 60);
-    if (mins < 60) return mins + ' min';
-    var hrs = Math.floor(mins / 60);
-    var rem = mins % 60;
-    return hrs + ' hr ' + rem + ' min';
-  }
-
-  function formatEtaClock(seconds) {
-    if (!isFinite(seconds) || seconds < 0) return '—';
-    try {
-      var fmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
-      return fmt.format(new Date(Date.now() + seconds * 1000));
-    } catch (e) { return '—'; }
-  }
-
-  function turnGlyph(deltaDeg) {
-    var d = ((deltaDeg + 540) % 360) - 180;
-    if (d > 135 || d < -135) return '↺';
-    if (d > 30)  return '↷';
-    if (d < -30) return '↶';
-    if (d > 15)  return '↗';
-    if (d < -15) return '↖';
-    return '↑';
-  }
-
-  // ---------- DOM refs ----------
-  var banner = document.getElementById('banner');
-  var unitBtn = document.getElementById('unit-toggle');
-  var locateBtn = document.getElementById('btn-locate');
-  var resetBtn = document.getElementById('btn-reset');
-  var driveBtn = document.getElementById('btn-drive');
-  var hudEl = document.getElementById('drive-hud');
-  var distEl = document.getElementById('drive-dist');
-  var streetEl = document.getElementById('drive-street');
-  var arrowEl = document.getElementById('drive-arrow');
-  var exitBtn = document.getElementById('drive-exit');
-  var remainEl = document.getElementById('drive-remaining');
-  var etaEl = document.getElementById('drive-eta');
-  var statusEl = document.getElementById('drive-status');
-
-  setUnits(units);
-  unitBtn.addEventListener('click', function() {
-    setUnits(units === 'imperial' ? 'metric' : 'imperial');
-  });
-
-  // ---------- MapLibre ----------
-  var map = new maplibregl.Map({
-    container: 'map',
-    style: {
-      version: 8,
-      sources: {
-        osm: {
-          type: 'raster',
-          tiles: [
-            'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
-            'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
-            'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'
-          ],
-          tileSize: 256,
-          maxzoom: 19,
-          attribution: '© OpenStreetMap contributors'
-        }
-      },
-      layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
-    },
-    center: [-122.4194, 37.7749],
-    zoom: 12,
-    maxZoom: 19,
-    attributionControl: true
-  });
-  map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
-  map.addControl(new maplibregl.GeolocateControl({
-    positionOptions: { enableHighAccuracy: true },
-    trackUserLocation: true,
-    showUserHeading: true
-  }), 'top-right');
-
-  // ---------- Tap-to-plan synthetic route ----------
-  var origin = null, dest = null;
-  var originMarker = null, destMarker = null;
-  var routeSourceAdded = false;
-  var route = null;  // augmented route (from augmentRouteForDriving)
-
-  function makeDot(color) {
-    var el = document.createElement('div');
-    el.style.cssText =
-      'width:14px;height:14px;border-radius:50%;background:' + color +
-      ';border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.5);';
-    return el;
-  }
-
-  function drawRoute() {
-    if (!origin || !dest) return;
-    // Interpolate along the great-circle approximation — 40 steps is plenty
-    // for straight-line driving, gives the camera smooth tangent samples.
-    var steps = 40;
-    var coords = [];
-    for (var i = 0; i <= steps; i++) {
-      var t = i / steps;
-      coords.push([
-        origin[0] + (dest[0] - origin[0]) * t,
-        origin[1] + (dest[1] - origin[1]) * t
-      ]);
-    }
-    // Assume ~35 mph average; used only for ETA estimate
-    var avg = 15.6; // m/s ≈ 35 mph
-    route = augmentRouteForDriving(coords, avg);
-
-    var geojson = { type: 'Feature', geometry: { type: 'LineString', coordinates: coords } };
-    if (routeSourceAdded) {
-      map.getSource('route').setData(geojson);
-    } else {
-      map.addSource('route', { type: 'geojson', data: geojson });
-      map.addLayer({
-        id: 'route-outline', type: 'line', source: 'route',
-        paint: { 'line-color': '#1e40af', 'line-width': 8, 'line-opacity': 0.4 }
-      });
-      map.addLayer({
-        id: 'route-line', type: 'line', source: 'route',
-        paint: { 'line-color': '#2563eb', 'line-width': 4, 'line-opacity': 0.9 }
-      });
-      routeSourceAdded = true;
-    }
-    var bounds = coords.reduce(function(b, c) { return b.extend(c); },
-      new maplibregl.LngLatBounds(coords[0], coords[0]));
-    map.fitBounds(bounds, { padding: 80, duration: 700 });
-    driveBtn.disabled = false;
-    banner.classList.add('hidden');
-  }
-
-  function clearPlan() {
-    if (driveMode.active) driveMode.exit();
-    origin = dest = null;
-    route = null;
-    if (originMarker) { originMarker.remove(); originMarker = null; }
-    if (destMarker) { destMarker.remove(); destMarker = null; }
-    if (routeSourceAdded) {
-      try { map.removeLayer('route-line'); } catch (e) {}
-      try { map.removeLayer('route-outline'); } catch (e) {}
-      try { map.removeSource('route'); } catch (e) {}
-      routeSourceAdded = false;
-    }
-    driveBtn.disabled = true;
-    resetBtn.disabled = true;
-    banner.classList.remove('hidden');
-  }
-
-  resetBtn.addEventListener('click', clearPlan);
-
-  map.on('click', function(e) {
-    if (driveMode.active) return;
-    var ll = [e.lngLat.lng, e.lngLat.lat];
-    if (!origin) {
-      origin = ll;
-      originMarker = new maplibregl.Marker({ element: makeDot('#22c55e') })
-        .setLngLat(ll).addTo(map);
-      resetBtn.disabled = false;
-    } else if (!dest) {
-      dest = ll;
-      destMarker = new maplibregl.Marker({ element: makeDot('#ef4444') })
-        .setLngLat(ll).addTo(map);
-      drawRoute();
-    } else {
-      // Third tap — treat as new origin; clear and restart
-      clearPlan();
-      origin = ll;
-      originMarker = new maplibregl.Marker({ element: makeDot('#22c55e') })
-        .setLngLat(ll).addTo(map);
-      resetBtn.disabled = false;
-    }
-  });
-
-  locateBtn.addEventListener('click', function() {
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(function(p) {
-      map.easeTo({
-        center: [p.coords.longitude, p.coords.latitude],
-        zoom: Math.max(15, map.getZoom()),
-        duration: 800
-      });
-    }, function() {}, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
-  });
-
-  // ---------- Driving mode (mirrors the ZIM viewer's logic) ----------
-
-  var driveMode = (function() {
-    var state = {
-      active: false,
-      route: null,
-      savedCam: null,
-      watchId: null,
-      lastBearing: null,
-      offRouteSince: 0
-    };
-
-    function setStatus(msg) {
-      if (!msg) { statusEl.classList.remove('visible'); statusEl.textContent = ''; return; }
-      statusEl.textContent = msg;
-      statusEl.classList.add('visible');
-    }
-
-    function onPosition(pos) {
-      if (!state.active || !state.route) return;
-      var lat = pos.coords.latitude, lon = pos.coords.longitude;
-      var proj = projectOnRoute(state.route, lat, lon);
-      var remaining = Math.max(0, state.route.distance - proj.distAlong);
-      var avgSpeed = state.route.time > 0 ? state.route.distance / state.route.time : 0;
-      var remainingTime = avgSpeed > 0 ? remaining / avgSpeed : 0;
-
-      distEl.textContent = formatDistance(remaining);
-      streetEl.textContent = remaining < 30 ? 'Arriving at destination' : 'Continue to destination';
-      arrowEl.textContent = remaining < 30 ? '◎' : '↑';
-      remainEl.textContent = formatDistance(remaining) + ' · ' + formatDuration(remainingTime);
-      etaEl.textContent = formatEtaClock(remainingTime);
-
-      if (proj.offMeters > 60) {
-        if (!state.offRouteSince) state.offRouteSince = Date.now();
-        if (Date.now() - state.offRouteSince > 6000) {
-          setStatus('Off route (' + Math.round(proj.offMeters) + ' m).');
-        }
-      } else {
-        state.offRouteSince = 0;
-        setStatus('');
-      }
-
-      var speed = pos.coords.speed;
-      var heading = pos.coords.heading;
-      var bearing;
-      if (typeof heading === 'number' && !isNaN(heading) && speed != null && speed > 1) {
-        bearing = heading;
-      } else {
-        bearing = proj.bearing;
-      }
-      if (state.lastBearing != null) {
-        var delta = ((bearing - state.lastBearing + 540) % 360) - 180;
-        if (Math.abs(delta) < 2) bearing = state.lastBearing;
-      }
-      state.lastBearing = bearing;
-
-      map.easeTo({
-        center: [lon, lat],
-        bearing: bearing, pitch: 60, zoom: 17,
-        duration: 600,
-        easing: function(t) { return t; }
-      });
-    }
-
-    function onError(err) {
-      setStatus('Location unavailable: ' + (err && err.message ? err.message : 'error'));
-    }
-
-    var api = {
-      get active() { return state.active; },
-      enter: function() {
-        if (state.active || !route) return;
-        if (!navigator.geolocation) { setStatus('Geolocation not supported'); return; }
-        state.active = true;
-        state.route = route;
-        state.savedCam = {
-          center: map.getCenter(),
-          zoom: map.getZoom(),
-          bearing: map.getBearing(),
-          pitch: map.getPitch()
+  async function ensureSW() {
+    const reg = await navigator.serviceWorker.register('sw.js', { scope: './' });
+    // Wait until there's an active, controlling SW — fetch interception
+    // only works once the page is controlled.
+    if (!navigator.serviceWorker.controller) {
+      await new Promise((resolve) => {
+        const check = () => {
+          if (navigator.serviceWorker.controller) resolve();
+          else setTimeout(check, 100);
         };
-        hudEl.classList.add('visible');
-        hudEl.setAttribute('aria-hidden', 'false');
-        distEl.textContent = '—';
-        streetEl.textContent = 'Getting location…';
-        arrowEl.textContent = '↑';
-        remainEl.textContent = '—';
-        etaEl.textContent = '—';
-        setStatus('');
-        driveBtn.textContent = 'Exit driving';
-        map.easeTo({ pitch: 60, zoom: 17, duration: 600 });
-        try {
-          state.watchId = navigator.geolocation.watchPosition(
-            onPosition, onError,
-            { enableHighAccuracy: true, timeout: 15000, maximumAge: 2000 }
-          );
-        } catch (e) {
-          setStatus('Could not start location tracking');
-          state.active = false;
-          hudEl.classList.remove('visible');
-          driveBtn.textContent = 'Drive ▶';
-        }
-      },
-      exit: function() {
-        if (!state.active) return;
-        state.active = false;
-        if (state.watchId != null) {
-          try { navigator.geolocation.clearWatch(state.watchId); } catch (e) {}
-          state.watchId = null;
-        }
-        hudEl.classList.remove('visible');
-        hudEl.setAttribute('aria-hidden', 'true');
-        if (state.savedCam) {
-          map.easeTo({
-            center: state.savedCam.center,
-            zoom: state.savedCam.zoom,
-            bearing: state.savedCam.bearing,
-            pitch: state.savedCam.pitch,
-            duration: 800
-          });
-          state.savedCam = null;
-        }
-        state.route = null;
-        state.lastBearing = null;
-        state.offRouteSince = 0;
-        driveBtn.textContent = 'Drive ▶';
-      }
-    };
-    return api;
-  })();
-
-  driveBtn.addEventListener('click', function() {
-    if (!route) return;
-    if (driveMode.active) driveMode.exit();
-    else driveMode.enter();
-  });
-  exitBtn.addEventListener('click', function() { driveMode.exit(); });
-
-  // Keep screen awake while driving (best-effort; Safari/iOS 16.4+)
-  var wakeLock = null;
-  async function acquireWakeLock() {
-    try {
-      if ('wakeLock' in navigator) {
-        wakeLock = await navigator.wakeLock.request('screen');
-      }
-    } catch (e) { /* ignore */ }
-  }
-  function releaseWakeLock() {
-    if (wakeLock) { try { wakeLock.release(); } catch (e) {} wakeLock = null; }
-  }
-  document.addEventListener('visibilitychange', function() {
-    if (document.visibilityState === 'visible' && driveMode.active) acquireWakeLock();
-  });
-  // Patch enter/exit to toggle wake lock
-  var _enter = driveMode.enter, _exit = driveMode.exit;
-  driveMode.enter = function() { _enter.call(driveMode); if (driveMode.active) acquireWakeLock(); };
-  driveMode.exit  = function() { releaseWakeLock(); _exit.call(driveMode); };
-
-  // ---------- Service worker (offline shell) ----------
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function() {
-      navigator.serviceWorker.register('sw.js').catch(function(e) {
-        console.warn('[streetzim-drive] sw register failed', e);
+        check();
       });
+    }
+    return reg;
+  }
+
+  function askSW(msg) {
+    return new Promise((resolve, reject) => {
+      const ch = new MessageChannel();
+      ch.port1.onmessage = (e) => resolve(e.data);
+      const target = navigator.serviceWorker.controller;
+      if (!target) { reject(new Error('no active service worker')); return; }
+      target.postMessage(msg, [ch.port2]);
+      setTimeout(() => reject(new Error('SW message timeout')), 30000);
     });
   }
+
+  async function refreshStatus() {
+    try {
+      const r = await askSW({ type: 'status' });
+      if (r && r.ok && r.loaded) {
+        setStatus('ok', 'ZIM loaded',
+          'v' + r.info.version + ' · ' + r.info.articles.toLocaleString() + ' entries · ' +
+          r.info.sizeMB + ' MB');
+        openBtn.style.display = '';
+        clearBtn.style.display = '';
+        pickBtn.textContent = 'Change ZIM';
+      } else {
+        setStatus('warn', 'No ZIM loaded',
+          'Pick a file below — it stays in your browser, nothing uploaded.');
+        openBtn.style.display = 'none';
+        clearBtn.style.display = 'none';
+        pickBtn.textContent = 'Choose a ZIM file';
+      }
+    } catch (err) {
+      setStatus('err', 'Status check failed', String(err && err.message || err));
+    }
+  }
+
+  // ---------- File picker ----------
+
+  async function pickFile() {
+    try {
+      if (window.showOpenFilePicker) {
+        const [handle] = await window.showOpenFilePicker({
+          types: [{ description: 'ZIM files', accept: { 'application/octet-stream': ['.zim'] } }],
+          excludeAcceptAllOption: false,
+          multiple: false
+        });
+        return await handle.getFile();
+      }
+    } catch (err) {
+      if (err && err.name === 'AbortError') return null;
+      dbg('showOpenFilePicker failed, falling back to input', err);
+    }
+    return new Promise((resolve) => {
+      fileFallback.onchange = () => {
+        resolve(fileFallback.files && fileFallback.files[0] ? fileFallback.files[0] : null);
+      };
+      fileFallback.click();
+    });
+  }
+
+  async function loadZim(file) {
+    if (!file) return;
+    if (!/\.zim$/i.test(file.name) && file.type !== 'application/octet-stream') {
+      setStatus('warn', 'Not a .zim file',
+        'Got: ' + file.name + ' (' + (file.type || 'unknown type') + ')');
+      return;
+    }
+    setStatus('warn', 'Loading ZIM…',
+      file.name + ' · ' + (file.size / (1024 * 1024)).toFixed(1) + ' MB — opening header…');
+    try {
+      const resp = await askSW({ type: 'set-zim', blob: file, name: file.name });
+      if (!resp || !resp.ok) throw new Error(resp && resp.error || 'SW rejected file');
+      await refreshStatus();
+      // Small delay so the user sees the "ZIM loaded" flash before redirecting.
+      setTimeout(() => { window.location.href = 'viewer/'; }, 600);
+    } catch (err) {
+      setStatus('err', 'Failed to open ZIM', String(err && err.message || err));
+    }
+  }
+
+  pickBtn.addEventListener('click', async () => {
+    const file = await pickFile();
+    if (file) loadZim(file);
+  });
+
+  clearBtn.addEventListener('click', async () => {
+    if (!confirm('Remove the loaded ZIM from this browser?')) return;
+    try {
+      const r = await askSW({ type: 'clear-zim' });
+      if (!r || !r.ok) throw new Error(r && r.error || 'SW refused');
+      await refreshStatus();
+    } catch (err) {
+      setStatus('err', 'Clear failed', String(err && err.message || err));
+    }
+  });
+
+  // ---------- Boot ----------
+
+  (async () => {
+    try {
+      swRegistration = await ensureSW();
+      dbg('sw ready', swRegistration.scope);
+      await refreshStatus();
+    } catch (err) {
+      setStatus('err', 'Service worker registration failed',
+        String(err && err.message || err));
+    }
+  })();
 })();
 </script>
 </body>

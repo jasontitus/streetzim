@@ -13,3 +13,9 @@ terrain_cache*/
 terrain_compression_test/
 world-data/
 wikidata_cache/
+
+# PWA assets populated by scripts/sync-drive-viewer.sh (run via Firebase
+# predeploy hook). Keeping them out of git avoids drift with the
+# canonical viewer in resources/viewer/ and the CDN-hosted libraries.
+web/drive/viewer/
+web/drive/fzstd.js

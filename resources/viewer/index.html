@@ -401,15 +401,21 @@
     font-size: 12px; color: var(--text-secondary);
   }
   #routing-clear:hover { background: var(--hover-bg); color: var(--text-primary); }
-  #routing-drive {
-    display: none; margin-top: 8px; width: 100%;
-    padding: 8px; border: none; border-radius: 6px;
+  #routing-go-row {
+    display: none; margin-top: 8px; gap: 6px;
+  }
+  #routing-go-row.visible { display: flex; }
+  #routing-go-row button {
+    flex: 1; padding: 8px 6px; border: none; border-radius: 6px;
     background: #2563eb; cursor: pointer; font-family: var(--ui-font);
     font-size: 13px; font-weight: 600; color: #fff;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.3px; min-width: 0;
   }
-  #routing-drive:hover { background: #1d4ed8; }
-  #routing-drive:active { background: #1e40af; }
+  #routing-go-row button:hover { background: #1d4ed8; }
+  #routing-go-row button:active { background: #1e40af; }
+  #routing-go-row button.active-mode { background: #b91c1c; }
+  #routing-go-row button.active-mode:hover { background: #991b1b; }
+  #routing-go-row button.hidden-mode { display: none; }
   /* --- Driving mode HUD --- */
   #drive-hud {
     display: none; position: absolute; top: 10px; left: 10px; right: 10px;
@@ -513,7 +519,11 @@
     <div class="route-stat"><label>Est. time</label><value id="route-time"></value></div>
     <div id="route-roads"></div>
   </div>
-  <button id="routing-drive">Drive &#9654;</button>
+  <div id="routing-go-row">
+    <button id="routing-drive" data-mode="drive">Drive</button>
+    <button id="routing-walk"  data-mode="walk">Walk</button>
+    <button id="routing-bike"  data-mode="bike">Bike</button>
+  </div>
   <button id="routing-clear">Clear route</button>
 </div>
 <div id="drive-hud" aria-hidden="true">
@@ -2312,7 +2322,28 @@ function initRouting(map, config) {
   var timeEl = document.getElementById('route-time');
   var roadsEl = document.getElementById('route-roads');
   var clearBtn = document.getElementById('routing-clear');
-  var driveBtn = document.getElementById('routing-drive');
+  var goRow = document.getElementById('routing-go-row');
+  var modeBtns = {
+    drive: document.getElementById('routing-drive'),
+    walk:  document.getElementById('routing-walk'),
+    bike:  document.getElementById('routing-bike')
+  };
+  var MODE_LABELS = { drive: 'Drive', walk: 'Walk', bike: 'Bike' };
+  // Per-mode presets — camera feels right for the modality and the avg
+  // speed is used to re-estimate remaining-time since the routing graph
+  // is driver-speeds only. Speeds in m/s: walk≈3.1 mph, bike≈10 mph.
+  var MODE_PRESETS = {
+    drive: { pitch: 60, zoom: 17,   speed: null },  // null = use route's car-speed
+    walk:  { pitch: 45, zoom: 18,   speed: 1.4 },
+    bike:  { pitch: 55, zoom: 17.5, speed: 4.5 }
+  };
+
+  function resetGoButtons() {
+    Object.keys(modeBtns).forEach(function(m) {
+      modeBtns[m].classList.remove('active-mode', 'hidden-mode');
+      modeBtns[m].textContent = MODE_LABELS[m];
+    });
+  }
 
   toggleBtn.style.display = 'block';
 
@@ -2362,8 +2393,8 @@ function initRouting(map, config) {
     destResultsEl.style.display = 'none';
     resultEl.style.display = 'none';
     clearBtn.style.display = 'none';
-    driveBtn.style.display = 'none';
-    driveBtn.innerHTML = 'Drive &#9654;';
+    goRow.classList.remove('visible');
+    resetGoButtons();
     if (driveMode.active) driveMode.exit();
     lastRoute = null;
     if (originMarker) { originMarker.remove(); originMarker = null; }
@@ -2893,7 +2924,8 @@ function initRouting(map, config) {
         renderRoads(result.roads);
         resultEl.style.display = 'block';
         clearBtn.style.display = 'block';
-        driveBtn.style.display = 'block';
+        goRow.classList.add('visible');
+        resetGoButtons();
         lastRoute = augmentRouteForDriving(result);
         if (driveMode.active) driveMode.setRoute(lastRoute);
         statusEl.textContent = '';
@@ -3211,6 +3243,7 @@ function initRouting(map, config) {
 
     var state = {
       active: false,
+      mode: 'drive',
       route: null,
       savedCam: null,
       watchId: null,
@@ -3222,7 +3255,7 @@ function initRouting(map, config) {
 
     exitBtn.addEventListener('click', function() {
       api.exit();
-      driveBtn.innerHTML = 'Drive &#9654;';
+      resetGoButtons();
     });
 
     function setStatus(msg) {
@@ -3237,9 +3270,16 @@ function initRouting(map, config) {
       var proj = projectOnRoute(state.route, lat, lon);
       var totalDist = state.route.distance;
       var remaining = Math.max(0, totalDist - proj.distAlong);
-      // Average speed of the planned route; we don't have real-time segment
-      // speeds, so this is a reasonable ETA estimate.
-      var avgSpeed = state.route.time > 0 ? state.route.distance / state.route.time : 0;
+      // Remaining time. Drive mode uses the route's A*-computed time
+      // (car speeds). Walk/bike override with a flat avg speed since the
+      // routing graph only has car speeds.
+      var preset = MODE_PRESETS[state.mode] || MODE_PRESETS.drive;
+      var avgSpeed;
+      if (preset.speed != null) {
+        avgSpeed = preset.speed;
+      } else {
+        avgSpeed = state.route.time > 0 ? state.route.distance / state.route.time : 0;
+      }
       var remainingTime = avgSpeed > 0 ? remaining / avgSpeed : 0;
 
       // Find next turn ahead of us
@@ -3303,11 +3343,12 @@ function initRouting(map, config) {
       }
       state.lastBearing = bearing;
 
+      var p = MODE_PRESETS[state.mode] || MODE_PRESETS.drive;
       map.easeTo({
         center: [lon, lat],
         bearing: bearing,
-        pitch: 60,
-        zoom: 17,
+        pitch: p.pitch,
+        zoom: p.zoom,
         duration: 600,
         easing: function(t) { return t; }
       });
@@ -3320,13 +3361,14 @@ function initRouting(map, config) {
     var api = {
       get active() { return state.active; },
       setRoute: function(r) { state.route = r; state.lastBearing = null; },
-      enter: function() {
+      enter: function(mode) {
         if (state.active) return;
         if (!lastRoute) return;
         if (!navigator.geolocation) {
           setStatus('Geolocation not supported in this browser');
           return;
         }
+        state.mode = MODE_PRESETS[mode] ? mode : 'drive';
         state.active = true;
         state.route = lastRoute;
         state.savedCam = {
@@ -3345,7 +3387,8 @@ function initRouting(map, config) {
         setStatus('');
         // Immediate camera shift so the user sees the perspective change
         // before the first fix arrives.
-        map.easeTo({ pitch: 60, zoom: 17, duration: 600 });
+        var p = MODE_PRESETS[state.mode];
+        map.easeTo({ pitch: p.pitch, zoom: p.zoom, duration: 600 });
         try {
           state.watchId = navigator.geolocation.watchPosition(
             onPosition,
@@ -3385,15 +3428,26 @@ function initRouting(map, config) {
     return api;
   })();
 
-  driveBtn.addEventListener('click', function() {
-    if (!lastRoute) return;
-    if (driveMode.active) {
-      driveMode.exit();
-      driveBtn.innerHTML = 'Drive &#9654;';
-    } else {
-      driveMode.enter();
-      if (driveMode.active) driveBtn.textContent = 'Exit driving';
-    }
+  Object.keys(modeBtns).forEach(function(mode) {
+    modeBtns[mode].addEventListener('click', function() {
+      if (!lastRoute) return;
+      if (driveMode.active) {
+        driveMode.exit();
+        resetGoButtons();
+        return;
+      }
+      driveMode.enter(mode);
+      if (driveMode.active) {
+        Object.keys(modeBtns).forEach(function(m) {
+          if (m === mode) {
+            modeBtns[m].classList.add('active-mode');
+            modeBtns[m].textContent = 'Exit';
+          } else {
+            modeBtns[m].classList.add('hidden-mode');
+          }
+        });
+      }
+    });
   });
 
   // Keep HUD units in sync with the scale bar unit toggle
