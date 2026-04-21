@@ -168,33 +168,63 @@
   let swRegistration = null;
 
   async function ensureSW() {
-    // Use absolute /drive/sw.js rather than relative 'sw.js' — Firebase's
-    // cleanUrls serves /drive/index.html at /drive (no trailing slash), so
-    // a relative 'sw.js' resolves against /drive (treated as a filename)
-    // and the browser tries /sw.js which 404s.
+    // Absolute path + absolute scope — Firebase cleanUrls can strip the
+    // trailing slash from /drive/, which would make the relative form
+    // 'sw.js' resolve at the site root. Being explicit side-steps it.
+    setStatus('warn', 'Starting up…', 'Registering service worker…');
     const reg = await navigator.serviceWorker.register('/drive/sw.js', { scope: '/drive/' });
-    // Wait until there's an active, controlling SW — fetch interception
-    // only works once the page is controlled.
+    swRegistration = reg;
+    dbg('register ok', { scope: reg.scope,
+                         installing: !!reg.installing,
+                         waiting: !!reg.waiting,
+                         active: !!reg.active });
+
+    // Wait for an active worker (not necessarily controlling yet).
+    setStatus('warn', 'Starting up…', 'Waiting for activation…');
+    await navigator.serviceWorker.ready;
+
+    // On first install the page isn't controlled yet even though activate
+    // fired, because clients.claim() takes a tick. Give it ~3 s, then
+    // proceed regardless — askSW falls back to registration.active.
     if (!navigator.serviceWorker.controller) {
+      setStatus('warn', 'Starting up…', 'Waiting for controller…');
       await new Promise((resolve) => {
-        const check = () => {
-          if (navigator.serviceWorker.controller) resolve();
-          else setTimeout(check, 100);
+        const done = () => { cleanup(); resolve(); };
+        const cleanup = () => {
+          navigator.serviceWorker.removeEventListener('controllerchange', done);
+          clearTimeout(t);
         };
-        check();
+        const t = setTimeout(done, 3000);
+        navigator.serviceWorker.addEventListener('controllerchange', done, { once: true });
       });
     }
+    dbg('sw ready', {
+      controlled: !!navigator.serviceWorker.controller,
+      active: !!(reg.active),
+      state: reg.active && reg.active.state
+    });
     return reg;
+  }
+
+  function swTarget() {
+    // Prefer the controller (what fetch interception needs), but fall back
+    // to any worker attached to our registration so postMessage works on
+    // the very first load before clients.claim() has taken effect.
+    if (navigator.serviceWorker.controller) return navigator.serviceWorker.controller;
+    if (swRegistration) {
+      return swRegistration.active || swRegistration.waiting || swRegistration.installing;
+    }
+    return null;
   }
 
   function askSW(msg) {
     return new Promise((resolve, reject) => {
+      const target = swTarget();
+      if (!target) { reject(new Error('no service worker available')); return; }
       const ch = new MessageChannel();
-      ch.port1.onmessage = (e) => resolve(e.data);
-      const target = navigator.serviceWorker.controller;
-      if (!target) { reject(new Error('no active service worker')); return; }
+      const t = setTimeout(() => reject(new Error('SW message timeout')), 30000);
+      ch.port1.onmessage = (e) => { clearTimeout(t); resolve(e.data); };
       target.postMessage(msg, [ch.port2]);
-      setTimeout(() => reject(new Error('SW message timeout')), 30000);
     });
   }
 
