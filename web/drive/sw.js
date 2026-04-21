@@ -1,69 +1,292 @@
-// StreetZim Drive — minimal service worker for the PWA shell.
+// StreetZim Drive — service worker.
 //
-// Phase 2a goal: make "Add to Home Screen" work and keep the app shell
-// available when cell coverage is spotty. Map tiles still need network;
-// Phase 2b will move to a local-ZIM reader served via maplibregl.addProtocol.
+// Role: turn the Firebase-hosted /drive/ PWA into a fully offline viewer
+// backed by whichever .zim file the user picks. Responsibilities:
+//   1. Precache the viewer shell (HTML + MapLibre JS/CSS) on install.
+//   2. Intercept fetches from /drive/viewer/* and serve them either from
+//      the shell cache (known static assets) or from the user's local
+//      ZIM via ZimReader.
+//   3. Keep the ZIM Blob in IndexedDB so it survives SW termination and
+//      re-launches.
+//
+// After install + ZIM pick, the app works with zero network requests.
 
-const SHELL_CACHE = 'streetzim-drive-shell-v1';
+importScripts('./fzstd.js', './zim-reader.js');
+
+// Bump this when the shell changes (new maplibre, new viewer HTML, etc.).
+// The sync script writes a stamp to web/drive/viewer/.version which the
+// page reads on load and posts to the SW — we compare and clear stale
+// caches. For now just hand-bump on big changes.
+const SHELL_CACHE = 'streetzim-drive-shell-v2';
+
 const SHELL_URLS = [
   './',
   './index.html',
   './manifest.webmanifest',
-  'https://unpkg.com/maplibre-gl@5.23.0/dist/maplibre-gl.css',
-  'https://unpkg.com/maplibre-gl@5.23.0/dist/maplibre-gl.js'
+  './icon-192.png',
+  './icon-512.png',
+  './viewer/',
+  './viewer/index.html',
+  './viewer/maplibre-gl.js',
+  './viewer/maplibre-gl.css'
 ];
 
+// Files in /drive/viewer/ that are always part of the shell, never the
+// ZIM. Everything else under /drive/viewer/ is ZIM content.
+const VIEWER_SHELL_NAMES = new Set([
+  '', 'index.html', 'maplibre-gl.js', 'maplibre-gl.css'
+]);
+
+// ---------- IndexedDB helpers (no dependency) ----------
+
+const DB_NAME = 'streetzim-drive';
+const DB_VERSION = 1;
+const DB_STORE = 'zim';
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(DB_STORE)) {
+        db.createObjectStore(DB_STORE, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbGet(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DB_STORE, 'readonly');
+    const req = tx.objectStore(DB_STORE).get(id);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbPut(record) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DB_STORE, 'readwrite');
+    tx.objectStore(DB_STORE).put(record);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function idbDelete(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DB_STORE, 'readwrite');
+    tx.objectStore(DB_STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// ---------- ZIM reader (lazy singleton) ----------
+
+let readerPromise = null;  // Promise<ZimReader|null>
+
+function resetReader() {
+  readerPromise = null;
+}
+
+async function getReader() {
+  if (readerPromise) return readerPromise;
+  readerPromise = (async () => {
+    const rec = await idbGet('current');
+    if (!rec || !rec.blob) return null;
+    const r = new self.StreetZimReader(rec.blob);
+    await r.open();
+    return r;
+  })();
+  return readerPromise;
+}
+
+// ---------- Lifecycle ----------
+
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(SHELL_CACHE).then((cache) =>
-      // Don't fail install if one asset refuses to cache (CDN CORS quirks etc.)
-      Promise.all(SHELL_URLS.map((url) =>
-        cache.add(url).catch((err) => console.warn('[sw] skip', url, err))
-      ))
-    ).then(() => self.skipWaiting())
-  );
+  event.waitUntil((async () => {
+    const cache = await caches.open(SHELL_CACHE);
+    // Don't fail install if one asset can't be cached — we prefer a
+    // partly-working PWA over none at all.
+    await Promise.all(SHELL_URLS.map((url) =>
+      cache.add(url).catch((err) => console.warn('[sw] skip', url, err))
+    ));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((names) =>
-      Promise.all(names.filter((n) => n !== SHELL_CACHE).map((n) => caches.delete(n)))
-    ).then(() => self.clients.claim())
-  );
+  event.waitUntil((async () => {
+    const names = await caches.keys();
+    await Promise.all(
+      names.filter((n) => n !== SHELL_CACHE).map((n) => caches.delete(n))
+    );
+    await self.clients.claim();
+  })());
 });
+
+// ---------- Messages from the page ----------
+
+self.addEventListener('message', (event) => {
+  const msg = event.data || {};
+  event.waitUntil((async () => {
+    let reply = { ok: true };
+    try {
+      if (msg.type === 'set-zim') {
+        await idbPut({
+          id: 'current',
+          blob: msg.blob,
+          name: msg.name || 'zim',
+          addedAt: Date.now()
+        });
+        resetReader();
+        // Force-open so the page sees any error immediately.
+        const r = await getReader();
+        reply.info = r ? r.info : null;
+      } else if (msg.type === 'clear-zim') {
+        await idbDelete('current');
+        resetReader();
+      } else if (msg.type === 'status') {
+        const r = await getReader().catch(() => null);
+        reply.info = r ? r.info : null;
+        reply.loaded = !!r;
+      } else {
+        reply = { ok: false, error: 'unknown message type' };
+      }
+    } catch (err) {
+      reply = { ok: false, error: String(err && err.message || err) };
+    }
+    if (event.ports && event.ports[0]) event.ports[0].postMessage(reply);
+  })());
+});
+
+// ---------- Fetch interception ----------
+
+function rangeResponse(data, range, mime) {
+  // Parse "bytes=start-end" (end optional)
+  const m = /^bytes=(\d+)-(\d*)$/.exec(range);
+  if (!m) return null;
+  const start = parseInt(m[1], 10);
+  const end = m[2] ? parseInt(m[2], 10) : data.byteLength - 1;
+  if (isNaN(start) || start >= data.byteLength) return null;
+  const slice = data.subarray(start, Math.min(end + 1, data.byteLength));
+  return new Response(slice, {
+    status: 206,
+    statusText: 'Partial Content',
+    headers: {
+      'Content-Type': mime,
+      'Content-Length': String(slice.byteLength),
+      'Content-Range': 'bytes ' + start + '-' + (start + slice.byteLength - 1) + '/' + data.byteLength,
+      'Accept-Ranges': 'bytes'
+    }
+  });
+}
+
+function okResponse(data, mime) {
+  return new Response(data, {
+    status: 200,
+    headers: {
+      'Content-Type': mime,
+      'Content-Length': String(data.byteLength),
+      'Cache-Control': 'no-cache',
+      'Accept-Ranges': 'bytes'
+    }
+  });
+}
+
+function notFound(path) {
+  return new Response('Not in ZIM: ' + path, {
+    status: 404,
+    headers: { 'Content-Type': 'text/plain' }
+  });
+}
+
+function noZim() {
+  return new Response('No ZIM loaded', {
+    status: 503,
+    headers: { 'Content-Type': 'text/plain' }
+  });
+}
+
+async function serveFromZim(viewerPath, request) {
+  try {
+    const reader = await getReader();
+    if (!reader) return noZim();
+    const entry = await reader.read(viewerPath);
+    if (!entry) return notFound(viewerPath);
+    const range = request.headers.get('range');
+    if (range) {
+      const rr = rangeResponse(entry.data, range, entry.mime);
+      if (rr) return rr;
+    }
+    return okResponse(entry.data, entry.mime);
+  } catch (err) {
+    console.error('[sw] ZIM lookup failed for', viewerPath, err);
+    return new Response('ZIM error: ' + (err && err.message || err), {
+      status: 500,
+      headers: { 'Content-Type': 'text/plain' }
+    });
+  }
+}
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
+
   const url = new URL(req.url);
 
-  // Tiles: network-first with cache fallback. Keeps the map fresh when we
-  // have signal, shows last-seen tiles when we don't.
-  if (/\.tile\.openstreetmap\.org$/i.test(url.hostname)) {
-    event.respondWith(
-      fetch(req).then((resp) => {
-        // Only cache successful opaque/basic responses
-        if (resp && resp.ok) {
-          const copy = resp.clone();
-          caches.open('streetzim-drive-tiles-v1').then((c) => c.put(req, copy));
+  // Only intercept within our own scope. Firebase assets outside /drive/
+  // (e.g. analytics for web/index.html) fall through to the network.
+  if (url.origin !== location.origin) return;
+  if (!url.pathname.startsWith('/drive/')) return;
+
+  // Viewer scope: /drive/viewer/*
+  const viewerPrefix = '/drive/viewer/';
+  if (url.pathname === viewerPrefix || url.pathname.startsWith(viewerPrefix)) {
+    const rest = url.pathname.slice(viewerPrefix.length);  // '' | 'index.html' | 'tiles/10/1/2.pbf' | ...
+    const firstSegment = rest.split('/')[0] || '';
+    if (VIEWER_SHELL_NAMES.has(firstSegment) && !rest.includes('/')) {
+      // Shell asset — serve from cache, network as fallback.
+      event.respondWith((async () => {
+        const cached = await caches.match(req);
+        if (cached) return cached;
+        try {
+          const net = await fetch(req);
+          if (net && net.ok) {
+            const copy = net.clone();
+            caches.open(SHELL_CACHE).then((c) => c.put(req, copy));
+          }
+          return net;
+        } catch (e) {
+          return notFound(rest);
         }
-        return resp;
-      }).catch(() => caches.match(req))
-    );
+      })());
+      return;
+    }
+    // Data path — serve from ZIM.
+    event.respondWith(serveFromZim(rest, req));
     return;
   }
 
-  // Shell: cache-first, refresh in background.
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      const fetchPromise = fetch(req).then((resp) => {
-        if (resp && resp.ok && (url.origin === location.origin || url.hostname === 'unpkg.com')) {
-          const copy = resp.clone();
-          caches.open(SHELL_CACHE).then((c) => c.put(req, copy));
-        }
-        return resp;
-      }).catch(() => cached);
-      return cached || fetchPromise;
-    })
-  );
+  // /drive/ itself (picker page) and PWA shell assets: cache-first.
+  event.respondWith((async () => {
+    const cached = await caches.match(req);
+    if (cached) return cached;
+    try {
+      const net = await fetch(req);
+      if (net && net.ok) {
+        const copy = net.clone();
+        caches.open(SHELL_CACHE).then((c) => c.put(req, copy));
+      }
+      return net;
+    } catch (e) {
+      return cached || notFound(url.pathname);
+    }
+  })());
 });

@@ -1,6 +1,9 @@
 {
   "hosting": {
     "public": "web",
+    "predeploy": [
+      "bash scripts/sync-drive-viewer.sh"
+    ],
     "ignore": [
       "firebase.json",
       "**/.*",
@@ -31,6 +34,26 @@
         "headers": [
           { "key": "Content-Type", "value": "application/manifest+json" },
           { "key": "Cache-Control", "value": "public, max-age=300" }
+        ]
+      },
+      {
+        "source": "drive/zim-reader.js",
+        "headers": [
+          { "key": "Content-Type", "value": "text/javascript" },
+          { "key": "Cache-Control", "value": "public, max-age=3600" }
+        ]
+      },
+      {
+        "source": "drive/fzstd.js",
+        "headers": [
+          { "key": "Content-Type", "value": "text/javascript" },
+          { "key": "Cache-Control", "value": "public, max-age=86400" }
+        ]
+      },
+      {
+        "source": "drive/viewer/maplibre-gl.@(js|css)",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=86400" }
         ]
       }
     ],
