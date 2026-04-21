@@ -75,7 +75,7 @@ COPERNICUS_DEM_URL_GLO90 = (
 )
 
 # MapLibre GL JS version to bundle
-MAPLIBRE_VERSION = "5.23.0"
+MAPLIBRE_VERSION = "5.20.0"
 MAPLIBRE_CDN = f"https://unpkg.com/maplibre-gl@{MAPLIBRE_VERSION}/dist"
 
 
