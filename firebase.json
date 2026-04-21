@@ -19,6 +19,19 @@
           { "key": "Content-Type", "value": "application/octet-stream" },
           { "key": "Content-Disposition", "value": "attachment" }
         ]
+      },
+      {
+        "source": "drive/sw.js",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+        ]
+      },
+      {
+        "source": "drive/manifest.webmanifest",
+        "headers": [
+          { "key": "Content-Type", "value": "application/manifest+json" },
+          { "key": "Cache-Control", "value": "public, max-age=300" }
+        ]
       }
     ],
     "cleanUrls": true
