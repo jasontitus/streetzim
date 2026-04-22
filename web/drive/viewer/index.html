@@ -2481,7 +2481,9 @@ function initRouting(map, config) {
       throw new Error('Invalid routing graph magic');
     }
     var version = view.getUint32(4, true);
-    if (version !== 2 && version !== 3) throw new Error('Unsupported graph version: ' + version);
+    if (version !== 2 && version !== 3 && version !== 4) throw new Error('Unsupported graph version: ' + version);
+    // v4 appends a class_access u32 per edge — skip it by widening the edge stride.
+    var edgeStride = (version === 4) ? 5 : 4;
     var numNodes = view.getUint32(8, true);
     var numEdges = view.getUint32(12, true);
     var numGeoms = view.getUint32(16, true);
@@ -2494,8 +2496,8 @@ function initRouting(map, config) {
     offset += numNodes * 2 * 4;
     var adjOffsets = new Uint32Array(buffer, offset, numNodes + 1);
     offset += (numNodes + 1) * 4;
-    var edges = new Uint32Array(buffer, offset, numEdges * 4);
-    offset += numEdges * 4 * 4;
+    var edges = new Uint32Array(buffer, offset, numEdges * edgeStride);
+    offset += numEdges * edgeStride * 4;
     var geomOffsets = new Uint32Array(buffer, offset, numGeoms + 1);
     offset += (numGeoms + 1) * 4;
     var geomBlob = new Uint8Array(buffer, offset, geomBytes);
@@ -2553,14 +2555,14 @@ function initRouting(map, config) {
     var NO_GEOM;
     if (version === 2) {
       NO_GEOM = 0xFFFFFF;
-      edgeDistMeters = function(i) { return edges[i * 4 + 1] / 10; };
-      edgeSpeed = function(i) { return edges[i * 4 + 2] >>> 24; };
-      edgeGeomIdx = function(i) { return edges[i * 4 + 2] & 0xFFFFFF; };
-    } else { // v3
+      edgeDistMeters = function(i) { return edges[i * edgeStride + 1] / 10; };
+      edgeSpeed = function(i) { return edges[i * edgeStride + 2] >>> 24; };
+      edgeGeomIdx = function(i) { return edges[i * edgeStride + 2] & 0xFFFFFF; };
+    } else { // v3 + v4
       NO_GEOM = 0xFFFFFFFF;
-      edgeDistMeters = function(i) { return (edges[i * 4 + 1] & 0xFFFFFF) / 10; };
-      edgeSpeed = function(i) { return edges[i * 4 + 1] >>> 24; };
-      edgeGeomIdx = function(i) { return edges[i * 4 + 2]; };
+      edgeDistMeters = function(i) { return (edges[i * edgeStride + 1] & 0xFFFFFF) / 10; };
+      edgeSpeed = function(i) { return edges[i * edgeStride + 1] >>> 24; };
+      edgeGeomIdx = function(i) { return edges[i * edgeStride + 2]; };
     }
 
     return {
@@ -2573,11 +2575,11 @@ function initRouting(map, config) {
       adjOffsets: adjOffsets,
       edges: edges,
       NO_GEOM: NO_GEOM,
-      edgeTarget: function(i) { return edges[i * 4]; },
+      edgeTarget: function(i) { return edges[i * edgeStride]; },
       edgeDistMeters: edgeDistMeters,
       edgeSpeed: edgeSpeed,
       edgeGeomIdx: edgeGeomIdx,
-      edgeNameIdx: function(i) { return edges[i * 4 + 3]; },
+      edgeNameIdx: function(i) { return edges[i * edgeStride + 3]; },
       decodeGeom: decodeGeom,
       getName: function(nameIdx) {
         if (nameIdx <= 0 || nameIdx >= numNames) return '';
