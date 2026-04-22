@@ -1044,13 +1044,47 @@ fetchConfig(1)
       document.querySelector('#info p').textContent = 'Map data: ' + config.buildDate;
     }
 
-    // Check for #map=zoom/lat/lon hash (used by search result redirects)
+    // URL-fragment routing. Supports three independent fragments
+    // that can mix (`#dest=…&label=…`, `#map=…&dest=…`, …):
+    //   map=zoom/lat/lon              ← legacy "show this on the map"
+    //   dest=lat,lon                  ← pre-populate routing destination
+    //   origin=lat,lon                ← pre-populate routing origin
+    //   label=…                       ← optional label for the dest pin
+    // Search detail pages (search/<slug>.html) link in via dest=… so
+    // the viewer pops the routing panel open with the place already
+    // filled in — see "Directions to here" CTA.
     function applyHash() {
-      var hash = window.location.hash;
+      var hash = window.location.hash || '';
       var m = hash.match(/map=(\d+\.?\d*)\/(-?\d+\.?\d*)\/(-?\d+\.?\d*)/);
       if (m) {
         var z = parseFloat(m[1]), lat = parseFloat(m[2]), lon = parseFloat(m[3]);
         map.flyTo({ center: [lon, lat], zoom: z, duration: 1500 });
+      }
+      var destMatch  = hash.match(/dest=(-?\d+\.?\d*),(-?\d+\.?\d*)/);
+      var origMatch  = hash.match(/origin=(-?\d+\.?\d*),(-?\d+\.?\d*)/);
+      var labelMatch = hash.match(/label=([^&]+)/);
+      var label = labelMatch ? decodeURIComponent(labelMatch[1]) : null;
+      if (destMatch) {
+        var dLat = parseFloat(destMatch[1]), dLon = parseFloat(destMatch[2]);
+        // If we don't already have a `map=` fragment, frame the
+        // destination so the user sees what they picked.
+        if (!m) map.flyTo({ center: [dLon, dLat], zoom: 16, duration: 1200 });
+        // Open the routing panel + load the graph by triggering the
+        // same toggle button the user would press. `setDestFromLatLon`
+        // queues the pick if the graph isn't loaded yet, so timing
+        // doesn't matter.
+        var routingApi = window.streetzimRouting;
+        var tBtn = document.getElementById('route-toggle');
+        if (tBtn && document.getElementById('routing-panel').style.display !== 'block') {
+          tBtn.click();
+        }
+        if (routingApi && typeof routingApi.setDest === 'function') {
+          routingApi.setDest(dLat, dLon, label || '');
+        }
+        if (origMatch && routingApi && typeof routingApi.setOrigin === 'function') {
+          routingApi.setOrigin(parseFloat(origMatch[1]),
+                               parseFloat(origMatch[2]), '');
+        }
       }
     }
     map.on('load', applyHash);

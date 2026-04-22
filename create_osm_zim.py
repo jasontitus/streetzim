@@ -28,6 +28,7 @@ import argparse
 import datetime
 import glob
 import gzip
+import html as html_mod
 import json
 import os
 import shutil
@@ -36,6 +37,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -703,6 +705,62 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
     with open(completed_marker, "w") as f:
         f.write(f"{count + cached}\n")
     return count + cached
+
+
+def search_detail_html(name, kind_label, lat, lon, map_hash):
+    """HTML for a search-result detail page (`search/<slug>.html`).
+
+    Two CTAs: "View on map" reproduces the legacy auto-redirect target,
+    and "Directions to here" links the user into the viewer's routing
+    panel with the destination pre-populated. The viewer parses
+    `index.html#dest=lat,lon&label=…` on load and pops the routing
+    panel open with the destination filled — see `applyHash` in
+    `resources/viewer/index.html`.
+
+    No `<meta refresh>` redirect any more — the explicit CTAs let the
+    user choose between viewing and navigating, and search-result
+    pages now stay readable in their own right (useful in Kiwix when
+    you arrive via the title index rather than a tap).
+    """
+    safe_name = html_mod.escape(name)
+    safe_kind = html_mod.escape(kind_label)
+    label_q = urllib.parse.quote(name, safe="")
+    dest_hash = f"dest={lat},{lon}&label={label_q}"
+    return (
+        '<!DOCTYPE html><html><head>'
+        '<meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<title>{safe_name}</title>'
+        '<style>'
+        'body{font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;'
+        'margin:0;padding:24px;max-width:640px;color:#1a1a1a;'
+        'background:#fafafa;line-height:1.45}'
+        'h1{margin:0 0 4px;font-size:1.6rem}'
+        'p.kind{margin:0 0 18px;color:#666;font-size:0.95rem}'
+        'p.coords{margin:18px 0 0;color:#888;font-size:0.85rem;'
+        'font-family:ui-monospace,Menlo,monospace}'
+        '.cta{display:flex;flex-direction:column;gap:10px;margin-top:14px}'
+        '.cta a{display:block;padding:12px 16px;border-radius:10px;'
+        'text-decoration:none;font-weight:600;text-align:center;'
+        'border:1px solid #d0d0d0;color:#1a1a1a;background:#fff}'
+        '.cta a.primary{background:#0a7cff;color:#fff;border-color:#0a7cff}'
+        '.cta a:active{transform:scale(0.99)}'
+        '@media(prefers-color-scheme:dark){'
+        'body{background:#111;color:#eee}p.kind{color:#aaa}p.coords{color:#888}'
+        '.cta a{background:#1c1c1c;border-color:#333;color:#eee}'
+        '.cta a.primary{background:#0a7cff;color:#fff;border-color:#0a7cff}}'
+        '</style>'
+        '</head><body>'
+        f'<h1>{safe_name}</h1>'
+        f'<p class="kind">{safe_kind}</p>'
+        '<div class="cta">'
+        f'<a class="primary" href="index.html#{dest_hash}">'
+        'Directions to here</a>'
+        f'<a href="index.html#{map_hash}">View on map</a>'
+        '</div>'
+        f'<p class="coords">{lat:.5f}, {lon:.5f}</p>'
+        '</body></html>'
+    )
 
 
 def download_osm_extract(geofabrik_path, dest):
@@ -3398,22 +3456,15 @@ def create_zim(
                     map_hash = f"map={zoom}/{feat['lat']}/{feat['lon']}"
                     label = feat.get("subtype", feat["type"]).replace("_", " ").title()
 
-                    html = (
-                        f'<!DOCTYPE html><html><head>'
-                        f'<meta charset="utf-8">'
-                        f'<meta http-equiv="refresh" content="0;url=index.html#{map_hash}">'
-                        f'<title>{feat["name"]}</title>'
-                        f'</head><body>'
-                        f'<h1>{feat["name"]}</h1>'
-                        f'<p>{label}</p>'
-                        f'<p><a href="index.html#{map_hash}">View on map</a></p>'
-                        f'</body></html>'
+                    page_html = search_detail_html(
+                        feat["name"], label,
+                        feat["lat"], feat["lon"], map_hash
                     )
                     creator.add_item(MapItem(
                         f"search/{slug}.html",
                         feat["name"],
                         "text/html",
-                        html.encode("utf-8"),
+                        page_html.encode("utf-8"),
                         is_front=False,
                     ))
 
@@ -3491,22 +3542,15 @@ def create_zim(
                 map_hash = f"map={zoom}/{feat['lat']}/{feat['lon']}"
                 label = feat.get("subtype", feat["type"]).replace("_", " ").title()
 
-                html = (
-                    f'<!DOCTYPE html><html><head>'
-                    f'<meta charset="utf-8">'
-                    f'<meta http-equiv="refresh" content="0;url=index.html#{map_hash}">'
-                    f'<title>{feat["name"]}</title>'
-                    f'</head><body>'
-                    f'<h1>{feat["name"]}</h1>'
-                    f'<p>{label}</p>'
-                    f'<p><a href="index.html#{map_hash}">View on map</a></p>'
-                    f'</body></html>'
+                page_html = search_detail_html(
+                    feat["name"], label,
+                    feat["lat"], feat["lon"], map_hash
                 )
                 creator.add_item(MapItem(
                     f"search/{slug}.html",
                     feat["name"],
                     "text/html",
-                    html.encode("utf-8"),
+                    page_html.encode("utf-8"),
                     is_front=False,
                 ))
 
