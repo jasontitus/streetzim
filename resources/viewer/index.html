@@ -2584,6 +2584,26 @@ function initRouting(map, config) {
       edgeSpeed: edgeSpeed,
       edgeGeomIdx: edgeGeomIdx,
       edgeNameIdx: function(i) { return edges[i * edgeStride + 3]; },
+      // v4 class_access — bit layout in docs/driving-mode-road-class-warnings.md:
+      //   bits 0..4 : road-class ordinal
+      //   bit 5..7  : no-foot / no-bicycle / oneway
+      //   bit 8     : junction=roundabout
+      // v2/v3 ZIMs pre-dated this field, so we return 0 and the HUD
+      // falls back to geometric turn arrows — no roundabout/ramp cues.
+      edgeClassAccess: (version === 4)
+        ? function(i) { return edges[i * edgeStride + 4]; }
+        : function() { return 0; },
+      edgeIsRoundabout: (version === 4)
+        ? function(i) { return ((edges[i * edgeStride + 4] >>> 8) & 1) !== 0; }
+        : function() { return false; },
+      // Link / ramp ordinals: motorway_link=2, trunk_link=4, primary_link=6,
+      // secondary_link=8, tertiary_link=10.
+      edgeIsLink: (version === 4)
+        ? function(i) {
+            var cls = edges[i * edgeStride + 4] & 0x1F;
+            return cls === 2 || cls === 4 || cls === 6 || cls === 8 || cls === 10;
+          }
+        : function() { return false; },
       decodeGeom: decodeGeom,
       getName: function(nameIdx) {
         if (nameIdx <= 0 || nameIdx >= numNames) return '';
@@ -2776,8 +2796,11 @@ function initRouting(map, config) {
       var distM = graph.edgeDistMeters(ei);
       var geomIdx = graph.edgeGeomIdx(ei);
       var nameIdx = graph.edgeNameIdx(ei);
+      var isRound = graph.edgeIsRoundabout(ei);
+      var isLink  = graph.edgeIsLink(ei);
+      var manFlags = (isRound ? 1 : 0) | (isLink ? 2 : 0);
       totalDist += distM;
-      segRev.push({ nameIdx: nameIdx, distM: distM });
+      segRev.push({ nameIdx: nameIdx, distM: distM, flags: manFlags });
 
       var fromLat = nodesScaled[p * 2] / 1e7;
       var fromLon = nodesScaled[p * 2 + 1] / 1e7;
@@ -2794,15 +2817,19 @@ function initRouting(map, config) {
       n = p;
     }
 
-    // Coalesce consecutive same-name segments into named roads.
-    // Goal: a human-readable list like "Broadway (1.2 km) → Main St (0.4 km)..."
+    // Coalesce consecutive same-name segments into named roads. We also
+    // coalesce by maneuver flags so that e.g. a multi-segment unnamed
+    // roundabout collapses into one "roundabout" road entry (was merging
+    // by name alone, which dropped the maneuver cue on unnamed pieces).
     var roads = [];
     for (var si = segRev.length - 1; si >= 0; si--) {
       var s = segRev[si];
-      if (roads.length > 0 && roads[roads.length - 1].nameIdx === s.nameIdx) {
+      if (roads.length > 0 &&
+          roads[roads.length - 1].nameIdx === s.nameIdx &&
+          roads[roads.length - 1].flags === s.flags) {
         roads[roads.length - 1].distM += s.distM;
       } else {
-        roads.push({ nameIdx: s.nameIdx, distM: s.distM });
+        roads.push({ nameIdx: s.nameIdx, distM: s.distM, flags: s.flags });
       }
     }
 
@@ -3206,9 +3233,10 @@ function initRouting(map, config) {
   }
 
   // Augment a route with data the HUD needs:
-  //   cumM[i]      — distance from start to coords[i] (meters)
-  //   turns[]      — { distM, coordIdx, nameIdx } for each road-name change,
-  //                  distM = cumulative distance at the turn, nameIdx = NEXT road
+  //   cumM[i]  — distance from start to coords[i] (meters)
+  //   turns[]  — { distM, coordIdx, nameIdx, flags, fromFlags } for each
+  //              road-name-or-flags change. flags = road you're entering,
+  //              fromFlags = road you're leaving (bit 0 roundabout, bit 1 link).
   function augmentRouteForDriving(route) {
     var coords = route.coords;
     var cumM = new Float64Array(coords.length);
@@ -3234,7 +3262,9 @@ function initRouting(map, config) {
       turns.push({
         distM: running,
         coordIdx: ci,
-        nameIdx: roads[r + 1].nameIdx
+        nameIdx: roads[r + 1].nameIdx,
+        flags: roads[r + 1].flags || 0,
+        fromFlags: roads[r].flags || 0
       });
     }
     return {
@@ -3586,14 +3616,44 @@ function initRouting(map, config) {
             }
           }
         }
-        streetEl.textContent = name ? ('onto ' + name) : 'next turn';
-        // Tangent just after the turn → rotate arrow relative to current bearing
-        var nextCi = Math.min(nextTurn.coordIdx + 1, state.route.coords.length - 1);
-        var nextTangent = bearingDeg(
-          state.route.coords[nextTurn.coordIdx][1], state.route.coords[nextTurn.coordIdx][0],
-          state.route.coords[nextCi][1],           state.route.coords[nextCi][0]
-        );
-        arrowEl.textContent = turnGlyph(nextTangent - proj.bearing);
+        // Maneuver cue from SZRG-v4 class_access flags (v2/v3 ZIMs set
+        // flags=0, falling through to the geometric arrow below).
+        var nextFlags = nextTurn.flags || 0;
+        var prevFlags = nextTurn.fromFlags || 0;
+        var enteringRound = (nextFlags & 1) && !(prevFlags & 1);
+        var exitingRound  = !(nextFlags & 1) && (prevFlags & 1);
+        var enteringLink  = (nextFlags & 2) && !(prevFlags & 2);
+        if (enteringRound) {
+          // Hunt forward for the first named non-roundabout road — that's
+          // the actual destination the driver cares about.
+          var exitName = '';
+          for (var t = 0; t < state.route.turns.length; t++) {
+            var tt = state.route.turns[t];
+            if (tt.distM <= nextTurn.distM) continue;
+            if (tt.flags & 1) continue;
+            var nm = graph.getName(tt.nameIdx);
+            if (nm) { exitName = nm; break; }
+          }
+          streetEl.textContent = exitName
+            ? ('take roundabout onto ' + exitName)
+            : 'take roundabout';
+          arrowEl.textContent = '↻';
+        } else if (exitingRound) {
+          streetEl.textContent = name ? ('exit onto ' + name) : 'exit roundabout';
+          arrowEl.textContent = '↱';
+        } else if (enteringLink) {
+          streetEl.textContent = name ? ('take ramp onto ' + name) : 'take ramp';
+          arrowEl.textContent = '↗';
+        } else {
+          streetEl.textContent = name ? ('onto ' + name) : 'next turn';
+          // Tangent just after the turn → rotate arrow relative to current bearing
+          var nextCi = Math.min(nextTurn.coordIdx + 1, state.route.coords.length - 1);
+          var nextTangent = bearingDeg(
+            state.route.coords[nextTurn.coordIdx][1], state.route.coords[nextTurn.coordIdx][0],
+            state.route.coords[nextCi][1],           state.route.coords[nextCi][0]
+          );
+          arrowEl.textContent = turnGlyph(nextTangent - proj.bearing);
+        }
       } else {
         // No more turns — you're on the final leg
         distEl.textContent = formatDistanceLocalized(remaining, unit);

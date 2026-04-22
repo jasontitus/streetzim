@@ -1761,6 +1761,21 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
     }
     DEFAULT_SPEED = 30
 
+    # Road-class ordinal for the v4 routing-graph class_access u32
+    # (bits 0..4). See docs/driving-mode-road-class-warnings.md for the
+    # full bit layout. Unknown / missing classes fall through to 0.
+    CLASS_ORDINAL = {
+        "motorway": 1, "motorway_link": 2,
+        "trunk": 3, "trunk_link": 4,
+        "primary": 5, "primary_link": 6,
+        "secondary": 7, "secondary_link": 8,
+        "tertiary": 9, "tertiary_link": 10,
+        "residential": 11, "living_street": 12,
+        "unclassified": 13, "service": 14,
+        "track": 15, "path": 16, "footway": 17,
+        "cycleway": 18, "pedestrian": 19, "steps": 20,
+    }
+
     # Pass 1: Walk every highway way, record node refs. Junctions = nodes
     # appearing in 2+ ways OR at way endpoints. Store interior refs in a
     # compact int64 array and endpoint refs in a set; after the pass, sort
@@ -1894,6 +1909,15 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
     edges_dist_speed = array.array('I')
     edges_geom = array.array('I')
     edges_name = array.array('I')
+    # v4 class_access u32 per edge — see docs/driving-mode-road-class-warnings.md
+    # for the bit layout. We populate:
+    #   bits 0..4 : road-class ordinal
+    #   bit 5     : foot=no
+    #   bit 6     : bicycle=no
+    #   bit 7     : oneway=yes
+    #   bit 8     : junction=roundabout / circular / mini_roundabout
+    # bits 9..31 stay reserved so future access/maneuver flags can slot in.
+    edges_class_access = array.array('I')
 
     # Geom offsets are stored as uint32 byte offsets into the blob — v2 format
     # caps geom_blob at 2^32 bytes. For continent-scale extracts (Europe) the
@@ -1951,6 +1975,23 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
             else:
                 oneway = 0
             speed = SPEED.get(hw, DEFAULT_SPEED)
+
+            # v4 class_access u32 (see docs/driving-mode-road-class-warnings.md).
+            # Packed once per way — every edge derived from this way shares the
+            # same class / access / roundabout state.
+            class_ord = CLASS_ORDINAL.get(hw, 0) & 0x1F
+            access_bits = 0
+            if w.tags.get("foot") == "no":    access_bits |= 0x20  # bit 5
+            if w.tags.get("bicycle") == "no": access_bits |= 0x40  # bit 6
+            if oneway == 1:                   access_bits |= 0x80  # bit 7
+            # Roundabouts in OSM are implicitly oneway. Mark them in bit 8 so
+            # the HUD can say "take roundabout" and render a curved arrow.
+            # Includes mini_roundabout because the maneuver is the same from
+            # a driver's perspective.
+            junction = (w.tags.get("junction") or "").strip()
+            if junction in ("roundabout", "circular", "mini_roundabout"):
+                access_bits |= 0x100  # bit 8
+            class_access = class_ord | access_bits
 
             # Name label (same logic as before: prefer name, fall back to ref)
             name = (w.tags.get("name") or "").strip()
@@ -2049,6 +2090,7 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
                         edges_dist_speed.append(dist_speed)
                         edges_geom.append(0xFFFFFFFF if fgi < 0 else fgi)
                         edges_name.append(name_idx)
+                        edges_class_access.append(class_access)
                         self.edge_count += 1
                     if oneway != 1:
                         edges_from.append(to_idx)
@@ -2056,6 +2098,7 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
                         edges_dist_speed.append(dist_speed)
                         edges_geom.append(0xFFFFFFFF if rgi < 0 else rgi)
                         edges_name.append(name_idx)
+                        edges_class_access.append(class_access)
                         self.edge_count += 1
 
                 seg_start = i
@@ -2081,17 +2124,19 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
 
     edges_from_np = np.frombuffer(edges_from, dtype=np.uint32)
     sort_order = np.argsort(edges_from_np, kind='stable')
-    # Build final edges array in v3 layout:
-    #   (target, dist_speed, geom_idx, name_idx)
-    # dist_speed = (speed << 24) | dist_dm24
-    # geom_idx is a full u32; 0xFFFFFFFF means "no geometry".
-    edges_arr = np.empty((num_edges, 4), dtype='<u4')
+    # Build final edges array in v4 layout (u32 stride = 5):
+    #   (target, dist_speed, geom_idx, name_idx, class_access)
+    # dist_speed  = (speed << 24) | dist_dm24
+    # geom_idx    full u32; 0xFFFFFFFF = "no geometry"
+    # class_access bit layout per docs/driving-mode-road-class-warnings.md
+    edges_arr = np.empty((num_edges, 5), dtype='<u4')
     edges_arr[:, 0] = np.frombuffer(edges_to, dtype=np.uint32)[sort_order]
     edges_arr[:, 1] = np.frombuffer(edges_dist_speed, dtype=np.uint32)[sort_order]
     edges_arr[:, 2] = np.frombuffer(edges_geom, dtype=np.uint32)[sort_order]
     edges_arr[:, 3] = np.frombuffer(edges_name, dtype=np.uint32)[sort_order]
+    edges_arr[:, 4] = np.frombuffer(edges_class_access, dtype=np.uint32)[sort_order]
     edges_from_sorted = edges_from_np[sort_order]
-    del edges_from, edges_to, edges_dist_speed, edges_geom, edges_name
+    del edges_from, edges_to, edges_dist_speed, edges_geom, edges_name, edges_class_access
     del edges_from_np, sort_order
 
     adj_offsets = np.zeros(num_nodes + 1, dtype='<u4')
@@ -2124,11 +2169,12 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
         cur += len(b)
     name_offsets[num_names] = cur
 
-    # Serialize (SZRG v3 format — see the viewer parser for layout).
+    # Serialize (SZRG v4 format — see the viewer parser for layout, and
+    # docs/driving-mode-road-class-warnings.md for the class_access field).
     output_path = os.path.join(output_dir, "routing-graph.bin")
     with open(output_path, "wb") as f:
         f.write(b"SZRG")
-        np.array([3, num_nodes, num_edges, num_geoms, geom_bytes_total,
+        np.array([4, num_nodes, num_edges, num_geoms, geom_bytes_total,
                   num_names, names_bytes], dtype='<u4').tofile(f)
         nodes_arr.tofile(f)
         adj_offsets.tofile(f)
@@ -2140,10 +2186,16 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
             f.write(b)
 
     size_mb = os.path.getsize(output_path) / (1024 * 1024)
+    # Class_access diagnostics — helps verify the v4 writer populated flags
+    # for regions that are expected to have lots of roundabouts or ramps.
+    class_access_col = edges_arr[:, 4]
+    num_round = int(((class_access_col >> 8) & 1).sum())
+    num_link = int(np.isin((class_access_col & 0x1F), [2, 4, 6, 8, 10]).sum())
     print(f"    Routing graph: {size_mb:.1f} MB ({num_nodes} nodes, "
           f"{num_edges} edges, {num_geoms} geoms, "
           f"{geom_bytes_total / (1024*1024):.1f} MB geom blob, "
-          f"{num_names} names, {names_bytes / 1024:.0f} KB name text)")
+          f"{num_names} names, {names_bytes / 1024:.0f} KB name text, "
+          f"{num_round} roundabout + {num_link} link edges)")
     return output_path
 
 
