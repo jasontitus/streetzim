@@ -3774,7 +3774,65 @@ function initRouting(map, config) {
     },
     loadGraph: loadGraph,
     get graphReady() { return !!graph; },
-    get hasRoute()   { return !!lastRoute; }
+    get hasRoute()   { return !!lastRoute; },
+
+    /// Atomic "enter drive mode with these endpoints". Handles the full
+    /// sequence internally so host containers (e.g. the mcpzim iOS chat
+    /// view) don't have to orchestrate it across the JS bridge:
+    ///   1. Kick off loadGraph if needed, poll graphReady.
+    ///   2. Call setOriginFromLatLon / setDestFromLatLon.
+    ///   3. Poll lastRoute (set asynchronously by computeAndDrawRoute).
+    ///   4. Call driveMode.enter(mode) *directly* — not via modeBtn.click(),
+    ///      which toggles and can flip the HUD off on repeated calls.
+    ///   5. Mark modeBtns UI to match (active-mode class on selected,
+    ///      hidden-mode on the others + Exit label) so the visual state
+    ///      agrees with the internal state when the user eventually
+    ///      returns to the routing panel.
+    /// Returns a Promise that resolves when drive mode is active or
+    /// rejects on timeout / error. Safe to call multiple times —
+    /// subsequent calls while already active are a no-op.
+    enterDriveMode: function(mode, origLat, origLon, destLat, destLon) {
+      return new Promise(function(resolve, reject) {
+        if (!modeBtns[mode]) {
+          return reject(new Error("unknown mode: " + mode));
+        }
+        // `driveMode.active` is exposed via the IIFE's returned api;
+        // `state.mode` isn't, so we cache the last-entered mode ourselves.
+        if (driveMode.active && window.streetzimRouting.__lastEnteredMode === mode) {
+          return resolve({ alreadyActive: true });
+        }
+        function waitFor(test, cb, label, tries) {
+          tries = tries || 0;
+          if (test()) return cb();
+          if (tries > 300) return reject(new Error("timeout waiting for " + label));
+          setTimeout(function() { waitFor(test, cb, label, tries + 1); }, 100);
+        }
+        if (!graph) loadGraph();
+        waitFor(function() { return !!graph; }, function() {
+          try {
+            setOriginFromLatLon(origLat, origLon, "Start");
+            setDestFromLatLon(destLat, destLon, "Destination");
+          } catch (e) { return reject(e); }
+          waitFor(function() { return !!lastRoute; }, function() {
+            try {
+              driveMode.enter(mode);
+              window.streetzimRouting.__lastEnteredMode = mode;
+              // Mirror what the mode-button click handler does to
+              // the go-row so the chrome agrees with the state.
+              Object.keys(modeBtns).forEach(function(m) {
+                if (m === mode) {
+                  modeBtns[m].classList.add("active-mode");
+                  modeBtns[m].textContent = "Exit";
+                } else {
+                  modeBtns[m].classList.add("hidden-mode");
+                }
+              });
+              resolve({ alreadyActive: false, mode: mode });
+            } catch (e) { reject(e); }
+          }, "lastRoute");
+        }, "graphReady");
+      });
+    }
   };
 }
 </script>
