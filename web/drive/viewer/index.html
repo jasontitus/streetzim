@@ -2458,7 +2458,7 @@ function initRouting(map, config) {
     removeRouteLine();
   }
 
-  // Binary graph format (SZRG v2 / v3):
+  // Binary graph format (SZRG v2 / v3 / v4):
   //   Header (32 B): "SZRG" magic, u32 version, u32 numNodes, u32 numEdges,
   //                  u32 numGeoms, u32 geomBytes, u32 numNames, u32 namesBytes
   //   Nodes:         Int32Array [lat_e7, lon_e7, ...] length numNodes*2
@@ -2482,7 +2482,11 @@ function initRouting(map, config) {
     }
     var version = view.getUint32(4, true);
     if (version !== 2 && version !== 3 && version !== 4) throw new Error('Unsupported graph version: ' + version);
-    // v4 appends a class_access u32 per edge — skip it by widening the edge stride.
+    // v4 inserts a trailing class_access u32 per edge (road class + access
+    // flags, see docs/driving-mode-road-class-warnings.md). The rest of
+    // the header/body layout is unchanged. We don't consume the extra
+    // field yet — walking it past the edge stride is enough to keep the
+    // routing reader compatible.
     var edgeStride = (version === 4) ? 5 : 4;
     var numNodes = view.getUint32(8, true);
     var numEdges = view.getUint32(12, true);
@@ -2558,7 +2562,7 @@ function initRouting(map, config) {
       edgeDistMeters = function(i) { return edges[i * edgeStride + 1] / 10; };
       edgeSpeed = function(i) { return edges[i * edgeStride + 2] >>> 24; };
       edgeGeomIdx = function(i) { return edges[i * edgeStride + 2] & 0xFFFFFF; };
-    } else { // v3 + v4
+    } else { // v3 + v4 share the packed speed+dist / full geom layout
       NO_GEOM = 0xFFFFFFFF;
       edgeDistMeters = function(i) { return (edges[i * edgeStride + 1] & 0xFFFFFF) / 10; };
       edgeSpeed = function(i) { return edges[i * edgeStride + 1] >>> 24; };
@@ -3749,6 +3753,22 @@ function initRouting(map, config) {
   map.on('streetzim.units', function() {
     // Next position tick will pick up new unit. No-op here; kept for future.
   });
+
+  // Host-container hook — lets a wrapper like the mcpzim iOS chat view
+  // drive routing + drive-mode from injected JS. All routing state
+  // (lastRoute, setOriginFromLatLon, modeBtns, graph) is function-scoped
+  // inside `initRouting`, so this tiny window object is the public seam.
+  // No-op cost when nothing calls it.
+  window.streetzimRouting = {
+    setOrigin: setOriginFromLatLon,
+    setDest:   setDestFromLatLon,
+    clickMode: function(mode) {
+      var btn = modeBtns[mode];
+      if (btn) btn.click();
+    },
+    get graphReady() { return !!graph; },
+    get hasRoute()   { return !!lastRoute; }
+  };
 }
 </script>
 </body>

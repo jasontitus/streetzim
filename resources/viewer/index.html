@@ -3759,6 +3759,12 @@ function initRouting(map, config) {
   // (lastRoute, setOriginFromLatLon, modeBtns, graph) is function-scoped
   // inside `initRouting`, so this tiny window object is the public seam.
   // No-op cost when nothing calls it.
+  //
+  // `graph` is lazy-loaded on first user interaction with the routing
+  // panel (`toggleBtn` click above), so a host that calls `setOrigin`
+  // cold would hit `if (!graph) return;` and silently no-op. Expose
+  // `loadGraph` directly so the host can kick off the fetch itself,
+  // then poll `graphReady` before calling `setOrigin / setDest`.
   window.streetzimRouting = {
     setOrigin: setOriginFromLatLon,
     setDest:   setDestFromLatLon,
@@ -3766,6 +3772,7 @@ function initRouting(map, config) {
       var btn = modeBtns[mode];
       if (btn) btn.click();
     },
+    loadGraph: loadGraph,
     get graphReady() { return !!graph; },
     get hasRoute()   { return !!lastRoute; }
   };
