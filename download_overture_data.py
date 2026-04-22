@@ -16,8 +16,8 @@ Usage:
       --release 2026-04-15.0 \\
       --out overture_cache/sv-addresses.parquet
 
-Current tested theme: `addresses`. Places/transportation are out of
-scope for v1 — see docs/overture-matching.md for the integration plan.
+Supported themes: `addresses`, `places`. `transportation` is out of
+scope — see docs/overture-matching.md for the integration plan.
 """
 import argparse
 import os
@@ -26,9 +26,33 @@ import sys
 OVERTURE_S3_BUCKET = "s3://overturemaps-us-west-2"
 DEFAULT_RELEASE = "2026-04-15.0"
 
-# Only addresses for now. Schemas for other themes differ enough that
-# adding them blindly would ship corrupted columns.
-SUPPORTED_THEMES = {"addresses"}
+# Each theme needs its own S3 path suffix + column projection.
+# Adding a theme requires auditing its schema against
+# create_osm_zim.py's merge_* consumers — don't add blindly.
+THEME_SPECS = {
+    "addresses": {
+        "s3_glob": "theme=addresses/type=address/*",
+        "columns": (
+            "id, number, street, postcode, unit, country, "
+            "address_levels, sources, "
+            "ST_AsText(geometry) AS wkt"
+        ),
+    },
+    "places": {
+        "s3_glob": "theme=places/type=place/*",
+        # Struct-typed fields (names / categories / brand / addresses /
+        # sources) come across as DuckDB STRUCT / LIST values which
+        # fetch_record_batch materializes as Python dicts / lists in
+        # pyarrow-backed rows. No extraction needed here — the merge
+        # step unpacks them.
+        "columns": (
+            "id, names, categories, confidence, phones, websites, "
+            "emails, socials, brand, addresses, sources, "
+            "ST_AsText(geometry) AS wkt"
+        ),
+    },
+}
+SUPPORTED_THEMES = set(THEME_SPECS.keys())
 
 
 def download_overture(theme: str, bbox: str, release: str, out_path: str) -> str:
@@ -60,16 +84,13 @@ def download_overture(theme: str, bbox: str, release: str, out_path: str) -> str
     con.execute("INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs;")
     con.execute("SET s3_region='us-west-2'; SET s3_url_style='vhost';")
 
-    source = f"{OVERTURE_S3_BUCKET}/release/{release}/theme={theme}/type=address/*"
-    # We keep raw Overture columns (no projection) so the merge step
-    # downstream has the full record to reason about. The bbox filter
-    # exploits Overture's per-row `bbox` struct which DuckDB can push
-    # into the parquet predicate and cut >99% of IO.
+    spec = THEME_SPECS[theme]
+    source = f"{OVERTURE_S3_BUCKET}/release/{release}/{spec['s3_glob']}"
+    # The bbox filter exploits Overture's per-row `bbox` struct, which
+    # DuckDB can push into the parquet predicate and cut >99% of IO.
     sql = f"""
     COPY (
-      SELECT id, number, street, postcode, unit, country,
-             address_levels, sources,
-             ST_AsText(geometry) AS wkt
+      SELECT {spec['columns']}
       FROM read_parquet('{source}', hive_partitioning=1)
       WHERE bbox.xmin >= {minlon} AND bbox.xmax <= {maxlon}
         AND bbox.ymin >= {minlat} AND bbox.ymax <= {maxlat}

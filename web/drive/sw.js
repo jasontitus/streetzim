@@ -17,7 +17,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // The sync script writes a stamp to web/drive/viewer/.version which the
 // page reads on load and posts to the SW — we compare and clear stale
 // caches. For now just hand-bump on big changes.
-const SHELL_CACHE = 'streetzim-drive-shell-v6';
+const SHELL_CACHE = 'streetzim-drive-shell-v9';
 
 const SHELL_URLS = [
   './',
@@ -110,6 +110,25 @@ async function getReader() {
 
 // ---------- Lifecycle ----------
 
+// Wrap a fetched response in a fresh Response object before caching.
+// Firebase's `cleanUrls: true` means `/drive/viewer/places.html` → 301
+// `/drive/viewer/places`. A plain fetch(url, redirect:'follow') returns a
+// Response whose `.redirected === true`. iOS Safari refuses to use any
+// such response for a *navigation* ("Response served by service worker
+// has redirections"), so we rebuild the Response from the body + status
+// + headers — the manual constructor has no redirect chain, which iOS
+// accepts. We keep `redirect: 'follow'` so the body is still the final
+// clean-URL content.
+async function cacheClean(cache, request, response) {
+  const body = await response.blob();
+  const clean = new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+  return cache.put(request, clean);
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(SHELL_CACHE);
@@ -120,7 +139,7 @@ self.addEventListener('install', (event) => {
       try {
         const res = await fetch(url, { cache: 'reload' });
         if (!res || !res.ok) throw new Error('status ' + (res && res.status));
-        await cache.put(url, res);
+        await cacheClean(cache, url, res);
       } catch (err) {
         console.warn('[sw] skip', url, err);
       }
@@ -268,7 +287,7 @@ self.addEventListener('fetch', (event) => {
           const net = await fetch(req);
           if (net && net.ok) {
             const copy = net.clone();
-            caches.open(SHELL_CACHE).then((c) => c.put(req, copy));
+            caches.open(SHELL_CACHE).then((c) => cacheClean(c, req, copy));
           }
           return net;
         } catch (e) {
@@ -302,7 +321,7 @@ self.addEventListener('fetch', (event) => {
       const net = await fetch(req);
       if (net && net.ok) {
         const copy = net.clone();
-        caches.open(SHELL_CACHE).then((c) => c.put(req, copy));
+        caches.open(SHELL_CACHE).then((c) => cacheClean(c, req, copy));
       }
       return net;
     } catch (e) {

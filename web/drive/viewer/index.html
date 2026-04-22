@@ -464,15 +464,18 @@
     margin-top: 2px;
   }
   #drive-exit,
-  #drive-fullscreen {
+  #drive-fullscreen,
+  #drive-recenter {
     flex-shrink: 0; background: rgba(255,255,255,0.12);
     border: none; border-radius: 8px; color: #fff;
     font-family: var(--ui-font); font-size: 12px; font-weight: 600;
     padding: 8px 12px; cursor: pointer; letter-spacing: 0.5px;
   }
   #drive-exit:hover,
-  #drive-fullscreen:hover { background: rgba(255,255,255,0.22); }
-  #drive-fullscreen { font-size: 18px; padding: 4px 10px; line-height: 1; }
+  #drive-fullscreen:hover,
+  #drive-recenter:hover { background: rgba(255,255,255,0.22); }
+  #drive-fullscreen,
+  #drive-recenter { font-size: 18px; padding: 4px 10px; line-height: 1; }
   /* When fullscreen is active, swap the glyph to an X and brighten it
      so the exit affordance is obvious at a glance. */
   html.drive-fullscreen-active #drive-fullscreen {
@@ -553,6 +556,43 @@
                 0 1px 6px rgba(0,0,0,0.4);
     pointer-events: none;
   }
+  /* Search-pin popup with inline "Directions to here" CTA. Routing is
+     now a one-tap hop from any search result. */
+  .pin-popup { min-width: 180px; max-width: 300px; }
+  .pin-popup .pin-name {
+    font-family: var(--ui-font); font-weight: 600;
+    font-size: 14px; color: var(--text-primary);
+    margin: 0 0 4px; line-height: 1.3; word-wrap: break-word;
+  }
+  .pin-popup .pin-brand {
+    font-family: var(--ui-font); font-size: 12px;
+    color: var(--text-secondary); margin: 0 0 4px;
+  }
+  .pin-popup .pin-cat {
+    font-family: var(--ui-font); font-size: 11px;
+    text-transform: capitalize; color: var(--text-tertiary);
+    margin: 0 0 8px;
+  }
+  .pin-popup .pin-contact {
+    display: flex; gap: 10px; flex-wrap: wrap;
+    margin: 0 0 10px; align-items: center;
+  }
+  .pin-popup .pin-link {
+    font-size: 16px; text-decoration: none;
+    padding: 4px 6px; border-radius: 6px;
+    background: var(--hover-bg); color: var(--accent);
+    line-height: 1; min-width: 24px; text-align: center;
+  }
+  .pin-popup .pin-link:hover { background: rgba(37,99,235,0.10); }
+  .pin-popup .pin-directions {
+    display: block; width: 100%;
+    padding: 8px 12px; font-family: var(--ui-font);
+    font-size: 13px; font-weight: 600;
+    background: var(--accent); color: #fff;
+    border: none; border-radius: 6px; cursor: pointer;
+  }
+  .pin-popup .pin-directions:hover { background: var(--accent-hover); }
+  .pin-popup .pin-directions:active { transform: translateY(1px); }
 </style>
 </head>
 <body>
@@ -561,7 +601,6 @@
   <button id="layer-toggle" title="Toggle satellite imagery">Satellite</button>
   <button id="terrain-toggle" title="Toggle 3D terrain">3D</button>
   <button id="wiki-toggle" title="Show nearby Wikipedia entries">Explore</button>
-  <button id="route-toggle" title="Get directions between two points">Route</button>
   <a id="places-link" href="places.html"
      title="Browse places by name or category">Find</a>
 </div>
@@ -604,6 +643,8 @@
       <div id="drive-dist">—</div>
       <div id="drive-street">Getting location…</div>
     </div>
+    <button id="drive-recenter" title="Recenter to default zoom &amp; pitch"
+            style="display:none;">◎</button>
     <button id="drive-fullscreen" title="Toggle fullscreen">&#x26F6;</button>
     <button id="drive-exit" title="Exit driving mode">EXIT</button>
   </div>
@@ -1101,32 +1142,50 @@ fetchConfig(1)
       }
       var destMatch  = hash.match(/dest=(-?\d+\.?\d*),(-?\d+\.?\d*)/);
       var origMatch  = hash.match(/origin=(-?\d+\.?\d*),(-?\d+\.?\d*)/);
+      var pinMatch   = hash.match(/pin=(-?\d+\.?\d*),(-?\d+\.?\d*)/);
       var labelMatch = hash.match(/label=([^&]+)/);
       var label = labelMatch ? decodeURIComponent(labelMatch[1]) : null;
+      // `pin=` drops a red pin + Directions popup at a location without
+      // opening the routing panel. Used by the Find-page "Map" button so
+      // the user sees what they picked instead of landing on an
+      // unannotated camera move.
+      if (pinMatch) {
+        var pinLat = parseFloat(pinMatch[1]), pinLon = parseFloat(pinMatch[2]);
+        placeSearchPin(map, pinLat, pinLon, label || '');
+      }
       if (destMatch) {
         var dLat = parseFloat(destMatch[1]), dLon = parseFloat(destMatch[2]);
         // If we don't already have a `map=` fragment, frame the
         // destination so the user sees what they picked.
         if (!m) map.flyTo({ center: [dLon, dLat], zoom: 16, duration: 1200 });
-        // Open the routing panel + load the graph by triggering the
-        // same toggle button the user would press. `setDestFromLatLon`
-        // queues the pick if the graph isn't loaded yet, so timing
-        // doesn't matter.
+        // Open the routing panel via the streetzimRouting surface.
+        // The legacy path clicked a now-removed `#route-toggle` button,
+        // which silently failed after the Find-first rework — breaking
+        // the entire deep-link flow.
         var routingApi = window.streetzimRouting;
-        var tBtn = document.getElementById('route-toggle');
-        if (tBtn && document.getElementById('routing-panel').style.display !== 'block') {
-          tBtn.click();
+        if (routingApi && typeof routingApi.open === 'function') {
+          routingApi.open();
         }
         if (routingApi && typeof routingApi.setDest === 'function') {
           routingApi.setDest(dLat, dLon, label || '');
         }
         if (origMatch && routingApi && typeof routingApi.setOrigin === 'function') {
-          routingApi.setOrigin(parseFloat(origMatch[1]),
-                               parseFloat(origMatch[2]), '');
+          var oLat = parseFloat(origMatch[1]), oLon = parseFloat(origMatch[2]);
+          routingApi.setOrigin(oLat, oLon, 'Current location');
+          // Stash on the window so the next "Directions to here" popup
+          // (or any in-session action) can reuse the fix without asking
+          // the browser for a new one.
+          window.__streetzimLastLoc = { lat: oLat, lon: oLon, ts: Date.now() };
         }
       }
     }
+    // Run applyHash both on `load` and (if the map already finished
+    // loading by the time we got here) immediately. Without the
+    // immediate fallback a fast PWA cold-start can leave `#pin=…` /
+    // `#dest=…` deep-links broken because the listener registered
+    // after the event already fired.
     map.on('load', applyHash);
+    if (map.loaded && map.loaded()) applyHash();
     window.addEventListener('hashchange', applyHash);
 
     // Attribution dialog
@@ -1663,6 +1722,111 @@ function makeStyle(config) {
 // bounded even for world-scale datasets (millions of features).
 var searchMarker = null;
 
+// Drop a red marker at (lat, lon) with a "Directions to here" popup.
+// Shared by the search-result picker and the #pin= deep-link path
+// (Find-page "Map" button). Replaces any existing search marker.
+// `map` is the module-scope map instance; callers ensure it's ready.
+function placeSearchPin(map, lat, lon, name, enrich) {
+  if (searchMarker) { searchMarker.remove(); searchMarker = null; }
+  searchMarker = new maplibregl.Marker({ color: '#e74c3c' })
+    .setLngLat([lon, lat])
+    .addTo(map);
+  if (!window.streetzimRouting ||
+      typeof window.streetzimRouting.open !== 'function') {
+    return searchMarker;
+  }
+  enrich = enrich || {};
+  var box = document.createElement('div');
+  box.className = 'pin-popup';
+  if (name) {
+    var nm = document.createElement('div');
+    nm.className = 'pin-name';
+    nm.textContent = name;
+    box.appendChild(nm);
+  }
+  // Brand subline — shows chain name ("Holiday Inn", "Starbucks") when
+  // the place's own name doesn't already contain it.
+  var brand = enrich.brand;
+  if (brand && (!name || name.toLowerCase().indexOf(brand.toLowerCase()) === -1)) {
+    var br = document.createElement('div');
+    br.className = 'pin-brand';
+    br.textContent = brand;
+    box.appendChild(br);
+  }
+  // Category label from Overture's normalized taxonomy
+  // (museum / hotel / vietnamese_restaurant / …).
+  var cat = enrich.cat || enrich.subtype;
+  if (cat) {
+    var ct = document.createElement('div');
+    ct.className = 'pin-cat';
+    ct.textContent = String(cat).replace(/_/g, ' ');
+    box.appendChild(ct);
+  }
+  // Contact row — icon links for website, phone, socials.
+  var contact = document.createElement('div');
+  contact.className = 'pin-contact';
+  var any = false;
+  function addLink(href, glyph, title) {
+    var a = document.createElement('a');
+    a.href = href;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.className = 'pin-link';
+    a.textContent = glyph;
+    a.title = title;
+    contact.appendChild(a);
+    any = true;
+  }
+  if (enrich.w)  addLink(enrich.w, '🌐', enrich.w);
+  if (enrich.p)  addLink('tel:' + enrich.p.replace(/\s+/g, ''), '📞', enrich.p);
+  if (enrich.soc && enrich.soc.length) {
+    enrich.soc.forEach(function(s) {
+      var host = s.toLowerCase();
+      var g = /facebook/.test(host) ? 'f' :
+              /instagram/.test(host) ? 'IG' :
+              /twitter|x\.com/.test(host) ? '𝕏' :
+              /tiktok/.test(host) ? 'TT' : '•';
+      addLink(s, g, s);
+    });
+  }
+  if (any) box.appendChild(contact);
+
+  var btn = document.createElement('button');
+  btn.className = 'pin-directions';
+  btn.textContent = 'Directions to here';
+  btn.addEventListener('click', function() {
+    window.streetzimRouting.open();
+    window.streetzimRouting.setDest(lat, lon, name || undefined);
+    var cached = window.__streetzimLastLoc;
+    var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
+    if (fresh) {
+      window.streetzimRouting.setOrigin(cached.lat, cached.lon, 'Current location');
+    } else if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        function(pos) {
+          window.__streetzimLastLoc = {
+            lat: pos.coords.latitude, lon: pos.coords.longitude, ts: Date.now()
+          };
+          window.streetzimRouting.setOrigin(
+            pos.coords.latitude, pos.coords.longitude, 'Current location');
+        },
+        function() {},
+        { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 });
+    }
+  });
+  box.appendChild(btn);
+  var popup = new maplibregl.Popup({ offset: 28, closeButton: true,
+                                     closeOnClick: false,
+                                     maxWidth: '320px' })
+    .setDOMContent(box);
+  searchMarker.setPopup(popup);
+  // Auto-open once the camera settles.
+  map.once('moveend', function() {
+    if (searchMarker) searchMarker.togglePopup();
+  });
+  return searchMarker;
+}
+
 function initSearch(map) {
   var input = document.getElementById('search-input');
   var resultsEl = document.getElementById('search-results');
@@ -1831,8 +1995,14 @@ function initSearch(map) {
     return matches.slice(0, 15);
   }
 
+  // Stash the rendered match set so selectResult can look up the full
+  // record (including Overture enrichment fields) by index — cleaner
+  // than mirroring every optional field as a data-attribute.
+  var lastSearchMatches = [];
+
   function renderResults(matches) {
     activeIdx = -1;
+    lastSearchMatches = matches;
     if (matches.length === 0) {
       resultsEl.innerHTML = '<div class="search-no-results">No results found</div>';
       resultsEl.style.display = 'block';
@@ -1841,11 +2011,15 @@ function initSearch(map) {
     var html = '';
     for (var j = 0; j < matches.length; j++) {
       var m = matches[j].item;
-      var label = m.s ? m.s.replace(/_/g, ' ') : m.t;
+      // Display label: Overture's clean category (`cat`) when present,
+      // otherwise fall back to the OMT subtype.
+      var rawLabel = m.cat || m.s || m.t;
+      var label = rawLabel ? String(rawLabel).replace(/_/g, ' ') : '';
       var loc = m.l ? ' &middot; ' + escapeHtml(m.l) : '';
       var distLabel = matches[j].dist ? ' &middot; ' + escapeHtml(matches[j].dist) : '';
       html += '<div class="search-result" data-idx="' + j +
-        '" data-lat="' + m.a + '" data-lon="' + m.o + '" data-type="' + m.t + '">' +
+        '" data-lat="' + m.a + '" data-lon="' + m.o + '" data-type="' + m.t +
+        '" data-name="' + escapeHtml(m.n) + '">' +
         '<span class="search-result-name">' + escapeHtml(m.n) + '</span>' +
         '<span class="search-result-type">' + escapeHtml(label) + loc + distLabel + '</span></div>';
     }
@@ -1884,16 +2058,29 @@ function initSearch(map) {
   }
 
   function selectResult(el) {
+    var idx = parseInt(el.getAttribute('data-idx'), 10);
+    var match = (isFinite(idx) && lastSearchMatches[idx]) || null;
+    var item = match && match.item ? match.item : null;
     var lat = parseFloat(el.getAttribute('data-lat'));
     var lon = parseFloat(el.getAttribute('data-lon'));
     var type = el.getAttribute('data-type');
+    var name = el.getAttribute('data-name') || (item && item.n) || '';
     var zoom = {place: 14, airport: 14, peak: 15, park: 15, water: 14, poi: 17, street: 16}[type] || 15;
-
-    if (searchMarker) { searchMarker.remove(); searchMarker = null; }
-    searchMarker = new maplibregl.Marker({ color: '#e74c3c' })
-      .setLngLat([lon, lat])
-      .addTo(map);
-
+    // Pull Overture enrichment fields when the result has them
+    // (websites, phones, socials, brand, normalized category).
+    var enrich = null;
+    if (item) {
+      enrich = {
+        cat:   item.cat,
+        subtype: item.s,
+        w:     item.w,
+        p:     item.p,
+        soc:   item.soc,
+        brand: item.brand,
+        wd:    item.wd,
+      };
+    }
+    placeSearchPin(map, lat, lon, name, enrich);
     map.flyTo({ center: [lon, lat], zoom: zoom, duration: 1500 });
     resultsEl.style.display = 'none';
     input.blur();
@@ -2445,6 +2632,12 @@ function initWikiSidebar(map, config) {
 function initRouting(map, config) {
   if (!config.hasRouting) return;
 
+  // The old "Route" button in the right rail was dropped in favor of a
+  // single "Find" entry-point — routing is now triggered from the search
+  // pin's "Directions" popup or places.html's "Directions" CTA via the
+  // streetzimRouting.open() hook. We tolerate the button being absent so
+  // legacy layouts (and host containers that inject their own entrypoint)
+  // still work.
   var toggleBtn = document.getElementById('route-toggle');
   var panel = document.getElementById('routing-panel');
   var closeBtn = document.getElementById('routing-close');
@@ -2482,7 +2675,7 @@ function initRouting(map, config) {
     });
   }
 
-  toggleBtn.style.display = 'block';
+  if (toggleBtn) toggleBtn.style.display = 'block';
 
   var active = false;
   var graph = null;       // {nodes: Float64Array, adj: Array, geom: Array}
@@ -2493,24 +2686,27 @@ function initRouting(map, config) {
   var routeDrawn = false;
   var lastRoute = null;   // last computed {coords, distance, time, roads} — used by driving mode
 
-  // Toggle routing mode
-  toggleBtn.addEventListener('click', function() {
-    active = !active;
-    if (active) {
-      toggleBtn.classList.add('active-control');
-      panel.style.display = 'block';
-      map.getCanvas().style.cursor = 'crosshair';
-      loadGraph();
-    } else {
-      deactivate();
-    }
-  });
+  function activate() {
+    active = true;
+    if (toggleBtn) toggleBtn.classList.add('active-control');
+    panel.style.display = 'block';
+    map.getCanvas().style.cursor = 'crosshair';
+    loadGraph();
+  }
+
+  // Toggle routing mode — only wired if the legacy Route button is in
+  // the DOM. Otherwise activation happens via streetzimRouting.open().
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', function() {
+      if (active) deactivate(); else activate();
+    });
+  }
 
   closeBtn.addEventListener('click', deactivate);
 
   function deactivate() {
     active = false;
-    toggleBtn.classList.remove('active-control');
+    if (toggleBtn) toggleBtn.classList.remove('active-control');
     panel.style.display = 'none';
     map.getCanvas().style.cursor = '';
     clearRoute();
@@ -3263,6 +3459,10 @@ function initRouting(map, config) {
       function(pos) {
         var lat = pos.coords.latitude;
         var lon = pos.coords.longitude;
+        // Cache for the rest of this session so the search-pin popup
+        // and any other "Directions to here" flows can reuse the fix
+        // instead of re-prompting.
+        window.__streetzimLastLoc = { lat: lat, lon: lon, ts: Date.now() };
         setOriginFromLatLon(lat, lon, 'Current location');
         map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 13), duration: 800 });
       },
@@ -3472,7 +3672,12 @@ function initRouting(map, config) {
       gotFirstFix: false,
       lastLat: null,       // most recent GPS fix — fed to re-route button
       lastLon: null,
-      reroutePending: false
+      reroutePending: false,
+      // True once the driver pinches / tilts / scrolls the map. Locks
+      // the follow-camera's zoom + pitch to whatever the driver chose,
+      // so we don't snap back on every position tick. Reset via the
+      // HUD "recenter" button or on drive-mode exit.
+      userPerspective: false
     };
 
     // Fullscreen behavior depends on context:
@@ -3590,6 +3795,36 @@ function initRouting(map, config) {
       resetGoButtons();
     });
 
+    // Recenter button — only shows after the driver has touched the
+    // camera manually; tapping it snaps back to the mode preset and
+    // resumes auto-follow of zoom + pitch.
+    var recenterBtn = document.getElementById('drive-recenter');
+    recenterBtn.addEventListener('click', function() {
+      state.userPerspective = false;
+      recenterBtn.style.display = 'none';
+      if (state.lastLat != null && state.lastLon != null) {
+        var p = MODE_PRESETS[state.mode] || MODE_PRESETS.drive;
+        map.easeTo({
+          center: [state.lastLon, state.lastLat],
+          zoom: p.zoom, pitch: p.pitch,
+          duration: 500, easing: function(t) { return t; }
+        });
+      }
+    });
+
+    // Detect driver-initiated camera changes. MapLibre fires zoom/pitch
+    // with `originalEvent` set when the change came from a user gesture
+    // (touch, wheel). Programmatic easeTo does not set it, so this
+    // cleanly separates "driver pinched" from "follow-cam updated".
+    function onUserCameraGesture(e) {
+      if (!state.active || !e || !e.originalEvent) return;
+      if (state.userPerspective) return;
+      state.userPerspective = true;
+      recenterBtn.style.display = '';
+    }
+    map.on('zoom', onUserCameraGesture);
+    map.on('pitch', onUserCameraGesture);
+
     var statusTextEl = document.getElementById('drive-status-text');
     var rerouteBtn = document.getElementById('drive-reroute-btn');
 
@@ -3643,6 +3878,9 @@ function initRouting(map, config) {
       var lat = pos.coords.latitude, lon = pos.coords.longitude;
       state.lastLat = lat;
       state.lastLon = lon;
+      // Mirror the fix into the session-wide cache so the search-pin
+      // popup and any post-drive routing keeps one-tap directions.
+      window.__streetzimLastLoc = { lat: lat, lon: lon, ts: Date.now() };
       // Place / update the "you are here" dot before doing any route
       // projection — the user wants to see themselves immediately, even
       // if the projection math below throws or the route is weird.
@@ -3776,14 +4014,22 @@ function initRouting(map, config) {
       state.lastBearing = bearing;
 
       var p = MODE_PRESETS[state.mode] || MODE_PRESETS.drive;
-      map.easeTo({
+      // Follow the user — always update center + bearing. Leave zoom &
+      // pitch alone once the driver has manually pinched or tilted, so
+      // their chosen perspective sticks until they tap "recenter" (◎)
+      // in the HUD. Auto-overriding every GPS fix made pinch-to-zoom
+      // effectively useless while driving.
+      var ease = {
         center: [lon, lat],
         bearing: bearing,
-        pitch: p.pitch,
-        zoom: p.zoom,
         duration: 600,
         easing: function(t) { return t; }
-      });
+      };
+      if (!state.userPerspective) {
+        ease.zoom = p.zoom;
+        ease.pitch = p.pitch;
+      }
+      map.easeTo(ease);
     }
 
     function onPositionError(err) {
@@ -3820,6 +4066,9 @@ function initRouting(map, config) {
         panel.style.display = 'none';
         if (controlsEl) controlsEl.style.display = 'none';
         if (searchEl)   searchEl.style.display = 'none';
+        // Fresh session starts with auto-follow on and recenter hidden.
+        state.userPerspective = false;
+        recenterBtn.style.display = 'none';
 
         hudEl.classList.add('visible');
         hudEl.setAttribute('aria-hidden', 'false');
@@ -3889,6 +4138,8 @@ function initRouting(map, config) {
         state.route = null;
         state.lastBearing = null;
         state.offRouteSince = 0;
+        state.userPerspective = false;
+        recenterBtn.style.display = 'none';
       }
     };
     return api;
@@ -3937,12 +4188,24 @@ function initRouting(map, config) {
     // feature-detect. Callers that need a given method should test
     // for it (`typeof window.streetzimRouting.foo === "function"`),
     // but the version helps diagnostics attribute "host vs ZIM" skew.
-    version: 3,
+    version: 4,
     setOrigin: setOriginFromLatLon,
     setDest:   setDestFromLatLon,
     clickMode: function(mode) {
       var btn = modeBtns[mode];
       if (btn) btn.click();
+    },
+    /// Open the routing panel programmatically. Used by the search pin
+    /// "Directions" popup and places.html's "Directions" CTA — both
+    /// entry points now that the Route button is gone from the right
+    /// rail. No-op when already open.
+    open: function() {
+      if (!active) activate();
+    },
+    /// Close the routing panel + clear route state. Mirrors the panel's
+    /// `×` button.
+    close: function() {
+      deactivate();
     },
     loadGraph: loadGraph,
     get graphReady() { return !!graph; },

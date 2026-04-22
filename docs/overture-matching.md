@@ -119,7 +119,67 @@ Overture has obvious duplicates (two Foursquare-sourced rows for the same
 business), dedupe the Overture side **before** matching — the best-score-wins
 rule is symmetric only when each side is already clean.
 
-## 6. Engineer checklist for `merge_overture_addresses()`
+## 6. v1 implementation notes (what we actually shipped 2026-04-22)
+
+`merge_overture_addresses()` and `merge_overture_places()` are now live
+in `create_osm_zim.py`. v1 is intentionally simpler than the full
+checklist below — practical defaults first, tighten later as real-world
+failures surface:
+
+- Pass 1 uses only `sources[].dataset == "OpenStreetMap"` as the
+  deterministic hook. `record_id` back-lookup against our OSM index is
+  a no-op today because `extract_addresses_pbf` doesn't persist OSM
+  element IDs. Places merge Pass 1 therefore runs almost exclusively
+  through Pass 2.
+- Pass 2 uses a rounded-coord key `(round(lat, 5), round(lon, 5))` for
+  addresses (≈1 m grid) and `(round(lat, 4), round(lon, 4))` for POIs
+  (≈10 m grid) plus normalized-name equality. No libpostal — in-house
+  `_normalize_street()` handles US suffix + direction abbreviations.
+  Good enough for the US/EU rows we've tested; expect tuning as
+  non-US regions land.
+- 1:many resolution is greedy-first-hit inside each coord bucket. No
+  Hungarian yet; the v1 buckets are small enough (often size 1).
+- Category authority — for POIs, Overture's `categories.primary` wins
+  over OMT's noisy `class` when the OSM `subtype` was a generic bucket
+  (`tourism`, `amenity`, `shop`, `attraction`, `leisure`, …). This is
+  the "categories matter" win: **museums tagged `tourism` in OMT now
+  expose `subtype: "museum"` in the search feed**, and the
+  `places.html` chips / pin-popup label treat `r.cat` as canonical.
+- Enrichment fields land on existing OSM POIs without overwriting any
+  field the OSM row already had (no regressions).
+- Fresh Overture POIs get emitted with `source: "overture"` so mcpzim
+  and the viewer can surface provenance.
+
+**Search record extensions** (all optional, additive):
+
+| field  | from                                 | typical size |
+|--------|--------------------------------------|-------------:|
+| `cat`  | `categories.primary`                 |  ~15 bytes   |
+| `w`    | `websites[0]`                        |  ~50 bytes   |
+| `p`    | `phones[0]`                          |  ~15 bytes   |
+| `soc`  | `socials[:3]` (array)                |  ~120 bytes  |
+| `brand`| `brand.names.primary`                |  ~20 bytes   |
+| `wd`   | `brand.wikidata`                     |   ~8 bytes   |
+| `source` | "overture" when Pass 2 added it    |  ~15 bytes   |
+
+Silicon Valley (bbox `-122.6,37.2,-121.7,37.9`, 2026-04-22) results:
+- 4,988 OSM POIs enriched
+- 224,141 new POIs added from Overture
+- JSONL: 222 MB → 275.8 MB (+53.8 MB raw)
+- ZIM: 194.9 MB → 221.0 MB (+26.1 MB, +13.4%)
+- Effective ZSTD ratio on the delta: ~2×
+
+**Known v1 gaps (deferred):**
+
+- `address_levels[]` from Overture isn't used to seed `location` —
+  `build_location_index` still runs `reverse_geocoder` on the coord.
+- `addresses[]` on place rows is ignored. When a place row is the only
+  signal of a building's address, we miss a chance to backfill the
+  addresses feed.
+- Pass 1 for address rows is dormant since we don't keep OSM element
+  IDs in the address pipeline; fixing that is a one-liner when we care.
+
+## 7. Full-fat engineer checklist (for the next iteration)
 
 1. Download Overture `addresses` + `places` theme for the target bbox.
 2. Reproject both sides to a local metric CRS (UTM zone or Web Mercator for

@@ -707,25 +707,69 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
     return count + cached
 
 
-def search_detail_html(name, kind_label, lat, lon, map_hash):
+def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
     """HTML for a search-result detail page (`search/<slug>.html`).
 
-    Two CTAs: "View on map" reproduces the legacy auto-redirect target,
-    and "Directions to here" links the user into the viewer's routing
-    panel with the destination pre-populated. The viewer parses
-    `index.html#dest=lat,lon&label=…` on load and pops the routing
-    panel open with the destination filled — see `applyHash` in
+    CTAs: "Directions to here" + "View on map" (no auto-redirect any
+    more). The viewer parses `index.html#dest=lat,lon&label=…` on load
+    and pops the routing panel open — see `applyHash` in
     `resources/viewer/index.html`.
 
-    No `<meta refresh>` redirect any more — the explicit CTAs let the
-    user choose between viewing and navigating, and search-result
-    pages now stay readable in their own right (useful in Kiwix when
-    you arrive via the title index rather than a tap).
+    `enrich` is an optional dict sourced from Overture's places theme:
+        {"w": website, "p": phone, "soc": [social urls],
+         "brand": brand name, "wd": wikidata Q-ID, "cat": category}
+    Rendered as a compact contact block below the kind label when
+    any field is present. Empty / missing fields are skipped so the
+    page stays readable for plain OSM-only POIs.
     """
     safe_name = html_mod.escape(name)
     safe_kind = html_mod.escape(kind_label)
     label_q = urllib.parse.quote(name, safe="")
     dest_hash = f"dest={lat},{lon}&label={label_q}"
+
+    enrich = enrich or {}
+    contact_html = ""
+    contact_parts = []
+    if enrich.get("brand"):
+        contact_parts.append(
+            f'<p class="brand">{html_mod.escape(enrich["brand"])}</p>')
+    links = []
+    if enrich.get("w"):
+        w = enrich["w"]
+        w_show = html_mod.escape(w)
+        w_attr = html_mod.escape(w, quote=True)
+        links.append(
+            f'<a href="{w_attr}" target="_blank" rel="noopener noreferrer">'
+            f'🌐 {w_show}</a>')
+    if enrich.get("p"):
+        p = enrich["p"]
+        p_attr = html_mod.escape(p.replace(" ", ""), quote=True)
+        links.append(
+            f'<a href="tel:{p_attr}">📞 {html_mod.escape(p)}</a>')
+    for s in (enrich.get("soc") or [])[:3]:
+        s_attr = html_mod.escape(s, quote=True)
+        host = s.lower()
+        if "facebook" in host:   g = "Facebook"
+        elif "instagram" in host: g = "Instagram"
+        elif "twitter" in host or "x.com" in host: g = "X / Twitter"
+        elif "tiktok" in host:   g = "TikTok"
+        else:                    g = "Social"
+        links.append(
+            f'<a href="{s_attr}" target="_blank" rel="noopener noreferrer">'
+            f'{g}</a>')
+    if enrich.get("wd"):
+        wd = html_mod.escape(enrich["wd"], quote=True)
+        links.append(
+            f'<a href="https://www.wikidata.org/wiki/{wd}" '
+            'target="_blank" rel="noopener noreferrer">Wikidata</a>')
+    if links:
+        contact_parts.append(
+            '<ul class="contact">' +
+            "".join(f'<li>{l}</li>' for l in links) +
+            '</ul>')
+    if contact_parts:
+        contact_html = "".join(contact_parts)
+
     return (
         '<!DOCTYPE html><html><head>'
         '<meta charset="utf-8">'
@@ -736,7 +780,12 @@ def search_detail_html(name, kind_label, lat, lon, map_hash):
         'margin:0;padding:24px;max-width:640px;color:#1a1a1a;'
         'background:#fafafa;line-height:1.45}'
         'h1{margin:0 0 4px;font-size:1.6rem}'
-        'p.kind{margin:0 0 18px;color:#666;font-size:0.95rem}'
+        'p.kind{margin:0 0 14px;color:#666;font-size:0.95rem}'
+        'p.brand{margin:0 0 10px;color:#666;font-style:italic;font-size:0.95rem}'
+        'ul.contact{list-style:none;padding:0;margin:0 0 18px;'
+        'display:flex;flex-direction:column;gap:6px;font-size:0.95rem}'
+        'ul.contact a{color:#0a7cff;text-decoration:none;word-break:break-all}'
+        'ul.contact a:hover{text-decoration:underline}'
         'p.coords{margin:18px 0 0;color:#888;font-size:0.85rem;'
         'font-family:ui-monospace,Menlo,monospace}'
         '.cta{display:flex;flex-direction:column;gap:10px;margin-top:14px}'
@@ -746,13 +795,14 @@ def search_detail_html(name, kind_label, lat, lon, map_hash):
         '.cta a.primary{background:#0a7cff;color:#fff;border-color:#0a7cff}'
         '.cta a:active{transform:scale(0.99)}'
         '@media(prefers-color-scheme:dark){'
-        'body{background:#111;color:#eee}p.kind{color:#aaa}p.coords{color:#888}'
+        'body{background:#111;color:#eee}p.kind,p.brand{color:#aaa}p.coords{color:#888}'
         '.cta a{background:#1c1c1c;border-color:#333;color:#eee}'
         '.cta a.primary{background:#0a7cff;color:#fff;border-color:#0a7cff}}'
         '</style>'
         '</head><body>'
         f'<h1>{safe_name}</h1>'
         f'<p class="kind">{safe_kind}</p>'
+        f'{contact_html}'
         '<div class="cta">'
         f'<a class="primary" href="index.html#{dest_hash}">'
         'Directions to here</a>'
@@ -1866,6 +1916,196 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     return {"added": added, "datasets": sorted(source_datasets)}
 
 
+def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None):
+    """Enrich OSM POIs with Overture places' websites / phones / socials /
+    categories / brand — and emit new POI records for places OSM doesn't
+    know about.
+
+    Two passes, mirroring merge_overture_addresses:
+
+      Pass 1 (enrich): for each Overture row, look up an OSM POI in the
+        search feed by rounded coord + normalized name. If found, add
+        the Overture fields to that record in place. This is the main
+        win — OSM's `subtype` is noisy (museums bucketed under `tourism`,
+        hotels under `amenity`); Overture's `categories.primary` gives
+        a clean label we can drive chips + popups off.
+      Pass 2 (add-new): Overture rows with no OSM match become fresh
+        `type: "poi"` records tagged `subtype` = Overture primary
+        category and `source: "overture"`.
+
+    Per-record extensions (kept terse to bound chunk sizes):
+      cat        — Overture primary category ("museum", "hotel", …)
+      w          — first website URL
+      p          — first phone
+      soc        — first 3 social URLs (array)
+      brand      — brand primary name (string, often empty)
+      wd         — brand wikidata Q-ID when present
+      source     — "overture" if the record was freshly added by this pass
+
+    Returns {"enriched": N, "added": M, "datasets": [...], "size_bytes": {...}}
+    so the caller can log the size impact without re-stat'ing the jsonl.
+    """
+    import duckdb
+    print(f"  Merging Overture places from {overture_parquet}...")
+
+    size_before = os.path.getsize(search_jsonl_path)
+
+    # Read entire jsonl into memory so we can edit POI records in place.
+    # For SV-scale (~175K POIs) that's ~60 MB of Python — fine. For
+    # continent-scale we'd need a streaming rewrite; flagged but not
+    # solved in v1.
+    records = []
+    poi_index = {}   # (lat_e5, lon_e5, normalized_name) → record index
+    with open(search_jsonl_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                records.append({"_raw": line})  # pass through
+                continue
+            records.append(rec)
+            if rec.get("type") == "poi":
+                lat = rec.get("lat"); lon = rec.get("lon")
+                nm = rec.get("name") or ""
+                if lat is not None and lon is not None and nm:
+                    key = (round(lat, 4), round(lon, 4), _normalize_street(nm))
+                    poi_index.setdefault(key, []).append(len(records) - 1)
+    print(f"    Indexed {len(poi_index)} OSM POI keys ({sum(len(v) for v in poi_index.values())} records)")
+
+    # Stream Overture places from parquet via arrow batches.
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")
+    sql = f"""
+      SELECT names, categories, phones, websites, socials, brand, sources,
+             ST_X(ST_GeomFromText(wkt)) AS lon,
+             ST_Y(ST_GeomFromText(wkt)) AS lat
+      FROM read_parquet('{overture_parquet}')
+    """
+    reader = con.execute(sql).fetch_record_batch(2048)
+
+    if bbox is not None:
+        bbox_minlon, bbox_minlat, bbox_maxlon, bbox_maxlat = bbox
+    else:
+        bbox_minlon = bbox_minlat = -1e9
+        bbox_maxlon = bbox_maxlat = 1e9
+
+    enriched = 0
+    added = 0
+    unnamed = 0
+    source_datasets = set()
+
+    for batch in reader:
+        for row in batch.to_pylist():
+            lat = row.get("lat"); lon = row.get("lon")
+            if lat is None or lon is None:
+                continue
+            if not (bbox_minlat <= lat <= bbox_maxlat and
+                    bbox_minlon <= lon <= bbox_maxlon):
+                continue
+
+            names = row.get("names") or {}
+            name = (names.get("primary") or "").strip()
+            if not name:
+                unnamed += 1
+                continue
+
+            cats = row.get("categories") or {}
+            primary = (cats.get("primary") or "").strip()
+
+            phones = row.get("phones") or []
+            websites = row.get("websites") or []
+            socials = row.get("socials") or []
+            brand = row.get("brand") or {}
+            brand_names = (brand or {}).get("names") or {}
+            brand_primary = (brand_names.get("primary") or "").strip() if brand_names else ""
+            brand_wd = (brand or {}).get("wikidata") or None
+
+            # Surface-area extensions. Keep empty fields out of the
+            # record so downstream JSON stays tight.
+            extra = {}
+            if primary: extra["cat"] = primary
+            if websites: extra["w"] = websites[0]
+            if phones: extra["p"] = phones[0]
+            if socials: extra["soc"] = socials[:3]
+            if brand_primary: extra["brand"] = brand_primary
+            if brand_wd: extra["wd"] = brand_wd
+
+            # Pass 1: enrich an existing OSM POI.
+            key = (round(lat, 4), round(lon, 4), _normalize_street(name))
+            hit_indices = poi_index.get(key) or []
+            if hit_indices:
+                idx = hit_indices[0]  # first match wins; duplicates rare at this precision
+                target = records[idx]
+                for k, v in extra.items():
+                    # Don't overwrite pre-existing values (e.g. OSM's
+                    # wikidata) — Overture's row is enrichment, not
+                    # replacement.
+                    if k not in target:
+                        target[k] = v
+                # Prefer Overture's clean category over OMT's noisy
+                # `subtype` when the OSM record had a generic bucket
+                # (tourism / amenity / shop / attraction). This is the
+                # "categories matter" win.
+                s_old = target.get("subtype") or ""
+                if primary and s_old in ("", "tourism", "amenity", "shop",
+                                          "attraction", "leisure", "car",
+                                          "historic", "landuse"):
+                    target["subtype"] = primary
+                enriched += 1
+            else:
+                # Pass 2: emit new POI.
+                # Skip records with no category — they're noise for our
+                # chip-driven UI.
+                if not primary:
+                    continue
+                records.append({
+                    "name": name,
+                    "type": "poi",
+                    "subtype": primary,
+                    "lat": round(float(lat), 6),
+                    "lon": round(float(lon), 6),
+                    "source": "overture",
+                    **extra,
+                })
+                added += 1
+
+            for src in (row.get("sources") or []):
+                ds = (src or {}).get("dataset")
+                if ds:
+                    source_datasets.add(ds)
+
+    # Rewrite the jsonl with enriched records + new rows appended.
+    # Tempfile-and-rename so a mid-write failure leaves the original
+    # intact.
+    tmp_path = search_jsonl_path + ".overture_tmp"
+    with open(tmp_path, "w", encoding="utf-8") as out:
+        for rec in records:
+            if "_raw" in rec:
+                out.write(rec["_raw"]); out.write("\n")
+                continue
+            out.write(json.dumps(rec, separators=(",", ":"),
+                                 ensure_ascii=False))
+            out.write("\n")
+    os.replace(tmp_path, search_jsonl_path)
+
+    size_after = os.path.getsize(search_jsonl_path)
+    delta_mb = (size_after - size_before) / (1024 * 1024)
+    print(f"    Overture places: {enriched} enriched, {added} added, "
+          f"{unnamed} unnamed skipped, "
+          f"{len(source_datasets)} upstream datasets; "
+          f"jsonl {size_before/1024/1024:.1f} MB → "
+          f"{size_after/1024/1024:.1f} MB (+{delta_mb:.1f} MB)")
+    return {
+        "enriched": enriched,
+        "added": added,
+        "datasets": sorted(source_datasets),
+        "size_bytes": {"before": size_before, "after": size_after},
+    }
+
+
 def extract_wiki_tags_pbf(pbf_path, bbox=None):
     """Extract {wikipedia, wikidata} tags per OSM object with a name.
 
@@ -2771,6 +3011,7 @@ def create_zim(
     wiki_cross_refs=None,
     address_count=0,
     overture_sources=None,
+    overture_themes=None,
 ):
     """Create a ZIM file containing the map viewer and all tiles."""
     from libzim.writer import Creator, Item, StringProvider, FileProvider
@@ -3481,13 +3722,25 @@ def create_zim(
             # feeds the address enrichment came from — OpenAddresses
             # contributors, national/regional registers, etc.
             if overture_sources:
+                themes = overture_themes or ["addresses"]
+                theme_label = " + ".join(themes)
+                themes_phrase = (
+                    "Address data is derived from the Overture addresses theme"
+                    if themes == ["addresses"] else
+                    "Place info (POIs, websites, phones, socials, brand,"
+                    " categories) is derived from the Overture places theme"
+                    if themes == ["places"] else
+                    "Address + place info (POIs, websites, phones, socials,"
+                    " brand, categories) are derived from the Overture"
+                    " addresses + places themes"
+                )
                 overture_doc = {
                     "release": "2026-04-15.0",
-                    "theme": "addresses",
+                    "themes": themes,
                     "attribution": (
                         "© OpenStreetMap contributors and Overture Maps "
-                        "Foundation (overturemaps.org). Address data is "
-                        "derived from the Overture addresses theme; "
+                        "Foundation (overturemaps.org). "
+                        f"{themes_phrase}; "
                         "credits for each underlying dataset follow."
                     ),
                     "datasets": list(overture_sources),
@@ -3517,11 +3770,15 @@ def create_zim(
                     zoom = {"place": 14, "airport": 14, "peak": 15, "park": 15,
                             "water": 14, "poi": 17, "street": 16}.get(feat["type"], 15)
                     map_hash = f"map={zoom}/{feat['lat']}/{feat['lon']}"
-                    label = feat.get("subtype", feat["type"]).replace("_", " ").title()
-
+                    # Prefer Overture's normalized category for display
+                    # when present (falls back to OMT subtype / OSM type).
+                    kind_raw = feat.get("cat") or feat.get("subtype") or feat["type"]
+                    label = kind_raw.replace("_", " ").title()
+                    enrich = {k: feat[k] for k in ("w", "p", "soc", "brand", "wd")
+                              if feat.get(k)}
                     page_html = search_detail_html(
                         feat["name"], label,
-                        feat["lat"], feat["lon"], map_hash
+                        feat["lat"], feat["lon"], map_hash, enrich=enrich,
                     )
                     creator.add_item(MapItem(
                         f"search/{slug}.html",
@@ -3603,11 +3860,13 @@ def create_zim(
                 zoom = {"place": 14, "airport": 14, "peak": 15, "park": 15,
                         "water": 14, "poi": 17, "street": 16}.get(feat["type"], 15)
                 map_hash = f"map={zoom}/{feat['lat']}/{feat['lon']}"
-                label = feat.get("subtype", feat["type"]).replace("_", " ").title()
-
+                kind_raw = feat.get("cat") or feat.get("subtype") or feat["type"]
+                label = kind_raw.replace("_", " ").title()
+                enrich = {k: feat[k] for k in ("w", "p", "soc", "brand", "wd")
+                          if feat.get(k)}
                 page_html = search_detail_html(
                     feat["name"], label,
-                    feat["lat"], feat["lon"], map_hash
+                    feat["lat"], feat["lon"], map_hash, enrich=enrich,
                 )
                 creator.add_item(MapItem(
                     f"search/{slug}.html",
@@ -3824,6 +4083,11 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Merge Overture Maps address records from a parquet extract. "
                              "Use download_overture_data.py to produce the parquet first. "
                              "Dedups against the OSM address pass; see docs/overture-matching.md.")
+    parser.add_argument("--overture-places", metavar="PARQUET",
+                        help="Enrich OSM POIs (and add new ones) from Overture Maps "
+                             "places theme: websites, phones, socials, brand, and normalized "
+                             "categories (museum/hotel/…) instead of OMT's noisy class buckets. "
+                             "Run download_overture_data.py places --out …parquet first.")
 
     args = parser.parse_args()
 
@@ -3995,6 +4259,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         # tiles don't carry addr:* tags. Skipped silently when PBF is missing.
         address_count = 0
         wiki_cross_refs = None
+        overture_sources = None
+        overture_themes = None
         if isinstance(search_features, str) and os.path.isfile(search_features):
             addr_pbf = locals().get('work_pbf') or pbf_path or args.pbf
             if addr_pbf:
@@ -4006,17 +4272,33 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 # didn't cover (the 1029-block gaps on Ramona St and friends).
                 # Propagates the upstream-dataset list into overture_sources
                 # (written into the ZIM + surfaced in the viewer's Sources
-                # panel) so attribution credits every underlying feed.
-                overture_sources = None
+                # panel) so attribution credits every underlying feed. We
+                # merge both address + places themes when provided, and
+                # union their `datasets` so the ZIM credits every upstream
+                # feed we touched.
+                overture_themes = []
+                overture_datasets = set()
                 if args.overture_addresses:
                     try:
                         merge_result = merge_overture_addresses(
                             args.overture_addresses, search_features,
                             bbox=addr_bbox)
                         address_count += merge_result.get("added", 0) or 0
-                        overture_sources = merge_result.get("datasets") or []
+                        overture_datasets.update(merge_result.get("datasets") or [])
+                        overture_themes.append("addresses")
                     except Exception as _e:
-                        print(f"    Warning: Overture merge failed: {_e}")
+                        print(f"    Warning: Overture addresses merge failed: {_e}")
+                if args.overture_places:
+                    try:
+                        places_result = merge_overture_places(
+                            args.overture_places, search_features,
+                            bbox=addr_bbox)
+                        overture_datasets.update(places_result.get("datasets") or [])
+                        overture_themes.append("places")
+                    except Exception as _e:
+                        print(f"    Warning: Overture places merge failed: {_e}")
+                if overture_datasets:
+                    overture_sources = sorted(overture_datasets)
                 # Same PBF feeds the wiki-tag lookup so the chunker can enrich
                 # POI records with wikipedia/wikidata for offline cross-ref.
                 try:
@@ -4352,6 +4634,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             routing_graph_path=routing_graph_path,
             wiki_cross_refs=wiki_cross_refs,
             overture_sources=overture_sources,
+            overture_themes=overture_themes,
             address_count=address_count,
         )
 
