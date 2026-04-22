@@ -281,6 +281,21 @@ kiwix-serve --port 8888 osm-monaco.zim
 3. Import the ZIM file
 4. The map opens with full pan/zoom, rendered entirely offline
 
+## In-ZIM Apps
+
+The ZIM ships two LLM-free, network-free browser apps in addition
+to the main map viewer:
+
+- `search/<slug>.html` — per-feature detail pages with **Directions
+  to here** + **View on map** CTAs.
+- `places.html` — search-and-browse mini-app. Search box, category
+  chips (Restaurants, Cafés, Bars, Museums, Parks, Libraries,
+  Shops, Gas), optional GPS-distance sort.
+
+Both compose into the main viewer through a tiny URL-fragment
+protocol (`index.html#dest=lat,lon&label=…`). Full reference in
+[`docs/in-zim-apps.md`](docs/in-zim-apps.md).
+
 ## Technical Details
 
 ### OSM Data Pipeline
