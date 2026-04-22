@@ -87,8 +87,8 @@
 
 <div class="toggle">
   <label>
-    <input id="gps" type="checkbox">
-    <span>Use my location to sort by distance</span>
+    <input id="gps" type="checkbox" checked>
+    <span>Sort by distance</span>
   </label>
 </div>
 
@@ -144,11 +144,23 @@ const CATEGORIES = [
     subtypes: ['hotel', 'motel', 'hostel', 'bed_and_breakfast',
                'lodging', 'inn', 'guest_house', 'resort', 'campsite'] },
   { id: 'museums',     label: 'Museums',     cat: 'poi',
-    subtypes: ['museum', 'art_gallery', 'historic', 'castle',
-               'historical_landmark', 'monument'],
+    // Exact `museum` (OMT + Overture generic) plus any Overture variant
+    // suffixed `_museum` (art_museum, history_museum, science_museum,
+    // childrens_museum, asian_art_museum, …) and the art_gallery bucket
+    // — people conflate museums + galleries. Historic / landmarks /
+    // monuments moved to their own "Landmarks" chip below.
+    subtypes: ['museum', 'art_gallery', 'planetarium', 'observatory'],
+    includeRegex: /_museum$|_gallery$/,
     nameInclude: {
       subtypes: ['tourism', 'attraction'],
-      pattern: /\b(museum|gallery|exhibit|memorial)\b/i,
+      pattern: /\b(museum|gallery|exhibit|planetarium)\b/i,
+    } },
+  { id: 'landmarks',   label: 'Landmarks',   cat: 'poi',
+    subtypes: ['historic', 'castle', 'monument', 'historical_landmark',
+               'landmark_and_historical_building', 'memorial'],
+    nameInclude: {
+      subtypes: ['tourism', 'attraction'],
+      pattern: /\b(landmark|monument|memorial|historic)\b/i,
     } },
   { id: 'parks',       label: 'Parks',       cat: 'park' },
   { id: 'libraries',   label: 'Libraries',   cat: 'poi',
@@ -200,6 +212,10 @@ const els = {
   renderChips();
   els.q.addEventListener('input', debounce(onSearch, 200));
   els.gps.addEventListener('change', onGpsToggle);
+  // Sort-by-distance is the default. We don't request GPS yet — that
+  // happens lazily on the first chip pick or search (see
+  // ensureOriginThen) so cold loads don't pop a permission dialog the
+  // user wasn't expecting.
   // Restore filter from URL (#cat=museums or #q=foo).
   const hash = parseHash(location.hash);
   if (hash.q) { els.q.value = hash.q; }
@@ -260,6 +276,7 @@ function rerunQuery() {
 }
 
 async function runChipQuery(def) {
+  if (maybeFetchOriginFirst()) return;
   setStatus(`Loading ${def.label.toLowerCase()}…`);
   let records;
   try {
@@ -293,6 +310,7 @@ async function runChipQuery(def) {
 }
 
 async function runNameQuery(q) {
+  if (maybeFetchOriginFirst()) return;
   setStatus(`Searching for “${q}”…`);
   const prefixes = prefixesFor(q);
   let merged = [];
@@ -466,6 +484,42 @@ function formatDistance(m) {
 }
 
 // ---------- GPS ----------
+
+// Fire a GPS request and update state + rerun the current query. Shared
+// by the toggle's change handler and the lazy trigger that runs on the
+// first chip pick / name search when the toggle defaults to on.
+function requestGPS() {
+  if (!navigator.geolocation) {
+    els.gps.checked = false;
+    setStatus('This device does not support geolocation.');
+    return;
+  }
+  setStatus('Getting your location…');
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      state.origin = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      rerunQuery();
+    },
+    err => {
+      els.gps.checked = false;
+      setStatus(`Location unavailable: ${err.message}`);
+    },
+    { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 }
+  );
+}
+
+// Lazy trigger — called before running a chip or name query. If the
+// "Sort by distance" toggle is on but we haven't fetched GPS yet, do
+// so and return true so the caller knows not to run its query yet
+// (the GPS callback will fire rerunQuery when the fix lands). Returns
+// false when the caller can proceed immediately.
+function maybeFetchOriginFirst() {
+  if (els.gps.checked && !state.origin) {
+    requestGPS();
+    return true;  // hand-off: requestGPS triggers rerunQuery when ready
+  }
+  return false;
+}
 
 function onGpsToggle() {
   if (!els.gps.checked) { state.origin = null; rerunQuery(); return; }
