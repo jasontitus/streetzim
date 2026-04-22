@@ -1783,6 +1783,10 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     pass2_skipped = 0      # dropped via coord/attr match
     added = 0              # net new records appended
     orphan_skipped = 0     # missing number or street
+    # Distinct upstream datasets observed across rows that survived to
+    # output. Drives overture-sources.json + the viewer's attribution
+    # panel — OpenAddresses / LINZ NZ / Asiaq / NYC Open Data / etc.
+    source_datasets = set()
     with open(search_jsonl_path, "a", encoding="utf-8") as fout:
         for batch in reader:
             for row in batch.to_pylist():
@@ -1847,14 +1851,19 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
                 fout.write(json.dumps(entry, separators=(",", ":"), ensure_ascii=False))
                 fout.write("\n")
                 added += 1
+                for src in (row.get("sources") or []):
+                    ds = (src or {}).get("dataset")
+                    if ds:
+                        source_datasets.add(ds)
 
     total_overture = pass1_skipped + pass2_skipped + added + orphan_skipped
     print(f"    Overture: {total_overture} rows scanned, "
           f"{pass1_skipped} skipped (OSM source link), "
           f"{pass2_skipped} skipped (spatial dup), "
           f"{orphan_skipped} orphan (missing num/street), "
-          f"{added} added")
-    return added
+          f"{added} added, "
+          f"{len(source_datasets)} distinct upstream datasets")
+    return {"added": added, "datasets": sorted(source_datasets)}
 
 
 def extract_wiki_tags_pbf(pbf_path, bbox=None):
@@ -2761,6 +2770,7 @@ def create_zim(
     routing_graph_path=None,
     wiki_cross_refs=None,
     address_count=0,
+    overture_sources=None,
 ):
     """Create a ZIM file containing the map viewer and all tiles."""
     from libzim.writer import Creator, Item, StringProvider, FileProvider
@@ -2834,14 +2844,24 @@ def create_zim(
         creator.add_metadata("Name", f"osm_{zim_name}")
         creator.add_metadata("Flavour", "maxi")
         creator.add_metadata("Scraper", "streetzim/1.0")
-        creator.add_metadata("License", (
-            "Map data: ODbL (OpenStreetMap); "
-            "Tile schema: CC-BY 4.0 (OpenMapTiles); "
-            "Satellite imagery: CC BY-NC-SA 4.0 (Sentinel-2 cloudless by EOX); "
-            "Elevation: Copernicus GLO-30 DEM © DLR/Airbus, provided under COPERNICUS by EU and ESA; "
-            "Place info: CC0 (Wikidata) / CC BY-SA 3.0 (Wikipedia); "
-            "Tool code: MIT"
-        ))
+        license_parts = [
+            "Map data: ODbL (OpenStreetMap)",
+            "Tile schema: CC-BY 4.0 (OpenMapTiles)",
+            "Satellite imagery: CC BY-NC-SA 4.0 (Sentinel-2 cloudless by EOX)",
+            "Elevation: Copernicus GLO-30 DEM © DLR/Airbus, provided under COPERNICUS by EU and ESA",
+            "Place info: CC0 (Wikidata) / CC BY-SA 3.0 (Wikipedia)",
+        ]
+        if overture_sources:
+            # Overture's addresses theme ships mixed per-source licenses
+            # (CC0/CC-BY-4.0/OGL-UK/etc.). We point to the dataset credits
+            # embedded in the ZIM as overture-sources.json rather than
+            # enumerating every upstream feed inline.
+            license_parts.append(
+                "Address enrichment: Overture Maps Foundation "
+                "(overturemaps.org) — dataset credits in overture-sources.json"
+            )
+        license_parts.append("Tool code: MIT")
+        creator.add_metadata("License", "; ".join(license_parts))
 
         # Add 48x48 illustration (required by Kiwix to show in library)
         # Generate a simple map icon as PNG
@@ -3432,6 +3452,7 @@ def create_zim(
                 "hasSatellite": bool(map_config.get("hasSatellite")),
                 "hasTerrain": bool(map_config.get("hasTerrain")),
                 "hasWikidata": bool(map_config.get("hasWikidata")),
+                "hasOvertureAddresses": bool(map_config.get("hasOvertureAddresses")),
                 "hasAddresses": address_count > 0,
                 "counts": {
                     "total": total_features,
@@ -3453,6 +3474,33 @@ def create_zim(
             ))
             print(f"    Added streetzim-meta.json (name={meta['name']}, "
                   f"types={len(type_counts)}, addresses={address_count})")
+
+            # Overture dataset credits. Written when --overture-addresses
+            # was used so the viewer's Sources panel (and the ZIM-level
+            # License metadata) can point readers at the actual upstream
+            # feeds the address enrichment came from — OpenAddresses
+            # contributors, national/regional registers, etc.
+            if overture_sources:
+                overture_doc = {
+                    "release": "2026-04-15.0",
+                    "theme": "addresses",
+                    "attribution": (
+                        "© OpenStreetMap contributors and Overture Maps "
+                        "Foundation (overturemaps.org). Address data is "
+                        "derived from the Overture addresses theme; "
+                        "credits for each underlying dataset follow."
+                    ),
+                    "datasets": list(overture_sources),
+                    "canonicalCredits": "https://docs.overturemaps.org/attribution/",
+                }
+                creator.add_item(MapItem(
+                    "overture-sources.json", "Overture Dataset Credits",
+                    "application/json",
+                    json.dumps(overture_doc, separators=(",", ":"),
+                               ensure_ascii=False).encode("utf-8"),
+                ))
+                print(f"    Added overture-sources.json "
+                      f"({len(overture_sources)} upstream datasets)")
 
             # Pass 3: stream xapian file -> HTML redirect pages
             print(f"    Adding {xapian_count} Xapian search pages (of {total_features} total)...", flush=True)
@@ -3956,12 +4004,17 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 # Overture address enrichment — runs after OSM extraction so
                 # the dedup index is populated. Only adds rows the OSM pass
                 # didn't cover (the 1029-block gaps on Ramona St and friends).
+                # Propagates the upstream-dataset list into overture_sources
+                # (written into the ZIM + surfaced in the viewer's Sources
+                # panel) so attribution credits every underlying feed.
+                overture_sources = None
                 if args.overture_addresses:
                     try:
-                        added = merge_overture_addresses(
+                        merge_result = merge_overture_addresses(
                             args.overture_addresses, search_features,
                             bbox=addr_bbox)
-                        address_count += added or 0
+                        address_count += merge_result.get("added", 0) or 0
+                        overture_sources = merge_result.get("datasets") or []
                     except Exception as _e:
                         print(f"    Warning: Overture merge failed: {_e}")
                 # Same PBF feeds the wiki-tag lookup so the chunker can enrich
@@ -4266,6 +4319,11 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             map_config["hasWikidata"] = True
         if routing_graph_path:
             map_config["hasRouting"] = True
+        if overture_sources:
+            # Surface the flag so the viewer's Sources panel can show the
+            # Overture attribution section. The concrete dataset list is
+            # shipped as overture-sources.json at the ZIM root (below).
+            map_config["hasOvertureAddresses"] = True
 
         create_zim(
             output_path=output_path,
@@ -4293,6 +4351,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             wikidata_data=wikidata_data,
             routing_graph_path=routing_graph_path,
             wiki_cross_refs=wiki_cross_refs,
+            overture_sources=overture_sources,
             address_count=address_count,
         )
 

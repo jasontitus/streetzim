@@ -553,6 +553,23 @@
                 0 1px 6px rgba(0,0,0,0.4);
     pointer-events: none;
   }
+  /* Search-pin popup with inline "Directions to here" CTA. Routing is
+     now a one-tap hop from any search result. */
+  .pin-popup { min-width: 160px; max-width: 260px; }
+  .pin-popup .pin-name {
+    font-family: var(--ui-font); font-weight: 600;
+    font-size: 14px; color: var(--text-primary);
+    margin: 0 0 8px; line-height: 1.3; word-wrap: break-word;
+  }
+  .pin-popup .pin-directions {
+    display: block; width: 100%;
+    padding: 8px 12px; font-family: var(--ui-font);
+    font-size: 13px; font-weight: 600;
+    background: var(--accent); color: #fff;
+    border: none; border-radius: 6px; cursor: pointer;
+  }
+  .pin-popup .pin-directions:hover { background: var(--accent-hover); }
+  .pin-popup .pin-directions:active { transform: translateY(1px); }
 </style>
 </head>
 <body>
@@ -561,7 +578,6 @@
   <button id="layer-toggle" title="Toggle satellite imagery">Satellite</button>
   <button id="terrain-toggle" title="Toggle 3D terrain">3D</button>
   <button id="wiki-toggle" title="Show nearby Wikipedia entries">Explore</button>
-  <button id="route-toggle" title="Get directions between two points">Route</button>
   <a id="places-link" href="places.html"
      title="Browse places by name or category">Find</a>
 </div>
@@ -667,6 +683,18 @@
       <p>Wikidata &amp; Wikipedia</p>
       <p class="license">Creative Commons CC0 (Wikidata) / Creative Commons Attribution-ShareAlike 3.0 (Wikipedia) &mdash; wikidata.org / wikipedia.org</p>
     </section>
+    <section id="attr-overture-section" style="display:none;">
+      <h3>Address Enrichment</h3>
+      <p>Overture Maps Foundation &mdash; Addresses theme</p>
+      <p class="license">
+        Mixed per-source licensing (CC0 / CC BY 4.0 / OGL-UK / regional
+        permissive licenses). Upstream datasets include OpenAddresses
+        contributors and national / municipal address registers.
+        See <a href="overture-sources.json">overture-sources.json</a>
+        for the per-ZIM list and <a href="https://docs.overturemaps.org/attribution/">
+        docs.overturemaps.org/attribution</a> for canonical credits.
+      </p>
+    </section>
     <section>
       <h3>Map Renderer</h3>
       <p>MapLibre GL JS</p>
@@ -680,9 +708,17 @@
   </div>
 </div>
 <script>
-// Compute base URL for absolute resource paths.
+// Compute base URL for absolute resource paths. Strip `#` fragment and
+// `?` query first — deep-links like `index.html#map=16/37.4/-122.1`
+// contain `/` inside the fragment, which used to leak into baseUrl and
+// produce `.../index.html#map=16/37.4/map-config.json`, corrupting every
+// subsequent fetch. Same for `?q=…` used by the Find mini-app.
 var baseUrl = (function() {
   var href = window.location.href;
+  var hashAt = href.indexOf('#');
+  if (hashAt !== -1) href = href.substring(0, hashAt);
+  var queryAt = href.indexOf('?');
+  if (queryAt !== -1) href = href.substring(0, queryAt);
   return href.substring(0, href.lastIndexOf('/') + 1);
 })();
 
@@ -1118,6 +1154,14 @@ fetchConfig(1)
     attrOverlay.addEventListener('click', function(e) {
       if (e.target === attrOverlay) attrOverlay.style.display = 'none';
     });
+    // Show the Overture attribution section only for ZIMs that actually
+    // ship Overture-derived address data (the flag is set by the builder
+    // when --overture-addresses was used). Older ZIMs without Overture
+    // content shouldn't credit a dataset they don't include.
+    if (config.hasOvertureAddresses) {
+      var overtureSection = document.getElementById('attr-overture-section');
+      if (overtureSection) overtureSection.style.display = '';
+    }
 
     // Initialize search
     initSearch(map);
@@ -1817,7 +1861,8 @@ function initSearch(map) {
       var loc = m.l ? ' &middot; ' + escapeHtml(m.l) : '';
       var distLabel = matches[j].dist ? ' &middot; ' + escapeHtml(matches[j].dist) : '';
       html += '<div class="search-result" data-idx="' + j +
-        '" data-lat="' + m.a + '" data-lon="' + m.o + '" data-type="' + m.t + '">' +
+        '" data-lat="' + m.a + '" data-lon="' + m.o + '" data-type="' + m.t +
+        '" data-name="' + escapeHtml(m.n) + '">' +
         '<span class="search-result-name">' + escapeHtml(m.n) + '</span>' +
         '<span class="search-result-type">' + escapeHtml(label) + loc + distLabel + '</span></div>';
     }
@@ -1859,12 +1904,43 @@ function initSearch(map) {
     var lat = parseFloat(el.getAttribute('data-lat'));
     var lon = parseFloat(el.getAttribute('data-lon'));
     var type = el.getAttribute('data-type');
+    var name = el.getAttribute('data-name') || '';
     var zoom = {place: 14, airport: 14, peak: 15, park: 15, water: 14, poi: 17, street: 16}[type] || 15;
 
     if (searchMarker) { searchMarker.remove(); searchMarker = null; }
     searchMarker = new maplibregl.Marker({ color: '#e74c3c' })
       .setLngLat([lon, lat])
       .addTo(map);
+
+    // Attach a popup with a Directions CTA so routing is one-tap from
+    // the dropped pin. Only wire the button when routing is available
+    // in this ZIM and the surface actually exposes .open() — older
+    // containers with a v<4 streetzimRouting just see the popup text.
+    if (window.streetzimRouting &&
+        typeof window.streetzimRouting.open === 'function') {
+      var box = document.createElement('div');
+      box.className = 'pin-popup';
+      if (name) {
+        var nm = document.createElement('div');
+        nm.className = 'pin-name';
+        nm.textContent = name;
+        box.appendChild(nm);
+      }
+      var btn = document.createElement('button');
+      btn.className = 'pin-directions';
+      btn.textContent = 'Directions to here';
+      btn.addEventListener('click', function() {
+        window.streetzimRouting.open();
+        window.streetzimRouting.setDest(lat, lon, name || undefined);
+      });
+      box.appendChild(btn);
+      var popup = new maplibregl.Popup({ offset: 28, closeButton: true,
+                                         closeOnClick: false })
+        .setDOMContent(box);
+      searchMarker.setPopup(popup);
+      // Auto-open once the flyTo finishes so the CTA is discoverable.
+      map.once('moveend', function() { searchMarker.togglePopup(); });
+    }
 
     map.flyTo({ center: [lon, lat], zoom: zoom, duration: 1500 });
     resultsEl.style.display = 'none';
@@ -2417,6 +2493,12 @@ function initWikiSidebar(map, config) {
 function initRouting(map, config) {
   if (!config.hasRouting) return;
 
+  // The old "Route" button in the right rail was dropped in favor of a
+  // single "Find" entry-point — routing is now triggered from the search
+  // pin's "Directions" popup or places.html's "Directions" CTA via the
+  // streetzimRouting.open() hook. We tolerate the button being absent so
+  // legacy layouts (and host containers that inject their own entrypoint)
+  // still work.
   var toggleBtn = document.getElementById('route-toggle');
   var panel = document.getElementById('routing-panel');
   var closeBtn = document.getElementById('routing-close');
@@ -2454,7 +2536,7 @@ function initRouting(map, config) {
     });
   }
 
-  toggleBtn.style.display = 'block';
+  if (toggleBtn) toggleBtn.style.display = 'block';
 
   var active = false;
   var graph = null;       // {nodes: Float64Array, adj: Array, geom: Array}
@@ -2465,24 +2547,27 @@ function initRouting(map, config) {
   var routeDrawn = false;
   var lastRoute = null;   // last computed {coords, distance, time, roads} — used by driving mode
 
-  // Toggle routing mode
-  toggleBtn.addEventListener('click', function() {
-    active = !active;
-    if (active) {
-      toggleBtn.classList.add('active-control');
-      panel.style.display = 'block';
-      map.getCanvas().style.cursor = 'crosshair';
-      loadGraph();
-    } else {
-      deactivate();
-    }
-  });
+  function activate() {
+    active = true;
+    if (toggleBtn) toggleBtn.classList.add('active-control');
+    panel.style.display = 'block';
+    map.getCanvas().style.cursor = 'crosshair';
+    loadGraph();
+  }
+
+  // Toggle routing mode — only wired if the legacy Route button is in
+  // the DOM. Otherwise activation happens via streetzimRouting.open().
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', function() {
+      if (active) deactivate(); else activate();
+    });
+  }
 
   closeBtn.addEventListener('click', deactivate);
 
   function deactivate() {
     active = false;
-    toggleBtn.classList.remove('active-control');
+    if (toggleBtn) toggleBtn.classList.remove('active-control');
     panel.style.display = 'none';
     map.getCanvas().style.cursor = '';
     clearRoute();
@@ -3909,12 +3994,24 @@ function initRouting(map, config) {
     // feature-detect. Callers that need a given method should test
     // for it (`typeof window.streetzimRouting.foo === "function"`),
     // but the version helps diagnostics attribute "host vs ZIM" skew.
-    version: 3,
+    version: 4,
     setOrigin: setOriginFromLatLon,
     setDest:   setDestFromLatLon,
     clickMode: function(mode) {
       var btn = modeBtns[mode];
       if (btn) btn.click();
+    },
+    /// Open the routing panel programmatically. Used by the search pin
+    /// "Directions" popup and places.html's "Directions" CTA — both
+    /// entry points now that the Route button is gone from the right
+    /// rail. No-op when already open.
+    open: function() {
+      if (!active) activate();
+    },
+    /// Close the routing panel + clear route state. Mirrors the panel's
+    /// `×` button.
+    close: function() {
+      deactivate();
     },
     loadGraph: loadGraph,
     get graphReady() { return !!graph; },

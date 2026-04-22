@@ -61,6 +61,23 @@
     background: var(--accent-hover);
   }
   #controls button + button { border-top: 1px solid var(--border); }
+  /* `Find` is an <a> not a <button> so it can be middle-clicked and
+     opened in its own tab. Mirror the button styling rather than
+     letting it inherit anchor defaults. Always-visible (no feature
+     flag), unlike the other buttons which JS reveals once their
+     backing data is confirmed. */
+  #controls a#places-link {
+    background: transparent; border: none; border-top: 1px solid var(--border);
+    padding: 9px 14px; font-size: 12px; font-weight: 500;
+    cursor: pointer; font-family: var(--ui-font);
+    color: var(--text-secondary); text-decoration: none;
+    text-align: left; white-space: nowrap;
+    transition: background 0.2s, color 0.2s;
+    letter-spacing: -0.01em; display: block;
+  }
+  #controls a#places-link:hover {
+    background: var(--hover-bg); color: var(--text-primary);
+  }
 
   /* Pulse marker for wiki item clicks */
   .pulse-marker {
@@ -545,6 +562,8 @@
   <button id="terrain-toggle" title="Toggle 3D terrain">3D</button>
   <button id="wiki-toggle" title="Show nearby Wikipedia entries">Explore</button>
   <button id="route-toggle" title="Get directions between two points">Route</button>
+  <a id="places-link" href="places.html"
+     title="Browse places by name or category">Find</a>
 </div>
 <div id="routing-panel">
   <h4>Directions <button id="routing-close" title="Close">&times;</button></h4>
@@ -648,6 +667,18 @@
       <p>Wikidata &amp; Wikipedia</p>
       <p class="license">Creative Commons CC0 (Wikidata) / Creative Commons Attribution-ShareAlike 3.0 (Wikipedia) &mdash; wikidata.org / wikipedia.org</p>
     </section>
+    <section id="attr-overture-section" style="display:none;">
+      <h3>Address Enrichment</h3>
+      <p>Overture Maps Foundation &mdash; Addresses theme</p>
+      <p class="license">
+        Mixed per-source licensing (CC0 / CC BY 4.0 / OGL-UK / regional
+        permissive licenses). Upstream datasets include OpenAddresses
+        contributors and national / municipal address registers.
+        See <a href="overture-sources.json">overture-sources.json</a>
+        for the per-ZIM list and <a href="https://docs.overturemaps.org/attribution/">
+        docs.overturemaps.org/attribution</a> for canonical credits.
+      </p>
+    </section>
     <section>
       <h3>Map Renderer</h3>
       <p>MapLibre GL JS</p>
@@ -661,9 +692,17 @@
   </div>
 </div>
 <script>
-// Compute base URL for absolute resource paths.
+// Compute base URL for absolute resource paths. Strip `#` fragment and
+// `?` query first — deep-links like `index.html#map=16/37.4/-122.1`
+// contain `/` inside the fragment, which used to leak into baseUrl and
+// produce `.../index.html#map=16/37.4/map-config.json`, corrupting every
+// subsequent fetch. Same for `?q=…` used by the Find mini-app.
 var baseUrl = (function() {
   var href = window.location.href;
+  var hashAt = href.indexOf('#');
+  if (hashAt !== -1) href = href.substring(0, hashAt);
+  var queryAt = href.indexOf('?');
+  if (queryAt !== -1) href = href.substring(0, queryAt);
   return href.substring(0, href.lastIndexOf('/') + 1);
 })();
 
@@ -1044,13 +1083,47 @@ fetchConfig(1)
       document.querySelector('#info p').textContent = 'Map data: ' + config.buildDate;
     }
 
-    // Check for #map=zoom/lat/lon hash (used by search result redirects)
+    // URL-fragment routing. Supports three independent fragments
+    // that can mix (`#dest=…&label=…`, `#map=…&dest=…`, …):
+    //   map=zoom/lat/lon              ← legacy "show this on the map"
+    //   dest=lat,lon                  ← pre-populate routing destination
+    //   origin=lat,lon                ← pre-populate routing origin
+    //   label=…                       ← optional label for the dest pin
+    // Search detail pages (search/<slug>.html) link in via dest=… so
+    // the viewer pops the routing panel open with the place already
+    // filled in — see "Directions to here" CTA.
     function applyHash() {
-      var hash = window.location.hash;
+      var hash = window.location.hash || '';
       var m = hash.match(/map=(\d+\.?\d*)\/(-?\d+\.?\d*)\/(-?\d+\.?\d*)/);
       if (m) {
         var z = parseFloat(m[1]), lat = parseFloat(m[2]), lon = parseFloat(m[3]);
         map.flyTo({ center: [lon, lat], zoom: z, duration: 1500 });
+      }
+      var destMatch  = hash.match(/dest=(-?\d+\.?\d*),(-?\d+\.?\d*)/);
+      var origMatch  = hash.match(/origin=(-?\d+\.?\d*),(-?\d+\.?\d*)/);
+      var labelMatch = hash.match(/label=([^&]+)/);
+      var label = labelMatch ? decodeURIComponent(labelMatch[1]) : null;
+      if (destMatch) {
+        var dLat = parseFloat(destMatch[1]), dLon = parseFloat(destMatch[2]);
+        // If we don't already have a `map=` fragment, frame the
+        // destination so the user sees what they picked.
+        if (!m) map.flyTo({ center: [dLon, dLat], zoom: 16, duration: 1200 });
+        // Open the routing panel + load the graph by triggering the
+        // same toggle button the user would press. `setDestFromLatLon`
+        // queues the pick if the graph isn't loaded yet, so timing
+        // doesn't matter.
+        var routingApi = window.streetzimRouting;
+        var tBtn = document.getElementById('route-toggle');
+        if (tBtn && document.getElementById('routing-panel').style.display !== 'block') {
+          tBtn.click();
+        }
+        if (routingApi && typeof routingApi.setDest === 'function') {
+          routingApi.setDest(dLat, dLon, label || '');
+        }
+        if (origMatch && routingApi && typeof routingApi.setOrigin === 'function') {
+          routingApi.setOrigin(parseFloat(origMatch[1]),
+                               parseFloat(origMatch[2]), '');
+        }
       }
     }
     map.on('load', applyHash);
@@ -1065,6 +1138,14 @@ fetchConfig(1)
     attrOverlay.addEventListener('click', function(e) {
       if (e.target === attrOverlay) attrOverlay.style.display = 'none';
     });
+    // Show the Overture attribution section only for ZIMs that actually
+    // ship Overture-derived address data (the flag is set by the builder
+    // when --overture-addresses was used). Older ZIMs without Overture
+    // content shouldn't credit a dataset they don't include.
+    if (config.hasOvertureAddresses) {
+      var overtureSection = document.getElementById('attr-overture-section');
+      if (overtureSection) overtureSection.style.display = '';
+    }
 
     // Initialize search
     initSearch(map);
