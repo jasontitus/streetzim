@@ -320,6 +320,31 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .routing-field span.set { color: var(--text-primary); font-weight: 500; }
+  .routing-input-wrap { position: relative; flex: 1; }
+  .routing-input-wrap input {
+    width: 100%; padding: 6px 8px; border: 1px solid var(--border);
+    border-radius: 6px; font-family: var(--ui-font); font-size: 12px;
+    background: var(--hover-bg); color: var(--text-primary); box-sizing: border-box;
+  }
+  .routing-input-wrap input:focus {
+    outline: none; border-color: rgba(37,99,235,0.6);
+    box-shadow: 0 0 0 2px rgba(37,99,235,0.2);
+  }
+  .routing-input-wrap input.resolved { background: rgba(34,197,94,0.08); }
+  .routing-results {
+    display: none; position: absolute; left: 0; right: 0; top: 100%;
+    margin-top: 4px; max-height: 240px; overflow-y: auto; z-index: 50;
+    background: var(--panel-bg); border: 1px solid var(--border);
+    border-radius: 8px; box-shadow: 0 8px 20px rgba(0,0,0,0.18);
+  }
+  .routing-results.open { display: block; }
+  .routing-result {
+    padding: 6px 10px; cursor: pointer; border-bottom: 1px solid var(--border);
+  }
+  .routing-result:last-child { border-bottom: none; }
+  .routing-result:hover, .routing-result.active { background: var(--hover-bg); }
+  .routing-result-name { font-size: 12px; color: var(--text-primary); font-weight: 500; }
+  .routing-result-sub { font-size: 11px; color: var(--text-tertiary); }
   #routing-result {
     display: none; margin-top: 10px; padding-top: 10px;
     border-top: 1px solid var(--border);
@@ -340,6 +365,29 @@
     font-size: 12px; color: var(--text-secondary);
   }
   #routing-clear:hover { background: var(--hover-bg); color: var(--text-primary); }
+  #routing-steps {
+    display: none; margin-top: 10px; max-height: 260px; overflow-y: auto;
+    border-top: 1px solid var(--border); padding-top: 8px;
+  }
+  .routing-step {
+    display: flex; gap: 10px; padding: 6px 4px; border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .routing-step:last-child { border-bottom: none; }
+  .routing-step:hover { background: var(--hover-bg); }
+  .routing-step-icon {
+    flex-shrink: 0; width: 24px; height: 24px; display: flex;
+    align-items: center; justify-content: center; font-weight: 700;
+    color: var(--text-secondary); font-size: 14px;
+  }
+  .routing-step-body { flex: 1; min-width: 0; }
+  .routing-step-text {
+    font-size: 12px; color: var(--text-primary); line-height: 1.35;
+    word-wrap: break-word;
+  }
+  .routing-step-dist {
+    font-size: 11px; color: var(--text-tertiary); margin-top: 2px;
+  }
   #routing-status {
     color: var(--text-tertiary); font-size: 11px; margin-top: 6px;
   }
@@ -370,17 +418,24 @@
   <h4>Directions <button id="routing-close" title="Close">&times;</button></h4>
   <div class="routing-field">
     <div class="routing-dot origin"></div>
-    <span id="routing-origin">Click map to set start</span>
+    <div class="routing-input-wrap">
+      <input id="routing-origin-input" type="text" placeholder="Start: address, place, or click map" autocomplete="off">
+      <div id="routing-origin-results" class="routing-results"></div>
+    </div>
   </div>
   <div class="routing-field">
     <div class="routing-dot dest"></div>
-    <span id="routing-dest">Then click to set destination</span>
+    <div class="routing-input-wrap">
+      <input id="routing-dest-input" type="text" placeholder="Destination" autocomplete="off">
+      <div id="routing-dest-results" class="routing-results"></div>
+    </div>
   </div>
   <div id="routing-status"></div>
   <div id="routing-result">
     <div class="route-stat"><label>Distance</label><value id="route-distance"></value></div>
     <div class="route-stat"><label>Est. time</label><value id="route-time"></value></div>
   </div>
+  <div id="routing-steps"></div>
   <button id="routing-clear">Clear route</button>
 </div>
 <div id="wiki-panel">
@@ -849,7 +904,8 @@ fetchConfig(1)
       if (e.target === attrOverlay) attrOverlay.style.display = 'none';
     });
 
-    // Initialize search
+    // Initialize search (with address index if available)
+    window._addressSearchConfig = { enabled: !!config.hasAddresses };
     initSearch(map);
 
     // Initialize Wikidata info popups
@@ -1380,12 +1436,27 @@ function initSearch(map) {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       manifest = data;
+      window._featureSearchManifest = manifest;
       input.placeholder = 'Search ' + data.total.toLocaleString() + ' places...';
     })
     .catch(function() {
       input.placeholder = 'Search unavailable';
       input.disabled = true;
     });
+
+  // Shared feature-search helper — returns top N feature entries for a query.
+  // Used by both the main search bar and the routing autocomplete.
+  window._featureSearch = function(query, center) {
+    if (!manifest || !query || query.length < 2) return Promise.resolve([]);
+    var prefixes = getPrefixes(query);
+    if (!prefixes.length) return Promise.resolve([]);
+    return Promise.all(prefixes.map(fetchChunk)).then(function(arrays) {
+      var all = [];
+      for (var i = 0; i < arrays.length; i++) all = all.concat(arrays[i]);
+      // scoreResults relies on map.getCenter() and getBounds() — both are live, so the center arg is informational
+      return scoreResults(all, query).slice(0, 8).map(function(m) { return m.item; });
+    });
+  };
 
   // Fetch a chunk by prefix, with caching
   function fetchChunk(prefix) {
@@ -1501,8 +1572,11 @@ function initSearch(map) {
     return matches.slice(0, 15);
   }
 
+  var currentSearchMatches = [];
+
   function renderResults(matches) {
     activeIdx = -1;
+    currentSearchMatches = matches;
     if (matches.length === 0) {
       resultsEl.innerHTML = '<div class="search-no-results">No results found</div>';
       resultsEl.style.display = 'block';
@@ -1524,6 +1598,7 @@ function initSearch(map) {
   }
 
   var searchSeq = 0;  // Sequence counter to discard stale results
+  var addressLoadStarted = false;
 
   function doSearch(query) {
     if (!manifest || query.length < 2) {
@@ -1531,21 +1606,72 @@ function initSearch(map) {
       return;
     }
 
-    var seq = ++searchSeq;
-    var prefixes = getPrefixes(query);
-    if (prefixes.length === 0) {
-      renderResults([]);
-      return;
+    // Lazy-load address index on first real search so address hits can appear inline
+    if (!addressLoadStarted && window._addressSearchConfig && window._addressSearchConfig.enabled) {
+      addressLoadStarted = true;
+      AddressIndex.load(baseUrl).catch(function() { /* missing; silently skip */ });
     }
 
-    // Fetch all needed chunks in parallel, then score
-    Promise.all(prefixes.map(fetchChunk)).then(function(arrays) {
-      if (seq !== searchSeq) return;  // Stale query, discard
-      var all = [];
-      for (var i = 0; i < arrays.length; i++) {
-        all = all.concat(arrays[i]);
+    var seq = ++searchSeq;
+    var prefixes = getPrefixes(query);
+    var parsed = AddressIndex.parseQuery(query);
+    var center = map.getCenter();
+
+    var featuresP;
+    if (prefixes.length === 0) {
+      featuresP = Promise.resolve([]);
+    } else {
+      featuresP = Promise.all(prefixes.map(fetchChunk)).then(function(arrays) {
+        var all = [];
+        for (var i = 0; i < arrays.length; i++) all = all.concat(arrays[i]);
+        return scoreResults(all, query);
+      });
+    }
+
+    featuresP.then(function(featureMatches) {
+      if (seq !== searchSeq) return;
+
+      var addrMatches = [];
+      if (AddressIndex.isReady()) {
+        var candidates = AddressIndex.findStreets(
+          parsed.rest || query, center.lat, center.lng, 6
+        );
+        for (var i = 0; i < candidates.length; i++) {
+          var s = candidates[i].entry;
+          if (parsed.housenumber) {
+            addrMatches.push({
+              item: {
+                n: parsed.housenumber + ' ' + (s.sr || s.s),
+                t: 'address',
+                s: '',
+                a: s.a, o: s.o,
+                l: s.cr || '',
+                _addrEntry: s,
+                _addrHn: parsed.housenumber
+              },
+              score: candidates[i].score * 200 + 60,  // Prioritize numbered addresses
+              dist: ''
+            });
+          } else {
+            addrMatches.push({
+              item: {
+                n: s.sr || s.s,
+                t: 'street',
+                s: '',
+                a: s.a, o: s.o,
+                l: s.cr || '',
+                _addrEntry: s
+              },
+              score: candidates[i].score * 100 + 20,
+              dist: ''
+            });
+          }
+        }
       }
-      renderResults(scoreResults(all, query));
+
+      var merged = featureMatches.concat(addrMatches);
+      merged.sort(function(a, b) { return b.score - a.score; });
+      renderResults(merged.slice(0, 15));
     });
   }
 
@@ -1554,19 +1680,35 @@ function initSearch(map) {
   }
 
   function selectResult(el) {
+    var idx = parseInt(el.getAttribute('data-idx'), 10);
+    var match = currentSearchMatches[idx];
+    var item = match ? match.item : null;
     var lat = parseFloat(el.getAttribute('data-lat'));
     var lon = parseFloat(el.getAttribute('data-lon'));
     var type = el.getAttribute('data-type');
-    var zoom = {place: 14, airport: 14, peak: 15, park: 15, water: 14, poi: 17, street: 16}[type] || 15;
+    var zoom = {place: 14, airport: 14, peak: 15, park: 15, water: 14, poi: 17, street: 16, address: 18}[type] || 15;
 
+    // Address results need a housenumber lookup before we fly
+    if (item && item._addrEntry && item._addrHn) {
+      AddressIndex.findHousenumber(baseUrl, item._addrEntry, item._addrHn).then(function(hit) {
+        if (!hit) return;
+        flyTo(hit.lat, hit.lng, zoom);
+      }).catch(function() { flyTo(lat, lon, zoom); });
+      resultsEl.style.display = 'none';
+      input.blur();
+      return;
+    }
+    flyTo(lat, lon, zoom);
+    resultsEl.style.display = 'none';
+    input.blur();
+  }
+
+  function flyTo(lat, lon, zoom) {
     if (searchMarker) { searchMarker.remove(); searchMarker = null; }
     searchMarker = new maplibregl.Marker({ color: '#e74c3c' })
       .setLngLat([lon, lat])
       .addTo(map);
-
     map.flyTo({ center: [lon, lat], zoom: zoom, duration: 1500 });
-    resultsEl.style.display = 'none';
-    input.blur();
   }
 
   // Input handler with debounce
@@ -2093,6 +2235,222 @@ function initWikiSidebar(map, config) {
   });
 }
 
+// --- Address index (trigram fuzzy search over streets + housenumbers) ---
+var AddressIndex = (function() {
+  var STREET_ABBREV = {
+    "st":"street","str":"street","ave":"avenue","av":"avenue",
+    "blvd":"boulevard","bl":"boulevard","rd":"road","dr":"drive",
+    "ln":"lane","ct":"court","pl":"place","hwy":"highway",
+    "pkwy":"parkway","cir":"circle","ter":"terrace","ctr":"center",
+    "sq":"square","mt":"mount","ft":"fort",
+    "n":"north","s":"south","e":"east","w":"west",
+    "ne":"northeast","nw":"northwest","se":"southeast","sw":"southwest"
+  };
+
+  function normalize(s) {
+    if (!s) return "";
+    var out = [];
+    var lower = s.toLowerCase();
+    for (var i = 0; i < lower.length; i++) {
+      var ch = lower.charCodeAt(i);
+      var c = lower[i];
+      if ((ch >= 48 && ch <= 57) || (ch >= 97 && ch <= 122) || ch === 32) out.push(c);
+      else out.push(' ');
+    }
+    var tokens = out.join('').split(/\s+/).filter(Boolean);
+    var expanded = tokens.map(function(t) { return STREET_ABBREV[t] || t; });
+    return expanded.join(' ');
+  }
+
+  // Rolling 3-char trigrams over padded string
+  function trigramSet(s) {
+    var padded = '  ' + s + '  ';
+    var set = Object.create(null);
+    for (var i = 0; i + 3 <= padded.length; i++) {
+      set[padded.substr(i, 3)] = 1;
+    }
+    return set;
+  }
+
+  function trigramCount(s) {
+    // Distinct trigram count without building a set (used for Jaccard denominator)
+    return Math.max(s.length + 1, 1);
+  }
+
+  // Parse "1600 market st san francisco" -> {hn: "1600", rest: "market st san francisco"}
+  function parseQuery(q) {
+    var trimmed = (q || "").trim();
+    var m = trimmed.match(/^(\d+[a-z]?)(?:\s+(.+))?$/i);
+    if (m) return { housenumber: m[1], rest: m[2] || "" };
+    return { housenumber: null, rest: trimmed };
+  }
+
+  var state = {
+    loading: null,   // Promise
+    ready: false,
+    streets: null,   // array of street entries from streets.json
+    trigramIdx: null, // { trigram: [streetIdx, streetIdx, ...] }
+    streetTriCounts: null, // Int32Array of trigram counts per street
+    shardCache: Object.create(null),
+    shardPending: Object.create(null)
+  };
+
+  function load(baseUrl) {
+    if (state.ready) return Promise.resolve();
+    if (state.loading) return state.loading;
+    state.loading = fetch(baseUrl + 'search-data/addr/streets.json')
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        state.streets = data.streets || [];
+        var n = state.streets.length;
+        state.trigramIdx = Object.create(null);
+        state.streetTriCounts = new Int32Array(n);
+        for (var i = 0; i < n; i++) {
+          var entry = state.streets[i];
+          var key = entry.s + (entry.c ? ' ' + entry.c : '');
+          var padded = '  ' + key + '  ';
+          var seen = Object.create(null);
+          var count = 0;
+          for (var j = 0; j + 3 <= padded.length; j++) {
+            var tri = padded.substr(j, 3);
+            if (seen[tri]) continue;
+            seen[tri] = 1;
+            count++;
+            var list = state.trigramIdx[tri];
+            if (!list) { list = []; state.trigramIdx[tri] = list; }
+            list.push(i);
+          }
+          state.streetTriCounts[i] = count;
+        }
+        state.ready = true;
+      })
+      .catch(function(err) {
+        state.loading = null;
+        throw err;
+      });
+    return state.loading;
+  }
+
+  // Find top street candidates by trigram Jaccard. nearLat/nearLng adds proximity bump.
+  function findStreets(query, nearLat, nearLng, limit) {
+    if (!state.ready) return [];
+    var q = normalize(query);
+    if (q.length < 2) return [];
+    var padded = '  ' + q + '  ';
+    var qTris = Object.create(null);
+    var qCount = 0;
+    for (var i = 0; i + 3 <= padded.length; i++) {
+      var tri = padded.substr(i, 3);
+      if (!qTris[tri]) { qTris[tri] = 1; qCount++; }
+    }
+    if (qCount === 0) return [];
+
+    // Count overlap per candidate
+    var hits = Object.create(null);
+    for (var t in qTris) {
+      var list = state.trigramIdx[t];
+      if (!list) continue;
+      for (var k = 0; k < list.length; k++) {
+        var idx = list[k];
+        hits[idx] = (hits[idx] || 0) + 1;
+      }
+    }
+
+    var results = [];
+    for (var sIdx in hits) {
+      var overlap = hits[sIdx];
+      var streetTri = state.streetTriCounts[sIdx] || 1;
+      var jaccard = overlap / (qCount + streetTri - overlap);
+      // Require meaningful overlap to prune noise
+      if (jaccard < 0.2) continue;
+      var entry = state.streets[sIdx];
+      var score = jaccard;
+      // Prefix boost: if normalized street starts with query, lift it
+      if (entry.s.indexOf(q) === 0) score += 0.3;
+      else if ((entry.s + ' ' + entry.c).indexOf(q) === 0) score += 0.2;
+      // Proximity boost
+      if (nearLat != null && nearLng != null) {
+        var dlat = entry.a - nearLat;
+        var dlng = entry.o - nearLng;
+        var d = Math.sqrt(dlat * dlat + dlng * dlng);
+        // 0..0.2 bonus, stronger for closer results
+        score += 0.2 * Math.exp(-d * 3);
+      }
+      results.push({ idx: +sIdx, entry: entry, score: score, jaccard: jaccard });
+    }
+    results.sort(function(a, b) { return b.score - a.score; });
+    return results.slice(0, limit || 8);
+  }
+
+  function fetchShard(baseUrl, shardId) {
+    if (state.shardCache[shardId]) return Promise.resolve(state.shardCache[shardId]);
+    if (state.shardPending[shardId]) return state.shardPending[shardId];
+    var p = fetch(baseUrl + 'search-data/addr/hn/' + shardId + '.json')
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        state.shardCache[shardId] = data;
+        delete state.shardPending[shardId];
+        return data;
+      })
+      .catch(function(err) {
+        delete state.shardPending[shardId];
+        throw err;
+      });
+    state.shardPending[shardId] = p;
+    return p;
+  }
+
+  // Given a street and a raw housenumber, return the best matching lat/lng.
+  // Exact housenumber match wins; otherwise nearest by numeric parsing.
+  function findHousenumber(baseUrl, streetEntry, hnRaw) {
+    return fetchShard(baseUrl, streetEntry.k).then(function(shard) {
+      var key = streetEntry.s + '|' + streetEntry.c;
+      var list = shard[key];
+      if (!list || !list.length) return null;
+      var needle = String(hnRaw).toLowerCase();
+      for (var i = 0; i < list.length; i++) {
+        if (String(list[i][0]).toLowerCase() === needle) {
+          return { lat: list[i][1], lng: list[i][2], hn: list[i][0], exact: true };
+        }
+      }
+      // Nearest numeric match
+      var targetNum = parseInt(needle, 10);
+      if (isNaN(targetNum)) {
+        // Fallback: return the first entry
+        return { lat: list[0][1], lng: list[0][2], hn: list[0][0], exact: false };
+      }
+      var best = null;
+      var bestDiff = Infinity;
+      for (var j = 0; j < list.length; j++) {
+        var n = parseInt(String(list[j][0]), 10);
+        if (isNaN(n)) continue;
+        var diff = Math.abs(n - targetNum);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          best = list[j];
+        }
+      }
+      if (!best) best = list[0];
+      return { lat: best[1], lng: best[2], hn: best[0], exact: false };
+    });
+  }
+
+  return {
+    load: load,
+    isReady: function() { return state.ready; },
+    findStreets: findStreets,
+    findHousenumber: findHousenumber,
+    parseQuery: parseQuery,
+    normalize: normalize
+  };
+})();
+
 // --- Routing with A* pathfinding ---
 function initRouting(map, config) {
   if (!config.hasRouting) return;
@@ -2100,8 +2458,10 @@ function initRouting(map, config) {
   var toggleBtn = document.getElementById('route-toggle');
   var panel = document.getElementById('routing-panel');
   var closeBtn = document.getElementById('routing-close');
-  var originLabel = document.getElementById('routing-origin');
-  var destLabel = document.getElementById('routing-dest');
+  var originInput = document.getElementById('routing-origin-input');
+  var destInput = document.getElementById('routing-dest-input');
+  var originResultsEl = document.getElementById('routing-origin-results');
+  var destResultsEl = document.getElementById('routing-dest-results');
   var statusEl = document.getElementById('routing-status');
   var resultEl = document.getElementById('routing-result');
   var distEl = document.getElementById('route-distance');
@@ -2117,6 +2477,7 @@ function initRouting(map, config) {
   var originMarker = null;
   var destMarker = null;
   var routeDrawn = false;
+  var addrLoadAttempted = false;
 
   // Toggle routing mode
   toggleBtn.addEventListener('click', function() {
@@ -2126,6 +2487,7 @@ function initRouting(map, config) {
       panel.style.display = 'block';
       map.getCanvas().style.cursor = 'crosshair';
       loadGraph();
+      loadAddresses();
     } else {
       deactivate();
     }
@@ -2149,12 +2511,16 @@ function initRouting(map, config) {
   function clearRoute() {
     originNode = -1;
     destNode = -1;
-    originLabel.textContent = 'Click map to set start';
-    originLabel.classList.remove('set');
-    destLabel.textContent = 'Then click to set destination';
-    destLabel.classList.remove('set');
+    originInput.value = '';
+    originInput.classList.remove('resolved');
+    destInput.value = '';
+    destInput.classList.remove('resolved');
+    originResultsEl.classList.remove('open');
+    destResultsEl.classList.remove('open');
     resultEl.style.display = 'none';
     clearBtn.style.display = 'none';
+    var stepsEl = document.getElementById('routing-steps');
+    if (stepsEl) { stepsEl.style.display = 'none'; stepsEl.innerHTML = ''; }
     if (originMarker) { originMarker.remove(); originMarker = null; }
     if (destMarker) { destMarker.remove(); destMarker = null; }
     if (routeDrawn) {
@@ -2163,6 +2529,14 @@ function initRouting(map, config) {
       if (map.getSource('route')) map.removeSource('route');
       routeDrawn = false;
     }
+  }
+
+  function loadAddresses() {
+    if (addrLoadAttempted || !config.hasAddresses) return;
+    addrLoadAttempted = true;
+    AddressIndex.load(baseUrl).catch(function(err) {
+      console.error('Address index unavailable:', err);
+    });
   }
 
   // Load routing graph (lazy)
@@ -2311,8 +2685,9 @@ function initRouting(map, config) {
 
     if (g[endNode] === Infinity) return null;
 
-    // Reconstruct path
-    var path = [];
+    // Reconstruct path — collect both geometry and per-edge metadata
+    var path = [];           // array of segment coord arrays (for drawing)
+    var routeEdges = [];     // per-edge: {fromNode, toNode, dist, speed, nameIdx, flags, firstLngLat, lastLngLat}
     var totalDist = 0;
     var totalTime = g[endNode];
     var n = endNode;
@@ -2323,7 +2698,6 @@ function initRouting(map, config) {
       var edge = adj[p][ei];
       totalDist += edge[1];
 
-      // Build segment geometry
       var fromLat = nodes[p * 2], fromLon = nodes[p * 2 + 1];
       var toLat = nodes[n * 2], toLon = nodes[n * 2 + 1];
       var geomIdx = edge[3];
@@ -2336,6 +2710,20 @@ function initRouting(map, config) {
       }
       segment.push([toLon, toLat]);
       path.unshift(segment);
+
+      // Unshift so routeEdges ends up in start->end order
+      routeEdges.unshift({
+        fromNode: p,
+        toNode: n,
+        dist: edge[1],
+        speed: edge[2],
+        nameIdx: edge[4] != null ? edge[4] : 0,
+        flags: edge[5] != null ? edge[5] : 0,
+        firstLngLat: segment[0],
+        secondLngLat: segment[1],
+        secondLastLngLat: segment[segment.length - 2],
+        lastLngLat: segment[segment.length - 1]
+      });
 
       n = p;
     }
@@ -2352,8 +2740,167 @@ function initRouting(map, config) {
     return {
       coords: coords,
       distance: totalDist,
-      time: totalTime
+      time: totalTime,
+      edges: routeEdges
     };
+  }
+
+  // ---- Turn-by-turn step generation ----
+  // Great-circle initial bearing in degrees (0 = north, clockwise)
+  function bearing(aLng, aLat, bLng, bLat) {
+    var dLon = (bLng - aLng) * Math.PI / 180;
+    var la1 = aLat * Math.PI / 180;
+    var la2 = bLat * Math.PI / 180;
+    var y = Math.sin(dLon) * Math.cos(la2);
+    var x = Math.cos(la1) * Math.sin(la2) - Math.sin(la1) * Math.cos(la2) * Math.cos(dLon);
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  }
+
+  function normalizeDelta(a) {
+    while (a > 180) a -= 360;
+    while (a < -180) a += 360;
+    return a;
+  }
+
+  function classifyTurn(delta) {
+    var ad = Math.abs(delta);
+    if (ad < 20) return { kind: 'straight', text: 'Continue straight' };
+    if (ad < 45) {
+      return delta > 0
+        ? { kind: 'slight-right', text: 'Bear right' }
+        : { kind: 'slight-left', text: 'Bear left' };
+    }
+    if (ad < 135) {
+      return delta > 0
+        ? { kind: 'right', text: 'Turn right' }
+        : { kind: 'left', text: 'Turn left' };
+    }
+    if (ad < 170) {
+      return delta > 0
+        ? { kind: 'sharp-right', text: 'Sharp right' }
+        : { kind: 'sharp-left', text: 'Sharp left' };
+    }
+    return { kind: 'u-turn', text: 'Make a U-turn' };
+  }
+
+  function headingCardinal(deg) {
+    // Approximate compass heading label for the first step.
+    var dirs = ['north','northeast','east','southeast','south','southwest','west','northwest'];
+    return dirs[Math.round(deg / 45) % 8];
+  }
+
+  function computeSteps(routeEdges, graph) {
+    if (!routeEdges || !routeEdges.length) return [];
+    var names = graph.names || [];
+    function nameOf(e) { return names[e.nameIdx] || ''; }
+
+    // Group consecutive edges by "effective" street name.
+    // Unnamed edges adopt the preceding named group's name (so short unnamed
+    // connectors don't become their own steps).
+    var groups = [];  // { name, edges: [], distance, startIdx, endIdx }
+    for (var i = 0; i < routeEdges.length; i++) {
+      var e = routeEdges[i];
+      var n = nameOf(e);
+      var last = groups[groups.length - 1];
+      var takesName = n || (last ? last.name : '');
+      if (!last || last.name !== takesName) {
+        groups.push({
+          name: takesName,
+          edges: [e],
+          distance: e.dist,
+          startIdx: i,
+          endIdx: i,
+          startLngLat: e.firstLngLat,
+          endLngLat: e.lastLngLat,
+          roundabout: !!(e.flags & 1),
+          link: !!(e.flags & 2)
+        });
+      } else {
+        last.edges.push(e);
+        last.distance += e.dist;
+        last.endIdx = i;
+        last.endLngLat = e.lastLngLat;
+        last.roundabout = last.roundabout || !!(e.flags & 1);
+        last.link = last.link || !!(e.flags & 2);
+      }
+    }
+
+    // Merge groups that are too short and unnamed (noise filtering)
+    if (groups.length > 2) {
+      for (var gi = groups.length - 1; gi > 0; gi--) {
+        var gr = groups[gi];
+        if (!gr.name && gr.distance < 20 && gi < groups.length - 1) {
+          // absorb into next group
+          var next = groups[gi + 1];
+          next.edges = gr.edges.concat(next.edges);
+          next.distance += gr.distance;
+          next.startIdx = gr.startIdx;
+          next.startLngLat = gr.startLngLat;
+          groups.splice(gi, 1);
+        }
+      }
+    }
+
+    var steps = [];
+    for (var k = 0; k < groups.length; k++) {
+      var g = groups[k];
+      var firstEdge = g.edges[0];
+      // Initial bearing of this group (from first to second point of first edge)
+      var a = firstEdge.firstLngLat;
+      var b = firstEdge.secondLngLat || firstEdge.lastLngLat;
+      var leaveBearing = bearing(a[0], a[1], b[0], b[1]);
+      // Final bearing at group end (second-last -> last point of last edge)
+      var lastEdge = g.edges[g.edges.length - 1];
+      var c = lastEdge.secondLastLngLat || lastEdge.firstLngLat;
+      var d = lastEdge.lastLngLat;
+      var enterBearingNext = bearing(c[0], c[1], d[0], d[1]);
+
+      if (k === 0) {
+        // First step: head <direction> on <street>
+        var card = headingCardinal(leaveBearing);
+        var text = 'Head ' + card + (g.name ? ' on ' + g.name : '');
+        if (g.roundabout) text = 'Enter the roundabout';
+        if (g.link) text = 'Take the ramp' + (g.name ? ' onto ' + g.name : '');
+        steps.push({
+          kind: 'depart', text: text, distance: g.distance,
+          lngLat: g.startLngLat, name: g.name
+        });
+      } else {
+        // Turn onto this group from the previous group
+        var prevGroup = groups[k - 1];
+        var prevLastEdge = prevGroup.edges[prevGroup.edges.length - 1];
+        var pc = prevLastEdge.secondLastLngLat || prevLastEdge.firstLngLat;
+        var pd = prevLastEdge.lastLngLat;
+        var approach = bearing(pc[0], pc[1], pd[0], pd[1]);
+        var leave = leaveBearing;
+        var delta = normalizeDelta(leave - approach);
+        var turn = classifyTurn(delta);
+
+        var text;
+        if (g.roundabout) {
+          text = 'Enter the roundabout' + (g.name ? ' toward ' + g.name : '');
+        } else if (g.link) {
+          text = 'Take the ramp' + (g.name ? ' onto ' + g.name : '');
+        } else if (turn.kind === 'straight') {
+          text = 'Continue' + (g.name ? ' on ' + g.name : '');
+        } else {
+          text = turn.text + (g.name ? ' onto ' + g.name : '');
+        }
+        steps.push({
+          kind: turn.kind, text: text, distance: g.distance,
+          lngLat: g.startLngLat, name: g.name
+        });
+      }
+    }
+
+    // Final step
+    var lastEdgeAll = routeEdges[routeEdges.length - 1];
+    steps.push({
+      kind: 'arrive', text: 'Arrive at destination', distance: 0,
+      lngLat: lastEdgeAll.lastLngLat, name: ''
+    });
+
+    return steps;
   }
 
   function drawRoute(coords) {
@@ -2421,76 +2968,301 @@ function initRouting(map, config) {
     return el;
   }
 
-  // Map click handler for routing
+  // Snap (lat, lon) to the nearest graph node, update the input label + marker,
+  // and kick off routing if both ends are now set.
+  function setEndpoint(which, lat, lon, labelText) {
+    if (!graph) return;
+    var nodeIdx = nearestNode(lat, lon);
+    var nLat = graph.nodes[nodeIdx * 2];
+    var nLon = graph.nodes[nodeIdx * 2 + 1];
+    var inputEl = which === 'origin' ? originInput : destInput;
+    var markerRef = which === 'origin' ? originMarker : destMarker;
+    var markerCls = which === 'origin' ? 'routing-marker-origin' : 'routing-marker-dest';
+
+    inputEl.value = labelText || coordLabel(nLat, nLon);
+    inputEl.classList.add('resolved');
+    if (markerRef) markerRef.remove();
+    var marker = new maplibregl.Marker({ element: makeMarkerEl(markerCls), anchor: 'center' })
+      .setLngLat([nLon, nLat])
+      .addTo(map);
+    if (which === 'origin') { originNode = nodeIdx; originMarker = marker; }
+    else { destNode = nodeIdx; destMarker = marker; }
+
+    if (originNode !== -1 && destNode !== -1) {
+      statusEl.textContent = 'Calculating route...';
+      setTimeout(runRouting, 10);
+    } else {
+      statusEl.textContent = which === 'origin'
+        ? 'Set destination (type an address or click the map)'
+        : 'Set start (type an address or click the map)';
+    }
+  }
+
+  function runRouting() {
+    var result = findRoute(originNode, destNode);
+    if (result) {
+      drawRoute(result.coords);
+      distEl.textContent = formatDistance(result.distance);
+      timeEl.textContent = formatTime(result.time);
+      resultEl.style.display = 'block';
+      clearBtn.style.display = 'block';
+      statusEl.textContent = '';
+
+      renderSteps(computeSteps(result.edges, graph));
+
+      var bounds = result.coords.reduce(function(b, c) {
+        return b.extend(c);
+      }, new maplibregl.LngLatBounds(result.coords[0], result.coords[0]));
+      map.fitBounds(bounds, { padding: 60, duration: 1000 });
+    } else {
+      statusEl.textContent = 'No route found';
+      clearBtn.style.display = 'block';
+      renderSteps([]);
+    }
+  }
+
+  function maneuverIcon(kind) {
+    switch (kind) {
+      case 'depart': return '\u25B2';       // triangle up
+      case 'arrive': return '\u2691';       // flag
+      case 'left': return '\u21B0';
+      case 'right': return '\u21B1';
+      case 'slight-left': return '\u2196';
+      case 'slight-right': return '\u2197';
+      case 'sharp-left': return '\u21A9';
+      case 'sharp-right': return '\u21AA';
+      case 'straight': return '\u2191';
+      case 'u-turn': return '\u21BA';
+      default: return '\u2022';
+    }
+  }
+
+  function renderSteps(steps) {
+    var el = document.getElementById('routing-steps');
+    if (!steps.length) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < steps.length; i++) {
+      var s = steps[i];
+      html += '<div class="routing-step" data-idx="' + i + '">' +
+        '<div class="routing-step-icon">' + maneuverIcon(s.kind) + '</div>' +
+        '<div class="routing-step-body">' +
+          '<div class="routing-step-text">' + escapeHtmlStep(s.text) + '</div>' +
+          (s.distance > 0
+            ? '<div class="routing-step-dist">' + formatDistance(s.distance) + '</div>'
+            : '') +
+        '</div></div>';
+    }
+    el.innerHTML = html;
+    el.style.display = 'block';
+    // Clicking a step pans the map to that maneuver
+    el.onclick = function(ev) {
+      var item = ev.target.closest && ev.target.closest('.routing-step');
+      if (!item) return;
+      var idx = parseInt(item.getAttribute('data-idx'), 10);
+      var s = steps[idx];
+      if (!s || !s.lngLat) return;
+      map.flyTo({ center: s.lngLat, zoom: Math.max(map.getZoom(), 16), duration: 700 });
+    };
+  }
+
+  function escapeHtmlStep(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // Map click handler: fills whichever endpoint is empty (or resets origin).
   map.on('click', function(e) {
     if (!active || !graph) return;
-
     var lat = e.lngLat.lat;
     var lon = e.lngLat.lng;
-
     if (originNode === -1) {
-      // Set origin
-      originNode = nearestNode(lat, lon);
-      var oLat = graph.nodes[originNode * 2];
-      var oLon = graph.nodes[originNode * 2 + 1];
-      originLabel.textContent = coordLabel(oLat, oLon);
-      originLabel.classList.add('set');
-      statusEl.textContent = 'Click map to set destination';
-
-      if (originMarker) originMarker.remove();
-      originMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-origin'), anchor: 'center' })
-        .setLngLat([oLon, oLat])
-        .addTo(map);
+      setEndpoint('origin', lat, lon, null);
     } else if (destNode === -1) {
-      // Set destination
-      destNode = nearestNode(lat, lon);
-      var dLat = graph.nodes[destNode * 2];
-      var dLon = graph.nodes[destNode * 2 + 1];
-      destLabel.textContent = coordLabel(dLat, dLon);
-      destLabel.classList.add('set');
-      statusEl.textContent = 'Calculating route...';
-
-      if (destMarker) destMarker.remove();
-      destMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-dest'), anchor: 'center' })
-        .setLngLat([dLon, dLat])
-        .addTo(map);
-
-      // Calculate route
-      setTimeout(function() {
-        var result = findRoute(originNode, destNode);
-        if (result) {
-          drawRoute(result.coords);
-          distEl.textContent = formatDistance(result.distance);
-          timeEl.textContent = formatTime(result.time);
-          resultEl.style.display = 'block';
-          clearBtn.style.display = 'block';
-          statusEl.textContent = '';
-
-          // Fit map to route
-          var bounds = result.coords.reduce(function(b, c) {
-            return b.extend(c);
-          }, new maplibregl.LngLatBounds(result.coords[0], result.coords[0]));
-          map.fitBounds(bounds, { padding: 60, duration: 1000 });
-        } else {
-          statusEl.textContent = 'No route found';
-          clearBtn.style.display = 'block';
-        }
-      }, 10);
+      setEndpoint('dest', lat, lon, null);
     } else {
-      // Reset and set new origin
       clearRoute();
-      originNode = nearestNode(lat, lon);
-      var nLat = graph.nodes[originNode * 2];
-      var nLon = graph.nodes[originNode * 2 + 1];
-      originLabel.textContent = coordLabel(nLat, nLon);
-      originLabel.classList.add('set');
-      statusEl.textContent = 'Click map to set destination';
-
-      originMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-origin'), anchor: 'center' })
-        .setLngLat([nLon, nLat])
-        .addTo(map);
+      setEndpoint('origin', lat, lon, null);
     }
   });
+
+  // --- Autocomplete for origin + dest text inputs ---
+  function wireInput(inputEl, resultsEl, which) {
+    var activeIdx = -1;
+    var currentMatches = [];
+    var debounceTimer = null;
+    var seq = 0;
+
+    function closeResults() {
+      resultsEl.classList.remove('open');
+      resultsEl.innerHTML = '';
+      activeIdx = -1;
+      currentMatches = [];
+    }
+
+    function renderMatches(matches) {
+      currentMatches = matches;
+      activeIdx = -1;
+      if (!matches.length) {
+        resultsEl.innerHTML = '<div class="routing-result"><div class="routing-result-sub">No matches</div></div>';
+        resultsEl.classList.add('open');
+        return;
+      }
+      var html = '';
+      for (var i = 0; i < matches.length; i++) {
+        var m = matches[i];
+        html += '<div class="routing-result" data-idx="' + i + '">' +
+          '<div class="routing-result-name">' + escapeHtml(m.display) + '</div>' +
+          (m.sub ? '<div class="routing-result-sub">' + escapeHtml(m.sub) + '</div>' : '') +
+          '</div>';
+      }
+      resultsEl.innerHTML = html;
+      resultsEl.classList.add('open');
+    }
+
+    function escapeHtml(s) {
+      return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function runSearch(raw) {
+      if (!raw || raw.length < 2) { closeResults(); return; }
+      var mySeq = ++seq;
+      var center = map.getCenter();
+      var parsed = AddressIndex.parseQuery(raw);
+
+      // Feature search (POIs, places, streets)
+      var featureP = searchFeaturesFallback(raw, center);
+      // Address street search
+      var streetCandidates = AddressIndex.isReady()
+        ? AddressIndex.findStreets(parsed.rest || raw, center.lat, center.lng, 8)
+        : [];
+
+      featureP.then(function(featMatches) {
+        if (mySeq !== seq) return;
+        var results = [];
+        if (parsed.housenumber) {
+          // Prefer address results when the query has a leading number
+          for (var i = 0; i < streetCandidates.length; i++) {
+            var s = streetCandidates[i].entry;
+            results.push({
+              kind: 'address',
+              display: parsed.housenumber + ' ' + (s.sr || s.s) +
+                       (s.cr ? ', ' + s.cr : ''),
+              sub: 'Address',
+              entry: s,
+              hn: parsed.housenumber
+            });
+          }
+        }
+        // Streets (no housenumber)
+        for (var j = 0; j < streetCandidates.length; j++) {
+          var sj = streetCandidates[j].entry;
+          results.push({
+            kind: 'street',
+            display: (sj.sr || sj.s) + (sj.cr ? ', ' + sj.cr : ''),
+            sub: sj.n + ' addresses',
+            entry: sj
+          });
+        }
+        // Feature matches (POIs, places, etc)
+        for (var k = 0; k < featMatches.length; k++) {
+          var fm = featMatches[k];
+          results.push({
+            kind: 'feature',
+            display: fm.n,
+            sub: (fm.t || '') + (fm.l ? ' · ' + fm.l : ''),
+            lat: fm.a,
+            lng: fm.o
+          });
+        }
+        renderMatches(results.slice(0, 10));
+      });
+    }
+
+    inputEl.addEventListener('input', function() {
+      inputEl.classList.remove('resolved');
+      var v = inputEl.value.trim();
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(function() { runSearch(v); }, 180);
+    });
+
+    inputEl.addEventListener('focus', function() {
+      if (currentMatches.length) resultsEl.classList.add('open');
+    });
+
+    inputEl.addEventListener('blur', function() {
+      setTimeout(closeResults, 150);  // Delay so click on result fires first
+    });
+
+    inputEl.addEventListener('keydown', function(e) {
+      var items = resultsEl.querySelectorAll('.routing-result[data-idx]');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        activeIdx = Math.min(activeIdx + 1, items.length - 1);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        activeIdx = Math.max(activeIdx - 1, 0);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (activeIdx >= 0 && currentMatches[activeIdx]) pickMatch(currentMatches[activeIdx]);
+        else if (currentMatches[0]) pickMatch(currentMatches[0]);
+        return;
+      } else if (e.key === 'Escape') {
+        closeResults();
+        return;
+      } else {
+        return;
+      }
+      for (var i = 0; i < items.length; i++) {
+        if (i === activeIdx) items[i].classList.add('active');
+        else items[i].classList.remove('active');
+      }
+    });
+
+    resultsEl.addEventListener('mousedown', function(e) {
+      var el = e.target.closest && e.target.closest('.routing-result[data-idx]');
+      if (!el) return;
+      e.preventDefault();
+      var idx = parseInt(el.getAttribute('data-idx'), 10);
+      if (currentMatches[idx]) pickMatch(currentMatches[idx]);
+    });
+
+    function pickMatch(m) {
+      closeResults();
+      if (m.kind === 'address' && m.entry && m.hn) {
+        statusEl.textContent = 'Resolving address...';
+        AddressIndex.findHousenumber(baseUrl, m.entry, m.hn).then(function(hit) {
+          if (!hit) {
+            statusEl.textContent = 'Address not found';
+            return;
+          }
+          var label = m.hn + ' ' + (m.entry.sr || m.entry.s) +
+                      (m.entry.cr ? ', ' + m.entry.cr : '');
+          setEndpoint(which, hit.lat, hit.lng, label);
+        }).catch(function() {
+          statusEl.textContent = 'Address lookup failed';
+        });
+      } else if (m.kind === 'street' && m.entry) {
+        var label = (m.entry.sr || m.entry.s) +
+                    (m.entry.cr ? ', ' + m.entry.cr : '');
+        setEndpoint(which, m.entry.a, m.entry.o, label);
+      } else if (m.kind === 'feature' && m.lat != null) {
+        setEndpoint(which, m.lat, m.lng, m.display);
+      }
+    }
+  }
+
+  // Best-effort fallback: hook into the existing search manifest to pull POI/place matches.
+  // Returns a Promise resolving to a (possibly empty) array of feature entries.
+  function searchFeaturesFallback(query, center) {
+    if (!window._featureSearchManifest) return Promise.resolve([]);
+    return window._featureSearch(query, center).catch(function() { return []; });
+  }
+
+  wireInput(originInput, originResultsEl, 'origin');
+  wireInput(destInput, destResultsEl, 'dest');
 }
 </script>
 </body>

@@ -1325,7 +1325,9 @@ def extract_routing_graph(pbf_path, output_dir):
     DEFAULT_SPEED = 30
 
     coord_count = {}  # snapped (lat, lon) -> count of ways containing it
-    ways = []  # [(coords, highway_class, oneway, speed)]
+    ways = []  # [(coords, highway_class, oneway, speed, name_idx, flags)]
+    name_list = [""]  # index 0 = unnamed / empty
+    name_index = {"": 0}
 
     print(f"    Reading highway features...")
     feat_count = 0
@@ -1356,6 +1358,27 @@ def extract_routing_graph(pbf_path, output_dir):
 
             speed = SPEED.get(highway, DEFAULT_SPEED)
 
+            # Display name: prefer `name`, fall back to `ref` (e.g. "US 101") for
+            # ramps and highways that lack a common name.
+            name_raw = (props.get("name") or "").strip()
+            ref_raw = (props.get("ref") or "").strip()
+            display_name = name_raw or ref_raw
+            if display_name:
+                if display_name not in name_index:
+                    name_index[display_name] = len(name_list)
+                    name_list.append(display_name)
+                name_idx = name_index[display_name]
+            else:
+                name_idx = 0
+
+            # Bit flags: 1 = roundabout (junction=roundabout or =circular)
+            flags = 0
+            junction = (props.get("junction") or "").strip()
+            if junction in ("roundabout", "circular"):
+                flags |= 1
+            if highway.endswith("_link"):
+                flags |= 2   # link/ramp (used for "take the ramp" wording)
+
             coords = []
             for c in geom["coordinates"]:
                 lat = round(c[1], SNAP)
@@ -1365,7 +1388,7 @@ def extract_routing_graph(pbf_path, output_dir):
             if len(coords) < 2:
                 continue
 
-            ways.append((coords, highway, oneway, speed))
+            ways.append((coords, highway, oneway, speed, name_idx, flags))
             feat_count += 1
 
             for coord in coords:
@@ -1382,7 +1405,8 @@ def extract_routing_graph(pbf_path, output_dir):
 
     # Step 4: Identify graph nodes (intersections + endpoints)
     graph_nodes = set()
-    for coords, _, _, _ in ways:
+    for way_data in ways:
+        coords = way_data[0]
         graph_nodes.add(coords[0])
         graph_nodes.add(coords[-1])
         for coord in coords[1:-1]:
@@ -1404,8 +1428,8 @@ def extract_routing_graph(pbf_path, output_dir):
         return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
     # Step 5: Build edges by splitting ways at graph nodes
-    edges = []  # [from_idx, to_idx, dist_m, speed_kmh, [geometry]]
-    for coords, highway, oneway, speed in ways:
+    edges = []  # [from_idx, to_idx, dist_m, speed_kmh, [geometry], name_idx, flags]
+    for coords, highway, oneway, speed, name_idx, flags in ways:
         # Split into segments at graph nodes
         seg_start = 0
         for i in range(1, len(coords)):
@@ -1425,11 +1449,11 @@ def extract_routing_graph(pbf_path, output_dir):
 
                         # Add forward edge
                         if oneway != -1:
-                            edges.append([from_idx, to_idx, dist, speed, geom])
+                            edges.append([from_idx, to_idx, dist, speed, geom, name_idx, flags])
                         # Add reverse edge
                         if oneway != 1:
                             rev_geom = list(reversed(geom))
-                            edges.append([to_idx, from_idx, dist, speed, rev_geom])
+                            edges.append([to_idx, from_idx, dist, speed, rev_geom, name_idx, flags])
 
                 seg_start = i
 
@@ -1442,13 +1466,14 @@ def extract_routing_graph(pbf_path, output_dir):
         nodes_flat.append(lat)
         nodes_flat.append(lon)
 
-    # Build adjacency list for efficient lookup: adj[node] = [[target, dist, speed, geomIdx], ...]
+    # Build adjacency list for efficient lookup:
+    #   adj[node] = [[target, dist, speed, geomIdx, nameIdx, flags], ...]
     # Store geometries separately to allow dedup
     geom_list = []
     geom_map = {}  # tuple(geom) -> index
     adj = [[] for _ in range(len(node_list))]
 
-    for from_idx, to_idx, dist, speed, geom in edges:
+    for from_idx, to_idx, dist, speed, geom, name_idx, flags in edges:
         geom_key = tuple(tuple(c) for c in geom) if geom else ()
         if geom_key in geom_map:
             gi = geom_map[geom_key]
@@ -1458,12 +1483,13 @@ def extract_routing_graph(pbf_path, output_dir):
             geom_map[geom_key] = gi
         else:
             gi = -1
-        adj[from_idx].append([to_idx, dist, speed, gi])
+        adj[from_idx].append([to_idx, dist, speed, gi, name_idx, flags])
 
     routing_data = {
         "nodes": nodes_flat,
         "adj": adj,
         "geom": geom_list,
+        "names": name_list,
     }
 
     output_path = os.path.join(output_dir, "routing-graph.json")
@@ -1471,7 +1497,8 @@ def extract_routing_graph(pbf_path, output_dir):
         json.dump(routing_data, f, separators=(",", ":"))
 
     size_mb = os.path.getsize(output_path) / (1024 * 1024)
-    print(f"    Routing graph: {size_mb:.1f} MB ({len(node_list)} nodes, {len(edges)} edges)")
+    print(f"    Routing graph: {size_mb:.1f} MB ({len(node_list)} nodes, "
+          f"{len(edges)} edges, {len(name_list) - 1} unique names)")
 
     # Clean up temp files
     for tmp in [highways_pbf, highways_geojson]:
@@ -1479,6 +1506,237 @@ def extract_routing_graph(pbf_path, output_dir):
             os.remove(tmp)
 
     return output_path
+
+
+_STREET_ABBREV = {
+    "st": "street", "str": "street",
+    "ave": "avenue", "av": "avenue",
+    "blvd": "boulevard", "bl": "boulevard",
+    "rd": "road",
+    "dr": "drive",
+    "ln": "lane",
+    "ct": "court",
+    "pl": "place",
+    "hwy": "highway",
+    "pkwy": "parkway",
+    "cir": "circle",
+    "ter": "terrace",
+    "ctr": "center",
+    "sq": "square",
+    "mt": "mount",
+    "ft": "fort",
+    "n": "north", "s": "south", "e": "east", "w": "west",
+    "ne": "northeast", "nw": "northwest", "se": "southeast", "sw": "southwest",
+}
+
+
+def _normalize_street(name):
+    """Lowercase, expand common abbreviations, collapse whitespace/punct."""
+    if not name:
+        return ""
+    # Lowercase and replace punctuation with spaces
+    out = []
+    for ch in name.lower():
+        if ch.isalnum() or ch == " ":
+            out.append(ch)
+        else:
+            out.append(" ")
+    tokens = [t for t in "".join(out).split() if t]
+    expanded = [_STREET_ABBREV.get(t, t) for t in tokens]
+    return " ".join(expanded)
+
+
+def extract_address_index(pbf_path, output_dir):
+    """Extract addressed points (houses, buildings, shops) from OSM PBF.
+
+    Uses osmium to filter features with `addr:housenumber`, exports to
+    GeoJSONSeq, then buckets (city, street) -> [housenumber, lat, lon].
+
+    Output layout in `output_dir/addr/`:
+      streets.json          flat list of unique streets for client-side trigram index
+      hn/<shard>.json       housenumber -> [lat, lon] for streets in that shard
+      manifest.json         index metadata
+
+    Returns the path to `output_dir/addr/` on success, or None if no addresses found.
+    """
+    print("  Extracting address index from OSM data...")
+
+    addr_dir = os.path.join(output_dir, "addr")
+    os.makedirs(addr_dir, exist_ok=True)
+
+    # Step 1: filter PBF for any feature tagged with addr:housenumber
+    addr_pbf = os.path.join(output_dir, "addresses.osm.pbf")
+    cmd = [
+        "osmium", "tags-filter", str(pbf_path),
+        "n/addr:housenumber", "w/addr:housenumber", "r/addr:housenumber",
+        "-o", addr_pbf, "--overwrite",
+    ]
+    print("    Filtering addressed features...")
+    subprocess.run(cmd, check=True)
+    size_mb = os.path.getsize(addr_pbf) / (1024 * 1024)
+    print(f"    Address PBF: {size_mb:.1f} MB")
+
+    # Step 2: export as GeoJSONSeq
+    addr_geojson = os.path.join(output_dir, "addresses.geojsonseq")
+    cmd = [
+        "osmium", "export", addr_pbf,
+        "-f", "geojsonseq",
+        "-o", addr_geojson, "--overwrite",
+    ]
+    print("    Exporting to GeoJSON...")
+    subprocess.run(cmd, check=True)
+
+    # Step 3: walk features, group by (street, city)
+    # Key = (normalized_street, normalized_city). Value = list of [hn_raw, lat, lon]
+    def _centroid(geom):
+        t = geom.get("type")
+        c = geom.get("coordinates")
+        if t == "Point":
+            return c[1], c[0]
+        if t == "LineString":
+            if not c:
+                return None
+            lat = sum(p[1] for p in c) / len(c)
+            lon = sum(p[0] for p in c) / len(c)
+            return lat, lon
+        if t == "Polygon":
+            if not c or not c[0]:
+                return None
+            ring = c[0]
+            lat = sum(p[1] for p in ring) / len(ring)
+            lon = sum(p[0] for p in ring) / len(ring)
+            return lat, lon
+        if t == "MultiPolygon":
+            if not c or not c[0] or not c[0][0]:
+                return None
+            ring = c[0][0]
+            lat = sum(p[1] for p in ring) / len(ring)
+            lon = sum(p[0] for p in ring) / len(ring)
+            return lat, lon
+        return None
+
+    groups = {}  # (street_norm, city_norm) -> [(hn_raw, lat, lon), ...]
+    # Keep the most common raw display name for each (street, city) key
+    display = {}  # (street_norm, city_norm) -> (street_raw, city_raw)
+
+    feat_count = 0
+    kept = 0
+    with open(addr_geojson) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            feat_count += 1
+            try:
+                feat = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            props = feat.get("properties") or {}
+            hn = props.get("addr:housenumber")
+            street = props.get("addr:street")
+            if not hn or not street:
+                continue
+
+            geom = feat.get("geometry") or {}
+            ll = _centroid(geom)
+            if not ll:
+                continue
+            lat, lon = ll
+
+            street_norm = _normalize_street(street)
+            city_raw = props.get("addr:city") or ""
+            city_norm = _normalize_street(city_raw)
+            key = (street_norm, city_norm)
+
+            groups.setdefault(key, []).append((hn, round(lat, 6), round(lon, 6)))
+            if key not in display:
+                display[key] = (street.strip(), city_raw.strip())
+            kept += 1
+
+            if feat_count % 50000 == 0:
+                print(f"\r    Read {feat_count} address features ({kept} kept)...",
+                      end="", flush=True)
+
+    print(f"\r    Read {feat_count} address features, kept {kept}")
+
+    if not groups:
+        print("    No addressed features found, skipping address index")
+        # Clean up and bail
+        for tmp in [addr_pbf, addr_geojson]:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        return None
+
+    # Step 4: assign each (street, city) group to a shard (stable hash on key)
+    def _shard_id(key):
+        s = (key[0] + "|" + key[1]).encode("utf-8")
+        # Simple deterministic hash; 256 shards keep each small
+        h = 2166136261
+        for b in s:
+            h = ((h ^ b) * 16777619) & 0xFFFFFFFF
+        return h % 256
+
+    # Step 5: build streets.json — one entry per (street, city)
+    # Each street entry references the shard that has its housenumbers
+    streets = []
+    shard_groups = {}  # shard_id -> { "street|city": [[hn, lat, lon], ...] }
+    for idx, (key, entries) in enumerate(sorted(groups.items())):
+        street_norm, city_norm = key
+        street_raw, city_raw = display[key]
+        # Compute bbox so client can show the best match near current view
+        lats = [e[1] for e in entries]
+        lons = [e[2] for e in entries]
+        shard = _shard_id(key)
+        streets.append({
+            "s": street_norm,
+            "c": city_norm,
+            "sr": street_raw,
+            "cr": city_raw,
+            "a": round(sum(lats) / len(lats), 5),
+            "o": round(sum(lons) / len(lons), 5),
+            "n": len(entries),
+            "k": shard,
+        })
+        shard_key = f"{street_norm}|{city_norm}"
+        shard_groups.setdefault(shard, {})[shard_key] = [
+            [e[0], e[1], e[2]] for e in entries
+        ]
+
+    streets_path = os.path.join(addr_dir, "streets.json")
+    with open(streets_path, "w") as f:
+        json.dump({"streets": streets}, f, separators=(",", ":"))
+    streets_mb = os.path.getsize(streets_path) / (1024 * 1024)
+
+    # Step 6: write housenumber shard files
+    hn_dir = os.path.join(addr_dir, "hn")
+    os.makedirs(hn_dir, exist_ok=True)
+    total_hn_bytes = 0
+    for shard_id, payload in shard_groups.items():
+        shard_path = os.path.join(hn_dir, f"{shard_id}.json")
+        with open(shard_path, "w") as f:
+            json.dump(payload, f, separators=(",", ":"))
+        total_hn_bytes += os.path.getsize(shard_path)
+
+    # Step 7: manifest
+    manifest = {
+        "shards": sorted(shard_groups.keys()),
+        "streetCount": len(streets),
+        "addressCount": kept,
+    }
+    with open(os.path.join(addr_dir, "manifest.json"), "w") as f:
+        json.dump(manifest, f, separators=(",", ":"))
+
+    print(f"    Address index: {len(streets)} streets, {kept} addresses")
+    print(f"      streets.json: {streets_mb:.1f} MB")
+    print(f"      hn shards: {len(shard_groups)} files, "
+          f"{total_hn_bytes / (1024 * 1024):.1f} MB total")
+
+    # Clean up temp files
+    for tmp in [addr_pbf, addr_geojson]:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+    return addr_dir
 
 
 def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
@@ -1776,6 +2034,7 @@ def create_zim(
     bbox=None,
     wikidata_data=None,
     routing_graph_path=None,
+    address_dir=None,
 ):
     """Create a ZIM file containing the map viewer and all tiles."""
     from libzim.writer import Creator, Item, StringProvider, FileProvider
@@ -2186,6 +2445,43 @@ def create_zim(
                 "application/json",
                 routing_graph_path,
             ))
+
+        # Add address index (streets list + housenumber shards)
+        if address_dir and os.path.isdir(address_dir):
+            streets_path = os.path.join(address_dir, "streets.json")
+            manifest_path = os.path.join(address_dir, "manifest.json")
+            hn_dir = os.path.join(address_dir, "hn")
+            if os.path.isfile(streets_path) and os.path.isfile(manifest_path):
+                streets_mb = os.path.getsize(streets_path) / (1024 * 1024)
+                print(f"    Adding address index (streets: {streets_mb:.1f} MB)...")
+                creator.add_item(MapItem(
+                    "search-data/addr/streets.json",
+                    "Address Streets",
+                    "application/json",
+                    streets_path,
+                ))
+                creator.add_item(MapItem(
+                    "search-data/addr/manifest.json",
+                    "Address Manifest",
+                    "application/json",
+                    manifest_path,
+                ))
+                if os.path.isdir(hn_dir):
+                    shard_files = sorted(os.listdir(hn_dir))
+                    total_hn_bytes = 0
+                    for fname in shard_files:
+                        fpath = os.path.join(hn_dir, fname)
+                        if not os.path.isfile(fpath):
+                            continue
+                        total_hn_bytes += os.path.getsize(fpath)
+                        creator.add_item(MapItem(
+                            f"search-data/addr/hn/{fname}",
+                            f"Address shard {fname}",
+                            "application/json",
+                            fpath,
+                        ))
+                    print(f"    Added {len(shard_files)} address shards "
+                          f"({total_hn_bytes / (1024 * 1024):.1f} MB)")
 
         # Build location index for search feature enrichment
         loc_lookup = None
@@ -2615,6 +2911,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "If bbox is set, features are filtered to the bounding box.")
     parser.add_argument("--routing", action="store_true",
                         help="Include offline routing graph for turn-by-turn directions")
+    parser.add_argument("--addresses", action=argparse.BooleanOptionalAction, default=None,
+                        help="Include offline address index (on by default when --routing is set)")
 
     args = parser.parse_args()
 
@@ -2670,7 +2968,15 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     # Routing options
     include_routing = args.routing
 
-    total_steps = 6 + (1 if include_satellite else 0) + (1 if include_terrain else 0) + (1 if include_wikidata else 0) + (1 if include_routing else 0)
+    # Addresses default to on whenever routing is on; --no-addresses disables
+    if args.addresses is None:
+        include_addresses = include_routing
+    else:
+        include_addresses = args.addresses
+
+    total_steps = (6 + (1 if include_satellite else 0) + (1 if include_terrain else 0)
+                   + (1 if include_wikidata else 0) + (1 if include_routing else 0)
+                   + (1 if include_addresses else 0))
 
     print(f"=== Creating Offline OSM ZIM: {name} ===")
     if include_satellite:
@@ -2682,6 +2988,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         print(f"  Including Wikidata info for places and POIs")
     if include_routing:
         print(f"  Including offline routing graph")
+    if include_addresses:
+        print(f"  Including offline address index")
     print()
 
     # Create temp directory
@@ -2771,7 +3079,6 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 search_features = filtered_path
             else:
                 # No bbox — use the whole cache, copy to tmpdir
-                import shutil
                 filtered_path = os.path.join(tmpdir, "search_features.jsonl")
                 shutil.copy2(search_cache_path, filtered_path)
                 print(f"    Using all features (no bbox filter)")
@@ -2820,6 +3127,18 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 print("    (routing requires a PBF file — not available with --mbtiles only)")
             else:
                 routing_graph_path = extract_routing_graph(rt_pbf, tmpdir)
+
+        # Extract address index if requested
+        address_dir = None
+        if include_addresses:
+            step_ad = 5 + (1 if include_wikidata else 0) + (1 if include_routing else 0)
+            print()
+            print(f"[{step_ad}/{total_steps}] Extracting address index...")
+            ad_pbf = locals().get('work_pbf') or pbf_path or args.pbf
+            if not ad_pbf:
+                print("    Warning: no PBF file available, skipping address index")
+            else:
+                address_dir = extract_address_index(ad_pbf, tmpdir)
 
         # Download satellite tiles and generate terrain tiles
         # These are independent (satellite=I/O-bound, terrain=CPU-bound) so run in parallel
@@ -2976,6 +3295,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             map_config["hasWikidata"] = True
         if routing_graph_path:
             map_config["hasRouting"] = True
+        if address_dir and os.path.isdir(address_dir):
+            map_config["hasAddresses"] = True
 
         create_zim(
             output_path=output_path,
@@ -3002,6 +3323,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             bbox=parse_bbox(bbox_str) if bbox_str else None,
             wikidata_data=wikidata_data,
             routing_graph_path=routing_graph_path,
+            address_dir=address_dir,
         )
 
         print()
