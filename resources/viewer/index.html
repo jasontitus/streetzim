@@ -3975,6 +3975,74 @@ function initRouting(map, config) {
       if (map.getSource(src)) map.removeSource(src);
     },
 
+    /// Draw a translucent "coverage radius" circle centred on a point.
+    /// Useful for "near me" style tool calls so the user sees *why* the
+    /// returned list of places is what it is — the circle visualises the
+    /// `radius_km` arg the tool was invoked with.
+    ///
+    /// opts: { lat, lon, radiusKm, color? }
+    ///   - lat / lon:  required, decimal degrees, centre of the circle
+    ///   - radiusKm:   required, radius in kilometres
+    ///   - color:      optional, ring + fill color (default #2563eb)
+    ///
+    /// We approximate the circle as a 64-point polygon in lon/lat — that's
+    /// close enough at city scale and doesn't need a projection-aware
+    /// geodesic path. For larger radii (>100 km) distortion becomes
+    /// visible at high latitudes; host should clamp the display radius
+    /// if it cares.
+    showRadiusRing: function(opts) {
+      opts = opts || {};
+      if (typeof opts.lat !== "number" || typeof opts.lon !== "number"
+          || typeof opts.radiusKm !== "number" || opts.radiusKm <= 0) {
+        return;
+      }
+      var src = "mcpzim-radius";
+      var fillId = "mcpzim-radius-fill";
+      var lineId = "mcpzim-radius-line";
+      var color = opts.color || "#2563eb";
+      // Equirectangular approximation: 1° lat ≈ 111.32 km everywhere,
+      // 1° lon ≈ 111.32 * cos(lat) km. Good enough for the rendered
+      // polygon at city-to-region scale.
+      var kmPerDegLat = 111.32;
+      var kmPerDegLon = 111.32 * Math.cos(opts.lat * Math.PI / 180);
+      var steps = 64;
+      var ring = [];
+      for (var i = 0; i <= steps; i++) {
+        var theta = (i / steps) * 2 * Math.PI;
+        var dLat = (opts.radiusKm / kmPerDegLat) * Math.sin(theta);
+        var dLon = (opts.radiusKm / kmPerDegLon) * Math.cos(theta);
+        ring.push([opts.lon + dLon, opts.lat + dLat]);
+      }
+      var polygon = {
+        type: "Feature",
+        geometry: { type: "Polygon", coordinates: [ring] },
+        properties: {}
+      };
+      if (map.getSource(src)) {
+        map.getSource(src).setData(polygon);
+      } else {
+        map.addSource(src, { type: "geojson", data: polygon });
+        // Fill under everything interactive so taps still hit pins.
+        map.addLayer({
+          id: fillId, type: "fill", source: src,
+          paint: { "fill-color": color, "fill-opacity": 0.08 }
+        });
+        map.addLayer({
+          id: lineId, type: "line", source: src,
+          paint: { "line-color": color, "line-width": 2, "line-opacity": 0.5,
+                   "line-dasharray": [2, 2] }
+        });
+      }
+    },
+
+    clearRadiusRing: function() {
+      var src = "mcpzim-radius";
+      ["mcpzim-radius-line", "mcpzim-radius-fill"].forEach(function(id) {
+        if (map.getLayer(id)) map.removeLayer(id);
+      });
+      if (map.getSource(src)) map.removeSource(src);
+    },
+
     /// Show / hide the viewer's own chrome (search bar, zoom+layer controls,
     /// routing panel). Host wrappers that overlay their own UI can suppress
     /// the on-page chrome for a cleaner look. Pass an object like
