@@ -3747,6 +3747,22 @@ function initRouting(map, config) {
   map.on('streetzim.units', function() {
     // Next position tick will pick up new unit. No-op here; kept for future.
   });
+
+  // Host-container hook — lets a wrapper like the mcpzim iOS chat view
+  // drive routing + drive-mode from injected JS. All routing state
+  // (lastRoute, setOriginFromLatLon, modeBtns, graph) is function-scoped
+  // inside `initRouting`, so this tiny window object is the public seam.
+  // No-op cost when nothing calls it.
+  window.streetzimRouting = {
+    setOrigin: setOriginFromLatLon,
+    setDest:   setDestFromLatLon,
+    clickMode: function(mode) {
+      var btn = modeBtns[mode];
+      if (btn) btn.click();
+    },
+    get graphReady() { return !!graph; },
+    get hasRoute()   { return !!lastRoute; }
+  };
 }
 </script>
 </body>
