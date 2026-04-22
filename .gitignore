@@ -20,3 +20,12 @@ wikidata_cache/
 # predeploy hooks, and so cloning the repo gives a runnable PWA.
 # Re-run scripts/sync-drive-viewer.sh after changing resources/viewer/
 # or bumping the MapLibre / fzstd versions.
+overture_cache/
+
+# Cache-dir symlinks in worktrees (pointed at main tree)
+/satellite_cache_avif_256
+/search_cache
+/terrain_cache
+/wikidata_cache
+/world-data
+/silicon-valley-overture.log

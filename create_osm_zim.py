@@ -1592,6 +1592,213 @@ def extract_addresses_pbf(pbf_path, output_path, bbox=None):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# US street-suffix normalization map. The pass-2 matcher needs "1029 Ramona
+# St" and "1029 Ramona Street" to hash to the same key. This dict is
+# intentionally small and US-focused — full libpostal coverage would be
+# overkill for v1 and pulls in a 2 GB libpostal dataset. For non-US
+# regions the worst outcome is an extra Overture row slipping in
+# alongside an equivalent OSM row, which degrades gracefully (dup at
+# same coordinate) and can be tightened later per docs/overture-matching.md.
+_STREET_ABBREV = {
+    "st": "street", "str": "street",
+    "ave": "avenue", "av": "avenue",
+    "blvd": "boulevard", "bl": "boulevard",
+    "rd": "road",
+    "dr": "drive",
+    "ln": "lane",
+    "ct": "court",
+    "pl": "place",
+    "hwy": "highway",
+    "pkwy": "parkway",
+    "cir": "circle",
+    "ter": "terrace",
+    "ctr": "center",
+    "sq": "square",
+    "mt": "mount", "ft": "fort",
+    "n": "north", "s": "south", "e": "east", "w": "west",
+    "ne": "northeast", "nw": "northwest", "se": "southeast", "sw": "southwest",
+}
+
+def _normalize_street(name):
+    """Lowercase, strip punctuation, expand common US suffix abbreviations.
+
+    Idempotent — running it twice is the same as running it once.
+    """
+    if not name:
+        return ""
+    import re as _re
+    # Replace punctuation with spaces; strip accents via NFKD+combining.
+    import unicodedata as _ud
+    folded = "".join(
+        c for c in _ud.normalize("NFKD", name.lower()) if not _ud.combining(c)
+    )
+    tokens = _re.findall(r"[a-z0-9]+", folded)
+    return " ".join(_STREET_ABBREV.get(t, t) for t in tokens)
+
+
+def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
+    """Append Overture-sourced address records to the search-feed JSONL.
+
+    Two-pass conflation per docs/overture-matching.md:
+      Pass 1 (deterministic) — skip any Overture row whose `sources[]`
+        points to an OSM element ID we already extracted. The OSM
+        record carries the same information and already participates in
+        the routing graph, so keeping OSM as the authority is correct.
+      Pass 2 (fuzzy) — for rows with no OSM provenance, match on rounded
+        coord (~1m grid) with tie-break by matching (number, normalized
+        street). The 1m coord grid catches OpenAddresses points that
+        got mapped onto OSM-derived positions; normalized-street match
+        collapses "RAMONA ST" / "Ramona Street" / "Ramona St." variants.
+
+    Writes new Overture records into the same JSONL in the existing
+    schema with `subtype="overture"` so downstream code and mcpzim can
+    spot the provenance. Returns the count of rows added.
+    """
+    import duckdb  # local import — only needed when the flag is set
+    print(f"  Merging Overture addresses from {overture_parquet}...")
+
+    # ------------------------------------------------------------------
+    # Build the OSM-side index from the existing JSONL. We scan only
+    # `type == "addr"` entries because non-address records (cities,
+    # POIs, ways) have fundamentally different identity.
+    # ------------------------------------------------------------------
+    osm_coord_index = set()   # {(lat_e5, lon_e5)}
+    osm_attr_index = set()    # {(number, normalized_street)}
+    osm_count = 0
+    with open(search_jsonl_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if '"type":"addr"' not in line:
+                # Fast path: ~98% of lines in the world feed aren't
+                # addresses. Skipping the json.loads here saves minutes.
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            if rec.get("type") != "addr":
+                continue
+            lat = rec.get("lat"); lon = rec.get("lon")
+            if lat is None or lon is None:
+                continue
+            # ~1 m grid — rounds to 5 decimal places in degrees.
+            osm_coord_index.add((round(lat, 5), round(lon, 5)))
+            name = rec.get("name") or ""
+            # Existing OSM records serialize as "<num> <street>, <city>".
+            # Split on the first space + comma to recover number/street.
+            num = ""
+            street = name
+            if " " in name:
+                num, _, street = name.partition(" ")
+            street = street.split(",")[0].strip()
+            if num and street:
+                osm_attr_index.add((num.strip(), _normalize_street(street)))
+            osm_count += 1
+    print(f"    Indexed {osm_count} existing OSM address records")
+
+    # ------------------------------------------------------------------
+    # Stream Overture rows via DuckDB Arrow batches. Materializing the
+    # whole parquet OOMs a Mac for continent-scale bboxes; batch of
+    # 2048 keeps working-set bounded.
+    # ------------------------------------------------------------------
+    con = duckdb.connect()
+    # The parquet is already bbox-filtered by download_overture_data.py;
+    # a second WHERE here would need a `bbox` struct the downloader doesn't
+    # project. Instead, filter row-side in Python if the caller passes a
+    # bbox — handles the edge case of reusing a larger-region parquet.
+    sql = f"""
+      SELECT number, street, postcode,
+             address_levels, sources,
+             ST_X(ST_GeomFromText(wkt)) AS lon,
+             ST_Y(ST_GeomFromText(wkt)) AS lat
+      FROM read_parquet('{overture_parquet}')
+    """
+    con.execute("INSTALL spatial; LOAD spatial;")
+    reader = con.execute(sql).fetch_record_batch(2048)
+
+    if bbox is not None:
+        bbox_minlon, bbox_minlat, bbox_maxlon, bbox_maxlat = bbox
+    else:
+        bbox_minlon = bbox_minlat = -1e9
+        bbox_maxlon = bbox_maxlat = 1e9
+
+    pass1_skipped = 0      # dropped via OSM-source link
+    pass2_skipped = 0      # dropped via coord/attr match
+    added = 0              # net new records appended
+    orphan_skipped = 0     # missing number or street
+    with open(search_jsonl_path, "a", encoding="utf-8") as fout:
+        for batch in reader:
+            for row in batch.to_pylist():
+                num = (row.get("number") or "").strip()
+                street_raw = (row.get("street") or "").strip()
+                if not num or not street_raw:
+                    orphan_skipped += 1
+                    continue
+                lat = row.get("lat"); lon = row.get("lon")
+                if lat is None or lon is None:
+                    orphan_skipped += 1
+                    continue
+                if not (bbox_minlat <= lat <= bbox_maxlat and
+                        bbox_minlon <= lon <= bbox_maxlon):
+                    continue
+
+                # Pass 1: Overture-to-OSM provenance link. Today we
+                # don't keep a set of imported OSM address node IDs —
+                # extract_addresses_pbf doesn't expose them — so this
+                # branch is a no-op for the address theme in v1. Left
+                # in place so when we wire in the OSM-ID capture it
+                # picks up automatically (docs/overture-matching.md §1).
+                has_osm_source = False
+                for src in (row.get("sources") or []):
+                    if (src or {}).get("dataset") == "OpenStreetMap":
+                        has_osm_source = True
+                        break
+                if has_osm_source:
+                    pass1_skipped += 1
+                    continue
+
+                # Pass 2: fuzzy match against our OSM index.
+                coord_key = (round(lat, 5), round(lon, 5))
+                attr_key = (num, _normalize_street(street_raw))
+                if coord_key in osm_coord_index or attr_key in osm_attr_index:
+                    pass2_skipped += 1
+                    continue
+
+                # Reconstruct a city label from address_levels when we
+                # have it. For US addresses Overture writes
+                # [{'value':'CA'},{'value':'PALO ALTO'}] — state first,
+                # then city. For non-US layouts the last non-empty
+                # value is usually the city, which is our best-effort
+                # fallback.
+                city = ""
+                levels = row.get("address_levels") or []
+                if len(levels) >= 2 and levels[-1]:
+                    city = (levels[-1].get("value") or "").title()
+                # Street is frequently uppercased in US OpenAddresses
+                # feeds — title-case it so it renders nicely in search.
+                street_display = street_raw.title() if street_raw.isupper() else street_raw
+                display = f"{num} {street_display}"
+                if city:
+                    display = f"{display}, {city}"
+                entry = {
+                    "name": display,
+                    "type": "addr",
+                    "subtype": "overture",   # provenance marker
+                    "lat": round(float(lat), 6),
+                    "lon": round(float(lon), 6),
+                }
+                fout.write(json.dumps(entry, separators=(",", ":"), ensure_ascii=False))
+                fout.write("\n")
+                added += 1
+
+    total_overture = pass1_skipped + pass2_skipped + added + orphan_skipped
+    print(f"    Overture: {total_overture} rows scanned, "
+          f"{pass1_skipped} skipped (OSM source link), "
+          f"{pass2_skipped} skipped (spatial dup), "
+          f"{orphan_skipped} orphan (missing num/street), "
+          f"{added} added")
+    return added
+
+
 def extract_wiki_tags_pbf(pbf_path, bbox=None):
     """Extract {wikipedia, wikidata} tags per OSM object with a name.
 
@@ -3506,6 +3713,10 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "If bbox is set, features are filtered to the bounding box.")
     parser.add_argument("--routing", action="store_true",
                         help="Include offline routing graph for turn-by-turn directions")
+    parser.add_argument("--overture-addresses", metavar="PARQUET",
+                        help="Merge Overture Maps address records from a parquet extract. "
+                             "Use download_overture_data.py to produce the parquet first. "
+                             "Dedups against the OSM address pass; see docs/overture-matching.md.")
 
     args = parser.parse_args()
 
@@ -3683,6 +3894,17 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 addr_bbox = parse_bbox(bbox_str) if bbox_str else None
                 address_count = extract_addresses_pbf(
                     addr_pbf, search_features, bbox=addr_bbox) or 0
+                # Overture address enrichment — runs after OSM extraction so
+                # the dedup index is populated. Only adds rows the OSM pass
+                # didn't cover (the 1029-block gaps on Ramona St and friends).
+                if args.overture_addresses:
+                    try:
+                        added = merge_overture_addresses(
+                            args.overture_addresses, search_features,
+                            bbox=addr_bbox)
+                        address_count += added or 0
+                    except Exception as _e:
+                        print(f"    Warning: Overture merge failed: {_e}")
                 # Same PBF feeds the wiki-tag lookup so the chunker can enrich
                 # POI records with wikipedia/wikidata for offline cross-ref.
                 try:

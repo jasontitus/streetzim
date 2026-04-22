@@ -9,3 +9,4 @@ mapbox-vector-tile>=2.0
 requests>=2.28
 internetarchive>=4.0
 reverse_geocoder>=1.5    # GeoNames-backed (lat,lon) → city/admin1 for POI location labels
+duckdb>=1.5
