@@ -478,7 +478,7 @@ def test_merge_overture_places_enriches_existing_poi(
     assert rec["subtype"] == "museum", (
         "generic OMT bucket must be replaced by Overture's clean category")
     assert rec["cat"] == "museum"
-    assert rec["w"] == "https://www.hpgarage.com"
+    assert rec["ws"] == "https://www.hpgarage.com"
     assert rec["p"] == "+16508574400"
     assert rec["soc"] == [
         "https://www.facebook.com/hpgarage",
@@ -486,6 +486,12 @@ def test_merge_overture_places_enriches_existing_poi(
     ]
     assert rec["brand"] == "HP"
     assert rec["wd"] == "Q82525"
+    # Explicit: `w` (Wikipedia tag key, used by OSM-sourced POIs
+    # elsewhere in the record) MUST NOT be overwritten by Overture's
+    # website. Regression guard against the 2026-04 collision that
+    # broke mcpzim's Wikipedia lookup.
+    assert "w" not in rec or rec["w"].startswith(("en:", "fr:", "de:", "es:")), (
+        "Overture website must not be written to the Wikipedia-tag `w` slot")
 
 
 def test_merge_overture_places_keeps_specific_subtype_over_category(
@@ -538,7 +544,8 @@ def test_merge_overture_places_adds_new_poi(duckdb_available, tmp_path):
     assert rec["source"] == "overture"
     assert rec["subtype"] == "ramen_restaurant"
     assert rec["cat"] == "ramen_restaurant"
-    assert rec["w"] == "https://mystery.example"
+    assert rec["ws"] == "https://mystery.example"
+    assert "w" not in rec, "Overture website must use `ws`, not `w`"
 
 
 def test_merge_overture_places_skips_unnamed(duckdb_available, tmp_path):
@@ -593,7 +600,7 @@ def test_merge_overture_places_drops_empty_enrichment_fields(
     rec = [json.loads(l) for l in open(jsonl) if l.strip()][0]
     # `cat` is always present when category is known.
     assert rec.get("cat") == "cafe"
-    for empty_key in ("w", "p", "soc", "brand", "wd"):
+    for empty_key in ("ws", "p", "soc", "brand", "wd"):
         assert empty_key not in rec, (
             f"empty enrichment field '{empty_key}' leaked onto record")
 

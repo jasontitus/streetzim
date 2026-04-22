@@ -716,11 +716,17 @@ def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
     `resources/viewer/index.html`.
 
     `enrich` is an optional dict sourced from Overture's places theme:
-        {"w": website, "p": phone, "soc": [social urls],
+        {"ws": website, "p": phone, "soc": [social urls],
          "brand": brand name, "wd": wikidata Q-ID, "cat": category}
     Rendered as a compact contact block below the kind label when
     any field is present. Empty / missing fields are skipped so the
     page stays readable for plain OSM-only POIs.
+
+    Note: the enrichment key for *website* is `ws`, not `w`. `w` is
+    reserved for the Wikipedia tag ("en:Article_Title") that OSM POIs
+    carry in the same record — colliding the two corrupts downstream
+    consumers (mcpzim reads `rec["w"]` as a wiki title; feeding it a
+    URL breaks article lookup).
     """
     safe_name = html_mod.escape(name)
     safe_kind = html_mod.escape(kind_label)
@@ -734,8 +740,8 @@ def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
         contact_parts.append(
             f'<p class="brand">{html_mod.escape(enrich["brand"])}</p>')
     links = []
-    if enrich.get("w"):
-        w = enrich["w"]
+    if enrich.get("ws"):
+        w = enrich["ws"]
         w_show = html_mod.escape(w)
         w_attr = html_mod.escape(w, quote=True)
         links.append(
@@ -2025,9 +2031,17 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None):
 
             # Surface-area extensions. Keep empty fields out of the
             # record so downstream JSON stays tight.
+            #
+            # Website is `ws`, not `w`. `w` is reserved for the Wikipedia
+            # tag (e.g. "en:HP_Garage") that OSM POIs carry in the same
+            # record — mcpzim reads `rec["w"]` into `Place.wiki` and then
+            # calls `articleByTitle` on it. Putting a URL in that slot
+            # corrupts Wikipedia lookups across every downstream tool
+            # (`nearby_stories`, `near_places(has_wiki=true)`, etc.). See
+            # commit "Rename Overture website field to ws (fix w collision)".
             extra = {}
             if primary: extra["cat"] = primary
-            if websites: extra["w"] = websites[0]
+            if websites: extra["ws"] = websites[0]
             if phones: extra["p"] = phones[0]
             if socials: extra["soc"] = socials[:3]
             if brand_primary: extra["brand"] = brand_primary
@@ -3774,7 +3788,7 @@ def create_zim(
                     # when present (falls back to OMT subtype / OSM type).
                     kind_raw = feat.get("cat") or feat.get("subtype") or feat["type"]
                     label = kind_raw.replace("_", " ").title()
-                    enrich = {k: feat[k] for k in ("w", "p", "soc", "brand", "wd")
+                    enrich = {k: feat[k] for k in ("ws", "p", "soc", "brand", "wd")
                               if feat.get(k)}
                     page_html = search_detail_html(
                         feat["name"], label,
@@ -3862,7 +3876,7 @@ def create_zim(
                 map_hash = f"map={zoom}/{feat['lat']}/{feat['lon']}"
                 kind_raw = feat.get("cat") or feat.get("subtype") or feat["type"]
                 label = kind_raw.replace("_", " ").title()
-                enrich = {k: feat[k] for k in ("w", "p", "soc", "brand", "wd")
+                enrich = {k: feat[k] for k in ("ws", "p", "soc", "brand", "wd")
                           if feat.get(k)}
                 page_html = search_detail_html(
                     feat["name"], label,

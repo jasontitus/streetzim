@@ -152,15 +152,20 @@ failures surface:
 
 **Search record extensions** (all optional, additive):
 
-| field  | from                                 | typical size |
-|--------|--------------------------------------|-------------:|
-| `cat`  | `categories.primary`                 |  ~15 bytes   |
-| `w`    | `websites[0]`                        |  ~50 bytes   |
-| `p`    | `phones[0]`                          |  ~15 bytes   |
-| `soc`  | `socials[:3]` (array)                |  ~120 bytes  |
-| `brand`| `brand.names.primary`                |  ~20 bytes   |
-| `wd`   | `brand.wikidata`                     |   ~8 bytes   |
-| `source` | "overture" when Pass 2 added it    |  ~15 bytes   |
+| field    | from                                 | typical size |
+|----------|--------------------------------------|-------------:|
+| `cat`    | `categories.primary`                 |  ~15 bytes   |
+| `ws`     | `websites[0]`                        |  ~50 bytes   |
+| `p`      | `phones[0]`                          |  ~15 bytes   |
+| `soc`    | `socials[:3]` (array)                |  ~120 bytes  |
+| `brand`  | `brand.names.primary`                |  ~20 bytes   |
+| `wd`     | `brand.wikidata`                     |   ~8 bytes   |
+| `source` | "overture" when Pass 2 added it      |  ~15 bytes   |
+
+`ws` (not `w`) is deliberate: `w` is the Wikipedia tag key
+(`"en:Article_Title"`) on OSM POIs elsewhere in the same record, and
+the `w` / website collision silently corrupted mcpzim's article lookup
+(`Place.wiki` would receive a URL, then `articleByTitle` would fail).
 
 Silicon Valley (bbox `-122.6,37.2,-121.7,37.9`, 2026-04-22) results:
 - 4,988 OSM POIs enriched
