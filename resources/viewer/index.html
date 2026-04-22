@@ -3766,6 +3766,11 @@ function initRouting(map, config) {
   // `loadGraph` directly so the host can kick off the fetch itself,
   // then poll `graphReady` before calling `setOrigin / setDest`.
   window.streetzimRouting = {
+    // Bump when a new capability lands so host containers can
+    // feature-detect. Callers that need a given method should test
+    // for it (`typeof window.streetzimRouting.foo === "function"`),
+    // but the version helps diagnostics attribute "host vs ZIM" skew.
+    version: 3,
     setOrigin: setOriginFromLatLon,
     setDest:   setDestFromLatLon,
     clickMode: function(mode) {
@@ -3775,6 +3780,8 @@ function initRouting(map, config) {
     loadGraph: loadGraph,
     get graphReady() { return !!graph; },
     get hasRoute()   { return !!lastRoute; },
+    get driveActive() { return !!driveMode.active; },
+    get lastEnteredMode() { return window.streetzimRouting.__lastEnteredMode || null; },
 
     /// Atomic "enter drive mode with these endpoints". Handles the full
     /// sequence internally so host containers (e.g. the mcpzim iOS chat
@@ -3791,6 +3798,199 @@ function initRouting(map, config) {
     /// Returns a Promise that resolves when drive mode is active or
     /// rejects on timeout / error. Safe to call multiple times —
     /// subsequent calls while already active are a no-op.
+    /// Clear any active route. Matches the "Clear route" button in the
+    /// routing panel — removes markers, line, go-row, and exits drive
+    /// mode if active.
+    clearRoute: function() {
+      clearRoute();
+    },
+
+    /// Explicit drive-mode exit — inverse of `enterDriveMode`. Also
+    /// resets the go-row chrome so mode buttons return to their
+    /// pre-activated visual state.
+    exitDriveMode: function() {
+      if (!driveMode.active) return;
+      driveMode.exit();
+      resetGoButtons();
+      window.streetzimRouting.__lastEnteredMode = null;
+    },
+
+    /// Switch the active drive mode without fully leaving. Useful if
+    /// the host wants the user to toggle Drive↔Walk↔Bike from its
+    /// own chat-bubble pills while the fullscreen view is already up.
+    /// Exits the current mode (if any) then enters the new one —
+    /// re-uses the existing `lastRoute`, so no re-compute needed.
+    switchDriveMode: function(newMode) {
+      if (!modeBtns[newMode]) throw new Error("unknown mode: " + newMode);
+      if (driveMode.active) {
+        driveMode.exit();
+        resetGoButtons();
+      }
+      if (!lastRoute) return false;
+      driveMode.enter(newMode);
+      window.streetzimRouting.__lastEnteredMode = newMode;
+      Object.keys(modeBtns).forEach(function(m) {
+        if (m === newMode) {
+          modeBtns[m].classList.add("active-mode");
+          modeBtns[m].textContent = "Exit";
+        } else {
+          modeBtns[m].classList.add("hidden-mode");
+        }
+      });
+      return true;
+    },
+
+    /// Camera control. Host can frame the map (pan / zoom / pitch / bearing)
+    /// without entering drive mode — useful for "show me this place" intents
+    /// where we just want to centre the map on a coordinate.
+    flyTo: function(opts) {
+      if (!map) return;
+      var easeOpts = {};
+      if (typeof opts.lat === "number" && typeof opts.lon === "number") {
+        easeOpts.center = [opts.lon, opts.lat];
+      }
+      if (typeof opts.zoom === "number")    easeOpts.zoom = opts.zoom;
+      if (typeof opts.pitch === "number")   easeOpts.pitch = opts.pitch;
+      if (typeof opts.bearing === "number") easeOpts.bearing = opts.bearing;
+      easeOpts.duration = typeof opts.duration === "number" ? opts.duration : 800;
+      map.easeTo(easeOpts);
+    },
+
+    /// Display an array of places on the map as pins. Replaces any
+    /// previous set from a prior `showPlaces` call (use `clearPlaces`
+    /// to take them off without a new set). Useful for host-driven
+    /// intents like "interesting places near you" / "bars in North Beach"
+    /// where the LLM returns several candidates and we want them all
+    /// visible at once rather than one pin at a time.
+    ///
+    /// places: [{ lat, lon, label, description?, color? }]
+    ///   - lat / lon:       required, decimal degrees
+    ///   - label:           required, shown as a popup on tap
+    ///   - description:     optional, shown below the label in popup
+    ///   - color:           optional, CSS color (default #e11d48)
+    ///
+    /// opts: { fitBounds?: true, padding?: 40 }
+    ///   - fitBounds: pan+zoom to frame the pins (default: true)
+    ///   - padding:   fitBounds padding in px (default: 40)
+    showPlaces: function(places, opts) {
+      opts = opts || {};
+      if (!Array.isArray(places) || places.length === 0) {
+        window.streetzimRouting.clearPlaces();
+        return;
+      }
+      var src = "mcpzim-places";
+      var layerDots = "mcpzim-places-dots";
+      var layerLabels = "mcpzim-places-labels";
+      var features = places
+        .map(function(p, i) {
+          if (typeof p.lat !== "number" || typeof p.lon !== "number") return null;
+          return {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [p.lon, p.lat] },
+            properties: {
+              idx: i,
+              label: p.label || "",
+              description: p.description || "",
+              color: p.color || "#e11d48"
+            }
+          };
+        })
+        .filter(Boolean);
+      if (features.length === 0) return;
+      var fc = { type: "FeatureCollection", features: features };
+      if (map.getSource(src)) {
+        map.getSource(src).setData(fc);
+      } else {
+        map.addSource(src, { type: "geojson", data: fc });
+        map.addLayer({
+          id: layerDots, type: "circle", source: src,
+          paint: {
+            "circle-radius": 8,
+            "circle-color": ["get", "color"],
+            "circle-stroke-color": "#ffffff",
+            "circle-stroke-width": 2
+          }
+        });
+        map.addLayer({
+          id: layerLabels, type: "symbol", source: src,
+          layout: {
+            "text-field": ["get", "label"],
+            "text-font": ["Open Sans Bold"],
+            "text-size": 12,
+            "text-offset": [0, 1.2],
+            "text-anchor": "top",
+            "text-optional": true,
+            "text-max-width": 10
+          },
+          paint: {
+            "text-color": "#111827",
+            "text-halo-color": "#ffffff",
+            "text-halo-width": 1.5
+          }
+        });
+        // Tap-to-popup with label + optional description.
+        map.on("click", layerDots, function(e) {
+          var f = e.features && e.features[0];
+          if (!f) return;
+          var props = f.properties;
+          var html = '<div style="font-family:var(--ui-font,system-ui);max-width:220px;">'
+            + '<div style="font-weight:600;font-size:14px;margin-bottom:2px;">'
+            + (props.label || "").replace(/</g, "&lt;") + "</div>";
+          if (props.description) {
+            html += '<div style="font-size:12px;color:#555;">'
+              + props.description.replace(/</g, "&lt;") + "</div>";
+          }
+          html += "</div>";
+          new maplibregl.Popup({ offset: 14 })
+            .setLngLat(f.geometry.coordinates)
+            .setHTML(html)
+            .addTo(map);
+        });
+        map.on("mouseenter", layerDots, function() { map.getCanvas().style.cursor = "pointer"; });
+        map.on("mouseleave", layerDots, function() { map.getCanvas().style.cursor = ""; });
+      }
+      if (opts.fitBounds !== false && features.length >= 1) {
+        var b = new maplibregl.LngLatBounds(
+          features[0].geometry.coordinates,
+          features[0].geometry.coordinates
+        );
+        features.forEach(function(f) { b.extend(f.geometry.coordinates); });
+        var padding = typeof opts.padding === "number" ? opts.padding : 40;
+        // For a single pin we can't fitBounds, just centre it.
+        if (features.length === 1) {
+          map.easeTo({ center: features[0].geometry.coordinates, zoom: 15, duration: 800 });
+        } else {
+          map.fitBounds(b, { padding: padding, duration: 800, maxZoom: 15 });
+        }
+      }
+    },
+
+    /// Remove the pins set by the most recent `showPlaces` call.
+    /// Safe to call when nothing is set.
+    clearPlaces: function() {
+      var src = "mcpzim-places";
+      ["mcpzim-places-labels", "mcpzim-places-dots"].forEach(function(id) {
+        if (map.getLayer(id)) map.removeLayer(id);
+      });
+      if (map.getSource(src)) map.removeSource(src);
+    },
+
+    /// Show / hide the viewer's own chrome (search bar, zoom+layer controls,
+    /// routing panel). Host wrappers that overlay their own UI can suppress
+    /// the on-page chrome for a cleaner look. Pass an object like
+    /// `{search: false, controls: false, panel: false}`; omit keys to leave
+    /// those elements untouched.
+    setChromeVisibility: function(opts) {
+      opts = opts || {};
+      function setDisplay(el, visible) {
+        if (!el) return;
+        el.style.display = visible ? "" : "none";
+      }
+      if ("search" in opts)   setDisplay(document.getElementById("search-container"), opts.search);
+      if ("controls" in opts) setDisplay(document.getElementById("controls"),         opts.controls);
+      if ("panel" in opts)    setDisplay(document.getElementById("routing-panel"),    opts.panel);
+    },
+
     enterDriveMode: function(mode, origLat, origLon, destLat, destLon) {
       return new Promise(function(resolve, reject) {
         if (!modeBtns[mode]) {
