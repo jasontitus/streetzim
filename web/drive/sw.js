@@ -17,7 +17,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // The sync script writes a stamp to web/drive/viewer/.version which the
 // page reads on load and posts to the SW — we compare and clear stale
 // caches. For now just hand-bump on big changes.
-const SHELL_CACHE = 'streetzim-drive-shell-v2';
+const SHELL_CACHE = 'streetzim-drive-shell-v5';
 
 const SHELL_URLS = [
   './',
@@ -112,11 +112,18 @@ async function getReader() {
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(SHELL_CACHE);
-    // Don't fail install if one asset can't be cached — we prefer a
-    // partly-working PWA over none at all.
-    await Promise.all(SHELL_URLS.map((url) =>
-      cache.add(url).catch((err) => console.warn('[sw] skip', url, err))
-    ));
+    // Bypass the browser HTTP cache — without {cache:'reload'}, cache.add
+    // can pull a stale copy that a prior deploy left in Safari's disk
+    // cache (e.g. HTML with max-age=3600 that hasn't expired yet).
+    await Promise.all(SHELL_URLS.map(async (url) => {
+      try {
+        const res = await fetch(url, { cache: 'reload' });
+        if (!res || !res.ok) throw new Error('status ' + (res && res.status));
+        await cache.put(url, res);
+      } catch (err) {
+        console.warn('[sw] skip', url, err);
+      }
+    }));
     await self.skipWaiting();
   })());
 });
@@ -271,6 +278,18 @@ self.addEventListener('fetch', (event) => {
     }
     // Data path — serve from ZIM.
     event.respondWith(serveFromZim(rest, req));
+    return;
+  }
+
+  // build-info.js must never be cached — it's the "am I on the fresh
+  // deploy?" indicator for the picker page. Network-first, no fallback.
+  if (url.pathname === '/drive/build-info.js') {
+    event.respondWith(fetch(req, { cache: 'no-store' }).catch(() =>
+      new Response('/* offline */', {
+        status: 200,
+        headers: { 'Content-Type': 'text/javascript' }
+      })
+    ));
     return;
   }
 

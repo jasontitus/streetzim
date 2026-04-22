@@ -456,8 +456,38 @@
   #drive-exit:hover,
   #drive-fullscreen:hover { background: rgba(255,255,255,0.22); }
   #drive-fullscreen { font-size: 18px; padding: 4px 10px; line-height: 1; }
-  /* Fullscreen API unavailable → hide the button rather than no-op */
-  html.no-fullscreen #drive-fullscreen { display: none; }
+  /* When fullscreen is active, swap the glyph to an X and brighten it
+     so the exit affordance is obvious at a glance. */
+  html.drive-fullscreen-active #drive-fullscreen {
+    background: rgba(239, 68, 68, 0.85);
+  }
+  html.drive-fullscreen-active #drive-fullscreen:hover {
+    background: rgba(220, 38, 38, 0.95);
+  }
+  /* Pseudo-fullscreen for browsers without the Fullscreen API (notably
+     iOS Safari < 16.4, and iOS Safari in practice where requestFullscreen
+     is exposed but rejects). iOS only hides its URL bar when the page is
+     actually scrollable AND the user scrolls — so we make the body 1px
+     taller than the viewport, pin the map + HUD to `position: fixed`, and
+     programmatically scroll to y=1. The visible chrome-less area is the
+     fixed layer; the 1px of scroll is invisible. */
+  html.drive-fullscreen-pseudo,
+  html.drive-fullscreen-pseudo body {
+    height: auto !important;
+    overflow: visible !important;
+    position: static !important;
+  }
+  html.drive-fullscreen-pseudo body {
+    min-height: calc(100vh + 1px);
+  }
+  html.drive-fullscreen-pseudo #map {
+    position: fixed !important;
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: 100vw; height: 100dvh;
+  }
+  html.drive-fullscreen-pseudo #drive-hud {
+    position: fixed !important;
+  }
   #drive-hud-eta {
     margin-top: 8px; padding-top: 8px;
     border-top: 1px solid rgba(255,255,255,0.12);
@@ -471,8 +501,16 @@
     display: none; margin-top: 8px; padding: 6px 8px;
     background: rgba(234, 179, 8, 0.18); color: #fde68a;
     border-radius: 6px; font-size: 12px;
+    align-items: center; justify-content: space-between; gap: 8px;
   }
-  #drive-status.visible { display: block; }
+  #drive-status.visible { display: flex; }
+  #drive-reroute-btn {
+    flex: 0 0 auto; font: inherit; font-weight: 600;
+    padding: 6px 10px; border-radius: 5px; border: none;
+    background: #2563eb; color: #fff; cursor: pointer;
+  }
+  #drive-reroute-btn:hover { background: #1d4ed8; }
+  #drive-reroute-btn:disabled { opacity: 0.6; cursor: default; }
   #routing-status {
     color: var(--text-tertiary); font-size: 11px; margin-top: 6px;
   }
@@ -488,6 +526,15 @@
     width: 16px; height: 16px; border-radius: 50%;
     background: #ef4444; border: 3px solid #fff;
     box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+  /* Driving-mode "you are here" dot. Larger + pulsing so it's easy to
+     spot at driving speeds against busy map tiles. */
+  .drive-user-dot {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: #2563eb; border: 3px solid #fff;
+    box-shadow: 0 0 0 4px rgba(37,99,235,0.25),
+                0 1px 6px rgba(0,0,0,0.4);
+    pointer-events: none;
   }
 </style>
 </head>
@@ -545,7 +592,10 @@
     <span>Remaining: <strong id="drive-remaining">—</strong></span>
     <span>ETA: <strong id="drive-eta">—</strong></span>
   </div>
-  <div id="drive-status"></div>
+  <div id="drive-status">
+    <span id="drive-status-text"></span>
+    <button id="drive-reroute-btn" style="display:none;">Re-route</button>
+  </div>
 </div>
 <div id="wiki-panel">
   <div id="wiki-panel-header">
@@ -2935,9 +2985,14 @@ function initRouting(map, config) {
         lastRoute = augmentRouteForDriving(result);
         if (driveMode.active) driveMode.setRoute(lastRoute);
         statusEl.textContent = '';
-        var bounds = result.coords.reduce(function(b, c) { return b.extend(c); },
-          new maplibregl.LngLatBounds(result.coords[0], result.coords[0]));
-        map.fitBounds(bounds, { padding: 60, duration: 1000 });
+        // In drive mode, the next GPS fix re-centers at the user's
+        // location; fitBounds would yank the camera out to the whole
+        // route and blow up the follow-cam.
+        if (!driveMode.active) {
+          var bounds = result.coords.reduce(function(b, c) { return b.extend(c); },
+            new maplibregl.LngLatBounds(result.coords[0], result.coords[0]));
+          map.fitBounds(bounds, { padding: 60, duration: 1000 });
+        }
       } else {
         removeRouteLine();
         statusEl.textContent = 'No route found';
@@ -3080,9 +3135,12 @@ function initRouting(map, config) {
 
   // Map click — fallback picker. Fills origin if empty, else updates
   // destination (preserving the origin so users can iterate on the target
-  // without wiping the route). Clear button resets both.
+  // without wiping the route). Clear button resets both. Disabled while
+  // drive mode is active — a stray tap on the map while navigating
+  // would otherwise silently reroute to wherever the finger landed.
   map.on('click', function(e) {
     if (!active || !graph) return;
+    if (driveMode && driveMode.active) return;
     var lat = e.lngLat.lat;
     var lon = e.lngLat.lng;
     if (originNode === -1) {
@@ -3266,35 +3324,122 @@ function initRouting(map, config) {
       fallbackTimer: null,
       lastBearing: null,
       offRouteSince: 0,
-      lastTick: 0
+      lastTick: 0,
+      userMarker: null,    // maplibregl.Marker rendering the blue "you are here" dot
+      gotFirstFix: false,
+      lastLat: null,       // most recent GPS fix — fed to re-route button
+      lastLon: null,
+      reroutePending: false
     };
 
-    // Fullscreen API support detection — iOS Safari doesn't expose
-    // requestFullscreen on Element/Document, so the button would no-op.
-    // Hide the button via CSS in that case so the user isn't confused.
-    var canFullscreen = !!(
-      document.documentElement.requestFullscreen ||
-      document.documentElement.webkitRequestFullscreen
-    );
-    if (!canFullscreen) {
-      document.documentElement.classList.add('no-fullscreen');
+    // Fullscreen behavior depends on context:
+    //   • Desktop / Android Chrome: real Fullscreen API hides browser
+    //     chrome AND our HUD.
+    //   • iOS Safari (non-standalone): pseudo-fullscreen scrolls the URL
+    //     bar away AND hides our HUD.
+    //   • Standalone PWA: there's no browser chrome to chase — tapping
+    //     the button just hides our HUD so the driver gets more map.
+    //     A floating restore button brings it back.
+    var htmlEl = document.documentElement;
+    var GLYPH_ENTER = '⛶';  // ⛶ corners-box
+    var GLYPH_EXIT = '✕';   // ✕
+
+    function isStandalone() {
+      return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+             window.navigator.standalone === true;
     }
 
-    function isFullscreen() {
+    function realFullscreenActive() {
       return !!(document.fullscreenElement || document.webkitFullscreenElement);
     }
-    function enterFullscreen() {
-      var el = document.documentElement;
-      var fn = el.requestFullscreen || el.webkitRequestFullscreen;
-      if (fn) { try { fn.call(el); } catch (e) { /* user gesture required, etc. */ } }
+    function pseudoFullscreenActive() {
+      return htmlEl.classList.contains('drive-fullscreen-pseudo');
     }
-    function exitFullscreen() {
+    function fullscreenActive() {
+      return realFullscreenActive() || pseudoFullscreenActive();
+    }
+
+    function enterRealFullscreen() {
+      var el = htmlEl;
+      var fn = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (!fn) return false;
+      try {
+        var p = fn.call(el);
+        // Some browsers (notably iOS Safari) expose requestFullscreen
+        // but reject the promise. Fall back to pseudo mode then — and
+        // re-sync the glyph, since fullscreenchange won't fire on the
+        // rejected path.
+        if (p && typeof p.then === 'function') {
+          p.catch(function() {
+            enterPseudoFullscreen();
+            syncFullscreenGlyph();
+          });
+        }
+        return true;
+      } catch (e) { return false; }
+    }
+    function enterPseudoFullscreen() {
+      htmlEl.classList.add('drive-fullscreen-pseudo');
+      // iOS Safari only collapses its URL bar once the document is
+      // actually scrollable AND we scroll. The CSS above makes the body
+      // 1px taller; we wait two animation frames for that to commit,
+      // then nudge the scroll position and re-size the map to fill the
+      // now-larger visible area.
+      requestAnimationFrame(function() {
+        requestAnimationFrame(function() {
+          window.scrollTo(0, 1);
+          map.resize();
+          // Some iOS builds re-expand the URL bar on the first paint —
+          // a second nudge ~300 ms later sticks the collapse.
+          setTimeout(function() { window.scrollTo(0, 1); map.resize(); }, 300);
+        });
+      });
+    }
+    function exitRealFullscreen() {
       var fn = document.exitFullscreen || document.webkitExitFullscreen;
       if (fn) { try { fn.call(document); } catch (e) {} }
     }
+    function exitPseudoFullscreen() {
+      htmlEl.classList.remove('drive-fullscreen-pseudo');
+      window.scrollTo(0, 0);
+      map.resize();
+    }
+
+    function syncFullscreenGlyph() {
+      var on = fullscreenActive();
+      htmlEl.classList.toggle('drive-fullscreen-active', on);
+      fullscreenBtn.textContent = on ? GLYPH_EXIT : GLYPH_ENTER;
+      fullscreenBtn.title = on ? 'Exit fullscreen' : 'Enter fullscreen';
+    }
+    // Keep the glyph in sync when the user exits via the ESC key / system
+    // gesture rather than our button.
+    document.addEventListener('fullscreenchange', syncFullscreenGlyph);
+    document.addEventListener('webkitfullscreenchange', syncFullscreenGlyph);
+    syncFullscreenGlyph();  // initial paint
+
+    // iOS can't do anything useful with this button:
+    //   • iOS Safari has tied URL-bar collapse to touch-scroll gestures
+    //     since iOS 13 — window.scrollTo(0,1) is a no-op, and
+    //     documentElement.requestFullscreen() either rejects or silently
+    //     fails depending on the iOS version.
+    //   • iOS PWA / WKWebView (Kiwix iOS) has no browser chrome AND no
+    //     working Fullscreen API.
+    // Kiwix Desktop (Qt WebEngine), Android, and desktop browsers all do
+    // support the real Fullscreen API — show the button there.
+    var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (isIOS) {
+      fullscreenBtn.style.display = 'none';
+    }
+
     fullscreenBtn.addEventListener('click', function(e) {
       e.stopPropagation();
-      if (isFullscreen()) exitFullscreen(); else enterFullscreen();
+      if (fullscreenActive()) {
+        if (realFullscreenActive()) exitRealFullscreen();
+        if (pseudoFullscreenActive()) exitPseudoFullscreen();
+      } else {
+        if (!enterRealFullscreen()) enterPseudoFullscreen();
+      }
+      syncFullscreenGlyph();
     });
 
     exitBtn.addEventListener('click', function() {
@@ -3302,15 +3447,69 @@ function initRouting(map, config) {
       resetGoButtons();
     });
 
-    function setStatus(msg) {
-      if (!msg) { statusEl.classList.remove('visible'); statusEl.textContent = ''; return; }
-      statusEl.textContent = msg;
+    var statusTextEl = document.getElementById('drive-status-text');
+    var rerouteBtn = document.getElementById('drive-reroute-btn');
+
+    function setStatus(msg, opts) {
+      opts = opts || {};
+      if (!msg) {
+        statusEl.classList.remove('visible');
+        if (statusTextEl) statusTextEl.textContent = '';
+        if (rerouteBtn) rerouteBtn.style.display = 'none';
+        return;
+      }
+      if (statusTextEl) statusTextEl.textContent = msg;
+      if (rerouteBtn) {
+        rerouteBtn.style.display = opts.showReroute ? 'inline-block' : 'none';
+        rerouteBtn.disabled = !!state.reroutePending;
+        rerouteBtn.textContent = state.reroutePending ? 'Re-routing…' : 'Re-route';
+      }
       statusEl.classList.add('visible');
     }
+
+    rerouteBtn.addEventListener('click', function() {
+      if (state.reroutePending) return;
+      if (state.lastLat == null || state.lastLon == null) {
+        setStatus('Waiting for GPS fix…');
+        return;
+      }
+      if (destNode === -1) {
+        setStatus('No destination set');
+        return;
+      }
+      state.reroutePending = true;
+      setStatus('Re-routing from current location…', { showReroute: true });
+      // setOriginFromLatLon triggers computeAndDrawRoute, which updates
+      // lastRoute + calls driveMode.setRoute on success. One tick of
+      // yield so the "Re-routing…" status paints before A* runs.
+      setTimeout(function() {
+        try {
+          setOriginFromLatLon(state.lastLat, state.lastLon, 'Current location');
+        } finally {
+          state.reroutePending = false;
+          // setStatus('') will be called by the next onPosition if the new
+          // route puts us back on track. Clear the banner optimistically.
+          setStatus('');
+          state.offRouteSince = 0;
+        }
+      }, 0);
+    });
 
     function onPosition(pos) {
       if (!state.active || !state.route) return;
       var lat = pos.coords.latitude, lon = pos.coords.longitude;
+      state.lastLat = lat;
+      state.lastLon = lon;
+      // Place / update the "you are here" dot before doing any route
+      // projection — the user wants to see themselves immediately, even
+      // if the projection math below throws or the route is weird.
+      if (state.userMarker) {
+        state.userMarker.setLngLat([lon, lat]);
+        if (!state.gotFirstFix) {
+          state.userMarker.addTo(map);
+          state.gotFirstFix = true;
+        }
+      }
       var proj = projectOnRoute(state.route, lat, lon);
       var totalDist = state.route.distance;
       var remaining = Math.max(0, totalDist - proj.distAlong);
@@ -3378,7 +3577,8 @@ function initRouting(map, config) {
       if (proj.offMeters > 60) {
         if (!state.offRouteSince) state.offRouteSince = Date.now();
         if (Date.now() - state.offRouteSince > 6000) {
-          setStatus('Off route (' + Math.round(proj.offMeters) + ' m). Recenter with Route.');
+          setStatus('Off route (' + Math.round(proj.offMeters) + ' m)',
+                    { showReroute: true });
         }
       } else {
         state.offRouteSince = 0;
@@ -3456,6 +3656,14 @@ function initRouting(map, config) {
         remainEl.textContent = '—';
         etaEl.textContent = '—';
         setStatus('');
+
+        // Create the user-location dot. Added to the map only after the
+        // first GPS fix arrives (in onPosition) — adding a marker with
+        // no lngLat would plant it at [0,0].
+        state.gotFirstFix = false;
+        var dotEl = document.createElement('div');
+        dotEl.className = 'drive-user-dot';
+        state.userMarker = new maplibregl.Marker({ element: dotEl });
         // Immediate camera shift so the user sees the perspective change
         // before the first fix arrives.
         var p = MODE_PRESETS[state.mode];
@@ -3479,9 +3687,16 @@ function initRouting(map, config) {
           try { navigator.geolocation.clearWatch(state.watchId); } catch (e) {}
           state.watchId = null;
         }
+        if (state.userMarker) {
+          try { state.userMarker.remove(); } catch (e) {}
+          state.userMarker = null;
+          state.gotFirstFix = false;
+        }
         hudEl.classList.remove('visible');
         hudEl.setAttribute('aria-hidden', 'true');
-        if (isFullscreen()) exitFullscreen();
+        if (realFullscreenActive()) exitRealFullscreen();
+        if (pseudoFullscreenActive()) exitPseudoFullscreen();
+        syncFullscreenGlyph();
         if (state.savedUI) {
           panel.style.display    = state.savedUI.panel;
           if (controlsEl) controlsEl.style.display = state.savedUI.controls;

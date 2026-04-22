@@ -6,7 +6,10 @@
     ],
     "ignore": [
       "firebase.json",
-      "**/.*",
+      "**/.git/**",
+      "**/.DS_Store",
+      "**/.gitignore",
+      "**/.gitkeep",
       "**/node_modules/**"
     ],
     "headers": [
@@ -14,6 +17,12 @@
         "source": "**/*.html",
         "headers": [
           { "key": "Cache-Control", "value": "public, max-age=300" }
+        ]
+      },
+      {
+        "source": "/drive{,/**}",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=60, must-revalidate" }
         ]
       },
       {
@@ -25,6 +34,12 @@
       },
       {
         "source": "drive/sw.js",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+        ]
+      },
+      {
+        "source": "drive/build-info.js",
         "headers": [
           { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
         ]
