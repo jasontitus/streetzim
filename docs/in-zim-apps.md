@@ -58,6 +58,101 @@ Both build paths in `create_osm_zim.py` (the streamed-Xapian path
 and the non-chunked search-features path) call the same helper, so
 the two emit byte-identical pages for equivalent input.
 
+## Category chips (current set)
+
+The Find-places mini-app's chip row is driven by the `CATEGORIES`
+table at the top of `resources/viewer/places.html`. Each chip
+filters the `category-index/poi.json` records (or its own named
+index for `parks`) by one or more of these selectors:
+
+- **`subtypes`** — always-include when `r.s` (record subtype) exactly matches.
+- **`includeRegex`** — always-include when `r.s` matches a regex. Catches
+  Overture's `<noun>_<modifier>` conventions without enumerating every
+  permutation (`_restaurant$|^food_`, `_museum$|_gallery$`, `_store$|^store$`).
+- **`nameInclude`** — include when `r.s` is in a fallback bucket AND
+  `r.n` matches a name regex. Used for "Museums" and "Landmarks" to
+  pull items OMT collapsed into generic `tourism`/`attraction` buckets.
+
+Current chips (order matters — left-to-right priority for horizontal space):
+
+| Chip | subtypes / regex | Notes |
+|---|---|---|
+| Restaurants | `restaurant`, `fast_food`, `food_court`, `ice_cream` + `/_restaurant$|^food_/` | pulls in Overture's `italian_restaurant`, `thai_restaurant`, `food_court`, … |
+| Cafés | `cafe`, `coffee_shop`, `bakery`, `tea_room`, `ice_cream_parlor` | — |
+| Bars | `bar`, `pub`, `biergarten`, `nightclub`, `beer`, `alcohol_shop`, `wine_bar`, `sports_bar`, `cocktail_bar`, `dive_bar`, `beer_bar`, `brewery`, `wine_store`, `liquor_store` | liquor retail lumped in alongside drinking establishments |
+| Hotels | `hotel`, `motel`, `hostel`, `bed_and_breakfast`, `lodging`, `inn`, `guest_house`, `resort`, `campsite` | — |
+| Museums | `museum`, `art_gallery`, `planetarium`, `observatory` + `/_museum$|_gallery$/` + `nameInclude` over `tourism`/`attraction` | separates from Landmarks below; people conflate museums + galleries |
+| Landmarks | `historic`, `castle`, `monument`, `historical_landmark`, `landmark_and_historical_building`, `memorial` + `nameInclude` over `tourism`/`attraction` | pulls the historic-rich subset of OMT's `tourism` bucket |
+| Parks | — (uses the `park` category index directly) | |
+| Libraries | `library`, `public_library` | |
+| Health | `hospital`, `pharmacy`, `clinic`, `doctors`, `dentist`, `urgent_care_clinic`, `veterinary` | |
+| Shops | `shop`, `supermarket`, `mall`, `marketplace`, `department_store`, `convenience`, `grocery`, `clothing_store`, `jewelry_store` + `/_store$|^store$/` | retail catchall |
+| Gas | `fuel`, `charging_station`, `gas_station`, `ev_charging_station` | includes EV |
+
+"Sort by distance" (GPS) is **on by default** — one-shot
+`navigator.geolocation.getCurrentPosition` feeds each row's
+haversine distance, and the result list sorts by that. Toggle off
+to fall back to name sort.
+
+## Overture places enrichment (per-record fields)
+
+When the ZIM was built with `--overture-places <parquet>`, POI
+records gain cleaner categories + website / phone / socials /
+brand data. See `merge_overture_places` in `create_osm_zim.py`.
+
+Two-pass enrichment:
+
+1. **Pass 1 — enrich**: for each Overture row, look up an OSM POI by
+   `(round(lat,4), round(lon,4), normalized_name)`. If hit, merge the
+   Overture fields in place and rewrite `subtype` from noisy OMT
+   buckets (`tourism`, `amenity`, `shop`, `attraction`, `leisure`,
+   `car`, `historic`, `landuse`) to Overture's `categories.primary`.
+   Specific OSM subtypes like `restaurant` survive unchanged.
+2. **Pass 2 — add-new**: Overture rows with no OSM match become fresh
+   `type: "poi"` records tagged `source: "overture"` and
+   `subtype` = Overture primary category. Rows without a primary
+   category are dropped (no useful chip assignment).
+
+Extra fields the merge writes onto enriched / new records:
+
+| Key | Value |
+|---|---|
+| `cat` | Overture primary category (`museum`, `hotel`, `ramen_restaurant`, …) |
+| `w` | first website URL |
+| `p` | first phone |
+| `soc` | first 3 social URLs (array) |
+| `brand` | brand primary name (string) |
+| `wd` | brand Wikidata Q-ID. Never overwrites an OSM-supplied `wd` (the OSM one is entity-level, Overture's is brand-level — different Q-IDs) |
+| `source` | `"overture"` only on newly-added (pass-2) records |
+
+Empty enrichment fields are deliberately omitted from the JSON —
+bloating every search-data chunk with `"w": ""` would kill the size
+budget at continent scale.
+
+The mini-app reads `cat`, `w`, `p`, `soc`, and `brand` and renders
+them as a small "rich" row below each result (see `.rich .brand` +
+`.rich .links` styles in `places.html`).
+
+## Tests
+
+`tests/test_overture.py` covers all of the above:
+
+- 27 `_normalize_street` cases + idempotence guard,
+- 27 `_STREET_ABBREV` canary entries + "no shadowed canonicals" invariant,
+- 8 `merge_overture_addresses` end-to-end tests (pass-1 ID join,
+  pass-2 coord / attr match, bbox, orphan rejection, empty parquet,
+  append-only guarantee),
+- 8 `merge_overture_places` end-to-end tests (enrich-existing,
+  specific-subtype preservation, add-new with provenance,
+  unnamed/uncategorized rejection, empty-field pruning, non-POI
+  pass-through, OSM-wikidata vs Overture-brand-wikidata precedence).
+
+Run with:
+
+```sh
+./venv312/bin/python3 -m pytest tests/test_overture.py -q
+```
+
 ## Find-places mini-app (`places.html`)
 
 Pure vanilla JS, single file, no dependencies. Lives at

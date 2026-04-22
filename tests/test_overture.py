@@ -49,6 +49,7 @@ _SPEC.loader.exec_module(_MOD)
 _normalize_street = _MOD._normalize_street
 _STREET_ABBREV = _MOD._STREET_ABBREV
 merge_overture_addresses = _MOD.merge_overture_addresses
+merge_overture_places = _MOD.merge_overture_places
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +237,8 @@ def test_merge_overture_adds_new_address_when_osm_has_none(
     jsonl = tmp_path / "feed.jsonl"
     _write_jsonl(str(jsonl), [])           # empty OSM side
 
-    added = merge_overture_addresses(str(parquet), str(jsonl))
+    result = merge_overture_addresses(str(parquet), str(jsonl))
+    added = result["added"] if isinstance(result, dict) else result
     assert added == 1
 
     # Last line is the appended Overture record.
@@ -266,7 +268,8 @@ def test_merge_overture_skips_when_sources_link_to_osm(
     jsonl = tmp_path / "feed.jsonl"
     _write_jsonl(str(jsonl), [])
 
-    added = merge_overture_addresses(str(parquet), str(jsonl))
+    result = merge_overture_addresses(str(parquet), str(jsonl))
+    added = result["added"] if isinstance(result, dict) else result
     assert added == 0, "OSM-sourced rows must be skipped in pass 1"
 
 
@@ -287,7 +290,8 @@ def test_merge_overture_skips_when_coord_matches_existing_osm(
         "lat": 37.42200, "lon": -122.08400,
     }])
 
-    added = merge_overture_addresses(str(parquet), str(jsonl))
+    result = merge_overture_addresses(str(parquet), str(jsonl))
+    added = result["added"] if isinstance(result, dict) else result
     assert added == 0
 
 
@@ -310,7 +314,8 @@ def test_merge_overture_skips_when_attr_matches_existing_osm(
         "lat": 37.44170, "lon": -122.16080,
     }])
 
-    added = merge_overture_addresses(str(parquet), str(jsonl))
+    result = merge_overture_addresses(str(parquet), str(jsonl))
+    added = result["added"] if isinstance(result, dict) else result
     assert added == 0, (
         "normalized-street attr key must collapse 'RAMONA ST' and "
         + "'Ramona Street' so pass-2 catches the dup")
@@ -329,7 +334,8 @@ def test_merge_overture_rejects_orphan_rows_missing_number_or_street(
     jsonl = tmp_path / "feed.jsonl"
     _write_jsonl(str(jsonl), [])
 
-    added = merge_overture_addresses(str(parquet), str(jsonl))
+    result = merge_overture_addresses(str(parquet), str(jsonl))
+    added = result["added"] if isinstance(result, dict) else result
     assert added == 0
 
 
@@ -348,7 +354,8 @@ def test_merge_overture_respects_bbox_filter(duckdb_available, tmp_path):
 
     # bbox order matches the rest of the codebase: (minlon, minlat, maxlon, maxlat)
     bbox = (-122.5, 37.3, -121.9, 37.5)
-    added = merge_overture_addresses(str(parquet), str(jsonl), bbox=bbox)
+    result = merge_overture_addresses(str(parquet), str(jsonl), bbox=bbox)
+    added = result["added"] if isinstance(result, dict) else result
     assert added == 1
     appended = [json.loads(l) for l in open(jsonl) if l.strip()]
     assert appended[0]["name"].startswith("1 In St")
@@ -359,8 +366,294 @@ def test_merge_overture_handles_empty_parquet(duckdb_available, tmp_path):
     _write_parquet(str(parquet), [])
     jsonl = tmp_path / "feed.jsonl"
     _write_jsonl(str(jsonl), [])
-    added = merge_overture_addresses(str(parquet), str(jsonl))
+    result = merge_overture_addresses(str(parquet), str(jsonl))
+    added = result["added"] if isinstance(result, dict) else result
     assert added == 0
+
+
+def _write_places_parquet(path: str, rows: list[dict]) -> None:
+    """Build an Overture-places-shaped parquet from plain dicts.
+
+    Matches the columns `merge_overture_places` selects via DuckDB:
+    `names.primary`, `categories.primary`, `phones[]`, `websites[]`,
+    `socials[]`, `brand.names.primary` + `brand.wikidata`, `sources[]`,
+    and a WKT point for the geometry.
+    """
+    import duckdb
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")
+    # `primary` is a DuckDB reserved keyword — quote the field name
+    # both at CREATE TABLE time and in INSERT struct literals below
+    # so the schema matches what Overture's real parquet exposes
+    # (names.primary, categories.primary, brand.names.primary).
+    con.execute("""
+        CREATE TABLE places (
+            names STRUCT("primary" VARCHAR),
+            categories STRUCT("primary" VARCHAR),
+            phones VARCHAR[],
+            websites VARCHAR[],
+            socials VARCHAR[],
+            brand STRUCT(
+                names STRUCT("primary" VARCHAR),
+                wikidata VARCHAR
+            ),
+            sources STRUCT(dataset VARCHAR, record_id VARCHAR)[],
+            wkt VARCHAR
+        )
+    """)
+    def _lit_list(values: list[str]) -> str:
+        return "[" + ", ".join(
+            "'" + v.replace("'", "''") + "'" for v in values
+        ) + "]"
+    for r in rows:
+        name = (r.get("name") or "").replace("'", "''")
+        cat = (r.get("category") or "").replace("'", "''")
+        brand_name = (r.get("brand") or "").replace("'", "''")
+        brand_wd = (r.get("brand_wd") or "").replace("'", "''")
+        sources_lit = (
+            "[" + ", ".join(
+                f"{{'dataset': '{s[0]}', 'record_id': '{s[1]}'}}"
+                for s in r.get("sources", [])
+            ) + "]"
+        )
+        wkt = f"POINT ({r['lon']} {r['lat']})"
+        con.execute(
+            "INSERT INTO places VALUES ("
+            f"  {{\"primary\": '{name}'}}, "
+            f"  {{\"primary\": '{cat}'}}, "
+            f"  {_lit_list(r.get('phones', []))}, "
+            f"  {_lit_list(r.get('websites', []))}, "
+            f"  {_lit_list(r.get('socials', []))}, "
+            f"  {{'names': {{\"primary\": '{brand_name}'}}, "
+            f"   'wikidata': '{brand_wd}'}}, "
+            f"  {sources_lit}, '{wkt}'"
+            f")"
+        )
+    con.execute(f"COPY places TO '{path}' (FORMAT PARQUET)")
+    con.close()
+
+
+# ---------------------------------------------------------------------------
+# merge_overture_places — POI enrichment + add-new.
+# ---------------------------------------------------------------------------
+
+def test_merge_overture_places_enriches_existing_poi(
+    duckdb_available, tmp_path
+):
+    # OSM has the HP Garage as a POI but with OMT's noisy `tourism`
+    # subtype. Overture knows the same place at the same coord with
+    # `museum` category + website + phone. Pass-1 enrichment:
+    # rewrite the subtype to the clean category, add the fields, do
+    # NOT duplicate the record.
+    parquet = tmp_path / "ov.parquet"
+    _write_places_parquet(str(parquet), [{
+        "name": "HP Garage",
+        "category": "museum",
+        "lat": 37.44453, "lon": -122.15269,
+        "websites": ["https://www.hpgarage.com"],
+        "phones": ["+16508574400"],
+        "socials": [
+            "https://www.facebook.com/hpgarage",
+            "https://www.instagram.com/hpgarage",
+        ],
+        "brand": "HP", "brand_wd": "Q82525",
+        "sources": [("meta", "a-1")],
+    }])
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [{
+        "name": "HP Garage",
+        "type": "poi",
+        "subtype": "tourism",   # OMT's noisy bucket
+        "lat": 37.44453,
+        "lon": -122.15269,
+    }])
+
+    out = merge_overture_places(str(parquet), str(jsonl))
+    assert out["enriched"] == 1
+    assert out["added"] == 0
+
+    rows = [json.loads(l) for l in open(jsonl) if l.strip()]
+    assert len(rows) == 1, "enrich must not duplicate the record"
+    rec = rows[0]
+    assert rec["subtype"] == "museum", (
+        "generic OMT bucket must be replaced by Overture's clean category")
+    assert rec["cat"] == "museum"
+    assert rec["w"] == "https://www.hpgarage.com"
+    assert rec["p"] == "+16508574400"
+    assert rec["soc"] == [
+        "https://www.facebook.com/hpgarage",
+        "https://www.instagram.com/hpgarage",
+    ]
+    assert rec["brand"] == "HP"
+    assert rec["wd"] == "Q82525"
+
+
+def test_merge_overture_places_keeps_specific_subtype_over_category(
+    duckdb_available, tmp_path
+):
+    # When OSM already has a SPECIFIC subtype (not a generic bucket),
+    # Overture's category enrichment should NOT overwrite it. Only the
+    # six noisy buckets (tourism/amenity/shop/attraction/leisure/etc.)
+    # get rewritten.
+    parquet = tmp_path / "ov.parquet"
+    _write_places_parquet(str(parquet), [{
+        "name": "Joe's Pizzeria",
+        "category": "pizza_restaurant",
+        "lat": 37.50, "lon": -122.20,
+        "websites": ["https://joes.example"],
+    }])
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [{
+        "name": "Joe's Pizzeria",
+        "type": "poi",
+        "subtype": "restaurant",        # already specific; don't replace
+        "lat": 37.50, "lon": -122.20,
+    }])
+    merge_overture_places(str(parquet), str(jsonl))
+    rec = [json.loads(l) for l in open(jsonl) if l.strip()][0]
+    assert rec["subtype"] == "restaurant", (
+        "specific OSM subtype must survive Overture enrichment")
+    assert rec["cat"] == "pizza_restaurant", (
+        "Overture's category still lands in `cat` for display/filtering")
+
+
+def test_merge_overture_places_adds_new_poi(duckdb_available, tmp_path):
+    # Overture knows about a place OSM doesn't — e.g. a new restaurant
+    # in the middle of nowhere. Pass-2 creates a fresh POI record
+    # tagged `source="overture"` so downstream consumers can see
+    # provenance.
+    parquet = tmp_path / "ov.parquet"
+    _write_places_parquet(str(parquet), [{
+        "name": "Mystery Ramen House",
+        "category": "ramen_restaurant",
+        "lat": 37.77, "lon": -122.42,
+        "websites": ["https://mystery.example"],
+    }])
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [])
+    out = merge_overture_places(str(parquet), str(jsonl))
+    assert out["added"] == 1
+    assert out["enriched"] == 0
+    rec = [json.loads(l) for l in open(jsonl) if l.strip()][0]
+    assert rec["source"] == "overture"
+    assert rec["subtype"] == "ramen_restaurant"
+    assert rec["cat"] == "ramen_restaurant"
+    assert rec["w"] == "https://mystery.example"
+
+
+def test_merge_overture_places_skips_unnamed(duckdb_available, tmp_path):
+    # Overture rows without a primary name are useless for our
+    # chip-driven search UI — drop them silently.
+    parquet = tmp_path / "ov.parquet"
+    _write_places_parquet(str(parquet), [{
+        "name": "",
+        "category": "restaurant",
+        "lat": 37.5, "lon": -122.5,
+    }])
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [])
+    out = merge_overture_places(str(parquet), str(jsonl))
+    assert out["added"] == 0
+    assert out["enriched"] == 0
+
+
+def test_merge_overture_places_skips_uncategorized_new_poi(
+    duckdb_available, tmp_path
+):
+    # A new Overture row with no `category.primary` is noise — we
+    # wouldn't know which chip to put it under. Skip.
+    parquet = tmp_path / "ov.parquet"
+    _write_places_parquet(str(parquet), [{
+        "name": "Unknown Thing",
+        "category": "",
+        "lat": 37.5, "lon": -122.5,
+    }])
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [])
+    out = merge_overture_places(str(parquet), str(jsonl))
+    assert out["added"] == 0
+
+
+def test_merge_overture_places_drops_empty_enrichment_fields(
+    duckdb_available, tmp_path
+):
+    # When Overture doesn't know a website / phone / socials for a
+    # row, those keys MUST NOT land on the record (empty strings or
+    # empty arrays would bloat every search-data chunk).
+    parquet = tmp_path / "ov.parquet"
+    _write_places_parquet(str(parquet), [{
+        "name": "Plain POI",
+        "category": "cafe",
+        "lat": 37.5, "lon": -122.5,
+        # all enrichment fields intentionally absent
+    }])
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [])
+    merge_overture_places(str(parquet), str(jsonl))
+    rec = [json.loads(l) for l in open(jsonl) if l.strip()][0]
+    # `cat` is always present when category is known.
+    assert rec.get("cat") == "cafe"
+    for empty_key in ("w", "p", "soc", "brand", "wd"):
+        assert empty_key not in rec, (
+            f"empty enrichment field '{empty_key}' leaked onto record")
+
+
+def test_merge_overture_places_preserves_non_poi_rows(
+    duckdb_available, tmp_path
+):
+    # Regression guard: addresses + non-POI records (cities,
+    # airports, streets) must survive the merge byte-identical —
+    # they're filtered by `type != 'poi'` and passed through.
+    parquet = tmp_path / "ov.parquet"
+    _write_places_parquet(str(parquet), [{
+        "name": "New Cafe",
+        "category": "cafe",
+        "lat": 37.5, "lon": -122.5,
+    }])
+    jsonl = tmp_path / "feed.jsonl"
+    survivors = [
+        {"name": "123 Castro St", "type": "addr", "lat": 37.4, "lon": -122.1},
+        {"name": "Palo Alto", "type": "place", "subtype": "city",
+         "lat": 37.44, "lon": -122.15},
+        {"name": "Castro St", "type": "street", "lat": 37.4, "lon": -122.1},
+    ]
+    _write_jsonl(str(jsonl), survivors)
+    merge_overture_places(str(parquet), str(jsonl))
+    rows = [json.loads(l) for l in open(jsonl) if l.strip()]
+    # Survivors come first, added POI last.
+    for i, expected in enumerate(survivors):
+        actual = rows[i]
+        assert actual["name"] == expected["name"]
+        assert actual["type"] == expected["type"]
+    assert rows[-1]["source"] == "overture"
+
+
+def test_merge_overture_places_does_not_overwrite_existing_enrichment(
+    duckdb_available, tmp_path
+):
+    # If OSM already carried `wd` (wikidata Q-ID) from the wiki
+    # cross-ref pass, Overture's brand.wikidata must NOT clobber it —
+    # OSM's wiki is entity-level, Overture's is brand-level (often
+    # different Q-IDs).
+    parquet = tmp_path / "ov.parquet"
+    _write_places_parquet(str(parquet), [{
+        "name": "Stanford Museum",
+        "category": "museum",
+        "lat": 37.43, "lon": -122.17,
+        "brand_wd": "Q99999",  # Overture's brand Q-ID (random)
+    }])
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [{
+        "name": "Stanford Museum",
+        "type": "poi",
+        "subtype": "museum",
+        "wd": "Q5035378",                   # OSM's entity Q-ID
+        "lat": 37.43, "lon": -122.17,
+    }])
+    merge_overture_places(str(parquet), str(jsonl))
+    rec = [json.loads(l) for l in open(jsonl) if l.strip()][0]
+    assert rec["wd"] == "Q5035378", (
+        "OSM entity Q-ID must win over Overture brand Q-ID")
 
 
 def test_merge_overture_preserves_existing_feed_rows(duckdb_available, tmp_path):
@@ -382,7 +675,8 @@ def test_merge_overture_preserves_existing_feed_rows(duckdb_available, tmp_path)
     _write_jsonl(str(jsonl), original)
     before = pathlib.Path(jsonl).read_text(encoding="utf-8")
 
-    added = merge_overture_addresses(str(parquet), str(jsonl))
+    result = merge_overture_addresses(str(parquet), str(jsonl))
+    added = result["added"] if isinstance(result, dict) else result
     assert added == 1
 
     after = pathlib.Path(jsonl).read_text(encoding="utf-8")
