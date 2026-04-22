@@ -247,13 +247,24 @@ def build_page():
                              if f.get("name", "").endswith(".zim")
                              and "history/" not in f.get("name", "")]
                 if zim_files:
-                    # Prefer dated filenames (e.g. osm-europe-2026-04.zim) over
-                    # undated (osm-europe.zim). Among same preference, pick largest.
+                    # Prefer dated filenames (e.g. osm-europe-2026-04-22.zim)
+                    # over undated (osm-europe.zim). Among dated, pick the
+                    # NEWEST by embedded date, not the largest — rebuilds
+                    # can shrink a ZIM (e.g. when Overture deduping trims
+                    # OSM duplicates). Old size-based tie-breaker was
+                    # stale-stickying: a 5.5 GB April-13 ZIM beat a fresh
+                    # 210 MB April-22 one because of byte size alone.
+                    # Size only breaks ties among same-date uploads.
                     import re as _re
                     def _sort_key(f):
                         name = f.get("name", "")
-                        dated = 1 if _re.search(r'-\d{4}-\d{2}(-\d{2})?\.zim$', name) else 0
-                        return (dated, int(f.get("size", 0)))
+                        m = _re.search(r'-(\d{4}-\d{2}(?:-\d{2})?)\.zim$', name)
+                        if m:
+                            # (dated=1, date_str, size). Lexicographic
+                            # comparison is correct: YYYY-MM < YYYY-MM-DD
+                            # because the shorter prefix sorts first.
+                            return (1, m.group(1), int(f.get("size", 0)))
+                        return (0, "", int(f.get("size", 0)))
                     best = max(zim_files, key=_sort_key)
                     zim_filename = best.get("name")
                     try:
