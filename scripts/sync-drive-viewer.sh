@@ -33,10 +33,16 @@ fetch() {
   return 1
 }
 
-# 1. Copy the canonical viewer. We copy (not symlink) so firebase deploy's
-#    tarball sees a plain file regardless of the host filesystem.
+# 1. Copy the canonical viewer + the find-places mini-app. We copy
+#    (not symlink) so firebase deploy's tarball sees plain files
+#    regardless of the host filesystem.
 cp "resources/viewer/index.html" "$OUT/index.html"
 echo "  viewer HTML  → $OUT/index.html ($(wc -c < "$OUT/index.html") bytes)"
+
+if [ -f "resources/viewer/places.html" ]; then
+  cp "resources/viewer/places.html" "$OUT/places.html"
+  echo "  places HTML  → $OUT/places.html ($(wc -c < "$OUT/places.html") bytes)"
+fi
 
 # 2. Download MapLibre. Already on disk? Skip.
 MAPLIBRE_BASE="https://unpkg.com/maplibre-gl@${MAPLIBRE_VERSION}/dist"

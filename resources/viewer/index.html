@@ -61,6 +61,23 @@
     background: var(--accent-hover);
   }
   #controls button + button { border-top: 1px solid var(--border); }
+  /* `Find` is an <a> not a <button> so it can be middle-clicked and
+     opened in its own tab. Mirror the button styling rather than
+     letting it inherit anchor defaults. Always-visible (no feature
+     flag), unlike the other buttons which JS reveals once their
+     backing data is confirmed. */
+  #controls a#places-link {
+    background: transparent; border: none; border-top: 1px solid var(--border);
+    padding: 9px 14px; font-size: 12px; font-weight: 500;
+    cursor: pointer; font-family: var(--ui-font);
+    color: var(--text-secondary); text-decoration: none;
+    text-align: left; white-space: nowrap;
+    transition: background 0.2s, color 0.2s;
+    letter-spacing: -0.01em; display: block;
+  }
+  #controls a#places-link:hover {
+    background: var(--hover-bg); color: var(--text-primary);
+  }
 
   /* Pulse marker for wiki item clicks */
   .pulse-marker {
@@ -545,6 +562,8 @@
   <button id="terrain-toggle" title="Toggle 3D terrain">3D</button>
   <button id="wiki-toggle" title="Show nearby Wikipedia entries">Explore</button>
   <button id="route-toggle" title="Get directions between two points">Route</button>
+  <a id="places-link" href="places.html"
+     title="Browse places by name or category">Find</a>
 </div>
 <div id="routing-panel">
   <h4>Directions <button id="routing-close" title="Close">&times;</button></h4>

@@ -17,7 +17,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // The sync script writes a stamp to web/drive/viewer/.version which the
 // page reads on load and posts to the SW — we compare and clear stale
 // caches. For now just hand-bump on big changes.
-const SHELL_CACHE = 'streetzim-drive-shell-v5';
+const SHELL_CACHE = 'streetzim-drive-shell-v6';
 
 const SHELL_URLS = [
   './',
@@ -27,6 +27,7 @@ const SHELL_URLS = [
   './icon-512.png',
   './viewer/',
   './viewer/index.html',
+  './viewer/places.html',
   './viewer/maplibre-gl.js',
   './viewer/maplibre-gl.css'
 ];
@@ -34,7 +35,7 @@ const SHELL_URLS = [
 // Files in /drive/viewer/ that are always part of the shell, never the
 // ZIM. Everything else under /drive/viewer/ is ZIM content.
 const VIEWER_SHELL_NAMES = new Set([
-  '', 'index.html', 'maplibre-gl.js', 'maplibre-gl.css'
+  '', 'index.html', 'places.html', 'maplibre-gl.js', 'maplibre-gl.css'
 ]);
 
 // ---------- IndexedDB helpers (no dependency) ----------

@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Find places</title>
+<style>
+  :root {
+    --bg:#fafafa; --fg:#1a1a1a; --muted:#666; --line:#e0e0e0;
+    --card:#fff; --accent:#0a7cff; --chip-bg:#f0f0f0; --chip-on:#0a7cff;
+    --chip-on-fg:#fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111; --fg:#eee; --muted:#aaa; --line:#2a2a2a;
+            --card:#1c1c1c; --chip-bg:#2a2a2a; }
+  }
+  * { box-sizing: border-box; }
+  html,body { margin:0; padding:0; background:var(--bg); color:var(--fg);
+              font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+              line-height:1.4; }
+  header { position:sticky; top:0; z-index:10; background:var(--bg);
+           border-bottom:1px solid var(--line);
+           padding:env(safe-area-inset-top,12px) 16px 12px; }
+  .titlebar { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+  .titlebar h1 { margin:0; font-size:1.2rem; flex:1; }
+  .titlebar a.back { color:var(--accent); text-decoration:none; font-weight:600;
+                     font-size:0.95rem; }
+  input[type=search] { width:100%; padding:11px 14px; border-radius:10px;
+                       border:1px solid var(--line); background:var(--card);
+                       color:var(--fg); font-size:1rem; -webkit-appearance:none; }
+  input[type=search]:focus { outline:2px solid var(--accent); border-color:transparent; }
+  nav.chips { display:flex; gap:8px; overflow-x:auto; padding:10px 16px;
+              -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+  nav.chips::-webkit-scrollbar { display:none; }
+  nav.chips button { flex:0 0 auto; padding:7px 14px; border-radius:18px;
+                     border:1px solid var(--line); background:var(--chip-bg);
+                     color:var(--fg); font-size:0.9rem; cursor:pointer;
+                     white-space:nowrap; }
+  nav.chips button.on { background:var(--chip-on); color:var(--chip-on-fg);
+                        border-color:var(--chip-on); }
+  .toggle { padding:4px 16px 12px; display:flex; align-items:center;
+            gap:8px; font-size:0.9rem; color:var(--muted); }
+  .toggle label { display:flex; align-items:center; gap:6px; cursor:pointer; }
+  .toggle input { transform:translateY(1px); }
+  .status { padding:18px 16px; color:var(--muted); font-size:0.9rem; }
+  ol#results { list-style:none; margin:0; padding:0; }
+  ol#results li { background:var(--card); margin:0 16px 10px; padding:14px;
+                  border-radius:12px; border:1px solid var(--line);
+                  display:flex; flex-direction:column; gap:10px; }
+  ol#results h3 { margin:0; font-size:1.05rem; }
+  ol#results .meta { margin:0; color:var(--muted); font-size:0.85rem; }
+  ol#results .ctas { display:flex; gap:8px; }
+  ol#results .ctas a { flex:1; text-align:center; padding:9px 12px;
+                       border-radius:8px; text-decoration:none; font-weight:600;
+                       font-size:0.9rem; border:1px solid var(--line); color:var(--fg);
+                       background:var(--card); }
+  ol#results .ctas a.primary { background:var(--accent); color:#fff;
+                               border-color:var(--accent); }
+  footer { padding:24px 16px 40px; color:var(--muted); font-size:0.8rem;
+           text-align:center; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="titlebar">
+    <h1>Find places</h1>
+    <a class="back" href="index.html">← Map</a>
+  </div>
+  <input id="q" type="search" placeholder="Search by name or category…"
+         autocomplete="off" autocapitalize="none" spellcheck="false">
+</header>
+
+<nav class="chips" id="chips" aria-label="Category filter">
+  <!-- buttons inserted at runtime -->
+</nav>
+
+<div class="toggle">
+  <label>
+    <input id="gps" type="checkbox">
+    <span>Use my location to sort by distance</span>
+  </label>
+</div>
+
+<div id="status" class="status">Loading places index…</div>
+<ol id="results"></ol>
+
+<footer>
+  Searches the index baked into this map. No network required.
+</footer>
+
+<script>
+"use strict";
+// All data fetches go through the same origin as this page. Inside a
+// ZIM (kiwix) the path is `search-data/...`; over the Firebase /drive
+// PWA it's `viewer/search-data/...` because the viewer ships under
+// `viewer/`. We compute the prefix once at boot.
+const HERE = location.pathname.replace(/[^/]*$/, '');
+const DATA = HERE + 'search-data/';
+const CAT  = HERE + 'category-index/';
+
+// Categories surfaced as chips. Each maps to either a single
+// category-index slug (cheap one-fetch) or a subtype filter applied
+// to the broader `poi` index. Order matters — first chip wins
+// horizontal real-estate.
+const CATEGORIES = [
+  { id: 'restaurants', label: 'Restaurants', cat: 'poi',
+    subtypes: ['restaurant', 'fast_food', 'food_court'] },
+  { id: 'cafes',       label: 'Cafés',       cat: 'poi',
+    subtypes: ['cafe'] },
+  { id: 'bars',        label: 'Bars',        cat: 'poi',
+    subtypes: ['bar', 'pub', 'biergarten', 'nightclub'] },
+  { id: 'museums',     label: 'Museums',     cat: 'poi',
+    subtypes: ['museum', 'gallery'] },
+  { id: 'parks',       label: 'Parks',       cat: 'park' },
+  { id: 'libraries',   label: 'Libraries',   cat: 'poi',
+    subtypes: ['library'] },
+  { id: 'shops',       label: 'Shops',       cat: 'poi',
+    subtypes: ['shop', 'supermarket', 'mall', 'marketplace',
+               'department_store', 'convenience'] },
+  { id: 'fuel',        label: 'Gas',         cat: 'poi',
+    subtypes: ['fuel', 'charging_station'] },
+];
+
+const state = {
+  manifests: { search: null, cat: null }, // small lookups
+  cache: { chunks: new Map(), cats: new Map() }, // path → array of records
+  results: [],
+  query: '',
+  chip: null,
+  origin: null,        // {lat, lon} when GPS toggle is on
+};
+
+const els = {
+  q:       document.getElementById('q'),
+  chips:   document.getElementById('chips'),
+  status:  document.getElementById('status'),
+  results: document.getElementById('results'),
+  gps:     document.getElementById('gps'),
+};
+
+// ---------- bootstrapping ----------
+
+(async function init() {
+  // Manifests are tiny and always needed; fetch in parallel.
+  try {
+    const [s, c] = await Promise.all([
+      fetchJSON(DATA + 'manifest.json'),
+      fetchJSON(CAT  + 'manifest.json').catch(() => null),
+    ]);
+    state.manifests.search = s;
+    state.manifests.cat = c; // may be null if the ZIM was built without it
+  } catch (e) {
+    setStatus(`Couldn't load the search index: ${e.message}`);
+    return;
+  }
+  renderChips();
+  els.q.addEventListener('input', debounce(onSearch, 200));
+  els.gps.addEventListener('change', onGpsToggle);
+  // Restore filter from URL (#cat=museums or #q=foo).
+  const hash = parseHash(location.hash);
+  if (hash.q) { els.q.value = hash.q; }
+  if (hash.cat) {
+    const def = CATEGORIES.find(c => c.id === hash.cat);
+    if (def) selectChip(def);
+  } else if (hash.q) {
+    onSearch();
+  } else {
+    setStatus('Type to search, or pick a category above.');
+  }
+})();
+
+// ---------- chips ----------
+
+function renderChips() {
+  for (const def of CATEGORIES) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = def.label;
+    b.dataset.cat = def.id;
+    b.addEventListener('click', () => selectChip(def));
+    els.chips.appendChild(b);
+  }
+}
+
+function selectChip(def) {
+  const isSame = state.chip && state.chip.id === def.id;
+  state.chip = isSame ? null : def;
+  for (const b of els.chips.querySelectorAll('button')) {
+    b.classList.toggle('on', state.chip && b.dataset.cat === state.chip.id);
+  }
+  rerunQuery();
+}
+
+// ---------- search ----------
+
+function onSearch() {
+  state.query = els.q.value.trim();
+  rerunQuery();
+}
+
+function rerunQuery() {
+  // 1. If a chip is on, fetch the category index.
+  // 2. Else if there's a name query, fetch the matching prefix chunk(s).
+  // 3. Else (nothing) — clear results.
+  if (state.chip) {
+    runChipQuery(state.chip);
+  } else if (state.query.length >= 2) {
+    runNameQuery(state.query);
+  } else {
+    state.results = [];
+    setStatus(state.query.length === 1
+      ? 'Type at least 2 characters.'
+      : 'Type to search, or pick a category above.');
+    renderResults();
+  }
+}
+
+async function runChipQuery(def) {
+  setStatus(`Loading ${def.label.toLowerCase()}…`);
+  let records;
+  try {
+    records = await loadCategory(def.cat);
+  } catch (e) {
+    setStatus(`Couldn't load category ‘${def.cat}’: ${e.message}`);
+    return;
+  }
+  // Filter by subtype if the chip restricts it (e.g. POI subset).
+  if (def.subtypes && def.subtypes.length) {
+    const allowed = new Set(def.subtypes);
+    records = records.filter(r => allowed.has(r.s));
+  }
+  // Stack the name filter on top if there's a query.
+  if (state.query) {
+    records = filterByName(records, state.query);
+  }
+  applyResults(records);
+}
+
+async function runNameQuery(q) {
+  setStatus(`Searching for “${q}”…`);
+  const prefixes = prefixesFor(q);
+  let merged = [];
+  const seen = new Set();
+  for (const p of prefixes) {
+    if (!state.manifests.search.chunks[p]) continue;
+    let chunk;
+    try {
+      chunk = await loadChunk(p);
+    } catch (e) {
+      // Single missing chunk shouldn't kill the whole query.
+      continue;
+    }
+    for (const rec of chunk) {
+      // Substring match across name + subtype.
+      const k = `${rec.n}@${rec.a},${rec.o}`;
+      if (seen.has(k)) continue;
+      if (matchesName(rec, q)) {
+        merged.push(rec);
+        seen.add(k);
+      }
+    }
+  }
+  applyResults(merged);
+}
+
+function filterByName(records, q) {
+  return records.filter(r => matchesName(r, q));
+}
+
+function matchesName(rec, q) {
+  const ql = q.toLowerCase();
+  return (rec.n || '').toLowerCase().includes(ql)
+      || (rec.s || '').toLowerCase().includes(ql);
+}
+
+function prefixesFor(q) {
+  // Same logic the build script uses to chunk: 2-char prefixes of any
+  // word in the name. We at least try the first 2 chars of the query.
+  const out = new Set();
+  const head = q.slice(0, 2).toLowerCase().replace(/\s/g, '_');
+  if (head.length === 2) out.add(head);
+  for (const word of q.toLowerCase().split(/\s+/)) {
+    if (word.length >= 2) out.add(word.slice(0, 2));
+  }
+  return [...out];
+}
+
+// ---------- result presentation ----------
+
+function applyResults(records) {
+  if (state.origin) {
+    for (const r of records) {
+      r._dist = haversine(state.origin.lat, state.origin.lon, r.a, r.o);
+    }
+    records.sort((a, b) => a._dist - b._dist);
+  } else {
+    records.sort((a, b) => (a.n || '').localeCompare(b.n || ''));
+  }
+  // Cap to keep the DOM responsive on big indices.
+  state.results = records.slice(0, 300);
+  setStatus(records.length > state.results.length
+    ? `Showing first ${state.results.length} of ${records.length} matches.`
+    : `${state.results.length} match${state.results.length === 1 ? '' : 'es'}.`);
+  renderResults();
+}
+
+function renderResults() {
+  els.results.innerHTML = '';
+  for (const r of state.results) {
+    const li = document.createElement('li');
+
+    const h = document.createElement('h3');
+    h.textContent = r.n || '(unnamed)';
+    li.appendChild(h);
+
+    const meta = document.createElement('p');
+    meta.className = 'meta';
+    const parts = [];
+    if (r.s) parts.push(prettyKind(r.s));
+    if (r._dist != null) parts.push(formatDistance(r._dist));
+    if (r.l) parts.push(r.l);
+    meta.textContent = parts.join(' · ');
+    li.appendChild(meta);
+
+    const ctas = document.createElement('div');
+    ctas.className = 'ctas';
+    const dirA = document.createElement('a');
+    dirA.className = 'primary';
+    dirA.textContent = 'Directions';
+    dirA.href = 'index.html#dest=' + r.a + ',' + r.o
+              + '&label=' + encodeURIComponent(r.n || '');
+    ctas.appendChild(dirA);
+    const mapA = document.createElement('a');
+    mapA.textContent = 'Map';
+    const zoom = (r.t === 'place' || r.t === 'park') ? 14 : 16;
+    mapA.href = 'index.html#map=' + zoom + '/' + r.a + '/' + r.o;
+    ctas.appendChild(mapA);
+
+    li.appendChild(ctas);
+    els.results.appendChild(li);
+  }
+}
+
+function prettyKind(s) {
+  return s.replace(/_/g, ' ');
+}
+
+function formatDistance(m) {
+  if (m == null) return '';
+  if (m < 1000) return Math.round(m) + ' m';
+  return (m / 1000).toFixed(1) + ' km';
+}
+
+// ---------- GPS ----------
+
+function onGpsToggle() {
+  if (!els.gps.checked) { state.origin = null; rerunQuery(); return; }
+  if (!navigator.geolocation) {
+    els.gps.checked = false;
+    setStatus('This device does not support geolocation.');
+    return;
+  }
+  setStatus('Getting your location…');
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      state.origin = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      rerunQuery();
+    },
+    err => {
+      els.gps.checked = false;
+      setStatus(`Location unavailable: ${err.message}`);
+    },
+    { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 }
+  );
+}
+
+// ---------- data loading ----------
+
+async function loadChunk(prefix) {
+  if (state.cache.chunks.has(prefix)) return state.cache.chunks.get(prefix);
+  const data = await fetchJSON(DATA + prefix + '.json');
+  state.cache.chunks.set(prefix, data);
+  return data;
+}
+
+async function loadCategory(slug) {
+  if (state.cache.cats.has(slug)) return state.cache.cats.get(slug);
+  if (!state.manifests.cat || !state.manifests.cat.categories
+      || !(slug in state.manifests.cat.categories)) {
+    throw new Error(`category ‘${slug}’ not in the index`);
+  }
+  const data = await fetchJSON(CAT + slug + '.json');
+  state.cache.cats.set(slug, data);
+  return data;
+}
+
+async function fetchJSON(url) {
+  const res = await fetch(url, { cache: 'force-cache' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// ---------- helpers ----------
+
+function setStatus(text) { els.status.textContent = text; }
+
+function debounce(fn, ms) {
+  let t = null;
+  return function () {
+    const a = arguments, c = this;
+    if (t) clearTimeout(t);
+    t = setTimeout(() => fn.apply(c, a), ms);
+  };
+}
+
+function parseHash(h) {
+  const out = {};
+  if (!h || h[0] !== '#') return out;
+  for (const pair of h.slice(1).split('&')) {
+    const [k, ...rest] = pair.split('=');
+    if (k) out[k] = decodeURIComponent(rest.join('='));
+  }
+  return out;
+}
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000; // metres
+  const r = Math.PI / 180;
+  const dLat = (lat2 - lat1) * r;
+  const dLon = (lon2 - lon1) * r;
+  const a = Math.sin(dLat / 2) ** 2
+          + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+</script>
+</body>
+</html>

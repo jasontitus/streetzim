@@ -2869,6 +2869,21 @@ def create_zim(
             is_front=True,
         ))
 
+        # Find-places mini-app (`places.html`). LLM-free: searches the
+        # in-ZIM `search-data/` + `category-index/` files client-side
+        # and links each result through the viewer's `dest=` hash so
+        # the user lands in the routing panel with the destination
+        # pre-filled. Same single file works in Kiwix and the Firebase
+        # PWA shell — see HOW_TO_BUILD-style notes in the file itself.
+        places_path = VIEWER_DIR / "places.html"
+        if places_path.exists():
+            print("    Adding places.html (find-places mini-app)...")
+            creator.add_item(MapItem(
+                "places.html", "Find places", "text/html",
+                open(str(places_path)).read().encode("utf-8"),
+                is_front=False,
+            ))
+
         # Add MapLibre GL JS
         print("    Adding MapLibre GL JS...")
         creator.add_item(MapItem(
