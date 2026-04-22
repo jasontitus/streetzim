@@ -2909,10 +2909,36 @@ function initRouting(map, config) {
     return el;
   }
 
+  // Queue a pick when the graph isn't loaded yet. Previously these setters
+  // silently `return`ed on `!graph`, which is why tapping the routing-panel
+  // GPS button or picking a typeahead result before graph load finished
+  // left the UI stuck at "Getting location…" with no visible progress.
+  // Loads the graph if needed, then re-fires the pick with the original
+  // label. Pass a 'which' of 'origin' or 'dest' so the retry dispatches
+  // to the correct setter.
+  function queueGraphPick(which, lat, lon, label) {
+    if (graph) return false;
+    statusEl.textContent = 'Loading routing data…';
+    loadGraph();
+    var tries = 0;
+    var retry = setInterval(function() {
+      tries++;
+      if (graph) {
+        clearInterval(retry);
+        if (which === 'origin') setOriginFromLatLon(lat, lon, label);
+        else setDestFromLatLon(lat, lon, label);
+      } else if (tries > 300) {  // 30 s
+        clearInterval(retry);
+        statusEl.textContent = 'Could not load routing data';
+      }
+    }, 100);
+    return true;
+  }
+
   // Set origin from any source (map click, typeahead, GPS). `label` is what
   // to show in the input; if omitted, a lat/lon coord label is used.
   function setOriginFromLatLon(lat, lon, label) {
-    if (!graph) return;
+    if (queueGraphPick('origin', lat, lon, label)) return;
     originNode = nearestNode(lat, lon);
     var oLat = graph.nodesScaled[originNode * 2] / 1e7;
     var oLon = graph.nodesScaled[originNode * 2 + 1] / 1e7;
@@ -2928,7 +2954,7 @@ function initRouting(map, config) {
   }
 
   function setDestFromLatLon(lat, lon, label) {
-    if (!graph) return;
+    if (queueGraphPick('dest', lat, lon, label)) return;
     destNode = nearestNode(lat, lon);
     var dLat = graph.nodesScaled[destNode * 2] / 1e7;
     var dLon = graph.nodesScaled[destNode * 2 + 1] / 1e7;
