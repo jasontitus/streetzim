@@ -54,6 +54,62 @@ TILEMAKER_CONFIG = RESOURCES_DIR / "tilemaker" / "config-openmaptiles.json"
 TILEMAKER_PROCESS = RESOURCES_DIR / "tilemaker" / "process-openmaptiles.lua"
 VIEWER_DIR = RESOURCES_DIR / "viewer"
 
+
+def log_viewer_freshness():
+    """Print viewer-HTML fingerprints at the top of every build.
+
+    Reasoning: on 2026-04-22 I lost ~hours of builds because a git-
+    worktree's `resources/viewer/index.html` was 2h stale relative to
+    the main tree. Every ZIM built from that worktree baked the old
+    viewer (no `ws` website rendering, stale Route-button code paths,
+    etc.). Nothing warned about it until a user downloaded a ZIM and
+    noticed the regression.
+    Now every build logs the viewer files' size + mtime + first-512-
+    byte SHA-1 prefix + the most recent git commit that touched them.
+    If the file is older than the commit or missing expected strings,
+    a loud WARNING prints so future-me catches it before packaging.
+    """
+    import hashlib
+    import datetime as _dt
+    print("  --- viewer HTML fingerprint ---")
+    expected_markers = {
+        "index.html": ["enrich.ws", "item.ws", "places-link"],
+        "places.html": ["Search near", "near-input"],
+    }
+    worst_age_mtime = None
+    warned = False
+    for name in ("index.html", "places.html"):
+        p = VIEWER_DIR / name
+        if not p.exists():
+            print(f"    {name}: MISSING at {p}")
+            warned = True
+            continue
+        st = p.stat()
+        mtime = _dt.datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        sha = hashlib.sha1(p.read_bytes()[:512]).hexdigest()[:12]
+        try:
+            gitlog = subprocess.run(
+                ["git", "-C", str(SCRIPT_DIR), "log", "-1",
+                 "--format=%ai  %h  %s", "--", f"resources/viewer/{name}"],
+                capture_output=True, text=True, timeout=5)
+            last_commit = (gitlog.stdout or "").strip() or "(no git)"
+        except Exception:
+            last_commit = "(git unavailable)"
+        print(f"    {name}: {st.st_size:>8d} B  mtime={mtime}  sha1={sha}")
+        print(f"      last commit: {last_commit}")
+        # Marker check — catches "somebody renamed the field, file on
+        # disk still has the old name" regressions before ZIM packaging.
+        body = p.read_text(errors="replace")
+        missing = [m for m in expected_markers[name] if m not in body]
+        if missing:
+            print(f"    ⚠️  {name}: MISSING EXPECTED STRINGS {missing} — "
+                  "viewer is probably stale. Packaging anyway, but the "
+                  "resulting ZIM will miss features.")
+            warned = True
+    if not warned:
+        print("    viewer freshness OK")
+    print()
+
 # Geofabrik base URL for downloading OSM extracts
 GEOFABRIK_BASE = "https://download.geofabrik.de"
 
@@ -3563,8 +3619,16 @@ def create_zim(
                         # Optional additions (safe to forward through their parser):
                         #   w  = wikipedia tag value(s)  (OSM format, e.g. "en:Lincoln_Memorial")
                         #   q  = wikidata Q-ID
+                        #   Overture-places enrichment (set by merge_overture_places;
+                        #   empty on non-POI rows): ws = website, p = phone, soc = socials,
+                        #   brand = brand primary name, wd = brand Wikidata Q-ID,
+                        #   cat = normalized category, source = "overture" for Pass-2 adds.
                         rec = {"n": feat["name"], "t": t, "s": feat.get("subtype", ""),
                                "a": feat["lat"], "o": feat["lon"], "l": feat.get("location", "")}
+                        for ov_key in ("ws", "p", "soc", "brand", "wd", "cat", "source"):
+                            v = feat.get(ov_key)
+                            if v:
+                                rec[ov_key] = v
                         if wiki:
                             if wiki.get("wikipedia"):
                                 rec["w"] = wiki["wikipedia"]
@@ -4170,6 +4234,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     if include_routing:
         print(f"  Including offline routing graph")
     print()
+    log_viewer_freshness()
 
     # Create temp directory
     tmpdir = tempfile.mkdtemp(prefix="osm_zim_")
