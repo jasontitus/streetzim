@@ -1777,7 +1777,7 @@ function placeSearchPin(map, lat, lon, name, enrich) {
     contact.appendChild(a);
     any = true;
   }
-  if (enrich.w)  addLink(enrich.w, '🌐', enrich.w);
+  if (enrich.ws) addLink(enrich.ws, '🌐', enrich.ws);
   if (enrich.p)  addLink('tel:' + enrich.p.replace(/\s+/g, ''), '📞', enrich.p);
   if (enrich.soc && enrich.soc.length) {
     enrich.soc.forEach(function(s) {
@@ -2073,7 +2073,10 @@ function initSearch(map) {
       enrich = {
         cat:   item.cat,
         subtype: item.s,
-        w:     item.w,
+        // `ws` (website) not `w` — `w` is reserved for the Wikipedia
+        // tag that OSM POIs carry in the same record; see commit
+        // fa6208b's collision notes.
+        ws:    item.ws,
         p:     item.p,
         soc:   item.soc,
         brand: item.brand,

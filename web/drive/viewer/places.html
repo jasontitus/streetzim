@@ -400,7 +400,9 @@ function renderResults() {
 
     // Enrichment row — website / phone / socials when Overture supplied
     // them. Keep the markup lean: icon-only links row.
-    if (r.w || r.p || (r.soc && r.soc.length) || r.brand) {
+    // `ws` (website), not `w` — `w` is reserved for the OSM Wikipedia
+    // tag in the same record; see commit fa6208b.
+    if (r.ws || r.p || (r.soc && r.soc.length) || r.brand) {
       const rich = document.createElement('p');
       rich.className = 'rich';
       if (r.brand) {
@@ -411,10 +413,10 @@ function renderResults() {
       }
       const links = document.createElement('span');
       links.className = 'links';
-      if (r.w) {
+      if (r.ws) {
         const a = document.createElement('a');
-        a.href = r.w; a.target = '_blank'; a.rel = 'noopener';
-        a.title = r.w; a.textContent = '🌐';
+        a.href = r.ws; a.target = '_blank'; a.rel = 'noopener';
+        a.title = r.ws; a.textContent = '🌐';
         links.appendChild(a);
       }
       if (r.p) {
