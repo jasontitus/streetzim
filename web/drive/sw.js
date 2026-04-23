@@ -17,7 +17,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // The sync script writes a stamp to web/drive/viewer/.version which the
 // page reads on load and posts to the SW — we compare and clear stale
 // caches. For now just hand-bump on big changes.
-const SHELL_CACHE = 'streetzim-drive-shell-v12';
+const SHELL_CACHE = 'streetzim-drive-shell-v17';
 
 const SHELL_URLS = [
   './',

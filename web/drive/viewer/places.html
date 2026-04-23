@@ -38,10 +38,37 @@
                      white-space:nowrap; }
   nav.chips button.on { background:var(--chip-on); color:var(--chip-on-fg);
                         border-color:var(--chip-on); }
-  .toggle { padding:4px 16px 12px; display:flex; align-items:center;
-            gap:8px; font-size:0.9rem; color:var(--muted); }
-  .toggle label { display:flex; align-items:center; gap:6px; cursor:pointer; }
-  .toggle input { transform:translateY(1px); }
+  .near { padding:4px 16px 12px; display:flex; align-items:center;
+          gap:10px; font-size:0.9rem; color:var(--muted); }
+  .near label { flex:0 0 auto; }
+  .near-wrap { position:relative; flex:1 1 auto; }
+  #near-input {
+    width:100%; padding:8px 28px 8px 12px; border-radius:10px;
+    border:1px solid var(--line); background:var(--card); color:var(--text);
+    font:inherit; font-size:0.95rem;
+  }
+  #near-input:focus { outline:2px solid var(--chip-on); outline-offset:-1px; }
+  #near-clear {
+    position:absolute; right:6px; top:50%; transform:translateY(-50%);
+    background:transparent; border:none; color:var(--muted);
+    font-size:18px; line-height:1; cursor:pointer; padding:2px 6px;
+  }
+  #near-clear:hover { color:var(--text); }
+  #near-results {
+    position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:20;
+    background:var(--card); border:1px solid var(--line); border-radius:10px;
+    max-height:260px; overflow-y:auto; box-shadow:0 4px 16px rgba(0,0,0,0.4);
+  }
+  #near-results .near-result {
+    padding:10px 12px; cursor:pointer; font-size:0.92rem; line-height:1.35;
+    border-bottom:1px solid var(--line);
+  }
+  #near-results .near-result:last-child { border-bottom:none; }
+  #near-results .near-result:hover,
+  #near-results .near-result.active { background:var(--chip-on); color:var(--chip-on-fg); }
+  #near-results .near-result .sub { color:var(--muted); font-size:0.82rem; }
+  #near-results .near-result:hover .sub,
+  #near-results .near-result.active .sub { color:var(--chip-on-fg); opacity:0.85; }
   .status { padding:18px 16px; color:var(--muted); font-size:0.9rem; }
   ol#results { list-style:none; margin:0; padding:0; }
   ol#results li { background:var(--card); margin:0 16px 10px; padding:14px;
@@ -85,11 +112,14 @@
   <!-- buttons inserted at runtime -->
 </nav>
 
-<div class="toggle">
-  <label>
-    <input id="gps" type="checkbox" checked>
-    <span>Sort by distance</span>
-  </label>
+<div class="near">
+  <label for="near-input">Search near</label>
+  <div class="near-wrap">
+    <input id="near-input" type="search" value="My location"
+           autocomplete="off" autocapitalize="none" spellcheck="false">
+    <button id="near-clear" type="button" aria-label="Clear" title="Reset to my location">×</button>
+    <div id="near-results" role="listbox" hidden></div>
+  </div>
 </div>
 
 <div id="status" class="status">Loading places index…</div>
@@ -187,11 +217,13 @@ const state = {
 };
 
 const els = {
-  q:       document.getElementById('q'),
-  chips:   document.getElementById('chips'),
-  status:  document.getElementById('status'),
-  results: document.getElementById('results'),
-  gps:     document.getElementById('gps'),
+  q:           document.getElementById('q'),
+  chips:       document.getElementById('chips'),
+  status:      document.getElementById('status'),
+  results:     document.getElementById('results'),
+  near:        document.getElementById('near-input'),
+  nearClear:   document.getElementById('near-clear'),
+  nearResults: document.getElementById('near-results'),
 };
 
 // ---------- bootstrapping ----------
@@ -211,11 +243,21 @@ const els = {
   }
   renderChips();
   els.q.addEventListener('input', debounce(onSearch, 200));
-  els.gps.addEventListener('change', onGpsToggle);
-  // Sort-by-distance is the default. We don't request GPS yet — that
-  // happens lazily on the first chip pick or search (see
-  // ensureOriginThen) so cold loads don't pop a permission dialog the
-  // user wasn't expecting.
+  // Search-near input: typeahead into the same place/POI index, click
+  // a result to set the search origin manually. "My location" (GPS)
+  // is the default when the input hasn't been edited. Clearing with
+  // "×" reverts to GPS.
+  els.near.addEventListener('input', debounce(onNearInput, 180));
+  els.near.addEventListener('focus', () => {
+    // Select the whole current label so the first keystroke replaces it.
+    setTimeout(() => els.near.select(), 0);
+  });
+  els.near.addEventListener('keydown', onNearKeydown);
+  els.nearClear.addEventListener('click', clearNearCustom);
+  // Clicking outside the dropdown closes it without resetting state.
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.near-wrap')) hideNearResults();
+  });
   // Restore filter from URL (#cat=museums or #q=foo).
   const hash = parseHash(location.hash);
   if (hash.q) { els.q.value = hash.q; }
@@ -485,14 +527,16 @@ function formatDistance(m) {
   return (m / 1000).toFixed(1) + ' km';
 }
 
-// ---------- GPS ----------
+// ---------- Origin selection ----------
+// originMode: 'gps' (implicit my-location) | 'custom' (user picked a
+// named place from the near-typeahead) | 'none' (GPS denied/refused —
+// falls back to alphabetical sort).
+state.originMode = 'gps';
+state.originLabel = 'My location';
 
-// Fire a GPS request and update state + rerun the current query. Shared
-// by the toggle's change handler and the lazy trigger that runs on the
-// first chip pick / name search when the toggle defaults to on.
 function requestGPS() {
   if (!navigator.geolocation) {
-    els.gps.checked = false;
+    state.originMode = 'none';
     setStatus('This device does not support geolocation.');
     return;
   }
@@ -500,49 +544,151 @@ function requestGPS() {
   navigator.geolocation.getCurrentPosition(
     pos => {
       state.origin = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      state.originMode = 'gps';
+      state.originLabel = 'My location';
+      els.near.value = 'My location';
       rerunQuery();
     },
     err => {
-      els.gps.checked = false;
-      setStatus(`Location unavailable: ${err.message}`);
+      state.origin = null;
+      state.originMode = 'none';
+      setStatus(`Location unavailable: ${err.message}. Pick a place under "Search near" to sort by distance.`);
     },
     { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 }
   );
 }
 
-// Lazy trigger — called before running a chip or name query. If the
-// "Sort by distance" toggle is on but we haven't fetched GPS yet, do
-// so and return true so the caller knows not to run its query yet
-// (the GPS callback will fire rerunQuery when the fix lands). Returns
-// false when the caller can proceed immediately.
+// Lazy trigger — called before running a chip or name query. When the
+// user hasn't picked a custom origin and we haven't fetched GPS, ask
+// for it; return true so the caller waits (requestGPS's success
+// handler fires rerunQuery). Returns false when caller can proceed.
 function maybeFetchOriginFirst() {
-  if (els.gps.checked && !state.origin) {
-    requestGPS();
-    return true;  // hand-off: requestGPS triggers rerunQuery when ready
-  }
+  if (state.originMode === 'custom' && state.origin) return false;
+  if (state.originMode === 'none') return false;
+  if (!state.origin) { requestGPS(); return true; }
   return false;
 }
 
-function onGpsToggle() {
-  if (!els.gps.checked) { state.origin = null; rerunQuery(); return; }
-  if (!navigator.geolocation) {
-    els.gps.checked = false;
-    setStatus('This device does not support geolocation.');
+// --- near-typeahead ---
+
+function hideNearResults() {
+  els.nearResults.hidden = true;
+  els.nearResults.replaceChildren();
+}
+
+function renderNearResults(cands, activeIdx) {
+  els.nearResults.replaceChildren();
+  if (!cands.length) {
+    const msg = document.createElement('div');
+    msg.className = 'near-result';
+    msg.style.color = 'var(--muted)';
+    msg.textContent = 'No matches.';
+    els.nearResults.appendChild(msg);
+    els.nearResults.hidden = false;
     return;
   }
-  setStatus('Getting your location…');
-  navigator.geolocation.getCurrentPosition(
-    pos => {
-      state.origin = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-      rerunQuery();
-    },
-    err => {
-      els.gps.checked = false;
-      setStatus(`Location unavailable: ${err.message}`);
-    },
-    { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 }
-  );
+  cands.forEach((c, i) => {
+    const row = document.createElement('div');
+    row.className = 'near-result' + (i === activeIdx ? ' active' : '');
+    row.setAttribute('role', 'option');
+    const nameEl = document.createElement('div');
+    nameEl.textContent = c.n || '(unnamed)';
+    row.appendChild(nameEl);
+    const sub = [];
+    if (c.cat) sub.push(prettyKind(c.cat));
+    else if (c.s) sub.push(prettyKind(c.s));
+    if (c.l) sub.push(c.l);
+    if (sub.length) {
+      const subEl = document.createElement('div');
+      subEl.className = 'sub';
+      subEl.textContent = sub.join(' · ');
+      row.appendChild(subEl);
+    }
+    row.addEventListener('click', () => pickNearResult(c));
+    els.nearResults.appendChild(row);
+  });
+  els.nearResults.hidden = false;
 }
+
+let nearActive = -1;
+let nearCandidates = [];
+
+async function onNearInput() {
+  const q = els.near.value.trim();
+  if (q.length < 2 || q === 'My location') { hideNearResults(); return; }
+  const prefixes = prefixesFor(q);
+  if (!prefixes.length) { hideNearResults(); return; }
+  const seen = new Set();
+  const matches = [];
+  const needle = q.toLowerCase();
+  for (const p of prefixes) {
+    if (!state.manifests.search.chunks[p]) continue;
+    let chunk;
+    try { chunk = await loadChunk(p); } catch { continue; }
+    for (const r of chunk) {
+      if (!r.n) continue;
+      const lower = r.n.toLowerCase();
+      if (!lower.includes(needle)) continue;
+      const key = `${r.n}|${r.a}|${r.o}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      matches.push(r);
+    }
+  }
+  matches.sort((a, b) => {
+    const aStart = a.n.toLowerCase().startsWith(needle) ? 0 : 1;
+    const bStart = b.n.toLowerCase().startsWith(needle) ? 0 : 1;
+    if (aStart !== bStart) return aStart - bStart;
+    return a.n.length - b.n.length;
+  });
+  nearCandidates = matches.slice(0, 12);
+  nearActive = nearCandidates.length ? 0 : -1;
+  renderNearResults(nearCandidates, nearActive);
+}
+
+function onNearKeydown(e) {
+  if (els.nearResults.hidden) return;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    nearActive = Math.min(nearCandidates.length - 1, nearActive + 1);
+    renderNearResults(nearCandidates, nearActive);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    nearActive = Math.max(0, nearActive - 1);
+    renderNearResults(nearCandidates, nearActive);
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (nearActive >= 0 && nearCandidates[nearActive]) {
+      pickNearResult(nearCandidates[nearActive]);
+    }
+  } else if (e.key === 'Escape') {
+    hideNearResults();
+  }
+}
+
+function pickNearResult(r) {
+  state.origin = { lat: r.a, lon: r.o };
+  state.originMode = 'custom';
+  state.originLabel = r.n;
+  els.near.value = r.n;
+  hideNearResults();
+  rerunQuery();
+}
+
+function clearNearCustom() {
+  state.origin = null;
+  state.originMode = 'gps';
+  state.originLabel = 'My location';
+  els.near.value = 'My location';
+  hideNearResults();
+  requestGPS();
+}
+
+// No-op shim — the GPS toggle is gone from the UI but we keep the
+// symbol so any deep-link code that still references onGpsToggle()
+// doesn't explode. Real origin-selection is in requestGPS +
+// pickNearResult above.
+function onGpsToggle() { /* intentionally empty */ }
 
 // ---------- data loading ----------
 

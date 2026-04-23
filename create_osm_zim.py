@@ -2275,7 +2275,7 @@ def extract_wiki_tags_pbf(pbf_path, bbox=None):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def extract_routing_graph(pbf_path, output_dir, bbox=None):
+def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
     """Extract road network from OSM PBF and build a compact routing graph.
 
     Streams through the (bbox-filtered) PBF with pyosmium in two passes:
@@ -2295,8 +2295,16 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
                     and the final routing-graph.bin.
         bbox: Optional (minlon, minlat, maxlon, maxlat) to bbox-filter first.
               Critical for regional builds from a planet PBF.
+        split_graph: If True, emit SZRG v5 split layout — main ``routing-graph.bin``
+                    holds everything routing needs (nodes + edges + name table);
+                    companion ``routing-graph-geoms.bin`` (SZGM v1) holds the
+                    polyline blob for lazy loading on route-draw. Frees iOS
+                    Safari from allocating a multi-GB single buffer up-front.
+                    Default False keeps the current v4 inline layout so Kiwix
+                    Desktop + mcpzim stay on their supported contract.
 
-    Returns the path to the output routing-graph.bin, or None if no highways found.
+    Returns (main_path, geoms_path_or_None). geoms_path is set only when
+    ``split_graph=True``. Returns (None, None) if no highways found.
     """
     import math
     import array
@@ -2753,34 +2761,122 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
         cur += len(b)
     name_offsets[num_names] = cur
 
-    # Serialize (SZRG v4 format — see the viewer parser for layout, and
-    # docs/driving-mode-road-class-warnings.md for the class_access field).
+    # Serialize. Two layouts:
+    #   * v4 inline (default) — everything in one graph.bin. Back-compat
+    #     with Kiwix Desktop + mcpzim; matches docs/mcpzim-contract.md.
+    #   * v5 split (--split-graph) — geoms hoisted into a companion file
+    #     so the PWA can defer their GB-scale allocation until a route is
+    #     actually drawn. main layout keeps the same header plus
+    #     nodes/adj/edges/names. class_access bit layout unchanged.
     output_path = os.path.join(output_dir, "routing-graph.bin")
-    with open(output_path, "wb") as f:
-        f.write(b"SZRG")
-        np.array([4, num_nodes, num_edges, num_geoms, geom_bytes_total,
-                  num_names, names_bytes], dtype='<u4').tofile(f)
-        nodes_arr.tofile(f)
-        adj_offsets.tofile(f)
-        edges_arr.tofile(f)
-        geom_offsets_np.tofile(f)
-        f.write(bytes(geom_blob))
-        name_offsets.tofile(f)
-        for b in name_blobs:
-            f.write(b)
+    geoms_path = None
+
+    if not split_graph:
+        # v4 inline — byte-identical to pre-split builds.
+        with open(output_path, "wb") as f:
+            f.write(b"SZRG")
+            np.array([4, num_nodes, num_edges, num_geoms, geom_bytes_total,
+                      num_names, names_bytes], dtype='<u4').tofile(f)
+            nodes_arr.tofile(f)
+            adj_offsets.tofile(f)
+            edges_arr.tofile(f)
+            geom_offsets_np.tofile(f)
+            f.write(bytes(geom_blob))
+            name_offsets.tofile(f)
+            for b in name_blobs:
+                f.write(b)
+    else:
+        # v5 split main file. Header sets geomBytes=0 so old parsers that
+        # ignore the version field still notice "no geoms here." Readers
+        # that understand v5 look for routing-graph-geoms.bin beside it.
+        with open(output_path, "wb") as f:
+            f.write(b"SZRG")
+            np.array([5, num_nodes, num_edges, num_geoms, 0,
+                      num_names, names_bytes], dtype='<u4').tofile(f)
+            nodes_arr.tofile(f)
+            adj_offsets.tofile(f)
+            edges_arr.tofile(f)
+            name_offsets.tofile(f)
+            for b in name_blobs:
+                f.write(b)
+        # Companion geoms file — SZGM magic so the viewer can't accidentally
+        # mis-interpret this as a graph buffer.
+        geoms_path = os.path.join(output_dir, "routing-graph-geoms.bin")
+        with open(geoms_path, "wb") as gf:
+            gf.write(b"SZGM")
+            np.array([1, num_geoms, geom_bytes_total], dtype='<u4').tofile(gf)
+            geom_offsets_np.tofile(gf)
+            gf.write(bytes(geom_blob))
 
     size_mb = os.path.getsize(output_path) / (1024 * 1024)
-    # Class_access diagnostics — helps verify the v4 writer populated flags
+    # Class_access diagnostics — helps verify the writer populated flags
     # for regions that are expected to have lots of roundabouts or ramps.
     class_access_col = edges_arr[:, 4]
     num_round = int(((class_access_col >> 8) & 1).sum())
     num_link = int(np.isin((class_access_col & 0x1F), [2, 4, 6, 8, 10]).sum())
-    print(f"    Routing graph: {size_mb:.1f} MB ({num_nodes} nodes, "
-          f"{num_edges} edges, {num_geoms} geoms, "
+    fmt_note = "v5 split" if split_graph else "v4 inline"
+    geoms_note = ""
+    if geoms_path:
+        geoms_mb = os.path.getsize(geoms_path) / (1024 * 1024)
+        geoms_note = f", companion {geoms_mb:.1f} MB"
+    print(f"    Routing graph ({fmt_note}): {size_mb:.1f} MB{geoms_note} "
+          f"({num_nodes} nodes, {num_edges} edges, {num_geoms} geoms, "
           f"{geom_bytes_total / (1024*1024):.1f} MB geom blob, "
           f"{num_names} names, {names_bytes / 1024:.0f} KB name text, "
           f"{num_round} roundabout + {num_link} link edges)")
-    return output_path
+    return output_path, geoms_path
+
+
+def chunk_graph_file(src_path: str, chunk_size_bytes: int,
+                     out_prefix: str = "routing-graph-chunk") -> tuple[list[str], dict]:
+    """Split ``src_path`` into N files of ``chunk_size_bytes`` each.
+
+    Returns (chunk_paths, manifest_dict). The manifest mirrors the shape
+    the viewer's ``loadChunkedGraph()`` expects:
+
+        {"schema": 1, "total_bytes": <size>,
+         "chunks": [{"path": "...", "bytes": N}, ...]}
+
+    A dedicated manifest entry (rather than inferring from file listing)
+    keeps the ordering deterministic for the reader. If concatenation of
+    the chunks doesn't byte-match the source, the loader rejects them —
+    that saves a lot of pain tracking down torn uploads.
+    """
+    import hashlib
+    if chunk_size_bytes <= 0:
+        raise ValueError("chunk_size_bytes must be positive")
+    src_size = os.path.getsize(src_path)
+    chunk_paths: list[str] = []
+    entries: list[dict] = []
+    src_dir = os.path.dirname(src_path) or "."
+
+    with open(src_path, "rb") as src:
+        idx = 0
+        while True:
+            chunk = src.read(chunk_size_bytes)
+            if not chunk:
+                break
+            fname = f"{out_prefix}-{idx:04d}.bin"
+            out_path = os.path.join(src_dir, fname)
+            with open(out_path, "wb") as fh:
+                fh.write(chunk)
+            chunk_paths.append(out_path)
+            entries.append({"path": fname, "bytes": len(chunk)})
+            idx += 1
+
+    # Sanity sha — the reader verifies this so torn uploads fail loud.
+    h = hashlib.sha256()
+    with open(src_path, "rb") as fh:
+        for blk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(blk)
+
+    manifest = {
+        "schema": 1,
+        "total_bytes": src_size,
+        "sha256": h.hexdigest(),
+        "chunks": entries,
+    }
+    return chunk_paths, manifest
 
 
 def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
@@ -3078,6 +3174,8 @@ def create_zim(
     bbox=None,
     wikidata_data=None,
     routing_graph_path=None,
+    routing_graph_geoms_path=None,
+    routing_graph_chunk_mb=0,
     wiki_cross_refs=None,
     address_count=0,
     overture_sources=None,
@@ -3507,16 +3605,121 @@ def create_zim(
             )
             print(f"    Added {len(wd_chunks)} Wikidata chunks ({total_bytes / 1024:.0f} KB)")
 
-        # Add routing graph data
+        # Add routing graph data.
+        # Large regions produce multi-hundred-MB / multi-GB graph.bin
+        # files (Japan = 1.8 GB, Europe/US ≥ 3 GB). libzim's default
+        # ZSTD clustering puts the whole file in one giant compressed
+        # cluster, which our in-browser PWA's pure-JS `fzstd` port
+        # cannot decompress in a single shot — it throws "invalid zstd
+        # data" around ~500 MB. Set COMPRESS=0 so the file lands in
+        # its own uncompressed cluster; the cluster header becomes
+        # type-1 (raw) and `zim-reader.js` bypasses fzstd entirely.
+        # SZRG is a tight binary format already (~10–15% ZSTD gain),
+        # so the ZIM grows by only that much in return for PWA-
+        # parseable routing.
         if routing_graph_path and os.path.isfile(routing_graph_path):
             size_mb = os.path.getsize(routing_graph_path) / (1024 * 1024)
-            print(f"    Adding routing graph ({size_mb:.1f} MB)...")
-            creator.add_item(MapItem(
-                "routing-data/graph.bin",
-                "Routing Graph",
-                "application/octet-stream",
-                routing_graph_path,
-            ))
+            if routing_graph_chunk_mb and routing_graph_chunk_mb > 0:
+                # Byte-range chunk the primary graph file into N entries
+                # so libzim puts each in its own cluster. fzstd's ~500 MB
+                # ceiling is the actual blocker for Japan-size ZIMs; this
+                # side-steps it without touching the SZRG format.
+                print(f"    Adding routing graph chunked "
+                      f"({size_mb:.1f} MB → {routing_graph_chunk_mb} MB chunks)...")
+                # NOTE: out_prefix is what the manifest records. The
+                # reader joins it with the manifest's *directory* inside
+                # the ZIM, so keep this in lock-step with the ZIM entry
+                # names below ("graph-chunk-NNNN.bin" under routing-data/).
+                chunk_paths, manifest = chunk_graph_file(
+                    routing_graph_path,
+                    routing_graph_chunk_mb * 1024 * 1024,
+                    out_prefix="graph-chunk",
+                )
+                # Manifest first — the reader checks it to learn chunk order.
+                creator.add_item(MapItem(
+                    "routing-data/graph-chunk-manifest.json",
+                    "Routing Graph Manifest",
+                    "application/json",
+                    json.dumps(manifest, separators=(",", ":")).encode("utf-8"),
+                    compress=True,
+                ))
+                for i, cp in enumerate(chunk_paths):
+                    cp_mb = os.path.getsize(cp) / (1024 * 1024)
+                    # Each chunk gets the same PWA-compat compress rule so
+                    # fzstd can process them (per-cluster, not per-file).
+                    compress_chunk = cp_mb < 200
+                    creator.add_item(MapItem(
+                        f"routing-data/graph-chunk-{i:04d}.bin",
+                        f"Routing Graph Chunk {i}",
+                        "application/octet-stream",
+                        cp,
+                        compress=compress_chunk,
+                    ))
+                print(f"    Wrote {len(chunk_paths)} graph chunks + manifest")
+            else:
+                # Cap where compression helps more than it hurts: below
+                # ~200 MB fzstd handles it fine in one shot, so keep it
+                # compressed. Above, skip compression for PWA compat.
+                compress_graph = size_mb < 200
+                compress_note = "compressed" if compress_graph else "raw (PWA-compat)"
+                print(f"    Adding routing graph ({size_mb:.1f} MB, {compress_note})...")
+                creator.add_item(MapItem(
+                    "routing-data/graph.bin",
+                    "Routing Graph",
+                    "application/octet-stream",
+                    routing_graph_path,
+                    compress=compress_graph,
+                ))
+            # v5 companion — only emitted when --split-graph was passed.
+            # Compressed is fine since the viewer lazy-loads it on route
+            # render, not startup; fzstd has to decompress only when a
+            # route is drawn, which is an easy allocation window compared
+            # to the original "everything at page load" pattern.
+            if (routing_graph_geoms_path
+                    and os.path.isfile(routing_graph_geoms_path)):
+                geoms_mb = os.path.getsize(routing_graph_geoms_path) / (1024 * 1024)
+                if routing_graph_chunk_mb and routing_graph_chunk_mb > 0:
+                    # Same reason we chunk graph.bin — the geoms companion
+                    # is typically 30–50% of total graph size, so it also
+                    # busts fzstd's per-cluster cap on continents. Chunk it.
+                    print(f"    Adding geoms companion chunked "
+                          f"({geoms_mb:.1f} MB → {routing_graph_chunk_mb} MB chunks)...")
+                    # Same lock-step naming constraint as the main graph
+                    # chunks — manifest path must match the ZIM entry
+                    # relative to routing-data/.
+                    chunk_paths, manifest = chunk_graph_file(
+                        routing_graph_geoms_path,
+                        routing_graph_chunk_mb * 1024 * 1024,
+                        out_prefix="graph-geoms-chunk",
+                    )
+                    creator.add_item(MapItem(
+                        "routing-data/graph-geoms-chunk-manifest.json",
+                        "Routing Geoms Manifest",
+                        "application/json",
+                        json.dumps(manifest, separators=(",", ":")).encode("utf-8"),
+                        compress=True,
+                    ))
+                    for i, cp in enumerate(chunk_paths):
+                        cp_mb = os.path.getsize(cp) / (1024 * 1024)
+                        creator.add_item(MapItem(
+                            f"routing-data/graph-geoms-chunk-{i:04d}.bin",
+                            f"Routing Geoms Chunk {i}",
+                            "application/octet-stream",
+                            cp,
+                            compress=cp_mb < 200,
+                        ))
+                else:
+                    compress_geoms = geoms_mb < 200
+                    print(f"    Adding routing geoms companion "
+                          f"({geoms_mb:.1f} MB, "
+                          f"{'compressed' if compress_geoms else 'raw (PWA-compat)'})...")
+                    creator.add_item(MapItem(
+                        "routing-data/graph-geoms.bin",
+                        "Routing Graph Geoms",
+                        "application/octet-stream",
+                        routing_graph_geoms_path,
+                        compress=compress_geoms,
+                    ))
 
         # Build location index for search feature enrichment
         loc_lookup = None
@@ -3546,12 +3749,42 @@ def create_zim(
                 return s.lower()
 
             def _prefix_key(word):
-                """Two-char ASCII-alnum prefix, padded with '_' for non-alnum."""
+                """Chunk key for a word's first char.
+
+                Latin-leading names get the same 2-char ASCII-alnum
+                prefix as before (``"to"`` for Tokyo in rōmaji, ``"_p"``
+                for "_private"). Non-ASCII first chars are bucketed by
+                their single Unicode codepoint in lowercase hex
+                (``"u6771"`` for 東, ``"u43f"`` for п) — previously every
+                CJK/Cyrillic/Arabic/Thai record collapsed into one
+                ``__.json`` chunk, 350 MB on Japan, 230 MB on Iran,
+                crashing Kiwix Desktop on "find". Now each distinct
+                leading codepoint gets its own bucket.
+
+                Callers (JS viewer ``keyFor``, Swift ``normalizePrefix``)
+                implement the same rule — if this changes, update them
+                in lockstep or lookups desync.
+                """
                 pw = _norm(word).replace(" ", "_")
-                pw = "".join(c if c.isascii() and c.isalnum() else "_" for c in pw)
                 if not pw:
                     return "__"
-                return pw[:2].ljust(2, "_")
+                c0 = pw[0]
+                # Non-ASCII → codepoint hex bucket
+                if not c0.isascii():
+                    return "u" + format(ord(c0), "x")
+                # ASCII path mirrors the original rule: first char is
+                # alnum or '_' (kept), anything else becomes '_'.
+                def _ascii_norm(ch: str) -> str:
+                    return ch if ch.isalnum() or ch == "_" else "_"
+                k0 = _ascii_norm(c0)
+                if len(pw) >= 2:
+                    c1 = pw[1]
+                    # If the 2nd char is non-ASCII, collapse it to ``_`` —
+                    # the bucket is keyed by c0 alone in that case.
+                    k1 = _ascii_norm(c1) if c1.isascii() else "_"
+                else:
+                    k1 = "_"
+                return k0 + k1
 
             # Word splitter: any run of non-alnum (unicode-aware) ends a word.
             # Gives us each term in the name so "Washington National Cathedral"
@@ -4157,6 +4390,19 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "If bbox is set, features are filtered to the bounding box.")
     parser.add_argument("--routing", action="store_true",
                         help="Include offline routing graph for turn-by-turn directions")
+    parser.add_argument("--split-graph", action="store_true",
+                        help="Emit SZRG v5 split routing graph (main graph.bin "
+                             "+ companion graph-geoms.bin) so the PWA can "
+                             "defer geom loading. Opt-in: default stays on "
+                             "v4 inline for Kiwix Desktop / mcpzim compat.")
+    parser.add_argument("--chunk-graph-mb", type=int, default=0, metavar="N",
+                        help="Split the routing graph file(s) into N-MB chunks "
+                             "when packaging (each chunk becomes its own ZIM "
+                             "entry). Intended for continent-scale ZIMs whose "
+                             "graph.bin would land in a single libzim cluster "
+                             "> 500 MB — the PWA's fzstd port chokes there. "
+                             "Default 0 = no chunking. 200 is a safe starting "
+                             "value; it keeps each cluster well under the limit.")
     parser.add_argument("--overture-addresses", metavar="PARQUET",
                         help="Merge Overture Maps address records from a parquet extract. "
                              "Use download_overture_data.py to produce the parquet first. "
@@ -4415,6 +4661,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
 
         # Extract routing graph if requested
         routing_graph_path = None
+        routing_graph_geoms_path = None
         if include_routing:
             step_rt = 5 + (1 if include_wikidata else 0)
             print()
@@ -4425,7 +4672,10 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 print("    (routing requires a PBF file — not available with --mbtiles only)")
             else:
                 rt_bbox = parse_bbox(bbox_str) if bbox_str else None
-                routing_graph_path = extract_routing_graph(rt_pbf, tmpdir, bbox=rt_bbox)
+                routing_graph_path, routing_graph_geoms_path = extract_routing_graph(
+                    rt_pbf, tmpdir, bbox=rt_bbox,
+                    split_graph=bool(getattr(args, 'split_graph', False)),
+                )
 
         # Download satellite tiles and generate terrain tiles
         # These are independent (satellite=I/O-bound, terrain=CPU-bound) so run in parallel
@@ -4597,8 +4847,21 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                                 hits += 1
                         return hits / total if total else 0.0
 
+                    # Previously: audited only z ≥ 10 (see
+                    # ``project_terrain_blank_tile_bug.md``) on the grounds
+                    # that z < 10 tiles extend outside the bbox+1° buffer
+                    # and "cannot be fully regenerated from the buffered
+                    # VRT". In practice that carve-out let interior z8-z9
+                    # blanks slip through — Iran 2026-04-23 shipped with
+                    # 9,433 blank tiles, of which ~80 at z8-z9 were
+                    # user-visible as a horizontal stripe. The land-
+                    # fraction check (≥ 6/9 of VRT sample points on
+                    # land) is zoom-independent — it already treats
+                    # genuinely-ocean low-zoom tiles as OK. So extend the
+                    # audit all the way to z=0. Legitimate-partial cases
+                    # stay exempt; VRT-race blanks over real land fail.
                     still_broken = []
-                    for z in range(10, terrain_max_zoom + 1):
+                    for z in range(0, terrain_max_zoom + 1):
                         for t in mercantile.tiles(*bbox_parsed, zooms=z):
                             tile_path = os.path.join(terrain_dir, str(z), str(t.x),
                                                      f"{t.y}.webp")
@@ -4711,6 +4974,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             bbox=parse_bbox(bbox_str) if bbox_str else None,
             wikidata_data=wikidata_data,
             routing_graph_path=routing_graph_path,
+            routing_graph_geoms_path=routing_graph_geoms_path,
+            routing_graph_chunk_mb=int(getattr(args, 'chunk_graph_mb', 0) or 0),
             wiki_cross_refs=wiki_cross_refs,
             overture_sources=overture_sources,
             overture_themes=overture_themes,
