@@ -195,17 +195,55 @@ def fetch_item_details(identifier):
         return None
 
 
-def render_live_card(region, size_label):
+# Per-feature badge rendered on each region card. Keys mirror the
+# metadata fields `cloud/stamp_item_metadata.py` sets on archive.org
+# items after a successful upload. When a field is absent from the
+# item metadata the badge is hidden — users on older pre-stamping
+# ZIMs get no false advertising.
+FEATURE_BADGES = [
+    ("streetzim_routing",   "Routing & Directions", "nav"),
+    ("streetzim_overture",  "Rich place info",      "overture"),
+    ("streetzim_terrain",   "3D Terrain",           "terrain"),
+    ("streetzim_satellite", "Satellite",            "satellite"),
+    ("streetzim_wikidata",  "Wikipedia links",      "wiki"),
+]
+
+
+def render_feature_badges(item_meta):
+    """Return an HTML fragment listing the features an item advertises.
+
+    `item_meta` is the top-level `metadata` block of an archive.org
+    metadata response (each field is a string). We treat "yes" (case-
+    insensitive) as enabled and anything else — including the field
+    being absent entirely — as disabled. No badges → empty string so
+    the card doesn't get an empty row on stamping-less older items.
+    """
+    if not item_meta:
+        return ""
+    pills = []
+    for key, label, css in FEATURE_BADGES:
+        val = str(item_meta.get(key, "")).lower()
+        if val == "yes":
+            pills.append(
+                f'<span class="map-badge badge-{css}">{escape(label)}</span>'
+            )
+    if not pills:
+        return ""
+    return '\n        <div class="map-card-badges">' + "".join(pills) + "</div>"
+
+
+def render_live_card(region, size_label, item_meta=None):
     """Render a map card with active download/torrent/details buttons."""
     item_id = f"streetzim-{region['id']}"
     zim_file = region["zim_file"]
     title_attr = escape(region["title"], quote=True)
+    badges_html = render_feature_badges(item_meta)
     return f"""      <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">{escape(region["title"])}</div>
           <div class="map-card-size">{size_label}</div>
         </div>
-        <p class="map-card-desc">{region["description"]}</p>
+        <p class="map-card-desc">{region["description"]}</p>{badges_html}
         <div class="map-card-links">
           <a class="btn btn-primary" href="https://archive.org/download/{item_id}/{zim_file}" data-track="download" data-region="{region["id"]}" data-title="{title_attr}">Download</a>
           <a class="btn btn-secondary" href="https://archive.org/download/{item_id}/{item_id}_archive.torrent" data-track="torrent" data-region="{region["id"]}" data-title="{title_attr}">Torrent</a>
@@ -287,7 +325,9 @@ def build_page():
                 cards.append(render_upcoming_card(region))
                 upcoming_count += 1
                 continue
-            cards.append(render_live_card(region, human_size(zim_size)))
+            cards.append(render_live_card(
+                region, human_size(zim_size),
+                item_meta=(details or {}).get("metadata") if details else None))
             live_count += 1
         else:
             cards.append(render_upcoming_card(region))

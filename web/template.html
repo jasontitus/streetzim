@@ -173,9 +173,27 @@
   }
   .map-card-desc {
     font-size: 13px; color: var(--text-dim);
-    margin: 0 0 12px;
+    margin: 0 0 8px;
     line-height: 1.45;
   }
+  /* Per-card feature badges — tells users at a glance which ZIMs
+     ship routing, Overture rich place info, terrain, etc. Keys:
+     see FEATURE_BADGES in web/generate.py. */
+  .map-card-badges {
+    display: flex; gap: 6px; flex-wrap: wrap;
+    margin: 0 0 12px;
+  }
+  .map-badge {
+    font-size: 10.5px; font-weight: 500;
+    padding: 3px 8px; border-radius: 999px;
+    line-height: 1.35; white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .badge-nav       { background: #162a4f; color: #a8c6ff; border-color: #1f3a73; }
+  .badge-overture  { background: #1f2f1f; color: #a9e4a9; border-color: #2e4b2e; }
+  .badge-terrain   { background: #2f2418; color: #e3c18a; border-color: #4d3a25; }
+  .badge-satellite { background: #2a1f3a; color: #c2a8ff; border-color: #3e2e58; }
+  .badge-wiki      { background: #2a2a2a; color: #d0d0d0; border-color: #3c3c3c; }
   .map-card-links {
     display: flex; gap: 8px; flex-wrap: wrap;
     margin-top: auto;
@@ -291,6 +309,13 @@
     color: var(--text-faint);
     margin: 0 0 12px;
   }
+  .feature-key {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.9;
+    margin: 12px 0 18px;
+  }
+  .feature-key .map-badge { margin: 0 4px 0 6px; }
 
   footer {
     padding: 32px 0 48px;
@@ -329,6 +354,14 @@
   <div class="container">
     <h2>Download a map</h2>
     <p>Pick a region below, install <a href="https://kiwix.org" target="_blank" rel="noopener">Kiwix</a>, and open the .zim file. Hosted on the Internet Archive — each download includes a torrent.</p>
+    <p class="feature-key">
+      Badges on each card show what's inside:
+      <span class="map-badge badge-nav">Routing &amp; Directions</span> offline turn-by-turn,
+      <span class="map-badge badge-overture">Rich place info</span> websites, phones &amp; socials from Overture,
+      <span class="map-badge badge-terrain">3D Terrain</span> Copernicus elevation,
+      <span class="map-badge badge-satellite">Satellite</span> Sentinel-2 imagery,
+      <span class="map-badge badge-wiki">Wikipedia links</span> Wikidata cross-refs.
+    </p>
     <p class="updated">Last updated: {{UPDATED}}</p>
 
     <div class="maps">
