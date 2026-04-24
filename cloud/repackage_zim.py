@@ -273,27 +273,37 @@ def _emit_upgraded_graph(creator, graph_bytes: bytes, *,
     def emit_blob(name: str, title: str, mime: str, data: bytes,
                   chunk_prefix: str, manifest_name: str,
                   manifest_title: str):
-        if chunk_size <= 0 or len(data) <= chunk_size:
-            compress = len(data) < 200 * 1024 * 1024
-            creator.add_item(passthrough_cls(
-                name, title, mime, data, compress=compress))
-            print(f"    + {name} ({len(data)/1e6:.1f} MB, "
-                  f"{'compressed' if compress else 'raw'})")
-            return
-        entries, manifest = _chunk_bytes_inmem(data, chunk_size, chunk_prefix)
+        # Always emit the monolithic blob — Kiwix iOS / Desktop /
+        # mcpzim all read ``routing-data/graph.bin`` natively via
+        # libzim's cluster decompression (no fzstd dependency, so
+        # the 500 MB PWA cap doesn't apply). Skipping this entry
+        # broke iOS routing on Egypt 2026-04-24 and Iran 2026-04-24.
+        #
+        # When the data exceeds the fzstd per-cluster ceiling we ALSO
+        # emit chunks for the PWA. PWA prefers the manifest; Kiwix
+        # ignores chunks. Both coexist cheaply (~30% ZIM-size cost
+        # for the routing data, which itself is ~5% of a typical ZIM).
+        compress = len(data) < 200 * 1024 * 1024
         creator.add_item(passthrough_cls(
-            manifest_name, manifest_title, "application/json",
-            json.dumps(manifest, separators=(",", ":")).encode("utf-8"),
-            compress=True))
-        for ename, edata in entries:
-            compress = len(edata) < 200 * 1024 * 1024
+            name, title, mime, data, compress=compress))
+        print(f"    + {name} ({len(data)/1e6:.1f} MB, "
+              f"{'compressed' if compress else 'raw'})")
+
+        if chunk_size > 0 and len(data) > chunk_size:
+            entries, manifest = _chunk_bytes_inmem(data, chunk_size, chunk_prefix)
             creator.add_item(passthrough_cls(
-                f"routing-data/{ename}",
-                f"{title} ({ename})",
-                "application/octet-stream", edata,
-                compress=compress))
-        print(f"    + {name} chunked → {len(entries)} entries of "
-              f"≤{chunk_graph_mb} MB each")
+                manifest_name, manifest_title, "application/json",
+                json.dumps(manifest, separators=(",", ":")).encode("utf-8"),
+                compress=True))
+            for ename, edata in entries:
+                c2 = len(edata) < 200 * 1024 * 1024
+                creator.add_item(passthrough_cls(
+                    f"routing-data/{ename}",
+                    f"{title} ({ename})",
+                    "application/octet-stream", edata,
+                    compress=c2))
+            print(f"    + {name} ALSO chunked → {len(entries)} entries "
+                  f"of ≤{chunk_graph_mb} MB each (for PWA fzstd cap)")
 
     emit_blob(
         "routing-data/graph.bin",
@@ -322,7 +332,9 @@ def repackage(src_path: str, dst_path: str,
               split_graph: bool = False,
               chunk_graph_mb: int = 0,
               spatial_chunk_scale: int = 0,
-              split_hot_search_chunks_mb: int = 0) -> int:
+              split_hot_search_chunks_mb: int = 0,
+              refresh_terrain_dir: str | None = None,
+              unchunk_graph: bool = False) -> int:
     from libzim.reader import Archive
     from libzim.writer import Creator, Item, StringProvider, Hint
 
@@ -336,6 +348,8 @@ def repackage(src_path: str, dst_path: str,
     print(f"  chunk graph MB:   {chunk_graph_mb}")
     print(f"  spatial chunk scale: {spatial_chunk_scale} "
           f"(0=disabled; 10 = 0.1° cells, 1 = 1° cells)")
+    if refresh_terrain_dir:
+        print(f"  refresh terrain tiles from: {refresh_terrain_dir}")
 
     # Collect viewer replacements (only for known paths — anything
     # else passes through from the source ZIM unchanged).
@@ -431,7 +445,8 @@ def repackage(src_path: str, dst_path: str,
     # passthrough and emit the new entries after. Capture its bytes first.
     upgrade_graph = (split_graph
                      or chunk_graph_mb > 0
-                     or spatial_chunk_scale > 0)
+                     or spatial_chunk_scale > 0
+                     or unchunk_graph)
     captured_graph_bytes: bytes | None = None
 
     # Hot-chunk splitting: if a search-data/*.json exceeds the threshold,
@@ -454,6 +469,12 @@ def repackage(src_path: str, dst_path: str,
     swapped = 0
     raw_clusters = 0
     skipped_routing = 0
+    refreshed_terrain = 0
+    captured_graph_bytes = None
+    # Keyed by the source's chunk path ("routing-data/graph-chunk-0000.bin"
+    # etc). Reassembled into a single buffer below when the source
+    # shipped chunked but not monolithic.
+    captured_graph_chunks: dict | None = None
     with creator as c:
         # Passthrough all entries — Archive iterates titles + paths.
         for i in range(src.entry_count):
@@ -476,6 +497,28 @@ def repackage(src_path: str, dst_path: str,
             if swap_viewer and path in replacements:
                 content = replacements[path]
                 swapped += 1
+            # Optionally swap terrain tiles for the filesystem version.
+            # Used after ``cloud/fix_stale_terrain_tiles.py`` regenerates
+            # cached tiles — ``--refresh-terrain-tiles terrain_cache``
+            # lets the repackaged ZIM carry those fresh tiles without a
+            # full rebuild. Strict byte-replace: only entries that exist
+            # both in source and on disk are swapped; extras are ignored.
+            if refresh_terrain_dir and path.startswith("terrain/") and path.endswith(".webp"):
+                rel = path[len("terrain/"):]  # e.g. "5/20/12.webp"
+                disk = os.path.join(refresh_terrain_dir, rel)
+                try:
+                    disk_mtime = os.path.getmtime(disk)
+                    # Only swap if the filesystem copy is strictly newer
+                    # than the source ZIM itself — otherwise we churn
+                    # every terrain entry needlessly and inflate
+                    # repackage time for no gain.
+                    src_mtime = os.path.getmtime(src_path)
+                    if disk_mtime > src_mtime:
+                        with open(disk, "rb") as fh:
+                            content = fh.read()
+                        refreshed_terrain += 1
+                except (OSError, FileNotFoundError):
+                    pass
             # Capture + defer the routing graph when we're upgrading
             # layout — we'll emit split / chunked entries after the
             # passthrough pass so they land contiguously.
@@ -495,6 +538,17 @@ def repackage(src_path: str, dst_path: str,
                 or path.startswith("routing-data/graph-cell-")
                 or path == "routing-data/graph-cells-index.bin"
             ):
+                # Accumulate source chunks into captured_graph_bytes if
+                # the source is already chunked (no graph.bin entry).
+                # Without this, the later _emit_upgraded_graph path sees
+                # captured_graph_bytes=None and prints a warning — and
+                # we SHIP a ZIM with no routing. Caught by validator
+                # gate, but only after wasting a full repackage.
+                if path.startswith("routing-data/graph-chunk-") and not \
+                        path.startswith("routing-data/graph-chunk-manifest"):
+                    if captured_graph_chunks is None:
+                        captured_graph_chunks = {}
+                    captured_graph_chunks[path] = content
                 skipped_routing += 1
                 continue
             # Hot-chunk splitting: capture the search-data manifest and
@@ -526,10 +580,40 @@ def repackage(src_path: str, dst_path: str,
             if kept % 50_000 == 0:
                 print(f"    copied {kept} entries...")
 
+        # If source shipped chunked graph (no graph.bin), reassemble
+        # the chunks into a single buffer so the re-emit path below
+        # has something to work with. Source chunks are byte-ranges
+        # of the original graph, so concatenation is byte-exact.
+        if (upgrade_graph and captured_graph_bytes is None
+                and captured_graph_chunks):
+            parts = [captured_graph_chunks[k]
+                     for k in sorted(captured_graph_chunks)]
+            captured_graph_bytes = b"".join(parts)
+            print(f"  reassembled graph.bin from {len(parts)} source "
+                  f"chunks ({len(captured_graph_bytes)/1024/1024:.1f} MB)")
+
         # Re-emit the routing graph in the requested layout.
         if upgrade_graph and captured_graph_bytes is None:
             print("  warning: no routing-data/graph.bin in source — "
                   "nothing to upgrade. Output will have no routing.")
+        elif upgrade_graph and unchunk_graph and not split_graph \
+                and chunk_graph_mb == 0 and spatial_chunk_scale == 0:
+            # --unchunk-graph alone: emit monolithic graph.bin only.
+            # Useful to retrofit Kiwix-compat into a chunked-only ZIM
+            # whose graph size doesn't actually need chunking (<500MB).
+            size_mb = len(captured_graph_bytes) / (1024 * 1024)
+            compress = size_mb < 200
+            c.add_item(PassthroughItem(
+                "routing-data/graph.bin",
+                "Routing Graph",
+                "application/octet-stream",
+                captured_graph_bytes,
+                compress=compress,
+            ))
+            if not compress:
+                raw_clusters += 1
+            print(f"  emitted monolithic graph.bin ({size_mb:.1f} MB, "
+                  f"{'compressed' if compress else 'raw'})")
         elif upgrade_graph and spatial_chunk_scale > 0:
             _emit_spatial_graph(
                 c, captured_graph_bytes,
@@ -577,9 +661,45 @@ def repackage(src_path: str, dst_path: str,
             try: c.add_metadata("Illustration_48x48@1", illus)
             except Exception as e: print(f"  warning: illustration: {e}")
 
+        # Add viewer assets that existed in `replacements` but weren't
+        # present in the source ZIM. Several 2026-04-22 regional builds
+        # (east-coast-us, australia-nz, west-coast-us) shipped without
+        # `places.html`, so clicking "Find" in Kiwix showed "Unable to
+        # load the article requested." Adding-on-absence is the same
+        # intent as the swap — make the output carry the current viewer
+        # set — just generalised to new entries.
+        added_missing = 0
+        for name, data in replacements.items():
+            if name in replaced_search_paths:  # paranoia: never collide
+                continue
+            try:
+                src.get_entry_by_path(name)
+                continue  # Already swapped above
+            except Exception:
+                pass
+            mime = "text/html"
+            title = "Map" if name == "index.html" else "Find places"
+            is_front = (name == "index.html")
+            class NewViewerItem(Item):
+                def __init__(self, path, data, title, mime, is_front):
+                    super().__init__()
+                    self._p = path; self._d = data; self._t = title
+                    self._m = mime; self._front = is_front
+                def get_path(self): return self._p
+                def get_title(self): return self._t
+                def get_mimetype(self): return self._m
+                def get_contentprovider(self):
+                    return StringProvider(self._d)
+                def get_hints(self):
+                    return {Hint.FRONT_ARTICLE: self._front, Hint.COMPRESS: True}
+            c.add_item(NewViewerItem(name, data, title, mime, is_front))
+            added_missing += 1
+            print(f"  added missing {name} from viewer set ({len(data)} B)")
+
     size_mb = os.path.getsize(dst_path) / (1024 * 1024)
+    extra = f"; {refreshed_terrain} terrain tiles refreshed" if refreshed_terrain else ""
     print(f"\n  kept {kept} entries; {swapped} viewer swaps; "
-          f"{raw_clusters} raw cluster(s)")
+          f"{added_missing} added; {raw_clusters} raw cluster(s){extra}")
     print(f"  output: {dst_path} ({size_mb:.1f} MB)")
     return 0
 
@@ -618,6 +738,19 @@ def main() -> int:
                         "(e.g. Japan's 大 = 500 MB). Updates the manifest's "
                         "``sub_chunks`` section so clients know to fan out "
                         "queries to the right sub-file. Typical threshold: 50.")
+    p.add_argument("--refresh-terrain-tiles", metavar="DIR", default=None,
+                   help="Swap every terrain/z/x/y.webp entry whose "
+                        "filesystem counterpart in DIR is strictly newer "
+                        "than the source ZIM. Use after "
+                        "cloud/fix_stale_terrain_tiles.py regenerates "
+                        "cached tiles, to roll them into the ZIM without "
+                        "a full rebuild. Typical DIR: terrain_cache")
+    p.add_argument("--unchunk-graph", action="store_true",
+                   help="Reassemble a chunked routing-data/graph-chunk-*.bin "
+                        "into a single graph.bin. Use when graph total is "
+                        "under 500 MB (Kiwix iOS app can't parse chunked-"
+                        "only layout but handles monolithic fine). Under "
+                        "500 MB the chunk split is unnecessary anyway.")
     args = p.parse_args()
     return repackage(args.src, args.dst,
                      swap_viewer=not args.no_swap_viewer,
@@ -625,7 +758,9 @@ def main() -> int:
                      split_graph=args.split_graph,
                      chunk_graph_mb=args.chunk_graph_mb,
                      spatial_chunk_scale=args.spatial_chunk_scale,
-                     split_hot_search_chunks_mb=args.split_hot_search_chunks_mb)
+                     split_hot_search_chunks_mb=args.split_hot_search_chunks_mb,
+                     refresh_terrain_dir=args.refresh_terrain_tiles,
+                     unchunk_graph=args.unchunk_graph)
 
 
 if __name__ == "__main__":

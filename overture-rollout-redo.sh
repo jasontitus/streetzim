@@ -91,6 +91,21 @@ build_and_ship() {
     wait_for_parquet "$places_parquet"
 
     log "=== Building ${id} (${name}) bbox=${bbox} ==="
+
+    # STRUCTURAL PRE-BUILD GATE. Refuse to start the build if any
+    # required input/cache/viewer-asset/tile is missing, stale, or
+    # content-wrong. Prevents another "shipped broken ZIM, found
+    # the hole after the fact" cycle. --audit-content is expensive
+    # but catches the fresh-mtime-but-zero-fill case that burned us
+    # on Iran / Butte MT.
+    if ! python3 cloud/preflight.py --bbox="$bbox" --name "$id" \
+            --zooms 0-12 --workers 16 --audit-content \
+            > "${id}-preflight.log" 2>&1; then
+        log "PREFLIGHT FAILED ${id} — see ${id}-preflight.log; NOT building"
+        return 1
+    fi
+    log "preflight passed for ${id}"
+
     rm -f "$out"
     if ! python3 create_osm_zim.py \
           --mbtiles world-data/world-tiles-v2.mbtiles \
@@ -111,6 +126,17 @@ build_and_ship() {
         log "BUILD FAILED ${id} — no ZIM produced"
         return 1
     fi
+
+    # STRUCTURAL POST-BUILD GATE. Every ZIM must pass the full
+    # validator (tile coverage, search chunk sizes, routing entry
+    # sizes, places.html present, etc.) before it's uploaded.
+    # Exits nonzero on any FAIL — upload is skipped.
+    if ! python3 cloud/validate_zim.py "$out" \
+            > "${id}-validate.log" 2>&1; then
+        log "VALIDATOR FAILED ${id} — see ${id}-validate.log; NOT uploading"
+        return 1
+    fi
+    log "validator passed for ${id}"
     upload_and_deploy "$id" "$out"
 }
 

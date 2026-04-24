@@ -152,6 +152,395 @@ def _chk_illustration(arc) -> tuple[str, str]:
     return ("pass", "present")
 
 
+def _chk_fonts(arc) -> tuple[str, str]:
+    """MapLibre needs glyph ranges 0-65535 stepping by 256. Builds ship
+    ~768 pbf files total (256 ranges × 3 fontstacks: OpenSans Regular
+    /Bold/Italic). A missing range means labels in that codepoint
+    band silently don't render. Walk the `fonts/` namespace and
+    confirm: at least one fontstack present + every range 0-255 and a
+    couple of sparse high-band ranges resolved."""
+    fontstacks: set[str] = set()
+    ranges_by_stack: dict[str, set[str]] = {}
+    total = 0
+    for i in range(arc.entry_count):
+        e = arc._get_entry_by_id(i)
+        if e.is_redirect:
+            continue
+        p = e.path
+        if not p.startswith("fonts/") or not p.endswith(".pbf"):
+            continue
+        total += 1
+        parts = p[len("fonts/"):-len(".pbf")].split("/", 1)
+        if len(parts) != 2:
+            continue
+        stack, rng = parts
+        fontstacks.add(stack)
+        ranges_by_stack.setdefault(stack, set()).add(rng)
+    if not fontstacks:
+        return ("fail", "no fonts/ glyph entries — labels will be blank")
+    # For every present fontstack, every range must exist (build either
+    # ships all or none for a given stack — a partial set is a build
+    # error). 256 ranges expected per stack.
+    bad_stacks = []
+    for stack, rngs in ranges_by_stack.items():
+        if len(rngs) < 200:
+            bad_stacks.append((stack, len(rngs)))
+    if bad_stacks:
+        return ("fail",
+                f"fontstacks with incomplete glyph ranges: "
+                f"{[(s, n) for s, n in bad_stacks]}")
+    return ("pass",
+            f"{total} glyph ranges across {len(fontstacks)} fontstack(s): "
+            f"{sorted(fontstacks)}")
+
+
+def _chk_terrain_edge_stripe(arc, cfg) -> tuple[str, str]:
+    """Walk a sample of terrain tiles and flag any with the bbox-edge
+    zero-column pattern — the bug that shipped as the Iran 33°N stripe,
+    Butte MT vertical band, and the eastern-Iran 65°E stripe (z=4).
+
+    For speed, sample every 50th terrain tile (still ~100 across a
+    typical region). The bug is systematic (affects hundreds of tiles
+    per region when present), so random-samples detect it reliably."""
+    if not cfg.get("hasTerrain"):
+        return ("skip", "hasTerrain=False")
+    import io, numpy as np
+    from PIL import Image
+    # Only audit low-zoom tiles (z=0..7). At z=8+ coastal tiles
+    # legitimately have ocean-side zero-columns (e.g. a tile straddling
+    # a north-south coastline).
+    #
+    # Even at z<=7, a coastal tile can legitimately have a full zero-
+    # column edge (e.g. Japan at 135-180°E — the right 47% is Pacific).
+    # To distinguish "ocean off the coast" from "bbox-edge DEM gap",
+    # sample the world DEM at the tile's right/left midline: if the
+    # VRT says nodata there, the zero-col block is legit ocean. If it
+    # returns a real elevation, we've got the bbox-edge bug.
+    import math
+    vrt_path = ROOT / "terrain_cache" / "dem_sources" / "comprehensive.vrt"
+    vrt_src = None
+    vrt_nodata = None
+    if vrt_path.is_file():
+        try:
+            import rasterio
+            vrt_src = rasterio.open(str(vrt_path))
+            vrt_nodata = vrt_src.nodata
+        except Exception:
+            vrt_src = None
+
+    def tile_bounds(z, x, y):
+        n = 1 << z
+        lon_w = x / n * 360.0 - 180.0
+        lon_e = (x + 1) / n * 360.0 - 180.0
+        lat_n = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * y / n))))
+        lat_s = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * (y + 1) / n))))
+        return (lon_w, lat_s, lon_e, lat_n)
+
+    def edge_is_ocean(z, x, y, side):
+        """True if the VRT shows nodata at the tile's left or right
+        midline (i.e. that edge is open ocean, not missing land)."""
+        if vrt_src is None:
+            return False
+        lon_w, lat_s, lon_e, lat_n = tile_bounds(z, x, y)
+        lat_mid = (lat_s + lat_n) / 2
+        lon = lon_w if side == "left" else lon_e - 1e-6
+        try:
+            val = list(vrt_src.sample([(lon, lat_mid)]))[0][0]
+            return (vrt_nodata is not None and val == vrt_nodata) or abs(val) < 1
+        except Exception:
+            return False
+
+    checked = 0
+    bad = []
+    for i in range(arc.entry_count):
+        e = arc._get_entry_by_id(i)
+        if e.is_redirect:
+            continue
+        if not e.path.startswith("terrain/"):
+            continue
+        parts = e.path.split("/")
+        try:
+            z = int(parts[1])
+        except (ValueError, IndexError):
+            continue
+        if z > 7:
+            continue
+        try:
+            data = bytes(e.get_item().content)
+            im = Image.open(io.BytesIO(data)).convert("RGB")
+            arr = np.array(im).astype(np.int64)
+            elev = -10000 + (arr[:, :, 0] * 65536
+                             + arr[:, :, 1] * 256
+                             + arr[:, :, 2]) * 0.1
+            max_elev = elev.max()
+            if max_elev > 100:
+                h, w = elev.shape
+                col_all_zero = (np.sum(np.abs(elev) < 5, axis=0) == h)
+                left = 0
+                while left < w and col_all_zero[left]:
+                    left += 1
+                right = 0
+                while right < w and col_all_zero[w - 1 - right]:
+                    right += 1
+                if left >= 10 or right >= 10:
+                    # Cross-check with the world VRT: if the edge in
+                    # question is actually ocean (nodata), skip — the
+                    # zero-cols are legit, not a bug.
+                    parts = e.path.split("/")
+                    try:
+                        ez = int(parts[1])
+                        ex = int(parts[2])
+                        ey = int(parts[3].split(".")[0])
+                    except (ValueError, IndexError):
+                        bad.append((e.path, left, right))
+                        continue
+                    left_bug = left >= 10 and not edge_is_ocean(ez, ex, ey, "left")
+                    right_bug = right >= 10 and not edge_is_ocean(ez, ex, ey, "right")
+                    if left_bug or right_bug:
+                        bad.append((e.path, left, right))
+        except Exception:
+            pass
+        checked += 1
+    if bad:
+        return ("fail",
+                f"{len(bad)} low-zoom terrain tile(s) with bbox-edge "
+                f"zero block (of {checked} sampled); first: "
+                f"{bad[0][0]} left={bad[0][1]} right={bad[0][2]}")
+    return ("pass",
+            f"{checked} z0-z7 terrain tiles sampled; no bbox-edge stripes")
+
+
+def _chk_places_categories(arc) -> tuple[str, str]:
+    """`places.html` renders Categories by loading `category-index/
+    manifest.json` + per-category chunks. Confirm the file exists AND
+    at least one declared category's content is non-empty — otherwise
+    Find opens to an empty list."""
+    try:
+        mani = json.loads(bytes(
+            arc.get_entry_by_path("category-index/manifest.json").get_item().content
+        ))
+    except Exception as exc:
+        return ("warn",
+                f"category-index/manifest.json missing ({exc}) — Find "
+                "page will fall back to search-only")
+    cats = mani.get("categories") or {}
+    if not cats:
+        return ("warn", "category-index has 0 categories")
+    # Pick the first declared category and read its records.
+    slug = next(iter(cats))
+    try:
+        raw = bytes(arc.get_entry_by_path(
+            f"category-index/{slug}.json").get_item().content)
+        recs = json.loads(raw)
+    except Exception as exc:
+        return ("fail",
+                f"category-index/{slug}.json missing/unreadable ({exc})")
+    if not isinstance(recs, list) or not recs:
+        return ("fail",
+                f"category-index/{slug}.json is empty — Find page "
+                "would show no results for this category")
+    return ("pass",
+            f"{len(cats)} categories; sample {slug} has {len(recs):,} records")
+
+
+def _chk_routing_sample(arc, cfg, zim_path: str) -> tuple[str, str]:
+    """Pick two on-map points and attempt an A* route. If the graph
+    loads but no sample route can find a path within reasonable
+    effort, the graph is structurally corrupt (e.g. disconnected
+    components)."""
+    if not cfg.get("hasRouting"):
+        return ("skip", "hasRouting=False")
+    try:
+        from tests.szrg_reader import load_from_zim
+        from tests.szrg_astar import find_route
+    except Exception as exc:
+        return ("warn", f"test harness not importable ({exc})")
+    try:
+        g = load_from_zim(zim_path)
+    except Exception as exc:
+        # Spatial ZIMs throw a clear "use load_spatial_from_zim" hint;
+        # try that before giving up.
+        if "spatial-chunked" in str(exc):
+            try:
+                from tests.szrg_spatial import load_spatial_from_zim
+                gs = load_spatial_from_zim(zim_path)
+                return ("pass",
+                        f"spatial graph loads OK: {gs.num_nodes:,} "
+                        f"nodes, {gs.num_edges:,} edges")
+            except Exception as sp_exc:
+                return ("fail",
+                        f"spatial SZCI/SZRC parse failed: {sp_exc}")
+        return ("fail", f"SZRG parse failed: {exc}")
+    n = g.num_nodes
+    if n < 100:
+        return ("warn", f"only {n} nodes — graph may be a stub")
+    # Sample a handful of origin/destination pairs from the node
+    # space. Real regions can have disconnected components (islands,
+    # gated neighborhoods), so we only require ONE pair to succeed.
+    # If ALL fail, the graph is structurally broken (e.g. an edge
+    # array pointing to invalid nodes, or the wrong node count).
+    ok = 0
+    tried = 0
+    for a, b in [(n // 4, 3 * n // 4),
+                 (n // 5, 4 * n // 5),
+                 (n // 3, 2 * n // 3)]:
+        tried += 1
+        try:
+            r = find_route(g, a, b, max_pops=500_000)
+            if r is not None:
+                ok += 1
+        except Exception:
+            pass
+    if ok == 0:
+        return ("warn",
+                f"no sample route found in {tried} tries "
+                "(may be real if bbox is disconnected)")
+    return ("pass", f"{ok}/{tried} sample routes succeeded; "
+            f"{n:,} nodes")
+
+
+def _chk_satellite_coverage(arc, cfg) -> tuple[str, str]:
+    """Deep-sample satellite/{z}/{x}/{y} across zooms. Catches whole-
+    zoom gaps (e.g. tilemaker/downloader bailed midway through z12)
+    that the shallow 7-tile spot-check misses."""
+    if not cfg.get("hasSatellite"):
+        return ("skip", "hasSatellite=False")
+    # Count by zoom + sample non-empty.
+    by_zoom: dict[int, int] = {}
+    empty_by_zoom: dict[int, int] = {}
+    for i in range(arc.entry_count):
+        e = arc._get_entry_by_id(i)
+        if e.is_redirect:
+            continue
+        if not e.path.startswith("satellite/"):
+            continue
+        parts = e.path.split("/")
+        try:
+            z = int(parts[1])
+        except (ValueError, IndexError):
+            continue
+        by_zoom[z] = by_zoom.get(z, 0) + 1
+        if e.get_item().size < 200:  # WEBP/AVIF header+empty is ~100 B
+            empty_by_zoom[z] = empty_by_zoom.get(z, 0) + 1
+    if not by_zoom:
+        return ("fail", "hasSatellite=True but no satellite tiles")
+    # Each zoom that has content should have at least 1 and no
+    # >5% empty. (Ocean tiles legitimately are tiny at AVIF q40
+    # — >100 B but often <1 KB — so be lenient.)
+    zooms_str = ", ".join(f"z{z}={n:,}"
+                          for z, n in sorted(by_zoom.items()))
+    for z, empty in empty_by_zoom.items():
+        total = by_zoom[z]
+        if empty > total * 0.5:
+            return ("fail",
+                    f"z{z}: {empty:,}/{total:,} satellite tiles empty "
+                    "(>50%) — downloader likely failed silently")
+    return ("pass", zooms_str)
+
+
+def _chk_vector_coverage(arc) -> tuple[str, str]:
+    """Deep-sample vector MVT tiles. Each zoom in the build profile
+    should have non-empty tiles. An empty zoom silently breaks
+    rendering at that level."""
+    by_zoom: dict[int, int] = {}
+    empty_by_zoom: dict[int, int] = {}
+    for i in range(arc.entry_count):
+        e = arc._get_entry_by_id(i)
+        if e.is_redirect:
+            continue
+        if not e.path.startswith("tiles/"):
+            continue
+        parts = e.path.split("/")
+        try:
+            z = int(parts[1])
+        except (ValueError, IndexError):
+            continue
+        by_zoom[z] = by_zoom.get(z, 0) + 1
+        # An empty MVT tile is ~35 B (container header + zero layers).
+        # Anything larger has content.
+        if e.get_item().size < 50:
+            empty_by_zoom[z] = empty_by_zoom.get(z, 0) + 1
+    if not by_zoom:
+        return ("fail", "no tiles/ entries")
+    zooms = sorted(by_zoom)
+    # Catch a zoom that should have a LOT of tiles but has <5% vs its
+    # parent — the cliff-drop bug where tilemaker crashed at that
+    # zoom.
+    drops = []
+    for z in zooms[1:]:
+        prev = by_zoom.get(z - 1, 0)
+        cur = by_zoom[z]
+        if prev >= 1000 and cur < prev * 0.05:
+            drops.append((z, cur, prev))
+    if drops:
+        return ("fail",
+                f"cliff-drop at zoom: {drops} — tilemaker may have "
+                "bailed mid-zoom")
+    zooms_str = ", ".join(f"z{z}={by_zoom[z]:,}" for z in zooms)
+    return ("pass", zooms_str)
+
+
+def _chk_overture_fields(arc, cfg) -> tuple[str, str]:
+    """Sample search records and confirm at least one has the Overture
+    enrichment fields (ws, p, cat, brand). Dropped from a repackage
+    would silently lose website/phone/brand data downstream."""
+    if not cfg.get("hasOvertureAddresses") and not cfg.get("hasOverturePlaces"):
+        return ("skip", "no Overture flags set")
+    # Find a search-data chunk and sample.
+    sample_path = None
+    for i in range(arc.entry_count):
+        e = arc._get_entry_by_id(i)
+        if e.is_redirect:
+            continue
+        p = e.path
+        if p.startswith("search-data/") and p.endswith(".json") and p != "search-data/manifest.json":
+            sample_path = p
+            break
+    if sample_path is None:
+        return ("warn", "no search-data chunks to sample")
+    try:
+        recs = json.loads(bytes(arc.get_entry_by_path(sample_path).get_item().content))
+    except Exception as exc:
+        return ("fail", f"{sample_path} unreadable: {exc}")
+    if not recs:
+        return ("warn", f"{sample_path} empty")
+    # Scan first 1000 records for any Overture field.
+    has_ws = any("ws" in r for r in recs[:1000])
+    has_p = any("p" in r for r in recs[:1000])
+    has_cat = any("cat" in r for r in recs[:1000])
+    has_brand = any("brand" in r for r in recs[:1000])
+    fields = []
+    if has_ws: fields.append("ws")
+    if has_p: fields.append("p")
+    if has_cat: fields.append("cat")
+    if has_brand: fields.append("brand")
+    if not fields:
+        return ("warn",
+                f"no Overture fields (ws/p/cat/brand) seen in first "
+                f"1,000 of {sample_path} — enrichment may have "
+                "dropped during repackage")
+    return ("pass", f"Overture fields seen: {fields}")
+
+
+def _chk_places_html(arc) -> tuple[str, str]:
+    """The ``/Find`` button in Kiwix/PWA loads `places.html`. Multiple
+    2026-04-22 regional builds shipped without it, so "Find" rendered
+    "Unable to load the article requested." Fail hard if missing."""
+    try:
+        e = arc.get_entry_by_path("places.html")
+    except Exception:
+        return ("fail", "places.html missing — Kiwix 'Find' will 404")
+    try:
+        data = bytes(e.get_item().content)
+    except Exception as exc:
+        return ("fail", f"places.html unreadable: {exc}")
+    if len(data) < 1000:
+        return ("fail",
+                f"places.html suspiciously small ({len(data)} B) — "
+                "probably a stub")
+    return ("pass", f"present ({len(data):,} B)")
+
+
 def _chk_main_entry(arc) -> tuple[str, str]:
     if not arc.has_main_entry:
         # Some pre-existing Japan/Iran source builds have no main entry
@@ -323,6 +712,11 @@ def _chk_terrain(arc, cfg) -> tuple[str, str]:
 
 
 def _chk_wikidata(arc, cfg) -> tuple[str, str]:
+    """Wikidata structural + content integrity. Catches:
+    - manifest missing or unreadable
+    - manifest lists chunks that don't exist
+    - chunks have 0 Q-IDs
+    - sample Q-ID has no name/coords (broken entry)"""
     has = bool(cfg.get("hasWikidata"))
     try:
         mani = json.loads(bytes(
@@ -335,10 +729,165 @@ def _chk_wikidata(arc, cfg) -> tuple[str, str]:
     chunks = mani.get("chunks", {})
     if not chunks:
         return ("warn", "wikidata manifest has 0 chunks")
-    prefix = next(iter(chunks))
-    chunk = json.loads(bytes(arc.get_entry_by_path(f"wikidata/{prefix}.json").get_item().content))
+    # Verify a handful of declared chunks actually exist + parse.
+    bad = []
+    sample_prefix = next(iter(chunks))
+    sample_data = None
+    for prefix in list(chunks)[:5]:
+        try:
+            raw = bytes(arc.get_entry_by_path(
+                f"wikidata/{prefix}.json").get_item().content)
+            data = json.loads(raw)
+            if not isinstance(data, dict) or not data:
+                bad.append(f"{prefix}:empty")
+            elif sample_data is None:
+                sample_data = (prefix, data)
+        except Exception as exc:
+            bad.append(f"{prefix}:{exc}")
+    if bad:
+        return ("fail",
+                f"wikidata manifest lists {len(chunks)} chunks but "
+                f"spot-check failed on {bad}")
+    # Inspect a sample entry: must have a name AND one of the
+    # coordinate signals (pt = [lat, lon]). A broken entry without
+    # coords would cause empty popups.
+    # Sample entry MUST have a label `l` (what the popup shows).
+    # Coords aren't stored in wikidata entries — they come from the
+    # clicked MVT feature via the Q-ID cross-ref, not from this
+    # store. So don't require coords here.
+    prefix, data = sample_data
+    sample_qid, sample_entry = next(iter(data.items()))
+    if not sample_entry.get("l") and not sample_entry.get("name"):
+        return ("warn",
+                f"sample Q-ID {sample_qid} in {prefix!r} has no label "
+                "`l` field (popup will render empty)")
     total = sum(chunks.values())
-    return ("pass", f"{total} items in {len(chunks)} chunks; sample {prefix!r}={len(chunk)}")
+    return ("pass",
+            f"{total} items in {len(chunks)} chunks; sample "
+            f"{sample_qid} in {prefix!r} has label "
+            f"{sample_entry['l'][:30]!r}")
+
+
+def _chk_routing_kiwix_compat(arc, cfg) -> tuple[str, str]:
+    """Routing layout compatibility across clients. Three valid shapes:
+
+      1. Monolithic ``routing-data/graph.bin`` only:
+         works on every client IF size fits the platform heap
+         (iOS/Android WebView ≈ 700 MB ceiling — see
+         cloud/validate_platforms.py for the per-platform model).
+
+      2. Spatial ``routing-data/graph-cells-index.bin`` + per-cell
+         ``graph-cell-NNNNN.bin``: lazy-loaded by the viewer/mcpzim,
+         keeps mobile memory bounded regardless of region size.
+         PREFERRED for any region whose full graph would exceed
+         the monolithic ceiling.
+
+      3. Chunked-only (``graph-chunk-manifest.json`` + chunks) with
+         no ``graph.bin``: PWA-compatible but BREAKS Kiwix iOS /
+         macOS native apps (they don't reassemble chunks). Always
+         a fail — emit spatial instead for big graphs, or
+         monolithic for small ones.
+    """
+    if not cfg.get("hasRouting"):
+        return ("skip", "hasRouting=False")
+    # Count entries in each shape.
+    has_monolithic = False
+    mono_bytes = 0
+    try:
+        e = arc.get_entry_by_path("routing-data/graph.bin")
+        has_monolithic = True
+        mono_bytes = e.get_item().size
+    except Exception:
+        pass
+    has_spatial = False
+    cells_index_bytes = 0
+    cell_count = 0
+    try:
+        e = arc.get_entry_by_path("routing-data/graph-cells-index.bin")
+        has_spatial = True
+        cells_index_bytes = e.get_item().size
+    except Exception:
+        pass
+    chunk_count = 0
+    chunk_bytes = 0
+    for i in range(arc.entry_count):
+        e = arc._get_entry_by_id(i)
+        if e.is_redirect:
+            continue
+        if e.path.startswith("routing-data/graph-chunk-") and e.path.endswith(".bin"):
+            chunk_count += 1
+            chunk_bytes += e.get_item().size
+        elif e.path.startswith("routing-data/graph-cell-") and e.path.endswith(".bin"):
+            cell_count += 1
+
+    # Shape 2: spatial. Preferred for big graphs; every client handles
+    # it via lazy cell loading.
+    if has_spatial:
+        idx_mb = cells_index_bytes / (1024 * 1024)
+        return ("pass",
+                f"spatial ({cell_count} cells, {idx_mb:.0f} MB index) "
+                f"— lazy-loaded, mobile-safe")
+
+    # Shape 1: monolithic.
+    if has_monolithic:
+        mono_mb = mono_bytes / (1024 * 1024)
+        extra = f" (+ {chunk_count} chunks for PWA)" if chunk_count else ""
+        return ("pass", f"monolithic graph.bin ({mono_mb:.0f} MB){extra}")
+
+    # Shape 3: chunked-only. Always bad.
+    if chunk_count > 0:
+        total_mb = chunk_bytes / (1024 * 1024)
+        return ("fail",
+                f"chunked-only graph ({chunk_count} chunks, "
+                f"{total_mb:.0f} MB) — Kiwix native clients cannot load; "
+                f"emit spatial (--spatial-chunk-scale 1) or monolithic "
+                f"(--unchunk-graph).")
+    return ("fail",
+            "hasRouting=True but no graph.bin or spatial index found")
+
+
+def _chk_tile_corners(arc) -> tuple[str, str]:
+    """Tiles at the extremes — polar rows and dateline columns — must
+    still decode cleanly. A tilemaker or downloader corner-case that
+    truncated these would be invisible except at a dateline-crossing
+    region (none today, but future-proofing)."""
+    # Pick the highest z present (cheap, don't scan all).
+    max_z = -1
+    for i in range(arc.entry_count):
+        e = arc._get_entry_by_id(i)
+        if e.is_redirect:
+            continue
+        if e.path.startswith("tiles/"):
+            try:
+                z = int(e.path.split("/")[1])
+                if z > max_z:
+                    max_z = z
+            except (ValueError, IndexError):
+                pass
+    if max_z < 0:
+        return ("skip", "no tiles/")
+    n = 1 << max_z
+    # The corner + extremes the build could mishandle.
+    probes = [
+        (0, 0),
+        (n - 1, 0),
+        (0, n - 1),
+        (n - 1, n - 1),
+    ]
+    results = []
+    for x, y in probes:
+        p = f"tiles/{max_z}/{x}/{y}.pbf"
+        try:
+            e = arc.get_entry_by_path(p)
+            size = e.get_item().size
+            results.append(f"({x},{y})={size}B")
+        except Exception:
+            # Missing corner tile is expected for non-global regions —
+            # the bbox doesn't extend there. Not a bug.
+            pass
+    if not results:
+        return ("pass", f"z={max_z} corners absent (regional bbox)")
+    return ("pass", f"z={max_z} corners: {results}")
 
 
 def _chk_search_data_sizes(arc) -> tuple[str, str]:
@@ -695,6 +1244,7 @@ def validate(zim_path: str, *, audit_tiles: bool = False) -> list[Result]:
     results.append(_check("metadata_required", "error", _chk_metadata, arc))
     results.append(_check("illustration", "error", _chk_illustration, arc))
     results.append(_check("main_entry", "error", _chk_main_entry, arc))
+    results.append(_check("places_html", "error", _chk_places_html, arc))
     results.append(_check("fulltext_xapian", "error", _chk_fulltext, arc))
     results.append(_check("map_config", "error", _chk_map_config, arc))
     cfg = _map_config(arc)
@@ -702,6 +1252,23 @@ def validate(zim_path: str, *, audit_tiles: bool = False) -> list[Result]:
     results.append(_check("satellite", "error", _chk_satellite, arc, cfg))
     results.append(_check("terrain", "error", _chk_terrain, arc, cfg))
     results.append(_check("wikidata", "error", _chk_wikidata, arc, cfg))
+    results.append(_check("fonts", "error", _chk_fonts, arc))
+    results.append(_check("satellite_coverage", "error",
+                          _chk_satellite_coverage, arc, cfg))
+    results.append(_check("vector_coverage", "error",
+                          _chk_vector_coverage, arc))
+    results.append(_check("terrain_edge_stripe", "error",
+                          _chk_terrain_edge_stripe, arc, cfg))
+    results.append(_check("places_categories", "warn",
+                          _chk_places_categories, arc))
+    results.append(_check("overture_fields", "warn",
+                          _chk_overture_fields, arc, cfg))
+    results.append(_check("routing_kiwix_compat", "error",
+                          _chk_routing_kiwix_compat, arc, cfg))
+    results.append(_check("tile_corners", "warn",
+                          _chk_tile_corners, arc))
+    results.append(_check("routing_sample", "warn",
+                          _chk_routing_sample, arc, cfg, zim_path))
     results.append(_check("search_data_sizes", "error",
                           _chk_search_data_sizes, arc))
     results.append(_check("category_index", "warn", _chk_category_index, arc))

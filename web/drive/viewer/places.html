@@ -258,9 +258,30 @@ const els = {
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.near-wrap')) hideNearResults();
   });
-  // Restore filter from URL (#cat=museums or #q=foo).
+  // Restore filter from URL (#cat=museums or #q=foo). Also accepts
+  // ``#lat=..&lon=..`` from the main viewer's Find link to default
+  // "Search near" to the map's current view center instead of GPS.
   const hash = parseHash(location.hash);
   if (hash.q) { els.q.value = hash.q; }
+  if (hash.lat && hash.lon) {
+    // Viewport-centered origin — kick off reverse-geocode in the
+    // background so the "Search near" label reads the nearest city
+    // name, but don't block chip/query rendering on it.
+    const lat = parseFloat(hash.lat);
+    const lon = parseFloat(hash.lon);
+    if (isFinite(lat) && isFinite(lon)) {
+      state.origin = { lat, lon };
+      state.originMode = 'viewport';
+      state.originLabel = `Near (${lat.toFixed(3)}, ${lon.toFixed(3)})`;
+      els.near.value = state.originLabel;
+      reverseGeocodeFromViewport(lat, lon).then(name => {
+        if (name && state.originMode === 'viewport') {
+          state.originLabel = name;
+          els.near.value = name;
+        }
+      }).catch(() => {});  // fallback stays as coord label
+    }
+  }
   if (hash.cat) {
     const def = CATEGORIES.find(c => c.id === hash.cat);
     if (def) selectChip(def);
@@ -270,6 +291,39 @@ const els = {
     setStatus('Type to search, or pick a category above.');
   }
 })();
+
+// ---------- reverse geocoder (viewport-center → nearest city) ----------
+
+// Find the closest place:city|town|village record within ~50 km of
+// (lat, lon) by scanning the category-index places chunk. We use the
+// category-index (not search-data) because it's keyed by OSM `type`
+// and already indexes places separately, so the fetch is small +
+// one-time. Falls back to a larger radius if nothing nearby.
+async function reverseGeocodeFromViewport(lat, lon) {
+  try {
+    const raw = await fetchJSON(CAT + 'places.json').catch(() => null);
+    if (!raw || !Array.isArray(raw)) return null;
+    const kinds = { city: 4, town: 3, village: 2, hamlet: 1, suburb: 1 };
+    let bestName = null, bestScore = -Infinity;
+    for (const r of raw) {
+      const rlat = r.a, rlon = r.o;
+      if (typeof rlat !== 'number' || typeof rlon !== 'number') continue;
+      const d = haversine(lat, lon, rlat, rlon);
+      if (d > 50000) continue;  // cap at 50 km
+      const k = kinds[r.s] || kinds[r.t] || 0;
+      if (!k) continue;
+      // Score: prefer larger place types, break ties by proximity.
+      const score = k * 1e6 - d;
+      if (score > bestScore) {
+        bestScore = score;
+        bestName = r.n || null;
+      }
+    }
+    return bestName;
+  } catch (e) {
+    return null;
+  }
+}
 
 // ---------- chips ----------
 
@@ -563,6 +617,9 @@ function requestGPS() {
 // for it; return true so the caller waits (requestGPS's success
 // handler fires rerunQuery). Returns false when caller can proceed.
 function maybeFetchOriginFirst() {
+  // Viewport origin (from hash) and custom origin (user picked a
+  // named place) both skip GPS — they already have a point.
+  if (state.originMode === 'viewport' && state.origin) return false;
   if (state.originMode === 'custom' && state.origin) return false;
   if (state.originMode === 'none') return false;
   if (!state.origin) { requestGPS(); return true; }

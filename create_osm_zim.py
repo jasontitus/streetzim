@@ -515,12 +515,20 @@ def _generate_one_terrain_tile(args):
     img.save(tile_path, "WEBP", lossless=True)
 
 
-def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
+def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
+                           low_zoom_world_vrt=None):
     """Download Copernicus GLO-30 DEM and generate terrain-RGB tiles.
 
     Downloads 1-degree GeoTIFF tiles from AWS, mosaics them, then generates
     Mapbox terrain-RGB tiles as lossless WebP using rasterio + mercantile.
     Tiles are stored as {dest_dir}/{z}/{x}/{y}.webp.
+
+    ``low_zoom_world_vrt`` (optional): if provided, z=0-7 tiles are
+    generated from that DEM instead of the region-bbox mosaic. Prevents
+    the bbox-edge stripe bug at low zooms where a tile's footprint
+    extends past the region and zero-fills outside. z=8+ still use the
+    regional mosaic (fine-grained detail, no stripe risk since each
+    tile is small).
     """
     import math
     import io
@@ -697,15 +705,25 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12):
     num_workers = min(os.cpu_count() or 4, 16)  # cap at 16 to limit I/O contention
 
     for z in range(0, max_zoom + 1):
+        # For z=0-7, prefer the world-coverage VRT if supplied — those
+        # tiles span regions past the bbox, so a regional mosaic would
+        # zero-fill outside and produce the bbox-edge stripe bug
+        # (Iran 33°N, Butte MT, east-Iran 65°E). z=8+ stays on the
+        # regional mosaic (small tiles, full DEM resolution, no stripe).
+        vrt_for_z = (low_zoom_world_vrt
+                     if (z <= 7 and low_zoom_world_vrt
+                         and os.path.isfile(low_zoom_world_vrt))
+                     else mosaic_path)
+
         # Streaming generator — yields args one at a time, skipping cached tiles
-        def tile_arg_gen(zoom):
+        def tile_arg_gen(zoom, _vrt=vrt_for_z):
             for tile in mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=zoom):
                 # Skip already-cached tiles
                 tile_path = os.path.join(dest_dir, str(zoom), str(tile.x), f"{tile.y}.webp")
                 if os.path.isfile(tile_path):
                     continue
                 b = mercantile.bounds(tile)
-                yield (mosaic_path, tile.x, tile.y, zoom, dest_dir,
+                yield (_vrt, tile.x, tile.y, zoom, dest_dir,
                        b.west, b.south, b.east, b.north)
 
         # Count total and cached for this zoom (estimate for large zooms)
@@ -3149,6 +3167,46 @@ def download_maplibre(dest_dir):
     return js_path, css_path
 
 
+def _sub_bucket_for_name(name: str, n_buckets: int) -> int:
+    """FNV-1a 32-bit hash of the UTF-8 bytes of `name`, mod n_buckets.
+
+    Used when ``--split-hot-search-chunks-mb`` fans out an oversized
+    prefix chunk into ``{prefix}-{hex}`` sub-files. MUST match:
+      * ``cloud/repackage_zim._sub_bucket_for_name``
+      * viewer ``subBucketFor`` in resources/viewer/index.html
+      * Swift ``Geocoder.subBucketFor`` in mcpzim/MCPZimKit
+    Any disagreement silently drops records from query results.
+    """
+    h = 0x811C9DC5  # FNV offset basis (32-bit)
+    for b in name.encode("utf-8"):
+        h ^= b
+        h = (h * 0x01000193) & 0xFFFFFFFF
+    return h % n_buckets
+
+
+def _split_big_search_chunk(prefix: str, records: list, n_buckets: int = 16
+                            ) -> list[tuple[str, bytes]]:
+    """Fan out `records` into up to `n_buckets` sub-chunks based on
+    FNV-1a hash of record['n']. Returns [(sub_prefix, json_bytes), …]
+    — same on-disk format the repackage writer + JS/Swift readers
+    expect. Empty buckets are omitted (not emitted)."""
+    import json as _json
+    buckets: list[list] = [[] for _ in range(n_buckets)]
+    for rec in records:
+        name = rec.get("n", "") or ""
+        buckets[_sub_bucket_for_name(name, n_buckets)].append(rec)
+    hex_width = len(format(n_buckets - 1, "x"))
+    out = []
+    for i, bucket in enumerate(buckets):
+        if not bucket:
+            continue
+        sub_prefix = f"{prefix}-{format(i, f'0{hex_width}x')}"
+        sub_bytes = _json.dumps(bucket, separators=(",", ":"),
+                                ensure_ascii=False).encode("utf-8")
+        out.append((sub_prefix, sub_bytes))
+    return out
+
+
 def create_zim(
     output_path,
     tiles,
@@ -3180,6 +3238,7 @@ def create_zim(
     address_count=0,
     overture_sources=None,
     overture_themes=None,
+    split_hot_search_chunks_mb=0,
 ):
     """Create a ZIM file containing the map viewer and all tiles."""
     from libzim.writer import Creator, Item, StringProvider, FileProvider
@@ -3624,8 +3683,23 @@ def create_zim(
                 # so libzim puts each in its own cluster. fzstd's ~500 MB
                 # ceiling is the actual blocker for Japan-size ZIMs; this
                 # side-steps it without touching the SZRG format.
-                print(f"    Adding routing graph chunked "
-                      f"({size_mb:.1f} MB → {routing_graph_chunk_mb} MB chunks)...")
+                # Always emit the monolithic graph.bin — Kiwix iOS
+                # (and Desktop, and mcpzim) read it natively via
+                # libzim's cluster decompression, independent of the
+                # PWA fzstd path. Skipping this broke iOS on Iran
+                # 2026-04-24. The chunks below are for PWA fzstd
+                # only; both coexist cheaply.
+                compress_graph = size_mb < 200
+                creator.add_item(MapItem(
+                    "routing-data/graph.bin",
+                    "Routing Graph",
+                    "application/octet-stream",
+                    routing_graph_path,
+                    compress=compress_graph,
+                ))
+                print(f"    Adding routing graph ({size_mb:.1f} MB, "
+                      f"{'compressed' if compress_graph else 'raw'}) "
+                      f"+ {routing_graph_chunk_mb} MB chunks for PWA...")
                 # NOTE: out_prefix is what the manifest records. The
                 # reader joins it with the manifest's *directory* inside
                 # the ZIM, so keep this in lock-step with the ZIM entry
@@ -3645,8 +3719,6 @@ def create_zim(
                 ))
                 for i, cp in enumerate(chunk_paths):
                     cp_mb = os.path.getsize(cp) / (1024 * 1024)
-                    # Each chunk gets the same PWA-compat compress rule so
-                    # fzstd can process them (per-cluster, not per-file).
                     compress_chunk = cp_mb < 200
                     creator.add_item(MapItem(
                         f"routing-data/graph-chunk-{i:04d}.bin",
@@ -3655,7 +3727,8 @@ def create_zim(
                         cp,
                         compress=compress_chunk,
                     ))
-                print(f"    Wrote {len(chunk_paths)} graph chunks + manifest")
+                print(f"    Wrote monolithic graph.bin + "
+                      f"{len(chunk_paths)} chunks + manifest")
             else:
                 # Cap where compression helps more than it hurts: below
                 # ~200 MB fzstd handles it fine in one shot, so keep it
@@ -3912,15 +3985,23 @@ def create_zim(
 
             print(f"\r    Bucketed {total_features} features into {len(chunk_counts)} chunks, {xapian_count} xapian entries", flush=True)
 
-            # Add chunk manifest
-            manifest = {k: chunk_counts[k] for k in sorted(chunk_counts)}
-            creator.add_item(MapItem(
-                "search-data/manifest.json", "Search Manifest", "application/json",
-                json.dumps({"total": total_features, "chunks": manifest},
-                           separators=(",", ":")).encode("utf-8"),
-            ))
+            # Pass 2: read each chunk file, serialize, and emit. When
+            # `split_hot_search_chunks_mb` > 0, fan out any chunk whose
+            # JSON exceeds that threshold into 16 FNV-1a sub-buckets
+            # (`{prefix}-{0..f}.json`). The manifest then records the
+            # fan-out in ``sub_chunks`` so clients (viewer, Swift) know
+            # which queries to spread across sub-files.
+            #
+            # Accumulate manifest mutations during the emission loop
+            # (instead of writing the manifest up-front) so split vs
+            # passthrough decisions are reflected in the final manifest.
+            hot_split_bytes = (split_hot_search_chunks_mb * 1024 * 1024
+                               if split_hot_search_chunks_mb > 0 else None)
+            hot_split_N = 16
+            manifest_chunks: dict[str, int] = {}
+            manifest_sub_chunks: dict[str, list[str]] = {}
+            split_total = 0
 
-            # Pass 2: read each chunk file, serialize to JSON, add to ZIM, delete file
             chunks_added = 0
             for prefix in sorted(chunk_counts):
                 chunk_path = os.path.join(chunk_tmp, f"{prefix}.jsonl")
@@ -3930,18 +4011,82 @@ def create_zim(
                         entries.append(json.loads(cline))
                 os.unlink(chunk_path)
 
-                chunk_json = json.dumps(entries, separators=(",", ":"))
-                creator.add_item(MapItem(
-                    f"search-data/{prefix}.json",
-                    f"Search chunk {prefix}",
-                    "application/json",
-                    chunk_json.encode("utf-8"),
-                ))
+                chunk_bytes = json.dumps(entries, separators=(",", ":"),
+                                         ensure_ascii=False).encode("utf-8")
+                if hot_split_bytes and len(chunk_bytes) > hot_split_bytes:
+                    # Oversized — fan out. Also handle multi-level
+                    # recursion: if a sub-bucket is STILL too big after
+                    # the first split (high-cardinality hotspots like
+                    # Texas "st" splitting into "st-b" at 37 MB), split
+                    # that sub-bucket too. Max depth 2 in practice.
+                    sub_chunks = _split_big_search_chunk(prefix, entries, hot_split_N)
+                    sub_prefix_list = []
+                    for sub_prefix, sub_bytes in sub_chunks:
+                        if len(sub_bytes) > hot_split_bytes:
+                            # Recursive split.
+                            sub_records = json.loads(sub_bytes.decode("utf-8"))
+                            sub2 = _split_big_search_chunk(sub_prefix, sub_records, hot_split_N)
+                            sub2_prefixes = []
+                            for sp2, sb2 in sub2:
+                                creator.add_item(MapItem(
+                                    f"search-data/{sp2}.json",
+                                    f"Search chunk {sp2}",
+                                    "application/json",
+                                    sb2,
+                                ))
+                                recs2 = json.loads(sb2.decode("utf-8"))
+                                manifest_chunks[sp2] = len(recs2)
+                                sub2_prefixes.append(sp2)
+                                split_total += 1
+                            manifest_sub_chunks[sub_prefix] = sub2_prefixes
+                            # The parent sub_prefix itself is NOT an
+                            # entry — only its sub-sub-chunks are.
+                        else:
+                            creator.add_item(MapItem(
+                                f"search-data/{sub_prefix}.json",
+                                f"Search chunk {sub_prefix}",
+                                "application/json",
+                                sub_bytes,
+                            ))
+                            recs = json.loads(sub_bytes.decode("utf-8"))
+                            manifest_chunks[sub_prefix] = len(recs)
+                            sub_prefix_list.append(sub_prefix)
+                            split_total += 1
+                    manifest_sub_chunks[prefix] = sub_prefix_list
+                else:
+                    creator.add_item(MapItem(
+                        f"search-data/{prefix}.json",
+                        f"Search chunk {prefix}",
+                        "application/json",
+                        chunk_bytes,
+                    ))
+                    manifest_chunks[prefix] = len(entries)
                 chunks_added += 1
                 if chunks_added % 100 == 0:
                     print(f"\r    Added {chunks_added}/{len(chunk_counts)} search chunks...", end="", flush=True)
 
-            print(f"\r    Added {len(chunk_counts)} search chunks ({total_features} features)          ", flush=True)
+            # Emit the manifest AFTER the emission loop so it reflects
+            # every split decision.
+            manifest_dict: dict = {"total": total_features,
+                                   "chunks": manifest_chunks}
+            if manifest_sub_chunks:
+                manifest_dict["sub_chunks"] = manifest_sub_chunks
+            creator.add_item(MapItem(
+                "search-data/manifest.json", "Search Manifest",
+                "application/json",
+                json.dumps(manifest_dict, separators=(",", ":")).encode("utf-8"),
+            ))
+
+            if hot_split_bytes:
+                print(f"\r    Added {chunks_added} chunks; "
+                      f"{len(manifest_sub_chunks)} hot prefix(es) split → "
+                      f"{split_total} sub-chunks "
+                      f"({total_features} features)          ",
+                      flush=True)
+            else:
+                print(f"\r    Added {chunks_added} search chunks "
+                      f"({total_features} features)          ",
+                      flush=True)
 
             # Pass 2b: category-index files (optional, mirrors search-data
             # chunks but keyed by OSM top-level `type`). Lets consumers answer
@@ -4403,6 +4548,28 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "> 500 MB — the PWA's fzstd port chokes there. "
                              "Default 0 = no chunking. 200 is a safe starting "
                              "value; it keeps each cluster well under the limit.")
+    parser.add_argument("--split-hot-search-chunks-mb", type=int, default=0,
+                        metavar="N",
+                        help="Fan out any search-data chunk whose JSON "
+                             "exceeds N MB into 16 FNV-1a-hashed sub-"
+                             "buckets (`{prefix}-{0..f}.json`). The "
+                             "manifest gains `sub_chunks` so clients "
+                             "know to spread queries across sub-files. "
+                             "Essential for region-heavy prefixes like "
+                             "Japan's u5927 (大) at 514 MB; 10 is the "
+                             "target to keep each chunk fetch fast on "
+                             "iOS Safari. Default 0 = off.")
+    parser.add_argument("--low-zoom-world-vrt", metavar="PATH", default=None,
+                        help="Use a world-coverage DEM VRT (e.g. "
+                             "terrain_cache/dem_sources/world_dem_32k.tif) "
+                             "for z=0-7 terrain tiles instead of the "
+                             "region-bbox VRT. Prevents the bbox-edge "
+                             "stripe bug where z=0-7 tiles that extend "
+                             "past the bbox get zero-fill outside the "
+                             "region. z=8+ still use the regional VRT "
+                             "(fine-grained, no stripe risk). Default "
+                             "None = regional VRT everywhere (matches "
+                             "pre-2026-04-24 behavior).")
     parser.add_argument("--overture-addresses", metavar="PARQUET",
                         help="Merge Overture Maps address records from a parquet extract. "
                              "Use download_overture_data.py to produce the parquet first. "
@@ -4702,7 +4869,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                     sat_format=satellite_format, sat_quality=satellite_quality,
                     tile_size=satellite_tile_size)
                 terrain_future = step_pool.submit(
-                    generate_terrain_tiles, bbox_str, terrain_dir, terrain_max_zoom)
+                    generate_terrain_tiles, bbox_str, terrain_dir, terrain_max_zoom,
+                    low_zoom_world_vrt=getattr(args, "low_zoom_world_vrt", None))
                 # Wait for both — exceptions will be raised on .result()
                 terrain_future.result()
                 print("    Terrain generation complete (satellite download continuing...)")
@@ -4726,7 +4894,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 if not bbox_str:
                     print("    Warning: no bbox specified, skipping terrain tiles")
                 else:
-                    generate_terrain_tiles(bbox_str, terrain_dir, max_zoom=terrain_max_zoom)
+                    generate_terrain_tiles(bbox_str, terrain_dir,
+                        max_zoom=terrain_max_zoom,
+                        low_zoom_world_vrt=getattr(args, "low_zoom_world_vrt", None))
 
         # Verify terrain completeness — regen missing tiles AND fix boundary
         # seam tiles before packaging. Boundary tiles (straddling 1-degree DEM
@@ -4976,6 +5146,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             routing_graph_path=routing_graph_path,
             routing_graph_geoms_path=routing_graph_geoms_path,
             routing_graph_chunk_mb=int(getattr(args, 'chunk_graph_mb', 0) or 0),
+            split_hot_search_chunks_mb=int(getattr(args, 'split_hot_search_chunks_mb', 0) or 0),
             wiki_cross_refs=wiki_cross_refs,
             overture_sources=overture_sources,
             overture_themes=overture_themes,

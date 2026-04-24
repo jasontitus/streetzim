@@ -250,15 +250,22 @@ def load_from_zim(zim_path: str | Path) -> SZRG:
         "routing-data/graph-chunk",
     )
     if main_bytes is None:
-        # Surface a more specific hint if the ZIM is actually spatial-split.
+        # Surface a more specific hint if the ZIM is actually
+        # spatial-split. The old inner bare-except swallowed the
+        # ValueError we were trying to raise when cells-index existed,
+        # so callers got the generic FileNotFoundError and missed the
+        # signal to use load_spatial_from_zim.
+        spatial_present = False
         try:
             arc.get_entry_by_path("routing-data/graph-cells-index.bin")
+            spatial_present = True
+        except Exception:
+            spatial_present = False
+        if spatial_present:
             raise ValueError(
                 f"{zim_path} is spatial-chunked — use "
                 f"tests.szrg_spatial.load_spatial_from_zim()"
             )
-        except Exception:
-            pass
         raise FileNotFoundError(
             f"{zim_path} has no routing-data/graph.bin or chunked variant"
         )

@@ -603,6 +603,37 @@
   <button id="wiki-toggle" title="Show nearby Wikipedia entries">Explore</button>
   <a id="places-link" href="places.html"
      title="Browse places by name or category">Find</a>
+  <script>
+    // Stamp the Find link with the current map center so places.html
+    // can default its "Search near" to the visible viewport instead
+    // of requesting GPS. Re-stamps on every map move so whenever the
+    // user clicks Find, the link reflects where they're currently
+    // looking. No-op until MapLibre has been initialized.
+    (function() {
+      var link = document.getElementById('places-link');
+      function stamp() {
+        if (!window.__streetzim_map) return;
+        var c = window.__streetzim_map.getCenter();
+        var z = window.__streetzim_map.getZoom();
+        link.href = 'places.html#lat=' + c.lat.toFixed(5)
+                  + '&lon=' + c.lng.toFixed(5)
+                  + '&zoom=' + z.toFixed(1);
+      }
+      // Try to wire up as soon as the map is available. MapLibre
+      // exposes `__streetzim_map` after style load; poll briefly.
+      var ticks = 0;
+      var iv = setInterval(function() {
+        ticks++;
+        if (window.__streetzim_map) {
+          clearInterval(iv);
+          stamp();
+          window.__streetzim_map.on('moveend', stamp);
+        } else if (ticks > 100) {
+          clearInterval(iv);  // give up after 10s; link works anyway
+        }
+      }, 100);
+    })();
+  </script>
 </div>
 <div id="routing-panel">
   <h4>Directions <button id="routing-close" title="Close">&times;</button></h4>
@@ -2086,6 +2117,27 @@ function initSearch(map) {
     if (prefixes.length === 0) {
       renderResults([]);
       return;
+    }
+
+    // Show a "Searching…" row immediately. On Japan a prefix like `sh`
+    // can land on a 15 MB JSON chunk which takes 20-40s to fetch+parse
+    // over Kiwix's SW on iOS; without feedback the input feels hung.
+    // Skip the placeholder if any needed chunk is already cached —
+    // the response will be synchronous-enough that a flicker is worse
+    // than no indicator.
+    var anyMissing = false;
+    for (var pi = 0; pi < prefixes.length; pi++) {
+      if (!chunkCache[prefixes[pi]]) { anyMissing = true; break; }
+    }
+    if (anyMissing) {
+      while (resultsEl.firstChild) resultsEl.removeChild(resultsEl.firstChild);
+      var loadingRow = document.createElement('div');
+      loadingRow.className = 'search-result';
+      loadingRow.style.pointerEvents = 'none';
+      loadingRow.style.opacity = '0.7';
+      loadingRow.textContent = 'Searching…';
+      resultsEl.appendChild(loadingRow);
+      resultsEl.style.display = 'block';
     }
 
     // Fetch all needed chunks in parallel, then score
@@ -4024,13 +4076,34 @@ function initRouting(map, config) {
       resultsEl.style.display = 'block';
     }
 
+    // Large chunks (e.g. `sh.json` at 15 MB on Japan) take 20-40s to
+    // fetch+parse over Kiwix's SW on iOS. Without feedback the input
+    // feels hung — show a spinner row so the user knows the fetch is
+    // in flight. Tracked with a sequence id so a stale response from
+    // an earlier keystroke doesn't overwrite the dropdown.
+    var seq = 0;
+    function renderLoading() {
+      while (resultsEl.firstChild) resultsEl.removeChild(resultsEl.firstChild);
+      var row = document.createElement('div');
+      row.className = 'routing-result-row routing-result-loading';
+      row.style.pointerEvents = 'none';
+      row.style.opacity = '0.7';
+      row.textContent = 'Searching…';
+      resultsEl.appendChild(row);
+      resultsEl.style.display = 'block';
+    }
     inputEl.addEventListener('input', function() {
       clearTimeout(timer);
       var q = inputEl.value.trim();
       if (q.length < 2) { resultsEl.style.display = 'none'; return; }
       if (!map._queryPlaces) return;
       timer = setTimeout(function() {
-        map._queryPlaces(q).then(renderDropdown);
+        var mySeq = ++seq;
+        renderLoading();
+        map._queryPlaces(q).then(function(matches) {
+          if (mySeq !== seq) return;  // newer keystroke already in flight
+          renderDropdown(matches);
+        });
       }, 150);
     });
 
