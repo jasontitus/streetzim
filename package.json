@@ -1,0 +1,9 @@
+{
+  "name": "streetzim-harness",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "puppeteer": "^23.11.1"
+  }
+}

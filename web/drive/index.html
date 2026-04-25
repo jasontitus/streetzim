@@ -292,8 +292,19 @@
       const resp = await askSW({ type: 'set-zim', blob: file, name: file.name });
       if (!resp || !resp.ok) throw new Error(resp && resp.error || 'SW rejected file');
       await refreshStatus();
-      // Small delay so the user sees the "ZIM loaded" flash before redirecting.
-      setTimeout(() => { window.location.href = '/drive/viewer/'; }, 600);
+      // Forward debug-related query params so flags like ?debug=1
+      // and ?route=full survive the redirect into the viewer. Without
+      // this, the picker stripped them silently and ?debug=1 was a
+      // no-op (seen 2026-04-25 — debug overlay never appeared).
+      const passthrough = new URLSearchParams();
+      const here = new URLSearchParams(window.location.search);
+      for (const k of ['debug', 'route', 'bust']) {
+        const v = here.get(k);
+        if (v) passthrough.set(k, v);
+      }
+      const qs = passthrough.toString();
+      const dest = '/drive/viewer/' + (qs ? '?' + qs : '');
+      setTimeout(() => { window.location.href = dest; }, 600);
     } catch (err) {
       setStatus('err', 'Failed to open ZIM', String(err && err.message || err));
     }

@@ -374,35 +374,52 @@ function rerunQuery() {
 async function runChipQuery(def) {
   if (maybeFetchOriginFirst()) return;
   setStatus(`Loading ${def.label.toLowerCase()}…`);
+  // Prefer the pre-filtered per-chip file if the ZIM was built with
+  // --split-find-chips. Otherwise fall back to loading the full OMT-
+  // bucket file + client-side filtering (legacy path; OOMs Chrome on
+  // Japan-sized ZIMs but works on smaller regions).
   let records;
   try {
-    records = await loadCategory(def.cat);
+    const chipsMani = state.manifests.cat
+                      && state.manifests.cat.chips;
+    if (chipsMani && chipsMani[def.id]) {
+      records = await loadChipFile(def.id);
+    } else {
+      records = await loadCategory(def.cat);
+      // Legacy filter path.
+      if (def.subtypes && def.subtypes.length) {
+        const allowed = new Set(def.subtypes);
+        const extra = def.nameInclude;
+        const extraAllowed = extra && extra.subtypes ? new Set(extra.subtypes) : null;
+        const pattern = extra && extra.pattern;
+        const includeRegex = def.includeRegex;
+        records = records.filter(r => {
+          if (allowed.has(r.s)) return true;
+          if (includeRegex && r.s && includeRegex.test(r.s)) return true;
+          if (extraAllowed && pattern && extraAllowed.has(r.s)
+              && pattern.test(r.n || '')) return true;
+          return false;
+        });
+      }
+    }
   } catch (e) {
-    setStatus(`Couldn't load category ‘${def.cat}’: ${e.message}`);
+    setStatus(`Couldn't load ‘${def.label}’: ${e.message}`);
     return;
-  }
-  // Filter by subtype if the chip restricts it (e.g. POI subset),
-  // optionally broadened by a name-pattern fallback for OMT buckets
-  // that collapsed the real type we care about (museums → tourism etc.).
-  if (def.subtypes && def.subtypes.length) {
-    const allowed = new Set(def.subtypes);
-    const extra = def.nameInclude;
-    const extraAllowed = extra && extra.subtypes ? new Set(extra.subtypes) : null;
-    const pattern = extra && extra.pattern;
-    const includeRegex = def.includeRegex;
-    records = records.filter(r => {
-      if (allowed.has(r.s)) return true;
-      if (includeRegex && r.s && includeRegex.test(r.s)) return true;
-      if (extraAllowed && pattern && extraAllowed.has(r.s)
-          && pattern.test(r.n || '')) return true;
-      return false;
-    });
   }
   // Stack the name filter on top if there's a query.
   if (state.query) {
     records = filterByName(records, state.query);
   }
   applyResults(records);
+}
+
+async function loadChipFile(chipId) {
+  if (state.cache.cats.has('chip:' + chipId)) {
+    return state.cache.cats.get('chip:' + chipId);
+  }
+  const data = await fetchJSON(CAT + 'chip-' + chipId + '.json');
+  state.cache.cats.set('chip:' + chipId, data);
+  return data;
 }
 
 async function runNameQuery(q) {

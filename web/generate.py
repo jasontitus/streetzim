@@ -141,6 +141,12 @@ REGIONS = [
         "zim_file": "osm-central-us.zim",
         "description": "The Mountain West and surrounds &mdash; Utah, Colorado, Wyoming, Montana, Idaho, Nevada, Arizona, and New Mexico. Salt Lake City, Denver, Phoenix, Albuquerque, Yellowstone, Grand Canyon, and the Rockies.",
     },
+    {
+        "id": "egypt",
+        "title": "Egypt",
+        "zim_file": "osm-egypt.zim",
+        "description": "Egypt &mdash; Cairo, Alexandria, Giza, Luxor, Aswan, the Nile Valley, Sinai Peninsula, and the Red Sea coast.",
+    },
 ]
 
 
@@ -157,11 +163,19 @@ def human_size(bytes_count):
 
 def fetch_archive_items():
     """Query Archive.org for all streetzim-* items. Returns {region_id: metadata}."""
+    # NOTE: don't include `&fl[]=title` here. archive.org's search index
+    # populates fields incrementally for new items — `title` can lag the
+    # `identifier`/`item_size` fields by hours. With `title` in the
+    # field list, a brand-new item is silently filtered OUT of the
+    # response. We don't actually use the search-side title (live-card
+    # rendering uses the static REGIONS[].title), so dropping it makes
+    # generate.py see new items as soon as their identifier indexes.
+    # Bug seen 2026-04-25 with Egypt — first ~hour after upload it had
+    # a title in metadata but not in the search index.
     url = (
         "https://archive.org/advancedsearch.php?"
         "q=identifier%3Astreetzim-*"
         "&fl%5B%5D=identifier"
-        "&fl%5B%5D=title"
         "&fl%5B%5D=item_size"
         "&fl%5B%5D=publicdate"
         "&rows=100"

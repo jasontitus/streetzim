@@ -66,15 +66,27 @@ repack_one() {
     local dst="osm-${id}-shipped.zim"
     local log="${id}-shipped.log"
     log "repackaging $id ($layout) from $src → $dst"
-    local extra_args=()
+    # --spatial-chunk-scale 1 = 1° cells. Source must be SZRG v4/v5
+    # (our default build); repackage_zim reassembles chunks if the
+    # source shipped chunked. Empty-array dereference under `set -u`
+    # is the cause of the 2026-04-24 rollout egypt crash, so invoke
+    # with vs. without the flag as two distinct code paths.
+    # --split-find-chips is on by default now: Japan's 1 GB poi.json
+    # OOM'd both iOS Safari and Chrome (2026-04-24) — chip files cap
+    # any single fetch around 100 MB.
     if [ "$layout" = "spatial" ]; then
-        # --spatial-chunk-scale 1 = 1° cells. The source must be SZRG v4
-        # (our default build); repackage_zim reassembles chunks if the
-        # source shipped chunked.
-        extra_args+=(--spatial-chunk-scale 1)
+        run_ok=0
+        ./venv312/bin/python3 cloud/repackage_zim.py \
+            "$src" "$dst" --spatial-chunk-scale 1 --split-find-chips \
+            > "$log" 2>&1 \
+            && run_ok=1
+    else
+        run_ok=0
+        ./venv312/bin/python3 cloud/repackage_zim.py \
+            "$src" "$dst" --split-find-chips > "$log" 2>&1 \
+            && run_ok=1
     fi
-    if ! ./venv312/bin/python3 cloud/repackage_zim.py \
-            "$src" "$dst" "${extra_args[@]}" > "$log" 2>&1; then
+    if [ "$run_ok" != "1" ]; then
         log "FAIL repackage $id — see $log"
         return 1
     fi

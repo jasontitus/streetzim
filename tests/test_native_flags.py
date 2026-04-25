@@ -114,6 +114,8 @@ class TestCliArgsParse(unittest.TestCase):
             "new flag missing from --help")
         self.assertIn("--low-zoom-world-vrt", result.stdout,
             "new flag missing from --help")
+        self.assertIn("--split-find-chips", result.stdout,
+            "--split-find-chips missing from --help")
 
 
 if __name__ == "__main__":

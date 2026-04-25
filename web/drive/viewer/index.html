@@ -324,6 +324,26 @@
     color: var(--text-tertiary); padding: 0 2px; line-height: 1;
   }
   #routing-panel h4 button:hover { color: var(--text-primary); }
+  /* Fold-down on phones: collapse the panel to a single-row header so
+     the driven route stays visible on the map beneath. Tap anywhere
+     on the header (or the chevron) to unfold. Blue route line is
+     preserved — clear() is only called by the × button. */
+  #routing-panel.minimized #routing-body { display: none; }
+  #routing-panel.minimized h4 { margin: 0; cursor: pointer; }
+  /* Flip the chevron so the glyph hints at "unfold". ▾ when expanded,
+     ▴ when folded. */
+  #routing-panel.minimized #routing-minimize {
+    transform: rotate(180deg); display: inline-block;
+  }
+  /* Mobile-ish: auto-compact when narrow. Keeps the directions usable
+     when driving + wanting to see the road. */
+  @media (max-width: 640px) {
+    #routing-panel {
+      left: 8px; right: 8px; width: auto; max-width: none;
+      max-height: 60vh; overflow-y: auto;
+    }
+    #routing-panel.minimized { max-height: none; overflow: visible; }
+  }
   .routing-field {
     display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
   }
@@ -597,6 +617,32 @@
 </head>
 <body>
 <div id="map"></div>
+<!-- Routing debug overlay (?debug=1). Pops, cells loaded, and (when
+     available) JS heap usage. Updates live during A* expansion so we
+     can tell whether a long route is OOMing on cell cache, on visited-
+     node Maps, or on something else. Hidden by default. -->
+<div id="route-debug" style="display:none;position:fixed;bottom:16px;right:16px;background:rgba(0,0,0,0.85);color:#0f0;font:11px/1.45 ui-monospace,monospace;padding:8px 10px;max-width:360px;border-radius:6px;z-index:9999;white-space:pre-wrap;pointer-events:none;"></div>
+<!-- Always-visible build stamp. Tiny, top-left, click to copy. Lets
+     you instantly tell which deploy the page is from. Populated by
+     a fetch('/drive/build-info.js') below. -->
+<div id="viewer-build-stamp" style="position:fixed;top:6px;left:8px;background:rgba(0,0,0,0.55);color:#0f0;font:10px/1 ui-monospace,monospace;padding:3px 6px;border-radius:4px;z-index:9999;pointer-events:auto;cursor:copy;opacity:0.7;" title="StreetZim build (click to copy)">…</div>
+<script>
+(function() {
+  var el = document.getElementById('viewer-build-stamp');
+  if (!el) return;
+  fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
+    .then(function(r) { return r.ok ? r.text() : ''; })
+    .then(function(src) {
+      var m = src.match(/stamp:\s*"([^"]+)"/);
+      var t = src.match(/time:\s*"([^"]+)"/);
+      if (m) el.textContent = m[1] + (t ? ' · ' + t[1] : '');
+    })
+    .catch(function() { el.textContent = 'build:?'; });
+  el.addEventListener('click', function() {
+    if (navigator.clipboard) navigator.clipboard.writeText(el.textContent);
+  });
+})();
+</script>
 <div id="controls">
   <button id="layer-toggle" title="Toggle satellite imagery">Satellite</button>
   <button id="terrain-toggle" title="Toggle 3D terrain">3D</button>
@@ -636,7 +682,13 @@
   </script>
 </div>
 <div id="routing-panel">
-  <h4>Directions <button id="routing-close" title="Close">&times;</button></h4>
+  <h4>Directions
+    <span>
+      <button id="routing-minimize" title="Fold down (show map)" aria-label="Fold">&#x25BE;</button>
+      <button id="routing-close" title="Close">&times;</button>
+    </span>
+  </h4>
+  <div id="routing-body">
   <div class="routing-field-group">
     <div class="routing-field-row">
       <div class="routing-dot origin"></div>
@@ -666,6 +718,7 @@
     <button id="routing-bike"  data-mode="bike">Bike</button>
   </div>
   <button id="routing-clear">Clear route</button>
+  </div> <!-- /#routing-body -->
 </div>
 <div id="drive-hud" aria-hidden="true">
   <div id="drive-hud-row">
@@ -2396,6 +2449,67 @@ function initWikidataPopups(map, config) {
     return d.innerHTML;
   }
 
+  // Build the "Directions" button used inside wiki/feature popups.
+  // Mirrors the placeSearchPin one so the user gets the same flow
+  // regardless of how they discovered the destination.
+  function buildDirectionsButton(lat, lon, name) {
+    var btn = document.createElement('button');
+    btn.className = 'pin-directions';
+    btn.textContent = 'Directions to here';
+    btn.style.marginTop = '8px';
+    btn.addEventListener('click', function() {
+      if (!window.streetzimRouting ||
+          typeof window.streetzimRouting.open !== 'function') {
+        return;
+      }
+      window.streetzimRouting.open();
+      window.streetzimRouting.setDest(lat, lon, name || undefined);
+      var cached = window.__streetzimLastLoc;
+      var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
+      if (fresh) {
+        window.streetzimRouting.setOrigin(
+          cached.lat, cached.lon, 'Current location');
+      } else if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          function(pos) {
+            window.__streetzimLastLoc = {
+              lat: pos.coords.latitude, lon: pos.coords.longitude, ts: Date.now()
+            };
+            window.streetzimRouting.setOrigin(
+              pos.coords.latitude, pos.coords.longitude, 'Current location');
+          },
+          function() {},
+          { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 });
+      }
+    });
+    return btn;
+  }
+
+  // Build a popup DOM (rather than HTML string) so we can append an
+  // event-bound Directions button. The text content is the same as
+  // buildPopupHTML — wrapping HTML in a fresh div keeps that helper
+  // useful for the wiki sidebar (which still uses setHTML).
+  function buildWikiPopupDOM(name, wd, lngLat) {
+    var box = document.createElement('div');
+    box.className = 'pin-popup wiki-popup';
+    if (wd) {
+      box.innerHTML = buildPopupHTML(name, wd);
+    } else {
+      var h = document.createElement('div');
+      h.style.cssText = 'font-family:-apple-system,system-ui,sans-serif;font-size:14px;font-weight:600;';
+      h.textContent = name;
+      box.appendChild(h);
+    }
+    box.appendChild(buildDirectionsButton(lngLat.lat, lngLat.lng, name));
+    return box;
+  }
+
+  // Expose for the wiki sidebar (so its panel-spawned popups can use
+  // the same Directions button without duplicating the routing-bridge
+  // glue).
+  map._buildDirectionsButton = buildDirectionsButton;
+  map._buildWikiPopupDOM = buildWikiPopupDOM;
+
   map.on('click', function(e) {
     if (currentPopup) { currentPopup.remove(); currentPopup = null; }
 
@@ -2424,20 +2538,10 @@ function initWikidataPopups(map, config) {
     var prefix = getWdPrefix(qid);
 
     fetchWdChunk(prefix).then(function(chunk) {
-      if (!chunk || !chunk[qid]) {
-        // No wikidata info available — show minimal popup
-        currentPopup = new maplibregl.Popup({ maxWidth: '300px' })
-          .setLngLat(e.lngLat)
-          .setHTML('<div style="font-family:-apple-system,system-ui,sans-serif;font-size:14px;font-weight:600;">' +
-                   escapeHtml(name) + '</div>')
-          .addTo(map);
-        return;
-      }
-
-      var wd = chunk[qid];
+      var wd = (chunk && chunk[qid]) ? chunk[qid] : null;
       currentPopup = new maplibregl.Popup({ maxWidth: '320px' })
         .setLngLat(e.lngLat)
-        .setHTML(buildPopupHTML(name, wd))
+        .setDOMContent(buildWikiPopupDOM(name, wd, e.lngLat))
         .addTo(map);
     });
   });
@@ -2655,13 +2759,14 @@ function initWikiSidebar(map, config) {
             } else {
               map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 1200 });
             }
-            // Show wikidata popup offset above the point
-            if (map._buildWdPopup && map._wdCache) {
+            // Show wikidata popup offset above the point. Use the
+            // DOM-builder so the same Directions button appears as
+            // when the user clicks a feature on the map.
+            if (map._buildWikiPopupDOM && map._wdCache) {
               var prefix = getWdPrefix(itemQid);
               var chunk = wdCache[prefix];
               var wdEntry = chunk ? chunk[itemQid] : null;
               if (wdEntry) {
-                // Remove any existing popup
                 if (map._wikiSidebarPopup) { map._wikiSidebarPopup.remove(); }
                 map._wikiSidebarPopup = new maplibregl.Popup({
                   maxWidth: '320px',
@@ -2669,7 +2774,8 @@ function initWikiSidebar(map, config) {
                   closeOnClick: true
                 })
                   .setLngLat([lng, lat])
-                  .setHTML(map._buildWdPopup(itemName, wdEntry))
+                  .setDOMContent(map._buildWikiPopupDOM(
+                    itemName, wdEntry, { lat: lat, lng: lng }))
                   .addTo(map);
               }
             }
@@ -2805,10 +2911,38 @@ function initRouting(map, config) {
 
   closeBtn.addEventListener('click', deactivate);
 
+  // Minimize: collapse the panel to just its header stripe so the
+  // map + route are visible underneath. On phones this is essential
+  // — the directions panel otherwise covers the whole screen and
+  // you can't see the line you're about to drive. Tap the header
+  // (or the "▢" glyph) to expand again.
+  var minBtn = document.getElementById('routing-minimize');
+  var heading = panel.querySelector('h4');
+  function toggleMinimized(e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    panel.classList.toggle('minimized');
+    var folded = panel.classList.contains('minimized');
+    minBtn.title = folded ? 'Unfold (show directions)' : 'Fold down (show map)';
+    // Tell MapLibre the available canvas size changed so any fit
+    // bounds / camera calc uses the new dims. Route line + markers
+    // are NOT touched — they stay on the map through the fold cycle.
+    try { map.resize(); } catch (err) {}
+  }
+  if (minBtn) minBtn.addEventListener('click', toggleMinimized);
+  // Clicking anywhere on the header while minimized expands. When
+  // not minimized the h4 is plain text so we only hook the handler
+  // through the class-conditional cursor:pointer rule above.
+  heading.addEventListener('click', function(e) {
+    if (panel.classList.contains('minimized') && e.target === heading) {
+      toggleMinimized();
+    }
+  });
+
   function deactivate() {
     active = false;
     if (toggleBtn) toggleBtn.classList.remove('active-control');
     panel.style.display = 'none';
+    panel.classList.remove('minimized');
     map.getCanvas().style.cursor = '';
     clearRoute();
   }
@@ -3308,7 +3442,12 @@ function initRouting(map, config) {
     this._cells = new Map();     // cell_id → parsed cell
     this._inFlight = new Map();  // cell_id → Promise<parsed cell>
     this._lru = [];
-    this._cacheLimit = cacheLimit || 32;
+    // Default 12 (down from 32). Each cell is ~8 MB JS-decoded; 32
+    // means ~256 MB just for cells, which combined with the route
+    // Maps + MapLibre tiles pushed iOS Safari over the heap limit
+    // and triggered page-discards mid-route. 12 keeps us under
+    // ~100 MB cell footprint with rare re-fetches.
+    this._cacheLimit = cacheLimit || 12;
     // Expose SZRG-like surface so call sites don't need a version switch.
     this.isSpatial = true;
     this.numNodes = index.numNodes;
@@ -3323,6 +3462,19 @@ function initRouting(map, config) {
     var s = String(cid);
     while (s.length < 5) s = '0' + s;
     return 'routing-data/graph-cell-' + s + '.bin';
+  };
+
+  // Aggressively drop cached cells when the page needs the memory
+  // back. Called after each route completes — the cells stick around
+  // in case the user routes again, but if iOS Safari is under
+  // memory pressure (typeahead, MapLibre re-render, etc.) we'd
+  // rather give up the cache than have the page killed.
+  SpatialGraph.prototype.compact = function(keep) {
+    keep = (keep === undefined) ? Math.min(8, this._cacheLimit) : keep;
+    while (this._lru.length > keep) {
+      var cid = this._lru.shift();
+      this._cells.delete(cid);
+    }
   };
 
   SpatialGraph.prototype._ensureCell = function(cid) {
@@ -3407,7 +3559,12 @@ function initRouting(map, config) {
       })
       .then(function(buf) {
         var idx = parseRoutingCellsIndex(buf);
-        graph = new SpatialGraph(idx, /*cacheLimit*/ 16);
+        // 4 instead of 8. Tokyo→Oita on Japan measured 285 MB at 8
+        // cells (~36 MB/cell decoded, much bigger than my 8 MB
+        // estimate — Japan's 1° cells are dense). 4 keeps cell
+        // footprint near 140 MB. Re-fetches will be slow but the
+        // page survives.
+        graph = new SpatialGraph(idx, /*cacheLimit*/ 4);
         window.__streetzim_graph = graph;
         console.log('[streetzim] spatial graph loaded', {
           numNodes: idx.numNodes,
@@ -3525,73 +3682,350 @@ function initRouting(map, config) {
   // asynchronously as the frontier crosses them. Return shape matches
   // the monolithic version so the caller in computeAndDrawRoute sees a
   // uniform result regardless of layout.
+  // findRouteSpatial — full-graph A* on the spatial graph. Sparse-state
+  // implementation lives in findRouteSpatialFiltered (with
+  // highwayOnly=false this is the same algorithm); delegating here
+  // keeps the call sites for short-route fallback and the
+  // findRouteSpatialTwoPass legs working on the same code path.
+  // The dense typed-array version that lived here OOM'd on long
+  // routes (Tokyo→Oita, Tehran→Baghdad) — see the sparse-state
+  // comment on findRouteSpatialFiltered.
   async function findRouteSpatial(startNode, endNode) {
-    var nodesScaled = graph.nodesScaled;
-    var numNodes = graph.numNodes;
+    return findRouteSpatialFiltered(startNode, endNode, false);
+  }
 
+  // Highway-tier ordinals (motorway, motorway_link, trunk, trunk_link,
+  // primary, primary_link). Bit-encoded into class_access bits 0..4 by
+  // create_osm_zim.CLASS_ORDINAL. Edges in this set are the cross-country
+  // backbone — A* on just these is ~10× cheaper for long routes.
+  function isHighwayClass(classAccess) {
+    var ord = classAccess & 0x1F;
+    return ord >= 1 && ord <= 6;
+  }
+
+  // ?debug=1 overlay — shows pops/cells/heap during routing so we can
+  // tell whether a long route is bottlenecked on cell cache, visited-
+  // node Maps, or something else. No-op when the flag isn't set.
+  // Sticky via localStorage: once you append ?debug=1 to any URL,
+  // the flag persists across page loads + the picker redirect.
+  // ?debug=0 turns it off again.
+  var DEBUG_ROUTING = (function() {
+    try {
+      var p = new URLSearchParams(location.search).get('debug');
+      if (p === '1') {
+        try { localStorage.setItem('streetzim_debug', '1'); } catch (e) {}
+        return true;
+      }
+      if (p === '0') {
+        try { localStorage.removeItem('streetzim_debug'); } catch (e) {}
+        return false;
+      }
+      try { return localStorage.getItem('streetzim_debug') === '1'; }
+      catch (e) { return false; }
+    } catch (e) { return false; }
+  })();
+  var __routeDebugEl = null;
+  var __routeDebugStart = 0;
+  var __routeDebugLabel = 'idle';
+  var __routeDebugPops = 0;
+  // Always-on tick paints idle stats every 2s when ?debug=1 is set,
+  // even when no route is in flight. That way the overlay is a
+  // continuous "is debug on?" indicator and lets you watch heap
+  // creep, cell-cache fill, etc. while you're just panning.
+  function __debugPaint() {
+    if (!DEBUG_ROUTING || !__routeDebugEl) return;
+    var lines = [__routeDebugLabel];
+    if (__routeDebugStart) {
+      lines.push('elapsed: ' +
+        ((performance.now() - __routeDebugStart) / 1000).toFixed(1) + 's');
+    }
+    if (__routeDebugPops) {
+      lines.push('pops: ' + __routeDebugPops);
+    }
+    var cellMB = 0;
+    if (typeof graph !== 'undefined' && graph && graph._cells) {
+      // Sum the actual byte lengths of each cell's typed arrays.
+      // Catches the real memory footprint of the cell cache; the
+      // count alone misses that one big cell can be 5× a small one.
+      graph._cells.forEach(function(cell) {
+        if (!cell) return;
+        if (cell.cellAdj && cell.cellAdj.byteLength) cellMB += cell.cellAdj.byteLength;
+        if (cell.edges && cell.edges.byteLength) cellMB += cell.edges.byteLength;
+        if (cell.geomBlob && cell.geomBlob.byteLength) cellMB += cell.geomBlob.byteLength;
+        if (cell.localToGlobal && cell.localToGlobal.byteLength) {
+          cellMB += cell.localToGlobal.byteLength;
+        }
+      });
+      cellMB = cellMB / (1024 * 1024);
+      lines.push('cells: ' + graph._cells.size + ' / cap ' +
+        (graph._cacheLimit || '?') + ' = ' + cellMB.toFixed(0) + ' MB');
+    } else {
+      lines.push('graph: not loaded');
+    }
+    // Estimated heap. Each Map entry in V8 is ~80 bytes (key + value
+    // boxed in HashMap). 4 maps grown together ⇒ ~320 bytes/visited.
+    // prevEdge stores 6-element JS arrays, each ~120 bytes → +120 byte.
+    // 440 bytes/visited is a reasonable upper bound.
+    var visitMB = (__routeDebugPops * 440) / (1024 * 1024);
+    if (__routeDebugPops > 0) {
+      lines.push('est. visited Maps: ' + visitMB.toFixed(0) + ' MB');
+    }
+    if (performance && performance.memory) {
+      var mb = performance.memory.usedJSHeapSize / (1024 * 1024);
+      var lim = performance.memory.jsHeapSizeLimit / (1024 * 1024);
+      lines.push('JS heap: ' + mb.toFixed(0) + ' / ' + lim.toFixed(0) + ' MB');
+    } else {
+      // Best-effort total: cells + visited-state. Underestimates
+      // (no MapLibre tile cache, no DOM, no place-search index).
+      // Doubling gets closer to a reasonable upper bound on iOS
+      // where Safari typically discards a tab around 1500 MB.
+      var est = cellMB + visitMB;
+      lines.push('est. heap (no Safari): ~' + (est * 2).toFixed(0) +
+        ' MB (' + cellMB.toFixed(0) + ' cells + ' +
+        visitMB.toFixed(0) + ' visit, ×2 overhead)');
+    }
+    __routeDebugEl.textContent = lines.join('\n');
+  }
+  if (DEBUG_ROUTING) {
+    // Painter starts as soon as the body parses. The overlay div may
+    // not exist yet if this script runs before the body — guard it.
+    var __startDebug = function() {
+      __routeDebugEl = document.getElementById('route-debug');
+      if (!__routeDebugEl) return;
+      __routeDebugEl.style.display = 'block';
+      __routeDebugLabel = 'idle';
+      __debugPaint();
+      setInterval(__debugPaint, 2000);
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', __startDebug);
+    } else {
+      __startDebug();
+    }
+  }
+  function debugInit() {
+    if (!DEBUG_ROUTING) return;
+    __routeDebugEl = __routeDebugEl || document.getElementById('route-debug');
+    if (__routeDebugEl) __routeDebugEl.style.display = 'block';
+    __routeDebugStart = performance.now();
+    __routeDebugLabel = 'route start';
+    __routeDebugPops = 0;
+    __debugPaint();
+  }
+  function debugStats(label, pops) {
+    __routeDebugLabel = label;
+    __routeDebugPops = pops;
+    // Surface progress to the user-facing status panel even when
+    // ?debug=1 isn't set — long routes (Tokyo→Oita took 90+s) used
+    // to stare at "Calculating route..." for two minutes with no
+    // signal of activity. Now they see pops + cells ticking.
+    var s = document.getElementById('routing-status');
+    if (s) {
+      var cells = '';
+      if (typeof graph !== 'undefined' && graph && graph._cells) {
+        cells = ' · ' + graph._cells.size + ' cells';
+      }
+      s.textContent = label + ' · ' + pops.toLocaleString() + ' nodes' + cells;
+    }
+    if (DEBUG_ROUTING) __debugPaint();
+  }
+
+  // Two-pass routing: full-graph for first/last mile, highway-tier for
+  // the long middle. Orchestrates three legs and stitches the result.
+  // Falls back to single-pass full A* if either endpoint can't reach
+  // a highway-adjacent node within `maxBfs`. See cloud/route_cli.py
+  // for the same algorithm in Python (used as the differential test).
+  async function findRouteSpatialTwoPass(startNode, endNode) {
+    var hwSrc = await findNearestHighwayNode(startNode, 5000);
+    var hwDst = await findNearestHighwayNode(endNode, 5000);
+    if (hwSrc === null || hwDst === null) {
+      return null;  // caller should fall back to full A*
+    }
+
+    var legA = (startNode === hwSrc)
+      ? null
+      : await findRouteSpatialFiltered(startNode, hwSrc, /*highwayOnly=*/false);
+    if (legA === null && startNode !== hwSrc) return null;
+    // Compact cells between phases. Phase A only needs the cells
+    // around the start; Phase B will use mid-country cells. Holding
+    // both is what blew Tokyo→Oita on iOS Safari.
+    if (graph && typeof graph.compact === 'function') graph.compact(4);
+
+    var legB = (hwSrc === hwDst)
+      ? null
+      : await findRouteSpatialFiltered(hwSrc, hwDst, /*highwayOnly=*/true);
+    if (legB === null && hwSrc !== hwDst) return null;
+    if (graph && typeof graph.compact === 'function') graph.compact(4);
+
+    var legC = (hwDst === endNode)
+      ? null
+      : await findRouteSpatialFiltered(hwDst, endNode, /*highwayOnly=*/false);
+    if (legC === null && hwDst !== endNode) return null;
+
+    return concatenateLegs([legA, legB, legC]);
+  }
+
+  function concatenateLegs(legs) {
+    var coords = [];
+    var roads = [];
+    var distance = 0;
+    var time = 0;
+    for (var i = 0; i < legs.length; i++) {
+      var leg = legs[i];
+      if (!leg) continue;
+      // Drop the first coord of continuation legs to avoid duplicate
+      // join nodes (the join node ends one leg and starts the next).
+      var startIdx = (coords.length > 0) ? 1 : 0;
+      for (var k = startIdx; k < leg.coords.length; k++) coords.push(leg.coords[k]);
+      for (var r = 0; r < leg.roads.length; r++) roads.push(leg.roads[r]);
+      distance += leg.distance;
+      time += leg.time;
+    }
+    return { coords: coords, distance: distance, time: time, roads: roads };
+  }
+
+  async function findNearestHighwayNode(seedNode, maxPops) {
+    // Outgoing-edge BFS from `seedNode`. Returns the first node whose
+    // outgoing-edge set contains a highway-tier edge — i.e. is a
+    // highway "entry/exit" node. Bounded so a stranded seed doesn't
+    // walk the full graph. Most populated places sit within a few
+    // hops of motorway/primary; 5,000 pops covers ~10 km of urban
+    // grid in the worst case.
+    // Sparse Set instead of Uint8Array(numNodes) — BFS visits at most
+    // maxPops nodes, so a Set holds maxPops entries (~few hundred KB)
+    // vs 18 MB for the typed-array bitmap on Japan.
+    var visited = new Set();
+    visited.add(seedNode);
+    var queue = [seedNode];
+    var pops = 0;
+    while (queue.length > 0 && pops < maxPops) {
+      var current = queue.shift();
+      pops++;
+      var edges = await graph.edgesOfNode(current);
+      for (var k = 0; k < edges.length; k++) {
+        if (isHighwayClass(edges[k][4])) {
+          return current;
+        }
+      }
+      for (var k = 0; k < edges.length; k++) {
+        var target = edges[k][0];
+        if (!visited.has(target)) {
+          visited.add(target);
+          queue.push(target);
+        }
+      }
+    }
+    return null;
+  }
+
+  // A* on the spatial graph with optional highway-tier edge filter.
+  // Identical to findRouteSpatial when highwayOnly=false; with the
+  // filter, only edges whose class_access ordinal is in 1..6 are
+  // expanded — drops ~95% of edges in metro grids and keeps the
+  // backbone for cross-country.
+  //
+  // Sparse-state implementation: g/prev/prevEdge/closed are Maps/Sets
+  // that only allocate for visited nodes, not all numNodes. The dense
+  // typed-array version blew the iOS heap on Tokyo→Oita (Japan has
+  // 18M nodes ⇒ 234 MB just for g+prev+closed before any cell loaded).
+  // For routes that visit ~100k–1M nodes, the Maps are 5-50 MB total.
+  // Two-stage wrapper: try optimal (admissible heuristic) with a
+  // tight pop budget first; on bail, retry with a greedy weight.
+  // Easy routes get a guaranteed-optimal answer; hard routes still
+  // get a suboptimal-but-found answer instead of crashing the page.
+  async function findRouteSpatialFiltered(startNode, endNode, highwayOnly) {
+    var optimal = await findRouteSpatialAStar(
+      startNode, endNode, highwayOnly,
+      /*greedy*/ 1.0,
+      /*popLimit*/ highwayOnly ? 50000 : 200000);
+    if (optimal) return optimal;
+    // Optimal bailed — retry greedy. Routes here are 5-25% suboptimal
+    // but the page survives and the user gets directions.
+    return findRouteSpatialAStar(
+      startNode, endNode, highwayOnly,
+      /*greedy*/ highwayOnly ? 2.0 : 1.5,
+      /*popLimit*/ highwayOnly ? 100000 : 400000);
+  }
+
+  async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
+                                        GREEDY_WEIGHT, POP_LIMIT) {
+    var nodesScaled = graph.nodesScaled;
     var endLat = nodesScaled[endNode * 2] / 1e7;
     var endLon = nodesScaled[endNode * 2 + 1] / 1e7;
 
-    var g = new Float64Array(numNodes);
-    g.fill(Infinity);
-    g[startNode] = 0;
-    var prev = new Int32Array(numNodes);
-    prev.fill(-1);
-    // prevEdge[n] = [sourceNodeIdx, target, speedDist, geomLocal, nameIdx, classAccess]
-    var prevEdge = new Array(numNodes);
-    var closed = new Uint8Array(numNodes);
+    var g = new Map();         // node -> g-score (seconds)
+    var prev = new Map();      // node -> predecessor node
+    var prevEdge = new Map();  // node -> [src, tgt, speedDist, geomLocal, name, cls]
+    var closed = new Set();
+    g.set(startNode, 0);
 
     var open = new MinHeap();
     var h0 = haversine(
       nodesScaled[startNode * 2] / 1e7,
       nodesScaled[startNode * 2 + 1] / 1e7,
       endLat, endLon
-    ) / (100 / 3.6);
+    ) / (80 / 3.6);
     open.push([h0, startNode]);
+    var pops = 0;
+    var weightTag = (GREEDY_WEIGHT > 1.0) ? ' greedy×' + GREEDY_WEIGHT : ' optimal';
+    var label = (highwayOnly ? 'A* highway-only' : 'A* full') + weightTag;
 
     while (open.size() > 0) {
       var item = open.pop();
       var current = item[1];
+      pops++;
+      // Yield to the event loop every 2k pops so the debug overlay
+      // can paint, and the page doesn't lock up. Cheap and only
+      // ticks N/2k times — still much less overhead than awaiting
+      // each cell load.
+      if (pops % 2000 === 0) {
+        debugStats(label, pops);
+        await new Promise(function(r) { setTimeout(r, 0); });
+      }
+      if (pops > POP_LIMIT) {
+        debugStats(label + ' BAIL (pop limit ' + POP_LIMIT + ')', pops);
+        return null;  // caller decides next step
+      }
       if (current === endNode) break;
-      if (closed[current]) continue;
-      closed[current] = 1;
-
-      // Await this node's edges — may trigger a cell fetch.
+      if (closed.has(current)) continue;
+      closed.add(current);
       var nodeEdges = await graph.edgesOfNode(current);
-      var curG = g[current];
+      var curG = g.get(current);
       for (var k = 0; k < nodeEdges.length; k++) {
         var e = nodeEdges[k];
+        if (highwayOnly && !isHighwayClass(e[4])) continue;
         var target = e[0];
         var speedDist = e[1];
-        if (closed[target]) continue;
+        if (closed.has(target)) continue;
         var distM = (speedDist & 0xFFFFFF) / 10;
         var speed = speedDist >>> 24;
         if (speed === 0) continue;
         var cost = distM / (speed / 3.6);
         var newG = curG + cost;
-        if (newG < g[target]) {
-          g[target] = newG;
-          prev[target] = current;
-          prevEdge[target] = [current, target, speedDist, e[2], e[3], e[4]];
+        var oldG = g.has(target) ? g.get(target) : Infinity;
+        if (newG < oldG) {
+          g.set(target, newG);
+          prev.set(target, current);
+          prevEdge.set(target, [current, target, speedDist, e[2], e[3], e[4]]);
           var tLat = nodesScaled[target * 2] / 1e7;
           var tLon = nodesScaled[target * 2 + 1] / 1e7;
-          var h = haversine(tLat, tLon, endLat, endLon) / (100 / 3.6);
+          var h = haversine(tLat, tLon, endLat, endLon) / (80 / 3.6) * GREEDY_WEIGHT;
           open.push([newG + h, target]);
         }
       }
     }
+    debugStats(label + ' done', pops);
 
-    if (g[endNode] === Infinity) return null;
+    if (!g.has(endNode)) return null;
 
-    // Reconstruct. Decoded geoms require awaiting the source-node cell
-    // (already loaded during forward search, so effectively sync).
+    // Path reconstruction.
     var path = [];
     var totalDist = 0;
-    var totalTime = g[endNode];
+    var totalTime = g.get(endNode);
     var n = endNode;
     var segRev = [];
     while (n !== startNode) {
-      var pe = prevEdge[n];
+      var pe = prevEdge.get(n);
       var sourceNode = pe[0];
       var speedDist = pe[2];
       var geomLocal = pe[3];
@@ -3617,10 +4051,9 @@ function initRouting(map, config) {
       segment.push([toLon, toLat]);
       path.unshift(segment);
 
-      n = prev[n];
+      n = prev.get(n);
     }
 
-    // Coalesce — same logic as the monolithic version.
     var roads = [];
     for (var si = segRev.length - 1; si >= 0; si--) {
       var s = segRev[si];
@@ -3635,17 +4068,12 @@ function initRouting(map, config) {
 
     var coords = [];
     for (var sp = 0; sp < path.length; sp++) {
-      var start = (sp === 0) ? 0 : 1;
-      for (var kk = start; kk < path[sp].length; kk++) {
+      var startI = (sp === 0) ? 0 : 1;
+      for (var kk = startI; kk < path[sp].length; kk++) {
         coords.push(path[sp][kk]);
       }
     }
-    return {
-      coords: coords,
-      distance: totalDist,
-      time: totalTime,
-      roads: roads,
-    };
+    return { coords: coords, distance: totalDist, time: totalTime, roads: roads };
   }
 
   async function findRoute(startNode, endNode) {
@@ -3653,7 +4081,74 @@ function initRouting(map, config) {
     // inline monolithic A* beneath only works with a single typed array
     // of edges (graph.edges is undefined on spatial graphs).
     if (graph.isSpatial) {
-      return findRouteSpatial(startNode, endNode);
+      // Long-distance routing wins big from the highway-tier two-pass:
+      // Tehran→Baghdad (~700 km) was 4-5 min single-pass full A* in
+      // Kiwix Desktop; two-pass measured ~10× fewer pops in the Python
+      // prototype (cloud/route_cli.py). For short routes the full A*
+      // is already fast and the two-pass overhead (BFS + leg stitching)
+      // would actually slow it down, so gate by crow-fly distance.
+      // Threshold of 100 km picked empirically: at 50 km the two-pass
+      // wins barely; at 100 km it dominates; at 200 km it's huge.
+      // Override via URL ?route=full or ?route=two-pass for testing.
+      debugInit();
+      var nodesScaled = graph.nodesScaled;
+      var startLat = nodesScaled[startNode * 2] / 1e7;
+      var startLon = nodesScaled[startNode * 2 + 1] / 1e7;
+      var endLat = nodesScaled[endNode * 2] / 1e7;
+      var endLon = nodesScaled[endNode * 2 + 1] / 1e7;
+      var crow = haversine(startLat, startLon, endLat, endLon);
+      var override = new URLSearchParams(location.search).get('route');
+      var useTwoPass = override === 'two-pass'
+        || (override !== 'full' && crow > 100000);
+      // Long-route pre-cleanup. Drops all cached cells + yields to
+      // the event loop so the browser has a chance to GC before we
+      // start allocating again. Without this, an immediately-prior
+      // route (Kyoto→Oita) leaves the heap close to the limit, and
+      // the next long route (Tokyo→Oita) spills over and iOS Safari
+      // discards the page mid-A*. Threshold matches the two-pass
+      // gate above so it's only invoked when actually needed.
+      if (useTwoPass && graph && typeof graph.compact === 'function') {
+        graph.compact(0);
+        // Three short awaits give the browser real GC opportunities;
+        // a single 0ms timeout often isn't enough on Safari.
+        for (var i = 0; i < 3; i++) {
+          await new Promise(function(r) { setTimeout(r, 50); });
+        }
+        if (DEBUG_ROUTING) {
+          __routeDebugLabel = 'pre-route cleanup done (cells dropped)';
+          __debugPaint();
+        }
+      }
+      // Strategy chain: try the cheapest most-accurate option first,
+      // fall back only on failure.
+      //   1. Full A*  — most accurate; findRouteSpatialFiltered is
+      //      already two-stage internally (admissible → greedy).
+      //   2. Two-pass — only when full bails on a really long route.
+      // The 100-km threshold for forcing two-pass that we had earlier
+      // made cross-country routes WORSE in both time and accuracy
+      // when full A* would have finished. Always try full first.
+      var routeResult = null;
+      var t1 = performance.now();
+      routeResult = await findRouteSpatial(startNode, endNode);
+      if (routeResult) {
+        console.log('[route] full crow=' + (crow/1000).toFixed(0) +
+                    'km took ' + (performance.now() - t1).toFixed(0) + 'ms');
+      } else if (useTwoPass) {
+        console.log('[route] full bailed, trying two-pass...');
+        var t0 = performance.now();
+        routeResult = await findRouteSpatialTwoPass(startNode, endNode);
+        if (routeResult) {
+          console.log('[route] two-pass crow=' + (crow/1000).toFixed(0) +
+                      'km took ' + (performance.now() - t0).toFixed(0) + 'ms');
+        }
+      }
+      // Free up cell cache after EVERY route. iOS Safari discards
+      // the page when heap stays near the limit even during idle
+      // browsing (clicking an input, panning the map). Dropping
+      // cells back to ~8 retained gives the rest of the page room.
+      // Cells re-fetch cheaply if the user routes again.
+      if (graph && typeof graph.compact === 'function') graph.compact(8);
+      return routeResult;
     }
     var nodesScaled = graph.nodesScaled;
     var adjOffsets = graph.adjOffsets;
@@ -3682,7 +4177,7 @@ function initRouting(map, config) {
       nodesScaled[startNode * 2] / 1e7,
       nodesScaled[startNode * 2 + 1] / 1e7,
       endLat, endLon
-    ) / (100 / 3.6);
+    ) / (80 / 3.6);
     open.push([h0, startNode]);
 
     while (open.size() > 0) {
@@ -3712,7 +4207,7 @@ function initRouting(map, config) {
           prevEdge[target] = i;
           var tLat = nodesScaled[target * 2] / 1e7;
           var tLon = nodesScaled[target * 2 + 1] / 1e7;
-          var h = haversine(tLat, tLon, endLat, endLon) / (100 / 3.6);
+          var h = haversine(tLat, tLon, endLat, endLon) / (80 / 3.6);
           open.push([newG + h, target]);
         }
       }
@@ -4142,6 +4637,20 @@ function initRouting(map, config) {
 
   attachTypeahead(originInput, originResultsEl, 'origin');
   attachTypeahead(destInput, destResultsEl, 'dest');
+
+  // Auto-clear "Current location" placeholder text on focus, so the
+  // user can start typing a new address without first hand-deleting
+  // the synthetic label. Only triggers for that specific placeholder
+  // label — a real typed address is left untouched.
+  function clearCurrentLocationOnFocus(input) {
+    input.addEventListener('focus', function() {
+      if (input.value === 'Current location') {
+        input.value = '';
+      }
+    });
+  }
+  clearCurrentLocationOnFocus(originInput);
+  clearCurrentLocationOnFocus(destInput);
 
   // Current location button (origin only). Uses the standard Geolocation API.
   // Falls back gracefully if not available or permission denied.

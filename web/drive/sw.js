@@ -17,7 +17,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // The sync script writes a stamp to web/drive/viewer/.version which the
 // page reads on load and posts to the SW — we compare and clear stale
 // caches. For now just hand-bump on big changes.
-const SHELL_CACHE = 'streetzim-drive-shell-48ce0a6d5a';
+const SHELL_CACHE = 'streetzim-drive-shell-ca2abdd485-d120623';
 
 const SHELL_URLS = [
   './',
@@ -276,22 +276,26 @@ self.addEventListener('fetch', (event) => {
   // Viewer scope: /drive/viewer/*
   const viewerPrefix = '/drive/viewer/';
   if (url.pathname === viewerPrefix || url.pathname.startsWith(viewerPrefix)) {
-    const rest = url.pathname.slice(viewerPrefix.length);  // '' | 'index.html' | 'tiles/10/1/2.pbf' | ...
+    const rest = url.pathname.slice(viewerPrefix.length);
     const firstSegment = rest.split('/')[0] || '';
     if (VIEWER_SHELL_NAMES.has(firstSegment) && !rest.includes('/')) {
-      // Shell asset — serve from cache, network as fallback.
+      // Shell asset — NETWORK-FIRST. Stale cached HTML/JS was the
+      // 2026-04-25 frustration: deploys were live on Firebase but
+      // users saw old bundles for an indefinite window because the
+      // SW served the cache. Network-first means: when online, you
+      // ALWAYS see the current deploy. Cache only kicks in offline.
       event.respondWith((async () => {
-        const cached = await caches.match(req);
-        if (cached) return cached;
         try {
-          const net = await fetch(req);
+          const net = await fetch(req, { cache: 'no-store' });
           if (net && net.ok) {
             const copy = net.clone();
             caches.open(SHELL_CACHE).then((c) => cacheClean(c, req, copy));
           }
           return net;
         } catch (e) {
-          return notFound(rest);
+          // Offline fallback only.
+          const cached = await caches.match(req);
+          return cached || notFound(rest);
         }
       })());
       return;
@@ -302,7 +306,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   // build-info.js must never be cached — it's the "am I on the fresh
-  // deploy?" indicator for the picker page. Network-first, no fallback.
+  // deploy?" indicator. Network-first, no cache.
   if (url.pathname === '/drive/build-info.js') {
     event.respondWith(fetch(req, { cache: 'no-store' }).catch(() =>
       new Response('/* offline */', {
@@ -313,18 +317,18 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // /drive/ itself (picker page) and PWA shell assets: cache-first.
+  // Picker page + shell — NETWORK-FIRST too. Same reason as the
+  // viewer above: when online, always reflect the current deploy.
   event.respondWith((async () => {
-    const cached = await caches.match(req);
-    if (cached) return cached;
     try {
-      const net = await fetch(req);
+      const net = await fetch(req, { cache: 'no-store' });
       if (net && net.ok) {
         const copy = net.clone();
         caches.open(SHELL_CACHE).then((c) => cacheClean(c, req, copy));
       }
       return net;
     } catch (e) {
+      const cached = await caches.match(req);
       return cached || notFound(url.pathname);
     }
   })());

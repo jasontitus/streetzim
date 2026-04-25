@@ -31,6 +31,19 @@ if [ -x "$PROJECT_DIR/venv312/bin/python" ]; then
 else
     PYTHON="${PYTHON:-python3}"
 fi
+# `ia` ships with the internetarchive pip package inside the venv; bare
+# `ia` isn't on PATH in non-activated shells, so resolve it alongside
+# $PYTHON. Was silently broken on 2026-04-24 when a Japan upload hit
+# "ia: command not found" and skipped the actual upload but kept going.
+if [ -x "$PROJECT_DIR/venv312/bin/ia" ]; then
+    IA="$PROJECT_DIR/venv312/bin/ia"
+    # cleanup_old_zims.py + stamp_item_metadata.py shell out to bare
+    # `ia` via subprocess.run; prepend venv bin so those Python children
+    # inherit a PATH that resolves `ia`.
+    export PATH="$PROJECT_DIR/venv312/bin:$PATH"
+else
+    IA="${IA:-ia}"
+fi
 
 if [ ! -s "$dated" ]; then
     echo "FATAL ${id}: source ${dated} missing or empty" >&2
@@ -46,12 +59,12 @@ fi
 echo "validation passed."
 
 # --- 2. ia upload (same pattern as overture-rollout-redo.sh) ---
-ia upload "streetzim-${id}" "$(basename "$dated")" --retries 5 \
+"$IA" upload "streetzim-${id}" "$(basename "$dated")" --retries 5 \
     || echo "WARN upload reported issues for ${id} — continuing"
 sleep 30
 
 # --- 3. metadata modify ---
-ia metadata "streetzim-${id}" --modify="date:${today}" || true
+"$IA" metadata "streetzim-${id}" --modify="date:${today}" || true
 
 # --- 4. stamp feature flags ---
 "$PYTHON" cloud/stamp_item_metadata.py "streetzim-${id}" \

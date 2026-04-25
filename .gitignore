@@ -29,3 +29,14 @@ overture_cache/
 /wikidata_cache
 /world-data
 /silicon-valley-overture.log
+
+# Node deps for the puppeteer-based routing harness.
+/node_modules/
+
+# Build / deploy noise (logs from build_region.sh, rollout scripts,
+# and ad-hoc retry runs). We don't review these.
+/*.log
+/.preflight-corrupt-tiles.txt
+/3
+/boundary_chunk_*.txt
+/.firebase/

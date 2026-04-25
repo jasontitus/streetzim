@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>StreetZim — Offline Maps for Kiwix</title>
 <meta name="description" content="Free, fully offline OpenStreetMap maps for the Kiwix reader. Vector tiles, satellite imagery, 3D terrain, and Wikipedia info — works without an internet connection on iOS, Android, Mac, Windows, and Linux.">
-<!-- Firebase Analytics -->
+<!-- Firebase Analytics — only on the public marketing landing page.
+     Removed from the /drive/ PWA so the maintainer's debugging
+     sessions don't fire tracking events. -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
   import { getAnalytics, logEvent } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-analytics.js";
@@ -362,7 +364,17 @@
       <span class="map-badge badge-satellite">Satellite</span> Sentinel-2 imagery,
       <span class="map-badge badge-wiki">Wikipedia links</span> Wikidata cross-refs.
     </p>
-    <p class="updated">Last updated: {{UPDATED}}</p>
+    <p class="updated">Last updated: {{UPDATED}} · build <span id="build-stamp">…</span></p>
+<script>
+fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
+  .then(function(r) { return r.ok ? r.text() : ''; })
+  .then(function(src) {
+    var el = document.getElementById('build-stamp');
+    if (!el) return;
+    var m = src.match(/stamp:\s*"([^"]+)"/);
+    if (m) el.textContent = m[1];
+  });
+</script>
 
     <div class="maps">
 {{MAPS}}

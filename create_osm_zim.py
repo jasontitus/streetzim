@@ -3239,6 +3239,7 @@ def create_zim(
     overture_sources=None,
     overture_themes=None,
     split_hot_search_chunks_mb=0,
+    split_find_chips=False,
 ):
     """Create a ZIM file containing the map viewer and all tiles."""
     from libzim.writer import Creator, Item, StringProvider, FileProvider
@@ -3462,6 +3463,16 @@ def create_zim(
 
         print(f"    Adding {total_tiles} vector tiles...", flush=True)
         tiles_added = 0
+        # Tilemaker emits a 0-byte PBF for every tile coord that has no
+        # features in its bbox (deep ocean / desert / pure-empty). Adding
+        # those wastes a libzim entry per tile (~50 B each) and floods
+        # zimcheck's "Empty article" report (3k–191k per region as of
+        # 2026-04-25). MapLibre treats 404 and "0-byte tile" the same —
+        # nothing to render — so we drop them at write time. Real-content
+        # near-empty tiles (e.g. 55-byte ocean-only with a water/ocean
+        # layer) ARE kept; they paint the right ocean color when MapLibre
+        # styles them.
+        tiles_skipped_empty = 0
         tile_start = time.time()
         batch_start = time.time()
         batch_size = 1000
@@ -3481,6 +3492,13 @@ def create_zim(
 
             add_start = time.time()
             for i, (z, x, y, tile_data) in enumerate(results):
+                # See note above: 0-byte tiles are MVT placeholders for
+                # bbox cells with no features. Drop them — MapLibre
+                # rendering is unaffected, ZIM entries dedup, zimcheck
+                # "Empty article" count goes to 0.
+                if not tile_data:
+                    tiles_skipped_empty += 1
+                    continue
                 item_start = time.time()
                 creator.add_item(MapItem(
                     f"tiles/{z}/{x}/{y}.pbf", f"Tile {z}/{x}/{y}",
@@ -3520,7 +3538,9 @@ def create_zim(
 
         elapsed = time.time() - tile_start
         rate_str = f"{tiles_added/elapsed:.0f}/s" if elapsed > 0 else "instant"
-        print(f"\r    Added {tiles_added} tiles in {elapsed:.0f}s ({rate_str})                ", flush=True)
+        skip_str = (f" (skipped {tiles_skipped_empty} empty)"
+                    if tiles_skipped_empty else "")
+        print(f"\r    Added {tiles_added} tiles in {elapsed:.0f}s ({rate_str}){skip_str}                ", flush=True)
         _watchdog_stop.set()  # stop watchdog after tiles
 
         # Build bbox tile filter if bbox is provided (shared cache may have tiles from other areas)
@@ -4094,6 +4114,7 @@ def create_zim(
             # linear scan. Same canonical record shape as search-data chunks.
             if cat_chunk_counts:
                 cat_total_records = 0
+                records_by_cat: dict[str, list] = {}
                 for cat_slug in sorted(cat_chunk_counts):
                     cat_path = os.path.join(cat_dir, f"{cat_slug}.jsonl")
                     entries = []
@@ -4109,14 +4130,38 @@ def create_zim(
                         chunk_json.encode("utf-8"),
                     ))
                     cat_total_records += len(entries)
+                    if split_find_chips and cat_slug in ("poi", "park"):
+                        records_by_cat[cat_slug] = entries
                 cat_manifest = {k: cat_chunk_counts[k] for k in sorted(cat_chunk_counts)}
+                manifest_payload = {"total": cat_total_records,
+                                    "categories": cat_manifest}
+                if split_find_chips and records_by_cat:
+                    from cloud.chip_rules import CHIP_RULES, split_records_by_chip
+                    by_chip = split_records_by_chip(records_by_cat)
+                    chips_manifest: dict = {}
+                    for chip in CHIP_RULES:
+                        recs = by_chip.get(chip.id, [])
+                        blob = json.dumps(recs, separators=(",", ":"))
+                        blob_bytes = blob.encode("utf-8")
+                        creator.add_item(MapItem(
+                            f"category-index/chip-{chip.id}.json",
+                            f"Find chip {chip.label}",
+                            "application/json",
+                            blob_bytes,
+                        ))
+                        chips_manifest[chip.id] = {
+                            "label": chip.label,
+                            "count": len(recs),
+                            "bytes": len(blob_bytes),
+                        }
+                    manifest_payload["chips"] = chips_manifest
+                    print(f"    Added {len(chips_manifest)} chip files "
+                          f"({sum(c['count'] for c in chips_manifest.values())} records)")
                 creator.add_item(MapItem(
                     "category-index/manifest.json",
                     "Category Index Manifest",
                     "application/json",
-                    json.dumps({"total": cat_total_records,
-                                "categories": cat_manifest},
-                               separators=(",", ":")).encode("utf-8"),
+                    json.dumps(manifest_payload, separators=(",", ":")).encode("utf-8"),
                 ))
                 print(f"    Added category-index: "
                       f"{len(cat_chunk_counts)} categories, {cat_total_records} records")
@@ -4579,6 +4624,13 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "places theme: websites, phones, socials, brand, and normalized "
                              "categories (museum/hotel/…) instead of OMT's noisy class buckets. "
                              "Run download_overture_data.py places --out …parquet first.")
+    parser.add_argument("--split-find-chips", action="store_true",
+                        help="Pre-slice category-index/{poi,park}.json by Find-page "
+                             "chip at build time. Emits one `category-index/chip-{id}.json` "
+                             "per chip plus chip entries in the manifest. places.html "
+                             "loads only the chosen chip file (~MB) instead of the "
+                             "full poi.json (up to 1 GB on Japan), which OOM'd Chrome "
+                             "and iOS WebViews. Source of truth: cloud/chip_rules.py.")
 
     args = parser.parse_args()
 
@@ -5053,16 +5105,34 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 finally:
                     _vrt_handle.close()
                 if still_broken:
+                    # Narrow escape hatch: when Copernicus GLO-30 has
+                    # genuine gaps (e.g. high Arctic ≥75°N where DEM
+                    # tiles are sparse on Banks Island, Sverdrup
+                    # Islands), an operator can set
+                    # `TERRAIN_BLANK_TOLERATE=N` to allow up to N
+                    # still-blank tiles through. Default 0 keeps the
+                    # hard fail. This is intentionally NOT a flag —
+                    # we don't want it to leak into routine builds.
+                    tolerate = int(os.environ.get("TERRAIN_BLANK_TOLERATE", "0") or 0)
                     sample = still_broken[:5]
-                    raise RuntimeError(
-                        f"Terrain build unhealthy: {len(still_broken)} tiles still "
-                        f"under 500 bytes after repair pass. Sample:\n  " +
-                        "\n  ".join(f"z={z} x={x} y={y} ({p})" for z, x, y, p in sample) +
-                        "\nLikely missing DEM sources for these tiles' bbox. "
-                        "Download the needed Copernicus DEMs or delete the broken "
-                        "tiles and rerun. Aborting before ZIM packaging."
-                    )
-                print("    Terrain audit passed — no blank tiles in bbox")
+                    sample_str = "\n  ".join(
+                        f"z={z} x={x} y={y} ({p})" for z, x, y, p in sample)
+                    if len(still_broken) <= tolerate:
+                        print(f"    [WARN] {len(still_broken)} blank tile(s) past "
+                              f"repair, within TERRAIN_BLANK_TOLERATE={tolerate}. "
+                              f"Sample:\n  {sample_str}\n    Continuing.")
+                    else:
+                        raise RuntimeError(
+                            f"Terrain build unhealthy: {len(still_broken)} tiles still "
+                            f"under 500 bytes after repair pass. Sample:\n  " +
+                            sample_str +
+                            "\nLikely missing DEM sources for these tiles' bbox. "
+                            "Download the needed Copernicus DEMs, delete the broken "
+                            "tiles and rerun, or set TERRAIN_BLANK_TOLERATE=N to "
+                            f"accept up to N gaps (currently {tolerate}). Aborting."
+                        )
+                else:
+                    print("    Terrain audit passed — no blank tiles in bbox")
 
         # NOTE: No size-threshold satellite audit — legitimate deep-ocean
         # Sentinel-2 imagery compresses to ~300-500 bytes (dark near-black RGB).
@@ -5147,6 +5217,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             routing_graph_geoms_path=routing_graph_geoms_path,
             routing_graph_chunk_mb=int(getattr(args, 'chunk_graph_mb', 0) or 0),
             split_hot_search_chunks_mb=int(getattr(args, 'split_hot_search_chunks_mb', 0) or 0),
+            split_find_chips=bool(getattr(args, 'split_find_chips', False)),
             wiki_cross_refs=wiki_cross_refs,
             overture_sources=overture_sources,
             overture_themes=overture_themes,

@@ -31,6 +31,21 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent.parent.resolve()
 VIEWER_DIR = SCRIPT_DIR / "resources" / "viewer"
 
+# When this script is run as `python3 cloud/repackage_zim.py …`, sys.path[0]
+# is the `cloud/` dir, not the repo root, so `from cloud.chip_rules import …`
+# fails with ModuleNotFoundError. Put the repo root at the front so sibling
+# package imports resolve.
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+# Eager import so a bad sys.path or missing chip_rules fails fast at
+# startup, not 30 minutes into a chip-split run. The 2026-04-24 Japan
+# "broken v1" regression was caused by this import living inside the
+# split_find_chips branch — by the time it threw ModuleNotFoundError,
+# the source manifest had already been skipped, leaving the output
+# ZIM without ANY category-index/manifest.json.
+from cloud.chip_rules import CHIP_RULES, record_matches_chip  # noqa: E402
+
 
 def _v4_to_v5_bufs(v4_buf: bytes) -> tuple[bytes, bytes]:
     """Split a v4 SZRG buffer into the v5 main + SZGM companion. Mirrors
@@ -334,7 +349,8 @@ def repackage(src_path: str, dst_path: str,
               spatial_chunk_scale: int = 0,
               split_hot_search_chunks_mb: int = 0,
               refresh_terrain_dir: str | None = None,
-              unchunk_graph: bool = False) -> int:
+              unchunk_graph: bool = False,
+              split_find_chips: bool = False) -> int:
     from libzim.reader import Archive
     from libzim.writer import Creator, Item, StringProvider, Hint
 
@@ -562,6 +578,11 @@ def repackage(src_path: str, dst_path: str,
                     captured_search_manifest = None
                 replaced_search_paths.add(path)
                 continue
+            # When we're emitting a new category-index/manifest.json
+            # at the end (with the chip counts), skip the source one so
+            # the new one doesn't collide.
+            if split_find_chips and path == "category-index/manifest.json":
+                continue
             if (split_search and path.startswith("search-data/")
                     and path.endswith(".json")
                     and path != "search-data/manifest.json"
@@ -661,6 +682,67 @@ def repackage(src_path: str, dst_path: str,
             try: c.add_metadata("Illustration_48x48@1", illus)
             except Exception as e: print(f"  warning: illustration: {e}")
 
+        # Chip-split retrofit: if requested, read the source's
+        # category-index/poi.json + park.json, split by Find-page chip
+        # via cloud/chip_rules, and emit one chip-{id}.json per chip.
+        # places.html fetches chip-* instead of the full poi.json (which
+        # is 1 GB on Japan and OOM'd Chrome). Runs AFTER the passthrough
+        # so the new entries always get into the output.
+        # CHIP_RULES / record_matches_chip are imported at module top
+        # so failures surface before any copy work starts.
+        if split_find_chips:
+            # Load the per-cat bundles the chips pull from.
+            records_by_cat: dict[str, list] = {}
+            for cat in {chip.from_cat for chip in CHIP_RULES}:
+                path = f"category-index/{cat}.json"
+                try:
+                    raw = bytes(src.get_entry_by_path(path).get_item().content)
+                    records_by_cat[cat] = json.loads(raw)
+                except Exception:
+                    records_by_cat[cat] = []
+            new_chips_meta: dict[str, dict] = {}
+            for chip in CHIP_RULES:
+                src_records = records_by_cat.get(chip.from_cat, [])
+                if not src_records:
+                    continue
+                dst_records = [r for r in src_records
+                               if record_matches_chip(r, chip)]
+                if not dst_records:
+                    continue
+                chip_bytes = json.dumps(dst_records, separators=(",", ":"),
+                                         ensure_ascii=False).encode("utf-8")
+                entry_path = f"category-index/chip-{chip.id}.json"
+                c.add_item(PassthroughItem(
+                    entry_path,
+                    f"Find chip: {chip.label}",
+                    "application/json",
+                    chip_bytes,
+                    compress=True,
+                ))
+                new_chips_meta[chip.id] = {
+                    "label": chip.label,
+                    "count": len(dst_records),
+                    "bytes": len(chip_bytes),
+                }
+                print(f"  chip-{chip.id}: {len(dst_records):,} records "
+                      f"({len(chip_bytes)/1024/1024:.1f} MB)")
+            # Re-emit category-index/manifest.json with the new chips
+            # section so places.html can enumerate them.
+            try:
+                old_mani = json.loads(bytes(
+                    src.get_entry_by_path("category-index/manifest.json"
+                                          ).get_item().content))
+            except Exception:
+                old_mani = {}
+            old_mani["chips"] = new_chips_meta
+            c.add_item(PassthroughItem(
+                "category-index/manifest.json",
+                "Category Index Manifest",
+                "application/json",
+                json.dumps(old_mani, separators=(",", ":")).encode("utf-8"),
+                compress=True,
+            ))
+
         # Add viewer assets that existed in `replacements` but weren't
         # present in the source ZIM. Several 2026-04-22 regional builds
         # (east-coast-us, australia-nz, west-coast-us) shipped without
@@ -751,6 +833,13 @@ def main() -> int:
                         "under 500 MB (Kiwix iOS app can't parse chunked-"
                         "only layout but handles monolithic fine). Under "
                         "500 MB the chunk split is unnecessary anyway.")
+    p.add_argument("--split-find-chips", action="store_true",
+                   help="Read category-index/poi.json + park.json and "
+                        "emit per-chip category-index/chip-{id}.json "
+                        "files (restaurants, cafes, museums, …). "
+                        "places.html fetches the chip file directly "
+                        "instead of the full 1 GB poi.json which OOMs "
+                        "Chrome on Japan.")
     args = p.parse_args()
     return repackage(args.src, args.dst,
                      swap_viewer=not args.no_swap_viewer,
@@ -760,7 +849,8 @@ def main() -> int:
                      spatial_chunk_scale=args.spatial_chunk_scale,
                      split_hot_search_chunks_mb=args.split_hot_search_chunks_mb,
                      refresh_terrain_dir=args.refresh_terrain_tiles,
-                     unchunk_graph=args.unchunk_graph)
+                     unchunk_graph=args.unchunk_graph,
+                     split_find_chips=args.split_find_chips)
 
 
 if __name__ == "__main__":

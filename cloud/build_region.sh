@@ -105,12 +105,44 @@ if ! ./venv312/bin/python3 create_osm_zim.py \
         --overture-places "$places" \
         --chunk-graph-mb 200 \
         --split-hot-search-chunks-mb 10 \
+        --split-find-chips \
         "${LOW_ZOOM_VRT_ARG[@]}" \
         --output "$out" \
         --keep-temp \
         > "$log" 2>&1; then
     echo "[FATAL] build failed for $id — see $log"
     exit 2
+fi
+
+# ------------------------------------------------------------------
+# 4b. Conditional spatial repackage. create_osm_zim's --chunk-graph-mb
+# only does linear byte-range chunks; the PWA's fzstd port AND mobile
+# Kiwix both need spatial (SZCI+SZRC) layout when the graph exceeds
+# the WebView heap ceiling (~500 MB). Threshold measured 2026-04-24
+# (Egypt 316 MB mono OK; Iran 520 MB chunked failed on iOS).
+# ------------------------------------------------------------------
+graph_mb=$(./venv312/bin/python3 -c "
+from libzim.reader import Archive
+import sys
+try:
+    a = Archive(sys.argv[1])
+    e = a.get_entry_by_path('routing-data/graph.bin')
+    print(int(e.get_item().size / 1024 / 1024))
+except Exception:
+    print(0)
+" "$out" 2>/dev/null)
+if [ "${graph_mb:-0}" -gt 500 ]; then
+    log "graph.bin=${graph_mb} MB > 500 — repackaging to spatial layout"
+    spatial_out="${out%.zim}-spatial.zim"
+    if ! ./venv312/bin/python3 cloud/repackage_zim.py \
+            "$out" "$spatial_out" --spatial-chunk-scale 1 \
+            > "${id}-spatial.log" 2>&1; then
+        echo "[FATAL] spatial repackage failed for $id — see ${id}-spatial.log"
+        exit 3
+    fi
+    mv "$out" "${out%.zim}-mono.zim"
+    mv "$spatial_out" "$out"
+    log "spatial repackage OK"
 fi
 
 # ------------------------------------------------------------------

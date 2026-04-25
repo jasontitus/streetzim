@@ -343,6 +343,66 @@ def _chk_places_categories(arc) -> tuple[str, str]:
             f"{len(cats)} categories; sample {slug} has {len(recs):,} records")
 
 
+def _chk_find_chips(arc) -> tuple[str, str]:
+    """When `--split-find-chips` was used, the manifest must declare a
+    `chips` map AND every referenced `chip-{id}.json` file must exist
+    and parse as a list. Catches silent chip-split failures (e.g.
+    ModuleNotFoundError during chip emission that still lets the
+    wrapper ZIM finalize — the 2026-04-24 Japan chips bug)."""
+    try:
+        mani = json.loads(bytes(
+            arc.get_entry_by_path("category-index/manifest.json").get_item().content
+        ))
+    except Exception:
+        return ("skip", "manifest missing (no chip-split)")
+    chips = mani.get("chips")
+    if not isinstance(chips, dict) or not chips:
+        # Skip rather than warn — a ZIM built without --split-find-chips
+        # legitimately has no chips section.
+        return ("skip", "no chips declared in manifest")
+    # Every declared chip must have a corresponding file that parses.
+    missing = []
+    empty = []
+    for cid, meta in chips.items():
+        path = f"category-index/chip-{cid}.json"
+        try:
+            raw = bytes(arc.get_entry_by_path(path).get_item().content)
+        except Exception:
+            missing.append(cid)
+            continue
+        try:
+            recs = json.loads(raw)
+        except Exception:
+            missing.append(cid)
+            continue
+        if not isinstance(recs, list):
+            missing.append(cid)
+            continue
+        # Manifest count should match the file's actual record count.
+        declared = int(meta.get("count") or 0)
+        if declared != len(recs):
+            return ("fail",
+                    f"chip '{cid}' manifest count={declared} but file "
+                    f"has {len(recs)} records — inconsistent")
+        if declared == 0 and cid in ("restaurants", "cafes", "shops"):
+            # These three are expected to have matches in any populated
+            # region. An empty one signals the rules didn't run.
+            empty.append(cid)
+    if missing:
+        return ("fail",
+                f"chip files missing/unreadable: {', '.join(missing)}")
+    if empty:
+        return ("warn",
+                f"chips with zero records: {', '.join(empty)} — "
+                f"rules likely didn't run")
+    sizes = sorted(chips.items(), key=lambda kv: -int(kv[1].get("bytes") or 0))
+    biggest = sizes[0]
+    return ("pass",
+            f"{len(chips)} chip files; biggest "
+            f"{biggest[0]}={int(biggest[1]['bytes'])/1e6:.1f}MB "
+            f"({biggest[1]['count']} recs)")
+
+
 def _chk_routing_sample(arc, cfg, zim_path: str) -> tuple[str, str]:
     """Pick two on-map points and attempt an A* route. If the graph
     loads but no sample route can find a path within reasonable
@@ -1261,6 +1321,10 @@ def validate(zim_path: str, *, audit_tiles: bool = False) -> list[Result]:
                           _chk_terrain_edge_stripe, arc, cfg))
     results.append(_check("places_categories", "warn",
                           _chk_places_categories, arc))
+    # "error" severity: if chips were declared but the files are missing/
+    # broken, Find will default back to `poi.json` and OOM the browser on
+    # big regions. Worth failing a PR-candidate ZIM over.
+    results.append(_check("find_chips", "error", _chk_find_chips, arc))
     results.append(_check("overture_fields", "warn",
                           _chk_overture_fields, arc, cfg))
     results.append(_check("routing_kiwix_compat", "error",

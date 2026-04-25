@@ -69,6 +69,19 @@ fi
 #    mix of old+new for 3+ hours.
 # ---------------------------------------------------------------
 stamp=$(git rev-parse --short=10 HEAD 2>/dev/null || echo "$(date +%Y%m%d%H)")
+# When the working tree has staged or unstaged changes, append a
+# minute-precision dirty suffix so a cache-bust deploy from an
+# uncommitted state still produces a NEW SHELL_CACHE key. Otherwise
+# repeated `--deploy` calls before a commit silently reuse the cache
+# and the SW serves stale viewer JS to clients (seen 2026-04-25 when
+# the wiki Directions button + two-pass routing edits weren't
+# reaching the PWA).
+if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+    # Use seconds-precision so back-to-back deploys within the same
+    # minute still produce a fresh cache key — otherwise the SW
+    # treated two same-minute dirty deploys as equivalent.
+    stamp="${stamp}-d$(date +%H%M%S)"
+fi
 when=$(date "+%Y-%m-%d %H:%M %Z")
 
 log "bump build-info → $stamp @ $when"
