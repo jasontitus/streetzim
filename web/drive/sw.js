@@ -17,7 +17,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // The sync script writes a stamp to web/drive/viewer/.version which the
 // page reads on load and posts to the SW — we compare and clear stale
 // caches. For now just hand-bump on big changes.
-const SHELL_CACHE = 'streetzim-drive-shell-ca2abdd485-d120623';
+const SHELL_CACHE = 'streetzim-drive-shell-946d6d26a5-d090354';
 
 const SHELL_URLS = [
   './',
@@ -32,10 +32,17 @@ const SHELL_URLS = [
   './viewer/maplibre-gl.css'
 ];
 
-// Files in /drive/viewer/ that are always part of the shell, never the
-// ZIM. Everything else under /drive/viewer/ is ZIM content.
+// Files in /drive/viewer/ that are always part of the shell, never
+// the ZIM. Everything else under /drive/viewer/ is ZIM content.
+// Firebase Hosting's `cleanUrls: true` redirects `places.html` →
+// `places` (no extension), so we list both — otherwise the SW
+// intercepts the redirected URL and tries to serve `places` from
+// the ZIM, which 404s as "Not in ZIM: places".
 const VIEWER_SHELL_NAMES = new Set([
-  '', 'index.html', 'places.html', 'maplibre-gl.js', 'maplibre-gl.css'
+  '',
+  'index', 'index.html',
+  'places', 'places.html',
+  'maplibre-gl.js', 'maplibre-gl.css'
 ]);
 
 // ---------- IndexedDB helpers (no dependency) ----------
@@ -241,12 +248,45 @@ function noZim() {
   });
 }
 
+// The viewer probes for both the v10+ spatial layout and the v8/v9
+// monolithic layout, expecting one to be absent. Returning 404 for
+// the missing variant is *correct* but the browser surfaces it as
+// "Failed to load resource" in the console even though the JS
+// handles the .ok=false path. Map known-optional probes to
+// 204 No Content + X-Streetzim-Absent header — quiet, and the JS
+// already treats !ok || empty body as "fall back".
+const OPTIONAL_PROBE_PATHS = new Set([
+  'routing-data/graph-cells-index.bin',
+  'routing-data/graph.bin',
+  'routing-data/graph-chunk-manifest.json',
+  'routing-data/graph-geoms.bin',
+  'routing-data/graph-geoms-chunk-manifest.json',
+]);
+
 async function serveFromZim(viewerPath, request) {
   try {
     const reader = await getReader();
     if (!reader) return noZim();
     const entry = await reader.read(viewerPath);
-    if (!entry) return notFound(viewerPath);
+    if (!entry) {
+      if (OPTIONAL_PROBE_PATHS.has(viewerPath)) {
+        // Tried 204 No Content; Chromium fires both response(204) AND
+        // requestfailed(net::ERR_ABORTED) for null-body 204s, which
+        // makes Puppeteer (and devtools panel) flag it as a failure.
+        // 200 OK + empty body + X-Streetzim-Absent header is quiet
+        // and lets the JS detect "absent" via the header.
+        return new Response('', {
+          status: 200,
+          statusText: 'OK',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'Content-Length': '0',
+            'X-Streetzim-Absent': '1'
+          }
+        });
+      }
+      return notFound(viewerPath);
+    }
     const range = request.headers.get('range');
     if (range) {
       const rr = rangeResponse(entry.data, range, entry.mime);
@@ -278,7 +318,12 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname === viewerPrefix || url.pathname.startsWith(viewerPrefix)) {
     const rest = url.pathname.slice(viewerPrefix.length);
     const firstSegment = rest.split('/')[0] || '';
-    if (VIEWER_SHELL_NAMES.has(firstSegment) && !rest.includes('/')) {
+    // Firebase cleanUrls + trailingSlash:true canonicalizes
+    // `places.html` to `places/` (with trailing slash). Treat that
+    // as the same shell asset as the un-slashed name — strip a
+    // single trailing slash before deciding shell vs ZIM data.
+    const restNoSlash = rest.endsWith('/') ? rest.slice(0, -1) : rest;
+    if (VIEWER_SHELL_NAMES.has(firstSegment) && !restNoSlash.includes('/')) {
       // Shell asset — NETWORK-FIRST. Stale cached HTML/JS was the
       // 2026-04-25 frustration: deploys were live on Firebase but
       // users saw old bundles for an indefinite window because the

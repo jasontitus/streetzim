@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Find places</title>
+<!-- See viewer/index.html — same favicon hack to keep the browser
+     from auto-probing /favicon.ico (outside SW scope = 404). -->
+<link rel="icon" href="data:image/x-icon;base64,AAABAAEAAQEAAAEAIAAwAAAAFgAAACgAAAABAAAAAgAAAAEAIAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA">
 <style>
   :root {
     --bg:#fafafa; --fg:#1a1a1a; --muted:#666; --line:#e0e0e0;
@@ -102,7 +105,7 @@
 <header>
   <div class="titlebar">
     <h1>Find places</h1>
-    <a class="back" href="index.html">← Map</a>
+    <a class="back" href="../index.html">← Map</a>
   </div>
   <input id="q" type="search" placeholder="Search by name or category…"
          autocomplete="off" autocapitalize="none" spellcheck="false">
@@ -135,7 +138,12 @@
 // ZIM (kiwix) the path is `search-data/...`; over the Firebase /drive
 // PWA it's `viewer/search-data/...` because the viewer ships under
 // `viewer/`. We compute the prefix once at boot.
-const HERE = location.pathname.replace(/[^/]*$/, '');
+//
+// Handle both `…/viewer/places.html` (Kiwix native, no rewriting) AND
+// `…/viewer/places/` (Firebase cleanUrls + trailingSlash) — treat the
+// trailing slash as if it were the file extension by stripping the
+// last non-empty path component plus any trailing slash.
+const HERE = location.pathname.replace(/[^/]+\/?$/, '');
 const DATA = HERE + 'search-data/';
 const CAT  = HERE + 'category-index/';
 
@@ -295,13 +303,16 @@ const els = {
 // ---------- reverse geocoder (viewport-center → nearest city) ----------
 
 // Find the closest place:city|town|village record within ~50 km of
-// (lat, lon) by scanning the category-index places chunk. We use the
-// category-index (not search-data) because it's keyed by OSM `type`
-// and already indexes places separately, so the fetch is small +
-// one-time. Falls back to a larger radius if nothing nearby.
+// (lat, lon) by scanning the category-index `place` chunk. The file
+// name follows the OSM `type` field (singular `place`, never `places`)
+// — older builds and the smoke harness both proved a hardcoded
+// `places.json` 404s. Skip the request entirely if the manifest says
+// no `place` chunk exists.
 async function reverseGeocodeFromViewport(lat, lon) {
   try {
-    const raw = await fetchJSON(CAT + 'places.json').catch(() => null);
+    const cats = state.manifests.cat && state.manifests.cat.categories;
+    if (!cats || !cats.place) return null;
+    const raw = await fetchJSON(CAT + 'place.json').catch(() => null);
     if (!raw || !Array.isArray(raw)) return null;
     const kinds = { city: 4, town: 3, village: 2, hamlet: 1, suburb: 1 };
     let bestName = null, bestScore = -Infinity;
@@ -564,7 +575,12 @@ function renderResults() {
     // toggle), pass it as `origin=…` so the viewer's routing panel can
     // fill both endpoints up front instead of forcing the user to tap
     // the GPS button and wait for a second fix.
-    let href = 'index.html#dest=' + r.a + ',' + r.o
+    // Firebase Hosting's `trailingSlash: true` canonicalizes
+    // `places.html` to `places/`, so the document base for relative
+    // URLs is `/drive/viewer/places/`. A bare `index.html` would
+    // resolve to `/drive/viewer/places/index.html` (404, served by SW
+    // as ZIM 404). Go up one level so it lands on the viewer root.
+    let href = '../index.html#dest=' + r.a + ',' + r.o
              + '&label=' + encodeURIComponent(r.n || '');
     if (state.origin) {
       href += '&origin=' + state.origin.lat + ',' + state.origin.lon;
@@ -574,11 +590,7 @@ function renderResults() {
     const mapA = document.createElement('a');
     mapA.textContent = 'Map';
     const zoom = (r.t === 'place' || r.t === 'park') ? 14 : 16;
-    // Pass the name through as &label= so the viewer can drop a red pin
-    // (+ Directions popup) at the place — without it the user just
-    // lands on a camera move with no visual indicator of *what* they
-    // tapped.
-    mapA.href = 'index.html#map=' + zoom + '/' + r.a + '/' + r.o
+    mapA.href = '../index.html#map=' + zoom + '/' + r.a + '/' + r.o
               + '&pin=' + r.a + ',' + r.o
               + '&label=' + encodeURIComponent(r.n || '');
     ctas.appendChild(mapA);

@@ -11,6 +11,7 @@
 <title>StreetZim — Offline Maps</title>
 <link rel="manifest" href="/drive/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/drive/icon-192.png">
+<link rel="icon" href="/drive/icon-192.png" type="image/png">
 <style>
   :root {
     --bg: #0b1220;
@@ -227,7 +228,14 @@
       const target = swTarget();
       if (!target) { reject(new Error('no service worker available')); return; }
       const ch = new MessageChannel();
-      const t = setTimeout(() => reject(new Error('SW message timeout')), 30000);
+      // set-zim on very large ZIMs (Canada at 28 GB, world hypotheticals)
+      // can take >30 s for the SW to clone the Blob reference, write
+      // it to IDB, open the ZimReader, and parse the header. For the
+      // small messages (status, clear-zim) 30 s is plenty.
+      const TIMEOUT = (msg && msg.type === 'set-zim') ? 600000 : 30000;
+      const t = setTimeout(() => reject(new Error(
+        'SW message timeout (' + (TIMEOUT/1000) + 's, type=' + (msg && msg.type) + ')'
+      )), TIMEOUT);
       ch.port1.onmessage = (e) => { clearTimeout(t); resolve(e.data); };
       target.postMessage(msg, [ch.port2]);
     });

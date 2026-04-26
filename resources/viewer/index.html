@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>OpenStreetMap Offline</title>
+<!-- Suppress the browser's auto-fetch of /favicon.ico — outside our SW
+     scope, so a 404 there fires a console error in the smoke harness. -->
+<link rel="icon" href="data:image/x-icon;base64,AAABAAEAAQEAAAEAIAAwAAAAFgAAACgAAAABAAAAAgAAAAEAIAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA">
 <!-- MapLibre GL JS and CSS are loaded from embedded files in the ZIM -->
 <link rel="stylesheet" href="maplibre-gl.css">
 <script src="maplibre-gl.js"></script>
@@ -1153,8 +1156,13 @@ fetchConfig(1)
 
       function setTerrainMode(mode) {
         addTerrainSource();
-        // Remove existing hillshade layer if any
-        try { map.removeLayer('hillshade-layer'); } catch(e) {}
+        // Remove existing hillshade layer if present. MapLibre fires
+        // an 'error' EVENT (not a throw) for non-existing layers in
+        // recent versions, so try/catch isn't enough — explicitly
+        // check first to keep the console clean.
+        if (map.getLayer('hillshade-layer')) {
+          map.removeLayer('hillshade-layer');
+        }
 
         if (mode === 0) {
           // Off
@@ -2020,19 +2028,36 @@ function initSearch(map) {
     var subChunks = (manifest && manifest.sub_chunks) || {};
     function expandPrefix(k, seen, out) {
       if (seen[k]) return;
-      if (subChunks[k]) {
-        // Fan out across every sub-bucket.
-        var subs = subChunks[k];
-        for (var j = 0; j < subs.length; j++) {
-          if (!seen[subs[j]] && manifest.chunks[subs[j]] !== undefined) {
-            seen[subs[j]] = true; out.push(subs[j]);
-          }
-        }
-        seen[k] = true;
+      seen[k] = true;
+      // Direct chunk hit — done.
+      if (manifest.chunks[k] !== undefined) { out.push(k); return; }
+      // Recursive fan-out. Canada has prefixes that were split TWICE
+      // (e.g. "to" → "to-0".."to-f" → "to-0-0", "to-1-1", …) and
+      // ``sub_chunks['to']`` was emitted as an empty list by an
+      // earlier writer — the real first-level relationship was
+      // dropped, but the second-level (``sub_chunks['to-0']``) is
+      // present. So when we don't find ``k`` directly:
+      //   1. Try its declared sub-chunks (one level).
+      //   2. Otherwise scan ``sub_chunks`` for any entry whose key
+      //      starts with ``k + '-'`` (covers the case where the
+      //      parent's list was empty but children exist).
+      //   3. Otherwise scan ``chunks`` for any leaf starting with
+      //      ``k + '-'`` (final fallback for non-recursive splits).
+      var direct = subChunks[k];
+      if (direct && direct.length) {
+        for (var j = 0; j < direct.length; j++) expandPrefix(direct[j], seen, out);
         return;
       }
-      if (manifest.chunks[k] !== undefined) {
-        seen[k] = true; out.push(k);
+      var prefix = k + '-';
+      var found = false;
+      for (var sk in subChunks) {
+        if (sk.indexOf(prefix) === 0) { found = true; expandPrefix(sk, seen, out); }
+      }
+      if (found) return;
+      for (var ck in manifest.chunks) {
+        if (ck.indexOf(prefix) === 0 && !seen[ck]) {
+          seen[ck] = true; out.push(ck);
+        }
       }
     }
 
@@ -3181,7 +3206,17 @@ function initRouting(map, config) {
     // and the manifest is authoritative.
     return fetch(baseUrl + manifestPath)
       .then(function(r) {
+        // SW returns 200 + X-Streetzim-Absent for absent optional
+        // probes (e.g. graph-chunk-manifest only exists in v10+
+        // chunked builds). Drain the body before throwing —
+        // Chrome flags an undrained response as net::ERR_ABORTED.
+        var absent = r.headers.get('X-Streetzim-Absent') === '1';
         if (!r.ok) throw new Error('manifest HTTP ' + r.status);
+        if (absent) {
+          return r.text().then(function() {
+            throw new Error('manifest HTTP absent');
+          });
+        }
         return r.json();
       })
       .then(function(manifest) {
@@ -3225,7 +3260,13 @@ function initRouting(map, config) {
           return fetch(baseUrl + primaryPath)
             .then(function(r) {
               if (!r.ok) throw new Error('HTTP ' + r.status);
-              return r.arrayBuffer();
+              var absent = r.headers.get('X-Streetzim-Absent') === '1';
+              return r.arrayBuffer().then(function(buf) {
+                if (absent || !buf || buf.byteLength === 0) {
+                  throw new Error(absent ? 'HTTP absent' : 'empty');
+                }
+                return buf;
+              });
             });
         }
         throw err;
@@ -3546,19 +3587,42 @@ function initRouting(map, config) {
   // (SZCI index) — if present, sets ``graph`` to a SpatialGraph instance
   // and routing paths switch to the async spatial A*. Otherwise falls
   // back to the monolithic/v5-split path.
+  //
+  // Guarded against re-entrance: applyHash + queueGraphPick (origin) +
+  // queueGraphPick (dest) can each call loadGraph in the same tick, and
+  // before this guard each call would race-parse the same SZCI buffer
+  // and the loser would clobber `graph` after the winner already
+  // populated it. The .catch() on the loser then fires the fallback
+  // path, which on a chunked-only Canada ZIM mis-parses graph.bin and
+  // logs "Failed to load routing graph". Single in-flight promise
+  // means the catch only fires once if the underlying load truly
+  // fails.
+  var loadGraphInflight = null;
   function loadGraph() {
     if (graph) return;
+    if (loadGraphInflight) return;
     statusEl.textContent = 'Loading routing data...';
     // Try the spatial index first (tiny file, ~150 MB on Japan but only
     // ~10-100 KB on small regions). If it's not there, fall through to
     // the monolithic loader.
-    fetch(baseUrl + 'routing-data/graph-cells-index.bin')
+    loadGraphInflight = fetch(baseUrl + 'routing-data/graph-cells-index.bin')
       .then(function(r) {
+        // SW returns 200 + X-Streetzim-Absent: 1 for ZIM layouts that
+        // skipped the spatial index (v8/v9 monolithic). Chrome flags
+        // the response as net::ERR_ABORTED if the body stream isn't
+        // drained, so call arrayBuffer() unconditionally and check
+        // the header alongside the byteLength.
+        var absent = r.headers.get('X-Streetzim-Absent') === '1';
         if (!r.ok) throw new Error('no-spatial');
-        return r.arrayBuffer();
+        return r.arrayBuffer().then(function(buf) {
+          return { absent: absent, buf: buf };
+        });
       })
-      .then(function(buf) {
-        var idx = parseRoutingCellsIndex(buf);
+      .then(function(o) {
+        if (o.absent || !o.buf || o.buf.byteLength === 0) {
+          throw new Error('no-spatial');
+        }
+        var idx = parseRoutingCellsIndex(o.buf);
         // 4 instead of 8. Tokyo→Oita on Japan measured 285 MB at 8
         // cells (~36 MB/cell decoded, much bigger than my 8 MB
         // estimate — Japan's 1° cells are dense). 4 keeps cell
@@ -3571,7 +3635,7 @@ function initRouting(map, config) {
           numEdges: idx.numEdges,
           numCells: idx.numCells,
           cellScale: idx.cellScale,
-          indexBytes: buf.byteLength,
+          indexBytes: o.buf.byteLength,
         });
         statusEl.textContent = 'Enter start and destination';
       })
@@ -3600,9 +3664,16 @@ function initRouting(map, config) {
           })
           .catch(function(err) {
             statusEl.textContent = 'Routing data unavailable';
-            console.error('Failed to load routing graph:', err);
+            console.error('Failed to load routing graph:',
+              (err && err.message) || err);
           });
       });
+    // Clear the in-flight latch once the chain settles (success or
+    // failure) so a future loadGraph() call after a transient error
+    // can retry. If `graph` is set, future calls bail at the top.
+    loadGraphInflight.finally && loadGraphInflight.finally(function() {
+      loadGraphInflight = null;
+    });
   }
 
   // Find nearest graph node to a lat/lon (operates on int32-scaled coords)
