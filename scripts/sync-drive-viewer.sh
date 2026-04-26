@@ -69,9 +69,19 @@ else
 fi
 
 # 4. Emit a version stamp so the SW can bust the shell cache when we
-#    change anything here. Hash of concatenated asset sizes — cheap but
-#    stable enough for our purposes.
-STAMP=$(sha1sum "$OUT"/*.* "$fzstd_target" | sha1sum | awk '{print substr($1,1,10)}')
+#    change anything here. By default a hash of concatenated asset
+#    sizes — cheap but stable enough.
+#
+#    `cloud/deploy_pwa.sh` exports its own git-derived stamp via
+#    $STAMP_OVERRIDE so build-info.js, viewer/.version, and the SW's
+#    SHELL_CACHE key all agree (the verify step on deploy_pwa.sh
+#    used to fail because predeploy clobbered the git stamp with
+#    the content-hash one).
+if [ -n "${STAMP_OVERRIDE:-}" ]; then
+  STAMP="$STAMP_OVERRIDE"
+else
+  STAMP=$(sha1sum "$OUT"/*.* "$fzstd_target" | sha1sum | awk '{print substr($1,1,10)}')
+fi
 echo "$STAMP" > "$OUT/.version"
 echo "  version stamp: $STAMP"
 

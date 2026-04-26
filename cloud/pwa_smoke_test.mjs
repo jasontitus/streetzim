@@ -31,6 +31,65 @@ const HEADFUL = process.env.HEADFUL === '1';
 const CHROME_PATH = process.env.CHROME_PATH ||
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
+// Pairs that exercise long-distance routing — what the user actually
+// hits when planning a trip. Picked to be far apart relative to each
+// region's bbox so the spatial graph spans many cells (route memory
+// and convergence time scale with cells touched). Lookup is by
+// substring of the ZIM URL; falls back to silicon-valley.
+const ROUTE_PAIRS = {
+  'silicon-valley': {
+    o: { lat: 37.7749, lon: -122.4194, label: 'San Francisco' },
+    d: { lat: 37.3382, lon: -121.8863, label: 'San Jose' },
+    crow_km: 75,
+  },
+  'canada': {
+    // Toronto → Montreal (~505 km) is the Canada smoke default —
+    // exercises spatial graph + cell paging, completes in ~7 s on
+    // the current algorithm so it makes a workable regression
+    // gate. For the cross-Canada stress test (Toronto → Vancouver,
+    // 3300 km, 5+ minutes today) set LONG_ROUTE=1 — it's currently
+    // expected to hit our pop-limit chain and exercise the spinner
+    // ETA cap rather than complete in any reasonable time.
+    o: { lat: 43.6532, lon:  -79.3832, label: 'Toronto' },
+    d: { lat: 45.5019, lon:  -73.5674, label: 'Montreal' },
+    crow_km: 505,
+  },
+  'canada-long': {
+    o: { lat: 43.6532, lon:  -79.3832, label: 'Toronto' },
+    d: { lat: 49.2827, lon: -123.1207, label: 'Vancouver' },
+    crow_km: 3360,
+  },
+  'japan': {
+    o: { lat: 35.6762, lon:  139.6503, label: 'Tokyo' },
+    d: { lat: 33.2382, lon:  131.6126, label: 'Oita' },
+    crow_km: 920,
+  },
+  'central-us': {
+    o: { lat: 39.7392, lon: -104.9903, label: 'Denver' },
+    d: { lat: 41.8781, lon:  -87.6298, label: 'Chicago' },
+    crow_km: 1480,
+  },
+  'iran': {
+    o: { lat: 35.6892, lon:   51.3890, label: 'Tehran' },
+    d: { lat: 32.6539, lon:   51.6660, label: 'Isfahan' },
+    crow_km: 340,
+  },
+};
+
+function pickRoutePair(zimUrl) {
+  const wantLong = process.env.LONG_ROUTE === '1';
+  for (const key of Object.keys(ROUTE_PAIRS)) {
+    if (key.endsWith('-long')) continue;
+    if (!zimUrl.includes(key)) continue;
+    if (wantLong) {
+      const longKey = key + '-long';
+      if (ROUTE_PAIRS[longKey]) return { region: longKey, ...ROUTE_PAIRS[longKey] };
+    }
+    return { region: key, ...ROUTE_PAIRS[key] };
+  }
+  return { region: 'silicon-valley', ...ROUTE_PAIRS['silicon-valley'] };
+}
+
 const failures = [];
 function fail(label, detail) {
   failures.push(label + ': ' + detail);
@@ -46,6 +105,10 @@ async function main() {
     headless: !HEADFUL,
     executablePath: CHROME_PATH,
     args: ['--no-sandbox', '--disable-web-security'],
+    // Default 180s lets a long route eat the entire CDP budget and
+    // turn into "Runtime.callFunctionOn timed out" rather than a
+    // clean failure with a useful last-status snapshot.
+    protocolTimeout: 600_000,
   });
   const page = await browser.newPage();
   page.setDefaultNavigationTimeout(60_000);
@@ -278,6 +341,78 @@ async function main() {
     pass('origin typeahead', sugg + ' suggestions');
   } catch (e) {
     fail('origin typeahead', e.message);
+  }
+
+  // 6. Long-distance routing perf. The user complaint that motivated
+  // this step: "I enter locations and it cranks (without an indicator
+  // that tells me how close I am to done) and then sits there. Maybe
+  // it is really slow." So time setOrigin+setDest -> route-result
+  // visible, and stream the live status text every second so we can
+  // see what the on-screen indicator actually says along the way.
+  currentStep = 'route-perf';
+  const route = pickRoutePair(ZIM_URL);
+  console.log('\n[route-perf] ' + route.region + ': ' +
+    route.o.label + ' → ' + route.d.label +
+    ' (~' + route.crow_km + ' km crow-fly)');
+  try {
+    // Reset routing UI to a known state, then set both endpoints.
+    // setOrigin+setDest both fires computeAndDrawRoute() (drive mode
+    // is the default) — same code path the user invokes by entering
+    // both fields and clicking "Drive".
+    await page.evaluate(() => {
+      const r = window.streetzimRouting;
+      if (r && typeof r.clear === 'function') r.clear();
+      r && r.open && r.open();
+    });
+    const t0 = Date.now();
+    await page.evaluate((o, d) => {
+      const r = window.streetzimRouting;
+      r.setOrigin(o.lat, o.lon, o.label);
+      r.setDest(d.lat, d.lon, d.label);
+    }, route.o, route.d);
+    let lastStatus = '';
+    const statusTimer = setInterval(async () => {
+      try {
+        const s = await page.evaluate(() => {
+          const el = document.getElementById('routing-status');
+          return el ? el.textContent : '';
+        });
+        if (!s) return;
+        // Drop the spinner glyph + sub-second elapsed time from the
+        // dedup key — those tick every 100ms and would log every
+        // poll. Compare on the meaningful state (label, pops, cells).
+        const key = s.replace(/^.\s/, '').replace(/·\s\d+\.\d+s/, '');
+        if (key === lastStatus) return;
+        lastStatus = key;
+        const dt = ((Date.now() - t0) / 1000).toFixed(1);
+        console.log('    +' + dt + 's status: ' + s.slice(0, 110));
+      } catch {}
+    }, 1000);
+    try {
+      await page.waitForFunction(() => {
+        const res = document.getElementById('routing-result');
+        if (!res) return false;
+        const visible = res.offsetParent !== null
+          || (res.style.display && res.style.display !== 'none');
+        const dist = document.getElementById('route-distance');
+        return visible && dist && dist.textContent.trim().length > 0;
+      }, { timeout: 360_000, polling: 500 });
+      const elapsed = Date.now() - t0;
+      const summary = await page.evaluate(() => ({
+        dist: (document.getElementById('route-distance') || {}).textContent || '',
+        time: (document.getElementById('route-time') || {}).textContent || '',
+        status: (document.getElementById('routing-status') || {}).textContent || '',
+      }));
+      pass('route ready', (elapsed / 1000).toFixed(1) + 's · ' +
+        summary.dist + ' / ' + summary.time);
+    } finally {
+      clearInterval(statusTimer);
+    }
+  } catch (e) {
+    const finalStatus = await page.evaluate(() =>
+      (document.getElementById('routing-status') || {}).textContent || ''
+    ).catch(() => '');
+    fail('route-perf', e.message + ' (last status: "' + finalStatus + '")');
   }
 
   // Summary.

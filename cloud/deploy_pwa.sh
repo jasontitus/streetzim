@@ -121,11 +121,15 @@ fi
 # ---------------------------------------------------------------
 # 3. Deploy. The predeploy hook in firebase.json runs
 #    scripts/sync-drive-viewer.sh which copies resources/viewer
-#    into web/drive/viewer, so our bumped .version is preserved
-#    and the fresh HTML lands with it.
+#    into web/drive/viewer and rewrites build-info.js + .version
+#    with its OWN content-hash stamp. Pass our git stamp through
+#    via STAMP_OVERRIDE so all three artifacts (build-info.js,
+#    viewer/.version, SHELL_CACHE in sw.js) agree on one stamp,
+#    which is what the verify step (and the user looking at the
+#    picker page footer) expects.
 # ---------------------------------------------------------------
 log "firebase deploy --only hosting"
-firebase deploy --only hosting
+STAMP_OVERRIDE="$stamp" firebase deploy --only hosting
 
 # ---------------------------------------------------------------
 # 4. Verify live origin serves the bumped stamp — this is what
@@ -133,11 +137,16 @@ firebase deploy --only hosting
 # ---------------------------------------------------------------
 log "verifying live origin..."
 # Retry a few times — Fastly edge caches can linger briefly after
-# a fresh deploy (< 1 minute typical).
+# a fresh deploy (< 1 minute typical). The build-info.js line is
+#   var info = "<when> · <stamp>";
+# where stamp is `<git-sha10>` or `<git-sha10>-d<HHMMSS>` for dirty
+# tree deploys. Earlier the regex only matched the bare hex prefix
+# and dropped the dirty suffix, so every dirty deploy hit a false
+# FATAL even though Firebase served the right bytes.
 for attempt in 1 2 3 4 5; do
     sleep $((attempt * 3))
     live=$(curl -fsSL --max-time 10 "https://streetzim.web.app/drive/build-info.js?bust=$$" \
-            | grep -oE '· [a-f0-9]{10,}' | head -1 | tr -d ' ·')
+            | grep -oE '· [a-f0-9]+(-d[0-9]+)?' | head -1 | tr -d ' ·')
     if [ "$live" = "$stamp" ]; then
         log "OK: live serves $stamp"
         exit 0

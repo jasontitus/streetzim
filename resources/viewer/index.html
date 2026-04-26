@@ -3886,19 +3886,74 @@ function initRouting(map, config) {
   function debugStats(label, pops) {
     __routeDebugLabel = label;
     __routeDebugPops = pops;
-    // Surface progress to the user-facing status panel even when
-    // ?debug=1 isn't set — long routes (Tokyo→Oita took 90+s) used
-    // to stare at "Calculating route..." for two minutes with no
-    // signal of activity. Now they see pops + cells ticking.
-    var s = document.getElementById('routing-status');
-    if (s) {
+    // The continuous spinner/timer below picks up label+pops on its
+    // own — no need to write the status text twice. We only paint
+    // the on-screen ?debug=1 overlay here.
+    if (DEBUG_ROUTING) __debugPaint();
+  }
+
+  // Continuous "still calculating" indicator. Without this, the
+  // status panel updated only when the spatial A* paged in enough
+  // edges to trigger a new debugStats() call — for 4-5 seconds at
+  // the start of a Toronto→Montreal route the user saw "Calculating
+  // route..." with no animation and no elapsed-time clock, and
+  // assumed it had hung. Now the panel ticks every 100 ms with a
+  // braille-spinner frame, the running pops/cells count, the
+  // elapsed seconds, and (after 3s) a heuristic ETA derived from
+  // the crow-fly distance. The timer is started by
+  // computeAndDrawRoute and cleared once the result lands or
+  // fails.
+  var __routeStatusTimer = null;
+  var __routeStatusStart = 0;
+  var __routeStatusEtaSec = 0;
+  var __ROUTE_SPINNER_FRAMES = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
+  function startRouteProgressIndicator(crowKm) {
+    if (__routeStatusTimer) clearInterval(__routeStatusTimer);
+    __routeStatusStart = performance.now();
+    // Heuristic: empirically Toronto→Montreal (505 km) took ~7.5 s
+    // and Tokyo→Oita (920 km) ~90 s. Linear-ish on crow-km, with a
+    // floor so short routes don't show a crowded ETA. The number is
+    // a hint, not a contract — labelled "~" in the UI.
+    __routeStatusEtaSec = crowKm > 0
+      ? Math.max(2, Math.round(crowKm * 0.05))
+      : 0;
+    var frame = 0;
+    __routeStatusTimer = setInterval(function() {
+      var s = document.getElementById('routing-status');
+      if (!s) return;
+      var elapsed = (performance.now() - __routeStatusStart) / 1000;
+      var spin = __ROUTE_SPINNER_FRAMES[frame % __ROUTE_SPINNER_FRAMES.length];
+      frame++;
+      var label = __routeDebugLabel || 'Calculating route';
+      var pops = __routeDebugPops || 0;
       var cells = '';
       if (typeof graph !== 'undefined' && graph && graph._cells) {
         cells = ' · ' + graph._cells.size + ' cells';
       }
-      s.textContent = label + ' · ' + pops.toLocaleString() + ' nodes' + cells;
+      var line = spin + ' ' + label
+        + (pops > 0 ? ' · ' + pops.toLocaleString() + ' nodes' : '')
+        + cells
+        + ' · ' + elapsed.toFixed(1) + 's';
+      // ETA hint — only show while still inside the heuristic's
+      // window. Once we blow past the estimate (Toronto→Vancouver
+      // measured 180s+ vs our 170s estimate, highway-only A* hits a
+      // long plateau) drop the "left" string so we don't keep
+      // showing "~0s left" forever. Better to show only the elapsed
+      // clock than to lie.
+      if (__routeStatusEtaSec > 0 && elapsed > 1.5 &&
+          elapsed < __routeStatusEtaSec * 0.95) {
+        var remaining = Math.max(1,
+          Math.ceil(__routeStatusEtaSec - elapsed));
+        line += ' · ~' + remaining + 's left';
+      }
+      s.textContent = line;
+    }, 100);
+  }
+  function stopRouteProgressIndicator() {
+    if (__routeStatusTimer) {
+      clearInterval(__routeStatusTimer);
+      __routeStatusTimer = null;
     }
-    if (DEBUG_ROUTING) __debugPaint();
   }
 
   // Two-pass routing: full-graph for first/last mile, highway-tier for
@@ -4520,20 +4575,45 @@ function initRouting(map, config) {
   }
 
   function computeAndDrawRoute() {
-    statusEl.textContent = 'Calculating route...';
     resultEl.style.display = 'none';
     var seq = ++routeSeq;
+    // Compute crow-fly distance to feed the ETA heuristic, then start
+    // the spinner-and-elapsed-time indicator immediately. Ticks every
+    // 100 ms whether or not the A* loop has yielded — closes the
+    // "is it stuck?" gap that drove the user to give up on long
+    // routes.
+    var crowKm = 0;
+    if (graph && originNode >= 0 && destNode >= 0) {
+      var oLatE7 = graph.nodesScaled[originNode * 2];
+      var oLonE7 = graph.nodesScaled[originNode * 2 + 1];
+      var dLatE7 = graph.nodesScaled[destNode * 2];
+      var dLonE7 = graph.nodesScaled[destNode * 2 + 1];
+      crowKm = haversine(oLatE7 / 1e7, oLonE7 / 1e7,
+                         dLatE7 / 1e7, dLonE7 / 1e7) / 1000;
+    }
+    __routeDebugLabel = 'Calculating route';
+    __routeDebugPops = 0;
+    startRouteProgressIndicator(crowKm);
     setTimeout(async function() {
-      if (seq !== routeSeq) return;  // stale — a newer route is pending
+      // A stale callback (newer route already kicked off via a second
+      // setOrigin/setDest in the same tick) must NOT call
+      // stopRouteProgressIndicator — that would clear the spinner the
+      // newer call just installed. Only the live callback owns the
+      // indicator. Same logic everywhere else seq is rechecked below.
+      if (seq !== routeSeq) return;
       var result;
       try {
         result = await findRoute(originNode, destNode);
       } catch (err) {
         console.error('[streetzim] findRoute failed:', err);
-        statusEl.textContent = 'Routing failed';
+        if (seq === routeSeq) {
+          stopRouteProgressIndicator();
+          statusEl.textContent = 'Routing failed';
+        }
         return;
       }
-      if (seq !== routeSeq) return;  // user changed dest while routing
+      if (seq !== routeSeq) return;  // newer route owns the spinner now
+      stopRouteProgressIndicator();
       if (result) {
         // Sanity check: any coord obviously off the map? Logs first
         // offender — helps diagnose "crazy lines" bugs after the fact.
@@ -5467,6 +5547,11 @@ function initRouting(map, config) {
     version: 4,
     setOrigin: setOriginFromLatLon,
     setDest:   setDestFromLatLon,
+    /// Reset the routing panel to "no route picked" — clears both
+    /// endpoints, the result panel, and any drawn route. Mirrors the
+    /// `Clear route` button. Useful for test harnesses that swap
+    /// origin/dest pairs across runs.
+    clear:     clearRoute,
     clickMode: function(mode) {
       var btn = modeBtns[mode];
       if (btn) btn.click();
