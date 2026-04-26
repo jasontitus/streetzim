@@ -398,11 +398,60 @@ async function main() {
         return visible && dist && dist.textContent.trim().length > 0;
       }, { timeout: 360_000, polling: 500 });
       const elapsed = Date.now() - t0;
-      const summary = await page.evaluate(() => ({
-        dist: (document.getElementById('route-distance') || {}).textContent || '',
-        time: (document.getElementById('route-time') || {}).textContent || '',
-        status: (document.getElementById('routing-status') || {}).textContent || '',
-      }));
+      const summary = await page.evaluate(() => {
+        // window.__streetzim_lastRoute is set in computeAndDrawRoute's
+        // success path. coords are MapLibre [lng, lat] pairs.
+        const r = window.__streetzim_lastRoute;
+        const first = (r && r.coords && r.coords[0]) || null;
+        const last = (r && r.coords && r.coords[r.coords.length - 1]) || null;
+        return {
+          dist: (document.getElementById('route-distance') || {}).textContent || '',
+          time: (document.getElementById('route-time') || {}).textContent || '',
+          status: (document.getElementById('routing-status') || {}).textContent || '',
+          coordCount: (r && r.coords && r.coords.length) || 0,
+          first, last,
+          totalKm: r && r.distance ? r.distance / 1000 : null,
+        };
+      });
+      // Coverage: the user's standing rule — "highway-only for the
+      // sketch is fine but it still needs to get me from where I
+      // start to where I am going." Verify drawn route's endpoints
+      // are within ~5 km of the requested origin/dest (snap
+      // distance to nearest highway/local node) AND total distance
+      // ≥ 80 % of crow-fly (sanity check that nothing's dropped).
+      function haversineKm(la1, lo1, la2, lo2) {
+        const R = 6371;
+        const dLat = (la2 - la1) * Math.PI / 180;
+        const dLon = (lo2 - lo1) * Math.PI / 180;
+        const a = Math.sin(dLat/2)**2 +
+          Math.cos(la1*Math.PI/180) * Math.cos(la2*Math.PI/180) *
+          Math.sin(dLon/2)**2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      }
+      if (!summary.first || !summary.last) {
+        fail('route coverage', 'no coords on lastRoute');
+      } else {
+        const startGap = haversineKm(
+          route.o.lat, route.o.lon, summary.first[1], summary.first[0]);
+        const endGap = haversineKm(
+          route.d.lat, route.d.lon, summary.last[1], summary.last[0]);
+        const minDist = route.crow_km * 0.8;
+        const enoughDist = (summary.totalKm || 0) >= minDist;
+        const tightStart = startGap < 5;
+        const tightEnd = endGap < 5;
+        if (tightStart && tightEnd && enoughDist) {
+          pass('route coverage',
+            'start gap ' + startGap.toFixed(1) + ' km · end gap ' +
+            endGap.toFixed(1) + ' km · ' + (summary.totalKm||0).toFixed(0) +
+            ' km / crow ' + route.crow_km + ' km · ' +
+            summary.coordCount + ' coords');
+        } else {
+          fail('route coverage',
+            'start gap ' + startGap.toFixed(1) + ' km, end gap ' +
+            endGap.toFixed(1) + ' km, total ' + (summary.totalKm||0).toFixed(0) +
+            ' km < ' + minDist.toFixed(0) + ' km (80% crow-fly)');
+        }
+      }
       pass('route ready', (elapsed / 1000).toFixed(1) + 's · ' +
         summary.dist + ' / ' + summary.time);
     } finally {

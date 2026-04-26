@@ -4060,13 +4060,34 @@ function initRouting(map, config) {
   // Easy routes get a guaranteed-optimal answer; hard routes still
   // get a suboptimal-but-found answer instead of crashing the page.
   async function findRouteSpatialFiltered(startNode, endNode, highwayOnly) {
-    var optimal = await findRouteSpatialAStar(
-      startNode, endNode, highwayOnly,
-      /*greedy*/ 1.0,
-      /*popLimit*/ highwayOnly ? 50000 : 200000);
-    if (optimal) return optimal;
-    // Optimal bailed — retry greedy. Routes here are 5-25% suboptimal
-    // but the page survives and the user gets directions.
+    // Skip the optimal pass for very long highway legs. Toronto→Vancouver
+    // (3360 km crow-fly) measured 134 s on highway-only optimal making
+    // ~150 pops/sec before bailing at 50 k pops, then phase 2 (greedy)
+    // found the route in 12 s. The optimal phase brought no useful
+    // partial work — its frontier never reached the dst's hemisphere.
+    // Threshold of 1500 km picked empirically: at 920 km (Tokyo→Oita)
+    // optimal still bails fast (~1 s) and isn't pure waste; at 3360 km
+    // it costs us 2 minutes of wall time. Crow distance scales much
+    // faster than the optimal bail rate, so a hard skip is safer than
+    // tuning the pop limit.
+    var nodesScaled = graph.nodesScaled;
+    var crowKm = haversine(
+      nodesScaled[startNode * 2] / 1e7,
+      nodesScaled[startNode * 2 + 1] / 1e7,
+      nodesScaled[endNode * 2] / 1e7,
+      nodesScaled[endNode * 2 + 1] / 1e7
+    ) / 1000;
+    var skipOptimal = highwayOnly && crowKm > 1500;
+    if (!skipOptimal) {
+      var optimal = await findRouteSpatialAStar(
+        startNode, endNode, highwayOnly,
+        /*greedy*/ 1.0,
+        /*popLimit*/ highwayOnly ? 50000 : 200000);
+      if (optimal) return optimal;
+    }
+    // Optimal bailed (or skipped) — retry greedy. Routes here are
+    // 5-25% suboptimal but the page survives and the user gets
+    // directions in tens-of-seconds rather than minutes.
     return findRouteSpatialAStar(
       startNode, endNode, highwayOnly,
       /*greedy*/ highwayOnly ? 2.0 : 1.5,
@@ -4640,6 +4661,12 @@ function initRouting(map, config) {
         goRow.classList.add('visible');
         resetGoButtons();
         lastRoute = augmentRouteForDriving(result);
+        // Expose for the smoke harness: the user's standing rule is
+        // "highway-only for the sketch is fine but it still needs to
+        // get me from where I start to where I am going." Smoke
+        // checks the first/last coords of the drawn route against
+        // the requested origin/destination.
+        try { window.__streetzim_lastRoute = lastRoute; } catch (e) {}
         if (driveMode.active) driveMode.setRoute(lastRoute);
         statusEl.textContent = '';
         // In drive mode, the next GPS fix re-centers at the user's
