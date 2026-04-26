@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>StreetZim — Offline Maps for Kiwix</title>
 <meta name="description" content="Free, fully offline OpenStreetMap maps for the Kiwix reader. Vector tiles, satellite imagery, 3D terrain, and Wikipedia info — works without an internet connection on iOS, Android, Mac, Windows, and Linux.">
-<!-- Firebase Analytics -->
+<!-- Firebase Analytics — only on the public marketing landing page.
+     Removed from the /drive/ PWA so the maintainer's debugging
+     sessions don't fire tracking events. -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
   import { getAnalytics, logEvent } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-analytics.js";
@@ -362,7 +364,17 @@
       <span class="map-badge badge-satellite">Satellite</span> Sentinel-2 imagery,
       <span class="map-badge badge-wiki">Wikipedia links</span> Wikidata cross-refs.
     </p>
-    <p class="updated">Last updated: 2026-04-25 16:18 UTC</p>
+    <p class="updated">Last updated: 2026-04-26 04:35 UTC · build <span id="build-stamp">…</span></p>
+<script>
+fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
+  .then(function(r) { return r.ok ? r.text() : ''; })
+  .then(function(src) {
+    var el = document.getElementById('build-stamp');
+    if (!el) return;
+    var m = src.match(/stamp:\s*"([^"]+)"/);
+    if (m) el.textContent = m[1];
+  });
+</script>
 
     <div class="maps">
       <div class="map-card">
@@ -612,6 +624,19 @@
           <a class="btn btn-primary" href="https://archive.org/download/streetzim-egypt/osm-egypt-2026-04-25.zim" data-track="download" data-region="egypt" data-title="Egypt">Download</a>
           <a class="btn btn-secondary" href="https://archive.org/download/streetzim-egypt/streetzim-egypt_archive.torrent" data-track="torrent" data-region="egypt" data-title="Egypt">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-egypt" data-track="details" data-region="egypt" data-title="Egypt">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Canada</div>
+          <div class="map-card-size">26.3 GB</div>
+        </div>
+        <p class="map-card-desc">All of Canada &mdash; Toronto, Montreal, Vancouver, Calgary, Ottawa, Quebec City, Edmonton, Halifax, the Rockies, Banff, the Great Lakes, the Maritimes, and the Yukon and Northwest Territories.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-canada/osm-canada-2026-04-25.zim" data-track="download" data-region="canada" data-title="Canada">Download</a>
+          <a class="btn btn-secondary" href="https://archive.org/download/streetzim-canada/streetzim-canada_archive.torrent" data-track="torrent" data-region="canada" data-title="Canada">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-canada" data-track="details" data-region="canada" data-title="Canada">Info</a>
         </div>
       </div>
     </div>

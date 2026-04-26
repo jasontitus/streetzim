@@ -147,6 +147,12 @@ REGIONS = [
         "zim_file": "osm-egypt.zim",
         "description": "Egypt &mdash; Cairo, Alexandria, Giza, Luxor, Aswan, the Nile Valley, Sinai Peninsula, and the Red Sea coast.",
     },
+    {
+        "id": "canada",
+        "title": "Canada",
+        "zim_file": "osm-canada.zim",
+        "description": "All of Canada &mdash; Toronto, Montreal, Vancouver, Calgary, Ottawa, Quebec City, Edmonton, Halifax, the Rockies, Banff, the Great Lakes, the Maritimes, and the Yukon and Northwest Territories.",
+    },
 ]
 
 
