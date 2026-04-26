@@ -31,7 +31,14 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 
-today=$(date +%Y-%m-%d)
+# Suffix override lets a same-day re-run land as a distinct dated
+# filename instead of overwriting the morning's upload (which would
+# move the v1 bytes into archive's hidden history/files/ and bloat
+# item storage permanently). Set DATE_SUFFIX=b for the second roll
+# of the day, =c for the third, etc. cleanup_old_zims.py --keep 2
+# will rotate the older visible file out on the next pass.
+suffix="${DATE_SUFFIX:-}"
+today="$(date +%Y-%m-%d)${suffix}"
 log() { printf "[reroll %s] %s\n" "$(date '+%H:%M:%S')" "$*"; }
 
 # Detect which features the source ZIM already has and emit the
@@ -76,8 +83,13 @@ PY
 # may carry chips and/or spatial routing already, in which case the
 # corresponding flag is suppressed by detect_flags() above.
 regions=(
-  "silicon-valley   osm-silicon-valley.zim"
-  "iran             osm-iran-shipped.zim"
+  # silicon-valley + iran already got their v2 upload earlier today
+  # (with the corrected per-region flags). Re-rolling them again
+  # under a -b suffix would just rotate them back to a no-op
+  # equivalent of what's already on archive. Comment back in if
+  # there's a real source change for them.
+  # "silicon-valley   osm-silicon-valley.zim"
+  # "iran             osm-iran-shipped.zim"
   "egypt            osm-egypt-chips.zim"
   "central-asia     osm-central-asia-shipped.zim"
   "japan            osm-japan-chips-v2.zim"
