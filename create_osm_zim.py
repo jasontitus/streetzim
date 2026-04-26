@@ -5032,6 +5032,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 # filter alone isn't enough either: genuine ocean tiles are
                 # also near-zero. The combination is the signal.
                 from PIL import Image as _PILImage
+                import numpy as _np
                 def _center_elev(path):
                     try:
                         im = _PILImage.open(path)
@@ -5040,6 +5041,26 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         return -10000.0 + ((r * 65536 + g * 256 + b) * 0.1)
                     except Exception:
                         return None
+
+                def _tile_nonzero_fraction(path):
+                    """Fraction of 256x256 pixels with elev != 0 m.
+                    Cheap signal: a uniform-zero tile (the VRT-race
+                    blank) is 0.0; a real terrain tile with a small
+                    sea/lake patch (e.g. Caspian shoreline at z=12,
+                    97 % at -10 m + 3 % at 0 m) is ≥ 0.97. Center-
+                    pixel sampling alone caught the wrong cases —
+                    Europe 2026-04-26 flagged 2 tiles whose center
+                    happened to land in the small 0 m patch."""
+                    try:
+                        im = _np.array(_PILImage.open(path).convert("RGB"))
+                        encoded = (im[:, :, 0].astype(_np.uint32) << 16) | \
+                                  (im[:, :, 1].astype(_np.uint32) << 8) | \
+                                  im[:, :, 2].astype(_np.uint32)
+                        zero_code = int((10000.0 / 0.1))  # encoded value for 0 m
+                        nonzero = (encoded != zero_code).sum()
+                        return float(nonzero) / encoded.size
+                    except Exception:
+                        return 1.0  # on read error, don't flag — fall through
 
                 # The real bug we're guarding against: tile decodes to ~0 m
                 # (all-zeros output from a VRT-race artifact) but the VRT
@@ -5093,6 +5114,21 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                                 continue
                             tile_elev = _center_elev(tile_path)
                             if tile_elev is None:
+                                continue
+                            # Whole-tile sanity check first: if MOST of the
+                            # 256x256 pixels are non-zero, the tile is fine
+                            # regardless of what the center pixel says. The
+                            # center-pixel-only check let two false positives
+                            # through Europe 2026-04-26 (Caspian shoreline +
+                            # Pechora lowland — both 70-97 % real terrain
+                            # but the center pixel landed in a small 0 m
+                            # patch). Threshold of 5 % nonzero matches the
+                            # known-broken signature: VRT-race blanks are
+                            # uniform 0 m (0 % nonzero), legit tiles even at
+                            # the lowest land elevations have at least some
+                            # spatial variation.
+                            nonzero_frac = _tile_nonzero_fraction(tile_path)
+                            if nonzero_frac > 0.05:
                                 continue
                             bnds = mercantile.bounds(t)
                             # Broken iff tile says near-zero AND majority of VRT

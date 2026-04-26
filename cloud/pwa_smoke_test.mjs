@@ -415,10 +415,12 @@ async function main() {
       });
       // Coverage: the user's standing rule — "highway-only for the
       // sketch is fine but it still needs to get me from where I
-      // start to where I am going." Verify drawn route's endpoints
-      // are within ~5 km of the requested origin/dest (snap
-      // distance to nearest highway/local node) AND total distance
-      // ≥ 80 % of crow-fly (sanity check that nothing's dropped).
+      // start to where I am going" — and the follow-up tightening:
+      // "I don't want directions to get within 5 km. I want it to be
+      // within 100 m or so." 100 m is roughly one block (and well
+      // tighter than the typical street-grid snap). Verifies drawn
+      // route's endpoints are within 0.1 km of the requested
+      // origin/dest AND total distance ≥ 80 % of crow-fly.
       function haversineKm(la1, lo1, la2, lo2) {
         const R = 6371;
         const dLat = (la2 - la1) * Math.PI / 180;
@@ -431,24 +433,32 @@ async function main() {
       if (!summary.first || !summary.last) {
         fail('route coverage', 'no coords on lastRoute');
       } else {
-        const startGap = haversineKm(
+        const startGapKm = haversineKm(
           route.o.lat, route.o.lon, summary.first[1], summary.first[0]);
-        const endGap = haversineKm(
+        const endGapKm = haversineKm(
           route.d.lat, route.d.lon, summary.last[1], summary.last[0]);
         const minDist = route.crow_km * 0.8;
         const enoughDist = (summary.totalKm || 0) >= minDist;
-        const tightStart = startGap < 5;
-        const tightEnd = endGap < 5;
+        // Tightened to 100 m per user direction: "I don't want
+        // directions to get within 5 km. I want it to be within 100 m
+        // or so." 100 m is roughly half a city block — well within
+        // the typical street-grid snap, and tight enough that a
+        // regression dropping the start/end legs would surface.
+        const TIGHT_M = 100;
+        const startMeters = startGapKm * 1000;
+        const endMeters = endGapKm * 1000;
+        const tightStart = startMeters < TIGHT_M;
+        const tightEnd = endMeters < TIGHT_M;
         if (tightStart && tightEnd && enoughDist) {
           pass('route coverage',
-            'start gap ' + startGap.toFixed(1) + ' km · end gap ' +
-            endGap.toFixed(1) + ' km · ' + (summary.totalKm||0).toFixed(0) +
+            'start gap ' + startMeters.toFixed(0) + ' m · end gap ' +
+            endMeters.toFixed(0) + ' m · ' + (summary.totalKm||0).toFixed(0) +
             ' km / crow ' + route.crow_km + ' km · ' +
             summary.coordCount + ' coords');
         } else {
           fail('route coverage',
-            'start gap ' + startGap.toFixed(1) + ' km, end gap ' +
-            endGap.toFixed(1) + ' km, total ' + (summary.totalKm||0).toFixed(0) +
+            'start gap ' + startMeters.toFixed(0) + ' m, end gap ' +
+            endMeters.toFixed(0) + ' m, total ' + (summary.totalKm||0).toFixed(0) +
             ' km < ' + minDist.toFixed(0) + ' km (80% crow-fly)');
         }
       }
