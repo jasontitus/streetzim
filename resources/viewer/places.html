@@ -105,7 +105,12 @@
 <header>
   <div class="titlebar">
     <h1>Find places</h1>
-    <a class="back" href="../index.html">← Map</a>
+    <!-- Back-to-map link. Static `../index.html` works for the PWA
+         (places at /drive/viewer/places/) but is OUT OF ZIM BOUNDS
+         when Kiwix Desktop serves places.html at the ZIM root. We
+         rewrite this href in JS once `HERE` is known (script tag
+         below) so both paths resolve correctly. -->
+    <a class="back" id="back-link" href="#">← Map</a>
   </div>
   <input id="q" type="search" placeholder="Search by name or category…"
          autocomplete="off" autocapitalize="none" spellcheck="false">
@@ -146,6 +151,15 @@
 const HERE = location.pathname.replace(/[^/]+\/?$/, '');
 const DATA = HERE + 'search-data/';
 const CAT  = HERE + 'category-index/';
+
+// Wire the static back-link href now that HERE is known. Doing it
+// in JS instead of HTML lets the same template work whether places
+// is served at `/drive/viewer/places/` (PWA) or `<zim-root>/places.html`
+// (Kiwix) — the two have different ../ semantics.
+{
+  const back = document.getElementById('back-link');
+  if (back) back.href = HERE + 'index.html';
+}
 
 // Categories surfaced as chips. Each maps to either a single
 // category-index slug (cheap one-fetch) or a subtype filter applied
@@ -575,12 +589,20 @@ function renderResults() {
     // toggle), pass it as `origin=…` so the viewer's routing panel can
     // fill both endpoints up front instead of forcing the user to tap
     // the GPS button and wait for a second fix.
-    // Firebase Hosting's `trailingSlash: true` canonicalizes
-    // `places.html` to `places/`, so the document base for relative
-    // URLs is `/drive/viewer/places/`. A bare `index.html` would
-    // resolve to `/drive/viewer/places/index.html` (404, served by SW
-    // as ZIM 404). Go up one level so it lands on the viewer root.
-    let href = '../index.html#dest=' + r.a + ',' + r.o
+    // Use the runtime-computed `HERE` (line ~146) instead of static
+    // `../index.html` or bare `index.html`. The two hosting paths
+    // disagree on what the right base is:
+    //   - Firebase PWA serves places at `/drive/viewer/places/`
+    //     (trailingSlash:true) → relative `index.html` resolves to
+    //     `/drive/viewer/places/index.html` (404). `../index.html`
+    //     works here but…
+    //   - Kiwix Desktop / iOS Kiwix serve places.html at the ZIM
+    //     root → `../index.html` is OUT OF BOUNDS (zimcheck failure
+    //     on every shipped ZIM). Bare `index.html` works here.
+    // HERE = location.pathname stripped of the trailing filename,
+    // so HERE + 'index.html' resolves correctly on both: PWA gets
+    // `/drive/viewer/index.html`, Kiwix gets `<zim-root>/index.html`.
+    let href = HERE + 'index.html#dest=' + r.a + ',' + r.o
              + '&label=' + encodeURIComponent(r.n || '');
     if (state.origin) {
       href += '&origin=' + state.origin.lat + ',' + state.origin.lon;
@@ -590,7 +612,7 @@ function renderResults() {
     const mapA = document.createElement('a');
     mapA.textContent = 'Map';
     const zoom = (r.t === 'place' || r.t === 'park') ? 14 : 16;
-    mapA.href = '../index.html#map=' + zoom + '/' + r.a + '/' + r.o
+    mapA.href = HERE + 'index.html#map=' + zoom + '/' + r.a + '/' + r.o
               + '&pin=' + r.a + ',' + r.o
               + '&label=' + encodeURIComponent(r.n || '');
     ctas.appendChild(mapA);

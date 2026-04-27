@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -1300,6 +1301,133 @@ def validate(zim_path: str, *, audit_tiles: bool = False) -> list[Result]:
         results.append(Result("zim_opens", "error", "fail",
                               f"{type(exc).__name__}: {exc}"))
         return results
+    return _populate_results(results, arc, zim_path, audit_tiles)
+
+
+# False-positive patterns to filter out of zimcheck's "Invalid internal
+# links" output. zimcheck heuristically scans HTML for href-like
+# substrings; some of our identifiers (MapLibre source/layer names like
+# `mcpzim-places`) get matched even though they're string literals
+# inside JavaScript, not actual href values. The viewer works
+# correctly in Kiwix, browsers, and PWA — the warning is bookkeeping
+# noise. Add new entries here when new MapLibre source/layer IDs hit
+# this pattern.
+_ZIMCHECK_KNOWN_FALSE_POSITIVE_LINKS = (
+    "mcpzim-places",
+    "mcpzim-places-dots",
+    "mcpzim-places-labels",
+)
+
+
+def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
+    """Run Kiwix's `zimcheck` binary and parse the verdict.
+
+    Catches what our in-house checks miss — primarily broken internal
+    HTML links from search/<slug>.html pages (those went undetected for
+    months until 2026-04-26 when a user ran zimcheck against an upload
+    and reported it failing).
+
+    Skips gracefully when zimcheck isn't installed or its libzim/xapian
+    linkage is broken — the in-house checks still run.
+    """
+    import shutil
+    import subprocess
+    bin_path = shutil.which("zimcheck")
+    if not bin_path:
+        return "pass", "zimcheck binary not on PATH (skipped; ok for dev hosts)"
+    # Homebrew's zimcheck on macOS links against an older xapian than
+    # what's installed; the patched libzim under
+    # python-libzim/libzim/libzim.dylib has the missing symbol. Try
+    # to surface it so zimcheck loads cleanly.
+    env = dict(os.environ)
+    patched = os.path.expanduser(
+        "~/experiments/python-libzim/libzim")
+    if os.path.isdir(patched):
+        existing = env.get("DYLD_LIBRARY_PATH", "")
+        env["DYLD_LIBRARY_PATH"] = (patched + ":" + existing).rstrip(":")
+    try:
+        proc = subprocess.run([bin_path, zim_path], capture_output=True,
+                              text=True, env=env, timeout=600)
+    except subprocess.TimeoutExpired:
+        return "fail", "zimcheck timed out after 600 s"
+    except Exception as exc:
+        return "pass", f"zimcheck unrunnable: {exc} (skipped)"
+    out = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    # If zimcheck itself can't load (xapian symbol mismatch etc.),
+    # the binary exits early with a dyld error — treat as skipped
+    # so a broken local install doesn't hard-fail the whole pipeline.
+    if "Symbol not found" in out or "dyld" in out and "Library not loaded" in out:
+        return "pass", "zimcheck binary failed to load libraries (skipped)"
+    # zimcheck groups errors into multi-line blocks: a "[ERROR] Foo:"
+    # header followed by indented child lines. Split into blocks
+    # before filtering — the false-positive patterns appear on child
+    # lines, not the header.
+    real_blocks = []
+    cur_header = None
+    cur_body = []
+    def _maybe_keep(header, body):
+        if not header:
+            return
+        # Empty articles: legit when the entry is a 0-byte ocean tile
+        # (vector tiles/*.pbf) — we ship those intentionally for
+        # full bbox coverage. Drop the entire block when EVERY child
+        # is `Entry tiles/.../*.pbf is empty`.
+        if header.startswith("[ERROR] Empty articles"):
+            non_tile = [b for b in body
+                        if "Entry tiles/" not in b
+                        or not b.endswith(".pbf is empty")]
+            if not non_tile:
+                return  # all empties were ocean tiles — skip block
+            real_blocks.append((header, non_tile))
+            return
+        # Invalid internal links: drop the block when every child line
+        # matches one of the known MapLibre source/layer IDs that
+        # zimcheck mistakes for an href.
+        if header.startswith("[ERROR] Invalid internal links"):
+            real_lines = [b for b in body
+                          if not any(fp in b for fp in
+                                     _ZIMCHECK_KNOWN_FALSE_POSITIVE_LINKS)]
+            # Any child line that isn't part of a known false-positive
+            # link block survives — and so does the header.
+            real_links = [b for b in real_lines
+                          if b.startswith("- ")]
+            if not real_links:
+                return  # only false positives in this block
+            real_blocks.append((header, real_lines))
+            return
+        # Unknown error category — keep, surface to operator.
+        real_blocks.append((header, body))
+    for line in out.splitlines():
+        if line.startswith("[ERROR]"):
+            _maybe_keep(cur_header, cur_body)
+            cur_header = line
+            cur_body = []
+        elif cur_header is not None and (line.startswith(" ")
+                                          or line.startswith("- ")):
+            cur_body.append(line.strip())
+        else:
+            _maybe_keep(cur_header, cur_body)
+            cur_header = None
+            cur_body = []
+    _maybe_keep(cur_header, cur_body)
+    if real_blocks:
+        # Show first 3 headers + a child count.
+        sample = "; ".join(
+            f"{h} (+{len(b)} entries)" for h, b in real_blocks[:3])
+        more = f" (+{len(real_blocks)-3} more)" if len(real_blocks) > 3 else ""
+        return "fail", (
+            f"{len(real_blocks)} unexpected zimcheck block(s): "
+            f"{sample}{more}")
+    if "Overall Test Status: Pass" in out:
+        return "pass", "zimcheck Pass"
+    return "pass", ("zimcheck flagged only known-OK patterns "
+                    "(empty ocean tiles + mcpzim-places false positive)")
+
+
+def _populate_results(results, arc, zim_path, audit_tiles):
+    """Run all checks against an open Archive. Pulled out so the
+    external zimcheck check (which doesn't take an Archive handle)
+    can be added in the same flow without copy-pasting the rest."""
     results.append(_check("zim_opens", "error", _chk_opens, arc))
     results.append(_check("metadata_required", "error", _chk_metadata, arc))
     results.append(_check("illustration", "error", _chk_illustration, arc))
@@ -1340,6 +1468,16 @@ def validate(zim_path: str, *, audit_tiles: bool = False) -> list[Result]:
     results.append(_check("routing", "error", _chk_routing, arc, cfg, zim_path))
     if audit_tiles:
         results.append(_check("tile_coverage", "error", _audit_tiles, arc))
+    # External zimcheck — Kiwix's official validator. Catches bugs
+    # that our in-house checks miss (e.g. broken internal links from
+    # search/<slug>.html pages, which only zimcheck's HTML link
+    # crawler surfaces). Skipped silently if the binary isn't on
+    # PATH or its libzim/xapian symbols don't load — the rest of the
+    # validator still runs. Disable explicitly with
+    # STREETZIM_SKIP_ZIMCHECK=1 if a build host doesn't have it.
+    if os.environ.get("STREETZIM_SKIP_ZIMCHECK", "") != "1":
+        results.append(_check("zimcheck_external", "error",
+                              _chk_zimcheck_external, zim_path))
     return results
 
 

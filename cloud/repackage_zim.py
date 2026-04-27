@@ -350,7 +350,8 @@ def repackage(src_path: str, dst_path: str,
               split_hot_search_chunks_mb: int = 0,
               refresh_terrain_dir: str | None = None,
               unchunk_graph: bool = False,
-              split_find_chips: bool = False) -> int:
+              split_find_chips: bool = False,
+              rewrite_search_links: bool = True) -> int:
     from libzim.reader import Archive
     from libzim.writer import Creator, Item, StringProvider, Hint
 
@@ -486,6 +487,7 @@ def repackage(src_path: str, dst_path: str,
     raw_clusters = 0
     skipped_routing = 0
     refreshed_terrain = 0
+    rewritten_search = 0
     captured_graph_bytes = None
     # Keyed by the source's chunk path ("routing-data/graph-chunk-0000.bin"
     # etc). Reassembled into a single buffer below when the source
@@ -591,6 +593,31 @@ def repackage(src_path: str, dst_path: str,
                 captured_search_chunks[prefix] = content
                 replaced_search_paths.add(path)
                 continue
+            # Search-detail link rewrite: every search/<slug>.html
+            # baked before 2026-04-26 had bare `href="index.html#..."`
+            # which from inside the search/ subdir resolves to
+            # `search/index.html` (404). zimcheck flagged hundreds of
+            # these as broken internal URLs and Kiwix's library validator
+            # marks the whole ZIM as Fail. The fresh-build template now
+            # uses `../index.html`; this pass retrofits the same fix
+            # into already-shipped ZIMs without a full create_osm_zim
+            # rebuild. Cheap: only touches the search/ namespace, all
+            # other entries remain byte-for-byte passthrough.
+            if (rewrite_search_links and path.startswith("search/")
+                    and path.endswith(".html")):
+                # Rewrite the two broken hrefs the template emits.
+                # Use a literal-bytes match (no regex) so an attacker-
+                # controlled name field can't break out of the
+                # rewriter and so we don't accidentally touch
+                # legitimate `index.html` strings inside <code> blocks.
+                fixed = (content
+                    .replace(b'href="index.html#dest=',
+                             b'href="../index.html#dest=')
+                    .replace(b'href="index.html#map=',
+                             b'href="../index.html#map='))
+                if fixed != content:
+                    content = fixed
+                    rewritten_search += 1
             # Mark the routing graph uncompressed for PWA-fzstd compat
             # (skipped when we're rewriting the graph anyway, above).
             if uncompress_graph and path == "routing-data/graph.bin":
@@ -780,6 +807,8 @@ def repackage(src_path: str, dst_path: str,
 
     size_mb = os.path.getsize(dst_path) / (1024 * 1024)
     extra = f"; {refreshed_terrain} terrain tiles refreshed" if refreshed_terrain else ""
+    if rewritten_search:
+        extra += f"; {rewritten_search} search detail page(s) link-fixed"
     print(f"\n  kept {kept} entries; {swapped} viewer swaps; "
           f"{added_missing} added; {raw_clusters} raw cluster(s){extra}")
     print(f"  output: {dst_path} ({size_mb:.1f} MB)")
@@ -840,6 +869,14 @@ def main() -> int:
                         "places.html fetches the chip file directly "
                         "instead of the full 1 GB poi.json which OOMs "
                         "Chrome on Japan.")
+    p.add_argument("--no-rewrite-search-links", action="store_true",
+                   help="Disable the search/<slug>.html href fix. By "
+                        "default the script rewrites bare "
+                        "`href=\"index.html#...\"` to `href=\"../index.html#...\"` "
+                        "so the link reaches the viewer at the ZIM root "
+                        "rather than 404'ing on `search/index.html`. "
+                        "Disable only when re-emitting an old ZIM that "
+                        "needs to stay byte-identical for diffing.")
     args = p.parse_args()
     return repackage(args.src, args.dst,
                      swap_viewer=not args.no_swap_viewer,
@@ -850,7 +887,8 @@ def main() -> int:
                      split_hot_search_chunks_mb=args.split_hot_search_chunks_mb,
                      refresh_terrain_dir=args.refresh_terrain_tiles,
                      unchunk_graph=args.unchunk_graph,
-                     split_find_chips=args.split_find_chips)
+                     split_find_chips=args.split_find_chips,
+                     rewrite_search_links=not args.no_rewrite_search_links)
 
 
 if __name__ == "__main__":

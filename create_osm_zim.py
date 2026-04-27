@@ -883,10 +883,18 @@ def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
         f'<h1>{safe_name}</h1>'
         f'<p class="kind">{safe_kind}</p>'
         f'{contact_html}'
+        # Search detail pages live at `search/<slug>.html` inside the
+        # ZIM. A bare `index.html#...` resolves to `search/index.html`
+        # (which doesn't exist) — zimcheck flagged hundreds of these
+        # as broken internal URLs and Kiwix's library validator
+        # treats the whole ZIM as Fail. Use `../index.html` so the
+        # link reaches the viewer at the ZIM root regardless of
+        # how the host (Kiwix Desktop, kiwix-serve, our PWA's SW)
+        # serves the path.
         '<div class="cta">'
-        f'<a class="primary" href="index.html#{dest_hash}">'
+        f'<a class="primary" href="../index.html#{dest_hash}">'
         'Directions to here</a>'
-        f'<a href="index.html#{map_hash}">View on map</a>'
+        f'<a href="../index.html#{map_hash}">View on map</a>'
         '</div>'
         f'<p class="coords">{lat:.5f}, {lon:.5f}</p>'
         '</body></html>'
