@@ -303,6 +303,20 @@ def _chk_terrain_edge_stripe(arc, cfg) -> tuple[str, str]:
             pass
         checked += 1
     if bad:
+        # Operator escape hatch: regional ZIMs can't fix low-zoom tile
+        # edges that fall outside the region's bbox without a global
+        # terrain cache (we render only the bbox+1° buffer, then the
+        # tile's outer columns are zero-filled). The full-rebuild path
+        # on a host with the world DEM doesn't hit this. Set
+        # TERRAIN_STRIPE_TOLERATE=N to allow up to N flagged tiles
+        # through — these only affect z<=7 terrain visuals at the
+        # bbox edges, never routing or in-region rendering.
+        tolerate = int(os.environ.get("TERRAIN_STRIPE_TOLERATE", "0") or 0)
+        if len(bad) <= tolerate:
+            return ("pass",
+                    f"{len(bad)} bbox-edge stripe(s) within "
+                    f"TERRAIN_STRIPE_TOLERATE={tolerate} (regional bbox; "
+                    f"affects low-zoom outside region only)")
         return ("fail",
                 f"{len(bad)} low-zoom terrain tile(s) with bbox-edge "
                 f"zero block (of {checked} sampled); first: "

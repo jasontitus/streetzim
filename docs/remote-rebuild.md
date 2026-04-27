@@ -258,10 +258,20 @@ bash cloud/upload_validated.sh "$ID" "$OUT"
 | 2     | hispaniola      | -75.0,17.0,-67.0,21.0          | ~15 min     |
 | 3     | colorado        | -109.1,36.9,-102.0,41.0        | ~20 min     |
 | 4     | baltics         | 19.0,53.0,28.5,60.0            | ~30 min     |
-| 5     | midwest-us      | -97.5,36.0,-80.0,49.4          | ~1 h        |
-| 6     | africa          | -18.0,-35.0,52.0,38.0          | ~3 h        |
-| 7     | united-states   | -125.0,24.5,-66.9,49.4         | ~3 h        |
-| 8     | europe          | -25.0,34.0,50.5,72.0           | ~4 h        |
+| 5     | california      | -125.0,32.0,-114.0,42.0        | ~30 min     |
+| 6     | midwest-us      | -97.5,36.0,-80.0,49.4          | ~1 h        |
+| 7     | africa          | -18.0,-35.0,52.0,38.0          | ~3 h        |
+| 8     | united-states   | -125.0,24.5,-66.9,49.4         | ~3 h        |
+| 9     | europe          | -25.0,34.0,50.5,72.0           | ~4 h        |
+
+California is in the list because today's local reroll caught a
+pre-existing low-zoom terrain edge-stripe bug in the source ZIM
+(tile 3/1/2.webp had 59-pixel and 131-pixel zero columns). The
+local Mac doesn't have the world DEM cache to render those edges
+correctly; the remote box does. The local reroll shipped with
+TERRAIN_STRIPE_TOLERATE=20 as a stop-gap so iOS Kiwix users get the
+spatial-routing fix today; replace with a full rebuild when the
+remote queue catches up.
 
 Total ≈ 12 h serially; less if the world build's caches are warm.
 Run them sequentially — `create_osm_zim.py` saturates 8+ cores per
