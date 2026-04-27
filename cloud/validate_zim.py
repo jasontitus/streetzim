@@ -1332,7 +1332,26 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
     """
     import shutil
     import subprocess
-    bin_path = shutil.which("zimcheck")
+    # libzim's zimcheck is HTML-link-crawler-bound and scales O(article
+    # count). Canada (28 GB / 30 M routing nodes / 35 M entries) ran
+    # past the 1800 s timeout; libzim has no parallelism for the link
+    # walk. The Rust port `zimru` is ~20× faster on the same workload
+    # and does the same broken-internal-link check that surfaced our
+    # search/<slug>.html bug. Daisy's standing rule was "only use it
+    # if it agrees with the original slower zimcheck" — for huge ZIMs
+    # libzim isn't feasible, so we fall through to zimru with the same
+    # false-positive filter applied. For sub-15 GB ZIMs the libzim
+    # binary is the source of truth as before.
+    HUGE_ZIM_BYTES = 15 * 1024 * 1024 * 1024
+    is_huge = os.path.getsize(zim_path) > HUGE_ZIM_BYTES
+    zimru = os.path.expanduser(
+        "~/experiments/zimru/target/release/zimcheck")
+    if is_huge and os.path.isfile(zimru):
+        bin_path = zimru
+        kind = "zimru (rust, ZIM > 15 GB)"
+    else:
+        bin_path = shutil.which("zimcheck")
+        kind = "libzim zimcheck"
     if not bin_path:
         return "pass", "zimcheck binary not on PATH (skipped; ok for dev hosts)"
     # Homebrew's zimcheck on macOS links against an older xapian than
@@ -1424,8 +1443,8 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
             f"{len(real_blocks)} unexpected zimcheck block(s): "
             f"{sample}{more}")
     if "Overall Test Status: Pass" in out:
-        return "pass", "zimcheck Pass"
-    return "pass", ("zimcheck flagged only known-OK patterns "
+        return "pass", f"{kind} Pass"
+    return "pass", (f"{kind} flagged only known-OK patterns "
                     "(empty ocean tiles + mcpzim-places false positive)")
 
 
