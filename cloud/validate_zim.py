@@ -1345,11 +1345,16 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
     if os.path.isdir(patched):
         existing = env.get("DYLD_LIBRARY_PATH", "")
         env["DYLD_LIBRARY_PATH"] = (patched + ":" + existing).rstrip(":")
+    # Big regions take much longer than small. Australia-NZ (6 GB +
+    # 6.8 M routing nodes) hit 600 s and false-failed; libzim
+    # zimcheck on canada (28 GB) is even worse. 1800 s covers
+    # everything we ship today; legit zimcheck failures surface in
+    # well under a minute on smaller ZIMs.
     try:
         proc = subprocess.run([bin_path, zim_path], capture_output=True,
-                              text=True, env=env, timeout=600)
+                              text=True, env=env, timeout=1800)
     except subprocess.TimeoutExpired:
-        return "fail", "zimcheck timed out after 600 s"
+        return "fail", "zimcheck timed out after 1800 s"
     except Exception as exc:
         return "pass", f"zimcheck unrunnable: {exc} (skipped)"
     out = (proc.stdout or "") + "\n" + (proc.stderr or "")
