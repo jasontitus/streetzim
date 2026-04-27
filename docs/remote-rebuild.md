@@ -1,18 +1,25 @@
 # Remote-box rebuild runbook
 
-For the 128 GB / 14 TB remote box. Two paths:
+For the 128 GB / 14 TB remote box (Europe-located, with the full
+satellite tile cache + world build currently in progress, which means
+planet PBF + world MBTiles + terrain cache are already there).
 
-- **REROLL** — pull an existing shipped ZIM from archive.org and
-  re-emit it with the current viewer + mobile-safety upgrades. Cheap
-  (10–60 min per region), no PBF processing.
-- **FULL REBUILD** — start from the planet PBF and run
-  `create_osm_zim.py` end-to-end. Expensive (hours per continental
-  region) but produces a fresh routing graph, fresh OSM data, fresh
-  Overture enrichment.
+**Default path on this box: FULL REBUILD.** A reroll preserves any
+trailing data issues from the source ZIM (the 12 broken terrain
+tiles in California's source were caught by the validator only
+because the audit got tighter today; older shipped regions might
+have missed similar bugs). Starting from the planet PBF guarantees
+no inherited regressions and produces fresh OSM data + fresh
+Overture enrichment.
 
-Always reroll first. Only do a full rebuild when the source ZIM
-itself has bugs you can't patch via repackage (e.g. terrain
-edge-stripe blocks, wrong bbox, schema breaks).
+Use REROLL only as an exception:
+- When you need a quick fix (e.g. a viewer-only bug) and a full
+  rebuild can't fit in the schedule.
+- When the source ZIM is known-good and you only need new viewer
+  HTML / search-link rewrite / chip-sub-bucketing.
+
+The reroll commands are at the END of this doc. The full-rebuild
+flow is the body.
 
 ---
 
@@ -46,10 +53,10 @@ git clone https://github.com/jasontitus/zimru.git ~/experiments/zimru
 (cd ~/experiments/zimru && cargo build --release)
 ```
 
-## Path A — REROLL a shipped archive.org ZIM
+## Path A (DE-EMPHASIZED) — REROLL a shipped archive.org ZIM
 
-Use this when the source ZIM has good data but predates the
-mobile-safety upgrades (any pre-2026-04-26 region falls here).
+Use this only as an exception when a fresh full rebuild can't fit
+the schedule. A reroll keeps any bugs latent in the source ZIM.
 
 ```sh
 # Region IDs match the streetzim-{id} archive item names.
@@ -149,36 +156,36 @@ bash cloud/upload_validated.sh "$ID" "$OUT"
 
 ---
 
-## Path B — FULL REBUILD from planet PBF
+## Path B (PRIMARY) — FULL REBUILD from planet PBF
 
-Use only when the source ZIM has unfixable issues (e.g. wrong bbox,
-missing Overture enrichment, schema that predates the chunk format).
+This is the canonical path on the remote box. Produces fresh data
+from the planet PBF + Overture + Wikidata, with all of today's
+mobile-safety flags.
 
 ### Prereq: planet data on the remote box
 
+The Europe box already has the heavy assets (planet PBF + world
+MBTiles + terrain DEM cache + full satellite tile cache) from the
+world-build run. **Do not re-download.** Just confirm they're at the
+expected paths:
+
 ```sh
-mkdir -p world-data
-# Latest planet PBF (~80 GB, slow download).
-curl -fL "https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf" \
-    -o world-data/planet.osm.pbf
+# Verify the world build's working files are present.
+ls -lh world-data/{planet*.osm.pbf,world-tiles*.mbtiles}
+ls -d terrain_cache/dem_sources/ satellite_cache_avif_256/
 
-# Optional: world MBTiles for vector tiles. Fastest is to copy from
-# the local Mac since regenerating tilemaker output is hours.
-#   scp local-mac:~/experiments/streetzim/world-data/world-tiles-v2.mbtiles \
-#       remote-box:~/experiments/streetzim/world-data/
-
-# Terrain DEM cache. The Copernicus tiles are deterministic and the
-# generator caches them. If you have the local Mac's
-# terrain_cache/dem_sources/, sync it (~547 GB) so the build doesn't
-# re-download from AWS.
-#   rsync -aP local-mac:~/experiments/streetzim/terrain_cache \
-#               remote-box:~/experiments/streetzim/
-
-# Overture parquet caches per region (~1-3 GB each, much smaller
-# than the full planet bundle — fetch only what's needed):
+# Pull just the per-region Overture parquets you need (small,
+# 1-3 GB each, regional bbox-clipped). Skip if running a region
+# the world build hasn't touched.
 #   scp local-mac:~/experiments/streetzim/overture_cache/{addresses,places}-${ID}-2026-04-15.0.parquet \
 #       remote-box:~/experiments/streetzim/overture_cache/
 ```
+
+If the world build is still running, **don't kick off concurrent
+regional builds** until it finishes — they share the same MBTiles +
+terrain cache + tilemaker store and will block each other on
+filesystem locks. The world build is the implicit Phase 0; queue
+regional builds after it.
 
 ### Build a region
 
@@ -230,13 +237,87 @@ mv "osm-${ID}.zim" "$OUT"
 
 # Spatial-chunk the routing graph for mobile (post-process, since
 # create_osm_zim emits monolithic graph.bin — we then convert).
+# Also drops the LLM bundle (addr/poi/street.json — viewer doesn't
+# read them, ~10-15% size win) and sub-buckets fat chips (>10 MB).
 ./venv312/bin/python3 cloud/repackage_zim.py "$OUT" "$OUT.spatial.zim" \
     --spatial-chunk-scale 10 \
+    --split-find-chips \
+    --split-hot-search-chunks-mb 10 \
     --chip-split-threshold-mb 10
 mv "$OUT.spatial.zim" "$OUT"
 
 ./venv312/bin/python3 cloud/validate_zim.py "$OUT"
 bash cloud/upload_validated.sh "$ID" "$OUT"
+```
+
+### Suggested order (small → large, lets you bail without losing big work)
+
+| Order | ID              | Bbox                           | Est runtime |
+|-------|-----------------|--------------------------------|-------------|
+| 1     | washington-dc   | -77.2,38.7,-76.9,39.0          | ~10 min     |
+| 2     | hispaniola      | -75.0,17.0,-67.0,21.0          | ~15 min     |
+| 3     | colorado        | -109.1,36.9,-102.0,41.0        | ~20 min     |
+| 4     | baltics         | 19.0,53.0,28.5,60.0            | ~30 min     |
+| 5     | midwest-us      | -97.5,36.0,-80.0,49.4          | ~1 h        |
+| 6     | africa          | -18.0,-35.0,52.0,38.0          | ~3 h        |
+| 7     | united-states   | -125.0,24.5,-66.9,49.4         | ~3 h        |
+| 8     | europe          | -25.0,34.0,50.5,72.0           | ~4 h        |
+
+Total ≈ 12 h serially; less if the world build's caches are warm.
+Run them sequentially — `create_osm_zim.py` saturates 8+ cores per
+region during the routing extraction pass and concurrent regions
+will fight for memory + the same tilemaker store dir.
+
+### Wrapper script for the queue
+
+After Phase 0 (the world build) finishes, run one of these per
+region. Each takes its own log so you can resume from where it
+crashed:
+
+```sh
+for row in \
+  "washington-dc -77.2,38.7,-76.9,39.0 'Washington, D.C.'" \
+  "hispaniola    -75.0,17.0,-67.0,21.0 'Hispaniola'"       \
+  "colorado      -109.1,36.9,-102.0,41.0 'Colorado'"       \
+  "baltics       19.0,53.0,28.5,60.0 'Baltics'"            \
+  "midwest-us    -97.5,36.0,-80.0,49.4 'Midwest US'"       \
+  "africa        -18.0,-35.0,52.0,38.0 'Africa'"           \
+  "united-states -125.0,24.5,-66.9,49.4 'United States'"   \
+  "europe        -25.0,34.0,50.5,72.0 'Europe'"            \
+; do
+  read -r id bbox name <<< "$row"
+  log="${id}-rebuild-$(date +%Y%m%d).log"
+  if [ -s "osm-${id}-$(date +%Y-%m-%d).zim" ]; then
+      echo "skip $id (already built today)"; continue
+  fi
+  echo "=== $id @ $(date '+%H:%M:%S') ==="
+  ./venv312/bin/python3 create_osm_zim.py \
+      --mbtiles world-data/world-tiles-v2.mbtiles \
+      --pbf world-data/planet.osm.pbf \
+      --bbox="$bbox" --name "$name" \
+      --satellite --satellite-download-zoom 12 \
+      --terrain --wikidata --routing \
+      --search-cache search_cache/world.jsonl \
+      --overture-addresses overture_cache/addresses-${id}-2026-04-15.0.parquet \
+      --overture-places overture_cache/places-${id}-2026-04-15.0.parquet \
+      --chunk-graph-mb 200 \
+      --split-hot-search-chunks-mb 10 \
+      --split-find-chips \
+      --low-zoom-world-vrt terrain_cache/dem_sources/world_dem_32k.tif \
+      --output "osm-${id}.zim" \
+      --keep-temp 2>&1 | tee "$log" || { echo "FAIL $id"; continue; }
+  TODAY=$(date +%Y-%m-%d)
+  OUT="osm-${id}-${TODAY}.zim"
+  mv "osm-${id}.zim" "$OUT"
+  ./venv312/bin/python3 cloud/repackage_zim.py "$OUT" "${OUT}.tmp" \
+      --spatial-chunk-scale 10 \
+      --split-find-chips --chip-split-threshold-mb 10 \
+      --split-hot-search-chunks-mb 10 \
+      >> "$log" 2>&1
+  mv "${OUT}.tmp" "$OUT"
+  ./venv312/bin/python3 cloud/validate_zim.py "$OUT" >> "$log" 2>&1
+  bash cloud/upload_validated.sh "$id" "$OUT" >> "$log" 2>&1
+done
 ```
 
 ---
