@@ -1393,10 +1393,19 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
     def _maybe_keep(header, body):
         if not header:
             return
-        # Empty articles: legit when the entry is a 0-byte ocean tile
-        # (vector tiles/*.pbf) — we ship those intentionally for
-        # full bbox coverage. Drop the entire block when EVERY child
-        # is `Entry tiles/.../*.pbf is empty`.
+        # zimru per-line format: `[ERROR] Empty article: tiles/X/Y/Z.pbf`.
+        # libzim block format: `[ERROR] Empty articles:` + indented
+        # `  Entry tiles/... is empty` children. Both are legit when
+        # the entry is a 0-byte ocean tile (vector tiles/*.pbf) —
+        # we ship those intentionally for full bbox coverage.
+        if header.startswith("[ERROR] Empty article:"):
+            # Single-line zimru entry. Drop iff it's a tiles/*.pbf.
+            payload = header.split(":", 1)[1].strip()
+            if payload.startswith("tiles/") and payload.endswith(".pbf"):
+                return
+            # Anything else (empty HTML, empty manifest, etc.) keep.
+            real_blocks.append((header, body))
+            return
         if header.startswith("[ERROR] Empty articles"):
             non_tile = [b for b in body
                         if "Entry tiles/" not in b
