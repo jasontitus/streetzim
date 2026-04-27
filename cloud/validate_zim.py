@@ -362,24 +362,46 @@ def _chk_find_chips(arc) -> tuple[str, str]:
         # legitimately has no chips section.
         return ("skip", "no chips declared in manifest")
     # Every declared chip must have a corresponding file that parses.
+    # Sub-bucketed chips are split into chip-{cid}-{suffix}.json files,
+    # listed in `meta["sub_chunks"]` — load all of those instead of
+    # the single chip-{cid}.json (which doesn't exist when sub-
+    # bucketing kicks in for files > chip_split_threshold_mb).
     missing = []
     empty = []
     for cid, meta in chips.items():
-        path = f"category-index/chip-{cid}.json"
-        try:
-            raw = bytes(arc.get_entry_by_path(path).get_item().content)
-        except Exception:
+        sub_chunks = meta.get("sub_chunks")
+        recs: list = []
+        ok = True
+        if isinstance(sub_chunks, list) and sub_chunks:
+            for suffix in sub_chunks:
+                path = f"category-index/chip-{cid}-{suffix}.json"
+                try:
+                    raw = bytes(arc.get_entry_by_path(path)
+                                .get_item().content)
+                    part = json.loads(raw)
+                except Exception:
+                    ok = False
+                    break
+                if not isinstance(part, list):
+                    ok = False
+                    break
+                recs.extend(part)
+        else:
+            path = f"category-index/chip-{cid}.json"
+            try:
+                raw = bytes(arc.get_entry_by_path(path)
+                            .get_item().content)
+                recs = json.loads(raw)
+            except Exception:
+                ok = False
+            else:
+                if not isinstance(recs, list):
+                    ok = False
+        if not ok:
             missing.append(cid)
             continue
-        try:
-            recs = json.loads(raw)
-        except Exception:
-            missing.append(cid)
-            continue
-        if not isinstance(recs, list):
-            missing.append(cid)
-            continue
-        # Manifest count should match the file's actual record count.
+        # Manifest count should match the file's actual record count
+        # (sum across sub-buckets when applicable).
         declared = int(meta.get("count") or 0)
         if declared != len(recs):
             return ("fail",
