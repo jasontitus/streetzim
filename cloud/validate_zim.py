@@ -1342,13 +1342,14 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
     # libzim isn't feasible, so we fall through to zimru with the same
     # false-positive filter applied. For sub-15 GB ZIMs the libzim
     # binary is the source of truth as before.
-    HUGE_ZIM_BYTES = 15 * 1024 * 1024 * 1024
-    is_huge = os.path.getsize(zim_path) > HUGE_ZIM_BYTES
+    # Prefer zimru (Rust port, ~20× faster) when available — Daisy:
+    # "we can use zimru zimcheck for now". Falls through to libzim's
+    # zimcheck binary on dev hosts that don't have zimru built.
     zimru = os.path.expanduser(
         "~/experiments/zimru/target/release/zimcheck")
-    if is_huge and os.path.isfile(zimru):
+    if os.path.isfile(zimru):
         bin_path = zimru
-        kind = "zimru (rust, ZIM > 15 GB)"
+        kind = "zimru (rust)"
     else:
         bin_path = shutil.which("zimcheck")
         kind = "libzim zimcheck"

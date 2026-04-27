@@ -351,7 +351,9 @@ def repackage(src_path: str, dst_path: str,
               refresh_terrain_dir: str | None = None,
               unchunk_graph: bool = False,
               split_find_chips: bool = False,
-              rewrite_search_links: bool = True) -> int:
+              rewrite_search_links: bool = True,
+              drop_llm_bundle: bool = True,
+              chip_split_threshold_mb: int = 10) -> int:
     from libzim.reader import Archive
     from libzim.writer import Creator, Item, StringProvider, Hint
 
@@ -488,12 +490,26 @@ def repackage(src_path: str, dst_path: str,
     skipped_routing = 0
     refreshed_terrain = 0
     rewritten_search = 0
+
+    # Per-section timing — printed at the end so future runs can
+    # eyeball where the wall-clock is going. Build pipeline is the
+    # natural next target for parallelization; knowing whether
+    # passthrough, chip emission, graph rewrite, or finalize
+    # dominates determines what to optimize first.
+    import time as _time
+    _t_start = _time.time()
+    _section_times: dict[str, float] = {}
+    def _tick(name: str):
+        now = _time.time()
+        _section_times[name] = now - (_section_times.get("_last", _t_start))
+        _section_times["_last"] = now
     captured_graph_bytes = None
     # Keyed by the source's chunk path ("routing-data/graph-chunk-0000.bin"
     # etc). Reassembled into a single buffer below when the source
     # shipped chunked but not monolithic.
     captured_graph_chunks: dict | None = None
     with creator as c:
+        _tick("setup")
         # Passthrough all entries — Archive iterates titles + paths.
         for i in range(src.entry_count):
             entry = src._get_entry_by_id(i) if hasattr(src, "_get_entry_by_id") else src.get_entry_by_path_id(i)
@@ -593,6 +609,29 @@ def repackage(src_path: str, dst_path: str,
                 captured_search_chunks[prefix] = content
                 replaced_search_paths.add(path)
                 continue
+            # LLM-bundle drop: addr.json / poi.json / street.json hold
+            # the raw category source records (not what the viewer
+            # reads — that's chip-X.json). They're a few hundred MB
+            # to ~5 GB per region and sit dormant in the ZIM, but
+            # phones could OOM if anything ever fetched them
+            # accidentally. Default DROP; opt back in with
+            # `--include-llm-bundle` for bundle consumers.
+            # Don't drop place.json — places.html's reverse-geocode
+            # reads it on viewport-origin mode.
+            if drop_llm_bundle and path in (
+                "category-index/addr.json",
+                "category-index/poi.json",
+                "category-index/street.json",
+            ):
+                continue
+            # When --split-find-chips is on we re-derive chips from
+            # poi.json + park.json below; skip the source chip-*.json
+            # passthrough so the new files don't collide with the old
+            # at the same paths.
+            if (split_find_chips
+                    and path.startswith("category-index/chip-")
+                    and path.endswith(".json")):
+                continue
             # Search-detail link rewrite: every search/<slug>.html
             # baked before 2026-04-26 had bare `href="index.html#..."`
             # which from inside the search/ subdir resolves to
@@ -640,6 +679,7 @@ def repackage(src_path: str, dst_path: str,
             print(f"  reassembled graph.bin from {len(parts)} source "
                   f"chunks ({len(captured_graph_bytes)/1024/1024:.1f} MB)")
 
+        _tick("passthrough")
         # Re-emit the routing graph in the requested layout.
         if upgrade_graph and captured_graph_bytes is None:
             print("  warning: no routing-data/graph.bin in source — "
@@ -692,6 +732,7 @@ def repackage(src_path: str, dst_path: str,
                 src_arc=src,
             )
 
+        _tick("graph_rewrite")
         # Preserve ZIM-level metadata. Illustration is binary (PNG),
         # everything else text; treat both correctly.
         for k in ("Title", "Description", "Language", "Creator",
@@ -709,6 +750,7 @@ def repackage(src_path: str, dst_path: str,
             try: c.add_metadata("Illustration_48x48@1", illus)
             except Exception as e: print(f"  warning: illustration: {e}")
 
+        _tick("metadata")
         # Chip-split retrofit: if requested, read the source's
         # category-index/poi.json + park.json, split by Find-page chip
         # via cloud/chip_rules, and emit one chip-{id}.json per chip.
@@ -736,23 +778,85 @@ def repackage(src_path: str, dst_path: str,
                                if record_matches_chip(r, chip)]
                 if not dst_records:
                     continue
+                # Note: experimented with dropping the constant `t`
+                # field (always "poi" inside a poi-derived chip) —
+                # 0.5 % / 75 KB saving after ZSTD22 on a 110 MB JSON.
+                # ZSTD eats the repetition. Not worth the schema
+                # break; consumers (mcpzim, future viewer code) keep
+                # the same shape.
                 chip_bytes = json.dumps(dst_records, separators=(",", ":"),
                                          ensure_ascii=False).encode("utf-8")
-                entry_path = f"category-index/chip-{chip.id}.json"
-                c.add_item(PassthroughItem(
-                    entry_path,
-                    f"Find chip: {chip.label}",
-                    "application/json",
-                    chip_bytes,
-                    compress=True,
-                ))
-                new_chips_meta[chip.id] = {
-                    "label": chip.label,
-                    "count": len(dst_records),
-                    "bytes": len(chip_bytes),
-                }
-                print(f"  chip-{chip.id}: {len(dst_records):,} records "
-                      f"({len(chip_bytes)/1024/1024:.1f} MB)")
+                threshold_b = chip_split_threshold_mb * 1024 * 1024
+                # Sub-bucket fat chips. Japan's restaurants chip was
+                # 164 MB and Canada's shops chip 137 MB — both under
+                # iOS heap but loading + parsing pushes the page
+                # near discard. Split via FNV-1a hash on record name
+                # (same scheme as search-data) so phones fetch only
+                # the sub-bucket they need. The viewer's loadChipFile
+                # reads `manifest.chips[id].sub_chunks` and fans out
+                # parallel fetches.
+                if (chip_split_threshold_mb > 0 and
+                        len(chip_bytes) > threshold_b):
+                    n_sub = 1
+                    while True:
+                        n_sub *= 2
+                        buckets = [[] for _ in range(n_sub)]
+                        for r in dst_records:
+                            name = r.get("n", "") or ""
+                            buckets[_sub_bucket_for_name(name, n_sub)].append(r)
+                        bucket_blobs = [
+                            json.dumps(b, separators=(",", ":"),
+                                       ensure_ascii=False).encode("utf-8")
+                            for b in buckets
+                        ]
+                        biggest = max(len(b) for b in bucket_blobs)
+                        # Cap depth at 256 sub-buckets — beyond that
+                        # the records have low cardinality on `n` and
+                        # further splitting won't help.
+                        if biggest <= threshold_b or n_sub >= 256:
+                            break
+                    sub_paths = []
+                    hex_w = max(1, len(format(n_sub - 1, "x")))
+                    for i, blob in enumerate(bucket_blobs):
+                        if not blob or blob == b"[]":
+                            continue
+                        sub_id = format(i, f"0{hex_w}x")
+                        sub_path = f"category-index/chip-{chip.id}-{sub_id}.json"
+                        c.add_item(PassthroughItem(
+                            sub_path,
+                            f"Find chip: {chip.label} (bucket {sub_id})",
+                            "application/json",
+                            blob,
+                            compress=True,
+                        ))
+                        sub_paths.append(sub_id)
+                    print(f"  chip-{chip.id}: {len(dst_records):,} records "
+                          f"({len(chip_bytes)/1024/1024:.1f} MB) "
+                          f"→ {len(sub_paths)} sub-buckets, "
+                          f"biggest {biggest/1024/1024:.1f} MB")
+                    new_chips_meta[chip.id] = {
+                        "label": chip.label,
+                        "count": len(dst_records),
+                        "bytes": len(chip_bytes),
+                        "sub_chunks": sub_paths,
+                        "n_sub_buckets": n_sub,
+                    }
+                else:
+                    entry_path = f"category-index/chip-{chip.id}.json"
+                    c.add_item(PassthroughItem(
+                        entry_path,
+                        f"Find chip: {chip.label}",
+                        "application/json",
+                        chip_bytes,
+                        compress=True,
+                    ))
+                    new_chips_meta[chip.id] = {
+                        "label": chip.label,
+                        "count": len(dst_records),
+                        "bytes": len(chip_bytes),
+                    }
+                    print(f"  chip-{chip.id}: {len(dst_records):,} records "
+                          f"({len(chip_bytes)/1024/1024:.1f} MB)")
             # Re-emit category-index/manifest.json with the new chips
             # section so places.html can enumerate them.
             try:
@@ -770,6 +874,7 @@ def repackage(src_path: str, dst_path: str,
                 compress=True,
             ))
 
+        _tick("chips")
         # Add viewer assets that existed in `replacements` but weren't
         # present in the source ZIM. Several 2026-04-22 regional builds
         # (east-coast-us, australia-nz, west-coast-us) shipped without
@@ -806,11 +911,25 @@ def repackage(src_path: str, dst_path: str,
             print(f"  added missing {name} from viewer set ({len(data)} B)")
 
     size_mb = os.path.getsize(dst_path) / (1024 * 1024)
+    _tick("finalize")
     extra = f"; {refreshed_terrain} terrain tiles refreshed" if refreshed_terrain else ""
     if rewritten_search:
         extra += f"; {rewritten_search} search detail page(s) link-fixed"
     print(f"\n  kept {kept} entries; {swapped} viewer swaps; "
           f"{added_missing} added; {raw_clusters} raw cluster(s){extra}")
+    # Per-section timing — useful when planning what to optimize
+    # next. The libzim cluster compressor (run during finalize when
+    # the Creator __exit__ flushes pending clusters) usually
+    # dominates; passthrough is mostly I/O-bound; chip emission and
+    # graph rewrite are CPU/memory-bound but bounded by file size.
+    total = sum(v for k, v in _section_times.items() if not k.startswith("_"))
+    print(f"\n  per-section wall time:")
+    for sect in ("setup", "passthrough", "graph_rewrite", "metadata",
+                 "chips", "finalize"):
+        secs = _section_times.get(sect, 0.0)
+        pct = (100.0 * secs / total) if total > 0 else 0.0
+        print(f"    {sect:<14} {secs:>7.1f} s  ({pct:>5.1f}%)")
+    print(f"    {'total':<14} {total:>7.1f} s  (100.0%)")
     print(f"  output: {dst_path} ({size_mb:.1f} MB)")
     return 0
 
@@ -877,6 +996,22 @@ def main() -> int:
                         "rather than 404'ing on `search/index.html`. "
                         "Disable only when re-emitting an old ZIM that "
                         "needs to stay byte-identical for diffing.")
+    p.add_argument("--include-llm-bundle", action="store_true",
+                   help="Keep category-index/{addr,poi,street}.json in the "
+                        "output ZIM. By default these are DROPPED — the "
+                        "viewer doesn't read them, they're hundreds of MB "
+                        "each (5 GB+ on US regions), and a phone fetching "
+                        "one would OOM. Enable only when emitting a ZIM "
+                        "for an offline LLM consumer that ingests the raw "
+                        "category bundles directly.")
+    p.add_argument("--chip-split-threshold-mb", type=int, default=10,
+                   metavar="N",
+                   help="Sub-bucket category-index/chip-{id}.json files "
+                        "larger than N MB into FNV-bucketed sub-files. "
+                        "Mirrors the --split-hot-search-chunks-mb logic. "
+                        "Default 10 — Japan's restaurants chip was 164 MB "
+                        "and Canada's shops 137 MB without sub-bucketing, "
+                        "tight against iOS heap. Set to 0 to disable.")
     args = p.parse_args()
     return repackage(args.src, args.dst,
                      swap_viewer=not args.no_swap_viewer,
@@ -888,7 +1023,9 @@ def main() -> int:
                      refresh_terrain_dir=args.refresh_terrain_tiles,
                      unchunk_graph=args.unchunk_graph,
                      split_find_chips=args.split_find_chips,
-                     rewrite_search_links=not args.no_rewrite_search_links)
+                     rewrite_search_links=not args.no_rewrite_search_links,
+                     drop_llm_bundle=not args.include_llm_bundle,
+                     chip_split_threshold_mb=args.chip_split_threshold_mb)
 
 
 if __name__ == "__main__":

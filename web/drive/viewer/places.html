@@ -442,6 +442,23 @@ async function loadChipFile(chipId) {
   if (state.cache.cats.has('chip:' + chipId)) {
     return state.cache.cats.get('chip:' + chipId);
   }
+  // Sub-bucketed chips: the build emits chip-{id}-{NN}.json
+  // when chip-{id}.json would exceed 10 MB (Japan restaurants
+  // 164 MB, Canada shops 137 MB — both phone-fetchable but tight
+  // against iOS heap). Manifest's chips[id].sub_chunks lists the
+  // bucket suffixes; fan out parallel fetches, concatenate.
+  const meta = (state.manifests.cat &&
+                state.manifests.cat.chips &&
+                state.manifests.cat.chips[chipId]) || {};
+  const subBuckets = Array.isArray(meta.sub_chunks) ? meta.sub_chunks : null;
+  if (subBuckets && subBuckets.length) {
+    const blobs = await Promise.all(subBuckets.map(suffix =>
+      fetchJSON(CAT + 'chip-' + chipId + '-' + suffix + '.json')
+        .catch(() => [])));
+    const combined = [].concat(...blobs);
+    state.cache.cats.set('chip:' + chipId, combined);
+    return combined;
+  }
   const data = await fetchJSON(CAT + 'chip-' + chipId + '.json');
   state.cache.cats.set('chip:' + chipId, data);
   return data;
