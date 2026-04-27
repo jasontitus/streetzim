@@ -83,13 +83,13 @@ PY
 # may carry chips and/or spatial routing already, in which case the
 # corresponding flag is suppressed by detect_flags() above.
 regions=(
-  # silicon-valley + iran already got their v2 upload earlier today
-  # (with the corrected per-region flags). Re-rolling them again
-  # under a -b suffix would just rotate them back to a no-op
-  # equivalent of what's already on archive. Comment back in if
-  # there's a real source change for them.
-  # "silicon-valley   osm-silicon-valley.zim"
-  # "iran             osm-iran-shipped.zim"
+  # silicon-valley and iran originally commented out for -b run
+  # since their v2 upload landed earlier. Re-included for -c run
+  # because the search/<slug>.html broken-link bug applies to
+  # them too — those uploads predate the rewrite_search_links
+  # default and need a third roll to be valid per zimcheck.
+  "silicon-valley   osm-silicon-valley.zim"
+  "iran             osm-iran-shipped.zim"
   "egypt            osm-egypt-chips.zim"
   "central-asia     osm-central-asia-shipped.zim"
   "japan            osm-japan-chips-v2.zim"
