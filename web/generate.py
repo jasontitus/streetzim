@@ -153,6 +153,12 @@ REGIONS = [
         "zim_file": "osm-canada.zim",
         "description": "All of Canada &mdash; Toronto, Montreal, Vancouver, Calgary, Ottawa, Quebec City, Edmonton, Halifax, the Rockies, Banff, the Great Lakes, the Maritimes, and the Yukon and Northwest Territories.",
     },
+    {
+        "id": "central-asia",
+        "title": "Central Asia",
+        "zim_file": "osm-central-asia.zim",
+        "description": "Central Asia &mdash; Kazakhstan, Uzbekistan, Turkmenistan, Tajikistan, Kyrgyzstan, Afghanistan, and the Caucasus. Almaty, Tashkent, Bishkek, Ashgabat, Dushanbe, Kabul, the Pamirs, and the Silk Road.",
+    },
 ]
 
 
@@ -316,7 +322,16 @@ def build_page():
                     import re as _re
                     def _sort_key(f):
                         name = f.get("name", "")
-                        m = _re.search(r'-(\d{4}-\d{2}(?:-\d{2})?)\.zim$', name)
+                        # Match dated filenames optionally followed by a
+                        # single-letter "same-day re-roll" suffix (b, c, d…).
+                        # `2026-04-26 < 2026-04-26b < 2026-04-26c` by
+                        # lexicographic compare, so the suffix wins as
+                        # intended. Without the [a-z]? part, the c suffix
+                        # didn't match the regex and the script treated
+                        # the file as undated — letting the no-suffix
+                        # version win on size alone.
+                        m = _re.search(
+                            r'-(\d{4}-\d{2}(?:-\d{2})?[a-z]?)\.zim$', name)
                         if m:
                             # (dated=1, date_str, size). Lexicographic
                             # comparison is correct: YYYY-MM < YYYY-MM-DD
