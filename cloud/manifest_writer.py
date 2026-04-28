@@ -15,15 +15,19 @@ The libzim API surface used by `create_osm_zim.py` is small:
         creator.add_item(MapItem(...))
 
 ManifestCreator implements the same surface plus `add_redirection`
-(used by repackage_zim.py). MapItem-shaped objects are introspected
-via attributes set in the existing inner class:
+(used by repackage_zim.py).
 
-    _path, _title, _mimetype, _is_front, _compress, _data, _file_path
+Body-encoding strategy:
 
-For in-memory bytes (`_data`), we write them to a per-build staging
-directory and reference them from the manifest by absolute path —
-keeping the Rust side uniform (every item is file-backed in the
-emitted JSONL).
+  - Inline UTF-8 (`content`) for text mimes ≤ 256 KiB. Cheapest path;
+    no encoding cost.
+  - Inline base64 (`body_b64`) for everything else that fits in
+    memory. The 33 % size tax buys us no per-item `open()` syscalls
+    at consume time — at Japan-scale (3.2 M items) the previous
+    per-body file-stage path spent ~320 s in `open()` syscalls alone.
+  - On-disk path (`file`) is reserved for streaming-mode items
+    (>= 64 MiB; zimru's chunked-encode path keeps RSS bounded by
+    chunk size, not file size). Anything smaller goes inline.
 
 Per-item compress is supported: zimru routes items into separate
 clusters by effective compression, so a single ZIM can mix compressed
@@ -34,12 +38,12 @@ zstd-compressed).
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any, Iterable
@@ -67,6 +71,23 @@ _INLINE_TEXT_MIMES = frozenset({
 # and Python's json.dumps doesn't blow memory on a freak record. Items
 # above this fall back to file-stage even when the mime suggests text.
 _INLINE_TEXT_LIMIT = 256 * 1024
+
+# Bodies at or above this size are written through zimru's streaming
+# path (Item with `streaming: true` + `file` reference) rather than
+# base64-inlined. zimru's chunked encoder keeps peak RSS to one chunk
+# (~4 MiB) regardless of file size; base64-inlining a 1 GB routing
+# chunk would briefly hold ~1.4 GB of UTF-8 string + the source bytes
+# in Python's memory. 64 MiB is the same threshold add_item used
+# pre-base64 to switch on `streaming`, so the break-even point is
+# unchanged.
+_STREAMING_THRESHOLD = 64 * 1024 * 1024
+
+
+def _encode_body_b64(data: bytes) -> str:
+    """Encode binary body for inline JSONL transport. Pure ASCII out,
+    so JSON needs no escape characters and the 1.33× inflation is
+    the only cost. Decode happens once on the Rust side per record."""
+    return base64.b64encode(data).decode("ascii")
 
 
 # Resolved once per process. Override with STREETZIM_PACK_BIN if the
@@ -104,11 +125,14 @@ class ManifestCreator:
         verbose: bool = False,
     ) -> None:
         self._output_path = str(output_path)
+        # Stage dir holds just the manifest.jsonl now — bodies are
+        # base64-inlined. Kept as a directory rather than a bare
+        # file so existing tooling/inspection scripts that look at
+        # `<output>.pack-stage/` continue to find the manifest.
         self._stage_dir = Path(self._output_path + ".pack-stage")
         self._stage_dir.mkdir(parents=True, exist_ok=True)
         self._manifest_path = self._stage_dir / "manifest.jsonl"
         self._mf = self._manifest_path.open("w", encoding="utf-8")
-        self._n_inline = 0
         self._closed = False
         self._keep_stage = keep_stage
         self._verbose = verbose
@@ -183,9 +207,14 @@ class ManifestCreator:
         self._write_record(self._metadata_record(name, value, mimetype=mimetype))
 
     def add_illustration(self, side: int, png_bytes: bytes) -> None:
-        path = self._stage_inline_bytes(f"illustration-{side}.png", png_bytes)
+        # Illustration PNGs are tiny (typical 48 px favicon ~ a few KB)
+        # — always inline.
         self._write_record(
-            {"kind": "illustration", "size": int(side), "file": str(path)}
+            {
+                "kind": "illustration",
+                "size": int(side),
+                "body_b64": _encode_body_b64(bytes(png_bytes)),
+            }
         )
 
     def add_redirection(self, path: str, title: str, target: str) -> None:
@@ -206,8 +235,7 @@ class ManifestCreator:
         if mimetype is not None:
             rec["mimetype"] = str(mimetype)
         if isinstance(value, (bytes, bytearray)):
-            stage = self._stage_inline_bytes(f"meta-{name}", bytes(value))
-            rec["file"] = str(stage)
+            rec["body_b64"] = _encode_body_b64(bytes(value))
         else:
             rec["value"] = value if isinstance(value, str) else str(value)
         return rec
@@ -235,12 +263,21 @@ class ManifestCreator:
         file_path = getattr(item, "_file_path", None)
         if file_path:
             size = os.path.getsize(file_path)
-            rec["file"] = str(file_path)
-            # Stream items > ~64 MiB through zimru's chunked path so
-            # peak RSS doesn't track item size.
-            if size >= 64 * 1024 * 1024:
+            if size >= _STREAMING_THRESHOLD:
+                # Multi-MiB-to-multi-GB items (routing graph chunks,
+                # large PBF blobs) — let zimru read them in its own
+                # 4 MiB chunks at pack time so peak RSS stays bounded.
+                rec["file"] = str(file_path)
                 rec["streaming"] = True
                 rec["size"] = size
+            else:
+                # Sub-streaming-threshold disk-backed item — read once
+                # and inline as base64. Saves a per-item `open()` on
+                # the Rust side (the whole point of the body_b64
+                # path); the file is typically already hot in the
+                # page cache because Python just wrote it.
+                with open(file_path, "rb") as f:
+                    rec["body_b64"] = _encode_body_b64(f.read())
         else:
             data = getattr(item, "_data", None)
             if data is None:
@@ -248,46 +285,24 @@ class ManifestCreator:
                     f"add_item({path!r}): item has neither _file_path nor _data"
                 )
             data = bytes(data)
-            # Inline small text-ish items directly in the manifest as a
-            # `content` string. Saves the per-entry file-stage syscall
-            # (open/write/close/stat/open-again-from-Rust/read/close)
-            # which on a 17 K-entry build like silicon-valley costs
-            # ~100 s of wall time. Threshold of 256 KiB keeps the
-            # JSONL line-length sane and matches the size profile of
-            # chip-bucket / search-data sub-chunks (most are < 50 KB).
-            # Binary items (PBF, AVIF, WebP, PNG) are NOT inlined —
-            # they're not valid UTF-8, and JSON-encoding the bytes
-            # would balloon the manifest.
+            # Inline small text-ish items as a `content` string. UTF-8
+            # round-trips through JSON without the 33 % base64 tax;
+            # for HTML/JS/CSS/JSON that mostly lives in this branch
+            # the savings are real on the manifest size side.
+            # Threshold of 256 KiB keeps any single JSONL line sane.
+            inlined_text = False
             if (len(data) <= _INLINE_TEXT_LIMIT
                     and mime in _INLINE_TEXT_MIMES):
                 try:
                     rec["content"] = data.decode("utf-8")
+                    inlined_text = True
                 except UnicodeDecodeError:
                     # Mime says text but bytes aren't UTF-8 — fall
-                    # back to file-stage rather than risk lossy
-                    # encoding.
-                    stage = self._stage_inline_bytes(
-                        self._safe_stage_name(path), data)
-                    rec["file"] = str(stage)
-            else:
-                stage = self._stage_inline_bytes(
-                    self._safe_stage_name(path), data)
-                rec["file"] = str(stage)
+                    # through to body_b64 to avoid lossy encoding.
+                    pass
+            if not inlined_text:
+                rec["body_b64"] = _encode_body_b64(data)
         return rec
-
-    def _safe_stage_name(self, path: str) -> str:
-        return path.replace("/", "__").replace("\\", "__")
-
-    def _stage_inline_bytes(self, hint: str, data: bytes) -> Path:
-        # Unique-but-deterministic name based on a 4-digit counter +
-        # caller hint. Keeps stage dir browsable for debugging.
-        self._n_inline += 1
-        name = f"{self._n_inline:06d}-{hint}"
-        # Guard against huge or path-busting names.
-        name = name[:200]
-        out = self._stage_dir / name
-        out.write_bytes(data)
-        return out
 
     def _write_record(self, rec: dict[str, Any]) -> None:
         self._mf.write(json.dumps(rec, ensure_ascii=False, separators=(",", ":")))

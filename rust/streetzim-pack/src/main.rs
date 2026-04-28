@@ -6,18 +6,34 @@
 //! ```jsonl
 //! {"kind":"config","compression":"zstd","compression_level":3,"cluster_strategy":"by_mime","cluster_size_target":2097152,"max_in_flight_bytes":536870912,"main_path":"index.html"}
 //! {"kind":"metadata","name":"Title","value":"OSM Bay Area"}
-//! {"kind":"metadata","name":"CustomBlob","mimetype":"application/octet-stream","file":"/abs/path/blob"}
-//! {"kind":"illustration","size":48,"file":"/abs/path/icon48.png"}
+//! {"kind":"metadata","name":"CustomBlob","mimetype":"application/octet-stream","body_b64":"AAECAw…"}
+//! {"kind":"illustration","size":48,"body_b64":"iVBORw0KGgo…"}
 //! {"kind":"item","path":"index.html","title":"Map","mime":"text/html","content":"<html>…</html>","front":true}
-//! {"kind":"item","path":"maplibre-gl.js","title":"MapLibre","mime":"application/javascript","file":"/abs/path/maplibre-gl.js"}
+//! {"kind":"item","path":"tiles/14/x/y.avif","title":"","mime":"image/avif","body_b64":"AAAAGGZ0eXA…"}
 //! {"kind":"item","path":"routing-data/graph-chunk-0001.bin","title":"","mime":"application/octet-stream","file":"/abs/path/chunk.bin","streaming":true,"size":104857600}
 //! {"kind":"redirect","path":"home","title":"Home","target":"index.html"}
 //! ```
 //!
+//! Body sources (exactly one per item / per binary metadata):
+//! - `content`  — inline UTF-8 string. Cheapest path; used for HTML,
+//!                JSON, JS, CSS, SVG, plain text.
+//! - `body_b64` — inline base64-encoded bytes. The default for
+//!                everything binary that fits in memory (tiles, PNGs,
+//!                small PBFs). 33 % file-size inflation buys us:
+//!                no per-item `open()` syscalls (a 320 s win at
+//!                Japan-scale on APFS), no temp-file staging on the
+//!                Python side, and one big sequential read on the
+//!                Rust side instead of millions of random opens.
+//! - `file`     — path on disk. Reserved for `streaming: true` items
+//!                (multi-GB routing chunks where zimru reads a chunk
+//!                at a time instead of loading whole-file). Also a
+//!                back-compat path for legacy manifests still using
+//!                the old per-body staged-files layout.
+//!
 //! Notes:
-//! - exactly one of `content` / `file` per item; same for metadata.
 //! - `streaming: true` routes through zimru's chunked-streaming path
-//!   (memory peak = chunk size, not file size). Use it for >256 MiB files.
+//!   (memory peak = chunk size, not file size). Use it for >64 MiB
+//!   files; bodies that big should not be base64-inlined.
 //! - `compress` is a per-item override: `false` forces the cluster
 //!   uncompressed even when `config.compression` is zstd/xz; omitting
 //!   it (or `true`) honours the Creator default. zimru groups items by
@@ -30,6 +46,8 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context, Result};
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use clap::Parser;
 use serde::Deserialize;
 use zimru::writer::{ClusterStrategy, Creator, Item};
@@ -82,6 +100,11 @@ struct MetadataRec {
     mimetype: Option<String>,
     #[serde(default)]
     value: Option<String>,
+    /// Base64-encoded inline body. Mutually exclusive with `value` /
+    /// `file`. Used for binary metadata blobs that need to ride
+    /// inline alongside the string-valued metadata.
+    #[serde(default)]
+    body_b64: Option<String>,
     #[serde(default)]
     file: Option<PathBuf>,
 }
@@ -89,7 +112,11 @@ struct MetadataRec {
 #[derive(Debug, Deserialize)]
 struct IllustrationRec {
     size: u32,
-    file: PathBuf,
+    /// Base64-encoded PNG body. Mutually exclusive with `file`.
+    #[serde(default)]
+    body_b64: Option<String>,
+    #[serde(default)]
+    file: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -98,8 +125,18 @@ struct ItemRec {
     #[serde(default)]
     title: String,
     mime: String,
+    /// Inline UTF-8 body. Used for text mimes that round-trip
+    /// through JSON without escaping cost (HTML, JSON, JS, CSS, SVG).
     #[serde(default)]
     content: Option<String>,
+    /// Inline base64-encoded body. Default path for binary items
+    /// (tiles, PNGs, small PBFs) — see crate docstring for the full
+    /// rationale and tradeoffs.
+    #[serde(default)]
+    body_b64: Option<String>,
+    /// On-disk path. Reserved for `streaming: true` items (huge
+    /// routing chunks). Legacy manifests may also reference small
+    /// staged files here.
     #[serde(default)]
     file: Option<PathBuf>,
     #[serde(default)]
@@ -152,6 +189,12 @@ fn read_file_bytes(path: &PathBuf) -> Result<Vec<u8>> {
     std::fs::read(path).with_context(|| format!("read {path:?}"))
 }
 
+fn decode_body_b64(s: &str) -> Result<Vec<u8>> {
+    BASE64
+        .decode(s.as_bytes())
+        .map_err(|e| anyhow!("base64 decode: {e}"))
+}
+
 fn apply_config(creator: &mut Creator, cfg: &ConfigRec) -> Result<()> {
     if let Some(ref c) = cfg.compression {
         creator.set_compression(parse_compression(c)?);
@@ -175,11 +218,19 @@ fn apply_config(creator: &mut Creator, cfg: &ConfigRec) -> Result<()> {
 }
 
 fn handle_metadata(creator: &mut Creator, rec: MetadataRec) -> Result<()> {
-    let bytes: Vec<u8> = match (rec.value, rec.file) {
-        (Some(s), None) => s.into_bytes(),
-        (None, Some(p)) => read_file_bytes(&p)?,
-        (Some(_), Some(_)) => bail!("metadata {:?}: only one of value/file allowed", rec.name),
-        (None, None) => bail!("metadata {:?}: must provide value or file", rec.name),
+    let bytes: Vec<u8> = match (rec.value, rec.body_b64, rec.file) {
+        (Some(s), None, None) => s.into_bytes(),
+        (None, Some(b64), None) => decode_body_b64(&b64)
+            .with_context(|| format!("metadata {:?}", rec.name))?,
+        (None, None, Some(p)) => read_file_bytes(&p)?,
+        (None, None, None) => bail!(
+            "metadata {:?}: must provide value, body_b64, or file",
+            rec.name
+        ),
+        _ => bail!(
+            "metadata {:?}: only one of value/body_b64/file allowed",
+            rec.name
+        ),
     };
     match rec.mimetype {
         Some(mt) => {
@@ -193,7 +244,19 @@ fn handle_metadata(creator: &mut Creator, rec: MetadataRec) -> Result<()> {
 }
 
 fn handle_illustration(creator: &mut Creator, rec: IllustrationRec) -> Result<()> {
-    let bytes = read_file_bytes(&rec.file)?;
+    let bytes = match (rec.body_b64, rec.file) {
+        (Some(b64), None) => decode_body_b64(&b64)
+            .with_context(|| format!("illustration {}x{}", rec.size, rec.size))?,
+        (None, Some(p)) => read_file_bytes(&p)?,
+        (None, None) => bail!(
+            "illustration {}x{}: must provide body_b64 or file",
+            rec.size, rec.size
+        ),
+        (Some(_), Some(_)) => bail!(
+            "illustration {}x{}: only one of body_b64/file allowed",
+            rec.size, rec.size
+        ),
+    };
     creator.add_illustration(rec.size, bytes);
     Ok(())
 }
@@ -214,25 +277,30 @@ fn handle_item(creator: &mut Creator, rec: ItemRec) -> Result<()> {
             .as_ref()
             .ok_or_else(|| anyhow!("item {:?}: streaming requires file (no inline content)", rec.path))?
             .clone();
-        stream_item_from_file(creator, &rec, &file_path)
-    } else {
-        let bytes: Vec<u8> = match (&rec.content, &rec.file) {
-            (Some(s), None) => s.clone().into_bytes(),
-            (None, Some(p)) => read_file_bytes(p)?,
-            (Some(_), Some(_)) => bail!(
-                "item {:?}: only one of content/file allowed",
-                rec.path
-            ),
-            (None, None) => bail!("item {:?}: must provide content or file", rec.path),
-        };
-        let mut item = match rec.namespace {
-            Some(ns) => Item::in_namespace(ns, rec.path, rec.title, rec.mime, bytes),
-            None => Item::new(rec.path, rec.title, rec.mime, bytes),
-        };
-        item.compress = rec.compress;
-        creator.add_item(item);
-        Ok(())
+        return stream_item_from_file(creator, &rec, &file_path);
     }
+
+    let bytes: Vec<u8> = match (&rec.content, &rec.body_b64, &rec.file) {
+        (Some(s), None, None) => s.clone().into_bytes(),
+        (None, Some(b64), None) => decode_body_b64(b64)
+            .with_context(|| format!("item {:?}", rec.path))?,
+        (None, None, Some(p)) => read_file_bytes(p)?,
+        (None, None, None) => bail!(
+            "item {:?}: must provide content, body_b64, or file",
+            rec.path
+        ),
+        _ => bail!(
+            "item {:?}: only one of content/body_b64/file allowed",
+            rec.path
+        ),
+    };
+    let mut item = match rec.namespace {
+        Some(ns) => Item::in_namespace(ns, rec.path, rec.title, rec.mime, bytes),
+        None => Item::new(rec.path, rec.title, rec.mime, bytes),
+    };
+    item.compress = rec.compress;
+    creator.add_item(item);
+    Ok(())
 }
 
 fn stream_item_from_file(creator: &mut Creator, rec: &ItemRec, file: &PathBuf) -> Result<()> {
