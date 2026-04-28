@@ -40,3 +40,7 @@ overture_cache/
 /3
 /boundary_chunk_*.txt
 /.firebase/
+
+# Rust build outputs (streetzim-pack — the zimru-backed manifest packer).
+# Source lives under rust/, we don't commit `target/` artifacts.
+/rust/**/target/

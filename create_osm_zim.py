@@ -3248,10 +3248,18 @@ def create_zim(
     overture_themes=None,
     split_hot_search_chunks_mb=0,
     split_find_chips=False,
+    zim_builder="python",
 ):
     """Create a ZIM file containing the map viewer and all tiles."""
-    from libzim.writer import Creator, Item, StringProvider, FileProvider
+    from libzim.writer import Creator as LibzimCreator, Item, StringProvider, FileProvider
     from libzim.writer import Hint
+    if zim_builder == "rust":
+        from cloud.manifest_writer import ManifestCreator
+        Creator = lambda p: ManifestCreator(  # noqa: E731 — small adapter
+            p, verbose=True
+        )
+    else:
+        Creator = LibzimCreator
 
     print(f"  Creating ZIM file: {output_path}")
     print(f"    Name: {name}")
@@ -4540,6 +4548,17 @@ Examples:
 Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     )
 
+    parser.add_argument(
+        "--zim-builder",
+        choices=["python", "rust"],
+        default="python",
+        help=(
+            "ZIM emit backend. 'python' (default) uses libzim/python-libzim "
+            "as before. 'rust' shells out to streetzim-pack (zimru-backed); "
+            "supports per-item compress flags so routing-graph chunks land "
+            "in raw clusters even when tiles/HTML stay zstd."
+        ),
+    )
     parser.add_argument("--area", help="Well-known area name (see list above)")
     parser.add_argument("--geofabrik", help="Geofabrik download path (e.g., europe/liechtenstein)")
     parser.add_argument("--pbf", help="Path to local OSM PBF file")
@@ -5266,6 +5285,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             overture_sources=overture_sources,
             overture_themes=overture_themes,
             address_count=address_count,
+            zim_builder=getattr(args, "zim_builder", "python"),
         )
 
         print()
