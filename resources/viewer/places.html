@@ -471,7 +471,11 @@ async function runNameQuery(q) {
   let merged = [];
   const seen = new Set();
   for (const p of prefixes) {
-    if (!state.manifests.search.chunks[p]) continue;
+    // Skip prefixes the manifest has nothing for. expandPrefix
+    // covers the unsplit / hot-split / recursive-split layouts,
+    // including the "empty sub_chunks list" build bug we saw on
+    // Midwest's `ch` prefix.
+    if (!expandPrefix(p).length) continue;
     let chunk;
     try {
       chunk = await loadChunk(p);
@@ -747,7 +751,11 @@ async function onNearInput() {
   const matches = [];
   const needle = q.toLowerCase();
   for (const p of prefixes) {
-    if (!state.manifests.search.chunks[p]) continue;
+    // Skip prefixes the manifest has nothing for. expandPrefix
+    // covers the unsplit / hot-split / recursive-split layouts,
+    // including the "empty sub_chunks list" build bug we saw on
+    // Midwest's `ch` prefix.
+    if (!expandPrefix(p).length) continue;
     let chunk;
     try { chunk = await loadChunk(p); } catch { continue; }
     for (const r of chunk) {
@@ -817,11 +825,51 @@ function onGpsToggle() { /* intentionally empty */ }
 
 // ---------- data loading ----------
 
+// Expand a prefix to the set of leaf chunk filenames that hold its
+// records. Three layouts in the wild:
+//   1. Unsplit:        chunks['de'] = size; load 'de.json'.
+//   2. Hot-split:      sub_chunks['de'] = ['de-0','de-1',...,'de-f'];
+//                      each child appears in chunks. Load all 16.
+//   3. Recursively-split (hot prefix split *again*): sub_chunks['ch']
+//      may be empty, with intermediate keys ('ch-0'→['ch-0-0']) and
+//      4-char leaves ('ch-0-0-0') in chunks. The Midwest build hit
+//      this for "ch" (Chicago, Cherokee, …). The manifest *should*
+//      list the intermediate children under sub_chunks['ch'], but
+//      that array can be empty in current builds — fall back to a
+//      chunks-map scan for keys starting with `<prefix>-`.
+function expandPrefix(prefix) {
+  const m = state.manifests && state.manifests.search;
+  if (!m) return [];
+  const chunks = m.chunks || {};
+  const subs = m.sub_chunks || {};
+  if (chunks[prefix]) return [prefix];
+  const direct = subs[prefix];
+  if (Array.isArray(direct) && direct.length) {
+    return direct.flatMap(expandPrefix);
+  }
+  // Fallback: scan chunks for leaves under this prefix (covers the
+  // empty-sub_chunks build bug).
+  return Object.keys(chunks).filter(k =>
+    k === prefix || k.startsWith(prefix + '-'));
+}
+
 async function loadChunk(prefix) {
   if (state.cache.chunks.has(prefix)) return state.cache.chunks.get(prefix);
-  const data = await fetchJSON(DATA + prefix + '.json');
-  state.cache.chunks.set(prefix, data);
-  return data;
+  const leaves = expandPrefix(prefix);
+  if (leaves.length === 1 && leaves[0] === prefix) {
+    const data = await fetchJSON(DATA + prefix + '.json');
+    state.cache.chunks.set(prefix, data);
+    return data;
+  }
+  if (leaves.length === 0) {
+    state.cache.chunks.set(prefix, []);
+    return [];
+  }
+  const blobs = await Promise.all(leaves.map(name =>
+    fetchJSON(DATA + name + '.json').catch(() => [])));
+  const merged = [].concat(...blobs);
+  state.cache.chunks.set(prefix, merged);
+  return merged;
 }
 
 async function loadCategory(slug) {
