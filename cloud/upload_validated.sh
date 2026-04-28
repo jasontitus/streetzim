@@ -71,6 +71,32 @@ sleep 30
     --routing --overture --terrain --satellite --wikidata \
     || echo "WARN stamp skipped for ${id}"
 
+# --- 4b. Wait for `ia metadata` to reflect the upload before
+# pruning. The 30-second blanket sleep above isn't enough on its own:
+# archive.org's metadata API is eventually consistent, and on 2026-04-28
+# a DC upload finished cleanup before the new ZIM was visible, so
+# cleanup saw N-1 dated files, decided nothing needed pruning, and
+# left osm-washington-dc-2026-04-20.zim (176 MB) plus two newer
+# versions in place — 700 MB of stale data showing on the site. Poll
+# the metadata until the just-uploaded file is listed (or 3 minutes
+# elapse), then proceed.
+target_file="$(basename "$dated")"
+metadata_deadline=$(( $(date +%s) + 180 ))
+metadata_started=$(date +%s)
+echo "waiting for archive.org metadata to list ${target_file}..."
+while [ "$(date +%s)" -lt "$metadata_deadline" ]; do
+    if "$IA" metadata "streetzim-${id}" 2>/dev/null \
+            | "$PYTHON" -c "import sys, json; m=json.load(sys.stdin); sys.exit(0 if any(f.get('name')==sys.argv[1] for f in m.get('files', [])) else 1)" \
+                "$target_file"; then
+        echo "  metadata reflects ${target_file} after $(( $(date +%s) - metadata_started ))s"
+        break
+    fi
+    sleep 10
+done
+if [ "$(date +%s)" -ge "$metadata_deadline" ]; then
+    echo "WARN ${id}: metadata still didn't list ${target_file} after 3 min — cleanup may be stale"
+fi
+
 # --- 5. prune old dated ZIMs (keep last 2) ---
 "$PYTHON" cloud/cleanup_old_zims.py "streetzim-${id}" --keep 2 \
     || echo "WARN cleanup skipped for ${id}"
