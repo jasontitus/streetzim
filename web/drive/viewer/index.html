@@ -1013,12 +1013,23 @@ fetchConfig(1)
     // Force resize after load — Kiwix WebView may not have final dimensions at init
     map.on('load', function() { map.resize(); });
     window.addEventListener('resize', function() { map.resize(); });
-    // "You are here" geolocation dot — placed bottom-right to avoid overlapping layer controls
-    map.addControl(new maplibregl.GeolocateControl({
+    // "You are here" geolocation dot — placed bottom-right to avoid overlapping layer controls.
+    // Cache every fix on `window.__streetzimLastLoc` so "Directions to here"
+    // and the routing GPS button can fill the origin without re-prompting.
+    var geolocateCtl = new maplibregl.GeolocateControl({
       positionOptions: { enableHighAccuracy: true },
       trackUserLocation: true,
       showUserHeading: true
-    }), 'bottom-right');
+    });
+    geolocateCtl.on('geolocate', function(pos) {
+      if (!pos || !pos.coords) return;
+      window.__streetzimLastLoc = {
+        lat: pos.coords.latitude,
+        lon: pos.coords.longitude,
+        ts: Date.now()
+      };
+    });
+    map.addControl(geolocateCtl, 'bottom-right');
 
     // Satellite layer toggle
     if (config.hasSatellite) {
@@ -4832,7 +4843,17 @@ function initRouting(map, config) {
 
   // Current location button (origin only). Uses the standard Geolocation API.
   // Falls back gracefully if not available or permission denied.
+  // Just fills the origin — does NOT recenter the map. The user picked their
+  // destination on purpose; yanking the camera back to "you are here" hides
+  // what they were looking at. If a destination is also set,
+  // computeAndDrawRoute will fitBounds the route once both ends are pinned.
   gpsBtn.addEventListener('click', function() {
+    var cached = window.__streetzimLastLoc;
+    var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
+    if (fresh) {
+      setOriginFromLatLon(cached.lat, cached.lon, 'Current location');
+      return;
+    }
     if (!navigator.geolocation) {
       statusEl.textContent = 'Geolocation not available';
       return;
@@ -4842,12 +4863,8 @@ function initRouting(map, config) {
       function(pos) {
         var lat = pos.coords.latitude;
         var lon = pos.coords.longitude;
-        // Cache for the rest of this session so the search-pin popup
-        // and any other "Directions to here" flows can reuse the fix
-        // instead of re-prompting.
         window.__streetzimLastLoc = { lat: lat, lon: lon, ts: Date.now() };
         setOriginFromLatLon(lat, lon, 'Current location');
-        map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 13), duration: 800 });
       },
       function(err) {
         statusEl.textContent = 'Location denied or unavailable';
@@ -5778,7 +5795,11 @@ function initRouting(map, config) {
         if (features.length === 1) {
           map.easeTo({ center: features[0].geometry.coordinates, zoom: 15, duration: 800 });
         } else {
-          map.fitBounds(b, { padding: padding, duration: 800, maxZoom: 15 });
+          // maxZoom: 17 — was 15, which capped tight clusters (a few
+          // bars on one block) at a zoom level that shows a whole
+          // neighbourhood, leaving the pins as a tiny red clump in the
+          // middle. 17 still maintains context but zooms in appropriately.
+          map.fitBounds(b, { padding: padding, duration: 800, maxZoom: 17 });
         }
       }
     },
