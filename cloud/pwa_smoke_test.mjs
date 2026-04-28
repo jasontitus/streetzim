@@ -74,6 +74,31 @@ const ROUTE_PAIRS = {
     d: { lat: 32.6539, lon:   51.6660, label: 'Isfahan' },
     crow_km: 340,
   },
+  'california': {
+    o: { lat: 37.7749, lon: -122.4194, label: 'San Francisco' },
+    d: { lat: 34.0522, lon: -118.2437, label: 'Los Angeles' },
+    crow_km: 560,
+  },
+  'colorado': {
+    o: { lat: 39.7392, lon: -104.9903, label: 'Denver' },
+    d: { lat: 38.8339, lon: -104.8214, label: 'Colorado Springs' },
+    crow_km: 100,
+  },
+  'midwest-us': {
+    o: { lat: 41.8781, lon:  -87.6298, label: 'Chicago' },
+    d: { lat: 38.6270, lon:  -90.1994, label: 'St. Louis' },
+    crow_km: 420,
+  },
+  'baltics': {
+    o: { lat: 54.6872, lon:   25.2797, label: 'Vilnius' },
+    d: { lat: 56.9496, lon:   24.1052, label: 'Riga' },
+    crow_km: 270,
+  },
+  'hispaniola': {
+    o: { lat: 18.4861, lon:  -69.9312, label: 'Santo Domingo' },
+    d: { lat: 18.5944, lon:  -72.3074, label: 'Port-au-Prince' },
+    crow_km: 250,
+  },
 };
 
 function pickRoutePair(zimUrl) {
@@ -280,6 +305,136 @@ async function main() {
       const n = await page.evaluate(() =>
         document.getElementById('results').children.length);
       pass('find chip Restaurants returned', n + ' rows');
+
+      // ----- city-pinned chip filter -----
+      // Type a city into "Search near", click the typeahead pick, then
+      // tap the Gas chip and confirm the first result is genuinely
+      // close to the city (not still sorted by some other key like
+      // GPS-default or alphabetical). Without this, Find could ship
+      // looking healthy while ignoring the user's chosen origin.
+      const nearCity = pickRoutePair(ZIM_URL).o.label;
+      console.log('    near-city:', nearCity);
+      await page.evaluate((c) => {
+        const inp = document.getElementById('near-input');
+        inp.focus();
+        inp.value = c;
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+      }, nearCity);
+      let nearReady = true;
+      try {
+        await page.waitForFunction(() => {
+          const r = document.getElementById('near-results');
+          return r && !r.hidden && r.children.length > 0;
+        }, { timeout: 15_000 });
+      } catch (e) {
+        fail('near typeahead', `no suggestions for "${nearCity}"`);
+        nearReady = false;
+      }
+      if (nearReady) {
+        // Dump the typeahead candidates so we can see what we're
+        // about to click — the first match is what `pickNearResult`
+        // wires into state.origin. If it's "Denver Reservoir" 200 km
+        // from actual Denver, the Gas-distance assertion will read
+        // as a sort failure when really it's a typeahead-rank issue.
+        const candidates = await page.evaluate(() => {
+          const list = document.getElementById('near-results');
+          return Array.from(list.children).map(c =>
+            (c.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80));
+        });
+        console.log('    near-candidates[0..3]:', JSON.stringify(candidates.slice(0, 3)));
+        await page.click('#near-results .near-result');
+        // After click, near-input value reflects the picked place name
+        // and state.origin is set. Wait for both to settle.
+        try {
+          await page.waitForFunction((typed) => {
+            const inp = document.getElementById('near-input');
+            return inp && inp.value && inp.value !== typed && inp.value !== 'My location';
+          }, { timeout: 5_000 }, nearCity);
+        } catch (e) { /* fall through with whatever label is set */ }
+        const nearLabel = await page.$eval('#near-input', el => el.value);
+        const originDump = await page.evaluate(() => {
+          if (typeof state === 'undefined' || !state.origin) return null;
+          return { lat: state.origin.lat, lon: state.origin.lon, mode: state.originMode };
+        });
+        console.log('    state.origin after pick:', JSON.stringify(originDump));
+        pass('near pinned origin', `-> "${nearLabel}"`);
+
+        // Click the Gas chip — different from Restaurants so it forces
+        // a re-query with the new origin.
+        let gasChip = null;
+        for (const btn of chipButtons) {
+          const txt = await page.evaluate(b => b.textContent, btn);
+          if (/^\s*(gas|fuel)/i.test(txt.trim())) { gasChip = btn; break; }
+        }
+        if (!gasChip) {
+          fail('near chip exists', 'no Gas/Fuel chip on places.html');
+        } else {
+          await gasChip.click();
+          try {
+            await page.waitForFunction(() => {
+              const list = document.getElementById('results');
+              return list && list.children && list.children.length > 0;
+            }, { timeout: 30_000 });
+            // Read first result's distance from .meta — format is
+            // "<kind> · <dist> · <city>" e.g. "Gas · 1.2 km · Tokyo"
+            // or "<kind> · 230 m · …".
+            const firstMeta = await page.$eval(
+              '#results li .meta', el => el.textContent);
+            const m = firstMeta.match(/(\d+(?:\.\d+)?)\s*(m|km)\b/);
+            const distKm = m
+              ? parseFloat(m[1]) * (m[2] === 'km' ? 1 : 0.001)
+              : null;
+            // 50 km is generous — a city's nearest gas station is
+            // typically <5 km, but small regions / rural areas may
+            // legitimately stretch this. We're guarding against the
+            // obvious break (sort ignored, first result on the other
+            // side of the bbox), not measuring map quality.
+            const NEAR_THRESHOLD_KM = 50;
+            if (distKm == null) {
+              fail('near chip distance',
+                `first Gas result has no distance — meta="${firstMeta}"`);
+            } else if (distKm > NEAR_THRESHOLD_KM) {
+              fail('near chip distance',
+                `first Gas result ${distKm.toFixed(1)} km from "${nearLabel}" — origin sort not applied?`);
+            } else {
+              pass('near chip distance',
+                `first Gas result ${distKm < 1 ? Math.round(distKm * 1000) + ' m' : distKm.toFixed(1) + ' km'} from "${nearLabel}"`);
+            }
+            // Reset state.origin back to the viewport seed before
+            // the directions step. Without this, the city-pinned
+            // origin keeps the closest restaurant ~at-the-pin
+            // (Kitchen 69 ~12 m from Denver), so the dir-href has
+            // origin ≈ dest, and the viewer's routing trips on the
+            // degenerate same-point case (`Cannot read properties
+            // of undefined (reading 'lng')`). That viewer bug is
+            // worth fixing separately; here we just hand the next
+            // step a clean slate so it tests what it tested before.
+            await page.evaluate(() => {
+              if (typeof state !== 'undefined') {
+                state.origin = { lat: 37.4419, lon: -122.143 };
+                state.originMode = 'viewport';
+                state.originLabel = 'Near (37.442, -122.143)';
+                const inp = document.getElementById('near-input');
+                if (inp) inp.value = state.originLabel;
+              }
+            });
+            // Toggle Gas off, re-click Restaurants so the rerender
+            // uses the restored origin.
+            await gasChip.click();
+            await page.waitForFunction(() => {
+              const list = document.getElementById('results');
+              return list && list.children && list.children.length === 0;
+            }, { timeout: 5_000 }).catch(() => {});
+            await restaurants.click();
+            await page.waitForFunction(() => {
+              const list = document.getElementById('results');
+              return list && list.children && list.children.length > 0;
+            }, { timeout: 30_000 });
+          } catch (e) {
+            fail('near chip results', `Gas chip empty: ${e.message}`);
+          }
+        }
+      }
 
       // Click the first result's directions button (it's an <a> or
       // <button> inside a result <li>).
