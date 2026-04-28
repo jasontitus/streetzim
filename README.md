@@ -152,30 +152,11 @@ quality and zoom levels, vector ZIMs would be 50-200x smaller than raster.
 
 ### Prerequisites
 
-**CRITICAL: Patched libzim required.** The stock libzim from openzim.org has two bugs
-that hang large ZIM builds (US-scale and above):
-
-1. **Spin-lock stall** — `microsleep()` polling in queue.h causes 100% CPU with zero I/O
-2. **Compressor infinite loop** — ZSTD compression hangs deterministically at tile ~431,760
-
-Our patches fix both. The patched library must be built from source and installed into the
-Python venv. See `patches/README.md` for full build instructions and verification steps.
-
-**Quick verification:**
-```bash
-# Patched libzim has condition_variable symbols; stock does not
-nm venv312/lib/python3.12/site-packages/libzim/libzim.9.dylib | grep condition_variable
-# Should show 3+ symbols. If zero: YOU HAVE THE WRONG LIBRARY.
-
-# Patched build is ~789K; stock download is ~9.7M
-ls -lh venv312/lib/python3.12/site-packages/libzim/libzim.9.dylib
-```
-
-Key locations:
-- Patched C++ source: `/Users/jasontitus/experiments/libzim/` (patches pre-applied)
-- Installed patched dylib: `libzim-install/lib/libzim.9.dylib`
-- Active copy in venv: `venv312/lib/python3.12/site-packages/libzim/libzim.9.dylib`
-- Patch files: `patches/`
+**libzim 9.6+ required for large builds.** Two fixes that StreetZim contributed
+upstream — the compressor infinite-loop fix and the spin-loop → condition-variable
+rewrite of the writer pipeline — are needed when building US-scale (and larger)
+ZIMs. Both landed in stock libzim by 9.6, so a current `pip install libzim` is
+sufficient. The historical patches are kept in `patches/` for reference.
 
 **System tools:**
 
@@ -330,7 +311,7 @@ The OpenMapTiles schema includes these layers:
 
 ### Map Rendering
 
-- **Renderer:** MapLibre GL JS v4.7.1
+- **Renderer:** MapLibre GL JS v5.23.0
 - **Style:** Custom lightweight style embedded in ZIM
 - **Fonts:** Minimal SDF (Signed Distance Field) font PBFs for labels
 - **No sprites/icons** in this prototype (text-only labels)
@@ -341,8 +322,7 @@ The OpenMapTiles schema includes these layers:
    (Natural Earth data). The prototype skips these, so oceans appear as background color.
 2. **Minimal fonts** — the prototype includes placeholder SDF fonts. For production,
    bundle real font PBFs from [openmaptiles/fonts](https://github.com/openmaptiles/fonts).
-3. **No search** — the prototype is view-only. A future version could add geocoding.
-4. **iOS Kiwix JS support** — Kiwix iOS uses WKWebView which supports WebGL (required
+3. **iOS Kiwix JS support** — Kiwix iOS uses WKWebView which supports WebGL (required
    by MapLibre GL JS). Initial testing indicates this works, but complex map interactions
    may vary by iOS version.
 
