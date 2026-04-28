@@ -45,6 +45,30 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+# Mime types we'll inline directly in the manifest as `content` strings.
+# Skipping the per-entry file-stage syscall is the single biggest win on
+# small-item-heavy builds (silicon-valley has 17 K entries, mostly
+# small JSON). Anything not in this set (PBF tiles, AVIF satellite,
+# WebP terrain, PNG icons) gets file-staged as before — those are
+# binary, JSON-stringification would lose data.
+_INLINE_TEXT_MIMES = frozenset({
+    "application/json",
+    "application/javascript",
+    "text/javascript",
+    "application/xml",
+    "text/html",
+    "text/plain",
+    "text/css",
+    "text/csv",
+    "image/svg+xml",
+})
+
+# Cap inline payloads at 256 KiB so the JSONL line-length stays sane
+# and Python's json.dumps doesn't blow memory on a freak record. Items
+# above this fall back to file-stage even when the mime suggests text.
+_INLINE_TEXT_LIMIT = 256 * 1024
+
+
 # Resolved once per process. Override with STREETZIM_PACK_BIN if the
 # binary lives somewhere unusual (CI runners, vendored release builds).
 def _resolve_pack_binary() -> str:
@@ -214,8 +238,32 @@ class ManifestCreator:
                 raise ValueError(
                     f"add_item({path!r}): item has neither _file_path nor _data"
                 )
-            stage = self._stage_inline_bytes(self._safe_stage_name(path), bytes(data))
-            rec["file"] = str(stage)
+            data = bytes(data)
+            # Inline small text-ish items directly in the manifest as a
+            # `content` string. Saves the per-entry file-stage syscall
+            # (open/write/close/stat/open-again-from-Rust/read/close)
+            # which on a 17 K-entry build like silicon-valley costs
+            # ~100 s of wall time. Threshold of 256 KiB keeps the
+            # JSONL line-length sane and matches the size profile of
+            # chip-bucket / search-data sub-chunks (most are < 50 KB).
+            # Binary items (PBF, AVIF, WebP, PNG) are NOT inlined —
+            # they're not valid UTF-8, and JSON-encoding the bytes
+            # would balloon the manifest.
+            if (len(data) <= _INLINE_TEXT_LIMIT
+                    and mime in _INLINE_TEXT_MIMES):
+                try:
+                    rec["content"] = data.decode("utf-8")
+                except UnicodeDecodeError:
+                    # Mime says text but bytes aren't UTF-8 — fall
+                    # back to file-stage rather than risk lossy
+                    # encoding.
+                    stage = self._stage_inline_bytes(
+                        self._safe_stage_name(path), data)
+                    rec["file"] = str(stage)
+            else:
+                stage = self._stage_inline_bytes(
+                    self._safe_stage_name(path), data)
+                rec["file"] = str(stage)
         return rec
 
     def _safe_stage_name(self, path: str) -> str:

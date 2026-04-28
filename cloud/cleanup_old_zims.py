@@ -27,7 +27,14 @@ import subprocess
 import sys
 from typing import Dict, List, Tuple
 
-DATED_ZIM = re.compile(r"^(osm-.+)-(\d{4}-\d{2}-\d{2})\.zim$")
+# Optional `[a-z]?` lets the same-day-reroll suffix (b, c, d…) match
+# alongside the bare YYYY-MM-DD. Without it cleanup couldn't see -b/-c
+# uploads at all and never pruned them — Egypt's archive item still
+# had 4 dated copies (04-25, 04-26, 04-26b, 04-26c) past
+# `--keep 2` because the regex matched only the first two.
+# Lexicographic sort: 2026-04-26 < 2026-04-26b < 2026-04-26c, which is
+# what we want — the latest suffix lives.
+DATED_ZIM = re.compile(r"^(osm-.+)-(\d{4}-\d{2}-\d{2}[a-z]?)\.zim$")
 
 
 def ia(args: list) -> subprocess.CompletedProcess:
