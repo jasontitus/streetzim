@@ -662,6 +662,23 @@ def repackage(src_path: str, dst_path: str,
             if uncompress_graph and path == "routing-data/graph.bin":
                 compress = False
                 raw_clusters += 1
+            # Mirror the per-item compress thresholds that
+            # `_emit_spatial_graph` applies at fresh-build time, so a
+            # passthrough doesn't silently re-compress what was raw.
+            # Specifically: graph-cells-index.bin >= 200 MB and any
+            # individual graph-cell-*.bin >= 200 MB land in raw
+            # clusters. Without this, repacking a Midwest-sized ZIM
+            # (212 MB cells-index) produces a compressed cluster that
+            # Kiwix Desktop's WebView can't decompress in bounded
+            # time — Directions hangs on "loading routing data" and
+            # eventually errors out. Source ZIMs that stored these
+            # raw work fine; repacks that re-compressed them did not.
+            if (path == "routing-data/graph-cells-index.bin"
+                    or (path.startswith("routing-data/graph-cell-")
+                        and path.endswith(".bin"))):
+                if len(content) >= 200 * 1024 * 1024:
+                    compress = False
+                    raw_clusters += 1
             c.add_item(PassthroughItem(path, title, mime, content, compress=compress))
             kept += 1
             if kept % 50_000 == 0:
