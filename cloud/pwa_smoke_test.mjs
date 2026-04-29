@@ -99,6 +99,16 @@ const ROUTE_PAIRS = {
     d: { lat: 18.5944, lon:  -72.3074, label: 'Port-au-Prince' },
     crow_km: 250,
   },
+  'washington-dc': {
+    o: { lat: 38.9072, lon:  -77.0369, label: 'Washington' },
+    d: { lat: 38.8816, lon:  -77.0910, label: 'Arlington' },
+    crow_km: 8,
+  },
+  'australia-nz': {
+    o: { lat: -33.8688, lon: 151.2093, label: 'Sydney' },
+    d: { lat: -37.8136, lon: 144.9631, label: 'Melbourne' },
+    crow_km: 715,
+  },
 };
 
 function pickRoutePair(zimUrl) {
