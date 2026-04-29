@@ -1859,7 +1859,16 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     # POIs, ways) have fundamentally different identity.
     # ------------------------------------------------------------------
     osm_coord_index = set()   # {(lat_e5, lon_e5)}
-    osm_attr_index = set()    # {(number, normalized_street)}
+    # attr_key was (number, normalized_street) but that collides across
+    # cities — "1029 Ramona Street" in Ramona, CA (OSM) and "1029
+    # RAMONA ST" in Palo Alto (Overture) hash to the same key, so the
+    # Palo Alto Overture row gets dropped as a "spatial dup" 600 km
+    # from any OSM neighbour. Include city to make the key
+    # city-scoped; addresses with the same number+street in different
+    # cities now both land. Cities are normalised the same way streets
+    # are (lowercased, accent-stripped, single-spaced) so "PALO ALTO"
+    # / "Palo Alto" / "palo  alto" all collapse to one value.
+    osm_attr_index = set()    # {(number, normalized_street, normalized_city)}
     osm_count = 0
     with open(search_jsonl_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -1880,14 +1889,27 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
             osm_coord_index.add((round(lat, 5), round(lon, 5)))
             name = rec.get("name") or ""
             # Existing OSM records serialize as "<num> <street>, <city>".
-            # Split on the first space + comma to recover number/street.
+            # Split on the first space + comma to recover number/street/city.
             num = ""
             street = name
+            city = ""
             if " " in name:
-                num, _, street = name.partition(" ")
-            street = street.split(",")[0].strip()
+                num, _, rest = name.partition(" ")
+                if "," in rest:
+                    street, _, city = rest.partition(",")
+                else:
+                    street = rest
+            else:
+                if "," in name:
+                    street, _, city = name.partition(",")
+            street = street.strip()
+            city = city.strip()
             if num and street:
-                osm_attr_index.add((num.strip(), _normalize_street(street)))
+                osm_attr_index.add((
+                    num.strip(),
+                    _normalize_street(street),
+                    _normalize_street(city),
+                ))
             osm_count += 1
     print(f"    Indexed {osm_count} existing OSM address records")
 
@@ -1956,23 +1978,33 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
                     pass1_skipped += 1
                     continue
 
-                # Pass 2: fuzzy match against our OSM index.
-                coord_key = (round(lat, 5), round(lon, 5))
-                attr_key = (num, _normalize_street(street_raw))
-                if coord_key in osm_coord_index or attr_key in osm_attr_index:
-                    pass2_skipped += 1
-                    continue
-
                 # Reconstruct a city label from address_levels when we
                 # have it. For US addresses Overture writes
                 # [{'value':'CA'},{'value':'PALO ALTO'}] — state first,
                 # then city. For non-US layouts the last non-empty
                 # value is usually the city, which is our best-effort
-                # fallback.
+                # fallback. Computed before the dedup test because
+                # attr_key now includes a normalised city.
                 city = ""
                 levels = row.get("address_levels") or []
                 if len(levels) >= 2 and levels[-1]:
                     city = (levels[-1].get("value") or "").title()
+
+                # Pass 2: fuzzy match against our OSM index. attr_key
+                # now scopes by normalised city so two addresses with
+                # the same number+street in different cities both
+                # land — fixes the cross-city collision that dropped
+                # "1029 Ramona St, Palo Alto" because OSM had "1029
+                # Ramona Street" in Ramona (city), 600 km away.
+                coord_key = (round(lat, 5), round(lon, 5))
+                attr_key = (
+                    num,
+                    _normalize_street(street_raw),
+                    _normalize_street(city),
+                )
+                if coord_key in osm_coord_index or attr_key in osm_attr_index:
+                    pass2_skipped += 1
+                    continue
                 # Street is frequently uppercased in US OpenAddresses
                 # feeds — title-case it so it renders nicely in search.
                 street_display = street_raw.title() if street_raw.isupper() else street_raw
