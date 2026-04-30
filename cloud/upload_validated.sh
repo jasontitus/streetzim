@@ -26,22 +26,27 @@ today=$(date +%Y-%m-%d)
 # we fall back to the absolute path. Prevents ``python3`` from resolving
 # to a broken anaconda install that happens to be earlier on $PATH.
 PROJECT_DIR="${PROJECT_DIR:-/Users/jasontitus/experiments/streetzim}"
-if [ -x "$PROJECT_DIR/venv312/bin/python" ]; then
-    PYTHON="$PROJECT_DIR/venv312/bin/python"
-else
-    PYTHON="${PYTHON:-python3}"
-fi
-# `ia` ships with the internetarchive pip package inside the venv; bare
-# `ia` isn't on PATH in non-activated shells, so resolve it alongside
-# $PYTHON. Was silently broken on 2026-04-24 when a Japan upload hit
-# "ia: command not found" and skipped the actual upload but kept going.
-if [ -x "$PROJECT_DIR/venv312/bin/ia" ]; then
-    IA="$PROJECT_DIR/venv312/bin/ia"
+# Resolve to whichever venv has a working python+ia. venv312 is the Mac
+# convention; venv-linux exists on the Linux build host and contains a
+# real Linux interpreter — venv312 may be present there as an rsynced
+# stub with Mac-pathed shebangs that fail to execute. Prefer the venv
+# whose `python` runs without error.
+ACTIVE_VENV=""
+for v in venv-linux venv312; do
+    if "$PROJECT_DIR/$v/bin/python" --version >/dev/null 2>&1; then
+        ACTIVE_VENV="$PROJECT_DIR/$v"
+        break
+    fi
+done
+if [ -n "$ACTIVE_VENV" ]; then
+    PYTHON="$ACTIVE_VENV/bin/python"
+    IA="$ACTIVE_VENV/bin/ia"
     # cleanup_old_zims.py + stamp_item_metadata.py shell out to bare
     # `ia` via subprocess.run; prepend venv bin so those Python children
     # inherit a PATH that resolves `ia`.
-    export PATH="$PROJECT_DIR/venv312/bin:$PATH"
+    export PATH="$ACTIVE_VENV/bin:$PATH"
 else
+    PYTHON="${PYTHON:-python3}"
     IA="${IA:-ia}"
 fi
 

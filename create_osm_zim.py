@@ -662,35 +662,41 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
         # gdalbuildvrt not on PATH — fall back to in-memory merge
         print("    Warning: gdalbuildvrt not found, falling back to in-memory merge")
         from rasterio.merge import merge
-        # Pre-validate DEMs by reading full band — corrupt files crash merge()
-        print(f"    Validating {len(tif_paths)} DEM tiles...")
-        valid_paths = []
-        for p in tif_paths:
-            try:
-                with rasterio.open(p) as _ds:
-                    _ds.read(1)
-                valid_paths.append(p)
-            except Exception as e:
-                print(f"    Warning: skipping corrupt DEM {os.path.basename(p)}: {e}")
-        if not valid_paths:
-            print("    No valid DEM tiles, skipping terrain")
-            return 0
-        print(f"    Merging {len(valid_paths)} validated DEM tiles...")
-        datasets = [rasterio.open(p) for p in valid_paths]
-        mosaic_arr, mosaic_transform = merge(datasets)
-        mosaic_meta = datasets[0].meta.copy()
-        for ds in datasets:
-            ds.close()
-        mosaic_meta.update({
-            "height": mosaic_arr.shape[1],
-            "width": mosaic_arr.shape[2],
-            "transform": mosaic_transform,
-            "count": 1,
-        })
+
+        # Reuse cached mosaic if present — saves ~30 min validation + the
+        # merge itself for subsequent builds against the same DEM set.
         mosaic_path = os.path.join(dem_dir, "mosaic_4326.tif")
-        with rasterio.open(mosaic_path, "w", **mosaic_meta) as dst:
-            dst.write(mosaic_arr[0], 1)
-        del mosaic_arr
+        if os.path.isfile(mosaic_path):
+            print(f"    Reusing cached mosaic: {mosaic_path} "
+                  f"({os.path.getsize(mosaic_path)/1024/1024:.0f} MB)")
+        else:
+            # Pre-validate DEMs by reading full band — corrupt files crash merge()
+            print(f"    Validating {len(tif_paths)} DEM tiles...")
+            valid_paths = []
+            for p in tif_paths:
+                try:
+                    with rasterio.open(p) as _ds:
+                        _ds.read(1)
+                    valid_paths.append(p)
+                except Exception as e:
+                    print(f"    Warning: skipping corrupt DEM {os.path.basename(p)}: {e}")
+            if not valid_paths:
+                print("    No valid DEM tiles, skipping terrain")
+                return 0
+            # Stream the merge directly to disk with dst_path + mem_limit so we
+            # never materialize the full mosaic in memory. World-scale DEM at
+            # GLO-30 is 612000x129600 pixels (~600 GB float32) which OOMs the
+            # box; chunked streaming keeps RSS bounded by mem_limit (MB).
+            print(f"    Merging {len(valid_paths)} validated DEM tiles "
+                  f"-> {mosaic_path} (streaming)...")
+            datasets = [rasterio.open(p) for p in valid_paths]
+            try:
+                merge(datasets, dst_path=mosaic_path, mem_limit=2048)
+            finally:
+                for ds in datasets:
+                    ds.close()
+            print(f"    Mosaic written: "
+                  f"{os.path.getsize(mosaic_path)/1024/1024:.0f} MB")
 
     # Generate terrain-RGB tiles using multiprocessing.
     # Each process opens its own handle to the VRT file — GDAL reads only the
@@ -965,10 +971,11 @@ def get_mbtiles_info(mbtiles_path):
     return metadata, tile_count
 
 
-def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None):
+def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None):
     """Yield (z, x, y, data) tuples from MBTiles, streaming from SQLite.
 
     If zoom_level is specified, only yields tiles at that zoom.
+    If max_zoom is specified (and zoom_level is not), yields tiles at zoom <= max_zoom.
     If bbox is specified as (minlon, minlat, maxlon, maxlat), only yields
     tiles that intersect the bounding box.
     Yields in (z, x, y) sorted order for deterministic ZIM insertion.
@@ -978,6 +985,19 @@ def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None):
     conn = sqlite3.connect(str(mbtiles_path))
     cursor = conn.cursor()
 
+    # Whole-world bbox: drop the per-zoom column/row index lookups and use
+    # the rowid-sequential scan path instead. World bbox at z13 has 67M
+    # tiles; the index lookup forces a random heap fetch per tile_data BLOB
+    # against a 113 GB MBTiles, which is ~1500x slower than scanning the
+    # heap in rowid order (sqlite stores rows in zoom-major order from
+    # tilemaker's insert pattern, so z<=max_zoom rows are contiguous in
+    # the early part of the file).
+    if bbox:
+        _minlon, _minlat, _maxlon, _maxlat = bbox
+        if (_minlon <= -179.0 and _maxlon >= 179.0
+                and _minlat <= -84.0 and _maxlat >= 84.0):
+            bbox = None
+
     if bbox:
         import mercantile
         minlon, minlat, maxlon, maxlat = bbox
@@ -985,9 +1005,13 @@ def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None):
         # Query per zoom level with SQL-level column/row filtering
         # This avoids reading 100+ GB of out-of-bbox tiles through Python
         zoom_min = 0
-        zoom_max = zoom_level if zoom_level is not None else 14
         if zoom_level is not None:
             zoom_min = zoom_level
+            zoom_max = zoom_level
+        elif max_zoom is not None:
+            zoom_max = max_zoom
+        else:
+            zoom_max = 14
 
         for z in range(zoom_min, zoom_max + 1):
             # Get tile column/row bounds for this zoom
@@ -1018,6 +1042,16 @@ def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None):
                 "SELECT zoom_level, tile_column, tile_row, tile_data "
                 "FROM tiles WHERE zoom_level = ? ORDER BY zoom_level, tile_column, tile_row",
                 (zoom_level,),
+            )
+        elif max_zoom is not None:
+            # ORDER BY rowid drives a sequential heap scan rather than an
+            # index-driven query that does random rowid lookups for each
+            # tile_data BLOB. On a 113 GB world MBTiles backed by spinning
+            # disks the difference is ~30 min vs ~22 hr.
+            cursor.execute(
+                "SELECT zoom_level, tile_column, tile_row, tile_data "
+                "FROM tiles WHERE zoom_level <= ? ORDER BY rowid",
+                (max_zoom,),
             )
         else:
             cursor.execute(
@@ -1706,6 +1740,9 @@ def extract_addresses_pbf(pbf_path, output_path, bbox=None):
     Returns count of address entries written.
     """
     print("  Extracting address features from OSM data...")
+    if not shutil.which("osmium"):
+        print("    Skipping: osmium CLI not found on PATH")
+        return 0
     source_pbf = str(pbf_path)
     tmp = tempfile.mkdtemp(prefix="streetzim_addr_")
     try:
@@ -2070,30 +2107,45 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None):
 
     size_before = os.path.getsize(search_jsonl_path)
 
-    # Read entire jsonl into memory so we can edit POI records in place.
-    # For SV-scale (~175K POIs) that's ~60 MB of Python — fine. For
-    # continent-scale we'd need a streaming rewrite; flagged but not
-    # solved in v1.
-    records = []
-    poi_index = {}   # (lat_e5, lon_e5, normalized_name) → record index
+    # Streaming refactor (was: load ALL records into memory). For
+    # europe-scale the JSONL post-addresses-merge has ~120M lines;
+    # the in-memory records[] peaked at >24 GB and OOM-killed the
+    # process during continent rebuilds. New flow:
+    #
+    #   Pass A — scan JSONL once to collect POI keys (only POI type
+    #     records contribute keys; bounded by POI count, ~10M for
+    #     europe → ~1 GB, vs 24 GB for ALL records).
+    #   Pass B — stream Overture parquet; for each row decide
+    #     enrich-existing or new-POI, store decisions in two small
+    #     in-memory tables keyed by (round(lat,4), round(lon,4),
+    #     normalized_name).
+    #   Pass C — re-stream JSONL → tmp file applying enrichments;
+    #     append new-POI additions at end.
+    #
+    # No intermediate full-feature materialization. Memory bounded by
+    # POI count + Overture row count, not total feature count.
+    poi_keys = set()  # POI keys seen in source JSONL
     with open(search_jsonl_path, "r", encoding="utf-8") as f:
         for line in f:
-            line = line.rstrip("\n")
-            if not line:
+            # Fast pre-filter: skip lines that aren't POIs without
+            # parsing JSON. Saves minutes on continent-scale where
+            # most of the feed is addresses + streets, not POIs.
+            if '"type":"poi"' not in line:
                 continue
             try:
                 rec = json.loads(line)
             except Exception:
-                records.append({"_raw": line})  # pass through
                 continue
-            records.append(rec)
-            if rec.get("type") == "poi":
-                lat = rec.get("lat"); lon = rec.get("lon")
-                nm = rec.get("name") or ""
-                if lat is not None and lon is not None and nm:
-                    key = (round(lat, 4), round(lon, 4), _normalize_street(nm))
-                    poi_index.setdefault(key, []).append(len(records) - 1)
-    print(f"    Indexed {len(poi_index)} OSM POI keys ({sum(len(v) for v in poi_index.values())} records)")
+            if rec.get("type") != "poi":
+                continue
+            lat = rec.get("lat"); lon = rec.get("lon")
+            nm = rec.get("name") or ""
+            if lat is None or lon is None or not nm:
+                continue
+            poi_keys.add((round(lat, 4), round(lon, 4),
+                          _normalize_street(nm)))
+    print(f"    Indexed {len(poi_keys)} OSM POI keys (streaming, "
+          f"bounded memory)")
 
     # Stream Overture places from parquet via arrow batches.
     con = duckdb.connect()
@@ -2116,108 +2168,146 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None):
     added = 0
     unnamed = 0
     source_datasets = set()
-
-    for batch in reader:
-        for row in batch.to_pylist():
-            lat = row.get("lat"); lon = row.get("lon")
-            if lat is None or lon is None:
-                continue
-            if not (bbox_minlat <= lat <= bbox_maxlat and
-                    bbox_minlon <= lon <= bbox_maxlon):
-                continue
-
-            names = row.get("names") or {}
-            name = (names.get("primary") or "").strip()
-            if not name:
-                unnamed += 1
-                continue
-
-            cats = row.get("categories") or {}
-            primary = (cats.get("primary") or "").strip()
-
-            phones = row.get("phones") or []
-            websites = row.get("websites") or []
-            socials = row.get("socials") or []
-            brand = row.get("brand") or {}
-            brand_names = (brand or {}).get("names") or {}
-            brand_primary = (brand_names.get("primary") or "").strip() if brand_names else ""
-            brand_wd = (brand or {}).get("wikidata") or None
-
-            # Surface-area extensions. Keep empty fields out of the
-            # record so downstream JSON stays tight.
-            #
-            # Website is `ws`, not `w`. `w` is reserved for the Wikipedia
-            # tag (e.g. "en:HP_Garage") that OSM POIs carry in the same
-            # record — mcpzim reads `rec["w"]` into `Place.wiki` and then
-            # calls `articleByTitle` on it. Putting a URL in that slot
-            # corrupts Wikipedia lookups across every downstream tool
-            # (`nearby_stories`, `near_places(has_wiki=true)`, etc.). See
-            # commit "Rename Overture website field to ws (fix w collision)".
-            extra = {}
-            if primary: extra["cat"] = primary
-            if websites: extra["ws"] = websites[0]
-            if phones: extra["p"] = phones[0]
-            if socials: extra["soc"] = socials[:3]
-            if brand_primary: extra["brand"] = brand_primary
-            if brand_wd: extra["wd"] = brand_wd
-
-            # Pass 1: enrich an existing OSM POI.
-            key = (round(lat, 4), round(lon, 4), _normalize_street(name))
-            hit_indices = poi_index.get(key) or []
-            if hit_indices:
-                idx = hit_indices[0]  # first match wins; duplicates rare at this precision
-                target = records[idx]
-                for k, v in extra.items():
-                    # Don't overwrite pre-existing values (e.g. OSM's
-                    # wikidata) — Overture's row is enrichment, not
-                    # replacement.
-                    if k not in target:
-                        target[k] = v
-                # Prefer Overture's clean category over OMT's noisy
-                # `subtype` when the OSM record had a generic bucket
-                # (tourism / amenity / shop / attraction). This is the
-                # "categories matter" win.
-                s_old = target.get("subtype") or ""
-                if primary and s_old in ("", "tourism", "amenity", "shop",
-                                          "attraction", "leisure", "car",
-                                          "historic", "landuse"):
-                    target["subtype"] = primary
-                enriched += 1
-            else:
-                # Pass 2: emit new POI.
-                # Skip records with no category — they're noise for our
-                # chip-driven UI.
-                if not primary:
+    # Pass B accumulators (bounded by POI count + Overture row count,
+    # not total feature count). enrichments stays under ~1-2 GB even
+    # for europe; additions is the hot growth path.
+    enrichments = {}   # key → extra-dict (applied to first matching POI)
+    additions_path = search_jsonl_path + ".overture_additions"
+    additions_count = 0
+    with open(additions_path, "w", encoding="utf-8") as add_fh:
+        for batch in reader:
+            for row in batch.to_pylist():
+                lat = row.get("lat"); lon = row.get("lon")
+                if lat is None or lon is None:
                     continue
-                records.append({
-                    "name": name,
-                    "type": "poi",
-                    "subtype": primary,
-                    "lat": round(float(lat), 6),
-                    "lon": round(float(lon), 6),
-                    "source": "overture",
-                    **extra,
-                })
-                added += 1
+                if not (bbox_minlat <= lat <= bbox_maxlat and
+                        bbox_minlon <= lon <= bbox_maxlon):
+                    continue
 
-            for src in (row.get("sources") or []):
-                ds = (src or {}).get("dataset")
-                if ds:
-                    source_datasets.add(ds)
+                names = row.get("names") or {}
+                name = (names.get("primary") or "").strip()
+                if not name:
+                    unnamed += 1
+                    continue
 
-    # Rewrite the jsonl with enriched records + new rows appended.
-    # Tempfile-and-rename so a mid-write failure leaves the original
-    # intact.
+                cats = row.get("categories") or {}
+                primary = (cats.get("primary") or "").strip()
+
+                phones = row.get("phones") or []
+                websites = row.get("websites") or []
+                socials = row.get("socials") or []
+                brand = row.get("brand") or {}
+                brand_names = (brand or {}).get("names") or {}
+                brand_primary = (brand_names.get("primary") or "").strip() if brand_names else ""
+                brand_wd = (brand or {}).get("wikidata") or None
+
+                # Surface-area extensions. Keep empty fields out of the
+                # record so downstream JSON stays tight.
+                #
+                # Website is `ws`, not `w`. `w` is reserved for the Wikipedia
+                # tag (e.g. "en:HP_Garage") that OSM POIs carry in the same
+                # record — mcpzim reads `rec["w"]` into `Place.wiki` and then
+                # calls `articleByTitle` on it. Putting a URL in that slot
+                # corrupts Wikipedia lookups across every downstream tool
+                # (`nearby_stories`, `near_places(has_wiki=true)`, etc.). See
+                # commit "Rename Overture website field to ws (fix w collision)".
+                extra = {}
+                if primary: extra["cat"] = primary
+                if websites: extra["ws"] = websites[0]
+                if phones: extra["p"] = phones[0]
+                if socials: extra["soc"] = socials[:3]
+                if brand_primary: extra["brand"] = brand_primary
+                if brand_wd: extra["wd"] = brand_wd
+
+                key = (round(lat, 4), round(lon, 4), _normalize_street(name))
+                if key in poi_keys:
+                    # Pass 1 enrich: queue the extra-dict by key. First
+                    # Overture row wins per key (matches old "first match
+                    # wins" semantics); duplicates are rare at this
+                    # precision.
+                    if key not in enrichments:
+                        enrichments[key] = extra
+                        enriched += 1
+                else:
+                    # Pass 2 add-new: skip uncategorized noise; stream
+                    # additions to a sidecar file so we don't hold
+                    # millions of dicts in memory.
+                    if not primary:
+                        continue
+                    rec = {
+                        "name": name,
+                        "type": "poi",
+                        "subtype": primary,
+                        "lat": round(float(lat), 6),
+                        "lon": round(float(lon), 6),
+                        "source": "overture",
+                        **extra,
+                    }
+                    add_fh.write(json.dumps(rec, separators=(",", ":"),
+                                            ensure_ascii=False))
+                    add_fh.write("\n")
+                    additions_count += 1
+                    added += 1
+
+                for src in (row.get("sources") or []):
+                    ds = (src or {}).get("dataset")
+                    if ds:
+                        source_datasets.add(ds)
+
+    print(f"    Pass B done: {enriched} enrichments queued, "
+          f"{added} additions staged at {additions_path}")
+
+    # Pass C: stream-rewrite the JSONL applying enrichments inline,
+    # then append the additions sidecar.
     tmp_path = search_jsonl_path + ".overture_tmp"
-    with open(tmp_path, "w", encoding="utf-8") as out:
-        for rec in records:
-            if "_raw" in rec:
-                out.write(rec["_raw"]); out.write("\n")
+    applied = set()  # keys already enriched ("first match wins")
+    with open(search_jsonl_path, "r", encoding="utf-8") as fin, \
+         open(tmp_path, "w", encoding="utf-8") as out:
+        for line in fin:
+            if '"type":"poi"' not in line:
+                # Fast path: not a POI, copy verbatim.
+                out.write(line)
                 continue
+            try:
+                rec = json.loads(line.rstrip("\n"))
+            except Exception:
+                out.write(line)
+                continue
+            if rec.get("type") != "poi":
+                out.write(line)
+                continue
+            lat = rec.get("lat"); lon = rec.get("lon")
+            nm = rec.get("name") or ""
+            if lat is None or lon is None or not nm:
+                out.write(line)
+                continue
+            key = (round(lat, 4), round(lon, 4), _normalize_street(nm))
+            extra = enrichments.get(key)
+            if not extra or key in applied:
+                out.write(line)
+                continue
+            applied.add(key)
+            for k, v in extra.items():
+                if k not in rec:
+                    rec[k] = v
+            s_old = rec.get("subtype") or ""
+            if extra.get("cat") and s_old in (
+                    "", "tourism", "amenity", "shop",
+                    "attraction", "leisure", "car",
+                    "historic", "landuse"):
+                rec["subtype"] = extra["cat"]
             out.write(json.dumps(rec, separators=(",", ":"),
                                  ensure_ascii=False))
             out.write("\n")
+        # Append the additions sidecar (already JSONL formatted).
+        if additions_count:
+            with open(additions_path, "r", encoding="utf-8") as add_fh:
+                shutil.copyfileobj(add_fh, out, length=8 * 1024 * 1024)
     os.replace(tmp_path, search_jsonl_path)
+    try:
+        os.unlink(additions_path)
+    except OSError:
+        pass
 
     size_after = os.path.getsize(search_jsonl_path)
     delta_mb = (size_after - size_before) / (1024 * 1024)
@@ -2762,7 +2852,22 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
                       end="", flush=True)
 
     p2 = _Pass2()
-    p2.apply_file(source_pbf, locations=True)
+    # Disk-backed node location store. Default apply_file(locations=True)
+    # uses an in-memory sparse map that peaks at tens of GB on continent-
+    # scale PBFs and silently OOM-kills Pass 2. dense_file_array is sized
+    # by max OSM node id (planet ≈12B → ~96 GB sparse file) but only
+    # touched pages count against RSS, so peak memory stays bounded.
+    node_loc_path = os.path.join(output_dir, "routing_node_locations.bin")
+    if os.path.exists(node_loc_path):
+        os.remove(node_loc_path)
+    loc_handler = osmium.NodeLocationsForWays(
+        osmium.index.create_map(f"dense_file_array,{node_loc_path}"))
+    loc_handler.ignore_errors()
+    osmium.apply(source_pbf, loc_handler, p2)
+    try:
+        os.remove(node_loc_path)
+    except OSError:
+        pass
     print(f"\r    Pass 2: {p2.hw_count} ways, {p2.edge_count} edges, "
           f"{len(geom_offsets) - 1} geoms, "
           f"{len(geom_blob) / (1024 * 1024):.1f} MB geom blob          ")
@@ -3281,6 +3386,7 @@ def create_zim(
     split_hot_search_chunks_mb=0,
     split_find_chips=False,
     zim_builder="python",
+    max_zoom=None,
 ):
     """Create a ZIM file containing the map viewer and all tiles."""
     from libzim.writer import Creator as LibzimCreator, Item, StringProvider, FileProvider
@@ -3504,7 +3610,7 @@ def create_zim(
         # Stream tiles from mbtiles or use in-memory dict
         if mbtiles_path:
             total_tiles = tile_count or 0
-            tile_source = iter_tiles_from_mbtiles(mbtiles_path, bbox=bbox)
+            tile_source = iter_tiles_from_mbtiles(mbtiles_path, bbox=bbox, max_zoom=max_zoom)
         else:
             total_tiles = len(tiles)
             tile_source = iter([(z, x, y, data) for (z, x, y), data in sorted(tiles.items())])
@@ -5034,10 +5140,17 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 with _tmpfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as flist:
                     flist.write('\n'.join(all_tifs_v))
                     flist_path = flist.name
-                subprocess.run(
-                    ["gdalbuildvrt", "-overwrite", "-input_file_list", flist_path, vrt_path],
-                    check=True, capture_output=True, text=True,
-                )
+                try:
+                    subprocess.run(
+                        ["gdalbuildvrt", "-overwrite", "-input_file_list", flist_path, vrt_path],
+                        check=True, capture_output=True, text=True,
+                    )
+                except FileNotFoundError:
+                    # gdalbuildvrt not on PATH — skip the verification VRT.
+                    # The terrain pyramid generation step already produced the
+                    # tiles; verification is a defensive boundary-seam fixer
+                    # that runs only when the VRT can be (re)built.
+                    print(f"    Skipping terrain verification: gdalbuildvrt not found on PATH")
                 os.unlink(flist_path)
 
             if os.path.isfile(vrt_path):
@@ -5318,6 +5431,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             overture_themes=overture_themes,
             address_count=address_count,
             zim_builder=getattr(args, "zim_builder", "python"),
+            max_zoom=args.max_zoom,
         )
 
         print()
