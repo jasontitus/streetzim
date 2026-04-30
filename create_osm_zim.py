@@ -2852,22 +2852,19 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
                       end="", flush=True)
 
     p2 = _Pass2()
-    # Disk-backed node location store. Default apply_file(locations=True)
-    # uses an in-memory sparse map that peaks at tens of GB on continent-
-    # scale PBFs and silently OOM-kills Pass 2. dense_file_array is sized
-    # by max OSM node id (planet ≈12B → ~96 GB sparse file) but only
-    # touched pages count against RSS, so peak memory stays bounded.
-    node_loc_path = os.path.join(output_dir, "routing_node_locations.bin")
-    if os.path.exists(node_loc_path):
-        os.remove(node_loc_path)
+    # Anonymous mmap node location store. Default apply_file(locations=True)
+    # uses sparse_mem_array which peaks at tens of GB on continent-scale
+    # PBFs and silently OOM-killed US Pass 2 three runs in a row.
+    # dense_mmap_array indexes by node id directly (~96 GB virtual for
+    # planet IDs) but only touched pages get committed to RAM, so the
+    # working set is bounded by actual node-touch count (~9 GB for US,
+    # ~15 GB for Europe). File-backed dense_file_array also works for
+    # memory but is impractically slow on HDD because every node lookup
+    # is a random read from a 100 GB file — anonymous mmap stays in RAM.
     loc_handler = osmium.NodeLocationsForWays(
-        osmium.index.create_map(f"dense_file_array,{node_loc_path}"))
+        osmium.index.create_map("dense_mmap_array"))
     loc_handler.ignore_errors()
     osmium.apply(source_pbf, loc_handler, p2)
-    try:
-        os.remove(node_loc_path)
-    except OSError:
-        pass
     print(f"\r    Pass 2: {p2.hw_count} ways, {p2.edge_count} edges, "
           f"{len(geom_offsets) - 1} geoms, "
           f"{len(geom_blob) / (1024 * 1024):.1f} MB geom blob          ")
@@ -4743,6 +4740,10 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--search-cache", metavar="PATH", default=None,
                         help="Use pre-built search features JSONL instead of extracting from tiles. "
                              "If bbox is set, features are filtered to the bounding box.")
+    parser.add_argument("--skip-address-extract", action="store_true",
+                        help="Skip extract_addresses_pbf and merge_overture_{addresses,places}. "
+                             "Use when --search-cache already contains the address records and "
+                             "overture enrichment from a prior run that crashed in a later phase.")
     parser.add_argument("--routing", action="store_true",
                         help="Include offline routing graph for turn-by-turn directions")
     parser.add_argument("--split-graph", action="store_true",
@@ -4974,8 +4975,11 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             addr_pbf = locals().get('work_pbf') or pbf_path or args.pbf
             if addr_pbf:
                 addr_bbox = parse_bbox(bbox_str) if bbox_str else None
-                address_count = extract_addresses_pbf(
-                    addr_pbf, search_features, bbox=addr_bbox) or 0
+                if args.skip_address_extract:
+                    print("    [--skip-address-extract] reusing cached addresses + overture enrichment")
+                else:
+                    address_count = extract_addresses_pbf(
+                        addr_pbf, search_features, bbox=addr_bbox) or 0
                 # Overture address enrichment — runs after OSM extraction so
                 # the dedup index is populated. Only adds rows the OSM pass
                 # didn't cover (the 1029-block gaps on Ramona St and friends).
@@ -4987,7 +4991,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 # feed we touched.
                 overture_themes = []
                 overture_datasets = set()
-                if args.overture_addresses:
+                if args.overture_addresses and not args.skip_address_extract:
                     try:
                         merge_result = merge_overture_addresses(
                             args.overture_addresses, search_features,
@@ -4997,7 +5001,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         overture_themes.append("addresses")
                     except Exception as _e:
                         print(f"    Warning: Overture addresses merge failed: {_e}")
-                if args.overture_places:
+                if args.overture_places and not args.skip_address_extract:
                     try:
                         places_result = merge_overture_places(
                             args.overture_places, search_features,
