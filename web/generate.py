@@ -159,6 +159,18 @@ REGIONS = [
         "zim_file": "osm-central-asia.zim",
         "description": "Central Asia &mdash; Kazakhstan, Uzbekistan, Turkmenistan, Tajikistan, Kyrgyzstan, Afghanistan, and the Caucasus. Almaty, Tashkent, Bishkek, Ashgabat, Dushanbe, Kabul, the Pamirs, and the Silk Road.",
     },
+    {
+        "id": "central-america-caribbean",
+        "title": "Central America & Caribbean",
+        "zim_file": "osm-central-america-caribbean.zim",
+        "description": "Central America and the Caribbean &mdash; Yucatán, Belize, Guatemala, Honduras, El Salvador, Nicaragua, Costa Rica, Panama, Cuba, Jamaica, Hispaniola, Cayman Islands, Puerto Rico, the Lesser Antilles, and the southern Bahamas.",
+    },
+    {
+        "id": "himalayas",
+        "title": "Himalayas",
+        "zim_file": "osm-himalayas.zim",
+        "description": "The Himalayas, Karakoram, Hindu Kush, and Pamir &mdash; Nepal, Bhutan, Tibet, Sikkim, Ladakh, Kashmir, the Indus and Brahmaputra valleys. Kathmandu, Pokhara, Lhasa, Thimphu, Leh, Hunza, Everest, K2, Kanchenjunga, and Annapurna.",
+    },
 ]
 
 

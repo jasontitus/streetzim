@@ -61,8 +61,8 @@ const ROUTE_PAIRS = {
   },
   'japan': {
     o: { lat: 35.6762, lon:  139.6503, label: 'Tokyo' },
-    d: { lat: 33.2382, lon:  131.6126, label: 'Oita' },
-    crow_km: 920,
+    d: { lat: 34.6937, lon:  135.5023, label: 'Osaka' },
+    crow_km: 400,
   },
   'central-us': {
     o: { lat: 39.7392, lon: -104.9903, label: 'Denver' },
@@ -108,6 +108,16 @@ const ROUTE_PAIRS = {
     o: { lat: -33.8688, lon: 151.2093, label: 'Sydney' },
     d: { lat: -37.8136, lon: 144.9631, label: 'Melbourne' },
     crow_km: 715,
+  },
+  'central-america-caribbean': {
+    o: { lat: 21.1619, lon: -86.8515, label: 'Cancún' },
+    d: { lat: 20.9674, lon: -89.5926, label: 'Mérida' },
+    crow_km: 300,
+  },
+  'himalayas': {
+    o: { lat: 27.7172, lon:  85.3240, label: 'Kathmandu' },
+    d: { lat: 28.2096, lon:  83.9856, label: 'Pokhara' },
+    crow_km: 200,
   },
 };
 
