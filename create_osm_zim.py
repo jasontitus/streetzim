@@ -2852,22 +2852,36 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
                       end="", flush=True)
 
     p2 = _Pass2()
-    # Hash-based sparse node location store. We tried in turn:
-    #   - default apply_file(locations=True) / sparse_mem_array — sorted
-    #     array, OOM'd US Pass 2 three runs in a row.
-    #   - dense_file_array — file-backed; OOM-safe but each node lookup
-    #     is a random HDD seek so US Pass 2 didn't finish 200k of 53M
-    #     ways in 1.5 h.
-    #   - dense_mmap_array — anonymous mmap; fast lookup but commits ~96
-    #     GB virtual (planet-scale node ids) + Pass 1 state above the
-    #     128 GB RAM ceiling, OOM-killed Europe Pass 2.
-    # sparse_mem_map keeps only touched node ids in a hash, ~30 bytes
-    # per entry. For Europe ≈1B touched nodes that's ~30 GB — fits with
-    # Pass 1's ref_to_idx dict (~12 GB) and edges/geom buffers (~10 GB).
+    # File-backed sparse node location store on a fast (NVMe) volume.
+    # We iterated through several map types:
+    #   - default sparse_mem_array — OOM'd US Pass 2 three runs in a row.
+    #   - dense_file_array on /storage HDD — OOM-safe but each node
+    #     lookup was a random HDD seek (US Pass 2 didn't finish 200k of
+    #     53M ways in 1.5 h).
+    #   - dense_mmap_array — anonymous mmap committed ~96 GB virtual for
+    #     planet-scale node ids, OOM-killed Europe Pass 2.
+    #   - sparse_mem_map — hash-based; OOM-killed Europe Pass 2 too
+    #     (~50 GB peak with libosmium overhead + Pass 1 state).
+    # sparse_file_array is sorted (id, lon, lat) triples on disk —
+    # ~16 GB for Europe's ~1B touched nodes, sequential writes during
+    # indexing, mostly cached lookups during way iteration. Putting it
+    # on /data (NVMe SSD, 370 GB free) makes random reads fast enough.
+    # /data is the project's reserved fast-scratch volume (separate from
+    # /storage HDD and the 79 GB / root); cleaned up at end of pass.
+    NODE_LOC_DIR = os.environ.get("STREETZIM_NODE_LOC_DIR", "/data")
+    if not os.path.isdir(NODE_LOC_DIR) or not os.access(NODE_LOC_DIR, os.W_OK):
+        NODE_LOC_DIR = output_dir
+    node_loc_path = os.path.join(NODE_LOC_DIR, "streetzim_node_locations.bin")
+    if os.path.exists(node_loc_path):
+        os.remove(node_loc_path)
     loc_handler = osmium.NodeLocationsForWays(
-        osmium.index.create_map("sparse_mem_map"))
+        osmium.index.create_map(f"sparse_file_array,{node_loc_path}"))
     loc_handler.ignore_errors()
     osmium.apply(source_pbf, loc_handler, p2)
+    try:
+        os.remove(node_loc_path)
+    except OSError:
+        pass
     print(f"\r    Pass 2: {p2.hw_count} ways, {p2.edge_count} edges, "
           f"{len(geom_offsets) - 1} geoms, "
           f"{len(geom_blob) / (1024 * 1024):.1f} MB geom blob          ")
