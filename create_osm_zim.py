@@ -2852,17 +2852,20 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
                       end="", flush=True)
 
     p2 = _Pass2()
-    # Anonymous mmap node location store. Default apply_file(locations=True)
-    # uses sparse_mem_array which peaks at tens of GB on continent-scale
-    # PBFs and silently OOM-killed US Pass 2 three runs in a row.
-    # dense_mmap_array indexes by node id directly (~96 GB virtual for
-    # planet IDs) but only touched pages get committed to RAM, so the
-    # working set is bounded by actual node-touch count (~9 GB for US,
-    # ~15 GB for Europe). File-backed dense_file_array also works for
-    # memory but is impractically slow on HDD because every node lookup
-    # is a random read from a 100 GB file — anonymous mmap stays in RAM.
+    # Hash-based sparse node location store. We tried in turn:
+    #   - default apply_file(locations=True) / sparse_mem_array — sorted
+    #     array, OOM'd US Pass 2 three runs in a row.
+    #   - dense_file_array — file-backed; OOM-safe but each node lookup
+    #     is a random HDD seek so US Pass 2 didn't finish 200k of 53M
+    #     ways in 1.5 h.
+    #   - dense_mmap_array — anonymous mmap; fast lookup but commits ~96
+    #     GB virtual (planet-scale node ids) + Pass 1 state above the
+    #     128 GB RAM ceiling, OOM-killed Europe Pass 2.
+    # sparse_mem_map keeps only touched node ids in a hash, ~30 bytes
+    # per entry. For Europe ≈1B touched nodes that's ~30 GB — fits with
+    # Pass 1's ref_to_idx dict (~12 GB) and edges/geom buffers (~10 GB).
     loc_handler = osmium.NodeLocationsForWays(
-        osmium.index.create_map("dense_mmap_array"))
+        osmium.index.create_map("sparse_mem_map"))
     loc_handler.ignore_errors()
     osmium.apply(source_pbf, loc_handler, p2)
     print(f"\r    Pass 2: {p2.hw_count} ways, {p2.edge_count} edges, "
