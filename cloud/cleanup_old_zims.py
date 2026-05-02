@@ -27,14 +27,39 @@ import subprocess
 import sys
 from typing import Dict, List, Tuple
 
-# Optional `[a-z]?` lets the same-day-reroll suffix (b, c, d…) match
-# alongside the bare YYYY-MM-DD. Without it cleanup couldn't see -b/-c
-# uploads at all and never pruned them — Egypt's archive item still
-# had 4 dated copies (04-25, 04-26, 04-26b, 04-26c) past
-# `--keep 2` because the regex matched only the first two.
-# Lexicographic sort: 2026-04-26 < 2026-04-26b < 2026-04-26c, which is
-# what we want — the latest suffix lives.
-DATED_ZIM = re.compile(r"^(osm-.+)-(\d{4}-\d{2}-\d{2}[a-z]?)\.zim$")
+# Filename shapes we manage, oldest-style first:
+#   osm-<id>.zim                                 (legacy undated)
+#   osm-<id>-YYYY-MM.zim                         (legacy year-month)
+#   osm-<id>-YYYY-MM-DD[a-z]?.zim                (current; suffix b/c/… for same-day re-rolls)
+#
+# Pre-2026-05-01 the regex required full YYYY-MM-DD, so legacy undated
+# and year-month files snuck past `--keep 2` forever. Audit on
+# 2026-05-01 found africa with 4 ZIMs (an undated one, a 2026-04, and
+# two dated), california with 5, midwest-us with 5, etc. The torrent
+# `streetzim-<id>_archive.torrent` lists every file in the item, so
+# users were getting torrents containing 3+ stale ZIMs.
+#
+# Sort key promotes the shorter shapes so they compare oldest:
+#   undated         → ""
+#   YYYY-MM         → "YYYY-MM-00"   (sorts before any same-month YYYY-MM-DD)
+#   YYYY-MM-DD[s]   → "YYYY-MM-DD[s]"
+DATED_ZIM_FULL  = re.compile(r"^osm-(.+)-(\d{4}-\d{2}-\d{2}[a-z]?)\.zim$")
+DATED_ZIM_MONTH = re.compile(r"^osm-(.+)-(\d{4}-\d{2})\.zim$")
+UNDATED_ZIM     = re.compile(r"^osm-(.+)\.zim$")
+
+
+def parse_zim_filename(name: str):
+    """Return (sort_key, name) if `name` is a managed ZIM; else None."""
+    m = DATED_ZIM_FULL.match(name)
+    if m:
+        return (m.group(2), name)
+    m = DATED_ZIM_MONTH.match(name)
+    if m:
+        return (m.group(2) + "-00", name)
+    m = UNDATED_ZIM.match(name)
+    if m:
+        return ("", name)
+    return None
 
 
 def ia(args: list) -> subprocess.CompletedProcess:
@@ -79,10 +104,12 @@ def item_zim_files(item: str) -> List[Dict]:
     zims: List[Tuple[str, str]] = []
     for f in meta.get("files", []):
         name = f.get("name") or ""
-        m = DATED_ZIM.match(name)
-        if m:
-            zims.append((m.group(2), name))  # (YYYY-MM-DD, filename)
-    zims.sort()  # ascending by date
+        if "history/" in name:
+            continue
+        parsed = parse_zim_filename(name)
+        if parsed:
+            zims.append(parsed)
+    zims.sort()  # ascending by date (undated first, year-month next, full date newest)
     return [{"date": d, "name": n} for d, n in zims]
 
 
