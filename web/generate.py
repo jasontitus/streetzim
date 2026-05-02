@@ -284,7 +284,7 @@ def render_live_card(region, size_label, item_meta=None):
         <p class="map-card-desc">{region["description"]}</p>{badges_html}
         <div class="map-card-links">
           <a class="btn btn-primary" href="https://archive.org/download/{item_id}/{zim_file}" data-track="download" data-region="{region["id"]}" data-title="{title_attr}">Download</a>
-          <a class="btn btn-secondary" href="https://archive.org/download/{item_id}/{item_id}_archive.torrent" data-track="torrent" data-region="{region["id"]}" data-title="{title_attr}">Torrent</a>
+          <a class="btn btn-secondary" href="/torrents/{region["id"]}.torrent" data-track="torrent" data-region="{region["id"]}" data-title="{title_attr}">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/{item_id}" data-track="details" data-region="{region["id"]}" data-title="{title_attr}">Info</a>
         </div>
       </div>"""
