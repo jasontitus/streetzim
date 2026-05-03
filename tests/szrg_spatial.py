@@ -63,10 +63,36 @@ from tests.szrg_reader import SZRG, parse_szrg_bytes
 
 SZCI_MAGIC = b"SZCI"
 SZRC_MAGIC = b"SZRC"
-SZCI_VERSION = 1
+SZCI_VERSION_INLINE = 1     # legacy: nodes_scaled in the SZCI body
+SZCI_VERSION_SHARDED = 2    # nodes_scaled sharded into routing-data/nodes-scaled-NNN.bin
+SZCI_VERSION = SZCI_VERSION_SHARDED
 SZRC_VERSION = 1
 
 DEFAULT_CELL_SCALE = 10  # 0.1° cells — ~11 km lat; lon varies by latitude
+
+# Cap any single ZIM entry well under the 200 MB validator threshold
+# (and even further under the libzim 4 GB blob limit). 5 M nodes × 8 B
+# = 40 MB per shard, so a 90 M-node continent ZIM produces 18 shards.
+DEFAULT_NODES_PER_SHARD = 5_000_000
+
+# Below this, just inline nodes_scaled in the SZCI (v1) so small ZIMs
+# don't pay the per-shard ZIM-entry overhead. 2 M nodes × 8 B = 16 MB.
+NODES_SCALED_INLINE_MB_THRESHOLD = 50
+
+
+def _node_shard_ranges(num_nodes: int,
+                       nodes_per_shard: int = DEFAULT_NODES_PER_SHARD,
+                       ) -> list[tuple[int, int]]:
+    """Return list of (start_node_idx, end_node_idx) tuples that partition
+    [0, num_nodes) into shards of at most ``nodes_per_shard`` nodes each.
+    The final shard may be shorter."""
+    out: list[tuple[int, int]] = []
+    start = 0
+    while start < num_nodes:
+        end = min(start + nodes_per_shard, num_nodes)
+        out.append((start, end))
+        start = end
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -301,15 +327,55 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
     del order, cell_starts, cell_ends
 
     # ---- Build SZCI index -------------------------------------------------
-    header = SZCI_MAGIC + struct.pack(
-        "<7I",
-        SZCI_VERSION,
-        num_nodes, num_edges,
-        num_names, len(g.names_blob),
-        num_cells,
-        cell_scale if cell_scale >= 0 else 0,
-    )
-    nodes_blob = nodes_arr.tobytes()  # int32 LE, source order
+    # Decide on inline (v1) vs sharded (v2) layout. Sharding splits
+    # nodes_scaled into per-file shards on disk so no single ZIM entry
+    # exceeds the validator's 200 MB per-entry cap (a continent-scale
+    # build like the US has 90 M nodes ⇒ 720 MB unsharded). When
+    # ``output_dir`` is provided we always shard — even small graphs
+    # produce only one ~4 MB shard, exercising the same read code path
+    # as the continent build for free. When called in-memory by tests
+    # (output_dir is None), we keep inline (v1) since the caller has no
+    # filesystem to write shards into.
+    use_shards = output_dir is not None
+
+    if use_shards:
+        version = SZCI_VERSION_SHARDED
+        shard_ranges = _node_shard_ranges(num_nodes, DEFAULT_NODES_PER_SHARD)
+        num_node_shards = len(shard_ranges)
+        nodes_per_shard = DEFAULT_NODES_PER_SHARD
+        shard_paths: list[Path] = []
+        for shard_idx, (lo, hi) in enumerate(shard_ranges):
+            # nodes_arr is shape [num_nodes*2] in source order, so a
+            # node-range [lo, hi) maps to flat-index [lo*2, hi*2).
+            shard_arr = nodes_arr[lo * 2:hi * 2]
+            shard_path = output_dir / f"nodes-scaled-{shard_idx:03d}.bin"
+            shard_path.write_bytes(shard_arr.tobytes())
+            shard_paths.append(shard_path)
+        # SZCI v2 header: 9 × u32 = 36 bytes (40 with magic). No inline
+        # nodes_blob — readers fetch shards via routing-data/nodes-scaled-NNN.bin.
+        header = SZCI_MAGIC + struct.pack(
+            "<7I 2I",
+            version,
+            num_nodes, num_edges,
+            num_names, len(g.names_blob),
+            num_cells,
+            cell_scale if cell_scale >= 0 else 0,
+            num_node_shards,
+            nodes_per_shard,
+        )
+        nodes_blob = b""
+    else:
+        version = SZCI_VERSION_INLINE
+        shard_paths = []
+        header = SZCI_MAGIC + struct.pack(
+            "<7I",
+            version,
+            num_nodes, num_edges,
+            num_names, len(g.names_blob),
+            num_cells,
+            cell_scale if cell_scale >= 0 else 0,
+        )
+        nodes_blob = nodes_arr.tobytes()  # int32 LE, source order
 
     # Cell metadata table — 20 bytes per cell (i32 lat, i32 lon, u32 ×3).
     cell_meta_dt = np.dtype([
@@ -340,7 +406,8 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
 
     if output_dir is not None:
         total_bytes = (len(index_bytes)
-                       + sum(os.path.getsize(p) for p in cells_out.values()))
+                       + sum(os.path.getsize(p) for p in cells_out.values())
+                       + sum(p.stat().st_size for p in shard_paths))
     else:
         total_bytes = len(index_bytes) + sum(len(b) for b in cells_out.values())
 
@@ -349,6 +416,7 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
         "cell_coords": cell_coords_sorted,
         "total_bytes": total_bytes,
         "cell_scale": cell_scale,
+        "node_shard_paths": [str(p) for p in shard_paths],
     }
     return index_bytes, cells_out, meta
 
@@ -420,18 +488,53 @@ class SZCIIndex:
         return self.names_blob[s:e].decode("utf-8", errors="replace")
 
 
-def parse_szci(buf: bytes) -> SZCIIndex:
+def parse_szci(buf: bytes,
+               nodes_scaled_loader=None) -> SZCIIndex:
+    """Parse SZCI index bytes.
+
+    For version 1 (inline): nodes_scaled is read from the buffer directly.
+
+    For version 2 (sharded): the SZCI body has no nodes_scaled blob;
+    pass ``nodes_scaled_loader(shard_idx) -> bytes`` to fetch each
+    ``routing-data/nodes-scaled-NNN.bin`` shard. The shards are
+    concatenated and re-typed as int32 little-endian. If
+    ``nodes_scaled_loader`` is None on a v2 index, ``nodes_scaled`` is
+    populated as an empty array — useful only for inspecting cell
+    metadata; routing requires the loader.
+    """
     if buf[:4] != SZCI_MAGIC:
         raise ValueError("Not a SZCI index (bad magic)")
-    (version, num_nodes, num_edges, num_names, names_bytes, num_cells,
-     cell_scale) = struct.unpack_from("<7I", buf, 4)
-    if version != SZCI_VERSION:
+    version = struct.unpack_from("<I", buf, 4)[0]
+    if version == SZCI_VERSION_INLINE:
+        (_, num_nodes, num_edges, num_names, names_bytes, num_cells,
+         _cell_scale_unsigned) = struct.unpack_from("<7I", buf, 4)
+        cell_scale_signed = struct.unpack_from("<i", buf, 4 + 6 * 4)[0]
+        off = 32  # 4 magic + 7×4 fields
+        nodes_scaled = np.frombuffer(buf, dtype="<i4",
+                                     count=num_nodes * 2, offset=off)
+        off += num_nodes * 2 * 4
+    elif version == SZCI_VERSION_SHARDED:
+        (_, num_nodes, num_edges, num_names, names_bytes, num_cells,
+         _cell_scale_unsigned, num_node_shards,
+         _nodes_per_shard) = struct.unpack_from("<9I", buf, 4)
+        cell_scale_signed = struct.unpack_from("<i", buf, 4 + 6 * 4)[0]
+        off = 4 + 9 * 4  # 40
+        if nodes_scaled_loader is None:
+            # Caller wants metadata only — leave nodes_scaled empty so
+            # this path doesn't silently allocate when we can't load.
+            nodes_scaled = np.empty(0, dtype=np.int32)
+        else:
+            parts: list[bytes] = []
+            for shard_idx in range(num_node_shards):
+                parts.append(nodes_scaled_loader(shard_idx))
+            joined = b"".join(parts)
+            nodes_scaled = np.frombuffer(joined, dtype="<i4")
+            if nodes_scaled.shape[0] != num_nodes * 2:
+                raise ValueError(
+                    f"node shards yielded {nodes_scaled.shape[0]//2} nodes "
+                    f"in {num_node_shards} files, header expected {num_nodes}")
+    else:
         raise ValueError(f"Unsupported SZCI version: {version}")
-    cell_scale_signed = struct.unpack_from("<i", buf, 4 + 6 * 4)[0]
-
-    off = 32
-    nodes_scaled = np.frombuffer(buf, dtype="<i4", count=num_nodes * 2, offset=off)
-    off += num_nodes * 2 * 4
 
     cell_lat_idx = np.empty(num_cells, dtype=np.int32)
     cell_lon_idx = np.empty(num_cells, dtype=np.int32)
@@ -449,7 +552,8 @@ def parse_szci(buf: bytes) -> SZCIIndex:
         cell_id_by_key[(la, lo)] = cid
         off += 20
 
-    name_offsets = np.frombuffer(buf, dtype="<u4", count=num_names + 1, offset=off)
+    name_offsets = np.frombuffer(buf, dtype="<u4",
+                                 count=num_names + 1, offset=off)
     off += (num_names + 1) * 4
     names_blob = bytes(buf[off:off + names_bytes])
 
@@ -722,12 +826,20 @@ def spatial_graph_from_memory(index_bytes: bytes,
 
 def load_spatial_from_zim(zim_path: str | Path,
                           cache_limit: int | None = None) -> SpatialGraph:
-    """Open a spatial-chunked ZIM. Eager-loads the SZCI index; cell files
-    are fetched lazily via the ZIM archive when A* walks into them."""
+    """Open a spatial-chunked ZIM. Eager-loads the SZCI index (and any
+    nodes_scaled shards); cell files are fetched lazily via the ZIM
+    archive when A* walks into them."""
     from libzim.reader import Archive
     arc = Archive(str(zim_path))
     idx_entry = arc.get_entry_by_path("routing-data/graph-cells-index.bin")
-    idx = parse_szci(bytes(idx_entry.get_item().content))
+    idx_buf = bytes(idx_entry.get_item().content)
+
+    def shard_loader(shard_idx: int) -> bytes:
+        # 3-digit zero-pad matches the writer in build_spatial.
+        path = f"routing-data/nodes-scaled-{shard_idx:03d}.bin"
+        return bytes(arc.get_entry_by_path(path).get_item().content)
+
+    idx = parse_szci(idx_buf, nodes_scaled_loader=shard_loader)
 
     def loader(cell_id: int) -> bytes:
         # 5-digit zero-pad matches the writer in cloud/repackage_zim.py.

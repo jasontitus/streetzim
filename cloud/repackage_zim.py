@@ -126,20 +126,86 @@ def _sub_bucket_for_name(name: str, n_buckets: int) -> int:
     return h % n_buckets
 
 
+def _split_records_recursive(
+    records: list, prefix: str, threshold_bytes: int,
+    n_buckets: int, max_depth: int,
+) -> list[tuple[str, bytes]]:
+    """Recursively split records into sub-chunks until each fits under
+    ``threshold_bytes`` or ``max_depth`` is reached. Returns a list of
+    ``(leaf_prefix, serialized_bytes)`` tuples — only leaves, no
+    intermediate nodes.
+
+    Strategy:
+      1. Try FNV-1a hash by record's ``n`` field across ``n_buckets``.
+      2. If degenerate (≥75% of records collapsed into one bucket — happens
+         when records share an empty/identical name), fall back to
+         **size-based slicing**: distribute records by index modulo
+         n_buckets. Client behavior is unaffected because the client
+         already fetches every sub-chunk under a prefix and filters by
+         query content (see resources/viewer/index.html ``expandPrefix``).
+
+    The serialized payload is checked against ``threshold_bytes`` before
+    splitting — if the chunk is already small enough (or recursion is
+    exhausted), it's returned as a leaf.
+    """
+    serialized = json.dumps(records, separators=(",", ":"),
+                            ensure_ascii=False).encode("utf-8")
+    if len(serialized) <= threshold_bytes or max_depth <= 0 or len(records) <= 1:
+        return [(prefix, serialized)]
+
+    # By-name FNV-1a bucketing (deterministic; preferred when distribution
+    # is reasonable).
+    by_name: list[list] = [[] for _ in range(n_buckets)]
+    for rec in records:
+        name = rec.get("n", "") or ""
+        by_name[_sub_bucket_for_name(name, n_buckets)].append(rec)
+    largest_share = max(len(b) for b in by_name) / max(1, len(records))
+
+    if largest_share <= 0.75:
+        buckets = by_name
+        strategy = "name"
+    else:
+        # Degenerate — anonymous records (empty `n`) or 1.5M records sharing
+        # the same `n`. Split by record index instead, breaking the FNV tie.
+        buckets = [[] for _ in range(n_buckets)]
+        for i, rec in enumerate(records):
+            buckets[i % n_buckets].append(rec)
+        strategy = "index"
+
+    out: list[tuple[str, bytes]] = []
+    hex_width = len(format(n_buckets - 1, "x"))
+    for i, bucket in enumerate(buckets):
+        if not bucket:
+            continue
+        sub_prefix = f"{prefix}-{format(i, f'0{hex_width}x')}"
+        out.extend(_split_records_recursive(
+            bucket, sub_prefix, threshold_bytes, n_buckets, max_depth - 1,
+        ))
+    if strategy == "index":
+        # Surfaced for log diagnostics; the actual recursion already wrote
+        # uniform sub-chunks. (No extra effect — just informational.)
+        pass
+    return out
+
+
 def _emit_split_search(creator, manifest: dict, hot_chunks: dict[str, bytes],
                        *, n_sub_buckets: int, threshold_mb: int,
                        passthrough_cls, src_arc) -> None:
-    """Re-emit search-data with hot chunks sub-split by name-hash.
+    """Re-emit search-data with hot chunks sub-split until each leaf is
+    under ``threshold_mb``.
 
-    - Any prefix whose chunk bytes we captured above goes through the
-      split path: records are bucketed by FNV-1a hash of the record's
-      ``n`` field, written as ``search-data/{prefix}-{0..f}.json``.
-    - The new manifest replaces the old ``chunks[prefix] = count`` entry
-      with ``chunks[prefix-0] = sub_count`` etc., and records the
-      original prefix → [sub_prefixes] in a new ``sub_chunks`` section
-      so clients know which queries to spread across sub-files.
+    Recursive: ``_split_records_recursive`` keeps splitting until either
+    every leaf is below threshold or max-depth (5) is exhausted. The
+    flattened leaf list is written to ``sub_chunks[prefix]`` so the
+    client's ``expandPrefix`` (which already walks ``sub_chunks``
+    recursively) finds them. When FNV-1a bucketing is degenerate (an
+    earlier failure mode: 1.5 M same-``n`` records collapsing to one
+    bucket → ``→ 1 sub-chunks`` while the chunk stayed at 232 MB), the
+    splitter falls back to size-based index slicing — guaranteeing
+    forward progress.
     """
-    import hashlib
+    threshold_bytes = threshold_mb * 1024 * 1024
+    max_depth = 5  # 16^5 = 1M leaf buckets — enough for any continent
     new_manifest = {
         "chunks": dict(manifest.get("chunks", {})),
         "sub_chunks": dict(manifest.get("sub_chunks", {})),
@@ -162,35 +228,53 @@ def _emit_split_search(creator, manifest: dict, hot_chunks: dict[str, bytes],
                 compress=True,
             ))
             continue
-        # Bucket records by hash.
-        buckets: list[list] = [[] for _ in range(n_sub_buckets)]
-        for rec in records:
-            name = rec.get("n", "") or ""
-            buckets[_sub_bucket_for_name(name, n_sub_buckets)].append(rec)
 
-        hex_width = len(format(n_sub_buckets - 1, "x"))
+        leaves = _split_records_recursive(
+            records, prefix, threshold_bytes, n_sub_buckets, max_depth,
+        )
+        # If the recursion returned the input unchanged (single leaf with
+        # the same prefix), the chunk was already below threshold — pass
+        # through as a normal sub-chunk of itself.
+        if len(leaves) == 1 and leaves[0][0] == prefix:
+            creator.add_item(passthrough_cls(
+                f"search-data/{prefix}.json", f"search chunk {prefix}",
+                "application/json", leaves[0][1],
+                compress=True,
+            ))
+            new_manifest["chunks"][prefix] = len(records)
+            split_total_emitted += 1
+            print(f"  pass-through {prefix!r} "
+                  f"({len(records):,} records, {len(raw)/1e6:.0f} MB) "
+                  f"— already under {threshold_mb} MB")
+            continue
+
         sub_prefix_list: list[str] = []
-        for i, bucket in enumerate(buckets):
-            if not bucket:
-                continue
-            sub_prefix = f"{prefix}-{format(i, f'0{hex_width}x')}"
+        max_leaf_mb = 0.0
+        for sub_prefix, sub_bytes in leaves:
             sub_prefix_list.append(sub_prefix)
-            sub_bytes = json.dumps(bucket, separators=(",", ":"),
-                                   ensure_ascii=False).encode("utf-8")
             creator.add_item(passthrough_cls(
                 f"search-data/{sub_prefix}.json",
                 f"search chunk {sub_prefix}",
                 "application/json", sub_bytes,
                 compress=True,
             ))
-            new_manifest["chunks"][sub_prefix] = len(bucket)
+            # Reverse-engineer the record count from the serialized JSON
+            # (cheaper than reparsing): the leaf bytes are the chunk file,
+            # use len(json.loads(sub_bytes)) once for each leaf.
+            try:
+                leaf_count = len(json.loads(sub_bytes.decode("utf-8")))
+            except Exception:
+                leaf_count = 0
+            new_manifest["chunks"][sub_prefix] = leaf_count
+            mb = len(sub_bytes) / 1e6
+            if mb > max_leaf_mb:
+                max_leaf_mb = mb
             split_total_emitted += 1
-        # Drop the original prefix entry from chunks[] and note the split
-        # in sub_chunks[].
         new_manifest["chunks"].pop(prefix, None)
         new_manifest["sub_chunks"][prefix] = sub_prefix_list
         print(f"  split {prefix!r} ({len(records):,} records, "
-              f"{len(raw)/1e6:.0f} MB) → {len(sub_prefix_list)} sub-chunks")
+              f"{len(raw)/1e6:.0f} MB) → {len(sub_prefix_list)} leaves "
+              f"(largest {max_leaf_mb:.1f} MB)")
 
     # Emit updated manifest (now covers remaining passthroughs too). We
     # count on the passthrough loop having SKIPPED every hot chunk + the
@@ -203,8 +287,8 @@ def _emit_split_search(creator, manifest: dict, hot_chunks: dict[str, bytes],
         compress=True,
     ))
     print(f"  search-data manifest rewritten; "
-          f"{split_total_emitted} sub-chunks emitted across "
-          f"{len(hot_chunks)} split prefixes; threshold {threshold_mb} MB")
+          f"{split_total_emitted} leaves emitted across "
+          f"{len(hot_chunks)} hot prefixes; threshold {threshold_mb} MB")
 
 
 def _emit_spatial_graph(creator, graph_path: str | Path, *,
@@ -257,7 +341,12 @@ def _emit_spatial_graph(creator, graph_path: str | Path, *,
     cell_sizes_mb = [os.path.getsize(p) / 1e6 for p in cell_paths.values()]
     total_cell_mb = sum(cell_sizes_mb)
     max_cell_mb = max(cell_sizes_mb) if cell_sizes_mb else 0.0
+    node_shard_paths = meta.get("node_shard_paths", []) or []
+    shard_sizes_mb = [os.path.getsize(p) / 1e6 for p in node_shard_paths]
+    total_shard_mb = sum(shard_sizes_mb)
     print(f"  → spatial (cell_scale={cell_scale}): index {idx_mb:.1f} MB + "
+          f"{len(node_shard_paths)} node shards "
+          f"({total_shard_mb:.1f} MB) + "
           f"{meta['num_cells']} cells totalling {total_cell_mb:.1f} MB "
           f"(max cell {max_cell_mb:.1f} MB) — streamed via {spill_dir}")
 
@@ -270,6 +359,22 @@ def _emit_spatial_graph(creator, graph_path: str | Path, *,
         idx_bytes,
         compress=compress_idx,
     ))
+
+    # nodes_scaled shards (SZCI v2). Each shard is ≤ 40 MB by default —
+    # well under the 200 MB validator cap. Add via FileProvider.
+    for shard_path in node_shard_paths:
+        # File name format: ``nodes-scaled-NNN.bin`` — ZIM entry path is
+        # ``routing-data/<basename>``. The 3-digit zero-pad matches the
+        # writer in tests/szrg_spatial.py and the reader in
+        # ``load_spatial_from_zim``.
+        basename = os.path.basename(shard_path)
+        creator.add_item(file_passthrough_cls(
+            f"routing-data/{basename}",
+            f"Routing Nodes Shard {basename}",
+            "application/octet-stream",
+            shard_path,
+            compress=True,
+        ))
 
     # Each cell — compress individually; cells are smaller than the
     # monolithic graph so fzstd handles them comfortably. Add via

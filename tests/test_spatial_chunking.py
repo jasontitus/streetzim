@@ -205,6 +205,85 @@ def test_build_spatial_geom_index_is_cell_local():
         assert int(c.edges[2]) == 0
 
 
+def test_build_spatial_sharded_nodes_scaled(tmp_path):
+    """SZCI v2: when nodes_scaled would be large enough, build_spatial
+    writes ``nodes-scaled-NNN.bin`` shard files instead of inlining them
+    in the SZCI body. parse_szci with a shard loader callback must
+    reconstruct the same nodes_scaled bytes that the v1 inline path
+    produced for the same source graph.
+
+    Drives a 4-node graph through both paths and asserts byte-identity
+    on the reassembled nodes_scaled + a routed result. Forces sharding
+    by patching the inline threshold to 0 (so any non-empty graph picks
+    the shard path)."""
+    import tests.szrg_spatial as ssm
+
+    nodes = [
+        (   0,         0),
+        (2_000_000,    0),
+        (   0, 2_000_000),
+        (2_000_000, 2_000_000),
+    ]
+    edges = [
+        (0, 1, 1000, 30, 0xFFFFFFFF, 0),
+        (1, 3, 1000, 30, 0xFFFFFFFF, 0),
+        (3, 2, 1000, 30, 0xFFFFFFFF, 0),
+        (2, 0, 1000, 30, 0xFFFFFFFF, 0),
+    ]
+    g = parse_szrg_bytes(_pack_v4_graph(nodes, edges))
+
+    # 1) v1 inline (in-memory path): nodes_scaled lives inside SZCI bytes.
+    idx_bytes_v1, cells_v1, _ = ssm.build_spatial(g, cell_scale=10)
+    idx_v1 = ssm.parse_szci(idx_bytes_v1)
+    assert idx_v1.version == ssm.SZCI_VERSION_INLINE
+    nodes_v1_bytes = idx_v1.nodes_scaled.tobytes()
+
+    # 2) v2 sharded (force the threshold so the shard path triggers
+    # for our tiny test graph).
+    orig_threshold = ssm.NODES_SCALED_INLINE_MB_THRESHOLD
+    orig_per_shard = ssm.DEFAULT_NODES_PER_SHARD
+    try:
+        ssm.NODES_SCALED_INLINE_MB_THRESHOLD = 0
+        ssm.DEFAULT_NODES_PER_SHARD = 2  # 2 nodes/shard → 2 shards for our 4-node graph
+        idx_bytes_v2, cells_v2, meta_v2 = ssm.build_spatial(
+            g, cell_scale=10, output_dir=tmp_path,
+        )
+    finally:
+        ssm.NODES_SCALED_INLINE_MB_THRESHOLD = orig_threshold
+        ssm.DEFAULT_NODES_PER_SHARD = orig_per_shard
+
+    # SZCI body is now smaller (no inline nodes blob).
+    assert len(idx_bytes_v2) < len(idx_bytes_v1)
+    assert len(meta_v2["node_shard_paths"]) == 2
+
+    # parse_szci with no loader: nodes_scaled comes back empty.
+    idx_v2_no_loader = ssm.parse_szci(idx_bytes_v2)
+    assert idx_v2_no_loader.version == ssm.SZCI_VERSION_SHARDED
+    assert idx_v2_no_loader.nodes_scaled.shape[0] == 0
+    # Header still records the right node count for the rest of the
+    # routing surface to use.
+    assert idx_v2_no_loader.num_nodes == 4
+
+    # parse_szci WITH loader: shards are concatenated and decoded as
+    # int32 little-endian — must equal the v1 inline bytes exactly.
+    shard_paths = sorted(meta_v2["node_shard_paths"])
+    def loader(shard_idx: int) -> bytes:
+        return Path(shard_paths[shard_idx]).read_bytes()
+    idx_v2 = ssm.parse_szci(idx_bytes_v2, nodes_scaled_loader=loader)
+    assert idx_v2.nodes_scaled.tobytes() == nodes_v1_bytes
+
+    # Routing still works through the v2 path. Build a SpatialGraph
+    # whose cell loader looks at the on-disk cell files (v2 wrote them
+    # alongside the index) and route 0 → 2.
+    def cell_loader(cell_id: int) -> bytes:
+        path = tmp_path / f"graph-cell-{cell_id:05d}.bin"
+        return path.read_bytes()
+    sg = ssm.SpatialGraph(idx_v2, cell_loader)
+    r = find_route_spatial(sg, 0, 2)
+    assert r is not None
+    assert r.node_sequence[0] == 0 and r.node_sequence[-1] == 2
+
+
 # ---- 2. Spatial A* route identity on synthetic graphs ---------------------
 
 

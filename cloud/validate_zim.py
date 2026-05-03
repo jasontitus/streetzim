@@ -1348,10 +1348,28 @@ def validate(zim_path: str, *, audit_tiles: bool = False) -> list[Result]:
 # correctly in Kiwix, browsers, and PWA — the warning is bookkeeping
 # noise. Add new entries here when new MapLibre source/layer IDs hit
 # this pattern.
+# MapLibre source/layer IDs that zimcheck (libzim variant) heuristically
+# flags because they appear inside JS string literals that look href-like.
 _ZIMCHECK_KNOWN_FALSE_POSITIVE_LINKS = (
     "mcpzim-places",
     "mcpzim-places-dots",
     "mcpzim-places-labels",
+)
+
+# zimru's "Invalid internal links" output groups lines into sub-blocks of:
+#     "  The following links:"
+#     "- <link>"
+#     "(<resolved-target>) were not found in article <source-page>"
+# These (resolved-target, link) pairs are known false positives the
+# Kiwix/PWA viewer handles correctly via fragment-aware navigation —
+# zimcheck's static scanner doesn't model the runtime hash routing.
+# When EVERY sub-block matches one of these known patterns we drop the
+# whole block. Anything unrecognized still surfaces.
+_ZIMCHECK_KNOWN_FALSE_POSITIVE_PAIRS = (
+    # search/N-N.html links to "index.html#dest=…&label=…" — zimru
+    # resolves the relative path to "search/index.html" which doesn't
+    # exist. Production Kiwix/PWA viewer handles the hash correctly.
+    ("search/index.html", "search/"),
 )
 
 
@@ -1420,12 +1438,64 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
     if "Symbol not found" in out or "dyld" in out and "Library not loaded" in out:
         return "pass", "zimcheck binary failed to load libraries (skipped)"
     # zimcheck groups errors into multi-line blocks: a "[ERROR] Foo:"
-    # header followed by indented child lines. Split into blocks
-    # before filtering — the false-positive patterns appear on child
-    # lines, not the header.
+    # header followed by indented child lines. zimru's "Invalid internal
+    # links found:" block can contain MANY sub-blocks separated by
+    # "(resolved-target) were not found in article source-page" lines —
+    # the parser must capture all of them under the same header so the
+    # filter can categorize each sub-block as known-FP or unknown.
     real_blocks = []
     cur_header = None
     cur_body = []
+
+    def _classify_invalid_links_subblocks(body):
+        """Walk an "Invalid internal links" body and split it into
+        sub-blocks of (link_lines, context_line). Each sub-block ends
+        with a parenthetical "(resolved) were not found in article
+        source" line. Returns a list of dicts with link_lines + context.
+        """
+        sub_blocks = []
+        cur = {"link_lines": [], "context": None}
+        for ln in body:
+            stripped = ln.strip()
+            if stripped.startswith("(") and "were not found" in stripped:
+                cur["context"] = stripped
+                sub_blocks.append(cur)
+                cur = {"link_lines": [], "context": None}
+            elif stripped.startswith("- "):
+                cur["link_lines"].append(stripped)
+            # "  The following links:" and other decorative lines: ignore
+        if cur["link_lines"] or cur["context"]:
+            sub_blocks.append(cur)
+        return sub_blocks
+
+    def _is_subblock_false_positive(sb):
+        """A sub-block is a known false positive if EVERY link line
+        matches a known FP pattern (the per-link FP list, OR a per-pair
+        target/source FP)."""
+        link_lines = sb["link_lines"]
+        if not link_lines:
+            return False
+        # Per-link substring match (mcpzim-places et al).
+        if all(any(fp in ln for fp in _ZIMCHECK_KNOWN_FALSE_POSITIVE_LINKS)
+               for ln in link_lines):
+            return True
+        # Per-pair (resolved-target, source-prefix) match. Drop if every
+        # link is a relative reference to the same target AND the
+        # context's parenthetical resolved-target + source-page prefix
+        # match a known FP pair.
+        ctx = sb["context"] or ""
+        for tgt, src_prefix in _ZIMCHECK_KNOWN_FALSE_POSITIVE_PAIRS:
+            if (f"({tgt})" in ctx
+                    and f"in article {src_prefix}" in ctx):
+                # All links must reference index.html (the canonical
+                # PWA target) or whatever maps onto tgt's basename.
+                tgt_basename = tgt.rsplit("/", 1)[-1]
+                if all(ln.endswith(tgt_basename)
+                       or ln.endswith(f"./{tgt_basename}")
+                       for ln in link_lines):
+                    return True
+        return False
+
     def _maybe_keep(header, body):
         if not header:
             return
@@ -1435,11 +1505,9 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
         # the entry is a 0-byte ocean tile (vector tiles/*.pbf) —
         # we ship those intentionally for full bbox coverage.
         if header.startswith("[ERROR] Empty article:"):
-            # Single-line zimru entry. Drop iff it's a tiles/*.pbf.
             payload = header.split(":", 1)[1].strip()
             if payload.startswith("tiles/") and payload.endswith(".pbf"):
                 return
-            # Anything else (empty HTML, empty manifest, etc.) keep.
             real_blocks.append((header, body))
             return
         if header.startswith("[ERROR] Empty articles"):
@@ -1447,38 +1515,42 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
                         if "Entry tiles/" not in b
                         or not b.endswith(".pbf is empty")]
             if not non_tile:
-                return  # all empties were ocean tiles — skip block
+                return
             real_blocks.append((header, non_tile))
             return
-        # Invalid internal links: drop the block when every child line
-        # matches one of the known MapLibre source/layer IDs that
-        # zimcheck mistakes for an href.
         if header.startswith("[ERROR] Invalid internal links"):
-            real_lines = [b for b in body
-                          if not any(fp in b for fp in
-                                     _ZIMCHECK_KNOWN_FALSE_POSITIVE_LINKS)]
-            # Any child line that isn't part of a known false-positive
-            # link block survives — and so does the header.
-            real_links = [b for b in real_lines
-                          if b.startswith("- ")]
-            if not real_links:
-                return  # only false positives in this block
-            real_blocks.append((header, real_lines))
+            sub_blocks = _classify_invalid_links_subblocks(body)
+            real_subs = [sb for sb in sub_blocks
+                         if not _is_subblock_false_positive(sb)]
+            if not real_subs:
+                return
+            # Surface only the unrecognized sub-blocks (cap to first 5
+            # to keep the validator output digestible).
+            surface_lines = []
+            for sb in real_subs[:5]:
+                surface_lines.extend(sb["link_lines"][:3])
+                if sb["context"]:
+                    surface_lines.append(sb["context"])
+            real_blocks.append((header, surface_lines))
             return
-        # Unknown error category — keep, surface to operator.
         real_blocks.append((header, body))
+
     for line in out.splitlines():
-        if line.startswith("[ERROR]"):
+        is_marker = (line.startswith("[ERROR]")
+                     or line.startswith("[INFO]")
+                     or line.startswith("[WARNING]"))
+        if is_marker:
             _maybe_keep(cur_header, cur_body)
-            cur_header = line
+            cur_header = line if line.startswith("[ERROR]") else None
             cur_body = []
-        elif cur_header is not None and (line.startswith(" ")
-                                          or line.startswith("- ")):
-            cur_body.append(line.strip())
-        else:
-            _maybe_keep(cur_header, cur_body)
-            cur_header = None
-            cur_body = []
+        elif cur_header is not None:
+            # Capture every non-marker line under the current [ERROR]
+            # header. This includes sub-block decorations
+            # ("  The following links:"), per-link "- foo" entries,
+            # and parenthetical "(target) were not found in article
+            # source" terminators. The filter logic uses all of these
+            # to recognize false-positive sub-blocks.
+            cur_body.append(line)
     _maybe_keep(cur_header, cur_body)
     if real_blocks:
         # Show first 3 headers + a child count.
