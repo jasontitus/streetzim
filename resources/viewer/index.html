@@ -633,6 +633,14 @@
 (function() {
   var el = document.getElementById('viewer-build-stamp');
   if (!el) return;
+  // /drive/build-info.js only exists on the PWA origin. Inside Kiwix the
+  // viewer loads from zim:// (or content://), so the fetch would 404 and
+  // log noise to the console. Hide the widget entirely off-PWA.
+  var proto = window.location.protocol;
+  if (proto !== 'http:' && proto !== 'https:') {
+    el.style.display = 'none';
+    return;
+  }
   fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
     .then(function(r) { return r.ok ? r.text() : ''; })
     .then(function(src) {
@@ -1067,64 +1075,71 @@ fetchConfig(1)
         satelliteAdded = true;
       }
 
+      // Current MapLibre fires an `error` *event* (not a throw) when
+      // setPaintProperty / setLayoutProperty hits a non-existent layer,
+      // so try/catch can't suppress it. Always gate on map.getLayer(id).
+      function setLayout(id, k, v) {
+        if (map.getLayer(id)) map.setLayoutProperty(id, k, v);
+      }
+      function setPaint(id, k, v) {
+        if (map.getLayer(id)) map.setPaintProperty(id, k, v);
+      }
+
       function showSatellite() {
         addSatelliteLayer();
-        map.setLayoutProperty('satellite-layer', 'visibility', 'visible');
-        map.setPaintProperty('satellite-layer', 'raster-opacity', 1);
+        setLayout('satellite-layer', 'visibility', 'visible');
+        setPaint('satellite-layer', 'raster-opacity', 1);
         hiddenInSatellite.forEach(function(id) {
-          try { map.setLayoutProperty(id, 'visibility', 'none'); } catch(e) {}
+          setLayout(id, 'visibility', 'none');
         });
         // White text with strong dark outline on all labels
         ['road-label','water-label','place-city','place-town','place-village',
-         'place-hamlet','place-suburb','poi-label'].forEach(function(id) {
-          try {
-            map.setPaintProperty(id, 'text-color', '#fff');
-            map.setPaintProperty(id, 'text-halo-color', 'rgba(0,0,0,0.85)');
-            map.setPaintProperty(id, 'text-halo-width', 2);
-          } catch(e) {}
+         'place-suburb','poi-label'].forEach(function(id) {
+          setPaint(id, 'text-color', '#fff');
+          setPaint(id, 'text-halo-color', 'rgba(0,0,0,0.85)');
+          setPaint(id, 'text-halo-width', 2);
         });
-        try { map.setPaintProperty('water-label', 'text-color', '#aad3df'); } catch(e) {}
+        setPaint('water-label', 'text-color', '#aad3df');
         ['road-motorway','road-trunk','road-primary','road-secondary',
          'road-tertiary','road-minor','road-path'].forEach(function(id) {
-          try { map.setPaintProperty(id, 'line-color', 'rgba(255,255,255,0.6)'); } catch(e) {}
+          setPaint(id, 'line-color', 'rgba(255,255,255,0.6)');
         });
         ['road-motorway-casing','road-trunk-casing','road-primary-casing',
          'road-secondary-casing'].forEach(function(id) {
-          try { map.setLayoutProperty(id, 'visibility', 'none'); } catch(e) {}
+          setLayout(id, 'visibility', 'none');
         });
         map.triggerRepaint();
       }
 
       function hideSatellite() {
         if (satelliteAdded) {
-          map.setLayoutProperty('satellite-layer', 'visibility', 'none');
+          setLayout('satellite-layer', 'visibility', 'none');
         }
         hiddenInSatellite.forEach(function(id) {
-          try { map.setLayoutProperty(id, 'visibility', 'visible'); } catch(e) {}
+          setLayout(id, 'visibility', 'visible');
         });
-        // Restore label colors and halos (with wikidata blue tint)
+        // Restore label colors and halos (with wikidata blue tint).
+        // Only includes layer IDs that actually exist in the style —
+        // place-hamlet / place-neighbourhood don't, and styling them
+        // would fire console errors on every satellite toggle.
         var labelDefaults = {
           'road-label': {c: '#555', hc: 'rgba(255,255,255,0.8)', hw: 1.5},
           'water-label': {c: ['case',['has','wikidata'],'#3a60a0','#5d80b4'], hc: 'rgba(255,255,255,0.7)', hw: 1},
           'place-city': {c: ['case',['has','wikidata'],'#2a4a7a','#333'], hc: 'rgba(255,255,255,0.8)', hw: 1.5},
           'place-town': {c: ['case',['has','wikidata'],'#3a5a8a','#444'], hc: 'rgba(255,255,255,0.7)', hw: 1.2},
           'place-village': {c: ['case',['has','wikidata'],'#3a5a8a','#555'], hc: 'rgba(255,255,255,0.8)', hw: 1.5},
-          'place-hamlet': {c: '#666', hc: 'rgba(255,255,255,0.8)', hw: 1.2},
           'place-suburb': {c: ['case',['has','wikidata'],'#4a6fa5','#666'], hc: 'rgba(255,255,255,0.8)', hw: 1},
-          'place-neighbourhood': {c: '#777', hc: 'rgba(255,255,255,0.7)', hw: 1},
           'poi-label': {c: ['case',['has','wikidata'],'#4a6fa5','#666'], hc: 'rgba(255,255,255,0.7)', hw: 1}
         };
         Object.keys(labelDefaults).forEach(function(id) {
           var d = labelDefaults[id];
-          try {
-            map.setPaintProperty(id, 'text-color', d.c);
-            map.setPaintProperty(id, 'text-halo-color', d.hc);
-            map.setPaintProperty(id, 'text-halo-width', d.hw);
-          } catch(e) {}
+          setPaint(id, 'text-color', d.c);
+          setPaint(id, 'text-halo-color', d.hc);
+          setPaint(id, 'text-halo-width', d.hw);
         });
         ['road-motorway-casing','road-trunk-casing','road-primary-casing',
          'road-secondary-casing'].forEach(function(id) {
-          try { map.setLayoutProperty(id, 'visibility', 'visible'); } catch(e) {}
+          setLayout(id, 'visibility', 'visible');
         });
         var roadColors = {
           'road-motorway': '#ffa35c', 'road-trunk': '#ffd592',
@@ -1132,7 +1147,7 @@ fetchConfig(1)
           'road-tertiary': '#fff', 'road-minor': '#fff', 'road-path': '#ccc'
         };
         Object.keys(roadColors).forEach(function(id) {
-          try { map.setPaintProperty(id, 'line-color', roadColors[id]); } catch(e2) {}
+          setPaint(id, 'line-color', roadColors[id]);
         });
       }
 
