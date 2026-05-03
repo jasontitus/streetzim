@@ -2878,6 +2878,12 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
         osmium.index.create_map(f"sparse_file_array,{node_loc_path}"))
     loc_handler.ignore_errors()
     osmium.apply(source_pbf, loc_handler, p2)
+    # Drop loc_handler (and its libosmium index) BEFORE the post-Pass-2
+    # numpy work, so the kernel can release the ~60 GB sparse_file_array
+    # mmap. Without this, the file pages squat in RssFile even after
+    # os.remove(), starving the argsort/fancy-indexing ops that follow
+    # of cache and forcing them to thrash through swap.
+    del loc_handler
     try:
         os.remove(node_loc_path)
     except OSError:

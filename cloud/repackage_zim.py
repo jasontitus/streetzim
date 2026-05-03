@@ -207,22 +207,34 @@ def _emit_split_search(creator, manifest: dict, hot_chunks: dict[str, bytes],
           f"{len(hot_chunks)} split prefixes; threshold {threshold_mb} MB")
 
 
-def _emit_spatial_graph(creator, graph_bytes: bytes, *,
+def _emit_spatial_graph(creator, graph_path: str | Path, *,
                         cell_scale: int,
-                        passthrough_cls) -> None:
-    """Convert a SZRG v4/v5 buffer into the spatial SZCI + SZRC layout
-    and add all pieces as ZIM entries. Routing reader decides which cells
-    to load at route time; only the index is eager."""
+                        passthrough_cls,
+                        file_passthrough_cls,
+                        spill_dir: str | Path) -> None:
+    """Convert a spilled SZRG v4/v5 file into the spatial SZCI + SZRC layout
+    and add all pieces as ZIM entries.
+
+    Streaming throughout: ``graph_path`` is the on-disk routing graph
+    captured during passthrough (avoids the 8.6 GB bytes object), and
+    ``spill_dir`` receives the per-cell SZRC files as they're built.
+    Cells are then added to the ZIM via ``file_passthrough_cls`` (libzim
+    ``FileProvider``) so libzim streams the bytes off disk without ever
+    materializing them in the producer queue.
+
+    Memory profile on continent-scale (US): ~12 GB peak vs ~80 GB for
+    the legacy in-memory path.
+    """
     # Import lazily so this module stays usable in lightweight contexts
     # that don't need the spatial chunker (e.g., viewer-only repackage).
     import sys
     repo_root = Path(__file__).resolve().parent.parent
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    from tests.szrg_reader import parse_szrg_bytes
+    from tests.szrg_reader import load_from_file
     from tests.szrg_spatial import build_spatial
 
-    g = parse_szrg_bytes(graph_bytes)
+    g = load_from_file(graph_path)
     # v5 in-memory parse yielded has_geoms=False; if the source was v5
     # split we'd need to attach the SZGM companion first. Not supported
     # in the repackage path yet — fail loud so the user knows.
@@ -232,13 +244,22 @@ def _emit_spatial_graph(creator, graph_bytes: bytes, *,
             "companion too; pass a v4 source graph instead"
         )
 
-    idx_bytes, cells, meta = build_spatial(g, cell_scale=cell_scale)
+    spill_dir = Path(spill_dir)
+    idx_bytes, cell_paths, meta = build_spatial(
+        g, cell_scale=cell_scale, output_dir=spill_dir,
+    )
+    # Free the parsed graph eagerly — we still hold idx_bytes (small) and
+    # the on-disk cell files. The numpy arrays under `g` reference the
+    # source bytes via views; dropping `g` lets the source bytes go too.
+    del g
+
     idx_mb = len(idx_bytes) / 1e6
-    cell_sizes = [len(b) / 1e6 for b in cells.values()]
-    total_cell_mb = sum(cell_sizes)
+    cell_sizes_mb = [os.path.getsize(p) / 1e6 for p in cell_paths.values()]
+    total_cell_mb = sum(cell_sizes_mb)
+    max_cell_mb = max(cell_sizes_mb) if cell_sizes_mb else 0.0
     print(f"  → spatial (cell_scale={cell_scale}): index {idx_mb:.1f} MB + "
           f"{meta['num_cells']} cells totalling {total_cell_mb:.1f} MB "
-          f"(max cell {max(cell_sizes):.1f} MB)")
+          f"(max cell {max_cell_mb:.1f} MB) — streamed via {spill_dir}")
 
     # Index — eager, compress when small enough for fzstd.
     compress_idx = idx_mb < 200
@@ -251,15 +272,17 @@ def _emit_spatial_graph(creator, graph_bytes: bytes, *,
     ))
 
     # Each cell — compress individually; cells are smaller than the
-    # monolithic graph so fzstd handles them comfortably.
-    for cid in sorted(cells.keys()):
-        data = cells[cid]
-        compress_cell = len(data) < 200 * 1024 * 1024
-        creator.add_item(passthrough_cls(
+    # monolithic graph so fzstd handles them comfortably. Add via
+    # FileProvider so libzim reads from disk, not RAM.
+    for cid in sorted(cell_paths.keys()):
+        path = cell_paths[cid]
+        size = os.path.getsize(path)
+        compress_cell = size < 200 * 1024 * 1024
+        creator.add_item(file_passthrough_cls(
             f"routing-data/graph-cell-{cid:05d}.bin",
             f"Routing Graph Cell {cid}",
             "application/octet-stream",
-            data,
+            path,
             compress=compress_cell,
         ))
 
@@ -355,7 +378,10 @@ def repackage(src_path: str, dst_path: str,
               drop_llm_bundle: bool = True,
               chip_split_threshold_mb: int = 10) -> int:
     from libzim.reader import Archive
-    from libzim.writer import Creator, Item, StringProvider, Hint
+    from libzim.writer import (
+        Creator, Item, StringProvider, FileProvider, Hint,
+        ContentProvider, Blob,
+    )
 
     src = Archive(src_path)
     print(f"  Source:   {src_path} ({os.path.getsize(src_path)/1024/1024:.1f} MB)")
@@ -394,6 +420,79 @@ def repackage(src_path: str, dst_path: str,
         def get_title(self):     return self._title
         def get_mimetype(self):  return self._mimetype
         def get_contentprovider(self): return StringProvider(self._data)
+        def get_hints(self):
+            return {Hint.FRONT_ARTICLE: False, Hint.COMPRESS: self._compress}
+
+    class FilePathItem(Item):
+        """An item whose content lives on disk — libzim ``FileProvider``
+        reads bytes lazily during cluster compression, so the producer
+        side never holds the payload in memory. Used for the spatial
+        cell files (~hundreds of MB each on continent-scale graphs)."""
+        def __init__(self, path, title, mimetype, file_path, compress=True):
+            super().__init__()
+            self._path = path
+            self._title = title
+            self._mimetype = mimetype
+            self._file_path = str(file_path)
+            self._compress = compress
+
+        def get_path(self):      return self._path
+        def get_title(self):     return self._title
+        def get_mimetype(self):  return self._mimetype
+        def get_contentprovider(self): return FileProvider(self._file_path)
+        def get_hints(self):
+            return {Hint.FRONT_ARTICLE: False, Hint.COMPRESS: self._compress}
+
+    class LazyZimEntryProvider(ContentProvider):
+        """Reads an entry's bytes from the source archive only when libzim
+        invokes ``gen_blob()`` during cluster compression. The producer-
+        side queue therefore holds just (src, path, size) for each entry
+        instead of the bytes — for a 49 GB US source with 30 M+ entries
+        that drops queue RSS from ~80 GB to a few hundred MB.
+
+        Source Archive must outlive the libzim Creator's __exit__ (it
+        does — ``src`` is a function-scope local that stays alive until
+        ``repackage`` returns).
+
+        Note: implements ``gen_blob`` (generator), not ``feed``. The
+        Cython binding's ``feed`` override doesn't dispatch to Python
+        subclasses cleanly and segfaults on ``__exit__`` when called
+        from compression worker threads."""
+        def __init__(self, src_arc, entry_path, size):
+            super().__init__()
+            self._src = src_arc
+            self._path = entry_path
+            self._size = size
+
+        def get_size(self):
+            return self._size
+
+        def gen_blob(self):
+            entry = self._src.get_entry_by_path(self._path)
+            yield Blob(bytes(entry.get_item().content))
+
+    class LazyPassthroughItem(Item):
+        """Passthrough item that defers reading the source bytes to
+        ``feed()`` time via :class:`LazyZimEntryProvider`. Use for any
+        entry whose content is being copied byte-for-byte; switch to
+        :class:`PassthroughItem` only when the bytes have to be
+        modified before emit (viewer swap, search-link rewrite,
+        terrain-tile refresh)."""
+        def __init__(self, src_arc, path, title, mimetype, size,
+                     compress=True):
+            super().__init__()
+            self._src = src_arc
+            self._path = path
+            self._title = title
+            self._mimetype = mimetype
+            self._size = size
+            self._compress = compress
+
+        def get_path(self):      return self._path
+        def get_title(self):     return self._title
+        def get_mimetype(self):  return self._mimetype
+        def get_contentprovider(self):
+            return LazyZimEntryProvider(self._src, self._path, self._size)
         def get_hints(self):
             return {Hint.FRONT_ARTICLE: False, Hint.COMPRESS: self._compress}
 
@@ -468,6 +567,23 @@ def repackage(src_path: str, dst_path: str,
                      or unchunk_graph)
     captured_graph_bytes: bytes | None = None
 
+    # Continent-scale graphs (US: 8.6 GB) blow past 100 GB RSS when held
+    # as Python bytes through the libzim producer queue + spatial chunker.
+    # Spill the captured graph to a tempfile and stream cells through
+    # libzim FileProvider; only the spatial path needs this today (other
+    # emit paths see <2 GB graphs in practice). spill_dir auto-cleans at
+    # the bottom of the function once libzim has consumed the cells.
+    needs_disk_spill = upgrade_graph and spatial_chunk_scale > 0
+    spill_dir: Path | None = None
+    graph_spill_path: Path | None = None
+    graph_chunk_spill_paths: dict[str, Path] | None = None
+    if needs_disk_spill:
+        import tempfile as _tempfile
+        spill_dir = Path(_tempfile.mkdtemp(prefix="repackage_spill_"))
+        graph_spill_path = spill_dir / "graph.bin"
+        graph_chunk_spill_paths = {}
+        print(f"  spatial-chunk spill dir: {spill_dir}")
+
     # Hot-chunk splitting: if a search-data/*.json exceeds the threshold,
     # sub-split by hashing record's first-word-prefix into N buckets.
     # We capture the original chunks up-front, rewrite manifest, then
@@ -510,7 +626,18 @@ def repackage(src_path: str, dst_path: str,
     captured_graph_chunks: dict | None = None
     with creator as c:
         _tick("setup")
-        # Passthrough all entries — Archive iterates titles + paths.
+        # Passthrough all entries. The bulk of entries (tiles, search-
+        # data chunks, wikidata, terrain when not refreshing) pass
+        # through byte-for-byte; we route those to LazyPassthroughItem
+        # so libzim reads bytes from the source archive only at cluster-
+        # compression time. Without this the producer queue holds the
+        # bytes for every queued entry and continent-scale sources
+        # (US: 30 M+ entries) push RSS past 80 GB.
+        #
+        # Eager PassthroughItem is still used for the small subset of
+        # entries we actively rewrite (viewer swap, terrain refresh,
+        # search-link fix) and for capture branches that read content
+        # for spill / hot-chunk-split.
         for i in range(src.entry_count):
             entry = src._get_entry_by_id(i) if hasattr(src, "_get_entry_by_id") else src.get_entry_by_path_id(i)
             # Redirect entries carry no content; we recreate them via Creator.add_redirection
@@ -523,13 +650,18 @@ def repackage(src_path: str, dst_path: str,
                 continue
             item = entry.get_item()
             path = entry.path
-            content = bytes(item.content)
             mime = item.mimetype
+            size = item.size  # cheap — no content read
             title = entry.title or ""
             compress = True
+            # Bytes only when a modifier or capture branch needs them.
+            # Set to a non-None value to switch this entry to the eager
+            # PassthroughItem path at the end of the loop.
+            modified_content: bytes | None = None
+
             # Swap viewer HTML for the current version.
             if swap_viewer and path in replacements:
-                content = replacements[path]
+                modified_content = replacements[path]
                 swapped += 1
             # Optionally swap terrain tiles for the filesystem version.
             # Used after ``cloud/fix_stale_terrain_tiles.py`` regenerates
@@ -549,13 +681,16 @@ def repackage(src_path: str, dst_path: str,
                     src_mtime = os.path.getmtime(src_path)
                     if disk_mtime > src_mtime:
                         with open(disk, "rb") as fh:
-                            content = fh.read()
+                            modified_content = fh.read()
+                        size = len(modified_content)
                         refreshed_terrain += 1
                 except (OSError, FileNotFoundError):
                     pass
             # Capture + defer the routing graph when we're upgrading
             # layout — we'll emit split / chunked entries after the
-            # passthrough pass so they land contiguously.
+            # passthrough pass so they land contiguously. When spilling
+            # to disk (needs_disk_spill), the bytes go straight to
+            # tempfiles so they're not held in the producer's RSS.
             if upgrade_graph and path in (
                 "routing-data/graph.bin",
                 "routing-data/graph-geoms.bin",
@@ -563,7 +698,13 @@ def repackage(src_path: str, dst_path: str,
                 "routing-data/graph-geoms-chunk-manifest.json",
             ):
                 if path == "routing-data/graph.bin":
-                    captured_graph_bytes = content
+                    if needs_disk_spill:
+                        # Stream-copy bytes from the source archive into
+                        # the spill file without keeping the buffer alive.
+                        with open(graph_spill_path, "wb") as gf:
+                            gf.write(bytes(item.content))
+                    else:
+                        captured_graph_bytes = bytes(item.content)
                 skipped_routing += 1
                 continue
             if upgrade_graph and (
@@ -572,17 +713,24 @@ def repackage(src_path: str, dst_path: str,
                 or path.startswith("routing-data/graph-cell-")
                 or path == "routing-data/graph-cells-index.bin"
             ):
-                # Accumulate source chunks into captured_graph_bytes if
-                # the source is already chunked (no graph.bin entry).
-                # Without this, the later _emit_upgraded_graph path sees
-                # captured_graph_bytes=None and prints a warning — and
-                # we SHIP a ZIM with no routing. Caught by validator
-                # gate, but only after wasting a full repackage.
+                # Accumulate source chunks for later reassembly if the
+                # source shipped chunked-only (no graph.bin entry). Each
+                # chunk is a contiguous byte range of the original graph
+                # so concatenation is byte-exact. Without this the later
+                # spatial/upgrade path sees a None graph and SHIPS a ZIM
+                # with no routing — caught by validator but only after
+                # wasting a full repackage.
                 if path.startswith("routing-data/graph-chunk-") and not \
                         path.startswith("routing-data/graph-chunk-manifest"):
-                    if captured_graph_chunks is None:
-                        captured_graph_chunks = {}
-                    captured_graph_chunks[path] = content
+                    if needs_disk_spill:
+                        chunk_spill = spill_dir / f"src-{path.split('/')[-1]}"
+                        with open(chunk_spill, "wb") as cf:
+                            cf.write(bytes(item.content))
+                        graph_chunk_spill_paths[path] = chunk_spill
+                    else:
+                        if captured_graph_chunks is None:
+                            captured_graph_chunks = {}
+                        captured_graph_chunks[path] = bytes(item.content)
                 skipped_routing += 1
                 continue
             # Hot-chunk splitting: capture the search-data manifest and
@@ -590,7 +738,8 @@ def repackage(src_path: str, dst_path: str,
             # chunks land as sub-files at the end.
             if split_search and path == "search-data/manifest.json":
                 try:
-                    captured_search_manifest = json.loads(content.decode("utf-8"))
+                    captured_search_manifest = json.loads(
+                        bytes(item.content).decode("utf-8"))
                 except Exception as ex:
                     print(f"  warning: couldn't parse search manifest: {ex}")
                     captured_search_manifest = None
@@ -604,9 +753,9 @@ def repackage(src_path: str, dst_path: str,
             if (split_search and path.startswith("search-data/")
                     and path.endswith(".json")
                     and path != "search-data/manifest.json"
-                    and len(content) > hot_split_mb * 1024 * 1024):
+                    and size > hot_split_mb * 1024 * 1024):
                 prefix = path[len("search-data/"):-len(".json")]
-                captured_search_chunks[prefix] = content
+                captured_search_chunks[prefix] = bytes(item.content)
                 replaced_search_paths.add(path)
                 continue
             # LLM-bundle drop: addr.json / poi.json / street.json hold
@@ -649,13 +798,15 @@ def repackage(src_path: str, dst_path: str,
                 # controlled name field can't break out of the
                 # rewriter and so we don't accidentally touch
                 # legitimate `index.html` strings inside <code> blocks.
-                fixed = (content
+                src_bytes = bytes(item.content)
+                fixed = (src_bytes
                     .replace(b'href="index.html#dest=',
                              b'href="../index.html#dest=')
                     .replace(b'href="index.html#map=',
                              b'href="../index.html#map='))
-                if fixed != content:
-                    content = fixed
+                if fixed != src_bytes:
+                    modified_content = fixed
+                    size = len(modified_content)
                     rewritten_search += 1
             # Mark the routing graph uncompressed for PWA-fzstd compat
             # (skipped when we're rewriting the graph anyway, above).
@@ -676,19 +827,45 @@ def repackage(src_path: str, dst_path: str,
             if (path == "routing-data/graph-cells-index.bin"
                     or (path.startswith("routing-data/graph-cell-")
                         and path.endswith(".bin"))):
-                if len(content) >= 200 * 1024 * 1024:
+                if size >= 200 * 1024 * 1024:
                     compress = False
                     raw_clusters += 1
-            c.add_item(PassthroughItem(path, title, mime, content, compress=compress))
+            if modified_content is not None:
+                c.add_item(PassthroughItem(
+                    path, title, mime, modified_content, compress=compress))
+            else:
+                c.add_item(LazyPassthroughItem(
+                    src, path, title, mime, size, compress=compress))
             kept += 1
             if kept % 50_000 == 0:
                 print(f"    copied {kept} entries...")
 
         # If source shipped chunked graph (no graph.bin), reassemble
-        # the chunks into a single buffer so the re-emit path below
+        # the chunks into a single buffer/file so the re-emit path below
         # has something to work with. Source chunks are byte-ranges
         # of the original graph, so concatenation is byte-exact.
-        if (upgrade_graph and captured_graph_bytes is None
+        if upgrade_graph and needs_disk_spill:
+            if not graph_spill_path.exists() and graph_chunk_spill_paths:
+                # Stream-concat the chunk files into graph_spill_path
+                # without ever holding the full graph in memory.
+                with open(graph_spill_path, "wb") as out:
+                    for k in sorted(graph_chunk_spill_paths):
+                        with open(graph_chunk_spill_paths[k], "rb") as src_chunk:
+                            while True:
+                                buf = src_chunk.read(64 * 1024 * 1024)
+                                if not buf:
+                                    break
+                                out.write(buf)
+                # Source-chunk spill files no longer needed.
+                for chunk_path in graph_chunk_spill_paths.values():
+                    try:
+                        chunk_path.unlink()
+                    except OSError:
+                        pass
+                print(f"  reassembled graph.bin (on disk) from "
+                      f"{len(graph_chunk_spill_paths)} source chunks "
+                      f"({os.path.getsize(graph_spill_path)/1024/1024:.1f} MB)")
+        elif (upgrade_graph and captured_graph_bytes is None
                 and captured_graph_chunks):
             parts = [captured_graph_chunks[k]
                      for k in sorted(captured_graph_chunks)]
@@ -698,7 +875,12 @@ def repackage(src_path: str, dst_path: str,
 
         _tick("passthrough")
         # Re-emit the routing graph in the requested layout.
-        if upgrade_graph and captured_graph_bytes is None:
+        graph_missing = (
+            (needs_disk_spill and (graph_spill_path is None
+                                   or not graph_spill_path.exists()))
+            or (not needs_disk_spill and captured_graph_bytes is None)
+        )
+        if upgrade_graph and graph_missing:
             print("  warning: no routing-data/graph.bin in source — "
                   "nothing to upgrade. Output will have no routing.")
         elif upgrade_graph and unchunk_graph and not split_graph \
@@ -720,10 +902,17 @@ def repackage(src_path: str, dst_path: str,
             print(f"  emitted monolithic graph.bin ({size_mb:.1f} MB, "
                   f"{'compressed' if compress else 'raw'})")
         elif upgrade_graph and spatial_chunk_scale > 0:
+            # Streaming spatial path — graph is on disk, cells are written
+            # to disk as they're built, libzim FileProvider reads them
+            # lazily during cluster compression. Peak RSS bounded ~12 GB
+            # for US-scale (was ~80 GB with the legacy in-memory path).
+            cells_dir = spill_dir / "cells"
             _emit_spatial_graph(
-                c, captured_graph_bytes,
+                c, graph_spill_path,
                 cell_scale=spatial_chunk_scale,
                 passthrough_cls=PassthroughItem,
+                file_passthrough_cls=FilePathItem,
+                spill_dir=cells_dir,
             )
         elif upgrade_graph:
             _emit_upgraded_graph(
@@ -948,6 +1137,18 @@ def repackage(src_path: str, dst_path: str,
         print(f"    {sect:<14} {secs:>7.1f} s  ({pct:>5.1f}%)")
     print(f"    {'total':<14} {total:>7.1f} s  (100.0%)")
     print(f"  output: {dst_path} ({size_mb:.1f} MB)")
+
+    # Cleanup the spatial-chunk spill dir now that libzim has consumed
+    # everything (`with creator as c:` exited above, all FileProvider
+    # reads are done).
+    if spill_dir is not None:
+        import shutil as _shutil
+        try:
+            _shutil.rmtree(spill_dir, ignore_errors=True)
+            print(f"  cleaned spill dir: {spill_dir}")
+        except OSError:
+            pass
+
     return 0
 
 
