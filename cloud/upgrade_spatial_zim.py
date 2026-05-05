@@ -152,10 +152,18 @@ def _rewrite_szci_v1_to_v2(idx_v1_bytes: bytes,
     if idx_v1_bytes[:4] != SZCI_MAGIC:
         raise ValueError("source index is not SZCI")
     v = struct.unpack_from("<I", idx_v1_bytes, 4)[0]
+    if v == SZCI_VERSION_SHARDED:
+        # Source is already v2. Return its bytes unchanged and signal
+        # "no shards to rewrite" — the caller still copies the existing
+        # nodes-scaled-NNN.bin entries via LazyPassthrough. Useful when
+        # the upgrader is being invoked solely for the overture-sources
+        # injection or another non-routing fix on a ZIM that already
+        # has the v2 layout applied.
+        return idx_v1_bytes, []
     if v != SZCI_VERSION_INLINE:
         raise ValueError(
             f"source index is SZCI v{v}, expected v{SZCI_VERSION_INLINE} "
-            f"(this upgrader rewrites v1 → v2 only)"
+            f"or v{SZCI_VERSION_SHARDED} (got v{v})"
         )
     (_v, num_nodes, num_edges, num_names, names_bytes, num_cells,
      _cs_unsigned) = struct.unpack_from("<7I", idx_v1_bytes, 4)
@@ -199,9 +207,102 @@ def _rewrite_szci_v1_to_v2(idx_v1_bytes: bytes,
 # --- main upgrade pass ------------------------------------------------------
 
 
+def _detect_overture_in_search_data(src: Archive, *, sample_chunks: int = 16,
+                                    sample_records: int | None = None) -> list[str]:
+    """Sample search-data chunks in the source ZIM for ``"source":"overture"``
+    markers. Returns inferred theme list (subset of ``["addresses","places"]``).
+
+    Used by the salvage-build retrofit: a build run with
+    ``--skip-address-extract`` ships search records sourced from a prior
+    Overture merge but never writes ``overture-sources.json`` and never
+    sets ``streetzim-meta.json:hasOvertureAddresses``. zimcheck flags the
+    static link in ``index.html`` even though the runtime conditional
+    keeps it hidden — and downstream users miss the Overture credit.
+    Sampling the search chunks lets the upgrader auto-correct both.
+    """
+    themes: set[str] = set()
+    chunks_seen = 0
+    for i in range(src.entry_count):
+        if chunks_seen >= sample_chunks:
+            break
+        try:
+            e = src._get_entry_by_id(i)
+            p = e.path
+        except Exception:
+            continue
+        if not (p.startswith("search-data/") and p.endswith(".json")):
+            continue
+        if p == "search-data/manifest.json":
+            continue
+        chunks_seen += 1
+        try:
+            records = json.loads(bytes(e.get_item().content).decode("utf-8"))
+        except Exception:
+            continue
+        # Search-data chunks use abbreviated keys (``t`` = type, ``s`` =
+        # subtype, ``a``/``o`` = lat/lon, ``cat``, ``source``). The chunker
+        # in create_osm_zim.py shortens keys to shrink chunk size. The
+        # salvage-cache jsonl uses long-form keys; sample both so this
+        # function works on either input. Records are typically sorted
+        # alphabetically inside a chunk, so overture POIs (often
+        # mid-alphabet) won't appear in the first 200; scan the whole
+        # chunk by default and let the early-exit short-circuit save time.
+        record_iter = (records[:sample_records]
+                       if sample_records is not None else records)
+        for r in record_iter:
+            if not isinstance(r, dict):
+                continue
+            if r.get("source") != "overture":
+                continue
+            t = r.get("t") or r.get("type")
+            if t == "poi":
+                themes.add("places")
+            if (r.get("addr") or r.get("housenumber") or r.get("street")
+                    or r.get("h")):
+                themes.add("addresses")
+            if "places" in themes and "addresses" in themes:
+                return sorted(themes)
+    return sorted(themes)
+
+
+def _build_overture_stub(themes: list[str]) -> bytes:
+    """Build the placeholder overture-sources.json content for salvage
+    rebuilds where the upstream dataset list isn't retained."""
+    if themes == ["addresses"]:
+        themes_phrase = ("Address data is derived from the Overture "
+                         "addresses theme")
+    elif themes == ["places"]:
+        themes_phrase = ("Place info (POIs, websites, phones, socials, "
+                         "brand, categories) is derived from the Overture "
+                         "places theme")
+    else:
+        themes_phrase = ("Address + place info (POIs, websites, phones, "
+                         "socials, brand, categories) are derived from the "
+                         "Overture addresses + places themes")
+    doc = {
+        "release": "2026-04-15.0",
+        "themes": themes,
+        "attribution": (
+            "© OpenStreetMap contributors and Overture Maps "
+            f"Foundation (overturemaps.org). {themes_phrase}; "
+            "see canonicalCredits URL for the upstream dataset list."
+        ),
+        "datasets": [],
+        "_note": ("Salvage rebuild — upstream dataset list not retained "
+                  "from prior search cache. The data is present in this "
+                  "ZIM's search index, but the per-feed list lives in the "
+                  "original Overture parquet metadata which the salvage "
+                  "cache didn't preserve."),
+        "canonicalCredits": "https://docs.overturemaps.org/attribution/",
+    }
+    return json.dumps(doc, separators=(",", ":"),
+                      ensure_ascii=False).encode("utf-8")
+
+
 def upgrade(src_path: str, dst_path: str, *,
             split_hot_search_chunks_mb: int = 10,
             keep_spill: bool = False,
+            inject_overture_sources: bool = False,
             ) -> None:
     src_path = str(src_path)
     dst_path = str(dst_path)
@@ -268,6 +369,48 @@ def upgrade(src_path: str, dst_path: str, *,
           f"will resplit {len(captured_search_chunks)} oversized "
           f"(threshold {split_hot_search_chunks_mb} MB) "
           f"in {time.time()-t0:.1f}s", flush=True)
+
+    # ---- Phase 2b: detect overture content for stub injection -------------
+    overture_stub_themes: list[str] = []
+    overture_stub_bytes: bytes | None = None
+    patched_meta_bytes: bytes | None = None
+    has_existing_overture_sources = False
+    try:
+        src.get_entry_by_path("overture-sources.json")
+        has_existing_overture_sources = True
+    except Exception:
+        pass
+    if inject_overture_sources and not has_existing_overture_sources:
+        t0 = time.time()
+        overture_stub_themes = _detect_overture_in_search_data(src)
+        if overture_stub_themes:
+            overture_stub_bytes = _build_overture_stub(overture_stub_themes)
+            print(f"  overture content detected (themes={overture_stub_themes}); "
+                  f"will inject overture-sources.json "
+                  f"({len(overture_stub_bytes)} B) and patch streetzim-meta.json "
+                  f"in {time.time()-t0:.1f}s", flush=True)
+            # Patch streetzim-meta.json: set hasOvertureAddresses=True so
+            # the viewer's runtime conditional un-hides the credits section
+            # (otherwise the JSON we just emitted would never be reachable
+            # via the static link in index.html).
+            try:
+                meta_entry = src.get_entry_by_path("streetzim-meta.json")
+                meta = json.loads(bytes(meta_entry.get_item().content)
+                                  .decode("utf-8"))
+                meta["hasOvertureAddresses"] = True
+                patched_meta_bytes = json.dumps(
+                    meta, separators=(",", ":"),
+                    ensure_ascii=False).encode("utf-8")
+                replaced_search_paths.add("streetzim-meta.json")
+            except Exception as ex:
+                print(f"  warning: could not patch streetzim-meta.json: {ex}",
+                      flush=True)
+        else:
+            print(f"  no overture content detected in sample; skipping stub "
+                  f"injection (took {time.time()-t0:.1f}s)", flush=True)
+    elif inject_overture_sources and has_existing_overture_sources:
+        print(f"  overture-sources.json already present in source; "
+              f"no injection needed", flush=True)
 
     # ---- Phase 3: emit output ZIM -----------------------------------------
     if os.path.exists(dst_path):
@@ -417,6 +560,31 @@ def upgrade(src_path: str, dst_path: str, *,
                 compress=True,
             ))
 
+        # 3d.1) Inject overture-sources.json + patched streetzim-meta.json
+        # for salvage-build retrofits where the original create_osm_zim.py
+        # run skipped both because it didn't go through the merge_overture_*
+        # code path. See _detect_overture_in_search_data above.
+        if overture_stub_bytes is not None:
+            c.add_item(PassthroughItem(
+                "overture-sources.json",
+                "Overture Dataset Credits",
+                "application/json",
+                overture_stub_bytes,
+                compress=True,
+            ))
+            print(f"  injected overture-sources.json "
+                  f"({len(overture_stub_bytes)} B)", flush=True)
+        if patched_meta_bytes is not None:
+            c.add_item(PassthroughItem(
+                "streetzim-meta.json",
+                "StreetZim Meta",
+                "application/json",
+                patched_meta_bytes,
+                compress=True,
+            ))
+            print(f"  patched streetzim-meta.json "
+                  f"(set hasOvertureAddresses=True)", flush=True)
+
         # 3e) Lazy passthrough for everything else. metadata entries,
         # the v1 cells index, and the items we re-emitted are all in
         # ``replaced_search_paths`` or are filtered out below.
@@ -485,12 +653,19 @@ def main() -> int:
                    metavar="N",
                    help="Threshold in MB for re-splitting search chunks "
                         "(default: 10)")
+    p.add_argument("--inject-overture-sources", action="store_true",
+                   help="If the source ZIM contains overture-tagged search "
+                        "records but is missing overture-sources.json, emit "
+                        "a stub credits file and set hasOvertureAddresses=True "
+                        "in streetzim-meta.json. Fixes the broken-link "
+                        "zimcheck flag on salvage-built ZIMs without rebuild.")
     p.add_argument("--keep-spill", action="store_true",
                    help="Keep the spill tmpdir for debugging")
     args = p.parse_args()
     upgrade(args.src, args.dst,
             split_hot_search_chunks_mb=args.split_hot_search_chunks_mb,
-            keep_spill=args.keep_spill)
+            keep_spill=args.keep_spill,
+            inject_overture_sources=args.inject_overture_sources)
     return 0
 
 

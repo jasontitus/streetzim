@@ -1869,6 +1869,61 @@ def _normalize_street(name):
     return " ".join(_STREET_ABBREV.get(t, t) for t in tokens)
 
 
+def _sample_overture_themes_in_cache(search_features, *,
+                                     sample_per_slice: int = 5000):
+    """Sample a search-cache jsonl for ``"source":"overture"`` markers
+    and infer themes (subset of ``["addresses","places"]``).
+
+    Used by the ``--skip-address-extract`` salvage path: the original
+    Overture merge ran on a prior build, dataset names live in the
+    Overture parquet metadata (not retained in the salvage cache), but
+    we can still detect *that* overture data is present in the cache,
+    pick the right theme labels, and emit a stub credits JSON. Without
+    this the static link in index.html → overture-sources.json stays
+    broken and zimcheck rejects the ZIM.
+
+    Reads three slices (head/middle/tail, ~``sample_per_slice`` lines
+    each) since overture features tend to cluster at one end of the
+    cache depending on the merge order.
+    """
+    if not isinstance(search_features, str) or not os.path.isfile(search_features):
+        return []
+    themes: set[str] = set()
+    try:
+        size = os.path.getsize(search_features)
+        # Head, middle, tail. ~16 MB per slice is plenty.
+        slice_offsets = [0,
+                         max(0, size // 2 - 8 * 1024 * 1024),
+                         max(0, size - 16 * 1024 * 1024)]
+        with open(search_features, "rb") as fh:
+            for off in slice_offsets:
+                if off > 0:
+                    fh.seek(off)
+                    fh.readline()  # discard partial line
+                read = 0
+                while read < sample_per_slice:
+                    line = fh.readline()
+                    if not line:
+                        break
+                    read += 1
+                    try:
+                        rec = json.loads(line)
+                    except Exception:
+                        continue
+                    if rec.get("source") != "overture":
+                        continue
+                    if rec.get("type") == "poi":
+                        themes.add("places")
+                    if (rec.get("addr") or rec.get("housenumber")
+                            or rec.get("street")):
+                        themes.add("addresses")
+                    if "places" in themes and "addresses" in themes:
+                        return ["addresses", "places"]
+    except Exception:
+        pass
+    return sorted(themes)
+
+
 def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     """Append Overture-sourced address records to the search-feed JSONL.
 
@@ -4409,6 +4464,24 @@ def create_zim(
                     " brand, categories) are derived from the Overture"
                     " addresses + places themes"
                 )
+                # Filter out the salvage sentinel — when the build ran
+                # with --skip-address-extract, overture_sources holds the
+                # marker ``__salvage_inherited__`` instead of real dataset
+                # names (the prior merge's dataset list isn't retained in
+                # the search cache). We still want to emit the JSON so the
+                # static link in index.html resolves and zimcheck doesn't
+                # flag it; the ``_note`` field below makes the situation
+                # explicit, and canonicalCredits points users at the
+                # authoritative upstream list.
+                real_datasets = [d for d in overture_sources
+                                 if not d.startswith("__")]
+                is_salvage_stub = (not real_datasets
+                                   and any(d.startswith("__") for d in overture_sources))
+                attribution_tail = (
+                    "see canonicalCredits URL for the upstream dataset list."
+                    if is_salvage_stub
+                    else "credits for each underlying dataset follow."
+                )
                 overture_doc = {
                     "release": "2026-04-15.0",
                     "themes": themes,
@@ -4416,19 +4489,32 @@ def create_zim(
                         "© OpenStreetMap contributors and Overture Maps "
                         "Foundation (overturemaps.org). "
                         f"{themes_phrase}; "
-                        "credits for each underlying dataset follow."
+                        f"{attribution_tail}"
                     ),
-                    "datasets": list(overture_sources),
+                    "datasets": real_datasets,
                     "canonicalCredits": "https://docs.overturemaps.org/attribution/",
                 }
+                if is_salvage_stub:
+                    overture_doc["_note"] = (
+                        "Salvage rebuild — upstream dataset list not "
+                        "retained from prior search cache. The data is "
+                        "present in this ZIM's search index, but the "
+                        "per-feed list lives in the original Overture "
+                        "parquet metadata which the salvage cache didn't "
+                        "preserve.")
                 creator.add_item(MapItem(
                     "overture-sources.json", "Overture Dataset Credits",
                     "application/json",
                     json.dumps(overture_doc, separators=(",", ":"),
                                ensure_ascii=False).encode("utf-8"),
                 ))
-                print(f"    Added overture-sources.json "
-                      f"({len(overture_sources)} upstream datasets)")
+                if is_salvage_stub:
+                    print(f"    Added overture-sources.json "
+                          f"(stub — salvage rebuild, upstream dataset list "
+                          f"not retained)")
+                else:
+                    print(f"    Added overture-sources.json "
+                          f"({len(real_datasets)} upstream datasets)")
 
             # Pass 3: stream xapian file -> HTML redirect pages
             print(f"    Adding {xapian_count} Xapian search pages (of {total_features} total)...", flush=True)
@@ -5035,6 +5121,35 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         print(f"    Warning: Overture places merge failed: {_e}")
                 if overture_datasets:
                     overture_sources = sorted(overture_datasets)
+                elif args.skip_address_extract:
+                    # Salvage rebuild: ``merge_overture_*`` was skipped, so
+                    # neither overture_themes nor overture_sources got
+                    # populated. But the cached search jsonl was generated
+                    # by a prior build that DID merge overture, and those
+                    # records (tagged ``"source":"overture"``) are now in
+                    # the search index of this ZIM. Without an
+                    # overture-sources.json entry, the static link in
+                    # ``index.html`` points at a missing file — zimcheck
+                    # flags it as a broken internal link, validate_zim.py
+                    # rejects the ZIM, and uploads abort. The runtime
+                    # conditional in the viewer also stays off (because
+                    # streetzim-meta:hasOvertureAddresses is False), so
+                    # users searching for Overture POIs see them but the
+                    # viewer's Sources panel doesn't credit Overture —
+                    # an attribution bug as well as a validation bug.
+                    # Sample the cache for overture markers; if found,
+                    # emit a stub credits doc that points users at the
+                    # canonical Overture credits URL for the upstream
+                    # dataset list (which the salvage cache doesn't
+                    # retain).
+                    sampled_themes = _sample_overture_themes_in_cache(
+                        search_features)
+                    if sampled_themes:
+                        overture_themes = sampled_themes
+                        overture_sources = ["__salvage_inherited__"]
+                        print(f"    [--skip-address-extract] overture content "
+                              f"detected in cache (themes={sampled_themes}); "
+                              f"will emit stub overture-sources.json", flush=True)
                 # Same PBF feeds the wiki-tag lookup so the chunker can enrich
                 # POI records with wikipedia/wikidata for offline cross-ref.
                 try:
