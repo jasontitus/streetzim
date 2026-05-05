@@ -46,6 +46,12 @@ REGIONS = [
         "description": "Turkey, Syria, Lebanon, Israel, Palestine, Jordan, Iraq, Iran, Kuwait, Saudi Arabia, Bahrain, Qatar, UAE, Oman, Yemen, and parts of Egypt, Afghanistan, and Pakistan.",
     },
     {
+        "id": "ukraine",
+        "title": "Ukraine, Moldova & Western Russia",
+        "zim_file": "osm-ukraine.zim",
+        "description": "Ukraine and Moldova in full (including Crimea), plus the western Russian frontier &mdash; Volgograd, Rostov, Sochi, Krasnodar, the Black Sea coast, and the Caucasus foothills.",
+    },
+    {
         "id": "africa",
         "title": "Africa",
         "zim_file": "osm-africa.zim",
