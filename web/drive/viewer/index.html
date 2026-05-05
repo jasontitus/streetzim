@@ -3325,13 +3325,27 @@ function initRouting(map, config) {
   // startup — contains the global nodes array, name table, and per-cell
   // metadata. Each actual cell's edges/geoms live in a separate ZIM
   // entry fetched on demand.
+  //
+  // Two layouts:
+  //   v1 — nodes_blob is INLINE in this buffer right after the header.
+  //        Header is 32 bytes (4 magic + 7 × u32). Used for small ZIMs
+  //        where total nodes_scaled fits comfortably in one entry.
+  //   v2 — nodes_blob is SHARDED into routing-data/nodes-scaled-NNN.bin
+  //        files. Header is 40 bytes (4 magic + 9 × u32, the extra two
+  //        being num_node_shards and nodes_per_shard). The continent-
+  //        scale path: ~10 M+ nodes ⇒ 80 MB+ of node data ⇒ would blow
+  //        the 200 MB per-entry cap if inline. Caller must run
+  //        loadNodeShards(idx, baseUrl) before constructing
+  //        SpatialGraph; nodesScaled is null until then.
   function parseRoutingCellsIndex(buffer) {
     var view = new DataView(buffer);
     if (view.getUint32(0, false) !== 0x53_5A_43_49 /* "SZCI" */) {
       throw new Error('Invalid cells-index magic');
     }
     var version = view.getUint32(4, true);
-    if (version !== 1) throw new Error('Unsupported SZCI version: ' + version);
+    if (version !== 1 && version !== 2) {
+      throw new Error('Unsupported SZCI version: ' + version);
+    }
     var numNodes = view.getUint32(8, true);
     var numEdges = view.getUint32(12, true);
     var numNames = view.getUint32(16, true);
@@ -3339,9 +3353,18 @@ function initRouting(map, config) {
     var numCells = view.getUint32(24, true);
     var cellScale = view.getInt32(28, true);  // signed: 1 ⇒ 1°, 10 ⇒ 0.1°
 
-    var offset = 32;
-    var nodesScaled = new Int32Array(buffer, offset, numNodes * 2);
-    offset += numNodes * 2 * 4;
+    var offset, numNodeShards = 0, nodesPerShard = 0, nodesScaled = null;
+    if (version === 1) {
+      offset = 32;
+      nodesScaled = new Int32Array(buffer, offset, numNodes * 2);
+      offset += numNodes * 2 * 4;
+    } else {
+      // v2: two extra header u32s, then NO inline nodes — fetched from
+      // routing-data/nodes-scaled-NNN.bin shards by loadNodeShards.
+      numNodeShards = view.getUint32(32, true);
+      nodesPerShard = view.getUint32(36, true);
+      offset = 40;
+    }
     // Cell metadata: num_cells × 20 bytes each
     var cellLatIdx = new Int32Array(numCells);
     var cellLonIdx = new Int32Array(numCells);
@@ -3373,14 +3396,6 @@ function initRouting(map, config) {
       return { lat: latMult, lon: lonMult };
     }
 
-    function cellForNode(nodeIdx) {
-      var latE7 = nodesScaled[nodeIdx * 2];
-      var lonE7 = nodesScaled[nodeIdx * 2 + 1];
-      var k = cellOf(latE7, lonE7);
-      var id = cellKeyToId.get(k.lat + ',' + k.lon);
-      return id === undefined ? -1 : id;
-    }
-
     function getName(nameIdx) {
       if (nameIdx <= 0 || nameIdx >= numNames) return '';
       var s = nameOffsets[nameIdx];
@@ -3389,22 +3404,69 @@ function initRouting(map, config) {
       return textDecoder.decode(namesBlob.subarray(s, e));
     }
 
-    return {
+    var idx = {
       version: version,
       numNodes: numNodes,
       numEdges: numEdges,
       numNames: numNames,
       numCells: numCells,
       cellScale: cellScale,
+      numNodeShards: numNodeShards,
+      nodesPerShard: nodesPerShard,
       nodesScaled: nodesScaled,
       cellLatIdx: cellLatIdx,
       cellLonIdx: cellLonIdx,
       cellNodeCount: cellNodeCount,
       cellEdgeCount: cellEdgeCount,
       cellGeomCount: cellGeomCount,
-      cellForNode: cellForNode,
       getName: getName,
     };
+    // cellForNode reads idx.nodesScaled at call time so it works both
+    // for v1 (set during parse) and v2 (set after shard fetch).
+    idx.cellForNode = function(nodeIdx) {
+      var ns = idx.nodesScaled;
+      if (!ns) return -1;
+      var latE7 = ns[nodeIdx * 2];
+      var lonE7 = ns[nodeIdx * 2 + 1];
+      var k = cellOf(latE7, lonE7);
+      var id = cellKeyToId.get(k.lat + ',' + k.lon);
+      return id === undefined ? -1 : id;
+    };
+    return idx;
+  }
+
+  // Fetch all SZCI v2 nodes-scaled-NNN.bin shards in parallel and
+  // assemble idx.nodesScaled. No-op for v1 (already inline). Resolves
+  // when every shard has been read into the contiguous Int32Array.
+  function loadNodeShards(idx) {
+    if (idx.version !== 2) return Promise.resolve();
+    var combined = new Int32Array(idx.numNodes * 2);
+    var pad3 = function(n) {
+      return n < 10 ? '00' + n : n < 100 ? '0' + n : '' + n;
+    };
+    var fetches = [];
+    for (var i = 0; i < idx.numNodeShards; i++) {
+      (function(shardIdx) {
+        var path = baseUrl + 'routing-data/nodes-scaled-' + pad3(shardIdx) + '.bin';
+        fetches.push(
+          fetch(path).then(function(r) {
+            if (!r.ok || r.headers.get('X-Streetzim-Absent') === '1') {
+              throw new Error('node shard ' + shardIdx + ' missing');
+            }
+            return r.arrayBuffer();
+          }).then(function(buf) {
+            // Each shard holds up to nodes_per_shard nodes × 8 B.
+            // Source order: shardIdx * nodes_per_shard * 2 i32 elements
+            // into the combined array.
+            var shardArr = new Int32Array(buf);
+            combined.set(shardArr, shardIdx * idx.nodesPerShard * 2);
+          })
+        );
+      })(i);
+    }
+    return Promise.all(fetches).then(function() {
+      idx.nodesScaled = combined;
+    });
   }
 
   // Parse one SZRC cell buffer — owns the edges + geoms for a subset of
@@ -3649,21 +3711,28 @@ function initRouting(map, config) {
           throw new Error('no-spatial');
         }
         var idx = parseRoutingCellsIndex(o.buf);
-        // 4 instead of 8. Tokyo→Oita on Japan measured 285 MB at 8
-        // cells (~36 MB/cell decoded, much bigger than my 8 MB
-        // estimate — Japan's 1° cells are dense). 4 keeps cell
-        // footprint near 140 MB. Re-fetches will be slow but the
-        // page survives.
-        graph = new SpatialGraph(idx, /*cacheLimit*/ 4);
-        window.__streetzim_graph = graph;
-        console.log('[streetzim] spatial graph loaded', {
-          numNodes: idx.numNodes,
-          numEdges: idx.numEdges,
-          numCells: idx.numCells,
-          cellScale: idx.cellScale,
-          indexBytes: o.buf.byteLength,
+        // SZCI v2 shards nodes_scaled into separate ZIM entries — fetch
+        // them in parallel before constructing SpatialGraph. v1 has
+        // nodes inline, so loadNodeShards is a synchronous no-op.
+        return loadNodeShards(idx).then(function() {
+          // 4 instead of 8. Tokyo→Oita on Japan measured 285 MB at 8
+          // cells (~36 MB/cell decoded, much bigger than my 8 MB
+          // estimate — Japan's 1° cells are dense). 4 keeps cell
+          // footprint near 140 MB. Re-fetches will be slow but the
+          // page survives.
+          graph = new SpatialGraph(idx, /*cacheLimit*/ 4);
+          window.__streetzim_graph = graph;
+          console.log('[streetzim] spatial graph loaded', {
+            version: idx.version,
+            numNodes: idx.numNodes,
+            numEdges: idx.numEdges,
+            numCells: idx.numCells,
+            cellScale: idx.cellScale,
+            indexBytes: o.buf.byteLength,
+            numNodeShards: idx.numNodeShards,
+          });
+          statusEl.textContent = 'Enter start and destination';
         });
-        statusEl.textContent = 'Enter start and destination';
       })
       .catch(function(_spatialErr) {
         // Fall back to monolithic / v5 split / byte-chunked layouts.

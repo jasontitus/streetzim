@@ -59,6 +59,19 @@ const ROUTE_PAIRS = {
     d: { lat: 49.2827, lon: -123.1207, label: 'Vancouver' },
     crow_km: 3360,
   },
+  'ukraine': {
+    // Kyiv → Kharkiv (~410 km E-W) crosses several spatial cells.
+    // Long variant Lviv → Volgograd is the full west-east bbox span
+    // (~1,500 km), exercises cross-region cell paging.
+    o: { lat: 50.4501, lon:  30.5234, label: 'Kyiv' },
+    d: { lat: 49.9935, lon:  36.2304, label: 'Kharkiv' },
+    crow_km: 410,
+  },
+  'ukraine-long': {
+    o: { lat: 49.8397, lon:  24.0297, label: 'Lviv' },
+    d: { lat: 48.7080, lon:  44.5133, label: 'Volgograd' },
+    crow_km: 1500,
+  },
   'japan': {
     o: { lat: 35.6762, lon:  139.6503, label: 'Tokyo' },
     d: { lat: 34.6937, lon:  135.5023, label: 'Osaka' },
