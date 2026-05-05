@@ -303,6 +303,7 @@ def upgrade(src_path: str, dst_path: str, *,
             split_hot_search_chunks_mb: int = 10,
             keep_spill: bool = False,
             inject_overture_sources: bool = False,
+            swap_viewer: bool = True,
             ) -> None:
     src_path = str(src_path)
     dst_path = str(dst_path)
@@ -411,6 +412,31 @@ def upgrade(src_path: str, dst_path: str, *,
     elif inject_overture_sources and has_existing_overture_sources:
         print(f"  overture-sources.json already present in source; "
               f"no injection needed", flush=True)
+
+    # ---- Phase 2c: collect viewer replacements ----------------------------
+    # The upgrader normally LazyPassthroughs every entry byte-for-byte,
+    # which means the source's viewer index.html stays baked in. When the
+    # source is older than the current resources/viewer/ on disk (e.g.
+    # the SZCI v2 viewer fix from 2026-05-05 that lets iOS read sharded
+    # nodes_scaled), the upgraded ZIM ships the stale viewer and users hit
+    # the same bug we already fixed. Mirrors repackage_zim.py's
+    # ``--no-swap-viewer`` convention: default-on, opt out for forensic
+    # repros.
+    viewer_replacements: dict[str, bytes] = {}
+    if swap_viewer:
+        viewer_dir = REPO / "resources" / "viewer"
+        for name in ("index.html", "places.html"):
+            disk = viewer_dir / name
+            if not disk.exists():
+                continue
+            try:
+                src.get_entry_by_path(name)
+            except Exception:
+                continue  # source doesn't ship this entry; don't add new ones
+            data = disk.read_bytes()
+            viewer_replacements[name] = data
+            replaced_search_paths.add(name)
+            print(f"  will swap {name} ← {disk} ({len(data)} B)", flush=True)
 
     # ---- Phase 3: emit output ZIM -----------------------------------------
     if os.path.exists(dst_path):
@@ -585,6 +611,16 @@ def upgrade(src_path: str, dst_path: str, *,
             print(f"  patched streetzim-meta.json "
                   f"(set hasOvertureAddresses=True)", flush=True)
 
+        # 3d.2) Refresh viewer HTML from disk so the upgraded ZIM picks
+        # up viewer fixes (e.g. SZCI v2 reader for iOS, Sources panel
+        # tweaks). Skipped under ``--no-swap-viewer``.
+        for name, data in viewer_replacements.items():
+            mime = "text/html"
+            c.add_item(PassthroughItem(
+                name, name, mime, data, compress=True,
+            ))
+            print(f"  swapped {name} ({len(data)} B from disk)", flush=True)
+
         # 3e) Lazy passthrough for everything else. metadata entries,
         # the v1 cells index, and the items we re-emitted are all in
         # ``replaced_search_paths`` or are filtered out below.
@@ -653,6 +689,11 @@ def main() -> int:
                    metavar="N",
                    help="Threshold in MB for re-splitting search chunks "
                         "(default: 10)")
+    p.add_argument("--no-swap-viewer", action="store_true",
+                   help="Skip swapping resources/viewer/index.html and "
+                        "places.html into the output. Default is to swap "
+                        "(matches repackage_zim.py) so iOS-compat viewer "
+                        "fixes reach upgraded ZIMs.")
     p.add_argument("--inject-overture-sources", action="store_true",
                    help="If the source ZIM contains overture-tagged search "
                         "records but is missing overture-sources.json, emit "
@@ -665,7 +706,8 @@ def main() -> int:
     upgrade(args.src, args.dst,
             split_hot_search_chunks_mb=args.split_hot_search_chunks_mb,
             keep_spill=args.keep_spill,
-            inject_overture_sources=args.inject_overture_sources)
+            inject_overture_sources=args.inject_overture_sources,
+            swap_viewer=not args.no_swap_viewer)
     return 0
 
 
