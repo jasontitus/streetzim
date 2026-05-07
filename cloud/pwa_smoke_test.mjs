@@ -42,6 +42,13 @@ const ROUTE_PAIRS = {
     d: { lat: 37.3382, lon: -121.8863, label: 'San Jose' },
     crow_km: 75,
   },
+  'california': {
+    // SF → LA (~560 km) — the canonical N-S cross-state route. Exercises
+    // spatial graph cell paging across the full Central Valley + Grapevine.
+    o: { lat: 37.7749, lon: -122.4194, label: 'San Francisco' },
+    d: { lat: 34.0522, lon: -118.2437, label: 'Los Angeles' },
+    crow_km: 560,
+  },
   'canada': {
     // Toronto → Montreal (~505 km) is the Canada smoke default —
     // exercises spatial graph + cell paging, completes in ~7 s on
