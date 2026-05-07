@@ -131,9 +131,35 @@ log "smoke OK"
 # ------------------------------------------------------------------
 # 5. Upload — validate-once-more inside, then ia upload + metadata
 #    stamp + cleanup + site regen + deploy.
+#
+# Default: launches in BACKGROUND once smoke has passed (validation
+# already gated entry to this step). The wrapper then exits cleanly so
+# the next region's build can start in parallel with the in-flight
+# upload — uploads are network-bound, builds are CPU-bound, no contention.
+# Output goes to <id>-upload.log; check that file for failures.
+#
+# Set NO_UPLOAD=1 to skip the upload entirely (rare — lets you stage a
+# ZIM, inspect it, and upload manually later).
+# Set FOREGROUND_UPLOAD=1 to wait for upload before exiting (useful when
+# you want a single command to fully ship one region).
 # ------------------------------------------------------------------
-log "upload start"
-TERRAIN_STRIPE_TOLERATE=10 bash cloud/upload_validated.sh "$ID" "$OUT"
-log "upload OK"
+if [ "${NO_UPLOAD:-0}" = "1" ]; then
+    log "NO_UPLOAD=1 set — stopping after smoke. ZIM staged at $OUT"
+    log "to upload later: TERRAIN_STRIPE_TOLERATE=10 bash cloud/upload_validated.sh $ID $OUT"
+    exit 0
+fi
 
-log "DONE — $OUT shipped to streetzim-${ID}"
+if [ "${FOREGROUND_UPLOAD:-0}" = "1" ]; then
+    log "upload start (foreground)"
+    TERRAIN_STRIPE_TOLERATE=10 bash cloud/upload_validated.sh "$ID" "$OUT"
+    log "upload OK"
+    log "DONE — $OUT shipped to streetzim-${ID}"
+else
+    log "upload start (background → ${ID}-upload.log)"
+    nohup bash -c \
+        "TERRAIN_STRIPE_TOLERATE=10 bash cloud/upload_validated.sh '$ID' '$OUT'" \
+        > "${ID}-upload.log" 2>&1 &
+    upload_pid=$!
+    log "upload pid=$upload_pid — wrapper exits, upload continues"
+    log "DONE (build/validate/smoke) — $OUT staged; upload running in background"
+fi

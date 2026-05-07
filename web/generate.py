@@ -177,6 +177,18 @@ REGIONS = [
         "zim_file": "osm-himalayas.zim",
         "description": "The Himalayas, Karakoram, Hindu Kush, and Pamir &mdash; Nepal, Bhutan, Tibet, Sikkim, Ladakh, Kashmir, the Indus and Brahmaputra valleys. Kathmandu, Pokhara, Lhasa, Thimphu, Leh, Hunza, Everest, K2, Kanchenjunga, and Annapurna.",
     },
+    {
+        "id": "brazil",
+        "title": "Brazil",
+        "zim_file": "osm-brazil.zim",
+        "description": "All of Brazil &mdash; São Paulo, Rio de Janeiro, Brasília, Salvador, Belo Horizonte, Fortaleza, Manaus, the Amazon, Pantanal, Iguaçu Falls, and the Atlantic coast.",
+    },
+    {
+        "id": "argentina",
+        "title": "Argentina",
+        "zim_file": "osm-argentina.zim",
+        "description": "Argentina &mdash; Buenos Aires, Córdoba, Rosario, Mendoza, Bariloche, the Pampas, the Andes, Patagonia, and Tierra del Fuego.",
+    },
 ]
 
 

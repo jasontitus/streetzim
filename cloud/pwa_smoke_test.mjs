@@ -74,6 +74,20 @@ const ROUTE_PAIRS = {
     d: { lat: 49.9935, lon:  36.2304, label: 'Kharkiv' },
     crow_km: 410,
   },
+  'brazil': {
+    // Rio → São Paulo (~360 km along BR-116 / Via Dutra) — the
+    // canonical Brazilian inter-city route.
+    o: { lat: -22.9068, lon: -43.1729, label: 'Rio de Janeiro' },
+    d: { lat: -23.5505, lon: -46.6333, label: 'São Paulo' },
+    crow_km: 360,
+  },
+  'argentina': {
+    // Buenos Aires → Mendoza (~1,000 km W) — cross-Argentina along
+    // RN7. Long enough to stress cell paging across the Pampas.
+    o: { lat: -34.6037, lon: -58.3816, label: 'Buenos Aires' },
+    d: { lat: -32.8908, lon: -68.8272, label: 'Mendoza' },
+    crow_km: 1000,
+  },
   'ukraine-long': {
     o: { lat: 49.8397, lon:  24.0297, label: 'Lviv' },
     d: { lat: 48.7080, lon:  44.5133, label: 'Volgograd' },
