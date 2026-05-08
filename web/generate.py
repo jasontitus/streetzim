@@ -189,6 +189,12 @@ REGIONS = [
         "zim_file": "osm-argentina.zim",
         "description": "Argentina &mdash; Buenos Aires, Córdoba, Rosario, Mendoza, Bariloche, the Pampas, the Andes, Patagonia, and Tierra del Fuego.",
     },
+    {
+        "id": "south-america",
+        "title": "South America",
+        "zim_file": "osm-south-america.zim",
+        "description": "Continental South America &mdash; Colombia, Venezuela, Guyana, Suriname, French Guiana, Ecuador, Peru, Bolivia, Paraguay, Uruguay, Chile, the Amazon, the Andes, the Atacama, and Patagonia. (Brazil and Argentina ship as their own dedicated ZIMs.)",
+    },
 ]
 
 
