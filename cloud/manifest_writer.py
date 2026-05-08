@@ -119,7 +119,19 @@ class ManifestCreator:
         *,
         compression: str = "zstd",
         compression_level: int | None = None,
-        cluster_strategy: str = "by_mime",
+        cluster_strategy: str = "single",
+        # Empirically: ``by_mime`` puts search-data/*.json into a
+        # different cluster from index/wikidata/etc., so a viewer
+        # fan-out fetch of 256 chunks ends up spread across more
+        # clusters → more random-access seeks per chunk → ~25-50%
+        # higher wall-clock for typeahead-style workloads. Measured
+        # on California 2026-05-07: by_mime hit the 15 s smoke
+        # timeout while libzim's `single` (default) finished in <8 s
+        # for the same byte-identical chunk content. ``single`` packs
+        # everything in one cluster (post-zstd) and trades a slight
+        # write-time hit for the random-access win at read time —
+        # the right default for streetzim ZIMs whose primary load
+        # pattern IS random-access typeahead lookup.
         max_in_flight_bytes: int | None = None,
         keep_stage: bool = False,
         verbose: bool = False,
@@ -246,6 +258,7 @@ class ManifestCreator:
         mime = item._mimetype  # noqa: SLF001
         is_front = bool(getattr(item, "_is_front", False))
         compress = bool(getattr(item, "_compress", True))
+        namespace = getattr(item, "_namespace", None)
 
         rec: dict[str, Any] = {
             "kind": "item",
@@ -259,6 +272,20 @@ class ManifestCreator:
             # Per-item override — zimru routes this item to its own
             # uncompressed cluster regardless of the build's default.
             rec["compress"] = False
+        if namespace is not None:
+            # Caller is placing the item into a non-default namespace
+            # (typical: 'X' for Xapian indexes at X/fulltext/xapian and
+            # X/title/xapian). zimru's Item::in_namespace honours the
+            # raw byte; pass it through so the rust packer can route
+            # the entry to the right namespace dirent table.
+            if isinstance(namespace, str):
+                if len(namespace) != 1:
+                    raise ValueError(
+                        f"namespace must be a single character: {namespace!r}"
+                    )
+                rec["namespace"] = ord(namespace)
+            else:
+                rec["namespace"] = int(namespace)
 
         file_path = getattr(item, "_file_path", None)
         if file_path:
@@ -314,6 +341,7 @@ class ManifestCreator:
         if self._verbose:
             cmd.append("--verbose")
             print(f"  streetzim-pack: {' '.join(cmd)}", flush=True)
+        manifest_size = os.path.getsize(self._manifest_path)
         started = time.time()
         try:
             subprocess.run(cmd, check=True)
@@ -322,11 +350,50 @@ class ManifestCreator:
                 f"streetzim-pack failed (exit {e.returncode}). "
                 f"Manifest preserved at {self._manifest_path} for inspection."
             ) from e
+        elapsed = time.time() - started
+        out_size = (os.path.getsize(self._output_path)
+                    if os.path.isfile(self._output_path) else 0)
         if self._verbose:
             print(
-                f"  streetzim-pack done in {time.time() - started:.1f}s — {self._output_path}",
+                f"  streetzim-pack done in {elapsed:.1f}s — "
+                f"{self._output_path} ({out_size/1e9:.2f} GB)",
                 flush=True,
             )
+        # Surface the rust-pack wall-clock as a sub-phase under whatever
+        # top-level phase the caller is currently in (usually the
+        # `[N/total] Creating ZIM file` phase). Keeps the optimization
+        # target — Python+libzim Creator vs. zimru/streetzim-pack — in
+        # the build summary so before/after comparisons are concrete.
+        #
+        # Inter-module note: when create_osm_zim runs as __main__, its
+        # module name is '__main__', not 'create_osm_zim'. A bare
+        # `from create_osm_zim import PHASE_TIMER` would import the
+        # file again as a fresh module with a fresh-and-empty timer.
+        # Walk sys.modules and pick whichever copy has a PHASE_TIMER —
+        # they share file path so it's the same instance whichever
+        # module name we ended up under.
+        import sys
+        timer = None
+        for mod_name in ("__main__", "create_osm_zim"):
+            mod = sys.modules.get(mod_name)
+            if mod is not None and hasattr(mod, "PHASE_TIMER"):
+                timer = getattr(mod, "PHASE_TIMER")
+                break
+        if timer is not None:
+            try:
+                timer.record_subphase(
+                    "zim-pack: streetzim-pack (zimru)",
+                    elapsed,
+                    note=f"manifest {manifest_size/1e6:.0f} MB → ZIM {out_size/1e9:.2f} GB",
+                )
+                timer.record_metric(
+                    "zim-pack: manifest size", f"{manifest_size/1e6:.0f}", "MB",
+                )
+                timer.record_metric(
+                    "zim-pack: output ZIM size", f"{out_size/1e6:.0f}", "MB",
+                )
+            except Exception:
+                pass
 
 
 def iter_records(manifest_path: str) -> Iterable[dict[str, Any]]:

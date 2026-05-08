@@ -42,9 +42,195 @@ import urllib.request
 from pathlib import Path
 
 # Wrap print to auto-flush step/progress lines so monitoring never sees stale output.
+# Also doubles as a phase-timer hook: lines that look like a phase header
+# (``"[N/total] Title..."``) trigger PHASE_TIMER.start so we can emit a
+# clean per-phase wall-clock summary at end-of-run without rewriting every
+# phase header in the script.
 _builtin_print = print
+
+
+class _PhaseTimer:
+    """Tracks (start, end) wall-clock for each numbered phase the
+    script announces, plus the overall build window. ``start(name)``
+    closes any previous open phase, ``stop()`` finalises the last
+    one, and ``summary()`` prints a Markdown-style table — printed
+    automatically at end-of-main and also written into the build log
+    so post-mortems don't need to re-time anything.
+    """
+
+    def __init__(self) -> None:
+        import time as _t
+        self._t = _t
+        self._t0 = _t.time()
+        self._cur: tuple[str, float] | None = None
+        self._records: list[tuple[str, float, float]] = []
+        # Sub-phase + metric records, used to surface fine-grained
+        # timing on the parts we're actively optimizing (Xapian build,
+        # ZIM-pack subprocess, etc.) without disturbing top-level
+        # phase boundaries. Each entry: (parent, name, duration_s, note).
+        self._subphases: list[tuple[str, str, float, str]] = []
+        # (parent, name, value_str, unit)
+        self._metrics: list[tuple[str, str, str, str]] = []
+
+    @property
+    def t0(self) -> float:
+        return self._t0
+
+    @property
+    def current(self) -> str:
+        return self._cur[0] if self._cur else "<no phase>"
+
+    def start(self, name: str) -> None:
+        if self._cur is not None:
+            self._close()
+        now = self._t.time()
+        self._cur = (name, now)
+
+    def stop(self) -> None:
+        self._close()
+
+    def _close(self) -> None:
+        if self._cur is None:
+            return
+        name, t_start = self._cur
+        t_end = self._t.time()
+        self._records.append((name, t_start, t_end))
+        self._cur = None
+
+    def record_subphase(self, name: str, duration_s: float, note: str = "") -> None:
+        """Record a measured sub-step under the currently-running phase.
+        Called from helpers (xapianbuilder, streetzim-pack invocation,
+        per-pass loops) to attribute time to the things we're tuning."""
+        self._subphases.append((self.current, name, float(duration_s), note))
+
+    def subphase(self, name: str):
+        """Context manager — wrap a block of code to measure its
+        wall-clock and attribute it under the currently-running phase.
+
+        Usage:
+            with PHASE_TIMER.subphase("zim-pack: vector tiles") as sp:
+                # ... do work
+                sp.set_note(f"{n:,} tiles")
+        """
+        outer = self
+        class _Ctx:
+            def __init__(self):
+                self._t0 = None
+                self.note = ""
+            def __enter__(self):
+                import time as _t
+                self._t0 = _t.time()
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                import time as _t
+                elapsed = _t.time() - self._t0
+                outer.record_subphase(name, elapsed, note=self.note)
+                return False
+            def set_note(self, note: str) -> None:
+                self.note = str(note)
+        return _Ctx()
+
+    def record_metric(self, name: str, value: str, unit: str = "") -> None:
+        """Record a non-time measurement (e.g. final glass-DB size,
+        record count, peak bytes). Surfaced in the summary table."""
+        self._metrics.append((self.current, name, str(value), unit))
+
+    def summary(self) -> str:
+        self._close()
+        if not self._records:
+            return ""
+        end = max(t for _, _, t in self._records)
+        total = end - self._t0
+        rows = [("Phase", "Started", "Duration", "% of run")]
+        for name, t_start, t_end in self._records:
+            ts = self._t.strftime("%H:%M:%S", self._t.localtime(t_start))
+            dur = t_end - t_start
+            pct = 100 * dur / total if total > 0 else 0
+            rows.append((name, ts, _fmt_phase_dur(dur), f"{pct:.1f}%"))
+        rows.append(("TOTAL", self._t.strftime("%H:%M:%S", self._t.localtime(self._t0)),
+                     _fmt_phase_dur(total), "100.0%"))
+        widths = [max(len(r[i]) for r in rows) for i in range(4)]
+        sep = "+" + "+".join("-" * (w + 2) for w in widths) + "+"
+        lines = [sep, _phase_row(rows[0], widths), sep]
+        for r in rows[1:-1]:
+            lines.append(_phase_row(r, widths))
+        lines.append(sep)
+        lines.append(_phase_row(rows[-1], widths))
+        lines.append(sep)
+
+        if self._subphases:
+            lines.append("")
+            lines.append("Sub-phase timing (optimization targets):")
+            sub_rows = [("Parent phase", "Sub-phase", "Duration", "Note")]
+            for parent, name, dur, note in self._subphases:
+                sub_rows.append((parent, name, _fmt_phase_dur(dur), note))
+            sw = [max(len(r[i]) for r in sub_rows) for i in range(4)]
+            ssep = "+" + "+".join("-" * (w + 2) for w in sw) + "+"
+            lines.append(ssep)
+            lines.append("| " + " | ".join(f"{sub_rows[0][i]:<{sw[i]}}" for i in range(4)) + " |")
+            lines.append(ssep)
+            for r in sub_rows[1:]:
+                lines.append("| " + " | ".join(f"{r[i]:<{sw[i]}}" for i in range(4)) + " |")
+            lines.append(ssep)
+
+        if self._metrics:
+            lines.append("")
+            lines.append("Build metrics:")
+            mrows = [("Parent phase", "Metric", "Value", "Unit")]
+            for parent, name, val, unit in self._metrics:
+                mrows.append((parent, name, val, unit))
+            mw = [max(len(r[i]) for r in mrows) for i in range(4)]
+            msep = "+" + "+".join("-" * (w + 2) for w in mw) + "+"
+            lines.append(msep)
+            lines.append("| " + " | ".join(f"{mrows[0][i]:<{mw[i]}}" for i in range(4)) + " |")
+            lines.append(msep)
+            for r in mrows[1:]:
+                lines.append("| " + " | ".join(f"{r[i]:<{mw[i]}}" for i in range(4)) + " |")
+            lines.append(msep)
+
+        return "\n".join(lines)
+
+
+def _fmt_phase_dur(seconds: float) -> str:
+    if seconds < 1:
+        return f"{seconds*1000:.0f}ms"
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    if seconds < 3600:
+        m, s = divmod(int(seconds), 60)
+        return f"{m}m{s:02d}s"
+    h, rem = divmod(int(seconds), 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}h{m:02d}m{s:02d}s"
+
+
+def _phase_row(cells, widths):
+    return "| " + " | ".join(f"{cells[i]:<{widths[i]}}" for i in range(4)) + " |"
+
+
+PHASE_TIMER = _PhaseTimer()
+
+
+# Phase headers in this script use the pattern ``[<n>/<total>] Title``.
+# Detecting them in the print wrapper means we don't have to thread a
+# timer object through every helper call site.
+import re as _re_phase
+_PHASE_RE = _re_phase.compile(r"^\s*\[(\d+)/(\d+)\]\s+(.+?)(\.{3,})?\s*$")
+
+
 def print(*args, **kwargs):
     kwargs.setdefault("flush", True)
+    if args and isinstance(args[0], str):
+        first = args[0]
+        m = _PHASE_RE.match(first)
+        if m:
+            phase_name = f"[{m.group(1)}/{m.group(2)}] {m.group(3).strip()}"
+            PHASE_TIMER.start(phase_name)
+            # Add a wall-clock prefix so live monitors can see when each
+            # phase started without parsing the eventual summary table.
+            import time as _t
+            ts = _t.strftime("%H:%M:%S", _t.localtime())
+            args = (f"[{ts}] {first}", *args[1:])
     _builtin_print(*args, **kwargs)
 
 
@@ -3427,6 +3613,219 @@ def _split_big_search_chunk(prefix: str, records: list, n_buckets: int = 16
     return out
 
 
+def _resolve_xapianbuilder_binary(override: str | None = None) -> str:
+    """Locate the xapianbuilder binary. Resolution order:
+    1. ``override`` argument (typically the --xapianbuilder-bin flag).
+    2. ``$XAPIANBUILDER_BIN`` env var.
+    3. ``../xapianbuilder/target/release/xapianbuilder``.
+    4. ``../xapianbuilder/target/debug/xapianbuilder``.
+
+    Raises FileNotFoundError if none found.
+    """
+    candidates = []
+    if override:
+        candidates.append(override)
+    env_path = os.environ.get("XAPIANBUILDER_BIN")
+    if env_path:
+        candidates.append(env_path)
+    repo_root = Path(__file__).resolve().parent
+    candidates.append(str(repo_root.parent / "xapianbuilder" / "target" / "release" / "xapianbuilder"))
+    candidates.append(str(repo_root.parent / "xapianbuilder" / "target" / "debug" / "xapianbuilder"))
+    for c in candidates:
+        if c and os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    raise FileNotFoundError(
+        "xapianbuilder binary not found. Build it with "
+        "`cd ../xapianbuilder && cargo build --release` or pass "
+        "--xapianbuilder-bin=PATH (or set $XAPIANBUILDER_BIN). "
+        f"Tried: {candidates}"
+    )
+
+
+def _streetzim_to_xapianbuilder_jsonl(src_jsonl: str, dst_jsonl: str,
+                                      *, language: str = "eng") -> int:
+    """Stream-translate the streetzim search-feature JSONL written by
+    pass 1 (one feature record per line: ``{"name", "type", "lat",
+    "lon", "location", "cat", "subtype", "ws", "p", "soc", "brand",
+    "wd", ...}``) into the xapianbuilder input format
+    (``{"path", "title", "mimetype", "body", "language",
+    "target_path"}``).
+
+    Indexable body keeps the same fields libzim's HTML-stub auto-
+    indexer would have seen: name + location + type + subtype +
+    category + brand. ``geo.position`` meta tag is embedded so
+    xapianbuilder's MyHtmlParser populates value slot 2 with the
+    lat/lon (kept on parity with libzim's path).
+
+    Returns the number of records emitted. Streams line-by-line —
+    constant memory regardless of corpus size.
+    """
+    n = 0
+    with open(src_jsonl, "r", encoding="utf-8") as src, \
+         open(dst_jsonl, "w", encoding="utf-8") as dst:
+        for line in src:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                feat = json.loads(line)
+            except Exception:
+                continue
+            name = feat.get("name") or ""
+            if not name:
+                continue
+            # Synthetic path: clicks in Kiwix's native search land
+            # here. We don't emit a real entry at this path today —
+            # follow-up work will add a tiny redirect entry per record
+            # so clicks open the viewer's map at the feature's lat/lon.
+            slug_path = f"s/{n}"
+            body_parts = [name]
+            for k in ("location", "type", "subtype", "cat", "brand"):
+                v = feat.get(k)
+                if v:
+                    body_parts.append(str(v))
+            body_text = " ".join(body_parts)
+            lat = feat.get("lat", 0)
+            lon = feat.get("lon", 0)
+            # Wrap as minimal HTML so xapianbuilder's MyHtmlParser
+            # extracts geo.position into value slot 2 — keeps Kiwix
+            # geo features (e.g. nearby search) working.
+            body_html = (
+                f'<html><head><meta name="geo.position" '
+                f'content="{lat};{lon}"></head><body>{body_text}'
+                f'</body></html>'
+            )
+            rec = {
+                "path": slug_path,
+                "title": name,
+                "mimetype": "text/html",
+                "body": body_html,
+                "language": language,
+                "target_path": "",
+            }
+            dst.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            n += 1
+    return n
+
+
+def _build_xapian_via_xapianbuilder(streetzim_xapian_jsonl: str,
+                                    workdir: str,
+                                    *,
+                                    language: str = "eng",
+                                    binary_override: str | None = None,
+                                    jobs: int = 0,
+                                    ) -> tuple[str, str]:
+    import time
+    import subprocess  # noqa: F401 — also used below; pre-import to make the
+                       # NameError surface here, before we run the helper
+    """Run xapianbuilder over the streetzim _xapian.jsonl corpus and
+    return ``(fulltext_glass_path, title_glass_path)``.
+
+    Idempotent: if the output glass files already exist (e.g. resuming
+    a --keep-temp build that crashed at the libzim/zimru pack step),
+    this returns immediately without re-running xapianbuilder.
+
+    Streams: the input JSONL is translated line-by-line into the
+    xapianbuilder format and piped via stdin to two parallel
+    subprocesses (one fulltext, one title). Constant Python memory.
+
+    The fulltext and title runs are independent processes that share
+    the input JSONL but read it fresh each time — small cost relative
+    to the per-pass build, and keeps the streaming model trivial.
+    """
+    binary = _resolve_xapianbuilder_binary(binary_override)
+    os.makedirs(workdir, exist_ok=True)
+    xb_jsonl = os.path.join(workdir, "_xapianbuilder.jsonl")
+    ft_glass = os.path.join(workdir, "X-fulltext-xapian.glass")
+    ti_glass = os.path.join(workdir, "X-title-xapian.glass")
+
+    # Recovery: skip the conversion + builder runs if both outputs
+    # already exist and look usable.
+    have_ft = os.path.isfile(ft_glass) and os.path.getsize(ft_glass) > 0
+    have_ti = os.path.isfile(ti_glass) and os.path.getsize(ti_glass) > 0
+    if have_ft and have_ti:
+        print(f"      reusing existing Xapian glass DBs ({os.path.getsize(ft_glass)/1e6:.1f} MB ft, {os.path.getsize(ti_glass)/1e6:.1f} MB title)", flush=True)
+        return ft_glass, ti_glass
+
+    # Convert streetzim JSONL → xapianbuilder JSONL on disk. We could
+    # pipe directly (no intermediate file), but writing it out gives
+    # a cheap recovery checkpoint AND lets fulltext + title both read
+    # from the same file in parallel without coordinating a single
+    # producer to two consumers.
+    if not os.path.isfile(xb_jsonl) or os.path.getsize(xb_jsonl) == 0:
+        t0 = time.time()
+        n = _streetzim_to_xapianbuilder_jsonl(streetzim_xapian_jsonl,
+                                              xb_jsonl, language=language)
+        elapsed = time.time() - t0
+        size_mb = os.path.getsize(xb_jsonl) / 1e6
+        print(f"      converted {n} records → xapianbuilder JSONL "
+              f"({size_mb:.1f} MB in {elapsed:.0f}s)", flush=True)
+        PHASE_TIMER.record_subphase(
+            "xapian: jsonl convert", elapsed,
+            note=f"{n:,} recs, {size_mb:.0f} MB")
+        PHASE_TIMER.record_metric(
+            "xapian: input records", f"{n:,}", "")
+    else:
+        print(f"      reusing existing xapianbuilder JSONL "
+              f"({os.path.getsize(xb_jsonl)/1e6:.1f} MB)", flush=True)
+
+    import subprocess
+    procs = []
+    proc_starts: dict[str, float] = {}
+    for mode, out_path, missing in (
+        ("fulltext", ft_glass, not have_ft),
+        ("title",    ti_glass, not have_ti),
+    ):
+        if not missing:
+            continue
+        # Output file must NOT exist (xapianbuilder refuses to
+        # overwrite). Remove any prior partial.
+        try: os.unlink(out_path)
+        except FileNotFoundError: pass
+        cmd = [binary, mode,
+               "--input", xb_jsonl,
+               "--output", out_path,
+               "--language", language,
+               "--jobs", str(jobs),
+               "--quiet"]
+        print(f"      launching xapianbuilder {mode} → {os.path.basename(out_path)}", flush=True)
+        proc_starts[mode] = time.time()
+        procs.append((mode, subprocess.Popen(cmd)))
+
+    failures = []
+    proc_durs: dict[str, float] = {}
+    pair_t0 = time.time()
+    for mode, p in procs:
+        rc = p.wait()
+        proc_durs[mode] = time.time() - proc_starts[mode]
+        if rc != 0:
+            failures.append((mode, rc))
+    pair_wall = time.time() - pair_t0
+    if failures:
+        details = ", ".join(f"{m}: rc={rc}" for m, rc in failures)
+        raise RuntimeError(f"xapianbuilder failed ({details})")
+
+    ft_size = os.path.getsize(ft_glass)
+    ti_size = os.path.getsize(ti_glass)
+    print(f"      xapianbuilder done — fulltext {ft_size/1e6:.0f} MB ({proc_durs.get('fulltext',0):.0f}s), title {ti_size/1e6:.0f} MB ({proc_durs.get('title',0):.0f}s); parallel wall-clock {pair_wall:.0f}s", flush=True)
+    if "fulltext" in proc_durs:
+        PHASE_TIMER.record_subphase(
+            "xapian: build fulltext", proc_durs["fulltext"],
+            note=f"{ft_size/1e6:.0f} MB glass DB")
+    if "title" in proc_durs:
+        PHASE_TIMER.record_subphase(
+            "xapian: build title", proc_durs["title"],
+            note=f"{ti_size/1e6:.0f} MB glass DB")
+    PHASE_TIMER.record_subphase(
+        "xapian: parallel wall-clock", pair_wall,
+        note=f"max(ft, title) — both ran concurrently")
+    PHASE_TIMER.record_metric(
+        "xapian: fulltext glass size", f"{ft_size/1e6:.0f}", "MB")
+    PHASE_TIMER.record_metric(
+        "xapian: title glass size", f"{ti_size/1e6:.0f}", "MB")
+    return ft_glass, ti_glass
+
+
 def create_zim(
     output_path,
     tiles,
@@ -3462,17 +3861,62 @@ def create_zim(
     split_find_chips=False,
     zim_builder="python",
     max_zoom=None,
+    xapian_mode="libzim",
+    xapianbuilder_bin=None,
+    xapian_workdir=None,
+    no_llm_bundle=False,
+    spatial_chunk_scale=0,
 ):
-    """Create a ZIM file containing the map viewer and all tiles."""
+    """Create a ZIM file containing the map viewer and all tiles.
+
+    ``xapian_mode``:
+      ``"libzim"`` — emit search/<slug>.html stubs and let libzim's
+        auto-indexer build the Xapian DBs at finalize. Default.
+      ``"builder"`` — skip the HTML stubs; stream the search JSONL
+        through the external ``xapianbuilder`` to produce glass DBs on
+        disk, then add them at namespace 'X' with compress=False.
+        Requires ``zim_builder='rust'`` because the libzim Creator
+        does not accept items in the X namespace via its public API.
+      ``"none"`` — skip Xapian entirely. Kiwix native search degrades
+        to title-prefix; the in-ZIM places.html (which reads the JSON
+        search-data chunks) is the only search UI.
+    """
     from libzim.writer import Creator as LibzimCreator, Item, StringProvider, FileProvider
     from libzim.writer import Hint
+    # ZSTD compression level. Match the libzim path's default
+    # (ZSTD_CLEVEL=22 in shipped builds — see build_command_template
+    # memory) so the rust path produces ZIMs of comparable size.
+    # ZSTD_CLEVEL env var overrides for parity with the libzim
+    # convention. Range is 1..22; 22 is "max" (slow but smallest).
+    zstd_level = int(os.environ.get("ZSTD_CLEVEL", "22"))
     if zim_builder == "rust":
         from cloud.manifest_writer import ManifestCreator
+        # Capture once for the closure so the lambda captures the
+        # resolved value, not the name.
+        _level = zstd_level
         Creator = lambda p: ManifestCreator(  # noqa: E731 — small adapter
-            p, verbose=True
+            p, verbose=True, compression_level=_level
         )
+        print(f"  ZIM compression: zstd level {zstd_level} (rust/zimru path)", flush=True)
+        # Surface the compression level as a build metric so
+        # before/after comparisons can attribute size deltas correctly.
+        PHASE_TIMER.record_metric(
+            "zim-pack: zstd level", str(zstd_level), "")
     else:
         Creator = LibzimCreator
+        print(f"  ZIM compression: zstd level {zstd_level} (libzim path)", flush=True)
+        PHASE_TIMER.record_metric(
+            "zim-pack: zstd level", str(zstd_level), "")
+
+    if xapian_mode == "builder" and zim_builder != "rust":
+        # libzim's public Creator API doesn't accept items at the X
+        # namespace — that's reserved for libzim's own auto-indexer.
+        # Pre-built Xapian DBs can only be injected via the rust path
+        # which exposes Item::in_namespace.
+        raise ValueError(
+            "--xapian=builder requires --zim-builder=rust; "
+            "libzim's Creator can't place items in the X namespace"
+        )
 
     print(f"  Creating ZIM file: {output_path}")
     print(f"    Name: {name}")
@@ -3480,14 +3924,26 @@ def create_zim(
     print(f"    Fonts: {len(fonts)}")
 
     class MapItem(Item):
-        """A single item (file) in the ZIM archive."""
-        def __init__(self, path, title, mimetype, content, is_front=False, compress=True):
+        """A single item (file) in the ZIM archive.
+
+        ``namespace`` is captured for the rust/zimru emit path
+        (``cloud.manifest_writer.ManifestCreator``) which can place items
+        into reserved namespaces such as ``'X'`` (Xapian indexes,
+        compressed=False by Kiwix convention). The python-libzim path
+        ignores it — libzim's public API doesn't accept per-item
+        namespace, so any integrator using the libzim Creator must keep
+        items in the default 'C' namespace and let libzim's
+        ``config_indexing`` produce X-namespace entries itself.
+        """
+        def __init__(self, path, title, mimetype, content,
+                     is_front=False, compress=True, namespace=None):
             super().__init__()
             self._path = path
             self._title = title
             self._mimetype = mimetype
             self._is_front = is_front
             self._compress = compress
+            self._namespace = namespace
             # Normalize content to bytes
             if isinstance(content, (str, Path)) and os.path.isfile(str(content)):
                 self._file_path = str(content)
@@ -3516,7 +3972,12 @@ def create_zim(
     # Create ZIM file
     # config_indexing and set_mainpath must be called BEFORE __enter__
     creator = Creator(str(output_path))
-    creator.config_indexing(True, "en")
+    # libzim's auto-indexer ingests every text/html item we add and
+    # writes X/fulltext/xapian + X/title/xapian at finalize. Skip it for
+    # the builder/none modes; in 'builder' mode we'll inject pre-built
+    # glass DBs directly, in 'none' mode we ship without Xapian and
+    # rely on the in-ZIM places.html (JSON search-data) for search.
+    creator.config_indexing(xapian_mode == "libzim", "en")
     creator.config_clustersize(cluster_size)
     # Use 2 compression workers for large builds to avoid libzim's
     # spin-lock death spiral. With many workers + ZSTD level 22, all
@@ -3770,6 +4231,10 @@ def create_zim(
         skip_str = (f" (skipped {tiles_skipped_empty} empty)"
                     if tiles_skipped_empty else "")
         print(f"\r    Added {tiles_added} tiles in {elapsed:.0f}s ({rate_str}){skip_str}                ", flush=True)
+        PHASE_TIMER.record_subphase(
+            "zim-pack: vector tiles", elapsed,
+            note=f"{tiles_added:,} tiles ({rate_str})"
+                 + (f", skipped {tiles_skipped_empty} empty" if tiles_skipped_empty else ""))
         _watchdog_stop.set()  # stop watchdog after tiles
 
         # Build bbox tile filter if bbox is provided (shared cache may have tiles from other areas)
@@ -3783,6 +4248,7 @@ def create_zim(
 
         def _add_raster_tiles(source_dir, zim_prefix, max_zoom, label, ext="webp", mimetype="image/webp"):
             """Walk a tile cache dir and add tiles to ZIM, filtering by bbox."""
+            _t0 = time.time()
             count = 0
             skipped = 0
             suffix = f".{ext}"
@@ -3820,8 +4286,14 @@ def create_zim(
                         count += 1
                         if count % 2000 == 0:
                             print(f"\r    Added {count} {label.lower()} tiles...", end="", flush=True)
-            print(f"\r    Added {count} {label.lower()} tiles" +
+            elapsed = time.time() - _t0
+            rate = (count / elapsed) if elapsed > 0 else 0
+            print(f"\r    Added {count} {label.lower()} tiles in {elapsed:.0f}s ({rate:.0f}/s)" +
                   (f" (skipped {skipped} outside bbox)" if skipped else ""))
+            PHASE_TIMER.record_subphase(
+                f"zim-pack: {label.lower()} tiles", elapsed,
+                note=f"{count:,} tiles ({rate:.0f}/s)"
+                     + (f", skipped {skipped} outside bbox" if skipped else ""))
             return count
 
         # Add satellite tiles if provided
@@ -3838,20 +4310,23 @@ def create_zim(
             _add_raster_tiles(terrain_dir, "terrain", max_tz, "Terrain")
 
         # Add font glyphs
-        print(f"    Adding {len(fonts)} font glyph ranges...")
-        for (font_name, range_key), data in fonts.items():
-            # font_name has no spaces (e.g. "OpenSansRegular") to avoid
-            # URL-encoding issues across Kiwix implementations
-            path = f"fonts/{font_name}/{range_key}.pbf"
-            creator.add_item(MapItem(
-                path, f"Font {font_name} {range_key}",
-                "application/x-protobuf",
-                data,
-            ))
+        with PHASE_TIMER.subphase("zim-pack: font glyphs") as _sp:
+            print(f"    Adding {len(fonts)} font glyph ranges...")
+            for (font_name, range_key), data in fonts.items():
+                # font_name has no spaces (e.g. "OpenSansRegular") to avoid
+                # URL-encoding issues across Kiwix implementations
+                path = f"fonts/{font_name}/{range_key}.pbf"
+                creator.add_item(MapItem(
+                    path, f"Font {font_name} {range_key}",
+                    "application/x-protobuf",
+                    data,
+                ))
+            _sp.set_note(f"{len(fonts)} entries")
 
         # Add Wikidata info — filter to Q-IDs present in the bbox tiles
         # Skip filtering for world bbox (all Q-IDs are relevant)
         if wikidata_data:
+            _wd_t0 = time.time()
             is_world_bbox = bbox and abs(bbox[0] - (-180)) < 1 and abs(bbox[2] - 180) < 1 and abs(bbox[1] - (-85)) < 2 and abs(bbox[3] - 85) < 2
             if bbox and mbtiles_path and not is_world_bbox:
                 print(f"    Scanning tiles for Wikidata Q-IDs in bbox...")
@@ -3912,6 +4387,9 @@ def create_zim(
                 for v in wd_chunks.values()
             )
             print(f"    Added {len(wd_chunks)} Wikidata chunks ({total_bytes / 1024:.0f} KB)")
+            PHASE_TIMER.record_subphase(
+                "zim-pack: wikidata", time.time() - _wd_t0,
+                note=f"{len(wikidata_data)} entries → {len(wd_chunks)} chunks, {total_bytes / 1024:.0f} KB")
 
         # Add routing graph data.
         # Large regions produce multi-hundred-MB / multi-GB graph.bin
@@ -3926,8 +4404,92 @@ def create_zim(
         # so the ZIM grows by only that much in return for PWA-
         # parseable routing.
         if routing_graph_path and os.path.isfile(routing_graph_path):
-            size_mb = os.path.getsize(routing_graph_path) / (1024 * 1024)
-            if routing_graph_chunk_mb and routing_graph_chunk_mb > 0:
+            _rt_t0 = time.time()
+            _rt_size_b = os.path.getsize(routing_graph_path)
+            size_mb = _rt_size_b / (1024 * 1024)
+            if spatial_chunk_scale and spatial_chunk_scale > 0:
+                # In-build spatial chunking — replaces the post-process
+                # `cloud/repackage_zim.py --spatial-chunk-scale N` step.
+                # Reuses tests/szrg_spatial.build_spatial which streams
+                # from the routing graph file into a spill dir, so peak
+                # RSS stays bounded. Output: graph-cells-index.bin (the
+                # SZCI index) + graph-cell-NNNNN.bin per cell + (for
+                # SZCI v2) nodes-scaled-NNN.bin shards. Items are added
+                # via FileProvider so libzim/zimru streams from disk.
+                #
+                # SZCI v1 emits nodes inline in the index; v2 emits
+                # sharded files when the global node table is large.
+                # The viewer at resources/viewer/index.html supports
+                # both (commit b4e1000 added v2). Other Kiwix readers
+                # use the X/fulltext/xapian + JSON search-data paths
+                # we ship, so neither is on the routing hot path here.
+                import sys as _sys
+                _repo_root = Path(__file__).resolve().parent
+                if str(_repo_root) not in _sys.path:
+                    _sys.path.insert(0, str(_repo_root))
+                from tests.szrg_spatial import build_spatial
+                from tests.szrg_reader import load_from_file
+                _spatial_outdir = Path(routing_graph_path).parent / "spatial"
+                _spatial_outdir.mkdir(parents=True, exist_ok=True)
+                print(f"    Spatial-chunking routing graph "
+                      f"(scale={spatial_chunk_scale}, "
+                      f"src={size_mb:.1f} MB → {_spatial_outdir})...",
+                      flush=True)
+                _sg = load_from_file(routing_graph_path)
+                _index_bytes, _cells_bytes, _spatial_meta = build_spatial(
+                    _sg,
+                    cell_scale=spatial_chunk_scale,
+                    output_dir=_spatial_outdir,
+                )
+                # Index — eager-load by readers, must stay raw when ≥ 200 MB
+                # (Kiwix Desktop / iOS WebView decompression watchdog
+                # times out on big compressed clusters; see project
+                # memory `cells-index-raw-threshold`).
+                idx_path = _spatial_outdir / "graph-cells-index.bin"
+                idx_size = os.path.getsize(idx_path)
+                idx_compress = idx_size < 200 * 1024 * 1024
+                creator.add_item(MapItem(
+                    "routing-data/graph-cells-index.bin",
+                    "Routing Cells Index",
+                    "application/octet-stream",
+                    str(idx_path),
+                    compress=idx_compress,
+                ))
+                # SZCI v2 sharded nodes_scaled — only when build_spatial
+                # was given output_dir (always true on this code path).
+                node_shard_paths = _spatial_meta.get("node_shard_paths") or []
+                for shard_path in node_shard_paths:
+                    creator.add_item(MapItem(
+                        f"routing-data/{os.path.basename(shard_path)}",
+                        f"Routing Nodes Shard {os.path.basename(shard_path)}",
+                        "application/octet-stream",
+                        str(shard_path),
+                        compress=True,
+                    ))
+                # Per-cell SZRC files. build_spatial(output_dir=...) has
+                # already written each cell to disk; _cells_bytes maps
+                # cell_id → path string in that mode. Cap compression at
+                # 200 MB to dodge the same fzstd ceiling.
+                _cell_count = 0
+                for cid in sorted(_cells_bytes.keys()):
+                    cp = _cells_bytes[cid]  # str path written by build_spatial
+                    cp_size = os.path.getsize(cp)
+                    creator.add_item(MapItem(
+                        f"routing-data/graph-cell-{cid:05d}.bin",
+                        f"Routing Graph Cell {cid}",
+                        "application/octet-stream",
+                        cp,
+                        compress=cp_size < 200 * 1024 * 1024,
+                    ))
+                    _cell_count += 1
+                print(f"    Wrote spatial routing layout: "
+                      f"{_cell_count} cells, {len(node_shard_paths)} node shards, "
+                      f"index {idx_size/1e6:.1f} MB", flush=True)
+                PHASE_TIMER.record_subphase(
+                    "zim-pack: routing graph (spatial)", time.time() - _rt_t0,
+                    note=f"{_cell_count} cells, {len(node_shard_paths)} node shards, "
+                         f"index {idx_size/1e6:.1f} MB")
+            elif routing_graph_chunk_mb and routing_graph_chunk_mb > 0:
                 # Byte-range chunk the primary graph file into N entries
                 # so libzim puts each in its own cluster. fzstd's ~500 MB
                 # ceiling is the actual blocker for Japan-size ZIMs; this
@@ -4042,6 +4604,11 @@ def create_zim(
                         routing_graph_geoms_path,
                         compress=compress_geoms,
                     ))
+            PHASE_TIMER.record_subphase(
+                "zim-pack: routing graph", time.time() - _rt_t0,
+                note=f"{_rt_size_b/1e6:.0f} MB graph.bin"
+                     + (f" + {routing_graph_chunk_mb} MB chunks" if routing_graph_chunk_mb else "")
+                     + (f" + geoms companion" if routing_graph_geoms_path else ""))
 
         # Build location index for search feature enrichment
         loc_lookup = None
@@ -4143,6 +4710,7 @@ def create_zim(
                 s = "".join(c if c.isascii() and (c.isalnum() or c == "_") else "_" for c in t.lower())
                 return s[:40] or "_"
 
+            _bucket_t0 = time.time()
             print("    Streaming search features from disk...", flush=True)
             with open(xapian_path, "w") as xf:
                 with open(search_features_path, "r") as sf:
@@ -4233,6 +4801,10 @@ def create_zim(
             del chunk_fds
 
             print(f"\r    Bucketed {total_features} features into {len(chunk_counts)} chunks, {xapian_count} xapian entries", flush=True)
+            PHASE_TIMER.record_subphase(
+                "zim-pack: search bucketing (pass 1)", time.time() - _bucket_t0,
+                note=f"{total_features:,} features → {len(chunk_counts)} chunks, {xapian_count:,} xapian entries")
+            _emit_t0 = time.time()
 
             # Pass 2: read each chunk file, serialize, and emit. When
             # `split_hot_search_chunks_mb` > 0, fan out any chunk whose
@@ -4263,45 +4835,46 @@ def create_zim(
                 chunk_bytes = json.dumps(entries, separators=(",", ":"),
                                          ensure_ascii=False).encode("utf-8")
                 if hot_split_bytes and len(chunk_bytes) > hot_split_bytes:
-                    # Oversized — fan out. Also handle multi-level
-                    # recursion: if a sub-bucket is STILL too big after
-                    # the first split (high-cardinality hotspots like
-                    # Texas "st" splitting into "st-b" at 37 MB), split
-                    # that sub-bucket too. Max depth 2 in practice.
-                    sub_chunks = _split_big_search_chunk(prefix, entries, hot_split_N)
-                    sub_prefix_list = []
-                    for sub_prefix, sub_bytes in sub_chunks:
-                        if len(sub_bytes) > hot_split_bytes:
-                            # Recursive split.
-                            sub_records = json.loads(sub_bytes.decode("utf-8"))
-                            sub2 = _split_big_search_chunk(sub_prefix, sub_records, hot_split_N)
-                            sub2_prefixes = []
-                            for sp2, sb2 in sub2:
-                                creator.add_item(MapItem(
-                                    f"search-data/{sp2}.json",
-                                    f"Search chunk {sp2}",
-                                    "application/json",
-                                    sb2,
-                                ))
-                                recs2 = json.loads(sb2.decode("utf-8"))
-                                manifest_chunks[sp2] = len(recs2)
-                                sub2_prefixes.append(sp2)
-                                split_total += 1
-                            manifest_sub_chunks[sub_prefix] = sub2_prefixes
-                            # The parent sub_prefix itself is NOT an
-                            # entry — only its sub-sub-chunks are.
-                        else:
+                    # Oversized — fan out via the SAME recursive splitter
+                    # `cloud/repackage_zim.py` uses (max_depth 5, FNV-1a
+                    # by-name with degenerate-distribution fallback). The
+                    # earlier in-build splitter capped at depth 2, which
+                    # left continent-scale hotspots like CA's `sa-9-9` at
+                    # 200K records / hundreds of MB — too big for the
+                    # viewer's substring scan. By delegating to the same
+                    # helper, the in-build path now produces the same
+                    # `sa-X-X-Y` 3-level layout the post-build repack
+                    # used to produce.
+                    from cloud.repackage_zim import _split_records_recursive
+                    leaves = _split_records_recursive(
+                        entries, prefix, hot_split_bytes,
+                        n_buckets=hot_split_N, max_depth=5)
+                    if len(leaves) == 1 and leaves[0][0] == prefix:
+                        # Already-small chunk — emit as-is.
+                        creator.add_item(MapItem(
+                            f"search-data/{prefix}.json",
+                            f"Search chunk {prefix}",
+                            "application/json",
+                            leaves[0][1],
+                        ))
+                        manifest_chunks[prefix] = len(entries)
+                    else:
+                        sub_prefix_list = []
+                        for sub_prefix, sub_bytes in leaves:
                             creator.add_item(MapItem(
                                 f"search-data/{sub_prefix}.json",
                                 f"Search chunk {sub_prefix}",
                                 "application/json",
                                 sub_bytes,
                             ))
-                            recs = json.loads(sub_bytes.decode("utf-8"))
-                            manifest_chunks[sub_prefix] = len(recs)
+                            try:
+                                leaf_count = len(json.loads(sub_bytes.decode("utf-8")))
+                            except Exception:
+                                leaf_count = 0
+                            manifest_chunks[sub_prefix] = leaf_count
                             sub_prefix_list.append(sub_prefix)
                             split_total += 1
-                    manifest_sub_chunks[prefix] = sub_prefix_list
+                        manifest_sub_chunks[prefix] = sub_prefix_list
                 else:
                     creator.add_item(MapItem(
                         f"search-data/{prefix}.json",
@@ -4336,6 +4909,11 @@ def create_zim(
                 print(f"\r    Added {chunks_added} search chunks "
                       f"({total_features} features)          ",
                       flush=True)
+            PHASE_TIMER.record_subphase(
+                "zim-pack: search-data emit (pass 2)", time.time() - _emit_t0,
+                note=f"{chunks_added} chunks"
+                     + (f", {len(manifest_sub_chunks)} hot prefixes split → {split_total} sub-chunks" if hot_split_bytes else ""))
+            _cat_t0 = time.time()
 
             # Pass 2b: category-index files (optional, mirrors search-data
             # chunks but keyed by OSM top-level `type`). Lets consumers answer
@@ -4344,6 +4922,17 @@ def create_zim(
             if cat_chunk_counts:
                 cat_total_records = 0
                 records_by_cat: dict[str, list] = {}
+                # The LLM bundle (addr/poi/street.json) is the heaviest
+                # part of category-index — hundreds of MB to multi-GB on
+                # continent regions. Today the post-build repack drops
+                # them by default; with `no_llm_bundle=True` we skip
+                # writing them in the first place. Chip emission still
+                # gets `records_by_cat` populated below so chip-*.json
+                # files are derivable. The category manifest also drops
+                # the entries we skipped, so validators don't complain
+                # about declared-but-missing categories.
+                _llm_bundle = {"addr", "poi", "street"}
+                _llm_skipped = []
                 for cat_slug in sorted(cat_chunk_counts):
                     cat_path = os.path.join(cat_dir, f"{cat_slug}.jsonl")
                     entries = []
@@ -4351,6 +4940,14 @@ def create_zim(
                         for cline in cf:
                             entries.append(json.loads(cline))
                     os.unlink(cat_path)
+                    if no_llm_bundle and cat_slug in _llm_bundle:
+                        # Don't add to ZIM, but keep `entries` around for
+                        # the chip-emission pass below (poi only).
+                        if split_find_chips and cat_slug in ("poi", "park"):
+                            records_by_cat[cat_slug] = entries
+                        _llm_skipped.append(cat_slug)
+                        cat_total_records += len(entries)
+                        continue
                     chunk_json = json.dumps(entries, separators=(",", ":"))
                     creator.add_item(MapItem(
                         f"category-index/{cat_slug}.json",
@@ -4361,7 +4958,16 @@ def create_zim(
                     cat_total_records += len(entries)
                     if split_find_chips and cat_slug in ("poi", "park"):
                         records_by_cat[cat_slug] = entries
-                cat_manifest = {k: cat_chunk_counts[k] for k in sorted(cat_chunk_counts)}
+                if _llm_skipped:
+                    print(f"    --no-llm-bundle: skipped category-index/{{{','.join(_llm_skipped)}}}.json", flush=True)
+                # Validator's `places_categories` check picks the first
+                # listed category and tries to read it; with the LLM
+                # bundle dropped we'd point at addr.json which we
+                # didn't write. Strip the dropped slugs from the
+                # categories manifest so the check finds a real entry.
+                cat_manifest = {k: cat_chunk_counts[k]
+                                for k in sorted(cat_chunk_counts)
+                                if not (no_llm_bundle and k in _llm_bundle)}
                 manifest_payload = {"total": cat_total_records,
                                     "categories": cat_manifest}
                 if split_find_chips and records_by_cat:
@@ -4394,6 +5000,10 @@ def create_zim(
                 ))
                 print(f"    Added category-index: "
                       f"{len(cat_chunk_counts)} categories, {cat_total_records} records")
+                PHASE_TIMER.record_subphase(
+                    "zim-pack: chips + category-index", time.time() - _cat_t0,
+                    note=f"{len(cat_chunk_counts)} categories, {cat_total_records:,} records"
+                         + (f", {len(chips_manifest) if 'chips_manifest' in dir() else 0} chip files" if cat_chunk_counts else ""))
 
             # streetzim-meta.json — ZIM-level summary for offline LLM agents.
             # Shape matches the mcpzim consumption contract (see
@@ -4516,48 +5126,92 @@ def create_zim(
                     print(f"    Added overture-sources.json "
                           f"({len(real_datasets)} upstream datasets)")
 
-            # Pass 3: stream xapian file -> HTML redirect pages
-            print(f"    Adding {xapian_count} Xapian search pages (of {total_features} total)...", flush=True)
-            xapian_start = time.time()
-            i = 0
-            with open(xapian_path, "r") as xf:
-                for line in xf:
-                    feat = json.loads(line)
-                    slug = feat["name"].lower()
-                    slug = "".join(c if c.isalnum() or c in "-_ " else "" for c in slug)
-                    slug = slug.strip().replace(" ", "-")[:80]
-                    slug = f"{slug}-{i}"
+            # Pass 3 (xapian_mode=libzim only): stream xapian file → HTML
+            # redirect pages. libzim's auto-indexer ingests the HTML
+            # bodies and produces X/fulltext/xapian + X/title/xapian at
+            # finalize. For xapian_mode=builder/none we skip this loop
+            # entirely and (for builder) inject pre-built glass DBs
+            # below.
+            if xapian_mode == "libzim":
+                print(f"    Adding {xapian_count} Xapian search pages (of {total_features} total)...", flush=True)
+                xapian_start = time.time()
+                i = 0
+                with open(xapian_path, "r") as xf:
+                    for line in xf:
+                        feat = json.loads(line)
+                        slug = feat["name"].lower()
+                        slug = "".join(c if c.isalnum() or c in "-_ " else "" for c in slug)
+                        slug = slug.strip().replace(" ", "-")[:80]
+                        slug = f"{slug}-{i}"
 
-                    zoom = {"place": 14, "airport": 14, "peak": 15, "park": 15,
-                            "water": 14, "poi": 17, "street": 16}.get(feat["type"], 15)
-                    map_hash = f"map={zoom}/{feat['lat']}/{feat['lon']}"
-                    # Prefer Overture's normalized category for display
-                    # when present (falls back to OMT subtype / OSM type).
-                    kind_raw = feat.get("cat") or feat.get("subtype") or feat["type"]
-                    label = kind_raw.replace("_", " ").title()
-                    enrich = {k: feat[k] for k in ("ws", "p", "soc", "brand", "wd")
-                              if feat.get(k)}
-                    page_html = search_detail_html(
-                        feat["name"], label,
-                        feat["lat"], feat["lon"], map_hash, enrich=enrich,
-                    )
-                    creator.add_item(MapItem(
-                        f"search/{slug}.html",
-                        feat["name"],
-                        "text/html",
-                        page_html.encode("utf-8"),
-                        is_front=False,
-                    ))
+                        zoom = {"place": 14, "airport": 14, "peak": 15, "park": 15,
+                                "water": 14, "poi": 17, "street": 16}.get(feat["type"], 15)
+                        map_hash = f"map={zoom}/{feat['lat']}/{feat['lon']}"
+                        # Prefer Overture's normalized category for display
+                        # when present (falls back to OMT subtype / OSM type).
+                        kind_raw = feat.get("cat") or feat.get("subtype") or feat["type"]
+                        label = kind_raw.replace("_", " ").title()
+                        enrich = {k: feat[k] for k in ("ws", "p", "soc", "brand", "wd")
+                                  if feat.get(k)}
+                        page_html = search_detail_html(
+                            feat["name"], label,
+                            feat["lat"], feat["lon"], map_hash, enrich=enrich,
+                        )
+                        creator.add_item(MapItem(
+                            f"search/{slug}.html",
+                            feat["name"],
+                            "text/html",
+                            page_html.encode("utf-8"),
+                            is_front=False,
+                        ))
 
-                    i += 1
-                    if i % 2000 == 0:
-                        elapsed = time.time() - xapian_start
-                        rate = i / elapsed if elapsed > 0 else 0
-                        remaining = (xapian_count - i) / rate if rate > 0 else 0
-                        print(f"\r    Added {i}/{xapian_count} search pages ({rate:.0f}/s, ~{remaining/60:.0f}m left)...", end="", flush=True)
+                        i += 1
+                        if i % 2000 == 0:
+                            elapsed = time.time() - xapian_start
+                            rate = i / elapsed if elapsed > 0 else 0
+                            remaining = (xapian_count - i) / rate if rate > 0 else 0
+                            print(f"\r    Added {i}/{xapian_count} search pages ({rate:.0f}/s, ~{remaining/60:.0f}m left)...", end="", flush=True)
 
-            os.unlink(xapian_path)
-            print(f"\r    Added {i} search pages in {time.time() - xapian_start:.0f}s                ", flush=True)
+                os.unlink(xapian_path)
+                print(f"\r    Added {i} search pages in {time.time() - xapian_start:.0f}s                ", flush=True)
+            elif xapian_mode == "builder":
+                # Build the Xapian DBs externally via the xapianbuilder
+                # helper, then add the glass DB files at namespace 'X'
+                # with compress=False. Saves the ~2-6h libzim spends
+                # ingesting search/*.html stubs on continent-scale ZIMs
+                # AND the 13-15 GB those stubs cost in the shipped ZIM.
+                print(f"    Building Xapian indexes via xapianbuilder "
+                      f"({xapian_count} docs of {total_features} total)...", flush=True)
+                xapian_workdir_local = xapian_workdir or chunk_tmp
+                ft_glass, ti_glass = _build_xapian_via_xapianbuilder(
+                    xapian_path, xapian_workdir_local,
+                    language="eng", binary_override=xapianbuilder_bin,
+                )
+                # Xapian's X-namespace items must be uncompressed by
+                # Kiwix convention — libzim's reader detects them via
+                # the +xapian mimetype and the raw cluster layout.
+                creator.add_item(MapItem(
+                    "fulltext/xapian", "",
+                    "application/octet-stream+xapian",
+                    ft_glass, is_front=False, compress=False,
+                    namespace="X",
+                ))
+                creator.add_item(MapItem(
+                    "title/xapian", "",
+                    "application/octet-stream+xapian",
+                    ti_glass, is_front=False, compress=False,
+                    namespace="X",
+                ))
+                # The JSONL on disk stays — it's harmless to keep, and
+                # --keep-temp users may want to re-run xapianbuilder
+                # with different settings without redoing the bucketing.
+            elif xapian_mode == "none":
+                # No Xapian. Drop the JSONL — nothing reads it.
+                try: os.unlink(xapian_path)
+                except OSError: pass
+                print(f"    --xapian=none — skipped {xapian_count} Xapian pages "
+                      "(no fulltext/title indexes; users search via places.html)",
+                      flush=True)
 
             # Clean up chunk temp dir
             try:
@@ -4906,6 +5560,58 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "loads only the chosen chip file (~MB) instead of the "
                              "full poi.json (up to 1 GB on Japan), which OOM'd Chrome "
                              "and iOS WebViews. Source of truth: cloud/chip_rules.py.")
+    parser.add_argument("--xapian",
+                        choices=("libzim", "builder", "none"),
+                        default="libzim",
+                        help="How to produce the X/fulltext/xapian and "
+                             "X/title/xapian indexes. "
+                             "'libzim' (default) — emit search/<slug>.html "
+                             "stubs and let libzim's auto-indexer build the "
+                             "Xapian DBs at finalize. The 2026-05 baseline "
+                             "behaviour. "
+                             "'builder' — skip the HTML stubs entirely; "
+                             "stream the search-feature JSONL through the "
+                             "external `xapianbuilder` helper "
+                             "(../xapianbuilder/target/release/xapianbuilder) "
+                             "to produce the glass DBs on disk, then add "
+                             "them to the ZIM at namespace 'X' with "
+                             "compress=false. Requires --zim-builder=rust "
+                             "(libzim's Creator can't accept items at the "
+                             "X namespace). Saves 2-6h on continent-scale "
+                             "ZIMs and 13-15 GB on Europe. "
+                             "'none' — skip Xapian entirely; users search "
+                             "via the in-ZIM places.html (which uses the "
+                             "JSON search-data chunks). Saves another "
+                             "1-2h of libzim finalize time. Kiwix's "
+                             "native search bar degrades to title-prefix.")
+    parser.add_argument("--xapianbuilder-bin", metavar="PATH", default=None,
+                        help="Path to the xapianbuilder binary. Defaults to "
+                             "$XAPIANBUILDER_BIN, then "
+                             "../xapianbuilder/target/release/xapianbuilder, "
+                             "then ../xapianbuilder/target/debug/xapianbuilder.")
+    parser.add_argument("--no-llm-bundle", action="store_true",
+                        help="Skip writing category-index/{addr,poi,street}.json "
+                             "(the LLM bundle). These files are hundreds of MB "
+                             "to multi-GB on continent regions; the post-build "
+                             "`cloud/repackage_zim.py` strips them by default. "
+                             "Set this flag on direct create_osm_zim builds to "
+                             "match the shipped output without an extra repack "
+                             "pass. The chip-*.json files (Find page) are still "
+                             "derived from poi+park records — they survive the "
+                             "drop.")
+    parser.add_argument("--spatial-chunk-scale", type=int, default=0, metavar="N",
+                        help="Convert the monolithic routing graph into the "
+                             "spatial SZCI/SZRC layout in-build (N = cells per "
+                             "degree; 1 = 1° cells, 10 = 0.1° cells). When "
+                             "set, the routing graph emits as "
+                             "routing-data/graph-cells-index.bin + per-cell "
+                             "graph-cell-NNNNN.bin files (+ nodes-scaled-NNN.bin "
+                             "shards on continent scale). Replaces the post-"
+                             "build `cloud/repackage_zim.py --spatial-chunk-scale N` "
+                             "pass: same output bytes, but the work runs while "
+                             "create_osm_zim already has the graph in memory, "
+                             "saving a full unpack-repack of the ZIM. "
+                             "Default 0 = monolithic graph.bin (legacy).")
 
     args = parser.parse_args()
 
@@ -5574,7 +6280,21 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             address_count=address_count,
             zim_builder=getattr(args, "zim_builder", "python"),
             max_zoom=args.max_zoom,
+            xapian_mode=getattr(args, "xapian", "libzim"),
+            xapianbuilder_bin=getattr(args, "xapianbuilder_bin", None),
+            xapian_workdir=tmpdir,
+            no_llm_bundle=bool(getattr(args, "no_llm_bundle", False)),
+            spatial_chunk_scale=int(getattr(args, "spatial_chunk_scale", 0) or 0),
         )
+
+        # Stop the phase timer (no further phases will be printed
+        # after this) and emit the summary table for post-mortem.
+        PHASE_TIMER.stop()
+        summary = PHASE_TIMER.summary()
+        if summary:
+            print()
+            print("=== Phase timing ===")
+            print(summary)
 
         print()
         print("=" * 60)
