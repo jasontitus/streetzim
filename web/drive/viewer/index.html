@@ -1341,6 +1341,12 @@ fetchConfig(1)
 
     // Initialize routing
     initRouting(map, config);
+
+    // "Explore" — top-right floating button that opens a chip menu.
+    // Each chip links into places.html with that chip preselected and
+    // the "Limit to map area" toggle on, so the user goes straight to
+    // a constrained category browse.
+    initExplore(map);
   })
   .catch(function(err) {
     dbg('fatal error loading map', describeError(err), err && err.stack);
@@ -2345,13 +2351,15 @@ function _showPlaceDetail(map, r, idx) {
     }).catch(function() {});
   }
 
-  // "Nearby" placeholder row — wired up in feature #2.
-  // Already lay out the slot so the panel doesn't reflow when it
-  // becomes interactive.
+  // Nearby — up to 5 closest places from the current result set,
+  // excluding self. Cheap (no fetch) and immediately useful: lets
+  // the user explore "what else is around this restaurant" without
+  // closing the panel and flicking the carousel.
   var nearbyRow = document.createElement('div');
   nearbyRow.id = 'detail-nearby-slot';
   nearbyRow.style.cssText = 'margin-top:14px;';
   panel.appendChild(nearbyRow);
+  _populateNearby(nearbyRow, map, r, idx);
 
   document.body.appendChild(backdrop);
   document.body.appendChild(panel);
@@ -2538,6 +2546,250 @@ function _detailFmtNumber(n) {
   if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
   if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
   return String(n);
+}
+
+// --- Explore menu ---
+// Floating top-right pill. Click to expand a list of common chips;
+// click a chip to navigate to places.html with that chip preselected
+// + map-area toggle on. Hidden when the carousel is up so it doesn't
+// fight that affordance for screen real estate.
+//
+// Chip list is hard-coded here (mirrors a subset of places.html
+// CATEGORIES). The build still emits chip files keyed by these IDs;
+// regions without a particular category just show "0 matches" on
+// places.html — graceful degrade.
+var EXPLORE_CHIPS = [
+  { id: 'restaurants',    label: 'Restaurants',   emoji: '🍴' },
+  { id: 'cafes',          label: 'Cafés',         emoji: '☕' },
+  { id: 'shops',          label: 'Shops',         emoji: '🛍️' },
+  { id: 'attractions',    label: 'Attractions',   emoji: '🏛️' },
+  { id: 'parks',          label: 'Parks',         emoji: '🌳' },
+  { id: 'fuel',           label: 'Gas',           emoji: '⛽' },
+  { id: 'lodging',        label: 'Hotels',        emoji: '🏨' },
+];
+
+function initExplore(map) {
+  // Don't try to render this affordance if the host page already
+  // owns the corner (e.g. Kiwix Desktop's chrome). Detect via the
+  // URL prefix MapLibre uses.
+  if (document.getElementById('explore-fab')) return;
+
+  var fab = document.createElement('button');
+  fab.type = 'button';
+  fab.id = 'explore-fab';
+  fab.title = 'Explore nearby';
+  fab.textContent = '⊕ Explore';
+  fab.style.cssText = (
+    'position:fixed; right:14px; top:14px; z-index:1500;'
+    + 'padding:9px 14px; border-radius:999px; font-weight:600;'
+    + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
+    + 'background:rgba(255,255,255,0.94); color:#1a73e8;'
+    + 'border:1px solid rgba(0,0,0,0.12);'
+    + 'box-shadow:0 3px 10px rgba(0,0,0,0.14);'
+    + 'cursor:pointer;'
+  );
+  fab.addEventListener('click', function() {
+    if (document.getElementById('explore-menu')) {
+      _closeExploreMenu();
+    } else {
+      _openExploreMenu(map);
+    }
+  });
+  document.body.appendChild(fab);
+  // Hide while the carousel/detail-panel is open — they're already
+  // top-of-screen UX. Toggle via a periodic pointer (cheap; runs
+  // only while the FAB is mounted).
+  setInterval(function() {
+    var hide = !!_findResultsState.strip;
+    fab.style.display = hide ? 'none' : '';
+  }, 250);
+}
+
+function _openExploreMenu(map) {
+  _closeExploreMenu();
+  var menu = document.createElement('div');
+  menu.id = 'explore-menu';
+  menu.style.cssText = (
+    'position:fixed; right:14px; top:54px; z-index:1500;'
+    + 'background:#fff; color:#222;'
+    + 'border:1px solid #ddd; border-radius:12px;'
+    + 'box-shadow:0 8px 22px rgba(0,0,0,0.18);'
+    + 'padding:6px; min-width:200px;'
+    + 'font:14px/1.4 -apple-system,system-ui,sans-serif;'
+  );
+  var head = document.createElement('div');
+  head.style.cssText = (
+    'padding:6px 10px 8px; color:#666; font-size:12px;'
+    + 'text-transform:uppercase; letter-spacing:0.04em;'
+  );
+  head.textContent = 'Explore in this area';
+  menu.appendChild(head);
+  for (var i = 0; i < EXPLORE_CHIPS.length; i++) {
+    var c = EXPLORE_CHIPS[i];
+    var row = document.createElement('button');
+    row.type = 'button';
+    row.style.cssText = (
+      'display:flex; align-items:center; gap:10px; width:100%;'
+      + 'padding:10px 12px; background:transparent; border:none;'
+      + 'text-align:left; font:inherit; font-size:14px;'
+      + 'border-radius:8px; cursor:pointer;'
+    );
+    row.addEventListener('mouseenter', function() {
+      this.style.background = '#f5f9ff';
+    });
+    row.addEventListener('mouseleave', function() {
+      this.style.background = 'transparent';
+    });
+    var emoji = document.createElement('span');
+    emoji.setAttribute('aria-hidden', 'true');
+    emoji.textContent = c.emoji;
+    var label = document.createElement('span');
+    label.textContent = c.label;
+    row.appendChild(emoji);
+    row.appendChild(label);
+    (function(chipId) {
+      row.addEventListener('click', function() {
+        _gotoExplore(map, chipId);
+      });
+    })(c.id);
+    menu.appendChild(row);
+  }
+  document.body.appendChild(menu);
+  // Close on outside click — defer attach so this same-event click
+  // doesn't immediately close.
+  setTimeout(function() {
+    document.addEventListener('click', _exploreOutsideClick);
+  }, 0);
+}
+
+function _exploreOutsideClick(e) {
+  if (e.target.closest('#explore-menu')
+      || e.target.closest('#explore-fab')) {
+    return;
+  }
+  _closeExploreMenu();
+}
+
+function _closeExploreMenu() {
+  var m = document.getElementById('explore-menu');
+  if (m && m.parentNode) m.parentNode.removeChild(m);
+  document.removeEventListener('click', _exploreOutsideClick);
+}
+
+function _gotoExplore(map, chipId) {
+  // Make sure the current viewport is in sessionStorage before we
+  // navigate — places.html only enables "Limit to map area" if the
+  // stash exists. We already write on moveend, but a fresh tab that
+  // never moved the camera might be stale.
+  try {
+    var b = map.getBounds();
+    sessionStorage.setItem('streetzim_last_viewport', JSON.stringify({
+      n: b.getNorth(), s: b.getSouth(),
+      e: b.getEast(),  w: b.getWest(),
+      z: map.getZoom(), ts: Date.now(),
+    }));
+  } catch (e) {}
+  _closeExploreMenu();
+  // Navigate to places.html with the chip + bbox toggle preset.
+  // Path is the same directory as the viewer (cleanUrls strips the
+  // .html on Firebase, but it's harmless on Kiwix where the file
+  // is served as-is).
+  var here = location.pathname.replace(/[^/]+\/?$/, '');
+  location.href = here + 'places.html?chip='
+                + encodeURIComponent(chipId) + '&mapArea=1';
+}
+
+// "Nearby" inside the detail panel. Source is the loaded result set
+// itself, sorted by distance from `r`. Capped to 5 rows + a 1500 m
+// radius so out-of-area entries don't drift in. Tapping a row swaps
+// the detail panel to that place (no carousel flick required).
+function _populateNearby(slot, map, r, selfIdx) {
+  if (!_findResultsState.items || _findResultsState.items.length < 2) return;
+  var items = _findResultsState.items;
+  var ranked = [];
+  for (var i = 0; i < items.length; i++) {
+    if (i === selfIdx) continue;
+    var o = items[i];
+    if (typeof o.a !== 'number' || typeof o.o !== 'number') continue;
+    var d = _haversineMetersStrip(r.a, r.o, o.a, o.o);
+    if (d > 1500) continue;
+    ranked.push({ idx: i, item: o, dist: d });
+  }
+  if (ranked.length === 0) return;
+  ranked.sort(function(a, b) { return a.dist - b.dist; });
+  ranked = ranked.slice(0, 5);
+
+  var head = document.createElement('div');
+  head.style.cssText = (
+    'font-size:11px; color:#888; text-transform:uppercase;'
+    + 'letter-spacing:0.04em; margin:0 0 6px;'
+  );
+  head.textContent = 'Nearby (within 1.5 km)';
+  slot.appendChild(head);
+  var list = document.createElement('div');
+  list.style.cssText = (
+    'display:flex; flex-direction:column;'
+    + 'border:1px solid #eee; border-radius:10px; overflow:hidden;'
+  );
+  for (var j = 0; j < ranked.length; j++) {
+    list.appendChild(_nearbyRow(map, ranked[j], j === ranked.length - 1));
+  }
+  slot.appendChild(list);
+}
+
+function _nearbyRow(map, entry, isLast) {
+  var row = document.createElement('button');
+  row.type = 'button';
+  row.style.cssText = (
+    'display:flex; align-items:center; gap:10px; width:100%;'
+    + 'padding:10px 12px; background:#fff; cursor:pointer;'
+    + 'border:none;' + (isLast ? '' : 'border-bottom:1px solid #f0f0f0;')
+    + 'text-align:left; font:inherit;'
+  );
+  row.addEventListener('mouseenter', function() {
+    row.style.background = '#f5f9ff';
+  });
+  row.addEventListener('mouseleave', function() {
+    row.style.background = '#fff';
+  });
+
+  var col = document.createElement('div');
+  col.style.cssText = 'flex:1 1 auto; min-width:0;';
+  var name = document.createElement('div');
+  name.style.cssText = (
+    'font-weight:600; font-size:14px;'
+    + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
+  );
+  name.textContent = entry.item.n || '(unnamed)';
+  col.appendChild(name);
+  var meta = document.createElement('div');
+  meta.style.cssText = (
+    'color:#777; font-size:12px;'
+    + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
+  );
+  var kind = entry.item.cat || entry.item.s || entry.item.t;
+  var metaParts = [];
+  if (kind) metaParts.push(String(kind).replace(/_/g, ' '));
+  if (entry.item.brand) metaParts.push(entry.item.brand);
+  meta.textContent = metaParts.join(' · ');
+  col.appendChild(meta);
+  row.appendChild(col);
+
+  var dist = document.createElement('div');
+  dist.style.cssText = (
+    'flex:0 0 auto; color:#1a73e8; font-size:13px; font-weight:600;'
+  );
+  dist.textContent = _formatDistanceStrip(entry.dist);
+  row.appendChild(dist);
+
+  row.addEventListener('click', function() {
+    // Swap the detail panel to the tapped neighbour. Re-using
+    // _showPlaceDetail keeps a clean stack — _showPlaceDetail tears
+    // down any prior panel before opening the new one.
+    _setActiveResult(map, entry.idx, /*flyTo*/true);
+    _showPlaceDetail(map, entry.item, entry.idx);
+  });
+  return row;
 }
 
 function _findResultCard(map, r, idx) {

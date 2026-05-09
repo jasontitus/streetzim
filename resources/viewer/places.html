@@ -514,6 +514,29 @@ function _effectiveSortMode() {
   return state.sortMode || (state.origin ? 'distance' : 'name');
 }
 
+// Apply ?chip=…&mapArea=1 URL params, set by the index.html Explore
+// menu. Idempotent — runs once on init. Pre-toggles the bbox filter
+// when mapArea=1 is requested AND a viewport is actually on hand.
+function applyUrlParamsOnce() {
+  let params;
+  try { params = new URLSearchParams(location.search); }
+  catch (e) { return; }
+  const chipId = params.get('chip');
+  const mapArea = params.get('mapArea') === '1';
+  if (mapArea && state.mapArea && els.mapAreaCheck) {
+    state.mapAreaOn = true;
+    els.mapAreaCheck.checked = true;
+  }
+  if (chipId) {
+    const def = CATEGORIES.find(c => c.id === chipId);
+    if (def) {
+      // selectChip toggles, so make sure the starting state is "off".
+      state.chip = null;
+      selectChip(def);
+    }
+  }
+}
+
 // ---------- bootstrapping ----------
 
 (async function init() {
@@ -533,6 +556,7 @@ function _effectiveSortMode() {
   initMapAreaToggle();
   initRecents();
   initSortRow();
+  applyUrlParamsOnce();
   els.q.addEventListener('input', debounce(onSearch, 200));
   // Search-near input: typeahead into the same place/POI index, click
   // a result to set the search origin manually. "My location" (GPS)
