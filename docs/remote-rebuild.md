@@ -194,9 +194,15 @@ ID=europe
 BBOX="-25.0,34.0,50.5,72.0"           # west,south,east,north
 NAME=Europe                            # human-readable region name
 
-# This is the canonical command for a regional build. All flags
-# match what we ship today on -c:
-./venv312/bin/python3 create_osm_zim.py \
+# This is the canonical command for a regional build (2026-05-08+).
+# All Tier-1 work (spatial routing layout, LLM-bundle drop, recursive
+# search-chunk split) happens inside create_osm_zim.py — there is no
+# longer a post-build `cloud/repackage_zim.py` pass. Xapian indexes
+# are produced by the standalone `xapianbuilder` helper rather than
+# libzim's auto-indexer (40-60× faster on continent corpora). The
+# ZIM emit goes through zimru (`--zim-builder=rust`) for parallel
+# rayon-backed compression.
+ZSTD_CLEVEL=22 ./venv312/bin/python3 create_osm_zim.py \
     --mbtiles world-data/world-tiles-v2.mbtiles \
     --pbf world-data/planet.osm.pbf \
     --bbox="$BBOX" \
@@ -208,47 +214,61 @@ NAME=Europe                            # human-readable region name
     --search-cache search_cache/world.jsonl \
     --overture-addresses overture_cache/addresses-${ID}-2026-04-15.0.parquet \
     --overture-places overture_cache/places-${ID}-2026-04-15.0.parquet \
-    --chunk-graph-mb 200 \
     --split-hot-search-chunks-mb 10 \
     --split-find-chips \
+    --no-llm-bundle \
+    --spatial-chunk-scale 1 \
+    --xapian builder \
+    --zim-builder rust \
     --low-zoom-world-vrt terrain_cache/dem_sources/world_dem_32k.tif \
     --output osm-${ID}.zim \
     --keep-temp \
     2>&1 | tee ${ID}-build.log
 ```
 
-Notes:
-- `--keep-temp` is important. Builds can fail at the ZIM-pack step
+Flag reference:
+- `--no-llm-bundle` — skip writing `category-index/{addr,poi,street}.json`.
+  These are hundreds of MB to multi-GB on continent regions; the old
+  post-build repack used to drop them. Chip emission still derives
+  from poi+park records.
+- `--spatial-chunk-scale N` — emit the routing graph as native
+  SZCI/SZRC layout in-build (replaces the post-build
+  `cloud/repackage_zim.py --spatial-chunk-scale N` step). N=1 (1°
+  cells, ~110 cells for California) matches today's shipping
+  convention; N=10 (0.1° cells) for ZIMs where the graph would be
+  huge per-cell otherwise.
+- `--xapian builder` — produce Xapian fulltext + title indexes via
+  the external `../xapianbuilder/` helper (parallel, seconds rather
+  than hours). Requires `--zim-builder=rust`. See
+  `docs/zim-builder-rust.md` § "Xapian on the rust path".
+- `--zim-builder rust` — emit via zimru / streetzim-pack. Required
+  for `--xapian=builder`. Per-cluster zstd `windowLog` is pinned to
+  `ceil(log2(cluster_size))` after zimru `64e76c7` — fzstd-friendly
+  in browser. Don't ship continent-scale rust ZIMs against an older
+  zimru checkout; see `docs/zim-packaging-gotchas.md` Gotcha #6.
+- `--keep-temp` — important. Builds can fail at the ZIM-pack step
   and `--keep-temp` lets you resume without redoing the 4-hour
   routing extraction.
-- Set `ZSTD_CLEVEL=22` in the env if you want maximum compression
-  (it's the default).
-- Set `TERRAIN_BLANK_TOLERATE=5` if the build aborts on the safety
+- `ZSTD_CLEVEL=22` — production default. ManifestCreator now reads
+  this and forwards to zimru explicitly. Logged in the build summary
+  as `zim-pack: zstd level` so you can spot a level mismatch.
+- `TERRAIN_BLANK_TOLERATE=5` — set if the build aborts on the safety
   check from a few legit-low-elevation tiles (Caspian shoreline
-  type cases). Memory file `project_terrain_blank_tile_bug.md`
-  describes when to use this and when to fix the underlying DEM gap.
+  type cases). See memory `project_terrain_blank_tile_bug.md`.
 
-After build:
+After build (no repack pass any more):
 
 ```sh
 TODAY="$(date +%Y-%m-%d)"
 OUT="osm-${ID}-${TODAY}.zim"
 mv "osm-${ID}.zim" "$OUT"
-
-# Spatial-chunk the routing graph for mobile (post-process, since
-# create_osm_zim emits monolithic graph.bin — we then convert).
-# Also drops the LLM bundle (addr/poi/street.json — viewer doesn't
-# read them, ~10-15% size win) and sub-buckets fat chips (>10 MB).
-./venv312/bin/python3 cloud/repackage_zim.py "$OUT" "$OUT.spatial.zim" \
-    --spatial-chunk-scale 10 \
-    --split-find-chips \
-    --split-hot-search-chunks-mb 10 \
-    --chip-split-threshold-mb 10
-mv "$OUT.spatial.zim" "$OUT"
-
 ./venv312/bin/python3 cloud/validate_zim.py "$OUT"
 bash cloud/upload_validated.sh "$ID" "$OUT"
 ```
+
+The build summary printed at end-of-run breaks down phase + sub-phase
+wall-clock so before/after measurements are concrete (memory:
+`feedback_instrument_what_you_optimize.md`).
 
 ### Suggested order (small → large, lets you bail without losing big work)
 

@@ -236,3 +236,95 @@ through this trap has `manifest.chips = {}` (empty), so the chips
 check is `[SKIP]` and the lethal-on-mobile fallback to `poi.json`
 ships unflagged. A future check should also verify chips exist
 when `poi.json` was supposed to be the source data.
+
+---
+
+## 6. zimru zstd `windowLog` must match cluster size for fzstd-in-browser
+
+**Symptom.** A continent-scale ZIM emitted via the rust path
+(`--zim-builder=rust`) loads correctly in Kiwix Desktop / iOS / kiwix-
+serve (libzim's reader is fine), but when opened in the streetzim PWA
+viewer at `streetzim.web.app/drive/`, every workload that fans out
+random-access reads — typeahead, route loading, find chips — runs
+3-4× slower than the same content in a libzim-emitted ZIM. The smoke
+harness's 15 s typeahead timeout reliably fails on continent-scale
+zimru ZIMs and reliably passes on libzim ones, even though the byte
+content of the cells is identical.
+
+**Cause.** zstd's `windowLog` parameter defaults to `27` (128 MiB
+window) when compression level ≥ 20. The frame header records this
+window size, and decoders allocate a buffer that big per stream. In-
+browser fzstd is the consumer in our PWA; for continent-scale
+typeahead the viewer fans out 256 parallel decompressions — that's
+256 × 128 MiB = 32 GiB of speculative buffer space, which Chrome's
+GC chokes on. Native readers (libzim) don't suffer because they use
+libzstd which mmaps the dictionary and pages in only what's needed.
+
+libzim's writer caps `windowLog` at `log2(cluster_size_target)` (e.g.
+21 for 2 MiB clusters), so its frames are decoder-friendly out of the
+box. zimru's `encode_cluster` was using zstd defaults — fine for
+correctness, fatal for in-browser perf at scale.
+
+**Fix in zimru** (`zimru/src/writer.rs:encode_cluster`, commit
+`64e76c7` 2026-05-08): pin `windowLog` to `ceil(log2(payload.len()))`,
+clamped to `[10, 27]`. The actual cluster size on streetzim is
+typically 200 KB – 8 MB, so per-stream allocation drops from 128 MiB
+to a few MB.
+
+**Numbers** (California ZIM, 3.5 GB, 5,521 clusters, 256-leaf 'sa'
+typeahead walk):
+
+| | windowLog=27 (default) | windowLog=ceil(log2(payload)) |
+|---|---|---|
+| Smoke route load | 16 s | 7.5 s |
+| Smoke typeahead | **fail (15 s timeout)** | pass |
+| Build wall-clock | 1h26m20s | 1h27m43s (essentially same) |
+| Output ZIM size | 3.50 GB | 3.50 GB |
+
+The frame header records the actual window size, so older fzstd
+decoders stay compatible — they just allocate exactly what they need.
+
+**Validator gap (worth adding).** No current check verifies that
+emitted zstd frames have a sane window. A future check could open
+the first cluster's frame header and assert `windowLog <=
+log2(cluster_size_target) + 1`.
+
+---
+
+## 7. `cluster_strategy: by_mime` is wrong for typeahead-style workloads
+
+**Symptom.** ZIMs emitted by `cloud/manifest_writer.py:ManifestCreator`
+with `cluster_strategy="by_mime"` (the old default) put all `text/json`
+items in one bucket, all `text/html` items in another, etc. That sounds
+like a good locality optimization, but for the streetzim viewer's
+typeahead walk — which fetches 16-256 search-data JSON chunks scattered
+by FNV-1a hash across many cluster boundaries — every chunk fetch
+hits a different cluster and pays a fresh decompression context.
+
+`cluster_strategy="single"` (the libzim default) packs items in URL-
+sort order. Search-data chunks like `sa-0-0.json`, `sa-0-1.json`, …
+end up in nearby clusters → page cache stays warm during the walk.
+
+**Fix.** `ManifestCreator` default flipped to `"single"` in commit
+`f38cfb4` (2026-05-07). Don't pass `by_mime` unless you have a
+specific multi-mime locality argument *and* you've measured your
+actual workload doesn't fan-out across mime types.
+
+---
+
+## 8. `ManifestCreator` swallows `ZSTD_CLEVEL` if `compression_level` is left unset
+
+**Symptom.** `build_region.sh` (and our wrappers) set
+`ZSTD_CLEVEL=22` in the environment to match the libzim path's
+production default. libzim's Creator reads the env var directly. But
+`cloud/manifest_writer.py` builds a manifest config dict and only
+emits `compression_level` if the caller explicitly passed one — the
+env var was being lost. The first XB1 build of California shipped
+silently at zstd-3 (the rust default) instead of zstd-22, producing
+a ~25 % larger ZIM than baseline.
+
+**Fix.** `create_osm_zim.py:create_zim` now reads `ZSTD_CLEVEL` and
+passes it to `ManifestCreator(compression_level=...)` explicitly,
+so the rust path matches libzim's behaviour. Logged via
+`PHASE_TIMER.record_metric("zim-pack: zstd level", ...)` in every
+build summary so you can spot a level mismatch immediately.

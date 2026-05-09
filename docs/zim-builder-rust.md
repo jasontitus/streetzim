@@ -125,7 +125,7 @@ are recommended for any `file:` field.
 | Peak RSS for emit        | tied to libzim's queue + worker count     | bounded by `max_in_flight_bytes`               |
 | Parallelism              | C++ workers (config_nbworkers); GIL-bound feed | `rayon` work-stealing across cores         |
 | Per-item compression     | only via the `Hint.COMPRESS` ItemHint     | native `Item::compress` (mixed builds OK)      |
-| FT index (xapian)        | yes                                       | no (zimru is GPL-incompatible — out of scope)  |
+| FT index (xapian)        | yes (libzim auto-indexer at finalize)     | yes via `xapianbuilder` subprocess; see "Xapian on the rust path" below |
 | Streaming for huge items | `FileProvider` (libzim cluster heuristic) | dedicated streaming-encode (zstd or raw)       |
 | Cluster strategy         | `single` / `by_mime` (libzim flag)        | `single` / `by_mime` / `by_extension` / `by_first_path_segment` |
 
@@ -147,3 +147,59 @@ Path D is an externalisation of the ZIM emit phase only — the
 upstream OSM PBF + tile + satellite + terrain + wikidata + overture
 pipeline is untouched and still runs in Python. Only the final
 `Creator` calls move to Rust.
+
+## Xapian on the rust path
+
+zimru itself is GPL-incompatible so it doesn't link Xapian, but it
+*does* accept arbitrary items into the `X/` namespace. We exploit
+this by:
+
+1. Building the fulltext + title Xapian glass DBs externally via
+   `../xapianbuilder/target/release/xapianbuilder` (a separate Rust
+   binary that's GPL-clean for ZIM output and licence-bound to its
+   own tree).
+2. Adding the resulting `*.glass` files to the manifest as items at
+   `namespace=88` (`b'X'`), `path=fulltext/xapian` and `path=title/xapian`,
+   `mime=application/octet-stream+xapian`, `compress=False` (required
+   — see *Gotcha #6: zimru zstd `windowLog`* in
+   `zim-packaging-gotchas.md`; the X namespace is uncompressed by
+   Kiwix convention so libzim's reader picks them up via
+   `has_fulltext_index`).
+3. libzim's reader on Kiwix Desktop / iOS / kiwix-serve treats the
+   resulting ZIM identically to one libzim emitted itself.
+
+Wired up by `create_osm_zim.py --xapian=builder` (see
+`docs/remote-rebuild.md` for the full flag set). Roughly **40-60×
+faster** than libzim's auto-indexer on continent-scale corpora
+(California: 252,947 docs in ~3 s vs. ~hours for libzim's
+HTML-stub-feed flow).
+
+Caveats:
+
+- `--xapian=builder` requires `--zim-builder=rust`. libzim's
+  Creator's public Python API doesn't accept items at the X
+  namespace, so we can't inject pre-built glass DBs there.
+- `xapianbuilder` is a separate `cargo build --release` in
+  `../xapianbuilder/`. The Python side resolves the binary via
+  `--xapianbuilder-bin` flag, then `$XAPIANBUILDER_BIN`, then
+  `../xapianbuilder/target/{release,debug}/xapianbuilder`.
+- Both `xapianbuilder fulltext` and `xapianbuilder title` run in
+  parallel; the wall-clock recorded in the build summary is
+  `max(fulltext_dur, title_dur)`.
+
+## zimru zstd window-log: don't ship without it
+
+zimru's `encode_cluster` previously used zstd defaults, which set
+`windowLog=27` (128 MiB) at high levels. fzstd in browsers
+allocates a buffer of windowLog size per decompression — fatal for
+the streetzim PWA viewer's 256-parallel-fetch typeahead workload at
+continent scale.
+
+Fixed in zimru `64e76c7` (2026-05-08): `windowLog` is pinned to
+`ceil(log2(payload.len()))`, clamped `[10, 27]`. See
+`docs/zim-packaging-gotchas.md` Gotcha #6 for the full numbers.
+
+If you build streetzim against an older `../zimru/` checkout, you'll
+see continent-scale ZIMs that pass validate but fail the smoke
+harness's typeahead test. `cd ../zimru && git pull && cargo build
+--release` and rebuild streetzim-pack.
