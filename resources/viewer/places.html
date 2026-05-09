@@ -82,6 +82,48 @@
   .map-area .info { color:var(--muted); font-size:0.8rem;
                     overflow:hidden; text-overflow:ellipsis;
                     white-space:nowrap; flex:1 1 auto; min-width:0; }
+  /* Recent searches dropdown — reuses near-results visuals so the
+     hit area + selection styling are familiar. */
+  #recent-searches {
+    position:absolute; left:0; right:0; top:calc(100% + 4px);
+    background:var(--card); border:1px solid var(--line);
+    border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,0.18);
+    z-index:1100; max-height:300px; overflow-y:auto; padding:4px 0;
+  }
+  #recent-searches[hidden] { display:none; }
+  #recent-searches .recent-head {
+    padding:6px 12px; font-size:0.8rem; color:var(--muted);
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  #recent-searches .recent-head button {
+    background:transparent; border:none; color:var(--accent);
+    font:inherit; font-size:0.8rem; cursor:pointer; padding:2px 6px;
+  }
+  #recent-searches .recent-row {
+    padding:8px 12px; cursor:pointer; display:flex;
+    align-items:center; gap:8px; font-size:0.95rem;
+  }
+  #recent-searches .recent-row:hover,
+  #recent-searches .recent-row.active { background:var(--chip-on); color:var(--chip-on-fg); }
+  #recent-searches .recent-row .icon { color:var(--muted); flex:0 0 auto; }
+  /* Sort selector — slim row above the result list. */
+  .sort-row {
+    padding:8px 16px 4px; display:flex; align-items:center; gap:6px;
+    font-size:0.85rem; color:var(--muted); flex-wrap:wrap;
+  }
+  .sort-row[hidden] { display:none; }
+  .sort-row label { flex:0 0 auto; }
+  .sort-row .sort-btn {
+    flex:0 0 auto; padding:4px 10px; border-radius:999px;
+    border:1px solid var(--line); background:transparent;
+    color:var(--text); font:inherit; font-size:0.85rem; cursor:pointer;
+  }
+  .sort-row .sort-btn.on {
+    background:var(--accent); color:#fff; border-color:var(--accent);
+  }
+  /* Wrap the search input so the recent-searches dropdown can absolutely
+     position relative to it. */
+  header .q-wrap { position:relative; }
   #near-results {
     position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:20;
     background:var(--card); border:1px solid var(--line); border-radius:10px;
@@ -143,8 +185,11 @@
          below) so both paths resolve correctly. -->
     <a class="back" id="back-link" href="#">← Map</a>
   </div>
-  <input id="q" type="search" placeholder="Search by name or category…"
-         autocomplete="off" autocapitalize="none" spellcheck="false">
+  <div class="q-wrap">
+    <input id="q" type="search" placeholder="Search by name or category…"
+           autocomplete="off" autocapitalize="none" spellcheck="false">
+    <div id="recent-searches" role="listbox" aria-label="Recent searches" hidden></div>
+  </div>
 </header>
 
 <nav class="chips" id="chips" aria-label="Category filter">
@@ -170,6 +215,14 @@
 <div id="status" class="status">
   <span id="status-text" class="count">Loading places index…</span>
 </div>
+
+<div id="sort-row" class="sort-row" hidden>
+  <label>Sort:</label>
+  <button type="button" class="sort-btn" data-sort="distance">Distance</button>
+  <button type="button" class="sort-btn" data-sort="name">Name</button>
+  <button type="button" class="sort-btn" data-sort="category">Category</button>
+</div>
+
 <ol id="results"></ol>
 
 <footer>
@@ -272,12 +325,39 @@ const state = {
   manifests: { search: null, cat: null }, // small lookups
   cache: { chunks: new Map(), cats: new Map() }, // path → array of records
   results: [],
+  lastRecords: [],     // unsorted records from the last query — re-used by sort
   query: '',
   chip: null,
   origin: null,        // {lat, lon} when GPS toggle is on
   mapArea: null,       // {n,s,e,w,z,ts} from index.html or null
   mapAreaOn: false,    // user toggled "Limit to map area"
+  sortMode: null,      // 'distance' | 'name' | 'category' (null = auto)
 };
+
+// Recent searches are persisted in localStorage so they survive
+// across sessions. Capped to keep storage bounded; users who want
+// more history can star results once we ship saved-places.
+const RECENT_KEY = 'streetzim_recent_searches';
+const RECENT_LIMIT = 10;
+function loadRecents() {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.slice(0, RECENT_LIMIT) : [];
+  } catch (e) { return []; }
+}
+function saveRecent(entry) {
+  // entry: {kind: 'query'|'chip', label, value, ts}
+  if (!entry || !entry.label) return;
+  let arr = loadRecents();
+  // De-dup by (kind, value); promote the existing entry to the top.
+  arr = arr.filter(e => !(e.kind === entry.kind && e.value === entry.value));
+  arr.unshift(entry);
+  arr = arr.slice(0, RECENT_LIMIT);
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(arr)); }
+  catch (e) {}
+}
 
 // Viewport that index.html stashed on its last moveend. We accept it
 // only if it's < 30 min old — otherwise the user has probably context-
@@ -308,6 +388,8 @@ const els = {
   mapAreaRow:   document.getElementById('map-area-row'),
   mapAreaCheck: document.getElementById('map-area-checkbox'),
   mapAreaInfo:  document.getElementById('map-area-info'),
+  recents:      document.getElementById('recent-searches'),
+  sortRow:      document.getElementById('sort-row'),
 };
 
 // If index.html stashed a recent viewport, expose the toggle so the
@@ -327,8 +409,109 @@ function initMapAreaToggle() {
   els.mapAreaRow.hidden = false;
   els.mapAreaCheck.addEventListener('change', () => {
     state.mapAreaOn = els.mapAreaCheck.checked;
-    runSearch();
+    rerunQuery();
   });
+}
+
+function initRecents() {
+  if (!els.recents) return;
+  // Show recents only when the search box is empty AND focused, so
+  // typing-driven typeahead isn't competing with history. Hide on
+  // outside click. Selecting an entry restores the query/chip.
+  els.q.addEventListener('focus', () => {
+    if (!els.q.value.trim()) renderRecents();
+  });
+  els.q.addEventListener('input', () => {
+    // Hide as soon as the user types — typeahead takes over.
+    if (els.q.value) els.recents.hidden = true;
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.q-wrap')) els.recents.hidden = true;
+  });
+}
+
+function renderRecents() {
+  if (!els.recents) return;
+  const items = loadRecents();
+  if (items.length === 0) {
+    els.recents.hidden = true;
+    return;
+  }
+  // Tear down + rebuild via DOM APIs (no innerHTML) since the entries
+  // come from user-typed history that can contain arbitrary text.
+  while (els.recents.firstChild) els.recents.removeChild(els.recents.firstChild);
+  const head = document.createElement('div');
+  head.className = 'recent-head';
+  const headLabel = document.createElement('span');
+  headLabel.textContent = 'Recent searches';
+  head.appendChild(headLabel);
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.textContent = 'Clear';
+  clear.addEventListener('click', (e) => {
+    e.stopPropagation();
+    try { localStorage.removeItem(RECENT_KEY); } catch (e2) {}
+    els.recents.hidden = true;
+  });
+  head.appendChild(clear);
+  els.recents.appendChild(head);
+  for (const item of items) {
+    const row = document.createElement('div');
+    row.className = 'recent-row';
+    row.setAttribute('role', 'option');
+    const icon = document.createElement('span');
+    icon.className = 'icon';
+    icon.textContent = item.kind === 'chip' ? '🏷️' : '🕘';
+    row.appendChild(icon);
+    const label = document.createElement('span');
+    label.textContent = item.label;
+    row.appendChild(label);
+    row.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus
+    row.addEventListener('click', () => applyRecent(item));
+    els.recents.appendChild(row);
+  }
+  els.recents.hidden = false;
+}
+
+function applyRecent(item) {
+  els.recents.hidden = true;
+  if (item.kind === 'chip') {
+    const def = CATEGORIES.find(c => c.id === item.value);
+    if (!def) return;
+    state.chip = null; // selectChip toggles, so make sure we end up "on"
+    selectChip(def);
+  } else {
+    state.chip = null;
+    for (const b of els.chips.querySelectorAll('button')) {
+      b.classList.remove('on');
+    }
+    els.q.value = item.value;
+    state.query = item.value;
+    rerunQuery();
+  }
+}
+
+function initSortRow() {
+  if (!els.sortRow) return;
+  for (const btn of els.sortRow.querySelectorAll('.sort-btn')) {
+    btn.addEventListener('click', () => {
+      state.sortMode = btn.dataset.sort;
+      _refreshSortButtons();
+      _sortAndShow(state.lastRecords.slice());
+    });
+  }
+}
+
+function _refreshSortButtons() {
+  if (!els.sortRow) return;
+  const mode = _effectiveSortMode();
+  for (const btn of els.sortRow.querySelectorAll('.sort-btn')) {
+    btn.classList.toggle('on', btn.dataset.sort === mode);
+  }
+}
+
+function _effectiveSortMode() {
+  return state.sortMode || (state.origin ? 'distance' : 'name');
 }
 
 // ---------- bootstrapping ----------
@@ -348,6 +531,8 @@ function initMapAreaToggle() {
   }
   renderChips();
   initMapAreaToggle();
+  initRecents();
+  initSortRow();
   els.q.addEventListener('input', debounce(onSearch, 200));
   // Search-near input: typeahead into the same place/POI index, click
   // a result to set the search origin manually. "My location" (GPS)
@@ -665,7 +850,6 @@ function stashResultsForMap(label) {
 function applyResults(records) {
   // Hard-filter to the map's last viewport when the user opted in.
   // Done before sort/cap so distance + count reflect the filtered set.
-  let totalBeforeFilter = records.length;
   let filteredOut = 0;
   if (state.mapAreaOn && state.mapArea) {
     const v = state.mapArea;
@@ -677,12 +861,38 @@ function applyResults(records) {
     }
     records = next;
   }
-  if (state.origin) {
+  // Stash the post-filter records so the sort row can re-sort
+  // without re-running the search.
+  state.lastRecords = records.slice();
+  state._lastFilteredOut = filteredOut;
+  // Save to recent history when the search produced anything.
+  if (records.length > 0) {
+    if (state.chip) {
+      saveRecent({ kind: 'chip', value: state.chip.id,
+                   label: state.chip.label, ts: Date.now() });
+    } else if (state.query && state.query.length >= 2) {
+      saveRecent({ kind: 'query', value: state.query,
+                   label: state.query, ts: Date.now() });
+    }
+  }
+  _sortAndShow(records);
+}
+
+function _sortAndShow(records) {
+  const mode = _effectiveSortMode();
+  if (mode === 'distance' && state.origin) {
     for (const r of records) {
       r._dist = haversine(state.origin.lat, state.origin.lon, r.a, r.o);
     }
     records.sort((a, b) => a._dist - b._dist);
-  } else {
+  } else if (mode === 'category') {
+    records.sort((a, b) => {
+      const ca = (a.cat || a.s || a.t || '').toString();
+      const cb = (b.cat || b.s || b.t || '').toString();
+      return ca.localeCompare(cb)
+          || (a.n || '').localeCompare(b.n || '');
+    });
+  } else { // name (default)
     records.sort((a, b) => (a.n || '').localeCompare(b.n || ''));
   }
   // Cap to keep the DOM responsive on big indices.
@@ -693,10 +903,15 @@ function applyResults(records) {
   } else {
     countLine = `${state.results.length} match${state.results.length === 1 ? '' : 'es'}`;
   }
-  if (state.mapAreaOn && state.mapArea && filteredOut > 0) {
-    countLine += ` (filtered ${filteredOut} outside map area)`;
+  if (state.mapAreaOn && state.mapArea && state._lastFilteredOut > 0) {
+    countLine += ` (filtered ${state._lastFilteredOut} outside map area)`;
   }
   setStatus(countLine + '.');
+  // Show the sort row only when there's a meaningful number to sort.
+  if (els.sortRow) {
+    els.sortRow.hidden = state.results.length < 2;
+    _refreshSortButtons();
+  }
   // Show the "On map" pill iff there's something to plot. Toggle
   // every applyResults call so chip/query swaps refresh visibility.
   if (els.mapViewBtn) els.mapViewBtn.hidden = state.results.length === 0;

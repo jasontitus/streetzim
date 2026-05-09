@@ -2266,6 +2266,31 @@ function _findResultCard(map, r, idx) {
     }
   });
   actions.appendChild(dir);
+  // Tap-to-call + tap-to-website actions when the place has them.
+  // Stop propagation so the card-level click handler doesn't also
+  // re-centre the camera under the user's finger.
+  function _miniBtn(emoji, title, href, target) {
+    var a = document.createElement('a');
+    a.href = href;
+    a.title = title;
+    if (target) { a.target = target; a.rel = 'noopener'; }
+    a.textContent = emoji;
+    a.style.cssText = (
+      'flex:0 0 auto; display:inline-flex; align-items:center;'
+      + 'justify-content:center; width:36px; padding:7px 0;'
+      + 'border-radius:8px; text-decoration:none; font-size:14px;'
+      + 'border:1px solid #ddd; background:#fff; color:#222;'
+    );
+    a.addEventListener('click', function(e) { e.stopPropagation(); });
+    return a;
+  }
+  if (r.p) {
+    actions.appendChild(_miniBtn('📞', r.p,
+      'tel:' + String(r.p).replace(/\s+/g, '')));
+  }
+  if (r.ws) {
+    actions.appendChild(_miniBtn('🌐', r.ws, r.ws, '_blank'));
+  }
   card.appendChild(actions);
 
   // Tap (not on the Directions button) → re-center the camera on
