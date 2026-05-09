@@ -1856,12 +1856,17 @@ function makeStyle(config) {
 //     items:  [ { n, a, o, t?, s?, cat?, l?, ws?, p?, soc?, brand?, wd? }, … ] }
 var FIND_RESULTS_STASH_KEY = 'streetzim_find_results';
 var _findResultsState = {
+  map:     null,   // maplibregl.Map — kept so teardown can re-enable keyboard
   markers: [],     // maplibregl.Marker[] — index aligns with stash.items
   strip:   null,   // root <div> of the bottom carousel
   track:   null,   // the scrollable inner element holding the cards
   items:   null,   // stash.items
   origin:  null,   // stash.origin (used for distance labels)
   active:  -1,     // index of the card currently centered
+  searchAreaBtn: null,  // floating "Search this area" pill on the map
+  anchorCenter:  null,  // map center after the initial fitBounds settles
+  anchorZoom:    null,  // map zoom after the initial fitBounds settles
+  moveHandler:   null,  // bound moveend handler (so we can detach on clear)
   scrollDebounce: null,
 };
 
@@ -1882,8 +1887,13 @@ function renderFindResultsFromStash(map) {
   // open carousel.
   try { sessionStorage.removeItem(FIND_RESULTS_STASH_KEY); }
   catch (e) {}
+  _findResultsState.map    = map;
   _findResultsState.items  = stash.items;
   _findResultsState.origin = stash.origin || null;
+  // MapLibre's KeyboardHandler eats arrow keys for camera panning,
+  // which fights the carousel's keyboard nav. Disable while the
+  // carousel is open; clearFindResults re-enables.
+  try { map.keyboard.disable(); } catch (e) {}
 
   // One marker per record. The "active" marker (whichever the
   // carousel currently highlights) gets a distinct color via DOM
@@ -1920,6 +1930,35 @@ function renderFindResultsFromStash(map) {
   }
   _renderFindResultsStrip(map, stash);
   _setActiveResult(map, 0, /*flyTo*/false);
+
+  // After fitBounds settles, capture the anchor view + start watching
+  // for camera moves. Any subsequent move shows the "Search this area"
+  // pill so the user can re-filter results to the new viewport.
+  map.once('idle', function() {
+    if (!_findResultsState.strip) return;
+    _findResultsState.anchorCenter = map.getCenter();
+    _findResultsState.anchorZoom   = map.getZoom();
+    _findResultsState.moveHandler  = function() {
+      if (!_findResultsState.strip) return;
+      if (_searchAreaThresholdReached(map)) _showSearchAreaPill(map);
+    };
+    map.on('moveend', _findResultsState.moveHandler);
+  });
+}
+
+// Threshold: pill appears once the user has either zoomed by ≥ 0.5
+// levels or panned the centre out of the original viewport. Tighter
+// than "any move" so a small jitter doesn't flash the pill.
+function _searchAreaThresholdReached(map) {
+  var ac = _findResultsState.anchorCenter;
+  var az = _findResultsState.anchorZoom;
+  if (!ac || az == null) return false;
+  if (Math.abs(map.getZoom() - az) >= 0.5) return true;
+  var c = map.getCenter();
+  var b = map.getBounds();
+  // Outside the current viewport box → user has clearly panned away.
+  return ac.lng < b.getWest() || ac.lng > b.getEast()
+      || ac.lat < b.getSouth() || ac.lat > b.getNorth();
 }
 
 function _findResultPopup(map, r) {
@@ -2022,6 +2061,107 @@ function _renderFindResultsStrip(map, stash) {
   // Skip when the user is typing in an input — they want to type, not
   // scroll cards.
   document.addEventListener('keydown', _findResultsKeydown);
+}
+
+function _showSearchAreaPill(map) {
+  if (_findResultsState.searchAreaBtn) return; // already on screen
+  var btn = document.createElement('button');
+  btn.id = 'find-search-area-btn';
+  btn.type = 'button';
+  btn.textContent = 'Search this area';
+  btn.style.cssText = (
+    'position:fixed; left:50%; top:14px; transform:translateX(-50%);'
+    + 'z-index:1600; padding:9px 18px;'
+    + 'background:rgba(255,255,255,0.92); color:#222;'
+    + 'border:1px solid rgba(0,0,0,0.12); border-radius:999px;'
+    + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
+    + 'box-shadow:0 4px 14px rgba(0,0,0,0.18);'
+    + 'cursor:pointer; opacity:0;'
+    + 'transition:opacity .25s ease, transform .25s ease, background .15s;'
+    + 'pointer-events:auto;'
+  );
+  btn.addEventListener('mouseenter', function() {
+    btn.style.background = 'rgba(255,255,255,1)';
+  });
+  btn.addEventListener('mouseleave', function() {
+    btn.style.background = 'rgba(255,255,255,0.92)';
+  });
+  btn.addEventListener('click', function() {
+    _searchAreaApply(map);
+  });
+  document.body.appendChild(btn);
+  _findResultsState.searchAreaBtn = btn;
+  // Two RAFs so the initial style flush takes the opacity-0 starting
+  // point; otherwise the transition skips and the button pops in.
+  requestAnimationFrame(function() {
+    requestAnimationFrame(function() {
+      if (!_findResultsState.searchAreaBtn) return;
+      _findResultsState.searchAreaBtn.style.opacity = '1';
+    });
+  });
+}
+
+function _hideSearchAreaPill() {
+  var btn = _findResultsState.searchAreaBtn;
+  if (!btn) return;
+  _findResultsState.searchAreaBtn = null;
+  btn.style.opacity = '0';
+  setTimeout(function() {
+    if (btn.parentNode) btn.parentNode.removeChild(btn);
+  }, 250);
+}
+
+function _searchAreaApply(map) {
+  // Hard-filter the existing items array to the current viewport,
+  // re-render markers + carousel. No re-search — this is the offline
+  // simple version of Google Maps' "Search this area"; the original
+  // result set was already capped at 300 by places.html, so for
+  // unbounded re-search the user can go back to the find page.
+  if (!_findResultsState.items || !_findResultsState.items.length) return;
+  var b = map.getBounds();
+  var w = b.getWest(), e = b.getEast(),
+      s = b.getSouth(), n = b.getNorth();
+  function lonInside(lon) {
+    return w <= e ? (lon >= w && lon <= e) : (lon >= w || lon <= e);
+  }
+  var filtered = _findResultsState.items.filter(function(r) {
+    return r.a >= s && r.a <= n && lonInside(r.o);
+  });
+  if (filtered.length === 0) {
+    // Nothing in view — keep current state, just flash a hint.
+    _hideSearchAreaPill();
+    var btn = document.createElement('div');
+    btn.style.cssText = (
+      'position:fixed; left:50%; top:14px; transform:translateX(-50%);'
+      + 'z-index:1600; padding:9px 18px;'
+      + 'background:rgba(255,255,255,0.95); color:#a33;'
+      + 'border:1px solid rgba(170,50,50,0.25); border-radius:999px;'
+      + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
+      + 'box-shadow:0 4px 14px rgba(0,0,0,0.18); pointer-events:none;'
+    );
+    btn.textContent = 'No results in this area';
+    document.body.appendChild(btn);
+    setTimeout(function() {
+      if (btn.parentNode) btn.parentNode.removeChild(btn);
+    }, 1800);
+    return;
+  }
+  // Tear down the old visuals (markers + strip) but keep the
+  // session: stash a fresh stash with the filtered items and
+  // re-enter the render path so all the wiring is consistent.
+  var origin = _findResultsState.origin;
+  var label = (_findResultsState.strip
+    && _findResultsState.strip.querySelector('span'))
+    ? _findResultsState.strip.querySelector('span').textContent
+        .replace(/\s·\s\d+$/, '')
+    : 'Results';
+  clearFindResults();
+  try {
+    sessionStorage.setItem(FIND_RESULTS_STASH_KEY, JSON.stringify({
+      label: label, origin: origin, items: filtered,
+    }));
+  } catch (e2) {}
+  renderFindResultsFromStash(map);
 }
 
 function _findResultsKeydown(e) {
@@ -2253,6 +2393,23 @@ function clearFindResults() {
     clearTimeout(_findResultsState.scrollDebounce);
     _findResultsState.scrollDebounce = null;
   }
+  if (_findResultsState.map && _findResultsState.moveHandler) {
+    try { _findResultsState.map.off('moveend', _findResultsState.moveHandler); }
+    catch (e) {}
+  }
+  _findResultsState.moveHandler = null;
+  _findResultsState.anchorCenter = null;
+  _findResultsState.anchorZoom = null;
+  if (_findResultsState.searchAreaBtn
+      && _findResultsState.searchAreaBtn.parentNode) {
+    _findResultsState.searchAreaBtn.parentNode.removeChild(
+      _findResultsState.searchAreaBtn);
+  }
+  _findResultsState.searchAreaBtn = null;
+  if (_findResultsState.map) {
+    try { _findResultsState.map.keyboard.enable(); } catch (e) {}
+  }
+  _findResultsState.map = null;
   document.removeEventListener('keydown', _findResultsKeydown);
 }
 
