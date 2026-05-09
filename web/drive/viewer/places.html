@@ -72,7 +72,23 @@
   #near-results .near-result .sub { color:var(--muted); font-size:0.82rem; }
   #near-results .near-result:hover .sub,
   #near-results .near-result.active .sub { color:var(--chip-on-fg); opacity:0.85; }
-  .status { padding:18px 16px; color:var(--muted); font-size:0.9rem; }
+  .status { padding:18px 16px; color:var(--muted); font-size:0.9rem;
+            display:flex; gap:12px; align-items:center;
+            justify-content:space-between; flex-wrap:wrap; }
+  .status .count { flex:1 1 auto; min-width:0; }
+  /* "View on map" CTA appears as soon as the result list is non-
+     empty. Hands the current `state.results` off to index.html via
+     sessionStorage; the viewer drops one search-pin per record + a
+     floating sidebar with click-to-fly behaviour. */
+  .status .map-view {
+    flex:0 0 auto; padding:6px 12px; border-radius:8px;
+    border:1px solid var(--accent); background:var(--accent); color:#fff;
+    font:inherit; font-size:0.85rem; font-weight:600;
+    text-decoration:none; cursor:pointer; line-height:1;
+    display:inline-flex; align-items:center; gap:6px;
+  }
+  .status .map-view[hidden] { display:none; }
+  .status .map-view:hover { filter:brightness(1.05); }
   ol#results { list-style:none; margin:0; padding:0; }
   ol#results li { background:var(--card); margin:0 16px 10px; padding:14px;
                   border-radius:12px; border:1px solid var(--line);
@@ -130,7 +146,10 @@
   </div>
 </div>
 
-<div id="status" class="status">Loading places index…</div>
+<div id="status" class="status">
+  <span id="status-text" class="count">Loading places index…</span>
+  <button id="map-view-btn" class="map-view" type="button" hidden>📍 Map view</button>
+</div>
 <ol id="results"></ol>
 
 <footer>
@@ -239,13 +258,15 @@ const state = {
 };
 
 const els = {
-  q:           document.getElementById('q'),
-  chips:       document.getElementById('chips'),
-  status:      document.getElementById('status'),
-  results:     document.getElementById('results'),
-  near:        document.getElementById('near-input'),
-  nearClear:   document.getElementById('near-clear'),
-  nearResults: document.getElementById('near-results'),
+  q:            document.getElementById('q'),
+  chips:        document.getElementById('chips'),
+  status:       document.getElementById('status'),
+  statusText:   document.getElementById('status-text'),
+  mapViewBtn:   document.getElementById('map-view-btn'),
+  results:      document.getElementById('results'),
+  near:         document.getElementById('near-input'),
+  nearClear:    document.getElementById('near-clear'),
+  nearResults:  document.getElementById('near-results'),
 };
 
 // ---------- bootstrapping ----------
@@ -280,6 +301,23 @@ const els = {
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.near-wrap')) hideNearResults();
   });
+  // "Map view" hand-off: stash the current result set in
+  // sessionStorage and navigate to index.html. The viewer reads the
+  // stash on load and drops one search-pin per record. Same-origin
+  // sessionStorage works in every host (PWA, Kiwix Desktop, iOS).
+  if (els.mapViewBtn) {
+    els.mapViewBtn.addEventListener('click', () => {
+      if (state.results.length === 0) return;
+      // Build a label that names what's being plotted — the chip
+      // label if a chip is active, otherwise the query string.
+      const label = (state.chip && state.chip.label)
+                    || state.query
+                    || `${state.results.length} places`;
+      if (stashResultsForMap(label)) {
+        window.location.href = HERE + 'index.html#find=results';
+      }
+    });
+  }
   // Restore filter from URL (#cat=museums or #q=foo). Also accepts
   // ``#lat=..&lon=..`` from the main viewer's Find link to default
   // "Search near" to the map's current view center instead of GPS.
@@ -520,6 +558,47 @@ function prefixesFor(q) {
 
 // ---------- result presentation ----------
 
+// sessionStorage key the viewer (index.html) reads on load to spawn
+// pins for the current Find result set. Same key for places.html
+// (the writer) and index.html (the reader); both are same-origin in
+// every host (PWA, Kiwix Desktop, kiwix-serve, iOS Kiwix).
+const FIND_RESULTS_STASH_KEY = 'streetzim_find_results';
+
+// Only the fields the viewer actually needs to render a pin + popup
+// — name, lat/lon, type/subtype/category, brand, contact links. Keeps
+// the JSON blob small for sessionStorage (which has a few-MB cap on
+// most browsers).
+function _pinShape(r) {
+  const out = { n: r.n, a: r.a, o: r.o };
+  for (const k of ('t s cat l ws p soc brand wd'.split(' '))) {
+    if (r[k]) out[k] = r[k];
+  }
+  return out;
+}
+
+function stashResultsForMap(label) {
+  try {
+    const stash = {
+      label: label || '',
+      origin: state.origin
+        ? { lat: state.origin.lat, lon: state.origin.lon,
+            label: state.originLabel } : null,
+      items: state.results.map(_pinShape),
+    };
+    sessionStorage.setItem(FIND_RESULTS_STASH_KEY,
+                           JSON.stringify(stash));
+    return true;
+  } catch (e) {
+    // sessionStorage can throw QuotaExceededError on tiny mobile
+    // budgets; surface to the user rather than silently navigating
+    // to an empty map.
+    console.warn('stash failed:', e);
+    setStatus(`Couldn't hand off to the map (${e.message}). `
+              + `Reduce the result set and try again.`);
+    return false;
+  }
+}
+
 function applyResults(records) {
   if (state.origin) {
     for (const r of records) {
@@ -534,6 +613,11 @@ function applyResults(records) {
   setStatus(records.length > state.results.length
     ? `Showing first ${state.results.length} of ${records.length} matches.`
     : `${state.results.length} match${state.results.length === 1 ? '' : 'es'}.`);
+  // Show "Map view" iff there's something to plot. Toggle every
+  // applyResults call so chip/query swaps refresh the visibility.
+  if (els.mapViewBtn) {
+    els.mapViewBtn.hidden = state.results.length === 0;
+  }
   renderResults();
 }
 
@@ -891,7 +975,7 @@ async function fetchJSON(url) {
 
 // ---------- helpers ----------
 
-function setStatus(text) { els.status.textContent = text; }
+function setStatus(text) { els.statusText.textContent = text; }
 
 function debounce(fn, ms) {
   let t = null;
