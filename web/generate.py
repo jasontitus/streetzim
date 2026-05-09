@@ -26,174 +26,227 @@ PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
 # Static registry of regions with their display names and descriptions.
 # The "order" field controls display order. New regions go here.
 # `zim_file` must match the filename we upload to Archive.org.
+# Tier display order. Each entry is (tier_id, header_text). REGIONS are
+# rendered grouped by tier in this order, with the header_text emitted
+# as a full-width row inside the .maps grid (`.maps-tier-header` CSS,
+# grid-column: 1 / -1).
+TIERS = [
+    ("continent", "Continents & continent-scale regions"),
+    ("multi-country", "Multi-country regions"),
+    ("country", "Individual countries"),
+    ("us-region", "United States — sub-regions"),
+    ("local", "States, cities & islands"),
+]
+
+
 REGIONS = [
+    # ── Continents & continent-scale regions ─────────────────────────
     {
         "id": "europe",
+        "tier": "continent",
         "title": "Europe",
         "zim_file": "osm-europe.zim",
         "description": "United Kingdom, Ireland, France, Spain, Portugal, Germany, Italy, Netherlands, Belgium, Switzerland, Austria, Poland, Greece, Sweden, Norway, Finland, Denmark, the Baltics, Ukraine, Georgia, Armenia, Azerbaijan, Cyprus, and dozens more.",
     },
     {
         "id": "united-states",
+        "tier": "continent",
         "title": "United States",
         "zim_file": "osm-united-states.zim",
         "description": "Continental United States &mdash; all 48 contiguous states and Washington, D.C.",
     },
     {
-        "id": "west-asia",
-        "title": "West Asia",
-        "zim_file": "osm-west-asia.zim",
-        "description": "Turkey, Syria, Lebanon, Israel, Palestine, Jordan, Iraq, Iran, Kuwait, Saudi Arabia, Bahrain, Qatar, UAE, Oman, Yemen, and parts of Egypt, Afghanistan, and Pakistan.",
-    },
-    {
-        "id": "ukraine",
-        "title": "Ukraine, Moldova & Western Russia",
-        "zim_file": "osm-ukraine.zim",
-        "description": "Ukraine and Moldova in full (including Crimea), plus the western Russian frontier &mdash; Volgograd, Rostov, Sochi, Krasnodar, the Black Sea coast, and the Caucasus foothills.",
+        "id": "south-america",
+        "tier": "continent",
+        "title": "South America",
+        "zim_file": "osm-south-america.zim",
+        "description": "Continental South America &mdash; Colombia, Venezuela, Guyana, Suriname, French Guiana, Ecuador, Peru, Bolivia, Paraguay, Uruguay, Chile, the Amazon, the Andes, the Atacama, and Patagonia. (Brazil and Argentina ship as their own dedicated ZIMs.)",
     },
     {
         "id": "africa",
+        "tier": "continent",
         "title": "Africa",
         "zim_file": "osm-africa.zim",
         "description": "All of Africa &mdash; Algeria, Egypt, Ethiopia, Kenya, Morocco, Nigeria, South Africa, Tanzania, and 40+ more countries.",
     },
     {
         "id": "indian-subcontinent",
+        "tier": "continent",
         "title": "Indian Subcontinent",
         "zim_file": "osm-indian-subcontinent.zim",
         "description": "India, Pakistan, Bangladesh, Sri Lanka, Nepal, Bhutan, and the Maldives.",
     },
     {
-        "id": "midwest-us",
-        "title": "Midwest United States",
-        "zim_file": "osm-midwest-us.zim",
-        "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, North Dakota, South Dakota, Nebraska, and Kansas.",
-    },
-    {
-        "id": "california",
-        "title": "California",
-        "zim_file": "osm-california.zim",
-        "description": "All of California &mdash; from the Oregon border to Mexico, the Pacific coast to the Sierra Nevada.",
-    },
-    {
-        "id": "colorado",
-        "title": "Colorado",
-        "zim_file": "osm-colorado.zim",
-        "description": "The Rocky Mountain state &mdash; Denver, Aspen, Vail, Rocky Mountain National Park, and the Continental Divide.",
-    },
-    {
-        "id": "iran",
-        "title": "Iran",
-        "zim_file": "osm-iran.zim",
-        "description": "Iran &mdash; from the Caspian Sea to the Persian Gulf, including Tehran, Isfahan, Shiraz, and Mashhad.",
-    },
-    {
-        "id": "hispaniola",
-        "title": "Hispaniola",
-        "zim_file": "osm-hispaniola.zim",
-        "description": "The Caribbean island of Hispaniola &mdash; Haiti and the Dominican Republic.",
-    },
-    {
-        "id": "texas",
-        "title": "Texas",
-        "zim_file": "osm-texas.zim",
-        "description": "Texas, USA &mdash; from the Gulf Coast to the Rio Grande, including Houston, Dallas, San Antonio, Austin, Fort Worth, and El Paso.",
-    },
-    {
-        "id": "west-coast-us",
-        "title": "West Coast US",
-        "zim_file": "osm-west-coast-us.zim",
-        "description": "U.S. West Coast: Washington, Oregon, and California &mdash; Seattle, Portland, San Francisco, Los Angeles, San Diego, and everything in between.",
-    },
-    {
-        "id": "east-coast-us",
-        "title": "East Coast US",
-        "zim_file": "osm-east-coast-us.zim",
-        "description": "U.S. East Coast from Maine to Florida &mdash; New York, Boston, Philadelphia, Washington D.C., Atlanta, Miami, and the entire Eastern Seaboard.",
-    },
-    {
         "id": "australia-nz",
+        "tier": "continent",
         "title": "Australia & New Zealand",
         "zim_file": "osm-australia-nz.zim",
         "description": "Australia and New Zealand &mdash; Sydney, Melbourne, Brisbane, Perth, Auckland, Wellington, the Great Barrier Reef, Outback, and Southern Alps.",
     },
     {
-        "id": "japan",
-        "title": "Japan",
-        "zim_file": "osm-japan.zim",
-        "description": "Japan &mdash; all four main islands (Honshu, Hokkaido, Kyushu, Shikoku), Okinawa, and the Ryukyu archipelago. Tokyo, Osaka, Kyoto, Nagoya, Sapporo, Fukuoka, Hiroshima, and more.",
-    },
-    {
-        "id": "washington-dc",
-        "title": "Washington, D.C.",
-        "zim_file": "osm-washington-dc.zim",
-        "description": "Washington, D.C. &mdash; the U.S. capital and surrounding metro area.",
-    },
-    {
-        "id": "baltics",
-        "title": "Baltics",
-        "zim_file": "osm-baltics.zim",
-        "description": "Estonia, Latvia, and Lithuania &mdash; Tallinn, Riga, Vilnius, and the Baltic Sea coast.",
-    },
-    {
-        "id": "silicon-valley",
-        "title": "Silicon Valley",
-        "zim_file": "osm-silicon-valley.zim",
-        "description": "San Francisco Bay Area &mdash; San Francisco, Oakland, Palo Alto, Mountain View, Stanford, Cupertino, San Jose, and the Peninsula.",
-    },
-    {
-        "id": "central-us",
-        "title": "Central US",
-        "zim_file": "osm-central-us.zim",
-        "description": "The Mountain West and surrounds &mdash; Utah, Colorado, Wyoming, Montana, Idaho, Nevada, Arizona, and New Mexico. Salt Lake City, Denver, Phoenix, Albuquerque, Yellowstone, Grand Canyon, and the Rockies.",
-    },
-    {
-        "id": "egypt",
-        "title": "Egypt",
-        "zim_file": "osm-egypt.zim",
-        "description": "Egypt &mdash; Cairo, Alexandria, Giza, Luxor, Aswan, the Nile Valley, Sinai Peninsula, and the Red Sea coast.",
+        "id": "southeast-asia",
+        "tier": "continent",
+        "title": "Southeast Asia",
+        "zim_file": "osm-southeast-asia.zim",
+        "description": "Thailand, Vietnam, Myanmar, Cambodia, Laos, Malaysia, Singapore, Indonesia, the Philippines, Brunei, and Timor-Leste &mdash; Bangkok, Hanoi, Ho Chi Minh City, Yangon, Kuala Lumpur, Jakarta, Manila, Bali, Borneo, the Mekong Delta, and the South China Sea.",
     },
     {
         "id": "canada",
+        "tier": "continent",
         "title": "Canada",
         "zim_file": "osm-canada.zim",
         "description": "All of Canada &mdash; Toronto, Montreal, Vancouver, Calgary, Ottawa, Quebec City, Edmonton, Halifax, the Rockies, Banff, the Great Lakes, the Maritimes, and the Yukon and Northwest Territories.",
     },
+    # ── Multi-country regions ────────────────────────────────────────
+    {
+        "id": "west-asia",
+        "tier": "multi-country",
+        "title": "West Asia",
+        "zim_file": "osm-west-asia.zim",
+        "description": "Turkey, Syria, Lebanon, Israel, Palestine, Jordan, Iraq, Iran, Kuwait, Saudi Arabia, Bahrain, Qatar, UAE, Oman, Yemen, and parts of Egypt, Afghanistan, and Pakistan.",
+    },
     {
         "id": "central-asia",
+        "tier": "multi-country",
         "title": "Central Asia",
         "zim_file": "osm-central-asia.zim",
         "description": "Central Asia &mdash; Kazakhstan, Uzbekistan, Turkmenistan, Tajikistan, Kyrgyzstan, Afghanistan, and the Caucasus. Almaty, Tashkent, Bishkek, Ashgabat, Dushanbe, Kabul, the Pamirs, and the Silk Road.",
     },
     {
         "id": "central-america-caribbean",
+        "tier": "multi-country",
         "title": "Central America & Caribbean",
         "zim_file": "osm-central-america-caribbean.zim",
         "description": "Central America and the Caribbean &mdash; Yucatán, Belize, Guatemala, Honduras, El Salvador, Nicaragua, Costa Rica, Panama, Cuba, Jamaica, Hispaniola, Cayman Islands, Puerto Rico, the Lesser Antilles, and the southern Bahamas.",
     },
     {
         "id": "himalayas",
+        "tier": "multi-country",
         "title": "Himalayas",
         "zim_file": "osm-himalayas.zim",
         "description": "The Himalayas, Karakoram, Hindu Kush, and Pamir &mdash; Nepal, Bhutan, Tibet, Sikkim, Ladakh, Kashmir, the Indus and Brahmaputra valleys. Kathmandu, Pokhara, Lhasa, Thimphu, Leh, Hunza, Everest, K2, Kanchenjunga, and Annapurna.",
     },
     {
+        "id": "baltics",
+        "tier": "multi-country",
+        "title": "Baltics",
+        "zim_file": "osm-baltics.zim",
+        "description": "Estonia, Latvia, and Lithuania &mdash; Tallinn, Riga, Vilnius, and the Baltic Sea coast.",
+    },
+    # ── Individual countries ─────────────────────────────────────────
+    {
         "id": "brazil",
+        "tier": "country",
         "title": "Brazil",
         "zim_file": "osm-brazil.zim",
         "description": "All of Brazil &mdash; São Paulo, Rio de Janeiro, Brasília, Salvador, Belo Horizonte, Fortaleza, Manaus, the Amazon, Pantanal, Iguaçu Falls, and the Atlantic coast.",
     },
     {
         "id": "argentina",
+        "tier": "country",
         "title": "Argentina",
         "zim_file": "osm-argentina.zim",
         "description": "Argentina &mdash; Buenos Aires, Córdoba, Rosario, Mendoza, Bariloche, the Pampas, the Andes, Patagonia, and Tierra del Fuego.",
     },
     {
-        "id": "south-america",
-        "title": "South America",
-        "zim_file": "osm-south-america.zim",
-        "description": "Continental South America &mdash; Colombia, Venezuela, Guyana, Suriname, French Guiana, Ecuador, Peru, Bolivia, Paraguay, Uruguay, Chile, the Amazon, the Andes, the Atacama, and Patagonia. (Brazil and Argentina ship as their own dedicated ZIMs.)",
+        "id": "ukraine",
+        "tier": "country",
+        "title": "Ukraine, Moldova & Western Russia",
+        "zim_file": "osm-ukraine.zim",
+        "description": "Ukraine and Moldova in full (including Crimea), plus the western Russian frontier &mdash; Volgograd, Rostov, Sochi, Krasnodar, the Black Sea coast, and the Caucasus foothills.",
+    },
+    {
+        "id": "japan",
+        "tier": "country",
+        "title": "Japan",
+        "zim_file": "osm-japan.zim",
+        "description": "Japan &mdash; all four main islands (Honshu, Hokkaido, Kyushu, Shikoku), Okinawa, and the Ryukyu archipelago. Tokyo, Osaka, Kyoto, Nagoya, Sapporo, Fukuoka, Hiroshima, and more.",
+    },
+    {
+        "id": "iran",
+        "tier": "country",
+        "title": "Iran",
+        "zim_file": "osm-iran.zim",
+        "description": "Iran &mdash; from the Caspian Sea to the Persian Gulf, including Tehran, Isfahan, Shiraz, and Mashhad.",
+    },
+    {
+        "id": "egypt",
+        "tier": "country",
+        "title": "Egypt",
+        "zim_file": "osm-egypt.zim",
+        "description": "Egypt &mdash; Cairo, Alexandria, Giza, Luxor, Aswan, the Nile Valley, Sinai Peninsula, and the Red Sea coast.",
+    },
+    # ── United States — sub-regions ──────────────────────────────────
+    {
+        "id": "east-coast-us",
+        "tier": "us-region",
+        "title": "East Coast US",
+        "zim_file": "osm-east-coast-us.zim",
+        "description": "U.S. East Coast from Maine to Florida &mdash; New York, Boston, Philadelphia, Washington D.C., Atlanta, Miami, and the entire Eastern Seaboard.",
+    },
+    {
+        "id": "midwest-us",
+        "tier": "us-region",
+        "title": "Midwest United States",
+        "zim_file": "osm-midwest-us.zim",
+        "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, North Dakota, South Dakota, Nebraska, and Kansas.",
+    },
+    {
+        "id": "west-coast-us",
+        "tier": "us-region",
+        "title": "West Coast US",
+        "zim_file": "osm-west-coast-us.zim",
+        "description": "U.S. West Coast: Washington, Oregon, and California &mdash; Seattle, Portland, San Francisco, Los Angeles, San Diego, and everything in between.",
+    },
+    {
+        "id": "central-us",
+        "tier": "us-region",
+        "title": "Central US",
+        "zim_file": "osm-central-us.zim",
+        "description": "The Mountain West and surrounds &mdash; Utah, Colorado, Wyoming, Montana, Idaho, Nevada, Arizona, and New Mexico. Salt Lake City, Denver, Phoenix, Albuquerque, Yellowstone, Grand Canyon, and the Rockies.",
+    },
+    # ── States, cities & islands ─────────────────────────────────────
+    {
+        "id": "california",
+        "tier": "local",
+        "title": "California",
+        "zim_file": "osm-california.zim",
+        "description": "All of California &mdash; from the Oregon border to Mexico, the Pacific coast to the Sierra Nevada.",
+    },
+    {
+        "id": "texas",
+        "tier": "local",
+        "title": "Texas",
+        "zim_file": "osm-texas.zim",
+        "description": "Texas, USA &mdash; from the Gulf Coast to the Rio Grande, including Houston, Dallas, San Antonio, Austin, Fort Worth, and El Paso.",
+    },
+    {
+        "id": "colorado",
+        "tier": "local",
+        "title": "Colorado",
+        "zim_file": "osm-colorado.zim",
+        "description": "The Rocky Mountain state &mdash; Denver, Aspen, Vail, Rocky Mountain National Park, and the Continental Divide.",
+    },
+    {
+        "id": "silicon-valley",
+        "tier": "local",
+        "title": "Silicon Valley",
+        "zim_file": "osm-silicon-valley.zim",
+        "description": "San Francisco Bay Area &mdash; San Francisco, Oakland, Palo Alto, Mountain View, Stanford, Cupertino, San Jose, and the Peninsula.",
+    },
+    {
+        "id": "washington-dc",
+        "tier": "local",
+        "title": "Washington, D.C.",
+        "zim_file": "osm-washington-dc.zim",
+        "description": "Washington, D.C. &mdash; the U.S. capital and surrounding metro area.",
+    },
+    {
+        "id": "hispaniola",
+        "tier": "local",
+        "title": "Hispaniola",
+        "zim_file": "osm-hispaniola.zim",
+        "description": "The Caribbean island of Hispaniola &mdash; Haiti and the Dominican Republic.",
     },
 ]
 
@@ -325,13 +378,53 @@ def render_upcoming_card(region):
       </div>"""
 
 
+def render_tier_header(label: str) -> str:
+    """A full-width row inside the .maps grid that visually separates
+    one tier of regions from the next. ``grid-column: 1 / -1`` makes
+    the header span every column regardless of viewport width."""
+    return (
+        f'      <h3 class="maps-tier-header">{escape(label)}</h3>'
+    )
+
+
 def build_page():
     archive_items = fetch_archive_items()
+
+    # Validate that every region declares a known tier, fail loud if
+    # not — silently rendering an unknown-tier region in a default
+    # bucket would mask a config typo for weeks.
+    valid_tiers = {tid for tid, _ in TIERS}
+    for region in REGIONS:
+        if region.get("tier") not in valid_tiers:
+            raise ValueError(
+                f"region {region['id']!r} has invalid tier "
+                f"{region.get('tier')!r}; valid tiers: {sorted(valid_tiers)}")
+
+    # Group regions by tier, preserving in-list order within each tier.
+    by_tier: dict[str, list] = {tid: [] for tid, _ in TIERS}
+    for region in REGIONS:
+        by_tier[region["tier"]].append(region)
+
     cards = []
     live_count = 0
     upcoming_count = 0
 
-    for region in REGIONS:
+    # Walk tiers in display order, emitting a header before each
+    # non-empty group's cards.
+    flat_iter = []
+    for tier_id, tier_label in TIERS:
+        regions_in_tier = by_tier.get(tier_id) or []
+        if not regions_in_tier:
+            continue
+        flat_iter.append(("__header__", tier_label))
+        for r in regions_in_tier:
+            flat_iter.append(("region", r))
+
+    for kind, payload in flat_iter:
+        if kind == "__header__":
+            cards.append(render_tier_header(payload))
+            continue
+        region = payload
         item = archive_items.get(region["id"])
         if item:
             # Get the actual ZIM file name + size from Archive.org metadata.

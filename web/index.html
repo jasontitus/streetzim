@@ -145,6 +145,28 @@
     gap: 14px;
     margin-top: 16px;
   }
+  /* Tier dividers — emitted as `<h3>` elements between groups of
+     map-cards. `grid-column: 1 / -1` makes them span every column
+     regardless of viewport width so they read as section breaks
+     rather than getting tucked into a single grid cell. */
+  .maps-tier-header {
+    grid-column: 1 / -1;
+    margin: 24px 0 4px;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    border-top: 1px solid var(--border);
+    padding-top: 18px;
+  }
+  .maps-tier-header:first-child {
+    /* No top rule for the first header — the parent `<h2>Download a
+       map</h2>` already separates this section from the page header. */
+    border-top: none;
+    padding-top: 4px;
+    margin-top: 8px;
+  }
   .map-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -364,7 +386,7 @@
       <span class="map-badge badge-satellite">Satellite</span> Sentinel-2 imagery,
       <span class="map-badge badge-wiki">Wikipedia links</span> Wikidata cross-refs.
     </p>
-    <p class="updated">Last updated: 2026-05-08 23:48 UTC · build <span id="build-stamp">…</span></p>
+    <p class="updated">Last updated: 2026-05-09 04:22 UTC · build <span id="build-stamp">…</span></p>
 <script>
 fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
   .then(function(r) { return r.ok ? r.text() : ''; })
@@ -377,6 +399,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
 </script>
 
     <div class="maps">
+      <h3 class="maps-tier-header">Continents &amp; continent-scale regions</h3>
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Europe</div>
@@ -405,28 +428,15 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       </div>
       <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">West Asia</div>
-          <div class="map-card-size">10.3 GB</div>
+          <div class="map-card-title">South America</div>
+          <div class="map-card-size">20.7 GB</div>
         </div>
-        <p class="map-card-desc">Turkey, Syria, Lebanon, Israel, Palestine, Jordan, Iraq, Iran, Kuwait, Saudi Arabia, Bahrain, Qatar, UAE, Oman, Yemen, and parts of Egypt, Afghanistan, and Pakistan.</p>
+        <p class="map-card-desc">Continental South America &mdash; Colombia, Venezuela, Guyana, Suriname, French Guiana, Ecuador, Peru, Bolivia, Paraguay, Uruguay, Chile, the Amazon, the Andes, the Atacama, and Patagonia. (Brazil and Argentina ship as their own dedicated ZIMs.)</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-west-asia/osm-west-asia-2026-04-27d.zim" data-track="download" data-region="west-asia" data-title="West Asia">Download</a>
-          <a class="btn btn-secondary" href="/torrents/west-asia.torrent" data-track="torrent" data-region="west-asia" data-title="West Asia">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-west-asia" data-track="details" data-region="west-asia" data-title="West Asia">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Ukraine, Moldova &amp; Western Russia</div>
-          <div class="map-card-size">4.2 GB</div>
-        </div>
-        <p class="map-card-desc">Ukraine and Moldova in full (including Crimea), plus the western Russian frontier &mdash; Volgograd, Rostov, Sochi, Krasnodar, the Black Sea coast, and the Caucasus foothills.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-ukraine/osm-ukraine-2026-05-05b.zim" data-track="download" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia">Download</a>
-          <a class="btn btn-secondary" href="/torrents/ukraine.torrent" data-track="torrent" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-ukraine" data-track="details" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia">Info</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-south-america/osm-south-america-2026-05-08.zim" data-track="download" data-region="south-america" data-title="South America">Download</a>
+          <a class="btn btn-secondary" href="/torrents/south-america.torrent" data-track="torrent" data-region="south-america" data-title="South America">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-south-america" data-track="details" data-region="south-america" data-title="South America">Info</a>
         </div>
       </div>
       <div class="map-card">
@@ -457,110 +467,6 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       </div>
       <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">Midwest United States</div>
-          <div class="map-card-size">7.2 GB</div>
-        </div>
-        <p class="map-card-desc">Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, North Dakota, South Dakota, Nebraska, and Kansas.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-midwest-us/osm-midwest-us-2026-04-29.zim" data-track="download" data-region="midwest-us" data-title="Midwest United States">Download</a>
-          <a class="btn btn-secondary" href="/torrents/midwest-us.torrent" data-track="torrent" data-region="midwest-us" data-title="Midwest United States">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-midwest-us" data-track="details" data-region="midwest-us" data-title="Midwest United States">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">California</div>
-          <div class="map-card-size">3.2 GB</div>
-        </div>
-        <p class="map-card-desc">All of California &mdash; from the Oregon border to Mexico, the Pacific coast to the Sierra Nevada.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-california/osm-california-2026-05-05.zim" data-track="download" data-region="california" data-title="California">Download</a>
-          <a class="btn btn-secondary" href="/torrents/california.torrent" data-track="torrent" data-region="california" data-title="California">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-california" data-track="details" data-region="california" data-title="California">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Colorado</div>
-          <div class="map-card-size">853 MB</div>
-        </div>
-        <p class="map-card-desc">The Rocky Mountain state &mdash; Denver, Aspen, Vail, Rocky Mountain National Park, and the Continental Divide.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-colorado/osm-colorado-2026-04-29.zim" data-track="download" data-region="colorado" data-title="Colorado">Download</a>
-          <a class="btn btn-secondary" href="/torrents/colorado.torrent" data-track="torrent" data-region="colorado" data-title="Colorado">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-colorado" data-track="details" data-region="colorado" data-title="Colorado">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Iran</div>
-          <div class="map-card-size">2.5 GB</div>
-        </div>
-        <p class="map-card-desc">Iran &mdash; from the Caspian Sea to the Persian Gulf, including Tehran, Isfahan, Shiraz, and Mashhad.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-iran/osm-iran-2026-04-26c.zim" data-track="download" data-region="iran" data-title="Iran">Download</a>
-          <a class="btn btn-secondary" href="/torrents/iran.torrent" data-track="torrent" data-region="iran" data-title="Iran">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-iran" data-track="details" data-region="iran" data-title="Iran">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Hispaniola</div>
-          <div class="map-card-size">268 MB</div>
-        </div>
-        <p class="map-card-desc">The Caribbean island of Hispaniola &mdash; Haiti and the Dominican Republic.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-hispaniola/osm-hispaniola-2026-04-29.zim" data-track="download" data-region="hispaniola" data-title="Hispaniola">Download</a>
-          <a class="btn btn-secondary" href="/torrents/hispaniola.torrent" data-track="torrent" data-region="hispaniola" data-title="Hispaniola">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-hispaniola" data-track="details" data-region="hispaniola" data-title="Hispaniola">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Texas</div>
-          <div class="map-card-size">3.7 GB</div>
-        </div>
-        <p class="map-card-desc">Texas, USA &mdash; from the Gulf Coast to the Rio Grande, including Houston, Dallas, San Antonio, Austin, Fort Worth, and El Paso.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-texas/osm-texas-2026-04-26c.zim" data-track="download" data-region="texas" data-title="Texas">Download</a>
-          <a class="btn btn-secondary" href="/torrents/texas.torrent" data-track="torrent" data-region="texas" data-title="Texas">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-texas" data-track="details" data-region="texas" data-title="Texas">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">West Coast US</div>
-          <div class="map-card-size">4.8 GB</div>
-        </div>
-        <p class="map-card-desc">U.S. West Coast: Washington, Oregon, and California &mdash; Seattle, Portland, San Francisco, Los Angeles, San Diego, and everything in between.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-west-coast-us/osm-west-coast-us-2026-04-26c.zim" data-track="download" data-region="west-coast-us" data-title="West Coast US">Download</a>
-          <a class="btn btn-secondary" href="/torrents/west-coast-us.torrent" data-track="torrent" data-region="west-coast-us" data-title="West Coast US">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-west-coast-us" data-track="details" data-region="west-coast-us" data-title="West Coast US">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">East Coast US</div>
-          <div class="map-card-size">8.9 GB</div>
-        </div>
-        <p class="map-card-desc">U.S. East Coast from Maine to Florida &mdash; New York, Boston, Philadelphia, Washington D.C., Atlanta, Miami, and the entire Eastern Seaboard.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-east-coast-us/osm-east-coast-us-2026-04-27d.zim" data-track="download" data-region="east-coast-us" data-title="East Coast US">Download</a>
-          <a class="btn btn-secondary" href="/torrents/east-coast-us.torrent" data-track="torrent" data-region="east-coast-us" data-title="East Coast US">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-east-coast-us" data-track="details" data-region="east-coast-us" data-title="East Coast US">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
           <div class="map-card-title">Australia &amp; New Zealand</div>
           <div class="map-card-size">6.3 GB</div>
         </div>
@@ -572,83 +478,12 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-australia-nz" data-track="details" data-region="australia-nz" data-title="Australia &amp; New Zealand">Info</a>
         </div>
       </div>
-      <div class="map-card">
+      <div class="map-card upcoming">
         <div class="map-card-head">
-          <div class="map-card-title">Japan</div>
-          <div class="map-card-size">4.8 GB</div>
+          <div class="map-card-title">Southeast Asia</div>
+          <div class="map-card-size">building</div>
         </div>
-        <p class="map-card-desc">Japan &mdash; all four main islands (Honshu, Hokkaido, Kyushu, Shikoku), Okinawa, and the Ryukyu archipelago. Tokyo, Osaka, Kyoto, Nagoya, Sapporo, Fukuoka, Hiroshima, and more.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-japan/osm-japan-2026-04-28.zim" data-track="download" data-region="japan" data-title="Japan">Download</a>
-          <a class="btn btn-secondary" href="/torrents/japan.torrent" data-track="torrent" data-region="japan" data-title="Japan">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-japan" data-track="details" data-region="japan" data-title="Japan">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Washington, D.C.</div>
-          <div class="map-card-size">169 MB</div>
-        </div>
-        <p class="map-card-desc">Washington, D.C. &mdash; the U.S. capital and surrounding metro area.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-washington-dc/osm-washington-dc-2026-04-29.zim" data-track="download" data-region="washington-dc" data-title="Washington, D.C.">Download</a>
-          <a class="btn btn-secondary" href="/torrents/washington-dc.torrent" data-track="torrent" data-region="washington-dc" data-title="Washington, D.C.">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-washington-dc" data-track="details" data-region="washington-dc" data-title="Washington, D.C.">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Baltics</div>
-          <div class="map-card-size">1.5 GB</div>
-        </div>
-        <p class="map-card-desc">Estonia, Latvia, and Lithuania &mdash; Tallinn, Riga, Vilnius, and the Baltic Sea coast.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-baltics/osm-baltics-2026-04-29.zim" data-track="download" data-region="baltics" data-title="Baltics">Download</a>
-          <a class="btn btn-secondary" href="/torrents/baltics.torrent" data-track="torrent" data-region="baltics" data-title="Baltics">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-baltics" data-track="details" data-region="baltics" data-title="Baltics">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Silicon Valley</div>
-          <div class="map-card-size">226 MB</div>
-        </div>
-        <p class="map-card-desc">San Francisco Bay Area &mdash; San Francisco, Oakland, Palo Alto, Mountain View, Stanford, Cupertino, San Jose, and the Peninsula.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-silicon-valley/osm-silicon-valley-2026-05-05.zim" data-track="download" data-region="silicon-valley" data-title="Silicon Valley">Download</a>
-          <a class="btn btn-secondary" href="/torrents/silicon-valley.torrent" data-track="torrent" data-region="silicon-valley" data-title="Silicon Valley">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-silicon-valley" data-track="details" data-region="silicon-valley" data-title="Silicon Valley">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Central US</div>
-          <div class="map-card-size">6.7 GB</div>
-        </div>
-        <p class="map-card-desc">The Mountain West and surrounds &mdash; Utah, Colorado, Wyoming, Montana, Idaho, Nevada, Arizona, and New Mexico. Salt Lake City, Denver, Phoenix, Albuquerque, Yellowstone, Grand Canyon, and the Rockies.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-central-us/osm-central-us-2026-04-26c.zim" data-track="download" data-region="central-us" data-title="Central US">Download</a>
-          <a class="btn btn-secondary" href="/torrents/central-us.torrent" data-track="torrent" data-region="central-us" data-title="Central US">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-central-us" data-track="details" data-region="central-us" data-title="Central US">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Egypt</div>
-          <div class="map-card-size">1.2 GB</div>
-        </div>
-        <p class="map-card-desc">Egypt &mdash; Cairo, Alexandria, Giza, Luxor, Aswan, the Nile Valley, Sinai Peninsula, and the Red Sea coast.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-egypt/osm-egypt-2026-04-26c.zim" data-track="download" data-region="egypt" data-title="Egypt">Download</a>
-          <a class="btn btn-secondary" href="/torrents/egypt.torrent" data-track="torrent" data-region="egypt" data-title="Egypt">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-egypt" data-track="details" data-region="egypt" data-title="Egypt">Info</a>
-        </div>
+        <p class="map-card-desc">Thailand, Vietnam, Myanmar, Cambodia, Laos, Malaysia, Singapore, Indonesia, the Philippines, Brunei, and Timor-Leste &mdash; Bangkok, Hanoi, Ho Chi Minh City, Yangon, Kuala Lumpur, Jakarta, Manila, Bali, Borneo, the Mekong Delta, and the South China Sea.</p>
       </div>
       <div class="map-card">
         <div class="map-card-head">
@@ -661,6 +496,20 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <a class="btn btn-primary" href="https://archive.org/download/streetzim-canada/osm-canada-2026-04-27d.zim" data-track="download" data-region="canada" data-title="Canada">Download</a>
           <a class="btn btn-secondary" href="/torrents/canada.torrent" data-track="torrent" data-region="canada" data-title="Canada">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-canada" data-track="details" data-region="canada" data-title="Canada">Info</a>
+        </div>
+      </div>
+      <h3 class="maps-tier-header">Multi-country regions</h3>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">West Asia</div>
+          <div class="map-card-size">10.3 GB</div>
+        </div>
+        <p class="map-card-desc">Turkey, Syria, Lebanon, Israel, Palestine, Jordan, Iraq, Iran, Kuwait, Saudi Arabia, Bahrain, Qatar, UAE, Oman, Yemen, and parts of Egypt, Afghanistan, and Pakistan.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-west-asia/osm-west-asia-2026-04-27d.zim" data-track="download" data-region="west-asia" data-title="West Asia">Download</a>
+          <a class="btn btn-secondary" href="/torrents/west-asia.torrent" data-track="torrent" data-region="west-asia" data-title="West Asia">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-west-asia" data-track="details" data-region="west-asia" data-title="West Asia">Info</a>
         </div>
       </div>
       <div class="map-card">
@@ -704,6 +553,20 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       </div>
       <div class="map-card">
         <div class="map-card-head">
+          <div class="map-card-title">Baltics</div>
+          <div class="map-card-size">1.5 GB</div>
+        </div>
+        <p class="map-card-desc">Estonia, Latvia, and Lithuania &mdash; Tallinn, Riga, Vilnius, and the Baltic Sea coast.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-baltics/osm-baltics-2026-04-29.zim" data-track="download" data-region="baltics" data-title="Baltics">Download</a>
+          <a class="btn btn-secondary" href="/torrents/baltics.torrent" data-track="torrent" data-region="baltics" data-title="Baltics">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-baltics" data-track="details" data-region="baltics" data-title="Baltics">Info</a>
+        </div>
+      </div>
+      <h3 class="maps-tier-header">Individual countries</h3>
+      <div class="map-card">
+        <div class="map-card-head">
           <div class="map-card-title">Brazil</div>
           <div class="map-card-size">15.9 GB</div>
         </div>
@@ -730,15 +593,186 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       </div>
       <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">South America</div>
-          <div class="map-card-size">20.7 GB</div>
+          <div class="map-card-title">Ukraine, Moldova &amp; Western Russia</div>
+          <div class="map-card-size">4.2 GB</div>
         </div>
-        <p class="map-card-desc">Continental South America &mdash; Colombia, Venezuela, Guyana, Suriname, French Guiana, Ecuador, Peru, Bolivia, Paraguay, Uruguay, Chile, the Amazon, the Andes, the Atacama, and Patagonia. (Brazil and Argentina ship as their own dedicated ZIMs.)</p>
+        <p class="map-card-desc">Ukraine and Moldova in full (including Crimea), plus the western Russian frontier &mdash; Volgograd, Rostov, Sochi, Krasnodar, the Black Sea coast, and the Caucasus foothills.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-south-america/osm-south-america-2026-05-08.zim" data-track="download" data-region="south-america" data-title="South America">Download</a>
-          <a class="btn btn-secondary" href="/torrents/south-america.torrent" data-track="torrent" data-region="south-america" data-title="South America">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-south-america" data-track="details" data-region="south-america" data-title="South America">Info</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-ukraine/osm-ukraine-2026-05-05b.zim" data-track="download" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia">Download</a>
+          <a class="btn btn-secondary" href="/torrents/ukraine.torrent" data-track="torrent" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-ukraine" data-track="details" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Japan</div>
+          <div class="map-card-size">4.8 GB</div>
+        </div>
+        <p class="map-card-desc">Japan &mdash; all four main islands (Honshu, Hokkaido, Kyushu, Shikoku), Okinawa, and the Ryukyu archipelago. Tokyo, Osaka, Kyoto, Nagoya, Sapporo, Fukuoka, Hiroshima, and more.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-japan/osm-japan-2026-04-28.zim" data-track="download" data-region="japan" data-title="Japan">Download</a>
+          <a class="btn btn-secondary" href="/torrents/japan.torrent" data-track="torrent" data-region="japan" data-title="Japan">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-japan" data-track="details" data-region="japan" data-title="Japan">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Iran</div>
+          <div class="map-card-size">2.5 GB</div>
+        </div>
+        <p class="map-card-desc">Iran &mdash; from the Caspian Sea to the Persian Gulf, including Tehran, Isfahan, Shiraz, and Mashhad.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-iran/osm-iran-2026-04-26c.zim" data-track="download" data-region="iran" data-title="Iran">Download</a>
+          <a class="btn btn-secondary" href="/torrents/iran.torrent" data-track="torrent" data-region="iran" data-title="Iran">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-iran" data-track="details" data-region="iran" data-title="Iran">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Egypt</div>
+          <div class="map-card-size">1.2 GB</div>
+        </div>
+        <p class="map-card-desc">Egypt &mdash; Cairo, Alexandria, Giza, Luxor, Aswan, the Nile Valley, Sinai Peninsula, and the Red Sea coast.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-egypt/osm-egypt-2026-04-26c.zim" data-track="download" data-region="egypt" data-title="Egypt">Download</a>
+          <a class="btn btn-secondary" href="/torrents/egypt.torrent" data-track="torrent" data-region="egypt" data-title="Egypt">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-egypt" data-track="details" data-region="egypt" data-title="Egypt">Info</a>
+        </div>
+      </div>
+      <h3 class="maps-tier-header">United States — sub-regions</h3>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">East Coast US</div>
+          <div class="map-card-size">8.9 GB</div>
+        </div>
+        <p class="map-card-desc">U.S. East Coast from Maine to Florida &mdash; New York, Boston, Philadelphia, Washington D.C., Atlanta, Miami, and the entire Eastern Seaboard.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-east-coast-us/osm-east-coast-us-2026-04-27d.zim" data-track="download" data-region="east-coast-us" data-title="East Coast US">Download</a>
+          <a class="btn btn-secondary" href="/torrents/east-coast-us.torrent" data-track="torrent" data-region="east-coast-us" data-title="East Coast US">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-east-coast-us" data-track="details" data-region="east-coast-us" data-title="East Coast US">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Midwest United States</div>
+          <div class="map-card-size">7.2 GB</div>
+        </div>
+        <p class="map-card-desc">Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, North Dakota, South Dakota, Nebraska, and Kansas.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-midwest-us/osm-midwest-us-2026-04-29.zim" data-track="download" data-region="midwest-us" data-title="Midwest United States">Download</a>
+          <a class="btn btn-secondary" href="/torrents/midwest-us.torrent" data-track="torrent" data-region="midwest-us" data-title="Midwest United States">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-midwest-us" data-track="details" data-region="midwest-us" data-title="Midwest United States">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">West Coast US</div>
+          <div class="map-card-size">4.8 GB</div>
+        </div>
+        <p class="map-card-desc">U.S. West Coast: Washington, Oregon, and California &mdash; Seattle, Portland, San Francisco, Los Angeles, San Diego, and everything in between.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-west-coast-us/osm-west-coast-us-2026-04-26c.zim" data-track="download" data-region="west-coast-us" data-title="West Coast US">Download</a>
+          <a class="btn btn-secondary" href="/torrents/west-coast-us.torrent" data-track="torrent" data-region="west-coast-us" data-title="West Coast US">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-west-coast-us" data-track="details" data-region="west-coast-us" data-title="West Coast US">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Central US</div>
+          <div class="map-card-size">6.7 GB</div>
+        </div>
+        <p class="map-card-desc">The Mountain West and surrounds &mdash; Utah, Colorado, Wyoming, Montana, Idaho, Nevada, Arizona, and New Mexico. Salt Lake City, Denver, Phoenix, Albuquerque, Yellowstone, Grand Canyon, and the Rockies.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-central-us/osm-central-us-2026-04-26c.zim" data-track="download" data-region="central-us" data-title="Central US">Download</a>
+          <a class="btn btn-secondary" href="/torrents/central-us.torrent" data-track="torrent" data-region="central-us" data-title="Central US">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-central-us" data-track="details" data-region="central-us" data-title="Central US">Info</a>
+        </div>
+      </div>
+      <h3 class="maps-tier-header">States, cities &amp; islands</h3>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">California</div>
+          <div class="map-card-size">3.2 GB</div>
+        </div>
+        <p class="map-card-desc">All of California &mdash; from the Oregon border to Mexico, the Pacific coast to the Sierra Nevada.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-california/osm-california-2026-05-05.zim" data-track="download" data-region="california" data-title="California">Download</a>
+          <a class="btn btn-secondary" href="/torrents/california.torrent" data-track="torrent" data-region="california" data-title="California">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-california" data-track="details" data-region="california" data-title="California">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Texas</div>
+          <div class="map-card-size">3.7 GB</div>
+        </div>
+        <p class="map-card-desc">Texas, USA &mdash; from the Gulf Coast to the Rio Grande, including Houston, Dallas, San Antonio, Austin, Fort Worth, and El Paso.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-texas/osm-texas-2026-04-26c.zim" data-track="download" data-region="texas" data-title="Texas">Download</a>
+          <a class="btn btn-secondary" href="/torrents/texas.torrent" data-track="torrent" data-region="texas" data-title="Texas">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-texas" data-track="details" data-region="texas" data-title="Texas">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Colorado</div>
+          <div class="map-card-size">853 MB</div>
+        </div>
+        <p class="map-card-desc">The Rocky Mountain state &mdash; Denver, Aspen, Vail, Rocky Mountain National Park, and the Continental Divide.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-colorado/osm-colorado-2026-04-29.zim" data-track="download" data-region="colorado" data-title="Colorado">Download</a>
+          <a class="btn btn-secondary" href="/torrents/colorado.torrent" data-track="torrent" data-region="colorado" data-title="Colorado">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-colorado" data-track="details" data-region="colorado" data-title="Colorado">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Silicon Valley</div>
+          <div class="map-card-size">226 MB</div>
+        </div>
+        <p class="map-card-desc">San Francisco Bay Area &mdash; San Francisco, Oakland, Palo Alto, Mountain View, Stanford, Cupertino, San Jose, and the Peninsula.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-silicon-valley/osm-silicon-valley-2026-05-05.zim" data-track="download" data-region="silicon-valley" data-title="Silicon Valley">Download</a>
+          <a class="btn btn-secondary" href="/torrents/silicon-valley.torrent" data-track="torrent" data-region="silicon-valley" data-title="Silicon Valley">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-silicon-valley" data-track="details" data-region="silicon-valley" data-title="Silicon Valley">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Washington, D.C.</div>
+          <div class="map-card-size">169 MB</div>
+        </div>
+        <p class="map-card-desc">Washington, D.C. &mdash; the U.S. capital and surrounding metro area.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-washington-dc/osm-washington-dc-2026-04-29.zim" data-track="download" data-region="washington-dc" data-title="Washington, D.C.">Download</a>
+          <a class="btn btn-secondary" href="/torrents/washington-dc.torrent" data-track="torrent" data-region="washington-dc" data-title="Washington, D.C.">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-washington-dc" data-track="details" data-region="washington-dc" data-title="Washington, D.C.">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Hispaniola</div>
+          <div class="map-card-size">268 MB</div>
+        </div>
+        <p class="map-card-desc">The Caribbean island of Hispaniola &mdash; Haiti and the Dominican Republic.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-hispaniola/osm-hispaniola-2026-04-29.zim" data-track="download" data-region="hispaniola" data-title="Hispaniola">Download</a>
+          <a class="btn btn-secondary" href="/torrents/hispaniola.torrent" data-track="torrent" data-region="hispaniola" data-title="Hispaniola">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-hispaniola" data-track="details" data-region="hispaniola" data-title="Hispaniola">Info</a>
         </div>
       </div>
     </div>

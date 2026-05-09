@@ -145,6 +145,28 @@
     gap: 14px;
     margin-top: 16px;
   }
+  /* Tier dividers — emitted as `<h3>` elements between groups of
+     map-cards. `grid-column: 1 / -1` makes them span every column
+     regardless of viewport width so they read as section breaks
+     rather than getting tucked into a single grid cell. */
+  .maps-tier-header {
+    grid-column: 1 / -1;
+    margin: 24px 0 4px;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    border-top: 1px solid var(--border);
+    padding-top: 18px;
+  }
+  .maps-tier-header:first-child {
+    /* No top rule for the first header — the parent `<h2>Download a
+       map</h2>` already separates this section from the page header. */
+    border-top: none;
+    padding-top: 4px;
+    margin-top: 8px;
+  }
   .map-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
