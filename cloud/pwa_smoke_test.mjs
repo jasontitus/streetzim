@@ -206,7 +206,10 @@ async function main() {
   });
   page.on('console', m => {
     const type = m.type();
-    if (type !== 'error' && type !== 'warning') return;
+    // Chrome/Puppeteer reports console.warn as type 'warn' (some
+    // older docs say 'warning' — both happen across versions); accept
+    // either so warnings always surface to the smoke output.
+    if (type !== 'error' && type !== 'warning' && type !== 'warn') return;
     const text = m.text();
     console.log('  ! ' + type + ' [' + currentStep + ']:', text);
     if (type === 'error') consoleErrs.push(currentStep + ': console: ' + text);

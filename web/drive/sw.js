@@ -17,7 +17,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // The sync script writes a stamp to web/drive/viewer/.version which the
 // page reads on load and posts to the SW — we compare and clear stale
 // caches. For now just hand-bump on big changes.
-const SHELL_CACHE = 'streetzim-drive-shell-33d3d2fb00-d154958';
+const SHELL_CACHE = 'streetzim-drive-shell-ca710f97b5-d163654';
 
 const SHELL_URLS = [
   './',
@@ -42,7 +42,12 @@ const VIEWER_SHELL_NAMES = new Set([
   '',
   'index', 'index.html',
   'places', 'places.html',
-  'maplibre-gl.js', 'maplibre-gl.css'
+  'maplibre-gl.js', 'maplibre-gl.css',
+  // Routing worker source — served from Firebase, not the ZIM. Without
+  // this entry the SW would fall through to "data path → serve from
+  // ZIM" and 404 because the ZIM doesn't carry the file (yet — pending
+  // next ZIM rebuild for Kiwix Desktop).
+  'routing-worker.js',
 ]);
 
 // ---------- IndexedDB helpers (no dependency) ----------

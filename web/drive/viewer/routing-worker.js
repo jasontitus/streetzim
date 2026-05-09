@@ -23,6 +23,55 @@ var BASE_URL = '';
 var graph = null;
 var cancelledRoutes = new Set();
 
+// Profiling — reset at route start, emitted as a single console.warn
+// on completion so the user (or smoke harness) gets one consolidated
+// line per route showing where wall-clock went. Always-on; cheap.
+var _profile = null;
+function nowMs() {
+  return (typeof performance !== 'undefined' && performance.now)
+    ? performance.now() : Date.now();
+}
+function _profileReset() {
+  _profile = {
+    routeT0: nowMs(),
+    crowKm: 0,
+    phases: [],
+    cellHits: 0,
+    cellMisses: 0,
+    cellFetchMs: 0,
+    cellParseMs: 0,
+    yields: 0,
+    yieldMs: 0,
+    edgeReqs: 0,
+  };
+}
+function _profileEmit(routeOk, totalCoords) {
+  if (!_profile) return;
+  var total = nowMs() - _profile.routeT0;
+  // Pack into a flat object the main thread can format/log. Worker
+  // console messages aren't captured by puppeteer's page.on('console')
+  // hook (different target), so the main-thread log is what the smoke
+  // harness sees. The worker ALSO console.warn's locally for devtools.
+  var summary = {
+    type: 'route-profile',
+    ok: routeOk,
+    totalMs: total,
+    crowKm: _profile.crowKm,
+    coords: totalCoords || 0,
+    cellHits: _profile.cellHits,
+    cellMisses: _profile.cellMisses,
+    cellFetchMs: _profile.cellFetchMs,
+    cellParseMs: _profile.cellParseMs,
+    edgeReqs: _profile.edgeReqs,
+    yields: _profile.yields,
+    yieldMs: _profile.yieldMs,
+    phases: _profile.phases,
+  };
+  console.warn('[route-profile worker]', JSON.stringify(summary));
+  try { self.postMessage(summary); } catch (e) {}
+  _profile = null;
+}
+
 self.onmessage = function(e) {
   var msg = e.data;
   switch (msg.cmd) {
@@ -69,6 +118,7 @@ function handleRoute(msg) {
     });
   }
   cancelledRoutes.delete(msg.id);
+  _profileReset();
   var ctx = {
     id: msg.id,
     options: msg.options || {},
@@ -77,6 +127,7 @@ function handleRoute(msg) {
   findRoute(msg.start, msg.end, ctx)
     .then(function(result) {
       cancelledRoutes.delete(msg.id);
+      _profileEmit(!!result, result && result.coords ? result.coords.length : 0);
       self.postMessage({
         type: 'route-done', id: msg.id,
         ok: !!result, result: result,
@@ -84,6 +135,7 @@ function handleRoute(msg) {
     })
     .catch(function(err) {
       cancelledRoutes.delete(msg.id);
+      _profileEmit(false, 0);
       self.postMessage({
         type: 'route-done', id: msg.id, ok: false,
         error: String(err && err.stack ? err.stack : err),
@@ -420,19 +472,30 @@ SpatialGraph.prototype.compact = function(keep) {
 SpatialGraph.prototype._ensureCell = function(cid) {
   var self = this;
   if (self._cells.has(cid)) {
+    if (_profile) _profile.cellHits++;
     var idx = self._lru.indexOf(cid);
     if (idx >= 0) self._lru.splice(idx, 1);
     self._lru.push(cid);
     return Promise.resolve(self._cells.get(cid));
   }
-  if (self._inFlight.has(cid)) return self._inFlight.get(cid);
+  if (self._inFlight.has(cid)) {
+    // Same cell already in flight — count as a near-miss; the actual
+    // wait time gets attributed via the original fetch's timing.
+    if (_profile) _profile.cellHits++;
+    return self._inFlight.get(cid);
+  }
+  if (_profile) _profile.cellMisses++;
+  var fetchT0 = nowMs();
   var p = fetch(BASE_URL + self._cellPath(cid))
     .then(function(r) {
       if (!r.ok) throw new Error('cell HTTP ' + r.status + ' for ' + cid);
       return r.arrayBuffer();
     })
     .then(function(buf) {
+      if (_profile) _profile.cellFetchMs += nowMs() - fetchT0;
+      var parseT0 = nowMs();
       var cell = parseRoutingCell(buf);
+      if (_profile) _profile.cellParseMs += nowMs() - parseT0;
       self._cells.set(cid, cell);
       self._lru.push(cid);
       self._inFlight.delete(cid);
@@ -531,6 +594,8 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
   var pops = 0;
   var weightTag = (GREEDY_WEIGHT > 1.0) ? ' greedy×' + GREEDY_WEIGHT : ' optimal';
   var label = (highwayOnly ? 'A* highway-only' : 'A* full') + weightTag;
+  var phaseT0 = nowMs();
+  if (_profile) _profile.edgeReqs++; // we'll add per-pop below
 
   // #1: time-budget yielding. Decoupled from progress reporting:
   // - report every 2k pops (cheap; main thread can re-render the
@@ -539,12 +604,7 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
   //   cancel/compact messages from the main thread can be processed
   //   without burning hundreds of ms before each yield
   var lastReportPops = 0;
-  var lastYield = (typeof performance !== 'undefined' && performance.now)
-    ? performance.now() : Date.now();
-  function nowMs() {
-    return (typeof performance !== 'undefined' && performance.now)
-      ? performance.now() : Date.now();
-  }
+  var lastYield = nowMs();
 
   while (open.size() > 0) {
     var item = open.pop();
@@ -555,17 +615,33 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
       lastReportPops = pops;
     }
     if (nowMs() - lastYield > 50) {
+      var yT0 = nowMs();
       await new Promise(function(r) { setTimeout(r, 0); });
+      if (_profile) {
+        _profile.yields++;
+        _profile.yieldMs += nowMs() - yT0;
+      }
       lastYield = nowMs();
-      if (ctx && ctx.cancelled && ctx.cancelled()) return null;
+      if (ctx && ctx.cancelled && ctx.cancelled()) {
+        if (_profile) _profile.phases.push({
+          label: label, pops: pops, ms: nowMs() - phaseT0,
+          bailed: true, cancelled: true,
+        });
+        return null;
+      }
     }
     if (pops > POP_LIMIT) {
       debugStats(ctx, label + ' BAIL (pop limit ' + POP_LIMIT + ')', pops);
+      if (_profile) _profile.phases.push({
+        label: label, pops: pops, ms: nowMs() - phaseT0,
+        bailed: true,
+      });
       return null;
     }
     if (current === endNode) break;
     if (closed.has(current)) continue;
     closed.add(current);
+    if (_profile) _profile.edgeReqs++;
     var nodeEdges = await graph.edgesOfNode(current);
     var curG = g.get(current);
     for (var k = 0; k < nodeEdges.length; k++) {
@@ -592,6 +668,10 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     }
   }
   debugStats(ctx, label + ' done', pops);
+  if (_profile) _profile.phases.push({
+    label: label, pops: pops, ms: nowMs() - phaseT0,
+    bailed: false,
+  });
 
   if (!g.has(endNode)) return null;
 
@@ -737,6 +817,7 @@ async function findRoute(startNode, endNode, ctx) {
   var endLat = nodesScaled[endNode * 2] / 1e7;
   var endLon = nodesScaled[endNode * 2 + 1] / 1e7;
   var crow = haversine(startLat, startLon, endLat, endLon);
+  if (_profile) _profile.crowKm = crow / 1000;
   var override = ctx && ctx.options && ctx.options.route;
   var useTwoPass = override === 'two-pass'
     || (override !== 'full' && crow > 100000);

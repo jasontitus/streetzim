@@ -1350,6 +1350,23 @@ fetchConfig(1)
   })
   .catch(function(err) {
     dbg('fatal error loading map', describeError(err), err && err.stack);
+    // map-config.json 404 from the PWA path almost always means the
+    // SW has no ZIM loaded — the user navigated to /drive/viewer/
+    // directly instead of /drive/. Redirect to the picker instead of
+    // dumping a stack trace they can't act on. (Kiwix Desktop and
+    // other ZIM-baked hosts always have map-config.json present, so
+    // this only triggers in the PWA case.)
+    var msg = describeError(err) || '';
+    var isPwaPath = /\/drive\/viewer\/?(\?|#|$)/.test(location.pathname + location.search);
+    var isMissingConfig = msg.indexOf('HTTP 404') >= 0
+      && (err && err._url && err._url.indexOf('map-config.json') >= 0);
+    if (isPwaPath && isMissingConfig) {
+      try { sessionStorage.setItem('streetzim_redirect_reason', 'no-zim'); }
+      catch (e) {}
+      var pickerUrl = location.pathname.replace(/viewer\/?$/, '');
+      location.replace(pickerUrl);
+      return;
+    }
     showFatalError('Error loading map', err, err && err._url);
   });
 
@@ -5615,21 +5632,56 @@ function initRouting(map, config) {
   var __routingWorkerInflight = new Map();
 
   function initRoutingWorker() {
-    if (__routingWorker) return;
-    if (typeof Worker !== 'function') return;
-    var workerUrl = baseUrl + 'routing-worker.js';
-    try {
-      __routingWorker = new Worker(workerUrl);
-    } catch (e) {
-      console.warn('[streetzim] failed to spawn routing worker:', e);
-      __routingWorker = null;
-      return;
+    if (__routingWorkerReady) return __routingWorkerReady;
+    if (typeof Worker !== 'function') {
+      __routingWorkerReady = Promise.resolve(false);
+      return __routingWorkerReady;
     }
-    __routingWorkerReady = new Promise(function(resolve) {
+    // Spawn from a blob: URL rather than a same-origin URL. Same-origin
+    // worker construction was producing opaque error events with no
+    // message/filename/lineno (likely a CSP/CORP/COEP edge case on
+    // Firebase Hosting). Fetching the worker source and wrapping it
+    // in a Blob sidesteps all of that — blob: URLs are same-origin to
+    // the page that created them and aren't subject to host CSP rules.
+    //
+    // Returns a Promise<bool> — true once the worker has loaded its
+    // graph data, false on any failure. findRoute awaits this so a
+    // route requested before the worker is ready waits up briefly
+    // rather than silently falling back to the main thread.
+    var workerSrcUrl = baseUrl + 'routing-worker.js';
+    __routingWorkerReady = fetch(workerSrcUrl)
+      .then(function(r) {
+        if (!r.ok) throw new Error('routing-worker.js HTTP ' + r.status);
+        return r.text();
+      })
+      .then(function(src) {
+        var blob = new Blob([src], { type: 'application/javascript' });
+        var blobUrl = URL.createObjectURL(blob);
+        __routingWorker = new Worker(blobUrl);
+        return _installRoutingWorker();
+      })
+      .catch(function(err) {
+        console.warn('[streetzim] routing worker init failed:', err);
+        if (__routingWorker) {
+          try { __routingWorker.terminate(); } catch (e) {}
+          __routingWorker = null;
+        }
+        return false;
+      });
+    return __routingWorkerReady;
+  }
+
+  function _installRoutingWorker() {
+    if (!__routingWorker) return Promise.resolve(false);
+    return new Promise(function(resolve) {
       __routingWorker.addEventListener('message', function onMsg(e) {
         var m = e.data || {};
         if (m.type === 'ready') {
-          console.log('[streetzim] routing worker ready', m);
+          // console.warn so the smoke harness and devtools both
+          // surface the moment the worker comes up — important for
+          // distinguishing "worker is doing the routing" from
+          // "silently fell back to main thread".
+          console.warn('[streetzim] routing worker ready', JSON.stringify(m));
           window.__streetzim_routingWorker = __routingWorker;
           window.__streetzim_routingWorkerReady = true;
           __routingWorker.removeEventListener('message', onMsg);
@@ -5643,19 +5695,19 @@ function initRouting(map, config) {
         }
       });
       __routingWorker.addEventListener('error', function(err) {
-        console.warn('[streetzim] routing worker error:', err.message || err);
+        console.warn('[streetzim] routing worker error:'
+          + ' msg=' + (err.message || '<none>')
+          + ' file=' + (err.filename || '<none>')
+          + ' line=' + (err.lineno || '?')
+          + ' col=' + (err.colno || '?')
+          + ' type=' + (err.type || '?')
+        );
         if (__routingWorker) {
           try { __routingWorker.terminate(); } catch (e) {}
           __routingWorker = null;
         }
         resolve(false);
       });
-      // Init expects baseUrl that's resolvable from the worker's own
-      // origin. baseUrl on main thread is relative; the worker uses
-      // `fetch(BASE_URL + ...)` so we need it to resolve correctly.
-      // For the PWA at /drive/viewer/, baseUrl is "" so the worker
-      // would fetch "/routing-data/..." (root) which is wrong. Pass
-      // an absolute URL so workers + SW + range reads compose.
       var workerBaseUrl;
       try {
         workerBaseUrl = new URL(baseUrl, location.href).href;
@@ -5668,6 +5720,30 @@ function initRouting(map, config) {
 
   function _routingWorkerOnMessage(e) {
     var m = e.data || {};
+    if (m.type === 'route-profile') {
+      // Format the worker's profile summary into a single console.warn
+      // line so smoke harness + devtools both surface it consistently.
+      var line = '[route-profile] ' + (m.ok ? 'OK' : 'FAIL')
+        + ' total=' + m.totalMs.toFixed(0) + 'ms'
+        + ' crow=' + (m.crowKm || 0).toFixed(0) + 'km'
+        + ' coords=' + (m.coords || 0)
+        + ' cells=' + m.cellHits + 'h/' + m.cellMisses + 'm/'
+        + (m.cellFetchMs || 0).toFixed(0) + 'ms'
+        + ' edgeReqs=' + m.edgeReqs
+        + ' yields=' + m.yields + '/' + (m.yieldMs || 0).toFixed(0) + 'ms';
+      for (var pi = 0; pi < (m.phases || []).length; pi++) {
+        var p = m.phases[pi];
+        var pps = (p.pops > 0 && p.ms > 0)
+          ? Math.round(p.pops / (p.ms / 1000)) : 0;
+        line += '\n  phase[' + pi + '] ' + p.label
+              + ' pops=' + p.pops
+              + ' ms=' + p.ms.toFixed(0)
+              + (pps > 0 ? ' (' + pps + '/s)' : '')
+              + ' bail=' + (p.bailed ? 'yes' : 'no');
+      }
+      console.warn(line);
+      return;
+    }
     var inflight = __routingWorkerInflight.get(m.id);
     if (!inflight) return;
     if (m.type === 'route-progress') {
@@ -5696,22 +5772,27 @@ function initRouting(map, config) {
   }
 
   async function findRoute(startNode, endNode) {
-    // Prefer the worker on spatial-v2 graphs. The bridge swallows
-    // initialization errors and reports false from the ready promise;
-    // we fall through to the main-thread implementation in that case.
-    if (graph && graph.isSpatial && __routingWorker && __routingWorkerReady) {
-      var ready = await __routingWorkerReady;
-      if (ready) {
+    // Prefer the worker on spatial-v2 graphs. initRoutingWorker is
+    // idempotent and returns a Promise<bool> resolving once init
+    // completes (true → ready, false → failed, fall back). Awaiting
+    // here means a route requested before init finishes waits up
+    // briefly rather than silently bypassing the worker.
+    if (graph && graph.isSpatial) {
+      var ready = await initRoutingWorker();
+      if (ready && __routingWorker) {
         try {
           var t0 = performance.now();
+          console.warn('[streetzim] routing via worker (start=' + startNode
+                       + ' end=' + endNode + ')');
           var workerResult = await findRouteViaWorker(startNode, endNode);
-          console.log('[route] worker took ' +
-                      (performance.now() - t0).toFixed(0) + ' ms');
+          console.warn('[streetzim] worker route done in '
+                       + (performance.now() - t0).toFixed(0) + ' ms');
           return workerResult;
         } catch (err) {
           console.warn('[streetzim] worker route failed, falling back:', err);
-          // Fall through to main-thread path below.
         }
+      } else {
+        console.warn('[streetzim] routing on main thread (worker not ready)');
       }
     }
     return findRouteMainThread(startNode, endNode);
@@ -6026,6 +6107,14 @@ function initRouting(map, config) {
   // to the correct setter.
   function queueGraphPick(which, lat, lon, label) {
     if (graph) return false;
+    // Show the picked label in the input IMMEDIATELY so the user can
+    // see what they chose — graph load can take 3-5 s, and an empty
+    // input plus "loading routing data…" status reads as "the click
+    // did nothing." The retry below will then snap to the nearest
+    // node and overwrite the marker once the graph is up.
+    var visible = label || coordLabel(lat, lon);
+    if (which === 'origin') originInput.value = visible;
+    else                    destInput.value   = visible;
     statusEl.textContent = 'Loading routing data…';
     loadGraph();
     var tries = 0;
@@ -6310,19 +6399,31 @@ function initRouting(map, config) {
   attachTypeahead(originInput, originResultsEl, 'origin');
   attachTypeahead(destInput, destResultsEl, 'dest');
 
-  // Auto-clear "Current location" placeholder text on focus, so the
-  // user can start typing a new address without first hand-deleting
-  // the synthetic label. Only triggers for that specific placeholder
-  // label — a real typed address is left untouched.
-  function clearCurrentLocationOnFocus(input) {
+  // Focus behaviour: select existing text so the next keystroke
+  // overwrites it cleanly, AND clear the synthetic "Current location"
+  // label so the user doesn't have to hand-delete it. setTimeout(0)
+  // works around iOS Safari's habit of un-selecting on the focus
+  // event tick. Hooks both focus AND click — clicking on an
+  // already-focused input still re-selects, which matches Google
+  // Maps' behaviour.
+  function autoSelectOnFocus(input) {
+    // First focus on the input (transitioning from elsewhere) selects
+    // all so the next keystroke replaces — and clears the synthetic
+    // "Current location" label specifically. Subsequent clicks while
+    // already focused let the user position the caret normally; we
+    // don't re-select on every click.
     input.addEventListener('focus', function() {
-      if (input.value === 'Current location') {
-        input.value = '';
-      }
+      setTimeout(function() {
+        if (input.value === 'Current location') {
+          input.value = '';
+        } else if (document.activeElement === input) {
+          try { input.select(); } catch (e) {}
+        }
+      }, 0);
     });
   }
-  clearCurrentLocationOnFocus(originInput);
-  clearCurrentLocationOnFocus(destInput);
+  autoSelectOnFocus(originInput);
+  autoSelectOnFocus(destInput);
 
   // Current location button (origin only). Uses the standard Geolocation API.
   // Falls back gracefully if not available or permission denied.
