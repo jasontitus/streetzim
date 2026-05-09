@@ -4256,22 +4256,13 @@ function initRouting(map, config) {
   // ?debug=1 overlay — shows pops/cells/heap during routing so we can
   // tell whether a long route is bottlenecked on cell cache, visited-
   // node Maps, or something else. No-op when the flag isn't set.
-  // Sticky via localStorage: once you append ?debug=1 to any URL,
-  // the flag persists across page loads + the picker redirect.
-  // ?debug=0 turns it off again.
+  // Per-page-load only — used to be sticky via localStorage but that
+  // surprised users who'd left the URL flag on once and couldn't get
+  // rid of it. The cleanup below also wipes any old sticky key.
   var DEBUG_ROUTING = (function() {
+    try { localStorage.removeItem('streetzim_debug'); } catch (e) {}
     try {
-      var p = new URLSearchParams(location.search).get('debug');
-      if (p === '1') {
-        try { localStorage.setItem('streetzim_debug', '1'); } catch (e) {}
-        return true;
-      }
-      if (p === '0') {
-        try { localStorage.removeItem('streetzim_debug'); } catch (e) {}
-        return false;
-      }
-      try { return localStorage.getItem('streetzim_debug') === '1'; }
-      catch (e) { return false; }
+      return new URLSearchParams(location.search).get('debug') === '1';
     } catch (e) { return false; }
   })();
   var __routeDebugEl = null;
