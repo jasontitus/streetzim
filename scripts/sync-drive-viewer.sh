@@ -44,6 +44,15 @@ if [ -f "resources/viewer/places.html" ]; then
   echo "  places HTML  → $OUT/places.html ($(wc -c < "$OUT/places.html") bytes)"
 fi
 
+# Off-main-thread routing engine. PWA-only for now; ZIM-baked viewers
+# will start including it at the next rebuild (see in-zim-apps.md), at
+# which point Kiwix Desktop / iOS get the worker too. Until then they
+# fall back to the main-thread engine — no breakage.
+if [ -f "resources/viewer/routing-worker.js" ]; then
+  cp "resources/viewer/routing-worker.js" "$OUT/routing-worker.js"
+  echo "  routing wrkr → $OUT/routing-worker.js ($(wc -c < "$OUT/routing-worker.js") bytes)"
+fi
+
 # 2. Download MapLibre. Already on disk? Skip.
 MAPLIBRE_BASE="https://unpkg.com/maplibre-gl@${MAPLIBRE_VERSION}/dist"
 for asset in maplibre-gl.js maplibre-gl.css; do

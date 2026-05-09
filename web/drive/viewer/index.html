@@ -5006,6 +5006,16 @@ function initRouting(map, config) {
             indexBytes: o.buf.byteLength,
             numNodeShards: idx.numNodeShards,
           });
+          // Off-main-thread routing — best-effort. Worker re-fetches
+          // its own copy of the graph data via the same baseUrl; the
+          // SW range-cache absorbs the duplicate bytes. If the worker
+          // fails to load (host doesn't ship routing-worker.js, or
+          // CSP blocks Workers), routing falls back to the main-thread
+          // implementation transparently. See routing-worker.js for
+          // the protocol.
+          try { initRoutingWorker(); } catch (e) {
+            console.warn('[streetzim] routing worker init skipped:', e);
+          }
           statusEl.textContent = 'Enter start and destination';
         });
       })
@@ -5478,17 +5488,26 @@ function initRouting(map, config) {
     var weightTag = (GREEDY_WEIGHT > 1.0) ? ' greedy×' + GREEDY_WEIGHT : ' optimal';
     var label = (highwayOnly ? 'A* highway-only' : 'A* full') + weightTag;
 
+    // Time-budget yielding decouples reporting (every 2k pops, so the
+    // debug overlay updates predictably) from yielding (every 50 ms
+    // wall-clock, so the event loop gets a turn for MapLibre repaints
+    // / cancel handling). Replaces the count-based yield that paid
+    // setTimeout-clamp overhead on every tick regardless of how slow
+    // each pop ran. cf. project_routing_perf_canada.md.
+    var lastReportPops = 0;
+    var lastYield = performance.now();
+
     while (open.size() > 0) {
       var item = open.pop();
       var current = item[1];
       pops++;
-      // Yield to the event loop every 2k pops so the debug overlay
-      // can paint, and the page doesn't lock up. Cheap and only
-      // ticks N/2k times — still much less overhead than awaiting
-      // each cell load.
-      if (pops % 2000 === 0) {
+      if (pops - lastReportPops >= 2000) {
         debugStats(label, pops);
+        lastReportPops = pops;
+      }
+      if (performance.now() - lastYield > 50) {
         await new Promise(function(r) { setTimeout(r, 0); });
+        lastYield = performance.now();
       }
       if (pops > POP_LIMIT) {
         debugStats(label + ' BAIL (pop limit ' + POP_LIMIT + ')', pops);
@@ -5584,7 +5603,121 @@ function initRouting(map, config) {
     return { coords: coords, distance: totalDist, time: totalTime, roads: roads };
   }
 
+  // --- Off-main-thread routing bridge ---
+  // The worker owns its own copy of the spatial-v2 graph (cells-index
+  // + node shards), so its A* runs flat-out without competing with
+  // MapLibre repaints. Falls back to the main-thread engine below if
+  // the worker fails to come up (e.g. host CSP, ZIM-baked viewer
+  // pre-dating routing-worker.js, etc.). cf. project_routing_perf_canada.md.
+  var __routingWorker = null;
+  var __routingWorkerReady = null;       // Promise<boolean> | null
+  var __routingWorkerSeq = 0;
+  var __routingWorkerInflight = new Map();
+
+  function initRoutingWorker() {
+    if (__routingWorker) return;
+    if (typeof Worker !== 'function') return;
+    var workerUrl = baseUrl + 'routing-worker.js';
+    try {
+      __routingWorker = new Worker(workerUrl);
+    } catch (e) {
+      console.warn('[streetzim] failed to spawn routing worker:', e);
+      __routingWorker = null;
+      return;
+    }
+    __routingWorkerReady = new Promise(function(resolve) {
+      __routingWorker.addEventListener('message', function onMsg(e) {
+        var m = e.data || {};
+        if (m.type === 'ready') {
+          console.log('[streetzim] routing worker ready', m);
+          window.__streetzim_routingWorker = __routingWorker;
+          window.__streetzim_routingWorkerReady = true;
+          __routingWorker.removeEventListener('message', onMsg);
+          __routingWorker.addEventListener('message', _routingWorkerOnMessage);
+          resolve(true);
+        } else if (m.type === 'init-error') {
+          console.warn('[streetzim] routing worker init failed:', m.error);
+          __routingWorker.terminate();
+          __routingWorker = null;
+          resolve(false);
+        }
+      });
+      __routingWorker.addEventListener('error', function(err) {
+        console.warn('[streetzim] routing worker error:', err.message || err);
+        if (__routingWorker) {
+          try { __routingWorker.terminate(); } catch (e) {}
+          __routingWorker = null;
+        }
+        resolve(false);
+      });
+      // Init expects baseUrl that's resolvable from the worker's own
+      // origin. baseUrl on main thread is relative; the worker uses
+      // `fetch(BASE_URL + ...)` so we need it to resolve correctly.
+      // For the PWA at /drive/viewer/, baseUrl is "" so the worker
+      // would fetch "/routing-data/..." (root) which is wrong. Pass
+      // an absolute URL so workers + SW + range reads compose.
+      var workerBaseUrl;
+      try {
+        workerBaseUrl = new URL(baseUrl, location.href).href;
+      } catch (e) {
+        workerBaseUrl = baseUrl;
+      }
+      __routingWorker.postMessage({ cmd: 'init', baseUrl: workerBaseUrl });
+    });
+  }
+
+  function _routingWorkerOnMessage(e) {
+    var m = e.data || {};
+    var inflight = __routingWorkerInflight.get(m.id);
+    if (!inflight) return;
+    if (m.type === 'route-progress') {
+      __routeDebugLabel = m.label || __routeDebugLabel;
+      __routeDebugPops = m.pops || 0;
+      if (DEBUG_ROUTING) __debugPaint();
+    } else if (m.type === 'route-done') {
+      __routingWorkerInflight.delete(m.id);
+      if (m.ok && m.result) inflight.resolve(m.result);
+      else if (m.ok)        inflight.resolve(null);
+      else                  inflight.reject(new Error(m.error || 'route failed'));
+    }
+  }
+
+  function findRouteViaWorker(startNode, endNode) {
+    if (!__routingWorker) return Promise.reject(new Error('worker not ready'));
+    var id = ++__routingWorkerSeq;
+    return new Promise(function(resolve, reject) {
+      __routingWorkerInflight.set(id, { resolve: resolve, reject: reject });
+      __routingWorker.postMessage({
+        cmd: 'route', id: id,
+        start: startNode, end: endNode,
+        options: {},
+      });
+    });
+  }
+
   async function findRoute(startNode, endNode) {
+    // Prefer the worker on spatial-v2 graphs. The bridge swallows
+    // initialization errors and reports false from the ready promise;
+    // we fall through to the main-thread implementation in that case.
+    if (graph && graph.isSpatial && __routingWorker && __routingWorkerReady) {
+      var ready = await __routingWorkerReady;
+      if (ready) {
+        try {
+          var t0 = performance.now();
+          var workerResult = await findRouteViaWorker(startNode, endNode);
+          console.log('[route] worker took ' +
+                      (performance.now() - t0).toFixed(0) + ' ms');
+          return workerResult;
+        } catch (err) {
+          console.warn('[streetzim] worker route failed, falling back:', err);
+          // Fall through to main-thread path below.
+        }
+      }
+    }
+    return findRouteMainThread(startNode, endNode);
+  }
+
+  async function findRouteMainThread(startNode, endNode) {
     // Spatial graphs route via the async-cell-loading path below; the
     // inline monolithic A* beneath only works with a single typed array
     // of edges (graph.edges is undefined on spatial graphs).
