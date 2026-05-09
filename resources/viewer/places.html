@@ -72,23 +72,33 @@
   #near-results .near-result .sub { color:var(--muted); font-size:0.82rem; }
   #near-results .near-result:hover .sub,
   #near-results .near-result.active .sub { color:var(--chip-on-fg); opacity:0.85; }
-  .status { padding:18px 16px; color:var(--muted); font-size:0.9rem;
-            display:flex; gap:12px; align-items:center;
-            justify-content:space-between; flex-wrap:wrap; }
-  .status .count { flex:1 1 auto; min-width:0; }
-  /* "View on map" CTA appears as soon as the result list is non-
-     empty. Hands the current `state.results` off to index.html via
-     sessionStorage; the viewer drops one search-pin per record + a
-     floating sidebar with click-to-fly behaviour. */
-  .status .map-view {
-    flex:0 0 auto; padding:6px 12px; border-radius:8px;
-    border:1px solid var(--accent); background:var(--accent); color:#fff;
-    font:inherit; font-size:0.85rem; font-weight:600;
-    text-decoration:none; cursor:pointer; line-height:1;
-    display:inline-flex; align-items:center; gap:6px;
+  .status { padding:18px 16px; color:var(--muted); font-size:0.9rem; }
+  /* Map-view CTA is a floating action button — same pattern as Google
+     and Apple Maps when switching list ↔ map. Hands the current
+     `state.results` off to index.html via sessionStorage; the viewer
+     drops one search-pin per record + a bottom carousel of cards. */
+  .map-view-fab {
+    position:fixed; right:16px;
+    bottom:max(20px, env(safe-area-inset-bottom));
+    z-index:1000;
+    padding:12px 20px; border-radius:999px;
+    border:none; background:var(--accent); color:#fff;
+    font:inherit; font-size:0.95rem; font-weight:600; line-height:1;
+    box-shadow:0 4px 14px rgba(37,99,235,0.35),
+               0 2px 4px rgba(0,0,0,0.12);
+    cursor:pointer;
+    display:inline-flex; align-items:center; gap:8px;
+    transition:transform .15s ease, box-shadow .15s ease;
   }
-  .status .map-view[hidden] { display:none; }
-  .status .map-view:hover { filter:brightness(1.05); }
+  .map-view-fab:hover {
+    transform:translateY(-1px);
+    box-shadow:0 6px 18px rgba(37,99,235,0.42),
+               0 3px 6px rgba(0,0,0,0.14);
+  }
+  .map-view-fab[hidden] { display:none; }
+  /* Reserve room below the last result so the FAB doesn't cover the
+     CTAs on the bottom card. Only kicks in when the FAB is on screen. */
+  body.has-results ol#results { padding-bottom:80px; }
   ol#results { list-style:none; margin:0; padding:0; }
   ol#results li { background:var(--card); margin:0 16px 10px; padding:14px;
                   border-radius:12px; border:1px solid var(--line);
@@ -148,9 +158,12 @@
 
 <div id="status" class="status">
   <span id="status-text" class="count">Loading places index…</span>
-  <button id="map-view-btn" class="map-view" type="button" hidden>📍 Map view</button>
 </div>
 <ol id="results"></ol>
+
+<button id="map-view-btn" class="map-view-fab" type="button" hidden>
+  <span aria-hidden="true">📍</span><span>Map view</span>
+</button>
 
 <footer>
   Searches the index baked into this map. No network required.
@@ -613,11 +626,13 @@ function applyResults(records) {
   setStatus(records.length > state.results.length
     ? `Showing first ${state.results.length} of ${records.length} matches.`
     : `${state.results.length} match${state.results.length === 1 ? '' : 'es'}.`);
-  // Show "Map view" iff there's something to plot. Toggle every
-  // applyResults call so chip/query swaps refresh the visibility.
-  if (els.mapViewBtn) {
-    els.mapViewBtn.hidden = state.results.length === 0;
-  }
+  // Show the "Map view" FAB iff there's something to plot. The body
+  // class drives extra bottom-padding on the results list so the FAB
+  // doesn't cover the last card's CTAs. Toggle every applyResults
+  // call so chip/query swaps refresh the visibility.
+  const hasResults = state.results.length > 0;
+  if (els.mapViewBtn) els.mapViewBtn.hidden = !hasResults;
+  document.body.classList.toggle('has-results', hasResults);
   renderResults();
 }
 
