@@ -23,6 +23,19 @@ flow is the body.
 
 ---
 
+## Pending changes to apply before the next rebuild
+
+These are repo-wide changes that should land in the same PR as the
+next regional rebuild — they're not in `main` yet because the PWA
+viewer can't ship them without rebuilt chip files (see each entry
+for migration notes).
+
+- **Merge Restaurants + Cafés into a single Food & Drink chip.**
+  See [`docs/in-zim-apps.md` § "Queued for next rebuild"](in-zim-apps.md#queued-for-next-rebuild--merge-restaurants--cafés).
+  Touches `cloud/chip_rules.py`, `resources/viewer/places.html`,
+  `resources/viewer/index.html`, `cloud/validate_zim.py`. Also fixes
+  the `ice_cream` / `ice_cream_parlor` cross-bucket bug.
+
 ## Prereqs (one-time)
 
 ```sh

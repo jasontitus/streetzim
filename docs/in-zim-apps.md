@@ -60,6 +60,19 @@ the two emit byte-identical pages for equivalent input.
 
 ## Category chips (current set)
 
+> **Chip rules are duplicated** — they live in two files that must
+> stay in sync:
+> - `cloud/chip_rules.py` — `CHIP_RULES` list, consumed at build time
+>   by `record_matches_chip` to slice records into per-chip JSONs.
+> - `resources/viewer/places.html` — `CATEGORIES` const, consumed at
+>   runtime by the Find UI.
+>
+> A smaller hand-curated subset lives in `EXPLORE_CHIPS` at the top
+> of `resources/viewer/index.html` (the map's "Explore" menu). Any
+> chip change has to touch all relevant sites; the validator
+> (`cloud/validate_zim.py` ~line 424) also lists chip IDs in its
+> declared-count warnings.
+
 The Find-places mini-app's chip row is driven by the `CATEGORIES`
 table at the top of `resources/viewer/places.html`. Each chip
 filters the `category-index/poi.json` records (or its own named
@@ -93,6 +106,61 @@ Current chips (order matters — left-to-right priority for horizontal space):
 `navigator.geolocation.getCurrentPosition` feeds each row's
 haversine distance, and the result list sorts by that. Toggle off
 to fall back to name sort.
+
+## Queued for next rebuild — merge Restaurants + Cafés
+
+Apply this change in any region rebuilt 2026-05-09 or later.
+
+**What:** Replace the separate "Restaurants" and "Cafés" chips with
+a single **"Food & Drink"** chip (`id: "food"`).
+
+**Why:** End users can't intuit the line between sit-down meal vs
+coffee/pastry/bakery/tea — the labels alone don't communicate it. The
+sub-filter chip UI already shipped (top-N `r.s` subtypes inside a
+chip's results) surfaces "Italian restaurant · Bakery · Café · Fast
+food" automatically, so a single Food & Drink chip with in-page
+sub-filter is the better Google-Maps-style UX. Also fixes a real bug:
+today `ice_cream` lands in Restaurants while `ice_cream_parlor` lands
+in Cafés — same thing, different bucket.
+
+**How — three files in lock-step:**
+
+1. `cloud/chip_rules.py` — drop the `restaurants` and `cafes` rules,
+   add:
+   ```python
+   ChipRule(id="food", label="Food & Drink", from_cat="poi",
+            subtypes=("restaurant", "fast_food", "food_court",
+                      "ice_cream", "ice_cream_parlor",
+                      "cafe", "coffee_shop", "bakery", "tea_room"),
+            include_regex=re.compile(
+                r"_restaurant$|^food_|^coffee_|_bakery$|_cafe$"))
+   ```
+2. `resources/viewer/places.html` — same merge in the `CATEGORIES`
+   const so `expandPrefix` / chip rendering matches.
+3. `resources/viewer/index.html` — replace the two food entries in
+   `EXPLORE_CHIPS` with `{ id: 'food', label: 'Food & Drink',
+   emoji: '🍴' }`.
+4. `cloud/validate_zim.py` ~line 424 — update the
+   `("restaurants", "cafes", "shops")` declared==0 allowlist to
+   `("food", "shops")`.
+5. Update the chip table earlier in this doc.
+
+**Migration order — important.** The viewer is baked into each ZIM,
+so old ZIMs keep their old chip files. The PWA viewer at
+`streetzim.web.app/drive` serves whatever ZIM the user loads, so:
+
+- If you change the PWA `places.html` to query `chip-food.json` but
+  the user loads an old ZIM with only `chip-restaurants.json` +
+  `chip-cafes.json`, the PWA will 404 and show "0 matches" for Food
+  & Drink.
+- Safe path: hold the PWA + repo edits until the next regional
+  rebuild wave is staged, then ship them in lockstep with the new
+  ZIMs. Older ZIMs continue to work because *they* still bake the
+  old chips.
+- Alternative: put a fallback in `runChipQuery` that fetches
+  `chip-restaurants.json` + `chip-cafes.json` and concatenates when
+  `chip-food.json` 404s. Costs a one-line check + a second fetch on
+  legacy ZIMs; lets the PWA viewer change ride ahead of rebuilds.
 
 ## Overture places enrichment (per-record fields)
 
