@@ -71,6 +71,17 @@
     font-size:18px; line-height:1; cursor:pointer; padding:2px 6px;
   }
   #near-clear:hover { color:var(--text); }
+  /* "Limit to map area" toggle — appears when index.html has stashed
+     a recent viewport in sessionStorage. Hard-filters results to the
+     bbox so "bars near my neighborhood" is just zoom + chip. */
+  .map-area { padding:0 16px 12px; display:flex; align-items:center;
+              gap:8px; font-size:0.85rem; color:var(--muted); }
+  .map-area[hidden] { display:none; }
+  .map-area input[type=checkbox] { margin:0; cursor:pointer; }
+  .map-area label { cursor:pointer; user-select:none; }
+  .map-area .info { color:var(--muted); font-size:0.8rem;
+                    overflow:hidden; text-overflow:ellipsis;
+                    white-space:nowrap; flex:1 1 auto; min-width:0; }
   #near-results {
     position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:20;
     background:var(--card); border:1px solid var(--line); border-radius:10px;
@@ -148,6 +159,12 @@
     <button id="near-clear" type="button" aria-label="Clear" title="Reset to my location">×</button>
     <div id="near-results" role="listbox" hidden></div>
   </div>
+</div>
+
+<div id="map-area-row" class="map-area" hidden>
+  <input id="map-area-checkbox" type="checkbox">
+  <label for="map-area-checkbox">Limit to map area</label>
+  <span id="map-area-info" class="info"></span>
 </div>
 
 <div id="status" class="status">
@@ -258,7 +275,25 @@ const state = {
   query: '',
   chip: null,
   origin: null,        // {lat, lon} when GPS toggle is on
+  mapArea: null,       // {n,s,e,w,z,ts} from index.html or null
+  mapAreaOn: false,    // user toggled "Limit to map area"
 };
+
+// Viewport that index.html stashed on its last moveend. We accept it
+// only if it's < 30 min old — otherwise the user has probably context-
+// switched and the cached bbox is no longer what they mean by
+// "this area".
+const VIEWPORT_FRESH_MS = 30 * 60 * 1000;
+function _readMapArea() {
+  try {
+    const raw = sessionStorage.getItem('streetzim_last_viewport');
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    if (!v || typeof v.n !== 'number') return null;
+    if (Date.now() - (v.ts || 0) > VIEWPORT_FRESH_MS) return null;
+    return v;
+  } catch (e) { return null; }
+}
 
 const els = {
   q:            document.getElementById('q'),
@@ -270,7 +305,31 @@ const els = {
   near:         document.getElementById('near-input'),
   nearClear:    document.getElementById('near-clear'),
   nearResults:  document.getElementById('near-results'),
+  mapAreaRow:   document.getElementById('map-area-row'),
+  mapAreaCheck: document.getElementById('map-area-checkbox'),
+  mapAreaInfo:  document.getElementById('map-area-info'),
 };
+
+// If index.html stashed a recent viewport, expose the toggle so the
+// user can constrain results to it. Otherwise the toggle row stays
+// hidden and search is unchanged.
+function initMapAreaToggle() {
+  state.mapArea = _readMapArea();
+  if (!state.mapArea || !els.mapAreaRow) return;
+  // Brief, friendly description of the bbox. Zoom level is more
+  // intuitive than degrees: "neighborhood / city / region".
+  const z = state.mapArea.z || 0;
+  let scale = 'map area';
+  if      (z >= 15) scale = 'neighborhood';
+  else if (z >= 12) scale = 'city';
+  else if (z >= 9)  scale = 'region';
+  els.mapAreaInfo.textContent = `(${scale}, zoom ${z.toFixed(1)})`;
+  els.mapAreaRow.hidden = false;
+  els.mapAreaCheck.addEventListener('change', () => {
+    state.mapAreaOn = els.mapAreaCheck.checked;
+    runSearch();
+  });
+}
 
 // ---------- bootstrapping ----------
 
@@ -288,6 +347,7 @@ const els = {
     return;
   }
   renderChips();
+  initMapAreaToggle();
   els.q.addEventListener('input', debounce(onSearch, 200));
   // Search-near input: typeahead into the same place/POI index, click
   // a result to set the search origin manually. "My location" (GPS)
@@ -603,6 +663,20 @@ function stashResultsForMap(label) {
 }
 
 function applyResults(records) {
+  // Hard-filter to the map's last viewport when the user opted in.
+  // Done before sort/cap so distance + count reflect the filtered set.
+  let totalBeforeFilter = records.length;
+  let filteredOut = 0;
+  if (state.mapAreaOn && state.mapArea) {
+    const v = state.mapArea;
+    const inside = (r) =>
+      r.a >= v.s && r.a <= v.n && _lonInside(r.o, v.w, v.e);
+    const next = [];
+    for (const r of records) {
+      if (inside(r)) next.push(r); else filteredOut++;
+    }
+    records = next;
+  }
   if (state.origin) {
     for (const r of records) {
       r._dist = haversine(state.origin.lat, state.origin.lon, r.a, r.o);
@@ -613,9 +687,16 @@ function applyResults(records) {
   }
   // Cap to keep the DOM responsive on big indices.
   state.results = records.slice(0, 300);
-  setStatus(records.length > state.results.length
-    ? `Showing first ${state.results.length} of ${records.length} matches.`
-    : `${state.results.length} match${state.results.length === 1 ? '' : 'es'}.`);
+  let countLine;
+  if (records.length > state.results.length) {
+    countLine = `Showing first ${state.results.length} of ${records.length} matches`;
+  } else {
+    countLine = `${state.results.length} match${state.results.length === 1 ? '' : 'es'}`;
+  }
+  if (state.mapAreaOn && state.mapArea && filteredOut > 0) {
+    countLine += ` (filtered ${filteredOut} outside map area)`;
+  }
+  setStatus(countLine + '.');
   // Show the "On map" pill iff there's something to plot. Toggle
   // every applyResults call so chip/query swaps refresh visibility.
   if (els.mapViewBtn) els.mapViewBtn.hidden = state.results.length === 0;
@@ -1005,6 +1086,13 @@ function haversine(lat1, lon1, lat2, lon2) {
   const a = Math.sin(dLat / 2) ** 2
           + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+// Longitude-inside-bounds with antimeridian wraparound. MapLibre's
+// getBounds().getEast() can be < getWest() when the camera spans
+// 180°/-180°; in that case "inside" is the union of [w,180]∪[-180,e].
+function _lonInside(lon, w, e) {
+  return w <= e ? (lon >= w && lon <= e) : (lon >= w || lon <= e);
 }
 </script>
 </body>

@@ -2014,6 +2014,43 @@ function _renderFindResultsStrip(map, stash) {
 
   _findResultsState.strip = strip;
   _findResultsState.track = track;
+
+  // Keyboard nav for the carousel:
+  //   ←/↑ → previous card   →/↓ → next card
+  //   Enter → toggle active marker's popup (same as tapping the pin)
+  //   Esc   → close the carousel
+  // Skip when the user is typing in an input — they want to type, not
+  // scroll cards.
+  document.addEventListener('keydown', _findResultsKeydown);
+}
+
+function _findResultsKeydown(e) {
+  if (!_findResultsState.strip) return;
+  var t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA'
+            || t.tagName === 'SELECT' || t.isContentEditable)) {
+    return;
+  }
+  var n = _findResultsState.items ? _findResultsState.items.length : 0;
+  if (n === 0) return;
+  var active = _findResultsState.active;
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    _scrollCarouselTo(Math.min(n - 1, (active < 0 ? 0 : active) + 1));
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    _scrollCarouselTo(Math.max(0, (active < 0 ? 0 : active) - 1));
+  } else if (e.key === 'Enter') {
+    if (active < 0) return;
+    e.preventDefault();
+    var marker = _findResultsState.markers[active];
+    if (marker) {
+      try { marker.togglePopup(); } catch (err) {}
+    }
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    clearFindResults();
+  }
 }
 
 function _findResultCard(map, r, idx) {
@@ -2216,6 +2253,7 @@ function clearFindResults() {
     clearTimeout(_findResultsState.scrollDebounce);
     _findResultsState.scrollDebounce = null;
   }
+  document.removeEventListener('keydown', _findResultsKeydown);
 }
 
 // --- Search functionality ---
@@ -2749,6 +2787,31 @@ function initSearch(map) {
   // Expose map globally for DevTools diagnostics. Safe to leave in shipping
   // builds — it's just a property on window.
   try { window.__streetzim_map = map; } catch (e) {}
+
+  // Stash the current viewport in sessionStorage so the Find page can
+  // offer a "Limit to map area" filter when the user just zoomed in
+  // somewhere. Debounced so a fast pan doesn't pound the storage. The
+  // shape matches what places.html's bbox filter reads.
+  var __vpDebounce = null;
+  function __stashViewport() {
+    try {
+      var b = map.getBounds();
+      var v = {
+        n: b.getNorth(), s: b.getSouth(),
+        e: b.getEast(),  w: b.getWest(),
+        z: map.getZoom(),
+        ts: Date.now(),
+      };
+      sessionStorage.setItem('streetzim_last_viewport', JSON.stringify(v));
+    } catch (e) {}
+  }
+  map.on('moveend', function() {
+    clearTimeout(__vpDebounce);
+    __vpDebounce = setTimeout(__stashViewport, 200);
+  });
+  // Also stash once at load — covers the case where the user opens
+  // the find page without ever moving the map.
+  map.once('idle', __stashViewport);
 
   // Shared search API — used by routing panel's typeahead inputs so we
   // don't duplicate the manifest/chunk/scoring infrastructure. Returns
