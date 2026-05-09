@@ -2286,6 +2286,13 @@ function _showPlaceDetail(map, r, idx) {
   var dline = _detailDistanceLine(r);
   if (dline) panel.appendChild(dline);
 
+  // Rough travel-time estimate (straight-line). Not a real ETA — the
+  // routing graph isn't available as a programmatic compute API, so
+  // we sub in average-speed heuristics (walking 5 km/h, driving
+  // 40 km/h urban average). Labelled "≈" so the user can tell.
+  var tline = _detailTravelTimesLine(r);
+  if (tline) panel.appendChild(tline);
+
   // Action row: Directions / Call / Website / (Save placeholder)
   var actions = document.createElement('div');
   actions.style.cssText = (
@@ -2451,6 +2458,39 @@ function _detailFactRow(label, value, href, target) {
 function _detailHostname(url) {
   try { return new URL(url).hostname.replace(/^www\./, ''); }
   catch (e) { return url; }
+}
+
+function _detailTravelTimesLine(r) {
+  if (!_findResultsState.origin
+      || typeof r.a !== 'number' || typeof r.o !== 'number') {
+    return null;
+  }
+  var o = _findResultsState.origin;
+  var m = _haversineMetersStrip(o.lat, o.lon, r.a, r.o);
+  // Walking 1.4 m/s (~5 km/h), driving 11 m/s (~40 km/h urban).
+  // Round up so 0 doesn't display as "0 min" for non-zero distances.
+  function fmtMin(sec) {
+    var min = Math.max(1, Math.round(sec / 60));
+    if (min < 60) return min + ' min';
+    var h = Math.floor(min / 60), rest = min % 60;
+    return rest === 0 ? h + ' hr' : h + ' hr ' + rest + ' min';
+  }
+  var walkMin = fmtMin(m / 1.4);
+  var driveMin = fmtMin(m / 11);
+  var line = document.createElement('div');
+  line.style.cssText = (
+    'color:#666; font-size:12px; margin:2px 0 0;'
+  );
+  // Drop walking estimate when it would exceed 2 hours; switch to
+  // drive-only display so we're not telling the user to walk for
+  // four hours across CA.
+  var walkMinValue = m / 1.4 / 60;
+  if (walkMinValue > 120) {
+    line.textContent = '≈ ' + driveMin + ' drive (straight-line)';
+  } else {
+    line.textContent = '≈ ' + walkMin + ' walk · ' + driveMin + ' drive (straight-line)';
+  }
+  return line;
 }
 
 function _detailDistanceLine(r) {

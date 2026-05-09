@@ -121,6 +121,25 @@
   .sort-row .sort-btn.on {
     background:var(--accent); color:#fff; border-color:var(--accent);
   }
+  /* Sub-filter chips — derived from the current result set's subtype
+     histogram (top N). Sits above the sort row. */
+  .subfilter-row {
+    padding:4px 16px 8px; display:flex; gap:6px;
+    overflow-x:auto; -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+  }
+  .subfilter-row[hidden] { display:none; }
+  .subfilter-row::-webkit-scrollbar { display:none; }
+  .subfilter-row .sub-chip {
+    flex:0 0 auto; padding:5px 11px; border-radius:999px;
+    border:1px solid var(--line); background:var(--card); color:var(--text);
+    font:inherit; font-size:0.8rem; cursor:pointer;
+    white-space:nowrap;
+  }
+  .subfilter-row .sub-chip:hover { background:#eef3fe; }
+  .subfilter-row .sub-chip.on {
+    background:var(--accent); color:#fff; border-color:var(--accent);
+  }
   /* Wrap the search input so the recent-searches dropdown can absolutely
      position relative to it. */
   header .q-wrap { position:relative; }
@@ -215,6 +234,8 @@
 <div id="status" class="status">
   <span id="status-text" class="count">Loading places index…</span>
 </div>
+
+<div id="subfilter-row" class="subfilter-row" hidden></div>
 
 <div id="sort-row" class="sort-row" hidden>
   <label>Sort:</label>
@@ -332,6 +353,7 @@ const state = {
   mapArea: null,       // {n,s,e,w,z,ts} from index.html or null
   mapAreaOn: false,    // user toggled "Limit to map area"
   sortMode: null,      // 'distance' | 'name' | 'category' (null = auto)
+  subFilter: null,     // selected r.s subtype (e.g. 'italian_restaurant')
 };
 
 // Recent searches are persisted in localStorage so they survive
@@ -390,6 +412,7 @@ const els = {
   mapAreaInfo:  document.getElementById('map-area-info'),
   recents:      document.getElementById('recent-searches'),
   sortRow:      document.getElementById('sort-row'),
+  subfilterRow: document.getElementById('subfilter-row'),
 };
 
 // If index.html stashed a recent viewport, expose the toggle so the
@@ -679,6 +702,9 @@ function selectChip(def) {
   for (const b of els.chips.querySelectorAll('button')) {
     b.classList.toggle('on', state.chip && b.dataset.cat === state.chip.id);
   }
+  // Sub-filter is scoped to the current chip's result histogram —
+  // clear it on chip change so we don't ghost-apply across queries.
+  state.subFilter = null;
   rerunQuery();
 }
 
@@ -686,6 +712,8 @@ function selectChip(def) {
 
 function onSearch() {
   state.query = els.q.value.trim();
+  // Sub-filter is scoped to the current query's result histogram.
+  state.subFilter = null;
   rerunQuery();
 }
 
@@ -902,7 +930,73 @@ function applyResults(records) {
   _sortAndShow(records);
 }
 
+// Build "italian / shoe shop / bakery" style sub-filter chips from
+// the current result set's r.s histogram. Top 8 by count, hidden
+// when there's only one (or zero) distinct subtype — nothing to
+// filter against. Idempotent: re-runs on every applyResults / sort
+// change without leaking listeners.
+function _renderSubfilterChips(records) {
+  if (!els.subfilterRow) return;
+  const counts = new Map();
+  for (const r of records) {
+    const s = (r.s || '').trim();
+    if (!s) continue;
+    counts.set(s, (counts.get(s) || 0) + 1);
+  }
+  const subs = Array.from(counts.entries())
+    .filter(([_, n]) => n >= 2)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8);
+  while (els.subfilterRow.firstChild) {
+    els.subfilterRow.removeChild(els.subfilterRow.firstChild);
+  }
+  if (subs.length < 2) {
+    els.subfilterRow.hidden = true;
+    return;
+  }
+  els.subfilterRow.hidden = false;
+  // "All" pseudo-chip for clearing the filter — only meaningful when
+  // a subfilter is currently active.
+  if (state.subFilter) {
+    const all = document.createElement('button');
+    all.type = 'button';
+    all.className = 'sub-chip';
+    all.textContent = 'All';
+    all.addEventListener('click', () => {
+      state.subFilter = null;
+      _sortAndShow(state.lastRecords.slice());
+    });
+    els.subfilterRow.appendChild(all);
+  }
+  for (const [sub, count] of subs) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'sub-chip' + (sub === state.subFilter ? ' on' : '');
+    chip.textContent = `${_humanSubtype(sub)} · ${count}`;
+    chip.addEventListener('click', () => {
+      state.subFilter = (state.subFilter === sub) ? null : sub;
+      _sortAndShow(state.lastRecords.slice());
+    });
+    els.subfilterRow.appendChild(chip);
+  }
+}
+
+function _humanSubtype(s) {
+  // OSM/Overture subtypes are snake_case; humans want spaces and
+  // sentence case. "italian_restaurant" → "Italian restaurant".
+  if (!s) return s;
+  return s.replace(/_/g, ' ')
+          .replace(/^./, c => c.toUpperCase());
+}
+
 function _sortAndShow(records) {
+  // Render sub-filter chips from the unfiltered set so the user
+  // can always see all subtypes available, even after a sub-filter
+  // is applied. Then narrow `records` if a subfilter is active.
+  _renderSubfilterChips(records);
+  if (state.subFilter) {
+    records = records.filter(r => (r.s || '') === state.subFilter);
+  }
   const mode = _effectiveSortMode();
   if (mode === 'distance' && state.origin) {
     for (const r of records) {
