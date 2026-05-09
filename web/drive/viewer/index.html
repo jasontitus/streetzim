@@ -1843,10 +1843,12 @@ function makeStyle(config) {
 // --- Find-results map view ---
 // places.html stashes its current `state.results` in sessionStorage
 // when the user clicks "Map view"; we read that here, drop one pin
-// per record, fit bounds, and render a floating sidebar with
-// click-to-fly behaviour. This is the v1 of the Google-Maps-style
-// results-on-map view: list lives on places.html, map lives on
-// index.html, sessionStorage is the contract surface.
+// per record, fit bounds, and render a horizontal carousel pinned
+// to the bottom of the viewport. As the user swipes (or scroll-
+// snaps) between cards, the camera flies to the centered card's
+// pin and that pin gets a visual highlight. v1 used a floating
+// upper-right sidebar — covered most of the map on phones, replaced
+// 2026-05-08 with this Google-Maps-style bottom strip.
 //
 // Schema (must match places.html `stashResultsForMap`):
 //   { label: "<chip or query name>",
@@ -1854,13 +1856,16 @@ function makeStyle(config) {
 //     items:  [ { n, a, o, t?, s?, cat?, l?, ws?, p?, soc?, brand?, wd? }, … ] }
 var FIND_RESULTS_STASH_KEY = 'streetzim_find_results';
 var _findResultsState = {
-  markers: [],   // maplibregl.Marker[]
-  panel: null,   // root <div> for the floating sidebar
+  markers: [],     // maplibregl.Marker[] — index aligns with stash.items
+  strip:   null,   // root <div> of the bottom carousel
+  track:   null,   // the scrollable inner element holding the cards
+  items:   null,   // stash.items
+  origin:  null,   // stash.origin (used for distance labels)
+  active:  -1,     // index of the card currently centered
+  scrollDebounce: null,
 };
 
 function renderFindResultsFromStash(map) {
-  // Tear down any previous render before parsing new state — handles
-  // back-and-forth between the Find page and the map.
   clearFindResults();
   var raw;
   try { raw = sessionStorage.getItem(FIND_RESULTS_STASH_KEY); }
@@ -1872,15 +1877,17 @@ function renderFindResultsFromStash(map) {
   if (!stash || !Array.isArray(stash.items) || stash.items.length === 0) {
     return;
   }
-  // Drop the stash AFTER we've used it so a refresh doesn't re-fire.
-  // Keep the data on the page in `_findResultsState` for the panel
-  // click handlers and for clearFindResults to remove.
+  // Drop the stash after parsing so a refresh doesn't re-fire.
+  // The data lives on `_findResultsState` for the lifetime of the
+  // open carousel.
   try { sessionStorage.removeItem(FIND_RESULTS_STASH_KEY); }
   catch (e) {}
+  _findResultsState.items  = stash.items;
+  _findResultsState.origin = stash.origin || null;
 
-  // One marker per record. Same red search-pin as the single-result
-  // path, with the same enrich-aware popup so users get the familiar
-  // "Directions to here" CTA on every hit.
+  // One marker per record. The "active" marker (whichever the
+  // carousel currently highlights) gets a distinct color via DOM
+  // class — see `_setActiveResult` for the swap.
   var bounds = null;
   for (var i = 0; i < stash.items.length; i++) {
     var r = stash.items[i];
@@ -1888,41 +1895,43 @@ function renderFindResultsFromStash(map) {
     var marker = new maplibregl.Marker({ color: '#e74c3c' })
       .setLngLat([r.o, r.a])
       .addTo(map);
-    // Wire the same DOM popup the click-on-map flow uses (built by
-    // `_buildWikiPopupDOM` if exposed; otherwise fall back to a
-    // plain Directions popup).
     var popup = _findResultPopup(map, r);
     if (popup) marker.setPopup(popup);
+    // Tap a pin → snap the carousel to the matching card. Two-way
+    // sync between map and strip so the user can drive from either.
+    (function(idx) {
+      var el = marker.getElement();
+      el.style.cursor = 'pointer';
+      el.addEventListener('click', function() {
+        _scrollCarouselTo(idx);
+      });
+    })(i);
     _findResultsState.markers.push(marker);
     if (!bounds) bounds = new maplibregl.LngLatBounds([r.o, r.a], [r.o, r.a]);
     else         bounds.extend([r.o, r.a]);
   }
   if (bounds) {
-    map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 800 });
+    // Leave room for the carousel at the bottom — extra bottom
+    // padding so the camera doesn't park results behind the strip.
+    map.fitBounds(bounds, {
+      padding: { top: 60, right: 40, bottom: 200, left: 40 },
+      maxZoom: 14, duration: 800,
+    });
   }
-  _renderFindResultsPanel(map, stash);
+  _renderFindResultsStrip(map, stash);
+  _setActiveResult(map, 0, /*flyTo*/false);
 }
 
 function _findResultPopup(map, r) {
-  // Prefer the existing wiki/feature popup builder so the Directions
-  // button + enrich row look identical to a normal map-click pin.
   if (typeof map._buildWikiPopupDOM === 'function') {
     var wd = null;
-    if (r.wd) {
-      // The enrich shape the wiki popup expects.
-      wd = {};
-      if (r.l)  wd.c = r.l;
-      // Wikipedia/Wikidata fields aren't stashed; the popup degrades
-      // gracefully when they're absent.
-    }
+    if (r.l) wd = { c: r.l };
     var lng = { lat: r.a, lng: r.o };
     var dom = map._buildWikiPopupDOM(r.n || '(unnamed)', wd, lng);
     return new maplibregl.Popup({ offset: 28, closeButton: true,
                                   closeOnClick: false, maxWidth: '320px' })
       .setDOMContent(dom);
   }
-  // Fallback — minimal popup with just the name. Should never hit
-  // this in practice; map._buildWikiPopupDOM is exposed by initWikidataPopups.
   var box = document.createElement('div');
   box.style.cssText = 'font:14px/1.4 -apple-system,system-ui,sans-serif;';
   box.textContent = r.n || '(unnamed)';
@@ -1931,33 +1940,31 @@ function _findResultPopup(map, r) {
     .setDOMContent(box);
 }
 
-function _renderFindResultsPanel(map, stash) {
-  // Floating sidebar in the upper-right, below the layer-toggle row.
-  // Click any item to flyTo + open its marker's popup. Clear button
-  // tears down both the panel and all markers.
-  var panel = document.createElement('div');
-  panel.id = 'find-results-panel';
-  panel.style.cssText = (
-    'position:fixed; top:64px; right:12px; z-index:1500;'
-    + 'background:rgba(255,255,255,0.96); color:#222;'
-    + 'border:1px solid #ccc; border-radius:10px;'
-    + 'box-shadow:0 4px 16px rgba(0,0,0,0.18);'
-    + 'font:13px/1.4 -apple-system,system-ui,sans-serif;'
-    + 'max-width:280px; max-height:60vh; overflow:hidden;'
-    + 'display:flex; flex-direction:column;'
+function _renderFindResultsStrip(map, stash) {
+  // Bottom-pinned, full-width carousel. Each card snaps to center
+  // via CSS scroll-snap; an IntersectionObserver tracks which card
+  // is centered and drives the active-result update.
+  var strip = document.createElement('div');
+  strip.id = 'find-results-strip';
+  strip.style.cssText = (
+    'position:fixed; left:0; right:0; bottom:0; z-index:1500;'
+    + 'background:rgba(255,255,255,0.96); border-top:1px solid #ccc;'
+    + 'box-shadow:0 -4px 16px rgba(0,0,0,0.12);'
+    + 'font:13px/1.35 -apple-system,system-ui,sans-serif; color:#222;'
+    + 'padding-top:6px; padding-bottom:max(8px, env(safe-area-inset-bottom));'
   );
 
   var header = document.createElement('div');
   header.style.cssText = (
-    'padding:8px 10px; border-bottom:1px solid #eee;'
-    + 'display:flex; align-items:center; gap:6px;'
-    + 'font-weight:600; flex:0 0 auto;'
+    'padding:2px 14px 6px; display:flex; align-items:center; gap:8px;'
+    + 'font-size:12px; color:#555;'
   );
   var title = document.createElement('span');
-  title.style.cssText = 'flex:1 1 auto; min-width:0;'
-    + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
-  var n = stash.items.length;
-  title.textContent = (stash.label || 'Results') + ' (' + n + ')';
+  title.style.cssText = (
+    'flex:1 1 auto; min-width:0; overflow:hidden;'
+    + 'text-overflow:ellipsis; white-space:nowrap;'
+  );
+  title.textContent = (stash.label || 'Results') + ' · ' + stash.items.length;
   header.appendChild(title);
   var closeBtn = document.createElement('button');
   closeBtn.type = 'button';
@@ -1966,68 +1973,230 @@ function _renderFindResultsPanel(map, stash) {
   closeBtn.style.cssText = (
     'flex:0 0 auto; background:transparent; border:none;'
     + 'font-size:18px; line-height:1; cursor:pointer; color:#666;'
-    + 'padding:0 4px;'
+    + 'padding:2px 6px;'
   );
   closeBtn.addEventListener('click', clearFindResults);
   header.appendChild(closeBtn);
-  panel.appendChild(header);
+  strip.appendChild(header);
 
-  var listWrap = document.createElement('div');
-  listWrap.style.cssText = 'overflow-y:auto; flex:1 1 auto;';
-  panel.appendChild(listWrap);
-
+  var track = document.createElement('div');
+  track.id = 'find-results-strip-track';
+  track.style.cssText = (
+    'display:flex; gap:8px; overflow-x:auto; overflow-y:hidden;'
+    + 'scroll-snap-type:x mandatory;'
+    + '-webkit-overflow-scrolling:touch;'
+    + 'scrollbar-width:none;'
+    + 'padding:4px 12vw 8px;'  // big side-padding so the first/last card can center
+  );
+  // Hide scrollbar across browsers — purely visual on a touch UI.
+  track.style.setProperty('scrollbar-width', 'none');
   for (var i = 0; i < stash.items.length; i++) {
-    listWrap.appendChild(_findResultRow(map, stash.items[i], i));
+    track.appendChild(_findResultCard(map, stash.items[i], i));
   }
-  document.body.appendChild(panel);
-  _findResultsState.panel = panel;
+  strip.appendChild(track);
+  document.body.appendChild(strip);
+
+  // Watch for the centered card. IntersectionObserver with a tall
+  // narrow root margin would work, but the simpler signal is just
+  // the scroll position — debounced so a fast swipe doesn't fire
+  // a flyTo for every transitional card.
+  track.addEventListener('scroll', function() {
+    if (_findResultsState.scrollDebounce) {
+      clearTimeout(_findResultsState.scrollDebounce);
+    }
+    _findResultsState.scrollDebounce = setTimeout(function() {
+      var idx = _findCenteredCardIdx();
+      if (idx >= 0 && idx !== _findResultsState.active) {
+        _setActiveResult(map, idx, /*flyTo*/true);
+      }
+    }, 120);
+  });
+
+  _findResultsState.strip = strip;
+  _findResultsState.track = track;
 }
 
-function _findResultRow(map, r, idx) {
-  var row = document.createElement('div');
-  row.style.cssText = (
-    'padding:8px 10px; border-bottom:1px solid #f0f0f0; cursor:pointer;'
+function _findResultCard(map, r, idx) {
+  var card = document.createElement('div');
+  card.className = 'find-result-card';
+  card.dataset.idx = idx;
+  card.style.cssText = (
+    'flex:0 0 76vw; max-width:340px; min-width:240px;'
+    + 'scroll-snap-align:center; scroll-snap-stop:always;'
+    + 'background:#fff; border:1px solid #ddd; border-radius:12px;'
+    + 'padding:10px 12px; cursor:pointer; transition:border-color .15s, box-shadow .15s;'
+    + 'display:flex; flex-direction:column; gap:4px;'
   );
-  row.addEventListener('mouseenter', function() {
-    row.style.background = '#f5f9ff';
-  });
-  row.addEventListener('mouseleave', function() {
-    row.style.background = '';
-  });
+
   var name = document.createElement('div');
-  name.style.cssText = 'font-weight:600; font-size:13px;'
-    + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+  name.style.cssText = (
+    'font-weight:600; font-size:14px;'
+    + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
+  );
   name.textContent = r.n || '(unnamed)';
-  row.appendChild(name);
-  // Secondary line: location + type/category, mirrors places.html.
+  card.appendChild(name);
+
+  var sub = document.createElement('div');
+  sub.style.cssText = (
+    'color:#777; font-size:12px;'
+    + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
+  );
   var subParts = [];
-  if (r.l) subParts.push(r.l);
   var kind = r.cat || r.s || r.t;
-  if (kind) {
-    subParts.push(String(kind).replace(/_/g, ' '));
+  if (kind) subParts.push(String(kind).replace(/_/g, ' '));
+  if (_findResultsState.origin && r.a != null && r.o != null) {
+    var dm = _haversineMetersStrip(
+      _findResultsState.origin.lat, _findResultsState.origin.lon,
+      r.a, r.o);
+    subParts.push(_formatDistanceStrip(dm));
   }
-  if (subParts.length) {
-    var sub = document.createElement('div');
-    sub.style.cssText = 'color:#777; font-size:11px;'
-      + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
-    sub.textContent = subParts.join(' · ');
-    row.appendChild(sub);
-  }
-  row.addEventListener('click', function() {
-    // Pan + open the corresponding marker's popup.
-    map.flyTo({ center: [r.o, r.a],
-                zoom: Math.max(map.getZoom(), 14),
-                duration: 600 });
-    var marker = _findResultsState.markers[idx];
-    if (marker) {
-      // Wait for the camera move to settle before popping so the
-      // popup's anchor lines up with the final pin position.
-      map.once('moveend', function() {
-        try { marker.togglePopup(); } catch (e) {}
-      });
+  if (r.l) subParts.push(r.l);
+  if (subParts.length) sub.textContent = subParts.join(' · ');
+  card.appendChild(sub);
+
+  // Quick action: Directions to here. Same URL-fragment protocol as
+  // the wiki/feature popup so the routing flow opens identically.
+  var actions = document.createElement('div');
+  actions.style.cssText = 'margin-top:6px; display:flex; gap:6px;';
+  var dir = document.createElement('a');
+  dir.href = 'javascript:void(0)';
+  dir.textContent = 'Directions';
+  dir.style.cssText = (
+    'flex:1; text-align:center; padding:7px 8px; border-radius:8px;'
+    + 'text-decoration:none; font-weight:600; font-size:12px;'
+    + 'background:#1a73e8; color:#fff; border:1px solid #1a73e8;'
+  );
+  dir.addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (window.streetzimRouting && window.streetzimRouting.open) {
+      window.streetzimRouting.open();
+      window.streetzimRouting.setDest(r.a, r.o, r.n || '');
+      var cached = window.__streetzimLastLoc;
+      var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
+      if (fresh && window.streetzimRouting.setOrigin) {
+        window.streetzimRouting.setOrigin(cached.lat, cached.lon, 'Current location');
+      } else if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(function(pos) {
+          window.__streetzimLastLoc = {
+            lat: pos.coords.latitude, lon: pos.coords.longitude, ts: Date.now()
+          };
+          if (window.streetzimRouting.setOrigin) {
+            window.streetzimRouting.setOrigin(
+              pos.coords.latitude, pos.coords.longitude, 'Current location');
+          }
+        }, function() {}, { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 });
+      }
     }
   });
-  return row;
+  actions.appendChild(dir);
+  card.appendChild(actions);
+
+  // Tap (not on the Directions button) → re-center the camera on
+  // this result; redundant with auto-fly when scrolled-to but lets
+  // the user re-target after the camera has drifted.
+  card.addEventListener('click', function() {
+    _setActiveResult(map, idx, /*flyTo*/true);
+  });
+  return card;
+}
+
+function _findCenteredCardIdx() {
+  var track = _findResultsState.track;
+  if (!track || !track.children.length) return -1;
+  var rect = track.getBoundingClientRect();
+  var center = rect.left + rect.width / 2;
+  var bestIdx = -1, bestDist = Infinity;
+  for (var i = 0; i < track.children.length; i++) {
+    var cardRect = track.children[i].getBoundingClientRect();
+    var c = cardRect.left + cardRect.width / 2;
+    var d = Math.abs(c - center);
+    if (d < bestDist) { bestDist = d; bestIdx = i; }
+  }
+  return bestIdx;
+}
+
+function _scrollCarouselTo(idx) {
+  var track = _findResultsState.track;
+  if (!track || idx < 0 || idx >= track.children.length) return;
+  var card = track.children[idx];
+  // Use scrollIntoView with center inline so scroll-snap settles cleanly.
+  card.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+}
+
+function _setActiveResult(map, idx, flyTo) {
+  if (idx < 0 || !_findResultsState.items
+      || idx >= _findResultsState.items.length) return;
+  var prev = _findResultsState.active;
+  _findResultsState.active = idx;
+  // Card highlight.
+  var track = _findResultsState.track;
+  if (track) {
+    if (prev >= 0 && track.children[prev]) {
+      track.children[prev].style.borderColor = '#ddd';
+      track.children[prev].style.boxShadow = '';
+    }
+    var active = track.children[idx];
+    if (active) {
+      active.style.borderColor = '#e74c3c';
+      active.style.boxShadow = '0 0 0 2px rgba(231,76,60,0.25)';
+    }
+  }
+  // Marker highlight — recolor the active pin and revert the previous.
+  // maplibregl.Marker stores the SVG inside `getElement()`; the fill is
+  // on a `<path>` we can update.
+  if (prev >= 0 && _findResultsState.markers[prev]) {
+    _markerSetColor(_findResultsState.markers[prev], '#e74c3c');
+  }
+  if (_findResultsState.markers[idx]) {
+    _markerSetColor(_findResultsState.markers[idx], '#1a73e8');
+  }
+  if (flyTo) {
+    var r = _findResultsState.items[idx];
+    map.flyTo({
+      center: [r.o, r.a],
+      zoom: Math.max(map.getZoom(), 14),
+      // Offset the camera up by the strip's height so the active
+      // pin sits in the visible map area, not behind the carousel.
+      offset: [0, -110],
+      duration: 500,
+    });
+  }
+}
+
+function _markerSetColor(marker, color) {
+  // MapLibre v5's default marker is an inline <svg> with the body
+  // color spread across a few elements (a <g fill> wrapper plus a
+  // few <path>s). Walk every fill-bearing node and recolor anything
+  // that isn't the inner white highlight.
+  try {
+    var el = marker.getElement();
+    var svg = el.querySelector('svg') || el;
+    var nodes = svg.querySelectorAll('[fill]');
+    for (var i = 0; i < nodes.length; i++) {
+      var raw = (nodes[i].getAttribute('fill') || '').trim().toLowerCase();
+      if (!raw || raw === 'none' || raw === 'transparent') continue;
+      var noHash = raw.replace(/^#/, '');
+      if (noHash === 'fff' || noHash === 'ffffff' || raw === 'white') continue;
+      nodes[i].setAttribute('fill', color);
+    }
+  } catch (e) {}
+}
+
+function _haversineMetersStrip(lat1, lon1, lat2, lon2) {
+  var R = 6371000;
+  var toRad = Math.PI / 180;
+  var dLat = (lat2 - lat1) * toRad;
+  var dLon = (lon2 - lon1) * toRad;
+  var a = Math.sin(dLat/2) * Math.sin(dLat/2)
+        + Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad)
+        * Math.sin(dLon/2) * Math.sin(dLon/2);
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+function _formatDistanceStrip(m) {
+  if (m == null || isNaN(m)) return '';
+  if (m < 1000) return Math.round(m) + ' m';
+  return (m / 1000).toFixed(m < 10000 ? 1 : 0) + ' km';
 }
 
 function clearFindResults() {
@@ -2035,10 +2204,18 @@ function clearFindResults() {
     try { _findResultsState.markers[i].remove(); } catch (e) {}
   }
   _findResultsState.markers = [];
-  if (_findResultsState.panel && _findResultsState.panel.parentNode) {
-    _findResultsState.panel.parentNode.removeChild(_findResultsState.panel);
+  if (_findResultsState.strip && _findResultsState.strip.parentNode) {
+    _findResultsState.strip.parentNode.removeChild(_findResultsState.strip);
   }
-  _findResultsState.panel = null;
+  _findResultsState.strip = null;
+  _findResultsState.track = null;
+  _findResultsState.items = null;
+  _findResultsState.origin = null;
+  _findResultsState.active = -1;
+  if (_findResultsState.scrollDebounce) {
+    clearTimeout(_findResultsState.scrollDebounce);
+    _findResultsState.scrollDebounce = null;
+  }
 }
 
 // --- Search functionality ---
