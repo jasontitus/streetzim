@@ -24,10 +24,24 @@
   header { position:sticky; top:0; z-index:10; background:var(--bg);
            border-bottom:1px solid var(--line);
            padding:env(safe-area-inset-top,12px) 16px 12px; }
-  .titlebar { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
-  .titlebar h1 { margin:0; font-size:1.2rem; flex:1; }
+  .titlebar { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .titlebar h1 { margin:0; font-size:1.2rem; flex:1 1 auto; min-width:0;
+                 overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .titlebar a.back { color:var(--accent); text-decoration:none; font-weight:600;
-                     font-size:0.95rem; }
+                     font-size:0.95rem; flex:0 0 auto; }
+  /* Top-right action: jump to the map with the current results plotted.
+     Lives in the sticky header so it stays reachable without floating
+     over the list. Pill matches the back-link's accent colour but
+     filled, to read as an action rather than navigation. */
+  .titlebar .map-view {
+    flex:0 0 auto; padding:6px 12px; border-radius:999px;
+    border:1px solid var(--accent); background:var(--accent); color:#fff;
+    font:inherit; font-size:0.85rem; font-weight:600;
+    text-decoration:none; cursor:pointer; line-height:1;
+    display:inline-flex; align-items:center; gap:6px;
+  }
+  .titlebar .map-view[hidden] { display:none; }
+  .titlebar .map-view:hover { filter:brightness(1.05); }
   input[type=search] { width:100%; padding:11px 14px; border-radius:10px;
                        border:1px solid var(--line); background:var(--card);
                        color:var(--fg); font-size:1rem; -webkit-appearance:none; }
@@ -73,32 +87,6 @@
   #near-results .near-result:hover .sub,
   #near-results .near-result.active .sub { color:var(--chip-on-fg); opacity:0.85; }
   .status { padding:18px 16px; color:var(--muted); font-size:0.9rem; }
-  /* Map-view CTA is a floating action button — same pattern as Google
-     and Apple Maps when switching list ↔ map. Hands the current
-     `state.results` off to index.html via sessionStorage; the viewer
-     drops one search-pin per record + a bottom carousel of cards. */
-  .map-view-fab {
-    position:fixed; right:16px;
-    bottom:max(20px, env(safe-area-inset-bottom));
-    z-index:1000;
-    padding:12px 20px; border-radius:999px;
-    border:none; background:var(--accent); color:#fff;
-    font:inherit; font-size:0.95rem; font-weight:600; line-height:1;
-    box-shadow:0 4px 14px rgba(37,99,235,0.35),
-               0 2px 4px rgba(0,0,0,0.12);
-    cursor:pointer;
-    display:inline-flex; align-items:center; gap:8px;
-    transition:transform .15s ease, box-shadow .15s ease;
-  }
-  .map-view-fab:hover {
-    transform:translateY(-1px);
-    box-shadow:0 6px 18px rgba(37,99,235,0.42),
-               0 3px 6px rgba(0,0,0,0.14);
-  }
-  .map-view-fab[hidden] { display:none; }
-  /* Reserve room below the last result so the FAB doesn't cover the
-     CTAs on the bottom card. Only kicks in when the FAB is on screen. */
-  body.has-results ol#results { padding-bottom:80px; }
   ol#results { list-style:none; margin:0; padding:0; }
   ol#results li { background:var(--card); margin:0 16px 10px; padding:14px;
                   border-radius:12px; border:1px solid var(--line);
@@ -131,6 +119,12 @@
 <header>
   <div class="titlebar">
     <h1>Find places</h1>
+    <!-- Top-right action — jump to the map with the current results
+         plotted. Hidden until results land; the click handler stashes
+         them in sessionStorage and routes to index.html#find=results. -->
+    <button id="map-view-btn" class="map-view" type="button" hidden>
+      <span aria-hidden="true">📍</span><span>On map</span>
+    </button>
     <!-- Back-to-map link. Static `../index.html` works for the PWA
          (places at /drive/viewer/places/) but is OUT OF ZIM BOUNDS
          when Kiwix Desktop serves places.html at the ZIM root. We
@@ -160,10 +154,6 @@
   <span id="status-text" class="count">Loading places index…</span>
 </div>
 <ol id="results"></ol>
-
-<button id="map-view-btn" class="map-view-fab" type="button" hidden>
-  <span aria-hidden="true">📍</span><span>Map view</span>
-</button>
 
 <footer>
   Searches the index baked into this map. No network required.
@@ -626,13 +616,9 @@ function applyResults(records) {
   setStatus(records.length > state.results.length
     ? `Showing first ${state.results.length} of ${records.length} matches.`
     : `${state.results.length} match${state.results.length === 1 ? '' : 'es'}.`);
-  // Show the "Map view" FAB iff there's something to plot. The body
-  // class drives extra bottom-padding on the results list so the FAB
-  // doesn't cover the last card's CTAs. Toggle every applyResults
-  // call so chip/query swaps refresh the visibility.
-  const hasResults = state.results.length > 0;
-  if (els.mapViewBtn) els.mapViewBtn.hidden = !hasResults;
-  document.body.classList.toggle('has-results', hasResults);
+  // Show the "On map" pill iff there's something to plot. Toggle
+  // every applyResults call so chip/query swaps refresh visibility.
+  if (els.mapViewBtn) els.mapViewBtn.hidden = state.results.length === 0;
   renderResults();
 }
 
