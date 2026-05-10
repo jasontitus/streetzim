@@ -2110,6 +2110,36 @@ def _sample_overture_themes_in_cache(search_features, *,
     return sorted(themes)
 
 
+def _load_url_cache(path):
+    """Load the url_validation_cache.json entries map produced by
+    cloud/validate_overture_urls.py. Returns {} on missing/invalid so
+    callers can treat absence-of-evidence the same as "URL unknown".
+    """
+    if not path:
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    entries = data.get("entries")
+    return entries if isinstance(entries, dict) else {}
+
+
+def _is_url_dead(url, cache):
+    """True iff the cache has an explicit alive=False for `url`.
+    Unknown URLs (never crawled) are treated as alive — we never drop
+    on absence of evidence."""
+    if not url or not isinstance(url, str):
+        return False
+    e = cache.get(url.strip())
+    if not e:
+        return False
+    return e.get("alive") is False
+
+
 def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     """Append Overture-sourced address records to the search-feed JSONL.
 
@@ -2314,7 +2344,8 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     return {"added": added, "datasets": sorted(source_datasets)}
 
 
-def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None):
+def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
+                          url_cache=None, url_cache_policy="drop-record"):
     """Enrich OSM POIs with Overture places' websites / phones / socials /
     categories / brand — and emit new POI records for places OSM doesn't
     know about.
@@ -2408,6 +2439,9 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None):
     enriched = 0
     added = 0
     unnamed = 0
+    dead_dropped = 0       # add-new rows skipped under drop-record policy
+    dead_scrubbed = 0      # add-new rows kept after stripping dead `ws`
+    enrich_ws_scrubbed = 0 # enrich rows that lost a dead `ws` from extras
     source_datasets = set()
     # Pass B accumulators (bounded by POI count + Overture row count,
     # not total feature count). enrichments stays under ~1-2 GB even
@@ -2460,12 +2494,22 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None):
                 if brand_primary: extra["brand"] = brand_primary
                 if brand_wd: extra["wd"] = brand_wd
 
+                ws_dead = bool(
+                    url_cache and extra.get("ws")
+                    and _is_url_dead(extra["ws"], url_cache)
+                )
+
                 key = (round(lat, 4), round(lon, 4), _normalize_street(name))
                 if key in poi_keys:
                     # Pass 1 enrich: queue the extra-dict by key. First
                     # Overture row wins per key (matches old "first match
                     # wins" semantics); duplicates are rare at this
                     # precision.
+                    if ws_dead:
+                        # Don't propagate a dead URL onto an OSM POI.
+                        # The OSM record stays; just strip the bad link.
+                        extra.pop("ws", None)
+                        enrich_ws_scrubbed += 1
                     if key not in enrichments:
                         enrichments[key] = extra
                         enriched += 1
@@ -2475,6 +2519,13 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None):
                     # millions of dicts in memory.
                     if not primary:
                         continue
+                    if ws_dead:
+                        if url_cache_policy == "drop-record":
+                            dead_dropped += 1
+                            continue
+                        # scrub-only: keep the record sans dead link
+                        extra.pop("ws", None)
+                        dead_scrubbed += 1
                     rec = {
                         "name": name,
                         "type": "poi",
@@ -2557,9 +2608,17 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None):
           f"{len(source_datasets)} upstream datasets; "
           f"jsonl {size_before/1024/1024:.1f} MB → "
           f"{size_after/1024/1024:.1f} MB (+{delta_mb:.1f} MB)")
+    if url_cache:
+        print(f"    URL filter: {dead_dropped} add-new dropped (dead site), "
+              f"{dead_scrubbed} add-new scrubbed (kept), "
+              f"{enrich_ws_scrubbed} OSM enrich extras lost dead `ws` "
+              f"(policy={url_cache_policy})", flush=True)
     return {
         "enriched": enriched,
         "added": added,
+        "dead_dropped": dead_dropped,
+        "dead_scrubbed": dead_scrubbed,
+        "enrich_ws_scrubbed": enrich_ws_scrubbed,
         "datasets": sorted(source_datasets),
         "size_bytes": {"before": size_before, "after": size_after},
     }
@@ -5553,6 +5612,25 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "places theme: websites, phones, socials, brand, and normalized "
                              "categories (museum/hotel/…) instead of OMT's noisy class buckets. "
                              "Run download_overture_data.py places --out …parquet first.")
+    parser.add_argument("--url-cache", metavar="PATH", default=None,
+                        help="Path to url_validation_cache.json (produced by "
+                             "cloud/validate_overture_urls.py). When set, the "
+                             "Overture-places merge consults the cache: rows whose "
+                             "`ws` URL is dead (4xx/5xx/DNS/timeout/parked) are "
+                             "dropped under drop-record policy (Pass 2 add-new), "
+                             "or have their `ws` scrubbed under scrub-only policy "
+                             "(Pass 1 enrich path always scrubs — never drops an "
+                             "OSM POI based on a dead Overture URL).")
+    parser.add_argument("--url-cache-policy",
+                        choices=("drop-record", "scrub-only"),
+                        default="drop-record",
+                        help="How to handle Overture rows with dead `ws` URLs. "
+                             "'drop-record' (default) — skip the whole Overture-added "
+                             "POI when its website is dead, on the theory that a "
+                             "dead site usually means a dead business. "
+                             "'scrub-only' — keep the record but strip the dead `ws` "
+                             "field. Pass 1 enrich (OSM POI getting Overture extras) "
+                             "always scrubs regardless of policy.")
     parser.add_argument("--split-find-chips", action="store_true",
                         help="Pre-slice category-index/{poi,park}.json by Find-page "
                              "chip at build time. Emits one `category-index/chip-{id}.json` "
@@ -5818,9 +5896,17 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         print(f"    Warning: Overture addresses merge failed: {_e}")
                 if args.overture_places and not args.skip_address_extract:
                     try:
+                        _url_cache = _load_url_cache(args.url_cache)
+                        if args.url_cache:
+                            print(f"  URL cache: {len(_url_cache)} entries from "
+                                  f"{args.url_cache} "
+                                  f"(policy={args.url_cache_policy})",
+                                  flush=True)
                         places_result = merge_overture_places(
                             args.overture_places, search_features,
-                            bbox=addr_bbox)
+                            bbox=addr_bbox,
+                            url_cache=_url_cache,
+                            url_cache_policy=args.url_cache_policy)
                         overture_datasets.update(places_result.get("datasets") or [])
                         overture_themes.append("places")
                     except Exception as _e:
