@@ -8,7 +8,8 @@ already inside it.
 | File | What it is | Triggered when |
 | --- | --- | --- |
 | `search/<slug>.html` | One detail page per indexed feature (place, airport, peak, park, water). Title, kind, coords, two CTAs. | User taps a Kiwix search result, or visits the title-index entry. |
-| `places.html` | Search-and-browse mini-app. Search box, category chips (Restaurants, Cafés, Bars, Museums, Parks, Libraries, Shops, Gas), optional GPS-distance sort. | User taps the **Find** link in the main viewer's controls strip, or hits `places.html` directly. |
+| `index.html` (chip rail) | On-map chip rail under the search input. Tapping a chip fetches the matching `category-index/chip-<id>.json` and renders the result set as pins + carousel directly on the map (no navigation). Also exposes a *"Search this area"* pill once the user pans/zooms. | Default UX for chip-based browsing as of 2026-05-10. |
+| `places.html` | Search-and-browse mini-app — full list view, sort options, sub-filter chips, recent-searches dropdown, "Limit to map area" toggle. | User taps the **Find** link in the main viewer's controls strip, or hits `places.html` directly. Now a secondary surface; the on-map chip rail covers the common case. |
 
 Both compose into the main viewer through a small URL-fragment
 protocol the viewer parses on load and on every `hashchange`.
@@ -221,11 +222,61 @@ Run with:
 ./venv312/bin/python3 -m pytest tests/test_overture.py -q
 ```
 
+## On-map Find chip rail (in `index.html`)
+
+The primary chip-based find UX lives ON the map. A horizontal
+scroll-snap chip rail is rendered just under the map's
+`#search-input` (Restaurants · Cafés · Bars · Shops · Museums ·
+Parks · Gas · Hotels). Tapping a chip:
+
+1. Fetches `category-index/manifest.json` (cached after first
+   load) to know whether the chip is sub-bucketed.
+2. Fetches `category-index/chip-<id>.json` (or fans out the
+   `chip-<id>-<NN>.json` sub-buckets in parallel and concatenates
+   when the chip is split).
+3. Filters records to the current map viewport. Initial chip-rail
+   tap auto-falls-back to the unfiltered chip data when the
+   viewport has 0 matches (better to surface what's around than
+   show nothing).
+4. Caps to top 300 records.
+5. Pulls cached GPS as the carousel's distance-label origin.
+6. Stashes a `{label, origin, items, chipId}` object and calls
+   `renderFindResultsFromStash` so the existing pin/carousel/
+   detail-panel stack lights up identically to the
+   "On map" hand-off from `places.html`.
+
+The stash carries `chipId` so `renderFindResultsFromStash` can
+restore `_findResultsState.activeChip` on the new state — the
+*"Search this area"* pill that appears after the user pans/zooms
+needs this to know which chip's full dataset to re-fetch (vs.
+filtering the in-memory items, which only cover the prior
+viewport's matches).
+
+When the pill is clicked, `loadChipOnMap` runs with
+`requireInBounds: true`. If the new viewport has zero matches,
+a "No <chip> in this area" toast fires and the previous carousel
+stays put — the user explicitly asked for spatial constraint, so
+we don't surface unrelated results from elsewhere.
+
+`EXPLORE_CHIPS` in `index.html` is the chip-rail's source of truth
+(must match `cloud/chip_rules.py` IDs — see
+`project_chip_rules_duplicated.md`). The chip rail uses a CSS
+`mask-image` gradient on its left/right edges so the horizontal-
+scroll affordance is visually obvious.
+
+The `places.html` mini-app (next section) is still reachable via
+the **Find** link in the controls strip for users who want list
+view, sort, sub-filter chips, recent-searches dropdown, and the
+"Limit to map area" toggle.
+
 ## Find-places mini-app (`places.html`)
 
 Pure vanilla JS, single file, no dependencies. Lives at
 `resources/viewer/places.html` and is added to the ZIM by
-`create_osm_zim.py` next to `index.html`.
+`create_osm_zim.py` next to `index.html`. Now a secondary surface
+— the on-map chip rail covers the common case; this page is for
+users who want the full controls (sort, sub-filter, recent
+searches).
 
 Data sources (all read with `cache: 'force-cache'`):
 
