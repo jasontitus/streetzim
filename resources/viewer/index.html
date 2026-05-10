@@ -1984,6 +1984,20 @@ function renderFindResultsFromStash(map) {
   try { sessionStorage.removeItem(FIND_RESULTS_STASH_KEY); }
   catch (e) {}
   _findResultsState.map    = map;
+  // Sub-filter handling: the stash carries the FULL set of items
+  // for the active chip plus an optional subFilter ("italian_-
+  // restaurant", "bakery", …). We narrow stash.items in place so
+  // every downstream loop (markers, carousel) sees only the filtered
+  // subset, but keep allItems on state so the sub-filter row's
+  // histogram reflects the full scope.
+  _findResultsState.allItems = stash.items;
+  _findResultsState.subFilter = stash.subFilter || null;
+  _findResultsState.label = stash.label || '';
+  if (stash.subFilter) {
+    stash.items = stash.items.filter(function(r) {
+      return (r.s || '') === stash.subFilter;
+    });
+  }
   _findResultsState.items  = stash.items;
   _findResultsState.origin = stash.origin || null;
   // Restore activeChip from the stash, paint the chip rail. Required
@@ -2121,6 +2135,112 @@ function _findResultPopup(map, r) {
     .setDOMContent(box);
 }
 
+// Sub-filter chip row above the carousel. Derived from the FULL
+// item set (`_findResultsState.allItems`) so the histogram doesn't
+// shrink as the user narrows; only the displayed cards/markers
+// shrink. Tapping a chip swaps `_findResultsState.subFilter` and
+// re-runs the render path (via session-storage stash) with the
+// new filter applied.
+function _renderSubfilterRow(map, stash) {
+  var all = _findResultsState.allItems || stash.items || [];
+  var counts = new Map();
+  for (var i = 0; i < all.length; i++) {
+    var s = (all[i] && all[i].s) ? String(all[i].s) : '';
+    if (!s) continue;
+    counts.set(s, (counts.get(s) || 0) + 1);
+  }
+  var subs = [];
+  counts.forEach(function(n, key) {
+    if (n >= 2) subs.push([key, n]);
+  });
+  subs.sort(function(a, b) { return b[1] - a[1]; });
+  subs = subs.slice(0, 8);
+  // Need at least 2 distinct subtypes to be useful — if everyone
+  // is e.g. just "restaurant" there's nothing to narrow.
+  if (subs.length < 2) return null;
+
+  var row = document.createElement('div');
+  row.style.cssText = (
+    'display:flex; gap:6px; padding:0 14px 6px;'
+    + 'overflow-x:auto; overflow-y:hidden;'
+    + '-webkit-overflow-scrolling:touch; scrollbar-width:none;'
+    + 'mask-image:linear-gradient(to right, transparent 0, black 14px,'
+    + ' black calc(100% - 14px), transparent 100%);'
+    + '-webkit-mask-image:linear-gradient(to right, transparent 0,'
+    + ' black 14px, black calc(100% - 14px), transparent 100%);'
+  );
+
+  var current = _findResultsState.subFilter;
+
+  function makeChip(label, sub, count) {
+    var chip = document.createElement('button');
+    chip.type = 'button';
+    var active = sub === current;
+    chip.style.cssText = (
+      'flex:0 0 auto; padding:5px 11px; border-radius:999px;'
+      + 'font:inherit; font-size:12px; font-weight:600;'
+      + 'cursor:pointer; white-space:nowrap;'
+      + 'transition:background .12s ease, color .12s ease,'
+      + ' transform .08s ease;'
+      + (active
+        ? 'background:#1a73e8; color:#fff;'
+          + 'border:1px solid #1a73e8;'
+        : 'background:#fff; color:#222;'
+          + 'border:1px solid #ddd;')
+    );
+    chip.textContent = (count != null) ? (label + ' · ' + count) : label;
+    chip.addEventListener('click', function() {
+      _applySubFilter(map, sub === current ? null : sub);
+    });
+    chip.addEventListener('pointerdown', function() {
+      chip.style.transform = 'scale(0.97)';
+    });
+    chip.addEventListener('pointerup', function() {
+      chip.style.transform = '';
+    });
+    chip.addEventListener('pointerleave', function() {
+      chip.style.transform = '';
+    });
+    return chip;
+  }
+
+  if (current) {
+    row.appendChild(makeChip('All', null, null));
+  }
+  for (var k = 0; k < subs.length; k++) {
+    row.appendChild(makeChip(_humanSubtype(subs[k][0]), subs[k][0], subs[k][1]));
+  }
+  return row;
+}
+
+function _humanSubtype(s) {
+  if (!s) return '';
+  return s.replace(/_/g, ' ').replace(/^./, function(c) {
+    return c.toUpperCase();
+  });
+}
+
+function _applySubFilter(map, sub) {
+  var all = _findResultsState.allItems;
+  if (!all) return;
+  // Build a fresh stash with the SAME full item set + new subFilter.
+  // renderFindResultsFromStash will narrow stash.items in place
+  // before drawing markers / carousel cards, but keep allItems
+  // visible to the sub-row builder so the histogram is stable.
+  var chip = _findResultsState.activeChip;
+  var origin = _findResultsState.origin;
+  var label = _findResultsState.label || (chip ? chip.label : 'Results');
+  var stash = {
+    label: label, origin: origin, items: all,
+    chipId: chip ? chip.id : undefined,
+    subFilter: sub || undefined,
+  };
+  try {
+    sessionStorage.setItem(FIND_RESULTS_STASH_KEY, JSON.stringify(stash));
+  } catch (e) {}
+  renderFindResultsFromStash(map);
+}
+
 function _renderFindResultsStrip(map, stash) {
   // Bottom-pinned, full-width carousel. Each card snaps to center
   // via CSS scroll-snap; an IntersectionObserver tracks which card
@@ -2159,6 +2279,13 @@ function _renderFindResultsStrip(map, stash) {
   closeBtn.addEventListener('click', clearFindResults);
   header.appendChild(closeBtn);
   strip.appendChild(header);
+
+  // Sub-filter chip row — same idea as places.html's
+  // _renderSubfilterChips. Derives top-N subtypes from the active
+  // result set's r.s histogram. Tapping narrows the carousel + pins
+  // to that subtype; tapping again or "All" clears.
+  var subRow = _renderSubfilterRow(map, stash);
+  if (subRow) strip.appendChild(subRow);
 
   var track = document.createElement('div');
   track.id = 'find-results-strip-track';
