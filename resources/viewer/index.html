@@ -2500,22 +2500,35 @@ function _showPlaceDetail(map, r, idx) {
   });
 }
 
-function _hidePlaceDetail() {
+function _hidePlaceDetail(opts) {
   var panel = _findResultsState.detailPanel;
   var backdrop = _findResultsState.detailBackdrop;
   _findResultsState.detailPanel = null;
   _findResultsState.detailBackdrop = null;
+  // `instant: true` removes the sheet immediately rather than running
+  // the 250 ms slide-down. Callers like _detailOpenDirections want
+  // this so the routing panel they're about to open isn't visually
+  // hidden behind a slowly-departing bottom sheet.
+  var instant = opts && opts.instant;
   if (panel) {
-    panel.style.transform = 'translateY(100%)';
-    setTimeout(function() {
+    if (instant) {
       if (panel.parentNode) panel.parentNode.removeChild(panel);
-    }, 250);
+    } else {
+      panel.style.transform = 'translateY(100%)';
+      setTimeout(function() {
+        if (panel.parentNode) panel.parentNode.removeChild(panel);
+      }, 250);
+    }
   }
   if (backdrop) {
-    backdrop.style.opacity = '0';
-    setTimeout(function() {
+    if (instant) {
       if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
-    }, 250);
+    } else {
+      backdrop.style.opacity = '0';
+      setTimeout(function() {
+        if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+      }, 250);
+    }
   }
 }
 
@@ -2534,11 +2547,22 @@ function _detailActionBtn(label, emoji, primary, onClick) {
     'flex:1 1 auto; min-width:88px; padding:10px 14px;'
     + 'border-radius:10px; font:inherit; font-weight:600;'
     + 'cursor:pointer;'
+    + 'transition:transform .08s ease, filter .08s ease;'
     + (primary
        ? 'background:#1a73e8; color:#fff; border:1px solid #1a73e8;'
        : 'background:#fff; color:#1a73e8;'
          + 'border:1px solid #1a73e8;')
   );
+  // Tap feedback: dim + slight scale on press so the user gets
+  // instant visual confirmation before the route compute (~1-3 s)
+  // makes anything else change. Pointer events cover both mouse and
+  // touch in a single listener.
+  function press() { btn.style.filter = 'brightness(0.92)'; btn.style.transform = 'scale(0.97)'; }
+  function release() { btn.style.filter = ''; btn.style.transform = ''; }
+  btn.addEventListener('pointerdown', press);
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointerleave', release);
+  btn.addEventListener('pointercancel', release);
   btn.addEventListener('click', onClick);
   return btn;
 }
@@ -2631,12 +2655,12 @@ function _detailDistanceLine(r) {
 
 function _detailOpenDirections(r) {
   if (!window.streetzimRouting || !window.streetzimRouting.open) return;
-  // Close the bottom-sheet detail view first — otherwise the routing
-  // panel opens behind it and looks greyed out / unreachable. The
-  // user already chose "Directions"; the detail view has done its
-  // job. The carousel + pin stay on the map below the routing panel
-  // for context.
-  _hidePlaceDetail();
+  // Close the bottom-sheet detail view INSTANTLY (no 250 ms slide-
+  // down) so the routing panel underneath becomes visible
+  // immediately. Without instant:true the user sees no UI change
+  // for ~250 ms after tapping Directions while the sheet animates
+  // away — felt like the click did nothing.
+  _hidePlaceDetail({ instant: true });
   // Kick off destination-cell prewarm IMMEDIATELY (before opening
   // the panel + waiting on GPS resolution) so by the time A* runs
   // the destination cell is already in cache. Combined with the
@@ -2871,10 +2895,13 @@ function _gotoExplore(map, chipId) {
   } catch (e) {}
   _closeExploreMenu();
   // Navigate to places.html with the chip + bbox toggle preset.
-  // Path is the same directory as the viewer (cleanUrls strips the
-  // .html on Firebase, but it's harmless on Kiwix where the file
-  // is served as-is).
-  var here = location.pathname.replace(/[^/]+\/?$/, '');
+  // Path is the same directory as the viewer. The previous regex
+  // (replace(/[^/]+\/?$/, '')) was wrong: for `/drive/viewer/` it
+  // stripped the trailing `viewer/` segment and produced `/drive/`,
+  // 404'ing on /drive/places.html. Only strip the trailing PATH
+  // SEGMENT if the URL doesn't already end with `/`.
+  var here = location.pathname;
+  if (!here.endsWith('/')) here = here.replace(/[^/]+$/, '');
   location.href = here + 'places.html?chip='
                 + encodeURIComponent(chipId) + '&mapArea=1';
 }
@@ -6571,6 +6598,23 @@ function initRouting(map, config) {
             new maplibregl.LngLatBounds(result.coords[0], result.coords[0]));
           map.fitBounds(bounds, { padding: 60, duration: 1000 });
         }
+        // Auto-minimize when the routing panel would otherwise cover
+        // most of the route — common on phones where the panel can
+        // be 80%+ of viewport height. Threshold: panel takes more
+        // than half the viewport height. The user can tap the
+        // header stripe to expand again.
+        try {
+          var panelH = panel.getBoundingClientRect().height;
+          var vh = window.innerHeight || document.documentElement.clientHeight;
+          if (vh > 0 && panelH / vh > 0.5
+              && !panel.classList.contains('minimized')) {
+            panel.classList.add('minimized');
+            if (minBtn) {
+              minBtn.title = 'Unfold (show directions)';
+            }
+            try { map.resize(); } catch (e) {}
+          }
+        } catch (e) {}
       } else {
         removeRouteLine();
         statusEl.textContent = 'No route found';
