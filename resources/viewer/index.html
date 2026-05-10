@@ -555,7 +555,43 @@
   #drive-reroute-btn:hover { background: #1d4ed8; }
   #drive-reroute-btn:disabled { opacity: 0.6; cursor: default; }
   #routing-status {
-    color: var(--text-tertiary); font-size: 11px; margin-top: 6px;
+    color: var(--text-tertiary); font-size: 12px; margin-top: 8px;
+    min-height: 16px;
+  }
+  /* Progress bar — slim accent-coloured pill below the status line.
+     Hidden by default; .visible reveals + starts the indeterminate
+     stripe. Determinate mode (real % from cell loads) kicks in by
+     setting --progress on the inner bar instead of running the
+     keyframes. */
+  #routing-progress {
+    position: relative; height: 3px; margin: 6px 0 2px;
+    border-radius: 999px; background: rgba(37,99,235,0.12);
+    overflow: hidden; opacity: 0;
+    transition: opacity .15s ease;
+  }
+  #routing-progress.visible { opacity: 1; }
+  #routing-progress-bar {
+    position: absolute; left: 0; top: 0; height: 100%;
+    width: var(--progress, 35%);
+    background: linear-gradient(90deg,
+      transparent 0%,
+      var(--accent, #2563eb) 35%,
+      var(--accent, #2563eb) 65%,
+      transparent 100%);
+    border-radius: 999px;
+    animation: routing-progress-slide 1.4s cubic-bezier(.4,.0,.2,1) infinite;
+  }
+  #routing-progress.determinate #routing-progress-bar {
+    /* When we have a real fraction, stop the slide and grow the bar
+       from the left edge instead. */
+    animation: none;
+    left: 0; right: auto;
+    width: var(--progress, 0%);
+    transition: width .25s ease;
+  }
+  @keyframes routing-progress-slide {
+    0%   { left: -35%; }
+    100% { left: 100%; }
   }
   .routing-marker {
     width: 24px; height: 24px; cursor: pointer;
@@ -718,6 +754,17 @@
     <div class="routing-results" id="routing-dest-results"></div>
   </div>
   <div id="routing-status"></div>
+  <!-- Slim progress bar that animates while routing. Visible only
+       during a route compute; .visible class fades it in. The bar
+       itself is two stacked layers: a low-contrast track and a
+       moving "stripe" that travels left→right via CSS animation —
+       conveys "still working" without committing to a real percent
+       (A* pop counts vary too much across regions to estimate
+       reliably). When we wire a real metric (e.g. cells loaded /
+       cells expected) the .determinate variant kicks in. -->
+  <div id="routing-progress" aria-hidden="true">
+    <div id="routing-progress-bar"></div>
+  </div>
   <div id="routing-result">
     <div class="route-stat"><label>Distance</label><value id="route-distance"></value></div>
     <div class="route-stat"><label>Est. time</label><value id="route-time"></value></div>
@@ -5295,53 +5342,53 @@ function initRouting(map, config) {
   var __routeStatusStart = 0;
   var __routeStatusEtaSec = 0;
   var __ROUTE_SPINNER_FRAMES = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
+  // Route progress UI v2: clean stage label + slim animated bar
+  // instead of the busy spinner/ETA/pops/cells string. The ETA
+  // heuristic was wrong post-worker (a 1100 km route now finishes in
+  // ~13 s but the heuristic still announced 55 s), so we drop the
+  // number and let the bar carry "still working" semantics.
+  // Stage transitions come from the worker's route-progress
+  // messages (see _routingWorkerOnMessage). On main-thread fallback
+  // we just show the indeterminate bar without label transitions.
   function startRouteProgressIndicator(crowKm) {
     if (__routeStatusTimer) clearInterval(__routeStatusTimer);
     __routeStatusStart = performance.now();
-    // Heuristic: empirically Toronto→Montreal (505 km) took ~7.5 s
-    // and Tokyo→Oita (920 km) ~90 s. Linear-ish on crow-km, with a
-    // floor so short routes don't show a crowded ETA. The number is
-    // a hint, not a contract — labelled "~" in the UI.
-    __routeStatusEtaSec = crowKm > 0
-      ? Math.max(2, Math.round(crowKm * 0.05))
-      : 0;
-    var frame = 0;
+    var s = document.getElementById('routing-status');
+    if (s) s.textContent = 'Loading map data…';
+    var prog = document.getElementById('routing-progress');
+    if (prog) {
+      prog.classList.remove('determinate');
+      prog.classList.add('visible');
+      prog.style.removeProperty('--progress');
+    }
+    // Stage labels advance based on elapsed time as a simple
+    // heuristic — most of the time is cell load + A* pops, in that
+    // order. The indeterminate bar carries the "still working"
+    // signal so we don't have to lie about percent complete.
+    var phase = 0;  // 0=loading, 1=searching, 2=drawing
     __routeStatusTimer = setInterval(function() {
-      var s = document.getElementById('routing-status');
-      if (!s) return;
       var elapsed = (performance.now() - __routeStatusStart) / 1000;
-      var spin = __ROUTE_SPINNER_FRAMES[frame % __ROUTE_SPINNER_FRAMES.length];
-      frame++;
-      var label = __routeDebugLabel || 'Calculating route';
-      var pops = __routeDebugPops || 0;
-      var cells = '';
-      if (typeof graph !== 'undefined' && graph && graph._cells) {
-        cells = ' · ' + graph._cells.size + ' cells';
+      if (!s) return;
+      var newPhase = phase;
+      if (elapsed > 2.5 && phase < 1) newPhase = 1;
+      // We never auto-advance to phase 2 — that transition is driven
+      // by the actual route-done message in computeAndDrawRoute,
+      // which immediately calls stopRouteProgressIndicator anyway.
+      if (newPhase !== phase) {
+        phase = newPhase;
+        s.textContent = phase === 1
+          ? 'Finding fastest route…'
+          : 'Loading map data…';
       }
-      var line = spin + ' ' + label
-        + (pops > 0 ? ' · ' + pops.toLocaleString() + ' nodes' : '')
-        + cells
-        + ' · ' + elapsed.toFixed(1) + 's';
-      // ETA hint — only show while still inside the heuristic's
-      // window. Once we blow past the estimate (Toronto→Vancouver
-      // measured 180s+ vs our 170s estimate, highway-only A* hits a
-      // long plateau) drop the "left" string so we don't keep
-      // showing "~0s left" forever. Better to show only the elapsed
-      // clock than to lie.
-      if (__routeStatusEtaSec > 0 && elapsed > 1.5 &&
-          elapsed < __routeStatusEtaSec * 0.95) {
-        var remaining = Math.max(1,
-          Math.ceil(__routeStatusEtaSec - elapsed));
-        line += ' · ~' + remaining + 's left';
-      }
-      s.textContent = line;
-    }, 100);
+    }, 250);
   }
   function stopRouteProgressIndicator() {
     if (__routeStatusTimer) {
       clearInterval(__routeStatusTimer);
       __routeStatusTimer = null;
     }
+    var prog = document.getElementById('routing-progress');
+    if (prog) prog.classList.remove('visible');
   }
 
   // Two-pass routing: full-graph for first/last mile, highway-tier for
@@ -5761,11 +5808,34 @@ function initRouting(map, config) {
       if (DEBUG_ROUTING) __debugPaint();
     } else if (m.type === 'route-done') {
       __routingWorkerInflight.delete(m.id);
-      if (m.ok && m.result) inflight.resolve(m.result);
-      else if (m.ok)        inflight.resolve(null);
-      else                  inflight.reject(new Error(m.error || 'route failed'));
+      if (m.cancelled) {
+        // Resolve with a sentinel so findRoute can return null
+        // without triggering the main-thread fallback (the user
+        // explicitly asked us to stop).
+        inflight.resolve({ _cancelled: true });
+      } else if (m.ok && m.result) inflight.resolve(m.result);
+      else if (m.ok)               inflight.resolve(null);
+      else                         inflight.reject(new Error(m.error || 'route failed'));
     }
   }
+
+  // Cancel any worker routes still in flight. Hooked into origin /
+  // destination input focus so a route auto-fired by "Directions to
+  // here" doesn't keep grinding while the user is changing one of
+  // the endpoints. The worker checks ctx.cancelled() at every yield
+  // and exits the inner loop early; the bridge then resolves the
+  // route promise with a {_cancelled:true} sentinel that findRoute
+  // recognises and turns into a no-op (no UI update, no fallback).
+  function cancelInFlightRoute() {
+    if (!__routingWorker || __routingWorkerInflight.size === 0) return;
+    __routingWorkerInflight.forEach(function(_v, id) {
+      try { __routingWorker.postMessage({ cmd: 'cancel', id: id }); }
+      catch (e) {}
+    });
+  }
+  // Keep on window for any host (drive mode, popup helpers) that
+  // wants to short-circuit a stale route without restarting search.
+  window.__streetzim_cancelInFlightRoute = cancelInFlightRoute;
 
   function findRouteViaWorker(startNode, endNode) {
     if (!__routingWorker) return Promise.reject(new Error('worker not ready'));
@@ -5794,6 +5864,14 @@ function initRouting(map, config) {
           console.warn('[streetzim] routing via worker (start=' + startNode
                        + ' end=' + endNode + ')');
           var workerResult = await findRouteViaWorker(startNode, endNode);
+          // Cancellation: caller asked us to stop (likely via the
+          // origin/dest focus hook). Don't fall back to main thread —
+          // they're about to fire a new route. Return null so
+          // computeAndDrawRoute treats it as "no route" silently.
+          if (workerResult && workerResult._cancelled) {
+            console.warn('[streetzim] worker route cancelled');
+            return null;
+          }
           console.warn('[streetzim] worker route done in '
                        + (performance.now() - t0).toFixed(0) + ' ms');
           return workerResult;
@@ -6465,6 +6543,22 @@ function initRouting(map, config) {
   }
   originInput.addEventListener('focus', markOriginEditing);
   originInput.addEventListener('input', markOriginEditing);
+  // When the user clicks into either input, cancel any route still
+  // computing in the worker. They're clearly about to change one of
+  // the endpoints, so the in-flight result is moot. Fixes the
+  // "Directions to here auto-fires a route from current location
+  // and grinds while I try to type San Diego" complaint.
+  function cancelOnFieldFocus() {
+    if (typeof window.__streetzim_cancelInFlightRoute === 'function') {
+      window.__streetzim_cancelInFlightRoute();
+    }
+    if (typeof statusEl !== 'undefined' && statusEl) {
+      statusEl.textContent = '';
+    }
+    stopRouteProgressIndicator();
+  }
+  originInput.addEventListener('focus', cancelOnFieldFocus);
+  destInput.addEventListener('focus', cancelOnFieldFocus);
   // Cleared by any code path that successfully sets origin (GPS
   // button, typeahead pick, map click). setOriginFromLatLon below
   // is the funnel — clear there.

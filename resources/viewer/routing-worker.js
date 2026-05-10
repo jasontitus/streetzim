@@ -136,18 +136,26 @@ function handleRoute(msg) {
   };
   findRoute(msg.start, msg.end, ctx)
     .then(function(result) {
+      // Capture the cancellation state BEFORE clearing — the bridge
+      // uses this to distinguish "user clicked origin field while
+      // routing" (don't fall back, don't update UI) from "no route
+      // found" (do fall back to main thread once).
+      var wasCancelled = cancelledRoutes.has(msg.id);
       cancelledRoutes.delete(msg.id);
       _profileEmit(!!result, result && result.coords ? result.coords.length : 0);
       self.postMessage({
         type: 'route-done', id: msg.id,
-        ok: !!result, result: result,
+        ok: !!result, cancelled: wasCancelled,
+        result: result,
       });
     })
     .catch(function(err) {
+      var wasCancelled = cancelledRoutes.has(msg.id);
       cancelledRoutes.delete(msg.id);
       _profileEmit(false, 0);
       self.postMessage({
         type: 'route-done', id: msg.id, ok: false,
+        cancelled: wasCancelled,
         error: String(err && err.stack ? err.stack : err),
       });
     });
