@@ -2700,12 +2700,19 @@ function initExplore(map) {
     }
   });
   document.body.appendChild(fab);
-  // Hide while the carousel/detail-panel is open — they're already
-  // top-of-screen UX. Toggle via a periodic pointer (cheap; runs
-  // only while the FAB is mounted).
+  // Hide while:
+  //   - the find-results carousel is up (already top-of-screen UX)
+  //   - the routing/directions panel is open (the user has dedicated
+  //     workflow on screen, Explore would just clutter the corner)
+  // Toggle via a periodic pointer (cheap; runs only while the FAB is
+  // mounted).
   setInterval(function() {
-    var hide = !!_findResultsState.strip;
-    fab.style.display = hide ? 'none' : '';
+    var hideForCarousel = !!_findResultsState.strip;
+    var routingPanel = document.getElementById('routing-panel');
+    var hideForRouting = !!(routingPanel
+      && routingPanel.style.display !== 'none'
+      && routingPanel.offsetParent !== null);
+    fab.style.display = (hideForCarousel || hideForRouting) ? 'none' : '';
   }, 250);
 }
 
