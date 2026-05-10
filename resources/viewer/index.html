@@ -3347,6 +3347,15 @@ function initSearch(map) {
   function streamFilterChunks(prefixes, query) {
     if (!prefixes || !prefixes.length) return Promise.resolve([]);
     var qNorm = normalizeText(query || '');
+    // Skip address records unless the query contains a digit. Each
+    // sa-X-Y chunk is ~94 % addresses (11.7k of 12.5k), so without
+    // this filter the 20k MAX_RESULTS cap fills with addresses long
+    // before we reach the chunk that holds the actual city of San
+    // Diego (sa-d-b). For typeahead queries like "san" the user
+    // wants cities/POIs/streets, not "1023 10th Avenue, San Diego" —
+    // and once they type a street number ("1023 san jose ave") we
+    // re-include addresses.
+    var includeAddrs = /\d/.test(qNorm);
     var matches = [];
     var MAX_CONCURRENT = 6;
     var MAX_RESULTS = 20000;  // soft cap; scorer slices top ~20 anyway
@@ -3373,6 +3382,7 @@ function initSearch(map) {
                   var rec = chunk[j];
                   var name = rec && rec.n;
                   if (!name) continue;
+                  if (!includeAddrs && rec.t === 'addr') continue;
                   if (qNorm && normalizeText(name).indexOf(qNorm) < 0) continue;
                   matches.push(rec);
                   if (matches.length >= MAX_RESULTS) break;
@@ -3533,6 +3543,19 @@ function initSearch(map) {
       if (name.indexOf(q) === 0) textScore += 25;
       var typeBonus = {place: 20, airport: 15, peak: 10, park: 10, water: 5, poi: 5, building: 3, street: 0};
       textScore += typeBonus[item.t] || 0;
+      // Subtype boost — cities and counties carry far more public
+      // relevance than a same-named neighbourhood or hamlet, but
+      // they're often FAR from the user's current view (San Diego
+      // when typing "san" in SF) and would otherwise be crushed by
+      // the proximity multiplier. Adding a sizable subtype bonus
+      // lifts them above local non-place hits even at 1× prox.
+      var placeSubBonus = {
+        city: 200, county: 80, region: 60, town: 30,
+        suburb: 10, village: 8, neighbourhood: 4,
+      };
+      if (item.t === 'place' && item.s) {
+        textScore += placeSubBonus[item.s] || 0;
+      }
 
       // Proximity is the PRIMARY signal — multiply text score by proximity factor
       // This means a mediocre text match nearby always beats a perfect match far away
