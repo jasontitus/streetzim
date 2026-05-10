@@ -3315,6 +3315,77 @@ function initSearch(map) {
                        : s.toLowerCase();
   }
 
+  // Stream-fetch + per-chunk filter for large prefix expansions.
+  //
+  // Hot prefixes like "sa" (the leading letters for "San Francisco",
+  // "Sacramento", thousands of others) are recursive-split into 256
+  // hash-bucketed sub-chunks (`sa-0-0` … `sa-f-f`) each ~1.5 MB on
+  // disk. Naively `Promise.all(prefixes.map(fetchChunk))` would
+  // download AND keep parsed all 256 (~1.5 GB of JS heap) — iOS
+  // Safari OOMs and the page reloads. cf. user report on "san "
+  // crashing the iPhone.
+  //
+  // This helper:
+  //   • caps concurrent in-flight fetches at MAX_CONCURRENT (peak
+  //     ~9 MB of parsed JSON live at any moment)
+  //   • filters records on parse — only those whose normalized name
+  //     contains the normalized query are retained, so the original
+  //     chunk array goes straight to GC after extraction
+  //   • caps the accumulated matches (very generous — we just want
+  //     to bound runaway worst case)
+  //
+  // Build-side fix is queued: prefix-based recursive split (use the
+  // next character of the most common word, not FNV hash) would let
+  // "san" target a single sub-chunk instead of all 256.
+  function streamFilterChunks(prefixes, query) {
+    if (!prefixes || !prefixes.length) return Promise.resolve([]);
+    var qNorm = normalizeText(query || '');
+    var matches = [];
+    var MAX_CONCURRENT = 6;
+    var MAX_RESULTS = 20000;  // soft cap; scorer slices top ~20 anyway
+    var i = 0;
+    return new Promise(function(resolve) {
+      var inFlight = 0;
+      var done = false;
+      function pump() {
+        if (done) return;
+        if (matches.length >= MAX_RESULTS && inFlight === 0) {
+          done = true; return resolve(matches);
+        }
+        if (i >= prefixes.length && inFlight === 0) {
+          done = true; return resolve(matches);
+        }
+        while (inFlight < MAX_CONCURRENT
+               && i < prefixes.length
+               && matches.length < MAX_RESULTS) {
+          (function(prefix) {
+            inFlight++;
+            fetchChunk(prefix).then(function(chunk) {
+              if (chunk && chunk.length) {
+                for (var j = 0; j < chunk.length; j++) {
+                  var rec = chunk[j];
+                  var name = rec && rec.n;
+                  if (!name) continue;
+                  if (qNorm && normalizeText(name).indexOf(qNorm) < 0) continue;
+                  matches.push(rec);
+                  if (matches.length >= MAX_RESULTS) break;
+                }
+              }
+              // chunk goes out of scope here — eligible for GC.
+            }).catch(function() {
+              // Swallow individual chunk failures; partial results
+              // are better than no results.
+            }).then(function() {
+              inFlight--;
+              pump();
+            });
+          })(prefixes[i++]);
+        }
+      }
+      pump();
+    });
+  }
+
   // Determine which chunk prefixes are needed for a query. With multi-word
   // indexing on the server side, entries live in chunks keyed by each of
   // their words' 2-char prefixes — so we fetch one chunk per query word to
@@ -3558,14 +3629,11 @@ function initSearch(map) {
       resultsEl.style.display = 'block';
     }
 
-    // Fetch all needed chunks in parallel, then score
-    Promise.all(prefixes.map(fetchChunk)).then(function(arrays) {
+    // Stream-fetch with per-chunk filter — bounds peak heap on hot
+    // prefixes (e.g. "sa" → 256 sub-chunks). See streamFilterChunks.
+    streamFilterChunks(prefixes, query).then(function(matches) {
       if (seq !== searchSeq) return;  // Stale query, discard
-      var all = [];
-      for (var i = 0; i < arrays.length; i++) {
-        all = all.concat(arrays[i]);
-      }
-      renderResults(scoreResults(all, query));
+      renderResults(scoreResults(matches, query));
     });
   }
 
@@ -3712,10 +3780,10 @@ function initSearch(map) {
     if (!manifest || !query || query.length < 2) return Promise.resolve([]);
     var prefixes = getPrefixes(query);
     if (!prefixes.length) return Promise.resolve([]);
-    return Promise.all(prefixes.map(fetchChunk)).then(function(arrays) {
-      var all = [];
-      for (var i = 0; i < arrays.length; i++) all = all.concat(arrays[i]);
-      return scoreResults(all, query);
+    // Stream + filter — same OOM-avoidance as the inline typeahead
+    // above. Used by the routing-panel typeahead.
+    return streamFilterChunks(prefixes, query).then(function(matches) {
+      return scoreResults(matches, query);
     });
   };
 }

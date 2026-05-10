@@ -35,6 +35,17 @@ for migration notes).
   Touches `cloud/chip_rules.py`, `resources/viewer/places.html`,
   `resources/viewer/index.html`, `cloud/validate_zim.py`. Also fixes
   the `ice_cream` / `ice_cream_parlor` cross-bucket bug.
+- **Recursive search-data split: bucket by next-character, not hash.**
+  Hot prefixes (e.g. `sa`) get fanned into 256 FNV-hash-bucketed
+  sub-chunks (`sa-0-0`…`sa-f-f`). The viewer can't pre-filter by them,
+  so typing "san" downloads ~384 MB of JSON and crashes iOS Safari.
+  Switch to a char-prefix split (`sa-n` for "san…", `sa-c` for
+  "sacramento…") so the viewer can target one chunk per typed
+  character. Touches `_split_records_recursive` in
+  `cloud/repackage_zim.py` and the in-build copy in
+  `create_osm_zim.py`. Existing viewer mitigation
+  (`streamFilterChunks` in `resources/viewer/index.html`) avoids the
+  OOM crash but is slow until the build emits char-bucketed chunks.
 
 ## Prereqs (one-time)
 
