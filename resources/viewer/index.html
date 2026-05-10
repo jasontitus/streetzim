@@ -2029,6 +2029,21 @@ function renderFindResultsFromStash(map) {
   _findResultsState.map    = map;
   _findResultsState.items  = stash.items;
   _findResultsState.origin = stash.origin || null;
+  // Restore activeChip from the stash, paint the chip rail. Required
+  // so subsequent "Search this area" clicks know to RE-FETCH the
+  // chip's full dataset rather than just filter the in-memory items
+  // array (which only contains the prior viewport's matches).
+  if (stash.chipId && typeof EXPLORE_CHIPS !== 'undefined') {
+    for (var ci = 0; ci < EXPLORE_CHIPS.length; ci++) {
+      if (EXPLORE_CHIPS[ci].id === stash.chipId) {
+        _findResultsState.activeChip = EXPLORE_CHIPS[ci];
+        if (typeof _findChipPaintActive === 'function') {
+          _findChipPaintActive(stash.chipId);
+        }
+        break;
+      }
+    }
+  }
   // MapLibre's KeyboardHandler eats arrow keys for camera panning,
   // which fights the carousel's keyboard nav. Disable while the
   // carousel is open; clearFindResults re-enables.
@@ -2310,9 +2325,10 @@ function _searchAreaApply(map) {
   var activeChip = _findResultsState.activeChip;
   if (activeChip && typeof loadChipOnMap === 'function') {
     _hideSearchAreaPill();
-    loadChipOnMap(map, activeChip).catch(function(err) {
-      console.warn('[streetzim] search-this-area chip refetch failed:', err);
-    });
+    loadChipOnMap(map, activeChip, { requireInBounds: true })
+      .catch(function(err) {
+        console.warn('[streetzim] search-this-area chip refetch failed:', err);
+      });
     return;
   }
   if (!_findResultsState.items || !_findResultsState.items.length) return;
@@ -2932,7 +2948,31 @@ function _findFetchChipData(chipId) {
   return p;
 }
 
-async function loadChipOnMap(map, chipDef) {
+// Helper for the "no results" toast — pulled out because both
+// `loadChipOnMap` (when called via the Search-this-area pill with
+// requireInBounds) and the old `_searchAreaApply` in-memory path
+// want the same look.
+function _showFindToast(text, opts) {
+  opts = opts || {};
+  var d = document.createElement('div');
+  d.style.cssText = (
+    'position:fixed; left:50%; top:14px; transform:translateX(-50%);'
+    + 'z-index:1600; padding:9px 18px;'
+    + 'background:rgba(255,255,255,0.95);'
+    + 'color:' + (opts.color || '#a33') + ';'
+    + 'border:1px solid rgba(170,50,50,0.25); border-radius:999px;'
+    + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
+    + 'box-shadow:0 4px 14px rgba(0,0,0,0.18); pointer-events:none;'
+  );
+  d.textContent = text;
+  document.body.appendChild(d);
+  setTimeout(function() {
+    if (d.parentNode) d.parentNode.removeChild(d);
+  }, opts.ms || 1800);
+}
+
+async function loadChipOnMap(map, chipDef, opts) {
+  opts = opts || {};
   _findChipPaintActive(chipDef.id);
   // Stash the active chip on the find state so "Search this area"
   // (the pill that appears when the user pans the map) can re-fetch
@@ -2974,6 +3014,16 @@ async function loadChipOnMap(map, chipDef) {
     if (typeof r.a !== 'number' || typeof r.o !== 'number') continue;
     if (r.a >= s && r.a <= n && lonInside(r.o)) filtered.push(r);
   }
+  // Behaviour split:
+  //   - Initial chip-rail tap: viewport often empty (user just opened
+  //     the map; chip might have nothing in their immediate view).
+  //     Auto-fall back to the full chip data so they SEE something.
+  //   - Search-this-area pill: user explicitly asked for "search
+  //     here". Empty viewport → toast + keep existing carousel.
+  if (filtered.length === 0 && opts.requireInBounds) {
+    _showFindToast('No ' + chipDef.label.toLowerCase() + ' in this area');
+    return;
+  }
   var items = filtered.length ? filtered : data;
   // Cap at 300 to keep the carousel + pin-rendering responsive.
   // The scorer in places.html caps at the same number; matches.
@@ -2990,6 +3040,12 @@ async function loadChipOnMap(map, chipDef) {
     label: chipDef.label + (filtered.length ? '' : ' · expanded'),
     origin: origin,
     items: items,
+    // Tag the stash with the chip id so the render path (which
+    // calls clearFindResults — wiping activeChip — at start)
+    // can re-bind activeChip on the new state. Without this, the
+    // first "Search this area" click had activeChip already null
+    // and fell through to the old in-memory filter.
+    chipId: chipDef.id,
   };
   try {
     sessionStorage.setItem(FIND_RESULTS_STASH_KEY, JSON.stringify(stash));
