@@ -2050,6 +2050,13 @@ function renderFindResultsFromStash(map) {
             if (pop && pop.isOpen()) other.togglePopup();
           } catch (e2) {}
         }
+        // Also dismiss the Wikidata feature popup if any — otherwise
+        // tap on a feature opens its popup, then tap on a find-pin
+        // accumulates a second popup. The two systems live in
+        // separate closures; bridge via map._closeWikidataPopup.
+        if (typeof map._closeWikidataPopup === 'function') {
+          try { map._closeWikidataPopup(); } catch (e3) {}
+        }
         _scrollCarouselTo(idx);
       });
     })(i);
@@ -3431,6 +3438,13 @@ function _setActiveResult(map, idx, flyTo) {
         if (pop && pop.isOpen()) other.togglePopup();
       } catch (e3) {}
     }
+    // Also dismiss the Wikidata feature popup if any. Same
+    // cross-system rationale as the marker click handler in
+    // renderFindResultsFromStash.
+    if (_findResultsState.map
+        && typeof _findResultsState.map._closeWikidataPopup === 'function') {
+      try { _findResultsState.map._closeWikidataPopup(); } catch (e4) {}
+    }
   }
   if (flyTo) {
     var r = _findResultsState.items[idx];
@@ -4385,8 +4399,28 @@ function initWikidataPopups(map, config) {
   map._buildDirectionsButton = buildDirectionsButton;
   map._buildWikiPopupDOM = buildWikiPopupDOM;
 
+  // Expose a closer so the find-result marker click handler can
+  // dismiss the Wikidata feature popup (otherwise the two popup
+  // systems accumulate when the user alternates between feature
+  // clicks and find-result-marker clicks).
+  map._closeWikidataPopup = function() {
+    if (currentPopup) { currentPopup.remove(); currentPopup = null; }
+  };
+
   map.on('click', function(e) {
     if (currentPopup) { currentPopup.remove(); currentPopup = null; }
+    // Close find-result marker popups too — same reason as above.
+    if (typeof _findResultsState !== 'undefined'
+        && _findResultsState.markers) {
+      for (var __k = 0; __k < _findResultsState.markers.length; __k++) {
+        var __mm = _findResultsState.markers[__k];
+        if (!__mm) continue;
+        try {
+          var __p = __mm.getPopup();
+          if (__p && __p.isOpen()) __mm.togglePopup();
+        } catch (e3) {}
+      }
+    }
 
     // Query rendered features at click point
     var queryOpts = {};
