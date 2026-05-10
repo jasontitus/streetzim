@@ -468,3 +468,28 @@ the just-uploaded file yet. Re-run from any host:
 ```
 
 Or wait for the next regular reroll which calls it.
+
+### What happens when archive.org's metadata API is flaky
+
+`fetch_item_details` now retries 3× with 1s/2s/4s exponential
+backoff. Most transient errors (TLS handshake timeouts, brief
+eventual-consistency hiccups, transient 5xx) absorb at the first
+or second retry without operator intervention.
+
+If retries are exhausted for an item that's KNOWN to exist (i.e.
+appeared in the advancedsearch result list), `build_page`
+collects the IDs in `failed_metadata` and **exits 2** rather than
+writing the output file. The non-zero exit aborts the subsequent
+`firebase deploy` step in `cloud/upload_validated.sh`, so a
+broken-URL page never goes live.
+
+Symptom in the wild: the **2026-05-10 California "page not
+found" incident** — one SSL handshake timeout during the
+upload's site-regen step caused `fetch_item_details` to return
+`None`, which made the rendering loop silently fall through to
+the static undated `osm-california.zim` URL (which doesn't
+exist on archive.org since every upload uses dated filenames
+per `feedback_dated_filenames_over_swap.md`). With this guard
+in place, that timeout would now exit 2, the deploy would skip,
+and the previous good site would remain live. Operator re-runs
+`web/generate.py --deploy` once the network's stable.
