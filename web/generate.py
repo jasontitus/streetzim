@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.request
 from html import escape
 
@@ -298,16 +299,41 @@ def fetch_archive_items():
     return by_id
 
 
-def fetch_item_details(identifier):
-    """Fetch the file list for an item to find the actual ZIM file size."""
+def fetch_item_details(identifier, *, retries=3):
+    """Fetch the file list for an item to find the actual ZIM file size.
+
+    Retries on transient network errors (SSL handshake timeouts,
+    connection resets, etc.) with exponential backoff. Without this,
+    a single TLS hiccup during the upload's site-regen step caused
+    the dated-filename detection to fall back to the undated
+    canonical URL — which doesn't exist on the item, so users got
+    "page not found" when clicking Download.
+
+    Returns None only after every attempt fails. Callers MUST treat
+    a None return as a hard failure (don't render that region's
+    card with a guessed URL — the URL won't work).
+    """
     url = f"https://archive.org/metadata/{identifier}"
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "streetzim-generate/1.0"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.load(resp)
-    except Exception as e:
-        print(f"  Warning: failed to fetch {identifier}: {e}")
-        return None
+    last_err = None
+    for attempt in range(1, retries + 1):
+        try:
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "streetzim-generate/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.load(resp)
+        except Exception as e:
+            last_err = e
+            if attempt < retries:
+                wait = 2 ** (attempt - 1)  # 1s, 2s, 4s
+                print(
+                    f"  Warning: fetch {identifier} attempt "
+                    f"{attempt}/{retries} failed: {e} "
+                    f"(retrying in {wait}s)"
+                )
+                time.sleep(wait)
+    print(f"  ERROR: failed to fetch {identifier} after {retries} attempts: {last_err}")
+    return None
 
 
 # Per-feature badge rendered on each region card. Keys mirror the
@@ -408,6 +434,15 @@ def build_page():
     cards = []
     live_count = 0
     upcoming_count = 0
+    # Track items where archive.org's metadata fetch failed even
+    # after retries. We KNOW these items exist (they showed up in
+    # the search results) — a failure here means transient network
+    # issue, not a missing item. Refuse to render the page so the
+    # deploy doesn't ship a card with a broken (undated canonical)
+    # URL like the 2026-05-10 California incident
+    # (osm-california.zim 404 because the dated filename didn't make
+    # it into the card).
+    failed_metadata = []
 
     # Walk tiers in display order, emitting a header before each
     # non-empty group's cards.
@@ -433,6 +468,12 @@ def build_page():
             details = fetch_item_details(f"streetzim-{region['id']}")
             zim_size = None
             zim_filename = None
+            if details is None:
+                # Metadata fetch failed despite retries. Track and
+                # raise after the loop so we don't silently ship a
+                # broken-URL card.
+                failed_metadata.append(region["id"])
+                continue
             if details:
                 # Find the .zim file (may be dated like osm-europe-2026-04.zim
                 # or undated like osm-europe.zim). Pick the largest .zim.
@@ -498,6 +539,24 @@ def build_page():
             upcoming_count += 1
 
     print(f"Rendered {live_count} live, {upcoming_count} upcoming")
+
+    # Refuse to write the page if any item had an unrecoverable
+    # metadata fetch. Better to fail the deploy than ship a card
+    # with the undated canonical URL (which doesn't exist on
+    # archive.org since we always upload dated filenames).
+    # cf. 2026-05-10 California "page not found" incident.
+    if failed_metadata:
+        print(
+            f"\nERROR: {len(failed_metadata)} item(s) failed metadata "
+            f"fetch even after retries: {failed_metadata}",
+            file=sys.stderr,
+        )
+        print(
+            "Refusing to write site — re-run when archive.org's "
+            "metadata API is reachable.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     with open(TEMPLATE_PATH) as f:
         template = f.read()
