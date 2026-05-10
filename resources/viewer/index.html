@@ -737,7 +737,7 @@
 <div id="controls">
   <button id="layer-toggle" title="Toggle satellite imagery">Satellite</button>
   <button id="terrain-toggle" title="Toggle 3D terrain">3D</button>
-  <button id="wiki-toggle" title="Show nearby Wikipedia entries">Explore</button>
+  <button id="wiki-toggle" title="Show nearby Wikipedia entries">📖 Wiki</button>
   <a id="places-link" href="places.html"
      title="Browse places by name or category">Find</a>
   <script>
@@ -2997,146 +2997,18 @@ async function loadChipOnMap(map, chipDef) {
   renderFindResultsFromStash(map);
 }
 
-function initExplore(map) {
-  // Don't try to render this affordance if the host page already
-  // owns the corner (e.g. Kiwix Desktop's chrome). Detect via the
-  // URL prefix MapLibre uses.
-  if (document.getElementById('explore-fab')) return;
-
-  var fab = document.createElement('button');
-  fab.type = 'button';
-  fab.id = 'explore-fab';
-  fab.title = 'Explore nearby';
-  fab.textContent = '⊕ Explore';
-  fab.style.cssText = (
-    'position:fixed; right:14px; top:14px; z-index:1500;'
-    + 'padding:9px 14px; border-radius:999px; font-weight:600;'
-    + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
-    + 'background:rgba(255,255,255,0.94); color:#1a73e8;'
-    + 'border:1px solid rgba(0,0,0,0.12);'
-    + 'box-shadow:0 3px 10px rgba(0,0,0,0.14);'
-    + 'cursor:pointer;'
-  );
-  fab.addEventListener('click', function() {
-    if (document.getElementById('explore-menu')) {
-      _closeExploreMenu();
-    } else {
-      _openExploreMenu(map);
-    }
-  });
-  document.body.appendChild(fab);
-  // Hide while:
-  //   - the find-results carousel is up (already top-of-screen UX)
-  //   - the routing/directions panel is open (the user has dedicated
-  //     workflow on screen, Explore would just clutter the corner)
-  // Toggle via a periodic pointer (cheap; runs only while the FAB is
-  // mounted).
-  setInterval(function() {
-    var hideForCarousel = !!_findResultsState.strip;
-    var routingPanel = document.getElementById('routing-panel');
-    var hideForRouting = !!(routingPanel
-      && routingPanel.style.display !== 'none'
-      && routingPanel.offsetParent !== null);
-    fab.style.display = (hideForCarousel || hideForRouting) ? 'none' : '';
-  }, 250);
-}
-
-function _openExploreMenu(map) {
-  _closeExploreMenu();
-  var menu = document.createElement('div');
-  menu.id = 'explore-menu';
-  menu.style.cssText = (
-    'position:fixed; right:14px; top:54px; z-index:1500;'
-    + 'background:#fff; color:#222;'
-    + 'border:1px solid #ddd; border-radius:12px;'
-    + 'box-shadow:0 8px 22px rgba(0,0,0,0.18);'
-    + 'padding:6px; min-width:200px;'
-    + 'font:14px/1.4 -apple-system,system-ui,sans-serif;'
-  );
-  var head = document.createElement('div');
-  head.style.cssText = (
-    'padding:6px 10px 8px; color:#666; font-size:12px;'
-    + 'text-transform:uppercase; letter-spacing:0.04em;'
-  );
-  head.textContent = 'Explore in this area';
-  menu.appendChild(head);
-  for (var i = 0; i < EXPLORE_CHIPS.length; i++) {
-    var c = EXPLORE_CHIPS[i];
-    var row = document.createElement('button');
-    row.type = 'button';
-    row.style.cssText = (
-      'display:flex; align-items:center; gap:10px; width:100%;'
-      + 'padding:10px 12px; background:transparent; border:none;'
-      + 'text-align:left; font:inherit; font-size:14px;'
-      + 'border-radius:8px; cursor:pointer;'
-    );
-    row.addEventListener('mouseenter', function() {
-      this.style.background = '#f5f9ff';
-    });
-    row.addEventListener('mouseleave', function() {
-      this.style.background = 'transparent';
-    });
-    var emoji = document.createElement('span');
-    emoji.setAttribute('aria-hidden', 'true');
-    emoji.textContent = c.emoji;
-    var label = document.createElement('span');
-    label.textContent = c.label;
-    row.appendChild(emoji);
-    row.appendChild(label);
-    (function(chipId) {
-      row.addEventListener('click', function() {
-        _gotoExplore(map, chipId);
-      });
-    })(c.id);
-    menu.appendChild(row);
-  }
-  document.body.appendChild(menu);
-  // Close on outside click — defer attach so this same-event click
-  // doesn't immediately close.
-  setTimeout(function() {
-    document.addEventListener('click', _exploreOutsideClick);
-  }, 0);
-}
-
-function _exploreOutsideClick(e) {
-  if (e.target.closest('#explore-menu')
-      || e.target.closest('#explore-fab')) {
-    return;
-  }
-  _closeExploreMenu();
-}
-
-function _closeExploreMenu() {
-  var m = document.getElementById('explore-menu');
-  if (m && m.parentNode) m.parentNode.removeChild(m);
-  document.removeEventListener('click', _exploreOutsideClick);
-}
-
-function _gotoExplore(map, chipId) {
-  // Make sure the current viewport is in sessionStorage before we
-  // navigate — places.html only enables "Limit to map area" if the
-  // stash exists. We already write on moveend, but a fresh tab that
-  // never moved the camera might be stale.
-  try {
-    var b = map.getBounds();
-    sessionStorage.setItem('streetzim_last_viewport', JSON.stringify({
-      n: b.getNorth(), s: b.getSouth(),
-      e: b.getEast(),  w: b.getWest(),
-      z: map.getZoom(), ts: Date.now(),
-    }));
-  } catch (e) {}
-  _closeExploreMenu();
-  // Navigate to places.html with the chip + bbox toggle preset.
-  // Path is the same directory as the viewer. The previous regex
-  // (replace(/[^/]+\/?$/, '')) was wrong: for `/drive/viewer/` it
-  // stripped the trailing `viewer/` segment and produced `/drive/`,
-  // 404'ing on /drive/places.html. Only strip the trailing PATH
-  // SEGMENT if the URL doesn't already end with `/`.
-  var here = location.pathname;
-  if (!here.endsWith('/')) here = here.replace(/[^/]+$/, '');
-  location.href = here + 'places.html?chip='
-                + encodeURIComponent(chipId) + '&mapArea=1';
-}
+// initExplore was the corner ⊕ Explore FAB that opened a chip
+// menu. It duplicated the on-map chip rail (#find-chips) and shared
+// its name with the Wikipedia "Explore" button (#wiki-toggle), per
+// user 2026-05-10: "we have that same functionality in the
+// chicklets under search AND in the 'Find' section. We need to
+// fold it down to one. And we already have a wikipedia based
+// 'Explore' as well."
+//
+// The chip rail wins (always visible, single tap, no click-to-
+// reveal). This is now a no-op kept so the call site doesn't
+// have to change.
+function initExplore(_map) {}
 
 // "Nearby" inside the detail panel. Source is the loaded result set
 // itself, sorted by distance from `r`. Capped to 5 rows + a 1500 m

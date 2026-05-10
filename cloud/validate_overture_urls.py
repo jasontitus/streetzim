@@ -371,8 +371,15 @@ async def _crawl(
     timeout: int,
     progress_every: int,
     check_parking_body: bool = False,
+    checkpoint_every: int = 0,
+    checkpoint_cb=None,
 ) -> dict[str, dict]:
-    """Returns {url: result} for every url in `urls`."""
+    """Returns {url: result} for every url in `urls`.
+
+    If `checkpoint_every > 0` and `checkpoint_cb` is given, the
+    callback is invoked with the partial `results` map every N
+    completed URLs so the caller can persist progress mid-run.
+    """
     results: dict[str, dict] = {}
     overall = asyncio.Semaphore(concurrency)
     per_host = _PerHostLimiter(per_host_concurrency)
@@ -380,6 +387,7 @@ async def _crawl(
     total = len(urls)
     done = 0
     alive = 0
+    last_checkpoint = 0
 
     timeout_obj = aiohttp.ClientTimeout(
         total=timeout, connect=timeout, sock_read=timeout
@@ -400,7 +408,7 @@ async def _crawl(
     ) as session:
 
         async def bounded(url: str) -> None:
-            nonlocal done, alive
+            nonlocal done, alive, last_checkpoint
             try:
                 host = urlparse(url).hostname or ""
             except Exception:  # noqa: BLE001
@@ -427,6 +435,16 @@ async def _crawl(
                     file=sys.stderr,
                     flush=True,
                 )
+            # Persist mid-run so a Ctrl-C / OOM doesn't lose hours
+            # of crawl. Checkpoint cadence is set by the caller.
+            if (checkpoint_every > 0 and checkpoint_cb is not None
+                    and done - last_checkpoint >= checkpoint_every):
+                last_checkpoint = done
+                try:
+                    checkpoint_cb(results)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"  warn: checkpoint failed: {exc}",
+                          file=sys.stderr)
 
         await asyncio.gather(*(bounded(u) for u in urls))
 
@@ -465,6 +483,14 @@ def main() -> int:
         help="for URLs that return 200, also fetch up to 32 KB of "
              "body and grep for parking-page phrases. Doubles "
              "request count; use sparingly.",
+    )
+    p.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=2000,
+        help="persist the cache every N completed URLs so a long "
+             "crawl can survive Ctrl-C / OOM without losing all "
+             "state. Set to 0 to disable.",
     )
     args = p.parse_args()
 
@@ -534,6 +560,18 @@ def main() -> int:
         file=sys.stderr,
     )
     started = time.time()
+
+    # Checkpoint callback: merge partial results into the cache and
+    # write the file atomically. Called every checkpoint-every URLs.
+    def _save_checkpoint(partial: dict[str, dict]) -> None:
+        # Merge into the in-memory `entries` dict, then write.
+        for u, r in partial.items():
+            entries[u] = r
+        cache["checked_at"] = _now_iso()
+        tmp = args.cache.with_suffix(args.cache.suffix + ".tmp")
+        tmp.write_text(json.dumps(cache, indent=2, sort_keys=True))
+        tmp.replace(args.cache)
+
     results = asyncio.run(
         _crawl(
             todo,
@@ -542,6 +580,8 @@ def main() -> int:
             timeout=args.timeout,
             progress_every=args.progress_every,
             check_parking_body=args.check_parking_body,
+            checkpoint_every=args.checkpoint_every,
+            checkpoint_cb=_save_checkpoint,
         )
     )
     elapsed = time.time() - started
