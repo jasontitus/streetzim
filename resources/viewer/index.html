@@ -3163,6 +3163,18 @@ function _setActiveResult(map, idx, flyTo) {
   }
   if (_findResultsState.markers[idx]) {
     _markerSetColor(_findResultsState.markers[idx], '#1a73e8');
+    // Bring the active marker to the top of the marker stack.
+    // MapLibre puts each marker in its own absolutely-positioned div
+    // that's a child of the markers layer; with the same z-index,
+    // DOM order decides what stacks on top. Re-appending puts the
+    // active pin last in the parent → painted last → no longer
+    // hidden behind another marker the user just panned past.
+    try {
+      var el = _findResultsState.markers[idx].getElement();
+      if (el && el.parentNode) {
+        el.parentNode.appendChild(el);
+      }
+    } catch (e2) {}
   }
   if (flyTo) {
     var r = _findResultsState.items[idx];

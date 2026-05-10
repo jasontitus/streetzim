@@ -430,6 +430,13 @@ function initMapAreaToggle() {
   else if (z >= 9)  scale = 'region';
   els.mapAreaInfo.textContent = `(${scale}, zoom ${z.toFixed(1)})`;
   els.mapAreaRow.hidden = false;
+  // Default ON when a fresh viewport is on hand. Searching the
+  // user's current map area is what they almost always want; if the
+  // filter would yield zero results, _sortAndShow auto-falls back
+  // to the unfiltered set rather than showing nothing. The user
+  // can still untick to force a wider search.
+  state.mapAreaOn = true;
+  els.mapAreaCheck.checked = true;
   els.mapAreaCheck.addEventListener('change', () => {
     state.mapAreaOn = els.mapAreaCheck.checked;
     rerunQuery();
@@ -902,7 +909,14 @@ function stashResultsForMap(label) {
 function applyResults(records) {
   // Hard-filter to the map's last viewport when the user opted in.
   // Done before sort/cap so distance + count reflect the filtered set.
+  // Auto-fallback: if the bbox filter would leave zero results,
+  // expand to the unfiltered set instead of showing "0 matches".
+  // The user has the toggle ticked by default; we don't want them
+  // to think there's nothing in their area when there's just nothing
+  // *of this type* in their immediate viewport — better to surface
+  // what's around the city/region.
   let filteredOut = 0;
+  let autoExpanded = false;
   if (state.mapAreaOn && state.mapArea) {
     const v = state.mapArea;
     const inside = (r) =>
@@ -911,12 +925,20 @@ function applyResults(records) {
     for (const r of records) {
       if (inside(r)) next.push(r); else filteredOut++;
     }
-    records = next;
+    if (next.length > 0) {
+      records = next;
+    } else if (records.length > 0) {
+      // Filter would have wiped everything — keep the original set
+      // and flag for the status line.
+      autoExpanded = true;
+      filteredOut = 0;
+    }
   }
   // Stash the post-filter records so the sort row can re-sort
   // without re-running the search.
   state.lastRecords = records.slice();
   state._lastFilteredOut = filteredOut;
+  state._autoExpanded = autoExpanded;
   // Save to recent history when the search produced anything.
   if (records.length > 0) {
     if (state.chip) {
@@ -1023,6 +1045,8 @@ function _sortAndShow(records) {
   }
   if (state.mapAreaOn && state.mapArea && state._lastFilteredOut > 0) {
     countLine += ` (filtered ${state._lastFilteredOut} outside map area)`;
+  } else if (state._autoExpanded) {
+    countLine += ' (none in map area — showing all)';
   }
   setStatus(countLine + '.');
   // Show the sort row only when there's a meaningful number to sort.
