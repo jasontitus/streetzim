@@ -264,10 +264,64 @@ we don't surface unrelated results from elsewhere.
 `mask-image` gradient on its left/right edges so the horizontal-
 scroll affordance is visually obvious.
 
-The `places.html` mini-app (next section) is still reachable via
-the **Find** link in the controls strip for users who want list
-view, sort, sub-filter chips, recent-searches dropdown, and the
-"Limit to map area" toggle.
+### Sub-filter chip row inside the carousel
+
+When a chip's results land, the carousel header is followed by a
+second chip row built from the result set's `r.s` subtype
+histogram (top 8 by count, count ≥ 2; "All" prepended when
+narrowing). Tapping a sub-chip narrows the displayed pins +
+carousel cards via `_applySubFilter`, which:
+
+1. Re-stashes `_findResultsState.allItems` (the full chip dataset
+   captured at render time) under `stash.items` plus the new
+   `subFilter` field.
+2. Calls `renderFindResultsFromStash`. That function captures
+   `stash.items` as `_findResultsState.allItems` BEFORE applying
+   the filter in place, so the histogram remains stable as the
+   user narrows.
+
+This was previously a places.html-only feature; folded into the
+on-map carousel after the **Find** link was retired (see
+"What's no longer in the chrome" below).
+
+### Two popup systems on one map (find-result ↔ Wikidata)
+
+There are two independent popup systems on the map:
+
+- **Find-result marker popups.** Created by
+  `_findResultPopup` for each pin in a chip's result set;
+  `closeOnClick:false` so a stray map tap doesn't dismiss them
+  mid-read.
+- **Wikidata feature popups.** `initWikidataPopups` opens a
+  popup anchored to the click point when the user taps any
+  vector-tile feature whose `wikidata=Q*` tag matches an entry
+  in our cached Wikidata. Singleton `currentPopup` inside that
+  function's closure.
+
+Without a cross-system bridge, alternating taps between the two
+kinds of pin would stack both popups on screen. The bridge:
+
+- `initWikidataPopups` exposes `map._closeWikidataPopup()` that
+  closes its `currentPopup`. Its own click handler also walks
+  `_findResultsState.markers` and closes any open find-result
+  popups before opening a new Wikidata popup.
+- Find-result marker click handlers (in
+  `renderFindResultsFromStash`) and `_setActiveResult` (carousel
+  scroll-snap) both call `map._closeWikidataPopup()` before
+  MapLibre's default `togglePopup` opens this marker's popup.
+
+Net: at most one popup of either kind is ever on screen. Add
+similar bridge logic if a third popup system is added later.
+
+### What's no longer in the chrome
+
+- The `Find` link in the controls strip was removed 2026-05-10.
+  The chip rail covers chip browsing inline; if a user wants
+  full-list view + sort + recent-searches, they hit
+  `/drive/viewer/places.html` directly.
+- The `⊕ Explore` corner FAB was removed the same day. It
+  duplicated the chip rail and conflicted with the Wikipedia
+  panel button (now `📖 Wiki`, `#wiki-toggle`).
 
 ## Find-places mini-app (`places.html`)
 
