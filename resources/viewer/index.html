@@ -120,12 +120,22 @@
      Tapping a chip fetches the corresponding category-index file,
      filters by current viewport, and renders as pins + carousel
      via the existing find-results path. Replaces the click-through
-     to places.html for chip-based browsing. */
+     to places.html for chip-based browsing.
+     Edge fade via mask: chips that scroll past the right (or left)
+     edge fade out gracefully so the user can tell there's more
+     content rather than a hard cut-off. */
   #find-chips {
     margin-top: 8px;
     display: flex; gap: 6px;
+    padding: 2px 4px;
     overflow-x: auto; -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    mask-image: linear-gradient(to right,
+                  transparent 0, black 14px,
+                  black calc(100% - 14px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to right,
+                  transparent 0, black 14px,
+                  black calc(100% - 14px), transparent 100%);
   }
   #find-chips::-webkit-scrollbar { display: none; }
   #find-chips .find-chip {
@@ -2291,11 +2301,20 @@ function _hideSearchAreaPill() {
 }
 
 function _searchAreaApply(map) {
-  // Hard-filter the existing items array to the current viewport,
-  // re-render markers + carousel. No re-search — this is the offline
-  // simple version of Google Maps' "Search this area"; the original
-  // result set was already capped at 300 by places.html, so for
-  // unbounded re-search the user can go back to the find page.
+  // If the carousel was populated by a chip-rail tap, re-fetch the
+  // chip's full dataset and filter to the new viewport — that way
+  // panning SF→LA and tapping "Search this area" surfaces LA
+  // restaurants instead of (no SF restaurants in LA, so nothing).
+  // For non-chip stashes (e.g. a hand-off from places.html name
+  // search), fall back to filtering the existing items array.
+  var activeChip = _findResultsState.activeChip;
+  if (activeChip && typeof loadChipOnMap === 'function') {
+    _hideSearchAreaPill();
+    loadChipOnMap(map, activeChip).catch(function(err) {
+      console.warn('[streetzim] search-this-area chip refetch failed:', err);
+    });
+    return;
+  }
   if (!_findResultsState.items || !_findResultsState.items.length) return;
   var b = map.getBounds();
   var w = b.getWest(), e = b.getEast(),
@@ -2915,6 +2934,13 @@ function _findFetchChipData(chipId) {
 
 async function loadChipOnMap(map, chipDef) {
   _findChipPaintActive(chipDef.id);
+  // Stash the active chip on the find state so "Search this area"
+  // (the pill that appears when the user pans the map) can re-fetch
+  // the chip's FULL dataset instead of just re-filtering the
+  // already-loaded result set. Without this, panning from SF to
+  // LA and clicking the pill kept showing SF restaurants because
+  // the items array only had SF-area data.
+  _findResultsState.activeChip = chipDef;
   // Show progress in the search input as a placeholder so the user
   // sees "loading" for the chip they tapped without a separate
   // status surface.
@@ -3484,6 +3510,7 @@ function clearFindResults() {
   if (typeof _findChipPaintActive === 'function') {
     _findChipPaintActive(null);
   }
+  _findResultsState.activeChip = null;
   if (_findResultsState.map) {
     try { _findResultsState.map.keyboard.enable(); } catch (e) {}
   }
