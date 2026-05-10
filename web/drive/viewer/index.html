@@ -1080,8 +1080,15 @@ fetchConfig(1)
     // and the routing GPS button can fill the origin without re-prompting.
     var geolocateCtl = new maplibregl.GeolocateControl({
       positionOptions: { enableHighAccuracy: true },
-      trackUserLocation: true,
-      showUserHeading: true
+      // trackUserLocation:false intentionally — true makes the
+      // control auto-recenter on every GPS update, which yanked the
+      // camera back to the user every time the carousel/route
+      // fitBounds tried to show the result. Drive mode has its own
+      // follow-cam (driveMode.setRoute → projectOnRoute) so we don't
+      // need MapLibre's tracking outside of it. The button still
+      // does a one-shot center when tapped explicitly.
+      trackUserLocation: false,
+      showUserHeading: false
     });
     geolocateCtl.on('geolocate', function(pos) {
       if (!pos || !pos.coords) return;
@@ -4346,11 +4353,39 @@ function initWikidataPopups(map, config) {
     btn.className = 'pin-directions';
     btn.textContent = 'Directions to here';
     btn.style.marginTop = '8px';
-    btn.addEventListener('click', function() {
+    btn.addEventListener('click', function(ev) {
       if (!window.streetzimRouting ||
           typeof window.streetzimRouting.open !== 'function') {
         return;
       }
+      // Close the parent popup BEFORE opening directions — otherwise
+      // it lingers above the route asking the user to choose
+      // "Directions to here" again. Walk to the maplibregl-popup
+      // ancestor and trigger its close button (preserves whatever
+      // teardown maplibre wires up internally). Backup: blanket
+      // close via map._closeWikidataPopup + clearAllFindMarkerPopups.
+      try {
+        var popEl = ev && ev.target && ev.target.closest
+          ? ev.target.closest('.maplibregl-popup') : null;
+        if (popEl) {
+          var closer = popEl.querySelector('.maplibregl-popup-close-button');
+          if (closer) closer.click();
+        }
+        if (typeof map._closeWikidataPopup === 'function') {
+          map._closeWikidataPopup();
+        }
+        if (typeof _findResultsState !== 'undefined'
+            && _findResultsState.markers) {
+          for (var __i = 0; __i < _findResultsState.markers.length; __i++) {
+            var __mm = _findResultsState.markers[__i];
+            if (!__mm) continue;
+            try {
+              var __pp = __mm.getPopup();
+              if (__pp && __pp.isOpen()) __mm.togglePopup();
+            } catch (e2) {}
+          }
+        }
+      } catch (e3) {}
       window.streetzimRouting.open();
       window.streetzimRouting.setDest(lat, lon, name || undefined);
       var cached = window.__streetzimLastLoc;
