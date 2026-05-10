@@ -6141,11 +6141,27 @@ function initRouting(map, config) {
   // Set origin from any source (map click, typeahead, GPS). `label` is what
   // to show in the input; if omitted, a lat/lon coord label is used.
   function setOriginFromLatLon(lat, lon, label) {
+    // Race guard: a "Directions to here" click on a place-detail
+    // popup fires getCurrentPosition, then on resolve calls back into
+    // this with label='Current location'. If the user has clicked
+    // into the origin field and started typing in the meantime, we'd
+    // clobber their input AND auto-fire a route from current location
+    // before they even finished picking their actual origin. Skip
+    // GPS auto-fills (the only callers that pass 'Current location')
+    // when the input is being edited.
+    if (label === 'Current location'
+        && window.__streetzim_originBeingEdited) {
+      return;
+    }
     if (queueGraphPick('origin', lat, lon, label)) return;
     originNode = nearestNode(lat, lon);
     var oLat = graph.nodesScaled[originNode * 2] / 1e7;
     var oLon = graph.nodesScaled[originNode * 2 + 1] / 1e7;
     originInput.value = label || coordLabel(oLat, oLon);
+    // Origin is now committed (typeahead pick, map click, GPS button,
+    // or queued-pick replay). Clear the editing flag so future GPS
+    // auto-fills aren't blocked indefinitely.
+    window.__streetzim_originBeingEdited = false;
     if (originMarker) originMarker.remove();
     originMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-origin'), anchor: 'center' })
       .setLngLat([oLon, oLat]).addTo(map);
@@ -6430,6 +6446,29 @@ function initRouting(map, config) {
   }
   autoSelectOnFocus(originInput);
   autoSelectOnFocus(destInput);
+
+  // Race guard: when "Directions to here" is clicked, the popup
+  // handlers fire `getCurrentPosition` and on resolve overwrite the
+  // origin input with the cached current location. If the user
+  // started typing a custom origin in the meantime, the GPS resolve
+  // would clobber what they typed (and the auto-fired route would
+  // be from current location instead of their pick). Track active
+  // editing so the GPS callbacks can skip auto-fill.
+  function markOriginEditing() {
+    window.__streetzim_originBeingEdited = true;
+  }
+  function clearOriginEditing() {
+    window.__streetzim_originBeingEdited = false;
+  }
+  originInput.addEventListener('focus', markOriginEditing);
+  originInput.addEventListener('input', markOriginEditing);
+  // Cleared by any code path that successfully sets origin (GPS
+  // button, typeahead pick, map click). setOriginFromLatLon below
+  // is the funnel — clear there.
+  // Hook all "Directions to here" callers via this small bridge.
+  window.__streetzimGpsAutofillOk = function() {
+    return !window.__streetzim_originBeingEdited;
+  };
 
   // Current location button (origin only). Uses the standard Geolocation API.
   // Falls back gracefully if not available or permission denied.
