@@ -3629,7 +3629,36 @@ function placeSearchPin(map, lat, lon, name, enrich) {
   var btn = document.createElement('button');
   btn.className = 'pin-directions';
   btn.textContent = 'Directions to here';
-  btn.addEventListener('click', function() {
+  btn.addEventListener('click', function(ev) {
+    // Close the parent popup before firing the route — otherwise it
+    // sits on top of the drawn route asking the user to choose
+    // "Directions to here" again. Cf. the same fix in
+    // initWikidataPopups.buildDirectionsButton — there are TWO copies
+    // of this button-construction code in the file (this one is the
+    // search-pin path; the other is the Wikidata feature-popup path).
+    try {
+      var popEl = ev && ev.target && ev.target.closest
+        ? ev.target.closest('.maplibregl-popup') : null;
+      if (popEl) {
+        var closer = popEl.querySelector('.maplibregl-popup-close-button');
+        if (closer) closer.click();
+      }
+      if (window.__streetzim_map
+          && typeof window.__streetzim_map._closeWikidataPopup === 'function') {
+        window.__streetzim_map._closeWikidataPopup();
+      }
+      if (typeof _findResultsState !== 'undefined'
+          && _findResultsState.markers) {
+        for (var __i = 0; __i < _findResultsState.markers.length; __i++) {
+          var __mm = _findResultsState.markers[__i];
+          if (!__mm) continue;
+          try {
+            var __pp = __mm.getPopup();
+            if (__pp && __pp.isOpen()) __mm.togglePopup();
+          } catch (e2) {}
+        }
+      }
+    } catch (e3) {}
     window.streetzimRouting.open();
     window.streetzimRouting.setDest(lat, lon, name || undefined);
     var cached = window.__streetzimLastLoc;
