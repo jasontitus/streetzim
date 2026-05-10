@@ -1995,12 +1995,24 @@ function renderFindResultsFromStash(map) {
       .addTo(map);
     var popup = _findResultPopup(map, r);
     if (popup) marker.setPopup(popup);
-    // Tap a pin → snap the carousel to the matching card. Two-way
-    // sync between map and strip so the user can drive from either.
+    // Tap a pin → snap the carousel to the matching card AND close
+    // any other popups that were open. MapLibre default
+    // closeOnClick:false leaves earlier popups dangling when the
+    // user clicks a different pin; before this we'd accumulate
+    // multiple popups on the map.
     (function(idx) {
       var el = marker.getElement();
       el.style.cursor = 'pointer';
       el.addEventListener('click', function() {
+        for (var k = 0; k < _findResultsState.markers.length; k++) {
+          if (k === idx) continue;
+          var other = _findResultsState.markers[k];
+          if (!other) continue;
+          try {
+            var pop = other.getPopup();
+            if (pop && pop.isOpen()) other.togglePopup();
+          } catch (e2) {}
+        }
         _scrollCarouselTo(idx);
       });
     })(i);
@@ -3175,6 +3187,18 @@ function _setActiveResult(map, idx, flyTo) {
         el.parentNode.appendChild(el);
       }
     } catch (e2) {}
+    // Close any popups on OTHER markers — common case is the user
+    // tapped marker A (popup A opens), then swiped the carousel to
+    // card B. Without this, popup A lingers on the map.
+    for (var k = 0; k < _findResultsState.markers.length; k++) {
+      if (k === idx) continue;
+      var other = _findResultsState.markers[k];
+      if (!other) continue;
+      try {
+        var pop = other.getPopup();
+        if (pop && pop.isOpen()) other.togglePopup();
+      } catch (e3) {}
+    }
   }
   if (flyTo) {
     var r = _findResultsState.items[idx];
