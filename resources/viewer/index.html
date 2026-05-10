@@ -359,13 +359,48 @@
   /* Fold-down on phones: collapse the panel to a single-row header so
      the driven route stays visible on the map beneath. Tap anywhere
      on the header (or the chevron) to unfold. Blue route line is
-     preserved — clear() is only called by the × button. */
+     preserved — clear() is only called by the × button.
+
+     Minimized-state affordance:
+     - Whole header gets a subtle accent pill background so it
+       clearly reads as "tappable", not "static label".
+     - "Tap to expand" hint appears next to the title.
+     - Close button is HIDDEN while folded so you can't mis-tap it
+       — to close a route, expand first then hit ×. The minimize
+       chevron sat right next to × and the user kept hitting the
+       wrong one.
+  */
   #routing-panel.minimized #routing-body { display: none; }
-  #routing-panel.minimized h4 { margin: 0; cursor: pointer; }
+  #routing-panel.minimized h4 {
+    margin: 0; cursor: pointer;
+    padding: 6px 10px;
+    border-radius: var(--radius);
+    background: rgba(37, 99, 235, 0.08);
+    transition: background 0.15s ease;
+  }
+  #routing-panel.minimized h4:hover {
+    background: rgba(37, 99, 235, 0.14);
+  }
+  #routing-panel.minimized h4:active {
+    background: rgba(37, 99, 235, 0.20);
+  }
   /* Flip the chevron so the glyph hints at "unfold". ▾ when expanded,
      ▴ when folded. */
   #routing-panel.minimized #routing-minimize {
     transform: rotate(180deg); display: inline-block;
+    color: var(--accent, #2563eb);
+    font-size: 20px;  /* bigger so the affordance is obvious */
+  }
+  /* Hide the close button while folded — expand first to close. */
+  #routing-panel.minimized #routing-close { display: none; }
+  /* Show "Tap to expand" hint inline. The hint is in DOM all the
+     time; CSS only reveals it in the minimized state so we don't
+     have to mutate the DOM on every fold/unfold. */
+  #routing-panel #routing-expand-hint { display: none; }
+  #routing-panel.minimized #routing-expand-hint {
+    display: inline; margin-left: 8px;
+    font-weight: 400; font-size: 12px;
+    color: var(--text-secondary, #555);
   }
   /* Mobile-ish: auto-compact when narrow. Keeps the directions usable
      when driving + wanting to see the road. */
@@ -730,7 +765,7 @@
        recent searches) but is no longer surfaced in chrome. -->
 </div>
 <div id="routing-panel">
-  <h4>Directions
+  <h4>Directions<span id="routing-expand-hint">— tap to expand</span>
     <span>
       <button id="routing-minimize" title="Fold down (show map)" aria-label="Fold">&#x25BE;</button>
       <button id="routing-close" title="Close">&times;</button>
@@ -4917,7 +4952,14 @@ function initRouting(map, config) {
   // not minimized the h4 is plain text so we only hook the handler
   // through the class-conditional cursor:pointer rule above.
   heading.addEventListener('click', function(e) {
-    if (panel.classList.contains('minimized') && e.target === heading) {
+    // Any click on the folded header expands. The minimize chevron
+    // has its own click handler that calls toggleMinimized AND
+    // stopPropagation, so it won't double-fire here. The close
+    // button is display:none while folded (CSS), so it can't be the
+    // origin of a bubbled click in this branch. Used to require
+    // e.target === heading; that excluded the new "tap to expand"
+    // hint span.
+    if (panel.classList.contains('minimized')) {
       toggleMinimized();
     }
   });
