@@ -2137,6 +2137,16 @@ function _renderFindResultsStrip(map, stash) {
 
 function _showSearchAreaPill(map) {
   if (_findResultsState.searchAreaBtn) return; // already on screen
+  // While the pill is on screen it pretty much owns the top-center
+  // band — hide the main search input so the two affordances aren't
+  // crowding each other / drawing the user's eye away from the
+  // result-set-on-map flow they're actively in.
+  var searchContainer = document.getElementById('search-container');
+  if (searchContainer && !_findResultsState._searchHidden) {
+    _findResultsState._searchHidden = true;
+    _findResultsState._searchPrevDisplay = searchContainer.style.display;
+    searchContainer.style.display = 'none';
+  }
   var btn = document.createElement('button');
   btn.id = 'find-search-area-btn';
   btn.type = 'button';
@@ -2181,6 +2191,16 @@ function _hideSearchAreaPill() {
   setTimeout(function() {
     if (btn.parentNode) btn.parentNode.removeChild(btn);
   }, 250);
+  // Restore the main search container to whatever display value it
+  // had before we hid it (most often '' = inherits from CSS).
+  if (_findResultsState._searchHidden) {
+    var searchContainer = document.getElementById('search-container');
+    if (searchContainer) {
+      searchContainer.style.display = _findResultsState._searchPrevDisplay || '';
+    }
+    _findResultsState._searchHidden = false;
+    _findResultsState._searchPrevDisplay = null;
+  }
 }
 
 function _searchAreaApply(map) {
@@ -3147,6 +3167,16 @@ function clearFindResults() {
       _findResultsState.searchAreaBtn);
   }
   _findResultsState.searchAreaBtn = null;
+  // Restore the main search if we hid it for the pill.
+  if (_findResultsState._searchHidden) {
+    var searchContainer = document.getElementById('search-container');
+    if (searchContainer) {
+      searchContainer.style.display =
+        _findResultsState._searchPrevDisplay || '';
+    }
+    _findResultsState._searchHidden = false;
+    _findResultsState._searchPrevDisplay = null;
+  }
   _hidePlaceDetail();
   if (_findResultsState.map) {
     try { _findResultsState.map.keyboard.enable(); } catch (e) {}
@@ -5160,6 +5190,16 @@ function initRouting(map, config) {
           throw new Error('no-spatial');
         }
         var idx = parseRoutingCellsIndex(o.buf);
+        // Kick off the worker init NOW, in parallel with the main
+        // thread's loadNodeShards. The worker re-fetches its own
+        // copy of cells-index + node shards (SW range-cache absorbs
+        // duplicate reads), so its init runs concurrently with the
+        // main thread's. On the user's first route this halves the
+        // cold-start wall time (worker would previously start AFTER
+        // the main thread finished assembling SpatialGraph).
+        try { initRoutingWorker(); } catch (e) {
+          console.warn('[streetzim] routing worker init skipped:', e);
+        }
         // SZCI v2 shards nodes_scaled into separate ZIM entries — fetch
         // them in parallel before constructing SpatialGraph. v1 has
         // nodes inline, so loadNodeShards is a synchronous no-op.
@@ -5180,16 +5220,8 @@ function initRouting(map, config) {
             indexBytes: o.buf.byteLength,
             numNodeShards: idx.numNodeShards,
           });
-          // Off-main-thread routing — best-effort. Worker re-fetches
-          // its own copy of the graph data via the same baseUrl; the
-          // SW range-cache absorbs the duplicate bytes. If the worker
-          // fails to load (host doesn't ship routing-worker.js, or
-          // CSP blocks Workers), routing falls back to the main-thread
-          // implementation transparently. See routing-worker.js for
-          // the protocol.
-          try { initRoutingWorker(); } catch (e) {
-            console.warn('[streetzim] routing worker init skipped:', e);
-          }
+          // Worker init was kicked off above in parallel with this
+          // loadNodeShards — see comment at parseRoutingCellsIndex.
           statusEl.textContent = 'Enter start and destination';
         });
       })
