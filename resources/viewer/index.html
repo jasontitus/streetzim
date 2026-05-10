@@ -116,6 +116,35 @@
      same top-center band. Class-based with !important so a stray
      inline display from a third party can't beat it. */
   #search-container.streetzim-hidden { display: none !important; }
+  /* Chip rail beneath the search input — the on-map find UI.
+     Tapping a chip fetches the corresponding category-index file,
+     filters by current viewport, and renders as pins + carousel
+     via the existing find-results path. Replaces the click-through
+     to places.html for chip-based browsing. */
+  #find-chips {
+    margin-top: 8px;
+    display: flex; gap: 6px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  #find-chips::-webkit-scrollbar { display: none; }
+  #find-chips .find-chip {
+    flex: 0 0 auto; padding: 7px 12px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.96);
+    color: var(--text-primary, #222);
+    border: 1px solid rgba(0,0,0,0.10);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.10);
+    font: inherit; font-size: 13px; font-weight: 500;
+    cursor: pointer; white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 5px;
+    transition: background .15s ease, transform .08s ease;
+  }
+  #find-chips .find-chip:hover { background: #fff; }
+  #find-chips .find-chip:active { transform: scale(0.97); }
+  #find-chips .find-chip.on {
+    background: #1a73e8; color: #fff; border-color: #1a73e8;
+  }
   #search-input {
     width: 100%; box-sizing: border-box;
     padding: 10px 36px 10px 14px; border: none; border-radius: var(--radius);
@@ -820,6 +849,12 @@
   <input id="search-input" type="text" placeholder="Search places, streets, POIs..." autocomplete="off">
   <button id="search-clear" title="Clear">&times;</button>
   <div id="search-results"></div>
+  <!-- On-map Find UI: tapping a chip fetches its category-index
+       file, filters to the current viewport, and drops pins +
+       carousel directly on the map below. Built dynamically by
+       initFindChips() so we have a single source of truth for
+       the chip list (EXPLORE_CHIPS). -->
+  <div id="find-chips" role="toolbar" aria-label="Find places by category"></div>
 </div>
 <div id="info">
   <h3>Offline OSM</h3>
@@ -1405,10 +1440,16 @@ fetchConfig(1)
     // Initialize routing
     initRouting(map, config);
 
+    // On-map Find chip rail — replaces the navigation to places.html
+    // for chip-based browsing. Tap a chip → results pin on the map +
+    // carousel below.
+    initFindChips(map);
+
     // "Explore" — top-right floating button that opens a chip menu.
     // Each chip links into places.html with that chip preselected and
     // the "Limit to map area" toggle on, so the user goes straight to
-    // a constrained category browse.
+    // a constrained category browse. Now mostly redundant with the
+    // chip rail above; kept as the entry-point for full-list view.
     initExplore(map);
   })
   .catch(function(err) {
@@ -2767,15 +2808,168 @@ function _detailFmtNumber(n) {
 // CATEGORIES). The build still emits chip files keyed by these IDs;
 // regions without a particular category just show "0 matches" on
 // places.html — graceful degrade.
+// Chip IDs MUST match the build's chip_rules.py — see
+// project_chip_rules_duplicated.md memory. Used by both
+// initFindChips (on-map rail) and initExplore (corner menu).
 var EXPLORE_CHIPS = [
-  { id: 'restaurants',    label: 'Restaurants',   emoji: '🍴' },
-  { id: 'cafes',          label: 'Cafés',         emoji: '☕' },
-  { id: 'shops',          label: 'Shops',         emoji: '🛍️' },
-  { id: 'attractions',    label: 'Attractions',   emoji: '🏛️' },
-  { id: 'parks',          label: 'Parks',         emoji: '🌳' },
-  { id: 'fuel',           label: 'Gas',           emoji: '⛽' },
-  { id: 'lodging',        label: 'Hotels',        emoji: '🏨' },
+  { id: 'restaurants', label: 'Restaurants', emoji: '🍴' },
+  { id: 'cafes',       label: 'Cafés',       emoji: '☕' },
+  { id: 'bars',        label: 'Bars',        emoji: '🍺' },
+  { id: 'shops',       label: 'Shops',       emoji: '🛍️' },
+  { id: 'museums',     label: 'Museums',     emoji: '🏛️' },
+  { id: 'parks',       label: 'Parks',       emoji: '🌳' },
+  { id: 'fuel',        label: 'Gas',         emoji: '⛽' },
+  { id: 'hotels',      label: 'Hotels',      emoji: '🏨' },
 ];
+
+// --- On-map Find UI: chip rail beneath the search input ---
+// Tapping a chip fetches its category-index file (with sub-bucket
+// fan-out when split), filters to the current viewport, and drops
+// pins + carousel directly on the map via the existing
+// renderFindResultsFromStash path. No navigation to places.html.
+//
+// Cache lives in module scope so a quick second tap on the same
+// chip doesn't re-fetch the same MB+ JSON.
+var _findCatManifest = null;
+var _findChipCache = new Map();    // chipId -> Promise<Array<record>>
+
+function initFindChips(map) {
+  var rail = document.getElementById('find-chips');
+  if (!rail) return;
+  // Build the chip buttons from EXPLORE_CHIPS (single source of
+  // truth; mirrors chip_rules.py).
+  for (var i = 0; i < EXPLORE_CHIPS.length; i++) {
+    (function(c) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'find-chip';
+      btn.dataset.chip = c.id;
+      var emoji = document.createElement('span');
+      emoji.setAttribute('aria-hidden', 'true');
+      emoji.textContent = c.emoji;
+      var label = document.createElement('span');
+      label.textContent = c.label;
+      btn.appendChild(emoji);
+      btn.appendChild(label);
+      btn.addEventListener('click', function() {
+        loadChipOnMap(map, c).catch(function(err) {
+          console.warn('[streetzim] chip load failed:', err);
+        });
+      });
+      rail.appendChild(btn);
+    })(EXPLORE_CHIPS[i]);
+  }
+}
+
+function _findChipPaintActive(chipId) {
+  var rail = document.getElementById('find-chips');
+  if (!rail) return;
+  var btns = rail.querySelectorAll('.find-chip');
+  for (var i = 0; i < btns.length; i++) {
+    btns[i].classList.toggle('on', btns[i].dataset.chip === chipId);
+  }
+}
+
+function _findFetchCatManifest() {
+  if (_findCatManifest) return Promise.resolve(_findCatManifest);
+  return fetch(baseUrl + 'category-index/manifest.json')
+    .then(function(r) {
+      if (!r.ok) throw new Error('category manifest HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function(m) { _findCatManifest = m; return m; })
+    .catch(function() { _findCatManifest = {}; return {}; });
+}
+
+function _findFetchChipData(chipId) {
+  if (_findChipCache.has(chipId)) return _findChipCache.get(chipId);
+  var p = _findFetchCatManifest().then(function(m) {
+    var meta = (m.chips && m.chips[chipId]) || {};
+    var subs = Array.isArray(meta.sub_chunks) ? meta.sub_chunks : null;
+    if (subs && subs.length) {
+      // Fan-out fetch when the build sub-bucketed this chip
+      // (cloud/repackage_zim.py --split-find-chips). Concatenate the
+      // per-bucket arrays.
+      return Promise.all(subs.map(function(suffix) {
+        return fetch(baseUrl + 'category-index/chip-' + chipId
+                     + '-' + suffix + '.json')
+          .then(function(r) { return r.ok ? r.json() : []; })
+          .catch(function() { return []; });
+      })).then(function(blobs) {
+        var out = [];
+        for (var i = 0; i < blobs.length; i++) {
+          for (var j = 0; j < blobs[i].length; j++) out.push(blobs[i][j]);
+        }
+        return out;
+      });
+    }
+    return fetch(baseUrl + 'category-index/chip-' + chipId + '.json')
+      .then(function(r) {
+        if (!r.ok) throw new Error('chip-' + chipId + ' HTTP ' + r.status);
+        return r.json();
+      });
+  });
+  _findChipCache.set(chipId, p);
+  return p;
+}
+
+async function loadChipOnMap(map, chipDef) {
+  _findChipPaintActive(chipDef.id);
+  // Show progress in the search input as a placeholder so the user
+  // sees "loading" for the chip they tapped without a separate
+  // status surface.
+  var searchInput = document.getElementById('search-input');
+  var prevPlaceholder = searchInput ? searchInput.placeholder : null;
+  if (searchInput) {
+    searchInput.placeholder = 'Loading ' + chipDef.label.toLowerCase() + '…';
+  }
+  try {
+    var data = await _findFetchChipData(chipDef.id);
+  } catch (err) {
+    if (searchInput) searchInput.placeholder = prevPlaceholder || '';
+    _findChipPaintActive(null);
+    console.warn('[streetzim] chip fetch failed:', err);
+    return;
+  }
+  if (searchInput) searchInput.placeholder = prevPlaceholder || '';
+
+  // Filter to the current map viewport. If that wipes everything,
+  // fall back to the unfiltered set (matches places.html behaviour
+  // — better to surface what's around than show "no results").
+  var bounds = map.getBounds();
+  var n = bounds.getNorth(), s = bounds.getSouth();
+  var e = bounds.getEast(),  w = bounds.getWest();
+  function lonInside(lon) {
+    return w <= e ? (lon >= w && lon <= e) : (lon >= w || lon <= e);
+  }
+  var filtered = [];
+  for (var i = 0; i < data.length; i++) {
+    var r = data[i];
+    if (typeof r.a !== 'number' || typeof r.o !== 'number') continue;
+    if (r.a >= s && r.a <= n && lonInside(r.o)) filtered.push(r);
+  }
+  var items = filtered.length ? filtered : data;
+  // Cap at 300 to keep the carousel + pin-rendering responsive.
+  // The scorer in places.html caps at the same number; matches.
+  if (items.length > 300) items = items.slice(0, 300);
+
+  // Use the cached GPS as origin so the carousel cards' distance
+  // labels are populated. Stale/missing → no distance shown.
+  var origin = null;
+  var loc = window.__streetzimLastLoc;
+  if (loc && Date.now() - (loc.ts || 0) < 30 * 60 * 1000) {
+    origin = { lat: loc.lat, lon: loc.lon, label: 'Current location' };
+  }
+  var stash = {
+    label: chipDef.label + (filtered.length ? '' : ' · expanded'),
+    origin: origin,
+    items: items,
+  };
+  try {
+    sessionStorage.setItem(FIND_RESULTS_STASH_KEY, JSON.stringify(stash));
+  } catch (e2) {}
+  renderFindResultsFromStash(map);
+}
 
 function initExplore(map) {
   // Don't try to render this affordance if the host page already
@@ -3286,6 +3480,10 @@ function clearFindResults() {
     _findResultsState._searchHidden = false;
   }
   _hidePlaceDetail();
+  // Clear any active chip in the on-map find rail.
+  if (typeof _findChipPaintActive === 'function') {
+    _findChipPaintActive(null);
+  }
   if (_findResultsState.map) {
     try { _findResultsState.map.keyboard.enable(); } catch (e) {}
   }
