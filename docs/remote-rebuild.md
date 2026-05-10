@@ -76,6 +76,28 @@ for migration notes).
   some fields). When the field is present in records, the viewer can
   start rendering it without further coordination — old viewers just
   ignore the unrecognised field.
+- **Filter records against the URL liveness cache.**
+  Many Overture POI websites are dead — DNS failures, 4xx/5xx,
+  redirects to domain-squatter parking pages (sedo / hugedomains /
+  godaddy parked / etc.). Field reports of broken links + parking
+  pages prompted us to add `cloud/validate_overture_urls.py` (the
+  async crawler) and `cloud/url_cache_filter.py` (build-side
+  consumer). Build-side wiring is still TODO:
+    1. Run `cloud/validate_overture_urls.py --zim <last shipped
+       region.zim> --check-parking-body` to populate
+       `url_validation_cache.json` (keep this file in the repo or
+       a shared cache location; it's a few MB).
+    2. In `create_osm_zim.py`'s POI emission step, import
+       `from cloud.url_cache_filter import load_cache,
+       decide_record_action, scrub_record_url` and consult the
+       cache per record. Default policy: `drop-record` for POIs
+       whose website is dead (per user: "a dead website may likely
+       mean a dead business so we might want to drop it
+       entirely"). Records without a `ws` field are always kept.
+    3. The cache is reused across builds; only URLs older than
+       `--max-age-days` (default 30) get rechecked, so subsequent
+       runs are cheap. New URLs from a fresh Overture parquet
+       still need a first crawl pass.
 
 ## Prereqs (one-time)
 
