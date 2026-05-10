@@ -3713,22 +3713,34 @@ function initSearch(map) {
   // doesn't dismiss before the selection registers.
   resultsEl.addEventListener('mousedown', function(e) { e.preventDefault(); });
 
-  // On touch devices, use touchend for selection since preventDefault
-  // on touchstart blocks the click event on iOS.
-  var isTouching = false;
+  // Touch handling: previously this preventDefault'd touchstart to
+  // suppress synthetic mouse events, which had the side effect of
+  // BLOCKING SCROLL inside the dropdown — every touch was treated as
+  // a selection, so trying to scroll the result list immediately
+  // picked an item. Replaced with a touchmove-distance check: if the
+  // finger moved more than the slop threshold between touchstart and
+  // touchend, treat it as a scroll and don't select. Listeners are
+  // passive so iOS can run the scroll on the compositor.
+  var __touchStartY = null;
+  var __touchScrolled = false;
   resultsEl.addEventListener('touchstart', function(e) {
-    isTouching = true;
-    e.preventDefault();
-  });
-  resultsEl.addEventListener('touchend', function(e) {
-    if (!isTouching) return;
-    isTouching = false;
-    var el = e.target.closest('.search-result');
-    if (el) selectResult(el);
-  });
+    if (e.touches.length === 1) {
+      __touchStartY = e.touches[0].clientY;
+      __touchScrolled = false;
+    }
+  }, { passive: true });
+  resultsEl.addEventListener('touchmove', function(e) {
+    if (__touchStartY != null && e.touches.length === 1) {
+      var dy = Math.abs(e.touches[0].clientY - __touchStartY);
+      if (dy > 8) __touchScrolled = true; // 8 px slop
+    }
+  }, { passive: true });
 
   resultsEl.addEventListener('click', function(e) {
-    if (isTouching) return; // Already handled by touchend
+    if (__touchScrolled) {
+      __touchScrolled = false;
+      return;
+    }
     var el = e.target.closest('.search-result');
     if (el) selectResult(el);
   });
@@ -6496,7 +6508,23 @@ function initRouting(map, config) {
             meta.textContent = m.dist;
             row.appendChild(meta);
           }
-          row.addEventListener('mousedown', function(e) { e.preventDefault(); pickMatch(m); });
+          // mousedown firing pickMatch on touch was the
+          // "scrolling the dropdown selects an item" bug — touch
+          // devices dispatch mousedown at touchstart, before the
+          // OS knows whether it's a tap or a scroll. Split:
+          //   - mousedown: only preventDefault to keep focus on
+          //     the input (so the blur handler doesn't hide the
+          //     dropdown out from under the click).
+          //   - click:     actually pick. Click is suppressed by
+          //     the browser when a scroll gesture moves past its
+          //     slop threshold, which is exactly what we want.
+          row.addEventListener('mousedown', function(e) { e.preventDefault(); });
+          (function(match) {
+            row.addEventListener('click', function(e) {
+              e.preventDefault();
+              pickMatch(match);
+            });
+          })(m);
           resultsEl.appendChild(row);
         })(matches[i]);
       }
