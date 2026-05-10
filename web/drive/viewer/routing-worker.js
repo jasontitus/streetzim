@@ -580,7 +580,16 @@ async function findRouteSpatialFiltered(startNode, endNode, highwayOnly, ctx) {
   ) / 1000;
   // Skip optimal pass for very long highway legs (Toronto→Vancouver
   // pattern). cf. project_routing_perf_canada.md.
-  var skipOptimal = highwayOnly && crowKm > 1500;
+  // Skip the optimal pass on long routes:
+  //   - highway-only > 1500 km (Toronto→Vancouver pattern; established
+  //     threshold from project_routing_perf_canada.md)
+  //   - full-graph    > 800 km (SD→Arcata pattern; SD→Arcata at
+  //     1095 km consistently bails the 200 k-pop full-optimal at ~12 s
+  //     and falls back to greedy anyway, so the optimal pass produces
+  //     zero value. SF→LA at 559 km succeeds in optimal — calibrate
+  //     between if we hit a region where 800 km is too tight.)
+  var skipOptimal = (highwayOnly && crowKm > 1500)
+                 || (!highwayOnly && crowKm > 800);
   if (!skipOptimal) {
     var optimal = await findRouteSpatialAStar(
       startNode, endNode, highwayOnly,

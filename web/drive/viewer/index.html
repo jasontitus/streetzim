@@ -5465,7 +5465,10 @@ function initRouting(map, config) {
       nodesScaled[endNode * 2] / 1e7,
       nodesScaled[endNode * 2 + 1] / 1e7
     ) / 1000;
-    var skipOptimal = highwayOnly && crowKm > 1500;
+    // Skip the optimal pass on long routes (matches the worker — see
+    // routing-worker.js for the threshold rationale).
+    var skipOptimal = (highwayOnly && crowKm > 1500)
+                   || (!highwayOnly && crowKm > 800);
     if (!skipOptimal) {
       var optimal = await findRouteSpatialAStar(
         startNode, endNode, highwayOnly,
