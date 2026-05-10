@@ -2019,6 +2019,25 @@ function renderFindResultsFromStash(map) {
   _renderFindResultsStrip(map, stash);
   _setActiveResult(map, 0, /*flyTo*/false);
 
+  // Pre-warm routing cells for the visible results NOW, while the
+  // user is reading the carousel. Each card is a candidate
+  // "Directions to here" target — by the time they click, the
+  // destination cell should be loaded (vs the 1.7 s wait we saw on
+  // the user's profile). Cap at 12 unique cells (worker dedupes by
+  // cell_id internally) so we don't blow the 12-cell LRU.
+  if (typeof window.__streetzim_prewarmRoutingCells === 'function') {
+    var coords = [];
+    for (var pi = 0; pi < stash.items.length && coords.length < 12; pi++) {
+      var r = stash.items[pi];
+      if (typeof r.a === 'number' && typeof r.o === 'number') {
+        coords.push({ lat: r.a, lon: r.o });
+      }
+    }
+    if (coords.length) {
+      window.__streetzim_prewarmRoutingCells(coords);
+    }
+  }
+
   // After fitBounds settles, capture the anchor view + start watching
   // for camera moves. Any subsequent move shows the "Search this area"
   // pill so the user can re-filter results to the new viewport.
@@ -2612,6 +2631,21 @@ function _detailDistanceLine(r) {
 
 function _detailOpenDirections(r) {
   if (!window.streetzimRouting || !window.streetzimRouting.open) return;
+  // Close the bottom-sheet detail view first — otherwise the routing
+  // panel opens behind it and looks greyed out / unreachable. The
+  // user already chose "Directions"; the detail view has done its
+  // job. The carousel + pin stay on the map below the routing panel
+  // for context.
+  _hidePlaceDetail();
+  // Kick off destination-cell prewarm IMMEDIATELY (before opening
+  // the panel + waiting on GPS resolution) so by the time A* runs
+  // the destination cell is already in cache. Combined with the
+  // GPS-cell prewarm shipped earlier, both endpoints' starting
+  // cells are warm before the route fires.
+  if (typeof window.__streetzim_prewarmRoutingCells === 'function'
+      && typeof r.a === 'number' && typeof r.o === 'number') {
+    window.__streetzim_prewarmRoutingCells([{ lat: r.a, lon: r.o }]);
+  }
   window.streetzimRouting.open();
   window.streetzimRouting.setDest(r.a, r.o, r.n || '');
   var cached = window.__streetzimLastLoc;

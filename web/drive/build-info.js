@@ -1,6 +1,6 @@
 (function(){
-  var info = "2026-05-09 23:37 PDT · 051ecc1fe8-d233731";
+  var info = "2026-05-09 23:41 PDT · 5212b605d7-d234135";
   var el = document.getElementById('build-stamp');
   if (el) el.textContent = info;
-  window.__STREETZIM_BUILD__ = { time: "2026-05-09 23:37 PDT", stamp: "051ecc1fe8-d233731" };
+  window.__STREETZIM_BUILD__ = { time: "2026-05-09 23:41 PDT", stamp: "5212b605d7-d234135" };
 })();
