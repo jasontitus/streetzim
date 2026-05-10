@@ -100,6 +100,11 @@ truncate -s 91646574601 world-data/planet-2026-03-10.osm.pbf
 gcloud storage cp gs://streetzim-cache/search_cache/world.jsonl            search_cache/world.jsonl
 gcloud storage rsync gs://streetzim-cache/wikidata_cache/                  wikidata_cache/ --recursive
 
+# URL liveness cache (optional — build still works without it; record-filtering
+# in create_osm_zim.py treats absence of file as "no records dropped").
+gcloud storage cp gs://streetzim-cache/url_validation_cache.json url_validation_cache.json 2>/dev/null || \
+  echo "(no url_validation_cache.json on GCS — skipping URL liveness filter)"
+
 # Restore PBF mtime to match the cached qids_*.json key. The wikidata_cache.py
 # key encoding is qids_<pbf_name>_<size>_<mtime>.json — if we don't restore the
 # original mtime, the script re-scans the full 85 GB PBF unnecessarily.

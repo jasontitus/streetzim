@@ -78,6 +78,13 @@ REGIONS = [
         "description": "India, Pakistan, Bangladesh, Sri Lanka, Nepal, Bhutan, and the Maldives.",
     },
     {
+        "id": "china",
+        "tier": "continent",
+        "title": "China",
+        "zim_file": "osm-china.zim",
+        "description": "China &mdash; Beijing, Shanghai, Guangzhou, Shenzhen, Chengdu, Chongqing, Xi&rsquo;an, Wuhan, Hangzhou, Hong Kong, and Macau, plus the Great Wall, the Yangtze, the Tibetan Plateau, and the Gobi.",
+    },
+    {
         "id": "australia-nz",
         "tier": "continent",
         "title": "Australia & New Zealand",

@@ -9,7 +9,7 @@ const browser = await puppeteer.launch({
 });
 const page = await browser.newPage();
 page.on('console', m => {
-  console.log('[' + m.type() + ']', m.text().slice(0, 240));
+  console.log('[' + m.type() + ']', m.text().slice(0, 2400));
 });
 page.on('pageerror', e => console.log('[pageerror]', e.message));
 

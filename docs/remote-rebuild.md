@@ -82,11 +82,20 @@ for migration notes).
   godaddy parked / etc.). Field reports of broken links + parking
   pages prompted us to add `cloud/validate_overture_urls.py` (the
   async crawler) and `cloud/url_cache_filter.py` (build-side
-  consumer). Build-side wiring is still TODO:
-    1. Run `cloud/validate_overture_urls.py --zim <last shipped
-       region.zim> --check-parking-body` to populate
-       `url_validation_cache.json` (keep this file in the repo or
-       a shared cache location; it's a few MB).
+  consumer).
+
+  **Cache status (2026-05-10):** the first full crawl is complete.
+  1,292,172 URLs sampled from
+  `osm-california-2026-05-09.zim` — 833,060 alive (64.5%), 459,112
+  dead (35.5%). The 333 MiB `url_validation_cache.json` is on GCS
+  at `gs://streetzim-cache/url_validation_cache.json`. The build
+  VM already pulls it at startup
+  (`cloud/build-vm-startup.sh`, optional — absent file does not
+  fail the build).
+
+  Build-side wiring is still TODO:
+    1. ~~Run `cloud/validate_overture_urls.py` to populate
+       `url_validation_cache.json`.~~ (DONE, see above.)
     2. In `create_osm_zim.py`'s POI emission step, import
        `from cloud.url_cache_filter import load_cache,
        decide_record_action, scrub_record_url` and consult the
@@ -98,6 +107,9 @@ for migration notes).
        `--max-age-days` (default 30) get rechecked, so subsequent
        runs are cheap. New URLs from a fresh Overture parquet
        still need a first crawl pass.
+    4. To refresh the cache mid-rebuild cycle: locally re-run
+       `cloud/validate_overture_urls.py --zim <newest-region>.zim`,
+       then `bash cloud/upload_url_cache.sh` to push to GCS.
 
 ## Prereqs (one-time)
 
