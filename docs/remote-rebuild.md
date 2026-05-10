@@ -46,6 +46,36 @@ for migration notes).
   `create_osm_zim.py`. Existing viewer mitigation
   (`streamFilterChunks` in `resources/viewer/index.html`) avoids the
   OOM crash but is slow until the build emits char-bucketed chunks.
+- **Smaller routing cells: `--spatial-chunk-scale 10` (0.1° cells).**
+  Today California ships with `--spatial-chunk-scale 1` → 113 cells,
+  each ~50 MB on disk. A *single* cold cell-fetch on iPhone over the
+  SW range-read into a 3.3 GB ZIM blob takes ~1.7 s — measured on a
+  1 km route where 0 cells were missed but the in-flight prewarm
+  fetch took the full 1.7 s before A* could proceed.
+  Switching to scale 10 produces ~11 k tiny ~500 KB cells per region.
+  Single-cell short routes drop from ~1.7 s to ~150-300 ms cold;
+  long routes stay roughly even (more cells but each fetches faster
+  and parallelism caps at 6). Touches the `--spatial-chunk-scale`
+  CLI default in `cloud/build_region.sh` and `docs/remote-rebuild.md`'s
+  Path B canonical command (already documents `=10` in the wrapper
+  script at the bottom of the doc; just promote it to the primary
+  build flow). NB: the cells-index header grows roughly linearly in
+  cell count; we've shipped scale-10 builds before (Europe), so this
+  is well-tested.
+- **Street addresses on POI search records.**
+  POI records today carry `{n, t, s, l, ws, p, soc, cat}` (name,
+  type, subtype, location-label, website, phone, socials, category)
+  but no street address. The OSM tags `addr:housenumber` and
+  `addr:street` are dropped at extraction. Surface them as a new
+  field (suggest `f` for "full address" — short JSON keys keep the
+  per-region search-data size from ballooning) on POI records during
+  extraction. Then carousel cards and the place-detail bottom-sheet
+  in `resources/viewer/index.html` can render the address line below
+  the existing category/location subhead. Touches `create_osm_zim.py`
+  POI emission (and possibly the Overture merge path that overwrites
+  some fields). When the field is present in records, the viewer can
+  start rendering it without further coordination — old viewers just
+  ignore the unrecognised field.
 
 ## Prereqs (one-time)
 
