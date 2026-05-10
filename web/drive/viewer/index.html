@@ -3626,6 +3626,11 @@ function placeSearchPin(map, lat, lon, name, enrich) {
   }
   if (any) box.appendChild(contact);
 
+  // NOTE: see project_directions_button_duplicated.md memory.
+  // This is the SEARCH-PIN copy of the Directions button. There's
+  // a near-identical sibling in initWikidataPopups
+  // (~line 4382). Any click-handler change MUST be applied to
+  // BOTH or only one popup-source gets the new behaviour.
   var btn = document.createElement('button');
   btn.className = 'pin-directions';
   btn.textContent = 'Directions to here';
@@ -4377,6 +4382,12 @@ function initWikidataPopups(map, config) {
   // Build the "Directions" button used inside wiki/feature popups.
   // Mirrors the placeSearchPin one so the user gets the same flow
   // regardless of how they discovered the destination.
+  // NOTE: see project_directions_button_duplicated.md memory.
+  // This is the WIKIDATA-FEATURE / FIND-RESULT copy of the
+  // Directions button. There's a near-identical sibling at line
+  // ~3635 (search-pin path). Any click-handler change here MUST
+  // be applied to BOTH copies or only one popup-source gets the
+  // new behaviour.
   function buildDirectionsButton(lat, lon, name) {
     var btn = document.createElement('button');
     btn.className = 'pin-directions';
