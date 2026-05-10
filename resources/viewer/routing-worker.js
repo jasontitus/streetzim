@@ -38,8 +38,13 @@ function _profileReset() {
     phases: [],
     cellHits: 0,
     cellMisses: 0,
-    cellFetchMs: 0,
-    cellParseMs: 0,
+    cellHttpMs: 0,    // fetch() → headers
+    cellBodyMs: 0,    // headers → arrayBuffer() complete
+    cellFetchMs: 0,   // total fetch + body (sum of two above; kept for compat)
+    cellParseMs: 0,   // parseRoutingCell time (typed-array views)
+    cellBytes: 0,     // total bytes loaded across misses
+    prewarmCells: 0,  // # of cells fired off by corridor pre-warm
+    prewarmMs: 0,     // wall time spent kicking off the prefetches
     yields: 0,
     yieldMs: 0,
     edgeReqs: 0,
@@ -61,7 +66,12 @@ function _profileEmit(routeOk, totalCoords) {
     cellHits: _profile.cellHits,
     cellMisses: _profile.cellMisses,
     cellFetchMs: _profile.cellFetchMs,
+    cellHttpMs: _profile.cellHttpMs,
+    cellBodyMs: _profile.cellBodyMs,
     cellParseMs: _profile.cellParseMs,
+    cellBytes: _profile.cellBytes,
+    prewarmCells: _profile.prewarmCells,
+    prewarmMs: _profile.prewarmMs,
     edgeReqs: _profile.edgeReqs,
     yields: _profile.yields,
     yieldMs: _profile.yieldMs,
@@ -328,6 +338,13 @@ function parseRoutingCellsIndex(buffer) {
     var id = cellKeyToId.get(k.lat + ',' + k.lon);
     return id === undefined ? -1 : id;
   };
+  // Used by the corridor pre-warm — sample arbitrary lat/lon, find
+  // the cell that owns that point, prefetch in parallel before A*.
+  idx.cellForCoords = function(latE7, lonE7) {
+    var k = cellOf(latE7, lonE7);
+    var id = cellKeyToId.get(k.lat + ',' + k.lon);
+    return id === undefined ? -1 : id;
+  };
   return idx;
 }
 
@@ -486,13 +503,21 @@ SpatialGraph.prototype._ensureCell = function(cid) {
   }
   if (_profile) _profile.cellMisses++;
   var fetchT0 = nowMs();
+  var bodyT0 = 0;
   var p = fetch(BASE_URL + self._cellPath(cid))
     .then(function(r) {
       if (!r.ok) throw new Error('cell HTTP ' + r.status + ' for ' + cid);
+      // HTTP-response time: from fetch() to receiving headers. The
+      // body still has to stream in via arrayBuffer(); time that
+      // separately so we can tell SW round-trip from blob-slice cost.
+      if (_profile) _profile.cellHttpMs += nowMs() - fetchT0;
+      bodyT0 = nowMs();
       return r.arrayBuffer();
     })
     .then(function(buf) {
+      if (_profile) _profile.cellBodyMs += nowMs() - bodyT0;
       if (_profile) _profile.cellFetchMs += nowMs() - fetchT0;
+      if (_profile) _profile.cellBytes += buf.byteLength;
       var parseT0 = nowMs();
       var cell = parseRoutingCell(buf);
       if (_profile) _profile.cellParseMs += nowMs() - parseT0;
@@ -829,10 +854,45 @@ async function findRoute(startNode, endNode, ctx) {
     }
   }
 
+  // Pre-warm the corridor: sample points along the great-circle line
+  // and fire the cell fetches in parallel BEFORE A* starts. _ensureCell
+  // de-dupes via _inFlight, so when A* later expands into one of these
+  // cells it awaits the existing fetch promise instead of starting a
+  // sequential round-trip. On a cold cache this collapses ~N×720ms of
+  // per-cell I/O into one parallel ~720ms wave.
+  _prewarmCorridor(startLat, startLon, endLat, endLon, crow);
+
   var routeResult = await findRouteSpatial(startNode, endNode, ctx);
   if (!routeResult && useTwoPass) {
     routeResult = await findRouteSpatialTwoPass(startNode, endNode, ctx);
   }
   graph.compact(8);
   return routeResult;
+}
+
+function _prewarmCorridor(startLat, startLon, endLat, endLon, crowM) {
+  if (!graph || !graph._index || !graph._index.cellForCoords) return;
+  var prewarmT0 = nowMs();
+  // Sample density: one sample per ~25 km along the line, with a
+  // floor of 20 samples for short routes. Dedupe by cell_id, so the
+  // actual fetch count caps at the number of cells the line crosses.
+  var samples = Math.max(20, Math.ceil((crowM / 1000) / 25));
+  var seen = new Set();
+  for (var i = 0; i <= samples; i++) {
+    var t = i / samples;
+    var lat = startLat + (endLat - startLat) * t;
+    var lon = startLon + (endLon - startLon) * t;
+    var latE7 = Math.round(lat * 1e7);
+    var lonE7 = Math.round(lon * 1e7);
+    var cid = graph._index.cellForCoords(latE7, lonE7);
+    if (cid < 0 || seen.has(cid)) continue;
+    seen.add(cid);
+    if (graph._cells.has(cid)) continue;
+    // Kick off the fetch — A* awaits via _inFlight when it gets there.
+    graph._ensureCell(cid).catch(function() { /* ignore, A* will retry */ });
+  }
+  if (_profile) {
+    _profile.prewarmCells = seen.size;
+    _profile.prewarmMs = nowMs() - prewarmT0;
+  }
 }

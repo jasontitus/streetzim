@@ -5723,12 +5723,18 @@ function initRouting(map, config) {
     if (m.type === 'route-profile') {
       // Format the worker's profile summary into a single console.warn
       // line so smoke harness + devtools both surface it consistently.
+      var mb = (m.cellBytes || 0) / 1024 / 1024;
       var line = '[route-profile] ' + (m.ok ? 'OK' : 'FAIL')
         + ' total=' + m.totalMs.toFixed(0) + 'ms'
         + ' crow=' + (m.crowKm || 0).toFixed(0) + 'km'
         + ' coords=' + (m.coords || 0)
-        + ' cells=' + m.cellHits + 'h/' + m.cellMisses + 'm/'
-        + (m.cellFetchMs || 0).toFixed(0) + 'ms'
+        + ' cells=' + m.cellHits + 'h/' + m.cellMisses + 'm'
+        + ' (' + mb.toFixed(1) + 'MB,'
+        + ' http=' + (m.cellHttpMs || 0).toFixed(0) + 'ms'
+        + ' body=' + (m.cellBodyMs || 0).toFixed(0) + 'ms'
+        + ' parse=' + (m.cellParseMs || 0).toFixed(0) + 'ms)'
+        + ' prewarm=' + (m.prewarmCells || 0)
+        + '/' + (m.prewarmMs || 0).toFixed(0) + 'ms'
         + ' edgeReqs=' + m.edgeReqs
         + ' yields=' + m.yields + '/' + (m.yieldMs || 0).toFixed(0) + 'ms';
       for (var pi = 0; pi < (m.phases || []).length; pi++) {
