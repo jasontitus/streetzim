@@ -111,6 +111,11 @@
     z-index: 2; width: 340px; max-width: calc(100% - 100px);
     font-family: var(--ui-font);
   }
+  /* Hidden when the find-results "Search this area" pill is on
+     screen — the two affordances would otherwise compete for the
+     same top-center band. Class-based with !important so a stray
+     inline display from a third party can't beat it. */
+  #search-container.streetzim-hidden { display: none !important; }
   #search-input {
     width: 100%; box-sizing: border-box;
     padding: 10px 36px 10px 14px; border: none; border-radius: var(--radius);
@@ -1083,6 +1088,17 @@ fetchConfig(1)
         lon: pos.coords.longitude,
         ts: Date.now()
       };
+      // Pre-warm the routing cell containing the user's GPS so the
+      // first "Directions to here" doesn't pay a cold cell-fetch on
+      // its starting cell. The bridge is exposed by initRouting; if
+      // routing hasn't initialised yet (very early in load), the
+      // hook below at worker-ready replays this.
+      if (typeof window.__streetzim_prewarmRoutingCells === 'function') {
+        window.__streetzim_prewarmRoutingCells([{
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+        }]);
+      }
     });
     map.addControl(geolocateCtl, 'bottom-right');
 
@@ -2140,12 +2156,13 @@ function _showSearchAreaPill(map) {
   // While the pill is on screen it pretty much owns the top-center
   // band — hide the main search input so the two affordances aren't
   // crowding each other / drawing the user's eye away from the
-  // result-set-on-map flow they're actively in.
+  // result-set-on-map flow they're actively in. Class-based so the
+  // !important rule beats any stray inline display (and so the
+  // hide survives if some other code rewrites style.display).
   var searchContainer = document.getElementById('search-container');
-  if (searchContainer && !_findResultsState._searchHidden) {
+  if (searchContainer) {
+    searchContainer.classList.add('streetzim-hidden');
     _findResultsState._searchHidden = true;
-    _findResultsState._searchPrevDisplay = searchContainer.style.display;
-    searchContainer.style.display = 'none';
   }
   var btn = document.createElement('button');
   btn.id = 'find-search-area-btn';
@@ -2191,15 +2208,13 @@ function _hideSearchAreaPill() {
   setTimeout(function() {
     if (btn.parentNode) btn.parentNode.removeChild(btn);
   }, 250);
-  // Restore the main search container to whatever display value it
-  // had before we hid it (most often '' = inherits from CSS).
+  // Restore the main search container.
   if (_findResultsState._searchHidden) {
     var searchContainer = document.getElementById('search-container');
     if (searchContainer) {
-      searchContainer.style.display = _findResultsState._searchPrevDisplay || '';
+      searchContainer.classList.remove('streetzim-hidden');
     }
     _findResultsState._searchHidden = false;
-    _findResultsState._searchPrevDisplay = null;
   }
 }
 
@@ -3169,13 +3184,9 @@ function clearFindResults() {
   _findResultsState.searchAreaBtn = null;
   // Restore the main search if we hid it for the pill.
   if (_findResultsState._searchHidden) {
-    var searchContainer = document.getElementById('search-container');
-    if (searchContainer) {
-      searchContainer.style.display =
-        _findResultsState._searchPrevDisplay || '';
-    }
+    var sc = document.getElementById('search-container');
+    if (sc) sc.classList.remove('streetzim-hidden');
     _findResultsState._searchHidden = false;
-    _findResultsState._searchPrevDisplay = null;
   }
   _hidePlaceDetail();
   if (_findResultsState.map) {
@@ -5878,6 +5889,14 @@ function initRouting(map, config) {
           window.__streetzim_routingWorkerReady = true;
           __routingWorker.removeEventListener('message', onMsg);
           __routingWorker.addEventListener('message', _routingWorkerOnMessage);
+          // Replay any GPS that fired before the worker was ready —
+          // the geolocate handler tries to prewarm but a no-op'd if
+          // the bridge wasn't installed yet.
+          var loc = window.__streetzimLastLoc;
+          if (loc && typeof loc.lat === 'number'
+              && typeof window.__streetzim_prewarmRoutingCells === 'function') {
+            window.__streetzim_prewarmRoutingCells([{ lat: loc.lat, lon: loc.lon }]);
+          }
           resolve(true);
         } else if (m.type === 'init-error') {
           console.warn('[streetzim] routing worker init failed:', m.error);
@@ -5978,6 +5997,19 @@ function initRouting(map, config) {
   // Keep on window for any host (drive mode, popup helpers) that
   // wants to short-circuit a stale route without restarting search.
   window.__streetzim_cancelInFlightRoute = cancelInFlightRoute;
+
+  // Pre-warm worker-side cells around a list of lat/lon points. Used
+  // at page-load (cell at user's GPS) so the FIRST route doesn't pay
+  // the ~1.7 s cold-fetch penalty on its starting cell. Safe to call
+  // multiple times; the worker's _ensureCell de-dupes via _inFlight.
+  function prewarmRoutingCells(coords) {
+    if (!__routingWorker) return;
+    if (!coords || !coords.length) return;
+    try {
+      __routingWorker.postMessage({ cmd: 'prewarmCells', coords: coords });
+    } catch (e) {}
+  }
+  window.__streetzim_prewarmRoutingCells = prewarmRoutingCells;
 
   function findRouteViaWorker(startNode, endNode) {
     if (!__routingWorker) return Promise.reject(new Error('worker not ready'));

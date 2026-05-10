@@ -91,8 +91,38 @@ self.onmessage = function(e) {
     case 'getCoords': handleGetCoords(msg); break;
     case 'compact':   handleCompact(msg);   break;
     case 'cancel':    cancelledRoutes.add(msg.id); break;
+    case 'prewarmCells': handlePrewarmCells(msg); break;
   }
 };
+
+// Prewarm a list of cells covering caller-supplied lat/lon points.
+// Used at page-load time to warm the cells around the user's GPS
+// location so the first route doesn't pay the ~1.7s cold-fetch
+// penalty on its starting cell. _ensureCell de-dupes via _inFlight,
+// so this is safe to call repeatedly (and idempotent w.r.t. the
+// corridor pre-warm fired at route start).
+function handlePrewarmCells(msg) {
+  if (!graph || !graph._index || !graph._index.cellForCoords) return;
+  var coords = msg.coords || [];
+  var seen = new Set();
+  var fired = 0;
+  for (var i = 0; i < coords.length; i++) {
+    var c = coords[i];
+    if (!c || typeof c.lat !== 'number' || typeof c.lon !== 'number') continue;
+    var latE7 = Math.round(c.lat * 1e7);
+    var lonE7 = Math.round(c.lon * 1e7);
+    var cid = graph._index.cellForCoords(latE7, lonE7);
+    if (cid < 0 || seen.has(cid)) continue;
+    seen.add(cid);
+    if (graph._cells.has(cid)) continue;
+    graph._ensureCell(cid).catch(function() {}); // best-effort
+    fired++;
+  }
+  if (fired > 0) {
+    console.warn('[routing-worker] prewarmed ' + fired + ' cells around '
+                 + coords.length + ' coords');
+  }
+}
 
 function handleInit(msg) {
   BASE_URL = msg.baseUrl || '';
