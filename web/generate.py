@@ -271,6 +271,20 @@ REGIONS = [
         "description": "The Hawaiian Islands &mdash; Honolulu, Hilo, Kahului; O&lsquo;ahu, Maui, Hawai&lsquo;i (Big Island), Kaua&lsquo;i, Moloka&lsquo;i, and Lāna&lsquo;i; Mauna Kea, Mauna Loa, Haleakalā, Pearl Harbor, and the Nā Pali coast.",
     },
     {
+        "id": "new-york-state",
+        "tier": "local",
+        "title": "New York State",
+        "zim_file": "osm-new-york-state.zim",
+        "description": "All of New York State &mdash; New York City, Albany, Buffalo, Rochester, Syracuse, Yonkers; Long Island, the Hudson Valley, the Catskills, the Adirondacks, the Finger Lakes, Niagara Falls, and the Thousand Islands.",
+    },
+    {
+        "id": "florida",
+        "tier": "local",
+        "title": "Florida",
+        "zim_file": "osm-florida.zim",
+        "description": "All of Florida &mdash; Miami, Orlando, Tampa, Jacksonville, St. Petersburg, Tallahassee, Fort Lauderdale; the Everglades, the Keys, Cape Canaveral, the Atlantic and Gulf coasts, and Walt Disney World.",
+    },
+    {
         "id": "nyc-metro",
         "tier": "local",
         "title": "New York Metro",
