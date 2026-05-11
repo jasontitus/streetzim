@@ -1327,6 +1327,18 @@ function pickNearResult(r) {
   state.originMode = 'custom';
   state.originLabel = r.n;
   els.near.value = r.n;
+  // When the user explicitly pins a near-origin, drop the
+  // "Limit to map area" filter. The implicit viewport from
+  // index.html is almost certainly stale relative to the user's
+  // new choice (e.g. user types "Cancún" while map is parked on
+  // Caribbean center → otherwise mapArea filter strips all
+  // Mexican results and we surface 600+ km Cayman gas stations
+  // as "nearest to Cancún"). The user can re-tick the box to
+  // re-engage map-area filtering.
+  if (state.mapAreaOn) {
+    state.mapAreaOn = false;
+    if (els.mapAreaCheck) els.mapAreaCheck.checked = false;
+  }
   hideNearResults();
   rerunQuery();
 }
