@@ -23,6 +23,88 @@ flow is the body.
 
 ---
 
+## URGENT — chip-sort regression baked into every shipped ZIM (2026-05-11)
+
+Commit `db560e1` fixes a Find-page chip-sort bug in
+`resources/viewer/places.html`. **The PWA at streetzim.web.app/drive/
+is already fixed** (Firebase served the new viewer; SW refresh delivers
+it on next page load). **Kiwix-native readers — Kiwix Desktop, iOS,
+Android, anything that opens a `.zim` directly — see the buggy viewer
+baked into every ZIM uploaded before this commit.** Every region's
+chip-sort can produce wildly wrong "first result" distances when the
+user pins an origin via the Near input.
+
+### What the bug does
+
+`places.html` auto-ticks "Limit to map area" on first render when it
+finds a stashed viewport from `index.html`. `pickNearResult` then sets
+`state.origin` to the typed city but **doesn't update the viewport
+filter**. `applyResults` filters records to the (stale) viewport
+BEFORE sort-by-distance — so typing "Cancún" + clicking the Gas chip
+on CAC produced "Pemex 941 km in the Cayman Islands" as the nearest
+gas station, because the default viewport excluded every Mexican
+record. The auto-fallback ("if filter yields zero, expand") doesn't
+fire when the viewport has *some* matches.
+
+Verified shapes:
+
+| Region | First Gas result before fix | After fix |
+|---|---|---|
+| central-america-caribbean | 941 km from Cancún | **26 m** (Pemex) |
+| iran                      | 103 km from Tehran | **1 m** |
+| silicon-valley            | 8.4 km from SF     | **71 m** |
+| washington-dc             | 15 m from Washington | 15 m (unchanged — origin already on top) |
+
+**Workaround for Kiwix users on existing ZIMs**: untick "Limit to map
+area" before clicking the chip, or pan the map to the typed city
+before searching. Other Find paths (typing a query, GPS-pinned origin,
+direct chip without Near) are unaffected.
+
+### ZIMs needing rebuild
+
+All 18 ZIMs uploaded this rebuild cycle are pre-fix:
+
+**Locally rebuilt today (8 — `osm-*-2026-05-10.zim` or `-2026-05-11.zim`):**
+washington-dc, silicon-valley, colorado, baltics, hispaniola, iran,
+texas, central-america-caribbean
+
+**Remote-box rebuilt this cycle (10 — `osm-*-2026-05-11.zim`):**
+russia (in progress, no ZIM up yet), iceland, korea-mongolia, caucasus,
+turkey, south-korea, hawaii, nyc-metro, chicago-metro, greater-la
+
+Plus every pre-existing region not rebuilt this cycle (~20 more) also
+has the buggy viewer baked in, but those are old enough that they'll
+get cleaned up in the natural rebuild cadence.
+
+### Action on the remote box
+
+The remote box should rebuild all 18 fresh-this-cycle regions to clear
+the regression for Kiwix-native users. The build pipeline already pulls
+the latest `resources/viewer/places.html` into every ZIM (no special
+flag needed — just `git pull` before each build).
+
+The build host can use a reroll path (preserves OSM+Overture data,
+re-emits the viewer asset) instead of a full rebuild to save time —
+the bug is purely in the JS, no upstream data needs to change. See
+"Path A — REROLL" at the bottom of this doc for the syntax; passing
+`--rebuild-viewer-only` (if implemented) or just rerunning the chunked
+copy-with-new-resources flow is faster than a full PBF parse.
+
+If reroll isn't viable for some regions, full rebuilds in any order
+also fix it — just longer.
+
+### Side effect on the smoke harness
+
+Commit `51ee80d` bumped `NEAR_THRESHOLD_KM` from 50 → 250 km, with the
+comment "URL-liveness filter is dropping POIs near major cities". That
+reasoning was wrong — the URL filter wasn't the cause; the
+viewport-filter bug was. Now that the real bug is fixed, the threshold
+could safely return to 50 km for any future regression to surface
+immediately. Left at 250 for now; revisit when the smoke is next
+touched.
+
+---
+
 ## Pending changes to apply before the next rebuild
 
 These are repo-wide changes that should land in the same PR as the
