@@ -229,6 +229,15 @@ async function main() {
     const u = req.url();
     if (!u.includes('/drive/') && !u.includes(ZIM_URL)) return;
     const reason = req.failure() && req.failure().errorText;
+    // net::ERR_ABORTED is MapLibre cancelling stale tile requests when
+    // the viewport changes mid-fetch (panEnd, zoom transitions). Not a
+    // real failure — the new viewport's tiles will be requested fresh.
+    // Treating these as errors made route-perf flake whenever fitBounds
+    // animated through multiple zoom levels.
+    if (reason === 'net::ERR_ABORTED') {
+      console.log('  · req cancelled [' + currentStep + ']:', u);
+      return;
+    }
     console.log('  ! reqfail [' + currentStep + ']:', u, reason);
     consoleErrs.push(currentStep + ': reqfail: ' + u + ' ' + reason);
   });
@@ -538,6 +547,17 @@ async function main() {
   try {
     await page.evaluate(() => window.streetzimRouting.open());
     await page.waitForSelector('#routing-origin-input', { timeout: 10_000 });
+    // Step 4's dir-href can include a far-away origin (the hardcoded
+    // Palo Alto seed), which on a small ZIM (DC) snaps to the nearest
+    // in-bbox node, succeeds at routing, fitBounds zooms out, and the
+    // panel auto-minimizes when its height exceeds 50% of viewport —
+    // hiding #routing-body. The origin input is then in-DOM but has
+    // no layout box, so page.click fails with "Node is either not
+    // clickable". Defensively un-minimize before clicking.
+    await page.evaluate(() => {
+      const p = document.getElementById('routing-panel');
+      if (p && p.classList.contains('minimized')) p.classList.remove('minimized');
+    });
     await page.click('#routing-origin-input');
     await page.evaluate(() => {
       const i = document.getElementById('routing-origin-input');

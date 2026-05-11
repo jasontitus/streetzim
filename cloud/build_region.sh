@@ -66,9 +66,15 @@ fi
 #    content-corrupt.
 # ------------------------------------------------------------------
 log "preflight..."
+PREFLIGHT_EXTRA=()
+if [ "${SKIP_TERRAIN_PREFLIGHT:-0}" = "1" ]; then
+    PREFLIGHT_EXTRA+=(--skip-terrain)
+    log "  (SKIP_TERRAIN_PREFLIGHT=1 — audit-content false-positives bypassed)"
+fi
 if ! ./venv312/bin/python3 cloud/preflight.py \
         --bbox="$bbox" --name "$id" \
         --zooms 0-12 --workers 16 --audit-content \
+        "${PREFLIGHT_EXTRA[@]}" \
         > "${id}-preflight.log" 2>&1; then
     echo "[FATAL] preflight failed for $id — see ${id}-preflight.log"
     echo "        (some failures can be post-fixed; see README)"
@@ -91,6 +97,16 @@ if [ -s "$vrt32k" ]; then
     LOW_ZOOM_VRT_ARG=(--low-zoom-world-vrt "$vrt32k")
 fi
 
+# URL liveness cache (commit c950da8 — drop POIs with dead websites).
+# Auto-detect url_validation_cache.json in repo root; default policy
+# drop-record. Env var URL_CACHE_POLICY overrides ("drop-record" or
+# "scrub-only"). Absent file means no filtering, same as before.
+URL_CACHE_ARG=()
+if [ -s "url_validation_cache.json" ]; then
+    URL_CACHE_ARG=(--url-cache url_validation_cache.json \
+                   --url-cache-policy "${URL_CACHE_POLICY:-drop-record}")
+fi
+
 log "build start bbox=$bbox name=\"$name\""
 rm -f "$out"
 if ! ./venv312/bin/python3 create_osm_zim.py \
@@ -107,6 +123,7 @@ if ! ./venv312/bin/python3 create_osm_zim.py \
         --split-hot-search-chunks-mb 10 \
         --split-find-chips \
         "${LOW_ZOOM_VRT_ARG[@]}" \
+        "${URL_CACHE_ARG[@]}" \
         --output "$out" \
         --keep-temp \
         > "$log" 2>&1; then
