@@ -85,6 +85,13 @@ REGIONS = [
         "description": "China &mdash; Beijing, Shanghai, Guangzhou, Shenzhen, Chengdu, Chongqing, Xi&rsquo;an, Wuhan, Hangzhou, Hong Kong, and Macau, plus the Great Wall, the Yangtze, the Tibetan Plateau, and the Gobi.",
     },
     {
+        "id": "russia",
+        "tier": "continent",
+        "title": "Russia",
+        "zim_file": "osm-russia.zim",
+        "description": "Russia &mdash; Moscow, Saint Petersburg, Novosibirsk, Yekaterinburg, Kazan, Nizhny Novgorod, Sochi, Vladivostok; the Volga, the Urals, the Caucasus, Lake Baikal; the Trans-Siberian Railway from the Baltic to the Sea of Japan.",
+    },
+    {
         "id": "australia-nz",
         "tier": "continent",
         "title": "Australia & New Zealand",
@@ -119,6 +126,20 @@ REGIONS = [
         "title": "Central Asia",
         "zim_file": "osm-central-asia.zim",
         "description": "Central Asia &mdash; Kazakhstan, Uzbekistan, Turkmenistan, Tajikistan, Kyrgyzstan, Afghanistan, and the Caucasus. Almaty, Tashkent, Bishkek, Ashgabat, Dushanbe, Kabul, the Pamirs, and the Silk Road.",
+    },
+    {
+        "id": "korea-mongolia",
+        "tier": "multi-country",
+        "title": "Korea & Mongolia",
+        "zim_file": "osm-korea-mongolia.zim",
+        "description": "The Korean Peninsula and Mongolia &mdash; Seoul, Busan, Daegu, Incheon, Pyongyang, Ulaanbaatar, Darkhan; the Gobi, the Khangai mountains, the DMZ, and the Sea of Japan coast.",
+    },
+    {
+        "id": "caucasus",
+        "tier": "multi-country",
+        "title": "Caucasus",
+        "zim_file": "osm-caucasus.zim",
+        "description": "The Caucasus &mdash; Georgia, Armenia, and Azerbaijan, with the southern Russian Caucasus and eastern Turkey. Tbilisi, Yerevan, Baku, Batumi, the Greater Caucasus range, Mount Elbrus, Lake Sevan, and the Caspian coast.",
     },
     {
         "id": "central-america-caribbean",
@@ -184,6 +205,27 @@ REGIONS = [
         "zim_file": "osm-egypt.zim",
         "description": "Egypt &mdash; Cairo, Alexandria, Giza, Luxor, Aswan, the Nile Valley, Sinai Peninsula, and the Red Sea coast.",
     },
+    {
+        "id": "iceland",
+        "tier": "country",
+        "title": "Iceland",
+        "zim_file": "osm-iceland.zim",
+        "description": "Iceland &mdash; Reykjavík, Akureyri, the Ring Road, Þingvellir, Geysir, Gullfoss, Vík, Jökulsárlón, Snæfellsnes, the Westfjords, and Vatnajökull.",
+    },
+    {
+        "id": "turkey",
+        "tier": "country",
+        "title": "Turkey",
+        "zim_file": "osm-turkey.zim",
+        "description": "Turkey &mdash; Istanbul, Ankara, İzmir, Bursa, Antalya, Konya, Gaziantep, Trabzon, Cappadocia, Pamukkale, Ephesus, the Bosporus, the Aegean coast, and the Anatolian plateau.",
+    },
+    {
+        "id": "south-korea",
+        "tier": "country",
+        "title": "South Korea",
+        "zim_file": "osm-south-korea.zim",
+        "description": "South Korea &mdash; Seoul, Busan, Incheon, Daegu, Daejeon, Gwangju, Suwon, Jeju Island, the DMZ, Seoraksan, and Hallasan.",
+    },
     # ── United States — sub-regions ──────────────────────────────────
     {
         "id": "east-coast-us",
@@ -220,6 +262,34 @@ REGIONS = [
         "title": "California",
         "zim_file": "osm-california.zim",
         "description": "All of California &mdash; from the Oregon border to Mexico, the Pacific coast to the Sierra Nevada.",
+    },
+    {
+        "id": "hawaii",
+        "tier": "local",
+        "title": "Hawaii",
+        "zim_file": "osm-hawaii.zim",
+        "description": "The Hawaiian Islands &mdash; Honolulu, Hilo, Kahului; O&lsquo;ahu, Maui, Hawai&lsquo;i (Big Island), Kaua&lsquo;i, Moloka&lsquo;i, and Lāna&lsquo;i; Mauna Kea, Mauna Loa, Haleakalā, Pearl Harbor, and the Nā Pali coast.",
+    },
+    {
+        "id": "nyc-metro",
+        "tier": "local",
+        "title": "New York Metro",
+        "zim_file": "osm-nyc-metro.zim",
+        "description": "The NYC tri-state metropolitan area &mdash; Manhattan, Brooklyn, Queens, the Bronx, Staten Island, Long Island, Westchester, northern New Jersey, and southwestern Connecticut.",
+    },
+    {
+        "id": "chicago-metro",
+        "tier": "local",
+        "title": "Chicago Metro",
+        "zim_file": "osm-chicago-metro.zim",
+        "description": "Greater Chicago &mdash; the city and Cook, DuPage, Lake, Will, Kane, McHenry counties, plus northwest Indiana and southeast Wisconsin along Lake Michigan.",
+    },
+    {
+        "id": "greater-la",
+        "tier": "local",
+        "title": "Greater Los Angeles",
+        "zim_file": "osm-greater-la.zim",
+        "description": "The Los Angeles metropolitan area &mdash; LA, Long Beach, Anaheim, Santa Monica, Pasadena, Riverside, San Bernardino, Orange County, and the Inland Empire, plus Catalina Island and the Channel Islands.",
     },
     {
         "id": "texas",
