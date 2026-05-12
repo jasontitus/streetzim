@@ -271,6 +271,13 @@ REGIONS = [
         "description": "The Hawaiian Islands &mdash; Honolulu, Hilo, Kahului; O&lsquo;ahu, Maui, Hawai&lsquo;i (Big Island), Kaua&lsquo;i, Moloka&lsquo;i, and Lāna&lsquo;i; Mauna Kea, Mauna Loa, Haleakalā, Pearl Harbor, and the Nā Pali coast.",
     },
     {
+        "id": "alaska",
+        "tier": "local",
+        "title": "Alaska",
+        "zim_file": "osm-alaska.zim",
+        "description": "Alaska &mdash; Anchorage, Fairbanks, Juneau, Sitka, Ketchikan, Nome, Barrow; Denali, the Brooks Range, the Aleutians, the Inside Passage, Prince William Sound, the Yukon, and the Arctic.",
+    },
+    {
         "id": "new-york-state",
         "tier": "local",
         "title": "New York State",

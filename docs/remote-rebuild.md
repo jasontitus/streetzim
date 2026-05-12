@@ -23,6 +23,41 @@ flow is the body.
 
 ---
 
+## URGENT — Hawaii map opens on empty ocean (2026-05-12)
+
+User feedback: opening `osm-hawaii-*.zim` in Kiwix Desktop "shows no
+map." Root cause: Hawaii's bbox `[-178.5, 18.5, -154.5, 28.5]` includes
+the uninhabited NW Hawaiian Islands, so the geometric centroid is
+`(-166.5, 23.5)` — mid-Pacific between Midway and Kauai. At z6 the
+user sees only open ocean. The vector tiles, satellite, and terrain
+are all present (728 K tiles, validated); the bug is purely the
+initial-view default in `map-config.json`.
+
+### Fix (build flag)
+
+`create_osm_zim.py` now accepts `--map-center "LON,LAT"` and
+`--map-zoom Z` overrides. For Hawaii, build with:
+
+    --map-center "-157.5,20.7" --map-zoom 7
+
+That centers the initial view between Oahu and the Big Island, with
+all main islands visible at z7. NWHI atolls remain in the ZIM and pan
+into view if the user moves the map west.
+
+### Action on the remote box
+
+Full rebuild of Hawaii with the override above. The same data caches
+apply — only the map-config.json output changes.
+
+`cloud/repackage_zim.py` also got the same flag pair, but the python
+repackage path can't write libzim's X namespace, so the rebuilt xapian
+ends up empty (the in-viewer Find still works via search-data/*.json,
+but Kiwix Desktop's top-bar search returns no hits). A full rebuild
+via `create_osm_zim.py` is the only way to get both the map-center fix
+**and** a working fulltext index.
+
+---
+
 ## URGENT — chip-sort regression baked into every shipped ZIM (2026-05-11)
 
 Commit `db560e1` fixes a Find-page chip-sort bug in

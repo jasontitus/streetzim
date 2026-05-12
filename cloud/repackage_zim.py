@@ -481,7 +481,9 @@ def repackage(src_path: str, dst_path: str,
               split_find_chips: bool = False,
               rewrite_search_links: bool = True,
               drop_llm_bundle: bool = True,
-              chip_split_threshold_mb: int = 10) -> int:
+              chip_split_threshold_mb: int = 10,
+              map_center: tuple[float, float] | None = None,
+              map_zoom: int | None = None) -> int:
     from libzim.reader import Archive
     from libzim.writer import (
         Creator, Item, StringProvider, FileProvider, Hint,
@@ -768,6 +770,21 @@ def repackage(src_path: str, dst_path: str,
             if swap_viewer and path in replacements:
                 modified_content = replacements[path]
                 swapped += 1
+            # Override map-config.json center/zoom — fixes regions whose
+            # bbox centroid lands in empty water (e.g. Hawaii's bbox
+            # spans the uninhabited NW Hawaiian Islands so the centroid
+            # is mid-Pacific between Midway and Kauai, rendering as
+            # blank ocean on first open).
+            if (map_center is not None or map_zoom is not None) \
+                    and path == "map-config.json":
+                src_bytes = bytes(item.content)
+                cfg = json.loads(src_bytes.decode("utf-8"))
+                if map_center is not None:
+                    cfg["center"] = [map_center[0], map_center[1]]
+                if map_zoom is not None:
+                    cfg["zoom"] = map_zoom
+                modified_content = json.dumps(cfg, indent=2).encode("utf-8")
+                size = len(modified_content)
             # Optionally swap terrain tiles for the filesystem version.
             # Used after ``cloud/fix_stale_terrain_tiles.py`` regenerates
             # cached tiles — ``--refresh-terrain-tiles terrain_cache``
@@ -1335,7 +1352,18 @@ def main() -> int:
                         "Default 10 — Japan's restaurants chip was 164 MB "
                         "and Canada's shops 137 MB without sub-bucketing, "
                         "tight against iOS heap. Set to 0 to disable.")
+    p.add_argument("--map-center", metavar="LON,LAT", default=None,
+                   help="Override map-config.json 'center'. Fixes regions "
+                        "whose bbox centroid lands on empty water "
+                        "(e.g. Hawaii). Format: '-157.5,21.0'.")
+    p.add_argument("--map-zoom", type=int, default=None, metavar="Z",
+                   help="Override map-config.json 'zoom' to pair with "
+                        "--map-center.")
     args = p.parse_args()
+    map_center = None
+    if args.map_center:
+        lon, lat = (float(x) for x in args.map_center.split(","))
+        map_center = (lon, lat)
     return repackage(args.src, args.dst,
                      swap_viewer=not args.no_swap_viewer,
                      uncompress_graph=not args.no_uncompress_graph,
@@ -1348,7 +1376,9 @@ def main() -> int:
                      split_find_chips=args.split_find_chips,
                      rewrite_search_links=not args.no_rewrite_search_links,
                      drop_llm_bundle=not args.include_llm_bundle,
-                     chip_split_threshold_mb=args.chip_split_threshold_mb)
+                     chip_split_threshold_mb=args.chip_split_threshold_mb,
+                     map_center=map_center,
+                     map_zoom=args.map_zoom)
 
 
 if __name__ == "__main__":

@@ -5520,6 +5520,15 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--geofabrik", help="Geofabrik download path (e.g., europe/liechtenstein)")
     parser.add_argument("--pbf", help="Path to local OSM PBF file")
     parser.add_argument("--bbox", help="Bounding box: minlon,minlat,maxlon,maxlat")
+    parser.add_argument("--map-center", metavar="LON,LAT",
+                        help="Override initial map center. Default = bbox "
+                             "centroid, which lands in empty water for "
+                             "regions like Hawaii whose bbox includes the "
+                             "uninhabited NW Hawaiian Islands. Format: "
+                             "'-157.5,20.7'.")
+    parser.add_argument("--map-zoom", type=int, metavar="Z",
+                        help="Override initial map zoom (default = derived "
+                             "from bbox extent).")
     parser.add_argument("--name", help="Name for the map (shown in Kiwix)")
     parser.add_argument("--output", "-o", help="Output ZIM file path")
     parser.add_argument("--keep-temp", action="store_true", help="Keep temporary files")
@@ -6301,6 +6310,16 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         else:
             center = [0, 0]
             zoom = 2
+        if args.map_center:
+            try:
+                lon, lat = (float(x) for x in args.map_center.split(","))
+                center = [lon, lat]
+            except (ValueError, TypeError) as e:
+                raise SystemExit(
+                    f"--map-center {args.map_center!r} must be 'LON,LAT': {e}"
+                )
+        if args.map_zoom is not None:
+            zoom = args.map_zoom
 
         import time as _time
         map_config = {
