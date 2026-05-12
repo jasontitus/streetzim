@@ -74,7 +74,7 @@ fi
 if ! ./venv312/bin/python3 cloud/preflight.py \
         --bbox="$bbox" --name "$id" \
         --zooms 0-12 --workers 16 --audit-content \
-        "${PREFLIGHT_EXTRA[@]}" \
+        ${PREFLIGHT_EXTRA[@]+"${PREFLIGHT_EXTRA[@]}"} \
         > "${id}-preflight.log" 2>&1; then
     echo "[FATAL] preflight failed for $id — see ${id}-preflight.log"
     echo "        (some failures can be post-fixed; see README)"
@@ -107,6 +107,19 @@ if [ -s "url_validation_cache.json" ]; then
                    --url-cache-policy "${URL_CACHE_POLICY:-drop-record}")
 fi
 
+# Optional initial-view overrides. Needed when a bbox's geometric
+# centroid lands somewhere empty (Hawaii's NW Hawaiian Islands push
+# the centroid into open ocean). MAP_CENTER="lon,lat", MAP_ZOOM=int.
+# Use --map-center=VALUE so argparse doesn't treat a leading '-' in
+# longitude as another flag.
+MAP_VIEW_ARG=()
+if [ -n "${MAP_CENTER:-}" ]; then
+    MAP_VIEW_ARG+=("--map-center=$MAP_CENTER")
+fi
+if [ -n "${MAP_ZOOM:-}" ]; then
+    MAP_VIEW_ARG+=("--map-zoom=$MAP_ZOOM")
+fi
+
 log "build start bbox=$bbox name=\"$name\""
 rm -f "$out"
 if ! ./venv312/bin/python3 create_osm_zim.py \
@@ -124,6 +137,7 @@ if ! ./venv312/bin/python3 create_osm_zim.py \
         --split-find-chips \
         "${LOW_ZOOM_VRT_ARG[@]}" \
         "${URL_CACHE_ARG[@]}" \
+        "${MAP_VIEW_ARG[@]}" \
         --output "$out" \
         --keep-temp \
         > "$log" 2>&1; then
