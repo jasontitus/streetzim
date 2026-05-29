@@ -114,6 +114,28 @@ python -m cloud.wikidata_titles --measure osm-california-2026-05-09.zim \
 The flag is **off by default** so stock builds stay hermetic/offline
 unless explicitly opted in.
 
+## Web viewer (dual-use)
+
+The enriched `w` field is the standard, shared OSM-Wikipedia field — not an
+mcpzim-only path — so the in-ZIM web viewer surfaces it too. The place
+detail panel (`resources/viewer/index.html`) and the Find-page cards
+(`places.html`) now render a 📖 **Wikipedia** link whenever a record has
+`w`, including the titles backfilled here. So the lift is visible on the
+web Find page, not just to the offline LLM.
+
+Link target:
+
+- **Default** — the public site, `https://<lang>.wikipedia.org/wiki/<Title>`
+  (matches the viewer's existing external Wikidata link).
+- **Local** — most hosts (incl. kiwix-serve) **can't deep-link across
+  ZIMs**, so `wikipediaBase` is unset by default. A custom host that can
+  serve a local Wikipedia (e.g. an app WebView with its own URL scheme)
+  may set `wikipediaBase` in `map-config.json` to resolve offline. The
+  viewer reads it gracefully whether or not it's present.
+
+This keeps the design honest: one shared field, two consumers (mcpzim's
+`articleByTitle` and the web viewer), zero parallel blobs.
+
 ## Edge cases
 
 - **No enwiki sitelink** → left as wikidata-only; behaviour unchanged.

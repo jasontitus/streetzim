@@ -1097,6 +1097,14 @@ fetchConfig(1)
     // Scale bar with mi/km toggle — click to switch units
     var scaleUnit = 'imperial';
     map._streetzimUnit = scaleUnit;  // shared with driving-mode HUD
+    // Optional Wikipedia base URL for the place-detail article link. Most
+    // hosts (incl. kiwix-serve) can't deep-link from one ZIM into another,
+    // so this is UNSET by default and the link goes to the public site. A
+    // custom host that can serve a local Wikipedia (e.g. an app WebView
+    // with its own URL scheme) may set `wikipediaBase` in map-config.json
+    // (trailing slash; we append the article title) to resolve offline.
+    // Either way this surfaces the wikidata->title enrichment (`rec.w`).
+    map._wikipediaBase = (config.wikipediaBase || '').trim() || null;
     var scaleControl = new maplibregl.ScaleControl({ unit: scaleUnit });
     map.addControl(scaleControl, 'bottom-left');
     document.addEventListener('click', function(e) {
@@ -2651,6 +2659,15 @@ function _showPlaceDetail(map, r, idx) {
       'Website', '🌐', false,
       function() { window.open(r.ws, '_blank', 'noopener'); }));
   }
+  // Wikipedia article link — present whenever the record carries an OSM
+  // wikipedia title (`w`), now including titles backfilled from a wikidata
+  // Q-ID (streetzim --resolve-wikidata-titles). Opens the local Wikipedia
+  // ZIM when one is configured, else the public site.
+  if (r.w) {
+    actions.appendChild(_detailActionBtn(
+      'Wikipedia', '📖', false,
+      function() { window.open(_wikipediaArticleUrl(map, r.w), '_blank', 'noopener'); }));
+  }
   panel.appendChild(actions);
 
   // Address line (if location string distinct from subhead)
@@ -2908,6 +2925,24 @@ function _detailOpenDirections(r) {
       }
     }, function() {}, { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 });
   }
+}
+
+// Build a Wikipedia article URL from an OSM `wikipedia=`-style tag value
+// ("en:Article Title"). Prefers the local Wikipedia ZIM base
+// (map._wikipediaBase, from map-config.json) so it resolves offline;
+// falls back to the public site when none is configured.
+function _wikipediaArticleUrl(map, w) {
+  var s = String(w || '');
+  var lang = 'en', title = s;
+  var ci = s.indexOf(':');
+  if (ci >= 2 && ci <= 3 && /^[a-z]+$/i.test(s.slice(0, ci))) {
+    lang = s.slice(0, ci).toLowerCase();
+    title = s.slice(ci + 1);
+  }
+  title = title.replace(/ /g, '_');
+  var base = map && map._wikipediaBase;
+  if (base) return base + encodeURIComponent(title);
+  return 'https://' + lang + '.wikipedia.org/wiki/' + encodeURIComponent(title);
 }
 
 function _populateWikipediaExtract(slot, wd) {
