@@ -4814,6 +4814,11 @@ def create_zim(
                         if wiki:
                             if wiki.get("wikipedia"):
                                 rec["w"] = wiki["wikipedia"]
+                                # Provenance: "wd" = title backfilled from a
+                                # wikidata Q-ID (see --resolve-wikidata-titles);
+                                # absent = the OSM wikipedia= tag itself.
+                                if wiki.get("wikipedia_src"):
+                                    rec["wsrc"] = wiki["wikipedia_src"]
                             if wiki.get("wikidata"):
                                 rec["q"] = wiki["wikidata"]
                         entry = json.dumps(rec, separators=(",", ":")) + "\n"
@@ -5686,6 +5691,23 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "pass. The chip-*.json files (Find page) are still "
                              "derived from poi+park records — they survive the "
                              "drop.")
+    parser.add_argument("--resolve-wikidata-titles", action="store_true",
+                        help="For search-index records that carry an OSM "
+                             "`wikidata=` Q-ID but no `wikipedia=` tag, resolve "
+                             "the Q-ID to its English Wikipedia title and fill "
+                             "`w` so mcpzim can cross-link them to a Wikipedia "
+                             "ZIM by title (no mcpzim change needed). Uses the "
+                             "public Wikidata API by default; pass "
+                             "--wikidata-title-map for an offline build. Lifts "
+                             "the directly-linkable distinct-article count ~2.4x "
+                             "on California. See docs/wikidata-title-resolution.md.")
+    parser.add_argument("--wikidata-title-cache", metavar="JSON",
+                        help="JSON cache for Q-ID->title resolutions; reused "
+                             "across rebuilds so the Wikidata API is hit once.")
+    parser.add_argument("--wikidata-title-map", metavar="TSV",
+                        help="Offline `Q-ID<TAB>Title` map; when set, "
+                             "--resolve-wikidata-titles uses it instead of the "
+                             "network (air-gapped builds).")
     parser.add_argument("--spatial-chunk-scale", type=int, default=0, metavar="N",
                         help="Convert the monolithic routing graph into the "
                              "spatial SZCI/SZRC layout in-build (N = cells per "
@@ -5958,6 +5980,19 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 except Exception as _e:
                     print(f"    Warning: wiki cross-ref extraction failed: {_e}")
                     wiki_cross_refs = None
+                # Optionally backfill `wikipedia` from `wikidata` so records
+                # that carry only a Q-ID become title-linkable to a Wikipedia
+                # ZIM (the chunker writes the filled title into rec["w"]).
+                if getattr(args, "resolve_wikidata_titles", False) and wiki_cross_refs:
+                    try:
+                        from cloud.wikidata_titles import augment_wiki_cross_refs
+                        augment_wiki_cross_refs(
+                            wiki_cross_refs,
+                            cache_path=getattr(args, "wikidata_title_cache", None),
+                            offline_map=getattr(args, "wikidata_title_map", None),
+                        )
+                    except Exception as _e:
+                        print(f"    Warning: wikidata->title resolution failed: {_e}")
 
         # Build Wikidata cache if requested
         wikidata_data = None
