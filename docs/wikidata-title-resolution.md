@@ -136,6 +136,46 @@ Link target:
 This keeps the design honest: one shared field, two consumers (mcpzim's
 `articleByTitle` and the web viewer), zero parallel blobs.
 
+## Bundling full articles offline (`--bundle-wiki-articles`)
+
+Linking (above) needs a Wikipedia ZIM present. But **kiwix-serve can't
+deep-link from one ZIM into another**, so for a truly self-contained
+offline streetzim, `--bundle-wiki-articles` stores the article *in* the
+ZIM at `wiki-article/<Title>` for every linkable title (the `w` set + any
+`--resolve-wikidata-titles` backfill). mcpzim's `articleByTitle` resolves
+that path, and its narration cleaner (`ArticleSections.stripHTML`) de-
+noises it for Kokoro TTS (see mcpzim BundledArticleTests /
+ArticleSpeechCleanupTests).
+
+Each article is trimmed at build time to a compact reader page
+(`cloud/wiki_articles.py:clean_article_html`): scripts/styles/tables/
+infoboxes/figures/nav/reference-lists/edit-links and the IPA/coordinate
+clutter removed, links unwrapped to text, attributes stripped, with a
+CC BY-SA source-link footer. Real articles trim ~8× (Camarillo Ranch
+House 98 KB → 12 KB; Nevada 630 KB → 67 KB). Measured size: ~0.2-1% of
+the California ZIM for the linkable set.
+
+Sources + caching:
+
+- **Local Wikipedia ZIM** (`--wiki-articles-source <enwiki.zim>`) — offline,
+  fast, no crawl. Use a FULL enwiki ZIM; a `top`/subset misses long-tail
+  POIs.
+- **Wikipedia API** (default) — cached to `wiki_articles_cache/` (repo-
+  relative, like `wikidata_cache/`; gitignored). Both hits and known-misses
+  are cached, so **a rebuild never re-crawls**.
+
+```sh
+# Offline (fast) — read articles from a local enwiki ZIM:
+python create_osm_zim.py ... --resolve-wikidata-titles \
+    --bundle-wiki-articles --wiki-articles-source ~/zim/wikipedia_en_all.zim
+
+# Online (cached) — fetch + cache, so the next rebuild is free:
+python create_osm_zim.py ... --resolve-wikidata-titles --bundle-wiki-articles
+```
+
+Off by default. Pairs with `--resolve-wikidata-titles` for the widest set,
+but works alone (bundles just the OSM-tagged `w` titles).
+
 ## Edge cases
 
 - **No enwiki sitelink** → left as wikidata-only; behaviour unchanged.

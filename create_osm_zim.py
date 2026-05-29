@@ -3925,6 +3925,9 @@ def create_zim(
     xapian_workdir=None,
     no_llm_bundle=False,
     spatial_chunk_scale=0,
+    bundle_wiki_articles=False,
+    wiki_articles_cache=None,
+    wiki_articles_source=None,
 ):
     """Create a ZIM file containing the map viewer and all tiles.
 
@@ -4449,6 +4452,32 @@ def create_zim(
             PHASE_TIMER.record_subphase(
                 "zim-pack: wikidata", time.time() - _wd_t0,
                 note=f"{len(wikidata_data)} entries → {len(wd_chunks)} chunks, {total_bytes / 1024:.0f} KB")
+
+        # Bundle full Wikipedia article pages (option B) so offline clients
+        # can open + narrate them — kiwix can't deep-link across ZIMs. Titles
+        # come from the cross-ref index (`w` OSM tags + any backfilled from
+        # wikidata via --resolve-wikidata-titles). Stored at
+        # wiki-article/<Title>; mcpzim's articleByTitle reads them there and
+        # its narration cleaner de-noises for TTS. Cached so rebuilds don't
+        # re-crawl. Source: a local Wikipedia ZIM (offline) or the API.
+        if bundle_wiki_articles and wiki_cross_refs:
+            _wa_titles = {e["wikipedia"] for e in wiki_cross_refs.values()
+                          if e.get("wikipedia")}
+            if _wa_titles:
+                from cloud.wiki_articles import bundle_wiki_articles as _bundle_wa
+                _wa_t0 = time.time()
+                _wa_stats = _bundle_wa(
+                    _wa_titles,
+                    lambda path, title, mt, content: creator.add_item(
+                        MapItem(path, title, mt, content)),
+                    cache_dir=wiki_articles_cache,
+                    offline_zim=wiki_articles_source,
+                )
+                PHASE_TIMER.record_subphase(
+                    "zim-pack: wiki-articles", time.time() - _wa_t0,
+                    note=f"{_wa_stats['bundled']} articles, "
+                         f"{_wa_stats['bytes'] // 1024} KB, "
+                         f"{_wa_stats['failed']} missing")
 
         # Add routing graph data.
         # Large regions produce multi-hundred-MB / multi-GB graph.bin
@@ -5708,6 +5737,23 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Offline `Q-ID<TAB>Title` map; when set, "
                              "--resolve-wikidata-titles uses it instead of the "
                              "network (air-gapped builds).")
+    parser.add_argument("--bundle-wiki-articles", action="store_true",
+                        help="Store full Wikipedia article pages at "
+                             "wiki-article/<Title> for every linkable POI (the "
+                             "`w` set + any --resolve-wikidata-titles backfill), "
+                             "trimmed to a compact reader page. Lets offline "
+                             "clients open + narrate articles without a separate "
+                             "Wikipedia ZIM (kiwix can't deep-link across ZIMs). "
+                             "~0.2-1% size on California. Cached so rebuilds "
+                             "don't re-crawl. See docs/wikidata-title-resolution.md.")
+    parser.add_argument("--wiki-articles-cache", metavar="DIR", default=None,
+                        help="Disk cache for fetched article HTML (default: "
+                             "wiki_articles_cache/). Reused across rebuilds.")
+    parser.add_argument("--wiki-articles-source", metavar="ZIM", default=None,
+                        help="Local Wikipedia ZIM to read articles from "
+                             "(offline, fast, no crawl). Omit to fetch from the "
+                             "public Wikipedia API. Use a FULL enwiki ZIM for "
+                             "coverage; a 'top'/subset misses long-tail POIs.")
     parser.add_argument("--spatial-chunk-scale", type=int, default=0, metavar="N",
                         help="Convert the monolithic routing graph into the "
                              "spatial SZCI/SZRC layout in-build (N = cells per "
@@ -6425,6 +6471,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             xapian_workdir=tmpdir,
             no_llm_bundle=bool(getattr(args, "no_llm_bundle", False)),
             spatial_chunk_scale=int(getattr(args, "spatial_chunk_scale", 0) or 0),
+            bundle_wiki_articles=bool(getattr(args, "bundle_wiki_articles", False)),
+            wiki_articles_cache=getattr(args, "wiki_articles_cache", None),
+            wiki_articles_source=getattr(args, "wiki_articles_source", None),
         )
 
         # Stop the phase timer (no further phases will be printed
