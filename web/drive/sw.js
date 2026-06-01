@@ -272,7 +272,11 @@ async function serveFromZim(viewerPath, request) {
   try {
     const reader = await getReader();
     if (!reader) return noZim();
-    const entry = await reader.read(viewerPath);
+    // Percent-decode so paths with special chars (e.g. wiki-article titles
+    // like "AT%26T_Park" or "Foo_%28Bar%29") match the raw ZIM entry path.
+    let lookupPath = viewerPath;
+    try { lookupPath = decodeURIComponent(viewerPath); } catch (e) {}
+    const entry = await reader.read(lookupPath);
     if (!entry) {
       if (OPTIONAL_PROBE_PATHS.has(viewerPath)) {
         // Tried 204 No Content; Chromium fires both response(204) AND

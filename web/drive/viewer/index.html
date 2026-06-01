@@ -931,6 +931,37 @@ var baseUrl = (function() {
   return href.substring(0, href.lastIndexOf('/') + 1);
 })();
 
+// Optional Q-ID -> Wikipedia-title bridge for full-article links. Hosted at
+// /drive/wiki-qid-titles.json (served from the web, NOT the ZIM, so it sits
+// one level above the viewer base). When present, wiki popups gain a
+// "Read full article" button that opens the in-ZIM wiki-article/<Title> page
+// (served by the drive service worker). Absent (e.g. plain Kiwix) -> popups
+// just show the wikidata blurb as before. This is a transitional side-load;
+// once the bridge is baked into the ZIM the fetch simply falls back to it.
+var WIKI_QID_TITLES = null;
+(function loadWikiTitleBridge() {
+  try {
+    fetch(baseUrl + '../wiki-qid-titles.json')
+      .then(function(r) { return r && r.ok ? r.json() : null; })
+      .then(function(m) { if (m && typeof m === 'object') WIKI_QID_TITLES = m; })
+      .catch(function() {});
+  } catch (e) {}
+})();
+
+// Resolve the in-ZIM article path for a place: prefer its OSM wikipedia tag
+// (`w`, e.g. "en:Golden Gate Bridge"), else the Q-ID->title bridge. Returns
+// an underscored title (no namespace) or null when no article is available.
+function _wikiArticlePath(qid, w) {
+  var t = null;
+  if (w) {
+    var s = String(w), ci = s.indexOf(':');
+    t = (ci >= 2 && ci <= 3 && /^[a-z]+$/i.test(s.slice(0, ci))) ? s.slice(ci + 1) : s;
+  } else if (qid && WIKI_QID_TITLES) {
+    t = WIKI_QID_TITLES[qid] || null;
+  }
+  return t ? t.replace(/ /g, '_') : null;
+}
+
 // Debug logging — enable by appending ?debug=1 to the URL.
 // Keeps a ring-buffer of the last 200 log lines so we can render them
 // into a visible panel if something goes wrong (consoles are often
@@ -2171,7 +2202,8 @@ function _findResultPopup(map, r) {
     var wd = null;
     if (r.l) wd = { c: r.l };
     var lng = { lat: r.a, lng: r.o };
-    var dom = map._buildWikiPopupDOM(r.n || '(unnamed)', wd, lng);
+    var dom = map._buildWikiPopupDOM(r.n || '(unnamed)', wd, lng,
+                                     _wikiArticlePath(r.q, r.w));
     return new maplibregl.Popup({ offset: 28, closeButton: true,
                                   closeOnClick: false, maxWidth: '320px' })
       .setDOMContent(dom);
@@ -4488,7 +4520,7 @@ function initWikidataPopups(map, config) {
   // event-bound Directions button. The text content is the same as
   // buildPopupHTML — wrapping HTML in a fresh div keeps that helper
   // useful for the wiki sidebar (which still uses setHTML).
-  function buildWikiPopupDOM(name, wd, lngLat) {
+  function buildWikiPopupDOM(name, wd, lngLat, articlePath) {
     var box = document.createElement('div');
     box.className = 'pin-popup wiki-popup';
     if (wd) {
@@ -4498,6 +4530,19 @@ function initWikidataPopups(map, config) {
       h.style.cssText = 'font-family:-apple-system,system-ui,sans-serif;font-size:14px;font-weight:600;';
       h.textContent = name;
       box.appendChild(h);
+    }
+    // Full bundled-article link — opens the in-ZIM wiki-article/<Title> page
+    // (served by the drive SW) when this place has one.
+    if (articlePath) {
+      var ab = document.createElement('button');
+      ab.className = 'wiki-article-btn';
+      ab.textContent = '📖 Read full article';
+      ab.style.cssText = 'display:block;width:100%;margin-top:8px;padding:7px 10px;border:0;border-radius:6px;background:#2a4a7a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;';
+      ab.addEventListener('click', function(e) {
+        e.stopPropagation();
+        window.open(baseUrl + 'wiki-article/' + encodeURIComponent(articlePath), '_blank', 'noopener');
+      });
+      box.appendChild(ab);
     }
     box.appendChild(buildDirectionsButton(lngLat.lat, lngLat.lng, name));
     return box;
@@ -4560,7 +4605,8 @@ function initWikidataPopups(map, config) {
       var wd = (chunk && chunk[qid]) ? chunk[qid] : null;
       currentPopup = new maplibregl.Popup({ maxWidth: '320px' })
         .setLngLat(e.lngLat)
-        .setDOMContent(buildWikiPopupDOM(name, wd, e.lngLat))
+        .setDOMContent(buildWikiPopupDOM(name, wd, e.lngLat,
+                                         _wikiArticlePath(qid, null)))
         .addTo(map);
     });
   });
@@ -4599,6 +4645,122 @@ function initWikiSidebar(map, config) {
   var pulseTimeout = null;
   var staleView = false; // true after flying to an item (list is stale)
 
+  // Baked geo-index: { title_underscored: [lat, lon, type, qid] } for every
+  // placed Wikipedia article. When present (ZIMs built 2026-05-30+) it drives
+  // the nearby list + map markers at ANY zoom, replacing the tile-scan path
+  // and the side-loaded Q-ID bridge.
+  var geoIndex = null;
+  fetch(baseUrl + 'wiki-geo-index.json')
+    .then(function(r) { return r && r.ok ? r.json() : null; })
+    .then(function(m) { if (m && typeof m === 'object') geoIndex = m; })
+    .catch(function() {});
+
+  function geoPriority(type) {
+    if (type === 'place') return 80;             // settlements (cities/towns)
+    if (type === 'water' || type === 'peak') return 55;
+    if (type === 'park') return 50;
+    if (type === 'poi') return 40;
+    return 35;
+  }
+
+  function ensureWikiMarkerLayer() {
+    if (map.getSource('wiki-markers')) return;
+    map.addSource('wiki-markers', { type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({
+      id: 'wiki-markers-layer', type: 'symbol', source: 'wiki-markers',
+      layout: { 'text-field': '📖', 'text-size': 17, 'text-allow-overlap': false }
+    });
+    map.on('click', 'wiki-markers-layer', function(e) {
+      var f = e.features[0], p = f.properties || {};
+      flyAndDetail({ title: p.title, name: p.name, qid: p.qid || null,
+                     coords: f.geometry.coordinates, type: p.type });
+    });
+    map.on('mouseenter', 'wiki-markers-layer', function() { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'wiki-markers-layer', function() { map.getCanvas().style.cursor = ''; });
+  }
+  function setWikiMarkers(items) {
+    ensureWikiMarkerLayer();
+    map.getSource('wiki-markers').setData({ type: 'FeatureCollection',
+      features: items.map(function(it) {
+        return { type: 'Feature', geometry: { type: 'Point', coordinates: it.coords },
+                 properties: { title: it.title, name: it.name, qid: it.qid || '', type: it.type || '' } };
+      }) });
+  }
+  function clearWikiMarkers() {
+    if (map.getSource('wiki-markers')) {
+      map.getSource('wiki-markers').setData({ type: 'FeatureCollection', features: [] });
+    }
+  }
+
+  // Fly to a geo item, drop a pulse marker, and show its in-panel detail.
+  function flyAndDetail(it) {
+    var lon = it.coords[0], lat = it.coords[1];
+    if (wikiPulseMarker) { wikiPulseMarker.remove(); wikiPulseMarker = null; }
+    if (pulseTimeout) { clearTimeout(pulseTimeout); pulseTimeout = null; }
+    var el = document.createElement('div'); el.className = 'pulse-marker';
+    wikiPulseMarker = new maplibregl.Marker({ element: el, anchor: 'center' })
+      .setLngLat([lon, lat]).addTo(map);
+    var targetZoom = Math.max(map.getZoom(), 14);
+    var isMobile = window.innerWidth <= 600;
+    if (isMobile && panel.style.display === 'flex') {
+      var off = (map.getBounds().getNorth() - map.getBounds().getSouth()) * 0.2;
+      map.flyTo({ center: [lon, lat - off], zoom: targetZoom, duration: 1000 });
+    } else {
+      map.flyTo({ center: [lon, lat], zoom: targetZoom, duration: 1000 });
+    }
+    pulseTimeout = setTimeout(function() {
+      if (wikiPulseMarker) { wikiPulseMarker.remove(); wikiPulseMarker = null; }
+    }, 5000);
+    var fin = function() { renderWikiDetail(it.qid, it.name, [lon, lat], it.title); };
+    if (it.qid) { fetchWdChunk(getWdPrefix(it.qid)).then(fin); } else { fin(); }
+  }
+
+  // Build the nearby list + markers from the baked geo-index (any zoom).
+  function updateSidebarFromGeo() {
+    loadingEl.style.display = 'none';
+    listEl.textContent = '';
+    var b = map.getBounds(), W = b.getWest(), E = b.getEast(), S = b.getSouth(), N = b.getNorth();
+    var items = [];
+    for (var title in geoIndex) {
+      var g = geoIndex[title]; if (!g) continue;
+      var lat = g[0], lon = g[1];
+      if (lon < W || lon > E || lat < S || lat > N) continue;
+      items.push({ title: title, name: title.replace(/_/g, ' '),
+                   qid: g[3] || null, type: g[2] || '', coords: [lon, lat],
+                   priority: geoPriority(g[2] || '') });
+    }
+    items.sort(function(a, b2) { return b2.priority - a.priority || a.name.localeCompare(b2.name); });
+    countEl.textContent = items.length;
+    if (items.length > 150) items = items.slice(0, 150);
+    setWikiMarkers(items);
+    if (!items.length) {
+      var empty = createEl('div', 'wiki-empty-state');
+      empty.appendChild(createEl('div', 'wiki-empty-state-icon', '🌍'));
+      empty.appendChild(createEl('div', 'wiki-empty-state-text', 'No Wikipedia places in view — pan or zoom to explore.'));
+      listEl.appendChild(empty);
+      return;
+    }
+    var prefixes = {};
+    items.forEach(function(it) { if (it.qid) prefixes[getWdPrefix(it.qid)] = true; });
+    Promise.all(Object.keys(prefixes).map(fetchWdChunk)).then(function() {
+      items.forEach(function(it) {
+        var wd = it.qid ? (wdCache[getWdPrefix(it.qid)] || {})[it.qid] : null;
+        var desc = wd ? (wd.d || wd.x || '') : '';
+        var div = createEl('div', 'wiki-item' + (desc ? '' : ' wiki-item-nodesc'));
+        div.appendChild(createEl('div', 'wiki-item-name', it.name));
+        var meta = createEl('div', 'wiki-item-meta');
+        meta.appendChild(createEl('span', 'wiki-item-type', (it.type || 'place').replace(/_/g, ' ')));
+        div.appendChild(meta);
+        if (desc) div.appendChild(createEl('div', 'wiki-item-desc', desc));
+        div.addEventListener('click', function() {
+          staleView = true; refreshBar.style.display = 'block'; flyAndDetail(it);
+        });
+        listEl.appendChild(div);
+      });
+    });
+  }
+
   function fetchWdChunk(prefix) {
     if (wdCache[prefix]) return Promise.resolve(wdCache[prefix]);
     var url = baseUrl + 'wikidata/' + prefix + '.json';
@@ -4633,13 +4795,104 @@ function initWikiSidebar(map, config) {
     return el;
   }
 
+  // Show one entry's detail INSIDE the panel (replacing the list) so the
+  // description + "Read full article" button are readable — a map popup
+  // here would sit behind the list. A Back link restores the list.
+  function renderWikiDetail(qid, name, coords, explicitTitle) {
+    loadingEl.style.display = 'none';
+    refreshBar.style.display = 'none';
+    countEl.textContent = '';
+    listEl.textContent = '';
+
+    // Padded wrapper — the list's horizontal padding comes from .wiki-item,
+    // which the detail elements don't use, so add it here (was edge-to-edge
+    // on mobile).
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'padding:12px 16px;box-sizing:border-box;';
+    listEl.appendChild(wrap);
+
+    var back = createEl('button', 'wiki-detail-back', '← Back to list');
+    back.style.cssText = 'display:block;margin:0 0 12px;padding:6px 10px;border:0;border-radius:6px;background:#eef2fa;color:#2a4a7a;font-size:13px;font-weight:600;cursor:pointer;';
+    back.addEventListener('click', function() { staleView = false; updateSidebar(); });
+    wrap.appendChild(back);
+
+    var nm = createEl('div', 'wiki-detail-name', name);
+    nm.style.cssText = 'font-size:17px;font-weight:700;margin-bottom:6px;color:#1a1a2a;line-height:1.25;word-wrap:break-word;';
+    wrap.appendChild(nm);
+
+    var wd = (wdCache[getWdPrefix(qid)] || {})[qid] || null;
+    var desc = wd ? (wd.x || wd.d || '') : '';
+    if (desc) {
+      var dd = createEl('div', 'wiki-detail-desc', desc);
+      dd.style.cssText = 'font-size:13.5px;line-height:1.5;color:#444;margin-bottom:10px;word-wrap:break-word;';
+      wrap.appendChild(dd);
+    }
+
+    var ap = explicitTitle || _wikiArticlePath(qid, null);
+    if (ap) {
+      var ab = createEl('button', 'wiki-article-btn', '📖 Read full article');
+      ab.style.cssText = 'display:block;width:100%;margin-bottom:8px;padding:9px 10px;border:0;border-radius:6px;background:#2a4a7a;color:#fff;font-size:14px;font-weight:600;cursor:pointer;box-sizing:border-box;';
+      ab.addEventListener('click', function() {
+        window.open(baseUrl + 'wiki-article/' + encodeURIComponent(ap), '_blank', 'noopener');
+      });
+      wrap.appendChild(ab);
+    } else {
+      var noa = createEl('div', 'wiki-detail-noarticle', 'No bundled article for this place.');
+      noa.style.cssText = 'font-size:12px;color:#888;margin-bottom:8px;';
+      wrap.appendChild(noa);
+    }
+    if (coords && map._buildDirectionsButton) {
+      wrap.appendChild(map._buildDirectionsButton(coords[1], coords[0], name));
+    }
+  }
+
+  // Collect wiki-tagged features across the viewport from the SOURCE tiles
+  // (not just what's rendered) so the list isn't limited by the current
+  // zoom's label-collision / layer min-zoom rules. Dedup happens downstream
+  // via the qid `seen` map; the existing priority sort puts cities/regions
+  // before specific POIs.
+  function collectWikiFeatures() {
+    var b = map.getBounds();
+    var west = b.getWest(), east = b.getEast(),
+        south = b.getSouth(), north = b.getNorth();
+    var layers = ['place', 'poi', 'water_name', 'mountain_peak',
+                  'aerodrome_label', 'transportation_name'];
+    var out = [];
+    for (var li = 0; li < layers.length; li++) {
+      var feats;
+      try {
+        feats = map.querySourceFeatures('openmaptiles', { sourceLayer: layers[li] });
+      } catch (e) { continue; }
+      for (var fi = 0; fi < feats.length; fi++) {
+        var f = feats[fi], p = f.properties || {};
+        if (!p.wikidata || !/^Q\d+$/.test(p.wikidata)) continue;
+        var g = f.geometry, cc = g && g.coordinates;
+        var pt = null;
+        if (cc) {
+          if (g.type === 'Point') pt = cc;
+          else if (g.type === 'MultiPoint' || g.type === 'LineString') pt = cc[0];
+          else if (g.type === 'MultiLineString' || g.type === 'Polygon') pt = cc[0][0];
+          else if (g.type === 'MultiPolygon') pt = cc[0][0][0];
+        }
+        if (!pt) continue;
+        if (pt[0] < west || pt[0] > east || pt[1] < south || pt[1] > north) continue;
+        out.push(f);
+      }
+    }
+    // Fallback: if the source query came up empty (e.g. source not yet
+    // queryable), use rendered features so the panel is never blank.
+    return out.length ? out : map.queryRenderedFeatures();
+  }
+
   function updateSidebar() {
     if (!active) return;
+    // Prefer the baked geo-index (any-zoom list + markers) when available.
+    if (geoIndex) { updateSidebarFromGeo(); return; }
 
     loadingEl.style.display = 'block';
     listEl.textContent = '';
 
-    var features = map.queryRenderedFeatures();
+    var features = collectWikiFeatures();
     var seen = {};
     var items = [];
 
@@ -4778,26 +5031,13 @@ function initWikiSidebar(map, config) {
             } else {
               map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 1200 });
             }
-            // Show wikidata popup offset above the point. Use the
-            // DOM-builder so the same Directions button appears as
-            // when the user clicks a feature on the map.
-            if (map._buildWikiPopupDOM && map._wdCache) {
-              var prefix = getWdPrefix(itemQid);
-              var chunk = wdCache[prefix];
-              var wdEntry = chunk ? chunk[itemQid] : null;
-              if (wdEntry) {
-                if (map._wikiSidebarPopup) { map._wikiSidebarPopup.remove(); }
-                map._wikiSidebarPopup = new maplibregl.Popup({
-                  maxWidth: '320px',
-                  offset: [0, -30],
-                  closeOnClick: true
-                })
-                  .setLngLat([lng, lat])
-                  .setDOMContent(map._buildWikiPopupDOM(
-                    itemName, wdEntry, { lat: lat, lng: lng }))
-                  .addTo(map);
-              }
-            }
+            // Show the entry detail INSIDE the panel (replacing the list)
+            // rather than a map popup the list would overlay. Make sure the
+            // wikidata chunk is loaded first so the description renders.
+            if (map._wikiSidebarPopup) { map._wikiSidebarPopup.remove(); map._wikiSidebarPopup = null; }
+            fetchWdChunk(getWdPrefix(itemQid)).then(function() {
+              renderWikiDetail(itemQid, itemName, [lng, lat]);
+            });
             // Remove marker after 5 seconds
             pulseTimeout = setTimeout(function() {
               if (wikiPulseMarker) { wikiPulseMarker.remove(); wikiPulseMarker = null; }
@@ -4827,6 +5067,8 @@ function initWikiSidebar(map, config) {
     panel.style.display = 'none';
     listEl.textContent = '';
     countEl.textContent = '';
+    clearWikiMarkers();
+    if (wikiPulseMarker) { wikiPulseMarker.remove(); wikiPulseMarker = null; }
   }
 
   toggle.addEventListener('click', function() {
