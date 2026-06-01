@@ -24,7 +24,7 @@ import os
 import sys
 
 OVERTURE_S3_BUCKET = "s3://overturemaps-us-west-2"
-DEFAULT_RELEASE = "2026-04-15.0"
+DEFAULT_RELEASE = "2026-05-20.0"
 
 # Each theme needs its own S3 path suffix + column projection.
 # Adding a theme requires auditing its schema against
