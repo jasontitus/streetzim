@@ -4790,6 +4790,8 @@ def create_zim(
             # linearly today; see STREETZIM_CONSUMPTION.md).
             type_counts = {}
             wiki_fields_added = 0
+            wiki_geo = {}  # title_us -> [lat, lon, type]: geo-index for the
+                           # viewer's nearby-Wikipedia list + markers (any zoom)
             cat_chunk_fds = {}
             cat_chunk_counts = {}
             cat_dir = os.path.join(chunk_tmp, "categories")
@@ -4848,6 +4850,20 @@ def create_zim(
                                 # absent = the OSM wikipedia= tag itself.
                                 if wiki.get("wikipedia_src"):
                                     rec["wsrc"] = wiki["wikipedia_src"]
+                                # Geo-index: underscored title -> [lat, lon, type].
+                                # Matches the bundled wiki-article/<Title> path so
+                                # the viewer can list + pin nearby Wikipedia at any
+                                # zoom (no tile scan, no side-loaded bridge).
+                                _wt = wiki["wikipedia"]
+                                _ci = _wt.find(":")
+                                _gt = (_wt[_ci + 1:] if 2 <= _ci <= 3
+                                       and _wt[:_ci].isalpha() else _wt).replace(" ", "_")
+                                if _gt and _gt not in wiki_geo:
+                                    # [lat, lon, type, qid] — qid lets the viewer
+                                    # pull the wikidata blurb from wikidata/<prefix>.
+                                    wiki_geo[_gt] = [round(feat["lat"], 5),
+                                                     round(feat["lon"], 5), t,
+                                                     wiki.get("wikidata")]
                             if wiki.get("wikidata"):
                                 rec["q"] = wiki["wikidata"]
                         entry = json.dumps(rec, separators=(",", ":")) + "\n"
@@ -5093,6 +5109,19 @@ def create_zim(
                 ))
                 print(f"    Added category-index: "
                       f"{len(cat_chunk_counts)} categories, {cat_total_records} records")
+                # Wiki geo-index: {title: [lat, lon, type]} for every placed
+                # bundled-article, so the viewer renders the nearby-Wikipedia
+                # list + map markers at any zoom without scanning vector tiles
+                # or a side-loaded bridge. Tiny (~0.005% of the ZIM).
+                if wiki_geo:
+                    creator.add_item(MapItem(
+                        "wiki-geo-index.json",
+                        "Wikipedia Geo Index",
+                        "application/json",
+                        json.dumps(wiki_geo, separators=(",", ":")).encode("utf-8"),
+                    ))
+                    print(f"    Added wiki-geo-index: {len(wiki_geo)} placed "
+                          f"articles", flush=True)
                 PHASE_TIMER.record_subphase(
                     "zim-pack: chips + category-index", time.time() - _cat_t0,
                     note=f"{len(cat_chunk_counts)} categories, {cat_total_records:,} records"
