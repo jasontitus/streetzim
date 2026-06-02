@@ -4871,11 +4871,23 @@ def create_zim(
                                 if (_gt and _gt not in wiki_geo
                                         and _bundled_set is not None
                                         and _gt in _bundled_set):
-                                    # [lat, lon, type, qid] — qid lets the viewer
-                                    # pull the wikidata blurb from wikidata/<prefix>.
+                                    # [lat, lon, type, qid, desc]. The short
+                                    # description is baked in so the viewer's
+                                    # nearby-Wikipedia list needs NO
+                                    # wikidata/<prefix>.json chunk. Those chunks
+                                    # are keyed by Q-ID prefix and are
+                                    # region-global (the 10–13 prefixes are
+                                    # 20–45 MB each); a wide "explore" used to
+                                    # prefetch several at once and OOM mobile.
+                                    _gq = wiki.get("wikidata")
+                                    _gd = ""
+                                    if _gq and wikidata_data:
+                                        _gwd = wikidata_data.get(_gq)
+                                        if _gwd:
+                                            _gd = (_gwd.get("d") or "")[:160]
                                     wiki_geo[_gt] = [round(feat["lat"], 5),
                                                      round(feat["lon"], 5), t,
-                                                     wiki.get("wikidata")]
+                                                     _gq, _gd]
                             if wiki.get("wikidata"):
                                 rec["q"] = wiki["wikidata"]
                         entry = json.dumps(rec, separators=(",", ":")) + "\n"

@@ -4794,7 +4794,16 @@ function initWikiSidebar(map, config) {
       if (wikiPulseMarker) { wikiPulseMarker.remove(); wikiPulseMarker = null; }
     }, 5000);
     var fin = function() { renderWikiDetail(it.qid, it.name, [lon, lat], it.title); };
-    if (it.qid) { fetchWdChunk(getWdPrefix(it.qid)).then(fin); } else { fin(); }
+    if (it.qid) {
+      var _pfx = getWdPrefix(it.qid);
+      fetchWdChunk(_pfx).then(function() {
+        fin();
+        // renderWikiDetail reads its one record synchronously in fin(); drop
+        // the big (20-45 MB) wikidata chunk afterwards so tapping items across
+        // prefixes can't accumulate hundreds of MB and OOM the WebView.
+        try { delete wdCache[_pfx]; } catch (e) {}
+      });
+    } else { fin(); }
   }
 
   // Build the nearby list + markers from the baked geo-index (any zoom).
@@ -4809,7 +4818,7 @@ function initWikiSidebar(map, config) {
       if (lon < W || lon > E || lat < S || lat > N) continue;
       items.push({ title: title, name: title.replace(/_/g, ' '),
                    qid: g[3] || null, type: g[2] || '', coords: [lon, lat],
-                   priority: geoPriority(g[2] || '') });
+                   desc: g[4] || '', priority: geoPriority(g[2] || '') });
     }
     items.sort(function(a, b2) { return b2.priority - a.priority || a.name.localeCompare(b2.name); });
     countEl.textContent = items.length;
@@ -4822,23 +4831,23 @@ function initWikiSidebar(map, config) {
       listEl.appendChild(empty);
       return;
     }
-    var prefixes = {};
-    items.forEach(function(it) { if (it.qid) prefixes[getWdPrefix(it.qid)] = true; });
-    Promise.all(Object.keys(prefixes).map(fetchWdChunk)).then(function() {
-      items.forEach(function(it) {
-        var wd = it.qid ? (wdCache[getWdPrefix(it.qid)] || {})[it.qid] : null;
-        var desc = wd ? (wd.d || wd.x || '') : '';
-        var div = createEl('div', 'wiki-item' + (desc ? '' : ' wiki-item-nodesc'));
-        div.appendChild(createEl('div', 'wiki-item-name', it.name));
-        var meta = createEl('div', 'wiki-item-meta');
-        meta.appendChild(createEl('span', 'wiki-item-type', (it.type || 'place').replace(/_/g, ' ')));
-        div.appendChild(meta);
-        if (desc) div.appendChild(createEl('div', 'wiki-item-desc', desc));
-        div.addEventListener('click', function() {
-          staleView = true; refreshBar.style.display = 'block'; flyAndDetail(it);
-        });
-        listEl.appendChild(div);
+    // Render rows straight from the geo-index — the short description is now
+    // baked into it (g[4]). We no longer prefetch wikidata/<prefix>.json for
+    // the whole list: those chunks are region-global 20-45 MB files and a wide
+    // "explore" used to Promise.all several at once and OOM mobile WebViews.
+    // (Older ZIMs without a baked desc simply show name + type — no fetch.)
+    items.forEach(function(it) {
+      var desc = it.desc || '';
+      var div = createEl('div', 'wiki-item' + (desc ? '' : ' wiki-item-nodesc'));
+      div.appendChild(createEl('div', 'wiki-item-name', it.name));
+      var meta = createEl('div', 'wiki-item-meta');
+      meta.appendChild(createEl('span', 'wiki-item-type', (it.type || 'place').replace(/_/g, ' ')));
+      div.appendChild(meta);
+      if (desc) div.appendChild(createEl('div', 'wiki-item-desc', desc));
+      div.addEventListener('click', function() {
+        staleView = true; refreshBar.style.display = 'block'; flyAndDetail(it);
       });
+      listEl.appendChild(div);
     });
   }
 
