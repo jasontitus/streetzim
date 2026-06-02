@@ -205,7 +205,7 @@ function handleSnap(msg) {
 }
 
 function handleGetCoords(msg) {
-  if (!graph || !graph.nodesScaled) {
+  if (!graph || !graph.hasNodes || !graph.hasNodes()) {
     return self.postMessage({
       type: 'coords-done', id: msg.id, error: 'graph not loaded',
     });
@@ -218,8 +218,8 @@ function handleGetCoords(msg) {
   }
   self.postMessage({
     type: 'coords-done', id: msg.id,
-    lat: graph.nodesScaled[n * 2] / 1e7,
-    lon: graph.nodesScaled[n * 2 + 1] / 1e7,
+    lat: graph.nodeLatE7(n) / 1e7,
+    lon: graph.nodeLonE7(n) / 1e7,
   });
 }
 
@@ -367,11 +367,28 @@ function parseRoutingCellsIndex(buffer) {
     cellGeomCount: cellGeomCount,
     getName: getName,
   };
+  // Node-coordinate accessors — work for v1 (inline flat array) and v2
+  // (separate shard buffers, never combined into one full-size array, which
+  // doubled peak memory and OOM'd dense graphs like California's 7.9M nodes).
+  idx.hasNodes = function() { return !!(idx.nodeShards || idx.nodesScaled); };
+  idx.nodeLatE7 = function(n) {
+    if (idx.nodeShards) {
+      var s = (n / idx.nodesPerShard) | 0;
+      return idx.nodeShards[s][(n - s * idx.nodesPerShard) * 2];
+    }
+    return idx.nodesScaled[n * 2];
+  };
+  idx.nodeLonE7 = function(n) {
+    if (idx.nodeShards) {
+      var s = (n / idx.nodesPerShard) | 0;
+      return idx.nodeShards[s][(n - s * idx.nodesPerShard) * 2 + 1];
+    }
+    return idx.nodesScaled[n * 2 + 1];
+  };
   idx.cellForNode = function(nodeIdx) {
-    var ns = idx.nodesScaled;
-    if (!ns) return -1;
-    var latE7 = ns[nodeIdx * 2];
-    var lonE7 = ns[nodeIdx * 2 + 1];
+    if (!idx.hasNodes()) return -1;
+    var latE7 = idx.nodeLatE7(nodeIdx);
+    var lonE7 = idx.nodeLonE7(nodeIdx);
     var k = cellOf(latE7, lonE7);
     var id = cellKeyToId.get(k.lat + ',' + k.lon);
     return id === undefined ? -1 : id;
@@ -388,7 +405,13 @@ function parseRoutingCellsIndex(buffer) {
 
 function loadNodeShards(idx) {
   if (idx.version !== 2) return Promise.resolve();
-  var combined = new Int32Array(idx.numNodes * 2);
+  // Keep each shard buffer separate and index into the owning shard on
+  // demand (see idx.nodeLatE7/nodeLonE7). Building one combined
+  // Int32Array(numNodes*2) doubled peak memory — the shard buffers PLUS the
+  // full-size copy — and OOM'd dense graphs (California: 7.9M nodes, the
+  // copy alone was ~60 MB on top of the 60 MB of shards). Now peak is just
+  // the shards.
+  var shards = new Array(idx.numNodeShards);
   function pad3(n) {
     return n < 10 ? '00' + n : n < 100 ? '0' + n : '' + n;
   }
@@ -403,14 +426,13 @@ function loadNodeShards(idx) {
           }
           return r.arrayBuffer();
         }).then(function(buf) {
-          var shardArr = new Int32Array(buf);
-          combined.set(shardArr, shardIdx * idx.nodesPerShard * 2);
+          shards[shardIdx] = new Int32Array(buf);
         })
       );
     })(i);
   }
   return Promise.all(fetches).then(function() {
-    idx.nodesScaled = combined;
+    idx.nodeShards = shards;
   });
 }
 
@@ -509,6 +531,8 @@ function SpatialGraph(index, cacheLimit) {
   this.numEdges = index.numEdges;
   this.numNames = index.numNames;
   this.nodesScaled = index.nodesScaled;
+  this.nodeLatE7 = index.nodeLatE7;   // shard-aware coord accessors (see
+  this.nodeLonE7 = index.nodeLonE7;   // parseCellsIndex) — no full-size copy
   this.NO_GEOM = 0xFFFFFFFF;
   this.getName = function(idx) { return index.getName(idx); };
 }
@@ -609,12 +633,12 @@ async function findRouteSpatial(startNode, endNode, ctx) {
 }
 
 async function findRouteSpatialFiltered(startNode, endNode, highwayOnly, ctx) {
-  var nodesScaled = graph.nodesScaled;
+  var nLat = graph.nodeLatE7, nLon = graph.nodeLonE7;
   var crowKm = haversine(
-    nodesScaled[startNode * 2] / 1e7,
-    nodesScaled[startNode * 2 + 1] / 1e7,
-    nodesScaled[endNode * 2] / 1e7,
-    nodesScaled[endNode * 2 + 1] / 1e7
+    nLat(startNode) / 1e7,
+    nLon(startNode) / 1e7,
+    nLat(endNode) / 1e7,
+    nLon(endNode) / 1e7
   ) / 1000;
   // Skip optimal pass for very long highway legs (Toronto→Vancouver
   // pattern). cf. project_routing_perf_canada.md.
@@ -646,9 +670,9 @@ async function findRouteSpatialFiltered(startNode, endNode, highwayOnly, ctx) {
 
 async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
                                       GREEDY_WEIGHT, POP_LIMIT, ctx) {
-  var nodesScaled = graph.nodesScaled;
-  var endLat = nodesScaled[endNode * 2] / 1e7;
-  var endLon = nodesScaled[endNode * 2 + 1] / 1e7;
+  var nLat = graph.nodeLatE7, nLon = graph.nodeLonE7;
+  var endLat = nLat(endNode) / 1e7;
+  var endLon = nLon(endNode) / 1e7;
 
   var g = new Map();
   var prev = new Map();
@@ -658,8 +682,8 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
 
   var open = new MinHeap();
   var h0 = haversine(
-    nodesScaled[startNode * 2] / 1e7,
-    nodesScaled[startNode * 2 + 1] / 1e7,
+    nLat(startNode) / 1e7,
+    nLon(startNode) / 1e7,
     endLat, endLon
   ) / (80 / 3.6);
   open.push([h0, startNode]);
@@ -732,8 +756,8 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
         g.set(target, newG);
         prev.set(target, current);
         prevEdge.set(target, [current, target, speedDist, e[2], e[3], e[4]]);
-        var tLat = nodesScaled[target * 2] / 1e7;
-        var tLon = nodesScaled[target * 2 + 1] / 1e7;
+        var tLat = nLat(target) / 1e7;
+        var tLon = nLon(target) / 1e7;
         var h = haversine(tLat, tLon, endLat, endLon) / (80 / 3.6) * GREEDY_WEIGHT;
         open.push([newG + h, target]);
       }
@@ -768,10 +792,10 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     totalDist += distM;
     segRev.push({ nameIdx: nameIdx, distM: distM, flags: manFlags });
 
-    var fromLat = nodesScaled[sourceNode * 2] / 1e7;
-    var fromLon = nodesScaled[sourceNode * 2 + 1] / 1e7;
-    var toLat = nodesScaled[n * 2] / 1e7;
-    var toLon = nodesScaled[n * 2 + 1] / 1e7;
+    var fromLat = nLat(sourceNode) / 1e7;
+    var fromLon = nLon(sourceNode) / 1e7;
+    var toLat = nLat(n) / 1e7;
+    var toLon = nLon(n) / 1e7;
     var segment = [[fromLon, fromLat]];
     if (geomLocal !== graph.NO_GEOM) {
       var pts = await graph.decodeGeomForEdge(sourceNode, geomLocal);
@@ -883,11 +907,11 @@ async function findRoute(startNode, endNode, ctx) {
   if (!graph.isSpatial) {
     throw new Error('worker only handles spatial-v2 graphs');
   }
-  var nodesScaled = graph.nodesScaled;
-  var startLat = nodesScaled[startNode * 2] / 1e7;
-  var startLon = nodesScaled[startNode * 2 + 1] / 1e7;
-  var endLat = nodesScaled[endNode * 2] / 1e7;
-  var endLon = nodesScaled[endNode * 2 + 1] / 1e7;
+  var nLat = graph.nodeLatE7, nLon = graph.nodeLonE7;
+  var startLat = nLat(startNode) / 1e7;
+  var startLon = nLon(startNode) / 1e7;
+  var endLat = nLat(endNode) / 1e7;
+  var endLon = nLon(endNode) / 1e7;
   var crow = haversine(startLat, startLon, endLat, endLon);
   if (_profile) _profile.crowKm = crow / 1000;
   var override = ctx && ctx.options && ctx.options.route;
