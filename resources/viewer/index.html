@@ -972,6 +972,58 @@ function _wikiArticlePath(qid, w) {
   return t ? t.replace(/ /g, '_') : null;
 }
 
+// Open a bundled Wikipedia article in a full-screen in-app overlay with a
+// "← Back to map" bar, instead of window.open('_blank'). In the Kiwix WebView
+// '_blank' replaces the view with the chrome-less article and leaves no way
+// back (no close/back button). An iframe overlay keeps the map underneath and
+// the back bar is TOP-anchored, so it renders in the Kiwix WebView. Internal
+// article links stay inside the iframe; the bar always returns to the map.
+function openWikiArticle(path) {
+  if (!path) return;
+  var url = baseUrl + 'wiki-article/' + encodeURIComponent(path);
+  var ov = document.getElementById('wiki-article-overlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'wiki-article-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:5000;background:#fff;'
+      + 'display:flex;flex-direction:column;';
+    var bar = document.createElement('div');
+    bar.style.cssText = 'flex:0 0 auto;display:flex;align-items:center;gap:10px;'
+      + 'padding:calc(env(safe-area-inset-top,0px) + 8px) 12px 8px;'
+      + 'background:#2a4a7a;color:#fff;font:600 15px system-ui,-apple-system,sans-serif;'
+      + 'box-shadow:0 1px 4px rgba(0,0,0,0.3);';
+    var back = document.createElement('button');
+    back.type = 'button';
+    back.setAttribute('aria-label', 'Back to map');
+    back.textContent = '← Back to map';
+    back.style.cssText = 'border:0;background:rgba(255,255,255,0.18);color:#fff;'
+      + 'font:600 15px system-ui,-apple-system,sans-serif;padding:8px 14px;'
+      + 'border-radius:8px;cursor:pointer;-webkit-appearance:none;appearance:none;flex:0 0 auto;';
+    back.addEventListener('click', function() {
+      ov.style.display = 'none';
+      var f = document.getElementById('wiki-article-frame');
+      if (f) f.src = 'about:blank';
+    });
+    bar.appendChild(back);
+    var ttl = document.createElement('div');
+    ttl.id = 'wiki-article-title';
+    ttl.style.cssText = 'flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    bar.appendChild(ttl);
+    var fr = document.createElement('iframe');
+    fr.id = 'wiki-article-frame';
+    fr.style.cssText = 'flex:1 1 auto;width:100%;border:0;';
+    ov.appendChild(bar);
+    ov.appendChild(fr);
+    document.body.appendChild(ov);
+  }
+  try {
+    document.getElementById('wiki-article-title').textContent =
+      decodeURIComponent(path).replace(/_/g, ' ');
+  } catch (e) {}
+  document.getElementById('wiki-article-frame').src = url;
+  ov.style.display = 'flex';
+}
+
 // Debug logging — enable by appending ?debug=1 to the URL.
 // Keeps a ring-buffer of the last 200 log lines so we can render them
 // into a visible panel if something goes wrong (consoles are often
@@ -2704,8 +2756,7 @@ function _showPlaceDetail(map, r, idx) {
   if (_detailArt) {
     actions.appendChild(_detailActionBtn(
       'Wikipedia', '📖', false,
-      function() { window.open(baseUrl + 'wiki-article/'
-        + encodeURIComponent(_detailArt), '_blank', 'noopener'); }));
+      function() { openWikiArticle(_detailArt); }));
   }
   panel.appendChild(actions);
 
@@ -4564,7 +4615,7 @@ function initWikidataPopups(map, config) {
       ab.style.cssText = 'display:block;width:100%;margin-top:8px;padding:7px 10px;border:0;border-radius:6px;background:#2a4a7a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;';
       ab.addEventListener('click', function(e) {
         e.stopPropagation();
-        window.open(baseUrl + 'wiki-article/' + encodeURIComponent(articlePath), '_blank', 'noopener');
+        openWikiArticle(articlePath);
       });
       box.appendChild(ab);
     }
@@ -4863,7 +4914,7 @@ function initWikiSidebar(map, config) {
       var ab = createEl('button', 'wiki-article-btn', '📖 Read full article');
       ab.style.cssText = 'display:block;width:100%;margin-bottom:8px;padding:9px 10px;border:0;border-radius:6px;background:#2a4a7a;color:#fff;font-size:14px;font-weight:600;cursor:pointer;box-sizing:border-box;';
       ab.addEventListener('click', function() {
-        window.open(baseUrl + 'wiki-article/' + encodeURIComponent(ap), '_blank', 'noopener');
+        openWikiArticle(ap);
       });
       wrap.appendChild(ab);
     } else {
