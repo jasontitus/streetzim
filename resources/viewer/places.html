@@ -1084,7 +1084,7 @@ function renderResults() {
     // them. Keep the markup lean: icon-only links row.
     // `ws` (website), not `w` — `w` is reserved for the OSM Wikipedia
     // tag in the same record; see commit fa6208b.
-    if (r.ws || r.p || (r.soc && r.soc.length) || r.brand) {
+    if (r.ws || r.p || (r.soc && r.soc.length) || r.brand || r.w) {
       const rich = document.createElement('p');
       rich.className = 'rich';
       if (r.brand) {
@@ -1099,6 +1099,20 @@ function renderResults() {
         const a = document.createElement('a');
         a.href = r.ws; a.target = '_blank'; a.rel = 'noopener';
         a.title = r.ws; a.textContent = '🌐';
+        links.appendChild(a);
+      }
+      if (r.w) {
+        // OSM Wikipedia title ("en:Article Title"), incl. titles backfilled
+        // from a wikidata Q-ID. Links to the public site (the rich detail
+        // panel in index.html prefers a local Wikipedia ZIM when present).
+        const wt = String(r.w), wc = wt.indexOf(':');
+        const isLang = wc >= 2 && wc <= 3 && /^[a-z]+$/i.test(wt.slice(0, wc));
+        const wl = isLang ? wt.slice(0, wc).toLowerCase() : 'en';
+        const wtitle = (isLang ? wt.slice(wc + 1) : wt).replace(/ /g, '_');
+        const a = document.createElement('a');
+        a.href = 'https://' + wl + '.wikipedia.org/wiki/' + encodeURIComponent(wtitle);
+        a.target = '_blank'; a.rel = 'noopener';
+        a.title = 'Wikipedia'; a.textContent = '📖';
         links.appendChild(a);
       }
       if (r.p) {

@@ -3925,6 +3925,9 @@ def create_zim(
     xapian_workdir=None,
     no_llm_bundle=False,
     spatial_chunk_scale=0,
+    bundle_wiki_articles=False,
+    wiki_articles_cache=None,
+    wiki_articles_source=None,
 ):
     """Create a ZIM file containing the map viewer and all tiles.
 
@@ -4450,6 +4453,32 @@ def create_zim(
                 "zim-pack: wikidata", time.time() - _wd_t0,
                 note=f"{len(wikidata_data)} entries → {len(wd_chunks)} chunks, {total_bytes / 1024:.0f} KB")
 
+        # Bundle full Wikipedia article pages (option B) so offline clients
+        # can open + narrate them — kiwix can't deep-link across ZIMs. Titles
+        # come from the cross-ref index (`w` OSM tags + any backfilled from
+        # wikidata via --resolve-wikidata-titles). Stored at
+        # wiki-article/<Title>; mcpzim's articleByTitle reads them there and
+        # its narration cleaner de-noises for TTS. Cached so rebuilds don't
+        # re-crawl. Source: a local Wikipedia ZIM (offline) or the API.
+        if bundle_wiki_articles and wiki_cross_refs:
+            _wa_titles = {e["wikipedia"] for e in wiki_cross_refs.values()
+                          if e.get("wikipedia")}
+            if _wa_titles:
+                from cloud.wiki_articles import bundle_wiki_articles as _bundle_wa
+                _wa_t0 = time.time()
+                _wa_stats = _bundle_wa(
+                    _wa_titles,
+                    lambda path, title, mt, content: creator.add_item(
+                        MapItem(path, title, mt, content)),
+                    cache_dir=wiki_articles_cache,
+                    offline_zim=wiki_articles_source,
+                )
+                PHASE_TIMER.record_subphase(
+                    "zim-pack: wiki-articles", time.time() - _wa_t0,
+                    note=f"{_wa_stats['bundled']} articles, "
+                         f"{_wa_stats['bytes'] // 1024} KB, "
+                         f"{_wa_stats['failed']} missing")
+
         # Add routing graph data.
         # Large regions produce multi-hundred-MB / multi-GB graph.bin
         # files (Japan = 1.8 GB, Europe/US ≥ 3 GB). libzim's default
@@ -4761,6 +4790,8 @@ def create_zim(
             # linearly today; see STREETZIM_CONSUMPTION.md).
             type_counts = {}
             wiki_fields_added = 0
+            wiki_geo = {}  # title_us -> [lat, lon, type]: geo-index for the
+                           # viewer's nearby-Wikipedia list + markers (any zoom)
             cat_chunk_fds = {}
             cat_chunk_counts = {}
             cat_dir = os.path.join(chunk_tmp, "categories")
@@ -4814,6 +4845,25 @@ def create_zim(
                         if wiki:
                             if wiki.get("wikipedia"):
                                 rec["w"] = wiki["wikipedia"]
+                                # Provenance: "wd" = title backfilled from a
+                                # wikidata Q-ID (see --resolve-wikidata-titles);
+                                # absent = the OSM wikipedia= tag itself.
+                                if wiki.get("wikipedia_src"):
+                                    rec["wsrc"] = wiki["wikipedia_src"]
+                                # Geo-index: underscored title -> [lat, lon, type].
+                                # Matches the bundled wiki-article/<Title> path so
+                                # the viewer can list + pin nearby Wikipedia at any
+                                # zoom (no tile scan, no side-loaded bridge).
+                                _wt = wiki["wikipedia"]
+                                _ci = _wt.find(":")
+                                _gt = (_wt[_ci + 1:] if 2 <= _ci <= 3
+                                       and _wt[:_ci].isalpha() else _wt).replace(" ", "_")
+                                if _gt and _gt not in wiki_geo:
+                                    # [lat, lon, type, qid] — qid lets the viewer
+                                    # pull the wikidata blurb from wikidata/<prefix>.
+                                    wiki_geo[_gt] = [round(feat["lat"], 5),
+                                                     round(feat["lon"], 5), t,
+                                                     wiki.get("wikidata")]
                             if wiki.get("wikidata"):
                                 rec["q"] = wiki["wikidata"]
                         entry = json.dumps(rec, separators=(",", ":")) + "\n"
@@ -5059,6 +5109,19 @@ def create_zim(
                 ))
                 print(f"    Added category-index: "
                       f"{len(cat_chunk_counts)} categories, {cat_total_records} records")
+                # Wiki geo-index: {title: [lat, lon, type]} for every placed
+                # bundled-article, so the viewer renders the nearby-Wikipedia
+                # list + map markers at any zoom without scanning vector tiles
+                # or a side-loaded bridge. Tiny (~0.005% of the ZIM).
+                if wiki_geo:
+                    creator.add_item(MapItem(
+                        "wiki-geo-index.json",
+                        "Wikipedia Geo Index",
+                        "application/json",
+                        json.dumps(wiki_geo, separators=(",", ":")).encode("utf-8"),
+                    ))
+                    print(f"    Added wiki-geo-index: {len(wiki_geo)} placed "
+                          f"articles", flush=True)
                 PHASE_TIMER.record_subphase(
                     "zim-pack: chips + category-index", time.time() - _cat_t0,
                     note=f"{len(cat_chunk_counts)} categories, {cat_total_records:,} records"
@@ -5686,6 +5749,40 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "pass. The chip-*.json files (Find page) are still "
                              "derived from poi+park records — they survive the "
                              "drop.")
+    parser.add_argument("--resolve-wikidata-titles", action="store_true",
+                        help="For search-index records that carry an OSM "
+                             "`wikidata=` Q-ID but no `wikipedia=` tag, resolve "
+                             "the Q-ID to its English Wikipedia title and fill "
+                             "`w` so mcpzim can cross-link them to a Wikipedia "
+                             "ZIM by title (no mcpzim change needed). Uses the "
+                             "public Wikidata API by default; pass "
+                             "--wikidata-title-map for an offline build. Lifts "
+                             "the directly-linkable distinct-article count ~2.4x "
+                             "on California. See docs/wikidata-title-resolution.md.")
+    parser.add_argument("--wikidata-title-cache", metavar="JSON",
+                        help="JSON cache for Q-ID->title resolutions; reused "
+                             "across rebuilds so the Wikidata API is hit once.")
+    parser.add_argument("--wikidata-title-map", metavar="TSV",
+                        help="Offline `Q-ID<TAB>Title` map; when set, "
+                             "--resolve-wikidata-titles uses it instead of the "
+                             "network (air-gapped builds).")
+    parser.add_argument("--bundle-wiki-articles", action="store_true",
+                        help="Store full Wikipedia article pages at "
+                             "wiki-article/<Title> for every linkable POI (the "
+                             "`w` set + any --resolve-wikidata-titles backfill), "
+                             "trimmed to a compact reader page. Lets offline "
+                             "clients open + narrate articles without a separate "
+                             "Wikipedia ZIM (kiwix can't deep-link across ZIMs). "
+                             "~0.2-1% size on California. Cached so rebuilds "
+                             "don't re-crawl. See docs/wikidata-title-resolution.md.")
+    parser.add_argument("--wiki-articles-cache", metavar="DIR", default=None,
+                        help="Disk cache for fetched article HTML (default: "
+                             "wiki_articles_cache/). Reused across rebuilds.")
+    parser.add_argument("--wiki-articles-source", metavar="ZIM", default=None,
+                        help="Local Wikipedia ZIM to read articles from "
+                             "(offline, fast, no crawl). Omit to fetch from the "
+                             "public Wikipedia API. Use a FULL enwiki ZIM for "
+                             "coverage; a 'top'/subset misses long-tail POIs.")
     parser.add_argument("--spatial-chunk-scale", type=int, default=0, metavar="N",
                         help="Convert the monolithic routing graph into the "
                              "spatial SZCI/SZRC layout in-build (N = cells per "
@@ -5958,6 +6055,19 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 except Exception as _e:
                     print(f"    Warning: wiki cross-ref extraction failed: {_e}")
                     wiki_cross_refs = None
+                # Optionally backfill `wikipedia` from `wikidata` so records
+                # that carry only a Q-ID become title-linkable to a Wikipedia
+                # ZIM (the chunker writes the filled title into rec["w"]).
+                if getattr(args, "resolve_wikidata_titles", False) and wiki_cross_refs:
+                    try:
+                        from cloud.wikidata_titles import augment_wiki_cross_refs
+                        augment_wiki_cross_refs(
+                            wiki_cross_refs,
+                            cache_path=getattr(args, "wikidata_title_cache", None),
+                            offline_map=getattr(args, "wikidata_title_map", None),
+                        )
+                    except Exception as _e:
+                        print(f"    Warning: wikidata->title resolution failed: {_e}")
 
         # Build Wikidata cache if requested
         wikidata_data = None
@@ -6390,6 +6500,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             xapian_workdir=tmpdir,
             no_llm_bundle=bool(getattr(args, "no_llm_bundle", False)),
             spatial_chunk_scale=int(getattr(args, "spatial_chunk_scale", 0) or 0),
+            bundle_wiki_articles=bool(getattr(args, "bundle_wiki_articles", False)),
+            wiki_articles_cache=getattr(args, "wiki_articles_cache", None),
+            wiki_articles_source=getattr(args, "wiki_articles_source", None),
         )
 
         # Stop the phase timer (no further phases will be printed

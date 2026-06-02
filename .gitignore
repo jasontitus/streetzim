@@ -13,6 +13,7 @@ terrain_cache*/
 terrain_compression_test/
 world-data/
 wikidata_cache/
+wiki_articles_cache/
 
 # web/drive/viewer/ and web/drive/fzstd.js are populated by
 # scripts/sync-drive-viewer.sh. We commit them (rather than generating
