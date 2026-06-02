@@ -1184,7 +1184,12 @@ fetchConfig(1)
     locBtn.type = 'button';
     locBtn.title = 'Find my location';
     locBtn.setAttribute('aria-label', 'Find my location');
-    locBtn.style.cssText = 'position:absolute;right:10px;bottom:96px;z-index:5;'
+    // Lifted well clear of the bottom edge: in the Kiwix app and iOS Safari a
+    // bottom toolbar + home-indicator overlays the lower ~100px, so a
+    // bottom-right control (the old maplibre placement, and an earlier
+    // bottom:96px) sat behind it and was invisible. env() adds the safe-area.
+    locBtn.style.cssText = 'position:absolute;right:10px;'
+      + 'bottom:calc(env(safe-area-inset-bottom, 0px) + 132px);z-index:10;'
       + 'width:40px;height:40px;padding:0;border:none;border-radius:8px;'
       + 'background:#fff;box-shadow:0 1px 4px rgba(0,0,0,0.35);cursor:pointer;'
       + 'display:flex;align-items:center;justify-content:center;'
