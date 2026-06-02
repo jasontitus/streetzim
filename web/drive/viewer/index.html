@@ -1151,38 +1151,80 @@ fetchConfig(1)
     // "You are here" geolocation dot — placed bottom-right to avoid overlapping layer controls.
     // Cache every fix on `window.__streetzimLastLoc` so "Directions to here"
     // and the routing GPS button can fill the origin without re-prompting.
-    var geolocateCtl = new maplibregl.GeolocateControl({
-      positionOptions: { enableHighAccuracy: true },
-      // trackUserLocation:false intentionally — true makes the
-      // control auto-recenter on every GPS update, which yanked the
-      // camera back to the user every time the carousel/route
-      // fitBounds tried to show the result. Drive mode has its own
-      // follow-cam (driveMode.setRoute → projectOnRoute) so we don't
-      // need MapLibre's tracking outside of it. The button still
-      // does a one-shot center when tapped explicitly.
-      trackUserLocation: false,
-      showUserHeading: false
-    });
-    geolocateCtl.on('geolocate', function(pos) {
+    // Custom locate control. MapLibre's GeolocateControl hides its button
+    // unless navigator.permissions.query({name:'geolocation'}) reports the
+    // permission granted — which the Kiwix iOS/macOS WebView never does: its
+    // geolocation bridge (app 3.15.0) wires up getCurrentPosition() but not
+    // navigator.permissions. So we call getCurrentPosition() directly — the
+    // path Kiwix supports and Directions already use — and the button always
+    // shows + works (web and Kiwix). Reuses MapLibre's control CSS so it
+    // looks identical to the native control + the user-location dot.
+    function _onLocated(pos) {
       if (!pos || !pos.coords) return;
       window.__streetzimLastLoc = {
-        lat: pos.coords.latitude,
-        lon: pos.coords.longitude,
-        ts: Date.now()
+        lat: pos.coords.latitude, lon: pos.coords.longitude, ts: Date.now()
       };
-      // Pre-warm the routing cell containing the user's GPS so the
-      // first "Directions to here" doesn't pay a cold cell-fetch on
-      // its starting cell. The bridge is exposed by initRouting; if
-      // routing hasn't initialised yet (very early in load), the
-      // hook below at worker-ready replays this.
+      // Pre-warm the routing cell containing the user's GPS so the first
+      // "Directions to here" doesn't pay a cold cell-fetch.
       if (typeof window.__streetzim_prewarmRoutingCells === 'function') {
         window.__streetzim_prewarmRoutingCells([{
-          lat: pos.coords.latitude,
-          lon: pos.coords.longitude,
+          lat: pos.coords.latitude, lon: pos.coords.longitude
         }]);
       }
-    });
-    map.addControl(geolocateCtl, 'bottom-right');
+    }
+    var _locateMarker = null;
+    var LocateControl = function() {};
+    LocateControl.prototype.onAdd = function(m) {
+      this._map = m;
+      var div = document.createElement('div');
+      div.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'maplibregl-ctrl-geolocate';
+      btn.title = 'Find my location';
+      btn.setAttribute('aria-label', 'Find my location');
+      var icon = document.createElement('span');
+      icon.className = 'maplibregl-ctrl-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      btn.appendChild(icon);
+      var busy = false;
+      btn.addEventListener('click', function() {
+        if (busy) return;
+        if (!navigator.geolocation) {
+          alert('Location is not available on this device.'); return;
+        }
+        busy = true;
+        btn.classList.add('maplibregl-ctrl-geolocate-waiting');
+        navigator.geolocation.getCurrentPosition(function(pos) {
+          busy = false;
+          btn.classList.remove('maplibregl-ctrl-geolocate-waiting');
+          var lon = pos.coords.longitude, lat = pos.coords.latitude;
+          if (_locateMarker) _locateMarker.remove();
+          var el = document.createElement('div');
+          el.className = 'maplibregl-user-location-dot';
+          _locateMarker = new maplibregl.Marker({ element: el })
+            .setLngLat([lon, lat]).addTo(m);
+          m.easeTo({ center: [lon, lat],
+                     zoom: Math.max(m.getZoom(), 14), duration: 800 });
+          _onLocated(pos);
+        }, function(err) {
+          busy = false;
+          btn.classList.remove('maplibregl-ctrl-geolocate-waiting');
+          alert('Could not get your location: '
+                + ((err && err.message) || 'permission denied or unavailable'));
+        }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+      });
+      div.appendChild(btn);
+      this._container = div;
+      return div;
+    };
+    LocateControl.prototype.onRemove = function() {
+      if (this._container && this._container.parentNode) {
+        this._container.parentNode.removeChild(this._container);
+      }
+      this._map = undefined;
+    };
+    map.addControl(new LocateControl(), 'bottom-right');
 
     // Satellite layer toggle
     if (config.hasSatellite) {
