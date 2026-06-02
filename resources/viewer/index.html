@@ -4728,34 +4728,32 @@ function initWikiSidebar(map, config) {
     return 35;
   }
 
-  function ensureWikiMarkerLayer() {
-    if (map.getSource('wiki-markers')) return;
-    map.addSource('wiki-markers', { type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] } });
-    map.addLayer({
-      id: 'wiki-markers-layer', type: 'symbol', source: 'wiki-markers',
-      layout: { 'text-field': '📖', 'text-size': 17, 'text-allow-overlap': false }
-    });
-    map.on('click', 'wiki-markers-layer', function(e) {
-      var f = e.features[0], p = f.properties || {};
-      flyAndDetail({ title: p.title, name: p.name, qid: p.qid || null,
-                     coords: f.geometry.coordinates, type: p.type });
-    });
-    map.on('mouseenter', 'wiki-markers-layer', function() { map.getCanvas().style.cursor = 'pointer'; });
-    map.on('mouseleave', 'wiki-markers-layer', function() { map.getCanvas().style.cursor = ''; });
-  }
+  // HTML markers (DOM 📖 elements) rather than a MapLibre symbol layer: the
+  // ZIM's bundled glyph font has no emoji range, so a symbol text-field of
+  // '📖' renders nothing (and 404s the 128000-128255 glyph range). DOM
+  // elements use the browser font, so the 📖 shows — same as the UI buttons.
+  var _wikiMarkers = [];
   function setWikiMarkers(items) {
-    ensureWikiMarkerLayer();
-    map.getSource('wiki-markers').setData({ type: 'FeatureCollection',
-      features: items.map(function(it) {
-        return { type: 'Feature', geometry: { type: 'Point', coordinates: it.coords },
-                 properties: { title: it.title, name: it.name, qid: it.qid || '', type: it.type || '' } };
-      }) });
+    clearWikiMarkers();
+    items.forEach(function(it) {
+      var el = document.createElement('div');
+      el.className = 'wiki-map-marker';
+      el.textContent = '📖';
+      el.title = it.name;
+      el.style.cssText = 'font-size:18px;line-height:1;cursor:pointer;'
+        + 'text-shadow:0 0 3px #fff,0 1px 2px rgba(255,255,255,0.95);';
+      el.addEventListener('click', function(e) {
+        e.stopPropagation(); flyAndDetail(it);
+      });
+      _wikiMarkers.push(new maplibregl.Marker({ element: el, anchor: 'center' })
+        .setLngLat(it.coords).addTo(map));
+    });
   }
   function clearWikiMarkers() {
-    if (map.getSource('wiki-markers')) {
-      map.getSource('wiki-markers').setData({ type: 'FeatureCollection', features: [] });
+    for (var i = 0; i < _wikiMarkers.length; i++) {
+      try { _wikiMarkers[i].remove(); } catch (e) {}
     }
+    _wikiMarkers = [];
   }
 
   // Fly to a geo item, drop a pulse marker, and show its in-panel detail.
