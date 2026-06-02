@@ -1,6 +1,6 @@
 // routing-worker.js — runs in a Web Worker context.
 //
-// Owns the spatial-v2 routing graph + cell cache + A* multi-phase
+// Owns the spatial routing graph + cell cache + A* multi-phase
 // engine. Frees the main thread from competing with MapLibre repaints
 // during the long-route plateau (cf. project_routing_perf_canada.md).
 //
@@ -14,7 +14,7 @@
 //   {cmd:'cancel', id}                          → cooperatively stops the matching route
 //
 // This worker does NOT include the legacy monolithic v1 binary format
-// — only spatial v2 (SZCI / SZRC). Continent-scale ZIMs all use v2;
+// — only spatial layouts (SZCI / SZRC). New ZIMs use SZCI v3;
 // older ZIMs fall back to the main-thread implementation.
 
 'use strict';
@@ -115,7 +115,7 @@ function handlePrewarmCells(msg) {
     if (cid < 0 || seen.has(cid)) continue;
     seen.add(cid);
     if (graph._cells.has(cid)) continue;
-    graph._ensureCell(cid).catch(function() {}); // best-effort
+    graph._ensureCell(cid, /*priority=*/false).catch(function() {}); // best-effort
     fired++;
   }
   if (fired > 0) {
@@ -136,7 +136,7 @@ function handleInit(msg) {
       return loadNodeShards(idx).then(function() { return idx; });
     })
     .then(function(idx) {
-      graph = new SpatialGraph(idx, /*cacheLimit*/ 12);
+      graph = new SpatialGraph(idx, /*maxResidentBytes*/ 64 * 1024 * 1024);
       self.postMessage({
         type: 'ready',
         format: 'spatial-v' + idx.version,
@@ -197,15 +197,22 @@ function handleSnap(msg) {
       type: 'snap-done', id: msg.id, error: 'graph not loaded',
     });
   }
-  // Main thread does the actual snap-to-nearest using its own
-  // graph copy today; this hook is here for a future refactor.
-  self.postMessage({
-    type: 'snap-done', id: msg.id, error: 'not implemented',
-  });
+  graph.snapNearestNode(Math.round(msg.lat * 1e7), Math.round(msg.lon * 1e7))
+    .then(function(result) {
+      self.postMessage({
+        type: 'snap-done', id: msg.id,
+        node: result.node, lat: result.lat, lon: result.lon,
+      });
+    })
+    .catch(function(err) {
+      self.postMessage({
+        type: 'snap-done', id: msg.id, error: String(err),
+      });
+    });
 }
 
 function handleGetCoords(msg) {
-  if (!graph || !graph.hasNodes || !graph.hasNodes()) {
+  if (!graph) {
     return self.postMessage({
       type: 'coords-done', id: msg.id, error: 'graph not loaded',
     });
@@ -216,10 +223,16 @@ function handleGetCoords(msg) {
       type: 'coords-done', id: msg.id, error: 'node out of range',
     });
   }
-  self.postMessage({
-    type: 'coords-done', id: msg.id,
-    lat: graph.nodeLatE7(n) / 1e7,
-    lon: graph.nodeLonE7(n) / 1e7,
+  graph.nodeCoordsE7(n).then(function(coords) {
+    self.postMessage({
+      type: 'coords-done', id: msg.id,
+      lat: coords[0] / 1e7,
+      lon: coords[1] / 1e7,
+    });
+  }).catch(function(err) {
+    self.postMessage({
+      type: 'coords-done', id: msg.id, error: String(err),
+    });
   });
 }
 
@@ -297,7 +310,7 @@ function parseRoutingCellsIndex(buffer) {
     throw new Error('Invalid cells-index magic');
   }
   var version = view.getUint32(4, true);
-  if (version !== 1 && version !== 2) {
+  if (version !== 1 && version !== 2 && version !== 3) {
     throw new Error('Unsupported SZCI version: ' + version);
   }
   var numNodes = view.getUint32(8, true);
@@ -312,13 +325,16 @@ function parseRoutingCellsIndex(buffer) {
     offset = 32;
     nodesScaled = new Int32Array(buffer, offset, numNodes * 2);
     offset += numNodes * 2 * 4;
-  } else {
+  } else if (version === 2) {
     numNodeShards = view.getUint32(32, true);
     nodesPerShard = view.getUint32(36, true);
     offset = 40;
+  } else {
+    offset = 32;
   }
   var cellLatIdx = new Int32Array(numCells);
   var cellLonIdx = new Int32Array(numCells);
+  var cellBaseNode = new Uint32Array(numCells);
   var cellNodeCount = new Uint32Array(numCells);
   var cellEdgeCount = new Uint32Array(numCells);
   var cellGeomCount = new Uint32Array(numCells);
@@ -326,11 +342,19 @@ function parseRoutingCellsIndex(buffer) {
   for (var i = 0; i < numCells; i++) {
     cellLatIdx[i]    = view.getInt32(offset,      true);
     cellLonIdx[i]    = view.getInt32(offset +  4, true);
-    cellNodeCount[i] = view.getUint32(offset +  8, true);
-    cellEdgeCount[i] = view.getUint32(offset + 12, true);
-    cellGeomCount[i] = view.getUint32(offset + 16, true);
+    if (version === 3) {
+      cellBaseNode[i]  = view.getUint32(offset +  8, true);
+      cellNodeCount[i] = view.getUint32(offset + 12, true);
+      cellEdgeCount[i] = view.getUint32(offset + 16, true);
+      cellGeomCount[i] = view.getUint32(offset + 20, true);
+      offset += 24;
+    } else {
+      cellNodeCount[i] = view.getUint32(offset +  8, true);
+      cellEdgeCount[i] = view.getUint32(offset + 12, true);
+      cellGeomCount[i] = view.getUint32(offset + 16, true);
+      offset += 20;
+    }
     cellKeyToId.set(cellLatIdx[i] + ',' + cellLonIdx[i], i);
-    offset += 20;
   }
   var nameOffsets = new Uint32Array(buffer, offset, numNames + 1);
   offset += (numNames + 1) * 4;
@@ -362,6 +386,7 @@ function parseRoutingCellsIndex(buffer) {
     nodesScaled: nodesScaled,
     cellLatIdx: cellLatIdx,
     cellLonIdx: cellLonIdx,
+    cellBaseNode: cellBaseNode,
     cellNodeCount: cellNodeCount,
     cellEdgeCount: cellEdgeCount,
     cellGeomCount: cellGeomCount,
@@ -370,7 +395,9 @@ function parseRoutingCellsIndex(buffer) {
   // Node-coordinate accessors — work for v1 (inline flat array) and v2
   // (separate shard buffers, never combined into one full-size array, which
   // doubled peak memory and OOM'd dense graphs like California's 7.9M nodes).
-  idx.hasNodes = function() { return !!(idx.nodeShards || idx.nodesScaled); };
+  idx.hasNodes = function() {
+    return idx.version === 3 || !!(idx.nodeShards || idx.nodesScaled);
+  };
   idx.nodeLatE7 = function(n) {
     if (idx.nodeShards) {
       var s = (n / idx.nodesPerShard) | 0;
@@ -386,6 +413,18 @@ function parseRoutingCellsIndex(buffer) {
     return idx.nodesScaled[n * 2 + 1];
   };
   idx.cellForNode = function(nodeIdx) {
+    if (idx.version === 3) {
+      var lo = 0, hi = idx.numCells;
+      while (lo < hi) {
+        var mid = (lo + hi) >>> 1;
+        if (idx.cellBaseNode[mid] <= nodeIdx) lo = mid + 1;
+        else hi = mid;
+      }
+      var cid = lo - 1;
+      return cid >= 0
+        && nodeIdx < idx.cellBaseNode[cid] + idx.cellNodeCount[cid]
+        ? cid : -1;
+    }
     if (!idx.hasNodes()) return -1;
     var latE7 = idx.nodeLatE7(nodeIdx);
     var lonE7 = idx.nodeLonE7(nodeIdx);
@@ -436,13 +475,15 @@ function loadNodeShards(idx) {
   });
 }
 
-function parseRoutingCell(buffer) {
+function parseRoutingCell(index, cid, buffer) {
   var view = new DataView(buffer);
   if (view.getUint32(0, false) !== 0x53_5A_52_43) {
     throw new Error('Invalid SZRC magic');
   }
   var version = view.getUint32(4, true);
-  if (version !== 1) throw new Error('Unsupported SZRC version: ' + version);
+  if (version !== 1 && version !== 2) {
+    throw new Error('Unsupported SZRC version: ' + version);
+  }
   var cellId = view.getUint32(8, true);
   var nodeCount = view.getUint32(12, true);
   var edgeCount = view.getUint32(16, true);
@@ -450,8 +491,16 @@ function parseRoutingCell(buffer) {
   var geomBytes = view.getUint32(24, true);
 
   var off = 28;
-  var cellNodesGlobal = new Uint32Array(buffer, off, nodeCount);
-  off += nodeCount * 4;
+  var baseNode = version === 2 ? index.cellBaseNode[cid] : 0;
+  var cellNodesGlobal = null;
+  var nodesScaled = null;
+  if (version === 1) {
+    cellNodesGlobal = new Uint32Array(buffer, off, nodeCount);
+    off += nodeCount * 4;
+  } else {
+    nodesScaled = new Int32Array(buffer, off, nodeCount * 2);
+    off += nodeCount * 2 * 4;
+  }
   var cellAdj = new Uint32Array(buffer, off, nodeCount + 1);
   off += (nodeCount + 1) * 4;
   var edges = new Uint32Array(buffer, off, edgeCount * 5);
@@ -462,6 +511,10 @@ function parseRoutingCell(buffer) {
   var geomBlobByteStart = off;
 
   function localIdxFor(globalIdx) {
+    if (version === 2) {
+      var local = globalIdx - baseNode;
+      return local >= 0 && local < nodeCount ? local : -1;
+    }
     var lo = 0, hi = nodeCount;
     while (lo < hi) {
       var mid = (lo + hi) >>> 1;
@@ -509,10 +562,13 @@ function parseRoutingCell(buffer) {
 
   return {
     cellId: cellId,
+    byteLength: buffer.byteLength,
+    baseNode: baseNode,
     nodeCount: nodeCount,
     edgeCount: edgeCount,
     geomCount: geomCount,
     cellNodesGlobal: cellNodesGlobal,
+    nodesScaled: nodesScaled,
     cellAdj: cellAdj,
     edges: edges,
     localIdxFor: localIdxFor,
@@ -520,19 +576,21 @@ function parseRoutingCell(buffer) {
   };
 }
 
-function SpatialGraph(index, cacheLimit) {
+function SpatialGraph(index, maxResidentBytes) {
   this._index = index;
   this._cells = new Map();
   this._inFlight = new Map();
   this._lru = [];
-  this._cacheLimit = cacheLimit || 12;
+  this._residentBytes = 0;
+  this._maxResidentBytes = maxResidentBytes || 64 * 1024 * 1024;
+  this._maxConcurrent = 4;
+  this._activeFetches = 0;
+  this._queue = [];
   this.isSpatial = true;
   this.numNodes = index.numNodes;
   this.numEdges = index.numEdges;
   this.numNames = index.numNames;
   this.nodesScaled = index.nodesScaled;
-  this.nodeLatE7 = index.nodeLatE7;   // shard-aware coord accessors (see
-  this.nodeLonE7 = index.nodeLonE7;   // parseCellsIndex) — no full-size copy
   this.NO_GEOM = 0xFFFFFFFF;
   this.getName = function(idx) { return index.getName(idx); };
 }
@@ -542,19 +600,74 @@ SpatialGraph.prototype._cellPath = function(cid) {
   return 'routing-data/graph-cell-' + s + '.bin';
 };
 SpatialGraph.prototype.compact = function(keep) {
-  keep = (keep === undefined) ? Math.min(8, this._cacheLimit) : keep;
+  keep = (keep === undefined) ? 4 : keep;
   while (this._lru.length > keep) {
     var cid = this._lru.shift();
+    var cell = this._cells.get(cid);
+    if (cell) this._residentBytes -= cell.byteLength;
     this._cells.delete(cid);
   }
 };
-SpatialGraph.prototype._ensureCell = function(cid) {
+SpatialGraph.prototype._touch = function(cid) {
+  var idx = this._lru.indexOf(cid);
+  if (idx >= 0) this._lru.splice(idx, 1);
+  this._lru.push(cid);
+};
+SpatialGraph.prototype._evictToBudget = function(protectCid) {
+  while (this._residentBytes > this._maxResidentBytes && this._lru.length > 1) {
+    var cid = this._lru.shift();
+    if (cid === protectCid) {
+      this._lru.push(cid);
+      continue;
+    }
+    var cell = this._cells.get(cid);
+    if (cell) this._residentBytes -= cell.byteLength;
+    this._cells.delete(cid);
+  }
+};
+SpatialGraph.prototype._drainQueue = function() {
+  var self = this;
+  while (self._activeFetches < self._maxConcurrent && self._queue.length) {
+    (function(task) {
+      self._activeFetches++;
+      var fetchT0 = nowMs();
+      var bodyT0 = 0;
+      fetch(BASE_URL + self._cellPath(task.cid))
+        .then(function(r) {
+          if (!r.ok) throw new Error('cell HTTP ' + r.status + ' for ' + task.cid);
+          if (_profile) _profile.cellHttpMs += nowMs() - fetchT0;
+          bodyT0 = nowMs();
+          return r.arrayBuffer();
+        })
+        .then(function(buf) {
+          if (_profile) {
+            _profile.cellBodyMs += nowMs() - bodyT0;
+            _profile.cellFetchMs += nowMs() - fetchT0;
+            _profile.cellBytes += buf.byteLength;
+          }
+          var parseT0 = nowMs();
+          var cell = parseRoutingCell(self._index, task.cid, buf);
+          if (_profile) _profile.cellParseMs += nowMs() - parseT0;
+          self._cells.set(task.cid, cell);
+          self._residentBytes += cell.byteLength;
+          self._touch(task.cid);
+          self._evictToBudget(task.cid);
+          task.resolve(cell);
+        })
+        .catch(task.reject)
+        .then(function() {
+          self._inFlight.delete(task.cid);
+          self._activeFetches--;
+          self._drainQueue();
+        });
+    })(self._queue.shift());
+  }
+};
+SpatialGraph.prototype._ensureCell = function(cid, priority) {
   var self = this;
   if (self._cells.has(cid)) {
     if (_profile) _profile.cellHits++;
-    var idx = self._lru.indexOf(cid);
-    if (idx >= 0) self._lru.splice(idx, 1);
-    self._lru.push(cid);
+    self._touch(cid);
     return Promise.resolve(self._cells.get(cid));
   }
   if (self._inFlight.has(cid)) {
@@ -564,36 +677,71 @@ SpatialGraph.prototype._ensureCell = function(cid) {
     return self._inFlight.get(cid);
   }
   if (_profile) _profile.cellMisses++;
-  var fetchT0 = nowMs();
-  var bodyT0 = 0;
-  var p = fetch(BASE_URL + self._cellPath(cid))
-    .then(function(r) {
-      if (!r.ok) throw new Error('cell HTTP ' + r.status + ' for ' + cid);
-      // HTTP-response time: from fetch() to receiving headers. The
-      // body still has to stream in via arrayBuffer(); time that
-      // separately so we can tell SW round-trip from blob-slice cost.
-      if (_profile) _profile.cellHttpMs += nowMs() - fetchT0;
-      bodyT0 = nowMs();
-      return r.arrayBuffer();
-    })
-    .then(function(buf) {
-      if (_profile) _profile.cellBodyMs += nowMs() - bodyT0;
-      if (_profile) _profile.cellFetchMs += nowMs() - fetchT0;
-      if (_profile) _profile.cellBytes += buf.byteLength;
-      var parseT0 = nowMs();
-      var cell = parseRoutingCell(buf);
-      if (_profile) _profile.cellParseMs += nowMs() - parseT0;
-      self._cells.set(cid, cell);
-      self._lru.push(cid);
-      self._inFlight.delete(cid);
-      if (self._cells.size > self._cacheLimit) {
-        var evict = self._lru.shift();
-        self._cells.delete(evict);
-      }
-      return cell;
-    });
+  var resolveTask, rejectTask;
+  var p = new Promise(function(resolve, reject) {
+    resolveTask = resolve;
+    rejectTask = reject;
+  });
   self._inFlight.set(cid, p);
+  var task = { cid: cid, resolve: resolveTask, reject: rejectTask };
+  if (priority === false) self._queue.push(task);
+  else self._queue.unshift(task);
+  self._drainQueue();
   return p;
+};
+SpatialGraph.prototype.nodeCoordsE7 = function(globalNodeIdx) {
+  var self = this;
+  var cid = self._index.cellForNode(globalNodeIdx);
+  if (cid < 0) return Promise.reject(new Error('node out of range: ' + globalNodeIdx));
+  if (self._index.version !== 3) {
+    return Promise.resolve([
+      self._index.nodeLatE7(globalNodeIdx),
+      self._index.nodeLonE7(globalNodeIdx),
+    ]);
+  }
+  return self._ensureCell(cid).then(function(cell) {
+    var local = globalNodeIdx - cell.baseNode;
+    return [cell.nodesScaled[local * 2], cell.nodesScaled[local * 2 + 1]];
+  });
+};
+SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7) {
+  var scale = this._index.cellScale;
+  var candidates = [];
+  for (var cid = 0; cid < this._index.numCells; cid++) {
+    var la = this._index.cellLatIdx[cid];
+    var lo = this._index.cellLonIdx[cid];
+    var latMin = la * 10_000_000 / scale;
+    var latMax = (la + 1) * 10_000_000 / scale;
+    var lonMin = lo * 10_000_000 / scale;
+    var lonMax = (lo + 1) * 10_000_000 / scale;
+    var dlat = latE7 < latMin ? latMin - latE7 : latE7 > latMax ? latE7 - latMax : 0;
+    var dlon = lonE7 < lonMin ? lonMin - lonE7 : lonE7 > lonMax ? lonE7 - lonMax : 0;
+    candidates.push([dlat * dlat + dlon * dlon, cid]);
+  }
+  candidates.sort(function(a, b) { return a[0] - b[0]; });
+  var bestNode = -1, bestDist = Infinity, bestLat = 0, bestLon = 0;
+  for (var i = 0; i < candidates.length && candidates[i][0] <= bestDist; i++) {
+    var cell = await this._ensureCell(candidates[i][1]);
+    for (var local = 0; local < cell.nodeCount; local++) {
+      var globalNode = cell.nodesScaled
+        ? cell.baseNode + local : cell.cellNodesGlobal[local];
+      var nlat = cell.nodesScaled
+        ? cell.nodesScaled[local * 2] : this._index.nodeLatE7(globalNode);
+      var nlon = cell.nodesScaled
+        ? cell.nodesScaled[local * 2 + 1] : this._index.nodeLonE7(globalNode);
+      var ndlat = nlat - latE7;
+      var ndlon = nlon - lonE7;
+      var dist = ndlat * ndlat + ndlon * ndlon;
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestNode = globalNode;
+        bestLat = nlat;
+        bestLon = nlon;
+      }
+    }
+  }
+  if (bestNode < 0) throw new Error('no routing nodes');
+  return { node: bestNode, lat: bestLat / 1e7, lon: bestLon / 1e7 };
 };
 SpatialGraph.prototype.edgesOfNode = function(globalNodeIdx) {
   var cid = this._index.cellForNode(globalNodeIdx);
@@ -633,12 +781,13 @@ async function findRouteSpatial(startNode, endNode, ctx) {
 }
 
 async function findRouteSpatialFiltered(startNode, endNode, highwayOnly, ctx) {
-  var nLat = graph.nodeLatE7, nLon = graph.nodeLonE7;
+  var startCoords = await graph.nodeCoordsE7(startNode);
+  var endCoords = await graph.nodeCoordsE7(endNode);
   var crowKm = haversine(
-    nLat(startNode) / 1e7,
-    nLon(startNode) / 1e7,
-    nLat(endNode) / 1e7,
-    nLon(endNode) / 1e7
+    startCoords[0] / 1e7,
+    startCoords[1] / 1e7,
+    endCoords[0] / 1e7,
+    endCoords[1] / 1e7
   ) / 1000;
   // Skip optimal pass for very long highway legs (Toronto→Vancouver
   // pattern). cf. project_routing_perf_canada.md.
@@ -670,9 +819,9 @@ async function findRouteSpatialFiltered(startNode, endNode, highwayOnly, ctx) {
 
 async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
                                       GREEDY_WEIGHT, POP_LIMIT, ctx) {
-  var nLat = graph.nodeLatE7, nLon = graph.nodeLonE7;
-  var endLat = nLat(endNode) / 1e7;
-  var endLon = nLon(endNode) / 1e7;
+  var endCoords = await graph.nodeCoordsE7(endNode);
+  var endLat = endCoords[0] / 1e7;
+  var endLon = endCoords[1] / 1e7;
 
   var g = new Map();
   var prev = new Map();
@@ -681,9 +830,10 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
   g.set(startNode, 0);
 
   var open = new MinHeap();
+  var startCoords = await graph.nodeCoordsE7(startNode);
   var h0 = haversine(
-    nLat(startNode) / 1e7,
-    nLon(startNode) / 1e7,
+    startCoords[0] / 1e7,
+    startCoords[1] / 1e7,
     endLat, endLon
   ) / (80 / 3.6);
   open.push([h0, startNode]);
@@ -756,8 +906,9 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
         g.set(target, newG);
         prev.set(target, current);
         prevEdge.set(target, [current, target, speedDist, e[2], e[3], e[4]]);
-        var tLat = nLat(target) / 1e7;
-        var tLon = nLon(target) / 1e7;
+        var targetCoords = await graph.nodeCoordsE7(target);
+        var tLat = targetCoords[0] / 1e7;
+        var tLon = targetCoords[1] / 1e7;
         var h = haversine(tLat, tLon, endLat, endLon) / (80 / 3.6) * GREEDY_WEIGHT;
         open.push([newG + h, target]);
       }
@@ -792,10 +943,12 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     totalDist += distM;
     segRev.push({ nameIdx: nameIdx, distM: distM, flags: manFlags });
 
-    var fromLat = nLat(sourceNode) / 1e7;
-    var fromLon = nLon(sourceNode) / 1e7;
-    var toLat = nLat(n) / 1e7;
-    var toLon = nLon(n) / 1e7;
+    var fromCoords = await graph.nodeCoordsE7(sourceNode);
+    var toCoords = await graph.nodeCoordsE7(n);
+    var fromLat = fromCoords[0] / 1e7;
+    var fromLon = fromCoords[1] / 1e7;
+    var toLat = toCoords[0] / 1e7;
+    var toLon = toCoords[1] / 1e7;
     var segment = [[fromLon, fromLat]];
     if (geomLocal !== graph.NO_GEOM) {
       var pts = await graph.decodeGeomForEdge(sourceNode, geomLocal);
@@ -905,13 +1058,14 @@ function concatenateLegs(legs) {
 
 async function findRoute(startNode, endNode, ctx) {
   if (!graph.isSpatial) {
-    throw new Error('worker only handles spatial-v2 graphs');
+    throw new Error('worker only handles spatial graphs');
   }
-  var nLat = graph.nodeLatE7, nLon = graph.nodeLonE7;
-  var startLat = nLat(startNode) / 1e7;
-  var startLon = nLon(startNode) / 1e7;
-  var endLat = nLat(endNode) / 1e7;
-  var endLon = nLon(endNode) / 1e7;
+  var startCoords = await graph.nodeCoordsE7(startNode);
+  var endCoords = await graph.nodeCoordsE7(endNode);
+  var startLat = startCoords[0] / 1e7;
+  var startLon = startCoords[1] / 1e7;
+  var endLat = endCoords[0] / 1e7;
+  var endLon = endCoords[1] / 1e7;
   var crow = haversine(startLat, startLon, endLat, endLon);
   if (_profile) _profile.crowKm = crow / 1000;
   var override = ctx && ctx.options && ctx.options.route;
@@ -960,7 +1114,7 @@ function _prewarmCorridor(startLat, startLon, endLat, endLon, crowM) {
     seen.add(cid);
     if (graph._cells.has(cid)) continue;
     // Kick off the fetch — A* awaits via _inFlight when it gets there.
-    graph._ensureCell(cid).catch(function() { /* ignore, A* will retry */ });
+    graph._ensureCell(cid, /*priority=*/false).catch(function() { /* ignore, A* will retry */ });
   }
   if (_profile) {
     _profile.prewarmCells = seen.size;

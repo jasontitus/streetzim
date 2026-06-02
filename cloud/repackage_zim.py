@@ -507,7 +507,7 @@ def repackage(src_path: str, dst_path: str,
     # else passes through from the source ZIM unchanged).
     replacements = {}
     if swap_viewer:
-        for name in ("index.html", "places.html"):
+        for name in ("index.html", "places.html", "routing-worker.js"):
             p = VIEWER_DIR / name
             if p.exists():
                 replacements[name] = p.read_bytes()
@@ -1219,8 +1219,11 @@ def repackage(src_path: str, dst_path: str,
                 continue  # Already swapped above
             except Exception:
                 pass
-            mime = "text/html"
-            title = "Map" if name == "index.html" else "Find places"
+            mime = ("application/javascript"
+                    if name.endswith(".js") else "text/html")
+            title = ("Map" if name == "index.html"
+                     else "Routing Worker" if name.endswith(".js")
+                     else "Find places")
             is_front = (name == "index.html")
             class NewViewerItem(Item):
                 def __init__(self, path, data, title, mime, is_front):

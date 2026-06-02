@@ -8,7 +8,7 @@ Palo Alto) — takes **20+ seconds "loading routing data"** and then the tab
 
 ## Root cause
 
-The routing graph loads the **global node-coordinate table** the first time a
+Legacy routing graphs load the **global node-coordinate table** the first time a
 route runs, regardless of how local the route is. For a spatial-v2 ZIM the node
 coordinates live in sharded files `routing-data/nodes-scaled-NNN.bin`, and
 `loadNodeShards()` does two memory-heavy things:
@@ -38,62 +38,38 @@ It is the flip side of the `nodes_scaled` sharding: the shards were moved out of
 the cells-index, but the worker/main-thread still pull all of them into one
 full-size array.
 
-## Status (2026-06-02)
+## Resolution (2026-06-02)
 
-- **Worker half: done** — `f2edb21` "routing(worker): index node coords from
-  shards, drop the 60 MB combined copy". `loadNodeShards` now keeps the shard
-  buffers separate and indexes the owning shard via `nodeLatE7`/`nodeLonE7`
-  accessors (math cross-checked against the ZIM). Removes one of the two 60 MB
-  allocations. **Committed + pushed; not yet deployed to web or baked into a
-  ZIM.** Note: `swap_viewer_rust.py` only swaps `index.html`/`places.html`, so
-  the routing-worker fix reaches a ZIM only via a deploy (web) and a rebuild or
-  an extended swap (ZIM).
-- **Main thread: not started** — `index.html` still builds the combined array
-  and has ~30 flat-access sites across two graph types (monolithic + spatial).
+New spatial builds use **SZCI v3 + SZRC v2**:
 
-## Fix options
+- Nodes are reindexed into cell-major order during packing.
+- Each cell payload carries its own node coordinates, adjacency, edges, and
+  geometries.
+- The small SZCI index stores `base_node + node_count` for each cell. Readers
+  resolve node ownership with a binary search over those ranges.
+- Edges are rewritten to the cell-major node IDs during packing.
+- Endpoint snapping orders cells by geometric lower bound and stops loading
+  once no unloaded cell can beat the best candidate.
+- The worker cache is bounded by resident bytes (`64 MB`) rather than a fixed
+  number of cells, and cell I/O is capped at four concurrent requests.
 
-### Option 1 — finish the main-thread half (recommended now)
+There is no `routing-data/nodes-scaled-NNN.bin` table in v3. A local route no
+longer downloads or allocates coordinates for the entire region.
 
-Apply the same shard-accessor change to the main-thread graph in `index.html`
-(mirrors the worker fix): add `nodeLatE7`/`nodeLonE7` to the spatial parser +
-`SpatialGraph`, stop building the combined array in `loadNodeShards`, and
-rewrite the ~30 `nodesScaled[n*2]` access sites to the accessors (with a
-fallback so the monolithic/non-spatial graph path keeps working).
+The embedded viewer now bundles `routing-worker.js` inside every new ZIM.
+Normal Kiwix use routes and snaps in that worker. The main thread retains a
+lazy v3 fallback for WebViews where worker startup fails.
 
-- **Effect:** removes the second 60 MB allocation; peak ~240 MB → ~120 MB.
-  Stops the OOM.
-- **Does NOT fix** the ~20 s load — both contexts still download the full 60 MB
-  node table.
-- **Risk:** edits to live navigation code; the browser harness can confirm the
-  graph *loads* cleanly but not that a route is *correct*, so a human spot-check
-  of a real route is needed before shipping.
-- **Verify:** Playwright harness clean-load + grep for zero remaining flat
-  `nodesScaled[` in the spatial path; then a manual Palo Alto route on the web
-  viewer before baking into the ZIM.
+Legacy SZCI v1/v2 readers remain for existing ZIMs, but new region rebuilds
+should use `--spatial-chunk-scale 10`.
 
-### Option 2 — ship the worker fix only (already committed)
+## Verification
 
-Leave the main thread as-is.
-
-- **Effect:** peak ~240 MB → ~180 MB. Lower risk, no further changes.
-- **Downside:** the main-thread 60 MB array remains, so it may still OOM on the
-  tightest devices.
-
-### Option 3 — the proper fix: per-cell node coordinates
-
-Re-bundle node coordinates **per routing cell** (each `graph-cell-NNNNN.bin`
-carries its own nodes' coordinates) instead of a global `nodes-scaled` table, so
-a local route loads only the handful of cells it touches (a few hundred KB),
-never the whole 60 MB table.
-
-- **Effect:** fixes **both** the 20 s first-route load **and** the OOM, and
-  scales to every region — local routes become cheap everywhere.
-- **Cost:** a build-format change in `create_osm_zim.py` (+ the routing graph
-  emitter) and a full **rebuild** of each region's ZIM; worker + main-thread
-  readers updated to read coords from cells.
-
-## Recommendation
-
-Do **Option 1** now to stop the crash (with a human route spot-check), then
-schedule **Option 3** as the real load-time fix for the next rebuild cycle.
+- `tests/test_spatial_chunking.py` covers cell-local coordinates, edge
+  remapping, lazy routes, cache behavior, and boundary snapping.
+- `tests/test_routing_worker_v3.py` runs the actual worker message protocol
+  against a generated v3 graph and checks snap + route results.
+- `cloud/validate_zim.py` identifies the SZCI version and warns on legacy
+  eager-coordinate layouts.
+- `cloud/validate_platforms.py` models legacy node shards separately from the
+  v3 bounded cell cache.

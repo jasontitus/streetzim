@@ -62,10 +62,10 @@ def find_route_spatial(
     if start == end:
         return SpatialRoute(start, end, 0.0, 0.0, [start], [])
 
-    nodes = g.nodes_scaled
     num_nodes = g.num_nodes
-    end_lat = int(nodes[end * 2]) / 1e7
-    end_lon = int(nodes[end * 2 + 1]) / 1e7
+    end_lat_e7, end_lon_e7 = g.node_coords_e7(end)
+    end_lat = end_lat_e7 / 1e7
+    end_lon = end_lon_e7 / 1e7
 
     INF = math.inf
     gscore = [INF] * num_nodes
@@ -76,8 +76,9 @@ def find_route_spatial(
     prev_edge: list = [None] * num_nodes
     closed = bytearray(num_nodes)
 
-    start_lat = int(nodes[start * 2]) / 1e7
-    start_lon = int(nodes[start * 2 + 1]) / 1e7
+    start_lat_e7, start_lon_e7 = g.node_coords_e7(start)
+    start_lat = start_lat_e7 / 1e7
+    start_lon = start_lon_e7 / 1e7
     h0 = haversine_m(start_lat, start_lon, end_lat, end_lon) / HEURISTIC_SPEED_MPS
 
     heap: list = []
@@ -122,8 +123,9 @@ def find_route_spatial(
                 gscore[target] = new_g
                 prev[target] = current
                 prev_edge[target] = (dist_m, geom_local, name_idx, class_access)
-                t_lat = int(nodes[target * 2]) / 1e7
-                t_lon = int(nodes[target * 2 + 1]) / 1e7
+                t_lat_e7, t_lon_e7 = g.node_coords_e7(target)
+                t_lat = t_lat_e7 / 1e7
+                t_lon = t_lon_e7 / 1e7
                 dlat = _radians(end_lat - t_lat)
                 dlon = _radians(end_lon - t_lon)
                 shd = _sin(dlat * 0.5)

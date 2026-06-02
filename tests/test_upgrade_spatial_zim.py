@@ -30,7 +30,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tests.szrg_reader import parse_szrg_bytes  # noqa: E402
-from tests.szrg_spatial import build_spatial  # noqa: E402
+from tests.szrg_spatial import (  # noqa: E402
+    SZCI_MAGIC, SZCI_VERSION_INLINE, SZRC_MAGIC,
+    build_spatial, parse_szci, parse_szrc,
+)
 from tests.test_spatial_chunking import _pack_v4_graph  # noqa: E402
 
 
@@ -70,7 +73,50 @@ def _build_v1_spatial_zim(zim_path: Path, *, with_fulltext: bool) -> dict:
         (2, 0, 1000, 30, 0xFFFFFFFF, 0),
     ]
     g = parse_szrg_bytes(_pack_v4_graph(nodes, edges))
-    idx_bytes_v1, cells_v1, _meta = build_spatial(g, cell_scale=10)
+    idx_bytes_v3, cells_v3, _meta = build_spatial(g, cell_scale=10)
+    idx_v3 = parse_szci(idx_bytes_v3)
+
+    # Production builds now emit SZCI v3. This fixture intentionally
+    # reconstructs the legacy v1 representation so the standalone
+    # v1→v2 upgrader remains covered.
+    nodes_blob = bytearray()
+    cells_v1 = {}
+    cell_meta = bytearray()
+    for cid in range(idx_v3.num_cells):
+        base = int(idx_v3.cell_base_node[cid])
+        cell = parse_szrc(cells_v3[cid], base_node=base)
+        nodes_blob.extend(cell.nodes_scaled.tobytes())
+        cell_meta.extend(struct.pack(
+            "<iiIII",
+            int(idx_v3.cell_lat_idx[cid]),
+            int(idx_v3.cell_lon_idx[cid]),
+            cell.node_count,
+            int(idx_v3.cell_edge_count[cid]),
+            int(idx_v3.cell_geom_count[cid]),
+        ))
+        # SZRC v1 stores explicit global IDs where v2 stores coordinates.
+        old_tail = cells_v3[cid][28 + cell.node_count * 8:]
+        old_nodes = struct.pack(
+            f"<{cell.node_count}I",
+            *range(base, base + cell.node_count),
+        )
+        cells_v1[cid] = (
+            SZRC_MAGIC
+            + struct.pack("<6I", 1, cid, cell.node_count,
+                          int(idx_v3.cell_edge_count[cid]),
+                          int(idx_v3.cell_geom_count[cid]),
+                          len(cell.geom_blob))
+            + old_nodes + old_tail
+        )
+    idx_bytes_v1 = (
+        SZCI_MAGIC
+        + struct.pack("<7I", SZCI_VERSION_INLINE, idx_v3.num_nodes,
+                      idx_v3.num_edges, idx_v3.num_names,
+                      len(idx_v3.names_blob), idx_v3.num_cells,
+                      idx_v3.cell_scale)
+        + bytes(nodes_blob) + bytes(cell_meta)
+        + idx_v3.name_offsets.tobytes() + idx_v3.names_blob
+    )
 
     # --- Construct ZIM ----------------------------------------------------
     class _Item(Item):
@@ -226,3 +272,6 @@ def test_upgrade_preserves_szci_v2_and_search_chunks(tmp_path):
     dst_leaf = bytes(dst_arc.get_entry_by_path(
         "search-data/aa.json").get_item().content)
     assert dst_leaf == src_leaf, "below-threshold search leaf must pass through byte-identical"
+    worker = bytes(dst_arc.get_entry_by_path(
+        "routing-worker.js").get_item().content)
+    assert b"handleSnap" in worker, "viewer upgrade must add the routing worker"

@@ -1,8 +1,8 @@
-# Routing in the StreetZim Drive PWA
+# Routing in StreetZim
 
 This document describes how driving directions are computed in the
-`streetzim.web.app/drive/` PWA, and how the implementation was tuned
-to work on iOS Safari with its hard ~1.5 GB JS-heap ceiling.
+embedded Kiwix viewer and `streetzim.web.app/drive/` PWA, and how the
+implementation is tuned for memory-constrained mobile WebViews.
 
 ## Algorithm chain
 
@@ -60,16 +60,16 @@ stay well under that. Per-route memory budget at peak:
 
 | Component | Size | Comment |
 |---|---|---|
-| Cell cache (cap = 4) | ~140 MB | Each Japan 1° cell is ~36 MB JS-decoded. |
+| Cell cache (byte budget) | ≤64 MB | Scale-10 SZCI v3 cells are fetched lazily. |
 | Visited-node Maps | up to ~300 MB | `g`/`prev`/`prevEdge`/`closed`. ~440 B per visited node × pop limit. |
 | MapLibre tiles + DOM | ~100 MB | Constant-ish. |
 | **Routing peak** | **~500–600 MB** | Measured on Tokyo→Oita with the harness. |
 
 Knobs in `resources/viewer/index.html`:
 
-* `SpatialGraph` constructor: `cacheLimit = 4`. Drops cells aggressively
-  during long-distance routing. Re-fetches are cheap if the user
-  routes again across the same corridor.
+* `SpatialGraph` constructor: `maxResidentBytes = 64 MB`. Drops cells
+  aggressively during long-distance routing. Cell I/O is capped at four
+  concurrent requests; route-critical fetches jump ahead of prewarm work.
 * Per-phase compaction: `graph.compact(4)` between two-pass legs;
   `graph.compact(0)` before any route with crow-fly > 100 km
   (the "pre-route cleanup" pause + GC yields).
@@ -78,6 +78,8 @@ Knobs in `resources/viewer/index.html`:
 * Sparse-state algorithm: `Map<int, X>` instead of typed arrays
   sized for `numNodes`. Eliminates the ~370 MB up-front allocation
   the old code paid even on a 1.5 km route.
+* SZCI v3: node coordinates live inside cell payloads. Startup loads only
+  compact cell metadata and names; there is no region-wide coordinate table.
 
 ## Debug instrumentation
 
@@ -91,7 +93,7 @@ A* expansions during a route. Lines:
 A* highway-only greedy×2 · 174,000 nodes · 4 cells
 elapsed: 89.4s
 pops: 174000
-cells: 4 / cap 4 = 144 MB
+cells: 18 = 42 / 64 MB budget
 est. visited Maps: 73 MB
 est. heap (no Safari): ~832 MB (144 cells + 73 visit, ×2 overhead)
 ```

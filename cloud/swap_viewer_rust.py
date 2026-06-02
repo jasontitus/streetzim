@@ -12,8 +12,9 @@ This tool emits via :class:`ManifestCreator` (cloud.manifest_writer)
 which honours per-item `_namespace='X'`. It walks the source's
 `all_entry_count` (not just `entry_count`) so Xapian entries are
 picked up, sets `_namespace='X', _compress=False` for them, and
-swaps the two viewer files (``index.html`` and ``places.html``).
-Everything else copies byte-for-byte from the source.
+swaps the viewer files (``index.html``, ``places.html``, and
+``routing-worker.js``). Large routing entries stay uncompressed so Kiwix
+WebViews do not stall while inflating oversized clusters.
 
 Scope: viewer swap ONLY. No routing changes, no chip-split, no
 search-data rewrites, no terrain refresh. Use `repackage_zim.py` for
@@ -65,7 +66,7 @@ def swap_viewer_rust(src_path: str, dst_path: str) -> int:
 
     # Collect viewer replacements from disk.
     replacements: dict[str, bytes] = {}
-    for name in ("index.html", "places.html"):
+    for name in ("index.html", "places.html", "routing-worker.js"):
         p = VIEWER_DIR / name
         if not p.exists():
             print(f"  warning: {p} missing; that viewer file will NOT be swapped")
@@ -99,6 +100,7 @@ def swap_viewer_rust(src_path: str, dst_path: str) -> int:
     illustration_count = 0
     redirects = 0
     kept = 0
+    replaced_paths: set[str] = set()
 
     with creator as c:
         # Copy metadata entries verbatim (Title, Description, Date, Name,
@@ -162,6 +164,7 @@ def swap_viewer_rust(src_path: str, dst_path: str) -> int:
                 c.add_item(_Item(path, mime, title=title,
                                  data=replacements[path],
                                  compress=True, namespace=None))
+                replaced_paths.add(path)
                 swapped += 1
                 continue
 
@@ -187,10 +190,27 @@ def swap_viewer_rust(src_path: str, dst_path: str) -> int:
                                  compress=False, namespace="X"))
                 xapian += 1
             else:
+                # Large routing entries must remain raw. Kiwix WebViews
+                # can time out while decompressing a huge fzstd cluster.
+                compress = not (
+                    path == "routing-data/graph-cells-index.bin"
+                    or path.startswith("routing-data/graph-cell-")
+                ) or len(data) < 200 * 1024 * 1024
                 c.add_item(_Item(path, mime, title=title,
                                  data=data,
-                                 compress=True, namespace=None))
+                                 compress=compress, namespace=None))
                 kept += 1
+
+        for path, data in replacements.items():
+            if path in replaced_paths:
+                continue
+            mime = ("application/javascript"
+                    if path.endswith(".js") else "text/html")
+            title = ("Routing Worker" if path.endswith(".js")
+                     else "Map" if path == "index.html" else "Find places")
+            c.add_item(_Item(path, mime, title=title, data=data,
+                             compress=True, namespace=None))
+            swapped += 1
 
     elapsed = time.time() - started
     print(f"\n  done in {elapsed:.1f}s")

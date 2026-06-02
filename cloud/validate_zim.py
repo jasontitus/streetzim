@@ -917,13 +917,23 @@ def _chk_routing_kiwix_compat(arc, cfg) -> tuple[str, str]:
         elif e.path.startswith("routing-data/graph-cell-") and e.path.endswith(".bin"):
             cell_count += 1
 
-    # Shape 2: spatial. Preferred for big graphs; every client handles
-    # it via lazy cell loading.
+    # Shape 2: spatial. SZCI v3 keeps coordinates cell-local; older
+    # spatial versions still carry an eager region-wide coordinate table.
     if has_spatial:
+        try:
+            idx_bytes = bytes(arc.get_entry_by_path(
+                "routing-data/graph-cells-index.bin").get_item().content)
+            idx_version = int.from_bytes(idx_bytes[4:8], "little")
+        except Exception as exc:
+            return ("fail", f"spatial index unreadable: {exc}")
         idx_mb = cells_index_bytes / (1024 * 1024)
+        if idx_version < 3:
+            return ("warn",
+                    f"legacy spatial SZCI v{idx_version} ({cell_count} cells, "
+                    f"{idx_mb:.0f} MB index) — eager global coordinates remain")
         return ("pass",
-                f"spatial ({cell_count} cells, {idx_mb:.0f} MB index) "
-                f"— lazy-loaded, mobile-safe")
+                f"spatial SZCI v{idx_version} ({cell_count} cells, "
+                f"{idx_mb:.0f} MB index) — cell-local coordinates")
 
     # Shape 1: monolithic.
     if has_monolithic:
@@ -937,7 +947,7 @@ def _chk_routing_kiwix_compat(arc, cfg) -> tuple[str, str]:
         return ("fail",
                 f"chunked-only graph ({chunk_count} chunks, "
                 f"{total_mb:.0f} MB) — Kiwix native clients cannot load; "
-                f"emit spatial (--spatial-chunk-scale 1) or monolithic "
+                f"emit spatial (--spatial-chunk-scale 10) or monolithic "
                 f"(--unchunk-graph).")
     return ("fail",
             "hasRouting=True but no graph.bin or spatial index found")
@@ -1100,10 +1110,14 @@ def _chk_routing(arc, cfg, zim_path: str) -> tuple[str, str]:
             sg = load_spatial_from_zim(zim_path, cache_limit=8)
             # Pick an arbitrary source node with at least one edge.
             cell0 = sg._ensure_cell(0)
-            if cell0.cell_nodes_global.shape[0] < 2:
+            if cell0.node_count < 2:
                 return ("warn", f"spatial · cell 0 has too few nodes")
-            s = int(cell0.cell_nodes_global[0])
-            e = int(cell0.cell_nodes_global[min(50, cell0.cell_nodes_global.shape[0]-1)])
+            if cell0.nodes_scaled.shape[0]:
+                s = cell0.base_node
+                e = cell0.base_node + min(50, cell0.node_count - 1)
+            else:
+                s = int(cell0.cell_nodes_global[0])
+                e = int(cell0.cell_nodes_global[min(50, cell0.node_count - 1)])
             r = find_route_spatial(sg, s, e, max_pops=500_000)
             status = "ok" if r else "unreachable"
             return ("pass",

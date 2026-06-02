@@ -166,7 +166,7 @@ if [ "${graph_mb:-0}" -gt 500 ]; then
     log "graph.bin=${graph_mb} MB > 500 — repackaging to spatial layout"
     spatial_out="${out%.zim}-spatial.zim"
     if ! ./venv312/bin/python3 cloud/repackage_zim.py \
-            "$out" "$spatial_out" --spatial-chunk-scale 1 \
+            "$out" "$spatial_out" --spatial-chunk-scale 10 \
             > "${id}-spatial.log" 2>&1; then
         echo "[FATAL] spatial repackage failed for $id — see ${id}-spatial.log"
         exit 3

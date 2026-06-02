@@ -130,7 +130,7 @@ pass too (depending on what's deployed). Open the ZIM in iOS Kiwix
 or Kiwix Desktop and Directions stays at "Loading routing data…",
 console error: `Failed to load routing graph: HTTP absent`.
 
-**Cause.** `repackage_zim.py` emits **SZCI v1** (nodes inline in
+**Historical cause.** `repackage_zim.py` emitted **SZCI v1** (nodes inline in
 `graph-cells-index.bin`) for small graphs and **SZCI v2** (nodes
 sharded into `routing-data/nodes-scaled-NNN.bin` files) once node
 count crosses the inline-threshold. Continent-scale builds and
@@ -167,11 +167,17 @@ serving the freshly-built ZIM is the load-bearing gate here. The
 PWA viewer is downstream — it's a deployment artifact, not the
 contract surface for native Kiwix consumers.
 
+**Current format.** New builds emit **SZCI v3 + SZRC v2**. Coordinates
+live inside cells, `routing-worker.js` is bundled into the ZIM, and the
+small index stores contiguous node ranges. Any future format bump must
+update the embedded viewer, worker, Python reader, and native-ZIM smoke
+gate together.
+
 ---
 
 ## 5. Repackage flag traps when the source is already-repacked
 
-`build_region.sh` runs `cloud/repackage_zim.py --spatial-chunk-scale 1`
+`build_region.sh` runs `cloud/repackage_zim.py --spatial-chunk-scale 10`
 internally whenever the create_osm_zim graph exceeds 500 MB (Iran,
 California, Ukraine, Canada, …). That internal repack uses the
 default `drop_llm_bundle=True`, so by the time the wrapper's
