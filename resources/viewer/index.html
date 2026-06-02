@@ -938,7 +938,9 @@ var baseUrl = (function() {
 // (served by the drive service worker). Absent (e.g. plain Kiwix) -> popups
 // just show the wikidata blurb as before. This is a transitional side-load;
 // once the bridge is baked into the ZIM the fetch simply falls back to it.
-var WIKI_QID_TITLES = null;
+var WIKI_QID_TITLES = null;   // optional side-load bridge (transitional)
+var WIKI_GEO_INDEX = null;    // {title:[lat,lon,type,qid]} from the ZIM's wiki-geo-index.json
+var WIKI_GEO_QID = null;      // reverse {qid:title} built from WIKI_GEO_INDEX
 (function loadWikiTitleBridge() {
   try {
     fetch(baseUrl + '../wiki-qid-titles.json')
@@ -948,16 +950,21 @@ var WIKI_QID_TITLES = null;
   } catch (e) {}
 })();
 
-// Resolve the in-ZIM article path for a place: prefer its OSM wikipedia tag
-// (`w`, e.g. "en:Golden Gate Bridge"), else the Q-ID->title bridge. Returns
-// an underscored title (no namespace) or null when no article is available.
+// Resolve the in-ZIM article path for a place. Returns null UNLESS this ZIM
+// actually bundles Wikipedia articles — signalled by the presence of
+// wiki-geo-index.json (WIKI_GEO_INDEX). That gate is what makes the viewer
+// safe on other ZIMs that have no bundled articles: no broken article links.
+// When articles exist, prefer the OSM `wikipedia` tag (`w`, "en:Golden Gate
+// Bridge"), else the geo-index reverse map, else the side-load bridge.
 function _wikiArticlePath(qid, w) {
+  if (!WIKI_GEO_INDEX) return null;
   var t = null;
   if (w) {
     var s = String(w), ci = s.indexOf(':');
     t = (ci >= 2 && ci <= 3 && /^[a-z]+$/i.test(s.slice(0, ci))) ? s.slice(ci + 1) : s;
-  } else if (qid && WIKI_QID_TITLES) {
-    t = WIKI_QID_TITLES[qid] || null;
+  } else if (qid) {
+    t = (WIKI_GEO_QID && WIKI_GEO_QID[qid])
+        || (WIKI_QID_TITLES && WIKI_QID_TITLES[qid]) || null;
   }
   return t ? t.replace(/ /g, '_') : null;
 }
@@ -4657,10 +4664,18 @@ function initWikiSidebar(map, config) {
   // placed Wikipedia article. When present (ZIMs built 2026-05-30+) it drives
   // the nearby list + map markers at ANY zoom, replacing the tile-scan path
   // and the side-loaded Q-ID bridge.
-  var geoIndex = null;
+  // Load once the ZIM is ready; sets module-scope WIKI_GEO_INDEX (+ reverse
+  // qid map) which also gate the "Read full article" links everywhere, so
+  // ZIMs without bundled articles never show broken links.
   fetch(baseUrl + 'wiki-geo-index.json')
     .then(function(r) { return r && r.ok ? r.json() : null; })
-    .then(function(m) { if (m && typeof m === 'object') geoIndex = m; })
+    .then(function(m) {
+      if (m && typeof m === 'object') {
+        WIKI_GEO_INDEX = m;
+        WIKI_GEO_QID = {};
+        for (var t in m) { var q = m[t] && m[t][3]; if (q) WIKI_GEO_QID[q] = t; }
+      }
+    })
     .catch(function() {});
 
   function geoPriority(type) {
@@ -4730,8 +4745,8 @@ function initWikiSidebar(map, config) {
     listEl.textContent = '';
     var b = map.getBounds(), W = b.getWest(), E = b.getEast(), S = b.getSouth(), N = b.getNorth();
     var items = [];
-    for (var title in geoIndex) {
-      var g = geoIndex[title]; if (!g) continue;
+    for (var title in WIKI_GEO_INDEX) {
+      var g = WIKI_GEO_INDEX[title]; if (!g) continue;
       var lat = g[0], lon = g[1];
       if (lon < W || lon > E || lat < S || lat > N) continue;
       items.push({ title: title, name: title.replace(/_/g, ' '),
@@ -4895,7 +4910,7 @@ function initWikiSidebar(map, config) {
   function updateSidebar() {
     if (!active) return;
     // Prefer the baked geo-index (any-zoom list + markers) when available.
-    if (geoIndex) { updateSidebarFromGeo(); return; }
+    if (WIKI_GEO_INDEX) { updateSidebarFromGeo(); return; }
 
     loadingEl.style.display = 'block';
     listEl.textContent = '';
