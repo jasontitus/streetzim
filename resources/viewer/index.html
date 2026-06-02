@@ -1020,7 +1020,13 @@ function openWikiArticle(path) {
     document.getElementById('wiki-article-title').textContent =
       decodeURIComponent(path).replace(/_/g, ' ');
   } catch (e) {}
-  document.getElementById('wiki-article-frame').src = url;
+  var _frame = document.getElementById('wiki-article-frame');
+  // Force the article to the top. The WebView otherwise keeps a prior scroll
+  // position (or jumps to a focused element), opening the article mid-page.
+  _frame.onload = function() {
+    try { _frame.contentWindow.scrollTo(0, 0); } catch (e) {}
+  };
+  _frame.src = url;
   ov.style.display = 'flex';
 }
 
@@ -4785,8 +4791,12 @@ function initWikiSidebar(map, config) {
     var targetZoom = Math.max(map.getZoom(), 14);
     var isMobile = window.innerWidth <= 600;
     if (isMobile && panel.style.display === 'flex') {
-      var off = (map.getBounds().getNorth() - map.getBounds().getSouth()) * 0.2;
-      map.flyTo({ center: [lon, lat - off], zoom: targetZoom, duration: 1000 });
+      // Lift the marker above the bottom detail sheet with a zoom-INDEPENDENT
+      // pixel offset. The old code shifted the center by 20% of the *current*
+      // latitude span; when zoomed out to explore a few cities that span is
+      // large, so it flew ~0.1-0.2° (many km) SOUTH of the real location.
+      var _dy = Math.round((map.getCanvas().clientHeight || 600) * 0.22);
+      map.flyTo({ center: [lon, lat], zoom: targetZoom, duration: 1000, offset: [0, -_dy] });
     } else {
       map.flyTo({ center: [lon, lat], zoom: targetZoom, duration: 1000 });
     }
