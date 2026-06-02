@@ -1,47 +1,46 @@
 """Spatial-chunked SZRG (SZCI index + SZRC per-cell files).
 
-Splits a v4/v5 SZRG graph into an eagerly-loaded index (global nodes +
-names + cell metadata) plus one file per spatial cell (edges + geoms for
+Splits a v4/v5 SZRG graph into an eagerly-loaded index (names + compact
+cell metadata) plus one file per spatial cell (coords + edges + geoms for
 that cell's nodes). A* loads cells lazily as its frontier crosses
-boundaries — on a country-scale graph this caps peak memory at the set
-of cells touched by the route, not the whole graph.
+boundaries, so mobile readers never allocate a region-wide coordinate
+table.
 
-Node indices are **preserved** from the source graph so v4 golden-corpus
-fingerprints diff directly against spatial output — route identity is
-the test. Cells are sequential IDs; their (lat_cell, lon_cell) keys live
-in the index.
+SZCI v3 reindexes nodes into cell-major order. Each cell owns one
+contiguous global-node range, which lets readers resolve node ownership
+with a binary search over the small metadata table. Cells are sequential
+IDs; their (lat_cell, lon_cell) keys live in the index.
 
 Companion format to resources/viewer/index.html + mcpzim SZRGGraph. This
 module is the reference implementation; language ports mirror it.
 
 File formats (little-endian, u32 unless stated):
 
-  SZCI (cells index, 32-byte header then global tables):
+  SZCI v3 (cells index, 32-byte header then global tables):
     "SZCI" magic (4)
-    u32 version = 1
+    u32 version = 3
     u32 num_nodes
     u32 num_edges
     u32 num_names
     u32 names_bytes
     u32 num_cells
     i32 cell_scale       -- e.g., 10 ⇒ 0.1° cells; 1 ⇒ 1° cells
-    Int32[num_nodes * 2] -- lat_e7, lon_e7 in source order
-    -- Cell metadata (num_cells × 20 bytes):
+    -- Cell metadata (num_cells × 24 bytes):
     foreach cell:
       i32 lat_cell_idx, i32 lon_cell_idx
-      u32 node_count, u32 edge_count, u32 geom_count
+      u32 base_node, u32 node_count, u32 edge_count, u32 geom_count
     u32[num_names + 1]   -- name_offsets
     bytes[names_bytes]   -- names_blob
 
-  SZRC (one cell, 24-byte header then per-cell tables):
+  SZRC v2 (one cell, 24-byte header then per-cell tables):
     "SZRC" magic (4)
-    u32 version = 1
+    u32 version = 2
     u32 cell_id
     u32 node_count
     u32 edge_count
     u32 geom_count
     u32 geom_bytes
-    u32[node_count]           -- cell_nodes_global (sorted ascending)
+    Int32[node_count * 2]     -- lat_e7, lon_e7 in cell-major node order
     u32[node_count + 1]       -- cell_adj (offsets into cell_edges)
     u32[edge_count * 5]       -- edges: target_global, speed_dist, geom_local, name, class_access
     u32[geom_count + 1]       -- geom_offsets (bytes into geom_blob)
@@ -65,8 +64,11 @@ SZCI_MAGIC = b"SZCI"
 SZRC_MAGIC = b"SZRC"
 SZCI_VERSION_INLINE = 1     # legacy: nodes_scaled in the SZCI body
 SZCI_VERSION_SHARDED = 2    # nodes_scaled sharded into routing-data/nodes-scaled-NNN.bin
-SZCI_VERSION = SZCI_VERSION_SHARDED
-SZRC_VERSION = 1
+SZCI_VERSION_CELL_COORDS = 3 # coords live in cell payloads; index stores node ranges
+SZCI_VERSION = SZCI_VERSION_CELL_COORDS
+SZRC_VERSION_LEGACY = 1
+SZRC_VERSION_CELL_COORDS = 2
+SZRC_VERSION = SZRC_VERSION_CELL_COORDS
 
 DEFAULT_CELL_SCALE = 10  # 0.1° cells — ~11 km lat; lon varies by latitude
 
@@ -125,8 +127,8 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
     in-memory API used by tests). Suitable for graphs ≤ a few million
     edges; larger sizes will OOM in the per-cell-bytes accumulator.
 
-    Output is byte-identical to the original list-based implementation
-    so the SZCI/SZRC golden-corpus tests continue to pass.
+    Output is SZCI v3 + SZRC v2. Route semantics remain identical to the
+    source graph after translating source IDs to cell-major IDs.
     """
     if g.version not in (4, 5):
         raise ValueError(f"spatial writer needs SZRG v4 or v5, got v{g.version}")
@@ -166,10 +168,13 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
                 | ((lon_cell_idx + BIAS) & 0xFFFFFFFF).astype(np.uint64))
     del lat_cell_idx, lon_cell_idx
 
-    # Stable sort so ties (same cell_key) preserve source-node-idx order
-    # — matches the legacy `sorted(cell_buckets[k])` invariant required
-    # by the SZRC golden corpus.
+    # Stable sort so ties (same cell_key) preserve source-node-idx order.
+    # The sorted position is the SZCI v3 global node ID. Reindexing nodes
+    # cell-major makes every cell a contiguous range and removes the
+    # region-wide coordinate table from the read path.
     order = np.argsort(cell_key, kind='stable')
+    old_to_new = np.empty(num_nodes, dtype=np.uint32)
+    old_to_new[order] = np.arange(num_nodes, dtype=np.uint32)
     sorted_keys = cell_key[order]
     unique_keys, cell_starts = np.unique(sorted_keys, return_index=True)
     num_cells = int(len(unique_keys))
@@ -193,6 +198,7 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
     cell_node_counts = np.zeros(num_cells, dtype=np.uint32)
     cell_edge_counts = np.zeros(num_cells, dtype=np.uint32)
     cell_geom_counts = np.zeros(num_cells, dtype=np.uint32)
+    cell_base_nodes = cell_starts.astype(np.uint32, copy=True)
 
     # ---- Pass 2: per-cell SZRC build + serialize --------------------------
     edges_view = edges_arr.reshape(-1, stride)  # (num_edges, stride) view
@@ -200,9 +206,10 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
     for cid in range(num_cells):
         s = int(cell_starts[cid])
         e = int(cell_ends[cid])
-        # cell_nodes is sorted ascending by source_node_idx (stable argsort
-        # tie-break preserves input order, and input is by source idx).
+        # Keep source IDs only while gathering source adjacency and coords.
+        # Serialized edges are rewritten to cell-major SZCI v3 IDs.
         cell_nodes = order[s:e].astype(np.uint32, copy=False)
+        cell_coords = nodes_arr.reshape(-1, 2)[cell_nodes].copy()
         n_count = e - s
 
         # Per-node edge ranges + cumulative cell_adj.
@@ -229,6 +236,7 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
             # One-shot fancy-index gather of all 5 columns (~e_count*5*4 B).
             cell_edge_data = edges_view[edge_idx].copy()  # (e_count, stride)
             del edge_idx
+            cell_edge_data[:, 0] = old_to_new[cell_edge_data[:, 0]]
 
             # Cell-local geom mapping in encounter order. NO_GEOM stays as
             # the 0xFFFFFFFF sentinel; only real geom_idx values get a
@@ -303,7 +311,7 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
             len(local_geom_buf),
         )
         body = (
-            cell_nodes.tobytes()
+            cell_coords.reshape(-1).tobytes()
             + cell_adj.tobytes()
             + cell_edge_data.reshape(-1).tobytes()
             + local_geom_offsets.tobytes()
@@ -319,68 +327,32 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
             cells_out[cid] = cell_bytes
 
         # Free per-cell buffers so peak doesn't accumulate across cells.
-        del (cell_nodes, cell_adj, cell_edge_data, local_geom_offsets,
+        del (cell_nodes, cell_coords, cell_adj, cell_edge_data, local_geom_offsets,
              local_geom_buf, cell_header, body, cell_bytes,
              per_node_counts, node_e_starts, node_e_ends)
 
     # Free Pass 1 working arrays once cells are emitted.
-    del order, cell_starts, cell_ends
+    del order, old_to_new, cell_starts, cell_ends
 
     # ---- Build SZCI index -------------------------------------------------
-    # Decide on inline (v1) vs sharded (v2) layout. Sharding splits
-    # nodes_scaled into per-file shards on disk so no single ZIM entry
-    # exceeds the validator's 200 MB per-entry cap (a continent-scale
-    # build like the US has 90 M nodes ⇒ 720 MB unsharded). When
-    # ``output_dir`` is provided we always shard — even small graphs
-    # produce only one ~4 MB shard, exercising the same read code path
-    # as the continent build for free. When called in-memory by tests
-    # (output_dir is None), we keep inline (v1) since the caller has no
-    # filesystem to write shards into.
-    use_shards = output_dir is not None
+    # SZCI v3 keeps only compact metadata in the eagerly-loaded index.
+    # Coordinates live in SZRC v2 cells and are fetched on demand.
+    version = SZCI_VERSION_CELL_COORDS
+    shard_paths: list[Path] = []
+    header = SZCI_MAGIC + struct.pack(
+        "<7I",
+        version,
+        num_nodes, num_edges,
+        num_names, len(g.names_blob),
+        num_cells,
+        cell_scale if cell_scale >= 0 else 0,
+    )
 
-    if use_shards:
-        version = SZCI_VERSION_SHARDED
-        shard_ranges = _node_shard_ranges(num_nodes, DEFAULT_NODES_PER_SHARD)
-        num_node_shards = len(shard_ranges)
-        nodes_per_shard = DEFAULT_NODES_PER_SHARD
-        shard_paths: list[Path] = []
-        for shard_idx, (lo, hi) in enumerate(shard_ranges):
-            # nodes_arr is shape [num_nodes*2] in source order, so a
-            # node-range [lo, hi) maps to flat-index [lo*2, hi*2).
-            shard_arr = nodes_arr[lo * 2:hi * 2]
-            shard_path = output_dir / f"nodes-scaled-{shard_idx:03d}.bin"
-            shard_path.write_bytes(shard_arr.tobytes())
-            shard_paths.append(shard_path)
-        # SZCI v2 header: 9 × u32 = 36 bytes (40 with magic). No inline
-        # nodes_blob — readers fetch shards via routing-data/nodes-scaled-NNN.bin.
-        header = SZCI_MAGIC + struct.pack(
-            "<7I 2I",
-            version,
-            num_nodes, num_edges,
-            num_names, len(g.names_blob),
-            num_cells,
-            cell_scale if cell_scale >= 0 else 0,
-            num_node_shards,
-            nodes_per_shard,
-        )
-        nodes_blob = b""
-    else:
-        version = SZCI_VERSION_INLINE
-        shard_paths = []
-        header = SZCI_MAGIC + struct.pack(
-            "<7I",
-            version,
-            num_nodes, num_edges,
-            num_names, len(g.names_blob),
-            num_cells,
-            cell_scale if cell_scale >= 0 else 0,
-        )
-        nodes_blob = nodes_arr.tobytes()  # int32 LE, source order
-
-    # Cell metadata table — 20 bytes per cell (i32 lat, i32 lon, u32 ×3).
+    # Cell metadata table — 24 bytes per cell (i32 ×2, u32 ×4).
     cell_meta_dt = np.dtype([
         ('lat_cell', '<i4'),
         ('lon_cell', '<i4'),
+        ('base_node', '<u4'),
         ('node_count', '<u4'),
         ('edge_count', '<u4'),
         ('geom_count', '<u4'),
@@ -388,6 +360,7 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
     cell_meta = np.empty(num_cells, dtype=cell_meta_dt)
     cell_meta['lat_cell'] = cell_lat_arr
     cell_meta['lon_cell'] = cell_lon_arr
+    cell_meta['base_node'] = cell_base_nodes
     cell_meta['node_count'] = cell_node_counts
     cell_meta['edge_count'] = cell_edge_counts
     cell_meta['geom_count'] = cell_geom_counts
@@ -396,7 +369,7 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
     name_offsets_blob = g.name_offsets.tobytes()
     names_blob = g.names_blob
 
-    index_bytes = (header + nodes_blob + cell_meta_blob
+    index_bytes = (header + cell_meta_blob
                    + name_offsets_blob + names_blob)
 
     if output_dir is not None:
@@ -430,7 +403,10 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
 class SZRCCell:
     """In-memory form of one SZRC cell file."""
     cell_id: int
-    cell_nodes_global: np.ndarray   # uint32[node_count], sorted ascending
+    base_node: int
+    node_count: int
+    cell_nodes_global: np.ndarray   # legacy v1 only; empty for v2
+    nodes_scaled: np.ndarray        # v2 int32[node_count*2]; empty for v1
     cell_adj: np.ndarray            # uint32[node_count+1]
     edges: np.ndarray               # uint32[edge_count*5]
     geom_offsets: np.ndarray        # uint32[geom_count+1]
@@ -438,7 +414,10 @@ class SZRCCell:
     geom_count: int
 
     def local_idx_for(self, global_node_idx: int) -> int | None:
-        """Binary search for a node in cell_nodes_global; None if absent."""
+        """Return the cell-local index for a global node; None if absent."""
+        if self.nodes_scaled.shape[0]:
+            local = global_node_idx - self.base_node
+            return local if 0 <= local < self.node_count else None
         arr = self.cell_nodes_global
         lo, hi = 0, arr.shape[0]
         while lo < hi:
@@ -467,6 +446,7 @@ class SZCIIndex:
     # Cell metadata (parallel arrays for fast indexing)
     cell_lat_idx: np.ndarray            # int32[num_cells]
     cell_lon_idx: np.ndarray            # int32[num_cells]
+    cell_base_node: np.ndarray           # uint32[num_cells], v3 only
     cell_node_count: np.ndarray         # uint32[num_cells]
     cell_edge_count: np.ndarray
     cell_geom_count: np.ndarray
@@ -474,7 +454,13 @@ class SZCIIndex:
     cell_id_by_key: dict[tuple[int, int], int] = field(default_factory=dict)
 
     def cell_for_node(self, node_idx: int) -> int | None:
-        """Compute cell_id for a global node by re-bucketing its coords."""
+        """Resolve the owning cell for a global node."""
+        if self.version == SZCI_VERSION_CELL_COORDS:
+            cid = bisect.bisect_right(self.cell_base_node, node_idx) - 1
+            if cid < 0:
+                return None
+            base = int(self.cell_base_node[cid])
+            return cid if node_idx < base + int(self.cell_node_count[cid]) else None
         lat_e7 = int(self.nodes_scaled[node_idx * 2])
         lon_e7 = int(self.nodes_scaled[node_idx * 2 + 1])
         key = cell_of(lat_e7, lon_e7, self.cell_scale)
@@ -501,6 +487,9 @@ def parse_szci(buf: bytes,
     ``nodes_scaled_loader`` is None on a v2 index, ``nodes_scaled`` is
     populated as an empty array — useful only for inspecting cell
     metadata; routing requires the loader.
+
+    For version 3 (cell coords): coordinates are absent from the index
+    entirely. Readers fetch them lazily from SZRC v2 cells.
     """
     if buf[:4] != SZCI_MAGIC:
         raise ValueError("Not a SZCI index (bad magic)")
@@ -533,24 +522,36 @@ def parse_szci(buf: bytes,
                 raise ValueError(
                     f"node shards yielded {nodes_scaled.shape[0]//2} nodes "
                     f"in {num_node_shards} files, header expected {num_nodes}")
+    elif version == SZCI_VERSION_CELL_COORDS:
+        (_, num_nodes, num_edges, num_names, names_bytes, num_cells,
+         _cell_scale_unsigned) = struct.unpack_from("<7I", buf, 4)
+        cell_scale_signed = struct.unpack_from("<i", buf, 4 + 6 * 4)[0]
+        off = 32
+        nodes_scaled = np.empty(0, dtype=np.int32)
     else:
         raise ValueError(f"Unsupported SZCI version: {version}")
 
     cell_lat_idx = np.empty(num_cells, dtype=np.int32)
     cell_lon_idx = np.empty(num_cells, dtype=np.int32)
+    cell_base_node = np.zeros(num_cells, dtype=np.uint32)
     cell_node_count = np.empty(num_cells, dtype=np.uint32)
     cell_edge_count = np.empty(num_cells, dtype=np.uint32)
     cell_geom_count = np.empty(num_cells, dtype=np.uint32)
     cell_id_by_key: dict[tuple[int, int], int] = {}
     for cid in range(num_cells):
-        la, lo, nc, ec, gc = struct.unpack_from("<iiIII", buf, off)
+        if version == SZCI_VERSION_CELL_COORDS:
+            la, lo, base, nc, ec, gc = struct.unpack_from("<iiIIII", buf, off)
+            cell_base_node[cid] = base
+            off += 24
+        else:
+            la, lo, nc, ec, gc = struct.unpack_from("<iiIII", buf, off)
+            off += 20
         cell_lat_idx[cid] = la
         cell_lon_idx[cid] = lo
         cell_node_count[cid] = nc
         cell_edge_count[cid] = ec
         cell_geom_count[cid] = gc
         cell_id_by_key[(la, lo)] = cid
-        off += 20
 
     name_offsets = np.frombuffer(buf, dtype="<u4",
                                  count=num_names + 1, offset=off)
@@ -569,6 +570,7 @@ def parse_szci(buf: bytes,
         names_blob=names_blob,
         cell_lat_idx=cell_lat_idx,
         cell_lon_idx=cell_lon_idx,
+        cell_base_node=cell_base_node,
         cell_node_count=cell_node_count,
         cell_edge_count=cell_edge_count,
         cell_geom_count=cell_geom_count,
@@ -576,17 +578,24 @@ def parse_szci(buf: bytes,
     )
 
 
-def parse_szrc(buf: bytes) -> SZRCCell:
+def parse_szrc(buf: bytes, *, base_node: int = 0) -> SZRCCell:
     if buf[:4] != SZRC_MAGIC:
         raise ValueError("Not a SZRC cell (bad magic)")
     (version, cell_id, node_count, edge_count, geom_count,
      geom_bytes) = struct.unpack_from("<6I", buf, 4)
-    if version != SZRC_VERSION:
+    if version not in (SZRC_VERSION_LEGACY, SZRC_VERSION_CELL_COORDS):
         raise ValueError(f"Unsupported SZRC version: {version}")
     off = 28
-    cell_nodes_global = np.frombuffer(buf, dtype="<u4",
-                                       count=node_count, offset=off)
-    off += node_count * 4
+    if version == SZRC_VERSION_LEGACY:
+        cell_nodes_global = np.frombuffer(buf, dtype="<u4",
+                                          count=node_count, offset=off)
+        nodes_scaled = np.empty(0, dtype=np.int32)
+        off += node_count * 4
+    else:
+        cell_nodes_global = np.empty(0, dtype=np.uint32)
+        nodes_scaled = np.frombuffer(buf, dtype="<i4",
+                                     count=node_count * 2, offset=off)
+        off += node_count * 2 * 4
     cell_adj = np.frombuffer(buf, dtype="<u4",
                              count=node_count + 1, offset=off)
     off += (node_count + 1) * 4
@@ -599,7 +608,10 @@ def parse_szrc(buf: bytes) -> SZRCCell:
     geom_blob = bytes(buf[off:off + geom_bytes])
     return SZRCCell(
         cell_id=cell_id,
+        base_node=base_node,
+        node_count=node_count,
         cell_nodes_global=cell_nodes_global,
+        nodes_scaled=nodes_scaled,
         cell_adj=cell_adj,
         edges=edges,
         geom_offsets=geom_offsets,
@@ -616,8 +628,8 @@ def parse_szrc(buf: bytes) -> SZRCCell:
 class SpatialGraph:
     """Read-side view over a spatial-chunked graph.
 
-    Holds the SZCI index in memory (global nodes + names + cell metadata)
-    plus a growing cache of SZRC cell data. ``load_cell(cid)`` is invoked
+    Holds the SZCI index in memory (names + cell metadata) plus a growing
+    cache of SZRC cell data. ``load_cell(cid)`` is invoked
     lazily by ``edges_of_node``; callers can bound residency via ``cache_limit``
     (LRU eviction). For the test harness this is effectively unbounded.
     """
@@ -662,6 +674,19 @@ class SpatialGraph:
         return self._index.num_names
     @property
     def nodes_scaled(self) -> np.ndarray:
+        """Compatibility accessor for offline tools that need every node.
+
+        SZCI v3 routing itself uses ``node_coords_e7`` and remains lazy.
+        Calling this property on v3 intentionally materializes all cells.
+        """
+        if (self._index.version == SZCI_VERSION_CELL_COORDS
+                and self._index.nodes_scaled.shape[0] == 0):
+            nodes = np.empty(self.num_nodes * 2, dtype=np.int32)
+            for cid in range(self._index.num_cells):
+                c = self._ensure_cell(cid)
+                s = c.base_node * 2
+                nodes[s:s + c.node_count * 2] = c.nodes_scaled
+            self._index.nodes_scaled = nodes
         return self._index.nodes_scaled
     @property
     def has_geoms(self) -> bool:
@@ -716,7 +741,7 @@ class SpatialGraph:
         buf = self._loader(cell_id)
         self._loader_call_count += 1
         self._cells_ever_loaded.add(cell_id)
-        c = parse_szrc(buf)
+        c = parse_szrc(buf, base_node=int(self._index.cell_base_node[cell_id]))
         if c.cell_id != cell_id:
             raise ValueError(
                 f"cell_id mismatch: loader returned {c.cell_id} for {cell_id}"
@@ -730,6 +755,52 @@ class SpatialGraph:
             evict = self._lru.pop(0)
             self._cells.pop(evict, None)
         return c
+
+    def node_coords_e7(self, global_node_idx: int) -> tuple[int, int]:
+        """Return one node coordinate pair without loading unrelated cells."""
+        cell_id = self._index.cell_for_node(global_node_idx)
+        if cell_id is None:
+            raise IndexError(f"node out of range: {global_node_idx}")
+        if self._index.version != SZCI_VERSION_CELL_COORDS:
+            nodes = self._index.nodes_scaled
+            return (int(nodes[global_node_idx * 2]),
+                    int(nodes[global_node_idx * 2 + 1]))
+        cell = self._ensure_cell(cell_id)
+        local = global_node_idx - cell.base_node
+        return (int(cell.nodes_scaled[local * 2]),
+                int(cell.nodes_scaled[local * 2 + 1]))
+
+    def nearest_node(self, lat_e7: int, lon_e7: int) -> int:
+        """Find the exact nearest node while loading only plausible cells."""
+        scale = self._index.cell_scale
+        candidates: list[tuple[int, int]] = []
+        for cid in range(self._index.num_cells):
+            la = int(self._index.cell_lat_idx[cid])
+            lo = int(self._index.cell_lon_idx[cid])
+            lat_min = (la * 10_000_000) // scale
+            lat_max = ((la + 1) * 10_000_000) // scale
+            lon_min = (lo * 10_000_000) // scale
+            lon_max = ((lo + 1) * 10_000_000) // scale
+            dlat = lat_min - lat_e7 if lat_e7 < lat_min else (
+                lat_e7 - lat_max if lat_e7 > lat_max else 0)
+            dlon = lon_min - lon_e7 if lon_e7 < lon_min else (
+                lon_e7 - lon_max if lon_e7 > lon_max else 0)
+            candidates.append((dlat * dlat + dlon * dlon, cid))
+        candidates.sort()
+        best_node = -1
+        best_dist = None
+        for lower_bound, cid in candidates:
+            if best_dist is not None and lower_bound > best_dist:
+                break
+            cell = self._ensure_cell(cid)
+            for local in range(cell.node_count):
+                dlat = int(cell.nodes_scaled[local * 2]) - lat_e7
+                dlon = int(cell.nodes_scaled[local * 2 + 1]) - lon_e7
+                dist = dlat * dlat + dlon * dlon
+                if best_dist is None or dist < best_dist:
+                    best_dist = dist
+                    best_node = cell.base_node + local
+        return best_node
 
     def edges_of_node(self, global_node_idx: int) -> list[tuple[int, int, int, int, int]]:
         """Return list of edges for a global node as (target, speed_dist,

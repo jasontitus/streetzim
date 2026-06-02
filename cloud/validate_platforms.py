@@ -23,8 +23,9 @@ and flags fail/pass against known platform ceilings:
     PWA (Safari)     ≤ 500 MB — same ceiling as iOS Kiwix
     PWA (Chrome)     ≤ 1 GB   (desktop Chrome is looser)
 
-Spatial routing (SZCI + graph-cell-*) always passes — peak memory is
-index + 1-2 loaded cells, typically < 50 MB regardless of region size.
+SZCI v3 spatial routing keeps coordinates inside graph cells, so peak
+memory is the compact index plus a bounded cell cache. Legacy SZCI v1/v2
+still pay for a global coordinate table and are modeled conservatively.
 
 Usage:
     python3 cloud/validate_platforms.py osm-iran-shipped.zim
@@ -34,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import struct
 import sys
 from pathlib import Path
 
@@ -87,7 +89,8 @@ def _scan_routing(arc) -> dict:
     info = dict.fromkeys((
         "graph_bin_bytes", "chunks_total_bytes",
         "cells_index_bytes", "cell_count",
-        "cell_avg_bytes", "cell_max_bytes",
+        "cell_avg_bytes", "cell_max_bytes", "spatial_version",
+        "node_shards_bytes",
     ))
     info["layout"] = "none"
 
@@ -99,6 +102,7 @@ def _scan_routing(arc) -> dict:
     # Scan for chunked + spatial entries.
     chunk_total = 0
     chunk_count = 0
+    node_shards_bytes = 0
     cell_bytes = []
     cells_index = None
     for i in range(arc.entry_count):
@@ -110,8 +114,15 @@ def _scan_routing(arc) -> dict:
             continue
         if p == "routing-data/graph-cells-index.bin":
             cells_index = e.get_item().size
+            try:
+                head = bytes(e.get_item().content)[:8]
+                info["spatial_version"] = struct.unpack_from("<I", head, 4)[0]
+            except Exception:
+                pass
         elif p.startswith("routing-data/graph-cell-") and p.endswith(".bin"):
             cell_bytes.append(e.get_item().size)
+        elif p.startswith("routing-data/nodes-scaled-") and p.endswith(".bin"):
+            node_shards_bytes += e.get_item().size
         elif p.startswith("routing-data/graph-chunk-") and p.endswith(".bin"):
             chunk_total += e.get_item().size
             chunk_count += 1
@@ -120,6 +131,7 @@ def _scan_routing(arc) -> dict:
         info["cell_count"] = len(cell_bytes)
         info["cell_avg_bytes"] = sum(cell_bytes) // len(cell_bytes)
         info["cell_max_bytes"] = max(cell_bytes)
+        info["node_shards_bytes"] = node_shards_bytes
         # Spatial overrides monolithic if both present — it's the
         # preferred path for mobile clients.
         info["layout"] = "spatial"
@@ -137,14 +149,20 @@ def estimate_peak_mb(info: dict, platform: str) -> tuple[int, str]:
         return (0, "no routing data")
 
     if layout == "spatial":
-        # All platforms can do spatial — peak is index + ~2 cells
-        # (source + destination neighborhoods). Peak is 2x the cell
-        # max to cover pathological routes crossing many cells.
+        # v3 has a compact index and a byte-budgeted cache. Legacy v1/v2
+        # retain global coords; v2 loads shards in both main and worker.
         idx = (info.get("cells_index_bytes") or 0) / 1024 / 1024
         cmax = (info.get("cell_max_bytes") or 0) / 1024 / 1024
-        peak = idx + cmax * 4  # 4 concurrent worst-case cells
+        version = info.get("spatial_version") or 0
+        shards = (info.get("node_shards_bytes") or 0) / 1024 / 1024
+        legacy_coords = shards * 2 if version == 2 else 0
+        # Worker cache residency is capped at 64 MB, but four response
+        # bodies can be in flight while the cache is full.
+        peak = idx + legacy_coords + 64 + cmax * 4
         return (int(peak),
-                f"spatial: {idx:.0f} MB index + ~4× {cmax:.0f} MB cells")
+                f"spatial v{version}: {idx:.0f} MB index"
+                + (f" + {legacy_coords:.0f} MB eager coords" if legacy_coords else "")
+                + f" + ≤64 MB cell cache + 4× {cmax:.0f} MB in-flight cells")
 
     if layout == "monolithic":
         # Client fetches entire graph.bin; parser uses typed-array

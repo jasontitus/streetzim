@@ -422,7 +422,7 @@ ZSTD_CLEVEL=22 ./venv312/bin/python3 create_osm_zim.py \
     --split-hot-search-chunks-mb 10 \
     --split-find-chips \
     --no-llm-bundle \
-    --spatial-chunk-scale 1 \
+    --spatial-chunk-scale 10 \
     --xapian builder \
     --zim-builder rust \
     --low-zoom-world-vrt terrain_cache/dem_sources/world_dem_32k.tif \
@@ -438,10 +438,9 @@ Flag reference:
   from poi+park records.
 - `--spatial-chunk-scale N` — emit the routing graph as native
   SZCI/SZRC layout in-build (replaces the post-build
-  `cloud/repackage_zim.py --spatial-chunk-scale N` step). N=1 (1°
-  cells, ~110 cells for California) matches today's shipping
-  convention; N=10 (0.1° cells) for ZIMs where the graph would be
-  huge per-cell otherwise.
+  `cloud/repackage_zim.py --spatial-chunk-scale N` step). Use N=10
+  (0.1° cells) for new SZCI v3 builds so local routes fetch compact
+  cell payloads.
 - `--xapian builder` — produce Xapian fulltext + title indexes via
   the external `../xapianbuilder/` helper (parallel, seconds rather
   than hours). Requires `--zim-builder=rust`. See

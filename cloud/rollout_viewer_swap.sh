@@ -66,7 +66,7 @@ repack_one() {
     local dst="osm-${id}-shipped.zim"
     local log="${id}-shipped.log"
     log "repackaging $id ($layout) from $src → $dst"
-    # --spatial-chunk-scale 1 = 1° cells. Source must be SZRG v4/v5
+    # --spatial-chunk-scale 10 = 0.1° cells. Source must be SZRG v4/v5
     # (our default build); repackage_zim reassembles chunks if the
     # source shipped chunked. Empty-array dereference under `set -u`
     # is the cause of the 2026-04-24 rollout egypt crash, so invoke
@@ -77,7 +77,7 @@ repack_one() {
     if [ "$layout" = "spatial" ]; then
         run_ok=0
         ./venv312/bin/python3 cloud/repackage_zim.py \
-            "$src" "$dst" --spatial-chunk-scale 1 --split-find-chips \
+            "$src" "$dst" --spatial-chunk-scale 10 --split-find-chips \
             > "$log" 2>&1 \
             && run_ok=1
     else

@@ -4109,6 +4109,14 @@ def create_zim(
             open(str(viewer_html_path)).read().encode("utf-8"),
             is_front=True,
         ))
+        routing_worker_path = VIEWER_DIR / "routing-worker.js"
+        if routing_worker_path.exists():
+            print("    Adding routing-worker.js...")
+            creator.add_item(MapItem(
+                "routing-worker.js", "Routing Worker", "application/javascript",
+                str(routing_worker_path),
+                is_front=False,
+            ))
 
         # Find-places mini-app (`places.html`). LLM-free: searches the
         # in-ZIM `search-data/` + `category-index/` files client-side
@@ -4503,14 +4511,11 @@ def create_zim(
                 # Reuses tests/szrg_spatial.build_spatial which streams
                 # from the routing graph file into a spill dir, so peak
                 # RSS stays bounded. Output: graph-cells-index.bin (the
-                # SZCI index) + graph-cell-NNNNN.bin per cell + (for
-                # SZCI v2) nodes-scaled-NNN.bin shards. Items are added
+                # SZCI index) + graph-cell-NNNNN.bin per cell. Items are added
                 # via FileProvider so libzim/zimru streams from disk.
                 #
-                # SZCI v1 emits nodes inline in the index; v2 emits
-                # sharded files when the global node table is large.
-                # The viewer at resources/viewer/index.html supports
-                # both (commit b4e1000 added v2). Other Kiwix readers
+                # SZCI v3 stores coordinates inside cell payloads so
+                # mobile readers never load a global node table. Other Kiwix readers
                 # use the X/fulltext/xapian + JSON search-data paths
                 # we ship, so neither is on the routing hot path here.
                 import sys as _sys
@@ -4545,8 +4550,8 @@ def create_zim(
                     str(idx_path),
                     compress=idx_compress,
                 ))
-                # SZCI v2 sharded nodes_scaled — only when build_spatial
-                # was given output_dir (always true on this code path).
+                # Legacy SZCI v2 builds may still report sharded node
+                # tables. SZCI v3 reports none.
                 node_shard_paths = _spatial_meta.get("node_shard_paths") or []
                 for shard_path in node_shard_paths:
                     creator.add_item(MapItem(
@@ -5796,8 +5801,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "degree; 1 = 1° cells, 10 = 0.1° cells). When "
                              "set, the routing graph emits as "
                              "routing-data/graph-cells-index.bin + per-cell "
-                             "graph-cell-NNNNN.bin files (+ nodes-scaled-NNN.bin "
-                             "shards on continent scale). Replaces the post-"
+                             "graph-cell-NNNNN.bin files with cell-local node "
+                             "coordinates. Replaces the post-"
                              "build `cloud/repackage_zim.py --spatial-chunk-scale N` "
                              "pass: same output bytes, but the work runs while "
                              "create_osm_zim already has the graph in memory, "

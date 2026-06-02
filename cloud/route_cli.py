@@ -22,7 +22,7 @@ in-memory edge data — a real CH preprocessing pass would be the right
 fix if we ever go down that road.
 
 Reads a spatial-chunked ZIM (created by ``cloud/repackage_zim.py
---spatial-chunk-scale 1`` or ``cloud/build_region.sh`` post-build).
+--spatial-chunk-scale 10`` or ``cloud/build_region.sh`` post-build).
 Doesn't require any rebuild — runs against existing ZIMs.
 
 Usage:

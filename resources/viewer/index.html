@@ -5212,6 +5212,8 @@ function initRouting(map, config) {
   var graph = null;       // {nodes: Float64Array, adj: Array, geom: Array}
   var originNode = -1;
   var destNode = -1;
+  var originCoordE7 = null;
+  var destCoordE7 = null;
   var originMarker = null;
   var destMarker = null;
   var routeDrawn = false;
@@ -5286,6 +5288,8 @@ function initRouting(map, config) {
   function clearRoute() {
     originNode = -1;
     destNode = -1;
+    originCoordE7 = null;
+    destCoordE7 = null;
     originInput.value = '';
     destInput.value = '';
     originResultsEl.style.display = 'none';
@@ -5602,11 +5606,11 @@ function initRouting(map, config) {
   }
 
   // Parse the SZCI (spatial cells index) buffer. Eager-loaded at
-  // startup — contains the global nodes array, name table, and per-cell
-  // metadata. Each actual cell's edges/geoms live in a separate ZIM
+  // startup — contains the name table and compact per-cell metadata.
+  // Each actual cell's coords/edges/geoms live in a separate ZIM
   // entry fetched on demand.
   //
-  // Two layouts:
+  // Three layouts:
   //   v1 — nodes_blob is INLINE in this buffer right after the header.
   //        Header is 32 bytes (4 magic + 7 × u32). Used for small ZIMs
   //        where total nodes_scaled fits comfortably in one entry.
@@ -5617,13 +5621,15 @@ function initRouting(map, config) {
   //        the 200 MB per-entry cap if inline. Caller must run
   //        loadNodeShards(idx, baseUrl) before constructing
   //        SpatialGraph; nodesScaled is null until then.
+  //   v3 — coordinates live in each SZRC v2 cell. The index stores one
+  //        contiguous global-node range per cell, so startup is index-only.
   function parseRoutingCellsIndex(buffer) {
     var view = new DataView(buffer);
     if (view.getUint32(0, false) !== 0x53_5A_43_49 /* "SZCI" */) {
       throw new Error('Invalid cells-index magic');
     }
     var version = view.getUint32(4, true);
-    if (version !== 1 && version !== 2) {
+    if (version !== 1 && version !== 2 && version !== 3) {
       throw new Error('Unsupported SZCI version: ' + version);
     }
     var numNodes = view.getUint32(8, true);
@@ -5638,16 +5644,19 @@ function initRouting(map, config) {
       offset = 32;
       nodesScaled = new Int32Array(buffer, offset, numNodes * 2);
       offset += numNodes * 2 * 4;
-    } else {
+    } else if (version === 2) {
       // v2: two extra header u32s, then NO inline nodes — fetched from
       // routing-data/nodes-scaled-NNN.bin shards by loadNodeShards.
       numNodeShards = view.getUint32(32, true);
       nodesPerShard = view.getUint32(36, true);
       offset = 40;
+    } else {
+      offset = 32;
     }
     // Cell metadata: num_cells × 20 bytes each
     var cellLatIdx = new Int32Array(numCells);
     var cellLonIdx = new Int32Array(numCells);
+    var cellBaseNode = new Uint32Array(numCells);
     var cellNodeCount = new Uint32Array(numCells);
     var cellEdgeCount = new Uint32Array(numCells);
     var cellGeomCount = new Uint32Array(numCells);
@@ -5655,11 +5664,19 @@ function initRouting(map, config) {
     for (var i = 0; i < numCells; i++) {
       cellLatIdx[i]    = view.getInt32(offset,      true);
       cellLonIdx[i]    = view.getInt32(offset +  4, true);
-      cellNodeCount[i] = view.getUint32(offset +  8, true);
-      cellEdgeCount[i] = view.getUint32(offset + 12, true);
-      cellGeomCount[i] = view.getUint32(offset + 16, true);
+      if (version === 3) {
+        cellBaseNode[i]  = view.getUint32(offset +  8, true);
+        cellNodeCount[i] = view.getUint32(offset + 12, true);
+        cellEdgeCount[i] = view.getUint32(offset + 16, true);
+        cellGeomCount[i] = view.getUint32(offset + 20, true);
+        offset += 24;
+      } else {
+        cellNodeCount[i] = view.getUint32(offset +  8, true);
+        cellEdgeCount[i] = view.getUint32(offset + 12, true);
+        cellGeomCount[i] = view.getUint32(offset + 16, true);
+        offset += 20;
+      }
       cellKeyToId.set(cellLatIdx[i] + ',' + cellLonIdx[i], i);
-      offset += 20;
     }
     var nameOffsets = new Uint32Array(buffer, offset, numNames + 1);
     offset += (numNames + 1) * 4;
@@ -5696,18 +5713,34 @@ function initRouting(map, config) {
       nodesScaled: nodesScaled,
       cellLatIdx: cellLatIdx,
       cellLonIdx: cellLonIdx,
+      cellBaseNode: cellBaseNode,
       cellNodeCount: cellNodeCount,
       cellEdgeCount: cellEdgeCount,
       cellGeomCount: cellGeomCount,
       getName: getName,
     };
-    // cellForNode reads idx.nodesScaled at call time so it works both
-    // for v1 (set during parse) and v2 (set after shard fetch).
     idx.cellForNode = function(nodeIdx) {
+      if (idx.version === 3) {
+        var lo = 0, hi = idx.numCells;
+        while (lo < hi) {
+          var mid = (lo + hi) >>> 1;
+          if (idx.cellBaseNode[mid] <= nodeIdx) lo = mid + 1;
+          else hi = mid;
+        }
+        var cid = lo - 1;
+        return cid >= 0
+          && nodeIdx < idx.cellBaseNode[cid] + idx.cellNodeCount[cid]
+          ? cid : -1;
+      }
       var ns = idx.nodesScaled;
       if (!ns) return -1;
       var latE7 = ns[nodeIdx * 2];
       var lonE7 = ns[nodeIdx * 2 + 1];
+      var k = cellOf(latE7, lonE7);
+      var id = cellKeyToId.get(k.lat + ',' + k.lon);
+      return id === undefined ? -1 : id;
+    };
+    idx.cellForCoords = function(latE7, lonE7) {
       var k = cellOf(latE7, lonE7);
       var id = cellKeyToId.get(k.lat + ',' + k.lon);
       return id === undefined ? -1 : id;
@@ -5752,13 +5785,15 @@ function initRouting(map, config) {
   // Parse one SZRC cell buffer — owns the edges + geoms for a subset of
   // graph nodes. Returns a record with binary-searchable node list,
   // local adjacency, edges (stride 5 u32), and geom offset/blob views.
-  function parseRoutingCell(buffer) {
+  function parseRoutingCell(index, cid, buffer) {
     var view = new DataView(buffer);
     if (view.getUint32(0, false) !== 0x53_5A_52_43 /* "SZRC" */) {
       throw new Error('Invalid SZRC magic');
     }
     var version = view.getUint32(4, true);
-    if (version !== 1) throw new Error('Unsupported SZRC version: ' + version);
+    if (version !== 1 && version !== 2) {
+      throw new Error('Unsupported SZRC version: ' + version);
+    }
     var cellId = view.getUint32(8, true);
     var nodeCount = view.getUint32(12, true);
     var edgeCount = view.getUint32(16, true);
@@ -5766,8 +5801,16 @@ function initRouting(map, config) {
     var geomBytes = view.getUint32(24, true);
 
     var off = 28;
-    var cellNodesGlobal = new Uint32Array(buffer, off, nodeCount);
-    off += nodeCount * 4;
+    var baseNode = version === 2 ? index.cellBaseNode[cid] : 0;
+    var cellNodesGlobal = null;
+    var nodesScaled = null;
+    if (version === 1) {
+      cellNodesGlobal = new Uint32Array(buffer, off, nodeCount);
+      off += nodeCount * 4;
+    } else {
+      nodesScaled = new Int32Array(buffer, off, nodeCount * 2);
+      off += nodeCount * 2 * 4;
+    }
     var cellAdj = new Uint32Array(buffer, off, nodeCount + 1);
     off += (nodeCount + 1) * 4;
     var edges = new Uint32Array(buffer, off, edgeCount * 5);
@@ -5781,6 +5824,10 @@ function initRouting(map, config) {
     // Returns -1 if not present (shouldn't happen when the index is
     // consistent — cells are authoritative for their nodes).
     function localIdxFor(globalIdx) {
+      if (version === 2) {
+        var local = globalIdx - baseNode;
+        return local >= 0 && local < nodeCount ? local : -1;
+      }
       var lo = 0, hi = nodeCount;
       while (lo < hi) {
         var mid = (lo + hi) >>> 1;
@@ -5830,10 +5877,13 @@ function initRouting(map, config) {
 
     return {
       cellId: cellId,
+      byteLength: buffer.byteLength,
+      baseNode: baseNode,
       nodeCount: nodeCount,
       edgeCount: edgeCount,
       geomCount: geomCount,
       cellNodesGlobal: cellNodesGlobal,
+      nodesScaled: nodesScaled,
       cellAdj: cellAdj,
       edges: edges,
       localIdxFor: localIdxFor,
@@ -5846,17 +5896,13 @@ function initRouting(map, config) {
   // entry points the routing A* needs. Cells are fetched via
   // ``routing-data/graph-cell-NNNNN.bin`` (5-digit zero-pad) — must
   // match the writer in cloud/repackage_zim.py.
-  function SpatialGraph(index, cacheLimit) {
+  function SpatialGraph(index, maxResidentBytes) {
     this._index = index;
     this._cells = new Map();     // cell_id → parsed cell
     this._inFlight = new Map();  // cell_id → Promise<parsed cell>
     this._lru = [];
-    // Default 12 (down from 32). Each cell is ~8 MB JS-decoded; 32
-    // means ~256 MB just for cells, which combined with the route
-    // Maps + MapLibre tiles pushed iOS Safari over the heap limit
-    // and triggered page-discards mid-route. 12 keeps us under
-    // ~100 MB cell footprint with rare re-fetches.
-    this._cacheLimit = cacheLimit || 12;
+    this._residentBytes = 0;
+    this._maxResidentBytes = maxResidentBytes || 64 * 1024 * 1024;
     // Expose SZRG-like surface so call sites don't need a version switch.
     this.isSpatial = true;
     this.numNodes = index.numNodes;
@@ -5879,9 +5925,11 @@ function initRouting(map, config) {
   // memory pressure (typeahead, MapLibre re-render, etc.) we'd
   // rather give up the cache than have the page killed.
   SpatialGraph.prototype.compact = function(keep) {
-    keep = (keep === undefined) ? Math.min(8, this._cacheLimit) : keep;
+    keep = (keep === undefined) ? 4 : keep;
     while (this._lru.length > keep) {
       var cid = this._lru.shift();
+      var cell = this._cells.get(cid);
+      if (cell) this._residentBytes -= cell.byteLength;
       this._cells.delete(cid);
     }
   };
@@ -5902,18 +5950,74 @@ function initRouting(map, config) {
         return r.arrayBuffer();
       })
       .then(function(buf) {
-        var cell = parseRoutingCell(buf);
+        var cell = parseRoutingCell(self._index, cid, buf);
         self._cells.set(cid, cell);
         self._lru.push(cid);
+        self._residentBytes += cell.byteLength;
         self._inFlight.delete(cid);
-        if (self._cells.size > self._cacheLimit) {
+        while (self._residentBytes > self._maxResidentBytes
+               && self._lru.length > 1) {
           var evict = self._lru.shift();
+          var evicted = self._cells.get(evict);
+          if (evicted) self._residentBytes -= evicted.byteLength;
           self._cells.delete(evict);
         }
         return cell;
       });
     self._inFlight.set(cid, p);
     return p;
+  };
+
+  SpatialGraph.prototype.nodeCoordsE7 = function(globalNodeIdx) {
+    var self = this;
+    var cid = self._index.cellForNode(globalNodeIdx);
+    if (cid < 0) return Promise.reject(new Error('node out of range: ' + globalNodeIdx));
+    if (self._index.version !== 3) {
+      return Promise.resolve([
+        self._index.nodesScaled[globalNodeIdx * 2],
+        self._index.nodesScaled[globalNodeIdx * 2 + 1],
+      ]);
+    }
+    return self._ensureCell(cid).then(function(cell) {
+      var local = globalNodeIdx - cell.baseNode;
+      return [cell.nodesScaled[local * 2], cell.nodesScaled[local * 2 + 1]];
+    });
+  };
+
+  SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7) {
+    var scale = this._index.cellScale;
+    var candidates = [];
+    for (var cid = 0; cid < this._index.numCells; cid++) {
+      var la = this._index.cellLatIdx[cid];
+      var lo = this._index.cellLonIdx[cid];
+      var latMin = la * 10_000_000 / scale;
+      var latMax = (la + 1) * 10_000_000 / scale;
+      var lonMin = lo * 10_000_000 / scale;
+      var lonMax = (lo + 1) * 10_000_000 / scale;
+      var dlat = latE7 < latMin ? latMin - latE7 : latE7 > latMax ? latE7 - latMax : 0;
+      var dlon = lonE7 < lonMin ? lonMin - lonE7 : lonE7 > lonMax ? lonE7 - lonMax : 0;
+      candidates.push([dlat * dlat + dlon * dlon, cid]);
+    }
+    candidates.sort(function(a, b) { return a[0] - b[0]; });
+    var bestNode = -1, bestDist = Infinity, bestLat = 0, bestLon = 0;
+    for (var i = 0; i < candidates.length && candidates[i][0] <= bestDist; i++) {
+      var cell = await this._ensureCell(candidates[i][1]);
+      for (var local = 0; local < cell.nodeCount; local++) {
+        var nlat = cell.nodesScaled[local * 2];
+        var nlon = cell.nodesScaled[local * 2 + 1];
+        var ndlat = nlat - latE7;
+        var ndlon = nlon - lonE7;
+        var dist = ndlat * ndlat + ndlon * ndlon;
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestNode = cell.baseNode + local;
+          bestLat = nlat;
+          bestLon = nlon;
+        }
+      }
+    }
+    if (bestNode < 0) throw new Error('no routing nodes');
+    return { node: bestNode, lat: bestLat / 1e7, lon: bestLon / 1e7 };
   };
 
   // Returns a promise resolving to an array of edges for the given
@@ -6005,12 +6109,9 @@ function initRouting(map, config) {
         // them in parallel before constructing SpatialGraph. v1 has
         // nodes inline, so loadNodeShards is a synchronous no-op.
         return loadNodeShards(idx).then(function() {
-          // 4 instead of 8. Tokyo→Oita on Japan measured 285 MB at 8
-          // cells (~36 MB/cell decoded, much bigger than my 8 MB
-          // estimate — Japan's 1° cells are dense). 4 keeps cell
-          // footprint near 140 MB. Re-fetches will be slow but the
-          // page survives.
-          graph = new SpatialGraph(idx, /*cacheLimit*/ 4);
+          // Cache by bytes rather than cell count: legacy 1° cells vary
+          // wildly in density, while v3 scale-10 cells stay small.
+          graph = new SpatialGraph(idx, /*maxResidentBytes*/ 64 * 1024 * 1024);
           window.__streetzim_graph = graph;
           console.log('[streetzim] spatial graph loaded', {
             version: idx.version,
@@ -6064,9 +6165,19 @@ function initRouting(map, config) {
   }
 
   // Find nearest graph node to a lat/lon (operates on int32-scaled coords)
-  function nearestNode(lat, lon) {
+  async function nearestNode(lat, lon) {
     var latE7 = Math.round(lat * 1e7);
     var lonE7 = Math.round(lon * 1e7);
+    if (graph.isSpatial && graph._index.version === 3) {
+      var workerReady = await initRoutingWorker();
+      if (workerReady && __routingWorker) {
+        try { return await snapViaWorker(lat, lon); }
+        catch (err) {
+          console.warn('[streetzim] worker snap failed, falling back:', err);
+        }
+      }
+      return graph.snapNearestNode(latE7, lonE7);
+    }
     var nodes = graph.nodesScaled;
     var best = -1;
     var bestDist = Infinity;
@@ -6080,7 +6191,11 @@ function initRouting(map, config) {
         best = i / 2;
       }
     }
-    return best;
+    return {
+      node: best,
+      lat: nodes[best * 2] / 1e7,
+      lon: nodes[best * 2 + 1] / 1e7,
+    };
   }
 
   // Haversine distance in meters
@@ -6193,21 +6308,15 @@ function initRouting(map, config) {
     }
     var cellMB = 0;
     if (typeof graph !== 'undefined' && graph && graph._cells) {
-      // Sum the actual byte lengths of each cell's typed arrays.
-      // Catches the real memory footprint of the cell cache; the
-      // count alone misses that one big cell can be 5× a small one.
+      // Sum payload buffers. Typed arrays are views over these buffers.
       graph._cells.forEach(function(cell) {
         if (!cell) return;
-        if (cell.cellAdj && cell.cellAdj.byteLength) cellMB += cell.cellAdj.byteLength;
-        if (cell.edges && cell.edges.byteLength) cellMB += cell.edges.byteLength;
-        if (cell.geomBlob && cell.geomBlob.byteLength) cellMB += cell.geomBlob.byteLength;
-        if (cell.localToGlobal && cell.localToGlobal.byteLength) {
-          cellMB += cell.localToGlobal.byteLength;
-        }
+        cellMB += cell.byteLength || 0;
       });
       cellMB = cellMB / (1024 * 1024);
-      lines.push('cells: ' + graph._cells.size + ' / cap ' +
-        (graph._cacheLimit || '?') + ' = ' + cellMB.toFixed(0) + ' MB');
+      lines.push('cells: ' + graph._cells.size + ' = ' + cellMB.toFixed(0)
+        + ' / ' + ((graph._maxResidentBytes || 0) / 1024 / 1024).toFixed(0)
+        + ' MB budget');
     } else {
       lines.push('graph: not loaded');
     }
@@ -6448,12 +6557,13 @@ function initRouting(map, config) {
     // it costs us 2 minutes of wall time. Crow distance scales much
     // faster than the optimal bail rate, so a hard skip is safer than
     // tuning the pop limit.
-    var nodesScaled = graph.nodesScaled;
+    var startCoords = await graph.nodeCoordsE7(startNode);
+    var endCoords = await graph.nodeCoordsE7(endNode);
     var crowKm = haversine(
-      nodesScaled[startNode * 2] / 1e7,
-      nodesScaled[startNode * 2 + 1] / 1e7,
-      nodesScaled[endNode * 2] / 1e7,
-      nodesScaled[endNode * 2 + 1] / 1e7
+      startCoords[0] / 1e7,
+      startCoords[1] / 1e7,
+      endCoords[0] / 1e7,
+      endCoords[1] / 1e7
     ) / 1000;
     // Skip the optimal pass on long routes (matches the worker — see
     // routing-worker.js for the threshold rationale).
@@ -6477,9 +6587,9 @@ function initRouting(map, config) {
 
   async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
                                         GREEDY_WEIGHT, POP_LIMIT) {
-    var nodesScaled = graph.nodesScaled;
-    var endLat = nodesScaled[endNode * 2] / 1e7;
-    var endLon = nodesScaled[endNode * 2 + 1] / 1e7;
+    var endCoords = await graph.nodeCoordsE7(endNode);
+    var endLat = endCoords[0] / 1e7;
+    var endLon = endCoords[1] / 1e7;
 
     var g = new Map();         // node -> g-score (seconds)
     var prev = new Map();      // node -> predecessor node
@@ -6488,9 +6598,10 @@ function initRouting(map, config) {
     g.set(startNode, 0);
 
     var open = new MinHeap();
+    var startCoords = await graph.nodeCoordsE7(startNode);
     var h0 = haversine(
-      nodesScaled[startNode * 2] / 1e7,
-      nodesScaled[startNode * 2 + 1] / 1e7,
+      startCoords[0] / 1e7,
+      startCoords[1] / 1e7,
       endLat, endLon
     ) / (80 / 3.6);
     open.push([h0, startNode]);
@@ -6544,8 +6655,9 @@ function initRouting(map, config) {
           g.set(target, newG);
           prev.set(target, current);
           prevEdge.set(target, [current, target, speedDist, e[2], e[3], e[4]]);
-          var tLat = nodesScaled[target * 2] / 1e7;
-          var tLon = nodesScaled[target * 2 + 1] / 1e7;
+          var targetCoords = await graph.nodeCoordsE7(target);
+          var tLat = targetCoords[0] / 1e7;
+          var tLon = targetCoords[1] / 1e7;
           var h = haversine(tLat, tLon, endLat, endLon) / (80 / 3.6) * GREEDY_WEIGHT;
           open.push([newG + h, target]);
         }
@@ -6576,10 +6688,12 @@ function initRouting(map, config) {
       totalDist += distM;
       segRev.push({ nameIdx: nameIdx, distM: distM, flags: manFlags });
 
-      var fromLat = nodesScaled[sourceNode * 2] / 1e7;
-      var fromLon = nodesScaled[sourceNode * 2 + 1] / 1e7;
-      var toLat = nodesScaled[n * 2] / 1e7;
-      var toLon = nodesScaled[n * 2 + 1] / 1e7;
+      var fromCoords = await graph.nodeCoordsE7(sourceNode);
+      var toCoords = await graph.nodeCoordsE7(n);
+      var fromLat = fromCoords[0] / 1e7;
+      var fromLon = fromCoords[1] / 1e7;
+      var toLat = toCoords[0] / 1e7;
+      var toLon = toCoords[1] / 1e7;
       var segment = [[fromLon, fromLat]];
       if (geomLocal !== graph.NO_GEOM) {
         var pts = await graph.decodeGeomForEdge(sourceNode, geomLocal);
@@ -6614,8 +6728,8 @@ function initRouting(map, config) {
   }
 
   // --- Off-main-thread routing bridge ---
-  // The worker owns its own copy of the spatial-v2 graph (cells-index
-  // + node shards), so its A* runs flat-out without competing with
+  // The worker owns the spatial graph cell cache, so its A* runs
+  // flat-out without competing with
   // MapLibre repaints. Falls back to the main-thread engine below if
   // the worker fails to come up (e.g. host CSP, ZIM-baked viewer
   // pre-dating routing-worker.js, etc.). cf. project_routing_perf_canada.md.
@@ -6767,6 +6881,10 @@ function initRouting(map, config) {
       } else if (m.ok && m.result) inflight.resolve(m.result);
       else if (m.ok)               inflight.resolve(null);
       else                         inflight.reject(new Error(m.error || 'route failed'));
+    } else if (m.type === 'snap-done') {
+      __routingWorkerInflight.delete(m.id);
+      if (m.error) inflight.reject(new Error(m.error));
+      else inflight.resolve({ node: m.node, lat: m.lat, lon: m.lon });
     }
   }
 
@@ -6814,8 +6932,17 @@ function initRouting(map, config) {
     });
   }
 
+  function snapViaWorker(lat, lon) {
+    if (!__routingWorker) return Promise.reject(new Error('worker not ready'));
+    var id = ++__routingWorkerSeq;
+    return new Promise(function(resolve, reject) {
+      __routingWorkerInflight.set(id, { resolve: resolve, reject: reject });
+      __routingWorker.postMessage({ cmd: 'snap', id: id, lat: lat, lon: lon });
+    });
+  }
+
   async function findRoute(startNode, endNode) {
-    // Prefer the worker on spatial-v2 graphs. initRoutingWorker is
+    // Prefer the worker on spatial graphs. initRoutingWorker is
     // idempotent and returns a Promise<bool> resolving once init
     // completes (true → ready, false → failed, fall back). Awaiting
     // here means a route requested before init finishes waits up
@@ -6864,11 +6991,12 @@ function initRouting(map, config) {
       // wins barely; at 100 km it dominates; at 200 km it's huge.
       // Override via URL ?route=full or ?route=two-pass for testing.
       debugInit();
-      var nodesScaled = graph.nodesScaled;
-      var startLat = nodesScaled[startNode * 2] / 1e7;
-      var startLon = nodesScaled[startNode * 2 + 1] / 1e7;
-      var endLat = nodesScaled[endNode * 2] / 1e7;
-      var endLon = nodesScaled[endNode * 2 + 1] / 1e7;
+      var startCoords = await graph.nodeCoordsE7(startNode);
+      var endCoords = await graph.nodeCoordsE7(endNode);
+      var startLat = startCoords[0] / 1e7;
+      var startLon = startCoords[1] / 1e7;
+      var endLat = endCoords[0] / 1e7;
+      var endLon = endCoords[1] / 1e7;
       var crow = haversine(startLat, startLon, endLat, endLon);
       var override = new URLSearchParams(location.search).get('route');
       var useTwoPass = override === 'two-pass'
@@ -7185,7 +7313,10 @@ function initRouting(map, config) {
 
   // Set origin from any source (map click, typeahead, GPS). `label` is what
   // to show in the input; if omitted, a lat/lon coord label is used.
-  function setOriginFromLatLon(lat, lon, label) {
+  var originSnapSeq = 0;
+  var destSnapSeq = 0;
+
+  async function setOriginFromLatLon(lat, lon, label) {
     // Race guard: a "Directions to here" click on a place-detail
     // popup fires getCurrentPosition, then on resolve calls back into
     // this with label='Current location'. If the user has clicked
@@ -7199,9 +7330,21 @@ function initRouting(map, config) {
       return;
     }
     if (queueGraphPick('origin', lat, lon, label)) return;
-    originNode = nearestNode(lat, lon);
-    var oLat = graph.nodesScaled[originNode * 2] / 1e7;
-    var oLon = graph.nodesScaled[originNode * 2 + 1] / 1e7;
+    var snapSeq = ++originSnapSeq;
+    statusEl.textContent = 'Finding nearest road...';
+    var snapped;
+    try {
+      snapped = await nearestNode(lat, lon);
+    } catch (err) {
+      if (snapSeq === originSnapSeq) statusEl.textContent = 'Could not find a nearby road';
+      console.error('[streetzim] origin snap failed:', err);
+      return;
+    }
+    if (snapSeq !== originSnapSeq) return;
+    originNode = snapped.node;
+    var oLat = snapped.lat;
+    var oLon = snapped.lon;
+    originCoordE7 = [Math.round(oLat * 1e7), Math.round(oLon * 1e7)];
     originInput.value = label || coordLabel(oLat, oLon);
     // Origin is now committed (typeahead pick, map click, GPS button,
     // or queued-pick replay). Clear the editing flag so future GPS
@@ -7217,11 +7360,23 @@ function initRouting(map, config) {
     }
   }
 
-  function setDestFromLatLon(lat, lon, label) {
+  async function setDestFromLatLon(lat, lon, label) {
     if (queueGraphPick('dest', lat, lon, label)) return;
-    destNode = nearestNode(lat, lon);
-    var dLat = graph.nodesScaled[destNode * 2] / 1e7;
-    var dLon = graph.nodesScaled[destNode * 2 + 1] / 1e7;
+    var snapSeq = ++destSnapSeq;
+    statusEl.textContent = 'Finding nearest road...';
+    var snapped;
+    try {
+      snapped = await nearestNode(lat, lon);
+    } catch (err) {
+      if (snapSeq === destSnapSeq) statusEl.textContent = 'Could not find a nearby road';
+      console.error('[streetzim] destination snap failed:', err);
+      return;
+    }
+    if (snapSeq !== destSnapSeq) return;
+    destNode = snapped.node;
+    var dLat = snapped.lat;
+    var dLon = snapped.lon;
+    destCoordE7 = [Math.round(dLat * 1e7), Math.round(dLon * 1e7)];
     destInput.value = label || coordLabel(dLat, dLon);
     if (destMarker) destMarker.remove();
     destMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-dest'), anchor: 'center' })
@@ -7255,10 +7410,10 @@ function initRouting(map, config) {
     // routes.
     var crowKm = 0;
     if (graph && originNode >= 0 && destNode >= 0) {
-      var oLatE7 = graph.nodesScaled[originNode * 2];
-      var oLonE7 = graph.nodesScaled[originNode * 2 + 1];
-      var dLatE7 = graph.nodesScaled[destNode * 2];
-      var dLonE7 = graph.nodesScaled[destNode * 2 + 1];
+      var oLatE7 = originCoordE7[0];
+      var oLonE7 = originCoordE7[1];
+      var dLatE7 = destCoordE7[0];
+      var dLonE7 = destCoordE7[1];
       crowKm = haversine(oLatE7 / 1e7, oLonE7 / 1e7,
                          dLatE7 / 1e7, dLonE7 / 1e7) / 1000;
     }

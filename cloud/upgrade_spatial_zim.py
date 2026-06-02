@@ -312,8 +312,11 @@ def upgrade(src_path: str, dst_path: str, *,
     print(f"  source: {os.path.getsize(src_path)/1e9:.2f} GB, "
           f"{src.entry_count} entries", flush=True)
 
-    spill = Path(tempfile.mkdtemp(prefix="upgrade_spill_",
-                                  dir="/storage/streetzim/tmp"))
+    preferred_tmp = Path("/storage/streetzim/tmp")
+    spill = Path(tempfile.mkdtemp(
+        prefix="upgrade_spill_",
+        dir=str(preferred_tmp) if preferred_tmp.is_dir() else None,
+    ))
     print(f"  spill dir: {spill}", flush=True)
 
     threshold_bytes = split_hot_search_chunks_mb * 1024 * 1024
@@ -425,18 +428,14 @@ def upgrade(src_path: str, dst_path: str, *,
     viewer_replacements: dict[str, bytes] = {}
     if swap_viewer:
         viewer_dir = REPO / "resources" / "viewer"
-        for name in ("index.html", "places.html"):
+        for name in ("index.html", "places.html", "routing-worker.js"):
             disk = viewer_dir / name
             if not disk.exists():
                 continue
-            try:
-                src.get_entry_by_path(name)
-            except Exception:
-                continue  # source doesn't ship this entry; don't add new ones
             data = disk.read_bytes()
             viewer_replacements[name] = data
             replaced_search_paths.add(name)
-            print(f"  will swap {name} ← {disk} ({len(data)} B)", flush=True)
+            print(f"  will add/swap {name} ← {disk} ({len(data)} B)", flush=True)
 
     # ---- Phase 3: emit output ZIM -----------------------------------------
     if os.path.exists(dst_path):
@@ -615,7 +614,8 @@ def upgrade(src_path: str, dst_path: str, *,
         # up viewer fixes (e.g. SZCI v2 reader for iOS, Sources panel
         # tweaks). Skipped under ``--no-swap-viewer``.
         for name, data in viewer_replacements.items():
-            mime = "text/html"
+            mime = ("application/javascript"
+                    if name.endswith(".js") else "text/html")
             c.add_item(PassthroughItem(
                 name, name, mime, data, compress=True,
             ))

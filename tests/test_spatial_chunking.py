@@ -6,8 +6,8 @@ Three levels of coverage:
      parsed back, with assertions on cell count / cell membership / edge
      attribution / geom localisation.
   2. Route identity on synthetic graphs — spatial A* vs monolithic A*
-     across a hand-constructed 4-cell grid; node_sequence + total_dist +
-     total_time must match bit-for-bit.
+     across a hand-constructed 4-cell grid; geometry + total_dist +
+     total_time must match after the intentional cell-major reindex.
   3. Route identity on real ZIMs — for each region in tests/golden,
      rebuild the graph as spatial, replay the first 50 golden routes via
      spatial A*, confirm the format-independent fingerprint fields
@@ -97,6 +97,19 @@ def _pack_v4_graph(nodes_e7: list[tuple[int, int]],
 # ---- 1. Unit tests on build_spatial ---------------------------------------
 
 
+def _parse_cell(idx, cells, cid):
+    return parse_szrc(cells[cid], base_node=int(idx.cell_base_node[cid]))
+
+
+def _spatial_node_for_source(sg, nodes, source_idx):
+    lat, lon = nodes[source_idx]
+    return sg.nearest_node(lat, lon)
+
+
+def _coords_for_spatial_route(sg, route):
+    return [sg.node_coords_e7(n) for n in route.node_sequence]
+
+
 def test_cell_of_basic():
     # 0.1° cells: lat=37.7 → cell_lat=377, lon=-122.4 → cell_lon=-1224.
     assert cell_of(377_000_000, -1_224_000_000, 10) == (377, -1224)
@@ -125,8 +138,8 @@ def test_build_spatial_single_cell():
     idx = parse_szci(idx_bytes)
     assert idx.num_cells == 1
     assert len(cells) == 1
-    only_cell = parse_szrc(cells[0])
-    assert list(only_cell.cell_nodes_global) == [0, 1, 2]
+    only_cell = _parse_cell(idx, cells, 0)
+    assert list(only_cell.nodes_scaled) == [v for pair in nodes for v in pair]
     assert only_cell.edges.shape[0] == 2 * 5  # 2 edges × stride 5
 
 
@@ -153,8 +166,8 @@ def test_build_spatial_multi_cell_attribution():
     assert idx.num_cells == 4
     # Each cell should own exactly one node and one outgoing edge.
     for cid in range(4):
-        c = parse_szrc(cells[cid])
-        assert c.cell_nodes_global.shape[0] == 1
+        c = _parse_cell(idx, cells, cid)
+        assert c.node_count == 1
         # edges stride 5, one edge → 5 u32s
         assert c.edges.shape[0] == 5
 
@@ -199,23 +212,14 @@ def test_build_spatial_geom_index_is_cell_local():
     assert idx.num_cells == 2
 
     for cid in range(2):
-        c = parse_szrc(cells[cid])
+        c = _parse_cell(idx, cells, cid)
         assert c.geom_count == 1
         # The single edge's geom_local should be 0 in every cell.
         assert int(c.edges[2]) == 0
 
 
-def test_build_spatial_sharded_nodes_scaled(tmp_path):
-    """SZCI v2: when nodes_scaled would be large enough, build_spatial
-    writes ``nodes-scaled-NNN.bin`` shard files instead of inlining them
-    in the SZCI body. parse_szci with a shard loader callback must
-    reconstruct the same nodes_scaled bytes that the v1 inline path
-    produced for the same source graph.
-
-    Drives a 4-node graph through both paths and asserts byte-identity
-    on the reassembled nodes_scaled + a routed result. Forces sharding
-    by patching the inline threshold to 0 (so any non-empty graph picks
-    the shard path)."""
+def test_build_spatial_v3_keeps_coords_cell_local(tmp_path):
+    """SZCI v3 keeps coordinates in cells and emits no global shards."""
     import tests.szrg_spatial as ssm
 
     nodes = [
@@ -232,56 +236,38 @@ def test_build_spatial_sharded_nodes_scaled(tmp_path):
     ]
     g = parse_szrg_bytes(_pack_v4_graph(nodes, edges))
 
-    # 1) v1 inline (in-memory path): nodes_scaled lives inside SZCI bytes.
-    idx_bytes_v1, cells_v1, _ = ssm.build_spatial(g, cell_scale=10)
-    idx_v1 = ssm.parse_szci(idx_bytes_v1)
-    assert idx_v1.version == ssm.SZCI_VERSION_INLINE
-    nodes_v1_bytes = idx_v1.nodes_scaled.tobytes()
+    idx_bytes, _cells, meta = ssm.build_spatial(
+        g, cell_scale=10, output_dir=tmp_path,
+    )
+    idx = ssm.parse_szci(idx_bytes)
+    assert idx.version == ssm.SZCI_VERSION_CELL_COORDS
+    assert idx.nodes_scaled.shape[0] == 0
+    assert meta["node_shard_paths"] == []
+    assert not list(tmp_path.glob("nodes-scaled-*.bin"))
 
-    # 2) v2 sharded (force the threshold so the shard path triggers
-    # for our tiny test graph).
-    orig_threshold = ssm.NODES_SCALED_INLINE_MB_THRESHOLD
-    orig_per_shard = ssm.DEFAULT_NODES_PER_SHARD
-    try:
-        ssm.NODES_SCALED_INLINE_MB_THRESHOLD = 0
-        ssm.DEFAULT_NODES_PER_SHARD = 2  # 2 nodes/shard → 2 shards for our 4-node graph
-        idx_bytes_v2, cells_v2, meta_v2 = ssm.build_spatial(
-            g, cell_scale=10, output_dir=tmp_path,
-        )
-    finally:
-        ssm.NODES_SCALED_INLINE_MB_THRESHOLD = orig_threshold
-        ssm.DEFAULT_NODES_PER_SHARD = orig_per_shard
-
-    # SZCI body is now smaller (no inline nodes blob).
-    assert len(idx_bytes_v2) < len(idx_bytes_v1)
-    assert len(meta_v2["node_shard_paths"]) == 2
-
-    # parse_szci with no loader: nodes_scaled comes back empty.
-    idx_v2_no_loader = ssm.parse_szci(idx_bytes_v2)
-    assert idx_v2_no_loader.version == ssm.SZCI_VERSION_SHARDED
-    assert idx_v2_no_loader.nodes_scaled.shape[0] == 0
-    # Header still records the right node count for the rest of the
-    # routing surface to use.
-    assert idx_v2_no_loader.num_nodes == 4
-
-    # parse_szci WITH loader: shards are concatenated and decoded as
-    # int32 little-endian — must equal the v1 inline bytes exactly.
-    shard_paths = sorted(meta_v2["node_shard_paths"])
-    def loader(shard_idx: int) -> bytes:
-        return Path(shard_paths[shard_idx]).read_bytes()
-    idx_v2 = ssm.parse_szci(idx_bytes_v2, nodes_scaled_loader=loader)
-    assert idx_v2.nodes_scaled.tobytes() == nodes_v1_bytes
-
-    # Routing still works through the v2 path. Build a SpatialGraph
-    # whose cell loader looks at the on-disk cell files (v2 wrote them
-    # alongside the index) and route 0 → 2.
     def cell_loader(cell_id: int) -> bytes:
         path = tmp_path / f"graph-cell-{cell_id:05d}.bin"
         return path.read_bytes()
-    sg = ssm.SpatialGraph(idx_v2, cell_loader)
-    r = find_route_spatial(sg, 0, 2)
+    sg = ssm.SpatialGraph(idx, cell_loader)
+    start = _spatial_node_for_source(sg, nodes, 0)
+    end = _spatial_node_for_source(sg, nodes, 2)
+    r = find_route_spatial(sg, start, end)
     assert r is not None
-    assert r.node_sequence[0] == 0 and r.node_sequence[-1] == 2
+    assert _coords_for_spatial_route(sg, r)[0] == nodes[0]
+    assert _coords_for_spatial_route(sg, r)[-1] == nodes[2]
+
+
+def test_spatial_v3_nearest_node_checks_neighbor_cells():
+    """Snapping near a boundary must not stop at the containing cell."""
+    nodes = [
+        (999_000, 0),    # cell (0, 0), farther from the query
+        (1_001_000, 0),  # cell (1, 0), nearest across the boundary
+    ]
+    g = parse_szrg_bytes(_pack_v4_graph(nodes, []))
+    idx_bytes, cells, _ = build_spatial(g, cell_scale=10)
+    sg = spatial_graph_from_memory(idx_bytes, cells)
+    snapped = sg.nearest_node(1_000_900, 0)
+    assert sg.node_coords_e7(snapped) == nodes[1]
 
 
 # ---- 2. Spatial A* route identity on synthetic graphs ---------------------
@@ -307,9 +293,11 @@ def test_spatial_astar_matches_monolithic_on_grid():
     sg = spatial_graph_from_memory(idx_bytes, cells)
 
     mono = find_route(g4, 0, 3)
-    spat = find_route_spatial(sg, 0, 3)
+    spat_start = _spatial_node_for_source(sg, nodes, 0)
+    spat_end = _spatial_node_for_source(sg, nodes, 3)
+    spat = find_route_spatial(sg, spat_start, spat_end)
     assert mono is not None and spat is not None
-    assert mono.node_sequence == spat.node_sequence
+    assert [nodes[n] for n in mono.node_sequence] == _coords_for_spatial_route(sg, spat)
     assert abs(mono.total_dist_m - spat.total_dist_m) < 1e-9
     assert abs(mono.total_time_s - spat.total_time_s) < 1e-9
 
@@ -327,14 +315,17 @@ def test_spatial_astar_handles_cross_cell_detour():
     assert len(cells) == 6
 
     sg = spatial_graph_from_memory(idx_bytes, cells)
-    spat = find_route_spatial(sg, 0, 5)
+    spat = find_route_spatial(
+        sg,
+        _spatial_node_for_source(sg, nodes, 0),
+        _spatial_node_for_source(sg, nodes, 5),
+    )
     mono = find_route(g4, 0, 5)
     assert spat is not None and mono is not None
-    assert spat.node_sequence == mono.node_sequence == [0, 1, 2, 3, 4, 5]
-    # Touched all 5 source-node cells (dest cell has 0 outbound edges).
-    # Note that cells 0..4 each had outbound edges; cell 5 was never visited
-    # as a popped-source (its out-edges are empty), so cells_loaded == 5.
-    assert sg.cells_loaded == 5
+    assert _coords_for_spatial_route(sg, spat) == nodes
+    # Snapping touches both endpoint cells before A*, then the route walks
+    # through every source-node cell.
+    assert sg.cells_loaded == 6
 
 
 def test_spatial_lru_evicts_when_capped():
@@ -354,11 +345,15 @@ def test_spatial_lru_evicts_when_capped():
         return cells[cid]
 
     sg = SpatialGraph(idx, loader, cache_limit=2)
-    r = find_route_spatial(sg, 0, 5)
+    r = find_route_spatial(
+        sg,
+        _spatial_node_for_source(sg, nodes, 0),
+        _spatial_node_for_source(sg, nodes, 5),
+    )
     assert r is not None
     # Each source node's cell was loaded; some may be loaded twice due to
     # eviction, but correctness is unaffected.
-    assert r.node_sequence == [0, 1, 2, 3, 4, 5]
+    assert _coords_for_spatial_route(sg, r) == nodes
     assert hits["count"] >= 5
 
 
@@ -442,12 +437,17 @@ def test_spatial_preserves_routes_on_real_zim(corpus: Path):
                 continue
             s, e = rec["s"], rec["e"]
             mono = find_route(g4, s, e)
-            spat = find_route_spatial(sg, s, e)
+            spat = find_route_spatial(
+                sg,
+                sg.nearest_node(int(g4.nodes_scaled[s * 2]),
+                                int(g4.nodes_scaled[s * 2 + 1])),
+                sg.nearest_node(int(g4.nodes_scaled[e * 2]),
+                                int(g4.nodes_scaled[e * 2 + 1])),
+            )
             if mono is None or spat is None:
                 mismatches += 1
                 continue
-            if (mono.node_sequence != spat.node_sequence
-                    or abs(mono.total_dist_m - spat.total_dist_m) > 1e-6
+            if (abs(mono.total_dist_m - spat.total_dist_m) > 1e-6
                     or abs(mono.total_time_s - spat.total_time_s) > 1e-6):
                 mismatches += 1
                 if mismatches <= 3:

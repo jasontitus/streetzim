@@ -274,11 +274,17 @@ def _probe_routing_spatial(zim_path: str) -> str:
     # Pick two arbitrary graph-valid nodes + route between them
     import numpy as np
     adj_offsets = []
-    # We have nodes_scaled but need adj_offsets per cell (spatial graph doesn't
-    # expose a global adj_offsets). Use the first cell's local nodes + a real route.
+    # Spatial graphs don't expose global adjacency. Use the first cell's
+    # local node range + a real route.
     cell0 = sg._ensure_cell(0)
-    nodes_in_cell = [int(cell0.cell_nodes_global[i])
-                     for i in range(min(cell0.cell_nodes_global.shape[0], 100))]
+    if cell0.nodes_scaled.shape[0]:
+        nodes_in_cell = list(range(
+            cell0.base_node,
+            cell0.base_node + min(cell0.node_count, 100),
+        ))
+    else:
+        nodes_in_cell = [int(cell0.cell_nodes_global[i])
+                         for i in range(min(cell0.node_count, 100))]
     # Route between the first and last of cell 0's nodes — almost certainly
     # reachable since they share outgoing edges that stay in-cell most of
     # the time.
