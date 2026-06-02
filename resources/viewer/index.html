@@ -2683,6 +2683,14 @@ function _showPlaceDetail(map, r, idx) {
       'Website', '🌐', false,
       function() { window.open(r.ws, '_blank', 'noopener'); }));
   }
+  // Full bundled Wikipedia article (in-ZIM) when this place has one.
+  var _detailArt = _wikiArticlePath(r.q, r.w);
+  if (_detailArt) {
+    actions.appendChild(_detailActionBtn(
+      'Wikipedia', '📖', false,
+      function() { window.open(baseUrl + 'wiki-article/'
+        + encodeURIComponent(_detailArt), '_blank', 'noopener'); }));
+  }
   panel.appendChild(actions);
 
   // Address line (if location string distinct from subhead)
