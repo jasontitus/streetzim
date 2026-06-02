@@ -166,6 +166,21 @@ def swap_viewer_rust(src_path: str, dst_path: str) -> int:
                 continue
 
             data = bytes(item.content)
+            # Drop geo-index entries whose article wasn't actually bundled
+            # (enwiki had no page for that title) so the viewer never lists a
+            # place that 404s on "Read full article".
+            if path == "wiki-geo-index.json":
+                try:
+                    import json as _json
+                    geo = _json.loads(data.decode("utf-8"))
+                    before = len(geo)
+                    geo = {t: v for t, v in geo.items()
+                           if src.has_entry_by_path("wiki-article/" + t)}
+                    data = _json.dumps(geo, separators=(",", ":")).encode("utf-8")
+                    print(f"  geo-index filtered: {before} -> {len(geo)} "
+                          f"(dropped {before - len(geo)} without a bundled article)")
+                except Exception as e:
+                    print(f"  warning: geo-index filter failed: {e}")
             if is_xapian:
                 c.add_item(_Item(path, mime, title=title,
                                  data=data,

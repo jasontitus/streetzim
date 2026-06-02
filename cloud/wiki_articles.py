@@ -270,6 +270,7 @@ def bundle_wiki_articles(
            else f" via Wikipedia API (cache: {cache_dir})"))
 
     bundled = failed = total_bytes = 0
+    stored_titles: set = set()   # title_us actually written — for the geo-index
     for i, title_us in enumerate(norm, 1):
         raw = src.html(title_us) if src else _fetch_online(title_us, cache_dir, user_agent)
         if not raw:
@@ -279,6 +280,7 @@ def bundle_wiki_articles(
             url = "https://en.wikipedia.org/wiki/" + urllib.parse.quote(title_us)
             page = clean_article_html(raw, disp, url).encode("utf-8")
             add_item(f"wiki-article/{title_us}", disp, "text/html", page)
+            stored_titles.add(title_us)
             bundled += 1
             total_bytes += len(page)
         if not src and sleep:
@@ -287,7 +289,7 @@ def bundle_wiki_articles(
             log(f"    ... {i}/{len(norm)} bundled={bundled} failed={failed} "
                 f"{total_bytes // 1024} KB")
     stats = {"requested": len(norm), "bundled": bundled, "failed": failed,
-             "bytes": total_bytes}
+             "bytes": total_bytes, "stored_titles": stored_titles}
     log(f"    bundle-wiki-articles: stored {bundled} articles "
         f"({total_bytes / 1024:.0f} KB), {failed} unavailable")
     return stats

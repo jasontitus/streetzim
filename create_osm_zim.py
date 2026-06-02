@@ -4460,6 +4460,7 @@ def create_zim(
         # wiki-article/<Title>; mcpzim's articleByTitle reads them there and
         # its narration cleaner de-noises for TTS. Cached so rebuilds don't
         # re-crawl. Source: a local Wikipedia ZIM (offline) or the API.
+        _bundled_set = None  # title_us actually stored — gates the geo-index
         if bundle_wiki_articles and wiki_cross_refs:
             _wa_titles = {e["wikipedia"] for e in wiki_cross_refs.values()
                           if e.get("wikipedia")}
@@ -4473,6 +4474,7 @@ def create_zim(
                     cache_dir=wiki_articles_cache,
                     offline_zim=wiki_articles_source,
                 )
+                _bundled_set = _wa_stats.get("stored_titles") or set()
                 PHASE_TIMER.record_subphase(
                     "zim-pack: wiki-articles", time.time() - _wa_t0,
                     note=f"{_wa_stats['bundled']} articles, "
@@ -4858,7 +4860,12 @@ def create_zim(
                                 _ci = _wt.find(":")
                                 _gt = (_wt[_ci + 1:] if 2 <= _ci <= 3
                                        and _wt[:_ci].isalpha() else _wt).replace(" ", "_")
-                                if _gt and _gt not in wiki_geo:
+                                # Only index titles whose article was actually
+                                # bundled (enwiki had a page) — else the viewer
+                                # would list places that 404 on "Read full article".
+                                if (_gt and _gt not in wiki_geo
+                                        and _bundled_set is not None
+                                        and _gt in _bundled_set):
                                     # [lat, lon, type, qid] — qid lets the viewer
                                     # pull the wikidata blurb from wikidata/<prefix>.
                                     wiki_geo[_gt] = [round(feat["lat"], 5),
