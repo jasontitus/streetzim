@@ -1009,24 +1009,35 @@ function openWikiArticle(path) {
     ttl.id = 'wiki-article-title';
     ttl.style.cssText = 'flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
     bar.appendChild(ttl);
-    var fr = document.createElement('iframe');
-    fr.id = 'wiki-article-frame';
-    fr.style.cssText = 'flex:1 1 auto;width:100%;border:0;';
     ov.appendChild(bar);
-    ov.appendChild(fr);
     document.body.appendChild(ov);
   }
   try {
     document.getElementById('wiki-article-title').textContent =
       decodeURIComponent(path).replace(/_/g, ' ');
   } catch (e) {}
-  var _frame = document.getElementById('wiki-article-frame');
-  // Force the article to the top. The WebView otherwise keeps a prior scroll
-  // position (or jumps to a focused element), opening the article mid-page.
-  _frame.onload = function() {
-    try { _frame.contentWindow.scrollTo(0, 0); } catch (e) {}
-  };
-  _frame.src = url;
+  // Recreate the iframe on every open so the article always starts at the top.
+  // Reusing a single iframe let the WebView restore the previous scroll
+  // position, opening articles part-way down the page.
+  var oldFrame = document.getElementById('wiki-article-frame');
+  if (oldFrame && oldFrame.parentNode) oldFrame.parentNode.removeChild(oldFrame);
+  var frame = document.createElement('iframe');
+  frame.id = 'wiki-article-frame';
+  frame.style.cssText = 'flex:1 1 auto;width:100%;border:0;';
+  function _articleToTop() {
+    try {
+      frame.contentWindow.scrollTo(0, 0);
+      var d = frame.contentDocument;
+      if (d) {
+        if (d.scrollingElement) d.scrollingElement.scrollTop = 0;
+        if (d.documentElement) d.documentElement.scrollTop = 0;
+        if (d.body) d.body.scrollTop = 0;
+      }
+    } catch (e) {}
+  }
+  frame.addEventListener('load', function() { _articleToTop(); setTimeout(_articleToTop, 60); });
+  ov.appendChild(frame);
+  frame.src = url;
   ov.style.display = 'flex';
 }
 
@@ -4803,17 +4814,11 @@ function initWikiSidebar(map, config) {
     pulseTimeout = setTimeout(function() {
       if (wikiPulseMarker) { wikiPulseMarker.remove(); wikiPulseMarker = null; }
     }, 5000);
-    var fin = function() { renderWikiDetail(it.qid, it.name, [lon, lat], it.title); };
-    if (it.qid) {
-      var _pfx = getWdPrefix(it.qid);
-      fetchWdChunk(_pfx).then(function() {
-        fin();
-        // renderWikiDetail reads its one record synchronously in fin(); drop
-        // the big (20-45 MB) wikidata chunk afterwards so tapping items across
-        // prefixes can't accumulate hundreds of MB and OOM the WebView.
-        try { delete wdCache[_pfx]; } catch (e) {}
-      });
-    } else { fin(); }
+    // Render the detail immediately from the geo-index's baked description.
+    // No wikidata chunk fetch — those are 20-45 MB and made the detail slow to
+    // appear (and empty/short until they finished, so the panel never filled
+    // out). The "Read full article" button covers the full content.
+    renderWikiDetail(it.qid, it.name, [lon, lat], it.title, it.desc);
   }
 
   // Build the nearby list + markers from the baked geo-index (any zoom).
@@ -4898,7 +4903,7 @@ function initWikiSidebar(map, config) {
   // Show one entry's detail INSIDE the panel (replacing the list) so the
   // description + "Read full article" button are readable — a map popup
   // here would sit behind the list. A Back link restores the list.
-  function renderWikiDetail(qid, name, coords, explicitTitle) {
+  function renderWikiDetail(qid, name, coords, explicitTitle, bakedDesc) {
     loadingEl.style.display = 'none';
     refreshBar.style.display = 'none';
     countEl.textContent = '';
@@ -4920,8 +4925,10 @@ function initWikiSidebar(map, config) {
     nm.style.cssText = 'font-size:17px;font-weight:700;margin-bottom:6px;color:#1a1a2a;line-height:1.25;word-wrap:break-word;';
     wrap.appendChild(nm);
 
+    // Prefer the description baked into the geo-index (instant, no fetch). Fall
+    // back to a wikidata chunk only if a caller already had one loaded.
     var wd = (wdCache[getWdPrefix(qid)] || {})[qid] || null;
-    var desc = wd ? (wd.x || wd.d || '') : '';
+    var desc = bakedDesc || (wd ? (wd.x || wd.d || '') : '');
     if (desc) {
       var dd = createEl('div', 'wiki-detail-desc', desc);
       dd.style.cssText = 'font-size:13.5px;line-height:1.5;color:#444;margin-bottom:10px;word-wrap:break-word;';
