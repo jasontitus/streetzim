@@ -46,10 +46,7 @@
 
   /* --- Unified control strip --- */
   #controls {
-    /* top:160px clears the top-right maplibre control stack (zoom +
-       GeolocateControl) — the locate control lives top-right because the
-       map's bottom runs off-screen in the Kiwix WebView. */
-    position: absolute; top: 160px; right: 10px; z-index: 2;
+    position: absolute; top: 120px; right: 10px; z-index: 2;
     display: flex; flex-direction: column;
     background: var(--panel-bg); border-radius: var(--radius);
     box-shadow: var(--panel-shadow);
@@ -1261,7 +1258,7 @@ fetchConfig(1)
       trackUserLocation: false,
       showUserLocation: true
     });
-    map.addControl(geolocate, 'top-right');
+    map.addControl(geolocate, 'bottom-right');
     geolocate.on('geolocate', function(pos) { _onLocated(pos); });
 
     // Satellite layer toggle

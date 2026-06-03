@@ -46,10 +46,7 @@
 
   /* --- Unified control strip --- */
   #controls {
-    /* top:160px clears the top-right maplibre control stack (zoom +
-       GeolocateControl) — the locate control lives top-right because the
-       map's bottom runs off-screen in the Kiwix WebView. */
-    position: absolute; top: 160px; right: 10px; z-index: 2;
+    position: absolute; top: 120px; right: 10px; z-index: 2;
     display: flex; flex-direction: column;
     background: var(--panel-bg); border-radius: var(--radius);
     box-shadow: var(--panel-shadow);
@@ -1246,22 +1243,18 @@ fetchConfig(1)
         }]);
       }
     }
-    // Find-my-location: maplibre's own GeolocateControl. The earlier
-    // "navigator.permissions hides the button in Kiwix" diagnosis was wrong —
-    // maplibre does `if (navigator.permissions === undefined) return
-    // !!navigator.geolocation`, so in the Kiwix WebView (no permissions API) it
-    // falls back to true and shows the button. The button "disappeared" only
-    // because it was BOTTOM-anchored: html/body are height:100%, which on the
-    // iOS/Kiwix WebView resolves to the large (chrome-excluded) viewport, so the
-    // map container runs below the visible area and bottom-anchored controls
-    // land off-screen. Top-anchored controls (zoom, the #controls box) render
-    // fine — so add the locate control top-right, beside the zoom control.
+    // Find-my-location: maplibre's own GeolocateControl, bottom-right (its
+    // conventional home). It shows fine in the Kiwix WebView — maplibre does
+    // `if (navigator.permissions === undefined) return !!navigator.geolocation`,
+    // so it falls back to true there. (The earlier "missing button" was the
+    // whole page scrolling, not the control being off-screen; that's handled by
+    // the JS scroll lock, so it can live at the bottom again.)
     var geolocate = new maplibregl.GeolocateControl({
       positionOptions: { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
       trackUserLocation: false,
       showUserLocation: true
     });
-    map.addControl(geolocate, 'top-right');
+    map.addControl(geolocate, 'bottom-right');
     geolocate.on('geolocate', function(pos) { _onLocated(pos); });
 
     // Satellite layer toggle
