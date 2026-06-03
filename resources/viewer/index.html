@@ -992,8 +992,10 @@ function openWikiArticle(path) {
   if (!ov) {
     ov = document.createElement('div');
     ov.id = 'wiki-article-overlay';
+    // overflow:hidden clips the scroll wrapper so the (tall) article never
+    // grows the overlay or the document.
     ov.style.cssText = 'position:fixed;inset:0;z-index:5000;background:#fff;'
-      + 'display:flex;flex-direction:column;';
+      + 'display:flex;flex-direction:column;overflow:hidden;';
     var bar = document.createElement('div');
     bar.style.cssText = 'flex:0 0 auto;display:flex;align-items:center;gap:10px;'
       + 'padding:calc(env(safe-area-inset-top,0px) + 8px) 12px 8px;'
@@ -1009,43 +1011,59 @@ function openWikiArticle(path) {
     back.addEventListener('click', function() {
       ov.style.display = 'none';
       var f = document.getElementById('wiki-article-frame');
-      if (f) f.src = 'about:blank';
+      if (f && f.parentNode) f.parentNode.removeChild(f);
     });
     bar.appendChild(back);
     var ttl = document.createElement('div');
     ttl.id = 'wiki-article-title';
     ttl.style.cssText = 'flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
     bar.appendChild(ttl);
+    // Scroll container. iOS/Kiwix WebViews expand an <iframe> to its full
+    // content height instead of scrolling it internally — that grew the overlay
+    // (and the document) to the whole article's height, so the page scrolled
+    // and the back bar could be dragged off screen. We size the iframe to its
+    // content and let THIS div (overflow:auto, clipped by the overlay) scroll,
+    // while the bar stays pinned.
+    var wrap = document.createElement('div');
+    wrap.id = 'wiki-article-scroll';
+    wrap.style.cssText = 'flex:1 1 auto;overflow-y:auto;overflow-x:hidden;'
+      + '-webkit-overflow-scrolling:touch;position:relative;';
     ov.appendChild(bar);
+    ov.appendChild(wrap);
     document.body.appendChild(ov);
   }
   try {
     document.getElementById('wiki-article-title').textContent =
       decodeURIComponent(path).replace(/_/g, ' ');
   } catch (e) {}
-  // Recreate the iframe on every open so the article always starts at the top.
-  // Reusing a single iframe let the WebView restore the previous scroll
-  // position, opening articles part-way down the page.
+  var wrap = document.getElementById('wiki-article-scroll');
+  // Recreate the iframe each open (a reused one restored the prior scroll).
   var oldFrame = document.getElementById('wiki-article-frame');
   if (oldFrame && oldFrame.parentNode) oldFrame.parentNode.removeChild(oldFrame);
   var frame = document.createElement('iframe');
   frame.id = 'wiki-article-frame';
-  frame.style.cssText = 'flex:1 1 auto;width:100%;border:0;';
-  function _articleToTop() {
+  frame.setAttribute('scrolling', 'no');  // the wrapper scrolls, not the iframe
+  frame.style.cssText = 'display:block;width:100%;border:0;height:70vh;';
+  function _sizeArticle() {
     try {
-      frame.contentWindow.scrollTo(0, 0);
       var d = frame.contentDocument;
       if (d) {
-        if (d.scrollingElement) d.scrollingElement.scrollTop = 0;
-        if (d.documentElement) d.documentElement.scrollTop = 0;
-        if (d.body) d.body.scrollTop = 0;
+        var hh = Math.max(d.body ? d.body.scrollHeight : 0,
+                          d.documentElement ? d.documentElement.scrollHeight : 0);
+        if (hh) frame.style.height = hh + 'px';
       }
     } catch (e) {}
   }
-  frame.addEventListener('load', function() { _articleToTop(); setTimeout(_articleToTop, 60); });
-  ov.appendChild(frame);
+  frame.addEventListener('load', function() {
+    _sizeArticle(); wrap.scrollTop = 0;
+    // Re-measure after images / late layout so the wrapper reaches the end.
+    setTimeout(function() { _sizeArticle(); wrap.scrollTop = 0; }, 150);
+    setTimeout(_sizeArticle, 600);
+  });
+  wrap.appendChild(frame);
   frame.src = url;
   ov.style.display = 'flex';
+  wrap.scrollTop = 0;
 }
 
 // Debug logging — enable by appending ?debug=1 to the URL.
