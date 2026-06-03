@@ -4795,6 +4795,13 @@ function initWikiSidebar(map, config) {
 
   // Fly to a geo item, drop a pulse marker, and show its in-panel detail.
   function flyAndDetail(it) {
+    // Mark the nearby list stale: we're flying to a specific item, so the
+    // moveend handler must show the Refresh bar instead of rebuilding the list
+    // (which would wipe the detail we render below and shrink the panel to the
+    // few items now in view). The list-item click set this, but marker clicks
+    // did not — so a marker tap lost its detail and the panel collapsed.
+    staleView = true;
+    if (refreshBar) refreshBar.style.display = 'block';
     var lon = it.coords[0], lat = it.coords[1];
     if (wikiPulseMarker) { wikiPulseMarker.remove(); wikiPulseMarker = null; }
     if (pulseTimeout) { clearTimeout(pulseTimeout); pulseTimeout = null; }
