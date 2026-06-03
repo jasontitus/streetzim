@@ -242,7 +242,7 @@
   #wiki-panel-close:hover { color: var(--text-primary); }
   #wiki-panel-list {
     flex: 1; overflow-y: auto; padding: 4px 0;
-    -webkit-overflow-scrolling: touch;
+    -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
   }
   #wiki-panel-loading {
     padding: 32px 16px; text-align: center;
@@ -1177,6 +1177,36 @@ fetchConfig(1)
     // Exposed so module-scope helpers (e.g. openWikiArticle) can stamp the
     // current view into the URL hash before navigating away.
     window.__szMap = map;
+
+    // iOS/Kiwix WebView body-scroll lock. CSS (overflow:hidden, position:fixed,
+    // 100dvh) does NOT stop that WebView from dragging the whole page, so block
+    // document-level touch scrolling in JS. We allow it only inside genuinely
+    // scrollable regions (a panel list that overflows) and on the map (maplibre
+    // pans via JS — preventing the browser default doesn't stop it). Pinch
+    // (2+ touches) is always allowed so map zoom keeps working.
+    (function lockBodyScroll() {
+      function scrollableAllowed(node) {
+        var el = node;
+        while (el && el !== document.body && el !== document.documentElement) {
+          if (el.classList && (el.classList.contains('maplibregl-canvas')
+              || el.classList.contains('maplibregl-map')
+              || el.classList.contains('maplibregl-control-container'))) return true;
+          if (el.nodeType === 1) {
+            var oy = '';
+            try { oy = window.getComputedStyle(el).overflowY; } catch (e) {}
+            if ((oy === 'auto' || oy === 'scroll')
+                && el.scrollHeight > el.clientHeight + 1) return true;
+          }
+          el = el.parentNode;
+        }
+        return false;
+      }
+      document.addEventListener('touchmove', function(e) {
+        if (e.touches && e.touches.length > 1) return;     // pinch — let map zoom
+        if (!scrollableAllowed(e.target) && e.cancelable) e.preventDefault();
+      }, { passive: false });
+    })();
+
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     // Scale bar with mi/km toggle — click to switch units
     var scaleUnit = 'imperial';
