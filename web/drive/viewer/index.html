@@ -988,82 +988,28 @@ function _wikiArticlePath(qid, w) {
 function openWikiArticle(path) {
   if (!path) return;
   var url = baseUrl + 'wiki-article/' + encodeURIComponent(path);
-  var ov = document.getElementById('wiki-article-overlay');
-  if (!ov) {
-    ov = document.createElement('div');
-    ov.id = 'wiki-article-overlay';
-    // overflow:hidden clips the scroll wrapper so the (tall) article never
-    // grows the overlay or the document.
-    ov.style.cssText = 'position:fixed;inset:0;z-index:5000;background:#fff;'
-      + 'display:flex;flex-direction:column;overflow:hidden;';
-    var bar = document.createElement('div');
-    bar.style.cssText = 'flex:0 0 auto;display:flex;align-items:center;gap:10px;'
-      + 'padding:calc(env(safe-area-inset-top,0px) + 8px) 12px 8px;'
-      + 'background:#2a4a7a;color:#fff;font:600 15px system-ui,-apple-system,sans-serif;'
-      + 'box-shadow:0 1px 4px rgba(0,0,0,0.3);';
-    var back = document.createElement('button');
-    back.type = 'button';
-    back.setAttribute('aria-label', 'Back to map');
-    back.textContent = '← Back to map';
-    back.style.cssText = 'border:0;background:rgba(255,255,255,0.18);color:#fff;'
-      + 'font:600 15px system-ui,-apple-system,sans-serif;padding:8px 14px;'
-      + 'border-radius:8px;cursor:pointer;-webkit-appearance:none;appearance:none;flex:0 0 auto;';
-    back.addEventListener('click', function() {
-      ov.style.display = 'none';
-      var f = document.getElementById('wiki-article-frame');
-      if (f && f.parentNode) f.parentNode.removeChild(f);
-    });
-    bar.appendChild(back);
-    var ttl = document.createElement('div');
-    ttl.id = 'wiki-article-title';
-    ttl.style.cssText = 'flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-    bar.appendChild(ttl);
-    // Scroll container. iOS/Kiwix WebViews expand an <iframe> to its full
-    // content height instead of scrolling it internally — that grew the overlay
-    // (and the document) to the whole article's height, so the page scrolled
-    // and the back bar could be dragged off screen. We size the iframe to its
-    // content and let THIS div (overflow:auto, clipped by the overlay) scroll,
-    // while the bar stays pinned.
-    var wrap = document.createElement('div');
-    wrap.id = 'wiki-article-scroll';
-    wrap.style.cssText = 'flex:1 1 auto;overflow-y:auto;overflow-x:hidden;'
-      + '-webkit-overflow-scrolling:touch;position:relative;';
-    ov.appendChild(bar);
-    ov.appendChild(wrap);
-    document.body.appendChild(ov);
-  }
+  // Navigate the whole view to the article as a native ZIM page. We do NOT use
+  // an in-page iframe overlay: in the iOS/Kiwix WebView an <iframe> expands to
+  // its full content height and escapes any scroll container, so the article —
+  // and its chrome — could be scrolled off-screen. A native page navigation
+  // gives proper native scrolling and the app's own Back button. First stamp
+  // the current map view into the URL hash so Back returns to the same place
+  // (applyHash restores `#map=z/lat/lon` on the way back).
   try {
-    document.getElementById('wiki-article-title').textContent =
-      decodeURIComponent(path).replace(/_/g, ' ');
-  } catch (e) {}
-  var wrap = document.getElementById('wiki-article-scroll');
-  // Recreate the iframe each open (a reused one restored the prior scroll).
-  var oldFrame = document.getElementById('wiki-article-frame');
-  if (oldFrame && oldFrame.parentNode) oldFrame.parentNode.removeChild(oldFrame);
-  var frame = document.createElement('iframe');
-  frame.id = 'wiki-article-frame';
-  frame.setAttribute('scrolling', 'no');  // the wrapper scrolls, not the iframe
-  frame.style.cssText = 'display:block;width:100%;border:0;height:70vh;';
-  function _sizeArticle() {
-    try {
-      var d = frame.contentDocument;
-      if (d) {
-        var hh = Math.max(d.body ? d.body.scrollHeight : 0,
-                          d.documentElement ? d.documentElement.scrollHeight : 0);
-        if (hh) frame.style.height = hh + 'px';
+    var mp = window.__szMap;
+    if (mp) {
+      var c = mp.getCenter();
+      var z = Math.round(mp.getZoom() * 100) / 100;
+      var h = '#map=' + z + '/' + (Math.round(c.lat * 1e5) / 1e5)
+            + '/' + (Math.round(c.lng * 1e5) / 1e5);
+      if (history && history.replaceState) {
+        history.replaceState(null, '', location.pathname + location.search + h);
+      } else {
+        location.hash = h;
       }
-    } catch (e) {}
-  }
-  frame.addEventListener('load', function() {
-    _sizeArticle(); wrap.scrollTop = 0;
-    // Re-measure after images / late layout so the wrapper reaches the end.
-    setTimeout(function() { _sizeArticle(); wrap.scrollTop = 0; }, 150);
-    setTimeout(_sizeArticle, 600);
-  });
-  wrap.appendChild(frame);
-  frame.src = url;
-  ov.style.display = 'flex';
-  wrap.scrollTop = 0;
+    }
+  } catch (e) {}
+  window.location.href = url;
 }
 
 // Debug logging — enable by appending ?debug=1 to the URL.
@@ -1228,6 +1174,9 @@ fetchConfig(1)
         [config.bounds[2] + 0.01, config.bounds[3] + 0.01]
       ] : undefined
     });
+    // Exposed so module-scope helpers (e.g. openWikiArticle) can stamp the
+    // current view into the URL hash before navigating away.
+    window.__szMap = map;
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     // Scale bar with mi/km toggle — click to switch units
     var scaleUnit = 'imperial';
