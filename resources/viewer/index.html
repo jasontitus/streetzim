@@ -25,12 +25,18 @@
     --radius: 10px;
   }
 
-  /* The page is kept from scrolling by the JS touch-scroll lock (see
-     lockBodyScroll where the map is created) — NOT by position:fixed on body,
-     which on iOS broke the layout of the absolutely-positioned bottom-sheet
-     panels (they rendered off-screen / unclickable). overscroll-behavior:none
-     suppresses rubber-banding. */
+  /* Size the page to the REAL visible window. In the Kiwix WKWebView the
+     layout viewport is the full device screen (client/scrollHeight = 956 on an
+     iPhone 16) but only window.innerHeight = 772 is actually visible between
+     the app's top chrome and bottom toolbar (ruler-measured; visualViewport
+     agrees). Percentage/vh layout therefore dropped every bottom-anchored
+     control ~184px below the fold. setViewportVars() publishes the truth as
+     --app-height / --bottom-inset; body is position:relative at --app-height
+     so all absolutely-positioned panels (and #map with its bottom controls)
+     anchor to the visible bottom; position:fixed sheets use --bottom-inset.
+     The JS touch-scroll lock (lockBodyScroll) keeps the page from dragging. */
   html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; }
+  body { position: relative; height: var(--app-height, 100%); }
   #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; width: 100%; height: 100%; }
 
   /* --- Attribution / info tag --- */
@@ -206,7 +212,7 @@
   @media (max-width: 600px) {
     #wiki-panel {
       top: auto; left: 0; right: 0; bottom: 0;
-      width: 100%; max-height: 45vh;
+      width: 100%; max-height: calc(var(--app-height, 100vh) * 0.45);
       border-radius: var(--radius) var(--radius) 0 0;
     }
     #wiki-panel.wiki-visible {
@@ -1006,6 +1012,32 @@ function openWikiArticle(path) {
   } catch (e) {}
   window.location.href = url;
 }
+
+// Publish the REAL visible window size as CSS variables. In the Kiwix
+// WKWebView the layout viewport is the full device screen (client/scrollHeight
+// = 956 on an iPhone 16) while only window.innerHeight = 772 is actually
+// visible between the app's chrome (measured with the ruler diagnostic;
+// visualViewport agrees) — so percentage/vh layout dropped every
+// bottom-anchored control ~184px below the fold. body{height:var(--app-height)}
+// plus the fixed sheets' bottom:var(--bottom-inset) anchor the whole UI to
+// what is really on screen. On desktop/PWA the inset is 0 and nothing changes.
+function setViewportVars() {
+  try {
+    var de = document.documentElement;
+    de.style.setProperty('--app-height', window.innerHeight + 'px');
+    de.style.setProperty('--bottom-inset',
+      Math.max(0, de.clientHeight - window.innerHeight) + 'px');
+  } catch (e) {}
+}
+setViewportVars();
+window.addEventListener('resize', setViewportVars);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', setViewportVars);
+}
+window.addEventListener('orientationchange', function() {
+  setTimeout(setViewportVars, 250);
+});
+window.addEventListener('load', function() { setTimeout(setViewportVars, 300); });
 
 // Debug logging — enable by appending ?debug=1 to the URL.
 // Keeps a ring-buffer of the last 200 log lines so we can render them
@@ -2409,7 +2441,7 @@ function _renderFindResultsStrip(map, stash) {
   var strip = document.createElement('div');
   strip.id = 'find-results-strip';
   strip.style.cssText = (
-    'position:fixed; left:0; right:0; bottom:0; z-index:1500;'
+    'position:fixed; left:0; right:0; bottom:var(--bottom-inset, 0px); z-index:1500;'
     + 'background:rgba(255,255,255,0.96); border-top:1px solid #ccc;'
     + 'box-shadow:0 -4px 16px rgba(0,0,0,0.12);'
     + 'font:13px/1.35 -apple-system,system-ui,sans-serif; color:#222;'
@@ -2680,8 +2712,8 @@ function _showPlaceDetail(map, r, idx) {
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'Place details');
   panel.style.cssText = (
-    'position:fixed; left:0; right:0; bottom:0; z-index:1701;'
-    + 'max-height:78vh; overflow-y:auto;'
+    'position:fixed; left:0; right:0; bottom:var(--bottom-inset, 0px); z-index:1701;'
+    + 'max-height:calc(var(--app-height, 100vh) * 0.78); overflow-y:auto;'
     + 'background:#fff; color:#222;'
     + 'border-top:1px solid #ddd;'
     + 'border-radius:18px 18px 0 0;'
