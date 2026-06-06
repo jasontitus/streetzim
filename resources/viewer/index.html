@@ -38,6 +38,14 @@
   html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; }
   body { position: relative; height: var(--app-height, 100%); }
   #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; width: 100%; height: 100%; }
+  /* Keep the locate button above the DEAD TOUCH BAND next to the app's bottom
+     toolbar: in the Kiwix WebView, taps in the lowest ~50px are swallowed by
+     the native toolbar hit-slop / home-indicator gestures even though the
+     content renders. min() ties the lift to --bottom-inset, so on desktop/PWA
+     (inset 0) the button stays in the normal corner position. */
+  .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group {
+    margin-bottom: min(var(--bottom-inset, 0px), 64px);
+  }
 
   /* --- Attribution / info tag --- */
   #info {
