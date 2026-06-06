@@ -1227,10 +1227,17 @@ fetchConfig(1)
               || el.classList.contains('maplibregl-map')
               || el.classList.contains('maplibregl-control-container'))) return true;
           if (el.nodeType === 1) {
-            var oy = '';
-            try { oy = window.getComputedStyle(el).overflowY; } catch (e) {}
-            if ((oy === 'auto' || oy === 'scroll')
-                && el.scrollHeight > el.clientHeight + 1) return true;
+            var st = null;
+            try { st = window.getComputedStyle(el); } catch (e) {}
+            if (st) {
+              if ((st.overflowY === 'auto' || st.overflowY === 'scroll')
+                  && el.scrollHeight > el.clientHeight + 1) return true;
+              // Allow HORIZONTAL scrollers too — the find-results card strip
+              // is an overflow-x carousel; without this its swipe gesture was
+              // preventDefaulted (taps worked, swiping didn't).
+              if ((st.overflowX === 'auto' || st.overflowX === 'scroll')
+                  && el.scrollWidth > el.clientWidth + 1) return true;
+            }
           }
           el = el.parentNode;
         }
