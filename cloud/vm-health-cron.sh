@@ -40,7 +40,7 @@ for VM in "${WATCHED_VMS[@]}"; do
     RUNNING)
       # Health check: is the build process alive?
       BUILD_ALIVE=$(gcloud compute ssh "$VM" --zone="$ZONE" --project="$PROJECT" \
-        --command='pgrep -f "create_osm_zim\|apt-get\|pip install\|git clone\|gcloud storage\|tar " > /dev/null 2>&1 && echo YES || echo NO' 2>/dev/null || echo "SSH_FAIL")
+        --command='pgrep -f "([c]reate_osm_zim|apt-get|pip install|git clone|gcloud storage|tar )" > /dev/null 2>&1 && echo YES || echo NO' 2>/dev/null || echo "SSH_FAIL")
       if [ "$BUILD_ALIVE" = "NO" ]; then
         echo "[$(date '+%Y-%m-%d %H:%M')] $VM: RUNNING but build DEAD — deleting and relaunching" >> "$LOG"
         gcloud compute instances delete "$VM" --zone="$ZONE" --project="$PROJECT" --quiet 2>&1 || true

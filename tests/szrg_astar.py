@@ -65,7 +65,7 @@ class Route:
             "t": round(self.total_time_s, 3),
             "n": self.node_sequence,
             "g": self.geom_sequence,
-            "rd": [(int(ni), int(fl), round(dm, 3))
+            "rd": [[int(ni), int(fl), round(dm, 3)]
                    for (ni, fl, dm) in self.road_sequence],
         }
 

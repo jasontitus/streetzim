@@ -2,6 +2,7 @@
 # Build remaining ZIMs sequentially and upload each to Archive.org as it finishes.
 # Order: US (rebuild) -> Indian Subcontinent -> California -> Colorado -> Iran -> Hispaniola
 set -e
+set -o pipefail
 cd /Users/jasontitus/experiments/streetzim
 source venv312/bin/activate
 export ZSTD_CLEVEL=22

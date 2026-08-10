@@ -28,12 +28,14 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 VIEWER_DIR = REPO / "resources" / "viewer"
+STREAMING_THRESHOLD = 64 * 1024 * 1024
 
 sys.path.insert(0, str(REPO))
 from cloud.manifest_writer import ManifestCreator  # noqa: E402
@@ -102,115 +104,129 @@ def swap_viewer_rust(src_path: str, dst_path: str) -> int:
     kept = 0
     replaced_paths: set[str] = set()
 
-    with creator as c:
-        # Copy metadata entries verbatim (Title, Description, Date, Name,
-        # Counter, Language, etc.). ManifestCreator distinguishes
-        # metadata via add_metadata; iterating metadata_keys gives names
-        # only (no namespace prefixes).
-        for k in src.metadata_keys:
-            try:
-                v = src.get_metadata(k)
-                if k == "Illustration_48x48@1":
-                    # Special — ManifestCreator wants illustration via
-                    # add_illustration(size, png_bytes).
-                    if isinstance(v, str):
-                        v = v.encode("latin-1")  # libzim returns str for binary metadata sometimes
-                    c.add_illustration(48, bytes(v))
-                    illustration_count += 1
+    with tempfile.TemporaryDirectory(prefix="swap_viewer_rust_") as spill_dir:
+        spill_dir_path = Path(spill_dir)
+
+        def _stage_large(path: str, data: bytes) -> tuple[bytes | None, str | None]:
+            if len(data) < STREAMING_THRESHOLD:
+                return data, None
+            safe = path.replace("/", "__")
+            out = spill_dir_path / safe
+            out.write_bytes(data)
+            return None, str(out)
+
+        with creator as c:
+            # Copy metadata entries verbatim (Title, Description, Date, Name,
+            # Counter, Language, etc.). ManifestCreator distinguishes
+            # metadata via add_metadata; iterating metadata_keys gives names
+            # only (no namespace prefixes).
+            for k in src.metadata_keys:
+                try:
+                    v = src.get_metadata(k)
+                    if k == "Illustration_48x48@1":
+                        # Special — ManifestCreator wants illustration via
+                        # add_illustration(size, png_bytes).
+                        if isinstance(v, str):
+                            v = v.encode("latin-1")  # libzim returns str for binary metadata sometimes
+                        c.add_illustration(48, bytes(v))
+                        illustration_count += 1
+                    else:
+                        if isinstance(v, bytes):
+                            try:
+                                v = v.decode("utf-8")
+                            except UnicodeDecodeError:
+                                pass
+                        c.add_metadata(k, v)
+                        metadata_count += 1
+                except Exception as e:
+                    print(f"  skip metadata {k}: {e}")
+
+            # Walk ALL entries (incl. X-namespace at ids >= entry_count).
+            for i in range(src_total):
+                try:
+                    entry = src._get_entry_by_id(i)
+                except Exception as e:
+                    print(f"  skip entry id={i}: {e}")
+                    continue
+                if entry.is_redirect:
+                    target = entry.get_redirect_entry()
+                    try:
+                        c.add_redirection(entry.path,
+                                          entry.title or entry.path,
+                                          target.path)
+                        redirects += 1
+                    except Exception as e:
+                        print(f"  skip redirect {entry.path}: {e}")
+                    continue
+
+                item = entry.get_item()
+                path = entry.path
+                mime = item.mimetype
+                title = entry.title or ""
+
+                # X-namespace heuristic: id >= visible entry_count OR path
+                # matches the well-known Xapian paths. Either signal is
+                # sufficient — the create_osm_zim.py rust path places these
+                # in namespace 'X' with compress=False and an
+                # application/octet-stream+xapian mimetype.
+                is_xapian = (i >= src_visible
+                             or path in ("fulltext/xapian", "title/xapian")
+                             or mime.endswith("+xapian"))
+
+                if path in replacements:
+                    c.add_item(_Item(path, mime, title=title,
+                                     data=replacements[path],
+                                     compress=True, namespace=None))
+                    replaced_paths.add(path)
+                    swapped += 1
+                    continue
+
+                data = bytes(item.content)
+                # Drop geo-index entries whose article wasn't actually bundled
+                # (enwiki had no page for that title) so the viewer never lists a
+                # place that 404s on "Read full article".
+                if path == "wiki-geo-index.json":
+                    try:
+                        import json as _json
+                        geo = _json.loads(data.decode("utf-8"))
+                        before = len(geo)
+                        geo = {t: v for t, v in geo.items()
+                               if src.has_entry_by_path("wiki-article/" + t)}
+                        data = _json.dumps(geo, separators=(",", ":")).encode("utf-8")
+                        print(f"  geo-index filtered: {before} -> {len(geo)} "
+                              f"(dropped {before - len(geo)} without a bundled article)")
+                    except Exception as e:
+                        print(f"  warning: geo-index filter failed: {e}")
+
+                staged_data, staged_file = _stage_large(path, data)
+                if is_xapian:
+                    c.add_item(_Item(path, mime, title=title,
+                                     data=staged_data, file_path=staged_file,
+                                     compress=False, namespace="X"))
+                    xapian += 1
                 else:
-                    if isinstance(v, bytes):
-                        try:
-                            v = v.decode("utf-8")
-                        except UnicodeDecodeError:
-                            pass
-                    c.add_metadata(k, v)
-                    metadata_count += 1
-            except Exception as e:
-                print(f"  skip metadata {k}: {e}")
+                    # Large routing entries must remain raw. Kiwix WebViews
+                    # can time out while decompressing a huge fzstd cluster.
+                    compress = not (
+                        path == "routing-data/graph-cells-index.bin"
+                        or path.startswith("routing-data/graph-cell-")
+                    ) or len(data) < 200 * 1024 * 1024
+                    c.add_item(_Item(path, mime, title=title,
+                                     data=staged_data, file_path=staged_file,
+                                     compress=compress, namespace=None))
+                    kept += 1
+                del data
 
-        # Walk ALL entries (incl. X-namespace at ids >= entry_count).
-        for i in range(src_total):
-            try:
-                entry = src._get_entry_by_id(i)
-            except Exception as e:
-                print(f"  skip entry id={i}: {e}")
-                continue
-            if entry.is_redirect:
-                target = entry.get_redirect_entry()
-                try:
-                    c.add_redirection(entry.path,
-                                      entry.title or entry.path,
-                                      target.path)
-                    redirects += 1
-                except Exception as e:
-                    print(f"  skip redirect {entry.path}: {e}")
-                continue
-
-            item = entry.get_item()
-            path = entry.path
-            mime = item.mimetype
-            title = entry.title or ""
-
-            # X-namespace heuristic: id >= visible entry_count OR path
-            # matches the well-known Xapian paths. Either signal is
-            # sufficient — the create_osm_zim.py rust path places these
-            # in namespace 'X' with compress=False and an
-            # application/octet-stream+xapian mimetype.
-            is_xapian = (i >= src_visible
-                         or path in ("fulltext/xapian", "title/xapian")
-                         or mime.endswith("+xapian"))
-
-            if path in replacements:
-                c.add_item(_Item(path, mime, title=title,
-                                 data=replacements[path],
+            for path, data in replacements.items():
+                if path in replaced_paths:
+                    continue
+                mime = ("application/javascript"
+                        if path.endswith(".js") else "text/html")
+                title = ("Routing Worker" if path.endswith(".js")
+                         else "Map" if path == "index.html" else "Find places")
+                c.add_item(_Item(path, mime, title=title, data=data,
                                  compress=True, namespace=None))
-                replaced_paths.add(path)
                 swapped += 1
-                continue
-
-            data = bytes(item.content)
-            # Drop geo-index entries whose article wasn't actually bundled
-            # (enwiki had no page for that title) so the viewer never lists a
-            # place that 404s on "Read full article".
-            if path == "wiki-geo-index.json":
-                try:
-                    import json as _json
-                    geo = _json.loads(data.decode("utf-8"))
-                    before = len(geo)
-                    geo = {t: v for t, v in geo.items()
-                           if src.has_entry_by_path("wiki-article/" + t)}
-                    data = _json.dumps(geo, separators=(",", ":")).encode("utf-8")
-                    print(f"  geo-index filtered: {before} -> {len(geo)} "
-                          f"(dropped {before - len(geo)} without a bundled article)")
-                except Exception as e:
-                    print(f"  warning: geo-index filter failed: {e}")
-            if is_xapian:
-                c.add_item(_Item(path, mime, title=title,
-                                 data=data,
-                                 compress=False, namespace="X"))
-                xapian += 1
-            else:
-                # Large routing entries must remain raw. Kiwix WebViews
-                # can time out while decompressing a huge fzstd cluster.
-                compress = not (
-                    path == "routing-data/graph-cells-index.bin"
-                    or path.startswith("routing-data/graph-cell-")
-                ) or len(data) < 200 * 1024 * 1024
-                c.add_item(_Item(path, mime, title=title,
-                                 data=data,
-                                 compress=compress, namespace=None))
-                kept += 1
-
-        for path, data in replacements.items():
-            if path in replaced_paths:
-                continue
-            mime = ("application/javascript"
-                    if path.endswith(".js") else "text/html")
-            title = ("Routing Worker" if path.endswith(".js")
-                     else "Map" if path == "index.html" else "Find places")
-            c.add_item(_Item(path, mime, title=title, data=data,
-                             compress=True, namespace=None))
-            swapped += 1
 
     elapsed = time.time() - started
     print(f"\n  done in {elapsed:.1f}s")

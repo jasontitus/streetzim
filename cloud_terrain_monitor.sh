@@ -34,13 +34,31 @@ while IFS=$'\t' read -r name iid ip; do
             ubuntu@$ip 'find terrain_tiles/12 -name "*.webp" 2>/dev/null | wc -l' 2>/dev/null || echo "?")
         printf "%-14s DONE (%s tiles) — collecting...\n" "$name" "$tiles"
 
-        # Rsync tiles back
+        # Rsync tiles back; keep stderr visible so transfer failures are
+        # actionable in logs.
         rsync -az -e "ssh -i $KEY -o StrictHostKeyChecking=no" \
-            "ubuntu@${ip}:terrain_tiles/12/" "${LOCAL_DIR}/12/" 2>/dev/null
+            "ubuntu@${ip}:terrain_tiles/12/" "${LOCAL_DIR}/12/"
 
         if [ $? -eq 0 ]; then
-            printf "%-14s Collected! Terminating %s\n" "$name" "$iid"
-            aws ec2 terminate-instances --region "$REGION" --instance-ids "$iid" > /dev/null 2>&1
+            verified=true
+            sample=$(ssh -i "$KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+                ubuntu@$ip 'find terrain_tiles/12 -name "*.webp" 2>/dev/null | shuf -n 5' 2>/dev/null || true)
+            if [ -z "$sample" ]; then
+                printf "%-14s Verify failed: no remote sample tiles; keeping instance\n" "$name"
+                verified=false
+            fi
+            for remote_path in $sample; do
+                local_path="${LOCAL_DIR}/${remote_path#terrain_tiles/}"
+                if [ ! -f "$local_path" ]; then
+                    printf "%-14s Verify failed: %s missing locally; keeping instance\n" "$name" "$local_path"
+                    verified=false
+                    break
+                fi
+            done
+            if [ "$verified" = true ]; then
+                printf "%-14s Collected and verified! Terminating %s\n" "$name" "$iid"
+                aws ec2 terminate-instances --region "$REGION" --instance-ids "$iid" > /dev/null 2>&1
+            fi
         else
             printf "%-14s Rsync failed, keeping instance\n" "$name"
         fi

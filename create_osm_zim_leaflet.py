@@ -23,6 +23,7 @@ Usage:
 """
 
 import argparse
+import datetime
 import gzip
 import json
 import math
@@ -332,6 +333,24 @@ def render_tile_to_png(decoded_tile, zoom):
     img = Image.new("RGB", (TILE_SIZE, TILE_SIZE), COLORS["background"])
     draw = ImageDraw.Draw(img)
 
+    def _rings(projected):
+        if not projected:
+            return []
+        if isinstance(projected[0], tuple):
+            return [projected]
+        return projected
+
+    def _draw_polygon(projected, fill, outline=None):
+        rings = _rings(projected)
+        if not rings:
+            return
+        outer = rings[0]
+        if len(outer) >= 3:
+            draw.polygon(outer, fill=fill, outline=outline)
+        for hole in rings[1:]:
+            if len(hole) >= 3:
+                draw.polygon(hole, fill=COLORS["background"])
+
     # Render layers in order: landcover → water → buildings → roads → boundaries
 
     # 1. Landcover / landuse
@@ -369,10 +388,7 @@ def render_tile_to_png(decoded_tile, zoom):
                 for poly_coords in coords_list:
                     projected = project_coords(poly_coords, extent)
                     if projected:
-                        # Draw outer ring (first ring)
-                        ring = projected[0] if isinstance(projected[0][0], tuple) else projected
-                        if len(ring) >= 3:
-                            draw.polygon(ring, fill=color)
+                        _draw_polygon(projected, fill=color)
 
     # 2. Water
     for layer_name in ("water", "waterway"):
@@ -391,9 +407,7 @@ def render_tile_to_png(decoded_tile, zoom):
                 for poly_coords in coords_list:
                     projected = project_coords(poly_coords, extent)
                     if projected:
-                        ring = projected[0] if isinstance(projected[0][0], tuple) else projected
-                        if len(ring) >= 3:
-                            draw.polygon(ring, fill=COLORS["water"])
+                        _draw_polygon(projected, fill=COLORS["water"])
             elif gtype in ("LineString", "MultiLineString"):
                 coords_list = geom.get("coordinates", [])
                 if gtype == "LineString":
@@ -419,9 +433,11 @@ def render_tile_to_png(decoded_tile, zoom):
                     for poly_coords in coords_list:
                         projected = project_coords(poly_coords, extent)
                         if projected:
-                            ring = projected[0] if isinstance(projected[0][0], tuple) else projected
-                            if len(ring) >= 3:
-                                draw.polygon(ring, fill=COLORS["building"], outline=COLORS["building_outline"])
+                            _draw_polygon(
+                                projected,
+                                fill=COLORS["building"],
+                                outline=COLORS["building_outline"],
+                            )
 
     # 4. Roads (transportation layer)
     layer = decoded_tile.get("transportation")
@@ -759,7 +775,7 @@ def create_zim(
         creator.add_metadata("Language", "eng")
         creator.add_metadata("Publisher", "create_osm_zim_leaflet")
         creator.add_metadata("Creator", "OpenStreetMap contributors")
-        creator.add_metadata("Date", "2026-03-10")
+        creator.add_metadata("Date", datetime.date.today().isoformat())
         creator.add_metadata("Tags", "maps;osm;offline;leaflet;raster")
 
         # Viewer HTML

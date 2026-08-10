@@ -40,11 +40,6 @@ BANDS=(
   "72,85"     # Band 15: High Arctic
 )
 
-SETUP_SCRIPT='#!/bin/bash
-yum install -y python3-pip gdal gdal-devel
-pip3 install rasterio mercantile Pillow numpy
-'
-
 launch() {
     echo "Launching 8 spot instances..."
     for i in "${!BANDS[@]}"; do

@@ -105,6 +105,9 @@ def main():
     if args.dry_run:
         print("Dry run — no files written.")
         return
+    if not tasks:
+        print("No JPEG tiles to recompress.")
+        return
 
     print(f"\nRecompressing to AVIF q{args.quality} with {args.workers} workers...")
     print(f"Output: {dest_dir}")
@@ -132,7 +135,8 @@ def main():
 
     elapsed = time.time() - start
     out_gb = total_out_bytes / 1e9
-    print(f"\n\nDone! Recompressed {total:,} tiles in {elapsed:.0f}s ({total/elapsed:.0f} tiles/s)")
+    rate = total / elapsed if elapsed > 0 else 0
+    print(f"\n\nDone! Recompressed {total:,} tiles in {elapsed:.0f}s ({rate:.0f} tiles/s)")
     print(f"Total output: {out_gb:.2f} GB")
 
 

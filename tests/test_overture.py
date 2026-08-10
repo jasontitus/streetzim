@@ -321,6 +321,30 @@ def test_merge_overture_skips_when_attr_matches_existing_osm(
         + "'Ramona Street' so pass-2 catches the dup")
 
 
+def test_merge_overture_keeps_far_cross_city_attr_match(
+    duckdb_available, tmp_path
+):
+    # The cityless fallback is distance-limited. Same number+street far
+    # away must not be treated as a duplicate, which was the original
+    # 1029 Ramona cross-city data loss.
+    parquet = tmp_path / "ov.parquet"
+    _write_parquet(str(parquet), [{
+        "number": "1029", "street": "RAMONA ST",
+        "lat": 37.44200, "lon": -122.16100,
+        "levels": [], "sources": [("Esri", "c-99")],
+    }])
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [{
+        "name": "1029 Ramona Street, Ramona",
+        "type": "addr",
+        "lat": 33.04100, "lon": -116.86800,
+    }])
+
+    result = merge_overture_addresses(str(parquet), str(jsonl))
+    added = result["added"] if isinstance(result, dict) else result
+    assert added == 1
+
+
 def test_merge_overture_rejects_orphan_rows_missing_number_or_street(
     duckdb_available, tmp_path
 ):

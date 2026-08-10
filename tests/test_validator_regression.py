@@ -51,7 +51,8 @@ from cloud import validate_zim
 def _make_minimal_zim(tmp_path: Path,
                       filename: str = "test.zim",
                       extra_items: list | None = None,
-                      metadata_overrides: dict | None = None) -> Path:
+                      metadata_overrides: dict | None = None,
+                      index_html: bytes = b"<html></html>") -> Path:
     """Build a minimally-valid-looking streetzim ZIM so we can layer a
     single broken behaviour on top and assert the validator catches it
     specifically. libzim won't let us write a totally empty ZIM — we
@@ -95,7 +96,7 @@ def _make_minimal_zim(tmp_path: Path,
         # satisfy `has_illustration()`.
         png_stub = bytes.fromhex("89504e470d0a1a0a") + b"\x00" * 40
         cc.add_metadata("Illustration_48x48@1", png_stub)
-        cc.add_item(_It("index.html", "text/html", b"<html></html>"))
+        cc.add_item(_It("index.html", "text/html", index_html))
         cc.set_mainpath("index.html")
         # Minimal map-config so the validator doesn't short-circuit on
         # missing config.
@@ -161,6 +162,7 @@ def test_oversized_search_chunk_is_caught(tmp_path: Path):
             _mk_item("search-data/__.json", "application/json", big),
         ],
     )
+
     # Override the manifest so the validator notices this chunk.
     # Easiest: regenerate the whole ZIM with both entries present.
     # Re-create from scratch including the manifest pointing at __.
@@ -192,6 +194,22 @@ def test_oversized_search_chunk_is_caught(tmp_path: Path):
         f"oversized chunk must hard-fail; got status={r.status} "
         f"detail={r.detail!r}"
     )
+
+
+def test_missing_referenced_routing_worker_is_caught(tmp_path: Path):
+    """If index.html references the routing worker, native Kiwix must
+    receive that asset inside the ZIM.
+    """
+    zim = _make_minimal_zim(
+        tmp_path,
+        filename="missing_worker.zim",
+        index_html=b"<script>new Worker('routing-worker.js')</script>",
+    )
+    results = _run_validator(zim)
+    r = _find(results, "viewer_assets")
+    assert r is not None
+    assert r.status == "fail"
+    assert "routing-worker.js" in r.detail
 
 
 # -----------------------------------------------------------------------

@@ -129,10 +129,10 @@ def _sub_bucket_for_name(name: str, n_buckets: int) -> int:
 def _split_records_recursive(
     records: list, prefix: str, threshold_bytes: int,
     n_buckets: int, max_depth: int,
-) -> list[tuple[str, bytes]]:
+) -> list[tuple[str, bytes, int]]:
     """Recursively split records into sub-chunks until each fits under
     ``threshold_bytes`` or ``max_depth`` is reached. Returns a list of
-    ``(leaf_prefix, serialized_bytes)`` tuples — only leaves, no
+    ``(leaf_prefix, serialized_bytes, record_count)`` tuples — only leaves, no
     intermediate nodes.
 
     Strategy:
@@ -151,7 +151,7 @@ def _split_records_recursive(
     serialized = json.dumps(records, separators=(",", ":"),
                             ensure_ascii=False).encode("utf-8")
     if len(serialized) <= threshold_bytes or max_depth <= 0 or len(records) <= 1:
-        return [(prefix, serialized)]
+        return [(prefix, serialized, len(records))]
 
     # By-name FNV-1a bucketing (deterministic; preferred when distribution
     # is reasonable).
@@ -172,7 +172,7 @@ def _split_records_recursive(
             buckets[i % n_buckets].append(rec)
         strategy = "index"
 
-    out: list[tuple[str, bytes]] = []
+    out: list[tuple[str, bytes, int]] = []
     hex_width = len(format(n_buckets - 1, "x"))
     for i, bucket in enumerate(buckets):
         if not bucket:
@@ -250,7 +250,7 @@ def _emit_split_search(creator, manifest: dict, hot_chunks: dict[str, bytes],
 
         sub_prefix_list: list[str] = []
         max_leaf_mb = 0.0
-        for sub_prefix, sub_bytes in leaves:
+        for sub_prefix, sub_bytes, leaf_count in leaves:
             sub_prefix_list.append(sub_prefix)
             creator.add_item(passthrough_cls(
                 f"search-data/{sub_prefix}.json",
@@ -258,13 +258,6 @@ def _emit_split_search(creator, manifest: dict, hot_chunks: dict[str, bytes],
                 "application/json", sub_bytes,
                 compress=True,
             ))
-            # Reverse-engineer the record count from the serialized JSON
-            # (cheaper than reparsing): the leaf bytes are the chunk file,
-            # use len(json.loads(sub_bytes)) once for each leaf.
-            try:
-                leaf_count = len(json.loads(sub_bytes.decode("utf-8")))
-            except Exception:
-                leaf_count = 0
             new_manifest["chunks"][sub_prefix] = leaf_count
             mb = len(sub_bytes) / 1e6
             if mb > max_leaf_mb:
@@ -1132,17 +1125,21 @@ def repackage(src_path: str, dst_path: str,
                         for r in dst_records:
                             name = r.get("n", "") or ""
                             buckets[_sub_bucket_for_name(name, n_sub)].append(r)
-                        bucket_blobs = [
-                            json.dumps(b, separators=(",", ":"),
-                                       ensure_ascii=False).encode("utf-8")
-                            for b in buckets
-                        ]
-                        biggest = max(len(b) for b in bucket_blobs)
+                        largest_bucket = max(buckets, key=len)
+                        biggest = len(json.dumps(
+                            largest_bucket, separators=(",", ":"),
+                            ensure_ascii=False,
+                        ).encode("utf-8"))
                         # Cap depth at 256 sub-buckets — beyond that
                         # the records have low cardinality on `n` and
                         # further splitting won't help.
                         if biggest <= threshold_b or n_sub >= 256:
                             break
+                    bucket_blobs = [
+                        json.dumps(b, separators=(",", ":"),
+                                   ensure_ascii=False).encode("utf-8")
+                        for b in buckets
+                    ]
                     sub_paths = []
                     hex_w = max(1, len(format(n_sub - 1, "x")))
                     for i, blob in enumerate(bucket_blobs):

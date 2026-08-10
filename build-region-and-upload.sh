@@ -52,7 +52,7 @@ OUT="osm-${ID}-${TODAY}.zim"
 FLAGS=()
 HAS_GRAPH_BIN=0
 HAS_POI=0
-./venv312/bin/python3 -c "
+read HAS_GRAPH_BIN HAS_POI < <(./venv312/bin/python3 -c "
 from libzim.reader import Archive
 import sys
 a = Archive(sys.argv[1])
@@ -61,7 +61,7 @@ except Exception: has_graph=0
 try: a.get_entry_by_path('category-index/poi.json'); has_poi=1
 except Exception: has_poi=0
 print(has_graph, has_poi)
-" "$RAW" | read HAS_GRAPH_BIN HAS_POI
+" "$RAW")
 
 # spatial-chunk-scale converts a MONOLITHIC graph.bin into the spatial
 # layout. If the source is already spatial (build_region.sh's internal

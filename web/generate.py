@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 from html import escape
 
@@ -475,6 +476,7 @@ def render_live_card(region, size_label, item_meta=None):
     """Render a map card with active download/torrent/details buttons."""
     item_id = f"streetzim-{region['id']}"
     zim_file = region["zim_file"]
+    zim_file_attr = escape(urllib.parse.quote(zim_file), quote=True)
     title_attr = escape(region["title"], quote=True)
     badges_html = render_feature_badges(item_meta)
     return f"""      <div class="map-card">
@@ -484,7 +486,7 @@ def render_live_card(region, size_label, item_meta=None):
         </div>
         <p class="map-card-desc">{region["description"]}</p>{badges_html}
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/{item_id}/{zim_file}" data-track="download" data-region="{region["id"]}" data-title="{title_attr}">Download</a>
+          <a class="btn btn-primary" href="https://archive.org/download/{item_id}/{zim_file_attr}" data-track="download" data-region="{region["id"]}" data-title="{title_attr}">Download</a>
           <a class="btn btn-secondary" href="/torrents/{region["id"]}.torrent" data-track="torrent" data-region="{region["id"]}" data-title="{title_attr}">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/{item_id}" data-track="details" data-region="{region["id"]}" data-title="{title_attr}">Info</a>
         </div>

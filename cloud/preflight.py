@@ -261,17 +261,16 @@ def _check_one_terrain(args) -> tuple:
         # Tile missing. To avoid flagging every ocean tile, consult the
         # VRT: if the tile's center pixel has valid elevation, it's land
         # and the tile should exist. Otherwise it's ocean — skip.
-        if audit_content:
-            try:
-                tb_west, tb_south, tb_east, tb_north = tile_to_bounds(z, x, y)
-                clon = (tb_west + tb_east) / 2
-                clat = (tb_south + tb_north) / 2
-                src = _get_vrt_cached(vrt_path)
-                vals = list(src.sample([(clon, clat)]))[0]
-                if vals[0] == src.nodata or abs(vals[0]) < 1:
-                    return (z, x, y, "skip_ocean")
-            except Exception:
-                pass
+        try:
+            tb_west, tb_south, tb_east, tb_north = tile_to_bounds(z, x, y)
+            clon = (tb_west + tb_east) / 2
+            clat = (tb_south + tb_north) / 2
+            src = _get_vrt_cached(vrt_path)
+            vals = list(src.sample([(clon, clat)]))[0]
+            if vals[0] == src.nodata or abs(vals[0]) < 1:
+                return (z, x, y, "skip_ocean")
+        except Exception:
+            pass
         return (z, x, y, "missing")
 
     # Freshness check: every covering DEM must be <= tile mtime.

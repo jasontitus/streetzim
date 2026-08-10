@@ -3,11 +3,12 @@
 # regenerate the site and redeploy. Stops itself once all expected regions
 # from web/generate.py REGIONS list are live (or after 24h).
 set -e
+set -o pipefail
 cd /Users/jasontitus/experiments/streetzim
 source venv312/bin/activate
 
 # Total number of regions defined in REGIONS — when this many are live, exit.
-EXPECTED=10
+EXPECTED=$(python3 -c 'import sys; sys.path.insert(0, "."); import web.generate as g; print(len(g.REGIONS))')
 MAX_HOURS=24
 
 start=$(date +%s)

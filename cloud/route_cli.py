@@ -103,10 +103,12 @@ def nearest_node_filtered(g: SpatialGraph, lat: float, lon: float,
          + math.cos(math.radians(lat)) * np.cos(np.radians(lats_arr))
          * np.sin(dlon / 2) ** 2)
     d = 2 * R_EARTH * np.arcsin(np.sqrt(a))
-    # Order indices by distance then walk in batches until we find
-    # one with a highway edge.
-    order = np.argsort(d)
-    for cand in order[:50_000]:
+    # Check only the nearest candidate window, then sort that small
+    # subset by distance. A full argsort over all nodes is unnecessary.
+    k = min(50_000, len(d))
+    window = np.argpartition(d, k - 1)[:k]
+    order = window[np.argsort(d[window])]
+    for cand in order:
         cid = int(cand)
         for (_t, _sd, _gi, _ni, ca) in g.edges_of_node(cid):
             if (ca & CLASS_ORD_MASK) in HIGHWAY_TIER_ORDS:

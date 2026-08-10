@@ -113,7 +113,12 @@ class ZimOnlyHandler(http.server.SimpleHTTPRequestHandler):
         path = urllib.parse.urlparse(path).path
         path = urllib.parse.unquote(path)
         path = path.lstrip("/")
-        return str(ROOT / path)
+        candidate = (ROOT / path).resolve()
+        try:
+            candidate.relative_to(ROOT)
+        except ValueError:
+            return str(ROOT / "__streetzim_not_found__")
+        return str(candidate)
 
     def do_GET(self):
         if self.path in ("/", "/index.html"):
@@ -128,7 +133,11 @@ class ZimOnlyHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(body)
             return
         # Only *.zim files allowed; avoid accidentally exposing logs.
-        name = urllib.parse.unquote(self.path.lstrip("/"))
+        parsed_path = urllib.parse.urlparse(self.path).path
+        name = urllib.parse.unquote(parsed_path).lstrip("/")
+        if "/" in name or "\\" in name or ".." in name.split("/"):
+            self.send_error(404, "Not found")
+            return
         if not name.startswith("osm-") or not name.endswith(".zim"):
             self.send_error(404, "Not found")
             return

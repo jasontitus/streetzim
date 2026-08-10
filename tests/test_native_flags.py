@@ -82,18 +82,22 @@ class TestLowZoomVrtSelection(unittest.TestCase):
     """
 
     def test_vrt_path_selection_is_zoom_conditional(self):
-        # Build a synthetic tile_arg_gen-style closure to probe the
-        # z-conditional path. Since the logic is inline in the real
-        # function, exercise it via a controlled subset.
-        mosaic = "/tmp/regional.vrt"
-        world = "/tmp/world.vrt"
-        # Mimic the line in the patched generate_terrain_tiles:
-        for z in range(13):
-            for low_flag in (None, world):
-                vrt = low_flag if (z <= 7 and low_flag) else mosaic
-                expected = world if (z <= 7 and low_flag == world) else mosaic
-                self.assertEqual(vrt, expected,
-                    f"z={z}, low={low_flag}: got {vrt}, expected {expected}")
+        from create_osm_zim import _terrain_vrt_for_zoom
+        with tempfile.TemporaryDirectory() as td:
+            mosaic = os.path.join(td, "regional.vrt")
+            world = os.path.join(td, "world.vrt")
+            Path(mosaic).write_text("regional")
+            Path(world).write_text("world")
+            for z in range(13):
+                expected = world if z <= 7 else mosaic
+                self.assertEqual(
+                    _terrain_vrt_for_zoom(z, mosaic, world),
+                    expected,
+                    f"z={z}: expected {expected}",
+                )
+            missing_world = os.path.join(td, "missing-world.vrt")
+            self.assertEqual(_terrain_vrt_for_zoom(7, mosaic, missing_world),
+                             mosaic)
 
 
 class TestCliArgsParse(unittest.TestCase):

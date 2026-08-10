@@ -118,6 +118,13 @@ for cached in wikidata_cache/qids_planet-*.json; do
     break
   fi
 done
+PBF_MTIME=$(stat -c %Y world-data/planet-2026-03-10.osm.pbf)
+EXPECTED_QIDS="wikidata_cache/qids_planet-2026-03-10.osm.pbf_91646574601_${PBF_MTIME}.json"
+if [ ! -s "$EXPECTED_QIDS" ]; then
+  echo "FATAL: expected Wikidata QID cache missing for sparse planet PBF: $EXPECTED_QIDS" >&2
+  echo "Refusing to parse the zero-filled placeholder PBF." >&2
+  exit 2
+fi
 
 # Tarballs (streamed and extracted in place)
 if gcloud storage objects describe gs://streetzim-cache/tarballs/satellite_cache_avif_256.tar &>/dev/null; then

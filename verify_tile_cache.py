@@ -198,6 +198,11 @@ def check_zoom(args):
                 stubs.append((z, x, y, size))
             else:
                 present += 1
+    for ds in dem_cache.values():
+        try:
+            ds.close()
+        except Exception:
+            pass
     return (z, expected, present, missing, stubs, skipped_ocean)
 
 
@@ -250,6 +255,7 @@ def main():
         land_cells = load_land_cells()
         if not land_cells:
             print(f"Warning: no DEM sources in {DEM_SOURCES} — cannot determine land vs ocean")
+            land_cells = None
         else:
             print(f"Using {len(land_cells):,} DEM cells as land mask (ocean tiles will be skipped)")
 

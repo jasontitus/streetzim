@@ -37,11 +37,17 @@ disk_free_gb() { df -g /System/Volumes/Data | tail -1 | awk '{print $4}' ; }
 
 wait_for_parquet() {
     local path="$1"
+    local timeout="${PARQUET_WAIT_TIMEOUT_SECONDS:-14400}"
+    local deadline=$((SECONDS + timeout))
     while :; do
         if [ -s "$path" ] && ! pgrep -f "download_overture_data.py.*$(basename "$path")" >/dev/null 2>&1; then
             local size_mb=$(du -m "$path" | awk '{print $1}')
             log "Parquet ready: $(basename "$path") (${size_mb} MB)"
             return
+        fi
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            log "TIMEOUT waiting for parquet: $(basename "$path") after ${timeout}s"
+            return 1
         fi
         log "Waiting for parquet: $(basename "$path")"
         sleep 30
@@ -144,36 +150,36 @@ log "=== redo rollout start ==="
 log "Disk free: $(disk_free_gb) GB"
 
 # Wave 1 (×3): DC + Colorado + Baltics  [rebuild]
-build_and_ship "washington-dc" "Washington, D.C." "-77.12,38.79,-76.91,38.99" &
-build_and_ship "colorado"      "Colorado"         "-109.06,36.99,-102.04,41.00" &
-build_and_ship "baltics"       "Baltics"          "20.9,53.9,28.3,59.7" &
+build_and_ship "washington-dc" "Washington, D.C." "-77.12,38.79,-76.91,38.99"
+build_and_ship "colorado"      "Colorado"         "-109.06,36.99,-102.04,41.00"
+build_and_ship "baltics"       "Baltics"          "20.9,53.9,28.3,59.7"
 wait
 log "Wave 1 done"; log "Disk free: $(disk_free_gb) GB"
 
 # Wave 2 (×3): Silicon Valley + Hispaniola + Texas
-build_and_ship "silicon-valley" "Silicon Valley" "-122.6,37.2,-121.7,37.9" &
-build_and_ship "hispaniola"     "Hispaniola"     "-74.5,17.5,-68.3,20.1"   &
-build_and_ship "texas"          "Texas"          "-106.7,25.8,-93.5,36.5"  &
+build_and_ship "silicon-valley" "Silicon Valley" "-122.6,37.2,-121.7,37.9"
+build_and_ship "hispaniola"     "Hispaniola"     "-74.5,17.5,-68.3,20.1"
+build_and_ship "texas"          "Texas"          "-106.7,25.8,-93.5,36.5"
 wait
 log "Wave 2 done"; log "Disk free: $(disk_free_gb) GB"
 
 # Wave 3 (×3): Iran + California + Central US
-build_and_ship "iran"       "Iran"       "44.0,25.0,63.5,39.8"     &
-build_and_ship "california" "California" "-125.0,32.0,-114.0,42.2" &
-build_and_ship "central-us" "Central US" "-120.0,31.3,-104.0,49.0" &
+build_and_ship "iran"       "Iran"       "44.0,25.0,63.5,39.8"
+build_and_ship "california" "California" "-125.0,32.0,-114.0,42.2"
+build_and_ship "central-us" "Central US" "-120.0,31.3,-104.0,49.0"
 wait
 log "Wave 3 done"; log "Disk free: $(disk_free_gb) GB"
 
 # Wave 4 (×3): Midwest-US + Japan + Indian Subcontinent
-build_and_ship "midwest-us"           "Midwest US"          "-104.1,36.0,-80.5,49.4" &
-build_and_ship "japan"                "Japan"               "122.9,24.0,146.0,45.6"  &
-build_and_ship "indian-subcontinent"  "Indian Subcontinent" "60.0,5.0,97.5,37.0"     &
+build_and_ship "midwest-us"           "Midwest US"          "-104.1,36.0,-80.5,49.4"
+build_and_ship "japan"                "Japan"               "122.9,24.0,146.0,45.6"
+build_and_ship "indian-subcontinent"  "Indian Subcontinent" "60.0,5.0,97.5,37.0"
 wait
 log "Wave 4 done"; log "Disk free: $(disk_free_gb) GB"
 
 # Wave 5 (×2): West Coast US + Australia/NZ
-build_and_ship "west-coast-us" "West Coast US"           "-125.0,32.0,-116.5,49.5" &
-build_and_ship "australia-nz"  "Australia & New Zealand" "112.0,-48.0,179.0,-10.0" &
+build_and_ship "west-coast-us" "West Coast US"           "-125.0,32.0,-116.5,49.5"
+build_and_ship "australia-nz"  "Australia & New Zealand" "112.0,-48.0,179.0,-10.0"
 wait
 log "Wave 5 done"; log "Disk free: $(disk_free_gb) GB"
 

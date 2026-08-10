@@ -1,12 +1,13 @@
 #!/bin/bash
 # Wait for California + Texas builds to finish, then build West Coast and East Coast.
 set -e
+set -o pipefail
 cd /Users/jasontitus/experiments/streetzim
 source venv312/bin/activate
 export ZSTD_CLEVEL=22
 
 echo "Waiting for California + Texas to finish..."
-while pgrep -f "create_osm_zim.*California\|create_osm_zim.*Texas" > /dev/null 2>&1; do
+while pgrep -f "create_osm_zim.*(California|Texas)" > /dev/null 2>&1; do
   sleep 60
 done
 echo "California + Texas done. Starting coasts..."

@@ -3,8 +3,7 @@
 #
 # Usage: bash launch-build-vm.sh <region-id> [--fast] [--spot] [--big]
 #   region-id: africa | asia | south-america | oceania | world | japan | ...
-#   --fast   Use c3-standard-8 (Sapphire Rapids, ~20% faster single-thread,
-#            ~50% cheaper than n2-standard-16).
+#   --fast   Use the default n2-standard-8 path (kept for old wrappers).
 #   --spot   Use a Spot VM (60-80% off). Safe because cache-push-on-trap
 #            runs even if the VM is preempted.
 #   --big    Force n2-standard-16 (default for continent builds — more
@@ -33,10 +32,13 @@ for arg in "$@"; do
   esac
 done
 
-# Machine type selection. Default to c3-standard-8 (cheaper, faster single-core)
-# unless --big is explicitly set. --fast is an alias for the default c3 choice.
+# Machine type selection. Default to n2-standard-8 unless --big is
+# explicitly set. --fast is kept as a compatibility alias for wrappers.
 if [ $USE_BIG -eq 1 ]; then
   MACHINE_TYPE=n2-standard-16   # 16 vCPU, 64 GB RAM, $0.78/hr on-demand
+  ZONES=(us-central1-a us-central1-b us-central1-c us-central1-f us-east1-b us-east1-c us-east1-d us-west1-a us-west1-b us-west1-c)
+elif [ $USE_FAST -eq 1 ]; then
+  MACHINE_TYPE=n2-standard-8    # compatibility alias for the default path
   ZONES=(us-central1-a us-central1-b us-central1-c us-central1-f us-east1-b us-east1-c us-east1-d us-west1-a us-west1-b us-west1-c)
 else
   # n2-standard-8: 8 vCPU, 32 GB RAM, $0.39/hr on-demand

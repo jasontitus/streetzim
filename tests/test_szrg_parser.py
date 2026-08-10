@@ -187,7 +187,7 @@ def test_fingerprint_is_json_safe():
     fp = r.fingerprint()
     s = json.dumps(fp, separators=(",", ":"))
     back = json.loads(s)
-    assert back == json.loads(s)
+    assert back == fp
 
 
 def test_fingerprint_geom_sequence_preserved():

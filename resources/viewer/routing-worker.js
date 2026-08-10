@@ -259,6 +259,7 @@ function haversine(lat1, lon1, lat2, lon2) {
   var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
           Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
           Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  a = Math.min(1, Math.max(0, a));
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
@@ -580,7 +581,7 @@ function SpatialGraph(index, maxResidentBytes) {
   this._index = index;
   this._cells = new Map();
   this._inFlight = new Map();
-  this._lru = [];
+  this._lru = new Map();
   this._residentBytes = 0;
   this._maxResidentBytes = maxResidentBytes || 64 * 1024 * 1024;
   this._maxConcurrent = 4;
@@ -601,23 +602,24 @@ SpatialGraph.prototype._cellPath = function(cid) {
 };
 SpatialGraph.prototype.compact = function(keep) {
   keep = (keep === undefined) ? 4 : keep;
-  while (this._lru.length > keep) {
-    var cid = this._lru.shift();
+  while (this._lru.size > keep) {
+    var cid = this._lru.keys().next().value;
+    this._lru.delete(cid);
     var cell = this._cells.get(cid);
     if (cell) this._residentBytes -= cell.byteLength;
     this._cells.delete(cid);
   }
 };
 SpatialGraph.prototype._touch = function(cid) {
-  var idx = this._lru.indexOf(cid);
-  if (idx >= 0) this._lru.splice(idx, 1);
-  this._lru.push(cid);
+  this._lru.delete(cid);
+  this._lru.set(cid, true);
 };
 SpatialGraph.prototype._evictToBudget = function(protectCid) {
-  while (this._residentBytes > this._maxResidentBytes && this._lru.length > 1) {
-    var cid = this._lru.shift();
+  while (this._residentBytes > this._maxResidentBytes && this._lru.size > 1) {
+    var cid = this._lru.keys().next().value;
+    this._lru.delete(cid);
     if (cid === protectCid) {
-      this._lru.push(cid);
+      this._lru.set(cid, true);
       continue;
     }
     var cell = this._cells.get(cid);
@@ -955,7 +957,7 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
       if (pts) for (var j = 0; j < pts.length; j++) segment.push(pts[j]);
     }
     segment.push([toLon, toLat]);
-    path.unshift(segment);
+    path.push(segment);
 
     n = prev.get(n);
   }
@@ -979,6 +981,7 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     }
   }
 
+  path.reverse();
   var coords = [];
   for (var sp = 0; sp < path.length; sp++) {
     var startI = (sp === 0) ? 0 : 1;
@@ -993,9 +996,10 @@ async function findNearestHighwayNode(seedNode, maxPops) {
   var visited = new Set();
   visited.add(seedNode);
   var queue = [seedNode];
+  var head = 0;
   var pops = 0;
-  while (queue.length > 0 && pops < maxPops) {
-    var current = queue.shift();
+  while (head < queue.length && pops < maxPops) {
+    var current = queue[head++];
     pops++;
     var edges = await graph.edgesOfNode(current);
     for (var k = 0; k < edges.length; k++) {
@@ -1088,7 +1092,7 @@ async function findRoute(startNode, endNode, ctx) {
   _prewarmCorridor(startLat, startLon, endLat, endLon, crow);
 
   var routeResult = await findRouteSpatial(startNode, endNode, ctx);
-  if (!routeResult && useTwoPass) {
+  if (!routeResult && useTwoPass && !(ctx && ctx.cancelled && ctx.cancelled())) {
     routeResult = await findRouteSpatialTwoPass(startNode, endNode, ctx);
   }
   graph.compact(8);

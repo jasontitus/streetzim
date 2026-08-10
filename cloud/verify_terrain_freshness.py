@@ -103,8 +103,9 @@ def _check_tile(args) -> tuple:
     Stale reasons:
       'tile_missing' — file doesn't exist
       'dem_newer'    — covering DEM has newer mtime than tile
-      'zero_fill'    — tile has >20% zero pixels AND max elev > 100
-                       (the VRT-edge-coverage bug pattern)
+      'zero_fill'    — tile has a full-height zero-elevation column
+                       block on the left/right edge plus real elevation
+                       elsewhere (the VRT-edge-coverage bug pattern)
     """
     z, x, y, tile_path, dem_index, newest_dem_mtime, check_content = args
     try:
@@ -276,8 +277,9 @@ def main() -> int:
                          "exits nonzero on staleness so build scripts "
                          "can refuse to proceed.")
     ap.add_argument("--check-content", action="store_true",
-                    help="Also flag tiles with the zero-fill pattern "
-                         "(>20%% zero pixels and max elev > 100m) — "
+                    help="Also flag tiles with the edge zero-fill pattern "
+                         "(left/right full-height zero columns plus "
+                         "real elevation elsewhere) — "
                          "cheap per-tile check that catches the "
                          "Iran-stripe / Butte-MT-stripe bug.")
     ap.add_argument("--vrt", default=str(WORLD_VRT))

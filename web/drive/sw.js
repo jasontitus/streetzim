@@ -28,6 +28,7 @@ const SHELL_URLS = [
   './viewer/',
   './viewer/index.html',
   './viewer/places.html',
+  './viewer/routing-worker.js',
   './viewer/maplibre-gl.js',
   './viewer/maplibre-gl.css'
 ];
@@ -43,10 +44,8 @@ const VIEWER_SHELL_NAMES = new Set([
   'index', 'index.html',
   'places', 'places.html',
   'maplibre-gl.js', 'maplibre-gl.css',
-  // Routing worker source — served from Firebase, not the ZIM. Without
-  // this entry the SW would fall through to "data path → serve from
-  // ZIM" and 404 because the ZIM doesn't carry the file (yet — pending
-  // next ZIM rebuild for Kiwix Desktop).
+  // Routing worker source — served from Firebase for the PWA shell and
+  // embedded directly in rebuilt ZIMs for native Kiwix.
   'routing-worker.js',
 ]);
 

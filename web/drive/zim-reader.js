@@ -66,6 +66,7 @@
       this.clusterCache = new LRU(8);       // clusterNum → {data, extended}
       this.blobCache = new LRU(512);        // "c:b"      → Uint8Array
       this.entryCache = new LRU(1024);      // "ns/url"   → {mime, cluster, blob}
+      this.urlPtrPageCache = new LRU(256);  // page index → Uint8Array
     }
 
     async _readRange(offset, length) {
@@ -115,8 +116,17 @@
     }
 
     async _readUrlPointer(idx) {
-      const buf = await this._readRange(this.header.urlPtrPos + idx * 8, 8);
-      return u64(new DataView(buf.buffer), 0);
+      const pageSize = 4096; // pointers; 32 KiB per page
+      const page = Math.floor(idx / pageSize);
+      const inPage = idx - page * pageSize;
+      let buf = this.urlPtrPageCache.get(page);
+      if (buf === undefined) {
+        const first = page * pageSize;
+        const count = Math.min(pageSize, this.header.articleCount - first);
+        buf = await this._readRange(this.header.urlPtrPos + first * 8, count * 8);
+        this.urlPtrPageCache.set(page, buf);
+      }
+      return u64(new DataView(buf.buffer, buf.byteOffset, buf.byteLength), inPage * 8);
     }
 
     async _readClusterPointer(idx) {

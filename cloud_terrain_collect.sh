@@ -40,7 +40,7 @@ while IFS=$'\t' read -r name iid ip; do
     echo "--- $name ($ip) ---"
 
     # Check if instance is done
-    completed=$(ssh $SSH_OPTS ubuntu@$ip 'cat terrain_tiles/COMPLETED 2>/dev/null || echo NOT_DONE' 2>/dev/null)
+    completed=$(ssh $SSH_OPTS ubuntu@$ip 'cat terrain_tiles/COMPLETED 2>/dev/null || echo NOT_DONE' 2>/dev/null || echo NOT_DONE)
 
     if [ "$completed" = "NOT_DONE" ]; then
         # Still running — show progress

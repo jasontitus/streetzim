@@ -520,12 +520,13 @@ def upgrade(src_path: str, dst_path: str, *,
         # leaves into ``search-data/{leaf-prefix}.json`` and tracks
         # ``sub_chunks[prefix]`` for the manifest update below.
         new_manifest = None
-        if captured_search_manifest is not None:
+        if captured_search_manifest is not None or captured_search_chunks:
+            manifest_src = captured_search_manifest or {}
             new_manifest = {
-                "chunks": dict(captured_search_manifest.get("chunks", {})),
-                "sub_chunks": dict(captured_search_manifest.get("sub_chunks", {})),
+                "chunks": dict(manifest_src.get("chunks", {})),
+                "sub_chunks": dict(manifest_src.get("sub_chunks", {})),
             }
-            for k, v in captured_search_manifest.items():
+            for k, v in manifest_src.items():
                 if k in ("chunks", "sub_chunks"):
                     continue
                 new_manifest[k] = v
@@ -555,16 +556,12 @@ def upgrade(src_path: str, dst_path: str, *,
                     continue
                 sub_prefix_list = []
                 max_leaf_mb = 0.0
-                for sub_prefix, sub_bytes in leaves:
+                for sub_prefix, sub_bytes, leaf_count in leaves:
                     sub_prefix_list.append(sub_prefix)
                     c.add_item(PassthroughItem(
                         f"search-data/{sub_prefix}.json",
                         f"search chunk {sub_prefix}",
                         "application/json", sub_bytes, compress=True))
-                    try:
-                        leaf_count = len(json.loads(sub_bytes.decode("utf-8")))
-                    except Exception:
-                        leaf_count = 0
                     new_manifest["chunks"][sub_prefix] = leaf_count
                     mb = len(sub_bytes) / 1e6
                     if mb > max_leaf_mb:

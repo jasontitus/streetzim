@@ -388,16 +388,13 @@ async def _crawl(
     done = 0
     alive = 0
     last_checkpoint = 0
+    checkpoint_delta: dict[str, dict] = {}
 
     timeout_obj = aiohttp.ClientTimeout(
         total=timeout, connect=timeout, sock_read=timeout
     )
     connector = aiohttp.TCPConnector(
         limit=concurrency * 2,
-        # Skip strict cert validation — many small sites have expired
-        # certs and aren't actually compromised; we still report
-        # alive=False on ssl errors via the explicit handler.
-        ssl=False,
         force_close=False,
     )
     headers = {"User-Agent": USER_AGENT, "Accept": "*/*"}
@@ -421,6 +418,7 @@ async def _crawl(
                         check_parking_body=check_parking_body,
                     )
             results[url] = res
+            checkpoint_delta[url] = res
             done += 1
             if res.get("alive"):
                 alive += 1
@@ -441,7 +439,8 @@ async def _crawl(
                     and done - last_checkpoint >= checkpoint_every):
                 last_checkpoint = done
                 try:
-                    checkpoint_cb(results)
+                    checkpoint_cb(checkpoint_delta)
+                    checkpoint_delta.clear()
                 except Exception as exc:  # noqa: BLE001
                     print(f"  warn: checkpoint failed: {exc}",
                           file=sys.stderr)
@@ -506,6 +505,21 @@ def main() -> int:
             )
             return 1
     entries = cache.setdefault("entries", {})
+    checkpoint_log = args.cache.with_suffix(args.cache.suffix + ".checkpoint.jsonl")
+    if checkpoint_log.exists():
+        try:
+            with checkpoint_log.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    if not line.strip():
+                        continue
+                    delta = json.loads(line)
+                    if isinstance(delta, dict):
+                        entries.update(delta)
+            print(f"  merged checkpoint log {checkpoint_log}",
+                  file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  warn: could not merge checkpoint log: {exc}",
+                  file=sys.stderr)
 
     # 2. Gather input URLs.
     if args.zim:
@@ -561,16 +575,13 @@ def main() -> int:
     )
     started = time.time()
 
-    # Checkpoint callback: merge partial results into the cache and
-    # write the file atomically. Called every checkpoint-every URLs.
+    # Checkpoint callback: append only the delta. The full JSON cache is
+    # still written once at the end.
     def _save_checkpoint(partial: dict[str, dict]) -> None:
-        # Merge into the in-memory `entries` dict, then write.
         for u, r in partial.items():
             entries[u] = r
-        cache["checked_at"] = _now_iso()
-        tmp = args.cache.with_suffix(args.cache.suffix + ".tmp")
-        tmp.write_text(json.dumps(cache, indent=2, sort_keys=True))
-        tmp.replace(args.cache)
+        with checkpoint_log.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(partial, separators=(",", ":")) + "\n")
 
     results = asyncio.run(
         _crawl(
@@ -599,6 +610,10 @@ def main() -> int:
     tmp = args.cache.with_suffix(args.cache.suffix + ".tmp")
     tmp.write_text(json.dumps(cache, indent=2, sort_keys=True))
     tmp.replace(args.cache)
+    try:
+        checkpoint_log.unlink()
+    except FileNotFoundError:
+        pass
     print(f"  wrote {args.cache}", file=sys.stderr)
 
     # 7. Summary.

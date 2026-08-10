@@ -213,9 +213,9 @@ def _fetch_online(title_us: str, cache_dir: Optional[str], ua: str) -> Optional[
             cacheable_miss = not html
             break
         except urllib.error.HTTPError as e:
-            if e.code in (429, 503) and attempt < 3:
+            if (e.code in (429, 500, 502, 503, 504)) and attempt < 3:
                 time.sleep(2 ** attempt); continue
-            cacheable_miss = True   # 4xx (e.g. 404) = a real miss, cache it
+            cacheable_miss = 400 <= e.code < 500
             break
         except Exception:
             if attempt < 3:

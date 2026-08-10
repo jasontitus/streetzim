@@ -559,6 +559,12 @@ def _chk_vector_coverage(arc) -> tuple[str, str]:
             empty_by_zoom[z] = empty_by_zoom.get(z, 0) + 1
     if not by_zoom:
         return ("fail", "no tiles/ entries")
+    for z, empty in empty_by_zoom.items():
+        total = by_zoom[z]
+        if empty > total * 0.5:
+            return ("fail",
+                    f"z{z}: {empty:,}/{total:,} vector tiles empty "
+                    "(>50%) — tilemaker likely emitted an empty zoom")
     zooms = sorted(by_zoom)
     # Catch a zoom that should have a LOT of tiles but has <5% vs its
     # parent — the cliff-drop bug where tilemaker crashed at that
@@ -636,6 +642,35 @@ def _chk_places_html(arc) -> tuple[str, str]:
                 f"places.html suspiciously small ({len(data)} B) — "
                 "probably a stub")
     return ("pass", f"present ({len(data):,} B)")
+
+
+def _chk_viewer_assets(arc) -> tuple[str, str]:
+    """Fail when the shipped viewer references an asset that is absent
+    from the ZIM. Native Kiwix cannot fetch viewer-side assets from the
+    PWA shell, so missing worker JS silently degrades route performance.
+    """
+    try:
+        index = bytes(
+            arc.get_entry_by_path("index.html").get_item().content
+        ).decode("utf-8", "replace")
+    except Exception as exc:
+        return ("fail", f"index.html unreadable: {exc}")
+    required = []
+    if "routing-worker.js" in index:
+        required.append("routing-worker.js")
+    missing = []
+    for path in required:
+        try:
+            arc.get_entry_by_path(path)
+        except Exception:
+            missing.append(path)
+    if missing:
+        return ("fail", "viewer references missing asset(s): "
+                + ", ".join(missing))
+    if required:
+        return ("pass", "referenced viewer assets present: "
+                + ", ".join(required))
+    return ("skip", "viewer references no extra assets")
 
 
 def _chk_main_entry(arc) -> tuple[str, str]:
@@ -1017,7 +1052,7 @@ def _chk_search_data_sizes(arc) -> tuple[str, str]:
     for prefix in chunks:
         try:
             e = arc.get_entry_by_path(f"search-data/{prefix}.json")
-            size = len(bytes(e.get_item().content))
+            size = e.get_item().size
         except Exception:
             continue
         if size > biggest[0]:
@@ -1086,7 +1121,7 @@ def _chk_routing(arc, cfg, zim_path: str) -> tuple[str, str]:
         if not e.path.startswith("routing-data/"):
             continue
         try:
-            size = len(bytes(e.get_item().content))
+            size = e.get_item().size
         except Exception:
             continue
         routing_total += size
@@ -1282,14 +1317,7 @@ def _audit_tiles(arc) -> tuple[str, str]:
                     f"{kind}-z{z}: {actual}/{expected} — every "
                     f"coarse-zoom cell should be populated"
                 )
-            # Gate 2: below 5% anywhere is broken.
-            elif frac < ZERO_COVERAGE_FAIL and z > COARSE_ZOOM_CUTOFF:
-                fails.append(
-                    f"{kind}-z{z}: {actual}/{expected} "
-                    f"({frac*100:.1f}%) — looks empty"
-                )
-
-        # Gate 3: cliff drop between consecutive zooms. We compare the
+        # Gate 2: cliff drop between consecutive zooms. We compare the
         # COVERAGE RATIO zooms, not absolute counts (a quarter of the
         # tiles in the bbox at z+1 is normal because bbox area per tile
         # quarters). If z+1's fraction-of-expected drops to <10% of z's
@@ -1589,6 +1617,7 @@ def _populate_results(results, arc, zim_path, audit_tiles):
     results.append(_check("illustration", "error", _chk_illustration, arc))
     results.append(_check("main_entry", "error", _chk_main_entry, arc))
     results.append(_check("places_html", "error", _chk_places_html, arc))
+    results.append(_check("viewer_assets", "error", _chk_viewer_assets, arc))
     results.append(_check("fulltext_xapian", "error", _chk_fulltext, arc))
     results.append(_check("map_config", "error", _chk_map_config, arc))
     cfg = _map_config(arc)

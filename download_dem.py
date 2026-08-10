@@ -12,6 +12,7 @@ import sys
 import time
 import argparse
 import urllib.request
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 COPERNICUS_DEM_URL = (
@@ -19,6 +20,15 @@ COPERNICUS_DEM_URL = (
     "Copernicus_DSM_COG_10_{ns}{lat:02d}_00_{ew}{lon:03d}_00_DEM/"
     "Copernicus_DSM_COG_10_{ns}{lat:02d}_00_{ew}{lon:03d}_00_DEM.tif"
 )
+
+
+def looks_like_tiff(path):
+    try:
+        with open(path, "rb") as f:
+            head = f.read(4)
+        return head in (b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+")
+    except OSError:
+        return False
 
 
 def download_tile(args):
@@ -33,26 +43,40 @@ def download_tile(args):
     fpath = os.path.join(dest_dir, fname)
 
     # Skip if already cached
-    if os.path.exists(fpath) and os.path.getsize(fpath) > 1000:
+    if (os.path.exists(fpath) and os.path.getsize(fpath) > 1000
+            and looks_like_tiff(fpath)):
         return ("cached", lat, lon, os.path.getsize(fpath))
 
     url = COPERNICUS_DEM_URL.format(ns=ns, lat=abs_lat, ew=ew, lon=abs_lon)
     req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
 
     try:
+        tmp_path = None
         with urllib.request.urlopen(req, timeout=120) as resp:
-            with open(fpath, "wb") as f:
+            fd, tmp_path = tempfile.mkstemp(
+                prefix=f".{fname}.", suffix=".part", dir=dest_dir
+            )
+            with os.fdopen(fd, "wb") as f:
                 while True:
                     chunk = resp.read(1024 * 1024)
                     if not chunk:
                         break
                     f.write(chunk)
+        if os.path.getsize(tmp_path) <= 1000:
+            os.remove(tmp_path)
+            return ("error", lat, lon, 0)
+        os.replace(tmp_path, fpath)
         return ("downloaded", lat, lon, os.path.getsize(fpath))
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return ("ocean", lat, lon, 0)
         return ("error", lat, lon, 0)
     except Exception:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
         return ("error", lat, lon, 0)
 
 

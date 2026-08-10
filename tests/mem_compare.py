@@ -211,12 +211,20 @@ def pick_pairs(zim_path: str, n: int, seed: int = 42) -> list[tuple[int, int]]:
     pairs: list[tuple[int, int]] = []
     # Mix short / medium / long so we exercise routing of different spans.
     # 20k–80 km range keeps the monolithic A* finishing in reasonable time.
-    while len(pairs) < n:
+    attempts = 0
+    cap = max(1000, n * 20000)
+    while len(pairs) < n and attempts < cap:
+        attempts += 1
         a = rng.choice(ok); b = rng.choice(ok)
         if a == b: continue
         d = hav(a, b)
         if 20_000 < d < 80_000:
             pairs.append((a, b))
+    if len(pairs) < n:
+        raise RuntimeError(
+            f"only found {len(pairs)}/{n} node pairs in 20-80km band "
+            f"after {attempts} attempts"
+        )
     return pairs
 
 

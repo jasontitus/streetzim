@@ -4,6 +4,8 @@ Run: python tests/test_wiki_articles.py   (or via pytest)
 """
 import os
 import sys
+import tempfile
+import urllib.error
 import unittest
 from unittest import mock
 
@@ -82,6 +84,21 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(stats["bundled"], 0)
         self.assertEqual(stats["failed"], 1)
         self.assertEqual(stored, {})
+
+    def test_transient_5xx_does_not_poison_cache(self):
+        err = urllib.error.HTTPError(
+            url="https://example.test",
+            code=500,
+            msg="server error",
+            hdrs=None,
+            fp=None,
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.object(wa.urllib.request, "urlopen",
+                                   side_effect=err), \
+                    mock.patch.object(wa.time, "sleep"):
+                self.assertIsNone(wa._fetch_online("No_Such_Page", td, "ua"))
+            self.assertEqual(os.listdir(td), [])
 
 
 if __name__ == "__main__":

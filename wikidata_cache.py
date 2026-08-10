@@ -315,7 +315,13 @@ def _lookup_qids_by_name(features, batch_size=50):
         # Build SPARQL VALUES block
         values_parts = []
         for f in batch:
-            name_escaped = f["name"].replace('"', '\\"')
+            name_escaped = (
+                f["name"]
+                .replace("\\", "\\\\")
+                .replace('"', '\\"')
+                .replace("\r", " ")
+                .replace("\n", " ")
+            )
             values_parts.append(f'("{name_escaped}"@en {f["lat"]} {f["lon"]})')
 
         if not values_parts:

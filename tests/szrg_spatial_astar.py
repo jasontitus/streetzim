@@ -47,7 +47,7 @@ class SpatialRoute:
             "d": round(self.total_dist_m, 3),
             "t": round(self.total_time_s, 3),
             "n": self.node_sequence,
-            "rd": [(int(ni), int(fl), round(dm, 3))
+            "rd": [[int(ni), int(fl), round(dm, 3)]
                    for (ni, fl, dm) in self.road_sequence],
         }
 

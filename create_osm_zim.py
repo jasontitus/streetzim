@@ -701,6 +701,13 @@ def _generate_one_terrain_tile(args):
     img.save(tile_path, "WEBP", lossless=True)
 
 
+def _terrain_vrt_for_zoom(z, mosaic_path, low_zoom_world_vrt=None):
+    """Choose the VRT used for terrain generation at a given zoom."""
+    if z <= 7 and low_zoom_world_vrt and os.path.isfile(low_zoom_world_vrt):
+        return low_zoom_world_vrt
+    return mosaic_path
+
+
 def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
                            low_zoom_world_vrt=None):
     """Download Copernicus GLO-30 DEM and generate terrain-RGB tiles.
@@ -902,10 +909,7 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
         # zero-fill outside and produce the bbox-edge stripe bug
         # (Iran 33°N, Butte MT, east-Iran 65°E). z=8+ stays on the
         # regional mosaic (small tiles, full DEM resolution, no stripe).
-        vrt_for_z = (low_zoom_world_vrt
-                     if (z <= 7 and low_zoom_world_vrt
-                         and os.path.isfile(low_zoom_world_vrt))
-                     else mosaic_path)
+        vrt_for_z = _terrain_vrt_for_zoom(z, mosaic_path, low_zoom_world_vrt)
 
         # Streaming generator — yields args one at a time, skipping cached tiles
         def tile_arg_gen(zoom, _vrt=vrt_for_z):
@@ -1461,7 +1465,7 @@ def build_location_index(mbtiles_path):
         rows = conn.execute(
             "SELECT tile_column, tile_row, tile_data FROM tiles WHERE zoom_level = ?",
             (z,),
-        ).fetchall()
+        )
         for col, tms_row, data in rows:
             y = (1 << z) - 1 - tms_row
             tile_data = data
@@ -2055,6 +2059,23 @@ def _normalize_street(name):
     return " ".join(_STREET_ABBREV.get(t, t) for t in tokens)
 
 
+def _sql_string_literal(value):
+    """Return a single-quoted SQL string body for DuckDB path literals."""
+    return str(value).replace("'", "''")
+
+
+def _haversine_m(lat1, lon1, lat2, lon2):
+    import math
+    r = 6371000.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) ** 2 +
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+         math.sin(dlon / 2) ** 2)
+    a = min(1.0, max(0.0, a))
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(max(0.0, 1 - a)))
+
+
 def _sample_overture_themes_in_cache(search_features, *,
                                      sample_per_slice: int = 5000):
     """Sample a search-cache jsonl for ``"source":"overture"`` markers
@@ -2177,6 +2198,10 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     # are (lowercased, accent-stripped, single-spaced) so "PALO ALTO"
     # / "Palo Alto" / "palo  alto" all collapse to one value.
     osm_attr_index = set()    # {(number, normalized_street, normalized_city)}
+    # Missing Overture address_levels should still dedupe against a
+    # nearby OSM address with the same number+street, but only within a
+    # short distance so we do not reintroduce cross-city collisions.
+    osm_attr_near_index = {}  # {(number, normalized_street): [(lat, lon), ...]}
     osm_count = 0
     with open(search_jsonl_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -2213,11 +2238,9 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
             street = street.strip()
             city = city.strip()
             if num and street:
-                osm_attr_index.add((
-                    num.strip(),
-                    _normalize_street(street),
-                    _normalize_street(city),
-                ))
+                attr2 = (num.strip(), _normalize_street(street))
+                osm_attr_index.add((*attr2, _normalize_street(city)))
+                osm_attr_near_index.setdefault(attr2, []).append((lat, lon))
             osm_count += 1
     print(f"    Indexed {osm_count} existing OSM address records")
 
@@ -2231,12 +2254,13 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     # a second WHERE here would need a `bbox` struct the downloader doesn't
     # project. Instead, filter row-side in Python if the caller passes a
     # bbox — handles the edge case of reusing a larger-region parquet.
+    parquet_sql = _sql_string_literal(overture_parquet)
     sql = f"""
       SELECT number, street, postcode,
              address_levels, sources,
              ST_X(ST_GeomFromText(wkt)) AS lon,
              ST_Y(ST_GeomFromText(wkt)) AS lat
-      FROM read_parquet('{overture_parquet}')
+      FROM read_parquet('{parquet_sql}')
     """
     con.execute("INSTALL spatial; LOAD spatial;")
     reader = con.execute(sql).fetch_record_batch(2048)
@@ -2310,7 +2334,14 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
                     _normalize_street(street_raw),
                     _normalize_street(city),
                 )
-                if coord_key in osm_coord_index or attr_key in osm_attr_index:
+                attr2 = attr_key[:2]
+                nearby_attr_dup = any(
+                    _haversine_m(lat, lon, osm_lat, osm_lon) <= 100.0
+                    for osm_lat, osm_lon in osm_attr_near_index.get(attr2, ())
+                )
+                if (coord_key in osm_coord_index
+                        or attr_key in osm_attr_index
+                        or nearby_attr_dup):
                     pass2_skipped += 1
                     continue
                 # Street is frequently uppercased in US OpenAddresses
@@ -2422,11 +2453,12 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
     # Stream Overture places from parquet via arrow batches.
     con = duckdb.connect()
     con.execute("INSTALL spatial; LOAD spatial;")
+    parquet_sql = _sql_string_literal(overture_parquet)
     sql = f"""
       SELECT names, categories, phones, websites, socials, brand, sources,
              ST_X(ST_GeomFromText(wkt)) AS lon,
              ST_Y(ST_GeomFromText(wkt)) AS lat
-      FROM read_parquet('{overture_parquet}')
+      FROM read_parquet('{parquet_sql}')
     """
     reader = con.execute(sql).fetch_record_batch(2048)
 
@@ -4241,60 +4273,60 @@ def create_zim(
         # This prevents the spin-lock death spiral in libzim's queue.h where
         # the main thread and all workers busy-wait with microsleep().
         backpressure_sleep = 0.0
-        while True:
-            batch = list(itertools.islice(tile_source, batch_size))
-            if not batch:
-                break
-            decompress_start = time.time()
-            with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
+        with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
+            while True:
+                batch = list(itertools.islice(tile_source, batch_size))
+                if not batch:
+                    break
+                decompress_start = time.time()
                 results = list(pool.map(decompress_tile, batch))
-            decompress_time = time.time() - decompress_start
+                decompress_time = time.time() - decompress_start
 
-            add_start = time.time()
-            for i, (z, x, y, tile_data) in enumerate(results):
-                # See note above: 0-byte tiles are MVT placeholders for
-                # bbox cells with no features. Drop them — MapLibre
-                # rendering is unaffected, ZIM entries dedup, zimcheck
-                # "Empty article" count goes to 0.
-                if not tile_data:
-                    tiles_skipped_empty += 1
-                    continue
-                item_start = time.time()
-                creator.add_item(MapItem(
-                    f"tiles/{z}/{x}/{y}.pbf", f"Tile {z}/{x}/{y}",
-                    "application/x-protobuf",
-                    tile_data,
-                ))
-                item_elapsed = time.time() - item_start
-                tiles_added += 1
-                _watchdog_tile_count[0] = tiles_added
-                # Per-item backpressure: if a single add_item() took over
-                # 100ms, the queue is full — sleep to let workers drain.
-                # This prevents the spin-lock stall where add_item blocks
-                # forever inside libzim's C++ queue.
-                if item_elapsed > 0.1:
-                    time.sleep(min(item_elapsed * 2, 2.0))
-            add_time = time.time() - add_start
+                add_start = time.time()
+                for i, (z, x, y, tile_data) in enumerate(results):
+                    # See note above: 0-byte tiles are MVT placeholders for
+                    # bbox cells with no features. Drop them — MapLibre
+                    # rendering is unaffected, ZIM entries dedup, zimcheck
+                    # "Empty article" count goes to 0.
+                    if not tile_data:
+                        tiles_skipped_empty += 1
+                        continue
+                    item_start = time.time()
+                    creator.add_item(MapItem(
+                        f"tiles/{z}/{x}/{y}.pbf", f"Tile {z}/{x}/{y}",
+                        "application/x-protobuf",
+                        tile_data,
+                    ))
+                    item_elapsed = time.time() - item_start
+                    tiles_added += 1
+                    _watchdog_tile_count[0] = tiles_added
+                    # Per-item backpressure: if a single add_item() took over
+                    # 100ms, the queue is full — sleep to let workers drain.
+                    # This prevents the spin-lock stall where add_item blocks
+                    # forever inside libzim's C++ queue.
+                    if item_elapsed > 0.1:
+                        time.sleep(min(item_elapsed * 2, 2.0))
+                add_time = time.time() - add_start
 
-            # Batch-level backpressure: if overall rate is slow, add
-            # sleep between batches too.
-            batch_rate = batch_size / add_time if add_time > 0 else float("inf")
-            if batch_rate < 5000 and total_tiles > 100_000:
-                backpressure_sleep = min(backpressure_sleep + 0.05, 1.0)
-                time.sleep(backpressure_sleep)
-            elif batch_rate > 15000:
-                backpressure_sleep = max(backpressure_sleep - 0.01, 0.0)
+                # Batch-level backpressure: if overall rate is slow, add
+                # sleep between batches too.
+                batch_rate = batch_size / add_time if add_time > 0 else float("inf")
+                if batch_rate < 5000 and total_tiles > 100_000:
+                    backpressure_sleep = min(backpressure_sleep + 0.05, 1.0)
+                    time.sleep(backpressure_sleep)
+                elif batch_rate > 15000:
+                    backpressure_sleep = max(backpressure_sleep - 0.01, 0.0)
 
-            batch_start = time.time()
+                batch_start = time.time()
 
-            if tiles_added % 2000 == 0:
-                elapsed = time.time() - tile_start
-                rate = tiles_added / elapsed if elapsed > 0 else 0
-                remaining = (total_tiles - tiles_added) / rate if rate > 0 else 0
-                import resource
-                mem_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024**3)
-                bp_str = f" bp={backpressure_sleep*1000:.0f}ms" if backpressure_sleep > 0 else ""
-                print(f"\r    Added {tiles_added}/{total_tiles} tiles ({rate:.0f}/s, ~{remaining/60:.0f}m left, {mem_gb:.1f}GB RSS{bp_str})...", end="", flush=True)
+                if tiles_added % 2000 == 0:
+                    elapsed = time.time() - tile_start
+                    rate = tiles_added / elapsed if elapsed > 0 else 0
+                    remaining = (total_tiles - tiles_added) / rate if rate > 0 else 0
+                    import resource
+                    mem_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024**3)
+                    bp_str = f" bp={backpressure_sleep*1000:.0f}ms" if backpressure_sleep > 0 else ""
+                    print(f"\r    Added {tiles_added}/{total_tiles} tiles ({rate:.0f}/s, ~{remaining/60:.0f}m left, {mem_gb:.1f}GB RSS{bp_str})...", end="", flush=True)
 
         elapsed = time.time() - tile_start
         rate_str = f"{tiles_added/elapsed:.0f}/s" if elapsed > 0 else "instant"
@@ -4993,17 +5025,13 @@ def create_zim(
                         manifest_chunks[prefix] = len(entries)
                     else:
                         sub_prefix_list = []
-                        for sub_prefix, sub_bytes in leaves:
+                        for sub_prefix, sub_bytes, leaf_count in leaves:
                             creator.add_item(MapItem(
                                 f"search-data/{sub_prefix}.json",
                                 f"Search chunk {sub_prefix}",
                                 "application/json",
                                 sub_bytes,
                             ))
-                            try:
-                                leaf_count = len(json.loads(sub_bytes.decode("utf-8")))
-                            except Exception:
-                                leaf_count = 0
                             manifest_chunks[sub_prefix] = leaf_count
                             sub_prefix_list.append(sub_prefix)
                             split_total += 1
