@@ -178,7 +178,12 @@
     // trailing slash from /drive/, which would make the relative form
     // 'sw.js' resolve at the site root. Being explicit side-steps it.
     setStatus('warn', 'Starting up…', 'Registering service worker…');
-    const reg = await navigator.serviceWorker.register('/drive/sw.js', { scope: '/drive/' });
+    // updateViaCache:'none' — the default ('imports') satisfies the
+    // SW's importScripts('./zim-reader.js') from the HTTP cache, so a
+    // deploy that only changed zim-reader.js wasn't picked up for the
+    // hour its Cache-Control allows.
+    const reg = await navigator.serviceWorker.register('/drive/sw.js',
+      { scope: '/drive/', updateViaCache: 'none' });
     swRegistration = reg;
     dbg('register ok', { scope: reg.scope,
                          installing: !!reg.installing,
@@ -283,6 +288,10 @@
       fileFallback.onchange = () => {
         resolve(fileFallback.files && fileFallback.files[0] ? fileFallback.files[0] : null);
       };
+      // Reset so re-picking the same file (e.g. after "Remove loaded
+      // ZIM") still fires `change` — it doesn't when the value is
+      // unchanged.
+      fileFallback.value = '';
       fileFallback.click();
     });
   }

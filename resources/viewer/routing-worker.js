@@ -8,10 +8,18 @@
 //   {cmd:'init',  baseUrl}                      → {type:'ready'} | {type:'init-error',error}
 //   {cmd:'route', id, start, end, options?}     → {type:'route-progress', id, label, pops}*
 //                                                 {type:'route-done', id, ok, result?, error?}
+//                                                 ok:true + result:null means the search
+//                                                 completed and found no route; ok:false
+//                                                 means the engine threw.
 //   {cmd:'snap',  id, lat, lon, mode?}          → {type:'snap-done', id, node?, error?}
 //   {cmd:'getCoords', id, node}                 → {type:'coords-done', id, lat, lon}
 //   {cmd:'compact', keep?}                      → no reply
 //   {cmd:'cancel', id}                          → cooperatively stops the matching route
+//
+// Posting a new 'route' cancels any route still running in this
+// worker — the main thread only ever wants the newest one, and two
+// concurrent A*s would otherwise share the yield loop and the cell
+// budget and both crawl.
 //
 // This worker does NOT include the legacy monolithic v1 binary format
 // — only spatial layouts (SZCI / SZRC). New ZIMs use SZCI v3;
@@ -22,6 +30,23 @@
 var BASE_URL = '';
 var graph = null;
 var cancelledRoutes = new Set();
+var activeRoutes = new Set();
+
+// A* heuristic speed. MUST be >= the fastest edge speed the builder
+// emits (create_osm_zim.SPEED: motorway = 100 km/h) or the heuristic
+// over-estimates remaining time and the "optimal" pass silently
+// returns suboptimal routes. Matches tests/szrg_astar.HEURISTIC_SPEED_KPH
+// and cloud/route_cli.py, which are the differential references.
+var HEURISTIC_SPEED_KMH = 100;
+var HEURISTIC_MPS = HEURISTIC_SPEED_KMH / 3.6;
+
+// Pop budgets per phase. The sparse visited-state table costs ~40 B
+// per visited node (see NodeTable), so even the greedy full-graph
+// budget stays well under 50 MB of routing state.
+var POP_LIMIT_FULL_OPTIMAL = 200000;
+var POP_LIMIT_FULL_GREEDY = 400000;
+var POP_LIMIT_HW_OPTIMAL = 50000;
+var POP_LIMIT_HW_GREEDY = 100000;
 
 // Profiling — reset at route start, emitted as a single console.warn
 // on completion so the user (or smoke harness) gets one consolidated
@@ -47,7 +72,7 @@ function _profileReset() {
     prewarmMs: 0,     // wall time spent kicking off the prefetches
     yields: 0,
     yieldMs: 0,
-    edgeReqs: 0,
+    edgeReqs: 0,      // node expansions (pops that actually scanned edges)
   };
 }
 function _profileEmit(routeOk, totalCoords) {
@@ -157,31 +182,44 @@ function handleRoute(msg) {
       error: 'graph not loaded',
     });
   }
+  // Only the newest route matters — cancel anything still running so
+  // it stops burning pops and cell budget at the next yield.
+  activeRoutes.forEach(function(otherId) {
+    if (otherId !== msg.id) cancelledRoutes.add(otherId);
+  });
+  activeRoutes.add(msg.id);
   cancelledRoutes.delete(msg.id);
   _profileReset();
   var ctx = {
     id: msg.id,
     options: msg.options || {},
+    bailed: false,
     cancelled: function() { return cancelledRoutes.has(msg.id); },
   };
   findRoute(msg.start, msg.end, ctx)
     .then(function(result) {
       // Capture the cancellation state BEFORE clearing — the bridge
       // uses this to distinguish "user clicked origin field while
-      // routing" (don't fall back, don't update UI) from "no route
-      // found" (do fall back to main thread once).
+      // routing" (don't update UI) from "no route found".
       var wasCancelled = cancelledRoutes.has(msg.id);
       cancelledRoutes.delete(msg.id);
+      activeRoutes.delete(msg.id);
       _profileEmit(!!result, result && result.coords ? result.coords.length : 0);
+      // ok:true even when result is null: the search ran to completion
+      // and there is no route (or every phase exhausted its budget).
+      // Reporting ok:false here made the bridge treat it as an engine
+      // failure and re-run the identical search on the main thread —
+      // twice the wall time (and iOS heap) to reach the same answer.
       self.postMessage({
         type: 'route-done', id: msg.id,
-        ok: !!result, cancelled: wasCancelled,
-        result: result,
+        ok: true, cancelled: wasCancelled,
+        result: result || null,
       });
     })
     .catch(function(err) {
       var wasCancelled = cancelledRoutes.has(msg.id);
       cancelledRoutes.delete(msg.id);
+      activeRoutes.delete(msg.id);
       _profileEmit(false, 0);
       self.postMessage({
         type: 'route-done', id: msg.id, ok: false,
@@ -249,18 +287,21 @@ function debugStats(ctx, label, pops) {
 }
 
 // =============================================================
-// Routing engine (ported from main thread; spatial v2 only).
+// Routing engine (spatial layouts only).
 // =============================================================
 
+var DEG2RAD = Math.PI / 180;
+var EARTH_R2 = 2 * 6371000;
+
 function haversine(lat1, lon1, lat2, lon2) {
-  var R = 6371000;
-  var dLat = (lat2 - lat1) * Math.PI / 180;
-  var dLon = (lon2 - lon1) * Math.PI / 180;
-  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-          Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  var dLat = (lat2 - lat1) * DEG2RAD;
+  var dLon = (lon2 - lon1) * DEG2RAD;
+  var sLat = Math.sin(dLat / 2);
+  var sLon = Math.sin(dLon / 2);
+  var a = sLat * sLat +
+          Math.cos(lat1 * DEG2RAD) * Math.cos(lat2 * DEG2RAD) * sLon * sLon;
   a = Math.min(1, Math.max(0, a));
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return EARTH_R2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 // Highway-tier filter — matches the OSM class_access ordinal scheme.
@@ -271,39 +312,147 @@ function isHighwayClass(classAccess) {
   return cls >= 1 && cls <= 6;
 }
 
-function MinHeap() { this.data = []; }
-MinHeap.prototype.push = function(item) {
-  this.data.push(item);
-  var i = this.data.length - 1;
+// --- Sparse visited-node state -------------------------------------
+// Open-addressing hash table keyed by global node id with parallel
+// typed-array columns for the A* state (g, predecessor node,
+// predecessor edge slot, closed flag). Replaces four Map/Set objects
+// holding boxed doubles and a 6-element array per visited node
+// (~440 B/node) with ~21 B per slot at <=50% load, i.e. ~42 B per
+// visited node — and no per-relaxation allocation at all.
+function NodeTable(initialCapacity) {
+  var cap = 1024;
+  while (cap < initialCapacity) cap <<= 1;
+  this._alloc(cap);
+}
+NodeTable.prototype._alloc = function(cap) {
+  this.cap = cap;
+  this.mask = cap - 1;
+  this.size = 0;
+  this.keys = new Int32Array(cap);
+  this.keys.fill(-1);
+  this.g = new Float64Array(cap);
+  this.prev = new Int32Array(cap);
+  this.prevEi = new Int32Array(cap);
+  this.closed = new Uint8Array(cap);
+};
+NodeTable.prototype._slotFor = function(key) {
+  // Fibonacci hashing spreads consecutive node ids (cell-major, so
+  // neighbours are usually adjacent ids) across the table.
+  return (Math.imul(key, 0x9E3779B1) >>> 0) >>> 0 & this.mask;
+};
+// Slot holding `key`, or -1.
+NodeTable.prototype.find = function(key) {
+  var keys = this.keys, mask = this.mask;
+  var i = this._slotFor(key);
+  while (true) {
+    var k = keys[i];
+    if (k === key) return i;
+    if (k === -1) return -1;
+    i = (i + 1) & mask;
+  }
+};
+// Slot holding `key`, inserting it (g=Inf, no predecessor) if absent.
+// May grow the table — any slot index obtained earlier is stale after
+// this returns.
+NodeTable.prototype.insert = function(key) {
+  if ((this.size + 1) * 2 > this.cap) this._grow();
+  var keys = this.keys, mask = this.mask;
+  var i = this._slotFor(key);
+  while (true) {
+    var k = keys[i];
+    if (k === key) return i;
+    if (k === -1) {
+      keys[i] = key;
+      this.g[i] = Infinity;
+      this.prev[i] = -1;
+      this.prevEi[i] = -1;
+      this.closed[i] = 0;
+      this.size++;
+      return i;
+    }
+    i = (i + 1) & mask;
+  }
+};
+NodeTable.prototype._grow = function() {
+  var oldKeys = this.keys, oldG = this.g, oldPrev = this.prev;
+  var oldEi = this.prevEi, oldClosed = this.closed, oldCap = this.cap;
+  this._alloc(oldCap * 2);
+  for (var i = 0; i < oldCap; i++) {
+    var k = oldKeys[i];
+    if (k === -1) continue;
+    var j = this._slotFor(k);
+    while (this.keys[j] !== -1) j = (j + 1) & this.mask;
+    this.keys[j] = k;
+    this.g[j] = oldG[i];
+    this.prev[j] = oldPrev[i];
+    this.prevEi[j] = oldEi[i];
+    this.closed[j] = oldClosed[i];
+    this.size++;
+  }
+};
+// Approximate resident bytes (for the debug overlay / profile).
+NodeTable.prototype.bytes = function() {
+  return this.cap * (4 + 8 + 4 + 4 + 1);
+};
+
+// --- Binary min-heap on parallel typed arrays ----------------------
+// (f-score, node) pairs without allocating a 2-element array per push.
+function NodeHeap(initialCapacity) {
+  var cap = Math.max(1024, initialCapacity | 0);
+  this.keys = new Float64Array(cap);
+  this.vals = new Int32Array(cap);
+  this.n = 0;
+  this.topKey = 0;
+}
+NodeHeap.prototype.push = function(key, val) {
+  if (this.n === this.keys.length) {
+    var nk = new Float64Array(this.keys.length * 2);
+    nk.set(this.keys);
+    var nv = new Int32Array(this.vals.length * 2);
+    nv.set(this.vals);
+    this.keys = nk;
+    this.vals = nv;
+  }
+  var keys = this.keys, vals = this.vals;
+  var i = this.n++;
   while (i > 0) {
     var p = (i - 1) >> 1;
-    if (this.data[p][0] <= this.data[i][0]) break;
-    var tmp = this.data[p];
-    this.data[p] = this.data[i];
-    this.data[i] = tmp;
+    var pk = keys[p];
+    if (pk <= key) break;
+    keys[i] = pk;
+    vals[i] = vals[p];
     i = p;
   }
+  keys[i] = key;
+  vals[i] = val;
 };
-MinHeap.prototype.pop = function() {
-  var top = this.data[0];
-  var last = this.data.pop();
-  if (this.data.length > 0) {
-    this.data[0] = last;
+// Returns the node with the smallest key; the key is left in
+// `this.topKey`. Caller must check `n > 0` first.
+NodeHeap.prototype.pop = function() {
+  var keys = this.keys, vals = this.vals;
+  var topVal = vals[0];
+  this.topKey = keys[0];
+  var n = --this.n;
+  if (n > 0) {
+    var key = keys[n];
+    var val = vals[n];
     var i = 0;
-    while (true) {
-      var l = 2 * i + 1, r = 2 * i + 2, smallest = i;
-      if (l < this.data.length && this.data[l][0] < this.data[smallest][0]) smallest = l;
-      if (r < this.data.length && this.data[r][0] < this.data[smallest][0]) smallest = r;
-      if (smallest === i) break;
-      var tmp = this.data[i];
-      this.data[i] = this.data[smallest];
-      this.data[smallest] = tmp;
-      i = smallest;
+    var half = n >> 1;
+    while (i < half) {
+      var l = 2 * i + 1;
+      var r = l + 1;
+      var c = (r < n && keys[r] < keys[l]) ? r : l;
+      if (keys[c] >= key) break;
+      keys[i] = keys[c];
+      vals[i] = vals[c];
+      i = c;
     }
+    keys[i] = key;
+    vals[i] = val;
   }
-  return top;
+  return topVal;
 };
-MinHeap.prototype.size = function() { return this.data.length; };
+NodeHeap.prototype.size = function() { return this.n; };
 
 function parseRoutingCellsIndex(buffer) {
   var view = new DataView(buffer);
@@ -339,7 +488,12 @@ function parseRoutingCellsIndex(buffer) {
   var cellNodeCount = new Uint32Array(numCells);
   var cellEdgeCount = new Uint32Array(numCells);
   var cellGeomCount = new Uint32Array(numCells);
+  // Numeric cell key instead of "lat,lon" strings — cellForCoords is
+  // called from the snap + prewarm hot paths.
   var cellKeyToId = new Map();
+  function cellKey(latMult, lonMult) {
+    return latMult * 1048576 + lonMult;  // |lonMult| < 2^20 for any sane scale
+  }
   for (var i = 0; i < numCells; i++) {
     cellLatIdx[i]    = view.getInt32(offset,      true);
     cellLonIdx[i]    = view.getInt32(offset +  4, true);
@@ -355,17 +509,20 @@ function parseRoutingCellsIndex(buffer) {
       cellGeomCount[i] = view.getUint32(offset + 16, true);
       offset += 20;
     }
-    cellKeyToId.set(cellLatIdx[i] + ',' + cellLonIdx[i], i);
+    cellKeyToId.set(cellKey(cellLatIdx[i], cellLonIdx[i]), i);
   }
   var nameOffsets = new Uint32Array(buffer, offset, numNames + 1);
   offset += (numNames + 1) * 4;
   var namesBlob = new Uint8Array(buffer, offset, namesBytes);
   var textDecoder = new TextDecoder('utf-8');
 
-  function cellOf(latE7, lonE7) {
+  // cell_of(lat_e7, lon_e7, scale) — must match tests/szrg_spatial.cell_of
+  // EXACTLY (floor semantics on negatives).
+  function cellIdFor(latE7, lonE7) {
     var latMult = Math.floor((latE7 * cellScale) / 10_000_000);
     var lonMult = Math.floor((lonE7 * cellScale) / 10_000_000);
-    return { lat: latMult, lon: lonMult };
+    var id = cellKeyToId.get(cellKey(latMult, lonMult));
+    return id === undefined ? -1 : id;
   }
   function getName(nameIdx) {
     if (nameIdx <= 0 || nameIdx >= numNames) return '';
@@ -427,19 +584,11 @@ function parseRoutingCellsIndex(buffer) {
         ? cid : -1;
     }
     if (!idx.hasNodes()) return -1;
-    var latE7 = idx.nodeLatE7(nodeIdx);
-    var lonE7 = idx.nodeLonE7(nodeIdx);
-    var k = cellOf(latE7, lonE7);
-    var id = cellKeyToId.get(k.lat + ',' + k.lon);
-    return id === undefined ? -1 : id;
+    return cellIdFor(idx.nodeLatE7(nodeIdx), idx.nodeLonE7(nodeIdx));
   };
   // Used by the corridor pre-warm — sample arbitrary lat/lon, find
   // the cell that owns that point, prefetch in parallel before A*.
-  idx.cellForCoords = function(latE7, lonE7) {
-    var k = cellOf(latE7, lonE7);
-    var id = cellKeyToId.get(k.lat + ',' + k.lon);
-    return id === undefined ? -1 : id;
-  };
+  idx.cellForCoords = cellIdFor;
   return idx;
 }
 
@@ -563,6 +712,7 @@ function parseRoutingCell(index, cid, buffer) {
 
   return {
     cellId: cellId,
+    version: version,
     byteLength: buffer.byteLength,
     baseNode: baseNode,
     nodeCount: nodeCount,
@@ -587,6 +737,13 @@ function SpatialGraph(index, maxResidentBytes) {
   this._maxConcurrent = 4;
   this._activeFetches = 0;
   this._queue = [];
+  // Last cell looked up by node id — consecutive A* pops are almost
+  // always in the same (cell-major numbered) cell, so this turns the
+  // per-pop binary search over numCells into one range check.
+  this._lastCid = -1;
+  this._lastBase = 0;
+  this._lastEnd = 0;
+  this._lastTouched = -1;
   this.isSpatial = true;
   this.numNodes = index.numNodes;
   this.numEdges = index.numEdges;
@@ -609,10 +766,13 @@ SpatialGraph.prototype.compact = function(keep) {
     if (cell) this._residentBytes -= cell.byteLength;
     this._cells.delete(cid);
   }
+  this._lastTouched = -1;
 };
 SpatialGraph.prototype._touch = function(cid) {
+  if (cid === this._lastTouched) return;
   this._lru.delete(cid);
   this._lru.set(cid, true);
+  this._lastTouched = cid;
 };
 SpatialGraph.prototype._evictToBudget = function(protectCid) {
   while (this._residentBytes > this._maxResidentBytes && this._lru.size > 1) {
@@ -626,6 +786,7 @@ SpatialGraph.prototype._evictToBudget = function(protectCid) {
     if (cell) this._residentBytes -= cell.byteLength;
     this._cells.delete(cid);
   }
+  this._lastTouched = -1;
 };
 SpatialGraph.prototype._drainQueue = function() {
   var self = this;
@@ -665,6 +826,16 @@ SpatialGraph.prototype._drainQueue = function() {
     })(self._queue.shift());
   }
 };
+// Resident cell or null — no promise, no fetch. The A* inner loop
+// uses this first and only falls back to the async _ensureCell on a
+// miss, which keeps the hot path free of per-pop promise churn.
+SpatialGraph.prototype.cellIfResident = function(cid) {
+  var cell = this._cells.get(cid);
+  if (cell === undefined) return null;
+  if (_profile) _profile.cellHits++;
+  this._touch(cid);
+  return cell;
+};
 SpatialGraph.prototype._ensureCell = function(cid, priority) {
   var self = this;
   if (self._cells.has(cid)) {
@@ -691,9 +862,41 @@ SpatialGraph.prototype._ensureCell = function(cid, priority) {
   self._drainQueue();
   return p;
 };
+// Cell id owning a node, with a one-entry cache in front of the
+// binary search (v3) / coordinate hash (v1, v2).
+SpatialGraph.prototype.cellForNode = function(n) {
+  if (this._index.version === 3) {
+    if (n >= this._lastBase && n < this._lastEnd) return this._lastCid;
+    var cid = this._index.cellForNode(n);
+    if (cid >= 0) {
+      this._lastCid = cid;
+      this._lastBase = this._index.cellBaseNode[cid];
+      this._lastEnd = this._lastBase + this._index.cellNodeCount[cid];
+    }
+    return cid;
+  }
+  return this._index.cellForNode(n);
+};
+// Cell a node's coordinates live in when resident, else null. For
+// v1/v2 indexes coordinates come from the index and no cell is needed
+// (returns the index object as a truthy sentinel).
+SpatialGraph.prototype._coordCellSync = function(n, cid) {
+  if (this._index.version !== 3) return this._index;
+  return this.cellIfResident(cid);
+};
+// Latitude / longitude (E7) of node `n` given the resident cell (or the
+// index sentinel from _coordCellSync).
+SpatialGraph.prototype._latE7 = function(n, holder) {
+  if (holder === this._index) return this._index.nodeLatE7(n);
+  return holder.nodesScaled[(n - holder.baseNode) * 2];
+};
+SpatialGraph.prototype._lonE7 = function(n, holder) {
+  if (holder === this._index) return this._index.nodeLonE7(n);
+  return holder.nodesScaled[(n - holder.baseNode) * 2 + 1];
+};
 SpatialGraph.prototype.nodeCoordsE7 = function(globalNodeIdx) {
   var self = this;
-  var cid = self._index.cellForNode(globalNodeIdx);
+  var cid = self.cellForNode(globalNodeIdx);
   if (cid < 0) return Promise.reject(new Error('node out of range: ' + globalNodeIdx));
   if (self._index.version !== 3) {
     return Promise.resolve([
@@ -708,6 +911,10 @@ SpatialGraph.prototype.nodeCoordsE7 = function(globalNodeIdx) {
 };
 SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7) {
   var scale = this._index.cellScale;
+  // Longitude degrees shrink with latitude — without this the snap
+  // picks the nearest node in degree space, which at 60°N can be a
+  // node 2x further away on the ground than the true nearest.
+  var cosLat = Math.max(0.05, Math.cos(latE7 / 1e7 * DEG2RAD));
   var candidates = [];
   for (var cid = 0; cid < this._index.numCells; cid++) {
     var la = this._index.cellLatIdx[cid];
@@ -718,21 +925,20 @@ SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7) {
     var lonMax = (lo + 1) * 10_000_000 / scale;
     var dlat = latE7 < latMin ? latMin - latE7 : latE7 > latMax ? latE7 - latMax : 0;
     var dlon = lonE7 < lonMin ? lonMin - lonE7 : lonE7 > lonMax ? lonE7 - lonMax : 0;
+    dlon *= cosLat;
     candidates.push([dlat * dlat + dlon * dlon, cid]);
   }
   candidates.sort(function(a, b) { return a[0] - b[0]; });
   var bestNode = -1, bestDist = Infinity, bestLat = 0, bestLon = 0;
   for (var i = 0; i < candidates.length && candidates[i][0] <= bestDist; i++) {
     var cell = await this._ensureCell(candidates[i][1]);
+    var v2 = !!cell.nodesScaled;
     for (var local = 0; local < cell.nodeCount; local++) {
-      var globalNode = cell.nodesScaled
-        ? cell.baseNode + local : cell.cellNodesGlobal[local];
-      var nlat = cell.nodesScaled
-        ? cell.nodesScaled[local * 2] : this._index.nodeLatE7(globalNode);
-      var nlon = cell.nodesScaled
-        ? cell.nodesScaled[local * 2 + 1] : this._index.nodeLonE7(globalNode);
+      var globalNode = v2 ? cell.baseNode + local : cell.cellNodesGlobal[local];
+      var nlat = v2 ? cell.nodesScaled[local * 2] : this._index.nodeLatE7(globalNode);
+      var nlon = v2 ? cell.nodesScaled[local * 2 + 1] : this._index.nodeLonE7(globalNode);
       var ndlat = nlat - latE7;
-      var ndlon = nlon - lonE7;
+      var ndlon = (nlon - lonE7) * cosLat;
       var dist = ndlat * ndlat + ndlon * ndlon;
       if (dist < bestDist) {
         bestDist = dist;
@@ -745,8 +951,10 @@ SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7) {
   if (bestNode < 0) throw new Error('no routing nodes');
   return { node: bestNode, lat: bestLat / 1e7, lon: bestLon / 1e7 };
 };
+// Promise-returning edge list (kept for tooling / debugging; the A*
+// loops read the cell's typed arrays directly).
 SpatialGraph.prototype.edgesOfNode = function(globalNodeIdx) {
-  var cid = this._index.cellForNode(globalNodeIdx);
+  var cid = this.cellForNode(globalNodeIdx);
   if (cid < 0) return Promise.resolve([]);
   return this._ensureCell(cid).then(function(cell) {
     var local = cell.localIdxFor(globalNodeIdx);
@@ -769,7 +977,7 @@ SpatialGraph.prototype.edgesOfNode = function(globalNodeIdx) {
 };
 SpatialGraph.prototype.decodeGeomForEdge = function(sourceNodeIdx, geomLocal) {
   if (geomLocal === this.NO_GEOM) return Promise.resolve(null);
-  var cid = this._index.cellForNode(sourceNodeIdx);
+  var cid = this.cellForNode(sourceNodeIdx);
   if (cid < 0) return Promise.resolve(null);
   return this._ensureCell(cid).then(function(cell) {
     return cell.decodeGeomLocal(geomLocal);
@@ -791,8 +999,6 @@ async function findRouteSpatialFiltered(startNode, endNode, highwayOnly, ctx) {
     endCoords[0] / 1e7,
     endCoords[1] / 1e7
   ) / 1000;
-  // Skip optimal pass for very long highway legs (Toronto→Vancouver
-  // pattern). cf. project_routing_perf_canada.md.
   // Skip the optimal pass on long routes:
   //   - highway-only > 1500 km (Toronto→Vancouver pattern; established
   //     threshold from project_routing_perf_canada.md)
@@ -807,15 +1013,18 @@ async function findRouteSpatialFiltered(startNode, endNode, highwayOnly, ctx) {
     var optimal = await findRouteSpatialAStar(
       startNode, endNode, highwayOnly,
       /*greedy*/ 1.0,
-      /*popLimit*/ highwayOnly ? 50000 : 200000,
+      /*popLimit*/ highwayOnly ? POP_LIMIT_HW_OPTIMAL : POP_LIMIT_FULL_OPTIMAL,
       ctx);
     if (optimal) return optimal;
     if (ctx && ctx.cancelled && ctx.cancelled()) return null;
+    // Optimal search exhausted the open set without bailing: the
+    // destination is unreachable. Greedy can't do better — skip it.
+    if (ctx && !ctx.bailed) return null;
   }
   return findRouteSpatialAStar(
     startNode, endNode, highwayOnly,
     /*greedy*/ highwayOnly ? 2.0 : 1.5,
-    /*popLimit*/ highwayOnly ? 100000 : 400000,
+    /*popLimit*/ highwayOnly ? POP_LIMIT_HW_GREEDY : POP_LIMIT_FULL_GREEDY,
     ctx);
 }
 
@@ -824,28 +1033,27 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
   var endCoords = await graph.nodeCoordsE7(endNode);
   var endLat = endCoords[0] / 1e7;
   var endLon = endCoords[1] / 1e7;
-
-  var g = new Map();
-  var prev = new Map();
-  var prevEdge = new Map();
-  var closed = new Set();
-  g.set(startNode, 0);
-
-  var open = new MinHeap();
   var startCoords = await graph.nodeCoordsE7(startNode);
-  var h0 = haversine(
-    startCoords[0] / 1e7,
-    startCoords[1] / 1e7,
-    endLat, endLon
-  ) / (80 / 3.6);
-  open.push([h0, startNode]);
+  var startLat = startCoords[0] / 1e7;
+  var startLon = startCoords[1] / 1e7;
+  var hScale = GREEDY_WEIGHT / HEURISTIC_MPS;
+  var isV3 = graph._index.version === 3;
+
+  if (ctx) ctx.bailed = false;
+
+  var table = new NodeTable(1 << 14);
+  var startSlot = table.insert(startNode);
+  table.g[startSlot] = 0;
+
+  var open = new NodeHeap(1 << 14);
+  open.push(haversine(startLat, startLon, endLat, endLon) * hScale, startNode);
+
   var pops = 0;
   var weightTag = (GREEDY_WEIGHT > 1.0) ? ' greedy×' + GREEDY_WEIGHT : ' optimal';
   var label = (highwayOnly ? 'A* highway-only' : 'A* full') + weightTag;
   var phaseT0 = nowMs();
-  if (_profile) _profile.edgeReqs++; // we'll add per-pop below
 
-  // #1: time-budget yielding. Decoupled from progress reporting:
+  // Time-budget yielding. Decoupled from progress reporting:
   // - report every 2k pops (cheap; main thread can re-render the
   //   progress indicator at most that often)
   // - yield to the worker event loop every 50 ms of wall time so
@@ -853,16 +1061,16 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
   //   without burning hundreds of ms before each yield
   var lastReportPops = 0;
   var lastYield = nowMs();
+  var found = false;
 
-  while (open.size() > 0) {
-    var item = open.pop();
-    var current = item[1];
+  while (open.n > 0) {
+    var current = open.pop();
     pops++;
     if (pops - lastReportPops >= 2000) {
       debugStats(ctx, label, pops);
       lastReportPops = pops;
     }
-    if (nowMs() - lastYield > 50) {
+    if ((pops & 63) === 0 && nowMs() - lastYield > 50) {
       var yT0 = nowMs();
       await new Promise(function(r) { setTimeout(r, 0); });
       if (_profile) {
@@ -884,60 +1092,97 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
         label: label, pops: pops, ms: nowMs() - phaseT0,
         bailed: true,
       });
+      if (ctx) ctx.bailed = true;
       return null;
     }
-    if (current === endNode) break;
-    if (closed.has(current)) continue;
-    closed.add(current);
+    if (current === endNode) { found = true; break; }
+    var cs = table.find(current);
+    if (table.closed[cs]) continue;
+    table.closed[cs] = 1;
+    var curG = table.g[cs];
+
+    var cid = graph.cellForNode(current);
+    if (cid < 0) continue;  // dangling reference; treat as dead end
+    var cell = graph.cellIfResident(cid);
+    if (cell === null) cell = await graph._ensureCell(cid);
+    var local = cell.localIdxFor(current);
+    if (local < 0) continue;
     if (_profile) _profile.edgeReqs++;
-    var nodeEdges = await graph.edgesOfNode(current);
-    var curG = g.get(current);
-    for (var k = 0; k < nodeEdges.length; k++) {
-      var e = nodeEdges[k];
-      if (highwayOnly && !isHighwayClass(e[4])) continue;
-      var target = e[0];
-      var speedDist = e[1];
-      if (closed.has(target)) continue;
-      var distM = (speedDist & 0xFFFFFF) / 10;
+    var cellAdj = cell.cellAdj;
+    var edges = cell.edges;
+    var eEnd = cellAdj[local + 1];
+    for (var ei = cellAdj[local]; ei < eEnd; ei++) {
+      var base = ei * 5;
+      if (highwayOnly && !isHighwayClass(edges[base + 4])) continue;
+      var speedDist = edges[base + 1];
       var speed = speedDist >>> 24;
       if (speed === 0) continue;
-      var cost = distM / (speed / 3.6);
-      var newG = curG + cost;
-      var oldG = g.has(target) ? g.get(target) : Infinity;
-      if (newG < oldG) {
-        g.set(target, newG);
-        prev.set(target, current);
-        prevEdge.set(target, [current, target, speedDist, e[2], e[3], e[4]]);
-        var targetCoords = await graph.nodeCoordsE7(target);
-        var tLat = targetCoords[0] / 1e7;
-        var tLon = targetCoords[1] / 1e7;
-        var h = haversine(tLat, tLon, endLat, endLon) / (80 / 3.6) * GREEDY_WEIGHT;
-        open.push([newG + h, target]);
+      var target = edges[base];
+      var ts = table.find(target);
+      if (ts >= 0 && table.closed[ts]) continue;
+      var newG = curG + ((speedDist & 0xFFFFFF) / 10) / (speed / 3.6);
+      if (ts < 0) ts = table.insert(target);
+      if (newG < table.g[ts]) {
+        table.g[ts] = newG;
+        table.prev[ts] = current;
+        table.prevEi[ts] = ei;
+        // Target coordinates for the heuristic. Same cell as the
+        // source for the vast majority of edges; a neighbouring cell
+        // is usually already resident (corridor prewarm) — only a
+        // true miss pays a fetch.
+        var tLat, tLon;
+        if (!isV3) {
+          tLat = graph._index.nodeLatE7(target) / 1e7;
+          tLon = graph._index.nodeLonE7(target) / 1e7;
+        } else {
+          var tcid = graph.cellForNode(target);
+          var tcell = (tcid === cid) ? cell : graph.cellIfResident(tcid);
+          if (tcell === null) {
+            tcell = await graph._ensureCell(tcid);
+            // The await may have grown/rehashed nothing (only this
+            // loop inserts) but `ts` is still valid; re-read defensively
+            // in case a future edit adds inserts across the await.
+            ts = table.find(target);
+          }
+          var tl = (target - tcell.baseNode) * 2;
+          tLat = tcell.nodesScaled[tl] / 1e7;
+          tLon = tcell.nodesScaled[tl + 1] / 1e7;
+        }
+        open.push(newG + haversine(tLat, tLon, endLat, endLon) * hScale, target);
       }
     }
   }
   debugStats(ctx, label + ' done', pops);
   if (_profile) _profile.phases.push({
     label: label, pops: pops, ms: nowMs() - phaseT0,
-    bailed: false,
+    bailed: false, visited: table.size, tableBytes: table.bytes(),
   });
 
-  if (!g.has(endNode)) return null;
+  var endSlot = table.find(endNode);
+  if (!found || endSlot < 0 || table.g[endSlot] === Infinity) return null;
 
-  // Path reconstruction (same shape as main-thread implementation).
-  var path = [];
+  // Path reconstruction: walk predecessor links back to the start,
+  // re-reading each edge from its (cell-local) slot. Cells may have
+  // been evicted mid-search, so this path is async again — it runs
+  // once per route, over the route's own cells only.
+  var totalTime = table.g[endSlot];
   var totalDist = 0;
-  var totalTime = g.get(endNode);
+  var segRev = [];   // per-edge {nameIdx, distM, flags}, end → start
+  var pathRev = [];  // per-edge [[lon,lat], ...], end → start
   var n = endNode;
-  var segRev = [];
+  var slot = endSlot;
   while (n !== startNode) {
-    var pe = prevEdge.get(n);
-    var sourceNode = pe[0];
-    var speedDist = pe[2];
-    var geomLocal = pe[3];
-    var nameIdx = pe[4];
-    var classAccess = pe[5];
-    var distM = (speedDist & 0xFFFFFF) / 10;
+    var sourceNode = table.prev[slot];
+    var sourceEi = table.prevEi[slot];
+    if (sourceNode < 0 || sourceEi < 0) return null;  // corrupt link
+    var scid = graph.cellForNode(sourceNode);
+    var scell = await graph._ensureCell(scid);
+    var sb = sourceEi * 5;
+    var sSpeedDist = scell.edges[sb + 1];
+    var geomLocal = scell.edges[sb + 2];
+    var nameIdx = scell.edges[sb + 3];
+    var classAccess = scell.edges[sb + 4];
+    var distM = (sSpeedDist & 0xFFFFFF) / 10;
     var isRound = ((classAccess >>> 8) & 1) !== 0;
     var cls = classAccess & 0x1F;
     var isLink = (cls === 2 || cls === 4 || cls === 6 || cls === 8 || cls === 10);
@@ -947,19 +1192,17 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
 
     var fromCoords = await graph.nodeCoordsE7(sourceNode);
     var toCoords = await graph.nodeCoordsE7(n);
-    var fromLat = fromCoords[0] / 1e7;
-    var fromLon = fromCoords[1] / 1e7;
-    var toLat = toCoords[0] / 1e7;
-    var toLon = toCoords[1] / 1e7;
-    var segment = [[fromLon, fromLat]];
+    var segment = [[fromCoords[1] / 1e7, fromCoords[0] / 1e7]];
     if (geomLocal !== graph.NO_GEOM) {
-      var pts = await graph.decodeGeomForEdge(sourceNode, geomLocal);
+      var pts = scell.decodeGeomLocal(geomLocal);
       if (pts) for (var j = 0; j < pts.length; j++) segment.push(pts[j]);
     }
-    segment.push([toLon, toLat]);
-    path.push(segment);
+    segment.push([toCoords[1] / 1e7, toCoords[0] / 1e7]);
+    pathRev.push(segment);
 
-    n = prev.get(n);
+    n = sourceNode;
+    slot = table.find(n);
+    if (slot < 0) return null;
   }
 
   // Resolve road names so the main thread doesn't need access to the
@@ -981,17 +1224,24 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     }
   }
 
-  path.reverse();
   var coords = [];
-  for (var sp = 0; sp < path.length; sp++) {
-    var startI = (sp === 0) ? 0 : 1;
-    for (var kk = startI; kk < path[sp].length; kk++) {
-      coords.push(path[sp][kk]);
-    }
+  for (var sp = pathRev.length - 1; sp >= 0; sp--) {
+    var seg = pathRev[sp];
+    var startI = (coords.length === 0) ? 0 : 1;
+    for (var kk = startI; kk < seg.length; kk++) coords.push(seg[kk]);
+  }
+  if (coords.length === 0) {
+    // start === end: a zero-length route. Give the caller a
+    // degenerate but well-formed LineString so drawing/fitBounds
+    // don't trip over an empty coordinate list.
+    var pt = [startLon, startLat];
+    coords.push(pt, pt.slice());
   }
   return { coords: coords, distance: totalDist, time: totalTime, roads: roads };
 }
 
+// Outgoing-edge BFS from `seedNode`; returns the first node that has a
+// highway-tier outgoing edge, or null within `maxPops`.
 async function findNearestHighwayNode(seedNode, maxPops) {
   var visited = new Set();
   visited.add(seedNode);
@@ -1001,14 +1251,20 @@ async function findNearestHighwayNode(seedNode, maxPops) {
   while (head < queue.length && pops < maxPops) {
     var current = queue[head++];
     pops++;
-    var edges = await graph.edgesOfNode(current);
-    for (var k = 0; k < edges.length; k++) {
-      if (isHighwayClass(edges[k][4])) {
-        return current;
-      }
+    var cid = graph.cellForNode(current);
+    if (cid < 0) continue;
+    var cell = graph.cellIfResident(cid);
+    if (cell === null) cell = await graph._ensureCell(cid);
+    var local = cell.localIdxFor(current);
+    if (local < 0) continue;
+    var edges = cell.edges;
+    var eStart = cell.cellAdj[local];
+    var eEnd = cell.cellAdj[local + 1];
+    for (var ei = eStart; ei < eEnd; ei++) {
+      if (isHighwayClass(edges[ei * 5 + 4])) return current;
     }
-    for (var k2 = 0; k2 < edges.length; k2++) {
-      var target = edges[k2][0];
+    for (var e2 = eStart; e2 < eEnd; e2++) {
+      var target = edges[e2 * 5];
       if (!visited.has(target)) {
         visited.add(target);
         queue.push(target);
@@ -1053,7 +1309,18 @@ function concatenateLegs(legs) {
     if (!leg) continue;
     var startIdx = (coords.length > 0) ? 1 : 0;
     for (var k = startIdx; k < leg.coords.length; k++) coords.push(leg.coords[k]);
-    for (var r = 0; r < leg.roads.length; r++) roads.push(leg.roads[r]);
+    for (var r = 0; r < leg.roads.length; r++) {
+      var road = leg.roads[r];
+      var last = roads.length ? roads[roads.length - 1] : null;
+      // Merge the join road across the leg boundary so the turn list
+      // doesn't announce "continue on X" onto the road it's already on.
+      if (last && last.nameIdx === road.nameIdx && last.flags === road.flags) {
+        last.distM += road.distM;
+      } else {
+        roads.push({ nameIdx: road.nameIdx, name: road.name,
+                     distM: road.distM, flags: road.flags });
+      }
+    }
     distance += leg.distance;
     time += leg.time;
   }
@@ -1073,10 +1340,11 @@ async function findRoute(startNode, endNode, ctx) {
   var crow = haversine(startLat, startLon, endLat, endLon);
   if (_profile) _profile.crowKm = crow / 1000;
   var override = ctx && ctx.options && ctx.options.route;
-  var useTwoPass = override === 'two-pass'
-    || (override !== 'full' && crow > 100000);
+  var isLong = crow > 100000;
 
-  if (useTwoPass) {
+  if (isLong && override !== 'full') {
+    // Long-route pre-cleanup: drop cached cells and give the engine a
+    // few turns to GC before allocating the next search's state.
     graph.compact(0);
     for (var i = 0; i < 3; i++) {
       await new Promise(function(r) { setTimeout(r, 50); });
@@ -1091,8 +1359,16 @@ async function findRoute(startNode, endNode, ctx) {
   // per-cell I/O into one parallel ~720ms wave.
   _prewarmCorridor(startLat, startLon, endLat, endLon, crow);
 
-  var routeResult = await findRouteSpatial(startNode, endNode, ctx);
-  if (!routeResult && useTwoPass && !(ctx && ctx.cancelled && ctx.cancelled())) {
+  var routeResult = null;
+  if (override !== 'two-pass') {
+    routeResult = await findRouteSpatial(startNode, endNode, ctx);
+  }
+  // Strategy chain: full A* first (optimal → greedy). Two-pass only
+  // when full A* ran out of budget — an exhausted open set means the
+  // destination is genuinely unreachable and two-pass can't fix that.
+  var cancelled = !!(ctx && ctx.cancelled && ctx.cancelled());
+  if (!routeResult && !cancelled
+      && (override === 'two-pass' || (ctx && ctx.bailed))) {
     routeResult = await findRouteSpatialTwoPass(startNode, endNode, ctx);
   }
   graph.compact(8);

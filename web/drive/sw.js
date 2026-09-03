@@ -28,6 +28,10 @@ const SHELL_URLS = [
   './viewer/',
   './viewer/index.html',
   './viewer/places.html',
+  // Canonical clean URL the viewer actually navigates to (Firebase
+  // cleanUrls + trailingSlash). Caching only `places.html` left the
+  // offline fallback with no entry for the URL that is requested.
+  './viewer/places/',
   './viewer/routing-worker.js',
   './viewer/maplibre-gl.js',
   './viewer/maplibre-gl.css'
@@ -109,14 +113,22 @@ function resetReader() {
 
 async function getReader() {
   if (readerPromise) return readerPromise;
-  readerPromise = (async () => {
+  const p = (async () => {
     const rec = await idbGet('current');
     if (!rec || !rec.blob) return null;
     const r = new self.StreetZimReader(rec.blob);
     await r.open();
     return r;
   })();
-  return readerPromise;
+  // A failed open (transient IDB error, file moved/modified under a
+  // persisted File handle) must not be memoised — every later request
+  // would 500 until the SW happened to be terminated.
+  const wrapped = p.catch((err) => {
+    if (readerPromise === wrapped) readerPromise = null;
+    throw err;
+  });
+  readerPromise = wrapped;
+  return wrapped;
 }
 
 // ---------- Lifecycle ----------
@@ -161,9 +173,13 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
+    // caches.keys() is origin-wide, not scope-wide — only touch our
+    // own generations so another worker on this origin keeps its data.
     const names = await caches.keys();
     await Promise.all(
-      names.filter((n) => n !== SHELL_CACHE).map((n) => caches.delete(n))
+      names
+        .filter((n) => n.startsWith('streetzim-drive-shell-') && n !== SHELL_CACHE)
+        .map((n) => caches.delete(n))
     );
     await self.clients.claim();
   })());
@@ -177,16 +193,20 @@ self.addEventListener('message', (event) => {
     let reply = { ok: true };
     try {
       if (msg.type === 'set-zim') {
+        // Validate BEFORE persisting. Writing first meant a non-ZIM
+        // (or truncated) file stuck as `current`: every request then
+        // 500'd and the picker hid the Remove button because status
+        // reported "not loaded", so the user couldn't clear it.
+        const r = new self.StreetZimReader(msg.blob);
+        await r.open();
         await idbPut({
           id: 'current',
           blob: msg.blob,
           name: msg.name || 'zim',
           addedAt: Date.now()
         });
-        resetReader();
-        // Force-open so the page sees any error immediately.
-        const r = await getReader();
-        reply.info = r ? r.info : null;
+        readerPromise = Promise.resolve(r);
+        reply.info = r.info;
       } else if (msg.type === 'clear-zim') {
         await idbDelete('current');
         resetReader();
@@ -212,7 +232,15 @@ function rangeResponse(data, range, mime) {
   if (!m) return null;
   const start = parseInt(m[1], 10);
   const end = m[2] ? parseInt(m[2], 10) : data.byteLength - 1;
-  if (isNaN(start) || start >= data.byteLength) return null;
+  if (isNaN(start)) return null;
+  if (start >= data.byteLength || end < start) {
+    // RFC 7233: unsatisfiable range → 416, not a silent full 200.
+    return new Response(null, {
+      status: 416,
+      statusText: 'Range Not Satisfiable',
+      headers: { 'Content-Range': 'bytes */' + data.byteLength }
+    });
+  }
   const slice = data.subarray(start, Math.min(end + 1, data.byteLength));
   return new Response(slice, {
     status: 206,
@@ -342,12 +370,20 @@ self.addEventListener('fetch', (event) => {
           const net = await fetch(req, { cache: 'no-store' });
           if (net && net.ok) {
             const copy = net.clone();
-            caches.open(SHELL_CACHE).then((c) => cacheClean(c, req, copy));
+            // Keep the SW alive until the cache write lands, and never
+            // let a failed put surface as an unhandled rejection.
+            event.waitUntil(
+              caches.open(SHELL_CACHE)
+                .then((c) => cacheClean(c, req, copy))
+                .catch(() => {})
+            );
           }
           return net;
         } catch (e) {
-          // Offline fallback only.
-          const cached = await caches.match(req);
+          // Offline fallback only. ignoreSearch: the picker forwards
+          // ?debug=1 / ?route=… into /drive/viewer/?… and the shell
+          // was precached without a query string.
+          const cached = await caches.match(req, { ignoreSearch: true });
           return cached || notFound(rest);
         }
       })());
@@ -377,11 +413,15 @@ self.addEventListener('fetch', (event) => {
       const net = await fetch(req, { cache: 'no-store' });
       if (net && net.ok) {
         const copy = net.clone();
-        caches.open(SHELL_CACHE).then((c) => cacheClean(c, req, copy));
+        event.waitUntil(
+          caches.open(SHELL_CACHE)
+            .then((c) => cacheClean(c, req, copy))
+            .catch(() => {})
+        );
       }
       return net;
     } catch (e) {
-      const cached = await caches.match(req);
+      const cached = await caches.match(req, { ignoreSearch: true });
       return cached || notFound(url.pathname);
     }
   })());

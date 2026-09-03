@@ -624,7 +624,9 @@ function applyUrlParamsOnce() {
   // ``#lat=..&lon=..`` from the main viewer's Find link to default
   // "Search near" to the map's current view center instead of GPS.
   const hash = parseHash(location.hash);
-  if (hash.q) { els.q.value = hash.q; }
+  // Set state.query too so a `#cat=…&q=…` deep link name-filters the
+  // chip results (onSearch only runs on the q-only path below).
+  if (hash.q) { els.q.value = hash.q; state.query = hash.q.trim(); }
   if (hash.lat && hash.lon) {
     // Viewport-centered origin — kick off reverse-geocode in the
     // background so the "Search near" label reads the nearest city
@@ -741,8 +743,14 @@ function rerunQuery() {
   }
 }
 
+// Generation counter so a slow earlier query can't overwrite the
+// results of a newer one (tap Bars, tap Shops before Bars resolves →
+// bars rendered under a highlighted Shops chip).
+let _querySeq = 0;
+
 async function runChipQuery(def) {
   if (maybeFetchOriginFirst()) return;
+  const seq = ++_querySeq;
   setStatus(`Loading ${def.label.toLowerCase()}…`);
   // Prefer the pre-filtered per-chip file if the ZIM was built with
   // --split-find-chips. Otherwise fall back to loading the full OMT-
@@ -773,9 +781,11 @@ async function runChipQuery(def) {
       }
     }
   } catch (e) {
+    if (seq !== _querySeq) return;
     setStatus(`Couldn't load ‘${def.label}’: ${e.message}`);
     return;
   }
+  if (seq !== _querySeq) return;  // superseded while loading
   // Stack the name filter on top if there's a query.
   if (state.query) {
     records = filterByName(records, state.query);
@@ -811,6 +821,7 @@ async function loadChipFile(chipId) {
 
 async function runNameQuery(q) {
   if (maybeFetchOriginFirst()) return;
+  const seq = ++_querySeq;
   setStatus(`Searching for “${q}”…`);
   const prefixes = prefixesFor(q);
   let merged = [];
@@ -828,6 +839,7 @@ async function runNameQuery(q) {
       // Single missing chunk shouldn't kill the whole query.
       continue;
     }
+    if (seq !== _querySeq) return;  // superseded while loading
     for (const rec of chunk) {
       // Substring match across name + subtype.
       const k = `${rec.n}@${rec.a},${rec.o}`;
@@ -838,6 +850,7 @@ async function runNameQuery(q) {
       }
     }
   }
+  if (seq !== _querySeq) return;
   applyResults(merged);
 }
 
@@ -845,20 +858,48 @@ function filterByName(records, q) {
   return records.filter(r => matchesName(r, q));
 }
 
+// Accent-fold + lowercase, mirroring the writer's `_norm` in
+// create_osm_zim.py (NFKD, strip combining marks) so "ecouen" finds
+// "Écouen" and vice versa.
+function foldText(s) {
+  let t = String(s || '').toLowerCase();
+  try { t = t.normalize('NFKD').replace(/[\u0300-\u036f]/g, ''); } catch (_) {}
+  return t;
+}
+
 function matchesName(rec, q) {
-  const ql = q.toLowerCase();
-  return (rec.n || '').toLowerCase().includes(ql)
-      || (rec.s || '').toLowerCase().includes(ql);
+  const ql = foldText(q);
+  return foldText(rec.n).includes(ql) || foldText(rec.s).includes(ql);
+}
+
+// Chunk key for a word — MUST match the writer's `_prefix_key` in
+// create_osm_zim.py (and `keyFor` in index.html): Latin-leading words
+// use their first two ASCII-alnum chars (anything else → '_'),
+// non-ASCII first chars bucket into 'u' + hex codepoint. The previous
+// `q.slice(0, 2)` never matched the writer for accented, CJK, or
+// punctuation-leading names, so those searches returned nothing.
+function prefixKeyFor(word) {
+  if (!word) return '__';
+  const c0 = word.codePointAt(0);
+  if (c0 >= 128) return 'u' + c0.toString(16);
+  function asciiNorm(ch) {
+    const code = ch.charCodeAt(0);
+    const alnum = (code >= 48 && code <= 57) || (code >= 97 && code <= 122);
+    return (alnum || ch === '_') ? ch : '_';
+  }
+  const a = asciiNorm(word[0]);
+  const b = word.length > 1 ? asciiNorm(word[1]) : '_';
+  return a + b;
 }
 
 function prefixesFor(q) {
   // Same logic the build script uses to chunk: 2-char prefixes of any
-  // word in the name. We at least try the first 2 chars of the query.
+  // word in the (accent-folded) name. Try the query head and each word.
   const out = new Set();
-  const head = q.slice(0, 2).toLowerCase().replace(/\s/g, '_');
-  if (head.length === 2) out.add(head);
-  for (const word of q.toLowerCase().split(/\s+/)) {
-    if (word.length >= 2) out.add(word.slice(0, 2));
+  const folded = foldText(q).trim();
+  if (folded.length >= 2) out.add(prefixKeyFor(folded.replace(/\s/g, '_')));
+  for (const word of folded.split(/[^\p{L}\p{N}]+/u)) {
+    if (word.length >= 2) out.add(prefixKeyFor(word));
   }
   return [...out];
 }
@@ -1095,10 +1136,11 @@ function renderResults() {
       }
       const links = document.createElement('span');
       links.className = 'links';
-      if (r.ws) {
+      const wsUrl = safeHttpUrl(r.ws);
+      if (wsUrl) {
         const a = document.createElement('a');
-        a.href = r.ws; a.target = '_blank'; a.rel = 'noopener';
-        a.title = r.ws; a.textContent = '🌐';
+        a.href = wsUrl; a.target = '_blank'; a.rel = 'noopener';
+        a.title = wsUrl; a.textContent = '🌐';
         links.appendChild(a);
       }
       if (r.w) {
@@ -1117,12 +1159,14 @@ function renderResults() {
       }
       if (r.p) {
         const a = document.createElement('a');
-        a.href = 'tel:' + r.p.replace(/\s+/g, '');
-        a.title = r.p; a.textContent = '📞';
+        a.href = 'tel:' + String(r.p).replace(/\s+/g, '');
+        a.title = String(r.p); a.textContent = '📞';
         links.appendChild(a);
       }
       if (r.soc && r.soc.length) {
-        for (const s of r.soc.slice(0, 3)) {
+        for (const raw of r.soc.slice(0, 3)) {
+          const s = safeHttpUrl(raw);
+          if (!s) continue;
           const host = s.toLowerCase();
           const g = /facebook/.test(host) ? 'f'
                   : /instagram/.test(host) ? 'IG'
@@ -1162,7 +1206,11 @@ function renderResults() {
     // `/drive/viewer/index.html`, Kiwix gets `<zim-root>/index.html`.
     let href = HERE + 'index.html#dest=' + r.a + ',' + r.o
              + '&label=' + encodeURIComponent(r.n || '');
-    if (state.origin) {
+    // Only a real GPS fix may ride along as origin — index.html labels
+    // any `origin=` "Current location" and caches it as the device
+    // position, which was wrong for a "Search near <city>" pick or a
+    // viewport-centre deep link.
+    if (state.origin && state.originMode === 'gps') {
       href += '&origin=' + state.origin.lat + ',' + state.origin.lon;
     }
     dirA.href = href;
@@ -1199,13 +1247,29 @@ state.originLabel = 'My location';
 
 function requestGPS() {
   if (!navigator.geolocation) {
+    state.origin = null;
     state.originMode = 'none';
-    setStatus('This device does not support geolocation.');
+    // Re-run so the chip / query that triggered this isn't dropped.
+    rerunQuery();
     return;
   }
   setStatus('Getting your location…');
+  // The 8 s geolocation timeout only starts once permission is
+  // granted; an unanswered permission prompt would otherwise leave
+  // "Getting your location…" up forever with the query never run.
+  let settled = false;
+  const giveUp = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    state.origin = null;
+    state.originMode = 'none';
+    rerunQuery();
+  }, 12000);
   navigator.geolocation.getCurrentPosition(
     pos => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(giveUp);
       state.origin = { lat: pos.coords.latitude, lon: pos.coords.longitude };
       state.originMode = 'gps';
       state.originLabel = 'My location';
@@ -1213,8 +1277,15 @@ function requestGPS() {
       rerunQuery();
     },
     err => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(giveUp);
       state.origin = null;
       state.originMode = 'none';
+      // Run the pending query (name-sorted), then explain why there
+      // are no distances. Before this the first chip tap / typed
+      // query after a denial was silently lost.
+      rerunQuery();
       setStatus(`Location unavailable: ${err.message}. Pick a place under "Search near" to sort by distance.`);
     },
     { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 }
@@ -1456,9 +1527,21 @@ function parseHash(h) {
   if (!h || h[0] !== '#') return out;
   for (const pair of h.slice(1).split('&')) {
     const [k, ...rest] = pair.split('=');
-    if (k) out[k] = decodeURIComponent(rest.join('='));
+    if (!k) continue;
+    const raw = rest.join('=');
+    // A malformed escape (`#q=50%`) used to throw URIError out of the
+    // async init and leave the page stuck on "Loading places index…".
+    try { out[k] = decodeURIComponent(raw); } catch (_) { out[k] = raw; }
   }
   return out;
+}
+
+// Only http(s) links may come out of index data — a `javascript:`
+// website/social value in a record would otherwise execute on tap.
+function safeHttpUrl(u) {
+  if (typeof u !== 'string') return null;
+  const t = u.trim();
+  return /^https?:\/\//i.test(t) ? t : null;
 }
 
 function haversine(lat1, lon1, lat2, lon2) {
@@ -1472,10 +1555,17 @@ function haversine(lat1, lon1, lat2, lon2) {
 }
 
 // Longitude-inside-bounds with antimeridian wraparound. MapLibre's
-// getBounds().getEast() can be < getWest() when the camera spans
-// 180°/-180°; in that case "inside" is the union of [w,180]∪[-180,e].
+// getBounds() returns UNWRAPPED longitudes when the camera spans
+// 180° (e.g. west=170, east=190) while records store [-180, 180], so
+// also test the record shifted by ±360°. Kept the e<w union form for
+// callers that hand us pre-wrapped bounds.
 function _lonInside(lon, w, e) {
-  return w <= e ? (lon >= w && lon <= e) : (lon >= w || lon <= e);
+  if (w <= e) {
+    return (lon >= w && lon <= e)
+        || (lon + 360 >= w && lon + 360 <= e)
+        || (lon - 360 >= w && lon - 360 <= e);
+  }
+  return lon >= w || lon <= e;
 }
 </script>
 </body>

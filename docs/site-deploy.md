@@ -66,8 +66,9 @@ open web/index.html            # local preview in browser
 - **`node` / `npm` mismatch.** Firebase-tools needs Node 18+. If
   `firebase deploy` fails on `Unsupported engine`, upgrade Node first.
 - **Adding a new region:** edit `REGIONS` in `web/generate.py` (a new
-  entry needs `id` matching `streetzim-<id>`, plus `name`,
-  `description`, optional `default_zoom`). The card won't appear on
+  entry needs `id` matching `streetzim-<id>`, plus `tier` (one of the
+  ids in `TIERS`), `title`, `zim_file`, and `description`; see the
+  existing entries). The card won't appear on
   the homepage until both (a) the entry is in `REGIONS` and (b) the
   archive.org item exists. Push the registry change and redeploy.
 

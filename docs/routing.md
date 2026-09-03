@@ -13,12 +13,25 @@ chain is:
 
 1. **Full A*** — single-source A* over the entire spatial graph,
    sparse-state. Internally itself two-stage:
-   1. *Optimal pass*: admissible heuristic (haversine ÷ 80 km/h),
-      pop limit 200,000. Returns the guaranteed-shortest route.
+   1. *Optimal pass*: admissible heuristic (haversine ÷ 100 km/h —
+      the fastest edge speed `create_osm_zim.SPEED` emits, so the
+      estimate can never exceed the true remaining time), pop limit
+      200,000. Returns the guaranteed-shortest route.
+      (Until 2026-09 both JS engines divided by 80 km/h. That
+      over-estimates remaining time on any motorway leg, so the
+      "optimal" pass silently returned routes a few percent slower
+      than the true optimum — the synthetic differential test in
+      `tests/test_routing_worker_v3.py` reproduced it on half its
+      routes. The Python references always used 100 km/h.)
    2. *Greedy fallback*: heuristic × 1.5 (no longer admissible —
       may overshoot), pop limit 400,000. Routes here are 5–15%
-      longer than optimal but the page survives.
-2. **Two-pass** — only invoked when full A* exhausts both stages.
+      longer than optimal but the page survives. Only runs when the
+      optimal pass *bailed* on its pop budget; an optimal pass that
+      exhausted the open set proves the destination unreachable and
+      the greedy pass is skipped.
+2. **Two-pass** — only invoked when full A* bailed on its budget
+   (any distance — it used to be gated on crow-fly > 100 km, which
+   left dense-metro routes just under that with "No route found").
    Picks a "highway entry" near each endpoint via outgoing-edge BFS,
    then runs three legs: src → hw_src on the full graph (admissible
    then greedy), hw_src → hw_dst on a highway-tier-only filter, and
@@ -28,6 +41,25 @@ chain is:
 The chain is biased toward correctness: an admissible-A* answer is
 returned whenever it fits in the budget. We only degrade to greedy
 or two-pass when the optimal pass would have crashed the page.
+
+### Worker ↔ main-thread contract
+
+* `route-done` carries `ok:true, result:null` when the search ran to
+  completion without a route. `ok:false` means the engine threw, and
+  only then does the bridge fall back to the main-thread engine.
+  (Reporting "no route" as `ok:false` used to trigger a full
+  main-thread re-run of the identical search — twice the wall time
+  and iOS heap to reach the same "No route found".)
+* A new `route` command cancels any route still running in the
+  worker, and the bridge sends a `cancel` for its in-flight ids
+  before posting a new one. Only the newest request ever matters
+  (`computeAndDrawRoute` drops stale results via `routeSeq`).
+* If the worker dies mid-route the bridge rejects every pending
+  route/snap promise (callers fall back to the main thread) and pins
+  the ready state to `false`; previously those promises hung forever
+  and the panel stayed on "Finding fastest route…".
+* `?route=full` / `?route=two-pass` reach the worker via
+  `options.route`.
 
 ### Highway-tier filter
 
@@ -61,7 +93,7 @@ stay well under that. Per-route memory budget at peak:
 | Component | Size | Comment |
 |---|---|---|
 | Cell cache (byte budget) | ≤64 MB | Scale-10 SZCI v3 cells are fetched lazily. |
-| Visited-node Maps | up to ~300 MB | `g`/`prev`/`prevEdge`/`closed`. ~440 B per visited node × pop limit. |
+| Visited-node table (worker) | ≤ ~35 MB | `NodeTable` in `routing-worker.js`: open-addressing hash on node id with typed-array columns for g / prev / prev-edge / closed, ~21 B per slot at ≤ 50 % load ⇒ ~42 B per visited node × pop limit. The main-thread fallback still uses `Map`s at ~440 B per node. |
 | MapLibre tiles + DOM | ~100 MB | Constant-ish. |
 | **Routing peak** | **~500–600 MB** | Measured on Tokyo→Oita with the harness. |
 
@@ -75,9 +107,21 @@ Knobs in `resources/viewer/index.html`:
   (the "pre-route cleanup" pause + GC yields).
 * Pop limits: 200k optimal / 400k greedy on full A*; 50k optimal /
   100k greedy on the highway-only middle leg.
-* Sparse-state algorithm: `Map<int, X>` instead of typed arrays
-  sized for `numNodes`. Eliminates the ~370 MB up-front allocation
-  the old code paid even on a 1.5 km route.
+* Sparse-state algorithm: state only for visited nodes instead of
+  typed arrays sized for `numNodes`. Eliminates the ~370 MB up-front
+  allocation the old code paid even on a 1.5 km route. In the worker
+  the state is a `NodeTable` (see above) plus a `NodeHeap` (parallel
+  `Float64Array`/`Int32Array` binary heap), so the inner loop does no
+  per-edge allocation.
+* Synchronous fast path: the worker's A* reads edges and coordinates
+  straight out of the resident cell's typed arrays and only `await`s
+  on a genuine cell miss. The previous engine awaited a fresh promise
+  (and allocated an edge array) on every pop and every relaxation,
+  which dominated the per-pop cost. A one-entry "last cell" cache in
+  front of the node→cell binary search covers the common same-cell
+  case. On a 62 k-node synthetic grid the search phase got ~10×
+  faster (`tests/test_routing_worker_v3.py` has the differential
+  harness; see git history for the benchmark numbers).
 * SZCI v3: node coordinates live inside cell payloads. Startup loads only
   compact cell metadata and names; there is no region-wide coordinate table.
 

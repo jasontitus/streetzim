@@ -46,7 +46,11 @@
     (function() {
         // Compute base URL for absolute resource paths (needed for Kiwix JS PWA)
         var baseUrl = (function() {
-            var href = window.location.href;
+            // Strip the query/fragment first — `#map=12/45.5/-122.6`
+            // contains slashes, so lastIndexOf('/') on the full href
+            // produced a base inside the fragment and every tile and
+            // config fetch 404'd.
+            var href = window.location.href.split(/[?#]/)[0];
             return href.substring(0, href.lastIndexOf('/') + 1);
         })();
 
@@ -106,15 +110,34 @@
                 dbg('fatal error loading map config', describeError(err), err && err.stack);
                 var info = document.getElementById('info');
                 if (info) {
-                    info.innerHTML = '<strong>Error loading map config</strong><br>' +
-                        describeError(err) +
-                        '<br><span style="font-size:9px;opacity:0.75;">URL: ' + (err && err._url ? err._url : (baseUrl + 'map-config.json')) + '</span>' +
-                        '<br><span style="font-size:9px;opacity:0.75;">Base: ' + baseUrl + '</span>' +
-                        '<br><span style="font-size:9px;opacity:0.75;">UA: ' + (navigator.userAgent || '?').substring(0, 80) + '</span>' +
-                        '<br><a href="#" id="debug-show" style="font-size:10px;color:#1a73e8;">Show debug log</a>';
+                    // Built with DOM APIs — the URL/base strings echo
+                    // the page URL, so innerHTML here was a reflected
+                    // HTML injection sink.
+                    info.textContent = '';
+                    var strong = document.createElement('strong');
+                    strong.textContent = 'Error loading map config';
+                    info.appendChild(strong);
+                    info.appendChild(document.createElement('br'));
+                    info.appendChild(document.createTextNode(describeError(err)));
+                    function addSmall(text) {
+                        info.appendChild(document.createElement('br'));
+                        var span = document.createElement('span');
+                        span.style.cssText = 'font-size:9px;opacity:0.75;';
+                        span.textContent = text;
+                        info.appendChild(span);
+                    }
+                    addSmall('URL: ' + (err && err._url ? err._url : (baseUrl + 'map-config.json')));
+                    addSmall('Base: ' + baseUrl);
+                    addSmall('UA: ' + (navigator.userAgent || '?').substring(0, 80));
+                    info.appendChild(document.createElement('br'));
+                    var link = document.createElement('a');
+                    link.href = '#';
+                    link.id = 'debug-show';
+                    link.style.cssText = 'font-size:10px;color:#1a73e8;';
+                    link.textContent = 'Show debug log';
+                    info.appendChild(link);
                     info.style.pointerEvents = 'auto';
                     info.style.maxWidth = '420px';
-                    var link = document.getElementById('debug-show');
                     if (link) {
                         link.addEventListener('click', function(e) {
                             e.preventDefault();
@@ -158,11 +181,18 @@
             // Add offline tile layer with absolute URLs
             // Tiles are 512x512 (2x retina), so use tileSize: 512 and
             // zoomOffset: -1 to map Leaflet's zoom levels correctly.
-            // maxNativeZoom = highest zoom with actual tiles
             // maxZoom = 19 allows over-zooming (Leaflet scales up the tiles)
+            //
+            // Leaflet clamps min/maxNativeZoom in MAP-zoom space and
+            // applies zoomOffset afterwards, so with zoomOffset:-1 the
+            // native limits have to be shifted by +1: the deepest tile
+            // level z=N is shown at map zoom N+1. Passing N directly
+            // meant tiles/N/ was never requested (map zoom ≥ N+1 showed
+            // an upscaled N-1) and map zoom 0 asked for tiles/-1/.
             L.tileLayer(baseUrl + 'tiles/{z}/{x}/{y}.png', {
                 minZoom: minZoom,
-                maxNativeZoom: nativeMaxZoom,
+                minNativeZoom: minZoom + 1,
+                maxNativeZoom: nativeMaxZoom + 1,
                 maxZoom: 19,
                 tileSize: 512,
                 zoomOffset: -1,
@@ -178,9 +208,13 @@
                 var satMaxZoom = config.satelliteMaxZoom || nativeMaxZoom;
                 var satExt = config.satelliteFormat || 'webp';
                 var satTileSize = config.satelliteTileSize || 256;
+                // Same map-zoom-space shift as the base layer when the
+                // satellite tiles are 512 px (zoomOffset -1).
+                var satShift = satTileSize === 512 ? 1 : 0;
                 var satelliteLayer = L.tileLayer(baseUrl + 'satellite/{z}/{x}/{y}.' + satExt, {
                     minZoom: minZoom,
-                    maxNativeZoom: satMaxZoom,
+                    minNativeZoom: minZoom + satShift,
+                    maxNativeZoom: satMaxZoom + satShift,
                     maxZoom: 19,
                     tileSize: satTileSize,
                     zoomOffset: satTileSize === 512 ? -1 : 0,

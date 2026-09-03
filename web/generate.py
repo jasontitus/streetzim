@@ -472,13 +472,60 @@ def render_feature_badges(item_meta):
     return '\n        <div class="map-card-badges">' + "".join(pills) + "</div>"
 
 
-def render_live_card(region, size_label, item_meta=None):
-    """Render a map card with active download/torrent/details buttons."""
+def _bdecode(data, pos=0):
+    """Minimal bencode decoder (ints, byte strings, lists, dicts)."""
+    c = data[pos:pos + 1]
+    if c == b"i":
+        end = data.index(b"e", pos)
+        return int(data[pos + 1:end]), end + 1
+    if c == b"l":
+        out, pos = [], pos + 1
+        while data[pos:pos + 1] != b"e":
+            v, pos = _bdecode(data, pos)
+            out.append(v)
+        return out, pos + 1
+    if c == b"d":
+        out, pos = {}, pos + 1
+        while data[pos:pos + 1] != b"e":
+            k, pos = _bdecode(data, pos)
+            v, pos = _bdecode(data, pos)
+            out[k] = v
+        return out, pos + 1
+    colon = data.index(b":", pos)
+    n = int(data[pos:colon])
+    return data[colon + 1:colon + 1 + n], colon + 1 + n
+
+
+def torrent_file_name(region_id):
+    """`info.name` of web/torrents/<id>.torrent, or None if unreadable."""
+    path = os.path.join(SCRIPT_DIR, "torrents", f"{region_id}.torrent")
+    try:
+        with open(path, "rb") as f:
+            meta, _ = _bdecode(f.read())
+        name = meta.get(b"info", {}).get(b"name")
+        return name.decode("utf-8", "replace") if name else None
+    except (OSError, ValueError, KeyError, AttributeError):
+        return None
+
+
+def render_live_card(region, size_label, item_meta=None, torrent_ok=True):
+    """Render a map card with active download/torrent/details buttons.
+
+    `torrent_ok=False` drops the Torrent button: the committed .torrent
+    describes a different (older) file than the Download button, so
+    handing it out would seed a build that archive.org's keep-2 cleanup
+    is about to delete.
+    """
     item_id = f"streetzim-{region['id']}"
     zim_file = region["zim_file"]
     zim_file_attr = escape(urllib.parse.quote(zim_file), quote=True)
     title_attr = escape(region["title"], quote=True)
     badges_html = render_feature_badges(item_meta)
+    torrent_html = (
+        f'\n          <a class="btn btn-secondary" href="/torrents/{region["id"]}.torrent" '
+        f'data-track="torrent" data-region="{region["id"]}" data-title="{title_attr}">Torrent</a>'
+        if torrent_ok else ""
+    )
     return f"""      <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">{escape(region["title"])}</div>
@@ -486,8 +533,7 @@ def render_live_card(region, size_label, item_meta=None):
         </div>
         <p class="map-card-desc">{region["description"]}</p>{badges_html}
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/{item_id}/{zim_file_attr}" data-track="download" data-region="{region["id"]}" data-title="{title_attr}">Download</a>
-          <a class="btn btn-secondary" href="/torrents/{region["id"]}.torrent" data-track="torrent" data-region="{region["id"]}" data-title="{title_attr}">Torrent</a>
+          <a class="btn btn-primary" href="https://archive.org/download/{item_id}/{zim_file_attr}" data-track="download" data-region="{region["id"]}" data-title="{title_attr}">Download</a>{torrent_html}
           <a class="btn btn-secondary" href="https://archive.org/details/{item_id}" data-track="details" data-region="{region["id"]}" data-title="{title_attr}">Info</a>
         </div>
       </div>"""
@@ -590,6 +636,14 @@ def build_page():
                     # 210 MB April-22 one because of byte size alone.
                     # Size only breaks ties among same-date uploads.
                     import re as _re
+                    def _int(v):
+                        # archive.org occasionally reports size as
+                        # None / "" for a file still being processed;
+                        # a bare int() here aborted the whole build.
+                        try:
+                            return int(v or 0)
+                        except (TypeError, ValueError):
+                            return 0
                     def _sort_key(f):
                         name = f.get("name", "")
                         # Match dated filenames optionally followed by a
@@ -606,17 +660,24 @@ def build_page():
                             # (dated=1, date_str, size). Lexicographic
                             # comparison is correct: YYYY-MM < YYYY-MM-DD
                             # because the shorter prefix sorts first.
-                            return (1, m.group(1), int(f.get("size", 0)))
-                        return (0, "", int(f.get("size", 0)))
+                            return (1, m.group(1), _int(f.get("size")))
+                        return (0, "", _int(f.get("size")))
                     best = max(zim_files, key=_sort_key)
                     zim_filename = best.get("name")
-                    try:
-                        zim_size = int(best.get("size", 0))
-                    except (TypeError, ValueError):
-                        pass
+                    zim_size = _int(best.get("size")) or None
+            if not zim_filename:
+                # Item exists (dark / just created / mid-upload) but
+                # lists no .zim yet. The old path fell through to
+                # item_size (>0 from _meta.xml alone) and rendered a
+                # live card linking the undated osm-<id>.zim, which
+                # never exists on a dated item — the 2026-05-10
+                # California incident.
+                print(f"  {region['id']}: no .zim in item listing yet, treating as upcoming")
+                cards.append(render_upcoming_card(region))
+                upcoming_count += 1
+                continue
             # Override the static zim_file with what's actually on Archive.org
-            if zim_filename:
-                region = {**region, "zim_file": zim_filename}
+            region = {**region, "zim_file": zim_filename}
             if zim_size is None:
                 try:
                     zim_size = int(item.get("item_size", 0))
@@ -630,9 +691,21 @@ def build_page():
                 cards.append(render_upcoming_card(region))
                 upcoming_count += 1
                 continue
+            # The Torrent button must point at the same file as the
+            # Download button. Torrents are regenerated separately
+            # (cloud/generate_all_torrents.py) and drift behind
+            # rebuilds; a stale one seeds a ZIM the keep-2 cleanup on
+            # archive.org will soon delete.
+            torrent_name = torrent_file_name(region["id"])
+            torrent_ok = torrent_name == zim_filename
+            if not torrent_ok:
+                print(f"  {region['id']}: torrent names {torrent_name!r} but the "
+                      f"live ZIM is {zim_filename!r} — omitting Torrent button "
+                      f"(regenerate with cloud/generate_all_torrents.py)")
             cards.append(render_live_card(
                 region, human_size(zim_size),
-                item_meta=(details or {}).get("metadata") if details else None))
+                item_meta=(details or {}).get("metadata") if details else None,
+                torrent_ok=torrent_ok))
             live_count += 1
         else:
             cards.append(render_upcoming_card(region))
@@ -658,14 +731,17 @@ def build_page():
         )
         sys.exit(2)
 
-    with open(TEMPLATE_PATH) as f:
+    with open(TEMPLATE_PATH, encoding="utf-8") as f:
         template = f.read()
 
     updated = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     html = template.replace("{{MAPS}}", "\n".join(cards))
     html = html.replace("{{UPDATED}}", updated)
 
-    with open(OUTPUT_PATH, "w") as f:
+    # Explicit UTF-8: the template and region descriptions carry
+    # non-cp1252 characters (Lāna, İzmir, Þingvellir), so the locale
+    # default raised UnicodeEncodeError on Windows / C-locale hosts.
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"Wrote {OUTPUT_PATH}")
 

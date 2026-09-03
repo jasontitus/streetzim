@@ -1471,7 +1471,7 @@ fetchConfig(1)
               'hillshade-highlight-color': '#fff',
               'hillshade-illumination-direction': 315
             }
-          }, map.getStyle().layers[1] ? map.getStyle().layers[1].id : undefined);
+          }, _hillshadeBeforeId(map));
         } else if (mode === 2) {
           // Full 3D terrain + hillshade
           map.addLayer({
@@ -1484,7 +1484,7 @@ fetchConfig(1)
               'hillshade-highlight-color': '#fff',
               'hillshade-illumination-direction': 315
             }
-          }, map.getStyle().layers[1] ? map.getStyle().layers[1].id : undefined);
+          }, _hillshadeBeforeId(map));
           map.setTerrain({ source: 'terrain-dem', exaggeration: 1.5 });
         }
         map.triggerRepaint();
@@ -1527,7 +1527,14 @@ fetchConfig(1)
       var origMatch  = hash.match(/origin=(-?\d+\.?\d*),(-?\d+\.?\d*)/);
       var pinMatch   = hash.match(/pin=(-?\d+\.?\d*),(-?\d+\.?\d*)/);
       var labelMatch = hash.match(/label=([^&]+)/);
-      var label = labelMatch ? decodeURIComponent(labelMatch[1]) : null;
+      var label = null;
+      if (labelMatch) {
+        // A malformed escape (hand-typed or truncated URL) threw
+        // URIError here and aborted the whole hash handler — no pin,
+        // no routing panel — on load and on every hashchange.
+        try { label = decodeURIComponent(labelMatch[1]); }
+        catch (e) { label = labelMatch[1]; }
+      }
       // `pin=` drops a red pin + Directions popup at a location without
       // opening the routing panel. Used by the Find-page "Map" button so
       // the user sees what they picked instead of landing on an
@@ -2226,7 +2233,13 @@ function renderFindResultsFromStash(map) {
   var bounds = null;
   for (var i = 0; i < stash.items.length; i++) {
     var r = stash.items[i];
-    if (typeof r.a !== 'number' || typeof r.o !== 'number') continue;
+    if (typeof r.a !== 'number' || typeof r.o !== 'number') {
+      // Keep markers[] parallel to items[] — the carousel, pin click
+      // handler and keyboard nav all index by position, and every
+      // consumer already null-checks.
+      _findResultsState.markers.push(null);
+      continue;
+    }
     var marker = new maplibregl.Marker({ color: '#e74c3c' })
       .setLngLat([r.o, r.a])
       .addTo(map);
@@ -2661,8 +2674,17 @@ function _searchAreaApply(map) {
   var b = map.getBounds();
   var w = b.getWest(), e = b.getEast(),
       s = b.getSouth(), n = b.getNorth();
+  // getBounds() returns unwrapped longitudes across the antimeridian
+  // (west=170, east=190) while records store [-180, 180] — test the
+  // record shifted by ±360° too, or a viewport over Fiji rejects
+  // every record with a negative longitude.
   function lonInside(lon) {
-    return w <= e ? (lon >= w && lon <= e) : (lon >= w || lon <= e);
+    if (w <= e) {
+      return (lon >= w && lon <= e)
+          || (lon + 360 >= w && lon + 360 <= e)
+          || (lon - 360 >= w && lon - 360 <= e);
+    }
+    return lon >= w || lon <= e;
   }
   var filtered = _findResultsState.items.filter(function(r) {
     return r.a >= s && r.a <= n && lonInside(r.o);
@@ -2874,11 +2896,13 @@ function _showPlaceDetail(map, r, idx) {
       r.soc[0], '_blank'));
   }
   // Coordinates (always available, useful for cross-app copy-paste)
-  var coordRow = _detailFactRow(
-    'Coords',
-    r.a.toFixed(5) + ', ' + r.o.toFixed(5),
-    null);
-  info.appendChild(coordRow);
+  if (typeof r.a === 'number' && typeof r.o === 'number') {
+    var coordRow = _detailFactRow(
+      'Coords',
+      r.a.toFixed(5) + ', ' + r.o.toFixed(5),
+      null);
+    info.appendChild(coordRow);
+  }
   if (info.childElementCount > 0) panel.appendChild(info);
 
   // Wikipedia extract — async fetch via the existing wd cache.
@@ -3285,6 +3309,22 @@ function _findFetchChipData(chipId) {
 // `loadChipOnMap` (when called via the Search-this-area pill with
 // requireInBounds) and the old `_searchAreaApply` in-memory path
 // want the same look.
+// Layer id the hillshade should be inserted before: the first layer
+// that is neither the background nor a raster (satellite) layer. The
+// old positional `layers[1]` broke once the satellite layer had been
+// inserted at index 0 — hillshade then landed BELOW `background` and
+// was invisible whenever satellite was toggled back off.
+function _hillshadeBeforeId(map) {
+  var layers = (map.getStyle() && map.getStyle().layers) || [];
+  for (var i = 0; i < layers.length; i++) {
+    var l = layers[i];
+    if (l.type !== 'background' && l.type !== 'raster' && l.type !== 'hillshade') {
+      return l.id;
+    }
+  }
+  return undefined;
+}
+
 function _showFindToast(text, opts) {
   opts = opts || {};
   var d = document.createElement('div');
@@ -3304,8 +3344,14 @@ function _showFindToast(text, opts) {
   }, opts.ms || 1800);
 }
 
+// Generation counter: tap chip A (slow) then chip B (fast) used to
+// leave A's "Loading …" placeholder stuck in the search box and let A's
+// late result overwrite B's carousel.
+var _chipLoadSeq = 0;
+
 async function loadChipOnMap(map, chipDef, opts) {
   opts = opts || {};
+  var mySeq = ++_chipLoadSeq;
   _findChipPaintActive(chipDef.id);
   // Stash the active chip on the find state so "Search this area"
   // (the pill that appears when the user pans the map) can re-fetch
@@ -3325,11 +3371,13 @@ async function loadChipOnMap(map, chipDef, opts) {
   try {
     var data = await _findFetchChipData(chipDef.id);
   } catch (err) {
+    console.warn('[streetzim] chip fetch failed:', err);
+    if (mySeq !== _chipLoadSeq) return;  // a newer chip owns the UI now
     if (searchInput) searchInput.placeholder = prevPlaceholder || '';
     _findChipPaintActive(null);
-    console.warn('[streetzim] chip fetch failed:', err);
     return;
   }
+  if (mySeq !== _chipLoadSeq) return;  // superseded while loading
   if (searchInput) searchInput.placeholder = prevPlaceholder || '';
 
   // Filter to the current map viewport. If that wipes everything,
@@ -3338,8 +3386,17 @@ async function loadChipOnMap(map, chipDef, opts) {
   var bounds = map.getBounds();
   var n = bounds.getNorth(), s = bounds.getSouth();
   var e = bounds.getEast(),  w = bounds.getWest();
+  // getBounds() returns unwrapped longitudes across the antimeridian
+  // (west=170, east=190) while records store [-180, 180] — test the
+  // record shifted by ±360° too, or a viewport over Fiji rejects
+  // every record with a negative longitude.
   function lonInside(lon) {
-    return w <= e ? (lon >= w && lon <= e) : (lon >= w || lon <= e);
+    if (w <= e) {
+      return (lon >= w && lon <= e)
+          || (lon + 360 >= w && lon + 360 <= e)
+          || (lon - 360 >= w && lon - 360 <= e);
+    }
+    return lon >= w || lon <= e;
   }
   var filtered = [];
   for (var i = 0; i < data.length; i++) {
@@ -3847,8 +3904,12 @@ function placeSearchPin(map, lat, lon, name, enrich) {
     contact.appendChild(a);
     any = true;
   }
-  if (enrich.ws) addLink(enrich.ws, '🌐', enrich.ws);
-  if (enrich.p)  addLink('tel:' + enrich.p.replace(/\s+/g, ''), '📞', enrich.p);
+  // Only http(s) links may come out of index data (a `javascript:`
+  // website value would otherwise execute on tap).
+  var wsHref = (typeof enrich.ws === 'string' && /^https?:\/\//i.test(enrich.ws.trim()))
+    ? enrich.ws.trim() : null;
+  if (wsHref) addLink(wsHref, '🌐', wsHref);
+  if (enrich.p)  addLink('tel:' + String(enrich.p).replace(/\s+/g, ''), '📞', String(enrich.p));
   if (enrich.soc && enrich.soc.length) {
     enrich.soc.forEach(function(s) {
       var host = s.toLowerCase();
@@ -4228,7 +4289,9 @@ function initSearch(map) {
       var score = textScore; // fallback if no coordinates
       if (item.a !== undefined && item.o !== undefined) {
         var dlat = item.a - clat;
-        var dlng = item.o - clng;
+        // Scale longitude by cos(lat) so the degree-space distance is
+        // isotropic; raw Δlng overstated E–W distances 2x at 60°N.
+        var dlng = (item.o - clng) * Math.cos(clat * Math.PI / 180);
         var dist = Math.sqrt(dlat * dlat + dlng * dlng);
         var viewSpan = Math.max(
           bounds.getNorth() - bounds.getSouth(),
@@ -4333,7 +4396,11 @@ function initSearch(map) {
   }
 
   function escapeHtml(s) {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Quotes too — the result is also placed inside data-* attributes,
+    // where an unescaped `"` in a place name broke out of the attribute.
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   function selectResult(el) {
@@ -5010,7 +5077,9 @@ function initWikiSidebar(map, config) {
 
     // Prefer the description baked into the geo-index (instant, no fetch). Fall
     // back to a wikidata chunk only if a caller already had one loaded.
-    var wd = (wdCache[getWdPrefix(qid)] || {})[qid] || null;
+    // Geo-index entries without a wikidata tag arrive with qid=null —
+    // getWdPrefix(null) threw and left the panel blank with no Back.
+    var wd = qid ? ((wdCache[getWdPrefix(qid)] || {})[qid] || null) : null;
     var desc = bakedDesc || (wd ? (wd.x || wd.d || '') : '');
     if (desc) {
       var dd = createEl('div', 'wiki-detail-desc', desc);
@@ -5216,8 +5285,11 @@ function initWikiSidebar(map, config) {
             var targetZoom = Math.max(map.getZoom(), 14);
             var isMobile = window.innerWidth <= 600;
             if (isMobile && panel.style.display === 'flex') {
-              var offsetLat = (map.getBounds().getNorth() - map.getBounds().getSouth()) * 0.2;
-              map.flyTo({ center: [lng, lat - offsetLat], zoom: targetZoom, duration: 1200 });
+              // Zoom-independent pixel offset (same fix as flyAndDetail):
+              // the old latitude-span shift flew kilometres south of the
+              // target when the map was zoomed out.
+              var _dy2 = Math.round((map.getCanvas().clientHeight || 600) * 0.22);
+              map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 1200, offset: [0, -_dy2] });
             } else {
               map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 1200 });
             }
@@ -6113,6 +6185,9 @@ function initRouting(map, config) {
 
   SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7) {
     var scale = this._index.cellScale;
+    // Longitude degrees shrink with latitude — compare in a locally
+    // metric space or the snap picks the wrong node at high latitudes.
+    var cosLat = Math.max(0.05, Math.cos(latE7 / 1e7 * Math.PI / 180));
     var candidates = [];
     for (var cid = 0; cid < this._index.numCells; cid++) {
       var la = this._index.cellLatIdx[cid];
@@ -6123,6 +6198,7 @@ function initRouting(map, config) {
       var lonMax = (lo + 1) * 10_000_000 / scale;
       var dlat = latE7 < latMin ? latMin - latE7 : latE7 > latMax ? latE7 - latMax : 0;
       var dlon = lonE7 < lonMin ? lonMin - lonE7 : lonE7 > lonMax ? lonE7 - lonMax : 0;
+      dlon *= cosLat;
       candidates.push([dlat * dlat + dlon * dlon, cid]);
     }
     candidates.sort(function(a, b) { return a[0] - b[0]; });
@@ -6133,7 +6209,7 @@ function initRouting(map, config) {
         var nlat = cell.nodesScaled[local * 2];
         var nlon = cell.nodesScaled[local * 2 + 1];
         var ndlat = nlat - latE7;
-        var ndlon = nlon - lonE7;
+        var ndlon = (nlon - lonE7) * cosLat;
         var dist = ndlat * ndlat + ndlon * ndlon;
         if (dist < bestDist) {
           bestDist = dist;
@@ -6256,7 +6332,11 @@ function initRouting(map, config) {
       })
       .catch(function(_spatialErr) {
         // Fall back to monolithic / v5 split / byte-chunked layouts.
-        fetchSzrgBlob(
+        // Returned so the in-flight latch below stays set until this
+        // fallback settles too — otherwise a second loadGraph() call
+        // during the (multi-second) monolithic fetch started a
+        // duplicate download and double-parsed the graph.
+        return fetchSzrgBlob(
             'routing-data/graph.bin',
             'routing-data/graph-chunk-manifest.json')
           .then(function(buffer) {
@@ -6335,6 +6415,14 @@ function initRouting(map, config) {
             Math.sin(dLon / 2) * Math.sin(dLon / 2);
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
+
+  // A* heuristic speed. MUST be >= the fastest edge speed the builder
+  // emits (create_osm_zim.SPEED: motorway = 100 km/h) or the heuristic
+  // over-estimates remaining time and the "optimal" pass silently
+  // returns suboptimal routes. Matches routing-worker.js and the
+  // Python references (tests/szrg_astar.py, cloud/route_cli.py).
+  var HEURISTIC_SPEED_KMH = 100;
+  var HEURISTIC_MPS = HEURISTIC_SPEED_KMH / 3.6;
 
   // Binary min-heap for A* priority queue
   function MinHeap() {
@@ -6637,9 +6725,10 @@ function initRouting(map, config) {
     var visited = new Set();
     visited.add(seedNode);
     var queue = [seedNode];
+    var head = 0;  // index-based dequeue: shift() is O(n) per pop
     var pops = 0;
-    while (queue.length > 0 && pops < maxPops) {
-      var current = queue.shift();
+    while (head < queue.length && pops < maxPops) {
+      var current = queue[head++];
       pops++;
       var edges = await graph.edgesOfNode(current);
       for (var k = 0; k < edges.length; k++) {
@@ -6730,7 +6819,7 @@ function initRouting(map, config) {
       startCoords[0] / 1e7,
       startCoords[1] / 1e7,
       endLat, endLon
-    ) / (80 / 3.6);
+    ) / HEURISTIC_MPS;
     open.push([h0, startNode]);
     var pops = 0;
     var weightTag = (GREEDY_WEIGHT > 1.0) ? ' greedy×' + GREEDY_WEIGHT : ' optimal';
@@ -6785,7 +6874,7 @@ function initRouting(map, config) {
           var targetCoords = await graph.nodeCoordsE7(target);
           var tLat = targetCoords[0] / 1e7;
           var tLon = targetCoords[1] / 1e7;
-          var h = haversine(tLat, tLon, endLat, endLon) / (80 / 3.6) * GREEDY_WEIGHT;
+          var h = haversine(tLat, tLon, endLat, endLon) / HEURISTIC_MPS * GREEDY_WEIGHT;
           open.push([newG + h, target]);
         }
       }
@@ -6827,10 +6916,13 @@ function initRouting(map, config) {
         if (pts) for (var j = 0; j < pts.length; j++) segment.push(pts[j]);
       }
       segment.push([toLon, toLat]);
-      path.unshift(segment);
+      path.push(segment);
 
       n = prev.get(n);
     }
+    // Segments were collected end→start; unshift-ing each one was
+    // O(n²) on long routes (tens of thousands of segments).
+    path.reverse();
 
     var roads = [];
     for (var si = segRev.length - 1; si >= 0; si--) {
@@ -6864,6 +6956,17 @@ function initRouting(map, config) {
   var __routingWorkerReady = null;       // Promise<boolean> | null
   var __routingWorkerSeq = 0;
   var __routingWorkerInflight = new Map();
+
+  // Settle every pending route/snap promise when the worker dies.
+  // Without this a crash mid-route left findRoute awaiting forever
+  // and the panel stuck on "Finding fastest route…" with no fallback.
+  function _failRoutingWorkerInflight(err) {
+    var pending = Array.from(__routingWorkerInflight.values());
+    __routingWorkerInflight.clear();
+    pending.forEach(function(p) {
+      try { p.reject(err); } catch (e) {}
+    });
+  }
 
   function initRoutingWorker() {
     if (__routingWorkerReady) return __routingWorkerReady;
@@ -6948,6 +7051,14 @@ function initRouting(map, config) {
           try { __routingWorker.terminate(); } catch (e) {}
           __routingWorker = null;
         }
+        // Reject in-flight requests so their callers fall back to the
+        // main-thread engine, and pin the ready state to "failed" so
+        // later routes don't await a promise that already resolved
+        // true for a worker that no longer exists.
+        _failRoutingWorkerInflight(new Error('routing worker crashed: '
+          + (err.message || err.type || 'unknown')));
+        __routingWorkerReady = Promise.resolve(false);
+        window.__streetzim_routingWorkerReady = false;
         resolve(false);
       });
       var workerBaseUrl;
@@ -7048,13 +7159,24 @@ function initRouting(map, config) {
 
   function findRouteViaWorker(startNode, endNode) {
     if (!__routingWorker) return Promise.reject(new Error('worker not ready'));
+    // Only the newest route matters: an origin/dest change while a
+    // route is still computing used to leave the old search grinding
+    // in the worker alongside the new one (both slowed down, both
+    // competed for the cell budget). computeAndDrawRoute already
+    // ignores the stale result via routeSeq, so cancelling is safe.
+    cancelInFlightRoute();
+    // ?route=full / ?route=two-pass test override — the main-thread
+    // engine honoured it but the worker was always sent options:{}.
+    var override = null;
+    try { override = new URLSearchParams(location.search).get('route'); }
+    catch (e) {}
     var id = ++__routingWorkerSeq;
     return new Promise(function(resolve, reject) {
       __routingWorkerInflight.set(id, { resolve: resolve, reject: reject });
       __routingWorker.postMessage({
         cmd: 'route', id: id,
         start: startNode, end: endNode,
-        options: {},
+        options: override ? { route: override } : {},
       });
     });
   }
@@ -7205,7 +7327,7 @@ function initRouting(map, config) {
       nodesScaled[startNode * 2] / 1e7,
       nodesScaled[startNode * 2 + 1] / 1e7,
       endLat, endLon
-    ) / (80 / 3.6);
+    ) / HEURISTIC_MPS;
     open.push([h0, startNode]);
 
     while (open.size() > 0) {
@@ -7235,7 +7357,7 @@ function initRouting(map, config) {
           prevEdge[target] = i;
           var tLat = nodesScaled[target * 2] / 1e7;
           var tLon = nodesScaled[target * 2 + 1] / 1e7;
-          var h = haversine(tLat, tLon, endLat, endLon) / (80 / 3.6);
+          var h = haversine(tLat, tLon, endLat, endLon) / HEURISTIC_MPS;
           open.push([newG + h, target]);
         }
       }
@@ -7280,10 +7402,11 @@ function initRouting(map, config) {
         }
       }
       segment.push([toLon, toLat]);
-      path.unshift(segment);
+      path.push(segment);
 
       n = p;
     }
+    path.reverse();  // collected end→start
 
     // Coalesce consecutive same-name segments into named roads. We also
     // coalesce by maneuver flags so that e.g. a multi-segment unnamed
@@ -7430,7 +7553,12 @@ function initRouting(map, config) {
         clearInterval(retry);
         if (which === 'origin') setOriginFromLatLon(lat, lon, label);
         else setDestFromLatLon(lat, lon, label);
-      } else if (tries > 300) {  // 30 s
+      } else if (!loadGraphInflight || tries > 6000) {
+        // The load settled without producing a graph (fetch/parse
+        // failed) — or a 10-minute hard cap. Used to give up after a
+        // fixed 30 s, which was shorter than a cold country-scale
+        // index load over Kiwix on iOS, so the pick was dropped even
+        // though the graph arrived a few seconds later.
         clearInterval(retry);
         statusEl.textContent = 'Could not load routing data';
       }
@@ -8502,9 +8630,12 @@ function initRouting(map, config) {
             { enableHighAccuracy: true, timeout: 15000, maximumAge: 2000 }
           );
         } catch (e) {
+          // Full teardown via exit(): restores the hidden panel /
+          // controls / search box and the saved camera. Before this
+          // only the HUD was hidden, leaving the page with no UI and
+          // no way back short of a reload.
+          api.exit();
           setStatus('Could not start location tracking');
-          state.active = false;
-          hudEl.classList.remove('visible');
         }
       },
       exit: function() {
@@ -8685,6 +8816,7 @@ function initRouting(map, config) {
     /// where we just want to centre the map on a coordinate.
     flyTo: function(opts) {
       if (!map) return;
+      opts = opts || {};
       var easeOpts = {};
       if (typeof opts.lat === "number" && typeof opts.lon === "number") {
         easeOpts.center = [opts.lon, opts.lat];
@@ -8755,7 +8887,9 @@ function initRouting(map, config) {
           id: layerLabels, type: "symbol", source: src,
           layout: {
             "text-field": ["get", "label"],
-            "text-font": ["Open Sans Bold"],
+            // Must match the fontstack baked into the ZIM (see makeStyle);
+            // "Open Sans Bold" 404'd every glyph request and labels never drew.
+            "text-font": ["OpenSansBold"],
             "text-size": 12,
             "text-offset": [0, 1.2],
             "text-anchor": "top",
@@ -8769,7 +8903,10 @@ function initRouting(map, config) {
           }
         });
         // Tap-to-popup with label + optional description.
-        map.on("click", layerDots, function(e) {
+        // Handlers are kept on the api object so clearPlaces can
+        // detach them; registering afresh on every showPlaces →
+        // clearPlaces → showPlaces cycle stacked N popups per tap.
+        var onDotClick = function(e) {
           var f = e.features && e.features[0];
           if (!f) return;
           var props = f.properties;
@@ -8785,9 +8922,15 @@ function initRouting(map, config) {
             .setLngLat(f.geometry.coordinates)
             .setHTML(html)
             .addTo(map);
-        });
-        map.on("mouseenter", layerDots, function() { map.getCanvas().style.cursor = "pointer"; });
-        map.on("mouseleave", layerDots, function() { map.getCanvas().style.cursor = ""; });
+        };
+        var onDotEnter = function() { map.getCanvas().style.cursor = "pointer"; };
+        var onDotLeave = function() { map.getCanvas().style.cursor = ""; };
+        map.on("click", layerDots, onDotClick);
+        map.on("mouseenter", layerDots, onDotEnter);
+        map.on("mouseleave", layerDots, onDotLeave);
+        window.streetzimRouting.__placesHandlers = {
+          click: onDotClick, mouseenter: onDotEnter, mouseleave: onDotLeave
+        };
       }
       if (opts.fitBounds !== false && features.length >= 1) {
         var b = new maplibregl.LngLatBounds(
@@ -8813,6 +8956,13 @@ function initRouting(map, config) {
     /// Safe to call when nothing is set.
     clearPlaces: function() {
       var src = "mcpzim-places";
+      var h = window.streetzimRouting.__placesHandlers;
+      if (h) {
+        Object.keys(h).forEach(function(type) {
+          try { map.off(type, "mcpzim-places-dots", h[type]); } catch (e) {}
+        });
+        window.streetzimRouting.__placesHandlers = null;
+      }
       ["mcpzim-places-labels", "mcpzim-places-dots"].forEach(function(id) {
         if (map.getLayer(id)) map.removeLayer(id);
       });
@@ -8921,6 +9071,10 @@ function initRouting(map, config) {
         }
         if (!graph) loadGraph();
         waitFor(function() { return !!graph; }, function() {
+          // Drop any previous route first — otherwise the lastRoute
+          // poll below resolves immediately on the OLD route and drive
+          // mode starts before the new endpoints have been routed.
+          lastRoute = null;
           try {
             setOriginFromLatLon(origLat, origLon, "Start");
             setDestFromLatLon(destLat, destLon, "Destination");

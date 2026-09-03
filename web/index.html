@@ -24,8 +24,10 @@
   const analytics = getAnalytics(app);
 
   // Track clicks on download, torrent, and details links.
-  // Uses pointerdown so the event fires even when the browser navigates away.
-  document.addEventListener('pointerdown', function(e) {
+  // `click` (not pointerdown) so keyboard activation counts and
+  // right-click / drag-start don't; GA4 uses sendBeacon, so the event
+  // survives the navigation.
+  document.addEventListener('click', function(e) {
     var a = e.target.closest('a[data-track]');
     if (!a) return;
     try {
@@ -156,7 +158,7 @@
     font-weight: 600;
     letter-spacing: 0.02em;
     text-transform: uppercase;
-    color: var(--ink-muted);
+    color: var(--text-dim);
     border-top: 1px solid var(--border);
     padding-top: 18px;
   }
@@ -395,7 +397,8 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
     if (!el) return;
     var m = src.match(/stamp:\s*"([^"]+)"/);
     if (m) el.textContent = m[1];
-  });
+  })
+  .catch(function() { /* offline / file:// preview — stamp stays "…" */ });
 </script>
 
     <div class="maps">
