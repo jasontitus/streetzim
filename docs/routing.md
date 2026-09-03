@@ -311,9 +311,14 @@ per route in node: 372 km pair 2.3 s → 1.7 s (and a 4 % better
 route, 20,004 s vs 20,872 s); 320 km 2.3 s → 1.2 s; 331 km 1.8 s →
 0.7 s (now finishes in the optimal pass); two unreachable ~400 km
 pairs 3.2 s / 2.7 s → 1.7 s / 1.4 s; 10-route total 13.8 s → 7.6 s.
-Twenty random pairs up to 60 km: 4.4 s → 3.7 s wall for the whole
-run including init. Two observations for future work, not changed
-on this branch:
+Twenty random pairs up to 60 km (seed 42), back to back on an idle
+machine: 4.0 s → 3.0 s wall for the whole run including init, median
+per route 24 ms → 13 ms. Two pairs snap both ends to the same node
+(both points at sea) and one is unreachable by car (the old engine
+"routed" it over a footway; the Python reference confirms no
+drivable path) — the remaining 17 all finish in the optimal pass
+and match the Python optimum exactly. Two observations for future
+work, not changed on this branch:
 
 * The true optimum needs 5.7 M expansions on SD → Eureka and the
   64 MB cell budget then thrashes (700 k cell misses, 349 s in node);
