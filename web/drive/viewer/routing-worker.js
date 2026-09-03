@@ -40,13 +40,19 @@ var activeRoutes = new Set();
 var HEURISTIC_SPEED_KMH = 100;
 var HEURISTIC_MPS = HEURISTIC_SPEED_KMH / 3.6;
 
-// Pop budgets per phase. The sparse visited-state table costs ~40 B
-// per visited node (see NodeTable), so even the greedy full-graph
-// budget stays well under 50 MB of routing state.
-var POP_LIMIT_FULL_OPTIMAL = 200000;
-var POP_LIMIT_FULL_GREEDY = 400000;
-var POP_LIMIT_HW_OPTIMAL = 50000;
-var POP_LIMIT_HW_GREEDY = 100000;
+// Pop budgets per phase. The sparse visited-state table costs ~42 B
+// per visited node (see NodeTable) plus ~12 B per heap entry, so the
+// greedy full-graph budget below is ~40 MB of table + ~35 MB of heap
+// at worst — where the old Map-based state hit that at 200k pops.
+// Measured on the Silicon Valley ZIM (894k nodes): at 200k the optimal
+// pass bailed on 7 of 16 random 5-60 km metro pairs and one pair fell
+// through greedy to two-pass with a 70 % longer route; at these
+// budgets every pair completes in the optimal pass. ~800k pops/s on a
+// desktop core; budget the worst case at a few seconds on a phone.
+var POP_LIMIT_FULL_OPTIMAL = 500000;
+var POP_LIMIT_FULL_GREEDY = 1000000;
+var POP_LIMIT_HW_OPTIMAL = 150000;
+var POP_LIMIT_HW_GREEDY = 300000;
 
 // Profiling — reset at route start, emitted as a single console.warn
 // on completion so the user (or smoke harness) gets one consolidated
@@ -75,8 +81,15 @@ function _profileReset() {
     edgeReqs: 0,      // node expansions (pops that actually scanned edges)
   };
 }
-function _profileEmit(routeOk, totalCoords) {
-  if (!_profile) return;
+// Emits `prof` (a specific route's profile object). Routes overlap
+// briefly when a new one cancels its predecessor, so the predecessor
+// must only clear the global slot if it still owns it — otherwise the
+// successor's profile went missing and the predecessor's phases were
+// pushed into the successor's record.
+function _profileEmit(prof, routeOk, totalCoords) {
+  if (!prof) return;
+  var _profileWas = _profile;
+  _profile = prof;
   var total = nowMs() - _profile.routeT0;
   // Pack into a flat object the main thread can format/log. Worker
   // console messages aren't captured by puppeteer's page.on('console')
@@ -104,7 +117,9 @@ function _profileEmit(routeOk, totalCoords) {
   };
   console.warn('[route-profile worker]', JSON.stringify(summary));
   try { self.postMessage(summary); } catch (e) {}
-  _profile = null;
+  // Restore whichever profile was current (the successor's, if this is
+  // a cancelled predecessor winding down); clear only if it was ours.
+  _profile = (_profileWas === prof) ? null : _profileWas;
 }
 
 self.onmessage = function(e) {
@@ -194,6 +209,7 @@ function handleRoute(msg) {
     id: msg.id,
     options: msg.options || {},
     bailed: false,
+    profile: _profile,
     cancelled: function() { return cancelledRoutes.has(msg.id); },
   };
   findRoute(msg.start, msg.end, ctx)
@@ -204,7 +220,7 @@ function handleRoute(msg) {
       var wasCancelled = cancelledRoutes.has(msg.id);
       cancelledRoutes.delete(msg.id);
       activeRoutes.delete(msg.id);
-      _profileEmit(!!result, result && result.coords ? result.coords.length : 0);
+      _profileEmit(ctx.profile, !!result, result && result.coords ? result.coords.length : 0);
       // ok:true even when result is null: the search ran to completion
       // and there is no route (or every phase exhausted its budget).
       // Reporting ok:false here made the bridge treat it as an engine
@@ -220,7 +236,7 @@ function handleRoute(msg) {
       var wasCancelled = cancelledRoutes.has(msg.id);
       cancelledRoutes.delete(msg.id);
       activeRoutes.delete(msg.id);
-      _profileEmit(false, 0);
+      _profileEmit(ctx.profile, false, 0);
       self.postMessage({
         type: 'route-done', id: msg.id, ok: false,
         cancelled: wasCancelled,
@@ -246,6 +262,11 @@ function handleSnap(msg) {
       self.postMessage({
         type: 'snap-done', id: msg.id, error: String(err),
       });
+    })
+    .then(function() {
+      // The bridge's cancel sweep covers snap ids too; drop ours so the
+      // set doesn't grow by one entry per snap over a long session.
+      cancelledRoutes.delete(msg.id);
     });
 }
 
@@ -311,6 +332,13 @@ function isHighwayClass(classAccess) {
   var cls = classAccess & 0x1F;
   return cls >= 1 && cls <= 6;
 }
+// class_access bit 9: no motor vehicles (footway / path / steps /
+// cycleway / access=private …). Set by create_osm_zim.py ≥ 2026-09;
+// older ZIMs have it clear everywhere, so this is a no-op on them.
+// The driving profile must never expand such an edge — before the
+// builder marked them, a 20 m staircase at 3 km/h out-scored any road
+// detour over ~200 m and cars were routed down stairs.
+var NO_MOTOR_BIT = 0x200;
 
 // --- Sparse visited-node state -------------------------------------
 // Open-addressing hash table keyed by global node id with parallel
@@ -933,6 +961,7 @@ SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7) {
   for (var i = 0; i < candidates.length && candidates[i][0] <= bestDist; i++) {
     var cell = await this._ensureCell(candidates[i][1]);
     var v2 = !!cell.nodesScaled;
+    var cellAdj = cell.cellAdj, edges = cell.edges;
     for (var local = 0; local < cell.nodeCount; local++) {
       var globalNode = v2 ? cell.baseNode + local : cell.cellNodesGlobal[local];
       var nlat = v2 ? cell.nodesScaled[local * 2] : this._index.nodeLatE7(globalNode);
@@ -941,6 +970,17 @@ SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7) {
       var ndlon = (nlon - lonE7) * cosLat;
       var dist = ndlat * ndlat + ndlon * ndlon;
       if (dist < bestDist) {
+        // Skip nodes whose outgoing edges are ALL no-motor-vehicle (a
+        // footpath vertex next to the road). A node with no outgoing
+        // edges at all stays eligible — it's the end of a one-way and a
+        // perfectly good destination. Checked lazily, only when a node
+        // would improve the best, so the scan's per-node cost stays tiny.
+        var eStart = cellAdj[local], eEnd = cellAdj[local + 1];
+        var carOk = (eStart === eEnd);
+        for (var ei = eStart; ei < eEnd; ei++) {
+          if (!(edges[ei * 5 + 4] & NO_MOTOR_BIT)) { carOk = true; break; }
+        }
+        if (!carOk) continue;
         bestDist = dist;
         bestNode = globalNode;
         bestLat = nlat;
@@ -1052,6 +1092,9 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
   var weightTag = (GREEDY_WEIGHT > 1.0) ? ' greedy×' + GREEDY_WEIGHT : ' optimal';
   var label = (highwayOnly ? 'A* highway-only' : 'A* full') + weightTag;
   var phaseT0 = nowMs();
+  // Per-route profile: phases must land in THIS route's record even if
+  // a newer route has since replaced the global `_profile`.
+  var prof = (ctx && ctx.profile) || _profile;
 
   // Time-budget yielding. Decoupled from progress reporting:
   // - report every 2k pops (cheap; main thread can re-render the
@@ -1073,13 +1116,13 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     if ((pops & 63) === 0 && nowMs() - lastYield > 50) {
       var yT0 = nowMs();
       await new Promise(function(r) { setTimeout(r, 0); });
-      if (_profile) {
-        _profile.yields++;
-        _profile.yieldMs += nowMs() - yT0;
+      if (prof) {
+        prof.yields++;
+        prof.yieldMs += nowMs() - yT0;
       }
       lastYield = nowMs();
       if (ctx && ctx.cancelled && ctx.cancelled()) {
-        if (_profile) _profile.phases.push({
+        if (prof) prof.phases.push({
           label: label, pops: pops, ms: nowMs() - phaseT0,
           bailed: true, cancelled: true,
         });
@@ -1088,7 +1131,7 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     }
     if (pops > POP_LIMIT) {
       debugStats(ctx, label + ' BAIL (pop limit ' + POP_LIMIT + ')', pops);
-      if (_profile) _profile.phases.push({
+      if (prof) prof.phases.push({
         label: label, pops: pops, ms: nowMs() - phaseT0,
         bailed: true,
       });
@@ -1113,7 +1156,9 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     var eEnd = cellAdj[local + 1];
     for (var ei = cellAdj[local]; ei < eEnd; ei++) {
       var base = ei * 5;
-      if (highwayOnly && !isHighwayClass(edges[base + 4])) continue;
+      var classAccess = edges[base + 4];
+      if (classAccess & NO_MOTOR_BIT) continue;
+      if (highwayOnly && !isHighwayClass(classAccess)) continue;
       var speedDist = edges[base + 1];
       var speed = speedDist >>> 24;
       if (speed === 0) continue;
@@ -1153,7 +1198,7 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     }
   }
   debugStats(ctx, label + ' done', pops);
-  if (_profile) _profile.phases.push({
+  if (prof) prof.phases.push({
     label: label, pops: pops, ms: nowMs() - phaseT0,
     bailed: false, visited: table.size, tableBytes: table.bytes(),
   });
@@ -1264,6 +1309,7 @@ async function findNearestHighwayNode(seedNode, maxPops) {
       if (isHighwayClass(edges[ei * 5 + 4])) return current;
     }
     for (var e2 = eStart; e2 < eEnd; e2++) {
+      if (edges[e2 * 5 + 4] & NO_MOTOR_BIT) continue;
       var target = edges[e2 * 5];
       if (!visited.has(target)) {
         visited.add(target);
@@ -1338,7 +1384,7 @@ async function findRoute(startNode, endNode, ctx) {
   var endLat = endCoords[0] / 1e7;
   var endLon = endCoords[1] / 1e7;
   var crow = haversine(startLat, startLon, endLat, endLon);
-  if (_profile) _profile.crowKm = crow / 1000;
+  if (ctx && ctx.profile) ctx.profile.crowKm = crow / 1000;
   var override = ctx && ctx.options && ctx.options.route;
   var isLong = crow > 100000;
 

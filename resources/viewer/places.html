@@ -1105,7 +1105,11 @@ function _sortAndShow(records) {
   } else if (state._autoExpanded) {
     countLine += ' (none in map area — showing all)';
   }
-  setStatus(countLine + '.');
+  countLine += '.';
+  if (state.originMode === 'none' && state.originNote) {
+    countLine += ' — ' + state.originNote;
+  }
+  setStatus(countLine);
   // Show the sort row only when there's a meaningful number to sort.
   if (els.sortRow) {
     els.sortRow.hidden = state.results.length < 2;
@@ -1265,47 +1269,65 @@ function requestGPS() {
   if (!navigator.geolocation) {
     state.origin = null;
     state.originMode = 'none';
+    state.originNote = 'No geolocation on this device — pick a place under "Search near" to sort by distance.';
     // Re-run so the chip / query that triggered this isn't dropped.
     rerunQuery();
     return;
   }
   setStatus('Getting your location…');
+  // Ownership: while the prompt is up the user may pick "Search near
+  // <place>" or a deep link may install a viewport origin. Those set
+  // originMode to 'custom' / 'viewport'; none of the callbacks below
+  // may then clobber the origin they chose.
+  function gpsStillWanted() {
+    return state.originMode === 'gps' || state.originMode === 'none';
+  }
   // The 8 s geolocation timeout only starts once permission is
   // granted; an unanswered permission prompt would otherwise leave
   // "Getting your location…" up forever with the query never run.
-  let settled = false;
+  let gaveUp = false;
   const giveUp = setTimeout(() => {
-    if (settled) return;
-    settled = true;
-    state.origin = null;
+    gaveUp = true;
+    if (!gpsStillWanted() || state.origin) return;
     state.originMode = 'none';
+    state.originNote = 'Location not available yet — sorted by name.';
     rerunQuery();
   }, 12000);
   navigator.geolocation.getCurrentPosition(
     pos => {
-      if (settled) return;
-      settled = true;
       clearTimeout(giveUp);
+      // A late grant (after the 12 s give-up) is still welcome as long
+      // as nobody picked another origin in the meantime.
+      if (!gpsStillWanted()) return;
       state.origin = { lat: pos.coords.latitude, lon: pos.coords.longitude };
       state.originMode = 'gps';
       state.originLabel = 'My location';
+      state.originNote = '';
       els.near.value = 'My location';
       rerunQuery();
     },
     err => {
-      if (settled) return;
-      settled = true;
       clearTimeout(giveUp);
-      state.origin = null;
+      if (!gpsStillWanted() || state.origin) return;
       state.originMode = 'none';
-      // Run the pending query (name-sorted), then explain why there
-      // are no distances. Before this the first chip tap / typed
-      // query after a denial was silently lost.
-      rerunQuery();
-      setStatus(`Location unavailable: ${err.message}. Pick a place under "Search near" to sort by distance.`);
+      // Kept in state and appended to the result count line by
+      // _sortAndShow, because a plain setStatus here was overwritten
+      // a moment later by the query's own status text.
+      state.originNote = `Location unavailable (${err.message}) — sorted by name. Pick a place under "Search near" to sort by distance.`;
+      if (!gaveUp) rerunQuery();  // the give-up timer already re-ran it
+      else applyStatusNote();
     },
     { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 }
   );
+}
+
+// Re-apply the origin note to the current status line (used when the
+// note changes after the results have already been rendered).
+function applyStatusNote() {
+  if (state.originNote && els.statusText && state.results.length) {
+    const base = els.statusText.textContent.split(' — ')[0];
+    setStatus(base + ' — ' + state.originNote);
+  }
 }
 
 // Lazy trigger — called before running a chip or name query. When the

@@ -64,7 +64,9 @@ Bit layout of `class_access` (little-endian u32):
 | bits   | meaning                                                    |
 |--------|------------------------------------------------------------|
 | 0..4   | road class ordinal (see table below) — 5 bits, 32 values   |
-| 5..7   | access flags (bit 5=no-foot, bit 6=no-bicycle, bit 7=oneway) |
+| 5..7   | access flags (bit 5=no-foot, bit 6=no-bicycle, bit 7=oneway — set for both `oneway=yes` and reversed `oneway=-1` edges) |
+| 8      | junction=roundabout / circular / mini_roundabout           |
+| 9      | no motor vehicles: footway/path/steps/pedestrian/cycleway/bridleway/corridor/escape/busway, or access/vehicle/motor_vehicle ∈ {no, private} without an explicit motor_vehicle allow. The car router never expands these edges (routing-worker.js, index.html, tests/szrg_astar.py, cloud/route_cli.py). Builders before 2026-09 leave it clear. |
 | 8..31  | reserved — zero-fill, room for future use                  |
 
 Road-class ordinals (same 16 classes the speed table uses, packed):

@@ -64,9 +64,25 @@ fi
 echo "validation passed."
 
 # --- 2. ia upload (same pattern as overture-rollout-redo.sh) ---
-"$IA" upload "streetzim-${id}" "$(basename "$dated")" --retries 5 \
-    || echo "WARN upload reported issues for ${id} — continuing"
+# A failed upload must be FATAL: continuing used to bump the item date,
+# stamp features, prune the previous good ZIMs and redeploy the site —
+# all on top of a file that never arrived — and exit 0 so every wrapper
+# reported success.
+if ! "$IA" upload "streetzim-${id}" "$(basename "$dated")" --retries 5; then
+    echo "FATAL ${id}: ia upload failed for $(basename "$dated") — nothing pruned, site not redeployed" >&2
+    exit 3
+fi
 sleep 30
+
+# --- 2b. verify the remote listing matches the local file (size) ---
+local_size=$(stat -c %s "$dated" 2>/dev/null || stat -f %z "$dated")
+remote_size=$("$IA" metadata "streetzim-${id}" 2>/dev/null \
+    | "$PYTHON" -c "import sys, json; m=json.load(sys.stdin); print(next((f.get('size') for f in m.get('files', []) if f.get('name')==sys.argv[1]), ''))" \
+        "$(basename "$dated")")
+if [ -n "$remote_size" ] && [ "$remote_size" != "$local_size" ]; then
+    echo "FATAL ${id}: archive.org lists $(basename "$dated") as ${remote_size} B but local is ${local_size} B — partial upload?" >&2
+    exit 3
+fi
 
 # --- 3. metadata modify ---
 "$IA" metadata "streetzim-${id}" --modify="date:${today}" || true
@@ -100,6 +116,17 @@ while [ "$(date +%s)" -lt "$metadata_deadline" ]; do
 done
 if [ "$(date +%s)" -ge "$metadata_deadline" ]; then
     echo "WARN ${id}: metadata still didn't list ${target_file} after 3 min — cleanup may be stale"
+fi
+
+# --- 4c. refresh the site's torrent for this region from the LOCAL file
+# so web/torrents/<id>.torrent names the file the Download button links
+# (the committed torrents had drifted several builds behind and their
+# webseeds pointed at files the keep-2 prune below had already deleted).
+if [ -f cloud/build_torrent.py ]; then
+    "$PYTHON" cloud/build_torrent.py \
+        "https://archive.org/download/streetzim-${id}/$(basename "$dated")" \
+        "web/torrents/${id}.torrent" --local "$dated" \
+        || echo "WARN torrent refresh failed for ${id} (site will hide the Torrent button)"
 fi
 
 # --- 5. prune old dated ZIMs (keep last 2) ---

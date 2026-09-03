@@ -59,6 +59,7 @@ from tests.szrg_astar import R_EARTH, HEURISTIC_SPEED_MPS, haversine_m
 # would actually use.
 CLASS_ORD_MASK = 0x1F
 HIGHWAY_TIER_ORDS = frozenset({1, 2, 3, 4, 5, 6})  # motorway..primary_link
+NO_MOTOR_BIT = 0x200  # class_access bit 9 — see docs/driving-mode-road-class-warnings.md
 
 
 def parse_lat_lon(s: str) -> tuple[float, float]:
@@ -163,6 +164,8 @@ def find_route_filtered(
         closed[current] = 1
         current_g = gscore[current]
         for (target, speed_dist, _gi, _ni, class_access) in g.edges_of_node(current):
+            if class_access & NO_MOTOR_BIT:
+                continue  # car profile: footway / steps / private (bit 9)
             if highway_only and (class_access & CLASS_ORD_MASK) not in HIGHWAY_TIER_ORDS:
                 continue
             if closed[target]:

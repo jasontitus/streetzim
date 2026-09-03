@@ -38,13 +38,11 @@ upload_and_deploy() {
     if [ "$src" != "$dated" ]; then
         cp "$src" "$dated"
     fi
-    log "Uploading ${dated} → streetzim-${id}..."
-    ia upload "streetzim-${id}" "$dated" --retries 5 >>"$ROLLOUT_LOG" 2>&1 || \
-        log "Upload reported issues for ${id} — continuing"
-    sleep 30
-    ia metadata "streetzim-${id}" --modify="date:${today}" >>"$ROLLOUT_LOG" 2>&1 || true
-    python3 web/generate.py --deploy >>"$ROLLOUT_LOG" 2>&1 || \
-        log "Web deploy failed for ${id} — continuing"
+    log "Validating + uploading ${dated} → streetzim-${id}..."
+    if ! bash cloud/upload_validated.sh "$id" "$dated" >>"$ROLLOUT_LOG" 2>&1; then
+        log "FAIL upload ${id} — see ${ROLLOUT_LOG}"
+        return 1
+    fi
     log "DONE ${id}"
 }
 

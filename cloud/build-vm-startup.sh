@@ -16,6 +16,20 @@ set -euxo pipefail
 
 LOG=/var/log/streetzim-build.log
 exec > >(tee -a $LOG) 2>&1
+chmod 640 "$LOG" 2>/dev/null || true
+
+# Self-delete on EVERY exit path. Under `set -e` a failed step used to
+# skip the delete at the bottom of the script and the VM billed forever.
+# Set STREETZIM_KEEP_VM=1 in metadata to keep a failed VM for debugging.
+_self_delete() {
+  local rc=$?
+  echo "=== exit code $rc at $(date) ==="
+  if [ "${STREETZIM_KEEP_VM:-0}" != "1" ] && [ -n "${INSTANCE_NAME:-}" ] && [ -n "${ZONE:-}" ]; then
+    echo "=== Self-deleting VM $INSTANCE_NAME in $ZONE ==="
+    gcloud --quiet compute instances delete "$INSTANCE_NAME" --zone="$ZONE" || true
+  fi
+}
+trap _self_delete EXIT
 
 echo "=== StreetZim build VM started: $(date) ==="
 
@@ -44,8 +58,12 @@ fetch_meta() { curl -sf -H "Metadata-Flavor: Google" "$META/$1"; }
 REGION_ID=$(fetch_meta region-id)
 REGION_NAME=$(fetch_meta region-name)
 REGION_BBOX=$(fetch_meta region-bbox)
+# Secrets: turn xtrace off around them — `set -x` printed
+# `+ IA_SECRET=<secret>` into the world-readable build log.
+set +x
 IA_ACCESS=$(fetch_meta ia-access-key)
 IA_SECRET=$(fetch_meta ia-secret-key)
+set -x
 DESCRIPTION=$(fetch_meta description | python3 -c "import sys, urllib.parse; print(urllib.parse.unquote(sys.stdin.read()))")
 
 INSTANCE_NAME=$(curl -sf -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/name)
@@ -140,11 +158,14 @@ fi
 # Configure Archive.org credentials
 # ----------------------------------------------------------------------------
 mkdir -p ~/.config/internetarchive
+set +x
 cat > ~/.config/internetarchive/ia.ini <<EOF
 [s3]
 access = $IA_ACCESS
 secret = $IA_SECRET
 EOF
+chmod 600 ~/.config/internetarchive/ia.ini
+set -x
 
 # ----------------------------------------------------------------------------
 # Run the build
@@ -220,6 +241,14 @@ push_caches
 # ----------------------------------------------------------------------------
 # Upload finished ZIM to Archive.org
 # ----------------------------------------------------------------------------
+echo "=== Validating before upload ==="
+# Same gate every other release path enforces; a VM-built ZIM that
+# skipped it would become "live" by date on the shared item anyway.
+if ! python3 cloud/validate_zim.py "$ZIM_FILE"; then
+  echo "FATAL: validate_zim.py rejected $ZIM_FILE — not uploading"
+  exit 4
+fi
+
 echo "=== Uploading to Archive.org ==="
 ITEM_ID="streetzim-${REGION_ID}"
 TITLE="StreetZim - Offline Map of $REGION_NAME"
@@ -240,9 +269,4 @@ ia upload "$ITEM_ID" "$ZIM_FILE" \
 gcloud storage cp "$ZIM_FILE" "gs://streetzim-cache/output/$ZIM_FILE"
 
 echo "=== All done: $(date) ==="
-
-# ----------------------------------------------------------------------------
-# Self-delete the VM
-# ----------------------------------------------------------------------------
-echo "=== Self-deleting VM $INSTANCE_NAME in $ZONE ==="
-gcloud --quiet compute instances delete "$INSTANCE_NAME" --zone="$ZONE"
+# The EXIT trap at the top of the script deletes the VM.

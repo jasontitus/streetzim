@@ -70,7 +70,9 @@ def generate_tile(args):
     import io
 
     tile_path = os.path.join(output_dir, str(z), str(tile_x), f"{tile_y}.webp")
-    if os.path.isfile(tile_path):
+    # A lossless WebP of a real terrain tile is never under ~40 bytes;
+    # anything smaller is a truncated write from an interrupted worker.
+    if os.path.isfile(tile_path) and os.path.getsize(tile_path) >= 40:
         with counter_lock:
             counter.value += 1
         return True  # cached
@@ -97,9 +99,17 @@ def generate_tile(args):
     for dem_url in dem_urls:
         try:
             with rasterio.open(dem_url) as src:
+                # Each DEM is warped into its OWN buffer and composited
+                # where it has data. Reprojecting every DEM straight into
+                # dst_arr re-initialised the whole destination to nodata
+                # each call (init_dest_nodata defaults to True), so only
+                # the LAST DEM survived and every tile straddling a 1°
+                # line got a zero-filled band — the seam family the
+                # fix_boundary_* scripts were written to repair.
+                part = np.full((tile_size, tile_size), -10000, dtype=np.float32)
                 reproject(
                     source=rasterio.band(src, 1),
-                    destination=dst_arr,
+                    destination=part,
                     src_transform=src.transform,
                     src_crs=src.crs,
                     dst_transform=dst_transform,
@@ -107,8 +117,18 @@ def generate_tile(args):
                     resampling=Resampling.bilinear,
                     dst_nodata=-10000,
                 )
-        except Exception:
-            continue  # DEM doesn't exist (ocean tile)
+                has = part > -9999
+                dst_arr[has] = part[has]
+        except rasterio.errors.RasterioIOError as e:
+            msg = str(e)
+            if "404" in msg or "does not exist" in msg or "No such file" in msg:
+                continue  # DEM doesn't exist (ocean cell)
+            # Throttling / network error: writing a zero-filled tile now
+            # would cache the blank forever (the run skips existing
+            # files). Leave the tile absent so a re-run regenerates it.
+            print(f"\n  transient DEM read error for z{z}/{tile_x}/{tile_y}: {msg[:120]}",
+                  flush=True)
+            return False
 
     # Skip all-nodata tiles (open ocean)
     if (dst_arr <= -9999).all():
@@ -121,9 +141,12 @@ def generate_tile(args):
     rgb = _elev_to_terrain_rgb(dst_arr)
     img = Image.fromarray(rgb, "RGB")
 
-    # Save as lossless WebP
+    # Save as lossless WebP — atomically, so a spot-instance kill mid-write
+    # can't leave a truncated file that every later run treats as done.
     os.makedirs(os.path.dirname(tile_path), exist_ok=True)
-    img.save(tile_path, "WEBP", lossless=True)
+    tmp_path = f"{tile_path}.{os.getpid()}.tmp"
+    img.save(tmp_path, "WEBP", lossless=True)
+    os.replace(tmp_path, tile_path)
 
     with counter_lock:
         counter.value += 1

@@ -55,6 +55,11 @@ upload_zim() {
   fi
 
   local desc="${intro}${COMMON_DESC_FOOTER}"
+  echo ">>> Validating $zim_file"
+  if ! python3 cloud/validate_zim.py "$zim_file"; then
+    echo ">>> FATAL: validator rejected $zim_file — not uploading"
+    return 4
+  fi
   echo ">>> Uploading $zim_file -> archive.org/details/$item_id"
   ia upload "$item_id" "$zim_file" \
     --metadata="title:${title}" \

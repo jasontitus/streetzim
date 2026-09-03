@@ -32,6 +32,9 @@ from tests.szrg_reader import SZRG
 
 R_EARTH = 6_371_000.0
 HEURISTIC_SPEED_KPH = 100.0
+# class_access bit 9: no motor vehicles. The car profile never expands
+# such an edge (mirrors routing-worker.js / index.html).
+NO_MOTOR_BIT = 0x200
 HEURISTIC_SPEED_MPS = HEURISTIC_SPEED_KPH / 3.6
 M_PER_DEG_LAT = math.pi * R_EARTH / 180.0
 
@@ -146,8 +149,9 @@ def find_route(g: SZRG, start: int, end: int, *, max_pops: int | None = None) ->
                 dist_speed = edges_flat[base + 1]
                 dist_m = (dist_speed & 0xFFFFFF) / 10.0
                 speed = dist_speed >> 24
+            no_motor = stride >= 5 and (edges_flat[base + 4] & NO_MOTOR_BIT)
             base += stride
-            if speed == 0:
+            if speed == 0 or no_motor:
                 continue
             cost = dist_m / (speed / 3.6)
             new_g = current_g + cost

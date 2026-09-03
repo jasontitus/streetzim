@@ -65,6 +65,10 @@ repack_one() {
     local id="$1" src="$2" layout="$3"
     local dst="osm-${id}-shipped.zim"
     local log="${id}-shipped.log"
+    # Start clean: a stale validate log from a previous (passing) run
+    # made a region whose repackage FAILED today grep as "PASS", and
+    # yesterday's shipped file was then uploaded under today's name.
+    rm -f "$dst" "${id}-shipped-validate.log"
     log "repackaging $id ($layout) from $src → $dst"
     # --spatial-chunk-scale 10 = 0.1° cells. Source must be SZRG v4/v5
     # (our default build); repackage_zim reassembles chunks if the

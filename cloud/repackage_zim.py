@@ -744,7 +744,11 @@ def repackage(src_path: str, dst_path: str,
             if entry.is_redirect:
                 target = entry.get_redirect_entry()
                 try:
-                    c.add_redirection(entry.path, entry.title or entry.path, target.path)
+                    # libzim ≥ 3 requires the hints argument; the 3-arg
+                    # call raised TypeError and the except below silently
+                    # dropped every redirect in the source.
+                    c.add_redirection(entry.path, entry.title or entry.path,
+                                      target.path, {Hint.FRONT_ARTICLE: False})
                 except Exception as e:
                     print(f"    skip redirect {entry.path}: {e}")
                 continue
@@ -820,6 +824,17 @@ def repackage(src_path: str, dst_path: str,
                             gf.write(bytes(item.content))
                     else:
                         captured_graph_bytes = bytes(item.content)
+                elif path.startswith("routing-data/graph-geoms") \
+                        and not split_graph and not spatial_chunk_scale:
+                    # A v5 source's geoms companion is only regenerated
+                    # by --split-graph (from a v4 source) or carried by
+                    # spatial cells. Any other upgrade silently dropped
+                    # it and shipped a v5 graph.bin whose routes could
+                    # not be drawn.
+                    raise SystemExit(
+                        f"source carries {path} (SZRG v5 split layout) but "
+                        f"this upgrade would drop it; use "
+                        f"--spatial-chunk-scale, or --unchunk-graph only.")
                 skipped_routing += 1
                 continue
             if upgrade_graph and (
@@ -856,8 +871,14 @@ def repackage(src_path: str, dst_path: str,
                     captured_search_manifest = json.loads(
                         bytes(item.content).decode("utf-8"))
                 except Exception as ex:
-                    print(f"  warning: couldn't parse search manifest: {ex}")
-                    captured_search_manifest = None
+                    # Continuing here dropped the manifest AND every
+                    # oversized chunk from the output (they're only
+                    # re-emitted from the captured manifest) — a ZIM
+                    # with no working search, flagged by one warning line.
+                    raise SystemExit(
+                        f"search-data/manifest.json in {src_path} is "
+                        f"unparseable ({ex}); refusing to emit a ZIM "
+                        f"without search chunks")
                 replaced_search_paths.add(path)
                 continue
             # When we're emitting a new category-index/manifest.json
@@ -996,8 +1017,13 @@ def repackage(src_path: str, dst_path: str,
             or (not needs_disk_spill and captured_graph_bytes is None)
         )
         if upgrade_graph and graph_missing:
-            print("  warning: no routing-data/graph.bin in source — "
-                  "nothing to upgrade. Output will have no routing.")
+            # Was a warning followed by a full multi-hour finalize of a
+            # ZIM with no routing (docs/zim-packaging-gotchas.md §"already
+            # spatial"). Fail fast instead.
+            raise SystemExit(
+                "no routing-data/graph.bin in source — nothing to upgrade "
+                "(source is already spatial or has no routing). Re-run "
+                "without --spatial-chunk-scale / --chunk-graph-mb.")
         elif upgrade_graph and unchunk_graph and not split_graph \
                 and chunk_graph_mb == 0 and spatial_chunk_scale == 0:
             # --unchunk-graph alone: emit monolithic graph.bin only.
@@ -1060,15 +1086,21 @@ def repackage(src_path: str, dst_path: str,
                   "Publisher", "Date", "Tags", "Name", "Flavour",
                   "Scraper", "License"):
             v = meta_str(k)
+            if k == "Date":
+                # The re-rolled file is dated in its name; copying the
+                # source's Date made a May reroll report April in the
+                # Kiwix library.
+                import time as _time
+                v = _time.strftime("%Y-%m-%d")
             if v:
                 try: c.add_metadata(k, v)
                 except Exception as e: print(f"  warning: metadata {k}: {e}")
         # Illustration_48x48@1 is the 48x48 PNG icon Kiwix shows in
-        # its library. python-libzim's add_metadata wants bytes for
-        # binary fields.
+        # its library. add_illustration() stores it with the image/png
+        # mimetype; add_metadata() stamped it text/plain.
         illus = meta_bytes("Illustration_48x48@1")
         if illus:
-            try: c.add_metadata("Illustration_48x48@1", illus)
+            try: c.add_illustration(48, illus)
             except Exception as e: print(f"  warning: illustration: {e}")
 
         _tick("metadata")

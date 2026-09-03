@@ -16,7 +16,11 @@ chain is:
    1. *Optimal pass*: admissible heuristic (haversine ÷ 100 km/h —
       the fastest edge speed `create_osm_zim.SPEED` emits, so the
       estimate can never exceed the true remaining time), pop limit
-      200,000. Returns the guaranteed-shortest route.
+      500,000 (was 200,000 while visited state cost ~440 B/node; the
+      typed-array table made it cheap enough that on the Silicon
+      Valley ZIM every random 5–60 km metro pair now finishes in this
+      pass instead of 7/16 falling to greedy). Returns the
+      guaranteed-shortest route.
       (Until 2026-09 both JS engines divided by 80 km/h. That
       over-estimates remaining time on any motorway leg, so the
       "optimal" pass silently returned routes a few percent slower
@@ -24,7 +28,7 @@ chain is:
       `tests/test_routing_worker_v3.py` reproduced it on half its
       routes. The Python references always used 100 km/h.)
    2. *Greedy fallback*: heuristic × 1.5 (no longer admissible —
-      may overshoot), pop limit 400,000. Routes here are 5–15%
+      may overshoot), pop limit 1,000,000. Routes here are 5–15%
       longer than optimal but the page survives. Only runs when the
       optimal pass *bailed* on its pop budget; an optimal pass that
       exhausted the open set proves the destination unreachable and
@@ -105,7 +109,9 @@ Knobs in `resources/viewer/index.html`:
 * Per-phase compaction: `graph.compact(4)` between two-pass legs;
   `graph.compact(0)` before any route with crow-fly > 100 km
   (the "pre-route cleanup" pause + GC yields).
-* Pop limits: 200k optimal / 400k greedy on full A*; 50k optimal /
+* Pop limits (worker): 500k optimal / 1M greedy on full A*; 150k
+  optimal / 300k greedy on the highway-only middle leg. The
+  main-thread fallback keeps the old 200k / 400k and 50k /
   100k greedy on the highway-only middle leg.
 * Sparse-state algorithm: state only for visited nodes instead of
   typed arrays sized for `numNodes`. Eliminates the ~370 MB up-front

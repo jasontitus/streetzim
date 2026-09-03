@@ -164,14 +164,20 @@ def swap_viewer_rust(src_path: str, dst_path: str) -> int:
                 mime = item.mimetype
                 title = entry.title or ""
 
-                # X-namespace heuristic: id >= visible entry_count OR path
-                # matches the well-known Xapian paths. Either signal is
-                # sufficient — the create_osm_zim.py rust path places these
-                # in namespace 'X' with compress=False and an
-                # application/octet-stream+xapian mimetype.
-                is_xapian = (i >= src_visible
-                             or path in ("fulltext/xapian", "title/xapian")
+                # Entries at ids >= entry_count are the M (metadata), W
+                # (mainPage) and X (indexes) namespaces, returned with the
+                # namespace stripped. Only the two Xapian databases are
+                # worth carrying over; metadata was re-added above,
+                # mainPage is set via set_mainpath, and the title
+                # listings (`listing/titleOrdered/*`) are arrays of SOURCE
+                # entry indexes — garbage in the repacked archive. The
+                # old "everything past entry_count is Xapian" heuristic
+                # emitted X/Title, X/Counter, X/Illustration… duplicates
+                # and copied the stale listings verbatim.
+                is_xapian = (path in ("fulltext/xapian", "title/xapian")
                              or mime.endswith("+xapian"))
+                if i >= src_visible and not is_xapian:
+                    continue
 
                 if path in replacements:
                     c.add_item(_Item(path, mime, title=title,

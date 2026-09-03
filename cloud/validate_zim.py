@@ -434,10 +434,21 @@ def _chk_find_chips(arc) -> tuple[str, str]:
                 f"rules likely didn't run")
     sizes = sorted(chips.items(), key=lambda kv: -int(kv[1].get("bytes") or 0))
     biggest = sizes[0]
+    biggest_bytes = int(biggest[1].get("bytes") or 0)
+    # Chips exist to keep any single Find fetch phone-sized; a monolithic
+    # (un-sub-bucketed) 100 MB+ chip is the OOM they were built to avoid.
+    if biggest_bytes > 200 * 1024 * 1024 and not biggest[1].get("sub_chunks"):
+        return ("fail",
+                f"chip {biggest[0]} is {biggest_bytes/1e6:.0f} MB in one file "
+                f"(no sub_chunks) — mobile WebViews OOM; re-run with chip splitting")
+    if biggest_bytes > 50 * 1024 * 1024 and not biggest[1].get("sub_chunks"):
+        return ("warn",
+                f"chip {biggest[0]} is {biggest_bytes/1e6:.0f} MB in one file "
+                f"(no sub_chunks) — tight on older phones")
     return ("pass",
             f"{len(chips)} chip files; biggest "
-            f"{biggest[0]}={int(biggest[1]['bytes'])/1e6:.1f}MB "
-            f"({biggest[1]['count']} recs)")
+            f"{biggest[0]}={biggest_bytes/1e6:.1f}MB "
+            f"({biggest[1].get('count', '?')} recs)")
 
 
 def _chk_routing_sample(arc, cfg, zim_path: str) -> tuple[str, str]:
@@ -589,16 +600,23 @@ def _chk_overture_fields(arc, cfg) -> tuple[str, str]:
     would silently lose website/phone/brand data downstream."""
     if not cfg.get("hasOvertureAddresses") and not cfg.get("hasOverturePlaces"):
         return ("skip", "no Overture flags set")
-    # Find a search-data chunk and sample.
+    # Sample a chunk that carries POIs. The alphabetically-first chunk is
+    # a digit-prefixed address bucket ("0x"), which never has website /
+    # phone / brand fields and produced a spurious warning.
     sample_path = None
+    fallback_path = None
     for i in range(arc.entry_count):
         e = arc._get_entry_by_id(i)
         if e.is_redirect:
             continue
         p = e.path
         if p.startswith("search-data/") and p.endswith(".json") and p != "search-data/manifest.json":
-            sample_path = p
-            break
+            fallback_path = fallback_path or p
+            prefix = p[len("search-data/"):-len(".json")]
+            if prefix[:1].isalpha():
+                sample_path = p
+                break
+    sample_path = sample_path or fallback_path
     if sample_path is None:
         return ("warn", "no search-data chunks to sample")
     try:
@@ -697,6 +715,18 @@ def _chk_main_entry(arc) -> tuple[str, str]:
 
 def _chk_fulltext(arc) -> tuple[str, str]:
     if not getattr(arc, "has_fulltext_index", False):
+        # A ZIM that ADVERTISES a full-text index (Tags _ftindex:yes) but
+        # has none shows Kiwix a search box that returns nothing — the
+        # failure docs/remote-rebuild.md warns about after a rust-built
+        # ZIM is repacked through python-libzim (which drops X/). Fail
+        # rather than skip in that case.
+        try:
+            tags = arc.get_metadata("Tags").decode("utf-8", "replace")
+        except Exception:
+            tags = ""
+        if "_ftindex:yes" in tags:
+            return ("fail", "Tags advertise _ftindex:yes but the ZIM has "
+                            "no fulltext index (Kiwix search will be empty)")
         return ("skip", "no fulltext index")
     from libzim.search import Query, Searcher
     searcher = Searcher(arc)
@@ -1049,11 +1079,18 @@ def _chk_search_data_sizes(arc) -> tuple[str, str]:
     failed: list[tuple[str, int]] = []
     warned: list[tuple[str, int]] = []
     biggest = (0, "")
+    missing: list[str] = []
+    sub_chunks = mani.get("sub_chunks") or {}
     for prefix in chunks:
         try:
             e = arc.get_entry_by_path(f"search-data/{prefix}.json")
             size = e.get_item().size
         except Exception:
+            # Declared in the manifest but absent from the ZIM. A prefix
+            # that was hot-split lives in sub-files instead, so only
+            # count it missing when it has no sub_chunks either.
+            if not sub_chunks.get(prefix):
+                missing.append(prefix)
             continue
         if size > biggest[0]:
             biggest = (size, prefix)
@@ -1079,10 +1116,13 @@ def _chk_category_index(arc) -> tuple[str, str]:
     except Exception:
         return ("skip", "not present (older schema)")
     mani = json.loads(data)
-    # Newer builds write a dict-of-dicts; older flat list. Accept either.
-    size = (len(mani.get("categories", []))
-            if isinstance(mani.get("categories"), list)
-            else len(mani))
+    # Newer builds write {"total": N, "categories": {slug: count}} (a
+    # dict); older ones a flat list. len(mani) on the dict reported the
+    # 2–3 top-level keys as the category count.
+    cats = mani.get("categories") if isinstance(mani, dict) else mani
+    size = len(cats) if isinstance(cats, (list, dict)) else 0
+    if size == 0:
+        return ("warn", "manifest declares no categories")
     return ("pass", f"{size} categories")
 
 
@@ -1450,7 +1490,12 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
         bin_path = shutil.which("zimcheck")
         kind = "libzim zimcheck"
     if not bin_path:
-        return "pass", "zimcheck binary not on PATH (skipped; ok for dev hosts)"
+        # "pass" here silently lost the link checker that caught the
+        # search/<slug>.html bug. Report a skip (visible in the summary)
+        # and let release hosts insist on it via STREETZIM_REQUIRE_ZIMCHECK=1.
+        if os.environ.get("STREETZIM_REQUIRE_ZIMCHECK") == "1":
+            return "fail", "zimcheck binary not on PATH (STREETZIM_REQUIRE_ZIMCHECK=1)"
+        return "skip", "zimcheck binary not on PATH (install kiwix-tools / zimru on release hosts)"
     # Homebrew's zimcheck on macOS links against an older xapian than
     # what's installed; the patched libzim under
     # python-libzim/libzim/libzim.dylib has the missing symbol. Try

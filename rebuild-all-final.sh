@@ -1,4 +1,12 @@
 #!/bin/bash
+
+# DEPRECATED — this script uploads without validate_zim.py and (for the
+# rebuild queue) falls back to uploading whatever stale osm-<id>*.zim is
+# lying around. Use build-region-and-upload.sh + cloud/upload_validated.sh.
+if [ "${STREETZIM_ALLOW_LEGACY:-0}" != "1" ]; then
+  echo "DEPRECATED: $(basename "$0") — use build-region-and-upload.sh / cloud/upload_validated.sh (set STREETZIM_ALLOW_LEGACY=1 to override)" >&2
+  exit 64
+fi
 # Rebuild ALL regions with boundary-fixed terrain, YYYY-MM-DD naming.
 # Runs 2 tracks in parallel. Each build auto-verifies terrain + uploads.
 set -e

@@ -104,23 +104,23 @@ status() {
     echo ""
     printf "%-16s %-16s %s\n" "INSTANCE" "IP" "PROGRESS"
     printf "%-16s %-16s %s\n" "--------" "--" "--------"
-    while IFS=$'\t' read -r name ip; do
+    while IFS=$'\t' read -u 9 -r name ip; do
         if [ -n "$ip" ] && [ "$ip" != "None" ]; then
-            progress=$(ssh -i ~/.ssh/${KEY_NAME}.pem -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+            progress=$(ssh -n -i ~/.ssh/${KEY_NAME}.pem -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
                 ubuntu@${ip} 'tail -c 200 gen.log 2>/dev/null | tr "\r" "\n" | grep -v "^$" | tail -1' 2>/dev/null || echo "connecting...")
             printf "%-16s %-16s %s\n" "$name" "$ip" "$progress"
         fi
-    done <<< "$IPS"
+    done 9<<< "$IPS"
 
     echo ""
     echo "Tile counts on each instance:"
-    while IFS=$'\t' read -r name ip; do
+    while IFS=$'\t' read -u 9 -r name ip; do
         if [ -n "$ip" ] && [ "$ip" != "None" ]; then
-            count=$(ssh -i ~/.ssh/${KEY_NAME}.pem -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+            count=$(ssh -n -i ~/.ssh/${KEY_NAME}.pem -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
                 ubuntu@${ip} 'find terrain_tiles/12 -name "*.webp" 2>/dev/null | wc -l' 2>/dev/null || echo "?")
             printf "  %-16s %s tiles\n" "$name" "$count"
         fi
-    done <<< "$IPS"
+    done 9<<< "$IPS"
 }
 
 collect() {

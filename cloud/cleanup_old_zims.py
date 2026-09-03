@@ -113,6 +113,24 @@ def item_zim_files(item: str) -> List[Dict]:
     return [{"date": d, "name": n} for d, n in zims]
 
 
+def torrent_protected_name(item: str):
+    """Name of the ZIM the committed web/torrents/<id>.torrent points at
+    (its webseed), or None. Deleting that file strands every torrent
+    client that fetched the .torrent from the site."""
+    region_id = item[len("streetzim-"):] if item.startswith("streetzim-") else item
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                        "web", "torrents", f"{region_id}.torrent")
+    try:
+        data = open(path, "rb").read()
+    except OSError:
+        return None
+    m = re.search(rb"4:name(\d+):", data)
+    if not m:
+        return None
+    n = int(m.group(1))
+    return data[m.end():m.end() + n].decode("utf-8", "replace")
+
+
 def prune(item: str, keep: int, dry_run: bool) -> Tuple[int, int]:
     """Delete all but the `keep` newest dated ZIMs. Returns (kept, deleted)."""
     files = item_zim_files(item)
@@ -120,6 +138,11 @@ def prune(item: str, keep: int, dry_run: bool) -> Tuple[int, int]:
         return len(files), 0
     victims = files[:-keep]
     keepers = files[-keep:]
+    protected = torrent_protected_name(item)
+    if protected and any(v["name"] == protected for v in victims):
+        print(f"  PROTECT {protected} — web/torrents names it as webseed; "
+              f"regenerate the torrent (cloud/build_torrent.py) before pruning it")
+        victims = [v for v in victims if v["name"] != protected]
     print(f"\n{item}: {len(files)} dated ZIMs; keeping {keep}, deleting {len(victims)}")
     for k in keepers:
         print(f"  KEEP   {k['name']}")

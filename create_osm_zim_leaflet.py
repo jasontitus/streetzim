@@ -284,12 +284,22 @@ def extract_tiles_from_mbtiles(mbtiles_path):
 # ── Raster tile rendering ────────────────────────────────────────────────────
 
 def decode_vector_tile(data):
-    """Decode a vector tile from PBF format, handling gzip."""
+    """Decode a vector tile from PBF format, handling gzip.
+
+    y_coord_down=True: the decoder's default flips y to a bottom-left
+    origin (``y = extent - y``), which projected straight into Pillow's
+    top-left image space rendered every tile upside-down. The MapLibre
+    builder passes the same option everywhere.
+    """
     if data[:2] == b"\x1f\x8b":
         data = gzip.decompress(data)
     try:
-        return mapbox_vector_tile.decode(data)
-    except Exception:
+        return mapbox_vector_tile.decode(
+            data, default_options={"y_coord_down": True})
+    except Exception as exc:
+        # Log instead of silently returning an empty tile — a decode
+        # failure used to leave an unexplained hole in the map.
+        print(f"    Warning: vector tile decode failed: {exc}")
         return {}
 
 
@@ -345,11 +355,24 @@ def render_tile_to_png(decoded_tile, zoom):
         if not rings:
             return
         outer = rings[0]
-        if len(outer) >= 3:
+        if len(outer) < 3:
+            return
+        holes = [h for h in rings[1:] if len(h) >= 3]
+        if not holes:
             draw.polygon(outer, fill=fill, outline=outline)
-        for hole in rings[1:]:
-            if len(hole) >= 3:
-                draw.polygon(hole, fill=COLORS["background"])
+            return
+        # Paint through an L mask so holes reveal whatever was drawn
+        # underneath (a lake inside a forest keeps its water, a courtyard
+        # keeps the park) instead of being stamped with the background
+        # colour, which erased lower layers.
+        mask = Image.new("L", img.size, 0)
+        mdraw = ImageDraw.Draw(mask)
+        mdraw.polygon(outer, fill=255)
+        for hole in holes:
+            mdraw.polygon(hole, fill=0)
+        img.paste(fill, (0, 0, img.width, img.height), mask)
+        if outline:
+            draw.line(list(outer) + [outer[0]], fill=outline, width=1)
 
     # Render layers in order: landcover → water → buildings → roads → boundaries
 
@@ -511,8 +534,11 @@ def _render_labels(img, draw, decoded_tile, zoom):
 
     # Margin: only render labels whose anchor is within this inner area.
     # This prevents the same label from appearing on adjacent tiles.
-    # Use a margin that's ~15% of tile size on each side.
-    margin = int(TILE_SIZE * 0.15)
+    # It must match tilemaker's clip buffer (~64/4096 of the extent ≈
+    # 1.6 %): a 15 % margin left anchors in the 1.6–15 % edge band in
+    # NO tile's inner area, dropping roughly half of all village/road/
+    # water labels map-wide.
+    margin = int(TILE_SIZE * 0.02)
     inner_min = margin
     inner_max = TILE_SIZE - margin
 
@@ -776,7 +802,25 @@ def create_zim(
         creator.add_metadata("Publisher", "create_osm_zim_leaflet")
         creator.add_metadata("Creator", "OpenStreetMap contributors")
         creator.add_metadata("Date", datetime.date.today().isoformat())
-        creator.add_metadata("Tags", "maps;osm;offline;leaflet;raster")
+        creator.add_metadata("Tags", "maps;osm;offline;leaflet;raster;_pictures:yes;_ftindex:yes")
+        # Name + Illustration are required for Kiwix to register the ZIM
+        # in its library (the MapLibre builder sets both; this one didn't).
+        zim_name = name.lower().replace(" ", "_").replace(",", "").replace(".", "")
+        creator.add_metadata("Name", f"osm_leaflet_{zim_name}")
+        creator.add_metadata("Scraper", "streetzim-leaflet/1.0")
+        try:
+            from PIL import Image as _PImage, ImageDraw as _PDraw
+            import io as _io
+            _icon = _PImage.new("RGBA", (48, 48), (37, 99, 235, 255))
+            _d = _PDraw.Draw(_icon)
+            _d.ellipse([8, 8, 40, 40], outline=(255, 255, 255, 200), width=2)
+            _d.line([24, 8, 24, 40], fill=(255, 255, 255, 120), width=1)
+            _d.line([8, 24, 40, 24], fill=(255, 255, 255, 120), width=1)
+            _buf = _io.BytesIO()
+            _icon.save(_buf, "PNG")
+            creator.add_illustration(48, _buf.getvalue())
+        except Exception as _exc:
+            print(f"    Warning: could not add illustration: {_exc}")
 
         # Viewer HTML
         print("    Adding viewer HTML...")
@@ -1074,12 +1118,20 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             center = [0, 0]
             zoom = 2
 
+        # maxZoom must describe the tiles actually packaged: tilemaker's
+        # config fixes the pyramid at z14 regardless of --max-zoom, and
+        # advertising a deeper level made the viewer request tiles/15/…
+        # (blank map at zoom ≥ 16, no parent fallback in Leaflet).
+        _packed_max_z = max((z for (z, _x, _y) in vector_tiles), default=args.max_zoom)
+        if _packed_max_z != args.max_zoom:
+            print(f"    Note: --max-zoom {args.max_zoom} requested but tiles go to "
+                  f"z{_packed_max_z}; map-config maxZoom={_packed_max_z}")
         map_config = {
             "name": name,
             "center": center,
             "zoom": zoom,
             "minZoom": 0,
-            "maxZoom": args.max_zoom,
+            "maxZoom": _packed_max_z,
         }
         if bbox:
             map_config["bounds"] = bbox

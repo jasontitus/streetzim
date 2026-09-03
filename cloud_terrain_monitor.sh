@@ -22,15 +22,15 @@ RUNNING=0
 DONE=0
 COLLECTING=0
 
-while IFS=$'\t' read -r name iid ip; do
+while IFS=$'\t' read -u 9 -r name iid ip; do
     [ -z "$ip" ] && continue
     # Check if done
-    status=$(ssh -i "$KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
+    status=$(ssh -n -i "$KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
         ubuntu@$ip 'grep -c "^DONE" gen.log 2>/dev/null || echo 0' 2>/dev/null)
 
     if [ "$status" = "1" ]; then
         DONE=$((DONE+1))
-        tiles=$(ssh -i "$KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+        tiles=$(ssh -n -i "$KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
             ubuntu@$ip 'find terrain_tiles/12 -name "*.webp" 2>/dev/null | wc -l' 2>/dev/null || echo "?")
         printf "%-14s DONE (%s tiles) — collecting...\n" "$name" "$tiles"
 
@@ -41,7 +41,7 @@ while IFS=$'\t' read -r name iid ip; do
 
         if [ $? -eq 0 ]; then
             verified=true
-            sample=$(ssh -i "$KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+            sample=$(ssh -n -i "$KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
                 ubuntu@$ip 'find terrain_tiles/12 -name "*.webp" 2>/dev/null | shuf -n 5' 2>/dev/null || true)
             if [ -z "$sample" ]; then
                 printf "%-14s Verify failed: no remote sample tiles; keeping instance\n" "$name"
@@ -64,11 +64,11 @@ while IFS=$'\t' read -r name iid ip; do
         fi
     else
         RUNNING=$((RUNNING+1))
-        progress=$(ssh -i "$KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
+        progress=$(ssh -n -i "$KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
             ubuntu@$ip 'tail -c 120 gen.log 2>/dev/null | tr "\r" "\n" | grep -v "^$" | tail -1' 2>/dev/null || echo "starting...")
         printf "%-14s %s\n" "$name" "$progress"
     fi
-done <<< "$IPS"
+done 9<<< "$IPS"
 
 echo ""
 echo "Running: $RUNNING, Done+collected: $DONE"

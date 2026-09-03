@@ -40,7 +40,7 @@ TRACKERS = [
     "http://bt2.archive.org:6969/announce",
     "udp://tracker.opentrackr.org:1337/announce",
     "udp://tracker.openbittorrent.com:6969/announce",
-    "udp://9.rarbg.to:2710/announce",
+    # rarbg's tracker has been dead since 2023 — dropped.
 ]
 
 
@@ -131,31 +131,66 @@ def bencode(value) -> bytes:
     raise TypeError(f"cannot bencode {type(value).__name__}")
 
 
-def build_torrent(zim_url: str, out_path: str, comment: str = "") -> None:
-    """Write a single-file .torrent for `zim_url` to `out_path`."""
+def local_piece_hashes(path: str, piece_size: int):
+    """Hash a LOCAL file piece by piece; same output shape as
+    stream_piece_hashes. Used by the release path right after upload so
+    the torrent is built without re-downloading the ZIM from archive.org
+    (66 GB for Europe — the reason torrents were never regenerated)."""
+    pieces = bytearray()
+    total = 0
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(piece_size)
+            if not chunk:
+                break
+            pieces.extend(hashlib.sha1(chunk).digest())
+            total += len(chunk)
+    return bytes(pieces), total
+
+
+def build_torrent(zim_url: str, out_path: str, comment: str = "",
+                  local_path: str | None = None) -> None:
+    """Write a single-file .torrent for `zim_url` to `out_path`.
+
+    With `local_path`, the pieces are hashed from that file and `zim_url`
+    is only used as the file name + BEP-19 webseed. The local file must
+    be byte-identical to what was uploaded (its basename must match the
+    URL's) or clients will fail every piece check.
+    """
     # File name is the basename of the URL path, URL-decoded.
     parsed = urllib.parse.urlparse(zim_url)
     file_name = urllib.parse.unquote(os.path.basename(parsed.path))
     if not file_name:
         raise ValueError(f"could not derive filename from {zim_url}")
 
-    # Probe size first so we can pick a good piece size before streaming.
-    head = urllib.request.Request(
-        zim_url,
-        method="HEAD",
-        headers={"User-Agent": "streetzim-torrent-gen/1.0"},
-    )
-    with urllib.request.urlopen(head, timeout=30) as resp:
-        size = int(resp.headers["Content-Length"])
-    piece_size = auto_piece_size(size)
-    n_pieces = (size + piece_size - 1) // piece_size
-    print(f"  {file_name}: {size/1e9:.2f} GB, piece={piece_size//1024} KiB, "
-          f"{n_pieces} pieces")
-
-    pieces, streamed_size = stream_piece_hashes(zim_url, piece_size)
+    if local_path:
+        if os.path.basename(local_path) != file_name:
+            raise ValueError(
+                f"local file {os.path.basename(local_path)!r} does not match "
+                f"the URL's file name {file_name!r}")
+        size = os.path.getsize(local_path)
+        piece_size = auto_piece_size(size)
+        n_pieces = (size + piece_size - 1) // piece_size
+        print(f"  {file_name}: {size/1e9:.2f} GB (local), piece={piece_size//1024} KiB, "
+              f"{n_pieces} pieces")
+        pieces, streamed_size = local_piece_hashes(local_path, piece_size)
+    else:
+        # Probe size first so we can pick a good piece size before streaming.
+        head = urllib.request.Request(
+            zim_url,
+            method="HEAD",
+            headers={"User-Agent": "streetzim-torrent-gen/1.0"},
+        )
+        with urllib.request.urlopen(head, timeout=30) as resp:
+            size = int(resp.headers["Content-Length"])
+        piece_size = auto_piece_size(size)
+        n_pieces = (size + piece_size - 1) // piece_size
+        print(f"  {file_name}: {size/1e9:.2f} GB, piece={piece_size//1024} KiB, "
+              f"{n_pieces} pieces")
+        pieces, streamed_size = stream_piece_hashes(zim_url, piece_size)
     if streamed_size != size:
         raise RuntimeError(
-            f"size mismatch: HEAD said {size}, streamed {streamed_size}"
+            f"size mismatch: expected {size}, hashed {streamed_size}"
         )
 
     info = {
@@ -192,9 +227,13 @@ def main() -> int:
     p.add_argument("zim_url", help="HTTP URL of the ZIM file (archive.org)")
     p.add_argument("out", help="Output path for .torrent")
     p.add_argument("--comment", default="", help="Torrent comment field")
+    p.add_argument("--local", default=None, metavar="PATH",
+                   help="Hash this local copy of the ZIM instead of streaming "
+                        "it from zim_url (which stays the webseed)")
     args = p.parse_args()
     try:
-        build_torrent(args.zim_url, args.out, comment=args.comment)
+        build_torrent(args.zim_url, args.out, comment=args.comment,
+                      local_path=args.local)
     except Exception as e:
         print(f"FAILED: {e}", file=sys.stderr)
         return 1

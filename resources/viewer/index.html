@@ -1161,7 +1161,11 @@ dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAg
     function attempt(n) {
       return fetch(url, { signal: signal })
         .then(function(r) {
-          if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + r.statusText);
+          if (!r.ok) {
+            var e = new Error('HTTP ' + r.status + ' ' + r.statusText);
+            e.status = r.status;
+            throw e;
+          }
           return r.arrayBuffer();
         })
         .then(function(buf) {
@@ -1169,6 +1173,12 @@ dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAg
         })
         .catch(function(err) {
           dbg('tile fetch failed', 'attempt', n, url, describeError(err));
+          // A 404 is definitive (tile outside the bbox / beyond the baked
+          // satellite zoom): retrying it four times held one of the six
+          // fetch slots for ~2.4 s per missing tile and blocked
+          // MapLibre's parent-tile fallback, stalling every pan at z13+
+          // on regions whose satellite stops at z12.
+          if (err && err.status === 404) throw err;
           if (n < 4 && !signal.aborted) {
             return new Promise(function(resolve) {
               setTimeout(function() { resolve(attempt(n + 1)); }, 400 * n);
@@ -3431,6 +3441,11 @@ function _showFindToast(text, opts) {
 // leave A's "Loading …" placeholder stuck in the search box and let A's
 // late result overwrite B's carousel.
 var _chipLoadSeq = 0;
+// The search box's ORIGINAL placeholder, captured once. Capturing it
+// per call meant a second chip tap saw "Loading a…" as the value to
+// restore, and left that text stuck after the first load was
+// superseded.
+var _chipOrigPlaceholder = null;
 
 async function loadChipOnMap(map, chipDef, opts) {
   opts = opts || {};
@@ -3447,21 +3462,28 @@ async function loadChipOnMap(map, chipDef, opts) {
   // sees "loading" for the chip they tapped without a separate
   // status surface.
   var searchInput = document.getElementById('search-input');
-  var prevPlaceholder = searchInput ? searchInput.placeholder : null;
+  if (searchInput && _chipOrigPlaceholder == null) {
+    _chipOrigPlaceholder = searchInput.placeholder || '';
+  }
   if (searchInput) {
     searchInput.placeholder = 'Loading ' + chipDef.label.toLowerCase() + '…';
+  }
+  function restorePlaceholder() {
+    if (searchInput && _chipOrigPlaceholder != null) {
+      searchInput.placeholder = _chipOrigPlaceholder;
+    }
   }
   try {
     var data = await _findFetchChipData(chipDef.id);
   } catch (err) {
     console.warn('[streetzim] chip fetch failed:', err);
     if (mySeq !== _chipLoadSeq) return;  // a newer chip owns the UI now
-    if (searchInput) searchInput.placeholder = prevPlaceholder || '';
+    restorePlaceholder();
     _findChipPaintActive(null);
     return;
   }
   if (mySeq !== _chipLoadSeq) return;  // superseded while loading
-  if (searchInput) searchInput.placeholder = prevPlaceholder || '';
+  restorePlaceholder();
 
   // Filter to the current map viewport. If that wipes everything,
   // fall back to the unfiltered set (matches places.html behaviour
@@ -6603,6 +6625,9 @@ function initRouting(map, config) {
     var ord = classAccess & 0x1F;
     return ord >= 1 && ord <= 6;
   }
+  // class_access bit 9: no motor vehicles (footway / steps / private).
+  // Never expanded by the driving profile — see routing-worker.js.
+  var NO_MOTOR_BIT = 0x200;
 
   // ?debug=1 overlay — shows pops/cells/heap during routing so we can
   // tell whether a long route is bottlenecked on cell cache, visited-
@@ -6850,6 +6875,7 @@ function initRouting(map, config) {
         }
       }
       for (var k = 0; k < edges.length; k++) {
+        if (edges[k][4] & NO_MOTOR_BIT) continue;
         var target = edges[k][0];
         if (!visited.has(target)) {
           visited.add(target);
@@ -6904,6 +6930,10 @@ function initRouting(map, config) {
         /*greedy*/ 1.0,
         /*popLimit*/ highwayOnly ? 50000 : 200000);
       if (optimal) return optimal;
+      // Exhausted the open set without bailing: the destination is
+      // unreachable and a greedy re-run can't change that (same rule
+      // as the worker).
+      if (!__mainThreadBailed) return null;
     }
     // Optimal bailed (or skipped) — retry greedy. Routes here are
     // 5-25% suboptimal but the page survives and the user gets
@@ -6914,8 +6944,14 @@ function initRouting(map, config) {
       /*popLimit*/ highwayOnly ? 100000 : 400000);
   }
 
+  // Set when the most recent main-thread A* pass hit its pop budget
+  // (as opposed to exhausting the open set). Mirrors ctx.bailed in
+  // the worker so the fallback engine follows the same strategy chain.
+  var __mainThreadBailed = false;
+
   async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
                                         GREEDY_WEIGHT, POP_LIMIT) {
+    __mainThreadBailed = false;
     var endCoords = await graph.nodeCoordsE7(endNode);
     var endLat = endCoords[0] / 1e7;
     var endLon = endCoords[1] / 1e7;
@@ -6961,6 +6997,7 @@ function initRouting(map, config) {
       }
       if (pops > POP_LIMIT) {
         debugStats(label + ' BAIL (pop limit ' + POP_LIMIT + ')', pops);
+        __mainThreadBailed = true;
         return null;  // caller decides next step
       }
       if (current === endNode) break;
@@ -6970,6 +7007,7 @@ function initRouting(map, config) {
       var curG = g.get(current);
       for (var k = 0; k < nodeEdges.length; k++) {
         var e = nodeEdges[k];
+        if (e[4] & NO_MOTOR_BIT) continue;
         if (highwayOnly && !isHighwayClass(e[4])) continue;
         var target = e[0];
         var speedDist = e[1];
@@ -7323,7 +7361,11 @@ function initRouting(map, config) {
           // computeAndDrawRoute treats it as "no route" silently.
           if (workerResult && workerResult._cancelled) {
             console.warn('[streetzim] worker route cancelled');
-            return null;
+            // Hand the sentinel up: computeAndDrawRoute must neither
+            // draw nor say "No route found" — the user cancelled by
+            // focusing an endpoint field, and whatever route was
+            // drawn before should stay until a new one lands.
+            return { _cancelled: true };
           }
           console.warn('[streetzim] worker route done in '
                        + (performance.now() - t0).toFixed(0) + ' ms');
@@ -7396,7 +7438,10 @@ function initRouting(map, config) {
       if (routeResult) {
         console.log('[route] full crow=' + (crow/1000).toFixed(0) +
                     'km took ' + (performance.now() - t1).toFixed(0) + 'ms');
-      } else if (useTwoPass) {
+      } else if (useTwoPass || __mainThreadBailed) {
+        // Two-pass whenever the full search ran out of budget (any
+        // distance) — same gate as the worker; an exhausted open set
+        // means genuinely unreachable and is not retried.
         console.log('[route] full bailed, trying two-pass...');
         var t0 = performance.now();
         routeResult = await findRouteSpatialTwoPass(startNode, endNode);
@@ -7455,6 +7500,7 @@ function initRouting(map, config) {
       var eEnd = adjOffsets[current + 1];
 
       for (var i = eStart; i < eEnd; i++) {
+        if (graph.edgeClassAccess(i) & NO_MOTOR_BIT) continue;
         var target = graph.edgeTarget(i);
         var distM = graph.edgeDistMeters(i);
         var speed = graph.edgeSpeed(i);
@@ -7808,6 +7854,12 @@ function initRouting(map, config) {
       }
       if (seq !== routeSeq) return;  // newer route owns the spinner now
       stopRouteProgressIndicator();
+      if (result && result._cancelled) {
+        // Cancelled by the user (field focus) with no newer route yet:
+        // leave the map as it was. Used to fall into the "No route
+        // found" branch and erase the drawn route.
+        return;
+      }
       if (result) {
         // Sanity check: any coord obviously off the map? Logs first
         // offender — helps diagnose "crazy lines" bugs after the fact.
@@ -9184,10 +9236,11 @@ function initRouting(map, config) {
         }
         if (!graph) loadGraph();
         waitFor(function() { return !!graph; }, function() {
-          // Drop any previous route first — otherwise the lastRoute
-          // poll below resolves immediately on the OLD route and drive
-          // mode starts before the new endpoints have been routed.
-          lastRoute = null;
+          // Drop any previous route AND endpoints first. Nulling only
+          // lastRoute left the old destNode in place, so the origin
+          // snap could compute origin→old-dest and the poll below would
+          // resolve on that before the new destination was routed.
+          clearRoute();
           try {
             setOriginFromLatLon(origLat, origLon, "Start");
             setDestFromLatLon(destLat, destLon, "Destination");

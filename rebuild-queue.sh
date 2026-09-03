@@ -53,12 +53,12 @@ build_region() {
     date=$(date +%Y-%m-%d)
     dated="osm-${id}-${date}.zim"
     cp "$out" "$dated"
-    log "Uploading ${dated}..."
-    ia upload "streetzim-${id}" "$dated" --retries 5 >>"$logname" 2>&1 || \
-        log "Upload flagged issues — see ${logname}"
-    sleep 30
-    ia metadata "streetzim-${id}" --modify="date:${date}" >>"$logname" 2>&1 || true
-    python3 web/generate.py --deploy >>"$logname" 2>&1 || true
+    # Validate + upload through the shared path: it refuses unvalidated
+    # ZIMs and treats a failed upload as fatal (no date bump, no deploy).
+    if ! bash cloud/upload_validated.sh "$id" "$dated" >>"$logname" 2>&1; then
+        log "FAIL upload ${id} — see ${logname}"
+        return 1
+    fi
     log "=== DONE ${id} ==="
 }
 
