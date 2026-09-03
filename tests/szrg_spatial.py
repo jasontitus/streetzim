@@ -59,6 +59,10 @@ import numpy as np
 
 from tests.szrg_reader import SZRG, parse_szrg_bytes
 
+# class_access bit 9 (see docs/driving-mode-road-class-warnings.md). Kept
+# local rather than imported from szrg_astar to avoid a circular import.
+_NO_MOTOR_BIT = 0x200
+
 
 SZCI_MAGIC = b"SZCI"
 SZRC_MAGIC = b"SZRC"
@@ -793,13 +797,30 @@ class SpatialGraph:
             if best_dist is not None and lower_bound > best_dist:
                 break
             cell = self._ensure_cell(cid)
+            adj = cell.cell_adj
+            edges = cell.edges
             for local in range(cell.node_count):
                 dlat = int(cell.nodes_scaled[local * 2]) - lat_e7
                 dlon = int(cell.nodes_scaled[local * 2 + 1]) - lon_e7
                 dist = dlat * dlat + dlon * dlon
-                if best_dist is None or dist < best_dist:
-                    best_dist = dist
-                    best_node = cell.base_node + local
+                if best_dist is not None and dist >= best_dist:
+                    continue
+                # Same rule as routing-worker.js snapNearestNode: a node
+                # whose every outgoing edge is closed to motor vehicles
+                # (class_access bit 9) can never be expanded by the car
+                # A*, so snapping to it guarantees "no route". Nodes with
+                # no outgoing edges at all (sinks) stay eligible.
+                e_start = int(adj[local])
+                e_end = int(adj[local + 1])
+                car_ok = e_start == e_end
+                for ei in range(e_start, e_end):
+                    if not (int(edges[ei * 5 + 4]) & _NO_MOTOR_BIT):
+                        car_ok = True
+                        break
+                if not car_ok:
+                    continue
+                best_dist = dist
+                best_node = cell.base_node + local
         return best_node
 
     def edges_of_node(self, global_node_idx: int) -> list[tuple[int, int, int, int, int]]:

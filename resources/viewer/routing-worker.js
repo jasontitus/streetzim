@@ -40,10 +40,13 @@ var activeRoutes = new Set();
 var HEURISTIC_SPEED_KMH = 100;
 var HEURISTIC_MPS = HEURISTIC_SPEED_KMH / 3.6;
 
-// Pop budgets per phase. The sparse visited-state table costs ~42 B
-// per visited node (see NodeTable) plus ~12 B per heap entry, so the
-// greedy full-graph budget below is ~40 MB of table + ~35 MB of heap
-// at worst — where the old Map-based state hit that at 200k pops.
+// Pop budgets per phase. Visited state is the NodeTable (21 B/slot,
+// power-of-two capacity at ≤ 50 % load, entries inserted on relaxation
+// so ~1.4 entries per pop) plus the heap (12 B/push, ~2 pushes per
+// pop). At the 1M greedy budget that is a 4M-slot table (~88 MB, ~130
+// MB transiently while it doubles) plus ~25-50 MB of heap: ~150-180 MB
+// peak, versus ~440 B per visited node × 400k under the old Map-based
+// state (~175 MB) — same envelope, 2.5× the search budget.
 // Measured on the Silicon Valley ZIM (894k nodes): at 200k the optimal
 // pass bailed on 7 of 16 random 5-60 km metro pairs and one pair fell
 // through greedy to two-pass with a 70 % longer route; at these

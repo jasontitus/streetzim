@@ -1106,6 +1106,7 @@ function _sortAndShow(records) {
     countLine += ' (none in map area — showing all)';
   }
   countLine += '.';
+  state._statusBase = countLine;  // applyStatusNote rebuilds from this
   if (state.originMode === 'none' && state.originNote) {
     countLine += ' — ' + state.originNote;
   }
@@ -1324,9 +1325,10 @@ function requestGPS() {
 // Re-apply the origin note to the current status line (used when the
 // note changes after the results have already been rendered).
 function applyStatusNote() {
-  if (state.originNote && els.statusText && state.results.length) {
-    const base = els.statusText.textContent.split(' — ')[0];
-    setStatus(base + ' — ' + state.originNote);
+  if (state.originNote && state._statusBase && state.results.length) {
+    // Rebuild from the stored base line — splitting the live text on
+    // ' — ' also cut "(none in map area — showing all)" in half.
+    setStatus(state._statusBase + ' — ' + state.originNote);
   }
 }
 

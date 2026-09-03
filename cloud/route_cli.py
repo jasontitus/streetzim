@@ -81,6 +81,18 @@ def nearest_node(g: SpatialGraph, lat: float, lon: float) -> tuple[int, float]:
          + math.cos(math.radians(lat)) * np.cos(np.radians(lats))
          * np.sin(dlon / 2) ** 2)
     d = 2 * R_EARTH * np.arcsin(np.sqrt(a))
+    # Reject nodes whose every outgoing edge is closed to motor vehicles
+    # (class_access bit 9) — the car A* never expands them, so snapping
+    # there guarantees "no route". Edgeless sinks stay eligible. Mirrors
+    # routing-worker.js snapNearestNode.
+    k = min(50_000, len(d))
+    window = np.argpartition(d, k - 1)[:k]
+    order = window[np.argsort(d[window])]
+    for cand in order:
+        cid = int(cand)
+        out = g.edges_of_node(cid)
+        if not out or any(not (ca & NO_MOTOR_BIT) for (*_r, ca) in out):
+            return cid, float(d[cid])
     idx = int(np.argmin(d))
     return idx, float(d[idx])
 

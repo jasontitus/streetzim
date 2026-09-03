@@ -3462,7 +3462,11 @@ async function loadChipOnMap(map, chipDef, opts) {
   // sees "loading" for the chip they tapped without a separate
   // status surface.
   var searchInput = document.getElementById('search-input');
-  if (searchInput && _chipOrigPlaceholder == null) {
+  // Refresh the remembered placeholder whenever the current one is a
+  // real one (not our own "Loading …"): the search manifest rewrites it
+  // asynchronously ("Search N places…"), so capturing only once could
+  // pin the boot-time text forever.
+  if (searchInput && !/^Loading /.test(searchInput.placeholder || '')) {
     _chipOrigPlaceholder = searchInput.placeholder || '';
   }
   if (searchInput) {
@@ -5620,6 +5624,12 @@ function initRouting(map, config) {
   });
 
   function clearRoute() {
+    // Invalidate any route still computing: its result must neither be
+    // drawn after the user cleared, nor satisfy enterDriveMode's
+    // lastRoute poll with the OLD endpoints.
+    routeSeq++;
+    if (typeof cancelInFlightRoute === 'function') cancelInFlightRoute();
+    stopRouteProgressIndicator();
     originNode = -1;
     destNode = -1;
     originCoordE7 = null;
@@ -6347,6 +6357,14 @@ function initRouting(map, config) {
         var ndlon = (nlon - lonE7) * cosLat;
         var dist = ndlat * ndlat + ndlon * ndlon;
         if (dist < bestDist) {
+          // Same rule as the worker: skip a node whose outgoing edges are
+          // all car-prohibited (footpath vertex); edgeless sinks stay.
+          var eS = cell.cellAdj[local], eE = cell.cellAdj[local + 1];
+          var carOk = (eS === eE);
+          for (var ei = eS; ei < eE; ei++) {
+            if (!(cell.edges[ei * 5 + 4] & NO_MOTOR_BIT)) { carOk = true; break; }
+          }
+          if (!carOk) continue;
           bestDist = dist;
           bestNode = cell.baseNode + local;
           bestLat = nlat;
@@ -6523,14 +6541,28 @@ function initRouting(map, config) {
     var nodes = graph.nodesScaled;
     var best = -1;
     var bestDist = Infinity;
+    var cosLatM = Math.max(0.05, Math.cos(lat * Math.PI / 180));
+    var adj = graph.adjOffsets;
     for (var i = 0; i < nodes.length; i += 2) {
       // Cast to float before squaring — int32 products can overflow
       var dlat = (nodes[i] - latE7);
-      var dlon = (nodes[i + 1] - lonE7);
+      var dlon = (nodes[i + 1] - lonE7) * cosLatM;
       var d = dlat * dlat + dlon * dlon;
       if (d < bestDist) {
+        // Skip footpath-only vertices (all out-edges car-prohibited);
+        // spatial graphs go through snapNearestNode, this is the
+        // monolithic-graph path. Edgeless sinks stay eligible.
+        var n = i / 2;
+        if (adj) {
+          var eS = adj[n], eE = adj[n + 1];
+          var carOk = (eS === eE);
+          for (var ei = eS; ei < eE; ei++) {
+            if (!(graph.edgeClassAccess(ei) & NO_MOTOR_BIT)) { carOk = true; break; }
+          }
+          if (!carOk) continue;
+        }
         bestDist = d;
-        best = i / 2;
+        best = n;
       }
     }
     return {

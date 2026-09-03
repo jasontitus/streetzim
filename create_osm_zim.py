@@ -37,6 +37,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -804,6 +805,7 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
     # Include a 1-degree BUFFER around the bbox so that tiles at degree
     # boundaries get correct data from neighboring DEM cells.
     tif_paths = []
+    transient_dem_failures = []
     for lat in range(math.floor(minlat) - 1, math.floor(maxlat) + 2):
         for lon in range(math.floor(minlon) - 1, math.floor(maxlon) + 2):
             ns = "N" if lat >= 0 else "S"
@@ -845,7 +847,8 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
                                         f.write(chunk)
                             with open(tmp_path, "rb") as f:
                                 magic = f.read(4)
-                            if magic not in (b"II*\x00", b"MM\x00*"):
+                            # Classic TIFF or BigTIFF (download_dem.py accepts both).
+                            if magic not in (b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+"):
                                 raise IOError("response is not a TIFF (truncated or HTML error page)")
                             os.replace(tmp_path, fpath)
                             size_mb = os.path.getsize(fpath) / (1024 * 1024)
@@ -865,7 +868,8 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
                             if os.path.exists(tmp_path):
                                 try: os.remove(tmp_path)
                                 except OSError: pass
-                        time.sleep(2 * attempt)
+                        if attempt < 3:
+                            time.sleep(2 * attempt)
                     if got:
                         downloaded = True
                         break
@@ -878,14 +882,23 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
                         # Transient failure: do NOT write the marker — it
                         # used to brand a land cell as ocean forever, and
                         # every later build zero-filled real terrain there.
-                        print(f"      Warning: {ns}{abs_lat:02d} {ew}{abs_lon:03d} unavailable this run "
-                              f"(transient); will retry next build")
+                        # Remember it: continuing would rasterise the cell
+                        # as 0 m AND write the COMPLETED marker, so the
+                        # "retry" would never happen. We abort the terrain
+                        # step below instead.
+                        transient_dem_failures.append(f"{ns}{abs_lat:02d}{ew}{abs_lon:03d}")
                     continue
             else:
                 size_mb = os.path.getsize(fpath) / (1024 * 1024)
                 print(f"    Cached: {ns}{abs_lat:02d} {ew}{abs_lon:03d} ({size_mb:.1f} MB)")
             tif_paths.append(fpath)
 
+    if transient_dem_failures:
+        raise RuntimeError(
+            f"{len(transient_dem_failures)} DEM cell(s) could not be downloaded "
+            f"this run ({', '.join(transient_dem_failures[:8])}"
+            f"{'…' if len(transient_dem_failures) > 8 else ''}); refusing to "
+            f"rasterise them as 0 m and cache the result. Re-run the build.")
     if not tif_paths:
         print("    No DEM tiles downloaded, skipping terrain")
         return 0
@@ -2907,28 +2920,40 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
         "footway", "path", "steps", "pedestrian", "cycleway", "bridleway",
         "corridor", "escape", "busway",
     })
-    _ACCESS_DENY = ("no", "private")
+    # `private`, `destination`, `customers`, `delivery` are ALLOWED (like
+    # OSRM/Valhalla's restricted-access classes): they're exactly the
+    # roads you must use to reach a destination inside a gated community
+    # or campus. Only an outright `no` blocks. (We have no penalty
+    # mechanism, so through-routing over a private road is possible; the
+    # alternative — relocating the destination to the nearest public road
+    # with no indication — is worse.)
+    _ACCESS_DENY = ("no",)
     _ACCESS_ALLOW = ("yes", "designated", "permissive", "destination",
-                     "customers", "delivery")
+                     "customers", "delivery", "private")
+
+    def _access_value(tags, *keys):
+        """First RECOGNISED value among `keys` (an unrecognised value such
+        as motorcar=agricultural must not shadow motor_vehicle=no)."""
+        for k in keys:
+            v = tags.get(k)
+            if v in _ACCESS_ALLOW or v in _ACCESS_DENY:
+                return v
+        return None
 
     def _way_no_motor_vehicle(hw, tags):
         """True when motor vehicles may not use this way (OSM access
         hierarchy: motorcar/motor_vehicle override vehicle override
         access). An explicit motor_vehicle=yes re-opens a road that
         access=no closed (e.g. private roads tagged for through traffic)."""
-        mv = tags.get("motorcar") or tags.get("motor_vehicle")
-        if mv in _ACCESS_ALLOW:
-            return False
-        if mv in _ACCESS_DENY:
-            return True
-        veh = tags.get("vehicle")
-        if veh in _ACCESS_ALLOW:
-            return False
-        if veh in _ACCESS_DENY:
-            return True
-        acc = tags.get("access")
-        if acc in _ACCESS_DENY:
-            return True
+        mv = _access_value(tags, "motorcar", "motor_vehicle")
+        if mv is not None:
+            return mv in _ACCESS_DENY
+        veh = _access_value(tags, "vehicle")
+        if veh is not None:
+            return veh in _ACCESS_DENY
+        acc = _access_value(tags, "access")
+        if acc is not None:
+            return acc in _ACCESS_DENY
         return hw in NO_MOTOR_HIGHWAY
 
     # Road-class ordinal for the v4 routing-graph class_access u32
@@ -3343,6 +3368,16 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
     # Unique per run: a fixed name let a second build on the same host
     # delete/rewrite the first build's 16-60 GB index mid-pass.
     import tempfile as _tempfile
+    # Reclaim scratch files an OOM-killed earlier run left behind (they
+    # are 16-60 GB each and no longer share a fixed name).
+    try:
+        import glob as _glob
+        for _stale in _glob.glob(os.path.join(NODE_LOC_DIR, "streetzim_node_loc_*.bin")):
+            if time.time() - os.path.getmtime(_stale) > 6 * 3600:
+                os.remove(_stale)
+                print(f"    removed stale node-location scratch {_stale}")
+    except OSError:
+        pass
     _loc_fd, node_loc_path = _tempfile.mkstemp(
         dir=NODE_LOC_DIR, prefix="streetzim_node_loc_", suffix=".bin")
     os.close(_loc_fd)

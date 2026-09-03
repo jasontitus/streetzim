@@ -97,7 +97,7 @@ stay well under that. Per-route memory budget at peak:
 | Component | Size | Comment |
 |---|---|---|
 | Cell cache (byte budget) | ≤64 MB | Scale-10 SZCI v3 cells are fetched lazily. |
-| Visited-node table (worker) | ≤ ~35 MB | `NodeTable` in `routing-worker.js`: open-addressing hash on node id with typed-array columns for g / prev / prev-edge / closed, ~21 B per slot at ≤ 50 % load ⇒ ~42 B per visited node × pop limit. The main-thread fallback still uses `Map`s at ~440 B per node. |
+| Visited-node table + heap (worker) | ~150–180 MB peak at the 1M greedy budget | `NodeTable` in `routing-worker.js`: open-addressing hash on node id with typed-array columns for g / prev / prev-edge / closed, 21 B per slot, power-of-two capacity at ≤ 50 % load, ~1.4 entries per pop (inserted on relaxation) ⇒ a 4M-slot table (~88 MB, ~130 MB while it doubles) plus a `NodeHeap` at 12 B per push. The old `Map`-based state cost ~440 B per node, i.e. the same envelope at 400k pops. The main-thread fallback still uses `Map`s. |
 | MapLibre tiles + DOM | ~100 MB | Constant-ish. |
 | **Routing peak** | **~500–600 MB** | Measured on Tokyo→Oita with the harness. |
 

@@ -70,9 +70,10 @@ def generate_tile(args):
     import io
 
     tile_path = os.path.join(output_dir, str(z), str(tile_x), f"{tile_y}.webp")
-    # A lossless WebP of a real terrain tile is never under ~40 bytes;
-    # anything smaller is a truncated write from an interrupted worker.
-    if os.path.isfile(tile_path) and os.path.getsize(tile_path) >= 40:
+    # A lossless 256×256 WebP is ≥ 42 bytes even for a solid colour
+    # (measured with Pillow 12); anything under 30 is a truncated write
+    # from an interrupted worker.
+    if os.path.isfile(tile_path) and os.path.getsize(tile_path) >= 30:
         with counter_lock:
             counter.value += 1
         return True  # cached
@@ -119,9 +120,13 @@ def generate_tile(args):
                 )
                 has = part > -9999
                 dst_arr[has] = part[has]
-        except rasterio.errors.RasterioIOError as e:
+        except rasterio.errors.RasterioError as e:
+            # RasterioIOError (open failed) and WarpOperationError (a
+            # short/aborted read DURING reproject — what an S3 throttle
+            # looks like to GDAL) both derive from RasterioError.
             msg = str(e)
-            if "404" in msg or "does not exist" in msg or "No such file" in msg:
+            if isinstance(e, rasterio.errors.RasterioIOError) and (
+                    "404" in msg or "does not exist" in msg or "No such file" in msg):
                 continue  # DEM doesn't exist (ocean cell)
             # Throttling / network error: writing a zero-filled tile now
             # would cache the blank forever (the run skips existing
