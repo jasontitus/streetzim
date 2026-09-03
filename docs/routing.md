@@ -271,6 +271,48 @@ greedy/two-pass only when full bails:
 Peak heap on the longest route in each region stayed under 600 MB,
 well below the iOS Safari ceiling.
 
+### Test results (2026-09-03) — real ZIMs, node driver
+
+Same 20 random 4–56 km pairs on the Silicon Valley ZIM, worker as of
+2026-08 (`557f971`) versus this branch, Python reference A* as the
+oracle (`tests/` differential harness):
+
+| | old worker | new worker |
+|---|---|---|
+| Total wall for 20 routes | 15.6 s | 4.1 s |
+| Median / max per route | 675 ms / 2.6 s | 144 ms / 0.74 s |
+| Expansions per second | ~230 k | ~900 k |
+| Routes that finished in the optimal pass | 11 / 20 | 19 / 20 |
+| Routes matching the Python optimum | 11 / 20 | 20 / 20 |
+| "No route" on a routable pair | 0 (by luck of a degree-space snap) | 0 |
+
+The nine old greedy fallbacks were 2–16 % slower than the optimum
+(e.g. 3,699 s vs 3,234 s). Excluding footway ordinals also shrank the
+search: the same pairs need ~30 % fewer expansions.
+
+California ZIM (7.9 M nodes, 20 M edges, 7,568 cells), San Diego ⇄
+Eureka (1,093 km crow-fly, so both engines skip the optimal pass):
+
+| | old worker | new worker | Python optimum |
+|---|---|---|---|
+| SD → Eureka | 49,724 s / 1,312 km in 0.6 s | 49,321 s / 1,311 km in 2.0 s | 46,307 s / 1,229 km |
+| Eureka → SD | 51,420 s / 1,309 km in 0.6 s | 50,955 s / 1,320 km in 0.5 s | 46,295 s / 1,230 km |
+
+Greedy ×1.5 is 6.5 % / 10 % over the optimum here; the old engine's
+80 km/h heuristic made its greedy pass effectively ×1.875, so it
+expanded fewer nodes (69 k vs 667 k) at slightly worse quality. Two
+observations for future work, not changed on this branch:
+
+* The true optimum needs 5.7 M expansions on SD → Eureka and the
+  64 MB cell budget then thrashes (700 k cell misses, 349 s in node);
+  greedy ×1.25 gets within 3.7 % in 6 s. A contracted highway-tier
+  graph in the ZIM is the real fix for 1,000 km routes.
+* The two-pass fallback is *worse* on California: its highway-only
+  optimal leg touches cells across the whole state, evicts them at
+  64 MB and re-fetches 46 GB (24 s, then bails at 150 k pops and
+  returns a route 7.9 % over the optimum). It is only reached when
+  the full greedy pass bails, which none of the tested routes did.
+
 ## Files
 
 * `resources/viewer/index.html` — viewer JS, including
