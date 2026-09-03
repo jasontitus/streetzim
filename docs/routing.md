@@ -282,13 +282,13 @@ oracle (`tests/` differential harness):
 | Total wall for 20 routes | 15.6 s | 4.1 s |
 | Median / max per route | 675 ms / 2.6 s | 144 ms / 0.74 s |
 | Expansions per second | ~230 k | ~900 k |
-| Routes that finished in the optimal pass | 11 / 20 | 19 / 20 |
-| Routes matching the Python optimum | 11 / 20 | 20 / 20 |
-| "No route" on a routable pair | 0 (by luck of a degree-space snap) | 0 |
+| Routes that finished in the "optimal" pass | 11 / 20 (80 km/h heuristic, so not actually guaranteed optimal) | 19 / 20 |
+| Routes matching the Python optimum | n/a — 7 of 20 origins snapped onto footway vertices the car-only reference cannot route from, and the other routes drive over footways | 20 / 20 |
 
-The nine old greedy fallbacks were 2–16 % slower than the optimum
-(e.g. 3,699 s vs 3,234 s). Excluding footway ordinals also shrank the
-search: the same pairs need ~30 % fewer expansions.
+The nine old greedy fallbacks were 2–16 % slower than the new routes
+for the same pairs (e.g. 3,699 s vs 3,234 s). Excluding footway
+ordinals also shrank the search: the same pairs need ~30 % fewer
+expansions.
 
 California ZIM (7.9 M nodes, 20 M edges, 7,568 cells), San Diego ⇄
 Eureka (1,093 km crow-fly, so both engines skip the optimal pass):
