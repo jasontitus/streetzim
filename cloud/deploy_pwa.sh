@@ -96,18 +96,24 @@ cat > web/drive/build-info.js <<EOF
 })();
 EOF
 
-# viewer/.version — the SW reads this on install to decide when to
-# clear the shell cache
+# viewer/.version — informational stamp (nothing reads it at runtime;
+# kept so the deployed tree carries the same id as build-info.js).
 echo -n "$stamp" > web/drive/viewer/.version
 
 # SW cache key — new name ⇒ new cache entry ⇒ old cache evicted
-# on activate. Use the same stamp so all three agree.
+# on activate. Use the same stamp so all three agree. (The predeploy
+# hook rewrites it again from STAMP_OVERRIDE, which is the same value.)
+# Done in Python rather than `sed -i ''` so it works with GNU sed too.
 new_cache="streetzim-drive-shell-$stamp"
 if grep -q "^const SHELL_CACHE = " web/drive/sw.js; then
-    # macOS sed requires the '' argument to -i
-    sed -i '' -E \
-        "s/^const SHELL_CACHE = '[^']+';/const SHELL_CACHE = '$new_cache';/" \
-        web/drive/sw.js
+    python3 - "$new_cache" <<'PY'
+import re, sys, pathlib
+p = pathlib.Path("web/drive/sw.js")
+src = p.read_text(encoding="utf-8")
+new = re.sub(r"^const SHELL_CACHE = '[^']+';",
+             f"const SHELL_CACHE = '{sys.argv[1]}';", src, count=1, flags=re.M)
+p.write_text(new, encoding="utf-8")
+PY
     log "sw cache key → $new_cache"
 else
     echo "[WARN] could not find SHELL_CACHE in web/drive/sw.js"

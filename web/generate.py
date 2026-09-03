@@ -352,13 +352,20 @@ REGIONS = [
 
 
 def human_size(bytes_count):
-    """Format bytes as 'X.X GB' or 'X MB'."""
+    """Format bytes as 'X.X GB' or 'X MB'.
+
+    Binary units (1024-based) to match what Finder / Explorer show for
+    the downloaded file; archive.org's own listing uses decimal, so its
+    numbers read ~7% larger.
+    """
     if bytes_count is None or bytes_count <= 0:
         return ""
     gb = bytes_count / (1024 ** 3)
     if gb >= 1:
         return f"{gb:.1f} GB"
     mb = bytes_count / (1024 ** 2)
+    if mb < 1:
+        return "<1 MB"  # was "0 MB" for anything under a mebibyte
     return f"{int(round(mb))} MB"
 
 

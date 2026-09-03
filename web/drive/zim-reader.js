@@ -3,11 +3,12 @@
 // Consumed by the service worker (importScripts) to turn a local .zim
 // Blob into HTTP responses. Exposes StreetZimReader on the global scope.
 //
-// Supported: ZIM v5/v6 with uncompressed (flag 1/2) and zstd (flag 5)
-//            clusters. Requires fzstd (loaded alongside via importScripts
-//            or <script>) for zstd.
-// Not yet:   xz clusters (throws), full-text search, title index,
-//            redirect chains > 1 hop.
+// Supported: ZIM v6 (new-namespace layout: content under 'C', which is
+//            what `read()` defaults to) with uncompressed (flag 1/2) and
+//            zstd (flag 5) clusters. Requires fzstd (loaded alongside via
+//            importScripts or <script>) for zstd.
+// Not yet:   ZIM v5 legacy namespaces ('A'/'-'), xz clusters (throws),
+//            full-text search, title index, redirect chains > 1 hop.
 //
 // Format ref: https://wiki.openzim.org/wiki/ZIM_file_format
 // If we hit weird ZIMs in the wild, cross-reference kiwix-js:

@@ -94,6 +94,29 @@ fi
 echo "$STAMP" > "$OUT/.version"
 echo "  version stamp: $STAMP"
 
+# 4b. Bump the service worker's cache generation to the same stamp. A
+#     plain `firebase deploy` (the documented path in docs/site-deploy.md)
+#     used to leave sw.js byte-identical, so the browser never installed
+#     a new worker and the offline precache stayed stale indefinitely —
+#     only the network-first fetch path hid it. Portable (no sed -i
+#     dialect issues between GNU and BSD sed).
+python3 - "$STAMP" <<'PY'
+import re, sys, pathlib
+stamp = sys.argv[1]
+p = pathlib.Path("web/drive/sw.js")
+src = p.read_text(encoding="utf-8")
+new, n = re.subn(r"^const SHELL_CACHE = 'streetzim-drive-shell-[^']*';",
+                 f"const SHELL_CACHE = 'streetzim-drive-shell-{stamp}';",
+                 src, count=1, flags=re.M)
+if n != 1:
+    sys.exit("sync-drive-viewer: SHELL_CACHE line not found in web/drive/sw.js")
+if new != src:
+    p.write_text(new, encoding="utf-8")
+    print(f"  SHELL_CACHE  → streetzim-drive-shell-{stamp}")
+else:
+    print("  SHELL_CACHE  unchanged")
+PY
+
 # 5. Emit build-info.js for the /drive/ picker page footer — gives the
 #    user a visible "am I on the fresh deploy?" indicator independent of
 #    the service worker's cache state.

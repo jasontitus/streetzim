@@ -13,10 +13,12 @@
 
 importScripts('./fzstd.js', './zim-reader.js');
 
-// Bump this when the shell changes (new maplibre, new viewer HTML, etc.).
-// The sync script writes a stamp to web/drive/viewer/.version which the
-// page reads on load and posts to the SW — we compare and clear stale
-// caches. For now just hand-bump on big changes.
+// Cache generation. scripts/sync-drive-viewer.sh (the firebase predeploy
+// hook) rewrites the stamp on every deploy from the shell asset hashes
+// (or from cloud/deploy_pwa.sh's git stamp via STAMP_OVERRIDE), so a
+// changed viewer always produces a new precache and the old one is
+// dropped on activate. Keep the 'streetzim-drive-shell-' prefix — the
+// activate handler only deletes caches carrying it.
 const SHELL_CACHE = 'streetzim-drive-shell-74960f5b17-d100721';
 
 const SHELL_URLS = [
@@ -214,6 +216,13 @@ self.addEventListener('message', (event) => {
         const r = await getReader().catch(() => null);
         reply.info = r ? r.info : null;
         reply.loaded = !!r;
+        // `present` ≠ `loaded`: a persisted File handle can stop being
+        // readable later (file moved / edited on disk). The picker uses
+        // this to keep the Remove button available so the user can
+        // clear a record that no longer opens.
+        const rec = await idbGet('current').catch(() => null);
+        reply.present = !!(rec && rec.blob);
+        reply.name = rec && rec.name ? rec.name : null;
       } else {
         reply = { ok: false, error: 'unknown message type' };
       }
@@ -233,8 +242,11 @@ function rangeResponse(data, range, mime) {
   const start = parseInt(m[1], 10);
   const end = m[2] ? parseInt(m[2], 10) : data.byteLength - 1;
   if (isNaN(start)) return null;
-  if (start >= data.byteLength || end < start) {
-    // RFC 7233: unsatisfiable range → 416, not a silent full 200.
+  // RFC 7233 §2.1: last-byte-pos < first-byte-pos makes the whole Range
+  // header syntactically invalid → ignore it (full 200). Only a start
+  // past the end is a genuine 416.
+  if (end < start) return null;
+  if (start >= data.byteLength) {
     return new Response(null, {
       status: 416,
       statusText: 'Range Not Satisfiable',
@@ -359,6 +371,10 @@ self.addEventListener('fetch', (event) => {
     // as the same shell asset as the un-slashed name — strip a
     // single trailing slash before deciding shell vs ZIM data.
     const restNoSlash = rest.endsWith('/') ? rest.slice(0, -1) : rest;
+    // Runtime-cache key without the query string: lookups use
+    // ignoreSearch, so storing `?debug=1` / `?bust=<ts>` variants
+    // separately only accumulated ~370 KB copies of the viewer HTML.
+    const cacheKey = url.origin + url.pathname;
     if (VIEWER_SHELL_NAMES.has(firstSegment) && !restNoSlash.includes('/')) {
       // Shell asset — NETWORK-FIRST. Stale cached HTML/JS was the
       // 2026-04-25 frustration: deploys were live on Firebase but
@@ -367,16 +383,25 @@ self.addEventListener('fetch', (event) => {
       // ALWAYS see the current deploy. Cache only kicks in offline.
       event.respondWith((async () => {
         try {
-          const net = await fetch(req, { cache: 'no-store' });
+          // 'no-cache' (not 'no-store'): still revalidates with Firebase on
+          // every load so a deploy is visible immediately, but a 304 lets
+          // the ~1.5 MB of MapLibre JS/CSS come from the HTTP cache instead
+          // of being re-downloaded on every launch.
+          const net = await fetch(req, { cache: 'no-cache' });
           if (net && net.ok) {
             const copy = net.clone();
             // Keep the SW alive until the cache write lands, and never
-            // let a failed put surface as an unhandled rejection.
-            event.waitUntil(
-              caches.open(SHELL_CACHE)
-                .then((c) => cacheClean(c, req, copy))
-                .catch(() => {})
-            );
+            // let a failed put surface as an unhandled rejection. The
+            // waitUntil itself is guarded too: if an engine ever refused
+            // it here, the outer catch would otherwise swap this fresh
+            // response for the stale cache.
+            try {
+              event.waitUntil(
+                caches.open(SHELL_CACHE)
+                  .then((c) => cacheClean(c, cacheKey, copy))
+                  .catch(() => {})
+              );
+            } catch (_) {}
           }
           return net;
         } catch (e) {
@@ -410,14 +435,16 @@ self.addEventListener('fetch', (event) => {
   // viewer above: when online, always reflect the current deploy.
   event.respondWith((async () => {
     try {
-      const net = await fetch(req, { cache: 'no-store' });
+      const net = await fetch(req, { cache: 'no-cache' });
       if (net && net.ok) {
         const copy = net.clone();
-        event.waitUntil(
-          caches.open(SHELL_CACHE)
-            .then((c) => cacheClean(c, req, copy))
-            .catch(() => {})
-        );
+        try {
+          event.waitUntil(
+            caches.open(SHELL_CACHE)
+              .then((c) => cacheClean(c, url.origin + url.pathname, copy))
+              .catch(() => {})
+          );
+        } catch (_) {}
       }
       return net;
     } catch (e) {

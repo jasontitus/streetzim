@@ -960,6 +960,47 @@ var baseUrl = (function() {
 var WIKI_QID_TITLES = null;   // optional side-load bridge (transitional)
 var WIKI_GEO_INDEX = null;    // {title:[lat,lon,type,qid]} from the ZIM's wiki-geo-index.json
 var WIKI_GEO_QID = null;      // reverse {qid:title} built from WIKI_GEO_INDEX
+var WIKI_GEO_BUCKETS = null;     // Map<1°-cell key, [title, …]>, built lazily
+var WIKI_GEO_BUCKETS_SRC = null; // the index object the buckets were built from
+
+function wikiGeoBucketKey(lat, lon) {
+  return (Math.floor(lat) + 90) * 1000 + (Math.floor(lon) + 180);
+}
+
+// Titles whose point lies inside [W,E]×[S,N]. Uses a lazily built 1°
+// bucket grid so a pan/zoom only touches the cells under the viewport
+// instead of rescanning every placed article in the ZIM (hundreds of
+// thousands on country-scale builds) on every debounced moveend.
+function wikiGeoTitlesInBounds(W, E, S, N) {
+  if (!WIKI_GEO_INDEX) return [];
+  if (WIKI_GEO_BUCKETS_SRC !== WIKI_GEO_INDEX) {
+    WIKI_GEO_BUCKETS = new Map();
+    for (var t in WIKI_GEO_INDEX) {
+      var g = WIKI_GEO_INDEX[t];
+      if (!g || typeof g[0] !== 'number' || typeof g[1] !== 'number') continue;
+      var k = wikiGeoBucketKey(g[0], g[1]);
+      var arr = WIKI_GEO_BUCKETS.get(k);
+      if (!arr) WIKI_GEO_BUCKETS.set(k, arr = []);
+      arr.push(t);
+    }
+    WIKI_GEO_BUCKETS_SRC = WIKI_GEO_INDEX;
+  }
+  var out = [];
+  var la0 = Math.max(-90, Math.floor(S)), la1 = Math.min(89, Math.floor(N));
+  var lo0 = Math.max(-180, Math.floor(W)), lo1 = Math.min(179, Math.floor(E));
+  for (var la = la0; la <= la1; la++) {
+    for (var lo = lo0; lo <= lo1; lo++) {
+      var b = WIKI_GEO_BUCKETS.get(wikiGeoBucketKey(la, lo));
+      if (!b) continue;
+      for (var i = 0; i < b.length; i++) {
+        var g2 = WIKI_GEO_INDEX[b[i]];
+        if (g2[1] < W || g2[1] > E || g2[0] < S || g2[0] > N) continue;
+        out.push(b[i]);
+      }
+    }
+  }
+  return out;
+}
 (function loadWikiTitleBridge() {
   try {
     fetch(baseUrl + '../wiki-qid-titles.json')
@@ -1350,8 +1391,38 @@ fetchConfig(1)
         if (map.getLayer(id)) map.setPaintProperty(id, k, v);
       }
 
+      // Paint values hideSatellite must put back, captured from the live
+      // style the first time showSatellite overrides them. The hand-
+      // copied tables in hideSatellite drifted from makeStyle (trunk,
+      // secondary, path colours, village halo), so one satellite
+      // round-trip permanently recoloured the base map.
+      var SAT_LABEL_IDS = ['road-label','water-label','place-city','place-town',
+                           'place-village','place-suburb','poi-label'];
+      var SAT_ROAD_IDS = ['road-motorway','road-trunk','road-primary','road-secondary',
+                          'road-tertiary','road-minor','road-path'];
+      var satSavedPaint = null;
+      function captureSatPaint() {
+        if (satSavedPaint) return;
+        satSavedPaint = {};
+        function save(id, prop) {
+          if (!map.getLayer(id)) return;
+          try { satSavedPaint[id + '|' + prop] = map.getPaintProperty(id, prop); }
+          catch (e) {}
+        }
+        SAT_LABEL_IDS.forEach(function(id) {
+          save(id, 'text-color'); save(id, 'text-halo-color'); save(id, 'text-halo-width');
+        });
+        SAT_ROAD_IDS.forEach(function(id) { save(id, 'line-color'); });
+      }
+      function satRestore(id, prop, fallback) {
+        var k = id + '|' + prop;
+        return (satSavedPaint && Object.prototype.hasOwnProperty.call(satSavedPaint, k))
+          ? satSavedPaint[k] : fallback;
+      }
+
       function showSatellite() {
         addSatelliteLayer();
+        captureSatPaint();
         setLayout('satellite-layer', 'visibility', 'visible');
         setPaint('satellite-layer', 'raster-opacity', 1);
         hiddenInSatellite.forEach(function(id) {
@@ -1396,11 +1467,13 @@ fetchConfig(1)
           'place-suburb': {c: ['case',['has','wikidata'],'#4a6fa5','#666'], hc: 'rgba(255,255,255,0.8)', hw: 1},
           'poi-label': {c: ['case',['has','wikidata'],'#4a6fa5','#666'], hc: 'rgba(255,255,255,0.7)', hw: 1}
         };
+        // Prefer the values captured from the live style; the table is
+        // only a fallback for a layer that wasn't present at capture.
         Object.keys(labelDefaults).forEach(function(id) {
           var d = labelDefaults[id];
-          setPaint(id, 'text-color', d.c);
-          setPaint(id, 'text-halo-color', d.hc);
-          setPaint(id, 'text-halo-width', d.hw);
+          setPaint(id, 'text-color', satRestore(id, 'text-color', d.c));
+          setPaint(id, 'text-halo-color', satRestore(id, 'text-halo-color', d.hc));
+          setPaint(id, 'text-halo-width', satRestore(id, 'text-halo-width', d.hw));
         });
         ['road-motorway-casing','road-trunk-casing','road-primary-casing',
          'road-secondary-casing'].forEach(function(id) {
@@ -1412,7 +1485,7 @@ fetchConfig(1)
           'road-tertiary': '#fff', 'road-minor': '#fff', 'road-path': '#ccc'
         };
         Object.keys(roadColors).forEach(function(id) {
-          setPaint(id, 'line-color', roadColors[id]);
+          setPaint(id, 'line-color', satRestore(id, 'line-color', roadColors[id]));
         });
       }
 
@@ -2168,6 +2241,7 @@ var _findResultsState = {
   anchorCenter:  null,  // map center after the initial fitBounds settles
   anchorZoom:    null,  // map zoom after the initial fitBounds settles
   moveHandler:   null,  // bound moveend handler (so we can detach on clear)
+  renderSeq:     0,     // bumped per render; stale map.once('idle') callbacks bail
   detailPanel:   null,  // root <div> of the place detail bottom-sheet (or null)
   detailBackdrop: null, // semi-transparent backdrop behind detail panel
   scrollDebounce: null,
@@ -2310,8 +2384,17 @@ function renderFindResultsFromStash(map) {
   // After fitBounds settles, capture the anchor view + start watching
   // for camera moves. Any subsequent move shows the "Search this area"
   // pill so the user can re-filter results to the new viewport.
+  // Two renders before the map goes idle (rapid chip / sub-filter
+  // taps) both used to reach this callback and each installed a
+  // moveend handler; clearFindResults only detached the last one, so
+  // the earlier handler leaked for the page lifetime.
+  var renderToken = ++_findResultsState.renderSeq;
   map.once('idle', function() {
     if (!_findResultsState.strip) return;
+    if (renderToken !== _findResultsState.renderSeq) return;
+    if (_findResultsState.moveHandler) {
+      try { map.off('moveend', _findResultsState.moveHandler); } catch (e) {}
+    }
     _findResultsState.anchorCenter = map.getCenter();
     _findResultsState.anchorZoom   = map.getZoom();
     _findResultsState.moveHandler  = function() {
@@ -3985,12 +4068,30 @@ function placeSearchPin(map, lat, lon, name, enrich) {
                                      maxWidth: '320px' })
     .setDOMContent(box);
   searchMarker.setPopup(popup);
-  // Auto-open once the camera settles.
-  map.once('moveend', function() {
-    if (searchMarker) searchMarker.togglePopup();
-  });
+  // Auto-open once the camera settles — or right away when no camera
+  // move is in flight (`#pin=` without `map=`), otherwise the popup
+  // used to pop on whatever unrelated pan came next. A pending
+  // listener from an earlier pin is detached so two rapid pins can't
+  // toggle the newer popup open and then closed again.
+  if (_searchPinOpenHandler) {
+    try { map.off('moveend', _searchPinOpenHandler); } catch (e) {}
+    _searchPinOpenHandler = null;
+  }
+  var thisMarker = searchMarker;
+  if (map.isMoving && map.isMoving()) {
+    _searchPinOpenHandler = function() {
+      _searchPinOpenHandler = null;
+      if (searchMarker === thisMarker && !thisMarker.getPopup().isOpen()) {
+        thisMarker.togglePopup();
+      }
+    };
+    map.once('moveend', _searchPinOpenHandler);
+  } else {
+    thisMarker.togglePopup();
+  }
   return searchMarker;
 }
+var _searchPinOpenHandler = null;
 
 function initSearch(map) {
   var input = document.getElementById('search-input');
@@ -4429,8 +4530,11 @@ function initSearch(map) {
         wd:    item.wd,
       };
     }
-    placeSearchPin(map, lat, lon, name, enrich);
+    // Start the camera move BEFORE dropping the pin: placeSearchPin
+    // opens the popup immediately when no move is in flight, and
+    // defers to moveend when one is — we want the latter here.
     map.flyTo({ center: [lon, lat], zoom: zoom, duration: 1500 });
+    placeSearchPin(map, lat, lon, name, enrich);
     resultsEl.style.display = 'none';
     input.blur();
   }
@@ -4977,10 +5081,11 @@ function initWikiSidebar(map, config) {
     listEl.textContent = '';
     var b = map.getBounds(), W = b.getWest(), E = b.getEast(), S = b.getSouth(), N = b.getNorth();
     var items = [];
-    for (var title in WIKI_GEO_INDEX) {
-      var g = WIKI_GEO_INDEX[title]; if (!g) continue;
+    var titles = wikiGeoTitlesInBounds(W, E, S, N);
+    for (var ti = 0; ti < titles.length; ti++) {
+      var title = titles[ti];
+      var g = WIKI_GEO_INDEX[title];
       var lat = g[0], lon = g[1];
-      if (lon < W || lon > E || lat < S || lat > N) continue;
       items.push({ title: title, name: title.replace(/_/g, ' '),
                    qid: g[3] || null, type: g[2] || '', coords: [lon, lat],
                    desc: g[4] || '', priority: geoPriority(g[2] || '') });
@@ -5143,11 +5248,18 @@ function initWikiSidebar(map, config) {
     return out.length ? out : map.queryRenderedFeatures();
   }
 
+  // Generation counter for the tile-scan path below: successive moveends
+  // each fire a Promise.all of chunk fetches, and a slower earlier set
+  // could resolve after the newer one and render the wrong viewport
+  // (or populate the list after the panel was closed).
+  var _wikiScanSeq = 0;
+
   function updateSidebar() {
     if (!active) return;
     // Prefer the baked geo-index (any-zoom list + markers) when available.
     if (WIKI_GEO_INDEX) { updateSidebarFromGeo(); return; }
 
+    var myScan = ++_wikiScanSeq;
     loadingEl.style.display = 'block';
     listEl.textContent = '';
 
@@ -5220,6 +5332,7 @@ function initWikiSidebar(map, config) {
     items.forEach(function(item) { prefixes[getWdPrefix(item.qid)] = true; });
 
     Promise.all(Object.keys(prefixes).map(fetchWdChunk)).then(function() {
+      if (myScan !== _wikiScanSeq || !active) return;  // superseded / closed
       loadingEl.style.display = 'none';
       listEl.textContent = '';
 

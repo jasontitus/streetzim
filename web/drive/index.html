@@ -256,6 +256,17 @@
         openBtn.style.display = '';
         clearBtn.style.display = '';
         pickBtn.textContent = 'Change ZIM';
+      } else if (r && r.ok && r.present) {
+        // A record exists but no longer opens (file moved/edited on
+        // disk, or a corrupt pick from an older build). Keep Remove
+        // visible — before this the user was stuck with a broken
+        // record and no way to clear it.
+        setStatus('err', 'Saved ZIM can\'t be opened',
+          (r.name ? r.name + ' — ' : '') +
+          'the file may have moved or changed. Remove it or pick it again.');
+        openBtn.style.display = 'none';
+        clearBtn.style.display = '';
+        pickBtn.textContent = 'Choose a ZIM file';
       } else {
         setStatus('warn', 'No ZIM loaded',
           'Pick a file below — it stays in your browser, nothing uploaded.');

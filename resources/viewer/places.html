@@ -736,6 +736,14 @@ function rerunQuery() {
     runNameQuery(state.query);
   } else {
     state.results = [];
+    // Drop the previous result set's chrome too — the sort row,
+    // sub-filter chips and "On map" pill used to stay up over an
+    // empty list after the query was cleared.
+    state.lastRecords = [];
+    state.subFilter = null;
+    if (els.subfilterRow) _renderSubfilterChips([]);
+    if (els.sortRow) els.sortRow.hidden = true;
+    if (els.mapViewBtn) els.mapViewBtn.hidden = true;
     setStatus(state.query.length === 1
       ? 'Type at least 2 characters.'
       : 'Type to search, or pick a category above.');
@@ -1066,6 +1074,14 @@ function _sortAndShow(records) {
       r._dist = haversine(state.origin.lat, state.origin.lon, r.a, r.o);
     }
     records.sort((a, b) => a._dist - b._dist);
+  } else {
+    // Records are shared cached objects: a distance computed for an
+    // earlier origin would otherwise keep rendering after the origin
+    // was dropped (GPS denied after a custom pick, etc.).
+    for (const r of records) r._dist = undefined;
+  }
+  if (mode === 'distance' && state.origin) {
+    // sorted above
   } else if (mode === 'category') {
     records.sort((a, b) => {
       const ca = (a.cat || a.s || a.t || '').toString();
