@@ -57,8 +57,12 @@ upload_zim() {
   local desc="${intro}${COMMON_DESC_FOOTER}"
   echo ">>> Validating $zim_file"
   if ! python3 cloud/validate_zim.py "$zim_file"; then
-    echo ">>> FATAL: validator rejected $zim_file — not uploading"
-    return 4
+    # Skip this region but keep the queue going (the script runs under
+    # set -e and calls upload_zim as a plain statement, so a non-zero
+    # return here would abort every region after it).
+    echo ">>> SKIPPED: validator rejected $zim_file — not uploading; fix and re-run this region"
+    FAILED_UPLOADS="${FAILED_UPLOADS:-} $zim_file"
+    return 0
   fi
   echo ">>> Uploading $zim_file -> archive.org/details/$item_id"
   ia upload "$item_id" "$zim_file" \
@@ -162,3 +166,7 @@ upload_zim "streetzim-hispaniola" "osm-hispaniola.zim" \
 
 echo ""
 echo "=== Build & Upload Queue Complete: $(date) ==="
+if [ -n "${FAILED_UPLOADS:-}" ]; then
+  echo "=== NOT UPLOADED (validator rejected):${FAILED_UPLOADS} ==="
+  exit 4
+fi

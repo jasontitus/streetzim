@@ -22,14 +22,18 @@ chmod 640 "$LOG" 2>/dev/null || true
 # skip the delete at the bottom of the script and the VM billed forever.
 # Set STREETZIM_KEEP_VM=1 in metadata to keep a failed VM for debugging.
 _self_delete() {
-  local rc=$?
+  local rc="${1:-$?}"
   echo "=== exit code $rc at $(date) ==="
   if [ "${STREETZIM_KEEP_VM:-0}" != "1" ] && [ -n "${INSTANCE_NAME:-}" ] && [ -n "${ZONE:-}" ]; then
     echo "=== Self-deleting VM $INSTANCE_NAME in $ZONE ==="
     gcloud --quiet compute instances delete "$INSTANCE_NAME" --zone="$ZONE" || true
   fi
 }
-trap _self_delete EXIT
+# NOTE: bash has ONE exit trap. The cache-push trap installed further down
+# is combined with this one there (`trap 'rc=$?; push_caches; _self_delete
+# "$rc"' EXIT`); installing them separately made the later one replace
+# this and the VM never self-deleted.
+trap '_self_delete "$?"' EXIT
 
 echo "=== StreetZim build VM started: $(date) ==="
 
@@ -47,13 +51,19 @@ push_caches() {
   gcloud storage rsync wikidata_cache/ gs://streetzim-cache/wikidata_cache/ --recursive 2>&1 || true
   echo "=== [trap] Cache push complete ==="
 }
-trap push_caches EXIT
+# Combined with the self-delete trap above (a second `trap … EXIT` would
+# replace it). Caches are pushed first, then the VM deletes itself.
+trap 'rc=$?; push_caches; _self_delete "$rc"' EXIT
 
 # ----------------------------------------------------------------------------
 # Read instance metadata
 # ----------------------------------------------------------------------------
 META=http://metadata.google.internal/computeMetadata/v1/instance/attributes
 fetch_meta() { curl -sf -H "Metadata-Flavor: Google" "$META/$1"; }
+# Optional debugging knob: set instance attribute streetzim-keep-vm=1 to
+# keep the VM alive after a failure (startup scripts don't receive
+# attributes as environment variables, so read it from metadata).
+STREETZIM_KEEP_VM=$(fetch_meta streetzim-keep-vm || echo 0)
 
 REGION_ID=$(fetch_meta region-id)
 REGION_NAME=$(fetch_meta region-name)

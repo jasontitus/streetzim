@@ -825,16 +825,20 @@ def repackage(src_path: str, dst_path: str,
                     else:
                         captured_graph_bytes = bytes(item.content)
                 elif path.startswith("routing-data/graph-geoms") \
-                        and not split_graph and not spatial_chunk_scale:
-                    # A v5 source's geoms companion is only regenerated
-                    # by --split-graph (from a v4 source) or carried by
-                    # spatial cells. Any other upgrade silently dropped
-                    # it and shipped a v5 graph.bin whose routes could
-                    # not be drawn.
+                        and not split_graph:
+                    # A v5-split source: no graph-layout upgrade here can
+                    # carry its geoms companion — --unchunk-graph emits
+                    # only graph.bin (routes can't be drawn), and
+                    # --spatial-chunk-scale fails hours later inside
+                    # _emit_spatial_graph for lack of the SZGM buffer.
+                    # Fail before the passthrough instead of after it.
                     raise SystemExit(
-                        f"source carries {path} (SZRG v5 split layout) but "
-                        f"this upgrade would drop it; use "
-                        f"--spatial-chunk-scale, or --unchunk-graph only.")
+                        f"source carries {path} (SZRG v5 split layout); "
+                        f"graph-layout upgrades of a v5-split source are not "
+                        f"supported. Re-run without --split-graph / "
+                        f"--chunk-graph-mb / --spatial-chunk-scale / "
+                        f"--unchunk-graph (routing passes through unchanged), "
+                        f"or regenerate from a v4 source.")
                 skipped_routing += 1
                 continue
             if upgrade_graph and (

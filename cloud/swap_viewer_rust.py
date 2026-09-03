@@ -149,6 +149,10 @@ def swap_viewer_rust(src_path: str, dst_path: str) -> int:
                     print(f"  skip entry id={i}: {e}")
                     continue
                 if entry.is_redirect:
+                    if i >= src_visible:
+                        # W-namespace mainPage redirect — recreated by
+                        # set_mainpath above, not as a content redirect.
+                        continue
                     target = entry.get_redirect_entry()
                     try:
                         c.add_redirection(entry.path,

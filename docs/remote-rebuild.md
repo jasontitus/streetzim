@@ -621,3 +621,15 @@ per `feedback_dated_filenames_over_swap.md`). With this guard
 in place, that timeout would now exit 2, the deploy would skip,
 and the previous good site would remain live. Operator re-runs
 `web/generate.py --deploy` once the network's stable.
+
+## Preflight is a hard gate (2026-09)
+
+`build-region-and-upload.sh` no longer forces `FORCE=1`; a failing
+`cloud/preflight.py` stops the build. For regions with a known-benign
+preflight failure (sparse Wikidata, ocean-coast false positives — see
+the comment in `cloud/build_region.sh`), run with `FORCE=1` explicitly
+and note the region here so the exception is recorded:
+
+| region | benign preflight failure | since |
+|---|---|---|
+| _(none recorded yet)_ | | |

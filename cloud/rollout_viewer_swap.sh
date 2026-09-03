@@ -68,6 +68,10 @@ repack_one() {
     # Start clean: a stale validate log from a previous (passing) run
     # made a region whose repackage FAILED today grep as "PASS", and
     # yesterday's shipped file was then uploaded under today's name.
+    if [ -e "$src" ] && [ "$src" -ef "$dst" ]; then
+        log "FAIL $id: source and destination are the same file ($dst)"
+        return 1
+    fi
     rm -f "$dst" "${id}-shipped-validate.log"
     log "repackaging $id ($layout) from $src → $dst"
     # --spatial-chunk-scale 10 = 0.1° cells. Source must be SZRG v4/v5

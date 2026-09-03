@@ -1102,6 +1102,11 @@ def _chk_search_data_sizes(arc) -> tuple[str, str]:
         tb = ", ".join(f"{p}={s/1e6:.0f}MB" for p, s in failed[:3])
         return ("fail",
                 f"{len(failed)} chunk(s) ≥ {SEARCH_CHUNK_FAIL_MB} MB: {tb}")
+    if missing:
+        return ("fail",
+                f"{len(missing)} manifest chunk(s) absent from the ZIM "
+                f"(declared but never written): {', '.join(missing[:5])}"
+                f"{'…' if len(missing) > 5 else ''}")
     if warned:
         tb = ", ".join(f"{p}={s/1e6:.0f}MB" for p, s in warned[:3])
         return ("warn",
