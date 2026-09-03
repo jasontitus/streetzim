@@ -27,8 +27,13 @@ chain is:
       than the true optimum — the synthetic differential test in
       `tests/test_routing_worker_v3.py` reproduced it on half its
       routes. The Python references always used 100 km/h.)
-   2. *Greedy fallback*: heuristic × 1.5 (no longer admissible —
-      may overshoot), pop limit 1,000,000. Routes here are 5–15%
+   2. *Greedy fallback*: heuristic × 1.875 (no longer admissible —
+      may overshoot), pop limit 500,000. The factor is the old
+      engine's 1.5 on an 80 km/h heuristic re-expressed against the
+      admissible 100 km/h one, so the fallback stays as focused as it
+      used to be: at × 1.5 a 372 km California pair needed more than
+      1 M pops and fell through to two-pass (14 s end to end); at
+      × 1.875 it converges in 155 k. Routes here are 3–10%
       longer than optimal but the page survives. Only runs when the
       optimal pass *bailed* on its pop budget; an optimal pass that
       exhausted the open set proves the destination unreachable and
@@ -123,7 +128,7 @@ stay well under that. Per-route memory budget at peak:
 | Component | Size | Comment |
 |---|---|---|
 | Cell cache (byte budget) | ≤64 MB | Scale-10 SZCI v3 cells are fetched lazily. |
-| Visited-node table + heap (worker) | ~150–180 MB peak at the 1M greedy budget | `NodeTable` in `routing-worker.js`: open-addressing hash on node id with typed-array columns for g / prev / prev-edge / closed, 21 B per slot, power-of-two capacity at ≤ 50 % load, ~1.4 entries per pop (inserted on relaxation) ⇒ a 4M-slot table (~88 MB, ~130 MB while it doubles) plus a `NodeHeap` at 12 B per push. The old `Map`-based state cost ~440 B per node, i.e. the same envelope at 400k pops. The main-thread fallback still uses `Map`s. |
+| Visited-node table + heap (worker) | ~90–130 MB peak at the 500k budgets | `NodeTable` in `routing-worker.js`: open-addressing hash on node id with typed-array columns for g / prev / prev-edge / closed, 21 B per slot, power-of-two capacity at ≤ 50 % load, ~1.4 entries per pop (inserted on relaxation) ⇒ a 4M-slot table (~88 MB, ~130 MB while it doubles) plus a `NodeHeap` at 12 B per push. The old `Map`-based state cost ~440 B per node, i.e. the same envelope at 400k pops. The main-thread fallback still uses `Map`s. |
 | MapLibre tiles + DOM | ~100 MB | Constant-ish. |
 | **Routing peak** | **~500–600 MB** | Measured on Tokyo→Oita with the harness. |
 
@@ -135,7 +140,7 @@ Knobs in `resources/viewer/index.html`:
 * Per-phase compaction: `graph.compact(4)` between two-pass legs;
   `graph.compact(0)` before any route with crow-fly > 100 km
   (the "pre-route cleanup" pause + GC yields).
-* Pop limits (worker): 500k optimal / 1M greedy on full A*; 150k
+* Pop limits (worker): 500k optimal / 500k greedy on full A*; 150k
   optimal / 300k greedy on the highway-only middle leg. The
   main-thread fallback keeps the old 200k / 400k and 50k /
   100k greedy on the highway-only middle leg.
@@ -298,10 +303,17 @@ Eureka (1,093 km crow-fly, so both engines skip the optimal pass):
 | SD → Eureka | 49,724 s / 1,312 km in 0.6 s | 49,321 s / 1,311 km in 2.0 s | 46,307 s / 1,229 km |
 | Eureka → SD | 51,420 s / 1,309 km in 0.6 s | 50,955 s / 1,320 km in 0.5 s | 46,295 s / 1,230 km |
 
-Greedy ×1.5 is 6.5 % / 10 % over the optimum here; the old engine's
-80 km/h heuristic made its greedy pass effectively ×1.875, so it
-expanded fewer nodes (69 k vs 667 k) at slightly worse quality. Two
-observations for future work, not changed on this branch:
+With the greedy factor at ×1.5 the new engine returned routes 6.5 % /
+10 % over the optimum after 667 k / 152 k pops; at the shipped ×1.875
+it returns the same routes as the old engine after ~60 k / 49 k
+pops. Ten random pairs up to 400 km (seed 7), old vs new, wall
+per route in node: 372 km pair 2.3 s → 1.7 s (and a 4 % better
+route, 20,004 s vs 20,872 s); 320 km 2.3 s → 1.2 s; 331 km 1.8 s →
+0.7 s (now finishes in the optimal pass); two unreachable ~400 km
+pairs 3.2 s / 2.7 s → 1.7 s / 1.4 s; 10-route total 13.8 s → 7.6 s.
+Twenty random pairs up to 60 km: 4.4 s → 3.7 s wall for the whole
+run including init. Two observations for future work, not changed
+on this branch:
 
 * The true optimum needs 5.7 M expansions on SD → Eureka and the
   64 MB cell budget then thrashes (700 k cell misses, 349 s in node);

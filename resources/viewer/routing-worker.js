@@ -53,7 +53,19 @@ var HEURISTIC_MPS = HEURISTIC_SPEED_KMH / 3.6;
 // budgets every pair completes in the optimal pass. ~800k pops/s on a
 // desktop core; budget the worst case at a few seconds on a phone.
 var POP_LIMIT_FULL_OPTIMAL = 500000;
-var POP_LIMIT_FULL_GREEDY = 1000000;
+// Greedy is the fallback for routes the optimal pass could not finish;
+// on a 7,500-cell state graph every extra 100k pops past the resident
+// cell budget is cell thrash (California, 400 km pair that is not
+// reachable: 1.5M pops took 13 s in node, ~115k pops/s). 500k keeps a
+// hopeless search under ~5 s while still being 2.5x the old 200k.
+var POP_LIMIT_FULL_GREEDY = 500000;
+// Weighted-A* factor for the full-graph greedy pass. The old engine
+// used 1.5 on top of an 80 km/h heuristic, i.e. an effective
+// 1.5 × 100/80 = 1.875 relative to the admissible 100 km/h estimate.
+// Keeping that effective weight keeps the fallback as focused as it
+// used to be: at 1.5 a 372 km California pair needed >1M pops (14 s
+// end to end through two-pass) where 1.875 converges in ~230k.
+var GREEDY_WEIGHT_FULL = 1.875;
 var POP_LIMIT_HW_OPTIMAL = 150000;
 var POP_LIMIT_HW_GREEDY = 300000;
 
@@ -1132,7 +1144,7 @@ async function findRouteSpatialFiltered(startNode, endNode, highwayOnly, ctx) {
   }
   return findRouteSpatialAStar(
     startNode, endNode, highwayOnly,
-    /*greedy*/ highwayOnly ? 2.0 : 1.5,
+    /*greedy*/ highwayOnly ? 2.0 : GREEDY_WEIGHT_FULL,
     /*popLimit*/ highwayOnly ? POP_LIMIT_HW_GREEDY : POP_LIMIT_FULL_GREEDY,
     ctx);
 }
