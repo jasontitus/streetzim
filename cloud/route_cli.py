@@ -60,6 +60,13 @@ from tests.szrg_astar import R_EARTH, HEURISTIC_SPEED_MPS, haversine_m
 CLASS_ORD_MASK = 0x1F
 HIGHWAY_TIER_ORDS = frozenset({1, 2, 3, 4, 5, 6})  # motorway..primary_link
 NO_MOTOR_BIT = 0x200  # class_access bit 9 — see docs/driving-mode-road-class-warnings.md
+NO_MOTOR_ORD_MIN, NO_MOTOR_ORD_MAX = 16, 20  # path..steps: never drivable
+
+
+def is_no_motor(class_access: int) -> bool:
+    if class_access & NO_MOTOR_BIT:
+        return True
+    return NO_MOTOR_ORD_MIN <= (class_access & CLASS_ORD_MASK) <= NO_MOTOR_ORD_MAX
 
 
 def parse_lat_lon(s: str) -> tuple[float, float]:
@@ -91,7 +98,7 @@ def nearest_node(g: SpatialGraph, lat: float, lon: float) -> tuple[int, float]:
     for cand in order:
         cid = int(cand)
         out = g.edges_of_node(cid)
-        if not out or any(not (ca & NO_MOTOR_BIT) for (*_r, ca) in out):
+        if not out or any(not is_no_motor(ca) for (*_r, ca) in out):
             return cid, float(d[cid])
     idx = int(np.argmin(d))
     return idx, float(d[idx])
@@ -176,8 +183,8 @@ def find_route_filtered(
         closed[current] = 1
         current_g = gscore[current]
         for (target, speed_dist, _gi, _ni, class_access) in g.edges_of_node(current):
-            if class_access & NO_MOTOR_BIT:
-                continue  # car profile: footway / steps / private (bit 9)
+            if is_no_motor(class_access):
+                continue  # car profile: footway / steps / private (bit 9 or ordinal 16..20)
             if highway_only and (class_access & CLASS_ORD_MASK) not in HIGHWAY_TIER_ORDS:
                 continue
             if closed[target]:

@@ -35,6 +35,15 @@ HEURISTIC_SPEED_KPH = 100.0
 # class_access bit 9: no motor vehicles. The car profile never expands
 # such an edge (mirrors routing-worker.js / index.html).
 NO_MOTOR_BIT = 0x200
+# Class ordinals 16..20 (path/footway/cycleway/pedestrian/steps) are never
+# drivable either; ZIMs built before bit 9 existed still carry them.
+NO_MOTOR_ORD_MIN, NO_MOTOR_ORD_MAX = 16, 20
+
+
+def is_no_motor(class_access: int) -> bool:
+    if class_access & NO_MOTOR_BIT:
+        return True
+    return NO_MOTOR_ORD_MIN <= (class_access & 0x1F) <= NO_MOTOR_ORD_MAX
 HEURISTIC_SPEED_MPS = HEURISTIC_SPEED_KPH / 3.6
 M_PER_DEG_LAT = math.pi * R_EARTH / 180.0
 
@@ -149,7 +158,7 @@ def find_route(g: SZRG, start: int, end: int, *, max_pops: int | None = None) ->
                 dist_speed = edges_flat[base + 1]
                 dist_m = (dist_speed & 0xFFFFFF) / 10.0
                 speed = dist_speed >> 24
-            no_motor = stride >= 5 and (edges_flat[base + 4] & NO_MOTOR_BIT)
+            no_motor = stride >= 5 and is_no_motor(int(edges_flat[base + 4]))
             base += stride
             if speed == 0 or no_motor:
                 continue

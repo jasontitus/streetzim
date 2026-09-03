@@ -342,6 +342,16 @@ function isHighwayClass(classAccess) {
 // builder marked them, a 20 m staircase at 3 km/h out-scored any road
 // detour over ~200 m and cars were routed down stairs.
 var NO_MOTOR_BIT = 0x200;
+// Class ordinals 16..20 (path, footway, cycleway, pedestrian, steps —
+// create_osm_zim.CLASS_ORDINAL) are never drivable either. ZIMs built
+// before the builder set bit 9 still carry these ways in the car graph
+// with 3–5 km/h speeds, so the ordinal is checked alongside the bit.
+var NO_MOTOR_ORD_MIN = 16, NO_MOTOR_ORD_MAX = 20;
+function isNoMotor(classAccess) {
+  if (classAccess & NO_MOTOR_BIT) return true;
+  var ord = classAccess & 0x1F;
+  return ord >= NO_MOTOR_ORD_MIN && ord <= NO_MOTOR_ORD_MAX;
+}
 
 // --- Sparse visited-node state -------------------------------------
 // Open-addressing hash table keyed by global node id with parallel
@@ -940,6 +950,22 @@ SpatialGraph.prototype.nodeCoordsE7 = function(globalNodeIdx) {
     return [cell.nodesScaled[local * 2], cell.nodesScaled[local * 2 + 1]];
   });
 };
+// Snap candidates are ranked by planar distance (longitude scaled by
+// cos(lat)), but the nearest vertex is not always a usable one: a
+// footpath vertex (all out-edges no-motor) or a four-node pier / private
+// drive fragment that never reconnects to the road network. The car A*
+// can't leave such a node, so a snap there guarantees "No route found"
+// even though a perfectly good road is a few metres further. We keep the
+// SNAP_CANDIDATES nearest car-ok vertices and return the first one from
+// which a bounded forward BFS reaches SNAP_MIN_REACH nodes; if none does
+// (tiny island ZIM), the nearest is returned as before. A candidate is
+// only preferred over a nearer one when it is at most SNAP_MAX_EXTRA_M
+// further away, so a legitimate one-way dead end right under the tap
+// still wins over a road a kilometre off.
+var SNAP_CANDIDATES = 6;
+var SNAP_MIN_REACH = 32;
+var SNAP_MAX_EXTRA_M = 1000;
+
 SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7) {
   var scale = this._index.cellScale;
   // Longitude degrees shrink with latitude — without this the snap
@@ -960,8 +986,10 @@ SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7) {
     candidates.push([dlat * dlat + dlon * dlon, cid]);
   }
   candidates.sort(function(a, b) { return a[0] - b[0]; });
-  var bestNode = -1, bestDist = Infinity, bestLat = 0, bestLon = 0;
-  for (var i = 0; i < candidates.length && candidates[i][0] <= bestDist; i++) {
+  // best[] holds up to SNAP_CANDIDATES {dist, node, lat, lon}, ascending.
+  var best = [];
+  var worstKept = Infinity;  // dist of best[SNAP_CANDIDATES-1] once full
+  for (var i = 0; i < candidates.length && candidates[i][0] <= worstKept; i++) {
     var cell = await this._ensureCell(candidates[i][1]);
     var v2 = !!cell.nodesScaled;
     var cellAdj = cell.cellAdj, edges = cell.edges;
@@ -972,27 +1000,65 @@ SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7) {
       var ndlat = nlat - latE7;
       var ndlon = (nlon - lonE7) * cosLat;
       var dist = ndlat * ndlat + ndlon * ndlon;
-      if (dist < bestDist) {
-        // Skip nodes whose outgoing edges are ALL no-motor-vehicle (a
-        // footpath vertex next to the road). A node with no outgoing
-        // edges at all stays eligible — it's the end of a one-way and a
-        // perfectly good destination. Checked lazily, only when a node
-        // would improve the best, so the scan's per-node cost stays tiny.
-        var eStart = cellAdj[local], eEnd = cellAdj[local + 1];
-        var carOk = (eStart === eEnd);
-        for (var ei = eStart; ei < eEnd; ei++) {
-          if (!(edges[ei * 5 + 4] & NO_MOTOR_BIT)) { carOk = true; break; }
-        }
-        if (!carOk) continue;
-        bestDist = dist;
-        bestNode = globalNode;
-        bestLat = nlat;
-        bestLon = nlon;
+      if (dist >= worstKept) continue;
+      // Skip nodes whose outgoing edges are ALL no-motor-vehicle (a
+      // footpath vertex next to the road). A node with no outgoing
+      // edges at all stays eligible — it's the end of a one-way and a
+      // perfectly good destination. Checked lazily, only when a node
+      // would make the shortlist, so the scan's per-node cost stays tiny.
+      var eStart = cellAdj[local], eEnd = cellAdj[local + 1];
+      var carOk = (eStart === eEnd);
+      for (var ei = eStart; ei < eEnd; ei++) {
+        if (!isNoMotor(edges[ei * 5 + 4])) { carOk = true; break; }
       }
+      if (!carOk) continue;
+      var k = best.length;
+      while (k > 0 && best[k - 1].dist > dist) k--;
+      best.splice(k, 0, { dist: dist, node: globalNode, lat: nlat, lon: nlon });
+      if (best.length > SNAP_CANDIDATES) best.pop();
+      if (best.length === SNAP_CANDIDATES) worstKept = best[best.length - 1].dist;
     }
   }
-  if (bestNode < 0) throw new Error('no routing nodes');
-  return { node: bestNode, lat: bestLat / 1e7, lon: bestLon / 1e7 };
+  if (best.length === 0) throw new Error('no routing nodes');
+  // 1 m ≈ 90 e7-units of latitude (and of cos-scaled longitude).
+  var extra = SNAP_MAX_EXTRA_M * 90;
+  var limitR = Math.sqrt(best[0].dist) + extra;
+  var pick = best[0];
+  for (var c = 0; c < best.length; c++) {
+    if (Math.sqrt(best[c].dist) > limitR) break;
+    if (await this._reachesAtLeast(best[c].node, SNAP_MIN_REACH)) { pick = best[c]; break; }
+  }
+  return { node: pick.node, lat: pick.lat / 1e7, lon: pick.lon / 1e7 };
+};
+
+// Bounded forward BFS over drivable edges: true once `limit` distinct
+// nodes are reachable from `node` (itself included). Cheap — a real road
+// vertex hits the limit within a few hops — and it only ever touches
+// the one or two cells around the snap point.
+SpatialGraph.prototype._reachesAtLeast = async function(node, limit) {
+  var seen = new Set([node]);
+  var queue = [node];
+  var head = 0;
+  while (head < queue.length) {
+    if (seen.size >= limit) return true;
+    var cur = queue[head++];
+    var cid = this.cellForNode(cur);
+    if (cid < 0) continue;
+    var cell = this.cellIfResident(cid);
+    if (cell === null) cell = await this._ensureCell(cid);
+    var local = cell.localIdxFor(cur);
+    if (local < 0) continue;
+    var edges = cell.edges;
+    var eEnd = cell.cellAdj[local + 1];
+    for (var ei = cell.cellAdj[local]; ei < eEnd; ei++) {
+      var ca = edges[ei * 5 + 4];
+      if (isNoMotor(ca)) continue;
+      if ((edges[ei * 5 + 1] >>> 24) === 0) continue;
+      var t = edges[ei * 5];
+      if (!seen.has(t)) { seen.add(t); queue.push(t); if (seen.size >= limit) return true; }
+    }
+  }
+  return seen.size >= limit;
 };
 // Promise-returning edge list (kept for tooling / debugging; the A*
 // loops read the cell's typed arrays directly).
@@ -1160,7 +1226,7 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     for (var ei = cellAdj[local]; ei < eEnd; ei++) {
       var base = ei * 5;
       var classAccess = edges[base + 4];
-      if (classAccess & NO_MOTOR_BIT) continue;
+      if (isNoMotor(classAccess)) continue;
       if (highwayOnly && !isHighwayClass(classAccess)) continue;
       var speedDist = edges[base + 1];
       var speed = speedDist >>> 24;
@@ -1312,7 +1378,7 @@ async function findNearestHighwayNode(seedNode, maxPops) {
       if (isHighwayClass(edges[ei * 5 + 4])) return current;
     }
     for (var e2 = eStart; e2 < eEnd; e2++) {
-      if (edges[e2 * 5 + 4] & NO_MOTOR_BIT) continue;
+      if (isNoMotor(edges[e2 * 5 + 4])) continue;
       var target = edges[e2 * 5];
       if (!visited.has(target)) {
         visited.add(target);

@@ -50,6 +50,7 @@ File formats (little-endian, u32 unless stated):
 from __future__ import annotations
 
 import bisect
+import math
 import os
 import struct
 from dataclasses import dataclass, field
@@ -62,6 +63,22 @@ from tests.szrg_reader import SZRG, parse_szrg_bytes
 # class_access bit 9 (see docs/driving-mode-road-class-warnings.md). Kept
 # local rather than imported from szrg_astar to avoid a circular import.
 _NO_MOTOR_BIT = 0x200
+_NO_MOTOR_ORD_MIN, _NO_MOTOR_ORD_MAX = 16, 20  # path..steps ordinals
+
+
+def _is_no_motor(class_access: int) -> bool:
+    if class_access & _NO_MOTOR_BIT:
+        return True
+    return _NO_MOTOR_ORD_MIN <= (class_access & 0x1F) <= _NO_MOTOR_ORD_MAX
+
+
+# Snap shortlist (mirrors routing-worker.js SNAP_*): keep the N nearest
+# car-ok vertices, return the first from which a bounded forward BFS
+# reaches SNAP_MIN_REACH nodes, as long as it is at most SNAP_MAX_EXTRA_M
+# further from the query than the nearest.
+SNAP_CANDIDATES = 6
+SNAP_MIN_REACH = 32
+SNAP_MAX_EXTRA_M = 1000
 
 
 SZCI_MAGIC = b"SZCI"
@@ -775,9 +792,18 @@ class SpatialGraph:
                 int(cell.nodes_scaled[local * 2 + 1]))
 
     def nearest_node(self, lat_e7: int, lon_e7: int) -> int:
-        """Find the exact nearest node while loading only plausible cells."""
+        """Find the nearest usable node while loading only plausible cells.
+
+        Distances are planar with longitude scaled by cos(lat), matching
+        the JS snappers. Nodes whose every outgoing edge is closed to
+        motor vehicles are skipped, and among the nearest few car-ok
+        vertices the first whose forward component is at least
+        ``SNAP_MIN_REACH`` nodes wins (so a four-node pier fragment next
+        to a road doesn't yield "no route").
+        """
         scale = self._index.cell_scale
-        candidates: list[tuple[int, int]] = []
+        cos_lat = max(0.05, math.cos(math.radians(lat_e7 / 1e7)))
+        candidates: list[tuple[float, int]] = []
         for cid in range(self._index.num_cells):
             la = int(self._index.cell_lat_idx[cid])
             lo = int(self._index.cell_lon_idx[cid])
@@ -789,39 +815,67 @@ class SpatialGraph:
                 lat_e7 - lat_max if lat_e7 > lat_max else 0)
             dlon = lon_min - lon_e7 if lon_e7 < lon_min else (
                 lon_e7 - lon_max if lon_e7 > lon_max else 0)
+            dlon *= cos_lat
             candidates.append((dlat * dlat + dlon * dlon, cid))
         candidates.sort()
-        best_node = -1
-        best_dist = None
+        best: list[tuple[float, int]] = []   # (dist, global node) ascending
+        worst_kept = math.inf
         for lower_bound, cid in candidates:
-            if best_dist is not None and lower_bound > best_dist:
+            if lower_bound > worst_kept:
                 break
             cell = self._ensure_cell(cid)
             adj = cell.cell_adj
             edges = cell.edges
             for local in range(cell.node_count):
                 dlat = int(cell.nodes_scaled[local * 2]) - lat_e7
-                dlon = int(cell.nodes_scaled[local * 2 + 1]) - lon_e7
+                dlon = (int(cell.nodes_scaled[local * 2 + 1]) - lon_e7) * cos_lat
                 dist = dlat * dlat + dlon * dlon
-                if best_dist is not None and dist >= best_dist:
+                if dist >= worst_kept:
                     continue
-                # Same rule as routing-worker.js snapNearestNode: a node
-                # whose every outgoing edge is closed to motor vehicles
-                # (class_access bit 9) can never be expanded by the car
-                # A*, so snapping to it guarantees "no route". Nodes with
-                # no outgoing edges at all (sinks) stay eligible.
                 e_start = int(adj[local])
                 e_end = int(adj[local + 1])
                 car_ok = e_start == e_end
                 for ei in range(e_start, e_end):
-                    if not (int(edges[ei * 5 + 4]) & _NO_MOTOR_BIT):
+                    if not _is_no_motor(int(edges[ei * 5 + 4])):
                         car_ok = True
                         break
                 if not car_ok:
                     continue
-                best_dist = dist
-                best_node = cell.base_node + local
-        return best_node
+                best.append((dist, cell.base_node + local))
+                best.sort()
+                if len(best) > SNAP_CANDIDATES:
+                    best.pop()
+                if len(best) == SNAP_CANDIDATES:
+                    worst_kept = best[-1][0]
+        if not best:
+            return -1
+        limit_r = math.sqrt(best[0][0]) + SNAP_MAX_EXTRA_M * 90
+        for dist, node in best:
+            if math.sqrt(dist) > limit_r:
+                break
+            if self._reaches_at_least(node, SNAP_MIN_REACH):
+                return node
+        return best[0][1]
+
+    def _reaches_at_least(self, node: int, limit: int) -> bool:
+        """Bounded forward BFS over drivable edges (mirrors the worker)."""
+        seen = {node}
+        queue = [node]
+        head = 0
+        while head < len(queue):
+            if len(seen) >= limit:
+                return True
+            cur = queue[head]
+            head += 1
+            for (target, speed_dist, _gi, _ni, ca) in self.edges_of_node(cur):
+                if _is_no_motor(ca) or (speed_dist >> 24) == 0:
+                    continue
+                if target not in seen:
+                    seen.add(target)
+                    queue.append(target)
+                    if len(seen) >= limit:
+                        return True
+        return len(seen) >= limit
 
     def edges_of_node(self, global_node_idx: int) -> list[tuple[int, int, int, int, int]]:
         """Return list of edges for a global node as (target, speed_dist,

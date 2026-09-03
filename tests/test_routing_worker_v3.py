@@ -282,3 +282,88 @@ def test_worker_reports_unreachable_as_ok_with_null_result(tmp_path: Path):
     assert unreachable["ok"] is True and unreachable["error"] is None
     assert unreachable["time"] is None
     assert reachable["ok"] is True and reachable["time"] is not None
+
+
+def _pack_v4_graph_cls(nodes_e7, edges, names=("",)):
+    """Like _pack_v4_graph but each edge carries a 7th element,
+    class_access, so tests can mark footway ordinals / bit 9."""
+    import struct
+    num_nodes = len(nodes_e7)
+    nodes_blob = struct.pack(f"<{num_nodes * 2}i",
+                             *[v for (lat, lon) in nodes_e7 for v in (lat, lon)])
+    edges_sorted = sorted(edges, key=lambda e: e[0])
+    adj = [0] * (num_nodes + 1)
+    for e in edges_sorted:
+        adj[e[0] + 1] += 1
+    for i in range(1, num_nodes + 1):
+        adj[i] += adj[i - 1]
+    vals = []
+    for (_f, target, dist_dm, speed, geom_idx, name_idx, cls) in edges_sorted:
+        vals += [target, ((speed & 0xFF) << 24) | (dist_dm & 0xFFFFFF),
+                 geom_idx, name_idx, cls]
+    name_offsets = [0]
+    name_bytes = b""
+    for n in names:
+        name_bytes += n.encode("utf-8")
+        name_offsets.append(len(name_bytes))
+    header = b"SZRG" + struct.pack("<7I", 4, num_nodes, len(edges), 0, 0,
+                                   len(names), len(name_bytes))
+    return (header + nodes_blob + struct.pack(f"<{num_nodes + 1}I", *adj)
+            + struct.pack(f"<{len(vals)}I", *vals) + struct.pack("<I", 0)
+            + struct.pack(f"<{len(names) + 1}I", *name_offsets) + name_bytes)
+
+
+def test_worker_snap_skips_footway_vertex_and_isolated_fragment(tmp_path: Path):
+    """The nearest vertex to a tap is often unusable for a car: a footway
+    vertex (class ordinal 17 on pre-bit-9 ZIMs) or a tiny fragment the
+    A* can never leave. Both the worker and the Python snapper must skip
+    them for the connected road a few metres further away."""
+    if shutil.which("node") is None:
+        pytest.skip("node is not installed")
+    from tests.szrg_spatial import SpatialGraph  # noqa: F401  (import check)
+
+    # A 60-node two-way road running east along lat 40.0000 at 50 m steps.
+    nodes = [(400_000_000, -1_050_000_000 + i * 6_000) for i in range(60)]
+    edges = []
+    for i in range(59):
+        edges.append((i, i + 1, 500, 50, 0xFFFFFFFF, 0, 11))
+        edges.append((i + 1, i, 500, 50, 0xFFFFFFFF, 0, 11))
+    # Query point 20 m north of road node 30.
+    q_lat, q_lon = 400_001_800, nodes[30][1]
+    # (a) footway-only vertex 5 m from the query (ordinal 17, bit 9 clear,
+    #     exactly what a June-2026 ZIM contains).
+    foot = len(nodes)
+    nodes.append((q_lat + 450, q_lon))
+    nodes.append((q_lat + 450, q_lon + 3_000))
+    edges.append((foot, foot + 1, 250, 5, 0xFFFFFFFF, 0, 17))
+    edges.append((foot + 1, foot, 250, 5, 0xFFFFFFFF, 0, 17))
+    # (b) a three-node private-drive fragment 8 m from the query,
+    #     car-ok edges but disconnected from the road.
+    frag = len(nodes)
+    nodes.append((q_lat - 720, q_lon))
+    nodes.append((q_lat - 720, q_lon + 2_000))
+    nodes.append((q_lat - 720, q_lon + 4_000))
+    for a, b in ((frag, frag + 1), (frag + 1, frag + 2)):
+        edges.append((a, b, 150, 20, 0xFFFFFFFF, 0, 14))
+        edges.append((b, a, 150, 20, 0xFFFFFFFF, 0, 14))
+
+    graph = parse_szrg_bytes(_pack_v4_graph_cls(nodes, edges))
+    routing_dir = tmp_path / "routing-data"
+    build_spatial(graph, cell_scale=10, output_dir=routing_dir)
+
+    # Worker: snap the query and route to the far end of the road.
+    out = _run_worker(tmp_path, [[q_lat / 1e7, q_lon / 1e7,
+                                  nodes[59][0] / 1e7, nodes[59][1] / 1e7]])
+    r = out[0]
+    assert r["start"] == 30, f"snapped to {r['start']} instead of road node 30"
+    assert r["end"] == 59
+    assert r["ok"] and r["time"] is not None
+
+    # Python reference snapper agrees.
+    sg = _spatial_graph_from_dir(routing_dir)
+    assert sg.nearest_node(q_lat, q_lon) == 30
+    # And the reference A* never uses the footway (ordinal rule).
+    from tests.szrg_spatial_astar import find_route_spatial
+    ref = find_route_spatial(sg, 30, 59)
+    assert ref is not None
+    assert abs(ref.total_time_s - r["time"]) < 1e-6

@@ -6328,6 +6328,13 @@ function initRouting(map, config) {
     });
   };
 
+  // Shortlist snap (mirrors routing-worker.js SNAP_*): the nearest vertex
+  // may be a footpath vertex or a tiny disconnected fragment (pier,
+  // private drive) the car A* can never leave. Keep the nearest few
+  // car-ok vertices and return the first whose forward component
+  // reaches SNAP_MIN_REACH nodes, provided it is at most
+  // SNAP_MAX_EXTRA_M further away than the nearest.
+  var SNAP_CANDIDATES = 6, SNAP_MIN_REACH = 32, SNAP_MAX_EXTRA_M = 1000;
   SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7) {
     var scale = this._index.cellScale;
     // Longitude degrees shrink with latitude — compare in a locally
@@ -6347,8 +6354,8 @@ function initRouting(map, config) {
       candidates.push([dlat * dlat + dlon * dlon, cid]);
     }
     candidates.sort(function(a, b) { return a[0] - b[0]; });
-    var bestNode = -1, bestDist = Infinity, bestLat = 0, bestLon = 0;
-    for (var i = 0; i < candidates.length && candidates[i][0] <= bestDist; i++) {
+    var best = [], worstKept = Infinity;
+    for (var i = 0; i < candidates.length && candidates[i][0] <= worstKept; i++) {
       var cell = await this._ensureCell(candidates[i][1]);
       for (var local = 0; local < cell.nodeCount; local++) {
         var nlat = cell.nodesScaled[local * 2];
@@ -6356,24 +6363,47 @@ function initRouting(map, config) {
         var ndlat = nlat - latE7;
         var ndlon = (nlon - lonE7) * cosLat;
         var dist = ndlat * ndlat + ndlon * ndlon;
-        if (dist < bestDist) {
-          // Same rule as the worker: skip a node whose outgoing edges are
-          // all car-prohibited (footpath vertex); edgeless sinks stay.
-          var eS = cell.cellAdj[local], eE = cell.cellAdj[local + 1];
-          var carOk = (eS === eE);
-          for (var ei = eS; ei < eE; ei++) {
-            if (!(cell.edges[ei * 5 + 4] & NO_MOTOR_BIT)) { carOk = true; break; }
-          }
-          if (!carOk) continue;
-          bestDist = dist;
-          bestNode = cell.baseNode + local;
-          bestLat = nlat;
-          bestLon = nlon;
+        if (dist >= worstKept) continue;
+        // Skip a node whose outgoing edges are all car-prohibited
+        // (footpath vertex); edgeless sinks stay eligible.
+        var eS = cell.cellAdj[local], eE = cell.cellAdj[local + 1];
+        var carOk = (eS === eE);
+        for (var ei = eS; ei < eE; ei++) {
+          if (!isNoMotor(cell.edges[ei * 5 + 4])) { carOk = true; break; }
         }
+        if (!carOk) continue;
+        var k = best.length;
+        while (k > 0 && best[k - 1].dist > dist) k--;
+        best.splice(k, 0, { dist: dist, node: cell.baseNode + local, lat: nlat, lon: nlon });
+        if (best.length > SNAP_CANDIDATES) best.pop();
+        if (best.length === SNAP_CANDIDATES) worstKept = best[best.length - 1].dist;
       }
     }
-    if (bestNode < 0) throw new Error('no routing nodes');
-    return { node: bestNode, lat: bestLat / 1e7, lon: bestLon / 1e7 };
+    if (best.length === 0) throw new Error('no routing nodes');
+    var limitR = Math.sqrt(best[0].dist) + SNAP_MAX_EXTRA_M * 90;  // ~90 e7/m
+    var pick = best[0];
+    for (var c = 0; c < best.length; c++) {
+      if (Math.sqrt(best[c].dist) > limitR) break;
+      if (await this._reachesAtLeast(best[c].node, SNAP_MIN_REACH)) { pick = best[c]; break; }
+    }
+    return { node: pick.node, lat: pick.lat / 1e7, lon: pick.lon / 1e7 };
+  };
+
+  // Bounded forward BFS over drivable edges: true once `limit` distinct
+  // nodes are reachable from `node`.
+  SpatialGraph.prototype._reachesAtLeast = async function(node, limit) {
+    var seen = new Set([node]);
+    var queue = [node], head = 0;
+    while (head < queue.length) {
+      if (seen.size >= limit) return true;
+      var edges = await this.edgesOfNode(queue[head++]);
+      for (var i = 0; i < edges.length; i++) {
+        var e = edges[i];
+        if (isNoMotor(e[4]) || (e[1] >>> 24) === 0) continue;
+        if (!seen.has(e[0])) { seen.add(e[0]); queue.push(e[0]); if (seen.size >= limit) return true; }
+      }
+    }
+    return seen.size >= limit;
   };
 
   // Returns a promise resolving to an array of edges for the given
@@ -6557,7 +6587,7 @@ function initRouting(map, config) {
           var eS = adj[n], eE = adj[n + 1];
           var carOk = (eS === eE);
           for (var ei = eS; ei < eE; ei++) {
-            if (!(graph.edgeClassAccess(ei) & NO_MOTOR_BIT)) { carOk = true; break; }
+            if (!isNoMotor(graph.edgeClassAccess(ei))) { carOk = true; break; }
           }
           if (!carOk) continue;
         }
@@ -6660,6 +6690,14 @@ function initRouting(map, config) {
   // class_access bit 9: no motor vehicles (footway / steps / private).
   // Never expanded by the driving profile — see routing-worker.js.
   var NO_MOTOR_BIT = 0x200;
+  // Ordinals 16..20 (path/footway/cycleway/pedestrian/steps) are never
+  // drivable either; ZIMs built before bit 9 existed still carry them
+  // in the car graph, so the ordinal is checked alongside the bit.
+  function isNoMotor(classAccess) {
+    if (classAccess & NO_MOTOR_BIT) return true;
+    var ord = classAccess & 0x1F;
+    return ord >= 16 && ord <= 20;
+  }
 
   // ?debug=1 overlay — shows pops/cells/heap during routing so we can
   // tell whether a long route is bottlenecked on cell cache, visited-
@@ -6907,7 +6945,7 @@ function initRouting(map, config) {
         }
       }
       for (var k = 0; k < edges.length; k++) {
-        if (edges[k][4] & NO_MOTOR_BIT) continue;
+        if (isNoMotor(edges[k][4])) continue;
         var target = edges[k][0];
         if (!visited.has(target)) {
           visited.add(target);
@@ -7039,7 +7077,7 @@ function initRouting(map, config) {
       var curG = g.get(current);
       for (var k = 0; k < nodeEdges.length; k++) {
         var e = nodeEdges[k];
-        if (e[4] & NO_MOTOR_BIT) continue;
+        if (isNoMotor(e[4])) continue;
         if (highwayOnly && !isHighwayClass(e[4])) continue;
         var target = e[0];
         var speedDist = e[1];
@@ -7532,7 +7570,7 @@ function initRouting(map, config) {
       var eEnd = adjOffsets[current + 1];
 
       for (var i = eStart; i < eEnd; i++) {
-        if (graph.edgeClassAccess(i) & NO_MOTOR_BIT) continue;
+        if (isNoMotor(graph.edgeClassAccess(i))) continue;
         var target = graph.edgeTarget(i);
         var distM = graph.edgeDistMeters(i);
         var speed = graph.edgeSpeed(i);

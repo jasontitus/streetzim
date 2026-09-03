@@ -65,6 +65,32 @@ or two-pass when the optimal pass would have crashed the page.
 * `?route=full` / `?route=two-pass` reach the worker via
   `options.route`.
 
+### Snapping and non-drivable edges
+
+Both snappers (`snapNearestNode` in the worker and in
+`index.html`) rank vertices by planar distance with longitude scaled
+by cos(lat), and they never return a vertex the car A* could not
+leave:
+
+* an edge is *non-drivable* when `class_access` has bit 9 set
+  (builders from 2026-09 on) **or** its class ordinal is 16..20
+  (path, footway, cycleway, pedestrian, steps). Older ZIMs carry
+  those ways in the car graph at 3–5 km/h, which used to route cars
+  down staircases and — more often — snap the origin to a pier or
+  footpath vertex and report "No route found". `isNoMotor()` is the
+  single predicate every A*, BFS and snapper uses.
+* the snap keeps the six nearest car-ok vertices and returns the
+  first from which a bounded forward BFS reaches 32 nodes, provided
+  it is no more than 1 km further away than the nearest. A
+  four-node private-drive fragment or a one-way stub right next to
+  the road no longer wins the snap. The Python references
+  (`tests/szrg_spatial.py`, `cloud/route_cli.py`) apply the same
+  rule so the differential harness stays byte-exact.
+
+On the Silicon Valley ZIM this moved 19 of 20 random metro pairs
+into the optimal pass (footways were inflating the search) and fixed
+one pair that snapped onto a pier and returned no route.
+
 ### Highway-tier filter
 
 Edges carry a `class_access` u32 from `CLASS_ORDINAL` in
