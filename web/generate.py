@@ -293,6 +293,13 @@ REGIONS = [
         "description": "All of Florida &mdash; Miami, Orlando, Tampa, Jacksonville, St. Petersburg, Tallahassee, Fort Lauderdale; the Everglades, the Keys, Cape Canaveral, the Atlantic and Gulf coasts, and Walt Disney World.",
     },
     {
+        "id": "carolinas",
+        "tier": "local",
+        "title": "The Carolinas",
+        "zim_file": "osm-carolinas.zim",
+        "description": "North and South Carolina &mdash; Charlotte, Raleigh, Durham, Greensboro, Winston-Salem, Columbia, Charleston, Myrtle Beach, Wilmington, and Asheville; the Blue Ridge and Great Smoky Mountains, the Research Triangle, and the Outer Banks and Atlantic coast.",
+    },
+    {
         "id": "nyc-metro",
         "tier": "local",
         "title": "New York Metro",

@@ -9,7 +9,7 @@ GPS fix), and the Wikipedia list opens + yields an in-ZIM "Read full article".
 import sys, threading, functools, http.server, socketserver, time
 from playwright.sync_api import sync_playwright
 
-ZIM = "/storage/streetzim/osm-california-geoviewer.zim"
+ZIM = "/storage/streetzim/osm-silicon-valley-2026-06-02.zim"
 PORT = 8765
 ROOT = "/storage/streetzim/web"
 
@@ -70,11 +70,11 @@ with sync_playwright() as p:
         check("map canvas rendered", False, str(e)[:120])
 
     # --- 4. locate button present + works with faked GPS ---
-    has_locate = page.query_selector(".maplibregl-ctrl-geolocate") is not None
+    has_locate = page.query_selector('.maplibregl-ctrl-geolocate') is not None
     check("locate button present", has_locate)
     if has_locate:
         try:
-            page.click(".maplibregl-ctrl-geolocate", timeout=5000)
+            page.click('.maplibregl-ctrl-geolocate', timeout=5000)
             page.wait_for_selector(".maplibregl-user-location-dot", timeout=10000)
             check("locate button drops a location dot (geolocation works)", True)
         except Exception as e:
