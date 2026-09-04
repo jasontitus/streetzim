@@ -48,6 +48,7 @@ is always kept — we don't drop on absence of evidence.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -77,7 +78,17 @@ def is_url_dead(url: str | None, cache: dict[str, dict]) -> bool:
     rec = cache.get(url.strip())
     if not rec:
         return False
-    return rec.get("alive") is False
+    if rec.get("alive") is not False:
+        return False
+    # STREETZIM_URL_DEAD_STATUSES=404,410,dns narrows "dead" to those
+    # cache statuses (403/429/5xx/timeouts are mostly bot-blocked, live
+    # sites). Unset keeps the historical any-alive=False rule. Mirrors
+    # create_osm_zim._is_url_dead.
+    raw = os.environ.get("STREETZIM_URL_DEAD_STATUSES", "").strip()
+    if not raw:
+        return True
+    dead = {x.strip().lower() for x in raw.split(",") if x.strip()}
+    return str(rec.get("status", "")).lower() in dead
 
 
 def decide_record_action(

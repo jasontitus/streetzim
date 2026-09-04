@@ -2149,8 +2149,25 @@ def _load_url_cache(path):
     return entries if isinstance(entries, dict) else {}
 
 
+def _url_dead_statuses():
+    """Optional narrowing of what counts as a dead website.
+
+    ``STREETZIM_URL_DEAD_STATUSES`` (comma-separated cache ``status``
+    values, e.g. ``404,410,dns``) restricts drop/scrub to those statuses.
+    Unset/empty keeps the historical rule: any ``alive: false`` entry is
+    dead. Motivation: 403 / 429 / 5xx / timeouts in the liveness cache
+    are dominated by bot-blocking CDNs, not closed businesses (the
+    2026-05-10 crawl marked 87k 403s and 35k 429s dead — Starbucks, BevMo,
+    AAA all fell out of the California ZIM)."""
+    raw = os.environ.get("STREETZIM_URL_DEAD_STATUSES", "").strip()
+    if not raw:
+        return None
+    return {x.strip().lower() for x in raw.split(",") if x.strip()}
+
+
 def _is_url_dead(url, cache):
-    """True iff the cache has an explicit alive=False for `url`.
+    """True iff the cache has an explicit alive=False for `url` (and, when
+    STREETZIM_URL_DEAD_STATUSES is set, its status is in that set).
     Unknown URLs (never crawled) are treated as alive — we never drop
     on absence of evidence."""
     if not url or not isinstance(url, str):
@@ -2158,7 +2175,12 @@ def _is_url_dead(url, cache):
     e = cache.get(url.strip())
     if not e:
         return False
-    return e.get("alive") is False
+    if e.get("alive") is not False:
+        return False
+    dead = _url_dead_statuses()
+    if dead is None:
+        return True
+    return str(e.get("status", "")).lower() in dead
 
 
 def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):

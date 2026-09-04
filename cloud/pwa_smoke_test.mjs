@@ -42,6 +42,14 @@ const ROUTE_PAIRS = {
     d: { lat: 37.3382, lon: -121.8863, label: 'San Jose' },
     crow_km: 75,
   },
+  'carolinas': {
+    // Raleigh → Asheville (~360 km) — cross-state E→W, runs the route
+    // straight through the western-NC mountains (the terrain-gap zone),
+    // exercising the spatial graph across the full bbox.
+    o: { lat: 35.7796, lon: -78.6382, label: 'Raleigh' },
+    d: { lat: 35.5951, lon: -82.5515, label: 'Asheville' },
+    crow_km: 360,
+  },
   'california': {
     // SF → LA (~560 km) — the canonical N-S cross-state route. Exercises
     // spatial graph cell paging across the full Central Valley + Grapevine.
@@ -161,6 +169,29 @@ const ROUTE_PAIRS = {
 };
 
 function pickRoutePair(zimUrl) {
+  // SMOKE_ROUTE="lat,lon;lat,lon[;crow_km]" overrides the table — the
+  // refresh queue passes each region's registry pair (cloud/regions.tsv)
+  // so regions without a ROUTE_PAIRS entry don't fall back to Silicon
+  // Valley coordinates (out of bbox → a false "no route").
+  const envRoute = process.env.SMOKE_ROUTE;
+  if (envRoute) {
+    const parts = envRoute.split(';');
+    const [ola, olo] = parts[0].split(',').map(Number);
+    const [dla, dlo] = (parts[1] || '').split(',').map(Number);
+    if ([ola, olo, dla, dlo].every(Number.isFinite)) {
+      let crow = Number(parts[2]);
+      if (!Number.isFinite(crow) || crow <= 0) {
+        const R = 6371, toRad = (d) => d * Math.PI / 180;
+        const dLat = toRad(dla - ola), dLon = toRad(dlo - olo);
+        const a = Math.sin(dLat / 2) ** 2 +
+          Math.cos(toRad(ola)) * Math.cos(toRad(dla)) * Math.sin(dLon / 2) ** 2;
+        crow = Math.round(2 * R * Math.asin(Math.sqrt(a)));
+      }
+      return { region: 'env', o: { lat: ola, lon: olo, label: 'origin' },
+               d: { lat: dla, lon: dlo, label: 'destination' }, crow_km: crow };
+    }
+    console.warn('SMOKE_ROUTE unparseable, ignoring: ' + envRoute);
+  }
   const wantLong = process.env.LONG_ROUTE === '1';
   for (const key of Object.keys(ROUTE_PAIRS)) {
     if (key.endsWith('-long')) continue;

@@ -1,0 +1,64 @@
+# Canonical StreetZim region registry — one row per shipped (or built) ZIM.
+# Columns (tab-separated):
+#   id	name	bbox(minlon,minlat,maxlon,maxlat)	tier	smoke_src(lat,lon)	smoke_dst(lat,lon)	smoke_search	notes
+# bbox = the bbox the most recent shipped build actually used (from the
+# build wrapper's "bbox:" stdout line, the queue spec, or the build script).
+# Rows marked RECONSTRUCTED had no surviving local record; confirm before use.
+# Smoke pairs are same-landmass city pairs well inside the bbox (100-500 km),
+# used by cloud/route_cli.py and cloud/pwa_smoke_test.mjs (SMOKE_ROUTE).
+# tier ∈ continent | multi-country | country | us-region | local (matches web/generate.py).
+#
+# --- local (small, fast; run first) ---
+silicon-valley	Silicon Valley	-122.6,37.2,-121.7,37.9	local	37.7749,-122.4194	37.3382,-121.8863	Palo Alto	
+washington-dc	Washington, D.C.	-77.12,38.79,-76.91,38.99	local	38.8977,-77.0365	38.8899,-77.0091	Georgetown	
+hawaii	Hawaii	-178.5,18.5,-154.5,28.5	local	21.2767,-157.8270	21.3683,-157.9776	Honolulu	smoke pair on Oahu only (islands are disconnected)
+chicago-metro	Chicago Metro	-88.5,41.0,-87.0,42.5	local	41.9742,-87.9073	41.8781,-87.6298	Chicago	
+nyc-metro	NYC Metro	-74.6,40.4,-73.4,41.4	local	40.7831,-73.9712	40.6413,-73.7781	Brooklyn	
+greater-la	Greater Los Angeles	-119.0,33.5,-117.0,34.8	local	33.9416,-118.4085	34.0928,-118.3287	Hollywood	
+hispaniola	Hispaniola	-74.5,17.5,-68.3,20.1	local	18.4861,-69.9312	19.4517,-70.6970	Santo Domingo	
+colorado	Colorado	-109.06,36.99,-102.04,41.00	local	39.7392,-104.9903	40.0150,-105.2705	Denver	
+florida	Florida	-88.0,24.4,-79.5,31.5	local	25.7617,-80.1918	28.5384,-81.3789	Miami	
+carolinas	The Carolinas	-84.4,32.0,-75.3,36.6	local	35.7796,-78.6382	35.5951,-82.5515	Charlotte	2026-07 blank-terrain incident region; terrain gate mandatory
+new-york-state	New York State	-80.0,40.4,-71.8,45.0	local	40.7128,-74.0060	42.8864,-78.8784	Albany	
+alaska	Alaska	-180.0,51.0,-130.0,72.0	local	61.2181,-149.9003	64.8378,-147.7164	Anchorage	crosses antimeridian edge (-180); ~3h build
+california	California	-125.0,32.0,-114.0,42.0	local	37.7749,-122.4194	37.3382,-121.8863	Los Angeles	
+texas	Texas	-106.7,25.8,-93.5,36.5	local	30.2672,-97.7431	29.4241,-98.4936	Houston	
+# --- country ---
+iceland	Iceland	-25.0,63.0,-13.0,67.0	country	64.1466,-21.9426	65.6826,-18.1107	Reykjavik	
+south-korea	South Korea	124.0,33.0,131.5,39.0	country	37.5665,126.9780	35.1796,129.0756	Seoul	
+egypt	Egypt	24.5,21.5,37.0,32.0	country	30.0444,31.2357	31.2001,29.9187	Cairo	
+turkey	Turkey	26.0,35.0,46.0,42.5	country	41.0082,28.9784	39.9334,32.8597	Istanbul	
+japan	Japan	122.9,24.0,146.0,45.6	country	35.6762,139.6503	35.4437,139.6380	Tokyo	
+iran	Iran	44.0,25.0,63.5,39.8	country	35.6892,51.3890	35.8400,50.9391	Tehran	
+ukraine	Ukraine, Moldova & Western Russia	22.0,43.0,46.0,53.0	country	50.4501,30.5234	49.7950,30.1310	Kyiv	
+argentina	Argentina	-73.5,-55.5,-53.5,-21.5	country	-34.6037,-58.3816	-34.9215,-57.9545	Buenos Aires	
+mexico	Mexico	-118.5,14.5,-86.0,33.0	country	19.4326,-99.1332	20.6597,-103.3496	Cancun	not yet listed in web/generate.py REGIONS; ~5h build
+brazil	Brazil	-74.0,-34.0,-32.0,5.5	country	-23.5505,-46.6333	-22.9099,-47.0626	Rio de Janeiro	~12h build
+# --- multi-country ---
+baltics	Baltics	20.9,53.9,28.3,59.7	multi-country	56.9496,24.1052	56.9680,23.7704	Riga	
+caucasus	Caucasus	39.0,38.0,52.0,44.0	multi-country	41.7151,44.8271	40.1792,44.4991	Tbilisi	
+himalayas	Himalayas	72.0,26.0,98.0,37.5	multi-country	27.7172,85.3240	28.2096,83.9856	Kathmandu	RECONSTRUCTED bbox (built 2026-04-29 on a cloud VM; no local record)
+central-america-caribbean	Central America & Caribbean	-93.0,7.0,-59.0,27.5	multi-country	14.6349,-90.5069	13.6929,-89.2182	Panama	RECONSTRUCTED bbox (built 2026-04-29 on a cloud VM; no local record)
+pacific-islands	Pacific Islands	130.0,-25.0,180.0,5.0	multi-country	-18.1416,178.4419	-17.7765,177.4356	Suva	smoke pair on Viti Levu; old queue pair spanned the ocean and forced a manual upload; not in generate.py REGIONS
+west-africa	West Africa	-18.0,3.0,15.0,17.0	multi-country	6.5244,3.3792	7.3775,3.9470	Lagos	not in generate.py REGIONS
+southern-africa	Southern Africa	11.0,-35.0,42.0,-15.0	multi-country	-26.2041,28.0473	-25.7479,28.2293	Johannesburg	not in generate.py REGIONS
+east-africa	East Africa	28.0,-12.0,52.0,18.0	multi-country	-1.2921,36.8219	-0.3031,36.0800	Nairobi	built 2026-05-12 (4.6 GB) but NEVER uploaded to archive.org
+korea-mongolia	Korea & Mongolia	87.5,33.0,131.5,53.0	multi-country	37.5665,126.9780	35.1796,129.0756	Seoul	
+west-asia	West Asia	25.0,12.0,62.5,42.0	multi-country	25.2048,55.2708	24.4539,54.3773	Dubai	
+central-asia	Central Asia	40.0,25.0,120.0,56.0	multi-country	43.2220,76.8512	42.8746,74.5698	Tashkent	
+# --- us-region ---
+central-us	Central US	-120.0,31.3,-104.0,49.0	us-region	39.7392,-104.9903	40.0150,-105.2705	Denver	
+west-coast-us	West Coast US	-125.0,32.0,-116.5,49.5	us-region	47.6062,-122.3321	45.5152,-122.6784	Seattle	
+midwest-us	Midwest US	-104.1,36.0,-80.5,49.4	us-region	41.8781,-87.6298	43.0389,-87.9065	Chicago	
+east-coast-us	East Coast US	-82.0,24.0,-66.5,47.6	us-region	40.7128,-74.0060	39.9526,-75.1652	Boston	
+# --- continent (largest last) ---
+southeast-asia	Southeast Asia	92.0,-11.0,141.5,28.5	continent	13.7563,100.5018	12.9236,100.8825	Bangkok	
+australia-nz	Australia & New Zealand	110.0,-50.0,180.0,-8.0	continent	-33.8688,151.2093	-35.2809,149.1300	Sydney	
+canada	Canada	-141.0,41.5,-52.0,83.5	continent	43.6532,-79.3832	45.4215,-75.6972	Toronto	
+indian-subcontinent	Indian Subcontinent	60.0,5.0,98.0,38.0	continent	28.6139,77.2090	27.1767,78.0081	Mumbai	~4h build
+china	China	73.0,18.0,135.0,53.5	continent	39.9042,116.4074	31.2304,121.4737	Beijing	~6h build
+africa	Africa	-18.0,-35.0,52.0,38.0	continent	-1.2921,36.8219	-4.0435,39.6682	Cairo	
+south-america	South America	-82.0,-56.0,-32.0,13.5	continent	-34.6037,-58.3816	-32.9442,-60.6505	Lima	~15h build
+russia	Russia	27.0,41.0,180.0,82.0	continent	55.7558,37.6173	59.9311,30.3609	Moscow	~26h build; post-pack swap stall seen 2026-05-10
+united-states	United States	-125.0,24.5,-66.9,49.4	continent	37.7749,-122.4194	38.5816,-121.4944	Chicago	previous round used build-us-salvage.sh (pinned search-with-overture jsonl) — stale for a data refresh
+europe	Europe	-25.0,34.0,50.5,72.0	continent	48.8566,2.3522	52.5200,13.4050	Paris	previous round used build-europe-salvage.sh — stale for a data refresh; needs MBTiles page-cache warm trick
