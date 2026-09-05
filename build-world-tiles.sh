@@ -15,9 +15,19 @@
 #           spinning disk). ALWAYS deleted when this script exits, however
 #           it exits: the NVMe is shared with other work and must not keep
 #           our files. Nothing else of ours is left there.
-#   MEMORY  container memory cap (default 64g). --shard-stores keeps real
-#           usage far below this; the cap exists so a runaway container is
-#           killed instead of the host.
+#   MEMORY  container memory cap (default 48g). Most of what tilemaker
+#           holds is reclaimable page cache over the mmap'd store rather
+#           than anonymous memory, so this mainly bounds cache.
+#
+#           DO NOT `docker update --memory` a RUNNING tilemaker below its
+#           current usage. Tried on 2026-09-05: the container sat at
+#           28.9 GB (nearly all reclaimable cache) and dropping the cap
+#           32g -> 24g killed it with rc=137 at phase 6/6 block 469/471,
+#           losing 1.5 h and a 192 GB store just as it was about to start
+#           writing tiles. Shrinking a cgroup limit forces synchronous
+#           reclaim, and with --memory-swap pinned equal to --memory there
+#           is nowhere to spill, so the OOM killer wins the race against
+#           reclaim. Set MEMORY at launch and leave it alone.
 #   THREADS tilemaker worker threads (default 28 of 36, leaving cores for
 #           a concurrent regional build).
 #
@@ -28,7 +38,7 @@ cd /storage/streetzim
 PLANET="${1:-/storage/streetzim/world-data/planet-2026-08-31.osm.pbf}"
 OUT="${2:-/storage/streetzim/world-data/world-tiles-v3.mbtiles}"
 STORE="${STORE:-/mnt/data/tilemaker/store}"
-MEMORY="${MEMORY:-32g}"
+MEMORY="${MEMORY:-48g}"
 THREADS="${THREADS:-28}"
 IMAGE="${IMAGE:-ghcr.io/systemed/tilemaker:master}"
 NAME="streetzim-tilemaker-$(date +%Y%m%d-%H%M%S)"
