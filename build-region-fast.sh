@@ -91,7 +91,9 @@ ARGS=(
 # shellcheck disable=SC2206
 ARGS+=( $XAPIAN_FLAG )
 [ -f "$LOWZ" ]   && ARGS+=( --low-zoom-world-vrt "$LOWZ" )
-if [ "$WIKI_IMAGES" != "off" ] && [ -f "$WIKI_ZIM" ] && [ "$(stat -c%s "$WIKI_ZIM")" = "$WIKI_ZIM_SIZE" ]; then
+if [ "$WIKI_IMAGES" = "off" ]; then
+    echo "  wikipedia: disabled (WIKI_IMAGES=off)"
+elif [ -f "$WIKI_ZIM" ] && [ "$(stat -c%s "$WIKI_ZIM")" = "$WIKI_ZIM_SIZE" ]; then
     mkdir -p /storage/streetzim/wiki_articles_cache
     ARGS+=( --resolve-wikidata-titles --wikidata-title-cache "$WIKI_TITLE_CACHE"
             --bundle-wiki-articles --wiki-articles-source "$WIKI_ZIM"

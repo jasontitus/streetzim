@@ -1037,7 +1037,11 @@ function _wikiArticlePath(qid, w) {
 // article links stay inside the iframe; the bar always returns to the map.
 function openWikiArticle(path) {
   if (!path) return;
-  var url = baseUrl + 'wiki-article/' + encodeURIComponent(path);
+  // Keep '/' literal: a title like Expo_Park/USC_station is stored two
+  // levels deep and its images are linked ../../wiki-image/…, which
+  // only resolves if the browser sees the real depth (%2F collapses
+  // it to one segment).
+  var url = baseUrl + 'wiki-article/' + encodeURIComponent(path).replace(/%2F/g, '/');
   // Navigate the whole view to the article as a native ZIM page. We do NOT use
   // an in-page iframe overlay: in the iOS/Kiwix WebView an <iframe> expands to
   // its full content height and escapes any scroll container, so the article —

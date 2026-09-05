@@ -230,8 +230,15 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
   fi
 
   touch "$TMPDIR/.queue-t0-$ID"   # this run's start: the ZIM must post-date it
-  log "  build (log: ${ID}-rebuild-${TODAY}.log, stdout: ${ID}-build.out)"
-  bash /storage/streetzim/build-region-fast.sh "$ID" "$BBOX" "$NAME" > "/storage/streetzim/${ID}-build.out" 2>&1
+  # Wikipedia images: every picture for country-and-smaller tiers; lead
+  # picture only for continents unless WIKI_IMAGES is set explicitly
+  # (Europe with 'all' is ~+31 GB and ~2.5 h of image reads inside the
+  # pack phase; 'lead' ~+3.5 GB).
+  if [ -z "${WIKI_IMAGES:-}" ]; then
+    case "$TIER" in continent) WI=lead ;; *) WI=all ;; esac
+  else WI="$WIKI_IMAGES"; fi
+  log "  build (log: ${ID}-rebuild-${TODAY}.log, stdout: ${ID}-build.out, wiki images=$WI)"
+  WIKI_IMAGES="$WI" bash /storage/streetzim/build-region-fast.sh "$ID" "$BBOX" "$NAME" > "/storage/streetzim/${ID}-build.out" 2>&1
   BUILD_RC=$?
   ZIM=$(ls -t /storage/streetzim/osm-${ID}-20*.zim 2>/dev/null | grep -v '\.tmp$' | head -1)
   MIN=$(( ($(date +%s) - T0) / 60 ))
@@ -270,12 +277,18 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
   if PROJECT_DIR=/storage/streetzim TERRAIN_STRIPE_TOLERATE=10 bash cloud/upload_validated.sh "$ID" "$(basename "$ZIM")" >> "$LOG" 2>&1; then
     log "  uploaded → https://archive.org/details/streetzim-$ID"
     row "$ID" uploaded "$MIN" "$SIZE" "$(basename "$ZIM")"; n_ok=$((n_ok+1))
-    # --keep-temp scratch is only useful for a failed build; reclaim it now.
-    TD=$(find "$TMPDIR" -maxdepth 1 -type d -name 'osm_zim_*' -newer "$TMPDIR/.queue-t0-$ID" 2>/dev/null | head -1)
-    if [ -n "$TD" ]; then
-      log "  reclaiming build scratch $TD ($(du -sh "$TD" 2>/dev/null | cut -f1))"
-      ionice -c3 nice -n 19 rm -rf "$TD"
-    fi
+    # --keep-temp scratch is only useful for a failed build. Delete exactly
+    # the directory this build reported ("Temp files kept at: …" in its
+    # log) — a newest-dir search could hit a concurrently running build.
+    TD=$(grep -a '^Temp files kept at: ' "${ID}-rebuild-${TODAY}.log" 2>/dev/null | tail -1 | sed 's/^Temp files kept at: //')
+    case "$TD" in
+      "$TMPDIR"/osm_zim_*)
+        if [ -d "$TD" ]; then
+          log "  reclaiming build scratch $TD ($(du -sh "$TD" 2>/dev/null | cut -f1))"
+          ionice -c3 nice -n 19 rm -rf "$TD"
+        fi ;;
+      *) log "  scratch dir not identified from the build log — leaving it" ;;
+    esac
   else
     log "  UPLOAD FAILED (rc=$?) — ZIM kept: $ZIM"
     row "$ID" upload-failed "$MIN" "$SIZE" "$(basename "$ZIM")"; n_fail=$((n_fail+1))

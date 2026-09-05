@@ -53,8 +53,11 @@ _KEEP_TAGS = {"p", "h2", "h3", "h4", "ul", "ol", "li", "b", "i", "em",
 # from wiki-article/<Title> as ../wiki-image/<name>, which resolves the
 # same way in kiwix-serve, the Kiwix apps and the PWA service worker.
 IMAGE_MODES = ("none", "lead", "all")
+# No SVG: it is the only script-capable format, and Kiwix pre-renders
+# SVG figures to .svg.png -> webp anyway (0 SVG candidates in 500 real
+# articles).
 _EXT_FOR_MIME = {"image/webp": "webp", "image/png": "png", "image/jpeg": "jpg",
-                 "image/gif": "gif", "image/svg+xml": "svg"}
+                 "image/gif": "gif"}
 # UI chrome and pog markers that are never "the picture of the place".
 _ICON_RE = re.compile(
     r"(OOjs|Symbol_|_Icon|Icon_|Wiki_letter|Ambox|Edit-|Crystal_Clear|"
@@ -71,11 +74,28 @@ def _img_width(tag: str) -> int:
 
 
 def _plain(text: str) -> str:
-    """Caption text: strip tags, collapse whitespace, HTML-escape."""
+    """Caption text: strip tags, decode the entities Kiwix HTML already
+    carries (or `&amp;` renders literally), collapse whitespace, then
+    escape exactly once for the attribute/element we emit it into."""
+    import html as _html
     t = re.sub(r"<[^>]+>", "", text)
+    t = _html.unescape(t)
     t = re.sub(r"\s+", " ", t).strip()
     return (t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             .replace('"', "&quot;"))
+
+
+_DISAMBIG_RE = re.compile(
+    r'class="[^"]*\b(dmbox|disambiguation)\b|'
+    r'<p\b[^>]*>\s*(?:<b>)?[^<]{0,120}(?:</b>)?\s*(?:most commonly )?(?:may |can |could )?'
+    r'(?:also )?refers? to\b|'
+    r'\bmay refer to:', re.I)
+
+
+def _is_disambiguation(raw_html: str) -> bool:
+    """enwiki disambiguation pages ("Roma or ROMA may refer to:")."""
+    head = raw_html[:20000]
+    return bool(_DISAMBIG_RE.search(head))
 
 
 def image_candidates(raw_html: str) -> list:
@@ -108,7 +128,8 @@ def image_candidates(raw_html: str) -> list:
         box = mbox.group(1)
         # Kiwix infobox pictures rarely carry alt text; the caption sits
         # in a sibling cell.
-        mc = re.search(r'class="[^"]*infobox-caption[^"]*"[^>]*>(.*?)</', box, re.S | re.I)
+        mc = re.search(r'class="[^"]*infobox-caption[^"]*"[^>]*>(.*?)</(?:td|div|th)>',
+                       box, re.S | re.I)
         cap = _plain(mc.group(1)) if mc else ""
         for tag in re.findall(r"<img\b[^>]*>", box, re.I):
             take(tag, cap)
@@ -270,14 +291,18 @@ class _OfflineZim:
         from libzim.reader import Archive  # lazy: only when offline source used
         self.a = Archive(path)
 
-    def image(self, src: str):
+    def image(self, src: str, max_bytes: Optional[int] = None):
         """Bytes + mimetype for an <img src> as written in a Kiwix article
         ("./_assets_/<hash>/<name>", percent-encoded once more than the
-        entry path is). None when the entry is absent."""
+        entry path is). None when the entry is absent or larger than
+        `max_bytes` — checked on the dirent size BEFORE the blob is read,
+        so an oversize image costs a lookup, not a decompressed cluster."""
         p = urllib.parse.unquote(src.lstrip("./"))
         for cand in (p, "I/" + p):
             try:
                 it = self.a.get_entry_by_path(cand).get_item()
+                if max_bytes is not None and it.size > max_bytes:
+                    return None
                 return bytes(it.content), it.mimetype
             except KeyError:
                 continue
@@ -354,6 +379,7 @@ def bundle_wiki_articles(
     log: Callable[[str], None] = print,
     images: str = "none",
     image_max_kb: int = 128,
+    max_images_per_article: int = 12,
     source=None,
 ) -> dict:
     """Fetch + clean + store each distinct article at `wiki-article/<Title>`.
@@ -382,7 +408,7 @@ def bundle_wiki_articles(
             "bundling text only")
         images = "none"
     image_paths: set = set()       # wiki-image/<sha>.<ext> already stored
-    images_stored = image_bytes = 0
+    images_stored = image_bytes = disambig = 0
     # Cache by default for the online path so a rebuild never re-crawls
     # Wikipedia (repo-relative, like wikidata_cache/). Offline (local ZIM)
     # needs no cache — reads are local.
@@ -396,16 +422,30 @@ def bundle_wiki_articles(
     stored_titles: set = set()   # title_us actually written — for the geo-index
     for i, title_us in enumerate(norm, 1):
         raw = src.html(title_us) if src else _fetch_online(title_us, cache_dir, user_agent)
+        if raw and _is_disambiguation(raw):
+            # A non-English `wikipedia=` tag whose enwiki namesake is a
+            # disambiguation page ("it:Roma" -> "Roma may refer to:") would
+            # bundle the wrong page under the POI, lead image and all.
+            raw = None
+            disambig += 1
         if not raw:
             failed += 1
         else:
             disp = title_us.replace("_", " ")
             url = "https://en.wikipedia.org/wiki/" + urllib.parse.quote(title_us)
             lead_html = gallery_html = ""
+            # The page lives at wiki-article/<Title>; a title with N
+            # slashes is N levels deeper, so the image link must climb
+            # N+1 (108 of California's 11,613 titles are like
+            # "Expo_Park/USC_station" — a fixed "../" left every one of
+            # them with dangling links and a failed validate gate).
+            up = "../" * (title_us.count("/") + 1)
             if images != "none":
                 figs = []
                 for isrc, caption in image_candidates(raw):
-                    got = src.image(isrc)
+                    if len(figs) >= max_images_per_article:
+                        break
+                    got = src.image(isrc, image_max_kb * 1024)
                     if not got:
                         continue
                     b, mt = got
@@ -425,11 +465,11 @@ def bundle_wiki_articles(
                 if figs:
                     name, caption = figs[0]
                     cap = f"<figcaption>{caption}</figcaption>" if caption else ""
-                    lead_html = (f'<figure class="lead"><img src="../wiki-image/{name}" '
+                    lead_html = (f'<figure class="lead"><img src="{up}wiki-image/{name}" '
                                  f'alt="{caption}" loading="lazy">{cap}</figure>\n')
                     if len(figs) > 1:
                         cells = "".join(
-                            f'<figure><img src="../wiki-image/{n}" alt="{c}" loading="lazy">'
+                            f'<figure><img src="{up}wiki-image/{n}" alt="{c}" loading="lazy">'
                             + (f"<figcaption>{c}</figcaption>" if c else "") + "</figure>"
                             for n, c in figs[1:])
                         gallery_html = f'<section class="gallery">{cells}</section>\n'
@@ -445,9 +485,11 @@ def bundle_wiki_articles(
                 f"{total_bytes // 1024} KB")
     stats = {"requested": len(norm), "bundled": bundled, "failed": failed,
              "bytes": total_bytes, "stored_titles": stored_titles,
-             "images": images_stored, "image_bytes": image_bytes}
+             "images": images_stored, "image_bytes": image_bytes,
+             "disambiguation_skipped": disambig}
     log(f"    bundle-wiki-articles: stored {bundled} articles "
         f"({total_bytes / 1024:.0f} KB), {failed} unavailable"
+        + (f" ({disambig} were enwiki disambiguation pages)" if disambig else "")
         + (f"; {images_stored} images ({image_bytes / 1024 / 1024:.0f} MB, mode={images})"
            if images != "none" else ""))
     return stats

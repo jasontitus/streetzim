@@ -4311,6 +4311,7 @@ def create_zim(
     wiki_articles_source=None,
     wiki_images="none",
     wiki_image_max_kb=128,
+    wiki_images_per_article=12,
 ):
     """Create a ZIM file containing the map viewer and all tiles.
 
@@ -4897,6 +4898,7 @@ def create_zim(
                     offline_zim=wiki_articles_source,
                     images=wiki_images,
                     image_max_kb=wiki_image_max_kb,
+                    max_images_per_article=wiki_images_per_article,
                 )
                 _bundled_set = _wa_stats.get("stored_titles") or set()
                 PHASE_TIMER.record_subphase(
@@ -6332,6 +6334,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "every non-icon image (~107 KB/article, median 3).")
     parser.add_argument("--wiki-image-max-kb", type=int, default=128,
                         help="Skip any single bundled image larger than this.")
+    parser.add_argument("--wiki-images-per-article", type=int, default=12,
+                        help="With --wiki-images all: cap per article (list "
+                             "pages reach 80+; the median place has 3).")
     parser.add_argument("--wiki-articles-source", metavar="ZIM", default=None,
                         help="Local Wikipedia ZIM to read articles from "
                              "(offline, fast, no crawl). Omit to fetch from the "
@@ -7077,6 +7082,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             wiki_articles_source=getattr(args, "wiki_articles_source", None),
             wiki_images=getattr(args, "wiki_images", "none"),
             wiki_image_max_kb=getattr(args, "wiki_image_max_kb", 128),
+            wiki_images_per_article=getattr(args, "wiki_images_per_article", 12),
             )
         except BaseException:
             # libzim's Creator.__exit__ finalises on exception, so an

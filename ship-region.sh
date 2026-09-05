@@ -172,11 +172,19 @@ if PROJECT_DIR=/storage/streetzim TERRAIN_STRIPE_TOLERATE=10 \
   # The build ran with --keep-temp so a failed build leaves its scratch
   # for inspection. Nothing ever reuses it (there is no resume path), so
   # once the region has shipped it is just ~20-120 GB of dead weight.
-  TD=$(find "$TMPDIR" -maxdepth 1 -type d -name 'osm_zim_*' -newer "$TMPDIR/.ship-t0-$ID" 2>/dev/null | head -1)
-  if [ -n "$TD" ] && ! pgrep -f "create_osm_zim.py.*--name $NAME" >/dev/null 2>&1; then
-    log "reclaiming build scratch $TD ($(du -sh "$TD" 2>/dev/null | cut -f1))"
-    ionice -c3 nice -n 19 rm -rf "$TD"
-  fi
+  # Delete exactly the directory THIS build reported ("Temp files kept
+  # at: …" is printed by create_osm_zim --keep-temp and lands in the
+  # build log). A "newest osm_zim_* dir" search could pick another
+  # region's live scratch when the queue and ship-region.sh overlap.
+  TD=$(grep -a '^Temp files kept at: ' "${ID}-rebuild-${TODAY}.log" 2>/dev/null | tail -1 | sed 's/^Temp files kept at: //')
+  case "$TD" in
+    "$TMPDIR"/osm_zim_*)
+      if [ -d "$TD" ]; then
+        log "reclaiming build scratch $TD ($(du -sh "$TD" 2>/dev/null | cut -f1))"
+        ionice -c3 nice -n 19 rm -rf "$TD"
+      fi ;;
+    *) log "scratch dir not identified from the build log — leaving it" ;;
+  esac
 else
   log "=== UPLOAD FAILED (ZIM kept: $ZIM)"; exit 5
 fi

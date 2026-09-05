@@ -113,8 +113,11 @@ class FakeWikiSource:
     def html(self, title_us):
         return self.pages.get(title_us)
 
-    def image(self, src):
-        return self.images.get(src)
+    def image(self, src, max_bytes=None):
+        got = self.images.get(src)
+        if got and max_bytes is not None and len(got[0]) > max_bytes:
+            return None                       # like _OfflineZim: dirent size, no read
+        return got
 
 
 BIG = b"\x89PNG" + b"\0" * 300_000
@@ -200,3 +203,75 @@ class ImageBundlingTests(unittest.TestCase):
     def test_rejects_unknown_mode(self):
         with self.assertRaises(ValueError):
             wa.bundle_wiki_articles(["X"], lambda *a: None, images="some", source=FakeWikiSource({}, {}))
+
+
+class ReviewRegressionTests(unittest.TestCase):
+    """Pinned from the 2026-09-05 adversarial review of image bundling."""
+
+    def _bundle(self, titles, pages, mode="all"):
+        stored = {}
+        wa.bundle_wiki_articles(
+            list(titles), lambda p, t, m, c: stored.__setitem__(p, (t, m, c)),
+            sleep=0, log=lambda *_: None, images=mode, image_max_kb=128,
+            source=FakeWikiSource(pages, IMAGES))
+        return stored
+
+    def test_slash_title_links_images_at_the_right_depth(self):
+        # wiki-article/Expo_Park/USC_station is two levels deep, so
+        # ../wiki-image/ would resolve to wiki-article/wiki-image/ (dangling,
+        # and a failed validate gate). 108 of California's 11,613 titles.
+        stored = self._bundle(["Expo Park/USC station", "Plain_Town"],
+                              {"Expo_Park/USC_station": ARTICLE, "Plain_Town": ARTICLE})
+        deep = stored["wiki-article/Expo_Park/USC_station"][2].decode()
+        flat = stored["wiki-article/Plain_Town"][2].decode()
+        self.assertIn('src="../../wiki-image/', deep)
+        self.assertNotIn('src="../wiki-image/', deep)
+        self.assertIn('src="../wiki-image/', flat)
+
+    def test_captions_are_not_double_escaped(self):
+        page_html = ARTICLE.replace("The <b>river</b> at dusk", "Walker &amp; Eisen &quot;Bandstand&quot;")
+        stored = self._bundle(["Cap_Town"], {"Cap_Town": page_html})
+        page = stored["wiki-article/Cap_Town"][2].decode()
+        self.assertIn("<figcaption>Walker &amp; Eisen &quot;Bandstand&quot;</figcaption>", page)
+        self.assertNotIn("&amp;amp;", page)
+        self.assertNotIn("&amp;quot;", page)
+
+    def test_disambiguation_page_is_skipped_not_bundled(self):
+        dab = ('<div class="mw-parser-output"><p><b>Roma</b> or <b>ROMA</b> may refer to:</p>'
+               '<ul><li>Rome</li></ul></div>')
+        stored = {}
+        stats = wa.bundle_wiki_articles(
+            ["it:Roma", "Real_Place"], lambda p, t, m, c: stored.__setitem__(p, c),
+            sleep=0, log=lambda *_: None, images="none",
+            source=FakeWikiSource({"Roma": dab, "Real_Place": ARTICLE}, {}))
+        self.assertNotIn("wiki-article/Roma", stored)
+        self.assertIn("wiki-article/Real_Place", stored)
+        self.assertEqual(stats["disambiguation_skipped"], 1)
+        self.assertEqual(stats["failed"], 1)
+
+    def test_oversize_image_is_rejected_by_size_before_read(self):
+        class CountingSource(FakeWikiSource):
+            reads = 0
+            def image(self, src, max_bytes=None):
+                if src == "./_assets_/h/Huge_panorama.png" and max_bytes and len(BIG) > max_bytes:
+                    return None                       # dirent-size check, no blob read
+                CountingSource.reads += 1
+                return FakeWikiSource.image(self, src)
+        stored = {}
+        wa.bundle_wiki_articles(["X"], lambda p, t, m, c: stored.__setitem__(p, c),
+                                sleep=0, log=lambda *_: None, images="all",
+                                source=CountingSource({"X": ARTICLE}, IMAGES))
+        self.assertEqual(len([p for p in stored if p.startswith("wiki-image/")]), 2)
+        # town hall + river read; the icon is filtered by name before any
+        # lookup, and the 300 KB panorama is refused on size without a read.
+        self.assertEqual(CountingSource.reads, 2)
+
+    def test_per_article_cap(self):
+        many = '<div class="mw-parser-output"><p>x</p>' + "".join(
+            f'<figure><img src="./_assets_/h/p{i}.jpg" width="200"></figure>' for i in range(30)) + "</div>"
+        imgs = {f"./_assets_/h/p{i}.jpg": (b"RIFFWEBPVP8 " + bytes([i]) * 3000, "image/webp") for i in range(30)}
+        stored = {}
+        wa.bundle_wiki_articles(["Listy"], lambda p, t, m, c: stored.__setitem__(p, c),
+                                sleep=0, log=lambda *_: None, images="all",
+                                max_images_per_article=5, source=FakeWikiSource({"Listy": many}, imgs))
+        self.assertEqual(len([p for p in stored if p.startswith("wiki-image/")]), 5)

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -62,7 +63,7 @@ def _api_batch(qids: list[str], *, api: str = WIKIDATA_API,
                 return json.load(resp)
         except urllib.error.HTTPError as e:
             last = e
-            if e.code in (429, 503) and attempt < retries - 1:
+            if (e.code == 429 or 500 <= e.code < 600) and attempt < retries - 1:
                 time.sleep(2 ** attempt)
                 continue
             raise
@@ -135,11 +136,38 @@ def resolve_qids(
             cache = {}
 
     todo = [q for q in want if q not in cache]
-    for i in range(0, len(todo), BATCH):
+
+    def _flush():
+        if not cache_path:
+            return
+        tmp = cache_path + ".part"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(cache, f)
+            os.replace(tmp, cache_path)
+        except OSError:
+            pass
+
+    # Resolve incrementally. A Europe-sized region is thousands of
+    # wbgetentities calls; one 502 at batch N used to raise straight
+    # through, the cache was never written, and the build carried on
+    # with ZERO backfilled titles (about 60% of the linkable set) and no
+    # gate to notice — and the next rebuild repeated every request.
+    # Now: 5xx retried, the cache flushed every 50 batches and on any
+    # failure, and a failure returns what was resolved so far, loudly.
+    failed_at = None
+    for n, i in enumerate(range(0, len(todo), BATCH)):
         batch = todo[i:i + BATCH]
-        hits = _titles_from_response(_api_batch(batch, user_agent=user_agent), batch)
+        try:
+            hits = _titles_from_response(_api_batch(batch, user_agent=user_agent), batch)
+        except Exception as exc:  # noqa: BLE001 — network/API; keep what we have
+            failed_at = (i, exc)
+            _flush()
+            break
         for q in batch:
             cache[q] = hits.get(q, "")  # "" == known to have no enwiki article
+        if n % 50 == 49:
+            _flush()
         if progress:
             progress(min(i + BATCH, len(todo)), len(todo))
         if sleep and i + BATCH < len(todo):
@@ -150,6 +178,14 @@ def resolve_qids(
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(cache, f)
         os.replace(tmp, cache_path)
+
+    if failed_at is not None:
+        i, exc = failed_at
+        resolved = sum(1 for q in want if cache.get(q))
+        print(f"    WARNING: Wikidata title resolution stopped at Q-ID {i}/{len(todo)} "
+              f"({type(exc).__name__}: {exc}); continuing with the {resolved} titles "
+              f"resolved so far — the rest will be retried on the next build",
+              file=sys.stderr, flush=True)
 
     return {q: cache[q] for q in want if cache.get(q)}
 
