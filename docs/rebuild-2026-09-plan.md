@@ -205,3 +205,23 @@ every PBF-touching phase walk the parent — the wikidata Q-ID scan alone
 went from minutes to 9+ hours on Brazil in May. Sizes grew as expected
 against April (europe 40.67 → 41.81 GB, us 14.52 → 14.98, china 6.16 →
 6.48), and `osmium fileinfo` reads cleanly on spot checks.
+
+## 10. Decisions taken 2026-09-05 (user)
+
+- **Bboxes**: the reconstructed Himalayas (`72.0,26.0,98.0,37.5`) and
+  Central America & Caribbean (`-93.0,7.0,-59.0,27.5`) boxes are confirmed.
+- **Wikipedia**: bundle articles in every region, **with images**
+  (`WIKI_IMAGES=all`, the wrapper default). Cost measured on California's
+  real linkable set: +1.2 GB (+37%) for all images, +138 MB for lead-only;
+  articles themselves are ~80 MB. Flip with `WIKI_IMAGES=lead` if a
+  continent turns out too large.
+- **East Africa**: in the round (built in May, never uploaded; now in
+  `web/generate.py` REGIONS too).
+- **Build scratch**: kept on failure (that tree is the only way to debug a
+  bad build), reclaimed automatically once the region has uploaded —
+  nothing ever reuses it, so keeping it makes no later build faster.
+- **Packer**: `streetzim-pack` stays on the May build (zimru 376f767) for
+  the round. The new zimru writes clusters out of pointer order, which the
+  PWA reader mis-sliced until 629a6ba; shipping ordered clusters keeps ZIMs
+  readable by browsers that have not picked up the new app. `xapianbuilder`
+  IS the new build (accented titles become searchable).
