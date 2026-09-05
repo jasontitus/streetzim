@@ -132,3 +132,50 @@ data, so a business-data refresh cannot use them: budget the full merge.
 - Tier A vs B (§2), and whether to give tilemaker an NVMe store dir.
 - Delete the 1.2 TB of `tmp/osm_zim_*` leftovers.
 - Whether to wait for the September Overture release (typically mid-month) before starting the region queue.
+
+## 8. SSD scratch policy (`/mnt/data`)
+
+`/mnt/data` is a 390 GB NVMe volume **shared with another project**
+(`st-bridge-models`, 16 GB). `/storage` is a single spinning 15 TB disk,
+so the SSD is the only place where the tilemaker store's random I/O is
+affordable — but nothing of ours may rest there.
+
+**Rule: the SSD holds exactly one thing, the tilemaker node/way store,
+and only while a tile build is running.** Everything else — planet PBFs,
+regional extracts, MBTiles, ZIMs, build temp dirs — stays on `/storage`.
+
+Four mechanisms enforce it, covering each other's gaps:
+
+| Mechanism | Covers | Gap it leaves |
+|---|---|---|
+| `build-world-tiles.sh` EXIT/TERM/INT trap | normal end, failure, `docker stop`, Ctrl-C | not SIGKILL or reboot |
+| `flock` on `tmp/.world-tiles.lock` | a second run sharing or deleting the store | — |
+| `scripts/nvme-guard.sh` (40 GB reserve) | the store filling the volume under the other project | only while it is running |
+| `scripts/ssd-reap.sh` + reap-on-start | SIGKILL, OOM kill, reboot | run it after any hard stop |
+
+Verified 2026-09-05: stopping the build mid-run freed 104 GB and left
+`st-bridge-models` untouched; the reaper refuses to delete a live run's
+store (exit 1).
+
+**Sizing.** tilemaker reports a *sparse* "Store size" (259–286 GB) that
+is much larger than real allocation. Measured real use on this planet:
+~73–107 GB during the store-building phases, growing ~4.5 GB/min while a
+phase runs. Budget ~150 GB and keep the 40 GB reserve; the guard stops
+the build rather than letting the volume fill.
+
+**If the footprint ever needs to be smaller**, in increasing order of
+cost:
+1. Lower `nvme-guard.sh`'s reserve only if the other project shrinks —
+   it is the last line of defence, not a tuning knob.
+2. Tile continent-by-continent into one MBTiles with tilemaker's
+   `--merge`, so the store only ever holds one continent (~30–60 GB).
+   Costs more wall time and needs a per-continent bbox list, but caps
+   SSD use and makes a failure cheap to resume.
+3. Put `STORE` on `/storage` (`STORE=/storage/streetzim/tmp/tilemaker-store`).
+   No SSD use at all, but the store is random-I/O heavy and the HDD is
+   already saturated — expect the planet run to take well over a week.
+
+**Housekeeping owed on `/storage`** (not SSD, but the same hygiene): the
+May round left **1.2 TB** of `--keep-temp` leftovers in
+`tmp/osm_zim_*`. Delete once no build is running:
+`rm -rf /storage/streetzim/tmp/osm_zim_*`.

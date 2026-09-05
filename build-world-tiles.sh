@@ -64,6 +64,13 @@ flock -n 8 || { echo "another build-world-tiles.sh holds the lock — refusing" 
 [ -e "$OUT" ] && { echo "refusing to overwrite $OUT" >&2; exit 1; }
 [ -s coastline/water_polygons.shp ] || { echo "coastline/water_polygons.shp missing" >&2; exit 1; }
 [ -s resources/tilemaker/config-openmaptiles.json ] || { echo "tilemaker config missing" >&2; exit 1; }
+# Holding the flock proves no other run owns the store, so anything left
+# here is an orphan from a SIGKILL, an OOM kill or a reboot — the cases a
+# trap cannot cover. Reclaim it before we add to the shared SSD.
+if [ -d "$STORE" ]; then
+    echo "reaping orphaned store ($(du -sh "$STORE" 2>/dev/null | cut -f1)) from a previous run"
+    rm -rf "$STORE"
+fi
 mkdir -p "$STORE" || { echo "cannot create $STORE" >&2; exit 1; }
 trap cleanup EXIT   # armed only now: every check above exits without touching the store
 
