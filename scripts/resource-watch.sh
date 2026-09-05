@@ -51,7 +51,12 @@ while true; do
   [ -n "$n" ]  && [ "$n"  -lt "$NVME_MIN"     ] && say nvme    "LOW /mnt/data (NVMe, shared): ${n} GB free — tilemaker store is $(du -sh /mnt/data/tilemaker/store 2>/dev/null | cut -f1)"
   [ -n "$r" ]  && [ "$r"  -lt "$ROOT_MIN"     ] && say root    "LOW / : ${r} GB free"
   [ -n "$ma" ] && [ "$ma" -lt "$MEMAVAIL_MIN" ] && say mem     "LOW memory: ${ma} GB available, swap ${sw} GB used"
-  [ -n "$sw" ] && [ "$sw" -gt "$SWAP_MAX"     ] && say swap    "SWAP in use: ${sw} GB (mem available ${ma} GB)"
+  # Swap alone is not a problem — osmium's id indexes legitimately live
+  # there while tilemaker holds page cache. It only matters when swap is
+  # deep AND there is little memory left to page back into, which is the
+  # state that precedes thrashing and the OOM killer.
+  [ -n "$sw" ] && [ "$sw" -gt "$SWAP_MAX" ] && [ -n "$ma" ] && [ "$ma" -lt 30 ] \
+    && say swap "THRASH RISK: ${sw} GB swapped with only ${ma} GB available"
 
   # tilemaker container approaching its cap (silent OOM-kill risk)
   cm=$(docker stats --no-stream --format '{{.MemUsage}}' $(docker ps -q --filter name=streetzim-tilemaker) 2>/dev/null \
@@ -60,7 +65,9 @@ while true; do
 
   watch_job tiles   'build-world-tiles.sh'    /storage/streetzim/world-tiles-2026-09-05.out      'world tile build'
   watch_job extract 'extract-region-pbfs.sh'  /storage/streetzim/extract-regions-2026-09-05.out  'regional PBF extraction'
-  watch_job queue   'build-refresh-queue.sh'  "/storage/streetzim/queue-refresh-$(date +%Y-%m-%d).log" 'region build queue'
+  watch_job ship    'ship-region.sh'           /storage/streetzim/ship-california.out             'single-region ship pipeline'
+  watch_job guard   'nvme-guard.sh'            /storage/streetzim/nvme-guard.log                  'NVMe guard'
+  watch_job queue   'build-refresh-queue.sh --continue'  /storage/streetzim/queue-refresh.log 'region build queue'
 
   sleep "$INTERVAL"
 done
