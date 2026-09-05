@@ -3609,6 +3609,104 @@ def chunk_graph_file(src_path: str, chunk_size_bytes: int,
     return chunk_paths, manifest
 
 
+def _finish_features_streaming(raw_path, output_dir, n_unique):
+    """Location-context + sort + write-out without holding every feature.
+
+    The in-memory version of this tail annotated a list of ~1.2e8 feature
+    dicts and then `list.sort()`ed it. On the 2026-09-05 world build that
+    reached 106 GB RSS before the location pass even started, filled a
+    125 GB host's swap and had to be killed. Everything here is bounded
+    by the place grid (the `place` subset only, ~1e6) plus one batch.
+
+    Three passes over the file, which is cheap next to the tile scan that
+    produced it:
+      1. collect `place` features -> spatial grid (the only resident set)
+      2. annotate in batches, emitting "<type_ord>\t<name>\t<json>"
+      3. `sort` (external, spills to disk) then strip the key prefix
+    """
+    import subprocess
+    from collections import defaultdict
+
+    type_order = {"place": 0, "airport": 1, "peak": 2, "park": 3,
+                  "water": 4, "poi": 5, "street": 6}
+
+    print("    Assigning location context to features...", flush=True)
+    place_grid = defaultdict(list)
+    n_places = 0
+    with open(raw_path, "r", encoding="utf-8") as fin:
+        for line in fin:
+            f = json.loads(line)
+            if f.get("type") == "place":
+                place_grid[(int(f["lon"] * 2), int(f["lat"] * 2))].append(f)
+                n_places += 1
+    print(f"      {n_places} place features form the lookup grid", flush=True)
+
+    global _place_grid
+    _place_grid = dict(place_grid)
+    del place_grid
+
+    keyed_path = os.path.join(output_dir, "search_features.keyed")
+    type_counts = {}
+    assigned = 0
+    BATCH = 50_000
+    with open(raw_path, "r", encoding="utf-8") as fin, \
+            open(keyed_path, "w", encoding="utf-8") as fout:
+        batch = []
+
+        def flush(batch):
+            nonlocal assigned
+            if not batch:
+                return
+            for f, loc in zip(batch, _assign_location_batch(batch)):
+                if loc:
+                    f["location"] = loc
+                    assigned += 1
+                # The key is sorting scaffolding only; the payload is
+                # untouched. Tabs and newlines in a name would break the
+                # column split, so flatten them in the key alone.
+                key = f["name"].replace("\t", " ").replace("\n", " ")
+                fout.write(f'{type_order.get(f["type"], 99)}\t{key}\t'
+                           f'{json.dumps(f, separators=(",", ":"))}\n')
+
+        for line in fin:
+            f = json.loads(line)
+            type_counts[f["type"]] = type_counts.get(f["type"], 0) + 1
+            batch.append(f)
+            if len(batch) >= BATCH:
+                flush(batch)
+                batch = []
+        flush(batch)
+    print(f"    Assigned location to {assigned}/{n_unique} features", flush=True)
+    os.unlink(raw_path)
+
+    print("    Sorting (external, disk-backed)...", flush=True)
+    sorted_path = os.path.join(output_dir, "search_features.sorted")
+    env = dict(os.environ, LC_ALL="C")
+    # -S bounds sort's own buffer; -T keeps its spill next to the data
+    # rather than on a small /tmp.
+    subprocess.run(["sort", "-t", "\t", "-k1,1n", "-k2,2",
+                    "-S", os.environ.get("STREETZIM_SORT_MEM", "4G"),
+                    "-T", output_dir, "-o", sorted_path, keyed_path],
+                   check=True, env=env)
+    os.unlink(keyed_path)
+
+    features_path = os.path.join(output_dir, "search_features.jsonl")
+    with open(sorted_path, "r", encoding="utf-8") as fin, \
+            open(features_path, "w", encoding="utf-8") as fout:
+        for line in fin:
+            parts = line.split("\t", 2)
+            if len(parts) == 3:
+                fout.write(parts[2])
+    os.unlink(sorted_path)
+
+    print(f"    Extracted {n_unique} searchable features")
+    for t, c in sorted(type_counts.items()):
+        print(f"      {t}: {c}")
+    size_mb = os.path.getsize(features_path) / (1024 * 1024)
+    print(f"    Wrote {n_unique} features to disk ({size_mb:.0f} MB)", flush=True)
+    return features_path
+
+
 def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
     """Extract named features from z14 vector tiles for search indexing.
 
@@ -3732,8 +3830,8 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
         import hashlib
         stream_out = None
         if output_dir:
-            features_path = os.path.join(output_dir, "search_features.jsonl")
-            stream_out = open(features_path, "w")
+            raw_path = os.path.join(output_dir, "search_features.raw.jsonl")
+            stream_out = open(raw_path, "w")
         features = []
         seen_global = set()
         n_unique = 0
@@ -3769,9 +3867,9 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
 
         print(f"    {n_unique} unique features after cross-worker dedup")
         if stream_out is not None:
-            size_mb = os.path.getsize(features_path) / (1024 * 1024)
-            print(f"    Wrote {n_unique} features to disk ({size_mb:.0f} MB)")
-            return features_path
+            # Location context and the final sort both used to require every
+            # feature resident. Do them over the file instead.
+            return _finish_features_streaming(raw_path, output_dir, n_unique)
     else:
         # Legacy mode: filter from in-memory dict
         z14_tiles = {(z, x, y): data for (z, x, y), data in tiles.items() if z == 14}
