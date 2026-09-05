@@ -179,3 +179,29 @@ cost:
 May round left **1.2 TB** of `--keep-temp` leftovers in
 `tmp/osm_zim_*`. Delete once no build is running:
 `rm -rf /storage/streetzim/tmp/osm_zim_*`.
+
+## 9. Operational notes learned during the round (2026-09-05)
+
+**Never edit a shell script that is currently running.** Bash reads a
+script incrementally and keeps a byte offset, so rewriting the file under
+it makes execution resume at a shifted position — usually a syntax error
+somewhere unrelated. `extract-region-pbfs.sh` died with
+`line 81: unexpected EOF while looking for matching '"'` after an in-place
+patch, though by then all four passes had finished, so nothing was lost.
+When a running script must change, write the new content to a temporary
+file and `mv` it over: the rename swaps the directory entry while the
+running shell keeps reading the old inode.
+
+**Never shrink a running container's memory cap.** See the header of
+`build-world-tiles.sh` — `docker update --memory` below current usage
+OOM-killed a tile build at 99.6% of its store phases.
+
+**Extraction results.** All 49 regional PBFs were extracted from
+`planet-2026-08-31` in four osmium passes, ~5 hours total. Every region
+is now a real extract; the previous round left several
+(`carolinas`, `alaska`, `hawaii`, `florida`, `mexico`, `russia`, `china`,
+and others) as symlinks to a parent region or the planet, which makes
+every PBF-touching phase walk the parent — the wikidata Q-ID scan alone
+went from minutes to 9+ hours on Brazil in May. Sizes grew as expected
+against April (europe 40.67 → 41.81 GB, us 14.52 → 14.98, china 6.16 →
+6.48), and `osmium fileinfo` reads cleanly on spot checks.
