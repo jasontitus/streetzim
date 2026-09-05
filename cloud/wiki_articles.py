@@ -44,6 +44,96 @@ DEFAULT_CACHE_DIR = Path(__file__).resolve().parent.parent / "wiki_articles_cach
 _KEEP_TAGS = {"p", "h2", "h3", "h4", "ul", "ol", "li", "b", "i", "em",
               "strong", "blockquote", "dl", "dt", "dd", "br"}
 
+# ---- images ------------------------------------------------------------
+# Kiwix "maxi" ZIMs already carry downscaled WebP thumbnails, so bundling
+# them is cheap: measured on California's 11,613 linkable articles,
+# median 3 images/article, ~12 KB for the lead image and ~107 KB for all
+# of them. Images are stored once each at wiki-image/<sha1>.<ext> (many
+# articles share a location map or a seal) and referenced relatively
+# from wiki-article/<Title> as ../wiki-image/<name>, which resolves the
+# same way in kiwix-serve, the Kiwix apps and the PWA service worker.
+IMAGE_MODES = ("none", "lead", "all")
+_EXT_FOR_MIME = {"image/webp": "webp", "image/png": "png", "image/jpeg": "jpg",
+                 "image/gif": "gif", "image/svg+xml": "svg"}
+# UI chrome and pog markers that are never "the picture of the place".
+_ICON_RE = re.compile(
+    r"(OOjs|Symbol_|_Icon|Icon_|Wiki_letter|Ambox|Edit-|Crystal_Clear|"
+    r"Question_book|Commons-logo|Wikisource|Wikiquote|Wikibooks|Wiktionary|"
+    r"Wikivoyage|Red_pog|Green_pog|Blue_pog|Padlock|Speaker_Icon|Loudspeaker|"
+    r"Nuvola|Emblem-|Disambig|Magnify-clip|Text_document)", re.I)
+_MIN_IMAGE_BYTES = 1500          # below this it is an icon or a spacer
+_IMG_RE = re.compile(r"<img\b[^>]*\bsrc=\"([^\"]+)\"[^>]*>", re.I)
+
+
+def _img_width(tag: str) -> int:
+    m = re.search(r'\bwidth="(\d+)"', tag)
+    return int(m.group(1)) if m else 0
+
+
+def _plain(text: str) -> str:
+    """Caption text: strip tags, collapse whitespace, HTML-escape."""
+    t = re.sub(r"<[^>]+>", "", text)
+    t = re.sub(r"\s+", " ", t).strip()
+    return (t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
+def image_candidates(raw_html: str) -> list:
+    """[(src, caption)] in preference order: the infobox image first, then
+    figures/thumbs in document order (with their captions), then any other
+    <img>. Icon-like srcs and tiny declared widths are skipped; srcs are
+    de-duplicated. Resolution and size filtering happen later, against the
+    source ZIM, so this is pure text work."""
+    out, seen = [], set()
+
+    def take(tag: str, caption: str = ""):
+        m = re.search(r'\bsrc="([^"]+)"', tag)
+        if not m:
+            return
+        src = m.group(1)
+        if src in seen or _ICON_RE.search(src):
+            return
+        w = _img_width(tag)
+        if 0 < w < 40:
+            return
+        if not caption:
+            ma = re.search(r'\balt="([^"]*)"', tag)
+            caption = _plain(ma.group(1)) if ma else ""
+        seen.add(src)
+        out.append((src, caption))
+
+    mbox = re.search(r'<table\b[^>]*class="[^"]*infobox[^"]*"[^>]*>(.*?)</table>',
+                     raw_html, re.S | re.I)
+    if mbox:
+        box = mbox.group(1)
+        # Kiwix infobox pictures rarely carry alt text; the caption sits
+        # in a sibling cell.
+        mc = re.search(r'class="[^"]*infobox-caption[^"]*"[^>]*>(.*?)</', box, re.S | re.I)
+        cap = _plain(mc.group(1)) if mc else ""
+        for tag in re.findall(r"<img\b[^>]*>", box, re.I):
+            take(tag, cap)
+            if out:
+                break
+    for m in re.finditer(r"<figure\b[^>]*>(.*?)</figure>", raw_html, re.S | re.I):
+        block = m.group(1)
+        tags = re.findall(r"<img\b[^>]*>", block, re.I)
+        if not tags:
+            continue
+        mc = re.search(r"<figcaption\b[^>]*>(.*?)</figcaption>", block, re.S | re.I)
+        take(tags[0], _plain(mc.group(1)) if mc else "")
+    for m in re.finditer(r'<div\b[^>]*class="[^"]*\bthumb\b[^"]*"[^>]*>(.*?)</div>',
+                         raw_html, re.S | re.I):
+        block = m.group(1)
+        tags = re.findall(r"<img\b[^>]*>", block, re.I)
+        if not tags:
+            continue
+        mc = re.search(r'<div\b[^>]*class="[^"]*thumbcaption[^"]*"[^>]*>(.*?)</div>',
+                       block, re.S | re.I)
+        take(tags[0], _plain(mc.group(1)) if mc else "")
+    for tag in re.findall(r"<img\b[^>]*>", raw_html, re.I):
+        take(tag)
+    return out
+
 
 def _strip_lang(title: str) -> str:
     """`en:Foo Bar` -> `Foo Bar`; leaves un-prefixed titles alone."""
@@ -96,7 +186,8 @@ def _remove_spans_by_class(html: str, class_tokens: set[str]) -> str:
     return "".join(out)
 
 
-def clean_article_html(html: str, title: str, source_url: str) -> str:
+def clean_article_html(html: str, title: str, source_url: str,
+                       lead_html: str = "", gallery_html: str = "") -> str:
     """Trim raw article HTML (Kiwix or Parsoid) to a compact, self-
     contained reader page: drop scripts/styles/tables/figures/nav/refs/
     edit-links and the IPA/coord clutter, unwrap links to text, whitelist
@@ -157,11 +248,17 @@ def clean_article_html(html: str, title: str, source_url: str) -> str:
         "max-width:42em;margin:1em auto;padding:0 1em;line-height:1.55;"
         "color:#222}h1{font-size:1.5em}h2{font-size:1.2em;margin-top:1.2em}"
         "footer{margin-top:2em;padding-top:1em;border-top:1px solid #ddd;"
-        "font-size:.85em;color:#666}</style></head><body>"
-        f"<h1>{safe_title}</h1>\n{h}\n"
+        "font-size:.85em;color:#666}"
+        "figure{margin:1em 0}img{max-width:100%;height:auto;border-radius:4px}"
+        "figcaption{font-size:.85em;color:#555;margin-top:.3em}"
+        ".gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.8em}"
+        "</style></head><body>"
+        f"<h1>{safe_title}</h1>\n{lead_html}{h}\n{gallery_html}"
         f"<footer>From <a href=\"{source_url}\">Wikipedia</a> — text under "
         "<a href=\"https://creativecommons.org/licenses/by-sa/4.0/\">"
-        "CC BY-SA 4.0</a>.</footer></body></html>"
+        "CC BY-SA 4.0</a>."
+        + (" Images: their own licences on Wikimedia Commons." if (lead_html or gallery_html) else "")
+        + "</footer></body></html>"
     )
 
 
@@ -172,6 +269,21 @@ class _OfflineZim:
     def __init__(self, path: str):
         from libzim.reader import Archive  # lazy: only when offline source used
         self.a = Archive(path)
+
+    def image(self, src: str):
+        """Bytes + mimetype for an <img src> as written in a Kiwix article
+        ("./_assets_/<hash>/<name>", percent-encoded once more than the
+        entry path is). None when the entry is absent."""
+        p = urllib.parse.unquote(src.lstrip("./"))
+        for cand in (p, "I/" + p):
+            try:
+                it = self.a.get_entry_by_path(cand).get_item()
+                return bytes(it.content), it.mimetype
+            except KeyError:
+                continue
+            except Exception:
+                continue
+        return None
 
     def html(self, title_us: str) -> Optional[str]:
         ws = title_us.replace("_", " ")
@@ -240,6 +352,9 @@ def bundle_wiki_articles(
     limit: Optional[int] = None,
     sleep: float = 0.1,
     log: Callable[[str], None] = print,
+    images: str = "none",
+    image_max_kb: int = 128,
+    source=None,
 ) -> dict:
     """Fetch + clean + store each distinct article at `wiki-article/<Title>`.
 
@@ -259,15 +374,23 @@ def bundle_wiki_articles(
     if limit:
         norm = norm[:limit]
 
-    src = _OfflineZim(offline_zim) if offline_zim else None
+    if images not in IMAGE_MODES:
+        raise ValueError(f"images must be one of {IMAGE_MODES}, got {images!r}")
+    src = source if source is not None else (_OfflineZim(offline_zim) if offline_zim else None)
+    if images != "none" and (src is None or not hasattr(src, "image")):
+        log("    bundle-wiki-articles: images need an offline source ZIM — "
+            "bundling text only")
+        images = "none"
+    image_paths: set = set()       # wiki-image/<sha>.<ext> already stored
+    images_stored = image_bytes = 0
     # Cache by default for the online path so a rebuild never re-crawls
     # Wikipedia (repo-relative, like wikidata_cache/). Offline (local ZIM)
     # needs no cache — reads are local.
     if src is None and cache_dir is None:
         cache_dir = str(DEFAULT_CACHE_DIR)
     log(f"    bundle-wiki-articles: {len(norm)} distinct titles"
-        + (f" from {os.path.basename(offline_zim)}" if src
-           else f" via Wikipedia API (cache: {cache_dir})"))
+        + (f" from {os.path.basename(offline_zim) if offline_zim else type(src).__name__}"
+           if src else f" via Wikipedia API (cache: {cache_dir})"))
 
     bundled = failed = total_bytes = 0
     stored_titles: set = set()   # title_us actually written — for the geo-index
@@ -278,7 +401,39 @@ def bundle_wiki_articles(
         else:
             disp = title_us.replace("_", " ")
             url = "https://en.wikipedia.org/wiki/" + urllib.parse.quote(title_us)
-            page = clean_article_html(raw, disp, url).encode("utf-8")
+            lead_html = gallery_html = ""
+            if images != "none":
+                figs = []
+                for isrc, caption in image_candidates(raw):
+                    got = src.image(isrc)
+                    if not got:
+                        continue
+                    b, mt = got
+                    ext = _EXT_FOR_MIME.get((mt or "").split(";")[0].strip())
+                    if not ext or len(b) < _MIN_IMAGE_BYTES or len(b) > image_max_kb * 1024:
+                        continue
+                    name = hashlib.sha1(b).hexdigest()[:20] + "." + ext
+                    ipath = "wiki-image/" + name
+                    if ipath not in image_paths:
+                        add_item(ipath, "", mt.split(";")[0].strip(), b)
+                        image_paths.add(ipath)
+                        images_stored += 1
+                        image_bytes += len(b)
+                    figs.append((name, caption))
+                    if images == "lead":
+                        break
+                if figs:
+                    name, caption = figs[0]
+                    cap = f"<figcaption>{caption}</figcaption>" if caption else ""
+                    lead_html = (f'<figure class="lead"><img src="../wiki-image/{name}" '
+                                 f'alt="{caption}" loading="lazy">{cap}</figure>\n')
+                    if len(figs) > 1:
+                        cells = "".join(
+                            f'<figure><img src="../wiki-image/{n}" alt="{c}" loading="lazy">'
+                            + (f"<figcaption>{c}</figcaption>" if c else "") + "</figure>"
+                            for n, c in figs[1:])
+                        gallery_html = f'<section class="gallery">{cells}</section>\n'
+            page = clean_article_html(raw, disp, url, lead_html, gallery_html).encode("utf-8")
             add_item(f"wiki-article/{title_us}", disp, "text/html", page)
             stored_titles.add(title_us)
             bundled += 1
@@ -289,7 +444,10 @@ def bundle_wiki_articles(
             log(f"    ... {i}/{len(norm)} bundled={bundled} failed={failed} "
                 f"{total_bytes // 1024} KB")
     stats = {"requested": len(norm), "bundled": bundled, "failed": failed,
-             "bytes": total_bytes, "stored_titles": stored_titles}
+             "bytes": total_bytes, "stored_titles": stored_titles,
+             "images": images_stored, "image_bytes": image_bytes}
     log(f"    bundle-wiki-articles: stored {bundled} articles "
-        f"({total_bytes / 1024:.0f} KB), {failed} unavailable")
+        f"({total_bytes / 1024:.0f} KB), {failed} unavailable"
+        + (f"; {images_stored} images ({image_bytes / 1024 / 1024:.0f} MB, mode={images})"
+           if images != "none" else ""))
     return stats

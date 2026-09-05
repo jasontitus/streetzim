@@ -29,6 +29,16 @@ LOWZ=/storage/streetzim/terrain_cache/dem_sources/world_dem_32k.tif
 OVERTURE_RELEASE="${OVERTURE_RELEASE:-2026-04-15.0}"
 ADDR=/storage/streetzim/overture_cache/addresses-${ID}-${OVERTURE_RELEASE}.parquet
 PLACES=/storage/streetzim/overture_cache/places-${ID}-${OVERTURE_RELEASE}.parquet
+# Offline Wikipedia: every linkable POI gets its article (trimmed reader
+# page) and, with WIKI_IMAGES, its pictures — from the local enwiki maxi
+# ZIM, never the network. The size check guards against a truncated copy
+# (sha256 bf0853bf… was verified 2026-05; only the byte count is cheap
+# enough to check per build). WIKI_IMAGES=lead|all|none (default all:
+# ~107 KB/article on California, +37% of the ZIM; lead ~12 KB, +4%).
+WIKI_ZIM=/storage/streetzim/wiki-src/wikipedia_en_all_maxi_2026-02.zim
+WIKI_ZIM_SIZE=123980647016
+WIKI_IMAGES="${WIKI_IMAGES:-all}"
+WIKI_TITLE_CACHE=/storage/streetzim/wiki_articles_cache/${ID}_qid_titles.json
 
 OUT_FINAL=osm-${ID}-${TODAY}.zim
 LOG=/storage/streetzim/${ID}-rebuild-${TODAY}.log
@@ -81,6 +91,15 @@ ARGS=(
 # shellcheck disable=SC2206
 ARGS+=( $XAPIAN_FLAG )
 [ -f "$LOWZ" ]   && ARGS+=( --low-zoom-world-vrt "$LOWZ" )
+if [ "$WIKI_IMAGES" != "off" ] && [ -f "$WIKI_ZIM" ] && [ "$(stat -c%s "$WIKI_ZIM")" = "$WIKI_ZIM_SIZE" ]; then
+    mkdir -p /storage/streetzim/wiki_articles_cache
+    ARGS+=( --resolve-wikidata-titles --wikidata-title-cache "$WIKI_TITLE_CACHE"
+            --bundle-wiki-articles --wiki-articles-source "$WIKI_ZIM"
+            --wiki-images "$WIKI_IMAGES" --wiki-image-max-kb 128 )
+    echo "  wikipedia: bundling articles + images=$WIKI_IMAGES from $(basename "$WIKI_ZIM")"
+else
+    echo "  WARNING: enwiki source missing or wrong size — building WITHOUT bundled Wikipedia" | tee -a "$LOG"
+fi
 [ -f "$ADDR" ]   && ARGS+=( --overture-addresses "$ADDR" )
 [ -f "$PLACES" ] && ARGS+=( --overture-places "$PLACES" )
 

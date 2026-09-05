@@ -164,6 +164,13 @@ REGIONS = [
         "description": "South Africa, Namibia, Botswana, Zimbabwe, Mozambique, Zambia, Malawi, Lesotho, and Eswatini &mdash; Johannesburg, Cape Town, Durban, Pretoria, Windhoek, Gaborone, Harare, Maputo, Lusaka, the Kalahari, Kruger, and the Cape.",
     },
     {
+        "id": "east-africa",
+        "tier": "multi-country",
+        "title": "East Africa",
+        "zim_file": "osm-east-africa.zim",
+        "description": "Kenya, Tanzania, Uganda, Ethiopia, Rwanda, Burundi, Somalia, and South Sudan &mdash; Nairobi, Dar es Salaam, Addis Ababa, Kampala, Kigali, Mombasa, Zanzibar, Mount Kilimanjaro, the Serengeti, and Lake Victoria.",
+    },
+    {
         "id": "central-america-caribbean",
         "tier": "multi-country",
         "title": "Central America & Caribbean",

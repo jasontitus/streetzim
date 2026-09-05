@@ -103,3 +103,100 @@ class BundleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class FakeWikiSource:
+    """Stands in for _OfflineZim: article HTML plus resolvable image bytes."""
+    def __init__(self, pages, images):
+        self.pages, self.images = pages, images
+
+    def html(self, title_us):
+        return self.pages.get(title_us)
+
+    def image(self, src):
+        return self.images.get(src)
+
+
+BIG = b"\x89PNG" + b"\0" * 300_000
+PIC_A = b"RIFFWEBPVP8 " + b"\1" * 5000
+PIC_B = b"RIFFWEBPVP8 " + b"\2" * 7000
+ICON = b"RIFFWEBPVP8 " + b"\3" * 400
+
+ARTICLE = (
+    '<div class="mw-parser-output">'
+    '<table class="infobox"><tr><td><img src="./_assets_/h/Town_Hall.jpg" width="220" alt="Town hall"></td></tr></table>'
+    '<p>Intro paragraph.</p>'
+    '<figure><img src="./_assets_/h/River.jpg" width="220"><figcaption>The <b>river</b> at dusk</figcaption></figure>'
+    '<img src="./_assets_/h/OOjs_UI_icon_edit.svg.png" width="12">'
+    '<img src="./_assets_/h/Huge_panorama.png" width="600">'
+    '<p>More prose.</p></div>'
+)
+IMAGES = {
+    "./_assets_/h/Town_Hall.jpg": (PIC_A, "image/webp"),
+    "./_assets_/h/River.jpg": (PIC_B, "image/webp"),
+    "./_assets_/h/OOjs_UI_icon_edit.svg.png": (ICON, "image/png"),
+    "./_assets_/h/Huge_panorama.png": (BIG, "image/png"),
+}
+
+
+class ImageBundlingTests(unittest.TestCase):
+    def _run(self, mode, titles=("Exampleville",), pages=None):
+        stored = {}
+        src = FakeWikiSource(pages or {t: ARTICLE for t in titles}, IMAGES)
+        stats = wa.bundle_wiki_articles(
+            list(titles), lambda p, t, m, c: stored.__setitem__(p, (t, m, c)),
+            sleep=0, log=lambda *_: None, images=mode, image_max_kb=128, source=src)
+        return stored, stats
+
+    def test_none_stores_no_images(self):
+        stored, stats = self._run("none")
+        self.assertEqual([p for p in stored if p.startswith("wiki-image/")], [])
+        self.assertEqual(stats["images"], 0)
+        self.assertNotIn(b"<img", stored["wiki-article/Exampleville"][2])
+
+    def test_lead_stores_the_infobox_picture_after_the_title(self):
+        stored, stats = self._run("lead")
+        imgs = [p for p in stored if p.startswith("wiki-image/")]
+        self.assertEqual(len(imgs), 1)
+        self.assertEqual(stats["images"], 1)
+        _, mt, data = stored[imgs[0]]
+        self.assertEqual((mt, data), ("image/webp", PIC_A))
+        page = stored["wiki-article/Exampleville"][2].decode()
+        self.assertRegex(page, r"<h1>Exampleville</h1>\s*<figure class=\"lead\"><img src=\"\.\./"
+                               + imgs[0].replace("wiki-image/", "wiki-image/") + r"\"")
+        self.assertNotIn('<section class="gallery">', page)
+
+    def test_all_skips_icons_and_oversize_and_keeps_captions(self):
+        stored, stats = self._run("all")
+        imgs = sorted(p for p in stored if p.startswith("wiki-image/"))
+        self.assertEqual(len(imgs), 2, imgs)          # icon (<1500 B) and 300 KB panorama dropped
+        self.assertEqual(stats["images"], 2)
+        page = stored["wiki-article/Exampleville"][2].decode()
+        self.assertIn('<section class="gallery">', page)
+        self.assertIn("<figcaption>The river at dusk</figcaption>", page)   # tags stripped
+        self.assertNotIn("OOjs", page)
+        self.assertNotIn("Huge_panorama", page)
+        for p in imgs:
+            self.assertIn(f'src="../{p}"', page)
+
+    def test_shared_image_stored_once_across_articles(self):
+        stored, stats = self._run("all", titles=("Town_A", "Town_B"),
+                                  pages={"Town_A": ARTICLE, "Town_B": ARTICLE})
+        self.assertEqual(stats["bundled"], 2)
+        self.assertEqual(stats["images"], 2)          # not 4
+        self.assertEqual(len([p for p in stored if p.startswith("wiki-image/")]), 2)
+
+    def test_images_need_an_offline_source(self):
+        stored = {}
+        msgs = []
+        fake_html = '<div class="mw-parser-output"><p>x</p><img src="//upload.wikimedia.org/a.jpg"></div>'
+        with mock.patch.object(wa, "_fetch_online", return_value=fake_html):
+            stats = wa.bundle_wiki_articles(
+                ["Online_Only"], lambda p, t, m, c: stored.__setitem__(p, c),
+                cache_dir="/tmp/ignored", sleep=0, log=msgs.append, images="all")
+        self.assertEqual(stats["images"], 0)
+        self.assertTrue(any("text only" in m for m in msgs))
+
+    def test_rejects_unknown_mode(self):
+        with self.assertRaises(ValueError):
+            wa.bundle_wiki_articles(["X"], lambda *a: None, images="some", source=FakeWikiSource({}, {}))

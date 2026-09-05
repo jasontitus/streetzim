@@ -4309,6 +4309,8 @@ def create_zim(
     bundle_wiki_articles=False,
     wiki_articles_cache=None,
     wiki_articles_source=None,
+    wiki_images="none",
+    wiki_image_max_kb=128,
 ):
     """Create a ZIM file containing the map viewer and all tiles.
 
@@ -4893,13 +4895,17 @@ def create_zim(
                         MapItem(path, title, mt, content)),
                     cache_dir=wiki_articles_cache,
                     offline_zim=wiki_articles_source,
+                    images=wiki_images,
+                    image_max_kb=wiki_image_max_kb,
                 )
                 _bundled_set = _wa_stats.get("stored_titles") or set()
                 PHASE_TIMER.record_subphase(
                     "zim-pack: wiki-articles", time.time() - _wa_t0,
                     note=f"{_wa_stats['bundled']} articles, "
                          f"{_wa_stats['bytes'] // 1024} KB, "
-                         f"{_wa_stats['failed']} missing")
+                         f"{_wa_stats['failed']} missing, "
+                         f"{_wa_stats.get('images', 0)} images "
+                         f"{_wa_stats.get('image_bytes', 0) // 1048576} MB")
 
         # Add routing graph data.
         # Large regions produce multi-hundred-MB / multi-GB graph.bin
@@ -6317,6 +6323,15 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--wiki-articles-cache", metavar="DIR", default=None,
                         help="Disk cache for fetched article HTML (default: "
                              "wiki_articles_cache/). Reused across rebuilds.")
+    parser.add_argument("--wiki-images", choices=("none", "lead", "all"), default="none",
+                        help="With --bundle-wiki-articles and an offline "
+                             "--wiki-articles-source: also bundle each article's "
+                             "images (Kiwix maxi thumbnails, stored once at "
+                             "wiki-image/<sha1>.<ext>). 'lead' = the infobox/first "
+                             "picture only (~12 KB/article on California), 'all' = "
+                             "every non-icon image (~107 KB/article, median 3).")
+    parser.add_argument("--wiki-image-max-kb", type=int, default=128,
+                        help="Skip any single bundled image larger than this.")
     parser.add_argument("--wiki-articles-source", metavar="ZIM", default=None,
                         help="Local Wikipedia ZIM to read articles from "
                              "(offline, fast, no crawl). Omit to fetch from the "
@@ -7060,6 +7075,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             bundle_wiki_articles=bool(getattr(args, "bundle_wiki_articles", False)),
             wiki_articles_cache=getattr(args, "wiki_articles_cache", None),
             wiki_articles_source=getattr(args, "wiki_articles_source", None),
+            wiki_images=getattr(args, "wiki_images", "none"),
+            wiki_image_max_kb=getattr(args, "wiki_image_max_kb", 128),
             )
         except BaseException:
             # libzim's Creator.__exit__ finalises on exception, so an

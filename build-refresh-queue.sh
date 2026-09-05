@@ -229,12 +229,13 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
     row "$ID" overture-failed 0 - "download $OVERTURE_RELEASE"; n_fail=$((n_fail+1)); continue
   fi
 
+  touch "$TMPDIR/.queue-t0-$ID"   # this run's start: the ZIM must post-date it
   log "  build (log: ${ID}-rebuild-${TODAY}.log, stdout: ${ID}-build.out)"
   bash /storage/streetzim/build-region-fast.sh "$ID" "$BBOX" "$NAME" > "/storage/streetzim/${ID}-build.out" 2>&1
   BUILD_RC=$?
   ZIM=$(ls -t /storage/streetzim/osm-${ID}-20*.zim 2>/dev/null | grep -v '\.tmp$' | head -1)
   MIN=$(( ($(date +%s) - T0) / 60 ))
-  if [ "$BUILD_RC" -ne 0 ] || [ -z "$ZIM" ] || [ ! -s "$ZIM" ] || [ ! "$ZIM" -nt "$PBF" ]; then
+  if [ "$BUILD_RC" -ne 0 ] || [ -z "$ZIM" ] || [ ! -s "$ZIM" ] || [ ! "$ZIM" -nt "$TMPDIR/.queue-t0-$ID" ]; then
     log "  BUILD FAILED rc=$BUILD_RC zim=${ZIM:-none} after ${MIN} min"
     row "$ID" build-failed "$MIN" - "rc=$BUILD_RC"; n_fail=$((n_fail+1)); continue
   fi
@@ -269,6 +270,12 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
   if PROJECT_DIR=/storage/streetzim TERRAIN_STRIPE_TOLERATE=10 bash cloud/upload_validated.sh "$ID" "$(basename "$ZIM")" >> "$LOG" 2>&1; then
     log "  uploaded → https://archive.org/details/streetzim-$ID"
     row "$ID" uploaded "$MIN" "$SIZE" "$(basename "$ZIM")"; n_ok=$((n_ok+1))
+    # --keep-temp scratch is only useful for a failed build; reclaim it now.
+    TD=$(find "$TMPDIR" -maxdepth 1 -type d -name 'osm_zim_*' -newer "$TMPDIR/.queue-t0-$ID" 2>/dev/null | head -1)
+    if [ -n "$TD" ]; then
+      log "  reclaiming build scratch $TD ($(du -sh "$TD" 2>/dev/null | cut -f1))"
+      ionice -c3 nice -n 19 rm -rf "$TD"
+    fi
   else
     log "  UPLOAD FAILED (rc=$?) — ZIM kept: $ZIM"
     row "$ID" upload-failed "$MIN" "$SIZE" "$(basename "$ZIM")"; n_fail=$((n_fail+1))

@@ -169,6 +169,14 @@ log "uploading to archive.org/details/streetzim-$ID"
 if PROJECT_DIR=/storage/streetzim TERRAIN_STRIPE_TOLERATE=10 \
      bash cloud/upload_validated.sh "$ID" "$ZIM" >> "$LOG" 2>&1; then
   log "=== SHIPPED $ZIM → https://archive.org/details/streetzim-$ID"
+  # The build ran with --keep-temp so a failed build leaves its scratch
+  # for inspection. Nothing ever reuses it (there is no resume path), so
+  # once the region has shipped it is just ~20-120 GB of dead weight.
+  TD=$(find "$TMPDIR" -maxdepth 1 -type d -name 'osm_zim_*' -newer "$TMPDIR/.ship-t0-$ID" 2>/dev/null | head -1)
+  if [ -n "$TD" ] && ! pgrep -f "create_osm_zim.py.*--name $NAME" >/dev/null 2>&1; then
+    log "reclaiming build scratch $TD ($(du -sh "$TD" 2>/dev/null | cut -f1))"
+    ionice -c3 nice -n 19 rm -rf "$TD"
+  fi
 else
   log "=== UPLOAD FAILED (ZIM kept: $ZIM)"; exit 5
 fi

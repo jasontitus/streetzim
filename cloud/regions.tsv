@@ -37,8 +37,8 @@ brazil	Brazil	-74.0,-34.0,-32.0,5.5	country	-23.5505,-46.6333	-22.9099,-47.0626	
 # --- multi-country ---
 baltics	Baltics	20.9,53.9,28.3,59.7	multi-country	56.9496,24.1052	56.9680,23.7704	Riga	
 caucasus	Caucasus	39.0,38.0,52.0,44.0	multi-country	41.7151,44.8271	40.1792,44.4991	Tbilisi	
-himalayas	Himalayas	72.0,26.0,98.0,37.5	multi-country	27.7172,85.3240	28.2096,83.9856	Kathmandu	RECONSTRUCTED bbox (built 2026-04-29 on a cloud VM; no local record)
-central-america-caribbean	Central America & Caribbean	-93.0,7.0,-59.0,27.5	multi-country	14.6349,-90.5069	13.6929,-89.2182	Panama	RECONSTRUCTED bbox (built 2026-04-29 on a cloud VM; no local record)
+himalayas	Himalayas	72.0,26.0,98.0,37.5	multi-country	27.7172,85.3240	28.2096,83.9856	Kathmandu	bbox reconstructed 2026-09-04 (no local record of the April cloud-VM build); confirmed by user 2026-09-05
+central-america-caribbean	Central America & Caribbean	-93.0,7.0,-59.0,27.5	multi-country	14.6349,-90.5069	13.6929,-89.2182	Panama	bbox reconstructed 2026-09-04 (no local record of the April cloud-VM build); confirmed by user 2026-09-05
 pacific-islands	Pacific Islands	130.0,-25.0,180.0,5.0	multi-country	-18.1416,178.4419	-17.7765,177.4356	Suva	smoke pair on Viti Levu; old queue pair spanned the ocean and forced a manual upload; not in generate.py REGIONS
 west-africa	West Africa	-18.0,3.0,15.0,17.0	multi-country	6.5244,3.3792	7.3775,3.9470	Lagos	not in generate.py REGIONS
 southern-africa	Southern Africa	11.0,-35.0,42.0,-15.0	multi-country	-26.2041,28.0473	-25.7479,28.2293	Johannesburg	not in generate.py REGIONS
