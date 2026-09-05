@@ -960,6 +960,47 @@ var baseUrl = (function() {
 var WIKI_QID_TITLES = null;   // optional side-load bridge (transitional)
 var WIKI_GEO_INDEX = null;    // {title:[lat,lon,type,qid]} from the ZIM's wiki-geo-index.json
 var WIKI_GEO_QID = null;      // reverse {qid:title} built from WIKI_GEO_INDEX
+var WIKI_GEO_BUCKETS = null;     // Map<1°-cell key, [title, …]>, built lazily
+var WIKI_GEO_BUCKETS_SRC = null; // the index object the buckets were built from
+
+function wikiGeoBucketKey(lat, lon) {
+  return (Math.floor(lat) + 90) * 1000 + (Math.floor(lon) + 180);
+}
+
+// Titles whose point lies inside [W,E]×[S,N]. Uses a lazily built 1°
+// bucket grid so a pan/zoom only touches the cells under the viewport
+// instead of rescanning every placed article in the ZIM (hundreds of
+// thousands on country-scale builds) on every debounced moveend.
+function wikiGeoTitlesInBounds(W, E, S, N) {
+  if (!WIKI_GEO_INDEX) return [];
+  if (WIKI_GEO_BUCKETS_SRC !== WIKI_GEO_INDEX) {
+    WIKI_GEO_BUCKETS = new Map();
+    for (var t in WIKI_GEO_INDEX) {
+      var g = WIKI_GEO_INDEX[t];
+      if (!g || typeof g[0] !== 'number' || typeof g[1] !== 'number') continue;
+      var k = wikiGeoBucketKey(g[0], g[1]);
+      var arr = WIKI_GEO_BUCKETS.get(k);
+      if (!arr) WIKI_GEO_BUCKETS.set(k, arr = []);
+      arr.push(t);
+    }
+    WIKI_GEO_BUCKETS_SRC = WIKI_GEO_INDEX;
+  }
+  var out = [];
+  var la0 = Math.max(-90, Math.floor(S)), la1 = Math.min(89, Math.floor(N));
+  var lo0 = Math.max(-180, Math.floor(W)), lo1 = Math.min(179, Math.floor(E));
+  for (var la = la0; la <= la1; la++) {
+    for (var lo = lo0; lo <= lo1; lo++) {
+      var b = WIKI_GEO_BUCKETS.get(wikiGeoBucketKey(la, lo));
+      if (!b) continue;
+      for (var i = 0; i < b.length; i++) {
+        var g2 = WIKI_GEO_INDEX[b[i]];
+        if (g2[1] < W || g2[1] > E || g2[0] < S || g2[0] > N) continue;
+        out.push(b[i]);
+      }
+    }
+  }
+  return out;
+}
 (function loadWikiTitleBridge() {
   try {
     fetch(baseUrl + '../wiki-qid-titles.json')
@@ -1120,7 +1161,11 @@ dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAg
     function attempt(n) {
       return fetch(url, { signal: signal })
         .then(function(r) {
-          if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + r.statusText);
+          if (!r.ok) {
+            var e = new Error('HTTP ' + r.status + ' ' + r.statusText);
+            e.status = r.status;
+            throw e;
+          }
           return r.arrayBuffer();
         })
         .then(function(buf) {
@@ -1128,6 +1173,12 @@ dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAg
         })
         .catch(function(err) {
           dbg('tile fetch failed', 'attempt', n, url, describeError(err));
+          // A 404 is definitive (tile outside the bbox / beyond the baked
+          // satellite zoom): retrying it four times held one of the six
+          // fetch slots for ~2.4 s per missing tile and blocked
+          // MapLibre's parent-tile fallback, stalling every pan at z13+
+          // on regions whose satellite stops at z12.
+          if (err && err.status === 404) throw err;
           if (n < 4 && !signal.aborted) {
             return new Promise(function(resolve) {
               setTimeout(function() { resolve(attempt(n + 1)); }, 400 * n);
@@ -1350,8 +1401,38 @@ fetchConfig(1)
         if (map.getLayer(id)) map.setPaintProperty(id, k, v);
       }
 
+      // Paint values hideSatellite must put back, captured from the live
+      // style the first time showSatellite overrides them. The hand-
+      // copied tables in hideSatellite drifted from makeStyle (trunk,
+      // secondary, path colours, village halo), so one satellite
+      // round-trip permanently recoloured the base map.
+      var SAT_LABEL_IDS = ['road-label','water-label','place-city','place-town',
+                           'place-village','place-suburb','poi-label'];
+      var SAT_ROAD_IDS = ['road-motorway','road-trunk','road-primary','road-secondary',
+                          'road-tertiary','road-minor','road-path'];
+      var satSavedPaint = null;
+      function captureSatPaint() {
+        if (satSavedPaint) return;
+        satSavedPaint = {};
+        function save(id, prop) {
+          if (!map.getLayer(id)) return;
+          try { satSavedPaint[id + '|' + prop] = map.getPaintProperty(id, prop); }
+          catch (e) {}
+        }
+        SAT_LABEL_IDS.forEach(function(id) {
+          save(id, 'text-color'); save(id, 'text-halo-color'); save(id, 'text-halo-width');
+        });
+        SAT_ROAD_IDS.forEach(function(id) { save(id, 'line-color'); });
+      }
+      function satRestore(id, prop, fallback) {
+        var k = id + '|' + prop;
+        return (satSavedPaint && Object.prototype.hasOwnProperty.call(satSavedPaint, k))
+          ? satSavedPaint[k] : fallback;
+      }
+
       function showSatellite() {
         addSatelliteLayer();
+        captureSatPaint();
         setLayout('satellite-layer', 'visibility', 'visible');
         setPaint('satellite-layer', 'raster-opacity', 1);
         hiddenInSatellite.forEach(function(id) {
@@ -1396,11 +1477,13 @@ fetchConfig(1)
           'place-suburb': {c: ['case',['has','wikidata'],'#4a6fa5','#666'], hc: 'rgba(255,255,255,0.8)', hw: 1},
           'poi-label': {c: ['case',['has','wikidata'],'#4a6fa5','#666'], hc: 'rgba(255,255,255,0.7)', hw: 1}
         };
+        // Prefer the values captured from the live style; the table is
+        // only a fallback for a layer that wasn't present at capture.
         Object.keys(labelDefaults).forEach(function(id) {
           var d = labelDefaults[id];
-          setPaint(id, 'text-color', d.c);
-          setPaint(id, 'text-halo-color', d.hc);
-          setPaint(id, 'text-halo-width', d.hw);
+          setPaint(id, 'text-color', satRestore(id, 'text-color', d.c));
+          setPaint(id, 'text-halo-color', satRestore(id, 'text-halo-color', d.hc));
+          setPaint(id, 'text-halo-width', satRestore(id, 'text-halo-width', d.hw));
         });
         ['road-motorway-casing','road-trunk-casing','road-primary-casing',
          'road-secondary-casing'].forEach(function(id) {
@@ -1412,7 +1495,7 @@ fetchConfig(1)
           'road-tertiary': '#fff', 'road-minor': '#fff', 'road-path': '#ccc'
         };
         Object.keys(roadColors).forEach(function(id) {
-          setPaint(id, 'line-color', roadColors[id]);
+          setPaint(id, 'line-color', satRestore(id, 'line-color', roadColors[id]));
         });
       }
 
@@ -1471,7 +1554,7 @@ fetchConfig(1)
               'hillshade-highlight-color': '#fff',
               'hillshade-illumination-direction': 315
             }
-          }, map.getStyle().layers[1] ? map.getStyle().layers[1].id : undefined);
+          }, _hillshadeBeforeId(map));
         } else if (mode === 2) {
           // Full 3D terrain + hillshade
           map.addLayer({
@@ -1484,7 +1567,7 @@ fetchConfig(1)
               'hillshade-highlight-color': '#fff',
               'hillshade-illumination-direction': 315
             }
-          }, map.getStyle().layers[1] ? map.getStyle().layers[1].id : undefined);
+          }, _hillshadeBeforeId(map));
           map.setTerrain({ source: 'terrain-dem', exaggeration: 1.5 });
         }
         map.triggerRepaint();
@@ -1516,26 +1599,46 @@ fetchConfig(1)
     // Search detail pages (search/<slug>.html) link in via dest=… so
     // the viewer pops the routing panel open with the place already
     // filled in — see "Directions to here" CTA.
+    // Out-of-range coordinates make maplibre throw ("Invalid LngLat
+    // latitude value") out of the map `load` handler, which used to
+    // abort the rest of applyHash (dest/origin/find=results) for a
+    // hand-typed or truncated URL. Validate before use.
+    function validLatLon(lat, lon) {
+      return isFinite(lat) && isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+    }
     function applyHash() {
       var hash = window.location.hash || '';
       var m = hash.match(/map=(\d+\.?\d*)\/(-?\d+\.?\d*)\/(-?\d+\.?\d*)/);
       if (m) {
         var z = parseFloat(m[1]), lat = parseFloat(m[2]), lon = parseFloat(m[3]);
-        map.flyTo({ center: [lon, lat], zoom: z, duration: 1500 });
+        if (validLatLon(lat, lon) && isFinite(z) && z >= 0 && z <= 24) {
+          map.flyTo({ center: [lon, lat], zoom: z, duration: 1500 });
+        } else {
+          m = null;
+        }
       }
       var destMatch  = hash.match(/dest=(-?\d+\.?\d*),(-?\d+\.?\d*)/);
       var origMatch  = hash.match(/origin=(-?\d+\.?\d*),(-?\d+\.?\d*)/);
       var pinMatch   = hash.match(/pin=(-?\d+\.?\d*),(-?\d+\.?\d*)/);
       var labelMatch = hash.match(/label=([^&]+)/);
-      var label = labelMatch ? decodeURIComponent(labelMatch[1]) : null;
+      var label = null;
+      if (labelMatch) {
+        // A malformed escape (hand-typed or truncated URL) threw
+        // URIError here and aborted the whole hash handler — no pin,
+        // no routing panel — on load and on every hashchange.
+        try { label = decodeURIComponent(labelMatch[1]); }
+        catch (e) { label = labelMatch[1]; }
+      }
       // `pin=` drops a red pin + Directions popup at a location without
       // opening the routing panel. Used by the Find-page "Map" button so
       // the user sees what they picked instead of landing on an
       // unannotated camera move.
       if (pinMatch) {
         var pinLat = parseFloat(pinMatch[1]), pinLon = parseFloat(pinMatch[2]);
-        placeSearchPin(map, pinLat, pinLon, label || '');
+        if (validLatLon(pinLat, pinLon)) placeSearchPin(map, pinLat, pinLon, label || '');
       }
+      if (destMatch && !validLatLon(parseFloat(destMatch[1]), parseFloat(destMatch[2]))) destMatch = null;
+      if (origMatch && !validLatLon(parseFloat(origMatch[1]), parseFloat(origMatch[2]))) origMatch = null;
       if (destMatch) {
         var dLat = parseFloat(destMatch[1]), dLon = parseFloat(destMatch[2]);
         // If we don't already have a `map=` fragment, frame the
@@ -2161,6 +2264,7 @@ var _findResultsState = {
   anchorCenter:  null,  // map center after the initial fitBounds settles
   anchorZoom:    null,  // map zoom after the initial fitBounds settles
   moveHandler:   null,  // bound moveend handler (so we can detach on clear)
+  renderSeq:     0,     // bumped per render; stale map.once('idle') callbacks bail
   detailPanel:   null,  // root <div> of the place detail bottom-sheet (or null)
   detailBackdrop: null, // semi-transparent backdrop behind detail panel
   scrollDebounce: null,
@@ -2226,7 +2330,13 @@ function renderFindResultsFromStash(map) {
   var bounds = null;
   for (var i = 0; i < stash.items.length; i++) {
     var r = stash.items[i];
-    if (typeof r.a !== 'number' || typeof r.o !== 'number') continue;
+    if (typeof r.a !== 'number' || typeof r.o !== 'number') {
+      // Keep markers[] parallel to items[] — the carousel, pin click
+      // handler and keyboard nav all index by position, and every
+      // consumer already null-checks.
+      _findResultsState.markers.push(null);
+      continue;
+    }
     var marker = new maplibregl.Marker({ color: '#e74c3c' })
       .setLngLat([r.o, r.a])
       .addTo(map);
@@ -2297,8 +2407,17 @@ function renderFindResultsFromStash(map) {
   // After fitBounds settles, capture the anchor view + start watching
   // for camera moves. Any subsequent move shows the "Search this area"
   // pill so the user can re-filter results to the new viewport.
+  // Two renders before the map goes idle (rapid chip / sub-filter
+  // taps) both used to reach this callback and each installed a
+  // moveend handler; clearFindResults only detached the last one, so
+  // the earlier handler leaked for the page lifetime.
+  var renderToken = ++_findResultsState.renderSeq;
   map.once('idle', function() {
     if (!_findResultsState.strip) return;
+    if (renderToken !== _findResultsState.renderSeq) return;
+    if (_findResultsState.moveHandler) {
+      try { map.off('moveend', _findResultsState.moveHandler); } catch (e) {}
+    }
     _findResultsState.anchorCenter = map.getCenter();
     _findResultsState.anchorZoom   = map.getZoom();
     _findResultsState.moveHandler  = function() {
@@ -2661,8 +2780,17 @@ function _searchAreaApply(map) {
   var b = map.getBounds();
   var w = b.getWest(), e = b.getEast(),
       s = b.getSouth(), n = b.getNorth();
+  // getBounds() returns unwrapped longitudes across the antimeridian
+  // (west=170, east=190) while records store [-180, 180] — test the
+  // record shifted by ±360° too, or a viewport over Fiji rejects
+  // every record with a negative longitude.
   function lonInside(lon) {
-    return w <= e ? (lon >= w && lon <= e) : (lon >= w || lon <= e);
+    if (w <= e) {
+      return (lon >= w && lon <= e)
+          || (lon + 360 >= w && lon + 360 <= e)
+          || (lon - 360 >= w && lon - 360 <= e);
+    }
+    return lon >= w || lon <= e;
   }
   var filtered = _findResultsState.items.filter(function(r) {
     return r.a >= s && r.a <= n && lonInside(r.o);
@@ -2874,11 +3002,13 @@ function _showPlaceDetail(map, r, idx) {
       r.soc[0], '_blank'));
   }
   // Coordinates (always available, useful for cross-app copy-paste)
-  var coordRow = _detailFactRow(
-    'Coords',
-    r.a.toFixed(5) + ', ' + r.o.toFixed(5),
-    null);
-  info.appendChild(coordRow);
+  if (typeof r.a === 'number' && typeof r.o === 'number') {
+    var coordRow = _detailFactRow(
+      'Coords',
+      r.a.toFixed(5) + ', ' + r.o.toFixed(5),
+      null);
+    info.appendChild(coordRow);
+  }
   if (info.childElementCount > 0) panel.appendChild(info);
 
   // Wikipedia extract — async fetch via the existing wd cache.
@@ -3285,6 +3415,22 @@ function _findFetchChipData(chipId) {
 // `loadChipOnMap` (when called via the Search-this-area pill with
 // requireInBounds) and the old `_searchAreaApply` in-memory path
 // want the same look.
+// Layer id the hillshade should be inserted before: the first layer
+// that is neither the background nor a raster (satellite) layer. The
+// old positional `layers[1]` broke once the satellite layer had been
+// inserted at index 0 — hillshade then landed BELOW `background` and
+// was invisible whenever satellite was toggled back off.
+function _hillshadeBeforeId(map) {
+  var layers = (map.getStyle() && map.getStyle().layers) || [];
+  for (var i = 0; i < layers.length; i++) {
+    var l = layers[i];
+    if (l.type !== 'background' && l.type !== 'raster' && l.type !== 'hillshade') {
+      return l.id;
+    }
+  }
+  return undefined;
+}
+
 function _showFindToast(text, opts) {
   opts = opts || {};
   var d = document.createElement('div');
@@ -3304,8 +3450,19 @@ function _showFindToast(text, opts) {
   }, opts.ms || 1800);
 }
 
+// Generation counter: tap chip A (slow) then chip B (fast) used to
+// leave A's "Loading …" placeholder stuck in the search box and let A's
+// late result overwrite B's carousel.
+var _chipLoadSeq = 0;
+// The search box's ORIGINAL placeholder, captured once. Capturing it
+// per call meant a second chip tap saw "Loading a…" as the value to
+// restore, and left that text stuck after the first load was
+// superseded.
+var _chipOrigPlaceholder = null;
+
 async function loadChipOnMap(map, chipDef, opts) {
   opts = opts || {};
+  var mySeq = ++_chipLoadSeq;
   _findChipPaintActive(chipDef.id);
   // Stash the active chip on the find state so "Search this area"
   // (the pill that appears when the user pans the map) can re-fetch
@@ -3318,19 +3475,32 @@ async function loadChipOnMap(map, chipDef, opts) {
   // sees "loading" for the chip they tapped without a separate
   // status surface.
   var searchInput = document.getElementById('search-input');
-  var prevPlaceholder = searchInput ? searchInput.placeholder : null;
+  // Refresh the remembered placeholder whenever the current one is a
+  // real one (not our own "Loading …"): the search manifest rewrites it
+  // asynchronously ("Search N places…"), so capturing only once could
+  // pin the boot-time text forever.
+  if (searchInput && !/^Loading /.test(searchInput.placeholder || '')) {
+    _chipOrigPlaceholder = searchInput.placeholder || '';
+  }
   if (searchInput) {
     searchInput.placeholder = 'Loading ' + chipDef.label.toLowerCase() + '…';
+  }
+  function restorePlaceholder() {
+    if (searchInput && _chipOrigPlaceholder != null) {
+      searchInput.placeholder = _chipOrigPlaceholder;
+    }
   }
   try {
     var data = await _findFetchChipData(chipDef.id);
   } catch (err) {
-    if (searchInput) searchInput.placeholder = prevPlaceholder || '';
-    _findChipPaintActive(null);
     console.warn('[streetzim] chip fetch failed:', err);
+    if (mySeq !== _chipLoadSeq) return;  // a newer chip owns the UI now
+    restorePlaceholder();
+    _findChipPaintActive(null);
     return;
   }
-  if (searchInput) searchInput.placeholder = prevPlaceholder || '';
+  if (mySeq !== _chipLoadSeq) return;  // superseded while loading
+  restorePlaceholder();
 
   // Filter to the current map viewport. If that wipes everything,
   // fall back to the unfiltered set (matches places.html behaviour
@@ -3338,8 +3508,17 @@ async function loadChipOnMap(map, chipDef, opts) {
   var bounds = map.getBounds();
   var n = bounds.getNorth(), s = bounds.getSouth();
   var e = bounds.getEast(),  w = bounds.getWest();
+  // getBounds() returns unwrapped longitudes across the antimeridian
+  // (west=170, east=190) while records store [-180, 180] — test the
+  // record shifted by ±360° too, or a viewport over Fiji rejects
+  // every record with a negative longitude.
   function lonInside(lon) {
-    return w <= e ? (lon >= w && lon <= e) : (lon >= w || lon <= e);
+    if (w <= e) {
+      return (lon >= w && lon <= e)
+          || (lon + 360 >= w && lon + 360 <= e)
+          || (lon - 360 >= w && lon - 360 <= e);
+    }
+    return lon >= w || lon <= e;
   }
   var filtered = [];
   for (var i = 0; i < data.length; i++) {
@@ -3847,8 +4026,12 @@ function placeSearchPin(map, lat, lon, name, enrich) {
     contact.appendChild(a);
     any = true;
   }
-  if (enrich.ws) addLink(enrich.ws, '🌐', enrich.ws);
-  if (enrich.p)  addLink('tel:' + enrich.p.replace(/\s+/g, ''), '📞', enrich.p);
+  // Only http(s) links may come out of index data (a `javascript:`
+  // website value would otherwise execute on tap).
+  var wsHref = (typeof enrich.ws === 'string' && /^https?:\/\//i.test(enrich.ws.trim()))
+    ? enrich.ws.trim() : null;
+  if (wsHref) addLink(wsHref, '🌐', wsHref);
+  if (enrich.p)  addLink('tel:' + String(enrich.p).replace(/\s+/g, ''), '📞', String(enrich.p));
   if (enrich.soc && enrich.soc.length) {
     enrich.soc.forEach(function(s) {
       var host = s.toLowerCase();
@@ -3924,12 +4107,30 @@ function placeSearchPin(map, lat, lon, name, enrich) {
                                      maxWidth: '320px' })
     .setDOMContent(box);
   searchMarker.setPopup(popup);
-  // Auto-open once the camera settles.
-  map.once('moveend', function() {
-    if (searchMarker) searchMarker.togglePopup();
-  });
+  // Auto-open once the camera settles — or right away when no camera
+  // move is in flight (`#pin=` without `map=`), otherwise the popup
+  // used to pop on whatever unrelated pan came next. A pending
+  // listener from an earlier pin is detached so two rapid pins can't
+  // toggle the newer popup open and then closed again.
+  if (_searchPinOpenHandler) {
+    try { map.off('moveend', _searchPinOpenHandler); } catch (e) {}
+    _searchPinOpenHandler = null;
+  }
+  var thisMarker = searchMarker;
+  if (map.isMoving && map.isMoving()) {
+    _searchPinOpenHandler = function() {
+      _searchPinOpenHandler = null;
+      if (searchMarker === thisMarker && !thisMarker.getPopup().isOpen()) {
+        thisMarker.togglePopup();
+      }
+    };
+    map.once('moveend', _searchPinOpenHandler);
+  } else {
+    thisMarker.togglePopup();
+  }
   return searchMarker;
 }
+var _searchPinOpenHandler = null;
 
 function initSearch(map) {
   var input = document.getElementById('search-input');
@@ -4228,7 +4429,9 @@ function initSearch(map) {
       var score = textScore; // fallback if no coordinates
       if (item.a !== undefined && item.o !== undefined) {
         var dlat = item.a - clat;
-        var dlng = item.o - clng;
+        // Scale longitude by cos(lat) so the degree-space distance is
+        // isotropic; raw Δlng overstated E–W distances 2x at 60°N.
+        var dlng = (item.o - clng) * Math.cos(clat * Math.PI / 180);
         var dist = Math.sqrt(dlat * dlat + dlng * dlng);
         var viewSpan = Math.max(
           bounds.getNorth() - bounds.getSouth(),
@@ -4333,7 +4536,11 @@ function initSearch(map) {
   }
 
   function escapeHtml(s) {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Quotes too — the result is also placed inside data-* attributes,
+    // where an unescaped `"` in a place name broke out of the attribute.
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   function selectResult(el) {
@@ -4362,8 +4569,11 @@ function initSearch(map) {
         wd:    item.wd,
       };
     }
-    placeSearchPin(map, lat, lon, name, enrich);
+    // Start the camera move BEFORE dropping the pin: placeSearchPin
+    // opens the popup immediately when no move is in flight, and
+    // defers to moveend when one is — we want the latter here.
     map.flyTo({ center: [lon, lat], zoom: zoom, duration: 1500 });
+    placeSearchPin(map, lat, lon, name, enrich);
     resultsEl.style.display = 'none';
     input.blur();
   }
@@ -4910,10 +5120,11 @@ function initWikiSidebar(map, config) {
     listEl.textContent = '';
     var b = map.getBounds(), W = b.getWest(), E = b.getEast(), S = b.getSouth(), N = b.getNorth();
     var items = [];
-    for (var title in WIKI_GEO_INDEX) {
-      var g = WIKI_GEO_INDEX[title]; if (!g) continue;
+    var titles = wikiGeoTitlesInBounds(W, E, S, N);
+    for (var ti = 0; ti < titles.length; ti++) {
+      var title = titles[ti];
+      var g = WIKI_GEO_INDEX[title];
       var lat = g[0], lon = g[1];
-      if (lon < W || lon > E || lat < S || lat > N) continue;
       items.push({ title: title, name: title.replace(/_/g, ' '),
                    qid: g[3] || null, type: g[2] || '', coords: [lon, lat],
                    desc: g[4] || '', priority: geoPriority(g[2] || '') });
@@ -5010,7 +5221,9 @@ function initWikiSidebar(map, config) {
 
     // Prefer the description baked into the geo-index (instant, no fetch). Fall
     // back to a wikidata chunk only if a caller already had one loaded.
-    var wd = (wdCache[getWdPrefix(qid)] || {})[qid] || null;
+    // Geo-index entries without a wikidata tag arrive with qid=null —
+    // getWdPrefix(null) threw and left the panel blank with no Back.
+    var wd = qid ? ((wdCache[getWdPrefix(qid)] || {})[qid] || null) : null;
     var desc = bakedDesc || (wd ? (wd.x || wd.d || '') : '');
     if (desc) {
       var dd = createEl('div', 'wiki-detail-desc', desc);
@@ -5074,11 +5287,18 @@ function initWikiSidebar(map, config) {
     return out.length ? out : map.queryRenderedFeatures();
   }
 
+  // Generation counter for the tile-scan path below: successive moveends
+  // each fire a Promise.all of chunk fetches, and a slower earlier set
+  // could resolve after the newer one and render the wrong viewport
+  // (or populate the list after the panel was closed).
+  var _wikiScanSeq = 0;
+
   function updateSidebar() {
     if (!active) return;
     // Prefer the baked geo-index (any-zoom list + markers) when available.
     if (WIKI_GEO_INDEX) { updateSidebarFromGeo(); return; }
 
+    var myScan = ++_wikiScanSeq;
     loadingEl.style.display = 'block';
     listEl.textContent = '';
 
@@ -5151,6 +5371,7 @@ function initWikiSidebar(map, config) {
     items.forEach(function(item) { prefixes[getWdPrefix(item.qid)] = true; });
 
     Promise.all(Object.keys(prefixes).map(fetchWdChunk)).then(function() {
+      if (myScan !== _wikiScanSeq || !active) return;  // superseded / closed
       loadingEl.style.display = 'none';
       listEl.textContent = '';
 
@@ -5216,8 +5437,11 @@ function initWikiSidebar(map, config) {
             var targetZoom = Math.max(map.getZoom(), 14);
             var isMobile = window.innerWidth <= 600;
             if (isMobile && panel.style.display === 'flex') {
-              var offsetLat = (map.getBounds().getNorth() - map.getBounds().getSouth()) * 0.2;
-              map.flyTo({ center: [lng, lat - offsetLat], zoom: targetZoom, duration: 1200 });
+              // Zoom-independent pixel offset (same fix as flyAndDetail):
+              // the old latitude-span shift flew kilometres south of the
+              // target when the map was zoomed out.
+              var _dy2 = Math.round((map.getCanvas().clientHeight || 600) * 0.22);
+              map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 1200, offset: [0, -_dy2] });
             } else {
               map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 1200 });
             }
@@ -5413,6 +5637,12 @@ function initRouting(map, config) {
   });
 
   function clearRoute() {
+    // Invalidate any route still computing: its result must neither be
+    // drawn after the user cleared, nor satisfy enterDriveMode's
+    // lastRoute poll with the OLD endpoints.
+    routeSeq++;
+    if (typeof cancelInFlightRoute === 'function') cancelInFlightRoute();
+    stopRouteProgressIndicator();
     originNode = -1;
     destNode = -1;
     originCoordE7 = null;
@@ -6111,8 +6341,23 @@ function initRouting(map, config) {
     });
   };
 
-  SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7) {
+  // Shortlist snap (mirrors routing-worker.js SNAP_*): the nearest vertex
+  // may be a footpath vertex or a tiny disconnected fragment (pier,
+  // private drive) the car A* can never leave. Keep the nearest few
+  // car-ok vertices and return the first whose forward component
+  // reaches SNAP_MIN_REACH nodes, provided it is at most
+  // SNAP_MAX_EXTRA_M further away than the nearest.
+  var SNAP_CANDIDATES = 6, SNAP_MIN_REACH = 32, SNAP_MAX_EXTRA_M = 1000;
+  // `mode` 'origin' (default) | 'dest': for a destination an edgeless
+  // vertex with a drivable incoming edge in its own cell (end of a
+  // one-way spur) is accepted too — the forward reach test would
+  // otherwise displace it up to SNAP_MAX_EXTRA_M. Mirrors the worker.
+  SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7, mode) {
+    var forDest = (mode === 'dest');
     var scale = this._index.cellScale;
+    // Longitude degrees shrink with latitude — compare in a locally
+    // metric space or the snap picks the wrong node at high latitudes.
+    var cosLat = Math.max(0.05, Math.cos(latE7 / 1e7 * Math.PI / 180));
     var candidates = [];
     for (var cid = 0; cid < this._index.numCells; cid++) {
       var la = this._index.cellLatIdx[cid];
@@ -6123,28 +6368,78 @@ function initRouting(map, config) {
       var lonMax = (lo + 1) * 10_000_000 / scale;
       var dlat = latE7 < latMin ? latMin - latE7 : latE7 > latMax ? latE7 - latMax : 0;
       var dlon = lonE7 < lonMin ? lonMin - lonE7 : lonE7 > lonMax ? lonE7 - lonMax : 0;
+      dlon *= cosLat;
       candidates.push([dlat * dlat + dlon * dlon, cid]);
     }
     candidates.sort(function(a, b) { return a[0] - b[0]; });
-    var bestNode = -1, bestDist = Infinity, bestLat = 0, bestLon = 0;
-    for (var i = 0; i < candidates.length && candidates[i][0] <= bestDist; i++) {
+    var best = [], worstKept = Infinity;
+    for (var i = 0; i < candidates.length && candidates[i][0] <= worstKept; i++) {
       var cell = await this._ensureCell(candidates[i][1]);
       for (var local = 0; local < cell.nodeCount; local++) {
         var nlat = cell.nodesScaled[local * 2];
         var nlon = cell.nodesScaled[local * 2 + 1];
         var ndlat = nlat - latE7;
-        var ndlon = nlon - lonE7;
+        var ndlon = (nlon - lonE7) * cosLat;
         var dist = ndlat * ndlat + ndlon * ndlon;
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestNode = cell.baseNode + local;
-          bestLat = nlat;
-          bestLon = nlon;
+        if (dist >= worstKept) continue;
+        // Skip a node whose outgoing edges are all car-prohibited
+        // (footpath vertex); edgeless sinks stay eligible.
+        var eS = cell.cellAdj[local], eE = cell.cellAdj[local + 1];
+        var carOk = (eS === eE);
+        for (var ei = eS; ei < eE; ei++) {
+          if (!isNoMotor(cell.edges[ei * 5 + 4])) { carOk = true; break; }
         }
+        if (!carOk) continue;
+        var k = best.length;
+        while (k > 0 && best[k - 1].dist > dist) k--;
+        best.splice(k, 0, { dist: dist, node: cell.baseNode + local, lat: nlat, lon: nlon,
+                            edgeless: (eS === eE) });
+        if (best.length > SNAP_CANDIDATES) best.pop();
+        if (best.length === SNAP_CANDIDATES) worstKept = best[best.length - 1].dist;
       }
     }
-    if (bestNode < 0) throw new Error('no routing nodes');
-    return { node: bestNode, lat: bestLat / 1e7, lon: bestLon / 1e7 };
+    if (best.length === 0) throw new Error('no routing nodes');
+    var limitR = Math.sqrt(best[0].dist) + SNAP_MAX_EXTRA_M * 90;  // ~90 e7/m
+    var pick = best[0];
+    for (var c = 0; c < best.length; c++) {
+      if (Math.sqrt(best[c].dist) > limitR) break;
+      if (await this._reachesAtLeast(best[c].node, SNAP_MIN_REACH)) { pick = best[c]; break; }
+      if (forDest && best[c].edgeless
+          && await this._hasDrivableIncomingInOwnCell(best[c].node)) { pick = best[c]; break; }
+    }
+    return { node: pick.node, lat: pick.lat / 1e7, lon: pick.lon / 1e7 };
+  };
+
+  // True when an edge in `node`'s own cell targets it and is drivable
+  // (mirrors the worker; own cell only so the result is deterministic).
+  SpatialGraph.prototype._hasDrivableIncomingInOwnCell = async function(node) {
+    var cid = this._index.cellForNode(node);
+    if (cid < 0) return false;
+    var cell = await this._ensureCell(cid);
+    var edges = cell.edges;
+    for (var ei = 0, n = cell.edgeCount; ei < n; ei++) {
+      if (edges[ei * 5] !== node) continue;
+      if (isNoMotor(edges[ei * 5 + 4]) || (edges[ei * 5 + 1] >>> 24) === 0) continue;
+      return true;
+    }
+    return false;
+  };
+
+  // Bounded forward BFS over drivable edges: true once `limit` distinct
+  // nodes are reachable from `node`.
+  SpatialGraph.prototype._reachesAtLeast = async function(node, limit) {
+    var seen = new Set([node]);
+    var queue = [node], head = 0;
+    while (head < queue.length) {
+      if (seen.size >= limit) return true;
+      var edges = await this.edgesOfNode(queue[head++]);
+      for (var i = 0; i < edges.length; i++) {
+        var e = edges[i];
+        if (isNoMotor(e[4]) || (e[1] >>> 24) === 0) continue;
+        if (!seen.has(e[0])) { seen.add(e[0]); queue.push(e[0]); if (seen.size >= limit) return true; }
+      }
+    }
+    return seen.size >= limit;
   };
 
   // Returns a promise resolving to an array of edges for the given
@@ -6256,7 +6551,11 @@ function initRouting(map, config) {
       })
       .catch(function(_spatialErr) {
         // Fall back to monolithic / v5 split / byte-chunked layouts.
-        fetchSzrgBlob(
+        // Returned so the in-flight latch below stays set until this
+        // fallback settles too — otherwise a second loadGraph() call
+        // during the (multi-second) monolithic fetch started a
+        // duplicate download and double-parsed the graph.
+        return fetchSzrgBlob(
             'routing-data/graph.bin',
             'routing-data/graph-chunk-manifest.json')
           .then(function(buffer) {
@@ -6292,30 +6591,46 @@ function initRouting(map, config) {
   }
 
   // Find nearest graph node to a lat/lon (operates on int32-scaled coords)
-  async function nearestNode(lat, lon) {
+  // `mode` is 'origin' or 'dest' — the destination rule accepts one-way
+  // sinks (see SpatialGraph.prototype.snapNearestNode).
+  async function nearestNode(lat, lon, mode) {
     var latE7 = Math.round(lat * 1e7);
     var lonE7 = Math.round(lon * 1e7);
     if (graph.isSpatial && graph._index.version === 3) {
       var workerReady = await initRoutingWorker();
       if (workerReady && __routingWorker) {
-        try { return await snapViaWorker(lat, lon); }
+        try { return await snapViaWorker(lat, lon, mode); }
         catch (err) {
           console.warn('[streetzim] worker snap failed, falling back:', err);
         }
       }
-      return graph.snapNearestNode(latE7, lonE7);
+      return graph.snapNearestNode(latE7, lonE7, mode);
     }
     var nodes = graph.nodesScaled;
     var best = -1;
     var bestDist = Infinity;
+    var cosLatM = Math.max(0.05, Math.cos(lat * Math.PI / 180));
+    var adj = graph.adjOffsets;
     for (var i = 0; i < nodes.length; i += 2) {
       // Cast to float before squaring — int32 products can overflow
       var dlat = (nodes[i] - latE7);
-      var dlon = (nodes[i + 1] - lonE7);
+      var dlon = (nodes[i + 1] - lonE7) * cosLatM;
       var d = dlat * dlat + dlon * dlon;
       if (d < bestDist) {
+        // Skip footpath-only vertices (all out-edges car-prohibited);
+        // spatial graphs go through snapNearestNode, this is the
+        // monolithic-graph path. Edgeless sinks stay eligible.
+        var n = i / 2;
+        if (adj) {
+          var eS = adj[n], eE = adj[n + 1];
+          var carOk = (eS === eE);
+          for (var ei = eS; ei < eE; ei++) {
+            if (!isNoMotor(graph.edgeClassAccess(ei))) { carOk = true; break; }
+          }
+          if (!carOk) continue;
+        }
         bestDist = d;
-        best = i / 2;
+        best = n;
       }
     }
     return {
@@ -6335,6 +6650,14 @@ function initRouting(map, config) {
             Math.sin(dLon / 2) * Math.sin(dLon / 2);
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
+
+  // A* heuristic speed. MUST be >= the fastest edge speed the builder
+  // emits (create_osm_zim.SPEED: motorway = 100 km/h) or the heuristic
+  // over-estimates remaining time and the "optimal" pass silently
+  // returns suboptimal routes. Matches routing-worker.js and the
+  // Python references (tests/szrg_astar.py, cloud/route_cli.py).
+  var HEURISTIC_SPEED_KMH = 100;
+  var HEURISTIC_MPS = HEURISTIC_SPEED_KMH / 3.6;
 
   // Binary min-heap for A* priority queue
   function MinHeap() {
@@ -6401,6 +6724,17 @@ function initRouting(map, config) {
   function isHighwayClass(classAccess) {
     var ord = classAccess & 0x1F;
     return ord >= 1 && ord <= 6;
+  }
+  // class_access bit 9: no motor vehicles (footway / steps / private).
+  // Never expanded by the driving profile — see routing-worker.js.
+  var NO_MOTOR_BIT = 0x200;
+  // Ordinals 16..20 (path/footway/cycleway/pedestrian/steps) are never
+  // drivable either; ZIMs built before bit 9 existed still carry them
+  // in the car graph, so the ordinal is checked alongside the bit.
+  function isNoMotor(classAccess) {
+    if (classAccess & NO_MOTOR_BIT) return true;
+    var ord = classAccess & 0x1F;
+    return ord >= 16 && ord <= 20;
   }
 
   // ?debug=1 overlay — shows pops/cells/heap during routing so we can
@@ -6637,9 +6971,10 @@ function initRouting(map, config) {
     var visited = new Set();
     visited.add(seedNode);
     var queue = [seedNode];
+    var head = 0;  // index-based dequeue: shift() is O(n) per pop
     var pops = 0;
-    while (queue.length > 0 && pops < maxPops) {
-      var current = queue.shift();
+    while (head < queue.length && pops < maxPops) {
+      var current = queue[head++];
       pops++;
       var edges = await graph.edgesOfNode(current);
       for (var k = 0; k < edges.length; k++) {
@@ -6648,6 +6983,7 @@ function initRouting(map, config) {
         }
       }
       for (var k = 0; k < edges.length; k++) {
+        if (isNoMotor(edges[k][4])) continue;
         var target = edges[k][0];
         if (!visited.has(target)) {
           visited.add(target);
@@ -6692,28 +7028,105 @@ function initRouting(map, config) {
       endCoords[0] / 1e7,
       endCoords[1] / 1e7
     ) / 1000;
-    // Skip the optimal pass on long routes (matches the worker — see
-    // routing-worker.js for the threshold rationale).
+    // Skip the admissible pass beyond 200 km on the full graph and the
+    // weighted pass beyond 800 km (matches the worker — see
+    // routing-worker.js OPTIMAL_MAX_CROW_KM for the rationale).
     var skipOptimal = (highwayOnly && crowKm > 1500)
-                   || (!highwayOnly && crowKm > 800);
+                   || (!highwayOnly && crowKm > 200);
+    var skipWeighted = !highwayOnly && crowKm > 800;
     if (!skipOptimal) {
       var optimal = await findRouteSpatialAStar(
         startNode, endNode, highwayOnly,
         /*greedy*/ 1.0,
         /*popLimit*/ highwayOnly ? 50000 : 200000);
       if (optimal) return optimal;
+      // Exhausted the open set without bailing: the destination is
+      // unreachable and a weighted re-run can't change that (same rule
+      // as the worker).
+      if (!__mainThreadBailed) return null;
     }
-    // Optimal bailed (or skipped) — retry greedy. Routes here are
-    // 5-25% suboptimal but the page survives and the user gets
-    // directions in tens-of-seconds rather than minutes.
+    if (!highwayOnly) {
+      // Same chain as the worker (routing-worker.js
+      // findRouteSpatialFiltered): closed-pocket check, then weighted
+      // A* ×1.25 (what the old 80 km/h heuristic effectively was, and
+      // what converges on 200–500 km pairs), then greedy ×1.875. The
+      // Map-based state here keeps the old budgets: 200k / 200k / 400k.
+      if (await destComponentClosedMain(startNode, endNode)) {
+        __mainThreadBailed = false;
+        debugStats('destination pocket closed — unreachable', 0);
+        return null;
+      }
+      if (!skipWeighted) {
+        var weighted = await findRouteSpatialAStar(
+          startNode, endNode, highwayOnly, /*greedy*/ 1.25, /*popLimit*/ 200000);
+        if (weighted) return weighted;
+        if (!__mainThreadBailed) return null;
+      }
+    }
+    // Both bounded passes bailed (or the optimal pass was skipped) —
+    // greedy. Routes here can be 10-20% suboptimal but the page
+    // survives and the user gets directions in seconds.
     return findRouteSpatialAStar(
       startNode, endNode, highwayOnly,
-      /*greedy*/ highwayOnly ? 2.0 : 1.5,
+      /*greedy*/ highwayOnly ? 2.0 : 1.875,
       /*popLimit*/ highwayOnly ? 100000 : 400000);
+  }
+
+  // Set when the most recent main-thread A* pass hit its pop budget
+  // (as opposed to exhausting the open set). Mirrors ctx.bailed in
+  // the worker so the fallback engine follows the same strategy chain.
+  var __mainThreadBailed = false;
+
+  // Mirrors routing-worker.js destComponentClosed exactly: bounded
+  // forward BFS from the destination; if it exhausts before 20k nodes
+  // without touching the origin, the pocket is "closed" only when no
+  // drivable edge enters it from outside (scanning the cells the
+  // pocket touches) — a one-way sink or parking loop has a tiny
+  // forward component but is enterable and must still route.
+  async function destComponentClosedMain(startNode, endNode) {
+    var LIMIT = 20000;
+    var seen = new Set([endNode]);
+    var queue = [endNode], head = 0;
+    var cids = new Set();
+    while (head < queue.length) {
+      if (seen.size >= LIMIT) return false;
+      var cur = queue[head++];
+      if (cur === startNode) return false;
+      var cid = graph._index.cellForNode(cur);
+      if (cid >= 0) cids.add(cid);
+      var edges = await graph.edgesOfNode(cur);
+      for (var i = 0; i < edges.length; i++) {
+        var e = edges[i];
+        if (isNoMotor(e[4]) || (e[1] >>> 24) === 0) continue;
+        if (!seen.has(e[0])) {
+          seen.add(e[0]); queue.push(e[0]);
+          if (seen.size >= LIMIT) return false;
+        }
+      }
+    }
+    if (seen.has(startNode)) return false;
+    var cidList = Array.from(cids);
+    for (var ci = 0; ci < cidList.length; ci++) {
+      var cell = await graph._ensureCell(cidList[ci]);
+      var pEdges = cell.edges, pAdj = cell.cellAdj;
+      var v2 = !!cell.nodesScaled;
+      for (var pl = 0; pl < cell.nodeCount; pl++) {
+        var src = v2 ? cell.baseNode + pl : cell.cellNodesGlobal[pl];
+        if (seen.has(src)) continue;
+        var pEnd = pAdj[pl + 1];
+        for (var pe = pAdj[pl]; pe < pEnd; pe++) {
+          if (!seen.has(pEdges[pe * 5])) continue;
+          if (isNoMotor(pEdges[pe * 5 + 4]) || (pEdges[pe * 5 + 1] >>> 24) === 0) continue;
+          return false;  // an entrance from outside the pocket
+        }
+      }
+    }
+    return true;
   }
 
   async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
                                         GREEDY_WEIGHT, POP_LIMIT) {
+    __mainThreadBailed = false;
     var endCoords = await graph.nodeCoordsE7(endNode);
     var endLat = endCoords[0] / 1e7;
     var endLon = endCoords[1] / 1e7;
@@ -6730,7 +7143,7 @@ function initRouting(map, config) {
       startCoords[0] / 1e7,
       startCoords[1] / 1e7,
       endLat, endLon
-    ) / (80 / 3.6);
+    ) / HEURISTIC_MPS;
     open.push([h0, startNode]);
     var pops = 0;
     var weightTag = (GREEDY_WEIGHT > 1.0) ? ' greedy×' + GREEDY_WEIGHT : ' optimal';
@@ -6759,6 +7172,7 @@ function initRouting(map, config) {
       }
       if (pops > POP_LIMIT) {
         debugStats(label + ' BAIL (pop limit ' + POP_LIMIT + ')', pops);
+        __mainThreadBailed = true;
         return null;  // caller decides next step
       }
       if (current === endNode) break;
@@ -6768,6 +7182,7 @@ function initRouting(map, config) {
       var curG = g.get(current);
       for (var k = 0; k < nodeEdges.length; k++) {
         var e = nodeEdges[k];
+        if (isNoMotor(e[4])) continue;
         if (highwayOnly && !isHighwayClass(e[4])) continue;
         var target = e[0];
         var speedDist = e[1];
@@ -6785,7 +7200,7 @@ function initRouting(map, config) {
           var targetCoords = await graph.nodeCoordsE7(target);
           var tLat = targetCoords[0] / 1e7;
           var tLon = targetCoords[1] / 1e7;
-          var h = haversine(tLat, tLon, endLat, endLon) / (80 / 3.6) * GREEDY_WEIGHT;
+          var h = haversine(tLat, tLon, endLat, endLon) / HEURISTIC_MPS * GREEDY_WEIGHT;
           open.push([newG + h, target]);
         }
       }
@@ -6827,10 +7242,13 @@ function initRouting(map, config) {
         if (pts) for (var j = 0; j < pts.length; j++) segment.push(pts[j]);
       }
       segment.push([toLon, toLat]);
-      path.unshift(segment);
+      path.push(segment);
 
       n = prev.get(n);
     }
+    // Segments were collected end→start; unshift-ing each one was
+    // O(n²) on long routes (tens of thousands of segments).
+    path.reverse();
 
     var roads = [];
     for (var si = segRev.length - 1; si >= 0; si--) {
@@ -6864,6 +7282,17 @@ function initRouting(map, config) {
   var __routingWorkerReady = null;       // Promise<boolean> | null
   var __routingWorkerSeq = 0;
   var __routingWorkerInflight = new Map();
+
+  // Settle every pending route/snap promise when the worker dies.
+  // Without this a crash mid-route left findRoute awaiting forever
+  // and the panel stuck on "Finding fastest route…" with no fallback.
+  function _failRoutingWorkerInflight(err) {
+    var pending = Array.from(__routingWorkerInflight.values());
+    __routingWorkerInflight.clear();
+    pending.forEach(function(p) {
+      try { p.reject(err); } catch (e) {}
+    });
+  }
 
   function initRoutingWorker() {
     if (__routingWorkerReady) return __routingWorkerReady;
@@ -6948,6 +7377,14 @@ function initRouting(map, config) {
           try { __routingWorker.terminate(); } catch (e) {}
           __routingWorker = null;
         }
+        // Reject in-flight requests so their callers fall back to the
+        // main-thread engine, and pin the ready state to "failed" so
+        // later routes don't await a promise that already resolved
+        // true for a worker that no longer exists.
+        _failRoutingWorkerInflight(new Error('routing worker crashed: '
+          + (err.message || err.type || 'unknown')));
+        __routingWorkerReady = Promise.resolve(false);
+        window.__streetzim_routingWorkerReady = false;
         resolve(false);
       });
       var workerBaseUrl;
@@ -7048,23 +7485,35 @@ function initRouting(map, config) {
 
   function findRouteViaWorker(startNode, endNode) {
     if (!__routingWorker) return Promise.reject(new Error('worker not ready'));
+    // Only the newest route matters: an origin/dest change while a
+    // route is still computing used to leave the old search grinding
+    // in the worker alongside the new one (both slowed down, both
+    // competed for the cell budget). computeAndDrawRoute already
+    // ignores the stale result via routeSeq, so cancelling is safe.
+    cancelInFlightRoute();
+    // ?route=full / ?route=two-pass test override — the main-thread
+    // engine honoured it but the worker was always sent options:{}.
+    var override = null;
+    try { override = new URLSearchParams(location.search).get('route'); }
+    catch (e) {}
     var id = ++__routingWorkerSeq;
     return new Promise(function(resolve, reject) {
       __routingWorkerInflight.set(id, { resolve: resolve, reject: reject });
       __routingWorker.postMessage({
         cmd: 'route', id: id,
         start: startNode, end: endNode,
-        options: {},
+        options: override ? { route: override } : {},
       });
     });
   }
 
-  function snapViaWorker(lat, lon) {
+  function snapViaWorker(lat, lon, mode) {
     if (!__routingWorker) return Promise.reject(new Error('worker not ready'));
     var id = ++__routingWorkerSeq;
     return new Promise(function(resolve, reject) {
       __routingWorkerInflight.set(id, { resolve: resolve, reject: reject });
-      __routingWorker.postMessage({ cmd: 'snap', id: id, lat: lat, lon: lon });
+      __routingWorker.postMessage({ cmd: 'snap', id: id, lat: lat, lon: lon,
+                                    mode: mode === 'dest' ? 'dest' : 'origin' });
     });
   }
 
@@ -7088,7 +7537,11 @@ function initRouting(map, config) {
           // computeAndDrawRoute treats it as "no route" silently.
           if (workerResult && workerResult._cancelled) {
             console.warn('[streetzim] worker route cancelled');
-            return null;
+            // Hand the sentinel up: computeAndDrawRoute must neither
+            // draw nor say "No route found" — the user cancelled by
+            // focusing an endpoint field, and whatever route was
+            // drawn before should stay until a new one lands.
+            return { _cancelled: true };
           }
           console.warn('[streetzim] worker route done in '
                        + (performance.now() - t0).toFixed(0) + ' ms');
@@ -7157,11 +7610,18 @@ function initRouting(map, config) {
       // when full A* would have finished. Always try full first.
       var routeResult = null;
       var t1 = performance.now();
-      routeResult = await findRouteSpatial(startNode, endNode);
+      __mainThreadBailed = false;
+      if (override !== 'two-pass') {
+        routeResult = await findRouteSpatial(startNode, endNode);
+      }
       if (routeResult) {
         console.log('[route] full crow=' + (crow/1000).toFixed(0) +
                     'km took ' + (performance.now() - t1).toFixed(0) + 'ms');
-      } else if (useTwoPass) {
+      } else if (override === 'two-pass' || __mainThreadBailed) {
+        // Two-pass only when the full search ran out of budget (any
+        // distance) — same gate as the worker; an exhausted open set
+        // or a closed destination pocket means genuinely unreachable
+        // and is not retried.
         console.log('[route] full bailed, trying two-pass...');
         var t0 = performance.now();
         routeResult = await findRouteSpatialTwoPass(startNode, endNode);
@@ -7205,7 +7665,7 @@ function initRouting(map, config) {
       nodesScaled[startNode * 2] / 1e7,
       nodesScaled[startNode * 2 + 1] / 1e7,
       endLat, endLon
-    ) / (80 / 3.6);
+    ) / HEURISTIC_MPS;
     open.push([h0, startNode]);
 
     while (open.size() > 0) {
@@ -7220,6 +7680,7 @@ function initRouting(map, config) {
       var eEnd = adjOffsets[current + 1];
 
       for (var i = eStart; i < eEnd; i++) {
+        if (isNoMotor(graph.edgeClassAccess(i))) continue;
         var target = graph.edgeTarget(i);
         var distM = graph.edgeDistMeters(i);
         var speed = graph.edgeSpeed(i);
@@ -7235,7 +7696,7 @@ function initRouting(map, config) {
           prevEdge[target] = i;
           var tLat = nodesScaled[target * 2] / 1e7;
           var tLon = nodesScaled[target * 2 + 1] / 1e7;
-          var h = haversine(tLat, tLon, endLat, endLon) / (80 / 3.6);
+          var h = haversine(tLat, tLon, endLat, endLon) / HEURISTIC_MPS;
           open.push([newG + h, target]);
         }
       }
@@ -7280,10 +7741,11 @@ function initRouting(map, config) {
         }
       }
       segment.push([toLon, toLat]);
-      path.unshift(segment);
+      path.push(segment);
 
       n = p;
     }
+    path.reverse();  // collected end→start
 
     // Coalesce consecutive same-name segments into named roads. We also
     // coalesce by maneuver flags so that e.g. a multi-segment unnamed
@@ -7430,7 +7892,12 @@ function initRouting(map, config) {
         clearInterval(retry);
         if (which === 'origin') setOriginFromLatLon(lat, lon, label);
         else setDestFromLatLon(lat, lon, label);
-      } else if (tries > 300) {  // 30 s
+      } else if (!loadGraphInflight || tries > 6000) {
+        // The load settled without producing a graph (fetch/parse
+        // failed) — or a 10-minute hard cap. Used to give up after a
+        // fixed 30 s, which was shorter than a cold country-scale
+        // index load over Kiwix on iOS, so the pick was dropped even
+        // though the graph arrived a few seconds later.
         clearInterval(retry);
         statusEl.textContent = 'Could not load routing data';
       }
@@ -7461,7 +7928,7 @@ function initRouting(map, config) {
     statusEl.textContent = 'Finding nearest road...';
     var snapped;
     try {
-      snapped = await nearestNode(lat, lon);
+      snapped = await nearestNode(lat, lon, 'origin');
     } catch (err) {
       if (snapSeq === originSnapSeq) statusEl.textContent = 'Could not find a nearby road';
       console.error('[streetzim] origin snap failed:', err);
@@ -7493,7 +7960,7 @@ function initRouting(map, config) {
     statusEl.textContent = 'Finding nearest road...';
     var snapped;
     try {
-      snapped = await nearestNode(lat, lon);
+      snapped = await nearestNode(lat, lon, 'dest');
     } catch (err) {
       if (snapSeq === destSnapSeq) statusEl.textContent = 'Could not find a nearby road';
       console.error('[streetzim] destination snap failed:', err);
@@ -7567,6 +8034,12 @@ function initRouting(map, config) {
       }
       if (seq !== routeSeq) return;  // newer route owns the spinner now
       stopRouteProgressIndicator();
+      if (result && result._cancelled) {
+        // Cancelled by the user (field focus) with no newer route yet:
+        // leave the map as it was. Used to fall into the "No route
+        // found" branch and erase the drawn route.
+        return;
+      }
       if (result) {
         // Sanity check: any coord obviously off the map? Logs first
         // offender — helps diagnose "crazy lines" bugs after the fact.
@@ -8502,9 +8975,12 @@ function initRouting(map, config) {
             { enableHighAccuracy: true, timeout: 15000, maximumAge: 2000 }
           );
         } catch (e) {
+          // Full teardown via exit(): restores the hidden panel /
+          // controls / search box and the saved camera. Before this
+          // only the HUD was hidden, leaving the page with no UI and
+          // no way back short of a reload.
+          api.exit();
           setStatus('Could not start location tracking');
-          state.active = false;
-          hudEl.classList.remove('visible');
         }
       },
       exit: function() {
@@ -8685,6 +9161,7 @@ function initRouting(map, config) {
     /// where we just want to centre the map on a coordinate.
     flyTo: function(opts) {
       if (!map) return;
+      opts = opts || {};
       var easeOpts = {};
       if (typeof opts.lat === "number" && typeof opts.lon === "number") {
         easeOpts.center = [opts.lon, opts.lat];
@@ -8755,7 +9232,9 @@ function initRouting(map, config) {
           id: layerLabels, type: "symbol", source: src,
           layout: {
             "text-field": ["get", "label"],
-            "text-font": ["Open Sans Bold"],
+            // Must match the fontstack baked into the ZIM (see makeStyle);
+            // "Open Sans Bold" 404'd every glyph request and labels never drew.
+            "text-font": ["OpenSansBold"],
             "text-size": 12,
             "text-offset": [0, 1.2],
             "text-anchor": "top",
@@ -8769,7 +9248,10 @@ function initRouting(map, config) {
           }
         });
         // Tap-to-popup with label + optional description.
-        map.on("click", layerDots, function(e) {
+        // Handlers are kept on the api object so clearPlaces can
+        // detach them; registering afresh on every showPlaces →
+        // clearPlaces → showPlaces cycle stacked N popups per tap.
+        var onDotClick = function(e) {
           var f = e.features && e.features[0];
           if (!f) return;
           var props = f.properties;
@@ -8785,9 +9267,15 @@ function initRouting(map, config) {
             .setLngLat(f.geometry.coordinates)
             .setHTML(html)
             .addTo(map);
-        });
-        map.on("mouseenter", layerDots, function() { map.getCanvas().style.cursor = "pointer"; });
-        map.on("mouseleave", layerDots, function() { map.getCanvas().style.cursor = ""; });
+        };
+        var onDotEnter = function() { map.getCanvas().style.cursor = "pointer"; };
+        var onDotLeave = function() { map.getCanvas().style.cursor = ""; };
+        map.on("click", layerDots, onDotClick);
+        map.on("mouseenter", layerDots, onDotEnter);
+        map.on("mouseleave", layerDots, onDotLeave);
+        window.streetzimRouting.__placesHandlers = {
+          click: onDotClick, mouseenter: onDotEnter, mouseleave: onDotLeave
+        };
       }
       if (opts.fitBounds !== false && features.length >= 1) {
         var b = new maplibregl.LngLatBounds(
@@ -8813,6 +9301,13 @@ function initRouting(map, config) {
     /// Safe to call when nothing is set.
     clearPlaces: function() {
       var src = "mcpzim-places";
+      var h = window.streetzimRouting.__placesHandlers;
+      if (h) {
+        Object.keys(h).forEach(function(type) {
+          try { map.off(type, "mcpzim-places-dots", h[type]); } catch (e) {}
+        });
+        window.streetzimRouting.__placesHandlers = null;
+      }
       ["mcpzim-places-labels", "mcpzim-places-dots"].forEach(function(id) {
         if (map.getLayer(id)) map.removeLayer(id);
       });
@@ -8921,6 +9416,11 @@ function initRouting(map, config) {
         }
         if (!graph) loadGraph();
         waitFor(function() { return !!graph; }, function() {
+          // Drop any previous route AND endpoints first. Nulling only
+          // lastRoute left the old destNode in place, so the origin
+          // snap could compute origin→old-dest and the poll below would
+          // resolve on that before the new destination was routed.
+          clearRoute();
           try {
             setOriginFromLatLon(origLat, origLon, "Start");
             setDestFromLatLon(destLat, destLon, "Destination");

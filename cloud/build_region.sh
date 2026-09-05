@@ -56,9 +56,19 @@ if [ ${#missing[@]} -gt 0 ]; then
             > "overture-${id}-places.log" 2>&1 &
         places_pid=$!
     fi
-    [ -n "${addr_pid:-}" ] && wait $addr_pid || true
-    [ -n "${places_pid:-}" ] && wait $places_pid || true
-    log "overture: addresses=$(stat -f %z "$addr")B places=$(stat -f %z "$places")B"
+    # `wait … || true` discarded the download's exit status and the build
+    # then ran with a missing/empty parquet. Fail loudly instead.
+    if [ -n "${addr_pid:-}" ]; then
+        wait "$addr_pid" || { echo "[FATAL] Overture addresses download failed — see overture-${id}-addresses.log"; exit 5; }
+    fi
+    if [ -n "${places_pid:-}" ]; then
+        wait "$places_pid" || { echo "[FATAL] Overture places download failed — see overture-${id}-places.log"; exit 5; }
+    fi
+    for f in "$addr" "$places"; do
+        [ -s "$f" ] || { echo "[FATAL] Overture file $f is missing or empty"; exit 5; }
+    done
+    _fsize() { stat -c %s "$1" 2>/dev/null || stat -f %z "$1"; }   # GNU / BSD stat
+    log "overture: addresses=$(_fsize "$addr")B places=$(_fsize "$places")B"
 fi
 
 # ------------------------------------------------------------------
@@ -135,9 +145,9 @@ if ! ./venv312/bin/python3 create_osm_zim.py \
         --chunk-graph-mb 200 \
         --split-hot-search-chunks-mb 10 \
         --split-find-chips \
-        "${LOW_ZOOM_VRT_ARG[@]}" \
-        "${URL_CACHE_ARG[@]}" \
-        "${MAP_VIEW_ARG[@]}" \
+        ${LOW_ZOOM_VRT_ARG[@]+"${LOW_ZOOM_VRT_ARG[@]}"} \
+        ${URL_CACHE_ARG[@]+"${URL_CACHE_ARG[@]}"} \
+        ${MAP_VIEW_ARG[@]+"${MAP_VIEW_ARG[@]}"} \
         --output "$out" \
         --keep-temp \
         > "$log" 2>&1; then

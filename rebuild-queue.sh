@@ -53,30 +53,39 @@ build_region() {
     date=$(date +%Y-%m-%d)
     dated="osm-${id}-${date}.zim"
     cp "$out" "$dated"
-    log "Uploading ${dated}..."
-    ia upload "streetzim-${id}" "$dated" --retries 5 >>"$logname" 2>&1 || \
-        log "Upload flagged issues — see ${logname}"
-    sleep 30
-    ia metadata "streetzim-${id}" --modify="date:${date}" >>"$logname" 2>&1 || true
-    python3 web/generate.py --deploy >>"$logname" 2>&1 || true
+    # Validate + upload through the shared path: it refuses unvalidated
+    # ZIMs and treats a failed upload as fatal (no date bump, no deploy).
+    if ! bash cloud/upload_validated.sh "$id" "$dated" >>"$logname" 2>&1; then
+        log "FAIL upload ${id} — see ${logname}"
+        return 1
+    fi
     log "=== DONE ${id} ==="
 }
 
 log "Starting queue (DC/Colorado/SV already rebuilt cleanly; retrying Iran/WCUS/Baltics/Central US that failed old audit)."
 
+# build_region's `return 1` used to be silently swallowed (no set -e), so the
+# queue printed ALL REBUILDS COMPLETE and exited 0 after failures.
+FAILED=()
+run() { build_region "$@" || FAILED+=("$1"); }
+
 # Retry regions that failed prior audits + remaining tier 2/3.
-build_region "iran"              "Iran"                    "44.0,25.0,63.0,40.0"
-build_region "west-coast-us"     "West Coast US"           "-125.0,32.0,-116.5,49.5"
-build_region "baltics"           "Baltics"                 "20.9,53.9,28.3,59.7"
-build_region "central-us"        "Central US"              "-120.0,31.3,-104.0,49.0"
-build_region "california"        "California"              "-125.0,32.0,-114.0,42.2"
-build_region "east-coast-us"     "East Coast US"           "-82.0,24.0,-66.5,47.6"
-build_region "west-asia"         "West Asia"               "25.0,12.0,63.0,45.0"
-build_region "japan"             "Japan"                   "122.9,24.0,146.0,45.6"
+run "iran"              "Iran"                    "44.0,25.0,63.0,40.0"
+run "west-coast-us"     "West Coast US"           "-125.0,32.0,-116.5,49.5"
+run "baltics"           "Baltics"                 "20.9,53.9,28.3,59.7"
+run "central-us"        "Central US"              "-120.0,31.3,-104.0,49.0"
+run "california"        "California"              "-125.0,32.0,-114.0,42.2"
+run "east-coast-us"     "East Coast US"           "-82.0,24.0,-66.5,47.6"
+run "west-asia"         "West Asia"               "25.0,12.0,63.0,45.0"
+run "japan"             "Japan"                   "122.9,24.0,146.0,45.6"
 
 # Large (last — require most disk headroom)
-build_region "australia-nz"      "Australia & New Zealand" "112.0,-48.0,179.0,-10.0"
-build_region "europe"            "Europe"                  "-25.0,34.0,50.5,72.0"
-build_region "united-states"     "United States"           "-125.0,24.0,-66.5,49.5"
+run "australia-nz"      "Australia & New Zealand" "112.0,-48.0,179.0,-10.0"
+run "europe"            "Europe"                  "-25.0,34.0,50.5,72.0"
+run "united-states"     "United States"           "-125.0,24.0,-66.5,49.5"
 
+if [ ${#FAILED[@]} -gt 0 ]; then
+    log "=== QUEUE FINISHED WITH FAILURES: ${FAILED[*]} ==="
+    exit 4
+fi
 log "=== ALL REBUILDS COMPLETE ==="

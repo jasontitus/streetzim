@@ -59,6 +59,14 @@ from tests.szrg_astar import R_EARTH, HEURISTIC_SPEED_MPS, haversine_m
 # would actually use.
 CLASS_ORD_MASK = 0x1F
 HIGHWAY_TIER_ORDS = frozenset({1, 2, 3, 4, 5, 6})  # motorway..primary_link
+NO_MOTOR_BIT = 0x200  # class_access bit 9 — see docs/driving-mode-road-class-warnings.md
+NO_MOTOR_ORD_MIN, NO_MOTOR_ORD_MAX = 16, 20  # path..steps: never drivable
+
+
+def is_no_motor(class_access: int) -> bool:
+    if class_access & NO_MOTOR_BIT:
+        return True
+    return NO_MOTOR_ORD_MIN <= (class_access & CLASS_ORD_MASK) <= NO_MOTOR_ORD_MAX
 
 
 def parse_lat_lon(s: str) -> tuple[float, float]:
@@ -68,28 +76,28 @@ def parse_lat_lon(s: str) -> tuple[float, float]:
     return float(parts[0]), float(parts[1])
 
 
-def nearest_node(g: SpatialGraph, lat: float, lon: float) -> tuple[int, float]:
-    """Brute-force nearest-node by haversine. Fast enough on ~20M nodes
-    (one numpy pass takes a few seconds)."""
-    nodes = g.nodes_scaled
-    lats = nodes[0::2].astype(np.float64) / 1e7
-    lons = nodes[1::2].astype(np.float64) / 1e7
-    dlat = np.radians(lats - lat)
-    dlon = np.radians(lons - lon)
-    a = (np.sin(dlat / 2) ** 2
-         + math.cos(math.radians(lat)) * np.cos(np.radians(lats))
-         * np.sin(dlon / 2) ** 2)
-    d = 2 * R_EARTH * np.arcsin(np.sqrt(a))
-    idx = int(np.argmin(d))
-    return idx, float(d[idx])
+def nearest_node(g: SpatialGraph, lat: float, lon: float,
+                 mode: str = "origin") -> tuple[int, float]:
+    """Snap exactly like the viewer: SpatialGraph.nearest_node in
+    tests/szrg_spatial.py is the Python mirror of routing-worker.js
+    snapNearestNode (cos(lat)-scaled planar ranking, no-motor vertices
+    skipped, six-candidate shortlist with the 32-node forward-reach
+    test, one-way sinks accepted for ``mode="dest"``). Returns the node
+    and its haversine distance from the query in metres."""
+    node = g.nearest_node(int(round(lat * 1e7)), int(round(lon * 1e7)), mode)
+    if node < 0:
+        raise RuntimeError("no routing nodes")
+    n_lat_e7, n_lon_e7 = g.node_coords_e7(node)
+    return node, haversine_m(lat, lon, n_lat_e7 / 1e7, n_lon_e7 / 1e7)
 
 
 def nearest_node_filtered(g: SpatialGraph, lat: float, lon: float,
-                          *, highway_only: bool) -> tuple[int, float]:
+                          *, highway_only: bool,
+                          mode: str = "origin") -> tuple[int, float]:
     """Nearest node that has at least one outgoing edge passing the
-    highway filter (or any node, when ``highway_only`` is False)."""
+    highway filter (or the viewer's snap, when ``highway_only`` is False)."""
     if not highway_only:
-        return nearest_node(g, lat, lon)
+        return nearest_node(g, lat, lon, mode)
     # Build candidate node ids by scanning a search radius incrementally.
     # In practice the nearest highway node is within a few km of any
     # populated point, so we walk concentric rings rather than scanning
@@ -163,6 +171,8 @@ def find_route_filtered(
         closed[current] = 1
         current_g = gscore[current]
         for (target, speed_dist, _gi, _ni, class_access) in g.edges_of_node(current):
+            if is_no_motor(class_access):
+                continue  # car profile: footway / steps / private (bit 9 or ordinal 16..20)
             if highway_only and (class_access & CLASS_ORD_MASK) not in HIGHWAY_TIER_ORDS:
                 continue
             if closed[target]:
@@ -490,8 +500,8 @@ def main():
     print("Resolving endpoints...")
     src_lat, src_lon = args.src
     dst_lat, dst_lon = args.dst
-    src_node, src_d = nearest_node(g, src_lat, src_lon)
-    dst_node, dst_d = nearest_node(g, dst_lat, dst_lon)
+    src_node, src_d = nearest_node(g, src_lat, src_lon, "origin")
+    dst_node, dst_d = nearest_node(g, dst_lat, dst_lon, "dest")
     print(f"  src node #{src_node}: {src_d:.0f} m from ({src_lat},{src_lon})")
     print(f"  dst node #{dst_node}: {dst_d:.0f} m from ({dst_lat},{dst_lon})")
     crow = haversine_m(src_lat, src_lon, dst_lat, dst_lon)

@@ -24,7 +24,7 @@ import math
 from dataclasses import dataclass
 
 from tests.szrg_spatial import SpatialGraph
-from tests.szrg_astar import R_EARTH, HEURISTIC_SPEED_MPS, haversine_m
+from tests.szrg_astar import R_EARTH, HEURISTIC_SPEED_MPS, NO_MOTOR_BIT, haversine_m, is_no_motor
 
 
 @dataclass
@@ -111,6 +111,8 @@ def find_route_spatial(
 
         current_g = gscore[current]
         for (target, speed_dist, geom_local, name_idx, class_access) in g.edges_of_node(current):
+            if is_no_motor(class_access):
+                continue  # car profile: footways / steps / private (bit 9 or ordinal 16..20)
             if closed[target]:
                 continue
             dist_m = (speed_dist & 0xFFFFFF) / 10.0

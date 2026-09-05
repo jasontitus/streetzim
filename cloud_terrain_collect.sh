@@ -33,18 +33,18 @@ DONE=0
 SYNCED=0
 VERIFIED=0
 
-while IFS=$'\t' read -r name iid ip; do
+while IFS=$'\t' read -u 9 -r name iid ip; do
     [ -z "$ip" ] && continue
     TOTAL=$((TOTAL+1))
 
     echo "--- $name ($ip) ---"
 
     # Check if instance is done
-    completed=$(ssh $SSH_OPTS ubuntu@$ip 'cat terrain_tiles/COMPLETED 2>/dev/null || echo NOT_DONE' 2>/dev/null || echo NOT_DONE)
+    completed=$(ssh -n $SSH_OPTS ubuntu@$ip 'cat terrain_tiles/COMPLETED 2>/dev/null || echo NOT_DONE' 2>/dev/null || echo NOT_DONE)
 
     if [ "$completed" = "NOT_DONE" ]; then
         # Still running — show progress
-        progress=$(ssh $SSH_OPTS ubuntu@$ip 'tail -c 120 gen.log 2>/dev/null | tr "\r" "\n" | grep -v "^$" | tail -1' 2>/dev/null || echo "unknown")
+        progress=$(ssh -n $SSH_OPTS ubuntu@$ip 'tail -c 120 gen.log 2>/dev/null | tr "\r" "\n" | grep -v "^$" | tail -1' 2>/dev/null || echo "unknown")
         echo "  STILL RUNNING: $progress"
         continue
     fi
@@ -65,12 +65,12 @@ while IFS=$'\t' read -r name iid ip; do
 
     # Verify by checking the instance's tile directories exist locally
     # Get list of x-directories from instance and verify they have files locally
-    remote_count=$(ssh $SSH_OPTS ubuntu@$ip 'find terrain_tiles/12 -name "*.webp" | wc -l' 2>/dev/null)
+    remote_count=$(ssh -n $SSH_OPTS ubuntu@$ip 'find terrain_tiles/12 -name "*.webp" | wc -l' 2>/dev/null)
     echo "  Remote has: $remote_count tiles"
 
     # Spot-check: pick 5 random tiles from the instance and verify they exist locally
     checks_ok=true
-    sample=$(ssh $SSH_OPTS ubuntu@$ip 'find terrain_tiles/12 -name "*.webp" | shuf -n 5' 2>/dev/null)
+    sample=$(ssh -n $SSH_OPTS ubuntu@$ip 'find terrain_tiles/12 -name "*.webp" | shuf -n 5' 2>/dev/null)
     for remote_path in $sample; do
         local_path="${LOCAL_DIR}/${remote_path#terrain_tiles/}"
         if [ ! -f "$local_path" ]; then
@@ -95,7 +95,7 @@ while IFS=$'\t' read -r name iid ip; do
         echo "  NOT VERIFIED — keeping instance alive"
     fi
 
-done <<< "$INSTANCES"
+done 9<<< "$INSTANCES"
 
 echo ""
 echo "=== Summary ==="

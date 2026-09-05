@@ -64,8 +64,10 @@ Bit layout of `class_access` (little-endian u32):
 | bits   | meaning                                                    |
 |--------|------------------------------------------------------------|
 | 0..4   | road class ordinal (see table below) — 5 bits, 32 values   |
-| 5..7   | access flags (bit 5=no-foot, bit 6=no-bicycle, bit 7=oneway) |
-| 8..31  | reserved — zero-fill, room for future use                  |
+| 5..7   | access flags (bit 5=no-foot, bit 6=no-bicycle, bit 7=oneway — set for both `oneway=yes` and reversed `oneway=-1` edges) |
+| 8      | junction=roundabout / circular / mini_roundabout           |
+| 9      | no motor vehicles: footway/path/steps/pedestrian/cycleway/bridleway/corridor/escape/busway with no recognised access tag, or motorcar/motor_vehicle = `no` (else vehicle = `no`, else access = `no`; OSM hierarchy, the most specific recognised key wins). `private`, `destination`, `customers`, `delivery` are **allowed** like `yes` — they are the roads you must use to reach a destination inside a campus or gated community (`create_osm_zim._ACCESS_ALLOW`). The car router never expands bit-9 edges (routing-worker.js, index.html, tests/szrg_astar.py, cloud/route_cli.py). Builders before 2026-09 leave it clear, so consumers also treat class ordinals 16..20 (path..steps) as no-motor. |
+| 10..31 | reserved — zero-fill, room for future use                  |
 
 Road-class ordinals (same 16 classes the speed table uses, packed):
 
@@ -111,11 +113,19 @@ In the edge-building pass that currently computes `speed` and appends to
 `edges_dist_speed` (lines ~2040–2060), also:
 
 ```python
-class_ord = CLASS_ORDINAL.get(highway_tag, 0)
+class_ord = CLASS_ORDINAL.get(highway_tag, 0) & 0x1F
 access = 0
 if tags.get("foot") == "no":     access |= 0x20  # bit 5
 if tags.get("bicycle") == "no":  access |= 0x40  # bit 6
-if tags.get("oneway") == "yes":  access |= 0x80  # bit 7
+# oneway is +1 for oneway=yes (and OSM-implied: junction=roundabout/
+# circular, highway=motorway), -1 for oneway=-1; bit 7 is set for both —
+# a reversed way only emits its reverse edge, which is just as much a
+# one-way for the HUD.
+if oneway != 0:                  access |= 0x80  # bit 7
+if junction in ("roundabout", "circular", "mini_roundabout"):
+    access |= 0x100                                # bit 8
+if _way_no_motor_vehicle(highway_tag, tags):
+    access |= 0x200                                # bit 9
 edges_class_access.append(class_ord | access)
 ```
 

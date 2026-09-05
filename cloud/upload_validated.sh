@@ -25,7 +25,7 @@ today=$(date +%Y-%m-%d)
 # the caller already activated it, $PYTHON below picks it up; otherwise
 # we fall back to the absolute path. Prevents ``python3`` from resolving
 # to a broken anaconda install that happens to be earlier on $PATH.
-PROJECT_DIR="${PROJECT_DIR:-/Users/jasontitus/experiments/streetzim}"
+PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 # Resolve to whichever venv has a working python+ia. venv312 is the Mac
 # convention; venv-linux exists on the Linux build host and contains a
 # real Linux interpreter — venv312 may be present there as an rsynced
@@ -64,8 +64,14 @@ fi
 echo "validation passed."
 
 # --- 2. ia upload (same pattern as overture-rollout-redo.sh) ---
-"$IA" upload "streetzim-${id}" "$(basename "$dated")" --retries 5 \
-    || echo "WARN upload reported issues for ${id} — continuing"
+# A failed upload must be FATAL: continuing used to bump the item date,
+# stamp features, prune the previous good ZIMs and redeploy the site —
+# all on top of a file that never arrived — and exit 0 so every wrapper
+# reported success.
+if ! "$IA" upload "streetzim-${id}" "$(basename "$dated")" --retries 5; then
+    echo "FATAL ${id}: ia upload failed for $(basename "$dated") — nothing pruned, site not redeployed" >&2
+    exit 3
+fi
 sleep 30
 
 # --- 3. metadata modify ---
@@ -100,6 +106,49 @@ while [ "$(date +%s)" -lt "$metadata_deadline" ]; do
 done
 if [ "$(date +%s)" -ge "$metadata_deadline" ]; then
     echo "WARN ${id}: metadata still didn't list ${target_file} after 3 min — cleanup may be stale"
+fi
+
+# --- 4b'. verify the remote listing matches the local file (size). Runs
+# AFTER the consistency poll above — right after upload the metadata API
+# usually doesn't list the file yet and the check would be skipped.
+local_size=$(stat -c %s "$dated" 2>/dev/null || stat -f %z "$dated")
+remote_size=$("$IA" metadata "streetzim-${id}" 2>/dev/null \
+    | "$PYTHON" -c "import sys, json; m=json.load(sys.stdin); print(next((f.get('size') for f in m.get('files', []) if f.get('name')==sys.argv[1]), ''))" \
+        "$target_file")
+if [ -z "$remote_size" ]; then
+    echo "FATAL ${id}: ${target_file} is not listed by archive.org — refusing to prune or redeploy" >&2
+    exit 3
+fi
+if [ "$remote_size" != "$local_size" ]; then
+    echo "FATAL ${id}: archive.org lists ${target_file} as ${remote_size} B but local is ${local_size} B — partial upload?" >&2
+    exit 3
+fi
+echo "  remote size matches local (${local_size} B)"
+
+# --- 4c. refresh the site's torrent for this region from the LOCAL file
+# so web/torrents/<id>.torrent names the file the Download button links
+# (the committed torrents had drifted several builds behind and their
+# webseeds pointed at files the keep-2 prune below had already deleted).
+if [ -f cloud/build_torrent.py ]; then
+    if "$PYTHON" cloud/build_torrent.py \
+            "https://archive.org/download/streetzim-${id}/$(basename "$dated")" \
+            "web/torrents/${id}.torrent" --local "$dated"; then
+        # The torrent is tracked in git: deploying it without committing
+        # means the next checkout regresses to the stale one (site hides
+        # the button, cleanup protects the wrong file). Commit unless the
+        # operator opts out with STREETZIM_NO_TORRENT_COMMIT=1.
+        if [ "${STREETZIM_NO_TORRENT_COMMIT:-0}" != "1" ] \
+                && git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+                && [ -n "$(git status --porcelain -- "web/torrents/${id}.torrent")" ]; then
+            # (git status, not git diff: a brand-new region's torrent is
+            # untracked, and `git diff --quiet` exits 0 for untracked files)
+            git add "web/torrents/${id}.torrent" \
+                && git commit -q -m "torrents: ${id} → $(basename "$dated")" -- "web/torrents/${id}.torrent" \
+                || echo "WARN could not commit web/torrents/${id}.torrent — commit it by hand"
+        fi
+    else
+        echo "WARN torrent refresh failed for ${id} (site will hide the Torrent button)"
+    fi
 fi
 
 # --- 5. prune old dated ZIMs (keep last 2) ---

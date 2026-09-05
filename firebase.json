@@ -10,7 +10,14 @@
       "**/.DS_Store",
       "**/.gitignore",
       "**/.gitkeep",
-      "**/node_modules/**"
+      "**/node_modules/**",
+      "**/__pycache__/**",
+      "generate.py",
+      "stats.py",
+      "template.html",
+      "watch-and-deploy.sh",
+      "watch-and-deploy.log",
+      "drive/viewer/.version"
     ],
     "headers": [
       {

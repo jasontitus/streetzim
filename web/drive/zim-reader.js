@@ -3,11 +3,12 @@
 // Consumed by the service worker (importScripts) to turn a local .zim
 // Blob into HTTP responses. Exposes StreetZimReader on the global scope.
 //
-// Supported: ZIM v5/v6 with uncompressed (flag 1/2) and zstd (flag 5)
-//            clusters. Requires fzstd (loaded alongside via importScripts
-//            or <script>) for zstd.
-// Not yet:   xz clusters (throws), full-text search, title index,
-//            redirect chains > 1 hop.
+// Supported: ZIM v6 (new-namespace layout: content under 'C', which is
+//            what `read()` defaults to) with uncompressed (flag 1/2) and
+//            zstd (flag 5) clusters. Requires fzstd (loaded alongside via
+//            importScripts or <script>) for zstd.
+// Not yet:   ZIM v5 legacy namespaces ('A'/'-'), xz clusters (throws),
+//            full-text search, title index, redirect chains > 1 hop.
 //
 // Format ref: https://wiki.openzim.org/wiki/ZIM_file_format
 // If we hit weird ZIMs in the wild, cross-reference kiwix-js:
@@ -29,6 +30,12 @@
   }
 
   function readCString(view, offset) {
+    if (offset >= view.byteLength) {
+      // String ran off the end of the buffer we over-read (a dirent
+      // with a >8 KB URL/title). Return empty rather than constructing
+      // a negative-length view, which throws RangeError.
+      return { str: '', nextOffset: offset + 1 };
+    }
     const u8a = new Uint8Array(view.buffer, view.byteOffset + offset,
                                view.byteLength - offset);
     let end = 0;
@@ -264,17 +271,24 @@
       }
       const start = readOff(blobNum * wordSize);
       const stop  = readOff((blobNum + 1) * wordSize);
-      const out = data.subarray(start, stop);
-      this.blobCache.set(key, out);
+      // Copy, don't subarray: a subarray pins the whole decompressed
+      // cluster buffer for as long as the blob sits in blobCache, so
+      // 512 cached tiles could keep 512 evicted clusters (2 MB each,
+      // far more for search/routing clusters) alive inside the SW.
+      const out = data.slice(start, stop);
+      // Only memoise small blobs; big search/routing payloads are
+      // one-shot reads and would blow the count-based LRU's budget.
+      if (out.byteLength <= 512 * 1024) this.blobCache.set(key, out);
       return out;
     }
 
     // Main entry point — look up a content path. Returns null if not found.
     async read(path, namespace) {
-      // Normalize: strip leading slash / "./"; percent-decode (tiles use
-      // percent-encoding for spaces in font names etc.).
+      // Normalize: strip leading slash / "./". Percent-decoding is the
+      // caller's job (sw.js decodes exactly once) — decoding here as
+      // well made any entry whose real path contains a literal %XX
+      // (e.g. a Wikipedia title with "%20" in it) unreachable.
       path = String(path || '').replace(/^\.?\//, '');
-      try { path = decodeURIComponent(path); } catch (_) { /* keep raw */ }
       const entry = await this.findEntry(path, namespace);
       if (!entry) return null;
       const data = await this._readBlob(entry.cluster, entry.blob);
@@ -292,10 +306,29 @@
     }
   }
 
+  // ZIM sorts dirents by their UTF-8 bytes, which is code-point order.
+  // JS `<` on strings compares UTF-16 code units, which disagrees for
+  // any character above U+FFFF (CJK Extension B, emoji) versus one in
+  // U+E000–U+FFFF — enough to misdirect the binary search.
+  function cmpCodePoints(a, b) {
+    const la = a.length, lb = b.length;
+    let i = 0, j = 0;
+    while (i < la && j < lb) {
+      const ca = a.codePointAt(i);
+      const cb = b.codePointAt(j);
+      if (ca !== cb) return ca < cb ? -1 : 1;
+      i += ca > 0xFFFF ? 2 : 1;
+      j += cb > 0xFFFF ? 2 : 1;
+    }
+    if (i < la) return 1;
+    if (j < lb) return -1;
+    return 0;
+  }
+
   function cmpNsUrl(aNs, aUrl, bNs, bUrl) {
     if (aNs !== bNs) return aNs < bNs ? -1 : 1;
     if (aUrl === bUrl) return 0;
-    return aUrl < bUrl ? -1 : 1;
+    return cmpCodePoints(aUrl, bUrl);
   }
 
   global.StreetZimReader = ZimReader;

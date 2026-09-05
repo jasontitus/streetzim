@@ -23,6 +23,7 @@ python3 create_osm_zim.py \
   --keep-temp \
   2>&1 | tee west-coast-us-build.log
 
+python3 cloud/validate_zim.py osm-west-coast-us.zim || { echo "FATAL: validator rejected osm-west-coast-us.zim"; exit 4; }
 ia upload streetzim-west-coast-us osm-west-coast-us.zim \
   --metadata="title:StreetZim - Offline Map of the U.S. West Coast (Washington, Oregon, California)" \
   --metadata="description:Offline map of the U.S. West Coast: Washington, Oregon, and California. Seattle, Portland, San Francisco, Los Angeles, San Diego, and everything in between. Includes vector maps, satellite imagery, 3D terrain, Wikipedia info, and full-text search. Open in Kiwix (free) — no internet needed. Built with StreetZim: https://github.com/jasontitus/streetzim" \
@@ -49,6 +50,7 @@ python3 create_osm_zim.py \
   --keep-temp \
   2>&1 | tee east-coast-us-build.log
 
+python3 cloud/validate_zim.py osm-east-coast-us.zim || { echo "FATAL: validator rejected osm-east-coast-us.zim"; exit 4; }
 ia upload streetzim-east-coast-us osm-east-coast-us.zim \
   --metadata="title:StreetZim - Offline Map of the U.S. East Coast (Maine to Florida)" \
   --metadata="description:Offline map of the U.S. East Coast from Maine to Florida. New York, Boston, Philadelphia, Washington D.C., Atlanta, Miami, Charlotte, Baltimore, and the entire Eastern Seaboard. Includes vector maps, satellite imagery, 3D terrain, Wikipedia info, and full-text search. Open in Kiwix (free) — no internet needed. Built with StreetZim: https://github.com/jasontitus/streetzim" \

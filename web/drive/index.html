@@ -178,7 +178,12 @@
     // trailing slash from /drive/, which would make the relative form
     // 'sw.js' resolve at the site root. Being explicit side-steps it.
     setStatus('warn', 'Starting up…', 'Registering service worker…');
-    const reg = await navigator.serviceWorker.register('/drive/sw.js', { scope: '/drive/' });
+    // updateViaCache:'none' — the default ('imports') satisfies the
+    // SW's importScripts('./zim-reader.js') from the HTTP cache, so a
+    // deploy that only changed zim-reader.js wasn't picked up for the
+    // hour its Cache-Control allows.
+    const reg = await navigator.serviceWorker.register('/drive/sw.js',
+      { scope: '/drive/', updateViaCache: 'none' });
     swRegistration = reg;
     dbg('register ok', { scope: reg.scope,
                          installing: !!reg.installing,
@@ -251,6 +256,17 @@
         openBtn.style.display = '';
         clearBtn.style.display = '';
         pickBtn.textContent = 'Change ZIM';
+      } else if (r && r.ok && r.present) {
+        // A record exists but no longer opens (file moved/edited on
+        // disk, or a corrupt pick from an older build). Keep Remove
+        // visible — before this the user was stuck with a broken
+        // record and no way to clear it.
+        setStatus('err', 'Saved ZIM can\'t be opened',
+          (r.name ? r.name + ' — ' : '') +
+          'the file may have moved or changed. Remove it or pick it again.');
+        openBtn.style.display = 'none';
+        clearBtn.style.display = '';
+        pickBtn.textContent = 'Choose a ZIM file';
       } else {
         setStatus('warn', 'No ZIM loaded',
           'Pick a file below — it stays in your browser, nothing uploaded.');
@@ -283,6 +299,10 @@
       fileFallback.onchange = () => {
         resolve(fileFallback.files && fileFallback.files[0] ? fileFallback.files[0] : null);
       };
+      // Reset so re-picking the same file (e.g. after "Remove loaded
+      // ZIM") still fires `change` — it doesn't when the value is
+      // unchanged.
+      fileFallback.value = '';
       fileFallback.click();
     });
   }

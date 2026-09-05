@@ -390,7 +390,17 @@ CORPORA = _discover_corpora()
 def test_spatial_preserves_routes_on_real_zim(corpus: Path):
     """For each region, convert its v4 ZIM → spatial split (in memory) →
     replay the first N golden routes → every fingerprint must match the
-    monolithic-v4 route."""
+    monolithic-v4 route.
+
+    The golden corpora (tests/golden/*.jsonl) were sampled before
+    class_access bit 9 and the footway-ordinal rule existed, on any
+    graph vertex — including vertices whose only out-edges are
+    footways/paths. Such a pair is unreachable for the car profile on
+    both sides today and is skipped (both None == agreement); the loop
+    keeps reading until N pairs have actually been compared. The
+    spatial side is re-anchored with nearest_node(raw=True) so it lands
+    on exactly the golden vertex rather than where the viewer's snap
+    rule would move a tap there."""
     meta = _read_meta(corpus)
     if meta is None:
         pytest.skip(f"{corpus.name} has no _meta header")
@@ -437,13 +447,23 @@ def test_spatial_preserves_routes_on_real_zim(corpus: Path):
                 continue
             s, e = rec["s"], rec["e"]
             mono = find_route(g4, s, e)
+            # raw=True: land on exactly the golden vertex. The viewer's
+            # snap rule (car-ok / reach-32 shortlist) would move a
+            # golden pair that starts or ends on a footway or isolated
+            # vertex somewhere else, which is correct for a tap but not
+            # for replaying a recorded vertex pair.
             spat = find_route_spatial(
                 sg,
                 sg.nearest_node(int(g4.nodes_scaled[s * 2]),
-                                int(g4.nodes_scaled[s * 2 + 1])),
+                                int(g4.nodes_scaled[s * 2 + 1]), raw=True),
                 sg.nearest_node(int(g4.nodes_scaled[e * 2]),
-                                int(g4.nodes_scaled[e * 2 + 1])),
+                                int(g4.nodes_scaled[e * 2 + 1]), raw=True),
             )
+            if mono is None and spat is None:
+                # Golden pairs pre-date the car-only rule; a pair whose
+                # only path was over a footway is now unreachable on
+                # both sides — agreement, not divergence.
+                continue
             if mono is None or spat is None:
                 mismatches += 1
                 continue

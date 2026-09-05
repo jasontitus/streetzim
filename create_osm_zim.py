@@ -31,12 +31,14 @@ import gzip
 import html as html_mod
 import json
 import os
+import re
 import shutil
 import sqlite3
 import struct
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -215,6 +217,11 @@ PHASE_TIMER = _PhaseTimer()
 # Detecting them in the print wrapper means we don't have to thread a
 # timer object through every helper call site.
 import re as _re_phase
+
+# Only http(s) URLs may become hrefs in detail pages — index data is not
+# trusted (a javascript: value would run on tap). Same rule as places.html.
+# Module-level so search_detail_html doesn't recompile it per record.
+_HTTP_OK_RE = re.compile(r"^https?://", re.I)
 _PHASE_RE = _re_phase.compile(r"^\s*\[(\d+)/(\d+)\]\s+(.+?)(\.{3,})?\s*$")
 
 
@@ -395,27 +402,34 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
     os.makedirs(source_cache_dir, exist_ok=True)
     total_downloaded = 0
     total_skipped = 0
+    total_missing = 0
     total_bytes_jpeg = 0
     total_bytes_out = 0
     lock = threading.Lock()
 
-    # Collect existing format caches for transcoding fallback
+    # Collect existing format caches for transcoding fallback. Only
+    # caches holding 256 px tiles qualify: the source tiles stitched
+    # below are 256 px, and a 512 px cache tile (satellite_cache_avif_512)
+    # pasted at (dx*256, dy*256) overflowed the canvas and overwrote its
+    # neighbouring quadrants.
     _format_caches = []
     for d in sorted(glob.glob(os.path.join(SCRIPT_DIR, "satellite_cache_*_*"))):
         if os.path.isdir(d) and d != dest_dir and d != source_cache_dir:
-            # Extract extension from dir name (e.g. satellite_cache_webp_256 → webp)
+            # Dir name: satellite_cache_<ext>_<size>
             parts = os.path.basename(d).replace("satellite_cache_", "").split("_")
-            if parts:
+            if len(parts) >= 2 and parts[1] == "256":
                 _format_caches.append((d, parts[0]))
-    # Also check the legacy satellite_cache/ (WebP tiles)
+    # Also check the legacy satellite_cache/ (256 px WebP tiles)
     legacy_cache = os.path.join(SCRIPT_DIR, "satellite_cache")
     if os.path.isdir(legacy_cache) and legacy_cache != dest_dir:
         _format_caches.append((legacy_cache, "webp"))
 
     def _fetch_source_tile(z, x, y):
         """Get a single 256px tile, using source cache if available.
-        Returns (PIL.Image, jpeg_bytes_len). Checks: JPEG source cache →
-        existing format caches (transcode) → network download."""
+        Returns (PIL.Image or None, jpeg_bytes_len). Checks: JPEG source
+        cache → existing format caches (transcode) → network download.
+        A transcoded tile reports 0 bytes (nothing was downloaded); the
+        caller must test the image, not the byte count, for presence."""
         # Check JPEG source cache first
         cache_path = os.path.join(source_cache_dir, str(z), str(x), f"{y}.jpg")
         if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
@@ -429,7 +443,9 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
             cached = os.path.join(cache_dir, str(z), str(x), f"{y}.{cache_ext}")
             if os.path.exists(cached) and os.path.getsize(cached) > 0:
                 try:
-                    return Image.open(cached), 0
+                    im = Image.open(cached)
+                    if im.size == (256, 256):
+                        return im, 0
                 except Exception:
                     pass
 
@@ -496,15 +512,21 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
         sx0, sy0 = x0 * 2, y0 * 2
         stitched = Image.new("RGB", (512, 512))
         total_jpeg = 0
+        found = 0
         for dy in range(2):
             for dx in range(2):
                 img, jpeg_size = _fetch_source_tile(sz, sx0 + dx, sy0 + dy)
                 total_jpeg += jpeg_size
                 if img is not None:
                     stitched.paste(img, (dx * 256, dy * 256))
+                    found += 1
 
-        if total_jpeg == 0:
-            return (False, 0, 0)
+        # Presence, not byte count: four transcoded quadrants report 0
+        # bytes and used to make this tile "not written". And a tile
+        # with any missing quadrant must not be written either — it was
+        # cached permanently with black squares.
+        if found < 4:
+            return (None, 0, 0)   # None = incomplete (not cached, not written)
 
         out_size = _save_image(stitched, tile_path)
         return (True, total_jpeg, out_size)
@@ -580,6 +602,8 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
                     total_downloaded += 1
                     total_bytes_jpeg += jpeg_bytes
                     total_bytes_out += out_bytes
+                elif downloaded is None:
+                    total_missing += 1
                 else:
                     total_skipped += 1
                 completed += 1
@@ -587,6 +611,12 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
                     print(f"\r    Processed {total_downloaded} tiles ({total_skipped} cached)...", end="", flush=True)
 
     print(f"\r    Produced {total_downloaded} satellite tiles ({total_skipped} cached)")
+    if total_missing:
+        # A tile with a missing quadrant is neither written nor cached, so
+        # it is a hole in the imagery (re-fetched next run). Say so instead
+        # of folding it into "cached".
+        print(f"    WARNING: {total_missing} satellite tiles skipped — a source "
+              f"quadrant failed to download (holes in imagery)", flush=True)
     if total_bytes_jpeg > 0:
         saved_mb = (total_bytes_jpeg - total_bytes_out) / (1024 * 1024)
         ratio = (1 - total_bytes_out / total_bytes_jpeg) * 100
@@ -673,9 +703,22 @@ def _generate_one_terrain_tile(args):
     tile_bounds_3857 = transform_bounds(
         "EPSG:4326", "EPSG:3857", tb_west, tb_south, tb_east, tb_north
     )
-    tile_transform = from_bounds(*tile_bounds_3857, 256, 256)
+    # Rasterise with a 2-pixel halo on every side and crop the centre.
+    # Cubic resampling looks at a 4-pixel window; at a plain 256×256
+    # extent that window was truncated on the tile edge, so neighbouring
+    # tiles disagreed along their shared edge (visible seams). This is
+    # the buffered generator from cloud/fix_terrain_seams.py folded into
+    # the builder, so seams are prevented instead of repaired after.
+    west3857, south3857, east3857, north3857 = tile_bounds_3857
+    px_w = (east3857 - west3857) / 256.0
+    px_h = (north3857 - south3857) / 256.0
+    HALO = 2
+    BUF = 256 + 2 * HALO
+    tile_transform = from_bounds(
+        west3857 - HALO * px_w, south3857 - HALO * px_h,
+        east3857 + HALO * px_w, north3857 + HALO * px_h, BUF, BUF)
 
-    elevation = np.zeros((1, 256, 256), dtype=np.float32)
+    elevation = np.zeros((1, BUF, BUF), dtype=np.float32)
     with rasterio.open(mosaic_file) as src:
         reproject(
             source=rasterio.band(src, 1),
@@ -685,7 +728,7 @@ def _generate_one_terrain_tile(args):
             resampling=Resampling.cubic,
         )
 
-    elev = elevation[0]
+    elev = elevation[0, HALO:HALO + 256, HALO:HALO + 256]
     elev = np.round(elev / 10.0) * 10.0  # quantize to 10m for ~74% compression savings
     encoded = ((elev + 10000.0) / 0.1).astype(np.uint32)
     encoded = np.clip(encoded, 0, 16777215)
@@ -698,7 +741,11 @@ def _generate_one_terrain_tile(args):
     tile_dir_path = os.path.join(dest_dir_local, str(z), str(tile_x))
     os.makedirs(tile_dir_path, exist_ok=True)
     tile_path = os.path.join(tile_dir_path, f"{tile_y}.webp")
-    img.save(tile_path, "WEBP", lossless=True)
+    # Atomic: a worker killed mid-save must not leave a truncated tile
+    # that every later run treats as cached.
+    tmp_path = f"{tile_path}.{os.getpid()}.tmp"
+    img.save(tmp_path, "WEBP", lossless=True)
+    os.replace(tmp_path, tile_path)
 
 
 def _terrain_vrt_for_zoom(z, mosaic_path, low_zoom_world_vrt=None):
@@ -773,6 +820,7 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
     # Include a 1-degree BUFFER around the bbox so that tiles at degree
     # boundaries get correct data from neighboring DEM cells.
     tif_paths = []
+    transient_dem_failures = []
     for lat in range(math.floor(minlat) - 1, math.floor(maxlat) + 2):
         for lon in range(math.floor(minlon) - 1, math.floor(maxlon) + 2):
             ns = "N" if lat >= 0 else "S"
@@ -793,39 +841,79 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
                 # (Georgia, Armenia, Azerbaijan etc. that 404 on GLO-30).
                 glo90_url = COPERNICUS_DEM_URL_GLO90.format(ns=ns, lat=abs_lat, ew=ew, lon=abs_lon)
                 downloaded = False
+                all_404 = True   # only a 404 from EVERY source means "ocean"
                 for try_url, label in [(url, "GLO-30"), (glo90_url, "GLO-90 fallback")]:
                     print(f"    Downloading {ns}{abs_lat:02d} {ew}{abs_lon:03d} ({label})...")
                     req = urllib.request.Request(try_url, headers={"User-Agent": "streetzim/1.0"})
-                    try:
-                        with urllib.request.urlopen(req, timeout=120) as resp:
-                            with open(fpath, "wb") as f:
-                                while True:
-                                    chunk = resp.read(1024 * 1024)
-                                    if not chunk:
-                                        break
-                                    f.write(chunk)
-                        size_mb = os.path.getsize(fpath) / (1024 * 1024)
-                        print(f"      {size_mb:.1f} MB ({label})")
+                    got = False
+                    for attempt in range(1, 4):
+                        # Download to a temp file and rename only when the
+                        # body is complete + looks like a TIFF. Writing in
+                        # place left a truncated .tif (> 1000 bytes passes
+                        # every size check) that gdalbuildvrt then used.
+                        tmp_path = fpath + ".part"
+                        try:
+                            with urllib.request.urlopen(req, timeout=120) as resp:
+                                with open(tmp_path, "wb") as f:
+                                    while True:
+                                        chunk = resp.read(1024 * 1024)
+                                        if not chunk:
+                                            break
+                                        f.write(chunk)
+                            with open(tmp_path, "rb") as f:
+                                magic = f.read(4)
+                            # Classic TIFF or BigTIFF (download_dem.py accepts both).
+                            if magic not in (b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+"):
+                                raise IOError("response is not a TIFF (truncated or HTML error page)")
+                            os.replace(tmp_path, fpath)
+                            size_mb = os.path.getsize(fpath) / (1024 * 1024)
+                            print(f"      {size_mb:.1f} MB ({label})")
+                            got = True
+                            break
+                        except urllib.error.HTTPError as e:
+                            if e.code == 404:
+                                print(f"      404 on {label}, trying next source...")
+                                break
+                            all_404 = False
+                            print(f"      Warning: HTTP {e.code} from {label} (attempt {attempt}/3)")
+                        except Exception as e:
+                            all_404 = False
+                            print(f"      Warning: failed to download from {label} (attempt {attempt}/3): {e}")
+                        finally:
+                            if os.path.exists(tmp_path):
+                                try: os.remove(tmp_path)
+                                except OSError: pass
+                        if attempt < 3:
+                            time.sleep(2 * attempt)
+                    if got:
                         downloaded = True
                         break
-                    except urllib.error.HTTPError as e:
-                        if e.code == 404:
-                            print(f"      404 on {label}, trying next source...")
-                            continue
-                        print(f"      Warning: failed to download from {label}: {e}")
-                        break
-                    except Exception as e:
-                        print(f"      Warning: failed to download from {label}: {e}")
-                        break
                 if not downloaded:
-                    # Both GLO-30 and GLO-90 failed — mark as genuinely nodata (ocean)
-                    open(nodata_marker, "w").close()
+                    if all_404:
+                        # 404 from both GLO-30 and GLO-90 — genuinely no
+                        # data (ocean). Persist that so we don't re-ask.
+                        open(nodata_marker, "w").close()
+                    else:
+                        # Transient failure: do NOT write the marker — it
+                        # used to brand a land cell as ocean forever, and
+                        # every later build zero-filled real terrain there.
+                        # Remember it: continuing would rasterise the cell
+                        # as 0 m AND write the COMPLETED marker, so the
+                        # "retry" would never happen. We abort the terrain
+                        # step below instead.
+                        transient_dem_failures.append(f"{ns}{abs_lat:02d}{ew}{abs_lon:03d}")
                     continue
             else:
                 size_mb = os.path.getsize(fpath) / (1024 * 1024)
                 print(f"    Cached: {ns}{abs_lat:02d} {ew}{abs_lon:03d} ({size_mb:.1f} MB)")
             tif_paths.append(fpath)
 
+    if transient_dem_failures:
+        raise RuntimeError(
+            f"{len(transient_dem_failures)} DEM cell(s) could not be downloaded "
+            f"this run ({', '.join(transient_dem_failures[:8])}"
+            f"{'…' if len(transient_dem_failures) > 8 else ''}); refusing to "
+            f"rasterise them as 0 m and cache the result. Re-run the build.")
     if not tif_paths:
         print("    No DEM tiles downloaded, skipping terrain")
         return 0
@@ -1010,8 +1098,11 @@ def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
         contact_parts.append(
             f'<p class="brand">{html_mod.escape(enrich["brand"])}</p>')
     links = []
-    if enrich.get("ws"):
-        w = enrich["ws"]
+    _http_ok = _HTTP_OK_RE
+    # Only http(s) URLs may become hrefs — index data is not trusted
+    # (a javascript: value would run on tap). Same rule as places.html.
+    if enrich.get("ws") and _http_ok.match(str(enrich["ws"]).strip()):
+        w = str(enrich["ws"]).strip()
         w_show = html_mod.escape(w)
         w_attr = html_mod.escape(w, quote=True)
         links.append(
@@ -1023,6 +1114,9 @@ def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
         links.append(
             f'<a href="tel:{p_attr}">📞 {html_mod.escape(p)}</a>')
     for s in (enrich.get("soc") or [])[:3]:
+        if not isinstance(s, str) or not _http_ok.match(s.strip()):
+            continue
+        s = s.strip()
         s_attr = html_mod.escape(s, quote=True)
         host = s.lower()
         if "facebook" in host:   g = "Facebook"
@@ -2855,6 +2949,49 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
     }
     DEFAULT_SPEED = 30
 
+    # Highway classes cars may never use (class_access bit 9). Tracks stay
+    # routable (rural last mile); service roads stay routable (driveways,
+    # parking aisles are how you reach the destination).
+    NO_MOTOR_HIGHWAY = frozenset({
+        "footway", "path", "steps", "pedestrian", "cycleway", "bridleway",
+        "corridor", "escape", "busway",
+    })
+    # `private`, `destination`, `customers`, `delivery` are ALLOWED (like
+    # OSRM/Valhalla's restricted-access classes): they're exactly the
+    # roads you must use to reach a destination inside a gated community
+    # or campus. Only an outright `no` blocks. (We have no penalty
+    # mechanism, so through-routing over a private road is possible; the
+    # alternative — relocating the destination to the nearest public road
+    # with no indication — is worse.)
+    _ACCESS_DENY = ("no",)
+    _ACCESS_ALLOW = ("yes", "designated", "permissive", "destination",
+                     "customers", "delivery", "private")
+
+    def _access_value(tags, *keys):
+        """First RECOGNISED value among `keys` (an unrecognised value such
+        as motorcar=agricultural must not shadow motor_vehicle=no)."""
+        for k in keys:
+            v = tags.get(k)
+            if v in _ACCESS_ALLOW or v in _ACCESS_DENY:
+                return v
+        return None
+
+    def _way_no_motor_vehicle(hw, tags):
+        """True when motor vehicles may not use this way (OSM access
+        hierarchy: motorcar/motor_vehicle override vehicle override
+        access). An explicit motor_vehicle=yes re-opens a road that
+        access=no closed (e.g. private roads tagged for through traffic)."""
+        mv = _access_value(tags, "motorcar", "motor_vehicle")
+        if mv is not None:
+            return mv in _ACCESS_DENY
+        veh = _access_value(tags, "vehicle")
+        if veh is not None:
+            return veh in _ACCESS_DENY
+        acc = _access_value(tags, "access")
+        if acc is not None:
+            return acc in _ACCESS_DENY
+        return hw in NO_MOTOR_HIGHWAY
+
     # Road-class ordinal for the v4 routing-graph class_access u32
     # (bits 0..4). See docs/driving-mode-road-class-warnings.md for the
     # full bit layout. Unknown / missing classes fall through to 0.
@@ -2923,7 +3060,9 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
 
     if p1.hw_count == 0:
         print("    Warning: no highway features found, skipping routing graph")
-        return None
+        # Caller unpacks a 2-tuple; a bare None here aborted the whole
+        # build with a TypeError after the expensive tile steps.
+        return None, None
 
     # Find interior refs that appear in 2+ ways.
     if p1.interior_chunks:
@@ -2983,9 +3122,19 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
         prev_lon = lons_e7[0]
         prev_lat = lats_e7[0]
         for k in range(1, len(lons_e7)):
-            _varint(_zigzag32(lons_e7[k] - prev_lon), out)
+            dlon = lons_e7[k] - prev_lon
+            # A way straddling the antimeridian has a ~3.6e9 delta, which
+            # does not fit the 32-bit zigzag (it wrapped to +145° and shifted
+            # every later point by 429°). Take the short way round instead:
+            # decoders simply continue the running longitude past ±180°,
+            # which MapLibre renders correctly (unwrapped coordinates).
+            if dlon > 1_800_000_000:
+                dlon -= 3_600_000_000
+            elif dlon <= -1_800_000_000:
+                dlon += 3_600_000_000
+            _varint(_zigzag32(dlon), out)
             _varint(_zigzag32(lats_e7[k] - prev_lat), out)
-            prev_lon = lons_e7[k]
+            prev_lon += dlon
             prev_lat = lats_e7[k]
         return start, len(out)
 
@@ -3024,6 +3173,9 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
 
     # Node coordinates indexed by graph idx (populated lazily as we see them).
     node_coords = np.zeros((num_nodes, 2), dtype=np.int32)  # lat_e7, lon_e7
+    # Explicit "seen" flags instead of using (0,0) as the unset sentinel —
+    # a genuine node at Null Island is indistinguishable otherwise.
+    node_has_coords = np.zeros(num_nodes, dtype=bool)
 
     # Geom dedup: hash geom bytes → geom index. Geom blob accumulates.
     geom_blob = bytearray()
@@ -3062,10 +3214,19 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
 
             # One-way direction
             ow = w.tags.get("oneway", "")
+            junction = (w.tags.get("junction") or "").strip()
             if ow in ("yes", "1", "true"):
                 oneway = 1
             elif ow == "-1":
                 oneway = -1
+            elif ow in ("no", "0", "false"):
+                oneway = 0
+            elif junction in ("roundabout", "circular") or hw == "motorway":
+                # OSM-implied one-ways. Without this a roundabout mapped per
+                # convention (no explicit oneway tag — a large fraction) got
+                # edges in both directions, so A* drove the short way round
+                # against traffic and the HUD counted the wrong exit.
+                oneway = 1
             else:
                 oneway = 0
             speed = SPEED.get(hw, DEFAULT_SPEED)
@@ -3077,14 +3238,25 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
             access_bits = 0
             if w.tags.get("foot") == "no":    access_bits |= 0x20  # bit 5
             if w.tags.get("bicycle") == "no": access_bits |= 0x40  # bit 6
-            if oneway == 1:                   access_bits |= 0x80  # bit 7
+            # bit 7 = "this edge is a one-way". Reversed (-1) ways only emit
+            # the reverse edge, which is just as much a one-way for the HUD.
+            if oneway != 0:                   access_bits |= 0x80  # bit 7
             # Roundabouts in OSM are implicitly oneway. Mark them in bit 8 so
             # the HUD can say "take roundabout" and render a curved arrow.
             # Includes mini_roundabout because the maneuver is the same from
             # a driver's perspective.
-            junction = (w.tags.get("junction") or "").strip()
             if junction in ("roundabout", "circular", "mini_roundabout"):
                 access_bits |= 0x100  # bit 8
+            # bit 9 = no motor vehicles. The graph keeps footways, paths,
+            # steps, cycleways and access-restricted roads (useful for
+            # future foot/bike profiles and for snapping), but the driving
+            # router must not use them: a 20 m staircase at 3 km/h beat any
+            # road detour over ~200 m, so cars were routed down stairs and
+            # through parks. Every consumer skips bit-9 edges for the car
+            # profile (routing-worker.js, index.html, tests/szrg_astar.py,
+            # cloud/route_cli.py).
+            if _way_no_motor_vehicle(hw, w.tags):
+                access_bits |= 0x200  # bit 9
             class_access = class_ord | access_bits
 
             # Name label (same logic as before: prefer name, fall back to ref)
@@ -3114,6 +3286,18 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
                     continue
                 from_idx = ref_to_idx[refs[a]]
                 to_idx = ref_to_idx[refs[b]]
+                # Cache endpoint coordinates for EVERY junction we see,
+                # including a→a loops: an isolated closed way (parking-lot
+                # loop, park path loop) used to leave its only junction at
+                # the (0,0) sentinel — a phantom node at Null Island.
+                if not node_has_coords[from_idx]:
+                    node_coords[from_idx, 0] = lats_e7[a]
+                    node_coords[from_idx, 1] = lons_e7[a]
+                    node_has_coords[from_idx] = True
+                if not node_has_coords[to_idx]:
+                    node_coords[to_idx, 0] = lats_e7[b]
+                    node_coords[to_idx, 1] = lons_e7[b]
+                    node_has_coords[to_idx] = True
                 if from_idx != to_idx:
                     # Distance (haversine over all points in segment).
                     dist_m = 0.0
@@ -3127,20 +3311,16 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
                         prev_lon = lon
                     dist_dm = int(round(dist_m * 10))
 
-                    # Cache endpoint coordinates.
-                    if node_coords[from_idx, 0] == 0 and node_coords[from_idx, 1] == 0:
-                        node_coords[from_idx, 0] = lats_e7[a]
-                        node_coords[from_idx, 1] = lons_e7[a]
-                    if node_coords[to_idx, 0] == 0 and node_coords[to_idx, 1] == 0:
-                        node_coords[to_idx, 0] = lats_e7[b]
-                        node_coords[to_idx, 1] = lons_e7[b]
-
                     # Geom: interior points only (endpoints are node vertices).
                     # Skip encoding when near the uint32 blob-size cap —
                     # downstream typed arrays use 4-byte offsets and must fit.
+                    # The forward geom is only needed when a forward edge is
+                    # emitted (oneway=-1 ways used to encode and orphan it).
                     interior_len = b - a - 1
                     near_cap = len(geom_blob) >= GEOM_BLOB_CAP
-                    if interior_len > 0 and not near_cap:
+                    fgi = -1
+                    rgi = -1
+                    if oneway != -1 and interior_len > 0 and not near_cap:
                         i_lons = lons_e7[a + 1:b]
                         i_lats = lats_e7[a + 1:b]
                         fstart, fend = _encode_geom(i_lons, i_lats, geom_blob)
@@ -3154,13 +3334,11 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
                             # Undo append: we already had this geom, trim blob.
                             del geom_blob[fstart:fend]
                             fgi = existing_gi
-                    else:
-                        fgi = -1
 
                     # Reverse geom (distinct encoding since deltas differ).
                     if oneway != 1 and interior_len > 0 and not near_cap:
-                        r_lons = list(reversed(i_lons))
-                        r_lats = list(reversed(i_lats))
+                        r_lons = list(reversed(lons_e7[a + 1:b]))
+                        r_lats = list(reversed(lats_e7[a + 1:b]))
                         rstart, rend = _encode_geom(r_lons, r_lats, geom_blob)
                         rkey = bytes(geom_blob[rstart:rend])
                         existing_rgi = geom_map.get(rkey)
@@ -3171,8 +3349,6 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
                         else:
                             del geom_blob[rstart:rend]
                             rgi = existing_rgi
-                    elif oneway != 1:
-                        rgi = -1
 
                     # dist_dm truncates at 24 bits = 1677 km; real road edges
                     # don't come close, but clamp for safety.
@@ -3225,23 +3401,40 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
     NODE_LOC_DIR = os.environ.get("STREETZIM_NODE_LOC_DIR", "/data")
     if not os.path.isdir(NODE_LOC_DIR) or not os.access(NODE_LOC_DIR, os.W_OK):
         NODE_LOC_DIR = output_dir
-    node_loc_path = os.path.join(NODE_LOC_DIR, "streetzim_node_locations.bin")
-    if os.path.exists(node_loc_path):
-        os.remove(node_loc_path)
+    # Unique per run: a fixed name let a second build on the same host
+    # delete/rewrite the first build's 16-60 GB index mid-pass.
+    import tempfile as _tempfile
+    # Reclaim scratch files an OOM-killed earlier run left behind (they
+    # are 16-60 GB each and no longer share a fixed name).
+    try:
+        import glob as _glob
+        for _stale in _glob.glob(os.path.join(NODE_LOC_DIR, "streetzim_node_loc_*.bin")):
+            if time.time() - os.path.getmtime(_stale) > 6 * 3600:
+                os.remove(_stale)
+                print(f"    removed stale node-location scratch {_stale}")
+    except OSError:
+        pass
+    _loc_fd, node_loc_path = _tempfile.mkstemp(
+        dir=NODE_LOC_DIR, prefix="streetzim_node_loc_", suffix=".bin")
+    os.close(_loc_fd)
     loc_handler = osmium.NodeLocationsForWays(
         osmium.index.create_map(f"sparse_file_array,{node_loc_path}"))
     loc_handler.ignore_errors()
-    osmium.apply(source_pbf, loc_handler, p2)
-    # Drop loc_handler (and its libosmium index) BEFORE the post-Pass-2
-    # numpy work, so the kernel can release the ~60 GB sparse_file_array
-    # mmap. Without this, the file pages squat in RssFile even after
-    # os.remove(), starving the argsort/fancy-indexing ops that follow
-    # of cache and forcing them to thrash through swap.
-    del loc_handler
     try:
-        os.remove(node_loc_path)
-    except OSError:
-        pass
+        osmium.apply(source_pbf, loc_handler, p2)
+    finally:
+        # Drop loc_handler (and its libosmium index) BEFORE the post-Pass-2
+        # numpy work, so the kernel can release the ~60 GB sparse_file_array
+        # mmap. Without this, the file pages squat in RssFile even after
+        # os.remove(), starving the argsort/fancy-indexing ops that follow
+        # of cache and forcing them to thrash through swap. Also runs on
+        # an exception so the multi-GB scratch file never outlives a
+        # failed pass.
+        del loc_handler
+        try:
+            os.remove(node_loc_path)
+        except OSError:
+            pass
     print(f"\r    Pass 2: {p2.hw_count} ways, {p2.edge_count} edges, "
           f"{len(geom_offsets) - 1} geoms, "
           f"{len(geom_blob) / (1024 * 1024):.1f} MB geom blob          ")
@@ -3803,9 +3996,10 @@ def _streetzim_to_xapianbuilder_jsonl(src_jsonl: str, dst_jsonl: str,
             # Wrap as minimal HTML so xapianbuilder's MyHtmlParser
             # extracts geo.position into value slot 2 — keeps Kiwix
             # geo features (e.g. nearby search) working.
+            import html as _html
             body_html = (
                 f'<html><head><meta name="geo.position" '
-                f'content="{lat};{lon}"></head><body>{body_text}'
+                f'content="{lat};{lon}"></head><body>{_html.escape(body_text)}'
                 f'</body></html>'
             )
             rec = {
@@ -4107,7 +4301,17 @@ def create_zim(
     with creator:
 
         # Add metadata — Name and Illustration are required by Kiwix to register the ZIM
-        zim_name = name.lower().replace(" ", "_").replace(",", "").replace(".", "")
+        import re as _re_name
+        # `name` usually already reads "OSM - <Region>", which yields the
+        # ugly "osm_osm_-_region". Every ZIM shipped since 2026-04 carries
+        # exactly that form, and Kiwix keys book identity / update
+        # detection on Name (repackage_zim.py copies the source Name for
+        # rerolls) — so keep it. Set STREETZIM_CLEAN_ZIM_NAME=1 to emit
+        # "osm_region" and start a new lineage deliberately.
+        zim_name = name.strip()
+        if os.environ.get("STREETZIM_CLEAN_ZIM_NAME") == "1":
+            zim_name = _re_name.sub(r"^osm\s*-\s*", "", zim_name, flags=_re_name.I)
+        zim_name = zim_name.lower().replace(" ", "_").replace(",", "").replace(".", "")
         creator.add_metadata("Title", name)
         creator.add_metadata("Description", description)
         creator.add_metadata("Language", "eng")
@@ -4115,7 +4319,13 @@ def create_zim(
         creator.add_metadata("Creator", "OpenStreetMap contributors")
         import time as _time
         creator.add_metadata("Date", _time.strftime("%Y-%m-%d"))
-        creator.add_metadata("Tags", "maps;osm;offline;_pictures:yes;_ftindex:yes")
+        # Only advertise a full-text index when one is actually built;
+        # `_ftindex:yes` under --xapian=none showed Kiwix a search box
+        # that returned nothing.
+        _tags = "maps;osm;offline;_pictures:yes"
+        if xapian_mode in ("libzim", "builder"):
+            _tags += ";_ftindex:yes"
+        creator.add_metadata("Tags", _tags)
         creator.add_metadata("Name", f"osm_{zim_name}")
         creator.add_metadata("Flavour", "maxi")
         creator.add_metadata("Scraper", "streetzim/1.0")
@@ -4258,13 +4468,18 @@ def create_zim(
         import itertools
         from concurrent.futures import ThreadPoolExecutor
 
+        bad_gzip_tiles = []
+
         def decompress_tile(item):
             z, x, y, data = item
             if data[:2] == b"\x1f\x8b":  # gzip magic bytes
                 try:
                     data = gzip.decompress(data)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # A corrupt tile used to be stored still-gzipped as
+                    # application/x-protobuf; MapLibre silently dropped it.
+                    bad_gzip_tiles.append((z, x, y, str(exc)))
+                    data = b""
             return z, x, y, data
 
         # Stream tiles from mbtiles or use in-memory dict
@@ -4302,6 +4517,10 @@ def create_zim(
                     break
                 decompress_start = time.time()
                 results = list(pool.map(decompress_tile, batch))
+                if bad_gzip_tiles:
+                    # Abort now (the SystemExit below reports it) instead of
+                    # spending hours adding the remaining tiles first.
+                    break
                 decompress_time = time.time() - decompress_start
 
                 add_start = time.time()
@@ -4352,6 +4571,12 @@ def create_zim(
 
         elapsed = time.time() - tile_start
         rate_str = f"{tiles_added/elapsed:.0f}/s" if elapsed > 0 else "instant"
+        if bad_gzip_tiles:
+            _bad = ", ".join(f"{z}/{x}/{y}" for z, x, y, _ in bad_gzip_tiles[:5])
+            raise SystemExit(
+                f"{len(bad_gzip_tiles)} vector tile(s) failed gzip decompression "
+                f"({_bad}{'…' if len(bad_gzip_tiles) > 5 else ''}) — corrupt MBTiles; "
+                f"re-run tilemaker before packaging")
         skip_str = (f" (skipped {tiles_skipped_empty} empty)"
                     if tiles_skipped_empty else "")
         print(f"\r    Added {tiles_added} tiles in {elapsed:.0f}s ({rate_str}){skip_str}                ", flush=True)
@@ -4708,7 +4933,11 @@ def create_zim(
             # render, not startup; fzstd has to decompress only when a
             # route is drawn, which is an easy allocation window compared
             # to the original "everything at page load" pattern.
+            # Not needed with the spatial layout: every SZRC cell carries
+            # its own geoms, so shipping the monolithic companion too just
+            # added a GB-scale dead entry on continents.
             if (routing_graph_geoms_path
+                    and not spatial_chunk_scale
                     and os.path.isfile(routing_graph_geoms_path)):
                 geoms_mb = os.path.getsize(routing_graph_geoms_path) / (1024 * 1024)
                 if routing_graph_chunk_mb and routing_graph_chunk_mb > 0:
@@ -4832,14 +5061,35 @@ def create_zim(
             import re as _re
             _word_re = _re.compile(r"[^\W_]+", _re.UNICODE)
 
+            # Open-file budget for the per-prefix chunk writers (see the
+            # LRU eviction at the write site).
+            try:
+                import resource as _resource
+                _soft, _hard = _resource.getrlimit(_resource.RLIMIT_NOFILE)
+                _want = min(_hard, 65536) if _hard != _resource.RLIM_INFINITY else 65536
+                if _soft < _want:
+                    _resource.setrlimit(_resource.RLIMIT_NOFILE, (_want, _hard))
+                    _soft = _want
+                _chunk_fd_budget = max(64, _soft - 256)
+            except Exception:
+                _chunk_fd_budget = 512
+
             def _prefixes_for(name):
-                """Set of 2-char prefix keys this name should be indexed under."""
+                """Set of 2-char prefix keys this name should be indexed under.
+
+                Keys are derived from the NORMALISED name (accent-folded,
+                lowercased) so they agree with what the readers compute
+                from a normalised query. Splitting the raw name let a
+                combining accent (NFD "Écouen") cut the word so the
+                key was "e_" while every reader asked for "ec".
+                """
                 keys = set()
+                nn = _norm(name)
                 # First-2-of-whole-name (keeps backwards-compat for callers
                 # that computed it the old way: "45 Broadway" → "45").
-                keys.add(_prefix_key(name[:2]))
+                keys.add(_prefix_key(nn[:2]))
                 # Plus one key per word — this is what unlocks substring search.
-                for m in _word_re.findall(name):
+                for m in _word_re.findall(nn):
                     if len(m) >= 2:
                         keys.add(_prefix_key(m))
                 return keys
@@ -4952,9 +5202,22 @@ def create_zim(
                         # hits like "cathedral" → "Washington National Cathedral".
                         for prefix in _prefixes_for(feat["name"]):
                             if prefix not in chunk_fds:
+                                if len(chunk_fds) >= _chunk_fd_budget:
+                                    # `u<hex>` buckets give one file per
+                                    # leading codepoint (thousands on CJK
+                                    # regions); keep the open-fd count
+                                    # under the soft limit by closing the
+                                    # least recently used handle (append
+                                    # reopens it later).
+                                    lru_prefix = next(iter(chunk_fds))
+                                    chunk_fds.pop(lru_prefix).close()
                                 chunk_fds[prefix] = open(
-                                    os.path.join(chunk_tmp, f"{prefix}.jsonl"), "w")
-                                chunk_counts[prefix] = 0
+                                    os.path.join(chunk_tmp, f"{prefix}.jsonl"), "a",
+                                    encoding="utf-8")
+                                chunk_counts.setdefault(prefix, 0)
+                            else:
+                                # Refresh recency (dict order = LRU order).
+                                chunk_fds[prefix] = chunk_fds.pop(prefix)
                             chunk_fds[prefix].write(entry)
                             chunk_counts[prefix] += 1
 
@@ -5014,7 +5277,7 @@ def create_zim(
             for prefix in sorted(chunk_counts):
                 chunk_path = os.path.join(chunk_tmp, f"{prefix}.jsonl")
                 entries = []
-                with open(chunk_path, "r") as cf:
+                with open(chunk_path, "r", encoding="utf-8") as cf:
                     for cline in cf:
                         entries.append(json.loads(cline))
                 os.unlink(chunk_path)
@@ -5118,20 +5381,35 @@ def create_zim(
                 _llm_skipped = []
                 for cat_slug in sorted(cat_chunk_counts):
                     cat_path = os.path.join(cat_dir, f"{cat_slug}.jsonl")
+                    if no_llm_bundle and cat_slug in _llm_bundle:
+                        # Skipped categories: only poi/park are needed
+                        # (for chip emission). addr/street are the 100M+
+                        # line files on continents — loading them into a
+                        # list of dicts just to drop them was a
+                        # tens-of-GB allocation for nothing. Count lines
+                        # streaming and move on.
+                        if split_find_chips and cat_slug in ("poi", "park"):
+                            entries = []
+                            with open(cat_path, "r", encoding="utf-8") as cf:
+                                for cline in cf:
+                                    entries.append(json.loads(cline))
+                            records_by_cat[cat_slug] = entries
+                            cat_total_records += len(entries)
+                        else:
+                            with open(cat_path, "rb") as cf:
+                                cat_total_records += sum(1 for _ in cf)
+                        os.unlink(cat_path)
+                        _llm_skipped.append(cat_slug)
+                        continue
                     entries = []
-                    with open(cat_path, "r") as cf:
+                    with open(cat_path, "r", encoding="utf-8") as cf:
                         for cline in cf:
                             entries.append(json.loads(cline))
                     os.unlink(cat_path)
-                    if no_llm_bundle and cat_slug in _llm_bundle:
-                        # Don't add to ZIM, but keep `entries` around for
-                        # the chip-emission pass below (poi only).
-                        if split_find_chips and cat_slug in ("poi", "park"):
-                            records_by_cat[cat_slug] = entries
-                        _llm_skipped.append(cat_slug)
-                        cat_total_records += len(entries)
-                        continue
-                    chunk_json = json.dumps(entries, separators=(",", ":"))
+                    # ensure_ascii=False: \uXXXX escapes roughly doubled
+                    # CJK category/chip files (search-data already uses it).
+                    chunk_json = json.dumps(entries, separators=(",", ":"),
+                                            ensure_ascii=False)
                     creator.add_item(MapItem(
                         f"category-index/{cat_slug}.json",
                         f"Category index {cat_slug}",
@@ -5155,23 +5433,61 @@ def create_zim(
                                     "categories": cat_manifest}
                 if split_find_chips and records_by_cat:
                     from cloud.chip_rules import CHIP_RULES, split_records_by_chip
+                    from cloud.repackage_zim import _sub_bucket_for_name
                     by_chip = split_records_by_chip(records_by_cat)
                     chips_manifest: dict = {}
+                    # Same 10 MB sub-bucket rule as cloud/repackage_zim.py.
+                    # The in-build path used to emit one file per chip
+                    # regardless of size, so a Japan-restaurants-class
+                    # chip (164 MB) shipped monolithic — the phone OOM the
+                    # chips exist to prevent — and with --no-llm-bundle a
+                    # later repack can't re-split (no poi.json).
+                    chip_threshold_b = 10 * 1024 * 1024
                     for chip in CHIP_RULES:
                         recs = by_chip.get(chip.id, [])
-                        blob = json.dumps(recs, separators=(",", ":"))
-                        blob_bytes = blob.encode("utf-8")
-                        creator.add_item(MapItem(
-                            f"category-index/chip-{chip.id}.json",
-                            f"Find chip {chip.label}",
-                            "application/json",
-                            blob_bytes,
-                        ))
-                        chips_manifest[chip.id] = {
+                        blob_bytes = json.dumps(recs, separators=(",", ":"),
+                                                ensure_ascii=False).encode("utf-8")
+                        meta_entry = {
                             "label": chip.label,
                             "count": len(recs),
                             "bytes": len(blob_bytes),
                         }
+                        if len(blob_bytes) > chip_threshold_b:
+                            n_sub = 1
+                            while True:
+                                n_sub *= 2
+                                buckets = [[] for _ in range(n_sub)]
+                                for r in recs:
+                                    buckets[_sub_bucket_for_name(r.get("n", "") or "", n_sub)].append(r)
+                                biggest = max(len(json.dumps(b, separators=(",", ":"),
+                                                             ensure_ascii=False).encode("utf-8"))
+                                              for b in buckets)
+                                if biggest <= chip_threshold_b or n_sub >= 256:
+                                    break
+                            hex_w = max(1, len(format(n_sub - 1, "x")))
+                            sub_paths = []
+                            for bi, bucket in enumerate(buckets):
+                                if not bucket:
+                                    continue
+                                sub_id = format(bi, f"0{hex_w}x")
+                                creator.add_item(MapItem(
+                                    f"category-index/chip-{chip.id}-{sub_id}.json",
+                                    f"Find chip {chip.label} (bucket {sub_id})",
+                                    "application/json",
+                                    json.dumps(bucket, separators=(",", ":"),
+                                               ensure_ascii=False).encode("utf-8"),
+                                ))
+                                sub_paths.append(sub_id)
+                            meta_entry["sub_chunks"] = sub_paths
+                            meta_entry["n_sub_buckets"] = n_sub
+                        else:
+                            creator.add_item(MapItem(
+                                f"category-index/chip-{chip.id}.json",
+                                f"Find chip {chip.label}",
+                                "application/json",
+                                blob_bytes,
+                            ))
+                        chips_manifest[chip.id] = meta_entry
                     manifest_payload["chips"] = chips_manifest
                     print(f"    Added {len(chips_manifest)} chip files "
                           f"({sum(c['count'] for c in chips_manifest.values())} records)")
@@ -5321,6 +5637,22 @@ def create_zim(
                 else:
                     print(f"    Added overture-sources.json "
                           f"({len(real_datasets)} upstream datasets)")
+            else:
+                # index.html links overture-sources.json statically, so a
+                # build without Overture data must still ship the file —
+                # otherwise zimcheck's link checker fails the validator on
+                # every plain --pbf build.
+                creator.add_item(MapItem(
+                    "overture-sources.json", "Overture Dataset Credits",
+                    "application/json",
+                    json.dumps({
+                        "themes": [],
+                        "datasets": [],
+                        "attribution": "This build contains no Overture Maps data.",
+                        "canonicalCredits": "https://docs.overturemaps.org/attribution/",
+                    }, separators=(",", ":")).encode("utf-8"),
+                ))
+                print("    Added overture-sources.json (empty — no Overture themes in this build)")
 
             # Pass 3 (xapian_mode=libzim only): stream xapian file → HTML
             # redirect pages. libzim's auto-indexer ingests the HTML
@@ -6073,7 +6405,13 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         overture_datasets.update(merge_result.get("datasets") or [])
                         overture_themes.append("addresses")
                     except Exception as _e:
-                        print(f"    Warning: Overture addresses merge failed: {_e}")
+                        # The theme was explicitly requested; shipping a
+                        # ZIM without it (and with hasOvertureAddresses
+                        # false, so the validator skips the check) is a
+                        # silent regression. Fail the build.
+                        raise SystemExit(
+                            f"Overture addresses merge failed: {_e} — "
+                            f"fix the input or drop --overture-addresses") from _e
                 if args.overture_places and not args.skip_address_extract:
                     try:
                         _url_cache = _load_url_cache(args.url_cache)
@@ -6090,7 +6428,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         overture_datasets.update(places_result.get("datasets") or [])
                         overture_themes.append("places")
                     except Exception as _e:
-                        print(f"    Warning: Overture places merge failed: {_e}")
+                        raise SystemExit(
+                            f"Overture places merge failed: {_e} — "
+                            f"fix the input or drop --overture-places") from _e
                 if overture_datasets:
                     overture_sources = sorted(overture_datasets)
                 elif args.skip_address_extract:
@@ -6304,8 +6644,16 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                             if crosses_lon or crosses_lat:
                                 needs_regen = True
                         if needs_regen:
+                            # Low zooms must come from the world VRT when
+                            # one was given: the bbox+1° verify VRT is
+                            # zero outside its extent, which painted the
+                            # "65°E stripe" onto z0-9 tiles that reach far
+                            # beyond the region.
+                            repair_src = _terrain_vrt_for_zoom(
+                                z, vrt_path,
+                                low_zoom_world_vrt=getattr(args, "low_zoom_world_vrt", None))
                             repair_tiles.append(
-                                (vrt_path, t.x, t.y, z, terrain_dir,
+                                (repair_src, t.x, t.y, z, terrain_dir,
                                  bounds.west, bounds.south, bounds.east, bounds.north)
                             )
                 if repair_tiles:
@@ -6534,7 +6882,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             # shipped as overture-sources.json at the ZIM root (below).
             map_config["hasOvertureAddresses"] = True
 
-        create_zim(
+        _out_before = os.path.exists(output_path)
+        try:
+            create_zim(
             output_path=output_path,
             tiles=tiles,
             tile_metadata=tile_metadata,
@@ -6577,7 +6927,19 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             bundle_wiki_articles=bool(getattr(args, "bundle_wiki_articles", False)),
             wiki_articles_cache=getattr(args, "wiki_articles_cache", None),
             wiki_articles_source=getattr(args, "wiki_articles_source", None),
-        )
+            )
+        except BaseException:
+            # libzim's Creator.__exit__ finalises on exception, so an
+            # aborted build (corrupt tile, OOM, Ctrl-C) used to leave a
+            # truncated-but-readable ZIM at the output path — exactly
+            # where the queue scripts look for a finished build.
+            if not _out_before and os.path.exists(output_path):
+                try:
+                    os.unlink(output_path)
+                    print(f"    removed partial output {output_path}", flush=True)
+                except OSError:
+                    pass
+            raise
 
         # Stop the phase timer (no further phases will be printed
         # after this) and emit the summary table for post-mortem.

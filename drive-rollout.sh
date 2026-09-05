@@ -38,13 +38,11 @@ upload_and_deploy() {
     if [ "$src" != "$dated" ]; then
         cp "$src" "$dated"
     fi
-    log "Uploading ${dated} → streetzim-${id}..."
-    ia upload "streetzim-${id}" "$dated" --retries 5 >>"$ROLLOUT_LOG" 2>&1 || \
-        log "Upload reported issues for ${id} — continuing"
-    sleep 30
-    ia metadata "streetzim-${id}" --modify="date:${today}" >>"$ROLLOUT_LOG" 2>&1 || true
-    python3 web/generate.py --deploy >>"$ROLLOUT_LOG" 2>&1 || \
-        log "Web deploy failed for ${id} — continuing"
+    log "Validating + uploading ${dated} → streetzim-${id}..."
+    if ! bash cloud/upload_validated.sh "$id" "$dated" >>"$ROLLOUT_LOG" 2>&1; then
+        log "FAIL upload ${id} — see ${ROLLOUT_LOG}"
+        return 1
+    fi
     log "DONE ${id}"
 }
 
@@ -90,10 +88,15 @@ log "Wave 1 complete (EC rc=${EC_RC}, WC rc=${WC_RC})"
 log "Disk free after wave 1: $(disk_free_gb) GB"
 
 # --- Wave 2: United States (solo) ----------------------------------------
-build_and_ship "united-states" "United States" "-125.0,24.0,-66.5,49.5"
+build_and_ship "united-states" "United States" "-125.0,24.0,-66.5,49.5"; US_RC=$?
 log "Disk free after wave 2: $(disk_free_gb) GB"
 
 # --- Wave 3: Europe (solo) -----------------------------------------------
-build_and_ship "europe" "Europe" "-25.0,34.0,50.5,72.0"
+build_and_ship "europe" "Europe" "-25.0,34.0,50.5,72.0"; EU_RC=$?
 
+# build_and_ship's `return 1` was previously swallowed; surface it.
+if [ "${EC_RC:-0}" -ne 0 ] || [ "${WC_RC:-0}" -ne 0 ] || [ "${US_RC:-0}" -ne 0 ] || [ "${EU_RC:-0}" -ne 0 ]; then
+    log "=== v4 big-regions rollout FINISHED WITH FAILURES (EC=${EC_RC:-0} WC=${WC_RC:-0} US=${US_RC:-0} EU=${EU_RC:-0}) ==="
+    exit 4
+fi
 log "=== v4 big-regions rollout complete ==="

@@ -39,9 +39,12 @@ for id in "${regions[@]}"; do
         if [ -s "$shipped" ]; then
             # Require the file to be stable (unchanged for 30 s) so we
             # don't upload mid-write.
-            sz1=$(stat -f %z "$shipped" 2>/dev/null || echo 0)
+            # GNU stat first, BSD fallback — on Linux `stat -f %z` printed
+            # nothing, both sizes read 0, and the loop ran to the 2 h
+            # timeout before uploading anyway.
+            sz1=$(stat -c %s "$shipped" 2>/dev/null || stat -f %z "$shipped" 2>/dev/null || echo 0)
             sleep 30; waited=$((waited+30))
-            sz2=$(stat -f %z "$shipped" 2>/dev/null || echo 0)
+            sz2=$(stat -c %s "$shipped" 2>/dev/null || stat -f %z "$shipped" 2>/dev/null || echo 0)
             if [ "$sz1" = "$sz2" ] && [ "$sz1" != "0" ]; then
                 break
             fi

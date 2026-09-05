@@ -103,10 +103,13 @@ Current chips (order matters — left-to-right priority for horizontal space):
 | Shops | `shop`, `supermarket`, `mall`, `marketplace`, `department_store`, `convenience`, `grocery`, `clothing_store`, `jewelry_store` + `/_store$|^store$/` | retail catchall |
 | Gas | `fuel`, `charging_station`, `gas_station`, `ev_charging_station` | includes EV |
 
-"Sort by distance" (GPS) is **on by default** — one-shot
-`navigator.geolocation.getCurrentPosition` feeds each row's
-haversine distance, and the result list sorts by that. Toggle off
-to fall back to name sort.
+Distance sort is implicit: the first chip tap or typed query asks
+for a one-shot `navigator.geolocation.getCurrentPosition`
+(`maybeFetchOriginFirst` → `requestGPS`), feeds each row's haversine
+distance, and sorts by it. If the fix is denied, unsupported, or the
+permission prompt is left unanswered (12 s), the pending query still
+runs, name-sorted. "Search near …" lets the user pick a named place
+as the origin instead. (The old on/off GPS toggle is gone.)
 
 ## Queued for next rebuild — merge Restaurants + Cafés
 
@@ -198,9 +201,10 @@ Empty enrichment fields are deliberately omitted from the JSON —
 bloating every search-data chunk with `"w": ""` would kill the size
 budget at continent scale.
 
-The mini-app reads `cat`, `w`, `p`, `soc`, and `brand` and renders
-them as a small "rich" row below each result (see `.rich .brand` +
-`.rich .links` styles in `places.html`).
+The mini-app reads `cat`, `ws` (website — `w` is the OSM Wikipedia
+title), `p`, `soc`, and `brand` and renders them as a small "rich"
+row below each result (see `.rich .brand` + `.rich .links` styles in
+`places.html`). Only `http(s)://` values of `ws` / `soc` are linked.
 
 ## Tests
 
@@ -354,17 +358,18 @@ Behaviour:
   cached). Some chips further filter by subtype — e.g. **Cafés**
   loads the `poi` index and keeps `s == "cafe"`. Defined by the
   `CATEGORIES` table at the top of the file.
-* **GPS toggle** asks the browser for a one-shot location, then
-  switches the sort key from name to haversine distance and adds
-  the distance to each row. Toggling off restores name sort.
+* **Origin / distance sort** — see "Distance sort is implicit"
+  above. The sort row offers name / category / distance once a
+  result set is showing.
 * Each result row carries two CTAs styled the same as the search
   detail pages: **Directions** (writes the `dest=…&label=…`
-  fragment) and **Map** (writes `map=…`).
+  fragment, plus `origin=` only when the origin is a real GPS fix)
+  and **Map** (writes `map=…&pin=…`).
 
-The `Find` link in the main viewer (`#places-link` in the controls
-strip) opens this app. Styled to match the satellite/3D/explore/
-route buttons next to it; rendered as `<a>` rather than `<button>`
-so middle-click and right-click open it in a new tab.
+The main viewer no longer has a dedicated `Find` link — the on-map
+chip rail covers chip browsing, and `places.html` is reached
+directly (Kiwix title index, the `/drive/viewer/places/` URL in the
+PWA, or a host container).
 
 ## Firebase `/drive` PWA integration
 

@@ -13,10 +13,12 @@
 
 importScripts('./fzstd.js', './zim-reader.js');
 
-// Bump this when the shell changes (new maplibre, new viewer HTML, etc.).
-// The sync script writes a stamp to web/drive/viewer/.version which the
-// page reads on load and posts to the SW — we compare and clear stale
-// caches. For now just hand-bump on big changes.
+// Cache generation. scripts/sync-drive-viewer.sh (the firebase predeploy
+// hook) rewrites the stamp on every deploy from the shell asset hashes
+// (or from cloud/deploy_pwa.sh's git stamp via STAMP_OVERRIDE), so a
+// changed viewer always produces a new precache and the old one is
+// dropped on activate. Keep the 'streetzim-drive-shell-' prefix — the
+// activate handler only deletes caches carrying it.
 const SHELL_CACHE = 'streetzim-drive-shell-74960f5b17-d100721';
 
 const SHELL_URLS = [
@@ -28,6 +30,10 @@ const SHELL_URLS = [
   './viewer/',
   './viewer/index.html',
   './viewer/places.html',
+  // Canonical clean URL the viewer actually navigates to (Firebase
+  // cleanUrls + trailingSlash). Caching only `places.html` left the
+  // offline fallback with no entry for the URL that is requested.
+  './viewer/places/',
   './viewer/routing-worker.js',
   './viewer/maplibre-gl.js',
   './viewer/maplibre-gl.css'
@@ -109,14 +115,22 @@ function resetReader() {
 
 async function getReader() {
   if (readerPromise) return readerPromise;
-  readerPromise = (async () => {
+  const p = (async () => {
     const rec = await idbGet('current');
     if (!rec || !rec.blob) return null;
     const r = new self.StreetZimReader(rec.blob);
     await r.open();
     return r;
   })();
-  return readerPromise;
+  // A failed open (transient IDB error, file moved/modified under a
+  // persisted File handle) must not be memoised — every later request
+  // would 500 until the SW happened to be terminated.
+  const wrapped = p.catch((err) => {
+    if (readerPromise === wrapped) readerPromise = null;
+    throw err;
+  });
+  readerPromise = wrapped;
+  return wrapped;
 }
 
 // ---------- Lifecycle ----------
@@ -161,9 +175,13 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
+    // caches.keys() is origin-wide, not scope-wide — only touch our
+    // own generations so another worker on this origin keeps its data.
     const names = await caches.keys();
     await Promise.all(
-      names.filter((n) => n !== SHELL_CACHE).map((n) => caches.delete(n))
+      names
+        .filter((n) => n.startsWith('streetzim-drive-shell-') && n !== SHELL_CACHE)
+        .map((n) => caches.delete(n))
     );
     await self.clients.claim();
   })());
@@ -177,16 +195,20 @@ self.addEventListener('message', (event) => {
     let reply = { ok: true };
     try {
       if (msg.type === 'set-zim') {
+        // Validate BEFORE persisting. Writing first meant a non-ZIM
+        // (or truncated) file stuck as `current`: every request then
+        // 500'd and the picker hid the Remove button because status
+        // reported "not loaded", so the user couldn't clear it.
+        const r = new self.StreetZimReader(msg.blob);
+        await r.open();
         await idbPut({
           id: 'current',
           blob: msg.blob,
           name: msg.name || 'zim',
           addedAt: Date.now()
         });
-        resetReader();
-        // Force-open so the page sees any error immediately.
-        const r = await getReader();
-        reply.info = r ? r.info : null;
+        readerPromise = Promise.resolve(r);
+        reply.info = r.info;
       } else if (msg.type === 'clear-zim') {
         await idbDelete('current');
         resetReader();
@@ -194,6 +216,13 @@ self.addEventListener('message', (event) => {
         const r = await getReader().catch(() => null);
         reply.info = r ? r.info : null;
         reply.loaded = !!r;
+        // `present` ≠ `loaded`: a persisted File handle can stop being
+        // readable later (file moved / edited on disk). The picker uses
+        // this to keep the Remove button available so the user can
+        // clear a record that no longer opens.
+        const rec = await idbGet('current').catch(() => null);
+        reply.present = !!(rec && rec.blob);
+        reply.name = rec && rec.name ? rec.name : null;
       } else {
         reply = { ok: false, error: 'unknown message type' };
       }
@@ -211,8 +240,20 @@ function rangeResponse(data, range, mime) {
   const m = /^bytes=(\d+)-(\d*)$/.exec(range);
   if (!m) return null;
   const start = parseInt(m[1], 10);
+  if (isNaN(start)) return null;
+  // RFC 7233 §2.1: an explicit last-byte-pos < first-byte-pos makes the
+  // whole Range header syntactically invalid → ignore it (full 200). The
+  // open-ended form "bytes=N-" has no last-byte-pos, so that rule cannot
+  // apply to it; a start past the end is a genuine 416 in both forms.
   const end = m[2] ? parseInt(m[2], 10) : data.byteLength - 1;
-  if (isNaN(start) || start >= data.byteLength) return null;
+  if (m[2] && end < start) return null;
+  if (start >= data.byteLength) {
+    return new Response(null, {
+      status: 416,
+      statusText: 'Range Not Satisfiable',
+      headers: { 'Content-Range': 'bytes */' + data.byteLength }
+    });
+  }
   const slice = data.subarray(start, Math.min(end + 1, data.byteLength));
   return new Response(slice, {
     status: 206,
@@ -331,6 +372,10 @@ self.addEventListener('fetch', (event) => {
     // as the same shell asset as the un-slashed name — strip a
     // single trailing slash before deciding shell vs ZIM data.
     const restNoSlash = rest.endsWith('/') ? rest.slice(0, -1) : rest;
+    // Runtime-cache key without the query string: lookups use
+    // ignoreSearch, so storing `?debug=1` / `?bust=<ts>` variants
+    // separately only accumulated ~370 KB copies of the viewer HTML.
+    const cacheKey = url.origin + url.pathname;
     if (VIEWER_SHELL_NAMES.has(firstSegment) && !restNoSlash.includes('/')) {
       // Shell asset — NETWORK-FIRST. Stale cached HTML/JS was the
       // 2026-04-25 frustration: deploys were live on Firebase but
@@ -339,15 +384,32 @@ self.addEventListener('fetch', (event) => {
       // ALWAYS see the current deploy. Cache only kicks in offline.
       event.respondWith((async () => {
         try {
-          const net = await fetch(req, { cache: 'no-store' });
+          // 'no-cache' (not 'no-store'): still revalidates with Firebase on
+          // every load so a deploy is visible immediately, but a 304 lets
+          // the ~1.5 MB of MapLibre JS/CSS come from the HTTP cache instead
+          // of being re-downloaded on every launch.
+          const net = await fetch(req, { cache: 'no-cache' });
           if (net && net.ok) {
             const copy = net.clone();
-            caches.open(SHELL_CACHE).then((c) => cacheClean(c, req, copy));
+            // Keep the SW alive until the cache write lands, and never
+            // let a failed put surface as an unhandled rejection. The
+            // waitUntil itself is guarded too: if an engine ever refused
+            // it here, the outer catch would otherwise swap this fresh
+            // response for the stale cache.
+            try {
+              event.waitUntil(
+                caches.open(SHELL_CACHE)
+                  .then((c) => cacheClean(c, cacheKey, copy))
+                  .catch(() => {})
+              );
+            } catch (_) {}
           }
           return net;
         } catch (e) {
-          // Offline fallback only.
-          const cached = await caches.match(req);
+          // Offline fallback only. ignoreSearch: the picker forwards
+          // ?debug=1 / ?route=… into /drive/viewer/?… and the shell
+          // was precached without a query string.
+          const cached = await caches.match(req, { ignoreSearch: true });
           return cached || notFound(rest);
         }
       })());
@@ -374,14 +436,20 @@ self.addEventListener('fetch', (event) => {
   // viewer above: when online, always reflect the current deploy.
   event.respondWith((async () => {
     try {
-      const net = await fetch(req, { cache: 'no-store' });
+      const net = await fetch(req, { cache: 'no-cache' });
       if (net && net.ok) {
         const copy = net.clone();
-        caches.open(SHELL_CACHE).then((c) => cacheClean(c, req, copy));
+        try {
+          event.waitUntil(
+            caches.open(SHELL_CACHE)
+              .then((c) => cacheClean(c, url.origin + url.pathname, copy))
+              .catch(() => {})
+          );
+        } catch (_) {}
       }
       return net;
     } catch (e) {
-      const cached = await caches.match(req);
+      const cached = await caches.match(req, { ignoreSearch: true });
       return cached || notFound(url.pathname);
     }
   })());

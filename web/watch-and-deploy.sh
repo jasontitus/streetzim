@@ -27,7 +27,10 @@ while true; do
     fi
   fi
 
-  if [ "$count" -ge "$EXPECTED" ] 2>/dev/null; then
+  # Test the count we actually DEPLOYED, not the raw archive.org count —
+  # otherwise a failed final deploy still printed "all live" and exited
+  # with the site stale.
+  if [ "$last_count" -ge "$EXPECTED" ] 2>/dev/null; then
     echo "[$(date '+%H:%M:%S')] All $EXPECTED regions live. Watcher exiting."
     exit 0
   fi

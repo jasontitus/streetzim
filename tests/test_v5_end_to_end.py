@@ -58,6 +58,13 @@ def test_v5_converter_preserves_routing(corpus: Path):
     """Convert the region's v4 graph to v5 in memory, re-route the first
     N pairs from the golden, and diff fingerprints.
 
+    The golden corpora predate class_access bit 9 and the footway-
+    ordinal rule (the 2026-04 ZIMs carry no bit-9 edges), and were
+    sampled on arbitrary vertices — many with only footway/path
+    out-edges. Those pairs are unreachable for the car profile on both
+    the v4 and the v5 side today; both-None counts as agreement and the
+    loop reads on until N pairs have really been compared.
+
     N is capped to keep test time reasonable — we're verifying the split
     preserves bytes, not re-running full 2000-route corpora. For that,
     use tests/test_route_identity.py against a real v5 ZIM rebuild.
@@ -108,6 +115,12 @@ def test_v5_converter_preserves_routing(corpus: Path):
             s, e = rec["s"], rec["e"]
             r4 = find_route(g4, s, e)
             r5 = find_route(g5, s, e)
+            if r4 is None and r5 is None:
+                # Golden pairs pre-date the car-only rule (class_access
+                # bit 9 / footway ordinals); a pair whose only path ran
+                # over a footway is unreachable on both sides now —
+                # agreement, not divergence.
+                continue
             if r4 is None or r5 is None:
                 mismatches += 1
                 continue

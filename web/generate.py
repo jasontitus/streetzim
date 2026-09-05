@@ -143,6 +143,27 @@ REGIONS = [
         "description": "The Caucasus &mdash; Georgia, Armenia, and Azerbaijan, with the southern Russian Caucasus and eastern Turkey. Tbilisi, Yerevan, Baku, Batumi, the Greater Caucasus range, Mount Elbrus, Lake Sevan, and the Caspian coast.",
     },
     {
+        "id": "pacific-islands",
+        "tier": "multi-country",
+        "title": "Pacific Islands",
+        "zim_file": "osm-pacific-islands.zim",
+        "description": "Papua New Guinea, Fiji, Solomon Islands, Vanuatu, New Caledonia, Samoa, Tonga, Palau, Micronesia, and the Marshall Islands &mdash; Port Moresby, Suva, Nadi, Nouméa, Apia, and Nuku'alofa.",
+    },
+    {
+        "id": "west-africa",
+        "tier": "multi-country",
+        "title": "West Africa",
+        "zim_file": "osm-west-africa.zim",
+        "description": "Nigeria, Ghana, Côte d'Ivoire, Senegal, Mali, Burkina Faso, Guinea, Benin, Togo, Sierra Leone, Liberia, and Niger &mdash; Lagos, Accra, Abidjan, Dakar, Abuja, Bamako, Ouagadougou, and the Gulf of Guinea coast.",
+    },
+    {
+        "id": "southern-africa",
+        "tier": "multi-country",
+        "title": "Southern Africa",
+        "zim_file": "osm-southern-africa.zim",
+        "description": "South Africa, Namibia, Botswana, Zimbabwe, Mozambique, Zambia, Malawi, Lesotho, and Eswatini &mdash; Johannesburg, Cape Town, Durban, Pretoria, Windhoek, Gaborone, Harare, Maputo, Lusaka, the Kalahari, Kruger, and the Cape.",
+    },
+    {
         "id": "central-america-caribbean",
         "tier": "multi-country",
         "title": "Central America & Caribbean",
@@ -177,6 +198,13 @@ REGIONS = [
         "title": "Argentina",
         "zim_file": "osm-argentina.zim",
         "description": "Argentina &mdash; Buenos Aires, Córdoba, Rosario, Mendoza, Bariloche, the Pampas, the Andes, Patagonia, and Tierra del Fuego.",
+    },
+    {
+        "id": "mexico",
+        "tier": "country",
+        "title": "Mexico",
+        "zim_file": "osm-mexico.zim",
+        "description": "All of Mexico &mdash; Mexico City, Guadalajara, Monterrey, Puebla, Tijuana, Cancún and the Riviera Maya, Oaxaca, the Yucatán Peninsula, Baja California, the Sierra Madre, and both the Pacific and Gulf coasts.",
     },
     {
         "id": "ukraine",
@@ -359,13 +387,20 @@ REGIONS = [
 
 
 def human_size(bytes_count):
-    """Format bytes as 'X.X GB' or 'X MB'."""
+    """Format bytes as 'X.X GB' or 'X MB'.
+
+    Binary units (1024-based) to match what Finder / Explorer show for
+    the downloaded file; archive.org's own listing uses decimal, so its
+    numbers read ~7% larger.
+    """
     if bytes_count is None or bytes_count <= 0:
         return ""
     gb = bytes_count / (1024 ** 3)
     if gb >= 1:
         return f"{gb:.1f} GB"
     mb = bytes_count / (1024 ** 2)
+    if mb < 1:
+        return "<1 MB"  # was "0 MB" for anything under a mebibyte
     return f"{int(round(mb))} MB"
 
 
@@ -391,8 +426,18 @@ def fetch_archive_items():
     )
     print(f"Querying Archive.org: {url}")
     req = urllib.request.Request(url, headers={"User-Agent": "streetzim-generate/1.0"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = json.load(resp)
+    data = None
+    for attempt in range(1, 4):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.load(resp)
+            break
+        except Exception as exc:  # noqa: BLE001 — transient 5xx/timeouts
+            if attempt == 3:
+                raise
+            wait = 5 * attempt
+            print(f"  search attempt {attempt} failed ({exc}); retrying in {wait}s")
+            time.sleep(wait)
     docs = data.get("response", {}).get("docs", [])
     by_id = {}
     for doc in docs:
@@ -479,13 +524,60 @@ def render_feature_badges(item_meta):
     return '\n        <div class="map-card-badges">' + "".join(pills) + "</div>"
 
 
-def render_live_card(region, size_label, item_meta=None):
-    """Render a map card with active download/torrent/details buttons."""
+def _bdecode(data, pos=0):
+    """Minimal bencode decoder (ints, byte strings, lists, dicts)."""
+    c = data[pos:pos + 1]
+    if c == b"i":
+        end = data.index(b"e", pos)
+        return int(data[pos + 1:end]), end + 1
+    if c == b"l":
+        out, pos = [], pos + 1
+        while data[pos:pos + 1] != b"e":
+            v, pos = _bdecode(data, pos)
+            out.append(v)
+        return out, pos + 1
+    if c == b"d":
+        out, pos = {}, pos + 1
+        while data[pos:pos + 1] != b"e":
+            k, pos = _bdecode(data, pos)
+            v, pos = _bdecode(data, pos)
+            out[k] = v
+        return out, pos + 1
+    colon = data.index(b":", pos)
+    n = int(data[pos:colon])
+    return data[colon + 1:colon + 1 + n], colon + 1 + n
+
+
+def torrent_file_name(region_id):
+    """`info.name` of web/torrents/<id>.torrent, or None if unreadable."""
+    path = os.path.join(SCRIPT_DIR, "torrents", f"{region_id}.torrent")
+    try:
+        with open(path, "rb") as f:
+            meta, _ = _bdecode(f.read())
+        name = meta.get(b"info", {}).get(b"name")
+        return name.decode("utf-8", "replace") if name else None
+    except (OSError, ValueError, KeyError, AttributeError):
+        return None
+
+
+def render_live_card(region, size_label, item_meta=None, torrent_ok=True):
+    """Render a map card with active download/torrent/details buttons.
+
+    `torrent_ok=False` drops the Torrent button: the committed .torrent
+    describes a different (older) file than the Download button, so
+    handing it out would seed a build that archive.org's keep-2 cleanup
+    is about to delete.
+    """
     item_id = f"streetzim-{region['id']}"
     zim_file = region["zim_file"]
     zim_file_attr = escape(urllib.parse.quote(zim_file), quote=True)
     title_attr = escape(region["title"], quote=True)
     badges_html = render_feature_badges(item_meta)
+    torrent_html = (
+        f'\n          <a class="btn btn-secondary" href="/torrents/{region["id"]}.torrent" '
+        f'data-track="torrent" data-region="{region["id"]}" data-title="{title_attr}">Torrent</a>'
+        if torrent_ok else ""
+    )
     return f"""      <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">{escape(region["title"])}</div>
@@ -493,8 +585,7 @@ def render_live_card(region, size_label, item_meta=None):
         </div>
         <p class="map-card-desc">{region["description"]}</p>{badges_html}
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/{item_id}/{zim_file_attr}" data-track="download" data-region="{region["id"]}" data-title="{title_attr}">Download</a>
-          <a class="btn btn-secondary" href="/torrents/{region["id"]}.torrent" data-track="torrent" data-region="{region["id"]}" data-title="{title_attr}">Torrent</a>
+          <a class="btn btn-primary" href="https://archive.org/download/{item_id}/{zim_file_attr}" data-track="download" data-region="{region["id"]}" data-title="{title_attr}">Download</a>{torrent_html}
           <a class="btn btn-secondary" href="https://archive.org/details/{item_id}" data-track="details" data-region="{region["id"]}" data-title="{title_attr}">Info</a>
         </div>
       </div>"""
@@ -597,6 +688,14 @@ def build_page():
                     # 210 MB April-22 one because of byte size alone.
                     # Size only breaks ties among same-date uploads.
                     import re as _re
+                    def _int(v):
+                        # archive.org occasionally reports size as
+                        # None / "" for a file still being processed;
+                        # a bare int() here aborted the whole build.
+                        try:
+                            return int(v or 0)
+                        except (TypeError, ValueError):
+                            return 0
                     def _sort_key(f):
                         name = f.get("name", "")
                         # Match dated filenames optionally followed by a
@@ -613,17 +712,24 @@ def build_page():
                             # (dated=1, date_str, size). Lexicographic
                             # comparison is correct: YYYY-MM < YYYY-MM-DD
                             # because the shorter prefix sorts first.
-                            return (1, m.group(1), int(f.get("size", 0)))
-                        return (0, "", int(f.get("size", 0)))
+                            return (1, m.group(1), _int(f.get("size")))
+                        return (0, "", _int(f.get("size")))
                     best = max(zim_files, key=_sort_key)
                     zim_filename = best.get("name")
-                    try:
-                        zim_size = int(best.get("size", 0))
-                    except (TypeError, ValueError):
-                        pass
+                    zim_size = _int(best.get("size")) or None
+            if not zim_filename:
+                # Item exists (dark / just created / mid-upload) but
+                # lists no .zim yet. The old path fell through to
+                # item_size (>0 from _meta.xml alone) and rendered a
+                # live card linking the undated osm-<id>.zim, which
+                # never exists on a dated item — the 2026-05-10
+                # California incident.
+                print(f"  {region['id']}: no .zim in item listing yet, treating as upcoming")
+                cards.append(render_upcoming_card(region))
+                upcoming_count += 1
+                continue
             # Override the static zim_file with what's actually on Archive.org
-            if zim_filename:
-                region = {**region, "zim_file": zim_filename}
+            region = {**region, "zim_file": zim_filename}
             if zim_size is None:
                 try:
                     zim_size = int(item.get("item_size", 0))
@@ -637,15 +743,36 @@ def build_page():
                 cards.append(render_upcoming_card(region))
                 upcoming_count += 1
                 continue
+            # The Torrent button must point at the same file as the
+            # Download button. Torrents are regenerated separately
+            # (cloud/generate_all_torrents.py) and drift behind
+            # rebuilds; a stale one seeds a ZIM the keep-2 cleanup on
+            # archive.org will soon delete.
+            torrent_name = torrent_file_name(region["id"])
+            torrent_ok = torrent_name == zim_filename
+            if not torrent_ok:
+                print(f"  {region['id']}: torrent names {torrent_name!r} but the "
+                      f"live ZIM is {zim_filename!r} — omitting Torrent button "
+                      f"(regenerate with cloud/generate_all_torrents.py)")
             cards.append(render_live_card(
                 region, human_size(zim_size),
-                item_meta=(details or {}).get("metadata") if details else None))
+                item_meta=(details or {}).get("metadata") if details else None,
+                torrent_ok=torrent_ok))
             live_count += 1
         else:
             cards.append(render_upcoming_card(region))
             upcoming_count += 1
 
     print(f"Rendered {live_count} live, {upcoming_count} upcoming")
+
+    # An empty-but-200 search response (archive.org index hiccup) would
+    # otherwise render every card as "upcoming" and --deploy would wipe
+    # the download links from the live site.
+    if live_count == 0:
+        print("\nERROR: archive.org search returned no live items — "
+              "refusing to write a page with zero download links",
+              file=sys.stderr)
+        sys.exit(2)
 
     # Refuse to write the page if any item had an unrecoverable
     # metadata fetch. Better to fail the deploy than ship a card
@@ -665,14 +792,17 @@ def build_page():
         )
         sys.exit(2)
 
-    with open(TEMPLATE_PATH) as f:
+    with open(TEMPLATE_PATH, encoding="utf-8") as f:
         template = f.read()
 
     updated = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     html = template.replace("{{MAPS}}", "\n".join(cards))
     html = html.replace("{{UPDATED}}", updated)
 
-    with open(OUTPUT_PATH, "w") as f:
+    # Explicit UTF-8: the template and region descriptions carry
+    # non-cp1252 characters (Lāna, İzmir, Þingvellir), so the locale
+    # default raised UnicodeEncodeError on Windows / C-locale hosts.
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"Wrote {OUTPUT_PATH}")
 

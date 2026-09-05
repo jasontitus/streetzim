@@ -29,8 +29,11 @@ log() { printf "[%s %s] %s\n" "$ID" "$(date +%H:%M:%S)" "$*"; }
 # 1. Fresh build via cloud/build_region.sh (preflight + create_osm_zim
 #    with all features + conditional spatial repack inside).
 # ------------------------------------------------------------------
-log "build_region.sh start (FORCE=1 to bypass terrain-edge-stripe preflight)"
-FORCE=1 bash cloud/build_region.sh "$ID" "$NAME" "$BBOX"
+# Preflight is a hard gate unless the caller opts out with FORCE=1 —
+# it used to be forced on unconditionally here, making every preflight
+# failure advisory on the canonical release path.
+log "build_region.sh start (FORCE=${FORCE:-0}; set FORCE=1 to bypass a known-benign preflight failure)"
+FORCE="${FORCE:-0}" bash cloud/build_region.sh "$ID" "$NAME" "$BBOX"
 log "build_region.sh OK"
 
 RAW="osm-${ID}.zim"
@@ -87,7 +90,7 @@ fi
 
 log "repackage start (flags: ${FLAGS[*]} --split-hot-search-chunks-mb 10)"
 ./venv312/bin/python3 cloud/repackage_zim.py "$RAW" "$TMP" \
-    "${FLAGS[@]}" \
+    ${FLAGS[@]+"${FLAGS[@]}"} \
     --split-hot-search-chunks-mb 10
 log "repackage OK"
 

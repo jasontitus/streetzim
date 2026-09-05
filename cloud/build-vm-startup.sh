@@ -16,6 +16,50 @@ set -euxo pipefail
 
 LOG=/var/log/streetzim-build.log
 exec > >(tee -a $LOG) 2>&1
+chmod 640 "$LOG" 2>/dev/null || true
+
+# Self-delete on EVERY exit path. Under `set -e` a failed step used to
+# skip the delete at the bottom of the script and the VM billed forever.
+# Set STREETZIM_KEEP_VM=1 in metadata to keep a failed VM for debugging.
+_self_delete() {
+  local rc="${1:-$?}"
+  echo "=== exit code $rc at $(date) ==="
+  # Preserve the evidence before the disk goes away with the VM: the build
+  # log lives only here, and a rejected/failed build used to leave the VM
+  # for inspection.
+  if [ -n "${REGION_ID:-}" ] && [ -f /var/log/streetzim-build.log ]; then
+    gcloud storage cp /var/log/streetzim-build.log \
+      "gs://streetzim-cache/logs/${REGION_ID}-$(date +%Y%m%dT%H%M%S)-rc${rc}.log" 2>/dev/null || true
+  fi
+  # A signal-driven exit (SIGTERM from `instances stop` during the spot →
+  # on-demand handoff, or a preemption) must NOT delete the VM: the local
+  # spot watcher needs it STOPPED to convert it, and a deleted VM looks
+  # like "build complete" to that watcher.
+  if [ "$rc" -ge 128 ] 2>/dev/null; then
+    echo "=== exit by signal (rc=$rc) — leaving VM for the handoff/preemption flow ==="
+    return 0
+  fi
+  if [ "${IS_SPOT:-FALSE}" = "TRUE" ] && [ -f "${PHASE_FILE:-/var/log/streetzim-phase}" ]; then
+    echo "=== spot handoff in progress — leaving VM ==="
+    return 0
+  fi
+  if [ "${STREETZIM_KEEP_VM:-0}" != "1" ] && [ -n "${INSTANCE_NAME:-}" ] && [ -n "${ZONE:-}" ]; then
+    echo "=== Self-deleting VM $INSTANCE_NAME in $ZONE ==="
+    gcloud --quiet compute instances delete "$INSTANCE_NAME" --zone="$ZONE" \
+      || echo "WARN: self-delete failed — delete $INSTANCE_NAME in $ZONE by hand (it is billing)"
+  else
+    echo "=== NOT deleting VM (keep-vm=${STREETZIM_KEEP_VM:-0} name=${INSTANCE_NAME:-unknown} zone=${ZONE:-unknown}) ==="
+  fi
+}
+# Make SIGTERM/SIGINT reach the EXIT trap with rc >= 128 (bash otherwise
+# reports $? = 0 inside the EXIT trap after a fatal signal).
+trap 'exit 143' TERM
+trap 'exit 130' INT
+# NOTE: bash has ONE exit trap. The cache-push trap installed further down
+# is combined with this one there (`trap 'rc=$?; push_caches; _self_delete
+# "$rc"' EXIT`); installing them separately made the later one replace
+# this and the VM never self-deleted.
+trap '_self_delete "$?"' EXIT
 
 echo "=== StreetZim build VM started: $(date) ==="
 
@@ -33,23 +77,34 @@ push_caches() {
   gcloud storage rsync wikidata_cache/ gs://streetzim-cache/wikidata_cache/ --recursive 2>&1 || true
   echo "=== [trap] Cache push complete ==="
 }
-trap push_caches EXIT
+# Combined with the self-delete trap above (a second `trap … EXIT` would
+# replace it). Caches are pushed first, then the VM deletes itself.
+trap 'rc=$?; push_caches; _self_delete "$rc"' EXIT
 
 # ----------------------------------------------------------------------------
 # Read instance metadata
 # ----------------------------------------------------------------------------
 META=http://metadata.google.internal/computeMetadata/v1/instance/attributes
 fetch_meta() { curl -sf -H "Metadata-Flavor: Google" "$META/$1"; }
+# Optional debugging knob: set instance attribute streetzim-keep-vm=1 to
+# keep the VM alive after a failure (startup scripts don't receive
+# attributes as environment variables, so read it from metadata).
+STREETZIM_KEEP_VM=$(fetch_meta streetzim-keep-vm || echo 0)
+# Instance identity first: if a later metadata fetch fails under set -e the
+# EXIT trap still knows what to delete.
+INSTANCE_NAME=$(curl -sf -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/name)
+ZONE=$(curl -sf -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/zone | awk -F/ '{print $NF}')
 
 REGION_ID=$(fetch_meta region-id)
 REGION_NAME=$(fetch_meta region-name)
 REGION_BBOX=$(fetch_meta region-bbox)
+# Secrets: turn xtrace off around them — `set -x` printed
+# `+ IA_SECRET=<secret>` into the world-readable build log.
+set +x
 IA_ACCESS=$(fetch_meta ia-access-key)
 IA_SECRET=$(fetch_meta ia-secret-key)
+set -x
 DESCRIPTION=$(fetch_meta description | python3 -c "import sys, urllib.parse; print(urllib.parse.unquote(sys.stdin.read()))")
-
-INSTANCE_NAME=$(curl -sf -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/name)
-ZONE=$(curl -sf -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/zone | awk -F/ '{print $NF}')
 
 echo "Region: $REGION_NAME ($REGION_ID) bbox=$REGION_BBOX"
 
@@ -68,7 +123,12 @@ cd /work
 # ----------------------------------------------------------------------------
 # Clone repo (latest main)
 # ----------------------------------------------------------------------------
-git clone --depth 1 https://github.com/jasontitus/streetzim.git
+if [ -d streetzim/.git ]; then
+  # On-demand restart after a spot handoff: the disk already has the clone.
+  git -C streetzim pull -q --ff-only || echo "WARN: git pull failed; building with the existing checkout"
+else
+  git clone --depth 1 https://github.com/jasontitus/streetzim.git
+fi
 cd streetzim
 
 # ----------------------------------------------------------------------------
@@ -140,11 +200,14 @@ fi
 # Configure Archive.org credentials
 # ----------------------------------------------------------------------------
 mkdir -p ~/.config/internetarchive
+set +x
 cat > ~/.config/internetarchive/ia.ini <<EOF
 [s3]
 access = $IA_ACCESS
 secret = $IA_SECRET
 EOF
+chmod 600 ~/.config/internetarchive/ia.ini
+set -x
 
 # ----------------------------------------------------------------------------
 # Run the build
@@ -220,6 +283,20 @@ push_caches
 # ----------------------------------------------------------------------------
 # Upload finished ZIM to Archive.org
 # ----------------------------------------------------------------------------
+echo "=== Validating before upload ==="
+# Same gate every other release path enforces; a VM-built ZIM that
+# skipped it would become "live" by date on the shared item anyway.
+if ! python3 cloud/validate_zim.py "$ZIM_FILE"; then
+  echo "FATAL: validate_zim.py rejected $ZIM_FILE — not uploading"
+  # Keep the rejected file somewhere inspectable; the VM is about to go away.
+  gcloud storage cp "$ZIM_FILE" "gs://streetzim-cache/output/rejected/$ZIM_FILE" || true
+  exit 4
+fi
+
+# GCS copy first: if `ia upload` fails the VM still self-deletes, and this
+# is the only other copy of a multi-hour build.
+gcloud storage cp "$ZIM_FILE" "gs://streetzim-cache/output/$ZIM_FILE"
+
 echo "=== Uploading to Archive.org ==="
 ITEM_ID="streetzim-${REGION_ID}"
 TITLE="StreetZim - Offline Map of $REGION_NAME"
@@ -236,13 +313,5 @@ ia upload "$ITEM_ID" "$ZIM_FILE" \
   --metadata="collection:opensource_media" \
   --retries 5
 
-# Also save a copy in GCS
-gcloud storage cp "$ZIM_FILE" "gs://streetzim-cache/output/$ZIM_FILE"
-
 echo "=== All done: $(date) ==="
-
-# ----------------------------------------------------------------------------
-# Self-delete the VM
-# ----------------------------------------------------------------------------
-echo "=== Self-deleting VM $INSTANCE_NAME in $ZONE ==="
-gcloud --quiet compute instances delete "$INSTANCE_NAME" --zone="$ZONE"
+# The EXIT trap at the top of the script deletes the VM.
