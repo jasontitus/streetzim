@@ -3713,8 +3713,30 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
 
         # Stream features from temp JSONL files for cross-worker dedup
         print(f"    Cross-worker deduplication from {len(partitions)} temp files...")
+        # Memory shape matters here: at planet scale this pass sees ~1.2e8
+        # features. Keeping the dedup keys as tuples of
+        # (str, str, float, float) AND accumulating every unique feature
+        # dict in a list drove this process to 106 GB RSS on a 125 GB host
+        # (2026-09-05, world tiles v3) — deep into swap, with the OOM
+        # killer one allocation away.
+        #
+        # Two changes keep it bounded:
+        #   * the dedup key becomes a 64-bit blake2b digest as a Python
+        #     int (~50 B in a set, versus several hundred for the tuple).
+        #     Expected collisions across 1.2e8 keys are ~4e-4, i.e. none
+        #     in practice, and a collision would drop one duplicate-
+        #     looking feature from a search index.
+        #   * when we are writing to disk anyway (output_dir set, which is
+        #     how every real caller runs), features stream straight to the
+        #     jsonl instead of piling up in a list.
+        import hashlib
+        stream_out = None
+        if output_dir:
+            features_path = os.path.join(output_dir, "search_features.jsonl")
+            stream_out = open(features_path, "w")
         features = []
         seen_global = set()
+        n_unique = 0
         for part_args in partitions:
             tmp_file = part_args[4]
             if not os.path.exists(tmp_file):
@@ -3722,13 +3744,22 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
             with open(tmp_file, "r") as f:
                 for line in f:
                     feat = json.loads(line)
-                    dedup_key = (feat["name"].lower(), feat["type"],
-                                 round(feat["lat"], 4), round(feat["lon"], 4))
+                    dedup_key = int.from_bytes(hashlib.blake2b(
+                        ("%s\x00%s\x00%.4f\x00%.4f" % (
+                            feat["name"].lower(), feat["type"],
+                            feat["lat"], feat["lon"])).encode("utf-8"),
+                        digest_size=8).digest(), "big")
                     if dedup_key not in seen_global:
                         seen_global.add(dedup_key)
-                        features.append(feat)
+                        n_unique += 1
+                        if stream_out is not None:
+                            stream_out.write(json.dumps(feat, separators=(",", ":")) + "\n")
+                        else:
+                            features.append(feat)
             os.unlink(tmp_file)
         del seen_global
+        if stream_out is not None:
+            stream_out.close()
 
         # Clean up temp dir
         try:
@@ -3736,7 +3767,11 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
         except OSError:
             pass
 
-        print(f"    {len(features)} unique features after cross-worker dedup")
+        print(f"    {n_unique} unique features after cross-worker dedup")
+        if stream_out is not None:
+            size_mb = os.path.getsize(features_path) / (1024 * 1024)
+            print(f"    Wrote {n_unique} features to disk ({size_mb:.0f} MB)")
+            return features_path
     else:
         # Legacy mode: filter from in-memory dict
         z14_tiles = {(z, x, y): data for (z, x, y), data in tiles.items() if z == 14}
