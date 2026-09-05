@@ -136,6 +136,29 @@
       return u64(new DataView(buf.buffer, buf.byteOffset, buf.byteLength), inPage * 8);
     }
 
+    // Smallest cluster offset strictly greater than `start`, else the
+    // checksum position (which follows all cluster data). The pointer
+    // array is read and sorted once — clusterCount * 8 bytes, tens of KB
+    // for a regional ZIM — and reused for every later cluster read.
+    async _clusterEnd(start) {
+      if (!this._sortedClusterOffsets) {
+        const n = this.header.clusterCount;
+        const buf = await this._readRange(this.header.clusterPtrPos, n * 8);
+        const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+        const offs = new Array(n);
+        for (let i = 0; i < n; i++) offs[i] = u64(v, i * 8);
+        offs.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+        this._sortedClusterOffsets = offs;
+      }
+      const offs = this._sortedClusterOffsets;
+      let lo = 0, hi = offs.length;
+      while (lo < hi) {                      // first offset > start
+        const mid = (lo + hi) >> 1;
+        if (offs[mid] > start) hi = mid; else lo = mid + 1;
+      }
+      return lo < offs.length ? offs[lo] : this.header.checksumPos;
+    }
+
     async _readClusterPointer(idx) {
       const buf = await this._readRange(this.header.clusterPtrPos + idx * 8, 8);
       return u64(new DataView(buf.buffer), 0);
@@ -227,9 +250,17 @@
       if (cached) return cached;
 
       const start = await this._readClusterPointer(clusterNum);
-      const end = (clusterNum + 1 < this.header.clusterCount)
-        ? await this._readClusterPointer(clusterNum + 1)
-        : this.header.checksumPos;
+      // A cluster's length is "up to wherever the next cluster STARTS IN
+      // THE FILE" — which is not necessarily clusterPtr[n+1]. The ZIM
+      // format does not require clusters to be laid out in pointer order,
+      // and a writer that emits them concurrently does not: a zimru build
+      // of California had 2182 of 5182 transitions going backwards, so
+      // `clusterPtr[n+1] - clusterPtr[n]` came out as -2215017 and fzstd
+      // was handed garbage ("invalid zstd data"). libzim never noticed
+      // because it decompresses streaming from the start and reads the
+      // cluster's own blob-offset table, never needing an end offset.
+      // Take the next-highest offset instead of the next index.
+      const end = await this._clusterEnd(start);
       const raw = await this._readRange(start, end - start);
       const info = raw[0];
       const compression = info & 0x0F;
