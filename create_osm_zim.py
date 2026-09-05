@@ -3609,6 +3609,29 @@ def chunk_graph_file(src_path: str, chunk_size_bytes: int,
     return chunk_paths, manifest
 
 
+def _annotate_lines_batch(lines, type_order):
+    """Worker: parse a batch of raw jsonl lines, assign location context
+    from the process-global place grid, and return the keyed output lines
+    plus stats. Doing the JSON decode/encode here rather than in the
+    parent is what makes the pool worth having — measured with the parent
+    doing it, 32 workers sat at ~30% CPU while the parent capped the whole
+    pass at ~20k lines/s."""
+    feats = [json.loads(l) for l in lines]
+    locs = _assign_location_batch(feats)
+    out = []
+    assigned = 0
+    counts = {}
+    for f, loc in zip(feats, locs):
+        if loc:
+            f["location"] = loc
+            assigned += 1
+        counts[f["type"]] = counts.get(f["type"], 0) + 1
+        key = f["name"].replace("\t", " ").replace("\n", " ")
+        out.append(f'{type_order.get(f["type"], 99)}\t{key}\t'
+                   f'{json.dumps(f, separators=(",", ":"))}\n')
+    return "".join(out), assigned, counts
+
+
 def _finish_features_streaming(raw_path, output_dir, n_unique):
     """Location-context + sort + write-out without holding every feature.
 
@@ -3659,19 +3682,6 @@ def _finish_features_streaming(raw_path, output_dir, n_unique):
     workers = min(32, os.cpu_count() or 4)
     window = workers * 2
 
-    def emit(fout, batch, locs):
-        nonlocal assigned
-        for f, loc in zip(batch, locs):
-            if loc:
-                f["location"] = loc
-                assigned += 1
-            # The key is sorting scaffolding only; the payload is
-            # untouched. Tabs and newlines in a name would break the
-            # column split, so flatten them in the key alone.
-            key = f["name"].replace("\t", " ").replace("\n", " ")
-            fout.write(f'{type_order.get(f["type"], 99)}\t{key}\t'
-                       f'{json.dumps(f, separators=(",", ":"))}\n')
-
     t_ann = time.time()
     done_rows = 0
     with open(raw_path, "r", encoding="utf-8") as fin, \
@@ -3683,26 +3693,30 @@ def _finish_features_streaming(raw_path, output_dir, n_unique):
         batch = []
 
         def drain(all_of_them=False):
-            nonlocal done_rows
+            nonlocal done_rows, assigned
             while inflight and (all_of_them or len(inflight) >= window or inflight[0][1].done()):
-                b, fut = inflight.popleft()
-                emit(fout, b, fut.result())
-                done_rows += len(b)
+                n_lines, fut = inflight.popleft()
+                text, n_assigned, counts = fut.result()
+                fout.write(text)
+                assigned += n_assigned
+                for k, v in counts.items():
+                    type_counts[k] = type_counts.get(k, 0) + v
+                done_rows += n_lines
                 if done_rows % (BATCH * 40) == 0:
                     rate = done_rows / max(1e-9, time.time() - t_ann)
                     print(f"      annotated {done_rows:,}/{n_unique:,} ({rate:,.0f}/s, "
                           f"~{(n_unique - done_rows) / rate / 60:.0f} min left)", flush=True)
 
+        # The parent only moves text: raw lines out to the workers, keyed
+        # lines back to disk. All parsing and serialising happens in the pool.
         for line in fin:
-            f = json.loads(line)
-            type_counts[f["type"]] = type_counts.get(f["type"], 0) + 1
-            batch.append(f)
+            batch.append(line)
             if len(batch) >= BATCH:
-                inflight.append((batch, pool.submit(_assign_location_batch, batch)))
+                inflight.append((len(batch), pool.submit(_annotate_lines_batch, batch, type_order)))
                 batch = []
                 drain()
         if batch:
-            inflight.append((batch, pool.submit(_assign_location_batch, batch)))
+            inflight.append((len(batch), pool.submit(_annotate_lines_batch, batch, type_order)))
         drain(all_of_them=True)
     print(f"    Assigned location to {assigned}/{n_unique} features "
           f"in {(time.time() - t_ann) / 60:.0f} min on {workers} workers", flush=True)
