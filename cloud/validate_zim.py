@@ -1598,6 +1598,28 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
                     return True
         return False
 
+    def _hdr_is(header, *prefixes):
+        """Match a zimcheck finding header across tool versions.
+
+        zim-tools 3.8.0 (and zimru from 405ec43, which tracks it) renamed
+        every finding: "Empty article:" -> "Empty Article:", "Invalid
+        internal links" -> "Internal URL:", "Redundant data found:" ->
+        "Redundant Data:". A header this function does not recognise falls
+        through to `real_blocks` and fails the ZIM, so a zimcheck upgrade
+        would silently turn the release gate into a blanket reject and
+        drop the false-positive allowlist below with it. Accept both
+        spellings rather than depend on which binary is on PATH.
+
+        NOTE: the newer scanner also reports dangling links differently
+        (indented "  - 'raw' (resolves to 'norm')" sub-lines). If you do
+        move to it, re-derive _is_subblock_false_positive() against a few
+        real regions BEFORE a release round — see
+        docs/rebuild-2026-09-plan.md.
+        """
+        if not header:
+            return False
+        return any(header.startswith("[ERROR] " + p) for p in prefixes)
+
     def _maybe_keep(header, body):
         if not header:
             return
@@ -1606,13 +1628,13 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
         # `  Entry tiles/... is empty` children. Both are legit when
         # the entry is a 0-byte ocean tile (vector tiles/*.pbf) —
         # we ship those intentionally for full bbox coverage.
-        if header.startswith("[ERROR] Empty article:"):
+        if _hdr_is(header, "Empty article:", "Empty Article:"):
             payload = header.split(":", 1)[1].strip()
             if payload.startswith("tiles/") and payload.endswith(".pbf"):
                 return
             real_blocks.append((header, body))
             return
-        if header.startswith("[ERROR] Empty articles"):
+        if _hdr_is(header, "Empty articles", "Empty Articles"):
             non_tile = [b for b in body
                         if "Entry tiles/" not in b
                         or not b.endswith(".pbf is empty")]
@@ -1620,7 +1642,7 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
                 return
             real_blocks.append((header, non_tile))
             return
-        if header.startswith("[ERROR] Invalid internal links"):
+        if _hdr_is(header, "Invalid internal links", "Internal URL:"):
             sub_blocks = _classify_invalid_links_subblocks(body)
             real_subs = [sb for sb in sub_blocks
                          if not _is_subblock_false_positive(sb)]
