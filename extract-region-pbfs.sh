@@ -27,6 +27,11 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -s "$PLANET" ] || { echo "planet missing: $PLANET (run ./download-planet.sh)" >&2; exit 1; }
+# Shared with build-refresh-queue.sh: both write world-data/regions/*.part,
+# and two osmium processes on one path yield a truncated-but-valid PBF.
+mkdir -p "${TMPDIR:-/storage/streetzim/tmp}"
+exec 9>"${TMPDIR:-/storage/streetzim/tmp}/.regions-pbf.lock"
+flock -n 9 || { echo "another PBF extractor or the build queue holds the regions lock" >&2; exit 1; }
 mkdir -p "$OUTDIR"
 
 todo=()

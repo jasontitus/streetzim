@@ -21,7 +21,7 @@ florida	Florida	-88.0,24.4,-79.5,31.5	local	25.7617,-80.1918	28.5384,-81.3789	Mi
 carolinas	The Carolinas	-84.4,32.0,-75.3,36.6	local	35.7796,-78.6382	35.5951,-82.5515	Charlotte	2026-07 blank-terrain incident region; terrain gate mandatory
 new-york-state	New York State	-80.0,40.4,-71.8,45.0	local	40.7128,-74.0060	42.8864,-78.8784	Albany	
 alaska	Alaska	-180.0,51.0,-130.0,72.0	local	61.2181,-149.9003	64.8378,-147.7164	Anchorage	crosses antimeridian edge (-180); ~3h build
-california	California	-125.0,32.0,-114.0,42.0	local	37.7749,-122.4194	37.3382,-121.8863	Los Angeles	
+california	California	-125.0,32.0,-114.0,42.0	local	37.7749,-122.4194	34.0522,-118.2437	Los Angeles	smoke pair is the 560 km SF->LA cross-state route (exercises spatial cell paging through the Central Valley + Grapevine)
 texas	Texas	-106.7,25.8,-93.5,36.5	local	30.2672,-97.7431	29.4241,-98.4936	Houston	
 # --- country ---
 iceland	Iceland	-25.0,63.0,-13.0,67.0	country	64.1466,-21.9426	65.6826,-18.1107	Reykjavik	

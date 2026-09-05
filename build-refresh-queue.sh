@@ -34,18 +34,26 @@ export TMPDIR=/storage/streetzim/tmp
 
 PLANET="${PLANET:-/storage/streetzim/world-data/planet-2026-08-31.osm.pbf}"
 export OVERTURE_RELEASE="${OVERTURE_RELEASE:-2026-08-19.0}"
-WORLD_MBTILES="${WORLD_MBTILES:-/storage/streetzim/world-data/world-tiles-v2.mbtiles}"
-WORLD_SEARCH="${WORLD_SEARCH:-/storage/streetzim/search_cache/world.jsonl}"
+# No defaults on purpose. The previous round's world-tiles-v2.mbtiles and
+# world.jsonl are still on disk; defaulting to them would staple an August
+# road graph to March vector tiles and a March POI index, and no gate can
+# see that (terrain comes from the DEM, the validator checks structure,
+# routing comes from the PBF). Name them, and they must post-date the planet.
+WORLD_MBTILES="${WORLD_MBTILES:?set WORLD_MBTILES to the tiles built from this planet (see build-world-tiles.sh), or TIER_A=1 to accept older tiles}"
+WORLD_SEARCH="${WORLD_SEARCH:?set WORLD_SEARCH to the search cache extracted from those tiles, or TIER_A=1}"
 REGISTRY="${REGISTRY:-/storage/streetzim/cloud/regions.tsv}"
 # Only these liveness-cache statuses drop/scrub a business record. 403/429/
 # 5xx/timeouts are mostly bot-blocking, not dead businesses (see
 # project_overture_dead_url_false_positives): keep those.
-export STREETZIM_URL_DEAD_STATUSES="${URL_DEAD_STATUSES:-404,410,dns}"
+export STREETZIM_URL_DEAD_STATUSES="${URL_DEAD_STATUSES:-404,410,dns,parked,url}"
 PY=/storage/streetzim/venv-linux/bin/python3
 REGDIR=/storage/streetzim/world-data/regions
 TODAY=$(date +%Y-%m-%d)
 LOG=/storage/streetzim/queue-refresh-${TODAY}.log
-TSV=/storage/streetzim/queue-refresh-${TODAY}.tsv
+# One results file for the whole round, not per day: a weeks-long run gets
+# resumed on a later date, and a fresh empty TSV would make --continue
+# rebuild and re-upload every region that already shipped.
+TSV="${RESULTS:-/storage/streetzim/queue-refresh.tsv}"
 NODE=/storage/streetzim/.browser-libs/node-v20.18.1-linux-x64/bin/node
 export CHROME_PATH="${CHROME_PATH:-/home/ot/.cache/ms-playwright/chromium-1217/chrome-linux64/chrome}"
 export LD_LIBRARY_PATH=/storage/streetzim/.browser-libs/ex/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}
@@ -79,11 +87,33 @@ fail=0
 command -v osmium >/dev/null || { echo "osmium not on PATH"; fail=1; }
 [ -x rust/streetzim-pack/target/release/streetzim-pack ] || { echo "streetzim-pack binary missing (cargo build --release in rust/streetzim-pack)"; fail=1; }
 [ -f terrain_cache/dem_sources/comprehensive.vrt ] || { echo "terrain DEM VRT missing (terrain gate needs it)"; fail=1; }
+if [ "${TIER_A:-0}" != "1" ]; then
+  [ "$WORLD_MBTILES" -nt "$PLANET" ] || { echo "WORLD_MBTILES ($WORLD_MBTILES) is older than $PLANET — set TIER_A=1 to build on older tiles deliberately"; fail=1; }
+  [ "$WORLD_SEARCH"  -nt "$PLANET" ] || { echo "WORLD_SEARCH ($WORLD_SEARCH) is older than $PLANET — set TIER_A=1 to accept it"; fail=1; }
+else
+  echo "TIER_A=1: building on $(basename "$WORLD_MBTILES") / $(basename "$WORLD_SEARCH"), which predate $(basename "$PLANET"). Routing and business data refresh; map tiles and the search index do not."
+fi
+# extract-region-pbfs.sh writes the same world-data/regions/<id>.osm.pbf.part
+# this queue would write. Two osmium processes on one path silently produce a
+# truncated-but-valid PBF, which passes every gate and ships a half-empty map.
+if pgrep -f 'extract-region-pbfs.sh' >/dev/null; then
+  echo "extract-region-pbfs.sh is running — refusing to start (both write world-data/regions/*.osm.pbf.part)"; fail=1
+fi
+exec 9>"$TMPDIR/.regions-pbf.lock"
+flock -n 9 || { echo "another build/extract holds $TMPDIR/.regions-pbf.lock"; fail=1; }
 FREE_GB=$(df -BG --output=avail /storage | tail -1 | tr -dc 0-9)
 [ "$FREE_GB" -ge 500 ] || { echo "only ${FREE_GB} GB free on /storage (want >= 500)"; fail=1; }
 if ! swapon --show | grep -q /storage/swapfile; then
-  echo "WARN: /storage/swapfile not active — continent builds may OOM. Run: sudo swapon /storage/swapfile; sudo sysctl vm.swappiness=100"
+  echo "/storage/swapfile is not active — continent builds have OOMed without it. Run:"
+  echo "    sudo swapon /storage/swapfile && sudo sysctl vm.swappiness=100"
+  echo "  (or set ALLOW_NO_SWAP=1 to proceed anyway)"
+  [ "${ALLOW_NO_SWAP:-0}" = "1" ] || fail=1
 fi
+# A malformed registry row shifts every later field (tab is IFS whitespace,
+# so consecutive tabs collapse and bbox can end up holding the tier).
+BADROWS=$(awk -F'\t' '!/^#/ && NF && NF!=8 {print NR": "$1" ("NF" fields)"}' "$REGISTRY")
+[ -z "$BADROWS" ] || { echo "cloud/regions.tsv rows without exactly 8 fields:"; echo "$BADROWS"; fail=1; }
+[ "$(tail -c1 "$REGISTRY" | xxd -p)" = "0a" ] || { echo "cloud/regions.tsv has no trailing newline — the last region would be skipped"; fail=1; }
 if [ "$UPLOAD" -eq 1 ] && ! /storage/streetzim/venv-linux/bin/ia --version >/dev/null 2>&1; then
   echo "ia CLI not runnable in venv-linux (needed for upload)"; fail=1
 fi
@@ -136,7 +166,11 @@ PYEOF
 browser_smoke() {  # browser_smoke <zim> <src> <dst> ; returns node exit code
   local zim="$1" port=8801 out="/storage/streetzim/${ID}-smoke-${TODAY}.log"
   ln -sfn "../$(basename "$zim")" "web/$(basename "$zim")"
-  "$PY" -m http.server $port --directory /storage/streetzim/web > "$TMPDIR/http-$port.log" 2>&1 &
+  # NOT python -m http.server: the site relies on Firebase cleanUrls/
+  # trailingSlash, and plain http.server 404s on /drive/viewer/places/,
+  # which the Find page and the routing bootstrap both fetch — every
+  # browser gate would fail.
+  "$PY" scripts/serve-web-local.py "$port" /storage/streetzim/web > "$TMPDIR/http-$port.log" 2>&1 &
   local http=$!; sleep 2
   STREETZIM_SITE="http://localhost:$port" ZIM_URL="http://localhost:$port/$(basename "$zim")" \
     SMOKE_ROUTE="$2;$3" timeout 600 "$NODE" cloud/pwa_smoke_test.mjs > "$out" 2>&1
@@ -147,7 +181,7 @@ browser_smoke() {  # browser_smoke <zim> <src> <dst> ; returns node exit code
 }
 
 n_ok=0; n_fail=0; n_skip=0
-while IFS=$'\t' read -r ID NAME BBOX TIER SRC DST SEARCH NOTES; do
+while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
   [ -z "$ID" ] || [ "${ID:0:1}" = "#" ] && continue
   [ -n "$ONLY" ] && [[ "$ONLY" != *",$ID,"* ]] && continue
   [ -n "$SKIP" ] && [[ "$SKIP" == *",$ID,"* ]] && continue
@@ -209,11 +243,12 @@ while IFS=$'\t' read -r ID NAME BBOX TIER SRC DST SEARCH NOTES; do
 
   # ---------- gates ----------
   G=""
-  if "$PY" cloud/check_terrain_coverage.py --zooms 10-12 -- "$ZIM" "$BBOX" >> "$LOG" 2>&1; then log "  gate terrain: OK"; else G="$G terrain"; log "  gate terrain: FAIL"; fi
-  if TERRAIN_STRIPE_TOLERATE=10 "$PY" cloud/validate_zim.py "$ZIM" >> "$LOG" 2>&1; then log "  gate validate: OK"; else G="$G validate"; log "  gate validate: FAIL"; fi
-  ROUTE_OUT=$("$PY" cloud/route_cli.py --zim="$ZIM" --src="$SRC" --dst="$DST" --mode=all --max-pops=5000000 2>&1)
+  if timeout 900 "$PY" cloud/check_terrain_coverage.py --zooms 10-12 -- "$ZIM" "$BBOX" >> "$LOG" 2>&1; then log "  gate terrain: OK"; else G="$G terrain"; log "  gate terrain: FAIL"; fi
+  if TERRAIN_STRIPE_TOLERATE=10 timeout 1800 "$PY" cloud/validate_zim.py "$ZIM" >> "$LOG" 2>&1; then log "  gate validate: OK"; else G="$G validate"; log "  gate validate: FAIL"; fi
+  ROUTE_OUT=$(timeout 2400 "$PY" cloud/route_cli.py --zim="$ZIM" --src="$SRC" --dst="$DST" --mode=all --max-pops=5000000 2>&1)
   echo "$ROUTE_OUT" | tail -6 | sed 's/^/    /' >> "$LOG"
-  if echo "$ROUTE_OUT" | grep -q "route OK"; then log "  gate routing: OK"; else G="$G routing"; log "  gate routing: FAIL"; fi
+  NOK=$(echo "$ROUTE_OUT" | grep -c "route OK")   # --mode=all runs astar + hwy2
+  if [ "${NOK:-0}" -ge 2 ]; then log "  gate routing: OK (both modes)"; else G="$G routing"; log "  gate routing: FAIL (${NOK:-0}/2 modes)"; fi
   SN=$(smoke_search "$ZIM" "$SEARCH"); FN=$(smoke_find "$ZIM")
   [ "${SN:-0}" -ge 1 ] && log "  gate search('$SEARCH'): $SN" || { G="$G search"; log "  gate search: FAIL ($SN)"; }
   [ "${FN:-0}" -ge 1 ] && log "  gate find(restaurants): $FN" || { G="$G find"; log "  gate find: FAIL ($FN)"; }
@@ -238,7 +273,7 @@ while IFS=$'\t' read -r ID NAME BBOX TIER SRC DST SEARCH NOTES; do
     log "  UPLOAD FAILED (rc=$?) — ZIM kept: $ZIM"
     row "$ID" upload-failed "$MIN" "$SIZE" "$(basename "$ZIM")"; n_fail=$((n_fail+1))
   fi
-done < "$REGISTRY"
+done 3< "$REGISTRY"
 
 log "=== refresh queue complete: ok=$n_ok failed=$n_fail skipped=$n_skip — see $TSV"
 [ $n_fail -eq 0 ]

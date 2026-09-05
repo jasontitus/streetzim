@@ -12,6 +12,8 @@
       "**/.gitkeep",
       "**/node_modules/**",
       "**/__pycache__/**",
+      "**/*.zim",
+      "**/*.zim.part",
       "generate.py",
       "stats.py",
       "template.html",
