@@ -3649,34 +3649,63 @@ def _finish_features_streaming(raw_path, output_dir, n_unique):
     type_counts = {}
     assigned = 0
     BATCH = 50_000
+    # Annotate in parallel, as the in-memory version did: one core over
+    # 1.2e8 features took ~7 h (measured 4.35 GB of 14.5 GB in 2 h), the
+    # pool takes tens of minutes. Batches are submitted with a bounded
+    # in-flight window so memory stays at ~window x batch, and results
+    # are consumed in submission order so the keyed file is deterministic.
+    from collections import deque
+    from concurrent.futures import ProcessPoolExecutor
+    workers = min(32, os.cpu_count() or 4)
+    window = workers * 2
+
+    def emit(fout, batch, locs):
+        nonlocal assigned
+        for f, loc in zip(batch, locs):
+            if loc:
+                f["location"] = loc
+                assigned += 1
+            # The key is sorting scaffolding only; the payload is
+            # untouched. Tabs and newlines in a name would break the
+            # column split, so flatten them in the key alone.
+            key = f["name"].replace("\t", " ").replace("\n", " ")
+            fout.write(f'{type_order.get(f["type"], 99)}\t{key}\t'
+                       f'{json.dumps(f, separators=(",", ":"))}\n')
+
+    t_ann = time.time()
+    done_rows = 0
     with open(raw_path, "r", encoding="utf-8") as fin, \
-            open(keyed_path, "w", encoding="utf-8") as fout:
+            open(keyed_path, "w", encoding="utf-8") as fout, \
+            ProcessPoolExecutor(max_workers=workers,
+                                initializer=_init_location_worker,
+                                initargs=(_place_grid,)) as pool:
+        inflight = deque()          # (batch, future) in submission order
         batch = []
 
-        def flush(batch):
-            nonlocal assigned
-            if not batch:
-                return
-            for f, loc in zip(batch, _assign_location_batch(batch)):
-                if loc:
-                    f["location"] = loc
-                    assigned += 1
-                # The key is sorting scaffolding only; the payload is
-                # untouched. Tabs and newlines in a name would break the
-                # column split, so flatten them in the key alone.
-                key = f["name"].replace("\t", " ").replace("\n", " ")
-                fout.write(f'{type_order.get(f["type"], 99)}\t{key}\t'
-                           f'{json.dumps(f, separators=(",", ":"))}\n')
+        def drain(all_of_them=False):
+            nonlocal done_rows
+            while inflight and (all_of_them or len(inflight) >= window or inflight[0][1].done()):
+                b, fut = inflight.popleft()
+                emit(fout, b, fut.result())
+                done_rows += len(b)
+                if done_rows % (BATCH * 40) == 0:
+                    rate = done_rows / max(1e-9, time.time() - t_ann)
+                    print(f"      annotated {done_rows:,}/{n_unique:,} ({rate:,.0f}/s, "
+                          f"~{(n_unique - done_rows) / rate / 60:.0f} min left)", flush=True)
 
         for line in fin:
             f = json.loads(line)
             type_counts[f["type"]] = type_counts.get(f["type"], 0) + 1
             batch.append(f)
             if len(batch) >= BATCH:
-                flush(batch)
+                inflight.append((batch, pool.submit(_assign_location_batch, batch)))
                 batch = []
-        flush(batch)
-    print(f"    Assigned location to {assigned}/{n_unique} features", flush=True)
+                drain()
+        if batch:
+            inflight.append((batch, pool.submit(_assign_location_batch, batch)))
+        drain(all_of_them=True)
+    print(f"    Assigned location to {assigned}/{n_unique} features "
+          f"in {(time.time() - t_ann) / 60:.0f} min on {workers} workers", flush=True)
     os.unlink(raw_path)
 
     print("    Sorting (external, disk-backed)...", flush=True)
