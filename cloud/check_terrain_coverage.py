@@ -18,7 +18,7 @@ Usage:
       [--zooms 10-12] [--min-bytes 200] [--sea-level 2] \
       [--vrt terrain_cache/dem_sources/comprehensive.vrt]
 """
-import argparse, math, sys
+import argparse, io, math, sys
 from libzim.reader import Archive
 import rasterio
 from rasterio.warp import transform
@@ -36,6 +36,32 @@ def tile_center(x, y, z):
     lon = (x + 0.5) / n * 360 - 180
     lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * (y + 0.5) / n))))
     return lat, lon
+
+
+def tile_elevation_ok(raw, dem_elev, tol_m=400.0):
+    """Does this small terrain tile actually carry elevation?
+
+    Returns (ok, detail). A genuinely blank tile decodes to the all-zero
+    RGB sentinel, i.e. -10000 m everywhere. A real one decodes near the
+    DEM's own reading for the same spot, however flat it is.
+    """
+    if not raw:
+        return False, "unreadable"
+    try:
+        from PIL import Image
+        import numpy as np
+        im = Image.open(io.BytesIO(raw)).convert("RGB")
+        a = np.asarray(im).astype(np.float64)
+        h = -10000.0 + (a[:, :, 0] * 65536.0 + a[:, :, 1] * 256.0 + a[:, :, 2]) * 0.1
+    except Exception as exc:  # noqa: BLE001 — a tile we cannot decode is not proof of elevation
+        return False, f"undecodable ({exc})"
+    hmin, hmax, hmean = float(h.min()), float(h.max()), float(h.mean())
+    if hmax <= -9000.0:
+        return False, "decodes to the all-zero sentinel"
+    if abs(hmean - dem_elev) > tol_m:
+        return False, (f"mean {hmean:.0f} m disagrees with the DEM's "
+                       f"{dem_elev:.0f} m")
+    return True, f"flat but real ({hmin:.0f}-{hmax:.0f} m, DEM {dem_elev:.0f} m)"
 
 
 def main():
@@ -60,6 +86,12 @@ def main():
         except Exception:
             return None
 
+    def zbytes(p):
+        try:
+            return bytes(arc.get_entry_by_path(p).get_item().content)
+        except Exception:
+            return None
+
     dem = rasterio.open(a.vrt)
     def elev(lat, lon):
         # 1x1 windowed read — the VRT is a planet-scale mosaic, never read whole.
@@ -70,7 +102,7 @@ def main():
             return float(v[0, 0]) if v.size else -32768.0
         return -32768.0
 
-    land = blank_land = missing_land = ocean = 0
+    land = blank_land = missing_land = ocean = flat_land = 0
     offenders = []
     for z in range(z0, z1 + 1):
         x0, y0 = deg2tile(n, w, z)
@@ -88,13 +120,28 @@ def main():
                     if len(offenders) < a.max_report:
                         offenders.append(f"z{z}/{x}/{y} MISSING (~{lat:.2f},{lon:.2f})")
                 elif sz <= a.min_bytes:
+                    # Small is suspicious, not proof. Terrain-RGB over flat
+                    # land is nearly a constant image and webp crushes it:
+                    # the San Joaquin Valley and the Modoc Plateau produce
+                    # 58-198 byte tiles that carry perfectly good elevation
+                    # (20-40 m and 1230-1240 m respectively). Judging on
+                    # size alone failed California and would fail the Great
+                    # Plains, the Sahara, the Amazon basin and Siberia.
+                    # Decode it and ask whether the elevation is real.
+                    verdict, detail = tile_elevation_ok(
+                        zbytes(f"terrain/{z}/{x}/{y}.webp"), elev(lat, lon))
+                    if verdict:
+                        flat_land += 1
+                        continue
                     blank_land += 1
                     if len(offenders) < a.max_report:
-                        offenders.append(f"z{z}/{x}/{y} {sz}B (~{lat:.2f},{lon:.2f})")
+                        offenders.append(
+                            f"z{z}/{x}/{y} {sz}B (~{lat:.2f},{lon:.2f}) {detail}")
 
     bad = blank_land + missing_land
     print(f"terrain coverage {a.zim} z{a.zooms}: land={land} ocean={ocean} "
-          f"blank-land={blank_land} missing-land={missing_land}")
+          f"blank-land={blank_land} missing-land={missing_land} "
+          f"flat-but-real={flat_land}")
     if bad:
         print(f"[FAIL] {bad} land tiles with no terrain:")
         for o in offenders:
