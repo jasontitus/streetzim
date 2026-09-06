@@ -116,14 +116,19 @@ wait "$DOCKER_PID"
 rc=$?
 [ "$rc" -eq 0 ] || { log "tilemaker FAILED rc=$rc — leaving $PART for inspection"; [ "$rc" = "137" ] && log "  rc=137 = OOM-killed or stopped; if OOM, raise MEMORY (currently $MEMORY)"; exit "$rc"; }
 
+# NB: probe with a capped subquery and per-zoom indexed lookups, never a
+# bare `count(*)`. On a 114 GB / 342M-row MBTiles on a spinning disk that
+# full scan ran at ~3 MB/s — about 10 hours to verify a file tilemaker had
+# already finished writing.
 [ -f "$PART" ] || { log "FATAL: tilemaker produced $(ls -ld "$PART" 2>/dev/null || echo nothing) — expected an MBTiles file"; exit 6; }
 /storage/streetzim/venv-linux/bin/python3 -c "
 import sqlite3,sys
 c=sqlite3.connect('file:$PART?mode=ro', uri=True)
-n=c.execute('select count(*) from tiles').fetchone()[0]
+n=c.execute('select count(*) from (select 1 from tiles limit 5001)').fetchone()[0]
 md=dict(c.execute('select name,value from metadata'))
-print(f'  {n} tiles, maxzoom={md.get(\"maxzoom\")}, format={md.get(\"format\")}')
-sys.exit(0 if n>1000 else 1)" 2>&1 | tee -a "$LOG" || { log "FATAL: $PART is not a usable MBTiles"; exit 6; }
+probe=[c.execute('select 1 from tiles where zoom_level=? limit 1',(z,)).fetchone() for z in (0,6,10,14)]
+print(f'  >={n} tiles (capped probe), maxzoom={md.get(\"maxzoom\")}, format={md.get(\"format\")}, zoom-probe={[bool(x) for x in probe]}')
+sys.exit(0 if n>1000 and all(probe) else 1)" 2>&1 | tee -a "$LOG" || { log "FATAL: $PART is not a usable MBTiles"; exit 6; }
 mv -f "$PART" "$OUT"
 log "=== mbtiles done: $(du -h "$OUT" | cut -f1)"
 
