@@ -274,8 +274,22 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
   if TERRAIN_STRIPE_TOLERATE=10 timeout 1800 "$PY" cloud/validate_zim.py "$ZIM" >> "$LOG" 2>&1; then log "  gate validate: OK"; else G="$G validate"; log "  gate validate: FAIL"; fi
   ROUTE_OUT=$(timeout 2400 "$PY" cloud/route_cli.py --zim="$ZIM" --src="$SRC" --dst="$DST" --mode=all --max-pops=5000000 2>&1)
   echo "$ROUTE_OUT" | tail -6 | sed 's/^/    /' >> "$LOG"
-  NOK=$(echo "$ROUTE_OUT" | grep -c "route OK")   # --mode=all runs astar + hwy2
-  if [ "${NOK:-0}" -ge 2 ]; then log "  gate routing: OK (both modes)"; else G="$G routing"; log "  gate routing: FAIL (${NOK:-0}/2 modes)"; fi
+  # --mode=all runs astar + hwy2. The A* result is the gate. The highway
+  # two-pass is only meaningful when the pair is long enough to have a
+  # highway leg at all — on a short/island pair it can legitimately find
+  # no highway entry (Honolulu -> Kailua, 18 km) while A* routes fine.
+  CROW=$("$PY" -c "
+import math,sys
+a=[float(x) for x in '$SRC'.split(',')]; b=[float(x) for x in '$DST'.split(',')]
+p=math.pi/180; d=math.acos(min(1,math.sin(a[0]*p)*math.sin(b[0]*p)+math.cos(a[0]*p)*math.cos(b[0]*p)*math.cos((b[1]-a[1])*p)))*6371
+print(int(d))" 2>/dev/null || echo 0)
+  ASTAR_OK=$(echo "$ROUTE_OUT" | awk '/=== mode: astar/{f=1} f&&/route OK/{print 1; exit} /=== mode: hwy2/{f=0}')
+  HWY_OK=$(echo "$ROUTE_OUT" | awk '/=== mode: hwy2/{f=1} f&&/route OK/{print 1; exit}')
+  if [ "${ASTAR_OK:-0}" = "1" ] && { [ "${HWY_OK:-0}" = "1" ] || [ "${CROW:-0}" -lt 40 ]; }; then
+    log "  gate routing: OK (astar${HWY_OK:+ + hwy2}; crow ${CROW} km)"
+  else
+    G="$G routing"; log "  gate routing: FAIL (astar=${ASTAR_OK:-0} hwy2=${HWY_OK:-0} crow=${CROW} km)"
+  fi
   SN=$(smoke_search "$ZIM" "$SEARCH"); FN=$(smoke_find "$ZIM")
   [ "${SN:-0}" -ge 1 ] && log "  gate search('$SEARCH'): $SN" || { G="$G search"; log "  gate search: FAIL ($SN)"; }
   [ "${FN:-0}" -ge 1 ] && log "  gate find(restaurants): $FN" || { G="$G find"; log "  gate find: FAIL ($FN)"; }

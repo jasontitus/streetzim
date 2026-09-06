@@ -11,7 +11,7 @@
 # --- local (small, fast; run first) ---
 silicon-valley	Silicon Valley	-122.6,37.2,-121.7,37.9	local	37.7749,-122.4194	37.3382,-121.8863	Palo Alto	
 washington-dc	Washington, D.C.	-77.12,38.79,-76.91,38.99	local	38.9076,-77.0723	38.8973,-77.0063	Georgetown	pair Georgetown->Union Station (7.3 km); the Capitol grounds are access-restricted and snap into an unreachable pocket
-hawaii	Hawaii	-178.5,18.5,-154.5,28.5	local	21.3099,-157.8581	21.3924,-157.7396	Honolulu	pair Honolulu->Kailua on Oahu (islands are disconnected); the old Pearl Harbor-side endpoint snapped 285 m off-road
+hawaii	Hawaii	-178.5,18.5,-154.5,28.5	local	21.2793,-157.8294	21.4180,-157.8036	Honolulu	pair Waikiki->Kaneohe via H-3 (routes in both engines, 23 km highway leg); Kailua had no highway entry and Pearl Harbor snapped 285 m off-road
 chicago-metro	Chicago Metro	-88.5,41.0,-87.0,42.5	local	41.9742,-87.9073	41.8781,-87.6298	Chicago	
 nyc-metro	NYC Metro	-74.6,40.4,-73.4,41.4	local	40.7831,-73.9712	40.6413,-73.7781	Brooklyn	
 greater-la	Greater Los Angeles	-119.0,33.5,-117.0,34.8	local	33.9416,-118.4085	34.0928,-118.3287	Hollywood	
