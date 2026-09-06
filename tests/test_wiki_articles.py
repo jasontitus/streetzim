@@ -2,6 +2,7 @@
 
 Run: python tests/test_wiki_articles.py   (or via pytest)
 """
+import re
 import os
 import sys
 import tempfile
@@ -275,3 +276,39 @@ class ReviewRegressionTests(unittest.TestCase):
                                 sleep=0, log=lambda *_: None, images="all",
                                 max_images_per_article=5, source=FakeWikiSource({"Listy": many}, imgs))
         self.assertEqual(len([p for p in stored if p.startswith("wiki-image/")]), 5)
+
+
+class EscapedMarkupTests(unittest.TestCase):
+    """Escaped markup in article text used to fail the release gate.
+
+    Some articles carry `<a href="...">` typed literally into the
+    wikitext, so Kiwix serves `&lt;a href="..."&lt;/a&gt`. The unwrap pass
+    only matches real tags, so the text survived, rendered as garbage, and
+    zimcheck's link scanner read the bare href out of it and reported a
+    dangling internal link — failing nyc-metro and new-york-state on
+    2026-09-06.
+    """
+
+    def _body(self, inner):
+        return wa.clean_article_html(
+            f'<div class="mw-parser-output">{inner}</div>', "T",
+            "https://en.wikipedia.org/wiki/T")
+
+    def _internal_hrefs(self, page):
+        return [h for h in re.findall(r'href="([^"]+)"', page)
+                if "creativecommons.org" not in h and "en.wikipedia.org" not in h]
+
+    def test_escaped_anchor_leaves_no_scannable_href(self):
+        page = self._body('<p>Moving &lt;a href="yzppassaic.org"&lt;/a&gt) soon.</p>')
+        self.assertEqual(self._internal_hrefs(page), [])
+        self.assertIn("Moving", page)
+
+    def test_escaped_img_leaves_no_scannable_src(self):
+        page = self._body('<p>See &lt;img src="Foo.jpg"&gt; here.</p>')
+        self.assertNotIn('src="Foo.jpg"', page)
+        self.assertIn("here", page)
+
+    def test_plain_prose_with_angle_brackets_survives(self):
+        page = self._body('<p>If a &lt; b and x &lt;= y then f(a) &lt; f(b).</p>')
+        self.assertIn("a &lt; b", page)
+        self.assertIn("&lt;= y", page)

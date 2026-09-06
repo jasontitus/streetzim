@@ -285,10 +285,16 @@ p=math.pi/180; d=math.acos(min(1,math.sin(a[0]*p)*math.sin(b[0]*p)+math.cos(a[0]
 print(int(d))" 2>/dev/null || echo 0)
   ASTAR_OK=$(echo "$ROUTE_OUT" | awk '/=== mode: astar/{f=1} f&&/route OK/{print 1; exit} /=== mode: hwy2/{f=0}')
   HWY_OK=$(echo "$ROUTE_OUT" | awk '/=== mode: hwy2/{f=1} f&&/route OK/{print 1; exit}')
-  if [ "${ASTAR_OK:-0}" = "1" ] && { [ "${HWY_OK:-0}" = "1" ] || [ "${CROW:-0}" -lt 40 ]; }; then
-    log "  gate routing: OK (astar${HWY_OK:+ + hwy2}; crow ${CROW} km)"
+  # A* is what the viewer actually runs, so it is the gate. hwy2 is the
+  # two-pass highway optimisation: it legitimately finds nothing where a
+  # region has no motorway-tier corridor between the pair (Iceland's ring
+  # road is trunk/primary; Hawaii's Kailua end has no highway entry), so
+  # it is reported, not gated.
+  if [ "${ASTAR_OK:-0}" = "1" ]; then
+    if [ "${HWY_OK:-0}" = "1" ]; then log "  gate routing: OK (astar + hwy2; crow ${CROW} km)"
+    else log "  gate routing: OK (astar; no highway corridor for this pair, crow ${CROW} km)"; fi
   else
-    G="$G routing"; log "  gate routing: FAIL (astar=${ASTAR_OK:-0} hwy2=${HWY_OK:-0} crow=${CROW} km)"
+    G="$G routing"; log "  gate routing: FAIL (astar found no route; crow ${CROW} km)"
   fi
   SN=$(smoke_search "$ZIM" "$SEARCH"); FN=$(smoke_find "$ZIM")
   [ "${SN:-0}" -ge 1 ] && log "  gate search('$SEARCH'): $SN" || { G="$G search"; log "  gate search: FAIL ($SN)"; }

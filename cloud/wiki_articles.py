@@ -239,6 +239,16 @@ def clean_article_html(html: str, title: str, source_url: str,
                   " ", h, flags=re.S | re.I)
     # Unwrap links → keep their text.
     h = re.sub(r"</?a\b[^>]*>", "", h, flags=re.I)
+    # Some articles contain ESCAPED markup as literal text — an editor typed
+    # `<a href="example.org">` into the wikitext, so Kiwix serves
+    # `&lt;a href="example.org"&lt;/a&gt`. The unwrap above cannot see it, it
+    # renders as garbage, and zimcheck's link scanner reads the bare
+    # `href="..."` out of the text and reports a dangling internal link —
+    # which fails the release gate (nyc-metro and new-york-state,
+    # 2026-09-06, on Yeshivas_Chofetz_Chaim). Drop escaped tags that carry
+    # an attribute; plain "a &lt; b" prose is untouched.
+    h = re.sub(r"&lt;\s*/?\s*[a-zA-Z][^&]{0,300}?=[^&]{0,300}?(?:&gt;|(?=&lt;))", "", h)
+    h = re.sub(r"&lt;\s*/\s*[a-zA-Z]+\s*&gt;?", "", h)
     # Whitelist tags, strip attributes; drop others (keep inner text).
     def keep(m: re.Match) -> str:
         closing, name = m.group(1), m.group(2).lower()
