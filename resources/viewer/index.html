@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>OpenStreetMap Offline</title>
 <!-- Suppress the browser's auto-fetch of /favicon.ico — outside our SW
      scope, so a 404 there fires a console error in the smoke harness. -->
@@ -219,8 +219,9 @@
   /* Mobile: bottom sheet, half height, full width */
   @media (max-width: 600px) {
     #wiki-panel {
-      top: auto; left: 0; right: 0; bottom: 0;
+      top: auto; left: 0; right: 0; bottom: var(--bottom-inset, 0px);
       width: 100%; max-height: calc(var(--app-height, 100vh) * 0.45);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
       border-radius: var(--radius) var(--radius) 0 0;
     }
     #wiki-panel.wiki-visible {
@@ -292,7 +293,7 @@
   .wiki-item-nodesc .wiki-item-name { margin-bottom: 0; }
   #wiki-refresh {
     display: none; flex-shrink: 0;
-    padding: 10px 16px; border-top: 1px solid var(--border);
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
     text-align: center;
   }
   #wiki-refresh button {
@@ -862,9 +863,9 @@
       <button id="wiki-panel-close" title="Close">&times;</button>
     </div>
   </div>
+  <div id="wiki-refresh"><button>Show in this area</button></div>
   <div id="wiki-panel-loading">Loading entries...</div>
   <div id="wiki-panel-list"></div>
-  <div id="wiki-refresh"><button>Show in this area</button></div>
 </div>
 <div id="search-container">
   <input id="search-input" type="text" placeholder="Search places, streets, POIs..." autocomplete="off">
@@ -1077,13 +1078,27 @@ function openWikiArticle(path) {
 function setViewportVars() {
   try {
     var de = document.documentElement;
-    de.style.setProperty('--app-height', window.innerHeight + 'px');
-    de.style.setProperty('--bottom-inset',
-      Math.max(0, de.clientHeight - window.innerHeight) + 'px');
+    // iOS Safari: window.innerHeight still spans under the bottom toolbar
+    // and the home-indicator band, so anything anchored to bottom:0 sits
+    // behind them (the "Directions to here" / "Show in this area" buttons
+    // were unreachable on an iPhone). visualViewport is what is really
+    // visible; size the app to it and push bottom sheets up by the gap.
+    var vv = window.visualViewport;
+    var visible = (vv && vv.height) ? vv.height : window.innerHeight;
+    var inset = Math.max(0, de.clientHeight - window.innerHeight);
+    if (vv && vv.height) {
+      inset = Math.max(inset, window.innerHeight - vv.height - (vv.offsetTop || 0));
+    }
+    de.style.setProperty('--app-height', Math.round(visible) + 'px');
+    de.style.setProperty('--bottom-inset', Math.round(inset) + 'px');
   } catch (e) {}
 }
 setViewportVars();
 window.addEventListener('resize', setViewportVars);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', setViewportVars);
+  window.visualViewport.addEventListener('scroll', setViewportVars);
+}
 if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', setViewportVars);
 }
@@ -2900,7 +2915,7 @@ function _showPlaceDetail(map, r, idx) {
     + 'border-radius:18px 18px 0 0;'
     + 'box-shadow:0 -8px 28px rgba(0,0,0,0.28);'
     + 'transform:translateY(100%); transition:transform .25s ease;'
-    + 'padding:8px 16px max(20px, min(var(--bottom-inset, 0px), 64px));'
+    + 'padding:8px 16px calc(max(20px, min(var(--bottom-inset, 0px), 64px)) + env(safe-area-inset-bottom, 0px));'
     + 'font:14px/1.45 -apple-system,system-ui,sans-serif;'
   );
 
@@ -5220,6 +5235,11 @@ function initWikiSidebar(map, config) {
     wrap.appendChild(back);
 
     var nm = createEl('div', 'wiki-detail-name', name);
+    // Primary action first, directly under the title. At the bottom of the
+    // sheet it sat under iOS Safari's toolbar and could not be tapped.
+    if (coords && map._buildDirectionsButton) {
+      wrap.appendChild(map._buildDirectionsButton(coords[1], coords[0], name));
+    }
     nm.style.cssText = 'font-size:17px;font-weight:700;margin-bottom:6px;color:#1a1a2a;line-height:1.25;word-wrap:break-word;';
     wrap.appendChild(nm);
 
@@ -5247,9 +5267,6 @@ function initWikiSidebar(map, config) {
       var noa = createEl('div', 'wiki-detail-noarticle', 'No bundled article for this place.');
       noa.style.cssText = 'font-size:12px;color:#888;margin-bottom:8px;';
       wrap.appendChild(noa);
-    }
-    if (coords && map._buildDirectionsButton) {
-      wrap.appendChild(map._buildDirectionsButton(coords[1], coords[0], name));
     }
   }
 
