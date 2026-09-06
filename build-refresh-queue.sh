@@ -58,7 +58,7 @@ NODE=/storage/streetzim/.browser-libs/node-v20.18.1-linux-x64/bin/node
 export CHROME_PATH="${CHROME_PATH:-/home/ot/.cache/ms-playwright/chromium-1217/chrome-linux64/chrome}"
 export LD_LIBRARY_PATH=/storage/streetzim/.browser-libs/ex/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}
 
-ONLY=""; SKIP=""; TIERS=""; UPLOAD=1; DRY=0; BROWSER=soft; CONTINUE=0
+ONLY=""; SKIP=""; TIERS=""; UPLOAD=1; DRY=0; BROWSER=soft; CONTINUE=0; REGATE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --only) ONLY=",$2,"; shift 2 ;;
@@ -68,6 +68,7 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY=1; shift ;;
     --browser-smoke) BROWSER="$2"; shift 2 ;;
     --continue) CONTINUE=1; shift ;;
+    --regate) REGATE=1; shift ;;      # today's ZIM exists: skip the build, re-run gates + upload
     -h|--help) sed -n 2,30p "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -229,6 +230,15 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
     row "$ID" overture-failed 0 - "download $OVERTURE_RELEASE"; n_fail=$((n_fail+1)); continue
   fi
 
+  # --regate: a same-day ZIM that already post-dates its PBF is reused and
+  # only the gates + upload run (the case after fixing a smoke pair or a
+  # gate tool — a rebuild would be 10 min to 26 h of identical output).
+  if [ "$REGATE" = "1" ] && [ -s "osm-${ID}-${TODAY}.zim" ] && [ "osm-${ID}-${TODAY}.zim" -nt "$PBF" ]; then
+    # marker one second before the ZIM so the post-build freshness check passes
+    touch -d "@$(( $(stat -c %Y "osm-${ID}-${TODAY}.zim") - 1 ))" "$TMPDIR/.queue-t0-$ID"
+    log "  --regate: reusing osm-${ID}-${TODAY}.zim, skipping the build"
+    BUILD_RC=0; T0=$(date +%s)
+  else
   touch "$TMPDIR/.queue-t0-$ID"   # this run's start: the ZIM must post-date it
   # Wikipedia images: every picture for country-and-smaller tiers; lead
   # picture only for continents unless WIKI_IMAGES is set explicitly
@@ -240,6 +250,7 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
   log "  build (log: ${ID}-rebuild-${TODAY}.log, stdout: ${ID}-build.out, wiki images=$WI)"
   WIKI_IMAGES="$WI" bash /storage/streetzim/build-region-fast.sh "$ID" "$BBOX" "$NAME" > "/storage/streetzim/${ID}-build.out" 2>&1
   BUILD_RC=$?
+  fi
   ZIM=$(ls -t /storage/streetzim/osm-${ID}-20*.zim 2>/dev/null | grep -v '\.tmp$' | head -1)
   MIN=$(( ($(date +%s) - T0) / 60 ))
   if [ "$BUILD_RC" -ne 0 ] || [ -z "$ZIM" ] || [ ! -s "$ZIM" ] || [ ! "$ZIM" -nt "$TMPDIR/.queue-t0-$ID" ]; then
@@ -250,6 +261,14 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
   log "  built $(basename "$ZIM") ($SIZE) in ${MIN} min"
 
   # ---------- gates ----------
+  # A hand-picked smoke coordinate on a plaza, a base or inside a gated
+  # compound fails the routing/browser gates with nothing wrong in the
+  # ZIM (DC's Capitol, Hawaii's Pearl Harbor on the first pilot). When
+  # ONLY those two gates fail, snap the pair onto reachable graph vertices
+  # (cloud/check_smoke_pairs.py --fix) and re-run the gates once.
+  GATE_TRY=0
+  while :; do
+  GATE_TRY=$((GATE_TRY+1))
   G=""
   if timeout 900 "$PY" cloud/check_terrain_coverage.py --zooms 10-12 -- "$ZIM" "$BBOX" >> "$LOG" 2>&1; then log "  gate terrain: OK"; else G="$G terrain"; log "  gate terrain: FAIL"; fi
   if TERRAIN_STRIPE_TOLERATE=10 timeout 1800 "$PY" cloud/validate_zim.py "$ZIM" >> "$LOG" 2>&1; then log "  gate validate: OK"; else G="$G validate"; log "  gate validate: FAIL"; fi
@@ -266,6 +285,22 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
     else log "  gate browser: FAIL (soft — see ${ID}-smoke-${TODAY}.log)"; fi
   fi
 
+  if [ -n "$G" ] && [ "$GATE_TRY" -eq 1 ] && [[ "$G" =~ ^( (routing|browser))+$ ]]; then
+    log "  routing/browser gate(s) failed — checking the smoke pair against this ZIM"
+    if timeout 900 "$PY" cloud/check_smoke_pairs.py --fix --only "$ID" >> "$LOG" 2>&1; then
+      NEWROW=$(awk -F'\t' -v id="$ID" '$1==id' "$REGISTRY")
+      NSRC=$(echo "$NEWROW" | cut -f5); NDST=$(echo "$NEWROW" | cut -f6)
+      if [ "$NSRC" != "$SRC" ] || [ "$NDST" != "$DST" ]; then
+        log "  pair snapped to vertices ($SRC -> $NSRC, $DST -> $NDST); re-running gates"
+        SRC="$NSRC"; DST="$NDST"; continue
+      fi
+      log "  pair unchanged (gaps already small) — the failure is not the coordinates"
+    else
+      log "  pair is unroutable on this ZIM — fix it by hand in $REGISTRY, then --regate"
+    fi
+  fi
+  break
+  done
   if [ -n "$G" ]; then
     log "  GATES FAILED:$G — NOT uploading $(basename "$ZIM")"
     row "$ID" gate-failed "$MIN" "$SIZE" "$G"; n_fail=$((n_fail+1)); continue
