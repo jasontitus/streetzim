@@ -755,6 +755,12 @@ def _terrain_vrt_for_zoom(z, mosaic_path, low_zoom_world_vrt=None):
     return mosaic_path
 
 
+# A terrain-RGB tile holding real elevation compresses to a few hundred
+# bytes at minimum; 44-byte files are the signature of a DEM fetch that
+# failed. Anything smaller than this is regenerated rather than reused.
+_TERRAIN_MIN_REUSE_BYTES = int(os.environ.get("TERRAIN_MIN_REUSE_BYTES", "200"))
+
+
 def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
                            low_zoom_world_vrt=None):
     """Download Copernicus GLO-30 DEM and generate terrain-RGB tiles.
@@ -1002,10 +1008,25 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
         # Streaming generator — yields args one at a time, skipping cached tiles
         def tile_arg_gen(zoom, _vrt=vrt_for_z):
             for tile in mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=zoom):
-                # Skip already-cached tiles
+                # Reuse a cached tile only if it is big enough to hold real
+                # elevation. A DEM download that failed at generation time
+                # leaves a 44-byte blank, and `isfile()` happily reused it
+                # for every later build — that is how the blank-terrain
+                # Carolinas shipped in 2026-07, and why alaska (228),
+                # argentina (406) and mexico (4,491) failed the terrain gate
+                # in this round with the same stale entries.
+                #
+                # Below the threshold, regenerate. Genuinely-blank ocean
+                # tiles simply come back blank (a DEM sample each, ~450
+                # tiles/s), which is a small price for never shipping a
+                # blank mountain range again. TERRAIN_MIN_REUSE_BYTES=0
+                # restores the old reuse-anything behaviour.
                 tile_path = os.path.join(dest_dir, str(zoom), str(tile.x), f"{tile.y}.webp")
-                if os.path.isfile(tile_path):
-                    continue
+                try:
+                    if os.path.getsize(tile_path) >= _TERRAIN_MIN_REUSE_BYTES:
+                        continue
+                except OSError:
+                    pass
                 b = mercantile.bounds(tile)
                 yield (_vrt, tile.x, tile.y, zoom, dest_dir,
                        b.west, b.south, b.east, b.north)
