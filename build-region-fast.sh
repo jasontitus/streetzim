@@ -116,6 +116,27 @@ if [ -f "$URL_CACHE" ]; then
     echo "  url cache: $URL_CACHE ($(du -h "$URL_CACHE" | cut -f1)) policy=drop-record"
 fi
 
+# streetzim-pack compresses clusters with one zstd context per rayon
+# thread. At ZSTD_CLEVEL=22 (windowLog 27) each context is hundreds of MB,
+# so on this 36-core host a large region's pack peaked around 40 GB and
+# Brazil's was OOM-killed after six hours of building (2026-09-07) — the
+# host has no /storage/swapfile active and we cannot enable it.
+#
+# Capping rayon's threads cuts peak memory nearly linearly and leaves the
+# OUTPUT IDENTICAL (same level, same clusters) — it only costs pack
+# wall-time. Scale the cap by the region's PBF, the best proxy we have
+# for manifest size. PACK_THREADS overrides.
+_pbf_gb=$(( $(stat -c%s "$PBF" 2>/dev/null || echo 0) / 1000000000 ))
+if [ -n "${PACK_THREADS:-}" ]; then
+    export RAYON_NUM_THREADS="$PACK_THREADS"
+elif [ "$_pbf_gb" -ge 4 ]; then
+    export RAYON_NUM_THREADS=6
+elif [ "$_pbf_gb" -ge 2 ]; then
+    export RAYON_NUM_THREADS=10
+fi
+[ -n "${RAYON_NUM_THREADS:-}" ] && \
+    echo "  pack: ${_pbf_gb} GB PBF -> RAYON_NUM_THREADS=$RAYON_NUM_THREADS (zstd $ZSTD_CLEVEL, output unchanged)"
+
 "$PY" "$SCRIPT" "${ARGS[@]}" 2>&1 | tee "$LOG"
 
 echo "=== validate @ $(date -Iseconds) ===" | tee -a "$LOG"

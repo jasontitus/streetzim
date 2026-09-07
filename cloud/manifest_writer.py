@@ -338,14 +338,32 @@ class ManifestCreator:
     def _run_packer(self) -> None:
         binary = _resolve_pack_binary()
         cmd = [binary, str(self._manifest_path), self._output_path]
+        _rayon = os.environ.get("RAYON_NUM_THREADS")
         if self._verbose:
             cmd.append("--verbose")
             print(f"  streetzim-pack: {' '.join(cmd)}", flush=True)
         manifest_size = os.path.getsize(self._manifest_path)
         started = time.time()
         try:
+            # resource.getrusage(RUSAGE_CHILDREN) gives the packer's peak
+            # RSS, which is the number that decides whether a region can be
+            # packed on this host at all.
+            import resource
+            _before = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
             subprocess.run(cmd, check=True)
+            _peak = max(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss, _before)
+            print(f"    streetzim-pack peak RSS {_peak / 1048576:.1f} GB"
+                  + (f" (RAYON_NUM_THREADS={_rayon})" if _rayon else " (all cores)"),
+                  flush=True)
         except subprocess.CalledProcessError as e:
+            if getattr(exc, "returncode", None) == -9:
+                raise RuntimeError(
+                    f"streetzim-pack was KILLED (SIGKILL) — almost certainly the "
+                    f"OOM killer. Peak memory scales with rayon threads x "
+                    f"ZSTD_CLEVEL; re-run with a lower PACK_THREADS "
+                    f"(currently {_rayon or 'all cores'}). Manifest preserved at "
+                    f"{self._manifest_path} for inspection."
+                ) from exc
             raise RuntimeError(
                 f"streetzim-pack failed (exit {e.returncode}). "
                 f"Manifest preserved at {self._manifest_path} for inspection."
