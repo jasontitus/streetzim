@@ -197,6 +197,11 @@
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
+  .map-card-date {
+    font-size: 12px; color: var(--text-faint);
+    margin: 2px 0 0; font-variant-numeric: tabular-nums;
+  }
+  .map-card-date time { color: var(--text-dim); font-weight: 500; }
   .map-card-desc {
     font-size: 13px; color: var(--text-dim);
     margin: 0 0 8px;
@@ -388,7 +393,7 @@
       <span class="map-badge badge-satellite">Satellite</span> Sentinel-2 imagery,
       <span class="map-badge badge-wiki">Wikipedia links</span> Wikidata cross-refs.
     </p>
-    <p class="updated">Last updated: 2026-09-06 03:22 UTC · build <span id="build-stamp">…</span></p>
+    <p class="updated">Last updated: 2026-09-07 15:16 UTC · build <span id="build-stamp">…</span></p>
 <script>
 fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
   .then(function(r) { return r.ok ? r.text() : ''; })
@@ -408,6 +413,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Europe</div>
           <div class="map-card-size">62.1 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-06">6 May 2026</time></div>
         <p class="map-card-desc">United Kingdom, Ireland, France, Spain, Portugal, Germany, Italy, Netherlands, Belgium, Switzerland, Austria, Poland, Greece, Sweden, Norway, Finland, Denmark, the Baltics, Ukraine, Georgia, Armenia, Azerbaijan, Cyprus, and dozens more.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -421,6 +427,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">United States</div>
           <div class="map-card-size">38.0 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-05">5 May 2026</time></div>
         <p class="map-card-desc">Continental United States &mdash; all 48 contiguous states and Washington, D.C.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -434,6 +441,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">South America</div>
           <div class="map-card-size">20.7 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-08">8 May 2026</time></div>
         <p class="map-card-desc">Continental South America &mdash; Colombia, Venezuela, Guyana, Suriname, French Guiana, Ecuador, Peru, Bolivia, Paraguay, Uruguay, Chile, the Amazon, the Andes, the Atacama, and Patagonia. (Brazil and Argentina ship as their own dedicated ZIMs.)</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -447,6 +455,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Africa</div>
           <div class="map-card-size">20.4 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-04-29">29 Apr 2026</time></div>
         <p class="map-card-desc">All of Africa &mdash; Algeria, Egypt, Ethiopia, Kenya, Morocco, Nigeria, South Africa, Tanzania, and 40+ more countries.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -460,6 +469,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Indian Subcontinent</div>
           <div class="map-card-size">12.0 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-08">8 May 2026</time></div>
         <p class="map-card-desc">India, Pakistan, Bangladesh, Sri Lanka, Nepal, Bhutan, and the Maldives.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -473,6 +483,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">China</div>
           <div class="map-card-size">19.5 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-09">9 May 2026</time></div>
         <p class="map-card-desc">China &mdash; Beijing, Shanghai, Guangzhou, Shenzhen, Chengdu, Chongqing, Xi&rsquo;an, Wuhan, Hangzhou, Hong Kong, and Macau, plus the Great Wall, the Yangtze, the Tibetan Plateau, and the Gobi.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -486,6 +497,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Russia</div>
           <div class="map-card-size">24.5 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-12">12 May 2026</time></div>
         <p class="map-card-desc">Russia &mdash; Moscow, Saint Petersburg, Novosibirsk, Yekaterinburg, Kazan, Nizhny Novgorod, Sochi, Vladivostok; the Volga, the Urals, the Caucasus, Lake Baikal; the Trans-Siberian Railway from the Baltic to the Sea of Japan.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -498,6 +510,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Australia &amp; New Zealand</div>
           <div class="map-card-size">6.3 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-04-28">28 Apr 2026</time></div>
         <p class="map-card-desc">Australia and New Zealand &mdash; Sydney, Melbourne, Brisbane, Perth, Auckland, Wellington, the Great Barrier Reef, Outback, and Southern Alps.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -511,6 +524,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Southeast Asia</div>
           <div class="map-card-size">9.7 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-09">9 May 2026</time></div>
         <p class="map-card-desc">Thailand, Vietnam, Myanmar, Cambodia, Laos, Malaysia, Singapore, Indonesia, the Philippines, Brunei, and Timor-Leste &mdash; Bangkok, Hanoi, Ho Chi Minh City, Yangon, Kuala Lumpur, Jakarta, Manila, Bali, Borneo, the Mekong Delta, and the South China Sea.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -524,6 +538,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Canada</div>
           <div class="map-card-size">25.7 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-04-27">27 Apr 2026</time></div>
         <p class="map-card-desc">All of Canada &mdash; Toronto, Montreal, Vancouver, Calgary, Ottawa, Quebec City, Edmonton, Halifax, the Rockies, Banff, the Great Lakes, the Maritimes, and the Yukon and Northwest Territories.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -538,6 +553,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">West Asia</div>
           <div class="map-card-size">10.3 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-04-27">27 Apr 2026</time></div>
         <p class="map-card-desc">Turkey, Syria, Lebanon, Israel, Palestine, Jordan, Iraq, Iran, Kuwait, Saudi Arabia, Bahrain, Qatar, UAE, Oman, Yemen, and parts of Egypt, Afghanistan, and Pakistan.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -551,6 +567,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Central Asia</div>
           <div class="map-card-size">4.4 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-04-26">26 Apr 2026</time></div>
         <p class="map-card-desc">Central Asia &mdash; Kazakhstan, Uzbekistan, Turkmenistan, Tajikistan, Kyrgyzstan, Afghanistan, and the Caucasus. Almaty, Tashkent, Bishkek, Ashgabat, Dushanbe, Kabul, the Pamirs, and the Silk Road.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -564,6 +581,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Korea &amp; Mongolia</div>
           <div class="map-card-size">5.2 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-11">11 May 2026</time></div>
         <p class="map-card-desc">The Korean Peninsula and Mongolia &mdash; Seoul, Busan, Daegu, Incheon, Pyongyang, Ulaanbaatar, Darkhan; the Gobi, the Khangai mountains, the DMZ, and the Sea of Japan coast.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -576,6 +594,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Caucasus</div>
           <div class="map-card-size">1.1 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-11">11 May 2026</time></div>
         <p class="map-card-desc">The Caucasus &mdash; Georgia, Armenia, and Azerbaijan, with the southern Russian Caucasus and eastern Turkey. Tbilisi, Yerevan, Baku, Batumi, the Greater Caucasus range, Mount Elbrus, Lake Sevan, and the Caspian coast.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -589,6 +608,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Pacific Islands</div>
           <div class="map-card-size">1.9 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-12">12 May 2026</time></div>
         <p class="map-card-desc">Papua New Guinea, Fiji, Solomon Islands, Vanuatu, New Caledonia, Samoa, Tonga, Palau, Micronesia, and the Marshall Islands &mdash; Port Moresby, Suva, Nadi, Nouméa, Apia, and Nuku'alofa.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -601,6 +621,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">West Africa</div>
           <div class="map-card-size">2.7 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-12">12 May 2026</time></div>
         <p class="map-card-desc">Nigeria, Ghana, Côte d'Ivoire, Senegal, Mali, Burkina Faso, Guinea, Benin, Togo, Sierra Leone, Liberia, and Niger &mdash; Lagos, Accra, Abidjan, Dakar, Abuja, Bamako, Ouagadougou, and the Gulf of Guinea coast.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -613,6 +634,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Southern Africa</div>
           <div class="map-card-size">2.3 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-12">12 May 2026</time></div>
         <p class="map-card-desc">South Africa, Namibia, Botswana, Zimbabwe, Mozambique, Zambia, Malawi, Lesotho, and Eswatini &mdash; Johannesburg, Cape Town, Durban, Pretoria, Windhoek, Gaborone, Harare, Maputo, Lusaka, the Kalahari, Kruger, and the Cape.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -632,6 +654,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Central America &amp; Caribbean</div>
           <div class="map-card-size">2.2 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-11">11 May 2026</time></div>
         <p class="map-card-desc">Central America and the Caribbean &mdash; Yucatán, Belize, Guatemala, Honduras, El Salvador, Nicaragua, Costa Rica, Panama, Cuba, Jamaica, Hispaniola, Cayman Islands, Puerto Rico, the Lesser Antilles, and the southern Bahamas.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -645,6 +668,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Himalayas</div>
           <div class="map-card-size">5.2 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-04-29">29 Apr 2026</time></div>
         <p class="map-card-desc">The Himalayas, Karakoram, Hindu Kush, and Pamir &mdash; Nepal, Bhutan, Tibet, Sikkim, Ladakh, Kashmir, the Indus and Brahmaputra valleys. Kathmandu, Pokhara, Lhasa, Thimphu, Leh, Hunza, Everest, K2, Kanchenjunga, and Annapurna.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -658,6 +682,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Baltics</div>
           <div class="map-card-size">1.5 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-10">10 May 2026</time></div>
         <p class="map-card-desc">Estonia, Latvia, and Lithuania &mdash; Tallinn, Riga, Vilnius, and the Baltic Sea coast.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -672,6 +697,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Brazil</div>
           <div class="map-card-size">15.9 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-07">7 May 2026</time></div>
         <p class="map-card-desc">All of Brazil &mdash; São Paulo, Rio de Janeiro, Brasília, Salvador, Belo Horizonte, Fortaleza, Manaus, the Amazon, Pantanal, Iguaçu Falls, and the Atlantic coast.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -685,6 +711,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Argentina</div>
           <div class="map-card-size">3.1 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-08">8 May 2026</time></div>
         <p class="map-card-desc">Argentina &mdash; Buenos Aires, Córdoba, Rosario, Mendoza, Bariloche, the Pampas, the Andes, Patagonia, and Tierra del Fuego.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -698,6 +725,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Mexico</div>
           <div class="map-card-size">7.7 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-12">12 May 2026</time></div>
         <p class="map-card-desc">All of Mexico &mdash; Mexico City, Guadalajara, Monterrey, Puebla, Tijuana, Cancún and the Riviera Maya, Oaxaca, the Yucatán Peninsula, Baja California, the Sierra Madre, and both the Pacific and Gulf coasts.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -708,12 +736,13 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Ukraine, Moldova &amp; Western Russia</div>
-          <div class="map-card-size">4.2 GB</div>
+          <div class="map-card-size">4.8 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">Ukraine and Moldova in full (including Crimea), plus the western Russian frontier &mdash; Volgograd, Rostov, Sochi, Krasnodar, the Black Sea coast, and the Caucasus foothills.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-ukraine/osm-ukraine-2026-05-05b.zim" data-track="download" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia">Download</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-ukraine/osm-ukraine-2026-09-06.zim" data-track="download" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia">Download</a>
           <a class="btn btn-secondary" href="/torrents/ukraine.torrent" data-track="torrent" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-ukraine" data-track="details" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia">Info</a>
         </div>
@@ -721,12 +750,13 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Japan</div>
-          <div class="map-card-size">4.8 GB</div>
+          <div class="map-card-size">5.6 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">Japan &mdash; all four main islands (Honshu, Hokkaido, Kyushu, Shikoku), Okinawa, and the Ryukyu archipelago. Tokyo, Osaka, Kyoto, Nagoya, Sapporo, Fukuoka, Hiroshima, and more.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-japan/osm-japan-2026-04-28.zim" data-track="download" data-region="japan" data-title="Japan">Download</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-japan/osm-japan-2026-09-06.zim" data-track="download" data-region="japan" data-title="Japan">Download</a>
           <a class="btn btn-secondary" href="/torrents/japan.torrent" data-track="torrent" data-region="japan" data-title="Japan">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-japan" data-track="details" data-region="japan" data-title="Japan">Info</a>
         </div>
@@ -734,12 +764,13 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Iran</div>
-          <div class="map-card-size">2.4 GB</div>
+          <div class="map-card-size">2.9 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">Iran &mdash; from the Caspian Sea to the Persian Gulf, including Tehran, Isfahan, Shiraz, and Mashhad.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-iran/osm-iran-2026-05-11.zim" data-track="download" data-region="iran" data-title="Iran">Download</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-iran/osm-iran-2026-09-06.zim" data-track="download" data-region="iran" data-title="Iran">Download</a>
           <a class="btn btn-secondary" href="/torrents/iran.torrent" data-track="torrent" data-region="iran" data-title="Iran">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-iran" data-track="details" data-region="iran" data-title="Iran">Info</a>
         </div>
@@ -747,12 +778,13 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Egypt</div>
-          <div class="map-card-size">1.2 GB</div>
+          <div class="map-card-size">1.5 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">Egypt &mdash; Cairo, Alexandria, Giza, Luxor, Aswan, the Nile Valley, Sinai Peninsula, and the Red Sea coast.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-egypt/osm-egypt-2026-04-26c.zim" data-track="download" data-region="egypt" data-title="Egypt">Download</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-egypt/osm-egypt-2026-09-06.zim" data-track="download" data-region="egypt" data-title="Egypt">Download</a>
           <a class="btn btn-secondary" href="/torrents/egypt.torrent" data-track="torrent" data-region="egypt" data-title="Egypt">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-egypt" data-track="details" data-region="egypt" data-title="Egypt">Info</a>
         </div>
@@ -762,6 +794,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Iceland</div>
           <div class="map-card-size">366 MB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-11">11 May 2026</time></div>
         <p class="map-card-desc">Iceland &mdash; Reykjavík, Akureyri, the Ring Road, Þingvellir, Geysir, Gullfoss, Vík, Jökulsárlón, Snæfellsnes, the Westfjords, and Vatnajökull.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -773,12 +806,13 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Turkey</div>
-          <div class="map-card-size">3.0 GB</div>
+          <div class="map-card-size">3.4 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">Turkey &mdash; Istanbul, Ankara, İzmir, Bursa, Antalya, Konya, Gaziantep, Trabzon, Cappadocia, Pamukkale, Ephesus, the Bosporus, the Aegean coast, and the Anatolian plateau.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-turkey/osm-turkey-2026-05-11c.zim" data-track="download" data-region="turkey" data-title="Turkey">Download</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-turkey/osm-turkey-2026-09-06.zim" data-track="download" data-region="turkey" data-title="Turkey">Download</a>
           <a class="btn btn-secondary" href="/torrents/turkey.torrent" data-track="torrent" data-region="turkey" data-title="Turkey">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-turkey" data-track="details" data-region="turkey" data-title="Turkey">Info</a>
         </div>
@@ -786,12 +820,13 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">South Korea</div>
-          <div class="map-card-size">900 MB</div>
+          <div class="map-card-size">1.1 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">South Korea &mdash; Seoul, Busan, Incheon, Daegu, Daejeon, Gwangju, Suwon, Jeju Island, the DMZ, Seoraksan, and Hallasan.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-south-korea/osm-south-korea-2026-05-11c.zim" data-track="download" data-region="south-korea" data-title="South Korea">Download</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-south-korea/osm-south-korea-2026-09-06.zim" data-track="download" data-region="south-korea" data-title="South Korea">Download</a>
           <a class="btn btn-secondary" href="/torrents/south-korea.torrent" data-track="torrent" data-region="south-korea" data-title="South Korea">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-south-korea" data-track="details" data-region="south-korea" data-title="South Korea">Info</a>
         </div>
@@ -802,6 +837,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">East Coast US</div>
           <div class="map-card-size">8.9 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-04-27">27 Apr 2026</time></div>
         <p class="map-card-desc">U.S. East Coast from Maine to Florida &mdash; New York, Boston, Philadelphia, Washington D.C., Atlanta, Miami, and the entire Eastern Seaboard.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -815,6 +851,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Midwest United States</div>
           <div class="map-card-size">7.2 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-04-29">29 Apr 2026</time></div>
         <p class="map-card-desc">Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, North Dakota, South Dakota, Nebraska, and Kansas.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -828,6 +865,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">West Coast US</div>
           <div class="map-card-size">4.8 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-04-26">26 Apr 2026</time></div>
         <p class="map-card-desc">U.S. West Coast: Washington, Oregon, and California &mdash; Seattle, Portland, San Francisco, Los Angeles, San Diego, and everything in between.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -841,6 +879,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Central US</div>
           <div class="map-card-size">6.7 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-04-26">26 Apr 2026</time></div>
         <p class="map-card-desc">The Mountain West and surrounds &mdash; Utah, Colorado, Wyoming, Montana, Idaho, Nevada, Arizona, and New Mexico. Salt Lake City, Denver, Phoenix, Albuquerque, Yellowstone, Grand Canyon, and the Rockies.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -855,6 +894,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">California</div>
           <div class="map-card-size">3.6 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">All of California &mdash; from the Oregon border to Mexico, the Pacific coast to the Sierra Nevada.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -866,12 +906,13 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Hawaii</div>
-          <div class="map-card-size">119 MB</div>
+          <div class="map-card-size">242 MB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">The Hawaiian Islands &mdash; Honolulu, Hilo, Kahului; O&lsquo;ahu, Maui, Hawai&lsquo;i (Big Island), Kaua&lsquo;i, Moloka&lsquo;i, and Lāna&lsquo;i; Mauna Kea, Mauna Loa, Haleakalā, Pearl Harbor, and the Nā Pali coast.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-hawaii/osm-hawaii-2026-05-12.zim" data-track="download" data-region="hawaii" data-title="Hawaii">Download</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-hawaii/osm-hawaii-2026-09-06.zim" data-track="download" data-region="hawaii" data-title="Hawaii">Download</a>
           <a class="btn btn-secondary" href="/torrents/hawaii.torrent" data-track="torrent" data-region="hawaii" data-title="Hawaii">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-hawaii" data-track="details" data-region="hawaii" data-title="Hawaii">Info</a>
         </div>
@@ -881,6 +922,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Alaska</div>
           <div class="map-card-size">3.0 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-11">11 May 2026</time></div>
         <p class="map-card-desc">Alaska &mdash; Anchorage, Fairbanks, Juneau, Sitka, Ketchikan, Nome, Barrow; Denali, the Brooks Range, the Aleutians, the Inside Passage, Prince William Sound, the Yukon, and the Arctic.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -894,6 +936,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">New York State</div>
           <div class="map-card-size">2.5 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-12">12 May 2026</time></div>
         <p class="map-card-desc">All of New York State &mdash; New York City, Albany, Buffalo, Rochester, Syracuse, Yonkers; Long Island, the Hudson Valley, the Catskills, the Adirondacks, the Finger Lakes, Niagara Falls, and the Thousand Islands.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -904,12 +947,13 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Florida</div>
-          <div class="map-card-size">1.9 GB</div>
+          <div class="map-card-size">2.0 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">All of Florida &mdash; Miami, Orlando, Tampa, Jacksonville, St. Petersburg, Tallahassee, Fort Lauderdale; the Everglades, the Keys, Cape Canaveral, the Atlantic and Gulf coasts, and Walt Disney World.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-florida/osm-florida-2026-05-11.zim" data-track="download" data-region="florida" data-title="Florida">Download</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-florida/osm-florida-2026-09-06.zim" data-track="download" data-region="florida" data-title="Florida">Download</a>
           <a class="btn btn-secondary" href="/torrents/florida.torrent" data-track="torrent" data-region="florida" data-title="Florida">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-florida" data-track="details" data-region="florida" data-title="Florida">Info</a>
         </div>
@@ -917,12 +961,14 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">The Carolinas</div>
-          <div class="map-card-size">1.9 GB</div>
+          <div class="map-card-size">2.1 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">North and South Carolina &mdash; Charlotte, Raleigh, Durham, Greensboro, Winston-Salem, Columbia, Charleston, Myrtle Beach, Wilmington, and Asheville; the Blue Ridge and Great Smoky Mountains, the Research Triangle, and the Outer Banks and Atlantic coast.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-carolinas/osm-carolinas-2026-07-06.zim" data-track="download" data-region="carolinas" data-title="The Carolinas">Download</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-carolinas/osm-carolinas-2026-09-06.zim" data-track="download" data-region="carolinas" data-title="The Carolinas">Download</a>
+          <a class="btn btn-secondary" href="/torrents/carolinas.torrent" data-track="torrent" data-region="carolinas" data-title="The Carolinas">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-carolinas" data-track="details" data-region="carolinas" data-title="The Carolinas">Info</a>
         </div>
       </div>
@@ -931,6 +977,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">New York Metro</div>
           <div class="map-card-size">536 MB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-05-11">11 May 2026</time></div>
         <p class="map-card-desc">The NYC tri-state metropolitan area &mdash; Manhattan, Brooklyn, Queens, the Bronx, Staten Island, Long Island, Westchester, northern New Jersey, and southwestern Connecticut.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -942,12 +989,13 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Chicago Metro</div>
-          <div class="map-card-size">389 MB</div>
+          <div class="map-card-size">597 MB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">Greater Chicago &mdash; the city and Cook, DuPage, Lake, Will, Kane, McHenry counties, plus northwest Indiana and southeast Wisconsin along Lake Michigan.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-chicago-metro/osm-chicago-metro-2026-05-11c.zim" data-track="download" data-region="chicago-metro" data-title="Chicago Metro">Download</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-chicago-metro/osm-chicago-metro-2026-09-06.zim" data-track="download" data-region="chicago-metro" data-title="Chicago Metro">Download</a>
           <a class="btn btn-secondary" href="/torrents/chicago-metro.torrent" data-track="torrent" data-region="chicago-metro" data-title="Chicago Metro">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-chicago-metro" data-track="details" data-region="chicago-metro" data-title="Chicago Metro">Info</a>
         </div>
@@ -955,12 +1003,13 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Greater Los Angeles</div>
-          <div class="map-card-size">599 MB</div>
+          <div class="map-card-size">822 MB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">The Los Angeles metropolitan area &mdash; LA, Long Beach, Anaheim, Santa Monica, Pasadena, Riverside, San Bernardino, Orange County, and the Inland Empire, plus Catalina Island and the Channel Islands.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-greater-la/osm-greater-la-2026-05-11c.zim" data-track="download" data-region="greater-la" data-title="Greater Los Angeles">Download</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-greater-la/osm-greater-la-2026-09-06.zim" data-track="download" data-region="greater-la" data-title="Greater Los Angeles">Download</a>
           <a class="btn btn-secondary" href="/torrents/greater-la.torrent" data-track="torrent" data-region="greater-la" data-title="Greater Los Angeles">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-greater-la" data-track="details" data-region="greater-la" data-title="Greater Los Angeles">Info</a>
         </div>
@@ -968,12 +1017,13 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Texas</div>
-          <div class="map-card-size">3.6 GB</div>
+          <div class="map-card-size">3.9 GB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">Texas, USA &mdash; from the Gulf Coast to the Rio Grande, including Houston, Dallas, San Antonio, Austin, Fort Worth, and El Paso.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-texas/osm-texas-2026-05-11.zim" data-track="download" data-region="texas" data-title="Texas">Download</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-texas/osm-texas-2026-09-06.zim" data-track="download" data-region="texas" data-title="Texas">Download</a>
           <a class="btn btn-secondary" href="/torrents/texas.torrent" data-track="torrent" data-region="texas" data-title="Texas">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-texas" data-track="details" data-region="texas" data-title="Texas">Info</a>
         </div>
@@ -981,12 +1031,13 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Colorado</div>
-          <div class="map-card-size">1.1 GB</div>
+          <div class="map-card-size">925 MB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">The Rocky Mountain state &mdash; Denver, Aspen, Vail, Rocky Mountain National Park, and the Continental Divide.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-colorado/osm-colorado-2026-05-10.zim" data-track="download" data-region="colorado" data-title="Colorado">Download</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-colorado/osm-colorado-2026-09-06.zim" data-track="download" data-region="colorado" data-title="Colorado">Download</a>
           <a class="btn btn-secondary" href="/torrents/colorado.torrent" data-track="torrent" data-region="colorado" data-title="Colorado">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-colorado" data-track="details" data-region="colorado" data-title="Colorado">Info</a>
         </div>
@@ -994,12 +1045,14 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Silicon Valley</div>
-          <div class="map-card-size">311 MB</div>
+          <div class="map-card-size">400 MB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">San Francisco Bay Area &mdash; San Francisco, Oakland, Palo Alto, Mountain View, Stanford, Cupertino, San Jose, and the Peninsula.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-silicon-valley/osm-silicon-valley-2026-06-03.zim" data-track="download" data-region="silicon-valley" data-title="Silicon Valley">Download</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-silicon-valley/osm-silicon-valley-2026-09-06.zim" data-track="download" data-region="silicon-valley" data-title="Silicon Valley">Download</a>
+          <a class="btn btn-secondary" href="/torrents/silicon-valley.torrent" data-track="torrent" data-region="silicon-valley" data-title="Silicon Valley">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-silicon-valley" data-track="details" data-region="silicon-valley" data-title="Silicon Valley">Info</a>
         </div>
       </div>
@@ -1008,6 +1061,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title">Washington, D.C.</div>
           <div class="map-card-size">215 MB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">Washington, D.C. &mdash; the U.S. capital and surrounding metro area.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
@@ -1019,12 +1073,13 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Hispaniola</div>
-          <div class="map-card-size">187 MB</div>
+          <div class="map-card-size">258 MB</div>
         </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
         <p class="map-card-desc">The Caribbean island of Hispaniola &mdash; Haiti and the Dominican Republic.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-hispaniola/osm-hispaniola-2026-05-10.zim" data-track="download" data-region="hispaniola" data-title="Hispaniola">Download</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-hispaniola/osm-hispaniola-2026-09-06.zim" data-track="download" data-region="hispaniola" data-title="Hispaniola">Download</a>
           <a class="btn btn-secondary" href="/torrents/hispaniola.torrent" data-track="torrent" data-region="hispaniola" data-title="Hispaniola">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-hispaniola" data-track="details" data-region="hispaniola" data-title="Hispaniola">Info</a>
         </div>

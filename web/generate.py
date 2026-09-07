@@ -13,6 +13,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -567,7 +568,34 @@ def torrent_file_name(region_id):
         return None
 
 
-def render_live_card(region, size_label, item_meta=None, torrent_ok=True):
+_DATED_ZIM_RE = re.compile(r"-(\d{4})-(\d{2})-(\d{2})[a-z]?\.zim$")
+
+
+def zim_build_date(zim_filename, file_meta=None):
+    """When this ZIM's data is from, as (iso, human) — or None.
+
+    The filename's date is what a reader actually wants: it is the day the
+    ZIM was built, i.e. the vintage of the OSM/Overture data inside. Fall
+    back to archive.org's per-file mtime (upload time) for the handful of
+    legacy files with no date in the name.
+    """
+    m = _DATED_ZIM_RE.search(zim_filename or "")
+    if m:
+        try:
+            d = datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            return d.isoformat(), d.strftime("%-d %b %Y")
+        except ValueError:
+            pass
+    try:
+        ts = int((file_meta or {}).get("mtime"))
+        d = datetime.datetime.utcfromtimestamp(ts).date()
+        return d.isoformat(), d.strftime("%-d %b %Y")
+    except (TypeError, ValueError):
+        return None
+
+
+def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
+                     build_date=None):
     """Render a map card with active download/torrent/details buttons.
 
     `torrent_ok=False` drops the Torrent button: the committed .torrent
@@ -580,6 +608,13 @@ def render_live_card(region, size_label, item_meta=None, torrent_ok=True):
     zim_file_attr = escape(urllib.parse.quote(zim_file), quote=True)
     title_attr = escape(region["title"], quote=True)
     badges_html = render_feature_badges(item_meta)
+    # Without this the only way to tell a refreshed ZIM from the one you
+    # already downloaded was to fetch it and look inside.
+    date_html = ""
+    if build_date:
+        iso, human = build_date
+        date_html = (f'\n        <div class="map-card-date">Updated '
+                     f'<time datetime="{iso}">{escape(human)}</time></div>')
     torrent_html = (
         f'\n          <a class="btn btn-secondary" href="/torrents/{region["id"]}.torrent" '
         f'data-track="torrent" data-region="{region["id"]}" data-title="{title_attr}">Torrent</a>'
@@ -589,7 +624,7 @@ def render_live_card(region, size_label, item_meta=None, torrent_ok=True):
         <div class="map-card-head">
           <div class="map-card-title">{escape(region["title"])}</div>
           <div class="map-card-size">{size_label}</div>
-        </div>
+        </div>{date_html}
         <p class="map-card-desc">{region["description"]}</p>{badges_html}
         <div class="map-card-links">
           <a class="btn btn-primary" href="https://archive.org/download/{item_id}/{zim_file_attr}" data-track="download" data-region="{region["id"]}" data-title="{title_attr}">Download</a>{torrent_html}
@@ -673,6 +708,7 @@ def build_page():
             details = fetch_item_details(f"streetzim-{region['id']}")
             zim_size = None
             zim_filename = None
+            zim_file_meta = None
             if details is None:
                 # Metadata fetch failed despite retries. Track and
                 # raise after the loop so we don't silently ship a
@@ -723,6 +759,7 @@ def build_page():
                         return (0, "", _int(f.get("size")))
                     best = max(zim_files, key=_sort_key)
                     zim_filename = best.get("name")
+                    zim_file_meta = best
                     zim_size = _int(best.get("size")) or None
             if not zim_filename:
                 # Item exists (dark / just created / mid-upload) but
@@ -764,7 +801,8 @@ def build_page():
             cards.append(render_live_card(
                 region, human_size(zim_size),
                 item_meta=(details or {}).get("metadata") if details else None,
-                torrent_ok=torrent_ok))
+                torrent_ok=torrent_ok,
+                build_date=zim_build_date(zim_filename, zim_file_meta)))
             live_count += 1
         else:
             cards.append(render_upcoming_card(region))
