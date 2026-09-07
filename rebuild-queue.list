@@ -1,0 +1,20 @@
+# Regions to rebuild once the main round finishes, cheapest first so
+# failures surface early. Edit this file freely — the runner reads it when
+# it starts each region, so it is never the script being edited.
+#
+# washington-dc  california ... shipped with the pre-05:22 viewer
+# iceland hawaii ............... hwy2 gating (fixed, now advisory)
+# nyc-metro new-york-state ..... escaped-markup validator trip (fixed)
+# alaska mexico argentina ...... stale blank terrain (now self-healing)
+# nyc-metro argentina .......... smoke-pair snap gap (queue auto-snaps)
+# brazil ....................... pack OOM (rayon thread cap added)
+washington-dc
+iceland
+hawaii
+nyc-metro
+alaska
+new-york-state
+argentina
+mexico
+california
+brazil
