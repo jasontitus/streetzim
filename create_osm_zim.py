@@ -792,14 +792,45 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
     import mercantile
     bbox_key = f"{minlon:.1f}_{minlat:.1f}_{maxlon:.1f}_{maxlat:.1f}"
     completed_marker = os.path.join(dest_dir, f"COMPLETED_z{max_zoom}_{bbox_key}")
+
+    def _blank_sample(n=400):
+        """Are any cached tiles in this bbox too small to hold elevation?
+
+        Both fast paths below skip terrain generation wholesale, so a
+        stale 44-byte blank (a DEM fetch that failed months ago) was never
+        revisited no matter what the per-tile check does — himalayas came
+        back with 498 blank land tiles in the 2026-09 round even after the
+        per-tile threshold landed, because the COMPLETED marker meant the
+        generator never ran. Sample a spread of tiles across the bbox at
+        the deepest zooms; if any is undersized, fall through and let the
+        generator re-make exactly those.
+        """
+        for z in (max_zoom, max(0, max_zoom - 1)):
+            tiles = list(mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z))
+            if not tiles:
+                continue
+            step = max(1, len(tiles) // n)
+            for t in tiles[::step]:
+                fp = os.path.join(dest_dir, str(z), str(t.x), f"{t.y}.webp")
+                try:
+                    if os.path.getsize(fp) < _TERRAIN_MIN_REUSE_BYTES:
+                        return f"z{z}/{t.x}/{t.y}"
+                except OSError:
+                    continue          # absent is the generator's business
+        return None
+
     if os.path.isfile(completed_marker):
-        total = sum(
-            len([f for f in files if f.endswith(".webp")])
-            for _, _, files in os.walk(dest_dir)
-            if "dem_sources" not in _
-        )
-        print(f"    Using {total} cached terrain tiles (generation complete for {bbox_key})")
-        return total
+        blank = _blank_sample()
+        if blank is None:
+            total = sum(
+                len([f for f in files if f.endswith(".webp")])
+                for _, _, files in os.walk(dest_dir)
+                if "dem_sources" not in _
+            )
+            print(f"    Using {total} cached terrain tiles (generation complete for {bbox_key})")
+            return total
+        print(f"    Cached terrain for {bbox_key} is marked complete but {blank} "
+              f"is blank — regenerating undersized tiles", flush=True)
 
     # Fallback: sample z-max tiles at the CORNERS AND CENTER of this bbox
     # to check if they're cached. More robust than just first/last.
@@ -810,10 +841,13 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
         sample_indices = [0, n_tiles//4, n_tiles//2, 3*n_tiles//4, n_tiles-1]
         sample = [z_max_tiles[i] for i in sample_indices if i < n_tiles]
         all_cached = all(
-            os.path.isfile(os.path.join(dest_dir, str(max_zoom), str(t.x), f"{t.y}.webp"))
+            os.path.getsize(os.path.join(dest_dir, str(max_zoom), str(t.x), f"{t.y}.webp"))
+            >= _TERRAIN_MIN_REUSE_BYTES
+            if os.path.isfile(os.path.join(dest_dir, str(max_zoom), str(t.x), f"{t.y}.webp"))
+            else False
             for t in sample
         )
-        if all_cached:
+        if all_cached and _blank_sample() is None:
             total = sum(
                 len([f for f in files if f.endswith(".webp")])
                 for _, _, files in os.walk(dest_dir)
