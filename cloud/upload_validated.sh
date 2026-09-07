@@ -68,7 +68,10 @@ echo "validation passed."
 # stamp features, prune the previous good ZIMs and redeploy the site —
 # all on top of a file that never arrived — and exit 0 so every wrapper
 # reported success.
-if ! "$IA" upload "streetzim-${id}" "$(basename "$dated")" --retries 5; then
+# --checksum: skip a file archive.org already holds with the same md5, so
+# re-running after a false "not listed" failure completes the remaining
+# steps without re-sending gigabytes.
+if ! "$IA" upload "streetzim-${id}" "$(basename "$dated")" --retries 5 --checksum; then
     echo "FATAL ${id}: ia upload failed for $(basename "$dated") — nothing pruned, site not redeployed" >&2
     exit 3
 fi
@@ -92,7 +95,15 @@ sleep 30
 # the metadata until the just-uploaded file is listed (or 3 minutes
 # elapse), then proceed.
 target_file="$(basename "$dated")"
-metadata_deadline=$(( $(date +%s) + 180 ))
+# archive.org lists a file minutes after the transfer finishes, and the
+# lag scales with size: 5.7 GB (japan) and 4.9 GB (ukraine) both blew a
+# flat 180 s on 2026-09-06 and were reported as upload failures even
+# though both files were already there. Allow 3 min + 1 min per GB, to
+# a 30 min ceiling.
+_size_gb=$(( ( $(stat -c %s "$dated" 2>/dev/null || stat -f %z "$dated") ) / 1000000000 ))
+_poll_secs=$(( 180 + _size_gb * 60 )); [ "$_poll_secs" -gt 1800 ] && _poll_secs=1800
+echo "  allowing ${_poll_secs}s for archive.org to list a ${_size_gb} GB file"
+metadata_deadline=$(( $(date +%s) + _poll_secs ))
 metadata_started=$(date +%s)
 echo "waiting for archive.org metadata to list ${target_file}..."
 while [ "$(date +%s)" -lt "$metadata_deadline" ]; do
@@ -105,7 +116,7 @@ while [ "$(date +%s)" -lt "$metadata_deadline" ]; do
     sleep 10
 done
 if [ "$(date +%s)" -ge "$metadata_deadline" ]; then
-    echo "WARN ${id}: metadata still didn't list ${target_file} after 3 min — cleanup may be stale"
+    echo "WARN ${id}: metadata still didn't list ${target_file} after ${_poll_secs}s — cleanup may be stale"
 fi
 
 # --- 4b'. verify the remote listing matches the local file (size). Runs
