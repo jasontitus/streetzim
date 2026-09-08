@@ -127,8 +127,20 @@ remote_size=$("$IA" metadata "streetzim-${id}" 2>/dev/null \
     | "$PYTHON" -c "import sys, json; m=json.load(sys.stdin); print(next((f.get('size') for f in m.get('files', []) if f.get('name')==sys.argv[1]), ''))" \
         "$target_file")
 if [ -z "$remote_size" ]; then
-    echo "FATAL ${id}: ${target_file} is not listed by archive.org — refusing to prune or redeploy" >&2
-    exit 3
+    # The transfer completed (ia upload returned 0 above). archive.org
+    # lists a file only after its archive.php task runs, and that queue
+    # can sit for hours — iceland's was still queued 4 h after a clean
+    # 565 MiB transfer. That is not an upload failure, and calling it one
+    # marks a good ZIM as failed and rebuilds it for nothing.
+    #
+    # Exit 6 = "transferred, listing pending". Prune and deploy are
+    # correctly skipped (both need the listing to be safe); the region is
+    # recorded for cloud/finish_pending_uploads.sh to complete later.
+    echo "PENDING ${id}: ${target_file} transferred but archive.org has not listed it yet"
+    echo "  (its archive.php task is queued; prune and deploy deferred)"
+    printf '%s\t%s\t%s\n' "$id" "$target_file" "$(date -Iseconds)" \
+        >> "${PROJECT_DIR}/pending-uploads.tsv"
+    exit 6
 fi
 if [ "$remote_size" != "$local_size" ]; then
     echo "FATAL ${id}: archive.org lists ${target_file} as ${remote_size} B but local is ${local_size} B — partial upload?" >&2

@@ -813,9 +813,15 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
                 fp = os.path.join(dest_dir, str(z), str(t.x), f"{t.y}.webp")
                 try:
                     if os.path.getsize(fp) < _TERRAIN_MIN_REUSE_BYTES:
-                        return f"z{z}/{t.x}/{t.y}"
+                        return f"z{z}/{t.x}/{t.y} (blank)"
                 except OSError:
-                    continue          # absent is the generator's business
+                    # ABSENT counts too. These fast paths skip the generator
+                    # wholesale, so "absent is the generator's business" was
+                    # wrong: the generator never runs. alaska came back with
+                    # 4,030 missing-land tiles that way, after a regeneration
+                    # sweep was interrupted and left holes the COMPLETED
+                    # marker then hid.
+                    return f"z{z}/{t.x}/{t.y} (absent)"
         return None
 
     if os.path.isfile(completed_marker):
@@ -829,7 +835,7 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
             print(f"    Using {total} cached terrain tiles (generation complete for {bbox_key})")
             return total
         print(f"    Cached terrain for {bbox_key} is marked complete but {blank} "
-              f"is blank — regenerating undersized tiles", flush=True)
+              f"— regenerating missing/undersized tiles", flush=True)
 
     # Fallback: sample z-max tiles at the CORNERS AND CENTER of this bbox
     # to check if they're cached. More robust than just first/last.

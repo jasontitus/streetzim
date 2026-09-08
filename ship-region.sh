@@ -100,13 +100,19 @@ TERRAIN_STRIPE_TOLERATE=10 timeout 1800 "$PY" cloud/validate_zim.py "$ZIM" >> "$
   && log "  validate OK" || { FAILED="$FAILED validate"; log "  validate FAIL"; }
 
 log "GATE 3/5 live routing $SRC -> $DST"
-RO=$(timeout 2400 "$PY" cloud/route_cli.py --zim="$ZIM" --src="$SRC" --dst="$DST" --mode=all --max-pops=5000000 2>&1)
+# A* is the engine the viewer runs, so it is the gate. The hwy2 two-pass
+# is an optimisation that legitimately finds nothing where a region has no
+# motorway-tier corridor between the pair (Iceland's ring road is
+# trunk/primary; Hawaii's Kailua end has no highway entry; West Asia spent
+# 638 s proving it before failing). Report it, don't gate on it — and
+# don't pay for it: --mode=astar keeps the gate to seconds.
+RO=$(timeout 2400 "$PY" cloud/route_cli.py --zim="$ZIM" --src="$SRC" --dst="$DST" --mode=astar --max-pops=5000000 2>&1)
 echo "$RO" | tail -20 >> "$LOG"
-# --mode=all runs astar + hwy2 and prints "route OK" per mode; requiring
-# both means one working mode cannot mask a broken graph.
-NOK=$(echo "$RO" | grep -c "route OK")
-[ "${NOK:-0}" -ge 2 ] && log "  routing OK (both modes)" \
-  || { FAILED="$FAILED routing"; log "  routing FAIL (only ${NOK:-0}/2 modes routed)"; }
+if echo "$RO" | grep -q "route OK"; then
+  log "  routing OK ($(echo "$RO" | grep -oE 'distance: [0-9.]+ km' | head -1))"
+else
+  FAILED="$FAILED routing"; log "  routing FAIL (A* found no route)"
+fi
 
 log "GATE 4/5 search '$SEARCH' + find chips"
 SN=$("$PY" - "$ZIM" "$SEARCH" <<'PYEOF' 2>/dev/null || echo 0
@@ -166,8 +172,14 @@ log "=== all gates passed"
 if [ "$UPLOAD" -eq 0 ]; then log "--no-upload: stopping here with $ZIM"; exit 0; fi
 
 log "uploading to archive.org/details/streetzim-$ID"
-if PROJECT_DIR=/storage/streetzim TERRAIN_STRIPE_TOLERATE=10 \
-     bash cloud/upload_validated.sh "$ID" "$ZIM" >> "$LOG" 2>&1; then
+PROJECT_DIR=/storage/streetzim TERRAIN_STRIPE_TOLERATE=10 \
+  bash cloud/upload_validated.sh "$ID" "$ZIM" >> "$LOG" 2>&1
+UP_RC=$?
+if [ "$UP_RC" -eq 6 ]; then
+  # Transferred fine; archive.org just has not listed it yet. Not a
+  # failure — cloud/finish_pending_uploads.sh finishes the prune/deploy.
+  log "=== UPLOADED $ZIM (archive.org listing pending; prune/deploy deferred)"
+elif [ "$UP_RC" -eq 0 ]; then
   log "=== SHIPPED $ZIM → https://archive.org/details/streetzim-$ID"
   # The build ran with --keep-temp so a failed build leaves its scratch
   # for inspection. Nothing ever reuses it (there is no resume path), so
