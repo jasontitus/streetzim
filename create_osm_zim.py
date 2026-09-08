@@ -793,24 +793,23 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
     bbox_key = f"{minlon:.1f}_{minlat:.1f}_{maxlon:.1f}_{maxlat:.1f}"
     completed_marker = os.path.join(dest_dir, f"COMPLETED_z{max_zoom}_{bbox_key}")
 
-    def _blank_sample(n=400):
-        """Are any cached tiles in this bbox too small to hold elevation?
+    def _blank_sample():
+        """First cached tile in this bbox too small to hold elevation.
 
         Both fast paths below skip terrain generation wholesale, so a
         stale 44-byte blank (a DEM fetch that failed months ago) was never
         revisited no matter what the per-tile check does — himalayas came
-        back with 498 blank land tiles in the 2026-09 round even after the
-        per-tile threshold landed, because the COMPLETED marker meant the
-        generator never ran. Sample a spread of tiles across the bbox at
-        the deepest zooms; if any is undersized, fall through and let the
-        generator re-make exactly those.
+        back with 498 blank land tiles in the 2026-09 round because the
+        COMPLETED marker meant the generator never ran.
+
+        This scans EVERY tile in the bbox, not a sample: a 400-tile sample
+        missed the single blank among midwest-us's 74,842 land tiles, and
+        one blank tile is still a hole in the map and still fails the
+        release gate. It is one getsize per tile with an early exit on the
+        first hit, which is seconds against a build measured in hours.
         """
-        for z in (max_zoom, max(0, max_zoom - 1)):
-            tiles = list(mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z))
-            if not tiles:
-                continue
-            step = max(1, len(tiles) // n)
-            for t in tiles[::step]:
+        for z in range(max_zoom, -1, -1):
+            for t in mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z):
                 fp = os.path.join(dest_dir, str(z), str(t.x), f"{t.y}.webp")
                 try:
                     if os.path.getsize(fp) < _TERRAIN_MIN_REUSE_BYTES:
