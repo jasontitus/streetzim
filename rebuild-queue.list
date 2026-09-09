@@ -8,6 +8,13 @@
 # alaska mexico argentina ...... stale blank terrain (now self-healing)
 # nyc-metro argentina .......... smoke-pair snap gap (queue auto-snaps)
 # brazil ....................... pack OOM (rayon thread cap added)
+# baltics ...................... wrapper corrupted by an in-place edit (ZIM is fine, needs gating)
+# caucasus ..................... upload metadata poll (now size-scaled)
+# himalayas pacific-islands .... blank terrain behind the COMPLETED marker
+# west-asia .................... hwy2 gate (queue was frozen on pre-fix logic)
+# central-asia korea-mongolia central-america-caribbean midwest-us .. blank terrain
+#                                (sampled scan missed them; now exhaustive)
+# east-coast-us ................ in-browser route exceeded 360 s under build load
 washington-dc
 iceland
 hawaii
@@ -17,4 +24,19 @@ new-york-state
 argentina
 mexico
 california
-brazil
+baltics
+caucasus
+himalayas
+pacific-islands
+west-asia
+central-asia
+korea-mongolia
+central-america-caribbean
+midwest-us
+east-coast-us
+
+# HELD (not queued): brazil — 93.1 GB manifest, streetzim-pack OOMed at 95 GB
+#   RSS twice (6 h each). The largest manifest that HAS packed on this host
+#   is east-coast-us at 56.2 GB, so the ceiling is between the two. Needs
+#   /storage/swapfile (root) or a streaming packer. Its May build stays live.
+#   The 10 continents are larger still and are in the same position.
