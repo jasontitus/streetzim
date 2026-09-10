@@ -208,6 +208,26 @@ function handlePrewarmCells(msg) {
   }
 }
 
+// Resident routing-cell budget.
+//
+// A flat 64 MB held only ~33 of east-coast-us's cells, but a NYC->Philadelphia
+// route needs ~62 resident at once (route_cli loads 62 and keeps them). The
+// A* frontier then evicted cells it was about to need again: measured on
+// 2026-09-10, misses climbed linearly at ~21 cells/s with resident pinned at
+// 33 cells / 63 MB and the route never finished — the 360 s browser-gate
+// timeout east-coast-us kept failing while the same route took 5.9 s
+// natively. The working set has to fit or the search never terminates.
+//
+// deviceMemory is Chrome-only and capped at 8; where it is missing (Safari,
+// Firefox) assume a mid-range device rather than the old 64 MB floor, since
+// that floor is precisely what breaks. Small regions never approach any of
+// these numbers — the cache only fills when the route is long.
+function residentCellBudget() {
+  var gb = (self.navigator && self.navigator.deviceMemory) || 0;
+  var mb = gb ? Math.min(384, Math.max(64, gb * 48)) : 192;
+  return mb * 1024 * 1024;
+}
+
 function handleInit(msg) {
   BASE_URL = msg.baseUrl || '';
   fetch(BASE_URL + 'routing-data/graph-cells-index.bin')
@@ -220,7 +240,7 @@ function handleInit(msg) {
       return loadNodeShards(idx).then(function() { return idx; });
     })
     .then(function(idx) {
-      graph = new SpatialGraph(idx, /*maxResidentBytes*/ 64 * 1024 * 1024);
+      graph = new SpatialGraph(idx, residentCellBudget());
       self.postMessage({
         type: 'ready',
         format: 'spatial-v' + idx.version,

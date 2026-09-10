@@ -173,7 +173,11 @@ browser_smoke() {  # browser_smoke <zim> <src> <dst> ; returns node exit code
   # browser gate would fail.
   "$PY" scripts/serve-web-local.py "$port" /storage/streetzim/web > "$TMPDIR/http-$port.log" 2>&1 &
   local http=$!; sleep 2
+  # ZIM_FILE hands the SW an on-disk File, as the picker does for a real user.
+  # Without it the smoke fetches the URL and calls resp.blob(), so Chrome tries
+  # to materialise the whole ZIM and simply fails past ~12 GB.
   STREETZIM_SITE="http://localhost:$port" ZIM_URL="http://localhost:$port/$(basename "$zim")" \
+    ZIM_FILE="$(readlink -f "$zim")" \
     SMOKE_ROUTE="$2;$3" timeout 600 "$NODE" cloud/pwa_smoke_test.mjs > "$out" 2>&1
   local rc=$?
   kill "$http" 2>/dev/null; rm -f "web/$(basename "$zim")"

@@ -25,6 +25,7 @@
 import puppeteer from 'puppeteer';
 
 const SITE = process.env.STREETZIM_SITE || 'https://streetzim.web.app';
+const ZIM_FILE = process.env.ZIM_FILE || '';
 const ZIM_URL = process.env.ZIM_URL ||
   'http://localhost:8765/osm-silicon-valley-2026-04-24.zim';
 const HEADFUL = process.env.HEADFUL === '1';
@@ -215,7 +216,8 @@ function pass(label, detail) {
 }
 
 async function main() {
-  console.log('site=' + SITE + '  zim=' + ZIM_URL);
+  console.log('site=' + SITE + '  zim=' + (ZIM_FILE || ZIM_URL) +
+              (ZIM_FILE ? '  (local file)' : ''));
   const browser = await puppeteer.launch({
     headless: !HEADFUL,
     executablePath: CHROME_PATH,
@@ -284,20 +286,49 @@ async function main() {
   await page.goto(SITE + '/drive/?bust=' + Date.now(), { waitUntil: 'domcontentloaded' });
   await page.evaluate(() =>
     new Promise(r => navigator.serviceWorker.ready.then(r)));
-  const setOk = await page.evaluate(async (zimUrl) => {
-    try {
-      const resp = await fetch(zimUrl);
-      if (!resp.ok) return { ok: false, error: 'fetch ' + resp.status };
-      const blob = await resp.blob();
-      const ch = new MessageChannel();
-      const reply = new Promise(r => { ch.port1.onmessage = e => r(e.data); });
-      navigator.serviceWorker.controller.postMessage(
-        { type: 'set-zim', blob, name: zimUrl.split('/').pop() }, [ch.port2]);
-      return await reply;
-    } catch (err) {
-      return { ok: false, error: String(err && err.message || err) };
-    }
-  }, ZIM_URL);
+  // Prefer handing the SW a real on-disk File (ZIM_FILE), which is what
+  // the picker gives it in production: File is lazily read from disk, so
+  // nothing is buffered. Fetching the URL and calling resp.blob() instead
+  // makes the browser materialise the WHOLE ZIM — Chrome simply fails
+  // ("Failed to fetch") on east-coast-us at 12.4 GB, which is why that
+  // region could never clear the browser gate. The URL path stays as the
+  // fallback for testing a genuinely remote ZIM.
+  let setOk;
+  if (ZIM_FILE) {
+    const picker = await page.$('#file-fallback');
+    if (!picker) { console.error('no #file-fallback input on /drive/'); process.exit(2); }
+    // uploadFile goes through CDP DOM.setFileInputFiles — the browser gets
+    // a path, not bytes, so a 12 GB ZIM costs nothing here.
+    await picker.uploadFile(ZIM_FILE);
+    setOk = await page.evaluate(async () => {
+      try {
+        const f = document.getElementById('file-fallback').files[0];
+        if (!f) return { ok: false, error: 'no file on #file-fallback' };
+        const ch = new MessageChannel();
+        const reply = new Promise(r => { ch.port1.onmessage = e => r(e.data); });
+        navigator.serviceWorker.controller.postMessage(
+          { type: 'set-zim', blob: f, name: f.name }, [ch.port2]);
+        return await reply;
+      } catch (err) {
+        return { ok: false, error: String(err && err.message || err) };
+      }
+    });
+  } else {
+    setOk = await page.evaluate(async (zimUrl) => {
+      try {
+        const resp = await fetch(zimUrl);
+        if (!resp.ok) return { ok: false, error: 'fetch ' + resp.status };
+        const blob = await resp.blob();
+        const ch = new MessageChannel();
+        const reply = new Promise(r => { ch.port1.onmessage = e => r(e.data); });
+        navigator.serviceWorker.controller.postMessage(
+          { type: 'set-zim', blob, name: zimUrl.split('/').pop() }, [ch.port2]);
+        return await reply;
+      } catch (err) {
+        return { ok: false, error: String(err && err.message || err) };
+      }
+    }, ZIM_URL);
+  }
   if (!setOk || !setOk.ok) {
     console.error('SW set-zim failed:', setOk);
     await browser.close();

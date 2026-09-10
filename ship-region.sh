@@ -155,7 +155,12 @@ ln -sfn "../$ZIM" "$SMOKE_LINK"
 "$PY" scripts/serve-web-local.py "$PORT" /storage/streetzim/web > "$TMPDIR/serve-$PORT.log" 2>&1 &
 HTTP=$!; SMOKE_HTTP=$HTTP
 sleep 2
+# ZIM_FILE hands the SW the ZIM as an on-disk File, exactly as the picker
+# does for a real user. Without it the smoke fetches the URL and calls
+# resp.blob(), making Chrome materialise the whole ZIM — that fails outright
+# at 12.4 GB, which is why east-coast-us could never clear this gate.
 STREETZIM_SITE="http://localhost:$PORT" ZIM_URL="http://localhost:$PORT/$ZIM" \
+  ZIM_FILE="/storage/streetzim/$ZIM" \
   SMOKE_ROUTE="$SRC;$DST" timeout 900 node cloud/pwa_smoke_test.mjs \
   > "${ID}-smoke-${TODAY}.log" 2>&1
 SMOKE=$?

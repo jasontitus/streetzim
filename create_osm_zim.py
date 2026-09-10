@@ -30,6 +30,7 @@ import glob
 import gzip
 import html as html_mod
 import json
+import itertools
 import os
 import re
 import shutil
@@ -688,6 +689,10 @@ def stitch_satellite_image(satellite_dir, max_zoom, bbox_str, webp_quality=80):
     return output_path, coordinates
 
 
+# One open DEM handle per worker process, keyed by path (see _generate_one_terrain_tile).
+_DEM_HANDLES = {}
+
+
 def _generate_one_terrain_tile(args):
     """Generate a single terrain-RGB tile. Module-level for multiprocessing.
 
@@ -719,14 +724,20 @@ def _generate_one_terrain_tile(args):
         east3857 + HALO * px_w, north3857 + HALO * px_h, BUF, BUF)
 
     elevation = np.zeros((1, BUF, BUF), dtype=np.float32)
-    with rasterio.open(mosaic_file) as src:
-        reproject(
-            source=rasterio.band(src, 1),
-            destination=elevation,
-            dst_transform=tile_transform,
-            dst_crs="EPSG:3857",
-            resampling=Resampling.cubic,
-        )
+    # Reopening the VRT per tile costs ~14 ms at 2,000 sources and ~380 ms at
+    # 26,000 — which would dominate a multi-million-tile run. Workers are
+    # long-lived, so keep one handle per (process, path).
+    src = _DEM_HANDLES.get(mosaic_file)
+    if src is None:
+        src = rasterio.open(mosaic_file)
+        _DEM_HANDLES[mosaic_file] = src
+    reproject(
+        source=rasterio.band(src, 1),
+        destination=elevation,
+        dst_transform=tile_transform,
+        dst_crs="EPSG:3857",
+        resampling=Resampling.cubic,
+    )
 
     elev = elevation[0, HALO:HALO + 256, HALO:HALO + 256]
     elev = np.round(elev / 10.0) * 10.0  # quantize to 10m for ~74% compression savings
@@ -759,6 +770,197 @@ def _terrain_vrt_for_zoom(z, mosaic_path, low_zoom_world_vrt=None):
 # bytes at minimum; 44-byte files are the signature of a DEM fetch that
 # failed. Anything smaller than this is regenerated rather than reused.
 _TERRAIN_MIN_REUSE_BYTES = int(os.environ.get("TERRAIN_MIN_REUSE_BYTES", "200"))
+
+# The window in which terrain was rasterised against the wrong DEM: from the
+# mtime of the Hispaniola-only mosaic_4326.tif to the moment _build_dem_vrt
+# replaced that fallback. Small tiles written inside it are regenerated once.
+# Overridable so a future incident can reuse the same machinery.
+_TERRAIN_POISON_FROM = float(os.environ.get(
+    "TERRAIN_POISON_FROM", "1773960843"))   # 2026-03-19 23:54 CET
+# Must sit AFTER the last build that ran the broken fallback (the 2026-09-10
+# rebuild pass ended 12:56:44) and BEFORE any tile written by the fixed code,
+# or regenerated tiles land back inside the window and the cache never settles.
+_TERRAIN_POISON_UNTIL = float(os.environ.get(
+    "TERRAIN_POISON_UNTIL", "1789038000"))  # 2026-09-10 13:00 CEST
+
+
+def _build_dem_vrt(tif_paths, out_path, res=1.0/3600.0, want_bbox=None):
+    """Write a mosaic VRT for DEM tiles without needing the gdalbuildvrt CLI.
+
+    This host has no GDAL command-line tools (rasterio ships libgdal, not the
+    binaries), so the old code silently fell through to a merge() fallback
+    that reused ONE shared `mosaic_4326.tif` for every region. That file was
+    built from Hispaniola on 2026-03-19 and covers -75..-68E / 17..21N, so
+    every terrain tile generated anywhere else since then rasterised against
+    nodata and came out a 44-byte blank. Hence the blank-terrain Carolinas
+    (2026-07) and this round's mexico/argentina/alaska/himalayas failures.
+
+    Copernicus GLO-30 tiles are 1 degree square but longitudinally subsampled
+    above 50 degrees (3600/1800/1200/720/360 columns), so the sources have
+    mixed x-resolution. A ComplexSource maps each source's pixel rect onto the
+    common output grid, and GDAL rescales on read -- which is exactly what
+    gdalbuildvrt itself emits.
+    """
+    import rasterio
+    from xml.sax.saxutils import escape as _xesc
+
+    srcs = []
+    for path in tif_paths:
+        try:
+            with rasterio.open(path) as ds:
+                srcs.append((path, ds.bounds, ds.width, ds.height,
+                             ds.block_shapes[0], str(ds.dtypes[0]), ds.nodata))
+        except Exception as e:
+            print(f"    Warning: skipping unreadable DEM {os.path.basename(path)}: {e}")
+    if not srcs:
+        return None
+
+    west = min(b.left for _, b, *_ in srcs)
+    east = max(b.right for _, b, *_ in srcs)
+    south = min(b.bottom for _, b, *_ in srcs)
+    north = max(b.top for _, b, *_ in srcs)
+    xsize = int(round((east - west) / res))
+    ysize = int(round((north - south) / res))
+    dtype = srcs[0][5]
+    gdal_dtype = {"float32": "Float32", "float64": "Float64",
+                  "int16": "Int16", "int32": "Int32",
+                  "uint16": "UInt16"}.get(dtype, "Float32")
+
+    parts = [
+        f'<VRTDataset rasterXSize="{xsize}" rasterYSize="{ysize}">',
+        '  <SRS>EPSG:4326</SRS>',
+        f'  <GeoTransform>{west:.12f}, {res:.12f}, 0.0, {north:.12f}, 0.0, {-res:.12f}</GeoTransform>',
+        f'  <VRTRasterBand dataType="{gdal_dtype}" band="1">',
+        '    <ColorInterp>Gray</ColorInterp>',
+    ]
+    for path, b, w, h, block, _dt, nodata in srcs:
+        # Destination rect on the common grid. Note GLO-30 tiles are
+        # pixel-edge registered at a half-pixel offset that differs per
+        # resolution band (3600 cols below 50 deg, then 2400/1800/1200/720/360),
+        # so this rounds rather than landing exactly: the residual is
+        # 0.5*(res_grid - res_src)/res_grid, i.e. 0.25 px for a 2400-col source
+        # and at worst ~4.5 px above 85 deg, where cos(lat) shrinks it to ~12 m
+        # on the ground. Sub-pixel at every terrain zoom, and gdalbuildvrt
+        # rounds the same way. Neighbouring same-band tiles share an offset, so
+        # rows still tile without gaps or overlaps.
+        dx = int(round((b.left - west) / res))
+        dy = int(round((north - b.top) / res))
+        dw = int(round((b.right - b.left) / res))
+        dh = int(round((b.top - b.bottom) / res))
+        parts.append('    <ComplexSource>')
+        parts.append(f'      <SourceFilename relativeToVRT="0">{_xesc(path)}</SourceFilename>')
+        parts.append('      <SourceBand>1</SourceBand>')
+        parts.append(f'      <SourceProperties RasterXSize="{w}" RasterYSize="{h}" '
+                     f'DataType="{gdal_dtype}" BlockXSize="{block[1]}" BlockYSize="{block[0]}"/>')
+        parts.append(f'      <SrcRect xOff="0" yOff="0" xSize="{w}" ySize="{h}"/>')
+        parts.append(f'      <DstRect xOff="{dx}" yOff="{dy}" xSize="{dw}" ySize="{dh}"/>')
+        if nodata is not None:
+            parts.append(f'      <NODATA>{nodata}</NODATA>')
+        parts.append('    </ComplexSource>')
+    parts.append('  </VRTRasterBand>')
+    parts.append('</VRTDataset>')
+
+    # pid-suffixed so two builds whose bboxes round to the same key cannot
+    # clobber each other's staging file.
+    tmp = f"{out_path}.{os.getpid()}.part"
+    try:
+        with open(tmp, "w") as f:
+            f.write("\n".join(parts) + "\n")
+        with rasterio.open(tmp) as ds:
+            got = ds.bounds
+
+        # The bug this function exists to prevent was a DEM mosaic that did not
+        # cover the region being built, so check coverage before publishing the
+        # VRT rather than merely that the file opens.
+        #
+        # A shortfall of a degree or less is normal and not an error: DEM cells
+        # over open ocean legitimately 404, so a bbox whose corner sits in the
+        # sea has no source there and the union rectangle falls short. Warn on
+        # those. Only a gross shortfall means the wrong DEM — the Hispaniola
+        # mosaic missed its regions by tens of degrees.
+        if want_bbox:
+            wlon, wlat, elon, nlat = want_bbox
+            short = {
+                "west": got.left - wlon, "east": elon - got.right,
+                "south": got.bottom - wlat, "north": nlat - got.top,
+            }
+            missing = {k: v for k, v in short.items() if v > res}
+            if missing:
+                desc = ", ".join(f"{k} short by {v:.2f} deg"
+                                 for k, v in sorted(missing.items()))
+                if max(missing.values()) > 1.0:
+                    raise RuntimeError(
+                        f"DEM VRT {out_path} does not cover the requested bbox "
+                        f"({wlon},{wlat},{elon},{nlat}): {desc}. Refusing to "
+                        f"rasterise terrain against the wrong DEM.")
+                print(f"    Note: DEM stops short of the bbox ({desc}) — "
+                      f"expected where the edge is open ocean.")
+        os.replace(tmp, out_path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+    print(f"    VRT built: {len(srcs)} DEM tiles, {xsize}x{ysize} px, "
+          f"bbox {west:.2f},{south:.2f},{east:.2f},{north:.2f}")
+    return out_path
+
+
+def _bbox_tile_total(minlon, minlat, maxlon, maxlat, max_zoom):
+    """Tile count for a bbox over z0..max_zoom, without touching the disk."""
+    import math
+    import mercantile
+    total = 0
+    for z in range(0, max_zoom + 1):
+        if z <= 8:
+            total += sum(1 for _ in mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z))
+        else:
+            n = 2 ** z
+            x_min = int((minlon + 180) / 360 * n)
+            x_max = int((maxlon + 180) / 360 * n)
+            lat_hi, lat_lo = maxlat, max(minlat, -85)
+            y_min = int((1 - math.log(math.tan(math.radians(lat_hi)) +
+                                      1 / math.cos(math.radians(lat_hi))) / math.pi) / 2 * n)
+            y_max = int((1 - math.log(math.tan(math.radians(lat_lo)) +
+                                      1 / math.cos(math.radians(lat_lo))) / math.pi) / 2 * n)
+            total += (x_max - x_min + 1) * (y_max - y_min + 1)
+    return total
+
+
+def _terrain_tile_usable(path):
+    """True if a cached terrain tile can be trusted and reused.
+
+    Size alone cannot answer this. A terrain-RGB tile of constant elevation
+    compresses to exactly 44 bytes, so an ocean tile is byte-identical in size
+    to one whose DEM read failed — Hawaii's cache is 99% legitimate 44-byte
+    ocean. Treating every small tile as broken would regenerate them on every
+    build forever and permanently defeat the COMPLETED-marker fast path.
+
+    What actually separates them here is *when* the tile was written. From
+    2026-03-19 until the VRT fix below, `gdalbuildvrt` was missing on this host
+    and terrain fell back to one shared `mosaic_4326.tif` covering only
+    Hispaniola, so every small tile written in that window is suspect while
+    every small tile written outside it is genuine flat ground. Sampling the
+    cache bears this out: sub-200-byte tiles exist only in 2026-04/05/09, never
+    in 2026-03.
+
+    Each suspect tile is regenerated exactly once; the rewrite moves its mtime
+    past the window, so genuinely-flat tiles settle as cached and the cache
+    converges instead of churning. TERRAIN_MIN_REUSE_BYTES=0 trusts everything.
+    """
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False
+    # A real tile is never smaller than the 44-byte constant-elevation floor,
+    # whatever its mtime says. Truncated leftovers (pre-atomic-write builds, an
+    # interrupted rsync) must not be trusted just for being old.
+    if st.st_size < 40:
+        return False
+    if _TERRAIN_MIN_REUSE_BYTES == 0:
+        return True
+    if st.st_size >= _TERRAIN_MIN_REUSE_BYTES:
+        return True
+    return not (_TERRAIN_POISON_FROM <= st.st_mtime < _TERRAIN_POISON_UNTIL)
 
 
 def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
@@ -811,10 +1013,17 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
         for z in range(max_zoom, -1, -1):
             for t in mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z):
                 fp = os.path.join(dest_dir, str(z), str(t.x), f"{t.y}.webp")
-                try:
-                    if os.path.getsize(fp) < _TERRAIN_MIN_REUSE_BYTES:
+                if os.path.exists(fp):
+                    # Must use the SAME rule as the generator. A bare size test
+                    # here condemned every legitimate 44-byte ocean tile, so for
+                    # any coastal region this returned a hit on the first tile
+                    # it touched, forever: the marker fast path was reported
+                    # stale on every build, the generator then correctly
+                    # regenerated nothing, and the marker was rewritten — a
+                    # permanent full rescan that never converged.
+                    if not _terrain_tile_usable(fp):
                         return f"z{z}/{t.x}/{t.y} (blank)"
-                except OSError:
+                else:
                     # ABSENT counts too. These fast paths skip the generator
                     # wholesale, so "absent is the generator's business" was
                     # wrong: the generator never runs. alaska came back with
@@ -827,12 +1036,14 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
     if os.path.isfile(completed_marker):
         blank = _blank_sample()
         if blank is None:
-            total = sum(
-                len([f for f in files if f.endswith(".webp")])
-                for _, _, files in os.walk(dest_dir)
-                if "dem_sources" not in _
-            )
-            print(f"    Using {total} cached terrain tiles (generation complete for {bbox_key})")
+            # Count this bbox's tiles arithmetically. This used to os.walk the
+            # whole of terrain_cache — 22 million files shared by every region
+            # — which made the "everything is cached" path by far the SLOWEST
+            # one (minutes of disk sleep), and reported a global count as if it
+            # were the region's. The value is only printed.
+            total = _bbox_tile_total(minlon, minlat, maxlon, maxlat, max_zoom)
+            print(f"    Using ~{total} cached terrain tiles "
+                  f"(generation complete for {bbox_key})", flush=True)
             return total
         print(f"    Cached terrain for {bbox_key} is marked complete but {blank} "
               f"— regenerating missing/undersized tiles", flush=True)
@@ -846,10 +1057,8 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
         sample_indices = [0, n_tiles//4, n_tiles//2, 3*n_tiles//4, n_tiles-1]
         sample = [z_max_tiles[i] for i in sample_indices if i < n_tiles]
         all_cached = all(
-            os.path.getsize(os.path.join(dest_dir, str(max_zoom), str(t.x), f"{t.y}.webp"))
-            >= _TERRAIN_MIN_REUSE_BYTES
-            if os.path.isfile(os.path.join(dest_dir, str(max_zoom), str(t.x), f"{t.y}.webp"))
-            else False
+            _terrain_tile_usable(
+                os.path.join(dest_dir, str(max_zoom), str(t.x), f"{t.y}.webp"))
             for t in sample
         )
         if all_cached and _blank_sample() is None:
@@ -868,6 +1077,13 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
     transient_dem_failures = []
     for lat in range(math.floor(minlat) - 1, math.floor(maxlat) + 2):
         for lon in range(math.floor(minlon) - 1, math.floor(maxlon) + 2):
+            # The 1-cell halo can step off the edge of the world: alaska's
+            # minlon=-180 asks for dem_N**_W181, which exists nowhere and
+            # 404s on every source, so each build wrote a bogus `.nodata`
+            # marker for it. GLO-30 cells are named for their SW corner, so
+            # the valid range is lat -90..89, lon -180..179.
+            if not (-90 <= lat <= 89 and -180 <= lon <= 179):
+                continue
             ns = "N" if lat >= 0 else "S"
             ew = "E" if lon >= 0 else "W"
             abs_lat = abs(lat)
@@ -979,50 +1195,28 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
         with _tmpfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as flist:
             flist.write('\n'.join(tif_paths))
             flist_path = flist.name
-        subprocess.run(
-            ["gdalbuildvrt", "-overwrite", "-input_file_list", flist_path, mosaic_path],
-            check=True, capture_output=True, text=True,
-        )
-        os.unlink(flist_path)
+        try:
+            subprocess.run(
+                ["gdalbuildvrt", "-overwrite", "-input_file_list", flist_path, mosaic_path],
+                check=True, capture_output=True, text=True,
+            )
+        finally:
+            # Must be in a finally: gdalbuildvrt is absent on this host, so the
+            # raise below skipped the unlink and every build leaked a /tmp file.
+            os.unlink(flist_path)
     except FileNotFoundError:
-        # gdalbuildvrt not on PATH — fall back to in-memory merge
-        print("    Warning: gdalbuildvrt not found, falling back to in-memory merge")
-        from rasterio.merge import merge
-
-        # Reuse cached mosaic if present — saves ~30 min validation + the
-        # merge itself for subsequent builds against the same DEM set.
-        mosaic_path = os.path.join(dem_dir, "mosaic_4326.tif")
-        if os.path.isfile(mosaic_path):
-            print(f"    Reusing cached mosaic: {mosaic_path} "
-                  f"({os.path.getsize(mosaic_path)/1024/1024:.0f} MB)")
-        else:
-            # Pre-validate DEMs by reading full band — corrupt files crash merge()
-            print(f"    Validating {len(tif_paths)} DEM tiles...")
-            valid_paths = []
-            for p in tif_paths:
-                try:
-                    with rasterio.open(p) as _ds:
-                        _ds.read(1)
-                    valid_paths.append(p)
-                except Exception as e:
-                    print(f"    Warning: skipping corrupt DEM {os.path.basename(p)}: {e}")
-            if not valid_paths:
-                print("    No valid DEM tiles, skipping terrain")
-                return 0
-            # Stream the merge directly to disk with dst_path + mem_limit so we
-            # never materialize the full mosaic in memory. World-scale DEM at
-            # GLO-30 is 612000x129600 pixels (~600 GB float32) which OOMs the
-            # box; chunked streaming keeps RSS bounded by mem_limit (MB).
-            print(f"    Merging {len(valid_paths)} validated DEM tiles "
-                  f"-> {mosaic_path} (streaming)...")
-            datasets = [rasterio.open(p) for p in valid_paths]
-            try:
-                merge(datasets, dst_path=mosaic_path, mem_limit=2048)
-            finally:
-                for ds in datasets:
-                    ds.close()
-            print(f"    Mosaic written: "
-                  f"{os.path.getsize(mosaic_path)/1024/1024:.0f} MB")
+        # gdalbuildvrt not on PATH — build the same VRT XML ourselves.
+        #
+        # NEVER fall back to a shared single-file mosaic here. The previous
+        # code did, keyed on a fixed `mosaic_4326.tif` with no bbox check, and
+        # silently rasterised every region against a Hispaniola-only DEM for
+        # six months. A per-bbox VRT is cheap (XML over the tiles already on
+        # disk) and cannot be reused for the wrong region.
+        print("    gdalbuildvrt not found; building VRT directly")
+        if _build_dem_vrt(tif_paths, mosaic_path,
+                          want_bbox=(minlon, minlat, maxlon, maxlat)) is None:
+            print("    No readable DEM tiles, skipping terrain")
+            return 0
 
     # Generate terrain-RGB tiles using multiprocessing.
     # Each process opens its own handle to the VRT file — GDAL reads only the
@@ -1061,21 +1255,28 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
                 # blank mountain range again. TERRAIN_MIN_REUSE_BYTES=0
                 # restores the old reuse-anything behaviour.
                 tile_path = os.path.join(dest_dir, str(zoom), str(tile.x), f"{tile.y}.webp")
-                try:
-                    if os.path.getsize(tile_path) >= _TERRAIN_MIN_REUSE_BYTES:
-                        continue
-                except OSError:
-                    pass
+                if _terrain_tile_usable(tile_path):
+                    continue
                 b = mercantile.bounds(tile)
                 yield (_vrt, tile.x, tile.y, zoom, dest_dir,
                        b.west, b.south, b.east, b.north)
 
-        # Count total and cached for this zoom (estimate for large zooms)
+        # Count total and cached for this zoom (estimate for large zooms).
+        #
+        # Only z<=8 is pre-counted. Above that the region's tile count is an
+        # estimate while the cache directory is shared by every region ever
+        # built, so any directory-wide count is meaningless here: comparing a
+        # global `cached` against a regional `total` made `need` negative and
+        # skipped z9-z12 outright for every region with a populated cache.
+        # For z>8 we stream instead and let the per-tile check decide, which
+        # is one stat pass rather than two.
+        cached_at_z = None
         if z <= 8:
             all_tiles = list(mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z))
             total_at_z = len(all_tiles)
             cached_at_z = sum(1 for t in all_tiles
-                              if os.path.isfile(os.path.join(dest_dir, str(z), str(t.x), f"{t.y}.webp")))
+                              if _terrain_tile_usable(
+                                  os.path.join(dest_dir, str(z), str(t.x), f"{t.y}.webp")))
         else:
             # For large zoom levels, estimate count from 4x previous zoom
             import math
@@ -1085,19 +1286,18 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
             y_min = int((1 - math.log(math.tan(math.radians(maxlat)) + 1/math.cos(math.radians(maxlat))) / math.pi) / 2 * n)
             y_max = int((1 - math.log(math.tan(math.radians(max(minlat, -85))) + 1/math.cos(math.radians(max(minlat, -85)))) / math.pi) / 2 * n)
             total_at_z = (x_max - x_min + 1) * (y_max - y_min + 1)
-            # Count cached from existing directory
-            cached_at_z = sum(
-                len([f for f in files if f.endswith(".webp")])
-                for _, _, files in os.walk(os.path.join(dest_dir, str(z)))
-            ) if os.path.isdir(os.path.join(dest_dir, str(z))) else 0
 
-        need = total_at_z - cached_at_z
-        if need <= 0:
-            cached += cached_at_z
-            print(f"      z{z}: {total_at_z} tiles (all cached)")
-            continue
-
-        print(f"      z{z}: {total_at_z} tiles ({cached_at_z} cached, {need} to generate)")
+        if cached_at_z is None:
+            need = None
+            print(f"      z{z}: ~{total_at_z} tiles (streaming; generating missing/blank)...",
+                  flush=True)
+        else:
+            need = total_at_z - cached_at_z
+            if need <= 0:
+                cached += cached_at_z
+                print(f"      z{z}: {total_at_z} tiles (all cached)")
+                continue
+            print(f"      z{z}: {total_at_z} tiles ({cached_at_z} cached, {need} to generate)")
         z_count = 0
 
         if total_at_z <= 10:
@@ -1106,17 +1306,29 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
                 z_count += 1
                 count += 1
         else:
+            # Peek before spawning: with nothing to generate this would still
+            # start (and tear down) a 16-process spawn Pool for every zoom.
+            gen = tile_arg_gen(z)
+            first = next(gen, None)
+            if first is None:
+                z_cached = cached_at_z if cached_at_z is not None else total_at_z
+                cached += z_cached
+                print(f"      z{z}: 0 generated, {z_cached} cached          ", flush=True)
+                continue
+            gen = itertools.chain([first], gen)
             ctx = multiprocessing.get_context("spawn")
             with ctx.Pool(num_workers) as pool:
                 for _ in pool.imap_unordered(_generate_one_terrain_tile,
-                                              tile_arg_gen(z), chunksize=256):
+                                              gen, chunksize=256):
                     z_count += 1
                     count += 1
                     if z_count % 5000 == 0:
-                        print(f"\r      z{z}: {z_count}/{need} generated...", end="", flush=True)
+                        print(f"\r      z{z}: {z_count}/{need or total_at_z} generated...",
+                              end="", flush=True)
 
-        cached += cached_at_z
-        print(f"\r      z{z}: {z_count} generated, {cached_at_z} cached          ")
+        z_cached = cached_at_z if cached_at_z is not None else max(total_at_z - z_count, 0)
+        cached += z_cached
+        print(f"\r      z{z}: {z_count} generated, {z_cached} cached          ", flush=True)
 
     print(f"    Terrain complete: {count} generated, {cached} cached")
     # Write completion marker so future builds skip terrain entirely
@@ -6869,12 +7081,15 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         check=True, capture_output=True, text=True,
                     )
                 except FileNotFoundError:
-                    # gdalbuildvrt not on PATH — skip the verification VRT.
-                    # The terrain pyramid generation step already produced the
-                    # tiles; verification is a defensive boundary-seam fixer
-                    # that runs only when the VRT can be (re)built.
-                    print(f"    Skipping terrain verification: gdalbuildvrt not found on PATH")
-                os.unlink(flist_path)
+                    # gdalbuildvrt is absent on this host, so this used to skip
+                    # verification entirely — the seam repair and the tiny-tile
+                    # safety net below have been dead here for months, which is
+                    # the same silent-skip that hid the Hispaniola mosaic bug.
+                    # Build the VRT ourselves instead.
+                    print("    gdalbuildvrt not found; building verification VRT directly")
+                    _build_dem_vrt(all_tifs_v, vrt_path)
+                finally:
+                    os.unlink(flist_path)
 
             if os.path.isfile(vrt_path):
                 print("    Verifying terrain tiles (missing + boundary seams)...")
@@ -6884,14 +7099,10 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         tile_path = os.path.join(terrain_dir, str(z), str(t.x), f"{t.y}.webp")
                         bounds = mercantile.bounds(t)
                         needs_regen = False
-                        if not os.path.isfile(tile_path):
-                            needs_regen = True
-                        elif os.path.getsize(tile_path) < 500:
-                            # 44-byte WebPs are a known failure mode: when an
-                            # earlier build's VRT didn't include the DEM for
-                            # this tile's area, lossless WebP compressed the
-                            # all-zeros fill down to ~44 bytes. Treat any tiny
-                            # tile as broken and regenerate from the full VRT.
+                        if not _terrain_tile_usable(tile_path):
+                            # Same rule as the generator. A bare size test here
+                            # condemned every legitimate 44-byte ocean tile and
+                            # so "repaired" all of Hawaii on every build.
                             needs_regen = True
                         elif z >= 10:
                             # Check if tile straddles a 1-degree boundary
@@ -6914,8 +7125,15 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                             )
                 if repair_tiles:
                     print(f"    Repairing {len(repair_tiles)} tiles (missing + boundary)...")
-                    from multiprocessing import Pool as _Pool
-                    with _Pool(min(4, os.cpu_count() or 4)) as pool:
+                    # spawn, not fork: _generate_one_terrain_tile keeps its
+                    # DEM dataset open in _DEM_HANDLES, and the parent has its
+                    # own open (low zooms are rasterised in-process). Forking
+                    # would hand four children the SAME GDAL dataset and its
+                    # shared file offset, so they would race on seeks and read
+                    # each other's blocks.
+                    import multiprocessing as _mp
+                    _ctx = _mp.get_context("spawn")
+                    with _ctx.Pool(min(4, os.cpu_count() or 4)) as pool:
                         pool.map(_generate_one_terrain_tile, repair_tiles)
                     print(f"    Repaired {len(repair_tiles)} terrain tiles")
                 else:
