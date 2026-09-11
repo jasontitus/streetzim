@@ -356,14 +356,18 @@ class ManifestCreator:
                   + (f" (RAYON_NUM_THREADS={_rayon})" if _rayon else " (all cores)"),
                   flush=True)
         except subprocess.CalledProcessError as e:
-            if getattr(exc, "returncode", None) == -9:
+            # `exc` is the __exit__ parameter and is not in scope here, so this
+            # branch raised NameError instead of the diagnostic — losing both
+            # the returncode and the manifest pointer in exactly the OOM case
+            # it exists to explain.
+            if e.returncode == -9:
                 raise RuntimeError(
                     f"streetzim-pack was KILLED (SIGKILL) — almost certainly the "
                     f"OOM killer. Peak memory scales with rayon threads x "
                     f"ZSTD_CLEVEL; re-run with a lower PACK_THREADS "
                     f"(currently {_rayon or 'all cores'}). Manifest preserved at "
                     f"{self._manifest_path} for inspection."
-                ) from exc
+                ) from e
             raise RuntimeError(
                 f"streetzim-pack failed (exit {e.returncode}). "
                 f"Manifest preserved at {self._manifest_path} for inspection."

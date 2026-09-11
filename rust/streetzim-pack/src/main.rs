@@ -347,62 +347,122 @@ fn stream_item_from_file(creator: &mut Creator, rec: &ItemRec, file: &PathBuf) -
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    // A failed pack must not leave a partial ZIM on disk. build-region-fast.sh
+    // writes straight to its final output path and skips the whole build with
+    // rc=0 if that file already exists, so a partial would masquerade as a
+    // finished ZIM on the next same-day run. The old code left partials too for
+    // any failure after start_writing (bad base64, missing file:, size
+    // mismatch, finish_writing); streaming merely widens the window to parse
+    // and read errors, so clean up on every error path rather than that one.
+    match run(&cli) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = std::fs::remove_file(&cli.output);
+            Err(e)
+        }
+    }
+}
+
+fn run(cli: &Cli) -> Result<()> {
     let started = std::time::Instant::now();
 
     let f = File::open(&cli.manifest)
         .with_context(|| format!("open manifest {:?}", cli.manifest))?;
-    let reader = BufReader::new(f);
+    // 8 MiB, not the 8 KiB default: reading the manifest is now the streaming
+    // hot path, and brazil's 93 GB would otherwise cost ~12M read(2) calls.
+    let reader = BufReader::with_capacity(8 << 20, f);
 
-    let mut records: Vec<Record> = Vec::new();
+    // Stream the manifest: parse one line, handle it, drop it.
+    //
+    // This used to collect every record into a Vec<Record> before writing a
+    // single byte. Because the manifest INLINES bodies — ItemRec::content as
+    // UTF-8 and ItemRec::body_b64 as base64, the latter held in its encoded
+    // form until handle_item decodes it — that Vec is not metadata, it is the
+    // whole payload. Peak RSS therefore tracked manifest size at ~1.02x and
+    // was reached before any output: brazil's 93.1 GB manifest died at ~95 GB
+    // RSS after six hours, twice, and no continent could ever be packed.
+    //
+    // zimru itself is a correct bounded streamer (dirent metadata plus the
+    // in-flight cluster), so streaming here is all that was needed; peak
+    // becomes dirents plus the single largest record.
+    //
+    // Safe because the manifest format guarantees `config` precedes every
+    // other record (see the module docstring), and cloud/manifest_writer.py
+    // emits it at __enter__ before any caller can add an item. A config
+    // arriving after writing has begun is now an explicit error rather than
+    // being silently applied too late to matter.
+    let mut creator = Creator::new();
+    let mut applied_config = false;
+    let mut writing = false;
+    let mut counts = (0usize, 0usize, 0usize, 0usize);
+
+    macro_rules! ensure_writing {
+        () => {
+            if !writing {
+                creator
+                    .start_writing(&cli.output)
+                    .map_err(|e| anyhow!("start_writing({:?}): {e}", cli.output))?;
+                writing = true;
+            }
+        };
+    }
+
     for (lineno, line) in reader.lines().enumerate() {
         let line = line.with_context(|| format!("read manifest line {}", lineno + 1))?;
         let s = line.trim();
         if s.is_empty() || s.starts_with('#') {
             continue;
         }
-        let rec: Record = serde_json::from_str(s)
-            .with_context(|| format!("parse manifest line {}: {s}", lineno + 1))?;
-        records.push(rec);
-    }
-
-    let mut creator = Creator::new();
-
-    let mut applied_config = false;
-    for rec in &records {
-        if let Record::Config(cfg) = rec {
-            if applied_config {
-                bail!("manifest contains more than one config record");
-            }
-            apply_config(&mut creator, cfg)?;
-            applied_config = true;
-        }
-    }
-
-    creator
-        .start_writing(&cli.output)
-        .map_err(|e| anyhow!("start_writing({:?}): {e}", cli.output))?;
-
-    let mut counts = (0usize, 0usize, 0usize, 0usize);
-    for rec in records {
+        let rec: Record = serde_json::from_str(s).with_context(|| {
+            // Truncate: a bad search-data record is megabytes on one line.
+            let snip: String = s.chars().take(200).collect();
+            let ell = if s.len() > snip.len() { "…" } else { "" };
+            format!("parse manifest line {}: {snip}{ell}", lineno + 1)
+        })?;
         match rec {
-            Record::Config(_) => {}
+            Record::Config(cfg) => {
+                if applied_config {
+                    bail!("manifest contains more than one config record");
+                }
+                if writing {
+                    bail!(
+                        "manifest line {}: config record appears after content; \
+                         config must precede every other record",
+                        lineno + 1
+                    );
+                }
+                apply_config(&mut creator, &cfg)?;
+                applied_config = true;
+            }
             Record::Metadata(m) => {
+                ensure_writing!();
                 handle_metadata(&mut creator, m)?;
                 counts.0 += 1;
             }
             Record::Illustration(i) => {
+                ensure_writing!();
                 handle_illustration(&mut creator, i)?;
                 counts.1 += 1;
             }
             Record::Item(it) => {
+                ensure_writing!();
                 handle_item(&mut creator, it)?;
                 counts.2 += 1;
             }
             Record::Redirect(r) => {
+                ensure_writing!();
                 handle_redirect(&mut creator, r)?;
                 counts.3 += 1;
             }
         }
+    }
+
+    // A manifest with no content records still has to produce a valid ZIM,
+    // which the old unconditional start_writing gave for free.
+    if !writing {
+        creator
+            .start_writing(&cli.output)
+            .map_err(|e| anyhow!("start_writing({:?}): {e}", cli.output))?;
     }
 
     creator
