@@ -161,7 +161,7 @@ sleep 2
 # at 12.4 GB, which is why east-coast-us could never clear this gate.
 STREETZIM_SITE="http://localhost:$PORT" ZIM_URL="http://localhost:$PORT/$ZIM" \
   ZIM_FILE="/storage/streetzim/$ZIM" \
-  SMOKE_ROUTE="$SRC;$DST" timeout 900 node cloud/pwa_smoke_test.mjs \
+  SMOKE_ROUTE="$SRC;$DST" SMOKE_SEARCH="$SEARCH" timeout 900 node cloud/pwa_smoke_test.mjs \
   > "${ID}-smoke-${TODAY}.log" 2>&1
 SMOKE=$?
 kill "$HTTP" 2>/dev/null; wait "$HTTP" 2>/dev/null; SMOKE_HTTP=""

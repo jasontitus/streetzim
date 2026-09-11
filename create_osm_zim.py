@@ -5002,11 +5002,15 @@ def create_zim(
         tile_start = time.time()
         batch_start = time.time()
         batch_size = 1000
-        # Adaptive backpressure: if a batch of add_item() calls slows down,
-        # sleep briefly to let libzim's compression workers drain the queue.
-        # This prevents the spin-lock death spiral in libzim's queue.h where
-        # the main thread and all workers busy-wait with microsleep().
-        backpressure_sleep = 0.0
+        # NOTE: there used to be adaptive backpressure here — per-item and
+        # per-batch sleeps to let libzim's compression workers drain, guarding
+        # the spin-lock death spiral in libzim's queue.h. That was correct when
+        # add_item() fed libzim's C++ queue directly. It is not any more: the
+        # creator is ManifestCreator, which appends a JSON line to a file. There
+        # is no queue, no worker pool, and nothing to drain, so a slow batch —
+        # which now means slow *disk*, as on central-asia's random reads from a
+        # 22 GB MBTiles — was answered by sleeping, making it slower still.
+        # Removed 2026-09-12. Packing happens later, in streetzim-pack.
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
             while True:
                 batch = list(itertools.islice(tile_source, batch_size))
@@ -5029,31 +5033,14 @@ def create_zim(
                     if not tile_data:
                         tiles_skipped_empty += 1
                         continue
-                    item_start = time.time()
                     creator.add_item(MapItem(
                         f"tiles/{z}/{x}/{y}.pbf", f"Tile {z}/{x}/{y}",
                         "application/x-protobuf",
                         tile_data,
                     ))
-                    item_elapsed = time.time() - item_start
                     tiles_added += 1
                     _watchdog_tile_count[0] = tiles_added
-                    # Per-item backpressure: if a single add_item() took over
-                    # 100ms, the queue is full — sleep to let workers drain.
-                    # This prevents the spin-lock stall where add_item blocks
-                    # forever inside libzim's C++ queue.
-                    if item_elapsed > 0.1:
-                        time.sleep(min(item_elapsed * 2, 2.0))
                 add_time = time.time() - add_start
-
-                # Batch-level backpressure: if overall rate is slow, add
-                # sleep between batches too.
-                batch_rate = batch_size / add_time if add_time > 0 else float("inf")
-                if batch_rate < 5000 and total_tiles > 100_000:
-                    backpressure_sleep = min(backpressure_sleep + 0.05, 1.0)
-                    time.sleep(backpressure_sleep)
-                elif batch_rate > 15000:
-                    backpressure_sleep = max(backpressure_sleep - 0.01, 0.0)
 
                 batch_start = time.time()
 
@@ -5063,8 +5050,9 @@ def create_zim(
                     remaining = (total_tiles - tiles_added) / rate if rate > 0 else 0
                     import resource
                     mem_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024**3)
-                    bp_str = f" bp={backpressure_sleep*1000:.0f}ms" if backpressure_sleep > 0 else ""
-                    print(f"\r    Added {tiles_added}/{total_tiles} tiles ({rate:.0f}/s, ~{remaining/60:.0f}m left, {mem_gb:.1f}GB RSS{bp_str})...", end="", flush=True)
+                    print(f"\r    Added {tiles_added}/{total_tiles} tiles "
+                          f"({rate:.0f}/s, ~{remaining/60:.0f}m left, {mem_gb:.1f}GB RSS)...",
+                          end="", flush=True)
 
         elapsed = time.time() - tile_start
         rate_str = f"{tiles_added/elapsed:.0f}/s" if elapsed > 0 else "instant"

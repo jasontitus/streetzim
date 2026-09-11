@@ -25,6 +25,14 @@
 import puppeteer from 'puppeteer';
 
 const SITE = process.env.STREETZIM_SITE || 'https://streetzim.web.app';
+// The search step used to hardcode "Palo Alto" regardless of region. It
+// passed elsewhere by luck (something matched the substring) and failed
+// central-asia honestly: a Central Asia ZIM has no Palo Alto, so the wait
+// for results ran out the 15 s clock and the gate reported a browser
+// failure for a ZIM whose search was fine — the CLI gate found 164 hits
+// for 'Tashkent' in the same file. Callers pass the registry's
+// smoke_search column; the old value stays the default.
+const SMOKE_SEARCH = process.env.SMOKE_SEARCH || 'Palo Alto';
 const ZIM_FILE = process.env.ZIM_FILE || '';
 const ZIM_URL = process.env.ZIM_URL ||
   'http://localhost:8765/osm-silicon-valley-2026-04-24.zim';
@@ -352,11 +360,11 @@ async function main() {
 
   // 3. Top-bar search.
   currentStep = 'search';
-  console.log('\n[search] does the search bar return results for "Palo Alto"?');
+  console.log('\n[search] does the search bar return results for "' + SMOKE_SEARCH + '"?');
   try {
     await page.waitForSelector('#search-input', { timeout: 10_000 });
     await page.click('#search-input');
-    await page.type('#search-input', 'Palo Alto', { delay: 30 });
+    await page.type('#search-input', SMOKE_SEARCH, { delay: 30 });
     await page.waitForFunction(() => {
       const r = document.getElementById('search-results');
       return r && r.children.length > 0;

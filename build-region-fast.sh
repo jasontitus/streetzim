@@ -21,6 +21,44 @@ PY=/storage/streetzim/venv-linux/bin/python3
 SCRIPT=/storage/streetzim/create_osm_zim.py
 
 MBTILES=/storage/streetzim/world-data/regions/${ID}.mbtiles
+
+# Stage the MBTiles on NVMe for the tile phase.
+#
+# Reading tiles is random small-record access into a multi-GB SQLite file. On
+# /storage (spinning) that measured 1,660 IOPS for 8 MB/s at 61% util and 8.4 ms
+# waits — central-asia added tiles at 163/s where east-coast-us managed 3,919/s,
+# turning one region into a ~13 h job while both NVMes sat idle at ~0%.
+#
+# Guards, because /mnt/data is shared with another tenant's st-bridge-models:
+# copy only if it still leaves NVME_RESERVE_GB free afterwards, and remove the
+# copy on EVERY exit path including a kill. Falls back to /storage silently.
+# /mnt/data itself is root-owned (shared host); /mnt/data/tilemaker is ours.
+NVME_SCRATCH="${NVME_SCRATCH:-/mnt/data/tilemaker/streetzim-scratch}"
+NVME_RESERVE_GB="${NVME_RESERVE_GB:-120}"
+STAGED_MBTILES=""
+cleanup_staged() {
+    [ -n "$STAGED_MBTILES" ] && rm -f "$STAGED_MBTILES" 2>/dev/null
+    STAGED_MBTILES=""
+}
+trap cleanup_staged EXIT INT TERM HUP
+
+if [ "${STAGE_MBTILES_NVME:-1}" = 1 ] && [ -f "$MBTILES" ]; then
+    _need_gb=$(( $(stat -c%s "$MBTILES") / 1073741824 + 1 ))
+    if mkdir -p "$NVME_SCRATCH" 2>/dev/null; then
+        _free_gb=$(df -BG --output=avail "$NVME_SCRATCH" 2>/dev/null | tail -1 | tr -dc '0-9')
+        if [ -n "$_free_gb" ] && [ $(( _free_gb - _need_gb )) -ge "$NVME_RESERVE_GB" ]; then
+            _dst="$NVME_SCRATCH/${ID}.$$.mbtiles"
+            echo "  staging ${ID}.mbtiles (${_need_gb}G) on NVMe — ${_free_gb}G free, keeping ${NVME_RESERVE_GB}G reserve"
+            if cp "$MBTILES" "$_dst" 2>/dev/null; then
+                STAGED_MBTILES="$_dst"; MBTILES="$_dst"
+            else
+                echo "  NVMe staging failed — using /storage"; rm -f "$_dst" 2>/dev/null
+            fi
+        else
+            echo "  not staging on NVMe: need ${_need_gb}G + ${NVME_RESERVE_GB}G reserve, have ${_free_gb:-?}G"
+        fi
+    fi
+fi
 PBF=/storage/streetzim/world-data/regions/${ID}.osm.pbf
 SEARCH=/storage/streetzim/world-data/regions/${ID}.search.jsonl
 WD=/storage/streetzim/wikidata_cache

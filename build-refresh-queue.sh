@@ -164,7 +164,7 @@ print(Searcher(a).search(Query().set_query(sys.argv[2])).getEstimatedMatches())
 PYEOF
 }
 
-browser_smoke() {  # browser_smoke <zim> <src> <dst> ; returns node exit code
+browser_smoke() {  # browser_smoke <zim> <src> <dst> <search> ; returns node exit code
   local zim="$1" port=8801 out="/storage/streetzim/${ID}-smoke-${TODAY}.log"
   ln -sfn "../$(basename "$zim")" "web/$(basename "$zim")"
   # NOT python -m http.server: the site relies on Firebase cleanUrls/
@@ -178,7 +178,7 @@ browser_smoke() {  # browser_smoke <zim> <src> <dst> ; returns node exit code
   # to materialise the whole ZIM and simply fails past ~12 GB.
   STREETZIM_SITE="http://localhost:$port" ZIM_URL="http://localhost:$port/$(basename "$zim")" \
     ZIM_FILE="$(readlink -f "$zim")" \
-    SMOKE_ROUTE="$2;$3" timeout 600 "$NODE" cloud/pwa_smoke_test.mjs > "$out" 2>&1
+    SMOKE_ROUTE="$2;$3" SMOKE_SEARCH="$4" timeout 600 "$NODE" cloud/pwa_smoke_test.mjs > "$out" 2>&1
   local rc=$?
   kill "$http" 2>/dev/null; rm -f "web/$(basename "$zim")"
   tail -3 "$out" | sed 's/^/    /' | tee -a "$LOG" >/dev/null
@@ -274,7 +274,21 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
   while :; do
   GATE_TRY=$((GATE_TRY+1))
   G=""
-  if timeout 900 "$PY" cloud/check_terrain_coverage.py --zooms 10-12 -- "$ZIM" "$BBOX" >> "$LOG" 2>&1; then log "  gate terrain: OK"; else G="$G terrain"; log "  gate terrain: FAIL"; fi
+  # Scale the timeout with ZIM size: the gate samples the DEM once per z10-z12
+  # tile, so it grows with area. A flat 900 s killed central-asia (22 GB) at
+  # exactly 15 min and reported "terrain FAIL" for a ZIM whose own in-build
+  # terrain audit had passed — a timeout indistinguishable, in the log, from
+  # real blank terrain. 300 s/GB, floor 900 s, cap 4 h.
+  _tsz=$(( $(stat -c%s "$ZIM") / 1073741824 ))
+  _tto=$(( 900 + _tsz * 300 )); [ "$_tto" -gt 14400 ] && _tto=14400
+  if timeout "$_tto" "$PY" cloud/check_terrain_coverage.py --zooms 10-12 -- "$ZIM" "$BBOX" >> "$LOG" 2>&1; then
+    log "  gate terrain: OK"
+  else
+    _trc=$?
+    G="$G terrain"
+    [ "$_trc" -eq 124 ] && log "  gate terrain: FAIL (timed out after ${_tto}s — inconclusive, not proof of blank terrain)" \
+                        || log "  gate terrain: FAIL"
+  fi
   if TERRAIN_STRIPE_TOLERATE=10 timeout 1800 "$PY" cloud/validate_zim.py "$ZIM" >> "$LOG" 2>&1; then log "  gate validate: OK"; else G="$G validate"; log "  gate validate: FAIL"; fi
   ROUTE_OUT=$(timeout 2400 "$PY" cloud/route_cli.py --zim="$ZIM" --src="$SRC" --dst="$DST" --mode=all --max-pops=5000000 2>&1)
   echo "$ROUTE_OUT" | tail -6 | sed 's/^/    /' >> "$LOG"
@@ -304,7 +318,7 @@ print(int(d))" 2>/dev/null || echo 0)
   [ "${SN:-0}" -ge 1 ] && log "  gate search('$SEARCH'): $SN" || { G="$G search"; log "  gate search: FAIL ($SN)"; }
   [ "${FN:-0}" -ge 1 ] && log "  gate find(restaurants): $FN" || { G="$G find"; log "  gate find: FAIL ($FN)"; }
   if [ "$BROWSER" != off ]; then
-    if browser_smoke "$ZIM" "$SRC" "$DST"; then log "  gate browser: OK"
+    if browser_smoke "$ZIM" "$SRC" "$DST" "$SEARCH"; then log "  gate browser: OK"
     elif [ "$BROWSER" = hard ]; then G="$G browser"; log "  gate browser: FAIL (hard)"
     else log "  gate browser: FAIL (soft — see ${ID}-smoke-${TODAY}.log)"; fi
   fi
