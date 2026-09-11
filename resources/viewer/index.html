@@ -6554,7 +6554,14 @@ function initRouting(map, config) {
         return loadNodeShards(idx).then(function() {
           // Cache by bytes rather than cell count: legacy 1° cells vary
           // wildly in density, while v3 scale-10 cells stay small.
-          graph = new SpatialGraph(idx, /*maxResidentBytes*/ 64 * 1024 * 1024);
+          // Same budget as routing-worker.js. This main-thread fallback is
+          // what runs where worker startup fails — Kiwix's iOS/macOS
+          // WKWebView — so leaving it at a flat 64 MB meant exactly those
+          // clients kept thrashing: ~33 of east-coast-us's cells resident
+          // when a 130 km route needs ~62, and the route never terminates.
+          var _gb = (navigator && navigator.deviceMemory) || 0;
+          var _mb = _gb ? Math.min(384, Math.max(64, _gb * 48)) : 192;
+          graph = new SpatialGraph(idx, _mb * 1024 * 1024);
           window.__streetzim_graph = graph;
           console.log('[streetzim] spatial graph loaded', {
             version: idx.version,

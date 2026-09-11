@@ -769,6 +769,7 @@ def _terrain_vrt_for_zoom(z, mosaic_path, low_zoom_world_vrt=None):
 # A terrain-RGB tile holding real elevation compresses to a few hundred
 # bytes at minimum; 44-byte files are the signature of a DEM fetch that
 # failed. Anything smaller than this is regenerated rather than reused.
+_DEM_MIN_TIF_BYTES = 1000
 _TERRAIN_MIN_REUSE_BYTES = int(os.environ.get("TERRAIN_MIN_REUSE_BYTES", "200"))
 
 # The window in which terrain was rasterised against the wrong DEM: from the
@@ -903,6 +904,26 @@ def _build_dem_vrt(tif_paths, out_path, res=1.0/3600.0, want_bbox=None):
     print(f"    VRT built: {len(srcs)} DEM tiles, {xsize}x{ysize} px, "
           f"bbox {west:.2f},{south:.2f},{east:.2f},{north:.2f}")
     return out_path
+
+
+def _dem_tif_is_usable(path):
+    """True if a DEM GeoTIFF is present, big enough, and has TIFF magic.
+
+    One predicate so the download gate, the marker-clear and the verification
+    VRT cannot disagree about what "a real DEM" means — they previously used
+    <1000, >=1000 and >1000 respectively, with cloud/preflight.py using <1024.
+    Also swallows the stat race: a concurrent build replacing the file must not
+    kill this one with an uncaught OSError.
+    """
+    try:
+        if os.path.getsize(path) < _DEM_MIN_TIF_BYTES:
+            return False
+        with open(path, "rb") as fh:
+            magic = fh.read(4)
+    except OSError:
+        return False
+    # II*\0 (little-endian), MM\0* (big-endian), and the BigTIFF variants.
+    return magic in (b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+")
 
 
 def _bbox_tile_total(minlon, minlat, maxlon, maxlat, max_zoom):
@@ -1092,10 +1113,35 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
             fname = f"dem_{ns}{abs_lat:02d}_{ew}{abs_lon:03d}.tif"
             fpath = os.path.join(dem_dir, fname)
 
-            # Check for a "no data" marker (empty file left by a previous 404)
+            # Check for a "no data" marker (empty file left by a previous 404).
+            #
+            # A marker must NEVER shadow a real DEM. The GLO-90 fallback below
+            # was added after some of these markers were written, so five cells
+            # (Georgia/Armenia/Azerbaijan and the Caspian — dem_N39_E048,
+            # N40_E049, N40_E050, N41_E043, N41_E046, carrying terrain up to
+            # 4,113 m) ended up with BOTH a usable .tif and a stale marker, and
+            # were silently dropped from every VRT covering them. That is why
+            # central-asia's 2026-09-11 build aborted: 263 Caspian tiles
+            # rasterised as 0 m against a DEM that reads -28 m. Clear the
+            # marker when the file is usable instead of skipping the cell.
             nodata_marker = fpath + ".nodata"
             if os.path.exists(nodata_marker):
-                continue
+                # Size alone is not validity: pre-atomic-write builds left
+                # truncated .tif files that clear every size check. Clearing a
+                # marker in front of one of those would admit a corrupt DEM to
+                # the VRT AND destroy the only thing that would have made the
+                # download branch re-fetch it. Check the TIFF magic, as the
+                # downloader itself does, and fall through to re-download when
+                # it fails rather than trusting the file.
+                if _dem_tif_is_usable(fpath):
+                    print(f"    Clearing stale .nodata marker shadowing {fname}",
+                          flush=True)
+                    try:
+                        os.unlink(nodata_marker)
+                    except OSError:
+                        pass
+                else:
+                    continue
 
             if not os.path.exists(fpath) or os.path.getsize(fpath) < 1000:
                 # Try GLO-30 first, fall back to GLO-90 for restricted regions
