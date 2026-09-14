@@ -2408,13 +2408,42 @@ def extract_addresses_pbf(pbf_path, output_path, bbox=None):
         ], check=True)
 
         addr_geojson = os.path.join(tmp, "addresses.geojsonseq")
+        # Points and areas only. osmium export writes a closed way twice —
+        # once as a LineString (the way) and once as a MultiPolygon (the
+        # area) — so taking linestrings too would double-count every
+        # addressed building. Areas cover closed building ways and
+        # multipolygon relations alike.
         subprocess.run([
             "osmium", "export", addr_pbf,
             "-f", "geojsonseq",
+            "--geometry-types=point,polygon",
             "-o", addr_geojson, "--overwrite",
         ], check=True)
 
         count = 0
+        n_point = n_area = n_no_street = n_dup = 0
+        # Duplicates: the same address is often tagged on a point AND on the
+        # building around it, or on two points a few metres apart. Two checks:
+        # - a ~11 m grid (1e-4 deg) searched including its 8 neighbours, so a
+        #   pair straddling a cell boundary still matches — rounding alone let
+        #   784 same-name Hawaii point pairs 5-15 m apart through;
+        # - an area is skipped when a point with the same address already lies
+        #   inside its bounding box. osmium export writes points before areas,
+        #   so the point (usually the entrance or the business) is the one kept.
+        #
+        # Both indexes hold 64-bit hashes, not (display, cell) tuples: a tuple
+        # keeps its display string alive, measured at ~290 B per address on
+        # Iran — ~38 GB at a Europe-scale ~130 M OSM addresses. A set of ints
+        # is ~60 B per entry. Collisions at 64 bits are ~1e-3 expected at 150 M
+        # entries, and a collision only drops one duplicate-looking row.
+        seen_cells = set()   # hash((display, cy, cx)) for every kept address
+        point_cells = set()  # the same, for kept POINTS only
+        point_names = set()  # hash(display) for kept POINTS; most buildings share
+                             # no address with any point, so this skips their scan
+        # Cell indices are offset to stay positive: CPython hashes -1 and -2
+        # identically, so cells -1/-2 (a ~22 m strip south of the equator or
+        # west of Greenwich) aliased and stretched dedup by one cell there.
+        _CELL0 = 1 << 21
         with open(addr_geojson, "r", encoding="utf-8") as fin, \
              open(output_path, "a", encoding="utf-8") as fout:
             for line in fin:
@@ -2430,6 +2459,7 @@ def extract_addresses_pbf(pbf_path, output_path, bbox=None):
                 street = (props.get("addr:street") or "").strip()
                 city = (props.get("addr:city") or "").strip()
                 if not num or not street:
+                    n_no_street += 1
                     continue  # skip orphan addresses that can't be typed
 
                 geom = feat.get("geometry") or {}
@@ -2437,18 +2467,57 @@ def extract_addresses_pbf(pbf_path, output_path, bbox=None):
                 coords = geom.get("coordinates")
                 if gtype == "Point" and coords:
                     lon, lat = coords[0], coords[1]
-                elif gtype == "Polygon" and coords:
-                    ring = coords[0]
+                    is_area = False
+                elif gtype in ("Polygon", "MultiPolygon") and coords:
+                    # osmium export emits every area — including a plain closed
+                    # building way — as a MultiPolygon. Only "Polygon" used to
+                    # be accepted, so every address tagged on a building was
+                    # dropped: Hawaii kept 3,937 of ~18,900, Iran 24,231 of
+                    # ~207,900, Turkey 134,930 of ~472,900. Use the first
+                    # polygon's outer ring, without its repeated closing vertex.
+                    ring = coords[0] if gtype == "Polygon" else (coords[0][0] if coords[0] else [])
+                    if len(ring) > 1 and ring[0] == ring[-1]:
+                        ring = ring[:-1]
                     if not ring:
                         continue
                     lon = sum(c[0] for c in ring) / len(ring)
                     lat = sum(c[1] for c in ring) / len(ring)
+                    is_area = True
+                    area_bbox = (min(c[1] for c in ring), max(c[1] for c in ring),
+                                 min(c[0] for c in ring), max(c[0] for c in ring))
                 else:
                     continue
 
                 display = f"{num} {street}"
                 if city:
                     display = f"{display}, {city}"
+                cy, cx = int(round(lat * 1e4)) + _CELL0, int(round(lon * 1e4)) + _CELL0
+                if any(hash((display, cy + dy, cx + dx)) in seen_cells
+                       for dy in (-1, 0, 1) for dx in (-1, 0, 1)):
+                    n_dup += 1
+                    continue
+                if is_area:
+                    # Skip the area when a same-address point lies within its
+                    # bounding box padded ~20 m (an entrance just outside the
+                    # footprint). Scan the grid cells the box covers; a huge area
+                    # (campus, park) would mean thousands of lookups, so above
+                    # ~50x50 cells fall back to the centroid neighbourhood above.
+                    pad = 2e-4
+                    s_, n_, w_, e_ = area_bbox
+                    y0, y1 = int(round((s_ - pad) * 1e4)) + _CELL0, int(round((n_ + pad) * 1e4)) + _CELL0
+                    x0, x1 = int(round((w_ - pad) * 1e4)) + _CELL0, int(round((e_ + pad) * 1e4)) + _CELL0
+                    if hash(display) in point_names and (y1 - y0 + 1) * (x1 - x0 + 1) <= 2500 and any(
+                            hash((display, yy, xx)) in point_cells
+                            for yy in range(y0, y1 + 1) for xx in range(x0, x1 + 1)):
+                        n_dup += 1
+                        continue
+                    n_area += 1
+                cell_key = hash((display, cy, cx))   # one int, shared by both sets
+                if not is_area:
+                    point_cells.add(cell_key)
+                    point_names.add(hash(display))
+                    n_point += 1
+                seen_cells.add(cell_key)
                 entry = {
                     "name": display,
                     "type": "addr",
@@ -2461,7 +2530,10 @@ def extract_addresses_pbf(pbf_path, output_path, bbox=None):
                 count += 1
                 if count % 100000 == 0:
                     print(f"\r    Wrote {count} addresses...", end="", flush=True)
-        print(f"\r    Wrote {count} address entries")
+        print(f"\r    Wrote {count} address entries "
+              f"({n_point} on points, {n_area} on buildings/areas; "
+              f"skipped {n_no_street} without addr:street, {n_dup} duplicates)",
+              flush=True)
         return count
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -2661,7 +2733,20 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     # `type == "addr"` entries because non-address records (cities,
     # POIs, ways) have fundamentally different identity.
     # ------------------------------------------------------------------
-    osm_coord_index = set()   # {(lat_e5, lon_e5)}
+    # All three indexes are built as flat 8-byte arrays and sorted once, then
+    # probed with numpy searchsorted. They used to be a set of float tuples,
+    # a set of string tuples and a dict of coordinate lists — measured at
+    # ~500 B per OSM address, which at a Europe-scale ~130 M OSM addresses is
+    # ~65 GB before the rest of the build. Now ~40 B per address once built,
+    # with a transient peak while each array is sorted. Keys are Python
+    # hashes of the same tuples the old code compared, so matching is
+    # unchanged except for genuine 64-bit collisions (~1e-3 expected at 150 M
+    # keys, each costing at most one skipped Overture row). Rounded
+    # coordinates are offset by 1000 before hashing: CPython hashes -1.0 and
+    # -2.0 identically, which would otherwise alias those rounded values.
+    import numpy as _np
+    from array import array as _array
+    _coord_keys = _array("q")           # hash((lat_e5, lon_e5))
     # attr_key was (number, normalized_street) but that collides across
     # cities — "1029 Ramona Street" in Ramona, CA (OSM) and "1029
     # RAMONA ST" in Palo Alto (Overture) hash to the same key, so the
@@ -2671,11 +2756,13 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     # cities now both land. Cities are normalised the same way streets
     # are (lowercased, accent-stripped, single-spaced) so "PALO ALTO"
     # / "Palo Alto" / "palo  alto" all collapse to one value.
-    osm_attr_index = set()    # {(number, normalized_street, normalized_city)}
+    _attr_keys = _array("q")            # hash((number, norm_street, norm_city))
     # Missing Overture address_levels should still dedupe against a
     # nearby OSM address with the same number+street, but only within a
     # short distance so we do not reintroduce cross-city collisions.
-    osm_attr_near_index = {}  # {(number, normalized_street): [(lat, lon), ...]}
+    _near_keys = _array("q")            # hash((number, norm_street)), one per point
+    _near_lat = _array("d")
+    _near_lon = _array("d")
     osm_count = 0
     with open(search_jsonl_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -2693,7 +2780,7 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
             if lat is None or lon is None:
                 continue
             # ~1 m grid — rounds to 5 decimal places in degrees.
-            osm_coord_index.add((round(lat, 5), round(lon, 5)))
+            _coord_keys.append(hash((round(lat, 5) + 1000.0, round(lon, 5) + 1000.0)))
             name = rec.get("name") or ""
             # Existing OSM records serialize as "<num> <street>, <city>".
             # Split on the first space + comma to recover number/street/city.
@@ -2713,10 +2800,31 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
             city = city.strip()
             if num and street:
                 attr2 = (num.strip(), _normalize_street(street))
-                osm_attr_index.add((*attr2, _normalize_street(city)))
-                osm_attr_near_index.setdefault(attr2, []).append((lat, lon))
+                _attr_keys.append(hash((*attr2, _normalize_street(city))))
+                _near_keys.append(hash(attr2))
+                _near_lat.append(lat)
+                _near_lon.append(lon)
             osm_count += 1
     print(f"    Indexed {osm_count} existing OSM address records")
+    # Build one index at a time and free its source buffer before the next,
+    # so only one sort's temporary copy exists at once.
+    osm_coord_index = _np.unique(_np.frombuffer(_coord_keys, dtype=_np.int64))
+    del _coord_keys
+    osm_attr_index = _np.unique(_np.frombuffer(_attr_keys, dtype=_np.int64))
+    del _attr_keys
+    _order = _np.argsort(_np.frombuffer(_near_keys, dtype=_np.int64), kind="stable")
+    near_keys = _np.frombuffer(_near_keys, dtype=_np.int64)[_order]
+    del _near_keys
+    near_lat = _np.frombuffer(_near_lat, dtype=_np.float64)[_order]
+    del _near_lat
+    near_lon = _np.frombuffer(_near_lon, dtype=_np.float64)[_order]
+    del _near_lon, _order
+    # Exact lower bound for the 100 m test: great-circle distance is never
+    # less than R * |dlat| (radians), because the haversine term is at least
+    # sin^2(dlat/2). Points beyond that bound cannot pass, so skipping them
+    # cannot change a result; the survivors get the unchanged exact check.
+    _NEAR_DLAT_DEG = (100.0 / 6371000.0) * (180.0 / 3.141592653589793) * (1 + 1e-9)
+
 
     # ------------------------------------------------------------------
     # Stream Overture rows via DuckDB Arrow batches. Materializing the
@@ -2755,6 +2863,12 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     source_datasets = set()
     with open(search_jsonl_path, "a", encoding="utf-8") as fout:
         for batch in reader:
+            # Classify each row, then run all three index lookups for the
+            # batch in one vectorised call. A per-row searchsorted made the
+            # merge ~34% slower on Washington DC; at a Europe-scale ~140 M
+            # Overture rows that would be hours. Rows are still decided and
+            # written in their original order, so output is unchanged.
+            cand = []          # (row, num, street_raw, lat, lon, city, attr_key)
             for row in batch.to_pylist():
                 num = (row.get("number") or "").strip()
                 street_raw = (row.get("street") or "").strip()
@@ -2796,26 +2910,54 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
                 if len(levels) >= 2 and levels[-1]:
                     city = (levels[-1].get("value") or "").title()
 
-                # Pass 2: fuzzy match against our OSM index. attr_key
-                # now scopes by normalised city so two addresses with
-                # the same number+street in different cities both
-                # land — fixes the cross-city collision that dropped
-                # "1029 Ramona St, Palo Alto" because OSM had "1029
-                # Ramona Street" in Ramona (city), 600 km away.
-                coord_key = (round(lat, 5), round(lon, 5))
+                # Pass 2 keys: attr_key scopes by normalised city so two
+                # addresses with the same number+street in different
+                # cities both land — fixes the cross-city collision that
+                # dropped "1029 Ramona St, Palo Alto" because OSM had
+                # "1029 Ramona Street" in Ramona (city), 600 km away.
                 attr_key = (
                     num,
                     _normalize_street(street_raw),
                     _normalize_street(city),
                 )
-                attr2 = attr_key[:2]
-                nearby_attr_dup = any(
-                    _haversine_m(lat, lon, osm_lat, osm_lon) <= 100.0
-                    for osm_lat, osm_lon in osm_attr_near_index.get(attr2, ())
-                )
-                if (coord_key in osm_coord_index
-                        or attr_key in osm_attr_index
-                        or nearby_attr_dup):
+                cand.append((row, num, street_raw, lat, lon, city, attr_key))
+            if not cand:
+                continue
+
+            k_coord = _np.fromiter((hash((round(c[3], 5) + 1000.0, round(c[4], 5) + 1000.0)) for c in cand),
+                                   dtype=_np.int64, count=len(cand))
+            k_attr = _np.fromiter((hash(c[6]) for c in cand), dtype=_np.int64, count=len(cand))
+            k_near = _np.fromiter((hash(c[6][:2]) for c in cand), dtype=_np.int64, count=len(cand))
+
+            def _member(arr, keys):
+                if arr.size == 0:
+                    return _np.zeros(keys.size, dtype=bool)
+                i = _np.searchsorted(arr, keys)
+                i_clip = _np.minimum(i, arr.size - 1)
+                return (i < arr.size) & (arr[i_clip] == keys)
+
+            dup = _member(osm_coord_index, k_coord) | _member(osm_attr_index, k_attr)
+            near_lo = _np.searchsorted(near_keys, k_near, side="left")
+            near_hi = _np.searchsorted(near_keys, k_near, side="right")
+
+            for j, (row, num, street_raw, lat, lon, city, attr_key) in enumerate(cand):
+                nearby_attr_dup = False
+                if not dup[j]:
+                    lo_j, hi_j = int(near_lo[j]), int(near_hi[j])
+                    if hi_j > lo_j:
+                        # Hot keys ("1 Hauptstraße" across a continent) can hold
+                        # thousands of points; filter by latitude first with the
+                        # exact lower bound, then run the unchanged haversine on
+                        # plain Python floats for the few that remain.
+                        seg_lat = near_lat[lo_j:hi_j]
+                        close = _np.nonzero(_np.abs(seg_lat - lat) <= _NEAR_DLAT_DEG)[0]
+                        if close.size:
+                            c_lat = seg_lat[close].tolist()
+                            c_lon = near_lon[lo_j:hi_j][close].tolist()
+                            nearby_attr_dup = any(
+                                _haversine_m(lat, lon, o_lat, o_lon) <= 100.0
+                                for o_lat, o_lon in zip(c_lat, c_lon))
+                if dup[j] or nearby_attr_dup:
                     pass2_skipped += 1
                     continue
                 # Street is frequently uppercased in US OpenAddresses
