@@ -10,3 +10,14 @@ china
 africa
 united-states
 europe
+# Added 2026-09-14 on request. Appended rather than inserted in size order:
+# the runner holds this file on fd 3 and consumes it line by line, so appends
+# are picked up but rewriting earlier lines would corrupt its read position.
+# These are NEW regions (never shipped), not refreshes.
+russia
+canada
+# Rebuild: 2026-09-14 build failed validate on two zero-byte satellite
+# cache tiles (14/13426/9043-9044). Cache files removed so they re-download;
+# create_osm_zim.py now drops empty raster files. Gate-failed ZIM moved to
+# rejected-zims/ so the same-name skip in build-region-fast.sh can't fire.
+australia-nz

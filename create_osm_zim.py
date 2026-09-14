@@ -5085,6 +5085,7 @@ def create_zim(
             _t0 = time.time()
             count = 0
             skipped = 0
+            empty = 0
             suffix = f".{ext}"
             strip_len = len(suffix)
             for z in range(0, max_zoom + 1):
@@ -5110,6 +5111,19 @@ def create_zim(
                             skipped += 1
                             continue
                         fpath = os.path.join(x_dir, fname)
+                        # A zero-byte cache file is a download that wrote
+                        # nothing. Adding it produces a ZIM entry with no
+                        # content, which zimcheck reports as "Empty article"
+                        # and the validator gate fails: australia-nz's
+                        # 2026-09-14 build did exactly that on two satellite
+                        # tiles cached empty on 2026-04-13. The vector-tile
+                        # loop already drops empty tiles; do the same here.
+                        try:
+                            if os.path.getsize(fpath) == 0:
+                                empty += 1
+                                continue
+                        except OSError:
+                            continue
                         zim_path = f"{zim_prefix}/{z}/{x_name}/{fname}"
                         creator.add_item(MapItem(
                             zim_path, f"{label} {z}/{x_name}/{fname}",
@@ -5123,7 +5137,9 @@ def create_zim(
             elapsed = time.time() - _t0
             rate = (count / elapsed) if elapsed > 0 else 0
             print(f"\r    Added {count} {label.lower()} tiles in {elapsed:.0f}s ({rate:.0f}/s)" +
-                  (f" (skipped {skipped} outside bbox)" if skipped else ""))
+                  (f" (skipped {skipped} outside bbox)" if skipped else "") +
+                  (f" (dropped {empty} zero-byte cache files)" if empty else ""),
+                  flush=True)
             PHASE_TIMER.record_subphase(
                 f"zim-pack: {label.lower()} tiles", elapsed,
                 note=f"{count:,} tiles ({rate:.0f}/s)"
