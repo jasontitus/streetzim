@@ -198,6 +198,20 @@ def check_wikidata_cache() -> list[CheckResult]:
         f"{n_items} shards on disk")]
 
 
+_TIFF_MAGICS = (b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+")
+
+
+def _tif_looks_usable(p) -> bool:
+    """>= 1000 bytes with TIFF magic — matches create_osm_zim._dem_tif_is_usable."""
+    try:
+        if p.stat().st_size < 1000:
+            return False
+        with open(p, "rb") as fh:
+            return fh.read(4) in _TIFF_MAGICS
+    except OSError:
+        return False
+
+
 def check_dem_cache_coverage(bbox) -> list[CheckResult]:
     """Every 1°-DEM that covers the bbox must be present and non-zero."""
     out = []
@@ -213,14 +227,20 @@ def check_dem_cache_coverage(bbox) -> list[CheckResult]:
     for name in need:
         p = DEM_DIR / name
         nodata_marker = DEM_DIR / (name + ".nodata")
+        if p.is_file():
+            # A tif on disk is judged on its own, marker or not. This used to
+            # skip any marked cell first, so a stale marker sitting beside a
+            # real DEM passed preflight — how five shadowed Georgia/Armenia/
+            # Azerbaijan/Caspian cells (up to 4,113 m) went unnoticed while the
+            # builder dropped them from every VRT. Same test as the builder's
+            # _dem_tif_is_usable: at least 1000 B and TIFF magic.
+            if not _tif_looks_usable(p):
+                empty.append(name)
+            continue
         if nodata_marker.is_file():
             # Sea/ice/polar cell with no terrestrial data — expected empty.
             continue
-        if not p.is_file():
-            missing.append(name)
-            continue
-        if p.stat().st_size < 1024:
-            empty.append(name)
+        missing.append(name)
     if missing:
         out.append(CheckResult("dem_cache.coverage", "fail",
             f"{len(missing)} DEM(s) missing for bbox (e.g. {missing[:3]})",

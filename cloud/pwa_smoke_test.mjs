@@ -363,15 +363,42 @@ async function main() {
   console.log('\n[search] does the search bar return results for "' + SMOKE_SEARCH + '"?');
   try {
     await page.waitForSelector('#search-input', { timeout: 10_000 });
+    // Wait for the search manifest before typing. doSearch() returns silently
+    // while the manifest is still loading, so on a 22 GB ZIM the keystrokes
+    // could all land before it was ready and nothing ever rendered — the
+    // likely real cause of central-asia's 2026-09-11 timeout. The placeholder
+    // flips to "Search N places..." (or "Search unavailable") once it loads.
+    await page.waitForFunction(() => {
+      const i = document.getElementById('search-input');
+      const ph = (i && i.placeholder) || '';
+      return /^Search [\d,.\s\u00a0\u202f]+ places/.test(ph) || ph === 'Search unavailable';
+    }, { timeout: 120_000 });
+    const ph = await page.evaluate(() => document.getElementById('search-input').placeholder);
+    if (ph === 'Search unavailable') throw new Error('search manifest failed to load');
     await page.click('#search-input');
     await page.type('#search-input', SMOKE_SEARCH, { delay: 30 });
+    // Require a REAL result row. This used to wait for any child of
+    // #search-results, but the viewer renders a "Searching…" placeholder row
+    // immediately and a "No results found" row on a miss — both are children —
+    // so the check could not fail: korea-mongolia "passed" searching Palo Alto.
     await page.waitForFunction(() => {
       const r = document.getElementById('search-results');
-      return r && r.children.length > 0;
-    }, { timeout: 15_000 });
-    const count = await page.evaluate(() =>
-      document.getElementById('search-results').children.length);
-    pass('search results', count + ' rows');
+      if (!r) return false;
+      if (r.querySelector('.search-no-results')) return true;
+      return Array.from(r.querySelectorAll('.search-result'))
+        .some(el => el.textContent.trim() !== 'Searching…');
+    }, { timeout: 60_000 });
+    const res = await page.evaluate(() => {
+      const r = document.getElementById('search-results');
+      const rows = Array.from(r.querySelectorAll('.search-result'))
+        .filter(el => el.textContent.trim() !== 'Searching…');
+      return { none: !!r.querySelector('.search-no-results'), n: rows.length,
+               first: rows[0] ? rows[0].textContent.trim().slice(0, 60) : '' };
+    });
+    if (res.none || res.n === 0) {
+      throw new Error('no results for "' + SMOKE_SEARCH + '"');
+    }
+    pass('search results', res.n + ' rows — first: ' + res.first);
   } catch (e) {
     fail('search', e.message);
   }

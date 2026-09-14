@@ -22,43 +22,6 @@ SCRIPT=/storage/streetzim/create_osm_zim.py
 
 MBTILES=/storage/streetzim/world-data/regions/${ID}.mbtiles
 
-# Stage the MBTiles on NVMe for the tile phase.
-#
-# Reading tiles is random small-record access into a multi-GB SQLite file. On
-# /storage (spinning) that measured 1,660 IOPS for 8 MB/s at 61% util and 8.4 ms
-# waits — central-asia added tiles at 163/s where east-coast-us managed 3,919/s,
-# turning one region into a ~13 h job while both NVMes sat idle at ~0%.
-#
-# Guards, because /mnt/data is shared with another tenant's st-bridge-models:
-# copy only if it still leaves NVME_RESERVE_GB free afterwards, and remove the
-# copy on EVERY exit path including a kill. Falls back to /storage silently.
-# /mnt/data itself is root-owned (shared host); /mnt/data/tilemaker is ours.
-NVME_SCRATCH="${NVME_SCRATCH:-/mnt/data/tilemaker/streetzim-scratch}"
-NVME_RESERVE_GB="${NVME_RESERVE_GB:-120}"
-STAGED_MBTILES=""
-cleanup_staged() {
-    [ -n "$STAGED_MBTILES" ] && rm -f "$STAGED_MBTILES" 2>/dev/null
-    STAGED_MBTILES=""
-}
-trap cleanup_staged EXIT INT TERM HUP
-
-if [ "${STAGE_MBTILES_NVME:-1}" = 1 ] && [ -f "$MBTILES" ]; then
-    _need_gb=$(( $(stat -c%s "$MBTILES") / 1073741824 + 1 ))
-    if mkdir -p "$NVME_SCRATCH" 2>/dev/null; then
-        _free_gb=$(df -BG --output=avail "$NVME_SCRATCH" 2>/dev/null | tail -1 | tr -dc '0-9')
-        if [ -n "$_free_gb" ] && [ $(( _free_gb - _need_gb )) -ge "$NVME_RESERVE_GB" ]; then
-            _dst="$NVME_SCRATCH/${ID}.$$.mbtiles"
-            echo "  staging ${ID}.mbtiles (${_need_gb}G) on NVMe — ${_free_gb}G free, keeping ${NVME_RESERVE_GB}G reserve"
-            if cp "$MBTILES" "$_dst" 2>/dev/null; then
-                STAGED_MBTILES="$_dst"; MBTILES="$_dst"
-            else
-                echo "  NVMe staging failed — using /storage"; rm -f "$_dst" 2>/dev/null
-            fi
-        else
-            echo "  not staging on NVMe: need ${_need_gb}G + ${NVME_RESERVE_GB}G reserve, have ${_free_gb:-?}G"
-        fi
-    fi
-fi
 PBF=/storage/streetzim/world-data/regions/${ID}.osm.pbf
 SEARCH=/storage/streetzim/world-data/regions/${ID}.search.jsonl
 WD=/storage/streetzim/wikidata_cache
@@ -90,6 +53,70 @@ if [ -f "$OUT_FINAL" ]; then
     echo "ALREADY EXISTS: $OUT_FINAL — skipping" | tee -a "$LOG"
     exit 0
 fi
+
+# Stage the MBTiles on NVMe for the tile phase.
+#
+# Tile reading is random small-record access into a multi-GB SQLite file. On
+# /storage (spinning) an early central-asia reading showed 1,660 IOPS for
+# 8 MB/s at 61% util while both NVMes idled. Honest caveat from review: whole-
+# build tile rates staged (brazil 8,262/s, indian-subcontinent 8,510/s) and
+# unstaged (mexico 9,259/s, west-asia 7,900/s) are similar, so this is harmless
+# rather than proven faster; the copy itself costs ~20 s per 4 GB.
+#
+# Rules, because /mnt/data is shared with another tenant's st-bridge-models:
+# - Stage only AFTER the "already exists" skip, so a skipped region copies nothing.
+# - One stager at a time (flock), and free space is checked under that lock, so
+#   two builds cannot both pass the check and breach NVME_RESERVE_GB together.
+# - Sweep copies left by dead builds (SIGKILL/reboot cannot run a trap).
+# - Remove our copy on every exit path, and let signals actually kill us.
+# /mnt/data itself is root-owned (shared host); /mnt/data/tilemaker is ours.
+NVME_SCRATCH="${NVME_SCRATCH:-/mnt/data/tilemaker/streetzim-scratch}"
+NVME_RESERVE_GB="${NVME_RESERVE_GB:-120}"
+STAGED_MBTILES=""
+cleanup_staged() {
+    if [ -n "$STAGED_MBTILES" ]; then rm -f "$STAGED_MBTILES" 2>/dev/null || true; fi
+    STAGED_MBTILES=""
+}
+# EXIT does the cleanup. The signal traps must also END the script: a trap that
+# merely returns lets bash resume, so a killed build ran on to validate and
+# "done", and a kill during the copy fell back to a full build from /storage.
+trap cleanup_staged EXIT
+trap 'cleanup_staged; trap - INT;  kill -INT  $$' INT
+trap 'cleanup_staged; trap - TERM; kill -TERM $$' TERM
+trap 'cleanup_staged; trap - HUP;  kill -HUP  $$' HUP
+
+if [ "${STAGE_MBTILES_NVME:-1}" = 1 ] && [ -f "$MBTILES" ] && mkdir -p "$NVME_SCRATCH" 2>/dev/null \
+   && exec 9>"$NVME_SCRATCH/.stage.lock" && flock -w 900 9; then
+    for _old in "$NVME_SCRATCH"/*.mbtiles; do
+        [ -e "$_old" ] || continue
+        _pid=${_old%.mbtiles}; _pid=${_pid##*.}
+        # /proc, not kill -0: kill -0 fails on another user's live PID and would
+        # make us delete a copy that is still in use.
+        if [ -n "$_pid" ] && [ "$_pid" -eq "$_pid" ] 2>/dev/null && [ ! -d "/proc/$_pid" ]; then
+            echo "  removing stale NVMe copy from dead build: $(basename "$_old")"
+            rm -f "$_old" || true
+        fi
+    done
+    _need_gb=$(( $(stat -c%s "$MBTILES") / 1073741824 + 1 ))
+    _free_gb=$(df -BG --output=avail "$NVME_SCRATCH" 2>/dev/null | tail -1 | tr -dc '0-9')
+    if [ -n "$_free_gb" ] && [ $(( _free_gb - _need_gb )) -ge "$NVME_RESERVE_GB" ]; then
+        _dst="$NVME_SCRATCH/${ID}.$$.mbtiles"
+        echo "  staging ${ID}.mbtiles (${_need_gb}G) on NVMe — ${_free_gb}G free, keeping ${NVME_RESERVE_GB}G reserve"
+        # Record the path BEFORE copying, so a signal mid-copy removes the partial.
+        STAGED_MBTILES="$_dst"
+        if cp "$MBTILES" "$_dst" 2>/dev/null; then
+            MBTILES="$_dst"
+        else
+            echo "  NVMe staging failed — using /storage"
+            cleanup_staged
+        fi
+    else
+        echo "  not staging on NVMe: need ${_need_gb}G + ${NVME_RESERVE_GB}G reserve, have ${_free_gb:-?}G"
+    fi
+    flock -u 9 || true
+    exec 9>&-
+fi
+
 
 # Pick xapian mode based on whether xapianbuilder is available.
 # `--xapian=builder` requires `--zim-builder=rust` per the create_osm_zim

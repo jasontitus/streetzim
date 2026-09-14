@@ -21,3 +21,10 @@ canada
 # create_osm_zim.py now drops empty raster files. Gate-failed ZIM moved to
 # rejected-zims/ so the same-name skip in build-region-fast.sh can't fire.
 australia-nz
+# CORRECTION (2026-09-14, from review): the header above is wrong for the
+# runner started 2026-09-14 01:25. That runner holds this file open and reads it
+# by byte offset, so ONLY appending whole lines (ending in a newline) is safe
+# while it runs. Commenting out, reordering, or atomically replacing this file
+# will be missed or corrupt its read. The run-continent-chain.sh installed after
+# this note re-reads the list per region, making all of those edits safe for
+# any chain launched from now on.

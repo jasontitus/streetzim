@@ -406,12 +406,22 @@ class ManifestCreator:
             _t = threading.Thread(target=_watch_hwm, args=(_proc.pid, _peak_kb),
                                   daemon=True)
             _t.start()
-            _rc = _proc.wait()
+            try:
+                _rc = _proc.wait()
+            except BaseException:
+                # subprocess.run() kills the child if the parent is interrupted;
+                # a bare Popen does not, so a KeyboardInterrupt here used to
+                # leave streetzim-pack running on its own. Keep run()'s contract.
+                _proc.kill()
+                _proc.wait()
+                raise
             _t.join(timeout=1.0)
             if _rc != 0:
                 raise subprocess.CalledProcessError(_rc, cmd)
             if _peak_kb[0]:
-                print(f"    streetzim-pack peak RSS {_peak_kb[0] / 1048576:.1f} GB"
+                _peak = (f"{_peak_kb[0] / 1048576:.1f} GB" if _peak_kb[0] >= 1048576
+                         else f"{_peak_kb[0] / 1024:.0f} MB")
+                print(f"    streetzim-pack peak RSS {_peak}"
                       + (f" (RAYON_NUM_THREADS={_rayon})" if _rayon else " (all cores)"),
                       flush=True)
         except subprocess.CalledProcessError as e:

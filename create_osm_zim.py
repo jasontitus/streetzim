@@ -794,6 +794,8 @@ def _terrain_vrt_for_zoom(z, mosaic_path, low_zoom_world_vrt=None):
 # bytes at minimum; 44-byte files are the signature of a DEM fetch that
 # failed. Anything smaller than this is regenerated rather than reused.
 _DEM_MIN_TIF_BYTES = 1000
+# II*\0 little-endian, MM\0* big-endian, and the BigTIFF variants.
+_TIFF_MAGICS = (b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+")
 _TERRAIN_MIN_REUSE_BYTES = int(os.environ.get("TERRAIN_MIN_REUSE_BYTES", "200"))
 
 # The window in which terrain was rasterised against the wrong DEM: from the
@@ -930,12 +932,13 @@ def _build_dem_vrt(tif_paths, out_path, res=1.0/3600.0, want_bbox=None):
     return out_path
 
 
-def _dem_tif_is_usable(path):
+def _dem_tif_is_usable(path, deep=False):
     """True if a DEM GeoTIFF is present, big enough, and has TIFF magic.
 
-    One predicate so the download gate, the marker-clear and the verification
-    VRT cannot disagree about what "a real DEM" means — they previously used
-    <1000, >=1000 and >1000 respectively, with cloud/preflight.py using <1024.
+    One predicate for the download gate, the marker-clear and the verification
+    VRT, so they cannot disagree about what "a real DEM" means (they used
+    <1000, >=1000 and >1000). deep=True additionally reads the last row to
+    catch truncation; it costs a read, so only the rare marker-clear uses it.
     Also swallows the stat race: a concurrent build replacing the file must not
     kill this one with an uncaught OSError.
     """
@@ -946,8 +949,22 @@ def _dem_tif_is_usable(path):
             magic = fh.read(4)
     except OSError:
         return False
-    # II*\0 (little-endian), MM\0* (big-endian), and the BigTIFF variants.
-    return magic in (b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+")
+    if magic not in _TIFF_MAGICS:
+        return False
+    if not deep:
+        return True
+    # Magic only rules out non-TIFF content (HTML error pages, zero-filled
+    # files). A TRUNCATED GeoTIFF keeps its header and passes it — review
+    # showed a 3 KB head of a real COG opens as 1200x1200 and fails only on
+    # read. So the deep form reads the last row, where truncation lands.
+    try:
+        import rasterio
+        from rasterio.windows import Window
+        with rasterio.open(path) as ds:
+            ds.read(1, window=Window(0, ds.height - 1, ds.width, 1))
+        return True
+    except Exception:
+        return False
 
 
 def _bbox_tile_total(minlon, minlat, maxlon, maxlat, max_zoom):
@@ -1150,14 +1167,13 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
             # marker when the file is usable instead of skipping the cell.
             nodata_marker = fpath + ".nodata"
             if os.path.exists(nodata_marker):
-                # Size alone is not validity: pre-atomic-write builds left
-                # truncated .tif files that clear every size check. Clearing a
-                # marker in front of one of those would admit a corrupt DEM to
-                # the VRT AND destroy the only thing that would have made the
-                # download branch re-fetch it. Check the TIFF magic, as the
-                # downloader itself does, and fall through to re-download when
-                # it fails rather than trusting the file.
-                if _dem_tif_is_usable(fpath):
+                # Only clear the marker for a DEM that actually reads. Pre-
+                # atomic-write builds left truncated .tif files; a truncated
+                # GeoTIFF keeps its header, so size and magic both pass — hence
+                # the deep read here. If it fails, the cell is skipped with its
+                # marker left in place (treated as absent, not re-downloaded);
+                # clearing the marker then would admit a corrupt DEM to the VRT.
+                if _dem_tif_is_usable(fpath, deep=True):
                     print(f"    Clearing stale .nodata marker shadowing {fname}",
                           flush=True)
                     try:
@@ -1167,7 +1183,7 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
                 else:
                     continue
 
-            if not os.path.exists(fpath) or os.path.getsize(fpath) < 1000:
+            if not _dem_tif_is_usable(fpath):
                 # Try GLO-30 first, fall back to GLO-90 for restricted regions
                 # (Georgia, Armenia, Azerbaijan etc. that 404 on GLO-30).
                 glo90_url = COPERNICUS_DEM_URL_GLO90.format(ns=ns, lat=abs_lat, ew=ew, lon=abs_lon)
@@ -1194,7 +1210,7 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
                             with open(tmp_path, "rb") as f:
                                 magic = f.read(4)
                             # Classic TIFF or BigTIFF (download_dem.py accepts both).
-                            if magic not in (b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+"):
+                            if magic not in _TIFF_MAGICS:
                                 raise IOError("response is not a TIFF (truncated or HTML error page)")
                             os.replace(tmp_path, fpath)
                             size_mb = os.path.getsize(fpath) / (1024 * 1024)
@@ -5026,15 +5042,18 @@ def create_zim(
         tile_start = time.time()
         batch_start = time.time()
         batch_size = 1000
-        # NOTE: there used to be adaptive backpressure here — per-item and
-        # per-batch sleeps to let libzim's compression workers drain, guarding
-        # the spin-lock death spiral in libzim's queue.h. That was correct when
-        # add_item() fed libzim's C++ queue directly. It is not any more: the
-        # creator is ManifestCreator, which appends a JSON line to a file. There
-        # is no queue, no worker pool, and nothing to drain, so a slow batch —
-        # which now means slow *disk*, as on central-asia's random reads from a
-        # 22 GB MBTiles — was answered by sleeping, making it slower still.
-        # Removed 2026-09-12. Packing happens later, in streetzim-pack.
+        # Adaptive backpressure, ONLY for the libzim builder. With libzim,
+        # add_item() feeds its C++ queue directly, and per-item / per-batch
+        # sleeps let the compression workers drain — guarding the spin-lock
+        # death spiral in libzim's queue.h. With zim_builder="rust" the creator
+        # is ManifestCreator, which appends a line to a file: there is no queue
+        # to drain, so a slow batch means slow disk, and sleeping only made
+        # central-asia's tile phase slower. build-region-fast.sh uses rust, but
+        # --zim-builder defaults to "python" (libzim) and several wrappers
+        # (cloud/build_region.sh, build-region.sh, the salvage and VM scripts)
+        # still take that path, so the guard must stay for them.
+        _libzim_backpressure = (zim_builder != "rust")
+        backpressure_sleep = 0.0
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
             while True:
                 batch = list(itertools.islice(tile_source, batch_size))
@@ -5057,6 +5076,7 @@ def create_zim(
                     if not tile_data:
                         tiles_skipped_empty += 1
                         continue
+                    item_start = time.time() if _libzim_backpressure else 0.0
                     creator.add_item(MapItem(
                         f"tiles/{z}/{x}/{y}.pbf", f"Tile {z}/{x}/{y}",
                         "application/x-protobuf",
@@ -5064,7 +5084,21 @@ def create_zim(
                     ))
                     tiles_added += 1
                     _watchdog_tile_count[0] = tiles_added
+                    if _libzim_backpressure:
+                        # A single add_item() over 100 ms means libzim's queue
+                        # is full — sleep so the workers can drain.
+                        item_elapsed = time.time() - item_start
+                        if item_elapsed > 0.1:
+                            time.sleep(min(item_elapsed * 2, 2.0))
                 add_time = time.time() - add_start
+
+                if _libzim_backpressure:
+                    batch_rate = batch_size / add_time if add_time > 0 else float("inf")
+                    if batch_rate < 5000 and total_tiles > 100_000:
+                        backpressure_sleep = min(backpressure_sleep + 0.05, 1.0)
+                        time.sleep(backpressure_sleep)
+                    elif batch_rate > 15000:
+                        backpressure_sleep = max(backpressure_sleep - 0.01, 0.0)
 
                 batch_start = time.time()
 
@@ -7152,7 +7186,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                     _ns = "N" if _lat >= 0 else "S"
                     _ew = "E" if _lon >= 0 else "W"
                     _p = os.path.join(dem_dir_v, f"dem_{_ns}{abs(_lat):02d}_{_ew}{abs(_lon):03d}.tif")
-                    if os.path.isfile(_p) and os.path.getsize(_p) > 1000:
+                    if _dem_tif_is_usable(_p):
                         all_tifs_v.append(_p)
             if all_tifs_v:
                 import tempfile as _tmpfile
