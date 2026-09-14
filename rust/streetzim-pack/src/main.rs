@@ -42,7 +42,7 @@
 //!   PWA fzstd's per-cluster cap).
 
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -366,11 +366,32 @@ fn main() -> Result<()> {
 fn run(cli: &Cli) -> Result<()> {
     let started = std::time::Instant::now();
 
-    let f = File::open(&cli.manifest)
+    let mut f = File::open(&cli.manifest)
         .with_context(|| format!("open manifest {:?}", cli.manifest))?;
+    // Accept a zstd-compressed manifest, detected by magic rather than by file
+    // extension so a plain manifest keeps working unchanged. The manifest is
+    // mostly base64 of already-compressed tiles plus JSON search data;
+    // measured on brazil's, zstd -3 shrinks the tile section 1.87x and the
+    // search-data section (72% of the bytes) 5.22x — ~93 GB -> ~25 GB on disk.
+    // Decompression runs ~1 GB/s against a packer bound at tens of MB/s by
+    // zstd-22 cluster compression, so reading it costs nothing measurable.
+    let mut magic = [0u8; 4];
+    let got = f
+        .read(&mut magic)
+        .with_context(|| format!("read manifest header {:?}", cli.manifest))?;
+    f.seek(SeekFrom::Start(0))
+        .with_context(|| format!("rewind manifest {:?}", cli.manifest))?;
+    let raw: Box<dyn Read> = if got == 4 && magic == [0x28, 0xB5, 0x2F, 0xFD] {
+        Box::new(
+            zstd::stream::read::Decoder::new(f)
+                .with_context(|| format!("zstd decoder for {:?}", cli.manifest))?,
+        )
+    } else {
+        Box::new(f)
+    };
     // 8 MiB, not the 8 KiB default: reading the manifest is now the streaming
     // hot path, and brazil's 93 GB would otherwise cost ~12M read(2) calls.
-    let reader = BufReader::with_capacity(8 << 20, f);
+    let reader = BufReader::with_capacity(8 << 20, raw);
 
     // Stream the manifest: parse one line, handle it, drop it.
     //

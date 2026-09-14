@@ -110,6 +110,19 @@ def _resolve_pack_binary() -> str:
     )
 
 
+_MANIFEST_ZSTD_THREADS = 4
+
+
+def _manifest_zstd_enabled() -> bool:
+    if os.environ.get("STREETZIM_MANIFEST_ZSTD", "1") == "0":
+        return False
+    try:
+        import zstandard  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 class ManifestCreator:
     """Captures every libzim Creator call as a JSONL record. Spawns
     `streetzim-pack` at __exit__."""
@@ -144,8 +157,28 @@ class ManifestCreator:
         # `<output>.pack-stage/` continue to find the manifest.
         self._stage_dir = Path(self._output_path + ".pack-stage")
         self._stage_dir.mkdir(parents=True, exist_ok=True)
-        self._manifest_path = self._stage_dir / "manifest.jsonl"
-        self._mf = self._manifest_path.open("w", encoding="utf-8")
+        # Write the manifest zstd-compressed when python-zstandard is present
+        # (STREETZIM_MANIFEST_ZSTD=0 forces plain). Measured on brazil's 93 GB
+        # manifest: zstd -3 shrinks the base64 tile section 1.87x and the JSON
+        # search-data section — 72% of the bytes — 5.22x, so ~93 GB -> ~25 GB.
+        # That is a footprint win, not a speed win: generation is bound by one
+        # Python core (profiled at 100% CPU, 2 MB/s written), and compression
+        # runs on zstd's own worker threads outside the GIL. What it buys is
+        # 70 GB less sequential I/O on the HDD the tile reads share, and a
+        # manifest small enough to stage on NVMe under the reserve.
+        # streetzim-pack detects zstd by magic, so either form packs.
+        self._zstd = _manifest_zstd_enabled()
+        self._manifest_path = self._stage_dir / (
+            "manifest.jsonl.zst" if self._zstd else "manifest.jsonl")
+        if self._zstd:
+            import io
+            import zstandard
+            _raw = open(self._manifest_path, "wb")
+            _zw = zstandard.ZstdCompressor(
+                level=3, threads=_MANIFEST_ZSTD_THREADS).stream_writer(_raw, closefd=True)
+            self._mf = io.TextIOWrapper(_zw, encoding="utf-8", newline="\n")
+        else:
+            self._mf = self._manifest_path.open("w", encoding="utf-8")
         self._closed = False
         self._keep_stage = keep_stage
         self._verbose = verbose
@@ -444,10 +477,24 @@ class ManifestCreator:
                 pass
 
 
+def _open_manifest_text(manifest_path: str):
+    """Open a manifest for reading whether plain or zstd (detected by magic)."""
+    with open(manifest_path, "rb") as probe:
+        magic = probe.read(4)
+    if magic == b"\x28\xb5\x2f\xfd":
+        import io
+        import zstandard
+        raw = open(manifest_path, "rb")
+        return io.TextIOWrapper(
+            zstandard.ZstdDecompressor().stream_reader(raw, closefd=True),
+            encoding="utf-8")
+    return open(manifest_path, "r", encoding="utf-8")
+
+
 def iter_records(manifest_path: str) -> Iterable[dict[str, Any]]:
     """Read a manifest back as an iterator of records — for tests and
-    diff tools."""
-    with open(manifest_path, "r", encoding="utf-8") as f:
+    diff tools. Accepts plain or zstd-compressed manifests."""
+    with _open_manifest_text(manifest_path) as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):

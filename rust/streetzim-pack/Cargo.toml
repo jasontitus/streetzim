@@ -16,6 +16,9 @@ serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 base64 = "0.22"
+# Read zstd-compressed manifests (manifest.jsonl.zst). Same crate/version zimru
+# already builds, so this adds no new native dependency.
+zstd = { version = "0.13", default-features = false }
 
 [profile.release]
 opt-level = 3
