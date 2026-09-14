@@ -329,13 +329,31 @@ those reviews found are in the commit after each change.
   the list by byte offset, so until it exits only whole-line appends (ending
   in a newline) are safe.
 
+### Addresses
+
+- **Every OSM address on a building was dropped** until 2026-09-14.
+  `osmium export` writes areas as MultiPolygon, and the extractor only took
+  Point/Polygon, so ZIMs carried address *nodes* only. Fixed: Hawaii 3,937 →
+  17,473, Iran 24,231 → 206,488, Baltics 446,252 → 1,896,182.
+- The Overture merge's indexes were rewritten to ~40 B per OSM address
+  (from ~500 B). Its output is byte-identical on DC and Baltics.
+- Regions shipped before the fix, including southeast-asia, keep node-only
+  addresses until rebuilt.
+
 ### Known, not fixed
 
-- **Overture addresses:** 13 regions get zero rows in both 2026-04-15.0 and
-  2026-08-19.0 (hawaii, indian-subcontinent, turkey, egypt, iran, west-asia,
-  caucasus, central-asia, himalayas, hispaniola, and east/west/southern
-  africa). That looks like coverage, not a regression; zero for Hawaii is
-  unverified. Their map-config still sets `hasOvertureAddresses`.
+- **Overture addresses** return zero rows for 13 regions in both
+  2026-04-15.0 and 2026-08-19.0. Researched 2026-09-14:
+  - This is upstream coverage, not our download. The theme covers exactly
+    39 countries, and none of Turkey, Egypt, Iran, India, the Dominican
+    Republic or any African/Central Asian country is among them.
+  - Hawaii is absent because the National Address Database has no Hawaii
+    data, and all four of its OpenAddresses sources (Honolulu, Maui, Kauai,
+    Hawaii County) carry no license, which Overture requires. The county
+    services themselves are live (Honolulu 204,963 points, Maui 77,613,
+    Kauai 30,089), but their terms are disclaimers only.
+  - Thin US coverage: roughly NV ~2%, SC ~9%, LA ~13%, GA ~15%, MI and
+    PA ~20% of housing units (housing figures approximate).
 - **indian-subcontinent** returns 4 search hits for "Mumbai". Not examined.
 - **Find chips** are bucketed by a hash of the name, so tapping a chip
   fetches and concatenates every bucket: 147.5 MB for east-coast-us "Shops".
