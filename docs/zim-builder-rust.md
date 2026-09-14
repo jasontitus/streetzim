@@ -68,6 +68,28 @@ Internally, `create_zim()` swaps the libzim `Creator` for
    propagates errors, and (on success) deletes the stage dir unless
    `keep_stage=True` is set on `ManifestCreator`.
 
+## Compressed manifests and memory
+
+- **zstd manifests.** `ManifestCreator` writes
+  `<output>.zim.pack-stage/manifest.jsonl.zst` (zstd -3, 4 threads) when
+  python-zstandard is installed; `STREETZIM_MANIFEST_ZSTD=0` forces plain
+  `manifest.jsonl`. `streetzim-pack` recognises zstd by its magic bytes, so
+  either form packs, and `iter_records()` reads either. Measured on brazil's
+  93 GB manifest: base64 tile records shrink 1.87× and JSON search data 5.22×,
+  ~93 GB → ~25 GB. It costs no measurable time, and saves none either:
+  generation is bound by one Python core.
+- **The packer streams.** Each record is parsed, handled and dropped, so
+  peak memory is dirents (~96 B per entry plus the URL) plus the largest
+  single record plus zstd's per-thread contexts. It no longer tracks manifest
+  size. Because of this, `config` must be the first record; a config after
+  content is an error. One exception: a `streaming:true` item still costs
+  about 2× its own size, because the item builder reserves the whole file
+  up front.
+- **A failed pack leaves no output.** Any error removes the output ZIM,
+  because wrappers treat an existing ZIM as a finished build.
+- **Peak RSS** in the build log is the packer's own VmHWM, not the build's
+  high-water mark.
+
 ## Manifest schema
 
 JSONL, one record per line. Field types are JSON-native; absolute paths

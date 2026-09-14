@@ -15,6 +15,17 @@ node cloud/pwa_smoke_test.mjs
 # Custom ZIM
 ZIM_URL=http://localhost:8765/osm-canada-2026-04-25.zim node cloud/pwa_smoke_test.mjs
 
+# Large ZIMs (anything past a few GB): pass the file itself. Without ZIM_FILE
+# the test fetches ZIM_URL into a browser blob, which Chrome cannot do at
+# 12 GB ("Failed to fetch"); with it the service worker gets an on-disk File,
+# exactly as the picker gives a real user.
+ZIM_FILE=/storage/streetzim/osm-east-coast-us-2026-09-11.zim \
+  ZIM_URL=http://localhost:8765/osm-east-coast-us-2026-09-11.zim \
+  SMOKE_ROUTE="40.7128,-74.0060;39.9526,-75.1652" SMOKE_SEARCH="Boston" \
+  node cloud/pwa_smoke_test.mjs
+# SMOKE_ROUTE and SMOKE_SEARCH come from cloud/regions.tsv (smoke_src,
+# smoke_dst, smoke_search); ship-region.sh and build-refresh-queue.sh pass them.
+
 # Watch it in a real Chrome window
 HEADFUL=1 node cloud/pwa_smoke_test.mjs
 ```
@@ -32,7 +43,7 @@ The script needs:
 |---|-----------------------|--------------------------------------------------------------|
 | 1 | SW load               | Picker page → `set-zim` round-trip succeeds                  |
 | 2 | Viewer ready          | `window.streetzimRouting.open` exists after viewer load       |
-| 3 | Top-bar search        | Typing "Palo Alto" populates `#search-results`               |
+| 3 | Top-bar search        | Waits for the search manifest, types `SMOKE_SEARCH` (default "Palo Alto"), and requires at least one real result row. "Searching…" and "No results found" rows do not count. |
 | 4 | Find chip             | `places.html` Restaurants chip → `#results` has rows         |
 | 5 | Directions handoff    | Click Directions on first result → `#routing-dest-input` fills |
 | 6 | Origin typeahead      | Type "Mount" in origin → `#routing-origin-results` populates  |

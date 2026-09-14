@@ -225,3 +225,118 @@ against April (europe 40.67 → 41.81 GB, us 14.52 → 14.98, china 6.16 →
   PWA reader mis-sliced until 629a6ba; shipping ordered clusters keeps ZIMs
   readable by browsers that have not picked up the new app. `xapianbuilder`
   IS the new build (accented titles become searchable).
+  **Superseded 2026-09-11:** the packer was rebuilt from zimru HEAD
+  (e185dea, 2026-08-22) for the streaming-manifest fix (7a44564). The only
+  cluster-related zimru commit since 376f767 is a zimcheck change, and ZIMs
+  built since pass the browser gate, but the binary is no longer the May build.
+
+## 11. What broke and what changed, 2026-09-10 → 09-14
+
+Every change below went through adversarial review; the fixes for what
+those reviews found are in the commit after each change.
+
+### Terrain
+
+- **Root cause of blank terrain** (c81feac). There is no gdal CLI on this
+  host. Terrain generation caught `gdalbuildvrt`'s FileNotFoundError and
+  reused one shared `mosaic_4326.tif` covering only Hispaniola. Every tile
+  generated elsewhere since 2026-03-19 rasterised against nodata. The builder
+  now writes its own VRT (`_build_dem_vrt`) and checks it covers the bbox.
+- **Blank ≠ ocean.** A constant-elevation tile is exactly 44 B, so size can't
+  separate a failed tile from open water. Reuse of small tiles is decided by
+  mtime instead: tiles written inside the corruption window
+  [2026-03-19 23:54, 2026-09-10 13:00) regenerate once.
+- **Stale `.nodata` markers hid five real DEM cells**
+  (Georgia/Armenia/Azerbaijan/Caspian, up to 4,113 m). The builder now clears
+  a marker only when the tif actually reads (`_dem_tif_is_usable(deep=True)`).
+  `cloud/preflight.py` judges the tif before the marker.
+- **The same 25 cells were missing from `comprehensive.vrt`** (the terrain
+  gate's DEM) and from **`world_dem_{32k,8k}.tif`** (all z0–z7 terrain):
+  - Both were built before the cells were fetched on 2026-04-17. Repaired in
+    place: VRT entries with fractional DstRects, and the world rasters
+    re-derived on an integer-aligned window.
+  - All 36 z0–z7 tiles over lon 42–51 / lat 37–42 were deleted so they
+    regenerate.
+  - The first repair (09-11) was a pixel off and left a zero column; review
+    caught it and it was redone 09-14.
+  - Pre-fix copies are in `backups/dem-2026-09-14/`.
+  - Regions already shipped over the Caucasus (central-asia, west-asia,
+    caucasus, turkey, iran) keep their old z0–z7 tiles until rebuilt.
+
+### Packer and manifest
+
+- **`streetzim-pack` streams the manifest** (7a44564). It used to read the
+  whole manifest into memory before writing, so peak RSS tracked manifest
+  size. Brazil (93 GB manifest) packed after two OOMs at ~95 GB. A failed
+  pack now removes its output, because `build-region-fast.sh` skips any build
+  whose ZIM already exists.
+- **The manifest is written zstd -3** (ca0e04e) when python-zstandard is
+  installed.
+  - Measured on brazil's: the tile section shrinks 1.87×, the search section
+    (72% of bytes) 5.22×, ~93 GB → ~25 GB.
+  - This saves disk, not time: generation is one Python core at 100%. The
+    packer detects zstd by magic; `STREETZIM_MANIFEST_ZSTD=0` writes plain.
+- **"streetzim-pack peak RSS" is the packer's own VmHWM** (042678b).
+  Earlier log lines were a high-water mark across every child of the build,
+  so brazil's "76.5 GB" and the 65.2 / 29.9 GB comparison are not packer
+  numbers.
+
+### Build wrappers
+
+- **NVMe staging of the region MBTiles** (`build-region-fast.sh`). Rules:
+  - It runs after the "already exists" skip, under a `flock`.
+  - It copies only if 120 G stays free on the shared volume.
+  - It sweeps copies left by dead builds.
+  - Its signal traps clean up and re-raise; the first version resumed after
+    a kill.
+  The copy costs ~20 s per 4 GB. Tile rates are similar staged and unstaged,
+  so this is harmless, not proven faster.
+- **Backpressure** in the tile loop applies only to the libzim builder,
+  which is still the `--zim-builder` default for several wrappers.
+- **Satellite tiles are written atomically**. Zero-byte raster cache files
+  are dropped when packing and counted in the phase summary. Two such files
+  failed australia-nz's 2026-09-14 validation. Builds only download satellite
+  up to z12, so they were fetched by hand at z14.
+
+### Gates
+
+- **Terrain gate timeout** is 900 s + 300 s per GB of ZIM, capped at 4 h.
+  A timeout is logged as inconclusive, and still blocks upload. Cost follows
+  the z10–12 tile count: russia (~2.8 M tiles) is tight against its cap.
+- **Browser smoke**:
+  - It loads the ZIM as an on-disk File (`ZIM_FILE`); fetching a 12 GB ZIM
+    into a blob fails outright.
+  - It searches the registry's term (`SMOKE_SEARCH`).
+  - Its search check now waits for the manifest and requires a real result
+    row. Before, it could not fail: "Searching…" and "No results found" rows
+    both counted.
+  - Other steps are still hollow: near-city types the literal "origin", the
+    Find page is seeded at Palo Alto, and origin typeahead always types
+    "Mount".
+- **Routing cell budget** scales with `navigator.deviceMemory` (192 MB when
+  unknown), in the worker and in the main-thread fallback Kiwix's WebView
+  uses. A flat 64 MB made a 130 km east-coast-us route thrash forever.
+
+### Continent chain
+
+- `run-continent-chain.sh` re-reads `continent-queue.list` before each
+  region.
+  - Appends, comment-outs, reordering and atomic replacement are all safe.
+  - A region listed twice runs twice, and unknown ids are skipped.
+  - It waits on any running queue first and refuses to start under 500 G
+    free.
+- **Caveat:** the chain launched 2026-09-14 01:25 predates this. It reads
+  the list by byte offset, so until it exits only whole-line appends (ending
+  in a newline) are safe.
+
+### Known, not fixed
+
+- **Overture addresses:** 13 regions get zero rows in both 2026-04-15.0 and
+  2026-08-19.0 (hawaii, indian-subcontinent, turkey, egypt, iran, west-asia,
+  caucasus, central-asia, himalayas, hispaniola, and east/west/southern
+  africa). That looks like coverage, not a regression; zero for Hawaii is
+  unverified. Their map-config still sets `hasOvertureAddresses`.
+- **indian-subcontinent** returns 4 search hits for "Mumbai". Not examined.
+- **Find chips** are bucketed by a hash of the name, so tapping a chip
+  fetches and concatenates every bucket: 147.5 MB for east-coast-us "Shops".
+  This is the largest phone-memory risk; geographic bucketing is the fix.
