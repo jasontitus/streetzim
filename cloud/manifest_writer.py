@@ -465,10 +465,16 @@ class ManifestCreator:
                 timer.record_subphase(
                     "zim-pack: streetzim-pack (zimru)",
                     elapsed,
-                    note=f"manifest {manifest_size/1e6:.0f} MB → ZIM {out_size/1e9:.2f} GB",
+                    note=f"manifest {manifest_size/1e6:.0f} MB"
+                         f"{' (zstd)' if self._zstd else ''} → ZIM {out_size/1e9:.2f} GB",
                 )
                 timer.record_metric(
-                    "zim-pack: manifest size", f"{manifest_size/1e6:.0f}", "MB",
+                    # On-disk bytes. Compressed manifests are ~3.5x smaller, so
+                    # label them rather than let them read as a 70% drop against
+                    # older builds' plain figures.
+                    "zim-pack: manifest size (zstd)" if self._zstd
+                    else "zim-pack: manifest size",
+                    f"{manifest_size/1e6:.0f}", "MB",
                 )
                 timer.record_metric(
                     "zim-pack: output ZIM size", f"{out_size/1e6:.0f}", "MB",

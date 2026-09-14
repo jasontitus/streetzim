@@ -11,4 +11,5 @@ internetarchive>=4.0
 reverse_geocoder>=1.5    # GeoNames-backed (lat,lon) → city/admin1 for POI location labels
 duckdb>=1.5
 pyarrow>=14.0         # for DuckDB Arrow-batch streaming in `merge_overture_addresses`
+zstandard>=0.22       # zstd-compressed pack manifest (~3.5x smaller); absent -> plain
 pytest>=8.0           # for tests/test_overture.py + other test_*.py harnesses

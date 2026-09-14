@@ -459,8 +459,17 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
                     jpg_data = resp.read()
                 # Save to source cache
                 os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-                with open(cache_path, 'wb') as f:
-                    f.write(jpg_data)
+                # Atomic: a killed write must not leave a truncated .jpg that
+                # every later build reuses (same rule as terrain and DEM).
+                import threading as _th
+                _tmp = f"{cache_path}.{os.getpid()}-{_th.get_ident()}.tmp"
+                try:
+                    with open(_tmp, 'wb') as f:
+                        f.write(jpg_data)
+                    os.replace(_tmp, cache_path)
+                finally:
+                    if os.path.exists(_tmp):
+                        os.unlink(_tmp)
                 return Image.open(io.BytesIO(jpg_data)), len(jpg_data)
             except Exception as e:
                 if attempt < 3:
@@ -470,11 +479,26 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
         return None, 0
 
     def _save_image(img, path):
-        """Save image in the configured format. Returns output file size."""
-        if sat_format == "avif":
-            img.save(path, "AVIF", quality=quality, speed=6)
-        else:
-            img.save(path, "WEBP", quality=quality)
+        """Save image in the configured format. Returns output file size.
+
+        Written to a temp file and renamed into place. Pillow opens the target
+        path before encoding and only removes it if the encoder raises, so a
+        build killed mid-encode left a 0-byte tile at the final path. The
+        downloader retries 0-byte files only up to --satellite-download-zoom, so
+        anything above that stayed broken for good — australia-nz's two empty
+        z14 tiles from 2026-04-13 failed the validator five months later.
+        """
+        import threading as _th
+        tmp = f"{path}.{os.getpid()}-{_th.get_ident()}.tmp"
+        try:
+            if sat_format == "avif":
+                img.save(tmp, "AVIF", quality=quality, speed=6)
+            else:
+                img.save(tmp, "WEBP", quality=quality)
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
         return os.path.getsize(path)
 
     def _process_tile_256(z, x, y):
@@ -5086,6 +5110,7 @@ def create_zim(
             count = 0
             skipped = 0
             empty = 0
+            unreadable = 0
             suffix = f".{ext}"
             strip_len = len(suffix)
             for z in range(0, max_zoom + 1):
@@ -5123,6 +5148,9 @@ def create_zim(
                                 empty += 1
                                 continue
                         except OSError:
+                            # Just listed from the directory, so a stat failure
+                            # is an I/O or permission problem — count it.
+                            unreadable += 1
                             continue
                         zim_path = f"{zim_prefix}/{z}/{x_name}/{fname}"
                         creator.add_item(MapItem(
@@ -5138,12 +5166,18 @@ def create_zim(
             rate = (count / elapsed) if elapsed > 0 else 0
             print(f"\r    Added {count} {label.lower()} tiles in {elapsed:.0f}s ({rate:.0f}/s)" +
                   (f" (skipped {skipped} outside bbox)" if skipped else "") +
-                  (f" (dropped {empty} zero-byte cache files)" if empty else ""),
+                  (f" (dropped {empty} zero-byte cache files)" if empty else "") +
+                  (f" (skipped {unreadable} unreadable files)" if unreadable else ""),
                   flush=True)
             PHASE_TIMER.record_subphase(
                 f"zim-pack: {label.lower()} tiles", elapsed,
                 note=f"{count:,} tiles ({rate:.0f}/s)"
-                     + (f", skipped {skipped} outside bbox" if skipped else ""))
+                     + (f", skipped {skipped} outside bbox" if skipped else "")
+                     # Dropped files are invisible to the validator's coverage
+                     # check (it can only count entries that exist), so record
+                     # them where the build summary keeps them.
+                     + (f", dropped {empty} zero-byte cache files" if empty else "")
+                     + (f", {unreadable} unreadable" if unreadable else ""))
             return count
 
         # Add satellite tiles if provided
