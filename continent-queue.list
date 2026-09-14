@@ -1,0 +1,12 @@
+# Continents to rebuild, cheapest first (mbtiles+pbf), one per line.
+# The runner re-reads this file before each region, so it can be edited
+# freely while the chain is running — never edit the runner itself.
+# Comment a line out to skip it; add canada / russia here if wanted.
+australia-nz
+indian-subcontinent
+southeast-asia
+south-america
+china
+africa
+united-states
+europe

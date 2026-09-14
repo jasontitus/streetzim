@@ -44,6 +44,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Iterable
@@ -345,16 +346,41 @@ class ManifestCreator:
         manifest_size = os.path.getsize(self._manifest_path)
         started = time.time()
         try:
-            # resource.getrusage(RUSAGE_CHILDREN) gives the packer's peak
-            # RSS, which is the number that decides whether a region can be
-            # packed on this host at all.
-            import resource
-            _before = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-            subprocess.run(cmd, check=True)
-            _peak = max(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss, _before)
-            print(f"    streetzim-pack peak RSS {_peak / 1048576:.1f} GB"
-                  + (f" (RAYON_NUM_THREADS={_rayon})" if _rayon else " (all cores)"),
-                  flush=True)
+            # Poll the packer's own VmHWM. This used to read
+            # getrusage(RUSAGE_CHILDREN).ru_maxrss, which is a high-water mark
+            # across EVERY child this process has reaped — and then took
+            # max(after, before), so it could only ever report the largest RSS
+            # of any build phase (osmium, xapianbuilder, ...) rather than the
+            # packer's. brazil logged "76.5 GB" that way on a run whose packer
+            # may have used a fraction of it. Read /proc/<pid>/status instead,
+            # which is the packer and nothing else.
+            _peak_kb = [0]
+
+            def _watch_hwm(pid, out):
+                path = f"/proc/{pid}/status"
+                while True:
+                    try:
+                        with open(path) as fh:
+                            for line in fh:
+                                if line.startswith("VmHWM:"):
+                                    out[0] = max(out[0], int(line.split()[1]))
+                                    break
+                    except (OSError, ValueError):
+                        return          # process gone
+                    time.sleep(0.25)
+
+            _proc = subprocess.Popen(cmd)
+            _t = threading.Thread(target=_watch_hwm, args=(_proc.pid, _peak_kb),
+                                  daemon=True)
+            _t.start()
+            _rc = _proc.wait()
+            _t.join(timeout=1.0)
+            if _rc != 0:
+                raise subprocess.CalledProcessError(_rc, cmd)
+            if _peak_kb[0]:
+                print(f"    streetzim-pack peak RSS {_peak_kb[0] / 1048576:.1f} GB"
+                      + (f" (RAYON_NUM_THREADS={_rayon})" if _rayon else " (all cores)"),
+                      flush=True)
         except subprocess.CalledProcessError as e:
             # `exc` is the __exit__ parameter and is not in scope here, so this
             # branch raised NameError instead of the diagnostic — losing both
