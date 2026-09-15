@@ -1,0 +1,48 @@
+# Shipped regions to retrofit with geographic Find-chip shards, one id per line.
+# Read by retrofit-chips-queue.sh before every region, so this file can be
+# edited while the queue runs (append, comment out, reorder, replace).
+# Order: east-coast-us first (requested), then by biggest legacy chip.
+# Not here: regions the continent chain is rebuilding with the new layout
+# (africa, united-states, europe, russia, canada, australia-nz, china), ZIMs
+# not live on archive.org, and regions with no chip over 2 MiB (hawaii,
+# washington-dc).
+east-coast-us
+south-america
+southeast-asia
+brazil
+japan
+indian-subcontinent
+mexico
+west-asia
+central-asia
+midwest-us
+argentina
+turkey
+central-us
+west-coast-us
+central-america-caribbean
+new-york-state
+texas
+ukraine
+himalayas
+california
+korea-mongolia
+south-korea
+alaska
+carolinas
+florida
+southern-africa
+iran
+nyc-metro
+greater-la
+east-africa
+egypt
+west-africa
+chicago-metro
+caucasus
+baltics
+colorado
+silicon-valley
+hispaniola
+iceland
+pacific-islands

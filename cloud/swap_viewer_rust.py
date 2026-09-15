@@ -16,16 +16,25 @@ swaps the viewer files (``index.html``, ``places.html``, and
 ``routing-worker.js``). Large routing entries stay uncompressed so Kiwix
 WebViews do not stall while inflating oversized clusters.
 
-Scope: viewer swap ONLY. No routing changes, no chip-split, no
-search-data rewrites, no terrain refresh. Use `repackage_zim.py` for
-those (and accept that it loses Xapian on rust-built sources).
+``--reshard-chips`` also rewrites the Find chips as geographic shards
+(cloud/chip_shards.py): every ``category-index/chip-*.json`` is dropped,
+each chip the source manifest declares is re-read whatever its layout and
+re-planned, and ``category-index/manifest.json`` gets the new chip entries
+with every other key kept. This is the chip retrofit for shipped ZIMs:
+`repackage_zim.py --split-find-chips` does the same re-shard but loses the
+title index, so Kiwix search suggestions come back empty.
+
+Scope otherwise: no routing changes, no search-data rewrites, no terrain
+refresh. Use `repackage_zim.py` for those (and accept that it loses Xapian
+on rust-built sources).
 
 Usage:
-    python3 cloud/swap_viewer_rust.py SRC.zim DST.zim
+    python3 cloud/swap_viewer_rust.py SRC.zim DST.zim [--reshard-chips]
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import tempfile
@@ -36,6 +45,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 VIEWER_DIR = REPO / "resources" / "viewer"
 STREAMING_THRESHOLD = 64 * 1024 * 1024
+CAT_MANIFEST = "category-index/manifest.json"
 
 sys.path.insert(0, str(REPO))
 from cloud.manifest_writer import ManifestCreator  # noqa: E402
@@ -56,7 +66,11 @@ class _Item:
         self._is_front = is_front
 
 
-def swap_viewer_rust(src_path: str, dst_path: str) -> int:
+def _is_chip_entry(path: str) -> bool:
+    return path.startswith("category-index/chip-") and path.endswith(".json")
+
+
+def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False) -> int:
     from libzim.reader import Archive
 
     src = Archive(src_path)
@@ -65,6 +79,36 @@ def swap_viewer_rust(src_path: str, dst_path: str) -> int:
     print(f"  source: {src_path} ({os.path.getsize(src_path)/1024/1024:.1f} MB)")
     print(f"  entries: {src_visible} visible / {src_total} total "
           f"(diff = X-namespace + special)")
+
+    def _src_bytes(path: str) -> bytes:
+        return bytes(src.get_entry_by_path(path).get_item().content)
+
+    # Chip retrofit: read the source manifest up front and refuse before
+    # writing anything if there are no chips to re-shard (writing on would
+    # ship a ZIM whose Find page has no chips at all).
+    cat_manifest: dict | None = None
+    cat_manifest_title = "Category Index Manifest"
+    if reshard_chips:
+        if not src.has_entry_by_path(CAT_MANIFEST):
+            raise SystemExit(f"--reshard-chips: {src_path} has no {CAT_MANIFEST}")
+        cat_manifest = json.loads(_src_bytes(CAT_MANIFEST))
+        cat_manifest_title = src.get_entry_by_path(CAT_MANIFEST).title or cat_manifest_title
+        if not isinstance(cat_manifest, dict) or not isinstance(cat_manifest.get("chips"), dict) \
+                or not cat_manifest["chips"]:
+            raise SystemExit(f"--reshard-chips: {src_path} declares no chips")
+        # Read and count every chip now, before hours of copying: a missing
+        # bucket or a count mismatch found after the walk aborts inside the
+        # creator and strands a multi-GB .pack-stage directory.
+        from cloud.chip_shards import read_chip_records
+        for cid, meta in cat_manifest["chips"].items():
+            if not isinstance(meta, dict):
+                raise SystemExit(f"--reshard-chips: chip {cid} manifest entry is not an object")
+            n = len(read_chip_records(_src_bytes, cid, meta))
+            if isinstance(meta.get("count"), int) and meta["count"] != n:
+                raise SystemExit(f"--reshard-chips: chip {cid} has {n} records "
+                                 f"but the source manifest says {meta['count']}")
+        print(f"  will re-shard {len(cat_manifest['chips'])} chip(s): "
+              f"{', '.join(cat_manifest['chips'])}")
 
     # Collect viewer replacements from disk.
     replacements: dict[str, bytes] = {}
@@ -102,6 +146,7 @@ def swap_viewer_rust(src_path: str, dst_path: str) -> int:
     illustration_count = 0
     redirects = 0
     kept = 0
+    dropped_chip_files = 0
     replaced_paths: set[str] = set()
 
     with tempfile.TemporaryDirectory(prefix="swap_viewer_rust_") as spill_dir:
@@ -154,6 +199,10 @@ def swap_viewer_rust(src_path: str, dst_path: str) -> int:
                         # set_mainpath above, not as a content redirect.
                         continue
                     target = entry.get_redirect_entry()
+                    if reshard_chips and (_is_chip_entry(entry.path)
+                                          or _is_chip_entry(target.path)):
+                        dropped_chip_files += 1
+                        continue
                     try:
                         c.add_redirection(entry.path,
                                           entry.title or entry.path,
@@ -183,6 +232,12 @@ def swap_viewer_rust(src_path: str, dst_path: str) -> int:
                 if i >= src_visible and not is_xapian:
                     continue
 
+                if reshard_chips and (path == CAT_MANIFEST or _is_chip_entry(path)):
+                    # Re-emitted below from the re-sharded plan.
+                    if path != CAT_MANIFEST:
+                        dropped_chip_files += 1
+                    continue
+
                 if path in replacements:
                     c.add_item(_Item(path, mime, title=title,
                                      data=replacements[path],
@@ -197,12 +252,11 @@ def swap_viewer_rust(src_path: str, dst_path: str) -> int:
                 # place that 404s on "Read full article".
                 if path == "wiki-geo-index.json":
                     try:
-                        import json as _json
-                        geo = _json.loads(data.decode("utf-8"))
+                        geo = json.loads(data.decode("utf-8"))
                         before = len(geo)
                         geo = {t: v for t, v in geo.items()
                                if src.has_entry_by_path("wiki-article/" + t)}
-                        data = _json.dumps(geo, separators=(",", ":")).encode("utf-8")
+                        data = json.dumps(geo, separators=(",", ":")).encode("utf-8")
                         print(f"  geo-index filtered: {before} -> {len(geo)} "
                               f"(dropped {before - len(geo)} without a bundled article)")
                     except Exception as e:
@@ -238,6 +292,37 @@ def swap_viewer_rust(src_path: str, dst_path: str) -> int:
                                  compress=True, namespace=None))
                 swapped += 1
 
+            if reshard_chips:
+                from cloud.chip_shards import plan_chip, read_chip_records
+                new_chips: dict = {}
+                n_files = 0
+                for cid, meta in cat_manifest["chips"].items():
+                    label = meta.get("label", cid) if isinstance(meta, dict) else cid
+                    records = read_chip_records(_src_bytes, cid, meta)
+                    want = meta.get("count") if isinstance(meta, dict) else None
+                    if isinstance(want, int) and want != len(records):
+                        raise SystemExit(f"--reshard-chips: chip {cid} has {len(records)} "
+                                         f"records but the source manifest says {want}")
+                    plan = plan_chip(records)
+                    del records
+                    nf = 0
+                    for fpath, ftitle, blob in plan.files(cid, label):
+                        c.add_item(_Item(fpath, "application/json", title=ftitle,
+                                         data=blob, compress=True, namespace=None))
+                        nf += 1
+                    new_chips[cid] = plan.manifest_entry(label)
+                    n_files += nf
+                    print(f"  chip-{cid}: {plan.count:,} records "
+                          f"({plan.bytes/1048576:.1f} MB) → {nf} file(s)", flush=True)
+                    del plan
+                payload = dict(cat_manifest)
+                payload["chips"] = new_chips
+                c.add_item(_Item(CAT_MANIFEST, "application/json", title=cat_manifest_title,
+                                 data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+                                 compress=True, namespace=None))
+                print(f"  chips: dropped {dropped_chip_files} old file(s), wrote {n_files} "
+                      f"for {len(new_chips)} chip(s)", flush=True)
+
     elapsed = time.time() - started
     print(f"\n  done in {elapsed:.1f}s")
     print(f"    metadata:      {metadata_count}")
@@ -256,8 +341,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("src", help="Source .zim file")
     ap.add_argument("dst", help="Output .zim file")
+    ap.add_argument("--reshard-chips", action="store_true",
+                    help="Rewrite the Find chips as geographic shards "
+                         "(cloud/chip_shards.py); keeps the Xapian indexes.")
     args = ap.parse_args()
-    return swap_viewer_rust(args.src, args.dst)
+    return swap_viewer_rust(args.src, args.dst, reshard_chips=args.reshard_chips)
 
 
 if __name__ == "__main__":

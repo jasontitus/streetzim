@@ -126,11 +126,22 @@ FN=$("$PY" - "$ZIM" <<'PYEOF' 2>/dev/null || echo 0
 import sys, json
 from libzim.reader import Archive
 a = Archive(sys.argv[1]); total = 0
-for c1 in '0123456789abcdef':
+def n(p):
+    return len(json.loads(bytes(a.get_entry_by_path(p).get_item().content).decode()))
+# The manifest names the files: geo shards (chip-restaurants-g000.json…,
+# cloud/chip_shards.py) or name-hash buckets. A listed file that is missing
+# or unreadable counts the chip as 0, which fails the gate.
+try:
+    meta = json.loads(bytes(a.get_entry_by_path(
+        'category-index/manifest.json').get_item().content))['chips']['restaurants']
+    subs = meta.get('sub_chunks') or []
+    total = (sum(n(f'category-index/chip-restaurants-{s}.json') for s in subs)
+             if subs else n('category-index/chip-restaurants.json'))
+except Exception: total = 0
+for c1 in ('0123456789abcdef' if total == 0 else ''):
     for c2 in [''] + list('0123456789abcdef'):
         try:
-            e = a.get_entry_by_path(f'category-index/chip-restaurants-{c1}{c2}.json')
-            total += len(json.loads(bytes(e.get_item().content).decode()))
+            total += n(f'category-index/chip-restaurants-{c1}{c2}.json')
         except Exception: pass
 if total == 0:
     try:
