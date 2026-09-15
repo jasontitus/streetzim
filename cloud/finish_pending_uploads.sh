@@ -6,14 +6,26 @@
 # queue can sit for hours. Re-running upload_validated with --checksum
 # skips the transfer entirely and just does the metadata stamp, torrent,
 # prune and deploy. Safe to run repeatedly; still-pending rows stay.
+#
+# Other jobs (the build queue, retrofit-chips-queue.sh) append rows while
+# this runs — it can wait hours for a build gap — so the rewrite at the end
+# keeps every row added after the start instead of replacing the file with
+# this run's leftovers. One finisher at a time (flock).
 set -uo pipefail
 cd /storage/streetzim
 PENDING=pending-uploads.tsv
+LOCK=/storage/streetzim/.finish-pending.lock
+exec 9> "$LOCK"
+flock -n 9 || { echo "another finish_pending_uploads.sh is running"; exit 0; }
 [ -s "$PENDING" ] || { echo "nothing pending"; exit 0; }
 LOG=/storage/streetzim/finish-pending.log
+n0=$(wc -l < "$PENDING")
 still=$(mktemp "${TMPDIR:-/storage/streetzim/tmp}/pending.XXXXXX")
+declare -A seen=()
 while IFS=$'\t' read -r id zim when; do
   [ -n "${id:-}" ] || continue
+  [ -n "${seen[$id/$zim]:-}" ] && continue
+  seen[$id/$zim]=1
   [ -s "$zim" ] || { echo "$id: $zim gone locally — dropping" | tee -a "$LOG"; continue; }
   listed=$(venv-linux/bin/ia metadata "streetzim-$id" 2>/dev/null \
     | venv-linux/bin/python3 -c "import sys,json;m=json.load(sys.stdin);print('yes' if any(f.get('name')==sys.argv[1] for f in m.get('files',[])) else 'no')" "$zim" 2>/dev/null)
@@ -30,8 +42,13 @@ while IFS=$'\t' read -r id zim when; do
     echo "  $id done" | tee -a "$LOG"
   else
     rc=$?; echo "  $id rc=$rc — keeping it pending" | tee -a "$LOG"
-    printf '%s\t%s\t%s\n' "$id" "$zim" "$when" >> "$still"
+    # upload_validated exit 6 has already appended its own row again; a
+    # second copy would only be dropped as a duplicate on the next run.
+    [ "$rc" -eq 6 ] || printf '%s\t%s\t%s\n' "$id" "$zim" "$when" >> "$still"
   fi
-done < "$PENDING"
+done < <(head -n "$n0" "$PENDING")
+# Rows appended after this run started (including exit-6 re-appends above).
+tail -n +"$((n0 + 1))" "$PENDING" >> "$still"
+awk -F'\t' '!seen[$1 "/" $2]++' "$still" > "$still.dedup" && mv -f "$still.dedup" "$still"
 mv -f "$still" "$PENDING"
 echo "remaining pending: $(wc -l < "$PENDING")"
