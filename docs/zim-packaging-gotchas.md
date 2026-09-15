@@ -230,6 +230,12 @@ falls back to `poi.json` (also gone) and OOMs the browser.
 `--split-find-chips` when poi is still present. When it's absent,
 let chips passthrough untouched.
 
+**Fixed 2026-09-15.** When `poi.json`/`park.json` are absent,
+`--split-find-chips` now re-shards the source's own chip files, whatever
+their layout. If there's nothing to rebuild from at all, it exits instead
+of writing a ZIM with no chips. See `docs/find-chip-shards.md`. The probe
+above is still harmless.
+
 ### Both checks live in `build-region-and-upload.sh`
 
 The wrapper now detects both conditions and conditionally drops the

@@ -6149,63 +6149,24 @@ def create_zim(
                                     "categories": cat_manifest}
                 if split_find_chips and records_by_cat:
                     from cloud.chip_rules import CHIP_RULES, split_records_by_chip
-                    from cloud.repackage_zim import _sub_bucket_for_name
+                    from cloud.chip_shards import plan_chip
                     by_chip = split_records_by_chip(records_by_cat)
                     chips_manifest: dict = {}
-                    # Same 10 MB sub-bucket rule as cloud/repackage_zim.py.
-                    # The in-build path used to emit one file per chip
-                    # regardless of size, so a Japan-restaurants-class
-                    # chip (164 MB) shipped monolithic — the phone OOM the
-                    # chips exist to prevent — and with --no-llm-bundle a
-                    # later repack can't re-split (no poi.json).
-                    chip_threshold_b = 10 * 1024 * 1024
+                    # Chips over 2 MiB are cut into geographic shards
+                    # (cloud/chip_shards.py) so a phone fetches only the
+                    # shards around the viewport. The old name-hash
+                    # buckets had no locality: every Find tap loaded the
+                    # whole chip (east-coast-us Shops: 147 MB of JSON).
+                    n_chip_files = 0
                     for chip in CHIP_RULES:
-                        recs = by_chip.get(chip.id, [])
-                        blob_bytes = json.dumps(recs, separators=(",", ":"),
-                                                ensure_ascii=False).encode("utf-8")
-                        meta_entry = {
-                            "label": chip.label,
-                            "count": len(recs),
-                            "bytes": len(blob_bytes),
-                        }
-                        if len(blob_bytes) > chip_threshold_b:
-                            n_sub = 1
-                            while True:
-                                n_sub *= 2
-                                buckets = [[] for _ in range(n_sub)]
-                                for r in recs:
-                                    buckets[_sub_bucket_for_name(r.get("n", "") or "", n_sub)].append(r)
-                                biggest = max(len(json.dumps(b, separators=(",", ":"),
-                                                             ensure_ascii=False).encode("utf-8"))
-                                              for b in buckets)
-                                if biggest <= chip_threshold_b or n_sub >= 256:
-                                    break
-                            hex_w = max(1, len(format(n_sub - 1, "x")))
-                            sub_paths = []
-                            for bi, bucket in enumerate(buckets):
-                                if not bucket:
-                                    continue
-                                sub_id = format(bi, f"0{hex_w}x")
-                                creator.add_item(MapItem(
-                                    f"category-index/chip-{chip.id}-{sub_id}.json",
-                                    f"Find chip {chip.label} (bucket {sub_id})",
-                                    "application/json",
-                                    json.dumps(bucket, separators=(",", ":"),
-                                               ensure_ascii=False).encode("utf-8"),
-                                ))
-                                sub_paths.append(sub_id)
-                            meta_entry["sub_chunks"] = sub_paths
-                            meta_entry["n_sub_buckets"] = n_sub
-                        else:
-                            creator.add_item(MapItem(
-                                f"category-index/chip-{chip.id}.json",
-                                f"Find chip {chip.label}",
-                                "application/json",
-                                blob_bytes,
-                            ))
-                        chips_manifest[chip.id] = meta_entry
+                        plan = plan_chip(by_chip.pop(chip.id, []))
+                        for path, title, blob in plan.files(chip.id, chip.label):
+                            creator.add_item(MapItem(path, title, "application/json", blob))
+                            n_chip_files += 1
+                        chips_manifest[chip.id] = plan.manifest_entry(chip.label)
+                        del plan
                     manifest_payload["chips"] = chips_manifest
-                    print(f"    Added {len(chips_manifest)} chip files "
+                    print(f"    Added {len(chips_manifest)} chips in {n_chip_files} files "
                           f"({sum(c['count'] for c in chips_manifest.values())} records)")
                 creator.add_item(MapItem(
                     "category-index/manifest.json",

@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -379,8 +380,13 @@ def _chk_find_chips(arc) -> tuple[str, str]:
         return ("skip", "manifest missing (no chip-split)")
     chips = mani.get("chips")
     if not isinstance(chips, dict) or not chips:
-        # Skip rather than warn — a ZIM built without --split-find-chips
-        # legitimately has no chips section.
+        # A ZIM built without --split-find-chips legitimately has no
+        # chips section — but then it has no "chips" key at all. An EMPTY
+        # map is what a chip re-split that found nothing to split writes
+        # (the old repackage trap), leaving Find with no categories.
+        if isinstance(chips, dict):
+            return ("fail", "manifest declares an empty chips map — every "
+                            "Find chip was dropped (bad --split-find-chips repack?)")
         return ("skip", "no chips declared in manifest")
     # Every declared chip must have a corresponding file that parses.
     # Sub-bucketed chips are split into chip-{cid}-{suffix}.json files,
@@ -389,45 +395,56 @@ def _chk_find_chips(arc) -> tuple[str, str]:
     # bucketing kicks in for files > chip_split_threshold_mb).
     missing = []
     empty = []
+    biggest_file = (None, 0)
+    biggest_geo_file = (None, 0)
     for cid, meta in chips.items():
         sub_chunks = meta.get("sub_chunks")
-        recs: list = []
+        # Count per file instead of accumulating: brazil's shops chip is
+        # 217 MB of JSON, ~2 GB as Python dicts.
+        n_recs = 0
         ok = True
+        geo = meta.get("layout") == "geo"
+        if geo:
+            shards = meta.get("shards")
+            if (not isinstance(sub_chunks, list) or not isinstance(shards, list)
+                    or len(shards) != len(sub_chunks) or not shards):
+                return ("fail", f"chip '{cid}' geo layout: shards/sub_chunks "
+                                f"missing or misaligned")
         if isinstance(sub_chunks, list) and sub_chunks:
-            for suffix in sub_chunks:
-                path = f"category-index/chip-{cid}-{suffix}.json"
-                try:
-                    raw = bytes(arc.get_entry_by_path(path)
-                                .get_item().content)
-                    part = json.loads(raw)
-                except Exception:
-                    ok = False
-                    break
-                if not isinstance(part, list):
-                    ok = False
-                    break
-                recs.extend(part)
+            files = [(f"category-index/chip-{cid}-{sfx}.json", i)
+                     for i, sfx in enumerate(sub_chunks)]
         else:
-            path = f"category-index/chip-{cid}.json"
+            files = [(f"category-index/chip-{cid}.json", None)]
+        for path, shard_i in files:
             try:
-                raw = bytes(arc.get_entry_by_path(path)
-                            .get_item().content)
-                recs = json.loads(raw)
+                raw = bytes(arc.get_entry_by_path(path).get_item().content)
+                part = json.loads(raw)
             except Exception:
                 ok = False
-            else:
-                if not isinstance(recs, list):
-                    ok = False
+                break
+            if not isinstance(part, list):
+                ok = False
+                break
+            n_recs += len(part)
+            if len(raw) > biggest_file[1]:
+                biggest_file = (path, len(raw))
+            if geo and len(raw) > biggest_geo_file[1]:
+                biggest_geo_file = (path, len(raw))
+            if geo:
+                bad = _chk_geo_shard(cid, shard_i, meta["shards"][shard_i], raw, part)
+                if bad:
+                    return ("fail", bad)
+            del part, raw
         if not ok:
             missing.append(cid)
             continue
         # Manifest count should match the file's actual record count
         # (sum across sub-buckets when applicable).
         declared = int(meta.get("count") or 0)
-        if declared != len(recs):
+        if declared != n_recs:
             return ("fail",
                     f"chip '{cid}' manifest count={declared} but file "
-                    f"has {len(recs)} records — inconsistent")
+                    f"has {n_recs} records — inconsistent")
         if declared == 0 and cid in ("restaurants", "cafes", "shops"):
             # These three are expected to have matches in any populated
             # region. An empty one signals the rules didn't run.
@@ -452,10 +469,73 @@ def _chk_find_chips(arc) -> tuple[str, str]:
         return ("warn",
                 f"chip {biggest[0]} is {biggest_bytes/1e6:.0f} MB in one file "
                 f"(no sub_chunks) — tight on older phones")
-    return ("pass",
-            f"{len(chips)} chip files; biggest "
-            f"{biggest[0]}={biggest_bytes/1e6:.1f}MB "
-            f"({biggest[1].get('count', '?')} recs)")
+    # Name-hash buckets have no locality: the viewer fetches every bucket,
+    # so the whole chip is parsed at once. Geo shards don't have that
+    # problem, but a shard file must itself stay phone-sized.
+    name_hashed = [cid for cid, m in chips.items()
+                   if m.get("sub_chunks") and m.get("layout") != "geo"
+                   and int(m.get("bytes") or 0) > 50 * 1024 * 1024]
+    geo_n = sum(1 for m in chips.values() if m.get("layout") == "geo")
+    detail = (f"{len(chips)} chips ({geo_n} geo-sharded); biggest "
+              f"{biggest[0]}={biggest_bytes/1e6:.1f}MB "
+              f"({biggest[1].get('count', '?')} recs); largest file "
+              f"{biggest_file[0]}={biggest_file[1]/1e6:.1f}MB")
+    if biggest_geo_file[1] > 16 * 1024 * 1024:
+        return ("warn", detail + f" — geo shard {biggest_geo_file[0]} is "
+                                 f"{biggest_geo_file[1]/1e6:.1f} MB (over 16 MB)")
+    if name_hashed:
+        return ("warn", detail + f" — name-hash buckets load whole on phones: "
+                                 f"{', '.join(name_hashed)}; rebuild or repackage "
+                                 f"--split-find-chips for geo shards")
+    return ("pass", detail)
+
+
+def _chk_geo_shard(cid, i, row, raw: bytes, part: list) -> str | None:
+    """One geo shard file against its manifest row
+    (``[s, w, n, e, count, bytes]``, see cloud/chip_shards.py). Returns an
+    error message, or None when consistent."""
+    if not isinstance(row, list) or len(row) != 6:
+        return f"chip '{cid}' shard {i}: malformed manifest row {row!r}"
+    s, w, n, e, count, nbytes = row
+    if count != len(part) or nbytes != len(raw):
+        return (f"chip '{cid}' shard {i}: manifest count/bytes {count}/{nbytes} "
+                f"but file has {len(part)}/{len(raw)}")
+
+    def _coords(r):
+        # Same rule as cloud/chip_shards._usable_coords (and the viewer).
+        a, o = r.get("a"), r.get("o")
+        if any(isinstance(v, bool) or not isinstance(v, (int, float))
+               or not math.isfinite(v) for v in (a, o)):
+            return None
+        if not (-90.0 <= a <= 90.0 and -180.0 <= o <= 180.0):
+            return None
+        return a, o
+
+    if s is None:
+        if any(v is not None for v in (w, n, e)):
+            return f"chip '{cid}' shard {i}: partially-null bbox {row!r}"
+        # Viewers never load null-bbox shards; a located record here is
+        # invisible to Find.
+        for r in part:
+            if isinstance(r, dict) and _coords(r) is not None:
+                return (f"chip '{cid}' shard {i}: record {r.get('n')!r} has "
+                        f"coordinates but sits in a no-bbox shard")
+        return None
+    tol = 2e-5
+    for r in part:
+        c = _coords(r) if isinstance(r, dict) else None
+        if c is None:
+            return f"chip '{cid}' shard {i}: record without coordinates in a bboxed shard"
+        a, o = c
+        lon_ok = False
+        for lon in (o, o - 360.0, o + 360.0):   # ±180 is one meridian
+            if (w - tol <= lon <= e + tol) if w <= e else (lon >= w - tol or lon <= e + tol):
+                lon_ok = True
+                break
+        if not (s - tol <= a <= n + tol and lon_ok):
+            return (f"chip '{cid}' shard {i}: record {r.get('n')!r} at ({a}, {o}) "
+                    f"outside shard bbox {[s, w, n, e]}")
+    return None
 
 
 def _chk_routing_sample(arc, cfg, zim_path: str) -> tuple[str, str]:

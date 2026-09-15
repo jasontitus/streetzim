@@ -413,12 +413,23 @@ async function main() {
   // 4. Find page → chip click → results.
   currentStep = 'find';
   console.log('\n[find] navigate to places.html, click Restaurants chip...');
+  // Every Find-chip file the page pulls, with its size. Geo-sharded
+  // chips (cloud/chip_shards.py) must never make a phone parse a whole
+  // chip — east-coast-us Shops was 147 MB of JSON as name-hash buckets.
+  const chipFetches = { files: 0, bytes: 0, pending: [] };
   try {
     page.on('response', resp => {
       const u = resp.url();
       if (u.includes('search-data') || u.includes('category-index') ||
           u.includes('routing-data')) {
         console.log('    network:', resp.status(), u);
+      }
+      if (/category-index\/chip-[^/]+\.json/.test(u) && resp.status() === 200) {
+        chipFetches.files++;
+        const len = parseInt((resp.headers() || {})['content-length'] || '', 10);
+        if (Number.isFinite(len)) chipFetches.bytes += len;
+        else chipFetches.pending.push(resp.buffer()
+          .then(b => { chipFetches.bytes += b.length; }).catch(() => {}));
       }
     });
     // #lat/#lon → places.html uses viewport-origin mode and skips
@@ -473,6 +484,21 @@ async function main() {
       const n = await page.evaluate(() =>
         document.getElementById('results').children.length);
       pass('find chip Restaurants returned', n + ' rows');
+      await Promise.all(chipFetches.pending);
+      const chipLayout = await page.evaluate(() => {
+        const c = typeof state !== 'undefined' && state.manifests.cat
+                  && state.manifests.cat.chips && state.manifests.cat.chips.restaurants;
+        return c ? { layout: c.layout || 'legacy', bytes: c.bytes || 0,
+                     files: (c.sub_chunks || [1]).length } : null;
+      });
+      const mb = (x) => (x / 1048576).toFixed(1) + ' MB';
+      const chipDetail = `${chipFetches.files} file(s), ${mb(chipFetches.bytes)} fetched`
+        + (chipLayout ? ` of ${mb(chipLayout.bytes)} in ${chipLayout.files} (${chipLayout.layout})` : '');
+      if (chipLayout && chipLayout.layout === 'geo' && chipFetches.bytes > 64 * 1048576) {
+        fail('find chip fetch size', chipDetail + ' — geo shards should load a neighbourhood, not the chip');
+      } else {
+        pass('find chip fetch size', chipDetail);
+      }
 
       // ----- city-pinned chip filter -----
       // Type a city into "Search near", click the typeahead pick, then
@@ -539,10 +565,27 @@ async function main() {
         } else {
           await gasChip.click();
           try {
+            // Wait for the Gas rows themselves: the list is already
+            // non-empty (Restaurants, re-sorted for the new origin), so
+            // "has children" alone reads the previous chip's rows.
+            // Viewers before 2026-05 have #status, not #status-text, and
+            // no state.resultsChipId (which names the chip on screen).
             await page.waitForFunction(() => {
-              const list = document.getElementById('results');
-              return list && list.children && list.children.length > 0;
+              const st = document.getElementById('status-text')
+                         || document.getElementById('status');
+              return typeof state !== 'undefined' && state.chip
+                && /gas|fuel/i.test(state.chip.id)
+                && st && !/^\s*Loading/i.test(st.textContent)
+                && (state.resultsChipId === undefined
+                    || state.resultsChipId === state.chip.id
+                    || /couldn.t load/i.test(st.textContent));
             }, { timeout: 30_000 });
+            const gasStatus = await page.evaluate(() => {
+              const st = document.getElementById('status-text')
+                         || document.getElementById('status');
+              return st ? st.textContent.trim() : '';
+            });
+            if (/couldn.t load/i.test(gasStatus)) throw new Error(gasStatus);
             // Read first result's distance from .meta — format is
             // "<kind> · <dist> · <city>" e.g. "Gas · 1.2 km · Tokyo"
             // or "<kind> · 230 m · …".

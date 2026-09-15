@@ -45,6 +45,9 @@ if str(SCRIPT_DIR) not in sys.path:
 # the source manifest had already been skipped, leaving the output
 # ZIM without ANY category-index/manifest.json.
 from cloud.chip_rules import CHIP_RULES, record_matches_chip  # noqa: E402
+from cloud.chip_shards import (  # noqa: E402
+    CHIP_SHARD_TARGET_BYTES, plan_chip, read_chip_records,
+)
 
 
 def _v4_to_v5_bufs(v4_buf: bytes) -> tuple[bytes, bytes]:
@@ -474,7 +477,7 @@ def repackage(src_path: str, dst_path: str,
               split_find_chips: bool = False,
               rewrite_search_links: bool = True,
               drop_llm_bundle: bool = True,
-              chip_split_threshold_mb: int = 10,
+              chip_shard_target_bytes: int = CHIP_SHARD_TARGET_BYTES,
               map_center: tuple[float, float] | None = None,
               map_zoom: int | None = None) -> int:
     from libzim.reader import Archive
@@ -487,6 +490,21 @@ def repackage(src_path: str, dst_path: str,
     print(f"  Source:   {src_path} ({os.path.getsize(src_path)/1024/1024:.1f} MB)")
     print(f"  Entries:  {src.entry_count}")
     print(f"  Target:   {dst_path}")
+    if split_find_chips:
+        # Decide before the (hours-long) passthrough copy, which skips the
+        # source's chip files and manifest: with nothing to rebuild them
+        # from, the output would have no Find page.
+        _has_src = any(src.has_entry_by_path(f"category-index/{cat}.json")
+                       for cat in {chip.from_cat for chip in CHIP_RULES})
+        try:
+            _pre_chips = json.loads(bytes(src.get_entry_by_path(
+                "category-index/manifest.json").get_item().content)).get("chips")
+        except Exception:
+            _pre_chips = None
+        if not _has_src and not (isinstance(_pre_chips, dict) and _pre_chips):
+            raise SystemExit(
+                f"--split-find-chips: {src_path} has neither "
+                f"poi.json/park.json nor chip files to re-shard")
     print(f"  swap viewer: {swap_viewer}")
     print(f"  uncompress routing-data/graph.bin: {uncompress_graph}")
     print(f"  split graph (v5): {split_graph}")
@@ -1117,6 +1135,12 @@ def repackage(src_path: str, dst_path: str,
         # CHIP_RULES / record_matches_chip are imported at module top
         # so failures surface before any copy work starts.
         if split_find_chips:
+            try:
+                old_mani = json.loads(bytes(
+                    src.get_entry_by_path("category-index/manifest.json"
+                                          ).get_item().content))
+            except Exception:
+                old_mani = {}
             # Load the per-cat bundles the chips pull from.
             records_by_cat: dict[str, list] = {}
             for cat in {chip.from_cat for chip in CHIP_RULES}:
@@ -1126,106 +1150,58 @@ def repackage(src_path: str, dst_path: str,
                     records_by_cat[cat] = json.loads(raw)
                 except Exception:
                     records_by_cat[cat] = []
+            # A chip the source already has is re-sharded from its own chip
+            # files: they are the build's rule output, and --no-llm-bundle
+            # builds (every build since 2026-05) ship no poi.json at all.
+            # Deciding this for the whole ZIM from "any category file
+            # present" wiped every poi chip on korea-mongolia, which still
+            # carries park.json. Categories are only used for chips the
+            # source lacks. Reads one chip at a time.
+            src_chips = old_mani.get("chips") if isinstance(old_mani.get("chips"), dict) else {}
+            if src_chips:
+                print(f"  chips: re-sharding {len(src_chips)} existing chip(s) "
+                      f"from the source's chip files")
+                unknown = sorted(set(src_chips) - {chip.id for chip in CHIP_RULES})
+                if unknown:
+                    print(f"  WARNING: source chips not in CHIP_RULES are dropped: "
+                          f"{', '.join(unknown)}")
+            elif not any(records_by_cat.values()):
+                # Skipping the source chip files and manifest with nothing
+                # to replace them would ship a ZIM with no Find page.
+                raise SystemExit(
+                    f"--split-find-chips: {src_path} has neither "
+                    f"poi.json/park.json nor chip files to re-shard")
+
+            def _src_bytes(path):
+                return bytes(src.get_entry_by_path(path).get_item().content)
+
             new_chips_meta: dict[str, dict] = {}
             for chip in CHIP_RULES:
-                src_records = records_by_cat.get(chip.from_cat, [])
-                if not src_records:
-                    continue
-                dst_records = [r for r in src_records
-                               if record_matches_chip(r, chip)]
-                if not dst_records:
-                    continue
-                # Note: experimented with dropping the constant `t`
-                # field (always "poi" inside a poi-derived chip) —
-                # 0.5 % / 75 KB saving after ZSTD22 on a 110 MB JSON.
-                # ZSTD eats the repetition. Not worth the schema
-                # break; consumers (mcpzim, future viewer code) keep
-                # the same shape.
-                chip_bytes = json.dumps(dst_records, separators=(",", ":"),
-                                         ensure_ascii=False).encode("utf-8")
-                threshold_b = chip_split_threshold_mb * 1024 * 1024
-                # Sub-bucket fat chips. Japan's restaurants chip was
-                # 164 MB and Canada's shops chip 137 MB — both under
-                # iOS heap but loading + parsing pushes the page
-                # near discard. Split via FNV-1a hash on record name
-                # (same scheme as search-data) so phones fetch only
-                # the sub-bucket they need. The viewer's loadChipFile
-                # reads `manifest.chips[id].sub_chunks` and fans out
-                # parallel fetches.
-                if (chip_split_threshold_mb > 0 and
-                        len(chip_bytes) > threshold_b):
-                    n_sub = 1
-                    while True:
-                        n_sub *= 2
-                        buckets = [[] for _ in range(n_sub)]
-                        for r in dst_records:
-                            name = r.get("n", "") or ""
-                            buckets[_sub_bucket_for_name(name, n_sub)].append(r)
-                        largest_bucket = max(buckets, key=len)
-                        biggest = len(json.dumps(
-                            largest_bucket, separators=(",", ":"),
-                            ensure_ascii=False,
-                        ).encode("utf-8"))
-                        # Cap depth at 256 sub-buckets — beyond that
-                        # the records have low cardinality on `n` and
-                        # further splitting won't help.
-                        if biggest <= threshold_b or n_sub >= 256:
-                            break
-                    bucket_blobs = [
-                        json.dumps(b, separators=(",", ":"),
-                                   ensure_ascii=False).encode("utf-8")
-                        for b in buckets
-                    ]
-                    sub_paths = []
-                    hex_w = max(1, len(format(n_sub - 1, "x")))
-                    for i, blob in enumerate(bucket_blobs):
-                        if not blob or blob == b"[]":
-                            continue
-                        sub_id = format(i, f"0{hex_w}x")
-                        sub_path = f"category-index/chip-{chip.id}-{sub_id}.json"
-                        c.add_item(PassthroughItem(
-                            sub_path,
-                            f"Find chip: {chip.label} (bucket {sub_id})",
-                            "application/json",
-                            blob,
-                            compress=True,
-                        ))
-                        sub_paths.append(sub_id)
-                    print(f"  chip-{chip.id}: {len(dst_records):,} records "
-                          f"({len(chip_bytes)/1024/1024:.1f} MB) "
-                          f"→ {len(sub_paths)} sub-buckets, "
-                          f"biggest {biggest/1024/1024:.1f} MB")
-                    new_chips_meta[chip.id] = {
-                        "label": chip.label,
-                        "count": len(dst_records),
-                        "bytes": len(chip_bytes),
-                        "sub_chunks": sub_paths,
-                        "n_sub_buckets": n_sub,
-                    }
+                if chip.id in src_chips:
+                    # Already filtered by the rules in force when the
+                    # source was built; re-filtering could only drop.
+                    dst_records = read_chip_records(_src_bytes, chip.id, src_chips[chip.id])
                 else:
-                    entry_path = f"category-index/chip-{chip.id}.json"
-                    c.add_item(PassthroughItem(
-                        entry_path,
-                        f"Find chip: {chip.label}",
-                        "application/json",
-                        chip_bytes,
-                        compress=True,
-                    ))
-                    new_chips_meta[chip.id] = {
-                        "label": chip.label,
-                        "count": len(dst_records),
-                        "bytes": len(chip_bytes),
-                    }
-                    print(f"  chip-{chip.id}: {len(dst_records):,} records "
-                          f"({len(chip_bytes)/1024/1024:.1f} MB)")
+                    src_records = records_by_cat.get(chip.from_cat, [])
+                    if not src_records:
+                        continue
+                    dst_records = [r for r in src_records
+                                   if record_matches_chip(r, chip)]
+                    if not dst_records:
+                        continue
+                plan = plan_chip(dst_records, chip_shard_target_bytes)
+                del dst_records
+                n_files = 0
+                for path, title, blob in plan.files(chip.id, chip.label):
+                    c.add_item(PassthroughItem(path, title, "application/json",
+                                               blob, compress=True))
+                    n_files += 1
+                new_chips_meta[chip.id] = plan.manifest_entry(chip.label)
+                print(f"  chip-{chip.id}: {plan.count:,} records "
+                      f"({plan.bytes/1024/1024:.1f} MB) → {n_files} file(s)")
+                del plan
             # Re-emit category-index/manifest.json with the new chips
             # section so places.html can enumerate them.
-            try:
-                old_mani = json.loads(bytes(
-                    src.get_entry_by_path("category-index/manifest.json"
-                                          ).get_item().content))
-            except Exception:
-                old_mani = {}
             old_mani["chips"] = new_chips_meta
             c.add_item(PassthroughItem(
                 "category-index/manifest.json",
@@ -1380,14 +1356,17 @@ def main() -> int:
                         "one would OOM. Enable only when emitting a ZIM "
                         "for an offline LLM consumer that ingests the raw "
                         "category bundles directly.")
-    p.add_argument("--chip-split-threshold-mb", type=int, default=10,
+    p.add_argument("--chip-shard-mb", type=float, default=None,
                    metavar="N",
-                   help="Sub-bucket category-index/chip-{id}.json files "
-                        "larger than N MB into FNV-bucketed sub-files. "
-                        "Mirrors the --split-hot-search-chunks-mb logic. "
-                        "Default 10 — Japan's restaurants chip was 164 MB "
-                        "and Canada's shops 137 MB without sub-bucketing, "
-                        "tight against iOS heap. Set to 0 to disable.")
+                   help="Cut category-index/chip-{id}.json files larger "
+                        "than N MiB into geographic shards "
+                        "(cloud/chip_shards.py) so the viewer fetches only "
+                        "the shards near the map. Default 2. 0 = never split.")
+    p.add_argument("--chip-split-threshold-mb", type=int, default=None,
+                   metavar="N",
+                   help="Deprecated (was the FNV name-bucket threshold). "
+                        "0 still disables splitting; any other value is "
+                        "ignored in favour of --chip-shard-mb.")
     p.add_argument("--map-center", metavar="LON,LAT", default=None,
                    help="Override map-config.json 'center'. Fixes regions "
                         "whose bbox centroid lands on empty water "
@@ -1400,6 +1379,16 @@ def main() -> int:
     if args.map_center:
         lon, lat = (float(x) for x in args.map_center.split(","))
         map_center = (lon, lat)
+    chip_shard_target_bytes = CHIP_SHARD_TARGET_BYTES
+    if args.chip_split_threshold_mb is not None:
+        if args.chip_split_threshold_mb == 0:
+            chip_shard_target_bytes = 0
+        else:
+            print("  note: --chip-split-threshold-mb is deprecated and ignored; "
+                  "chips are now geographic shards sized by --chip-shard-mb",
+                  file=sys.stderr)
+    if args.chip_shard_mb is not None:
+        chip_shard_target_bytes = int(args.chip_shard_mb * 1024 * 1024)
     return repackage(args.src, args.dst,
                      swap_viewer=not args.no_swap_viewer,
                      uncompress_graph=not args.no_uncompress_graph,
@@ -1412,7 +1401,7 @@ def main() -> int:
                      split_find_chips=args.split_find_chips,
                      rewrite_search_links=not args.no_rewrite_search_links,
                      drop_llm_bundle=not args.include_llm_bundle,
-                     chip_split_threshold_mb=args.chip_split_threshold_mb,
+                     chip_shard_target_bytes=chip_shard_target_bytes,
                      map_center=map_center,
                      map_zoom=args.map_zoom)
 
