@@ -6120,8 +6120,23 @@ def create_zim(
                     lpath = os.path.join(leaf_dir, lname + ".jsonl")
                     lrecs = []
                     with open(lpath, "r", encoding="utf-8") as lf:
-                        for lline in lf:
-                            lrecs.append(json.loads(lline))
+                        for lineno, lline in enumerate(lf):
+                            if not lline.strip():
+                                continue
+                            try:
+                                lrecs.append(json.loads(lline))
+                            except Exception as exc:
+                                # A leaf that does not round-trip means a
+                                # record was written incomplete. Observed
+                                # twice in the retrofit on east-coast-us
+                                # prefix 44 and not reproducible afterwards,
+                                # so the cause is still open — until it is,
+                                # fail the build rather than ship search data
+                                # that has silently lost a place.
+                                raise RuntimeError(
+                                    f"search-data {prefix}: leaf {lname} line "
+                                    f"{lineno} did not round-trip ({exc}); "
+                                    f"{len(lline)} bytes: {lline[:80]!r}")
                     os.unlink(lpath)
                     lbytes = json.dumps(lrecs, separators=(",", ":"),
                                         ensure_ascii=False).encode("utf-8")

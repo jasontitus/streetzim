@@ -459,8 +459,25 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                     leaf_names: list[str] = []
                     for ln in sorted(seen_leaves):
                         lpath = pdir / f"{ln}.jsonl"
-                        lrecs = [json.loads(x) for x in
-                                 lpath.read_text(encoding="utf-8").splitlines() if x]
+                        lrecs = []
+                        for lineno, x in enumerate(
+                                lpath.read_text(encoding="utf-8").splitlines()):
+                            if not x:
+                                continue
+                            try:
+                                lrecs.append(json.loads(x))
+                            except Exception as exc:
+                                # A leaf that does not round-trip means a
+                                # record was written incomplete. Seen twice on
+                                # east-coast-us prefix 44 and NOT reproducible
+                                # afterwards, so the cause is still open —
+                                # until it is, refuse to build a ZIM whose
+                                # search data would silently lose a place.
+                                raise SystemExit(
+                                    f"--reshard-search: {prefix}: leaf {ln} "
+                                    f"line {lineno} did not round-trip "
+                                    f"({exc}); {len(x)} bytes: {x[:80]!r}. "
+                                    f"Refusing to emit a corrupt search index.")
                         lpath.unlink()
                         lblob = json.dumps(lrecs, separators=(",", ":"),
                                            ensure_ascii=False).encode("utf-8")
