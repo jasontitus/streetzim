@@ -128,15 +128,20 @@ from libzim.reader import Archive
 a = Archive(sys.argv[1]); total = 0
 def n(p):
     return len(json.loads(bytes(a.get_entry_by_path(p).get_item().content).decode()))
-# The manifest names the files: geo shards (chip-restaurants-g000.json…,
+# The manifest names the files: geo shards (chip-food-g000.json…,
 # cloud/chip_shards.py) or name-hash buckets. A listed file that is missing
 # or unreadable counts the chip as 0, which fails the gate.
+# Chip id: "food" since the 2026-09-16 Restaurants+Cafés merge, "restaurants"
+# on every ZIM built before it — naming one would fail the gate on the other.
+cid = 'food'
 try:
-    meta = json.loads(bytes(a.get_entry_by_path(
-        'category-index/manifest.json').get_item().content))['chips']['restaurants']
+    chips = json.loads(bytes(a.get_entry_by_path(
+        'category-index/manifest.json').get_item().content))['chips']
+    cid = 'food' if 'food' in chips else 'restaurants'
+    meta = chips[cid]
     subs = meta.get('sub_chunks') or []
-    total = (sum(n(f'category-index/chip-restaurants-{s}.json') for s in subs)
-             if subs else n('category-index/chip-restaurants.json'))
+    total = (sum(n(f'category-index/chip-{cid}-{s}.json') for s in subs)
+             if subs else n(f'category-index/chip-{cid}.json'))
 except Exception: total = 0
 for c1 in ('0123456789abcdef' if total == 0 else ''):
     for c2 in [''] + list('0123456789abcdef'):

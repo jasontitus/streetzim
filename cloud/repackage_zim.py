@@ -1336,7 +1336,7 @@ def main() -> int:
     p.add_argument("--split-find-chips", action="store_true",
                    help="Read category-index/poi.json + park.json and "
                         "emit per-chip category-index/chip-{id}.json "
-                        "files (restaurants, cafes, museums, …). "
+                        "files (food, bars, museums, …). "
                         "places.html fetches the chip file directly "
                         "instead of the full 1 GB poi.json which OOMs "
                         "Chrome on Japan.")

@@ -45,12 +45,19 @@ class ChipRule:
 
 
 CHIP_RULES: list[ChipRule] = [
-    ChipRule(id="restaurants", label="Restaurants", from_cat="poi",
-             subtypes=("restaurant", "fast_food", "food_court", "ice_cream"),
-             include_regex=re.compile(r"_restaurant$|^food_")),
-    ChipRule(id="cafes", label="Cafés", from_cat="poi",
-             subtypes=("cafe", "coffee_shop", "bakery", "tea_room",
-                       "ice_cream_parlor")),
+    # Restaurants + Cafés merged 2026-09-16 (docs/in-zim-apps.md): users
+    # can't intuit the line between a sit-down meal and coffee/pastry, and
+    # the sub-filter chips already surface "Italian · Bakery · Café · Fast
+    # food" inside the results. It also fixes ice_cream landing in
+    # Restaurants while ice_cream_parlor landed in Cafés. ZIMs built before
+    # this keep their own chip files; the viewers render whichever chips
+    # the ZIM's manifest declares.
+    ChipRule(id="food", label="Food & Drink", from_cat="poi",
+             subtypes=("restaurant", "fast_food", "food_court",
+                       "ice_cream", "ice_cream_parlor",
+                       "cafe", "coffee_shop", "bakery", "tea_room"),
+             include_regex=re.compile(
+                 r"_restaurant$|^food_|^coffee_|_bakery$|_cafe$")),
     ChipRule(id="bars", label="Bars", from_cat="poi",
              subtypes=("bar", "pub", "biergarten", "nightclub", "beer",
                        "alcohol_shop", "wine_bar", "sports_bar",

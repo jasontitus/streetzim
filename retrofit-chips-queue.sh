@@ -83,12 +83,70 @@ PYEOF
 
 equivalence() {  # equivalence <src> <out> <search> ; exit 0 when the retrofit changed only the chips
   "$PY" - "$1" "$2" "$3" <<'PYEOF'
-import sys, json
+import hashlib, sys, json
 from libzim.reader import Archive
 from libzim.search import Query, Searcher
 from libzim.suggestion import SuggestionSearcher
 SHARD = 2 * 1024 * 1024
 src, out, q = sys.argv[1:4]
+
+def search_prefixes(p):
+    """{prefix: [chunk names]} from a ZIM's search manifest."""
+    a = Archive(p)
+    try:
+        man = json.loads(bytes(a.get_entry_by_path("search-data/manifest.json").get_item().content))
+    except Exception:
+        return None, None
+    groups = {}
+    for name in man.get("chunks", {}):
+        base = name.split("~", 1)[0].split("-", 1)[0]
+        groups.setdefault(base, []).append(name)
+    return a, groups
+
+
+def search_digest(p, sample):
+    """Distinct-record hash per sampled prefix, so a re-split that drops or
+    mangles records is caught. Nothing else in the gates reads search-data:
+    a lost place is invisible until a user looks for it.
+
+    Sampled, not exhaustive — hashing every record of a 20 GB region took
+    over 25 minutes and was killed, which is not a per-region gate. The
+    sample is the hottest prefixes plus a deterministic spread, and it is
+    the SET of records, since the character layout deliberately places a
+    record in one leaf per qualifying word (~1.12x)."""
+    a, groups = search_prefixes(p)
+    if a is None:
+        return None
+    out_d = {}
+    for base in sample:
+        seen = set()
+        for nm in groups.get(base, []):
+            try:
+                blob = bytes(a.get_entry_by_path(f"search-data/{nm}.json").get_item().content)
+            except Exception:
+                continue
+            for rec in json.loads(blob):
+                seen.add(json.dumps(rec, sort_keys=True, separators=(",", ":"),
+                                    ensure_ascii=False))
+        h = hashlib.sha256()
+        for line in sorted(seen):
+            h.update(line.encode("utf-8"))
+            h.update(b"\n")
+        out_d[base] = (len(seen), h.hexdigest()[:16])
+    return out_d
+
+
+def search_sample(p, n_hot=4, n_spread=4):
+    """Which prefixes to deep-check: the most fanned-out ones (where a
+    re-split does the most work) plus an even spread over the rest."""
+    a, groups = search_prefixes(p)
+    if a is None:
+        return []
+    by_fanout = sorted(groups, key=lambda b: (-len(groups[b]), b))
+    hot = by_fanout[:n_hot]
+    rest = sorted(b for b in groups if b not in hot)
+    step = max(1, len(rest) // max(1, n_spread))
+    return hot + rest[::step][:n_spread]
 def stats(p):
     a = Archive(p)
     m = json.loads(bytes(a.get_entry_by_path('category-index/manifest.json').get_item().content))
@@ -111,12 +169,23 @@ s, o = stats(src), stats(out)
 bad = [k for k in ('search', 'suggest', 'title_index', 'fulltext', 'counts', 'keys', 'categories', 'total')
        if s[k] != o[k]]
 unsharded = [c for c, b in s['sizes'].items() if b > SHARD and o['layouts'].get(c) != 'geo']
+sample = search_sample(src)
+sd_s = search_digest(src, sample) if sample else None
+sd_o = search_digest(out, sample) if sample else None
+sd_bad = []
+if sd_s is not None and sd_o is not None:
+    for base in sorted(set(sd_s) | set(sd_o)):
+        if sd_s.get(base) != sd_o.get(base):
+            sd_bad.append(f"{base}: {sd_s.get(base)} → {sd_o.get(base)}")
 print(f"search {s['search']}→{o['search']} suggest {s['suggest']}→{o['suggest']} "
       f"chips {len(s['counts'])}→{len(o['counts'])} geo={sum(v == 'geo' for v in o['layouts'].values())} "
-      f"records {sum(s['counts'].values())}→{sum(o['counts'].values())} entries {s['entries']}→{o['entries']}")
+      f"records {sum(s['counts'].values())}→{sum(o['counts'].values())} entries {s['entries']}→{o['entries']} "
+      f"search-prefixes {len(sd_s or {})}→{len(sd_o or {})}")
 if bad: print("MISMATCH: " + ", ".join(bad))
 if unsharded: print("NOT SHARDED: " + ", ".join(unsharded))
-sys.exit(1 if bad or unsharded else 0)
+if sd_bad:
+    print(f"SEARCH RECORDS CHANGED in {len(sd_bad)} prefix(es): " + "; ".join(sd_bad[:5]))
+sys.exit(1 if bad or unsharded or sd_bad else 0)
 PYEOF
 }
 

@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -46,6 +47,25 @@ REPO = HERE.parent
 VIEWER_DIR = REPO / "resources" / "viewer"
 STREAMING_THRESHOLD = 64 * 1024 * 1024
 CAT_MANIFEST = "category-index/manifest.json"
+SEARCH_MANIFEST = "search-data/manifest.json"
+# Match the build wrappers' --split-hot-search-chunks-mb.
+SEARCH_HOT_BYTES = 10 * 1024 * 1024
+SEARCH_LEAF_FD_CAP = 256
+
+
+def _base_prefix(chunk: str) -> str:
+    """The 2-character prefix a chunk name belongs to: 'de-0-1' → 'de',
+    'ca~r~c' → 'ca', 'u5927~u5b57~p' → 'u5927'."""
+    return re.split(r"[-~]", chunk, 1)[0]
+
+
+def _hot_prefixes(manifest: dict) -> dict[str, list[str]]:
+    """Prefixes whose chunk was split — the ones a query pays for today."""
+    groups: dict[str, list[str]] = {}
+    for name in manifest.get("chunks", {}):
+        groups.setdefault(_base_prefix(name), []).append(name)
+    return {p: names for p, names in groups.items()
+            if len(names) > 1 or names[0] != p}
 
 sys.path.insert(0, str(REPO))
 from cloud.manifest_writer import ManifestCreator  # noqa: E402
@@ -70,7 +90,8 @@ def _is_chip_entry(path: str) -> bool:
     return path.startswith("category-index/chip-") and path.endswith(".json")
 
 
-def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False) -> int:
+def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
+                     reshard_search: bool = False) -> int:
     from libzim.reader import Archive
 
     src = Archive(src_path)
@@ -82,6 +103,24 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False) 
 
     def _src_bytes(path: str) -> bytes:
         return bytes(src.get_entry_by_path(path).get_item().content)
+
+    # Search retrofit: hot prefixes are hash-fanned today, so a query fetches
+    # every leaf (docs/search-prefix-locality.md). Read the manifest up front
+    # and refuse before writing anything.
+    search_manifest: dict | None = None
+    search_manifest_title = "Search Manifest"
+    if reshard_search:
+        if not src.has_entry_by_path(SEARCH_MANIFEST):
+            raise SystemExit(f"--reshard-search: {src_path} has no {SEARCH_MANIFEST}")
+        search_manifest = json.loads(_src_bytes(SEARCH_MANIFEST))
+        search_manifest_title = (src.get_entry_by_path(SEARCH_MANIFEST).title
+                                 or search_manifest_title)
+        if not isinstance(search_manifest, dict) or not search_manifest.get("chunks"):
+            raise SystemExit(f"--reshard-search: {src_path} declares no search chunks")
+        hot_prefixes = _hot_prefixes(search_manifest)
+        print(f"  will re-split {len(hot_prefixes)} hot search prefix(es): "
+              f"{', '.join(sorted(hot_prefixes)[:8])}"
+              f"{'…' if len(hot_prefixes) > 8 else ''}")
 
     # Chip retrofit: read the source manifest up front and refuse before
     # writing anything if there are no chips to re-shard (writing on would
@@ -147,6 +186,7 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False) 
     redirects = 0
     kept = 0
     dropped_chip_files = 0
+    dropped_search_files = 0
     replaced_paths: set[str] = set()
 
     with tempfile.TemporaryDirectory(prefix="swap_viewer_rust_") as spill_dir:
@@ -238,6 +278,14 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False) 
                         dropped_chip_files += 1
                     continue
 
+                if reshard_search and path.startswith("search-data/") \
+                        and path.endswith(".json"):
+                    # Every search chunk and the manifest are rewritten below;
+                    # carrying the old hash leaves too would ship both layouts.
+                    if path != SEARCH_MANIFEST:
+                        dropped_search_files += 1
+                    continue
+
                 if path in replacements:
                     c.add_item(_Item(path, mime, title=title,
                                      data=replacements[path],
@@ -292,6 +340,138 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False) 
                                  compress=True, namespace=None))
                 swapped += 1
 
+            if reshard_search:
+                from cloud.search_shards import (Aggregator, SHARD_TARGET_BYTES,
+                                                 char_split_paths, leaf_for,
+                                                 tier_for)
+                from cloud.repackage_zim import _split_records_recursive
+                new_chunks: dict[str, int] = {}
+                new_sub: dict[str, list[str]] = {}
+                new_char: dict[str, list[str]] = {}
+                search_leaves_written = 0
+                target = min(SEARCH_HOT_BYTES, SHARD_TARGET_BYTES)
+                groups: dict[str, list[str]] = {}
+                for name in search_manifest["chunks"]:
+                    groups.setdefault(_base_prefix(name), []).append(name)
+
+                def _src_records(names):
+                    """Stream a prefix's existing leaves, one at a time."""
+                    for nm in names:
+                        try:
+                            blob = _src_bytes(f"search-data/{nm}.json")
+                        except Exception:
+                            continue
+                        for rec in json.loads(blob):
+                            yield rec
+
+                for prefix in sorted(groups):
+                    names = groups[prefix]
+                    # Pass 1: size it without holding it. `av` on
+                    # united-states is 2.93 GB of JSON.
+                    agg = Aggregator(prefix)
+                    total = 0
+                    for rec in _src_records(names):
+                        size = len(json.dumps(rec, separators=(",", ":"),
+                                              ensure_ascii=False).encode("utf-8"))
+                        total += size
+                        agg.add(rec, size)
+                    if total <= SEARCH_HOT_BYTES:
+                        # Small enough to be one file again.
+                        recs = list(_src_records(names))
+                        c.add_item(_Item(f"search-data/{prefix}.json",
+                                         "application/json",
+                                         title=f"Search chunk {prefix}",
+                                         data=json.dumps(recs, separators=(",", ":"),
+                                                         ensure_ascii=False).encode("utf-8")))
+                        new_chunks[prefix] = len(recs)
+                        search_leaves_written += 1
+                        continue
+                    planned = agg.leaves(target_bytes=target)
+                    planned_paths: dict[str, set] = {}
+                    for _t, _p, _c2, _b in planned:
+                        planned_paths.setdefault(_t, set()).add(_p)
+                    # Pass 2: bucket into per-leaf temp files, fd-capped.
+                    pdir = spill_dir_path / f"search-{prefix}"
+                    pdir.mkdir(parents=True, exist_ok=True)
+                    fds: dict[str, object] = {}
+                    seen_leaves: list[str] = []
+                    orphans = 0
+                    first_orphan = ""
+                    for rec in _src_records(names):
+                        lnames = list(leaf_for(prefix, rec,
+                                               planned_paths.get(tier_for(rec), ())))
+                        if not lnames:
+                            orphans += 1
+                            if not first_orphan:
+                                first_orphan = (rec.get("n") or "")[:60]
+                            continue
+                        line = json.dumps(rec, separators=(",", ":"),
+                                          ensure_ascii=False) + "\n"
+                        for ln in lnames:
+                            fd = fds.get(ln)
+                            if fd is None:
+                                if len(fds) >= SEARCH_LEAF_FD_CAP:
+                                    fds.pop(next(iter(fds))).close()
+                                if ln not in seen_leaves:
+                                    seen_leaves.append(ln)
+                                fd = open(pdir / f"{ln}.jsonl", "a", encoding="utf-8")
+                                fds[ln] = fd
+                            fd.write(line)
+                    for fd in fds.values():
+                        fd.close()
+                    if orphans:
+                        # A record that reaches no leaf is a place the user can
+                        # never find again, and no gate downstream would notice.
+                        raise SystemExit(
+                            f"--reshard-search: {prefix}: {orphans} record(s) "
+                            f"matched no leaf (first: {first_orphan!r})")
+                    leaf_names: list[str] = []
+                    for ln in sorted(seen_leaves):
+                        lpath = pdir / f"{ln}.jsonl"
+                        lrecs = [json.loads(x) for x in
+                                 lpath.read_text(encoding="utf-8").splitlines() if x]
+                        lpath.unlink()
+                        lblob = json.dumps(lrecs, separators=(",", ":"),
+                                           ensure_ascii=False).encode("utf-8")
+                        if len(lblob) > SEARCH_HOT_BYTES:
+                            # Characters could not divide it ("Carrera 7" a
+                            # million times) — hash-split as before.
+                            for sub, sub_bytes, sub_count in _split_records_recursive(
+                                    lrecs, ln, SEARCH_HOT_BYTES, n_buckets=16,
+                                    max_depth=5):
+                                c.add_item(_Item(f"search-data/{sub}.json",
+                                                 "application/json",
+                                                 title=f"Search chunk {sub}",
+                                                 data=sub_bytes))
+                                new_chunks[sub] = sub_count
+                                leaf_names.append(sub)
+                        else:
+                            c.add_item(_Item(f"search-data/{ln}.json",
+                                             "application/json",
+                                             title=f"Search chunk {ln}",
+                                             data=lblob))
+                            new_chunks[ln] = len(lrecs)
+                            leaf_names.append(ln)
+                        del lrecs
+                    pdir.rmdir()
+                    search_leaves_written += len(leaf_names)
+                    # Old clients resolve sub_chunks and fetch every leaf: as
+                    # slow as before, never wrong. Never ship an empty list.
+                    new_sub[prefix] = leaf_names
+                    new_char[prefix] = char_split_paths(planned)
+                    print(f"  search {prefix}: {len(names)} old leaf/leaves "
+                          f"({total/1048576:.1f} MB) → {len(leaf_names)}", flush=True)
+                payload = dict(search_manifest)
+                payload["chunks"] = new_chunks
+                payload["sub_chunks"] = new_sub
+                payload["char_split"] = new_char
+                mblob = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+                c.add_item(_Item(SEARCH_MANIFEST, "application/json",
+                                 title=search_manifest_title, data=mblob))
+                print(f"  search: dropped {dropped_search_files} old file(s), "
+                      f"wrote {search_leaves_written} for {len(groups)} prefix(es); "
+                      f"manifest {len(mblob)/1048576:.2f} MB", flush=True)
+
             if reshard_chips:
                 from cloud.chip_shards import plan_chip, read_chip_records
                 new_chips: dict = {}
@@ -344,8 +524,14 @@ def main() -> int:
     ap.add_argument("--reshard-chips", action="store_true",
                     help="Rewrite the Find chips as geographic shards "
                          "(cloud/chip_shards.py); keeps the Xapian indexes.")
+    ap.add_argument("--reshard-search", action="store_true",
+                    help="Re-split hot search-data prefixes by character path "
+                         "and record tier (cloud/search_shards.py), so a query "
+                         "reads one leaf instead of every leaf.")
     args = ap.parse_args()
-    return swap_viewer_rust(args.src, args.dst, reshard_chips=args.reshard_chips)
+    return swap_viewer_rust(args.src, args.dst,
+                            reshard_chips=args.reshard_chips,
+                            reshard_search=args.reshard_search)
 
 
 if __name__ == "__main__":

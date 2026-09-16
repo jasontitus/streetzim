@@ -5990,61 +5990,156 @@ def create_zim(
             split_total = 0
 
             chunks_added = 0
-            for prefix in sorted(chunk_counts):
-                chunk_path = os.path.join(chunk_tmp, f"{prefix}.jsonl")
+            manifest_char_split: dict[str, list[str]] = {}
+
+            def _emit_whole_chunk(prefix, chunk_path):
+                """Small prefix: one file, exactly as before."""
                 entries = []
                 with open(chunk_path, "r", encoding="utf-8") as cf:
                     for cline in cf:
                         entries.append(json.loads(cline))
+                creator.add_item(MapItem(
+                    f"search-data/{prefix}.json",
+                    f"Search chunk {prefix}",
+                    "application/json",
+                    json.dumps(entries, separators=(",", ":"),
+                               ensure_ascii=False).encode("utf-8"),
+                ))
+                manifest_chunks[prefix] = len(entries)
+
+            for prefix in sorted(chunk_counts):
+                chunk_path = os.path.join(chunk_tmp, f"{prefix}.jsonl")
+                if not hot_split_bytes:
+                    _emit_whole_chunk(prefix, chunk_path)
+                    os.unlink(chunk_path)
+                    chunks_added += 1
+                    continue
+
+                # Pass 1: size the prefix WITHOUT holding it. Reading a whole
+                # hot prefix into a list is what used to stall a continent
+                # build — `av` on united-states is 2.93 GB of JSON.
+                from cloud.search_shards import (
+                    Aggregator, SHARD_TARGET_BYTES, char_split_paths,
+                    leaf_for, tier_for)
+                from cloud.repackage_zim import _split_records_recursive
+                agg = Aggregator(prefix)
+                total_chunk_bytes = 0
+                with open(chunk_path, "r", encoding="utf-8") as cf:
+                    for cline in cf:
+                        size = len(cline.encode("utf-8"))
+                        total_chunk_bytes += size
+                        agg.add(json.loads(cline), size)
+                if total_chunk_bytes <= hot_split_bytes:
+                    _emit_whole_chunk(prefix, chunk_path)
+                    os.unlink(chunk_path)
+                    chunks_added += 1
+                    continue
+
+                # Hot prefix: character paths + tiers, so a reader fetches the
+                # leaf matching what was typed instead of every leaf under the
+                # prefix (docs/search-prefix-locality.md).
+                target = min(hot_split_bytes, SHARD_TARGET_BYTES)
+                planned = agg.leaves(target_bytes=target)
+                planned_paths: dict[str, set] = {}
+                for _tier, _path, _c, _b in planned:
+                    planned_paths.setdefault(_tier, set()).add(_path)
+
+                # Pass 2: stream records into one temp file per leaf, LRU over
+                # open descriptors so a 1000-leaf prefix cannot exhaust them.
+                leaf_dir = os.path.join(chunk_tmp, f"{prefix}.leaves")
+                os.makedirs(leaf_dir, exist_ok=True)
+                leaf_fds: dict[str, object] = {}
+                leaf_seen: list[str] = []
+                LEAF_FD_CAP = 256
+
+                def _leaf_fd(name):
+                    fd = leaf_fds.get(name)
+                    if fd is not None:
+                        return fd
+                    if len(leaf_fds) >= LEAF_FD_CAP:
+                        leaf_fds.pop(next(iter(leaf_fds))).close()
+                    if name not in leaf_seen:
+                        leaf_seen.append(name)
+                    fd = open(os.path.join(leaf_dir, name + ".jsonl"), "a",
+                              encoding="utf-8")
+                    leaf_fds[name] = fd
+                    return fd
+
+                orphans = 0
+                first_orphan = ""
+                with open(chunk_path, "r", encoding="utf-8") as cf:
+                    for cline in cf:
+                        rec = json.loads(cline)
+                        paths = planned_paths.get(tier_for(rec), ())
+                        names = list(leaf_for(prefix, rec, paths))
+                        if not names:
+                            orphans += 1
+                            if not first_orphan:
+                                first_orphan = (rec.get("n") or "")[:60]
+                            continue
+                        for lname in names:
+                            _leaf_fd(lname).write(cline if cline.endswith("\n")
+                                                  else cline + "\n")
+                for fd in leaf_fds.values():
+                    fd.close()
+                leaf_fds.clear()
+                if orphans:
+                    # A record that reaches no leaf is a place the user can
+                    # never find again, and nothing downstream would notice.
+                    raise RuntimeError(
+                        f"search-data {prefix}: {orphans} record(s) matched no "
+                        f"leaf (first: {first_orphan!r}) — the planner and the "
+                        f"writer disagree about paths")
+                if not leaf_seen:
+                    # Never ship sub_chunks[prefix] = [] — old clients fall
+                    # back to a name scan and would find nothing.
+                    _emit_whole_chunk(prefix, chunk_path)
+                    os.unlink(chunk_path)
+                    os.rmdir(leaf_dir)
+                    chunks_added += 1
+                    continue
                 os.unlink(chunk_path)
 
-                chunk_bytes = json.dumps(entries, separators=(",", ":"),
-                                         ensure_ascii=False).encode("utf-8")
-                if hot_split_bytes and len(chunk_bytes) > hot_split_bytes:
-                    # Oversized — fan out via the SAME recursive splitter
-                    # `cloud/repackage_zim.py` uses (max_depth 5, FNV-1a
-                    # by-name with degenerate-distribution fallback). The
-                    # earlier in-build splitter capped at depth 2, which
-                    # left continent-scale hotspots like CA's `sa-9-9` at
-                    # 200K records / hundreds of MB — too big for the
-                    # viewer's substring scan. By delegating to the same
-                    # helper, the in-build path now produces the same
-                    # `sa-X-X-Y` 3-level layout the post-build repack
-                    # used to produce.
-                    from cloud.repackage_zim import _split_records_recursive
-                    leaves = _split_records_recursive(
-                        entries, prefix, hot_split_bytes,
-                        n_buckets=hot_split_N, max_depth=5)
-                    if len(leaves) == 1 and leaves[0][0] == prefix:
-                        # Already-small chunk — emit as-is.
-                        creator.add_item(MapItem(
-                            f"search-data/{prefix}.json",
-                            f"Search chunk {prefix}",
-                            "application/json",
-                            leaves[0][1],
-                        ))
-                        manifest_chunks[prefix] = len(entries)
-                    else:
-                        sub_prefix_list = []
-                        for sub_prefix, sub_bytes, leaf_count in leaves:
+                # Emit each leaf; a leaf that characters could not divide
+                # ("Carrera 7" a million times) still gets the hash split, so
+                # no chunk ships over the validator's size bar.
+                sub_prefix_list = []
+                for lname in sorted(leaf_seen):
+                    lpath = os.path.join(leaf_dir, lname + ".jsonl")
+                    lrecs = []
+                    with open(lpath, "r", encoding="utf-8") as lf:
+                        for lline in lf:
+                            lrecs.append(json.loads(lline))
+                    os.unlink(lpath)
+                    lbytes = json.dumps(lrecs, separators=(",", ":"),
+                                        ensure_ascii=False).encode("utf-8")
+                    if len(lbytes) > hot_split_bytes:
+                        for sub_prefix, sub_bytes, leaf_count in \
+                                _split_records_recursive(
+                                    lrecs, lname, hot_split_bytes,
+                                    n_buckets=hot_split_N, max_depth=5):
                             creator.add_item(MapItem(
                                 f"search-data/{sub_prefix}.json",
                                 f"Search chunk {sub_prefix}",
-                                "application/json",
-                                sub_bytes,
-                            ))
+                                "application/json", sub_bytes))
                             manifest_chunks[sub_prefix] = leaf_count
                             sub_prefix_list.append(sub_prefix)
                             split_total += 1
-                        manifest_sub_chunks[prefix] = sub_prefix_list
-                else:
-                    creator.add_item(MapItem(
-                        f"search-data/{prefix}.json",
-                        f"Search chunk {prefix}",
-                        "application/json",
-                        chunk_bytes,
-                    ))
-                    manifest_chunks[prefix] = len(entries)
+                    else:
+                        creator.add_item(MapItem(
+                            f"search-data/{lname}.json",
+                            f"Search chunk {lname}",
+                            "application/json", lbytes))
+                        manifest_chunks[lname] = len(lrecs)
+                        sub_prefix_list.append(lname)
+                        split_total += 1
+                    del lrecs
+                os.rmdir(leaf_dir)
+                # Old clients (iOS, in-ZIM apps) resolve sub_chunks and fetch
+                # every leaf: as slow as before, never wrong. New clients use
+                # char_split to pick one.
+                manifest_sub_chunks[prefix] = sub_prefix_list
+                manifest_char_split[prefix] = char_split_paths(planned)
                 chunks_added += 1
                 if chunks_added % 100 == 0:
                     print(f"\r    Added {chunks_added}/{len(chunk_counts)} search chunks...", end="", flush=True)
@@ -6055,6 +6150,8 @@ def create_zim(
                                    "chunks": manifest_chunks}
             if manifest_sub_chunks:
                 manifest_dict["sub_chunks"] = manifest_sub_chunks
+            if manifest_char_split:
+                manifest_dict["char_split"] = manifest_char_split
             creator.add_item(MapItem(
                 "search-data/manifest.json", "Search Manifest",
                 "application/json",

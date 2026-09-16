@@ -63,6 +63,13 @@ if str(ROOT) not in sys.path:
 # San/Silicon density — possible sluggishness, unconfirmed crash).
 SEARCH_CHUNK_WARN_MB = 50
 SEARCH_CHUNK_FAIL_MB = 200
+# Character-split layout (docs/search-prefix-locality.md): a name query reads
+# one tier-c/tier-p leaf, so those must stay small. Street and address leaves
+# are exempt — characters cannot divide a million "Carrera 7"s, and they are
+# read only for digit queries; the hash split keeps them under the 200 MB bar.
+SEARCH_LEAF_FAIL_MB = 16
+# The manifest is fetched and parsed before any search can run.
+SEARCH_MANIFEST_FAIL_MB = 4
 MAX_ROUTING_ENTRY_MB = 500
 
 # Tile coverage thresholds — we don't know a region's land fraction a
@@ -445,7 +452,7 @@ def _chk_find_chips(arc) -> tuple[str, str]:
             return ("fail",
                     f"chip '{cid}' manifest count={declared} but file "
                     f"has {n_recs} records — inconsistent")
-        if declared == 0 and cid in ("restaurants", "cafes", "shops"):
+        if declared == 0 and cid in ("food", "restaurants", "cafes", "shops"):
             # These three are expected to have matches in any populated
             # region. An empty one signals the rules didn't run.
             empty.append(cid)
@@ -698,8 +705,14 @@ def _chk_overture_fields(arc, cfg) -> tuple[str, str]:
             continue
         p = e.path
         if p.startswith("search-data/") and p.endswith(".json") and p != "search-data/manifest.json":
-            fallback_path = fallback_path or p
             prefix = p[len("search-data/"):-len(".json")]
+            # Tier leaves hold one record type: "ca~r~a" is addresses and
+            # "ca~r~s" streets (plus their hash children, "ca~r~a-3"), and
+            # neither carries website/phone/brand — sampling one warns
+            # spuriously (docs/search-prefix-locality.md).
+            if "~" in prefix and prefix.rsplit("~", 1)[-1].split("-", 1)[0] in ("a", "s"):
+                continue
+            fallback_path = fallback_path or p
             # Two alphabetic chars: "a0" is still an address-style bucket
             # (letter + digit) with no website/phone/brand fields and
             # produced a spurious warn on Carolinas.
@@ -1160,17 +1173,20 @@ def _chk_search_data_sizes(arc) -> tuple[str, str]:
         clients — needs human review before shipping)
     """
     try:
-        mani = json.loads(bytes(
+        raw = bytes(
             arc.get_entry_by_path("search-data/manifest.json").get_item().content
-        ))
+        )
+        mani = json.loads(raw)
     except Exception as exc:
         return ("fail", f"search-data/manifest.json unparseable: {exc}")
     chunks = mani.get("chunks", {})
     failed: list[tuple[str, int]] = []
     warned: list[tuple[str, int]] = []
+    big_leaf: list[tuple[str, int]] = []
     biggest = (0, "")
     missing: list[str] = []
     sub_chunks = mani.get("sub_chunks") or {}
+    char_split = mani.get("char_split") or {}
     for prefix in chunks:
         try:
             e = arc.get_entry_by_path(f"search-data/{prefix}.json")
@@ -1188,6 +1204,28 @@ def _chk_search_data_sizes(arc) -> tuple[str, str]:
             failed.append((prefix, size))
         elif size > SEARCH_CHUNK_WARN_MB * 1024 * 1024:
             warned.append((prefix, size))
+        # A name query reads one tier-c/tier-p leaf in full, so those have a
+        # much tighter bar than the 200 MB crash guard.
+        if "~" in prefix:
+            tier = prefix.rsplit("~", 1)[-1].split("-", 1)[0]
+            if tier in ("c", "p") and size > SEARCH_LEAF_FAIL_MB * 1024 * 1024:
+                big_leaf.append((prefix, size))
+    # Character-split invariants (docs/search-prefix-locality.md).
+    bad_union: list[str] = []
+    bad_paths: list[str] = []
+    for prefix, paths in char_split.items():
+        declared = sub_chunks.get(prefix) or []
+        leaves = {k for k in chunks
+                  if k.startswith(prefix + "~") and k.split("~", 1)[0] == prefix}
+        if not declared or set(declared) != leaves:
+            # Old clients (iOS, in-ZIM apps) resolve a prefix through
+            # sub_chunks; a list that is empty or misses leaves makes them
+            # return nothing rather than merely being slow.
+            bad_union.append(prefix)
+            continue
+        for path in paths:
+            if not any(k.startswith(f"{prefix}~{path}~") for k in chunks):
+                bad_paths.append(f"{prefix}~{path}")
     if failed:
         tb = ", ".join(f"{p}={s/1e6:.0f}MB" for p, s in failed[:3])
         return ("fail",
@@ -1197,12 +1235,33 @@ def _chk_search_data_sizes(arc) -> tuple[str, str]:
                 f"{len(missing)} manifest chunk(s) absent from the ZIM "
                 f"(declared but never written): {', '.join(missing[:5])}"
                 f"{'…' if len(missing) > 5 else ''}")
+    if big_leaf:
+        tb = ", ".join(f"{p}={s/1e6:.0f}MB" for p, s in big_leaf[:3])
+        return ("fail",
+                f"{len(big_leaf)} name-query leaf/leaves ≥ "
+                f"{SEARCH_LEAF_FAIL_MB} MB: {tb}")
+    if bad_union:
+        return ("fail",
+                f"sub_chunks must list exactly the leaves of each split "
+                f"prefix; wrong for: {', '.join(bad_union[:5])}"
+                f"{'…' if len(bad_union) > 5 else ''}")
+    if bad_paths:
+        return ("fail",
+                f"{len(bad_paths)} char_split path(s) resolve to no chunk: "
+                f"{', '.join(bad_paths[:5])}")
+    if len(raw) > SEARCH_MANIFEST_FAIL_MB * 1024 * 1024:
+        return ("fail",
+                f"search-data/manifest.json is {len(raw)/1e6:.1f} MB "
+                f"(over {SEARCH_MANIFEST_FAIL_MB} MB; parsed on every load)")
     if warned:
         tb = ", ".join(f"{p}={s/1e6:.0f}MB" for p, s in warned[:3])
         return ("warn",
                 f"{len(warned)} chunk(s) between {SEARCH_CHUNK_WARN_MB}–{SEARCH_CHUNK_FAIL_MB} MB: {tb}")
-    return ("pass",
-            f"{len(chunks)} chunks; biggest {biggest[1]!r}={biggest[0]/1e6:.1f}MB")
+    detail = (f"{len(chunks)} chunks; biggest {biggest[1]!r}="
+              f"{biggest[0]/1e6:.1f}MB; manifest {len(raw)/1e6:.1f}MB")
+    if char_split:
+        detail += f"; {len(char_split)} char-split prefix(es)"
+    return ("pass", detail)
 
 
 def _chk_category_index(arc) -> tuple[str, str]:

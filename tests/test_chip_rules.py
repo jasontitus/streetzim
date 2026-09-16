@@ -26,30 +26,49 @@ class TestChipRulesContract(unittest.TestCase):
         ids = [c.id for c in CHIP_RULES]
         self.assertEqual(len(ids), len(set(ids)))
 
-    def test_restaurants_chip_matches_plain_restaurant(self):
+    def test_food_chip_matches_both_ice_cream_spellings(self):
+        """The merge's motivating bug: ice_cream landed in Restaurants and
+        ice_cream_parlor in Cafés — the same thing in two chips."""
         from cloud.chip_rules import CHIP_RULES, record_matches_chip
-        restaurants = next(c for c in CHIP_RULES if c.id == "restaurants")
-        r = {"t": "poi", "s": "restaurant", "n": "Joe's Diner"}
-        self.assertTrue(record_matches_chip(r, restaurants))
+        food = next(c for c in CHIP_RULES if c.id == "food")
+        for subtype in ("ice_cream", "ice_cream_parlor"):
+            r = {"t": "poi", "s": subtype, "n": "Gelateria"}
+            self.assertTrue(record_matches_chip(r, food),
+                            f"food chip should match s={subtype!r}")
 
-    def test_restaurants_chip_matches_regex_variant(self):
-        """Overture uses e.g. japanese_restaurant. The includeRegex
-        handles the _restaurant$ tail."""
+    def test_food_chip_covers_the_old_restaurants_and_cafes_subtypes(self):
         from cloud.chip_rules import CHIP_RULES, record_matches_chip
-        restaurants = next(c for c in CHIP_RULES if c.id == "restaurants")
+        food = next(c for c in CHIP_RULES if c.id == "food")
+        for subtype in ("restaurant", "fast_food", "food_court",
+                        "cafe", "coffee_shop", "bakery", "tea_room"):
+            r = {"t": "poi", "s": subtype, "n": "Somewhere"}
+            self.assertTrue(record_matches_chip(r, food),
+                            f"food chip should match s={subtype!r}")
+
+    def test_food_chip_excludes_bar(self):
+        from cloud.chip_rules import CHIP_RULES, record_matches_chip
+        food = next(c for c in CHIP_RULES if c.id == "food")
+        r = {"t": "poi", "s": "bar", "n": "The Anchor"}
+        self.assertFalse(record_matches_chip(r, food))
+
+    def test_restaurants_and_cafes_are_no_longer_separate_chips(self):
+        from cloud.chip_rules import CHIP_RULES
+        ids = {c.id for c in CHIP_RULES}
+        self.assertIn("food", ids)
+        self.assertNotIn("restaurants", ids)
+        self.assertNotIn("cafes", ids)
+
+    def test_food_chip_matches_regex_variants(self):
+        """Overture uses e.g. japanese_restaurant and coffee_shop; the
+        includeRegex covers the tails the subtype list doesn't name."""
+        from cloud.chip_rules import CHIP_RULES, record_matches_chip
+        food = next(c for c in CHIP_RULES if c.id == "food")
         for subtype in ("japanese_restaurant", "korean_restaurant",
-                        "fast_food", "food_court"):
+                        "fast_food", "food_court", "coffee_roaster",
+                        "french_bakery", "internet_cafe"):
             r = {"t": "poi", "s": subtype, "n": "x"}
-            self.assertTrue(record_matches_chip(r, restaurants),
-                f"restaurants chip should match s={subtype!r}")
-
-    def test_restaurants_chip_excludes_bar(self):
-        """Sanity: bars are a different chip; restaurants shouldn't
-        claim them."""
-        from cloud.chip_rules import CHIP_RULES, record_matches_chip
-        restaurants = next(c for c in CHIP_RULES if c.id == "restaurants")
-        r = {"t": "poi", "s": "bar", "n": "The Pub"}
-        self.assertFalse(record_matches_chip(r, restaurants))
+            self.assertTrue(record_matches_chip(r, food),
+                            f"food chip should match s={subtype!r}")
 
     def test_museums_name_fallback(self):
         """A tourism=attraction record named 'Art Museum of Hawaii'
@@ -88,8 +107,8 @@ class TestChipRulesContract(unittest.TestCase):
             ],
         }
         by_chip = split_records_by_chip(records_by_cat)
-        # Restaurants should have exactly 2 (restaurant + japanese_restaurant)
-        self.assertEqual(len(by_chip["restaurants"]), 2)
+        # Food & Drink should have exactly 2 (restaurant + japanese_restaurant)
+        self.assertEqual(len(by_chip["food"]), 2)
         # Museums should pick up MoMA + Art Gallery Uptown (via name_pattern)
         self.assertEqual(len(by_chip["museums"]), 2)
         # Parks get the whole park bucket

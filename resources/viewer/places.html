@@ -295,6 +295,14 @@ const CAT  = HERE + 'category-index/';
 // (vietnamese_restaurant, coffee_shop, wine_store, …) — `includeRegex`
 // matches a regex against the subtype string for coarser buckets.
 const CATEGORIES = [
+  // Merged 2026-09-16 (cloud/chip_rules.py). ZIMs built before that have
+  // chip-restaurants.json / chip-cafes.json and no chip-food.json, so all
+  // three stay listed and chipsForThisZim() shows whichever the ZIM has.
+  { id: 'food',        label: 'Food & Drink', cat: 'poi',
+    subtypes: ['restaurant', 'fast_food', 'food_court', 'ice_cream',
+               'ice_cream_parlor', 'cafe', 'coffee_shop', 'bakery',
+               'tea_room'],
+    includeRegex: /_restaurant$|^food_|^coffee_|_bakery$|_cafe$/ },
   { id: 'restaurants', label: 'Restaurants', cat: 'poi',
     subtypes: ['restaurant', 'fast_food', 'food_court', 'ice_cream'],
     includeRegex: /_restaurant$|^food_/ },
@@ -936,8 +944,19 @@ async function reverseGeocodeFromViewport(lat, lon) {
 
 // ---------- chips ----------
 
+// Show the chips this ZIM actually has. Restaurants + Cafés became one
+// "Food & Drink" chip on 2026-09-16, but every ZIM built before that ships
+// chip-restaurants.json / chip-cafes.json and no chip-food.json — so the
+// table is filtered by the manifest rather than assumed.
+function chipsForThisZim() {
+  const chips = state.manifests.cat && state.manifests.cat.chips;
+  if (!chips) return CATEGORIES;            // no chip files: legacy path
+  const have = CATEGORIES.filter(def => chips[def.id]);
+  return have.length ? have : CATEGORIES;
+}
+
 function renderChips() {
-  for (const def of CATEGORIES) {
+  for (const def of chipsForThisZim()) {
     const b = document.createElement('button');
     b.type = 'button';
     b.textContent = def.label;
@@ -1196,6 +1215,28 @@ async function runNameQuery(q) {
   if (maybeFetchOriginFirst()) return;
   const seq = ++_querySeq;
   setStatus(`Searching for “${q}”…`);
+  const alive = () => seq === _querySeq;
+
+  // Character-split ZIM: read the leaves holding what was typed, streamed
+  // and filtered as they arrive (docs/search-prefix-locality.md).
+  const targetedLeaves = searchLeavesFor(q);
+  if (targetedLeaves) {
+    let hits = await streamLeaves(targetedLeaves, q, alive);
+    if (!alive()) return;
+    // Targeting misses matches inside a word ("Caiçara" for "car" —
+    // measured ~2% of hits, nearly all streets). Rather than show almost
+    // nothing, fall back to the old whole-prefix scan.
+    if (hits.length < 5 && targetedLeaves.targeted) {
+      const all = searchLeavesFor(q, { noTargeting: true }) || [];
+      hits = await streamLeaves(all, q, alive);
+      if (!alive()) return;
+    }
+    const uniq = new Map();
+    for (const rec of hits) uniq.set(`${rec.n}@${rec.a},${rec.o}`, rec);
+    applyResults([...uniq.values()]);
+    return;
+  }
+
   const prefixes = prefixesFor(q);
   let merged = [];
   const seen = new Set();
@@ -1230,6 +1271,104 @@ async function runNameQuery(q) {
 function filterByName(records, q) {
   return records.filter(r => matchesName(r, q));
 }
+
+// BEGIN search-shards
+// Character-path + tier targeting for search-data leaves. Mirrors
+// cloud/search_shards.py — if the two drift, a reader asks for leaves the
+// writer never wrote. See docs/search-prefix-locality.md.
+//
+// Old layout: a hot prefix was fanned out by FNV hash, so a query had to
+// fetch every leaf ("Caracas" on south-america: 736 files, 320 MB, 99 s).
+// Here the manifest's char_split names the character paths that exist, and
+// the leaf holding what was typed is computed directly.
+var SEARCH_SHARDS = (function () {
+  'use strict';
+  var SEP = '~';
+  var TERMINAL = '_e';          // "the word ends here" (never a character)
+  var TIERS = ['c', 'p', 's'];  // place-like, POI, street; 'a' is gated below
+
+  function tokenFor(ch) {
+    var code = ch.codePointAt(0);
+    if (code >= 128) return 'u' + code.toString(16);
+    var alnum = (code >= 48 && code <= 57) || (code >= 97 && code <= 122);
+    return (alnum || ch === '_') ? ch : '_';
+  }
+
+  // Tokens of the characters following the prefix, as the writer computed
+  // them: a 'u<hex>' prefix consumed one code point, an ASCII one consumed
+  // two. Code points, not UTF-16 units, or astral names desync.
+  function pathTokens(prefix, word) {
+    var chars = Array.from(word || '');
+    var rest = chars.slice(prefix.indexOf('u') === 0 ? 1 : 2);
+    var out = [];
+    for (var i = 0; i < rest.length; i++) out.push(tokenFor(rest[i]));
+    return out;
+  }
+
+  function isPrefixOf(a, b) {          // a, b: token arrays
+    if (a.length > b.length) return false;
+    for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+
+  // Which declared paths cover what was typed. Both directions matter:
+  // typing "car" must read every leaf under "r" (including the terminal
+  // "r~_e"), and typing "cara" must still read the shallower leaf "r" when
+  // that node was never split.
+  function pathsFor(declared, typed) {
+    var out = [];
+    for (var i = 0; i < declared.length; i++) {
+      var p = declared[i] ? declared[i].split(SEP) : [];
+      if (isPrefixOf(p, typed) || isPrefixOf(typed, p)) out.push(declared[i]);
+    }
+    return out;
+  }
+
+  // Leaf names for one prefix, tier by tier, in fetch order. Returns null
+  // when this ZIM has no character split for the prefix (caller keeps the
+  // old whole-prefix behaviour), or [] when the typed characters exist in
+  // no path at all — which means no records, not "fetch everything".
+  function leavesFor(manifest, prefix, word, query, resolve) {
+    var cs = manifest && manifest.char_split && manifest.char_split[prefix];
+    if (!cs || !cs.length) return null;
+    var typed = pathTokens(prefix, word);
+    if (!typed.length) return null;            // 1-2 chars: whole prefix
+    var paths = pathsFor(cs, typed);
+    if (!paths.length) return [];
+    // Addresses are ~86% of a hot prefix and are only what the user wants
+    // once they type a house number; the map viewer already discards them
+    // for non-digit queries, after downloading them.
+    var tiers = TIERS.slice();
+    if (/\d/.test(query || '') && String(query || '').replace(/\W/g, '').length >= 4) {
+      tiers.push('a');
+    }
+    var out = [];
+    var seen = {};
+    for (var t = 0; t < tiers.length; t++) {
+      for (var i = 0; i < paths.length; i++) {
+        var name = prefix + SEP + paths[i] + SEP + tiers[t];
+        // Through expandPrefix, never a direct fetch: a later repackage
+        // hash-splits an oversized leaf into name-0…name-f and copies
+        // char_split through verbatim.
+        var leaves = resolve(name);
+        for (var j = 0; j < leaves.length; j++) {
+          if (!seen[leaves[j]]) { seen[leaves[j]] = 1; out.push(leaves[j]); }
+        }
+      }
+    }
+    return out;
+  }
+
+  return {
+    tokenFor: tokenFor,
+    pathTokens: pathTokens,
+    pathsFor: pathsFor,
+    leavesFor: leavesFor,
+    TERMINAL: TERMINAL,
+    _test: { isPrefixOf: isPrefixOf }
+  };
+})();
+// END search-shards
 
 // Accent-fold + lowercase, mirroring the writer's `_norm` in
 // create_osm_zim.py (NFKD, strip combining marks) so "ecouen" finds
@@ -1278,6 +1417,70 @@ function prefixesFor(q) {
     if (word.length >= 2) out.add(prefixKeyFor(word));
   }
   return [...out];
+}
+
+// Leaf names to read for a query, using the character split when the ZIM
+// has one (docs/search-prefix-locality.md). Returns null when no prefix is
+// character-split, so the caller keeps the old whole-prefix path.
+// `targeted` reports whether any prefix resolved through char_split, so the
+// caller knows a thin result set is worth re-running unfiltered.
+function searchLeavesFor(q, opts) {
+  const man = state.manifests && state.manifests.search;
+  if (!man || !man.char_split) return null;
+  const folded = foldText(q).trim();
+  if (folded.length < 3) return null;      // 2 chars: whole prefix, as before
+  const words = folded.split(/[^\p{L}\p{N}]+/u).filter(w => w.length >= 2);
+  words.push(folded.replace(/\s/g, '_'));
+  const seen = new Set();
+  const out = [];
+  let targeted = false;
+  for (const word of words) {
+    const key = prefixKeyFor(word);
+    const leaves = (opts && opts.noTargeting) ? null
+      : SEARCH_SHARDS.leavesFor(man, key, word, folded, expandPrefix);
+    if (leaves === null) {
+      for (const leaf of expandPrefix(key)) {
+        if (!seen.has(leaf)) { seen.add(leaf); out.push(leaf); }
+      }
+      continue;
+    }
+    targeted = true;        // [] means "no records for those characters"
+    for (const leaf of leaves) {
+      if (!seen.has(leaf)) { seen.add(leaf); out.push(leaf); }
+    }
+  }
+  out.targeted = targeted;
+  return out;
+}
+
+// Fetch leaves in order, filtering as each arrives, and stop once we have
+// enough. The map page has had this since "san " OOM'd iOS Safari; this
+// page still concatenated every leaf, which is why the Find page was the
+// worse of the two on a hot prefix.
+async function streamLeaves(leaves, q, seqCheck) {
+  const qn = foldText(q);
+  const includeAddrs = /\d/.test(qn);
+  const MAX_CONCURRENT = 6;
+  const MAX_MATCHES = 2000;
+  const matches = [];
+  let i = 0;
+  async function worker() {
+    while (i < leaves.length && matches.length < MAX_MATCHES) {
+      const name = leaves[i++];
+      let chunk;
+      try { chunk = await fetchJSON(DATA + name + '.json'); } catch (e) { continue; }
+      if (seqCheck && !seqCheck()) return;
+      for (const rec of chunk) {
+        if (!includeAddrs && rec.t === 'addr') continue;
+        if (!matchesName(rec, q)) continue;
+        matches.push(rec);
+        if (matches.length >= MAX_MATCHES) break;
+      }
+    }
+  }
+  await Promise.all(Array.from(
+    { length: Math.min(MAX_CONCURRENT, leaves.length) }, worker));
+  return matches;
 }
 
 // ---------- result presentation ----------
@@ -1896,9 +2099,13 @@ function expandPrefix(prefix) {
     return direct.flatMap(expandPrefix);
   }
   // Fallback: scan chunks for leaves under this prefix (covers the
-  // empty-sub_chunks build bug).
+  // empty-sub_chunks build bug). Both separators: '-' for hash buckets,
+  // '~' for character + tier leaves (docs/search-prefix-locality.md).
+  // 143 united-states prefixes ship an empty sub_chunks list and are
+  // reachable only here, so a '-'-only scan would return nothing on a
+  // character-split ZIM.
   return Object.keys(chunks).filter(k =>
-    k === prefix || k.startsWith(prefix + '-'));
+    k === prefix || k.startsWith(prefix + '-') || k.startsWith(prefix + '~'));
 }
 
 async function loadChunk(prefix) {

@@ -468,13 +468,17 @@ async function main() {
       throw e;
     }
     const chipButtons = await page.$$('nav.chips button');
+    // "Food & Drink" since the 2026-09-16 merge, "Restaurants" on every ZIM
+    // built before it. Matching one label only would fail here on the other
+    // — and every later step (Gas distance, directions, route) is nested
+    // inside this branch, so a miss silently skips them all.
     let restaurants = null;
     for (const btn of chipButtons) {
       const text = await page.evaluate(b => b.textContent, btn);
-      if (/restaurants/i.test(text)) { restaurants = btn; break; }
+      if (/food|restaurant/i.test(text)) { restaurants = btn; break; }
     }
     if (!restaurants) {
-      fail('find chip exists', 'no chip with "Restaurants" label');
+      fail('find chip exists', 'no chip labelled "Food & Drink" or "Restaurants"');
     } else {
       await restaurants.click();
       await page.waitForFunction(() => {
