@@ -5821,6 +5821,13 @@ def create_zim(
                            # viewer's nearby-Wikipedia list + markers (any zoom)
             cat_chunk_fds = {}
             cat_chunk_counts = {}
+            # places.html fetches category-index/place.json whole on load to
+            # name the city nearest the viewport. Past this size it is cut
+            # into geographic shards (cloud/chip_shards.py) and the viewer
+            # reads the one around the viewport: china ships 109 MB today
+            # and fails its browser gate on it, europe 480 MB, median 7.7 MB.
+            CATEGORY_SHARD_MIN_BYTES = 8 * 1024 * 1024
+            cat_shards: dict = {}
             cat_dir = os.path.join(chunk_tmp, "categories")
             os.makedirs(cat_dir, exist_ok=True)
             def _cat_slug(t):
@@ -6223,12 +6230,34 @@ def create_zim(
                     # CJK category/chip files (search-data already uses it).
                     chunk_json = json.dumps(entries, separators=(",", ":"),
                                             ensure_ascii=False)
-                    creator.add_item(MapItem(
-                        f"category-index/{cat_slug}.json",
-                        f"Category index {cat_slug}",
-                        "application/json",
-                        chunk_json.encode("utf-8"),
-                    ))
+                    # places.html fetches place.json whole, on load, only to
+                    # name the city nearest the viewport — 109 MB on china
+                    # (whose browser gate fails on it), 480 MB on europe.
+                    # Shard it the way Find chips are sharded so the viewer
+                    # reads the shard around the viewport instead.
+                    if (cat_slug == "place"
+                            and len(chunk_json.encode("utf-8")) > CATEGORY_SHARD_MIN_BYTES):
+                        from cloud.chip_shards import plan_chip
+                        cplan = plan_chip(entries)
+                        n_cat_files = 0
+                        for cpath, ctitle, cblob in cplan.files(
+                                cat_slug, cat_slug, name_prefix="",
+                                title_kind="Category index"):
+                            creator.add_item(MapItem(cpath, ctitle,
+                                                     "application/json", cblob))
+                            n_cat_files += 1
+                        cat_shards[cat_slug] = cplan.manifest_entry(cat_slug)
+                        print(f"    category-index/{cat_slug}: {len(entries):,} records "
+                              f"({len(chunk_json)/1048576:.1f} MB) → {n_cat_files} shard(s)",
+                              flush=True)
+                        del cplan
+                    else:
+                        creator.add_item(MapItem(
+                            f"category-index/{cat_slug}.json",
+                            f"Category index {cat_slug}",
+                            "application/json",
+                            chunk_json.encode("utf-8"),
+                        ))
                     cat_total_records += len(entries)
                     if split_find_chips and cat_slug in ("poi", "park"):
                         records_by_cat[cat_slug] = entries
@@ -6244,6 +6273,11 @@ def create_zim(
                                 if not (no_llm_bundle and k in _llm_bundle)}
                 manifest_payload = {"total": cat_total_records,
                                     "categories": cat_manifest}
+                if cat_shards:
+                    # Which categories were cut into geographic shards, in the
+                    # same shape as a chip entry, so the viewer can fetch the
+                    # shard around the viewport instead of the whole file.
+                    manifest_payload["category_shards"] = cat_shards
                 if split_find_chips and records_by_cat:
                     from cloud.chip_rules import CHIP_RULES, split_records_by_chip
                     from cloud.chip_shards import plan_chip

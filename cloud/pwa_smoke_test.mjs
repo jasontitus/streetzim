@@ -33,6 +33,11 @@ const SITE = process.env.STREETZIM_SITE || 'https://streetzim.web.app';
 // for 'Tashkent' in the same file. Callers pass the registry's
 // smoke_search column; the old value stays the default.
 const SMOKE_SEARCH = process.env.SMOKE_SEARCH || 'Palo Alto';
+// How long the Find page gets to answer a name search. Generous for a cold
+// 20 GB ZIM over the service worker, but well under the 99 s that shipped on
+// south-america before search had prefix locality
+// (docs/search-prefix-locality.md).
+const SEARCH_BUDGET_MS = +(process.env.SEARCH_BUDGET_MS || 20_000);
 const ZIM_FILE = process.env.ZIM_FILE || '';
 const ZIM_URL = process.env.ZIM_URL ||
   'http://localhost:8765/osm-silicon-valley-2026-04-24.zim';
@@ -502,6 +507,56 @@ async function main() {
         fail('find chip fetch size', chipDetail + ' — geo shards should load a neighbourhood, not the chip');
       } else {
         pass('find chip fetch size', chipDetail);
+      }
+
+      // ----- Find-page name search, with a clock on it -----
+      // Nothing used to exercise THIS page's search (the earlier step is
+      // the map page's), and nothing timed it — which is how a search
+      // that took 99 s and fetched 320 MB shipped unnoticed on
+      // south-america. See docs/search-prefix-locality.md.
+      const searchWord = (SMOKE_SEARCH || '').trim().split(/\s+/)[0] || '';
+      if (searchWord.length >= 3) {
+        const before = Date.now();
+        await page.evaluate((w) => {
+          const i = document.getElementById('q');
+          i.focus(); i.value = w;
+          i.dispatchEvent(new Event('input', { bubbles: true }));
+        }, searchWord);
+        let searched = true;
+        try {
+          await page.waitForFunction(() => {
+            const st = document.getElementById('status-text');
+            const list = document.getElementById('results');
+            if (!st) return false;
+            const t = st.textContent || '';
+            if (/^\s*Searching/i.test(t)) return false;
+            return /match|nearest|No |Couldn/i.test(t)
+                   || (list && list.children.length > 0);
+          }, { timeout: SEARCH_BUDGET_MS });
+        } catch (e) {
+          searched = false;
+        }
+        const secs = ((Date.now() - before) / 1000).toFixed(1);
+        const rows = await page.evaluate(() =>
+          document.getElementById('results').children.length);
+        const status = await page.evaluate(() => {
+          const st = document.getElementById('status-text');
+          return st ? st.textContent.replace(/\s+/g, ' ').trim().slice(0, 60) : '';
+        });
+        if (!searched) {
+          fail('find page search', `"${searchWord}" still searching after `
+            + `${SEARCH_BUDGET_MS / 1000}s — status "${status}"`);
+        } else if (rows === 0 && !/No /i.test(status)) {
+          fail('find page search', `"${searchWord}" rendered no rows — status "${status}"`);
+        } else {
+          pass('find page search', `"${searchWord}" → ${rows} rows in ${secs}s`);
+        }
+        // Clear it so the later chip steps start from a clean page.
+        await page.evaluate(() => {
+          const i = document.getElementById('q');
+          i.value = '';
+          i.dispatchEvent(new Event('input', { bubbles: true }));
+        });
       }
 
       // ----- city-pinned chip filter -----

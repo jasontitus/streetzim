@@ -906,6 +906,12 @@ function applyUrlParamsOnce() {
   }
 })();
 
+// Shared shard cache: used by the reverse geocoder below and by the chip
+// loader further down. Declared here because `const` has no hoisting — the
+// geocoder runs early and would hit the temporal dead zone otherwise.
+const chipShardCache = CHIP_SHARDS.makeCache(CHIP_SHARDS.budgetBytes());
+window.addEventListener('pagehide', () => chipShardCache.clear());
+
 // ---------- reverse geocoder (viewport-center → nearest city) ----------
 
 // Find the closest place:city|town|village record within ~50 km of
@@ -918,7 +924,26 @@ async function reverseGeocodeFromViewport(lat, lon) {
   try {
     const cats = state.manifests.cat && state.manifests.cat.categories;
     if (!cats || !cats.place) return null;
-    const raw = await fetchJSON(CAT + 'place.json').catch(() => null);
+    // Big regions shard this category geographically (china's place.json is
+    // 109 MB, europe's 480 MB, and this function only wants settlements
+    // within 50 km). Read the shards around the point; older ZIMs still
+    // have the single file.
+    const shardMeta = state.manifests.cat.category_shards
+                      && state.manifests.cat.category_shards.place;
+    let raw;
+    if (CHIP_SHARDS.isGeo(shardMeta)) {
+      const res = await CHIP_SHARDS.load(shardMeta, {
+        fetchShard: (suffix) => fetchJSON(CAT + 'place-' + suffix + '.json'),
+        cache: chipShardCache,
+        cacheKey: 'place',
+        point: { lat, lon },
+        k: 200,
+        fallbackToNearest: true,
+      }).catch(() => null);
+      raw = res && res.records;
+    } else {
+      raw = await fetchJSON(CAT + 'place.json').catch(() => null);
+    }
     if (!raw || !Array.isArray(raw)) return null;
     const kinds = { city: 4, town: 3, village: 2, hamlet: 1, suburb: 1 };
     let bestName = null, bestScore = -Infinity;
@@ -1092,8 +1117,6 @@ async function runChipQuery(def) {
 // the search (predicate), so "Starbucks" under Cafés finds the nearest
 // Starbucks rather than filtering the nearest 300 cafés.
 const LEGACY_CHIP = {};
-const chipShardCache = CHIP_SHARDS.makeCache(CHIP_SHARDS.budgetBytes());
-window.addEventListener('pagehide', () => chipShardCache.clear());
 let _regionCentreP = null;
 
 function _regionCentre(meta) {

@@ -150,15 +150,23 @@ class ChipPlan:
             entry["shards"] = rows
         return entry
 
-    def files(self, chip_id: str, label: str) -> Iterator[tuple[str, str, bytes]]:
-        """Yield ``(path, title, json_bytes)`` for every entry to add."""
+    def files(self, chip_id: str, label: str, name_prefix: str = "chip-",
+              title_kind: str = "Find chip") -> Iterator[tuple[str, str, bytes]]:
+        """Yield ``(path, title, json_bytes)`` for every entry to add.
+
+        ``name_prefix``/``title_kind`` let the same planner shard something
+        that is not a Find chip: the ``place`` category is sharded for the
+        viewer's reverse geocoder and is named ``place-g000.json``, not
+        ``chip-place-g000.json``, so it can't be mistaken for a chip.
+        """
         if not self.sharded:
-            yield (f"category-index/chip-{chip_id}.json", f"Find chip {label}",
+            yield (f"category-index/{name_prefix}{chip_id}.json",
+                   f"{title_kind} {label}",
                    b"[" + b",".join(self._parts) + b"]")
             return
         for suffix, ix in zip(self._suffixes(), self._leaves):
-            yield (f"category-index/chip-{chip_id}-{suffix}.json",
-                   f"Find chip {label} (area {suffix})",
+            yield (f"category-index/{name_prefix}{chip_id}-{suffix}.json",
+                   f"{title_kind} {label} (area {suffix})",
                    b"[" + b",".join(self._parts[i] for i in ix) + b"]")
 
 

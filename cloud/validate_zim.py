@@ -70,6 +70,12 @@ SEARCH_CHUNK_FAIL_MB = 200
 SEARCH_LEAF_FAIL_MB = 16
 # The manifest is fetched and parsed before any search can run.
 SEARCH_MANIFEST_FAIL_MB = 4
+# places.html fetches category-index/place.json whole on load to name the
+# nearest city. china ships 109 MB (its browser gate fails on it) and europe
+# 480 MB, against a 7.7 MB median — so an unsharded category file that big
+# must not ship again.
+CATEGORY_FILE_WARN_MB = 16
+CATEGORY_FILE_FAIL_MB = 48
 MAX_ROUTING_ENTRY_MB = 500
 
 # Tile coverage thresholds — we don't know a region's land fraction a
@@ -1277,7 +1283,28 @@ def _chk_category_index(arc) -> tuple[str, str]:
     size = len(cats) if isinstance(cats, (list, dict)) else 0
     if size == 0:
         return ("warn", "manifest declares no categories")
-    return ("pass", f"{size} categories")
+    # places.html fetches category-index/place.json whole, on load, to name
+    # the city nearest the viewport — 109 MB on china (whose browser gate
+    # fails on it) and 480 MB on europe. Sharded builds record the shards in
+    # the manifest and the viewer fetches only the nearest one.
+    biggest = (0, "")
+    for slug in (cats if isinstance(cats, dict) else []):
+        try:
+            sz = arc.get_entry_by_path(f"category-index/{slug}.json").get_item().size
+        except Exception:
+            continue                      # sharded or absent: nothing to load
+        if sz > biggest[0]:
+            biggest = (sz, slug)
+    detail = f"{size} categories"
+    if biggest[0]:
+        detail += f"; biggest {biggest[1]}.json={biggest[0]/1e6:.1f}MB"
+    if biggest[0] > CATEGORY_FILE_FAIL_MB * 1024 * 1024:
+        return ("fail",
+                f"category-index/{biggest[1]}.json is {biggest[0]/1e6:.0f} MB and is "
+                f"fetched whole by the Find page (cap {CATEGORY_FILE_FAIL_MB} MB)")
+    if biggest[0] > CATEGORY_FILE_WARN_MB * 1024 * 1024:
+        return ("warn", detail + f" — over {CATEGORY_FILE_WARN_MB} MB on page load")
+    return ("pass", detail)
 
 
 def _chk_streetzim_meta(arc) -> tuple[str, str]:
