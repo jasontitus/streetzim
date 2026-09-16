@@ -66,7 +66,10 @@ covers each by default:
   `../index.html` (or absolute `/drive/viewer/`).
 - **OSM `type` is singular** (`place`, not `places`) — the build emits
   `category-index/place.json`. Reverse-geocode gated this on the
-  manifest's `categories.place` entry to avoid a hardcoded 404.
+  manifest's `categories.place` entry to avoid a hardcoded 404. Past
+  8 MB the build shards that category instead (`place-g000.json`…,
+  listed under `category_shards` in the manifest) and writes no single
+  file, so the reverse geocoder checks `category_shards` first.
 - **Optional probe paths** — the viewer fetches both
   `routing-data/graph-cells-index.bin` (v10+ spatial) and
   `routing-data/graph.bin` + `graph-chunk-manifest.json` (v8/v9

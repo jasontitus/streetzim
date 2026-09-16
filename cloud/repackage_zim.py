@@ -924,7 +924,10 @@ def repackage(src_path: str, dst_path: str,
             # accidentally. Default DROP; opt back in with
             # `--include-llm-bundle` for bundle consumers.
             # Don't drop place.json — places.html's reverse-geocode
-            # reads it on viewport-origin mode.
+            # reads it on viewport-origin mode. On a big region the build
+            # shards that category instead (place-g000.json…, recorded in
+            # the manifest's category_shards); those entries are not in this
+            # list, so they pass through untouched either way.
             if drop_llm_bundle and path in (
                 "category-index/addr.json",
                 "category-index/poi.json",

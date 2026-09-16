@@ -111,9 +111,19 @@ permission prompt is left unanswered (12 s), the pending query still
 runs, name-sorted. "Search near …" lets the user pick a named place
 as the origin instead. (The old on/off GPS toggle is gone.)
 
-## Queued for next rebuild — merge Restaurants + Cafés
+## Landed 2026-09-16 — Restaurants + Cafés merged into Food & Drink
 
-Apply this change in any region rebuilt 2026-05-09 or later.
+Shipped in `cloud/chip_rules.py`, both viewers and the validator; first
+built into `osm-washington-dc-2026-09-16.zim`. **A ZIM keeps whatever
+chips it was built with**, so both layouts are in the wild: older ZIMs
+have `chip-restaurants.json` + `chip-cafes.json`, newer ones
+`chip-food.json`. The viewers render whichever ids the ZIM's manifest
+declares (`chipsForThisZim` in places.html, `_findChipsReconcile` in
+index.html) and alias saved/linked chip ids across the merge in both
+directions, so a `?chip=restaurants` link still opens Food & Drink.
+Anything else reading chips should do the same rather than assume an id.
+
+The original rationale, kept because it explains the subtype list:
 
 **What:** Replace the separate "Restaurants" and "Cafés" chips with
 a single **"Food & Drink"** chip (`id: "food"`).
@@ -346,6 +356,16 @@ Data sources (all read with `cache: 'force-cache'`):
 * `category-index/<slug>.json` — full list of features for one
   OSM top-level type. Loaded once per chip tap and cached for the
   session.
+* `category-index/<slug>-gNNN.json` — **a category can be sharded.**
+  Since 2026-09-16 a category over 8 MB is cut geographically and the
+  single file is not written at all: `place.json` is 109 MB on china and
+  480 MB on europe, and the Find page only ever wanted the settlements
+  near one point. The manifest's `category_shards.<slug>` describes the
+  shards in the same shape as a chip entry (`sub_chunks` names the
+  suffixes, `shards` gives each one's bounding box, count and bytes), so
+  a client can fetch just the shards covering its area. A client that
+  fetches `<slug>.json` blindly will 404 on those regions — check
+  `category_shards` first.
 
 Behaviour:
 
