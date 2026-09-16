@@ -23,7 +23,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cloud.validate_zim import (  # noqa: E402
-    SEARCH_LEAF_FAIL_MB, SEARCH_MANIFEST_FAIL_MB, _chk_search_data_sizes,
+    SEARCH_LEAF_FAIL_MB, SEARCH_MANIFEST_FAIL_MB, _chk_category_index,
+    _chk_search_data_sizes,
 )
 
 
@@ -204,6 +205,56 @@ def test_manifest_over_the_cap_fails():
         _FakeArchive(_split_manifest(), manifest_pad=pad))
     assert status == "fail"
     assert "manifest" in detail
+
+
+# ------------------------------------------------- sharded categories
+
+def _cat_arc(manifest, present):
+    """Fake archive whose category-index entries are only those in `present`."""
+    class _A(_FakeArchive):
+        def get_entry_by_path(self, path):
+            if path == "category-index/manifest.json" or path in present:
+                return super().get_entry_by_path("category-index/manifest.json")
+            raise KeyError(path)
+
+    a = _A(_manifest({"x": 1}))
+    a._blobs["category-index/manifest.json"] = json.dumps(
+        manifest, separators=(",", ":")).encode()
+    return a
+
+
+def _place_shards(subs=("g000", "g001")):
+    return {"label": "place", "count": 10, "bytes": 10,
+            "sub_chunks": list(subs), "layout": "geo",
+            "shards": [[0, 0, 1, 1, 5, 5]] * len(subs)}
+
+
+def _place_manifest(shards):
+    return {"total": 10, "categories": {"place": 10},
+            "category_shards": {"place": shards}}
+
+
+def test_sharded_place_with_all_shards_present_passes():
+    status, _ = _chk_category_index(_cat_arc(
+        _place_manifest(_place_shards()),
+        {"category-index/place-g000.json", "category-index/place-g001.json"}))
+    assert status == "pass"
+
+
+def test_sharded_place_with_a_missing_shard_fails():
+    # Otherwise the manifest declares shards, every other check passes, and
+    # the Find page silently stops naming the nearest city.
+    status, detail = _chk_category_index(_cat_arc(
+        _place_manifest(_place_shards()), {"category-index/place-g000.json"}))
+    assert status == "fail"
+    assert "place-g001.json" in detail
+
+
+def test_sharded_place_declaring_no_shards_fails():
+    status, detail = _chk_category_index(_cat_arc(
+        _place_manifest({"label": "place", "count": 10, "bytes": 10}), set()))
+    assert status == "fail"
+    assert "no shards" in detail
 
 
 def test_unparseable_manifest_fails():

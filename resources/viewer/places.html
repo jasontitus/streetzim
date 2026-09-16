@@ -942,24 +942,30 @@ async function reverseGeocodeFromViewport(lat, lon) {
     // 109 MB, europe's 480 MB, and this function only wants settlements
     // within 50 km). Read the shards around the point; older ZIMs still
     // have the single file.
+    const kinds = { city: 4, town: 3, village: 2, hamlet: 1, suburb: 1 };
     const shardMeta = state.manifests.cat.category_shards
                       && state.manifests.cat.category_shards.place;
     let raw;
     if (CHIP_SHARDS.isGeo(shardMeta)) {
+      // Settlements only, inside the search. 81.6% of this category is
+      // neighbourhoods, quarters and localities, so asking for the nearest
+      // 200 records of any kind and filtering afterwards left 11% of
+      // viewports with no city name and 30% with a worse one (measured over
+      // 400 points on japan). With the predicate the k-th match drives the
+      // stop rule, so the answer is exact again.
       const res = await CHIP_SHARDS.load(shardMeta, {
         fetchShard: (suffix) => fetchJSON(CAT + 'place-' + suffix + '.json'),
         cache: chipShardCache,
         cacheKey: 'place',
         point: { lat, lon },
-        k: 200,
-        fallbackToNearest: true,
+        predicate: (r) => !!(kinds[r.s] || kinds[r.t]),
+        k: 32,
       }).catch(() => null);
       raw = res && res.records;
     } else {
       raw = await fetchJSON(CAT + 'place.json').catch(() => null);
     }
     if (!raw || !Array.isArray(raw)) return null;
-    const kinds = { city: 4, town: 3, village: 2, hamlet: 1, suburb: 1 };
     let bestName = null, bestScore = -Infinity;
     for (const r of raw) {
       const rlat = r.a, rlon = r.o;

@@ -1318,6 +1318,27 @@ def _chk_category_index(arc) -> tuple[str, str]:
     # chip path still loads. Scanning every slug failed brazil on
     # water.json=102 MB, which nothing ever loads.
     sharded = (mani.get("category_shards") or {}) if isinstance(mani, dict) else {}
+    # A sharded category is only safe if its shards are actually there: a
+    # manifest that declares category_shards.place while the place-g*.json
+    # entries went missing would pass every other check while the Find page
+    # silently stopped naming the nearest city.
+    for slug, meta in sharded.items():
+        subs = (meta or {}).get("sub_chunks") or []
+        if not subs:
+            return ("fail",
+                    f"category_shards.{slug} declares no shards")
+        def _missing(suffix: str) -> bool:
+            try:
+                arc.get_entry_by_path(f"category-index/{slug}-{suffix}.json")
+                return False
+            except Exception:
+                return True
+
+        absent = [s for s in subs if _missing(s)]
+        if absent:
+            return ("fail",
+                    f"category_shards.{slug}: {len(absent)} shard(s) missing "
+                    f"from the ZIM, first {slug}-{absent[0]}.json")
     watched = [s for s in ("place", "poi", "park")
                if isinstance(cats, dict) and s in cats and s not in sharded]
     biggest = (0, "")

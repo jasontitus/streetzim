@@ -534,13 +534,20 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                 cats = cat_manifest.get("categories") or {}
                 if "place" in cats and not src_place_sharded:
                     try:
-                        place_records = json.loads(_src_bytes("category-index/place.json"))
+                        place_records = json.loads(_src_bytes(PLACE_INDEX))
                     except Exception as exc:
-                        raise SystemExit(f"--reshard-chips: category-index/place.json "
-                                         f"unreadable: {exc}")
-                    place_blob = json.dumps(place_records, separators=(",", ":"),
-                                            ensure_ascii=False).encode("utf-8")
-                    if len(place_blob) > PLACE_SHARD_MIN_BYTES:
+                        # Cosmetic index (the reverse geocoder's city name).
+                        # Losing it is not worth discarding a finished copy.
+                        print(f"  warning: {PLACE_INDEX} unreadable ({exc}); "
+                              f"the Find page won't name the nearest city",
+                              flush=True)
+                        place_records = None
+                    place_blob = (b"" if place_records is None
+                                  else json.dumps(place_records, separators=(",", ":"),
+                                                  ensure_ascii=False).encode("utf-8"))
+                    if place_records is None:
+                        pass          # warned above; nothing to re-emit
+                    elif len(place_blob) > PLACE_SHARD_MIN_BYTES:
                         pplan = plan_chip(place_records)
                         pn = 0
                         for fpath, ftitle, blob in pplan.files(
