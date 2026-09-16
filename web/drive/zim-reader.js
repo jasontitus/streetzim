@@ -136,10 +136,22 @@
       return u64(new DataView(buf.buffer, buf.byteOffset, buf.byteLength), inPage * 8);
     }
 
-    // Smallest cluster offset strictly greater than `start`, else the
-    // checksum position (which follows all cluster data). The pointer
-    // array is read and sorted once — clusterCount * 8 bytes, tens of KB
-    // for a regional ZIM — and reused for every later cluster read.
+    // Smallest boundary strictly greater than `start`. Candidates are the
+    // other cluster offsets AND the structures the writer puts after the
+    // cluster data — the URL pointer list, title index, cluster pointer
+    // list and MIME list. The array is built and sorted once —
+    // clusterCount * 8 bytes, tens of KB for a regional ZIM — and reused
+    // for every later cluster read.
+    //
+    // The LAST cluster by file offset has no cluster after it, and falling
+    // back to `checksumPos` handed fzstd the cluster plus everything
+    // between it and the checksum: 215 MB of index structures on
+    // east-coast-us, which the one-shot decoder rejects with "invalid
+    // zstd data". libzim never noticed because it decompresses streaming
+    // and reads the cluster's own blob table, never needing an end.
+    // Every ZIM has this over-read (korea-mongolia 236 MB, washington-dc
+    // 675 KB); it only breaks a page when something it fetches lands in
+    // that last cluster, as category-index/manifest.json did.
     async _clusterEnd(start) {
       if (!this._sortedClusterOffsets) {
         const n = this.header.clusterCount;
@@ -147,12 +159,16 @@
         const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
         const offs = new Array(n);
         for (let i = 0; i < n; i++) offs[i] = u64(v, i * 8);
+        for (const after of [this.header.urlPtrPos, this.header.titlePtrPos,
+                             this.header.clusterPtrPos, this.header.mimeListPos]) {
+          if (after) offs.push(after);
+        }
         offs.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
         this._sortedClusterOffsets = offs;
       }
       const offs = this._sortedClusterOffsets;
       let lo = 0, hi = offs.length;
-      while (lo < hi) {                      // first offset > start
+      while (lo < hi) {                      // first boundary > start
         const mid = (lo + hi) >> 1;
         if (offs[mid] > start) hi = mid; else lo = mid + 1;
       }
