@@ -274,5 +274,23 @@ def test_leaf_name_shape():
     assert leaf_name("ca", ("r", "a"), "p") == "ca~r~a~p"
 
 
-def test_default_target_is_four_mib():
+def test_record_with_unicode_line_separator_round_trips_through_a_temp_file(tmp_path):
+    """U+2028/U+2029 are legal inside a JSON string and ensure_ascii=False
+    writes them raw, but str.splitlines() treats them as line breaks — which
+    cut one east-coast-us address ("8 444 Lundy's Lane, Niagara Falls")
+    in half and failed the whole region twice. The retrofit and the writer
+    both read their per-leaf temp files back, so they must split on "\\n"
+    alone."""
+    recs = [_rec("8 444 Lundy's Lane, Niagara Falls", "addr"),
+            _rec("8 Paragraph Road", "addr"),
+            _rec("Plain Street", "addr")]
+    p = tmp_path / "leaf.jsonl"
+    with p.open("w", encoding="utf-8") as fh:
+        for r in recs:
+            fh.write(json.dumps(r, separators=(",", ":"), ensure_ascii=False) + "\n")
+
+    raw = p.read_text(encoding="utf-8")
+    assert len(raw.splitlines()) > len(recs)          # the trap
+    got = [json.loads(x) for x in raw.split("\n") if x]
+    assert got == recs
     assert SHARD_TARGET_BYTES == 4 * 1024 * 1024

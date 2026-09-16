@@ -460,8 +460,15 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                     for ln in sorted(seen_leaves):
                         lpath = pdir / f"{ln}.jsonl"
                         lrecs = []
+                        # split("\n"), NOT splitlines(): with
+                        # ensure_ascii=False a name containing U+2028 LINE
+                        # SEPARATOR is written raw (legal JSON), and
+                        # splitlines() treats it as a line break, cutting the
+                        # record in two. east-coast-us has exactly one such
+                        # name — "8 444 Lundy's Lane, Niagara Falls" —
+                        # which failed the whole region twice.
                         for lineno, x in enumerate(
-                                lpath.read_text(encoding="utf-8").splitlines()):
+                                lpath.read_text(encoding="utf-8").split("\n")):
                             if not x:
                                 continue
                             try:
