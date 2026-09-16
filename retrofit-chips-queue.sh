@@ -243,7 +243,8 @@ except Exception: print('err')" "$SRC")
   wait_for_resources
   T0=$(date +%s)
   RLOG="/storage/streetzim/$ID-retrofit-$TODAY.log"
-  if ! nice -n 10 ionice -c2 -n7 "$PY" -u cloud/swap_viewer_rust.py "$SRC" "$OUT_BASE" --reshard-chips > "$RLOG" 2>&1 \
+  if ! nice -n 10 ionice -c2 -n7 "$PY" -u cloud/swap_viewer_rust.py "$SRC" "$OUT_BASE" \
+       --reshard-chips --reshard-search > "$RLOG" 2>&1 \
      || [ ! -s "$OUT_BASE" ]; then
     log "  RETROFIT FAILED — see $RLOG"; rm -rf "$OUT_BASE" "$OUT_BASE.tmp" "$OUT_BASE.pack-stage"; row "$ID" retrofit-failed "$SRC" "$(tail -1 "$RLOG" | cut -c1-120)"; continue
   fi

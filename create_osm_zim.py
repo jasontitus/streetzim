@@ -6056,17 +6056,22 @@ def create_zim(
                 leaf_dir = os.path.join(chunk_tmp, f"{prefix}.leaves")
                 os.makedirs(leaf_dir, exist_ok=True)
                 leaf_fds: dict[str, object] = {}
-                leaf_seen: list[str] = []
+                leaf_seen: set[str] = set()
                 LEAF_FD_CAP = 256
 
                 def _leaf_fd(name):
                     fd = leaf_fds.get(name)
                     if fd is not None:
+                        # Refresh recency. dict order is insertion order, so
+                        # without this the cache evicts FIFO: 'ca' on
+                        # south-america plans ~2856 leaves against 256 slots
+                        # and records arrive in ingest order, so nearly every
+                        # one of 19.6 M writes would reopen a file.
+                        leaf_fds[name] = leaf_fds.pop(name)
                         return fd
                     if len(leaf_fds) >= LEAF_FD_CAP:
                         leaf_fds.pop(next(iter(leaf_fds))).close()
-                    if name not in leaf_seen:
-                        leaf_seen.append(name)
+                    leaf_seen.add(name)
                     fd = open(os.path.join(leaf_dir, name + ".jsonl"), "a",
                               encoding="utf-8")
                     leaf_fds[name] = fd

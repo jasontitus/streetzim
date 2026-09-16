@@ -3635,7 +3635,14 @@ function initFindChips(map) {
       btn.appendChild(label);
       btn.addEventListener('click', function() {
         loadChipOnMap(map, c).catch(function(err) {
+          // A chip tapped before the rail reconciles (or one whose file this
+          // ZIM lacks) used to leave the search box reading
+          // "Loading food & drink…" for ever, with only a console warning.
           console.warn('[streetzim] chip load failed:', err);
+          var si = document.getElementById('search-input');
+          if (si && _chipOrigPlaceholder) si.placeholder = _chipOrigPlaceholder;
+          _findChipPaintActive(null);
+          _showFindToast('Couldn’t load ' + c.label.toLowerCase());
         });
       });
       rail.appendChild(btn);
@@ -4715,7 +4722,10 @@ var SEARCH_SHARDS = (function () {
   // hit substring matches like "cathedral" → "Washington National Cathedral".
   function getPrefixes(query, opts) {
     var q = normalizeText(query);
-    var words = q.split(/[^\p{L}\p{N}]+/u).filter(function(w) { return w; });
+    // >= 2 chars, matching the writer (`_prefixes_for` skips shorter words)
+    // and places.html. Keeping 1-char words made "a coffee" expand the whole
+    // "a_" prefix for nothing.
+    var words = q.split(/[^\p{L}\p{N}]+/u).filter(function(w) { return w.length >= 2; });
 
     function keyFor(word) {
       // Latin-leading words keep the 2-char ASCII-alnum prefix. Non-ASCII
@@ -4760,6 +4770,20 @@ var SEARCH_SHARDS = (function () {
     // If ``sub_chunks`` is absent, we're on a pre-split ZIM — look up
     // the plain prefix as before.
     var subChunks = (manifest && manifest.sub_chunks) || {};
+
+    // Which names have hash children (`ca~r~c-0`…), computed once per
+    // manifest instead of re-scanning every chunk key per candidate leaf.
+    function _hashParents() {
+      if (manifest.__hashParents) return manifest.__hashParents;
+      var parents = {};
+      for (var k in manifest.chunks) {
+        var cut = k.lastIndexOf('-');
+        if (cut > 0) parents[k.slice(0, cut)] = 1;
+      }
+      for (var sk in subChunks) parents[sk] = 1;
+      manifest.__hashParents = parents;
+      return parents;
+    }
     function expandPrefix(k, seen, out) {
       if (seen[k]) return;
       seen[k] = true;
@@ -4812,7 +4836,14 @@ var SEARCH_SHARDS = (function () {
 
     // Resolve one leaf name through the same expansion (hash children,
     // empty sub_chunks lists, …) rather than fetching it blind.
+    //
+    // Fast path first: expandPrefix's miss branch scans sub_chunks and
+    // chunks four times over, and a CJK prefix asks about ~950 candidate
+    // leaves per keystroke — 1.06 s on korea-mongolia's 10,855 chunks, and
+    // united-states has ten times as many.
     function resolveLeaf(name) {
+      if (manifest.chunks[name] !== undefined) return [name];
+      if (!_hashParents()[name]) return [];
       var s2 = {}, o2 = [];
       expandPrefix(name, s2, o2);
       return o2;
@@ -5016,6 +5047,10 @@ var SEARCH_SHARDS = (function () {
           .then(function(more) {
             if (seq !== searchSeq) return;
             renderResults(scoreResults(more, query));
+          })
+          .catch(function() {
+            // Show what targeting did find rather than leaving "Searching…".
+            if (seq === searchSeq) renderResults(scored);
           });
         return;
       }
@@ -5194,7 +5229,10 @@ var SEARCH_SHARDS = (function () {
       // than one that takes a moment longer.
       if (scored.length < 5 && prefixes.targeted) {
         return streamFilterChunks(getPrefixes(query, { noTargeting: true }), query)
-          .then(function(more) { return scoreResults(more, query); });
+          .then(function(more) { return scoreResults(more, query); })
+          // The routing typeahead awaits this; a rejection must not take the
+          // panel down, so fall back to what targeting found.
+          .catch(function() { return scored; });
       }
       return scored;
     });

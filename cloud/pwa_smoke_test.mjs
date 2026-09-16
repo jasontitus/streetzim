@@ -495,8 +495,12 @@ async function main() {
       pass('find chip Restaurants returned', n + ' rows');
       await Promise.all(chipFetches.pending);
       const chipLayout = await page.evaluate(() => {
-        const c = typeof state !== 'undefined' && state.manifests.cat
-                  && state.manifests.cat.chips && state.manifests.cat.chips.restaurants;
+        // "food" since the 2026-09-16 merge, "restaurants" before it. Reading
+        // only the old id returned null on a merged ZIM, which quietly
+        // disabled the 64 MB fetch-size failure below.
+        const chips = (typeof state !== 'undefined' && state.manifests.cat
+                       && state.manifests.cat.chips) || {};
+        const c = chips.food || chips.restaurants;
         return c ? { layout: c.layout || 'legacy', bytes: c.bytes || 0,
                      files: (c.sub_chunks || [1]).length } : null;
       });
@@ -516,6 +520,17 @@ async function main() {
       // south-america. See docs/search-prefix-locality.md.
       const searchWord = (SMOKE_SEARCH || '').trim().split(/\s+/)[0] || '';
       if (searchWord.length >= 3) {
+        // Turn the chip off first. rerunQuery() prefers state.chip, so typing
+        // with one active just filters the chip's already-fetched records in
+        // memory and never reads search-data — i.e. it would time the wrong
+        // thing and pass while the slow path stayed untested.
+        await page.evaluate(() => {
+          const on = document.querySelector('nav.chips button.on');
+          if (on) on.click();
+        });
+        await page.waitForFunction(
+          () => typeof state === 'undefined' || !state.chip,
+          { timeout: 5_000 }).catch(() => {});
         const before = Date.now();
         await page.evaluate((w) => {
           const i = document.getElementById('q');
@@ -546,7 +561,10 @@ async function main() {
         if (!searched) {
           fail('find page search', `"${searchWord}" still searching after `
             + `${SEARCH_BUDGET_MS / 1000}s — status "${status}"`);
-        } else if (rows === 0 && !/No /i.test(status)) {
+        } else if (rows === 0) {
+          // The smoke search term is a place in this region, so zero rows is
+          // a failure however politely the page words it — "No matches."
+          // used to satisfy the status check and pass with an empty list.
           fail('find page search', `"${searchWord}" rendered no rows — status "${status}"`);
         } else {
           pass('find page search', `"${searchWord}" → ${rows} rows in ${secs}s`);

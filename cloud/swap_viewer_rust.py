@@ -122,6 +122,12 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                                  or search_manifest_title)
         if not isinstance(search_manifest, dict) or not search_manifest.get("chunks"):
             raise SystemExit(f"--reshard-search: {src_path} declares no search chunks")
+        if search_manifest.get("char_split"):
+            # Not idempotent: _base_prefix maps ca~r~c back to ca and a record
+            # is yielded once per leaf it occupies, so a second pass would
+            # duplicate every multi-leaf record (+0.7% measured).
+            raise SystemExit(f"--reshard-search: {src_path} already has the "
+                             f"character-split layout — nothing to do")
         hot_prefixes = _hot_prefixes(search_manifest)
         print(f"  will re-split {len(hot_prefixes)} hot search prefix(es): "
               f"{', '.join(sorted(hot_prefixes)[:8])}"
@@ -415,7 +421,7 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                     pdir = spill_dir_path / f"search-{prefix}"
                     pdir.mkdir(parents=True, exist_ok=True)
                     fds: dict[str, object] = {}
-                    seen_leaves: list[str] = []
+                    seen_leaves: set[str] = set()
                     orphans = 0
                     first_orphan = ""
                     for rec in _src_records(names):
@@ -433,10 +439,14 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                             if fd is None:
                                 if len(fds) >= SEARCH_LEAF_FD_CAP:
                                     fds.pop(next(iter(fds))).close()
-                                if ln not in seen_leaves:
-                                    seen_leaves.append(ln)
+                                seen_leaves.add(ln)
                                 fd = open(pdir / f"{ln}.jsonl", "a", encoding="utf-8")
                                 fds[ln] = fd
+                            else:
+                                # Refresh recency, or the cache evicts FIFO and
+                                # a prefix with more leaves than the cap
+                                # reopens a file on nearly every record.
+                                fds[ln] = fds.pop(ln)
                             fd.write(line)
                     for fd in fds.values():
                         fd.close()

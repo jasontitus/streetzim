@@ -1219,11 +1219,37 @@ def _chk_search_data_sizes(arc) -> tuple[str, str]:
     # Character-split invariants (docs/search-prefix-locality.md).
     bad_union: list[str] = []
     bad_paths: list[str] = []
+    def _expand(name: str, seen: set[str] | None = None) -> set[str]:
+        """Leaf names under a declared entry, following sub_chunks down.
+        A later repackage can hash-split a character leaf (ca~r~c becomes
+        ca~r~c-0…f with sub_chunks['ca~r~c'] naming them), so comparing
+        sub_chunks['ca'] to the chunk keys directly would fail a ZIM that is
+        perfectly consistent."""
+        seen = seen if seen is not None else set()
+        if name in seen:
+            return set()
+        seen.add(name)
+        if name in chunks:
+            return {name}
+        children = sub_chunks.get(name) or []
+        if not children:
+            # A declared name that is neither a chunk nor a parent: old
+            # clients fetch exactly what sub_chunks lists, so a dead entry
+            # means a 404 for them. Return it so the comparison below fails.
+            return {name}
+        out: set[str] = set()
+        for child in children:
+            out |= _expand(child, seen)
+        return out
+
     for prefix, paths in char_split.items():
         declared = sub_chunks.get(prefix) or []
         leaves = {k for k in chunks
                   if k.startswith(prefix + "~") and k.split("~", 1)[0] == prefix}
-        if not declared or set(declared) != leaves:
+        reachable: set[str] = set()
+        for entry in declared:
+            reachable |= _expand(entry)
+        if not declared or reachable != leaves:
             # Old clients (iOS, in-ZIM apps) resolve a prefix through
             # sub_chunks; a list that is empty or misses leaves makes them
             # return nothing rather than merely being slow.
@@ -1287,8 +1313,15 @@ def _chk_category_index(arc) -> tuple[str, str]:
     # the city nearest the viewport — 109 MB on china (whose browser gate
     # fails on it) and 480 MB on europe. Sharded builds record the shards in
     # the manifest and the viewer fetches only the nearest one.
+    # Only the files a viewer fetches WHOLE: place.json for the reverse
+    # geocoder (unless the build sharded it) and poi/park, which the legacy
+    # chip path still loads. Scanning every slug failed brazil on
+    # water.json=102 MB, which nothing ever loads.
+    sharded = (mani.get("category_shards") or {}) if isinstance(mani, dict) else {}
+    watched = [s for s in ("place", "poi", "park")
+               if isinstance(cats, dict) and s in cats and s not in sharded]
     biggest = (0, "")
-    for slug in (cats if isinstance(cats, dict) else []):
+    for slug in watched:
         try:
             sz = arc.get_entry_by_path(f"category-index/{slug}.json").get_item().size
         except Exception:

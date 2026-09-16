@@ -143,15 +143,21 @@ try:
     total = (sum(n(f'category-index/chip-{cid}-{s}.json') for s in subs)
              if subs else n(f'category-index/chip-{cid}.json'))
 except Exception: total = 0
-for c1 in ('0123456789abcdef' if total == 0 else ''):
-    for c2 in [''] + list('0123456789abcdef'):
-        try:
-            total += n(f'category-index/chip-restaurants-{c1}{c2}.json')
-        except Exception: pass
-if total == 0:
+# Fallbacks for a manifest that couldn't be read: try both chip ids, or a
+# gate on a merged ZIM counts 0 and blocks the ship.
+for fid in ('food', 'restaurants'):
+    if total:
+        break
+    for c1 in '0123456789abcdef':
+        for c2 in [''] + list('0123456789abcdef'):
+            try:
+                total += n(f'category-index/chip-{fid}-{c1}{c2}.json')
+            except Exception: pass
+for fid in ('food', 'restaurants'):
+    if total:
+        break
     try:
-        e = a.get_entry_by_path('category-index/chip-restaurants.json')
-        total = len(json.loads(bytes(e.get_item().content).decode()))
+        total = n(f'category-index/chip-{fid}.json')
     except Exception: pass
 print(total)
 PYEOF

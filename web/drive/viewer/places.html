@@ -753,10 +753,24 @@ function renderRecents() {
   els.recents.hidden = false;
 }
 
+// Resolve a saved or linked chip id against the chips THIS ZIM has, mapping
+// across the 2026-09-16 Restaurants+Cafés merge in both directions: a recent
+// saved as "restaurants" still opens Food & Drink on a new ZIM, and a
+// "?chip=food" link still opens Restaurants on an old one. Without this the
+// def resolves to a chip with no file and the page errors out.
+function chipDefById(id) {
+  const have = chipsForThisZim();
+  const exact = have.find(c => c.id === id);
+  if (exact) return exact;
+  const alias = { restaurants: 'food', cafes: 'food',
+                  food: 'restaurants' }[id];
+  return alias ? have.find(c => c.id === alias) || null : null;
+}
+
 function applyRecent(item) {
   els.recents.hidden = true;
   if (item.kind === 'chip') {
-    const def = CATEGORIES.find(c => c.id === item.value);
+    const def = chipDefById(item.value);
     if (!def) return;
     state.chip = null; // selectChip toggles, so make sure we end up "on"
     selectChip(def);
@@ -808,7 +822,7 @@ function applyUrlParamsOnce() {
     els.mapAreaCheck.checked = true;
   }
   if (chipId) {
-    const def = CATEGORIES.find(c => c.id === chipId);
+    const def = chipDefById(chipId);
     if (def) {
       // selectChip toggles, so make sure the starting state is "off".
       state.chip = null;
@@ -1251,8 +1265,14 @@ async function runNameQuery(q) {
     // nothing, fall back to the old whole-prefix scan.
     if (hits.length < 5 && targetedLeaves.targeted) {
       const all = searchLeavesFor(q, { noTargeting: true }) || [];
-      hits = await streamLeaves(all, q, alive);
-      if (!alive()) return;
+      try {
+        const wider = await streamLeaves(all, q, alive);
+        if (!alive()) return;
+        hits = wider;
+      } catch (e) {
+        // Keep what targeting found rather than leaving "Searching…" up.
+        if (!alive()) return;
+      }
     }
     const uniq = new Map();
     for (const rec of hits) uniq.set(`${rec.n}@${rec.a},${rec.o}`, rec);
@@ -1482,6 +1502,9 @@ function searchLeavesFor(q, opts) {
 // worse of the two on a hot prefix.
 async function streamLeaves(leaves, q, seqCheck) {
   const qn = foldText(q);
+  // Address leaves are only in `leaves` when searchLeavesFor decided the
+  // query earns them (a digit and >= 4 characters), so anything that
+  // arrives here is wanted; this only filters the legacy whole-prefix path.
   const includeAddrs = /\d/.test(qn);
   const MAX_CONCURRENT = 6;
   const MAX_MATCHES = 2000;
@@ -2111,12 +2134,29 @@ function onGpsToggle() { /* intentionally empty */ }
 //      list the intermediate children under sub_chunks['ch'], but
 //      that array can be empty in current builds — fall back to a
 //      chunks-map scan for keys starting with `<prefix>-`.
+// Names that have hash children (`ca~r~c-0`…) or declared sub-chunks,
+// computed once per manifest. searchLeavesFor asks about hundreds of
+// candidate leaves per keystroke, and the scan below is four passes over
+// every chunk key — 1.06 s on a CJK prefix in a 10,855-chunk manifest.
+function _searchHashParents(m) {
+  if (m.__hashParents) return m.__hashParents;
+  const parents = Object.create(null);
+  for (const k in (m.chunks || {})) {
+    const cut = k.lastIndexOf('-');
+    if (cut > 0) parents[k.slice(0, cut)] = 1;
+  }
+  for (const sk in (m.sub_chunks || {})) parents[sk] = 1;
+  m.__hashParents = parents;
+  return parents;
+}
+
 function expandPrefix(prefix) {
   const m = state.manifests && state.manifests.search;
   if (!m) return [];
   const chunks = m.chunks || {};
   const subs = m.sub_chunks || {};
   if (chunks[prefix]) return [prefix];
+  if (!_searchHashParents(m)[prefix]) return [];
   const direct = subs[prefix];
   if (Array.isArray(direct) && direct.length) {
     return direct.flatMap(expandPrefix);
