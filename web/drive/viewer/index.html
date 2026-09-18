@@ -3401,8 +3401,8 @@ function _detailFmtNumber(n) {
 var EXPLORE_CHIPS = [
   // Restaurants + Cafés merged into Food & Drink 2026-09-16
   // (cloud/chip_rules.py). All three stay listed because ZIMs built before
-  // that ship the old pair and no chip-food.json; _findChipsForThisZim()
-  // renders whichever the ZIM's manifest declares.
+  // that ship the old pair and no chip-food.json; _findChipsReconcile()
+  // hides whichever the ZIM's manifest does not declare.
   { id: 'food',        label: 'Food & Drink', emoji: '🍴' },
   { id: 'restaurants', label: 'Restaurants', emoji: '🍴' },
   { id: 'cafes',       label: 'Cafés',       emoji: '☕' },
@@ -3822,8 +3822,43 @@ var _chipLoadSeq = 0;
 // superseded.
 var _chipOrigPlaceholder = null;
 
+// Resolve a tapped chip against the chips THIS ZIM actually has. The rail is
+// built from EXPLORE_CHIPS before the category manifest arrives —
+// _findChipsReconcile() hides the absentees once it does — so on a slow
+// source, notably a ZIM streamed over HTTP by the online preview, "Food &
+// Drink" stays clickable for a second or two on a pre-2026-09-16 ZIM that
+// ships chip-restaurants.json / chip-cafes.json and no chip-food.json.
+// Tapping it then fetched a file that cannot exist and threw
+// "chip-food HTTP 404" (seen on central-asia, 2026-09-18). Resolve first,
+// across the merge in both directions, and bail quietly when the ZIM has
+// nothing to show rather than requesting a 404.
+async function _findResolveChipDef(chipDef) {
+  var m = await _findFetchCatManifest().catch(function() { return null; });
+  var chips = m && m.chips;
+  if (!chips || !Object.keys(chips).length) return chipDef;   // legacy ZIM: keep every chip
+  if (chips[chipDef.id]) return chipDef;
+  var alias = { food: ['restaurants', 'cafes'],
+                restaurants: ['food'], cafes: ['food'] }[chipDef.id] || [];
+  for (var i = 0; i < alias.length; i++) {
+    if (!chips[alias[i]]) continue;
+    for (var j = 0; j < EXPLORE_CHIPS.length; j++) {
+      if (EXPLORE_CHIPS[j].id === alias[i]) return EXPLORE_CHIPS[j];
+    }
+  }
+  return null;
+}
+
 async function loadChipOnMap(map, chipDef, opts) {
   opts = opts || {};
+  var _resolved = await _findResolveChipDef(chipDef);
+  if (!_resolved) {
+    var _btn = document.querySelector('.find-chip[data-chip="' + chipDef.id + '"]');
+    if (_btn) _btn.hidden = true;          // the reconcile is about to do this anyway
+    _showFindToast('No ' + chipDef.label.toLowerCase() + ' in this map');
+    _findChipPaintActive(null);
+    return;
+  }
+  chipDef = _resolved;
   var mySeq = ++_chipLoadSeq;
   _findChipPaintActive(chipDef.id);
   // Stash the active chip on the find state so "Search this area"
