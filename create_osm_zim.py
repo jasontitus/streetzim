@@ -7198,8 +7198,15 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 print(f"\r    Filtered {kept}/{total} features within bbox          ", flush=True)
                 search_features = filtered_path
             else:
-                # No bbox — use the whole cache, copy to tmpdir
-                import shutil
+                # No bbox — use the whole cache, copy to tmpdir.
+                # NOTE: do NOT `import shutil` here. shutil is already
+                # imported at module level (line 36); a local import binds
+                # the name as a local for the WHOLE of main(), so when this
+                # branch does not run, main()'s `finally: shutil.rmtree(...)`
+                # raises UnboundLocalError and the process exits non-zero
+                # AFTER a completely successful build. build-refresh-queue.sh
+                # reads that rc as BUILD FAILED and discards the region
+                # (caught 2026-09-18 on switzerland-nosat; the ZIM was valid).
                 filtered_path = os.path.join(tmpdir, "search_features.jsonl")
                 shutil.copy2(search_cache_path, filtered_path)
                 print(f"    Using all features (no bbox filter)")
