@@ -963,6 +963,7 @@
     clearTimeout(noteTimer);
     noteTimer = setTimeout(function() { noteEl.textContent = ''; }, 45000);
   });
+  if (navigator.serviceWorker.startMessages) navigator.serviceWorker.startMessages();
   navigator.serviceWorker.ready.then(function(reg) {
     var target = navigator.serviceWorker.controller || reg.active;
     if (!target) return;
@@ -2031,14 +2032,21 @@ fetchConfig(1)
         });
       } catch (e) { dbg('tile source reload failed', describeError(e)); }
     }
-    window.addEventListener('online', reloadTileSources);
+    window.addEventListener('online', function() { upstreamReloadDelay = 30000; reloadTileSources(); });
+    var upstreamReload = null, upstreamReloadDelay = 30000;
     if ('serviceWorker' in navigator) {
-      var upstreamReload = null;
       navigator.serviceWorker.addEventListener('message', function(e) {
         var d = e.data;
-        if (!d || d.type !== 'streetzim-upstream' || d.permanent || upstreamReload) return;
-        upstreamReload = setTimeout(function() { upstreamReload = null; reloadTileSources(); }, 30000);
+        // Not for a permanent failure, nor the proxy's daily 429 (that
+        // would just poll it); the wait doubles per notice, to 5 min.
+        if (!d || d.type !== 'streetzim-upstream' || d.permanent || d.status === 429 || upstreamReload) return;
+        upstreamReload = setTimeout(function() { upstreamReload = null; reloadTileSources(); }, upstreamReloadDelay);
+        upstreamReloadDelay = Math.min(upstreamReloadDelay * 2, 300000);
       });
+      // Without this (or an onmessage assignment) the spec leaves the
+      // client's message queue closed; Chromium opens it on
+      // addEventListener, WebKit is not promised to.
+      if (navigator.serviceWorker.startMessages) navigator.serviceWorker.startMessages();
     }
   })
   .catch(function(err) {

@@ -346,8 +346,13 @@ Measured on the rendered viewer:
 
 Everything in the order below was implemented, then reviewed
 adversarially by three independent read-throughs (service worker and
-reader; viewer and Find page; picker) whose findings were fixed before
-the commit. Verified in headless Chromium with `tests/test_sw_streaming.mjs`
+reader; viewer and Find page; picker) and a final pass over the whole
+diff, whose findings were fixed before the commits. One deliberate
+trade-off from that pass: a streamed body is handed to the page as the
+fetch's own stream (the browser pipes it past the worker's thread)
+rather than wrapped to report a mid-body drop; the page sees such a drop
+as a failed read and retries, and the next request against a dead
+origin raises the banner note anyway. Verified in headless Chromium with `tests/test_sw_streaming.mjs`
 (41 checks over a synthetic ZIM, URL and File sources),
 `tests/test_picker.mjs`, a phone-emulation layout check (iPhone 13
 portrait and landscape), and the existing smoke suites on the

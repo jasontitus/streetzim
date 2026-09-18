@@ -207,6 +207,7 @@ async function main() {
 
     // Entry-level checks shared by both sources.
     async function entryChecks(label) {
+      const swBefore = (await status()).sw || { streamed: 0, dedupedReads: 0 };
       await check(label + ': big raw entry streams whole (200)', async () => {
         const r = await get('big/0.bin');
         assert.equal(r.status, 200);
@@ -285,8 +286,10 @@ async function main() {
         // Not just "not cached": the worker's own counters say the big
         // entries went through streamRaw, and one small ranged read of an
         // 8 MiB entry moved a few KB over the network, not the entry.
-        assert.ok(st.sw && st.sw.streamed >= 8, 'streamed count ' + JSON.stringify(st.sw));
-        assert.ok(st.sw.dedupedReads >= 1, 'concurrent reads of one entry shared one read ' + JSON.stringify(st.sw));
+        // Deltas: the counters live for the worker's lifetime, so the
+        // file run must not pass on the url run's totals.
+        assert.ok(st.sw && st.sw.streamed - swBefore.streamed >= 8, 'streamed count ' + JSON.stringify([swBefore, st.sw]));
+        assert.ok(st.sw.dedupedReads - swBefore.dedupedReads >= 1, 'concurrent reads of one entry shared one read ' + JSON.stringify([swBefore, st.sw]));
         if (st.stats) {
           const before = st.stats.bytes;
           const r = await get('big/0.bin', { Range: 'bytes=6000000-6001999' });

@@ -189,6 +189,12 @@
     if (streamBtn) streamBtn.disabled = on;
   }
 
+  // A back-swipe from the viewer restores this page from the bfcache
+  // exactly as it was left: mid-"busy" with every button disabled.
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) { setBusy(false); refreshStatus({ quiet: true }); }
+  });
+
   function setStatus(kind, title, msg) {
     statusDot.classList.remove('ok', 'warn');
     statusCard.classList.remove('ok', 'warn');
@@ -466,6 +472,7 @@
         navigator.storage.persist().then((ok) => dbg('persist', ok), () => {});
       }
       await refreshStatus();
+      setBusy(false);
       setTimeout(() => { window.location.href = viewerUrl(); }, 600);
     } catch (err) {
       const msg = String(err && err.message || err);
@@ -574,6 +581,7 @@
       if (!resp || !resp.ok) throw new Error(resp && resp.error || 'SW rejected URL');
       dbg('streaming', src, resp.info);
       await refreshStatus();
+      setBusy(false);
       setTimeout(() => { window.location.href = viewerUrl(); }, 600);
       return true;
     } catch (err) {

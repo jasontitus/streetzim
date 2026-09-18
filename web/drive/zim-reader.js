@@ -616,7 +616,7 @@
       const cr = parseContentRange(res.headers.get('Content-Range'));
       this.etag = res.headers.get('ETag');
       this.lastModified = res.headers.get('Last-Modified');
-      const buf = new Uint8Array(await res.arrayBuffer());
+      const buf = new Uint8Array(await readBody(res));
       this.size = (cr && cr.total > 0) ? cr.total : await this._sizeFromHead();
       if (!(this.size > 0)) {
         throw new Error('HttpRangeSource: could not determine the file size ' +
@@ -682,7 +682,7 @@
       const running = this.inflight.get(key);
       if (running) return running;
       const p = this._fetch(offset, offset + length - 1)
-        .then((res) => res.arrayBuffer())
+        .then(readBody)
         .then((buf) => {
           if (buf.byteLength !== length) {
             throw new Error('HttpRangeSource: short read (' + buf.byteLength +
@@ -703,7 +703,7 @@
       const start = i * this.blockSize;
       const end = Math.min(start + this.blockSize, this.size) - 1;
       const p = this._fetch(start, end)
-        .then((res) => res.arrayBuffer())
+        .then(readBody)
         .then((buf) => {
           const u8 = new Uint8Array(buf);
           if (u8.byteLength !== end - start + 1) {
@@ -801,6 +801,18 @@
         return 0;
       }
     }
+  }
+
+  // The body of a verified 206. A connection that dies after the headers
+  // rejects here with a bare TypeError; that is the network's doing, not
+  // the file's, and is marked as such so the worker answers 503 rather
+  // than "ZIM error" (which the viewer treats as a broken map).
+  function readBody(res) {
+    return res.arrayBuffer().catch((err) => {
+      const e = (err instanceof Error) ? err : new Error(String(err));
+      e.upstream = true;
+      throw e;
+    });
   }
 
   function discardBody(res) {

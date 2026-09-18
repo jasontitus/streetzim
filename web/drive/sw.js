@@ -482,36 +482,6 @@ function notifyUpstreamTrouble(err, event) {
   if (event) { try { event.waitUntil(p); } catch (e) {} }
 }
 
-// A body that reports an origin dropping the connection mid-stream (the
-// page only sees a generic network error; the worker tells the banner)
-// and passes everything else through untouched.
-function watchedBody(upstream, event) {
-  let reader = null, cancelled = false;
-  return new ReadableStream({
-    start() { reader = upstream.getReader(); },
-    async pull(controller) {
-      let chunk;
-      try {
-        chunk = await reader.read();
-      } catch (err) {
-        // Only a failure of the upstream read is the origin's doing; a
-        // consumer that went away (HEAD probe, navigation) cancels
-        // instead and must not be reported.
-        if (cancelled) return;
-        const e = new Error('stream ended early: ' + String(err && err.message || err));
-        e.upstream = true;
-        notifyUpstreamTrouble(e, event);
-        try { controller.error(e); } catch (x) {}
-        return;
-      }
-      try {
-        if (chunk.done) controller.close(); else controller.enqueue(chunk.value);
-      } catch (x) { /* the consumer closed the stream first */ }
-    },
-    cancel(reason) { cancelled = true; try { reader.cancel(reason).catch(() => {}); } catch (e) {} }
-  });
-}
-
 async function streamRaw(reader, span, mime, request, event) {
   const total = span.length;
   let start = 0, end = total - 1, status = 200;
@@ -532,14 +502,19 @@ async function streamRaw(reader, span, mime, request, event) {
   if (span.offset + span.length > src.size) {
     throw new Error('ZimReader: blob ' + span.offset + '+' + span.length + ' past the end of the file (' + src.size + ')');
   }
-  swStats.streamed++;
   if (src.remote) {
-    // A verified 206 whose body has not been read: hand the stream on.
+    // A verified 206 whose body has not been read: hand its native
+    // stream on untouched, so the browser pipes it past the worker's
+    // thread. A drop after the headers reaches the page as a failed
+    // body read (which it retries); the next request the worker opens
+    // against a dead origin raises the banner note.
     const res = await src.openRange(span.offset + start, span.offset + end);
-    return new Response(watchedBody(res.body, event), { status, headers });
+    swStats.streamed++;
+    return new Response(res.body, { status, headers });
   }
   // A Blob body streams from disk as the page reads it; nothing is
   // materialised in the worker.
+  swStats.streamed++;
   return new Response(src.slice(span.offset + start, span.offset + end + 1), { status, headers });
 }
 
@@ -580,7 +555,7 @@ async function serveFromZim(viewerPath, request, event) {
         // the try block would skip the catch below, and an origin outage
         // while the range was being opened came back to the page as a
         // network failure instead of the 503 + notice it is meant to
-        // get. (A drop after the headers is watchedBody's business.)
+        // get.
         return await streamRaw(reader, span, entry.mime, request, event);
       }
     }
@@ -675,7 +650,9 @@ self.addEventListener('fetch', (event) => {
           // the ~1.5 MB of MapLibre JS/CSS come from the HTTP cache instead
           // of being re-downloaded on every launch.
           const net = await fetch(req, { cache: 'no-cache' });
-          if (net && net.ok) {
+          // GET only: caching a HEAD answer would store an empty body
+          // under the key the offline fallback serves.
+          if (net && net.ok && req.method === 'GET') {
             const copy = net.clone();
             // Keep the SW alive until the cache write lands, and never
             // let a failed put surface as an unhandled rejection. The
@@ -728,7 +705,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith((async () => {
     try {
       const net = await fetch(req, { cache: 'no-cache' });
-      if (net && net.ok) {
+      if (net && net.ok && req.method === 'GET') {
         const copy = net.clone();
         try {
           event.waitUntil(
