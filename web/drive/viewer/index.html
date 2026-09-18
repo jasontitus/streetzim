@@ -3399,16 +3399,25 @@ function _detailFmtNumber(n) {
 // project_chip_rules_duplicated.md memory. Used by both
 // initFindChips (on-map rail) and initExplore (corner menu).
 var EXPLORE_CHIPS = [
-  // Restaurants + Cafés merged into Food & Drink 2026-09-16
-  // (cloud/chip_rules.py). All three stay listed because ZIMs built before
-  // that ship the old pair and no chip-food.json; _findChipsReconcile()
-  // hides whichever the ZIM's manifest does not declare.
+  // Must cover every chip cloud/chip_rules.py can emit, or the map rail
+  // silently drops categories the ZIM contains: Health, Landmarks and
+  // Libraries were missing here while present in every build and in
+  // places.html, so the map offered two food chips and no hospitals.
+  //
+  // Restaurants + Cafés merged into Food & Drink 2026-09-16. All three stay
+  // listed because ZIMs built before that ship the old pair and no
+  // chip-food.json; _findChipsReconcile() hides whichever the ZIM's
+  // manifest does not declare, so a retrofitted ZIM shows the old pair and
+  // a freshly built one shows the merged chip.
   { id: 'food',        label: 'Food & Drink', emoji: '🍴' },
   { id: 'restaurants', label: 'Restaurants', emoji: '🍴' },
   { id: 'cafes',       label: 'Cafés',       emoji: '☕' },
   { id: 'bars',        label: 'Bars',        emoji: '🍺' },
   { id: 'shops',       label: 'Shops',       emoji: '🛍️' },
+  { id: 'health',      label: 'Health',      emoji: '🏥' },
   { id: 'museums',     label: 'Museums',     emoji: '🏛️' },
+  { id: 'landmarks',   label: 'Landmarks',   emoji: '🗽' },
+  { id: 'libraries',   label: 'Libraries',   emoji: '📚' },
   { id: 'parks',       label: 'Parks',       emoji: '🌳' },
   { id: 'fuel',        label: 'Gas',         emoji: '⛽' },
   { id: 'hotels',      label: 'Hotels',      emoji: '🏨' },
