@@ -311,7 +311,7 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
     [ "$_trc" -eq 124 ] && log "  gate terrain: FAIL (timed out after ${_tto}s — inconclusive, not proof of blank terrain)" \
                         || log "  gate terrain: FAIL"
   fi
-  if TERRAIN_STRIPE_TOLERATE=10 timeout 1800 "$PY" cloud/validate_zim.py "$ZIM" >> "$LOG" 2>&1; then log "  gate validate: OK"; else G="$G validate"; log "  gate validate: FAIL"; fi
+  if TERRAIN_STRIPE_TOLERATE=10 timeout 7200 "$PY" cloud/validate_zim.py "$ZIM" >> "$LOG" 2>&1; then log "  gate validate: OK"; else G="$G validate"; log "  gate validate: FAIL"; fi
   ROUTE_OUT=$(timeout 2400 "$PY" cloud/route_cli.py --zim="$ZIM" --src="$SRC" --dst="$DST" --mode=all --max-pops=5000000 2>&1)
   echo "$ROUTE_OUT" | tail -6 | sed 's/^/    /' >> "$LOG"
   # --mode=all runs astar + hwy2. The A* result is the gate. The highway

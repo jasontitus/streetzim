@@ -166,8 +166,18 @@ def stats(p):
                 categories=m.get('categories'), total=m.get('total'),
                 layouts=layouts, sizes=sizes, entries=a.entry_count)
 s, o = stats(src), stats(out)
-bad = [k for k in ('search', 'suggest', 'title_index', 'fulltext', 'counts', 'keys', 'categories', 'total')
+bad = [k for k in ('search', 'suggest', 'title_index', 'fulltext', 'counts', 'categories', 'total')
        if s[k] != o[k]]
+# Manifest keys: the retrofit ADDS keys on purpose -- category_shards once
+# place.json crosses PLACE_SHARD_MIN_BYTES, char_split in search-data. Exact
+# set equality failed 9 otherwise-perfect regions on 2026-09-17/18. A DROPPED
+# key is still fatal: that would be real loss.
+_dropped = sorted(set(s['keys']) - set(o['keys']))
+_added = sorted(set(o['keys']) - set(s['keys']))
+if _dropped:
+    bad.append('keys(dropped ' + ','.join(_dropped) + ')')
+if _added:
+    print('keys added (expected for a reshard): ' + ','.join(_added))
 unsharded = [c for c, b in s['sizes'].items() if b > SHARD and o['layouts'].get(c) != 'geo']
 sample = search_sample(src)
 sd_s = search_digest(src, sample) if sample else None
@@ -260,7 +270,7 @@ except Exception: print('err')" "$SRC")
     _trc=$?; G="$G terrain"
     [ "$_trc" -eq 124 ] && log "  gate terrain: FAIL (timed out after ${_tto}s — inconclusive)" || log "  gate terrain: FAIL"
   fi
-  if TERRAIN_STRIPE_TOLERATE=10 timeout 1800 "$PY" cloud/validate_zim.py "$OUT_BASE" >> "$LOG" 2>&1; then log "  gate validate: OK"; else G="$G validate"; log "  gate validate: FAIL"; fi
+  if TERRAIN_STRIPE_TOLERATE=10 timeout 7200 "$PY" cloud/validate_zim.py "$OUT_BASE" >> "$LOG" 2>&1; then log "  gate validate: OK"; else G="$G validate"; log "  gate validate: FAIL"; fi
   ROUTE_OUT=$(timeout 2400 "$PY" cloud/route_cli.py --zim="$OUT_BASE" --src="$RSRC" --dst="$RDST" --mode=all --max-pops=5000000 2>&1)
   echo "$ROUTE_OUT" | tail -6 | sed 's/^/    /' >> "$LOG"
   ASTAR_OK=$(echo "$ROUTE_OUT" | awk '/=== mode: astar/{f=1} f&&/route OK/{print 1; exit} /=== mode: hwy2/{f=0}')

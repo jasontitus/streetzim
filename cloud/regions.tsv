@@ -56,9 +56,10 @@ southeast-asia	Southeast Asia	92.0,-11.0,141.5,28.5	continent	13.7563,100.5018	1
 australia-nz	Australia & New Zealand	110.0,-50.0,180.0,-8.0	continent	-33.8688,151.2093	-35.2809,149.1300	Sydney	
 canada	Canada	-141.0,41.5,-52.0,83.5	continent	43.6532,-79.3832	45.4215,-75.6972	Toronto	
 indian-subcontinent	Indian Subcontinent	60.0,5.0,98.0,38.0	continent	28.6139,77.2090	27.1767,78.0081	Mumbai	~4h build
-china	China	73.0,18.0,135.0,53.5	continent	39.9042,116.4074	31.2304,121.4737	Beijing	~6h build
+china	China	73.0,18.0,135.0,53.5	continent	39.90432,116.40533	31.23044,121.47389	Beijing	~6h build
 africa	Africa	-18.0,-35.0,52.0,38.0	continent	-1.2921,36.8219	-4.0435,39.6682	Cairo	
 south-america	South America	-82.0,-56.0,-32.0,13.5	continent	-34.6037,-58.3816	-32.9442,-60.6505	Lima	~15h build
 russia	Russia	27.0,41.0,180.0,82.0	continent	55.7558,37.6173	59.9311,30.3609	Moscow	~26h build; post-pack swap stall seen 2026-05-10
 united-states	United States	-125.0,24.5,-66.9,49.4	continent	37.7749,-122.4194	38.5816,-121.4944	Chicago	previous round used build-us-salvage.sh (pinned search-with-overture jsonl) — stale for a data refresh
 europe	Europe	-25.0,34.0,50.5,72.0	continent	48.8566,2.3522	52.5200,13.4050	Paris	previous round used build-europe-salvage.sh — stale for a data refresh; needs MBTiles page-cache warm trick
+switzerland	Switzerland and the Alps	5.4,45.7,11.2,48.2	country	47.3769,8.5417	46.9480,7.4474	Zurich	derived from europe extracts 2026-09-18; south edge 45.7 excludes Milan/Bergamo/Brescia, keeps Aosta, Como, Lugano, Maggiore, north Garda

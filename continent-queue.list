@@ -28,3 +28,5 @@ australia-nz
 # will be missed or corrupt its read. The run-continent-chain.sh installed after
 # this note re-reads the list per region, making all of those edits safe for
 # any chain launched from now on.
+# 2026-09-15: africa failed on a transient Overture download timeout (duckdb HTTP GET timeout on addresses part-00024); retry.
+africa
