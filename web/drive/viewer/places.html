@@ -1083,8 +1083,49 @@ async function runChipQuery(def) {
   // --split-find-chips. Otherwise fall back to loading the full OMT-
   // bucket file + client-side filtering (legacy path; OOMs Chrome on
   // Japan-sized ZIMs but works on smaller regions).
-  const geoMeta = state.manifests.cat && state.manifests.cat.chips
-                  && state.manifests.cat.chips[def.id];
+  // A merged chip (Food & Drink over a pre-merge ZIM's restaurants+cafes)
+  // has no manifest entry of its own, so look the geo meta up per backing
+  // source. Without this, chips[def.id] was undefined, isGeo() was false,
+  // and the clicked chip fell through to the legacy whole-bucket loader —
+  // which on a chip-split ZIM has no bucket to load, so the Find page hung
+  // with no request made at all.
+  const _srcIds = chipSourcesFor(def.id);
+  const _allChips = (state.manifests.cat && state.manifests.cat.chips) || {};
+  if (_srcIds.length > 1 && _srcIds.every(id => CHIP_SHARDS.isGeo(_allChips[id]))) {
+    const parts = [];
+    for (const sid of _srcIds) {
+      const r = await loadGeoChip(Object.assign({}, def, { id: sid }),
+                                  _allChips[sid], seq, null);
+      if (r === null) return;                 // superseded or failed
+      if (r === LEGACY_CHIP) { parts.length = 0; break; }
+      parts.push(r);
+    }
+    if (parts.length) {
+      // Union two k-nearest sets and re-trim by distance. Not an exact kNN
+      // over both shard sets: where both are dense the true 300th-nearest
+      // can sit past one source's cut. Exact needs one shard walk spanning
+      // both chips with every index mapped back to its origin — more ways to be
+      // silently wrong than this is worth.
+      const rows = [];
+      for (const p of parts) {
+        for (let i = 0; i < p.records.length; i++) {
+          rows.push({ r: p.records[i], d: p.dists ? p.dists[i] : Infinity });
+        }
+      }
+      rows.sort((a, b) => a.d - b.d);
+      if (rows.length > 300) rows.length = 300;
+      const merged = Object.assign({}, parts[0], {
+        records: rows.map(x => x.r),
+        dists: rows.map(x => x.d),
+        partial: parts.some(p => p.partial),
+      });
+      if (seq !== _querySeq) return;
+      state.geoSubRecords = null;
+      applyResults(merged.records, merged);
+      return;
+    }
+  }
+  const geoMeta = _allChips[def.id];
   if (CHIP_SHARDS.isGeo(geoMeta)) {
     // A rerun of the same chip (new origin, map-area toggle) fetches
     // shards; meanwhile re-sort the rows on screen against the new
@@ -1212,6 +1253,8 @@ async function loadGeoChip(def, meta, seq, subtype) {
 // the subtype as part of the predicate; the sub-filter chips keep
 // showing the histogram of the chip's own nearest set.
 async function _subfilterChanged() {
+  // A merged chip has no manifest entry of its own; re-sorting the rows
+  // already on screen is right for it, which is what !isGeo(meta) does.
   const meta = state.geoBase && state.chip && state.manifests.cat
                && state.manifests.cat.chips && state.manifests.cat.chips[state.chip.id];
   // Supersede any sub-filter load still in flight, in both branches.
