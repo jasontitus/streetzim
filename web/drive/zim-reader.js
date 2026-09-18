@@ -108,7 +108,7 @@
                                (u) => u.byteLength);
       this.entryCache = new LRU(1024);      // "ns/url"   → {mime, cluster, blob}
       this.urlPtrPageCache = new LRU(256);  // page index → Uint8Array
-      this.rawClusterMeta = new LRU(64);    // clusterNum → {start, extended, table} | false (remote sources)
+      this.rawClusterMeta = new LRU(512);   // clusterNum → {start, extended, table} | false (~1–4 KB each)
       this.direntByIndex = new LRU(4096);   // entry index → parsed dirent (remote sources)
     }
 
@@ -392,10 +392,15 @@
       const cached = this.blobCache.get(key);
       if (cached) return cached;
 
-      // Remote source + raw cluster: fetch the blob's own bytes instead of
-      // the whole cluster (null → compressed, take the normal path).
-      let out = (this.file.remote && !this.clusterCache.get(clusterNum))
-        ? await this._readRawBlobRemote(clusterNum, blobNum)
+      // Raw cluster: read the blob's own bytes instead of the whole
+      // cluster (null → compressed, take the normal path). Over the
+      // network that is the difference between a tile and 2 MiB; on a
+      // local file it keeps a small entry that shares its cluster with a
+      // 100 MB routing chunk from pulling the chunk into memory — libzim
+      // closes an uncompressed cluster only after the item that pushed
+      // it past the target size, so big raw items do get such neighbours.
+      let out = !this.clusterCache.get(clusterNum)
+        ? await this._readRawBlob(clusterNum, blobNum)
         : null;
       if (!out) {
         const cluster = await this._loadCluster(clusterNum);
@@ -424,32 +429,39 @@
       return out;
     }
 
-    // Raw (uncompressed) cluster on a remote source: a whole-cluster read
-    // would pull up to 2 MiB — or a 100 MB routing chunk's neighbours —
-    // over the network for one blob. Read the info byte, then the blob
-    // offset table, then just the blob. Returns null for compressed
-    // clusters, whose zstd frame has to be decoded from the start anyway.
-    async _readRawBlobRemote(clusterNum, blobNum) {
+    // Raw (uncompressed) cluster metadata: where it starts and its blob
+    // offset table, read once per cluster (9 bytes, then the table).
+    // `false` for compressed clusters, whose zstd frame has to be decoded
+    // from the start anyway.
+    async _rawClusterMeta(clusterNum) {
       let meta = this.rawClusterMeta.get(clusterNum);
-      if (meta === undefined) {
-        const start = await this._readClusterPointer(clusterNum);
-        const head = await this._readRange(start, Math.min(9, this.size - start));
-        const compression = head[0] & 0x0F;
-        if (compression !== 1 && compression !== 2) {
-          meta = false;
-        } else {
-          const extended = (head[0] & 0x10) !== 0;
-          const hv = new DataView(head.buffer, head.byteOffset, head.byteLength);
-          const firstOffset = extended
-            ? hv.getUint32(1, true) + hv.getUint32(5, true) * 0x100000000
-            : hv.getUint32(1, true);
-          // The offset table is the first `firstOffset` bytes of the
-          // cluster payload: (numBlobs + 1) little-endian words.
-          const table = await this._readRange(start + 1, firstOffset);
-          meta = { start, extended, table };
-        }
-        this.rawClusterMeta.set(clusterNum, meta);
+      if (meta !== undefined) return meta;
+      const start = await this._readClusterPointer(clusterNum);
+      const head = await this._readRange(start, Math.min(9, this.size - start));
+      const compression = head[0] & 0x0F;
+      if (compression !== 1 && compression !== 2) {
+        meta = false;
+      } else {
+        const extended = (head[0] & 0x10) !== 0;
+        const hv = new DataView(head.buffer, head.byteOffset, head.byteLength);
+        const firstOffset = extended
+          ? hv.getUint32(1, true) + hv.getUint32(5, true) * 0x100000000
+          : hv.getUint32(1, true);
+        // The offset table is the first `firstOffset` bytes of the
+        // cluster payload: (numBlobs + 1) little-endian words.
+        const table = await this._readRange(start + 1, firstOffset);
+        meta = { start, extended, table };
       }
+      this.rawClusterMeta.set(clusterNum, meta);
+      return meta;
+    }
+
+    // Byte span of blob `blobNum` in the FILE, when its cluster is raw:
+    // {offset, length}. null for compressed clusters. This is what lets a
+    // caller hand out a raw blob without reading it into memory at all —
+    // a Blob.slice() or a ranged fetch of exactly these bytes.
+    async rawBlobSpan(clusterNum, blobNum) {
+      const meta = await this._rawClusterMeta(clusterNum);
       if (!meta) return null;
       const { start, extended, table } = meta;
       const wordSize = extended ? 8 : 4;
@@ -463,7 +475,21 @@
       }
       const bStart = readOff(blobNum * wordSize);
       const bStop  = readOff((blobNum + 1) * wordSize);
-      return this._readRange(start + 1 + bStart, bStop - bStart);
+      return { offset: start + 1 + bStart, length: bStop - bStart };
+    }
+
+    // One blob of a raw cluster, read on its own — null for compressed
+    // clusters, whose zstd frame has to be decoded from the start anyway.
+    async _readRawBlob(clusterNum, blobNum) {
+      const span = await this.rawBlobSpan(clusterNum, blobNum);
+      if (!span) return null;
+      return this._readRange(span.offset, span.length);
+    }
+
+    // The bytes of an entry findEntry() returned.
+    async readEntry(entry) {
+      const data = await this._readBlob(entry.cluster, entry.blob);
+      return { mime: entry.mime, data: data, url: entry.url };
     }
 
     // Main entry point — look up a content path. Returns null if not found.
@@ -475,8 +501,12 @@
       path = String(path || '').replace(/^\.?\//, '');
       const entry = await this.findEntry(path, namespace);
       if (!entry) return null;
-      const data = await this._readBlob(entry.cluster, entry.blob);
-      return { mime: entry.mime, data: data, url: entry.url };
+      return this.readEntry(entry);
+    }
+
+    // Normalise a content path the way read() does.
+    static normalizePath(path) {
+      return String(path || '').replace(/^\.?\//, '');
     }
 
     // What the caches hold right now. The SW's status message surfaces
@@ -600,6 +630,15 @@
       return this;
     }
 
+    // A verified 206 for exactly these bytes (inclusive), body unread —
+    // for handing a big blob's stream straight on to a Response.
+    openRange(start, end) {
+      if (start < 0 || end >= this.size || end < start) {
+        return Promise.reject(new Error('HttpRangeSource: out-of-range ' + start + '-' + end + ' of ' + this.size));
+      }
+      return this._fetch(start, end);
+    }
+
     // Blob.prototype.slice look-alike; only .arrayBuffer() is provided.
     // `opts.exact` fetches just those bytes, bypassing the block cache.
     slice(start, end, opts) {
@@ -679,13 +718,20 @@
       return p;
     }
 
-    // One ranged GET, retried on network errors and 5xx/429. Resolves
-    // with a verified 206 whose body has not been read yet.
+    // One ranged GET, retried on network errors and 5xx/429 — five
+    // attempts over ~8 s (0.5, 1, 2, 4 s plus jitter), long enough for a
+    // phone to come out of a tunnel, short enough not to hang a tile slot
+    // for a server that is really down. Resolves with a verified 206
+    // whose body has not been read yet; the error thrown after the last
+    // attempt carries the last HTTP status as `.status`.
     async _fetch(start, end) {
       const want = end - start + 1;
       let lastErr = null;
-      for (let attempt = 0; attempt < 4; attempt++) {
-        if (attempt) await new Promise((r) => setTimeout(r, 400 * attempt));
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (attempt) {
+          const wait = 500 * Math.pow(2, attempt - 1) + Math.random() * 300;
+          await new Promise((r) => setTimeout(r, wait));
+        }
         let res;
         try {
           // The range goes in the header (what any file server needs)
@@ -727,11 +773,16 @@
         }
         if (res.status >= 500 || res.status === 429) {
           lastErr = new Error('HTTP ' + res.status + ' from ' + this.url);
+          lastErr.status = res.status;
           continue;
         }
-        throw new Error('HTTP ' + res.status + ' from ' + this.url);
+        const err = new Error('HTTP ' + res.status + ' from ' + this.url);
+        err.status = res.status;
+        throw err;
       }
-      throw lastErr || new Error('HttpRangeSource: fetch failed');
+      if (!lastErr) lastErr = new Error('HttpRangeSource: fetch failed');
+      lastErr.upstream = true;   // the network or the server, not this file
+      throw lastErr;
     }
 
     // Fallback when the 206 carried no readable Content-Range (a

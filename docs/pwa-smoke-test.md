@@ -111,23 +111,30 @@ and touch, still Chromium); `CPU=4 NETWORK="Fast 3G"` slows the page and
 the service worker's own fetches; `SMOKE_SEARCH=Boston`, `SMOKE_WIKI=1`
 and `SMOKE_ARTICLE=1` exercise a real search, the Wiki panel and a
 Wikipedia article's "Back to map" bar over the streamed ZIM; the run
-ends with what the worker's caches hold. The unit tests next to it:
-`node tests/test_zim_http_source.mjs [zim]` (the range source) and
+ends with what the worker's caches hold. The tests next to it:
+`node tests/test_zim_http_source.mjs [zim]` (the range source),
 `node tests/test_preview_proxy.mjs [zim]` (the proxy, needs network;
-`PROXY_URL=` tests a deployed one).
+`PROXY_URL=` tests a deployed one), `node tests/test_sw_streaming.mjs`
+(the service worker's data path in Chromium over a synthetic ZIM: 200 /
+206 / 416, streamed big entries, the origin going away and coming back,
+the viewer's reaction to both, `check-zim` → page-side IndexedDB write →
+`reload-zim`) and `node tests/test_picker.mjs` (the picker's local pick
+with the storage check, Data Saver, standalone forward, bounce reason).
+Both Chromium tests find the browser through `CHROME_PATH` or the
+Playwright install under `/opt/pw-browsers`.
 
 ## When to run
 
 The standing rule: every diff that touches any of these triggers a
 mandatory smoke run before the change is considered done.
 
-- `web/drive/sw.js`
+- `web/drive/sw.js` (also `node tests/test_sw_streaming.mjs`)
 - `web/drive/zim-reader.js` (also `node tests/test_zim_http_source.mjs`)
 - `web/drive/preview-config.js`, `preview-proxy/` (also
   `cloud/preview_smoke_test.mjs`)
 - `resources/viewer/index.html`
 - `resources/viewer/places.html`
-- `web/drive/index.html`
+- `web/drive/index.html` (also `node tests/test_picker.mjs`)
 - `firebase.json`
 - `scripts/sync-drive-viewer.sh`
 - `cloud/deploy_pwa.sh`

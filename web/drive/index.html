@@ -126,13 +126,15 @@
     <button id="clear-btn" class="btn-danger" style="display:none;">Remove loaded ZIM</button>
   </div>
   <div id="hint">
-    Pick any <code>osm-*.zim</code> produced by <code>create_osm_zim.py</code>
-    (or download one from <a href="/">streetzim.web.app</a>).
-    On Chrome / Edge the file handle is remembered across launches;
-    on Safari you may need to re-pick it after a reboot.
+    Pick any <code>osm-*.zim</code> from <a href="/">streetzim.web.app</a>.
+    The browser keeps its own copy of the file, so it needs as much
+    free storage as the map is big; it stays until you remove it here.
+    Safari clears a site's storage after seven days without a visit
+    &mdash; an app added to the Home Screen keeps its map.
     Streaming reads a map straight off archive.org through a small
-    range proxy: nothing is downloaded up front, but tiles arrive
-    slower than from a local file and it needs a connection.
+    range proxy: nothing is stored, but tiles arrive slower than from a
+    local file and it needs a connection. On a phone, streaming is
+    usually the better first look.
   </div>
 </div>
 
@@ -293,7 +295,8 @@
           (r.name ? r.name + ' — ' : '') +
           (r.source === 'url'
             ? 'it is no longer reachable at its URL. Remove it or stream it again.'
-            : 'the file may have moved or changed. Remove it or pick it again.'));
+            : 'the file may have moved or changed. Remove it or pick it again.') +
+          (r.openError ? ' (' + r.openError + ')' : ''));
         openBtn.style.display = 'none';
         clearBtn.style.display = '';
         pickBtn.textContent = 'Choose a ZIM file';
@@ -356,6 +359,40 @@
     });
   }
 
+  function fmtSize(bytes) {
+    const gb = bytes / (1024 * 1024 * 1024);
+    return gb >= 1 ? gb.toFixed(1) + ' GB' : (bytes / (1024 * 1024)).toFixed(0) + ' MB';
+  }
+
+  // Store the picked File as the worker's `current` record. Done here
+  // rather than inside a service-worker message: browsers keep their own
+  // copy of a File put in IndexedDB (Chromium copies it, WebKit imports
+  // the pick and stores a second copy), which takes minutes for a
+  // multi-GB region on a phone, and Chromium ends a worker message event
+  // after five minutes. A window has no such limit
+  // (docs/mobile-browser-review.md §A4).
+  function putRecord(rec) {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('streetzim-drive', 1);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains('zim')) {
+          req.result.createObjectStore('zim', { keyPath: 'id' });
+        }
+      };
+      req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
+      req.onsuccess = () => {
+        const db = req.result;
+        let tx;
+        try { tx = db.transaction('zim', 'readwrite'); }
+        catch (e) { db.close(); reject(e); return; }
+        tx.objectStore('zim').put(rec);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => { db.close(); reject(tx.error || new Error('IndexedDB write failed')); };
+        tx.onabort = () => { db.close(); reject(tx.error || new Error('IndexedDB write aborted')); };
+      };
+    });
+  }
+
   async function loadZim(file) {
     if (!file) return;
     if (!/\.zim$/i.test(file.name) && file.type !== 'application/octet-stream') {
@@ -363,15 +400,49 @@
         'Got: ' + file.name + ' (' + (file.type || 'unknown type') + ')');
       return;
     }
-    setStatus('warn', 'Loading ZIM…',
-      file.name + ' · ' + (file.size / (1024 * 1024)).toFixed(1) + ' MB — opening header…');
+    const size = fmtSize(file.size);
+    setStatus('warn', 'Checking ZIM…', file.name + ' · ' + size + ' — reading the header…');
     try {
-      const resp = await askSW({ type: 'set-zim', blob: file, name: file.name });
-      if (!resp || !resp.ok) throw new Error(resp && resp.error || 'SW rejected file');
+      // 1. Is it a ZIM this reader can open? Nothing is stored yet.
+      const checked = await askSW({ type: 'check-zim', blob: file });
+      if (!checked || !checked.ok) throw new Error(checked && checked.error || 'not a readable ZIM');
+      // 2. Is there room for the browser's copy? Refusing here beats a
+      //    QuotaExceededError minutes into the write, or a copy that
+      //    silently pushes the device to zero free space.
+      if (navigator.storage && navigator.storage.estimate) {
+        let est = null;
+        try { est = await navigator.storage.estimate(); } catch (e) {}
+        if (est && est.quota > 0) {
+          const free = est.quota - (est.usage || 0);
+          if (free < file.size * 1.02) {
+            setStatus('err', 'Not enough storage for this map',
+              file.name + ' is ' + size + ' but this browser can store only about ' +
+              fmtSize(Math.max(0, free)) + ' more for this site. Free some space, or stream the ' +
+              'map instead — streaming stores nothing.');
+            dbg('storage estimate', est);
+            await refreshStatus({ quiet: true });
+            return;
+          }
+        }
+      }
+      // 3. Store the record, then have the worker open it.
+      setStatus('warn', 'Saving to browser storage…',
+        file.name + ' · ' + size + ' — the browser keeps its own copy; on a phone this can take a few minutes.');
+      await putRecord({ id: 'current', blob: file, name: file.name, addedAt: Date.now() });
+      const resp = await askSW({ type: 'reload-zim' });
+      if (!resp || !resp.ok) throw new Error(resp && resp.error || 'SW could not open the saved copy');
+      // Ask the browser not to evict it under storage pressure (Chromium
+      // grants this silently for installed apps and engaged sites; a
+      // refusal changes nothing today).
+      if (navigator.storage && navigator.storage.persist) {
+        navigator.storage.persist().then((ok) => dbg('persist', ok), () => {});
+      }
       await refreshStatus();
       setTimeout(() => { window.location.href = viewerUrl(); }, 600);
     } catch (err) {
-      setStatus('err', 'Failed to open ZIM', String(err && err.message || err));
+      const msg = String(err && err.message || err);
+      setStatus('err', /quota/i.test(msg) ? 'Not enough storage for this map' : 'Failed to open ZIM', msg);
+      await refreshStatus({ quiet: true });
     }
   }
 
@@ -494,19 +565,55 @@
 
   // ---------- Boot ----------
 
+  function isStandalone() {
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+           window.navigator.standalone === true;
+  }
+
   (async () => {
     try {
       swRegistration = await ensureSW();
       dbg('sw ready', swRegistration.scope);
+      const params = new URLSearchParams(window.location.search);
       // Arrived from a catalog Preview button or a shared link: stream
-      // that ZIM and go straight to the viewer.
-      const wanted = new URLSearchParams(window.location.search).get('zim');
+      // that ZIM and go straight to the viewer — unless the phone is in
+      // Data Saver mode, where a first look at a large region (15–25 MB)
+      // should be a choice: the URL is filled in, Stream starts it.
+      const wanted = params.get('zim');
       if (wanted) {
         urlInput.value = wanted;
-        await loadZimUrl(wanted);
+        const saveData = !!(navigator.connection && navigator.connection.saveData);
+        if (!saveData) {
+          await loadZimUrl(wanted);
+          return;
+        }
+        await refreshStatus({ quiet: true });
+        setStatus('warn', 'Data Saver is on',
+          'Streaming this map reads about 15–25 MB for a first look and more as you ' +
+          'pan, search or route. Press Stream to start, or download the file instead.');
         return;
       }
       await refreshStatus();
+      // The viewer sent the user here because it had nothing to show.
+      let reason = null;
+      try {
+        reason = sessionStorage.getItem('streetzim_redirect_reason');
+        sessionStorage.removeItem('streetzim_redirect_reason');
+      } catch (e) {}
+      if (reason === 'zim-error') {
+        setStatus('err', 'The saved map could not be opened',
+          'Remove it below and pick or stream it again.');
+      }
+      // Installed app (Add to Home Screen): a launch lands here, so go
+      // on to the map when one is loaded — the viewer's "Change map" link
+      // and the ?picker=1 bounce come back here without forwarding.
+      if (isStandalone() && !params.has('picker') && !reason) {
+        const r = await askSW({ type: 'status' }).catch(() => null);
+        if (r && r.ok && r.loaded) {
+          dbg('standalone launch: forwarding to the viewer');
+          window.location.replace(viewerUrl());
+        }
+      }
     } catch (err) {
       setStatus('err', 'Service worker registration failed',
         String(err && err.message || err));

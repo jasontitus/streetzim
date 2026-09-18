@@ -285,9 +285,15 @@ async function main() {
     // the 09-18 output), and validate_zim only warns about missing tile
     // zooms. Report them; never fail a region on them.
     const isTile = /\/tiles\/\d+\/\d+\/\d+\.pbf(\?|$)/.test(u);
+    // /drive/wiki-qid-titles.json is generated at deploy time and served
+    // by Firebase; a local copy of web/drive has no such file and the
+    // viewer treats its absence as "no titles" (cloud/preview_smoke_test
+    // lists it as optional for the same reason).
+    const isOptional = /\/drive\/wiki-qid-titles\.json(\?|$)/.test(u);
     console.log('  ! 404 [' + currentStep + ']' + (ours ? '' : ' (off-origin)')
-                + (isTile ? ' (missing tile, not fatal)' : '') + ':', u);
-    if (ours && !isTile) network404s.push(currentStep + ': 404 ' + u);
+                + (isTile ? ' (missing tile, not fatal)' : '')
+                + (isOptional ? ' (optional, deploy-generated)' : '') + ':', u);
+    if (ours && !isTile && !isOptional) network404s.push(currentStep + ': 404 ' + u);
   });
   page.on('requestfailed', req => {
     const u = req.url();

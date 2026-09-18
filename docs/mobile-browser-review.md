@@ -38,8 +38,8 @@ management plus a few standalone-mode gaps. Ranked by impact:
    57 MB after one east-coast-us search (52 MB of decompressed
    clusters), and a Wikidata bucket is a 30–45 MB blob in a cluster of
    its own. **Fixed here: byte budgets** (64 MB clusters / 32 MB blobs,
-   halved on devices reporting ≤ 2 GB). Still open: routing entries of
-   100–200 MB are buffered whole (§A2).
+   halved on devices reporting ≤ 2 GB). Routing entries of 100–200 MB
+   were buffered whole; **fixed in the second pass: streamed** (§A2).
 2. **Memory on the page** — the search chunk cache keeps 20 parsed
    chunks (300 MB of JSON on Japan), the routing index is resident
    twice, old-style chip files are cached without bound (§A3).
@@ -87,7 +87,7 @@ to workers; WebKit does not and gets the full budget) — and an entry
 larger than its whole budget is never kept (a one-shot read). Reads are
 unchanged; the unit, reader and end-to-end tests pass.
 
-### A2. Whole-entry buffering of routing data (open, medium)
+### A2. Whole-entry buffering of routing data (fixed: streamed)
 
 `serveFromZim` reads an entry completely before building the
 `Response`. The routing cells index is 5 MB (Hispaniola) to 212 MB
@@ -108,7 +108,7 @@ the main thread to the worker as a transferable instead of fetching it
 twice. The byte budget above already stops such clusters from being
 retained.
 
-### A3. Page-side memory (open, medium)
+### A3. Page-side memory (fixed: byte and count caps)
 
 - Search: `fetchChunk` keeps up to 20 whole parsed chunks
   (`resources/viewer/index.html:4702–4733`); with 15 MB chunks that is
@@ -123,7 +123,7 @@ retained.
   `state.cache.*`) grow without bound; only the geo-sharded path is
   budgeted. Reuse that budget.
 
-### A4. Local-file mode copies the file (open; the preview avoids it)
+### A4. Local-file mode copies the file (fixed: page-side write with a quota check)
 
 Every mobile browser lacks `showOpenFilePicker`, so a pick goes through
 `<input type=file>` and the `File` is stored in IndexedDB
@@ -144,7 +144,7 @@ clear message, call `navigator.storage.persist()`, and correct the hint.
 For phones, point users at the Preview button instead: it stores a URL
 and nothing else.
 
-### A5. Network and data (open, low–medium)
+### A5. Network and data (fixed)
 
 - A first look at a large region costs 15–25 MB (109–111 range
   requests); panning, Wiki and Directions add to it. Nothing consults
@@ -178,7 +178,7 @@ and nothing else.
 
 ## Part B — iOS Safari and home-screen apps
 
-### B1. Standalone layout ignores the top inset (open, high in standalone)
+### B1. Standalone layout ignores the top inset (fixed)
 
 The picker declares `apple-mobile-web-app-status-bar-style:
 black-translucent` and the viewer uses `viewport-fit=cover`, but
@@ -191,7 +191,7 @@ Recommended: a `--top-inset: env(safe-area-inset-top, 0px)` variable on
 the top-anchored containers and MapLibre's top-right control, or drop
 `black-translucent`.
 
-### B2. Service-worker lifetime (open, medium for the preview)
+### B2. Service-worker lifetime (partly fixed: keep-alive ping)
 
 WebKit ends an idle worker after 10 s (immediately under memory
 pressure); Chrome after 30 s; both when the app is backgrounded. All
@@ -203,7 +203,7 @@ Recommended: persist the header, MIME list, sorted cluster offsets and
 the memoised top-round dirents with the record, and keep the worker
 warm with a light `status` ping while the viewer is visible.
 
-### B3. Storage rules (open, low; the hint is wrong)
+### B3. Storage rules (fixed: hint, persist())
 
 Seven days of Safari use without a visit deletes IndexedDB, the Cache
 API and the registration for a site used in a tab; a home-screen app is
@@ -228,7 +228,7 @@ redirect, which iOS refuses for a navigation served through a worker).
 Verified end to end on Washington DC: open "Adams Morgan", tap the bar,
 back on the map with the routing API ready in 191 ms.
 
-### B5. Other iOS items (open)
+### B5. Other iOS items (fixed)
 
 - Driving mode never requests a Screen Wake Lock, so the phone locks
   mid-navigation; request it on enter and re-request on
@@ -251,7 +251,7 @@ back on the map with the routing API ready in 191 ms.
   lands on the picker and needs a tap; a viewer with no working ZIM shows
   "HTTP 503" instead of bouncing to the picker (only `HTTP 404` does).
 
-## Part C — layout and touch targets (both platforms)
+## Part C — layout and touch targets (both platforms; fixed)
 
 Measured on the rendered viewer:
 
@@ -342,20 +342,86 @@ Measured on the rendered viewer:
   worker's cache report. `cloud/pwa_smoke_test.mjs` asserts the banner
   stays hidden for a local file.
 
-## Recommended order for what remains
+## Changes made in the second pass (2026-09-18)
 
-1. Stream big raw entries instead of buffering them; fetch the cells
-   index once (§A2).
-2. Bound the search chunk cache and the legacy chip caches by bytes;
-   drop the duplicate main-thread routing index (§A3).
-3. Top safe-area inset in standalone; move "Sources" off the locate
-   control; hide or move the build stamp on phones; 44 px icon buttons
-   (§B1, §C).
-4. Wake Lock in driving mode; Find page "near" input at 16 px (§B5).
-5. Save-Data prompt and byte counter for the preview; longer retry
-   backoff (§A5).
-6. Local-file pick: write from the page, check quota first, fix the hint
-   (§A4).
-7. Device test on one low-end Android (2 GB) and one iPhone: the preview
+Everything in the order below was implemented, then reviewed
+adversarially by three independent read-throughs (service worker and
+reader; viewer and Find page; picker) whose findings were fixed before
+the commit. Verified in headless Chromium with `tests/test_sw_streaming.mjs`
+(41 checks over a synthetic ZIM, URL and File sources),
+`tests/test_picker.mjs`, a phone-emulation layout check (iPhone 13
+portrait and landscape), and the existing smoke suites on the
+washington-dc fixture and the 11.3 GB east-coast-us 2026-09-16 file.
+
+- **§A2 — streaming.** `web/drive/sw.js` answers any entry of 4 MiB or
+  more that sits in a raw cluster with a streamed body: `Blob.slice()`
+  for a local file, the range request's own body for a streamed one,
+  with correct 200/206/416 handling. Nothing of that size is held in
+  the worker any more. Concurrent reads of one path share a read, and
+  the viewer hands the parsed routing cells index to its worker as a
+  transferable instead of fetching it twice. Raw-cluster blobs are read
+  on their own for local files too, so a small entry next to a 100 MB
+  routing chunk no longer pulls the chunk in.
+- **§A3 — page memory.** The search chunk cache is budgeted by bytes
+  (32 MB, 12 MB on ≤ 2 GB devices); the map's chip cache keeps 3 (1)
+  chips; the Find page keeps 3 (1) chip / chunk / category arrays.
+- **§A4 — local pick.** The picker validates the file through the
+  worker (`check-zim`, header only), checks `navigator.storage.estimate()`
+  against the file size and refuses with the numbers, writes the record
+  from the page (no message-event time limit), has the worker reopen it
+  (`reload-zim`) and calls `navigator.storage.persist()`. The hint says
+  what really happens. A saved record that no longer opens reports the
+  reason (`openError`).
+- **§A5 — data.** `?zim=` links do not auto-stream under Data Saver
+  (the URL is filled in, Stream starts it); the banner shows a running
+  byte count; the range source retries five times over ~8 s and tile
+  fetches back off for ~7.5 s; a tile source is reloaded on `online`;
+  the shell precache revalidates scripts (`no-cache`) instead of
+  re-downloading them.
+- **§A6** — `backdrop-filter` dropped on coarse pointers.
+- **§B1, §C — layout.** `--top-inset` / `--safe-bottom` on every top- and
+  bottom-anchored element and on MapLibre's control corners; "Sources"
+  sits left of the locate control; the build stamp is hidden under
+  480 px unless `?debug=1` and no longer stacks above the search box;
+  under `(pointer: coarse)` every icon button has a 44 px box, inputs are
+  16 px and 44 px tall, chips and control buttons 44 px, MapLibre buttons
+  44 px; landscape phones put the side panels below the search box and
+  cap the dropdown; the catalog grid no longer overflows narrow phones
+  and its buttons are taller on touch; search and routing inputs carry
+  `autocorrect`/`autocapitalize`/`spellcheck`/`enterkeyhint`.
+- **§B2 — worker lifetime.** The banner pings the worker every 8 s while
+  the page is visible (`ping`: no IndexedDB, just the byte tally), which
+  keeps WebKit from idle-killing it between tile requests. Persisting
+  the parsed header/pointer tables is still open (below).
+- **§B5 — iOS.** Screen Wake Lock in driving mode (re-acquired on
+  return); Find page input 16 px; viewport variables ignore pinch-zoom
+  states; `touch-action: pan-x pan-y` on panels; attribution dialog
+  sized from `--app-height`; the wiki sheet sits at `bottom: 0`; the
+  viewer and Find page carry the manifest and Apple metas on the
+  `/drive/` origin, so Add to Home Screen installs the app; a standalone
+  launch forwards to the loaded map; the viewer bounces to the picker on
+  404/500/503-without-source and shows "not answering" with Try again
+  when the streamed source fails; `#info` links "Change map".
+- **§D — preview.** The banner has one line of copy on phones, the byte
+  counter, and a note when the source stops answering (HTTP 5xx, no
+  connection, or the proxy's 429 daily limit); the worker posts the
+  same notice to every open page.
+- **Find chips.** A merged chip (Food & Drink) on a ZIM built before the
+  merge loads its backing files instead of failing with "category 'poi'
+  not in the index"; a chip whose category the ZIM lacks says "No … in
+  this map" instead of an error.
+
+## What remains
+
+1. Device test on one low-end Android (2 GB) and one iPhone: the preview
    of a 10 GB region with search, Wiki and a route, watching
-   `chrome://inspect` / Web Inspector for worker restarts.
+   `chrome://inspect` / Web Inspector for worker restarts. Two things
+   only a device can answer: whether Chromium's IndexedDB blob write
+   accepts an Android `content://` pick (its modification-time check),
+   and whether WebKit keeps a service worker alive while a streamed
+   response body (a 100 MB routing chunk over cellular) is still being
+   read — if not, the viewer's retry covers a dropped tile but a routing
+   chunk would fail once and need a second tap.
+2. Persist the parsed header, MIME list and cluster pointer table with
+   the record so a cold worker restart in Private Browsing (no HTTP
+   cache) costs one request instead of a chain (§B2).

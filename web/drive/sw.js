@@ -177,7 +177,12 @@ self.addEventListener('install', (event) => {
     // cache (e.g. HTML with max-age=3600 that hasn't expired yet).
     await Promise.all(SHELL_URLS.map(async (url) => {
       try {
-        const res = await fetch(url, { cache: 'reload' });
+        // HTML/manifest: bypass the HTTP cache outright (a prior deploy
+        // can leave a stale copy in Safari's disk cache). Scripts and
+        // styles: revalidate — a 304 lets the ~1 MB MapLibre bundle come
+        // from the HTTP cache instead of being downloaded again on every
+        // deploy, which mattered on cellular.
+        const res = await fetch(url, { cache: /\.(js|css)$/.test(url) ? 'no-cache' : 'reload' });
         if (!res || !res.ok) throw new Error('status ' + (res && res.status));
         await cacheClean(cache, url, res);
       } catch (err) {
@@ -234,12 +239,44 @@ self.addEventListener('message', (event) => {
         readerPromise = Promise.resolve(r);
         reply.info = r.info;
         reply.source = rec.url ? 'url' : 'file';
+      } else if (msg.type === 'check-zim') {
+        // Validate a File without persisting it. The picker then writes
+        // the record itself: a window has no event time limit, whereas
+        // Chromium ends a service-worker message event after five
+        // minutes — which copying a multi-GB file on a phone exceeds.
+        const r = new self.StreetZimReader(msg.blob);
+        await r.open();
+        reply.info = r.info;
+      } else if (msg.type === 'reload-zim') {
+        // The page put a new `current` record in IndexedDB.
+        resetReader();
+        const r = await getReader();
+        if (!r) throw new Error('no ZIM record to open');
+        reply.info = r.info;
+        const rec = await idbGet('current').catch(() => null);
+        reply.source = rec && rec.url ? 'url' : 'file';
+      } else if (msg.type === 'ping') {
+        // The viewer's preview banner every few seconds: bytes moved so
+        // far from the memoised reader, no IndexedDB round trip, and
+        // enough activity to keep the worker from being idle-killed.
+        const r = readerPromise ? await readerPromise.catch(() => null) : null;
+        reply.loaded = !!r;
+        reply.stats = (r && r.file && r.file.stats) ? r.file.stats : null;
+        reply.cache = r ? r.cacheStats : null;
       } else if (msg.type === 'clear-zim') {
         await idbDelete('current');
         resetReader();
       } else if (msg.type === 'status') {
-        const r = await getReader().catch(() => null);
+        let openError = null;
+        const r = await getReader().catch((err) => {
+          openError = String(err && err.message || err);
+          return null;
+        });
         reply.info = r ? r.info : null;
+        // Why the record could not be opened (QuotaExceededError,
+        // NotReadableError, HTTP 404 from archive.org…) so the picker
+        // can say so instead of guessing.
+        reply.openError = openError;
         reply.loaded = !!r;
         // `present` ≠ `loaded`: a persisted File handle can stop being
         // readable later (file moved / edited on disk). The picker uses
@@ -268,26 +305,38 @@ self.addEventListener('message', (event) => {
 
 // ---------- Fetch interception ----------
 
-function rangeResponse(data, range, mime) {
-  // Parse "bytes=start-end" (end optional)
-  const m = /^bytes=(\d+)-(\d*)$/.exec(range);
+// "bytes=start-end" (end optional) against a `total`-byte body →
+// {start, end} inclusive, 416 for a start past the end, or null when the
+// header is absent/invalid and the whole body should be sent.
+// RFC 7233 §2.1: an explicit last-byte-pos < first-byte-pos makes the
+// whole Range header syntactically invalid → ignore it (full 200). The
+// open-ended form "bytes=N-" has no last-byte-pos, so that rule cannot
+// apply to it; a start past the end is a genuine 416 in both forms.
+function parseRange(range, total) {
+  const m = /^bytes=(\d+)-(\d*)$/.exec(range || '');
   if (!m) return null;
   const start = parseInt(m[1], 10);
   if (isNaN(start)) return null;
-  // RFC 7233 §2.1: an explicit last-byte-pos < first-byte-pos makes the
-  // whole Range header syntactically invalid → ignore it (full 200). The
-  // open-ended form "bytes=N-" has no last-byte-pos, so that rule cannot
-  // apply to it; a start past the end is a genuine 416 in both forms.
-  const end = m[2] ? parseInt(m[2], 10) : data.byteLength - 1;
-  if (m[2] && end < start) return null;
-  if (start >= data.byteLength) {
-    return new Response(null, {
-      status: 416,
-      statusText: 'Range Not Satisfiable',
-      headers: { 'Content-Range': 'bytes */' + data.byteLength }
-    });
-  }
-  const slice = data.subarray(start, Math.min(end + 1, data.byteLength));
+  const last = m[2] ? parseInt(m[2], 10) : total - 1;
+  if (m[2] && last < start) return null;
+  if (start >= total) return 416;
+  return { start, end: Math.min(last, total - 1) };
+}
+
+function notSatisfiable(total) {
+  return new Response(null, {
+    status: 416,
+    statusText: 'Range Not Satisfiable',
+    headers: { 'Content-Range': 'bytes */' + total }
+  });
+}
+
+function rangeResponse(data, range, mime) {
+  const r = parseRange(range, data.byteLength);
+  if (r === null) return null;
+  if (r === 416) return notSatisfiable(data.byteLength);
+  const start = r.start, end = r.end;
+  const slice = data.subarray(start, end + 1);
   return new Response(slice, {
     status: 206,
     statusText: 'Partial Content',
@@ -372,6 +421,60 @@ function withBackToMap(data) {
   return new TextEncoder().encode(html);
 }
 
+// Entries at least this big that sit in a raw (uncompressed) cluster are
+// streamed straight from the file or the network instead of being read
+// into the worker's memory first. Routing cells indexes run 5–212 MB and
+// v8/v9 routing chunks up to 100 MB; buffering one of those, twice (the
+// viewer's main thread and its routing worker both ask at startup), is
+// what emptied a phone's service-worker allowance.
+const STREAM_MIN_BYTES = 4 * 1024 * 1024;
+
+// Reads of the same path in flight at once share one read: the cells
+// index (below the streaming threshold on small regions) is requested
+// by the main thread and the worker together.
+const inflightEntryReads = new Map();   // lookupPath → Promise<{mime, data, url}>
+
+// Tell open viewer pages once in a while that the streaming source is
+// failing (archive.org 5xx, the worker's daily quota, no network), so
+// the preview banner can say so instead of tiles silently not arriving.
+let lastUpstreamNotice = 0;
+async function notifyUpstreamTrouble(err) {
+  const now = Date.now();
+  if (now - lastUpstreamNotice < 30000) return;
+  lastUpstreamNotice = now;
+  try {
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of clients) {
+      c.postMessage({ type: 'streetzim-upstream', status: (err && err.status) || 0,
+                      message: String(err && err.message || err) });
+    }
+  } catch (e) {}
+}
+
+async function streamRaw(reader, span, mime, request) {
+  const total = span.length;
+  let start = 0, end = total - 1, status = 200;
+  const r = parseRange(request.headers.get('range'), total);
+  if (r === 416) return notSatisfiable(total);
+  if (r) { start = r.start; end = r.end; status = 206; }
+  const headers = {
+    'Content-Type': mime,
+    'Content-Length': String(end - start + 1),
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'no-cache'
+  };
+  if (status === 206) headers['Content-Range'] = 'bytes ' + start + '-' + end + '/' + total;
+  const src = reader.file;
+  if (src.remote) {
+    // A verified 206 whose body has not been read: hand the stream on.
+    const res = await src.openRange(span.offset + start, span.offset + end);
+    return new Response(res.body, { status, headers });
+  }
+  // A Blob body streams from disk as the page reads it; nothing is
+  // materialised in the worker.
+  return new Response(src.slice(span.offset + start, span.offset + end + 1), { status, headers });
+}
+
 async function serveFromZim(viewerPath, request) {
   try {
     const reader = await getReader();
@@ -380,7 +483,8 @@ async function serveFromZim(viewerPath, request) {
     // like "AT%26T_Park" or "Foo_%28Bar%29") match the raw ZIM entry path.
     let lookupPath = viewerPath;
     try { lookupPath = decodeURIComponent(viewerPath); } catch (e) {}
-    const entry = await reader.read(lookupPath);
+    lookupPath = self.StreetZimReader.normalizePath(lookupPath);
+    const entry = await reader.findEntry(lookupPath);
     if (!entry) {
       if (OPTIONAL_PROBE_PATHS.has(viewerPath)) {
         // Tried 204 No Content; Chromium fires both response(204) AND
@@ -400,18 +504,49 @@ async function serveFromZim(viewerPath, request) {
       }
       return notFound(viewerPath);
     }
-    if (viewerPath.startsWith('wiki-article/') && /^text\/html/i.test(entry.mime)) {
-      return okResponse(withBackToMap(entry.data), entry.mime);
+    const isArticle = viewerPath.startsWith('wiki-article/') && /^text\/html/i.test(entry.mime);
+    if (!isArticle) {
+      const span = await reader.rawBlobSpan(entry.cluster, entry.blob);
+      if (span && span.length >= STREAM_MIN_BYTES) {
+        // `await`, not a bare `return`: a promise returned from inside
+        // the try block would skip the catch below, and an origin outage
+        // mid-stream came back to the page as a network failure instead
+        // of the 503 + notice it is meant to get.
+        return await streamRaw(reader, span, entry.mime, request);
+      }
     }
+    let read = inflightEntryReads.get(lookupPath);
+    if (!read) {
+      read = reader.readEntry(entry);
+      inflightEntryReads.set(lookupPath, read);
+      read.then(() => {}, () => {}).then(() => {
+        if (inflightEntryReads.get(lookupPath) === read) inflightEntryReads.delete(lookupPath);
+      });
+    }
+    const got = await read;
+    if (isArticle) return okResponse(withBackToMap(got.data), got.mime);
     const range = request.headers.get('range');
     if (range) {
-      const rr = rangeResponse(entry.data, range, entry.mime);
+      const rr = rangeResponse(got.data, range, got.mime);
       if (rr) return rr;
     }
-    return okResponse(entry.data, entry.mime);
+    return okResponse(got.data, got.mime);
   } catch (err) {
     console.error('[sw] ZIM lookup failed for', viewerPath, err);
-    return new Response('ZIM error: ' + (err && err.message || err), {
+    const message = String(err && err.message || err);
+    if (err && (err.upstream || err.status)) {
+      // The streaming source, not the ZIM: say so and ask for a retry.
+      notifyUpstreamTrouble(err);
+      return new Response('Upstream error: ' + message, {
+        status: 503,
+        headers: {
+          'Content-Type': 'text/plain',
+          'Retry-After': '30',
+          'X-Streetzim-Upstream': String(err.status || 'network')
+        }
+      });
+    }
+    return new Response('ZIM error: ' + message, {
       status: 500,
       headers: { 'Content-Type': 'text/plain' }
     });
