@@ -48,19 +48,35 @@
     return { str: str, nextOffset: offset + end + 1 };
   }
 
+  // Count-bounded, and optionally byte-bounded when `sizeOf` is given: an
+  // entry larger than the whole budget is not kept at all (a one-shot
+  // read), and older entries go until the total fits.
   class LRU {
-    constructor(limit) { this.limit = limit; this.map = new Map(); }
+    constructor(limit, maxBytes, sizeOf) {
+      this.limit = limit;
+      this.maxBytes = maxBytes || 0;
+      this.sizeOf = sizeOf || null;
+      this.bytes = 0;
+      this.map = new Map();
+    }
     get(k) {
       if (!this.map.has(k)) return undefined;
       const v = this.map.get(k);
       this.map.delete(k); this.map.set(k, v);
       return v;
     }
+    _drop(k) {
+      if (this.sizeOf) this.bytes -= this.sizeOf(this.map.get(k));
+      this.map.delete(k);
+    }
     set(k, v) {
-      if (this.map.has(k)) this.map.delete(k);
+      const size = this.sizeOf ? this.sizeOf(v) : 0;
+      if (this.map.has(k)) this._drop(k);
+      if (this.maxBytes && size > this.maxBytes) return;
       this.map.set(k, v);
-      while (this.map.size > this.limit) {
-        this.map.delete(this.map.keys().next().value);
+      this.bytes += size;
+      while (this.map.size > this.limit || (this.maxBytes && this.bytes > this.maxBytes)) {
+        this._drop(this.map.keys().next().value);
       }
     }
   }
@@ -74,11 +90,25 @@
       this.size = file.size;
       this.header = null;
       this.mimeList = null;
-      this.clusterCache = new LRU(8);       // clusterNum → {data, extended}
-      this.blobCache = new LRU(512);        // "c:b"      → Uint8Array
+      // Byte budgets keep a phone's service worker alive. A cluster
+      // usually decompresses to ~2 MiB, but a Wikidata bucket is a
+      // 30–45 MB blob in a cluster of its own and a raw routing cluster
+      // can be 100 MB+; an east-coast-us browse with one search held
+      // 52 MB of clusters under the old count-only bound, and iOS or a
+      // low-RAM Android kills a worker that grows past a few hundred MB.
+      // Halved where the device reports ≤ 2 GB (Chrome exposes
+      // deviceMemory to workers; WebKit does not and gets the full
+      // budget). See docs/mobile-browser-review.md.
+      const lowMem = (typeof navigator !== 'undefined' && navigator &&
+                      navigator.deviceMemory && navigator.deviceMemory <= 2);
+      const MB = 1048576;
+      this.clusterCache = new LRU(8, (lowMem ? 32 : 64) * MB,   // clusterNum → {data, extended}
+                                  (c) => c.data.byteLength);
+      this.blobCache = new LRU(512, (lowMem ? 16 : 32) * MB,    // "c:b" → Uint8Array
+                               (u) => u.byteLength);
       this.entryCache = new LRU(1024);      // "ns/url"   → {mime, cluster, blob}
       this.urlPtrPageCache = new LRU(256);  // page index → Uint8Array
-      this.rawClusterMeta = new LRU(64);    // clusterNum → {start, extended, table} | false (remote sources)
+      this.rawClusterMeta = new LRU(512);   // clusterNum → {start, extended, table} | false (~1–4 KB each)
       this.direntByIndex = new LRU(4096);   // entry index → parsed dirent (remote sources)
     }
 
@@ -362,10 +392,15 @@
       const cached = this.blobCache.get(key);
       if (cached) return cached;
 
-      // Remote source + raw cluster: fetch the blob's own bytes instead of
-      // the whole cluster (null → compressed, take the normal path).
-      let out = (this.file.remote && !this.clusterCache.get(clusterNum))
-        ? await this._readRawBlobRemote(clusterNum, blobNum)
+      // Raw cluster: read the blob's own bytes instead of the whole
+      // cluster (null → compressed, take the normal path). Over the
+      // network that is the difference between a tile and 2 MiB; on a
+      // local file it keeps a small entry that shares its cluster with a
+      // 100 MB routing chunk from pulling the chunk into memory — libzim
+      // closes an uncompressed cluster only after the item that pushed
+      // it past the target size, so big raw items do get such neighbours.
+      let out = !this.clusterCache.get(clusterNum)
+        ? await this._readRawBlob(clusterNum, blobNum)
         : null;
       if (!out) {
         const cluster = await this._loadCluster(clusterNum);
@@ -394,32 +429,39 @@
       return out;
     }
 
-    // Raw (uncompressed) cluster on a remote source: a whole-cluster read
-    // would pull up to 2 MiB — or a 100 MB routing chunk's neighbours —
-    // over the network for one blob. Read the info byte, then the blob
-    // offset table, then just the blob. Returns null for compressed
-    // clusters, whose zstd frame has to be decoded from the start anyway.
-    async _readRawBlobRemote(clusterNum, blobNum) {
+    // Raw (uncompressed) cluster metadata: where it starts and its blob
+    // offset table, read once per cluster (9 bytes, then the table).
+    // `false` for compressed clusters, whose zstd frame has to be decoded
+    // from the start anyway.
+    async _rawClusterMeta(clusterNum) {
       let meta = this.rawClusterMeta.get(clusterNum);
-      if (meta === undefined) {
-        const start = await this._readClusterPointer(clusterNum);
-        const head = await this._readRange(start, Math.min(9, this.size - start));
-        const compression = head[0] & 0x0F;
-        if (compression !== 1 && compression !== 2) {
-          meta = false;
-        } else {
-          const extended = (head[0] & 0x10) !== 0;
-          const hv = new DataView(head.buffer, head.byteOffset, head.byteLength);
-          const firstOffset = extended
-            ? hv.getUint32(1, true) + hv.getUint32(5, true) * 0x100000000
-            : hv.getUint32(1, true);
-          // The offset table is the first `firstOffset` bytes of the
-          // cluster payload: (numBlobs + 1) little-endian words.
-          const table = await this._readRange(start + 1, firstOffset);
-          meta = { start, extended, table };
-        }
-        this.rawClusterMeta.set(clusterNum, meta);
+      if (meta !== undefined) return meta;
+      const start = await this._readClusterPointer(clusterNum);
+      const head = await this._readRange(start, Math.min(9, this.size - start));
+      const compression = head[0] & 0x0F;
+      if (compression !== 1 && compression !== 2) {
+        meta = false;
+      } else {
+        const extended = (head[0] & 0x10) !== 0;
+        const hv = new DataView(head.buffer, head.byteOffset, head.byteLength);
+        const firstOffset = extended
+          ? hv.getUint32(1, true) + hv.getUint32(5, true) * 0x100000000
+          : hv.getUint32(1, true);
+        // The offset table is the first `firstOffset` bytes of the
+        // cluster payload: (numBlobs + 1) little-endian words.
+        const table = await this._readRange(start + 1, firstOffset);
+        meta = { start, extended, table };
       }
+      this.rawClusterMeta.set(clusterNum, meta);
+      return meta;
+    }
+
+    // Byte span of blob `blobNum` in the FILE, when its cluster is raw:
+    // {offset, length}. null for compressed clusters. This is what lets a
+    // caller hand out a raw blob without reading it into memory at all —
+    // a Blob.slice() or a ranged fetch of exactly these bytes.
+    async rawBlobSpan(clusterNum, blobNum) {
+      const meta = await this._rawClusterMeta(clusterNum);
       if (!meta) return null;
       const { start, extended, table } = meta;
       const wordSize = extended ? 8 : 4;
@@ -433,7 +475,21 @@
       }
       const bStart = readOff(blobNum * wordSize);
       const bStop  = readOff((blobNum + 1) * wordSize);
-      return this._readRange(start + 1 + bStart, bStop - bStart);
+      return { offset: start + 1 + bStart, length: bStop - bStart };
+    }
+
+    // One blob of a raw cluster, read on its own — null for compressed
+    // clusters, whose zstd frame has to be decoded from the start anyway.
+    async _readRawBlob(clusterNum, blobNum) {
+      const span = await this.rawBlobSpan(clusterNum, blobNum);
+      if (!span) return null;
+      return this._readRange(span.offset, span.length);
+    }
+
+    // The bytes of an entry findEntry() returned.
+    async readEntry(entry) {
+      const data = await this._readBlob(entry.cluster, entry.blob);
+      return { mime: entry.mime, data: data, url: entry.url };
     }
 
     // Main entry point — look up a content path. Returns null if not found.
@@ -445,8 +501,28 @@
       path = String(path || '').replace(/^\.?\//, '');
       const entry = await this.findEntry(path, namespace);
       if (!entry) return null;
-      const data = await this._readBlob(entry.cluster, entry.blob);
-      return { mime: entry.mime, data: data, url: entry.url };
+      return this.readEntry(entry);
+    }
+
+    // Normalise a content path the way read() does.
+    static normalizePath(path) {
+      return String(path || '').replace(/^\.?\//, '');
+    }
+
+    // What the caches hold right now. The SW's status message surfaces
+    // it so a phone's memory can be reasoned about with numbers rather
+    // than guesses (docs/mobile-browser-review.md).
+    get cacheStats() {
+      const tally = (lru, size) => {
+        let n = 0, bytes = 0;
+        for (const v of lru.map.values()) { n++; bytes += size(v); }
+        return { n, bytes };
+      };
+      const clusters = tally(this.clusterCache, (c) => c.data.byteLength);
+      const blobs = tally(this.blobCache, (u) => u.byteLength);
+      const blocks = (this.file && this.file.blocks)
+        ? tally(this.file.blocks, (u) => u.byteLength) : { n: 0, bytes: 0 };
+      return { clusters, blobs, blocks, totalBytes: clusters.bytes + blobs.bytes + blocks.bytes };
     }
 
     get info() {
@@ -540,7 +616,7 @@
       const cr = parseContentRange(res.headers.get('Content-Range'));
       this.etag = res.headers.get('ETag');
       this.lastModified = res.headers.get('Last-Modified');
-      const buf = new Uint8Array(await res.arrayBuffer());
+      const buf = new Uint8Array(await readBody(res));
       this.size = (cr && cr.total > 0) ? cr.total : await this._sizeFromHead();
       if (!(this.size > 0)) {
         throw new Error('HttpRangeSource: could not determine the file size ' +
@@ -552,6 +628,15 @@
       }
       this.blocks.set(0, buf);
       return this;
+    }
+
+    // A verified 206 for exactly these bytes (inclusive), body unread —
+    // for handing a big blob's stream straight on to a Response.
+    openRange(start, end) {
+      if (start < 0 || end >= this.size || end < start) {
+        return Promise.reject(new Error('HttpRangeSource: out-of-range ' + start + '-' + end + ' of ' + this.size));
+      }
+      return this._fetch(start, end);
     }
 
     // Blob.prototype.slice look-alike; only .arrayBuffer() is provided.
@@ -597,7 +682,7 @@
       const running = this.inflight.get(key);
       if (running) return running;
       const p = this._fetch(offset, offset + length - 1)
-        .then((res) => res.arrayBuffer())
+        .then(readBody)
         .then((buf) => {
           if (buf.byteLength !== length) {
             throw new Error('HttpRangeSource: short read (' + buf.byteLength +
@@ -618,7 +703,7 @@
       const start = i * this.blockSize;
       const end = Math.min(start + this.blockSize, this.size) - 1;
       const p = this._fetch(start, end)
-        .then((res) => res.arrayBuffer())
+        .then(readBody)
         .then((buf) => {
           const u8 = new Uint8Array(buf);
           if (u8.byteLength !== end - start + 1) {
@@ -633,13 +718,20 @@
       return p;
     }
 
-    // One ranged GET, retried on network errors and 5xx/429. Resolves
-    // with a verified 206 whose body has not been read yet.
+    // One ranged GET, retried on network errors and 5xx/429 — five
+    // attempts over ~8 s (0.5, 1, 2, 4 s plus jitter), long enough for a
+    // phone to come out of a tunnel, short enough not to hang a tile slot
+    // for a server that is really down. Resolves with a verified 206
+    // whose body has not been read yet; the error thrown after the last
+    // attempt carries the last HTTP status as `.status`.
     async _fetch(start, end) {
       const want = end - start + 1;
       let lastErr = null;
-      for (let attempt = 0; attempt < 4; attempt++) {
-        if (attempt) await new Promise((r) => setTimeout(r, 400 * attempt));
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (attempt) {
+          const wait = 500 * Math.pow(2, attempt - 1) + Math.random() * 300;
+          await new Promise((r) => setTimeout(r, wait));
+        }
         let res;
         try {
           // The range goes in the header (what any file server needs)
@@ -679,13 +771,21 @@
           throw new Error('HttpRangeSource: server ignores Range requests ' +
             '(200 for bytes=' + start + '-' + end + ') — refusing to stream the whole file');
         }
-        if (res.status >= 500 || res.status === 429) {
+        if (res.status >= 500) {
           lastErr = new Error('HTTP ' + res.status + ' from ' + this.url);
+          lastErr.status = res.status;
           continue;
         }
-        throw new Error('HTTP ' + res.status + ' from ' + this.url);
+        const err = new Error('HTTP ' + res.status + ' from ' + this.url);
+        err.status = res.status;
+        // 429 is the proxy's daily quota: retrying would only hold a tile
+        // slot for ~9 s. It is upstream trouble all the same.
+        if (res.status === 429) err.upstream = true;
+        throw err;
       }
-      throw lastErr || new Error('HttpRangeSource: fetch failed');
+      if (!lastErr) lastErr = new Error('HttpRangeSource: fetch failed');
+      lastErr.upstream = true;   // the network or the server, not this file
+      throw lastErr;
     }
 
     // Fallback when the 206 carried no readable Content-Range (a
@@ -701,6 +801,18 @@
         return 0;
       }
     }
+  }
+
+  // The body of a verified 206. A connection that dies after the headers
+  // rejects here with a bare TypeError; that is the network's doing, not
+  // the file's, and is marked as such so the worker answers 503 rather
+  // than "ZIM error" (which the viewer treats as a broken map).
+  function readBody(res) {
+    return res.arrayBuffer().catch((err) => {
+      const e = (err instanceof Error) ? err : new Error(String(err));
+      e.upstream = true;
+      throw e;
+    });
   }
 
   function discardBody(res) {

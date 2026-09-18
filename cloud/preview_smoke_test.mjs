@@ -34,7 +34,7 @@
 // message are all asserted; any console error or /drive/ request
 // failure fails the run, as in pwa_smoke_test.mjs.
 
-import puppeteer from 'puppeteer';
+import puppeteer, { KnownDevices, PredefinedNetworkConditions } from 'puppeteer';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -54,6 +54,18 @@ const PROXY_PORT = Number(process.env.PROXY_PORT || 8766);
 const SHOT_DIR = process.env.SHOT_DIR || '';
 const H2 = process.env.H2 === '1';
 const SITE_URL = (process.env.SITE_URL || '').replace(/\/+$/, '');
+// Extra Chrome flags, whitespace-separated — e.g. a corporate proxy:
+// CHROME_ARGS="--proxy-server=http://127.0.0.1:3128 --ignore-certificate-errors"
+const CHROME_ARGS = (process.env.CHROME_ARGS || '').split(/\s+/).filter(Boolean);
+// Phone emulation (viewport, pixel ratio, touch, user agent) from
+// Puppeteer's device list, e.g. DEVICE="iPhone 13" or DEVICE="Pixel 5".
+// Layout and touch only — the engine is still Chromium.
+const DEVICE = process.env.DEVICE || '';
+// A slow phone: CPU=4 slows the page's main thread 4×; NETWORK="Fast 3G"
+// (or "Slow 3G", "Slow 4G", "Fast 4G") throttles the page AND the service
+// worker's own fetches, which is where the ZIM bytes flow.
+const CPU = Number(process.env.CPU || 0);
+const NETWORK = process.env.NETWORK || '';
 const which = process.argv[2] || 'all';
 
 // Optional files the viewer probes for and copes without: the Q-ID →
@@ -110,6 +122,32 @@ async function runScenario(browser, siteDir, name, zimParam, proxyBase, expectSo
   const context = await browser.createBrowserContext();
   const page = await context.newPage();
   page.setDefaultNavigationTimeout(90_000);
+  if (DEVICE) {
+    const dev = KnownDevices[DEVICE];
+    if (!dev) throw new Error('unknown DEVICE "' + DEVICE + '" — try "iPhone 13" or "Pixel 5"');
+    await page.emulate(dev);
+  }
+  const tag = DEVICE ? '-' + DEVICE.replace(/\s+/g, '_') : '';
+  const netCond = NETWORK ? PredefinedNetworkConditions[NETWORK] : null;
+  if (NETWORK && !netCond) throw new Error('unknown NETWORK "' + NETWORK + '"; one of ' + Object.keys(PredefinedNetworkConditions).join(', '));
+  if (CPU > 1) await page.emulateCPUThrottling(CPU);
+  if (netCond) await page.emulateNetworkConditions(netCond);
+  // The service worker fetches on its own target; throttle it too once it
+  // exists (it registers on the picker page).
+  let swThrottled = false;
+  const throttleSW = async () => {
+    if (!netCond || swThrottled) return;
+    try {
+      const t = await browser.waitForTarget((x) => x.type() === 'service_worker' && x.url().includes('/drive/sw.js'), { timeout: 20_000 });
+      const cdp = await t.createCDPSession();
+      await cdp.send('Network.enable');
+      await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: netCond.latency,
+        downloadThroughput: netCond.download, uploadThroughput: netCond.upload });
+      swThrottled = true;
+      console.log('  · service worker throttled to ' + NETWORK);
+    } catch (e) { console.log('  · could not throttle the service worker: ' + e.message); }
+  };
+  if (CPU > 1 || NETWORK) console.log('  · emulating' + (CPU > 1 ? ' CPU ×' + CPU : '') + (NETWORK ? ' network "' + NETWORK + '"' : ''));
   const errors = [];
   const tileStatuses = [];
   const zimErrors = [];
@@ -144,7 +182,14 @@ async function runScenario(browser, siteDir, name, zimParam, proxyBase, expectSo
   const siteBase = SITE_URL || 'http://127.0.0.1:' + SITE_PORT;
   const pickerUrl = siteBase + '/drive/?zim=' + encodeURIComponent(zimParam);
   try {
+    if (SHOT_DIR && DEVICE) {
+      // The picker as a visitor sees it before choosing anything.
+      await page.goto(siteBase + '/drive/', { waitUntil: 'networkidle0', timeout: 60_000 });
+      await new Promise((r) => setTimeout(r, 1500));
+      await page.screenshot({ path: path.join(SHOT_DIR, 'picker-' + name + tag + '.png') });
+    }
     await page.goto(pickerUrl, { waitUntil: 'domcontentloaded' });
+    await throttleSW();
     // The picker registers the SW, opens the ZIM header over HTTP and
     // then redirects into the viewer. page.url() tracks that without
     // evaluating anything in a document that is about to go away.
@@ -198,6 +243,102 @@ async function runScenario(browser, siteDir, name, zimParam, proxyBase, expectSo
     fail(name + ' search index read from the streamed ZIM', e.message);
   }
 
+  // Optional deeper checks over the streamed ZIM: a real search (the
+  // prefix shards come through the SW) and the Wiki panel (the
+  // Wikidata buckets, the largest blobs a ZIM has).
+  if (process.env.SMOKE_SEARCH) {
+    const term = process.env.SMOKE_SEARCH;
+    const ts = Date.now();
+    try {
+      await page.click('#search-input');
+      await page.type('#search-input', term, { delay: 30 });
+      await page.waitForFunction(() => {
+        const r = document.getElementById('search-results');
+        if (!r) return false;
+        if (r.querySelector('.search-no-results')) return true;
+        return Array.from(r.querySelectorAll('.search-result'))
+          .some((el) => el.textContent.trim() !== 'Searching…');
+      }, { timeout: 120_000 });
+      const res = await page.evaluate(() => {
+        const r = document.getElementById('search-results');
+        const rows = Array.from(r.querySelectorAll('.search-result'))
+          .filter((el) => el.textContent.trim() !== 'Searching…');
+        return { none: !!r.querySelector('.search-no-results'), n: rows.length,
+                 first: rows[0] ? rows[0].textContent.trim().slice(0, 60) : '' };
+      });
+      if (res.none || res.n === 0) throw new Error('no results for "' + term + '"');
+      pass(name + ' search "' + term + '" over the streamed shards',
+        res.n + ' rows in ' + (Date.now() - ts) + ' ms — first: ' + res.first);
+    } catch (e) {
+      fail(name + ' search "' + term + '"', e.message);
+    }
+    await page.evaluate(() => {
+      const i = document.getElementById('search-input');
+      if (i) { i.value = ''; i.blur(); }
+      const r = document.getElementById('search-results');
+      if (r) r.style.display = 'none';
+    });
+  }
+  if (process.env.SMOKE_WIKI === '1') {
+    const tw = Date.now();
+    try {
+      await page.waitForFunction(() => {
+        const b = document.getElementById('wiki-toggle');
+        return b && getComputedStyle(b).display !== 'none';
+      }, { timeout: 30_000 });
+      await page.click('#wiki-toggle');
+      await page.waitForFunction(() => {
+        const l = document.getElementById('wiki-panel-list');
+        return l && l.childElementCount > 0;
+      }, { timeout: 120_000 });
+      const w = await page.evaluate(() => ({
+        n: document.getElementById('wiki-panel-list').childElementCount,
+        count: (document.getElementById('wiki-panel-count') || {}).textContent || '',
+        first: (document.getElementById('wiki-panel-list').firstElementChild.textContent || '').trim().slice(0, 60),
+      }));
+      pass(name + ' Wiki panel over the streamed Wikidata',
+        w.n + ' entries in ' + (Date.now() - tw) + ' ms' + (w.count ? ' (' + w.count.trim() + ')' : '') + ' — first: ' + w.first);
+    } catch (e) {
+      fail(name + ' Wiki panel', e.message);
+    }
+  }
+
+  // SMOKE_ARTICLE=1: open a bundled Wikipedia article the way the map
+  // does (a full navigation) and come back through its "Back to map" bar.
+  if (process.env.SMOKE_ARTICLE === '1') {
+    const ta = Date.now();
+    try {
+      const title = await page.evaluate(async () => {
+        const r = await fetch('wiki-geo-index.json');
+        if (!r.ok) return null;
+        const idx = await r.json();
+        const keys = Object.keys(idx || {});
+        return keys.length ? keys[0] : null;
+      });
+      if (!title) throw new Error('this ZIM bundles no wiki-geo-index.json (no articles to open)');
+      const articleUrl = siteBase + '/drive/viewer/wiki-article/' + encodeURIComponent(title).replace(/%2F/g, '/');
+      await page.goto(articleUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+      const bar = await page.evaluate(() => {
+        const a = document.querySelector('nav.sz-back a');
+        if (!a) return null;
+        const q = a.getBoundingClientRect();
+        return { href: a.getAttribute('href'), h: Math.round(q.height), sticky: getComputedStyle(a.parentElement).position };
+      });
+      if (!bar) throw new Error('article has no "Back to map" bar');
+      if (bar.href !== '/drive/viewer/') throw new Error('bar links to ' + bar.href);
+      if (bar.h < 44) throw new Error('bar link only ' + bar.h + ' px tall');
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60_000 }),
+        page.click('nav.sz-back a'),
+      ]);
+      if (!/\/drive\/viewer\/?(\?|#|$)/.test(page.url())) throw new Error('back landed on ' + page.url());
+      await page.waitForFunction(() => window.streetzimRouting && typeof window.streetzimRouting.open === 'function', { timeout: 60_000 });
+      pass(name + ' Wikipedia article and back', '"' + title + '" — bar ' + bar.h + ' px, ' + bar.sticky + '; back on the map in ' + (Date.now() - ta) + ' ms');
+    } catch (e) {
+      fail(name + ' Wikipedia article and back', e.message);
+    }
+  }
+
   // Ask the SW for its range-request tally while it is still busy with
   // the map (an idle SW is torn down after ~30 s and a fresh one would
   // report a fresh, near-empty reader).
@@ -239,16 +380,21 @@ async function runScenario(browser, siteDir, name, zimParam, proxyBase, expectSo
   // Let the map settle, then take the picture the user would see.
   await new Promise((r) => setTimeout(r, 4000));
   if (SHOT_DIR) {
-    const shot = path.join(SHOT_DIR, 'preview-' + name + '.png');
+    const shot = path.join(SHOT_DIR, 'preview-' + name + tag + '.png');
     await page.screenshot({ path: shot });
     console.log('  · screenshot ' + shot);
   }
   try {
     const status = await swStatus();
     const st = (status && status.stats) || { requests: 0, bytes: 0 };
+    const c = status && status.cache;
     console.log('  · at the end: ' + st.requests + ' range requests, ' +
       (st.bytes / 1048576).toFixed(1) + ' MB fetched; ' + tileStatuses.length +
-      ' tile responses seen on the page target');
+      ' tile responses seen on the page target' + (c ? '; SW caches hold ' +
+      (c.totalBytes / 1048576).toFixed(1) + ' MB (' + c.clusters.n + ' clusters ' +
+      (c.clusters.bytes / 1048576).toFixed(1) + ' MB, ' + c.blobs.n + ' blobs ' +
+      (c.blobs.bytes / 1048576).toFixed(1) + ' MB, ' + c.blocks.n + ' blocks ' +
+      (c.blocks.bytes / 1048576).toFixed(1) + ' MB)' : ''));
   } catch (e) {}
   if (zimErrors.length) fail(name + ' ZIM responses', zimErrors.slice(0, 5).join('; '));
   // A "Failed to load resource ... 404" console line is only tolerated
@@ -296,7 +442,7 @@ async function main() {
       executablePath: CHROME_PATH,
       // SwiftShader keeps WebGL (MapLibre) alive on GPU-less runners.
       args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
-             '--window-size=1200,800'].concat(H2 ? ['--ignore-certificate-errors'] : []),
+             '--window-size=1200,800'].concat(H2 ? ['--ignore-certificate-errors'] : [], CHROME_ARGS),
       defaultViewport: { width: 1200, height: 800 },
       protocolTimeout: 300_000,
     });

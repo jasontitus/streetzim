@@ -230,11 +230,17 @@ function residentCellBudget() {
 
 function handleInit(msg) {
   BASE_URL = msg.baseUrl || '';
-  fetch(BASE_URL + 'routing-data/graph-cells-index.bin')
-    .then(function(r) {
-      if (!r.ok) throw new Error('cells-index HTTP ' + r.status);
-      return r.arrayBuffer();
-    })
+  // The main thread has already fetched the cells index and hands over a
+  // copy (transferred); fetching it a second time through the service
+  // worker was the other half of a 300 MB startup on Japan.
+  var bufP = (msg.cellsIndex instanceof ArrayBuffer)
+    ? Promise.resolve(msg.cellsIndex)
+    : fetch(BASE_URL + 'routing-data/graph-cells-index.bin')
+        .then(function(r) {
+          if (!r.ok) throw new Error('cells-index HTTP ' + r.status);
+          return r.arrayBuffer();
+        });
+  bufP
     .then(function(buf) {
       var idx = parseRoutingCellsIndex(buf);
       return loadNodeShards(idx).then(function() { return idx; });

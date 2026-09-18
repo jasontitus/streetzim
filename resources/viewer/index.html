@@ -7,6 +7,27 @@
 <!-- Suppress the browser's auto-fetch of /favicon.ico — outside our SW
      scope, so a 404 there fires a console error in the smoke harness. -->
 <link rel="icon" href="data:image/x-icon;base64,AAABAAEAAQEAAAEAIAAwAAAAFgAAACgAAAABAAAAAgAAAAEAIAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA">
+<script>
+// PWA identity on the /drive/ origin only: the manifest and the Apple
+// metas, so Add to Home Screen from this page installs the app rather
+// than bookmarking it (docs/mobile-browser-review.md §B5). Inside Kiwix
+// (zim://, content://, file://) nothing is added.
+(function() {
+  if (!/^\/drive\//.test(location.pathname)) return;
+  function add(tag, attrs) {
+    var el = document.createElement(tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    document.head.appendChild(el);
+  }
+  add('link', { rel: 'manifest', href: '/drive/manifest.webmanifest' });
+  add('link', { rel: 'apple-touch-icon', href: '/drive/icon-192.png' });
+  add('meta', { name: 'apple-mobile-web-app-capable', content: 'yes' });
+  add('meta', { name: 'mobile-web-app-capable', content: 'yes' });
+  add('meta', { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' });
+  add('meta', { name: 'apple-mobile-web-app-title', content: 'StreetZim' });
+  add('meta', { name: 'theme-color', content: '#0b1220' });
+})();
+</script>
 <!-- MapLibre GL JS and CSS are loaded from embedded files in the ZIM -->
 <link rel="stylesheet" href="maplibre-gl.css">
 <script src="maplibre-gl.js"></script>
@@ -37,20 +58,28 @@
      The JS touch-scroll lock (lockBodyScroll) keeps the page from dragging. */
   html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; }
   body { position: relative; height: var(--app-height, 100%); }
+  /* Safe-area insets (docs/mobile-browser-review.md §B1). --top-inset lifts
+     everything anchored to the top out from under the status bar / Dynamic
+     Island once the PWA is installed (viewport-fit=cover); --safe-bottom
+     keeps the bottom row above the home indicator. Both are 0 in a browser
+     tab and inside Kiwix. */
+  :root { --top-inset: env(safe-area-inset-top, 0px); --safe-bottom: env(safe-area-inset-bottom, 0px); }
   #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; width: 100%; height: 100%; }
+  .maplibregl-ctrl-top-right, .maplibregl-ctrl-top-left { top: var(--top-inset, 0px); }
+  .maplibregl-ctrl-bottom-left { bottom: var(--safe-bottom, 0px); }
   /* Keep the locate button above the DEAD TOUCH BAND next to the app's bottom
      toolbar: in the Kiwix WebView, taps in the lowest ~50px are swallowed by
      the native toolbar hit-slop / home-indicator gestures even though the
      content renders. min() ties the lift to --bottom-inset, so on desktop/PWA
      (inset 0) the button stays in the normal corner position. */
   .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group {
-    margin-bottom: min(var(--bottom-inset, 0px), 64px);
+    margin-bottom: calc(min(var(--bottom-inset, 0px), 64px) + var(--safe-bottom, 0px));
   }
 
   /* --- Online-preview banner (PWA only; docs/online-preview.md) --- */
   #preview-banner {
-    position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%);
-    z-index: 3; box-sizing: border-box;
+    position: absolute; left: 50%; bottom: calc(84px + var(--safe-bottom, 0px)); transform: translateX(-50%);
+    z-index: 1; box-sizing: border-box;
     display: flex; align-items: center; justify-content: center;
     gap: 10px; flex-wrap: wrap;
     width: max-content; max-width: min(560px, calc(100% - 20px));
@@ -63,6 +92,9 @@
   }
   #preview-banner[hidden] { display: none; }
   #preview-banner b { color: var(--text-primary); font-weight: 600; }
+  #preview-banner-note:not(:empty) { color: #b45309; font-weight: 600; }
+  /* Phones: one line of copy; the map needs the room (§D). */
+  @media (max-width: 480px) { #preview-banner .long { display: none; } }
   #preview-banner a.dl {
     color: #fff; background: var(--accent); padding: 5px 10px;
     border-radius: 6px; text-decoration: none; font-weight: 600;
@@ -70,13 +102,15 @@
   }
   #preview-banner a.dl:hover { background: var(--accent-hover); }
   #preview-banner button {
-    background: none; border: none; padding: 0 2px; line-height: 1;
+    /* 44px hit area (iOS HIG / Android 48dp guidance) around an 18px glyph. */
+    background: none; border: none; padding: 0; line-height: 1;
+    min-width: 44px; min-height: 44px; margin: -10px -6px -10px -2px;
     color: var(--text-tertiary); font-size: 18px; cursor: pointer;
   }
 
   /* --- Attribution / info tag --- */
   #info {
-    position: absolute; bottom: 36px; left: 10px; z-index: 1;
+    position: absolute; bottom: calc(36px + var(--safe-bottom, 0px)); left: 10px; z-index: 1;
     background: rgba(255,255,255,0.65); padding: 3px 8px;
     border-radius: 4px; font-family: var(--ui-font);
     font-size: 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
@@ -84,10 +118,17 @@
   }
   #info h3 { margin: 0; font-size: 10px; font-weight: 600; display: inline; color: var(--text-primary); }
   #info p { margin: 0; color: var(--text-tertiary); font-size: 9px; }
+  /* The ways back from a dead viewer (Try again, Change map) must be
+     readable and tappable, not 9 px. */
+  #info .sz-recover { font-size: 13px; margin-top: 4px; }
+  #info .sz-recover a, #info a.sz-change { color: #2563eb; }
+  @media (pointer: coarse) {
+    #info .sz-recover a, #info a.sz-change { display: inline-block; line-height: 40px; padding: 0 6px; font-size: 14px; }
+  }
 
   /* --- Unified control strip --- */
   #controls {
-    position: absolute; top: 120px; right: 10px; z-index: 2;
+    position: absolute; top: calc(120px + var(--top-inset, 0px)); right: 10px; z-index: 2;
     display: flex; flex-direction: column;
     background: var(--panel-bg); border-radius: var(--radius);
     box-shadow: var(--panel-shadow);
@@ -138,7 +179,7 @@
 
   /* --- Search --- */
   #search-container {
-    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    position: absolute; top: calc(10px + var(--top-inset, 0px)); left: 50%; transform: translateX(-50%);
     z-index: 2; width: 340px; max-width: calc(100% - 100px);
     font-family: var(--ui-font);
   }
@@ -227,7 +268,8 @@
 
   /* --- Wiki panel --- */
   #wiki-panel {
-    position: absolute; top: 10px; left: 10px; bottom: 30px; width: 320px;
+    position: absolute; top: calc(10px + var(--top-inset, 0px)); left: 10px;
+    bottom: calc(30px + var(--safe-bottom, 0px)); width: 320px;
     z-index: 3; background: var(--panel-bg); border-radius: var(--radius);
     box-shadow: var(--panel-shadow);
     font-family: var(--ui-font);
@@ -246,7 +288,10 @@
   /* Mobile: bottom sheet, half height, full width */
   @media (max-width: 600px) {
     #wiki-panel {
-      top: auto; left: 0; right: 0; bottom: var(--bottom-inset, 0px);
+      /* bottom: 0, not --bottom-inset: the body is already sized to the
+         visible height, so the extra lift floated the sheet 184 px up
+         inside Kiwix. */
+      top: auto; left: 0; right: 0; bottom: 0;
       width: 100%; max-height: calc(var(--app-height, 100vh) * 0.45);
       padding-bottom: env(safe-area-inset-bottom, 0px);
       border-radius: var(--radius) var(--radius) 0 0;
@@ -333,7 +378,10 @@
   #wiki-refresh button:hover { background: var(--accent-hover); }
   /* Attribution dialog */
   #attr-btn {
-    position: absolute; bottom: 36px; right: 10px; z-index: 2;
+    /* Left of MapLibre's bottom-right control stack (the locate button,
+       44 px wide on a coarse pointer): at right:10px its lower third sat
+       under that button on phones. */
+    position: absolute; bottom: calc(36px + var(--safe-bottom, 0px)); right: 64px; z-index: 2;
     background: rgba(255,255,255,0.65); border: none; border-radius: 4px;
     padding: 2px 7px; font-size: 11px; cursor: pointer;
     font-family: var(--ui-font); color: var(--text-secondary);
@@ -341,14 +389,15 @@
   }
   #attr-btn:hover { background: rgba(255,255,255,0.9); color: var(--text-primary); }
   #attr-overlay {
-    display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    display: none; position: fixed; top: 0; left: 0; right: 0; bottom: var(--bottom-inset, 0px);
     z-index: 100; background: rgba(0,0,0,0.4);
     backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
   }
   #attr-dialog {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
     background: #fff; border-radius: var(--radius); padding: 24px 28px;
-    max-width: 480px; width: calc(100% - 40px); max-height: 80vh; overflow-y: auto;
+    max-width: 480px; width: calc(100% - 40px);
+    max-height: calc(var(--app-height, 100vh) * 0.8); overflow-y: auto;
     box-shadow: 0 8px 32px rgba(0,0,0,0.2);
     font-family: var(--ui-font);
   }
@@ -386,7 +435,7 @@
 
   /* --- Routing --- */
   #routing-panel {
-    display: none; position: absolute; top: 10px; left: 10px; z-index: 3;
+    display: none; position: absolute; top: calc(10px + var(--top-inset, 0px)); left: 10px; z-index: 3;
     width: 280px; max-width: calc(100% - 80px);
     background: var(--panel-bg); border-radius: var(--radius);
     box-shadow: var(--panel-shadow);
@@ -569,7 +618,7 @@
   #routing-go-row button.hidden-mode { display: none; }
   /* --- Driving mode HUD --- */
   #drive-hud {
-    display: none; position: absolute; top: 10px; left: 10px; right: 10px;
+    display: none; position: absolute; top: calc(10px + var(--top-inset, 0px)); left: 10px; right: 10px;
     z-index: 5; pointer-events: auto;
     background: rgba(17, 24, 39, 0.92); color: #fff;
     border-radius: 12px; padding: 12px 14px;
@@ -763,6 +812,61 @@
   }
   .pin-popup .pin-directions:hover { background: var(--accent-hover); }
   .pin-popup .pin-directions:active { transform: translateY(1px); }
+
+  /* --- Touch targets (docs/mobile-browser-review.md §C) ---
+     On a coarse pointer every icon button gets a 44 px box — padding plus
+     negative margins so the rows keep their height — inputs go to 16 px
+     (iOS Safari zooms into anything smaller) and rows get taller. */
+  @media (pointer: coarse) {
+    #routing-panel h4 button, #wiki-panel-close {
+      min-width: 44px; min-height: 44px; box-sizing: border-box; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    #routing-panel h4 button { margin: -12px 0; }
+    #routing-close { margin-right: -8px !important; }
+    #routing-panel.minimized h4 button { margin: -6px 0; }
+    #routing-panel.minimized #routing-minimize { display: inline-flex; }
+    #wiki-panel-close { margin: -14px -12px -12px 0; }
+    #search-clear {
+      top: -4px; right: 0; width: 44px; height: 44px; padding: 0;
+      line-height: 44px; text-align: center;
+    }
+    #search-input { font-size: 16px; }
+    .routing-input { font-size: 16px; min-height: 44px; padding: 8px 10px; }
+    .routing-icon-btn { min-width: 44px; min-height: 44px; padding: 0 8px; }
+    #controls button { min-height: 44px; padding: 12px 16px; font-size: 13px; }
+    #find-chips .find-chip { min-height: 44px; padding: 0 14px; }
+    #routing-go-row button { min-height: 44px; }
+    .maplibregl-ctrl-group button { width: 44px; height: 44px; }
+    #attr-btn { padding: 8px 12px; font-size: 12px; }
+    /* Fingers scroll panels; a pinch on one must not zoom the page. */
+    #routing-panel, #wiki-panel, #search-container, #drive-hud, #preview-banner,
+    #attr-dialog, #controls { touch-action: pan-x pan-y; }
+    /* backdrop-filter over an animating WebGL canvas is GPU work a weak
+       phone notices; the panels are opaque enough without it. */
+    #preview-banner, #info, #controls, #search-input, #search-results,
+    #wiki-panel, #attr-btn, #routing-panel, #drive-hud {
+      backdrop-filter: none; -webkit-backdrop-filter: none;
+    }
+  }
+  /* Landscape phones (§C): the side panels start below the search box
+     instead of covering it, and the dropdown stops above the bottom. */
+  @media (max-height: 500px) and (min-width: 601px) {
+    #wiki-panel, #routing-panel {
+      top: calc(58px + var(--top-inset, 0px));
+      max-height: calc(var(--app-height, 100vh) - 66px - var(--top-inset, 0px));
+      overflow-y: auto;
+    }
+    #wiki-panel { bottom: auto; }
+  }
+  @media (max-height: 500px) {
+    #search-results { max-height: calc(var(--app-height, 100vh) - 130px); }
+  }
+  /* The build stamp is a debugging aid; on a phone it sat over the top
+     band of the search box (§C). ?debug=1 keeps it. */
+  @media (max-width: 480px) {
+    body:not(.sz-debug) #viewer-build-stamp { display: none !important; }
+  }
 </style>
 </head>
 <body>
@@ -775,11 +879,13 @@
 <!-- Always-visible build stamp. Tiny, top-left, click to copy. Lets
      you instantly tell which deploy the page is from. Populated by
      a fetch('/drive/build-info.js') below. -->
-<div id="viewer-build-stamp" style="position:fixed;top:6px;left:8px;background:rgba(0,0,0,0.55);color:#0f0;font:10px/1 ui-monospace,monospace;padding:3px 6px;border-radius:4px;z-index:9999;pointer-events:auto;cursor:copy;opacity:0.7;" title="StreetZim build (click to copy)">…</div>
+<div id="viewer-build-stamp" style="position:fixed;top:calc(6px + env(safe-area-inset-top, 0px));left:8px;background:rgba(0,0,0,0.55);color:#0f0;font:10px/1 ui-monospace,monospace;padding:3px 6px;border-radius:4px;z-index:1;pointer-events:auto;cursor:copy;opacity:0.7;" title="StreetZim build (click to copy)">…</div>
 <script>
 (function() {
   var el = document.getElementById('viewer-build-stamp');
   if (!el) return;
+  // Phones hide the stamp (CSS above) unless ?debug=1 asks for it.
+  if (/[?&]debug=1/.test(window.location.search)) document.body.classList.add('sz-debug');
   // /drive/build-info.js only exists on the PWA origin. Inside Kiwix the
   // viewer loads from zim:// (or content://), so the fetch would 404 and
   // log noise to the console. Hide the widget entirely off-PWA.
@@ -806,9 +912,9 @@
      rather than reading a local file (docs/online-preview.md). Inside
      Kiwix there is no such worker to ask, so it never appears there. -->
 <div id="preview-banner" hidden>
-  <span>Online preview of <b id="preview-banner-name"></b>, streamed from
+  <span>Online preview of <b id="preview-banner-name"></b><span class="long">, streamed from
     <span id="preview-banner-host"></span> &mdash; the downloaded file is
-    faster and works offline.</span>
+    faster and works offline</span>.<span id="preview-banner-bytes"></span><span id="preview-banner-note"></span></span>
   <a class="dl" id="preview-banner-download" href="#" rel="noopener">Download</a>
   <button id="preview-banner-close" type="button" title="Hide" aria-label="Hide">&times;</button>
 </div>
@@ -818,15 +924,50 @@
   if (!banner) return;
   if (!/^\/drive\/viewer\/?(index\.html)?$/.test(location.pathname)) return;
   if (!('serviceWorker' in navigator)) return;
+  var bytesEl = document.getElementById('preview-banner-bytes');
+  var noteEl = document.getElementById('preview-banner-note');
+  var noteTimer = null;
   document.getElementById('preview-banner-close').addEventListener('click', function() {
     banner.hidden = true;
   });
+  function ask(target, msg) {
+    return new Promise(function(resolve) {
+      var ch = new MessageChannel();
+      var t = setTimeout(function() { resolve(null); }, 8000);
+      ch.port1.onmessage = function(e) { clearTimeout(t); resolve(e.data); };
+      try { target.postMessage(msg, [ch.port2]); } catch (err) { clearTimeout(t); resolve(null); }
+    });
+  }
+  function fmtBytes(b) {
+    return b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' :
+           b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
+  }
+  // Running total of what the preview has pulled over the connection
+  // (docs/mobile-browser-review.md §A5) — the worker counts the bytes.
+  function showBytes(r) {
+    var b = r && r.stats && r.stats.bytes;
+    bytesEl.textContent = b > 0 ? ' \u00b7 ' + fmtBytes(b) + ' streamed so far' : '';
+  }
+  // The worker tells every open page when the streamed source stops
+  // answering (archive.org 5xx, the proxy's daily quota, no network),
+  // which otherwise shows only as tiles not arriving.
+  navigator.serviceWorker.addEventListener('message', function(e) {
+    var d = e.data;
+    if (!d || d.type !== 'streetzim-upstream' || banner.hidden) return;
+    var st = d.status;
+    noteEl.textContent = st === 429
+      ? ' The preview is over its daily limit \u2014 try again later, or download the map.'
+      : d.permanent ? ' The source no longer has this file (HTTP ' + st + ') \u2014 pick or stream it again.'
+      : st ? ' The source answered HTTP ' + st + ' \u2014 retrying.'
+           : ' No connection to the source \u2014 retrying.';
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(function() { noteEl.textContent = ''; }, 45000);
+  });
+  if (navigator.serviceWorker.startMessages) navigator.serviceWorker.startMessages();
   navigator.serviceWorker.ready.then(function(reg) {
     var target = navigator.serviceWorker.controller || reg.active;
     if (!target) return;
-    var ch = new MessageChannel();
-    ch.port1.onmessage = function(e) {
-      var r = e.data;
+    ask(target, { type: 'status' }).then(function(r) {
       if (!r || !r.ok || r.source !== 'url' || !r.url) return;
       var host = 'the web';
       try { host = new URL(r.url).host; } catch (err) {}
@@ -838,9 +979,26 @@
       dl.textContent = 'Download' +
         (mb >= 1024 ? ' (' + (mb / 1024).toFixed(1) + ' GB)' :
          mb ? ' (' + Math.round(mb) + ' MB)' : '');
+      showBytes(r);
       banner.hidden = false;
-    };
-    target.postMessage({ type: 'status' }, [ch.port2]);
+      // Every 8 s while the page is visible: refresh the counter and, as
+      // a side effect, keep the worker from being idle-killed (WebKit
+      // ends one after 10 s without events; a cold restart costs a
+      // header read and cold lookups — docs/mobile-browser-review.md §B2).
+      var timer = null;
+      function tick() {
+        if (document.visibilityState !== 'visible') return;
+        var t = navigator.serviceWorker.controller || reg.active;
+        if (!t) return;
+        ask(t, { type: 'ping' }).then(function(pr) { if (pr && pr.ok) showBytes(pr); });
+      }
+      function arm() {
+        clearInterval(timer);
+        timer = document.visibilityState === 'visible' ? setInterval(tick, 8000) : null;
+      }
+      document.addEventListener('visibilitychange', arm);
+      arm();
+    });
   }).catch(function() {});
 })();
 </script>
@@ -866,7 +1024,8 @@
     <div class="routing-field-row">
       <div class="routing-dot origin"></div>
       <input type="text" class="routing-input" id="routing-origin-input"
-             placeholder="Start — type an address or place" autocomplete="off">
+             placeholder="Start — type an address or place" autocomplete="off"
+             autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
       <button class="routing-icon-btn" id="routing-gps-btn" title="Use current location">&#x25CE;</button>
     </div>
     <div class="routing-results" id="routing-origin-results"></div>
@@ -875,7 +1034,8 @@
     <div class="routing-field-row">
       <div class="routing-dot dest"></div>
       <input type="text" class="routing-input" id="routing-dest-input"
-             placeholder="Destination — type an address or place" autocomplete="off">
+             placeholder="Destination — type an address or place" autocomplete="off"
+             autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
     </div>
     <div class="routing-results" id="routing-dest-results"></div>
   </div>
@@ -938,7 +1098,8 @@
   <div id="wiki-panel-list"></div>
 </div>
 <div id="search-container">
-  <input id="search-input" type="text" placeholder="Search places, streets, POIs..." autocomplete="off">
+  <input id="search-input" type="text" placeholder="Search places, streets, POIs..." autocomplete="off"
+         autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
   <button id="search-clear" title="Clear">&times;</button>
   <div id="search-results"></div>
   <!-- On-map Find UI: tapping a chip fetches its category-index
@@ -1154,6 +1315,11 @@ function setViewportVars() {
     // were unreachable on an iPhone). visualViewport is what is really
     // visible; size the app to it and push bottom sheets up by the gap.
     var vv = window.visualViewport;
+    // A pinch-zoom (iOS ignores user-scalable=no) shrinks the visual
+    // viewport without changing what the layout has to fit; leave the
+    // variables alone rather than squeeze --app-height to the zoomed
+    // area (docs/mobile-browser-review.md §B5).
+    if (vv && vv.scale && Math.abs(vv.scale - 1) > 0.01) return;
     var visible = (vv && vv.height) ? vv.height : window.innerHeight;
     var inset = Math.max(0, de.clientHeight - window.innerHeight);
     if (vv && vv.height) {
@@ -1253,6 +1419,7 @@ dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAg
           if (!r.ok) {
             var e = new Error('HTTP ' + r.status + ' ' + r.statusText);
             e.status = r.status;
+            e.upstream = !!r.headers.get('X-Streetzim-Upstream');
             throw e;
           }
           return r.arrayBuffer();
@@ -1268,9 +1435,18 @@ dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAg
           // MapLibre's parent-tile fallback, stalling every pan at z13+
           // on regions whose satellite stops at z12.
           if (err && err.status === 404) throw err;
-          if (n < 4 && !signal.aborted) {
+          // The PWA's worker has already retried the streamed source for
+          // ~8 s when it answers 503 with X-Streetzim-Upstream (and a 503
+          // without it means no ZIM at all); more attempts here would
+          // hold a fetch slot for most of a minute per tile.
+          if (err && (err.upstream || err.status === 503 || err.status === 502)) throw err;
+          // Otherwise (a dropped request, a transient 5xx) back off for
+          // ~7.5 s in all — long enough to come out of a tunnel
+          // (docs/mobile-browser-review.md §A5).
+          if (n < 5 && !signal.aborted) {
             return new Promise(function(resolve) {
-              setTimeout(function() { resolve(attempt(n + 1)); }, 400 * n);
+              setTimeout(function() { resolve(attempt(n + 1)); },
+                         500 * Math.pow(2, n - 1) + Math.random() * 300);
             });
           }
           throw err;
@@ -1307,12 +1483,24 @@ function fetchConfig(n) {
   return fetch(url)
     .then(function(r) {
       dbg('map-config.json response', r.status, r.statusText, 'type=' + r.type);
-      if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + r.statusText);
+      if (!r.ok) {
+        var e = new Error('HTTP ' + r.status + ' ' + r.statusText);
+        e.status = r.status;
+        // Set by the PWA's service worker when the streamed source, not
+        // the ZIM, failed (docs/online-preview.md).
+        e.upstream = r.headers.get('X-Streetzim-Upstream');
+        throw e;
+      }
       return r.json();
     })
     .catch(function(err) {
       dbg('map-config.json fetch failed', 'attempt', n, describeError(err));
-      if (n < 4) {
+      // 404 (no ZIM), 500 (a ZIM that does not open) and the worker's
+      // "No ZIM loaded" 503 are definitive; only network hiccups and the
+      // upstream 503 (already retried for ~8 s by the worker) get more.
+      var definitive = err && (err.status === 404 || err.status === 500 || err.status === 502 ||
+                               (err.status === 503 && !err.upstream));
+      if (n < 4 && !definitive) {
         return new Promise(function(resolve) {
           setTimeout(function() { resolve(fetchConfig(n + 1)); }, 400 * n);
         });
@@ -1678,6 +1866,19 @@ fetchConfig(1)
     if (config.buildDate) {
       document.querySelector('#info p').textContent = 'Map data: ' + config.buildDate;
     }
+    // PWA only: a way back to the picker from an installed app, whose
+    // standalone launch skips it (docs/mobile-browser-review.md §B5).
+    if (/^\/drive\/viewer\/?/.test(location.pathname)) {
+      var infoP = document.querySelector('#info p');
+      if (infoP) {
+        infoP.appendChild(document.createTextNode(' \u00b7 '));
+        var changeLink = document.createElement('a');
+        changeLink.href = '/drive/?picker=1';
+        changeLink.textContent = 'Change map';
+        changeLink.className = 'sz-change';
+        infoP.appendChild(changeLink);
+      }
+    }
 
     // URL-fragment routing. Supports three independent fragments
     // that can mix (`#dest=…&label=…`, `#map=…&dest=…`, …):
@@ -1810,6 +2011,43 @@ fetchConfig(1)
     // a constrained category browse. Now mostly redundant with the
     // chip rail above; kept as the entry-point for full-list view.
     initExplore(map);
+
+    // MapLibre does not retry a tile that errored until its source
+    // reloads, so a tunnel left holes until the next pan. Point every
+    // tiled source at its own URLs again, which reloads it: when the
+    // connection comes back, and — the connection never went away for
+    // an archive.org 5xx or the proxy's quota — ~30 s after the worker
+    // reports the streamed source failing (its Retry-After), once per
+    // outage (docs/mobile-browser-review.md §A5).
+    function reloadTileSources() {
+      try {
+        var style = map.getStyle();
+        var sources = (style && style.sources) || {};
+        Object.keys(sources).forEach(function(id) {
+          var src = map.getSource(id);
+          var def = sources[id];
+          if (src && def && Array.isArray(def.tiles) && typeof src.setTiles === 'function') {
+            src.setTiles(def.tiles.slice());
+          }
+        });
+      } catch (e) { dbg('tile source reload failed', describeError(e)); }
+    }
+    window.addEventListener('online', function() { upstreamReloadDelay = 30000; reloadTileSources(); });
+    var upstreamReload = null, upstreamReloadDelay = 30000;
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', function(e) {
+        var d = e.data;
+        // Not for a permanent failure, nor the proxy's daily 429 (that
+        // would just poll it); the wait doubles per notice, to 5 min.
+        if (!d || d.type !== 'streetzim-upstream' || d.permanent || d.status === 429 || upstreamReload) return;
+        upstreamReload = setTimeout(function() { upstreamReload = null; reloadTileSources(); }, upstreamReloadDelay);
+        upstreamReloadDelay = Math.min(upstreamReloadDelay * 2, 300000);
+      });
+      // Without this (or an onmessage assignment) the spec leaves the
+      // client's message queue closed; Chromium opens it on
+      // addEventListener, WebKit is not promised to.
+      if (navigator.serviceWorker.startMessages) navigator.serviceWorker.startMessages();
+    }
   })
   .catch(function(err) {
     dbg('fatal error loading map', describeError(err), err && err.stack);
@@ -1819,15 +2057,37 @@ fetchConfig(1)
     // dumping a stack trace they can't act on. (Kiwix Desktop and
     // other ZIM-baked hosts always have map-config.json present, so
     // this only triggers in the PWA case.)
-    var msg = describeError(err) || '';
     var isPwaPath = /\/drive\/viewer\/?(\?|#|$)/.test(location.pathname + location.search);
-    var isMissingConfig = msg.indexOf('HTTP 404') >= 0
-      && (err && err._url && err._url.indexOf('map-config.json') >= 0);
-    if (isPwaPath && isMissingConfig) {
-      try { sessionStorage.setItem('streetzim_redirect_reason', 'no-zim'); }
+    var isConfig = !!(err && err._url && err._url.indexOf('map-config.json') >= 0);
+    var status = err && err.status;
+    // 404: no ZIM loaded. 503 without the upstream header: the worker has
+    // no ZIM either ("No ZIM loaded"). 500: the ZIM it has does not open
+    // (a moved file, a corrupt pick). All three are the picker's to sort
+    // out — it explains and offers Remove. A 503 *with* the header is the
+    // streamed source failing, which a retry can fix: say so instead.
+    var isNoZim = isConfig && (status === 404 || status === 500 ||
+                               (status === 503 && !err.upstream));
+    if (isPwaPath && isNoZim) {
+      try { sessionStorage.setItem('streetzim_redirect_reason', status === 500 ? 'zim-error' : 'no-zim'); }
       catch (e) {}
-      var pickerUrl = location.pathname.replace(/viewer\/?$/, '');
+      // ?picker=1: an installed app's picker otherwise forwards straight
+      // back here when it believes a ZIM is loaded.
+      var pickerUrl = location.pathname.replace(/viewer\/?$/, '') + '?picker=1';
       location.replace(pickerUrl);
+      return;
+    }
+    if (isPwaPath && isConfig && err.upstream) {
+      showFatalError(status === 502 ? 'The map source no longer has this file'
+                                    : 'The map source is not answering', err, err._url);
+      var infoEl = document.getElementById('info');
+      if (infoEl) {
+        var retry = document.createElement('p');
+        retry.className = 'sz-recover';
+        retry.innerHTML = '<a href="#">Try again</a> &middot; ' +
+                          '<a href="/drive/?picker=1">Change map</a>';
+        retry.firstChild.addEventListener('click', function(ev) { ev.preventDefault(); location.reload(); });
+        infoEl.appendChild(retry);
+      }
       return;
     }
     showFatalError('Error loading map', err, err && err._url);
@@ -2800,7 +3060,7 @@ function _showSearchAreaPill(map) {
   btn.type = 'button';
   btn.textContent = 'Search this area';
   btn.style.cssText = (
-    'position:fixed; left:50%; top:14px; transform:translateX(-50%);'
+    'position:fixed; left:50%; top:calc(14px + env(safe-area-inset-top, 0px)); transform:translateX(-50%);'
     + 'z-index:1600; padding:9px 18px;'
     + 'background:rgba(255,255,255,0.92); color:#222;'
     + 'border:1px solid rgba(0,0,0,0.12); border-radius:999px;'
@@ -2889,7 +3149,7 @@ function _searchAreaApply(map) {
     _hideSearchAreaPill();
     var btn = document.createElement('div');
     btn.style.cssText = (
-      'position:fixed; left:50%; top:14px; transform:translateX(-50%);'
+      'position:fixed; left:50%; top:calc(14px + env(safe-area-inset-top, 0px)); transform:translateX(-50%);'
       + 'z-index:1600; padding:9px 18px;'
       + 'background:rgba(255,255,255,0.95); color:#a33;'
       + 'border:1px solid rgba(170,50,50,0.25); border-radius:999px;'
@@ -3761,8 +4021,16 @@ function _findFetchCatManifest() {
     .catch(function() { _findCatManifest = {}; return {}; });
 }
 
+// Whole-chip arrays (pre-geo-shard ZIMs) run to 100 MB+ each; keeping
+// every chip tapped in a session added up on a phone. Keep the last few.
+var _FIND_CHIP_CACHE_MAX = (navigator.deviceMemory && navigator.deviceMemory <= 2) ? 1 : 3;
 function _findFetchChipData(chipId) {
-  if (_findChipCache.has(chipId)) return _findChipCache.get(chipId);
+  if (_findChipCache.has(chipId)) {
+    var hit = _findChipCache.get(chipId);
+    _findChipCache.delete(chipId);        // refresh recency
+    _findChipCache.set(chipId, hit);
+    return hit;
+  }
   var p = _findFetchCatManifest().then(function(m) {
     var meta = (m.chips && m.chips[chipId]) || {};
     var subs = Array.isArray(meta.sub_chunks) ? meta.sub_chunks : null;
@@ -3790,6 +4058,11 @@ function _findFetchChipData(chipId) {
       });
   });
   _findChipCache.set(chipId, p);
+  // A failed load must not occupy a slot.
+  p.catch(function() { if (_findChipCache.get(chipId) === p) _findChipCache.delete(chipId); });
+  while (_findChipCache.size > _FIND_CHIP_CACHE_MAX) {
+    _findChipCache.delete(_findChipCache.keys().next().value);
+  }
   return p;
 }
 
@@ -3817,7 +4090,7 @@ function _showFindToast(text, opts) {
   opts = opts || {};
   var d = document.createElement('div');
   d.style.cssText = (
-    'position:fixed; left:50%; top:14px; transform:translateX(-50%);'
+    'position:fixed; left:50%; top:calc(14px + env(safe-area-inset-top, 0px)); transform:translateX(-50%);'
     + 'z-index:1600; padding:9px 18px;'
     + 'background:rgba(255,255,255,0.95);'
     + 'color:' + (opts.color || '#a33') + ';'
@@ -4697,7 +4970,22 @@ function initSearch(map) {
   var activeIdx = -1;
 
   var manifest = null;       // {total: N, chunks: {prefix: count, ...}}
-  var chunkCache = {};       // prefix -> array of entries (LRU-ish)
+  var chunkCache = {};       // prefix -> array of entries
+  var chunkCacheBytes = {};  // prefix -> approximate bytes held
+  var chunkCacheOrder = [];  // prefixes, least recently used first
+  var chunkCacheTotal = 0;
+  function touchChunk(prefix) {
+    var i = chunkCacheOrder.indexOf(prefix);
+    if (i >= 0) chunkCacheOrder.splice(i, 1);
+    chunkCacheOrder.push(prefix);
+  }
+  // Parsed chunks stay referenced here after the streaming filter is done
+  // with them, so this cache — not the filter — set the page's peak: 20
+  // chunks of 15 MB JSON on Japan was ~300 MB of live objects, the range
+  // that gets a WebView killed on a phone. Bound it by bytes instead
+  // (the SW / kiwix-serve send Content-Length; else estimate from the
+  // record count), smaller where the device reports ≤ 2 GB.
+  var CHUNK_CACHE_BUDGET = ((navigator.deviceMemory && navigator.deviceMemory <= 2) ? 12 : 32) * 1024 * 1024;
   var pendingFetches = {};   // prefix -> Promise
 
   // Load manifest
@@ -4714,21 +5002,36 @@ function initSearch(map) {
 
   // Fetch a chunk by prefix, with caching
   function fetchChunk(prefix) {
-    if (chunkCache[prefix]) return Promise.resolve(chunkCache[prefix]);
+    if (chunkCache[prefix]) { touchChunk(prefix); return Promise.resolve(chunkCache[prefix]); }
     if (pendingFetches[prefix]) return pendingFetches[prefix];
 
     var p = fetch(baseUrl + 'search-data/' + encodeURIComponent(prefix) + '.json')
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
+        var len = parseInt(r.headers.get('Content-Length') || '0', 10) || 0;
+        return r.json().then(function(data) { return { data: data, bytes: len }; });
       })
-      .then(function(data) {
-        chunkCache[prefix] = data;
+      .then(function(o) {
+        var data = o.data;
+        // Parsed JSON weighs a few times its text; ~160 B per record when
+        // the length is unknown.
+        var bytes = o.bytes ? o.bytes * 3 : (Array.isArray(data) ? data.length * 160 : 0);
         delete pendingFetches[prefix];
-        // Evict old cache entries if too many (keep ~20 chunks in memory)
-        var keys = Object.keys(chunkCache);
-        while (keys.length > 20) {
-          delete chunkCache[keys.shift()];
+        // Always keep the newest chunk, even one over the whole budget: a
+        // hot 15 MB chunk takes seconds to parse on a phone and the next
+        // keystroke needs it again. Everything else goes, least recently
+        // used first, until under budget. (Object.keys() would list
+        // digit prefixes like "12" first whatever their age — hence the
+        // explicit order.)
+        chunkCacheTotal += bytes - (chunkCacheBytes[prefix] || 0);
+        chunkCache[prefix] = data;
+        chunkCacheBytes[prefix] = bytes;
+        touchChunk(prefix);
+        while (chunkCacheOrder.length > 1 && chunkCacheTotal > CHUNK_CACHE_BUDGET) {
+          var k = chunkCacheOrder.shift();
+          chunkCacheTotal -= chunkCacheBytes[k] || 0;
+          delete chunkCache[k];
+          delete chunkCacheBytes[k];
         }
         return data;
       })
@@ -7291,12 +7594,13 @@ function initRouting(map, config) {
         }
         var idx = parseRoutingCellsIndex(o.buf);
         // Kick off the worker init NOW, in parallel with the main
-        // thread's loadNodeShards. The worker re-fetches its own
-        // copy of cells-index + node shards (SW range-cache absorbs
-        // duplicate reads), so its init runs concurrently with the
-        // main thread's. On the user's first route this halves the
-        // cold-start wall time (worker would previously start AFTER
-        // the main thread finished assembling SpatialGraph).
+        // thread's loadNodeShards, and let it take a copy of the index
+        // buffer to transfer (it used to fetch its own: the same
+        // 150 MB on Japan through the service worker a second time).
+        // Only a reference is kept here: the copy is made at hand-off,
+        // so a platform without a worker (Kiwix's WKWebView) never holds
+        // two. The main thread keeps `o.buf` — v1 indexes view into it.
+        __routingCellsIndexForWorker = o.buf;
         try { initRoutingWorker(); } catch (e) {
           console.warn('[streetzim] routing worker init skipped:', e);
         }
@@ -8059,6 +8363,7 @@ function initRouting(map, config) {
   // the worker fails to come up (e.g. host CSP, ZIM-baked viewer
   // pre-dating routing-worker.js, etc.). cf. project_routing_perf_canada.md.
   var __routingWorker = null;
+  var __routingCellsIndexForWorker = null;  // ArrayBuffer copy handed to the worker on init
   var __routingWorkerReady = null;       // Promise<boolean> | null
   var __routingWorkerSeq = 0;
   var __routingWorkerInflight = new Map();
@@ -8077,6 +8382,7 @@ function initRouting(map, config) {
   function initRoutingWorker() {
     if (__routingWorkerReady) return __routingWorkerReady;
     if (typeof Worker !== 'function') {
+      __routingCellsIndexForWorker = null;
       __routingWorkerReady = Promise.resolve(false);
       return __routingWorkerReady;
     }
@@ -8105,6 +8411,7 @@ function initRouting(map, config) {
       })
       .catch(function(err) {
         console.warn('[streetzim] routing worker init failed:', err);
+        __routingCellsIndexForWorker = null;
         if (__routingWorker) {
           try { __routingWorker.terminate(); } catch (e) {}
           __routingWorker = null;
@@ -8173,7 +8480,17 @@ function initRouting(map, config) {
       } catch (e) {
         workerBaseUrl = baseUrl;
       }
-      __routingWorker.postMessage({ cmd: 'init', baseUrl: workerBaseUrl });
+      // Hand the worker the cells index the main thread already fetched
+      // (a copy, transferred) instead of letting it fetch its own —
+      // 150 MB on Japan through the service worker, twice, at startup.
+      var idxBuf = null;
+      try { if (__routingCellsIndexForWorker) idxBuf = __routingCellsIndexForWorker.slice(0); } catch (e) {}
+      __routingCellsIndexForWorker = null;
+      if (idxBuf) {
+        __routingWorker.postMessage({ cmd: 'init', baseUrl: workerBaseUrl, cellsIndex: idxBuf }, [idxBuf]);
+      } else {
+        __routingWorker.postMessage({ cmd: 'init', baseUrl: workerBaseUrl });
+      }
     });
   }
 
@@ -9335,8 +9652,38 @@ function initRouting(map, config) {
       // the follow-camera's zoom + pitch to whatever the driver chose,
       // so we don't snap back on every position tick. Reset via the
       // HUD "recenter" button or on drive-mode exit.
-      userPerspective: false
+      userPerspective: false,
+      wakeLock: null       // Screen Wake Lock sentinel while navigating
     };
+
+    // Screen Wake Lock: a phone that locks mid-navigation stops the GPS
+    // watch and the turn prompts (docs/mobile-browser-review.md §B5). The
+    // OS releases the lock whenever the page is hidden, so it is asked
+    // for again on return. Browsers without the API just do nothing.
+    function acquireWakeLock() {
+      if (!navigator.wakeLock || !navigator.wakeLock.request) return;
+      if (state.wakeLock || document.visibilityState !== 'visible') return;
+      navigator.wakeLock.request('screen').then(function(lock) {
+        // Exited while the request was pending, or a second request
+        // resolved after the first (enter → exit → enter): drop this one.
+        if (!state.active || state.wakeLock) {
+          try { lock.release().catch(function() {}); } catch (e) {}
+          return;
+        }
+        state.wakeLock = lock;
+        lock.addEventListener('release', function() {
+          if (state.wakeLock === lock) state.wakeLock = null;
+        });
+      }).catch(function(err) { dbg('wake lock refused', describeError(err)); });
+    }
+    function releaseWakeLock() {
+      var lock = state.wakeLock;
+      state.wakeLock = null;
+      if (lock) { try { lock.release().catch(function() {}); } catch (e) {} }
+    }
+    document.addEventListener('visibilitychange', function() {
+      if (state.active && document.visibilityState === 'visible') acquireWakeLock();
+    });
 
     // Fullscreen behavior depends on context:
     //   • Desktop / Android Chrome: real Fullscreen API hides browser
@@ -9707,6 +10054,7 @@ function initRouting(map, config) {
         state.mode = MODE_PRESETS[mode] ? mode : 'drive';
         state.active = true;
         state.route = lastRoute;
+        acquireWakeLock();
         state.savedCam = {
           center: map.getCenter(),
           zoom: map.getZoom(),
@@ -9766,6 +10114,7 @@ function initRouting(map, config) {
       exit: function() {
         if (!state.active) return;
         state.active = false;
+        releaseWakeLock();
         if (state.watchId != null) {
           try { navigator.geolocation.clearWatch(state.watchId); } catch (e) {}
           state.watchId = null;

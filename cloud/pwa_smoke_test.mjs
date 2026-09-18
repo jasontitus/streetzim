@@ -285,9 +285,15 @@ async function main() {
     // the 09-18 output), and validate_zim only warns about missing tile
     // zooms. Report them; never fail a region on them.
     const isTile = /\/tiles\/\d+\/\d+\/\d+\.pbf(\?|$)/.test(u);
+    // /drive/wiki-qid-titles.json is generated at deploy time and served
+    // by Firebase; a local copy of web/drive has no such file and the
+    // viewer treats its absence as "no titles" (cloud/preview_smoke_test
+    // lists it as optional for the same reason).
+    const isOptional = /\/drive\/wiki-qid-titles\.json(\?|$)/.test(u);
     console.log('  ! 404 [' + currentStep + ']' + (ours ? '' : ' (off-origin)')
-                + (isTile ? ' (missing tile, not fatal)' : '') + ':', u);
-    if (ours && !isTile) network404s.push(currentStep + ': 404 ' + u);
+                + (isTile ? ' (missing tile, not fatal)' : '')
+                + (isOptional ? ' (optional, deploy-generated)' : '') + ':', u);
+    if (ours && !isTile && !isOptional) network404s.push(currentStep + ': 404 ' + u);
   });
   page.on('requestfailed', req => {
     const u = req.url();
@@ -374,6 +380,19 @@ async function main() {
     pass('viewer streetzimRouting API ready');
   } catch (e) {
     fail('viewer streetzimRouting API ready', e.message);
+  }
+  // The online-preview banner is for ZIMs streamed off the web only. A
+  // locally picked file (this test) must never show it — nor does a ZIM
+  // opened in Kiwix, where the path and the missing service worker keep
+  // it hidden — so the "downloaded file is faster" pitch never appears
+  // to someone who already has the file.
+  {
+    const bannerShown = await page.evaluate(() => {
+      const b = document.getElementById('preview-banner');
+      return !!b && !b.hidden;
+    });
+    if (bannerShown) fail('preview banner hidden for a local file', 'banner is visible');
+    else pass('preview banner hidden for a local file');
   }
 
   // 3. Top-bar search.

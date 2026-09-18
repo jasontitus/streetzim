@@ -7,6 +7,27 @@
 <!-- See viewer/index.html — same favicon hack to keep the browser
      from auto-probing /favicon.ico (outside SW scope = 404). -->
 <link rel="icon" href="data:image/x-icon;base64,AAABAAEAAQEAAAEAIAAwAAAAFgAAACgAAAABAAAAAgAAAAEAIAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA">
+<script>
+// PWA identity on the /drive/ origin only: the manifest and the Apple
+// metas, so Add to Home Screen from this page installs the app rather
+// than bookmarking it (docs/mobile-browser-review.md §B5). Inside Kiwix
+// (zim://, content://, file://) nothing is added.
+(function() {
+  if (!/^\/drive\//.test(location.pathname)) return;
+  function add(tag, attrs) {
+    var el = document.createElement(tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    document.head.appendChild(el);
+  }
+  add('link', { rel: 'manifest', href: '/drive/manifest.webmanifest' });
+  add('link', { rel: 'apple-touch-icon', href: '/drive/icon-192.png' });
+  add('meta', { name: 'apple-mobile-web-app-capable', content: 'yes' });
+  add('meta', { name: 'mobile-web-app-capable', content: 'yes' });
+  add('meta', { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' });
+  add('meta', { name: 'apple-mobile-web-app-title', content: 'StreetZim' });
+  add('meta', { name: 'theme-color', content: '#0b1220' });
+})();
+</script>
 <style>
   :root {
     --bg:#fafafa; --fg:#1a1a1a; --muted:#666; --line:#e0e0e0;
@@ -62,7 +83,9 @@
   #near-input {
     width:100%; padding:8px 28px 8px 12px; border-radius:10px;
     border:1px solid var(--line); background:var(--card); color:var(--text);
-    font:inherit; font-size:0.95rem;
+    /* 16 px: iOS Safari zooms into any focused input below that on a
+       page that allows zooming (docs/mobile-browser-review.md §B5). */
+    font:inherit; font-size:1rem;
   }
   #near-input:focus { outline:2px solid var(--chip-on); outline-offset:-1px; }
   #near-clear {
@@ -350,7 +373,7 @@ const CATEGORIES = [
 
 const state = {
   manifests: { search: null, cat: null }, // small lookups
-  cache: { chunks: new Map(), cats: new Map() }, // path → array of records
+  cache: { chunks: new Map(), cats: new Map() }, // path → array of records (capped by cacheKeep)
   results: [],
   lastRecords: [],     // unsorted records from the last query — re-used by sort
   // Geo-sharded chip query info (CHIP_SHARDS.load result minus records):
@@ -836,7 +859,12 @@ function applyUrlParamsOnce() {
   try {
     const [s, c] = await Promise.all([
       fetchJSON(DATA + 'manifest.json'),
-      fetchJSON(CAT  + 'manifest.json').catch(() => null),
+      fetchJSON(CAT  + 'manifest.json').catch((e) => {
+        // Absent (404) means a ZIM built without it; anything else is a
+        // failed fetch, which must not read as "no such category".
+        if (!/HTTP 404/.test(e && e.message)) state.manifestCatFailed = true;
+        return null;
+      }),
     ]);
     state.manifests.search = s;
     state.manifests.cat = c; // may be null if the ZIM was built without it
@@ -1149,7 +1177,12 @@ async function runChipQuery(def) {
   try {
     const chipsMani = state.manifests.cat
                       && state.manifests.cat.chips;
-    if (chipsMani && chipsMani[def.id]) {
+    // A merged chip (Food & Drink over a pre-merge ZIM) has no manifest
+    // entry of its own — its backing files do. Testing chipsMani[def.id]
+    // alone sent every such ZIM to the category loader, which threw
+    // "category 'poi' not in the index" for a chip the ZIM serves fine.
+    const srcIds = chipSourcesFor(def.id);
+    if (chipsMani && srcIds.some(id => chipsMani[id])) {
       records = await loadChipFile(def.id);
     } else {
       records = await loadCategory(def.cat);
@@ -1171,6 +1204,13 @@ async function runChipQuery(def) {
     }
   } catch (e) {
     if (seq !== _querySeq) return;
+    if (e && e.code === 'no-category') {
+      // The ZIM has no data behind this chip (an older build without the
+      // category): an empty list and a plain sentence, not an error.
+      applyResults([]);
+      setStatus(`No ${def.label.toLowerCase()} in this map`);
+      return;
+    }
     setStatus(`Couldn't load ‘${def.label}’: ${e.message}`);
     return;
   }
@@ -1281,9 +1321,20 @@ function _resortCurrent() {
   }
 }
 
+// Whole-chip, chunk and category arrays can be 100 MB+ each on pre-shard
+// ZIMs; a Map that keeps every one tapped in a session is what got the
+// page killed on phones. Keep only the last few of each kind.
+const CACHE_KEEP = (navigator.deviceMemory && navigator.deviceMemory <= 2) ? 1 : 3;
+function cacheKeep(map, key, value) {
+  if (map.has(key)) map.delete(key);
+  map.set(key, value);
+  while (map.size > CACHE_KEEP) map.delete(map.keys().next().value);
+  return value;
+}
+
 async function loadChipFile(chipId) {
   if (state.cache.cats.has('chip:' + chipId)) {
-    return state.cache.cats.get('chip:' + chipId);
+    return cacheKeep(state.cache.cats, 'chip:' + chipId, state.cache.cats.get('chip:' + chipId));
   }
   // Sub-bucketed chips: the build emits chip-{id}-{NN}.json
   // when chip-{id}.json would exceed 10 MB (Japan restaurants
@@ -1307,8 +1358,7 @@ async function loadChipFile(chipId) {
     return fetchJSON(CAT + 'chip-' + sid + '.json').catch(() => []);
   }));
   const data = [].concat(...perSource);
-  state.cache.cats.set('chip:' + chipId, data);
-  return data;
+  return cacheKeep(state.cache.cats, 'chip:' + chipId, data);
 }
 
 async function runNameQuery(q) {
@@ -2235,33 +2285,38 @@ function expandPrefix(prefix) {
 }
 
 async function loadChunk(prefix) {
-  if (state.cache.chunks.has(prefix)) return state.cache.chunks.get(prefix);
+  if (state.cache.chunks.has(prefix)) {
+    return cacheKeep(state.cache.chunks, prefix, state.cache.chunks.get(prefix));
+  }
   const leaves = expandPrefix(prefix);
   if (leaves.length === 1 && leaves[0] === prefix) {
     const data = await fetchJSON(DATA + prefix + '.json');
-    state.cache.chunks.set(prefix, data);
-    return data;
+    return cacheKeep(state.cache.chunks, prefix, data);
   }
   if (leaves.length === 0) {
-    state.cache.chunks.set(prefix, []);
-    return [];
+    return cacheKeep(state.cache.chunks, prefix, []);
   }
   const blobs = await Promise.all(leaves.map(name =>
     fetchJSON(DATA + name + '.json').catch(() => [])));
   const merged = [].concat(...blobs);
-  state.cache.chunks.set(prefix, merged);
-  return merged;
+  return cacheKeep(state.cache.chunks, prefix, merged);
 }
 
 async function loadCategory(slug) {
-  if (state.cache.cats.has(slug)) return state.cache.cats.get(slug);
+  if (state.cache.cats.has(slug)) {
+    return cacheKeep(state.cache.cats, slug, state.cache.cats.get(slug));
+  }
+  if (!state.manifests.cat && state.manifestCatFailed) {
+    throw new Error('the category index could not be loaded');
+  }
   if (!state.manifests.cat || !state.manifests.cat.categories
       || !(slug in state.manifests.cat.categories)) {
-    throw new Error(`category ‘${slug}’ not in the index`);
+    const err = new Error(`category ‘${slug}’ not in the index`);
+    err.code = 'no-category';
+    throw err;
   }
   const data = await fetchJSON(CAT + slug + '.json');
-  state.cache.cats.set(slug, data);
-  return data;
+  return cacheKeep(state.cache.cats, slug, data);
 }
 
 async function fetchJSON(url) {

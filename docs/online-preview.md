@@ -263,6 +263,8 @@ URL.
 ```sh
 node tests/test_zim_http_source.mjs [some.zim]     # range source: synthetic ZIM + real one
 node tests/test_preview_proxy.mjs [some.zim]       # proxy handler against archive.org (network)
+node tests/test_sw_streaming.mjs                   # the worker's data path in Chromium (synthetic ZIM)
+node tests/test_picker.mjs                         # the picker's flows in Chromium
 python3 -m pytest tests/test_generate_preview_button.py
 ZIM_FILE=/path/osm-washington-dc-2026-09-08.zim CHROME_PATH=... SHOT_DIR=/tmp \
   H2=1 node cloud/preview_smoke_test.mjs all       # picker → viewer, both modes
@@ -295,6 +297,12 @@ next to `drive/`) needs no proxy at all.
   offline file. The banner says so and links the download.
 - Directions on a big region streams the routing cells it needs; expect
   tens of MB and long spinners for cross-country routes.
-- archive.org occasionally serves `5xx` under load; the source retries,
-  and a failed open shows on the picker as "Failed to open ZIM from
-  archive.org".
+- archive.org occasionally serves `5xx` under load; the source retries
+  five times over ~8 s. A failed open shows on the picker as "Failed to
+  open ZIM from archive.org"; once the viewer is up, a failing source
+  turns into a 503 with `X-Streetzim-Upstream` from the worker, a note
+  in the banner (including the proxy's 429 daily limit) and, if the map
+  itself cannot start, a "not answering" line with Try again.
+- Phones with Data Saver on are not auto-streamed from a catalog link;
+  the picker fills the URL in and waits for Stream. The banner counts
+  the bytes streamed so far.

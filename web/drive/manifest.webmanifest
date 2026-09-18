@@ -1,7 +1,7 @@
 {
   "name": "StreetZim Drive",
   "short_name": "SZ Drive",
-  "description": "Driving-mode test harness for StreetZim. Tap two points, then Drive.",
+  "description": "Offline OpenStreetMap maps: open a StreetZim .zim file, or preview one online.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

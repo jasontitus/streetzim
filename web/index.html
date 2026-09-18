@@ -143,7 +143,7 @@
 
   .maps {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
     gap: 14px;
     margin-top: 16px;
   }
@@ -356,6 +356,11 @@
   }
   footer a { color: var(--text-dim); }
 
+  /* Phones: card buttons and store badges tall enough to tap (44 px). */
+  @media (pointer: coarse) {
+    .btn { padding: 11px 14px; font-size: 13px; }
+    .badge { padding: 10px 14px; }
+  }
   @media (max-width: 600px) {
     h1 { font-size: 34px; }
     .tagline { font-size: 17px; }
