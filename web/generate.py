@@ -250,6 +250,13 @@ REGIONS = [
         "description": "Switzerland and the surrounding Alps &mdash; Z\u00fcrich, Geneva, Bern, Basel, Lausanne, Lucerne, Lugano, St. Moritz, Zermatt and the Matterhorn, Interlaken and the Jungfrau, plus Chamonix and Mont Blanc, Aosta, Lake Como, Liechtenstein, Lake Constance and western Tirol.",
     },
     {
+        "id": "switzerland-light",
+        "tier": "country",
+        "title": "Switzerland & the Alps (Light)",
+        "zim_file": "osm-switzerland-light.zim",
+        "description": "A smaller Switzerland for constrained devices and slow connections &mdash; same coverage and search as the full build, but without satellite imagery and with vector map detail capped one zoom level shallower (z13 instead of z14). 1.4 GB instead of 2.1 GB. Streets, places, addresses, routing, terrain and Wikipedia are unchanged; the map simply stops sharpening at building-footprint scale.",
+    },
+    {
         "id": "iceland",
         "tier": "country",
         "title": "Iceland",
