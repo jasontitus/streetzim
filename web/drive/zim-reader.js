@@ -626,7 +626,13 @@
         if (attempt) await new Promise((r) => setTimeout(r, 400 * attempt));
         let res;
         try {
-          res = await fetch(this.url, {
+          // The range goes in the header (what any file server needs)
+          // and, for the preview proxy, in the query string as well: a
+          // CDN in front of the proxy keys its cache on the URL, and
+          // Firebase Hosting is not documented to forward Range to a
+          // function. Static servers ignore the query.
+          const sep = this.url.indexOf('?') < 0 ? '?' : '&';
+          res = await fetch(this.url + sep + 'bytes=' + start + '-' + end, {
             headers: { Range: 'bytes=' + start + '-' + end },
             credentials: 'omit'
           });

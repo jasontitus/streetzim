@@ -61,10 +61,16 @@ export async function handleRequest(request) {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return reply(405, 'GET or HEAD only');
   }
-  const range = request.headers.get('Range');
+  // The range arrives as a Range header and, from the viewer, also as
+  // `?bytes=start-end`. The query form exists for proxies that sit behind
+  // a CDN: Firebase Hosting keys its cache on path + query and its docs
+  // do not promise to forward Range to a function, so the query is the
+  // form that survives and caches correctly. It wins when both are given.
+  const q = url.searchParams.get('bytes');
+  const range = (q && /^\d+-\d*$/.test(q)) ? 'bytes=' + q : request.headers.get('Range');
   if (request.method === 'GET' && !(range && RANGE_RE.test(range))) {
-    return reply(400, 'a single "Range: bytes=start-end" header is required; ' +
-      'for the whole file download it from archive.org directly');
+    return reply(400, 'a single byte range is required, as "Range: bytes=start-end" ' +
+      'or "?bytes=start-end"; for the whole file download it from archive.org directly');
   }
 
   const headers = new Headers();
@@ -89,10 +95,13 @@ export async function handleRequest(request) {
     if (value) out.set(name, value);
   }
   out.set('Accept-Ranges', 'bytes');
-  // Dated filenames never change content, so browsers may keep the
-  // aligned blocks the viewer asks for (its in-memory cache dies with
-  // the service worker). Errors are never cached.
-  out.set('Cache-Control', upstream.ok ? 'public, max-age=86400' : 'no-store');
+  // Dated filenames never change content, so browsers and CDNs may keep
+  // the aligned blocks the viewer asks for (its in-memory cache dies
+  // with the service worker). `Vary: Range` keeps a shared cache from
+  // handing one range's bytes to another when the range came only in
+  // the header; a ?bytes= query is already part of the cache key.
+  out.set('Cache-Control', upstream.ok ? 'public, max-age=86400, s-maxage=86400' : 'no-store');
+  out.set('Vary', 'Range');
 
   return new Response(request.method === 'HEAD' ? null : upstream.body, {
     status: upstream.status,

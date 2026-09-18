@@ -214,24 +214,37 @@ Everything visitors see already runs on streetzim.web.app: the picker,
 the service worker, the viewer banner and the catalog buttons are static
 files under `web/` deployed by the usual `firebase deploy`. The one
 piece Firebase Hosting cannot run is the proxy, because it has to execute
-code per request. Two ways to host it:
+code per request. Two ways to host it, and the bill is what separates
+them — the proxy's traffic *is* the visitors' data usage:
 
-- **Cloudflare Worker** (recommended): a separate `*.workers.dev`
-  hostname the visitor never sees, free at this scale, streams bodies
-  without size limits, and takes five minutes to deploy (above).
-- **Firebase Cloud Function behind a Hosting rewrite**, so the bytes
-  come from `streetzim.web.app/ia/<item>/<file>`: `preview-proxy/firebase/index.mjs`
-  is the 2nd-gen `onRequest` entry point wrapping the same handler, with
-  the `functions/` layout and the `firebase.json` rewrite in its header
-  comment. It needs the project on the Blaze plan, and Cloud Run bills
-  the outbound bytes (about $0.12/GB, i.e. cents per preview session,
-  dollars per thousand) where Workers bill nothing. It is not wired into
-  `firebase.json` by default so a plain `firebase deploy` keeps working
-  without a functions setup; the adapter shares its code with the Node
-  server the smoke test exercises, but has not itself been deployed.
+| | Cloudflare Worker | Firebase Function behind a Hosting rewrite |
+|---|---|---|
+| hostname | `streetzim-preview-proxy.<acct>.workers.dev` (visitors never see it) | `streetzim.web.app/ia/…` |
+| plan | free (100k requests/day; paid $5/month for 10 M) | Blaze (billing account) |
+| bytes served | **not billed** | Hosting data transfer $0.15/GB after 360 MB/day, plus function outbound $0.12/GB after 5 GB/month if the function→CDN leg counts as internet egress (not confirmed) |
+| 1,000 preview sessions at ~20 MB each | $0 | roughly $3–5 |
+| long transfers | streams without a size or wall-clock limit | Hosting cuts a request off at 60 s |
+| `Range` header reaching the code | yes | not documented; the `?bytes=` query form is what makes it work regardless |
 
-Either way the picker only needs the base URL in `preview-config.js`
-(`https://streetzim.web.app/ia` for the rewrite).
+**Cloudflare is the recommendation**; the step-by-step plan is
+[`preview-proxy-cloudflare.md`](preview-proxy-cloudflare.md).
+
+The Firebase route is packaged in `preview-proxy/firebase/`
+(`index.mjs`, a 2nd-gen `onRequest` wrapping the same handler, with its
+`package.json`; the `firebase.json` additions are in the file's header
+comment and are deliberately not applied, so a plain `firebase deploy
+--only hosting` keeps working without a functions setup). Its state:
+the function loads in the Firebase emulator and answers a ranged request
+correctly (206, CORS, `Content-Range`, cache headers) when called
+directly; the Hosting→function hop could not be exercised from the
+build sandbox, whose egress proxy the emulator's internal call insists
+on using, and nothing has been deployed to the real project. Because
+Firebase's docs do not promise to forward the `Range` header to a
+function, the viewer also sends the range as `?bytes=start-end` and the
+proxy prefers that form: Hosting forwards query strings and keys its CDN
+cache on them, so partial responses cache correctly there without
+`Vary` tricks. Either way the picker only needs the base URL in
+`preview-config.js` (`https://streetzim.web.app/ia` for the rewrite).
 
 ## Security
 
@@ -259,7 +272,12 @@ IA_ZIM=https://archive.org/download/streetzim-europe/osm-europe-2026-05-06.zim \
 
 `H2=1` runs the local proxy as HTTPS/HTTP-2 on a throw-away
 certificate, like a deployed worker; without it Chrome's six-connection
-limit per HTTP/1.1 host makes the timings pessimistic.
+limit per HTTP/1.1 host makes the timings pessimistic. Two more modes
+for a deployment: `PROXY_URL=https://<worker> node
+tests/test_preview_proxy.mjs` runs the proxy checks over the network
+against a deployed proxy, and `SITE_URL=https://streetzim.web.app node
+cloud/preview_smoke_test.mjs proxy` drives the live site's picker with
+whatever `preview-config.js` it serves.
 
 For hands-on local testing, serve `web/` with `scripts/serve-web-local.py`
 (it answers `Range`), run `node preview-proxy/serve-local.mjs 8766`, set

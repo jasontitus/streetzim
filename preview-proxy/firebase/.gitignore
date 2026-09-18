@@ -1,0 +1,5 @@
+# Copied in by the firebase.json predeploy hook (the deploy zips only this
+# directory, so the handler has to be inside it). Sources live one level up.
+ia-range-proxy.js
+node-adapter.mjs
+node_modules/

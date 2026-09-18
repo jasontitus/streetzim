@@ -4,7 +4,10 @@
 //
 // Needs network. With the ZIM on disk the proxied bytes are compared to
 // the file; without it only status/headers/lengths are checked. Override
-// the item/file with IA_ITEM / IA_FILE.
+// the item/file with IA_ITEM / IA_FILE. With PROXY_URL set (e.g.
+// https://streetzim-preview-proxy.<acct>.workers.dev, or
+// https://streetzim.web.app/ia) the same checks go over the network to
+// that deployed proxy instead of calling the handler in-process.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { handleRequest } from '../preview-proxy/ia-range-proxy.js';
@@ -12,9 +15,13 @@ import { handleRequest } from '../preview-proxy/ia-range-proxy.js';
 const ITEM = process.env.IA_ITEM || 'streetzim-washington-dc';
 const FILE = process.env.IA_FILE || 'osm-washington-dc-2026-09-08.zim';
 const LOCAL = process.argv[2] || process.env.ZIM_FILE || '';
-const BASE = 'https://proxy.example/';
+const PROXY_URL = (process.env.PROXY_URL || '').replace(/\/+$/, '');
+const BASE = PROXY_URL || 'https://proxy.example';
 
-const req = (p, init) => handleRequest(new Request(BASE.replace(/\/$/, '') + p, init));
+const req = (p, init) => PROXY_URL
+  ? fetch(BASE + p, { ...init, redirect: 'manual' })
+  : handleRequest(new Request(BASE + p, init));
+if (PROXY_URL) console.log('testing deployed proxy at ' + PROXY_URL);
 let failures = 0;
 const check = (name, fn) => Promise.resolve().then(fn).then(() => console.log('  [PASS] ' + name), (e) => { failures++; console.log('  [FAIL] ' + name + ' — ' + (e && e.stack || e)); });
 
@@ -45,6 +52,16 @@ await check('mid-file range', async () => {
     const fd = fs.openSync(LOCAL, 'r'); const want = Buffer.alloc(100); fs.readSync(fd, want, 0, 100, 1000000); fs.closeSync(fd);
     assert.ok(body.equals(want), 'bytes differ from the local file');
   }
+});
+
+await check('range in the query string (?bytes=) works and wins over the header', async () => {
+  const res = await req(`/${ITEM}/${FILE}?bytes=0-79`, { headers: { Range: 'bytes=0-1' } });
+  assert.equal(res.status, 206);
+  assert.match(res.headers.get('content-range'), /^bytes 0-79\//);
+  assert.equal((await res.arrayBuffer()).byteLength, 80);
+  assert.match(res.headers.get('cache-control'), /public/);
+  const bad = await req(`/${ITEM}/${FILE}?bytes=0-1,5-9`);
+  assert.equal(bad.status, 400);
 });
 
 await check('HEAD reports the size', async () => {

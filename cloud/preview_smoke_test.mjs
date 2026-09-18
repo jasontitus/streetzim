@@ -19,7 +19,11 @@
 //   CHROME_PATH=... SHOT_DIR=/tmp node cloud/preview_smoke_test.mjs [same-origin|proxy|all]
 //
 // ZIM_FILE is needed for same-origin, IA_ZIM (plus network) for proxy;
-// SHOT_DIR saves a screenshot of the rendered map per scenario. H2=1
+// SHOT_DIR saves a screenshot of the rendered map per scenario. With
+// SITE_URL set (e.g. https://streetzim.web.app, or the Firebase Hosting
+// emulator) no local servers are started: the picker at SITE_URL/drive/
+// is driven as deployed, with whatever preview-config.js it serves —
+// PROXY_BASE is then only reported. H2=1
 // runs the local proxy as HTTPS/HTTP-2 on a throw-away self-signed
 // certificate (needs openssl), which is what a deployed worker speaks
 // and what the viewer's parallel lookups are tuned for — over plain
@@ -49,6 +53,7 @@ const SITE_PORT = Number(process.env.SITE_PORT || 8765);
 const PROXY_PORT = Number(process.env.PROXY_PORT || 8766);
 const SHOT_DIR = process.env.SHOT_DIR || '';
 const H2 = process.env.H2 === '1';
+const SITE_URL = (process.env.SITE_URL || '').replace(/\/+$/, '');
 const which = process.argv[2] || 'all';
 
 // Optional files the viewer probes for and copes without: the Q-ID →
@@ -97,8 +102,9 @@ function writePreviewConfig(siteDir, proxyBase) {
 }
 
 async function runScenario(browser, siteDir, name, zimParam, proxyBase, expectSource) {
-  console.log('\n[' + name + '] ' + zimParam + (proxyBase ? '  via ' + proxyBase + (H2 ? ' (HTTP/2)' : ' (HTTP/1.1)') : ''));
-  writePreviewConfig(siteDir, proxyBase);
+  console.log('\n[' + name + '] ' + zimParam + (proxyBase ? '  via ' + proxyBase +
+    (SITE_URL ? '' : (H2 ? ' (HTTP/2)' : ' (HTTP/1.1)')) : ''));
+  if (!SITE_URL) writePreviewConfig(siteDir, proxyBase);
   // A fresh context = fresh service-worker registry, IndexedDB and HTTP
   // cache, so scenarios cannot leak into each other.
   const context = await browser.createBrowserContext();
@@ -135,7 +141,8 @@ async function runScenario(browser, siteDir, name, zimParam, proxyBase, expectSo
   });
 
   const t0 = Date.now();
-  const pickerUrl = 'http://127.0.0.1:' + SITE_PORT + '/drive/?zim=' + encodeURIComponent(zimParam);
+  const siteBase = SITE_URL || 'http://127.0.0.1:' + SITE_PORT;
+  const pickerUrl = siteBase + '/drive/?zim=' + encodeURIComponent(zimParam);
   try {
     await page.goto(pickerUrl, { waitUntil: 'domcontentloaded' });
     // The picker registers the SW, opens the ZIM header over HTTP and
@@ -257,27 +264,33 @@ async function runScenario(browser, siteDir, name, zimParam, proxyBase, expectSo
 
 async function main() {
   const siteDir = fs.mkdtempSync(path.join(os.tmpdir(), 'szpreview-'));
-  fs.cpSync(path.join(ROOT, 'web', 'drive'), path.join(siteDir, 'drive'), { recursive: true });
-  if (ZIM_FILE) fs.symlinkSync(path.resolve(ZIM_FILE), path.join(siteDir, path.basename(ZIM_FILE)));
-  writePreviewConfig(siteDir, '');
+  let site = null, proxy = null;
+  let proxyBase = process.env.PROXY_BASE || '';
+  if (!SITE_URL) {
+    fs.cpSync(path.join(ROOT, 'web', 'drive'), path.join(siteDir, 'drive'), { recursive: true });
+    if (ZIM_FILE) fs.symlinkSync(path.resolve(ZIM_FILE), path.join(siteDir, path.basename(ZIM_FILE)));
+    writePreviewConfig(siteDir, '');
 
-  const site = spawn('python3', [path.join(ROOT, 'scripts/serve-web-local.py'), String(SITE_PORT), siteDir],
-    { stdio: 'ignore' });
-  const proxyEnv = { ...process.env };
-  if (H2) {
-    const cert = path.join(siteDir, 'proxy-cert.pem'), key = path.join(siteDir, 'proxy-key.pem');
-    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key,
-      '-out', cert, '-days', '1', '-subj', '/CN=127.0.0.1',
-      '-addext', 'subjectAltName=IP:127.0.0.1'], { stdio: 'ignore' });
-    proxyEnv.H2_CERT = cert; proxyEnv.H2_KEY = key;
+    site = spawn('python3', [path.join(ROOT, 'scripts/serve-web-local.py'), String(SITE_PORT), siteDir],
+      { stdio: 'ignore' });
+    const proxyEnv = { ...process.env };
+    if (H2) {
+      const cert = path.join(siteDir, 'proxy-cert.pem'), key = path.join(siteDir, 'proxy-key.pem');
+      execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key,
+        '-out', cert, '-days', '1', '-subj', '/CN=127.0.0.1',
+        '-addext', 'subjectAltName=IP:127.0.0.1'], { stdio: 'ignore' });
+      proxyEnv.H2_CERT = cert; proxyEnv.H2_KEY = key;
+    }
+    proxy = spawn(process.execPath, [path.join(ROOT, 'preview-proxy/serve-local.mjs'), String(PROXY_PORT)],
+      { stdio: 'ignore', env: proxyEnv });
+    proxyBase = (H2 ? 'https' : 'http') + '://127.0.0.1:' + PROXY_PORT;
   }
-  const proxy = spawn(process.execPath, [path.join(ROOT, 'preview-proxy/serve-local.mjs'), String(PROXY_PORT)],
-    { stdio: 'ignore', env: proxyEnv });
-  const proxyBase = (H2 ? 'https' : 'http') + '://127.0.0.1:' + PROXY_PORT;
   let browser = null;
   try {
-    await waitForPort(SITE_PORT);
-    await waitForPort(PROXY_PORT);
+    if (!SITE_URL) {
+      await waitForPort(SITE_PORT);
+      await waitForPort(PROXY_PORT);
+    }
     browser = await puppeteer.launch({
       headless: !HEADFUL,
       executablePath: CHROME_PATH,
@@ -288,7 +301,8 @@ async function main() {
       protocolTimeout: 300_000,
     });
     if (which === 'all' || which === 'same-origin') {
-      if (!ZIM_FILE) fail('same-origin', 'ZIM_FILE not set');
+      if (SITE_URL) console.log('\n[same-origin] skipped: SITE_URL serves no local ZIM');
+      else if (!ZIM_FILE) fail('same-origin', 'ZIM_FILE not set');
       else {
         const local = 'http://127.0.0.1:' + SITE_PORT + '/' + path.basename(ZIM_FILE);
         await runScenario(browser, siteDir, 'same-origin', local, '', local);
@@ -301,7 +315,8 @@ async function main() {
     fail('harness', e && e.stack || String(e));
   } finally {
     if (browser) await browser.close().catch(() => {});
-    site.kill(); proxy.kill();
+    if (site) site.kill();
+    if (proxy) proxy.kill();
     fs.rmSync(siteDir, { recursive: true, force: true });
   }
   console.log('');

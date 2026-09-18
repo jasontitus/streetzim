@@ -263,7 +263,9 @@ stream a ZIM straight off archive.org, so a visitor can look at a region
 before downloading it: `/drive/?zim=<archive.org download URL>` (the
 catalog's Preview buttons). archive.org sends no CORS headers on ranged
 downloads, so streaming goes through a small range proxy that has to be
-deployed once — see [`docs/online-preview.md`](docs/online-preview.md).
+deployed once — a free Cloudflare Worker; the plan is in
+[`docs/preview-proxy-cloudflare.md`](docs/preview-proxy-cloudflare.md)
+and the design in [`docs/online-preview.md`](docs/online-preview.md).
 
 ### Using on iOS
 
