@@ -771,13 +771,16 @@
           throw new Error('HttpRangeSource: server ignores Range requests ' +
             '(200 for bytes=' + start + '-' + end + ') — refusing to stream the whole file');
         }
-        if (res.status >= 500 || res.status === 429) {
+        if (res.status >= 500) {
           lastErr = new Error('HTTP ' + res.status + ' from ' + this.url);
           lastErr.status = res.status;
           continue;
         }
         const err = new Error('HTTP ' + res.status + ' from ' + this.url);
         err.status = res.status;
+        // 429 is the proxy's daily quota: retrying would only hold a tile
+        // slot for ~9 s. It is upstream trouble all the same.
+        if (res.status === 429) err.upstream = true;
         throw err;
       }
       if (!lastErr) lastErr = new Error('HttpRangeSource: fetch failed');

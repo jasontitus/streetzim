@@ -93,7 +93,7 @@ async function idbPut(record) {
     const tx = db.transaction(DB_STORE, 'readwrite');
     tx.objectStore(DB_STORE).put(record);
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
+    tx.onerror = (e) => reject((e && e.target && e.target.error) || tx.error || new Error('IndexedDB write failed'));
   });
 }
 
@@ -128,6 +128,15 @@ async function openReader(rec) {
   const r = new self.StreetZimReader(source);
   await r.open();
   return r;
+}
+
+// Any valid ZIM opens (Wikipedia, an old build); only one with a
+// map-config.json is a map the viewer can show. Refusing here, before a
+// record is stored, beats a "ZIM loaded" card whose Open viewer bounces
+// straight back.
+async function requireMap(r, what) {
+  const cfg = await r.findEntry('map-config.json');
+  if (!cfg) throw new Error((what || 'this ZIM') + ' is not a StreetZim map (no map-config.json)');
 }
 
 async function getReader() {
@@ -235,6 +244,7 @@ self.addEventListener('message', (event) => {
                   name: msg.name || 'zim', addedAt: Date.now() };
         }
         const r = await openReader(rec);
+        await requireMap(r, rec.name);
         await idbPut(rec);
         readerPromise = Promise.resolve(r);
         reply.info = r.info;
@@ -246,6 +256,7 @@ self.addEventListener('message', (event) => {
         // minutes — which copying a multi-GB file on a phone exceeds.
         const r = new self.StreetZimReader(msg.blob);
         await r.open();
+        await requireMap(r, msg.name);
         reply.info = r.info;
       } else if (msg.type === 'reload-zim') {
         // The page put a new `current` record in IndexedDB.
@@ -263,6 +274,7 @@ self.addEventListener('message', (event) => {
         reply.loaded = !!r;
         reply.stats = (r && r.file && r.file.stats) ? r.file.stats : null;
         reply.cache = r ? r.cacheStats : null;
+        reply.sw = Object.assign({}, swStats);
       } else if (msg.type === 'clear-zim') {
         await idbDelete('current');
         resetReader();
@@ -293,6 +305,7 @@ self.addEventListener('message', (event) => {
         reply.sizeBytes = r ? r.size : null;
         reply.stats = (r && r.file && r.file.stats) ? r.file.stats : null;
         reply.cache = r ? r.cacheStats : null;
+        reply.sw = Object.assign({}, swStats);
       } else {
         reply = { ok: false, error: 'unknown message type' };
       }
@@ -423,35 +436,83 @@ function withBackToMap(data) {
 
 // Entries at least this big that sit in a raw (uncompressed) cluster are
 // streamed straight from the file or the network instead of being read
-// into the worker's memory first. Routing cells indexes run 5–212 MB and
-// v8/v9 routing chunks up to 100 MB; buffering one of those, twice (the
-// viewer's main thread and its routing worker both ask at startup), is
-// what emptied a phone's service-worker allowance.
+// into the worker's memory first. Which entries are raw is the builders'
+// call: cloud/repackage_zim.py and cloud/swap_viewer_rust.py store
+// routing-data/graph.bin and any routing item of 200 MB or more
+// uncompressed, and zstd-compress the rest — a compressed cluster has to
+// be decoded whole, so a 100 MB routing chunk still passes through
+// memory (once, and it is not cached). Lowering that builder threshold
+// to this one would let the streaming path carry every big routing item
+// (docs/mobile-browser-review.md, "What remains").
 const STREAM_MIN_BYTES = 4 * 1024 * 1024;
 
 // Reads of the same path in flight at once share one read: the cells
-// index (below the streaming threshold on small regions) is requested
-// by the main thread and the worker together.
+// index is requested by the main thread and the worker together on
+// older viewers.
 const inflightEntryReads = new Map();   // lookupPath → Promise<{mime, data, url}>
 
-// Tell open viewer pages once in a while that the streaming source is
-// failing (archive.org 5xx, the worker's daily quota, no network), so
-// the preview banner can say so instead of tiles silently not arriving.
-let lastUpstreamNotice = 0;
-async function notifyUpstreamTrouble(err) {
+// Counters the tests read through `status`/`ping` — the memory claims
+// ("streamed, not buffered"; "one read for concurrent requests") are
+// not observable from a page any other way.
+const swStats = { streamed: 0, dedupedReads: 0, notices: 0, lastNotice: null };
+
+// Tell open viewer pages that the streamed source is failing (archive.org
+// 5xx, the proxy's daily quota, no network — or, `permanent`, a 4xx that
+// no retry will fix), so the preview banner can say so instead of tiles
+// silently not arriving. One notice per status per 30 s.
+let lastUpstreamNotice = 0, lastUpstreamStatus = null;
+function notifyUpstreamTrouble(err, event) {
+  const status = (err && err.status) || 0;
   const now = Date.now();
-  if (now - lastUpstreamNotice < 30000) return;
+  if (status === lastUpstreamStatus && now - lastUpstreamNotice < 30000) return;
   lastUpstreamNotice = now;
-  try {
-    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const c of clients) {
-      c.postMessage({ type: 'streetzim-upstream', status: (err && err.status) || 0,
-                      message: String(err && err.message || err) });
-    }
-  } catch (e) {}
+  lastUpstreamStatus = status;
+  swStats.notices++;
+  swStats.lastNotice = status + ' ' + String(err && err.message || err).slice(0, 120);
+  const p = self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    .then((clients) => {
+      for (const c of clients) {
+        c.postMessage({ type: 'streetzim-upstream', status,
+                        permanent: !!(err && err.permanent),
+                        message: String(err && err.message || err) });
+      }
+    }).catch(() => {});
+  // Keep the worker alive until the notice is out; without this a worker
+  // with nothing else pending can be torn down first.
+  if (event) { try { event.waitUntil(p); } catch (e) {} }
 }
 
-async function streamRaw(reader, span, mime, request) {
+// A body that reports an origin dropping the connection mid-stream (the
+// page only sees a generic network error; the worker tells the banner)
+// and passes everything else through untouched.
+function watchedBody(upstream, event) {
+  let reader = null, cancelled = false;
+  return new ReadableStream({
+    start() { reader = upstream.getReader(); },
+    async pull(controller) {
+      let chunk;
+      try {
+        chunk = await reader.read();
+      } catch (err) {
+        // Only a failure of the upstream read is the origin's doing; a
+        // consumer that went away (HEAD probe, navigation) cancels
+        // instead and must not be reported.
+        if (cancelled) return;
+        const e = new Error('stream ended early: ' + String(err && err.message || err));
+        e.upstream = true;
+        notifyUpstreamTrouble(e, event);
+        try { controller.error(e); } catch (x) {}
+        return;
+      }
+      try {
+        if (chunk.done) controller.close(); else controller.enqueue(chunk.value);
+      } catch (x) { /* the consumer closed the stream first */ }
+    },
+    cancel(reason) { cancelled = true; try { reader.cancel(reason).catch(() => {}); } catch (e) {} }
+  });
+}
+
+async function streamRaw(reader, span, mime, request, event) {
   const total = span.length;
   let start = 0, end = total - 1, status = 200;
   const r = parseRange(request.headers.get('range'), total);
@@ -465,17 +526,24 @@ async function streamRaw(reader, span, mime, request) {
   };
   if (status === 206) headers['Content-Range'] = 'bytes ' + start + '-' + end + '/' + total;
   const src = reader.file;
+  // A corrupt offset table, or a file truncated on disk after the pick:
+  // Blob.slice would clamp silently and the declared Content-Length go
+  // unmet; the buffered path throws for the same case.
+  if (span.offset + span.length > src.size) {
+    throw new Error('ZimReader: blob ' + span.offset + '+' + span.length + ' past the end of the file (' + src.size + ')');
+  }
+  swStats.streamed++;
   if (src.remote) {
     // A verified 206 whose body has not been read: hand the stream on.
     const res = await src.openRange(span.offset + start, span.offset + end);
-    return new Response(res.body, { status, headers });
+    return new Response(watchedBody(res.body, event), { status, headers });
   }
   // A Blob body streams from disk as the page reads it; nothing is
   // materialised in the worker.
   return new Response(src.slice(span.offset + start, span.offset + end + 1), { status, headers });
 }
 
-async function serveFromZim(viewerPath, request) {
+async function serveFromZim(viewerPath, request, event) {
   try {
     const reader = await getReader();
     if (!reader) return noZim();
@@ -510,12 +578,14 @@ async function serveFromZim(viewerPath, request) {
       if (span && span.length >= STREAM_MIN_BYTES) {
         // `await`, not a bare `return`: a promise returned from inside
         // the try block would skip the catch below, and an origin outage
-        // mid-stream came back to the page as a network failure instead
-        // of the 503 + notice it is meant to get.
-        return await streamRaw(reader, span, entry.mime, request);
+        // while the range was being opened came back to the page as a
+        // network failure instead of the 503 + notice it is meant to
+        // get. (A drop after the headers is watchedBody's business.)
+        return await streamRaw(reader, span, entry.mime, request, event);
       }
     }
     let read = inflightEntryReads.get(lookupPath);
+    if (read) swStats.dedupedReads++;
     if (!read) {
       read = reader.readEntry(entry);
       inflightEntryReads.set(lookupPath, read);
@@ -534,9 +604,10 @@ async function serveFromZim(viewerPath, request) {
   } catch (err) {
     console.error('[sw] ZIM lookup failed for', viewerPath, err);
     const message = String(err && err.message || err);
-    if (err && (err.upstream || err.status)) {
-      // The streaming source, not the ZIM: say so and ask for a retry.
-      notifyUpstreamTrouble(err);
+    if (err && err.upstream) {
+      // The streamed source, not the ZIM, and it may come back (network,
+      // 5xx, the proxy's 429): say so and ask for a retry.
+      notifyUpstreamTrouble(err, event);
       return new Response('Upstream error: ' + message, {
         status: 503,
         headers: {
@@ -544,6 +615,17 @@ async function serveFromZim(viewerPath, request) {
           'Retry-After': '30',
           'X-Streetzim-Upstream': String(err.status || 'network')
         }
+      });
+    }
+    if (err && err.status) {
+      // A 4xx from the origin (the file was renamed or removed, the
+      // proxy refused the item): no retry will change it, so no
+      // Retry-After, and the notice says to pick the map again.
+      err.permanent = true;
+      notifyUpstreamTrouble(err, event);
+      return new Response('Upstream error: ' + message, {
+        status: 502,
+        headers: { 'Content-Type': 'text/plain', 'X-Streetzim-Upstream': String(err.status) }
       });
     }
     return new Response('ZIM error: ' + message, {
@@ -555,7 +637,9 @@ async function serveFromZim(viewerPath, request) {
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.method !== 'GET') return;
+  // HEAD is answered like GET without the body, so a probe of a ZIM path
+  // sees the entry's status and headers rather than the host's 404 page.
+  if (req.method !== 'GET' && req.method !== 'HEAD') return;
 
   const url = new URL(req.url);
 
@@ -618,7 +702,12 @@ self.addEventListener('fetch', (event) => {
       return;
     }
     // Data path — serve from ZIM.
-    event.respondWith(serveFromZim(rest, req));
+    event.respondWith(req.method === 'HEAD'
+      ? serveFromZim(rest, req, event).then((r) => {
+          if (r.body) { try { r.body.cancel(); } catch (e) {} }
+          return new Response(null, { status: r.status, statusText: r.statusText, headers: r.headers });
+        })
+      : serveFromZim(rest, req, event));
     return;
   }
 

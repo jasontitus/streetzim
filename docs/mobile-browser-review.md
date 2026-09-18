@@ -356,8 +356,12 @@ washington-dc fixture and the 11.3 GB east-coast-us 2026-09-16 file.
 - **§A2 — streaming.** `web/drive/sw.js` answers any entry of 4 MiB or
   more that sits in a raw cluster with a streamed body: `Blob.slice()`
   for a local file, the range request's own body for a streamed one,
-  with correct 200/206/416 handling. Nothing of that size is held in
-  the worker any more. Concurrent reads of one path share a read, and
+  with correct 200/206/416 handling, and a bounds check against the
+  file. Which entries are raw is decided at build time: today the
+  builders store `routing-data/graph.bin` and routing items of 200 MB
+  or more uncompressed and zstd-compress the rest, so a 100 MB routing
+  chunk is still decoded through memory (once, uncached; see "What
+  remains"). Concurrent reads of one path share a read, and
   the viewer hands the parsed routing cells index to its worker as a
   transferable instead of fetching it twice. Raw-cluster blobs are read
   on their own for local files too, so a small entry next to a 100 MB
@@ -425,3 +429,8 @@ washington-dc fixture and the 11.3 GB east-coast-us 2026-09-16 file.
 2. Persist the parsed header, MIME list and cluster pointer table with
    the record so a cold worker restart in Private Browsing (no HTTP
    cache) costs one request instead of a chain (§B2).
+3. Lower the builders' "store uncompressed" threshold for routing items
+   (`cloud/repackage_zim.py`, `cloud/swap_viewer_rust.py`: 200 MB) to
+   the worker's 4 MiB streaming threshold, so cells indexes and v8/v9
+   chunks of 5–199 MB are streamed instead of decoded whole. Costs
+   ZIM size (those items compress); a build-side decision.

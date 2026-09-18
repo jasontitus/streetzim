@@ -859,7 +859,12 @@ function applyUrlParamsOnce() {
   try {
     const [s, c] = await Promise.all([
       fetchJSON(DATA + 'manifest.json'),
-      fetchJSON(CAT  + 'manifest.json').catch(() => null),
+      fetchJSON(CAT  + 'manifest.json').catch((e) => {
+        // Absent (404) means a ZIM built without it; anything else is a
+        // failed fetch, which must not read as "no such category".
+        if (!/HTTP 404/.test(e && e.message)) state.manifestCatFailed = true;
+        return null;
+      }),
     ]);
     state.manifests.search = s;
     state.manifests.cat = c; // may be null if the ZIM was built without it
@@ -2300,6 +2305,9 @@ async function loadChunk(prefix) {
 async function loadCategory(slug) {
   if (state.cache.cats.has(slug)) {
     return cacheKeep(state.cache.cats, slug, state.cache.cats.get(slug));
+  }
+  if (!state.manifests.cat && state.manifestCatFailed) {
+    throw new Error('the category index could not be loaded');
   }
   if (!state.manifests.cat || !state.manifests.cat.categories
       || !(slug in state.manifests.cat.categories)) {

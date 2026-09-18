@@ -103,6 +103,12 @@ async function main() {
   console.log('synthetic ZIM: ' + zim.length + ' bytes, ' + entries.length + ' entries' +
     (haveZstd ? ' (with a zstd cluster)' : ' (no zstd in this Node)'));
 
+  // A server left behind by an earlier run would answer with stale files.
+  await new Promise((resolve, reject) => {
+    const probe = net.connect(PORT, '127.0.0.1');
+    probe.once('connect', () => { probe.destroy(); reject(new Error('port ' + PORT + ' is already in use: stop that server or set SITE_PORT')); });
+    probe.once('error', () => { probe.destroy(); resolve(); });
+  });
   let site = startSite(siteDir);
   let failures = 0;
   const check = (name, fn) => Promise.resolve().then(fn).then(
@@ -192,6 +198,10 @@ async function main() {
       await installHelpers();
     };
     const ask = (msg) => page.evaluate((m) => window.__szAsk(m), msg);
+    // The worker posts its notice after answering the request, so give it
+    // a moment.
+    const notices = () => page.waitForFunction(() => window.__szUpstream.length > 0, { timeout: 5000 })
+      .then(() => page.evaluate(() => window.__szUpstream), () => page.evaluate(() => window.__szUpstream));
     const get = (p, headers) => page.evaluate((u, h) => window.__szFetch(u, h), '/drive/viewer/' + p, headers || {});
     const status = () => ask({ type: 'status' });
 
@@ -252,14 +262,18 @@ async function main() {
         const rs = await page.evaluate(() => Promise.all([
           window.__szFetch('/drive/viewer/big/cells.bin'),
           window.__szFetch('/drive/viewer/big/cells.bin'),
-          window.__szFetch('/drive/viewer/small/a.bin'),
+          // A buffered 4 MiB entry, never read before: slow enough that the
+          // second request finds the first one's read in flight.
+          window.__szFetch('/drive/viewer/big/under.bin'),
+          window.__szFetch('/drive/viewer/big/under.bin'),
           window.__szFetch('/drive/viewer/small/a.bin'),
           window.__szFetch('/drive/viewer/big/0.bin', { Range: 'bytes=0-9' }),
         ]));
-        assert.deepEqual(rs.map((r) => r.status), [200, 200, 200, 200, 206]);
+        assert.deepEqual(rs.map((r) => r.status), [200, 200, 200, 200, 200, 206]);
         assert.equal(rs[0].hash, fnv1a(CELLS)); assert.equal(rs[1].hash, fnv1a(CELLS));
-        assert.equal(rs[2].hash, fnv1a(SMALL_A)); assert.equal(rs[3].hash, fnv1a(SMALL_A));
-        assert.equal(rs[4].hash, fnv1a(BIG.subarray(0, 10)));
+        assert.equal(rs[2].hash, fnv1a(UNDER)); assert.equal(rs[3].hash, fnv1a(UNDER));
+        assert.equal(rs[4].hash, fnv1a(SMALL_A));
+        assert.equal(rs[5].hash, fnv1a(BIG.subarray(0, 10)));
       });
       await check(label + ': big entries were streamed, not kept in memory', async () => {
         const st = await status();
@@ -268,6 +282,18 @@ async function main() {
         assert.ok(c && c.clusters && c.blobs, 'cache stats: ' + JSON.stringify(c));
         const held = c.clusters.bytes + c.blobs.bytes;
         assert.ok(held < 1 * MiB, 'reader holds ' + held + ' bytes after streaming ' + JSON.stringify(c));
+        // Not just "not cached": the worker's own counters say the big
+        // entries went through streamRaw, and one small ranged read of an
+        // 8 MiB entry moved a few KB over the network, not the entry.
+        assert.ok(st.sw && st.sw.streamed >= 8, 'streamed count ' + JSON.stringify(st.sw));
+        assert.ok(st.sw.dedupedReads >= 1, 'concurrent reads of one entry shared one read ' + JSON.stringify(st.sw));
+        if (st.stats) {
+          const before = st.stats.bytes;
+          const r = await get('big/0.bin', { Range: 'bytes=6000000-6001999' });
+          assert.equal(r.status, 206);
+          const moved = (await status()).stats.bytes - before;
+          assert.ok(moved < 64 * 1024, 'a 2000-byte range read moved ' + moved + ' bytes');
+        }
       });
       await check(label + ': small entry sharing a raw cluster with a big one is read alone', async () => {
         const before = await status();
@@ -316,6 +342,17 @@ async function main() {
         assert.ok(r.text.includes('class="sz-back"'), r.text);
         assert.ok(r.text.includes('href="/drive/viewer/"'), r.text);
         assert.ok(r.text.includes('<p>Article body.</p>'));
+      });
+      await check(label + ': HEAD answers like GET without a body', async () => {
+        const h = await page.evaluate(async () => {
+          const r = await fetch('/drive/viewer/big/0.bin', { method: 'HEAD', cache: 'no-store' });
+          return { status: r.status, cl: r.headers.get('content-length'), ar: r.headers.get('accept-ranges'),
+                   len: (await r.arrayBuffer()).byteLength };
+        });
+        assert.equal(h.status, 200);
+        assert.equal(h.cl, String(BIG.length));
+        assert.equal(h.ar, 'bytes');
+        assert.equal(h.len, 0);
       });
       await check(label + ': optional probe → 200 + X-Streetzim-Absent, other misses → 404', async () => {
         const r = await get('routing-data/graph.bin');
@@ -382,13 +419,29 @@ async function main() {
       assert.equal(r.headers['x-streetzim-upstream'], 'network');
       assert.equal(r.headers['retry-after'], '30');
       assert.match(r.text, /^Upstream error: /);
-      const notices = await page.evaluate(() => window.__szUpstream);
-      assert.ok(notices.length >= 1, 'no streetzim-upstream message reached the page');
-      assert.equal(notices[0].status, 0);
+      const seen = await notices();
+      assert.ok(seen.length >= 1, 'no streetzim-upstream message reached the page; worker says ' + JSON.stringify((await status()).sw));
+      assert.equal(seen[0].status, 0);
       const note = await page.evaluate(() => document.getElementById('preview-banner-note').textContent);
       assert.match(note, /No connection to the source/, note);
       site = startSite(siteDir);
       await waitForPort(PORT, true);
+      // The file disappears from the origin: a 404 is permanent — 502,
+      // no Retry-After, and the banner says to pick the map again.
+      fs.renameSync(zimPath, zimPath + '.gone');
+      try {
+        await page.evaluate(() => { window.__szUpstream.length = 0; });
+        const gone = await get('big/0.bin', { Range: 'bytes=7000000-7000999' });
+        assert.equal(gone.status, 502, JSON.stringify(gone));
+        assert.equal(gone.headers['x-streetzim-upstream'], '404');
+        assert.equal(gone.headers['retry-after'], undefined);
+        const n2 = await notices();
+        assert.ok(n2.length >= 1 && n2[0].permanent === true && n2[0].status === 404, JSON.stringify(n2));
+        assert.match(await page.evaluate(() => document.getElementById('preview-banner-note').textContent),
+                     /no longer has this file \(HTTP 404\)/);
+      } finally {
+        fs.renameSync(zimPath + '.gone', zimPath);
+      }
       const ok = await get('big/0.bin', { Range: 'bytes=4000000-4999999' });
       assert.equal(ok.status, 206, JSON.stringify(ok));
       assert.equal(ok.hash, fnv1a(BIG.subarray(4000000, 5000000)));

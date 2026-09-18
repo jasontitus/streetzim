@@ -118,6 +118,13 @@
   }
   #info h3 { margin: 0; font-size: 10px; font-weight: 600; display: inline; color: var(--text-primary); }
   #info p { margin: 0; color: var(--text-tertiary); font-size: 9px; }
+  /* The ways back from a dead viewer (Try again, Change map) must be
+     readable and tappable, not 9 px. */
+  #info .sz-recover { font-size: 13px; margin-top: 4px; }
+  #info .sz-recover a, #info a.sz-change { color: #2563eb; }
+  @media (pointer: coarse) {
+    #info .sz-recover a, #info a.sz-change { display: inline-block; line-height: 40px; padding: 0 6px; font-size: 14px; }
+  }
 
   /* --- Unified control strip --- */
   #controls {
@@ -815,10 +822,11 @@
       min-width: 44px; min-height: 44px; box-sizing: border-box; padding: 0;
       display: inline-flex; align-items: center; justify-content: center;
     }
-    #routing-panel h4 button { margin: -12px -8px -12px 0; }
-    #routing-panel.minimized h4 button { margin: -6px -8px -6px 0; }
+    #routing-panel h4 button { margin: -12px 0; }
+    #routing-close { margin-right: -8px !important; }
+    #routing-panel.minimized h4 button { margin: -6px 0; }
     #routing-panel.minimized #routing-minimize { display: inline-flex; }
-    #wiki-panel-close { margin: -14px -12px -14px 0; }
+    #wiki-panel-close { margin: -14px -12px -12px 0; }
     #search-clear {
       top: -4px; right: 0; width: 44px; height: 44px; padding: 0;
       line-height: 44px; text-align: center;
@@ -949,6 +957,7 @@
     var st = d.status;
     noteEl.textContent = st === 429
       ? ' The preview is over its daily limit \u2014 try again later, or download the map.'
+      : d.permanent ? ' The source no longer has this file (HTTP ' + st + ') \u2014 pick or stream it again.'
       : st ? ' The source answered HTTP ' + st + ' \u2014 retrying.'
            : ' No connection to the source \u2014 retrying.';
     clearTimeout(noteTimer);
@@ -1429,7 +1438,7 @@ dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAg
           // ~8 s when it answers 503 with X-Streetzim-Upstream (and a 503
           // without it means no ZIM at all); more attempts here would
           // hold a fetch slot for most of a minute per tile.
-          if (err && (err.upstream || err.status === 503)) throw err;
+          if (err && (err.upstream || err.status === 503 || err.status === 502)) throw err;
           // Otherwise (a dropped request, a transient 5xx) back off for
           // ~7.5 s in all — long enough to come out of a tunnel
           // (docs/mobile-browser-review.md §A5).
@@ -1488,7 +1497,7 @@ function fetchConfig(n) {
       // 404 (no ZIM), 500 (a ZIM that does not open) and the worker's
       // "No ZIM loaded" 503 are definitive; only network hiccups and the
       // upstream 503 (already retried for ~8 s by the worker) get more.
-      var definitive = err && (err.status === 404 || err.status === 500 ||
+      var definitive = err && (err.status === 404 || err.status === 500 || err.status === 502 ||
                                (err.status === 503 && !err.upstream));
       if (n < 4 && !definitive) {
         return new Promise(function(resolve) {
@@ -1865,7 +1874,7 @@ fetchConfig(1)
         var changeLink = document.createElement('a');
         changeLink.href = '/drive/?picker=1';
         changeLink.textContent = 'Change map';
-        changeLink.style.color = '#2563eb';
+        changeLink.className = 'sz-change';
         infoP.appendChild(changeLink);
       }
     }
@@ -2003,10 +2012,13 @@ fetchConfig(1)
     initExplore(map);
 
     // MapLibre does not retry a tile that errored until its source
-    // reloads, so a tunnel left holes until the next pan. When the
-    // connection comes back, point every tiled source at its own URLs
-    // again, which reloads it (docs/mobile-browser-review.md §A5).
-    window.addEventListener('online', function() {
+    // reloads, so a tunnel left holes until the next pan. Point every
+    // tiled source at its own URLs again, which reloads it: when the
+    // connection comes back, and — the connection never went away for
+    // an archive.org 5xx or the proxy's quota — ~30 s after the worker
+    // reports the streamed source failing (its Retry-After), once per
+    // outage (docs/mobile-browser-review.md §A5).
+    function reloadTileSources() {
       try {
         var style = map.getStyle();
         var sources = (style && style.sources) || {};
@@ -2017,8 +2029,17 @@ fetchConfig(1)
             src.setTiles(def.tiles.slice());
           }
         });
-      } catch (e) { dbg('online reload failed', describeError(e)); }
-    });
+      } catch (e) { dbg('tile source reload failed', describeError(e)); }
+    }
+    window.addEventListener('online', reloadTileSources);
+    if ('serviceWorker' in navigator) {
+      var upstreamReload = null;
+      navigator.serviceWorker.addEventListener('message', function(e) {
+        var d = e.data;
+        if (!d || d.type !== 'streetzim-upstream' || d.permanent || upstreamReload) return;
+        upstreamReload = setTimeout(function() { upstreamReload = null; reloadTileSources(); }, 30000);
+      });
+    }
   })
   .catch(function(err) {
     dbg('fatal error loading map', describeError(err), err && err.stack);
@@ -2048,12 +2069,14 @@ fetchConfig(1)
       return;
     }
     if (isPwaPath && isConfig && err.upstream) {
-      showFatalError('The map source is not answering', err, err._url);
+      showFatalError(status === 502 ? 'The map source no longer has this file'
+                                    : 'The map source is not answering', err, err._url);
       var infoEl = document.getElementById('info');
       if (infoEl) {
         var retry = document.createElement('p');
-        retry.innerHTML = '<a href="#" style="color:#2563eb;">Try again</a> &middot; ' +
-                          '<a href="/drive/?picker=1" style="color:#2563eb;">Change map</a>';
+        retry.className = 'sz-recover';
+        retry.innerHTML = '<a href="#">Try again</a> &middot; ' +
+                          '<a href="/drive/?picker=1">Change map</a>';
         retry.firstChild.addEventListener('click', function(ev) { ev.preventDefault(); location.reload(); });
         infoEl.appendChild(retry);
       }
@@ -4939,9 +4962,15 @@ function initSearch(map) {
   var activeIdx = -1;
 
   var manifest = null;       // {total: N, chunks: {prefix: count, ...}}
-  var chunkCache = {};       // prefix -> array of entries (LRU-ish)
+  var chunkCache = {};       // prefix -> array of entries
   var chunkCacheBytes = {};  // prefix -> approximate bytes held
+  var chunkCacheOrder = [];  // prefixes, least recently used first
   var chunkCacheTotal = 0;
+  function touchChunk(prefix) {
+    var i = chunkCacheOrder.indexOf(prefix);
+    if (i >= 0) chunkCacheOrder.splice(i, 1);
+    chunkCacheOrder.push(prefix);
+  }
   // Parsed chunks stay referenced here after the streaming filter is done
   // with them, so this cache — not the filter — set the page's peak: 20
   // chunks of 15 MB JSON on Japan was ~300 MB of live objects, the range
@@ -4965,7 +4994,7 @@ function initSearch(map) {
 
   // Fetch a chunk by prefix, with caching
   function fetchChunk(prefix) {
-    if (chunkCache[prefix]) return Promise.resolve(chunkCache[prefix]);
+    if (chunkCache[prefix]) { touchChunk(prefix); return Promise.resolve(chunkCache[prefix]); }
     if (pendingFetches[prefix]) return pendingFetches[prefix];
 
     var p = fetch(baseUrl + 'search-data/' + encodeURIComponent(prefix) + '.json')
@@ -4980,14 +5009,18 @@ function initSearch(map) {
         // the length is unknown.
         var bytes = o.bytes ? o.bytes * 3 : (Array.isArray(data) ? data.length * 160 : 0);
         delete pendingFetches[prefix];
-        if (bytes > CHUNK_CACHE_BUDGET) return data;   // one-shot: too big to keep
+        // Always keep the newest chunk, even one over the whole budget: a
+        // hot 15 MB chunk takes seconds to parse on a phone and the next
+        // keystroke needs it again. Everything else goes, least recently
+        // used first, until under budget. (Object.keys() would list
+        // digit prefixes like "12" first whatever their age — hence the
+        // explicit order.)
+        chunkCacheTotal += bytes - (chunkCacheBytes[prefix] || 0);
         chunkCache[prefix] = data;
         chunkCacheBytes[prefix] = bytes;
-        chunkCacheTotal += bytes;
-        // Evict oldest until under budget (insertion order of string keys).
-        var keys = Object.keys(chunkCache);
-        while (keys.length > 1 && chunkCacheTotal > CHUNK_CACHE_BUDGET) {
-          var k = keys.shift();
+        touchChunk(prefix);
+        while (chunkCacheOrder.length > 1 && chunkCacheTotal > CHUNK_CACHE_BUDGET) {
+          var k = chunkCacheOrder.shift();
           chunkCacheTotal -= chunkCacheBytes[k] || 0;
           delete chunkCache[k];
           delete chunkCacheBytes[k];
@@ -7525,13 +7558,13 @@ function initRouting(map, config) {
         }
         var idx = parseRoutingCellsIndex(o.buf);
         // Kick off the worker init NOW, in parallel with the main
-        // thread's loadNodeShards, and give it a copy of the index
+        // thread's loadNodeShards, and let it take a copy of the index
         // buffer to transfer (it used to fetch its own: the same
         // 150 MB on Japan through the service worker a second time).
-        // The main thread keeps `o.buf` — v1 indexes view into it.
-        try { __routingCellsIndexForWorker = o.buf.slice(0); } catch (e) {
-          __routingCellsIndexForWorker = null;
-        }
+        // Only a reference is kept here: the copy is made at hand-off,
+        // so a platform without a worker (Kiwix's WKWebView) never holds
+        // two. The main thread keeps `o.buf` — v1 indexes view into it.
+        __routingCellsIndexForWorker = o.buf;
         try { initRoutingWorker(); } catch (e) {
           console.warn('[streetzim] routing worker init skipped:', e);
         }
@@ -8313,6 +8346,7 @@ function initRouting(map, config) {
   function initRoutingWorker() {
     if (__routingWorkerReady) return __routingWorkerReady;
     if (typeof Worker !== 'function') {
+      __routingCellsIndexForWorker = null;
       __routingWorkerReady = Promise.resolve(false);
       return __routingWorkerReady;
     }
@@ -8341,6 +8375,7 @@ function initRouting(map, config) {
       })
       .catch(function(err) {
         console.warn('[streetzim] routing worker init failed:', err);
+        __routingCellsIndexForWorker = null;
         if (__routingWorker) {
           try { __routingWorker.terminate(); } catch (e) {}
           __routingWorker = null;
@@ -8412,7 +8447,8 @@ function initRouting(map, config) {
       // Hand the worker the cells index the main thread already fetched
       // (a copy, transferred) instead of letting it fetch its own —
       // 150 MB on Japan through the service worker, twice, at startup.
-      var idxBuf = __routingCellsIndexForWorker;
+      var idxBuf = null;
+      try { if (__routingCellsIndexForWorker) idxBuf = __routingCellsIndexForWorker.slice(0); } catch (e) {}
       __routingCellsIndexForWorker = null;
       if (idxBuf) {
         __routingWorker.postMessage({ cmd: 'init', baseUrl: workerBaseUrl, cellsIndex: idxBuf }, [idxBuf]);
@@ -9592,11 +9628,16 @@ function initRouting(map, config) {
       if (!navigator.wakeLock || !navigator.wakeLock.request) return;
       if (state.wakeLock || document.visibilityState !== 'visible') return;
       navigator.wakeLock.request('screen').then(function(lock) {
+        // Exited while the request was pending, or a second request
+        // resolved after the first (enter → exit → enter): drop this one.
+        if (!state.active || state.wakeLock) {
+          try { lock.release().catch(function() {}); } catch (e) {}
+          return;
+        }
         state.wakeLock = lock;
         lock.addEventListener('release', function() {
           if (state.wakeLock === lock) state.wakeLock = null;
         });
-        if (!state.active) releaseWakeLock();   // exited while the request was pending
       }).catch(function(err) { dbg('wake lock refused', describeError(err)); });
     }
     function releaseWakeLock() {

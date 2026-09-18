@@ -128,9 +128,11 @@
   <div id="hint">
     Pick any <code>osm-*.zim</code> from <a href="/">streetzim.web.app</a>.
     The browser keeps its own copy of the file, so it needs as much
-    free storage as the map is big; it stays until you remove it here.
-    Safari clears a site's storage after seven days without a visit
-    &mdash; an app added to the Home Screen keeps its map.
+    free storage as the map is big; it normally stays until you remove
+    it here. Safari clears a site's storage after seven days of use
+    without a visit, and a Home Screen app has storage of its own
+    &mdash; on an iPhone, add StreetZim to the Home Screen first, then
+    pick the map inside the app.
     Streaming reads a map straight off archive.org through a small
     range proxy: nothing is stored, but tiles arrive slower than from a
     local file and it needs a connection. On a phone, streaming is
@@ -175,6 +177,16 @@
       [...arguments].map((a) => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '));
     diagEl.textContent = log.slice(-60).join('\n');
     if (window.console && console.log) console.log.apply(console, ['[streetzim]'].concat([...arguments]));
+  }
+
+  // While a pick or a stream is in progress (a multi-GB copy can take
+  // minutes) a second pick, Stream or Remove would start a parallel
+  // write or delete the record under it.
+  function setBusy(on) {
+    pickBtn.disabled = on;
+    clearBtn.disabled = on;
+    const streamBtn = urlForm.querySelector('button[type=submit]');
+    if (streamBtn) streamBtn.disabled = on;
   }
 
   function setStatus(kind, title, msg) {
@@ -385,10 +397,18 @@
         let tx;
         try { tx = db.transaction('zim', 'readwrite'); }
         catch (e) { db.close(); reject(e); return; }
-        tx.objectStore('zim').put(rec);
+        const put = tx.objectStore('zim').put(rec);
+        // A failed put reports on the request first; tx.error is only
+        // filled in once the abort runs, so read the request's error
+        // (that is where QuotaExceededError shows up).
+        const fail = (e) => {
+          db.close();
+          reject((e && e.target && e.target.error) || put.error || tx.error ||
+                 new Error('IndexedDB write failed'));
+        };
         tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onerror = () => { db.close(); reject(tx.error || new Error('IndexedDB write failed')); };
-        tx.onabort = () => { db.close(); reject(tx.error || new Error('IndexedDB write aborted')); };
+        tx.onerror = fail;
+        tx.onabort = fail;
       };
     });
   }
@@ -402,9 +422,11 @@
     }
     const size = fmtSize(file.size);
     setStatus('warn', 'Checking ZIM…', file.name + ' · ' + size + ' — reading the header…');
+    setBusy(true);
     try {
-      // 1. Is it a ZIM this reader can open? Nothing is stored yet.
-      const checked = await askSW({ type: 'check-zim', blob: file });
+      // 1. Is it a ZIM this reader can open, with a map in it? Nothing
+      //    is stored yet.
+      const checked = await askSW({ type: 'check-zim', blob: file, name: file.name });
       if (!checked || !checked.ok) throw new Error(checked && checked.error || 'not a readable ZIM');
       // 2. Is there room for the browser's copy? Refusing here beats a
       //    QuotaExceededError minutes into the write, or a copy that
@@ -415,11 +437,17 @@
         if (est && est.quota > 0) {
           const free = est.quota - (est.usage || 0);
           if (free < file.size * 1.02) {
+            // The map already stored counts against the same quota:
+            // swapping one region for another usually just needs Remove.
+            const cur = await askSW({ type: 'status' }).catch(() => null);
+            const held = cur && cur.ok && cur.present && cur.source === 'file' && cur.sizeBytes > 0
+              ? ' Removing the loaded map first frees ' + fmtSize(cur.sizeBytes) + '.' : '';
             setStatus('err', 'Not enough storage for this map',
-              file.name + ' is ' + size + ' but this browser can store only about ' +
-              fmtSize(Math.max(0, free)) + ' more for this site. Free some space, or stream the ' +
-              'map instead — streaming stores nothing.');
+              file.name + ' is ' + size + ' but this browser reports it can store only about ' +
+              fmtSize(Math.max(0, free)) + ' more for this site.' + held +
+              ' Otherwise free some space, or stream the map instead — streaming stores nothing.');
             dbg('storage estimate', est);
+            setBusy(false);
             await refreshStatus({ quiet: true });
             return;
           }
@@ -441,7 +469,19 @@
       setTimeout(() => { window.location.href = viewerUrl(); }, 600);
     } catch (err) {
       const msg = String(err && err.message || err);
-      setStatus('err', /quota/i.test(msg) ? 'Not enough storage for this map' : 'Failed to open ZIM', msg);
+      const name = err && err.name || '';
+      setBusy(false);
+      if (/quota/i.test(msg) || /Quota/.test(name)) {
+        setStatus('err', 'Not enough storage for this map',
+          'The browser ran out of room while copying ' + file.name + ' (' + size + '). ' +
+          'Free some space, or stream the map instead — streaming stores nothing.');
+      } else if (/unknown message type/.test(msg)) {
+        // A deploy landed between this page and its worker: the page is
+        // new, the worker that answered is the old one.
+        setStatus('err', 'The app just updated', 'Reload this page and pick the file again.');
+      } else {
+        setStatus('err', 'Failed to open ZIM', msg);
+      }
       await refreshStatus({ quiet: true });
     }
   }
@@ -517,10 +557,12 @@
 
   async function loadZimUrl(raw) {
     let src;
+    setBusy(true);
     try {
       setStatus('warn', 'Resolving…', String(raw));
       src = await resolveZimUrl(raw);
     } catch (err) {
+      setBusy(false);
       setStatus('err', 'Can\'t stream that', String(err && err.message || err));
       await refreshStatus({ quiet: true });
       return false;
@@ -535,6 +577,7 @@
       setTimeout(() => { window.location.href = viewerUrl(); }, 600);
       return true;
     } catch (err) {
+      setBusy(false);
       setStatus('err', 'Failed to open ZIM from ' + src.host, String(err && err.message || err));
       await refreshStatus({ quiet: true });
       return false;
@@ -603,6 +646,18 @@
       if (reason === 'zim-error') {
         setStatus('err', 'The saved map could not be opened',
           'Remove it below and pick or stream it again.');
+        openBtn.style.display = 'none';
+      } else if (reason === 'no-zim') {
+        // Only reachable with a record present (an older build stored a
+        // ZIM without map-config.json, or the record went stale); with
+        // nothing stored refreshStatus already said "No ZIM loaded".
+        const r = await askSW({ type: 'status' }).catch(() => null);
+        if (r && r.ok && r.present) {
+          setStatus('err', 'The viewer could not use this ZIM',
+            (r.name ? r.name + ' ' : 'It ') + 'opens but has no map in it (no map-config.json). ' +
+            'Remove it and pick a StreetZim map.');
+          openBtn.style.display = 'none';
+        }
       }
       // Installed app (Add to Home Screen): a launch lands here, so go
       // on to the map when one is loaded — the viewer's "Change map" link

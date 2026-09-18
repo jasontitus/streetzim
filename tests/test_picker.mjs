@@ -54,11 +54,21 @@ async function main() {
     { path: 'small/a.bin', mime: 'application/octet-stream', data: pattern(3000, 1), cluster: 0 },
   ];
   const zim = buildZim(entries, [{ extended: false }]);
+  // A perfectly valid ZIM that is not a map: must be refused before storing.
+  const notMap = buildZim([{ path: 'A/index.html', mime: 'text/html', data: Buffer.from('<p>hi</p>'), cluster: 0 }], [{ extended: false }]);
   const siteDir = fs.mkdtempSync(path.join(os.tmpdir(), 'szpick-'));
   fs.cpSync(path.join(ROOT, 'web', 'drive'), path.join(siteDir, 'drive'), { recursive: true });
   fs.writeFileSync(path.join(siteDir, 'drive', 'preview-config.js'), 'window.STREETZIM_PREVIEW_PROXY = "";\n');
   const zimPath = path.join(siteDir, 'synthetic.zim');
   fs.writeFileSync(zimPath, zim);
+  const notMapPath = path.join(siteDir, 'notmap.zim');
+  fs.writeFileSync(notMapPath, notMap);
+  // A server left behind by an earlier run would answer with stale files.
+  await new Promise((resolve, reject) => {
+    const probe = net.connect(PORT, '127.0.0.1');
+    probe.once('connect', () => { probe.destroy(); reject(new Error('port ' + PORT + ' is already in use: stop that server or set SITE_PORT')); });
+    probe.once('error', () => { probe.destroy(); resolve(); });
+  });
   const site = spawn('python3', [path.join(ROOT, 'scripts/serve-web-local.py'), String(PORT), siteDir], { stdio: 'ignore' });
   const origin = 'http://127.0.0.1:' + PORT;
   let failures = 0;
@@ -75,7 +85,7 @@ async function main() {
   async function scenario(name, init, fn) {
     const context = await browser.createBrowserContext();
     const page = await context.newPage();
-    page.on('pageerror', (err) => { failures++; console.log('  [FAIL] pageerror in ' + name + ': ' + err.message); });
+    page.on('pageerror', (err) => { failures++; console.log('  [FAIL] pageerror in ' + name + ': ' + err.message + ' @ ' + page.url()); });
     if (init) await page.evaluateOnNewDocument(init);
     await check(name, () => fn(page));
     await context.close();
@@ -102,10 +112,10 @@ async function main() {
   // so the hidden <input type=file> is armed; uploadFile then fires its
   // change event.
   const noFsAccess = 'delete window.showOpenFilePicker;';
-  const pick = async (page) => {
+  const pick = async (page, file) => {
     await page.evaluate(() => document.getElementById('pick-btn').click());
     await page.waitForFunction(() => typeof document.getElementById('file-fallback').onchange === 'function', { timeout: 10000 });
-    await (await page.$('#file-fallback')).uploadFile(zimPath);
+    await (await page.$('#file-fallback')).uploadFile(file || zimPath);
   };
 
   try {
@@ -136,7 +146,8 @@ async function main() {
       await pick(page);
       await page.waitForFunction(() => /Not enough storage/.test(document.getElementById('status-title').textContent), { timeout: 30000 });
       const st = await status(page);
-      assert.match(st.msg, /only about 3 MB more|only about 0 MB more/);
+      assert.match(st.msg, /reports it can store only about 0 MB more/);
+      assert.equal(await page.$eval('#pick-btn', (b) => b.disabled), false, 'buttons re-enabled');
       assert.equal(st.url, '/drive/');
       const r = await ask(page, { type: 'status' });
       assert.equal(r.present, false, 'nothing must have been stored');
@@ -171,6 +182,34 @@ async function main() {
       assert.equal(await page.evaluate(() => location.pathname), '/drive/');
       await page.goto(origin + '/drive/', { waitUntil: 'domcontentloaded' });
       await page.waitForFunction(() => location.pathname === '/drive/viewer/', { timeout: 20000 });
+    });
+
+    await scenario('a ZIM without map-config.json is refused before anything is stored', noFsAccess, async (page) => {
+      await ready(page);
+      await pick(page, notMapPath);
+      await page.waitForFunction(() => document.getElementById('status-title').textContent === 'Failed to open ZIM', { timeout: 30000 })
+        .catch(async (e) => { throw new Error(e.message + ' — ' + JSON.stringify(await status(page))); });
+      const st = await status(page);
+      assert.match(st.msg, /not a StreetZim map/);
+      const r = await ask(page, { type: 'status' });
+      assert.equal(r.present, false);
+      const set = await ask(page, { type: 'set-zim', url: origin + '/notmap.zim', name: 'notmap.zim' });
+      assert.equal(set.ok, false);
+      assert.match(set.error, /not a StreetZim map/);
+    });
+
+    await scenario('standalone: a bounce reason suppresses the forward and hides Open viewer',
+      "Object.defineProperty(navigator, 'standalone', { value: true });", async (page) => {
+      await ready(page, '?picker=1');
+      const set = await ask(page, { type: 'set-zim', url: origin + '/synthetic.zim', name: 'synthetic.zim' });
+      assert.ok(set.ok, JSON.stringify(set));
+      await page.evaluate(() => sessionStorage.setItem('streetzim_redirect_reason', 'zim-error'));
+      await page.goto(origin + '/drive/', { waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => /could not be opened/.test(document.getElementById('status-title').textContent), { timeout: 20000 });
+      await new Promise((r) => setTimeout(r, 1200));
+      assert.equal(await page.evaluate(() => location.pathname), '/drive/');
+      assert.equal(await page.$eval('#open-btn', (b) => b.style.display), 'none');
+      assert.equal(await page.$eval('#clear-btn', (b) => b.style.display), '');
     });
 
     await scenario('the viewer\'s "could not open" bounce reason is shown once', null, async (page) => {
