@@ -7,4 +7,4 @@
 //
 // Leave it empty to keep the feature off: the picker then refuses
 // archive.org URLs and web/generate.py renders no Preview buttons.
-window.STREETZIM_PREVIEW_PROXY = '';
+window.STREETZIM_PREVIEW_PROXY = 'https://streetzim-preview-proxy.tiltastech.workers.dev';
