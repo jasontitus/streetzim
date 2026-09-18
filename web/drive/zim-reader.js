@@ -48,19 +48,35 @@
     return { str: str, nextOffset: offset + end + 1 };
   }
 
+  // Count-bounded, and optionally byte-bounded when `sizeOf` is given: an
+  // entry larger than the whole budget is not kept at all (a one-shot
+  // read), and older entries go until the total fits.
   class LRU {
-    constructor(limit) { this.limit = limit; this.map = new Map(); }
+    constructor(limit, maxBytes, sizeOf) {
+      this.limit = limit;
+      this.maxBytes = maxBytes || 0;
+      this.sizeOf = sizeOf || null;
+      this.bytes = 0;
+      this.map = new Map();
+    }
     get(k) {
       if (!this.map.has(k)) return undefined;
       const v = this.map.get(k);
       this.map.delete(k); this.map.set(k, v);
       return v;
     }
+    _drop(k) {
+      if (this.sizeOf) this.bytes -= this.sizeOf(this.map.get(k));
+      this.map.delete(k);
+    }
     set(k, v) {
-      if (this.map.has(k)) this.map.delete(k);
+      const size = this.sizeOf ? this.sizeOf(v) : 0;
+      if (this.map.has(k)) this._drop(k);
+      if (this.maxBytes && size > this.maxBytes) return;
       this.map.set(k, v);
-      while (this.map.size > this.limit) {
-        this.map.delete(this.map.keys().next().value);
+      this.bytes += size;
+      while (this.map.size > this.limit || (this.maxBytes && this.bytes > this.maxBytes)) {
+        this._drop(this.map.keys().next().value);
       }
     }
   }
@@ -74,8 +90,22 @@
       this.size = file.size;
       this.header = null;
       this.mimeList = null;
-      this.clusterCache = new LRU(8);       // clusterNum → {data, extended}
-      this.blobCache = new LRU(512);        // "c:b"      → Uint8Array
+      // Byte budgets keep a phone's service worker alive. A cluster
+      // usually decompresses to ~2 MiB, but a Wikidata bucket is a
+      // 30–45 MB blob in a cluster of its own and a raw routing cluster
+      // can be 100 MB+; an east-coast-us browse with one search held
+      // 52 MB of clusters under the old count-only bound, and iOS or a
+      // low-RAM Android kills a worker that grows past a few hundred MB.
+      // Halved where the device reports ≤ 2 GB (Chrome exposes
+      // deviceMemory to workers; WebKit does not and gets the full
+      // budget). See docs/mobile-browser-review.md.
+      const lowMem = (typeof navigator !== 'undefined' && navigator &&
+                      navigator.deviceMemory && navigator.deviceMemory <= 2);
+      const MB = 1048576;
+      this.clusterCache = new LRU(8, (lowMem ? 32 : 64) * MB,   // clusterNum → {data, extended}
+                                  (c) => c.data.byteLength);
+      this.blobCache = new LRU(512, (lowMem ? 16 : 32) * MB,    // "c:b" → Uint8Array
+                               (u) => u.byteLength);
       this.entryCache = new LRU(1024);      // "ns/url"   → {mime, cluster, blob}
       this.urlPtrPageCache = new LRU(256);  // page index → Uint8Array
       this.rawClusterMeta = new LRU(64);    // clusterNum → {start, extended, table} | false (remote sources)
@@ -447,6 +477,22 @@
       if (!entry) return null;
       const data = await this._readBlob(entry.cluster, entry.blob);
       return { mime: entry.mime, data: data, url: entry.url };
+    }
+
+    // What the caches hold right now. The SW's status message surfaces
+    // it so a phone's memory can be reasoned about with numbers rather
+    // than guesses (docs/mobile-browser-review.md).
+    get cacheStats() {
+      const tally = (lru, size) => {
+        let n = 0, bytes = 0;
+        for (const v of lru.map.values()) { n++; bytes += size(v); }
+        return { n, bytes };
+      };
+      const clusters = tally(this.clusterCache, (c) => c.data.byteLength);
+      const blobs = tally(this.blobCache, (u) => u.byteLength);
+      const blocks = (this.file && this.file.blocks)
+        ? tally(this.file.blocks, (u) => u.byteLength) : { n: 0, bytes: 0 };
+      return { clusters, blobs, blocks, totalBytes: clusters.bytes + blobs.bytes + blocks.bytes };
     }
 
     get info() {

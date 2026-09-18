@@ -255,6 +255,7 @@ self.addEventListener('message', (event) => {
         reply.url = rec && rec.url ? (rec.sourceUrl || rec.url) : null;
         reply.sizeBytes = r ? r.size : null;
         reply.stats = (r && r.file && r.file.stats) ? r.file.stats : null;
+        reply.cache = r ? r.cacheStats : null;
       } else {
         reply = { ok: false, error: 'unknown message type' };
       }
@@ -340,6 +341,37 @@ const OPTIONAL_PROBE_PATHS = new Set([
   'routing-data/graph-geoms-chunk-manifest.json',
 ]);
 
+// Wikipedia articles open by a full-page navigation from the map. A Home
+// Screen web app on iOS has no browser chrome, so an article opened there
+// was a dead end. ZIMs built since 2026-09 carry their own "Back to map"
+// bar (cloud/wiki_articles.py); for older ones the PWA adds the same bar
+// here, and in both cases the link becomes the absolute viewer URL —
+// `../index.html` would be answered by Firebase with a redirect, which
+// iOS refuses for a navigation served through a service worker.
+const BACK_BAR_HTML =
+  '<nav class="sz-back"><a href="/drive/viewer/" ' +
+  'onclick="if(history.length>1){history.back();return false}">' +
+  '&#8592; Back to map</a></nav>';
+const BACK_BAR_CSS =
+  '<link rel="icon" href="data:,">' +   // no /favicon.ico probe (404 noise)
+  '<style>.sz-back{position:sticky;top:0;z-index:1;background:#fff;' +
+  'margin:-1em -1em .5em;padding:calc(.3em + env(safe-area-inset-top,0px)) 1em .3em;' +
+  'border-bottom:1px solid #eee}.sz-back a{display:inline-flex;align-items:center;' +
+  'min-height:44px;color:#2563eb;font-weight:600;text-decoration:none}</style>';
+
+function withBackToMap(data) {
+  let html;
+  try { html = new TextDecoder('utf-8').decode(data); } catch (e) { return data; }
+  if (html.indexOf('class="sz-back"') >= 0) {
+    html = html.replace(/(<nav class="sz-back"><a href=")(?:\.\.\/)+index\.html"/,
+                        '$1/drive/viewer/"');
+  } else {
+    html = html.replace(/<\/head>/i, BACK_BAR_CSS + '</head>')
+               .replace(/<body\b[^>]*>/i, (m) => m + BACK_BAR_HTML);
+  }
+  return new TextEncoder().encode(html);
+}
+
 async function serveFromZim(viewerPath, request) {
   try {
     const reader = await getReader();
@@ -367,6 +399,9 @@ async function serveFromZim(viewerPath, request) {
         });
       }
       return notFound(viewerPath);
+    }
+    if (viewerPath.startsWith('wiki-article/') && /^text\/html/i.test(entry.mime)) {
+      return okResponse(withBackToMap(entry.data), entry.mime);
     }
     const range = request.headers.get('range');
     if (range) {

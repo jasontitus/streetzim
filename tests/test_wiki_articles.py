@@ -41,7 +41,9 @@ class CleanArticleTests(unittest.TestCase):
         self.assertNotIn("væd", out)         # IPA
         self.assertNotIn("[edit]", out)           # edit section
         self.assertNotIn("Some citation", out)    # reference list
-        body = out.split("<footer>")[0]
+        # The article prose: after the "Back to map" bar and title, before
+        # the footer. The bar and the footer are the page's only links.
+        body = out.split("<h1>", 1)[1].split("<footer>")[0]
         self.assertNotIn("href", body)            # body links unwrapped
         self.assertNotIn("./State", body)         # the internal link is gone
         self.assertNotIn("class=", body)          # attributes stripped
@@ -54,6 +56,19 @@ class CleanArticleTests(unittest.TestCase):
 
 
 class BundleTests(unittest.TestCase):
+    def test_every_article_carries_a_back_to_map_bar(self):
+        out = wa.clean_article_html("<p>x</p>", "Nevada",
+                                    "https://en.wikipedia.org/wiki/Nevada")
+        # Sticky bar first thing in the body, before the title.
+        self.assertLess(out.index('class="sz-back"'), out.index("<h1>"))
+        self.assertIn('href="../index.html"', out)
+        self.assertIn("history.back()", out)
+        self.assertIn("min-height:44px", out)
+        # A slash title lives two levels deep, like its images.
+        deep = wa.clean_article_html("<p>x</p>", "Expo Park/USC station",
+                                     "https://en.wikipedia.org/wiki/X")
+        self.assertIn('href="../../index.html"', deep)
+
     def test_bundles_distinct_titles_at_wiki_article_path(self):
         stored = {}
         def add_item(path, title, mimetype, content):
@@ -295,8 +310,13 @@ class EscapedMarkupTests(unittest.TestCase):
             "https://en.wikipedia.org/wiki/T")
 
     def _internal_hrefs(self, page):
+        # The "Back to map" bar's own link (../index.html, deeper for slash
+        # titles) resolves to the ZIM's main page; everything else internal
+        # would be a dangling link zimcheck rejects.
         return [h for h in re.findall(r'href="([^"]+)"', page)
-                if "creativecommons.org" not in h and "en.wikipedia.org" not in h]
+                if "creativecommons.org" not in h and "en.wikipedia.org" not in h
+                and not h.startswith("data:")
+                and not re.fullmatch(r"(\.\./)+index\.html", h)]
 
     def test_escaped_anchor_leaves_no_scannable_href(self):
         page = self._body('<p>Moving &lt;a href="yzppassaic.org"&lt;/a&gt) soon.</p>')

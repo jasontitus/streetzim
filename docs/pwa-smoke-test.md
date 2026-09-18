@@ -104,9 +104,17 @@ ZIM_FILE=/path/osm-washington-dc-2026-09-08.zim \
   CHROME_PATH=... node cloud/preview_smoke_test.mjs all
 ```
 
-`SHOT_DIR=/tmp` saves a screenshot per scenario. The unit tests next to
-it: `node tests/test_zim_http_source.mjs [zim]` (the range source) and
-`node tests/test_preview_proxy.mjs [zim]` (the proxy, needs network).
+`SHOT_DIR=/tmp` saves a screenshot per scenario. More knobs:
+`SITE_URL=https://streetzim.web.app` drives the live site instead of a
+local copy; `DEVICE="iPhone 13"` / `"Pixel 5"` emulates a phone (layout
+and touch, still Chromium); `CPU=4 NETWORK="Fast 3G"` slows the page and
+the service worker's own fetches; `SMOKE_SEARCH=Boston`, `SMOKE_WIKI=1`
+and `SMOKE_ARTICLE=1` exercise a real search, the Wiki panel and a
+Wikipedia article's "Back to map" bar over the streamed ZIM; the run
+ends with what the worker's caches hold. The unit tests next to it:
+`node tests/test_zim_http_source.mjs [zim]` (the range source) and
+`node tests/test_preview_proxy.mjs [zim]` (the proxy, needs network;
+`PROXY_URL=` tests a deployed one).
 
 ## When to run
 

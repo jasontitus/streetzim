@@ -207,6 +207,36 @@ def _remove_spans_by_class(html: str, class_tokens: set[str]) -> str:
     return "".join(out)
 
 
+# The article opens by a full-page navigation from the map (the viewer
+# stamps its camera into the URL hash first, so Back restores the view).
+# A Home Screen web app on iOS has no browser chrome and Kiwix's own Back
+# button is easy to miss, so every article carries its own way back: a
+# sticky bar whose link goes to the map, and which uses history.back()
+# when there is history so the stamped camera is restored. Sticky inside
+# the body scroller, padded under an iOS status bar, 44 px tall to tap.
+BACK_BAR_CSS = (
+    ".sz-back{position:sticky;top:0;z-index:1;background:#fff;"
+    "margin:-1em -1em .5em;padding:calc(.3em + env(safe-area-inset-top,0px)) 1em .3em;"
+    "border-bottom:1px solid #eee}"
+    ".sz-back a{display:inline-flex;align-items:center;min-height:44px;"
+    "color:#2563eb;font-weight:600;text-decoration:none}"
+)
+
+
+def back_to_map_bar(title: str) -> str:
+    """The "Back to map" bar for an article stored at wiki-article/<title>.
+
+    A title with slashes is stored that many levels deeper (its images are
+    linked ../../wiki-image/…), so the map link climbs the same depth.
+    """
+    up = "../" * (1 + title.count("/"))
+    return (
+        f'<nav class="sz-back"><a href="{up}index.html" '
+        'onclick="if(history.length>1){history.back();return false}">'
+        "&#8592; Back to map</a></nav>"
+    )
+
+
 def clean_article_html(html: str, title: str, source_url: str,
                        lead_html: str = "", gallery_html: str = "") -> str:
     """Trim raw article HTML (Kiwix or Parsoid) to a compact, self-
@@ -274,6 +304,7 @@ def clean_article_html(html: str, title: str, source_url: str,
     return (
         "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<link rel=\"icon\" href=\"data:,\">"
         f"<title>{safe_title}</title>"
         "<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;"
         "max-width:42em;margin:1em auto;padding:0 1em;line-height:1.55;"
@@ -283,7 +314,9 @@ def clean_article_html(html: str, title: str, source_url: str,
         "figure{margin:1em 0}img{max-width:100%;height:auto;border-radius:4px}"
         "figcaption{font-size:.85em;color:#555;margin-top:.3em}"
         ".gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.8em}"
+        + BACK_BAR_CSS +
         "</style></head><body>"
+        + back_to_map_bar(title) +
         f"<h1>{safe_title}</h1>\n{lead_html}{h}\n{gallery_html}"
         f"<footer>From <a href=\"{source_url}\">Wikipedia</a> — text under "
         "<a href=\"https://creativecommons.org/licenses/by-sa/4.0/\">"

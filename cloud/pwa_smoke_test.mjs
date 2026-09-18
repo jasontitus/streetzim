@@ -375,6 +375,19 @@ async function main() {
   } catch (e) {
     fail('viewer streetzimRouting API ready', e.message);
   }
+  // The online-preview banner is for ZIMs streamed off the web only. A
+  // locally picked file (this test) must never show it — nor does a ZIM
+  // opened in Kiwix, where the path and the missing service worker keep
+  // it hidden — so the "downloaded file is faster" pitch never appears
+  // to someone who already has the file.
+  {
+    const bannerShown = await page.evaluate(() => {
+      const b = document.getElementById('preview-banner');
+      return !!b && !b.hidden;
+    });
+    if (bannerShown) fail('preview banner hidden for a local file', 'banner is visible');
+    else pass('preview banner hidden for a local file');
+  }
 
   // 3. Top-bar search.
   currentStep = 'search';

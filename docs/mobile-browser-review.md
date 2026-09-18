@@ -1,237 +1,361 @@
 # Android and iOS browser review of the web code
 
-Scope: the /drive/ PWA (picker, service worker, ZIM reader, viewer,
-Find page), the online preview that streams ZIMs off archive.org, and
-the catalog page, as they behave in Android Chrome and iOS Safari
-(browser tab, "Add to Home Screen" standalone, and the WKWebView inside
-Kiwix where relevant). Reviewed 2026-09-18 against `main` at `3dd59f5`.
+Scope: the `/drive/` PWA (picker, service worker, ZIM reader, viewer,
+Find page), the online preview that streams ZIMs off archive.org, the
+Wikipedia article pages, and the catalog page, as they behave in Android
+Chrome and iOS Safari (browser tab, "Add to Home Screen" standalone, and
+the WKWebView / Android WebView inside Kiwix where relevant). Reviewed
+2026-09-18 against `main` at `3dd59f5`, with the emphasis the maintainer
+asked for: **low-end Android phones**.
 
 What this is based on:
 
-- reading the code (`web/drive/index.html`, `sw.js`, `zim-reader.js`,
-  `resources/viewer/index.html`, `places.html`, `web/template.html`);
-- the preview flow driven in headless Chromium with iPhone 13 and
-  Pixel 5 emulation (viewport, pixel ratio, touch, user agent) — layout
-  and touch only, the engine is still Chromium; screenshots of picker,
-  viewer and catalog at phone size;
-- the live site through the deployed Cloudflare worker, on files
-  uploaded this week: west-asia (9.9 GB) and east-coast-us (10.5 GB)
-  including a real search and the Wiki panel, and Washington DC;
-- measurements of what the reader holds in memory, from real ZIMs;
-- WebKit/Chromium behaviour that cannot be tested here, from the
-  browsers' own documentation and bug trackers (linked inline).
-
-Nothing here was run on a physical phone; the items marked **device
-test** are the ones where that matters.
+- two full read-throughs of the code (one of the viewer and page UI, one
+  of the service-worker/reader plumbing), with the browser behaviours
+  they depend on checked against WebKit and Chromium sources;
+- the viewer rendered headlessly at iPhone 13, iPhone SE, Pixel 7 and
+  landscape sizes with element rectangles and hit-tests measured, plus
+  the preview flow driven with iPhone 13 / Pixel 5 emulation (viewport,
+  pixel ratio, touch, user agent — the engine is still Chromium);
+- the live site through the deployed Cloudflare worker on files
+  uploaded this week (west-asia 9.9 GB, east-coast-us 10.5 GB with a
+  real search and the Wiki panel) and on Washington DC, including a
+  "slow phone" profile (CPU 4× slower, Fast 3G / Fast 4G throttling of
+  the page and the worker);
+- the service worker instrumented to report what its caches hold, on
+  real ZIMs;
+- nothing on a physical phone. Items marked **device test** are where
+  that matters.
 
 ## Summary
 
-The preview and the PWA work on phone-sized layouts and nothing in the
-code is Chrome-desktop-only. The issues found are, in order of impact:
+The PWA and the preview work at phone size and nothing is
+desktop-Chrome-only. What limits a low-end Android phone is memory and
+data, not layout; what limits iOS is its aggressive process and storage
+management plus a few standalone-mode gaps. Ranked by impact:
 
-1. **Memory in the service worker on phones** — the reader keeps whole
-   decompressed clusters and up to 512 blobs by *count*, and current
-   ZIMs contain clusters that decompress to 30–45 MB (Wikidata
-   buckets), so a browse-and-search session can pin a few hundred MB
-   inside the worker. iOS terminates a worker that grows that large.
-   Fix: budget the caches by bytes. (medium; device test to size it)
-2. **iOS Safari zooms into the picker's URL box** — its font was 13 px
-   and the page allows zoom. Fixed in this change (16 px).
-3. **Tap targets** — the catalog buttons are 30 px tall and the preview
-   banner's × was ~20 px; iOS/Android guidance is 44–48 px. Banner fixed
-   in this change; catalog buttons recommended.
-4. **Local-file mode on phones is the weak path, not the preview** —
-   storing a picked multi-GB File in IndexedDB is a copy on some
-   browsers, Safari's 7-day storage cap applies outside standalone
-   mode, and Safari and a home-screen app do not share storage. The
-   preview needs none of that, which is a good reason to point phone
-   users at it.
-5. Smaller layout items (build stamp over the search box, banner
-   height on phones) listed below.
+1. **Memory inside the service worker** — count-bounded caches held
+   57 MB after one east-coast-us search (52 MB of decompressed
+   clusters), and a Wikidata bucket is a 30–45 MB blob in a cluster of
+   its own. **Fixed here: byte budgets** (64 MB clusters / 32 MB blobs,
+   halved on devices reporting ≤ 2 GB). Still open: routing entries of
+   100–200 MB are buffered whole (§A2).
+2. **Memory on the page** — the search chunk cache keeps 20 parsed
+   chunks (300 MB of JSON on Japan), the routing index is resident
+   twice, old-style chip files are cached without bound (§A3).
+3. **A picked local file is copied into IndexedDB** — on Android a full
+   copy against quota inside a service-worker event Chromium kills after
+   five minutes; on iOS two copies. The preview stores only a URL and is
+   the right path for phones (§A4).
+4. **Wikipedia articles were a dead end** in an iOS home-screen app (no
+   browser chrome, no back). **Fixed here**: every article gets a sticky
+   "Back to map" bar, baked in at build time and injected by the PWA for
+   existing ZIMs (§B4).
+5. **iOS standalone layout** ignores the status bar inset; the "Sources"
+   button overlaps the locate control by 9 px on every phone viewport;
+   several controls are under 20 px; the build stamp intercepts taps on
+   the search box (§C). Two small ones fixed here (§Changes).
+6. **Data on cellular** — 15–25 MB for a first look at a large region and
+   no Save-Data awareness; the shell re-downloads 1.6 MB per deploy (§A5).
 
-## Findings
+## Part A — low-end Android
 
-### 1. Service-worker memory (medium, device test)
+### A1. Service-worker cache memory (fixed: byte budgets)
 
-`web/drive/zim-reader.js` keeps three caches per reader:
+`web/drive/zim-reader.js` keeps decompressed clusters and individual
+blobs in LRUs that were bounded by count only (8 clusters, 512 blobs of
+up to 512 KB). Measured with the worker reporting its own caches
+(`status` → `cache`):
 
-| cache | bound | what it holds |
-|---|---|---|
-| `clusterCache` | 8 entries | whole decompressed clusters |
-| `blobCache` | 512 entries, each ≤ 512 KB | individual blobs (tiles, fonts, JSON) |
-| `blocks` (HTTP source only) | 256 × 128 KiB = 32 MB | raw file blocks |
+| session | clusters | blobs | blocks | total |
+|---|---|---|---|---|
+| Washington DC, first view | 6 · 9.4 MB | 8 · 0.7 MB | 10 · 1.3 MB | 11.3 MB |
+| east-coast-us, first view + "Boston" search + Wiki panel | 7 · 51.8 MB | 10 · 0.8 MB | 32 · 4.0 MB | 56.6 MB |
 
-Measured on real ZIMs:
+Blob sizes on real ZIMs: tiles average 192 KB (max 981 KB, DC); search
+shards live in 0.9 MB clusters; category chips in 1.3 MB clusters; a
+**Wikidata bucket is one blob of 6.7 MB average and up to 45 MB**, in a
+cluster of its own (south-america: 7.3 MB on disk, one entry). Every
+popup that reads a bucket decompressed 30–45 MB into the cluster cache,
+where eight of them could sit. Android's low-memory killer and iOS
+jetsam end a worker that grows like that; the map then stalls while it
+restarts cold.
 
-- Washington DC: tiles average 192 KB (max 981 KB); the 512 largest
-  cacheable tiles total 33 MB, so `blobCache` alone can reach ~33 MB on
-  a small region and ~250 MB on one whose tiles are near the 512 KB
-  cap.
-- Wikidata buckets are single blobs of 6.7 MB on average and up to
-  45 MB (DC); on south-america a 7.3 MB-on-disk cluster holds one
-  bucket. Every read of such a bucket decompresses its whole cluster
-  into `clusterCache`, where up to 8 of them stay — a Wiki-panel
-  session can hold 100–300 MB of decompressed clusters.
-- Routing cells are fine: south-america packs 400 cells into 4 MB zstd
-  clusters, and the cells index (38 MB on disk on the old Europe
-  build, ~112 MB decompressed) is read once when Directions starts.
+Fix applied: `LRU` gained a byte budget — clusters 64 MB, blobs 32 MB,
+halved when `navigator.deviceMemory` reports ≤ 2 GB (Chrome exposes it
+to workers; WebKit does not and gets the full budget) — and an entry
+larger than its whole budget is never kept (a one-shot read). Reads are
+unchanged; the unit, reader and end-to-end tests pass.
 
-iOS gives the service-worker process a small memory allowance and
-terminates it silently when exceeded; the next request restarts it and
-the reader starts cold (for the preview that is one range request plus
-the cluster pointer table). So the failure mode is slowness and
-repeated cold starts rather than a visible error, and it is worst on
-older phones. Android Chrome is more forgiving but a low-memory
-device will kill the worker too.
+### A2. Whole-entry buffering of routing data (open, medium)
 
-Recommended fix (small): make both caches byte-budgeted rather than
-count-bounded — e.g. 48 MB of decompressed clusters and 24 MB of blobs
-— and never cache a cluster larger than the whole budget (a 45 MB
-Wikidata cluster is a one-shot read). `LRU` in the reader already has
-the shape for it (track a running byte total, evict oldest until under
-budget). Optionally read `navigator.deviceMemory` in the worker where
-available (Chrome only) to halve the budgets on ≤ 2 GB devices.
+`serveFromZim` reads an entry completely before building the
+`Response`. The routing cells index is 5 MB (Hispaniola) to 212 MB
+(Midwest) and v8/v9 routing chunks are up to 100 MB; each is one raw
+cluster, so a route start materialises the whole thing in the worker,
+and the viewer requests the cells index twice at once (main thread
+`resources/viewer/index.html:7249` and `routing-worker.js:233`). On a
+slow link Chromium also ends a fetch event that has not answered within
+five minutes, which a 100 MB read on cellular can exceed. Current
+split builds keep cells in ~4 MB zstd clusters of 400 cells
+(south-america), so day-to-day routing is fine; the peak is at route
+start.
 
-### 2. iOS focus zoom on the picker's URL box (fixed)
+Recommended: stream big raw blobs instead of buffering — for a local
+file respond with `blob.slice(start, end)` as the body, for a streamed
+file with the ranged fetch's own body — and pass the cells index from
+the main thread to the worker as a transferable instead of fetching it
+twice. The byte budget above already stops such clusters from being
+retained.
 
-`web/drive/index.html` styled `#url-input` at 13 px. iOS Safari zooms
-the page into any focused text input with a computed font size under
-16 px unless the viewport forbids zoom; the picker's viewport meta
-does not (`width=device-width, initial-scale=1, viewport-fit=cover`),
-which is the right choice for accessibility. Changed to 16 px. The
-viewer's own inputs are 12 px but its viewport carries
-`maximum-scale=1.0, user-scalable=no`, which suppresses the focus zoom
-(iOS still allows pinch-zoom for accessibility regardless of that
-flag); the Find page's search inputs are `1rem`.
+### A3. Page-side memory (open, medium)
 
-### 3. Tap targets (banner fixed; catalog recommended)
+- Search: `fetchChunk` keeps up to 20 whole parsed chunks
+  (`resources/viewer/index.html:4702–4733`); with 15 MB chunks that is
+  ~300 MB of JSON, and the streaming filter's "eligible for GC" comment
+  does not hold while the cache references them. Bound it by bytes
+  (~30–50 MB) or keep only filtered matches.
+- Routing: the cells index and a cell cache exist on the main thread
+  and again in the worker (`index.html:7240–7300`); on WebKit (no
+  `deviceMemory`) both default to 192 MB budgets. Drop the main-thread
+  cells once the worker is ready, or transfer the buffer.
+- Older ZIMs' chips and `places.html` caches (`_findChipCache`,
+  `state.cache.*`) grow without bound; only the geo-sharded path is
+  budgeted. Reuse that budget.
 
-- The preview banner's × close was an 18 px glyph with 2 px padding.
-  Now a 44 × 44 px hit area around the same glyph.
-- Catalog cards (`web/template.html`, `.btn`): Download / Preview /
-  Torrent / Info measure 79 × 30, 67 × 30, 62 × 30, 44 × 30 px on an
-  iPhone 13 viewport, 8 px apart. They fit one row at 390 px, but
-  30 px is below Apple's 44 pt and Android's 48 dp guidance and the
-  Info button is narrow. Recommended: on `(pointer: coarse)` raise
-  `.btn` padding to give ≥ 40 px height (e.g. `padding: 10px 14px;
-  font-size: 13px`) — the row wraps to two lines on the narrowest
-  phones, which is fine.
+### A4. Local-file mode copies the file (open; the preview avoids it)
 
-### 4. Local-file mode on phones (the preview sidesteps all of this)
+Every mobile browser lacks `showOpenFilePicker`, so a pick goes through
+`<input type=file>` and the `File` is stored in IndexedDB
+(`web/drive/index.html:345–367`, `sw.js:229–233`). Chromium writes IDB
+blobs with a file copy guarded by a modification-time check
+(`storage/browser/blob/write_blob_to_file.cc`); WebKit's document
+picker imports a copy first and IDB stores a second one. So a 3.5 GB
+region needs several GB of free storage and minutes of copying — inside
+a service-worker message event that Chromium terminates after five
+minutes (`kRequestTimeout`), while the picker waits ten. The hint text
+("the file handle is remembered") is not what the code does: it stores
+the File, not the handle. **Device test** for Android `content://` picks
+(the mtime the check sees may not match, failing the write).
 
-- **Android Chrome** has no `showOpenFilePicker`, so the `<input
-  type=file>` fallback is used and the resulting `File` is stored in
-  IndexedDB. Chrome copies a stored File into its blob storage rather
-  than keeping a reference to the picked file for files that come from
-  the system file chooser (**device test** — the behaviour differs from
-  desktop Chrome, where the picker's "file may have moved or changed"
-  path shows it keeps a reference). A 10 GB ZIM would then be a 10 GB
-  copy against the origin's quota and the picker would appear to hang
-  while it copies. Worth testing with one large file and
-  `navigator.storage.estimate()` before and after.
-- **iOS Safari (browser tab)**: script-writable storage (IndexedDB,
-  Cache API, the SW registration) is deleted after seven days of
-  Safari use without visiting the site; a home-screen install with
-  `display: standalone` is exempt. Storage is also separate between
-  Safari and the installed app, so a ZIM picked in Safari is not
-  available in the home-screen app and vice versa. The picker's hint
-  ("on Safari you may need to re-pick it") covers the symptom; the
-  cause is worth one sentence there.
-- **Private Browsing** on iOS has no service workers; the picker
-  already reports "Unsupported browser".
+Recommended: write the record from the page (no event time limit), check
+`navigator.storage.estimate()` against the size first and refuse with a
+clear message, call `navigator.storage.persist()`, and correct the hint.
+For phones, point users at the Preview button instead: it stores a URL
+and nothing else.
 
-None of this touches the preview: it stores only a URL, and the bytes
-come from the network each time.
+### A5. Network and data (open, low–medium)
 
-### 5. Preview on phones — what was checked
+- A first look at a large region costs 15–25 MB (109–111 range
+  requests); panning, Wiki and Directions add to it. Nothing consults
+  `navigator.connection.saveData` / `effectiveType` (Chrome Android,
+  Samsung Internet). Recommended: when Save-Data is on, ask before
+  auto-streaming from a catalog link and say the size; show the running
+  total in the banner (the worker already reports `stats.bytes`).
+- Retries give up after ~3 s of backoff, and MapLibre does not retry an
+  errored tile until the source reloads, so a tunnel leaves holes until
+  the user pans. Lengthen the backoff (~10 s with jitter) and reload
+  errored sources on `online`.
+- `sw.js` precaches the whole shell with `cache: 'reload'` on every new
+  deploy, re-downloading the 1 MB MapLibre bundle although it is
+  immutable per version; use `no-cache` for versioned assets.
 
-- Emulated iPhone 13 and Pixel 5: picker, redirect, viewer, banner all
-  render and fit (screenshots in the session). The banner sits above
-  the attribution tag and clears the map controls; on a 390 px-wide
-  screen it is four lines tall. Recommended: shorter copy on
-  `(max-width: 480px)` ("Online preview, streamed from archive.org.
-  Download for offline use.") to give the map more room.
-- Live site through the Cloudflare worker (Chromium, desktop
-  viewport): west-asia 9.9 GB — viewer ready 15.7 s, search index
-  22 s, 109 range requests / 15.7 MB; east-coast-us 10.5 GB — viewer
-  ready 18 s, 64.5 M-place search index 26 s, "Boston" 15 rows in
-  3.4 s, Wiki panel 150 entries, 111 requests / 24 MB; the same with
-  iPhone emulation on west-asia: 13.6 s / 19 s. A phone on cellular
-  will be slower in proportion to its latency; each cold lookup is a
-  chain of ~13 dependent requests on a 10 GB ZIM.
-- **Data use**: 15–25 MB for a first look at a large region, more with
-  panning, Wiki and Directions. Nothing warns a cellular user.
-  Recommended: when `navigator.connection.saveData` is true (Chrome
-  Android's Data Saver / Lite mode; not exposed by Safari) show one
-  line in the banner, or gate auto-streaming from a catalog link
-  behind a tap. Low effort, low risk.
-- **CORS and preflights**: the reader sends `Range: bytes=a-b` and
-  `?bytes=a-b`. Single-range `Range` values are CORS-safelisted, and
-  WebKit implements that (see [MDN](https://developer.mozilla.org/en-US/docs/Glossary/CORS-safelisted_request_header)
-  and [WebKit changeset 252047](https://trac.webkit.org/changeset/252047/webkit)),
-  so Safari does not preflight each block URL. Verified on Chromium in
-  the live run (no OPTIONS traffic to the worker beyond the harness's
-  own).
-- **Service-worker restarts**: WebKit's idle kill timer for service
-  workers is minutes, Chrome's ~30 s, and both kill the worker when the
-  app goes to the background on a phone. The preview restarts cleanly
-  (one range request, then the cluster table; the browser HTTP cache
-  usually answers both because the worker's ranges are aligned and
-  marked cacheable). Tiles already on screen stay; the next pan is a
-  cold start.
+### A6. CPU, GPU, WebView (mostly fine)
 
-### 6. Smaller layout items (low)
+- MapLibre asks for `webgl2` and falls back to `webgl`, so devices with
+  OpenGL ES 2.0 still render.
+- zstd decompression of a 2 MiB cluster in JS is the per-tile CPU cost;
+  under a 4× slower CPU on Fast 3G (page and worker throttled) DC's map
+  was ready 18.9 s after the click, all of it network. On Fast 4G with
+  the same CPU, live east-coast-us: viewer ready 14.6 s, search index
+  20.9 s, "Boston" 4.1 s, Wiki 0.4 s.
+- Eight overlays use `backdrop-filter` over an animating WebGL canvas —
+  GPU cost on weak devices; drop it under `(hover: none)`.
+- Language floor: numeric separators in the viewer and worker need
+  Chrome 75 / Safari 13. Android WebView updates through Play, so only
+  devices without Play Services are at risk; `sw.js` and
+  `zim-reader.js` use arrow functions and classes (Chrome 49+).
 
-- The build stamp (`#viewer-build-stamp`, top-left, `z-index: 9999`,
-  `pointer-events: auto`) overlaps the left end of the search box on
-  phone widths (the box is centred at `max-width: calc(100% - 100px)`).
-  It can swallow a tap meant for the search box's left edge and it
-  reads as clutter. Recommended: hide it under `(max-width: 480px)`
-  unless `?debug=1`, or move it below the chip rail.
-- `web/template.html` viewport meta lacks `viewport-fit=cover`; on
-  notched phones the page background does not extend under the status
-  bar. Cosmetic.
-- The picker's diagnostics `<pre>` is 11 px; fine for a debug panel.
+## Part B — iOS Safari and home-screen apps
+
+### B1. Standalone layout ignores the top inset (open, high in standalone)
+
+The picker declares `apple-mobile-web-app-status-bar-style:
+black-translucent` and the viewer uses `viewport-fit=cover`, but
+`safe-area-inset-top` is used nowhere in the viewer: the search box
+(`top: 10px`), navigation control, routing panel, driving HUD and build
+stamp sit under the status bar / Dynamic Island (47–59 px) once the app
+is installed. Bottom controls (locate button, "Sources", `#info`) add no
+`safe-area-inset-bottom` either; the Find page does it right.
+Recommended: a `--top-inset: env(safe-area-inset-top, 0px)` variable on
+the top-anchored containers and MapLibre's top-right control, or drop
+`black-translucent`.
+
+### B2. Service-worker lifetime (open, medium for the preview)
+
+WebKit ends an idle worker after 10 s (immediately under memory
+pressure); Chrome after 30 s; both when the app is backgrounded. All
+reader state is process-local, so the preview restarts cold: one range
+request for the header, the cluster pointer table (640 KiB on Europe),
+then cold lookups. The browser HTTP cache usually answers the aligned
+ranges again — but not in Private Browsing, which has no disk cache.
+Recommended: persist the header, MIME list, sorted cluster offsets and
+the memoised top-round dirents with the record, and keep the worker
+warm with a light `status` ping while the viewer is visible.
+
+### B3. Storage rules (open, low; the hint is wrong)
+
+Seven days of Safari use without a visit deletes IndexedDB, the Cache
+API and the registration for a site used in a tab; a home-screen app is
+exempt but has its own storage, so a ZIM picked in Safari is not visible
+in the installed app. `navigator.storage.persist()` is never called.
+Recommended: fix the picker hint and, in Safari, suggest Add to Home
+Screen to keep a map.
+
+### B4. Wikipedia articles were a dead end (fixed)
+
+`openWikiArticle` navigates the whole page to `wiki-article/<Title>`
+after stamping the map camera into the hash, relying on "the app's own
+Back button" — which a home-screen app does not have, and which is easy
+to miss in Kiwix. Fix applied in two layers: `cloud/wiki_articles.py`
+bakes a sticky "← Back to map" bar into every article (44 px tall,
+padded under the status bar, `history.back()` when there is history so
+the stamped camera is restored, otherwise a link to the map at the right
+depth for slash titles), and `sw.js` injects the same bar into articles
+from ZIMs built before this change and points the link at the absolute
+viewer URL (a relative `index.html` would come back from Firebase as a
+redirect, which iOS refuses for a navigation served through a worker).
+Verified end to end on Washington DC: open "Adams Morgan", tap the bar,
+back on the map with the routing API ready in 191 ms.
+
+### B5. Other iOS items (open)
+
+- Driving mode never requests a Screen Wake Lock, so the phone locks
+  mid-navigation; request it on enter and re-request on
+  `visibilitychange` (also Android).
+- The Find page's "Search near" input is 15.2 px, under WebKit's 16 px
+  focus-zoom threshold on a page that allows zoom (the main search input
+  is 16 px).
+- `user-scalable=no` is ignored by iOS; a pinch on a panel zooms the page
+  and `setViewportVars` then shrinks `--app-height` to the zoomed
+  viewport. Add `touch-action: pan-x pan-y` on panel roots and ignore
+  viewport updates while `visualViewport.scale ≠ 1`.
+- The attribution dialog is sized with `80vh`; inside the Kiwix
+  WKWebView (layout 956 px, visible 772 px) its bottom is under the
+  toolbar. Use `--app-height`.
+- The wiki sheet uses `--bottom-inset` while `position: absolute` in a
+  body already sized to the visible height, so in Kiwix it floats 184 px
+  above the bottom; `bottom: 0` is right there.
+- Viewer pages carry no manifest link or Apple metas, so Add to Home
+  Screen from the viewer makes a plain bookmark; a standalone launch
+  lands on the picker and needs a tap; a viewer with no working ZIM shows
+  "HTTP 503" instead of bouncing to the picker (only `HTTP 404` does).
+
+## Part C — layout and touch targets (both platforms)
+
+Measured on the rendered viewer:
+
+- **"Sources" overlaps the locate control** by 9 px across its width on
+  every phone viewport (`#attr-btn` at `bottom: 36px` vs MapLibre's
+  bottom-right stack); the lower third of the button opens the sources
+  dialog. Move `#attr-btn`/`#info` above the control stack.
+- **The build stamp** (`top: 6px; left: 8px; z-index: 9999;
+  pointer-events: auto`) covers the top band of the search input on
+  phone widths; a tap there copies a build id. Hide it under 480 px
+  unless `?debug=1`, or move it.
+- **Small targets**: routing minimise/close 13–15 × 18 px, 4.5 px apart;
+  `#routing-gps-btn` 28 × 24; wiki-panel close 13 × 16; search clear
+  ~16 × 18; control-strip buttons 32 px; chips 32 px; routing inputs
+  26 px tall at 12 px. Catalog buttons 30 px tall. Give icon buttons a
+  44 px box (padding or negative margins) and raise rows under
+  `@media (pointer: coarse)`.
+- Catalog grid `minmax(300px, 1fr)` with 24 px side padding overflows
+  below 348 px viewports (iPhone SE first generation, small Androids);
+  `minmax(min(300px, 100%), 1fr)` fixes it.
+- Landscape phones: wiki and routing panels cover the search box; the
+  preview banner covers the search dropdown's lower rows. `@media
+  (max-height: 500px)` variants.
+- Search and routing inputs lack `autocorrect="off" autocapitalize="off"
+  spellcheck="false" enterkeyhint="search"` (the Find page has them).
+
+## Part D — the online preview on phones
+
+- Emulated iPhone 13 and Pixel 5: picker, redirect, viewer and banner
+  render and fit; the banner clears the attribution and the controls.
+  It is four lines tall at 390 px; shorter copy under 480 px would give
+  the map more room.
+- Live site through the Cloudflare worker (desktop / iPhone emulation):
+  west-asia 9.9 GB — viewer 15.7 s / 13.6 s, search index 22 s / 19 s,
+  109 requests, 15.7 MB; east-coast-us 10.5 GB — viewer 18 s / 24 s,
+  64.5 M-place index 26 s / 41 s, "Boston" 15 rows in 3.4 s / 5.6 s,
+  Wiki 150 entries, 111 requests, 20–24 MB. On a real phone add its
+  own latency: each cold lookup is a chain of ~13 dependent requests.
+- Single-range `Range` values are CORS-safelisted in WebKit as in
+  Chromium/Firefox ([MDN](https://developer.mozilla.org/en-US/docs/Glossary/CORS-safelisted_request_header),
+  [WebKit r252047](https://trac.webkit.org/changeset/252047/webkit)), so
+  Safari does not preflight each block URL.
+- The banner never appears for a locally picked file (`source: 'file'`)
+  or inside Kiwix (different path, no worker) — verified both ways, and
+  the local-file smoke test now asserts it.
+- The Cloudflare free tier (100k requests/day) is a few hundred mobile
+  sessions; past it the worker answers 429 and tiles fail silently.
+  Worth mapping to a "preview temporarily unavailable" line.
 
 ## Already handled well
 
-- The viewer sizes itself from `visualViewport` and publishes
-  `--app-height` / `--bottom-inset`, with `env(safe-area-inset-*)`
-  padding on bottom sheets — the WKWebView toolbar problem is solved
-  in code, not by `100vh`.
-- Touch: `-webkit-overflow-scrolling: touch`, `overscroll-behavior:
-  contain`, a body scroll lock, pointer/touch handlers with slop
-  thresholds, `pointerdown` on chips.
-- Standalone detection (`display-mode: standalone` /
-  `navigator.standalone`) with iOS-specific pseudo-fullscreen handling.
-- The service worker rebuilds redirected responses before caching
-  (the iOS "response served by service worker has redirections"
-  failure), uses `updateViaCache: 'none'`, network-first for the shell,
-  and validates a ZIM before persisting it.
-- The picker's manifest has `display: standalone`, icons, `start_url`
-  and `scope` under `/drive/`, so an iOS home-screen install is exempt
-  from the 7-day storage cap.
-- Optional probe paths answer 200-with-marker instead of 404, keeping
-  consoles quiet on both mobile browsers' devtools.
+- Viewport sizing from `visualViewport` with `--app-height` and
+  `--bottom-inset`, safe-area padding on the bottom sheets, the Kiwix
+  dead-band lift for the locate button.
+- Touch: `-webkit-overflow-scrolling`, `overscroll-behavior`, a body
+  scroll lock that still allows in-page scrollers and multi-touch,
+  slop-threshold touch handling in dropdowns, `blur()` after picks.
+- Standalone detection and iOS fullscreen handling; geolocation without
+  `navigator.permissions` in Kiwix; storage access wrapped in try/catch;
+  `QuotaExceededError` surfaced on the Find page.
+- Service worker: redirected responses rebuilt before caching,
+  `updateViaCache: 'none'`, absolute scope, clean-URL aliases,
+  network-first shell, validate-before-persist, non-memoised failed
+  opens, quiet optional probes.
+- Reader: blob copies instead of subarrays so cached tiles don't pin
+  clusters, piecemeal raw-cluster reads and in-flight dedupe on the
+  streaming path, the `_clusterEnd` fixes; 206 verified, 200 refused.
+- Memory discipline elsewhere: streaming per-chunk search filtering,
+  byte-budgeted geo-shard cache cleared on `pagehide`, sparse-state A*,
+  `compact()` after routes, `deviceMemory` fallbacks, worker-crash
+  fallback.
+- `places.html`: top safe-area padding, 16 px search input,
+  `autocapitalize`/`spellcheck` attributes.
 
 ## Changes made in this review
 
+- `web/drive/zim-reader.js`: byte-budgeted cluster and blob caches
+  (64/32 MB, halved on ≤ 2 GB devices); `cacheStats` for diagnostics.
+- `web/drive/sw.js`: `status` reports `cache`; Wikipedia articles get
+  the "Back to map" bar (injected, or re-pointed if baked in).
+- `cloud/wiki_articles.py`: every built article carries the bar; test in
+  `tests/test_wiki_articles.py`.
 - `web/drive/index.html`: URL box at 16 px (no iOS focus zoom).
-- `resources/viewer/index.html` (and the PWA copy): 44 px hit area for
-  the banner's ×.
-- `cloud/preview_smoke_test.mjs`: `DEVICE="iPhone 13"` / `"Pixel 5"`
-  emulation with screenshots of the picker and viewer; `CHROME_ARGS`
-  for proxies; `SMOKE_SEARCH=<term>` and `SMOKE_WIKI=1` steps that
-  exercise search shards and Wikidata buckets over the stream;
-  `SITE_URL=` for the live site.
+- `resources/viewer/index.html`: 44 px hit area for the banner's ×.
+- `cloud/preview_smoke_test.mjs`: `DEVICE` emulation with screenshots,
+  `CPU`/`NETWORK` throttling of page and worker, `CHROME_ARGS`,
+  `SITE_URL`, `SMOKE_SEARCH`, `SMOKE_WIKI=1`, `SMOKE_ARTICLE=1`, and the
+  worker's cache report. `cloud/pwa_smoke_test.mjs` asserts the banner
+  stays hidden for a local file.
 
-## Recommended next steps, in order
+## Recommended order for what remains
 
-1. Byte-budget the reader's cluster and blob caches (§1).
-2. Catalog `.btn` height ≥ 40 px on coarse pointers (§3).
-3. Shorter banner copy under 480 px and a `saveData` line (§5).
-4. Hide the build stamp on phone widths unless `?debug=1` (§6).
-5. Device test on one Android phone and one iPhone: pick a 5–10 GB
-   ZIM locally (storage estimate before/after, time to open), then open
-   the same region's Preview button; note memory warnings in
-   Safari's Web Inspector / Chrome's `chrome://inspect`.
+1. Stream big raw entries instead of buffering them; fetch the cells
+   index once (§A2).
+2. Bound the search chunk cache and the legacy chip caches by bytes;
+   drop the duplicate main-thread routing index (§A3).
+3. Top safe-area inset in standalone; move "Sources" off the locate
+   control; hide or move the build stamp on phones; 44 px icon buttons
+   (§B1, §C).
+4. Wake Lock in driving mode; Find page "near" input at 16 px (§B5).
+5. Save-Data prompt and byte counter for the preview; longer retry
+   backoff (§A5).
+6. Local-file pick: write from the page, check quota first, fix the hint
+   (§A4).
+7. Device test on one low-end Android (2 GB) and one iPhone: the preview
+   of a 10 GB region with search, Wiki and a route, watching
+   `chrome://inspect` / Web Inspector for worker restarts.
