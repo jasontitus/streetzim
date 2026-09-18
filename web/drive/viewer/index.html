@@ -5773,16 +5773,36 @@ function initWikiSidebar(map, config) {
   // Load once the ZIM is ready; sets module-scope WIKI_GEO_INDEX (+ reverse
   // qid map) which also gate the "Read full article" links everywhere, so
   // ZIMs without bundled articles never show broken links.
-  fetch(baseUrl + 'wiki-geo-index.json')
-    .then(function(r) { return r && r.ok ? r.json() : null; })
-    .then(function(m) {
-      if (m && typeof m === 'object') {
-        WIKI_GEO_INDEX = m;
-        WIKI_GEO_QID = {};
-        for (var t in m) { var q = m[t] && m[t][3]; if (q) WIKI_GEO_QID[q] = t; }
-      }
-    })
-    .catch(function() {});
+  // Retry, because this used to be one shot with a silent catch. The ZIM is
+  // still opening when the viewer boots and the wait scales with its size:
+  // silicon-valley (16k entries) is ready in ~5 s, california (825k) takes
+  // ~58 s. A single early fetch failed, WIKI_GEO_INDEX stayed null, and the
+  // panel then reported "No Wikipedia places in view" — so california looked
+  // like it had no Wikipedia data at all when it has 5,367 places.
+  var wikiIndexTries = 0;
+  function loadWikiGeoIndex() {
+    wikiIndexTries++;
+    fetch(baseUrl + 'wiki-geo-index.json')
+      .then(function(r) { return r && r.ok ? r.json() : null; })
+      .then(function(m) {
+        if (m && typeof m === 'object') {
+          WIKI_GEO_INDEX = m;
+          WIKI_GEO_QID = {};
+          for (var t in m) { var q = m[t] && m[t][3]; if (q) WIKI_GEO_QID[q] = t; }
+          // Fill a panel the user opened while we were still loading.
+          if (active) updateSidebarFromGeo();
+          return;
+        }
+        retryWikiGeoIndex();
+      })
+      .catch(retryWikiGeoIndex);
+  }
+  function retryWikiGeoIndex() {
+    // ~90 s of attempts, which covers the slowest region we ship.
+    if (WIKI_GEO_INDEX || wikiIndexTries >= 12) return;
+    setTimeout(loadWikiGeoIndex, Math.min(15000, 1000 * wikiIndexTries));
+  }
+  loadWikiGeoIndex();
 
   function geoPriority(type) {
     if (type === 'place') return 80;             // settlements (cities/towns)
@@ -5878,8 +5898,16 @@ function initWikiSidebar(map, config) {
     setWikiMarkers(items);
     if (!items.length) {
       var empty = createEl('div', 'wiki-empty-state');
-      empty.appendChild(createEl('div', 'wiki-empty-state-icon', '🌍'));
-      empty.appendChild(createEl('div', 'wiki-empty-state-text', 'No Wikipedia places in view — pan or zoom to explore.'));
+      if (!WIKI_GEO_INDEX) {
+        // Don't claim the area is empty when we simply have not loaded the
+        // index yet — that misreading is what made california look broken.
+        empty.appendChild(createEl('div', 'wiki-empty-state-icon', '⏳'));
+        empty.appendChild(createEl('div', 'wiki-empty-state-text', 'Loading Wikipedia index…'));
+        countEl.textContent = '';
+      } else {
+        empty.appendChild(createEl('div', 'wiki-empty-state-icon', '🌍'));
+        empty.appendChild(createEl('div', 'wiki-empty-state-text', 'No Wikipedia places in view — pan or zoom to explore.'));
+      }
       listEl.appendChild(empty);
       return;
     }
