@@ -1706,12 +1706,26 @@ def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=N
     conn.close()
 
 
-def extract_tiles_from_mbtiles(mbtiles_path):
+def extract_tiles_from_mbtiles(mbtiles_path, max_zoom=None):
     """Extract individual tiles from an MBTiles file.
 
     Returns a dict of {(z, x, y): tile_data_bytes}.
     MBTiles uses TMS y-coordinate convention, so we flip to XYZ.
     Tiles in MBTiles are typically gzip-compressed already.
+
+    max_zoom caps the zoom levels loaded. Without it, `--max-zoom` was
+    silently ignored for every region whose mbtiles is <= 5 GB: create_zim
+    only receives mbtiles_path when use_streaming is true (size > 5 GB), so
+    small regions take the in-memory `tiles` dict path, which never consulted
+    max_zoom. The streaming path (iter_tiles_from_mbtiles) filtered correctly,
+    so the flag worked on continents and did nothing on countries. Caught
+    2026-09-18: a switzerland `--max-zoom 13` build shipped all 44,520 z14
+    tiles and came out byte-identical to the unrestricted build.
+
+    Note for callers: when no --search-cache is given, search features are
+    extracted from this dict (extract_searchable_features(tiles=...)), which
+    reads z14 for POIs. Capping the zoom therefore also thins the search index
+    unless a prebuilt search cache is supplied.
     """
     print("  Extracting tiles from MBTiles...")
     conn = sqlite3.connect(str(mbtiles_path))
@@ -1726,8 +1740,17 @@ def extract_tiles_from_mbtiles(mbtiles_path):
     except sqlite3.OperationalError:
         metadata = {}
 
-    # Extract tiles
-    cursor.execute("SELECT zoom_level, tile_column, tile_row, tile_data FROM tiles")
+    # Extract tiles. Filter in SQL, not in Python: a z14 region is ~75% z14
+    # tiles by count, and loading then discarding them wastes the memory this
+    # non-streaming path exists to bound.
+    if max_zoom is not None:
+        cursor.execute(
+            "SELECT zoom_level, tile_column, tile_row, tile_data FROM tiles "
+            "WHERE zoom_level <= ?",
+            (max_zoom,),
+        )
+    else:
+        cursor.execute("SELECT zoom_level, tile_column, tile_row, tile_data FROM tiles")
     tiles = {}
     count = 0
     for z, x, tms_y, data in cursor:
@@ -7162,7 +7185,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             print(f"    Format: {tile_metadata.get('format', 'unknown')}")
             print(f"    Name: {tile_metadata.get('name', 'unknown')}")
         else:
-            tiles, tile_metadata = extract_tiles_from_mbtiles(mbtiles_path)
+            tiles, tile_metadata = extract_tiles_from_mbtiles(
+                mbtiles_path, max_zoom=args.max_zoom)
             total_tile_count = len(tiles)
 
         # Generate font glyphs
