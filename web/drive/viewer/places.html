@@ -298,17 +298,15 @@ const CATEGORIES = [
   // Merged 2026-09-16 (cloud/chip_rules.py). ZIMs built before that have
   // chip-restaurants.json / chip-cafes.json and no chip-food.json, so all
   // three stay listed and chipsForThisZim() shows whichever the ZIM has.
+  // ONE food chip. A pre-merge ZIM has no chip-food.json, so
+  // chipsForThisZim() keeps this entry when the ZIM has restaurants and/or
+  // cafes, and loadChipFile() fetches both and concatenates — the Find page
+  // reads the same whatever vintage the ZIM is.
   { id: 'food',        label: 'Food & Drink', cat: 'poi',
     subtypes: ['restaurant', 'fast_food', 'food_court', 'ice_cream',
                'ice_cream_parlor', 'cafe', 'coffee_shop', 'bakery',
                'tea_room'],
     includeRegex: /_restaurant$|^food_|^coffee_|_bakery$|_cafe$/ },
-  { id: 'restaurants', label: 'Restaurants', cat: 'poi',
-    subtypes: ['restaurant', 'fast_food', 'food_court', 'ice_cream'],
-    includeRegex: /_restaurant$|^food_/ },
-  { id: 'cafes',       label: 'Cafés',       cat: 'poi',
-    subtypes: ['cafe', 'coffee_shop', 'bakery', 'tea_room',
-               'ice_cream_parlor'] },
   { id: 'bars',        label: 'Bars',        cat: 'poi',
     subtypes: ['bar', 'pub', 'biergarten', 'nightclub', 'beer',
                'alcohol_shop', 'wine_bar', 'sports_bar', 'cocktail_bar',
@@ -996,8 +994,20 @@ async function reverseGeocodeFromViewport(lat, lon) {
 function chipsForThisZim() {
   const chips = state.manifests.cat && state.manifests.cat.chips;
   if (!chips) return CATEGORIES;            // no chip files: legacy path
-  const have = CATEGORIES.filter(def => chips[def.id]);
+  // Food & Drink stands in for a pre-merge ZIM's restaurants/cafes pair.
+  const alt = { food: ['food', 'restaurants', 'cafes'] };
+  const have = CATEGORIES.filter(def =>
+    (alt[def.id] || [def.id]).some(id => chips[id]));
   return have.length ? have : CATEGORIES;
+}
+
+// Which concrete chip files back a (possibly merged) chip on THIS ZIM.
+function chipSourcesFor(chipId) {
+  const chips = (state.manifests.cat && state.manifests.cat.chips) || {};
+  if (chips[chipId]) return [chipId];
+  const alt = { food: ['restaurants', 'cafes'] }[chipId] || [];
+  const have = alt.filter(id => chips[id]);
+  return have.length ? have : [chipId];
 }
 
 function renderChips() {
@@ -1237,19 +1247,23 @@ async function loadChipFile(chipId) {
   // 164 MB, Canada shops 137 MB — both phone-fetchable but tight
   // against iOS heap). Manifest's chips[id].sub_chunks lists the
   // bucket suffixes; fan out parallel fetches, concatenate.
-  const meta = (state.manifests.cat &&
-                state.manifests.cat.chips &&
-                state.manifests.cat.chips[chipId]) || {};
-  const subBuckets = Array.isArray(meta.sub_chunks) ? meta.sub_chunks : null;
-  if (subBuckets && subBuckets.length) {
-    const blobs = await Promise.all(subBuckets.map(suffix =>
-      fetchJSON(CAT + 'chip-' + chipId + '-' + suffix + '.json')
-        .catch(() => [])));
-    const combined = [].concat(...blobs);
-    state.cache.cats.set('chip:' + chipId, combined);
-    return combined;
-  }
-  const data = await fetchJSON(CAT + 'chip-' + chipId + '.json');
+  // A merged chip (Food & Drink over a pre-merge ZIM) is backed by more
+  // than one file; every other chip resolves to itself.
+  const sources = chipSourcesFor(chipId);
+  const perSource = await Promise.all(sources.map(async (sid) => {
+    const meta = (state.manifests.cat &&
+                  state.manifests.cat.chips &&
+                  state.manifests.cat.chips[sid]) || {};
+    const subBuckets = Array.isArray(meta.sub_chunks) ? meta.sub_chunks : null;
+    if (subBuckets && subBuckets.length) {
+      const blobs = await Promise.all(subBuckets.map(suffix =>
+        fetchJSON(CAT + 'chip-' + sid + '-' + suffix + '.json')
+          .catch(() => [])));
+      return [].concat(...blobs);
+    }
+    return fetchJSON(CAT + 'chip-' + sid + '.json').catch(() => []);
+  }));
+  const data = [].concat(...perSource);
   state.cache.cats.set('chip:' + chipId, data);
   return data;
 }

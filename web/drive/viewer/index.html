@@ -3409,9 +3409,12 @@ var EXPLORE_CHIPS = [
   // chip-food.json; _findChipsReconcile() hides whichever the ZIM's
   // manifest does not declare, so a retrofitted ZIM shows the old pair and
   // a freshly built one shows the merged chip.
+  // ONE food chip on the rail. A pre-merge ZIM has no chip-food.json, so
+  // _findResolveChipDef() maps this button onto that ZIM's restaurants +
+  // cafes and loadChipOnMap merges them — the rail reads the same whatever
+  // vintage the ZIM is, instead of showing two food buttons on a
+  // retrofitted region and one on a freshly built one.
   { id: 'food',        label: 'Food & Drink', emoji: '🍴' },
-  { id: 'restaurants', label: 'Restaurants', emoji: '🍴' },
-  { id: 'cafes',       label: 'Cafés',       emoji: '☕' },
   { id: 'bars',        label: 'Bars',        emoji: '🍺' },
   { id: 'shops',       label: 'Shops',       emoji: '🛍️' },
   { id: 'health',      label: 'Health',      emoji: '🏥' },
@@ -3685,8 +3688,16 @@ function _findChipsReconcile(rail) {
     if (!chips || !Object.keys(chips).length) return;
     var btns = rail.querySelectorAll('.find-chip');
     var shown = 0;
+    // The merged Food & Drink button stands in for a pre-merge ZIM's
+    // restaurants/cafes pair, so keep it when EITHER of those exists —
+    // hiding it on the absence of chip-food.json alone would remove the
+    // only way to reach food on every region retrofitted this round.
+    var alt = { food: ['food', 'restaurants', 'cafes'] };
     for (var i = 0; i < btns.length; i++) {
-      if (chips[btns[i].dataset.chip]) { shown++; } else { btns[i].hidden = true; }
+      var ids = alt[btns[i].dataset.chip] || [btns[i].dataset.chip];
+      var ok = false;
+      for (var a = 0; a < ids.length; a++) { if (chips[ids[a]]) { ok = true; break; } }
+      if (ok) { shown++; } else { btns[i].hidden = true; }
     }
     if (!shown) {   // unrecognised chip set: better all than none
       for (var j = 0; j < btns.length; j++) btns[j].hidden = false;
@@ -3844,17 +3855,26 @@ var _chipOrigPlaceholder = null;
 async function _findResolveChipDef(chipDef) {
   var m = await _findFetchCatManifest().catch(function() { return null; });
   var chips = m && m.chips;
-  if (!chips || !Object.keys(chips).length) return chipDef;   // legacy ZIM: keep every chip
-  if (chips[chipDef.id]) return chipDef;
+  if (!chips || !Object.keys(chips).length) {
+    return { id: chipDef.id, label: chipDef.label, sources: [chipDef.id] };
+  }
+  if (chips[chipDef.id]) {
+    return { id: chipDef.id, label: chipDef.label, sources: [chipDef.id] };
+  }
+  // Food & Drink merged Restaurants + Cafés on 2026-09-16, but a retrofit
+  // reshards the chips a ZIM already has rather than re-deriving them from
+  // chip_rules.py, so every region retrofitted this round still ships the
+  // old pair. Present ONE chip either way: on those ZIMs "Food & Drink"
+  // loads both files and merges them, so the catalog reads the same
+  // whatever vintage the ZIM is.
   var alias = { food: ['restaurants', 'cafes'],
                 restaurants: ['food'], cafes: ['food'] }[chipDef.id] || [];
+  var have = [];
   for (var i = 0; i < alias.length; i++) {
-    if (!chips[alias[i]]) continue;
-    for (var j = 0; j < EXPLORE_CHIPS.length; j++) {
-      if (EXPLORE_CHIPS[j].id === alias[i]) return EXPLORE_CHIPS[j];
-    }
+    if (chips[alias[i]]) have.push(alias[i]);
   }
-  return null;
+  if (!have.length) return null;
+  return { id: chipDef.id, label: chipDef.label, sources: have };
 }
 
 async function loadChipOnMap(map, chipDef, opts) {
@@ -3898,9 +3918,81 @@ async function loadChipOnMap(map, chipDef, opts) {
   }
   var catManifest = await _findFetchCatManifest();
   if (mySeq !== _chipLoadSeq) return;
-  var chipMeta = (catManifest.chips && catManifest.chips[chipDef.id]) || null;
+  var _sources = chipDef.sources || [chipDef.id];
   var items, expanded;
-  if (CHIP_SHARDS.isGeo(chipMeta)) {
+  var data = null;             // chip records for the shared downstream path
+  var _mergedPath = false;     // true once a multi-source merge has filled `data`
+  if (_sources.length > 1) {
+    // Merged chip (Food & Drink over a pre-merge ZIM's restaurants+cafes).
+    // Each source is queried through its own layout and the results are
+    // concatenated, then the shared downstream code below filters to the
+    // viewport and caps at 300. Note this is a merge of two k-nearest
+    // queries, not one exact kNN over the union: where both sources are
+    // dense, the true 300th-nearest can sit just past one source's cut.
+    // Exact would mean one shard walk across both chips, which needs every
+    // shard index mapped back to its origin chip inside fetchShard — more
+    // ways to be silently wrong than this is worth.
+    var _merged = [];
+    var _mFailed = false, _mPartial = false;
+    for (var _si = 0; _si < _sources.length; _si++) {
+      var _sid = _sources[_si];
+      var _sMeta = (catManifest.chips && catManifest.chips[_sid]) || null;
+      try {
+        if (CHIP_SHARDS.isGeo(_sMeta)) {
+          var _vb = map.getBounds(), _ctr = map.getCenter().wrap();
+          var _r = await CHIP_SHARDS.load(_sMeta, {
+            fetchShard: (function(sid) {
+              return function(suffix) {
+                return fetch(baseUrl + 'category-index/chip-' + sid + '-' + suffix + '.json')
+                  .then(function(r) {
+                    if (!r.ok) throw new Error('chip shard HTTP ' + r.status);
+                    return r.json();
+                  });
+              };
+            })(_sid),
+            cache: _chipShardCache,
+            cacheKey: _sid,
+            point: { lat: _ctr.lat, lon: _ctr.lng },
+            bbox: { s: _vb.getSouth(), w: _vb.getWest(),
+                    n: _vb.getNorth(), e: _vb.getEast() },
+            k: 300,
+            isCancelled: function() { return mySeq !== _chipLoadSeq; },
+            fallbackToNearest: !opts.requireInBounds
+          });
+          if (mySeq !== _chipLoadSeq) return;
+          if (_r) {
+            _merged = _merged.concat(_r.records);
+            if (_r.partial) _mPartial = true;
+            if (_r.failed) _mFailed = true;
+          }
+        } else {
+          var _d = await _findFetchChipData(_sid);
+          if (mySeq !== _chipLoadSeq) return;
+          if (Array.isArray(_d)) _merged = _merged.concat(_d);
+        }
+      } catch (_e) {
+        console.warn('[streetzim] chip source failed:', _sid, _e);
+        _mFailed = true;
+      }
+    }
+    if (mySeq !== _chipLoadSeq) return;
+    restorePlaceholder();
+    if (!_merged.length) {
+      _showFindToast(_mFailed
+        ? 'Couldn\u2019t load ' + chipDef.label.toLowerCase()
+        : 'No ' + chipDef.label.toLowerCase() + ' in this map');
+      _findChipPaintActive(null);
+      return;
+    }
+    if (_mPartial) {
+      _showFindToast('Showing the nearest \u2014 zoom in for more',
+                     { color: '#333', ms: 2600 });
+    }
+    data = _merged;
+    _mergedPath = true;
+  }
+  var chipMeta = (catManifest.chips && catManifest.chips[chipDef.id]) || null;
+  if (!_mergedPath && CHIP_SHARDS.isGeo(chipMeta)) {
     // Geographic shards: load only what the 300 nearest records around
     // the map centre need, scoped to the viewport.
     var vb = map.getBounds();
@@ -3952,7 +4044,10 @@ async function loadChipOnMap(map, chipDef, opts) {
     expanded = res.fellBack;
   } else {
   try {
-    var data = await _findFetchChipData(chipDef.id);
+    // Already filled by the multi-source merge above — re-fetching here
+    // would throw the merged records away and ask for chip-food.json,
+    // which is the file this whole path exists to avoid.
+    if (!_mergedPath) data = await _findFetchChipData(chipDef.id);
   } catch (err) {
     console.warn('[streetzim] chip fetch failed:', err);
     if (mySeq !== _chipLoadSeq) return;  // a newer chip owns the UI now
