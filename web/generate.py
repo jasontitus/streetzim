@@ -594,19 +594,54 @@ def zim_build_date(zim_filename, file_meta=None):
         return None
 
 
+PREVIEW_CONFIG_PATH = os.path.join(SCRIPT_DIR, "drive", "preview-config.js")
+
+
+def preview_proxy_url(path=PREVIEW_CONFIG_PATH):
+    """The range proxy configured in web/drive/preview-config.js, or "".
+
+    A Preview button only makes sense when the /drive/ picker can really
+    stream an archive.org ZIM, and that takes the proxy: archive.org's
+    download servers send no CORS headers (docs/online-preview.md). So the
+    catalog reads the same setting the picker uses instead of a second
+    flag that could drift from it.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            src = f.read()
+    except OSError:
+        return ""
+    m = re.search(r"STREETZIM_PREVIEW_PROXY\s*=\s*(['\"])(.*?)\1", src)
+    return m.group(2).strip() if m else ""
+
+
 def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
-                     build_date=None):
+                     build_date=None, preview=False):
     """Render a map card with active download/torrent/details buttons.
 
     `torrent_ok=False` drops the Torrent button: the committed .torrent
     describes a different (older) file than the Download button, so
     handing it out would seed a build that archive.org's keep-2 cleanup
     is about to delete.
+
+    `preview=True` adds a Preview button that opens the ZIM in the /drive/
+    viewer streamed off archive.org (see preview_proxy_url).
     """
     item_id = f"streetzim-{region['id']}"
     zim_file = region["zim_file"]
     zim_file_attr = escape(urllib.parse.quote(zim_file), quote=True)
     title_attr = escape(region["title"], quote=True)
+    # Quoted once, as a whole: the picker decodes the query value once
+    # and matches it against the archive.org download URL shape.
+    preview_target = urllib.parse.quote(
+        f"https://archive.org/download/{item_id}/{zim_file}", safe=":/")
+    preview_html = (
+        f'\n          <a class="btn btn-secondary" '
+        f'href="/drive/?zim={escape(preview_target, quote=True)}" '
+        f'data-track="preview" data-region="{region["id"]}" data-title="{title_attr}" '
+        f'title="Look at this map in your browser, streamed from archive.org">Preview</a>'
+        if preview else ""
+    )
     badges_html = render_feature_badges(item_meta)
     # Without this the only way to tell a refreshed ZIM from the one you
     # already downloaded was to fetch it and look inside.
@@ -627,7 +662,7 @@ def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
         </div>{date_html}
         <p class="map-card-desc">{region["description"]}</p>{badges_html}
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/{item_id}/{zim_file_attr}" data-track="download" data-region="{region["id"]}" data-title="{title_attr}">Download</a>{torrent_html}
+          <a class="btn btn-primary" href="https://archive.org/download/{item_id}/{zim_file_attr}" data-track="download" data-region="{region["id"]}" data-title="{title_attr}">Download</a>{preview_html}{torrent_html}
           <a class="btn btn-secondary" href="https://archive.org/details/{item_id}" data-track="details" data-region="{region["id"]}" data-title="{title_attr}">Info</a>
         </div>
       </div>"""
@@ -674,6 +709,9 @@ def build_page():
     cards = []
     live_count = 0
     upcoming_count = 0
+    preview = bool(preview_proxy_url())
+    print("Preview buttons: " + ("on (proxy " + preview_proxy_url() + ")" if preview
+          else "off (no proxy in web/drive/preview-config.js)"))
     # Track items where archive.org's metadata fetch failed even
     # after retries. We KNOW these items exist (they showed up in
     # the search results) — a failure here means transient network
@@ -802,7 +840,8 @@ def build_page():
                 region, human_size(zim_size),
                 item_meta=(details or {}).get("metadata") if details else None,
                 torrent_ok=torrent_ok,
-                build_date=zim_build_date(zim_filename, zim_file_meta)))
+                build_date=zim_build_date(zim_filename, zim_file_meta),
+                preview=preview))
             live_count += 1
         else:
             cards.append(render_upcoming_card(region))

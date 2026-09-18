@@ -255,6 +255,18 @@ kiwix-serve --port 8888 osm-monaco.zim
 # Open in browser: http://localhost:8888
 ```
 
+### Previewing in the browser
+
+The `/drive/` page of the site (`streetzim.web.app/drive/`) renders any
+`.zim` you pick from disk with a service worker, no upload. It can also
+stream a ZIM straight off archive.org, so a visitor can look at a region
+before downloading it: `/drive/?zim=<archive.org download URL>` (the
+catalog's Preview buttons). archive.org sends no CORS headers on ranged
+downloads, so streaming goes through a small range proxy that has to be
+deployed once — a free Cloudflare Worker; the plan is in
+[`docs/preview-proxy-cloudflare.md`](docs/preview-proxy-cloudflare.md)
+and the design in [`docs/online-preview.md`](docs/online-preview.md).
+
 ### Using on iOS
 
 1. Transfer the `.zim` file to your iOS device (AirDrop, Files app, etc.)

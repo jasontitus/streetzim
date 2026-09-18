@@ -89,12 +89,34 @@ covers each by default:
   root which isn't in our SW scope. `<link rel="icon" href="data:…">`
   on every PWA page suppresses the probe.
 
+## Online-preview harness
+
+`cloud/preview_smoke_test.mjs` covers the streaming path the same way:
+it serves `web/drive/` locally, drives the picker with `?zim=<url>` and
+checks the redirect into the viewer, the search index coming through the
+service worker, the SW's own range-request tally, the preview banner and
+console cleanliness. Two scenarios — `same-origin` (a local ZIM served
+with Range by `scripts/serve-web-local.py`) and `proxy` (the real
+archive.org file through `preview-proxy/serve-local.mjs`):
+
+```sh
+ZIM_FILE=/path/osm-washington-dc-2026-09-08.zim \
+  CHROME_PATH=... node cloud/preview_smoke_test.mjs all
+```
+
+`SHOT_DIR=/tmp` saves a screenshot per scenario. The unit tests next to
+it: `node tests/test_zim_http_source.mjs [zim]` (the range source) and
+`node tests/test_preview_proxy.mjs [zim]` (the proxy, needs network).
+
 ## When to run
 
 The standing rule: every diff that touches any of these triggers a
 mandatory smoke run before the change is considered done.
 
 - `web/drive/sw.js`
+- `web/drive/zim-reader.js` (also `node tests/test_zim_http_source.mjs`)
+- `web/drive/preview-config.js`, `preview-proxy/` (also
+  `cloud/preview_smoke_test.mjs`)
 - `resources/viewer/index.html`
 - `resources/viewer/places.html`
 - `web/drive/index.html`

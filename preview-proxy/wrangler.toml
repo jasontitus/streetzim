@@ -1,0 +1,5 @@
+# Cloudflare Workers config for the StreetZim preview range proxy.
+# `npx wrangler deploy` from this directory (after `npx wrangler login`).
+name = "streetzim-preview-proxy"
+main = "worker.js"
+compatibility_date = "2026-01-01"

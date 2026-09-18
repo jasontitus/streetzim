@@ -1,0 +1,11 @@
+{
+  "name": "streetzim-preview-proxy-functions",
+  "private": true,
+  "description": "Firebase Cloud Functions (2nd gen) packaging of the StreetZim preview range proxy — see ../README.md and docs/online-preview.md",
+  "type": "module",
+  "main": "index.mjs",
+  "engines": { "node": "22" },
+  "dependencies": {
+    "firebase-functions": "^6.4.0"
+  }
+}

@@ -1,7 +1,10 @@
 // StreetZim Drive — in-browser ZIM reader.
 //
 // Consumed by the service worker (importScripts) to turn a local .zim
-// Blob into HTTP responses. Exposes StreetZimReader on the global scope.
+// Blob into HTTP responses. Exposes StreetZimReader on the global scope,
+// plus StreetZimHttpSource: a Blob look-alike over HTTP range requests
+// that lets the same reader stream a ZIM off a web server (the online
+// preview of the archive.org-hosted regions — docs/online-preview.md).
 //
 // Supported: ZIM v6 (new-namespace layout: content under 'C', which is
 //            what `read()` defaults to) with uncompressed (flag 1/2) and
@@ -20,6 +23,7 @@
   'use strict';
 
   const MAGIC = 0x44D495A;
+  const EXACT = { exact: true };   // HttpRangeSource.slice() option
 
   function u8 (v, o) { return v.getUint8(o); }
   function u16(v, o) { return v.getUint16(o, true); }
@@ -74,13 +78,21 @@
       this.blobCache = new LRU(512);        // "c:b"      → Uint8Array
       this.entryCache = new LRU(1024);      // "ns/url"   → {mime, cluster, blob}
       this.urlPtrPageCache = new LRU(256);  // page index → Uint8Array
+      this.rawClusterMeta = new LRU(64);    // clusterNum → {start, extended, table} | false (remote sources)
+      this.direntByIndex = new LRU(4096);   // entry index → parsed dirent (remote sources)
     }
 
-    async _readRange(offset, length) {
+    // `exact` (remote sources only): fetch just these bytes instead of the
+    // surrounding cache blocks — for probes far from anything else we
+    // will want.
+    async _readRange(offset, length, exact) {
       if (offset < 0 || offset + length > this.size) {
         throw new Error(`ZimReader: out-of-range read (${offset}+${length} of ${this.size})`);
       }
-      return new Uint8Array(await this.file.slice(offset, offset + length).arrayBuffer());
+      const part = (exact && this.file.remote)
+        ? this.file.slice(offset, offset + length, EXACT)
+        : this.file.slice(offset, offset + length);
+      return new Uint8Array(await part.arrayBuffer());
     }
 
     async open() {
@@ -180,11 +192,11 @@
       return u64(new DataView(buf.buffer), 0);
     }
 
-    async _readDirEntryAt(offset) {
+    async _readDirEntryAt(offset, exact) {
       // Over-read — DirEntries are typically < 512 B including URL + title.
       // If a string ran past our buffer we re-fetch larger.
       const initial = Math.min(1024, this.size - offset);
-      let buf = await this._readRange(offset, initial);
+      let buf = await this._readRange(offset, initial, exact);
       let v = new DataView(buf.buffer);
       const mimeType = u16(v, 0);
       const isRedirect = mimeType === 0xFFFF;
@@ -204,7 +216,7 @@
       let url = r.str;
       let nextOff = r.nextOffset;
       if (nextOff >= buf.length && buf.length < this.size - offset) {
-        buf = await this._readRange(offset, Math.min(8192, this.size - offset));
+        buf = await this._readRange(offset, Math.min(8192, this.size - offset), exact);
         v = new DataView(buf.buffer);
         r = readCString(v, headEnd);
         url = r.str; nextOff = r.nextOffset;
@@ -216,7 +228,7 @@
       }, extra);
     }
 
-    // Binary search URL pointer list for an entry whose (ns, url) matches.
+    // Search the URL pointer list for an entry whose (ns, url) matches.
     // ZIM sorts by (ns, url) ascending.
     async findEntry(path, namespace) {
       namespace = namespace || 'C';
@@ -225,40 +237,86 @@
       if (cached !== undefined) return cached;
 
       let lo = 0, hi = this.header.articleCount - 1;
+      // A binary search is strictly sequential — one dependent read per
+      // level, ~25 levels on a 39 M-entry continent ZIM — and on a remote
+      // source every level is a network round trip. There, probe FANOUT
+      // evenly spaced entries per round in parallel: log(FANOUT+1) rounds.
+      // Measured on Europe (62 GiB) in Chrome against archive.org, where
+      // the viewer starts ~20 lookups at once: fanout 1 and 3 reach the
+      // map in the same time (15 s here), 3 moves half the bytes (7 vs
+      // 15 MB) and shortens an isolated lookup's chain by a third; 6 and
+      // 16 only add requests (21 s, 33 s). Local Blobs keep the plain
+      // binary search: reads are cheap and it touches fewer bytes.
+      const fanout = this.file.remote ? (this.file.fanout || 3) : 1;
       while (lo <= hi) {
-        const mid = (lo + hi) >>> 1;
-        const off = await this._readUrlPointer(mid);
-        const de = await this._readDirEntryAt(off);
-        const cmp = cmpNsUrl(de.namespace, de.url, namespace, path);
-        if (cmp === 0) {
-          let resolved = de;
-          if (de.isRedirect) {
-            const targetOff = await this._readUrlPointer(de.redirectIndex);
-            resolved = await this._readDirEntryAt(targetOff);
-            if (resolved.isRedirect || resolved.isSpecial) {
-              this.entryCache.set(cacheKey, null);
-              return null;
-            }
+        if (fanout > 1 && hi - lo >= 2 * fanout) {
+          const step = (hi - lo + 1) / (fanout + 1);
+          const idxs = [];
+          for (let i = 1; i <= fanout; i++) idxs.push(lo + Math.floor(step * i));
+          const des = await Promise.all(idxs.map((i) => this._direntAtIndex(i, sparseFor(step))));
+          let found = null;
+          for (let j = 0; j < idxs.length; j++) {
+            const cmp = cmpNsUrl(des[j].namespace, des[j].url, namespace, path);
+            if (cmp === 0) { found = des[j]; break; }
+            if (cmp < 0) lo = idxs[j] + 1;       // probe sorts before the target
+            else { hi = idxs[j] - 1; break; }    // first probe after it bounds hi
           }
-          if (resolved.isSpecial) {
-            this.entryCache.set(cacheKey, null);
-            return null;
-          }
-          const info = {
-            mime: this.mimeList[resolved.mimeType] || 'application/octet-stream',
-            cluster: resolved.clusterNumber,
-            blob: resolved.blobNumber,
-            namespace: resolved.namespace,
-            url: resolved.url
-          };
-          this.entryCache.set(cacheKey, info);
-          return info;
+          if (found) return this._resolveEntry(cacheKey, found);
+          continue;
         }
+        const mid = (lo + hi) >>> 1;
+        const de = await this._direntAtIndex(mid, sparseFor((hi - lo) / 2));
+        const cmp = cmpNsUrl(de.namespace, de.url, namespace, path);
+        if (cmp === 0) return this._resolveEntry(cacheKey, de);
         if (cmp < 0) lo = mid + 1;
         else         hi = mid - 1;
       }
       this.entryCache.set(cacheKey, null);
       return null;
+    }
+
+    // The dirent at URL-pointer index `idx`. Remote sources memoise the
+    // parsed result by index: the top rounds of every lookup probe the
+    // same indices, so after the first lookup they cost nothing.
+    async _direntAtIndex(idx, sparse) {
+      const hit = this.direntByIndex.get(idx);
+      if (hit) return hit;
+      let off;
+      if (sparse && sparse.ptr) {
+        const b = await this._readRange(this.header.urlPtrPos + idx * 8, 8, true);
+        off = u64(new DataView(b.buffer, b.byteOffset, b.byteLength), 0);
+      } else {
+        off = await this._readUrlPointer(idx);
+      }
+      const de = await this._readDirEntryAt(off, !!(sparse && sparse.dirent));
+      if (this.file.remote) this.direntByIndex.set(idx, de);
+      return de;
+    }
+
+    // Follow one redirect hop and memoise the (mime, cluster, blob) triple.
+    async _resolveEntry(cacheKey, de) {
+      let resolved = de;
+      if (de.isRedirect) {
+        const targetOff = await this._readUrlPointer(de.redirectIndex);
+        resolved = await this._readDirEntryAt(targetOff);
+        if (resolved.isRedirect || resolved.isSpecial) {
+          this.entryCache.set(cacheKey, null);
+          return null;
+        }
+      }
+      if (resolved.isSpecial) {
+        this.entryCache.set(cacheKey, null);
+        return null;
+      }
+      const info = {
+        mime: this.mimeList[resolved.mimeType] || 'application/octet-stream',
+        cluster: resolved.clusterNumber,
+        blob: resolved.blobNumber,
+        namespace: resolved.namespace,
+        url: resolved.url
+      };
+      this.entryCache.set(cacheKey, info);
+      return info;
     }
 
     async _loadCluster(clusterNum) {
@@ -304,29 +362,78 @@
       const cached = this.blobCache.get(key);
       if (cached) return cached;
 
-      const cluster = await this._loadCluster(clusterNum);
-      const { data, extended } = cluster;
-      const v = new DataView(data.buffer, data.byteOffset, data.byteLength);
-      const wordSize = extended ? 8 : 4;
-      const readOff = extended
-        ? (o) => v.getUint32(o, true) + v.getUint32(o + 4, true) * 0x100000000
-        : (o) => v.getUint32(o, true);
-      const firstOffset = readOff(0);
-      const numBlobs = (firstOffset / wordSize) - 1;
-      if (blobNum < 0 || blobNum >= numBlobs) {
-        throw new Error('blobNumber ' + blobNum + ' out of range (' + numBlobs + ')');
+      // Remote source + raw cluster: fetch the blob's own bytes instead of
+      // the whole cluster (null → compressed, take the normal path).
+      let out = (this.file.remote && !this.clusterCache.get(clusterNum))
+        ? await this._readRawBlobRemote(clusterNum, blobNum)
+        : null;
+      if (!out) {
+        const cluster = await this._loadCluster(clusterNum);
+        const { data, extended } = cluster;
+        const v = new DataView(data.buffer, data.byteOffset, data.byteLength);
+        const wordSize = extended ? 8 : 4;
+        const readOff = extended
+          ? (o) => v.getUint32(o, true) + v.getUint32(o + 4, true) * 0x100000000
+          : (o) => v.getUint32(o, true);
+        const firstOffset = readOff(0);
+        const numBlobs = (firstOffset / wordSize) - 1;
+        if (blobNum < 0 || blobNum >= numBlobs) {
+          throw new Error('blobNumber ' + blobNum + ' out of range (' + numBlobs + ')');
+        }
+        const start = readOff(blobNum * wordSize);
+        const stop  = readOff((blobNum + 1) * wordSize);
+        // Copy, don't subarray: a subarray pins the whole decompressed
+        // cluster buffer for as long as the blob sits in blobCache, so
+        // 512 cached tiles could keep 512 evicted clusters (2 MB each,
+        // far more for search/routing clusters) alive inside the SW.
+        out = data.slice(start, stop);
       }
-      const start = readOff(blobNum * wordSize);
-      const stop  = readOff((blobNum + 1) * wordSize);
-      // Copy, don't subarray: a subarray pins the whole decompressed
-      // cluster buffer for as long as the blob sits in blobCache, so
-      // 512 cached tiles could keep 512 evicted clusters (2 MB each,
-      // far more for search/routing clusters) alive inside the SW.
-      const out = data.slice(start, stop);
       // Only memoise small blobs; big search/routing payloads are
       // one-shot reads and would blow the count-based LRU's budget.
       if (out.byteLength <= 512 * 1024) this.blobCache.set(key, out);
       return out;
+    }
+
+    // Raw (uncompressed) cluster on a remote source: a whole-cluster read
+    // would pull up to 2 MiB — or a 100 MB routing chunk's neighbours —
+    // over the network for one blob. Read the info byte, then the blob
+    // offset table, then just the blob. Returns null for compressed
+    // clusters, whose zstd frame has to be decoded from the start anyway.
+    async _readRawBlobRemote(clusterNum, blobNum) {
+      let meta = this.rawClusterMeta.get(clusterNum);
+      if (meta === undefined) {
+        const start = await this._readClusterPointer(clusterNum);
+        const head = await this._readRange(start, Math.min(9, this.size - start));
+        const compression = head[0] & 0x0F;
+        if (compression !== 1 && compression !== 2) {
+          meta = false;
+        } else {
+          const extended = (head[0] & 0x10) !== 0;
+          const hv = new DataView(head.buffer, head.byteOffset, head.byteLength);
+          const firstOffset = extended
+            ? hv.getUint32(1, true) + hv.getUint32(5, true) * 0x100000000
+            : hv.getUint32(1, true);
+          // The offset table is the first `firstOffset` bytes of the
+          // cluster payload: (numBlobs + 1) little-endian words.
+          const table = await this._readRange(start + 1, firstOffset);
+          meta = { start, extended, table };
+        }
+        this.rawClusterMeta.set(clusterNum, meta);
+      }
+      if (!meta) return null;
+      const { start, extended, table } = meta;
+      const wordSize = extended ? 8 : 4;
+      const tv = new DataView(table.buffer, table.byteOffset, table.byteLength);
+      const readOff = extended
+        ? (o) => tv.getUint32(o, true) + tv.getUint32(o + 4, true) * 0x100000000
+        : (o) => tv.getUint32(o, true);
+      const numBlobs = (table.byteLength / wordSize) - 1;
+      if (blobNum < 0 || blobNum >= numBlobs) {
+        throw new Error('blobNumber ' + blobNum + ' out of range (' + numBlobs + ')');
+      }
+      const bStart = readOff(blobNum * wordSize);
+      const bStop  = readOff((blobNum + 1) * wordSize);
+      return this._readRange(start + 1 + bStart, bStop - bStart);
     }
 
     // Main entry point — look up a content path. Returns null if not found.
@@ -372,11 +479,247 @@
     return 0;
   }
 
+  // Which reads of a lookup probe `step` entries from its neighbours
+  // should skip the block cache: further apart than a cache block, a
+  // probe reads just its own bytes (nothing near it will be wanted);
+  // once probes crowd together, block reads pay off because the final
+  // steps and neighbouring lookups land on the same blocks. 8 B per
+  // pointer; dirents average well under 128 B.
+  function sparseFor(step) {
+    return { ptr: step > 16384, dirent: step > 1024 };
+  }
+
   function cmpNsUrl(aNs, aUrl, bNs, bUrl) {
     if (aNs !== bNs) return aNs < bNs ? -1 : 1;
     if (aUrl === bUrl) return 0;
     return cmpCodePoints(aUrl, bUrl);
   }
 
+  // ---------- HTTP range source ----------
+  //
+  // Duck-types the two Blob members ZimReader uses — `size` and
+  // `slice(start, end).arrayBuffer()` — on top of HTTP byte-range
+  // requests, so the reader above streams a ZIM straight off a web
+  // server without knowing the difference. This is what the online
+  // preview of the archive.org-hosted regions runs on: the picker hands
+  // the service worker a URL instead of a File (docs/online-preview.md).
+  //
+  // Small reads are served from fixed, aligned blocks kept in an LRU:
+  // the dirent binary search revisits the same few blocks for every
+  // lookup, and an aligned range is byte-identical from one request to
+  // the next, so the browser HTTP cache can answer repeats after the
+  // service worker (and this cache with it) has been torn down. Reads of
+  // a block or more — whole clusters, routing chunks — fetch their exact
+  // range and are not cached here.
+  //
+  // The server must answer `Range: bytes=a-b` with a 206 (a 200 means it
+  // is about to stream the whole file, which is refused before the body
+  // is read) and, cross-origin, send CORS headers exposing Content-Range.
+  class HttpRangeSource {
+    constructor(url, opts) {
+      opts = opts || {};
+      if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
+        throw new Error('HttpRangeSource: expected an http(s) URL');
+      }
+      this.url = url;
+      this.remote = true;                 // ZimReader reads raw clusters piecemeal
+      this.size = 0;                      // known after open()
+      this.blockSize = opts.blockSize || 128 * 1024;
+      this.fanout = opts.fanout || 0;     // lookup probes per round (0 = reader default)
+      this.blocks = new LRU(opts.maxBlocks || 256);   // block index → Uint8Array
+      this.inflight = new Map();          // block index → Promise<Uint8Array>
+      this.stats = { requests: 0, bytes: 0 };
+      this.etag = null;
+      this.lastModified = null;
+    }
+
+    // Fetch block 0 (the header and, for every ZIM we ship, the whole
+    // MIME list live there) and learn the file size from Content-Range.
+    async open() {
+      const res = await this._fetch(0, this.blockSize - 1);
+      const cr = parseContentRange(res.headers.get('Content-Range'));
+      this.etag = res.headers.get('ETag');
+      this.lastModified = res.headers.get('Last-Modified');
+      const buf = new Uint8Array(await res.arrayBuffer());
+      this.size = (cr && cr.total > 0) ? cr.total : await this._sizeFromHead();
+      if (!(this.size > 0)) {
+        throw new Error('HttpRangeSource: could not determine the file size ' +
+          '(no Content-Range or Content-Length exposed by ' + this.url + ')');
+      }
+      if (buf.byteLength !== Math.min(this.blockSize, this.size)) {
+        throw new Error('HttpRangeSource: short read opening ' + this.url +
+          ' (' + buf.byteLength + ' of ' + Math.min(this.blockSize, this.size) + ')');
+      }
+      this.blocks.set(0, buf);
+      return this;
+    }
+
+    // Blob.prototype.slice look-alike; only .arrayBuffer() is provided.
+    // `opts.exact` fetches just those bytes, bypassing the block cache.
+    slice(start, end, opts) {
+      const self = this;
+      const exact = !!(opts && opts.exact);
+      return { arrayBuffer: function() { return self._read(start, end - start, exact); } };
+    }
+
+    async _read(offset, length, exact) {
+      if (length <= 0) return new ArrayBuffer(0);
+      if (offset < 0 || offset + length > this.size) {
+        throw new Error('HttpRangeSource: out-of-range read (' + offset + '+' +
+          length + ' of ' + this.size + ')');
+      }
+      const bs = this.blockSize;
+      if (exact || length >= bs) return this._exact(offset, length);
+      const first = Math.floor(offset / bs);
+      const last = Math.floor((offset + length - 1) / bs);
+      const pending = [];
+      for (let i = first; i <= last; i++) pending.push(this._block(i));
+      const blocks = await Promise.all(pending);
+      if (first === last) {
+        const o = offset - first * bs;
+        return blocks[0].slice(o, o + length).buffer;
+      }
+      const out = new Uint8Array(length);
+      let pos = 0;
+      for (let i = first; i <= last; i++) {
+        const b = blocks[i - first];
+        const from = (i === first) ? offset - first * bs : 0;
+        const to = (i === last) ? (offset + length) - last * bs : b.byteLength;
+        out.set(b.subarray(from, to), pos);
+        pos += to - from;
+      }
+      return out.buffer;
+    }
+
+    // One uncached range, shared with any identical read in flight.
+    _exact(offset, length) {
+      const key = offset + ':' + length;
+      const running = this.inflight.get(key);
+      if (running) return running;
+      const p = this._fetch(offset, offset + length - 1)
+        .then((res) => res.arrayBuffer())
+        .then((buf) => {
+          if (buf.byteLength !== length) {
+            throw new Error('HttpRangeSource: short read (' + buf.byteLength +
+              ' of ' + length + ')');
+          }
+          return buf;
+        })
+        .finally(() => { if (this.inflight.get(key) === p) this.inflight.delete(key); });
+      this.inflight.set(key, p);
+      return p;
+    }
+
+    _block(i) {
+      const hit = this.blocks.get(i);
+      if (hit) return Promise.resolve(hit);
+      const running = this.inflight.get(i);
+      if (running) return running;
+      const start = i * this.blockSize;
+      const end = Math.min(start + this.blockSize, this.size) - 1;
+      const p = this._fetch(start, end)
+        .then((res) => res.arrayBuffer())
+        .then((buf) => {
+          const u8 = new Uint8Array(buf);
+          if (u8.byteLength !== end - start + 1) {
+            throw new Error('HttpRangeSource: short block ' + i + ' (' +
+              u8.byteLength + ' of ' + (end - start + 1) + ')');
+          }
+          this.blocks.set(i, u8);
+          return u8;
+        })
+        .finally(() => { if (this.inflight.get(i) === p) this.inflight.delete(i); });
+      this.inflight.set(i, p);
+      return p;
+    }
+
+    // One ranged GET, retried on network errors and 5xx/429. Resolves
+    // with a verified 206 whose body has not been read yet.
+    async _fetch(start, end) {
+      const want = end - start + 1;
+      let lastErr = null;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        if (attempt) await new Promise((r) => setTimeout(r, 400 * attempt));
+        let res;
+        try {
+          // The range goes in the header (what any file server needs)
+          // and, for the preview proxy, in the query string as well: a
+          // CDN in front of the proxy keys its cache on the URL, and
+          // Firebase Hosting is not documented to forward Range to a
+          // function. Static servers ignore the query.
+          const sep = this.url.indexOf('?') < 0 ? '?' : '&';
+          res = await fetch(this.url + sep + 'bytes=' + start + '-' + end, {
+            headers: { Range: 'bytes=' + start + '-' + end },
+            credentials: 'omit'
+          });
+        } catch (err) {
+          lastErr = err;                  // network error, CORS failure
+          continue;
+        }
+        this.stats.requests++;
+        if (res.status === 206) {
+          const cr = parseContentRange(res.headers.get('Content-Range'));
+          const cl = parseInt(res.headers.get('Content-Length') || '', 10);
+          // A range past EOF is legitimately answered short, with
+          // Content-Range telling us so (open() asks for a whole block
+          // before it knows the size).
+          const crOk = !!cr && cr.start === start &&
+            (cr.end === end || (cr.total > 0 && cr.end === cr.total - 1 && end > cr.end));
+          if (crOk || (!cr && cl === want)) {
+            this.stats.bytes += cr ? cr.end - cr.start + 1 : want;
+            return res;
+          }
+          discardBody(res);
+          throw new Error('HttpRangeSource: asked for bytes=' + start + '-' + end +
+            ' but got ' + (cr ? 'bytes ' + cr.start + '-' + cr.end : 'no usable Content-Range') +
+            ' (Content-Length ' + cl + ')');
+        }
+        discardBody(res);
+        if (res.status === 200) {
+          throw new Error('HttpRangeSource: server ignores Range requests ' +
+            '(200 for bytes=' + start + '-' + end + ') — refusing to stream the whole file');
+        }
+        if (res.status >= 500 || res.status === 429) {
+          lastErr = new Error('HTTP ' + res.status + ' from ' + this.url);
+          continue;
+        }
+        throw new Error('HTTP ' + res.status + ' from ' + this.url);
+      }
+      throw lastErr || new Error('HttpRangeSource: fetch failed');
+    }
+
+    // Fallback when the 206 carried no readable Content-Range (a
+    // cross-origin server not exposing it): Content-Length on a HEAD is
+    // always readable.
+    async _sizeFromHead() {
+      try {
+        const res = await fetch(this.url, { method: 'HEAD', credentials: 'omit' });
+        this.stats.requests++;
+        const cl = parseInt(res.headers.get('Content-Length') || '', 10);
+        return (res.ok && cl > 0) ? cl : 0;
+      } catch (e) {
+        return 0;
+      }
+    }
+  }
+
+  function discardBody(res) {
+    try {
+      if (res.body && typeof res.body.cancel === 'function') res.body.cancel();
+    } catch (e) {}
+  }
+
+  // "bytes 0-131071/226265704" → {start, end, total} (total -1 for "*").
+  function parseContentRange(h) {
+    const m = /^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i.exec(String(h || '').trim());
+    if (!m) return null;
+    return {
+      start: parseInt(m[1], 10),
+      end: parseInt(m[2], 10),
+      total: m[3] === '*' ? -1 : parseInt(m[3], 10)
+    };
+  }
+
   global.StreetZimReader = ZimReader;
+  global.StreetZimHttpSource = HttpRangeSource;
 })(typeof self !== 'undefined' ? self : globalThis);

@@ -33,7 +33,7 @@
     try {
       logEvent(analytics, 'map_link_click', {
         region: a.getAttribute('data-region') || 'unknown',
-        link_type: a.getAttribute('data-track'),      // "download" | "torrent" | "details"
+        link_type: a.getAttribute('data-track'),      // "download" | "preview" | "torrent" | "details"
         region_title: a.getAttribute('data-title') || ''
       });
     } catch (err) {}

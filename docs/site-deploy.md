@@ -65,6 +65,11 @@ open web/index.html            # local preview in browser
   with `Failed to authenticate, have you run firebase login?`.
 - **`node` / `npm` mismatch.** Firebase-tools needs Node 18+. If
   `firebase deploy` fails on `Unsupported engine`, upgrade Node first.
+- **Preview buttons missing / unwanted:** `web/generate.py` only renders
+  a Preview button on live cards when `web/drive/preview-config.js`
+  names the range proxy the picker streams archive.org ZIMs through.
+  Empty string = no buttons. Deploying the proxy and switching it on is
+  covered in `docs/online-preview.md`.
 - **Adding a new region:** edit `REGIONS` in `web/generate.py` (a new
   entry needs `id` matching `streetzim-<id>`, plus `tier` (one of the
   ids in `TIERS`), `title`, `zim_file`, and `description`; see the

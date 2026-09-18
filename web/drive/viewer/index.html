@@ -47,6 +47,33 @@
     margin-bottom: min(var(--bottom-inset, 0px), 64px);
   }
 
+  /* --- Online-preview banner (PWA only; docs/online-preview.md) --- */
+  #preview-banner {
+    position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%);
+    z-index: 3; box-sizing: border-box;
+    display: flex; align-items: center; justify-content: center;
+    gap: 10px; flex-wrap: wrap;
+    width: max-content; max-width: min(560px, calc(100% - 20px));
+    padding: 8px 12px;
+    background: var(--panel-bg); border-radius: var(--radius);
+    box-shadow: var(--panel-shadow);
+    font-family: var(--ui-font); font-size: 12px; line-height: 1.4;
+    color: var(--text-secondary);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  }
+  #preview-banner[hidden] { display: none; }
+  #preview-banner b { color: var(--text-primary); font-weight: 600; }
+  #preview-banner a.dl {
+    color: #fff; background: var(--accent); padding: 5px 10px;
+    border-radius: 6px; text-decoration: none; font-weight: 600;
+    white-space: nowrap;
+  }
+  #preview-banner a.dl:hover { background: var(--accent-hover); }
+  #preview-banner button {
+    background: none; border: none; padding: 0 2px; line-height: 1;
+    color: var(--text-tertiary); font-size: 18px; cursor: pointer;
+  }
+
   /* --- Attribution / info tag --- */
   #info {
     position: absolute; bottom: 36px; left: 10px; z-index: 1;
@@ -772,6 +799,49 @@
   el.addEventListener('click', function() {
     if (navigator.clipboard) navigator.clipboard.writeText(el.textContent);
   });
+})();
+</script>
+<!-- Online-preview banner: shown only when the /drive/ service worker
+     reports that it is streaming the ZIM off the web by range requests
+     rather than reading a local file (docs/online-preview.md). Inside
+     Kiwix there is no such worker to ask, so it never appears there. -->
+<div id="preview-banner" hidden>
+  <span>Online preview of <b id="preview-banner-name"></b>, streamed from
+    <span id="preview-banner-host"></span> &mdash; the downloaded file is
+    faster and works offline.</span>
+  <a class="dl" id="preview-banner-download" href="#" rel="noopener">Download</a>
+  <button id="preview-banner-close" type="button" title="Hide" aria-label="Hide">&times;</button>
+</div>
+<script>
+(function() {
+  var banner = document.getElementById('preview-banner');
+  if (!banner) return;
+  if (!/^\/drive\/viewer\/?(index\.html)?$/.test(location.pathname)) return;
+  if (!('serviceWorker' in navigator)) return;
+  document.getElementById('preview-banner-close').addEventListener('click', function() {
+    banner.hidden = true;
+  });
+  navigator.serviceWorker.ready.then(function(reg) {
+    var target = navigator.serviceWorker.controller || reg.active;
+    if (!target) return;
+    var ch = new MessageChannel();
+    ch.port1.onmessage = function(e) {
+      var r = e.data;
+      if (!r || !r.ok || r.source !== 'url' || !r.url) return;
+      var host = 'the web';
+      try { host = new URL(r.url).host; } catch (err) {}
+      document.getElementById('preview-banner-name').textContent = r.name || 'this map';
+      document.getElementById('preview-banner-host').textContent = host;
+      var dl = document.getElementById('preview-banner-download');
+      dl.href = r.url;
+      var mb = r.sizeBytes ? r.sizeBytes / 1048576 : 0;
+      dl.textContent = 'Download' +
+        (mb >= 1024 ? ' (' + (mb / 1024).toFixed(1) + ' GB)' :
+         mb ? ' (' + Math.round(mb) + ' MB)' : '');
+      banner.hidden = false;
+    };
+    target.postMessage({ type: 'status' }, [ch.port2]);
+  }).catch(function() {});
 })();
 </script>
 <div id="controls">
