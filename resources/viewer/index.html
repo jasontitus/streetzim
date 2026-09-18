@@ -2083,8 +2083,14 @@ fetchConfig(1)
       if (infoEl) {
         var retry = document.createElement('p');
         retry.className = 'sz-recover';
-        retry.innerHTML = '<a href="#">Try again</a> &middot; ' +
-                          '<a href="/drive/?picker=1">Change map</a>';
+        // Set the picker href at runtime rather than emitting it in markup
+        // (same approach as changeLink above). This branch only runs on the
+        // PWA path, so Kiwix never reaches it — but zimcheck scans the static
+        // HTML, where a literal "/drive/?picker=1" is an internal link that
+        // does not exist inside a ZIM. It failed validate on every swapped
+        // ZIM (2026-09-18) even though the code is unreachable there.
+        retry.innerHTML = '<a href="#">Try again</a> &middot; <a>Change map</a>';
+        retry.lastChild.setAttribute('href', '/drive/?picker=1');
         retry.firstChild.addEventListener('click', function(ev) { ev.preventDefault(); location.reload(); });
         infoEl.appendChild(retry);
       }

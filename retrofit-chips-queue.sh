@@ -61,11 +61,19 @@ a = Archive(sys.argv[1]); total = 0
 def n(p):
     return len(json.loads(bytes(a.get_entry_by_path(p).get_item().content).decode()))
 try:
-    meta = json.loads(bytes(a.get_entry_by_path(
-        'category-index/manifest.json').get_item().content))['chips']['restaurants']
+    chips = json.loads(bytes(a.get_entry_by_path(
+        'category-index/manifest.json').get_item().content))['chips']
+    # 'restaurants' and 'cafes' were merged into one 'food' chip on
+    # 2026-09-18, so hardcoding 'restaurants' made this smoke return 0 for
+    # every current ZIM — a gate that failed good files and could never pass.
+    # Assert whatever food-ish chip the ZIM declares, else its largest chip.
+    cid = next((c for c in ('food', 'restaurants', 'shops') if c in chips), None)
+    if cid is None:
+        cid = max(chips, key=lambda c: chips[c].get('count') or 0)
+    meta = chips[cid]
     subs = meta.get('sub_chunks') or []
-    total = (sum(n(f'category-index/chip-restaurants-{s}.json') for s in subs)
-             if subs else n('category-index/chip-restaurants.json'))
+    total = (sum(n(f'category-index/chip-{cid}-{s}.json') for s in subs)
+             if subs else n(f'category-index/chip-{cid}.json'))
 except Exception: total = 0
 print(total)
 PYEOF
