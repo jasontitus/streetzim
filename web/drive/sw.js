@@ -6,8 +6,9 @@
 //   2. Intercept fetches from /drive/viewer/* and serve them either from
 //      the shell cache (known static assets) or from the user's local
 //      ZIM via ZimReader.
-//   3. Keep the ZIM Blob in IndexedDB so it survives SW termination and
-//      re-launches.
+//   3. Keep the ZIM Blob — or, for the online preview, the URL it is
+//      streamed from by range requests — in IndexedDB so it survives SW
+//      termination and re-launches.
 //
 // After install + ZIM pick, the app works with zero network requests.
 
@@ -27,6 +28,7 @@ const SHELL_URLS = [
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
+  './preview-config.js',
   './viewer/',
   './viewer/index.html',
   './viewer/places.html',
@@ -113,14 +115,27 @@ function resetReader() {
   readerPromise = null;
 }
 
+// A record holds either a File/Blob picked on /drive/ or the URL of a
+// ZIM to stream through HTTP range requests (the online preview of the
+// archive.org-hosted regions — docs/online-preview.md). Both end up as
+// the same ZimReader; only the byte source differs.
+async function openReader(rec) {
+  let source = rec.blob;
+  if (rec.url) {
+    source = new self.StreetZimHttpSource(rec.url);
+    await source.open();
+  }
+  const r = new self.StreetZimReader(source);
+  await r.open();
+  return r;
+}
+
 async function getReader() {
   if (readerPromise) return readerPromise;
   const p = (async () => {
     const rec = await idbGet('current');
-    if (!rec || !rec.blob) return null;
-    const r = new self.StreetZimReader(rec.blob);
-    await r.open();
-    return r;
+    if (!rec || !(rec.blob || rec.url)) return null;
+    return openReader(rec);
   })();
   // A failed open (transient IDB error, file moved/modified under a
   // persisted File handle) must not be memoised — every later request
@@ -199,16 +214,26 @@ self.addEventListener('message', (event) => {
         // (or truncated) file stuck as `current`: every request then
         // 500'd and the picker hid the Remove button because status
         // reported "not loaded", so the user couldn't clear it.
-        const r = new self.StreetZimReader(msg.blob);
-        await r.open();
-        await idbPut({
-          id: 'current',
-          blob: msg.blob,
-          name: msg.name || 'zim',
-          addedAt: Date.now()
-        });
+        // `url` streams the ZIM by range requests instead of reading a
+        // local Blob; `sourceUrl` is the human-facing origin of those
+        // bytes (the archive.org download link) when `url` is a proxy.
+        let rec;
+        if (msg.url) {
+          if (!/^https?:\/\//i.test(String(msg.url))) {
+            throw new Error('set-zim: url must be http(s)');
+          }
+          rec = { id: 'current', url: String(msg.url),
+                  sourceUrl: String(msg.sourceUrl || msg.url),
+                  name: msg.name || 'zim', addedAt: Date.now() };
+        } else {
+          rec = { id: 'current', blob: msg.blob,
+                  name: msg.name || 'zim', addedAt: Date.now() };
+        }
+        const r = await openReader(rec);
+        await idbPut(rec);
         readerPromise = Promise.resolve(r);
         reply.info = r.info;
+        reply.source = rec.url ? 'url' : 'file';
       } else if (msg.type === 'clear-zim') {
         await idbDelete('current');
         resetReader();
@@ -221,8 +246,15 @@ self.addEventListener('message', (event) => {
         // this to keep the Remove button available so the user can
         // clear a record that no longer opens.
         const rec = await idbGet('current').catch(() => null);
-        reply.present = !!(rec && rec.blob);
+        reply.present = !!(rec && (rec.blob || rec.url));
         reply.name = rec && rec.name ? rec.name : null;
+        // Where the bytes come from — 'file' for a local pick, 'url' for
+        // the online preview. The picker's status line and the viewer's
+        // preview banner (with its Download link) key off this.
+        reply.source = rec && rec.url ? 'url' : (rec && rec.blob ? 'file' : null);
+        reply.url = rec && rec.url ? (rec.sourceUrl || rec.url) : null;
+        reply.sizeBytes = r ? r.size : null;
+        reply.stats = (r && r.file && r.file.stats) ? r.file.stats : null;
       } else {
         reply = { ok: false, error: 'unknown message type' };
       }

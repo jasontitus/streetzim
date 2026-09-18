@@ -81,6 +81,15 @@
   .dot.ok { background: var(--ok); }
   .dot.warn { background: var(--warn); }
   input[type=file] { display: none; }
+  .or { text-align: center; font-size: 12px; color: var(--text-dim); margin: -2px 0; }
+  #url-form { display: flex; gap: 8px; }
+  #url-input {
+    flex: 1; min-width: 0; font-family: inherit; font-size: 13px;
+    padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+    background: #0a0f1c; color: var(--text);
+  }
+  #url-input::placeholder { color: var(--text-dim); opacity: 0.7; }
+  #url-form button { padding: 10px 14px; }
   details { margin-top: 16px; }
   details summary { cursor: pointer; color: var(--text-dim); font-size: 13px; }
   details pre {
@@ -105,6 +114,12 @@
 <div class="card">
   <div class="row stack">
     <button id="pick-btn">Choose a ZIM file</button>
+    <div class="or">or stream one from archive.org</div>
+    <form id="url-form" autocomplete="off">
+      <input id="url-input" type="url" spellcheck="false"
+             placeholder="https://archive.org/download/streetzim-…/….zim">
+      <button type="submit" class="btn-secondary">Stream</button>
+    </form>
     <a id="open-btn" class="btn btn-secondary" href="/drive/viewer/" style="display:none;">Open viewer</a>
     <button id="clear-btn" class="btn-danger" style="display:none;">Remove loaded ZIM</button>
   </div>
@@ -113,6 +128,9 @@
     (or download one from <a href="/">streetzim.web.app</a>).
     On Chrome / Edge the file handle is remembered across launches;
     on Safari you may need to re-pick it after a reboot.
+    Streaming reads a map straight off archive.org through a small
+    range proxy: nothing is downloaded up front, but tiles arrive
+    slower than from a local file and it needs a connection.
   </div>
 </div>
 
@@ -129,6 +147,8 @@
 <!-- Hidden fallback picker for browsers without showOpenFilePicker -->
 <input type="file" id="file-fallback" accept=".zim,application/octet-stream">
 
+<!-- Range-proxy base URL for streaming archive.org ZIMs (may be empty). -->
+<script src="/drive/preview-config.js"></script>
 <script>
 (function() {
   'use strict';
@@ -137,6 +157,8 @@
   const openBtn  = document.getElementById('open-btn');
   const clearBtn = document.getElementById('clear-btn');
   const fileFallback = document.getElementById('file-fallback');
+  const urlForm  = document.getElementById('url-form');
+  const urlInput = document.getElementById('url-input');
   const statusEl = document.getElementById('status');
   const statusTitle = document.getElementById('status-title');
   const statusDot = document.getElementById('status-dot');
@@ -246,13 +268,17 @@
     });
   }
 
-  async function refreshStatus() {
+  async function refreshStatus(opts) {
+    // quiet: sync the buttons but leave the current (error) message up.
+    const show = (opts && opts.quiet) ? function() {} : setStatus;
     try {
       const r = await askSW({ type: 'status' });
       if (r && r.ok && r.loaded) {
-        setStatus('ok', 'ZIM loaded',
+        const streaming = r.source === 'url';
+        show('ok', streaming ? 'Streaming from ' + hostOf(r.url) : 'ZIM loaded',
+          (r.name ? r.name + ' · ' : '') +
           'v' + r.info.version + ' · ' + r.info.articles.toLocaleString() + ' entries · ' +
-          r.info.sizeMB + ' MB');
+          r.info.sizeMB + ' MB' + (streaming ? ' · read on demand, nothing downloaded' : ''));
         openBtn.style.display = '';
         clearBtn.style.display = '';
         pickBtn.textContent = 'Change ZIM';
@@ -261,22 +287,43 @@
         // disk, or a corrupt pick from an older build). Keep Remove
         // visible — before this the user was stuck with a broken
         // record and no way to clear it.
-        setStatus('err', 'Saved ZIM can\'t be opened',
+        show('err', 'Saved ZIM can\'t be opened',
           (r.name ? r.name + ' — ' : '') +
-          'the file may have moved or changed. Remove it or pick it again.');
+          (r.source === 'url'
+            ? 'it is no longer reachable at its URL. Remove it or stream it again.'
+            : 'the file may have moved or changed. Remove it or pick it again.'));
         openBtn.style.display = 'none';
         clearBtn.style.display = '';
         pickBtn.textContent = 'Choose a ZIM file';
       } else {
-        setStatus('warn', 'No ZIM loaded',
+        show('warn', 'No ZIM loaded',
           'Pick a file below — it stays in your browser, nothing uploaded.');
         openBtn.style.display = 'none';
         clearBtn.style.display = 'none';
         pickBtn.textContent = 'Choose a ZIM file';
       }
     } catch (err) {
-      setStatus('err', 'Status check failed', String(err && err.message || err));
+      show('err', 'Status check failed', String(err && err.message || err));
     }
+  }
+
+  function hostOf(url) {
+    try { return new URL(url).host; } catch (e) { return 'the web'; }
+  }
+
+  // Forward debug-related query params so flags like ?debug=1 and
+  // ?route=full survive the redirect into the viewer. Without this,
+  // the picker stripped them silently and ?debug=1 was a no-op (seen
+  // 2026-04-25 — debug overlay never appeared).
+  function viewerUrl() {
+    const passthrough = new URLSearchParams();
+    const here = new URLSearchParams(window.location.search);
+    for (const k of ['debug', 'route', 'bust']) {
+      const v = here.get(k);
+      if (v) passthrough.set(k, v);
+    }
+    const qs = passthrough.toString();
+    return '/drive/viewer/' + (qs ? '?' + qs : '');
   }
 
   // ---------- File picker ----------
@@ -320,27 +367,116 @@
       const resp = await askSW({ type: 'set-zim', blob: file, name: file.name });
       if (!resp || !resp.ok) throw new Error(resp && resp.error || 'SW rejected file');
       await refreshStatus();
-      // Forward debug-related query params so flags like ?debug=1
-      // and ?route=full survive the redirect into the viewer. Without
-      // this, the picker stripped them silently and ?debug=1 was a
-      // no-op (seen 2026-04-25 — debug overlay never appeared).
-      const passthrough = new URLSearchParams();
-      const here = new URLSearchParams(window.location.search);
-      for (const k of ['debug', 'route', 'bust']) {
-        const v = here.get(k);
-        if (v) passthrough.set(k, v);
-      }
-      const qs = passthrough.toString();
-      const dest = '/drive/viewer/' + (qs ? '?' + qs : '');
-      setTimeout(() => { window.location.href = dest; }, 600);
+      setTimeout(() => { window.location.href = viewerUrl(); }, 600);
     } catch (err) {
       setStatus('err', 'Failed to open ZIM', String(err && err.message || err));
+    }
+  }
+
+  // ---------- Streaming from a URL (online preview) ----------
+  //
+  // `?zim=<url>` (the catalog's Preview buttons, shared links) or the
+  // URL box. archive.org's download servers honour Range but send no
+  // CORS headers, and its /cors/ endpoint ignores Range, so archive.org
+  // URLs are rewritten onto the range proxy from preview-config.js
+  // (docs/online-preview.md). Same-origin URLs go direct — that is how
+  // the smoke test runs against scripts/serve-web-local.py. Anything
+  // else is refused: ZIM content renders on this origin, so a link must
+  // not be able to point the viewer at a ZIM on a hostile server.
+  const IA_DOWNLOAD_RE = /^https?:\/\/archive\.org\/(?:download|serve)\/(streetzim-[a-z0-9-]+)\/([A-Za-z0-9._-]+\.zim)(?:[?#].*)?$/;
+  const IA_ITEM_RE = /^(?:https?:\/\/archive\.org\/(?:details|download)\/)?(streetzim-[a-z0-9-]+)\/?$/;
+
+  function previewProxy() {
+    return String(window.STREETZIM_PREVIEW_PROXY || '').replace(/\/+$/, '');
+  }
+
+  // Newest .zim in an archive.org item — the rule web/generate.py uses
+  // for the catalog cards: dated names win, later dates win, and a
+  // same-day re-roll suffix (…-2026-04-26b.zim) beats none. Size only
+  // breaks ties. (archive.org's metadata API does send CORS headers.)
+  async function newestZimInItem(item) {
+    const res = await fetch('https://archive.org/metadata/' + encodeURIComponent(item));
+    if (!res.ok) throw new Error('archive.org metadata: HTTP ' + res.status);
+    const meta = await res.json();
+    const files = ((meta && meta.files) || []).filter((f) =>
+      /\.zim$/.test(f.name || '') && (f.name || '').indexOf('history/') < 0);
+    if (!files.length) throw new Error('no .zim file in ' + item + ' yet');
+    const key = (f) => {
+      const m = /-(\d{4}-\d{2}(?:-\d{2})?[a-z]?)\.zim$/.exec(f.name);
+      return [m ? 1 : 0, m ? m[1] : '', parseInt(f.size, 10) || 0];
+    };
+    files.sort((a, b) => {
+      const ka = key(a), kb = key(b);
+      for (let i = 0; i < 3; i++) {
+        if (ka[i] !== kb[i]) return ka[i] < kb[i] ? 1 : -1;
+      }
+      return 0;
+    });
+    return 'https://archive.org/download/' + item + '/' + files[0].name;
+  }
+
+  async function resolveZimUrl(raw) {
+    raw = String(raw || '').trim();
+    let m = IA_ITEM_RE.exec(raw);
+    if (m) raw = await newestZimInItem(m[1]);
+    m = IA_DOWNLOAD_RE.exec(raw);
+    if (m) {
+      const proxy = previewProxy();
+      if (!proxy) {
+        throw new Error('Online preview is not switched on for this site: ' +
+          'no range proxy is configured (docs/online-preview.md).');
+      }
+      return {
+        fetchUrl: proxy + '/' + m[1] + '/' + m[2],
+        sourceUrl: 'https://archive.org/download/' + m[1] + '/' + m[2],
+        name: m[2],
+        host: 'archive.org'
+      };
+    }
+    let u;
+    try { u = new URL(raw, location.href); } catch (e) { throw new Error('Not a valid URL: ' + raw); }
+    if (u.origin === location.origin) {
+      return { fetchUrl: u.href, sourceUrl: u.href,
+               name: decodeURIComponent(u.pathname.split('/').pop() || 'zim'), host: u.host };
+    }
+    throw new Error('Only StreetZim downloads on archive.org can be streamed (got ' + u.host + ').');
+  }
+
+  async function loadZimUrl(raw) {
+    let src;
+    try {
+      setStatus('warn', 'Resolving…', String(raw));
+      src = await resolveZimUrl(raw);
+    } catch (err) {
+      setStatus('err', 'Can\'t stream that', String(err && err.message || err));
+      await refreshStatus({ quiet: true });
+      return false;
+    }
+    setStatus('warn', 'Connecting…', src.name + ' — reading the ZIM header from ' + src.host + '…');
+    try {
+      const resp = await askSW({ type: 'set-zim', url: src.fetchUrl,
+                                 sourceUrl: src.sourceUrl, name: src.name });
+      if (!resp || !resp.ok) throw new Error(resp && resp.error || 'SW rejected URL');
+      dbg('streaming', src, resp.info);
+      await refreshStatus();
+      setTimeout(() => { window.location.href = viewerUrl(); }, 600);
+      return true;
+    } catch (err) {
+      setStatus('err', 'Failed to open ZIM from ' + src.host, String(err && err.message || err));
+      await refreshStatus({ quiet: true });
+      return false;
     }
   }
 
   pickBtn.addEventListener('click', async () => {
     const file = await pickFile();
     if (file) loadZim(file);
+  });
+
+  urlForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = urlInput.value.trim();
+    if (v) loadZimUrl(v);
   });
 
   clearBtn.addEventListener('click', async () => {
@@ -360,6 +496,14 @@
     try {
       swRegistration = await ensureSW();
       dbg('sw ready', swRegistration.scope);
+      // Arrived from a catalog Preview button or a shared link: stream
+      // that ZIM and go straight to the viewer.
+      const wanted = new URLSearchParams(window.location.search).get('zim');
+      if (wanted) {
+        urlInput.value = wanted;
+        await loadZimUrl(wanted);
+        return;
+      }
       await refreshStatus();
     } catch (err) {
       setStatus('err', 'Service worker registration failed',
