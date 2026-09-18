@@ -34,6 +34,8 @@ TSV=/storage/streetzim/viewer-refresh.tsv
 LOCK=/storage/streetzim/.retrofit-upload.lock
 UPLOAD="${UPLOAD:-1}"
 TODAY=$(date +%Y-%m-%d)
+# Live filenames per region, from archive.org (tmp/live-inventory.py).
+LIVE_INVENTORY="${LIVE_INVENTORY:-/storage/streetzim/tmp/live-inventory.out}"
 
 # smallest first, as asked
 REGIONS=(switzerland argentina turkey west-coast-us japan central-us mexico
@@ -51,8 +53,14 @@ sed -n '/^smoke_find()/,/^}/p;/^smoke_search()/,/^}/p;/^browser_smoke()/,/^}/p' 
 
 for ID in "${REGIONS[@]}"; do
   grep -qP "^$ID\t(viewer-refreshed|uploaded)" "$TSV" 2>/dev/null && { log "skip $ID: already done"; continue; }
-  SRC=$(ls osm-"$ID"-20[0-9][0-9]-[0-9][0-9]-[0-9][0-9].zim 2>/dev/null | sort | tail -1)
-  [ -n "$SRC" ] || { log "skip $ID: no local ZIM"; row "$ID" skipped - "no zim"; continue; }
+  # SRC must be the file archive.org CURRENTLY LISTS, never "newest local
+  # dated ZIM": several regions have newer local artifacts that were built but
+  # never shipped (stranded retrofits that gate-failed). Swapping a viewer into
+  # one of those and uploading it would quietly publish un-gated chip/search
+  # reshards under the banner of a viewer fix.
+  SRC=$(awk -v r="$ID" '$1==r{print $NF}' "$LIVE_INVENTORY" 2>/dev/null)
+  [ -n "$SRC" ] || { log "skip $ID: not listed on archive.org"; row "$ID" skipped - "not live"; continue; }
+  [ -s "$SRC" ] || { log "skip $ID: live file $SRC not present locally"; row "$ID" skipped "$SRC" "no local copy"; continue; }
   OUT="osm-${ID}-${TODAY}b.zim"
   for sfx in b c d e; do OUT="osm-${ID}-${TODAY}${sfx}.zim"; [ -e "$OUT" ] || break; done
   [ -e "$OUT" ] && { log "skip $ID: no free name"; row "$ID" skipped "$SRC" "name"; continue; }

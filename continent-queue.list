@@ -1,32 +1,22 @@
 # Continents to rebuild, cheapest first (mbtiles+pbf), one per line.
 # The runner re-reads this file before each region, so it can be edited
 # freely while the chain is running — never edit the runner itself.
-# Comment a line out to skip it; add canada / russia here if wanted.
+# Comment a line out to skip it.
+#
+# 2026-09-18 (post viewer merge b861cc4): trimmed to the regions that need an
+# actual BUILD. Everything else from this round failed at gate or upload, not
+# at build, so their ZIMs exist and only need a viewer swap + re-gate — hours
+# of rebuild would buy nothing. Builds from here bake the merged viewer
+# automatically (create_osm_zim reads resources/viewer at assembly).
+#
+# australia-nz : 2026-09-14 gate-failed on two zero-byte satellite cache tiles
+#                (14/13426/9043-9044); caches cleared, create_osm_zim now drops
+#                empty raster files.
+# africa       : 2026-09-15 overture-failed on a duckdb HTTP timeout fetching
+#                addresses part-00024. Transient; retry.
+# russia       : never shipped this round (newest local is 2026-05-12c).
+# canada       : never shipped.
 australia-nz
-indian-subcontinent
-southeast-asia
-south-america
-china
 africa
-united-states
-europe
-# Added 2026-09-14 on request. Appended rather than inserted in size order:
-# the runner holds this file on fd 3 and consumes it line by line, so appends
-# are picked up but rewriting earlier lines would corrupt its read position.
-# These are NEW regions (never shipped), not refreshes.
 russia
 canada
-# Rebuild: 2026-09-14 build failed validate on two zero-byte satellite
-# cache tiles (14/13426/9043-9044). Cache files removed so they re-download;
-# create_osm_zim.py now drops empty raster files. Gate-failed ZIM moved to
-# rejected-zims/ so the same-name skip in build-region-fast.sh can't fire.
-australia-nz
-# CORRECTION (2026-09-14, from review): the header above is wrong for the
-# runner started 2026-09-14 01:25. That runner holds this file open and reads it
-# by byte offset, so ONLY appending whole lines (ending in a newline) is safe
-# while it runs. Commenting out, reordering, or atomically replacing this file
-# will be missed or corrupt its read. The run-continent-chain.sh installed after
-# this note re-reads the list per region, making all of those edits safe for
-# any chain launched from now on.
-# 2026-09-15: africa failed on a transient Overture download timeout (duckdb HTTP GET timeout on addresses part-00024); retry.
-africa
