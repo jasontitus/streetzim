@@ -243,6 +243,13 @@ REGIONS = [
         "description": "Egypt &mdash; Cairo, Alexandria, Giza, Luxor, Aswan, the Nile Valley, Sinai Peninsula, and the Red Sea coast.",
     },
     {
+        "id": "switzerland",
+        "tier": "country",
+        "title": "Switzerland & the Alps",
+        "zim_file": "osm-switzerland.zim",
+        "description": "Switzerland and the surrounding Alps &mdash; Z\u00fcrich, Geneva, Bern, Basel, Lausanne, Lucerne, Lugano, St. Moritz, Zermatt and the Matterhorn, Interlaken and the Jungfrau, plus Chamonix and Mont Blanc, Aosta, Lake Como, Liechtenstein, Lake Constance and western Tirol.",
+    },
+    {
         "id": "iceland",
         "tier": "country",
         "title": "Iceland",
