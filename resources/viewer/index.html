@@ -63,7 +63,19 @@
      Island once the PWA is installed (viewport-fit=cover); --safe-bottom
      keeps the bottom row above the home indicator. Both are 0 in a browser
      tab and inside Kiwix. */
-  :root { --top-inset: env(safe-area-inset-top, 0px); --safe-bottom: env(safe-area-inset-bottom, 0px); }
+  /* 2026-09-19: these are NOT 0 inside Kiwix. The comment above used to claim
+     they were; a user screenshot showed the search overlay sitting ~120 px
+     down the map in Kiwix on iOS, because its WKWebView reports a non-zero
+     env(safe-area-inset-top) even though the WebView already sits below the
+     app's own chrome — so the inset was double-counted. Default to 0 and only
+     lift for a real standalone/PWA launch, which is what §B1 actually wanted.
+     Matches isStandalone() further down: display-mode plus navigator.standalone
+     for older iOS Safari, applied via the .sz-standalone class. */
+  :root { --top-inset: 0px; --safe-bottom: 0px; }
+  @media (display-mode: standalone) {
+    :root { --top-inset: env(safe-area-inset-top, 0px); --safe-bottom: env(safe-area-inset-bottom, 0px); }
+  }
+  html.sz-standalone { --top-inset: env(safe-area-inset-top, 0px); --safe-bottom: env(safe-area-inset-bottom, 0px); }
   #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; width: 100%; height: 100%; }
   .maplibregl-ctrl-top-right, .maplibregl-ctrl-top-left { top: var(--top-inset, 0px); }
   .maplibregl-ctrl-bottom-left { bottom: var(--safe-bottom, 0px); }
@@ -879,7 +891,7 @@
 <!-- Always-visible build stamp. Tiny, top-left, click to copy. Lets
      you instantly tell which deploy the page is from. Populated by
      a fetch('/drive/build-info.js') below. -->
-<div id="viewer-build-stamp" style="position:fixed;top:calc(6px + env(safe-area-inset-top, 0px));left:8px;background:rgba(0,0,0,0.55);color:#0f0;font:10px/1 ui-monospace,monospace;padding:3px 6px;border-radius:4px;z-index:1;pointer-events:auto;cursor:copy;opacity:0.7;" title="StreetZim build (click to copy)">…</div>
+<div id="viewer-build-stamp" style="position:fixed;top:calc(6px + var(--top-inset, 0px));left:8px;background:rgba(0,0,0,0.55);color:#0f0;font:10px/1 ui-monospace,monospace;padding:3px 6px;border-radius:4px;z-index:1;pointer-events:auto;cursor:copy;opacity:0.7;" title="StreetZim build (click to copy)">…</div>
 <script>
 (function() {
   var el = document.getElementById('viewer-build-stamp');
@@ -3066,7 +3078,7 @@ function _showSearchAreaPill(map) {
   btn.type = 'button';
   btn.textContent = 'Search this area';
   btn.style.cssText = (
-    'position:fixed; left:50%; top:calc(14px + env(safe-area-inset-top, 0px)); transform:translateX(-50%);'
+    'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
     + 'z-index:1600; padding:9px 18px;'
     + 'background:rgba(255,255,255,0.92); color:#222;'
     + 'border:1px solid rgba(0,0,0,0.12); border-radius:999px;'
@@ -3155,7 +3167,7 @@ function _searchAreaApply(map) {
     _hideSearchAreaPill();
     var btn = document.createElement('div');
     btn.style.cssText = (
-      'position:fixed; left:50%; top:calc(14px + env(safe-area-inset-top, 0px)); transform:translateX(-50%);'
+      'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
       + 'z-index:1600; padding:9px 18px;'
       + 'background:rgba(255,255,255,0.95); color:#a33;'
       + 'border:1px solid rgba(170,50,50,0.25); border-radius:999px;'
@@ -4096,7 +4108,7 @@ function _showFindToast(text, opts) {
   opts = opts || {};
   var d = document.createElement('div');
   d.style.cssText = (
-    'position:fixed; left:50%; top:calc(14px + env(safe-area-inset-top, 0px)); transform:translateX(-50%);'
+    'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
     + 'z-index:1600; padding:9px 18px;'
     + 'background:rgba(255,255,255,0.95);'
     + 'color:' + (opts.color || '#a33') + ';'
