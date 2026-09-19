@@ -2140,35 +2140,88 @@ function renderNearResults(cands, activeIdx) {
 let nearActive = -1;
 let nearCandidates = [];
 
+let _nearSeq = 0;
+
 async function onNearInput() {
   const q = els.near.value.trim();
   if (q.length < 2 || q === 'My location') { hideNearResults(); return; }
-  const prefixes = prefixesFor(q);
-  if (!prefixes.length) { hideNearResults(); return; }
+  const seq = ++_nearSeq;
+  const alive = () => seq === _nearSeq;
   const seen = new Set();
   const matches = [];
   const needle = q.toLowerCase();
-  for (const p of prefixes) {
-    // Skip prefixes the manifest has nothing for. expandPrefix
-    // covers the unsplit / hot-split / recursive-split layouts,
-    // including the "empty sub_chunks list" build bug we saw on
-    // Midwest's `ch` prefix.
-    if (!expandPrefix(p).length) continue;
-    let chunk;
-    try { chunk = await loadChunk(p); } catch { continue; }
-    for (const r of chunk) {
+
+  // Same targeted path the name search (#q) uses — see runNameQuery.
+  // This input used to walk prefixesFor() -> expandPrefix() -> one
+  // awaited loadChunk() per leaf, serially. On a dense region that is
+  // hundreds of sequential round-trips for a single city name: "Chicago"
+  // expands to 465 leaves on midwest-us, "Cancun" to 1161 on mexico, and
+  // the dropdown took ~40 s to appear while the same ZIM's #q box
+  // answered the same word instantly. Measured leaf counts split cleanly
+  // at the 15 s browser-gate budget -- Denver 353, Chicago 465, Boston
+  // 475, Bangkok 938, Cancun 1161 all timed out; Sydney 1, Tokyo 95,
+  // Dubai 98, Buenos Aires 113, Istanbul 135, Seattle 250 all rendered.
+  // Total bytes did not predict it (Bangkok 1.1 MB failed, Seattle
+  // 0.6 MB passed) -- the count of serial fetches did.
+  const targetedLeaves = searchLeavesFor(q);
+  if (targetedLeaves) {
+    let hits = await streamLeaves(targetedLeaves, q, alive);
+    if (!alive()) return;                 // a newer keystroke owns the UI
+    // Mirror runNameQuery's widening: targeting misses matches inside a
+    // word, so a thin targeted result is worth re-running unfiltered
+    // rather than showing "No matches." for a place that exists.
+    if (hits.length < 5 && targetedLeaves.targeted) {
+      const all = searchLeavesFor(q, { noTargeting: true }) || [];
+      try {
+        const wider = await streamLeaves(all, q, alive);
+        if (!alive()) return;
+        hits = wider;
+      } catch (e) {
+        if (!alive()) return;             // keep what targeting found
+      }
+    }
+    for (const r of hits) {
       if (!r.n) continue;
-      const lower = r.n.toLowerCase();
-      if (!lower.includes(needle)) continue;
       const key = `${r.n}|${r.a}|${r.o}`;
       if (seen.has(key)) continue;
       seen.add(key);
       matches.push(r);
     }
+  } else {
+    // Legacy whole-prefix path, for ZIMs built without a character split.
+    const prefixes = prefixesFor(q);
+    if (!prefixes.length) { hideNearResults(); return; }
+    for (const p of prefixes) {
+      // Skip prefixes the manifest has nothing for. expandPrefix
+      // covers the unsplit / hot-split / recursive-split layouts,
+      // including the "empty sub_chunks list" build bug we saw on
+      // Midwest's `ch` prefix.
+      if (!expandPrefix(p).length) continue;
+      let chunk;
+      try { chunk = await loadChunk(p); } catch { continue; }
+      if (!alive()) return;
+      for (const r of chunk) {
+        if (!r.n) continue;
+        const lower = r.n.toLowerCase();
+        if (!lower.includes(needle)) continue;
+        const key = `${r.n}|${r.a}|${r.o}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        matches.push(r);
+      }
+    }
   }
+  if (!alive()) return;
+  // Rank on the folded form. streamLeaves filters through matchesName,
+  // which accent-folds both sides, so an unfolded startsWith() would rank
+  // the exact city BELOW incidental matches on every accented name:
+  // "Cancún".toLowerCase().startsWith("cancun") is false. The legacy
+  // branch filters unfolded, but folding here is a no-op for the ASCII
+  // names it can return, so one comparator is correct for both.
+  const foldedNeedle = foldText(q);
   matches.sort((a, b) => {
-    const aStart = a.n.toLowerCase().startsWith(needle) ? 0 : 1;
-    const bStart = b.n.toLowerCase().startsWith(needle) ? 0 : 1;
+    const aStart = foldText(a.n).startsWith(foldedNeedle) ? 0 : 1;
+    const bStart = foldText(b.n).startsWith(foldedNeedle) ? 0 : 1;
     if (aStart !== bStart) return aStart - bStart;
     return a.n.length - b.n.length;
   });

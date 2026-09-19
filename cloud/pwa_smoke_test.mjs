@@ -201,7 +201,16 @@ function pickRoutePair(zimUrl) {
           Math.cos(toRad(ola)) * Math.cos(toRad(dla)) * Math.sin(dLon / 2) ** 2;
         crow = Math.round(2 * R * Math.asin(Math.sqrt(a)));
       }
-      return { region: 'env', o: { lat: ola, lon: olo, label: 'origin' },
+      // The labels are not cosmetic: the city-pinned chip filter types
+      // o.label into #near-input and waits for typeahead suggestions.
+      // Emitting the placeholder 'origin' made that query meaningless —
+      // no region has a place called "origin", so the lookup could only
+      // ever pass by accident, and its failure cascaded into the
+      // directions assertions (streetzimRouting never opens, so .open()
+      // and .setOrigin() land on undefined). SMOKE_SEARCH is the
+      // region's registry search term, i.e. a real in-region place name.
+      const nearLabel = (process.env.SMOKE_SEARCH || '').trim() || 'origin';
+      return { region: 'env', o: { lat: ola, lon: olo, label: nearLabel },
                d: { lat: dla, lon: dlo, label: 'destination' }, crow_km: crow };
     }
     console.warn('SMOKE_ROUTE unparseable, ignoring: ' + envRoute);
@@ -623,13 +632,49 @@ async function main() {
         inp.value = c;
         inp.dispatchEvent(new Event('input', { bubbles: true }));
       }, nearCity);
+      // NEAR_DEBUG=1 reports what onNearInput actually saw. Standalone
+      // probes of places.html cannot reproduce this: served over plain
+      // HTTP with no service worker, search-data/manifest.json 404s and
+      // the manifest never loads, so a passing region fails exactly like
+      // a failing one. Only in here is the SW live and the manifest real.
+      if (process.env.NEAR_DEBUG === '1') {
+        const diag = await page.evaluate((city) => {
+          const o = {};
+          try {
+            const m = state.manifests && state.manifests.search;
+            o.manifestOk = !!m;
+            o.charSplit = !!(m && m.char_split);
+            o.chunkKeys = m && m.chunks ? Object.keys(m.chunks).length : 0;
+            o.folded = foldText(city).trim();
+            o.prefixes = prefixesFor(city);
+            o.expanded = o.prefixes.map(p => ({ p, leaves: expandPrefix(p).length }));
+            o.nearValue = (document.getElementById('near-input') || {}).value;
+            o.resultsHidden = (document.getElementById('near-results') || {}).hidden;
+          } catch (e) { o.error = e.message; }
+          return o;
+        }, nearCity);
+        console.log('    NEAR_DEBUG:', JSON.stringify(diag));
+      }
       let nearReady = true;
       try {
         await page.waitForFunction(() => {
           const r = document.getElementById('near-results');
           return r && !r.hidden && r.children.length > 0;
-        }, { timeout: 15_000 });
+        }, { timeout: Number(process.env.NEAR_WAIT_MS) || 15_000 });
       } catch (e) {
+        if (process.env.NEAR_DEBUG === '1') {
+          const post = await page.evaluate(() => {
+            const o = {};
+            try {
+              o.resultsHidden = (document.getElementById('near-results') || {}).hidden;
+              o.children = (document.getElementById('near-results') || {}).children?.length;
+              o.nearValue = (document.getElementById('near-input') || {}).value;
+              o.originMode = typeof state !== 'undefined' ? state.originMode : '?';
+            } catch (e) { o.error = e.message; }
+            return o;
+          });
+          console.log('    NEAR_DEBUG post-timeout:', JSON.stringify(post));
+        }
         fail('near typeahead', `no suggestions for "${nearCity}"`);
         nearReady = false;
       }
