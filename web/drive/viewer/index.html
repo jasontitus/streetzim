@@ -146,7 +146,13 @@
        Western Russia") would be next.
 
        vw, not %: #info is position:absolute, so a percentage resolves
-       against its containing block (the map container), not the viewport. */
+       against its containing block (the map container), not the viewport.
+
+       border-box, because max-width caps the CONTENT box by default: with
+       padding 3px 8px the 175px cap still rendered a 191px border box
+       (right edge 201 vs #attr-btn's left edge 198), leaving 3px of the
+       overlap in place. Measured on a loaded ZIM, not a fatal-error page. */
+    box-sizing: border-box;
     max-width: min(250px, calc(100vw - 145px));
   }
   #info h3 { margin: 0; font-size: 10px; font-weight: 600; display: inline; color: var(--text-primary); }
