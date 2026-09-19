@@ -8,3 +8,4 @@ japan	needs-reswap-inset-regression	osm-japan-2026-09-18b.zim	17 min	2026-09-19T
 central-us	needs-reswap-inset-regression	osm-central-us-2026-09-18b.zim	21 min	2026-09-19T01:30:31+02:00
 mexico	needs-reswap-inset-regression	osm-mexico-2026-09-18b.zim	24 min	2026-09-19T02:16:52+02:00
 australia-nz	needs-reswap-inset-regression	osm-australia-nz-2026-09-18.zim	uploaded 03:47 with viewer 445418 B (pre-guard); rc=6 = listing pending, NOT a failure	2026-09-19T04:12:10+02:00
+midwest-us	needs-reswap-inset-regression	osm-midwest-us-2026-09-18b.zim	uploaded after the queue was killed, so no row was ever written	2026-09-19T04:12:33+02:00
