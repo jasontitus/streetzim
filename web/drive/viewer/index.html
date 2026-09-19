@@ -135,7 +135,19 @@
     background: rgba(255,255,255,0.65); padding: 3px 8px;
     border-radius: 4px; font-family: var(--ui-font);
     font-size: 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-    max-width: 250px;
+    /* Reserve #attr-btn's gutter instead of a flat 250px. #attr-btn is
+       right:64px and ~71px wide, so at a 320px viewport its left edge is
+       x=198; #info starts at left:10px, so anything wider than ~175px runs
+       under it. The flat 250px cap was unreachable at 320px, so this only
+       bit regions whose NAME rendered wide enough: measured against a
+       loaded ZIM, "Switzerland and the Alps (light)" renders 196px (right
+       edge 206) and overlaps #attr-btn by 7px at 320px, while the shipped
+       short names (101-157px) clear it. Ukraine ("Ukraine, Moldova &
+       Western Russia") would be next.
+
+       vw, not %: #info is position:absolute, so a percentage resolves
+       against its containing block (the map container), not the viewport. */
+    max-width: min(250px, calc(100vw - 145px));
   }
   #info h3 { margin: 0; font-size: 10px; font-weight: 600; display: inline; color: var(--text-primary); }
   #info p { margin: 0; color: var(--text-tertiary); font-size: 9px; }
