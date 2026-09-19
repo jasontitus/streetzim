@@ -5660,7 +5660,27 @@ var SEARCH_SHARDS = (function () {
     // Start the camera move BEFORE dropping the pin: placeSearchPin
     // opens the popup immediately when no move is in flight, and
     // defers to moveend when one is — we want the latter here.
-    map.flyTo({ center: [lon, lat], zoom: zoom, duration: 1500 });
+    // Bias the camera DOWN so the pin's popup clears the top chrome. The
+    // popup opens above the pin, and with the pin centred it lands under the
+    // search box + chip rail: a "basel" search put the chips and the
+    // "Directions to here" CTA behind the search field on a 390px phone.
+    // Positive offset moves the map content down, i.e. the pin sits below
+    // centre. Zoom-independent pixels, same reasoning as the wiki detail
+    // sheet at ~6222: a percentage-of-latitude-span shift flies kilometres
+    // off target when zoomed out.
+    var _topChrome = (function() {
+      var sc = document.getElementById('search-container');
+      var r = sc ? sc.getBoundingClientRect() : null;
+      // chips sit inside #search-container; its bottom is the real edge
+      return r && r.bottom ? Math.round(r.bottom) : 110;
+    })();
+    var _h = map.getCanvas().clientHeight || 600;
+    // Just enough to clear the chrome and the popup's own height (~120px),
+    // not more: 0.28*h put the pin 74% down an 844px viewport, which reads
+    // as "the map jumped past my result". 0.18*h capped at chrome+60 lands
+    // it around 60% with the popup clear of the search box.
+    var _dy = Math.min(Math.round(_h * 0.18), _topChrome + 60);
+    map.flyTo({ center: [lon, lat], zoom: zoom, duration: 1500, offset: [0, _dy] });
     placeSearchPin(map, lat, lon, name, enrich);
     resultsEl.style.display = 'none';
     input.blur();
@@ -6699,10 +6719,23 @@ function initRouting(map, config) {
   var routeDrawn = false;
   var lastRoute = null;   // last computed {coords, distance, time, roads} — used by driving mode
 
+  // #search-container and #routing-panel are both absolutely positioned at
+  // top: calc(10px + var(--top-inset)) and overlap by 262x79 px at 390 px
+  // wide. The panel is z-index 3 and the search box 2, so desktop Chrome
+  // hit-tests to the panel and everything looks fine -- but in Kiwix's iOS
+  // WKWebView the search box takes the taps, so the origin field is dead and
+  // the panel's x is unreachable. Reported from a shipped mexico ZIM.
+  // The overlap gate never saw it: the panel is display:none on load, so the
+  // detector measured it as absent on all eleven regions that passed.
+  // Same treatment the find-results pill already gets (#search-container
+  // .streetzim-hidden, !important so a stray inline display can't beat it).
+  var searchBoxEl = document.getElementById('search-container');
+
   function activate() {
     active = true;
     if (toggleBtn) toggleBtn.classList.add('active-control');
     panel.style.display = 'block';
+    if (searchBoxEl) searchBoxEl.classList.add('streetzim-hidden');
     map.getCanvas().style.cursor = 'crosshair';
     loadGraph();
   }
@@ -6756,6 +6789,7 @@ function initRouting(map, config) {
     if (toggleBtn) toggleBtn.classList.remove('active-control');
     panel.style.display = 'none';
     panel.classList.remove('minimized');
+    if (searchBoxEl) searchBoxEl.classList.remove('streetzim-hidden');
     map.getCanvas().style.cursor = '';
     clearRoute();
   }
