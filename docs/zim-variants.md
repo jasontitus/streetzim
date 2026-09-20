@@ -261,6 +261,26 @@ drop tiles need not.
 Steps 1, 2 and 5 are independent of each other and of zimru. Step 4 depends
 on 3.
 
+## Quick start: `szim`
+
+One command, no toolchain: Python 3.10+ and `pip install zstandard`
+(`libzim` only for `verify`). Reads and writes ordinary ZIM; libzim, Kiwix
+and zimru read the output unchanged.
+
+```
+./szim inspect osm-argentina.zim --by-zoom        # what is large (works on an archive.org URL too)
+./szim plan    osm-argentina.zim --max-tile-zoom 13 --terrain-max-zoom 11 --satellite-max-zoom 11
+./szim trim    osm-argentina.zim ar-light.zim --max-tile-zoom 13 --terrain-max-zoom 11 \
+               --satellite-max-zoom 11 --title "OSM - Argentina (Light)" --name osm_argentina_light
+./szim verify  osm-argentina.zim ar-light.zim --expect-dropped tiles/14/ terrain/12/ satellite/12/
+./szim sim     osm-argentina.zim ar-light.zim --all --lat -34.60 --lon -58.38 --measure
+```
+
+`trim` copies every cluster it can byte-for-byte and re-encodes only the
+few it must, so a prefix or zoom drop on a multi-GB file takes well under a
+minute; `--strip-addresses` re-encodes the search clusters and takes
+minutes. `inspect` on a URL fetches only the tables.
+
 ## What exists now (2026-09-20, measured)
 
 Files: `cloud/zimfmt.py` (raw format), `cloud/zim_inventory.py`,
