@@ -102,6 +102,12 @@ def build_fixture(path: Path) -> dict:
         c.add_item(_Item("routing-data/graph-cell-00001.bin", "application/octet-stream", "R" * 5000, False))
         c.add_redirection("home", "Home", "index.html", {})
         c.add_redirection("sat-alias", "Sat", "satellite/3/1/1.avif", {})
+        # redirect chains in both sort orders relative to their target
+        c.add_redirection("a-alias", "A", "b-alias", {})
+        c.add_redirection("b-alias", "B", "index.html", {})
+        c.add_redirection("z-alias", "Z", "y-alias", {})
+        c.add_redirection("y-alias", "Y", "index.html", {})
+        c.add_redirection("sat-chain", "SC", "sat-alias", {})
     return paths
 
 
@@ -130,8 +136,16 @@ def test_inventory_components(fixture_zim):
     assert comps["tiles/14"]["entries"] == 16
     assert comps["satellite/14"]["entries"] == 16
     assert "terrain/13" not in comps
-    assert comps["search-data"]["entries"] == 25   # 20 legacy + 4 tiered + manifest
+    assert comps["search-data"]["entries"] == 24   # 20 legacy + 3 tiered + manifest
+    assert comps["search-data/addresses"]["entries"] == 1   # the tier-a leaf
+    flags = dict(inv["savings"])
+    assert "--no-satellite" in flags and "--max-tile-zoom 13" in flags
+    assert flags["--no-satellite"] == comps_total(inv, "satellite/")
     assert sum(row["on_disk"] for row in inv["rows"]) <= inv["size"]
+
+
+def comps_total(inv, prefix):
+    return sum(row["on_disk"] for row in inv["rows"] if row["component"].startswith(prefix))
 
 
 def _libzim_paths(a: Archive) -> set[str]:
@@ -150,7 +164,9 @@ def test_light_derive(fixture_zim, tmp_path):
     got = _libzim_paths(a)
     assert not any(p.startswith("satellite/") or p.startswith("tiles/14/") for p in got)
     assert "sat-alias" not in got, "redirect to a dropped target must be dropped too"
-    assert "home" in got
+    assert "sat-chain" not in got, "chain ending at a dropped target must be dropped too"
+    assert {"home", "a-alias", "b-alias", "y-alias", "z-alias"} <= got, "redirect chains survive"
+    assert a.get_entry_by_path("a-alias").get_redirect_entry().path == "b-alias"
     for path, data in paths.items():
         if path.startswith(("satellite/", "tiles/14/")):
             assert not a.has_entry_by_path(path)
@@ -233,6 +249,33 @@ def test_strip_addresses(fixture_zim, tmp_path):
         if not path.startswith("search-data/"):
             assert bytes(a.get_entry_by_path(path).get_item().content) == data
     assert a.all_entry_count == Archive(str(src)).all_entry_count
+
+
+def test_refuses_to_overwrite_source(fixture_zim, tmp_path):
+    src, _ = fixture_zim
+    import shutil
+    copy = tmp_path / "copy.zim"
+    shutil.copy(src, copy)
+    with pytest.raises(SystemExit):
+        derive(str(copy), str(copy), Recipe(satellite_max_zoom=-1), verbose=False)
+    assert Archive(str(copy)).check()
+
+
+def test_cluster_extents_exclude_dirent_table(fixture_zim, tmp_path):
+    """ZimWriter lays out clusters | dirents | tables; the last cluster must
+    end where the dirents start, or its bytes (and any copy of it) include
+    the whole dirent table."""
+    src, _ = fixture_zim
+    dst = tmp_path / "d.zim"
+    derive(str(src), str(dst), Recipe(satellite_max_zoom=-1, level=3), verbose=False)
+    r = zimfmt.ZimReader(str(dst))
+    last = r.header.cluster_count - 1
+    ci = r.cluster_info(last)
+    assert ci.offset + ci.size <= min(r.url_ptrs)
+    offs, body = r.cluster_offsets(last)
+    assert offs[-1] == len(body)          # payload ends exactly at the last blob
+    total = sum(r.cluster_info(c).size for c in range(r.header.cluster_count))
+    assert total < min(r.url_ptrs)
 
 
 def test_dry_run_writes_nothing(fixture_zim, tmp_path):

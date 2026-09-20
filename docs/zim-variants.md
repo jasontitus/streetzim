@@ -263,8 +263,8 @@ on 3.
 
 ## Quick start: `szim`
 
-One command, no toolchain: Python 3.10+ and `pip install zstandard`
-(`libzim` only for `verify`). Reads and writes ordinary ZIM; libzim, Kiwix
+One command, no toolchain: Python 3.10+ and `pip install zstandard`, nothing
+else (`libzim` only for `verify`; numpy is not used). Reads and writes ordinary ZIM; libzim, Kiwix
 and zimru read the output unchanged.
 
 ```
@@ -276,8 +276,10 @@ and zimru read the output unchanged.
 ./szim sim     osm-argentina.zim ar-light.zim --all --lat -34.60 --lon -58.38 --measure
 ```
 
-`trim` copies every cluster it can byte-for-byte and re-encodes only the
-few it must, so a prefix or zoom drop on a multi-GB file takes well under a
+`inspect` ends with a table of every trim option and the on-disk bytes it
+would remove, so the recipe can be chosen from the numbers; addresses show
+up as their own line (the tier-a search leaves). `trim` copies every cluster
+it can byte-for-byte and re-encodes only the few it must, so a prefix or zoom drop on a multi-GB file takes well under a
 minute; `--strip-addresses` re-encodes the search clusters and takes
 minutes. `inspect` on a URL fetches only the tables.
 
@@ -620,3 +622,38 @@ application/json             1188      965.8 MB    132.7 MB   7.3x  58.7%
 image/webp                   5085       60.0 MB     50.7 MB   1.2x  22.4%
 application/x-protobuf        953       37.6 MB     18.0 MB   2.1x   7.9%
 ```
+
+### Adversarial review (2026-09-20) and what it changed
+
+Two independent review passes over the tooling and the builder change found
+the following, all fixed and covered by tests where a test was possible:
+
+- **Redirect chains were dropped** when the outer alias sorted before its
+  target (`keep[]` read before it was decided). Chains are now followed to
+  their final item, with a cycle guard.
+- **`trim SRC SRC` truncated the source** to zero bytes and exited 0. The
+  derive refuses a DST that is the SRC, and writes to `DST.derive-tmp`,
+  renaming over DST only after the MD5 is written; a failure removes the
+  temp file, terminates the encode pool and clears the spill directory.
+- **Cluster extents swallowed the dirent table** for ZimWriter-layout files
+  (last cluster "ended" at the URL pointer list). The dirent table start is
+  now a boundary; a second-generation derive no longer risks carrying the
+  table forward as junk.
+- **The plan phase inflated every kept cluster** to count blobs, which for a
+  multi-GB raw routing cluster meant materialising it. It now compares kept
+  dirents against dirents referencing the cluster, so `--dry-run` and the
+  copy decision read no payload.
+- **`--strip-addresses` inflated a cluster once per leaf**; the cache clear
+  moved out of the loop. `counts.total` no longer zeroes when `byType` is
+  absent. Rewrites for absent entries and a missing address count now warn.
+- Builder: the cluster target was **not restored after satellite/terrain**;
+  raster zoom breaks are emitted lazily so an all-skipped zoom yields no
+  empty cluster; a world-sized bbox falls back to source order;
+  `--tile-cluster-mb` rejects non-positive values.
+- Simulator: duplicate wrapped tiles at z0-1 are deduplicated.
+
+Not changed, noted: the regenerated `titleOrdered/v1` lists every entry as
+the zimru source does (libzim's own v1 is front articles only), the
+in-memory dirent list is still Python objects (fine to ~3 M entries,
+untested at 12 M), and an old packer binary fails at the first
+`cluster_break` after the viewer items are written (no preflight).

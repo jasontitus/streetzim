@@ -25,7 +25,8 @@ import struct
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Iterator
 
-import numpy as np
+import sys
+from array import array
 
 MAGIC = 72173914
 HEADER_LEN = 80
@@ -84,7 +85,7 @@ class Header:
 class _Short(Exception):
     """Window too small to hold the whole dirent."""
 
-@dataclass
+@dataclass(eq=False)
 class Dirent:
     """One directory entry. ``mime`` is an index into the MIME list, or
     MIME_REDIRECT. Redirects carry ``redirect``; items carry ``cluster`` and
@@ -268,7 +269,7 @@ class HttpSource:
                 with urllib.request.urlopen(req, timeout=120) as resp:
                     data = resp.read()
                 break
-            except Exception as ex:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 if attempt == 3:
                     raise
                 import time
@@ -398,22 +399,20 @@ class ZimReader:
         self.header = Header.parse(self.src[:HEADER_LEN])
         h = self.header
         self.mimes = self._read_mimes(h.mime_list_pos)
-        self.url_ptrs = np.frombuffer(
-            self.src[h.url_ptr_pos:h.url_ptr_pos + 8 * h.entry_count], dtype="<u8")
-        self.cluster_ptrs = np.frombuffer(
-            self.src[h.cluster_ptr_pos:h.cluster_ptr_pos + 8 * h.cluster_count], dtype="<u8")
+        assert array("Q").itemsize == 8 and array("I").itemsize == 4
+        self.url_ptrs = _u64s(self.src[h.url_ptr_pos:h.url_ptr_pos + 8 * h.entry_count])
+        self.cluster_ptrs = _u64s(self.src[h.cluster_ptr_pos:h.cluster_ptr_pos + 8 * h.cluster_count])
         if self.remote and h.entry_count:
             # dirents are contiguous; pull them in one request
-            lo = int(self.url_ptrs.min())
-            hi = int(self.url_ptrs.max()) + 4096
+            lo = min(self.url_ptrs)
+            hi = max(self.url_ptrs) + 4096
             self.src.prefetch(lo, min(hi, self.size))
         self.title_ptrs = None
         # libzim >= 8 may write an absent title index (all ones) and rely on
         # X/listing/titleOrdered/* instead; zimru writes a real one.
         self.has_title_ptrs = 0 < h.title_ptr_pos < self.size and h.title_ptr_pos != h.url_ptr_pos
         if self.has_title_ptrs:
-            self.title_ptrs = np.frombuffer(
-                self.src[h.title_ptr_pos:h.title_ptr_pos + 4 * h.entry_count], dtype="<u4")
+            self.title_ptrs = _u32s(self.src[h.title_ptr_pos:h.title_ptr_pos + 4 * h.entry_count])
         self._cluster_ends = self._compute_cluster_ends()
         self._dirent_cache: dict[int, Dirent] = {}
         self._blob_cache: tuple[int, list[int], bytes] | None = None
@@ -438,16 +437,21 @@ class ZimReader:
             p = e + 1
         return mimes
 
-    def _compute_cluster_ends(self) -> np.ndarray:
+    def _compute_cluster_ends(self) -> list[int]:
+        """A cluster ends where the next known structure starts: the next
+        cluster, a pointer table, the MIME list, the dirent table (ZimWriter
+        puts dirents right after the clusters), the checksum, or EOF."""
+        import bisect
         h = self.header
-        boundaries = set(int(x) for x in self.cluster_ptrs)
+        boundaries = set(self.cluster_ptrs)
         boundaries.update([h.url_ptr_pos, h.cluster_ptr_pos, h.mime_list_pos,
                            h.checksum_pos, self.size])
         if self.has_title_ptrs:
             boundaries.add(h.title_ptr_pos)
-        arr = np.array(sorted(boundaries), dtype=np.int64)
-        idx = np.searchsorted(arr, self.cluster_ptrs.astype(np.int64), side="right")
-        return arr[idx]
+        if h.entry_count:
+            boundaries.add(min(self.url_ptrs))
+        arr = sorted(boundaries)
+        return [arr[bisect.bisect_right(arr, off)] for off in self.cluster_ptrs]
 
     # -- dirents --
     def dirent(self, i: int) -> Dirent:
@@ -459,7 +463,7 @@ class ZimReader:
 
     def dirents(self) -> Iterator[tuple[int, Dirent]]:
         mm = self.mm
-        for i, off in enumerate(self.url_ptrs.tolist()):
+        for i, off in enumerate(self.url_ptrs):
             yield i, Dirent.parse(mm, off)
 
     def find(self, namespace: str, url: bytes) -> int:
@@ -485,13 +489,13 @@ class ZimReader:
     def preload_cluster_infos(self):
         """Remote only: fetch every cluster's info byte in a few requests."""
         if self.remote:
-            self.src.prefetch_many([(int(o), int(o) + 1) for o in self.cluster_ptrs])
+            self.src.prefetch_many([(o, o + 1) for o in self.cluster_ptrs])
 
     def preload_frame_headers(self):
         """Remote only: fetch the first 18 bytes of every cluster so the zstd
         frame header (content size) is readable without the payload."""
         if self.remote:
-            self.src.prefetch_many([(int(o), int(o) + 19) for o in self.cluster_ptrs])
+            self.src.prefetch_many([(o, o + 19) for o in self.cluster_ptrs])
 
     def cluster_uncompressed_size(self, c: int) -> int | None:
         """Uncompressed payload size of a zstd cluster from its frame header
@@ -527,9 +531,9 @@ class ZimReader:
         self.src.prefetch_many(tables, per_request=64)
 
     def cluster_info(self, c: int) -> ClusterInfo:
-        off = int(self.cluster_ptrs[c])
+        off = self.cluster_ptrs[c]
         info = self.mm[off]
-        return ClusterInfo(c, off, int(self._cluster_ends[c]) - off,
+        return ClusterInfo(c, off, self._cluster_ends[c] - off,
                            info & 0x0F, bool(info & EXTENDED_FLAG))
 
     def cluster_raw(self, c: int) -> memoryview:
@@ -583,6 +587,30 @@ class ZimReader:
         while d.is_redirect:
             d = self.dirent(d.redirect)
         return self.content(d)
+
+
+def _u64s(buf: bytes) -> array:
+    """Little-endian u64 array view of ``buf`` (copied)."""
+    a = array("Q")
+    a.frombytes(bytes(buf))
+    if sys.byteorder == "big":
+        a.byteswap()
+    return a
+
+
+def _u32s(buf: bytes) -> array:
+    a = array("I")
+    a.frombytes(bytes(buf))
+    if sys.byteorder == "big":
+        a.byteswap()
+    return a
+
+
+def _le_bytes(typecode: str, values) -> bytes:
+    a = array(typecode, values)
+    if sys.byteorder == "big":
+        a.byteswap()
+    return a.tobytes()
 
 
 def _offsets(body: bytes, extended: bool) -> list[int]:
@@ -687,14 +715,14 @@ class ZimWriter:
             self._write(d.pack())
         # url pointer list
         url_ptr_pos = self._pos
-        self._write(np.asarray(dirent_pos, dtype="<u8").tobytes())
+        self._write(_le_bytes("Q", dirent_pos))
         # title pointer list (all entries, by namespace + title)
         title_ptr_pos = self._pos
         order = sorted(range(n), key=lambda i: sort_key_title(dirents[i]))
-        self._write(np.asarray(order, dtype="<u4").tobytes())
+        self._write(_le_bytes("I", order))
         # cluster pointer list
         cluster_ptr_pos = self._pos
-        self._write(np.asarray(self._cluster_offsets, dtype="<u8").tobytes())
+        self._write(_le_bytes("Q", self._cluster_offsets))
         checksum_pos = self._pos
         hdr = Header(self.major, self.minor, self.uuid, n, len(self._cluster_offsets),
                      url_ptr_pos, title_ptr_pos, cluster_ptr_pos, self.mime_list_pos,
@@ -752,4 +780,4 @@ def title_listing(dirents: list[Dirent], front: Callable[[int, Dirent], bool] | 
     articles only): u32 LE entry indexes sorted by (namespace, title)."""
     idx = [i for i, d in enumerate(dirents) if front is None or front(i, d)]
     idx.sort(key=lambda i: sort_key_title(dirents[i]))
-    return np.asarray(idx, dtype="<u4").tobytes()
+    return _le_bytes("I", idx)
