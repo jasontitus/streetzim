@@ -1,7 +1,8 @@
 # ZIM variants: deriving light builds in minutes, not hours
 
-Status: design note (2026-09-20). Nothing here is implemented yet except
-where a file is named.
+Status: design note (2026-09-20), with a first implementation of tiers 0-1
+measured on real files. See **What exists now** at the end for the tools,
+the numbers and what is still open.
 
 ## What the viewer slot actually bought us, and what it did not
 
@@ -259,3 +260,98 @@ drop tiles need not.
 
 Steps 1, 2 and 5 are independent of each other and of zimru. Step 4 depends
 on 3.
+
+## What exists now (2026-09-20, measured)
+
+Files: `cloud/zimfmt.py` (raw format), `cloud/zim_inventory.py`,
+`cloud/derive_zim.py` (the `streetzim-derive` CLI), `cloud/verify_derived.py`,
+`cloud/zim_access_sim.py`, `tests/test_derive_zim.py`. None of them need
+zimru or the libzim Creator; the verifier and the tests use python-libzim as
+the independent reader.
+
+### Inventory: where the bytes are
+
+`zim_inventory.py` reads every dirent and inflates every cluster once. 2 s on
+washington-dc, 10 s on switzerland.
+
+switzerland 2026-09-20d, 2.20 GB, 159,936 entries, 903 clusters, 19 mixed:
+
+| component | entries | on disk | share |
+|---|---|---|---|
+| tiles/14 | 44,520 | 489 MB | 22.2% |
+| search-data | 13,047 | 480 MB | 21.8% |
+| routing-data | 1,620 | 408 MB | 18.5% |
+| tiles/13 | 11,305 | 203 MB | 9.2% |
+| wiki articles + images | 20,963 | 124 MB | 5.6% |
+| wikidata | 91 | 109 MB | 5.0% |
+| satellite (all zooms) | 59,730 | 123 MB | 5.6% |
+| xapian | 2 | 70 MB | 3.2% |
+| terrain (all zooms) | 3,904 | 65 MB | 3.0% |
+| tiles z0-12 | 3,903 | 95 MB | 4.3% |
+
+Two things the table settles. First, the shipped "light" recipe (no
+satellite, z13 cap) removes 28% and z14 is four fifths of that; satellite is
+a rounding error next to search-data and routing. Second, the source is
+**already component-major and zoom-major**: only 19 of 903 clusters mix
+components, all at run boundaries. The ordering-contract concern above holds
+for the sub-5 GB SQL path in principle, but this build did not exhibit it, so
+a cluster-copy derive re-encodes a handful of boundary clusters, not the file.
+
+washington-dc for contrast is 48% wikidata and 28% wiki, with tiles at 7.7%.
+A recipe that helps one region can be irrelevant to another; run the
+inventory first.
+
+### Derive: tier 1 on real files
+
+```
+python3 cloud/derive_zim.py SRC.zim DST.zim --light            # = --no-satellite --max-tile-zoom 13
+python3 cloud/derive_zim.py SRC.zim DST.zim --no-terrain --no-routing --no-wiki
+python3 cloud/derive_zim.py SRC.zim DST.zim --satellite-max-zoom 12 --drop-prefix wiki-image/
+python3 cloud/derive_zim.py SRC.zim DST.zim --light --title "... (Light)" --name osm_x_light
+python3 cloud/derive_zim.py SRC.zim --light --dry-run          # cluster plan only
+python3 cloud/derive_zim.py SRC.zim DST.zim --regroup-tiles --tile-order hilbert --cluster-target 8388608
+python3 cloud/verify_derived.py SRC.zim DST.zim --expect-dropped satellite/ tiles/14/
+```
+
+| run | source | plan | time | output |
+|---|---|---|---|---|
+| washington-dc `--light` | 226 MB | copy 313 / re-encode 5 / drop 13 clusters | 4.6 s | 213 MB |
+| switzerland `--light` | 2.20 GB | copy 769 / re-encode 7 / drop 127 | **31 s** | 1.578 GB |
+| switzerland `--regroup-tiles hilbert` | 2.20 GB | copy 708 / re-encode 194 (1.6 GB of tiles) | 185 s, 4 cores | 2.214 GB (+0.6%) |
+
+The switzerland light derive produces a file the same size, to the megabyte,
+as the shipped `osm-switzerland-light-2026-09-20.zim` (1.578 GB), which took
+a rebuild plus a viewer re-pack. 31 s against ~5 min for the re-pack path and
+hours for the rebuild. The work is `sendfile`-shaped: 769 clusters copied
+through the source mmap, 7 clusters inflated and re-deflated (map-config,
+metadata, the two boundary clusters, the raw satellite/xapian cluster), one
+title listing regenerated, one MD5.
+
+What `verify_derived.py` proved for each output, with python-libzim:
+`Archive.check()` true, MD5 trailer valid, main page resolves, fulltext and
+title indexes present and answering queries, every kept entry byte-identical
+(55,667 on switzerland light), every expected-dropped entry absent (104,249),
+redirects to dropped targets dropped, `Counter` metadata recomputed, UUID
+fresh unless `--keep-uuid`.
+
+What the derive rewrites: `map-config.json` (flags, `maxZoom`, a `derived`
+block naming the recipe), `streetzim-meta.json` (`derivedFrom`: source UUID,
+filename, recipe, date), `M/Name`, `M/Title`, `M/Description`, `M/Flavour`,
+`M/Counter`, and `wiki-geo-index.json` under `--no-wiki`.
+
+### Known limits of the current tool
+
+- **Not yet a search-data or Xapian transform.** `--no-wiki` leaves dead
+  documents in the fulltext index, as predicted above. The address-stripping
+  recipe (the 53% lever on switzerland) needs the leaf rewrite and an
+  `xapianbuilder` rerun; that is tier 2 work the tool does not do yet.
+- **Regroup memory.** The first switzerland regroup peaked at 3.95 GB RSS;
+  blobs now spill to bucketed files (1/256 of a zoom per bucket) so memory
+  is bounded, but a continent regroup is still a 4-core re-encode of every
+  tile at zstd-22 (~3 MB/s per core), i.e. hours for europe. Regroup is an
+  experiment knob, not the shipping path; the builder should emit the layout
+  directly.
+- **Viewer slots are not re-padded.** A pre-slot source stays pre-slot; run
+  `swap_viewer_rust.py` once as today. A slotted source copies its slot
+  cluster verbatim, so `patch_viewer_inplace.py` keeps working on the output.
+- **Peak RSS figures include mmap'd file pages** and overstate heap use.
