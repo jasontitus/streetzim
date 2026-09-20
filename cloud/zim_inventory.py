@@ -53,6 +53,10 @@ def component_of(path: str, namespace: str, by_zoom: bool, mime: str | None = No
         return f"{seg[0]}/{seg[1]}" if by_zoom and len(seg) > 1 else seg[0]
     if seg[0] in ("wiki-article", "wiki-image"):
         return "wiki"
+    if seg[0] == "search-data" and len(seg) > 1 and path.endswith(".json"):
+        name = seg[1][:-len(".json")] if len(seg) == 2 else path[len("search-data/"):-len(".json")]
+        if "~" in name and name.rsplit("~", 1)[-1] == "a":
+            return "search-data/addresses"       # tier-a leaves hold only address records
     if len(seg) > 1:
         return seg[0]
     return "app"
@@ -134,9 +138,11 @@ def inventory(path: str, *, by_zoom: bool = False, tables_only: bool | None = No
             "on_disk": int(round(comp_comp[comp])),
             "clusters": len(comp_clusters[comp]),
         })
+    savings = _trim_savings(rows, by_zoom)
     return {
         "file": path,
         "size": r.size,
+        "savings": savings,
         "entries": r.header.entry_count,
         "redirects": redirects,
         "clusters": r.header.cluster_count,
@@ -148,6 +154,45 @@ def inventory(path: str, *, by_zoom: bool = False, tables_only: bool | None = No
         "approx_mixed_clusters": approx_clusters,
         "fetched_bytes": getattr(r.src, "bytes_fetched", None),
     }
+
+
+def _trim_savings(rows: list[dict], by_zoom: bool) -> list[tuple[str, int]]:
+    """What each `szim trim` option would remove, from the inventory rows.
+    On-disk bytes; exact for whole-component drops, and for per-zoom drops
+    when the inventory ran --by-zoom."""
+    disk = {row["component"]: row["on_disk"] for row in rows}
+    out: list[tuple[str, int]] = []
+
+    def zoom_rows(comp):
+        return sorted(((int(k.split("/")[1]), v) for k, v in disk.items()
+                       if k.startswith(comp + "/") and k.split("/")[1].isdigit()))
+
+    for comp, flag in (("satellite", "--no-satellite"), ("terrain", "--no-terrain")):
+        zr = zoom_rows(comp)
+        total = sum(v for _, v in zr) if zr else disk.get(comp, 0)
+        if total:
+            out.append((flag, total))
+        if zr:
+            acc = 0
+            for z, v in list(reversed(zr))[:3]:      # the three deepest zooms carry the bytes
+                acc += v
+                if z - 1 >= 0 and acc != total:
+                    out.append((f"--{comp}-max-zoom {z - 1}", acc))
+    zr = zoom_rows("tiles")
+    if zr:
+        acc = 0
+        for z, v in list(reversed(zr))[:3]:
+            acc += v
+            if z - 1 >= 10:
+                out.append((f"--max-tile-zoom {z - 1}", acc))
+    if disk.get("routing-data"):
+        out.append(("--no-routing", disk["routing-data"]))
+    if disk.get("wiki"):
+        out.append(("--no-wiki", disk["wiki"]))
+    if disk.get("search-data/addresses"):
+        out.append(("--strip-addresses (tier-a leaves only; legacy mixed leaves add more)",
+                    disk["search-data/addresses"]))
+    return out
 
 
 def _fmt(n: float) -> str:
@@ -191,6 +236,12 @@ def main() -> int:
         ratio = row["uncompressed"] / row["on_disk"] if row["on_disk"] else 0
         print(f"{row['component']:<{w}}{row['entries']:>9}{_fmt(row['uncompressed']):>14}"
               f"{_fmt(row['on_disk']):>12}{ratio:>6.1f}x{100*row['on_disk']/inv['size']:>6.1f}%{row['clusters']:>9}")
+    if inv["savings"]:
+        print("\ntrim options and what each removes (on disk):")
+        for flag, b in inv["savings"]:
+            print(f"  {flag:<32}{_fmt(b):>12}{100*b/inv['size']:>6.1f}%")
+        if not a.by_zoom:
+            print("  (run with --by-zoom for per-zoom options)")
     if a.clusters:
         for c, per in inv["mixed"]:
             print(f"  mixed c{c}: " + ", ".join(f"{k}={_fmt(v).strip()}" for k, v in sorted(per.items(), key=lambda kv: -kv[1])))

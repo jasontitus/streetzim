@@ -51,11 +51,11 @@ def tiles_for_view(lon: float, lat: float, zoom: float, w: int, h: int,
     y0 = int(math.floor((cy - half_h) / tile_px)) - margin
     y1 = int(math.floor((cy + half_h) / tile_px)) + margin
     n = 2 ** z
-    out = []
+    out = {}
     for x in range(x0, x1 + 1):
         for y in range(max(0, y0), min(n - 1, y1) + 1):
-            out.append((z, x % n, y))
-    return out
+            out[(z, x % n, y)] = None     # dedupe: at z0-1 the range wraps the world
+    return list(out)
 
 
 class Layout:

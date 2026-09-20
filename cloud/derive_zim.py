@@ -220,12 +220,15 @@ def _patch_streetzim_meta(raw: bytes, recipe: Recipe, src_uuid: bytes, src_name:
         meta["hasOvertureAddresses"] = False
         counts = meta.get("counts")
         if isinstance(counts, dict):
+            before = counts.get("addresses")
             counts["addresses"] = 0
             by = counts.get("byType")
             if isinstance(by, dict):
                 for t in ADDRESS_TYPES:
                     by.pop(t, None)
-            counts["total"] = sum(v for v in (by or {}).values() if isinstance(v, int))
+                counts["total"] = sum(v for v in by.values() if isinstance(v, int))
+            elif isinstance(counts.get("total"), int) and isinstance(before, int):
+                counts["total"] = max(0, counts["total"] - before)
     return json.dumps(meta, separators=(",", ":")).encode("utf-8")
 
 
@@ -261,6 +264,8 @@ def strip_address_records(raw: bytes) -> tuple[bytes, int, int]:
 def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = False,
            verbose: bool = True) -> dict:
     t0 = time.time()
+    if not dry_run and os.path.exists(dst_path) and os.path.realpath(dst_path) == os.path.realpath(src_path):
+        raise SystemExit("derive: DST is the same file as SRC; refusing to overwrite the source")
     r = ZimReader(src_path)
     h = r.header
     log = (lambda *a: print(*a, flush=True)) if verbose else (lambda *a: None)
@@ -278,7 +283,14 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
         keep[i] = keep_entry(d, recipe)
     for i, d in enumerate(dirents):
         if d.is_redirect:
-            keep[i] = keep[d.redirect]
+            # follow the chain to its final item (a chain sorted before its
+            # target would otherwise read a not-yet-decided keep[])
+            seen = {i}
+            t = d.redirect
+            while 0 <= t < len(dirents) and dirents[t].is_redirect and t not in seen:
+                seen.add(t)
+                t = dirents[t].redirect
+            keep[i] = 0 <= t < len(dirents) and not dirents[t].is_redirect and keep[t]
     dropped_components = set()
     present_components = set()
     for i, d in enumerate(dirents):
@@ -345,7 +357,7 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
                 rewrites[("C", d.url)] = new
                 if name in chunks:
                     chunks[name] = kept
-            r._blob_cache = None
+        r._blob_cache = None
         # 'total' counts unique features while chunk counts count leaf records
         # (a record sits in every character path that reaches it), so derive
         # the new total from the build's own unique address count.
@@ -358,6 +370,8 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
                 uniq_addr = None
         if isinstance(manifest.get("total"), int) and isinstance(uniq_addr, int):
             manifest["total"] = max(0, manifest["total"] - uniq_addr)
+        else:
+            log("  warning: streetzim-meta.json has no counts.addresses; manifest total left as is")
         manifest["addresses_stripped"] = True
         rewrites[("C", SEARCH_MANIFEST)] = json.dumps(manifest, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         log(f"  addresses: {addr_dropped} leaf records removed from {addr_leaves} leaves "
@@ -376,16 +390,19 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
 
     # 3. cluster plan
     kept_blobs: dict[int, set[int]] = defaultdict(set)
-    total_blobs: dict[int, int] = {}
+    referenced: Counter = Counter()          # dirents pointing into each cluster
     for i, d in enumerate(dirents):
-        if not d.is_redirect and keep[i]:
-            kept_blobs[d.cluster].add(d.blob)
+        if not d.is_redirect:
+            referenced[d.cluster] += 1
+            if keep[i]:
+                kept_blobs[d.cluster].add(d.blob)
     regroup_refs: dict[int, dict[int, tuple]] = defaultdict(dict)  # cluster -> blob -> (comp, z, key)
     rewrite_refs: dict[int, dict[int, bytes]] = defaultdict(dict)
     by_ns_url = {(d.namespace, d.url): i for i, d in enumerate(dirents)}
     for key, data in rewrites.items():
         i = by_ns_url.get(key)
         if i is None:
+            log(f"  warning: {key[0]}/{key[1].decode()} not in source; rewrite skipped")
             continue
         d = dirents[i]
         rewrite_refs[d.cluster][d.blob] = data
@@ -402,12 +419,13 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
     plan_bytes = Counter()
     for c in range(h.cluster_count):
         ci = r.cluster_info(c)
-        n = r.blob_count(c) if (c in kept_blobs or c in regroup_refs) else None
         kb = kept_blobs.get(c, set())
         if not kb:
             plan["drop"].append(c)
             plan_bytes["drop"] += ci.size
-        elif len(kb) == n and c not in rewrite_refs and c not in regroup_refs:
+        elif len(kb) == referenced[c] and c not in rewrite_refs and c not in regroup_refs:
+            # every dirent into this cluster is kept: copy it untouched (an
+            # unreferenced blob the source already carried stays, as it was)
             plan["copy"].append(c)
             plan_bytes["copy"] += ci.size
         else:
@@ -423,16 +441,34 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
     if dry_run:
         return result
 
-    # 4. emit
+    # 4. emit — to a temp name beside DST, renamed over it only on success, so
+    # a crash never leaves something that looks like a finished ZIM
     new_uuid = h.uuid if recipe.keep_uuid else uuidlib.uuid4().bytes
-    w = ZimWriter(dst_path, r.mimes, uuid=new_uuid, major=h.major, minor=h.minor)
+    tmp_path = dst_path + ".derive-tmp"
+    w = ZimWriter(tmp_path, r.mimes, uuid=new_uuid, major=h.major, minor=h.minor)
     w.begin()
+    try:
+        return _emit(r, h, w, dirents, keep, kept_blobs, rewrite_refs, regroup_refs, plan, recipe,
+                     dst_path, tmp_path, new_uuid, result, log, t0)
+    except BaseException:
+        try:
+            w._fh and w._fh.close()
+        except Exception:  # noqa: BLE001
+            pass
+        for stray in (tmp_path,):
+            try:
+                os.unlink(stray)
+            except OSError:
+                pass
+        raise
+
+
+def _emit(r, h, w, dirents, keep, kept_blobs, rewrite_refs, regroup_refs, plan, recipe,
+          dst_path, tmp_path, new_uuid, result, log, t0):
     # (old cluster, old blob) -> (new cluster, new blob)
     remap: dict[tuple[int, int], tuple[int, int]] = {}
     spill = SpillStore(Path(tempfile.mkdtemp(prefix="derive-spill-", dir=os.path.dirname(os.path.abspath(dst_path)))))
     regroup_emitted = False
-    first_regroup_cluster = min(regroup_refs) if regroup_refs else None
-    tiles_regrouped = 0
 
     def flush_regroup():
         """Emit the regrouped components: one run of clusters per (component,
@@ -441,7 +477,6 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
         nonlocal regroup_emitted
         tiles_regrouped_ref = [0]
         from multiprocessing import Pool
-        order = ("tiles", "satellite", "terrain")
         with Pool(max(1, os.cpu_count() or 1)) as pool:
             for (comp, z) in spill.groups():
                 compress = comp == "tiles"   # satellite/terrain are pre-compressed images
@@ -478,9 +513,25 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
         regroup_emitted = True
         return tiles_regrouped_ref[0]
 
-    copied = reenc = 0
     from multiprocessing import Pool
     pool = Pool(max(1, os.cpu_count() or 1))
+    try:
+        return _emit_body(r, h, w, dirents, keep, kept_blobs, rewrite_refs, regroup_refs, plan, recipe,
+                          dst_path, tmp_path, new_uuid, result, log, t0, pool, spill, remap,
+                          flush_regroup)
+    except BaseException:
+        pool.terminate()
+        try:
+            spill.close()
+        except Exception:  # noqa: BLE001
+            pass
+        raise
+
+
+def _emit_body(r, h, w, dirents, keep, kept_blobs, rewrite_refs, regroup_refs, plan, recipe,
+               dst_path, tmp_path, new_uuid, result, log, t0, pool, spill, remap, flush_regroup):
+    copied = reenc = 0
+    tiles_regrouped = 0
     pending: list[tuple[list[tuple[int, int]], object]] = []   # ordered encode jobs
     window = 2 * (os.cpu_count() or 1)
 
@@ -562,7 +613,7 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
         placeholder = Dirent(listing_mime, "X", 0, TITLE_LISTING_V1, b"")
         new_dirents.append(placeholder)
         new_dirents.sort(key=sort_key_url)
-        li = new_dirents.index(placeholder)
+        li = next(i for i, nd in enumerate(new_dirents) if nd is placeholder)
         # inserting shifts indexes >= li by one; fix redirects and main page
         def shift(i): return i + 1 if i >= li else i
         for nd in new_dirents:
@@ -572,11 +623,12 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
             main_page = shift(main_page)
         order = [i for i in range(len(new_dirents)) if i != li]
         order.sort(key=lambda i: sort_key_title(new_dirents[i]))
-        import numpy as np
-        listing = np.asarray(order, dtype="<u4").tobytes()
+        from cloud.zimfmt import _le_bytes
+        listing = _le_bytes("I", order)
         nc = w.add_cluster(encode_cluster([listing], False))
         placeholder.cluster, placeholder.blob = nc, 0
     hdr = w.finish(new_dirents, main_page=main_page)
+    os.replace(tmp_path, dst_path)
     dt = time.time() - t0
     out_size = os.path.getsize(dst_path)
     import resource
