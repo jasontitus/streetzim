@@ -90,7 +90,7 @@ enum Record {
 /// or drop without re-encoding. The flush needs a `Creator::flush_cluster()`
 /// on zimru and is compiled in only with `--features cluster_break`; without
 /// it the record still applies the size target and warns once.
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize)]
 struct ClusterBreakRec {
     #[serde(default)]
     cluster_size_target: Option<usize>,
@@ -436,6 +436,7 @@ fn run(cli: &Cli) -> Result<()> {
     let mut writing = false;
     let mut counts = (0usize, 0usize, 0usize, 0usize);
     let mut breaks = 0usize;
+    #[cfg(not(feature = "cluster_break"))]
     let mut warned_no_flush = false;
 
     macro_rules! ensure_writing {

@@ -1636,11 +1636,6 @@ def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=N
     conn = sqlite3.connect(str(mbtiles_path))
     cursor = conn.cursor()
 
-    if order != "source":
-        yield from _iter_tiles_ordered(conn, zoom_level, bbox, max_zoom, order)
-        conn.close()
-        return
-
     # Whole-world bbox: drop the per-zoom column/row index lookups and use
     # the rowid-sequential scan path instead. World bbox at z13 has 67M
     # tiles; the index lookup forces a random heap fetch per tile_data BLOB
@@ -1648,11 +1643,26 @@ def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=N
     # heap in rowid order (sqlite stores rows in zoom-major order from
     # tilemaker's insert pattern, so z<=max_zoom rows are contiguous in
     # the early part of the file).
+    world = False
     if bbox:
         _minlon, _minlat, _maxlon, _maxlat = bbox
         if (_minlon <= -179.0 and _maxlon >= 179.0
                 and _minlat <= -84.0 and _maxlat >= 84.0):
             bbox = None
+            world = True
+
+    if order != "source":
+        if world:
+            # The ordered path lists a whole zoom's coordinates and fetches
+            # each BLOB by key; on the world file that is the random-access
+            # pattern the rowid scan below exists to avoid (and z14 alone is
+            # ~270 M coordinates in RAM). Fall back rather than run for days.
+            print(f"    WARNING: --tile-order {order} ignored for a world-sized bbox; "
+                  "using source order", flush=True)
+        else:
+            yield from _iter_tiles_ordered(conn, zoom_level, bbox, max_zoom, order)
+            conn.close()
+            return
 
     if bbox:
         import mercantile
@@ -5388,14 +5398,16 @@ def create_zim(
             unreadable = 0
             suffix = f".{ext}"
             strip_len = len(suffix)
+            # Zoom boundaries get a cluster break lazily, right before the first
+            # tile actually added at the new zoom, so a zoom with nothing to
+            # add (all outside bbox, or missing) never yields an empty cluster.
+            _raster_last_zoom = [None]
             if _zoom_breaks:
                 _cluster_break(tile_cluster_bytes)
             for z in range(0, max_zoom + 1):
                 z_dir = os.path.join(source_dir, str(z))
                 if not os.path.isdir(z_dir):
                     continue
-                if _zoom_breaks and z > 0:
-                    _cluster_break()
                 def _walk_dir_order():
                     """(x_name, x, fname, y) in directory order."""
                     for x_name in sorted(os.listdir(z_dir)):
@@ -5448,6 +5460,9 @@ def create_zim(
                             # is an I/O or permission problem — count it.
                             unreadable += 1
                             continue
+                        if _zoom_breaks and _raster_last_zoom[0] is not None and z != _raster_last_zoom[0]:
+                            _cluster_break()
+                        _raster_last_zoom[0] = z
                         zim_path = f"{zim_prefix}/{z}/{x_name}/{fname}"
                         creator.add_item(MapItem(
                             zim_path, f"{label} {z}/{x_name}/{fname}",
@@ -5458,6 +5473,8 @@ def create_zim(
                         count += 1
                         if count % 2000 == 0:
                             print(f"\r    Added {count} {label.lower()} tiles...", end="", flush=True)
+            if _zoom_breaks:
+                _cluster_break(cluster_size)   # back to the build's default target
             elapsed = time.time() - _t0
             rate = (count / elapsed) if elapsed > 0 else 0
             print(f"\r    Added {count} {label.lower()} tiles in {elapsed:.0f}s ({rate:.0f}/s)" +
@@ -6956,7 +6973,12 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="insertion order for tiles/satellite/terrain: 'source' as today; "
                              "'zoom-hilbert' zoom-major with Hilbert order within a zoom and a "
                              "cluster break per zoom (rust builder; see docs/zim-variants.md)")
-    parser.add_argument("--tile-cluster-mb", type=float, default=None,
+    def _positive_mb(v):
+        f = float(v)
+        if f <= 0:
+            raise argparse.ArgumentTypeError("--tile-cluster-mb must be > 0")
+        return f
+    parser.add_argument("--tile-cluster-mb", type=_positive_mb, default=None,
                         help="cluster size target (MiB, uncompressed) for the tile components "
                              "while --tile-order is not 'source'; the build default otherwise. "
                              "2 measured well against 8 for zoom/pan cost")
