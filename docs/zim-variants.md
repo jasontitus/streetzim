@@ -355,3 +355,137 @@ filename, recipe, date), `M/Name`, `M/Title`, `M/Description`, `M/Flavour`,
   `swap_viewer_rust.py` once as today. A slotted source copies its slot
   cluster verbatim, so `patch_viewer_inplace.py` keeps working on the output.
 - **Peak RSS figures include mmap'd file pages** and overstate heap use.
+
+## Sparse regions (2026-09-20, second pass)
+
+Switzerland is the wrong file to size a light recipe on: it is a small dense
+country where search and routing dominate. `zim_inventory.py` now runs
+against a URL, reading only the tables (header, dirents, cluster pointers,
+raw-cluster offset tables) over HTTP range requests: 191 MB fetched for
+argentina, 872 MB for south-america, no download.
+
+| region | size | tiles | of which z14 | satellite | terrain | search-data | routing |
+|---|---|---|---|---|---|---|---|
+| switzerland | 2.2 GB | 36% | 22% | 5.6% | 3.0% | 22% | 18% |
+| argentina | 3.4 GB | 25% | 13% | 9.6% (z12: 7.0%) | **20%** (z12: 12.8%, z11: 4.9%) | 21% | 10% |
+| australia-nz | 7.2 GB | 18% | 10% | **29%** (z13: 1.4 GB) | 12% (z12: 575 MB) | 14% | 7% |
+| south-america | 21 GB | 18% | 9.5% | 4.5% | 15% (z12: 2.0 GB) | **47%** | 8.6% |
+
+So the lever differs per region and the inventory has to come first:
+
+- **argentina**: terrain z12 alone is 13%; satellite z12 another 7%; z14
+  tiles 13%. A light recipe that only drops z14 vectors and satellite
+  leaves the biggest raster component untouched.
+- **australia-nz**: satellite is the file. Its z13 satellite is 1.4 GB, so
+  `--satellite-max-zoom 12` alone saves 20%.
+- **south-america**: search-data is 10 GB of 21. Addresses, not imagery.
+  That is the tier-2 leaf rewrite, still not implemented here.
+
+### Argentina: the sparse-light recipe
+
+```
+python3 cloud/derive_zim.py osm-argentina.zim ar-light.zim \
+    --max-tile-zoom 13 --terrain-max-zoom 11 --satellite-max-zoom 11 \
+    --title "OSM - Argentina (Light)" --name osm_argentina_light
+```
+
+| recipe (dry-run) | copy / re-encode / drop clusters | dropped |
+|---|---|---|
+| `--light` (no sat, z13) | 1181 / 7 / 170 | 769 MB |
+| z13 + terrain ≤ z11 + satellite ≤ z11 | 1139 / 9 / 210 | **1113 MB** |
+| `--no-terrain --no-satellite` | 1224 / 6 / 128 | 1016 MB |
+| `--terrain-max-zoom 11` | 1300 / 5 / 53 | 434 MB |
+
+The second recipe ran in **47 s**: 3.43 GB to 2.17 GB (63%), 736,142 of
+2,599,702 entries kept, verified identical, all `tiles/14/`, `terrain/12/`,
+`satellite/12/` entries absent, search and suggestions working.
+
+The re-encoded clusters are the same nine every time: map-config, metadata,
+the raw satellite/terrain/xapian cluster at the component boundary, and the
+six clusters where two zooms meet. Everything else is copied.
+
+### Does zoom-major clustering slow down zooming? Measured.
+
+The worry: if every zoom level lives in its own clusters, a zoom-in sequence
+touches a new cluster at every step instead of finding neighbouring zooms in
+one. `zim_access_sim.py` replays three interactions (first view, zoom 4→14,
+six-screen pan at z14) on a phone viewport, counting distinct clusters read
+and their compressed bytes, and with `--measure` timing the same fetches
+through python-libzim (warm page cache, so this is dirent lookup plus
+inflate, which is the part a phone pays in CPU).
+
+Four layouts of the same content: the shipped file (component-major, zoom
+runs with mixed boundary clusters, ~8 MiB uncompressed clusters), a Hilbert
+zoom-major regroup at 8 MiB, the same at 2 MiB, and the sparse-light derive.
+
+**argentina, Buenos Aires, tiles + satellite + terrain, zoom 4→14:**
+
+| layout | clusters read | MB inflated | libzim ms |
+|---|---|---|---|
+| shipped | 23 | 141 | 715 |
+| hilbert, 8 MiB | 30 | 121 | 289 |
+| hilbert, 2 MiB | 35 | **44** | **109** |
+| sparse-light (shipped layout) | 18 | 98 | 435 |
+
+**argentina, El Calafate (Patagonia), same:** shipped 23 reads / 152 MB /
+816 ms; hilbert 8 MiB 27 / 110 / 116 ms; hilbert 2 MiB 30 / 40 / 48 ms.
+
+**first view (startup, z6):** shipped 6 reads / 33.9 MB / 116 ms; regrouped
+5 reads / 9.0 MB / 11-15 ms, both cluster sizes. The shipped file's low-zoom
+tiles share clusters with unrelated bulk, so the first paint inflates 34 MB
+to draw 84 tiles.
+
+**pan at z14, six screens, Calafate:** shipped 6 reads / 37 MB / 434 ms;
+hilbert 8 MiB 2 / 12 MB / 21 ms; 2 MiB 3 / 4 MB / 12 ms.
+
+**switzerland, Zurich, tiles only, zoom 4→14:** shipped 13 reads / 63 MB /
+540 ms; hilbert 8 MiB 15 / 50 MB / 338 ms. Zermatt with all layers: 22 / 135
+MB / 692 ms against 32 / 112 MB / 262 ms.
+
+Reading of the numbers:
+
+1. **Zoom-major does add cluster reads on a zoom-in**, 15-40% more, exactly
+   as feared: each zoom step lands in its own cluster. But each of those
+   clusters is smaller and contains nothing but that zoom, so bytes inflated
+   fall 15-30% and measured time falls 2-7x. The reads were never the cost;
+   inflating megabytes of unrelated tiles to get at one was.
+2. **Cluster size is the bigger knob.** 2 MiB clusters cut inflated bytes
+   another 2.7x over 8 MiB at the cost of 1.8% file size (argentina; 0.6% on
+   switzerland). MapLibre fetches 12-20 tiles per view; a 2 MiB cluster
+   holds ~100 z14 tiles, so most views still resolve in 1-3 clusters.
+3. **Hilbert order within a zoom** is what keeps the pan cheap: six screens
+   east at z14 cost 2-3 cluster reads total because neighbouring tiles are
+   neighbouring blobs.
+4. The light derive inherits the shipped layout and so inherits its startup
+   and zoom costs; a variant should be derived from a well-laid-out source,
+   or regrouped once.
+
+Caveat: `--measure` times python-libzim on this container with the file in
+page cache and libzim's own cluster cache in play, so absolute ms are not a
+phone's, and the per-step numbers wobble by tens of ms. The ratios between
+layouts on the same file are the result.
+
+### What this asks of the builder
+
+Emit tiles, satellite and terrain **zoom-major with a cluster break per
+zoom and Hilbert order within a zoom**, and use a smaller cluster target for
+those three components (2 MiB) than for search and routing (8 MiB, where the
+typeahead measurements in gotcha #7 want big clusters). That is an insertion
+order and two config values, no format change, and it makes every later
+derive a pure cluster copy. `--regroup-tiles` exists to measure this on
+shipped files, not to be the production path: it re-encodes every tile
+(argentina: 2.5 M tiles, 285 s on 4 cores; a continent is hours).
+
+### Costs observed
+
+| run | source | time | peak RSS |
+|---|---|---|---|
+| argentina sparse-light | 3.43 GB, 2.6 M entries | 47 s | 3.9 GB |
+| argentina regroup hilbert 8 MiB | 3.43 GB | 285 s | 5.5 GB |
+| argentina regroup hilbert 2 MiB | 3.43 GB | 218 s | 7.3 GB |
+
+RSS counts the mmap'd source pages the run touched, so it scales with bytes
+read rather than heap; the real heap cost is the in-memory dirent list (2.6 M
+Dirent objects for argentina). A continent with 12 M entries (south-america)
+will want dirents parsed into arrays instead of objects before this tool is
+run on one. Open item.
