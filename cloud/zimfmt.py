@@ -81,6 +81,9 @@ class Header:
 
 # ---------------------------------------------------------------- dirent --
 
+class _Short(Exception):
+    """Window too small to hold the whole dirent."""
+
 @dataclass
 class Dirent:
     """One directory entry. ``mime`` is an index into the MIME list, or
@@ -109,7 +112,25 @@ class Dirent:
         return self.title if self.title else self.url
 
     @classmethod
-    def parse(cls, buf, off: int) -> "Dirent":
+    def parse(cls, src, off: int) -> "Dirent":
+        """Parse from a bytes-like or a Source (anything sliceable). Reads a
+        small window and grows it until the two NUL terminators are found."""
+        n = 512
+        while True:
+            buf = src[off:off + n]
+            if not isinstance(buf, (bytes, bytearray)):
+                buf = bytes(buf)
+            try:
+                return cls._parse_bytes(buf, 0)
+            except _Short:
+                if off + n >= getattr(src, "size", len(src)) and n > len(buf):
+                    raise ValueError(f"truncated dirent at {off}")
+                n *= 4
+
+    @classmethod
+    def _parse_bytes(cls, buf: bytes, off: int) -> "Dirent":
+        if len(buf) < off + 16:
+            raise _Short()
         mime, plen, ns = struct.unpack_from("<HBc", buf, off)
         revision, = struct.unpack_from("<I", buf, off + 4)
         p = off + 8
@@ -123,11 +144,17 @@ class Dirent:
             cluster, blob = struct.unpack_from("<II", buf, p)
             p += 8
         e = buf.find(b"\0", p)
+        if e < 0:
+            raise _Short()
         url = bytes(buf[p:e])
         p = e + 1
         e = buf.find(b"\0", p)
+        if e < 0:
+            raise _Short()
         title = bytes(buf[p:e])
         p = e + 1
+        if len(buf) < p + plen:
+            raise _Short()
         param = bytes(buf[p:p + plen])
         return cls(mime, ns.decode("latin-1"), revision, url, title, param,
                    redirect, cluster, blob)
@@ -185,36 +212,214 @@ class ClusterInfo:
         return self.compression != COMP_NONE
 
 
-class ZimReader:
-    """Random access to the raw structure of a ZIM file."""
+class MmapSource:
+    """Local file, read through mmap. Slicing returns bytes."""
 
     def __init__(self, path: str):
+        import mmap
         self.path = path
         self.size = os.path.getsize(path)
         self._fh = open(path, "rb")
-        import mmap
         self.mm = mmap.mmap(self._fh.fileno(), 0, access=mmap.ACCESS_READ)
-        self.header = Header.parse(self.mm[:HEADER_LEN])
+
+    def __getitem__(self, k):
+        return self.mm[k]
+
+    def find(self, sub: bytes, start: int) -> int:
+        return self.mm.find(sub, start)
+
+    def view(self, start: int, end: int) -> memoryview:
+        return memoryview(self.mm)[start:end]
+
+    def close(self):
+        self.mm.close()
+        self._fh.close()
+
+
+class HttpSource:
+    """A ZIM behind an HTTP server that honours Range (archive.org does).
+    Reads go through a block cache; :meth:`prefetch` pulls one contiguous
+    region (the dirent table) in a single request. Enough to inventory a
+    23 GB continent by downloading a few hundred MB of tables."""
+
+    BLOCK = 1 << 20
+
+    def __init__(self, url: str, verbose: bool = False):
+        import urllib.request
+        self.url = url
+        self.path = url
+        self._verbose = verbose
+        req = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            self.size = int(resp.headers["Content-Length"])
+            self.url = resp.geturl()   # follow the redirect once, then hit the node directly
+        self._blocks: dict[int, bytes] = {}
+        self._regions: list[tuple[int, bytes]] = []
+        self._region_starts: list[int] = []
+        self.bytes_fetched = 0
+        self.requests = 0
+
+    def _fetch(self, start: int, end: int) -> bytes:
+        import urllib.request
+        end = min(end, self.size)
+        req = urllib.request.Request(self.url, headers={"Range": f"bytes={start}-{end - 1}"})
+        for attempt in range(4):
+            try:
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    data = resp.read()
+                break
+            except Exception as ex:  # noqa: BLE001
+                if attempt == 3:
+                    raise
+                import time
+                time.sleep(2 ** attempt)
+        self.requests += 1
+        self.bytes_fetched += len(data)
+        if self._verbose:
+            print(f"    range {start}-{end - 1} ({len(data)/1e6:.1f} MB)", flush=True)
+        return data
+
+    def prefetch(self, start: int, end: int):
+        self._add_region(start, self._fetch(start, end))
+
+    def _add_region(self, start: int, data: bytes):
+        import bisect
+        i = bisect.bisect_left(self._region_starts, start)
+        self._region_starts.insert(i, start)
+        self._regions.insert(i, (start, data))
+
+    def prefetch_many(self, ranges: list[tuple[int, int]], per_request: int = 64):
+        """Fetch many small [start, end) pieces with multipart range requests
+        (archive.org honours them). Used for the one-byte cluster info headers
+        and the offset tables of raw clusters."""
+        import re
+        import urllib.request
+        ranges = sorted(set((int(a), int(b)) for a, b in ranges if b > a))
+        for i in range(0, len(ranges), per_request):
+            batch = ranges[i:i + per_request]
+            if len(batch) == 1:
+                a, b = batch[0]
+                self._add_region(a, self._fetch(a, b))
+                continue
+            spec = ",".join(f"{a}-{b - 1}" for a, b in batch)
+            req = urllib.request.Request(self.url, headers={"Range": f"bytes={spec}"})
+            # archive.org occasionally accepts a multipart request and then
+            # never sends the body; a short socket timeout plus a retry on a
+            # fresh connection is what gets past it.
+            for attempt in range(5):
+                try:
+                    with urllib.request.urlopen(req, timeout=20) as resp:
+                        ctype = resp.headers.get("Content-Type", "")
+                        body = resp.read()
+                    break
+                except Exception as ex:  # noqa: BLE001
+                    if self._verbose:
+                        print(f"    multipart retry {attempt + 1}: {type(ex).__name__}", flush=True)
+                    if attempt == 4:
+                        raise
+            self.requests += 1
+            self.bytes_fetched += len(body)
+            m = re.search(r'boundary=("?)([^";]+)\1', ctype)
+            if resp.status == 206 and m:
+                bnd = ("--" + m.group(2)).encode()
+                for part in body.split(bnd)[1:]:
+                    if part.startswith(b"--"):
+                        break
+                    head, _, data = part.partition(b"\r\n\r\n")
+                    cr = re.search(rb"Content-Range:\s*bytes\s+(\d+)-(\d+)", head, re.I)
+                    if not cr:
+                        continue
+                    a, b = int(cr.group(1)), int(cr.group(2))
+                    self._add_region(a, data[:b - a + 1])
+            elif resp.status == 206:
+                a, b = batch[0]
+                self._add_region(a, body)
+                self.prefetch_many(batch[1:], per_request)
+            else:
+                # server ignored Range and sent the whole file: keep what we need
+                for a, b in batch:
+                    self._add_region(a, body[a:b])
+            if self._verbose:
+                print(f"    multipart {len(batch)} ranges ({len(body)/1e3:.0f} KB)", flush=True)
+
+    def _read(self, start: int, end: int) -> bytes:
+        import bisect
+        i = bisect.bisect_right(self._region_starts, start) - 1
+        if i >= 0:
+            rs, data = self._regions[i]
+            if end <= rs + len(data):
+                return data[start - rs:end - rs]
+        out = bytearray()
+        b0, b1 = start // self.BLOCK, (end - 1) // self.BLOCK
+        for b in range(b0, b1 + 1):
+            blk = self._blocks.get(b)
+            if blk is None:
+                blk = self._blocks[b] = self._fetch(b * self.BLOCK, (b + 1) * self.BLOCK)
+            lo = max(start, b * self.BLOCK) - b * self.BLOCK
+            hi = min(end, (b + 1) * self.BLOCK) - b * self.BLOCK
+            out += blk[lo:hi]
+        return bytes(out)
+
+    def __getitem__(self, k):
+        if isinstance(k, slice):
+            start = k.start or 0
+            stop = self.size if k.stop is None else k.stop
+            return self._read(start, stop)
+        return self._read(k, k + 1)[0]
+
+    def find(self, sub: bytes, start: int) -> int:
+        # only used for NUL-terminated strings: scan in 4 KiB steps
+        pos = start
+        while pos < self.size:
+            chunk = self._read(pos, min(pos + 4096, self.size))
+            i = chunk.find(sub)
+            if i >= 0:
+                return pos + i
+            pos += 4096 - len(sub) + 1
+        return -1
+
+    def view(self, start: int, end: int):
+        return memoryview(self._read(start, end))
+
+    def close(self):
+        pass
+
+
+class ZimReader:
+    """Random access to the raw structure of a ZIM file (local path or
+    http(s) URL)."""
+
+    def __init__(self, path: str, *, verbose: bool = False):
+        self.path = path
+        self.remote = path.startswith(("http://", "https://"))
+        self.src = HttpSource(path, verbose) if self.remote else MmapSource(path)
+        self.mm = self.src
+        self.size = self.src.size
+        self.header = Header.parse(self.src[:HEADER_LEN])
         h = self.header
         self.mimes = self._read_mimes(h.mime_list_pos)
         self.url_ptrs = np.frombuffer(
-            self.mm, dtype="<u8", count=h.entry_count, offset=h.url_ptr_pos)
+            self.src[h.url_ptr_pos:h.url_ptr_pos + 8 * h.entry_count], dtype="<u8")
         self.cluster_ptrs = np.frombuffer(
-            self.mm, dtype="<u8", count=h.cluster_count, offset=h.cluster_ptr_pos)
+            self.src[h.cluster_ptr_pos:h.cluster_ptr_pos + 8 * h.cluster_count], dtype="<u8")
+        if self.remote and h.entry_count:
+            # dirents are contiguous; pull them in one request
+            lo = int(self.url_ptrs.min())
+            hi = int(self.url_ptrs.max()) + 4096
+            self.src.prefetch(lo, min(hi, self.size))
         self.title_ptrs = None
         # libzim >= 8 may write an absent title index (all ones) and rely on
         # X/listing/titleOrdered/* instead; zimru writes a real one.
         self.has_title_ptrs = 0 < h.title_ptr_pos < self.size and h.title_ptr_pos != h.url_ptr_pos
         if self.has_title_ptrs:
             self.title_ptrs = np.frombuffer(
-                self.mm, dtype="<u4", count=h.entry_count, offset=h.title_ptr_pos)
+                self.src[h.title_ptr_pos:h.title_ptr_pos + 4 * h.entry_count], dtype="<u4")
         self._cluster_ends = self._compute_cluster_ends()
         self._dirent_cache: dict[int, Dirent] = {}
         self._blob_cache: tuple[int, list[int], bytes] | None = None
 
     def close(self):
-        self.mm.close()
-        self._fh.close()
+        self.src.close()
 
     def __enter__(self):
         return self
@@ -277,6 +482,28 @@ class ZimReader:
         return self.mimes[d.mime] if d.mime < len(self.mimes) else ""
 
     # -- clusters --
+    def preload_cluster_infos(self):
+        """Remote only: fetch every cluster's info byte in a few requests."""
+        if self.remote:
+            self.src.prefetch_many([(int(o), int(o) + 1) for o in self.cluster_ptrs])
+
+    def preload_raw_tables(self, clusters: list[int]):
+        """Remote only: fetch the offset tables of the given raw clusters."""
+        if not self.remote or not clusters:
+            return
+        heads = []
+        for c in clusters:
+            ci = self.cluster_info(c)
+            heads.append((ci.offset + 1, ci.offset + 1 + (8 if ci.extended else 4)))
+        self.src.prefetch_many(heads)
+        tables = []
+        for c in clusters:
+            ci = self.cluster_info(c)
+            w = 8 if ci.extended else 4
+            first = struct.unpack("<Q" if ci.extended else "<I", self.src[ci.offset + 1:ci.offset + 1 + w])[0]
+            tables.append((ci.offset + 1, ci.offset + 1 + first))
+        self.src.prefetch_many(tables, per_request=64)
+
     def cluster_info(self, c: int) -> ClusterInfo:
         off = int(self.cluster_ptrs[c])
         info = self.mm[off]
@@ -285,7 +512,20 @@ class ZimReader:
 
     def cluster_raw(self, c: int) -> memoryview:
         ci = self.cluster_info(c)
-        return memoryview(self.mm)[ci.offset:ci.offset + ci.size]
+        return self.src.view(ci.offset, ci.offset + ci.size)
+
+    def raw_cluster_blob_sizes(self, c: int) -> list[int] | None:
+        """Blob sizes of an UNCOMPRESSED cluster from its offset table alone
+        (a few KB read, no payload). None for compressed clusters."""
+        ci = self.cluster_info(c)
+        if ci.compressed:
+            return None
+        w = 8 if ci.extended else 4
+        first = struct.unpack("<Q" if ci.extended else "<I", self.src[ci.offset + 1:ci.offset + 1 + w])[0]
+        n = first // w
+        table = self.src[ci.offset + 1:ci.offset + 1 + first]
+        offs = struct.unpack(f"<{n}{'Q' if ci.extended else 'I'}", table)
+        return [offs[i + 1] - offs[i] for i in range(n - 1)]
 
     def cluster_offsets(self, c: int) -> tuple[list[int], bytes]:
         """Decompress cluster ``c``. Returns (offsets[n+1], body) where body
@@ -405,7 +645,7 @@ class ZimWriter:
         """Copy cluster ``c`` of ``src`` byte-for-byte via the reader's mmap."""
         ci = src.cluster_info(c)
         self._cluster_offsets.append(self._pos)
-        mv = memoryview(src.mm)[ci.offset:ci.offset + ci.size]
+        mv = src.src.view(ci.offset, ci.offset + ci.size)
         # write in 64 MiB pieces so a multi-GB raw routing cluster does not
         # materialise as one bytes object
         step = 64 << 20
