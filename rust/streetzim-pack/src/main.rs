@@ -34,6 +34,10 @@
 //! - `streaming: true` routes through zimru's chunked-streaming path
 //!   (memory peak = chunk size, not file size). Use it for >64 MiB
 //!   files; bodies that big should not be base64-inlined.
+//! - `cluster_break` (`{"kind":"cluster_break","cluster_size_target":N}`)
+//!   closes the current cluster and optionally changes the size target;
+//!   the flush is compiled in with `--features cluster_break`, which needs
+//!   zimru's `Creator::flush_cluster()`.
 //! - `compress` is a per-item override: `false` forces the cluster
 //!   uncompressed even when `config.compression` is zstd/xz; omitting
 //!   it (or `true`) honours the Creator default. zimru groups items by
@@ -75,6 +79,21 @@ enum Record {
     Illustration(IllustrationRec),
     Item(ItemRec),
     Redirect(RedirectRec),
+    ClusterBreak(ClusterBreakRec),
+}
+
+/// `{"kind":"cluster_break","cluster_size_target":2097152}` — close the
+/// cluster being filled so the next item opens a new one, and optionally
+/// change the cluster size target from here on. create_osm_zim.py emits one
+/// between zoom levels of tiles/satellite/terrain (--tile-order zoom-hilbert)
+/// so each zoom is a run of whole clusters that cloud/derive_zim.py can copy
+/// or drop without re-encoding. The flush needs a `Creator::flush_cluster()`
+/// on zimru and is compiled in only with `--features cluster_break`; without
+/// it the record still applies the size target and warns once.
+#[derive(Debug, Deserialize, Default)]
+struct ClusterBreakRec {
+    #[serde(default)]
+    cluster_size_target: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -416,6 +435,8 @@ fn run(cli: &Cli) -> Result<()> {
     let mut applied_config = false;
     let mut writing = false;
     let mut counts = (0usize, 0usize, 0usize, 0usize);
+    let mut breaks = 0usize;
+    let mut warned_no_flush = false;
 
     macro_rules! ensure_writing {
         () => {
@@ -475,6 +496,30 @@ fn run(cli: &Cli) -> Result<()> {
                 handle_redirect(&mut creator, r)?;
                 counts.3 += 1;
             }
+            Record::ClusterBreak(b) => {
+                ensure_writing!();
+                #[cfg(feature = "cluster_break")]
+                {
+                    creator
+                        .flush_cluster()
+                        .map_err(|e| anyhow!("flush_cluster at manifest line {}: {e}", lineno + 1))?;
+                }
+                #[cfg(not(feature = "cluster_break"))]
+                {
+                    if !warned_no_flush {
+                        eprintln!(
+                            "streetzim-pack: cluster_break records present but this binary was \
+                             built without the `cluster_break` feature; clusters will NOT be \
+                             split at zoom boundaries (size targets still apply)"
+                        );
+                        warned_no_flush = true;
+                    }
+                }
+                if let Some(n) = b.cluster_size_target {
+                    creator.set_cluster_size_target(n);
+                }
+                breaks += 1;
+            }
         }
     }
 
@@ -493,13 +538,14 @@ fn run(cli: &Cli) -> Result<()> {
     let elapsed = started.elapsed();
     if cli.verbose {
         eprintln!(
-            "streetzim-pack: wrote {:?} in {:.2}s — items={} metadata={} illustrations={} redirects={}",
+            "streetzim-pack: wrote {:?} in {:.2}s — items={} metadata={} illustrations={} redirects={} cluster_breaks={}",
             cli.output,
             elapsed.as_secs_f64(),
             counts.2,
             counts.0,
             counts.1,
-            counts.3
+            counts.3,
+            breaks
         );
     }
     Ok(())

@@ -56,7 +56,10 @@ def build_fixture(path: Path) -> dict:
         c.add_metadata("Language", "eng")
         c.add_item(_Item("index.html", "text/html", "<html><title>Map</title>hello map</html>", title="Map"))
         c.add_item(_Item("map-config.json", "application/json", json.dumps(cfg)))
-        c.add_item(_Item("streetzim-meta.json", "application/json", json.dumps({"name": "Fixture"})))
+        c.add_item(_Item("streetzim-meta.json", "application/json",
+                         json.dumps({"name": "Fixture", "hasAddresses": True,
+                                     "counts": {"total": 100, "addresses": 22,
+                                                "byType": {"poi": 60, "addr": 22, "street": 18}}})))
         for z in range(0, 15):
             n = min(2 ** z, 4)
             for x in range(n):
@@ -70,10 +73,27 @@ def build_fixture(path: Path) -> dict:
                         data = _tile_bytes(z, x, y, kind)
                         paths[p] = data
                         c.add_item(_Item(p, mime, data.decode(), comp))
-        for i in range(30):
+        # search-data: a character-split prefix with tiered leaves (c/p/s/a),
+        # plus legacy mixed leaves, plus the manifest the viewer resolves against
+        chunks = {}
+        for i in range(20):
             p = f"search-data/ch{i:02d}.json"
-            paths[p] = json.dumps([{"n": f"place {i}", "type": "poi"}]).encode()
+            recs = [{"n": f"place {i}", "t": "poi"}, {"n": f"Road {i} 5", "t": "addr"}]
+            paths[p] = json.dumps(recs).encode()
+            chunks[f"ch{i:02d}"] = len(recs)
             c.add_item(_Item(p, "application/json", paths[p].decode()))
+        for tier, recs in (("c", [{"n": "Zurich", "t": "place"}]),
+                           ("p", [{"n": "Zurich Cafe", "t": "poi"}]),
+                           ("s", [{"n": "Zurichstrasse", "t": "street"}]),
+                           ("a", [{"n": "Zurichstrasse 1", "t": "addr"}, {"n": "Zurichstrasse 2", "t": "addr"}])):
+            p = f"search-data/zu~r~{tier}.json"
+            paths[p] = json.dumps(recs).encode()
+            chunks[f"zu~r~{tier}"] = len(recs)
+            c.add_item(_Item(p, "application/json", paths[p].decode()))
+        manifest = {"total": 100, "chunks": chunks, "sub_chunks": {"zu": list(k for k in chunks if k.startswith("zu"))},
+                    "char_split": {"zu": ["r"]}}
+        paths["search-data/manifest.json"] = json.dumps(manifest).encode()
+        c.add_item(_Item("search-data/manifest.json", "application/json", paths["search-data/manifest.json"].decode()))
         for i in range(5):
             p = f"wiki-article/Article_{i}"
             paths[p] = f"<html><title>Article {i}</title>Zurich text {i}</html>".encode()
@@ -110,7 +130,7 @@ def test_inventory_components(fixture_zim):
     assert comps["tiles/14"]["entries"] == 16
     assert comps["satellite/14"]["entries"] == 16
     assert "terrain/13" not in comps
-    assert comps["search-data"]["entries"] == 30
+    assert comps["search-data"]["entries"] == 25   # 20 legacy + 4 tiered + manifest
     assert sum(row["on_disk"] for row in inv["rows"]) <= inv["size"]
 
 
@@ -184,6 +204,35 @@ def test_no_routing_no_wiki(fixture_zim, tmp_path):
     cfg = json.loads(bytes(a.get_entry_by_path("map-config.json").get_item().content))
     assert cfg["hasRouting"] is False
     assert json.loads(bytes(a.get_entry_by_path("wiki-geo-index.json").get_item().content)) == {}
+
+
+def test_strip_addresses(fixture_zim, tmp_path):
+    src, paths = fixture_zim
+    dst = tmp_path / "noaddr.zim"
+    derive(str(src), str(dst), Recipe(strip_addresses=True, level=3), verbose=False)
+    a = Archive(str(dst))
+    assert a.check()
+    def _json(p): return json.loads(bytes(a.get_entry_by_path(p).get_item().content))
+    # tier-a leaf kept as an empty list (manifest lookup still hits), others intact
+    assert _json("search-data/zu~r~a.json") == []
+    assert _json("search-data/zu~r~s.json") == [{"n": "Zurichstrasse", "t": "street"}]
+    # legacy mixed leaves lose only addr records
+    for i in range(20):
+        assert _json(f"search-data/ch{i:02d}.json") == [{"n": f"place {i}", "t": "poi"}]
+    man = _json("search-data/manifest.json")
+    assert man["chunks"]["zu~r~a"] == 0 and man["chunks"]["ch00"] == 1 and man["chunks"]["zu~r~c"] == 1
+    assert man["total"] == 100 - 22 and man["addresses_stripped"] is True
+    assert man["sub_chunks"] == {"zu": ["zu~r~c", "zu~r~p", "zu~r~s", "zu~r~a"]}   # untouched
+    meta = _json("streetzim-meta.json")
+    assert meta["hasAddresses"] is False and meta["counts"]["addresses"] == 0
+    assert "addr" not in meta["counts"]["byType"] and meta["counts"]["total"] == 78
+    cfg = _json("map-config.json")
+    assert cfg["hasAddresses"] is False
+    # nothing outside search-data changed
+    for path, data in paths.items():
+        if not path.startswith("search-data/"):
+            assert bytes(a.get_entry_by_path(path).get_item().content) == data
+    assert a.all_entry_count == Archive(str(src)).all_entry_count
 
 
 def test_dry_run_writes_nothing(fixture_zim, tmp_path):

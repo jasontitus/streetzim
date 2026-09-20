@@ -36,6 +36,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from cloud.tile_order import tile_sort_key as _tile_sort_key  # noqa: E402
+from cloud.search_shards import TIER_TYPES  # noqa: E402
 from cloud.zimfmt import (  # noqa: E402
     COMP_NONE, MIME_REDIRECT, NO_MAIN_PAGE, TITLE_LISTING_V0, TITLE_LISTING_V1,
     Dirent, ZimReader, ZimWriter, encode_cluster, sort_key_title, sort_key_url)
@@ -117,6 +119,7 @@ class Recipe:
     terrain_max_zoom: int | None = None
     no_routing: bool = False
     no_wiki: bool = False
+    strip_addresses: bool = False
     regroup_tiles: bool = False
     tile_order: str = "hilbert"
     cluster_target: int = DEFAULT_CLUSTER_TARGET
@@ -137,6 +140,7 @@ class Recipe:
         if self.max_tile_zoom is not None: out.append(f"tiles <= z{self.max_tile_zoom}")
         if self.no_routing: out.append("drop routing")
         if self.no_wiki: out.append("drop wiki articles/images")
+        if self.strip_addresses: out.append("strip address records from search-data")
         for p in self.drop_prefixes: out.append(f"drop {p}*")
         if self.regroup_tiles: out.append(f"regroup tiles zoom-major ({self.tile_order})")
         return out
@@ -167,31 +171,8 @@ def keep_entry(d: Dirent, r: Recipe) -> bool:
     return True
 
 
-def _hilbert_d(n: int, x: int, y: int) -> int:
-    """Hilbert curve index of (x, y) on an n x n grid (n power of two)."""
-    d = 0
-    s = n >> 1
-    while s > 0:
-        rx = 1 if (x & s) else 0
-        ry = 1 if (y & s) else 0
-        d += s * s * ((3 * rx) ^ ry)
-        if ry == 0:
-            if rx == 1:
-                x = s - 1 - x
-                y = s - 1 - y
-            x, y = y, x
-        s >>= 1
-    return d
-
-
 def tile_sort_key(order: str, z: int, x: int, y: int) -> int:
-    if order == "hilbert":
-        return _hilbert_d(1 << z, x, y)
-    if order == "xy":
-        return (x << z) | y
-    if order == "yx":
-        return (y << z) | x
-    raise ValueError(order)
+    return _tile_sort_key(order, z, x, y)
 
 
 # --------------------------------------------------------------- rewrite --
@@ -214,6 +195,9 @@ def _patch_map_config(raw: bytes, recipe: Recipe, dropped_components: set[str]) 
         cfg["hasRouting"] = False
     if recipe.no_wiki:
         cfg["hasWikiArticles"] = False
+    if recipe.strip_addresses:
+        cfg["hasOvertureAddresses"] = False   # attribution section; the data is gone
+        cfg["hasAddresses"] = False
     cfg.update(recipe.config_patch)
     derived = cfg.setdefault("derived", {})
     derived["recipe"] = recipe.describe()
@@ -231,7 +215,45 @@ def _patch_streetzim_meta(raw: bytes, recipe: Recipe, src_uuid: bytes, src_name:
     if recipe.satellite_max_zoom == -1: meta["hasSatellite"] = False
     if recipe.terrain_max_zoom == -1: meta["hasTerrain"] = False
     if recipe.no_routing: meta["hasRouting"] = False
+    if recipe.strip_addresses:
+        meta["hasAddresses"] = False
+        meta["hasOvertureAddresses"] = False
+        counts = meta.get("counts")
+        if isinstance(counts, dict):
+            counts["addresses"] = 0
+            by = counts.get("byType")
+            if isinstance(by, dict):
+                for t in ADDRESS_TYPES:
+                    by.pop(t, None)
+            counts["total"] = sum(v for v in (by or {}).values() if isinstance(v, int))
     return json.dumps(meta, separators=(",", ":")).encode("utf-8")
+
+
+ADDRESS_TYPES = TIER_TYPES["a"]
+SEARCH_PREFIX = b"search-data/"
+SEARCH_MANIFEST = b"search-data/manifest.json"
+
+
+def _is_address_leaf_name(name: str) -> bool:
+    """Character-split leaves carry their tier as the last '~' token; tier
+    'a' holds only address records (cloud/search_shards.py)."""
+    return name.rsplit("~", 1)[-1] == "a" and "~" in name
+
+
+def strip_address_records(raw: bytes) -> tuple[bytes, int, int]:
+    """Drop ``t`` in ADDRESS_TYPES from one leaf. Returns (new bytes, kept,
+    dropped). Legacy leaves (hash buckets, no tier) mix types, so every
+    record is inspected; the compact ``t`` key is what the builder writes,
+    ``type`` is accepted for older files."""
+    recs = json.loads(raw)
+    if not isinstance(recs, list):
+        return raw, 0, 0
+    kept = [r for r in recs if not (isinstance(r, dict)
+                                    and (r.get("t") or r.get("type")) in ADDRESS_TYPES)]
+    dropped = len(recs) - len(kept)
+    if dropped == 0:
+        return raw, len(recs), 0
+    return json.dumps(kept, separators=(",", ":"), ensure_ascii=False).encode("utf-8"), len(kept), dropped
 
 
 # ----------------------------------------------------------------- derive --
@@ -290,6 +312,57 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
         geo = _get("C", b"wiki-geo-index.json")
         if geo is not None:
             rewrites[("C", b"wiki-geo-index.json")] = b"{}"
+    addr_dropped = addr_leaves = 0
+    if recipe.strip_addresses:
+        man_i = r.find("C", SEARCH_MANIFEST)
+        if man_i < 0:
+            raise SystemExit("--strip-addresses: source has no search-data/manifest.json")
+        manifest = json.loads(r.content(dirents[man_i]))
+        chunks = manifest.get("chunks")
+        if not isinstance(chunks, dict):
+            raise SystemExit("--strip-addresses: manifest has no 'chunks' map")
+        empty = json.dumps([]).encode()
+        for i, d in enumerate(dirents):
+            if d.is_redirect or d.namespace != "C" or not d.url.startswith(SEARCH_PREFIX) \
+                    or d.url == SEARCH_MANIFEST or not d.url.endswith(b".json"):
+                continue
+            name = d.path[len("search-data/"):-len(".json")]
+            if _is_address_leaf_name(name):
+                # whole tier-a leaf: keep the entry as [] so the viewer's manifest
+                # lookup still hits directly (a missing name triggers its slow
+                # miss-branch scans) but the bytes go
+                n = chunks.get(name)
+                addr_dropped += n if isinstance(n, int) else 0
+                addr_leaves += 1
+                rewrites[("C", d.url)] = empty
+                if name in chunks:
+                    chunks[name] = 0
+                continue
+            new, kept, dropped = strip_address_records(r.content(d))
+            if dropped:
+                addr_dropped += dropped
+                addr_leaves += 1
+                rewrites[("C", d.url)] = new
+                if name in chunks:
+                    chunks[name] = kept
+            r._blob_cache = None
+        # 'total' counts unique features while chunk counts count leaf records
+        # (a record sits in every character path that reaches it), so derive
+        # the new total from the build's own unique address count.
+        meta_i = r.find("C", b"streetzim-meta.json")
+        uniq_addr = None
+        if meta_i >= 0:
+            try:
+                uniq_addr = json.loads(r.content(dirents[meta_i])).get("counts", {}).get("addresses")
+            except Exception:  # noqa: BLE001
+                uniq_addr = None
+        if isinstance(manifest.get("total"), int) and isinstance(uniq_addr, int):
+            manifest["total"] = max(0, manifest["total"] - uniq_addr)
+        manifest["addresses_stripped"] = True
+        rewrites[("C", SEARCH_MANIFEST)] = json.dumps(manifest, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        log(f"  addresses: {addr_dropped} leaf records removed from {addr_leaves} leaves "
+            f"({uniq_addr if uniq_addr is not None else '?'} unique addresses); "
+            f"manifest total {manifest.get('total')}")
     for key, val in (("Name", recipe.name), ("Title", recipe.title),
                      ("Description", recipe.description), ("Flavour", recipe.flavour)):
         if val is not None:
@@ -406,14 +479,29 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
         return tiles_regrouped_ref[0]
 
     copied = reenc = 0
+    from multiprocessing import Pool
+    pool = Pool(max(1, os.cpu_count() or 1))
+    pending: list[tuple[list[tuple[int, int]], object]] = []   # ordered encode jobs
+    window = 2 * (os.cpu_count() or 1)
+
+    def drain(all_: bool):
+        nonlocal reenc
+        while pending and (all_ or len(pending) >= window):
+            refs, fut = pending.pop(0)
+            nc = w.add_cluster(fut.get())
+            for bi, ref in enumerate(refs):
+                remap[ref] = (nc, bi)
+            reenc += 1
+
+    drop_set = set(plan["drop"])
+    copy_set = set(plan["copy"])
     for c in range(h.cluster_count):
-        if first_regroup_cluster is not None and c == first_regroup_cluster:
-            pass  # regrouped clusters are emitted after all sources have been read
-        if c in plan["drop"] and c not in regroup_refs:
+        if c in drop_set and c not in regroup_refs:
             continue
         ci = r.cluster_info(c)
         kb = kept_blobs.get(c, set())
-        if c in plan["copy"]:
+        if c in copy_set:
+            drain(True)   # keep cluster order: pending re-encodes land before this copy
             nc = w.copy_cluster_from(r, c)
             for b in kb:
                 remap[(c, b)] = (nc, b)
@@ -434,11 +522,12 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
             blobs.append(bytes(data))
             refs.append((c, b))
         if blobs:
-            nc = w.add_cluster(encode_cluster(blobs, ci.compression != COMP_NONE, recipe.level))
-            for bi, ref in enumerate(refs):
-                remap[ref] = (nc, bi)
-            reenc += 1
+            pending.append((refs, pool.apply_async(
+                _encode_job, ((blobs, ci.compression != COMP_NONE, recipe.level),))))
+            drain(False)
         r._blob_cache = None
+    drain(True)
+    pool.close(); pool.join()
     if regroup_refs:
         log(f"regrouping {sum(spill.count.values())} tiles "
             f"({spill.bytes/1e6:.1f} MB uncompressed, spilled to disk) ...")
@@ -518,6 +607,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--max-tile-zoom", type=int, help="drop vector tiles deeper than this")
     g.add_argument("--no-routing", action="store_true")
     g.add_argument("--no-wiki", action="store_true", help="drop wiki-article/ and wiki-image/")
+    g.add_argument("--strip-addresses", action="store_true",
+                   help="remove address records from search-data (tier-a leaves become []; "
+                        "legacy mixed leaves are filtered); re-encodes the search clusters")
     g.add_argument("--drop-prefix", action="append", default=[], metavar="PREFIX")
     g = ap.add_argument_group("layout")
     g.add_argument("--regroup-tiles", action="store_true",
@@ -540,7 +632,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def recipe_from_args(a) -> Recipe:
     rec = Recipe(drop_prefixes=a.drop_prefix, max_tile_zoom=a.max_tile_zoom,
-                 no_routing=a.no_routing, no_wiki=a.no_wiki, regroup_tiles=a.regroup_tiles,
+                 no_routing=a.no_routing, no_wiki=a.no_wiki, strip_addresses=a.strip_addresses,
+                 regroup_tiles=a.regroup_tiles,
                  tile_order=a.tile_order, cluster_target=a.cluster_target, level=a.level,
                  name=a.name, title=a.title, description=a.description, flavour=a.flavour,
                  keep_uuid=a.keep_uuid)
