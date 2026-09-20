@@ -148,6 +148,27 @@ def comps_total(inv, prefix):
     return sum(row["on_disk"] for row in inv["rows"] if row["component"].startswith(prefix))
 
 
+def test_inventory_exact_splits_addresses(fixture_zim):
+    p, _ = fixture_zim
+    approx = {r["component"]: r for r in inventory(str(p))["rows"]}
+    exact = {r["component"]: r for r in inventory(str(p), exact=True, exact_level=3)["rows"]}
+    # legacy leaves' address records are split out only in exact mode
+    assert exact["search-data/addresses"]["uncompressed"] > approx["search-data/addresses"]["uncompressed"]
+    # on-disk totals are conserved: every cluster's bytes land somewhere
+    for inv in (approx, exact):
+        assert abs(sum(r["on_disk"] for r in inv.values()) - sum(r["on_disk"] for r in approx.values())) < 64
+    flags = dict(inventory(str(p), exact=True, exact_level=3)["savings"])
+    assert "--strip-addresses" in flags
+
+
+def test_plan_estimate(fixture_zim):
+    p, _ = fixture_zim
+    res = derive(str(p), "", Recipe(satellite_max_zoom=-1, level=3), dry_run=True, verbose=False, estimate=True)
+    est = res["estimate"]
+    assert 0 < est["projected"] < Path(p).stat().st_size
+    assert est["reencoded_out"] > 0
+
+
 def _libzim_paths(a: Archive) -> set[str]:
     return {a._get_entry_by_id(i).path for i in range(a.entry_count)}
 

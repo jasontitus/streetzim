@@ -261,8 +261,13 @@ def strip_address_records(raw: bytes) -> tuple[bytes, int, int]:
 
 # ----------------------------------------------------------------- derive --
 
+def _estimate_job(args):
+    blobs, compress, level = args
+    return len(encode_cluster(blobs, compress, level))
+
+
 def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = False,
-           verbose: bool = True) -> dict:
+           verbose: bool = True, estimate: bool = False) -> dict:
     t0 = time.time()
     if not dry_run and os.path.exists(dst_path) and os.path.realpath(dst_path) == os.path.realpath(src_path):
         raise SystemExit("derive: DST is the same file as SRC; refusing to overwrite the source")
@@ -438,6 +443,32 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
     result = {"plan": {k: len(v) for k, v in plan.items()}, "plan_bytes": dict(plan_bytes),
               "entries_kept": sum(keep), "entries_src": len(dirents),
               "rewrites": [k[1].decode() for k in rewrites]}
+    if dry_run and estimate and not recipe.regroup_tiles:
+        # Compress what would be re-encoded (kept blobs, rewrites applied) and
+        # project the output size: copied bytes + re-encoded bytes + tables.
+        from multiprocessing import Pool
+        jobs = []
+        for c in plan["reencode"]:
+            offs, body = r.cluster_offsets(c)
+            ci = r.cluster_info(c)
+            blobs = []
+            for b in sorted(kept_blobs.get(c, ())):
+                data = body[offs[b]:offs[b + 1]]
+                if b in rewrite_refs.get(c, {}):
+                    data = rewrite_refs[c][b]
+                blobs.append(bytes(data))
+            jobs.append((blobs, ci.compression != COMP_NONE, recipe.level))
+            r._blob_cache = None
+        with Pool(max(1, os.cpu_count() or 1)) as pool:
+            reenc_out = sum(pool.imap_unordered(_estimate_job, jobs, chunksize=1)) if jobs else 0
+        # dirents + pointer tables scale with kept entries
+        tables = int((h.checksum_pos - max(int(min(r.url_ptrs)) if h.entry_count else h.checksum_pos, 0))
+                     * (sum(keep) / max(1, len(dirents))))
+        projected = plan_bytes["copy"] + reenc_out + tables
+        log(f"estimate: re-encoded clusters {plan_bytes['reencode']/1e6:.1f} MB -> {reenc_out/1e6:.1f} MB; "
+            f"projected output {projected/1e9:.3f} GB ({100*projected/r.size:.1f}% of source, "
+            f"saves {(r.size-projected)/1e6:.0f} MB)")
+        result["estimate"] = {"reencoded_out": reenc_out, "projected": projected}
     if dry_run:
         return result
 
@@ -678,6 +709,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--keep-uuid", action="store_true",
                    help="keep the source UUID (Kiwix then treats it as the same book)")
     ap.add_argument("--dry-run", action="store_true", help="print the cluster plan only")
+    ap.add_argument("--estimate", action="store_true",
+                    help="with --dry-run: compress the clusters that would be re-encoded and "
+                         "report the projected output size (costs the compression, not the I/O)")
     ap.add_argument("-q", "--quiet", action="store_true")
     return ap
 
@@ -710,7 +744,8 @@ def main(argv=None) -> int:
     if not a.dst and not a.dry_run:
         print("error: DST required unless --dry-run", file=sys.stderr)
         return 2
-    res = derive(a.src, a.dst or "", recipe_from_args(a), dry_run=a.dry_run, verbose=not a.quiet)
+    res = derive(a.src, a.dst or "", recipe_from_args(a), dry_run=a.dry_run, verbose=not a.quiet,
+                 estimate=a.estimate)
     if a.quiet:
         print(json.dumps(res))
     return 0
