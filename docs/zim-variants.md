@@ -657,3 +657,40 @@ the zimru source does (libzim's own v1 is front articles only), the
 in-memory dirent list is still Python objects (fine to ~3 M entries,
 untested at 12 M), and an old packer binary fails at the first
 `cluster_break` after the viewer items are written (no preflight).
+
+### Compressed size is what the tool has to track (2026-09-20, fourth pass)
+
+The address-strip estimate above was reasoned from record counts and was
+wrong by 2x; the inventory's default attribution (a mixed cluster's on-disk
+bytes split in proportion to uncompressed bytes) has the same flaw in a
+milder form, because addresses compress much better than the POI names
+they share clusters with. Two additions make the tool report what a trim
+will actually save:
+
+- **`szim inspect --exact`** recompresses every mixed compressed cluster
+  with and without each component, scales the marginal sizes to the
+  cluster's real on-disk size, and splits address records out of legacy
+  (untiered) search leaves as their own component.
+- **`szim plan ... --estimate`** compresses the clusters a trim would
+  re-encode and projects the output size before anything is written.
+
+Measured on argentina against the real `--strip-addresses` run (3.432 GB
+to 3.040 GB, 392 MB saved):
+
+| method | addresses on disk | time |
+|---|---|---|
+| default attribution (tier-a leaves, uncompressed share) | 271 MB | 12 s |
+| `--exact --exact-level 3` | 416 MB | 3 m 43 s |
+| `--exact` (level 22, the file's own level) | **401 MB** | 24 m |
+| `plan --strip-addresses --estimate` | saves 434 MB, projects 2.998 GB (actual 3.040) | 3 m 55 s |
+
+On washington-dc the split is starker: addresses are 79% of search-data's
+uncompressed bytes and 46% of its on-disk bytes (24x vs 5.6x compression).
+
+Level 3 is a usable proxy for the level-22 answer (4% high here) at a sixth
+of the cost, so `--exact --exact-level 3` is the practical first look; the
+default output still labels its address line as an underestimate and points
+at `--exact`. `--estimate` runs the same compression the trim would, so it
+costs the trim's CPU without its I/O; it is worth it before a multi-hour
+continent strip, not for a prefix drop, where the plan's dropped-bytes line
+is already exact.
