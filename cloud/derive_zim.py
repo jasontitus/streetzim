@@ -26,7 +26,9 @@ import argparse
 import json
 import os
 import re
+import struct
 import sys
+import tempfile
 import time
 import uuid as uuidlib
 from collections import Counter, defaultdict
@@ -45,6 +47,64 @@ DEFAULT_CLUSTER_TARGET = 8 << 20   # uncompressed bytes, matches manifest_writer
 def _encode_job(args):
     blobs, compress, level = args
     return encode_cluster(blobs, compress, level)
+
+
+class SpillStore:
+    """Regrouped blobs on disk, bucketed by the high bits of their sort key so
+    each bucket can be sorted in memory on its own. A continent's z14 tiles
+    are tens of GB; a bucket is 1/256 of a zoom level. Record layout:
+    key u64, src cluster u32, src blob u32, len u32, data."""
+
+    BUCKET_BITS = 8
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.root.mkdir(parents=True, exist_ok=True)
+        self._fh: dict[tuple, object] = {}
+        self.count: Counter = Counter()
+        self.bytes = 0
+
+    def _bucket(self, z: int, key: int) -> int:
+        shift = max(0, 2 * z - self.BUCKET_BITS)
+        return key >> shift
+
+    def add(self, comp: str, z: int, key: int, data: bytes, ref: tuple[int, int]):
+        k = (comp, z, self._bucket(z, key))
+        fh = self._fh.get(k)
+        if fh is None:
+            fh = self._fh[k] = open(self.root / f"{comp}-{z}-{k[2]:04d}.spill", "ab")
+        fh.write(struct.pack("<QIII", key, ref[0], ref[1], len(data)))
+        fh.write(data)
+        self.count[(comp, z)] += 1
+        self.bytes += len(data)
+
+    def groups(self) -> list[tuple[str, int]]:
+        return sorted(self.count, key=lambda k: (("tiles", "satellite", "terrain").index(k[0]), k[1]))
+
+    def iter_sorted(self, comp: str, z: int):
+        """Yield (key, data, ref) in key order across the group's buckets."""
+        for fh in self._fh.values():
+            fh.flush()
+        names = sorted(p for p in self.root.iterdir() if p.name.startswith(f"{comp}-{z}-"))
+        for name in names:
+            buf = name.read_bytes()
+            items = []
+            off = 0
+            while off < len(buf):
+                key, c, b, n = struct.unpack_from("<QIII", buf, off)
+                off += 20
+                items.append((key, buf[off:off + n], (c, b)))
+                off += n
+            items.sort(key=lambda t: t[0])
+            yield from items
+            name.unlink()
+
+    def close(self):
+        for fh in self._fh.values():
+            fh.close()
+        for p in self.root.iterdir():
+            p.unlink()
+        self.root.rmdir()
 
 
 # ------------------------------------------------------------------ plan --
@@ -296,8 +356,7 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
     w.begin()
     # (old cluster, old blob) -> (new cluster, new blob)
     remap: dict[tuple[int, int], tuple[int, int]] = {}
-    regroup_spill: dict[tuple[str, int], list] = defaultdict(list)  # (comp,z) -> [(key, bytes, (c,b))]
-    regroup_spill_bytes = 0
+    spill = SpillStore(Path(tempfile.mkdtemp(prefix="derive-spill-", dir=os.path.dirname(os.path.abspath(dst_path)))))
     regroup_emitted = False
     first_regroup_cluster = min(regroup_refs) if regroup_refs else None
     tiles_regrouped = 0
@@ -306,32 +365,45 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
         """Emit the regrouped components: one run of clusters per (component,
         zoom), never mixing zooms. Clusters are encoded in parallel (zstd-22
         runs at ~3 MB/s per core) and appended in order."""
-        nonlocal regroup_emitted, tiles_regrouped
+        nonlocal regroup_emitted
+        tiles_regrouped_ref = [0]
         from multiprocessing import Pool
         order = ("tiles", "satellite", "terrain")
         with Pool(max(1, os.cpu_count() or 1)) as pool:
-            for (comp, z) in sorted(regroup_spill, key=lambda k: (order.index(k[0]), k[1])):
-                items = regroup_spill.pop((comp, z))
-                items.sort(key=lambda t: t[0])
+            for (comp, z) in spill.groups():
                 compress = comp == "tiles"   # satellite/terrain are pre-compressed images
-                batches: list[list[bytes]] = []
-                batch_refs: list[list[tuple]] = []
-                cur: list[bytes] = []; cur_refs: list[tuple] = []; size = 0
-                for _key, data, ref in items:
-                    cur.append(data); cur_refs.append(ref); size += len(data)
-                    if size >= recipe.cluster_target:
-                        batches.append(cur); batch_refs.append(cur_refs)
-                        cur, cur_refs, size = [], [], 0
-                if cur:
-                    batches.append(cur); batch_refs.append(cur_refs)
-                jobs = [(b, compress, recipe.level) for b in batches]
-                for refs, raw in zip(batch_refs, pool.imap(_encode_job, jobs)):
-                    nc = w.add_cluster(raw)
-                    for bi, ref in enumerate(refs):
-                        remap[ref] = (nc, bi)
-                    tiles_regrouped += len(refs)
-                log(f"  {comp}/z{z}: {len(items)} blobs -> {len(batches)} clusters")
+                n_clusters = 0
+
+                def batches():
+                    cur: list[bytes] = []; cur_refs: list[tuple] = []; size = 0
+                    for _key, data, ref in spill.iter_sorted(comp, z):
+                        cur.append(data); cur_refs.append(ref); size += len(data)
+                        if size >= recipe.cluster_target:
+                            yield cur, cur_refs
+                            cur, cur_refs, size = [], [], 0
+                    if cur:
+                        yield cur, cur_refs
+                # keep a bounded window of encode jobs in flight
+                window = 2 * (os.cpu_count() or 1)
+                pending: list[tuple[list, object]] = []
+
+                def drain(all_: bool):
+                    nonlocal n_clusters
+                    while pending and (all_ or len(pending) >= window):
+                        refs, fut = pending.pop(0)
+                        nc = w.add_cluster(fut.get())
+                        for bi, ref in enumerate(refs):
+                            remap[ref] = (nc, bi)
+                        tiles_regrouped_ref[0] += len(refs)
+                        n_clusters += 1
+                for blobs, refs in batches():
+                    pending.append((refs, pool.apply_async(_encode_job, ((blobs, compress, recipe.level),))))
+                    drain(False)
+                drain(True)
+                log(f"  {comp}/z{z}: {spill.count[(comp, z)]} blobs -> {n_clusters} clusters")
+        spill.close()
         regroup_emitted = True
+        return tiles_regrouped_ref[0]
 
     copied = reenc = 0
     for c in range(h.cluster_count):
@@ -357,8 +429,7 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
                 data = rewrite_refs[c][b]
             if b in regroup_refs.get(c, {}):
                 comp, z, key = regroup_refs[c][b]
-                regroup_spill[(comp, z)].append((key, bytes(data), (c, b)))
-                regroup_spill_bytes += len(data)
+                spill.add(comp, z, key, bytes(data), (c, b))
                 continue
             blobs.append(bytes(data))
             refs.append((c, b))
@@ -369,9 +440,11 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
             reenc += 1
         r._blob_cache = None
     if regroup_refs:
-        log(f"regrouping {sum(len(v) for v in regroup_spill.values())} tiles "
-            f"({regroup_spill_bytes/1e6:.1f} MB uncompressed) ...")
-        flush_regroup()
+        log(f"regrouping {sum(spill.count.values())} tiles "
+            f"({spill.bytes/1e6:.1f} MB uncompressed, spilled to disk) ...")
+        tiles_regrouped = flush_regroup()
+    else:
+        spill.close()
 
     # 5. dirents
     old_to_new_index: dict[int, int] = {}

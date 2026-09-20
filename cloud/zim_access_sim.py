@@ -72,6 +72,13 @@ class Layout:
         self.csize = [r.cluster_info(c).size for c in range(r.header.cluster_count)]
         self.ccomp = [r.cluster_info(c).compressed for c in range(r.header.cluster_count)]
         self.cfg = __import__("json").loads(r.get("map-config.json") or b"{}")
+        # file extension per raster component, from the file itself (terrain is
+        # png in some builds and webp in others)
+        self.ext = {}
+        for p in self.index:
+            comp = p.split("/", 1)[0]
+            if comp in ("satellite", "terrain") and comp not in self.ext:
+                self.ext[comp] = p.rsplit(".", 1)[-1]
 
     def has(self, comp: str) -> bool:
         return {"satellite": self.cfg.get("hasSatellite"), "terrain": self.cfg.get("hasTerrain")}.get(comp, True)
@@ -125,7 +132,8 @@ def view_requests(L: Layout, lon, lat, zoom, w, h, layers) -> list[str]:
     if "tiles" in layers:
         for z, x, y in tiles_for_view(lon, lat, z_vec, w, h, 512):
             reqs.append(f"tiles/{z}/{x}/{y}.pbf")
-    for comp, ext in (("satellite", L.cfg.get("satelliteFormat", "avif")), ("terrain", "png")):
+    for comp in ("satellite", "terrain"):
+        ext = L.ext.get(comp, "png")
         if comp in layers and L.has(comp):
             zr = min(zoom + 1, L.max_zoom(comp))   # 256px raster: one zoom deeper
             for z, x, y in tiles_for_view(lon, lat, zr, w, h, 256):
