@@ -95,6 +95,14 @@ def _is_chip_entry(path: str) -> bool:
     return path.startswith("category-index/chip-") and path.endswith(".json")
 
 
+# Fixed-size viewer slots: see cloud/viewer_slots.py for the layout and the
+# reasoning. Padding each viewer file to a fixed, UNCOMPRESSED slot lets
+# cloud/patch_viewer_inplace.py overwrite it later without re-packing the ZIM
+# (~2h for europe, 0.1s patched). Uncompressed is required: bytes in a
+# compressed cluster do not map to file offsets.
+from cloud.viewer_slots import pad_to_slot as _pad_to_slot  # noqa: E402
+
+
 def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                      reshard_search: bool = False) -> int:
     from libzim.reader import Archive
@@ -315,8 +323,8 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
 
                 if path in replacements:
                     c.add_item(_Item(path, mime, title=title,
-                                     data=replacements[path],
-                                     compress=True, namespace=None))
+                                     data=_pad_to_slot(path, replacements[path]),
+                                     compress=False, namespace=None))
                     replaced_paths.add(path)
                     swapped += 1
                     continue
@@ -363,8 +371,9 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                         if path.endswith(".js") else "text/html")
                 title = ("Routing Worker" if path.endswith(".js")
                          else "Map" if path == "index.html" else "Find places")
-                c.add_item(_Item(path, mime, title=title, data=data,
-                                 compress=True, namespace=None))
+                c.add_item(_Item(path, mime, title=title,
+                                 data=_pad_to_slot(path, data),
+                                 compress=False, namespace=None))
                 swapped += 1
 
             if reshard_search:
