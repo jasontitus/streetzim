@@ -61,6 +61,7 @@ for(const d of DEVICES){
       const rail=document.getElementById('find-chips');
       out.chips = rail?rail.querySelectorAll('.find-chip').length:0;
       out.railScrollable = rail? rail.scrollWidth>rail.clientWidth : false;
+      out.chipTouchAction = rail?getComputedStyle(rail).touchAction:'n/a';
       return out;
     },d.inset,CONTROLS);
     for(const [k,v] of Object.entries(res.hit)) if(v!=='ok'&&v!=='absent') R.fail.push(`${k}: ${v}`);
@@ -81,13 +82,31 @@ for(const d of DEVICES){
       await p.evaluate(()=>{const c=document.querySelector('#find-chips .find-chip.on');c&&c.click();});
       await new Promise(r=>setTimeout(r,1500));
     }
+    // popup stacking: a MapLibre popup must paint ABOVE #search-container,
+    // or its Directions button and close X are unreachable under the chips.
+    const pop = await p.evaluate(()=>{
+      const sc=document.getElementById('search-container');
+      if(!sc) return 'no search-container';
+      const scz=+getComputedStyle(sc).zIndex||0;
+      const d=document.createElement('div');
+      d.className='maplibregl-popup';
+      d.style.cssText='position:absolute;top:0;left:0;width:10px;height:10px;';
+      (document.querySelector('.maplibregl-map')||document.body).appendChild(d);
+      const pz=+getComputedStyle(d).zIndex||0;
+      d.remove();
+      return pz>scz ? 'ok ('+pz+'>'+scz+')' : 'BELOW search-container ('+pz+'<='+scz+')';
+    });
+    R.checks.push('popup z: '+pop);
+    if(!pop.startsWith('ok')) R.fail.push('popup '+pop);
+    R.checks.push('chip touch-action: '+res.chipTouchAction);
+    if(res.chipTouchAction==='auto') R.fail.push('chip rail touch-action auto (taps get cancelled on iOS)');
     // rail swipe proxy
     const sw=await p.evaluate(()=>{const r=document.getElementById('find-chips');if(!r)return'none';
       const a=r.scrollLeft; r.scrollLeft=120; const b=r.scrollLeft; r.scrollLeft=a; return b>a?'scrolls':'STUCK at '+b;});
     R.checks.push('rail scroll: '+sw); if(sw.startsWith('STUCK')) R.fail.push('rail not scrollable');
     // search
     await p.click('#search-input').catch(()=>{});
-    await p.type('#search-input','San Francisco',{delay:60});
+    await p.type('#search-input',process.env.SEARCH_TERM||'San Francisco',{delay:60});
     for(let i=0;i<15;i++){await new Promise(r=>setTimeout(r,2000));
       if(await p.evaluate(()=>document.querySelectorAll('#search-results .search-result').length))break;}
     const sr=await p.evaluate(()=>{const r=document.getElementById('search-results');

@@ -343,6 +343,13 @@
     margin-top: 8px;
     display: flex; gap: 6px;
     padding: 2px 4px;
+    /* pan-x, not auto: with auto, iOS treats a tap that drifts a few px as
+       the start of a scroll, fires pointercancel and never delivers click.
+       Measured in-ZIM (chipdiag2-0846): touchstart 1, touchmove 7,
+       pointercancel 1, chip click handler fired 0, chip.on 0 -- i.e. the
+       tap reached the rail and was cancelled, which reads to a user as
+       "chips aren't clickable". The JS tap fallback below covers the rest. */
+    touch-action: pan-x;
     overflow-x: auto; -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     mask-image: linear-gradient(to right,
@@ -388,6 +395,14 @@
     line-height: 1;
   }
   #search-clear:hover { color: var(--text-secondary); }
+  /* MapLibre popups carry NO z-index of their own, so they painted below
+     #search-container (z-index 2): on a phone the place card's title,
+     "Directions to here" button and its close X rendered underneath the
+     search box and the chip rail, and could not be tapped. This is also
+     the "no X to click on" report from 2026-09-19. 4 clears the search
+     container and #attr-btn (both 2) while staying far below the modal
+     overlays (100 / 1500+). Measured in-ZIM on iPhone, chipdiag2-0846. */
+  .maplibregl-popup { z-index: 4; }
   #search-results {
     margin-top: 6px; background: var(--panel-bg); border-radius: var(--radius);
     box-shadow: var(--panel-shadow);
@@ -4091,6 +4106,7 @@ window.addEventListener('pagehide', function() { _chipShardCache.clear(); });
 // old pair and no chip-food.json — and the rail is built before the
 // category manifest is fetched, so reconcile once it arrives rather than
 // guessing. A ZIM with no chips at all keeps every chip (legacy path).
+var _szChipSynth = 0;   // ts of the last tap-synthesised chip activation
 function _findChipsReconcile(rail) {
   _findFetchCatManifest().then(function(m) {
     var chips = m && m.chips;
@@ -4132,7 +4148,11 @@ function initFindChips(map) {
       label.textContent = c.label;
       btn.appendChild(emoji);
       btn.appendChild(label);
-      btn.addEventListener('click', function() {
+      // iOS cancels the click when a tap drifts (pointercancel), so the
+      // action lives in a named function that BOTH the click listener and
+      // the touch-tap fallback below can invoke. _szChipSynth suppresses
+      // the double-fire when a real click arrives after a synthetic tap.
+      var act = function() {
         loadChipOnMap(map, c).catch(function(err) {
           // A chip tapped before the rail reconciles (or one whose file this
           // ZIM lacks) used to leave the search box reading
@@ -4143,10 +4163,38 @@ function initFindChips(map) {
           _findChipPaintActive(null);
           _showFindToast('Couldn’t load ' + c.label.toLowerCase());
         });
+      };
+      btn._szAct = act;
+      btn.addEventListener('click', function() {
+        if (Date.now() - _szChipSynth < 500) return;   // already run by tap
+        act();
       });
       rail.appendChild(btn);
     })(EXPLORE_CHIPS[i]);
   }
+  // Touch-tap fallback: a tap that drifts a few px is cancelled by iOS
+  // before click fires. Track the start point and, on touchend, treat a
+  // small, short gesture as a tap on whichever chip it began over.
+  // Threshold is deliberately generous (10 px / 600 ms) -- a real swipe
+  // moves far further, and scrollLeft reached 590 in the same trace, so
+  // this does not eat scrolling.
+  (function() {
+    var sx = 0, sy = 0, st = 0, startBtn = null;
+    rail.addEventListener('touchstart', function(e) {
+      var t = e.changedTouches && e.changedTouches[0];
+      if (!t) return;
+      sx = t.clientX; sy = t.clientY; st = Date.now();
+      startBtn = e.target && e.target.closest ? e.target.closest('.find-chip') : null;
+    }, { passive: true });
+    rail.addEventListener('touchend', function(e) {
+      var t = e.changedTouches && e.changedTouches[0];
+      if (!t || !startBtn) { startBtn = null; return; }
+      var moved = Math.abs(t.clientX - sx) + Math.abs(t.clientY - sy);
+      var btn = startBtn; startBtn = null;
+      if (moved > 10 || Date.now() - st > 600) return;   // a swipe, not a tap
+      if (typeof btn._szAct === 'function') { _szChipSynth = Date.now(); btn._szAct(); }
+    }, { passive: true });
+  })();
   _findChipsReconcile(rail);
 }
 
