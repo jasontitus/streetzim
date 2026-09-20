@@ -140,6 +140,19 @@ are recommended for any `file:` field.
 
 - **`redirect`** — `path` (alias) + `target` (existing path), optional `title`.
 
+- **`cluster_break`** — closes the cluster being filled so the next item
+  starts a new one; optional `cluster_size_target` (bytes) changes the
+  target from this point on. Written by `create_osm_zim.py --tile-order
+  zoom-hilbert` at every zoom boundary of tiles/satellite/terrain and
+  around those components (with `--tile-cluster-mb` as the target inside,
+  the build default restored after), so each zoom is a run of whole
+  clusters that `cloud/derive_zim.py` can copy or drop without re-encoding
+  (docs/zim-variants.md). The flush needs zimru's `Creator::flush_cluster()`
+  and is compiled in with `cargo build --release --features cluster_break`;
+  a binary built without it applies the size target, warns once, and does
+  not split. A packer older than this record rejects the manifest at parse
+  time (unknown `kind`), so keep `--tile-order source` for those.
+
 ## Differences vs. the Python path
 
 | dimension                | Python (`libzim`)                         | Rust (`streetzim-pack` + `zimru`)              |

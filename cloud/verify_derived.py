@@ -26,6 +26,8 @@ def main() -> int:
     ap.add_argument("src"); ap.add_argument("dst")
     ap.add_argument("--expect-dropped", nargs="*", default=[], metavar="PREFIX")
     ap.add_argument("--query", default="bridge")
+    ap.add_argument("--expect-stripped-addresses", action="store_true",
+                    help="search-data leaves may differ, but only by losing address records")
     a = ap.parse_args()
     from libzim.reader import Archive
     from libzim.search import Query, Searcher
@@ -60,13 +62,30 @@ def main() -> int:
             continue
         if p in REWRITTEN:
             continue
+        if a.expect_stripped_addresses and p.startswith("search-data/"):
+            if p == "search-data/manifest.json":
+                continue
+            import json
+            try:
+                sa = json.loads(bytes(e.get_item().content))
+                da = json.loads(bytes(dst.get_entry_by_path(p).get_item().content))
+            except Exception:  # noqa: BLE001
+                diff += 1; print("    unparsable:", p); continue
+            def _t(rec): return rec.get("t") or rec.get("type")
+            want = [r_ for r_ in sa if _t(r_) != "addr"]
+            if da == want:
+                same += 1
+            else:
+                diff += 1
+                if diff <= 5: print("    leaf not (source minus addresses):", p)
+            continue
         if bytes(e.get_item().content) == bytes(dst.get_entry_by_path(p).get_item().content):
             same += 1
         else:
             diff += 1
             if diff <= 5: print("    differs:", p)
-    rep("kept entries identical", diff == 0 and missing == 0,
-        f"({same} identical, {diff} differ, {missing} missing)")
+    rep("kept entries identical" + (" (search leaves: source minus addresses)" if a.expect_stripped_addresses else ""),
+        diff == 0 and missing == 0, f"({same} identical, {diff} differ, {missing} missing)")
     rep("dropped entries absent", present == 0, f"({dropped} expected dropped, {present} still present)")
     for k in ("Title", "Name", "Counter"):
         print(f"       {k} = {dst.get_metadata(k)[:90]!r}")

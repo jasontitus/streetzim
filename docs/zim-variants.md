@@ -489,3 +489,92 @@ read rather than heap; the real heap cost is the in-memory dirent list (2.6 M
 Dirent objects for argentina). A continent with 12 M entries (south-america)
 will want dirents parsed into arrays instead of objects before this tool is
 run on one. Open item.
+
+## Address stripping, builder ordering, inventory sizes (2026-09-20, third pass)
+
+### `--strip-addresses`
+
+South-america is 47% search-data and addresses are most of that; the
+inventory made this the lever, so it is now a derive option:
+
+```
+python3 cloud/derive_zim.py SRC.zim DST.zim --strip-addresses
+python3 cloud/verify_derived.py SRC.zim DST.zim --expect-stripped-addresses
+```
+
+How the search data is laid out decides the mechanics. Character-split
+prefixes (`docs/search-prefix-locality.md`, `cloud/search_shards.py`) put
+each record tier in its own leaf: `10~0~0~a` is tier **a**, address records
+only, and the viewer fetches tier-a leaves solely for digit queries of four
+or more characters. Legacy hash-bucket leaves (`ab-3`, or an unsplit `ab`)
+mix types. So:
+
+- a tier-a leaf is rewritten as `[]`, not deleted: the viewer looks every
+  leaf name up in the manifest before fetching and a *missing* name sends
+  it into `expandPrefix`'s miss branch (four scans of `sub_chunks` and
+  `chunks`, measured at 1 s per keystroke on korea-mongolia), while an
+  empty leaf is a direct hit and a two-byte fetch;
+- every other leaf is filtered record by record on `t` (or legacy `type`)
+  in `TIER_TYPES["a"]`;
+- `search-data/manifest.json` keeps `sub_chunks` and `char_split` as they
+  were, sets each touched chunk's count, and reduces `total` by the build's
+  unique address count from `streetzim-meta.json` (chunk counts count leaf
+  records, a record appears in every character path that reaches it, so
+  summing them is wrong; argentina: 41.7 M leaf records vs 8.9 M addresses);
+- `streetzim-meta.json` gets `hasAddresses: false`, `counts.addresses: 0`
+  and no `addr` in `byType`; `map-config.json` gets `hasAddresses` and
+  `hasOvertureAddresses` false (the Overture attribution is for address
+  data that is no longer there).
+
+Addresses are not in the Xapian index (`xapian_types` is place, airport,
+park, peak, water), so no dead documents result.
+
+Cost: unlike a prefix drop, this touches nearly every search-data cluster
+(leaves of all tiers interleave in insertion order), so those clusters are
+inflated and re-deflated with only the kept records. Re-encoding runs on a
+process pool with a bounded window and cluster order preserved. Argentina:
+797 of 1358 clusters re-encoded; see the run table below once measured.
+
+### Builder: `--tile-order zoom-hilbert --tile-cluster-mb 2`
+
+`create_osm_zim.py` can now emit the layout the measurements asked for:
+
+- vector tiles from MBTiles are streamed zoom-major with Hilbert order
+  inside each zoom (`_iter_tiles_ordered`: list one zoom's coordinates,
+  sort, fetch each tile by key; an indexed lookup that is fine for a
+  regional MBTiles in page cache and deliberately not the rowid scan the
+  world file needs);
+- satellite and terrain cache directories are listed per zoom and added in
+  the same order;
+- a `cluster_break` manifest record is written before the tile components,
+  at every zoom change, and after them, carrying `--tile-cluster-mb` on the
+  way in and the build's `--cluster-size` on the way out;
+- the libzim (`--zim-builder python`) path gets the ordering only:
+  `cluster_break` is looked up with `getattr`, so it is a no-op there.
+
+The packer side (`rust/streetzim-pack`) parses the record and applies the
+size target, but the actual flush calls `Creator::flush_cluster()` on zimru,
+which the checkout here could not be verified against, so it is behind a
+cargo feature: `cargo build --release --features cluster_break`. Without
+the feature the binary warns once and does not split; with an older binary
+the manifest fails to parse. `docs/zim-builder-rust.md` carries the record
+spec. This is the one piece that could not be run end to end in this
+session: there is no tilemaker output, mercantile or zimru here. The Python
+ordering and the manifest record are unit-tested (`tests/test_tile_order.py`).
+
+### Inventory: sizes on both sides, by MIME too
+
+`zim_inventory.py` always prints uncompressed, on-disk, and the ratio.
+Remote (URL) mode reads the zstd frame header of every cluster (18 bytes,
+via the same multipart range requests), which carries the content size, so
+uncompressed totals are exact remotely too; only the split of a *mixed*
+compressed cluster between components is by blob count. `--by-mime` groups
+by content type instead of path component:
+
+```
+$ python3 cloud/zim_inventory.py osm-washington-dc.zim --by-mime
+component                 entries  uncompressed     on disk  ratio  share
+application/json             1188      965.8 MB    132.7 MB   7.3x  58.7%
+image/webp                   5085       60.0 MB     50.7 MB   1.2x  22.4%
+application/x-protobuf        953       37.6 MB     18.0 MB   2.1x   7.9%
+```

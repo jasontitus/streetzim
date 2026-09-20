@@ -487,6 +487,28 @@ class ZimReader:
         if self.remote:
             self.src.prefetch_many([(int(o), int(o) + 1) for o in self.cluster_ptrs])
 
+    def preload_frame_headers(self):
+        """Remote only: fetch the first 18 bytes of every cluster so the zstd
+        frame header (content size) is readable without the payload."""
+        if self.remote:
+            self.src.prefetch_many([(int(o), int(o) + 19) for o in self.cluster_ptrs])
+
+    def cluster_uncompressed_size(self, c: int) -> int | None:
+        """Uncompressed payload size of a zstd cluster from its frame header
+        (zimru and libzim both write the content size), the raw size for an
+        uncompressed cluster, None if the frame does not carry it."""
+        ci = self.cluster_info(c)
+        if not ci.compressed:
+            return ci.size - 1
+        if ci.compression != COMP_ZSTD:
+            return None
+        import zstandard
+        try:
+            fp = zstandard.get_frame_parameters(bytes(self.src[ci.offset + 1:ci.offset + 19]))
+        except Exception:  # noqa: BLE001
+            return None
+        return fp.content_size or None
+
     def preload_raw_tables(self, clusters: list[int]):
         """Remote only: fetch the offset tables of the given raw clusters."""
         if not self.remote or not clusters:

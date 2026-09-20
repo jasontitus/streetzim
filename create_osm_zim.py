@@ -1613,7 +1613,8 @@ def get_mbtiles_info(mbtiles_path):
     return metadata, tile_count
 
 
-def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None):
+def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None,
+                            order="source"):
     """Yield (z, x, y, data) tuples from MBTiles, streaming from SQLite.
 
     If zoom_level is specified, only yields tiles at that zoom.
@@ -1621,11 +1622,24 @@ def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=N
     If bbox is specified as (minlon, minlat, maxlon, maxlat), only yields
     tiles that intersect the bounding box.
     Yields in (z, x, y) sorted order for deterministic ZIM insertion.
+
+    ``order`` (cloud/tile_order.py): "source" keeps the SQL/rowid order below;
+    "zoom-hilbert" / "zoom-xy" yield strictly zoom-major with each zoom in
+    Hilbert / column order, so tiles that render together are neighbours in
+    the ZIM (docs/zim-variants.md). Those orders list one zoom's coordinates
+    first and then fetch each tile by key, an indexed lookup that is fine on
+    a regional MBTiles in page cache and wrong for the world file on a
+    spinning disk (see the rowid note below).
     """
     import math
 
     conn = sqlite3.connect(str(mbtiles_path))
     cursor = conn.cursor()
+
+    if order != "source":
+        yield from _iter_tiles_ordered(conn, zoom_level, bbox, max_zoom, order)
+        conn.close()
+        return
 
     # Whole-world bbox: drop the per-zoom column/row index lookups and use
     # the rowid-sequential scan path instead. World bbox at z13 has 67M
@@ -1704,6 +1718,41 @@ def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=N
             y = (1 << z) - 1 - tms_y
             yield z, x, y, data
     conn.close()
+
+
+def _iter_tiles_ordered(conn, zoom_level, bbox, max_zoom, order):
+    """Zoom-major, ordered-within-zoom tile stream for iter_tiles_from_mbtiles."""
+    from cloud.tile_order import tile_sort_key
+    cursor = conn.cursor()
+    zooms = [zoom_level] if zoom_level is not None else None
+    if zooms is None:
+        cursor.execute("SELECT DISTINCT zoom_level FROM tiles ORDER BY zoom_level")
+        zooms = [z for (z,) in cursor.fetchall() if max_zoom is None or z <= max_zoom]
+    for z in zooms:
+        n = 1 << z
+        if bbox:
+            import mercantile
+            minlon, minlat, maxlon, maxlat = bbox
+            tiles_in_bbox = list(mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z))
+            if not tiles_in_bbox:
+                continue
+            cursor.execute(
+                "SELECT tile_column, tile_row FROM tiles WHERE zoom_level = ? "
+                "AND tile_column >= ? AND tile_column <= ? AND tile_row >= ? AND tile_row <= ?",
+                (z, min(t.x for t in tiles_in_bbox), max(t.x for t in tiles_in_bbox),
+                 min(n - 1 - t.y for t in tiles_in_bbox), max(n - 1 - t.y for t in tiles_in_bbox)))
+        else:
+            cursor.execute("SELECT tile_column, tile_row FROM tiles WHERE zoom_level = ?", (z,))
+        coords = [(x, n - 1 - tms_y, tms_y) for x, tms_y in cursor.fetchall()]
+        coords.sort(key=lambda t: tile_sort_key(order, z, t[0], t[1]))
+        fetch = conn.cursor()
+        for x, y, tms_y in coords:
+            fetch.execute(
+                "SELECT tile_data FROM tiles WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?",
+                (z, x, tms_y))
+            row = fetch.fetchone()
+            if row is not None:
+                yield z, x, y, row[0]
 
 
 def extract_tiles_from_mbtiles(mbtiles_path, max_zoom=None):
@@ -4873,6 +4922,8 @@ def create_zim(
     no_llm_bundle=False,
     spatial_chunk_scale=0,
     bundle_wiki_articles=False,
+    tile_order="source",
+    tile_cluster_bytes=None,
     wiki_articles_cache=None,
     wiki_articles_source=None,
     wiki_images="none",
@@ -5187,10 +5238,30 @@ def create_zim(
         # Stream tiles from mbtiles or use in-memory dict
         if mbtiles_path:
             total_tiles = tile_count or 0
-            tile_source = iter_tiles_from_mbtiles(mbtiles_path, bbox=bbox, max_zoom=max_zoom)
+            tile_source = iter_tiles_from_mbtiles(mbtiles_path, bbox=bbox, max_zoom=max_zoom,
+                                                  order=tile_order)
         else:
             total_tiles = len(tiles)
-            tile_source = iter([(z, x, y, data) for (z, x, y), data in sorted(tiles.items())])
+            if tile_order != "source":
+                from cloud.tile_order import order_tiles
+                tile_source = iter([(z, x, y, tiles[(z, x, y)])
+                                    for z, x, y in order_tiles(tiles.keys(), tile_order)])
+            else:
+                tile_source = iter([(z, x, y, data) for (z, x, y), data in sorted(tiles.items())])
+
+        # Zoom-major insertion plus a cluster break at every zoom boundary is
+        # what lets a later derive drop or copy a zoom as whole clusters and
+        # keeps a view's tiles in one or two clusters (docs/zim-variants.md).
+        # Only the rust path (ManifestCreator) has cluster_break; libzim's
+        # Creator silently gets the ordering alone.
+        def _cluster_break(target=None):
+            fn = getattr(creator, "cluster_break", None)
+            if fn is not None:
+                fn(target)
+        _zoom_breaks = tile_order != "source"
+        _last_zoom = [None]
+        if _zoom_breaks:
+            _cluster_break(tile_cluster_bytes)
 
         print(f"    Adding {total_tiles} vector tiles...", flush=True)
         tiles_added = 0
@@ -5241,6 +5312,9 @@ def create_zim(
                     if not tile_data:
                         tiles_skipped_empty += 1
                         continue
+                    if _zoom_breaks and _last_zoom[0] is not None and z != _last_zoom[0]:
+                        _cluster_break()
+                    _last_zoom[0] = z
                     item_start = time.time() if _libzim_backpressure else 0.0
                     creator.add_item(MapItem(
                         f"tiles/{z}/{x}/{y}.pbf", f"Tile {z}/{x}/{y}",
@@ -5293,6 +5367,8 @@ def create_zim(
             note=f"{tiles_added:,} tiles ({rate_str})"
                  + (f", skipped {tiles_skipped_empty} empty" if tiles_skipped_empty else ""))
         _watchdog_stop.set()  # stop watchdog after tiles
+        if _zoom_breaks:
+            _cluster_break(cluster_size)   # back to the build's default target
 
         # Build bbox tile filter if bbox is provided (shared cache may have tiles from other areas)
         def _tile_in_bbox(z, x, y, bbox_coords):
@@ -5312,25 +5388,46 @@ def create_zim(
             unreadable = 0
             suffix = f".{ext}"
             strip_len = len(suffix)
+            if _zoom_breaks:
+                _cluster_break(tile_cluster_bytes)
             for z in range(0, max_zoom + 1):
                 z_dir = os.path.join(source_dir, str(z))
                 if not os.path.isdir(z_dir):
                     continue
-                for x_name in sorted(os.listdir(z_dir)):
-                    x_dir = os.path.join(z_dir, x_name)
-                    if not os.path.isdir(x_dir):
-                        continue
-                    try:
-                        x = int(x_name)
-                    except ValueError:
-                        continue
-                    for fname in os.listdir(x_dir):
-                        if not fname.endswith(suffix):
+                if _zoom_breaks and z > 0:
+                    _cluster_break()
+                def _walk_dir_order():
+                    """(x_name, x, fname, y) in directory order."""
+                    for x_name in sorted(os.listdir(z_dir)):
+                        x_dir = os.path.join(z_dir, x_name)
+                        if not os.path.isdir(x_dir):
                             continue
                         try:
-                            y = int(fname[:-strip_len])
+                            x = int(x_name)
                         except ValueError:
                             continue
+                        for fname in os.listdir(x_dir):
+                            if not fname.endswith(suffix):
+                                continue
+                            try:
+                                y = int(fname[:-strip_len])
+                            except ValueError:
+                                continue
+                            yield x_name, x, fname, y
+
+                if _zoom_breaks:
+                    # Hilbert (or column) order within the zoom: list every
+                    # tile first, then add in curve order.
+                    from cloud.tile_order import tile_sort_key
+                    listed = [(tile_sort_key(tile_order, z, x, y), x_name, x, fname, y)
+                              for x_name, x, fname, y in _walk_dir_order()]
+                    listed.sort()
+                    tile_iter = ((x_name, x, fname, y) for _k, x_name, x, fname, y in listed)
+                else:
+                    tile_iter = _walk_dir_order()
+                for x_name, x, fname, y in tile_iter:
+                    x_dir = os.path.join(z_dir, x_name)
+                    if True:
                         if bbox and not _tile_in_bbox(z, x, y, bbox):
                             skipped += 1
                             continue
@@ -6855,6 +6952,14 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--max-zoom", type=int, default=14, help="Maximum zoom level (default: 14)")
     parser.add_argument("--cluster-size", type=int, default=2048,
                         help="ZIM cluster size in KiB (default: 2048 = 2 MiB)")
+    parser.add_argument("--tile-order", choices=["source", "zoom-hilbert", "zoom-xy"], default="source",
+                        help="insertion order for tiles/satellite/terrain: 'source' as today; "
+                             "'zoom-hilbert' zoom-major with Hilbert order within a zoom and a "
+                             "cluster break per zoom (rust builder; see docs/zim-variants.md)")
+    parser.add_argument("--tile-cluster-mb", type=float, default=None,
+                        help="cluster size target (MiB, uncompressed) for the tile components "
+                             "while --tile-order is not 'source'; the build default otherwise. "
+                             "2 measured well against 8 for zoom/pan cost")
     parser.add_argument("--fast", action="store_true",
                         help="Trade RAM for speed in tilemaker (needs 32+ GB RAM)")
     parser.add_argument("--store", metavar="PATH",
@@ -7796,6 +7901,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             address_count=address_count,
             zim_builder=getattr(args, "zim_builder", "python"),
             max_zoom=args.max_zoom,
+            tile_order=args.tile_order,
+            tile_cluster_bytes=(int(args.tile_cluster_mb * 1024 * 1024) if args.tile_cluster_mb else None),
             xapian_mode=getattr(args, "xapian", "libzim"),
             xapianbuilder_bin=getattr(args, "xapianbuilder_bin", None),
             xapian_workdir=tmpdir,

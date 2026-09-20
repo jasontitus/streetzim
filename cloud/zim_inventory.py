@@ -35,7 +35,13 @@ from cloud.zimfmt import ZimReader  # noqa: E402
 ZOOMED = ("tiles", "satellite", "terrain")
 
 
-def component_of(path: str, namespace: str, by_zoom: bool) -> str:
+def component_of(path: str, namespace: str, by_zoom: bool, mime: str | None = None) -> str:
+    if mime is not None:            # --by-mime: group by content type instead of path
+        if namespace == "X":
+            return "X/" + mime
+        if namespace == "M":
+            return "metadata"
+        return mime
     if namespace == "X":
         return "xapian" if "xapian" in path else "zim-listing"
     if namespace == "M":
@@ -53,7 +59,7 @@ def component_of(path: str, namespace: str, by_zoom: bool) -> str:
 
 
 def inventory(path: str, *, by_zoom: bool = False, tables_only: bool | None = None,
-              verbose: bool = False):
+              verbose: bool = False, by_mime: bool = False):
     """``tables_only`` skips inflating clusters: compressed clusters are then
     attributed to components by blob COUNT share instead of byte share (raw
     clusters stay exact via their offset table). Default for URLs."""
@@ -70,7 +76,7 @@ def inventory(path: str, *, by_zoom: bool = False, tables_only: bool | None = No
         if d.is_redirect:
             redirects += 1
             continue
-        comp = component_of(d.path, d.namespace, by_zoom)
+        comp = component_of(d.path, d.namespace, by_zoom, r.mime_of(d) if by_mime else None)
         comp_entries[comp] += 1
         blob_comp[d.cluster][d.blob] = comp
     # Second pass: clusters (one decompression each)
@@ -83,17 +89,20 @@ def inventory(path: str, *, by_zoom: bool = False, tables_only: bool | None = No
     approx_clusters = 0
     if tables_only:
         r.preload_cluster_infos()
+        r.preload_frame_headers()
         r.preload_raw_tables([c for c in range(r.header.cluster_count) if not r.cluster_info(c).compressed])
     for c in range(r.header.cluster_count):
         ci = r.cluster_info(c)
         if tables_only:
             sizes = r.raw_cluster_blob_sizes(c)
             if sizes is None:
-                # compressed: no payload read; weight blobs equally, and count
-                # the cluster's on-disk size as its "uncompressed" stand-in
+                # compressed: no payload read. The zstd frame header carries the
+                # uncompressed size, so the cluster total is exact; only its
+                # split between components (blob count share) is approximate.
                 comps_here = blob_comp.get(c, {})
                 nb = max(len(comps_here), 1)
-                sizes = [ci.size / nb] * nb
+                unc = r.cluster_uncompressed_size(c) or ci.size
+                sizes = [unc / nb] * nb
                 if len({v for v in comps_here.values()}) > 1:
                     approx_clusters += 1
         else:
@@ -150,33 +159,38 @@ def _fmt(n: float) -> str:
 
 
 def main() -> int:
+    import signal
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)   # `| head` must not traceback
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("zim")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--by-zoom", action="store_true", help="split tiles/satellite/terrain per zoom")
+    ap.add_argument("--by-mime", action="store_true", help="group by MIME type instead of path component")
     ap.add_argument("--clusters", action="store_true", help="list every mixed cluster")
     ap.add_argument("--tables-only", action="store_true",
                     help="do not inflate clusters (default for URLs); byte shares of compressed "
                          "mixed clusters become approximate")
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args()
-    inv = inventory(a.zim, by_zoom=a.by_zoom, tables_only=a.tables_only or None, verbose=a.verbose)
+    inv = inventory(a.zim, by_zoom=a.by_zoom, tables_only=a.tables_only or None, verbose=a.verbose,
+                    by_mime=a.by_mime)
     if a.json:
         print(json.dumps(inv, indent=1, default=list))
         return 0
     if inv["fetched_bytes"] is not None:
         print(f"(remote: fetched {_fmt(inv['fetched_bytes']).strip()} of tables)")
     if inv["tables_only"]:
-        print(f"(tables only: {inv['approx_mixed_clusters']} compressed mixed clusters attributed by blob count)")
+        print(f"(tables only: cluster sizes from headers; {inv['approx_mixed_clusters']} compressed mixed "
+              f"clusters split by blob count)")
     print(f"{inv['file']}: {_fmt(inv['size'])}, {inv['entries']} entries "
           f"({inv['redirects']} redirects), {inv['clusters']} clusters, "
           f"{inv['mixed_clusters']} mixed, {_fmt(inv['raw_cluster_bytes'])} in raw clusters")
-    unc = not inv["tables_only"]
-    print(f"{'component':<22}{'entries':>9}" + (f"{'uncompressed':>14}" if unc else "")
-          + f"{'on disk':>12}{'share':>7}{'clusters':>9}")
+    w = max(22, max((len(r_["component"]) for r_ in inv["rows"]), default=0) + 1)
+    print(f"{'component':<{w}}{'entries':>9}{'uncompressed':>14}{'on disk':>12}{'ratio':>7}{'share':>7}{'clusters':>9}")
     for row in inv["rows"]:
-        print(f"{row['component']:<22}{row['entries']:>9}" + (f"{_fmt(row['uncompressed']):>14}" if unc else "")
-              + f"{_fmt(row['on_disk']):>12}{100*row['on_disk']/inv['size']:>6.1f}%{row['clusters']:>9}")
+        ratio = row["uncompressed"] / row["on_disk"] if row["on_disk"] else 0
+        print(f"{row['component']:<{w}}{row['entries']:>9}{_fmt(row['uncompressed']):>14}"
+              f"{_fmt(row['on_disk']):>12}{ratio:>6.1f}x{100*row['on_disk']/inv['size']:>6.1f}%{row['clusters']:>9}")
     if a.clusters:
         for c, per in inv["mixed"]:
             print(f"  mixed c{c}: " + ", ".join(f"{k}={_fmt(v).strip()}" for k, v in sorted(per.items(), key=lambda kv: -kv[1])))
