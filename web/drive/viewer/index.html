@@ -4,6 +4,102 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>OpenStreetMap Offline</title>
+<script>
+/* Kiwix iOS safe-area shim.
+   Kiwix serves the in-ZIM viewer from a custom `zim:` scheme. WKWebView gives
+   a custom-scheme context NO safe-area insets, so env(safe-area-inset-top) is
+   hard 0 and every :root/--top-inset rule below computes to zero. When Kiwix
+   hides its own chrome the web view spans the whole screen, so top:10px
+   content lands under the status bar / Dynamic Island.
+
+   Measured 2026-09-20, iPhone 16 Pro Max, iOS 18.7, in-ZIM viewer:
+     env top (probe) 0.0   --top-inset 0px   search top 10.0 bottom 62.0
+     innerHeight 956 === screen.height 956 === docEl.clientHeight 956
+     location.protocol "zim:"   mm browser true   nav.standalone false
+
+   So the inset has to be derived, not read. Guards, in order: only the zim:
+   scheme (the web build gets real env() and is untouched), only iOS (Android
+   Kiwix lays out differently), only when the view actually spans the screen
+   (Kiwix's chrome-shown state already insets us), and never when env() does
+   report a real inset -- if a future Kiwix propagates insets, CSS wins and
+   this no-ops rather than double-counting. */
+(function () {
+  function isIOS() {
+    var ua = navigator.userAgent;
+    return /iPad|iPhone|iPod/.test(ua) ||
+           (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  }
+  function envTop() {
+    // Returns null when we cannot safely probe yet. This runs from <head>, so
+    // document.body does not exist on the first call -- appending a probe to
+    // <html> mid-parse is a DOM mutation the parser never asked for. Bail and
+    // let the DOMContentLoaded re-run do the real measurement.
+    if (!document.body) return null;
+    try {
+      var d = document.createElement('div');
+      d.style.cssText = 'position:fixed;top:env(safe-area-inset-top,0px);' +
+                        'height:env(safe-area-inset-bottom,0px);width:1px;' +
+                        'visibility:hidden;pointer-events:none;';
+      document.body.appendChild(d);
+      var r = d.getBoundingClientRect();
+      d.remove();
+      return { top: r.top, bottom: r.height };
+    } catch (e) { return null; }
+  }
+  function isAndroid() { return /Android/.test(navigator.userAgent); }
+  function isTouch() {
+    // Desktop Kiwix also serves zim: and can be maximised to screen height;
+    // it has no status bar to dodge, so require a touch/coarse pointer.
+    try { if (window.matchMedia && matchMedia('(pointer: coarse)').matches) return true; } catch (e) {}
+    return (navigator.maxTouchPoints || 0) > 0;
+  }
+  function insets() {
+    if (location.protocol !== 'zim:' || !isTouch()) return null;
+    var e = envTop();
+    // null == not probed yet; only a positive reading makes us defer to CSS.
+    if (e && (e.top > 0 || e.bottom > 0)) return null;
+    // Landscape hides the status bar; only the home indicator remains. This
+    // MUST precede the full-screen test: iOS keeps screen.height at the
+    // portrait value, so a landscape view always looks "inset" by height and
+    // would otherwise fall into the chrome-shown branch and lose the bottom.
+    if (window.innerWidth > window.innerHeight) return { top: 0, bottom: 21 };
+    // Chrome-shown state already insets the view; only compensate full-screen.
+    if (window.innerHeight < screen.height - 2) return { top: 0, bottom: 0 };
+    // THE CONDITION ABOVE IS MEASURED; ONLY THE MAGNITUDE BELOW IS ESTIMATED.
+    // Enumerating exact screen heights breaks on every device not yet listed,
+    // so classify by aspect instead: notch / Dynamic Island / punch-hole
+    // phones are all >= 1.95, legacy 16:9 is 1.78, tablets are near 1.33.
+    var lo = Math.min(screen.height, screen.width);
+    var hi = Math.max(screen.height, screen.width);
+    var tall = lo > 0 && (hi / lo) >= 1.95;
+    var i;
+    if (isAndroid())   i = tall ? { top: 28, bottom: 24 } : { top: 24, bottom: 0 };
+    else if (isIOS())  i = tall ? { top: 62, bottom: 34 } : { top: 20, bottom: 0 };
+    else               i = tall ? { top: 28, bottom: 24 } : { top: 20, bottom: 0 };
+    // Never eat more than a tenth of the viewport, whatever the screen reports.
+    var cap = Math.round(window.innerHeight * 0.1);
+    if (i.top > cap) i = { top: cap, bottom: Math.min(i.bottom, cap) };
+    return i;
+  }
+  function apply() {
+    var s = document.documentElement.style;
+    var i = insets();
+    // null means "not our case" -- drop any override we previously set so the
+    // stylesheet's env() rules win. Without this a first-paint override would
+    // stick after a later probe found real insets, double-counting them.
+    if (!i) { s.removeProperty('--top-inset'); s.removeProperty('--safe-bottom'); return; }
+    s.setProperty('--top-inset', i.top + 'px');
+    s.setProperty('--safe-bottom', i.bottom + 'px');
+  }
+  apply();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', apply);
+  }
+  window.addEventListener('resize', apply);
+  window.addEventListener('orientationchange', apply);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', apply);
+})();
+</script>
 <!-- Suppress the browser's auto-fetch of /favicon.ico — outside our SW
      scope, so a 404 there fires a console error in the smoke harness. -->
 <link rel="icon" href="data:image/x-icon;base64,AAABAAEAAQEAAAEAIAAwAAAAFgAAACgAAAABAAAAAgAAAAEAIAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA">
