@@ -417,6 +417,9 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
     hdr = w.finish(new_dirents, main_page=main_page)
     dt = time.time() - t0
     out_size = os.path.getsize(dst_path)
+    import resource
+    peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    log(f"peak RSS {peak_mb:.0f} MB (main process)")
     log(f"wrote {dst_path}: {out_size/1e9:.3f} GB ({100*out_size/r.size:.1f}% of source), "
         f"{hdr.entry_count} entries, {hdr.cluster_count} clusters "
         f"(copied {copied}, re-encoded {reenc}{', regrouped ' + str(tiles_regrouped) + ' tiles' if tiles_regrouped else ''}) in {dt:.1f} s")

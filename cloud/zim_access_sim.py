@@ -83,14 +83,19 @@ class Layout:
 
 
 class Session:
-    def __init__(self, layout: Layout, cache: int):
+    def __init__(self, layout: Layout, cache: int, measure: bool = False):
         self.L = layout
         self.cache_n = cache
         self.lru: OrderedDict[int, None] = OrderedDict()
+        self.archive = None
+        if measure:
+            from libzim.reader import Archive
+            self.archive = Archive(layout.path)
         self.reset_totals()
 
     def reset_totals(self):
         self.reads = 0; self.bytes = 0; self.hits = 0; self.misses_404 = 0; self.requests = 0
+        self.ms = 0.0
 
     def fetch(self, path: str):
         self.requests += 1
@@ -98,6 +103,11 @@ class Session:
         if loc is None:
             self.misses_404 += 1
             return
+        if self.archive is not None:
+            import time
+            t = time.perf_counter()
+            bytes(self.archive.get_entry_by_path(path).get_item().content)
+            self.ms += (time.perf_counter() - t) * 1000
         c = loc[0]
         if c in self.lru:
             self.lru.move_to_end(c); self.hits += 1
@@ -123,14 +133,14 @@ def view_requests(L: Layout, lon, lat, zoom, w, h, layers) -> list[str]:
     return reqs
 
 
-def run_scenario(L: Layout, name: str, lon, lat, w, h, layers, cache, *, zoom=14, screens=6):
-    S = Session(L, cache)
+def run_scenario(L: Layout, name: str, lon, lat, w, h, layers, cache, *, zoom=14, screens=6, measure=False):
+    S = Session(L, cache, measure)
     steps = []
     if name == "zoom-in":
         for z in range(4, 15):
             S.reset_totals()
             for p in view_requests(L, lon, lat, z, w, h, layers): S.fetch(p)
-            steps.append((f"z{z}", S.reads, S.bytes, S.requests, S.misses_404))
+            steps.append((f"z{z}", S.reads, S.bytes, S.requests, S.misses_404, S.ms))
     elif name == "pan":
         # pan east one screen at a time at a fixed zoom
         x0, y0 = lonlat_to_pixel(lon, lat, zoom, 512)
@@ -140,7 +150,7 @@ def run_scenario(L: Layout, name: str, lon, lat, w, h, layers, cache, *, zoom=14
             px = x0 + i * w
             lon_i = px / n * 360.0 - 180.0
             for p in view_requests(L, lon_i, lat, zoom, w, h, layers): S.fetch(p)
-            steps.append((f"screen{i}", S.reads, S.bytes, S.requests, S.misses_404))
+            steps.append((f"screen{i}", S.reads, S.bytes, S.requests, S.misses_404, S.ms))
     elif name == "startup":
         S.reset_totals()
         for p in ("index.html", "map-config.json", "maplibre-gl.js", "maplibre-gl.css"):
@@ -148,7 +158,7 @@ def run_scenario(L: Layout, name: str, lon, lat, w, h, layers, cache, *, zoom=14
         z0 = L.cfg.get("zoom", 11)
         c = L.cfg.get("center", [lon, lat])
         for p in view_requests(L, c[0], c[1], z0, w, h, layers): S.fetch(p)
-        steps.append((f"first view z{z0}", S.reads, S.bytes, S.requests, S.misses_404))
+        steps.append((f"first view z{z0}", S.reads, S.bytes, S.requests, S.misses_404, S.ms))
     return steps
 
 
@@ -163,6 +173,8 @@ def main() -> int:
     ap.add_argument("--screen", choices=SCREENS, default="phone")
     ap.add_argument("--layers", default="tiles", help="comma list of tiles,satellite,terrain")
     ap.add_argument("--cache", type=int, default=16, help="LRU clusters (libzim default 16)")
+    ap.add_argument("--measure", action="store_true",
+                    help="also perform the fetches with python-libzim and report wall ms per step")
     a = ap.parse_args()
     layers = set(a.layers.split(","))
     w, h = SCREENS[a.screen]
@@ -175,22 +187,24 @@ def main() -> int:
         print(f"\n## {sc}  ({a.screen} {w}x{h}, layers={','.join(sorted(layers))}, "
               f"cache={a.cache} clusters, at {lat:.4f},{lon:.4f}"
               + (f", zoom {a.zoom}, {a.screens} screens" if sc == "pan" else "") + ")")
-        results = [run_scenario(L, sc, lon, lat, w, h, layers, a.cache, zoom=a.zoom, screens=a.screens) for L in layouts]
+        results = [run_scenario(L, sc, lon, lat, w, h, layers, a.cache, zoom=a.zoom,
+                                screens=a.screens, measure=a.measure) for L in layouts]
         names = [Path(L.path).name for L in layouts]
-        head = f"{'step':<14}" + "".join(f"{n[:28]:>30}" for n in names)
-        print(head)
-        print(f"{'':<14}" + "".join(f"{'reads  MB-read  reqs 404':>30}" for _ in names))
-        tot = [[0, 0, 0, 0] for _ in layouts]
+        colw = 38 if a.measure else 30
+        cols = "reads  MB-read  reqs 404" + ("      ms" if a.measure else "")
+        print(f"{'step':<14}" + "".join(f"{n[:colw-2]:>{colw}}" for n in names))
+        print(f"{'':<14}" + "".join(f"{cols:>{colw}}" for _ in names))
+        tot = [[0, 0, 0, 0, 0.0] for _ in layouts]
         for si in range(len(results[0])):
             line = f"{results[0][si][0]:<14}"
             for li, res in enumerate(results):
-                _, reads, byts, reqs, m404 = res[si]
-                tot[li][0] += reads; tot[li][1] += byts; tot[li][2] += reqs; tot[li][3] += m404
-                line += f"{reads:>10}{byts/1e6:>9.2f}{reqs:>6}{m404:>5}"
+                _, reads, byts, reqs, m404, ms = res[si]
+                tot[li][0] += reads; tot[li][1] += byts; tot[li][2] += reqs; tot[li][3] += m404; tot[li][4] += ms
+                line += f"{reads:>10}{byts/1e6:>9.2f}{reqs:>6}{m404:>5}" + (f"{ms:>8.0f}" if a.measure else "")
             print(line)
         line = f"{'total':<14}"
         for t in tot:
-            line += f"{t[0]:>10}{t[1]/1e6:>9.2f}{t[2]:>6}{t[3]:>5}"
+            line += f"{t[0]:>10}{t[1]/1e6:>9.2f}{t[2]:>6}{t[3]:>5}" + (f"{t[4]:>8.0f}" if a.measure else "")
         print(line)
     return 0
 
