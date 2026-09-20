@@ -552,8 +552,20 @@ park, peak, water), so no dead documents result.
 Cost: unlike a prefix drop, this touches nearly every search-data cluster
 (leaves of all tiers interleave in insertion order), so those clusters are
 inflated and re-deflated with only the kept records. Re-encoding runs on a
-process pool with a bounded window and cluster order preserved. Argentina:
-797 of 1358 clusters re-encoded; see the run table below once measured.
+process pool with a bounded window and cluster order preserved.
+
+Measured on argentina: 797 of 1358 clusters re-encoded, **423 s** on 4
+cores, 3.43 GB to 3.04 GB (88.6%), 41.7 M leaf records removed, verified
+(every non-search entry identical, every search leaf equal to its source
+minus address records, search and suggestions working).
+
+The saving is smaller than the record count suggests: addresses are 70% of
+the records but only ~55% of search-data's *on-disk* bytes, because house
+numbers on the same street compress far better than POI names. On
+argentina that is 392 MB, about the same as dropping terrain z12. For
+south-america, where search-data is 10 GB, the same ratio would give ~5 GB,
+and the re-encode would take an hour or two. Run `szim inspect` first; the
+tier-a leaves show the exact on-disk share of addresses before deciding.
 
 ### Builder: `--tile-order zoom-hilbert --tile-cluster-mb 2`
 
