@@ -4107,6 +4107,29 @@ window.addEventListener('pagehide', function() { _chipShardCache.clear(); });
 // category manifest is fetched, so reconcile once it arrives rather than
 // guessing. A ZIM with no chips at all keeps every chip (legacy path).
 var _szChipSynth = 0;   // ts of the last tap-synthesised chip activation
+// A MapLibre popup anchors ABOVE its marker, so on a phone it can open flush
+// against — or overlapping — the search box + chip rail, even now that it
+// paints above them (z-index 4). Nudge the camera by just the shortfall so
+// the card keeps a small gap below the top chrome. Measured on iPhone: the
+// card opened with its top edge and close X inside the chip row.
+function _szPopupGap(map, popup) {
+  if (!map || !popup || typeof popup.on !== 'function') return;
+  popup.on('open', function () {
+    var el = typeof popup.getElement === 'function' ? popup.getElement() : null;
+    if (!el) return;
+    // after layout, or getBoundingClientRect reads the pre-paint position
+    requestAnimationFrame(function () {
+      var sc = document.getElementById('search-container');
+      var chromeBottom = (sc && getComputedStyle(sc).display !== 'none')
+        ? sc.getBoundingClientRect().bottom : 0;
+      var r = el.getBoundingClientRect();
+      if (!r.height) return;
+      var dy = (chromeBottom + 10) - r.top;   // 10 px of breathing room
+      // panBy positive-y moves features UP, so negative pushes the card down.
+      if (dy > 2) map.panBy([0, -dy], { duration: 250 });
+    });
+  });
+}
 function _findChipsReconcile(rail) {
   _findFetchCatManifest().then(function(m) {
     var chips = m && m.chips;
@@ -5135,6 +5158,7 @@ function placeSearchPin(map, lat, lon, name, enrich) {
                                      maxWidth: '320px' })
     .setDOMContent(box);
   searchMarker.setPopup(popup);
+  _szPopupGap(map, popup);
   // Auto-open once the camera settles — or right away when no camera
   // move is in flight (`#pin=` without `map=`), otherwise the popup
   // used to pop on whatever unrelated pan came next. A pending
@@ -6247,8 +6271,9 @@ function initWikidataPopups(map, config) {
       currentPopup = new maplibregl.Popup({ maxWidth: '320px' })
         .setLngLat(e.lngLat)
         .setDOMContent(buildWikiPopupDOM(name, wd, e.lngLat,
-                                         _wikiArticlePath(qid, null)))
-        .addTo(map);
+                                         _wikiArticlePath(qid, null)));
+      _szPopupGap(map, currentPopup);
+      currentPopup.addTo(map);
     });
   });
 
