@@ -582,7 +582,17 @@ tier-a leaves show the exact on-disk share of addresses before deciding.
   at every zoom change, and after them, carrying `--tile-cluster-mb` on the
   way in and the build's `--cluster-size` on the way out;
 - the libzim (`--zim-builder python`) path gets the ordering only:
-  `cluster_break` is looked up with `getattr`, so it is a no-op there.
+  `cluster_break` is looked up with `getattr`, so it is a no-op there;
+- a world-sized bbox falls back to source order with a warning (the ordered
+  path fetches each tile by key, which is the access pattern the rowid scan
+  exists to avoid on the 113 GB world file).
+
+Note that the build's default cluster target is `--cluster-size 2048` KiB
+(create_zim always passes it, overriding ManifestCreator's 8 MiB), so the
+"2 MiB tiles / 8 MiB search" layout needs `--tile-cluster-mb 2
+--cluster-size 8192` spelled out; the world build scripts already pass 8192.
+A packer binary older than the record fails at the first break, after the
+viewer items were written; there is no preflight yet.
 
 The packer side (`rust/streetzim-pack`) parses the record and applies the
 size target, but the actual flush calls `Creator::flush_cluster()` on zimru,
