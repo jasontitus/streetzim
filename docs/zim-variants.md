@@ -754,3 +754,61 @@ the single format implementation streetzim depends on; the cost is that
 `szim` then needs a Rust build rather than `pip install zstandard`. The
 Python tool is the reference for what that port must do, and the verifier
 would check it the same way.
+
+## Two follow-ups (2026-09-21)
+
+### Why the shipped ZIMs fail zimru's `zimcheck`, and whether that check is right
+
+zimru commit `6e6f39c` (2026-09-18, "Harden reader/writer/CLIs ...", a
+review-driven sweep) did two things to the title listing:
+
+- the **checker** now validates every title table present. For
+  `X/listing/titleOrdered/v1` it requires that each index points at a
+  content-namespace (`C/`) entry, appears once, and is in title order; the
+  header table and `v0` must also cover every entry;
+- the **writer** now emits `v1` as front articles only: `C/` entries whose
+  mime resolves through redirects to `text/html`. `zimrecreate` had been
+  gated this way since `ba2ec05` (2026-06-11), noting that indexing every
+  tile and font bloated the title index ~1000x; September moved the rule
+  into the core writer.
+
+The shipped streetzim files were packed by the older writer, whose `v1` was
+a snapshot of every dirent: on washington-dc all 9,010, including `M/`
+metadata, `W/mainPage` and the `X/` Xapian entries. The new checker rejects
+the non-`C/` indices. It does not object to tiles being listed; only the
+writer excludes those.
+
+The check is correct by the format's semantics: `v1` is the front-article
+listing readers binary-search for title suggestions, and offering
+`Counter`, `mainPage` or `fulltext/xapian` as suggestible titles is wrong.
+It went unnoticed because libzim tolerates the extra indices and Kiwix
+draws suggestions from `X/title/xapian`, which streetzim always ships. It
+would surface on a variant that dropped the Xapian index, where libzim
+falls back to `v1`. `szim trim` writes the modern listing, so derived files
+pass `zimcheck` where their sources do not; the sources are corrected at
+their next re-pack through the updated zimru (the listing is in a
+compressed cluster, so the in-place viewer patch cannot fix it).
+
+### A trim rewrites the container, not the payload
+
+Every trim writes a whole new file. The 80-byte header points at tables
+that all change when anything is removed: the URL pointer list (one offset
+per entry into the dirent table, which shrinks and renumbers), the cluster
+pointer list (one offset per cluster; every remaining cluster moves), and
+the dirents themselves, each carrying a cluster number and any redirect
+target index, both renumbered. The title tables and the MD5 trailer follow.
+
+What the derive avoids is not writing bytes but re-compressing them. The
+clusters, 95-99% of the file, are copied unchanged from the source mmap
+into the new file and their new offsets recorded as they land. Argentina
+sparse-light: 2.1 GB copied, 49 MB inflated and re-deflated, ~30 MB of
+tables built; 38-47 s, i.e. one sequential write at disk speed, which is
+why trim time scales with file size rather than with content.
+
+That makes the operation naturally atomic (`DST.derive-tmp` renamed over
+`DST` after the checksum) and makes it the opposite trade from the viewer
+slot: the slot avoids rewriting the file, so it cannot remove anything and
+keeps the UUID; a trim rewrites the container but not the payload, so it
+can remove anything and costs seconds per gigabyte. Upload is unchanged
+either way: archive.org has no partial update, so a new layout is a full
+transfer however it was produced.
