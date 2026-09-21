@@ -392,6 +392,7 @@ argentina, 872 MB for south-america, no download.
 | argentina | 3.4 GB | 25% | 13% | 9.6% (z12: 7.0%) | **20%** (z12: 12.8%, z11: 4.9%) | 21% | 10% |
 | australia-nz | 7.2 GB | 18% | 10% | **29%** (z13: 1.4 GB) | 12% (z12: 575 MB) | 14% | 7% |
 | south-america | 21 GB | 18% | 9.5% | 4.5% | 15% (z12: 2.0 GB) | **47%** | 8.6% |
+| brazil | 16.8 GB | 16% | 8.3% | 4.2% | 13% (z12: 1.4 GB) | **53%** (9.0 GB) | 7.6% |
 
 So the lever differs per region and the inventory has to come first:
 
@@ -400,8 +401,10 @@ So the lever differs per region and the inventory has to come first:
   leaves the biggest raster component untouched.
 - **australia-nz**: satellite is the file. Its z13 satellite is 1.4 GB, so
   `--satellite-max-zoom 12` alone saves 20%.
-- **south-america**: search-data is 10 GB of 21. Addresses, not imagery.
-  That is the tier-2 leaf rewrite, still not implemented here.
+- **south-america** and **brazil**: search-data is 10 GB of 21 and 9 GB
+  of 16.8. Addresses, not imagery, are the lever; `--strip-addresses` and
+  `inspect --exact` (below) exist for exactly these files. Terrain z12 is
+  the second lever on both (2.0 GB and 1.4 GB); satellite is 4%.
 
 ### Argentina: the sparse-light recipe
 
