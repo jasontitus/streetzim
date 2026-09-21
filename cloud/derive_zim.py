@@ -639,8 +639,11 @@ def _emit_body(r, h, w, dirents, keep, kept_blobs, rewrite_refs, regroup_refs, p
             nd.redirect = old_to_new_index[nd.redirect]
     main_page = old_to_new_index.get(h.main_page, NO_MAIN_PAGE) if h.main_page != NO_MAIN_PAGE else NO_MAIN_PAGE
     if listing_mime is not None:
-        # v1 = every entry except the listing itself, by (namespace, title): what
-        # the source carried (verified on washington-dc: 9009 of 9010).
+        # X/listing/titleOrdered/v1 = front articles: C-namespace entries whose
+        # mime, after following redirects, is text/html, in title order. That
+        # is libzim's meaning and what zimru's writer emits and its zimcheck
+        # requires today; older zimru builds listed every entry, which current
+        # zimcheck rejects as "invalid title indices" (libzim tolerates both).
         placeholder = Dirent(listing_mime, "X", 0, TITLE_LISTING_V1, b"")
         new_dirents.append(placeholder)
         new_dirents.sort(key=sort_key_url)
@@ -652,8 +655,18 @@ def _emit_body(r, h, w, dirents, keep, kept_blobs, rewrite_refs, regroup_refs, p
                 nd.redirect = shift(nd.redirect)
         if main_page != NO_MAIN_PAGE:
             main_page = shift(main_page)
-        order = [i for i in range(len(new_dirents)) if i != li]
-        order.sort(key=lambda i: sort_key_title(new_dirents[i]))
+        html_mimes = {i for i, m in enumerate(r.mimes) if m.split(";")[0].strip().lower() == "text/html"}
+
+        def is_front(i):
+            seen = set()
+            while i not in seen and 0 <= i < len(new_dirents) and new_dirents[i].is_redirect:
+                seen.add(i)
+                i = new_dirents[i].redirect
+            return (0 <= i < len(new_dirents) and not new_dirents[i].is_redirect
+                    and new_dirents[i].mime in html_mimes)
+        order = [i for i in range(len(new_dirents))
+                 if i != li and new_dirents[i].namespace == "C" and is_front(i)]
+        order.sort(key=lambda i: (new_dirents[i].effective_title, i))
         from cloud.zimfmt import _le_bytes
         listing = _le_bytes("I", order)
         nc = w.add_cluster(encode_cluster([listing], False))
