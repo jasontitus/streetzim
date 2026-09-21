@@ -68,6 +68,11 @@ class Header:
          checksum_pos) = struct.unpack_from(HEADER_FMT, buf, 0)
         if magic != MAGIC:
             raise ValueError(f"not a ZIM file (magic {magic:#x})")
+        if major not in (5, 6):
+            # The tables this module walks are the version 5/6 layout (libzim
+            # has written 6.x since 2020). Refuse anything else rather than
+            # misread it; zimru applies the same rule.
+            raise ValueError(f"unsupported ZIM major version {major} (this tool knows 5 and 6)")
         return cls(major, minor, uuid, entry_count, cluster_count, url_ptr_pos,
                    title_ptr_pos, cluster_ptr_pos, mime_list_pos, main_page,
                    layout_page, checksum_pos)
