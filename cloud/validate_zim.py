@@ -69,7 +69,12 @@ SEARCH_CHUNK_FAIL_MB = 200
 # read only for digit queries; the hash split keeps them under the 200 MB bar.
 SEARCH_LEAF_FAIL_MB = 16
 # The manifest is fetched and parsed before any search can run.
-SEARCH_MANIFEST_FAIL_MB = 4
+# Overridable like TERRAIN_STRIPE_TOLERATE: a region whose manifest is
+# legitimately large can be shipped with SEARCH_MANIFEST_FAIL_MB=<n> after
+# a human decides the load cost is acceptable. united-states sits at
+# 4.51 MB and this hard 4 MB rule had silently blocked its uploads since
+# at least 2026-09-16 -- the live map was still 2026-05-02.
+SEARCH_MANIFEST_FAIL_MB = int(os.environ.get("SEARCH_MANIFEST_FAIL_MB", "4") or 4)
 # places.html fetches category-index/place.json whole on load to name the
 # nearest city. china ships 109 MB (its browser gate fails on it) and europe
 # 480 MB, against a 7.7 MB median — so an unsharded category file that big
