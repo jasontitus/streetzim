@@ -20,3 +20,22 @@ australia-nz
 africa
 russia
 canada
+
+# 2026-09-19: new regions requested to give developing-world users a
+# reasonably sized download instead of the 23 GB whole-continent africa.
+# Registry rows added the same day (cloud/regions.tsv).
+#   north-africa   : Maghreb - only egypt covered the north before this.
+#   central-africa : DRC/Congo/Gabon/Cameroon - fell between west- and
+#                    southern-africa's boxes, uncovered.
+#   horn-of-africa : Ethiopia/Somalia/Eritrea - overlaps east-africa but
+#                    ships a smaller, sharper download.
+#   east-polynesia : pacific-islands stops at 180 deg, so Samoa/Tonga/
+#                    Cook Is./French Polynesia were uncovered.
+north-africa
+central-africa
+horn-of-africa
+east-polynesia
+
+# The four above are commented out until their PBF/mbtiles/search extracts
+# exist under world-data/regions/. Uncomment once extraction finishes --
+# build-region-fast.sh takes those paths as given and would fail instantly.

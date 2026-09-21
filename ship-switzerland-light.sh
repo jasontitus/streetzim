@@ -21,13 +21,14 @@ export LD_LIBRARY_PATH=/storage/streetzim/.browser-libs/ex/usr/lib/x86_64-linux-
 PORT=8841
 KIWIX_PORT=8842
 ID=switzerland-light
-OUT=osm-switzerland-light-2026-09-19.zim
+OUT=$(ls -t osm-switzerland-light-20??-??-??.zim 2>/dev/null | head -1)
 LOG=/storage/streetzim/light-ship.log
 LOCK=/storage/streetzim/.retrofit-upload.lock
 UPLOAD="${UPLOAD:-1}"
 log(){ echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*" | tee -a "$LOG"; }
 
 log "waiting for the viewer swap"
+# OUT is resolved after the swap runs, below.
 for _ in $(seq 1 240); do
   grep -q LIGHT-SWAP-DONE tmp/light-swap.out 2>/dev/null && break
   sleep 15
