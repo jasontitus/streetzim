@@ -27,27 +27,44 @@ from cloud.zimfmt import ZimReader  # noqa: E402
 
 
 class _Item:
-    def __init__(self, path, data, mime="application/x-protobuf", compress=True):
+    def __init__(self, path, data, mime="application/x-protobuf", compress=True, front=False):
         self._path, self._data, self._mimetype, self._compress = path, data, mime, compress
         self._title = path
+        self._is_front = front
+
+
+def _png_48() -> bytes:
+    import struct
+    import zlib
+    raw = b"".join(b"\x00" + b"\x80\x80\x80" * 48 for _ in range(48))
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 48, 48, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
 
 
 def main() -> int:
     out = Path(tempfile.mkdtemp()) / "cb.zim"
-    tile = os.urandom(3000) + b"x" * 5000            # ~8 KB, half incompressible
+    def tile_bytes():
+        return os.urandom(3000) + b"x" * 5000        # ~8 KB, half incompressible, unique
     with ManifestCreator(str(out), compression_level=3, verbose=False) as c:
         c.config_clustersize(64 * 1024)                # build default: 64 KiB
         c.set_mainpath("index.html")
-        c.add_item(_Item("index.html", b"<html>hi</html>", "text/html"))
+        for k, v in (("Title", "cb"), ("Description", "cluster break e2e"), ("Language", "eng"),
+                     ("Creator", "streetzim"), ("Publisher", "streetzim"), ("Date", "2026-09-21"),
+                     ("Name", "cb_e2e")):
+            c.add_metadata(k, v)
+        c.add_illustration(48, _png_48())
+        c.add_item(_Item("index.html", b"<html>hi</html>", "text/html", front=True))
         c.cluster_break(16 * 1024)                     # tiles: 16 KiB target
         for z in (12, 13, 14):
             if z > 12:
                 c.cluster_break()
             for i in range(12):
-                c.add_item(_Item(f"tiles/{z}/{i}/0.pbf", tile))
+                c.add_item(_Item(f"tiles/{z}/{i}/0.pbf", tile_bytes()))
         c.cluster_break(64 * 1024)                     # back to default
         for i in range(24):
-            c.add_item(_Item(f"search-data/s{i:02d}.json", tile, "application/json"))
+            c.add_item(_Item(f"search-data/s{i:02d}.json", tile_bytes(), "application/json"))
     r = ZimReader(str(out))
     per_cluster = defaultdict(set)
     sizes = {}

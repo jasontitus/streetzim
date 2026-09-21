@@ -694,3 +694,63 @@ at `--exact`. `--estimate` runs the same compression the trim would, so it
 costs the trim's CPU without its I/O; it is worth it before a multi-hour
 continent strip, not for a prefix drop, where the plan's dropped-bytes line
 is already exact.
+
+## zimru, libzim and the format-drift question (2026-09-21)
+
+`szim` reads and writes the ZIM container itself (`cloud/zimfmt.py`) and
+needs neither libzim nor zimru. That was a deliberate choice, and worth
+defending against the obvious worry that the format could move under it.
+
+**Why it is its own implementation.** The one thing the trim needs that no
+library offers is copying a compressed cluster verbatim into a new archive.
+zimru's `Creator` (checked at `061afbc`) takes items and compresses them
+into clusters; there is no `add_raw_cluster`. libzim's Creator is the same.
+So a trim built on either is a full re-encode, tiers 2 and 3 above, the
+5 to 22 minute path for a 3 to 7 GB region instead of 40 seconds. The
+container format is ~300 lines of tables; re-implementing them was cheaper
+than the alternative and is what makes the tool fast.
+
+**What guards against drift.**
+
+- The format has been at 6.x since 2020 and libzim is its reference
+  implementation; zimru itself is a from-scratch implementation of the same
+  spec and rejects majors other than 5 and 6. `zimfmt` now applies the same
+  rule and refuses anything else rather than misreading it.
+- `szim verify` reads every derived file with **two independent readers**:
+  python-libzim (`Archive.check()`, search, byte comparison of every kept
+  entry) and zimru's `zimcheck -A` when a binary is present (`ZIMCHECK_BIN`,
+  `$PATH`, or `../zimru/target/release`). A format detail this tool got
+  subtly wrong would have to fool both.
+- The end-to-end builder check (`tests/e2e_cluster_break.py`) packs through
+  zimru and reads back through `zimfmt`, so the two implementations cross-
+  check each other in both directions.
+
+**What the second reader found immediately.** zimru's current `zimcheck`
+fails every shipped streetzim ZIM with `invalid title indices`: the
+`X/listing/titleOrdered/v1` written by the zimru those builds used lists
+every entry, while current zimru (and libzim's meaning of v1) lists front
+articles only, content-namespace entries whose mime resolves to
+`text/html`. libzim accepts both, which is why nothing noticed. `szim trim`
+now writes the modern form, so derived files pass `zimcheck` even though
+their sources do not (washington-dc light: libzim PASS, zimcheck Pass). The
+shipped files will pick this up at their next viewer re-pack.
+
+**What was done on the zimru side.** The builder's `cluster_break` needs a
+`Creator::flush_cluster()` and a `set_cluster_size_target` that reaches the
+running streamer (today it is read once at `start_writing`, so a mid-stream
+change is silently ignored). Both are 19 lines,
+`patches/zimru-flush-cluster.patch`, applied to a local checkout here and
+compiled; `streetzim-pack --features cluster_break` built against it and
+`tests/e2e_cluster_break.py` passed: 18 tile clusters, no cluster with two
+zooms, the 16 KiB target inside and 64 KiB restored after. This session
+cannot push to zimru, so the patch travels in this repo until it lands.
+
+**If the trim should live in zimru anyway.** The port is bounded: an
+`Archive::cluster_byte_range` already exists (public) for the raw bytes, and
+the writer would need `add_raw_cluster(bytes, blob_count) -> cluster_idx`
+plus items that reference an existing (cluster, blob). Everything else in
+`derive_zim.py` is planning and JSON rewriting. Doing it would make zimru
+the single format implementation streetzim depends on; the cost is that
+`szim` then needs a Rust build rather than `pip install zstandard`. The
+Python tool is the reference for what that port must do, and the verifier
+would check it the same way.
