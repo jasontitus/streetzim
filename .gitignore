@@ -45,3 +45,21 @@ overture_cache/
 # Rust build outputs (streetzim-pack — the zimru-backed manifest packer).
 # Source lives under rust/, we don't commit `target/` artifacts.
 /rust/**/target/
+
+# Operational noise from build/rollout runs (2026-09-21). These are run
+# artefacts, not sources: regenerating them is the normal path, and 1,100+
+# of them made `git status` unreadable enough to hide real changes -- an
+# untracked runtime dependency (web/drive/wiki-qid-titles.json) sat
+# unnoticed in that list until a deploy would have 404'd on it.
+*.out
+*.log
+tmp/*.txt
+tmp/*.json
+tmp/*.zst
+tmp/*.bin
+*.pid
+*.lock
+*.bak-*
+*.patch
+rejected-zims/
+salvage/
