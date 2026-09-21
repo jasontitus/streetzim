@@ -188,3 +188,14 @@ os.unlink(f)
 | `USE_SYSTEM_LIBZIM` | Use system-installed libzim instead of bundled |
 | `DONT_DOWNLOAD_LIBZIM` | Skip download, use existing libzim in python-libzim/libzim/ |
 | `ZSTD_CLEVEL` | ZSTD compression level used by libzim at runtime (we use 22) |
+
+## zimru-flush-cluster.patch (2026-09-21)
+
+Against zimru `061afbc`. Adds `Creator::flush_cluster()` (close every
+bucket so the next item starts a new cluster; a no-op when nothing is
+buffered, so it never yields an empty cluster) and makes
+`set_cluster_size_target` reach the running streamer, which previously
+only read the target at `start_writing`. Both are what `streetzim-pack`'s
+`cluster_break` manifest record needs (`cargo build --release --features
+cluster_break`), see docs/zim-builder-rust.md. Apply with
+`git -C ../zimru apply patches/zimru-flush-cluster.patch`.

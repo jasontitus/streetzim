@@ -13,6 +13,9 @@ Checks, with python-libzim (an independent reader from cloud/zimfmt.py):
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -98,6 +101,19 @@ def main() -> int:
         rep("title suggestions", True, f"({g.getEstimatedMatches()} matches)")
     except Exception as ex:  # noqa: BLE001
         rep("search", False, str(ex))
+    # Second, independent reader: zimru's zimcheck (Rust), when a binary is
+    # around. Two implementations agreeing on the file is the real defence
+    # against a format detail this tool got subtly wrong.
+    zimcheck = os.environ.get("ZIMCHECK_BIN") or shutil.which("zimcheck") or next(
+        (p for p in ("/home/user/zimru/target/release/zimcheck",
+                     str(Path(__file__).resolve().parent.parent.parent / "zimru/target/release/zimcheck"))
+         if os.path.exists(p)), None)
+    if zimcheck:
+        res = subprocess.run([zimcheck, "-A", a.dst], capture_output=True, text=True, timeout=3600)
+        rep(f"zimru zimcheck -A ({Path(zimcheck).name})", res.returncode == 0,
+            (res.stdout.strip().splitlines() or [""])[-1][:100])
+    else:
+        print("  skip zimru zimcheck (no binary; set ZIMCHECK_BIN or build ../zimru)")
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
 
