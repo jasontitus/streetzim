@@ -43,6 +43,12 @@ import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
+# Viewer slots: pad the three viewer files to fixed UNCOMPRESSED slots so
+# cloud/patch_viewer_inplace.py can replace them later without a re-pack.
+# Single source of truth for the layout is cloud/viewer_slots.py, shared
+# with cloud/swap_viewer_rust.py -- they previously built the header
+# independently, which would have drifted.
+from cloud.viewer_slots import pad_to_slot as _pad_to_slot
 
 # Wrap print to auto-flush step/progress lines so monitoring never sees stale output.
 # Also doubles as a phase-timer hook: lines that look like a phase header
@@ -5068,20 +5074,35 @@ def create_zim(
         except ImportError:
             pass  # PIL not available, skip illustration
 
-        # Add the viewer HTML (main page)
-        print("    Adding viewer HTML...")
+        # Add the viewer HTML (main page).
+        #
+        # The three viewer files go into fixed-size UNCOMPRESSED slots
+        # (cloud/viewer_slots.py) so a later viewer change can be patched in
+        # place by cloud/patch_viewer_inplace.py in ~10 s instead of a full
+        # re-pack -- measured 2026-09-21 at 3 s on a 3.4 GB region and 10 s on
+        # 7.4 GB, against 8-22 min for the equivalent swap_viewer_rust pass.
+        # Uncompressed is the mechanism, not an oversight: bytes inside a
+        # compressed cluster do not map to file offsets, so there would be
+        # nothing to overwrite. Cost is ~1.4 MB per ZIM.
+        #
+        # Until now only swap_viewer_rust.py wrote slots, so every freshly
+        # built region was born without them and owed one full re-pack at the
+        # next viewer change.
+        print("    Adding viewer HTML (slotted)...")
         creator.add_item(MapItem(
             "index.html", name, "text/html",
-            open(str(viewer_html_path)).read().encode("utf-8"),
-            is_front=True,
+            _pad_to_slot("index.html",
+                         open(str(viewer_html_path), "rb").read()),
+            is_front=True, compress=False,
         ))
         routing_worker_path = VIEWER_DIR / "routing-worker.js"
         if routing_worker_path.exists():
-            print("    Adding routing-worker.js...")
+            print("    Adding routing-worker.js (slotted)...")
             creator.add_item(MapItem(
                 "routing-worker.js", "Routing Worker", "application/javascript",
-                str(routing_worker_path),
-                is_front=False,
+                _pad_to_slot("routing-worker.js",
+                             routing_worker_path.read_bytes()),
+                is_front=False, compress=False,
             ))
 
         # Find-places mini-app (`places.html`). LLM-free: searches the
@@ -5092,11 +5113,11 @@ def create_zim(
         # PWA shell — see HOW_TO_BUILD-style notes in the file itself.
         places_path = VIEWER_DIR / "places.html"
         if places_path.exists():
-            print("    Adding places.html (find-places mini-app)...")
+            print("    Adding places.html (find-places mini-app, slotted)...")
             creator.add_item(MapItem(
                 "places.html", "Find places", "text/html",
-                open(str(places_path)).read().encode("utf-8"),
-                is_front=False,
+                _pad_to_slot("places.html", places_path.read_bytes()),
+                is_front=False, compress=False,
             ))
 
         # Add MapLibre GL JS
