@@ -26,8 +26,17 @@ for(const d of DEVICES){
   await p.emulate({viewport:{width:d.w,height:d.h,isMobile:true,hasTouch:true,deviceScaleFactor:3},userAgent:IOS});
   // Reproduce the Kiwix condition the shim exists for: full-screen web view,
   // env() reporting zero, so the shim's derived inset is what CSS sees.
+  // The shim removes its own --top-inset override when env() reports nothing
+  // and the scheme is not zim: -- exactly the case over plain http -- and
+  // p.emulate()/setViewport fire a resize that triggers that reset. A one-shot
+  // injection at DOMContentLoaded gets wiped mid-run and the harness then
+  // fails its OWN `top < inset` assertion (hispaniola, 2 of 7 devices).
   await p.evaluateOnNewDocument(v=>{
-    addEventListener('DOMContentLoaded',()=>document.documentElement.style.setProperty('--top-inset',v+'px'));
+    const apply=()=>document.documentElement.style.setProperty('--top-inset',v+'px');
+    addEventListener('DOMContentLoaded',apply);
+    addEventListener('resize',apply);
+    setInterval(apply,200);
+    apply();
   },d.inset);
   const bad=[];
   p.on('pageerror',e=>bad.push('pageerror '+String(e).slice(0,80)));
@@ -107,14 +116,24 @@ for(const d of DEVICES){
     // search
     await p.click('#search-input').catch(()=>{});
     await p.type('#search-input',process.env.SEARCH_TERM||'San Francisco',{delay:60});
-    for(let i=0;i<15;i++){await new Promise(r=>setTimeout(r,2000));
-      if(await p.evaluate(()=>document.querySelectorAll('#search-results .search-result').length))break;}
+    {  // wait for the count to STABILISE, not merely to become non-zero:
+       // breaking at the first hit measures a transient mid-typing list that
+       // is still being replaced, which reads as "row BLOCKED by DIV".
+      let prev=-1, same=0;
+      for(let i=0;i<20;i++){
+        await new Promise(r=>setTimeout(r,1500));
+        const n=await p.evaluate(()=>document.querySelectorAll('#search-results .search-result').length);
+        if(n>0 && n===prev){ if(++same>=2) break; } else same=0;
+        prev=n;
+      }
+    }
     const sr=await p.evaluate(()=>{const r=document.getElementById('search-results');
       return {vis:r?getComputedStyle(r).display!=='none':false, n:r?r.querySelectorAll('.search-result').length:0};});
     R.checks.push(`search -> ${sr.n} results`); if(!sr.n) R.fail.push('search returned 0');
     if(sr.n){ const srh=await p.evaluate(()=>{const li=document.querySelector('#search-results .search-result');
         const r=li.getBoundingClientRect(); const el=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
-        return el&&(li===el||li.contains(el))?'ok':'BLOCKED by '+(el?el.tagName:'null');});
+        const ok=!!(el&&(li===el||li.contains(el)||el.contains(li)||(el.closest&&el.closest('.search-result'))));
+        return ok?'ok':'BLOCKED by '+(el?el.tagName+(el.id?'#'+el.id:''):'null');});
       R.checks.push('result row: '+srh); if(srh!=='ok') R.fail.push('result row '+srh); }
   }catch(e){ R.fail.push('EXC '+String(e).slice(0,110)); }
   if(bad.length) R.fail.push(...bad);

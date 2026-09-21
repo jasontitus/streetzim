@@ -9,3 +9,15 @@ central-us	needs-reswap-inset-regression	osm-central-us-2026-09-18b.zim	21 min	2
 mexico	needs-reswap-inset-regression	osm-mexico-2026-09-18b.zim	24 min	2026-09-19T02:16:52+02:00
 australia-nz	needs-reswap-inset-regression	osm-australia-nz-2026-09-18.zim	uploaded 03:47 with viewer 445418 B (pre-guard); rc=6 = listing pending, NOT a failure	2026-09-19T04:12:10+02:00
 midwest-us	needs-reswap-inset-regression	osm-midwest-us-2026-09-18b.zim	uploaded after the queue was killed, so no row was ever written	2026-09-19T04:12:33+02:00
+argentina	upload-pending	osm-argentina-2026-09-19b.zim	rc=6	2026-09-19T04:50:24+02:00
+turkey	uploaded	osm-turkey-2026-09-19b.zim	7 min	2026-09-19T05:07:09+02:00
+west-coast-us	uploaded	osm-west-coast-us-2026-09-19b.zim	15 min	2026-09-19T05:33:39+02:00
+japan	uploaded	osm-japan-2026-09-19b.zim	17 min	2026-09-19T06:10:54+02:00
+central-us	uploaded	osm-central-us-2026-09-19b.zim	18 min	2026-09-19T06:46:31+02:00
+mexico	upload-pending	osm-mexico-2026-09-19b.zim	rc=6	2026-09-19T07:38:09+02:00
+midwest-us	uploaded	osm-midwest-us-2026-09-19b.zim	67 min	2026-09-19T09:06:40+02:00
+australia-nz	upload-pending	osm-australia-nz-2026-09-19b.zim	rc=6	2026-09-19T10:05:02+02:00
+southeast-asia	uploaded	osm-southeast-asia-2026-09-19b.zim	41 min	2026-09-19T11:17:08+02:00
+west-asia	uploaded	osm-west-asia-2026-09-19b.zim	20 min	2026-09-19T11:59:57+02:00
+east-coast-us	gate-failed	osm-east-coast-us-2026-09-19b.zim	 browser	2026-09-19T12:39:26+02:00
+east-coast-us	gate-failed	osm-east-coast-us-2026-09-19c.zim	 browser	2026-09-19T13:22:21+02:00
