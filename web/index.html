@@ -163,6 +163,17 @@
     padding-top: 18px;
   }
   .maps-tier-header:first-child {
+    .maps-filter { display: flex; align-items: center; gap: 10px; margin: 18px 0 6px; }
+    #map-filter {
+      flex: 1 1 auto; max-width: 420px; padding: 10px 12px;
+      font-size: 16px; /* 16px or iOS zooms the page on focus */
+      border: 1px solid var(--border, #d8d8d8); border-radius: 8px;
+      background: #fff; color: inherit;
+    }
+    #map-filter:focus { outline: 2px solid #2563eb; outline-offset: 1px; }
+    .maps-filter-count { font-size: 13px; opacity: 0.7; white-space: nowrap; }
+    .maps [hidden] { display: none !important; }
+
     /* No top rule for the first header — the parent `<h2>Download a
        map</h2>` already separates this section from the page header. */
     border-top: none;
@@ -398,7 +409,7 @@
       <span class="map-badge badge-satellite">Satellite</span> Sentinel-2 imagery,
       <span class="map-badge badge-wiki">Wikipedia links</span> Wikidata cross-refs.
     </p>
-    <p class="updated">Last updated: 2026-09-21 03:39 UTC · build <span id="build-stamp">…</span></p>
+    <p class="updated">Last updated: 2026-09-22 17:54 UTC · build <span id="build-stamp">…</span></p>
 <script>
 fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
   .then(function(r) { return r.ok ? r.text() : ''; })
@@ -411,110 +422,41 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
   .catch(function() { /* offline / file:// preview — stamp stays "…" */ });
 </script>
 
+    <div class="maps-filter">
+      <input id="map-filter" type="search" autocomplete="off" spellcheck="false"
+             placeholder="Filter maps — try “france”, “alps”, “coast”…"
+             aria-label="Filter the list of maps">
+      <span id="map-filter-count" class="maps-filter-count" aria-live="polite"></span>
+    </div>
     <div class="maps">
       <h3 class="maps-tier-header">Continents &amp; continent-scale regions</h3>
       <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">Europe</div>
-          <div class="map-card-size">62.1 GB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-05-06">6 May 2026</time></div>
-        <p class="map-card-desc">United Kingdom, Ireland, France, Spain, Portugal, Germany, Italy, Netherlands, Belgium, Switzerland, Austria, Poland, Greece, Sweden, Norway, Finland, Denmark, the Baltics, Ukraine, Georgia, Armenia, Azerbaijan, Cyprus, and dozens more.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-europe/osm-europe-2026-05-06.zim" data-track="download" data-region="europe" data-title="Europe">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-europe/osm-europe-2026-05-06.zim" data-track="preview" data-region="europe" data-title="Europe" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/europe.torrent" data-track="torrent" data-region="europe" data-title="Europe">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-europe" data-track="details" data-region="europe" data-title="Europe">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">United States</div>
-          <div class="map-card-size">38.0 GB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-05-05">5 May 2026</time></div>
-        <p class="map-card-desc">Continental United States &mdash; all 48 contiguous states and Washington, D.C.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-united-states/osm-united-states-2026-05-05.zim" data-track="download" data-region="united-states" data-title="United States">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-united-states/osm-united-states-2026-05-05.zim" data-track="preview" data-region="united-states" data-title="United States" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/united-states.torrent" data-track="torrent" data-region="united-states" data-title="United States">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-united-states" data-track="details" data-region="united-states" data-title="United States">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">South America</div>
-          <div class="map-card-size">19.6 GB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-15">15 Sep 2026</time></div>
-        <p class="map-card-desc">Continental South America &mdash; Colombia, Venezuela, Guyana, Suriname, French Guiana, Ecuador, Peru, Bolivia, Paraguay, Uruguay, Chile, the Amazon, the Andes, the Atacama, and Patagonia. (Brazil and Argentina ship as their own dedicated ZIMs.)</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-south-america/osm-south-america-2026-09-15.zim" data-track="download" data-region="south-america" data-title="South America">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-south-america/osm-south-america-2026-09-15.zim" data-track="preview" data-region="south-america" data-title="South America" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/south-america.torrent" data-track="torrent" data-region="south-america" data-title="South America">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-south-america" data-track="details" data-region="south-america" data-title="South America">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
           <div class="map-card-title">Africa</div>
-          <div class="map-card-size">21.6 GB</div>
+          <div class="map-card-size">20.4 GB</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-19">19 Sep 2026</time></div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
         <p class="map-card-desc">All of Africa &mdash; Algeria, Egypt, Ethiopia, Kenya, Morocco, Nigeria, South Africa, Tanzania, and 40+ more countries.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-africa/osm-africa-2026-09-19.zim" data-track="download" data-region="africa" data-title="Africa">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-africa/osm-africa-2026-09-19.zim" data-track="preview" data-region="africa" data-title="Africa" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-africa/osm-africa-2026-09-20.zim" data-track="download" data-region="africa" data-title="Africa">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-africa/osm-africa-2026-09-20.zim" data-track="preview" data-region="africa" data-title="Africa" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/africa.torrent" data-track="torrent" data-region="africa" data-title="Africa">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-africa" data-track="details" data-region="africa" data-title="Africa">Info</a>
         </div>
       </div>
       <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">Indian Subcontinent</div>
-          <div class="map-card-size">13.2 GB</div>
+          <div class="map-card-title">Africa (Light)</div>
+          <div class="map-card-size">12.1 GB</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-14">14 Sep 2026</time></div>
-        <p class="map-card-desc">India, Pakistan, Bangladesh, Sri Lanka, Nepal, Bhutan, and the Maldives.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-date">Updated <time datetime="2026-09-22">22 Sep 2026</time></div>
+        <p class="map-card-desc">The whole of Africa without satellite imagery and capped at zoom 13 &mdash; the same coverage as Africa in roughly half the download. Built for slower connections and smaller devices.</p>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-indian-subcontinent/osm-indian-subcontinent-2026-09-14.zim" data-track="download" data-region="indian-subcontinent" data-title="Indian Subcontinent">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-indian-subcontinent/osm-indian-subcontinent-2026-09-14.zim" data-track="preview" data-region="indian-subcontinent" data-title="Indian Subcontinent" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/indian-subcontinent.torrent" data-track="torrent" data-region="indian-subcontinent" data-title="Indian Subcontinent">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-indian-subcontinent" data-track="details" data-region="indian-subcontinent" data-title="Indian Subcontinent">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">China</div>
-          <div class="map-card-size">19.5 GB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-05-09">9 May 2026</time></div>
-        <p class="map-card-desc">China &mdash; Beijing, Shanghai, Guangzhou, Shenzhen, Chengdu, Chongqing, Xi&rsquo;an, Wuhan, Hangzhou, Hong Kong, and Macau, plus the Great Wall, the Yangtze, the Tibetan Plateau, and the Gobi.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-china/osm-china-2026-05-09.zim" data-track="download" data-region="china" data-title="China">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-china/osm-china-2026-05-09.zim" data-track="preview" data-region="china" data-title="China" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/china.torrent" data-track="torrent" data-region="china" data-title="China">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-china" data-track="details" data-region="china" data-title="China">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Russia</div>
-          <div class="map-card-size">28.4 GB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-19">19 Sep 2026</time></div>
-        <p class="map-card-desc">Russia &mdash; Moscow, Saint Petersburg, Novosibirsk, Yekaterinburg, Kazan, Nizhny Novgorod, Sochi, Vladivostok; the Volga, the Urals, the Caucasus, Lake Baikal; the Trans-Siberian Railway from the Baltic to the Sea of Japan.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-russia/osm-russia-2026-09-19.zim" data-track="download" data-region="russia" data-title="Russia">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-russia/osm-russia-2026-09-19.zim" data-track="preview" data-region="russia" data-title="Russia" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/russia.torrent" data-track="torrent" data-region="russia" data-title="Russia">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-russia" data-track="details" data-region="russia" data-title="Russia">Info</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-africa-light/osm-africa-light-2026-09-22.zim" data-track="download" data-region="africa-light" data-title="Africa (Light)">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-africa-light/osm-africa-light-2026-09-22.zim" data-track="preview" data-region="africa-light" data-title="Africa (Light)" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/africa-light.torrent" data-track="torrent" data-region="africa-light" data-title="Africa (Light)">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-africa-light" data-track="details" data-region="africa-light" data-title="Africa (Light)">Info</a>
         </div>
       </div>
       <div class="map-card">
@@ -534,6 +476,95 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       </div>
       <div class="map-card">
         <div class="map-card-head">
+          <div class="map-card-title">Canada</div>
+          <div class="map-card-size">27.8 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">All of Canada &mdash; Toronto, Montreal, Vancouver, Calgary, Ottawa, Quebec City, Edmonton, Halifax, the Rockies, Banff, the Great Lakes, the Maritimes, and the Yukon and Northwest Territories.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-canada/osm-canada-2026-09-20.zim" data-track="download" data-region="canada" data-title="Canada">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-canada/osm-canada-2026-09-20.zim" data-track="preview" data-region="canada" data-title="Canada" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/canada.torrent" data-track="torrent" data-region="canada" data-title="Canada">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-canada" data-track="details" data-region="canada" data-title="Canada">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">China</div>
+          <div class="map-card-size">19.3 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">China &mdash; Beijing, Shanghai, Guangzhou, Shenzhen, Chengdu, Chongqing, Xi&rsquo;an, Wuhan, Hangzhou, Hong Kong, and Macau, plus the Great Wall, the Yangtze, the Tibetan Plateau, and the Gobi.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-china/osm-china-2026-09-20.zim" data-track="download" data-region="china" data-title="China">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-china/osm-china-2026-09-20.zim" data-track="preview" data-region="china" data-title="China" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/china.torrent" data-track="torrent" data-region="china" data-title="China">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-china" data-track="details" data-region="china" data-title="China">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Europe</div>
+          <div class="map-card-size">60.5 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-21">21 Sep 2026</time></div>
+        <p class="map-card-desc">United Kingdom, Ireland, France, Spain, Portugal, Germany, Italy, Netherlands, Belgium, Switzerland, Austria, Poland, Greece, Sweden, Norway, Finland, Denmark, the Baltics, Ukraine, Georgia, Armenia, Azerbaijan, Cyprus, and dozens more.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-europe/osm-europe-2026-09-21.zim" data-track="download" data-region="europe" data-title="Europe">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-europe/osm-europe-2026-09-21.zim" data-track="preview" data-region="europe" data-title="Europe" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-europe" data-track="details" data-region="europe" data-title="Europe">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Indian Subcontinent</div>
+          <div class="map-card-size">12.2 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">India, Pakistan, Bangladesh, Sri Lanka, Nepal, Bhutan, and the Maldives.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-indian-subcontinent/osm-indian-subcontinent-2026-09-20.zim" data-track="download" data-region="indian-subcontinent" data-title="Indian Subcontinent">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-indian-subcontinent/osm-indian-subcontinent-2026-09-20.zim" data-track="preview" data-region="indian-subcontinent" data-title="Indian Subcontinent" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/indian-subcontinent.torrent" data-track="torrent" data-region="indian-subcontinent" data-title="Indian Subcontinent">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-indian-subcontinent" data-track="details" data-region="indian-subcontinent" data-title="Indian Subcontinent">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Russia</div>
+          <div class="map-card-size">26.2 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-21">21 Sep 2026</time></div>
+        <p class="map-card-desc">Russia &mdash; Moscow, Saint Petersburg, Novosibirsk, Yekaterinburg, Kazan, Nizhny Novgorod, Sochi, Vladivostok; the Volga, the Urals, the Caucasus, Lake Baikal; the Trans-Siberian Railway from the Baltic to the Sea of Japan.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-russia/osm-russia-2026-09-21.zim" data-track="download" data-region="russia" data-title="Russia">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-russia/osm-russia-2026-09-21.zim" data-track="preview" data-region="russia" data-title="Russia" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/russia.torrent" data-track="torrent" data-region="russia" data-title="Russia">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-russia" data-track="details" data-region="russia" data-title="Russia">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">South America</div>
+          <div class="map-card-size">19.6 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">Continental South America &mdash; Colombia, Venezuela, Guyana, Suriname, French Guiana, Ecuador, Peru, Bolivia, Paraguay, Uruguay, Chile, the Amazon, the Andes, the Atacama, and Patagonia. (Brazil and Argentina ship as their own dedicated ZIMs.)</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-south-america/osm-south-america-2026-09-20.zim" data-track="download" data-region="south-america" data-title="South America">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-south-america/osm-south-america-2026-09-20.zim" data-track="preview" data-region="south-america" data-title="South America" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/south-america.torrent" data-track="torrent" data-region="south-america" data-title="South America">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-south-america" data-track="details" data-region="south-america" data-title="South America">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
           <div class="map-card-title">Southeast Asia</div>
           <div class="map-card-size">9.8 GB</div>
         </div>
@@ -548,64 +579,62 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       </div>
       <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">Canada</div>
-          <div class="map-card-size">27.8 GB</div>
+          <div class="map-card-title">United States</div>
+          <div class="map-card-size">36.5 GB</div>
         </div>
         <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">All of Canada &mdash; Toronto, Montreal, Vancouver, Calgary, Ottawa, Quebec City, Edmonton, Halifax, the Rockies, Banff, the Great Lakes, the Maritimes, and the Yukon and Northwest Territories.</p>
+        <p class="map-card-desc">Continental United States &mdash; all 48 contiguous states and Washington, D.C.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-canada/osm-canada-2026-09-20.zim" data-track="download" data-region="canada" data-title="Canada">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-canada/osm-canada-2026-09-20.zim" data-track="preview" data-region="canada" data-title="Canada" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/canada.torrent" data-track="torrent" data-region="canada" data-title="Canada">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-canada" data-track="details" data-region="canada" data-title="Canada">Info</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-united-states/osm-united-states-2026-09-20.zim" data-track="download" data-region="united-states" data-title="United States">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-united-states/osm-united-states-2026-09-20.zim" data-track="preview" data-region="united-states" data-title="United States" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/united-states.torrent" data-track="torrent" data-region="united-states" data-title="United States">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-united-states" data-track="details" data-region="united-states" data-title="United States">Info</a>
         </div>
       </div>
       <h3 class="maps-tier-header">Multi-country regions</h3>
+      <div class="map-card upcoming">
+        <div class="map-card-head">
+          <div class="map-card-title">Austria, Czechia &amp;amp; Slovakia</div>
+          <div class="map-card-size">building</div>
+        </div>
+        <p class="map-card-desc">Austria, Czechia &amp; Slovakia &mdash; Vienna, Prague, Bratislava, Brno, Salzburg, Graz, Innsbruck; the Eastern Alps, Bohemia, the Tatras.</p>
+      </div>
+      <div class="map-card upcoming">
+        <div class="map-card-head">
+          <div class="map-card-title">Balkans</div>
+          <div class="map-card-size">building</div>
+        </div>
+        <p class="map-card-desc">Slovenia, Croatia, Bosnia, Serbia, Montenegro, Albania, North Macedonia &amp; Kosovo &mdash; Belgrade, Zagreb, Sarajevo, Ljubljana, Split, Tirana; the Dalmatian coast, the Dinaric Alps.</p>
+      </div>
       <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">West Asia</div>
-          <div class="map-card-size">9.9 GB</div>
+          <div class="map-card-title">Baltics</div>
+          <div class="map-card-size">1.2 GB</div>
         </div>
         <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">Turkey, Syria, Lebanon, Israel, Palestine, Jordan, Iraq, Iran, Kuwait, Saudi Arabia, Bahrain, Qatar, UAE, Oman, Yemen, and parts of Egypt, Afghanistan, and Pakistan.</p>
+        <p class="map-card-desc">Estonia, Latvia, and Lithuania &mdash; Tallinn, Riga, Vilnius, and the Baltic Sea coast.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-west-asia/osm-west-asia-2026-09-20.zim" data-track="download" data-region="west-asia" data-title="West Asia">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-west-asia/osm-west-asia-2026-09-20.zim" data-track="preview" data-region="west-asia" data-title="West Asia" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/west-asia.torrent" data-track="torrent" data-region="west-asia" data-title="West Asia">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-west-asia" data-track="details" data-region="west-asia" data-title="West Asia">Info</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-baltics/osm-baltics-2026-09-20.zim" data-track="download" data-region="baltics" data-title="Baltics">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-baltics/osm-baltics-2026-09-20.zim" data-track="preview" data-region="baltics" data-title="Baltics" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/baltics.torrent" data-track="torrent" data-region="baltics" data-title="Baltics">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-baltics" data-track="details" data-region="baltics" data-title="Baltics">Info</a>
         </div>
       </div>
-      <div class="map-card">
+      <div class="map-card upcoming">
         <div class="map-card-head">
-          <div class="map-card-title">Central Asia</div>
-          <div class="map-card-size">21.6 GB</div>
+          <div class="map-card-title">Benelux</div>
+          <div class="map-card-size">building</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-11">11 Sep 2026</time></div>
-        <p class="map-card-desc">Central Asia &mdash; Kazakhstan, Uzbekistan, Turkmenistan, Tajikistan, Kyrgyzstan, Afghanistan, and the Caucasus. Almaty, Tashkent, Bishkek, Ashgabat, Dushanbe, Kabul, the Pamirs, and the Silk Road.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-central-asia/osm-central-asia-2026-09-11.zim" data-track="download" data-region="central-asia" data-title="Central Asia">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-central-asia/osm-central-asia-2026-09-11.zim" data-track="preview" data-region="central-asia" data-title="Central Asia" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/central-asia.torrent" data-track="torrent" data-region="central-asia" data-title="Central Asia">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-central-asia" data-track="details" data-region="central-asia" data-title="Central Asia">Info</a>
-        </div>
+        <p class="map-card-desc">Netherlands, Belgium &amp; Luxembourg &mdash; Amsterdam, Rotterdam, The Hague, Brussels, Antwerp, Ghent, Luxembourg City; the Randstad, the Ardennes, the North Sea coast.</p>
       </div>
-      <div class="map-card">
+      <div class="map-card upcoming">
         <div class="map-card-head">
-          <div class="map-card-title">Korea &amp; Mongolia</div>
-          <div class="map-card-size">5.8 GB</div>
+          <div class="map-card-title">Britain &amp;amp; Ireland</div>
+          <div class="map-card-size">building</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-11">11 Sep 2026</time></div>
-        <p class="map-card-desc">The Korean Peninsula and Mongolia &mdash; Seoul, Busan, Daegu, Incheon, Pyongyang, Ulaanbaatar, Darkhan; the Gobi, the Khangai mountains, the DMZ, and the Sea of Japan coast.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-korea-mongolia/osm-korea-mongolia-2026-09-11.zim" data-track="download" data-region="korea-mongolia" data-title="Korea &amp; Mongolia">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-korea-mongolia/osm-korea-mongolia-2026-09-11.zim" data-track="preview" data-region="korea-mongolia" data-title="Korea &amp; Mongolia" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/korea-mongolia.torrent" data-track="torrent" data-region="korea-mongolia" data-title="Korea &amp; Mongolia">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-korea-mongolia" data-track="details" data-region="korea-mongolia" data-title="Korea &amp; Mongolia">Info</a>
-        </div>
+        <p class="map-card-desc">The British Isles &mdash; London, Manchester, Birmingham, Glasgow, Edinburgh, Dublin, Cardiff, Belfast; the Highlands, Snowdonia, the Lake District, the Wild Atlantic Way.</p>
       </div>
       <div class="map-card">
         <div class="map-card-head">
@@ -620,66 +649,6 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-caucasus/osm-caucasus-2026-09-20.zim" data-track="preview" data-region="caucasus" data-title="Caucasus" title="Look at this map in your browser, streamed from archive.org">Preview</a>
           <a class="btn btn-secondary" href="/torrents/caucasus.torrent" data-track="torrent" data-region="caucasus" data-title="Caucasus">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-caucasus" data-track="details" data-region="caucasus" data-title="Caucasus">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Pacific Islands</div>
-          <div class="map-card-size">1.8 GB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">Papua New Guinea, Fiji, Solomon Islands, Vanuatu, New Caledonia, Samoa, Tonga, Palau, Micronesia, and the Marshall Islands &mdash; Port Moresby, Suva, Nadi, Nouméa, Apia, and Nuku'alofa.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-pacific-islands/osm-pacific-islands-2026-09-20.zim" data-track="download" data-region="pacific-islands" data-title="Pacific Islands">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-pacific-islands/osm-pacific-islands-2026-09-20.zim" data-track="preview" data-region="pacific-islands" data-title="Pacific Islands" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/pacific-islands.torrent" data-track="torrent" data-region="pacific-islands" data-title="Pacific Islands">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-pacific-islands" data-track="details" data-region="pacific-islands" data-title="Pacific Islands">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">West Africa</div>
-          <div class="map-card-size">2.8 GB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">Nigeria, Ghana, Côte d'Ivoire, Senegal, Mali, Burkina Faso, Guinea, Benin, Togo, Sierra Leone, Liberia, and Niger &mdash; Lagos, Accra, Abidjan, Dakar, Abuja, Bamako, Ouagadougou, and the Gulf of Guinea coast.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-west-africa/osm-west-africa-2026-09-20.zim" data-track="download" data-region="west-africa" data-title="West Africa">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-west-africa/osm-west-africa-2026-09-20.zim" data-track="preview" data-region="west-africa" data-title="West Africa" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/west-africa.torrent" data-track="torrent" data-region="west-africa" data-title="West Africa">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-west-africa" data-track="details" data-region="west-africa" data-title="West Africa">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Southern Africa</div>
-          <div class="map-card-size">2.4 GB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">South Africa, Namibia, Botswana, Zimbabwe, Mozambique, Zambia, Malawi, Lesotho, and Eswatini &mdash; Johannesburg, Cape Town, Durban, Pretoria, Windhoek, Gaborone, Harare, Maputo, Lusaka, the Kalahari, Kruger, and the Cape.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-southern-africa/osm-southern-africa-2026-09-20.zim" data-track="download" data-region="southern-africa" data-title="Southern Africa">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-southern-africa/osm-southern-africa-2026-09-20.zim" data-track="preview" data-region="southern-africa" data-title="Southern Africa" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/southern-africa.torrent" data-track="torrent" data-region="southern-africa" data-title="Southern Africa">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-southern-africa" data-track="details" data-region="southern-africa" data-title="Southern Africa">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">East Africa</div>
-          <div class="map-card-size">4.5 GB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-07">7 Sep 2026</time></div>
-        <p class="map-card-desc">Kenya, Tanzania, Uganda, Ethiopia, Rwanda, Burundi, Somalia, and South Sudan &mdash; Nairobi, Dar es Salaam, Addis Ababa, Kampala, Kigali, Mombasa, Zanzibar, Mount Kilimanjaro, the Serengeti, and Lake Victoria.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-east-africa/osm-east-africa-2026-09-07.zim" data-track="download" data-region="east-africa" data-title="East Africa">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-east-africa/osm-east-africa-2026-09-07.zim" data-track="preview" data-region="east-africa" data-title="East Africa" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/east-africa.torrent" data-track="torrent" data-region="east-africa" data-title="East Africa">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-east-africa" data-track="details" data-region="east-africa" data-title="East Africa">Info</a>
         </div>
       </div>
       <div class="map-card">
@@ -699,49 +668,146 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       </div>
       <div class="map-card">
         <div class="map-card-head">
+          <div class="map-card-title">Central Asia</div>
+          <div class="map-card-size">20.5 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">Central Asia &mdash; Kazakhstan, Uzbekistan, Turkmenistan, Tajikistan, Kyrgyzstan, Afghanistan, and the Caucasus. Almaty, Tashkent, Bishkek, Ashgabat, Dushanbe, Kabul, the Pamirs, and the Silk Road.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-central-asia/osm-central-asia-2026-09-20.zim" data-track="download" data-region="central-asia" data-title="Central Asia">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-central-asia/osm-central-asia-2026-09-20.zim" data-track="preview" data-region="central-asia" data-title="Central Asia" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/central-asia.torrent" data-track="torrent" data-region="central-asia" data-title="Central Asia">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-central-asia" data-track="details" data-region="central-asia" data-title="Central Asia">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">East Africa</div>
+          <div class="map-card-size">4.3 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">Kenya, Tanzania, Uganda, Ethiopia, Rwanda, Burundi, Somalia, and South Sudan &mdash; Nairobi, Dar es Salaam, Addis Ababa, Kampala, Kigali, Mombasa, Zanzibar, Mount Kilimanjaro, the Serengeti, and Lake Victoria.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-east-africa/osm-east-africa-2026-09-20.zim" data-track="download" data-region="east-africa" data-title="East Africa">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-east-africa/osm-east-africa-2026-09-20.zim" data-track="preview" data-region="east-africa" data-title="East Africa" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/east-africa.torrent" data-track="torrent" data-region="east-africa" data-title="East Africa">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-east-africa" data-track="details" data-region="east-africa" data-title="East Africa">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
           <div class="map-card-title">Himalayas</div>
           <div class="map-card-size">4.9 GB</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-19">19 Sep 2026</time></div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
         <p class="map-card-desc">The Himalayas, Karakoram, Hindu Kush, and Pamir &mdash; Nepal, Bhutan, Tibet, Sikkim, Ladakh, Kashmir, the Indus and Brahmaputra valleys. Kathmandu, Pokhara, Lhasa, Thimphu, Leh, Hunza, Everest, K2, Kanchenjunga, and Annapurna.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-himalayas/osm-himalayas-2026-09-19c.zim" data-track="download" data-region="himalayas" data-title="Himalayas">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-himalayas/osm-himalayas-2026-09-19c.zim" data-track="preview" data-region="himalayas" data-title="Himalayas" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-himalayas/osm-himalayas-2026-09-20.zim" data-track="download" data-region="himalayas" data-title="Himalayas">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-himalayas/osm-himalayas-2026-09-20.zim" data-track="preview" data-region="himalayas" data-title="Himalayas" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/himalayas.torrent" data-track="torrent" data-region="himalayas" data-title="Himalayas">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-himalayas" data-track="details" data-region="himalayas" data-title="Himalayas">Info</a>
         </div>
       </div>
+      <div class="map-card upcoming">
+        <div class="map-card-head">
+          <div class="map-card-title">Iberia</div>
+          <div class="map-card-size">building</div>
+        </div>
+        <p class="map-card-desc">Spain, Portugal &amp; Andorra &mdash; Madrid, Barcelona, Valencia, Seville, Lisbon, Porto; the Pyrenees, the Meseta, the Algarve, the Balearics.</p>
+      </div>
       <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">Baltics</div>
-          <div class="map-card-size">1.2 GB</div>
+          <div class="map-card-title">Korea &amp; Mongolia</div>
+          <div class="map-card-size">5.5 GB</div>
         </div>
         <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">Estonia, Latvia, and Lithuania &mdash; Tallinn, Riga, Vilnius, and the Baltic Sea coast.</p>
+        <p class="map-card-desc">The Korean Peninsula and Mongolia &mdash; Seoul, Busan, Daegu, Incheon, Pyongyang, Ulaanbaatar, Darkhan; the Gobi, the Khangai mountains, the DMZ, and the Sea of Japan coast.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-baltics/osm-baltics-2026-09-20.zim" data-track="download" data-region="baltics" data-title="Baltics">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-baltics/osm-baltics-2026-09-20.zim" data-track="preview" data-region="baltics" data-title="Baltics" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/baltics.torrent" data-track="torrent" data-region="baltics" data-title="Baltics">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-baltics" data-track="details" data-region="baltics" data-title="Baltics">Info</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-korea-mongolia/osm-korea-mongolia-2026-09-20.zim" data-track="download" data-region="korea-mongolia" data-title="Korea &amp; Mongolia">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-korea-mongolia/osm-korea-mongolia-2026-09-20.zim" data-track="preview" data-region="korea-mongolia" data-title="Korea &amp; Mongolia" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/korea-mongolia.torrent" data-track="torrent" data-region="korea-mongolia" data-title="Korea &amp; Mongolia">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-korea-mongolia" data-track="details" data-region="korea-mongolia" data-title="Korea &amp; Mongolia">Info</a>
+        </div>
+      </div>
+      <div class="map-card upcoming">
+        <div class="map-card-head">
+          <div class="map-card-title">Nordics</div>
+          <div class="map-card-size">building</div>
+        </div>
+        <p class="map-card-desc">Norway, Sweden, Finland &amp; Denmark &mdash; Oslo, Stockholm, Helsinki, Copenhagen, Bergen, Gothenburg; the fjords, Lapland, the Baltic archipelagos.</p>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Pacific Islands</div>
+          <div class="map-card-size">1.8 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">Papua New Guinea, Fiji, Solomon Islands, Vanuatu, New Caledonia, Samoa, Tonga, Palau, Micronesia, and the Marshall Islands &mdash; Port Moresby, Suva, Nadi, Nouméa, Apia, and Nuku'alofa.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-pacific-islands/osm-pacific-islands-2026-09-20.zim" data-track="download" data-region="pacific-islands" data-title="Pacific Islands">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-pacific-islands/osm-pacific-islands-2026-09-20.zim" data-track="preview" data-region="pacific-islands" data-title="Pacific Islands" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/pacific-islands.torrent" data-track="torrent" data-region="pacific-islands" data-title="Pacific Islands">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-pacific-islands" data-track="details" data-region="pacific-islands" data-title="Pacific Islands">Info</a>
+        </div>
+      </div>
+      <div class="map-card upcoming">
+        <div class="map-card-head">
+          <div class="map-card-title">Romania, Hungary &amp;amp; Bulgaria</div>
+          <div class="map-card-size">building</div>
+        </div>
+        <p class="map-card-desc">Romania, Hungary &amp; Bulgaria &mdash; Bucharest, Budapest, Sofia, Cluj-Napoca, Plovdiv, Timișoara; the Carpathians, the Danube delta, the Black Sea coast.</p>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Southern Africa</div>
+          <div class="map-card-size">2.4 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">South Africa, Namibia, Botswana, Zimbabwe, Mozambique, Zambia, Malawi, Lesotho, and Eswatini &mdash; Johannesburg, Cape Town, Durban, Pretoria, Windhoek, Gaborone, Harare, Maputo, Lusaka, the Kalahari, Kruger, and the Cape.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-southern-africa/osm-southern-africa-2026-09-20.zim" data-track="download" data-region="southern-africa" data-title="Southern Africa">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-southern-africa/osm-southern-africa-2026-09-20.zim" data-track="preview" data-region="southern-africa" data-title="Southern Africa" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/southern-africa.torrent" data-track="torrent" data-region="southern-africa" data-title="Southern Africa">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-southern-africa" data-track="details" data-region="southern-africa" data-title="Southern Africa">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">West Africa</div>
+          <div class="map-card-size">2.8 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">Nigeria, Ghana, Côte d'Ivoire, Senegal, Mali, Burkina Faso, Guinea, Benin, Togo, Sierra Leone, Liberia, and Niger &mdash; Lagos, Accra, Abidjan, Dakar, Abuja, Bamako, Ouagadougou, and the Gulf of Guinea coast.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-west-africa/osm-west-africa-2026-09-20.zim" data-track="download" data-region="west-africa" data-title="West Africa">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-west-africa/osm-west-africa-2026-09-20.zim" data-track="preview" data-region="west-africa" data-title="West Africa" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/west-africa.torrent" data-track="torrent" data-region="west-africa" data-title="West Africa">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-west-africa" data-track="details" data-region="west-africa" data-title="West Africa">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">West Asia</div>
+          <div class="map-card-size">9.9 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">Turkey, Syria, Lebanon, Israel, Palestine, Jordan, Iraq, Iran, Kuwait, Saudi Arabia, Bahrain, Qatar, UAE, Oman, Yemen, and parts of Egypt, Afghanistan, and Pakistan.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-west-asia/osm-west-asia-2026-09-20.zim" data-track="download" data-region="west-asia" data-title="West Asia">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-west-asia/osm-west-asia-2026-09-20.zim" data-track="preview" data-region="west-asia" data-title="West Asia" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/west-asia.torrent" data-track="torrent" data-region="west-asia" data-title="West Asia">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-west-asia" data-track="details" data-region="west-asia" data-title="West Asia">Info</a>
         </div>
       </div>
       <h3 class="maps-tier-header">Individual countries</h3>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Brazil</div>
-          <div class="map-card-size">15.7 GB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-14">14 Sep 2026</time></div>
-        <p class="map-card-desc">All of Brazil &mdash; São Paulo, Rio de Janeiro, Brasília, Salvador, Belo Horizonte, Fortaleza, Manaus, the Amazon, Pantanal, Iguaçu Falls, and the Atlantic coast.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-brazil/osm-brazil-2026-09-14.zim" data-track="download" data-region="brazil" data-title="Brazil">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-brazil/osm-brazil-2026-09-14.zim" data-track="preview" data-region="brazil" data-title="Brazil" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/brazil.torrent" data-track="torrent" data-region="brazil" data-title="Brazil">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-brazil" data-track="details" data-region="brazil" data-title="Brazil">Info</a>
-        </div>
-      </div>
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Argentina</div>
@@ -759,33 +825,81 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       </div>
       <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">Mexico</div>
-          <div class="map-card-size">7.3 GB</div>
+          <div class="map-card-title">Brazil</div>
+          <div class="map-card-size">14.5 GB</div>
         </div>
         <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">All of Mexico &mdash; Mexico City, Guadalajara, Monterrey, Puebla, Tijuana, Cancún and the Riviera Maya, Oaxaca, the Yucatán Peninsula, Baja California, the Sierra Madre, and both the Pacific and Gulf coasts.</p>
+        <p class="map-card-desc">All of Brazil &mdash; São Paulo, Rio de Janeiro, Brasília, Salvador, Belo Horizonte, Fortaleza, Manaus, the Amazon, Pantanal, Iguaçu Falls, and the Atlantic coast.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-mexico/osm-mexico-2026-09-20.zim" data-track="download" data-region="mexico" data-title="Mexico">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-mexico/osm-mexico-2026-09-20.zim" data-track="preview" data-region="mexico" data-title="Mexico" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/mexico.torrent" data-track="torrent" data-region="mexico" data-title="Mexico">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-mexico" data-track="details" data-region="mexico" data-title="Mexico">Info</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-brazil/osm-brazil-2026-09-20.zim" data-track="download" data-region="brazil" data-title="Brazil">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-brazil/osm-brazil-2026-09-20.zim" data-track="preview" data-region="brazil" data-title="Brazil" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-brazil" data-track="details" data-region="brazil" data-title="Brazil">Info</a>
         </div>
       </div>
       <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">Ukraine, Moldova &amp; Western Russia</div>
-          <div class="map-card-size">4.8 GB</div>
+          <div class="map-card-title">Egypt</div>
+          <div class="map-card-size">1.3 GB</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
-        <p class="map-card-desc">Ukraine and Moldova in full (including Crimea), plus the western Russian frontier &mdash; Volgograd, Rostov, Sochi, Krasnodar, the Black Sea coast, and the Caucasus foothills.</p>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">Egypt &mdash; Cairo, Alexandria, Giza, Luxor, Aswan, the Nile Valley, Sinai Peninsula, and the Red Sea coast.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-ukraine/osm-ukraine-2026-09-06.zim" data-track="download" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-ukraine/osm-ukraine-2026-09-06.zim" data-track="preview" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/ukraine.torrent" data-track="torrent" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-ukraine" data-track="details" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia">Info</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-egypt/osm-egypt-2026-09-20.zim" data-track="download" data-region="egypt" data-title="Egypt">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-egypt/osm-egypt-2026-09-20.zim" data-track="preview" data-region="egypt" data-title="Egypt" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/egypt.torrent" data-track="torrent" data-region="egypt" data-title="Egypt">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-egypt" data-track="details" data-region="egypt" data-title="Egypt">Info</a>
         </div>
+      </div>
+      <div class="map-card upcoming">
+        <div class="map-card-head">
+          <div class="map-card-title">France</div>
+          <div class="map-card-size">building</div>
+        </div>
+        <p class="map-card-desc">France &mdash; Paris, Lyon, Marseille, Toulouse, Bordeaux, Nice, Strasbourg; the Alps, the Pyrenees, the Loire and Rhône valleys, Corsica.</p>
+      </div>
+      <div class="map-card upcoming">
+        <div class="map-card-head">
+          <div class="map-card-title">Germany</div>
+          <div class="map-card-size">building</div>
+        </div>
+        <p class="map-card-desc">Germany &mdash; Berlin, Hamburg, Munich, Cologne, Frankfurt, Stuttgart; the Rhine and Danube, the Black Forest, the Bavarian Alps, the Baltic and North Sea coasts.</p>
+      </div>
+      <div class="map-card upcoming">
+        <div class="map-card-head">
+          <div class="map-card-title">Greece</div>
+          <div class="map-card-size">building</div>
+        </div>
+        <p class="map-card-desc">Greece &mdash; Athens, Thessaloniki, Patras, Heraklion; the Peloponnese, Crete, the Cyclades and Dodecanese, Mount Olympus.</p>
+      </div>
+      <div class="map-card upcoming">
+        <div class="map-card-head">
+          <div class="map-card-title">Iceland</div>
+          <div class="map-card-size">building</div>
+        </div>
+        <p class="map-card-desc">Iceland &mdash; Reykjavík, Akureyri, the Ring Road, Þingvellir, Geysir, Gullfoss, Vík, Jökulsárlón, Snæfellsnes, the Westfjords, and Vatnajökull.</p>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Iran</div>
+          <div class="map-card-size">2.6 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">Iran &mdash; from the Caspian Sea to the Persian Gulf, including Tehran, Isfahan, Shiraz, and Mashhad.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-iran/osm-iran-2026-09-20.zim" data-track="download" data-region="iran" data-title="Iran">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-iran/osm-iran-2026-09-20.zim" data-track="preview" data-region="iran" data-title="Iran" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-iran" data-track="details" data-region="iran" data-title="Iran">Info</a>
+        </div>
+      </div>
+      <div class="map-card upcoming">
+        <div class="map-card-head">
+          <div class="map-card-title">Italy</div>
+          <div class="map-card-size">building</div>
+        </div>
+        <p class="map-card-desc">Italy &mdash; Rome, Milan, Naples, Turin, Florence, Venice, Bologna; the Alps and Dolomites, the Apennines, Sicily and Sardinia.</p>
       </div>
       <div class="map-card">
         <div class="map-card-head">
@@ -804,31 +918,39 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       </div>
       <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">Iran</div>
-          <div class="map-card-size">2.6 GB</div>
+          <div class="map-card-title">Mexico</div>
+          <div class="map-card-size">7.3 GB</div>
         </div>
         <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">Iran &mdash; from the Caspian Sea to the Persian Gulf, including Tehran, Isfahan, Shiraz, and Mashhad.</p>
+        <p class="map-card-desc">All of Mexico &mdash; Mexico City, Guadalajara, Monterrey, Puebla, Tijuana, Cancún and the Riviera Maya, Oaxaca, the Yucatán Peninsula, Baja California, the Sierra Madre, and both the Pacific and Gulf coasts.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-iran/osm-iran-2026-09-20.zim" data-track="download" data-region="iran" data-title="Iran">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-iran/osm-iran-2026-09-20.zim" data-track="preview" data-region="iran" data-title="Iran" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-iran" data-track="details" data-region="iran" data-title="Iran">Info</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-mexico/osm-mexico-2026-09-20.zim" data-track="download" data-region="mexico" data-title="Mexico">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-mexico/osm-mexico-2026-09-20.zim" data-track="preview" data-region="mexico" data-title="Mexico" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/mexico.torrent" data-track="torrent" data-region="mexico" data-title="Mexico">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-mexico" data-track="details" data-region="mexico" data-title="Mexico">Info</a>
         </div>
+      </div>
+      <div class="map-card upcoming">
+        <div class="map-card-head">
+          <div class="map-card-title">Poland</div>
+          <div class="map-card-size">building</div>
+        </div>
+        <p class="map-card-desc">Poland &mdash; Warsaw, Kraków, Łódź, Wrocław, Poznań, Gdańsk; the Baltic coast, the Masurian lakes, the Tatras.</p>
       </div>
       <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">Egypt</div>
-          <div class="map-card-size">1.3 GB</div>
+          <div class="map-card-title">South Korea</div>
+          <div class="map-card-size">1.0 GB</div>
         </div>
         <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">Egypt &mdash; Cairo, Alexandria, Giza, Luxor, Aswan, the Nile Valley, Sinai Peninsula, and the Red Sea coast.</p>
+        <p class="map-card-desc">South Korea &mdash; Seoul, Busan, Incheon, Daegu, Daejeon, Gwangju, Suwon, Jeju Island, the DMZ, Seoraksan, and Hallasan.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-egypt/osm-egypt-2026-09-20.zim" data-track="download" data-region="egypt" data-title="Egypt">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-egypt/osm-egypt-2026-09-20.zim" data-track="preview" data-region="egypt" data-title="Egypt" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/egypt.torrent" data-track="torrent" data-region="egypt" data-title="Egypt">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-egypt" data-track="details" data-region="egypt" data-title="Egypt">Info</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-south-korea/osm-south-korea-2026-09-20.zim" data-track="download" data-region="south-korea" data-title="South Korea">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-south-korea/osm-south-korea-2026-09-20.zim" data-track="preview" data-region="south-korea" data-title="South Korea" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/south-korea.torrent" data-track="torrent" data-region="south-korea" data-title="South Korea">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-south-korea" data-track="details" data-region="south-korea" data-title="South Korea">Info</a>
         </div>
       </div>
       <div class="map-card">
@@ -863,21 +985,6 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       </div>
       <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">Iceland</div>
-          <div class="map-card-size">474 MB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">Iceland &mdash; Reykjavík, Akureyri, the Ring Road, Þingvellir, Geysir, Gullfoss, Vík, Jökulsárlón, Snæfellsnes, the Westfjords, and Vatnajökull.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-iceland/osm-iceland-2026-09-20.zim" data-track="download" data-region="iceland" data-title="Iceland">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-iceland/osm-iceland-2026-09-20.zim" data-track="preview" data-region="iceland" data-title="Iceland" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/iceland.torrent" data-track="torrent" data-region="iceland" data-title="Iceland">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-iceland" data-track="details" data-region="iceland" data-title="Iceland">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
           <div class="map-card-title">Turkey</div>
           <div class="map-card-size">3.2 GB</div>
         </div>
@@ -893,20 +1000,35 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       </div>
       <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">South Korea</div>
-          <div class="map-card-size">1.0 GB</div>
+          <div class="map-card-title">Ukraine, Moldova &amp; Western Russia</div>
+          <div class="map-card-size">4.4 GB</div>
         </div>
         <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">South Korea &mdash; Seoul, Busan, Incheon, Daegu, Daejeon, Gwangju, Suwon, Jeju Island, the DMZ, Seoraksan, and Hallasan.</p>
+        <p class="map-card-desc">Ukraine and Moldova in full (including Crimea), plus the western Russian frontier &mdash; Volgograd, Rostov, Sochi, Krasnodar, the Black Sea coast, and the Caucasus foothills.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-south-korea/osm-south-korea-2026-09-20.zim" data-track="download" data-region="south-korea" data-title="South Korea">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-south-korea/osm-south-korea-2026-09-20.zim" data-track="preview" data-region="south-korea" data-title="South Korea" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/south-korea.torrent" data-track="torrent" data-region="south-korea" data-title="South Korea">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-south-korea" data-track="details" data-region="south-korea" data-title="South Korea">Info</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-ukraine/osm-ukraine-2026-09-20.zim" data-track="download" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-ukraine/osm-ukraine-2026-09-20.zim" data-track="preview" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/ukraine.torrent" data-track="torrent" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-ukraine" data-track="details" data-region="ukraine" data-title="Ukraine, Moldova &amp; Western Russia">Info</a>
         </div>
       </div>
       <h3 class="maps-tier-header">United States — sub-regions</h3>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Central US</div>
+          <div class="map-card-size">6.8 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">The Mountain West and surrounds &mdash; Utah, Colorado, Wyoming, Montana, Idaho, Nevada, Arizona, and New Mexico. Salt Lake City, Denver, Phoenix, Albuquerque, Yellowstone, Grand Canyon, and the Rockies.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-central-us/osm-central-us-2026-09-20.zim" data-track="download" data-region="central-us" data-title="Central US">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-central-us/osm-central-us-2026-09-20.zim" data-track="preview" data-region="central-us" data-title="Central US" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/central-us.torrent" data-track="torrent" data-region="central-us" data-title="Central US">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-central-us" data-track="details" data-region="central-us" data-title="Central US">Info</a>
+        </div>
+      </div>
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">East Coast US</div>
@@ -950,52 +1072,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-west-coast-us" data-track="details" data-region="west-coast-us" data-title="West Coast US">Info</a>
         </div>
       </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Central US</div>
-          <div class="map-card-size">6.8 GB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">The Mountain West and surrounds &mdash; Utah, Colorado, Wyoming, Montana, Idaho, Nevada, Arizona, and New Mexico. Salt Lake City, Denver, Phoenix, Albuquerque, Yellowstone, Grand Canyon, and the Rockies.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-central-us/osm-central-us-2026-09-20.zim" data-track="download" data-region="central-us" data-title="Central US">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-central-us/osm-central-us-2026-09-20.zim" data-track="preview" data-region="central-us" data-title="Central US" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/central-us.torrent" data-track="torrent" data-region="central-us" data-title="Central US">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-central-us" data-track="details" data-region="central-us" data-title="Central US">Info</a>
-        </div>
-      </div>
       <h3 class="maps-tier-header">States, cities &amp; islands</h3>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">California</div>
-          <div class="map-card-size">3.6 GB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-09">9 Sep 2026</time></div>
-        <p class="map-card-desc">All of California &mdash; from the Oregon border to Mexico, the Pacific coast to the Sierra Nevada.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-california/osm-california-2026-09-09.zim" data-track="download" data-region="california" data-title="California">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-california/osm-california-2026-09-09.zim" data-track="preview" data-region="california" data-title="California" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/california.torrent" data-track="torrent" data-region="california" data-title="California">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-california" data-track="details" data-region="california" data-title="California">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Hawaii</div>
-          <div class="map-card-size">225 MB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">The Hawaiian Islands &mdash; Honolulu, Hilo, Kahului; O&lsquo;ahu, Maui, Hawai&lsquo;i (Big Island), Kaua&lsquo;i, Moloka&lsquo;i, and Lāna&lsquo;i; Mauna Kea, Mauna Loa, Haleakalā, Pearl Harbor, and the Nā Pali coast.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-hawaii/osm-hawaii-2026-09-20.zim" data-track="download" data-region="hawaii" data-title="Hawaii">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-hawaii/osm-hawaii-2026-09-20.zim" data-track="preview" data-region="hawaii" data-title="Hawaii" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/hawaii.torrent" data-track="torrent" data-region="hawaii" data-title="Hawaii">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-hawaii" data-track="details" data-region="hawaii" data-title="Hawaii">Info</a>
-        </div>
-      </div>
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Alaska</div>
@@ -1013,106 +1090,32 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       </div>
       <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">New York State</div>
-          <div class="map-card-size">3.2 GB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-09">9 Sep 2026</time></div>
-        <p class="map-card-desc">All of New York State &mdash; New York City, Albany, Buffalo, Rochester, Syracuse, Yonkers; Long Island, the Hudson Valley, the Catskills, the Adirondacks, the Finger Lakes, Niagara Falls, and the Thousand Islands.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-new-york-state/osm-new-york-state-2026-09-09.zim" data-track="download" data-region="new-york-state" data-title="New York State">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-new-york-state/osm-new-york-state-2026-09-09.zim" data-track="preview" data-region="new-york-state" data-title="New York State" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/new-york-state.torrent" data-track="torrent" data-region="new-york-state" data-title="New York State">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-new-york-state" data-track="details" data-region="new-york-state" data-title="New York State">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Florida</div>
-          <div class="map-card-size">1.9 GB</div>
+          <div class="map-card-title">California</div>
+          <div class="map-card-size">3.4 GB</div>
         </div>
         <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">All of Florida &mdash; Miami, Orlando, Tampa, Jacksonville, St. Petersburg, Tallahassee, Fort Lauderdale; the Everglades, the Keys, Cape Canaveral, the Atlantic and Gulf coasts, and Walt Disney World.</p>
+        <p class="map-card-desc">All of California &mdash; from the Oregon border to Mexico, the Pacific coast to the Sierra Nevada.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-florida/osm-florida-2026-09-20.zim" data-track="download" data-region="florida" data-title="Florida">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-florida/osm-florida-2026-09-20.zim" data-track="preview" data-region="florida" data-title="Florida" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/florida.torrent" data-track="torrent" data-region="florida" data-title="Florida">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-florida" data-track="details" data-region="florida" data-title="Florida">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">The Carolinas</div>
-          <div class="map-card-size">2.0 GB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">North and South Carolina &mdash; Charlotte, Raleigh, Durham, Greensboro, Winston-Salem, Columbia, Charleston, Myrtle Beach, Wilmington, and Asheville; the Blue Ridge and Great Smoky Mountains, the Research Triangle, and the Outer Banks and Atlantic coast.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-carolinas/osm-carolinas-2026-09-20.zim" data-track="download" data-region="carolinas" data-title="The Carolinas">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-carolinas/osm-carolinas-2026-09-20.zim" data-track="preview" data-region="carolinas" data-title="The Carolinas" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-carolinas" data-track="details" data-region="carolinas" data-title="The Carolinas">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">New York Metro</div>
-          <div class="map-card-size">852 MB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">The NYC tri-state metropolitan area &mdash; Manhattan, Brooklyn, Queens, the Bronx, Staten Island, Long Island, Westchester, northern New Jersey, and southwestern Connecticut.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-nyc-metro/osm-nyc-metro-2026-09-20.zim" data-track="download" data-region="nyc-metro" data-title="New York Metro">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-nyc-metro/osm-nyc-metro-2026-09-20.zim" data-track="preview" data-region="nyc-metro" data-title="New York Metro" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/nyc-metro.torrent" data-track="torrent" data-region="nyc-metro" data-title="New York Metro">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-nyc-metro" data-track="details" data-region="nyc-metro" data-title="New York Metro">Info</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-california/osm-california-2026-09-20.zim" data-track="download" data-region="california" data-title="California">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-california/osm-california-2026-09-20.zim" data-track="preview" data-region="california" data-title="California" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/california.torrent" data-track="torrent" data-region="california" data-title="California">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-california" data-track="details" data-region="california" data-title="California">Info</a>
         </div>
       </div>
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Chicago Metro</div>
-          <div class="map-card-size">597 MB</div>
+          <div class="map-card-size">580 MB</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
         <p class="map-card-desc">Greater Chicago &mdash; the city and Cook, DuPage, Lake, Will, Kane, McHenry counties, plus northwest Indiana and southeast Wisconsin along Lake Michigan.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-chicago-metro/osm-chicago-metro-2026-09-06.zim" data-track="download" data-region="chicago-metro" data-title="Chicago Metro">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-chicago-metro/osm-chicago-metro-2026-09-06.zim" data-track="preview" data-region="chicago-metro" data-title="Chicago Metro" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-chicago-metro/osm-chicago-metro-2026-09-20.zim" data-track="download" data-region="chicago-metro" data-title="Chicago Metro">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-chicago-metro/osm-chicago-metro-2026-09-20.zim" data-track="preview" data-region="chicago-metro" data-title="Chicago Metro" title="Look at this map in your browser, streamed from archive.org">Preview</a>
           <a class="btn btn-secondary" href="/torrents/chicago-metro.torrent" data-track="torrent" data-region="chicago-metro" data-title="Chicago Metro">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-chicago-metro" data-track="details" data-region="chicago-metro" data-title="Chicago Metro">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Greater Los Angeles</div>
-          <div class="map-card-size">794 MB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
-        <p class="map-card-desc">The Los Angeles metropolitan area &mdash; LA, Long Beach, Anaheim, Santa Monica, Pasadena, Riverside, San Bernardino, Orange County, and the Inland Empire, plus Catalina Island and the Channel Islands.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-greater-la/osm-greater-la-2026-09-20.zim" data-track="download" data-region="greater-la" data-title="Greater Los Angeles">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-greater-la/osm-greater-la-2026-09-20.zim" data-track="preview" data-region="greater-la" data-title="Greater Los Angeles" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/greater-la.torrent" data-track="torrent" data-region="greater-la" data-title="Greater Los Angeles">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-greater-la" data-track="details" data-region="greater-la" data-title="Greater Los Angeles">Info</a>
-        </div>
-      </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Texas</div>
-          <div class="map-card-size">3.9 GB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
-        <p class="map-card-desc">Texas, USA &mdash; from the Gulf Coast to the Rio Grande, including Houston, Dallas, San Antonio, Austin, Fort Worth, and El Paso.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-texas/osm-texas-2026-09-06.zim" data-track="download" data-region="texas" data-title="Texas">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-texas/osm-texas-2026-09-06.zim" data-track="preview" data-region="texas" data-title="Texas" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/texas.torrent" data-track="torrent" data-region="texas" data-title="Texas">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-texas" data-track="details" data-region="texas" data-title="Texas">Info</a>
         </div>
       </div>
       <div class="map-card">
@@ -1132,17 +1135,136 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       </div>
       <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">Silicon Valley</div>
-          <div class="map-card-size">400 MB</div>
+          <div class="map-card-title">Florida</div>
+          <div class="map-card-size">1.9 GB</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">All of Florida &mdash; Miami, Orlando, Tampa, Jacksonville, St. Petersburg, Tallahassee, Fort Lauderdale; the Everglades, the Keys, Cape Canaveral, the Atlantic and Gulf coasts, and Walt Disney World.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-florida/osm-florida-2026-09-20.zim" data-track="download" data-region="florida" data-title="Florida">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-florida/osm-florida-2026-09-20.zim" data-track="preview" data-region="florida" data-title="Florida" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/florida.torrent" data-track="torrent" data-region="florida" data-title="Florida">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-florida" data-track="details" data-region="florida" data-title="Florida">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Greater Los Angeles</div>
+          <div class="map-card-size">794 MB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">The Los Angeles metropolitan area &mdash; LA, Long Beach, Anaheim, Santa Monica, Pasadena, Riverside, San Bernardino, Orange County, and the Inland Empire, plus Catalina Island and the Channel Islands.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-greater-la/osm-greater-la-2026-09-20.zim" data-track="download" data-region="greater-la" data-title="Greater Los Angeles">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-greater-la/osm-greater-la-2026-09-20.zim" data-track="preview" data-region="greater-la" data-title="Greater Los Angeles" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/greater-la.torrent" data-track="torrent" data-region="greater-la" data-title="Greater Los Angeles">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-greater-la" data-track="details" data-region="greater-la" data-title="Greater Los Angeles">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Hawaii</div>
+          <div class="map-card-size">225 MB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">The Hawaiian Islands &mdash; Honolulu, Hilo, Kahului; O&lsquo;ahu, Maui, Hawai&lsquo;i (Big Island), Kaua&lsquo;i, Moloka&lsquo;i, and Lāna&lsquo;i; Mauna Kea, Mauna Loa, Haleakalā, Pearl Harbor, and the Nā Pali coast.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-hawaii/osm-hawaii-2026-09-20.zim" data-track="download" data-region="hawaii" data-title="Hawaii">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-hawaii/osm-hawaii-2026-09-20.zim" data-track="preview" data-region="hawaii" data-title="Hawaii" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/hawaii.torrent" data-track="torrent" data-region="hawaii" data-title="Hawaii">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-hawaii" data-track="details" data-region="hawaii" data-title="Hawaii">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Hispaniola</div>
+          <div class="map-card-size">254 MB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">The Caribbean island of Hispaniola &mdash; Haiti and the Dominican Republic.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-hispaniola/osm-hispaniola-2026-09-20.zim" data-track="download" data-region="hispaniola" data-title="Hispaniola">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-hispaniola/osm-hispaniola-2026-09-20.zim" data-track="preview" data-region="hispaniola" data-title="Hispaniola" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/hispaniola.torrent" data-track="torrent" data-region="hispaniola" data-title="Hispaniola">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-hispaniola" data-track="details" data-region="hispaniola" data-title="Hispaniola">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">New York Metro</div>
+          <div class="map-card-size">852 MB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">The NYC tri-state metropolitan area &mdash; Manhattan, Brooklyn, Queens, the Bronx, Staten Island, Long Island, Westchester, northern New Jersey, and southwestern Connecticut.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-nyc-metro/osm-nyc-metro-2026-09-20.zim" data-track="download" data-region="nyc-metro" data-title="New York Metro">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-nyc-metro/osm-nyc-metro-2026-09-20.zim" data-track="preview" data-region="nyc-metro" data-title="New York Metro" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/nyc-metro.torrent" data-track="torrent" data-region="nyc-metro" data-title="New York Metro">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-nyc-metro" data-track="details" data-region="nyc-metro" data-title="New York Metro">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">New York State</div>
+          <div class="map-card-size">3.0 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">All of New York State &mdash; New York City, Albany, Buffalo, Rochester, Syracuse, Yonkers; Long Island, the Hudson Valley, the Catskills, the Adirondacks, the Finger Lakes, Niagara Falls, and the Thousand Islands.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-new-york-state/osm-new-york-state-2026-09-20.zim" data-track="download" data-region="new-york-state" data-title="New York State">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-new-york-state/osm-new-york-state-2026-09-20.zim" data-track="preview" data-region="new-york-state" data-title="New York State" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/new-york-state.torrent" data-track="torrent" data-region="new-york-state" data-title="New York State">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-new-york-state" data-track="details" data-region="new-york-state" data-title="New York State">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Silicon Valley</div>
+          <div class="map-card-size">392 MB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
         <p class="map-card-desc">San Francisco Bay Area &mdash; San Francisco, Oakland, Palo Alto, Mountain View, Stanford, Cupertino, San Jose, and the Peninsula.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-silicon-valley/osm-silicon-valley-2026-09-06.zim" data-track="download" data-region="silicon-valley" data-title="Silicon Valley">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-silicon-valley/osm-silicon-valley-2026-09-06.zim" data-track="preview" data-region="silicon-valley" data-title="Silicon Valley" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-silicon-valley/osm-silicon-valley-2026-09-20.zim" data-track="download" data-region="silicon-valley" data-title="Silicon Valley">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-silicon-valley/osm-silicon-valley-2026-09-20.zim" data-track="preview" data-region="silicon-valley" data-title="Silicon Valley" title="Look at this map in your browser, streamed from archive.org">Preview</a>
           <a class="btn btn-secondary" href="/torrents/silicon-valley.torrent" data-track="torrent" data-region="silicon-valley" data-title="Silicon Valley">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-silicon-valley" data-track="details" data-region="silicon-valley" data-title="Silicon Valley">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">Texas</div>
+          <div class="map-card-size">3.7 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">Texas, USA &mdash; from the Gulf Coast to the Rio Grande, including Houston, Dallas, San Antonio, Austin, Fort Worth, and El Paso.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-texas/osm-texas-2026-09-20.zim" data-track="download" data-region="texas" data-title="Texas">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-texas/osm-texas-2026-09-20.zim" data-track="preview" data-region="texas" data-title="Texas" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/texas.torrent" data-track="torrent" data-region="texas" data-title="Texas">Torrent</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-texas" data-track="details" data-region="texas" data-title="Texas">Info</a>
+        </div>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title">The Carolinas</div>
+          <div class="map-card-size">2.0 GB</div>
+        </div>
+        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <p class="map-card-desc">North and South Carolina &mdash; Charlotte, Raleigh, Durham, Greensboro, Winston-Salem, Columbia, Charleston, Myrtle Beach, Wilmington, and Asheville; the Blue Ridge and Great Smoky Mountains, the Research Triangle, and the Outer Banks and Atlantic coast.</p>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-links">
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-carolinas/osm-carolinas-2026-09-20.zim" data-track="download" data-region="carolinas" data-title="The Carolinas">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-carolinas/osm-carolinas-2026-09-20.zim" data-track="preview" data-region="carolinas" data-title="The Carolinas" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-carolinas" data-track="details" data-region="carolinas" data-title="The Carolinas">Info</a>
         </div>
       </div>
       <div class="map-card">
@@ -1160,22 +1282,58 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-washington-dc" data-track="details" data-region="washington-dc" data-title="Washington, D.C.">Info</a>
         </div>
       </div>
-      <div class="map-card">
-        <div class="map-card-head">
-          <div class="map-card-title">Hispaniola</div>
-          <div class="map-card-size">258 MB</div>
-        </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-06">6 Sep 2026</time></div>
-        <p class="map-card-desc">The Caribbean island of Hispaniola &mdash; Haiti and the Dominican Republic.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
-        <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-hispaniola/osm-hispaniola-2026-09-06.zim" data-track="download" data-region="hispaniola" data-title="Hispaniola">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-hispaniola/osm-hispaniola-2026-09-06.zim" data-track="preview" data-region="hispaniola" data-title="Hispaniola" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/hispaniola.torrent" data-track="torrent" data-region="hispaniola" data-title="Hispaniola">Torrent</a>
-          <a class="btn btn-secondary" href="https://archive.org/details/streetzim-hispaniola" data-track="details" data-region="hispaniola" data-title="Hispaniola">Info</a>
-        </div>
-      </div>
     </div>
+<script>
+/* Client-side filter over the rendered cards. ~70 maps in five sections was
+   a long scan with no way to search -- typing "france" now narrows to it.
+   Matches the title AND the description, so "coast", "alps" or "danube"
+   find regions whose name does not contain the word. Section headers hide
+   when every card under them is filtered out. */
+(function () {
+  var input = document.getElementById('map-filter');
+  var counter = document.getElementById('map-filter-count');
+  var grid = document.querySelector('.maps');
+  if (!input || !grid) return;
+  var cards = [].slice.call(grid.querySelectorAll('.map-card'));
+  var headers = [].slice.call(grid.querySelectorAll('.maps-tier-header'));
+  var total = cards.length;
+  // Index once: lowercase title + description per card.
+  var hay = cards.map(function (c) {
+    return (c.textContent || '').toLowerCase().replace(/\s+/g, ' ');
+  });
+  function apply() {
+    var q = input.value.trim().toLowerCase();
+    var shown = 0;
+    for (var i = 0; i < cards.length; i++) {
+      var hit = !q || hay[i].indexOf(q) !== -1;
+      cards[i].hidden = !hit;
+      if (hit) shown++;
+    }
+    // A header is only useful if something under it survived. Walk the grid
+    // in document order: each header owns the cards until the next header.
+    var kids = [].slice.call(grid.children);
+    var currentHeader = null, seen = 0;
+    for (var j = 0; j <= kids.length; j++) {
+      var el = kids[j];
+      var isHeader = el && el.classList && el.classList.contains('maps-tier-header');
+      if (isHeader || j === kids.length) {
+        if (currentHeader) currentHeader.hidden = (seen === 0);
+        currentHeader = isHeader ? el : null;
+        seen = 0;
+        continue;
+      }
+      if (el && el.classList && el.classList.contains('map-card') && !el.hidden) seen++;
+    }
+    counter.textContent = q ? (shown + ' of ' + total) : '';
+  }
+  input.addEventListener('input', apply);
+  input.addEventListener('search', apply);
+  // Escape clears, which is what a search box is expected to do.
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { input.value = ''; apply(); }
+  });
+})();
+</script>
   </div>
 </section>
 

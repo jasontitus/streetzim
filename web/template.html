@@ -163,6 +163,17 @@
     padding-top: 18px;
   }
   .maps-tier-header:first-child {
+    .maps-filter { display: flex; align-items: center; gap: 10px; margin: 18px 0 6px; }
+    #map-filter {
+      flex: 1 1 auto; max-width: 420px; padding: 10px 12px;
+      font-size: 16px; /* 16px or iOS zooms the page on focus */
+      border: 1px solid var(--border, #d8d8d8); border-radius: 8px;
+      background: #fff; color: inherit;
+    }
+    #map-filter:focus { outline: 2px solid #2563eb; outline-offset: 1px; }
+    .maps-filter-count { font-size: 13px; opacity: 0.7; white-space: nowrap; }
+    .maps [hidden] { display: none !important; }
+
     /* No top rule for the first header — the parent `<h2>Download a
        map</h2>` already separates this section from the page header. */
     border-top: none;
@@ -411,9 +422,66 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
   .catch(function() { /* offline / file:// preview — stamp stays "…" */ });
 </script>
 
+    <div class="maps-filter">
+      <input id="map-filter" type="search" autocomplete="off" spellcheck="false"
+             placeholder="Filter maps — try “france”, “alps”, “coast”…"
+             aria-label="Filter the list of maps">
+      <span id="map-filter-count" class="maps-filter-count" aria-live="polite"></span>
+    </div>
     <div class="maps">
 {{MAPS}}
     </div>
+<script>
+/* Client-side filter over the rendered cards. ~70 maps in five sections was
+   a long scan with no way to search -- typing "france" now narrows to it.
+   Matches the title AND the description, so "coast", "alps" or "danube"
+   find regions whose name does not contain the word. Section headers hide
+   when every card under them is filtered out. */
+(function () {
+  var input = document.getElementById('map-filter');
+  var counter = document.getElementById('map-filter-count');
+  var grid = document.querySelector('.maps');
+  if (!input || !grid) return;
+  var cards = [].slice.call(grid.querySelectorAll('.map-card'));
+  var headers = [].slice.call(grid.querySelectorAll('.maps-tier-header'));
+  var total = cards.length;
+  // Index once: lowercase title + description per card.
+  var hay = cards.map(function (c) {
+    return (c.textContent || '').toLowerCase().replace(/\s+/g, ' ');
+  });
+  function apply() {
+    var q = input.value.trim().toLowerCase();
+    var shown = 0;
+    for (var i = 0; i < cards.length; i++) {
+      var hit = !q || hay[i].indexOf(q) !== -1;
+      cards[i].hidden = !hit;
+      if (hit) shown++;
+    }
+    // A header is only useful if something under it survived. Walk the grid
+    // in document order: each header owns the cards until the next header.
+    var kids = [].slice.call(grid.children);
+    var currentHeader = null, seen = 0;
+    for (var j = 0; j <= kids.length; j++) {
+      var el = kids[j];
+      var isHeader = el && el.classList && el.classList.contains('maps-tier-header');
+      if (isHeader || j === kids.length) {
+        if (currentHeader) currentHeader.hidden = (seen === 0);
+        currentHeader = isHeader ? el : null;
+        seen = 0;
+        continue;
+      }
+      if (el && el.classList && el.classList.contains('map-card') && !el.hidden) seen++;
+    }
+    counter.textContent = q ? (shown + ' of ' + total) : '';
+  }
+  input.addEventListener('input', apply);
+  input.addEventListener('search', apply);
+  // Escape clears, which is what a search box is expected to do.
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { input.value = ''; apply(); }
+  });
+})();
+</script>
   </div>
 </section>
 
