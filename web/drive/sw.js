@@ -20,7 +20,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // changed viewer always produces a new precache and the old one is
 // dropped on activate. Keep the 'streetzim-drive-shell-' prefix — the
 // activate handler only deletes caches carrying it.
-const SHELL_CACHE = 'streetzim-drive-shell-b7e26c62d4';
+const SHELL_CACHE = 'streetzim-drive-shell-3222dc46a1';
 
 const SHELL_URLS = [
   './',
@@ -119,6 +119,13 @@ function resetReader() {
 // ZIM to stream through HTTP range requests (the online preview of the
 // archive.org-hosted regions — docs/online-preview.md). Both end up as
 // the same ZimReader; only the byte source differs.
+// A File opened "this session only": the reader reads slices straight out
+// of the File, so nothing is copied. iPhone Safari will not store an 11 GB
+// ZIM in IndexedDB at any price, but it will happily read one off disk --
+// the copy exists for persistence across reloads, not for reading.
+// Lost when the worker is terminated; the picker says so.
+let sessionRec = null;
+
 async function openReader(rec) {
   let source = rec.blob;
   if (rec.url) {
@@ -245,10 +252,19 @@ self.addEventListener('message', (event) => {
         }
         const r = await openReader(rec);
         await requireMap(r, rec.name);
-        await idbPut(rec);
+        const sessionOnly = !!msg.session && !msg.url;
+        if (sessionOnly) {
+          // Skip the copy entirely. Reads come from the File reference.
+          await idbDelete('current').catch(() => {});
+          sessionRec = { name: rec.name, addedAt: rec.addedAt };
+        } else {
+          sessionRec = null;
+          await idbPut(rec);
+        }
         readerPromise = Promise.resolve(r);
         reply.info = r.info;
         reply.source = rec.url ? 'url' : 'file';
+        reply.session = sessionOnly;
       } else if (msg.type === 'check-zim') {
         // Validate a File without persisting it. The picker then writes
         // the record itself: a window has no event time limit, whereas
@@ -277,6 +293,7 @@ self.addEventListener('message', (event) => {
         reply.sw = Object.assign({}, swStats);
       } else if (msg.type === 'clear-zim') {
         await idbDelete('current');
+        sessionRec = null;
         resetReader();
       } else if (msg.type === 'status') {
         let openError = null;
@@ -295,12 +312,19 @@ self.addEventListener('message', (event) => {
         // this to keep the Remove button available so the user can
         // clear a record that no longer opens.
         const rec = await idbGet('current').catch(() => null);
-        reply.present = !!(rec && (rec.blob || rec.url));
-        reply.name = rec && rec.name ? rec.name : null;
+        reply.present = !!(rec && (rec.blob || rec.url)) || !!sessionRec;
+        reply.name = (rec && rec.name) || (sessionRec && sessionRec.name) || null;
+        reply.session = !!sessionRec && !rec;
         // Where the bytes come from — 'file' for a local pick, 'url' for
         // the online preview. The picker's status line and the viewer's
         // preview banner (with its Download link) key off this.
-        reply.source = rec && rec.url ? 'url' : (rec && rec.blob ? 'file' : null);
+        // A session-only open has no IDB record: `source` must fall back to
+        // sessionRec, or the picker reports "not loaded" for a map that IS
+        // open. (An earlier fix set this above and was silently overwritten
+        // here -- this is the authoritative assignment.)
+        reply.source = rec && rec.url ? 'url'
+                     : (rec && rec.blob) ? 'file'
+                     : sessionRec ? 'file' : null;
         reply.url = rec && rec.url ? (rec.sourceUrl || rec.url) : null;
         reply.sizeBytes = r ? r.size : null;
         reply.stats = (r && r.file && r.file.stats) ? r.file.stats : null;

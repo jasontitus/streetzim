@@ -430,35 +430,46 @@
     setStatus('warn', 'Checking ZIM…', file.name + ' · ' + size + ' — reading the header…');
     setBusy(true);
     try {
-      // 1. Is it a ZIM this reader can open, with a map in it? Nothing
-      //    is stored yet.
-      const checked = await askSW({ type: 'check-zim', blob: file, name: file.name });
-      if (!checked || !checked.ok) throw new Error(checked && checked.error || 'not a readable ZIM');
-      // 2. Is there room for the browser's copy? Refusing here beats a
-      //    QuotaExceededError minutes into the write, or a copy that
-      //    silently pushes the device to zero free space.
+      // 1. Is there room for the browser's copy? This MUST come before
+      //    check-zim. Validating means structured-cloning the whole File
+      //    into the service worker, and on iOS Safari that is slow and
+      //    fragile for multi-GB files -- an 11 GB pick sat on "reading the
+      //    header…" indefinitely on an iPhone while the same file checks in
+      //    260 ms in desktop Chromium. Deciding on size first turns that
+      //    into an instant, accurate message naming streaming as the way to
+      //    open a file this big, and costs nothing when the file does fit.
       if (navigator.storage && navigator.storage.estimate) {
         let est = null;
         try { est = await navigator.storage.estimate(); } catch (e) {}
         if (est && est.quota > 0) {
           const free = est.quota - (est.usage || 0);
           if (free < file.size * 1.02) {
-            // The map already stored counts against the same quota:
-            // swapping one region for another usually just needs Remove.
-            const cur = await askSW({ type: 'status' }).catch(() => null);
-            const held = cur && cur.ok && cur.present && cur.source === 'file' && cur.sizeBytes > 0
-              ? ' Removing the loaded map first frees ' + fmtSize(cur.sizeBytes) + '.' : '';
-            setStatus('err', 'Not enough storage for this map',
-              file.name + ' is ' + size + ' but this browser reports it can store only about ' +
-              fmtSize(Math.max(0, free)) + ' more for this site.' + held +
-              ' Otherwise free some space, or stream the map instead — streaming stores nothing.');
-            dbg('storage estimate', est);
+            // No room for a copy -- but a copy was never needed to READ it.
+            // The reader slices the File directly, so open it for this
+            // session instead of refusing. This is the only way an 11 GB ZIM
+            // opens on an iPhone: Safari will not put that in IndexedDB at
+            // any price, but it reads it off disk fine.
+            dbg('storage estimate too small, opening session-only', est);
+            setStatus('warn', 'Opening without saving…',
+              file.name + ' · ' + size + ' — too large for this browser to store, '
+              + 'reading it directly instead.');
+            const sess = await askSW({ type: 'set-zim', blob: file,
+                                       name: file.name, session: true });
+            if (!sess || !sess.ok) throw new Error(sess && sess.error || 'could not open the file');
+            setStatus('ok', 'Map open (not saved)',
+              file.name + ' · ' + size + ' — opened directly from your device. '
+              + 'It is not copied into the browser, so if this tab is closed or the '
+              + 'browser evicts the worker you will need to pick the file again.');
             setBusy(false);
-            await refreshStatus({ quiet: true });
+            setTimeout(() => { window.location.href = viewerUrl(); }, 900);
             return;
           }
         }
       }
+      // 2. Only now, with room confirmed, ask the worker to validate it.
+      setStatus('warn', 'Checking ZIM…', file.name + ' · ' + size + ' — reading the header…');
+      const checked = await askSW({ type: 'check-zim', blob: file, name: file.name });
+      if (!checked || !checked.ok) throw new Error(checked && checked.error || 'not a readable ZIM');
       // 3. Store the record, then have the worker open it.
       setStatus('warn', 'Saving to browser storage…',
         file.name + ' · ' + size + ' — the browser keeps its own copy; on a phone this can take a few minutes.');

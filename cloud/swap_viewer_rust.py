@@ -53,6 +53,11 @@ PLACE_INDEX = "category-index/place.json"
 # category is sharded so the viewer's reverse geocoder reads the shard around
 # the viewport instead of the whole file.
 PLACE_SHARD_MIN_BYTES = 8 * 1024 * 1024
+# Shard files are "<slug>-<suffix>.json". chip_shards._suffixes() emits
+# f"g{i:0{width}x}" -- HEXADECIMAL, width >= 3: g000..g009, g00a..g00f,
+# and wider for more leaves. A \d+ pattern silently misses a-f, which
+# dropped 6 of every 16 shards. Match the generator, not a sample of it.
+_SHARD_SUFFIX_RE = __import__("re").compile(r"-g[0-9a-f]{3,}$")
 # Match the build wrappers' --split-hot-search-chunks-mb.
 SEARCH_HOT_BYTES = 10 * 1024 * 1024
 SEARCH_LEAF_FD_CAP = 256
@@ -89,6 +94,28 @@ class _Item:
         self._compress = compress
         self._namespace = namespace
         self._is_front = is_front
+
+
+def _cat_index_slug(path: str) -> str | None:
+    """`category-index/park.json` -> `park`; None for chips and the manifest.
+
+    Whole-category files are what the Find page's legacy loader fetches. Any
+    of them can be oversized -- europe ships park.json at 53 MB and china
+    place.json at 109 MB -- so the re-shard must not be hard-coded to place.
+    """
+    if not path.startswith("category-index/") or not path.endswith(".json"):
+        return None
+    slug = path[len("category-index/"):-len(".json")]
+    if slug == "manifest" or slug.startswith("chip-"):
+        return None
+    # `place-g000.json` is a SHARD of `place`, not a category called
+    # "place-g000". Treating it as one made the walk drop every existing
+    # shard while the emit loop skipped the category for already being
+    # sharded -- europe lost all 256 place shards that way, caught by the
+    # post-reshard category check.
+    if _SHARD_SUFFIX_RE.search(slug):
+        return None
+    return slug or None
 
 
 def _is_chip_entry(path: str) -> bool:
@@ -170,11 +197,13 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                                  f"but the source manifest says {meta['count']}")
         print(f"  will re-shard {len(cat_manifest['chips'])} chip(s): "
               f"{', '.join(cat_manifest['chips'])}")
-        # Idempotent: a ZIM already carrying place shards keeps them.
-        src_place_sharded = bool(
-            (cat_manifest.get("category_shards") or {}).get("place"))
-        if src_place_sharded:
-            print("  place category already sharded — keeping it")
+        # Idempotent: categories already carrying shards keep them.
+        src_sharded_cats = {
+            k for k, v in (cat_manifest.get("category_shards") or {}).items() if v
+        }
+        if src_sharded_cats:
+            print(f"  already sharded, keeping: {', '.join(sorted(src_sharded_cats))}")
+        src_place_sharded = "place" in src_sharded_cats
 
     # Collect viewer replacements from disk.
     replacements: dict[str, bytes] = {}
@@ -305,9 +334,10 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                         dropped_chip_files += 1
                     continue
 
-                if reshard_chips and path == PLACE_INDEX and not src_place_sharded:
-                    # Replaced by place-g000.json… below; carrying the whole
-                    # file too would keep the 109 MB the shards exist to avoid.
+                _cat_slug_drop = _cat_index_slug(path) if reshard_chips else None
+                if _cat_slug_drop and _cat_slug_drop not in src_sharded_cats:
+                    # Replaced by <slug>-g000.json… below; carrying the whole
+                    # file too would keep the bytes the shards exist to avoid.
                     # (If the plan turns out to be under the threshold, the
                     # single unsharded file is re-emitted under the same name.)
                     dropped_chip_files += 1
@@ -559,53 +589,76 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                     print(f"  chip-{cid}: {plan.count:,} records "
                           f"({plan.bytes/1048576:.1f} MB) → {nf} file(s)", flush=True)
                     del plan
-                # places.html fetches category-index/place.json whole on load
-                # just to name the nearest city — 109 MB on china, 480 MB on
-                # europe. Shard it like a chip so the viewer reads only the
-                # shard around the viewport.
+                # Whole-category index files are what the Find page's legacy
+                # loader fetches, and any of them can be oversized: europe
+                # ships park.json at 53 MB (over validate_zim's 48 MB
+                # error-severity cap, which blocked europe's upload entirely
+                # and left the live map on 2026-05-06) and china place.json at
+                # 109 MB. Shard each one the way chips are sharded so the
+                # viewer reads only the shard around the viewport.
+                #
+                # This was place-only until 2026-09-21. The restriction was
+                # arbitrary -- the shard format and the viewer's reader are
+                # keyed on the manifest, not the slug.
                 new_cat_shards = dict(cat_manifest.get("category_shards") or {})
                 cats = cat_manifest.get("categories") or {}
-                if "place" in cats and not src_place_sharded:
+                for _slug in sorted(cats):
+                    if _slug in src_sharded_cats:
+                        continue          # already sharded; the walk kept it
+                    _cpath = f"category-index/{_slug}.json"
+                    if not src.has_entry_by_path(_cpath):
+                        continue
                     try:
-                        place_records = json.loads(_src_bytes(PLACE_INDEX))
+                        _recs = json.loads(_src_bytes(_cpath))
                     except Exception as exc:
-                        # Cosmetic index (the reverse geocoder's city name).
-                        # Losing it is not worth discarding a finished copy.
-                        print(f"  warning: {PLACE_INDEX} unreadable ({exc}); "
-                              f"the Find page won't name the nearest city",
+                        # Cosmetic indexes (the reverse geocoder's city name,
+                        # the legacy Find filter path). Losing one is not worth
+                        # discarding a finished multi-GB copy -- but the walk
+                        # already dropped the original, so say so loudly.
+                        print(f"  warning: {_cpath} unreadable ({exc}); "
+                              f"category '{_slug}' will be MISSING from the output",
                               flush=True)
-                        place_records = None
-                    place_blob = (b"" if place_records is None
-                                  else json.dumps(place_records, separators=(",", ":"),
-                                                  ensure_ascii=False).encode("utf-8"))
-                    if place_records is None:
-                        pass          # warned above; nothing to re-emit
-                    elif len(place_blob) > PLACE_SHARD_MIN_BYTES:
-                        pplan = plan_chip(place_records)
-                        pn = 0
-                        for fpath, ftitle, blob in pplan.files(
-                                "place", "place", name_prefix="",
+                        continue
+                    _blob = json.dumps(_recs, separators=(",", ":"),
+                                       ensure_ascii=False).encode("utf-8")
+                    if len(_blob) > PLACE_SHARD_MIN_BYTES:
+                        _plan = plan_chip(_recs)
+                        _n = 0
+                        for fpath, ftitle, blob in _plan.files(
+                                _slug, _slug, name_prefix="",
                                 title_kind="Category index"):
                             c.add_item(_Item(fpath, "application/json", title=ftitle,
                                              data=blob, compress=True, namespace=None))
-                            pn += 1
-                        new_cat_shards["place"] = pplan.manifest_entry("place")
-                        print(f"  place: {pplan.count:,} records "
-                              f"({pplan.bytes/1048576:.1f} MB) → {pn} shard(s)", flush=True)
-                        del pplan
+                            _n += 1
+                        # plan_chip decides for itself whether the records
+                        # warrant splitting (CHIP_SHARD_TARGET_BYTES). When it
+                        # declines, files() re-emits the single whole file --
+                        # so recording a category_shards entry would declare a
+                        # sharded layout that has no shard files behind it.
+                        # Caught on hispaniola with the threshold forced down:
+                        # park showed sub_chunks=0, layout=None, 0 files.
+                        if _plan.sharded:
+                            new_cat_shards[_slug] = _plan.manifest_entry(_slug)
+                            print(f"  {_slug}: {_plan.count:,} records "
+                                  f"({_plan.bytes/1048576:.1f} MB) → {_n} shard(s)", flush=True)
+                        else:
+                            new_cat_shards.pop(_slug, None)
+                            print(f"  {_slug}: {_plan.count:,} records "
+                                  f"({_plan.bytes/1048576:.1f} MB) — plan declined to split",
+                                  flush=True)
+                        del _plan
                     else:
                         # Under the threshold: put the single file back. The
-                        # walk already dropped it, and a region whose Find
-                        # page cannot name the nearest city is worse than one
-                        # that fetches 7 MB to do it.
-                        c.add_item(_Item(PLACE_INDEX, "application/json",
-                                         title="Category index place",
-                                         data=place_blob, compress=True,
-                                         namespace=None))
-                        print(f"  place: {len(place_records):,} records "
-                              f"({len(place_blob)/1048576:.1f} MB) — kept as one file",
+                        # walk already dropped it, and a region whose Find page
+                        # cannot name the nearest city is worse than one that
+                        # fetches a few MB to do it.
+                        c.add_item(_Item(_cpath, "application/json",
+                                         title=f"Category index {_slug}",
+                                         data=_blob, compress=True, namespace=None))
+                        print(f"  {_slug}: {len(_recs):,} records "
+                              f"({len(_blob)/1048576:.1f} MB) — kept as one file",
                               flush=True)
-                    del place_records, place_blob
+                    del _recs, _blob
 
                 payload = dict(cat_manifest)
                 payload["chips"] = new_chips

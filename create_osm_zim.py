@@ -6299,8 +6299,15 @@ def create_zim(
                     # (whose browser gate fails on it), 480 MB on europe.
                     # Shard it the way Find chips are sharded so the viewer
                     # reads the shard around the viewport instead.
-                    if (cat_slug == "place"
-                            and len(chunk_json.encode("utf-8")) > CATEGORY_SHARD_MIN_BYTES):
+                    # Shard ANY oversized category, not just `place`.
+                    # europe ships category-index/park.json at 53 MB and
+                    # china's place.json at 109 MB; the 48 MB cap in
+                    # validate_zim is an error-severity gate, so park alone
+                    # blocked europe's upload entirely (live europe was still
+                    # 2026-05-06 as a result). Restricting this to "place" was
+                    # arbitrary -- the shard format and the viewer's reader are
+                    # both keyed on the manifest, not on the slug.
+                    if (len(chunk_json.encode("utf-8")) > CATEGORY_SHARD_MIN_BYTES):
                         from cloud.chip_shards import plan_chip
                         cplan = plan_chip(entries)
                         n_cat_files = 0
@@ -6310,7 +6317,13 @@ def create_zim(
                             creator.add_item(MapItem(cpath, ctitle,
                                                      "application/json", cblob))
                             n_cat_files += 1
-                        cat_shards[cat_slug] = cplan.manifest_entry(cat_slug)
+                        # plan_chip decides for itself whether to split. If it
+                        # declines, files() emits the single whole file, so a
+                        # category_shards entry would declare a sharded layout
+                        # with no shard files behind it (caught in the
+                        # swap_viewer_rust path on 2026-09-21).
+                        if cplan.sharded:
+                            cat_shards[cat_slug] = cplan.manifest_entry(cat_slug)
                         print(f"    category-index/{cat_slug}: {len(entries):,} records "
                               f"({len(chunk_json)/1048576:.1f} MB) → {n_cat_files} shard(s)",
                               flush=True)
