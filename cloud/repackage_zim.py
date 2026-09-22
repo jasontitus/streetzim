@@ -45,6 +45,7 @@ if str(SCRIPT_DIR) not in sys.path:
 # the source manifest had already been skipped, leaving the output
 # ZIM without ANY category-index/manifest.json.
 from cloud.chip_rules import CHIP_RULES, record_matches_chip  # noqa: E402
+from cloud.viewer_slots import pad_to_slot as _pad_to_slot  # noqa: E402
 from cloud.chip_shards import (  # noqa: E402
     CHIP_SHARD_TARGET_BYTES, plan_chip, read_chip_records,
 )
@@ -521,8 +522,16 @@ def repackage(src_path: str, dst_path: str,
         for name in ("index.html", "places.html", "routing-worker.js"):
             p = VIEWER_DIR / name
             if p.exists():
-                replacements[name] = p.read_bytes()
-                print(f"  will swap {name} ← {p} ({len(replacements[name])} B)")
+                raw = p.read_bytes()
+                # Pad into the fixed viewer slot, exactly as create_osm_zim.py
+                # and swap_viewer_rust.py do. Without this, repackage silently
+                # UNDID the slots the build had just written: build-region.sh
+                # runs create_osm_zim (slotted) and then this repackage, which
+                # replaced the padded files with raw ones. benelux and greece
+                # each built for 3+ hours and failed the slot marker gate.
+                replacements[name] = _pad_to_slot(name, raw)
+                print(f"  will swap {name} ← {p} "
+                      f"({len(raw)} B → {len(replacements[name])} B slotted)")
 
     class PassthroughItem(Item):
         """An item copied from the source ZIM, preserving its bytes."""
@@ -992,6 +1001,14 @@ def repackage(src_path: str, dst_path: str,
                     compress = False
                     raw_clusters += 1
             if modified_content is not None:
+                # A viewer slot MUST be stored uncompressed: bytes inside a
+                # compressed cluster do not map to file offsets, so
+                # patch_viewer_inplace.py would have nothing to overwrite.
+                # Padding it without this leaves a ZIM that looks slotted
+                # (marker present in the decompressed bytes) but cannot
+                # actually be patched.
+                if swap_viewer and path in replacements:
+                    compress = False
                 c.add_item(PassthroughItem(
                     path, title, mime, modified_content, compress=compress))
             else:
@@ -1224,6 +1241,8 @@ def repackage(src_path: str, dst_path: str,
         # set — just generalised to new entries.
         added_missing = 0
         for name, data in replacements.items():
+            # `data` is already slot-padded (see the collection block above);
+            # the item below must also be emitted uncompressed.
             if name in replaced_search_paths:  # paranoia: never collide
                 continue
             try:
@@ -1248,7 +1267,9 @@ def repackage(src_path: str, dst_path: str,
                 def get_contentprovider(self):
                     return StringProvider(self._d)
                 def get_hints(self):
-                    return {Hint.FRONT_ARTICLE: self._front, Hint.COMPRESS: True}
+                    # Uncompressed: `data` is slot-padded, and a slot in a
+                    # compressed cluster cannot be patched in place.
+                    return {Hint.FRONT_ARTICLE: self._front, Hint.COMPRESS: False}
             c.add_item(NewViewerItem(name, data, title, mime, is_front))
             added_missing += 1
             print(f"  added missing {name} from viewer set ({len(data)} B)")
