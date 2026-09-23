@@ -434,7 +434,7 @@ REGIONS = [
         "description": "Greece &mdash; Athens, Thessaloniki, Patras, Heraklion; the Peloponnese, Crete, the Cyclades and Dodecanese, Mount Olympus.",
     },
     {
-        "id": "britain-ireland", "tier": "multi-country", "title": "Britain &amp; Ireland",
+        "id": "britain-ireland", "tier": "multi-country", "title": "Britain & Ireland",
         "zim_file": "osm-britain-ireland.zim",
         "description": "The British Isles &mdash; London, Manchester, Birmingham, Glasgow, Edinburgh, Dublin, Cardiff, Belfast; the Highlands, Snowdonia, the Lake District, the Wild Atlantic Way.",
     },
@@ -454,7 +454,7 @@ REGIONS = [
         "description": "Norway, Sweden, Finland &amp; Denmark &mdash; Oslo, Stockholm, Helsinki, Copenhagen, Bergen, Gothenburg; the fjords, Lapland, the Baltic archipelagos.",
     },
     {
-        "id": "austria-czech", "tier": "multi-country", "title": "Austria, Czechia &amp; Slovakia",
+        "id": "austria-czech", "tier": "multi-country", "title": "Austria, Czechia & Slovakia",
         "zim_file": "osm-austria-czech.zim",
         "description": "Austria, Czechia &amp; Slovakia &mdash; Vienna, Prague, Bratislava, Brno, Salzburg, Graz, Innsbruck; the Eastern Alps, Bohemia, the Tatras.",
     },
@@ -464,7 +464,7 @@ REGIONS = [
         "description": "Slovenia, Croatia, Bosnia, Serbia, Montenegro, Albania, North Macedonia &amp; Kosovo &mdash; Belgrade, Zagreb, Sarajevo, Ljubljana, Split, Tirana; the Dalmatian coast, the Dinaric Alps.",
     },
     {
-        "id": "carpathians", "tier": "multi-country", "title": "Romania, Hungary &amp; Bulgaria",
+        "id": "carpathians", "tier": "multi-country", "title": "Romania, Hungary & Bulgaria",
         "zim_file": "osm-carpathians.zim",
         "description": "Romania, Hungary &amp; Bulgaria &mdash; Bucharest, Budapest, Sofia, Cluj-Napoca, Plovdiv, Timișoara; the Carpathians, the Danube delta, the Black Sea coast.",
     },
@@ -782,6 +782,12 @@ def build_page():
             raise ValueError(
                 f"region {region['id']!r} has invalid tier "
                 f"{region.get('tier')!r}; valid tiers: {sorted(valid_tiers)}")
+        # Titles go through html.escape(); an entity written into one
+        # renders literally ("Britain &amp; Ireland" shipped that way).
+        if re.search(r"&(#?\w+);", region["title"]):
+            raise ValueError(
+                f"region {region['id']!r} title {region['title']!r} contains "
+                "an HTML entity; write the plain character, titles are escaped")
 
     # REGIONS here and cloud/regions.tsv are two lists of the same fact, and
     # nothing used to check they agreed. africa-light shipped to archive.org
