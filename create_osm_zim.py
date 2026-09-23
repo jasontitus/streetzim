@@ -1619,6 +1619,62 @@ def get_mbtiles_info(mbtiles_path):
     return metadata, tile_count
 
 
+def estimate_tile_total(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None):
+    """Upper bound on what iter_tiles_from_mbtiles() will yield, for progress.
+
+    total_tiles used to be get_mbtiles_info()'s COUNT(*) over the WHOLE
+    MBTiles. Every region streams from the shared 345 M-tile world file, so
+    the progress line read "Added 26000/345534297 tiles (~24081m left)" on a
+    3-hour build -- a denominator three orders of magnitude too large and an
+    ETA of 16 days. Mirror the iterator's own bounds instead: for a bbox it
+    is the per-zoom tile rectangle the SQL WHERE clause selects (arithmetic,
+    no DB read); for the whole-world path it is an indexed COUNT over the
+    zoom range. The bbox figure is an upper bound -- a sparse MBTiles holds
+    fewer rows than the rectangle -- so the ETA errs long, never short.
+    """
+    import mercantile
+
+    # Same whole-world short-circuit the iterator applies before using bbox.
+    if bbox:
+        _minlon, _minlat, _maxlon, _maxlat = bbox
+        if (_minlon <= -179.0 and _maxlon >= 179.0
+                and _minlat <= -84.0 and _maxlat >= 84.0):
+            bbox = None
+
+    if zoom_level is not None:
+        zoom_min = zoom_max = zoom_level
+    else:
+        zoom_min, zoom_max = 0, (14 if max_zoom is None else max_zoom)
+
+    if bbox:
+        minlon, minlat, maxlon, maxlat = bbox
+        # Web Mercator cuts off near +-85.0511; mercantile.tile() raises
+        # outside it, and several regions (nordics reaches 71N, and a
+        # whole-world bbox that dodges the short-circuit reaches 90) would
+        # otherwise crash the build for the sake of a progress number.
+        lat_lo = max(minlat, -85.0)
+        lat_hi = min(maxlat, 85.0)
+        if lat_lo > lat_hi:
+            return 0
+        total = 0
+        for z in range(zoom_min, zoom_max + 1):
+            ul = mercantile.tile(minlon, lat_hi, z)
+            lr = mercantile.tile(maxlon, lat_lo, z)
+            nx = lr.x - ul.x + 1
+            ny = lr.y - ul.y + 1
+            if nx <= 0 or ny <= 0:      # antimeridian-crossing bbox
+                continue
+            total += nx * ny
+        return total
+
+    # Whole-world path: the caller already has get_mbtiles_info()'s COUNT(*),
+    # which for a world build IS the right denominator. Return 0 so it falls
+    # back to that rather than paying a second scan -- "WHERE zoom_level <= 14"
+    # walks all 345 M index entries on the 113 GB world file, minutes of IO
+    # bought for a progress number.
+    return 0
+
+
 def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None):
     """Yield (z, x, y, data) tuples from MBTiles, streaming from SQLite.
 
@@ -5207,7 +5263,10 @@ def create_zim(
 
         # Stream tiles from mbtiles or use in-memory dict
         if mbtiles_path:
-            total_tiles = tile_count or 0
+            # NOT tile_count: that is COUNT(*) over the whole shared world
+            # MBTiles (345 M tiles), which made the progress ETA useless.
+            total_tiles = estimate_tile_total(
+                mbtiles_path, bbox=bbox, max_zoom=max_zoom) or (tile_count or 0)
             tile_source = iter_tiles_from_mbtiles(mbtiles_path, bbox=bbox, max_zoom=max_zoom)
         else:
             total_tiles = len(tiles)
