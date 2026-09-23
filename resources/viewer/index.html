@@ -4586,9 +4586,24 @@ async function loadChipOnMap(map, chipDef, opts) {
     return;
   }
   items = filtered.length ? filtered : data;
-  // Cap at 300 to keep the carousel + pin-rendering responsive.
-  // The scorer in places.html caps at the same number; matches.
-  if (items.length > 300) items = items.slice(0, 300);
+  // Cap at 300 to keep the carousel + pin-rendering responsive, keeping
+  // the 300 NEAREST the map centre. A plain slice took the first 300 in
+  // file order: zoomed into Aleksotas (Kaunas) with no food in view, the
+  // fallback returned 300 places strewn across the Baltics and fitBounds
+  // flew the camera out to zoom 5.8 (baltics 2026-09-20, legacy layout).
+  // The geo-shard path already falls back to nearest; this matches it.
+  if (items.length > 300) {
+    var _c = map.getCenter().wrap();
+    var _ranked = [];
+    for (var ri = 0; ri < items.length; ri++) {
+      var ir = items[ri];
+      if (typeof ir.a !== 'number' || typeof ir.o !== 'number') continue;
+      _ranked.push({ d: _haversineMetersStrip(_c.lat, _c.lng, ir.a, ir.o), r: ir });
+    }
+    _ranked.sort(function(x, y) { return x.d - y.d; });
+    items = [];
+    for (var rj = 0; rj < _ranked.length && rj < 300; rj++) items.push(_ranked[rj].r);
+  }
   expanded = !filtered.length;
   }  // end legacy (single-file / name-hash bucket) layout
 
