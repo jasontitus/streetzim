@@ -63,3 +63,4 @@ tmp/*.bin
 *.patch
 rejected-zims/
 salvage/
+/cache/natural-earth/

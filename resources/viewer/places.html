@@ -2368,6 +2368,33 @@ async function loadCategory(slug) {
     err.code = 'no-category';
     throw err;
   }
+  // Oversized categories are geo-sharded at build time exactly like `place`
+  // (create_osm_zim.py, cloud/chip_shards.py). Read the shards around the
+  // viewport when the manifest says so; older ZIMs still have one file.
+  // Without this, generalising the build-side sharding to `park` would make
+  // this legacy path 404 on ZIMs that have no whole-file copy.
+  // Same origin resolution the geo-chip path uses (loadGeoChip): the user's
+  // origin if set, else the centre of the map area, else the region centre.
+  const catShard = state.manifests.cat.category_shards
+                   && state.manifests.cat.category_shards[slug];
+  if (CHIP_SHARDS.isGeo(catShard)) {
+    const v = state.mapArea;
+    let point = state.origin;
+    if (!point && v) point = { lat: (v.s + v.n) / 2, lon: (v.w + v.e) / 2 };
+    if (!point) point = await _regionCentre(catShard);
+    if (point) {
+      const res = await CHIP_SHARDS.load(catShard, {
+        fetchShard: (suffix) => fetchJSON(CAT + slug + '-' + suffix + '.json'),
+        cache: chipShardCache,
+        cacheKey: 'cat:' + slug,
+        point,
+        bbox: (state.mapAreaOn && v) ? { s: v.s, w: v.w, n: v.n, e: v.e } : null,
+        k: 300,
+        fallbackToNearest: true,
+      }).catch(() => null);
+      if (res && res.records) return cacheKeep(state.cache.cats, slug, res.records);
+    }
+  }
   const data = await fetchJSON(CAT + slug + '.json');
   return cacheKeep(state.cache.cats, slug, data);
 }
