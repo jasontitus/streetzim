@@ -191,3 +191,8 @@ build artefact (`sz-chip-diag`, `sz-safearea-diag`) leaked into a production
 file. A patcher that silently wrote nothing would otherwise pass: on
 2026-09-20 an edit produced no file and the patch ran against an unmodified
 viewer, reported success, and was announced as shipped.
+
+See [viewer-rollout.md](viewer-rollout.md) for the procedure that uses
+this mechanism to push a viewer change into every shipped region, and
+[lowzoom-lakes.md](lowzoom-lakes.md) for the change that most recently rode
+it.

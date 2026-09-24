@@ -32,11 +32,14 @@ for(const d of DEVICES){
   // injection at DOMContentLoaded gets wiped mid-run and the harness then
   // fails its OWN `top < inset` assertion (hispaniola, 2 of 7 devices).
   await p.evaluateOnNewDocument(v=>{
-    const apply=()=>document.documentElement.style.setProperty('--top-inset',v+'px');
+    // evaluateOnNewDocument runs at document-start: documentElement does NOT
+    // exist yet, so an unguarded apply() throws and every page load fails
+    // with "Cannot read properties of null (reading 'style')".
+    const apply=()=>{ const d=document.documentElement;
+                      if(d) d.style.setProperty('--top-inset',v+'px'); };
     addEventListener('DOMContentLoaded',apply);
     addEventListener('resize',apply);
     setInterval(apply,200);
-    apply();
   },d.inset);
   const bad=[];
   p.on('pageerror',e=>bad.push('pageerror '+String(e).slice(0,80)));
