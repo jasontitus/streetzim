@@ -1282,6 +1282,11 @@
       <p class="license">Open Data Commons Open Database License (ODbL) &mdash; openstreetmap.org/copyright</p>
     </section>
     <section>
+      <h3>Lakes (zoomed-out view)</h3>
+      <p>Natural Earth 1:50m lakes</p>
+      <p class="license">Public domain &mdash; naturalearthdata.com</p>
+    </section>
+    <section>
       <h3>Vector Tile Schema</h3>
       <p>OpenMapTiles</p>
       <p class="license">Creative Commons Attribution 4.0 (CC-BY 4.0) &mdash; openmaptiles.org</p>
@@ -1682,9 +1687,23 @@ fetchConfig(1)
       return;
     }
 
+    // Opening view. map-config.json carries the bbox CENTRE and a fixed
+    // zoom 6 for every region regardless of size, so hawaii opened on open
+    // Pacific west of the islands, north-africa on empty Sahara and nordics
+    // on the Gulf of Bothnia -- "random fairly empty areas", 2026-09-25.
+    // config.bounds already ships in every ZIM (it is what maxBounds is
+    // built from), so the whole region can be framed without any new build
+    // data. _szOpeningView below falls back to the anchor city when the
+    // framed region turns out to be mostly empty.
+    var _szFit = config.bounds ? [
+      [config.bounds[0], config.bounds[1]],
+      [config.bounds[2], config.bounds[3]]
+    ] : null;
     var map = new maplibregl.Map({
       container: 'map',
       style: makeStyle(config),
+      // Framed by fitBounds below when we have bounds; these stay as the
+      // pre-fit camera (and the whole answer for a ZIM with no bounds).
       center: config.center,
       zoom: config.zoom,
       minZoom: config.minZoom || 0,
@@ -1698,6 +1717,89 @@ fetchConfig(1)
     // Exposed so module-scope helpers (e.g. openWikiArticle) can stamp the
     // current view into the URL hash before navigating away.
     window.__szMap = map;
+
+    // Frame the region, then rescue a view that is mostly nothing.
+    //
+    // Fitting the bbox is right for almost every region. It is NOT enough for
+    // one whose bbox is mostly water: hawaii's includes the northwestern
+    // islands, so the framed view is 144 rendered features of which 144 are
+    // water -- an empty blue rectangle. east-polynesia is 554 features, 553
+    // water. north-africa framed is 311 with 232 non-water (state labels,
+    // boundaries, landuse) and reads correctly.
+    //
+    // So the trigger is NON-WATER features, not the total, and the rescue
+    // target comes from querySourceFeatures(): place data is in the loaded
+    // tiles even at a zoom where the style draws no labels, so hawaii yields
+    // Kailua/Kapolei/Kaneohe on Oahu while the screen shows nothing. No
+    // per-region data is needed, which matters because this viewer file is
+    // byte-identical across every ZIM.
+    //
+    // Skipped when the URL carries a #hash view (a shared link, or a return
+    // from a wiki article): that is an explicit destination and must win.
+    (function _szOpeningView() {
+      if (!_szFit) return;                                     // no bounds
+      if (location.hash && location.hash.length > 2) return;   // explicit view
+      var MIN_LAND_FEATURES = 15;
+      var RESCUE_ZOOM = 11;
+      var RESCUE_MIN_FEATURES = 80;   // a rescued view must be worth the jump
+      var CLASS_RANK = { city: 0, town: 1, village: 2, state: 8 };
+      try {
+        map.fitBounds(_szFit, { padding: 24, duration: 0, animate: false });
+      } catch (e) { return; }
+      map.once('idle', function () {
+        var land;
+        try {
+          land = map.queryRenderedFeatures().filter(function (f) {
+            return !/^(water|ocean|background)/.test(f.layer.id);
+          }).length;
+        } catch (e) { return; }
+        if (land >= MIN_LAND_FEATURES) return;     // framed region reads fine
+        var places;
+        try { places = map.querySourceFeatures('openmaptiles', { sourceLayer: 'place' }); }
+        catch (e) { return; }
+        var ranked = [];
+        for (var i = 0; i < places.length; i++) {
+          var f = places[i], pr = f.properties || {};
+          if (!f.geometry || f.geometry.type !== 'Point') continue;
+          var c = f.geometry.coordinates;
+          if (!c || !isFinite(c[0]) || !isFinite(c[1])) continue;
+          // class first (a city beats a state centroid), then OpenMapTiles
+          // rank, where lower is more important.
+          ranked.push({ c: c,
+            k: (CLASS_RANK[pr['class']] == null ? 9 : CLASS_RANK[pr['class']]) * 100
+             + (typeof pr.rank === 'number' ? pr.rank : 50) });
+        }
+        ranked.sort(function (a, b) { return a.k - b.k; });
+        if (!ranked.length) return;
+
+        // Verify each candidate rather than trusting the ranking. On
+        // east-polynesia the best-ranked place is an atoll in the Tuamotus
+        // that renders 8 features -- as empty as the ocean we were escaping.
+        // Try in order, keep the first that actually has something on it, and
+        // if none do, go back to the framed region: never end up worse than
+        // where we started.
+        var tries = 0;
+        function attempt() {
+          if (tries >= 3 || tries >= ranked.length) { revert(); return; }
+          var cand = ranked[tries++];
+          map.jumpTo({ center: [cand.c[0], cand.c[1]], zoom: RESCUE_ZOOM });
+          map.once('idle', function () {
+            var n;
+            try {
+              n = map.queryRenderedFeatures().filter(function (f) {
+                return !/^(water|ocean|background)/.test(f.layer.id);
+              }).length;
+            } catch (e) { n = 0; }
+            if (n < RESCUE_MIN_FEATURES) attempt();
+          });
+        }
+        function revert() {
+          try { map.fitBounds(_szFit, { padding: 24, duration: 0, animate: false }); }
+          catch (e) {}
+        }
+        attempt();
+      });
+    })();
 
     // iOS/Kiwix WebView body-scroll lock. CSS (overflow:hidden, position:fixed,
     // 100dvh) does NOT stop that WebView from dragging the whole page, so block
@@ -2314,8 +2416,14 @@ function makeStyle(config) {
       "lowzoom-lakes": {
         "type": "geojson",
         "data": _szLowzoomLakes(),
-        "maxzoom": 6,
-        "attribution": '<a href="https://www.naturalearthdata.com/">Natural Earth</a>'
+        // No "attribution" here on purpose. MapLibre appends an active
+        // source's attribution to the on-map bar, and at a 320px viewport the
+        // extra "Natural Earth" wraps it to two lines, which then overlaps
+        // #attr-btn and the scale control (caught by tmp/overlap-check.mjs).
+        // Natural Earth is public domain and requires no attribution, so the
+        // credit lives in the Sources dialog instead, where it costs no
+        // layout. The shipped attribution string is unchanged.
+        "maxzoom": 6
       }
     },
     "glyphs": glyphUrl,
