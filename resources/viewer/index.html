@@ -1687,14 +1687,13 @@ fetchConfig(1)
       return;
     }
 
-    // Opening view. map-config.json carries the bbox CENTRE and a fixed
-    // zoom 6 for every region regardless of size, so hawaii opened on open
-    // Pacific west of the islands, north-africa on empty Sahara and nordics
-    // on the Gulf of Bothnia -- "random fairly empty areas", 2026-09-25.
-    // config.bounds already ships in every ZIM (it is what maxBounds is
-    // built from), so the whole region can be framed without any new build
-    // data. _szOpeningView below falls back to the anchor city when the
-    // framed region turns out to be mostly empty.
+    // Opening camera comes straight from map-config.json. Its centre is the
+    // bbox centre, which for some regions is empty water or desert -- hawaii
+    // opens on open Pacific west of the islands. Attempts to improve that
+    // were reverted on 2026-09-25; the note further down and
+    // docs/todo-opening-view.md record why, so the next attempt does not
+    // repeat them. The zoom is already extent-based (create_osm_zim's
+    // get_center_and_zoom), so only the centre needs work.
     var map = new maplibregl.Map({
       container: 'map',
       style: makeStyle(config),
