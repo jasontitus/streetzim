@@ -20,9 +20,14 @@ let anchorWhy = 'default view';
 function anchorFor(tagName) {
   // tag is the zim basename, e.g. osm-hawaii-2026-09-20 (a trailing build
   // letter like -2026-09-19d is possible).
+  // Accept an explicit id, a ZIM basename, or a bare region id. Callers
+  // disagree: most pass `osm-<id>-YYYY-MM-DD`, but .sweep-render.sh passes
+  // the bare id and .reshard-europe.sh passes a literal "europe". Deriving
+  // only from the dated form meant those two silently probed the default
+  // view for every ZIM -- the exact pre-fix behaviour, blamed on the
+  // registry by the log line. Fail closed on the contract, not open.
   const m = /^osm-(.+)-\d{4}-\d{2}-\d{2}[a-z]?$/.exec(tagName);
-  if (!m) { anchorWhy = `default view (tag ${tagName} is not osm-<id>-YYYY-MM-DD)`; return null; }
-  const id = m[1];
+  const id = process.env.REGION_ID || (m ? m[1] : tagName);
   let tsv;
   try { tsv = readFileSync(new URL('../cloud/regions.tsv', import.meta.url), 'utf8'); }
   catch (e) {

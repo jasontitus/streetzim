@@ -1695,10 +1695,6 @@ fetchConfig(1)
     // built from), so the whole region can be framed without any new build
     // data. _szOpeningView below falls back to the anchor city when the
     // framed region turns out to be mostly empty.
-    var _szFit = config.bounds ? [
-      [config.bounds[0], config.bounds[1]],
-      [config.bounds[2], config.bounds[3]]
-    ] : null;
     var map = new maplibregl.Map({
       container: 'map',
       style: makeStyle(config),
@@ -1718,88 +1714,29 @@ fetchConfig(1)
     // current view into the URL hash before navigating away.
     window.__szMap = map;
 
-    // Frame the region, then rescue a view that is mostly nothing.
+    // NOTE: the opening view is deliberately left as map-config.json ships
+    // it. See docs/todo-opening-view.md.
     //
-    // Fitting the bbox is right for almost every region. It is NOT enough for
-    // one whose bbox is mostly water: hawaii's includes the northwestern
-    // islands, so the framed view is 144 rendered features of which 144 are
-    // water -- an empty blue rectangle. east-polynesia is 554 features, 553
-    // water. north-africa framed is 311 with 232 non-water (state labels,
-    // boundaries, landuse) and reads correctly.
+    // Two attempts were made on 2026-09-25 and both were reverted:
     //
-    // So the trigger is NON-WATER features, not the total, and the rescue
-    // target comes from querySourceFeatures(): place data is in the loaded
-    // tiles even at a zoom where the style draws no labels, so hawaii yields
-    // Kailua/Kapolei/Kaneohe on Oahu while the screen shows nothing. No
-    // per-region data is needed, which matters because this viewer file is
-    // byte-identical across every ZIM.
+    //  1. fitBounds(config.bounds) to frame the whole region. Cannot work as
+    //     written: maxBounds is set from the same bounds, and MapLibre's
+    //     constraint zooms back IN to fill the viewport, so the fit is always
+    //     undone. Measured on a phone viewport, the US showed 30% of its
+    //     bbox width, hawaii 25%. Framing needs maxBounds widened to the
+    //     fitted view first.
+    //  2. A rescue that jumped to a city when the opening view rendered
+    //     almost nothing. It works where places are already in loaded tiles
+    //     (hawaii -> Honolulu, 1270 features) but not where they are not:
+    //     over the mid-Pacific querySourceFeatures returns no candidates at
+    //     the opening zoom, and a widen-and-retry still found none because
+    //     the post-jump idle can fire before the wider tiles arrive.
     //
-    // Skipped when the URL carries a #hash view (a shared link, or a return
-    // from a wiki article): that is an explicit destination and must win.
-    (function _szOpeningView() {
-      if (!_szFit) return;                                     // no bounds
-      if (location.hash && location.hash.length > 2) return;   // explicit view
-      var MIN_LAND_FEATURES = 15;
-      var RESCUE_ZOOM = 11;
-      var RESCUE_MIN_FEATURES = 80;   // a rescued view must be worth the jump
-      var CLASS_RANK = { city: 0, town: 1, village: 2, state: 8 };
-      try {
-        map.fitBounds(_szFit, { padding: 24, duration: 0, animate: false });
-      } catch (e) { return; }
-      map.once('idle', function () {
-        var land;
-        try {
-          land = map.queryRenderedFeatures().filter(function (f) {
-            return !/^(water|ocean|background)/.test(f.layer.id);
-          }).length;
-        } catch (e) { return; }
-        if (land >= MIN_LAND_FEATURES) return;     // framed region reads fine
-        var places;
-        try { places = map.querySourceFeatures('openmaptiles', { sourceLayer: 'place' }); }
-        catch (e) { return; }
-        var ranked = [];
-        for (var i = 0; i < places.length; i++) {
-          var f = places[i], pr = f.properties || {};
-          if (!f.geometry || f.geometry.type !== 'Point') continue;
-          var c = f.geometry.coordinates;
-          if (!c || !isFinite(c[0]) || !isFinite(c[1])) continue;
-          // class first (a city beats a state centroid), then OpenMapTiles
-          // rank, where lower is more important.
-          ranked.push({ c: c,
-            k: (CLASS_RANK[pr['class']] == null ? 9 : CLASS_RANK[pr['class']]) * 100
-             + (typeof pr.rank === 'number' ? pr.rank : 50) });
-        }
-        ranked.sort(function (a, b) { return a.k - b.k; });
-        if (!ranked.length) return;
-
-        // Verify each candidate rather than trusting the ranking. On
-        // east-polynesia the best-ranked place is an atoll in the Tuamotus
-        // that renders 8 features -- as empty as the ocean we were escaping.
-        // Try in order, keep the first that actually has something on it, and
-        // if none do, go back to the framed region: never end up worse than
-        // where we started.
-        var tries = 0;
-        function attempt() {
-          if (tries >= 3 || tries >= ranked.length) { revert(); return; }
-          var cand = ranked[tries++];
-          map.jumpTo({ center: [cand.c[0], cand.c[1]], zoom: RESCUE_ZOOM });
-          map.once('idle', function () {
-            var n;
-            try {
-              n = map.queryRenderedFeatures().filter(function (f) {
-                return !/^(water|ocean|background)/.test(f.layer.id);
-              }).length;
-            } catch (e) { n = 0; }
-            if (n < RESCUE_MIN_FEATURES) attempt();
-          });
-        }
-        function revert() {
-          try { map.fitBounds(_szFit, { padding: 24, duration: 0, animate: false }); }
-          catch (e) {}
-        }
-        attempt();
-      });
-    })();
+    // The original diagnosis was also wrong in one respect worth recording:
+    // the opening ZOOM is not fixed at 6. create_osm_zim.get_center_and_zoom
+    // buckets it by extent -- 4 for the US, 7 for the baltics, 11 for
+    // washington-dc. Only the CENTRE is wrong, and only for regions whose
+    // bbox centre is empty.
 
     // iOS/Kiwix WebView body-scroll lock. CSS (overflow:hidden, position:fixed,
     // 100dvh) does NOT stop that WebView from dragging the whole page, so block
@@ -2495,6 +2432,10 @@ function makeStyle(config) {
         "//": "Zoom 0-5 lakes (see _SZ_LAKES). Each lake appears from its Natural",
         "//2": "Earth min_zoom, so Finland's small lakes do not speckle a z2 view.",
         "//3": "zoom must be the input of the top-level step, hence one case per band.",
+        "//4": "The top band tests z<=6, not z<=5: six lakes carry a Natural",
+        "//5": "Earth min_zoom of 5.6/5.7 (Eyre, Torrens, Gairdner, Frome,",
+        "//6": "Mackay, Disappointment -- Australia's salt lakes) and would",
+        "//7": "otherwise never render at any zoom, since the layer stops at 6.",
         "id": "water-lowzoom",
         "type": "fill",
         "source": "lowzoom-lakes",
@@ -2507,7 +2448,7 @@ function makeStyle(config) {
             2, ["case", ["<=", ["get", "z"], 2], 1, 0],
             3, ["case", ["<=", ["get", "z"], 3], 1, 0],
             4, ["case", ["<=", ["get", "z"], 4], 1, 0],
-            5, ["case", ["<=", ["get", "z"], 5], 1, 0]]
+            5, ["case", ["<=", ["get", "z"], 6], 1, 0]]
         }
       },
       {
