@@ -142,8 +142,26 @@ if [ -z "$remote_size" ]; then
         >> "${PROJECT_DIR}/pending-uploads.tsv"
     exit 6
 fi
+# Re-poll on a mismatch before calling it fatal. Re-uploading a file that
+# already exists under the same name races archive.org's own metadata: the
+# listing keeps reporting the PREVIOUS size for a while, so a single read
+# compares new-local against stale-remote and condemns a good upload.
+# Measured 2026-09-25 on hawaii: reported 147189877 (the old file) against a
+# local 147189440, then matched exactly moments later. The rollout re-uploads
+# same-named files constantly and only escaped this because its transfers run
+# long enough for the metadata to settle.
 if [ "$remote_size" != "$local_size" ]; then
-    echo "FATAL ${id}: archive.org lists ${target_file} as ${remote_size} B but local is ${local_size} B — partial upload?" >&2
+    echo "  remote size ${remote_size} != local ${local_size}; re-polling (metadata may be stale)"
+    for _try in $(seq 1 30); do
+        sleep 20
+        remote_size=$("$IA" metadata "streetzim-${id}" 2>/dev/null \
+            | "$PYTHON" -c "import sys, json; m=json.load(sys.stdin); print(next((f.get('size') for f in m.get('files', []) if f.get('name')==sys.argv[1]), ''))" \
+                "$target_file")
+        [ "$remote_size" = "$local_size" ] && break
+    done
+fi
+if [ "$remote_size" != "$local_size" ]; then
+    echo "FATAL ${id}: archive.org lists ${target_file} as ${remote_size} B but local is ${local_size} B after 10 min of re-polling — partial upload?" >&2
     exit 3
 fi
 echo "  remote size matches local (${local_size} B)"
