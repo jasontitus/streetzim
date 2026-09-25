@@ -5507,11 +5507,24 @@ def create_zim(
         if wikidata_data:
             _wd_t0 = time.time()
             is_world_bbox = bbox and abs(bbox[0] - (-180)) < 1 and abs(bbox[2] - 180) < 1 and abs(bbox[1] - (-85)) < 2 and abs(bbox[3] - 85) < 2
-            if bbox and mbtiles_path and not is_world_bbox:
+            # Scan whichever tile source this build has. mbtiles_path is only
+            # passed in STREAMING mode (see create_zim's call site), so gating
+            # on it alone silently skipped the filter for every region with
+            # its own small extract -- hawaii and iceland rebuilt on
+            # 2026-09-25 shipped the full 640 MB global set while benelux,
+            # which streams from the world file, shipped 9.5 MB. The in-memory
+            # `tiles` dict is keyed (z, x, y) and already covers the bbox.
+            _tile_src = None
+            if bbox and not is_world_bbox:
+                if mbtiles_path:
+                    _tile_src = iter_tiles_from_mbtiles(mbtiles_path, zoom_level=14, bbox=bbox)
+                elif tiles:
+                    _tile_src = ((z, x, y, d) for (z, x, y), d in tiles.items() if z == 14)
+            if _tile_src is not None:
                 print(f"    Scanning tiles for Wikidata Q-IDs in bbox...")
                 import mapbox_vector_tile as _mvt
                 bbox_qids = set()
-                for z, x, y, data in iter_tiles_from_mbtiles(mbtiles_path, zoom_level=14, bbox=bbox):
+                for z, x, y, data in _tile_src:
                     tile_data = data
                     if data[:2] == b"\x1f\x8b":
                         try:
@@ -5531,6 +5544,11 @@ def create_zim(
                 print(f"    Filtered Wikidata: {len(filtered)} entries in bbox (from {len(wikidata_data)} total)")
                 wikidata_data = filtered
 
+            if _tile_src is None and len(wikidata_data) > 100_000:
+                print(f"    WARNING: Wikidata NOT filtered to the region "
+                      f"({len(wikidata_data)} entries, ~600 MB). bbox="
+                      f"{bool(bbox)} mbtiles={bool(mbtiles_path)} tiles="
+                      f"{bool(tiles)} world_bbox={bool(is_world_bbox)}", flush=True)
             print(f"    Adding Wikidata info for {len(wikidata_data)} features...")
             from collections import defaultdict as _dd
             wd_chunks = _dd(dict)
