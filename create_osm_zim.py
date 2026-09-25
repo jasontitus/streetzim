@@ -7195,6 +7195,41 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     # Satellite options
     include_satellite = args.satellite
     satellite_max_zoom = args.satellite_zoom or args.max_zoom
+    # Latitude-aware satellite cap.
+    #
+    # The imagery is Sentinel-2 Cloudless, natively 10 m/pixel. A 256 px tile
+    # at z14 is 156543*cos(lat)/2^14 m/pixel: 9.6 m at the equator (about the
+    # source resolution), 7.8 m at Casablanca, 5.2 m at Riga. So above the
+    # tropics z14 is not extra detail, it is interpolation -- and it costs
+    # 63% of the satellite payload, which is 18-24% of a ZIM and does not
+    # compress (AVIF already).
+    #
+    # Measured at Riga: a z14 tile against its z13 parent upscaled is
+    # PSNR 29.4 dB, and part of that gap is AVIF noise rather than detail.
+    # Clients overzoom the deepest level automatically, so capping at z13
+    # softens the deepest view rather than removing the layer.
+    #
+    # Cut at 45 deg on the bbox CENTRE, not its nearest edge. Testing the
+    # nearest edge capped only 5 small regions: russia (41-82N) and canada
+    # both keep z14 off a southern edge at ~41 deg although nearly all their
+    # area is far north. The centre is a fair proxy for where a region's
+    # tiles actually are, and it selects europe, russia, canada, alaska,
+    # ukraine, iceland, the baltics and switzerland -- 137 GB of the 424 GB
+    # being rebuilt. An explicit --satellite-zoom always wins.
+    # NB: `bbox` is not parsed until much later in main(); use bbox_str, which
+    # is final by this point (args, then the area lookup above).
+    if (include_satellite and args.satellite_zoom is None and bbox_str
+            and satellite_max_zoom is not None and satellite_max_zoom > 13):
+        try:
+            _bb = parse_bbox(bbox_str)
+            _lat_ctr = abs((float(_bb[1]) + float(_bb[3])) / 2.0)
+            if _lat_ctr >= 45.0:
+                print(f"    satellite: capping z{satellite_max_zoom} -> z13 "
+                      f"(centred at {_lat_ctr:.0f} deg; Sentinel-2 is 10 m/px, "
+                      f"so z14 there is upsampled)", flush=True)
+                satellite_max_zoom = 13
+        except Exception as _e:   # never fail a build over a progress nicety
+            print(f"    satellite: latitude cap skipped ({_e})", flush=True)
     satellite_download_zoom = args.satellite_download_zoom or satellite_max_zoom
     satellite_format = args.satellite_format
     satellite_quality = args.satellite_quality
