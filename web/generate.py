@@ -473,6 +473,29 @@ REGIONS = [
         "zim_file": "osm-africa-light.zim",
         "description": "The whole of Africa without satellite imagery and capped at zoom 13 &mdash; the same coverage as Africa in roughly half the download. Built for slower connections and smaller devices.",
     },
+    {
+        "id": "north-africa", "tier": "multi-country", "title": "North Africa",
+        "zim_file": "osm-north-africa.zim",
+        "description": "Morocco, Algeria, Tunisia, Libya, Mauritania &amp; Western Sahara &mdash; Casablanca, Algiers, Tunis, Tripoli, Marrakesh, Fes; the Atlas mountains, the Mediterranean coast, the northern Sahara.",
+    },
+    {
+        "id": "horn-of-africa", "tier": "multi-country", "title": "Horn of Africa",
+        "zim_file": "osm-horn-of-africa.zim",
+        "description": "Ethiopia, Somalia, Eritrea, Djibouti, South Sudan &amp; northern Kenya &mdash; Addis Ababa, Mogadishu, Asmara, Djibouti City, Juba; the Ethiopian highlands, the Rift Valley, the Red Sea coast.",
+    },
+    {
+        "id": "central-africa", "tier": "multi-country", "title": "Central Africa",
+        "zim_file": "osm-central-africa.zim",
+        "description": "DR Congo, Cameroon, Chad, Central African Republic, Gabon, Congo, Equatorial Guinea, Angola &amp; Zambia &mdash; Kinshasa, Luanda, Douala, Yaound&eacute;, N'Djamena, Lusaka; the Congo basin, the Albertine Rift.",
+    },
+    {
+        # Not Africa. Grouped into the same build queue only because its OSM
+        # extract was prepared in the same pass; the queue's name is a
+        # misnomer, the region is not.
+        "id": "east-polynesia", "tier": "multi-country", "title": "East Polynesia",
+        "zim_file": "osm-east-polynesia.zim",
+        "description": "French Polynesia, the Cook Islands &amp; the Austral and Tuamotu archipelagos &mdash; Papeete, Bora Bora, Mo&lsquo;orea, Rarotonga; atolls and volcanic islands across 3,000 km of the South Pacific.",
+    },
 ]
 
 
