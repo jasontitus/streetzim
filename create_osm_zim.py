@@ -1604,6 +1604,12 @@ def generate_tiles(pbf_path, mbtiles_path, bbox=None, fast=False, store=None):
     print(f"    Generated MBTiles: {size_mb:.1f} MB")
 
 
+# Decimal places kept for search-record coordinates. 5 dp is ~1.1 m at the
+# equator and less nearer the poles -- finer than any consumer GPS fix, and
+# finer than the OSM geometry most of these come from.
+_SEARCH_COORD_DP = int(os.environ.get("SEARCH_COORD_DP", "5") or 5)
+
+
 def get_mbtiles_info(mbtiles_path):
     """Get metadata and tile count from MBTiles without loading tiles."""
     conn = sqlite3.connect(str(mbtiles_path))
@@ -1628,8 +1634,8 @@ def estimate_tile_total(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None)
     3-hour build -- a denominator three orders of magnitude too large and an
     ETA of 16 days. Mirror the iterator's own bounds instead: for a bbox it
     is the per-zoom tile rectangle the SQL WHERE clause selects (arithmetic,
-    no DB read); for the whole-world path it is an indexed COUNT over the
-    zoom range. The bbox figure is an upper bound -- a sparse MBTiles holds
+    no DB read). The whole-world path returns 0 so the caller keeps the
+    MBTiles COUNT(*) it already has. The bbox figure is an upper bound -- a sparse MBTiles holds
     fewer rows than the rectangle -- so the ETA errs long, never short.
     """
     import mercantile
@@ -1662,8 +1668,14 @@ def estimate_tile_total(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None)
             lr = mercantile.tile(maxlon, lat_lo, z)
             nx = lr.x - ul.x + 1
             ny = lr.y - ul.y + 1
-            if nx <= 0 or ny <= 0:      # antimeridian-crossing bbox
-                continue
+            if nx <= 0 or ny <= 0:
+                # Antimeridian-crossing bbox. Do NOT `continue`: z0 always
+                # yields nx=ny=1, so the function would return 1, and the
+                # caller's `estimate_tile_total(...) or tile_count` treats 1
+                # as a real answer -- total_tiles=1 then breaks the progress
+                # line and disarms the backpressure guard. Bail so the caller
+                # falls back to the MBTiles COUNT(*).
+                return 0
             total += nx * ny
         return total
 
@@ -5339,7 +5351,11 @@ def create_zim(
 
                 if _libzim_backpressure:
                     batch_rate = batch_size / add_time if add_time > 0 else float("inf")
-                    if batch_rate < 5000 and total_tiles > 100_000:
+                    # No total_tiles clause: it used to be the world
+                    # COUNT(*), i.e. always over any threshold, so gating on a
+                    # now-region-sized total would quietly disarm this for
+                    # small regions on the libzim writer.
+                    if batch_rate < 5000:
                         backpressure_sleep = min(backpressure_sleep + 0.05, 1.0)
                         time.sleep(backpressure_sleep)
                     elif batch_rate > 15000:
@@ -5973,8 +5989,18 @@ def create_zim(
                         #   empty on non-POI rows): ws = website, p = phone, soc = socials,
                         #   brand = brand primary name, wd = brand Wikidata Q-ID,
                         #   cat = normalized category, source = "overture" for Pass-2 adds.
+                        # Coordinates rounded to 5 dp (~1.1 m). They were
+                        # emitted at full float64 repr -- 56.92662663189116,
+                        # nanometre precision for a bus stop -- and that is
+                        # entropy zstd cannot remove. Measured on 207,848 real
+                        # records: 1.72 MB -> 1.54 MB compressed, ~10% off the
+                        # search payload, which is ~10% of a ZIM. Display and
+                        # routing read the same field, so 1 m is the floor:
+                        # SEARCH_COORD_DP=7 restores ~1 cm if that ever bites.
                         rec = {"n": feat["name"], "t": t, "s": feat.get("subtype", ""),
-                               "a": feat["lat"], "o": feat["lon"], "l": feat.get("location", "")}
+                               "a": round(feat["lat"], _SEARCH_COORD_DP),
+                               "o": round(feat["lon"], _SEARCH_COORD_DP),
+                               "l": feat.get("location", "")}
                         for ov_key in ("ws", "p", "soc", "brand", "wd", "cat", "source"):
                             v = feat.get(ov_key)
                             if v:

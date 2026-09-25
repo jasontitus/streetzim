@@ -1,9 +1,12 @@
 #!/bin/bash
-# Build the 12 European country/batch regions that replace the single 60.5 GB
-# europe download. Same data, carved so nobody fetches 61 GB to get one country.
+# Rebuild the regions built before 2026-09-22, which each ship the ENTIRE
+# global Wikidata set (3.3 M entries, 624 MB uncompressed, ~108 MB compressed
+# -- byte-identical in hawaii and the baltics). Builds since carry only the
+# region's own. That is ~9% of every such ZIM spent on other continents, and
+# wikidata/ is not in a viewer slot, so only a rebuild fixes it.
 #
-# Order is SMALLEST FIRST so early wins land while the big ones are still
-# running: benelux (~1.6 GB) through france (~13 GB).
+# The list is rebuild-old.list, smallest first (washington-dc 0.2 GB ->
+# europe 65 GB), re-read every iteration so it can be trimmed mid-run.
 #
 # Per region: osmium extract -> symlink world tiles/search -> Overture
 # download -> build-region-fast.sh -> validate -> markers -> gates -> upload.
@@ -117,7 +120,7 @@ sys.exit(0 if ok else 1)' 2>/dev/null; then
 
 # ---- wait for every heavy job already in flight -------------------------
 echo $$ > /storage/streetzim/.rebuild-old.pid
-# Wait for the European country queue. Resolve by PID from its own pidfile,
+# Wait for the viewer rollout. Resolve by PID from its own pidfile,
 # never pgrep -f: this script's cmdline contains every string it searches for
 # (feedback_process_scan_self_match). Builds are CPU+IO bound and the host is
 # shared with another tenant, so only one build queue runs at a time.
@@ -145,8 +148,21 @@ for ID in $ORDER; do
     log "  pbf $(du -h "$PBF" | cut -f1)"
   else log "  pbf present ($(du -h "$PBF" | cut -f1))"; fi
 
-  ln -sfn "$WORLD_MB"     world-data/regions/${ID}.mbtiles
-  ln -sfn "$WORLD_SEARCH" world-data/regions/${ID}.search.jsonl
+  # NEVER `ln -sfn` blindly here. That line was copied from the africa queue,
+  # where the four regions were brand new and had no extracts. 50 of the 51
+  # regions in this queue already have REAL extract files, and `ln -sfn` over
+  # a regular file deletes it: measured 199.9 GB across the list, including
+  # europe.mbtiles 31.1 GB, canada 15.2 GB, russia 13.3 GB. There is no
+  # tilemaker on this host, so they could only be re-derived from the 114 GB
+  # world file. Symlink ONLY when nothing is there.
+  for _pair in "${ID}.mbtiles:$WORLD_MB" "${ID}.search.jsonl:$WORLD_SEARCH"; do
+    _dst="world-data/regions/${_pair%%:*}"; _src="${_pair#*:}"
+    if [ -e "$_dst" ] && [ ! -L "$_dst" ]; then
+      log "  keeping existing extract $(basename "$_dst") ($(du -h "$_dst" | cut -f1))"
+    else
+      ln -sfn "$_src" "$_dst"
+    fi
+  done
 
   for THEME in addresses places; do
     OUT=overture_cache/${THEME}-${ID}-${REL}.parquet
@@ -182,7 +198,11 @@ for ID in $ORDER; do
   fi
   # Must be THIS build's output. The wrapper exits 0 on "ALREADY EXISTS", in
   # which case `ls -t` would hand back an old file and we would gate it.
-  OUT=$(ls -t osm-${ID}-*.zim 2>/dev/null | head -1)
+  # Dated shape only: `osm-${ID}-*.zim` also matches osm-switzerland-light-*,
+  # osm-switzerland-nosat-* and osm-africa-light-*, which combined with the
+  # wrapper's exit-0-on-ALREADY-EXISTS could hand a sibling variant's ZIM to
+  # the gates and upload it under this region's id.
+  OUT=$(ls -t osm-${ID}-20??-??-??*.zim 2>/dev/null | head -1)
   if [ -z "$OUT" ] || [ ! -s "$OUT" ] || [ "$(stat -c %Y "$OUT")" -lt "$T0" ]; then
     log "  no FRESH output (got '${OUT:-none}') — not gating a stale file"
     row "$ID" no-output "${OUT:--}"; continue
@@ -208,4 +228,4 @@ for ID in $ORDER; do
     *) log "  UPLOAD FAILED rc=$RC"; row "$ID" upload-failed "$OUT" ;;
   esac
 done
-log "=== europe countries complete ==="
+log "=== rebuild complete ==="

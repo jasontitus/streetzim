@@ -830,9 +830,16 @@ def build_page():
             if len(parts) > 3:
                 registry_ids.add(parts[0])
     page_ids = {r["id"] for r in REGIONS}
+    # `rid`, NOT f"streetzim-{rid}": fetch_archive_items() strips the prefix
+    # when it builds the dict (see region_id above), so the prefixed form was
+    # never a key and this gate was unconditionally false from the day it was
+    # written. It did not protect the four african regions added in 0d93c58 --
+    # horn-of-africa and central-africa both went public before that commit
+    # and would have deployed cardless in silence. Proven against the live
+    # index: prefixed -> [], bare -> ['greece'] with greece's card removed.
     shipped_missing = sorted(
         rid for rid in registry_ids - page_ids
-        if f"streetzim-{rid}" in archive_items)
+        if rid in archive_items)
     if shipped_missing:
         raise ValueError(
             "these regions are live on archive.org but have no card in "
