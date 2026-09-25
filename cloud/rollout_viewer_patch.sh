@@ -149,7 +149,14 @@ log "=== queues clear — starting rollout"
 # script waited belong in it. A region that already carries the current
 # viewer costs nothing -- the patch rewrites identical bytes and
 # `ia upload --checksum` skips the transfer.
-if ! "$PY" tools/make_rollout_list.py "$TSV" >> "$LOG" 2>&1; then
+# Generate ONLY when there is no list. A list already on disk is an operator
+# decision -- on 2026-09-25 the 51 pre-09-22 regions were trimmed out of it
+# because they were moving to the rebuild queue, and regenerating on restart
+# silently put all 65 back and started patching regions that were about to be
+# rebuilt. Delete the TSV to force a fresh one.
+if [ -s "$TSV" ] && grep -qvE '^(id|#)' "$TSV"; then
+  log "  using the existing work list ($TSV); delete it to regenerate"
+elif ! "$PY" tools/make_rollout_list.py "$TSV" >> "$LOG" 2>&1; then
   log "FATAL: could not build the work list"; exit 1
 fi
 log "  work list: $(($(wc -l < "$TSV") - 1)) rows"
