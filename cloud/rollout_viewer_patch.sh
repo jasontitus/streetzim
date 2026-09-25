@@ -104,6 +104,26 @@ sys.exit(0 if ok else 1)' 2>/dev/null; then
   log "  GATES FAILED:$G"; return 1
 }
 
+# Refuse to ship uncommitted viewer code.
+#
+# This rollout reads resources/viewer/index.html straight off disk, so
+# whatever is in the working tree goes into every ZIM it patches -- committed
+# or not. On 2026-09-25 it patched and uploaded four regions with an
+# opening-view change that existed only in the working tree and was reverted
+# hours later. A dirty viewer here means the shipped artefact cannot be tied
+# to a commit, so stop rather than guess.
+for _f in resources/viewer/index.html web/drive/viewer/index.html; do
+  if ! git diff --quiet -- "$_f" 2>/dev/null; then
+    echo "FATAL: $_f has uncommitted changes; commit or stash before rolling out" >&2
+    exit 1
+  fi
+done
+if ! cmp -s resources/viewer/index.html web/drive/viewer/index.html; then
+  echo "FATAL: the two viewer copies differ; they must be byte-identical" >&2
+  exit 1
+fi
+echo "  viewer at $(git rev-parse --short HEAD) ($(stat -c %s resources/viewer/index.html) B)"
+
 echo $$ > /storage/streetzim/.rollout-viewer.pid
 
 # ---- wait for the build queues -----------------------------------------
