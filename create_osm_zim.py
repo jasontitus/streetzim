@@ -31,6 +31,7 @@ import gzip
 import html as html_mod
 import json
 import itertools
+import math
 import os
 import re
 import shutil
@@ -6832,6 +6833,54 @@ def parse_bbox(bbox_str):
     return parts
 
 
+def center_from_places(search_features_path, bbox, sample_limit=400_000):
+    """Opening centre = where this region's places actually are.
+
+    get_center_and_zoom() returns the geometric centre of the bbox, which for
+    several regions is nothing at all: hawaii's is open Pacific ~500 km west
+    of Kauai, north-africa's is open Sahara, nordics' is the Gulf of Bothnia.
+    Reported 2026-09-25 as ZIMs "opening to random fairly empty areas".
+
+    Two viewer-side fixes were tried and reverted -- fitBounds is undone by
+    maxBounds, and a rescue that hunts for a city cannot find one when no
+    tiles containing places are loaded. Doing it at build time needs no
+    runtime machinery and no per-region data: the search-feature dump is
+    already on disk at this point, one JSON object per place.
+
+    MEDIAN, not mean: a mean is dragged into the sea by a few outlying
+    islands, which is the failure being fixed. The median lands where the
+    mass of places is -- Oahu for hawaii. Falls back to the bbox centre if
+    the dump is missing or unreadable, so a build never fails over this.
+    """
+    import json as _json
+    if not search_features_path or not os.path.isfile(search_features_path):
+        return None
+    lats, lons = [], []
+    try:
+        with open(search_features_path, "r", encoding="utf-8") as fh:
+            for i, line in enumerate(fh):
+                if i >= sample_limit:
+                    break
+                try:
+                    rec = _json.loads(line)
+                except ValueError:
+                    continue
+                lat, lon = rec.get("lat"), rec.get("lon")
+                if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+                    if bbox and not (bbox[1] <= lat <= bbox[3] and bbox[0] <= lon <= bbox[2]):
+                        continue
+                    lats.append(lat)
+                    lons.append(lon)
+    except OSError:
+        return None
+    if len(lats) < 50:
+        return None
+    lats.sort()
+    lons.sort()
+    mid = len(lats) // 2
+    return [round(lons[mid], 5), round(lats[mid], 5)]
+
+
 def get_center_and_zoom(bbox):
     """Calculate center point and initial zoom from a bounding box."""
     minlon, minlat, maxlon, maxlat = bbox
@@ -7888,6 +7937,15 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         bbox = parse_bbox(bbox_str) if bbox_str else None
         if bbox:
             center, zoom = get_center_and_zoom(bbox)
+            # Prefer the median place position over the bbox centre; see
+            # center_from_places(). Zoom stays extent-based.
+            _place_center = center_from_places(locals().get("search_features"), bbox)
+            if _place_center:
+                _dist = math.hypot(_place_center[0] - center[0], _place_center[1] - center[1])
+                print(f"    opening centre: {_place_center} from place median "
+                      f"(bbox centre was {[round(c, 5) for c in center]}, "
+                      f"{_dist:.1f} deg away)", flush=True)
+                center = _place_center
         else:
             center = [0, 0]
             zoom = 2
