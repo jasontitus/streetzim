@@ -6833,6 +6833,50 @@ def parse_bbox(bbox_str):
     return parts
 
 
+def registry_anchor(bbox, registry_path=None):
+    """The hand-picked city for the region with this exact bbox, if any.
+
+    Preferred over the place median because a median is dragged to whatever
+    is densest inside the bbox, which is not always the region: pacific-
+    islands spans 130E-180 and so includes part of Australia, whose places
+    outnumber the islands' -- its median landed in inland Queensland, 15 deg
+    from the bbox centre and not on any Pacific island. cloud/regions.tsv
+    column 5 is a real city inside the region, chosen by hand.
+
+    Matched on the bbox, because create_zim() is given a bbox and a display
+    name but not the region id.
+    """
+    registry_path = registry_path or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "cloud", "regions.tsv")
+    if not bbox or not os.path.isfile(registry_path):
+        return None
+    try:
+        with open(registry_path, encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("#") or not line.strip():
+                    continue
+                c = line.rstrip("\n").split("\t")
+                if len(c) < 5:
+                    continue
+                try:
+                    rb = [float(x) for x in c[2].split(",")]
+                    lat, lon = (float(x) for x in c[4].split(","))
+                except ValueError:
+                    continue
+                if len(rb) != 4 or any(abs(a - b) > 1e-6 for a, b in zip(rb, bbox)):
+                    continue
+                if not (rb[1] <= lat <= rb[3] and rb[0] <= lon <= rb[2]):
+                    return None          # anchor outside its own bbox: ignore
+                # c[1] is the region NAME. Do NOT label with c[6]: that is
+                # the full-text search term, which for united-states is
+                # "Chicago" while c[5] is San Francisco -- a label naming a
+                # city the point is not at is how wrong evidence gets made.
+                return [round(lon, 5), round(lat, 5)], (c[1] if len(c) > 1 else c[0])
+    except OSError:
+        return None
+    return None
+
+
 def center_from_places(search_features_path, bbox, sample_limit=400_000):
     """Opening centre = where this region's places actually are.
 
@@ -7939,13 +7983,17 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             center, zoom = get_center_and_zoom(bbox)
             # Prefer the median place position over the bbox centre; see
             # center_from_places(). Zoom stays extent-based.
-            _place_center = center_from_places(locals().get("search_features"), bbox)
-            if _place_center:
-                _dist = math.hypot(_place_center[0] - center[0], _place_center[1] - center[1])
-                print(f"    opening centre: {_place_center} from place median "
+            _anchor = registry_anchor(bbox)
+            _place_center = None if _anchor else center_from_places(
+                locals().get("search_features"), bbox)
+            if _anchor or _place_center:
+                _new = _anchor[0] if _anchor else _place_center
+                _src = f"registry anchor ({_anchor[1]})" if _anchor else "place median"
+                _dist = math.hypot(_new[0] - center[0], _new[1] - center[1])
+                print(f"    opening centre: {_new} from {_src} "
                       f"(bbox centre was {[round(c, 5) for c in center]}, "
                       f"{_dist:.1f} deg away)", flush=True)
-                center = _place_center
+                center = _new
         else:
             center = [0, 0]
             zoom = 2
