@@ -5515,12 +5515,20 @@ def create_zim(
             # 2026-09-25 shipped the full 640 MB global set while benelux,
             # which streams from the world file, shipped 9.5 MB. The in-memory
             # `tiles` dict is keyed (z, x, y) and already covers the bbox.
+            # Scan the DEEPEST zoom this build actually has, not a hardcoded
+            # 14. A light variant caps tiles at z13 (--max-zoom 13), so a
+            # z14-only scan found no tiles, hence no Q-IDs, and the region
+            # shipped with ZERO Wikidata while map-config still advertised
+            # hasWikidata -- every POI panel would come up empty. Caught on
+            # switzerland-light 2026-09-26: "Filtered Wikidata: 0 entries in
+            # bbox (from 3342069 total)".
+            _scan_z = min(14, max_zoom) if max_zoom else 14
             _tile_src = None
             if bbox and not is_world_bbox:
                 if mbtiles_path:
-                    _tile_src = iter_tiles_from_mbtiles(mbtiles_path, zoom_level=14, bbox=bbox)
+                    _tile_src = iter_tiles_from_mbtiles(mbtiles_path, zoom_level=_scan_z, bbox=bbox)
                 elif tiles:
-                    _tile_src = ((z, x, y, d) for (z, x, y), d in tiles.items() if z == 14)
+                    _tile_src = ((z, x, y, d) for (z, x, y), d in tiles.items() if z == _scan_z)
             if _tile_src is not None:
                 print(f"    Scanning tiles for Wikidata Q-IDs in bbox...")
                 import mapbox_vector_tile as _mvt
@@ -5542,7 +5550,18 @@ def create_zim(
                             if qid and qid.startswith("Q"):
                                 bbox_qids.add(qid)
                 filtered = {qid: data for qid, data in wikidata_data.items() if qid in bbox_qids}
-                print(f"    Filtered Wikidata: {len(filtered)} entries in bbox (from {len(wikidata_data)} total)")
+                print(f"    Filtered Wikidata: {len(filtered)} entries in bbox "
+                      f"(from {len(wikidata_data)} total, scanned z{_scan_z})")
+                if not filtered and wikidata_data:
+                    # Zero is never right for a populated region: it means the
+                    # scan looked at a zoom this build does not contain, or the
+                    # tiles carry no wikidata tags at all. Keeping the full set
+                    # is wasteful; shipping none breaks every POI panel while
+                    # map-config still says hasWikidata. Fail loudly instead.
+                    raise SystemExit(
+                        f"FATAL: Wikidata bbox filter matched 0 of {len(wikidata_data)} "
+                        f"entries scanning z{_scan_z}. Shipping this would leave every "
+                        f"place panel empty. Check that the build has z{_scan_z} tiles.")
                 wikidata_data = filtered
 
             if _tile_src is None and len(wikidata_data) > 100_000:
