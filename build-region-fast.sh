@@ -20,16 +20,34 @@ TODAY=$(date +%Y-%m-%d)
 PY=/storage/streetzim/venv-linux/bin/python3
 SCRIPT=/storage/streetzim/create_osm_zim.py
 
-MBTILES=/storage/streetzim/world-data/regions/${ID}.mbtiles
+# Derived variants (switzerland-light, africa-light, ...) reuse their
+# PARENT's extracts and parquets and differ only in flags. See
+# cloud/region-variants.tsv for why this table exists rather than a
+# per-variant copy of this script.
+VARIANTS=/storage/streetzim/cloud/region-variants.tsv
+SRC_ID="$ID"
+VAR_SAT=yes
+VAR_MAXZOOM=""
+if [ -f "$VARIANTS" ]; then
+    _row=$(awk -F'\t' -v id="$ID" '$1==id && $1 !~ /^#/ {print; exit}' "$VARIANTS")
+    if [ -n "$_row" ]; then
+        SRC_ID=$(printf '%s' "$_row" | cut -f2)
+        VAR_SAT=$(printf '%s' "$_row" | cut -f3)
+        VAR_MAXZOOM=$(printf '%s' "$_row" | cut -f4)
+        echo "  variant of $SRC_ID: satellite=$VAR_SAT max_zoom=${VAR_MAXZOOM:-default}"
+    fi
+fi
 
-PBF=/storage/streetzim/world-data/regions/${ID}.osm.pbf
-SEARCH=/storage/streetzim/world-data/regions/${ID}.search.jsonl
+MBTILES=/storage/streetzim/world-data/regions/${SRC_ID}.mbtiles
+
+PBF=/storage/streetzim/world-data/regions/${SRC_ID}.osm.pbf
+SEARCH=/storage/streetzim/world-data/regions/${SRC_ID}.search.jsonl
 WD=/storage/streetzim/wikidata_cache
 TERRAIN=/storage/streetzim/terrain_cache
 LOWZ=/storage/streetzim/terrain_cache/dem_sources/world_dem_32k.tif
 OVERTURE_RELEASE="${OVERTURE_RELEASE:-2026-04-15.0}"
-ADDR=/storage/streetzim/overture_cache/addresses-${ID}-${OVERTURE_RELEASE}.parquet
-PLACES=/storage/streetzim/overture_cache/places-${ID}-${OVERTURE_RELEASE}.parquet
+ADDR=/storage/streetzim/overture_cache/addresses-${SRC_ID}-${OVERTURE_RELEASE}.parquet
+PLACES=/storage/streetzim/overture_cache/places-${SRC_ID}-${OVERTURE_RELEASE}.parquet
 # Offline Wikipedia: every linkable POI gets its article (trimmed reader
 # page) and, with WIKI_IMAGES, its pictures — from the local enwiki maxi
 # ZIM, never the network. The size check guards against a truncated copy
@@ -39,10 +57,19 @@ PLACES=/storage/streetzim/overture_cache/places-${ID}-${OVERTURE_RELEASE}.parque
 WIKI_ZIM=/storage/streetzim/wiki-src/wikipedia_en_all_maxi_2026-02.zim
 WIKI_ZIM_SIZE=123980647016
 WIKI_IMAGES="${WIKI_IMAGES:-all}"
-WIKI_TITLE_CACHE=/storage/streetzim/wiki_articles_cache/${ID}_qid_titles.json
+WIKI_TITLE_CACHE=/storage/streetzim/wiki_articles_cache/${SRC_ID}_qid_titles.json
 
 OUT_FINAL=osm-${ID}-${TODAY}.zim
 LOG=/storage/streetzim/${ID}-rebuild-${TODAY}.log
+
+if [ "$SRC_ID" != "$ID" ]; then
+    for _f in "$MBTILES" "$PBF" "$SEARCH" "$ADDR" "$PLACES"; do
+        [ -s "$_f" ] || { echo "FATAL: variant $ID needs $SRC_ID input $_f, which is missing." >&2
+                          echo "       Refusing to build: a missing parquet is dropped silently by the" >&2
+                          echo "       guards below and costs the region its Overture places." >&2
+                          exit 1; }
+    done
+fi
 
 echo "=== build $ID FAST @ $(date -Iseconds) ==="
 echo "  bbox: $BBOX  out: $OUT_FINAL  log: $LOG"
@@ -133,12 +160,18 @@ for cand in /home/ot/experiments/xapianbuilder/target/release/xapianbuilder \
     fi
 done
 
+SAT_ARGS=(--satellite --satellite-download-zoom 12)
+[ "$VAR_SAT" = no ] && SAT_ARGS=()
+ZOOM_ARGS=()
+[ -n "$VAR_MAXZOOM" ] && ZOOM_ARGS=(--max-zoom "$VAR_MAXZOOM")
+
 ARGS=(
+    "${SAT_ARGS[@]}"
+    "${ZOOM_ARGS[@]}"
     --mbtiles "$MBTILES"
     --pbf "$PBF"
     --bbox="$BBOX"
     --name "$NAME"
-    --satellite --satellite-download-zoom 12
     --terrain
     --wikidata --wikidata-cache "$WD"
     --terrain-dir "$TERRAIN"

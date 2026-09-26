@@ -1,0 +1,17 @@
+# Light / derived region variants.
+#
+# A variant reuses its PARENT's extracts and Overture parquets and differs
+# only in build flags. Without this table build-region-fast.sh would look for
+# overture_cache/{addresses,places}-<variant>-*.parquet, which do not exist,
+# and its `[ -f "$ADDR" ] &&` guard would SILENTLY drop both flags -- that is
+# how the first switzerland-light build lost 748,654 Overture place records
+# (9,947,615 -> 9,198,961): an empty fuel chip and nothing in the log but a
+# missing argument. The wrapper now ABORTS if a parent input is absent.
+#
+# satellite: no  -> omit --satellite entirely (there is no --no-satellite)
+# max_zoom:  13  -> pass --max-zoom 13 (honoured on the in-memory path since
+#                   3910bfc; switzerland's mbtiles is 0.9 GB so it takes it)
+#
+# id	parent	satellite	max_zoom
+switzerland-light	switzerland	no	13
+africa-light	africa	no	13
