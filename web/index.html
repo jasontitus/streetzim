@@ -163,23 +163,30 @@
     padding-top: 18px;
   }
   .maps-tier-header:first-child {
-    .maps-filter { display: flex; align-items: center; gap: 10px; margin: 18px 0 6px; }
-    #map-filter {
-      flex: 1 1 auto; max-width: 420px; padding: 10px 12px;
-      font-size: 16px; /* 16px or iOS zooms the page on focus */
-      border: 1px solid var(--border, #d8d8d8); border-radius: 8px;
-      background: #fff; color: inherit;
-    }
-    #map-filter:focus { outline: 2px solid #2563eb; outline-offset: 1px; }
-    .maps-filter-count { font-size: 13px; opacity: 0.7; white-space: nowrap; }
-    .maps [hidden] { display: none !important; }
-
     /* No top rule for the first header — the parent `<h2>Download a
        map</h2>` already separates this section from the page header. */
     border-top: none;
     padding-top: 4px;
     margin-top: 8px;
   }
+  /* The filter box above the grid, and the rule that makes filtering visible.
+     These five selectors sat INSIDE the rule above until 2026-09-27. Browsers
+     read that as CSS nesting, so they resolved to
+     `.maps-tier-header:first-child .maps [hidden]` and friends and matched
+     nothing: the input was unstyled, and — the reported symptom — the filter
+     did not filter, because `.map-card { display: flex }` below outranks the
+     UA stylesheet's `[hidden] { display: none }` and the override that was
+     supposed to beat it never applied. Keep them at top level. */
+  .maps-filter { display: flex; align-items: center; gap: 10px; margin: 18px 0 6px; }
+  #map-filter {
+    flex: 1 1 auto; max-width: 420px; padding: 10px 12px;
+    font-size: 16px; /* 16px or iOS zooms the page on focus */
+    border: 1px solid var(--border, #d8d8d8); border-radius: 8px;
+    background: #fff; color: inherit;
+  }
+  #map-filter:focus { outline: 2px solid #2563eb; outline-offset: 1px; }
+  .maps-filter-count { font-size: 13px; opacity: 0.7; white-space: nowrap; }
+  .maps [hidden] { display: none !important; }
   .map-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -409,7 +416,7 @@
       <span class="map-badge badge-satellite">Satellite</span> Sentinel-2 imagery,
       <span class="map-badge badge-wiki">Wikipedia links</span> Wikidata cross-refs.
     </p>
-    <p class="updated">Last updated: 2026-09-27 19:42 UTC · build <span id="build-stamp">…</span></p>
+    <p class="updated">Last updated: 2026-09-27 19:53 UTC · build <span id="build-stamp">…</span></p>
 <script>
 fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
   .then(function(r) { return r.ok ? r.text() : ''; })

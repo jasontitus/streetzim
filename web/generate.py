@@ -637,6 +637,36 @@ def render_feature_badges(item_meta):
     return '\n        <div class="map-card-badges">' + "".join(pills) + "</div>"
 
 
+def check_filter_css(html: str) -> None:
+    """Refuse to write a page whose filter box cannot hide anything.
+
+    The filter sets `card.hidden = true`; `.maps [hidden] { display: none
+    !important }` is what makes that visible, because `.map-card` sets
+    `display: flex` and so outranks the UA stylesheet's own [hidden] rule.
+    On 2026-09-27 that override had been written inside
+    `.maps-tier-header:first-child { ... }`, which browsers read as CSS
+    nesting -- it resolved to a selector that matches nothing, and typing in
+    the box visibly did nothing at all for as long as that shipped.
+
+    Nothing in the pipeline noticed, because the JS was correct and the
+    attribute really was set. So check the stylesheet's shape here, where it
+    costs nothing, and gate the behaviour in cloud/site_filter_gate.mjs.
+    """
+    if ".maps-filter" not in html:            # no filter box on this page
+        return
+    if not re.search(r"^  \.maps \[hidden\] \{[^}]*display:\s*none", html, re.M):
+        raise ValueError(
+            "the `.maps [hidden]` override is missing or indented as a nested "
+            "rule; the download-page filter would set `hidden` on cards that "
+            "stay visible (see cloud/site_filter_gate.mjs)")
+    block = re.search(r"\n  \.maps-tier-header:first-child \{(.*?)\n  \}",
+                      html, re.S)
+    if block and re.search(r"^\s+[.#][\w-]+.*\{", block.group(1), re.M):
+        raise ValueError(
+            "a selector is nested inside `.maps-tier-header:first-child`; "
+            "that is how the filter CSS was disabled on 2026-09-27")
+
+
 def _bdecode(data, pos=0):
     """Minimal bencode decoder (ints, byte strings, lists, dicts)."""
     c = data[pos:pos + 1]
@@ -1039,6 +1069,7 @@ def build_page():
     updated = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     html = template.replace("{{MAPS}}", "\n".join(cards))
     html = html.replace("{{UPDATED}}", updated)
+    check_filter_css(html)
 
     # Explicit UTF-8: the template and region descriptions carry
     # non-cp1252 characters (Lāna, İzmir, Þingvellir), so the locale
