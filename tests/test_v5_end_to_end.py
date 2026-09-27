@@ -52,6 +52,7 @@ def _read_meta(p: Path) -> dict | None:
 CORPORA = _discover_corpora()
 
 
+@pytest.mark.slow          # 17 of the suite's 19 minutes: see tests/conftest.py
 @pytest.mark.skipif(not CORPORA, reason="no golden corpora under tests/golden/")
 @pytest.mark.parametrize("corpus", CORPORA, ids=[p.stem for p in CORPORA])
 def test_v5_converter_preserves_routing(corpus: Path):
