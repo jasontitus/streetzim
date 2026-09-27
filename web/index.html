@@ -182,9 +182,18 @@
     flex: 1 1 auto; max-width: 420px; padding: 10px 12px;
     font-size: 16px; /* 16px or iOS zooms the page on focus */
     border: 1px solid var(--border, #d8d8d8); border-radius: 8px;
-    background: #fff; color: inherit;
+    /* The palette is dark-only. `background: #fff; color: inherit` put the
+       page's near-white --text on a white field -- white on white, reported
+       2026-09-27. Nobody saw it earlier because the whole block was nested
+       inside another rule and never applied at all; un-nesting the filter so
+       it worked is what made this visible. */
+    background: var(--bg-card); color: var(--text);
+    -webkit-text-fill-color: var(--text);   /* iOS ignores `color` on search inputs */
   }
-  #map-filter:focus { outline: 2px solid #2563eb; outline-offset: 1px; }
+  #map-filter::placeholder { color: var(--text-faint); opacity: 1; }
+  /* Safari draws its own clear button in the text colour; make it visible. */
+  #map-filter::-webkit-search-cancel-button { filter: invert(1) opacity(0.6); }
+  #map-filter:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   .maps-filter-count { font-size: 13px; opacity: 0.7; white-space: nowrap; }
   .maps [hidden] { display: none !important; }
   .map-card {
@@ -416,7 +425,7 @@
       <span class="map-badge badge-satellite">Satellite</span> Sentinel-2 imagery,
       <span class="map-badge badge-wiki">Wikipedia links</span> Wikidata cross-refs.
     </p>
-    <p class="updated">Last updated: 2026-09-27 19:53 UTC · build <span id="build-stamp">…</span></p>
+    <p class="updated">Last updated: 2026-09-27 21:24 UTC · build <span id="build-stamp">…</span></p>
 <script>
 fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
   .then(function(r) { return r.ok ? r.text() : ''; })
@@ -523,6 +532,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
         <div class="map-card-links">
           <a class="btn btn-primary" href="https://archive.org/download/streetzim-europe/osm-europe-2026-09-21.zim" data-track="download" data-region="europe" data-title="Europe">Download</a>
           <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-europe/osm-europe-2026-09-21.zim" data-track="preview" data-region="europe" data-title="Europe" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/europe.torrent" data-track="torrent" data-region="europe" data-title="Europe">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-europe" data-track="details" data-region="europe" data-title="Europe">Info</a>
         </div>
       </div>
@@ -582,6 +592,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
         <div class="map-card-links">
           <a class="btn btn-primary" href="https://archive.org/download/streetzim-southeast-asia/osm-southeast-asia-2026-09-20.zim" data-track="download" data-region="southeast-asia" data-title="Southeast Asia">Download</a>
           <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-southeast-asia/osm-southeast-asia-2026-09-20.zim" data-track="preview" data-region="southeast-asia" data-title="Southeast Asia" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/southeast-asia.torrent" data-track="torrent" data-region="southeast-asia" data-title="Southeast Asia">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-southeast-asia" data-track="details" data-region="southeast-asia" data-title="Southeast Asia">Info</a>
         </div>
       </div>
@@ -942,6 +953,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
         <div class="map-card-links">
           <a class="btn btn-primary" href="https://archive.org/download/streetzim-brazil/osm-brazil-2026-09-20.zim" data-track="download" data-region="brazil" data-title="Brazil">Download</a>
           <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-brazil/osm-brazil-2026-09-20.zim" data-track="preview" data-region="brazil" data-title="Brazil" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/brazil.torrent" data-track="torrent" data-region="brazil" data-title="Brazil">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-brazil" data-track="details" data-region="brazil" data-title="Brazil">Info</a>
         </div>
       </div>
@@ -1053,15 +1065,14 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Japan</div>
-          <div class="map-card-size">5.0 GB</div>
+          <div class="map-card-size">5.2 GB</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <div class="map-card-date">Updated <time datetime="2026-09-27">27 Sep 2026</time></div>
         <p class="map-card-desc">Japan &mdash; all four main islands (Honshu, Hokkaido, Kyushu, Shikoku), Okinawa, and the Ryukyu archipelago. Tokyo, Osaka, Kyoto, Nagoya, Sapporo, Fukuoka, Hiroshima, and more.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-japan/osm-japan-2026-09-20.zim" data-track="download" data-region="japan" data-title="Japan">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-japan/osm-japan-2026-09-20.zim" data-track="preview" data-region="japan" data-title="Japan" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/japan.torrent" data-track="torrent" data-region="japan" data-title="Japan">Torrent</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-japan/osm-japan-2026-09-27.zim" data-track="download" data-region="japan" data-title="Japan">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-japan/osm-japan-2026-09-27.zim" data-track="preview" data-region="japan" data-title="Japan" title="Look at this map in your browser, streamed from archive.org">Preview</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-japan" data-track="details" data-region="japan" data-title="Japan">Info</a>
         </div>
       </div>
@@ -1151,6 +1162,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
         <div class="map-card-links">
           <a class="btn btn-primary" href="https://archive.org/download/streetzim-turkey/osm-turkey-2026-09-27.zim" data-track="download" data-region="turkey" data-title="Turkey">Download</a>
           <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-turkey/osm-turkey-2026-09-27.zim" data-track="preview" data-region="turkey" data-title="Turkey" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/turkey.torrent" data-track="torrent" data-region="turkey" data-title="Turkey">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-turkey" data-track="details" data-region="turkey" data-title="Turkey">Info</a>
         </div>
       </div>
@@ -1196,6 +1208,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
         <div class="map-card-links">
           <a class="btn btn-primary" href="https://archive.org/download/streetzim-east-coast-us/osm-east-coast-us-2026-09-20.zim" data-track="download" data-region="east-coast-us" data-title="East Coast US">Download</a>
           <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-east-coast-us/osm-east-coast-us-2026-09-20.zim" data-track="preview" data-region="east-coast-us" data-title="East Coast US" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/east-coast-us.torrent" data-track="torrent" data-region="east-coast-us" data-title="East Coast US">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-east-coast-us" data-track="details" data-region="east-coast-us" data-title="East Coast US">Info</a>
         </div>
       </div>
@@ -1210,6 +1223,7 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
         <div class="map-card-links">
           <a class="btn btn-primary" href="https://archive.org/download/streetzim-midwest-us/osm-midwest-us-2026-09-20.zim" data-track="download" data-region="midwest-us" data-title="Midwest United States">Download</a>
           <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-midwest-us/osm-midwest-us-2026-09-20.zim" data-track="preview" data-region="midwest-us" data-title="Midwest United States" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-secondary" href="/torrents/midwest-us.torrent" data-track="torrent" data-region="midwest-us" data-title="Midwest United States">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-midwest-us" data-track="details" data-region="midwest-us" data-title="Midwest United States">Info</a>
         </div>
       </div>

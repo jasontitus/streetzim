@@ -79,6 +79,26 @@ try {
   say(restored.length === before.length,
       `Escape restored all ${before.length} cards (saw ${restored.length})`);
 
+  // Painted colours, not declared ones: the field showed the body's near-white
+  // text on a white background (reported "filter text is white one white"), and
+  // only the computed style proves what a reader actually sees.
+  const ink = await page.$eval('#map-filter', (el) => {
+    const cs = getComputedStyle(el);
+    return { color: cs.color, background: cs.backgroundColor };
+  });
+  const parse = (c) => (c.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+  const lum = (ch) => {
+    const [r, g, b] = ch.map((v) => {
+      const s = v / 255;
+      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const lf = lum(parse(ink.color)), lb = lum(parse(ink.background));
+  const ratio = (Math.max(lf, lb) + 0.05) / (Math.min(lf, lb) + 0.05);
+  say(ratio >= 4.5,
+      `filter text contrast ${ratio.toFixed(1)}:1 (${ink.color} on ${ink.background})`);
+
   // The headers must follow their cards, or a section title floats alone.
   const headers = await page.$$eval('.maps .maps-tier-header', (hs) => hs.length);
   say(headers > 0, `${headers} tier headers present`);
