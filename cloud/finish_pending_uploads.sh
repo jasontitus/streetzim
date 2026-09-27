@@ -27,8 +27,30 @@ while IFS=$'\t' read -r id zim when; do
   [ -n "${seen[$id/$zim]:-}" ] && continue
   seen[$id/$zim]=1
   [ -s "$zim" ] || { echo "$id: $zim gone locally — dropping" | tee -a "$LOG"; continue; }
-  listed=$(venv-linux/bin/ia metadata "streetzim-$id" 2>/dev/null \
-    | venv-linux/bin/python3 -c "import sys,json;m=json.load(sys.stdin);print('yes' if any(f.get('name')==sys.argv[1] for f in m.get('files',[])) else 'no')" "$zim" 2>/dev/null)
+  # One `ia metadata` call answers both questions: is this ZIM listed, and has
+  # a LATER build of the same region already been listed? A superseded row is
+  # not just wasted work -- completing it rebuilds web/torrents/<id>.torrent
+  # from the older file, which makes generate.py drop the region's Torrent
+  # button, and then cleanup_old_zims --keep 2 deletes the very file the row
+  # was about. Observed 2026-09-27 with southeast-asia 09-17 behind 09-20.
+  state=$(venv-linux/bin/ia metadata "streetzim-$id" 2>/dev/null \
+    | venv-linux/bin/python3 -c '
+import sys, json, re
+want = sys.argv[1]
+names = [f.get("name", "") for f in json.load(sys.stdin).get("files", [])]
+def stamp(n):
+    m = re.match(r"osm-.+-(\d{4}-\d{2}-\d{2})([a-z]?)\.zim$", n)
+    return (m.group(1), m.group(2)) if m else None
+mine = stamp(want)
+newer = sorted((n for n in names if stamp(n) and mine and stamp(n) > mine), key=stamp)
+print(("yes" if want in names else "no") + "\t" + (newer[-1] if newer else ""))
+' "$zim" 2>/dev/null)
+  listed=${state%%$'\t'*}
+  superseded=${state#*$'\t'}
+  if [ -n "$superseded" ]; then
+    echo "$id: $zim superseded by $superseded — dropping" | tee -a "$LOG"
+    continue
+  fi
   if [ "$listed" != "yes" ]; then
     echo "$id: still not listed (queued since $when)" | tee -a "$LOG"
     printf '%s\t%s\t%s\n' "$id" "$zim" "$when" >> "$still"
