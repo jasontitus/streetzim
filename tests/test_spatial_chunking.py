@@ -385,7 +385,7 @@ def _read_meta(p: Path) -> dict | None:
 CORPORA = _discover_corpora()
 
 
-@pytest.mark.slow          # minutes per corpus: see tests/conftest.py
+@pytest.mark.slow          # 44 min for four corpora: see tests/conftest.py
 @pytest.mark.skipif(not CORPORA, reason="no golden corpora under tests/golden/")
 @pytest.mark.parametrize("corpus", CORPORA, ids=[p.stem for p in CORPORA])
 def test_spatial_preserves_routes_on_real_zim(corpus: Path):

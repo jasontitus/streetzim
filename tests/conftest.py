@@ -3,11 +3,15 @@
 Two tests replay golden routes through a real ZIM after rebuilding its graph:
 test_spatial_chunking.py's spatial split (in memory) and test_v5_end_to_end.py's
 v5 conversion. Both run once per golden corpus, and four corpora have their
-source ZIM on this host. Measured on 2026-09-27: `pytest tests/` ran past a
-40-minute timeout twice and never reported; with the spatial one deferred it
-finished in 19 minutes, 17 of which were the four v5 corpora (colorado alone
-502 s). A suite nobody can finish is a suite nobody runs, which is worse than
-one that defers its heaviest checks. Without them the rest takes ~2 minutes.
+source ZIM on this host. Measured 2026-09-27/28, both green:
+
+    spatial split   43m39s   baltics 1720 s, colorado 739 s, sv 129 s, hisp 31 s
+    v5 conversion   ~17 min  colorado 502 s, baltics 339 s, sv 160 s, hisp 43 s
+
+So `pytest tests/` needed an hour, and it ran past a 40-minute timeout twice
+and reported nothing at all. A suite nobody can finish is a suite nobody runs,
+which is worse than one that defers its heaviest checks. Without these two the
+rest takes 32 seconds.
 
 So it is marked `slow` and deselected by default. Run it deliberately:
 
