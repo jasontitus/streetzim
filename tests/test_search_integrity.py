@@ -24,17 +24,89 @@ ROOT = Path(__file__).resolve().parent.parent
 libzim_reader = pytest.importorskip("libzim.reader")
 
 
+# Entry enumeration is linear in the archive, so a continent-scale ZIM turns
+# this module into a 20-minute disk hog -- and the newest dated build is often
+# exactly that, still being uploaded. Prefer the newest build that is small
+# enough to scan quickly; fall back to the newest of any size.
+_MAX_TEST_ZIM_BYTES = int(os.environ.get("STREETZIM_TEST_ZIM_MAX_GB", "3")) * 1000 ** 3
+
+
 def _pick_zim():
     env = os.environ.get("STREETZIM_TEST_ZIM")
     if env:
         return Path(env)
     dated = sorted(ROOT.glob("osm-*-20??-??-??.zim"),
                    key=lambda p: p.stat().st_mtime, reverse=True)
-    return dated[0] if dated else None
+    if not dated:
+        return None
+    for candidate in dated:
+        if candidate.stat().st_size <= _MAX_TEST_ZIM_BYTES:
+            return candidate
+    return dated[0]
 
 
 ZIM = _pick_zim()
 pytestmark = pytest.mark.skipif(ZIM is None, reason="no dated ZIM on this host")
+
+
+def _candidate_zims(limit=6):
+    """Small dated builds, newest first — for tests that need the right region.
+
+    Diacritic folding can only be observed on a ZIM whose index actually holds
+    an accented name, and the default pick is whatever built most recently. On
+    2026-09-27 that was switzerland-light, so both folding tests skipped and
+    the suite reported green while checking nothing. Widening the search to a
+    handful of builds makes them run on any host that has an Icelandic or
+    Nordic region lying around.
+    """
+    env = os.environ.get("STREETZIM_TEST_ZIM")
+    if env:
+        return [Path(env)]
+    small = [z for z in sorted(ROOT.glob("osm-*-20??-??-??.zim"),
+                               key=lambda p: p.stat().st_mtime, reverse=True)
+             if z.stat().st_size <= _MAX_TEST_ZIM_BYTES]
+    # Newest first, but wide enough to reach a region with the script a given
+    # test needs: the eight newest builds on this host held no æ/ø/þ at all,
+    # so a narrow list turned the ligature check into a permanent skip.
+    return small[:limit]
+
+
+# Regions whose place names actually use æ, ø, þ or ð. Scanning every small
+# build to find one costs minutes on a host that is also running a build; the
+# script lives in a known handful of regions, so ask them directly.
+LIGATURE_REGIONS = ("iceland", "nordics", "faroes", "baltics", "poland",
+                    "britain-ireland", "europe")
+
+
+def _ligature_zims(limit=2):
+    env = os.environ.get("STREETZIM_TEST_ZIM")
+    if env:
+        return [Path(env)]
+    out = []
+    for z in sorted(ROOT.glob("osm-*-20??-??-??.zim"),
+                    key=lambda p: p.stat().st_mtime, reverse=True):
+        if z.stat().st_size > _MAX_TEST_ZIM_BYTES:
+            continue
+        if any(f"osm-{r}-" in z.name for r in LIGATURE_REGIONS):
+            out.append(z)
+        if len(out) >= limit:
+            break
+    return out
+
+def _first_id_at_or_after(archive, prefix):
+    """Lowest entry id whose path sorts at or after `prefix`.
+
+    libzim stores entries sorted by path, which is what get_entry_by_path's
+    own lookup relies on, so a bisect over ids needs no enumeration.
+    """
+    lo, hi = 0, archive.all_entry_count
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if archive._get_entry_by_id(mid).path < prefix:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
 
 
 @pytest.fixture(scope="module")
@@ -45,12 +117,17 @@ def archive():
 @pytest.fixture(scope="module")
 def sample_records(archive):
     """A few thousand real search records from this ZIM."""
-    # Spread across the whole archive, not the first few chunks: chunks are
-    # keyed by name prefix, so taking the head samples only digits and
-    # punctuation and misses every accented place name in the region.
-    paths = [archive._get_entry_by_id(i).path for i in range(archive.all_entry_count)]
-    chunks = [p for p in paths
-              if p.startswith("search-data/") and not p.endswith("manifest.json")]
+    # Two constraints at once. The sample must SPREAD across the whole
+    # search-data range -- chunks are keyed by name prefix, so the head holds
+    # only digits and punctuation and would miss every accented place name --
+    # and it must not enumerate the archive, which is tens of millions of
+    # entries on a continent build. Entry ids are in sorted path order
+    # (verified: 4,004 strided reads of a real ZIM, zero inversions), so
+    # binary-search the "search-data/" block and stride inside it.
+    lo = _first_id_at_or_after(archive, "search-data/")
+    hi = _first_id_at_or_after(archive, "search-data0")   # '0' is the next char after '/'
+    chunks = [archive._get_entry_by_id(i).path for i in range(lo, hi)]
+    chunks = [c for c in chunks if not c.endswith("manifest.json")]
     if not chunks:
         return []
     step = max(1, len(chunks) // 60)
@@ -145,51 +222,84 @@ def test_search_index_holds_no_viewer_chrome(archive):
         assert n == 0, f"UI phrase {phrase} matched {n} documents"
 
 
-def test_diacritics_fold(archive, sample_records):
+def test_diacritics_fold():
     """An unaccented query must find an accented name.
 
     Verified on iceland 2026-09-25: Reykjavik/Reykjavík/reykjavik all return
     3, Abaejara/Ábæjará both return 13. Diacritic folding and case folding
     work; see the next test for what does not.
+
+    Walks several small builds rather than only the newest, because the
+    newest may be a region with no accents at all -- and a skip that looks
+    like a pass is how this check went unobserved.
     """
     search = pytest.importorskip("libzim.search")
-    if not archive.has_fulltext_index:
-        pytest.skip("no fulltext index in this ZIM")
-
-    def strip_marks(n):
-        return "".join(c for c in unicodedata.normalize("NFKD", n)
-                       if not unicodedata.combining(c))
-
-    LIGATURES = "æÆøØþÞðÐßłŁ"
-    searcher = search.Searcher(archive)
-
-    def hits(q):
-        return searcher.search(search.Query().set_query(q)).getEstimatedMatches()
-
-    # The fulltext index covers a SUBSET of the search records (xapianbuilder
-    # is fed "N docs of M total"), so most names return 0 in either form.
-    # Only a name that is actually indexed can say anything about folding.
-    pair = None
-    for r in sample_records:
-        n = (r.get("n") or "").strip()
-        if " " in n or len(n) <= 4 or any(c in LIGATURES for c in n):
+    checked = []
+    for path in _candidate_zims():
+        arc = libzim_reader.Archive(str(path))
+        if not arc.has_fulltext_index:
             continue
-        folded = strip_marks(n)
-        if folded == n or not folded.isascii():
+        pair = _find_folding_pair(arc, search, _records_from(arc))
+        if not pair:
             continue
-        if hits(n) > 0:
-            pair = (n, folded)
+        checked.append(path.name)
+        searcher = search.Searcher(arc)
+        hits = searcher.search(search.Query().set_query(pair[1])).getEstimatedMatches()
+        assert hits > 0, (
+            f"{pair[0]!r} is findable in {path.name} but {pair[1]!r} is not; "
+            "diacritics are not folding")
+        return
+    pytest.skip(f"no indexed diacritic-only place name in {len(_candidate_zims())} builds")
+
+
+def _strip_marks(name):
+    return "".join(c for c in unicodedata.normalize("NFKD", name)
+                   if not unicodedata.combining(c))
+
+
+# Letters libzim does not fold to ASCII; a name containing one tells us nothing
+# about diacritic folding, so they are excluded from that test's candidates.
+LIGATURES = "æÆøØþÞðÐßłŁ"
+
+
+def _records_from(arc):
+    lo = _first_id_at_or_after(arc, "search-data/")
+    hi = _first_id_at_or_after(arc, "search-data0")
+    chunks = [arc._get_entry_by_id(i).path for i in range(lo, hi)
+              if not arc._get_entry_by_id(i).path.endswith("manifest.json")]
+    if not chunks:
+        return []
+    step = max(1, len(chunks) // 60)
+    recs = []
+    for path in chunks[::step]:
+        try:
+            recs.extend(json.loads(bytes(arc.get_entry_by_path(path).get_item().content)))
+        except Exception:                                    # noqa: BLE001
+            continue
+        if len(recs) > 20000:
             break
-    if not pair:
-        pytest.skip("no indexed diacritic-only place name in the sample")
-    assert hits(pair[1]) > 0, (
-        f"{pair[0]!r} is findable but {pair[1]!r} is not; diacritics are not folding")
+    return recs
+
+
+def _find_folding_pair(arc, search, records):
+    """A single-word indexed name whose only ASCII difference is its accents."""
+    searcher = search.Searcher(arc)
+    for r in records:
+        name = (r.get("n") or "").strip()
+        if " " in name or len(name) <= 4 or any(c in LIGATURES for c in name):
+            continue
+        folded = _strip_marks(name)
+        if folded == name or not folded.isascii():
+            continue
+        if searcher.search(search.Query().set_query(name)).getEstimatedMatches() > 0:
+            return name, folded
+    return None
 
 
 @pytest.mark.xfail(reason="known gap: the index folds diacritics but does not "
                           "expand ligatures/letters (ae, th, d, o)",
                    strict=False)
-def test_letter_expansions_are_searchable(archive, sample_records):
+def test_letter_expansions_are_searchable():
     """Known gap, recorded so it flips green when fixed.
 
     Measured on iceland 2026-09-25:
@@ -199,32 +309,44 @@ def test_letter_expansions_are_searchable(archive, sample_records):
     are unreachable by search. Affects iceland, the faroes and the nordics
     (o for ø) most. Fixing it belongs in the index builder -- index both the
     original and an expanded form -- not in the viewer.
+
+    Walks the same candidate builds as the folding test: pinned to the newest
+    build alone this only ever skipped, which records nothing.
     """
     search = pytest.importorskip("libzim.search")
-    if not archive.has_fulltext_index:
-        pytest.skip("no fulltext index in this ZIM")
     EXPANSIONS = (("æ", "ae"), ("Æ", "AE"), ("ø", "o"), ("Ø", "O"),
                   ("þ", "th"), ("Þ", "TH"), ("ð", "d"), ("Ð", "D"))
-    pair = None
-    for r in sample_records:
-        n = (r.get("n") or "").strip()
-        if " " in n or len(n) <= 4:
+    for path in _ligature_zims():
+        arc = libzim_reader.Archive(str(path))
+        if not arc.has_fulltext_index:
             continue
-        out = n
-        for a, b in EXPANSIONS:
-            out = out.replace(a, b)
-        out = "".join(c for c in unicodedata.normalize("NFKD", out)
-                      if not unicodedata.combining(c))
-        if out != n and out.isascii():
-            searcher0 = search.Searcher(archive)
-            if searcher0.search(search.Query().set_query(n)).getEstimatedMatches() > 0:
-                pair = (n, out)
-                break
-    if not pair:
-        pytest.skip("no expandable place name in the sample")
-    searcher = search.Searcher(archive)
-    assert searcher.search(search.Query().set_query(pair[1])).getEstimatedMatches() > 0, (
-        f"{pair[0]!r} is not findable as {pair[1]!r}")
+        searcher = search.Searcher(arc)
+        # Bounded: a ligature name, if the region has any, turns up early in a
+        # 20k-record sample, and an unbounded walk across eight builds runs for
+        # minutes against the disk a build is already using.
+        for r in _records_from(arc)[:6000]:
+            name = (r.get("n") or "").strip()
+            if " " in name or len(name) <= 4:
+                continue
+            # Must actually contain a letter that needs EXPANDING. Without this
+            # the test accepted any accented name, stripped its marks and
+            # duplicated the folding test above -- it xpassed on
+            # 'Adandjro-akodé' -> 'Adandjro-akode', which says nothing about æ.
+            if not any(a in name for a, _ in EXPANSIONS):
+                continue
+            out = name
+            for a, b in EXPANSIONS:
+                out = out.replace(a, b)
+            out = _strip_marks(out)
+            if out == name or not out.isascii():
+                continue
+            if searcher.search(search.Query().set_query(name)).getEstimatedMatches() == 0:
+                continue
+            assert searcher.search(
+                search.Query().set_query(out)).getEstimatedMatches() > 0, (
+                f"{name!r} is not findable as {out!r} in {path.name}")
+            return
+    pytest.skip(f"no expandable place name in {[p.name for p in _ligature_zims()]}")
 
 
 def test_manifest_agrees_with_the_chunks_on_disk(archive):
