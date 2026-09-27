@@ -125,3 +125,24 @@ def test_the_regions_that_exposed_the_bug_have_anchors_on_land():
         assert abs(lat) <= 90 and abs(lon) <= 180
         # z14 resolution at this latitude, for the satellite cap's sake
         assert 156543.03 * math.cos(math.radians(lat)) / (2 ** 14) > 0
+
+
+def test_regions_sharing_a_bbox_agree_on_their_anchor():
+    """create_osm_zim.registry_anchor() matches on bbox and takes the FIRST row.
+
+    Four rows carry the identical bbox 5.4,45.7,11.2,48.2 (switzerland plus
+    switzerland-nosat, -nosat-z13 and -light) and two carry Africa's, because a
+    Light variant is the same geography with different build flags. The
+    builder is handed a bbox and a display name, never the region id, so it
+    cannot tell them apart -- whichever row appears first wins. That is only
+    safe while every row in a bbox group names the same anchor. If a variant
+    ever needs a different one, registry_anchor needs the id, not a tie-break.
+    """
+    groups = {}
+    for rid, c in registry().items():
+        groups.setdefault(c[2], []).append((rid, c[4]))
+    conflicts = {bbox: rs for bbox, rs in groups.items()
+                 if len({anchor for _, anchor in rs}) > 1}
+    assert not conflicts, (
+        "regions sharing a bbox disagree on their anchor, so the build picks "
+        f"one by file order: {conflicts}")
