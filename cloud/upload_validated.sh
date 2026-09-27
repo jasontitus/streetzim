@@ -81,9 +81,16 @@ sleep 30
 "$IA" metadata "streetzim-${id}" --modify="date:${today}" || true
 
 # --- 4. stamp feature flags ---
-"$PYTHON" cloud/stamp_item_metadata.py "streetzim-${id}" \
-    --routing --overture --terrain --satellite --wikidata \
-    || echo "WARN stamp skipped for ${id}"
+# Read them out of the ZIM we just shipped rather than asserting all five.
+# Until 2026-09-27 this passed --routing --overture --terrain --satellite
+# --wikidata unconditionally, so both Light variants — built with
+# --no-satellite, hasSatellite:false in their own meta — carried a
+# "Satellite" badge on the download page. --from-zim also writes an
+# explicit "no", which is what clears a stale yes from an earlier upload.
+# A ZIM too old to carry streetzim-meta.json leaves the badges untouched:
+# skipping is honest, guessing is how the wrong badge got there.
+"$PYTHON" cloud/stamp_item_metadata.py "streetzim-${id}" --from-zim "$dated" \
+    || echo "WARN stamp skipped for ${id} (no readable streetzim-meta.json)"
 
 # --- 4b. Wait for `ia metadata` to reflect the upload before
 # pruning. The 30-second blanket sleep above isn't enough on its own:
