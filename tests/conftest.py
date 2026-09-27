@@ -5,8 +5,11 @@ test_spatial_chunking.py's spatial split (in memory) and test_v5_end_to_end.py's
 v5 conversion. Both run once per golden corpus, and four corpora have their
 source ZIM on this host. Measured 2026-09-27/28, both green:
 
-    spatial split   43m39s   baltics 1720 s, colorado 739 s, sv 129 s, hisp 31 s
-    v5 conversion   ~17 min  colorado 502 s, baltics 339 s, sv 160 s, hisp 43 s
+    spatial split   43m39s  baltics 1720 s, colorado 739 s, sv 129 s, hisp 31 s
+    v5 conversion   16m04s  colorado 433 s, baltics 332 s, sv 158 s, hisp 42 s
+
+Each is 4 passed, 3 skipped — the two japan corpora and washington-dc have no
+source ZIM on this host.
 
 So `pytest tests/` needed an hour, and it ran past a 40-minute timeout twice
 and reported nothing at all. A suite nobody can finish is a suite nobody runs,
