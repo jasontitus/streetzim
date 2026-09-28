@@ -7,6 +7,8 @@ how production releases are made, and what is known to be wrong.
 how the 2026-09 openZIM review of this codebase was addressed, and
 [docs/openzim-integration.md](docs/openzim-integration.md) is the plan for
 bringing StreetZim features into openzim/maps.
+[docs/adoption-plan.md](docs/adoption-plan.md) tracks what it would take for
+openZIM to adopt StreetZim directly.
 
 ## 1. What is core and what is operations
 
