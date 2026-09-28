@@ -19,8 +19,9 @@ Usage:
 """
 import argparse, glob, math, os, re, sys, time
 
-# The checkout this script lives in (/storage/streetzim on the build host).
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# The checkout holding the ZIMs and cloud/regions.tsv: $STREETZIM_ROOT, else
+# the checkout this script lives in (/storage/streetzim on the build host).
+ROOT = os.environ.get("STREETZIM_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(ROOT, "cloud"))
 from streetzim.routing.spatial import load_spatial_from_zim  # noqa: E402
 from streetzim.routing.spatial_astar import find_route_spatial  # noqa: E402

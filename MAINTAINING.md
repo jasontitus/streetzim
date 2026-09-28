@@ -16,9 +16,10 @@ ZIM.
 **Core: builds a ZIM from OSM data.** Portable, tested, run by CI.
 
 - `create_osm_zim.py`: the builder. At import time it needs
-  `cloud/viewer_slots.py`; later it lazily imports `cloud/{manifest_writer,
-  wiki_articles, search_shards, repackage_zim, chip_shards, chip_rules,
-  wikidata_titles}.py`, `wikidata_cache.py`, and the `streetzim/` package
+  `cloud/viewer_slots.py`, `cloud/search_shards.py` and
+  `streetzim/search_extract.py`; later it lazily imports `cloud/{manifest_writer,
+  wiki_articles, chip_shards, chip_rules, wikidata_titles}.py`,
+  `wikidata_cache.py`, and the rest of the `streetzim/` package
   (`streetzim.routing`: graph formats, spatial cells, reference routers).
   `tests/szrg_*.py` are aliases of those modules, kept so old imports work.
 - `resources/viewer/`: the viewer baked into every ZIM. `resources/tilemaker/`: the tile profile.
