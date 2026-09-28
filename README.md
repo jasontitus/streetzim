@@ -123,7 +123,8 @@ resources/viewer/ (MapLibre app) ───┤
              tiles, searches the sharded JSON and routes in a Web Worker.
 ```
 
-- Every byte format and ZIM path is specified in [docs/formats.md](docs/formats.md).
+- Every byte format and ZIM path is specified in [docs/formats.md](docs/formats.md); search records and category files in [docs/search-records.md](docs/search-records.md).
+- Working with openzim/maps: StreetZim also builds from the OpenFreeMap tiles maps2zim uses (`scripts/fetch-openfreemap-mbtiles.py`, then `--mbtiles`); [docs/openzim-integration.md](docs/openzim-integration.md) is the plan for porting features into maps2zim.
 - Routing internals: [docs/routing.md](docs/routing.md). Search sharding: [docs/search-prefix-locality.md](docs/search-prefix-locality.md).
 - Kiwix reader quirks the design works around (service-worker request drops, cluster size limits, zstd windows): [docs/zim-packaging-gotchas.md](docs/zim-packaging-gotchas.md).
 - The in-ZIM apps (`places.html`, detail pages, the `#dest=` deep-link protocol): [docs/in-zim-apps.md](docs/in-zim-apps.md).

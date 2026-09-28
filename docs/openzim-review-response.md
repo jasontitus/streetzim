@@ -68,6 +68,10 @@ MIT-licensed, so it can be reused in GPL-3.0 openzim/maps with attribution.
 | 8. Routing | `extract_routing_graph` (graph builder), `tests/szrg_spatial.py` (cell writer), `resources/viewer/routing-worker.js`, the byte spec in `docs/formats.md`, the algorithm and iOS memory notes in `docs/routing.md`, and the reference router plus differential tests (`tests/szrg_astar.py`, `tests/test_route_identity.py`) |
 | 9. Wikidata / Wikipedia | `wikidata_cache.py`, `cloud/wikidata_titles.py` and `cloud/wiki_articles.py`, which already reads articles from a local Wikipedia ZIM, i.e. the cross-ZIM idea in the review |
 
+The step-by-step plan, including a verified build of StreetZim's search and
+chips from maps2zim's own OpenFreeMap tiles, is in
+[openzim-integration.md](openzim-integration.md).
+
 We're happy to review ports, especially routing and search sharding, and to
 upstream the Kiwix reader findings in `docs/zim-packaging-gotchas.md` to the
 reader projects, as §6.4 of the review suggests.

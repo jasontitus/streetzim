@@ -30,7 +30,7 @@ list, so change them in the same commit (then run
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -124,6 +124,23 @@ def record_matches_chip(rec: dict, chip: ChipRule) -> bool:
         if chip.name_pattern.search(n):
             return True
     return False
+
+
+def rules_as_json() -> list[dict]:
+    """``CHIP_RULES`` as plain JSON, in order, for another implementation to
+    load (a viewer, or openzim/maps emitting it at build time). Regexes travel
+    as their source plus an ignore-case flag, which reads the same in Python
+    and JavaScript for these patterns (see tests/chip_rules_js.test.mjs for
+    the one \\b caveat)."""
+    def rx(p: re.Pattern | None) -> dict | None:
+        if p is None:
+            return None
+        return {"source": p.pattern, "i": bool(p.flags & re.IGNORECASE)}
+    return [{
+        "id": c.id, "label": c.label, "cat": c.from_cat,
+        "subtypes": list(c.subtypes), "includeRegex": rx(c.include_regex),
+        "nameSubtypes": list(c.name_subtypes), "namePattern": rx(c.name_pattern),
+    } for c in CHIP_RULES]
 
 
 def split_records_by_chip(records_by_cat: dict) -> dict[str, list]:

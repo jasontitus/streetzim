@@ -4,7 +4,9 @@ For whoever picks this up next. [README.md](README.md) covers building a ZIM;
 this file covers how the repository is organised, how to change it safely,
 how production releases are made, and what is known to be wrong.
 [docs/openzim-review-response.md](docs/openzim-review-response.md) records
-how the 2026-09 openZIM review of this codebase was addressed.
+how the 2026-09 openZIM review of this codebase was addressed, and
+[docs/openzim-integration.md](docs/openzim-integration.md) is the plan for
+bringing StreetZim features into openzim/maps.
 
 ## 1. What is core and what is operations
 

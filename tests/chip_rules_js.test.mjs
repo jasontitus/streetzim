@@ -58,17 +58,10 @@ function sameAcrossCopies(file, name) {
 
 // Python side, as plain JSON. Regexes travel as (source, ignoreCase).
 const py = JSON.parse(execFileSync(PY, ['-c', `
-import json, re, sys
+import json, sys
 sys.path.insert(0, ${JSON.stringify(ROOT)})
-from cloud.chip_rules import CHIP_RULES
-def rx(p):
-    if p is None: return None
-    return {"source": p.pattern, "i": bool(p.flags & re.IGNORECASE)}
-print(json.dumps([{
-    "id": c.id, "label": c.label, "cat": c.from_cat,
-    "subtypes": list(c.subtypes), "includeRegex": rx(c.include_regex),
-    "nameSubtypes": list(c.name_subtypes), "namePattern": rx(c.name_pattern),
-} for c in CHIP_RULES]))
+from cloud.chip_rules import rules_as_json
+print(json.dumps(rules_as_json()))
 `], { encoding: 'utf8' }));
 
 const CATEGORIES = new Function(

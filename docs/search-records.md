@@ -1,0 +1,94 @@
+# Search records and category files (data contract)
+
+The search box, the Find page and the category chips all read the same
+compact JSON records. This page is the contract for anyone who produces or
+consumes them, including a port into openzim/maps
+([openzim-integration.md](openzim-integration.md)). The binary routing
+formats are in [formats.md](formats.md).
+
+## Record
+
+One JSON object per feature. Short keys, because a continent has tens of
+millions of records.
+
+| key | type | meaning |
+|---|---|---|
+| `n` | string | display name (`name:latin` when the tile has it, else `name`) |
+| `t` | string | type, see below |
+| `s` | string | subtype: the tile's `class` or `subclass` (for example `restaurant`, `cafe`, `primary`); may be `""` |
+| `a` | number | latitude, rounded to 5 decimal places (about 1 m; `SEARCH_COORD_DP` changes it) |
+| `o` | number | longitude, likewise |
+| `l` | string | location label ("City, Region") from GeoNames via `reverse_geocoder`; may be `""` |
+
+Optional keys (absent when empty):
+
+| key | meaning |
+|---|---|
+| `w` | Wikipedia title from the OSM `wikipedia` tag, for example `en:Lincoln_Memorial` |
+| `wsrc` | `"wd"` when `w` was backfilled from the Wikidata Q-ID instead |
+| `q` | Wikidata Q-ID |
+| `ws`, `p`, `soc`, `brand`, `wd` | website, phone, socials, brand name, brand Q-ID (Overture places) |
+| `cat` | Overture's normalized category |
+| `source` | `"overture"` for places added from Overture rather than OSM |
+
+Readers must ignore keys they don't know.
+
+### `t` values
+
+| `t` | from (OpenMapTiles layer) |
+|---|---|
+| `place` | `place` |
+| `poi` | `poi` |
+| `street` | `transportation_name` |
+| `water` | `water_name`, `waterway` |
+| `park` | `park` |
+| `peak` | `mountain_peak` |
+| `airport` | `aerodrome_label` |
+| `building`, `area` | `building`, `landuse` (named features only; OpenFreeMap tiles carry no names in these) |
+| `addr` | addresses from the OSM PBF (and Overture), not from tiles |
+
+Extraction: `extract_searchable_features` in `create_osm_zim.py` reads the
+z14 tiles of any OpenMapTiles MBTiles, which covers tilemaker output and
+OpenFreeMap's Planetiler builds. Each feature becomes one point (the point
+itself, a MultiPoint's mean, a line's middle vertex, or a polygon ring's
+mean). Duplicates of (name, type, position to 4 dp) are dropped.
+
+Known gaps:
+- A street that crosses tiles yields one record per tile.
+- Only the Latin-script name is indexed.
+
+## `search-data/`
+
+- `search-data/manifest.json`:
+  ```json
+  {"total": 1397, "chunks": {"mo": 12, "u5927": 3},
+   "sub_chunks": {"de": ["de-0", "de-1"]},
+   "char_split": {"ca": ["ca~r~c", "ca~s~p"]}}
+  ```
+  `chunks` maps a prefix to its record count. `sub_chunks` and `char_split`
+  appear only when big prefixes were split.
+- `search-data/{prefix}.json` is an array of records.
+- **Prefix rule**: `cloud/search_shards.py` `prefix_key`. Normalize the
+  word (NFKD, strip combining marks, lower-case, spaces become `_`).
+  - If the first character is non-ASCII, the key is `u<hex>` of that
+    character.
+  - Otherwise the key is the first two characters, with anything that isn't
+    alphanumeric mapped to `_`. A missing or non-ASCII second character also
+    becomes `_`.
+- **Splits**: hash splits `{prefix}-{0..f}`, and character/tier leaves
+  `{prefix}~{chars}~{tier}`, where tier is `c` places, `p` POIs, `s` streets
+  or `a` addresses. The viewer's `search-shards` block implements the reader.
+  `tests/search_shards_js.test.mjs` checks it against the Python planner.
+
+## `category-index/`
+
+- `category-index/manifest.json`:
+  `{"total": n, "categories": {"poi": n, …}, "category_shards"?: …, "chips"?: {…}}`
+- `category-index/{t}.json` holds every record of one type. Builds with
+  `--no-llm-bundle` omit these.
+- `category-index/chip-{id}.json` holds one Find chip. Chip ids, labels and
+  matching rules come from `cloud/chip_rules.py`; `rules_as_json()`
+  exports them. Large chips are geographic shards
+  `chip-{id}-g{hex}.json`, described in the chip's manifest entry
+  `{label, count, bytes, sub_chunks?, layout?, shards?}`
+  (`cloud/chip_shards.py`, `docs/find-chip-shards.md`).
