@@ -854,8 +854,17 @@ def _chk_fulltext(arc) -> tuple[str, str]:
         res = searcher.search(q)
         totals[q_str] = res.getEstimatedMatches()
     if all(v == 0 for v in totals.values()):
+        # Small non-English regions (Monaco: "Jardin", "Gare", "Rue") can
+        # miss all three English probes with a healthy index. The region's
+        # own name is always indexed, so try that before calling it
+        # corrupt; a broken index misses this too.
+        name = str(_map_config(arc).get("name") or "").split()
+        if name:
+            totals[name[0]] = searcher.search(
+                Query().set_query(name[0])).getEstimatedMatches()
+    if all(v == 0 for v in totals.values()):
         return ("fail",
-                f"xapian returned 0 hits for all three probes {totals} — "
+                f"xapian returned 0 hits for every probe {totals} — "
                 "index is likely corrupt")
     return ("pass", f"hits {totals}")
 
@@ -884,8 +893,15 @@ def _chk_vector_tiles(arc) -> tuple[str, str]:
     # linear scan breaks on big ZIMs because libzim orders tiles/ by
     # path, so `tiles/14/…` comes alphabetically AFTER `tiles/13/…` (it
     # falls outside a short iteration window).
-    z0 = bytes(arc.get_entry_by_path("tiles/0/0/0.pbf").get_item().content)
-    if not z0:
+    try:
+        z0 = bytes(arc.get_entry_by_path("tiles/0/0/0.pbf").get_item().content)
+    except KeyError:
+        # The builder drops 0-byte tiles, and a small region (Monaco) can
+        # have nothing left at z0 once tilemaker's low-zoom area filters
+        # run. Absent z0 is a warning if deeper zooms are there, and still
+        # a failure below when they are not.
+        z0 = None
+    if z0 is not None and not z0:
         return ("fail", "tiles/0/0/0.pbf is empty")
     cfg = _map_config(arc)
     bbox = None
@@ -928,7 +944,7 @@ def _chk_vector_tiles(arc) -> tuple[str, str]:
                 probes = [e.path]
                 break
     hits = []
-    misses = []
+    misses = ["tiles/0/0/0.pbf=missing"] if z0 is None else []
     for p in probes:
         try:
             data = bytes(arc.get_entry_by_path(p).get_item().content)

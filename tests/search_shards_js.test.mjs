@@ -11,7 +11,8 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
-const PY = `${REPO}/venv-linux/bin/python3`;
+const REPO_VENV = `${REPO}/venv-linux/bin/python3`;
+const PY = process.env.PYTHON || (fs.existsSync(REPO_VENV) ? REPO_VENV : 'python3');
 const VIEWERS = [
   'resources/viewer/index.html', 'resources/viewer/places.html',
   'web/drive/viewer/index.html', 'web/drive/viewer/places.html',
@@ -147,7 +148,7 @@ ok('a leaf is never listed twice', () => {
 });
 
 // ---- against a real retrofitted manifest, when one exists --------------
-const REAL = '/storage/streetzim/tmp/chips-e2e/km-search-manifest.json';
+const REAL = process.env.SEARCH_MANIFEST || '/storage/streetzim/tmp/chips-e2e/km-search-manifest.json';
 if (fs.existsSync(REAL)) {
   const manifest = JSON.parse(fs.readFileSync(REAL, 'utf8'));
   const resolve = (name) => {

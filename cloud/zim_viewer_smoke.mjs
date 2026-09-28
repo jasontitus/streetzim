@@ -6,7 +6,8 @@
 // viewer no matter what is inside the ZIM, and cannot detect a stale
 // baked-in viewer. Kiwix has no service worker and no site: it runs the
 // copy in the archive. This script serves entries straight out of the ZIM
-// (cloud/serve_zim_entries.py) and asserts on that copy.
+// (cloud/serve_zim_entries.py) and asserts on that copy. CI runs it against
+// the Monaco ZIM it builds (.github/workflows/ci.yml).
 //
 // Usage:
 //   ZIM_ORIGIN=http://localhost:8899 node cloud/zim_viewer_smoke.mjs
@@ -97,11 +98,19 @@ try {
       indexSize: window.WIKI_GEO_INDEX ? Object.keys(window.WIKI_GEO_INDEX).length : -1,
     };
   });
+  // A ZIM built without --wikidata has no geo-index to load.
+  const hasWikidata = await page.evaluate(() =>
+    fetch('map-config.json').then(r => r.json()).then(c => !!c.hasWikidata)
+      .catch(() => true));
   if (EXPECT_FIXES) {
     ok('no false "no Wikipedia places" state', !wiki.falseEmpty,
        'sidebar text claims no Wikipedia entries');
-    ok('wiki geo-index loaded or loading', wiki.loadingOrLoaded,
-       'index size=' + wiki.indexSize);
+    if (hasWikidata) {
+      ok('wiki geo-index loaded or loading', wiki.loadingOrLoaded,
+         'index size=' + wiki.indexSize);
+    } else {
+      console.log('skip  wiki geo-index (map-config.json: hasWikidata is false)');
+    }
   } else {
     console.log('note  (control) wiki falseEmpty=' + wiki.falseEmpty +
                 ' indexSize=' + wiki.indexSize);

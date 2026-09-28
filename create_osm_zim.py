@@ -1584,6 +1584,21 @@ def extract_bbox_from_pbf(pbf_path, bbox, output_path):
 def generate_tiles(pbf_path, mbtiles_path, bbox=None, fast=False, store=None):
     """Generate vector tiles from OSM PBF using tilemaker."""
     print("  Generating vector tiles with tilemaker...")
+    # tilemaker opens the config's shapefiles relative to the current
+    # directory and only prints "Unable to open" when one is missing, so a
+    # build run from the wrong directory silently loses the ocean (and with
+    # it, often the z0 tile). Fetch them with scripts/fetch-shapefiles.sh.
+    with open(TILEMAKER_CONFIG) as f:
+        shp = sorted({layer["source"] for layer in json.load(f)["layers"].values()
+                      if "source" in layer})
+    missing = [p for p in shp if not os.path.exists(p)]
+    if missing:
+        print(f"    WARNING: {len(missing)} shapefile(s) not found under "
+              f"{os.getcwd()}: {', '.join(missing)}. Oceans / Natural Earth "
+              "layers will be missing. Run scripts/fetch-shapefiles.sh from "
+              "the directory you build in.")
+        if os.environ.get("STREETZIM_REQUIRE_SHAPEFILES") == "1":
+            raise SystemExit("STREETZIM_REQUIRE_SHAPEFILES=1 and shapefiles are missing")
     cmd = [
         "tilemaker",
         "--input", str(pbf_path),
@@ -3951,21 +3966,24 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
                     # don't come close, but clamp for safety.
                     dist_dm_packed = min(dist_dm, 0xFFFFFF)
                     dist_speed = ((speed & 0xFF) << 24) | dist_dm_packed
+                    # noqa F821 below: these are closure arrays from
+                    # extract_routing_graph; ruff flags them only because the
+                    # function `del`s them after this pass.
                     if oneway != -1:
-                        edges_from.append(from_idx)
-                        edges_to.append(to_idx)
-                        edges_dist_speed.append(dist_speed)
-                        edges_geom.append(0xFFFFFFFF if fgi < 0 else fgi)
-                        edges_name.append(name_idx)
-                        edges_class_access.append(class_access)
+                        edges_from.append(from_idx)  # noqa: F821
+                        edges_to.append(to_idx)  # noqa: F821
+                        edges_dist_speed.append(dist_speed)  # noqa: F821
+                        edges_geom.append(0xFFFFFFFF if fgi < 0 else fgi)  # noqa: F821
+                        edges_name.append(name_idx)  # noqa: F821
+                        edges_class_access.append(class_access)  # noqa: F821
                         self.edge_count += 1
                     if oneway != 1:
-                        edges_from.append(to_idx)
-                        edges_to.append(from_idx)
-                        edges_dist_speed.append(dist_speed)
-                        edges_geom.append(0xFFFFFFFF if rgi < 0 else rgi)
-                        edges_name.append(name_idx)
-                        edges_class_access.append(class_access)
+                        edges_from.append(to_idx)  # noqa: F821
+                        edges_to.append(from_idx)  # noqa: F821
+                        edges_dist_speed.append(dist_speed)  # noqa: F821
+                        edges_geom.append(0xFFFFFFFF if rgi < 0 else rgi)  # noqa: F821
+                        edges_name.append(name_idx)  # noqa: F821
+                        edges_class_access.append(class_access)  # noqa: F821
                         self.edge_count += 1
 
                 seg_start = i

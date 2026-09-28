@@ -5,7 +5,7 @@
 //
 // Shards come from the real Python planner (PYTHON env, default the
 // build venv) so the viewer is tested against the layout the build emits.
-import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -13,7 +13,8 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const PY = process.env.PYTHON || '/storage/streetzim/venv-linux/bin/python3';
+const AUTHOR_VENV = '/storage/streetzim/venv-linux/bin/python3';
+const PY = process.env.PYTHON || (existsSync(AUTHOR_VENV) ? AUTHOR_VENV : 'python3');
 
 function extractBlock(file) {
   const src = readFileSync(join(ROOT, file), 'utf8');

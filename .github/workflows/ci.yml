@@ -1,0 +1,155 @@
+# Two jobs:
+#   checks     - lint gate, Python unit tests, Node viewer/PWA tests. Fast, offline.
+#   monaco-e2e - builds a real Monaco ZIM from Geofabrik with tilemaker v3 and the
+#                production routing layout, then runs cloud/validate_zim.py
+#                (with a current zimcheck) and a headless-browser smoke test of
+#                the viewer served straight out of the ZIM. Also runs weekly so
+#                upstream drift (Geofabrik, fonts CDN, MapLibre on unpkg,
+#                tilemaker, libzim) shows up without a code change.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+  TILEMAKER_REF: v3.0.0
+  ZIM_TOOLS_VERSION: 3.8.0
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt ruff==0.15.8
+      - name: Lint (narrow gate, see ruff.toml)
+        run: ruff check .
+      - name: Python tests
+        run: python -m pytest tests -q
+      - name: Node tests
+        env:
+          PYTHON: python
+        # test_picker / test_sw_streaming need a browser and the PWA server,
+        # test_preview_proxy talks to archive.org; they are run by hand.
+        run: |
+          for t in tests/chip_rules_js.test.mjs tests/chip_shards_js.test.mjs \
+                   tests/search_shards_js.test.mjs tests/zim_reader_js.test.mjs \
+                   tests/test_zim_http_source.mjs; do
+            echo "::group::$t"
+            node "$t"
+            echo "::endgroup::"
+          done
+
+  monaco-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install Python and Node dependencies
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "1"
+        run: |
+          pip install -r requirements.txt
+          npm ci --no-audit --no-fund
+          sudo apt-get update -q
+          sudo apt-get install -y -q osmium-tool unzip
+
+      # Ubuntu's tilemaker (2.4) is too old for resources/tilemaker/*.lua.
+      - name: Cache tilemaker ${{ env.TILEMAKER_REF }}
+        id: tilemaker-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/tilemaker
+          key: tilemaker-${{ env.TILEMAKER_REF }}-ubuntu-24.04
+      # The -dev packages also pull in the runtime libraries, so install them
+      # on a cache hit too rather than guessing runtime package names.
+      - name: Install tilemaker build and runtime libraries
+        run: |
+          sudo apt-get install -y -q build-essential cmake libboost-dev \
+            libboost-filesystem-dev libboost-iostreams-dev libboost-program-options-dev \
+            libboost-system-dev liblua5.1-0-dev libshp-dev libsqlite3-dev rapidjson-dev zlib1g-dev
+      - name: Build tilemaker ${{ env.TILEMAKER_REF }}
+        if: steps.tilemaker-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone -q --depth 1 --branch "$TILEMAKER_REF" https://github.com/systemed/tilemaker.git /tmp/tilemaker
+          cmake -S /tmp/tilemaker -B /tmp/tilemaker/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/tilemaker/build -j"$(nproc)"
+          mkdir -p ~/.local/tilemaker && cp /tmp/tilemaker/build/tilemaker ~/.local/tilemaker/
+      # Ubuntu's zimcheck (3.2) cannot read ZIMs written by current libzim.
+      - name: Install zim-tools ${{ env.ZIM_TOOLS_VERSION }}
+        run: |
+          curl -fsSL --retry 3 -o /tmp/zt.tgz \
+            "https://download.openzim.org/release/zim-tools/zim-tools_linux-x86_64-${ZIM_TOOLS_VERSION}.tar.gz"
+          tar -xzf /tmp/zt.tgz -C /tmp
+          echo "/tmp/zim-tools_linux-x86_64-${ZIM_TOOLS_VERSION}" >> "$GITHUB_PATH"
+          echo "$HOME/.local/tilemaker" >> "$GITHUB_PATH"
+
+      - name: Cache coastline and Natural Earth shapefiles
+        id: shp-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            coastline
+            landcover
+          key: shapefiles-v1
+      - name: Fetch shapefiles
+        if: steps.shp-cache.outputs.cache-hit != 'true'
+        run: scripts/fetch-shapefiles.sh .
+
+      - name: Build Monaco ZIM
+        env:
+          STREETZIM_REQUIRE_SHAPEFILES: "1"
+        run: |
+          python create_osm_zim.py --area monaco --routing --spatial-chunk-scale 10 \
+            --split-find-chips -o osm-monaco-ci.zim
+
+      - name: Validate (cloud/validate_zim.py + zimcheck)
+        env:
+          STREETZIM_REQUIRE_ZIMCHECK: "1"
+        run: python cloud/validate_zim.py osm-monaco-ci.zim
+
+      - name: Browser smoke test of the in-ZIM viewer
+        run: |
+          python cloud/serve_zim_entries.py osm-monaco-ci.zim --port 8899 &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8899/map-config.json >/dev/null && break; sleep 1; done
+          ZIM_ORIGIN=http://127.0.0.1:8899 SMOKE_SEARCH=Monaco \
+            CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
+            node cloud/zim_viewer_smoke.mjs
+
+      - name: Upload ZIM
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: osm-monaco-ci
+          path: osm-monaco-ci.zim
+          if-no-files-found: ignore
+          retention-days: 7
