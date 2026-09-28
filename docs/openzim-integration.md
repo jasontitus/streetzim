@@ -29,8 +29,9 @@ maps2zim downloads**. We fetched OpenFreeMap's Monaco MBTiles
 `_fetch_mbtiles`) and built with
 `create_osm_zim.py --mbtiles <ofm> --bbox … --split-find-chips`:
 
-- **Search**: 1,397 searchable records (922 POIs, 458 streets, 11 places, and
-  water, park and peak names).
+- **Search**: 1,397 searchable records (922 POIs, 458 street pieces, 11
+  places, and water, park and peak names). Street merging, which runs when
+  the ZIM is written, makes the 458 street pieces 319 records.
 - **Chips**: all 10 Find chips populated (food 172, shops 129, museums 88, …).
   The chip rules already match the OpenMapTiles `class`/`subclass` values
   OpenFreeMap uses.

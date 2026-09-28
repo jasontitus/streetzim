@@ -18,7 +18,7 @@ millions of records.
 | `s` | string | subtype: the tile's `class` or `subclass` (for example `restaurant`, `cafe`, `primary`); may be `""` |
 | `a` | number | latitude, rounded to 5 decimal places (about 1 m; `SEARCH_COORD_DP` changes it) |
 | `o` | number | longitude, likewise |
-| `l` | string | location label ("City, Region") from GeoNames via `reverse_geocoder`; may be `""` |
+| `l` | string | location label: the nearest OSM place at extraction time (for example "Monte-Carlo"); records without one get "City, Region" from GeoNames via `reverse_geocoder` when the ZIM is written; may be `""` |
 
 Optional keys (absent when empty):
 
@@ -54,11 +54,17 @@ OpenFreeMap's Planetiler builds. Each feature becomes one point (the point
 itself, a MultiPoint's mean, a line's middle vertex, or a polygon ring's
 mean). Duplicates of (name, type, position to 4 dp) are dropped.
 
-A street crossing several tiles is decoded once per tile. Pieces with the
-same name and the same location label, chained within 3 km, are merged
-into one record: the piece nearest the middle (`merge_street_records`,
-`STREETZIM_MERGE_STREETS=0` turns it off). In Monaco this takes 458 street
-records down to 319, and every distinct street name stays searchable.
+A street crossing several tiles is decoded once per tile. Just before the
+ZIM is written, after any region cut, `merge_streets_in_file` merges pieces
+that have the same name and the same location label and lie within 3 km of
+each other. A merged street never spans more than 6 km. The survivor is the
+piece nearest the middle, and it carries every piece's point in a private
+`_pts` field, which is used for Wikipedia matching and never written to the
+ZIM. The result is deterministic. `STREETZIM_MERGE_STREETS=0` turns it off.
+
+Extraction output and search caches are not merged. In Monaco this takes
+458 street records down to 319; every street name and every
+Wikipedia-linked street is kept.
 
 Known gap: only the Latin-script name is indexed.
 

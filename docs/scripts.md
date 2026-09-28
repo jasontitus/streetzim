@@ -1,9 +1,8 @@
 # Shell scripts: inventory and consolidation plan
 
-Status 2026-09-28: **73** tracked `*.sh` files; after Phase 1 (done, moved to
-`attic/`), **42** remain live. About **23** are live. The
-rest are one-offs, retired Mac/AWS/GCP tooling, or wrappers superseded by
-`build-region-fast.sh`. This file lists every script with a verdict and gives
+Status 2026-09-28: 73 tracked `*.sh` files. Phase 1 moved 31 dead ones to
+`attic/`, leaving **42** in use; about 23 are actually needed. The rest are
+one-offs or wrappers superseded by `build-region-fast.sh`. This file lists every script with a verdict and gives
 the order for cutting the count down **without breaking the production host**,
 which runs these scripts from `/storage/streetzim` (often by absolute path,
 sometimes while you edit them).

@@ -609,109 +609,6 @@ def _annotate_lines_batch(lines, type_order):
     return "".join(out), assigned, counts
 
 
-# A street crossing several z14 tiles is decoded once per tile, so search
-# listed "Avenue Saint-Martin" nine times in Monaco. Pieces of one street sit
-# about one tile apart (<= 2.45 km at z14), so records with the same name
-# and the same location label are merged when chained within this distance.
-# Keeping the location label in the key keeps the same street name in two
-# neighbouring villages ("Hauptstrasse") apart.
-STREET_MERGE_KM = 3.0
-
-
-def merge_street_records(records):
-    """Merge street records that are pieces of one street.
-
-    ``records`` all have the same name. Records whose ``location`` matches
-    and that chain together within STREET_MERGE_KM (single linkage) become
-    one record: the member nearest the group's centre, so the point still
-    lies on the street. Order of the survivors follows the input order.
-    """
-    import math
-    if len(records) < 2:
-        return list(records)
-    by_loc = {}
-    for i, r in enumerate(records):
-        by_loc.setdefault(r.get("location") or "", []).append(i)
-
-    parent = list(range(len(records)))
-
-    def find(i):
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
-
-    deg_lat = STREET_MERGE_KM / 111.32
-    for idxs in by_loc.values():
-        if len(idxs) < 2:
-            continue
-        # Grid of cells at least STREET_MERGE_KM wide, so only neighbouring
-        # cells can link. A degree of longitude shrinks with latitude, so
-        # size longitude cells for the group's highest latitude.
-        max_lat = max(abs(records[i]["lat"]) for i in idxs)
-        deg_lon = deg_lat / max(math.cos(math.radians(min(max_lat, 89.0))), 0.01)
-        cells = {}
-        for i in idxs:
-            r = records[i]
-            cells.setdefault((int(r["lat"] // deg_lat), int(r["lon"] // deg_lon)), []).append(i)
-        for (cy, cx), members in cells.items():
-            for dy in (-1, 0, 1):
-                for dx in (-1, 0, 1):
-                    for j in cells.get((cy + dy, cx + dx), ()):
-                        for i in members:
-                            if i >= j:
-                                continue
-                            a, b = records[i], records[j]
-                            kx = 111.32 * math.cos(math.radians((a["lat"] + b["lat"]) / 2))
-                            d = math.hypot((a["lat"] - b["lat"]) * 111.32,
-                                           (a["lon"] - b["lon"]) * kx)
-                            if d <= STREET_MERGE_KM:
-                                ri, rj = find(i), find(j)
-                                if ri != rj:
-                                    parent[rj] = ri
-
-    clusters = {}
-    for i in range(len(records)):
-        clusters.setdefault(find(i), []).append(i)
-    keep = []
-    for members in clusters.values():
-        clat = sum(records[i]["lat"] for i in members) / len(members)
-        clon = sum(records[i]["lon"] for i in members) / len(members)
-        keep.append(min(members, key=lambda i: ((records[i]["lat"] - clat) ** 2
-                                                + (records[i]["lon"] - clon) ** 2, i)))
-    return [records[i] for i in sorted(keep)]
-
-
-def merge_streets_in_sorted(features):
-    """In-memory counterpart of the streaming merge: ``features`` is sorted
-    by (type order, name), so same-named streets are adjacent. Honours
-    STREETZIM_MERGE_STREETS=0."""
-    if os.environ.get("STREETZIM_MERGE_STREETS", "1") == "0":
-        return features
-    out = []
-    n_in = n_out = 0
-    i = 0
-    while i < len(features):
-        f = features[i]
-        if f.get("type") != "street":
-            out.append(f)
-            i += 1
-            continue
-        j = i
-        while (j < len(features) and features[j].get("type") == "street"
-               and features[j]["name"] == f["name"]):
-            j += 1
-        kept = merge_street_records(features[i:j])
-        n_in += j - i
-        n_out += len(kept)
-        out.extend(kept)
-        i = j
-    if n_in != n_out:
-        print(f"    Merged per-tile street pieces: {n_in:,} -> {n_out:,} street records",
-              flush=True)
-    return out
-
-
 def _finish_features_streaming(raw_path, output_dir, n_unique):
     """Location-context + sort + write-out without holding every feature.
 
@@ -814,52 +711,13 @@ def _finish_features_streaming(raw_path, output_dir, n_unique):
     os.unlink(keyed_path)
 
     features_path = os.path.join(output_dir, "search_features.jsonl")
-    merge_streets = os.environ.get("STREETZIM_MERGE_STREETS", "1") != "0"
-    street_ord = str(type_order["street"])
-    n_street_in = n_street_out = 0
     with open(sorted_path, "r", encoding="utf-8") as fin, \
             open(features_path, "w", encoding="utf-8") as fout:
-        # The sort key is "<type_ord>\t<name>", so every street with the
-        # same name is contiguous: merge one name-group at a time.
-        group_name = None
-        group = []
-
-        def flush_group():
-            nonlocal n_street_in, n_street_out
-            if not group:
-                return
-            if merge_streets:
-                recs = [json.loads(raw) for raw in group]
-                keep = {id(r) for r in merge_street_records(recs)}
-                kept = [raw for raw, r in zip(group, recs) if id(r) in keep]
-            else:
-                kept = list(group)
-            n_street_in += len(group)
-            n_street_out += len(kept)
-            for raw in kept:   # original bytes, not re-serialised
-                fout.write(raw)
-            group.clear()
-
         for line in fin:
             parts = line.split("\t", 2)
-            if len(parts) != 3:
-                continue
-            if parts[0] == street_ord:
-                if parts[1] != group_name:
-                    flush_group()
-                    group_name = parts[1]
-                group.append(parts[2])
-            else:
-                flush_group()
-                group_name = None
+            if len(parts) == 3:
                 fout.write(parts[2])
-        flush_group()
     os.unlink(sorted_path)
-    if n_street_in != n_street_out:
-        n_unique -= n_street_in - n_street_out
-        type_counts["street"] = type_counts.get("street", 0) - (n_street_in - n_street_out)
-        print(f"    Merged per-tile street pieces: {n_street_in:,} -> "
-              f"{n_street_out:,} street records", flush=True)
 
     print(f"    Extracted {n_unique} searchable features")
     for t, c in sorted(type_counts.items()):
@@ -1136,7 +994,6 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
     # Sort by type priority then name
     type_order = {"place": 0, "airport": 1, "peak": 2, "park": 3, "water": 4, "poi": 5, "street": 6}
     features.sort(key=lambda f: (type_order.get(f["type"], 99), f["name"]))
-    features = merge_streets_in_sorted(features)
 
     print(f"    Extracted {len(features)} searchable features")
     type_counts = {}
@@ -1159,3 +1016,168 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
 
     return features
 
+
+# --- Street merging (runs on the final search-features file, see
+# merge_streets_in_file; NOT during extraction, so extraction output and
+# search caches stay exactly as they were) -----------------------------------
+#
+# A street crossing several z14 tiles is decoded once per tile, so search
+# listed "Avenue Saint-Martin" 27 times across Monaco's chunks. Pieces of one
+# street sit about one tile apart (<= 2.45 km at z14).
+STREET_MERGE_KM = 3.0      # link pieces this close (single linkage)
+STREET_MAX_EXTENT_KM = 6.0 # never grow a merged street beyond this box, so a
+                           # search result still lands near the part you want
+STREET_MERGE_MAX_GROUP = 2000  # same name + same place above this: leave as is
+
+
+def _km(a_lat, a_lon, b_lat, b_lon):
+    import math
+    kx = 111.32 * math.cos(math.radians((a_lat + b_lat) / 2))
+    return math.hypot((a_lat - b_lat) * 111.32, (a_lon - b_lon) * kx)
+
+
+def merge_street_records(records):
+    """Merge street records that are pieces of one street.
+
+    ``records`` all share a name. Pieces with the same ``location`` label
+    that lie within STREET_MERGE_KM of each other are merged (closest pairs
+    first), as long as the merged group stays within a STREET_MAX_EXTENT_KM
+    box. Each group keeps one existing record, the piece nearest the group's
+    centre, with the coordinates of every piece in ``_pts`` so later steps
+    (Wikipedia matching, region filters) can still see them. ``_pts`` is not
+    written into the ZIM.
+
+    Deterministic: the result depends only on the records' content, not on
+    their order. The location label keeps same-named streets in neighbouring
+    places apart.
+    """
+    import math
+    n = len(records)
+    if n < 2:
+        return list(records)
+    by_loc = {}
+    for i, r in enumerate(records):
+        by_loc.setdefault(r.get("location") or "", []).append(i)
+
+    parent = list(range(n))
+    box = [(r["lat"], r["lat"], r["lon"], r["lon"]) for r in records]
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    deg_lat = STREET_MERGE_KM / 111.32
+    for idxs in by_loc.values():
+        if len(idxs) < 2 or len(idxs) > STREET_MERGE_MAX_GROUP:
+            continue
+        max_lat = max(abs(records[i]["lat"]) for i in idxs)
+        deg_lon = deg_lat / max(math.cos(math.radians(min(max_lat, 89.0))), 0.01)
+        cells = {}
+        for i in idxs:
+            r = records[i]
+            cells.setdefault((int(r["lat"] // deg_lat), int(r["lon"] // deg_lon)), []).append(i)
+        pairs = []
+        for (cy, cx), members in cells.items():
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    for j in cells.get((cy + dy, cx + dx), ()):
+                        for i in members:
+                            if i >= j:
+                                continue
+                            a, b = records[i], records[j]
+                            d = _km(a["lat"], a["lon"], b["lat"], b["lon"])
+                            if d <= STREET_MERGE_KM:
+                                ka = (a["lat"], a["lon"], a.get("subtype") or "")
+                                kb = (b["lat"], b["lon"], b.get("subtype") or "")
+                                pairs.append((d, min(ka, kb), max(ka, kb), i, j))
+        pairs.sort(key=lambda p: p[:3])
+        for _d, _ka, _kb, i, j in pairs:
+            ri, rj = find(i), find(j)
+            if ri == rj:
+                continue
+            a, b = box[ri], box[rj]
+            merged = (min(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), max(a[3], b[3]))
+            if _km(merged[0], merged[2], merged[1], merged[3]) > STREET_MAX_EXTENT_KM:
+                continue
+            parent[rj] = ri
+            box[ri] = merged
+
+    clusters = {}
+    for i in range(n):
+        clusters.setdefault(find(i), []).append(i)
+    keep = {}
+    for members in clusters.values():
+        if len(members) == 1:
+            continue
+        pts = sorted((records[i]["lat"], records[i]["lon"]) for i in members)
+        clat = math.fsum(p[0] for p in pts) / len(pts)
+        clon = math.fsum(p[1] for p in pts) / len(pts)
+        best = min(members, key=lambda i: (
+            (records[i]["lat"] - clat) ** 2 + (records[i]["lon"] - clon) ** 2,
+            records[i]["lat"], records[i]["lon"], records[i].get("subtype") or ""))
+        keep[best] = [[lat, lon] for lat, lon in pts]
+    out = []
+    for i in range(n):
+        root_members = clusters[find(i)]
+        if len(root_members) == 1:
+            out.append(records[i])
+        elif i in keep:
+            rec = dict(records[i])
+            rec["_pts"] = keep[i]
+            out.append(rec)
+    return out
+
+
+def merge_streets_in_file(path):
+    """Merge street pieces in a search-features JSONL, in place.
+
+    Same-named street records must be adjacent (extraction and search caches
+    are sorted by type, then name). Runs that are not adjacent are simply not
+    merged. Everything else is copied through byte for byte.
+    STREETZIM_MERGE_STREETS=0 skips it. Returns (streets_in, streets_out).
+    """
+    if os.environ.get("STREETZIM_MERGE_STREETS", "1") == "0":
+        return (0, 0)
+    tmp = path + ".merging"
+    n_in = n_out = 0
+    with open(path, "r", encoding="utf-8") as fin, \
+            open(tmp, "w", encoding="utf-8") as fout:
+        group, group_name = [], None
+
+        def flush():
+            nonlocal n_in, n_out
+            if not group:
+                return
+            recs = [json.loads(line) for line in group]
+            kept = merge_street_records(recs)
+            n_in += len(recs)
+            n_out += len(kept)
+            if len(kept) == len(recs):
+                fout.writelines(group)          # untouched: original bytes
+            else:
+                by_id = {id(r): line for r, line in zip(recs, group)}
+                for r in kept:
+                    line = by_id.get(id(r))
+                    fout.write(line if line is not None else
+                               json.dumps(r, separators=(",", ":"), ensure_ascii=False) + "\n")
+            group.clear()
+
+        for line in fin:
+            if '"type":"street"' in line or '"type": "street"' in line:
+                rec_name = json.loads(line).get("name")
+                if rec_name != group_name:
+                    flush()
+                    group_name = rec_name
+                group.append(line if line.endswith("\n") else line + "\n")
+            else:
+                flush()
+                group_name = None
+                fout.write(line)
+        flush()
+    os.replace(tmp, path)
+    if n_in != n_out:
+        print(f"    Merged per-tile street pieces: {n_in:,} -> {n_out:,} street records",
+              flush=True)
+    return (n_in, n_out)

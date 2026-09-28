@@ -1912,16 +1912,25 @@ def generate_sdf_font_glyphs():
         local_name, cdn_name, range_key = task
         cdn_encoded = cdn_name.replace(" ", "%20")
         url = f"{font_cdn}/{cdn_encoded}/{range_key}.pbf"
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return (local_name, range_key, resp.read(), None)
-        except urllib.error.HTTPError as e:
-            # 404 means this range has no glyphs in this font — skip it.
-            # MapLibre falls back to local rendering on 404.
-            return (local_name, range_key, None, f"HTTP {e.code}")
-        except Exception as e:
-            return (local_name, range_key, None, str(e))
+        err = None
+        # Transient errors (timeouts, resets, 5xx) are retried: a range lost
+        # here ships as missing glyphs and those labels never render. Seen
+        # in 2 of 6 CI-sized builds: 1-9 of 768 ranges silently dropped.
+        for attempt in range(5):
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    return (local_name, range_key, resp.read(), None)
+            except urllib.error.HTTPError as e:
+                # 404 means this range has no glyphs in this font — skip it.
+                # MapLibre falls back to local rendering on 404.
+                if e.code == 404:
+                    return (local_name, range_key, None, "HTTP 404")
+                err = f"HTTP {e.code}"
+            except Exception as e:
+                err = str(e)
+            time.sleep(min(2 ** attempt, 10))
+        return (local_name, range_key, None, err)
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
     skipped = 0
@@ -1942,6 +1951,11 @@ def generate_sdf_font_glyphs():
                 print(f"\r    Downloaded {len(fonts)} ranges ({done}/{len(tasks)} checked, {skipped} empty, {failed} errors)...", end="", flush=True)
 
     print(f"\r    Downloaded {len(fonts)} font range files ({skipped} empty ranges skipped, {failed} errors)       ", flush=True)
+    if failed and os.environ.get("STREETZIM_ALLOW_FONT_ERRORS") != "1":
+        # Fail rather than ship a map whose labels in some scripts never render.
+        # STREETZIM_ALLOW_FONT_ERRORS=1 ships anyway (e.g. during a CDN outage).
+        raise SystemExit(f"{failed} font glyph range(s) failed to download after retries; "
+                         f"not building a ZIM with missing glyphs")
     return fonts
 
 
@@ -5005,12 +5019,18 @@ def create_zim(
                         # (name, coord) in the OSM-tag lookup built from the PBF.
                         wiki = None
                         if wiki_cross_refs:
-                            wiki_key = (
-                                feat["name"].lower(),
-                                int(round(feat["lat"] * 1e4)),
-                                int(round(feat["lon"] * 1e4)),
-                            )
-                            wiki = wiki_cross_refs.get(wiki_key)
+                            # A merged street keeps every piece's point in
+                            # _pts (merge_streets_in_file); the OSM tag may
+                            # match any of them.
+                            for plat, plon in ([(feat["lat"], feat["lon"])]
+                                               + [tuple(p) for p in feat.get("_pts", ())]):
+                                wiki = wiki_cross_refs.get((
+                                    feat["name"].lower(),
+                                    int(round(plat * 1e4)),
+                                    int(round(plon * 1e4)),
+                                ))
+                                if wiki:
+                                    break
                             if wiki:
                                 wiki_fields_added += 1
 
@@ -7052,6 +7072,12 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             # shipped as overture-sources.json at the ZIM root (below).
             map_config["hasOvertureAddresses"] = True
 
+        if isinstance(search_features, str) and os.path.isfile(search_features):
+            # After every filter and merge that rewrites the file (bbox cut of
+            # a search cache, addresses, Overture), so a street is merged
+            # from the pieces inside this region only.
+            from streetzim.search_extract import merge_streets_in_file
+            merge_streets_in_file(search_features)
         _out_before = os.path.exists(output_path)
         try:
             create_zim(
