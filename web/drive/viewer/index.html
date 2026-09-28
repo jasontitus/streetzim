@@ -7543,7 +7543,7 @@ function initRouting(map, config) {
 
     var textDecoder = new TextDecoder('utf-8');
 
-    // cell_of(lat_e7, lon_e7, scale) — must match tests/szrg_spatial.cell_of
+    // cell_of(lat_e7, lon_e7, scale) — must match streetzim/routing/spatial.cell_of
     // EXACTLY (floor semantics on negatives, which JS's Math.floor does
     // correctly unlike the // operator).
     function cellOf(latE7, lonE7) {
@@ -8165,7 +8165,7 @@ function initRouting(map, config) {
   // emits (create_osm_zim.SPEED: motorway = 100 km/h) or the heuristic
   // over-estimates remaining time and the "optimal" pass silently
   // returns suboptimal routes. Matches routing-worker.js and the
-  // Python references (tests/szrg_astar.py, cloud/route_cli.py).
+  // Python references (streetzim/routing/astar.py, cloud/route_cli.py).
   var HEURISTIC_SPEED_KMH = 100;
   var HEURISTIC_MPS = HEURISTIC_SPEED_KMH / 3.6;
 

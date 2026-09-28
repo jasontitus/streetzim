@@ -35,7 +35,7 @@ route on it, and cannot search it.
 | **Vector tiles** | `path` + `track` present with `subclass`/`surface` | ✅ already good |
 | **Style** | one rule: `class == path`, `minzoom 14`, 1 px dashed `#cba090`. `track` never drawn. `subclass`/`surface` never consulted | ❌ the visible gap |
 | **Routing graph** | `path`/`footway`/`steps`/`cycleway`/`bridleway`/`track` kept, with speeds (path 5 km/h, track 15) and class ordinals, flagged bit-9 "no motor vehicle" | ✅ data present, unusable |
-| **Routing UI** | car profile only; every consumer skips bit-9 edges (`routing-worker.js`, `index.html`, `tests/szrg_astar.py`, `cloud/route_cli.py`) | ❌ no foot/hike mode |
+| **Routing UI** | car profile only; every consumer skips bit-9 edges (`routing-worker.js`, `index.html`, `streetzim/routing/astar.py`, `cloud/route_cli.py`) | ❌ no foot/hike mode |
 | **Search** | named trails effectively absent — 400k switzerland rows yielded 5 trail-ish hits, all coincidental place names | ❌ |
 | **Route relations** | `create_osm_zim.py` has only `_Pass1`/`_Pass2` node+way handlers, **no relation handler**. PCT / AT / CDT / GR routes do not exist as entities | ❌ |
 | **Trail metadata** | `sac_scale`, `mtb:scale`, `trail_visibility` never read from the PBF (`surface` reaches the tiles but nothing else) | ❌ |
@@ -60,7 +60,7 @@ controls; add a check that a known alpine tile renders ≥ N path features.
 The graph already holds the edges and speeds. Today bit-9 is a hard exclude;
 a foot profile inverts it — use `path`/`footway`/`steps`/`track`, exclude
 `motorway`/`trunk`. Needs a mode toggle in the UI and matching changes in
-`routing-worker.js`, `cloud/route_cli.py`, `tests/szrg_astar.py` so the CLI,
+`routing-worker.js`, `cloud/route_cli.py`, `streetzim/routing/astar.py` so the CLI,
 tests and viewer agree.
 
 **Risk:** the car profile's speed table gives `steps` 3 km/h; a naive foot

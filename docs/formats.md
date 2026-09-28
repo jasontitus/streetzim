@@ -115,7 +115,7 @@ Also written by `cloud/repackage_zim.py::_v4_to_v5_bufs`.
 
 ### SZCI v3 + SZRC v2 — spatial cells (`--spatial-chunk-scale N`, what production ships)
 
-Writer: `build_spatial` in `tests/szrg_spatial.py` (called by
+Writer: `build_spatial` in `streetzim/routing/spatial.py` (called by
 `create_osm_zim.py` and `cloud/repackage_zim.py`; see
 [Known debt](#known-debt)). The SZRG v4 file is only an intermediate
 input in this mode.
@@ -191,7 +191,7 @@ build, **in addition to** `graph.bin`:
 
 Chunk paths are relative to the manifest. v5 adds
 `graph-geoms-chunk-manifest.json` the same way. The JS reader checks sizes
-but not the sha256; `tests/szrg_reader.py` checks both.
+but not the sha256; `streetzim/routing/reader.py` checks both.
 
 ### Compression
 
@@ -236,8 +236,5 @@ reader branch is only dead when no published ZIM needs it.
 
 ## Known debt
 
-- The shipped spatial writer and the Python reference readers live in
-  `tests/szrg_spatial.py` and `tests/szrg_reader.py`, and production code
-  imports them. Do not rename or move `tests/` without moving these first.
 - `map-config.json` has no routing format field; readers probe for
   `graph-cells-index.bin`, then the chunk manifest, then `graph.bin`.

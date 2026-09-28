@@ -631,7 +631,7 @@ function parseRoutingCellsIndex(buffer) {
   var namesBlob = new Uint8Array(buffer, offset, namesBytes);
   var textDecoder = new TextDecoder('utf-8');
 
-  // cell_of(lat_e7, lon_e7, scale) — must match tests/szrg_spatial.cell_of
+  // cell_of(lat_e7, lon_e7, scale) — must match streetzim/routing/spatial.cell_of
   // EXACTLY (floor semantics on negatives).
   function cellIdFor(latE7, lonE7) {
     var latMult = Math.floor((latE7 * cellScale) / 10_000_000);

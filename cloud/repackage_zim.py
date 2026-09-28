@@ -318,8 +318,8 @@ def _emit_spatial_graph(creator, graph_path: str | Path, *,
     repo_root = Path(__file__).resolve().parent.parent
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    from tests.szrg_reader import load_from_file
-    from tests.szrg_spatial import build_spatial
+    from streetzim.routing.reader import load_from_file
+    from streetzim.routing.spatial import build_spatial
 
     g = load_from_file(graph_path)
     # v5 in-memory parse yielded has_geoms=False; if the source was v5
@@ -368,7 +368,7 @@ def _emit_spatial_graph(creator, graph_path: str | Path, *,
     for shard_path in node_shard_paths:
         # File name format: ``nodes-scaled-NNN.bin`` — ZIM entry path is
         # ``routing-data/<basename>``. The 3-digit zero-pad matches the
-        # writer in tests/szrg_spatial.py and the reader in
+        # writer in streetzim/routing/spatial.py and the reader in
         # ``load_spatial_from_zim``.
         basename = os.path.basename(shard_path)
         creator.add_item(file_passthrough_cls(

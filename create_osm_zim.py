@@ -3866,7 +3866,7 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
             # router must not use them: a 20 m staircase at 3 km/h beat any
             # road detour over ~200 m, so cars were routed down stairs and
             # through parks. Every consumer skips bit-9 edges for the car
-            # profile (routing-worker.js, index.html, tests/szrg_astar.py,
+            # profile (routing-worker.js, index.html, streetzim/routing/astar.py,
             # cloud/route_cli.py).
             if _way_no_motor_vehicle(hw, w.tags):
                 access_bits |= 0x200  # bit 9
@@ -5678,7 +5678,7 @@ def create_zim(
             if spatial_chunk_scale and spatial_chunk_scale > 0:
                 # In-build spatial chunking — replaces the post-process
                 # `cloud/repackage_zim.py --spatial-chunk-scale N` step.
-                # Reuses tests/szrg_spatial.build_spatial which streams
+                # Reuses streetzim/routing/spatial.build_spatial which streams
                 # from the routing graph file into a spill dir, so peak
                 # RSS stays bounded. Output: graph-cells-index.bin (the
                 # SZCI index) + graph-cell-NNNNN.bin per cell. Items are added
@@ -5692,8 +5692,8 @@ def create_zim(
                 _repo_root = Path(__file__).resolve().parent
                 if str(_repo_root) not in _sys.path:
                     _sys.path.insert(0, str(_repo_root))
-                from tests.szrg_spatial import build_spatial
-                from tests.szrg_reader import load_from_file
+                from streetzim.routing.spatial import build_spatial
+                from streetzim.routing.reader import load_from_file
                 _spatial_outdir = Path(routing_graph_path).parent / "spatial"
                 _spatial_outdir.mkdir(parents=True, exist_ok=True)
                 print(f"    Spatial-chunking routing graph "

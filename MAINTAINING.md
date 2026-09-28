@@ -18,9 +18,9 @@ ZIM.
 - `create_osm_zim.py`: the builder. At import time it needs
   `cloud/viewer_slots.py`; later it lazily imports `cloud/{manifest_writer,
   wiki_articles, search_shards, repackage_zim, chip_shards, chip_rules,
-  wikidata_titles}.py`, `wikidata_cache.py`, and **`tests/szrg_spatial.py` /
-  `tests/szrg_reader.py`**. The spatial routing writer lives under `tests/`
-  for historical reasons, so don't move `tests/` without moving those first.
+  wikidata_titles}.py`, `wikidata_cache.py`, and the `streetzim/` package
+  (`streetzim.routing`: graph formats, spatial cells, reference routers).
+  `tests/szrg_*.py` are aliases of those modules, kept so old imports work.
 - `resources/viewer/`: the viewer baked into every ZIM. `resources/tilemaker/`: the tile profile.
 - `cloud/validate_zim.py`: the release gate. `cloud/repackage_zim.py` / `cloud/patch_viewer_inplace.py` (libzim), and the accelerator variant `cloud/swap_viewer_rust.py`: rewrite published ZIMs.
 - **The ZIM writer is libzim** (python-libzim), which is the default. `zimcheck`
@@ -170,8 +170,6 @@ scripts that may be running on the production host (see
   (`chip-shards`, `search-shards`, `chip-rules`, `chip-rail`) are the seams for
   splitting it. A split must keep shipping the same three slot files (inline
   at build time), because published ZIMs can't gain new entries.
-- **The routing writer lives in `tests/`** (`tests/szrg_spatial.py`,
-  `tests/szrg_reader.py`); move it into a real module.
 - **Legacy format readers.** SZRG v2/v3, SZCI v1/v2 and SZRC v1 can go once
   the continent ZIMs built before 2026-06-02 are rebuilt (see the retirement
   table in formats.md). The `--split-graph` writer (v5) is unused.

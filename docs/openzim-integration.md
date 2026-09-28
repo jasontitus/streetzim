@@ -72,7 +72,7 @@ with both codebases.
 | 5 | **Hot-prefix sharding** (continents) | port `search_shards.py` + reader | `cloud/search_shards.py` (stdlib only), `tests/test_search_shards.py` | 1–2 d |
 | 6 | **Category chips / Find panel** | port `chip_rules.py`, emit `content/chip-rules.json` from `rules_as_json()` (no inline copies needed in maps2zim); port `chip_shards.py` (numpy) | `cloud/chip_rules.py`, `cloud/chip_shards.py`, their tests | 3–4 d |
 | 7 | **PBF download + clip** (prerequisite for routing) | `--routing` derives the Geofabrik `-latest.osm.pbf` from the `.poly` URL, or takes `--osm-pbf-url`; clip with `osmium extract -p` | — | 1–2 d |
-| 8 | **Routing graph** | `maps2zim/routing/`; emit `routing-data/*`, storing entries ≥ 200 MB uncompressed | `extract_routing_graph`, `tests/szrg_spatial.py`, `tests/szrg_reader.py`; spec in [formats.md](formats.md); differential tests `tests/szrg_astar.py`, `tests/test_route_identity.py` | 4–6 d |
+| 8 | **Routing graph** | `maps2zim/routing/`; emit `routing-data/*`, storing entries ≥ 200 MB uncompressed | `extract_routing_graph`, `streetzim/routing/spatial.py`, `streetzim/routing/reader.py`; spec in [formats.md](formats.md); differential tests `streetzim/routing/astar.py`, `tests/test_route_identity.py` | 4–6 d |
 | 9 | **Routing UI** | ES-module worker + directions panel; browser test through `kiwix-serve` | `resources/viewer/routing-worker.js`, `docs/routing.md` (includes the iOS memory limits) | 4–6 d |
 | later | Wikidata (reliable only from the PBF: OpenFreeMap tiles carry no `wikidata`), terrain (GDAL, large) | | `wikidata_cache.py`, `generate_terrain_tiles` | 3–5 d each |
 

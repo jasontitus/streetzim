@@ -564,8 +564,8 @@ def _chk_routing_sample(arc, cfg, zim_path: str) -> tuple[str, str]:
     if not cfg.get("hasRouting"):
         return ("skip", "hasRouting=False")
     try:
-        from tests.szrg_reader import load_from_zim
-        from tests.szrg_astar import find_route
+        from streetzim.routing.reader import load_from_zim
+        from streetzim.routing.astar import find_route
     except Exception as exc:
         return ("warn", f"test harness not importable ({exc})")
     try:
@@ -575,7 +575,7 @@ def _chk_routing_sample(arc, cfg, zim_path: str) -> tuple[str, str]:
         # try that before giving up.
         if "spatial-chunked" in str(exc):
             try:
-                from tests.szrg_spatial import load_spatial_from_zim
+                from streetzim.routing.spatial import load_spatial_from_zim
                 gs = load_spatial_from_zim(zim_path)
                 return ("pass",
                         f"spatial graph loads OK: {gs.num_nodes:,} "
@@ -1446,8 +1446,8 @@ def _chk_routing(arc, cfg, zim_path: str) -> tuple[str, str]:
     # Sample a route. Layout-aware.
     try:
         if spatial_idx:
-            from tests.szrg_spatial import load_spatial_from_zim
-            from tests.szrg_spatial_astar import find_route_spatial
+            from streetzim.routing.spatial import load_spatial_from_zim
+            from streetzim.routing.spatial_astar import find_route_spatial
             sg = load_spatial_from_zim(zim_path, cache_limit=8)
             # Pick an arbitrary source node with at least one edge.
             cell0 = sg._ensure_cell(0)
@@ -1466,8 +1466,8 @@ def _chk_routing(arc, cfg, zim_path: str) -> tuple[str, str]:
                     f"sample route {status} · "
                     f"total routing-data={routing_total/1e6:.0f}MB")
         else:
-            from tests.szrg_reader import load_from_zim
-            from tests.szrg_astar import find_route
+            from streetzim.routing.reader import load_from_zim
+            from streetzim.routing.astar import find_route
             g = load_from_zim(zim_path)
             s, e = 0, min(g.num_nodes - 1, 1000)
             r = find_route(g, s, e, max_pops=500_000)
