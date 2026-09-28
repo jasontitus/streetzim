@@ -67,12 +67,12 @@ with both codebases.
 |---|---|---|---|---|
 | 1 | **Tile fetch retry + concurrency cap** (Kiwix service-worker drops) | new `zimui/zimtile.js`, registered with `maplibre.addProtocol`; `transformRequest` prefixes Tile/Glyphs URLs | `zimtile` protocol in `resources/viewer/index.html`; `docs/zim-packaging-gotchas.md` | 0.5–1 d |
 | 2 | **Populated places in search** | `_parse_geonames`: accept `PPL`, `PPLA*`, `PPLC` with a zoom per code | — | 0.5–1 d |
-| 3 | **Search records from the MBTiles** | new `search_records.py`; `Processor._write_search_data` after `_write_tilejson`; filter with `TileFilter`; new dep `mapbox-vector-tile` | `extract_searchable_features` (z14 decode, one point per feature, dedup), [search-records.md](search-records.md) | 2–3 d |
+| 3 | **Search records from the MBTiles** | new `search_records.py`; `Processor._write_search_data` after `_write_tilejson`; filter with `TileFilter`; new dep `mapbox-vector-tile` | `streetzim/search_extract.py` (z14 decode, one point per feature, dedup, street merge), [search-records.md](search-records.md) | 2–3 d |
 | 4 | **Search box in zimui** | `zimui/search.js`: normalize + prefix, fetch manifest and chunk, rank, fly to | the viewer's `search-shards` block; `tests/search_shards_js.test.mjs` pattern for JS/Python parity | 2–3 d |
 | 5 | **Hot-prefix sharding** (continents) | port `search_shards.py` + reader | `cloud/search_shards.py` (stdlib only), `tests/test_search_shards.py` | 1–2 d |
 | 6 | **Category chips / Find panel** | port `chip_rules.py`, emit `content/chip-rules.json` from `rules_as_json()` (no inline copies needed in maps2zim); port `chip_shards.py` (numpy) | `cloud/chip_rules.py`, `cloud/chip_shards.py`, their tests | 3–4 d |
 | 7 | **PBF download + clip** (prerequisite for routing) | `--routing` derives the Geofabrik `-latest.osm.pbf` from the `.poly` URL, or takes `--osm-pbf-url`; clip with `osmium extract -p` | — | 1–2 d |
-| 8 | **Routing graph** | `maps2zim/routing/`; emit `routing-data/*`, storing entries ≥ 200 MB uncompressed | `extract_routing_graph`, `streetzim/routing/spatial.py`, `streetzim/routing/reader.py`; spec in [formats.md](formats.md); differential tests `streetzim/routing/astar.py`, `tests/test_route_identity.py` | 4–6 d |
+| 8 | **Routing graph** | `maps2zim/routing/`; emit `routing-data/*`, storing entries ≥ 200 MB uncompressed | `extract_routing_graph`, `streetzim/routing/` (`spatial.py`, `reader.py`); spec in [formats.md](formats.md); differential tests `streetzim/routing/astar.py`, `tests/test_route_identity.py` | 4–6 d |
 | 9 | **Routing UI** | ES-module worker + directions panel; browser test through `kiwix-serve` | `resources/viewer/routing-worker.js`, `docs/routing.md` (includes the iOS memory limits) | 4–6 d |
 | later | Wikidata (reliable only from the PBF: OpenFreeMap tiles carry no `wikidata`), terrain (GDAL, large) | | `wikidata_cache.py`, `generate_terrain_tiles` | 3–5 d each |
 
@@ -95,22 +95,28 @@ Done:
 - `scripts/fetch-openfreemap-mbtiles.py` and the `openfreemap-tiles` CI job,
   which prove the OpenFreeMap path.
 
-Next, to make each port close to a copy:
-1. Move `extract_searchable_features` and its workers out of
-   `create_osm_zim.py` into an importable module, with `bbox`/`contains`,
-   `tmp_dir` and logger parameters and no module-level side effects. GNU
-   `sort` becomes optional.
-2. Merge street records that repeat per tile (Monaco: 458 records, 295
-   distinct names), and index native-script names alongside `name:latin`.
-3. Move the search-data/category emitters out of `create_zim` into a
-   function that returns `(path, bytes)` pairs. Move
-   `_split_records_recursive` into `search_shards.py`.
-4. Move the routing writer out of `tests/` into a `routing/` package.
-5. Type-annotate the pure modules (`search_shards`, `chip_rules`,
-   `chip_shards`, routing) and check them with pyright, since maps2zim runs
-   pyright strict.
-6. Publish a small fixture corpus (MBTiles in, records and shards out) that
-   both repositories test against.
+Also done, each checked with a golden-build diff: the refactored builder
+produces the same ZIM content from fixed inputs, apart from the intended
+street change.
+
+- `streetzim/search_extract.py`: search-feature extraction as an
+  importable module that doesn't load the builder, with a fixture test.
+- `streetzim/routing/`: the routing formats, spatial cell writer and
+  reference routers, moved out of `tests/`.
+- `cloud/search_shards.py`: now the one home of the prefix rule, the FNV
+  sub-bucket hash and the hot-chunk splitter (which gained tests).
+- Street pieces from different tiles are merged (Monaco: 458 → 319 street
+  records).
+
+Still to do:
+1. Index native-script names alongside `name:latin`. This affects index
+   size, so measure on a large region first.
+2. Move the search-data/category emitters out of `create_zim` into a
+   function that returns `(path, bytes)` pairs.
+3. Type-annotate the pure modules and check them with pyright, since
+   maps2zim runs pyright strict.
+4. Publish a small shared fixture corpus (MBTiles in, records and shards
+   out). `tests/test_search_extract.py` has the first fixture.
 
 ## Small things we noticed in maps2zim
 
