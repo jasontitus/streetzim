@@ -1,5 +1,7 @@
-# Two jobs:
+# Three jobs:
 #   checks     - lint gate, Python unit tests, Node viewer/PWA tests. Fast, offline.
+#   openfreemap-tiles - builds from the same OpenFreeMap MBTiles openzim/maps
+#                uses (no tilemaker), validates, and loads it through kiwix-serve.
 #   monaco-e2e - builds a real Monaco ZIM from Geofabrik with tilemaker v3 and the
 #                production routing layout, then runs cloud/validate_zim.py
 #                (with a current zimcheck) and a headless-browser smoke test of
@@ -204,3 +206,61 @@ jobs:
           path: osm-monaco-ci.zim
           if-no-files-found: ignore
           retention-days: 7
+
+  openfreemap-tiles:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install Python and Node dependencies
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "1"
+        run: |
+          pip install -r requirements.txt
+          npm ci --no-audit --no-fund
+      - name: Cache zim-tools and kiwix-tools
+        id: tools-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/zim-tools
+            ~/.local/kiwix-tools
+          key: zim-${{ env.ZIM_TOOLS_VERSION }}-kiwix-${{ env.KIWIX_TOOLS_VERSION }}-linux-x86_64
+      - name: Download zim-tools and kiwix-tools
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.local/zim-tools ~/.local/kiwix-tools
+          curl -fsSL --retry 3 --max-time 1200 \
+            "https://download.openzim.org/release/zim-tools/zim-tools_linux-x86_64-${ZIM_TOOLS_VERSION}.tar.gz" \
+            | tar -xz -C ~/.local/zim-tools --strip-components=1
+          curl -fsSL --retry 3 --max-time 1200 \
+            "https://download.kiwix.org/release/kiwix-tools/kiwix-tools_linux-x86_64-${KIWIX_TOOLS_VERSION}.tar.gz" \
+            | tar -xz -C ~/.local/kiwix-tools --strip-components=1
+      - name: Put the tools on PATH
+        run: |
+          echo "$HOME/.local/zim-tools" >> "$GITHUB_PATH"
+          echo "$HOME/.local/kiwix-tools" >> "$GITHUB_PATH"
+      - name: Fetch OpenFreeMap Monaco tiles
+        run: python scripts/fetch-openfreemap-mbtiles.py monaco -o ofm-monaco.mbtiles
+      - name: Build from OpenFreeMap tiles (search, Find chips, viewer)
+        run: |
+          python create_osm_zim.py --mbtiles ofm-monaco.mbtiles --bbox 7.40,43.72,7.44,43.76 \
+            --name Monaco --split-find-chips -o osm-monaco-ofm.zim
+      - name: Validate
+        env:
+          STREETZIM_REQUIRE_ZIMCHECK: "1"
+        run: python cloud/validate_zim.py osm-monaco-ofm.zim
+      - name: Browser smoke test through kiwix-serve
+        run: |
+          kiwix-serve --port 8900 osm-monaco-ofm.zim &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8900/content/osm-monaco-ofm/map-config.json >/dev/null && break; sleep 1; done
+          ZIM_ORIGIN=http://127.0.0.1:8900/content/osm-monaco-ofm \
+            CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
+            node cloud/zim_viewer_smoke.mjs
