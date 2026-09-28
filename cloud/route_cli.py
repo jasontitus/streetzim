@@ -48,9 +48,9 @@ if str(ROOT) not in sys.path:
 
 import numpy as np
 
-from tests.szrg_spatial import SpatialGraph, load_spatial_from_zim
-from tests.szrg_spatial_astar import find_route_spatial
-from tests.szrg_astar import R_EARTH, HEURISTIC_SPEED_MPS, haversine_m
+from streetzim.routing.spatial import SpatialGraph, load_spatial_from_zim
+from streetzim.routing.spatial_astar import find_route_spatial
+from streetzim.routing.astar import R_EARTH, HEURISTIC_SPEED_MPS, haversine_m
 
 
 # Bits 0..4 of class_access store the road-class ordinal (see
@@ -79,7 +79,7 @@ def parse_lat_lon(s: str) -> tuple[float, float]:
 def nearest_node(g: SpatialGraph, lat: float, lon: float,
                  mode: str = "origin") -> tuple[int, float]:
     """Snap exactly like the viewer: SpatialGraph.nearest_node in
-    tests/szrg_spatial.py is the Python mirror of routing-worker.js
+    streetzim/routing/spatial.py is the Python mirror of routing-worker.js
     snapNearestNode (cos(lat)-scaled planar ranking, no-motor vertices
     skipped, six-candidate shortlist with the 32-node forward-reach
     test, one-way sinks accepted for ``mode="dest"``). Returns the node
@@ -130,7 +130,7 @@ def find_route_filtered(
     max_pops: int | None = None,
 ):
     """A* with optional class_access filter. Mirrors
-    ``tests.szrg_spatial_astar.find_route_spatial`` but drops edges that
+    ``streetzim.routing.spatial_astar.find_route_spatial`` but drops edges that
     fail ``highway_only``. Edge skipping happens inline so the heap
     never sees them."""
     if start == end:

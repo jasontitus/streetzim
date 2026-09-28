@@ -317,6 +317,8 @@ const CAT  = HERE + 'category-index/';
 // Overture category strings follow a <noun>_<modifier> convention
 // (vietnamese_restaurant, coffee_shop, wine_store, …) — `includeRegex`
 // matches a regex against the subtype string for coarser buckets.
+// BEGIN chip-rules  (must equal cloud/chip_rules.py CHIP_RULES; enforced by
+// tests/chip_rules_js.test.mjs, so edit both together)
 const CATEGORIES = [
   // Merged 2026-09-16 (cloud/chip_rules.py). ZIMs built before that have
   // chip-restaurants.json / chip-cafes.json and no chip-food.json, so all
@@ -370,6 +372,7 @@ const CATEGORIES = [
   { id: 'fuel',        label: 'Gas',         cat: 'poi',
     subtypes: ['fuel', 'charging_station', 'gas_station', 'ev_charging_station'] },
 ];
+// END chip-rules
 
 const state = {
   manifests: { search: null, cat: null }, // small lookups

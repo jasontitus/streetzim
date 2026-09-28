@@ -42,7 +42,7 @@ from libzim.writer import (  # noqa: E402
     Creator, Item, ContentProvider, StringProvider, FileProvider, Blob, Hint,
 )
 
-from tests.szrg_spatial import (  # noqa: E402
+from streetzim.routing.spatial import (  # noqa: E402
     SZCI_MAGIC, SZCI_VERSION_INLINE, SZCI_VERSION_SHARDED,
     DEFAULT_NODES_PER_SHARD, _node_shard_ranges, parse_szci,
 )

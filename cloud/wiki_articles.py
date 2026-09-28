@@ -37,7 +37,8 @@ USER_AGENT = "streetzim-wiki/1.0 (+https://github.com/jasontitus/streetzim)"
 PARSE_API = "https://en.wikipedia.org/w/api.php"
 # Repo-relative cache dir, matching wikidata_cache.py's convention
 # (SCRIPT_DIR / "wikidata_cache"). create_osm_zim.py lives one level up.
-DEFAULT_CACHE_DIR = Path(__file__).resolve().parent.parent / "wiki_articles_cache"
+DEFAULT_CACHE_DIR = Path(os.environ.get("STREETZIM_CACHE_DIR")
+                         or Path(__file__).resolve().parent.parent) / "wiki_articles_cache"
 
 # Tags we keep (everything else is unwrapped to its text). Block + inline
 # structure that reads/displays well; no media, tables, or interactivity.

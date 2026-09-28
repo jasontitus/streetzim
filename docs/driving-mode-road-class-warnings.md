@@ -4,7 +4,9 @@ Design notes for the deferred feature: flag the user when they enter
 Walk or Bike mode on a planned route that includes roads unsuitable for
 that travel mode (e.g. an Interstate motorway).
 
-Status: **not implemented**. This doc captures what would need to change
+Status: **not implemented**. The graph section below predates SZRG v4;
+the current byte layout, including the `class_access` bits this plan
+needed (they now ship), is in [`formats.md`](formats.md). This doc captures what would need to change
 so it can be picked up later without re-deriving the plan.
 
 ---
@@ -66,7 +68,7 @@ Bit layout of `class_access` (little-endian u32):
 | 0..4   | road class ordinal (see table below) — 5 bits, 32 values   |
 | 5..7   | access flags (bit 5=no-foot, bit 6=no-bicycle, bit 7=oneway — set for both `oneway=yes` and reversed `oneway=-1` edges) |
 | 8      | junction=roundabout / circular / mini_roundabout           |
-| 9      | no motor vehicles: footway/path/steps/pedestrian/cycleway/bridleway/corridor/escape/busway with no recognised access tag, or motorcar/motor_vehicle = `no` (else vehicle = `no`, else access = `no`; OSM hierarchy, the most specific recognised key wins). `private`, `destination`, `customers`, `delivery` are **allowed** like `yes` — they are the roads you must use to reach a destination inside a campus or gated community (`create_osm_zim._ACCESS_ALLOW`). The car router never expands bit-9 edges (routing-worker.js, index.html, tests/szrg_astar.py, cloud/route_cli.py). Builders before 2026-09 leave it clear, so consumers also treat class ordinals 16..20 (path..steps) as no-motor. |
+| 9      | no motor vehicles: footway/path/steps/pedestrian/cycleway/bridleway/corridor/escape/busway with no recognised access tag, or motorcar/motor_vehicle = `no` (else vehicle = `no`, else access = `no`; OSM hierarchy, the most specific recognised key wins). `private`, `destination`, `customers`, `delivery` are **allowed** like `yes` — they are the roads you must use to reach a destination inside a campus or gated community (`create_osm_zim._ACCESS_ALLOW`). The car router never expands bit-9 edges (routing-worker.js, index.html, streetzim/routing/astar.py, cloud/route_cli.py). Builders before 2026-09 leave it clear, so consumers also treat class ordinals 16..20 (path..steps) as no-motor. |
 | 10..31 | reserved — zero-fill, room for future use                  |
 
 Road-class ordinals (same 16 classes the speed table uses, packed):

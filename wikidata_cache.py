@@ -35,7 +35,7 @@ from collections import defaultdict
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
-DEFAULT_CACHE_DIR = SCRIPT_DIR / "wikidata_cache"
+DEFAULT_CACHE_DIR = Path(os.environ.get("STREETZIM_CACHE_DIR") or SCRIPT_DIR) / "wikidata_cache"
 
 # Wikidata SPARQL endpoint
 WIKIDATA_SPARQL = "https://query.wikidata.org/sparql"
@@ -55,7 +55,9 @@ WIKIDATA_PROPERTIES = {
     "P31": "instance_of",
 }
 
-USER_AGENT = "StreetZIM/1.0 (https://github.com/user/streetzim; wikidata cache builder)"
+# Wikimedia's User-Agent policy wants a real contact URL; github.com/user/…
+# was a placeholder.
+USER_AGENT = "StreetZIM/1.0 (https://github.com/jasontitus/streetzim; wikidata cache builder)"
 
 
 def _qid_cache_path(pbf_path, cache_dir):

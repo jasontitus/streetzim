@@ -1,5 +1,10 @@
 # Remote-box rebuild runbook
 
+> This is the author's production runbook. It uses the optional
+> accelerators (`--zim-builder rust`, `--xapian builder`, zimru's
+> `zimcheck`) for continent-scale speed. None of them is required: see
+> [README.md](../README.md) for the standard libzim build.
+
 For the 128 GB / 14 TB remote box (Europe-located, with the full
 satellite tile cache + world build currently in progress, which means
 planet PBF + world MBTiles + terrain cache are already there).
@@ -624,7 +629,7 @@ and the previous good site would remain live. Operator re-runs
 
 ## Preflight is a hard gate (2026-09)
 
-`build-region-and-upload.sh` no longer forces `FORCE=1`; a failing
+`build-region-and-upload.sh` (retired to `attic/`) no longer forced `FORCE=1`; a failing
 `cloud/preflight.py` stops the build. For regions with a known-benign
 preflight failure (sparse Wikidata, ocean-coast false positives — see
 the comment in `cloud/build_region.sh`), run with `FORCE=1` explicitly

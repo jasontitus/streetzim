@@ -564,8 +564,8 @@ def _chk_routing_sample(arc, cfg, zim_path: str) -> tuple[str, str]:
     if not cfg.get("hasRouting"):
         return ("skip", "hasRouting=False")
     try:
-        from tests.szrg_reader import load_from_zim
-        from tests.szrg_astar import find_route
+        from streetzim.routing.reader import load_from_zim
+        from streetzim.routing.astar import find_route
     except Exception as exc:
         return ("warn", f"test harness not importable ({exc})")
     try:
@@ -575,7 +575,7 @@ def _chk_routing_sample(arc, cfg, zim_path: str) -> tuple[str, str]:
         # try that before giving up.
         if "spatial-chunked" in str(exc):
             try:
-                from tests.szrg_spatial import load_spatial_from_zim
+                from streetzim.routing.spatial import load_spatial_from_zim
                 gs = load_spatial_from_zim(zim_path)
                 return ("pass",
                         f"spatial graph loads OK: {gs.num_nodes:,} "
@@ -854,8 +854,17 @@ def _chk_fulltext(arc) -> tuple[str, str]:
         res = searcher.search(q)
         totals[q_str] = res.getEstimatedMatches()
     if all(v == 0 for v in totals.values()):
+        # Small non-English regions (Monaco: "Jardin", "Gare", "Rue") can
+        # miss all three English probes with a healthy index. The region's
+        # own name is always indexed, so try that before calling it
+        # corrupt; a broken index misses this too.
+        name = str(_map_config(arc).get("name") or "").split()
+        if name:
+            totals[name[0]] = searcher.search(
+                Query().set_query(name[0])).getEstimatedMatches()
+    if all(v == 0 for v in totals.values()):
         return ("fail",
-                f"xapian returned 0 hits for all three probes {totals} — "
+                f"xapian returned 0 hits for every probe {totals} — "
                 "index is likely corrupt")
     return ("pass", f"hits {totals}")
 
@@ -884,8 +893,15 @@ def _chk_vector_tiles(arc) -> tuple[str, str]:
     # linear scan breaks on big ZIMs because libzim orders tiles/ by
     # path, so `tiles/14/…` comes alphabetically AFTER `tiles/13/…` (it
     # falls outside a short iteration window).
-    z0 = bytes(arc.get_entry_by_path("tiles/0/0/0.pbf").get_item().content)
-    if not z0:
+    try:
+        z0 = bytes(arc.get_entry_by_path("tiles/0/0/0.pbf").get_item().content)
+    except KeyError:
+        # The builder drops 0-byte tiles, and a small region (Monaco) can
+        # have nothing left at z0 once tilemaker's low-zoom area filters
+        # run. Absent z0 is a warning for a sub-degree region whose deeper
+        # zooms are there, and a failure otherwise (below).
+        z0 = None
+    if z0 is not None and not z0:
         return ("fail", "tiles/0/0/0.pbf is empty")
     cfg = _map_config(arc)
     bbox = None
@@ -928,7 +944,7 @@ def _chk_vector_tiles(arc) -> tuple[str, str]:
                 probes = [e.path]
                 break
     hits = []
-    misses = []
+    misses = ["tiles/0/0/0.pbf=missing"] if z0 is None else []
     for p in probes:
         try:
             data = bytes(arc.get_entry_by_path(p).get_item().content)
@@ -941,6 +957,16 @@ def _chk_vector_tiles(arc) -> tuple[str, str]:
     if not hits:
         return ("fail",
                 f"no vector tiles found at probe paths: {misses}")
+    if z0 is None:
+        # Only a small region can legitimately have nothing at z0; on a
+        # country or continent a missing z0 means tiles were lost.
+        span = (max(bbox[2] - bbox[0], bbox[3] - bbox[1])
+                if bbox and all(v is not None for v in bbox) else None)
+        if span is None or span >= 1.0:
+            return ("fail",
+                    f"tiles/0/0/0.pbf missing on a region spanning "
+                    f"{span if span is not None else 'unknown'}° (only a "
+                    f"sub-degree region may have an empty z0); hits: {hits}")
     if misses:
         return ("warn",
                 f"some tile zooms missing — hits: {hits}; misses: {misses}")
@@ -1420,8 +1446,8 @@ def _chk_routing(arc, cfg, zim_path: str) -> tuple[str, str]:
     # Sample a route. Layout-aware.
     try:
         if spatial_idx:
-            from tests.szrg_spatial import load_spatial_from_zim
-            from tests.szrg_spatial_astar import find_route_spatial
+            from streetzim.routing.spatial import load_spatial_from_zim
+            from streetzim.routing.spatial_astar import find_route_spatial
             sg = load_spatial_from_zim(zim_path, cache_limit=8)
             # Pick an arbitrary source node with at least one edge.
             cell0 = sg._ensure_cell(0)
@@ -1440,8 +1466,8 @@ def _chk_routing(arc, cfg, zim_path: str) -> tuple[str, str]:
                     f"sample route {status} · "
                     f"total routing-data={routing_total/1e6:.0f}MB")
         else:
-            from tests.szrg_reader import load_from_zim
-            from tests.szrg_astar import find_route
+            from streetzim.routing.reader import load_from_zim
+            from streetzim.routing.astar import find_route
             g = load_from_zim(zim_path)
             s, e = 0, min(g.num_nodes - 1, 1000)
             r = find_route(g, s, e, max_pops=500_000)
@@ -1721,7 +1747,7 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
     # Prefer zimru (Rust port, ~20× faster) when available — Daisy:
     # "we can use zimru zimcheck for now". Falls through to libzim's
     # zimcheck binary on dev hosts that don't have zimru built.
-    zimru = os.path.expanduser(
+    zimru = os.environ.get("ZIMRU_ZIMCHECK") or os.path.expanduser(
         "~/experiments/zimru/target/release/zimcheck")
     if os.path.isfile(zimru):
         bin_path = zimru
@@ -1741,7 +1767,7 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
     # python-libzim/libzim/libzim.dylib has the missing symbol. Try
     # to surface it so zimcheck loads cleanly.
     env = dict(os.environ)
-    patched = os.path.expanduser(
+    patched = os.environ.get("PATCHED_LIBZIM_DIR") or os.path.expanduser(
         "~/experiments/python-libzim/libzim")
     if os.path.isdir(patched):
         existing = env.get("DYLD_LIBRARY_PATH", "")

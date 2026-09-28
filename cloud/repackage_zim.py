@@ -51,6 +51,12 @@ from cloud.chip_shards import (  # noqa: E402
 )
 
 
+# Chip ids retired by a merge in cloud/chip_rules.py -> the chip that
+# replaced them (Food & Drink, 2026-09-16). The viewers map the old ids onto
+# the new button when a ZIM only has the old files.
+LEGACY_CHIP_REPLACED_BY = {"restaurants": "food", "cafes": "food"}
+
+
 def _v4_to_v5_bufs(v4_buf: bytes) -> tuple[bytes, bytes]:
     """Split a v4 SZRG buffer into the v5 main + SZGM companion. Mirrors
     extract_routing_graph(split_graph=True) so repackaged ZIMs are
@@ -113,83 +119,13 @@ def _chunk_bytes_inmem(buf: bytes, chunk_size: int,
     return entries, manifest
 
 
-def _sub_bucket_for_name(name: str, n_buckets: int) -> int:
-    """Deterministic, language-agnostic hash mapping a record's name to
-    one of ``n_buckets`` sub-chunks. Must match the client-side logic
-    in resources/viewer/index.html (``subBucketFor``) and Swift
-    (``Geocoder.subBucketFor``).
-
-    Uses FNV-1a 32-bit hash over the UTF-8 bytes of the full name —
-    cheap, no external deps, and reproducible across Python / JS / Swift
-    to the bit.
-    """
-    h = 0x811C9DC5  # FNV offset basis (32-bit)
-    for b in name.encode("utf-8"):
-        h ^= b
-        h = (h * 0x01000193) & 0xFFFFFFFF  # FNV prime
-    return h % n_buckets
+# Moved to cloud/search_shards.py; the private names stay for callers.
+from cloud.search_shards import (  # noqa: E402
+    split_records_recursive as _split_records_recursive,
+    sub_bucket_for_name as _sub_bucket_for_name,
+)
 
 
-def _split_records_recursive(
-    records: list, prefix: str, threshold_bytes: int,
-    n_buckets: int, max_depth: int,
-) -> list[tuple[str, bytes, int]]:
-    """Recursively split records into sub-chunks until each fits under
-    ``threshold_bytes`` or ``max_depth`` is reached. Returns a list of
-    ``(leaf_prefix, serialized_bytes, record_count)`` tuples — only leaves, no
-    intermediate nodes.
-
-    Strategy:
-      1. Try FNV-1a hash by record's ``n`` field across ``n_buckets``.
-      2. If degenerate (≥75% of records collapsed into one bucket — happens
-         when records share an empty/identical name), fall back to
-         **size-based slicing**: distribute records by index modulo
-         n_buckets. Client behavior is unaffected because the client
-         already fetches every sub-chunk under a prefix and filters by
-         query content (see resources/viewer/index.html ``expandPrefix``).
-
-    The serialized payload is checked against ``threshold_bytes`` before
-    splitting — if the chunk is already small enough (or recursion is
-    exhausted), it's returned as a leaf.
-    """
-    serialized = json.dumps(records, separators=(",", ":"),
-                            ensure_ascii=False).encode("utf-8")
-    if len(serialized) <= threshold_bytes or max_depth <= 0 or len(records) <= 1:
-        return [(prefix, serialized, len(records))]
-
-    # By-name FNV-1a bucketing (deterministic; preferred when distribution
-    # is reasonable).
-    by_name: list[list] = [[] for _ in range(n_buckets)]
-    for rec in records:
-        name = rec.get("n", "") or ""
-        by_name[_sub_bucket_for_name(name, n_buckets)].append(rec)
-    largest_share = max(len(b) for b in by_name) / max(1, len(records))
-
-    if largest_share <= 0.75:
-        buckets = by_name
-        strategy = "name"
-    else:
-        # Degenerate — anonymous records (empty `n`) or 1.5M records sharing
-        # the same `n`. Split by record index instead, breaking the FNV tie.
-        buckets = [[] for _ in range(n_buckets)]
-        for i, rec in enumerate(records):
-            buckets[i % n_buckets].append(rec)
-        strategy = "index"
-
-    out: list[tuple[str, bytes, int]] = []
-    hex_width = len(format(n_buckets - 1, "x"))
-    for i, bucket in enumerate(buckets):
-        if not bucket:
-            continue
-        sub_prefix = f"{prefix}-{format(i, f'0{hex_width}x')}"
-        out.extend(_split_records_recursive(
-            bucket, sub_prefix, threshold_bytes, n_buckets, max_depth - 1,
-        ))
-    if strategy == "index":
-        # Surfaced for log diagnostics; the actual recursion already wrote
-        # uniform sub-chunks. (No extra effect — just informational.)
-        pass
-    return out
 
 
 def _emit_split_search(creator, manifest: dict, hot_chunks: dict[str, bytes],
@@ -312,8 +248,8 @@ def _emit_spatial_graph(creator, graph_path: str | Path, *,
     repo_root = Path(__file__).resolve().parent.parent
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    from tests.szrg_reader import load_from_file
-    from tests.szrg_spatial import build_spatial
+    from streetzim.routing.reader import load_from_file
+    from streetzim.routing.spatial import build_spatial
 
     g = load_from_file(graph_path)
     # v5 in-memory parse yielded has_geoms=False; if the source was v5
@@ -362,7 +298,7 @@ def _emit_spatial_graph(creator, graph_path: str | Path, *,
     for shard_path in node_shard_paths:
         # File name format: ``nodes-scaled-NNN.bin`` — ZIM entry path is
         # ``routing-data/<basename>``. The 3-digit zero-pad matches the
-        # writer in tests/szrg_spatial.py and the reader in
+        # writer in streetzim/routing/spatial.py and the reader in
         # ``load_spatial_from_zim``.
         basename = os.path.basename(shard_path)
         creator.add_item(file_passthrough_cls(
@@ -533,6 +469,12 @@ def repackage(src_path: str, dst_path: str,
                 print(f"  will swap {name} ← {p} "
                       f"({len(raw)} B → {len(replacements[name])} B slotted)")
 
+    # Paths re-added as front articles. libzim builds its title index (Kiwix's
+    # search suggestions) only from front articles, and the builder marks
+    # the main page front; re-adding everything as non-front made libzim
+    # write no title index at all. Filled once the main entry is resolved.
+    front_paths: set[str] = set()
+
     class PassthroughItem(Item):
         """An item copied from the source ZIM, preserving its bytes."""
         def __init__(self, path, title, mimetype, data, compress=True):
@@ -548,7 +490,8 @@ def repackage(src_path: str, dst_path: str,
         def get_mimetype(self):  return self._mimetype
         def get_contentprovider(self): return StringProvider(self._data)
         def get_hints(self):
-            return {Hint.FRONT_ARTICLE: False, Hint.COMPRESS: self._compress}
+            return {Hint.FRONT_ARTICLE: self._path in front_paths,
+                    Hint.COMPRESS: self._compress}
 
     class FilePathItem(Item):
         """An item whose content lives on disk — libzim ``FileProvider``
@@ -568,7 +511,8 @@ def repackage(src_path: str, dst_path: str,
         def get_mimetype(self):  return self._mimetype
         def get_contentprovider(self): return FileProvider(self._file_path)
         def get_hints(self):
-            return {Hint.FRONT_ARTICLE: False, Hint.COMPRESS: self._compress}
+            return {Hint.FRONT_ARTICLE: self._path in front_paths,
+                    Hint.COMPRESS: self._compress}
 
     class LazyZimEntryProvider(ContentProvider):
         """Reads an entry's bytes from the source archive only when libzim
@@ -621,7 +565,8 @@ def repackage(src_path: str, dst_path: str,
         def get_contentprovider(self):
             return LazyZimEntryProvider(self._src, self._path, self._size)
         def get_hints(self):
-            return {Hint.FRONT_ARTICLE: False, Hint.COMPRESS: self._compress}
+            return {Hint.FRONT_ARTICLE: self._path in front_paths,
+                    Hint.COMPRESS: self._compress}
 
     # Return the raw metadata bytes. The illustration entry is a PNG,
     # not UTF-8 — decoding would raise and my earlier version silently
@@ -676,6 +621,7 @@ def repackage(src_path: str, dst_path: str,
         except Exception:
             pass
     if main_path_to_set is not None:
+        front_paths.add(main_path_to_set)
         try:
             creator.set_mainpath(main_path_to_set)
             print(f"  main path: {main_path_to_set!r}")
@@ -1178,13 +1124,18 @@ def repackage(src_path: str, dst_path: str,
             # carries park.json. Categories are only used for chips the
             # source lacks. Reads one chip at a time.
             src_chips = old_mani.get("chips") if isinstance(old_mani.get("chips"), dict) else {}
+            # Ids the source declares but CHIP_RULES no longer defines, e.g.
+            # restaurants + cafes on ZIMs built before the 2026-09-16 food
+            # merge. Dropping them left such a ZIM with no food chip at all
+            # when it also ships no poi.json to rebuild "food" from; the
+            # viewers map the old pair onto the merged button, so keep them.
+            legacy_chip_ids = sorted(set(src_chips) - {chip.id for chip in CHIP_RULES})
             if src_chips:
                 print(f"  chips: re-sharding {len(src_chips)} existing chip(s) "
                       f"from the source's chip files")
-                unknown = sorted(set(src_chips) - {chip.id for chip in CHIP_RULES})
-                if unknown:
-                    print(f"  WARNING: source chips not in CHIP_RULES are dropped: "
-                          f"{', '.join(unknown)}")
+                if legacy_chip_ids:
+                    print(f"  chips no longer in CHIP_RULES are carried over "
+                          f"unchanged: {', '.join(legacy_chip_ids)}")
             elif not any(records_by_cat.values()):
                 # Skipping the source chip files and manifest with nothing
                 # to replace them would ship a ZIM with no Find page.
@@ -1218,6 +1169,27 @@ def repackage(src_path: str, dst_path: str,
                     n_files += 1
                 new_chips_meta[chip.id] = plan.manifest_entry(chip.label)
                 print(f"  chip-{chip.id}: {plan.count:,} records "
+                      f"({plan.bytes/1024/1024:.1f} MB) → {n_files} file(s)")
+                del plan
+            for chip_id in legacy_chip_ids:
+                if LEGACY_CHIP_REPLACED_BY.get(chip_id) in new_chips_meta:
+                    # The merged chip was rebuilt (source ships poi.json):
+                    # the old pair would only store the same records twice.
+                    print(f"  chip-{chip_id} (legacy): dropped, "
+                          f"{LEGACY_CHIP_REPLACED_BY[chip_id]} rebuilt")
+                    continue
+                meta = src_chips[chip_id]
+                label = meta.get("label") if isinstance(meta, dict) else None
+                label = label or chip_id
+                plan = plan_chip(read_chip_records(_src_bytes, chip_id, meta),
+                                 chip_shard_target_bytes)
+                n_files = 0
+                for path, title, blob in plan.files(chip_id, label):
+                    c.add_item(PassthroughItem(path, title, "application/json",
+                                               blob, compress=True))
+                    n_files += 1
+                new_chips_meta[chip_id] = plan.manifest_entry(label)
+                print(f"  chip-{chip_id} (legacy): {plan.count:,} records "
                       f"({plan.bytes/1024/1024:.1f} MB) → {n_files} file(s)")
                 del plan
             # Re-emit category-index/manifest.json with the new chips
