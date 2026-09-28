@@ -54,9 +54,13 @@ OpenFreeMap's Planetiler builds. Each feature becomes one point (the point
 itself, a MultiPoint's mean, a line's middle vertex, or a polygon ring's
 mean). Duplicates of (name, type, position to 4 dp) are dropped.
 
-Known gaps:
-- A street that crosses tiles yields one record per tile.
-- Only the Latin-script name is indexed.
+A street crossing several tiles is decoded once per tile. Pieces with the
+same name and the same location label, chained within 3 km, are merged
+into one record: the piece nearest the middle (`merge_street_records`,
+`STREETZIM_MERGE_STREETS=0` turns it off). In Monaco this takes 458 street
+records down to 319, and every distinct street name stays searchable.
+
+Known gap: only the Latin-script name is indexed.
 
 ## `search-data/`
 

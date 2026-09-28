@@ -99,6 +99,7 @@ Rules that keep published ZIMs working:
 | `STREETZIM_NODE_LOC_DIR` | fast scratch volume for the routing node-location store (default `/data`, falling back to the output directory) |
 | `STREETZIM_PACK_BIN`, `XAPIANBUILDER_BIN` | optional accelerators only (see §1) |
 | `ZSTD_CLEVEL` | ZIM compression level (production uses 22) |
+| `STREETZIM_MERGE_STREETS=0` | keep one search record per tile for streets instead of merging the pieces (docs/search-records.md) |
 | `PYTHON` | interpreter the Node tests shell out to |
 
 ## 3. How production releases are made
