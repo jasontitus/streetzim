@@ -68,13 +68,11 @@ kiwix-serve --port 8888 osm-monaco.zim          # from kiwix-tools; or:
 python cloud/serve_zim_entries.py osm-monaco.zim --port 8888
 ```
 
-**Everything above uses only openZIM's own stack**: python-libzim for
-writing, `zimcheck` for checking, `kiwix-serve` for serving. The optional
-Rust packer (`--zim-builder rust`, built on the author's `zimru`) is a speed
-option for continent-scale builds, not a requirement. CI checks this on
-every push: it builds with libzim, rewrites the ZIM with the repackage and
-in-place viewer-patch tools, and loads the viewer through `kiwix-serve` in
-headless Chrome.
+**StreetZim uses the standard openZIM tools.** It writes ZIMs with
+[python-libzim](https://github.com/openzim/python-libzim) (libzim), checks
+them with `zimcheck`, and serves them with `kiwix-serve`. Nothing else is
+needed. On every push, CI builds, rewrites and serves a ZIM with exactly
+this stack.
 
 `cloud/validate_zim.py` also runs `zimcheck` if it is on your PATH. Use
 zim-tools 3.8 or newer from <https://download.openzim.org/release/zim-tools/>;
@@ -103,7 +101,6 @@ Main feature flags (all off by default; `python create_osm_zim.py --help` lists 
 | `--wikidata` | population, descriptions, Wikipedia extracts | network to Wikidata/Wikipedia |
 | `--bundle-wiki-articles --wiki-articles-source enwiki.zim` | full Wikipedia articles, read from a local Wikipedia ZIM | a Wikipedia ZIM |
 | `--overture-addresses/--overture-places PARQUET` | Overture data, from `download_overture_data.py` | DuckDB, network to S3 |
-| `--zim-builder rust` | faster packer with per-entry compression control | `rust/streetzim-pack` built (see `docs/zim-builder-rust.md`) |
 
 Size and memory: a city builds in minutes on a laptop. Country and continent
 builds need tens to ~100 GB of RAM and are run with the production wrappers
@@ -140,7 +137,6 @@ resources/viewer/ (MapLibre app) ───┤
 | `resources/tilemaker/` | tilemaker config and Lua profile |
 | `cloud/` | Python modules the builder imports (`chip_rules`, `search_shards`, `repackage_zim`, …), the validator, and operations scripts |
 | `tests/` | pytest and Node tests; note `tests/szrg_*.py` are also imported by the builder |
-| `rust/streetzim-pack` | optional Rust ZIM packer |
 | `web/` | streetzim.web.app catalogue and the `/drive/` PWA |
 | `preview-proxy/` | archive.org range proxy for online previews |
 
@@ -174,6 +170,18 @@ and the known technical debt.
 > ZIMs contain it and may only be redistributed non-commercially. Build without
 > `--satellite` (or use a variant with `satellite=no` in
 > `cloud/region-variants.tsv`) for a ZIM with no non-commercial data.
+
+## Optional accelerators for very large builds
+
+The author's production host builds whole continents. It uses two optional
+speed-ups, both switched off by default:
+
+- `--zim-builder rust` swaps libzim's writer for a separate packer.
+- `--xapian builder` uses an external indexer.
+
+Both produce ordinary ZIMs, the same as libzim's. Neither is needed for
+anything in this README. [docs/zim-builder-rust.md](docs/zim-builder-rust.md)
+explains when they help.
 
 ## Legacy: raster (Leaflet) variant
 

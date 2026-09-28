@@ -1,4 +1,11 @@
-# Rust ZIM builder (Path D)
+# Optional accelerator: the Rust ZIM packer
+
+> **You probably don't need this.** StreetZim writes ZIMs with libzim
+> (python-libzim) by default, and every feature works that way. CI builds,
+> checks, rewrites and serves ZIMs with only the standard openZIM tools. This
+> page describes a speed-up used for continent-scale builds on the author's
+> production host.
+
 
 `create_osm_zim.py` ships two ZIM emit backends:
 

@@ -20,11 +20,16 @@ ZIM.
   `tests/szrg_reader.py`**. The spatial routing writer lives under `tests/`
   for historical reasons, so don't move `tests/` without moving those first.
 - `resources/viewer/`: the viewer baked into every ZIM. `resources/tilemaker/`: the tile profile.
-- `cloud/validate_zim.py`: the release gate. `cloud/repackage_zim.py` / `cloud/swap_viewer_rust.py` / `cloud/patch_viewer_inplace.py`: rewrite published ZIMs.
-- `rust/streetzim-pack` (optional `--zim-builder rust`). It depends on the
-  author's `zimru` crate through a **path dependency** (`../../../zimru`, i.e.
-  a `zimru` checkout next to this repo). `--xapian builder` likewise looks for
-  a `xapianbuilder` checkout next to the repo, or `$XAPIANBUILDER_BIN`.
+- `cloud/validate_zim.py`: the release gate. `cloud/repackage_zim.py` / `cloud/patch_viewer_inplace.py` (libzim), and the accelerator variant `cloud/swap_viewer_rust.py`: rewrite published ZIMs.
+- **The ZIM writer is libzim** (python-libzim), which is the default. `zimcheck`
+  and `kiwix-serve` are the reference checker and reader. CI uses only these.
+
+**Optional accelerators.** Only the continent-scale production builds use
+them; see §3. `rust/streetzim-pack` (`--zim-builder rust`) and
+`--xapian builder` are faster replacements for libzim's writer and indexer.
+They depend on the author's `zimru` and `xapianbuilder` checkouts placed next
+to this repo. They make the same ZIM, faster. You can ignore them unless you
+are building continents.
 
 **Operations: the author's hosting.** Works only on the production host and
 with the author's accounts:
@@ -88,9 +93,9 @@ Rules that keep published ZIMs working:
 | `STREETZIM_REQUIRE_SHAPEFILES=1` | fail the build if the coastline / Natural Earth shapefiles are missing (otherwise a warning) |
 | `STREETZIM_REQUIRE_ZIMCHECK=1` | `validate_zim.py` fails when `zimcheck` is not installed (otherwise skipped) |
 | `STREETZIM_SKIP_ZIMCHECK=1` | skip zimcheck in the validator |
-| `ZIMRU_ZIMCHECK` | path to the faster Rust `zimcheck` (default `~/experiments/zimru/target/release/zimcheck`; used when it exists) |
+| `ZIMRU_ZIMCHECK` | optional: a faster drop-in `zimcheck` for very large ZIMs; the standard `zimcheck` is used otherwise |
 | `STREETZIM_NODE_LOC_DIR` | fast scratch volume for the routing node-location store (default `/data`, falling back to the output directory) |
-| `STREETZIM_PACK_BIN`, `XAPIANBUILDER_BIN` | paths to the optional Rust packer / Xapian builder |
+| `STREETZIM_PACK_BIN`, `XAPIANBUILDER_BIN` | optional accelerators only (see §1) |
 | `ZSTD_CLEVEL` | ZIM compression level (production uses 22) |
 | `PYTHON` | interpreter the Node tests shell out to |
 
@@ -109,8 +114,11 @@ On the build host, from `/storage/streetzim`. The details are in
    tier, smoke-test points). `cloud/region-variants.tsv` defines derived
    variants such as `switzerland-light` (no satellite, z13).
 3. **Build one region.** `build-region-fast.sh <id> <bbox> <name>` is the
-   canonical wrapper (rust packer, in-build spatial routing cells, no LLM
-   bundle, Wikipedia articles, Overture).
+   canonical wrapper. It builds with in-build spatial routing cells,
+   Wikipedia articles and Overture, and no LLM bundle. On this host it also
+   turns on the two optional accelerators (§1) for speed. The same
+   `create_osm_zim.py` command without `--zim-builder rust --xapian builder`
+   produces an equivalent ZIM with plain libzim.
 4. **Gate and ship.** `ship-region.sh <id>` builds, then runs its gates
    (terrain, `validate_zim.py`, route checks, search + Find smoke tests,
    `cloud/pwa_smoke_test.mjs`), then uploads with
@@ -167,12 +175,12 @@ scripts that may be running on the production host (see
 - **`streetzim-meta.json` `routingGraph.version`** reports the intermediate
   SZRG version even when the ZIM ships SZCI v3 cells. `map-config.json` has no
   routing-format field.
-- **Personal dependencies.** `zimru` (a path dependency) and `xapianbuilder`
-  are the author's projects. Both are optional: CI proves the default libzim
-  path builds, rewrites and serves ZIMs without them. Production currently uses
-  them (`build-region-fast.sh`) for speed on large regions, and
-  `retrofit-chips-queue.sh` uses `cloud/swap_viewer_rust.py`, whose libzim
-  equivalent is `cloud/repackage_zim.py`.
+- **Production leans on the optional accelerators.** `build-region-fast.sh`
+  and `retrofit-chips-queue.sh` (via `cloud/swap_viewer_rust.py`) use
+  them. Both have libzim equivalents: the default writer, and
+  `cloud/repackage_zim.py` / `cloud/patch_viewer_inplace.py`. CI covers
+  those equivalents. A maintainer without the accelerators can run the same
+  wrappers without the two flags. Only the largest regions get slower.
 - **Docs that point at files that don't exist:** `docs/mcpzim-contract.md`
   and `docs/STREETZIM_CONSUMPTION.md` are cited from `create_osm_zim.py`.
 - **Satellite licence.** The EOX 2021 layer is CC BY-NC-SA and ships in most

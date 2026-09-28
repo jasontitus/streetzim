@@ -1,5 +1,10 @@
 # Remote-box rebuild runbook
 
+> This is the author's production runbook. It uses the optional
+> accelerators (`--zim-builder rust`, `--xapian builder`, zimru's
+> `zimcheck`) for continent-scale speed. None of them is required: see
+> [README.md](../README.md) for the standard libzim build.
+
 For the 128 GB / 14 TB remote box (Europe-located, with the full
 satellite tile cache + world build currently in progress, which means
 planet PBF + world MBTiles + terrain cache are already there).
