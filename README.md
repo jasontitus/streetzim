@@ -67,6 +67,14 @@ kiwix-serve --port 8888 osm-monaco.zim          # from kiwix-tools; or:
 python cloud/serve_zim_entries.py osm-monaco.zim --port 8888
 ```
 
+**Everything above uses only openZIM's own stack**: python-libzim for
+writing, `zimcheck` for checking, `kiwix-serve` for serving. The optional
+Rust packer (`--zim-builder rust`, built on the author's `zimru`) is a speed
+option for continent-scale builds, not a requirement. CI checks this on
+every push: it builds with libzim, rewrites the ZIM with the repackage and
+in-place viewer-patch tools, and loads the viewer through `kiwix-serve` in
+headless Chrome.
+
 `cloud/validate_zim.py` also runs `zimcheck` if it is on your PATH. Use
 zim-tools 3.8 or newer from <https://download.openzim.org/release/zim-tools/>;
 Ubuntu's 3.2 misreads ZIMs written by current libzim.

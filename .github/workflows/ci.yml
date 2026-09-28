@@ -3,7 +3,11 @@
 #   monaco-e2e - builds a real Monaco ZIM from Geofabrik with tilemaker v3 and the
 #                production routing layout, then runs cloud/validate_zim.py
 #                (with a current zimcheck) and a headless-browser smoke test of
-#                the viewer served straight out of the ZIM. Also runs weekly so
+#                the viewer served straight out of the ZIM, both by a minimal
+#                server and by Kiwix's own kiwix-serve. Everything here uses
+#                stock libzim (python-libzim, zim-tools, kiwix-tools); nothing
+#                needs the optional Rust packer. It also exercises the tools
+#                that rewrite published ZIMs (repackage, in-place viewer patch). Also runs weekly so
 #                upstream drift (Geofabrik, fonts CDN, MapLibre on unpkg,
 #                tilemaker, libzim) shows up without a code change.
 name: CI
@@ -27,6 +31,7 @@ env:
   NODE_VERSION: "22"
   TILEMAKER_REF: v3.0.0
   ZIM_TOOLS_VERSION: 3.8.0
+  KIWIX_TOOLS_VERSION: 3.8.2
 
 jobs:
   checks:
@@ -118,9 +123,23 @@ jobs:
             "https://download.openzim.org/release/zim-tools/zim-tools_linux-x86_64-${ZIM_TOOLS_VERSION}.tar.gz"
           mkdir -p ~/.local/zim-tools
           tar -xzf /tmp/zt.tgz -C ~/.local/zim-tools --strip-components=1
-      - name: Put tilemaker and zim-tools on PATH
+      - name: Cache kiwix-tools ${{ env.KIWIX_TOOLS_VERSION }}
+        id: kiwixtools-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/kiwix-tools
+          key: kiwix-tools-${{ env.KIWIX_TOOLS_VERSION }}-linux-x86_64
+      - name: Download kiwix-tools ${{ env.KIWIX_TOOLS_VERSION }}
+        if: steps.kiwixtools-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL --retry 3 --max-time 1200 -o /tmp/kt.tgz \
+            "https://download.kiwix.org/release/kiwix-tools/kiwix-tools_linux-x86_64-${KIWIX_TOOLS_VERSION}.tar.gz"
+          mkdir -p ~/.local/kiwix-tools
+          tar -xzf /tmp/kt.tgz -C ~/.local/kiwix-tools --strip-components=1
+      - name: Put tilemaker, zim-tools and kiwix-tools on PATH
         run: |
           echo "$HOME/.local/zim-tools" >> "$GITHUB_PATH"
+          echo "$HOME/.local/kiwix-tools" >> "$GITHUB_PATH"
           echo "$HOME/.local/tilemaker" >> "$GITHUB_PATH"
 
       - name: Cache coastline and Natural Earth shapefiles
@@ -154,6 +173,28 @@ jobs:
           ZIM_ORIGIN=http://127.0.0.1:8899 SMOKE_SEARCH=Monaco \
             CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
             node cloud/zim_viewer_smoke.mjs
+
+      - name: Browser smoke test through kiwix-serve
+        run: |
+          kiwix-serve --port 8900 osm-monaco-ci.zim &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8900/content/osm-monaco-ci/map-config.json >/dev/null && break; sleep 1; done
+          ZIM_ORIGIN=http://127.0.0.1:8900/content/osm-monaco-ci \
+            CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
+            node cloud/zim_viewer_smoke.mjs
+
+      - name: Rewrite tools on libzim (repackage, in-place viewer patch)
+        env:
+          STREETZIM_REQUIRE_ZIMCHECK: "1"
+        run: |
+          python cloud/repackage_zim.py osm-monaco-ci.zim osm-monaco-repack.zim --split-find-chips
+          python cloud/validate_zim.py osm-monaco-repack.zim
+          python -c "import sys; from libzim.reader import Archive; sys.exit(0 if Archive('osm-monaco-repack.zim').has_title_index else 'repackage lost the title index')"
+          cp osm-monaco-ci.zim osm-monaco-patched.zim
+          mkdir -p /tmp/viewer && cp resources/viewer/{index.html,places.html,routing-worker.js} /tmp/viewer/
+          sed -i 's/<title>/<title>ci-patch /' /tmp/viewer/index.html
+          python cloud/patch_viewer_inplace.py osm-monaco-patched.zim --viewer-dir /tmp/viewer
+          zimcheck -A osm-monaco-patched.zim
+          python -c "import sys; from libzim.reader import Archive; a = Archive('osm-monaco-patched.zim'); b = bytes(a.get_entry_by_path('index.html').get_item().content); sys.exit(0 if a.check() and b'ci-patch' in b else 'in-place patch not applied or checksum wrong')"
 
       - name: Upload ZIM
         if: always()

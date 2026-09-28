@@ -167,8 +167,11 @@ scripts that may be running on the production host (see
   SZRG version even when the ZIM ships SZCI v3 cells. `map-config.json` has no
   routing-format field.
 - **Personal dependencies.** `zimru` (a path dependency) and `xapianbuilder`
-  are the author's projects. Both are optional; the default Python/libzim path
-  needs neither.
+  are the author's projects. Both are optional: CI proves the default libzim
+  path builds, rewrites and serves ZIMs without them. Production currently uses
+  them (`build-region-fast.sh`) for speed on large regions, and
+  `retrofit-chips-queue.sh` uses `cloud/swap_viewer_rust.py`, whose libzim
+  equivalent is `cloud/repackage_zim.py`.
 - **Docs that point at files that don't exist:** `docs/mcpzim-contract.md`
   and `docs/STREETZIM_CONSUMPTION.md` are cited from `create_osm_zim.py`.
 - **Satellite licence.** The EOX 2021 layer is CC BY-NC-SA and ships in most

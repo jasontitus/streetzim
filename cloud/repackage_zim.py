@@ -533,6 +533,12 @@ def repackage(src_path: str, dst_path: str,
                 print(f"  will swap {name} ← {p} "
                       f"({len(raw)} B → {len(replacements[name])} B slotted)")
 
+    # Paths re-added as front articles. libzim builds its title index (Kiwix's
+    # search suggestions) only from front articles, and the builder marks
+    # the main page front; re-adding everything as non-front made libzim
+    # write no title index at all. Filled once the main entry is resolved.
+    front_paths: set[str] = set()
+
     class PassthroughItem(Item):
         """An item copied from the source ZIM, preserving its bytes."""
         def __init__(self, path, title, mimetype, data, compress=True):
@@ -548,7 +554,8 @@ def repackage(src_path: str, dst_path: str,
         def get_mimetype(self):  return self._mimetype
         def get_contentprovider(self): return StringProvider(self._data)
         def get_hints(self):
-            return {Hint.FRONT_ARTICLE: False, Hint.COMPRESS: self._compress}
+            return {Hint.FRONT_ARTICLE: self._path in front_paths,
+                    Hint.COMPRESS: self._compress}
 
     class FilePathItem(Item):
         """An item whose content lives on disk — libzim ``FileProvider``
@@ -568,7 +575,8 @@ def repackage(src_path: str, dst_path: str,
         def get_mimetype(self):  return self._mimetype
         def get_contentprovider(self): return FileProvider(self._file_path)
         def get_hints(self):
-            return {Hint.FRONT_ARTICLE: False, Hint.COMPRESS: self._compress}
+            return {Hint.FRONT_ARTICLE: self._path in front_paths,
+                    Hint.COMPRESS: self._compress}
 
     class LazyZimEntryProvider(ContentProvider):
         """Reads an entry's bytes from the source archive only when libzim
@@ -621,7 +629,8 @@ def repackage(src_path: str, dst_path: str,
         def get_contentprovider(self):
             return LazyZimEntryProvider(self._src, self._path, self._size)
         def get_hints(self):
-            return {Hint.FRONT_ARTICLE: False, Hint.COMPRESS: self._compress}
+            return {Hint.FRONT_ARTICLE: self._path in front_paths,
+                    Hint.COMPRESS: self._compress}
 
     # Return the raw metadata bytes. The illustration entry is a PNG,
     # not UTF-8 — decoding would raise and my earlier version silently
@@ -676,6 +685,7 @@ def repackage(src_path: str, dst_path: str,
         except Exception:
             pass
     if main_path_to_set is not None:
+        front_paths.add(main_path_to_set)
         try:
             creator.set_mainpath(main_path_to_set)
             print(f"  main path: {main_path_to_set!r}")
