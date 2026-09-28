@@ -185,7 +185,7 @@ scripts that may be running on the production host (see
   full satellite z14 ZIMs under "light" names.
 - **Large units.** `create_osm_zim.py`'s `main()` (~1.1k lines) is the
   biggest remaining function; `create_zim` is now a sequence of phase
-  functions in `streetzim/zim_writer.py` (none over ~250 lines), and
+  functions in `streetzim/zim_writer.py` (none over ~260 lines), and
   `index.html` is edited as parts in `resources/viewer/src/index/`.
   `places.html` (2.5k) and `routing-worker.js` (1.7k) are unsplit.
 - **Legacy format readers.** The builder writes only current formats
