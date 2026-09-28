@@ -39,7 +39,14 @@ maps2zim downloads**. We fetched OpenFreeMap's Monaco MBTiles
   in-ZIM viewer passes the headless-browser smoke test **through
   `kiwix-serve`**.
 
-CI repeats this on every push (job `openfreemap-tiles`). So the data side of
+CI repeats this on every push (job `openfreemap-tiles`).
+
+StreetZim's own tilemaker tiles still find more: on the same Monaco OSM
+data they have **+31% street names** (footpaths, stairways, service roads)
+and **about twice as many named places**. Most of the extra places are named
+buildings; for classed POIs the gain is +8%. The comparison, and how
+maps2zim could close most of the gap from the OSM PBF, is in
+[tile-sources.md](tile-sources.md). So the data side of
 search and categories needs no new data source in maps2zim, only code that
 reads the MBTiles it already has.
 

@@ -124,6 +124,7 @@ resources/viewer/ (MapLibre app) ───┤
 ```
 
 - Every byte format and ZIM path is specified in [docs/formats.md](docs/formats.md); search records and category files in [docs/search-records.md](docs/search-records.md).
+- Tile sources: StreetZim's tilemaker tiles give +31% street names and about 2x named places compared with OpenFreeMap's ([docs/tile-sources.md](docs/tile-sources.md)).
 - Working with openzim/maps: StreetZim also builds from the OpenFreeMap tiles maps2zim uses (`scripts/fetch-openfreemap-mbtiles.py`, then `--mbtiles`); [docs/openzim-integration.md](docs/openzim-integration.md) is the plan for porting features into maps2zim.
 - Routing internals: [docs/routing.md](docs/routing.md). Search sharding: [docs/search-prefix-locality.md](docs/search-prefix-locality.md).
 - Kiwix reader quirks the design works around (service-worker request drops, cluster size limits, zstd windows): [docs/zim-packaging-gotchas.md](docs/zim-packaging-gotchas.md).
