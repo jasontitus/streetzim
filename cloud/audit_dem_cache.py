@@ -18,11 +18,10 @@ import json
 import os
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from collections import Counter
 from pathlib import Path
 
-import numpy as np
 import rasterio
 
 
@@ -121,7 +120,7 @@ def main() -> int:
     if not out.parent.exists():
         out = Path("/tmp/dem_audit.json")
     Path("/tmp/dem_audit.json").write_text(json.dumps(results, indent=2))
-    print(f"\nfull report → /tmp/dem_audit.json")
+    print("\nfull report → /tmp/dem_audit.json")
     return 0
 
 

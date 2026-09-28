@@ -29,6 +29,7 @@ import os
 import sqlite3
 import sys
 import time
+import urllib.error
 import urllib.request
 import urllib.parse
 from collections import defaultdict
@@ -202,9 +203,9 @@ def extract_qids_from_mbtiles(mbtiles_path):
 
     Returns a dict mapping Q-ID -> {name, type, lat, lon}.
     """
-    print(f"  Note: MBTiles mode extracts feature names but not Q-IDs directly.")
-    print(f"  For best results, use --pbf mode which reads wikidata tags from OSM.")
-    print(f"  Scanning tiles for named features to look up in Wikidata...")
+    print("  Note: MBTiles mode extracts feature names but not Q-IDs directly.")
+    print("  For best results, use --pbf mode which reads wikidata tags from OSM.")
+    print("  Scanning tiles for named features to look up in Wikidata...")
 
     import gzip
     import mapbox_vector_tile
@@ -731,7 +732,7 @@ def print_cache_stats(cache_dir):
     print(f"    Has extract:       {has_extract:,} ({100*has_extract//total}%)")
     print(f"    Has country:       {has_country:,} ({100*has_country//total}%)")
     print(f"    Has Wikipedia URL: {has_wp_url:,} ({100*has_wp_url//total}%)")
-    print(f"    Top types:")
+    print("    Top types:")
     for itype, count in sorted(types.items(), key=lambda x: -x[1])[:15]:
         print(f"      {itype}: {count:,}")
 

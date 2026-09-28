@@ -28,9 +28,7 @@ there.
 from __future__ import annotations
 
 import json
-import struct
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -155,7 +153,7 @@ def test_oversized_search_chunk_is_caught(tmp_path: Path):
     # Allocate a 201 MB blob — above FAIL threshold, below 'obviously
     # OOM' ceiling for a test process.
     big = b'["dummy"]' + b"x" * (201 * 1024 * 1024 - 10)
-    zim = _make_minimal_zim(
+    _make_minimal_zim(
         tmp_path,
         filename="oversized_search.zim",
         extra_items=[

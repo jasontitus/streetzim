@@ -6,6 +6,7 @@ import os
 import sqlite3
 import subprocess
 import time
+import urllib.error
 import urllib.request
 
 # The builder's flushing, phase-timing print (see streetzim/common.py).
@@ -174,7 +175,6 @@ def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=N
     tiles that intersect the bounding box.
     Yields in (z, x, y) sorted order for deterministic ZIM insertion.
     """
-    import math
 
     conn = sqlite3.connect(str(mbtiles_path))
     cursor = conn.cursor()

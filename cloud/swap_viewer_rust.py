@@ -175,7 +175,6 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
     cat_manifest_title = "Category Index Manifest"
     # Read by the entry walk below, which runs in every mode — a
     # --reshard-search-only run never enters the chip preflight that sets it.
-    src_place_sharded = True
     if reshard_chips:
         if not src.has_entry_by_path(CAT_MANIFEST):
             raise SystemExit(f"--reshard-chips: {src_path} has no {CAT_MANIFEST}")
@@ -203,7 +202,6 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
         }
         if src_sharded_cats:
             print(f"  already sharded, keeping: {', '.join(sorted(src_sharded_cats))}")
-        src_place_sharded = "place" in src_sharded_cats
 
     # Collect viewer replacements from disk.
     replacements: dict[str, bytes] = {}

@@ -17,7 +17,7 @@ the route works, so the pair is a real, reachable road vertex.
 Usage:
   venv-linux/bin/python3 cloud/check_smoke_pairs.py [--fix] [--max-gap 80] [--only a,b]
 """
-import argparse, glob, math, os, re, sys, time
+import argparse, glob, os, sys, time
 
 # The checkout holding the ZIMs and cloud/regions.tsv: $STREETZIM_ROOT, else
 # the checkout this script lives in (/storage/streetzim on the build host).
@@ -84,7 +84,7 @@ def main():
                     kw[name] = 3_000_000; break
             r = find_route_spatial(g, pts[0][3], pts[1][3], **kw)
             ok = bool(r and (r.get("time") if isinstance(r, dict) else r))
-        except Exception as e:
+        except Exception:
             ok, r = False, None
         secs = time.time() - t0
         gaps = f"gap src {pts[0][4]:.0f} m, dst {pts[1][4]:.0f} m"

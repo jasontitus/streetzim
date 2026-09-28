@@ -281,7 +281,7 @@ def main() -> int:
         print(f"\n{'='*70}\n>> variant: {variant}\n{'='*70}")
         zim_arg = args.zim if variant != "spatz" else (args.spatial_zim or args.zim)
         if variant == "spatz" and not args.spatial_zim:
-            print(f"[parent] SKIP spatz: --spatial-zim not provided")
+            print("[parent] SKIP spatz: --spatial-zim not provided")
             continue
         cmd = [
             sys.executable, __file__,

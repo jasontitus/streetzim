@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from cloud.viewer_slots import (  # noqa: E402
-    SLOT_MAGIC, VIEWER_FILES, comment_delims, slot_header, slot_needle)
+    VIEWER_FILES, comment_delims, slot_header, slot_needle)
 # libzim writes a 16-byte MD5 of everything before it as the final bytes.
 CHECKSUM_LEN = 16
 

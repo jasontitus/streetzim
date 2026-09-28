@@ -84,7 +84,7 @@ def _chunk_bytes_inmem(buf: bytes, chunk_size: int,
 # Moved to cloud/search_shards.py; the private names stay for callers.
 from cloud.search_shards import (  # noqa: E402
     split_records_recursive as _split_records_recursive,
-    sub_bucket_for_name as _sub_bucket_for_name,
+    sub_bucket_for_name as _sub_bucket_for_name,  # noqa: F401 -- tests import it from here
 )
 
 
@@ -1198,7 +1198,7 @@ def repackage(src_path: str, dst_path: str,
     # dominates; passthrough is mostly I/O-bound; chip emission and
     # graph rewrite are CPU/memory-bound but bounded by file size.
     total = sum(v for k, v in _section_times.items() if not k.startswith("_"))
-    print(f"\n  per-section wall time:")
+    print("\n  per-section wall time:")
     for sect in ("setup", "passthrough", "graph_rewrite", "metadata",
                  "chips", "finalize"):
         secs = _section_times.get(sect, 0.0)

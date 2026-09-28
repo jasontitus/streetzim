@@ -3,7 +3,6 @@ places.html relies on: every chip has an id/label, matches obvious
 records, and doesn't matches false-positives like addresses."""
 from __future__ import annotations
 
-import re
 import sys
 import unittest
 from pathlib import Path
@@ -89,7 +88,7 @@ class TestChipRulesContract(unittest.TestCase):
     def test_split_preserves_total_record_count_across_chips(self):
         """Running split on a small synthetic corpus: every record
         that qualifies for any chip shows up in that chip's list."""
-        from cloud.chip_rules import CHIP_RULES, split_records_by_chip
+        from cloud.chip_rules import split_records_by_chip
         records_by_cat = {
             "poi": [
                 {"t": "poi", "s": "restaurant", "n": "Jane's"},

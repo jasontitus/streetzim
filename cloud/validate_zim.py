@@ -818,7 +818,7 @@ def _chk_main_entry(arc) -> tuple[str, str]:
         main = main.get_redirect_entry()
         steps += 1
     if main.is_redirect:
-        return ("fail", f"main entry redirect chain > 8 deep")
+        return ("fail", "main entry redirect chain > 8 deep")
     # Verify content is readable
     try:
         _ = bytes(main.get_item().content)
@@ -1033,7 +1033,7 @@ def _chk_wikidata(arc, cfg) -> tuple[str, str]:
         return ("warn", "wikidata manifest has 0 chunks")
     # Verify a handful of declared chunks actually exist + parse.
     bad = []
-    sample_prefix = next(iter(chunks))
+    _sample_prefix = next(iter(chunks))  # raises on an empty manifest, as before
     sample_data = None
     for prefix in list(chunks)[:5]:
         try:
@@ -1452,7 +1452,7 @@ def _chk_routing(arc, cfg, zim_path: str) -> tuple[str, str]:
             # Pick an arbitrary source node with at least one edge.
             cell0 = sg._ensure_cell(0)
             if cell0.node_count < 2:
-                return ("warn", f"spatial · cell 0 has too few nodes")
+                return ("warn", "spatial · cell 0 has too few nodes")
             if cell0.nodes_scaled.shape[0]:
                 s = cell0.base_node
                 e = cell0.base_node + min(50, cell0.node_count - 1)
@@ -1593,7 +1593,6 @@ def _audit_tiles(arc) -> tuple[str, str]:
             blanks.setdefault((kind, z), []).append((path, size))
 
     fails: list[str] = []
-    warns: list[str] = []
     summaries: list[str] = []
 
     for (kind, declared_max) in (("vector", 14),

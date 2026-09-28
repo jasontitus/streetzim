@@ -21,7 +21,7 @@ import os
 import re
 import sys
 import urllib.request
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 # Reuse the streamer + bencoder from build_torrent.py
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

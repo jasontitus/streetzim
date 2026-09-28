@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import glob
-import json
 import math
 import multiprocessing
 import os
@@ -139,13 +138,13 @@ def check_viewer_assets() -> list[CheckResult]:
         if not p.is_file():
             out.append(CheckResult(f"viewer.{label}", "fail",
                 f"{p} missing — build will ship ZIM without it",
-                f"restore from git or redeploy resources/viewer/"))
+                "restore from git or redeploy resources/viewer/"))
             continue
         size_kb = p.stat().st_size / 1024
         if size_kb < 1:
             out.append(CheckResult(f"viewer.{label}", "fail",
                 f"{p} is only {size_kb:.1f} KB — probably a stub",
-                f"restore from git"))
+                "restore from git"))
             continue
         out.append(CheckResult(f"viewer.{label}", "pass",
             f"{p.name} = {size_kb:.1f} KB"))
@@ -390,7 +389,7 @@ def check_terrain_cache(bbox, zooms, workers, audit_content=False) -> list[Check
             # Emit a concrete file list the build wrapper can feed into
             # a regen step: `xargs rm -f` then verify_terrain_freshness
             # --regenerate picks them up as missing.
-            dump = ROOT / f".preflight-corrupt-tiles.txt"
+            dump = ROOT / ".preflight-corrupt-tiles.txt"
             dump.write_text("\n".join(corrupt_paths))
             extra = f"; wrote {len(corrupt_paths)} corrupt paths → {dump.name}"
         results.append(CheckResult("terrain_cache", "fail",

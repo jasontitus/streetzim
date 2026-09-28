@@ -333,7 +333,7 @@ class _OfflineZim:
     """Lazy reader for a local Wikipedia ZIM (offline article source)."""
     def __init__(self, path: str):
         from libzim.reader import Archive  # lazy: only when offline source used
-        self.a = Archive(path)
+        self.a = Archive(Path(path))
 
     def image(self, src: str, max_bytes: Optional[int] = None):
         """Bytes + mimetype for an <img src> as written in a Kiwix article

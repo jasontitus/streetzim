@@ -24,7 +24,7 @@ import math
 from dataclasses import dataclass
 
 from streetzim.routing.spatial import SpatialGraph
-from streetzim.routing.astar import R_EARTH, HEURISTIC_SPEED_MPS, NO_MOTOR_BIT, haversine_m, is_no_motor
+from streetzim.routing.astar import R_EARTH, HEURISTIC_SPEED_MPS, haversine_m, is_no_motor
 
 
 @dataclass

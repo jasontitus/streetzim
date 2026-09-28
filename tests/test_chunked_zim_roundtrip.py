@@ -10,12 +10,9 @@ Skipped if libzim isn't installed (same as other ZIM-touching tests).
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 import struct
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -54,7 +51,7 @@ def synthetic_v4_graph() -> bytes:
 
 def test_chunked_zim_roundtrip(synthetic_v4_graph, tmp_path):
     try:
-        from libzim.reader import Archive
+        from libzim.reader import Archive  # noqa: F401 -- availability probe
         from libzim.writer import Creator, Item, StringProvider, Hint
     except ImportError:
         pytest.skip("libzim not installed")
@@ -119,7 +116,7 @@ def test_torn_chunk_rejected(tmp_path):
     """If a chunk's size doesn't match the manifest, loading must fail
     loudly rather than silently producing a broken graph."""
     try:
-        from libzim.reader import Archive
+        from libzim.reader import Archive  # noqa: F401 -- availability probe
         from libzim.writer import Creator, Item, StringProvider, Hint
     except ImportError:
         pytest.skip("libzim not installed")

@@ -7,6 +7,7 @@ import itertools
 import os
 import subprocess
 import time
+import urllib.error
 import urllib.request
 
 # The builder's flushing, phase-timing print (see streetzim/common.py).
@@ -347,7 +348,6 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
     tile is small).
     """
     import math
-    import io
 
     bbox = parse_bbox(bbox_str)
     minlon, minlat, maxlon, maxlat = bbox
@@ -575,7 +575,7 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
     # A VRT is a lightweight XML file that references source tiles on disk.
     # rasterio reads only the pixels needed for each terrain tile on demand.
     print("    Building VRT from DEM tiles...")
-    import rasterio
+    import rasterio  # noqa: F401 -- fail before building the VRT if missing
     import mercantile
 
     # Use a UNIQUE VRT path per bbox to avoid race conditions when two

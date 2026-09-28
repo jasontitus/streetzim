@@ -11,6 +11,7 @@ Layout of a slot, always exactly `slot` bytes:
 The marker sits AFTER the content so the file still parses as HTML/JS from
 byte zero, and it records the slot length so the patcher never infers it.
 """
+from __future__ import annotations
 
 SLOT_MAGIC = b"SZVSLOT1"
 NAME_WIDTH = 24
@@ -27,24 +28,24 @@ SLOT_SIZES = {
 }
 
 
-def comment_delims(name):
+def comment_delims(name: str) -> tuple[bytes, bytes]:
     return (b"/*", b"*/") if name.endswith(".js") else (b"<!--", b"-->")
 
 
-def slot_header(name, slot_len):
+def slot_header(name: str, slot_len: int) -> bytes:
     opener, _ = comment_delims(name)
     return (opener + SLOT_MAGIC + b":" + name.encode().ljust(NAME_WIDTH, b" ")
             + b":" + str(slot_len).encode().rjust(LEN_WIDTH, b"0") + b":")
 
 
-def slot_needle(name):
+def slot_needle(name: str) -> bytes:
     """What the patcher scans for."""
     return SLOT_MAGIC + b":" + name.encode().ljust(NAME_WIDTH, b" ") + b":"
 
 
-def pad_to_slot(name, data, slot_len=None):
+def pad_to_slot(name: str, data: bytes, slot_len: int | None = None) -> bytes:
     slot_len = slot_len or SLOT_SIZES[name]
-    opener, closer = comment_delims(name)
+    _, closer = comment_delims(name)
     head = slot_header(name, slot_len)
     overhead = len(head) + len(closer)
     if len(data) + overhead > slot_len:

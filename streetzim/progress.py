@@ -20,7 +20,7 @@ from streetzim import common
 
 
 class StatsFile:
-    def __init__(self, path: str | os.PathLike) -> None:
+    def __init__(self, path: str | os.PathLike[str]) -> None:
         self.path = Path(path)
         self.done = 0
         self.total = 1

@@ -41,3 +41,36 @@ namespaces = true
 [tool.setuptools.dynamic]
 version = { attr = "streetzim.__about__.__version__" }
 dependencies = { file = ["requirements.txt"] }
+
+# Type checking (pyright, as maps2zim uses). Basic mode on the builder core;
+# strict on the pure modules. CI runs tools/pyright_gate.py, which fails on
+# any finding not in pyright-baseline.json (the findings the older code had
+# when checking started), so the baseline only shrinks.
+[tool.pyright]
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+reportMissingModuleSource = false
+include = [
+  "streetzim",
+  "create_osm_zim.py",
+  "wikidata_cache.py",
+  "cloud/chip_rules.py",
+  "cloud/chip_shards.py",
+  "cloud/manifest_writer.py",
+  "cloud/search_shards.py",
+  "cloud/viewer_slots.py",
+  "cloud/wiki_articles.py",
+  "cloud/wikidata_titles.py",
+  "tools/build_viewer.py",
+  "tools/check_openzim_output.py",
+  "tools/measure_build.py",
+  "tools/offliner_definition.py",
+]
+strict = [
+  "cloud/chip_rules.py",
+  "cloud/search_shards.py",
+  "cloud/viewer_slots.py",
+  "streetzim/cli.py",
+  "streetzim/progress.py",
+  "streetzim/zim_metadata.py",
+]

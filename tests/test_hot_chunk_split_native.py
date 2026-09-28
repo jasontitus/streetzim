@@ -9,7 +9,6 @@ during the Japan/Iran rollout. This test locks the contract.
 """
 from __future__ import annotations
 
-import json
 import sys
 import unittest
 from pathlib import Path

@@ -12,13 +12,12 @@ Skipped when the matching golden / ZIM pair isn't available locally.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
-from tests.szrg_reader import parse_szgm_bytes, parse_szrg_bytes
+from tests.szrg_reader import parse_szrg_bytes
 from tests.szrg_astar import find_route
 from tests.v4_to_v5_convert import v4_to_v5_bufs
 

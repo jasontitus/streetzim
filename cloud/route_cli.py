@@ -547,7 +547,7 @@ def main():
         print(f"    time: {t_h:.1f} h ({t_h * 60:.0f} min)")
         print(f"    nodes: {nodes_n:,}  pops: {pops}")
         if legs:
-            print(f"    legs: " + ", ".join(f"{label}={km:.1f}km" for label, km in legs))
+            print("    legs: " + ", ".join(f"{label}={km:.1f}km" for label, km in legs))
         print(f"    cells loaded: {cells_loaded}  accessed-ever: {cells_accessed}")
         results.append((mode, elapsed, d_km, cells_loaded, cells_accessed))
 

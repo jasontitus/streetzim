@@ -23,7 +23,7 @@ MANDATORY = ("Name", "Title", "Description", "Language", "Creator", "Publisher",
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     ap.add_argument("out")
     ap.add_argument("name")
     ap.add_argument("--title", required=True)
@@ -51,7 +51,7 @@ def main() -> int:
     if not (stats.get("total", 0) > 0 and stats.get("done") == stats["total"]):
         problems.append(f"progress file not complete: {stats}")
 
-    arc = Archive(str(zim))
+    arc = Archive(zim)
     keys = set(arc.metadata_keys)
     missing = [k for k in MANDATORY if k not in keys]
     if missing:

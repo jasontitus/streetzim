@@ -12,10 +12,8 @@ dated build on the host. Skips cleanly when there is none, so CI on a
 machine without archives is quiet rather than red.
 """
 import json
-import math
 import unicodedata
 import os
-import re
 from pathlib import Path
 
 import pytest

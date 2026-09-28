@@ -32,6 +32,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Any
+
+# One search record (docs/search-records.md).
+Record = dict[str, Any]
 
 
 @dataclass
@@ -43,13 +47,13 @@ class ChipRule:
     label: str
     from_cat: str  # OMT top-level type the records live in (poi, park)
     subtypes: tuple[str, ...] = ()
-    include_regex: re.Pattern | None = None
+    include_regex: re.Pattern[str] | None = None
     # Fallback via name: records whose ``t`` is in ``name_subtypes`` AND
     # whose name matches ``name_pattern`` are admitted. Used for museums
     # named "Royal Observatory" etc. that are tagged only as
     # tourism=attraction.
     name_subtypes: tuple[str, ...] = ()
-    name_pattern: re.Pattern | None = None
+    name_pattern: re.Pattern[str] | None = None
 
 
 CHIP_RULES: list[ChipRule] = [
@@ -105,7 +109,7 @@ CHIP_RULES: list[ChipRule] = [
 ]
 
 
-def record_matches_chip(rec: dict, chip: ChipRule) -> bool:
+def record_matches_chip(rec: Record, chip: ChipRule) -> bool:
     """True if `rec` belongs in this chip's Find-page slice. Expects the
     canonical streetzim record shape: ``t`` top-level type, ``s`` subtype,
     ``n`` name."""
@@ -127,13 +131,13 @@ def record_matches_chip(rec: dict, chip: ChipRule) -> bool:
     return False
 
 
-def rules_as_json() -> list[dict]:
+def rules_as_json() -> list[dict[str, Any]]:
     """``CHIP_RULES`` as plain JSON, in order, for another implementation to
     load (a viewer, or openzim/maps emitting it at build time). Regexes travel
     as their source plus an ignore-case flag, which reads the same in Python
     and JavaScript for these patterns (see tests/chip_rules_js.test.mjs for
     the one \\b caveat)."""
-    def rx(p: re.Pattern | None) -> dict | None:
+    def rx(p: re.Pattern[str] | None) -> dict[str, Any] | None:
         if p is None:
             return None
         return {"source": p.pattern, "i": bool(p.flags & re.IGNORECASE)}
@@ -144,13 +148,13 @@ def rules_as_json() -> list[dict]:
     } for c in CHIP_RULES]
 
 
-def split_records_by_chip(records_by_cat: dict) -> dict[str, list]:
+def split_records_by_chip(records_by_cat: dict[str, list[Record]]) -> dict[str, list[Record]]:
     """One pass: return ``{chip_id: [records…]}`` for every chip.
 
     ``records_by_cat`` is ``{cat_name: [records]}`` — i.e. what the
     category-index already accumulates, keyed by the OMT ``t`` field.
     """
-    out: dict[str, list] = {c.id: [] for c in CHIP_RULES}
+    out: dict[str, list[Record]] = {c.id: [] for c in CHIP_RULES}
     for chip in CHIP_RULES:
         src = records_by_cat.get(chip.from_cat, [])
         if not src:
@@ -160,7 +164,7 @@ def split_records_by_chip(records_by_cat: dict) -> dict[str, list]:
             # re-filtering and keep the reference.
             out[chip.id] = list(src)
             continue
-        dst = []
+        dst: list[Record] = []
         for r in src:
             if record_matches_chip(r, chip):
                 dst.append(r)
