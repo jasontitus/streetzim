@@ -3606,7 +3606,8 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
         return hw in NO_MOTOR_HIGHWAY
 
     # Road-class ordinal for the v4 routing-graph class_access u32
-    # (bits 0..4). See docs/formats.md for the full bit layout. Unknown / missing classes fall through to 0.
+    # (bits 0..4). See docs/formats.md for the full bit layout. Unknown /
+    # missing classes fall through to 0.
     CLASS_ORDINAL = {
         "motorway": 1, "motorway_link": 2,
         "trunk": 3, "trunk_link": 4,

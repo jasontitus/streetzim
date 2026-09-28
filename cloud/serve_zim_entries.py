@@ -5,9 +5,9 @@ browser can run the viewer baked into the archive (not the copy on disk).
     ZIM_ORIGIN=http://localhost:8899 node cloud/zim_viewer_smoke.mjs
 
 `/` redirects to the main entry; `/<path>` returns that entry with its
-MIME type (redirect entries are followed); anything else is a 404. Range
-requests are not needed by the viewer and are not supported. Stdlib plus
-python-libzim only.
+MIME type (redirect entries are followed; HEAD works too); anything else
+is a 404. Range requests are not needed by the viewer and are not
+supported. Stdlib plus python-libzim only.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from libzim.reader import Archive
 
 def make_handler(arc: Archive):
     class Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):  # noqa: N802 (http.server API)
+        def _serve(self, send_body: bool):
             path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path).lstrip("/")
             if not path:
                 self.send_response(302)
@@ -30,15 +30,25 @@ def make_handler(arc: Archive):
                 return
             try:
                 item = arc.get_entry_by_path(path).get_item()
+                body = bytes(item.content)
             except KeyError:
                 self.send_error(404)
                 return
-            body = bytes(item.content)
+            except Exception as exc:  # corrupt cluster etc.: say so, don't hang up
+                self.send_error(500, explain=f"{type(exc).__name__}: {exc}")
+                return
             self.send_response(200)
             self.send_header("Content-Type", item.mimetype)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            if send_body:
+                self.wfile.write(body)
+
+        def do_GET(self):  # noqa: N802 (http.server API)
+            self._serve(True)
+
+        def do_HEAD(self):  # noqa: N802 (http.server API)
+            self._serve(False)
 
         def log_message(self, fmt, *args):
             pass

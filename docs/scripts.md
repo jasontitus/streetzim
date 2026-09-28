@@ -1,6 +1,6 @@
 # Shell scripts: inventory and consolidation plan
 
-Status 2026-09-28: **72** tracked `*.sh` files. About **23** are live. The
+Status 2026-09-28: **73** tracked `*.sh` files. About **23** are live. The
 rest are one-offs, retired Mac/AWS/GCP tooling, or wrappers superseded by
 `build-region-fast.sh`. This file lists every script with a verdict and gives
 the order for cutting the count down **without breaking the production host**,
@@ -164,7 +164,7 @@ Library code must be `set -u` clean and use absolute paths.
 
 ## After all phases
 
-About 23 live scripts plus two library files, down from 72. If the Mac and GCP
+About 23 live scripts plus two library files, down from 73. If the Mac and GCP
 tooling stays, 30.
 
 ## The live set (KEEP)

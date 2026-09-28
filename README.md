@@ -19,8 +19,9 @@ the browser.
 
 ## Quick start (build Monaco in about a minute)
 
-These are the same steps CI runs on every push (`.github/workflows/ci.yml`,
-job `monaco-e2e`), so they are known to work on Ubuntu 24.04.
+CI runs these steps on every push (`.github/workflows/ci.yml`, job
+`monaco-e2e`, which also adds the production routing and chip flags), so
+they are known to work on Ubuntu 24.04.
 
 **1. System tools.** You need Python ≥ 3.10, `osmium-tool`, and
 **tilemaker 3.x**. Ubuntu's `apt install tilemaker` (2.4) is too old for

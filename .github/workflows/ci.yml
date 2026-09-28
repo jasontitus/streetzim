@@ -170,7 +170,7 @@ jobs:
         run: |
           python cloud/serve_zim_entries.py osm-monaco-ci.zim --port 8899 &
           for i in $(seq 1 30); do curl -fs http://127.0.0.1:8899/map-config.json >/dev/null && break; sleep 1; done
-          ZIM_ORIGIN=http://127.0.0.1:8899 SMOKE_SEARCH=Monaco \
+          ZIM_ORIGIN=http://127.0.0.1:8899 \
             CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
             node cloud/zim_viewer_smoke.mjs
 

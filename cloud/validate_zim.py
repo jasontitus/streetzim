@@ -898,8 +898,8 @@ def _chk_vector_tiles(arc) -> tuple[str, str]:
     except KeyError:
         # The builder drops 0-byte tiles, and a small region (Monaco) can
         # have nothing left at z0 once tilemaker's low-zoom area filters
-        # run. Absent z0 is a warning if deeper zooms are there, and still
-        # a failure below when they are not.
+        # run. Absent z0 is a warning for a sub-degree region whose deeper
+        # zooms are there, and a failure otherwise (below).
         z0 = None
     if z0 is not None and not z0:
         return ("fail", "tiles/0/0/0.pbf is empty")
@@ -957,6 +957,16 @@ def _chk_vector_tiles(arc) -> tuple[str, str]:
     if not hits:
         return ("fail",
                 f"no vector tiles found at probe paths: {misses}")
+    if z0 is None:
+        # Only a small region can legitimately have nothing at z0; on a
+        # country or continent a missing z0 means tiles were lost.
+        span = (max(bbox[2] - bbox[0], bbox[3] - bbox[1])
+                if bbox and all(v is not None for v in bbox) else None)
+        if span is None or span >= 1.0:
+            return ("fail",
+                    f"tiles/0/0/0.pbf missing on a region spanning "
+                    f"{span if span is not None else 'unknown'}° (only a "
+                    f"sub-degree region may have an empty z0); hits: {hits}")
     if misses:
         return ("warn",
                 f"some tile zooms missing — hits: {hits}; misses: {misses}")

@@ -170,8 +170,9 @@ valid with SZCI v3 (it needs `base_node`).
   v1 fields, then u32 `num_node_shards`, u32 `nodes_per_shard`), no inline
   nodes; coordinates live in `routing-data/nodes-scaled-NNN.bin` (raw i32
   lat/lon pairs).
-- **SZRC v1**: 28-byte header with version 1, then u32 global node ids[n],
-  then the same tables as v2 with global targets. Pairs with SZCI v1/v2.
+- **SZRC v1**: 28-byte header with version 1, then u32 global node ids[n]
+  (no coordinates; they come from `nodes_scaled`), then the CSR, edges
+  (global targets), geom_offsets and blob as in v2. Pairs with SZCI v1/v2.
 
 ### SZRG v2 / v3 (read-only, pre-April 2026)
 

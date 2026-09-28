@@ -51,6 +51,12 @@ from cloud.chip_shards import (  # noqa: E402
 )
 
 
+# Chip ids retired by a merge in cloud/chip_rules.py -> the chip that
+# replaced them (Food & Drink, 2026-09-16). The viewers map the old ids onto
+# the new button when a ZIM only has the old files.
+LEGACY_CHIP_REPLACED_BY = {"restaurants": "food", "cafes": "food"}
+
+
 def _v4_to_v5_bufs(v4_buf: bytes) -> tuple[bytes, bytes]:
     """Split a v4 SZRG buffer into the v5 main + SZGM companion. Mirrors
     extract_routing_graph(split_graph=True) so repackaged ZIMs are
@@ -1236,6 +1242,12 @@ def repackage(src_path: str, dst_path: str,
                       f"({plan.bytes/1024/1024:.1f} MB) → {n_files} file(s)")
                 del plan
             for chip_id in legacy_chip_ids:
+                if LEGACY_CHIP_REPLACED_BY.get(chip_id) in new_chips_meta:
+                    # The merged chip was rebuilt (source ships poi.json):
+                    # the old pair would only store the same records twice.
+                    print(f"  chip-{chip_id} (legacy): dropped, "
+                          f"{LEGACY_CHIP_REPLACED_BY[chip_id]} rebuilt")
+                    continue
                 meta = src_chips[chip_id]
                 label = meta.get("label") if isinstance(meta, dict) else None
                 label = label or chip_id

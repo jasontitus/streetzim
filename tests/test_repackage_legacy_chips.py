@@ -61,3 +61,32 @@ def test_pre_merge_chips_survive_split_find_chips(tmp_path: Path):
     got = json.loads(bytes(arc.get_entry_by_path(
         "category-index/chip-cafes.json").get_item().content))
     assert sorted(r["n"] for r in got) == ["cafe 0", "cafe 1"]
+
+
+def test_legacy_pair_dropped_when_food_is_rebuilt(tmp_path: Path):
+    """A pre-merge ZIM that still ships poi.json gets a rebuilt "food" chip;
+    carrying restaurants/cafes as well would store the records twice."""
+    pytest.importorskip("libzim")
+    from libzim.reader import Archive
+    from cloud.repackage_zim import repackage
+
+    poi = _records(3, "restaurant") + _records(2, "cafe") + _records(4, "bar")
+    chips = {"restaurants": _records(3, "restaurant"), "cafes": _records(2, "cafe")}
+    manifest = {"total": 9, "categories": {"poi": len(poi)},
+                "chips": {cid: {"label": cid.title(), "count": len(r),
+                                "bytes": len(json.dumps(r))}
+                          for cid, r in chips.items()}}
+    items = [_mk_item("category-index/manifest.json", "application/json",
+                      json.dumps(manifest).encode()),
+             _mk_item("category-index/poi.json", "application/json",
+                      json.dumps(poi).encode())]
+    items += [_mk_item(f"category-index/chip-{cid}.json", "application/json",
+                       json.dumps(r).encode()) for cid, r in chips.items()]
+    src = _make_minimal_zim(tmp_path, "src.zim", extra_items=items)
+    dst = tmp_path / "dst.zim"
+    repackage(str(src), str(dst), swap_viewer=False, split_find_chips=True)
+
+    out = json.loads(bytes(Archive(str(dst)).get_entry_by_path(
+        "category-index/manifest.json").get_item().content))
+    assert out["chips"]["food"]["count"] == 5
+    assert "restaurants" not in out["chips"] and "cafes" not in out["chips"]

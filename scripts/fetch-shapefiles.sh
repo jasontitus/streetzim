@@ -24,7 +24,8 @@ WATER_URL="${WATER_URL:-https://osmdata.openstreetmap.de/download/water-polygons
 NE_BASE="${NE_BASE:-https://naciscdn.org/naturalearth/10m}"
 
 fetch() {  # url out
-  curl -fL --retry 4 --retry-delay 5 -o "$2.part" "$1"
+  curl -fL --retry 4 --retry-delay 5 --connect-timeout 30 \
+       --speed-limit 10000 --speed-time 120 -o "$2.part" "$1"
   mv "$2.part" "$2"
 }
 

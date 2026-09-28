@@ -111,10 +111,11 @@ On the build host, from `/storage/streetzim`. The details are in
 3. **Build one region.** `build-region-fast.sh <id> <bbox> <name>` is the
    canonical wrapper (rust packer, in-build spatial routing cells, no LLM
    bundle, Wikipedia articles, Overture).
-4. **Gate and ship.** `ship-region.sh <id>` builds, then runs the gates
-   (`validate_zim.py`, route checks, Find/search smoke tests, a headless
-   browser test, the Kiwix UI gate `cloud/kiwix_viewer_gate.sh`), then uploads
-   with `cloud/upload_validated.sh`, **the only upload path**.
+4. **Gate and ship.** `ship-region.sh <id>` builds, then runs its gates
+   (terrain, `validate_zim.py`, route checks, search + Find smoke tests,
+   `cloud/pwa_smoke_test.mjs`), then uploads with
+   `cloud/upload_validated.sh`, **the only upload path**. The Kiwix UI gate
+   `cloud/kiwix_viewer_gate.sh` is run by the viewer-rollout scripts.
    `build-refresh-queue.sh` does the same for the whole registry.
 5. **Viewer-only updates** go out with `cloud/rollout_viewer_patch.sh`
    (in-place slot patch, gates, upload). There is no rebuild.
@@ -134,7 +135,7 @@ In rough priority order. The items marked **bug** were found during the
 scripts that may be running on the production host (see
 [docs/scripts.md](docs/scripts.md) for how to change those safely).
 
-- **Script sprawl.** 72 shell scripts, of which about 23 are live. The
+- **Script sprawl.** 73 shell scripts, of which about 23 are live. The
   retirement and merge plan is in docs/scripts.md.
 - **Shared gate code is copy-pasted, or `sed`-extracted at runtime from
   `retrofit-chips-queue.sh`** by six other scripts. It should become a sourced
