@@ -584,7 +584,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "trimmed to a compact reader page. Lets offline "
                              "clients open + narrate articles without a separate "
                              "Wikipedia ZIM (kiwix can't deep-link across ZIMs). "
-                             "~0.2-1% size on California. Cached so rebuilds "
+                             "~0.2-1%% size on California. Cached so rebuilds "
                              "don't re-crawl. See docs/wikidata-title-resolution.md.")
     parser.add_argument("--wiki-articles-cache", metavar="DIR", default=None,
                         help="Disk cache for fetched article HTML (default: "

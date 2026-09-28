@@ -197,3 +197,12 @@ def test_illustration_checked_before_downloads_and_resolved(tmp_path, no_network
                        illustration=(tmp_path / "icon.png"))
     ill = argv[argv.index("--illustration") + 1]
     assert Path(ill).is_absolute()
+
+
+@pytest.mark.parametrize("module", ["create_osm_zim", "streetzim.cli"])
+def test_help_renders(module):
+    # argparse %-formats help strings: a bare "%" once made --help print an
+    # internal dict (create_osm_zim's --bundle-wiki-articles text).
+    import importlib
+    text = importlib.import_module(module).build_parser().format_help()
+    assert "option_strings" not in text and "_ArgumentGroup" not in text
