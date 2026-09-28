@@ -3700,21 +3700,9 @@ def download_maplibre(dest_dir):
     return js_path, css_path
 
 
-def _sub_bucket_for_name(name: str, n_buckets: int) -> int:
-    """FNV-1a 32-bit hash of the UTF-8 bytes of `name`, mod n_buckets.
-
-    Used when ``--split-hot-search-chunks-mb`` fans out an oversized
-    prefix chunk into ``{prefix}-{hex}`` sub-files. MUST match:
-      * ``cloud/repackage_zim._sub_bucket_for_name``
-      * viewer ``subBucketFor`` in resources/viewer/index.html
-      * Swift ``Geocoder.subBucketFor`` in mcpzim/MCPZimKit
-    Any disagreement silently drops records from query results.
-    """
-    h = 0x811C9DC5  # FNV offset basis (32-bit)
-    for b in name.encode("utf-8"):
-        h ^= b
-        h = (h * 0x01000193) & 0xFFFFFFFF
-    return h % n_buckets
+# FNV-1a sub-bucket hash; one copy in cloud/search_shards.py. MUST match the
+# viewer's subBucketFor and mcpzim's Geocoder.subBucketFor.
+from cloud.search_shards import sub_bucket_for_name as _sub_bucket_for_name  # noqa: E402
 
 
 def _split_big_search_chunk(prefix: str, records: list, n_buckets: int = 16
@@ -4930,48 +4918,9 @@ def create_zim(
             # Normalize (lowercase + ASCII-fold) so search matches across
             # accented / diacritic variants: "Café" ↔ "cafe", "São" ↔ "sao".
             import unicodedata
-            def _norm(s):
-                s = unicodedata.normalize("NFKD", s)
-                s = "".join(c for c in s if not unicodedata.combining(c))
-                return s.lower()
-
-            def _prefix_key(word):
-                """Chunk key for a word's first char.
-
-                Latin-leading names get the same 2-char ASCII-alnum
-                prefix as before (``"to"`` for Tokyo in rōmaji, ``"_p"``
-                for "_private"). Non-ASCII first chars are bucketed by
-                their single Unicode codepoint in lowercase hex
-                (``"u6771"`` for 東, ``"u43f"`` for п) — previously every
-                CJK/Cyrillic/Arabic/Thai record collapsed into one
-                ``__.json`` chunk, 350 MB on Japan, 230 MB on Iran,
-                crashing Kiwix Desktop on "find". Now each distinct
-                leading codepoint gets its own bucket.
-
-                Callers (JS viewer ``keyFor``, Swift ``normalizePrefix``)
-                implement the same rule — if this changes, update them
-                in lockstep or lookups desync.
-                """
-                pw = _norm(word).replace(" ", "_")
-                if not pw:
-                    return "__"
-                c0 = pw[0]
-                # Non-ASCII → codepoint hex bucket
-                if not c0.isascii():
-                    return "u" + format(ord(c0), "x")
-                # ASCII path mirrors the original rule: first char is
-                # alnum or '_' (kept), anything else becomes '_'.
-                def _ascii_norm(ch: str) -> str:
-                    return ch if ch.isalnum() or ch == "_" else "_"
-                k0 = _ascii_norm(c0)
-                if len(pw) >= 2:
-                    c1 = pw[1]
-                    # If the 2nd char is non-ASCII, collapse it to ``_`` —
-                    # the bucket is keyed by c0 alone in that case.
-                    k1 = _ascii_norm(c1) if c1.isascii() else "_"
-                else:
-                    k1 = "_"
-                return k0 + k1
+            # One implementation, shared with the planner and mirrored by
+            # the viewer's keyFor / mcpzim's normalizePrefix.
+            from cloud.search_shards import norm as _norm, prefix_key as _prefix_key
 
             # Word splitter: any run of non-alnum (unicode-aware) ends a word.
             # Gives us each term in the name so "Washington National Cathedral"
@@ -5242,7 +5191,7 @@ def create_zim(
                 from cloud.search_shards import (
                     Aggregator, SHARD_TARGET_BYTES, char_split_paths,
                     leaf_for, tier_for)
-                from cloud.repackage_zim import _split_records_recursive
+                from cloud.search_shards import split_records_recursive as _split_records_recursive
                 agg = Aggregator(prefix)
                 total_chunk_bytes = 0
                 with open(chunk_path, "r", encoding="utf-8") as cf:
