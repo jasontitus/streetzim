@@ -32,7 +32,7 @@ File formats (little-endian, u32 unless stated):
     u32[num_names + 1]   -- name_offsets
     bytes[names_bytes]   -- names_blob
 
-  SZRC v2 (one cell, 24-byte header then per-cell tables):
+  SZRC v2 (one cell, 28-byte header -- magic + 6 x u32 -- then per-cell tables):
     "SZRC" magic (4)
     u32 version = 2
     u32 cell_id

@@ -3971,9 +3971,11 @@ function _detailFmtNumber(n) {
 // CATEGORIES). The build still emits chip files keyed by these IDs;
 // regions without a particular category just show "0 matches" on
 // places.html — graceful degrade.
-// Chip IDs MUST match the build's chip_rules.py — see
-// project_chip_rules_duplicated.md memory. Used by both
+// Chip IDs MUST match the build's cloud/chip_rules.py —
+// tests/chip_rules_js.test.mjs fails CI when they drift. Used by both
 // initFindChips (on-map rail) and initExplore (corner menu).
+// BEGIN chip-rail  (ids + labels must equal cloud/chip_rules.py CHIP_RULES;
+// enforced by tests/chip_rules_js.test.mjs)
 var EXPLORE_CHIPS = [
   // Must cover every chip cloud/chip_rules.py can emit, or the map rail
   // silently drops categories the ZIM contains: Health, Landmarks and
@@ -4001,6 +4003,7 @@ var EXPLORE_CHIPS = [
   { id: 'fuel',        label: 'Gas',         emoji: '⛽' },
   { id: 'hotels',      label: 'Hotels',      emoji: '🏨' },
 ];
+// END chip-rail
 
 // --- On-map Find UI: chip rail beneath the search input ---
 // Tapping a chip fetches its category-index file (with sub-bucket

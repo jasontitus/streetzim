@@ -4,7 +4,9 @@ Design notes for the deferred feature: flag the user when they enter
 Walk or Bike mode on a planned route that includes roads unsuitable for
 that travel mode (e.g. an Interstate motorway).
 
-Status: **not implemented**. This doc captures what would need to change
+Status: **not implemented**. The graph section below predates SZRG v4;
+the current byte layout, including the `class_access` bits this plan
+needed (they now ship), is in [`formats.md`](formats.md). This doc captures what would need to change
 so it can be picked up later without re-deriving the plan.
 
 ---

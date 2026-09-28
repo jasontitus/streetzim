@@ -1178,13 +1178,18 @@ def repackage(src_path: str, dst_path: str,
             # carries park.json. Categories are only used for chips the
             # source lacks. Reads one chip at a time.
             src_chips = old_mani.get("chips") if isinstance(old_mani.get("chips"), dict) else {}
+            # Ids the source declares but CHIP_RULES no longer defines, e.g.
+            # restaurants + cafes on ZIMs built before the 2026-09-16 food
+            # merge. Dropping them left such a ZIM with no food chip at all
+            # when it also ships no poi.json to rebuild "food" from; the
+            # viewers map the old pair onto the merged button, so keep them.
+            legacy_chip_ids = sorted(set(src_chips) - {chip.id for chip in CHIP_RULES})
             if src_chips:
                 print(f"  chips: re-sharding {len(src_chips)} existing chip(s) "
                       f"from the source's chip files")
-                unknown = sorted(set(src_chips) - {chip.id for chip in CHIP_RULES})
-                if unknown:
-                    print(f"  WARNING: source chips not in CHIP_RULES are dropped: "
-                          f"{', '.join(unknown)}")
+                if legacy_chip_ids:
+                    print(f"  chips no longer in CHIP_RULES are carried over "
+                          f"unchanged: {', '.join(legacy_chip_ids)}")
             elif not any(records_by_cat.values()):
                 # Skipping the source chip files and manifest with nothing
                 # to replace them would ship a ZIM with no Find page.
@@ -1218,6 +1223,21 @@ def repackage(src_path: str, dst_path: str,
                     n_files += 1
                 new_chips_meta[chip.id] = plan.manifest_entry(chip.label)
                 print(f"  chip-{chip.id}: {plan.count:,} records "
+                      f"({plan.bytes/1024/1024:.1f} MB) → {n_files} file(s)")
+                del plan
+            for chip_id in legacy_chip_ids:
+                meta = src_chips[chip_id]
+                label = meta.get("label") if isinstance(meta, dict) else None
+                label = label or chip_id
+                plan = plan_chip(read_chip_records(_src_bytes, chip_id, meta),
+                                 chip_shard_target_bytes)
+                n_files = 0
+                for path, title, blob in plan.files(chip_id, label):
+                    c.add_item(PassthroughItem(path, title, "application/json",
+                                               blob, compress=True))
+                    n_files += 1
+                new_chips_meta[chip_id] = plan.manifest_entry(label)
+                print(f"  chip-{chip_id} (legacy): {plan.count:,} records "
                       f"({plan.bytes/1024/1024:.1f} MB) → {n_files} file(s)")
                 del plan
             # Re-emit category-index/manifest.json with the new chips

@@ -15,10 +15,17 @@ This module owns the chip-definitions. It's imported by:
   * tests — assertions that every chip rule has at least one match in a
     known-good ZIM
 
-The viewer (``places.html``) now only needs the chip ids + labels;
-filtering is done upstream. Keep the ``CHIP_RULES`` list here as the
-authoritative source, mirror ``{id, label}`` minimal entries in
-places.html for the chip-bar UI.
+``CHIP_RULES`` here is the authoritative source. The viewer keeps two
+inline copies because published ZIMs get their viewer patched in place
+and cannot gain a new rules file:
+  * ``resources/viewer/places.html`` ``CATEGORIES`` (block ``chip-rules``):
+    the full rules, used by the legacy client-side filter on ZIMs built
+    without per-chip files.
+  * ``resources/viewer/index.html`` ``EXPLORE_CHIPS`` (block ``chip-rail``):
+    ids, labels and emoji for the map's chip rail.
+``tests/chip_rules_js.test.mjs`` fails when either copy drifts from this
+list, so change them in the same commit (then run
+``scripts/sync-drive-viewer.sh``).
 """
 from __future__ import annotations
 

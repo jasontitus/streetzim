@@ -1,0 +1,242 @@
+# StreetZim data formats (frozen reference)
+
+This is the contract between the builder (`create_osm_zim.py` and the
+`cloud/` tools that write ZIMs) and every reader: the viewer
+(`resources/viewer/index.html`, `routing-worker.js`), the PWA at
+`/drive/` (which serves the *current* viewer against *any* ZIM a user
+opens), and the Python reference readers used by tests.
+
+Rule for maintainers: **a change to any layout below is a new version
+number, never an edit in place.** Readers must keep accepting every
+version that is still in a published ZIM (see
+[Version support](#version-support-and-retirement)). Update this file in
+the same commit as the writer.
+
+All byte layouts were derived from the writer code; line references are
+to the functions, which are the source of truth if this file ever
+disagrees.
+
+## Conventions
+
+- Every integer is **little-endian**. Magics are 4 ASCII bytes (JS checks
+  them as a big-endian u32, e.g. `SZRG` = `0x535A5247`).
+- Every typed section starts **4-byte aligned**, because the JS readers
+  build `Int32Array` / `Uint32Array` views directly on the buffer.
+- Coordinates are `round(degrees * 1e7)` stored as i32. Node arrays are
+  **(lat, lon)** pairs; geometry blobs are **(lon, lat)**.
+
+### Geometry blob encoding
+
+`_encode_geom` in `extract_routing_graph` (`create_osm_zim.py`):
+
+- First point: `<ii` = `lon_e7, lat_e7`.
+- Each later point: `varint(zigzag32(dlon))`, `varint(zigzag32(dlat))`.
+  varint is LEB128 (7 bits per byte, `0x80` = continue);
+  `zigzag32(n) = ((n << 1) ^ (n >> 31)) & 0xFFFFFFFF`.
+- A longitude delta over 180° is wrapped the short way, so a decoder keeps
+  a running longitude that may pass ±180°.
+- A geometry holds **interior points only**; its endpoints are the edge's
+  two nodes.
+- Geometries are deduplicated by exact encoded bytes; the reverse
+  direction of a two-way road is a separate geometry.
+- Geometry `k` is `blob[geom_offsets[k] : geom_offsets[k+1]]`. Once the
+  blob reaches `0xFFFF0000` bytes, later edges get no geometry.
+
+### Edge record (20 bytes, 5 × u32)
+
+| word | field |
+|---|---|
+| 0 | `target` node id |
+| 1 | `dist_speed = (speed_kmh & 0xFF) << 24 \| min(dist_dm, 0xFFFFFF)`; `dist_dm` is the haversine length in decimetres |
+| 2 | `geom_idx`, `0xFFFFFFFF` = none |
+| 3 | `name_idx` (0 = no name) |
+| 4 | `class_access`, below |
+
+`class_access` bits:
+
+| bits | meaning |
+|---|---|
+| 0–4 | road class ordinal (`CLASS_ORDINAL`): motorway 1, motorway_link 2, trunk 3, trunk_link 4, primary 5, primary_link 6, secondary 7, secondary_link 8, tertiary 9, tertiary_link 10, residential 11, living_street 12, unclassified 13, service 14, track 15, path 16, footway 17, cycleway 18, pedestrian 19, steps 20; anything else 0 |
+| 5 | `foot=no` |
+| 6 | `bicycle=no` |
+| 7 | one-way (set for both `oneway=yes` and `oneway=-1`, and implied for roundabouts and motorways) |
+| 8 | roundabout / circular / mini_roundabout |
+| 9 | no motor vehicles (OSM access hierarchy, or a class in `NO_MOTOR_HIGHWAY`); the car profile must skip these edges |
+| 10–31 | zero (reserved) |
+
+Speeds come from the `SPEED` table (`DEFAULT_SPEED` = 30 km/h).
+
+### Nodes and names
+
+- Nodes are junctions (used by 2+ ways, or a way endpoint), numbered by
+  ascending OSM node id.
+- Edges are stably sorted by source node; `adj_offsets` is CSR, u32[N+1]:
+  node `n`'s out-edges are `adj[n] .. adj[n+1]`.
+- Names: index 0 is `""`. A label is `"name (ref)"` when both tags exist,
+  otherwise whichever exists. UTF-8; `name_offsets` is u32[M+1].
+
+## Routing graph formats
+
+### SZRG v4 — `routing-data/graph.bin` (default for `--routing`)
+
+Writer: `extract_routing_graph`, `create_osm_zim.py`.
+
+| offset | type | field |
+|---|---|---|
+| 0 | char[4] | `SZRG` |
+| 4 | u32 | version = 4 |
+| 8 | u32 | N nodes |
+| 12 | u32 | E edges |
+| 16 | u32 | G geometries |
+| 20 | u32 | B geometry bytes (includes 0–3 zero pad bytes; `geom_offsets[G]` is the unpadded end) |
+| 24 | u32 | M names |
+| 28 | u32 | S name bytes |
+
+Then: nodes i32[2N] · adj_offsets u32[N+1] · edges u32[5E] ·
+geom_offsets u32[G+1] · geom_blob u8[B] · name_offsets u32[M+1] ·
+names u8[S].
+
+### SZRG v5 + SZGM v1 — split graph (`--split-graph`, opt-in, unused in production)
+
+`graph.bin` has the v4 header with `version = 5` and **B = 0** (G is kept
+so `geom_idx` still means something) and omits the geometry sections.
+Geometries move to `routing-data/graph-geoms.bin`:
+
+| offset | type | field |
+|---|---|---|
+| 0 | char[4] | `SZGM` |
+| 4 | u32 | version = 1 |
+| 8 | u32 | G (must equal the SZRG header's G) |
+| 12 | u32 | B |
+| 16 | u32[G+1] | geom_offsets |
+| 16 + 4(G+1) | u8[B] | geom_blob |
+
+Also written by `cloud/repackage_zim.py::_v4_to_v5_bufs`.
+
+### SZCI v3 + SZRC v2 — spatial cells (`--spatial-chunk-scale N`, what production ships)
+
+Writer: `build_spatial` in `tests/szrg_spatial.py` (called by
+`create_osm_zim.py` and `cloud/repackage_zim.py`; see
+[Known debt](#known-debt)). The SZRG v4 file is only an intermediate
+input in this mode.
+
+`routing-data/graph-cells-index.bin`:
+
+| offset | type | field |
+|---|---|---|
+| 0 | char[4] | `SZCI` |
+| 4 | u32 | version = 3 |
+| 8 | u32 | N |
+| 12 | u32 | E |
+| 16 | u32 | M names |
+| 20 | u32 | S name bytes |
+| 24 | u32 | C cells |
+| 28 | i32 | cell_scale (10 ⇒ 0.1° cells) |
+| 32 | 24 B × C | per cell: i32 lat_cell, i32 lon_cell, u32 base_node, u32 node_count, u32 edge_count, u32 geom_count |
+| 32 + 24C | u32[M+1] | name_offsets |
+| … | u8[S] | names |
+
+Cell rules: `cell = (floor(lat_e7 * scale / 1e7), floor(lon_e7 * scale / 1e7))`;
+cells sorted ascending by (lat_cell, lon_cell); empty cells omitted;
+nodes renumbered cell-major, so `base_node[i+1] = base_node[i] + node_count[i]`
+and a node's cell is found by binary search on `base_node`.
+
+`routing-data/graph-cell-NNNNN.bin` (5-digit cell id):
+
+| offset | type | field |
+|---|---|---|
+| 0 | char[4] | `SZRC` |
+| 4 | u32 | version = 2 |
+| 8 | u32 | cell_id |
+| 12 | u32 | n nodes |
+| 16 | u32 | e edges |
+| 20 | u32 | g geometries |
+| 24 | u32 | b geometry bytes |
+| 28 | i32[2n] | coords (lat, lon); local node `i` is global `base_node + i` |
+| … | u32[n+1] | local CSR into this cell's edges |
+| … | u32[5e] | edges (`target` is a global cell-major id, `geom_idx` is cell-local) |
+| … | u32[g+1] | geom_offsets |
+| … | u8[b] | geom_blob (last, unpadded) |
+
+A geometry used by edges in two cells is copied into both. SZRC v2 is only
+valid with SZCI v3 (it needs `base_node`).
+
+### Legacy spatial versions (read-only; no writer remains)
+
+- **SZCI v1**: v3 header with version 1, then `nodes_scaled` i32[2N] in
+  original node order, then 20-byte cell records (no `base_node`), then
+  names.
+- **SZCI v2** (`cloud/upgrade_spatial_zim.py`): 40-byte header (the seven
+  v1 fields, then u32 `num_node_shards`, u32 `nodes_per_shard`), no inline
+  nodes; coordinates live in `routing-data/nodes-scaled-NNN.bin` (raw i32
+  lat/lon pairs).
+- **SZRC v1**: 28-byte header with version 1, then u32 global node ids[n],
+  then the same tables as v2 with global targets. Pairs with SZCI v1/v2.
+
+### SZRG v2 / v3 (read-only, pre-April 2026)
+
+Same header as v4. v3 edges are 4 words (no `class_access`); v2 edges are
+`[target, dist_dm, speed << 24 | geom_idx24, name_idx]`.
+
+### Chunked graphs — `routing-data/graph-chunk-manifest.json`
+
+Written by `chunk_graph_file` when `--chunk-graph-mb > 0` on a non-spatial
+build, **in addition to** `graph.bin`:
+
+```json
+{"schema": 1, "total_bytes": 123, "sha256": "<hex of the whole file>",
+ "chunks": [{"path": "graph-chunk-0000.bin", "bytes": 123}]}
+```
+
+Chunk paths are relative to the manifest. v5 adds
+`graph-geoms-chunk-manifest.json` the same way. The JS reader checks sizes
+but not the sha256; `tests/szrg_reader.py` checks both.
+
+### Compression
+
+Routing entries of 200 MB or more are stored in uncompressed clusters:
+the PWA's zstd decoder fails on clusters over about 500 MB, and Kiwix
+WebViews time out decompressing them. See `docs/zim-packaging-gotchas.md`.
+
+## Version support and retirement
+
+| format | written by default? | JS reader | status |
+|---|---|---|---|
+| SZCI v3 + SZRC v2 | with `--spatial-chunk-scale` (all current production wrappers) | yes | canonical |
+| SZRG v4 (+ chunk manifest) | yes, plain `--routing` | yes | live (small regions via `cloud/build_region.sh`) |
+| SZRG v5 + SZGM v1 | only `--split-graph` | yes | writer can go; check live ZIMs for `routing-data/graph-geoms.bin` before dropping the reader |
+| SZCI v1/v2, SZRC v1 | no | yes | live in the continent ZIMs built before 2026-06-02; drop after those are rebuilt |
+| SZRG v2/v3 | no | yes | only pre-April 2026 files; first candidate for removal |
+
+`cloud/validate_zim.py` reports which layout a ZIM carries ("legacy
+spatial SZCI vN"), so run it over the live catalog before removing a
+reader branch. The PWA serves the current viewer to old files, so a
+reader branch is only dead when no published ZIM needs it.
+
+## Other ZIM entries
+
+| path | content |
+|---|---|
+| `index.html`, `places.html`, `routing-worker.js` | viewer, padded into fixed uncompressed slots with an `SZVSLOT1` marker so `cloud/patch_viewer_inplace.py` can replace them in a published ZIM (`docs/viewer-slots.md`) |
+| `maplibre-gl.js`, `maplibre-gl.css` | MapLibre GL JS (version in `MAPLIBRE_VERSION`) |
+| `map-config.json` | name, center, zoom, minZoom, maxZoom, buildDate, bounds, `hasSatellite`/`satelliteMaxZoom`/`satelliteFormat`/`satelliteTileSize`, `hasTerrain`/`terrainMaxZoom`, `hasWikidata`, `hasRouting`, `hasOvertureAddresses` |
+| `streetzim-meta.json` | build metadata for other consumers. `routingGraph.version` is the SZRG version of the intermediate graph (4 or 5), even when the ZIM ships SZCI v3 cells |
+| `tiles/{z}/{x}/{y}.pbf` | OpenMapTiles-schema MVT; empty tiles are dropped |
+| `satellite/{z}/{x}/{y}.{avif,webp}` | optional, uncompressed |
+| `terrain/{z}/{x}/{y}.webp` | optional, Mapbox terrain-RGB |
+| `fonts/{Font}/{start}-{end}.pbf` | SDF glyphs (Open Sans Regular/Bold/Italic) |
+| `search-data/manifest.json`, `search-data/{prefix}.json` | prefix-sharded search records `{n, t, s, a, o, l, …}`; see `docs/search-prefix-locality.md` |
+| `category-index/manifest.json`, `category-index/{cat}.json`, `category-index/chip-{id}[…].json` | Find page data; chip ids come from `cloud/chip_rules.py`, shard layout from `cloud/chip_shards.py` |
+| `wikidata/manifest.json`, `wikidata/{NN}.json` | optional Wikidata facts, bucketed by the first two digits of the Q-number |
+| `wiki-article/{Title}`, `wiki-image/{sha1}.{ext}` | optional bundled Wikipedia (`cloud/wiki_articles.py`) |
+| `wiki-geo-index.json` | `{title: [lat, lon, type]}` |
+| `search/{slug}.html` | per-feature detail pages (libzim Xapian mode only) |
+| `overture-sources.json` | Overture attribution, when Overture data was merged |
+
+## Known debt
+
+- The shipped spatial writer and the Python reference readers live in
+  `tests/szrg_spatial.py` and `tests/szrg_reader.py`, and production code
+  imports them. Do not rename or move `tests/` without moving these first.
+- `map-config.json` has no routing format field; readers probe for
+  `graph-cells-index.bin`, then the chunk manifest, then `graph.bin`.
