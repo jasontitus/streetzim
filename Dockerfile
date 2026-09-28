@@ -37,7 +37,8 @@ RUN python3 -m venv /venv && /venv/bin/pip install --no-cache-dir -r requirement
 ENV PATH=/venv/bin:$PATH
 
 COPY . /app
-RUN mkdir -p /output
+# The `streetzim` command (openZIM-style flags; see offliner-definition.json).
+RUN /venv/bin/pip install --no-cache-dir --no-deps -e /app && mkdir -p /output
 WORKDIR /output
 # Download caches (satellite, DEM, Wikidata, Wikipedia) go to the mounted
 # volume, so they survive `docker run --rm` and work with a non-root --user.

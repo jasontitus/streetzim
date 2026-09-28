@@ -358,7 +358,7 @@ KNOWN_AREAS = {
 }
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Create a ZIM file with offline OpenStreetMap viewer",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -622,7 +622,60 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "saving a full unpack-repack of the ZIM. "
                              "Default 0 = monolithic graph.bin (legacy).")
 
-    args = parser.parse_args()
+    meta = parser.add_argument_group(
+        "ZIM metadata (openZIM conventions)",
+        "Each overrides the builder's default; lengths follow openZIM's rules "
+        "and are checked before the build starts. `streetzim` (streetzim/cli.py) "
+        "is the openZIM-style front end that sets these.")
+    meta.add_argument("--zim-name", metavar="NAME",
+                      help="ZIM Name metadata (book identity in Kiwix). "
+                           "Default: osm_<name>")
+    meta.add_argument("--title", help="Title metadata (max 30 characters). "
+                                      "Default: 'OSM - <name>'")
+    meta.add_argument("--description",
+                      help="Description metadata (max 80 characters)")
+    meta.add_argument("--long-description",
+                      help="LongDescription metadata (max 4000 characters)")
+    meta.add_argument("--creator", help="Creator metadata. "
+                                        "Default: OpenStreetMap contributors")
+    meta.add_argument("--publisher", help="Publisher metadata. Default: create_osm_zim")
+    meta.add_argument("--tags", help="Extra tags, semicolon-delimited; added "
+                                     "after the builder's own")
+    meta.add_argument("--illustration", metavar="PATH_OR_URL",
+                      help="Image for the 48x48 ZIM illustration (PNG, JPEG or "
+                           "WebP; cropped to fill). Default: a generated map icon")
+    meta.add_argument("--scraper", help=argparse.SUPPRESS)
+    meta.add_argument("--stats-filename", metavar="PATH",
+                      help="Write Zimfarm progress JSON ({\"done\": N, "
+                           "\"total\": M}) here as the build moves through "
+                           "its phases")
+
+    args = parser.parse_args(argv)
+
+    # Validate the openZIM metadata now, not after a multi-hour build.
+    zim_metadata = zim_illustration = None
+    if any(getattr(args, k) is not None for k in (
+            "zim_name", "title", "description", "long_description", "creator",
+            "publisher", "tags", "scraper")):
+        from streetzim.zim_metadata import build_overrides
+        try:
+            zim_metadata = build_overrides(
+                name=args.zim_name, title=args.title,
+                description=args.description,
+                long_description=args.long_description, creator=args.creator,
+                publisher=args.publisher, tags=args.tags, scraper=args.scraper)
+        except ValueError as e:
+            raise SystemExit(f"Error: {e}")
+    if args.illustration:
+        from streetzim.zim_metadata import load_illustration
+        try:
+            zim_illustration = load_illustration(args.illustration)
+        except (OSError, ValueError) as e:
+            raise SystemExit(f"Error: illustration {args.illustration!r}: {e}")
+    stats = None
+    if args.stats_filename:
+        from streetzim.progress import StatsFile
+        stats = StatsFile(args.stats_filename).attach()
 
     # Resolve area configuration
     geofabrik_path = args.geofabrik
@@ -713,6 +766,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
 
     total_steps = 6 + (1 if include_satellite else 0) + (1 if include_terrain else 0) + (1 if include_wikidata else 0) + (1 if include_routing else 0)
 
+    if stats:
+        stats.write(0, total_steps)
     print(f"=== Creating Offline OSM ZIM: {name} ===")
     if include_satellite:
         sat_desc = f"{satellite_format} q{satellite_quality} {satellite_tile_size}px"
@@ -1417,6 +1472,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             wiki_images=getattr(args, "wiki_images", "none"),
             wiki_image_max_kb=getattr(args, "wiki_image_max_kb", 128),
             wiki_images_per_article=getattr(args, "wiki_images_per_article", 12),
+            metadata=zim_metadata,
+            illustration=zim_illustration,
             )
         except BaseException:
             # libzim's Creator.__exit__ finalises on exception, so an
@@ -1431,6 +1488,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                     pass
             raise
 
+        if stats:
+            stats.finish()
         # Stop the phase timer (no further phases will be printed
         # after this) and emit the summary table for post-mortem.
         PHASE_TIMER.stop()
@@ -1469,6 +1528,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         print("=" * 60)
 
     finally:
+        if stats:
+            stats.detach()
         if not args.keep_temp:
             shutil.rmtree(tmpdir, ignore_errors=True)
         else:

@@ -1,0 +1,43 @@
+# StreetZim as an installable scraper, openZIM style.
+#
+#   pip install -e .          # from a checkout (or use the Docker image)
+#   streetzim --help
+#
+# The builder reads its viewer, tilemaker profile and fonts from resources/
+# next to the code, so install from a checkout (editable) or use the Docker
+# image; a plain wheel would not carry resources/.
+# requirements.txt stays the single list of runtime dependencies (the Docker
+# image and the production host install from it).
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "streetzim"
+description = "Offline OpenStreetMap ZIMs with search, category browsing and routing"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dynamic = ["version", "dependencies"]
+
+[project.optional-dependencies]
+qa = ["ruff==0.15.8", "pyright==1.1.409"]
+test = ["pytest>=8.0"]
+
+[project.scripts]
+streetzim = "streetzim.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/jasontitus/streetzim"
+
+[tool.setuptools]
+py-modules = ["create_osm_zim", "wikidata_cache"]
+
+[tool.setuptools.packages.find]
+include = ["streetzim*", "cloud"]
+namespaces = true
+
+[tool.setuptools.dynamic]
+version = { attr = "streetzim.__about__.__version__" }
+dependencies = { file = ["requirements.txt"] }

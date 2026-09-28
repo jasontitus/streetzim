@@ -44,6 +44,13 @@ def extract_bbox_from_pbf(pbf_path, bbox, output_path):
     print(f"    Extracted: {size_mb:.1f} MB")
 
 
+def required_shapefiles():
+    """Shapefiles the tilemaker config reads, relative to the build directory."""
+    with open(TILEMAKER_CONFIG) as f:
+        return sorted({layer["source"] for layer in json.load(f)["layers"].values()
+                       if "source" in layer})
+
+
 def generate_tiles(pbf_path, mbtiles_path, bbox=None, fast=False, store=None):
     """Generate vector tiles from OSM PBF using tilemaker."""
     print("  Generating vector tiles with tilemaker...")
@@ -51,9 +58,7 @@ def generate_tiles(pbf_path, mbtiles_path, bbox=None, fast=False, store=None):
     # directory and only prints "Unable to open" when one is missing, so a
     # build run from the wrong directory silently loses the ocean (and with
     # it, often the z0 tile). Fetch them with scripts/fetch-shapefiles.sh.
-    with open(TILEMAKER_CONFIG) as f:
-        shp = sorted({layer["source"] for layer in json.load(f)["layers"].values()
-                      if "source" in layer})
+    shp = required_shapefiles()
     missing = [p for p in shp if not os.path.exists(p)]
     if missing:
         print(f"    WARNING: {len(missing)} shapefile(s) not found under "

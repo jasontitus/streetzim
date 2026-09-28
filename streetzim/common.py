@@ -197,6 +197,10 @@ import re as _re_phase
 _HTTP_OK_RE = re.compile(r"^https?://", re.I)
 _PHASE_RE = _re_phase.compile(r"^\s*\[(\d+)/(\d+)\]\s+(.+?)(\.{3,})?\s*$")
 
+# Called as listener(number, total, title) when a phase header is printed.
+# streetzim.progress.StatsFile (--stats-filename) is the one user.
+PHASE_LISTENERS: list = []
+
 
 def print(*args, **kwargs):
     kwargs.setdefault("flush", True)
@@ -206,6 +210,8 @@ def print(*args, **kwargs):
         if m:
             phase_name = f"[{m.group(1)}/{m.group(2)}] {m.group(3).strip()}"
             PHASE_TIMER.start(phase_name)
+            for listener in PHASE_LISTENERS:
+                listener(int(m.group(1)), int(m.group(2)), m.group(3).strip())
             # Add a wall-clock prefix so live monitors can see when each
             # phase started without parsing the eventual summary table.
             import time as _t

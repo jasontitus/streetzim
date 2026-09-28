@@ -1,0 +1,183 @@
+{
+  "offliner_id": "streetzim",
+  "stdOutput": true,
+  "stdStats": true,
+  "flags": {
+    "name": {
+      "type": "string",
+      "required": true,
+      "title": "ZIM name",
+      "description": "Name of the ZIM",
+      "pattern": "^([a-z0-9\\-\\.]+_)([a-z\\-]+_)([a-z0-9\\-\\.]+)$"
+    },
+    "title": {
+      "type": "string",
+      "required": true,
+      "title": "ZIM title",
+      "description": "Title of the ZIM (at most 30 characters)",
+      "minGraphemes": 1,
+      "maxGraphemes": 30
+    },
+    "description": {
+      "type": "string",
+      "required": true,
+      "title": "ZIM description",
+      "description": "Description of the ZIM (at most 80 characters)",
+      "minGraphemes": 1,
+      "maxGraphemes": 80
+    },
+    "long_description": {
+      "type": "string",
+      "required": false,
+      "title": "ZIM long description",
+      "description": "Long description of the ZIM (at most 4000 characters)",
+      "minGraphemes": 1,
+      "maxGraphemes": 4000
+    },
+    "creator": {
+      "type": "string",
+      "required": false,
+      "title": "Creator",
+      "description": "Name of content creator. Default: OpenStreetMap contributors"
+    },
+    "publisher": {
+      "type": "string",
+      "required": false,
+      "title": "Publisher",
+      "description": "Publisher name. Default: openZIM",
+      "isPublisher": true
+    },
+    "file_name": {
+      "type": "string",
+      "required": false,
+      "title": "ZIM filename",
+      "description": "ZIM file name, without .zim; {name} and {period} (YYYY-MM) are replaced. Default: {name}_{period}"
+    },
+    "tags": {
+      "type": "string",
+      "required": false,
+      "title": "ZIM tags",
+      "description": "Semicolon (;) delimited list of tags to add to the ZIM"
+    },
+    "illustration_url": {
+      "type": "string",
+      "required": false,
+      "title": "Illustration URL",
+      "description": "URL (or path) of a PNG, JPEG or WebP used for the ZIM illustration. Default: a generated map icon"
+    },
+    "output": {
+      "type": "string",
+      "required": false,
+      "title": "Output",
+      "description": "Output folder for the ZIM. Default: ./output",
+      "pattern": "^/output$"
+    },
+    "stats_filename": {
+      "type": "string",
+      "required": false,
+      "title": "Stats filename",
+      "description": "Path to store the progress JSON file to",
+      "pattern": "^/output/task_progress\\.json$"
+    },
+    "debug": {
+      "type": "boolean",
+      "required": false,
+      "title": "Debug",
+      "description": "Keep temporary files (the build log is always verbose)"
+    },
+    "area": {
+      "type": "string",
+      "required": false,
+      "title": "Preset area",
+      "description": "A preset area from create_osm_zim.py's KNOWN_AREAS, e.g. monaco"
+    },
+    "include_poly": {
+      "type": "string",
+      "required": false,
+      "title": "Include poly",
+      "description": "URL of a .poly file bounding the area. A Geofabrik URL also selects its OSM extract; otherwise give --pbf-url"
+    },
+    "bbox": {
+      "type": "string",
+      "required": false,
+      "title": "Bounding box",
+      "description": "minlon,minlat,maxlon,maxlat",
+      "pattern": "^-?[0-9.]+,-?[0-9.]+,-?[0-9.]+,-?[0-9.]+$"
+    },
+    "pbf_url": {
+      "type": "string",
+      "required": false,
+      "title": "OSM extract URL",
+      "description": "OSM extract (.osm.pbf) to build from. Default: the Geofabrik extract of --area / --include-poly"
+    },
+    "no_routing": {
+      "type": "boolean",
+      "required": false,
+      "title": "No routing",
+      "description": "Leave out offline routing (on by default)"
+    },
+    "wikidata": {
+      "type": "boolean",
+      "required": false,
+      "title": "Wikidata",
+      "description": "Wikidata place details (needs network access to Wikidata)"
+    },
+    "terrain": {
+      "type": "boolean",
+      "required": false,
+      "title": "Terrain",
+      "description": "Hillshade from Copernicus DEM (downloads DEM tiles)"
+    },
+    "max_zoom": {
+      "type": "integer",
+      "required": false,
+      "title": "Max zoom",
+      "description": "Maximum zoom of the vector tiles. Default: 14",
+      "min": 0,
+      "max": 14
+    },
+    "default_view": {
+      "type": "string",
+      "required": false,
+      "title": "Default view",
+      "description": "Initial map view as latitude,longitude[,zoom]"
+    },
+    "zim_workers": {
+      "type": "integer",
+      "required": false,
+      "title": "ZIM workers",
+      "description": "Compression threads for libzim. Default: CPU count",
+      "min": 1
+    }
+  },
+  "zimMetadata": [
+    {
+      "metadata": "Name",
+      "flag": "name"
+    },
+    {
+      "metadata": "Title",
+      "flag": "title"
+    },
+    {
+      "metadata": "Description",
+      "flag": "description"
+    },
+    {
+      "metadata": "LongDescription",
+      "flag": "long_description"
+    },
+    {
+      "metadata": "Creator",
+      "flag": "creator"
+    },
+    {
+      "metadata": "Publisher",
+      "flag": "publisher"
+    },
+    {
+      "metadata": "Illustration",
+      "flag": "illustration_url"
+    }
+  ]
+}

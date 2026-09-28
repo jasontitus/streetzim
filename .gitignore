@@ -67,3 +67,6 @@ salvage/
 
 # Git worktrees created by Claude Code sub-agents.
 /.claude/worktrees/
+
+# pip install -e .
+*.egg-info/

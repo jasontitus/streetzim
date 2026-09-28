@@ -25,3 +25,4 @@ web
 preview-proxy
 patches
 rust/**/target
+*.egg-info/

@@ -444,6 +444,8 @@ def create_zim(
     wiki_images="none",
     wiki_image_max_kb=128,
     wiki_images_per_article=12,
+    metadata=None,
+    illustration=None,
 ):
     """Create a ZIM file containing the map viewer and all tiles.
 
@@ -458,6 +460,9 @@ def create_zim(
       ``"none"`` — skip Xapian entirely. Kiwix native search degrades
         to title-prefix; the in-ZIM places.html (which reads the JSON
         search-data chunks) is the only search UI.
+
+    ``metadata`` / ``illustration``: openZIM metadata overrides and a 48x48
+    PNG, from the --title/--description/... flags (see _add_metadata).
     """
     from libzim.writer import Creator as LibzimCreator, Item, StringProvider, FileProvider
     from libzim.writer import Hint
@@ -568,7 +573,12 @@ def create_zim(
     creator.set_mainpath("index.html")
     with creator:
         _add_metadata(creator, name=name, description=description,
-                      overture_sources=overture_sources, xapian_mode=xapian_mode)
+                      overture_sources=overture_sources, xapian_mode=xapian_mode,
+                      metadata=metadata, illustration=illustration,
+                      has_satellite=bool(satellite_dir and os.path.isdir(satellite_dir)),
+                      has_terrain=bool(terrain_dir and os.path.isdir(terrain_dir)),
+                      has_wiki=bool(wikidata_data or wiki_cross_refs
+                                    or bundle_wiki_articles))
         _add_viewer(creator, MapItem, maplibre_js_path=maplibre_js_path,
                     maplibre_css_path=maplibre_css_path,
                     viewer_html_path=viewer_html_path, map_config=map_config,
@@ -704,8 +714,20 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                               loc_lookup=loc_lookup)
 
 
-def _add_metadata(creator, *, name, description, overture_sources, xapian_mode):
-    """ZIM metadata (Name, Title, Tags, License, ...) and the 48x48 illustration."""
+def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
+                  metadata=None, illustration=None, has_satellite=True,
+                  has_terrain=True, has_wiki=True):
+    """ZIM metadata (Name, Title, Tags, License, ...) and the 48x48 illustration.
+
+    ``metadata`` holds openZIM-flag overrides validated by
+    streetzim.zim_metadata.build_overrides (Name, Title, Description,
+    LongDescription, Creator, Publisher, Tags, Scraper); anything not in it
+    keeps the builder's default. ``illustration`` is a 48x48 PNG.
+    ``has_*`` say which optional layers the ZIM contains, so License names
+    only the licences that apply (a ZIM without the satellite layer must not
+    claim CC BY-NC-SA).
+    """
+    md = metadata or {}
     # Add metadata — Name and Illustration are required by Kiwix to register the ZIM
     import re as _re_name
     # `name` usually already reads "OSM - <Region>", which yields the
@@ -718,11 +740,13 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode):
     if os.environ.get("STREETZIM_CLEAN_ZIM_NAME") == "1":
         zim_name = _re_name.sub(r"^osm\s*-\s*", "", zim_name, flags=_re_name.I)
     zim_name = zim_name.lower().replace(" ", "_").replace(",", "").replace(".", "")
-    creator.add_metadata("Title", name)
-    creator.add_metadata("Description", description)
+    creator.add_metadata("Title", md.get("Title", name))
+    creator.add_metadata("Description", md.get("Description", description))
+    if md.get("LongDescription"):
+        creator.add_metadata("LongDescription", md["LongDescription"])
     creator.add_metadata("Language", "eng")
-    creator.add_metadata("Publisher", "create_osm_zim")
-    creator.add_metadata("Creator", "OpenStreetMap contributors")
+    creator.add_metadata("Publisher", md.get("Publisher", "create_osm_zim"))
+    creator.add_metadata("Creator", md.get("Creator", "OpenStreetMap contributors"))
     import time as _time
     creator.add_metadata("Date", _time.strftime("%Y-%m-%d"))
     # Only advertise a full-text index when one is actually built;
@@ -731,17 +755,28 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode):
     _tags = "maps;osm;offline;_pictures:yes"
     if xapian_mode in ("libzim", "builder"):
         _tags += ";_ftindex:yes"
+    if md.get("Tags"):
+        # The user's tags come after ours: _ftindex must stay accurate.
+        from streetzim.zim_metadata import merge_tags
+        _tags = merge_tags(_tags, md["Tags"])
     creator.add_metadata("Tags", _tags)
-    creator.add_metadata("Name", f"osm_{zim_name}")
+    creator.add_metadata("Name", md.get("Name", f"osm_{zim_name}"))
     creator.add_metadata("Flavour", "maxi")
-    creator.add_metadata("Scraper", "streetzim/1.0")
+    creator.add_metadata("Scraper", md.get("Scraper", "streetzim/1.0"))
     license_parts = [
         "Map data: ODbL (OpenStreetMap)",
         "Tile schema: CC-BY 4.0 (OpenMapTiles)",
-        "Satellite imagery: CC BY-NC-SA 4.0 (Sentinel-2 cloudless by EOX)",
-        "Elevation: Copernicus GLO-30 DEM © DLR/Airbus, provided under COPERNICUS by EU and ESA",
-        "Place info: CC0 (Wikidata) / CC BY-SA 3.0 (Wikipedia)",
     ]
+    if has_satellite:
+        license_parts.append(
+            "Satellite imagery: CC BY-NC-SA 4.0 (Sentinel-2 cloudless by EOX)")
+    if has_terrain:
+        license_parts.append(
+            "Elevation: Copernicus GLO-30 DEM © DLR/Airbus, provided under "
+            "COPERNICUS by EU and ESA")
+    if has_wiki:
+        # Wikipedia text has been CC BY-SA 4.0 since June 2023.
+        license_parts.append("Place info: CC0 (Wikidata) / CC BY-SA 4.0 (Wikipedia)")
     if overture_sources:
         # Overture's addresses theme ships mixed per-source licenses
         # (CC0/CC-BY-4.0/OGL-UK/etc.). We point to the dataset credits
@@ -755,6 +790,9 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode):
     creator.add_metadata("License", "; ".join(license_parts))
 
     # Add 48x48 illustration (required by Kiwix to show in library)
+    if illustration:
+        creator.add_illustration(48, illustration)
+        return
     # Generate a simple map icon as PNG
     try:
         from PIL import Image, ImageDraw

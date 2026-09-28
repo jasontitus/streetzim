@@ -1,4 +1,4 @@
-# Three jobs:
+# Four jobs (docker builds the image and runs `streetzim` in it as Zimfarm would):
 #   checks     - lint gate, Python unit tests, Node viewer/PWA tests. Fast, offline.
 #   openfreemap-tiles - builds from the same OpenFreeMap MBTiles openzim/maps
 #                uses (no tilemaker), validates, and loads it through kiwix-serve.
@@ -54,6 +54,8 @@ jobs:
         run: ruff check .
       - name: Viewer index.html matches its parts
         run: python tools/build_viewer.py --check
+      - name: offliner-definition.json matches the streetzim flags
+        run: python tools/offliner_definition.py --check
       - name: Python tests
         run: python -m pytest tests -q
       - name: Node tests
@@ -200,6 +202,19 @@ jobs:
           zimcheck -A osm-monaco-patched.zim
           python -c "import sys; from libzim.reader import Archive; a = Archive('osm-monaco-patched.zim'); b = bytes(a.get_entry_by_path('index.html').get_item().content); sys.exit(0 if a.check() and b'ci-patch' in b else 'in-place patch not applied or checksum wrong')"
 
+      - name: Build through the openZIM-style command (streetzim --area)
+        env:
+          STREETZIM_REQUIRE_SHAPEFILES: "1"
+          STREETZIM_REQUIRE_ZIMCHECK: "1"
+        run: |
+          pip install --no-deps -e .
+          streetzim --name osm_en_monaco --title Monaco \
+            --description "Offline map of Monaco with search and routing" \
+            --tags openstreetmap --area monaco --shapefiles "$PWD" \
+            --output out --stats-filename out/task_progress.json
+          python tools/check_openzim_output.py out osm_en_monaco --title Monaco --routing
+          python cloud/validate_zim.py out/osm_en_monaco_*.zim
+
       - name: Upload ZIM
         if: always()
         uses: actions/upload-artifact@v4
@@ -274,16 +289,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the image
         run: docker build -t streetzim .
-      - name: Build a ZIM inside it (OpenFreeMap tiles; no tilemaker, no shapefiles)
+      - name: Build a ZIM inside it the way Zimfarm runs an offliner
+        # OpenFreeMap tiles, so no tilemaker or shapefiles; --no-routing
+        # because there is no OSM extract. /output and task_progress.json
+        # are what offliner-definition.json pins.
         run: |
           mkdir -p out && chmod 777 out
           python3 scripts/fetch-openfreemap-mbtiles.py monaco -o out/monaco.mbtiles
           docker run --rm -v "$PWD/out:/output" streetzim \
-            create_osm_zim.py --mbtiles /output/monaco.mbtiles --bbox 7.40,43.72,7.44,43.76 \
-            --name Monaco --split-find-chips -o /output/osm-monaco-docker.zim
+            streetzim --name osm_en_monaco-docker --title Monaco \
+            --description "Offline map of Monaco with search" \
+            --bbox 7.40,43.72,7.44,43.76 --mbtiles /output/monaco.mbtiles --no-routing \
+            --output /output --stats-filename /output/task_progress.json \
+            --file-name osm-monaco-docker
       - name: tilemaker works in the image
         run: docker run --rm streetzim tilemaker --help | head -3
       - name: Validate the ZIM
         run: |
           pip install -q -r requirements.txt
+          python tools/check_openzim_output.py out osm_en_monaco-docker --title Monaco \
+            --file osm-monaco-docker.zim
           python cloud/validate_zim.py out/osm-monaco-docker.zim
