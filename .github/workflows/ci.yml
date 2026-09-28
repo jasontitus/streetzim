@@ -104,12 +104,23 @@ jobs:
           cmake --build /tmp/tilemaker/build -j"$(nproc)"
           mkdir -p ~/.local/tilemaker && cp /tmp/tilemaker/build/tilemaker ~/.local/tilemaker/
       # Ubuntu's zimcheck (3.2) cannot read ZIMs written by current libzim.
-      - name: Install zim-tools ${{ env.ZIM_TOOLS_VERSION }}
+      # download.openzim.org can be slow, so the tarball is cached.
+      - name: Cache zim-tools ${{ env.ZIM_TOOLS_VERSION }}
+        id: zimtools-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/zim-tools
+          key: zim-tools-${{ env.ZIM_TOOLS_VERSION }}-linux-x86_64
+      - name: Download zim-tools ${{ env.ZIM_TOOLS_VERSION }}
+        if: steps.zimtools-cache.outputs.cache-hit != 'true'
         run: |
-          curl -fsSL --retry 3 -o /tmp/zt.tgz \
+          curl -fsSL --retry 3 --max-time 1200 -o /tmp/zt.tgz \
             "https://download.openzim.org/release/zim-tools/zim-tools_linux-x86_64-${ZIM_TOOLS_VERSION}.tar.gz"
-          tar -xzf /tmp/zt.tgz -C /tmp
-          echo "/tmp/zim-tools_linux-x86_64-${ZIM_TOOLS_VERSION}" >> "$GITHUB_PATH"
+          mkdir -p ~/.local/zim-tools
+          tar -xzf /tmp/zt.tgz -C ~/.local/zim-tools --strip-components=1
+      - name: Put tilemaker and zim-tools on PATH
+        run: |
+          echo "$HOME/.local/zim-tools" >> "$GITHUB_PATH"
           echo "$HOME/.local/tilemaker" >> "$GITHUB_PATH"
 
       - name: Cache coastline and Natural Earth shapefiles
