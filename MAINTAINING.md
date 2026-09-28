@@ -17,7 +17,8 @@ ZIM.
 
 **Core: builds a ZIM from OSM data.** Portable, tested, run by CI.
 
-- `create_osm_zim.py`: the builder's CLI (argparse + `main()`). The steps it
+- `create_osm_zim.py`: the builder's CLI (`build_parser()`, and `main()`
+  calling one function per build phase). The steps it
   runs live in the `streetzim/` package: `common.py` (the phase-timing `print`,
   `PHASE_TIMER`, repo paths, URLs, `download_file`, `parse_bbox`), `tiles.py`
   (tilemaker, MBTiles readers, fonts, MapLibre), `satellite.py`, `terrain.py`,
@@ -183,9 +184,11 @@ scripts that may be running on the production host (see
 - **trap:** `cloud/regions.tsv` still has `switzerland-nosat*` rows with no
   matching `region-variants.tsv` rows. A full registry run would build them as
   full satellite z14 ZIMs under "light" names.
-- **Large units.** `create_osm_zim.py`'s `main()` (~1.1k lines) is the
-  biggest remaining function; `create_zim` is now a sequence of phase
-  functions in `streetzim/zim_writer.py` (none over ~260 lines), and
+- **Large units.** `create_osm_zim.py`'s `main()` and `create_zim` are now
+  sequences of phase functions (`build_parser` plus `_openzim_options` ...
+  `_print_summary` in `create_osm_zim.py`; `streetzim/zim_writer.py`), none over
+  ~290 lines. The phases pass state as keyword arguments and tuple returns,
+  so a new option usually means a parameter on the phase that reads it. And
   `index.html` is edited as parts in `resources/viewer/src/index/`.
   `places.html` (2.5k) and `routing-worker.js` (1.7k) are unsplit.
 - **Legacy format readers.** The builder writes only current formats

@@ -8,8 +8,6 @@
  "cloud/wiki_articles.py | reportOptionalMemberAccess | \"image\" is not a known attribute of \"None\"": 1,
  "cloud/wiki_articles.py | reportReturnType | Type \"Unknown | Any | dict[Unknown, Unknown] | None\" is not assignable to return type \"str | None\"": 1,
  "cloud/wikidata_titles.py | reportArgumentType | Argument of type \"str\" cannot be assigned to parameter \"filename\" of type \"Path\" in function \"__init__\"": 1,
- "create_osm_zim.py | reportArgumentType | Argument of type \"Any | Literal[13] | None\" cannot be assigned to parameter \"max_zoom\" of type \"int\"": 1,
- "create_osm_zim.py | reportArgumentType | Argument of type \"Any | Literal[13] | None\" cannot be assigned to parameter \"max_zoom\" of type \"int\" in function \"download_satellite_tiles\"": 1,
  "create_osm_zim.py | reportIndexIssue | \"__getitem__\" method not defined on type \"float\"": 1,
  "create_osm_zim.py | reportOptionalSubscript | Object of type \"None\" is not subscriptable": 3,
  "streetzim/addresses.py | reportArgumentType | Argument of type \"Generator[str | None, None, None]\" cannot be assigned to parameter \"iterable\" of type \"Iterable[str]\" in function \"join\"": 1,
