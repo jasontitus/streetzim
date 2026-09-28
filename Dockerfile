@@ -1,0 +1,44 @@
+# StreetZim builder image: tilemaker 3, osmium and the Python stack (libzim).
+#
+#   docker build -t streetzim .
+#   docker run --rm -v "$PWD/out:/output" streetzim \
+#       create_osm_zim.py --area monaco --routing -o /output/osm-monaco.zim
+#
+# The image fetches nothing at run time except what a build needs (OSM
+# extract, fonts, MapLibre). The coastline / Natural Earth shapefiles
+# (~900 MB) are not baked in; fetch them once into the output volume, which
+# is also the working directory tilemaker reads them from:
+#   docker run --rm -v "$PWD/out:/output" streetzim scripts/fetch-shapefiles.sh /output
+# Builds from OpenFreeMap tiles (--mbtiles) need neither tilemaker nor shapefiles.
+
+FROM ubuntu:24.04 AS tilemaker
+ARG TILEMAKER_REF=v3.0.0
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential cmake git ca-certificates \
+        libboost-dev libboost-filesystem-dev libboost-iostreams-dev \
+        libboost-program-options-dev libboost-system-dev \
+        liblua5.1-0-dev libshp-dev libsqlite3-dev rapidjson-dev zlib1g-dev \
+    && git clone --depth 1 --branch "$TILEMAKER_REF" https://github.com/systemed/tilemaker.git /src/tilemaker \
+    && cmake -S /src/tilemaker -B /src/tilemaker/build -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build /src/tilemaker/build -j"$(nproc)"
+
+FROM ubuntu:24.04
+LABEL org.opencontainers.image.source=https://github.com/jasontitus/streetzim
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        python3 python3-venv ca-certificates curl unzip osmium-tool \
+        libboost-filesystem1.83.0 libboost-iostreams1.83.0 \
+        libboost-program-options1.83.0 liblua5.1-0 libshp4 libsqlite3-0 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=tilemaker /src/tilemaker/build/tilemaker /usr/local/bin/tilemaker
+
+WORKDIR /app
+COPY requirements.txt /app/
+RUN python3 -m venv /venv && /venv/bin/pip install --no-cache-dir -r requirements.txt
+ENV PATH=/venv/bin:$PATH
+
+COPY . /app
+RUN mkdir -p /output
+WORKDIR /output
+ENV PATH=/app:/app/scripts:$PATH
+ENTRYPOINT []
+CMD ["create_osm_zim.py", "--help"]

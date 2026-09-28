@@ -78,6 +78,19 @@ this stack.
 zim-tools 3.8 or newer from <https://download.openzim.org/release/zim-tools/>;
 Ubuntu's 3.2 misreads ZIMs written by current libzim.
 
+### Or with Docker
+
+The image contains tilemaker 3, osmium and the Python stack; CI builds it
+and makes a ZIM inside it on every push.
+
+```bash
+docker build -t streetzim .
+mkdir -p out
+docker run --rm -v "$PWD/out:/output" streetzim scripts/fetch-shapefiles.sh /output   # once
+docker run --rm -v "$PWD/out:/output" streetzim \
+    create_osm_zim.py --area monaco --routing -o /output/osm-monaco.zim
+```
+
 ## Choosing what goes in
 
 Input, one of:

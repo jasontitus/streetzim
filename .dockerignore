@@ -1,0 +1,22 @@
+# Keep the build context to the code: no history, caches, build outputs or
+# retired scripts.
+.git
+.claude
+attic
+node_modules
+**/__pycache__
+*.zim
+*.mbtiles
+*.osm.pbf
+*.log
+coastline
+landcover
+*_cache*
+world-data
+wiki-src
+wiki_articles_cache
+tmp
+web
+preview-proxy
+patches
+rust/**/target

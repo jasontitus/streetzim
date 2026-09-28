@@ -266,3 +266,24 @@ jobs:
           ZIM_ORIGIN=http://127.0.0.1:8900/content/osm-monaco-ofm \
             CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
             node cloud/zim_viewer_smoke.mjs
+
+  docker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t streetzim .
+      - name: Build a ZIM inside it (OpenFreeMap tiles; no tilemaker, no shapefiles)
+        run: |
+          mkdir -p out && chmod 777 out
+          python3 scripts/fetch-openfreemap-mbtiles.py monaco -o out/monaco.mbtiles
+          docker run --rm -v "$PWD/out:/output" streetzim \
+            create_osm_zim.py --mbtiles /output/monaco.mbtiles --bbox 7.40,43.72,7.44,43.76 \
+            --name Monaco --split-find-chips -o /output/osm-monaco-docker.zim
+      - name: tilemaker works in the image
+        run: docker run --rm streetzim tilemaker --help | head -3
+      - name: Validate the ZIM
+        run: |
+          pip install -q -r requirements.txt
+          python cloud/validate_zim.py out/osm-monaco-docker.zim
