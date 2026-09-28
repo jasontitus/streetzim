@@ -222,7 +222,7 @@ encoded = ((elev + 10000.0) / 0.1).astype(np.uint32)
 ## Test Script
 
 ```bash
-python3 test_terrain_compression.py [--max-zoom 12]
+python3 attic/research/test_terrain_compression.py [--max-zoom 12]
 ```
 
 Tests all 16 strategies (WebP and AVIF lossless quantized variants, raw int16, raw int16 delta-encoded, LERC at 4 error levels) across three regions (Colorado, Kansas, DC), measures raw size, zstd-compressed size, and round-trip elevation error.

@@ -147,7 +147,7 @@ python3 create_osm_zim.py --area dc --satellite --satellite-tile-size 512
 ## Test Script
 
 ```bash
-python3 test_satellite_compression.py
+python3 attic/research/test_satellite_compression.py
 ```
 
 Downloads sample tiles from urban, rural, and suburban areas and benchmarks all format/quality/size combinations.

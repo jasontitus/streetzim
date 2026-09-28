@@ -1,6 +1,7 @@
 # Shell scripts: inventory and consolidation plan
 
-Status 2026-09-28: **73** tracked `*.sh` files. About **23** are live. The
+Status 2026-09-28: **73** tracked `*.sh` files; after Phase 1 (done, moved to
+`attic/`), **42** remain live. About **23** are live. The
 rest are one-offs, retired Mac/AWS/GCP tooling, or wrappers superseded by
 `build-region-fast.sh`. This file lists every script with a verdict and gives
 the order for cutting the count down **without breaking the production host**,
@@ -47,7 +48,11 @@ These come from how the scripts reference each other today:
 5. **Before any `git rm` sweep**, tag `pre-script-consolidation`, so any file
    can be brought back with `git show <tag>:<path>`.
 
-## Phase 1: retire (nothing tracked calls these)
+## Phase 1: retire (nothing tracked calls these) — DONE
+
+Moved to `attic/` with `git mv`. Before moving, the tree was searched for
+every moved filename: the only remaining mentions are comments, doc text,
+`cloud/regions.tsv` notes and `firebase.json` ignore entries.
 
 These use `/Users/jasontitus/…`, `venv312`, AWS, or April-era sources, or
 they declare themselves deprecated. Commit dates of 2026-09-03/05 on several

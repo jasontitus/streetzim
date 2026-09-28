@@ -629,7 +629,7 @@ and the previous good site would remain live. Operator re-runs
 
 ## Preflight is a hard gate (2026-09)
 
-`build-region-and-upload.sh` no longer forces `FORCE=1`; a failing
+`build-region-and-upload.sh` (retired to `attic/`) no longer forced `FORCE=1`; a failing
 `cloud/preflight.py` stops the build. For regions with a known-benign
 preflight failure (sparse Wikidata, ocean-coast false positives — see
 the comment in `cloud/build_region.sh`), run with `FORCE=1` explicitly

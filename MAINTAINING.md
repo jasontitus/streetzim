@@ -145,8 +145,9 @@ In rough priority order. The items marked **bug** were found during the
 scripts that may be running on the production host (see
 [docs/scripts.md](docs/scripts.md) for how to change those safely).
 
-- **Script sprawl.** 73 shell scripts, of which about 23 are live. The
-  retirement and merge plan is in docs/scripts.md.
+- **Script sprawl.** 42 live shell scripts (73 before Phase 1 moved the dead
+  ones to `attic/`); about 23 are needed. The remaining phases are in
+  docs/scripts.md.
 - **Shared gate code is copy-pasted, or `sed`-extracted at runtime from
   `retrofit-chips-queue.sh`** by six other scripts. It should become a sourced
   `scripts/lib/`; docs/scripts.md gives the order that avoids breaking the
