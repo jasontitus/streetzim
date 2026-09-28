@@ -47,7 +47,8 @@ Readers must ignore keys they don't know.
 | `building`, `area` | `building`, `landuse` (named features only; OpenFreeMap tiles carry no names in these) |
 | `addr` | addresses from the OSM PBF (and Overture), not from tiles |
 
-Extraction: `extract_searchable_features` in `create_osm_zim.py` reads the
+Extraction: `extract_searchable_features` in `streetzim/search_extract.py`
+(importable on its own; `tests/test_search_extract.py` has a fixture) reads the
 z14 tiles of any OpenMapTiles MBTiles, which covers tilemaker output and
 OpenFreeMap's Planetiler builds. Each feature becomes one point (the point
 itself, a MultiPoint's mean, a line's middle vertex, or a polygon ring's
