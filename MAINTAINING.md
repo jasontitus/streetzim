@@ -70,7 +70,12 @@ Rules that keep published ZIMs working:
   [docs/formats.md](docs/formats.md). The `/drive/` PWA serves the *current*
   viewer to *every* ZIM a user opens, so readers can't drop old versions
   until no published ZIM needs them (the retirement table is in formats.md).
-- **Viewer edits.** Change `resources/viewer/*`, then run
+- **Viewer edits.** `index.html` is built from the parts in
+  `resources/viewer/src/index/` (head, styles, markup, then one file per
+  feature: search, find, wiki, the routing formats, A*, the worker bridge,
+  driving mode…). Edit a part, then run `python tools/build_viewer.py`. CI
+  fails if `index.html` and the parts differ. `places.html` and
+  `routing-worker.js` are edited directly. Then run
   `scripts/sync-drive-viewer.sh` to refresh the PWA copy in
   `web/drive/viewer/` (the tests compare the shared blocks). Published ZIMs
   get viewer updates by in-place slot patching (`docs/viewer-slots.md`,

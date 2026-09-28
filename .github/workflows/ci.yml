@@ -52,6 +52,8 @@ jobs:
         run: pip install -r requirements.txt ruff==0.15.8
       - name: Lint (narrow gate, see ruff.toml)
         run: ruff check .
+      - name: Viewer index.html matches its parts
+        run: python tools/build_viewer.py --check
       - name: Python tests
         run: python -m pytest tests -q
       - name: Node tests

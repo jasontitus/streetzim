@@ -1,0 +1,900 @@
+<style>
+  :root {
+    --ui-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --panel-bg: rgba(255,255,255,0.96);
+    --panel-shadow: 0 2px 12px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.04);
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --text-primary: #1a1a1a;
+    --text-secondary: #6b7280;
+    --text-tertiary: #9ca3af;
+    --border: rgba(0,0,0,0.06);
+    --hover-bg: rgba(37,99,235,0.04);
+    --radius: 10px;
+  }
+
+  /* Size the page to the REAL visible window. In the Kiwix WKWebView the
+     layout viewport is the full device screen (client/scrollHeight = 956 on an
+     iPhone 16) but only window.innerHeight = 772 is actually visible between
+     the app's top chrome and bottom toolbar (ruler-measured; visualViewport
+     agrees). Percentage/vh layout therefore dropped every bottom-anchored
+     control ~184px below the fold. setViewportVars() publishes the truth as
+     --app-height / --bottom-inset; body is position:relative at --app-height
+     so all absolutely-positioned panels (and #map with its bottom controls)
+     anchor to the visible bottom; position:fixed sheets use --bottom-inset.
+     The JS touch-scroll lock (lockBodyScroll) keeps the page from dragging. */
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; }
+  body { position: relative; height: var(--app-height, 100%); }
+  /* Safe-area insets (docs/mobile-browser-review.md §B1). --top-inset lifts
+     everything anchored to the top out from under the status bar / Dynamic
+     Island once the PWA is installed (viewport-fit=cover); --safe-bottom
+     keeps the bottom row above the home indicator. Both are 0 in a browser
+     tab and inside Kiwix. */
+  /* 2026-09-19: these are NOT 0 inside Kiwix. The comment above used to claim
+     they were; a user screenshot showed the search overlay sitting ~120 px
+     down the map in Kiwix on iOS, because its WKWebView reports a non-zero
+     env(safe-area-inset-top) even though the WebView already sits below the
+     app's own chrome — so the inset was double-counted. Default to 0 and only
+     lift for a real standalone/PWA launch, which is what §B1 actually wanted.
+     Matches isStandalone() further down: display-mode plus navigator.standalone
+     for older iOS Safari, applied via the .sz-standalone class. */
+  :root { --top-inset: 0px; --safe-bottom: 0px; }
+  @media (display-mode: standalone) {
+    :root { --top-inset: env(safe-area-inset-top, 0px); --safe-bottom: env(safe-area-inset-bottom, 0px); }
+  }
+  html.sz-standalone { --top-inset: env(safe-area-inset-top, 0px); --safe-bottom: env(safe-area-inset-bottom, 0px); }
+  #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; width: 100%; height: 100%; }
+  .maplibregl-ctrl-top-right, .maplibregl-ctrl-top-left { top: var(--top-inset, 0px); }
+  /* 48px: MapLibre's attribution wraps to a 44px band at phone width and
+     occupies bottom 10..54, so the scale bar at bottom:0 (+10px of
+     MapLibre's own margin) printed straight on top of its second line.
+     Verified by injection at 320/390/430 before editing. */
+  .maplibregl-ctrl-bottom-left { bottom: calc(48px + var(--safe-bottom, 0px)); }
+  /* Keep the locate button above the DEAD TOUCH BAND next to the app's bottom
+     toolbar: in the Kiwix WebView, taps in the lowest ~50px are swallowed by
+     the native toolbar hit-slop / home-indicator gestures even though the
+     content renders. min() ties the lift to --bottom-inset, so on desktop/PWA
+     (inset 0) the button stays in the normal corner position. */
+  .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group {
+    margin-bottom: calc(min(var(--bottom-inset, 0px), 64px) + var(--safe-bottom, 0px));
+  }
+
+  /* --- Online-preview banner (PWA only; docs/online-preview.md) --- */
+  #preview-banner {
+    position: absolute; left: 50%; bottom: calc(84px + var(--safe-bottom, 0px)); transform: translateX(-50%);
+    z-index: 1; box-sizing: border-box;
+    display: flex; align-items: center; justify-content: center;
+    gap: 10px; flex-wrap: wrap;
+    width: max-content; max-width: min(560px, calc(100% - 20px));
+    padding: 8px 12px;
+    background: var(--panel-bg); border-radius: var(--radius);
+    box-shadow: var(--panel-shadow);
+    font-family: var(--ui-font); font-size: 12px; line-height: 1.4;
+    color: var(--text-secondary);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  }
+  #preview-banner[hidden] { display: none; }
+  #preview-banner b { color: var(--text-primary); font-weight: 600; }
+  #preview-banner-note:not(:empty) { color: #b45309; font-weight: 600; }
+  /* Phones: one line of copy; the map needs the room (§D). */
+  @media (max-width: 480px) { #preview-banner .long { display: none; } }
+  #preview-banner a.dl {
+    color: #fff; background: var(--accent); padding: 5px 10px;
+    border-radius: 6px; text-decoration: none; font-weight: 600;
+    white-space: nowrap;
+  }
+  #preview-banner a.dl:hover { background: var(--accent-hover); }
+  #preview-banner button {
+    /* 44px hit area (iOS HIG / Android 48dp guidance) around an 18px glyph. */
+    background: none; border: none; padding: 0; line-height: 1;
+    min-width: 44px; min-height: 44px; margin: -10px -6px -10px -2px;
+    color: var(--text-tertiary); font-size: 18px; cursor: pointer;
+  }
+
+  /* --- Attribution / info tag --- */
+  #info {
+    /* 58px, not 36px: MapLibre's attribution wraps to two lines on a phone
+       and occupies a 44 px band (y=790..834 at 390x844), so bottom:36px put
+       this label inside it — an 18 px overlap the detector confirmed at 320,
+       390 and 430. Pre-dates the mobile merge; the Kiwix safe-area inset was
+       masking it by lifting everything bottom-anchored clear. */
+    position: absolute; bottom: calc(84px + var(--safe-bottom, 0px)); left: 10px; z-index: 1;
+    background: rgba(255,255,255,0.65); padding: 3px 8px;
+    border-radius: 4px; font-family: var(--ui-font);
+    font-size: 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    /* Reserve #attr-btn's gutter instead of a flat 250px. #attr-btn is
+       right:64px and ~71px wide, so at a 320px viewport its left edge is
+       x=198; #info starts at left:10px, so anything wider than ~175px runs
+       under it. The flat 250px cap was unreachable at 320px, so this only
+       bit regions whose NAME rendered wide enough: measured against a
+       loaded ZIM, "Switzerland and the Alps (light)" renders 196px (right
+       edge 206) and overlaps #attr-btn by 7px at 320px, while the shipped
+       short names (101-157px) clear it. Ukraine ("Ukraine, Moldova &
+       Western Russia") would be next.
+
+       vw, not %: #info is position:absolute, so a percentage resolves
+       against its containing block (the map container), not the viewport.
+
+       border-box, because max-width caps the CONTENT box by default: with
+       padding 3px 8px the 175px cap still rendered a 191px border box
+       (right edge 201 vs #attr-btn's left edge 198), leaving 3px of the
+       overlap in place. Measured on a loaded ZIM, not a fatal-error page. */
+    box-sizing: border-box;
+    max-width: min(250px, calc(100vw - 145px));
+  }
+  #info h3 { margin: 0; font-size: 10px; font-weight: 600; display: inline; color: var(--text-primary); }
+  #info p { margin: 0; color: var(--text-tertiary); font-size: 9px; }
+  /* The ways back from a dead viewer (Try again, Change map) must be
+     readable and tappable, not 9 px. */
+  #info .sz-recover { font-size: 13px; margin-top: 4px; }
+  #info .sz-recover a, #info a.sz-change { color: #2563eb; }
+  @media (pointer: coarse) {
+    #info .sz-recover a, #info a.sz-change { display: inline-block; line-height: 40px; padding: 0 6px; font-size: 14px; }
+  }
+
+  /* --- Unified control strip --- */
+  #controls {
+    /* 152px, not 120px: the MapLibre control column runs to y=142 once
+       --top-inset is 0, which overlapped this panel by 44x22 px. */
+    position: absolute; top: calc(152px + var(--top-inset, 0px)); right: 10px; z-index: 2;
+    display: flex; flex-direction: column;
+    background: var(--panel-bg); border-radius: var(--radius);
+    box-shadow: var(--panel-shadow);
+    overflow: hidden; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  }
+  #controls button {
+    background: transparent; border: none;
+    padding: 9px 14px; font-size: 12px; font-weight: 500;
+    cursor: pointer; font-family: var(--ui-font);
+    color: var(--text-secondary); display: none;
+    text-align: left; white-space: nowrap;
+    transition: background 0.2s, color 0.2s;
+    letter-spacing: -0.01em;
+  }
+  #controls button:hover { background: var(--hover-bg); color: var(--text-primary); }
+  #controls button.active-control {
+    background: var(--accent); color: #fff; font-weight: 600;
+  }
+  #controls button.active-control:hover {
+    background: var(--accent-hover);
+  }
+  #controls button + button { border-top: 1px solid var(--border); }
+  /* (CSS for #places-link removed alongside the Find link on
+     2026-05-10 — see HTML comment in #controls.) */
+
+  /* Pulse marker for wiki item clicks */
+  .pulse-marker {
+    width: 60px; height: 60px; position: relative;
+    pointer-events: none;
+  }
+  .pulse-marker::after {
+    content: ''; position: absolute; top: 50%; left: 50%;
+    width: 12px; height: 12px; margin: -6px 0 0 -6px;
+    border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 8px rgba(37,99,235,0.6);
+  }
+  .pulse-marker::before {
+    content: ''; position: absolute; top: 50%; left: 50%;
+    width: 12px; height: 12px; margin: -6px 0 0 -6px;
+    border-radius: 50%; background: transparent;
+    border: 2px solid var(--accent);
+    animation: pulse-ring 1.2s ease-out 0s 4;
+  }
+  @keyframes pulse-ring {
+    0% { transform: scale(1); opacity: 0.8; }
+    100% { transform: scale(4); opacity: 0; }
+  }
+
+  /* --- Search --- */
+  #search-container {
+    position: absolute; top: calc(10px + var(--top-inset, 0px)); left: 50%; transform: translateX(-50%);
+    z-index: 2; width: 340px;
+    /* Reserve the MapLibre top-right control column. It is 54 px wide
+       (44 px button under pointer:coarse + 10 px margin) and now sits at
+       top:0 since --top-inset is guarded, so the old 100 px reserve (50 px
+       a side) left the box overlapping it by 4 px at every width. 128 px
+       gives 64 px a side = a 10 px gap at 320/390/430. */
+    max-width: calc(100% - 128px);
+    font-family: var(--ui-font);
+  }
+  /* Hidden when the find-results "Search this area" pill is on
+     screen — the two affordances would otherwise compete for the
+     same top-center band. Class-based with !important so a stray
+     inline display from a third party can't beat it. */
+  #search-container.streetzim-hidden { display: none !important; }
+  /* Chip rail beneath the search input — the on-map find UI.
+     Tapping a chip fetches the corresponding category-index file,
+     filters by current viewport, and renders as pins + carousel
+     via the existing find-results path. Replaces the click-through
+     to places.html for chip-based browsing.
+     Edge fade via mask: chips that scroll past the right (or left)
+     edge fade out gracefully so the user can tell there's more
+     content rather than a hard cut-off. */
+  #find-chips {
+    margin-top: 8px;
+    display: flex; gap: 6px;
+    padding: 2px 4px;
+    /* pan-x, not auto: with auto, iOS treats a tap that drifts a few px as
+       the start of a scroll, fires pointercancel and never delivers click.
+       Measured in-ZIM (chipdiag2-0846): touchstart 1, touchmove 7,
+       pointercancel 1, chip click handler fired 0, chip.on 0 -- i.e. the
+       tap reached the rail and was cancelled, which reads to a user as
+       "chips aren't clickable". The JS tap fallback below covers the rest. */
+    touch-action: pan-x;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    mask-image: linear-gradient(to right,
+                  transparent 0, black 14px,
+                  black calc(100% - 14px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to right,
+                  transparent 0, black 14px,
+                  black calc(100% - 14px), transparent 100%);
+  }
+  #find-chips::-webkit-scrollbar { display: none; }
+  #find-chips .find-chip {
+    flex: 0 0 auto; padding: 7px 12px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.96);
+    color: var(--text-primary, #222);
+    border: 1px solid rgba(0,0,0,0.10);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.10);
+    font: inherit; font-size: 13px; font-weight: 500;
+    cursor: pointer; white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 5px;
+    transition: background .15s ease, transform .08s ease;
+  }
+  #find-chips .find-chip:hover { background: #fff; }
+  #find-chips .find-chip:active { transform: scale(0.97); }
+  #find-chips .find-chip.on {
+    background: #1a73e8; color: #fff; border-color: #1a73e8;
+  }
+  #search-input {
+    width: 100%; box-sizing: border-box;
+    padding: 10px 36px 10px 14px; border: none; border-radius: var(--radius);
+    font-size: 14px; font-weight: 400; background: var(--panel-bg);
+    box-shadow: var(--panel-shadow);
+    outline: none; color: var(--text-primary);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    letter-spacing: -0.01em;
+  }
+  #search-input::placeholder { color: var(--text-tertiary); font-weight: 400; }
+  #search-input:focus { box-shadow: 0 2px 16px rgba(37,99,235,0.15), 0 0 0 2px rgba(37,99,235,0.2); }
+  #search-clear {
+    position: absolute; right: 10px; top: 9px;
+    background: none; border: none; font-size: 18px; color: var(--text-tertiary);
+    cursor: pointer; padding: 0 4px; display: none;
+    line-height: 1;
+  }
+  #search-clear:hover { color: var(--text-secondary); }
+  /* MapLibre popups carry NO z-index of their own, so they painted below
+     #search-container (z-index 2): on a phone the place card's title,
+     "Directions to here" button and its close X rendered underneath the
+     search box and the chip rail, and could not be tapped. This is also
+     the "no X to click on" report from 2026-09-19. 4 clears the search
+     container and #attr-btn (both 2) while staying far below the modal
+     overlays (100 / 1500+). Measured in-ZIM on iPhone, chipdiag2-0846. */
+  .maplibregl-popup { z-index: 4; }
+  #search-results {
+    margin-top: 6px; background: var(--panel-bg); border-radius: var(--radius);
+    box-shadow: var(--panel-shadow);
+    max-height: 320px; overflow-y: auto; display: none;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  }
+  .search-result {
+    padding: 10px 14px; cursor: pointer; border-bottom: 1px solid var(--border);
+    transition: background 0.12s;
+  }
+  .search-result:last-child { border-bottom: none; }
+  .search-result:hover, .search-result.active { background: var(--hover-bg); }
+  .search-result-name { font-size: 13px; color: var(--text-primary); font-weight: 500; letter-spacing: -0.01em; }
+  .search-result-type {
+    font-size: 11px; color: var(--text-tertiary); margin-left: 6px;
+    text-transform: capitalize; font-weight: 400;
+  }
+  .search-no-results {
+    padding: 16px 14px; color: var(--text-tertiary); font-size: 13px; text-align: center;
+  }
+
+  /* --- Wiki panel --- */
+  #wiki-panel {
+    position: absolute; top: calc(10px + var(--top-inset, 0px)); left: 10px;
+    bottom: calc(30px + var(--safe-bottom, 0px)); width: 320px;
+    z-index: 3; background: var(--panel-bg); border-radius: var(--radius);
+    box-shadow: var(--panel-shadow);
+    font-family: var(--ui-font);
+    display: none; flex-direction: column; overflow: hidden;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    transition: opacity 0.2s, transform 0.2s;
+  }
+  #wiki-panel.wiki-visible {
+    display: flex;
+    animation: wiki-slide-in 0.25s ease-out;
+  }
+  @keyframes wiki-slide-in {
+    from { opacity: 0; transform: translateX(-12px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  /* Mobile: bottom sheet, half height, full width */
+  @media (max-width: 600px) {
+    #wiki-panel {
+      /* bottom: 0, not --bottom-inset: the body is already sized to the
+         visible height, so the extra lift floated the sheet 184 px up
+         inside Kiwix. */
+      top: auto; left: 0; right: 0; bottom: 0;
+      width: 100%; max-height: calc(var(--app-height, 100vh) * 0.45);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+      border-radius: var(--radius) var(--radius) 0 0;
+    }
+    #wiki-panel.wiki-visible {
+      animation: wiki-slide-up 0.25s ease-out;
+    }
+    @keyframes wiki-slide-up {
+      from { opacity: 0; transform: translateY(40px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  }
+  #wiki-panel-header {
+    padding: 14px 16px 12px; border-bottom: 1px solid var(--border);
+    flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
+  }
+  #wiki-panel-header span {
+    font-size: 12px; font-weight: 600; color: var(--text-primary);
+    letter-spacing: 0.02em; text-transform: uppercase;
+  }
+  #wiki-panel-count {
+    font-size: 11px; font-weight: 500; color: var(--text-tertiary);
+    background: rgba(0,0,0,0.04); padding: 2px 8px; border-radius: 10px;
+  }
+  #wiki-panel-close {
+    background: none; border: none; font-size: 16px; color: var(--text-tertiary);
+    cursor: pointer; padding: 0 2px; line-height: 1;
+    margin-left: 8px;
+  }
+  #wiki-panel-close:hover { color: var(--text-primary); }
+  #wiki-panel-list {
+    flex: 1; overflow-y: auto; padding: 4px 0;
+    -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  }
+  #wiki-panel-loading {
+    padding: 32px 16px; text-align: center;
+    color: var(--text-tertiary); font-size: 12px;
+    display: none;
+  }
+  .wiki-item {
+    padding: 10px 16px; cursor: pointer;
+    transition: background 0.12s;
+    border-left: 3px solid transparent;
+  }
+  .wiki-item:hover {
+    background: var(--hover-bg);
+    border-left-color: var(--accent);
+  }
+  .wiki-item + .wiki-item { border-top: 1px solid var(--border); }
+  .wiki-item-name {
+    font-size: 13px; font-weight: 600; color: var(--text-primary);
+    letter-spacing: -0.01em; line-height: 1.3;
+  }
+  .wiki-item-meta {
+    display: flex; align-items: baseline; gap: 6px;
+    margin-top: 2px;
+  }
+  .wiki-item-type {
+    font-size: 10px; color: var(--accent); text-transform: uppercase;
+    font-weight: 600; letter-spacing: 0.04em;
+  }
+  .wiki-item-pop {
+    font-size: 10px; color: var(--text-tertiary); font-weight: 500;
+  }
+  .wiki-item-desc {
+    font-size: 12px; color: var(--text-secondary); margin-top: 4px;
+    line-height: 1.45; letter-spacing: -0.005em;
+    overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  }
+  .wiki-item-nodesc .wiki-item-name { margin-bottom: 0; }
+  #wiki-refresh {
+    display: none; flex-shrink: 0;
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    text-align: center;
+  }
+  #wiki-refresh button {
+    background: var(--accent); color: #fff; border: none;
+    border-radius: 6px; padding: 7px 16px; font-size: 12px;
+    font-weight: 600; cursor: pointer; font-family: var(--ui-font);
+    letter-spacing: 0.01em; width: 100%;
+    transition: background 0.15s;
+  }
+  #wiki-refresh button:hover { background: var(--accent-hover); }
+  /* Attribution dialog */
+  #attr-btn {
+    /* Left of MapLibre's bottom-right control stack (the locate button,
+       44 px wide on a coarse pointer): at right:10px its lower third sat
+       under that button on phones. */
+    position: absolute; bottom: calc(58px + var(--safe-bottom, 0px)); right: 64px; z-index: 2;
+    background: rgba(255,255,255,0.65); border: none; border-radius: 4px;
+    padding: 2px 7px; font-size: 11px; cursor: pointer;
+    font-family: var(--ui-font); color: var(--text-secondary);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  }
+  #attr-btn:hover { background: rgba(255,255,255,0.9); color: var(--text-primary); }
+  #attr-overlay {
+    display: none; position: fixed; top: 0; left: 0; right: 0; bottom: var(--bottom-inset, 0px);
+    z-index: 100; background: rgba(0,0,0,0.4);
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  }
+  #attr-dialog {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: #fff; border-radius: var(--radius); padding: 24px 28px;
+    max-width: 480px; width: calc(100% - 40px);
+    max-height: calc(var(--app-height, 100vh) * 0.8); overflow-y: auto;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    font-family: var(--ui-font);
+  }
+  #attr-dialog h2 {
+    margin: 0 0 16px; font-size: 16px; font-weight: 700;
+    color: var(--text-primary); letter-spacing: -0.02em;
+  }
+  #attr-dialog section { margin-bottom: 14px; }
+  #attr-dialog h3 {
+    margin: 0 0 2px; font-size: 12px; font-weight: 700;
+    color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  #attr-dialog p {
+    margin: 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5;
+  }
+  #attr-dialog .license {
+    font-size: 11px; color: var(--text-tertiary); font-style: italic;
+  }
+  #attr-close {
+    position: absolute; top: 12px; right: 14px;
+    background: none; border: none; font-size: 20px; color: var(--text-tertiary);
+    cursor: pointer; line-height: 1;
+  }
+  #attr-close:hover { color: var(--text-primary); }
+
+  .wiki-empty-state {
+    padding: 40px 24px; text-align: center;
+  }
+  .wiki-empty-state-icon {
+    font-size: 28px; margin-bottom: 8px; opacity: 0.3;
+  }
+  .wiki-empty-state-text {
+    font-size: 13px; color: var(--text-tertiary); line-height: 1.5;
+  }
+
+  /* --- Routing --- */
+  #routing-panel {
+    display: none; position: absolute; top: calc(10px + var(--top-inset, 0px)); left: 10px; z-index: 3;
+    width: 280px; max-width: calc(100% - 80px);
+    background: var(--panel-bg); border-radius: var(--radius);
+    box-shadow: var(--panel-shadow);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    font-family: var(--ui-font); font-size: 13px;
+    padding: 12px 14px;
+  }
+  #routing-panel h4 {
+    margin: 0 0 10px; font-size: 13px; font-weight: 600;
+    color: var(--text-primary); display: flex; justify-content: space-between; align-items: center;
+  }
+  #routing-panel h4 button {
+    background: none; border: none; font-size: 18px; cursor: pointer;
+    color: var(--text-tertiary); padding: 0 2px; line-height: 1;
+  }
+  #routing-panel h4 button:hover { color: var(--text-primary); }
+  /* Fold-down on phones: collapse the panel to a single-row header so
+     the driven route stays visible on the map beneath. Tap anywhere
+     on the header (or the chevron) to unfold. Blue route line is
+     preserved — clear() is only called by the × button.
+
+     Minimized-state affordance:
+     - Whole header gets a subtle accent pill background so it
+       clearly reads as "tappable", not "static label".
+     - "Tap to expand" hint appears next to the title.
+     - Close button is HIDDEN while folded so you can't mis-tap it
+       — to close a route, expand first then hit ×. The minimize
+       chevron sat right next to × and the user kept hitting the
+       wrong one.
+  */
+  #routing-panel.minimized #routing-body { display: none; }
+  #routing-panel.minimized h4 {
+    margin: 0; cursor: pointer;
+    padding: 6px 10px;
+    border-radius: var(--radius);
+    background: rgba(37, 99, 235, 0.08);
+    transition: background 0.15s ease;
+  }
+  #routing-panel.minimized h4:hover {
+    background: rgba(37, 99, 235, 0.14);
+  }
+  #routing-panel.minimized h4:active {
+    background: rgba(37, 99, 235, 0.20);
+  }
+  /* Flip the chevron so the glyph hints at "unfold". ▾ when expanded,
+     ▴ when folded. */
+  #routing-panel.minimized #routing-minimize {
+    transform: rotate(180deg); display: inline-block;
+    color: var(--accent, #2563eb);
+    font-size: 20px;  /* bigger so the affordance is obvious */
+  }
+  /* Hide the close button while folded — expand first to close. */
+  #routing-panel.minimized #routing-close { display: none; }
+  /* Show "Tap to expand" hint inline. The hint is in DOM all the
+     time; CSS only reveals it in the minimized state so we don't
+     have to mutate the DOM on every fold/unfold. */
+  #routing-panel #routing-expand-hint { display: none; }
+  #routing-panel.minimized #routing-expand-hint {
+    display: inline; margin-left: 8px;
+    font-weight: 400; font-size: 12px;
+    color: var(--text-secondary, #555);
+  }
+  /* Mobile-ish: auto-compact when narrow. Keeps the directions usable
+     when driving + wanting to see the road. */
+  @media (max-width: 640px) {
+    #routing-panel {
+      left: 8px; right: 8px; width: auto; max-width: none;
+      max-height: 60vh; overflow-y: auto;
+    }
+    #routing-panel.minimized { max-height: none; overflow: visible; }
+  }
+  .routing-field {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  }
+  .routing-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  }
+  .routing-dot.origin { background: #22c55e; }
+  .routing-dot.dest { background: #ef4444; }
+  .routing-field span {
+    color: var(--text-secondary); font-size: 12px; flex: 1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .routing-field span.set { color: var(--text-primary); font-weight: 500; }
+  .routing-field-group { position: relative; margin-bottom: 6px; }
+  .routing-field-row { display: flex; align-items: center; gap: 6px; }
+  .routing-input {
+    flex: 1; min-width: 0; font: inherit; font-size: 12px;
+    padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px;
+    background: var(--panel-bg); color: var(--text-primary); outline: none;
+  }
+  .routing-input:focus { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
+  .routing-icon-btn {
+    flex-shrink: 0; background: none; border: 1px solid var(--border); border-radius: 4px;
+    padding: 3px 7px; cursor: pointer; font-size: 14px; color: var(--text-secondary);
+  }
+  .routing-icon-btn:hover { color: var(--text-primary); border-color: #2563eb; }
+  .routing-results {
+    display: none; position: absolute; top: 100%; left: 18px; right: 0;
+    max-height: 220px; overflow-y: auto; z-index: 20; margin-top: 2px;
+    background: var(--panel-bg); border: 1px solid var(--border); border-radius: 6px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  }
+  .routing-result-row {
+    padding: 6px 10px; cursor: pointer; font-size: 12px;
+    border-bottom: 1px solid var(--border); display: flex;
+    justify-content: space-between; gap: 8px; align-items: baseline;
+  }
+  .routing-result-row:last-child { border-bottom: none; }
+  .routing-result-row:hover,
+  .routing-result-row.active { background: var(--hover-bg); }
+  .routing-result-text {
+    flex: 1; min-width: 0;
+  }
+  .routing-result-name {
+    color: var(--text-primary); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .routing-result-sub {
+    color: var(--text-tertiary); font-size: 11px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    margin-top: 1px;
+  }
+  .routing-result-meta {
+    color: var(--text-tertiary); font-size: 11px; flex-shrink: 0;
+  }
+  #routing-result {
+    display: none; margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+  #routing-result .route-stat {
+    display: flex; justify-content: space-between; margin-bottom: 4px;
+  }
+  #routing-result .route-stat label {
+    color: var(--text-secondary); font-size: 11px;
+  }
+  #routing-result .route-stat value {
+    color: var(--text-primary); font-weight: 600; font-size: 13px;
+  }
+  #route-roads {
+    margin-top: 8px; max-height: 180px; overflow-y: auto;
+    font-size: 12px;
+  }
+  #route-roads .road-row {
+    display: flex; justify-content: space-between; gap: 8px;
+    padding: 3px 0; border-bottom: 1px dashed var(--border);
+  }
+  #route-roads .road-row:last-child { border-bottom: none; }
+  #route-roads .road-name {
+    color: var(--text-primary); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  #route-roads .road-name.unnamed {
+    color: var(--text-secondary); font-style: italic;
+  }
+  #route-roads .road-dist {
+    color: var(--text-secondary); flex-shrink: 0;
+  }
+  #routing-clear {
+    display: none; margin-top: 8px; width: 100%;
+    padding: 6px; border: 1px solid var(--border); border-radius: 6px;
+    background: transparent; cursor: pointer; font-family: var(--ui-font);
+    font-size: 12px; color: var(--text-secondary);
+  }
+  #routing-clear:hover { background: var(--hover-bg); color: var(--text-primary); }
+  #routing-go-row {
+    display: none; margin-top: 8px; gap: 6px;
+  }
+  #routing-go-row.visible { display: flex; }
+  #routing-go-row button {
+    flex: 1; padding: 8px 6px; border: none; border-radius: 6px;
+    background: #2563eb; cursor: pointer; font-family: var(--ui-font);
+    font-size: 13px; font-weight: 600; color: #fff;
+    letter-spacing: 0.3px; min-width: 0;
+  }
+  #routing-go-row button:hover { background: #1d4ed8; }
+  #routing-go-row button:active { background: #1e40af; }
+  #routing-go-row button.active-mode { background: #b91c1c; }
+  #routing-go-row button.active-mode:hover { background: #991b1b; }
+  #routing-go-row button.hidden-mode { display: none; }
+  /* --- Driving mode HUD --- */
+  #drive-hud {
+    display: none; position: absolute; top: calc(10px + var(--top-inset, 0px)); left: 10px; right: 10px;
+    z-index: 5; pointer-events: auto;
+    background: rgba(17, 24, 39, 0.92); color: #fff;
+    border-radius: 12px; padding: 12px 14px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    font-family: var(--ui-font);
+  }
+  #drive-hud.visible { display: block; }
+  #drive-hud-row {
+    display: flex; align-items: center; gap: 12px;
+  }
+  #drive-arrow {
+    width: 44px; height: 44px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.1); border-radius: 10px;
+    font-size: 28px; line-height: 1;
+    transition: transform 0.3s ease;
+  }
+  #drive-text { flex: 1; min-width: 0; }
+  #drive-dist {
+    font-size: 22px; font-weight: 700; line-height: 1.1;
+  }
+  #drive-street {
+    font-size: 13px; color: rgba(255,255,255,0.78);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    margin-top: 2px;
+  }
+  #drive-exit,
+  #drive-fullscreen,
+  #drive-recenter {
+    flex-shrink: 0; background: rgba(255,255,255,0.12);
+    border: none; border-radius: 8px; color: #fff;
+    font-family: var(--ui-font); font-size: 12px; font-weight: 600;
+    padding: 8px 12px; cursor: pointer; letter-spacing: 0.5px;
+  }
+  #drive-exit:hover,
+  #drive-fullscreen:hover,
+  #drive-recenter:hover { background: rgba(255,255,255,0.22); }
+  #drive-fullscreen,
+  #drive-recenter { font-size: 18px; padding: 4px 10px; line-height: 1; }
+  /* When fullscreen is active, swap the glyph to an X and brighten it
+     so the exit affordance is obvious at a glance. */
+  html.drive-fullscreen-active #drive-fullscreen {
+    background: rgba(239, 68, 68, 0.85);
+  }
+  html.drive-fullscreen-active #drive-fullscreen:hover {
+    background: rgba(220, 38, 38, 0.95);
+  }
+  /* Pseudo-fullscreen for browsers without the Fullscreen API (notably
+     iOS Safari < 16.4, and iOS Safari in practice where requestFullscreen
+     is exposed but rejects). iOS only hides its URL bar when the page is
+     actually scrollable AND the user scrolls — so we make the body 1px
+     taller than the viewport, pin the map + HUD to `position: fixed`, and
+     programmatically scroll to y=1. The visible chrome-less area is the
+     fixed layer; the 1px of scroll is invisible. */
+  html.drive-fullscreen-pseudo,
+  html.drive-fullscreen-pseudo body {
+    height: auto !important;
+    overflow: visible !important;
+    position: static !important;
+  }
+  html.drive-fullscreen-pseudo body {
+    min-height: calc(100vh + 1px);
+  }
+  html.drive-fullscreen-pseudo #map {
+    position: fixed !important;
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: 100vw; height: 100dvh;
+  }
+  html.drive-fullscreen-pseudo #drive-hud {
+    position: fixed !important;
+  }
+  #drive-hud-eta {
+    margin-top: 8px; padding-top: 8px;
+    border-top: 1px solid rgba(255,255,255,0.12);
+    display: flex; justify-content: space-between;
+    font-size: 12px; color: rgba(255,255,255,0.78);
+  }
+  #drive-hud-eta strong {
+    color: #fff; font-weight: 600;
+  }
+  #drive-status {
+    display: none; margin-top: 8px; padding: 6px 8px;
+    background: rgba(234, 179, 8, 0.18); color: #fde68a;
+    border-radius: 6px; font-size: 12px;
+    align-items: center; justify-content: space-between; gap: 8px;
+  }
+  #drive-status.visible { display: flex; }
+  #drive-reroute-btn {
+    flex: 0 0 auto; font: inherit; font-weight: 600;
+    padding: 6px 10px; border-radius: 5px; border: none;
+    background: #2563eb; color: #fff; cursor: pointer;
+  }
+  #drive-reroute-btn:hover { background: #1d4ed8; }
+  #drive-reroute-btn:disabled { opacity: 0.6; cursor: default; }
+  #routing-status {
+    color: var(--text-tertiary); font-size: 12px; margin-top: 8px;
+    min-height: 16px;
+  }
+  /* Progress bar — slim accent-coloured pill below the status line.
+     Hidden by default; .visible reveals + starts the indeterminate
+     stripe. Determinate mode (real % from cell loads) kicks in by
+     setting --progress on the inner bar instead of running the
+     keyframes. */
+  #routing-progress {
+    position: relative; height: 3px; margin: 6px 0 2px;
+    border-radius: 999px; background: rgba(37,99,235,0.12);
+    overflow: hidden; opacity: 0;
+    transition: opacity .15s ease;
+  }
+  #routing-progress.visible { opacity: 1; }
+  #routing-progress-bar {
+    position: absolute; left: 0; top: 0; height: 100%;
+    width: var(--progress, 35%);
+    background: linear-gradient(90deg,
+      transparent 0%,
+      var(--accent, #2563eb) 35%,
+      var(--accent, #2563eb) 65%,
+      transparent 100%);
+    border-radius: 999px;
+    animation: routing-progress-slide 1.4s cubic-bezier(.4,.0,.2,1) infinite;
+  }
+  #routing-progress.determinate #routing-progress-bar {
+    /* When we have a real fraction, stop the slide and grow the bar
+       from the left edge instead. */
+    animation: none;
+    left: 0; right: auto;
+    width: var(--progress, 0%);
+    transition: width .25s ease;
+  }
+  @keyframes routing-progress-slide {
+    0%   { left: -35%; }
+    100% { left: 100%; }
+  }
+  .routing-marker {
+    width: 24px; height: 24px; cursor: pointer;
+  }
+  .routing-marker-origin {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #22c55e; border: 3px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+  .routing-marker-dest {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #ef4444; border: 3px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+  /* Driving-mode "you are here" dot. Larger + pulsing so it's easy to
+     spot at driving speeds against busy map tiles. */
+  .drive-user-dot {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: #2563eb; border: 3px solid #fff;
+    box-shadow: 0 0 0 4px rgba(37,99,235,0.25),
+                0 1px 6px rgba(0,0,0,0.4);
+    pointer-events: none;
+  }
+  /* Search-pin popup with inline "Directions to here" CTA. Routing is
+     now a one-tap hop from any search result. */
+  .pin-popup { min-width: 180px; max-width: 300px; }
+  .pin-popup .pin-name {
+    font-family: var(--ui-font); font-weight: 600;
+    font-size: 14px; color: var(--text-primary);
+    margin: 0 0 4px; line-height: 1.3; word-wrap: break-word;
+  }
+  .pin-popup .pin-brand {
+    font-family: var(--ui-font); font-size: 12px;
+    color: var(--text-secondary); margin: 0 0 4px;
+  }
+  .pin-popup .pin-cat {
+    font-family: var(--ui-font); font-size: 11px;
+    text-transform: capitalize; color: var(--text-tertiary);
+    margin: 0 0 8px;
+  }
+  .pin-popup .pin-contact {
+    display: flex; gap: 10px; flex-wrap: wrap;
+    margin: 0 0 10px; align-items: center;
+  }
+  .pin-popup .pin-link {
+    font-size: 16px; text-decoration: none;
+    padding: 4px 6px; border-radius: 6px;
+    background: var(--hover-bg); color: var(--accent);
+    line-height: 1; min-width: 24px; text-align: center;
+  }
+  .pin-popup .pin-link:hover { background: rgba(37,99,235,0.10); }
+  .pin-popup .pin-directions {
+    display: block; width: 100%;
+    padding: 8px 12px; font-family: var(--ui-font);
+    font-size: 13px; font-weight: 600;
+    background: var(--accent); color: #fff;
+    border: none; border-radius: 6px; cursor: pointer;
+  }
+  .pin-popup .pin-directions:hover { background: var(--accent-hover); }
+  .pin-popup .pin-directions:active { transform: translateY(1px); }
+
+  /* --- Touch targets (docs/mobile-browser-review.md §C) ---
+     On a coarse pointer every icon button gets a 44 px box — padding plus
+     negative margins so the rows keep their height — inputs go to 16 px
+     (iOS Safari zooms into anything smaller) and rows get taller. */
+  @media (pointer: coarse) {
+    #routing-panel h4 button, #wiki-panel-close {
+      min-width: 44px; min-height: 44px; box-sizing: border-box; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    #routing-panel h4 button { margin: -12px 0; }
+    #routing-close { margin-right: -8px !important; }
+    #routing-panel.minimized h4 button { margin: -6px 0; }
+    #routing-panel.minimized #routing-minimize { display: inline-flex; }
+    #wiki-panel-close { margin: -14px -12px -12px 0; }
+    #search-clear {
+      top: -4px; right: 0; width: 44px; height: 44px; padding: 0;
+      line-height: 44px; text-align: center;
+    }
+    #search-input { font-size: 16px; }
+    .routing-input { font-size: 16px; min-height: 44px; padding: 8px 10px; }
+    .routing-icon-btn { min-width: 44px; min-height: 44px; padding: 0 8px; }
+    #controls button { min-height: 44px; padding: 12px 16px; font-size: 13px; }
+    #find-chips .find-chip { min-height: 44px; padding: 0 14px; }
+    #routing-go-row button { min-height: 44px; }
+    .maplibregl-ctrl-group button { width: 44px; height: 44px; }
+    #attr-btn { padding: 8px 12px; font-size: 12px; }
+    /* Fingers scroll panels; a pinch on one must not zoom the page. */
+    #routing-panel, #wiki-panel, #search-container, #drive-hud, #preview-banner,
+    #attr-dialog, #controls { touch-action: pan-x pan-y; }
+    /* backdrop-filter over an animating WebGL canvas is GPU work a weak
+       phone notices; the panels are opaque enough without it. */
+    #preview-banner, #info, #controls, #search-input, #search-results,
+    #wiki-panel, #attr-btn, #routing-panel, #drive-hud {
+      backdrop-filter: none; -webkit-backdrop-filter: none;
+    }
+  }
+  /* Landscape phones (§C): the side panels start below the search box
+     instead of covering it, and the dropdown stops above the bottom. */
+  @media (max-height: 500px) and (min-width: 601px) {
+    #wiki-panel, #routing-panel {
+      top: calc(58px + var(--top-inset, 0px));
+      max-height: calc(var(--app-height, 100vh) - 66px - var(--top-inset, 0px));
+      overflow-y: auto;
+    }
+    #wiki-panel { bottom: auto; }
+  }
+  @media (max-height: 500px) {
+    #search-results { max-height: calc(var(--app-height, 100vh) - 130px); }
+  }
+  /* The build stamp is a debugging aid; on a phone it sat over the top
+     band of the search box (§C). ?debug=1 keeps it. */
+  @media (max-width: 480px) {
+    body:not(.sz-debug) #viewer-build-stamp { display: none !important; }
+  }
+</style>
+</head>

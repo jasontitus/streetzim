@@ -21,7 +21,8 @@ and cannot gain a new rules file:
   * ``resources/viewer/places.html`` ``CATEGORIES`` (block ``chip-rules``):
     the full rules, used by the legacy client-side filter on ZIMs built
     without per-chip files.
-  * ``resources/viewer/index.html`` ``EXPLORE_CHIPS`` (block ``chip-rail``):
+  * ``resources/viewer/index.html`` ``EXPLORE_CHIPS`` (block ``chip-rail``,
+    edited in ``resources/viewer/src/index/220-explore-menu-and-chip-rail.js``):
     ids, labels and emoji for the map's chip rail.
 ``tests/chip_rules_js.test.mjs`` fails when either copy drifts from this
 list, so change them in the same commit (then run

@@ -135,7 +135,7 @@ resources/viewer/ (MapLibre app) ───┤
 | path | what |
 |---|---|
 | `create_osm_zim.py` | the builder (single entry point) |
-| `resources/viewer/` | the viewer shipped inside every ZIM (`index.html`, `places.html`, `routing-worker.js`) |
+| `resources/viewer/` | the viewer shipped inside every ZIM (`index.html`, built from `src/index/` by `tools/build_viewer.py`; `places.html`; `routing-worker.js`) |
 | `resources/tilemaker/` | tilemaker config and Lua profile |
 | `cloud/` | Python modules the builder imports (`chip_rules`, `search_shards`, `repackage_zim`, …), the validator, and operations scripts |
 | `streetzim/` | importable building blocks: `streetzim.routing` (graph formats, spatial cells, reference routers) |
