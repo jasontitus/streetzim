@@ -198,8 +198,7 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
 
     if p1.hw_count == 0:
         print("    Warning: no highway features found, skipping routing graph")
-        # Caller unpacks a 2-tuple; a bare None here aborted the whole
-        # build with a TypeError after the expensive tile steps.
+        # None means "no routing": the caller skips the routing phase.
         return None
 
     # Find interior refs that appear in 2+ ways.

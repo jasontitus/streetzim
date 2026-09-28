@@ -78,7 +78,7 @@ def render() -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
+    ap = argparse.ArgumentParser(description=next(iter((__doc__ or "").splitlines()), ""))
     ap.add_argument("--check", action="store_true")
     args = ap.parse_args()
     text = render()

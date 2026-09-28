@@ -575,9 +575,11 @@ def create_zim(
                       metadata=metadata, illustration=illustration,
                       has_satellite=bool(satellite_dir and os.path.isdir(satellite_dir)),
                       has_terrain=bool(terrain_dir and os.path.isdir(terrain_dir)),
-                      # wiki_cross_refs are OSM's own wikipedia=/wikidata=
-                      # tags (ODbL), not Wikipedia or Wikidata content.
-                      has_wiki=bool(wikidata_data or bundle_wiki_articles))
+                      # wiki_cross_refs alone are OSM's wikipedia=/wikidata=
+                      # tags (ODbL); articles are bundled only from them.
+                      # Same condition as map-config's hasWikiArticles.
+                      has_wiki=bool(wikidata_data or (bundle_wiki_articles
+                                                      and wiki_cross_refs)))
         _add_viewer(creator, MapItem, maplibre_js_path=maplibre_js_path,
                     maplibre_css_path=maplibre_css_path,
                     viewer_html_path=viewer_html_path, map_config=map_config,

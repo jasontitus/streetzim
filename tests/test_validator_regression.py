@@ -506,3 +506,43 @@ def test_large_region_without_z0_tile_still_fails(tmp_path: Path):
     zim = _zim_with_tiles(tmp_path, tiles, bbox=(5.42, 42.74, 9.42, 44.74))
     status, detail = validate_zim._chk_vector_tiles(Archive(str(zim)))
     assert status == "fail", detail
+
+
+# -----------------------------------------------------------------------
+# The routing check names the SZRG version of a monolithic graph, and
+# flags the legacy ones (v2/v3, and v5 by its SZGM companion), so the
+# catalog can be surveyed before a reader branch is removed
+# (docs/formats.md, "Version support and retirement").
+# -----------------------------------------------------------------------
+def _routing_zim(tmp_path: Path, version: int, geoms: bool = False) -> Path:
+    import struct
+    from libzim.writer import Creator
+    zim = tmp_path / f"szrg{version}.zim"
+    with Creator(str(zim)) as cc:
+        for k, v in (("Title", "t"), ("Description", "d"), ("Language", "en"),
+                     ("Creator", "x"), ("Publisher", "x"), ("Date", "2026-09-28"),
+                     ("Name", "n")):
+            cc.add_metadata(k, v)
+        cc.add_item(_mk_item("index.html", "text/html", b"<html></html>"))
+        cc.set_mainpath("index.html")
+        cc.add_item(_mk_item("map-config.json", "application/json",
+                             json.dumps({"bbox": [0, 0, 1, 1], "hasRouting": True}).encode()))
+        header = b"SZRG" + struct.pack("<7I", version, 0, 0, 0, 0, 0, 0)
+        cc.add_item(_mk_item("routing-data/graph.bin", "application/octet-stream",
+                             header + b"\x00" * 64))
+        if geoms:
+            cc.add_item(_mk_item("routing-data/graph-geoms.bin",
+                                 "application/octet-stream", b"SZGM" + b"\x00" * 12))
+    return zim
+
+
+@pytest.mark.parametrize("version,geoms,status", [
+    (4, False, "pass"), (2, False, "warn"), (3, False, "warn"), (5, True, "warn"),
+])
+def test_routing_check_reports_szrg_version(tmp_path, version, geoms, status):
+    from libzim.reader import Archive
+    arc = Archive(str(_routing_zim(tmp_path, version, geoms)))
+    got, detail = validate_zim._chk_routing_kiwix_compat(arc, {"hasRouting": True})
+    assert got == status, detail
+    assert f"SZRG v{version}" in detail
+    assert ("legacy" in detail) == (status == "warn")

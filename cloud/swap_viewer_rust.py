@@ -173,8 +173,6 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
     # ship a ZIM whose Find page has no chips at all).
     cat_manifest: dict | None = None
     cat_manifest_title = "Category Index Manifest"
-    # Read by the entry walk below, which runs in every mode — a
-    # --reshard-search-only run never enters the chip preflight that sets it.
     if reshard_chips:
         if not src.has_entry_by_path(CAT_MANIFEST):
             raise SystemExit(f"--reshard-chips: {src_path} has no {CAT_MANIFEST}")

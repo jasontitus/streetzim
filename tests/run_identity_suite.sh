@@ -4,8 +4,8 @@
 #
 # Assumes the golden corpora were generated against the current v4 ZIMs
 # via ``tests/generate_golden_corpus.py``. A candidate build is any ZIM
-# whose routing graph SHOULD produce byte-identical routes — e.g., a v5
-# split-graph rebuild of the same region.
+# whose routing graph SHOULD produce byte-identical routes — e.g., a
+# spatial (--spatial-chunk-scale) rebuild of the same region.
 #
 # Usage:
 #   # Generate golden once (takes ~20 min on 20-core Mac):

@@ -111,9 +111,10 @@ Geometries move to `routing-data/graph-geoms.bin`:
 | 16 | u32[G+1] | geom_offsets |
 | 16 + 4(G+1) | u8[B] | geom_blob |
 
-No writer remains: `--split-graph` (builder and `cloud/repackage_zim.py`) was
-never used in production and now fails with a message. Readers keep v5
-support in case a published file carries it.
+No writer remains: `--split-graph` (builder and `cloud/repackage_zim.py`)
+was not used by the production wrappers and now fails with a message.
+Readers keep v5 support in case a published file carries one;
+`cloud/validate_zim.py` flags any that does.
 
 ### SZCI v3 + SZRC v2 — spatial cells (`--spatial-chunk-scale N`, what production ships)
 
@@ -168,7 +169,7 @@ valid with SZCI v3 (it needs `base_node`).
 - **SZCI v1**: v3 header with version 1, then `nodes_scaled` i32[2N] in
   original node order, then 20-byte cell records (no `base_node`), then
   names.
-- **SZCI v2** (written only by the retired `attic/upgrade_spatial_zim.py`): 40-byte header (the seven
+- **SZCI v2** (written by `build_spatial` from 2026-05-03 to 2026-06-02, and by the retired `attic/upgrade_spatial_zim.py`): 40-byte header (the seven
   v1 fields, then u32 `num_node_shards`, u32 `nodes_per_shard`), no inline
   nodes; coordinates live in `routing-data/nodes-scaled-NNN.bin` (raw i32
   lat/lon pairs).
@@ -231,9 +232,10 @@ matter for users; the Python ones are reference readers for tests and
 | SZRG v5 + SZGM | `510-…`: `attachGeoms` and the "v5 without companion" path; `520-routing-graph-load-and-snap.js`: the v5-split fallback; `540-routing-worker-bridge.js`: waiting for SZGM before drawing | `reader.py`: `parse_szgm_bytes`, `SZRG.attach_geoms`, the v5 branches of `load_from_zim` / `load_from_file`; `tests/test_szrg_v5_split.py` + `tests/v4_to_v5_convert.py` |
 | SZCI v1/v2, SZRC v1 | `510-…`: the `version === 1` / `version === 2` branches of the spatial index and cell parsers, `loadNodeShards` (`nodes-scaled-NNN.bin`); `520-…`: the node-shard fetch; `routing-worker.js`: the same branches in its SZCI/SZRC parsers and its shard loader | `streetzim/routing/spatial.py`: the v1/v2 branches of `parse_szci`, the v1 branch of `parse_szrc`, `SZRCCell.cell_nodes_global`, and the non-v3 paths of `SZCIIndex.cell_for_node` / `SpatialGraph.node_coords_e7` / `nodes_scaled` |
 
-`cloud/validate_zim.py` reports which layout a ZIM carries ("legacy
-spatial SZCI vN"), so run it over the live catalog before removing a
-reader branch. The PWA serves the current viewer to old files, so a
+`cloud/validate_zim.py` reports which layout a ZIM carries, and warns on
+the legacy ones ("legacy spatial SZCI vN", "legacy monolithic SZRG vN"; v5
+also by its `graph-geoms` companion), so run it over the live catalog before
+removing a reader branch. The PWA serves the current viewer to old files, so a
 reader branch is only dead when no published ZIM needs it.
 
 ## Other ZIM entries

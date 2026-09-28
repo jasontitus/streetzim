@@ -87,7 +87,7 @@ def du(path: Path) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
+    ap = argparse.ArgumentParser(description=next(iter((__doc__ or "").splitlines()), ""))
     ap.add_argument("--json", required=True, help="write the measurements here")
     ap.add_argument("--watch", action="append", default=[], help="folder to measure (repeat)")
     ap.add_argument("--interval", type=float, default=2.0)

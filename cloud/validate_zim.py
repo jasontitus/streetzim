@@ -1144,7 +1144,28 @@ def _chk_routing_kiwix_compat(arc, cfg) -> tuple[str, str]:
     if has_monolithic:
         mono_mb = mono_bytes / (1024 * 1024)
         extra = f" (+ {chunk_count} chunks for PWA)" if chunk_count else ""
-        return ("pass", f"monolithic graph.bin ({mono_mb:.0f} MB){extra}")
+        # Which SZRG version (docs/formats.md, "Version support"): read the
+        # header from the first chunk, or from graph.bin when it is small
+        # enough to load; v5 is also recognisable by its SZGM companion.
+        version = None
+        try:
+            src = ("routing-data/graph-chunk-0000.bin" if chunk_count
+                   else "routing-data/graph.bin")
+            item = arc.get_entry_by_path(src).get_item()
+            if chunk_count or item.size <= 256 * 1024 * 1024:
+                head = bytes(memoryview(item.content)[:8])
+                if head[:4] == b"SZRG":
+                    version = int.from_bytes(head[4:8], "little")
+        except Exception:
+            version = None
+        if (arc.has_entry_by_path("routing-data/graph-geoms.bin")
+                or arc.has_entry_by_path("routing-data/graph-geoms-chunk-manifest.json")):
+            version = 5
+        vtxt = f"SZRG v{version}" if version else "SZRG (version not read)"
+        if version in (2, 3, 5):
+            return ("warn", f"legacy monolithic {vtxt} graph.bin "
+                            f"({mono_mb:.0f} MB){extra}")
+        return ("pass", f"monolithic {vtxt} graph.bin ({mono_mb:.0f} MB){extra}")
 
     # Shape 3: chunked-only. Always bad.
     if chunk_count > 0:
