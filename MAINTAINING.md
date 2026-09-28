@@ -181,15 +181,16 @@ scripts that may be running on the production host (see
 - **trap:** `cloud/regions.tsv` still has `switzerland-nosat*` rows with no
   matching `region-variants.tsv` rows. A full registry run would build them as
   full satellite z14 ZIMs under "light" names.
-- **Monolithic files.** `streetzim/zim_writer.py` (`create_zim`, ~1.9k
-  lines), `create_osm_zim.py`'s `main()` (~1.1k lines) and
-  `resources/viewer/index.html` (~11k lines). The viewer's BEGIN/END blocks
-  (`chip-shards`, `search-shards`, `chip-rules`, `chip-rail`) are the seams for
-  splitting it. A split must keep shipping the same three slot files (inline
-  at build time), because published ZIMs can't gain new entries.
-- **Legacy format readers.** SZRG v2/v3, SZCI v1/v2 and SZRC v1 can go once
-  the continent ZIMs built before 2026-06-02 are rebuilt (see the retirement
-  table in formats.md). The `--split-graph` writer (v5) is unused.
+- **Large units.** `create_osm_zim.py`'s `main()` (~1.1k lines) is the
+  biggest remaining function; `create_zim` is now a sequence of phase
+  functions in `streetzim/zim_writer.py` (none over ~250 lines), and
+  `index.html` is edited as parts in `resources/viewer/src/index/`.
+  `places.html` (2.5k) and `routing-worker.js` (1.7k) are unsplit.
+- **Legacy format readers.** The builder writes only current formats
+  (SZRG v4, SZCI v3 + SZRC v2); the v5 writer and the SZCI v2 upgrader are
+  retired. The readers for SZRG v2/v3/v5, SZCI v1/v2 and SZRC v1 stay while
+  published ZIMs carry them; formats.md lists every branch to delete and
+  when.
 - **`streetzim-meta.json` `routingGraph.version`** reports the intermediate
   SZRG version even when the ZIM ships SZCI v3 cells. `map-config.json` has no
   routing-format field.

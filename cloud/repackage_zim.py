@@ -57,44 +57,6 @@ from cloud.chip_shards import (  # noqa: E402
 LEGACY_CHIP_REPLACED_BY = {"restaurants": "food", "cafes": "food"}
 
 
-def _v4_to_v5_bufs(v4_buf: bytes) -> tuple[bytes, bytes]:
-    """Split a v4 SZRG buffer into the v5 main + SZGM companion. Mirrors
-    extract_routing_graph(split_graph=True) so repackaged ZIMs are
-    format-identical to freshly-built ones."""
-    import struct
-    if v4_buf[:4] != b"SZRG":
-        raise ValueError("Not an SZRG buffer")
-    version, num_nodes, num_edges, num_geoms, geom_bytes, num_names, names_bytes = \
-        struct.unpack_from("<7I", v4_buf, 4)
-    if version != 4:
-        raise ValueError(f"expected SZRG v4 to upgrade; got v{version}")
-
-    edge_stride = 5
-    off = 32
-    nodes_len = num_nodes * 2 * 4
-    adj_len = (num_nodes + 1) * 4
-    edges_len = num_edges * edge_stride * 4
-    geom_offsets_len = (num_geoms + 1) * 4
-    name_offsets_len = (num_names + 1) * 4
-
-    nodes = v4_buf[off:off + nodes_len]; off += nodes_len
-    adj = v4_buf[off:off + adj_len]; off += adj_len
-    edges = v4_buf[off:off + edges_len]; off += edges_len
-    geom_offsets = v4_buf[off:off + geom_offsets_len]; off += geom_offsets_len
-    geom_blob = v4_buf[off:off + geom_bytes]; off += geom_bytes
-    name_offsets = v4_buf[off:off + name_offsets_len]; off += name_offsets_len
-    names_blob = v4_buf[off:off + names_bytes]
-
-    main_header = b"SZRG" + struct.pack("<7I",
-                                        5, num_nodes, num_edges,
-                                        num_geoms, 0,
-                                        num_names, names_bytes)
-    main_buf = main_header + nodes + adj + edges + name_offsets + names_blob
-    szgm_buf = (b"SZGM" + struct.pack("<3I", 1, num_geoms, geom_bytes)
-                + geom_offsets + geom_blob)
-    return main_buf, szgm_buf
-
-
 def _chunk_bytes_inmem(buf: bytes, chunk_size: int,
                        prefix: str) -> tuple[list[tuple[str, bytes]], dict]:
     """Chunk an in-memory buffer, returning (entries, manifest) where
@@ -326,23 +288,15 @@ def _emit_spatial_graph(creator, graph_path: str | Path, *,
 
 
 def _emit_upgraded_graph(creator, graph_bytes: bytes, *,
-                         split_graph: bool, chunk_graph_mb: int,
-                         passthrough_cls) -> None:
-    """Write the (possibly split, possibly chunked) routing graph entries
-    to an open Creator. Guards: split_graph requires a v4 source; chunking
-    operates on whatever main/companion files we just produced."""
+                         chunk_graph_mb: int, passthrough_cls) -> None:
+    """Write the (possibly chunked) routing graph entries to an open
+    Creator. (The SZRG v5 split upgrade was retired; see docs/formats.md.)"""
     import json
-    import struct
 
-    if split_graph:
-        main_buf, szgm_buf = _v4_to_v5_bufs(graph_bytes)
-        print(f"  → v5 split: main {len(main_buf)/1e6:.1f} MB + geoms {len(szgm_buf)/1e6:.1f} MB")
-    else:
-        main_buf = graph_bytes
-        szgm_buf = None
-        # Sanity: the source needs to be a SZRG of any supported version
-        if main_buf[:4] != b"SZRG":
-            print("  warning: routing graph doesn't start with SZRG magic")
+    main_buf = graph_bytes
+    # Sanity: the source needs to be a SZRG of any supported version
+    if main_buf[:4] != b"SZRG":
+        print("  warning: routing graph doesn't start with SZRG magic")
 
     chunk_size = chunk_graph_mb * 1024 * 1024 if chunk_graph_mb > 0 else 0
 
@@ -390,22 +344,11 @@ def _emit_upgraded_graph(creator, graph_bytes: bytes, *,
         manifest_name="routing-data/graph-chunk-manifest.json",
         manifest_title="Routing Graph Manifest",
     )
-    if szgm_buf is not None:
-        emit_blob(
-            "routing-data/graph-geoms.bin",
-            "Routing Graph Geoms",
-            "application/octet-stream",
-            szgm_buf,
-            chunk_prefix="graph-geoms-chunk",
-            manifest_name="routing-data/graph-geoms-chunk-manifest.json",
-            manifest_title="Routing Geoms Manifest",
-        )
 
 
 def repackage(src_path: str, dst_path: str,
               swap_viewer: bool = True,
               uncompress_graph: bool = True,
-              split_graph: bool = False,
               chunk_graph_mb: int = 0,
               spatial_chunk_scale: int = 0,
               split_hot_search_chunks_mb: int = 0,
@@ -444,7 +387,6 @@ def repackage(src_path: str, dst_path: str,
                 f"poi.json/park.json nor chip files to re-shard")
     print(f"  swap viewer: {swap_viewer}")
     print(f"  uncompress routing-data/graph.bin: {uncompress_graph}")
-    print(f"  split graph (v5): {split_graph}")
     print(f"  chunk graph MB:   {chunk_graph_mb}")
     print(f"  spatial chunk scale: {spatial_chunk_scale} "
           f"(0=disabled; 10 = 0.1° cells, 1 = 1° cells)")
@@ -631,11 +573,10 @@ def repackage(src_path: str, dst_path: str,
         print("  warning: no suitable main path found — output ZIM may "
               "fail Kiwix Desktop's book-open check")
 
-    # If we're upgrading the routing-data layout (split to v5, byte-
-    # chunked, or spatial-chunked), skip the original graph.bin in the
-    # passthrough and emit the new entries after. Capture its bytes first.
-    upgrade_graph = (split_graph
-                     or chunk_graph_mb > 0
+    # If we're upgrading the routing-data layout (byte-chunked or
+    # spatial-chunked), skip the original graph.bin in the passthrough and
+    # emit the new entries after. Capture its bytes first.
+    upgrade_graph = (chunk_graph_mb > 0
                      or spatial_chunk_scale > 0
                      or unchunk_graph)
     captured_graph_bytes: bytes | None = None
@@ -797,8 +738,7 @@ def repackage(src_path: str, dst_path: str,
                             gf.write(bytes(item.content))
                     else:
                         captured_graph_bytes = bytes(item.content)
-                elif path.startswith("routing-data/graph-geoms") \
-                        and not split_graph:
+                elif path.startswith("routing-data/graph-geoms"):
                     # A v5-split source: no graph-layout upgrade here can
                     # carry its geoms companion — --unchunk-graph emits
                     # only graph.bin (routes can't be drawn), and
@@ -808,7 +748,7 @@ def repackage(src_path: str, dst_path: str,
                     raise SystemExit(
                         f"source carries {path} (SZRG v5 split layout); "
                         f"graph-layout upgrades of a v5-split source are not "
-                        f"supported. Re-run without --split-graph / "
+                        f"supported. Re-run without "
                         f"--chunk-graph-mb / --spatial-chunk-scale / "
                         f"--unchunk-graph (routing passes through unchanged), "
                         f"or regenerate from a v4 source.")
@@ -1012,7 +952,7 @@ def repackage(src_path: str, dst_path: str,
                 "no routing-data/graph.bin in source — nothing to upgrade "
                 "(source is already spatial or has no routing). Re-run "
                 "without --spatial-chunk-scale / --chunk-graph-mb.")
-        elif upgrade_graph and unchunk_graph and not split_graph \
+        elif upgrade_graph and unchunk_graph \
                 and chunk_graph_mb == 0 and spatial_chunk_scale == 0:
             # --unchunk-graph alone: emit monolithic graph.bin only.
             # Useful to retrofit Kiwix-compat into a chunked-only ZIM
@@ -1046,7 +986,6 @@ def repackage(src_path: str, dst_path: str,
         elif upgrade_graph:
             _emit_upgraded_graph(
                 c, captured_graph_bytes,
-                split_graph=split_graph,
                 chunk_graph_mb=chunk_graph_mb,
                 passthrough_cls=PassthroughItem,
             )
@@ -1291,13 +1230,10 @@ def main() -> int:
                    help="Don't swap index.html / places.html")
     p.add_argument("--no-uncompress-graph", action="store_true",
                    help="Don't mark routing-data/graph.bin as COMPRESS=0")
-    p.add_argument("--split-graph", action="store_true",
-                   help="Upgrade SZRG v4 routing graph to v5 split "
-                        "(main + geoms companion) so the PWA can defer "
-                        "geom loading. Source must be SZRG v4.")
+    # Retired (SZRG v5 is no longer written); kept to fail clearly.
+    p.add_argument("--split-graph", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--chunk-graph-mb", type=int, default=0, metavar="N",
-                   help="Also chunk the routing graph (and geoms companion, "
-                        "if --split-graph) into N-MB ZIM entries so each "
+                   help="Also chunk the routing graph into N-MB ZIM entries so each "
                         "lands in its own cluster — avoids fzstd's per-"
                         "cluster cap for continental ZIMs.")
     p.add_argument("--spatial-chunk-scale", type=int, default=0, metavar="N",
@@ -1371,6 +1307,9 @@ def main() -> int:
                    help="Override map-config.json 'zoom' to pair with "
                         "--map-center.")
     args = p.parse_args()
+    if args.split_graph:
+        raise SystemExit("--split-graph (SZRG v5) was retired; use "
+                         "--spatial-chunk-scale N. See docs/formats.md.")
     map_center = None
     if args.map_center:
         lon, lat = (float(x) for x in args.map_center.split(","))
@@ -1388,7 +1327,6 @@ def main() -> int:
     return repackage(args.src, args.dst,
                      swap_viewer=not args.no_swap_viewer,
                      uncompress_graph=not args.no_uncompress_graph,
-                     split_graph=args.split_graph,
                      chunk_graph_mb=args.chunk_graph_mb,
                      spatial_chunk_scale=args.spatial_chunk_scale,
                      split_hot_search_chunks_mb=args.split_hot_search_chunks_mb,

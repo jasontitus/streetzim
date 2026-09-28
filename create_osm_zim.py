@@ -453,11 +453,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "overture enrichment from a prior run that crashed in a later phase.")
     parser.add_argument("--routing", action="store_true",
                         help="Include offline routing graph for turn-by-turn directions")
-    parser.add_argument("--split-graph", action="store_true",
-                        help="Emit SZRG v5 split routing graph (main graph.bin "
-                             "+ companion graph-geoms.bin) so the PWA can "
-                             "defer geom loading. Opt-in: default stays on "
-                             "v4 inline for Kiwix Desktop / mcpzim compat.")
+    # Retired: the SZRG v5 split writer (never used in production). Kept as
+    # a flag only to fail clearly instead of "unrecognized arguments".
+    parser.add_argument("--split-graph", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--chunk-graph-mb", type=int, default=0, metavar="N",
                         help="Split the routing graph file(s) into N-MB chunks "
                              "when packaging (each chunk becomes its own ZIM "
@@ -651,6 +649,10 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                            "its phases")
 
     args = parser.parse_args(argv)
+    if args.split_graph:
+        raise SystemExit("Error: --split-graph (SZRG v5) was retired; large "
+                         "regions use --spatial-chunk-scale N instead. See "
+                         "docs/formats.md, 'Version support and retirement'.")
 
     # Validate the openZIM metadata now, not after a multi-hour build.
     zim_metadata = zim_illustration = None
@@ -1029,7 +1031,6 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
 
         # Extract routing graph if requested
         routing_graph_path = None
-        routing_graph_geoms_path = None
         if include_routing:
             step_rt = 5 + (1 if include_wikidata else 0)
             print()
@@ -1040,10 +1041,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 print("    (routing requires a PBF file — not available with --mbtiles only)")
             else:
                 rt_bbox = parse_bbox(bbox_str) if bbox_str else None
-                routing_graph_path, routing_graph_geoms_path = extract_routing_graph(
-                    rt_pbf, tmpdir, bbox=rt_bbox,
-                    split_graph=bool(getattr(args, 'split_graph', False)),
-                )
+                routing_graph_path = extract_routing_graph(rt_pbf, tmpdir, bbox=rt_bbox)
 
         # Download satellite tiles and generate terrain tiles
         # These are independent (satellite=I/O-bound, terrain=CPU-bound) so run in parallel
@@ -1451,7 +1449,6 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             bbox=parse_bbox(bbox_str) if bbox_str else None,
             wikidata_data=wikidata_data,
             routing_graph_path=routing_graph_path,
-            routing_graph_geoms_path=routing_graph_geoms_path,
             routing_graph_chunk_mb=int(getattr(args, 'chunk_graph_mb', 0) or 0),
             split_hot_search_chunks_mb=int(getattr(args, 'split_hot_search_chunks_mb', 0) or 0),
             split_find_chips=bool(getattr(args, 'split_find_chips', False)),

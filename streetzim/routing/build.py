@@ -11,7 +11,7 @@ from streetzim.common import (
 )
 
 
-def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
+def extract_routing_graph(pbf_path, output_dir, bbox=None):
     """Extract road network from OSM PBF and build a compact routing graph.
 
     Streams through the (bbox-filtered) PBF with pyosmium in two passes:
@@ -31,16 +31,14 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
                     and the final routing-graph.bin.
         bbox: Optional (minlon, minlat, maxlon, maxlat) to bbox-filter first.
               Critical for regional builds from a planet PBF.
-        split_graph: If True, emit SZRG v5 split layout — main ``routing-graph.bin``
-                    holds everything routing needs (nodes + edges + name table);
-                    companion ``routing-graph-geoms.bin`` (SZGM v1) holds the
-                    polyline blob for lazy loading on route-draw. Frees iOS
-                    Safari from allocating a multi-GB single buffer up-front.
-                    Default False keeps the current v4 inline layout so Kiwix
-                    Desktop + mcpzim stay on their supported contract.
 
-    Returns (main_path, geoms_path_or_None). geoms_path is set only when
-    ``split_graph=True``. Returns (None, None) if no highways found.
+    Writes SZRG v4 (docs/formats.md). The SZRG v5 split layout (a separate
+    SZGM geometry file) is no longer written: nothing in production used it,
+    and large regions use the spatial layout (--spatial-chunk-scale), which
+    already loads geometry per cell. Readers keep v5 support for any
+    published file.
+
+    Returns the path of routing-graph.bin, or None if no highways were found.
     """
     import math
     import array
@@ -202,7 +200,7 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
         print("    Warning: no highway features found, skipping routing graph")
         # Caller unpacks a 2-tuple; a bare None here aborted the whole
         # build with a TypeError after the expensive tile steps.
-        return None, None
+        return None
 
     # Find interior refs that appear in 2+ ways.
     if p1.interior_chunks:
@@ -634,52 +632,21 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
         cur += len(b)
     name_offsets[num_names] = cur
 
-    # Serialize. Two layouts:
-    #   * v4 inline (default) — everything in one graph.bin. Back-compat
-    #     with Kiwix Desktop + mcpzim; matches docs/mcpzim-contract.md.
-    #   * v5 split (--split-graph) — geoms hoisted into a companion file
-    #     so the PWA can defer their GB-scale allocation until a route is
-    #     actually drawn. main layout keeps the same header plus
-    #     nodes/adj/edges/names. class_access bit layout unchanged.
+    # Serialize: SZRG v4, everything in one routing-graph.bin
+    # (docs/formats.md; docs/mcpzim-contract.md).
     output_path = os.path.join(output_dir, "routing-graph.bin")
-    geoms_path = None
-
-    if not split_graph:
-        # v4 inline — byte-identical to pre-split builds.
-        with open(output_path, "wb") as f:
-            f.write(b"SZRG")
-            np.array([4, num_nodes, num_edges, num_geoms, geom_bytes_total,
-                      num_names, names_bytes], dtype='<u4').tofile(f)
-            nodes_arr.tofile(f)
-            adj_offsets.tofile(f)
-            edges_arr.tofile(f)
-            geom_offsets_np.tofile(f)
-            f.write(bytes(geom_blob))
-            name_offsets.tofile(f)
-            for b in name_blobs:
-                f.write(b)
-    else:
-        # v5 split main file. Header sets geomBytes=0 so old parsers that
-        # ignore the version field still notice "no geoms here." Readers
-        # that understand v5 look for routing-graph-geoms.bin beside it.
-        with open(output_path, "wb") as f:
-            f.write(b"SZRG")
-            np.array([5, num_nodes, num_edges, num_geoms, 0,
-                      num_names, names_bytes], dtype='<u4').tofile(f)
-            nodes_arr.tofile(f)
-            adj_offsets.tofile(f)
-            edges_arr.tofile(f)
-            name_offsets.tofile(f)
-            for b in name_blobs:
-                f.write(b)
-        # Companion geoms file — SZGM magic so the viewer can't accidentally
-        # mis-interpret this as a graph buffer.
-        geoms_path = os.path.join(output_dir, "routing-graph-geoms.bin")
-        with open(geoms_path, "wb") as gf:
-            gf.write(b"SZGM")
-            np.array([1, num_geoms, geom_bytes_total], dtype='<u4').tofile(gf)
-            geom_offsets_np.tofile(gf)
-            gf.write(bytes(geom_blob))
+    with open(output_path, "wb") as f:
+        f.write(b"SZRG")
+        np.array([4, num_nodes, num_edges, num_geoms, geom_bytes_total,
+                  num_names, names_bytes], dtype='<u4').tofile(f)
+        nodes_arr.tofile(f)
+        adj_offsets.tofile(f)
+        edges_arr.tofile(f)
+        geom_offsets_np.tofile(f)
+        f.write(bytes(geom_blob))
+        name_offsets.tofile(f)
+        for b in name_blobs:
+            f.write(b)
 
     size_mb = os.path.getsize(output_path) / (1024 * 1024)
     # Class_access diagnostics — helps verify the writer populated flags
@@ -687,17 +654,12 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, split_graph=False):
     class_access_col = edges_arr[:, 4]
     num_round = int(((class_access_col >> 8) & 1).sum())
     num_link = int(np.isin((class_access_col & 0x1F), [2, 4, 6, 8, 10]).sum())
-    fmt_note = "v5 split" if split_graph else "v4 inline"
-    geoms_note = ""
-    if geoms_path:
-        geoms_mb = os.path.getsize(geoms_path) / (1024 * 1024)
-        geoms_note = f", companion {geoms_mb:.1f} MB"
-    print(f"    Routing graph ({fmt_note}): {size_mb:.1f} MB{geoms_note} "
+    print(f"    Routing graph (v4 inline): {size_mb:.1f} MB "
           f"({num_nodes} nodes, {num_edges} edges, {num_geoms} geoms, "
           f"{geom_bytes_total / (1024*1024):.1f} MB geom blob, "
           f"{num_names} names, {names_bytes / 1024:.0f} KB name text, "
           f"{num_round} roundabout + {num_link} link edges)")
-    return output_path, geoms_path
+    return output_path
 
 
 def chunk_graph_file(src_path: str, chunk_size_bytes: int,

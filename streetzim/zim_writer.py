@@ -423,7 +423,6 @@ def create_zim(
     bbox=None,
     wikidata_data=None,
     routing_graph_path=None,
-    routing_graph_geoms_path=None,
     routing_graph_chunk_mb=0,
     wiki_cross_refs=None,
     address_count=0,
@@ -605,7 +604,6 @@ def create_zim(
             wiki_images_per_article=wiki_images_per_article)
         _add_routing_graph(creator, MapItem,
                            routing_graph_path=routing_graph_path,
-                           routing_graph_geoms_path=routing_graph_geoms_path,
                            routing_graph_chunk_mb=routing_graph_chunk_mb,
                            spatial_chunk_scale=spatial_chunk_scale)
         _add_search(creator, MapItem, mbtiles_path=mbtiles_path,
@@ -1333,8 +1331,9 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
     return _bundled_set
 
 
-def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_geoms_path, routing_graph_chunk_mb, spatial_chunk_scale):
-    """The routing graph (graph.bin, optional chunks and geometry companion)."""
+def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_chunk_mb, spatial_chunk_scale):
+    """The routing graph: SZRG v4 graph.bin (optionally chunked), or the
+    spatial SZCI v3 + SZRC v2 cells with --spatial-chunk-scale."""
     # Add routing graph data.
     # Large regions produce multi-hundred-MB / multi-GB graph.bin
     # files (Japan = 1.8 GB, Europe/US ≥ 3 GB). libzim's default
@@ -1495,65 +1494,10 @@ def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_ge
                 routing_graph_path,
                 compress=compress_graph,
             ))
-        # v5 companion — only emitted when --split-graph was passed.
-        # Compressed is fine since the viewer lazy-loads it on route
-        # render, not startup; fzstd has to decompress only when a
-        # route is drawn, which is an easy allocation window compared
-        # to the original "everything at page load" pattern.
-        # Not needed with the spatial layout: every SZRC cell carries
-        # its own geoms, so shipping the monolithic companion too just
-        # added a GB-scale dead entry on continents.
-        if (routing_graph_geoms_path
-                and not spatial_chunk_scale
-                and os.path.isfile(routing_graph_geoms_path)):
-            geoms_mb = os.path.getsize(routing_graph_geoms_path) / (1024 * 1024)
-            if routing_graph_chunk_mb and routing_graph_chunk_mb > 0:
-                # Same reason we chunk graph.bin — the geoms companion
-                # is typically 30–50% of total graph size, so it also
-                # busts fzstd's per-cluster cap on continents. Chunk it.
-                print(f"    Adding geoms companion chunked "
-                      f"({geoms_mb:.1f} MB → {routing_graph_chunk_mb} MB chunks)...")
-                # Same lock-step naming constraint as the main graph
-                # chunks — manifest path must match the ZIM entry
-                # relative to routing-data/.
-                chunk_paths, manifest = chunk_graph_file(
-                    routing_graph_geoms_path,
-                    routing_graph_chunk_mb * 1024 * 1024,
-                    out_prefix="graph-geoms-chunk",
-                )
-                creator.add_item(MapItem(
-                    "routing-data/graph-geoms-chunk-manifest.json",
-                    "Routing Geoms Manifest",
-                    "application/json",
-                    json.dumps(manifest, separators=(",", ":")).encode("utf-8"),
-                    compress=True,
-                ))
-                for i, cp in enumerate(chunk_paths):
-                    cp_mb = os.path.getsize(cp) / (1024 * 1024)
-                    creator.add_item(MapItem(
-                        f"routing-data/graph-geoms-chunk-{i:04d}.bin",
-                        f"Routing Geoms Chunk {i}",
-                        "application/octet-stream",
-                        cp,
-                        compress=cp_mb < 200,
-                    ))
-            else:
-                compress_geoms = geoms_mb < 200
-                print(f"    Adding routing geoms companion "
-                      f"({geoms_mb:.1f} MB, "
-                      f"{'compressed' if compress_geoms else 'raw (PWA-compat)'})...")
-                creator.add_item(MapItem(
-                    "routing-data/graph-geoms.bin",
-                    "Routing Graph Geoms",
-                    "application/octet-stream",
-                    routing_graph_geoms_path,
-                    compress=compress_geoms,
-                ))
         PHASE_TIMER.record_subphase(
             "zim-pack: routing graph", time.time() - _rt_t0,
             note=f"{_rt_size_b/1e6:.0f} MB graph.bin"
-                 + (f" + {routing_graph_chunk_mb} MB chunks" if routing_graph_chunk_mb else "")
-                 + (f" + geoms companion" if routing_graph_geoms_path else ""))
+                 + (f" + {routing_graph_chunk_mb} MB chunks" if routing_graph_chunk_mb else ""))
 
 
 def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set):
