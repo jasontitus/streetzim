@@ -3,6 +3,8 @@
 For whoever picks this up next. [README.md](README.md) covers building a ZIM;
 this file covers how the repository is organised, how to change it safely,
 how production releases are made, and what is known to be wrong.
+[docs/openzim-review-response.md](docs/openzim-review-response.md) records
+how the 2026-09 openZIM review of this codebase was addressed.
 
 ## 1. What is core and what is operations
 
@@ -86,6 +88,7 @@ Rules that keep published ZIMs working:
 | `STREETZIM_REQUIRE_SHAPEFILES=1` | fail the build if the coastline / Natural Earth shapefiles are missing (otherwise a warning) |
 | `STREETZIM_REQUIRE_ZIMCHECK=1` | `validate_zim.py` fails when `zimcheck` is not installed (otherwise skipped) |
 | `STREETZIM_SKIP_ZIMCHECK=1` | skip zimcheck in the validator |
+| `ZIMRU_ZIMCHECK` | path to the faster Rust `zimcheck` (default `~/experiments/zimru/target/release/zimcheck`; used when it exists) |
 | `STREETZIM_NODE_LOC_DIR` | fast scratch volume for the routing node-location store (default `/data`, falling back to the output directory) |
 | `STREETZIM_PACK_BIN`, `XAPIANBUILDER_BIN` | paths to the optional Rust packer / Xapian builder |
 | `ZSTD_CLEVEL` | ZIM compression level (production uses 22) |

@@ -1737,7 +1737,7 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
     # Prefer zimru (Rust port, ~20× faster) when available — Daisy:
     # "we can use zimru zimcheck for now". Falls through to libzim's
     # zimcheck binary on dev hosts that don't have zimru built.
-    zimru = os.path.expanduser(
+    zimru = os.environ.get("ZIMRU_ZIMCHECK") or os.path.expanduser(
         "~/experiments/zimru/target/release/zimcheck")
     if os.path.isfile(zimru):
         bin_path = zimru
@@ -1757,7 +1757,7 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
     # python-libzim/libzim/libzim.dylib has the missing symbol. Try
     # to surface it so zimcheck loads cleanly.
     env = dict(os.environ)
-    patched = os.path.expanduser(
+    patched = os.environ.get("PATCHED_LIBZIM_DIR") or os.path.expanduser(
         "~/experiments/python-libzim/libzim")
     if os.path.isdir(patched):
         existing = env.get("DYLD_LIBRARY_PATH", "")

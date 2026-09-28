@@ -55,7 +55,9 @@ WIKIDATA_PROPERTIES = {
     "P31": "instance_of",
 }
 
-USER_AGENT = "StreetZIM/1.0 (https://github.com/user/streetzim; wikidata cache builder)"
+# Wikimedia's User-Agent policy wants a real contact URL; github.com/user/…
+# was a placeholder.
+USER_AGENT = "StreetZIM/1.0 (https://github.com/jasontitus/streetzim; wikidata cache builder)"
 
 
 def _qid_cache_path(pbf_path, cache_dir):
