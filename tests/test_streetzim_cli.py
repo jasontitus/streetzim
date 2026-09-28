@@ -137,3 +137,63 @@ def test_shapefiles_fetched_only_when_missing(tmp_path, monkeypatch):
         (tmp_path / rel).write_bytes(b"")
     cli.ensure_shapefiles(tmp_path)
     assert len(runs) == 1
+
+
+RUSSIA_LIKE = """russia
+1
+   19.6   54.3
+   180.0  64.0
+   -180.0 66.0
+   -169.0 65.9
+END
+END
+"""
+
+
+def test_polys_and_bboxes_reaching_the_antimeridian_are_refused(tmp_path, monkeypatch):
+    def fake_fetch(url, dest):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(RUSSIA_LIKE)
+        return dest
+    monkeypatch.setattr(cli, "fetch", fake_fetch)
+    with pytest.raises(ValueError, match="antimeridian"):
+        plan(["--include-poly", "https://example.org/russia.poly", "--pbf-url", "x"],
+             tmp_path)
+    for bad in ("170,10,180,20", "10,20,5,30", "1,2,3", "0,-91,1,1"):
+        with pytest.raises(ValueError):
+            cli.parse_bbox_arg(bad)
+    assert cli.parse_bbox_arg("7.40,43.72,7.44,43.76") == (7.40, 43.72, 7.44, 43.76)
+
+
+def test_placeholders_are_filled_like_maps2zim():
+    d = datetime.date(2026, 9, 28)
+    assert cli.fill("Monaco {period} ({name})", "osm_en_monaco", d) == \
+        "Monaco 2026-09 (osm_en_monaco)"
+
+
+def test_fetch_refreshes_when_the_source_changes(tmp_path):
+    import os
+    import time
+    src = tmp_path / "src.pbf"
+    src.write_bytes(b"v1")
+    dest = tmp_path / "dl" / "x.pbf"
+    url = f"file://{src}"
+    assert cli.fetch(url, dest).read_bytes() == b"v1"
+    assert cli.fetch(url, dest).read_bytes() == b"v1"          # reused
+    src.write_bytes(b"version 2")
+    os.utime(src, (time.time() + 5, time.time() + 5))
+    assert cli.fetch(url, dest).read_bytes() == b"version 2"   # refreshed
+
+
+def test_illustration_checked_before_downloads_and_resolved(tmp_path, no_network, capsys):
+    out = tmp_path / "out"
+    rc = cli.main(REQ + ["--area", "monaco", "--output", str(out), "--tmp", str(tmp_path / "t"),
+                         "--illustration-url", str(tmp_path / "missing.png")])
+    assert rc == 2 and "missing.png" in capsys.readouterr().err
+    assert no_network == []
+    from PIL import Image
+    Image.new("RGB", (64, 64)).save(tmp_path / "icon.png")
+    argv, _ = cli.plan(cli.build_parser().parse_args(REQ + ["--area", "monaco"]), tmp_path,
+                       illustration=(tmp_path / "icon.png"))
+    ill = argv[argv.index("--illustration") + 1]
+    assert Path(ill).is_absolute()

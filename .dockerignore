@@ -26,3 +26,4 @@ preview-proxy
 patches
 rust/**/target
 *.egg-info/
+/build/

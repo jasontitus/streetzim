@@ -36,7 +36,7 @@ def clean_str(value: str) -> str:
 
 def _text(label: str, value: str, max_len: int = 0) -> str:
     value = clean_str(value)
-    if not value:
+    if not value.strip():
         raise ValueError(f"{label}: empty value not allowed")
     if max_len and nb_graphemes(value) > max_len:
         raise ValueError(f"{label} is too long: {nb_graphemes(value)} characters, "
@@ -47,17 +47,20 @@ def _text(label: str, value: str, max_len: int = 0) -> str:
 def parse_tags(value: str) -> list[str]:
     """Semicolon-delimited tags, cleaned and de-duplicated (order kept)."""
     tags = [clean_str(t) for t in value.split(";")]
-    if not all(tags):
+    if not all(t.strip() for t in tags):
         raise ValueError(f"Tags: empty tag in {value!r}")
     return list(dict.fromkeys(tags))
 
 
-def build_overrides(*, name=None, title=None, description=None,
-                    long_description=None, creator=None, publisher=None,
-                    tags=None, scraper=None) -> dict:
+def build_overrides(*, name: str | None = None, title: str | None = None,
+                    description: str | None = None,
+                    long_description: str | None = None,
+                    creator: str | None = None, publisher: str | None = None,
+                    tags: str | None = None,
+                    scraper: str | None = None) -> dict[str, str | list[str]]:
     """Validated metadata values keyed by ZIM metadata name. Only the values
     actually given are returned; the builder keeps its defaults for the rest."""
-    md: dict = {}
+    md: dict[str, str | list[str]] = {}
     if name is not None:
         md["Name"] = _text("Name", name)
     if title is not None:
@@ -67,8 +70,6 @@ def build_overrides(*, name=None, title=None, description=None,
     if long_description is not None:
         md["LongDescription"] = _text("LongDescription", long_description,
                                       LONG_DESCRIPTION_MAX)
-        if md.get("Description") == md["LongDescription"]:
-            raise ValueError("LongDescription must differ from Description")
     if creator is not None:
         md["Creator"] = _text("Creator", creator)
     if publisher is not None:
@@ -81,10 +82,14 @@ def build_overrides(*, name=None, title=None, description=None,
 
 
 def merge_tags(builder_tags: str, extra: list[str] | None) -> str:
-    """The builder's own tags (which include the functional `_ftindex:yes`)
-    followed by the user's, without duplicates."""
-    tags = builder_tags.split(";") + list(extra or [])
-    return ";".join(dict.fromkeys(t for t in tags if t))
+    """The builder's tags followed by the user's, without duplicates. A user
+    tag of the form `_key:value` replaces the builder's `_key:` tag, as
+    maps2zim merges them (e.g. `_pictures:no`)."""
+    user = list(extra or [])
+    user_keys = {t.split(":", 1)[0] for t in user if t.startswith("_") and ":" in t}
+    tags = [t for t in builder_tags.split(";")
+            if t and not (t.startswith("_") and t.split(":", 1)[0] in user_keys)]
+    return ";".join(dict.fromkeys(tags + [t for t in user if t]))
 
 
 def illustration_png(data: bytes) -> bytes:

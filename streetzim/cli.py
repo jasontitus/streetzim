@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import json
 import os
 import re
 import shutil
@@ -30,6 +31,7 @@ import sys
 import tempfile
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 # Keep the imports above stdlib-only: --dl must reach STREETZIM_CACHE_DIR
 # before streetzim.common is first imported (it reads it at import time).
@@ -42,8 +44,9 @@ USER_AGENT = "streetzim (https://github.com/jasontitus/streetzim)"
 
 # Extra keys for offliner-definition.json, by flag. `offliner: False` keeps a
 # developer flag out of the Zimfarm definition. Everything else is derived
-# from the parser (tools/offliner_definition.py).
-ZIMFARM = {
+# from the parser (tools/offliner_definition.py). "choices": "KNOWN_AREAS"
+# is filled in from create_osm_zim.KNOWN_AREAS when the file is generated.
+ZIMFARM: dict[str, dict[str, Any]] = {
     "name": {"title": "ZIM name",
              "pattern": r"^([a-z0-9\-\.]+_)([a-z\-]+_)([a-z0-9\-\.]+)$"},
     "title": {"title": "ZIM title", "minGraphemes": 1, "maxGraphemes": 30},
@@ -53,12 +56,12 @@ ZIMFARM = {
     "publisher": {"isPublisher": True},
     "file_name": {"title": "ZIM filename"},
     "tags": {"title": "ZIM tags"},
-    "illustration_url": {"title": "Illustration URL"},
-    "area": {"title": "Preset area"},
+    "illustration_url": {"title": "Illustration URL", "type": "url"},
+    "area": {"title": "Preset area", "type": "string-enum", "choices": "KNOWN_AREAS"},
     "include_poly": {"title": "Include poly"},
     "bbox": {"title": "Bounding box",
              "pattern": r"^-?[0-9.]+,-?[0-9.]+,-?[0-9.]+,-?[0-9.]+$"},
-    "pbf_url": {"title": "OSM extract URL"},
+    "pbf_url": {"title": "OSM extract URL", "type": "url"},
     "no_routing": {"title": "No routing",
                    "description": "Leave out offline routing (on by default)"},
     "wikidata": {"title": "Wikidata"},
@@ -75,6 +78,9 @@ ZIMFARM = {
     "overwrite": {"offliner": False},
     "keep_temp": {"offliner": False},
 }
+# Zimfarm checks these when a recipe is saved (its check_exclusive_fields).
+MODEL_VALIDATORS = [{"name": "check_exclusive_fields",
+                     "fields": ["area", "include_poly", "bbox"]}]
 # Flag -> ZIM metadata, for the definition's zimMetadata list.
 ZIM_METADATA_FLAGS = {"Name": "name", "Title": "title", "Description": "description",
                       "LongDescription": "long_description", "Creator": "creator",
@@ -150,7 +156,8 @@ def build_parser() -> argparse.ArgumentParser:
     feat.add_argument("--default-view",
                       help="Initial map view as latitude,longitude[,zoom]")
     feat.add_argument("--zim-workers", type=int,
-                      help="Compression threads for libzim. Default: CPU count")
+                      help="Compression threads for libzim. Default: the CPU "
+                           "count, at most 20")
     feat.add_argument("--keep-temp", action="store_true", help=argparse.SUPPRESS)
     return p
 
@@ -158,17 +165,52 @@ def build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------- helpers
 
 
+def period(today: datetime.date | None = None) -> str:
+    return (today or datetime.date.today()).strftime("%Y-%m")
+
+
+def fill(value: str, name: str, today: datetime.date | None = None) -> str:
+    """maps2zim's placeholders: {name} and {period} (YYYY-MM)."""
+    return value.replace("{name}", name).replace("{period}", period(today))
+
+
 def zim_filename(pattern: str, name: str, today: datetime.date | None = None) -> str:
-    period = (today or datetime.date.today()).strftime("%Y-%m")
-    fn = pattern.replace("{name}", name).replace("{period}", period)
+    fn = fill(pattern, name, today)
     if not fn or "/" in fn or os.sep in fn or fn in (".", ".."):
         raise ValueError(f"--file-name {pattern!r} does not give a plain file name")
     return fn if fn.endswith(".zim") else fn + ".zim"
 
 
-def parse_poly(text: str) -> tuple[float, float, float, float]:
+BBox = tuple[float, float, float, float]
+
+
+def check_bbox(b: BBox, what: str) -> BBox:
+    minlon, minlat, maxlon, maxlat = b
+    if not (-180 <= minlon < maxlon <= 180 and -90 <= minlat < maxlat <= 90):
+        raise ValueError(f"{what}: {b} is not minlon,minlat,maxlon,maxlat "
+                         "with min < max in range")
+    # Areas are bounding boxes (tiles and the OSM extract are cut to the
+    # box, not the polygon), so one that wraps the antimeridian would become
+    # a band around the whole world.
+    if maxlon - minlon > 180 or minlon <= -179.99 or maxlon >= 179.99:
+        raise ValueError(f"{what}: {b} reaches the antimeridian (±180°); areas "
+                         "are bounding boxes and can't wrap it. Use --bbox for "
+                         "the part on one side.")
+    return b
+
+
+def parse_bbox_arg(value: str) -> BBox:
+    parts = value.split(",")
+    if len(parts) != 4:
+        raise ValueError(f"--bbox {value!r}: need minlon,minlat,maxlon,maxlat")
+    a, b, c, d = (float(x) for x in parts)
+    return check_bbox((a, b, c, d), "--bbox")
+
+
+def parse_poly(text: str) -> BBox:
     """Bounding box of an Osmosis .poly file (holes, marked '!', ignored)."""
-    lons, lats = [], []
+    lons: list[float] = []
+    lats: list[float] = []
     lines = [ln.strip() for ln in text.splitlines()]
     i, depth, hole = 1, 0, False            # line 0 is the file's name
     while i < len(lines):
@@ -203,11 +245,35 @@ def parse_default_view(value: str) -> tuple[float, float, float | None]:
     return lat, lon, (float(parts[2]) if len(parts) == 3 else None)
 
 
+def _source_stamp(url: str) -> dict[str, str] | None:
+    """What identifies the current version of `url` (HEAD for http(s), size
+    and mtime for file://); None when it can't be checked (offline)."""
+    if url.startswith("file://"):
+        st = os.stat(url[len("file://"):])
+        return {"size": str(st.st_size), "mtime": str(int(st.st_mtime))}
+    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            h = r.headers
+            return {k: h.get(k, "") for k in ("ETag", "Last-Modified", "Content-Length")}
+    except OSError:
+        return None
+
+
 def fetch(url: str, dest: Path) -> Path:
-    """Download once into --dl; reuse it on later runs."""
-    if dest.exists() and dest.stat().st_size > 0:
-        print(f"  Reusing {dest}")
-        return dest
+    """Download into --dl, reusing a previous download only while the source
+    is unchanged (same ETag/Last-Modified/size; for file://, size and mtime).
+    Geofabrik's -latest files change daily, so an old copy is refreshed."""
+    meta = dest.with_name(dest.name + ".source.json")
+    stamp = _source_stamp(url)
+    if dest.exists() and dest.stat().st_size > 0 and meta.exists():
+        old = json.loads(meta.read_text())
+        if stamp is None:
+            print(f"  Reusing {dest} (could not check {url} for updates)")
+            return dest
+        if old == stamp:
+            print(f"  Reusing {dest} (unchanged upstream)")
+            return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
     print(f"  Downloading {url}")
@@ -215,6 +281,10 @@ def fetch(url: str, dest: Path) -> Path:
     with urllib.request.urlopen(req, timeout=60) as r, open(part, "wb") as f:
         shutil.copyfileobj(r, f, 1 << 20)
     os.replace(part, dest)
+    if stamp is not None:
+        meta.write_text(json.dumps(stamp))
+    else:
+        meta.unlink(missing_ok=True)
     return dest
 
 
@@ -225,18 +295,19 @@ def _name_of_url(url: str) -> str:
 # ---------------------------------------------------------------- main
 
 
-def plan(args: argparse.Namespace, dl: Path) -> tuple[list[str], dict]:
+def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
+         ) -> tuple[list[str], dict[str, str | None]]:
     """Resolve the area and inputs, returning create_osm_zim arguments.
 
     Downloads the .poly and .pbf into `dl`. Raises ValueError on bad flags.
+    Text flags are expected with {name}/{period} already filled in.
     """
     from create_osm_zim import KNOWN_AREAS  # after STREETZIM_CACHE_DIR is set
 
     sources = [bool(args.area), bool(args.include_poly), bool(args.bbox)]
     if sum(sources) != 1:
         raise ValueError("give exactly one of --area, --include-poly, --bbox")
-    geofabrik = None
-    map_name = args.title
+    geofabrik: str | None = None
     if args.area:
         key = args.area.lower().replace(" ", "-")
         if key not in KNOWN_AREAS:
@@ -246,22 +317,22 @@ def plan(args: argparse.Namespace, dl: Path) -> tuple[list[str], dict]:
         geofabrik, bbox = area["geofabrik"], area["bbox"]
     elif args.include_poly:
         urls = [u.strip() for u in args.include_poly.split(",") if u.strip()]
-        boxes = []
+        boxes: list[BBox] = []
         for u in urls:
             text = fetch(u, dl / "poly" / _name_of_url(u)).read_text()
-            boxes.append(parse_poly(text))
-        bbox = ",".join(f"{v:.6f}" for v in (
-            min(b[0] for b in boxes), min(b[1] for b in boxes),
-            max(b[2] for b in boxes), max(b[3] for b in boxes)))
+            boxes.append(check_bbox(parse_poly(text), u))
+        union = check_bbox((min(b[0] for b in boxes), min(b[1] for b in boxes),
+                            max(b[2] for b in boxes), max(b[3] for b in boxes)),
+                           "--include-poly")
+        bbox = ",".join(f"{v:.6f}" for v in union)
         m = GEOFABRIK_POLY.match(urls[0])
         if len(urls) == 1 and m:
             geofabrik = m.group(1)
     else:
+        parse_bbox_arg(args.bbox)
         bbox = args.bbox
-        from streetzim.common import parse_bbox
-        parse_bbox(bbox)
 
-    pbf_url = args.pbf_url or (
+    pbf_url: str | None = args.pbf_url or (
         f"https://download.geofabrik.de/{geofabrik}-latest.osm.pbf" if geofabrik else None)
     if not pbf_url and not args.mbtiles:
         raise ValueError("no OSM extract for this area: give --pbf-url "
@@ -269,20 +340,20 @@ def plan(args: argparse.Namespace, dl: Path) -> tuple[list[str], dict]:
     if not pbf_url and args.routing:
         raise ValueError("--routing needs an OSM extract: give --pbf-url, or --no-routing")
 
-    argv = ["--bbox", bbox, "--name", map_name, "--zim-name", args.name,
+    argv = ["--bbox", bbox, "--name", args.title, "--zim-name", args.name,
             "--title", args.title, "--description", args.description,
             "--creator", args.creator, "--publisher", args.publisher,
             "--scraper", f"streetzim v{version()}", "--split-find-chips"]
     if pbf_url:
         argv += ["--pbf", str(fetch(pbf_url, dl / "osm" / _name_of_url(pbf_url)))]
     if args.mbtiles:
-        argv += ["--mbtiles", args.mbtiles]
+        argv += ["--mbtiles", str(Path(args.mbtiles).resolve())]
     if args.long_description:
         argv += ["--long-description", args.long_description]
     if args.tags:
         argv += ["--tags", args.tags]
-    if args.illustration_url:
-        argv += ["--illustration", args.illustration_url]
+    if illustration:
+        argv += ["--illustration", str(illustration)]
     if args.stats_filename:
         argv += ["--stats-filename", str(Path(args.stats_filename).resolve())]
     if args.routing:
@@ -316,50 +387,67 @@ def ensure_shapefiles(folder: Path) -> Path:
     return folder
 
 
+def _error(msg: object) -> int:
+    print(f"streetzim: error: {msg}", file=sys.stderr)
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if not (REPO_ROOT / "resources" / "viewer" / "index.html").exists():
-        print("streetzim: error: resources/ not found next to the code; install "
-              "from a checkout (pip install -e .) or use the Docker image",
-              file=sys.stderr)
-        return 2
+        return _error("resources/ not found next to the code; install from a "
+                      "checkout (pip install -e .) or use the Docker image")
     out_dir = Path(args.output).resolve()
     tmp = Path(args.tmp or (Path(tempfile.gettempdir()) / "streetzim")).resolve()
     tmp.mkdir(parents=True, exist_ok=True)
     tempfile.tempdir = str(tmp)
-    # Downloads and caches: --dl, else <tmp>/dl (as maps2zim does). An
-    # explicit --dl wins over an inherited STREETZIM_CACHE_DIR.
+    # Downloads and caches (OSM extract, DEM, Wikidata) go to --dl, else
+    # <tmp>/dl as in maps2zim -- never to the output folder, whatever
+    # STREETZIM_CACHE_DIR the environment (e.g. the Docker image) sets.
     dl = Path(args.dl or (tmp / "dl")).resolve()
-    if args.dl or not os.environ.get("STREETZIM_CACHE_DIR"):
-        os.environ["STREETZIM_CACHE_DIR"] = str(dl / "cache")
+    os.environ["STREETZIM_CACHE_DIR"] = str(dl / "cache")
+
+    # {name} and {period} in the text flags, as maps2zim does.
+    for key in ("title", "description", "long_description", "tags"):
+        if getattr(args, key):
+            setattr(args, key, fill(getattr(args, key), args.name))
 
     # Everything that can be checked cheaply is checked before downloading.
+    illustration: Path | None = None
     try:
-        from streetzim.zim_metadata import build_overrides
+        from streetzim.zim_metadata import build_overrides, load_illustration
         build_overrides(name=args.name, title=args.title, description=args.description,
                         long_description=args.long_description, creator=args.creator,
                         publisher=args.publisher, tags=args.tags)
         final = out_dir / zim_filename(args.file_name, args.name)
         if args.default_view:
             parse_default_view(args.default_view)
-    except ValueError as e:
-        print(f"streetzim: error: {e}", file=sys.stderr)
-        return 2
+        if args.bbox:
+            parse_bbox_arg(args.bbox)
+        if args.illustration_url:
+            illustration = tmp / "illustration-48.png"
+            illustration.write_bytes(load_illustration(args.illustration_url))
+    except (ValueError, OSError) as e:
+        return _error(e)
     out_dir.mkdir(parents=True, exist_ok=True)
     if final.exists() and not args.overwrite:
-        print(f"streetzim: error: {final} exists (use --overwrite)", file=sys.stderr)
-        return 2
+        return _error(f"{final} exists (use --overwrite)")
+    if args.stats_filename:
+        # Before the downloads, which can take a while on big regions.
+        from streetzim.progress import StatsFile
+        StatsFile(Path(args.stats_filename).resolve()).write(0, 1)
 
     try:
-        build_args, info = plan(args, dl)
+        build_args, _ = plan(args, dl, illustration=illustration)
     except ValueError as e:
-        print(f"streetzim: error: {e}", file=sys.stderr)
-        return 2
+        return _error(e)
 
     # Build next to the target and rename at the end, so a failed or
     # interrupted run never leaves (or replaces) a .zim in the output folder.
+    # (libzim itself writes <path>.tmp and renames it when it finishes.)
     building = final.with_name(final.name + ".tmp")
-    building.unlink(missing_ok=True)   # left by an interrupted run
+    for stale in (building, building.with_name(building.name + ".tmp")):
+        stale.unlink(missing_ok=True)       # left by an interrupted run
     build_args += ["-o", str(building)]
     cwd = os.getcwd()
     if not args.mbtiles:
@@ -367,7 +455,8 @@ def main(argv: list[str] | None = None) -> int:
         os.chdir(ensure_shapefiles(Path(args.shapefiles or (dl / "shapefiles")).resolve()))
     try:
         import create_osm_zim
-        create_osm_zim.main(build_args)
+        # The builder module itself is not typed (pyright basic mode).
+        create_osm_zim.main(build_args)  # pyright: ignore[reportUnknownMemberType]
     finally:
         os.chdir(cwd)
     os.replace(building, final)

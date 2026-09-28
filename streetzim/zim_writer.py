@@ -341,7 +341,6 @@ def _build_xapian_via_xapianbuilder(streetzim_xapian_jsonl: str,
         print(f"      reusing existing xapianbuilder JSONL "
               f"({os.path.getsize(xb_jsonl)/1e6:.1f} MB)", flush=True)
 
-    import subprocess
     procs = []
     proc_starts: dict[str, float] = {}
     for mode, out_path, missing in (
@@ -390,7 +389,7 @@ def _build_xapian_via_xapianbuilder(streetzim_xapian_jsonl: str,
             note=f"{ti_size/1e6:.0f} MB glass DB")
     PHASE_TIMER.record_subphase(
         "xapian: parallel wall-clock", pair_wall,
-        note=f"max(ft, title) — both ran concurrently")
+        note="max(ft, title) — both ran concurrently")
     PHASE_TIMER.record_metric(
         "xapian: fulltext glass size", f"{ft_size/1e6:.0f}", "MB")
     PHASE_TIMER.record_metric(
@@ -576,8 +575,9 @@ def create_zim(
                       metadata=metadata, illustration=illustration,
                       has_satellite=bool(satellite_dir and os.path.isdir(satellite_dir)),
                       has_terrain=bool(terrain_dir and os.path.isdir(terrain_dir)),
-                      has_wiki=bool(wikidata_data or wiki_cross_refs
-                                    or bundle_wiki_articles))
+                      # wiki_cross_refs are OSM's own wikipedia=/wikidata=
+                      # tags (ODbL), not Wikipedia or Wikidata content.
+                      has_wiki=bool(wikidata_data or bundle_wiki_articles))
         _add_viewer(creator, MapItem, maplibre_js_path=maplibre_js_path,
                     maplibre_css_path=maplibre_css_path,
                     viewer_html_path=viewer_html_path, map_config=map_config,
@@ -903,7 +903,7 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
                         else:
                             print(f"    File size: {os.path.getsize(str(output_path)) / 1e9:.2f} GB", flush=True)
                     except OSError:
-                        print(f"    File not yet created", flush=True)
+                        print("    File not yet created", flush=True)
                     import resource
                     mem_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024**3)
                     print(f"    RSS: {mem_gb:.1f} GB", flush=True)
@@ -919,7 +919,7 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
                         print(f"\n--- Thread {tid} ({tname}) ---", flush=True)
                         traceback.print_stack(frame)
                         sys.stdout.flush()
-                    print(f"=== END WATCHDOG DUMP ===\n", flush=True)
+                    print("=== END WATCHDOG DUMP ===\n", flush=True)
                     stall_seconds = 0  # reset so we dump again if still stuck
             else:
                 stall_seconds = 0
@@ -971,7 +971,6 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
     # styles them.
     tiles_skipped_empty = 0
     tile_start = time.time()
-    batch_start = time.time()
     batch_size = 1000
     # Adaptive backpressure, ONLY for the libzim builder. With libzim,
     # add_item() feeds its C++ queue directly, and per-item / per-batch
@@ -990,13 +989,11 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
             batch = list(itertools.islice(tile_source, batch_size))
             if not batch:
                 break
-            decompress_start = time.time()
             results = list(pool.map(decompress_tile, batch))
             if bad_gzip_tiles:
                 # Abort now (the SystemExit below reports it) instead of
                 # spending hours adding the remaining tiles first.
                 break
-            decompress_time = time.time() - decompress_start
 
             add_start = time.time()
             for i, (z, x, y, tile_data) in enumerate(results):
@@ -1035,7 +1032,6 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
                 elif batch_rate > 15000:
                     backpressure_sleep = max(backpressure_sleep - 0.01, 0.0)
 
-            batch_start = time.time()
 
             if tiles_added % 2000 == 0:
                 elapsed = time.time() - tile_start
@@ -1213,7 +1209,7 @@ def _add_wikidata(creator, MapItem, *, tiles, mbtiles_path, bbox, wikidata_data,
             elif tiles:
                 _tile_src = ((z, x, y, d) for (z, x, y), d in tiles.items() if z == _scan_z)
         if _tile_src is not None:
-            print(f"    Scanning tiles for Wikidata Q-IDs in bbox...")
+            print("    Scanning tiles for Wikidata Q-IDs in bbox...")
             import mapbox_vector_tile as _mvt
             bbox_qids = set()
             for z, x, y, data in _tile_src:
@@ -1516,7 +1512,6 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
 
     # Normalize (lowercase + ASCII-fold) so search matches across
     # accented / diacritic variants: "Café" ↔ "cafe", "São" ↔ "sao".
-    import unicodedata
     # One implementation, shared with the planner and mirrored by
     # the viewer's keyFor / mcpzim's normalizePrefix.
     from cloud.search_shards import norm as _norm, prefix_key as _prefix_key
@@ -2200,7 +2195,6 @@ def _add_overture_credits(creator, MapItem, *, overture_sources, overture_themes
     # contributors, national/regional registers, etc.
     if overture_sources:
         themes = overture_themes or ["addresses"]
-        theme_label = " + ".join(themes)
         themes_phrase = (
             "Address data is derived from the Overture addresses theme"
             if themes == ["addresses"] else
@@ -2256,9 +2250,9 @@ def _add_overture_credits(creator, MapItem, *, overture_sources, overture_themes
                        ensure_ascii=False).encode("utf-8"),
         ))
         if is_salvage_stub:
-            print(f"    Added overture-sources.json "
-                  f"(stub — salvage rebuild, upstream dataset list "
-                  f"not retained)")
+            print("    Added overture-sources.json "
+                  "(stub — salvage rebuild, upstream dataset list "
+                  "not retained)")
         else:
             print(f"    Added overture-sources.json "
                   f"({len(real_datasets)} upstream datasets)")

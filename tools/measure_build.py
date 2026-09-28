@@ -6,8 +6,11 @@ and peak disk use of the folders it writes to.
     python tools/measure_build.py --json out.json --watch /tmp/sz --watch out -- \\
         streetzim --name ... --output out --tmp /tmp/sz ...
 
-Memory is the sum of RSS over the command and all its descendants, sampled
-every --interval seconds, so short spikes between samples can be missed.
+Memory is summed over the command and all its descendants, sampled every
+--interval seconds (short spikes between samples can be missed), two ways:
+PSS, which splits pages shared between processes (forked workers) among
+them and so adds up to real use, and RSS, which counts shared pages once per
+process and so overstates it. Size a machine by PSS.
 Disk is the total size of the --watch folders, sampled at the same rate.
 Linux only (reads /proc). Used for docs/zimfarm.md.
 """
@@ -26,8 +29,19 @@ from pathlib import Path
 PAGE = os.sysconf("SC_PAGE_SIZE")
 
 
-def tree_rss(root: int) -> int:
-    """RSS in bytes of `root` and every descendant."""
+def _pss(pid: int) -> int:
+    try:
+        with open(f"/proc/{pid}/smaps_rollup") as f:
+            for line in f:
+                if line.startswith("Pss:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError):
+        pass
+    return 0
+
+
+def tree_mem(root: int) -> tuple[int, int]:
+    """(RSS, PSS) in bytes of `root` and every descendant."""
     children: dict[int, list[int]] = {}
     for d in os.listdir("/proc"):
         if not d.isdigit():
@@ -38,16 +52,18 @@ def tree_rss(root: int) -> int:
         except (OSError, IndexError, ValueError):
             continue
         children.setdefault(ppid, []).append(int(d))
-    total, todo = 0, [root]
+    rss = pss = 0
+    todo = [root]
     while todo:
         pid = todo.pop()
         try:
             with open(f"/proc/{pid}/statm") as f:
-                total += int(f.read().split()[1]) * PAGE
+                rss += int(f.read().split()[1]) * PAGE
         except (OSError, IndexError, ValueError):
             pass
+        pss += _pss(pid)
         todo.extend(children.get(pid, ()))
-    return total
+    return rss, pss
 
 
 def du(path: Path) -> int:
@@ -71,7 +87,7 @@ def du(path: Path) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     ap.add_argument("--json", required=True, help="write the measurements here")
     ap.add_argument("--watch", action="append", default=[], help="folder to measure (repeat)")
     ap.add_argument("--interval", type=float, default=2.0)
@@ -83,7 +99,7 @@ def main() -> int:
         ap.error("no command")
 
     watch = [Path(w) for w in a.watch]
-    peak = {"rss": 0, "disk": 0}
+    peak = {"rss": 0, "pss": 0, "disk": 0}
     samples = []
     log = open(a.log, "w") if a.log else None
     t0 = time.time()
@@ -92,11 +108,12 @@ def main() -> int:
 
     def sample():
         while not stop.is_set():
-            rss = tree_rss(proc.pid)
+            rss, pss = tree_mem(proc.pid)
             disk = sum(du(w) for w in watch)
             peak["rss"] = max(peak["rss"], rss)
+            peak["pss"] = max(peak["pss"], pss)
             peak["disk"] = max(peak["disk"], disk)
-            samples.append((round(time.time() - t0, 1), rss, disk))
+            samples.append((round(time.time() - t0, 1), rss, pss, disk))
             stop.wait(a.interval)
 
     th = threading.Thread(target=sample, daemon=True)
@@ -112,6 +129,7 @@ def main() -> int:
         "wall_s": round(wall, 1),
         "cpu_s": round(ru.ru_utime + ru.ru_stime, 1),
         "cpus": os.cpu_count(),
+        "peak_pss_gb": round(peak["pss"] / 1e9, 2),
         "peak_rss_gb": round(peak["rss"] / 1e9, 2),
         "peak_disk_gb": round(peak["disk"] / 1e9, 2),
         "watched": [str(w) for w in watch],
@@ -119,7 +137,8 @@ def main() -> int:
     }
     Path(a.json).write_text(json.dumps(result, indent=1))
     print(f"exit {rc}: wall {wall / 60:.1f} min, cpu {result['cpu_s'] / 60:.1f} min, "
-          f"peak RSS {result['peak_rss_gb']} GB, peak disk {result['peak_disk_gb']} GB",
+          f"peak memory {result['peak_pss_gb']} GB PSS ({result['peak_rss_gb']} GB RSS), "
+          f"peak disk {result['peak_disk_gb']} GB",
           file=sys.stderr)
     return rc
 

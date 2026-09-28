@@ -91,6 +91,22 @@ docker run --rm -v "$PWD/out:/output" streetzim \
     create_osm_zim.py --area monaco --routing -o /output/osm-monaco.zim
 ```
 
+### Or the openZIM way: `streetzim`
+
+`streetzim` is the same builder behind openZIM's scraper conventions:
+maps2zim's flag names, ZIM metadata flags checked before any download,
+`{name}_{period}.zim` in an output folder, and a Zimfarm progress file. Its
+flags are described for Zimfarm in `offliner-definition.json`;
+[docs/zimfarm.md](docs/zimfarm.md) covers the default profile and what a
+build costs.
+
+```bash
+pip install -e .              # or use the Docker image, which has it
+streetzim --name osm_en_monaco --title Monaco \
+    --description "Offline map of Monaco with search and routing" \
+    --area monaco --output out --stats-filename out/task_progress.json
+```
+
 ## Choosing what goes in
 
 Input, one of:
@@ -147,11 +163,12 @@ resources/viewer/ (MapLibre app) ───┤
 
 | path | what |
 |---|---|
-| `create_osm_zim.py` | the builder (single entry point) |
+| `create_osm_zim.py` | the builder's command line |
+| `streetzim/cli.py` | `streetzim`, the openZIM-style command (maps2zim's flags; `offliner-definition.json`) |
 | `resources/viewer/` | the viewer shipped inside every ZIM (`index.html`, built from `src/index/` by `tools/build_viewer.py`; `places.html`; `routing-worker.js`) |
 | `resources/tilemaker/` | tilemaker config and Lua profile |
 | `cloud/` | Python modules the builder imports (`chip_rules`, `search_shards`, `repackage_zim`, …), the validator, and operations scripts |
-| `streetzim/` | the builder's modules: `tiles`, `terrain`, `satellite`, `addresses`, `search_extract`, `zim_writer`, `common`, and `routing/` (graph build, formats, reference routers) |
+| `streetzim/` | the builder's modules: `tiles`, `terrain`, `satellite`, `addresses`, `search_extract`, `zim_writer` (one function per ZIM phase), `zim_metadata` (openZIM metadata rules), `progress` (Zimfarm progress file), `common`, and `routing/` (graph build, formats, reference routers) |
 | `tests/` | pytest and Node tests |
 | `web/` | streetzim.web.app catalogue and the `/drive/` PWA |
 | `preview-proxy/` | archive.org range proxy for online previews |

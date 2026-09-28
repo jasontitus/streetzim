@@ -119,6 +119,26 @@ try {
                 ' indexSize=' + wiki.indexSize);
   }
 
+  // ---- 4b. credits list only the layers this ZIM has --------------------
+  if (EXPECT_FIXES) {
+    const credits = await page.evaluate(() =>
+      fetch('map-config.json').then(r => r.json()).then(c => {
+        const shown = id => {
+          const el = document.getElementById(id);
+          return el ? el.style.display !== 'none' : null;
+        };
+        return [
+          ['attr-satellite-section', !!c.hasSatellite, shown('attr-satellite-section')],
+          ['attr-terrain-section', !!c.hasTerrain, shown('attr-terrain-section')],
+          ['attr-wiki-section', !!(c.hasWikidata || c.hasWikiArticles), shown('attr-wiki-section')],
+        ];
+      }).catch(e => [['map-config.json', true, String(e)]]));
+    for (const [id, want, got] of credits) {
+      ok(`credits: ${id} ${want ? 'shown' : 'hidden'}`, got === want,
+         `map-config says ${want}, section shown=${got}`);
+    }
+  }
+
   // ---- 5. the chip rail is the current one -------------------------------
   const chips = await page.evaluate(() => {
     const ids = new Set();

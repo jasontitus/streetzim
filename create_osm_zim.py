@@ -777,9 +777,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     if include_terrain:
         print(f"  Including Copernicus GLO-30 terrain (z0-{terrain_max_zoom})")
     if include_wikidata:
-        print(f"  Including Wikidata info for places and POIs")
+        print("  Including Wikidata info for places and POIs")
     if include_routing:
-        print(f"  Including offline routing graph")
+        print("  Including offline routing graph")
     print()
     log_viewer_freshness()
 
@@ -881,7 +881,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                 # (caught 2026-09-18 on switzerland-nosat; the ZIM was valid).
                 filtered_path = os.path.join(tmpdir, "search_features.jsonl")
                 shutil.copy2(search_cache_path, filtered_path)
-                print(f"    Using all features (no bbox filter)")
+                print("    Using all features (no bbox filter)")
                 search_features = filtered_path
         elif use_streaming:
             search_features = extract_searchable_features(mbtiles_path=mbtiles_path, output_dir=tmpdir)
@@ -1057,10 +1057,12 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         if include_terrain and bbox_str:
             terrain_dir = args.terrain_dir or os.path.join(CACHE_DIR, "terrain_cache")
 
+        # Satellite and terrain come after the Wikidata and routing phases.
+        step_sat = 5 + (1 if include_wikidata else 0) + (1 if include_routing else 0)
         if include_satellite and include_terrain and bbox_str:
             from concurrent.futures import ThreadPoolExecutor as StepPool
             print()
-            print(f"[5/{total_steps}] Downloading satellite tiles + generating terrain tiles (parallel)...")
+            print(f"[{step_sat}/{total_steps}] Downloading satellite tiles + generating terrain tiles (parallel)...")
 
             with StepPool(max_workers=2) as step_pool:
                 sat_future = step_pool.submit(
@@ -1078,7 +1080,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         else:
             if include_satellite:
                 print()
-                print(f"[5/{total_steps}] Downloading satellite tiles...")
+                print(f"[{step_sat}/{total_steps}] Downloading satellite tiles...")
                 if not bbox_str:
                     print("    Warning: no bbox specified, skipping satellite tiles")
                 else:
@@ -1087,7 +1089,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                                              tile_size=satellite_tile_size)
 
             if include_terrain:
-                step_terrain = 5 + (1 if include_satellite else 0)
+                step_terrain = step_sat + (1 if include_satellite else 0)
                 print()
                 print(f"[{step_terrain}/{total_steps}] Generating terrain tiles...")
                 if not bbox_str:
@@ -1408,6 +1410,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
             map_config["terrainMaxZoom"] = terrain_max_zoom
         if wikidata_data:
             map_config["hasWikidata"] = True
+        if getattr(args, "bundle_wiki_articles", False) and wiki_cross_refs:
+            # Bundled Wikipedia pages; the viewer's credits list Wikipedia.
+            map_config["hasWikiArticles"] = True
         if routing_graph_path:
             map_config["hasRouting"] = True
         if overture_sources:

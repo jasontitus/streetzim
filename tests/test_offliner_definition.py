@@ -28,13 +28,17 @@ def test_shape_matches_what_zimfarm_expects():
     assert DEF["stdOutput"] is True and DEF["stdStats"] is True
     for key, f in DEF["flags"].items():
         assert set(f) >= {"type", "required", "title", "description"}, key
-        assert f["type"] in ("string", "boolean", "integer"), key
+        assert f["type"] in ("string", "boolean", "integer", "url", "string-enum"), key
+        assert ("choices" in f) == (f["type"] == "string-enum"), key
     assert DEF["flags"]["output"]["pattern"] == "^/output$"
     assert DEF["flags"]["stats_filename"]["pattern"] == r"^/output/task_progress\.json$"
     flags = set(DEF["flags"])
     assert all(m["flag"] in flags for m in DEF["zimMetadata"])
     assert {m["metadata"] for m in DEF["zimMetadata"]} >= {"Name", "Title", "Description"}
     assert "satellite" not in flags          # never offered: CC BY-NC-SA
+    assert DEF["modelValidators"] == [{"name": "check_exclusive_fields",
+                                       "fields": ["area", "include_poly", "bbox"]}]
+    assert "monaco" in DEF["flags"]["area"]["choices"]
 
 
 def _argv_for(config: dict) -> list[str]:
@@ -52,8 +56,10 @@ def _argv_for(config: dict) -> list[str]:
 
 
 def test_every_offered_flag_parses():
-    sample = {"string": "x", "integer": 3, "boolean": True}
-    config = {k: sample[f["type"]] for k, f in DEF["flags"].items()}
+    sample = {"string": "x", "integer": 3, "boolean": True, "url": "https://example.org/x"}
+    config = {k: (f["choices"][0] if f["type"] == "string-enum" else sample[f["type"]])
+              for k, f in DEF["flags"].items()}
+    del config["area"], config["include_poly"]      # exclusive with bbox
     config.update(output="/output", stats_filename="/output/task_progress.json",
                   bbox="7.4,43.72,7.44,43.76", default_view="43.7,7.4,12", max_zoom=12)
     args = build_parser().parse_args(_argv_for(config))

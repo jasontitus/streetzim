@@ -21,7 +21,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 TARGET = ROOT / "offliner-definition.json"
 
-from streetzim.cli import ZIM_METADATA_FLAGS, ZIMFARM, build_parser  # noqa: E402
+from streetzim.cli import (  # noqa: E402
+    MODEL_VALIDATORS, ZIM_METADATA_FLAGS, ZIMFARM, build_parser)
 
 SKIP_ACTIONS = (argparse._HelpAction, argparse._VersionAction)
 
@@ -56,6 +57,9 @@ def definition() -> dict:
         }
         if isinstance(action.choices, range):
             entry["min"], entry["max"] = action.choices.start, action.choices.stop - 1
+        if extra.get("choices") == "KNOWN_AREAS":
+            from create_osm_zim import KNOWN_AREAS
+            extra["choices"] = sorted(KNOWN_AREAS)
         entry.update(extra)
         flags[key] = entry
     return {
@@ -63,6 +67,7 @@ def definition() -> dict:
         "stdOutput": True,
         "stdStats": True,
         "flags": flags,
+        "modelValidators": MODEL_VALIDATORS,
         "zimMetadata": [{"metadata": m, "flag": f} for m, f in ZIM_METADATA_FLAGS.items()
                         if f in flags],
     }
@@ -73,7 +78,7 @@ def render() -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     ap.add_argument("--check", action="store_true")
     args = ap.parse_args()
     text = render()

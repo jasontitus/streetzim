@@ -70,3 +70,6 @@ salvage/
 
 # pip install -e .
 *.egg-info/
+
+# pip wheel .
+/build/

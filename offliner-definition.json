@@ -60,7 +60,7 @@
       "description": "Semicolon (;) delimited list of tags to add to the ZIM"
     },
     "illustration_url": {
-      "type": "string",
+      "type": "url",
       "required": false,
       "title": "Illustration URL",
       "description": "URL (or path) of a PNG, JPEG or WebP used for the ZIM illustration. Default: a generated map icon"
@@ -86,10 +86,26 @@
       "description": "Keep temporary files (the build log is always verbose)"
     },
     "area": {
-      "type": "string",
+      "type": "string-enum",
       "required": false,
       "title": "Preset area",
-      "description": "A preset area from create_osm_zim.py's KNOWN_AREAS, e.g. monaco"
+      "description": "A preset area from create_osm_zim.py's KNOWN_AREAS, e.g. monaco",
+      "choices": [
+        "austin",
+        "california",
+        "colorado",
+        "dc",
+        "district-of-columbia",
+        "iran",
+        "liechtenstein",
+        "manhattan",
+        "monaco",
+        "portland",
+        "san-francisco",
+        "united-states",
+        "us",
+        "virginia"
+      ]
     },
     "include_poly": {
       "type": "string",
@@ -105,7 +121,7 @@
       "pattern": "^-?[0-9.]+,-?[0-9.]+,-?[0-9.]+,-?[0-9.]+$"
     },
     "pbf_url": {
-      "type": "string",
+      "type": "url",
       "required": false,
       "title": "OSM extract URL",
       "description": "OSM extract (.osm.pbf) to build from. Default: the Geofabrik extract of --area / --include-poly"
@@ -146,10 +162,20 @@
       "type": "integer",
       "required": false,
       "title": "ZIM workers",
-      "description": "Compression threads for libzim. Default: CPU count",
+      "description": "Compression threads for libzim. Default: the CPU count, at most 20",
       "min": 1
     }
   },
+  "modelValidators": [
+    {
+      "name": "check_exclusive_fields",
+      "fields": [
+        "area",
+        "include_poly",
+        "bbox"
+      ]
+    }
+  ],
   "zimMetadata": [
     {
       "metadata": "Name",

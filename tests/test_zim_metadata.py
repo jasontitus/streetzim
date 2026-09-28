@@ -38,9 +38,11 @@ def test_cleaning_and_empty_values():
         zm.build_overrides(name="")
 
 
-def test_long_description_must_differ():
-    with pytest.raises(ValueError, match="differ"):
-        zm.build_overrides(description="Same text", long_description="Same text")
+def test_whitespace_only_is_empty_like_zimscraperlib():
+    with pytest.raises(ValueError, match="empty"):
+        zm.build_overrides(title="\u00a0 \u2003")
+    # zimscraperlib has no Description != LongDescription rule; neither do we.
+    assert zm.build_overrides(description="Same", long_description="Same")
 
 
 def test_only_given_values_are_returned():
@@ -55,6 +57,9 @@ def test_tags_deduplicated_and_merged_after_builder_tags():
     ours = "maps;osm;offline;_pictures:yes;_ftindex:yes"
     assert zm.merge_tags(ours, ["osm", "extra"]) == ours + ";extra"
     assert zm.merge_tags(ours, None) == ours
+    # A `_key:value` tag replaces ours with the same key (maps2zim's merge).
+    assert zm.merge_tags(ours, ["_pictures:no", "x"]) == \
+        "maps;osm;offline;_ftindex:yes;_pictures:no;x"
 
 
 def _png(size, mode="RGB", fmt="PNG"):
@@ -122,6 +127,12 @@ def test_defaults_unchanged_and_license_lists_only_present_layers(tmp_path):
     lic = md["License"].decode()
     assert "ODbL" in lic and "NC" not in lic and "Copernicus" not in lic
     assert "Wikipedia" not in lic
+
+
+def test_osm_wiki_tags_alone_do_not_claim_wikipedia(tmp_path):
+    lic = _build(tmp_path, wiki_cross_refs={("X", 43.7, 7.4): {"wikipedia": "en:X"}}
+                 )["License"].decode()
+    assert "Wikipedia" not in lic and "Wikidata" not in lic
 
 
 def test_license_names_satellite_terrain_and_wiki_when_present(tmp_path):
