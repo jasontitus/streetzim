@@ -73,6 +73,7 @@ from streetzim.search_extract import (  # noqa: F401
 # re-exported so `import create_osm_zim` callers (cloud/, tests/) and
 # the PHASE_TIMER lookup in cloud/manifest_writer.py keep working.
 from streetzim.common import (  # noqa: F401
+    CACHE_DIR,
     _builtin_print,
     _PhaseTimer,
     _fmt_phase_dur,
@@ -999,9 +1000,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         if include_satellite and bbox_str:
             # Use format/size-specific cache dir to avoid mixing tile formats
             sat_cache_suffix = f"_{satellite_format}_{satellite_tile_size}"
-            satellite_dir = os.path.join(SCRIPT_DIR, f"satellite_cache{sat_cache_suffix}")
+            satellite_dir = os.path.join(CACHE_DIR, f"satellite_cache{sat_cache_suffix}")
         if include_terrain and bbox_str:
-            terrain_dir = args.terrain_dir or os.path.join(SCRIPT_DIR, "terrain_cache")
+            terrain_dir = args.terrain_dir or os.path.join(CACHE_DIR, "terrain_cache")
 
         if include_satellite and include_terrain and bbox_str:
             from concurrent.futures import ThreadPoolExecutor as StepPool

@@ -17,6 +17,7 @@ part may open a function that a later part closes (initRouting spans
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -25,11 +26,24 @@ PARTS = ROOT / "resources" / "viewer" / "src" / "index"
 TARGET = ROOT / "resources" / "viewer" / "index.html"
 
 
-def build() -> bytes:
-    parts = sorted(p for p in PARTS.iterdir() if p.is_file() and not p.name.startswith("."))
-    if not parts:
+PART_NAME = re.compile(r"^\d{3}-[\w-]+\.(html|js)$")
+
+
+def parts() -> list[Path]:
+    """The parts, in order. Anything else in the directory (a README, an
+    editor backup, a .orig/.rej) is an error rather than being spliced into
+    the shipped viewer; hidden files are ignored."""
+    found = sorted(p for p in PARTS.iterdir() if not p.name.startswith("."))
+    stray = [p.name for p in found if not PART_NAME.match(p.name)]
+    if stray:
+        raise SystemExit(f"not a viewer part (want NNN-name.html|js): {stray} in {PARTS}")
+    if not found:
         raise SystemExit(f"no parts in {PARTS}")
-    return b"".join(p.read_bytes() for p in parts)
+    return found
+
+
+def build() -> bytes:
+    return b"".join(p.read_bytes() for p in parts())
 
 
 def main() -> int:
@@ -43,7 +57,7 @@ def main() -> int:
             print(f"{TARGET.relative_to(ROOT)} does not match {PARTS.relative_to(ROOT)}/*.\n"
                   "Edit the parts, then run: python tools/build_viewer.py", file=sys.stderr)
             return 1
-        print(f"ok: {TARGET.relative_to(ROOT)} matches its {len(list(PARTS.iterdir()))} parts")
+        print(f"ok: {TARGET.relative_to(ROOT)} matches its {len(parts())} parts")
         return 0
     TARGET.write_bytes(data)
     print(f"wrote {TARGET.relative_to(ROOT)} ({len(data):,} bytes)")

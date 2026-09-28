@@ -12,7 +12,7 @@ import urllib.request
 # The builder's flushing, phase-timing print (see streetzim/common.py).
 from streetzim.common import (
     print,
-    SCRIPT_DIR,
+    CACHE_DIR,
     COPERNICUS_DEM_URL,
     COPERNICUS_DEM_URL_GLO90,
     parse_bbox,
@@ -354,7 +354,7 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
 
     os.makedirs(dest_dir, exist_ok=True)
     # Always use the shared DEM sources directory (large raw files, ~547 GB total)
-    dem_dir = os.path.join(SCRIPT_DIR, "terrain_cache", "dem_sources")
+    dem_dir = os.path.join(CACHE_DIR, "terrain_cache", "dem_sources")
     os.makedirs(dem_dir, exist_ok=True)
 
     # Check if terrain generation is already complete for THIS SPECIFIC bbox.

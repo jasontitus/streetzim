@@ -39,6 +39,9 @@ ENV PATH=/venv/bin:$PATH
 COPY . /app
 RUN mkdir -p /output
 WORKDIR /output
+# Download caches (satellite, DEM, Wikidata, Wikipedia) go to the mounted
+# volume, so they survive `docker run --rm` and work with a non-root --user.
+ENV STREETZIM_CACHE_DIR=/output/cache
 ENV PATH=/app:/app/scripts:$PATH
 ENTRYPOINT []
 CMD ["create_osm_zim.py", "--help"]

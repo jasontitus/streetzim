@@ -463,13 +463,19 @@ class ManifestCreator:
         # Walk sys.modules and pick whichever copy has a PHASE_TIMER —
         # they share file path so it's the same instance whichever
         # module name we ended up under.
+        # PHASE_TIMER now lives in streetzim.common (one instance, whatever
+        # imported the builder); the sys.modules walk stays as a fallback for
+        # an older checkout on sys.path.
         import sys
         timer = None
-        for mod_name in ("__main__", "create_osm_zim"):
-            mod = sys.modules.get(mod_name)
-            if mod is not None and hasattr(mod, "PHASE_TIMER"):
-                timer = getattr(mod, "PHASE_TIMER")
-                break
+        try:
+            from streetzim.common import PHASE_TIMER as timer
+        except ImportError:
+            for mod_name in ("__main__", "create_osm_zim"):
+                mod = sys.modules.get(mod_name)
+                if mod is not None and hasattr(mod, "PHASE_TIMER"):
+                    timer = getattr(mod, "PHASE_TIMER")
+                    break
         if timer is not None:
             try:
                 timer.record_subphase(

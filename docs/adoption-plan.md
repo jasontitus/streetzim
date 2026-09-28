@@ -8,7 +8,7 @@ which covers the other route: porting features into maps2zim.
 
 | # | the review asked for | status |
 |---|---|---|
-| 1 | Split the builder and viewer into modules, with a proper front-end build | **In progress.** See below. |
+| 1 | Split the builder and viewer into modules, with a proper front-end build | **Done for the builder and `index.html`**; no bundler (see below). |
 | 2 | Remove the hosting/operations layer | **Separated, not removed yet.** 31 dead scripts retired to `attic/`; the 42 live ones are catalogued in [scripts.md](scripts.md). Next step below. |
 | 3 | Replace zimru/xapianbuilder with libzim, or bring them under openZIM | **Done.** libzim is the default; CI builds, rewrites and serves ZIMs with libzim, zim-tools and kiwix-tools only. The Rust packer is an optional speed-up. |
 | 4 | Freeze and document the binary formats; drop legacy versions | **Documented and frozen** ([formats.md](formats.md), [search-records.md](search-records.md)). Dropping readers waits on rebuilding the pre-June continent ZIMs (retirement table in formats.md). |
@@ -25,7 +25,7 @@ Rule for every split: **behaviour-neutral and verified mechanically.**
 | `resources/viewer/index.html` | 11,007 lines, edited by hand | 24 parts in `resources/viewer/src/index/` (largest 976 lines), joined by `tools/build_viewer.py` | the joined output is byte-identical to the file; CI and a test fail if they drift |
 | search extraction | inside `create_osm_zim.py` | `streetzim/search_extract.py` | golden-build diff |
 | routing formats | under `tests/` | `streetzim/routing/` | golden-build diff |
-| `create_osm_zim.py` | 7,162 lines | being split into `streetzim/` modules, with `create_osm_zim.py` kept as the CLI | golden-build diff (fixed inputs, every entry compared) |
+| `create_osm_zim.py` | 7,188 lines | a 1,478-line CLI; the work happens in `streetzim/{common,tiles,satellite,terrain,addresses,zim_writer}.py` and `streetzim/routing/build.py`. `create_zim` is still one 1,900-line function | golden-build diff (fixed inputs, every entry compared) and an independent review that ran every production flag on old and new code |
 | `places.html`, `routing-worker.js` | 2.5k / 1.7k lines | unchanged | small enough for now |
 
 "A proper front-end build" in openZIM's sense (ES modules, bundler, npm) is

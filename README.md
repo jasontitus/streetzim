@@ -151,7 +151,7 @@ resources/viewer/ (MapLibre app) ───┤
 | `resources/viewer/` | the viewer shipped inside every ZIM (`index.html`, built from `src/index/` by `tools/build_viewer.py`; `places.html`; `routing-worker.js`) |
 | `resources/tilemaker/` | tilemaker config and Lua profile |
 | `cloud/` | Python modules the builder imports (`chip_rules`, `search_shards`, `repackage_zim`, …), the validator, and operations scripts |
-| `streetzim/` | importable building blocks: `streetzim.routing` (graph formats, spatial cells, reference routers) |
+| `streetzim/` | the builder's modules: `tiles`, `terrain`, `satellite`, `addresses`, `search_extract`, `zim_writer`, `common`, and `routing/` (graph build, formats, reference routers) |
 | `tests/` | pytest and Node tests |
 | `web/` | streetzim.web.app catalogue and the `/drive/` PWA |
 | `preview-proxy/` | archive.org range proxy for online previews |

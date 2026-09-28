@@ -37,6 +37,9 @@ function ok(name, cond, detail) {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const browser = await puppeteer.launch({
+  // CI runners sometimes take over puppeteer's 30 s default just to start
+  // Chrome (seen once: the ZIM had validated and no test had run yet).
+  timeout: 120_000,
   headless: !HEADFUL,
   executablePath: CHROME_PATH,
   args: ['--no-sandbox', '--disable-dev-shm-usage', '--allow-file-access-from-files'],

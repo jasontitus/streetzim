@@ -7,7 +7,7 @@ import urllib.request
 # The builder's flushing, phase-timing print (see streetzim/common.py).
 from streetzim.common import (
     print,
-    SCRIPT_DIR,
+    CACHE_DIR,
     SATELLITE_TILE_URL,
     parse_bbox,
 )
@@ -54,7 +54,7 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
 
     os.makedirs(dest_dir, exist_ok=True)
     # Shared source cache for original JPEG tiles (download once, encode to any format)
-    source_cache_dir = os.path.join(SCRIPT_DIR, "satellite_cache_sources")
+    source_cache_dir = os.path.join(CACHE_DIR, "satellite_cache_sources")
     os.makedirs(source_cache_dir, exist_ok=True)
     total_downloaded = 0
     total_skipped = 0
@@ -69,14 +69,14 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
     # pasted at (dx*256, dy*256) overflowed the canvas and overwrote its
     # neighbouring quadrants.
     _format_caches = []
-    for d in sorted(glob.glob(os.path.join(SCRIPT_DIR, "satellite_cache_*_*"))):
+    for d in sorted(glob.glob(os.path.join(CACHE_DIR, "satellite_cache_*_*"))):
         if os.path.isdir(d) and d != dest_dir and d != source_cache_dir:
             # Dir name: satellite_cache_<ext>_<size>
             parts = os.path.basename(d).replace("satellite_cache_", "").split("_")
             if len(parts) >= 2 and parts[1] == "256":
                 _format_caches.append((d, parts[0]))
     # Also check the legacy satellite_cache/ (256 px WebP tiles)
-    legacy_cache = os.path.join(SCRIPT_DIR, "satellite_cache")
+    legacy_cache = os.path.join(CACHE_DIR, "satellite_cache")
     if os.path.isdir(legacy_cache) and legacy_cache != dest_dir:
         _format_caches.append((legacy_cache, "webp"))
 

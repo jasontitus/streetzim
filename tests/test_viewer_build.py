@@ -15,7 +15,9 @@ def test_index_html_is_built_from_parts():
 
 
 def test_every_part_is_used_and_nonempty():
-    parts = sorted((ROOT / "resources/viewer/src/index").iterdir())
+    sys.path.insert(0, str(ROOT / "tools"))
+    import build_viewer
+    parts = build_viewer.parts()
     assert len(parts) >= 20
     assert all(p.stat().st_size > 0 for p in parts)
     assert parts[0].name.startswith("000-") and parts[-1].name.startswith("900-")
