@@ -91,7 +91,8 @@ class TestEmptyTileSkipLogic(unittest.TestCase):
 
 
 class TestSkipBoundsInSourceCode(unittest.TestCase):
-    """Read the relevant section of create_osm_zim.py and assert the
+    """Read the relevant section of streetzim/zim_writer.py (create_zim,
+    moved out of create_osm_zim.py) and assert the
     skip predicate is the byte-length-zero check, not a >0-byte
     threshold. Catches the most likely regression: someone changes
     `if not tile_data` to `if len(tile_data) < N` and silently drops
@@ -99,12 +100,12 @@ class TestSkipBoundsInSourceCode(unittest.TestCase):
     require importing the (slow) main module."""
 
     def test_skip_predicate_is_zero_only(self):
-        src = (ROOT / "create_osm_zim.py").read_text(encoding="utf-8")
+        src = (ROOT / "streetzim" / "zim_writer.py").read_text(encoding="utf-8")
         # The skip line should look like `if not tile_data:`.
         # Reject thresholded variants like `< 60` or `<= 100` near it.
         marker = "tiles_skipped_empty += 1"
         self.assertIn(marker, src,
-            "tiles_skipped_empty counter missing from create_osm_zim.py")
+            "tiles_skipped_empty counter missing from streetzim/zim_writer.py")
         # Find the lines around the marker.
         lines = src.splitlines()
         marker_idx = next(i for i, L in enumerate(lines) if marker in L)

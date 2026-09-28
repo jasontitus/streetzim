@@ -17,13 +17,20 @@ ZIM.
 
 **Core: builds a ZIM from OSM data.** Portable, tested, run by CI.
 
-- `create_osm_zim.py`: the builder. At import time it needs
-  `cloud/viewer_slots.py`, `cloud/search_shards.py` and
-  `streetzim/search_extract.py`; later it lazily imports `cloud/{manifest_writer,
+- `create_osm_zim.py`: the builder's CLI (argparse + `main()`). The steps it
+  runs live in the `streetzim/` package: `common.py` (the phase-timing `print`,
+  `PHASE_TIMER`, repo paths, URLs, `download_file`, `parse_bbox`), `tiles.py`
+  (tilemaker, MBTiles readers, fonts, MapLibre), `satellite.py`, `terrain.py`,
+  `addresses.py` (PBF addresses, Overture merges, wiki tags),
+  `search_extract.py`, `routing/build.py` (graph extraction + chunking) and
+  `zim_writer.py` (`create_zim`). `create_osm_zim.py` re-exports every name
+  those modules define, so `import create_osm_zim` callers keep working. At
+  import time it also needs `cloud/viewer_slots.py` and
+  `cloud/search_shards.py`; later it lazily imports `cloud/{manifest_writer,
   wiki_articles, chip_shards, chip_rules, wikidata_titles}.py`,
-  `wikidata_cache.py`, and the rest of the `streetzim/` package
-  (`streetzim.routing`: graph formats, spatial cells, reference routers).
-  `tests/szrg_*.py` are aliases of those modules, kept so old imports work.
+  `wikidata_cache.py`, and `streetzim.routing` (graph formats, spatial cells,
+  reference routers). `tests/szrg_*.py` are aliases of those modules, kept so
+  old imports work.
 - `resources/viewer/`: the viewer baked into every ZIM. `resources/tilemaker/`: the tile profile.
 - `cloud/validate_zim.py`: the release gate. `cloud/repackage_zim.py` / `cloud/patch_viewer_inplace.py` (libzim), and the accelerator variant `cloud/swap_viewer_rust.py`: rewrite published ZIMs.
 - **The ZIM writer is libzim** (python-libzim), which is the default. `zimcheck`
@@ -174,7 +181,8 @@ scripts that may be running on the production host (see
 - **trap:** `cloud/regions.tsv` still has `switzerland-nosat*` rows with no
   matching `region-variants.tsv` rows. A full registry run would build them as
   full satellite z14 ZIMs under "light" names.
-- **Monolithic files.** `create_osm_zim.py` (~8k lines) and
+- **Monolithic files.** `streetzim/zim_writer.py` (`create_zim`, ~1.9k
+  lines), `create_osm_zim.py`'s `main()` (~1.1k lines) and
   `resources/viewer/index.html` (~11k lines). The viewer's BEGIN/END blocks
   (`chip-shards`, `search-shards`, `chip-rules`, `chip-rail`) are the seams for
   splitting it. A split must keep shipping the same three slot files (inline
