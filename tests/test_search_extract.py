@@ -148,9 +148,25 @@ def test_raw_key_list_matches_the_tilemaker_profile():
     from streetzim.search_extract import RAW_OSM_KEY_CLASSES
     lua = (ROOT / "resources/tilemaker/process-openmaptiles.lua").read_text(encoding="utf-8")
     assert "class = poiClasses[v] or k" in lua
-    block = lua[lua.index("poiTags"):lua.index("poiClasses")]
-    keys = set(re.findall(r"(\w+)\s*=\s*Set\s*\{", block))
+    defs = list(re.finditer(r"^poiTags\s*=\s*\{", lua, re.M))
+    assert len(defs) == 1
+    start = defs[0].start()
+    block = lua[start:lua.index("poiClasses", start)]
+    # Keys as `amenity = Set {` or `["amenity"] = Set {`.
+    keys = set(re.findall(
+        r"""(?:\b(\w+)|\[\s*["'](\w+)["']\s*\])\s*=\s*Set\s*\{""", block))
+    keys = {a or b for a, b in keys}
     assert "amenity" in keys and "tourism" in keys
+    # No key added to poiTags anywhere else (poiTags.x = / poiTags["x"] =),
+    # which the block above would miss: the table is defined once and
+    # otherwise only iterated.
+    assert not re.search(r"poiTags\s*(?:\.\s*\w+|\[[^\]]*\])\s*=", lua)
+    assert len(re.findall(r"\bpoiTags\b", lua)) == 1 + len(
+        re.findall(r"pairs\(\s*poiTags\s*\)", lua))
+    # Real OpenMapTiles classes: Planetiler writes them too (OpenFreeMap's
+    # Monaco tiles have shop, railway and office POIs), so they stay as the
+    # subtype. The profile has no office key today; office is listed so
+    # adding one would not turn it into a raw key and change OpenFreeMap.
     omt_classes = {"shop", "railway", "aerialway", "office"}
     assert keys - omt_classes == RAW_OSM_KEY_CLASSES
     assert not RAW_OSM_KEY_CLASSES & omt_classes

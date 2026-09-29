@@ -305,10 +305,12 @@ const CAT  = HERE + 'category-index/';
 // category-index/<cat>.json records (cheap one-fetch).
 // We mix two selectors: (1) `subtypes` — always-include by subtype
 // (OpenMapTiles `class`/`subclass`). (2) `nameInclude` — broaden by
-// name when OMT collapsed the real type into a generic bucket. OMT
-// doesn't emit a dedicated `museum` class for example — those show
-// up as `tourism` — so the nameInclude fallback catches them without
-// inviting every random tourism POI into the Museums chip.
+// name when the record's type is only a generic bucket. OpenMapTiles
+// has a `museum` class, but older tilemaker-built ZIMs stored
+// tilemaker's raw OSM key instead (`tourism`, `amenity`, …; newer
+// builds store the subclass), and an attraction named "… Museum" is
+// only `attraction` — so the nameInclude fallback catches those
+// without inviting every random tourism POI into the Museums chip.
 // Category chips. `subtypes` matches `r.s` (record subtype). After the
 // Overture places merge, POI records have their subtype rewritten to
 // Overture's normalized category when OMT had a noisy bucket — so a
