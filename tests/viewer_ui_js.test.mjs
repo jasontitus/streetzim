@@ -62,7 +62,8 @@ function memStorage(opts = {}) {
 
 function loadView(env = {}) {
   const document = env.document || fakeDocument();
-  const window = { addEventListener() {} };
+  const winOn = {};
+  const window = { addEventListener(t, f) { (winOn[t] = winOn[t] || []).push(f); }, _on: winOn };
   if ('storage' in env) {
     Object.defineProperty(window, 'localStorage', {
       get() { if (env.storage === 'throws') throw new Error('SecurityError'); return env.storage; },
@@ -72,10 +73,18 @@ function loadView(env = {}) {
     VIEW_SRC + '\nreturn { SZ_VIEWER_VERSION, _szStorage, _szViewKey, _szHashSetsView,' +
     ' _szReadView, _szWriteView, _szOpeningCamera, initViewMemory, initHomeButton,' +
     ' _szAboutText, _szMonth, initAbout };');
-  const timers = [];
+  // Fake timers: `timers` holds the pending ones; runTimers() fires them.
+  const timers = new Map();
+  let next = 1;
   const api = fn(window, document, { pathname: env.pathname || '/C/index.html' },
-    (f) => { timers.push(f); return timers.length; }, () => {});
-  return { ...api, document, window, timers };
+    (f, ms) => { timers.set(next, { f, ms }); return next++; }, (id) => { timers.delete(id); });
+  const pending = (ms) => [...timers.values()].filter((t) => ms === undefined || t.ms === ms).length;
+  const runTimers = (ms) => {
+    const due = [...timers.entries()].filter(([, t]) => ms === undefined || t.ms === ms);
+    due.forEach(([id]) => timers.delete(id));
+    due.forEach(([, t]) => t.f());
+  };
+  return { ...api, document, window, timers, pending, runTimers };
 }
 
 const CONFIG = { name: 'Monaco', center: [7.42, 43.74], zoom: 13, minZoom: 0,
@@ -140,15 +149,30 @@ await ok('views are kept per map and invalid ones ignored', () => {
   assert.strictEqual(v._szWriteView(CONFIG, memStorage({ throwOnSet: true }), { lng: 1, lat: 1, zoom: 1 }), false);
 });
 
+// A map whose camera methods move `cam` and fire movestart/moveend like
+// MapLibre (no movestart while already moving; `hold` leaves a move open).
 function fakeMap() {
   const on = {};
-  return {
-    on: (t, f) => { on[t] = f; }, fire: (t, e) => on[t] && on[t](e || {}),
+  const canvasOn = {};
+  const map = {
+    cam: { lng: 7.425, lat: 43.735, zoom: 17, bearing: 0 },
+    moving: false,
+    on: (t, f) => { (on[t] = on[t] || []).push(f); },
+    fire(t, e) { (on[t] || []).forEach((f) => f(e || {})); },
     controls: [], eased: null,
     addControl(c, pos) { this.controls.push([c, pos]); },
-    easeTo(o) { this.eased = o; },
-    getCenter: () => ({ lng: 7.425, lat: 43.735 }), getZoom: () => 17, getBearing: () => 0, getPitch: () => 0,
+    getCanvasContainer: () => ({ addEventListener: (t, f) => { canvasOn[t] = f; } }),
+    input(t) { canvasOn[t]({ type: t }); },
+    start(e) { if (!this.moving) { this.moving = true; this.fire('movestart', e); } },
+    end(e) { this.moving = false; this.fire('moveend', e); },
+    move(o, e, hold) { this.start(e); Object.assign(this.cam, o); if (!hold) this.end(e); },
+    easeTo(o, e, hold) { this.eased = o; this.move(o.center ? { lng: o.center[0], lat: o.center[1], zoom: o.zoom } : o, e, hold); },
+    flyTo(o, e, hold) { this.easeTo(o, e, hold); },
+    jumpTo(o, e) { this.easeTo(o, e); },
+    getCenter() { return { lng: this.cam.lng, lat: this.cam.lat }; },
+    getZoom() { return this.cam.zoom; }, getBearing() { return this.cam.bearing; }, getPitch: () => 0,
   };
+  return map;
 }
 
 const GESTURE = { originalEvent: { type: 'mousedown' } };
@@ -160,7 +184,7 @@ await ok('reader moves are saved, but not while driving', () => {
   v.initViewMemory(map, CONFIG);
   map.fire('movestart', GESTURE);
   map.fire('moveend', {});          // e.g. the end of a drag's inertia
-  v.timers.pop()();
+  v.runTimers();
   assert.deepStrictEqual(JSON.parse(storage.m.get(v._szViewKey(CONFIG))),
     { c: [7.425, 43.735], z: 17, h: '7.42,43.74,13' });
   storage.m.clear();
@@ -168,8 +192,100 @@ await ok('reader moves are saved, but not while driving', () => {
   v.document.body.appendChild(hud);
   map.fire('movestart', GESTURE);
   map.fire('moveend', GESTURE);
-  v.timers.pop()();
+  v.runTimers();
   assert.strictEqual(storage.m.size, 0);
+});
+
+const saved = (v, storage) => JSON.parse(storage.m.get(v._szViewKey(CONFIG)) || 'null');
+
+await ok('a plain wheel notch (no originalEvent) is saved', () => {
+  const storage = memStorage();
+  const v = loadView({ storage });
+  const map = fakeMap();
+  v.initViewMemory(map, CONFIG);
+  map.input('wheel');
+  map.move({ zoom: 16 }, {});
+  assert.strictEqual(v.pending(400), 1);
+  v.runTimers();
+  assert.strictEqual(saved(v, storage).z, 16);
+});
+
+await ok('code that cuts into a drag is not saved as the reader\'s', () => {
+  const storage = memStorage();
+  const v = loadView({ storage });
+  const map = fakeMap();
+  v.initViewMemory(map, CONFIG);
+  map.input('pointerdown');
+  map.move({ lng: 7.43 }, GESTURE, true);              // drag, button still down
+  map.flyTo({ center: [7.41, 43.73], zoom: 14 });      // no movestart: already moving
+  v.runTimers();
+  assert.strictEqual(saved(v, storage), null);
+});
+
+await ok('a wheel during a flyTo that carries on does not make it the reader\'s', () => {
+  const storage = memStorage();
+  const v = loadView({ storage });
+  const map = fakeMap();
+  v.initViewMemory(map, CONFIG);
+  map.flyTo({ center: [7.43, 43.74], zoom: 15 }, undefined, true);
+  map.input('wheel');
+  map.end({});
+  v.runTimers();
+  assert.strictEqual(saved(v, storage), null);
+  // The reader's next move is theirs again.
+  map.input('wheel');
+  map.move({ zoom: 15.5 }, {});
+  v.runTimers();
+  assert.strictEqual(saved(v, storage).z, 15.5);
+});
+
+await ok('pan then Home: the pan is saved, not a mid-ease or Home camera', () => {
+  const storage = memStorage();
+  const v = loadView({ storage });
+  const map = fakeMap();
+  v.initViewMemory(map, CONFIG);
+  map.move({ lng: 7.431, zoom: 15 }, GESTURE);          // pan ends, save pending
+  assert.strictEqual(v.pending(400), 1);
+  v.runTimers(0);                                       // the event loop turns before a click
+  map.easeTo({ center: CONFIG.center, zoom: 13 });
+  assert.strictEqual(v.pending(400), 0);
+  v.runTimers();
+  assert.deepStrictEqual(saved(v, storage).c, [7.431, 43.735]);
+  assert.strictEqual(saved(v, storage).z, 15);
+});
+
+await ok('a new movestart cancels the pending save', () => {
+  const storage = memStorage();
+  const v = loadView({ storage });
+  const map = fakeMap();
+  v.initViewMemory(map, CONFIG);
+  map.move({ zoom: 15 }, GESTURE);
+  map.start({});                                        // unmarked, no recent input
+  assert.strictEqual(v.pending(400), 0);
+  map.end({});
+  v.runTimers();
+  assert.strictEqual(saved(v, storage), null);
+});
+
+await ok('a small rotate is saved after its snap to north', () => {
+  const storage = memStorage();
+  const v = loadView({ storage });
+  const map = fakeMap();
+  v.initViewMemory(map, CONFIG);
+  map.input('touchstart');
+  map.move({ bearing: -3.4 }, GESTURE);
+  // MapLibre calls resetNorth() from inside that moveend, without an event.
+  const fire = map.fire;
+  let snapped = false;
+  map.fire = function(t, e) {
+    fire.call(this, t, e);
+    if (t === 'moveend' && !snapped) { snapped = true; map.easeTo({ bearing: 0 }, undefined); }
+  };
+  map.cam.bearing = -3.4;
+  map.start(GESTURE); map.end(GESTURE);
+  v.runTimers();
+  assert.strictEqual(map.cam.bearing, 0);
+  assert.strictEqual(saved(v, storage).b, undefined);
 });
 
 await ok('opening, deep links and other programmatic moves save nothing', () => {
@@ -180,8 +296,10 @@ await ok('opening, deep links and other programmatic moves save nothing', () => 
   const map = fakeMap();
   v.initViewMemory(map, CONFIG);
   map.fire('moveend', {});                            // the opening camera
-  map.fire('movestart', {}); map.fire('moveend', {}); // #map= / #pin= flyTo, Home, route fit
-  assert.strictEqual(v.timers.length, 0);
+  map.fire('movestart', {}); map.fire('moveend', {}); // unmarked moves
+  map.flyTo({ center: [7.41, 43.74], zoom: 16 });      // #map= / #pin= deep link
+  map.easeTo({ center: CONFIG.center, zoom: 13 });     // Home
+  assert.strictEqual(v.pending(400), 0);
   assert.strictEqual(storage.m.get(v._szViewKey(CONFIG)), before);
 });
 
@@ -204,7 +322,7 @@ await ok('no storage: memory is off and nothing throws', () => {
   const map = fakeMap();
   v.initViewMemory(map, CONFIG);
   map.fire('moveend', GESTURE);
-  assert.strictEqual(v.timers.length, 0);
+  assert.strictEqual(v.pending(), 0);
 });
 
 await ok('Home returns to the config view, and not while driving', () => {
