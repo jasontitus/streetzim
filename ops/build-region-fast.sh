@@ -55,8 +55,13 @@ SEARCH=/storage/streetzim/world-data/regions/${SRC_ID}.search.jsonl
 WD=/storage/streetzim/wikidata_cache
 TERRAIN=/storage/streetzim/terrain_cache
 LOWZ=/storage/streetzim/terrain_cache/dem_sources/world_dem_32k.tif
-OVERTURE_RELEASE="${OVERTURE_RELEASE:-2026-04-15.0}"
-# Only reads the cache: the callers resolve `latest` to a name first.
+# Only reads the cache, so it needs the release of the cached parquets: no
+# default (the old one is gone from the bucket, and a missing parquet
+# silently drops --overture-places), and the callers resolve `latest` first.
+if [ -z "${OVERTURE_RELEASE:-}" ]; then
+    echo "FATAL: OVERTURE_RELEASE is not set — pass the release of the overture_cache/ parquets (e.g. OVERTURE_RELEASE=2026-08-19.0)" >&2
+    exit 1
+fi
 if [ "$OVERTURE_RELEASE" = latest ]; then
     echo "FATAL: OVERTURE_RELEASE=latest — pass the resolved name (download_overture_data.py addresses places --print-release)" >&2
     exit 1

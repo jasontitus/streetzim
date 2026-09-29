@@ -126,9 +126,12 @@ ln -sf /storage/streetzim/search_cache/world.jsonl          ${ID}.search.jsonl
 
 Use `download_overture_data.py` for both themes. Cache lives in
 `overture_cache/`. Filename pattern is what `build-region-fast.sh` looks for
-(with `OVERTURE_RELEASE` set to match). Resolve the release once and use the
-name for both files (the downloader's default, `--release latest`, is the
-newest release on the bucket, which moves when Overture publishes):
+(with `OVERTURE_RELEASE` set to match). Use one release for both files. To
+stay on the current round's release (what the ops wrappers default to), set
+`REL=2026-08-19.0`. For the newest complete release instead (the
+downloader's own default, `--release latest`: STAC's "latest", walking back
+past a release still being uploaded; it moves when Overture publishes),
+resolve it once:
 
 ```sh
 REL=$(venv-linux/bin/python3 download_overture_data.py addresses places --print-release)
@@ -169,11 +172,18 @@ setsid nohup env OVERTURE_RELEASE="$REL" WIKI_IMAGES=all \
     > "${ID}-build.out" 2>&1 < /dev/null &
 ```
 
-- `OVERTURE_RELEASE` **must** match the release in your parquet filenames. The
-  wrapper defaults to `2026-04-15.0`; if that file is absent it silently drops
+- `OVERTURE_RELEASE` **must** match the release in your parquet filenames, and
+  `build-region-fast.sh` refuses to start without it (it used to default to
+  `2026-04-15.0`). If the named file is absent it silently drops
   `--overture-places` (`[ -f "$PLACES" ] && ARGS+=…`) and the build ships
   without Overture — the same failure that cost switzerland-light 748,654
   place records.
+- The wrappers (`build-refresh-queue.sh`, `ship-region.sh`,
+  `cloud/build_region.sh`) default to the pinned round release, 2026-08-19.0;
+  `OVERTURE_RELEASE=latest` opts in to the newest complete release, resolved
+  once at start. The queue records its release in `queue-refresh.release`,
+  and `--continue` refuses a different one unless `OVERTURE_RELEASE` names a
+  release explicitly.
 - `WIKI_IMAGES`: `lead` for continent-tier regions, `all` otherwise (the rule
   in `build-refresh-queue.sh`).
 - If the region's `.mbtiles` is a symlink to the 107 GB world tile file, pass

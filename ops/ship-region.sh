@@ -19,8 +19,11 @@ unset _ops_real _ops_old
 # Usage: ./ship-region.sh <id> [--no-upload]
 #   Region id must exist in cloud/regions.tsv (bbox, smoke pair and
 #   search term all come from there).
-# Env: OVERTURE_RELEASE (default latest: resolved once at start to the newest
-#      release with addresses + places, logged, and used in the cache names)
+# Env: OVERTURE_RELEASE (default 2026-08-19.0, the round's pinned release, so
+#      callers that do not set it, e.g. .after-round-rebuild-ca-dc.sh, keep
+#      using the round's cached parquets). OVERTURE_RELEASE=latest opts in to
+#      the newest complete release: resolved once at start, logged, and used
+#      in the cache names.
 #      WAIT_FOR_PBF=1  block until the extractor has finished this
 #                      region's PBF instead of failing
 set -uo pipefail
@@ -28,7 +31,7 @@ cd /storage/streetzim
 # bbox_stale / bbox_mark
 . ops/region-bbox.sh || exit 1
 export TMPDIR=/storage/streetzim/tmp
-export OVERTURE_RELEASE="${OVERTURE_RELEASE:-latest}"
+export OVERTURE_RELEASE="${OVERTURE_RELEASE:-2026-08-19.0}"
 # 403/429/5xx/timeouts in the liveness cache are mostly bot-blocked live
 # sites, not closed businesses — only these statuses drop a record.
 # `parked` (redirects to a domain-squatter page) and `url` (syntactically

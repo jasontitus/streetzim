@@ -31,7 +31,9 @@ set -euo pipefail
 id="$1"
 name="$2"
 bbox="$3"
-release="${OVERTURE_RELEASE:-latest}"
+# Pinned by default (the round's release, whose parquets are cached);
+# OVERTURE_RELEASE=latest opts in to the newest complete release.
+release="${OVERTURE_RELEASE:-2026-08-19.0}"
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
