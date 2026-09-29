@@ -3,12 +3,13 @@
 For whoever picks this up next. [README.md](README.md) covers building a ZIM;
 this file covers how the repository is organised, how to change it safely,
 how production releases are made, and what is known to be wrong.
-[docs/openzim-review-response.md](docs/openzim-review-response.md) is our
-first response to the 2026-09 openZIM review of this codebase, and
-[docs/openzim-integration.md](docs/openzim-integration.md) is the plan for
-bringing StreetZim features into openzim/maps.
-[docs/adoption-plan.md](docs/adoption-plan.md) tracks what it would take for
-openZIM to adopt StreetZim directly.
+We propose that openZIM adopt StreetZim as its maps scraper;
+[docs/adoption-plan.md](docs/adoption-plan.md) tracks that work and
+[docs/zimfarm.md](docs/zimfarm.md) covers running on Zimfarm.
+[docs/openzim-integration.md](docs/openzim-integration.md) compares
+StreetZim with openzim/maps and sets out what porting its features there
+would involve. [docs/openzim-review-response.md](docs/openzim-review-response.md)
+is our first, superseded response to the 2026-09 openZIM review.
 
 ## 1. What is core and what is operations
 

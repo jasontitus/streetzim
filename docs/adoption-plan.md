@@ -2,9 +2,11 @@
 
 openZIM's review (§6.1, "Why not Option B") listed what StreetZim would need
 before openZIM could use it as its maps scraper, rather than porting features
-into openzim/maps. This page tracks each item: done, in progress, or left,
-with the reasoning. It complements [openzim-integration.md](openzim-integration.md),
-which covers the other route: porting features into maps2zim.
+into openzim/maps. We propose that openZIM adopt StreetZim (Option B) after
+a Zimfarm pilot ([zimfarm.md](zimfarm.md)). This page tracks each item:
+done, in progress, or left, with the reasoning.
+[openzim-integration.md](openzim-integration.md) compares the two tools and
+sets out the porting route (Option A) for reference.
 
 | # | the review asked for | status |
 |---|---|---|
@@ -85,11 +87,12 @@ maps2zim:
   [tile-sources.md](tile-sources.md)).
 
 What it would cost:
-- taking on a larger codebase (about 95k lines, most of it viewer and
-  operations);
+- taking on a larger codebase (about 42k lines of code after the
+  operations split, plus 13k of tests; most of it viewer and builder);
 - custom formats to maintain;
 - one author's history.
 
-The items above lower that cost, but openZIM decides whether it is low
-enough. Either way, the same work makes the porting route (Option A)
-cheaper too.
+The items above lower that cost enough, we think, for openZIM to adopt
+StreetZim rather than port it: a Zimfarm pilot next to maps2zim is the way
+to check. The same work would also make the porting route (Option A)
+cheaper, should openZIM still prefer it.
