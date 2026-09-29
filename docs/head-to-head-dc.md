@@ -18,6 +18,12 @@ other. One of the deliberate changes turned out to be a bug: the branch
 claimed Wikipedia content in a ZIM with no articles. It was fixed later
 (see [Differences](#differences-main-vs-branch)).
 
+A follow-up on 29 September bundled real D.C. article text through the
+Wikipedia API: 1,561 articles, against 1,551 in the published ZIM, with
+1,544 titles in common. `main` and the branch clean every article to
+identical bytes. Images are still not compared (see
+[Why no Wikipedia articles](#why-no-wikipedia-articles)).
+
 ## What was compared
 
 | side | commit |
@@ -317,34 +323,124 @@ What this means:
   label would appear in production whenever the article source yields
   nothing.
 
-### What a real comparison needs
+### Follow-up: real article text, 29 September
 
-- **A real article source, the same for both sides.** Either:
-  - production's full English Wikipedia ZIM (what `build-region-fast.sh`
-    passes as `--wiki-articles-source`, checked by size); or
-  - the 1,580 D.C. titles fetched once, slowly enough to stay under
-    Wikipedia's rate limit, into a shared `--wiki-articles-cache`. Images
-    still need an offline ZIM, because `--wiki-images` requires one.
-- **A warm, identical Wikidata and title cache,** as in this run, so both
-  sides resolve the same titles.
-- **Checks to add:**
-  - compare `wiki-article/` and `wiki-image/` entry by entry between
-    `main` and the branch;
-  - compare article and image counts, and `wiki-geo-index.json`, with the
-    published ZIM;
-  - confirm that `hasWikiArticles` and the Wikipedia `License` credit
-    appear, since articles are now stored;
-  - the smoke test's "wiki geo-index loaded" check should then pass on
-    both sides.
+A day later the article text was compared on real D.C. content. Images
+still were not.
 
-The rerun was estimated at about an hour of fetching plus two D.C. builds.
-That estimate is for fetching over the API. It was not measured.
+**Which source could be used.**
+
+| source | result |
+|---|---|
+| Wikipedia API (`action=parse`, the builder's online path) | Reachable, but heavily throttled. It worked with `Retry-After` honoured, 1.5 s between requests, and a User-Agent with a contact address. Fetching 563 pages drew 182 HTTP 429 responses. |
+| Full English Wikipedia ZIM (production's source) | Not possible here: the `maxi` ZIM is 119 GB and `nopic` is 49 GB. |
+| `wikipedia_en_top_maxi_2026-09` (6.5 GB, the only subset with images and broad coverage) | Not downloaded: the disk had 3.1–10 GB free while other builds were running, and this ZIM would have left less than the 3 GB floor. `top_nopic` (2.6 GB) and `top_mini` (283 MB) have no images, so they add nothing over the API. |
+| Kiwix's online library (`browse.library.kiwix.org`, full `maxi` 2026-08) | Returns an "Access confirmation" page aimed at AI crawlers. It was not bypassed. |
+
+**What was run.** The build used this branch at `ce2c161`, the `-next`
+head. The input was the same BBBike `WashingtonDC.osm.pbf` as in the
+original run (26 Sep, 64,659,545 bytes). Geofabrik still reset the
+connection. The flags were `--wikidata --resolve-wikidata-titles
+--bundle-wiki-articles --wiki-images all --wiki-image-max-kb 128
+--wiki-articles-cache <dir>`, with no `--wiki-articles-source`. To save
+time and disk, satellite, terrain, Overture and the world VRT were left
+out; they do not feed article bundling. The steps:
+
+1. A first build had cold caches. Wikidata returned 429 during title
+   resolution, which stopped at 600 of 1,072 Q-IDs. That left 1,203 titles,
+   and 1,009 articles were stored.
+2. The Wikidata title cache was then completed slowly, with one batch every
+   5 s and a 60 s pause after each 429. With the cache complete, the build
+   requests **1,580 distinct titles, the same number as the original run**.
+3. The 563 articles missing from the cache were fetched politely into the
+   builder's cache format. This took 2.5 hours.
+4. A final build ran from the warm caches and made no Wikipedia requests.
+
+**Numbers.**
+
+| | published (Feb 2026 enwiki ZIM) | branch, API text |
+|---|---|---|
+| titles requested | n/a | 1,580 |
+| `wiki-article/` | **1,551** | **1,561** |
+| … unavailable | n/a | 19 (12 enwiki disambiguation pages, 7 pages the API returns no text for) |
+| article bytes | 16.97 MB | 16.10 MB |
+| `wiki-image/` | **5,065** (in 1,474 articles, 6,377 `<img>` refs) | **0**: the online path is text only by design |
+| image candidates in the fetched HTML (≤ 12 per article) | n/a | 7,839 (6,322 unique `src`), an upper bound before the 128 KB cap |
+| wiki geo-index places | 523 | 495 |
+| `hasWikiArticles` | absent (older viewer) | `true` |
+| `License` credits Wikipedia | yes (CC BY-SA 3.0) | yes (CC BY-SA 4.0) |
+
+- **1,544 titles are in both ZIMs.**
+- **7 are only in the published ZIM:**
+  - 4 are no longer requested, because the OSM or Wikidata link changed.
+    For example, `Saint_Anselm's_Abbey_(Washington,_D.C.)` is now
+    `St._Anselm's_Abbey_…`.
+  - `Aurora_(sculpture)` is now a disambiguation page.
+  - 2 embassy pages now return no text.
+- **17 are only in the new build.** These are newer links or pages, for
+  example `New_Stadium_at_RFK_Campus`, `National_Mall` and
+  `National_Academy_of_Sciences`.
+- The geo-index gap (495 vs 523) is not explained. The Wikidata place
+  cache was still partial (1,360 of 1,511 Q-IDs fetched), and the geo-index
+  draws on it. This was not verified.
+- **`main` vs branch:** `main`'s `cloud/wiki_articles.py` differs only in
+  type annotations. Run over the same 1,561 cached pages, `main`'s
+  `clean_article_html` produced byte-identical output. The stored
+  `wiki-article/` entries match a fresh recompute byte for byte.
+
+**Rendering.** The final ZIM was served with `kiwix-serve` and checked in
+headless Chromium:
+- The viewer loaded `wiki-geo-index.json` (495 places), with no page
+  errors. This was the smoke-test check that failed in the original run.
+- `_wikiArticlePath(null, "en:Lincoln Memorial")` resolves.
+- Nine sampled articles returned HTTP 200 with the right `<h1>`, body text,
+  the "Back to map" bar, no failed requests and no page errors. They
+  included landmarks, a `/` title (`Bellevue_/_William_O._Lockridge_Library`),
+  an en-dash title and a `#` title (`McKeldin_Mall#The_Peace_Garden`).
+
+**Found on the way** (in `main` too):
+- `_fetch_online` caches a 429 that survives its retries as a permanent
+  "no article" marker. It uses a 1/2/4 s backoff and ignores `Retry-After`.
+  The cold build left 184 empty cache files. When they were refetched
+  politely, 177 turned out to be real articles. A rebuild would have
+  skipped them for good without saying so.
+- `cloud/wikidata_titles.py` also ignores `Retry-After`.
+- Both default User-Agents lack a contact address, which Wikimedia's
+  User-Agent policy asks for.
+- One stored title contains a fragment (`McKeldin_Mall#The_Peace_Garden`),
+  so the page is the whole McKeldin Mall article under that name.
+
+### What is still not compared
+
+Images, and the offline-ZIM HTML path, on real D.C. content. On the build
+host, which has the production ZIM:
+
+```
+# same warm caches for both sides; build main, then the branch
+create_osm_zim.py --pbf WashingtonDC.osm.pbf --bbox=-77.12,38.79,-76.91,38.99 --name "Washington, D.C." \
+  --wikidata --wikidata-cache <shared> --resolve-wikidata-titles --wikidata-title-cache <shared> \
+  --bundle-wiki-articles --wiki-articles-source /storage/streetzim/wiki-src/wikipedia_en_all_maxi_2026-02.zim \
+  --wiki-images all --wiki-image-max-kb 128 -o dc-<side>.zim
+```
+
+Then:
+- diff `wiki-article/` and `wiki-image/` entry by entry between the two
+  sides;
+- compare the counts with the published ZIM's 1,551 articles and 5,065
+  images, which came from that same source ZIM.
+
+This needs no network for articles. In a sandbox, `wikipedia_en_top_maxi`
+(6.5 GB) would give a partial image comparison once about 10 GB is free.
 
 ### Still to do
 
-- [ ] Rerun D.C. with a real article source, as above, at the current
-  branch head. This also covers the `main()` split, the 3.14 work and the
-  `hasWikiArticles` fix, none of which the run above includes.
+- [x] Rerun D.C. with a real article source at the current branch head.
+  Done for article text over the API; see the
+  [follow-up](#follow-up-real-article-text-29-september).
+- [ ] Compare images and the offline-ZIM path on the build host, as above.
+- [ ] Make `_fetch_online` stop caching 429s as misses and honour
+  `Retry-After`, in both the article fetcher and the Wikidata title
+  resolver.
 - [ ] Build one small region through `build-region-fast.sh` on the build
   host, to exercise `--zim-builder=rust`.
 - [ ] Make the golden and D.C. comparison scripts (entry fingerprint diff,
