@@ -85,8 +85,20 @@ Without the flag the pages that exist anyway (places, parks, peaks, water,
 airports) are in the title index too; that costs Monaco 15 KB (+0.5%) and
 Luxembourg 1.2 MB for 7,984 pages (+2.2%).
 
+The search pages are front articles (that is what puts them in the title
+index), so they count as the ZIM's articles: the "articles" number in the
+Kiwix library and the ZIM's article count are the main page plus one per
+search page. Monaco: 1 before this change, 18 without the flag, 1,830 with
+it; Luxembourg: 1, 7,985 and 29,199. `M/Counter` (entries by MIME type) and
+zimcheck's output do not change. Kiwix's "random article" can now open a
+search page (a place's detail page with "Directions to here" and "View on
+map").
+
 It is off by default for now. The planned `--profile full` is meant to turn
-it on and `--profile basic` to leave it off.
+it on, and so a full-profile ZIM carries the cost above (about +12% to +19%
+for a country, +28% for Monaco); `--profile basic` leaves it off. That
+branch will also make the option an on/off choice (an enum) in
+offliner-definition.json rather than the boolean it is here.
 
 ## Satellite imagery
 
