@@ -14,7 +14,7 @@ just after the host takes the change. Background: [README.md](README.md).
 
 **Commits:** `3d0a2c4` (moves) and `835226f` (symlinks, guard, root
 finder), plus the review fixes after them, on branch
-`claude/adoring-dijkstra-i2vge7`. `pre-ops-split` tags the commit before.
+`claude/adoring-dijkstra-i2vge7`. The commit before the split is `8334eb6`.
 Merge the branch to the branch the host pulls (usually via a PR) before
 step 4.
 
