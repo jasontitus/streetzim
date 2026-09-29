@@ -275,6 +275,20 @@ class TestValidatorGeoChips(unittest.TestCase):
         self.assertEqual(status, "fail")
         self.assertIn("no-bbox shard", msg)
 
+    def test_no_chips_key(self):
+        from cloud.validate_zim import _chk_find_chips
+        mani = json.dumps({"total": 0, "categories": {}}).encode()
+        # Built without --split-find-chips: nothing to check.
+        status, _ = _chk_find_chips(_FakeArchive({"category-index/manifest.json": mani}))
+        self.assertEqual(status, "skip")
+        # Chip files but no `chips` key: the split's manifest entry was lost.
+        for path in ("category-index/chip-shops.json", "category-index/chip-food-g000.json",
+                     "category-index/chip-cafes-00.json"):
+            status, msg = _chk_find_chips(_FakeArchive(
+                {"category-index/manifest.json": mani, path: b"[]"}))
+            self.assertEqual(status, "fail", path)
+            self.assertIn(path, msg)
+
     def test_legacy_single_file_verdicts_unchanged(self):
         from cloud.validate_zim import _chk_find_chips
 

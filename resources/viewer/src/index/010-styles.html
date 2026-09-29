@@ -231,6 +231,9 @@
                   black calc(100% - 14px), transparent 100%);
   }
   #find-chips::-webkit-scrollbar { display: none; }
+  /* display:flex / inline-flex below outrank the UA [hidden] rule, so the
+     chips the manifest says this ZIM lacks stayed on screen. */
+  #find-chips[hidden], #find-chips .find-chip[hidden] { display: none; }
   #find-chips .find-chip {
     flex: 0 0 auto; padding: 7px 12px;
     border-radius: 999px;
