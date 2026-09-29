@@ -961,6 +961,10 @@
   html.sz-dark .pin-popup .pin-link,
   html.sz-dark #routing-panel.minimized #routing-minimize { color: #8ab4f8; }
   html.sz-dark .sz-home-btn svg { fill: #e8eaed; }
+  /* Focus rings: the light ones (15-20% blue) vanish on a dark panel.
+     #8ab4f8 is 7.9:1 on it (WCAG 2.2 wants 3:1 for focus indicators). */
+  html.sz-dark #search-input:focus,
+  html.sz-dark .routing-input:focus { box-shadow: 0 0 0 2px #8ab4f8; border-color: #8ab4f8; }
   /* MapLibre's own controls (maplibre-gl.css is light only). */
   html.sz-dark .maplibregl-ctrl-group { background: #23262d; }
   html.sz-dark .maplibregl-ctrl-group:not(:empty) { box-shadow: 0 0 0 2px rgba(255,255,255,0.10); }
@@ -989,5 +993,32 @@
   html.sz-dark .maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: #23262d; }
   html.sz-dark .maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: #23262d; }
   html.sz-dark .maplibregl-popup-close-button { color: var(--text-secondary); }
+  /* Printing: paper is white, so print the chrome in its light colours.
+     The --szd-* tokens go back to "guaranteed invalid", so every
+     var(--szd-..., <light>) falls back to its light colour again. */
+  @media print {
+    html.sz-dark {
+      color-scheme: light;
+      --panel-bg: rgba(255,255,255,0.96);
+      --panel-shadow: 0 2px 12px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.04);
+      --text-primary: #1a1a1a;
+      --text-secondary: #6b7280;
+      --text-tertiary: #9ca3af;
+      --border: rgba(0,0,0,0.06);
+      --hover-bg: rgba(37,99,235,0.04);
+      --szd-surface: initial; --szd-surface-a: initial; --szd-surface-hover: initial;
+      --szd-fg: initial; --szd-fg-2: initial; --szd-fg-3: initial; --szd-line: initial;
+      --szd-link: initial; --szd-handle: initial; --szd-warn: initial;
+      --szd-btn2-bg: initial; --szd-btn2-fg: initial;
+    }
+    html.sz-dark #info, html.sz-dark #attr-btn,
+    html.sz-dark #find-chips .find-chip:not(.on),
+    html.sz-dark .maplibregl-ctrl-group, html.sz-dark .maplibregl-popup-content,
+    html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-scale,
+    html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-attrib { background: #fff; color: #1a1a1a; }
+    html.sz-dark .maplibregl-ctrl button .maplibregl-ctrl-icon,
+    html.sz-dark .maplibregl-ctrl-attrib-button { filter: none; }
+    html.sz-dark .sz-home-btn svg { fill: #333; }
+  }
 </style>
 </head>

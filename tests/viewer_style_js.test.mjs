@@ -276,11 +276,32 @@ await ok('theme: light mode is untouched -- --szd-* exist only under html.sz-dar
   for (const k of used) assert.ok(DARK_VARS[k], `${k} is used but not defined for dark mode`);
   // Defined nowhere else, so in light mode every var() falls back to the
   // literal light colour it replaced.
-  const defs = [...HTML.matchAll(/(--szd-[\w-]+)\s*:/g)].length;
-  assert.strictEqual(defs, Object.keys(DARK_VARS).filter(k => k.startsWith('--szd-')).length);
+  // (The print block below sets them back to "initial", i.e. undefined.)
+  const szd = Object.keys(DARK_VARS).filter(k => k.startsWith('--szd-'));
+  const defs = [...HTML.matchAll(/(--szd-[\w-]+)\s*:\s*([^;]+);/g)];
+  assert.strictEqual(defs.filter(m => m[2].trim() !== 'initial').length, szd.length);
+  assert.deepStrictEqual(defs.filter(m => m[2].trim() === 'initial').map(m => m[1]).sort(), szd.sort());
   const root = HTML.slice(HTML.indexOf(':root {'), HTML.indexOf('}', HTML.indexOf(':root {')));
   assert.match(root, /--panel-bg: rgba\(255,255,255,0\.96\);/);
   assert.match(root, /--text-tertiary: #9ca3af;/);
+});
+
+await ok('theme: dark focus rings are visible (>= 3:1 on the panel)', () => {
+  const ring = darkRule('html.sz-dark #search-input:focus,\n  html.sz-dark .routing-input:focus', 'box-shadow');
+  const col = /#[0-9a-f]{6}/i.exec(ring)[0];
+  assert.match(ring, /^0 0 0 2px #/);
+  for (const bg of [DARK_VARS['--panel-bg'], DARK_VARS['--szd-surface']]) {
+    assert.ok(contrast(col, overWhite(bg)) >= 3, `${col} on ${bg}`);
+  }
+});
+
+await ok('theme: printing a dark page gives the light chrome', () => {
+  const i = DARK_CSS.indexOf('@media print {');
+  assert.ok(i > 0, 'no print block');
+  const p = DARK_CSS.slice(i);
+  assert.match(p, /color-scheme: light;/);
+  assert.match(p, /--panel-bg: rgba\(255,255,255,0\.96\);/);
+  assert.match(p, /--text-tertiary: #9ca3af;/);
 });
 
 await ok('theme: JS-built panels take their light colours through --szd-* tokens', () => {
