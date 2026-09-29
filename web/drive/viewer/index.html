@@ -1033,6 +1033,84 @@
   @media (max-width: 480px) {
     body:not(.sz-debug) #viewer-build-stamp { display: none !important; }
   }
+  /* --- Dark UI chrome ---
+     html.sz-dark is set by 135-map-theme.js from the same choice as the dark
+     map (?theme=, a host that inverts the page, prefers-color-scheme, live
+     changes), so the panels can never disagree with the map. A class, not
+     @media, because ?theme=light must win over a dark OS and Kiwix JS's
+     invert mode must get light. Light mode reads none of this: the --szd-*
+     tokens are undefined there, so each var(--szd-..., <light value>) in the
+     JS-built sheets (find results, place details, wiki panel) falls back to
+     the light colour it always had. Text pairs keep WCAG AA (4.5:1) on the
+     panel colour (tests/viewer_style_js.test.mjs checks them). */
+  html.sz-dark {
+    color-scheme: dark;
+    --panel-bg: rgba(35,38,45,0.96);
+    --panel-shadow: 0 2px 12px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.08);
+    --text-primary: #e8eaed;
+    --text-secondary: #b9bec7;
+    --text-tertiary: #9ea4ae;
+    --border: rgba(255,255,255,0.10);
+    --hover-bg: rgba(138,180,248,0.12);
+    --szd-surface: #23262d;
+    --szd-surface-a: rgba(35,38,45,0.96);
+    --szd-surface-hover: #2e323a;
+    --szd-fg: #e8eaed;
+    --szd-fg-2: #c9cdd3;
+    --szd-fg-3: #a9afb8;
+    --szd-line: #3c414a;
+    --szd-link: #8ab4f8;
+    --szd-handle: #4b5059;
+    --szd-warn: #fca5a5;
+    --szd-btn2-bg: #2b3546;
+    --szd-btn2-fg: #a8c7fa;
+  }
+  html.sz-dark #info { background: rgba(35,38,45,0.92); }
+  html.sz-dark #attr-btn { background: rgba(35,38,45,0.92); }
+  html.sz-dark #attr-btn:hover { background: #2e323a; }
+  html.sz-dark #attr-dialog { background: #23262d; box-shadow: 0 8px 32px rgba(0,0,0,0.6); }
+  html.sz-dark #attr-overlay { background: rgba(0,0,0,0.6); }
+  html.sz-dark #info .sz-recover a, html.sz-dark #info a.sz-change { color: #8ab4f8; }
+  html.sz-dark #wiki-panel-count { background: rgba(255,255,255,0.08); }
+  html.sz-dark #preview-banner-note:not(:empty) { color: #fbbf24; }
+  html.sz-dark #find-chips .find-chip:not(.on) {
+    background: rgba(35,38,45,0.96); border-color: rgba(255,255,255,0.14);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+  }
+  html.sz-dark #find-chips .find-chip:not(.on):hover { background: #2e323a; }
+  /* --accent (#2563eb) stays for filled buttons (white text, 5.2:1); as
+     text on a dark panel it is too dark, so text uses a lighter blue. */
+  html.sz-dark .pin-popup .pin-link,
+  html.sz-dark #routing-panel.minimized #routing-minimize { color: #8ab4f8; }
+  html.sz-dark .sz-home-btn svg { fill: #e8eaed; }
+  /* MapLibre's own controls (maplibre-gl.css is light only). */
+  html.sz-dark .maplibregl-ctrl-group { background: #23262d; }
+  html.sz-dark .maplibregl-ctrl-group:not(:empty) { box-shadow: 0 0 0 2px rgba(255,255,255,0.10); }
+  html.sz-dark .maplibregl-ctrl-group button + button { border-top-color: #3c414a; }
+  html.sz-dark .maplibregl-ctrl button:not(:disabled):hover { background-color: rgba(255,255,255,0.08); }
+  /* The icons are black SVGs; invert + hue-rotate keeps the geolocate blue blue. */
+  html.sz-dark .maplibregl-ctrl button .maplibregl-ctrl-icon,
+  html.sz-dark .maplibregl-ctrl-attrib-button { filter: invert(1) hue-rotate(180deg); }
+  html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-scale {
+    background-color: rgba(35,38,45,0.92); border-color: #c9cdd3; color: #e8eaed;
+  }
+  html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-attrib,
+  html.sz-dark .maplibregl-ctrl-attrib.maplibregl-compact {
+    background-color: rgba(35,38,45,0.92); color: #c9cdd3;
+  }
+  html.sz-dark .maplibregl-ctrl-attrib a { color: #c9cdd3; }
+  html.sz-dark .maplibregl-popup-content {
+    background: #23262d; color: var(--text-primary); box-shadow: 0 2px 12px rgba(0,0,0,0.55);
+  }
+  html.sz-dark .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+  html.sz-dark .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+  html.sz-dark .maplibregl-popup-anchor-top-right .maplibregl-popup-tip { border-bottom-color: #23262d; }
+  html.sz-dark .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+  html.sz-dark .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+  html.sz-dark .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip { border-top-color: #23262d; }
+  html.sz-dark .maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: #23262d; }
+  html.sz-dark .maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: #23262d; }
+  html.sz-dark .maplibregl-popup-close-button { color: var(--text-secondary); }
 </style>
 </head>
 <body>
@@ -1372,8 +1450,9 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
      error shown when the map cannot start at all: a browser without Fetch /
      Promise / MapLibre, no WebGL, or a map-config.json that never loaded.
      The styles sit here rather than in 010 so this feature is one part.
-     Panels stay light in both map themes, as every other panel does; only
-     the full-page error, which has no map behind it, follows the OS scheme. -->
+     The Home button and About panel follow the map theme through
+     html.sz-dark (010); the full-page error, which can appear before any
+     of that code runs, follows the OS scheme directly. -->
 <style>
   .sz-home-btn svg { display: block; margin: auto; width: 18px; height: 18px; fill: #333; }
   #about-section { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
@@ -1694,7 +1773,7 @@ function showFatalError(title, err, url) {
   if (url) html += '<p style="font-size:8px;opacity:0.7;word-break:break-all;">URL: ' + url + '</p>';
   html += '<p style="font-size:8px;opacity:0.7;">UA: ' + (navigator.userAgent || '?').substring(0, 80) + '</p>';
   html += '<p style="font-size:8px;opacity:0.7;">Base: ' + baseUrl + '</p>';
-  html += '<p style="font-size:9px;"><a href="#" id="debug-show" style="color:#2563eb;">Show debug log</a></p>';
+  html += '<p style="font-size:9px;"><a href="#" id="debug-show" style="color:var(--szd-link, #2563eb);">Show debug log</a></p>';
   info.innerHTML = html;
   info.style.maxWidth = '420px';
   var link = document.getElementById('debug-show');
@@ -1702,7 +1781,7 @@ function showFatalError(title, err, url) {
     link.addEventListener('click', function(e) {
       e.preventDefault();
       var pre = document.createElement('pre');
-      pre.style.cssText = 'max-height:200px;overflow:auto;font-size:9px;background:#fff;padding:6px;margin-top:6px;border:1px solid #ddd;white-space:pre-wrap;word-break:break-all;';
+      pre.style.cssText = 'max-height:200px;overflow:auto;font-size:9px;background:var(--szd-surface, #fff);padding:6px;margin-top:6px;border:1px solid var(--szd-line, #ddd);white-space:pre-wrap;word-break:break-all;';
       pre.textContent = _debugLog.join('\n') || '(empty)';
       info.appendChild(pre);
       link.style.display = 'none';
@@ -3202,6 +3281,19 @@ function _szPrefersDark() {
   } catch (e) { return false; }
 }
 
+// The page chrome follows the map: html.sz-dark switches the search box,
+// chips, panels and MapLibre's controls to their dark colours (010-styles).
+// Applied once as the script loads, before the map exists, so the chrome
+// does not flash light, and again on every live scheme change.
+function _szApplyUiTheme(dark) {
+  try {
+    var root = document.documentElement;
+    if (dark) root.classList.add('sz-dark');
+    else root.classList.remove('sz-dark');
+  } catch (e) {}
+}
+_szApplyUiTheme(_szPrefersDark());
+
 function _szThemeStyle(style, dark) {
   if (!dark) return style;
   style.layers.forEach(function(layer) {
@@ -3228,6 +3320,7 @@ function initMapTheme(map, config) {
     var dark = _szPrefersDark();
     if (dark === current) return;
     current = dark;
+    _szApplyUiTheme(dark);
     var style = makeStyle(config);
     style.layers.forEach(function(layer) {
       if (!layer.paint || !map.getLayer(layer.id)) return;
@@ -4077,8 +4170,8 @@ function _renderSubfilterRow(map, stash) {
       + (active
         ? 'background:#1a73e8; color:#fff;'
           + 'border:1px solid #1a73e8;'
-        : 'background:#fff; color:#222;'
-          + 'border:1px solid #ddd;')
+        : 'background:var(--szd-surface, #fff); color:var(--szd-fg, #222);'
+          + 'border:1px solid var(--szd-line, #ddd);')
     );
     chip.textContent = (count != null) ? (label + ' · ' + count) : label;
     chip.addEventListener('click', function() {
@@ -4141,9 +4234,9 @@ function _renderFindResultsStrip(map, stash) {
   strip.id = 'find-results-strip';
   strip.style.cssText = (
     'position:fixed; left:0; right:0; bottom:var(--bottom-inset, 0px); z-index:1500;'
-    + 'background:rgba(255,255,255,0.96); border-top:1px solid #ccc;'
+    + 'background:var(--szd-surface-a, rgba(255,255,255,0.96)); border-top:1px solid var(--szd-line, #ccc);'
     + 'box-shadow:0 -4px 16px rgba(0,0,0,0.12);'
-    + 'font:13px/1.35 -apple-system,system-ui,sans-serif; color:#222;'
+    + 'font:13px/1.35 -apple-system,system-ui,sans-serif; color:var(--szd-fg, #222);'
     + 'padding-top:6px;'
     // Clear the dead touch band next to the app's bottom toolbar (see the
     // locate-button rule): without this the cards' lower half renders fine
@@ -4154,7 +4247,7 @@ function _renderFindResultsStrip(map, stash) {
   var header = document.createElement('div');
   header.style.cssText = (
     'padding:2px 14px 6px; display:flex; align-items:center; gap:8px;'
-    + 'font-size:12px; color:#555;'
+    + 'font-size:12px; color:var(--szd-fg-2, #555);'
   );
   var title = document.createElement('span');
   title.style.cssText = (
@@ -4169,7 +4262,7 @@ function _renderFindResultsStrip(map, stash) {
   closeBtn.textContent = '×';
   closeBtn.style.cssText = (
     'flex:0 0 auto; background:transparent; border:none;'
-    + 'font-size:18px; line-height:1; cursor:pointer; color:#666;'
+    + 'font-size:18px; line-height:1; cursor:pointer; color:var(--szd-fg-3, #666);'
     + 'padding:2px 6px;'
   );
   closeBtn.addEventListener('click', clearFindResults);
@@ -4278,7 +4371,7 @@ function _showSearchAreaPill(map) {
   btn.style.cssText = (
     'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
     + 'z-index:1600; padding:9px 18px;'
-    + 'background:rgba(255,255,255,0.92); color:#222;'
+    + 'background:var(--szd-surface-a, rgba(255,255,255,0.92)); color:var(--szd-fg, #222);'
     + 'border:1px solid rgba(0,0,0,0.12); border-radius:999px;'
     + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
     + 'box-shadow:0 4px 14px rgba(0,0,0,0.18);'
@@ -4287,10 +4380,10 @@ function _showSearchAreaPill(map) {
     + 'pointer-events:auto;'
   );
   btn.addEventListener('mouseenter', function() {
-    btn.style.background = 'rgba(255,255,255,1)';
+    btn.style.background = 'var(--szd-surface-hover, rgba(255,255,255,1))';
   });
   btn.addEventListener('mouseleave', function() {
-    btn.style.background = 'rgba(255,255,255,0.92)';
+    btn.style.background = 'var(--szd-surface-a, rgba(255,255,255,0.92))';
   });
   btn.addEventListener('click', function() {
     _searchAreaApply(map);
@@ -4367,7 +4460,7 @@ function _searchAreaApply(map) {
     btn.style.cssText = (
       'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
       + 'z-index:1600; padding:9px 18px;'
-      + 'background:rgba(255,255,255,0.95); color:#a33;'
+      + 'background:var(--szd-surface-a, rgba(255,255,255,0.95)); color:var(--szd-warn, #a33);'
       + 'border:1px solid rgba(170,50,50,0.25); border-radius:999px;'
       + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
       + 'box-shadow:0 4px 14px rgba(0,0,0,0.18); pointer-events:none;'
@@ -4456,8 +4549,8 @@ function _showPlaceDetail(map, r, idx) {
   panel.style.cssText = (
     'position:fixed; left:0; right:0; bottom:var(--bottom-inset, 0px); z-index:1701;'
     + 'max-height:calc(var(--app-height, 100vh) * 0.78); overflow-y:auto;'
-    + 'background:#fff; color:#222;'
-    + 'border-top:1px solid #ddd;'
+    + 'background:var(--szd-surface, #fff); color:var(--szd-fg, #222);'
+    + 'border-top:1px solid var(--szd-line, #ddd);'
     + 'border-radius:18px 18px 0 0;'
     + 'box-shadow:0 -8px 28px rgba(0,0,0,0.28);'
     + 'transform:translateY(100%); transition:transform .25s ease;'
@@ -4469,7 +4562,7 @@ function _showPlaceDetail(map, r, idx) {
   var handle = document.createElement('div');
   handle.style.cssText = (
     'width:40px; height:4px; border-radius:2px;'
-    + 'background:#d8dadd; margin:6px auto 12px;'
+    + 'background:var(--szd-handle, #d8dadd); margin:6px auto 12px;'
   );
   panel.appendChild(handle);
 
@@ -4487,7 +4580,7 @@ function _showPlaceDetail(map, r, idx) {
   close.textContent = '×';
   close.style.cssText = (
     'flex:0 0 auto; background:transparent; border:none;'
-    + 'font-size:28px; line-height:1; cursor:pointer; color:#666;'
+    + 'font-size:28px; line-height:1; cursor:pointer; color:var(--szd-fg-3, #666);'
     + 'padding:0 6px; margin-top:-4px;'
   );
   close.addEventListener('click', _hidePlaceDetail);
@@ -4502,7 +4595,7 @@ function _showPlaceDetail(map, r, idx) {
   if (r.l) subParts.push(r.l);
   if (subParts.length) {
     var sub = document.createElement('div');
-    sub.style.cssText = 'color:#666; font-size:13px; margin:4px 0 10px;';
+    sub.style.cssText = 'color:var(--szd-fg-3, #666); font-size:13px; margin:4px 0 10px;';
     sub.textContent = subParts.join(' · ');
     panel.appendChild(sub);
   }
@@ -4550,7 +4643,7 @@ function _showPlaceDetail(map, r, idx) {
   // Plus phone/website spelled out for accessibility / copy-paste
   var info = document.createElement('div');
   info.style.cssText = (
-    'border-top:1px solid #eee; margin-top:6px; padding-top:10px;'
+    'border-top:1px solid var(--szd-line, #eee); margin-top:6px; padding-top:10px;'
     + 'display:flex; flex-direction:column; gap:6px; font-size:13px;'
   );
   if (r.p) {
@@ -4666,7 +4759,7 @@ function _detailActionBtn(label, emoji, primary, onClick) {
     + 'transition:transform .08s ease, filter .08s ease;'
     + (primary
        ? 'background:#1a73e8; color:#fff; border:1px solid #1a73e8;'
-       : 'background:#fff; color:#1a73e8;'
+       : 'background:var(--szd-surface, #fff); color:var(--szd-link, #1a73e8);'
          + 'border:1px solid #1a73e8;')
   );
   // Tap feedback: dim + slight scale on press so the user gets
@@ -4691,7 +4784,7 @@ function _detailFactRow(label, value, href, target) {
   var lbl = document.createElement('span');
   lbl.textContent = label;
   lbl.style.cssText = (
-    'flex:0 0 70px; color:#888; font-size:12px; padding-top:2px;'
+    'flex:0 0 70px; color:var(--szd-fg-3, #888); font-size:12px; padding-top:2px;'
   );
   row.appendChild(lbl);
   var val;
@@ -4706,9 +4799,9 @@ function _detailFactRow(label, value, href, target) {
   val.style.cssText = (
     'flex:1 1 auto; min-width:0;'
     + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
-    + 'color:#1a73e8; text-decoration:none;'
+    + 'color:var(--szd-link, #1a73e8); text-decoration:none;'
   );
-  if (!href) val.style.color = '#222';
+  if (!href) val.style.color = 'var(--szd-fg, #222)';
   row.appendChild(val);
   return row;
 }
@@ -4737,7 +4830,7 @@ function _detailTravelTimesLine(r) {
   var driveMin = fmtMin(m / 11);
   var line = document.createElement('div');
   line.style.cssText = (
-    'color:#666; font-size:12px; margin:2px 0 0;'
+    'color:var(--szd-fg-3, #666); font-size:12px; margin:2px 0 0;'
   );
   // Drop walking estimate when it would exceed 2 hours; switch to
   // drive-only display so we're not telling the user to walk for
@@ -4762,7 +4855,7 @@ function _detailDistanceLine(r) {
   var o = _findResultsState.origin;
   var m = _haversineMetersStrip(o.lat, o.lon, r.a, r.o);
   var line = document.createElement('div');
-  line.style.cssText = 'color:#444; font-size:13px; margin:4px 0 0;';
+  line.style.cssText = 'color:var(--szd-fg-2, #444); font-size:13px; margin:4px 0 0;';
   var label = (o.label && o.label !== 'Current location')
     ? o.label : 'current location';
   line.textContent = _formatDistanceStrip(m) + ' from ' + label;
@@ -4810,7 +4903,7 @@ function _populateWikipediaExtract(slot, wd) {
   if (wd.d) {
     var desc = document.createElement('div');
     desc.style.cssText = (
-      'color:#555; font-size:13px; font-style:italic; margin-bottom:8px;'
+      'color:var(--szd-fg-2, #555); font-size:13px; font-style:italic; margin-bottom:8px;'
     );
     desc.textContent = wd.d;
     slot.appendChild(desc);
@@ -4818,13 +4911,13 @@ function _populateWikipediaExtract(slot, wd) {
   if (wd.x) {
     var head = document.createElement('div');
     head.style.cssText = (
-      'font-size:11px; color:#888; text-transform:uppercase;'
+      'font-size:11px; color:var(--szd-fg-3, #888); text-transform:uppercase;'
       + 'letter-spacing:0.04em; margin:0 0 4px;'
     );
     head.textContent = 'About';
     slot.appendChild(head);
     var body = document.createElement('div');
-    body.style.cssText = 'color:#333; font-size:14px; line-height:1.5;';
+    body.style.cssText = 'color:var(--szd-fg, #333); font-size:14px; line-height:1.5;';
     body.textContent = wd.x;
     slot.appendChild(body);
   }
@@ -4843,10 +4936,10 @@ function _populateWikipediaExtract(slot, wd) {
     );
     for (var i = 0; i < facts.length; i++) {
       var k = document.createElement('div');
-      k.style.cssText = 'color:#888;';
+      k.style.cssText = 'color:var(--szd-fg-3, #888);';
       k.textContent = facts[i][0];
       var v = document.createElement('div');
-      v.style.cssText = 'color:#222;';
+      v.style.cssText = 'color:var(--szd-fg, #222);';
       v.textContent = facts[i][1];
       grid.appendChild(k); grid.appendChild(v);
     }
@@ -5523,8 +5616,9 @@ function _showFindToast(text, opts) {
     // broke a one-line message into three on a phone.
     + 'width:max-content; max-width:calc(100vw - 32px); box-sizing:border-box;'
     + 'text-align:center;'
-    + 'background:rgba(255,255,255,0.95);'
-    + 'color:' + (opts.color || '#a33') + ';'
+    + 'background:var(--szd-surface-a, rgba(255,255,255,0.95));'
+    // A caller's colour is a neutral hint (#333); the default is the warning red.
+    + 'color:' + (opts.color ? 'var(--szd-fg, ' + opts.color + ')' : 'var(--szd-warn, #a33)') + ';'
     // 18px, not a pill: a message that wraps at 320px stays a tidy box.
     + 'border:1px solid rgba(170,50,50,0.25); border-radius:18px;'
     + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
@@ -5889,7 +5983,7 @@ function _populateNearby(slot, map, r, selfIdx) {
 
   var head = document.createElement('div');
   head.style.cssText = (
-    'font-size:11px; color:#888; text-transform:uppercase;'
+    'font-size:11px; color:var(--szd-fg-3, #888); text-transform:uppercase;'
     + 'letter-spacing:0.04em; margin:0 0 6px;'
   );
   head.textContent = 'Nearby (within 1.5 km)';
@@ -5897,7 +5991,7 @@ function _populateNearby(slot, map, r, selfIdx) {
   var list = document.createElement('div');
   list.style.cssText = (
     'display:flex; flex-direction:column;'
-    + 'border:1px solid #eee; border-radius:10px; overflow:hidden;'
+    + 'border:1px solid var(--szd-line, #eee); border-radius:10px; overflow:hidden;'
   );
   for (var j = 0; j < ranked.length; j++) {
     list.appendChild(_nearbyRow(map, ranked[j], j === ranked.length - 1));
@@ -5910,15 +6004,15 @@ function _nearbyRow(map, entry, isLast) {
   row.type = 'button';
   row.style.cssText = (
     'display:flex; align-items:center; gap:10px; width:100%;'
-    + 'padding:10px 12px; background:#fff; cursor:pointer;'
-    + 'border:none;' + (isLast ? '' : 'border-bottom:1px solid #f0f0f0;')
+    + 'padding:10px 12px; background:var(--szd-surface, #fff); cursor:pointer;'
+    + 'border:none;' + (isLast ? '' : 'border-bottom:1px solid var(--szd-line, #f0f0f0);')
     + 'text-align:left; font:inherit;'
   );
   row.addEventListener('mouseenter', function() {
-    row.style.background = '#f5f9ff';
+    row.style.background = 'var(--szd-surface-hover, #f5f9ff)';
   });
   row.addEventListener('mouseleave', function() {
-    row.style.background = '#fff';
+    row.style.background = 'var(--szd-surface, #fff)';
   });
 
   var col = document.createElement('div');
@@ -5932,7 +6026,7 @@ function _nearbyRow(map, entry, isLast) {
   col.appendChild(name);
   var meta = document.createElement('div');
   meta.style.cssText = (
-    'color:#777; font-size:12px;'
+    'color:var(--szd-fg-3, #777); font-size:12px;'
     + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
   );
   var kind = entry.item.cat || entry.item.s || entry.item.t;
@@ -5945,7 +6039,7 @@ function _nearbyRow(map, entry, isLast) {
 
   var dist = document.createElement('div');
   dist.style.cssText = (
-    'flex:0 0 auto; color:#1a73e8; font-size:13px; font-weight:600;'
+    'flex:0 0 auto; color:var(--szd-link, #1a73e8); font-size:13px; font-weight:600;'
   );
   dist.textContent = _formatDistanceStrip(entry.dist);
   row.appendChild(dist);
@@ -5967,7 +6061,7 @@ function _findResultCard(map, r, idx) {
   card.style.cssText = (
     'flex:0 0 76vw; max-width:340px; min-width:240px;'
     + 'scroll-snap-align:center; scroll-snap-stop:always;'
-    + 'background:#fff; border:1px solid #ddd; border-radius:12px;'
+    + 'background:var(--szd-surface, #fff); border:1px solid var(--szd-line, #ddd); border-radius:12px;'
     + 'padding:10px 12px; cursor:pointer; transition:border-color .15s, box-shadow .15s;'
     + 'display:flex; flex-direction:column; gap:4px;'
   );
@@ -5982,7 +6076,7 @@ function _findResultCard(map, r, idx) {
 
   var sub = document.createElement('div');
   sub.style.cssText = (
-    'color:#777; font-size:12px;'
+    'color:var(--szd-fg-3, #777); font-size:12px;'
     + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
   );
   var subParts = [];
@@ -6046,7 +6140,7 @@ function _findResultCard(map, r, idx) {
       'flex:0 0 auto; display:inline-flex; align-items:center;'
       + 'justify-content:center; width:36px; padding:7px 0;'
       + 'border-radius:8px; text-decoration:none; font-size:14px;'
-      + 'border:1px solid #ddd; background:#fff; color:#222;'
+      + 'border:1px solid var(--szd-line, #ddd); background:var(--szd-surface, #fff); color:var(--szd-fg, #222);'
     );
     a.addEventListener('click', function(e) { e.stopPropagation(); });
     return a;
@@ -6107,7 +6201,7 @@ function _setActiveResult(map, idx, flyTo) {
   var track = _findResultsState.track;
   if (track) {
     if (prev >= 0 && track.children[prev]) {
-      track.children[prev].style.borderColor = '#ddd';
+      track.children[prev].style.borderColor = 'var(--szd-line, #ddd)';
       track.children[prev].style.boxShadow = '';
     }
     var active = track.children[idx];
@@ -7330,7 +7424,7 @@ function initWikidataPopups(map, config) {
     h += '<div style="font-size:16px;font-weight:600;margin-bottom:4px;">' + escapeHtml(name) + '</div>';
 
     if (wd.d) {
-      h += '<div style="color:#555;font-size:12px;margin-bottom:6px;font-style:italic;">' + escapeHtml(wd.d) + '</div>';
+      h += '<div style="color:var(--szd-fg-2, #555);font-size:12px;margin-bottom:6px;font-style:italic;">' + escapeHtml(wd.d) + '</div>';
     }
 
     // Info grid
@@ -7345,19 +7439,19 @@ function initWikidataPopups(map, config) {
     if (facts.length > 0) {
       h += '<table style="border-collapse:collapse;width:100%;margin-bottom:6px;">';
       facts.forEach(function(f) {
-        h += '<tr><td style="color:#888;font-size:11px;padding:1px 8px 1px 0;white-space:nowrap;">' +
+        h += '<tr><td style="color:var(--szd-fg-3, #888);font-size:11px;padding:1px 8px 1px 0;white-space:nowrap;">' +
              f[0] + '</td><td style="font-size:12px;padding:1px 0;">' + escapeHtml(String(f[1])) + '</td></tr>';
       });
       h += '</table>';
     }
 
     if (wd.x) {
-      h += '<div style="color:#444;font-size:12px;line-height:1.4;border-top:1px solid #eee;padding-top:6px;">' +
+      h += '<div style="color:var(--szd-fg-2, #444);font-size:12px;line-height:1.4;border-top:1px solid var(--szd-line, #eee);padding-top:6px;">' +
            escapeHtml(wd.x) + '</div>';
     }
 
     if (wd.i) {
-      h += '<div style="color:#999;font-size:10px;margin-top:4px;">' + escapeHtml(wd.i) + '</div>';
+      h += '<div style="color:var(--szd-fg-3, #999);font-size:10px;margin-top:4px;">' + escapeHtml(wd.i) + '</div>';
     }
 
     h += '</div>';
@@ -7786,7 +7880,7 @@ function initWikiSidebar(map, config) {
     listEl.appendChild(wrap);
 
     var back = createEl('button', 'wiki-detail-back', '← Back to list');
-    back.style.cssText = 'display:block;margin:0 0 12px;padding:6px 10px;border:0;border-radius:6px;background:#eef2fa;color:#2a4a7a;font-size:13px;font-weight:600;cursor:pointer;';
+    back.style.cssText = 'display:block;margin:0 0 12px;padding:6px 10px;border:0;border-radius:6px;background:var(--szd-btn2-bg, #eef2fa);color:var(--szd-btn2-fg, #2a4a7a);font-size:13px;font-weight:600;cursor:pointer;';
     back.addEventListener('click', function() { staleView = false; updateSidebar(); });
     wrap.appendChild(back);
 
@@ -7796,7 +7890,7 @@ function initWikiSidebar(map, config) {
     if (coords && map._buildDirectionsButton) {
       wrap.appendChild(map._buildDirectionsButton(coords[1], coords[0], name));
     }
-    nm.style.cssText = 'font-size:17px;font-weight:700;margin-bottom:6px;color:#1a1a2a;line-height:1.25;word-wrap:break-word;';
+    nm.style.cssText = 'font-size:17px;font-weight:700;margin-bottom:6px;color:var(--szd-fg, #1a1a2a);line-height:1.25;word-wrap:break-word;';
     wrap.appendChild(nm);
 
     // Prefer the description baked into the geo-index (instant, no fetch). Fall
@@ -7807,7 +7901,7 @@ function initWikiSidebar(map, config) {
     var desc = bakedDesc || (wd ? (wd.x || wd.d || '') : '');
     if (desc) {
       var dd = createEl('div', 'wiki-detail-desc', desc);
-      dd.style.cssText = 'font-size:13.5px;line-height:1.5;color:#444;margin-bottom:10px;word-wrap:break-word;';
+      dd.style.cssText = 'font-size:13.5px;line-height:1.5;color:var(--szd-fg-2, #444);margin-bottom:10px;word-wrap:break-word;';
       wrap.appendChild(dd);
     }
 
@@ -7821,7 +7915,7 @@ function initWikiSidebar(map, config) {
       wrap.appendChild(ab);
     } else {
       var noa = createEl('div', 'wiki-detail-noarticle', 'No bundled article for this place.');
-      noa.style.cssText = 'font-size:12px;color:#888;margin-bottom:8px;';
+      noa.style.cssText = 'font-size:12px;color:var(--szd-fg-3, #888);margin-bottom:8px;';
       wrap.appendChild(noa);
     }
   }
@@ -11908,7 +12002,7 @@ function initRouting(map, config) {
             + '<div style="font-weight:600;font-size:14px;margin-bottom:2px;">'
             + (props.label || "").replace(/</g, "&lt;") + "</div>";
           if (props.description) {
-            html += '<div style="font-size:12px;color:#555;">'
+            html += '<div style="font-size:12px;color:var(--szd-fg-2, #555);">'
               + props.description.replace(/</g, "&lt;") + "</div>";
           }
           html += "</div>";

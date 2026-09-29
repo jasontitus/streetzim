@@ -39,8 +39,10 @@ function load(env = {}) {
     devicePixelRatio: env.dpr || 1,
     __szFetchWithRetry: env.fetcher,
   };
+  const classes = new Set();
   const document = {
-    documentElement: { tag: 'html' },
+    documentElement: { tag: 'html', classList: {
+      add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) } },
     createElement: env.createElement || (() => ({ getContext: () => null })),
   };
   const getComputedStyle = (el) => ({ filter: (env.filters || {})[el && el.tag] || 'none' });
@@ -52,7 +54,7 @@ function load(env = {}) {
     ' _szRenderPoiIcon, initRtlText };');
   const api = fn(window, document, { search }, getComputedStyle, 'http://zim/C/',
     (...x) => logs.push(x), (e) => String(e && e.message || e), env.Path2D, env.fetch);
-  return { ...api, window, mq, listeners, logs };
+  return { ...api, window, mq, listeners, logs, htmlClasses: classes };
 }
 const CONFIG = { minZoom: 0, maxZoom: 14 };
 
@@ -194,6 +196,101 @@ await ok('theme: satellite mode re-applies its overrides after a theme change', 
   const i = HTML.indexOf("map.on('streetzim.theme'");
   assert.ok(i > 0, 'satellite code does not listen for streetzim.theme');
   assert.match(HTML.slice(i, i + 200), /satSavedPaint = null;[\s\S]*showSatellite\(\)/);
+});
+
+// ---- Dark UI chrome (html.sz-dark, 010-styles.html) ----------------------
+await ok('theme: the page chrome gets html.sz-dark exactly when the map is dark', () => {
+  assert.ok(!load().htmlClasses.has('sz-dark'));
+  assert.ok(load({ dark: true }).htmlClasses.has('sz-dark'));
+  assert.ok(!load({ dark: true, search: '?theme=light' }).htmlClasses.has('sz-dark'));
+  assert.ok(load({ search: '?theme=dark' }).htmlClasses.has('sz-dark'));
+  assert.ok(!load({ dark: true, filters: { html: 'invert(1) hue-rotate(180deg)' } }).htmlClasses.has('sz-dark'));
+  // ... and follows a live scheme change both ways.
+  let darkNow = false;
+  const env = load({ darkNow: () => darkNow });
+  const map = { getLayer: () => ({}), setPaintProperty() {}, fire() {}, triggerRepaint() {} };
+  env.initMapTheme(map, CONFIG);
+  darkNow = true; env.listeners[0]();
+  assert.ok(env.htmlClasses.has('sz-dark'));
+  darkNow = false; env.listeners[0]();
+  assert.ok(!env.htmlClasses.has('sz-dark'));
+});
+
+// The dark block's custom properties, and the colours of a few rules in it.
+const DARK_CSS = (() => {
+  const i = HTML.indexOf('  html.sz-dark {');
+  assert.ok(i > 0, 'no html.sz-dark block in index.html');
+  return HTML.slice(i, HTML.indexOf('</style>', i));
+})();
+const DARK_VARS = Object.fromEntries([...DARK_CSS.slice(0, DARK_CSS.indexOf('}')).matchAll(/(--[\w-]+):\s*([^;]+);/g)]
+  .map(m => [m[1], m[2].trim()]));
+function darkRule(selector, prop) {
+  const i = DARK_CSS.indexOf(selector + ' {');
+  assert.ok(i >= 0, 'no dark rule for ' + selector);
+  const body = DARK_CSS.slice(i, DARK_CSS.indexOf('}', i));
+  const m = new RegExp('(?:^|[{;\\s])' + prop + ':\\s*([^;]+);').exec(body);
+  assert.ok(m, `${selector} sets no ${prop}`);
+  return m[1].trim();
+}
+// A translucent panel over the worst case behind it (white) -- light text
+// on it is then at its lowest contrast.
+function overWhite(c) {
+  const m = /^rgba\(([^)]+)\)$/.exec(c);
+  if (!m) return c;
+  const [r, g, b, a] = m[1].split(',').map(Number);
+  const hex = (v) => Math.round(v * a + 255 * (1 - a)).toString(16).padStart(2, '0');
+  return '#' + hex(r) + hex(g) + hex(b);
+}
+
+await ok('theme: dark chrome text keeps >= 4.5:1 (WCAG AA) on every dark panel colour', () => {
+  const v = (k) => { assert.ok(DARK_VARS[k], 'missing ' + k); return DARK_VARS[k]; };
+  const panels = {
+    '--panel-bg': v('--panel-bg'),
+    '#info': darkRule('html.sz-dark #info', 'background'),
+    '#attr-btn': darkRule('html.sz-dark #attr-btn', 'background'),
+    'chip': darkRule('html.sz-dark #find-chips .find-chip:not(.on)', 'background'),
+    'scale': darkRule('html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-scale', 'background-color'),
+    'attribution': darkRule('html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-attrib,\n  html.sz-dark .maplibregl-ctrl-attrib.maplibregl-compact', 'background-color'),
+    'popup': darkRule('html.sz-dark .maplibregl-popup-content', 'background'),
+    '--szd-surface': v('--szd-surface'), '--szd-surface-a': v('--szd-surface-a'),
+    '--szd-surface-hover': v('--szd-surface-hover'),
+  };
+  const texts = ['--text-primary', '--text-secondary', '--text-tertiary',
+                 '--szd-fg', '--szd-fg-2', '--szd-fg-3', '--szd-link', '--szd-warn'].map(v);
+  texts.push(darkRule('html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-scale', 'color'));
+  for (const [name, bg] of Object.entries(panels)) {
+    for (const fg of texts) {
+      const c = contrast(fg, overWhite(bg));
+      assert.ok(c >= 4.5, `${fg} on ${name} (${bg}) is ${c.toFixed(2)}:1`);
+    }
+  }
+  assert.ok(contrast(v('--szd-btn2-fg'), v('--szd-btn2-bg')) >= 4.5);
+  assert.ok(contrast('#8ab4f8', v('--szd-surface')) >= 4.5);            // pin links, "Change map"
+  // Filled buttons keep their light-mode colours: white on blue passes.
+  for (const bg of ['#1a73e8', '#2563eb', '#2a4a7a']) assert.ok(contrast('#ffffff', bg) >= 4.5, bg);
+});
+
+await ok('theme: light mode is untouched -- --szd-* exist only under html.sz-dark', () => {
+  const used = new Set([...HTML.matchAll(/var\((--szd-[\w-]+),\s*([^)]+\)?)\)/g)].map(m => m[1]));
+  assert.ok(used.size >= 8, 'the JS-built sheets should use the --szd-* tokens');
+  for (const k of used) assert.ok(DARK_VARS[k], `${k} is used but not defined for dark mode`);
+  // Defined nowhere else, so in light mode every var() falls back to the
+  // literal light colour it replaced.
+  const defs = [...HTML.matchAll(/(--szd-[\w-]+)\s*:/g)].length;
+  assert.strictEqual(defs, Object.keys(DARK_VARS).filter(k => k.startsWith('--szd-')).length);
+  const root = HTML.slice(HTML.indexOf(':root {'), HTML.indexOf('}', HTML.indexOf(':root {')));
+  assert.match(root, /--panel-bg: rgba\(255,255,255,0\.96\);/);
+  assert.match(root, /--text-tertiary: #9ca3af;/);
+});
+
+await ok('theme: JS-built panels take their light colours through --szd-* tokens', () => {
+  // Inline styles (no space after the colon) with a light surface or dark
+  // text colour would stay light in dark mode. White text on a filled
+  // button, the backdrop and the debug overlays are fine either way.
+  const allowed = /^(color:#fff|background:#(1a73e8|2a4a7a)|background:rgba\(0,0,0,0\.(32|55|85)\)|color:#0f0)$/;
+  const bad = [...HTML.matchAll(/(?:background|color):(?:#[0-9a-fA-F]{3,6}\b|rgba\([^)]*\))/g)]
+    .map(m => m[0]).filter(x => !allowed.test(x));
+  assert.deepStrictEqual(bad, []);
 });
 
 // ========================================================================
