@@ -88,12 +88,33 @@ def test_area_uses_geofabrik_extract_and_forwards_metadata(tmp_path, no_network)
     assert info["pbf_url"] == "https://download.geofabrik.de/europe/monaco-latest.osm.pbf"
     assert no_network == [info["pbf_url"]]
     ns = builder_args(argv)
-    assert ns.bbox == "7.40,43.72,7.44,43.76"
+    assert ns.bbox == "7.39,43.715,7.46,43.765"
     assert ns.zim_name == "osm_en_monaco" and ns.title == "Monaco"
     assert ns.publisher == "openZIM"
     assert ns.tags == "a;b"
     assert ns.map_center == "7.42,43.73" and ns.map_zoom == 13
     assert ns.routing and not ns.satellite
+    assert not ns.kiwix_poi_pages                      # off unless asked for
+
+
+def test_kiwix_poi_pages_is_forwarded(tmp_path, no_network):
+    argv, _ = plan(["--area", "monaco", "--kiwix-poi-pages"], tmp_path)
+    assert builder_args(argv).kiwix_poi_pages
+
+
+def test_monaco_preset_frames_all_of_monaco_with_sea_around_it():
+    """--area monaco is what CI and the Zimfarm recipe build. Its box used to
+    stop on Monaco's eastern border (7.44) and 500 m out to sea, so the sea
+    ended in a straight line and a desktop window could not fit the whole
+    country. Monaco: 7.409-7.440 E, 43.725-43.752 N."""
+    from create_osm_zim import KNOWN_AREAS
+    w, s, e, n = (float(v) for v in KNOWN_AREAS["monaco"]["bbox"].split(","))
+    assert w <= 7.409 - 0.01 and e >= 7.440 + 0.015      # ~1 km of margin east
+    assert s <= 43.725 - 0.009 and n >= 43.752 + 0.009   # ~1 km of sea south
+    # Wide enough for a 1280x800 window at the zoom that shows it all
+    # (MapLibre keeps the viewport inside the box): 3 km tall needs >= 0.06 deg.
+    assert e - w >= 0.06
+    assert e - w <= 0.1 and n - s <= 0.1                 # still a small CI build
 
 
 def test_terrain_is_on_by_default_and_no_terrain_turns_it_off(tmp_path, no_network):

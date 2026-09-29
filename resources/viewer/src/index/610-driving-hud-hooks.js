@@ -209,7 +209,7 @@
             + '<div style="font-weight:600;font-size:14px;margin-bottom:2px;">'
             + (props.label || "").replace(/</g, "&lt;") + "</div>";
           if (props.description) {
-            html += '<div style="font-size:12px;color:#555;">'
+            html += '<div style="font-size:12px;color:var(--szd-fg-2, #555);">'
               + props.description.replace(/</g, "&lt;") + "</div>";
           }
           html += "</div>";

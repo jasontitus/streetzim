@@ -9,6 +9,7 @@ venv/
 coastline/
 landcover/
 satellite_cache*/
+satellite_s2cloudless-*/
 terrain_cache*/
 terrain_compression_test/
 world-data/

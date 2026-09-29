@@ -68,6 +68,9 @@ there; the host only pulls.
 
 [`TESTING-STAGE1.md`](TESTING-STAGE1.md) is the step-by-step check to run
 before, and just after, the build host takes this change.
+[`TESTING-NEXT.md`](TESTING-NEXT.md) then gets the split onto `main`, moves
+the host on to the builder and `-next` branches, and lists the tests to run
+there.
 
 **Caveats:**
 - The guard does not keep bash options: `bash -x ops/X.sh` re-runs without

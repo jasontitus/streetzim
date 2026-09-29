@@ -7,7 +7,7 @@ file that opens in [Kiwix](https://kiwix.org) (iOS, Android, desktop) or in a
 browser, with no network at all. A ZIM contains:
 
 - **Vector map** rendered on the device by MapLibre GL JS (OpenMapTiles schema, z0–14, overzoomed beyond).
-- **Search** over places, streets, addresses, POIs, peaks, parks and water, plus Kiwix's own title/full-text search and one detail page per feature.
+- **Search** over places, streets, addresses, POIs, peaks, parks and water, plus Kiwix's own full-text search over a detail page for each place, park, peak, water feature and airport (POIs too with `--kiwix-poi-pages`; never streets or addresses: see `KIWIX_PAGE_TYPES` in streetzim/zim_writer.py and docs/zimfarm.md).
 - **Find page** with category chips (Food & Drink, Bars, Hotels, Museums, Parks, Health, Shops, Gas…) and distance sorting.
 - **Offline routing** (drive / walk / bike) in a Web Worker, with a GPS turn-by-turn HUD.
 - **Terrain**: hillshade and 3D from the Copernicus DEM (on by default in the `streetzim` command; `--terrain` for `create_osm_zim.py`).
@@ -110,6 +110,11 @@ streetzim --name osm_en_monaco --title Monaco \
     --area monaco --output out --stats-filename out/task_progress.json
 ```
 
+Satellite imagery is off by default in `streetzim`. `--satellite` adds EOX's
+2016 mosaic (CC BY 4.0); the sharper 2021 mosaic is non-commercial and takes
+`--satellite-source s2cloudless-2021 --satellite-accept-noncommercial`, which
+also labels the ZIM as restricted ([docs/zimfarm.md](docs/zimfarm.md#satellite-imagery)).
+
 ## Choosing what goes in
 
 Input, one of:
@@ -133,7 +138,7 @@ Main feature flags (all off by default; `python create_osm_zim.py --help` lists 
 | `--spatial-chunk-scale 10` | routing split into 0.1° cells loaded on demand (what production ships; needed for large regions on phones) | `--routing` |
 | `--split-find-chips` | one file per Find chip instead of the whole POI list | — |
 | `--terrain` | hillshade / 3D terrain tiles to z12 | GDAL (via `rasterio`), network to AWS S3 |
-| `--satellite` | Sentinel-2 imagery, **non-commercial licence** | network to EOX |
+| `--satellite` | Sentinel-2 imagery; `--satellite-source` picks the year: `s2cloudless-2021` (default here, **CC BY-NC-SA 4.0, non-commercial**) or `s2cloudless-2016` (CC BY 4.0) | network to EOX |
 | `--wikidata` | population, descriptions, Wikipedia extracts | network to Wikidata/Wikipedia |
 | `--bundle-wiki-articles --wiki-articles-source enwiki.zim` | full Wikipedia articles, read from a local Wikipedia ZIM | a Wikipedia ZIM |
 | `--overture-addresses/--overture-places PARQUET` | Overture data, from `download_overture_data.py` | DuckDB, network to S3 |
@@ -199,7 +204,8 @@ and the known technical debt.
 | OSM [water polygons](https://osmdata.openstreetmap.de/data/water-polygons.html) | ODbL 1.0 | © OpenStreetMap contributors |
 | [Natural Earth](https://www.naturalearthdata.com/) | public domain | — |
 | [Copernicus GLO-30 / GLO-90 DEM](https://dataspace.copernicus.eu) (`--terrain`) | Copernicus free & open | © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the EU and ESA |
-| [Sentinel-2 cloudless 2021](https://s2maps.eu) by EOX (`--satellite`) | **CC BY-NC-SA 4.0** | Sentinel-2 cloudless by EOX (contains modified Copernicus Sentinel data 2021) |
+| [EOxCloudless](https://cloudless.eox.at/license-non-commercial) Sentinel-2 cloudless **2016** by EOX (`--satellite-source s2cloudless-2016`; `streetzim --satellite`) | CC BY 4.0 | EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016 & 2017) |
+| [EOxCloudless](https://cloudless.eox.at/license-non-commercial) Sentinel-2 cloudless **2021** by EOX (`create_osm_zim.py --satellite`) | **CC BY-NC-SA 4.0** | EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2021) |
 | [Overture Maps](https://overturemaps.org/) (`--overture-*`) | CDLA-Permissive-2.0 and others per source; written to `overture-sources.json` | per source |
 | [Wikidata](https://www.wikidata.org/) | CC0 | — |
 | [Wikipedia](https://en.wikipedia.org/) text | CC BY-SA 4.0 | Wikipedia contributors |
@@ -215,12 +221,19 @@ for Arabic, Armenian, Georgian, Hebrew, Lao and Thai labels when a map has them,
 shipped in the ZIM as `fonts/NotoSans/OFL.txt`; pinned in
 `resources/viewer-assets.lock.json`, licence in `resources/vendor/noto-sans/`).
 
-> **Satellite imagery is non-commercial.** The Sentinel-2 cloudless 2021 layer
-> is CC BY-NC-SA 4.0. `create_osm_zim.py` only includes it with `--satellite`,
-> but the production wrappers pass that flag, so most **published** StreetZim
-> ZIMs contain it and may only be redistributed non-commercially. Build without
-> `--satellite` (or use a variant with `satellite=no` in
-> `cloud/region-variants.tsv`) for a ZIM with no non-commercial data.
+> **Satellite imagery: check which year a ZIM has.** EOX licenses each year
+> of its Sentinel-2 cloudless mosaic separately. The 2021 layer is CC BY-NC-SA
+> 4.0: non-commercial use only. `create_osm_zim.py` only includes it with
+> `--satellite`, but the production wrappers pass that flag, so most
+> **published** StreetZim ZIMs contain it and may only be used and
+> redistributed non-commercially. Build without `--satellite` (or use a variant
+> with `satellite=no` in `cloud/region-variants.tsv`) for a ZIM with no
+> non-commercial data. The 2016 layer is CC BY 4.0 (attribution only), and is
+> what the openZIM-style `streetzim --satellite` adds; `streetzim` takes the
+> 2021 layer only with `--satellite-accept-noncommercial`, and then labels the
+> ZIM as restricted. A ZIM's `License` metadata, its viewer credits and the
+> on-map attribution name the year it contains. Details:
+> [docs/zimfarm.md](docs/zimfarm.md#satellite-imagery).
 
 ## Optional accelerators for very large builds
 

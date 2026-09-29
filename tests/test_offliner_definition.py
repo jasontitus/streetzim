@@ -35,7 +35,17 @@ def test_shape_matches_what_zimfarm_expects():
     flags = set(DEF["flags"])
     assert all(m["flag"] in flags for m in DEF["zimMetadata"])
     assert {m["metadata"] for m in DEF["zimMetadata"]} >= {"Name", "Title", "Description"}
-    assert "satellite" not in flags          # never offered: CC BY-NC-SA
+    # Satellite: opt-in, off by default, each source's licence stated.
+    sat = DEF["flags"]["satellite"]
+    assert sat["type"] == "boolean" and not sat["required"]
+    assert "Off by default" in sat["description"] and "CC BY 4.0" in sat["description"]
+    src = DEF["flags"]["satellite_source"]
+    assert src["choices"] == ["s2cloudless-2016", "s2cloudless-2021"]
+    assert "CC BY 4.0" in src["description"] and "CC BY-NC-SA 4.0" in src["description"]
+    assert "NON-COMMERCIAL" in src["description"]
+    assert DEF["flags"]["satellite_accept_noncommercial"]["type"] == "boolean"
+    assert (DEF["flags"]["satellite_max_zoom"]["min"],
+            DEF["flags"]["satellite_max_zoom"]["max"]) == (0, 14)
     assert DEF["modelValidators"] == [{"name": "check_exclusive_fields",
                                        "fields": ["area", "include_poly", "bbox"]}]
     assert "monaco" in DEF["flags"]["area"]["choices"]

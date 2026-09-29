@@ -85,7 +85,8 @@ def build_overrides(*, name: str | None = None, title: str | None = None,
                     long_description: str | None = None,
                     creator: str | None = None, publisher: str | None = None,
                     tags: str | None = None,
-                    scraper: str | None = None) -> dict[str, str | list[str]]:
+                    scraper: str | None = None,
+                    flavour: str | None = None) -> dict[str, str | list[str]]:
     """Validated metadata values keyed by ZIM metadata name. Only the values
     actually given are returned; the builder keeps its defaults for the rest."""
     md: dict[str, str | list[str]] = {}
@@ -106,6 +107,8 @@ def build_overrides(*, name: str | None = None, title: str | None = None,
         md["Tags"] = _check_tags(tags)
     if scraper is not None:
         md["Scraper"] = _check("Scraper", scraper)
+    if flavour is not None:
+        md["Flavour"] = _check("Flavour", flavour)
     return md
 
 

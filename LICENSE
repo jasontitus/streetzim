@@ -32,13 +32,21 @@ each subject to its own license terms:
    Attribution: (c) OpenStreetMap contributors
    Details: https://www.openstreetmap.org/copyright
 
-2. Sentinel-2 Cloudless Satellite Imagery (2021)
+2. Sentinel-2 Cloudless Satellite Imagery (EOxCloudless), only in ZIMs built
+   with --satellite. Each ZIM's License metadata names the year it contains.
    Provider: EOX IT Services GmbH
+   Details: https://cloudless.eox.at/license-non-commercial
+
+   2016 mosaic (--satellite-source s2cloudless-2016)
+   License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+   Attribution: EOxCloudless https://cloudless.eox.at by EOX IT Services
+                GmbH (Contains modified Copernicus Sentinel data 2016 & 2017)
+
+   2021 mosaic (--satellite-source s2cloudless-2021)
    License: Creative Commons Attribution-NonCommercial-ShareAlike 4.0
             International (CC BY-NC-SA 4.0)
-   Attribution: Sentinel-2 cloudless - https://s2maps.eu by EOX IT Services
+   Attribution: EOxCloudless https://cloudless.eox.at by EOX IT Services
                 GmbH (Contains modified Copernicus Sentinel data 2021)
-   Details: https://s2maps.eu
    NOTE: This license restricts commercial use. See README for details.
 
 3. Copernicus GLO-30 Digital Elevation Model

@@ -34,6 +34,25 @@ from streetzim.tile_alias import TileAliaser, max_alias_bytes
 from streetzim import viewer_assets
 
 
+# Search records that get a Kiwix page (search/<slug>.html), and with it an
+# entry in Kiwix's full-text search (libzim indexes the page) and in its
+# title suggestions (the pages are front articles; libzim's title index
+# holds only those, so without it Kiwix suggested nothing). Streets and addresses never
+# do; the in-map search has them. POIs do only with --kiwix-poi-pages
+# (kiwix_poi_pages=True): without them kiwix-serve's search for "Casino" in
+# Monaco finds the Fontaine du Casino (a lake) and none of the shops, stops
+# and sights named Casino. Measured on 2026-09-29: about 440 B per named POI
+# (page, dirent, full-text and title index), Monaco +28% (1.8k pages),
+# Luxembourg +16% (56.7 -> 66.0 MB, 21k pages), so ~ +19% for Switzerland
+# and +12% for the Netherlands; build time within noise. docs/zimfarm.md.
+KIWIX_PAGE_TYPES = frozenset({"place", "airport", "park", "peak", "water"})
+
+
+def kiwix_page_types(poi_pages: bool = False) -> frozenset[str]:
+    """The record types that get a Kiwix page in this build."""
+    return KIWIX_PAGE_TYPES | {"poi"} if poi_pages else KIWIX_PAGE_TYPES
+
+
 def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
     """HTML for a search-result detail page (`search/<slug>.html`).
 
@@ -449,6 +468,7 @@ def create_zim(
     wiki_images_per_article=12,
     metadata=None,
     illustration=None,
+    kiwix_poi_pages=False,
 ):
     """Create a ZIM file containing the map viewer and all tiles.
 
@@ -466,6 +486,8 @@ def create_zim(
 
     ``metadata`` / ``illustration``: openZIM metadata overrides and a 48x48
     PNG, from the --title/--description/... flags (see _add_metadata).
+
+    ``kiwix_poi_pages``: give named POIs a Kiwix page too (KIWIX_PAGE_TYPES).
     """
     from libzim.writer import Creator as LibzimCreator, Item, StringProvider, FileProvider
     from libzim.writer import Hint
@@ -621,6 +643,7 @@ def create_zim(
                       overture_sources=overture_sources, xapian_mode=xapian_mode,
                       metadata=metadata, illustration=illustration,
                       has_satellite=bool(satellite_dir and os.path.isdir(satellite_dir)),
+                      satellite_source=map_config.get("satelliteSource"),
                       has_terrain=bool(terrain_dir and os.path.isdir(terrain_dir)),
                       has_wiki=has_wikidata or has_articles)
         _add_routing_graph(creator, MapItem,
@@ -642,7 +665,8 @@ def create_zim(
                     overture_themes=overture_themes,
                     overture_release=overture_release, xapian_mode=xapian_mode,
                     xapianbuilder_bin=xapianbuilder_bin,
-                    xapian_workdir=xapian_workdir, chunk_tmp=chunk_tmp)
+                    xapian_workdir=xapian_workdir, chunk_tmp=chunk_tmp,
+                    page_types=kiwix_page_types(kiwix_poi_pages))
         print("    Finalizing ZIM (ZSTD compression + Xapian indexing)...", flush=True)
         finalize_start = time.time()
 
@@ -682,7 +706,7 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                 map_config, name, bbox, routing_graph_path, address_count,
                 overture_sources, overture_themes, xapian_mode,
                 xapianbuilder_bin, xapian_workdir, chunk_tmp,
-                overture_release=None):
+                overture_release=None, page_types=KIWIX_PAGE_TYPES):
     """Search data: JSON chunks, category index, chips, streetzim-meta.json,
     overture-sources.json and the Kiwix full-text pages. The chunk files go
     to `chunk_tmp`, which create_zim removes after the creator has closed."""
@@ -699,7 +723,7 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                            wikidata_data=wikidata_data,
                            wiki_cross_refs=wiki_cross_refs,
                            loc_lookup=loc_lookup, _bundled_set=_bundled_set,
-                           chunk_tmp=chunk_tmp)
+                           chunk_tmp=chunk_tmp, page_types=page_types)
         _search_emit_chunks(creator, MapItem,
                             split_hot_search_chunks_mb=split_hot_search_chunks_mb,
                             chunk_tmp=b.chunk_tmp, chunk_counts=b.chunk_counts,
@@ -729,12 +753,12 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
 
     elif search_features:
         _add_search_in_memory(creator, MapItem, search_features=search_features,
-                              loc_lookup=loc_lookup)
+                              loc_lookup=loc_lookup, page_types=page_types)
 
 
 def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
                   metadata=None, illustration=None, has_satellite=True,
-                  has_terrain=True, has_wiki=True):
+                  has_terrain=True, has_wiki=True, satellite_source=None):
     """ZIM metadata (Name, Title, Tags, License, ...) and the 48x48 illustration.
 
     ``metadata`` holds openZIM-flag overrides validated by
@@ -743,8 +767,11 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
     keeps the builder's default. ``illustration`` is a 48x48 PNG.
     ``has_*`` say which optional layers the ZIM contains, so License names
     only the licences that apply (a ZIM without the satellite layer must not
-    claim CC BY-NC-SA).
+    claim CC BY-NC-SA). ``satellite_source`` names the mosaic
+    (streetzim.satellite_sources; default the builder's, 2021): with a
+    non-commercial one, License opens with a "Non-commercial use only" notice.
     """
+    from streetzim import satellite_sources
     md = metadata or {}
     # Add metadata — Name and Illustration are required by Kiwix to register the ZIM
     import re as _re_name
@@ -779,15 +806,18 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
         _tags = merge_tags(_tags, md["Tags"])
     creator.add_metadata("Tags", _tags)
     creator.add_metadata("Name", md.get("Name", f"osm_{zim_name}"))
-    creator.add_metadata("Flavour", "maxi")
+    creator.add_metadata("Flavour", md.get("Flavour", "maxi"))
     creator.add_metadata("Scraper", md.get("Scraper", "streetzim/1.0"))
     license_parts = [
         "Map data: ODbL (OpenStreetMap)",
         "Tile schema: CC-BY 4.0 (OpenMapTiles)",
     ]
     if has_satellite:
-        license_parts.append(
-            "Satellite imagery: CC BY-NC-SA 4.0 (Sentinel-2 cloudless by EOX)")
+        sat = satellite_sources.get(satellite_source or satellite_sources.BUILDER_DEFAULT)
+        if sat.noncommercial:
+            license_parts.insert(0, f"Non-commercial use only: the satellite imagery "
+                                    f"is {sat.license}")
+        license_parts.append(sat.license_metadata)
     if has_terrain:
         license_parts.append(
             # GLO-90 too: low zooms, and cells GLO-30 leaves out. The same
@@ -1433,7 +1463,8 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
                 "zim-pack: wiki-articles", time.time() - _wa_t0,
                 note=f"{_wa_stats['bundled']} articles, "
                      f"{_wa_stats['bytes'] // 1024} KB, "
-                     f"{_wa_stats['failed']} missing, "
+                     f"{_wa_stats['failed']} missing "
+                     f"({_wa_stats.get('unfetched', 0)} unfetched), "
                      f"{_wa_stats.get('images', 0)} images "
                      f"{_wa_stats.get('image_bytes', 0) // 1048576} MB")
     return _bundled_set
@@ -1608,10 +1639,10 @@ def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_ch
                  + (f" + {routing_graph_chunk_mb} MB chunks" if routing_graph_chunk_mb else ""))
 
 
-def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp):
+def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp, page_types=KIWIX_PAGE_TYPES):
     """Search pass 1: stream the search JSONL into per-prefix and per-category
     chunk files in `chunk_tmp`, plus the Xapian candidates file."""
-    xapian_types = {"place", "airport", "park", "peak", "water"}
+    xapian_types = page_types
 
     # Pass 1: stream JSONL -> per-prefix chunk files + xapian file
     chunk_counts = {}
@@ -2436,7 +2467,7 @@ def _search_xapian_pages(creator, MapItem, *, xapian_mode, xapianbuilder_bin, xa
                     feat["name"],
                     "text/html",
                     page_html.encode("utf-8"),
-                    is_front=False,
+                    is_front=True,      # in the title index: Kiwix suggestions
                 ))
 
                 i += 1
@@ -2488,7 +2519,7 @@ def _search_xapian_pages(creator, MapItem, *, xapian_mode, xapianbuilder_bin, xa
               flush=True)
 
 
-def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup):
+def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup, page_types=KIWIX_PAGE_TYPES):
     """Search for an in-memory feature list (small builds and tests)."""
     print(f"    Adding {len(search_features)} search entries...")
 
@@ -2531,8 +2562,7 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup):
 
     print(f"    Added {len(chunks)} search chunks ({total_features} features)")
 
-    xapian_types = {"place", "airport", "park", "peak", "water"}
-    xapian_features = [f for f in search_features if f["type"] in xapian_types]
+    xapian_features = [f for f in search_features if f["type"] in page_types]
     print(f"    Adding {len(xapian_features)} Xapian search pages (of {len(search_features)} total)...", flush=True)
 
     xapian_start = time.time()
@@ -2558,7 +2588,7 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup):
             feat["name"],
             "text/html",
             page_html.encode("utf-8"),
-            is_front=False,
+            is_front=True,      # in the title index: Kiwix suggestions
         ))
 
         if (i + 1) % 2000 == 0:

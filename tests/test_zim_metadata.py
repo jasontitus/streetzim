@@ -111,7 +111,7 @@ def test_illustration_svg_and_garbage(tmp_path):
 # ------------------------------------------------------------ create_zim
 
 
-def _build(tmp_path, map_config=None, **kw):
+def _build(tmp_path, map_config_extra=None, **kw):
     libzim = pytest.importorskip("libzim.reader")
     mvt = pytest.importorskip("mapbox_vector_tile")
     from streetzim.zim_writer import create_zim
@@ -126,7 +126,7 @@ def _build(tmp_path, map_config=None, **kw):
         maplibre_js_path=str(tmp_path / "ml.js"),
         maplibre_css_path=str(tmp_path / "ml.css"),
         viewer_html_path=str(ROOT / "resources/viewer/index.html"),
-        map_config=map_config or {"name": "Monaco"}, name="OSM - Monaco",
+        map_config={"name": "Monaco", **(map_config_extra or {})}, name="OSM - Monaco",
         bbox=(7.40, 43.72, 7.44, 43.76),
         search_features=[{"name": "Casino", "type": "poi", "subtype": "casino",
                           "lat": 43.739, "lon": 7.428}],
@@ -215,8 +215,8 @@ def test_terrain_credits_copernicus_and_packs_from_its_min_zoom(tmp_path):
         (ter / str(z) / str(x)).mkdir(parents=True)
         (ter / str(z) / str(x) / f"{y}.webp").write_bytes(b"RIFF" + bytes([z]) * 300)
     md = _build(tmp_path, terrain_dir=str(ter), terrain_max_zoom=12,
-                map_config={"name": "Monaco", "hasTerrain": True, "terrainMaxZoom": 12,
-                            "terrainMinZoom": 11})
+                map_config_extra={"hasTerrain": True, "terrainMaxZoom": 12,
+                                  "terrainMinZoom": 11})
     terrain = sorted(p for p in md["entries"] if p.startswith("terrain/"))
     assert terrain == ["terrain/11/1066/746.webp", "terrain/12/2132/1493.webp"]
     lic = md["License"].decode()

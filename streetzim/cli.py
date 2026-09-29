@@ -16,7 +16,11 @@ directly; both paths produce the same ZIM for the same inputs.
         --description "Offline map of Monaco with search and routing" \\
         --area monaco --output /output
 
-The satellite layer (CC BY-NC-SA) is deliberately not offered here.
+Satellite imagery is off by default and opt-in (--satellite). The default
+source is freely licensed (CC BY 4.0); a non-commercial one needs
+--satellite-accept-noncommercial and makes a ZIM labelled as restricted
+(Flavour, Tags, LongDescription, License, viewer credits). See
+docs/zimfarm.md, "Satellite imagery".
 """
 from __future__ import annotations
 
@@ -42,6 +46,7 @@ if str(REPO_ROOT) not in sys.path:     # also runnable as `python streetzim/cli.
     sys.path.insert(0, str(REPO_ROOT))
 from streetzim import area  # noqa: E402  (after the path fix above)
 from streetzim.paths import RESOURCES_DIR, missing_runtime_files  # noqa: E402
+from streetzim import satellite_sources  # noqa: E402
 GEOFABRIK_POLY = re.compile(r"^https?://download\.geofabrik\.de/(.+)\.poly$")
 USER_AGENT = "streetzim (https://github.com/jasontitus/streetzim)"
 
@@ -70,11 +75,17 @@ ZIMFARM: dict[str, dict[str, Any]] = {
     "wikidata": {"title": "Wikidata"},
     "no_terrain": {"title": "No terrain",
                    "description": "Leave out hillshade and 3D terrain (on by default)"},
+    "kiwix_poi_pages": {"title": "POIs in Kiwix search"},
     "default_view": {"title": "Default view"},
     "output": {"pattern": r"^/output$"},
     "stats_filename": {"pattern": r"^/output/task_progress\.json$"},
     "zim_workers": {"title": "ZIM workers", "min": 1},
     "max_zoom": {"min": 0, "max": 14},
+    "satellite": {"title": "Satellite imagery"},
+    "satellite_source": {"title": "Satellite source", "type": "string-enum",
+                         "choices": sorted(satellite_sources.SOURCES)},
+    "satellite_accept_noncommercial": {"title": "Accept non-commercial imagery"},
+    "satellite_max_zoom": {"title": "Satellite max zoom"},
     "tmp": {"offliner": False},
     "dl": {"offliner": False},
     "shapefiles": {"offliner": False},
@@ -111,9 +122,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--creator", default="OpenStreetMap contributors",
                    help="Name of content creator. Default: OpenStreetMap contributors")
     p.add_argument("--publisher", default="openZIM", help="Publisher name. Default: openZIM")
-    p.add_argument("--file-name", default="{name}_{period}",
-                   help="ZIM file name, without .zim; {name} and {period} (YYYY-MM) "
-                        "are replaced. Default: {name}_{period}")
+    p.add_argument("--file-name",
+                   help="ZIM file name, without .zim; {name}, {period} (YYYY-MM) "
+                        "and {flavour} are replaced. Default: {name}_{period}, "
+                        "or {name}_{flavour}_{period} with --satellite")
     p.add_argument("--tags", help="Semicolon (;) delimited list of tags to add to the ZIM")
     p.add_argument("--illustration-url",
                    help="URL (or path) of a PNG, JPEG, WebP or SVG (SVG needs "
@@ -158,7 +170,12 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Wikidata place details (needs network access to Wikidata)")
     feat.add_argument("--terrain", action=argparse.BooleanOptionalAction, default=True,
                       help="Hillshade and 3D terrain from the Copernicus DEM "
-                           "(downloads DEM tiles for the area). Default: on")
+                           "(downloads DEM tiles for the area)")
+    feat.add_argument("--kiwix-poi-pages", action="store_true",
+                      help="Also list every named POI in Kiwix's own search, "
+                           "not only "
+                           "places, parks, peaks, water and airports. Adds "
+                           "about 440 B per POI (+16%% on Luxembourg). Default: off")
     feat.add_argument("--max-zoom", type=int, choices=range(0, 15), metavar="{0..14}",
                       help="Maximum zoom of the vector tiles. Default: 14")
     feat.add_argument("--default-view",
@@ -167,7 +184,102 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Compression threads for libzim. Default: the CPU "
                            "count, at most 20")
     feat.add_argument("--keep-temp", action="store_true", help=argparse.SUPPRESS)
+    add_satellite_flags(p)
     return p
+
+
+# ---------------------------------------------------------------- satellite
+
+
+def add_satellite_flags(p: argparse.ArgumentParser) -> None:
+    free = satellite_sources.OPENZIM_DEFAULT
+    sat = p.add_argument_group(
+        "Satellite imagery (off by default)",
+        "EOX Sentinel-2 cloudless mosaics. Each year has its own licence; "
+        "see docs/zimfarm.md, 'Satellite imagery'.")
+    sat.add_argument("--satellite", action="store_true",
+                     help="Add a satellite imagery layer (a Satellite button in the "
+                          f"viewer). Off by default. The source defaults to {free}, "
+                          "CC BY 4.0; the ZIM's Flavour becomes 'satellite'. "
+                          "--satellite-source and --satellite-max-zoom also turn it on")
+    sat.add_argument("--satellite-source", choices=sorted(satellite_sources.SOURCES),
+                     help=f"Satellite imagery source (implies --satellite). {free}: EOX Sentinel-2 "
+                          "cloudless 2016, CC BY 4.0, free for any use with "
+                          "attribution (softer, bluer, some seams). "
+                          "s2cloudless-2021: EOX Sentinel-2 cloudless 2021, "
+                          "CC BY-NC-SA 4.0, NON-COMMERCIAL use only (sharper); "
+                          "needs --satellite-accept-noncommercial and labels the "
+                          "ZIM as restricted (Flavour 'satellite-nc', tag "
+                          f"'non-commercial'). Default: {free}")
+    sat.add_argument("--satellite-accept-noncommercial", action="store_true",
+                     help="Required with a non-commercial --satellite-source "
+                          "(s2cloudless-2021), refused without satellite imagery: "
+                          "confirms that this ZIM may be used and redistributed "
+                          "for non-commercial purposes only")
+    sat.add_argument("--satellite-max-zoom", type=int, choices=range(0, 15),
+                     metavar="{0..14}",
+                     help="Maximum zoom of the satellite tiles (implies "
+                          "--satellite; the viewer over-zooms past it). Default: "
+                          "--max-zoom, and at most 13 for areas centred 45 degrees "
+                          "or more from the equator")
+
+
+LONG_DESCRIPTION_MAX = 4000      # zimscraperlib; streetzim/zim_metadata.py
+
+
+def satellite_source(args: argparse.Namespace) -> satellite_sources.SatelliteSource | None:
+    """The satellite source the flags ask for (None: no satellite), after
+    checking them. ValueError when they are inconsistent, or a
+    non-commercial source is not acknowledged."""
+    if not (args.satellite or args.satellite_source or args.satellite_max_zoom is not None):
+        if args.satellite_accept_noncommercial:
+            raise ValueError("--satellite-accept-noncommercial needs --satellite-source")
+        return None
+    src = satellite_sources.get(args.satellite_source or satellite_sources.OPENZIM_DEFAULT)
+    if src.noncommercial and not args.satellite_accept_noncommercial:
+        raise ValueError(
+            f"--satellite-source {src.key} is {src.license}: non-commercial use "
+            "only, so the ZIM could not be used or passed on commercially. Add "
+            "--satellite-accept-noncommercial to build it as a restricted variant "
+            f"(Flavour {satellite_sources.FLAVOUR_NONCOMMERCIAL}), or use "
+            f"{satellite_sources.OPENZIM_DEFAULT} ("
+            f"{satellite_sources.get(satellite_sources.OPENZIM_DEFAULT).license})")
+    return src
+
+
+def apply_satellite(args: argparse.Namespace) -> None:
+    """Resolve --file-name and, with --satellite, label the ZIM: Flavour,
+    Tags and (for a non-commercial source) a LongDescription note. Run after
+    {name}/{period} are filled and before the metadata is validated."""
+    src = satellite_source(args)
+    args.flavour = satellite_sources.flavour(src) if src else None
+    if args.file_name is None:
+        args.file_name = "{name}_{flavour}_{period}" if src else "{name}_{period}"
+    args.file_name = args.file_name.replace("{flavour}", args.flavour or "maxi")
+    if not src:
+        return
+    args.tags = ";".join(([args.tags] if args.tags else []) + satellite_sources.tags(src))
+    if src.noncommercial:
+        # The note always fits: the text before it is cut to leave room
+        # (code points, which are never fewer than graphemes).
+        note = satellite_sources.restricted_note(src)
+        text = args.long_description or args.description
+        room = LONG_DESCRIPTION_MAX - len(note) - 2
+        if len(text) > room:
+            text = text[:room - 1].rstrip() + "\u2026"
+        args.long_description = f"{text}\n\n{note}"
+
+
+def satellite_argv(args: argparse.Namespace) -> list[str]:
+    """create_osm_zim arguments for the satellite layer and the flavour."""
+    src = satellite_source(args)
+    if not src:
+        return []
+    argv = ["--satellite", f"--satellite-source={src.key}",
+            f"--flavour={satellite_sources.flavour(src)}"]
+    if args.satellite_max_zoom is not None:
+        argv += ["--satellite-zoom", str(args.satellite_max_zoom)]
+    return argv
 
 
 # ---------------------------------------------------------------- helpers
@@ -497,6 +609,8 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
         argv += ["--wikidata"]
     if args.terrain:
         argv += ["--terrain"]
+    if args.kiwix_poi_pages:
+        argv += ["--kiwix-poi-pages"]
     if args.max_zoom is not None:
         argv += ["--max-zoom", str(args.max_zoom)]
     if args.zim_workers:
@@ -508,6 +622,7 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
             argv += ["--map-zoom", str(round(zoom))]
     if args.debug or args.keep_temp:
         argv += ["--keep-temp"]
+    argv += satellite_argv(args)
     return argv, {"bbox": bbox, "pbf_url": pbf_url}
 
 
@@ -551,10 +666,11 @@ def main(argv: list[str] | None = None) -> int:
     # Everything that can be checked cheaply is checked before downloading.
     illustration: Path | None = None
     try:
+        apply_satellite(args)
         from streetzim.zim_metadata import build_overrides, load_illustration
         build_overrides(name=args.name, title=args.title, description=args.description,
                         long_description=args.long_description, creator=args.creator,
-                        publisher=args.publisher, tags=args.tags)
+                        publisher=args.publisher, tags=args.tags, flavour=args.flavour)
         final = out_dir / zim_filename(args.file_name, args.name)
         if args.default_view:
             parse_default_view(args.default_view)

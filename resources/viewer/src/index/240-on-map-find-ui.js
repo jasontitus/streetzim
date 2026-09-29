@@ -372,8 +372,9 @@ function _showFindToast(text, opts) {
     // broke a one-line message into three on a phone.
     + 'width:max-content; max-width:calc(100vw - 32px); box-sizing:border-box;'
     + 'text-align:center;'
-    + 'background:rgba(255,255,255,0.95);'
-    + 'color:' + (opts.color || '#a33') + ';'
+    + 'background:var(--szd-surface-a, rgba(255,255,255,0.95));'
+    // A caller's colour is a neutral hint (#333); the default is the warning red.
+    + 'color:' + (opts.color ? 'var(--szd-fg, ' + opts.color + ')' : 'var(--szd-warn, #a33)') + ';'
     // 18px, not a pill: a message that wraps at 320px stays a tidy box.
     + 'border:1px solid rgba(170,50,50,0.25); border-radius:18px;'
     + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
@@ -738,15 +739,15 @@ function _populateNearby(slot, map, r, selfIdx) {
 
   var head = document.createElement('div');
   head.style.cssText = (
-    'font-size:11px; color:#888; text-transform:uppercase;'
+    'font-size:11px; color:var(--szd-fg-3, #888); text-transform:uppercase;'
     + 'letter-spacing:0.04em; margin:0 0 6px;'
   );
-  head.textContent = 'Nearby (within 1.5 km)';
+  head.textContent = 'Nearby (within ' + szFormatDistance(1500, szUnit()) + ')';
   slot.appendChild(head);
   var list = document.createElement('div');
   list.style.cssText = (
     'display:flex; flex-direction:column;'
-    + 'border:1px solid #eee; border-radius:10px; overflow:hidden;'
+    + 'border:1px solid var(--szd-line, #eee); border-radius:10px; overflow:hidden;'
   );
   for (var j = 0; j < ranked.length; j++) {
     list.appendChild(_nearbyRow(map, ranked[j], j === ranked.length - 1));
@@ -759,15 +760,15 @@ function _nearbyRow(map, entry, isLast) {
   row.type = 'button';
   row.style.cssText = (
     'display:flex; align-items:center; gap:10px; width:100%;'
-    + 'padding:10px 12px; background:#fff; cursor:pointer;'
-    + 'border:none;' + (isLast ? '' : 'border-bottom:1px solid #f0f0f0;')
+    + 'padding:10px 12px; background:var(--szd-surface, #fff); cursor:pointer;'
+    + 'border:none;' + (isLast ? '' : 'border-bottom:1px solid var(--szd-line, #f0f0f0);')
     + 'text-align:left; font:inherit;'
   );
   row.addEventListener('mouseenter', function() {
-    row.style.background = '#f5f9ff';
+    row.style.background = 'var(--szd-surface-hover, #f5f9ff)';
   });
   row.addEventListener('mouseleave', function() {
-    row.style.background = '#fff';
+    row.style.background = 'var(--szd-surface, #fff)';
   });
 
   var col = document.createElement('div');
@@ -781,7 +782,7 @@ function _nearbyRow(map, entry, isLast) {
   col.appendChild(name);
   var meta = document.createElement('div');
   meta.style.cssText = (
-    'color:#777; font-size:12px;'
+    'color:var(--szd-fg-3, #777); font-size:12px;'
     + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
   );
   var kind = entry.item.cat || entry.item.s || entry.item.t;
@@ -794,7 +795,7 @@ function _nearbyRow(map, entry, isLast) {
 
   var dist = document.createElement('div');
   dist.style.cssText = (
-    'flex:0 0 auto; color:#1a73e8; font-size:13px; font-weight:600;'
+    'flex:0 0 auto; color:var(--szd-link, #1a73e8); font-size:13px; font-weight:600;'
   );
   dist.textContent = _formatDistanceStrip(entry.dist);
   row.appendChild(dist);
@@ -816,7 +817,7 @@ function _findResultCard(map, r, idx) {
   card.style.cssText = (
     'flex:0 0 76vw; max-width:340px; min-width:240px;'
     + 'scroll-snap-align:center; scroll-snap-stop:always;'
-    + 'background:#fff; border:1px solid #ddd; border-radius:12px;'
+    + 'background:var(--szd-surface, #fff); border:1px solid var(--szd-line, #ddd); border-radius:12px;'
     + 'padding:10px 12px; cursor:pointer; transition:border-color .15s, box-shadow .15s;'
     + 'display:flex; flex-direction:column; gap:4px;'
   );
@@ -831,7 +832,7 @@ function _findResultCard(map, r, idx) {
 
   var sub = document.createElement('div');
   sub.style.cssText = (
-    'color:#777; font-size:12px;'
+    'color:var(--szd-fg-3, #777); font-size:12px;'
     + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
   );
   var subParts = [];
@@ -895,7 +896,7 @@ function _findResultCard(map, r, idx) {
       'flex:0 0 auto; display:inline-flex; align-items:center;'
       + 'justify-content:center; width:36px; padding:7px 0;'
       + 'border-radius:8px; text-decoration:none; font-size:14px;'
-      + 'border:1px solid #ddd; background:#fff; color:#222;'
+      + 'border:1px solid var(--szd-line, #ddd); background:var(--szd-surface, #fff); color:var(--szd-fg, #222);'
     );
     a.addEventListener('click', function(e) { e.stopPropagation(); });
     return a;
@@ -956,7 +957,7 @@ function _setActiveResult(map, idx, flyTo) {
   var track = _findResultsState.track;
   if (track) {
     if (prev >= 0 && track.children[prev]) {
-      track.children[prev].style.borderColor = '#ddd';
+      track.children[prev].style.borderColor = 'var(--szd-line, #ddd)';
       track.children[prev].style.boxShadow = '';
     }
     var active = track.children[idx];
@@ -1007,11 +1008,12 @@ function _setActiveResult(map, idx, flyTo) {
   }
   if (flyTo) {
     var r = _findResultsState.items[idx];
-    map.flyTo({
+    _szFlyToClear(map, {
       center: [r.o, r.a],
       zoom: Math.max(map.getZoom(), 14),
       // Offset the camera up by the strip's height so the active
-      // pin sits in the visible map area, not behind the carousel.
+      // pin sits in the visible map area, not behind the carousel
+      // (and zoom in when maxBounds holds it at the box edge, 140).
       offset: [0, -110],
       duration: 500,
     });
@@ -1049,9 +1051,7 @@ function _haversineMetersStrip(lat1, lon1, lat2, lon2) {
 }
 
 function _formatDistanceStrip(m) {
-  if (m == null || isNaN(m)) return '';
-  if (m < 1000) return Math.round(m) + ' m';
-  return (m / 1000).toFixed(m < 10000 ? 1 : 0) + ' km';
+  return szFormatDistance(m, szUnit());
 }
 
 function clearFindResults() {

@@ -401,7 +401,7 @@ jobs:
         run: python scripts/fetch-openfreemap-mbtiles.py monaco -o ofm-monaco.mbtiles
       - name: Build from OpenFreeMap tiles (search, Find chips, viewer)
         run: |
-          python create_osm_zim.py --mbtiles ofm-monaco.mbtiles --bbox 7.40,43.72,7.44,43.76 \
+          python create_osm_zim.py --mbtiles ofm-monaco.mbtiles --bbox 7.39,43.715,7.46,43.765 \
             --name Monaco --split-find-chips -o osm-monaco-ofm.zim
       - name: Validate
         env:
