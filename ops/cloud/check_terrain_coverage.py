@@ -31,6 +31,18 @@ def deg2tile(lat, lon, z):
     return x, y
 
 
+def tile_columns(w, s, e, n, z):
+    """Tile columns of the bbox at zoom z. Across the antimeridian
+    (minlon > maxlon, or maxlon past 180): the columns at both ends of the
+    row, not the ones between."""
+    x0 = deg2tile(n, w, z)[0]
+    x1 = deg2tile(s, e, z)[0]
+    if w > e or e > 180:
+        xe = deg2tile(s, e - 360 if e > 180 else e, z)[0]
+        return sorted(set(range(x0, 2 ** z)) | set(range(0, xe + 1)))
+    return range(min(x0, x1), max(x0, x1) + 1)
+
+
 def tile_center(x, y, z):
     n = 2 ** z
     lon = (x + 0.5) / n * 360 - 180
@@ -107,7 +119,7 @@ def main():
     for z in range(z0, z1 + 1):
         x0, y0 = deg2tile(n, w, z)
         x1, y1 = deg2tile(s, e, z)
-        for x in range(min(x0, x1), max(x0, x1) + 1):
+        for x in tile_columns(w, s, e, n, z):
             for y in range(min(y0, y1), max(y0, y1) + 1):
                 lat, lon = tile_center(x, y, z)
                 if elev(lat, lon) <= a.sea_level:

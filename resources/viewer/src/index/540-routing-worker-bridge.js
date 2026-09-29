@@ -518,6 +518,21 @@
     };
   }
 
+  // A route across the antimeridian steps from 179.99 to -179.99; drawn
+  // as given, that step is a line round the whole globe. Continue the
+  // longitude past +-180 instead, which MapLibre draws where it belongs.
+  function unwrapLngs(coords) {
+    var out = [];
+    var prev = null;
+    for (var i = 0; i < coords.length; i++) {
+      var lng = coords[i][0];
+      if (prev !== null) lng -= 360 * Math.round((lng - prev) / 360);
+      out.push([lng, coords[i][1]]);
+      prev = lng;
+    }
+    return out;
+  }
+
   function drawRoute(coords) {
     if (routeDrawn) {
       map.getSource('route').setData({

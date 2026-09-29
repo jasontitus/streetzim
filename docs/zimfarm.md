@@ -35,8 +35,17 @@ The area is exactly one of `--area` (a preset), `--include-poly` (a `.poly`
 URL; a Geofabrik one also selects its extract) or `--bbox`. Areas are
 bounding boxes: the extract and the tiles are cut to the box, not the
 polygon. So:
-- an area that reaches the antimeridian (Russia, Fiji) is refused rather
-  than turned into a band around the world;
+- an area across the antimeridian (Fiji, Chukotka, Kiribati) is supported.
+  A polygon whose parts sit either side of ±180° (rings split there, as
+  Geofabrik's are, or one ring drawn across it) becomes one box across the
+  antimeridian, never a band around the world. With `--bbox`, write such a
+  box with minlon > maxlon (Fiji: `172.8,-23.2,-176.5,-11.2`); a box that
+  would then be wider than 180° is refused as swapped coordinates. The
+  extract, the tiles (tilemaker runs once per side) and the map bounds
+  cover both sides, and search and routing work across it
+  ([formats](formats.md#areas-across-the-antimeridian)). The production
+  queue takes such regions too (`cloud/regions.tsv` alaska; see
+  `ops/docs/new-region-setup.md`);
 - a polygon whose parts are far apart is built from the part with the most
   land, and the log names the parts left out. Parts are kept together while
   they are less than 1° apart or their shared box is at most 3 times their

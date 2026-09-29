@@ -34,6 +34,11 @@ DST_DIR = os.path.join(ROOT, "world-data", "regions")
 TMP = os.path.join(ROOT, "tmp")
 
 
+# Registry bbox text per region, written to <output>.bbox (ops/region-bbox.sh:
+# the queue treats a slice cut for another bbox as stale).
+BBOX_TEXT = {}
+
+
 def load_regions(registry, only=None):
     out = {}
     with open(registry, encoding="utf-8") as fh:
@@ -46,12 +51,18 @@ def load_regions(registry, only=None):
             rid, _name, bbox = parts[0], parts[1], parts[2]
             if only and rid not in only:
                 continue
+            BBOX_TEXT[rid] = bbox
             out[rid] = tuple(float(v) for v in bbox.split(","))
     return out
 
 
 def precompute_ranges(bbox, max_zoom):
-    """{z: (min_col, max_col, min_tms_row, max_tms_row)} — source rows are TMS."""
+    """{z: (min_col, max_col, min_tms_row, max_tms_row)} — source rows are TMS.
+
+    Across the antimeridian (minlon > maxlon): {z: [ranges]}, one per side,
+    the columns they share (z0) once."""
+    if not bbox[0] <= bbox[2] <= 180:
+        return _crossing_ranges(bbox, max_zoom)
     minlon, minlat, maxlon, maxlat = bbox
     ranges = {}
     for z in range(0, max_zoom + 1):
@@ -61,6 +72,21 @@ def precompute_ranges(bbox, max_zoom):
         n = 1 << z
         ranges[z] = (min(t.x for t in tiles), max(t.x for t in tiles),
                      min(n - 1 - t.y for t in tiles), max(n - 1 - t.y for t in tiles))
+    return ranges
+
+
+def _crossing_ranges(bbox, max_zoom):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    from streetzim import area
+    ranges = {}
+    for side in area.sides(bbox):
+        for z, (c0, c1, r0, r1) in precompute_ranges(side, max_zoom).items():
+            rz = ranges.setdefault(z, [])
+            same = [r for r in rz if r[0] <= c1 and c0 <= r[1]]
+            for r in same:                       # overlapping columns: join
+                rz.remove(r)
+                c0, c1 = min(c0, r[0]), max(c1, r[1])
+            rz.append((c0, c1, r0, r1))
     return ranges
 
 
@@ -103,7 +129,8 @@ def main():
     by_zoom = {}
     for rid, rz in ranges.items():
         for z, r in rz.items():
-            by_zoom.setdefault(z, []).append((rid, r[0], r[1], r[2], r[3]))
+            for r in (r if isinstance(r, list) else [r]):   # list: across 180
+                by_zoom.setdefault(z, []).append((rid, r[0], r[1], r[2], r[3]))
 
     print(f"[2/4] opening {len(regions)} outputs under {DST_DIR}", flush=True)
     part = {rid: os.path.join(DST_DIR, f"{rid}.mbtiles.part") for rid in regions}
@@ -159,6 +186,8 @@ def main():
         if os.path.islink(final) or os.path.exists(final):
             os.unlink(final)
         os.rename(part[rid], final)
+        with open(final + ".bbox", "w") as fh:
+            fh.write(BBOX_TEXT[rid] + "\n")
         sz = os.path.getsize(final) / 1e9
         print(f"      {rid:28s} {counts[rid]:>12,} tiles  {sz:6.2f} GB", flush=True)
 

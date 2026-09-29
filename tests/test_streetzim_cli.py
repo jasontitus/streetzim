@@ -201,19 +201,67 @@ END
 """
 
 
-def test_polys_and_bboxes_reaching_the_antimeridian_are_refused(tmp_path, monkeypatch):
+# Fiji as Geofabrik-style rings split at the antimeridian.
+FIJI_LIKE = """fiji
+1
+   172.84 -17.76
+   176.01 -23.12
+   180.0  -20.48
+   180.0  -12.65
+   176.51 -11.24
+   172.84 -17.76
+END
+2
+   -180.0   -14.72
+   -176.53  -19.27
+   -180.0   -20.94
+   -180.0   -14.72
+END
+END
+"""
+
+
+def _fake_poly(monkeypatch, text):
     def fake_fetch(url, dest):
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(RUSSIA_LIKE)
+        dest.write_text(text)
         return dest
     monkeypatch.setattr(cli, "fetch", fake_fetch)
-    with pytest.raises(ValueError, match="antimeridian"):
-        plan(["--include-poly", "https://example.org/russia.poly", "--pbf-url", "x"],
-             tmp_path)
-    for bad in ("170,10,180,20", "10,20,5,30", "1,2,3", "0,-91,1,1"):
+
+
+def test_polys_and_bboxes_across_the_antimeridian_are_one_unwrapped_box(tmp_path, monkeypatch):
+    # A ring drawn across ±180 (Russia's) is followed the short way.
+    _fake_poly(monkeypatch, RUSSIA_LIKE)
+    _, info = plan(["--include-poly", "https://example.org/russia.poly", "--pbf-url", "x"],
+                   tmp_path)
+    assert info["bbox"] == "19.600000,54.300000,191.000000,66.000000"
+    # Rings split at ±180 (Fiji's) join into one box, not a world band.
+    _fake_poly(monkeypatch, FIJI_LIKE)
+    _, info = plan(["--include-poly", "https://example.org/fiji.poly", "--pbf-url", "x"],
+                   tmp_path)
+    assert info["bbox"] == "172.840000,-23.120000,183.470000,-11.240000"
+    # Either spelling of a box across the antimeridian.
+    assert cli.parse_bbox_arg("172.8,-23,-176.5,-11") == (172.8, -23.0, 183.5, -11.0)
+    assert cli.parse_bbox_arg("172.8,-23,183.5,-11") == (172.8, -23.0, 183.5, -11.0)
+    assert cli.parse_bbox_arg("170,10,180,20") == (170.0, 10.0, 180.0, 20.0)
+    for bad in ("10,20,5,30", "1,2,3", "0,-91,1,1", "170,10,550,20", "5,1,5,2"):
         with pytest.raises(ValueError):
             cli.parse_bbox_arg(bad)
     assert cli.parse_bbox_arg("7.40,43.72,7.44,43.76") == (7.40, 43.72, 7.44, 43.76)
+
+
+def test_far_apart_parts_still_split_the_short_way_round():
+    # New Caledonia (165E) and French Polynesia (150W) are 45° apart
+    # across the antimeridian, not 315° the other way; France is still
+    # the part built.
+    france = ((-5.0, 42.0, 8.0, 51.0), 60.0)
+    nc = ((163.5, -22.7, 168.2, -19.5), 2.0)
+    pf = ((-154.0, -28.0, -134.0, -7.0), 1.0)
+    box, left_out = cli.area_bbox([france, nc, pf])
+    assert box == france[0] and len(left_out) == 2
+    assert cli._gap(nc[0], (-179.5, -21.0, -178.0, -20.0)) == pytest.approx(12.3)
+    assert cli._union([(177.0, -20.0, 180.0, -16.0), (-180.0, -18.0, -179.0, -15.0)]) \
+        == (177.0, -20.0, 181.0, -15.0)
 
 
 def test_placeholders_are_filled_like_maps2zim():
@@ -257,3 +305,21 @@ def test_help_renders(module):
     import importlib
     text = importlib.import_module(module).build_parser().format_help()
     assert "option_strings" not in text and "_ArgumentGroup" not in text
+
+
+def test_bands_round_the_world_are_still_refused(tmp_path, monkeypatch):
+    # The old guard: an area is a box, and one wider than 180° is a band
+    # round the world, crossing or not.
+    for band in ("-170,0,170,10", "-180,-85,180,85", "-180,-90,180,90", "10,0,-10,10"):
+        with pytest.raises(ValueError, match="at most 180"):
+            cli.parse_bbox_arg(band)
+    assert cli.parse_bbox_arg("-90,0,90,10") == (-90.0, 0.0, 90.0, 10.0)   # exactly 180
+    # A whole-world ring has no box: a clear error, not "min < max".
+    _fake_poly(monkeypatch, "world\n1\n  -180 -90\n  180 -90\n  180 90\n"
+                            "  -180 90\n  -180 -90\nEND\nEND\n")
+    with pytest.raises(ValueError, match="all the way round"):
+        plan(["--include-poly", "https://example.org/world.poly", "--pbf-url", "x"], tmp_path)
+    ring = "ring\n1\n" + "".join(f"  {x} -70\n" for x in (-180, -90, 0, 90, 180)) + "END\nEND\n"
+    _fake_poly(monkeypatch, ring)
+    with pytest.raises(ValueError, match="all the way round"):
+        plan(["--include-poly", "https://example.org/ring.poly", "--pbf-url", "x"], tmp_path)

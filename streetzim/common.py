@@ -371,8 +371,15 @@ _SEARCH_COORD_DP = int(os.environ.get("SEARCH_COORD_DP", "5") or 5)
 
 
 def parse_bbox(bbox_str):
-    """Parse a bbox string 'minlon,minlat,maxlon,maxlat' into a list of floats."""
+    """Parse a bbox string 'minlon,minlat,maxlon,maxlat' into a list of floats.
+
+    A box crossing the antimeridian (minlon > maxlon, or maxlon > 180) comes
+    back unwrapped: minlon in [-180, 180), maxlon past 180."""
     parts = [float(x.strip()) for x in bbox_str.split(",")]
     if len(parts) != 4:
         raise ValueError(f"Invalid bbox format: {bbox_str}. Expected: minlon,minlat,maxlon,maxlat")
+    if parts[0] > parts[2] or parts[2] > 180:
+        # Crosses the antimeridian: unwrapped, east past 180 (streetzim/area.py).
+        from streetzim import area
+        return list(area.normalize(parts))
     return parts

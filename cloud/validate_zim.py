@@ -929,6 +929,8 @@ def _chk_vector_tiles(arc) -> tuple[str, str]:
     probes: list[str] = []
     if bbox and all(v is not None for v in bbox):
         lon = (bbox[0] + bbox[2]) / 2
+        if lon > 180:       # an area across the antimeridian (east past 180)
+            lon -= 360
         lat = (bbox[1] + bbox[3]) / 2
         for z in (8, 11, 14):
             x, y = _lonlat_to_tile(lon, lat, z)
@@ -1521,9 +1523,22 @@ def _bbox_from_zim(arc) -> tuple[float, float, float, float] | None:
 
 
 def _expected_tile_count(bbox, zoom: int) -> int:
-    """Number of z/x/y tiles whose extent intersects bbox at zoom ``zoom``."""
+    """Number of z/x/y tiles whose extent intersects bbox at zoom ``zoom``.
+
+    A bbox across the antimeridian has maxLon past 180 (streetzim/area.py):
+    its two sides are counted, the columns they share (z0) once."""
     import math
     minlon, minlat, maxlon, maxlat = bbox
+    if maxlon > 180:
+        n = 1 << zoom
+        west = _expected_tile_count((minlon, minlat, 180.0, maxlat), zoom)
+        east = _expected_tile_count((-180.0, minlat, maxlon - 360.0, maxlat), zoom)
+        rows = _expected_tile_count((-180.0, minlat, -180.0, maxlat), zoom)
+        # Columns of each side; a column both have is counted once.
+        west_cols = west // rows if rows else 0
+        east_cols = east // rows if rows else 0
+        shared = max(0, west_cols + east_cols - n)
+        return (west_cols + east_cols - shared) * rows
     n = 1 << zoom
     def lon2x(lon: float) -> int:
         return int((lon + 180.0) / 360.0 * n)

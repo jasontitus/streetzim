@@ -122,6 +122,7 @@ strict = [
   "cloud/viewer_slots.py",
   "streetzim/__about__.py",
   "streetzim/__init__.py",
+  "streetzim/area.py",
   "streetzim/cli.py",
   "streetzim/glyph_fallback.py",
   "streetzim/paths.py",

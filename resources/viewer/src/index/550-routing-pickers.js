@@ -189,7 +189,7 @@
           mid: result.coords[Math.floor(result.coords.length / 2)],
           last: result.coords[result.coords.length - 1],
         });
-        drawRoute(result.coords);
+        drawRoute(unwrapLngs(result.coords));
         distEl.textContent = formatDistance(result.distance);
         timeEl.textContent = formatTime(result.time);
         renderRoads(result.roads);
@@ -210,8 +210,9 @@
         // location; fitBounds would yank the camera out to the whole
         // route and blow up the follow-cam.
         if (!driveMode.active) {
-          var bounds = result.coords.reduce(function(b, c) { return b.extend(c); },
-            new maplibregl.LngLatBounds(result.coords[0], result.coords[0]));
+          var shown = unwrapLngs(result.coords);
+          var bounds = shown.reduce(function(b, c) { return b.extend(c); },
+            new maplibregl.LngLatBounds(shown[0], shown[0]));
           map.fitBounds(bounds, { padding: 60, duration: 1000 });
         }
         // Auto-minimize when the routing panel would otherwise cover

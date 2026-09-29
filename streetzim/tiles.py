@@ -6,9 +6,11 @@ import os
 import sqlite3
 import subprocess
 
+from streetzim import area
 # The builder's flushing, phase-timing print (see streetzim/common.py).
 from streetzim.common import (
     print,
+    parse_bbox,
     TILEMAKER_CONFIG,
     TILEMAKER_PROCESS,
     GEOFABRIK_BASE,
@@ -27,11 +29,16 @@ def download_osm_extract(geofabrik_path, dest):
 
 
 def extract_bbox_from_pbf(pbf_path, bbox, output_path):
-    """Extract a bounding box from a PBF file using osmium."""
+    """Extract a bounding box from a PBF file using osmium.
+
+    A box across the antimeridian is cut as two boxes, one each side
+    (streetzim/area.py)."""
     print(f"  Extracting bbox {bbox} from PBF...")
+    workdir = os.path.dirname(os.path.abspath(str(output_path)))
     cmd = [
         "osmium", "extract",
-        "--bbox", bbox,
+        *area.osmium_extract_args(parse_bbox(bbox), workdir, bbox_arg=bbox,
+                                  flag="--bbox"),
         "--strategy", "complete_ways",
         "--overwrite",
         "-o", str(output_path),
@@ -65,23 +72,47 @@ def generate_tiles(pbf_path, mbtiles_path, bbox=None, fast=False, store=None):
               "the directory you build in.")
         if os.environ.get("STREETZIM_REQUIRE_SHAPEFILES") == "1":
             raise SystemExit("STREETZIM_REQUIRE_SHAPEFILES=1 and shapefiles are missing")
-    cmd = [
-        "tilemaker",
-        "--input", str(pbf_path),
-        "--output", str(mbtiles_path),
-        "--config", str(TILEMAKER_CONFIG),
-        "--process", str(TILEMAKER_PROCESS),
-        "--skip-integrity",
-    ]
-    if bbox:
-        cmd.extend(["--bbox", bbox])
-    if fast:
-        cmd.append("--fast")
-        print("    Using --fast mode (trades RAM for speed)")
-    if store:
-        cmd.extend(["--store", str(store)])
-        print(f"    Using on-disk store: {store}")
-    subprocess.run(cmd, check=True)
+    def tilemaker(input_pbf, bbox, merge=False):
+        cmd = [
+            "tilemaker",
+            "--input", str(input_pbf),
+            "--output", str(mbtiles_path),
+            "--config", str(TILEMAKER_CONFIG),
+            "--process", str(TILEMAKER_PROCESS),
+            "--skip-integrity",
+        ]
+        if bbox:
+            cmd.extend(["--bbox", bbox])
+        if merge:
+            cmd.append("--merge")
+        if fast:
+            cmd.append("--fast")
+            print("    Using --fast mode (trades RAM for speed)")
+        if store:
+            cmd.extend(["--store", str(store)])
+            print(f"    Using on-disk store: {store}")
+        subprocess.run(cmd, check=True)
+
+    parts = area.split(parse_bbox(bbox)) if bbox else []
+    if len(parts) < 2:
+        tilemaker(pbf_path, bbox)
+    else:
+        # Across the antimeridian. tilemaker clips to one box in [-180, 180]
+        # (and one spanning the world would fill it with ocean tiles), so
+        # each side is its own run over that side's data, the second
+        # merged into the first MBTiles. Only z0 covers both sides;
+        # --merge combines its layers.
+        for i, part in enumerate(parts):
+            side = area.to_str(part)
+            side_pbf = f"{mbtiles_path}.side{i}.osm.pbf"
+            print(f"    Side {i + 1} of the antimeridian: {side}")
+            subprocess.run(["osmium", "extract", "--bbox", side,
+                            "--strategy", "complete_ways", "--overwrite",
+                            "-o", side_pbf, str(pbf_path)], check=True)
+            try:
+                tilemaker(side_pbf, side, merge=i > 0)
+            finally:
+                os.remove(side_pbf)
     size_mb = os.path.getsize(mbtiles_path) / (1024 * 1024)
     print(f"    Generated MBTiles: {size_mb:.1f} MB")
 
@@ -139,7 +170,17 @@ def estimate_tile_total(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None)
         if lat_lo > lat_hi:
             return 0
         total = 0
+        parts = area.split(bbox)
         for z in range(zoom_min, zoom_max + 1):
+            if len(parts) > 1:
+                # Across the antimeridian: the columns of both sides, once
+                # each (at z0 both sides are the one tile).
+                cols = _merge_ranges([(mercantile.tile(p[0], lat_hi, z).x,
+                                       mercantile.tile(p[2], lat_lo, z).x) for p in parts])
+                ny = (mercantile.tile(parts[0][0], lat_lo, z).y
+                      - mercantile.tile(parts[0][0], lat_hi, z).y + 1)
+                total += sum(c1 - c0 + 1 for c0, c1 in cols) * ny
+                continue
             ul = mercantile.tile(minlon, lat_hi, z)
             lr = mercantile.tile(maxlon, lat_lo, z)
             nx = lr.x - ul.x + 1
@@ -161,6 +202,17 @@ def estimate_tile_total(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None)
     # walks all 345 M index entries on the 113 GB world file, minutes of IO
     # bought for a progress number.
     return 0
+
+
+def _merge_ranges(ranges):
+    """Inclusive integer ranges, sorted, with overlapping ones joined."""
+    out = []
+    for lo, hi in sorted(ranges):
+        if out and lo <= out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], hi))
+        else:
+            out.append((lo, hi))
+    return out
 
 
 def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None):
@@ -204,29 +256,38 @@ def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=N
         else:
             zoom_max = 14
 
+        # One box, or two across the antimeridian (streetzim/area.py).
+        parts = area.split((minlon, minlat, maxlon, maxlat))
         for z in range(zoom_min, zoom_max + 1):
-            # Get tile column/row bounds for this zoom
-            tiles_in_bbox = list(mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z))
-            if not tiles_in_bbox:
-                continue
-            min_col = min(t.x for t in tiles_in_bbox)
-            max_col = max(t.x for t in tiles_in_bbox)
-            # Convert XYZ y to TMS y for SQL filter
             n = 1 << z
-            min_tms_row = min(n - 1 - t.y for t in tiles_in_bbox)
-            max_tms_row = max(n - 1 - t.y for t in tiles_in_bbox)
+            col_ranges = []
+            min_tms_row = max_tms_row = 0
+            for part in parts:
+                # Get tile column/row bounds for this zoom
+                tiles_in_bbox = list(mercantile.tiles(*part, zooms=z))
+                if not tiles_in_bbox:
+                    continue
+                min_col = min(t.x for t in tiles_in_bbox)
+                max_col = max(t.x for t in tiles_in_bbox)
+                # Convert XYZ y to TMS y for SQL filter
+                min_tms_row = min(n - 1 - t.y for t in tiles_in_bbox)
+                max_tms_row = max(n - 1 - t.y for t in tiles_in_bbox)
+                col_ranges.append((min_col, max_col))
 
-            cursor.execute(
-                "SELECT zoom_level, tile_column, tile_row, tile_data "
-                "FROM tiles WHERE zoom_level = ? "
-                "AND tile_column >= ? AND tile_column <= ? "
-                "AND tile_row >= ? AND tile_row <= ? "
-                "ORDER BY tile_column, tile_row",
-                (z, min_col, max_col, min_tms_row, max_tms_row),
-            )
-            for zz, x, tms_y, data in cursor:
-                y = n - 1 - tms_y
-                yield zz, x, y, data
+            # Columns ascending, each once: the two sides of the
+            # antimeridian are the two ends of the row (one tile at z0).
+            for min_col, max_col in _merge_ranges(col_ranges):
+                cursor.execute(
+                    "SELECT zoom_level, tile_column, tile_row, tile_data "
+                    "FROM tiles WHERE zoom_level = ? "
+                    "AND tile_column >= ? AND tile_column <= ? "
+                    "AND tile_row >= ? AND tile_row <= ? "
+                    "ORDER BY tile_column, tile_row",
+                    (z, min_col, max_col, min_tms_row, max_tms_row),
+                )
+                for zz, x, tms_y, data in cursor:
+                    y = n - 1 - tms_y
+                    yield zz, x, y, data
     else:
         if zoom_level is not None:
             cursor.execute(

@@ -652,7 +652,10 @@ var SEARCH_SHARDS = (function () {
         var dlat = item.a - clat;
         // Scale longitude by cos(lat) so the degree-space distance is
         // isotropic; raw Δlng overstated E–W distances 2x at 60°N.
-        var dlng = (item.o - clng) * Math.cos(clat * Math.PI / 180);
+        // The short way round, for maps across the antimeridian.
+        var dlng0 = item.o - clng;
+        dlng0 -= 360 * Math.round(dlng0 / 360);
+        var dlng = dlng0 * Math.cos(clat * Math.PI / 180);
         var dist = Math.sqrt(dlat * dlat + dlng * dlng);
         var viewSpan = Math.max(
           bounds.getNorth() - bounds.getSouth(),

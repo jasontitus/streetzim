@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 
+from streetzim import area
 # The builder's flushing, phase-timing print (see streetzim/common.py).
 from streetzim.common import (
     print,
@@ -30,11 +31,10 @@ def extract_addresses_pbf(pbf_path, output_path, bbox=None):
     tmp = tempfile.mkdtemp(prefix="streetzim_addr_")
     try:
         if bbox:
-            minlon, minlat, maxlon, maxlat = bbox
             bbox_pbf = os.path.join(tmp, "region.osm.pbf")
             subprocess.run([
                 "osmium", "extract",
-                "-b", f"{minlon},{minlat},{maxlon},{maxlat}",
+                *area.osmium_extract_args(bbox, tmp),
                 source_pbf, "-o", bbox_pbf, "--overwrite",
             ], check=True)
             source_pbf = bbox_pbf
@@ -521,7 +521,7 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
                     orphan_skipped += 1
                     continue
                 if not (bbox_minlat <= lat <= bbox_maxlat and
-                        bbox_minlon <= lon <= bbox_maxlon):
+                        area.contains_lon((bbox_minlon, 0, bbox_maxlon, 0), lon)):
                     continue
 
                 # Pass 1: Overture-to-OSM provenance link. Today we
@@ -745,7 +745,7 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
                 if lat is None or lon is None:
                     continue
                 if not (bbox_minlat <= lat <= bbox_maxlat and
-                        bbox_minlon <= lon <= bbox_maxlon):
+                        area.contains_lon((bbox_minlon, 0, bbox_maxlon, 0), lon)):
                     continue
 
                 names = row.get("names") or {}
@@ -932,11 +932,10 @@ def extract_wiki_tags_pbf(pbf_path, bbox=None):
     tmp = tempfile.mkdtemp(prefix="streetzim_wiki_")
     try:
         if bbox:
-            minlon, minlat, maxlon, maxlat = bbox
             bbox_pbf = os.path.join(tmp, "region.osm.pbf")
             subprocess.run([
                 "osmium", "extract",
-                "-b", f"{minlon},{minlat},{maxlon},{maxlat}",
+                *area.osmium_extract_args(bbox, tmp),
                 source_pbf, "-o", bbox_pbf, "--overwrite",
             ], check=True)
             source_pbf = bbox_pbf
