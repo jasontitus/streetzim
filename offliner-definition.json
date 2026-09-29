@@ -126,6 +126,12 @@
       "title": "OSM extract URL",
       "description": "OSM extract (.osm.pbf) to build from. Default: the Geofabrik extract of --area / --include-poly"
     },
+    "mbtiles_url": {
+      "type": "url",
+      "required": false,
+      "title": "MBTiles URL",
+      "description": "URL of an OpenMapTiles MBTiles (e.g. OpenFreeMap's) to use instead of generating tiles with tilemaker: downloaded into the download folder (resumed if interrupted, reused while unchanged upstream), or a file:// URL used in place. Tiles outside the area are left out. See docs/zimfarm.md"
+    },
     "no_routing": {
       "type": "boolean",
       "required": false,

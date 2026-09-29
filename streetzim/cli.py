@@ -25,15 +25,20 @@ docs/zimfarm.md, "Satellite imagery".
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
+import http.client
 import json
 import os
 import re
 import shutil
+import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +49,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:     # also runnable as `python streetzim/cli.py`
     sys.path.insert(0, str(REPO_ROOT))
-from streetzim import area  # noqa: E402  (after the path fix above)
+from streetzim import area, download  # noqa: E402  (after the path fix above)
 from streetzim.paths import RESOURCES_DIR, missing_runtime_files  # noqa: E402
 from streetzim import satellite_sources  # noqa: E402
 GEOFABRIK_POLY = re.compile(r"^https?://download\.geofabrik\.de/(.+)\.poly$")
@@ -70,6 +75,7 @@ ZIMFARM: dict[str, dict[str, Any]] = {
     "bbox": {"title": "Bounding box",
              "pattern": r"^-?[0-9.]+,-?[0-9.]+,-?[0-9.]+,-?[0-9.]+$"},
     "pbf_url": {"title": "OSM extract URL", "type": "url"},
+    "mbtiles_url": {"title": "MBTiles URL", "type": "url"},
     "no_routing": {"title": "No routing",
                    "description": "Leave out offline routing (on by default)"},
     "wikidata": {"title": "Wikidata"},
@@ -156,8 +162,15 @@ def build_parser() -> argparse.ArgumentParser:
                      help="OSM extract (.osm.pbf) to build from. Default: the "
                           "Geofabrik extract of --area / --include-poly")
     src.add_argument("--mbtiles",
-                     help="Use this OpenMapTiles MBTiles (e.g. OpenFreeMap) "
+                     help="Use this OpenMapTiles MBTiles file (e.g. OpenFreeMap) "
                           "instead of generating tiles with tilemaker")
+    src.add_argument("--mbtiles-url",
+                     help="URL of an OpenMapTiles MBTiles (e.g. OpenFreeMap's) to "
+                          "use instead of generating tiles with tilemaker: "
+                          "downloaded into the download folder (resumed if "
+                          "interrupted, reused while unchanged upstream), or "
+                          "a file:// URL used in place. Tiles outside the "
+                          "area are left out. See docs/zimfarm.md")
     src.add_argument("--shapefiles",
                      help="Folder with coastline/ and landcover/ for tilemaker. "
                           "Default: <dl>/shapefiles, fetched when missing")
@@ -482,19 +495,26 @@ def parse_default_view(value: str) -> tuple[float, float, float | None]:
     return lat, lon, (float(parts[2]) if len(parts) == 3 else None)
 
 
-def _source_stamp(url: str) -> dict[str, str] | None:
+def _head(url: str) -> dict[str, str] | None:
+    """The response headers for `url` (HEAD, or a one-byte GET when HEAD is
+    refused); None when it fails (offline)."""
+    return download.head(url, USER_AGENT)
+
+
+def _source_stamp(url: str, head: dict[str, str] | None = None) -> dict[str, str] | None:
     """What identifies the current version of `url` (HEAD for http(s), size
     and mtime for file://); None when it can't be checked (offline)."""
     if url.startswith("file://"):
         st = os.stat(url[len("file://"):])
         return {"size": str(st.st_size), "mtime": str(int(st.st_mtime))}
-    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": USER_AGENT})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            h = r.headers
-            return {k: h.get(k, "") for k in ("ETag", "Last-Modified", "Content-Length")}
-    except OSError:
-        return None
+    return download.stamp_of(head if head is not None else _head(url))
+
+
+def fetch_resumable(url: str, dest: Path, *,
+                    check_head: Callable[[bytes], None] | None = None) -> Path:
+    """A large download into --dl: resumed, reused, checked and locked as
+    streetzim/download.py describes."""
+    return download.fetch_resumable(url, dest, user_agent=USER_AGENT, check_head=check_head)
 
 
 def fetch(url: str, dest: Path) -> Path:
@@ -529,18 +549,94 @@ def fetch(url: str, dest: Path) -> Path:
     return dest
 
 
+def _check_mbtiles_head(head: bytes) -> None:
+    from streetzim import mbtiles
+    if not mbtiles.looks_like_sqlite(head):
+        raise ValueError("--mbtiles-url is not an MBTiles file (not SQLite)")
+
+
+def record_url(url: str) -> str:
+    """The URL as the ZIM records it: no user name, password, query or
+    fragment (which may carry a token); for file://, the file name only
+    (a path on the build host means nothing to a reader)."""
+    from urllib.parse import unquote, urlsplit, urlunsplit
+    u = urlsplit(url)
+    if u.scheme == "file":
+        return unquote(u.path).rsplit("/", 1)[-1]
+    netloc = u.hostname or ""
+    if ":" in netloc:
+        netloc = f"[{netloc}]"
+    if u.port:
+        netloc += f":{u.port}"
+    return urlunsplit((u.scheme, netloc, u.path, "", ""))
+
+
+def mbtiles_source(args: argparse.Namespace, dl: Path) -> tuple[Path, str | None] | None:
+    """The MBTiles to build from and the URL to record for it: --mbtiles as
+    given, a file:// --mbtiles-url in place, or an http(s) one downloaded
+    into <dl>/mbtiles. ValueError if it is missing or not an MBTiles."""
+    if args.mbtiles:
+        path = Path(args.mbtiles).resolve()
+        if not path.is_file():
+            raise ValueError(f"--mbtiles {args.mbtiles}: no such file")
+        return path, None
+    url: str | None = args.mbtiles_url
+    if not url:
+        return None
+    if url.startswith("file://"):
+        from urllib.parse import unquote, urlparse
+        path = Path(unquote(urlparse(url).path))
+        if not path.is_file():
+            raise ValueError(f"--mbtiles-url {record_url(url)}: no such file")
+        return path, record_url(url)
+    if not url.startswith(("http://", "https://")):
+        raise ValueError(f"--mbtiles-url {record_url(url)!r}: need an http(s):// or "
+                         "file:// URL (or --mbtiles for a local path)")
+    try:
+        return fetch_resumable(url, dl / "mbtiles" / _name_of_url(url),
+                               check_head=_check_mbtiles_head), record_url(url)
+    except (OSError, http.client.HTTPException) as e:
+        raise ValueError(f"--mbtiles-url {record_url(url)}: {e}") from e
+
+
+def prepare_mbtiles(path: Path, bbox: BBox | None, work: Path,
+                    max_zoom: int | None = None) -> tuple[Path, dict[str, str]]:
+    """Check the MBTiles and log what it is; with an area, cut it to the
+    tiles touching the area's box into `work` (streetzim/mbtiles.py). The
+    cut goes to z14 whatever --max-zoom says: the builder caps the tiles
+    it stores, and still reads z14 for search. Without a box every tile is
+    kept. `max_zoom` is accepted for callers and ignored."""
+    from streetzim import mbtiles
+    del max_zoom
+    meta = mbtiles.check(path)
+    print(f"  MBTiles: {mbtiles.describe(meta)}", flush=True)
+    if bbox is None:
+        return path, meta
+    import time
+    t0 = time.monotonic()
+    work.mkdir(parents=True, exist_ok=True)
+    out = work / "area.mbtiles"
+    counts = mbtiles.cut(path, out, bbox, max_zoom=mbtiles.MAX_ZOOM)
+    print(f"  Cut to the area: {sum(counts.values()):,} tiles "
+          f"({', '.join(f'z{z} {n:,}' for z, n in counts.items() if n)}) "
+          f"in {time.monotonic() - t0:.1f}s, {out.stat().st_size / 1e6:,.1f} MB", flush=True)
+    return out, meta
+
+
 def _name_of_url(url: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]", "_", url.split("://", 1)[-1])
+    return download.name_of_url(url)
 
 
 # ---------------------------------------------------------------- main
 
 
-def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
-         ) -> tuple[list[str], dict[str, str | None]]:
+def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None,
+         work: Path | None = None) -> tuple[list[str], dict[str, str | None]]:
     """Resolve the area and inputs, returning create_osm_zim arguments.
 
-    Downloads the .poly and .pbf into `dl`. Raises ValueError on bad flags.
+    Downloads the .poly, .pbf and MBTiles into `dl`, and cuts an MBTiles
+    larger than the area into `work` (default: a new temporary folder).
+    Raises ValueError on bad flags.
     Text flags are expected with {name}/{period} already filled in.
     """
     from create_osm_zim import KNOWN_AREAS  # after STREETZIM_CACHE_DIR is set
@@ -548,6 +644,9 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
     sources = [bool(args.area), bool(args.include_poly), bool(args.bbox)]
     if sum(sources) != 1:
         raise ValueError("give exactly one of --area, --include-poly, --bbox")
+    if args.mbtiles and args.mbtiles_url:
+        raise ValueError("give --mbtiles or --mbtiles-url, not both")
+    has_tiles = bool(args.mbtiles or args.mbtiles_url)
     geofabrik: str | None = None
     if args.area:
         key = args.area.lower().replace(" ", "-")
@@ -577,12 +676,45 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
 
     pbf_url: str | None = args.pbf_url or (
         f"https://download.geofabrik.de/{geofabrik}-latest.osm.pbf" if geofabrik else None)
-    if not pbf_url and not args.mbtiles:
+    if not pbf_url and not has_tiles:
         raise ValueError("no OSM extract for this area: give --pbf-url "
-                         "(or --mbtiles, which builds without routing)")
+                         "(or --mbtiles / --mbtiles-url, which build without routing)")
     if not pbf_url and args.routing:
         raise ValueError("--routing needs an OSM extract: give --pbf-url, or --no-routing")
 
+    # The MBTiles before the extract: a bad one fails before that download.
+    tiles_argv: list[str] = []
+    cut: str | None = None
+    source = mbtiles_source(args, dl)
+    if source is not None:
+        work = work or Path(tempfile.mkdtemp(prefix="streetzim-mbtiles-"))
+        from streetzim.area import normalize    # (`area` is the preset here)
+        box = normalize([float(v) for v in bbox.split(",")])
+        path, _ = prepare_mbtiles(source[0], box, work)
+        if path != source[0]:
+            cut = str(path)
+        tiles_argv = ["--mbtiles", str(path), "--record-tile-source"]
+        if source[1]:
+            tiles_argv.append(f"--tile-source-url={source[1]}")
+    try:
+        argv = _builder_argv(args, bbox, pbf_url, dl, illustration) + tiles_argv
+    except BaseException:
+        drop_cut(cut)                           # a failed extract download, or SIGTERM
+        raise
+    return argv, {"bbox": bbox, "pbf_url": pbf_url, "mbtiles_cut": cut}
+
+
+def drop_cut(cut: str | None) -> None:
+    """Remove the cut MBTiles (and its folder when that is left empty)."""
+    if cut:
+        Path(cut).unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            Path(cut).parent.rmdir()
+
+
+def _builder_argv(args: argparse.Namespace, bbox: str, pbf_url: str | None, dl: Path,
+                  illustration: Path | None) -> list[str]:
+    """create_osm_zim's arguments, but for the tiles; downloads the extract."""
     # --flag=value throughout: a value may start with "-" (a western
     # longitude, a title), which argparse would otherwise read as a flag.
     argv = [f"--bbox={bbox}", f"--name={args.title}", f"--zim-name={args.name}",
@@ -591,8 +723,6 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
             f"--scraper=streetzim v{version()}", "--split-find-chips"]
     if pbf_url:
         argv += ["--pbf", str(fetch(pbf_url, dl / "osm" / _name_of_url(pbf_url)))]
-    if args.mbtiles:
-        argv += ["--mbtiles", str(Path(args.mbtiles).resolve())]
     if args.long_description:
         argv += [f"--long-description={args.long_description}"]
     if args.tags:
@@ -621,7 +751,7 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
     if args.debug or args.keep_temp:
         argv += ["--keep-temp"]
     argv += satellite_argv(args)
-    return argv, {"bbox": bbox, "pbf_url": pbf_url}
+    return argv
 
 
 def ensure_shapefiles(folder: Path) -> Path:
@@ -699,9 +829,38 @@ def main(argv: list[str] | None = None) -> int:
         from streetzim.progress import StatsFile
         StatsFile(Path(args.stats_filename).resolve()).write(0, 1)
 
+    # The MBTiles cut goes to a fixed folder under --tmp, cleared first (a
+    # killed run may have left one) and removed afterwards, also on failure
+    # or SIGTERM (Zimfarm stops a task with it), unless --debug.
+    work = tmp / "mbtiles-cut"
+    shutil.rmtree(work, ignore_errors=True)
+    previous = _exit_on_sigterm()
     try:
-        build_args, _ = plan(args, dl, illustration=illustration)
-    except ValueError as e:
+        return _build(args, dl, illustration, work, building, final)
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGTERM, previous)
+        if not (args.debug or args.keep_temp):
+            shutil.rmtree(work, ignore_errors=True)
+
+
+def _exit_on_sigterm() -> Any:
+    """Make SIGTERM raise SystemExit, so cleanup code runs; returns the
+    handler it replaced (None off the main thread, where it cannot be set)."""
+    import threading
+    if threading.current_thread() is not threading.main_thread():
+        return None
+
+    def stop(signum: int, frame: object) -> None:
+        raise SystemExit(128 + signum)
+    return signal.signal(signal.SIGTERM, stop)
+
+
+def _build(args: argparse.Namespace, dl: Path, illustration: Path | None, work: Path,
+           building: Path, final: Path) -> int:
+    try:
+        build_args, _ = plan(args, dl, illustration=illustration, work=work)
+    except (ValueError, OSError, sqlite3.Error) as e:
         return _error(e)
 
     # Build next to the target and rename at the end, so a failed or
@@ -711,7 +870,7 @@ def main(argv: list[str] | None = None) -> int:
         stale.unlink(missing_ok=True)       # left by an interrupted run
     build_args += ["-o", str(building)]
     cwd = os.getcwd()
-    if not args.mbtiles:
+    if not (args.mbtiles or args.mbtiles_url):
         # tilemaker reads the shapefiles relative to the working directory.
         os.chdir(ensure_shapefiles(Path(args.shapefiles or (dl / "shapefiles")).resolve()))
     try:
