@@ -85,7 +85,14 @@ def test_kiwix_full_text_search_covers_the_page_types(tmp_path, source, poi_page
     # repackage_zim (run on published ZIMs) keeps them front.
     from cloud.repackage_zim import repackage
     repackage(str(tmp_path / "t.zim"), str(tmp_path / "r.zim"))
-    assert "Fontaine du Casino" in _suggest(Archive(str(tmp_path / "r.zim")), "Fontaine")
+    r = Archive(str(tmp_path / "r.zim"))
+    assert "Fontaine du Casino" in _suggest(r, "Fontaine")
+    # Front articles are exactly the main page and the search pages, before
+    # and after repackage: not places.html or any other .html.
+    for arc in (a, r):
+        assert arc.get_entry_by_path("places.html").title   # present ...
+        assert arc.article_count == len(pages) + 1          # ... but not front
+        assert _suggest(arc, "Find places") == []
 
 
 def _suggest(archive, text):
@@ -93,3 +100,24 @@ def _suggest(archive, text):
     s = SuggestionSearcher(archive).suggest(text)
     return [archive.get_entry_by_path(p).title
             for p in s.getResults(0, s.getEstimatedMatches())]
+
+
+@pytest.mark.parametrize("flag", [False, True])
+def test_create_osm_zim_passes_the_flag_to_create_zim(tmp_path, monkeypatch, flag):
+    """--kiwix-poi-pages must reach create_zim(kiwix_poi_pages=...): the
+    argument hop create_osm_zim -> _write_zim -> create_zim."""
+    import create_osm_zim as c
+    seen = {}
+    monkeypatch.setattr(c, "create_zim", lambda **kw: seen.update(kw))
+    args = c.build_parser().parse_args(
+        ["--bbox", "7.39,43.715,7.46,43.765"] + (["--kiwix-poi-pages"] if flag else []))
+    c._write_zim(
+        address_count=0, args=args, bbox_str="7.39,43.715,7.46,43.765", fonts={},
+        map_config={}, maplibre_css="c", maplibre_js="j", mbtiles_path=None, name="M",
+        output_path=str(tmp_path / "t.zim"), overture_sources=None, overture_themes=None,
+        routing_graph_path=None, satellite_dir=None, satellite_format=None,
+        satellite_max_zoom=0, search_features=[], terrain_dir=None, terrain_max_zoom=0,
+        tile_metadata={}, tiles={}, tmpdir=str(tmp_path), total_tile_count=0,
+        use_streaming=False, wiki_cross_refs=None, wikidata_data=None,
+        zim_illustration=None, zim_metadata=None)
+    assert seen["kiwix_poi_pages"] is flag
