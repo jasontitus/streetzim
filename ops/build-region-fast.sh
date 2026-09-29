@@ -208,7 +208,14 @@ ARGS=(
 )
 # shellcheck disable=SC2206
 ARGS+=( $XAPIAN_FLAG )
-[ -f "$LOWZ" ]   && ARGS+=( --low-zoom-world-vrt "$LOWZ" )
+# Terrain is always on here: without the world DEM the builder would
+# switch to its fresh-machine layout (streetzim/terrain.py). Refuse instead.
+if [ -f "$LOWZ" ]; then
+    ARGS+=( --low-zoom-world-vrt "$LOWZ" )
+else
+    echo "FATAL: world DEM $LOWZ is missing" >&2
+    exit 1
+fi
 if [ "$WIKI_IMAGES" = "off" ]; then
     echo "  wikipedia: disabled (WIKI_IMAGES=off)"
 elif [ -f "$WIKI_ZIM" ] && [ "$(stat -c%s "$WIKI_ZIM")" = "$WIKI_ZIM_SIZE" ]; then

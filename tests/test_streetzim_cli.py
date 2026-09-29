@@ -120,6 +120,16 @@ def test_monaco_preset_frames_all_of_monaco_with_sea_around_it():
     assert e - w <= 0.1 and n - s <= 0.1                 # still a small CI build
 
 
+def test_terrain_follows_the_profile_and_its_flags(tmp_path, no_network):
+    def terrain(extra):
+        args = cli.parse_args(REQ + ["--area", "monaco"] + extra)
+        return builder_args(cli.plan(args, tmp_path)[0]).terrain
+    assert terrain([]) and terrain(["--profile", "full"])      # full is the default
+    assert not terrain(["--profile", "basic"])
+    assert not terrain(["--no-terrain"]) and not terrain(["--terrain=off"])
+    assert terrain(["--profile", "basic", "--terrain"])
+
+
 def test_geofabrik_poly_selects_its_extract(tmp_path, no_network):
     argv, info = plan(["--include-poly", "https://download.geofabrik.de/europe/monaco.poly"],
                       tmp_path)

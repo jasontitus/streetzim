@@ -615,7 +615,9 @@ def create_zim(
                            satellite_max_zoom=satellite_max_zoom,
                            satellite_format=satellite_format,
                            terrain_dir=terrain_dir,
-                           terrain_max_zoom=terrain_max_zoom, bbox=bbox)
+                           terrain_max_zoom=terrain_max_zoom,
+                           terrain_min_zoom=int((map_config or {}).get("terrainMinZoom") or 0),
+                           bbox=bbox)
         _add_font_glyphs(creator, MapItem, fonts=fonts)
         wikidata_data = _add_wikidata(creator, MapItem, tiles=tiles,
                                       mbtiles_path=mbtiles_path, bbox=bbox,
@@ -829,8 +831,10 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
         license_parts.append(sat.license_metadata)
     if has_terrain:
         license_parts.append(
-            "Elevation: Copernicus GLO-30 DEM © DLR/Airbus, provided under "
-            "COPERNICUS by EU and ESA")
+            # GLO-90 too: low zooms, and cells GLO-30 leaves out. The same
+            # attribution covers both.
+            "Elevation: Copernicus DEM GLO-30/GLO-90 © DLR/Airbus, provided "
+            "under COPERNICUS by EU and ESA")
     if has_wiki:
         # Wikipedia text has been CC BY-SA 4.0 since June 2023.
         license_parts.append("Place info: CC0 (Wikidata) / CC BY-SA 4.0 (Wikipedia)")
@@ -1183,7 +1187,7 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
     _watchdog_stop.set()  # stop watchdog after tiles
 
 
-def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, satellite_format, terrain_dir, terrain_max_zoom, bbox):
+def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, satellite_format, terrain_dir, terrain_max_zoom, bbox, terrain_min_zoom=0):
     """Satellite and terrain raster tiles from their on-disk caches."""
     # Build bbox tile filter if bbox is provided (shared cache may have tiles from other areas)
     def _tile_in_bbox(z, x, y, bbox_coords):
@@ -1195,7 +1199,8 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
                         tile_bounds.north < minlat or tile_bounds.south > maxlat)
                    for minlon, minlat, maxlon, maxlat in _area.split(bbox_coords))
 
-    def _add_raster_tiles(source_dir, zim_prefix, max_zoom, label, ext="webp", mimetype="image/webp"):
+    def _add_raster_tiles(source_dir, zim_prefix, max_zoom, label, ext="webp",
+                          mimetype="image/webp", min_zoom=0):
         """Walk a tile cache dir and add tiles to ZIM, filtering by bbox."""
         _t0 = time.time()
         count = 0
@@ -1205,7 +1210,7 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
         suffix = f".{ext}"
         strip_len = len(suffix)
         aliaser = TileAliaser(creator)
-        for z in range(0, max_zoom + 1):
+        for z in range(min_zoom, max_zoom + 1):
             z_dir = os.path.join(source_dir, str(z))
             if not os.path.isdir(z_dir):
                 continue
@@ -1298,7 +1303,10 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
     # Add terrain tiles if provided
     if terrain_dir and os.path.isdir(terrain_dir):
         max_tz = terrain_max_zoom if terrain_max_zoom is not None else 99
-        _add_raster_tiles(terrain_dir, "terrain", max_tz, "Terrain")
+        # From the zoom the viewer starts at (map-config terrainMinZoom): a
+        # shared cache can hold lower tiles made for other areas.
+        _add_raster_tiles(terrain_dir, "terrain", max_tz, "Terrain",
+                          min_zoom=terrain_min_zoom)
 
 
 def _add_font_glyphs(creator, MapItem, *, fonts):

@@ -10,7 +10,8 @@ browser, with no network at all. A ZIM contains:
 - **Search** over places, streets, addresses, POIs, peaks, parks and water, plus Kiwix's own full-text search over a detail page for each place, park, peak, water feature and airport (POIs too with `--kiwix-poi-pages`; never streets or addresses: see `KIWIX_PAGE_TYPES` in streetzim/zim_writer.py and docs/zimfarm.md).
 - **Find page** with category chips (Food & Drink, Bars, Hotels, Museums, Parks, Health, Shops, Gas…) and distance sorting.
 - **Offline routing** (drive / walk / bike) in a Web Worker, with a GPS turn-by-turn HUD.
-- Optional **terrain** (hillshade / 3D from Copernicus DEM), **satellite imagery** (see the licence note below), **Wikidata** facts and bundled **Wikipedia** articles.
+- **Terrain**: hillshade and 3D from the Copernicus DEM (on in the `streetzim` command with `--profile full`, the default; `--terrain` for `create_osm_zim.py`).
+- Optional **satellite imagery** (see the licence note below), **Wikidata** facts and bundled **Wikipedia** articles.
 - Optional **Overture Maps** addresses and place details (websites, phones, brands).
 
 Published ZIMs are listed at <https://streetzim.web.app>. That site also has a

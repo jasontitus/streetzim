@@ -130,9 +130,8 @@ DEFAULT_PROFILE = "full"
 FEATURE_NAMES = {"wikidata": "Wikidata", "wikipedia": "Wikipedia articles",
                  "overture": "Overture Maps", "terrain": "terrain",
                  "kiwix_poi_pages": "POIs in Kiwix search"}
-# Joins the profile only once it can also be turned off where it is defined:
-# --terrain on `next` predates the openZIM terrain work (topic-terrain-openzim
-# makes it --terrain/--no-terrain); until that merges, it keeps its default.
+# Joins the profile only once it can also be turned off where it is defined
+# (--terrain/--no-terrain, since topic-terrain-openzim).
 NEEDS_OFF_SWITCH = {"terrain"}
 ON_OFF = ("on", "off")
 WIKIPEDIA_IMAGES = ("none", "lead", "all")
@@ -223,8 +222,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Offline routing (driving, walking, cycling). Default: on")
     feat.add_argument("--wikidata", action="store_true",
                       help="Wikidata place details (needs network access to Wikidata)")
-    feat.add_argument("--terrain", action="store_true",
-                      help="Hillshade from Copernicus DEM (downloads DEM tiles)")
+    feat.add_argument("--terrain", action=argparse.BooleanOptionalAction, default=True,
+                      help="Hillshade and 3D terrain from the Copernicus DEM "
+                           "(downloads DEM tiles for the area)")
     feat.add_argument("--kiwix-poi-pages", action="store_true",
                       help="Also list every named POI in Kiwix's own search, "
                            "not only "

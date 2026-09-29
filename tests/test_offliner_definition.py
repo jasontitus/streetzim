@@ -76,6 +76,7 @@ def test_every_offered_flag_parses():
                   overture_release="2026-09-23.1")
     args = parse_args(_argv_for(config))
     assert args.routing is False             # no_routing ticked
+    assert args.terrain is True              # terrain: "on"
     assert args.stats_filename == "/output/task_progress.json"
     assert args.wikipedia and args.wikipedia_zim_url == "https://example.org/x"
 
@@ -156,3 +157,16 @@ def test_zimfarm_accepts_the_definition_and_its_recipes():
             model.model_validate({**base, **bad})
     with pytest.raises(ValidationError):
         model.model_validate({**base, "overture-release": "newest"})
+
+
+def test_terrain_is_a_profile_feature():
+    # --terrain/--no-terrain (streetzim/terrain.py's openZIM layout) joins
+    # the profile: on with full, off with basic, "terrain" on/off on Zimfarm.
+    f = DEF["flags"]["terrain"]
+    assert f["type"] == "string-enum" and f["choices"] == ["on", "off"]
+    assert "no_terrain" not in DEF["flags"]
+    base = {"name": "osm_en_monaco", "title": "Monaco", "description": "d", "area": "monaco"}
+    for config, want in [({"profile": "full"}, True), ({"profile": "basic"}, False),
+                         ({"profile": "full", "terrain": "off"}, False),
+                         ({"profile": "basic", "terrain": "on"}, True)]:
+        assert parse_args(_argv_for({**base, **config})).terrain is want, config

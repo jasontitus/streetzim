@@ -337,6 +337,10 @@ jobs:
           zimcheck -A osm-monaco-patched.zim
           python -c "import sys; from libzim.reader import Archive; a = Archive('osm-monaco-patched.zim'); b = bytes(a.get_entry_by_path('index.html').get_item().content); sys.exit(0 if a.check() and b'ci-patch' in b else 'in-place patch not applied or checksum wrong')"
 
+      # --profile basic plus --terrain: the per-push end-to-end terrain
+      # check. Monaco fetches a GLO-30 and a GLO-90 cell (about 18 MB) from
+      # the public Copernicus buckets on S3 and adds a few seconds. (The
+      # docker job builds offline, so it leaves terrain out.)
       - name: Build through the openZIM-style command (streetzim --area)
         env:
           STREETZIM_REQUIRE_SHAPEFILES: "1"
@@ -345,9 +349,9 @@ jobs:
           pip install --no-deps -e .
           streetzim --name osm_en_monaco --title Monaco \
             --description "Offline map of Monaco with search and routing" \
-            --tags openstreetmap --area monaco --shapefiles "$PWD" --profile basic \
+            --tags openstreetmap --area monaco --shapefiles "$PWD" --profile basic --terrain \
             --output out --stats-filename out/task_progress.json
-          python tools/check_openzim_output.py out osm_en_monaco --title Monaco --routing
+          python tools/check_openzim_output.py out osm_en_monaco --title Monaco --routing --terrain
           python cloud/validate_zim.py out/osm_en_monaco_*.zim
 
       - name: Upload ZIM
@@ -445,6 +449,8 @@ jobs:
           docker run --rm streetzim tilemaker --help | head -3
           docker run --rm streetzim osmium --version | head -1
           docker run --rm streetzim python -c "import sys; from streetzim import scraperlib; assert scraperlib.AVAILABLE, 'zimscraperlib missing'; print(sys.version)"
+          # Terrain's GDAL (from the rasterio wheel); the build below is offline.
+          docker run --rm --network none streetzim python -c "import rasterio; print('GDAL', rasterio.__gdal_version__)"
 
       # The same paths and keys as monaco-e2e, so the two jobs share the caches.
       - name: Cache coastline and Natural Earth shapefiles
@@ -480,7 +486,11 @@ jobs:
         # what offliner-definition.json pins. --network none: the fixture's
         # caches must be enough (a lookup they lack fails softly and shows
         # in the "sources:" line). --user: the DuckDB extensions must load
-        # from /opt/duckdb-ext, not root's home. About 20 s outside Docker.
+        # from /opt/duckdb-ext, not root's home. --terrain=off: the DEM is
+        # not in the fixture (Monaco's two cells are about 18 MB, 15 times
+        # the fixture), and offline the download would stop the build;
+        # monaco-e2e (every push) and live-full (weekly, in the image) build
+        # terrain from S3. About 20 s outside Docker.
         timeout-minutes: 15
         run: |
           set -o pipefail
@@ -502,7 +512,8 @@ jobs:
             --description "Offline map of Monaco with search and routing" \
             --illustration-url /output/icon.svg \
             --area monaco --pbf-url file:///fixture/monaco.osm.pbf \
-            --profile full --overture-release "$(cat tests/fixtures/monaco-full/OVERTURE_RELEASE)" \
+            --profile full --terrain=off \
+            --overture-release "$(cat tests/fixtures/monaco-full/OVERTURE_RELEASE)" \
             --dl /dl --shapefiles /shapefiles \
             --output /output --stats-filename /output/task_progress.json \
             --file-name osm-monaco-docker 2>&1 | tee build.log
@@ -563,5 +574,5 @@ jobs:
       - name: Check the full features (Wikimedia softly)
         run: |
           pip install -q -r requirements.txt
-          python tools/check_openzim_output.py out osm_en_monaco --title Monaco --routing
+          python tools/check_openzim_output.py out osm_en_monaco --title Monaco --routing --terrain
           python tools/check_full_profile.py --soft-wikimedia out/osm_en_monaco_*.zim

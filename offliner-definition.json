@@ -138,12 +138,6 @@
       "title": "No routing",
       "description": "Leave out offline routing (on by default)"
     },
-    "terrain": {
-      "type": "boolean",
-      "required": false,
-      "title": "Terrain",
-      "description": "Hillshade from Copernicus DEM (downloads DEM tiles)"
-    },
     "max_zoom": {
       "type": "integer",
       "required": false,
@@ -169,7 +163,7 @@
       "type": "string-enum",
       "required": true,
       "title": "Profile",
-      "description": "Feature set: full: Wikidata, Wikipedia articles, Overture Maps, POIs in Kiwix search; basic: none of them (routing is on in both). Default: full",
+      "description": "Feature set: full: Wikidata, Wikipedia articles, Overture Maps, terrain, POIs in Kiwix search; basic: none of them (routing is on in both). Default: full",
       "choices": [
         "full",
         "basic"
@@ -200,6 +194,16 @@
       "required": false,
       "title": "Overture Maps",
       "description": "Overture Maps addresses and place details (websites, phones, brands, categories), read from Overture's public S3 bucket over HTTPS. Default: on with --profile full, off with basic",
+      "choices": [
+        "on",
+        "off"
+      ]
+    },
+    "terrain": {
+      "type": "string-enum",
+      "required": false,
+      "title": "Terrain",
+      "description": "Hillshade and 3D terrain from the Copernicus DEM (downloads DEM tiles for the area). Default: on with --profile full, off with basic",
       "choices": [
         "on",
         "off"

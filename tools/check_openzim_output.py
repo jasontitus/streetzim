@@ -3,7 +3,7 @@
 would see it (used by CI after building with the openZIM-style command).
 
     python tools/check_openzim_output.py OUT NAME --title T [--file F] [--routing]
-        [--satellite SOURCE]
+        [--satellite SOURCE] [--terrain]
 
 Checks: exactly one finished .zim and no .tmp left behind; the progress
 file reached done == total; openZIM's mandatory metadata is present (Name,
@@ -13,7 +13,9 @@ asked for. Satellite imagery: without --satellite, none, and the licence
 never claims the non-commercial layer; with --satellite SOURCE, that source
 in map-config.json, its licence in License, and the Flavour and tags that
 label it (a non-commercial source: "satellite-nc", "non-commercial", and a
-License that opens with the restriction).
+License that opens with the restriction). Terrain: tiles present when asked
+for (--terrain), and the licence credits the Copernicus DEM exactly when the
+ZIM has terrain.
 """
 from __future__ import annotations
 
@@ -65,6 +67,21 @@ def satellite_problems(md: dict[str, bytes], cfg: dict[str, Any],
     return out
 
 
+def terrain_problems(md: dict[str, bytes], cfg: dict[str, Any], want: bool,
+                     has_tiles: bool) -> list[str]:
+    """What is wrong with the terrain layer and its credit."""
+    out: list[str] = []
+    if want and not cfg.get("hasTerrain"):
+        out.append("terrain was requested but map-config has no hasTerrain")
+    elif want and not has_tiles:
+        out.append("map-config has hasTerrain but the ZIM has no terrain/ tiles")
+    # "Copernicus DEM", not "Copernicus": EOX's satellite credit names
+    # Copernicus Sentinel data.
+    if bool(cfg.get("hasTerrain")) != (b"Copernicus DEM" in md.get("License", b"")):
+        out.append("License must credit the Copernicus DEM exactly when the ZIM has terrain")
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=next(iter((__doc__ or "").splitlines()), ""))
     ap.add_argument("out")
@@ -72,6 +89,7 @@ def main() -> int:
     ap.add_argument("--title", required=True)
     ap.add_argument("--file", help="expected file name (default: <name>_<period>.zim)")
     ap.add_argument("--routing", action="store_true")
+    ap.add_argument("--terrain", action="store_true")
     ap.add_argument("--stats", default="task_progress.json")
     ap.add_argument("--satellite", metavar="SOURCE",
                     help="expect this satellite source (streetzim/satellite_sources.py)")
@@ -115,12 +133,17 @@ def main() -> int:
     problems += satellite_problems(md, cfg, a.satellite)
     if a.routing and not cfg.get("hasRouting"):
         problems.append("routing was requested but map-config has no hasRouting")
+    problems += terrain_problems(
+        md, cfg, a.terrain,
+        any(arc._get_entry_by_id(i).path.startswith("terrain/")  # pyright: ignore[reportPrivateUsage]
+            for i in range(arc.entry_count)))
 
     for p in problems:
         print(f"FAIL: {p}")
     if not problems:
         print(f"ok: {zim.name}: metadata, illustration, progress "
-              f"({stats['done']}/{stats['total']})" + (", routing" if a.routing else ""))
+              f"({stats['done']}/{stats['total']})" + (", routing" if a.routing else "")
+              + (", terrain" if a.terrain else ""))
     return 1 if problems else 0
 
 

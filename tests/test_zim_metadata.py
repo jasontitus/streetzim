@@ -135,6 +135,8 @@ def _build(tmp_path, map_config_extra=None, **kw):
     md = {k: a.get_metadata(k) for k in a.metadata_keys}
     md["map-config"] = json.loads(bytes(a.get_entry_by_path("map-config.json")
                                         .get_item().content))
+    md["entries"] = {a._get_entry_by_id(i).path for i in range(a.entry_count)}
+    md["index.html"] = bytes(a.get_entry_by_path("index.html").get_item().content)
     return md
 
 
@@ -203,3 +205,53 @@ def test_overrides_and_illustration_are_written(tmp_path):
     from PIL import Image
     ill = Image.open(io.BytesIO(md["Illustration_48x48@1"]))
     assert ill.size == (48, 48) and ill.getpixel((24, 24))[:3] == (10, 20, 30)
+
+
+def test_terrain_credits_copernicus_and_packs_from_its_min_zoom(tmp_path):
+    # Tiles below the zoom the viewer can show (map-config terrainMinZoom)
+    # stay out of the ZIM even when a shared cache has them.
+    ter = tmp_path / "ter"
+    for z, x, y in ((3, 4, 2), (11, 1066, 746), (12, 2132, 1493)):
+        (ter / str(z) / str(x)).mkdir(parents=True)
+        (ter / str(z) / str(x) / f"{y}.webp").write_bytes(b"RIFF" + bytes([z]) * 300)
+    md = _build(tmp_path, terrain_dir=str(ter), terrain_max_zoom=12,
+                map_config_extra={"hasTerrain": True, "terrainMaxZoom": 12,
+                                  "terrainMinZoom": 11})
+    terrain = sorted(p for p in md["entries"] if p.startswith("terrain/"))
+    assert terrain == ["terrain/11/1066/746.webp", "terrain/12/2132/1493.webp"]
+    lic = md["License"].decode()
+    assert "Copernicus DEM GLO-30/GLO-90" in lic and "COPERNICUS by EU and ESA" in lic
+    assert md["map-config"]["terrainMinZoom"] == 11
+    # The viewer credits the DEM when the ZIM has terrain, and asks for no
+    # tile below terrainMinZoom.
+    html = md["index.html"]
+    assert b"Copernicus DEM (GLO-30 and GLO-90)" in html
+    assert b"['attr-terrain-section', config.hasTerrain]" in html
+    assert b"minzoom: config.terrainMinZoom || 0" in html
+
+
+@pytest.mark.parametrize("terrain", [False, True])
+def test_openzim_check_tells_the_dem_credit_from_the_satellite_one(tmp_path, terrain):
+    # --satellite --no-terrain: EOX's credit names "Copernicus Sentinel"
+    # data; only "Copernicus DEM" means terrain (tools/check_openzim_output.py).
+    sys.path.insert(0, str(ROOT / "tools"))
+    from check_openzim_output import terrain_problems
+    from streetzim import satellite_sources as ss
+    src = ss.SOURCES["s2cloudless-2016"]
+    (tmp_path / "sat").mkdir()
+    extra = {"hasSatellite": True, **ss.map_config(src)}
+    kw = {}
+    if terrain:
+        ter = tmp_path / "ter" / "12" / "2132"
+        ter.mkdir(parents=True)
+        (ter / "1493.webp").write_bytes(b"RIFF" + b"x" * 300)
+        kw = {"terrain_dir": str(tmp_path / "ter"), "terrain_max_zoom": 12}
+        extra.update(hasTerrain=True, terrainMaxZoom=12)
+    md = _build(tmp_path, satellite_dir=str(tmp_path / "sat"), map_config_extra=extra, **kw)
+    assert b"Copernicus" in md["License"]           # the satellite credit alone
+    assert terrain_problems(md, md["map-config"], terrain, terrain) == []
+    assert terrain_problems(md, md["map-config"], True, terrain) != [] or terrain
+    lic = md["License"].replace(b"Copernicus DEM", b"Copernicus")
+    assert terrain_problems({**md, "License": lic}, md["map-config"], terrain, terrain) \
+        == ([] if not terrain else
+            ["License must credit the Copernicus DEM exactly when the ZIM has terrain"])
