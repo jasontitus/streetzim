@@ -1425,7 +1425,8 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
                 "zim-pack: wiki-articles", time.time() - _wa_t0,
                 note=f"{_wa_stats['bundled']} articles, "
                      f"{_wa_stats['bytes'] // 1024} KB, "
-                     f"{_wa_stats['failed']} missing, "
+                     f"{_wa_stats['failed']} missing "
+                     f"({_wa_stats.get('unfetched', 0)} unfetched), "
                      f"{_wa_stats.get('images', 0)} images "
                      f"{_wa_stats.get('image_bytes', 0) // 1048576} MB")
     return _bundled_set
