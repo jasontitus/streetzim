@@ -492,4 +492,39 @@ await ok('chips: hidden chips and rail are really hidden, and taps always say so
   assert.match(legacy, /if \(!Array\.isArray\(data\) \|\| !data\.length\) \{\s*_showFindToast\('No '/);
 });
 
+// ---- Files that live beside the /drive/ PWA, never in a ZIM (020, 100)
+
+const STAMP_SRC = slice('var SZ_ON_DRIVE_PWA', '</script>');
+const BRIDGE_SRC = slice('(function loadWikiTitleBridge()', '// Resolve the in-ZIM article path');
+function runPageLoad(pathname, protocol = 'http:') {
+  const fetched = [];
+  const fetch = (u) => { fetched.push(u); return new Promise(() => {}); };
+  const stamp = { style: {}, textContent: '…', addEventListener() {} };
+  const document = { getElementById: (id) => (id === 'viewer-build-stamp' ? stamp : null),
+                     body: { classList: { add() {} } } };
+  const window = { location: { pathname, protocol, search: '' } };
+  new Function('window', 'document', 'fetch', 'baseUrl',
+    STAMP_SRC + '\n' + BRIDGE_SRC)(window, document, fetch, 'http://h' + pathname.replace(/[^/]*$/, ''));
+  return { fetched, stamp };
+}
+
+await ok('kiwix-serve: no build-info.js or wiki-qid-titles.json requests', () => {
+  for (const path of ['/content/monaco/index.html', '/viewer#monaco/index.html',
+                      '/C/index.html', '/drive/index.html']) {
+    const { fetched, stamp } = runPageLoad(path);
+    assert.deepStrictEqual(fetched, [], path);
+    assert.strictEqual(stamp.style.display, 'none', path);
+  }
+});
+
+await ok('the /drive/ PWA still loads its stamp and Q-ID bridge', () => {
+  for (const path of ['/drive/viewer/', '/drive/viewer/index.html']) {
+    const { fetched, stamp } = runPageLoad(path, 'https:');
+    assert.strictEqual(fetched.length, 2, path);
+    assert.match(fetched[0], /^\/drive\/build-info\.js\?t=/);
+    assert.strictEqual(fetched[1], 'http://h/drive/viewer/../wiki-qid-titles.json');
+    assert.notStrictEqual(stamp.style.display, 'none');
+  }
+});
+
 console.log(`\n${pass} passed`);

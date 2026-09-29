@@ -1037,22 +1037,28 @@
      can tell whether a long route is OOMing on cell cache, on visited-
      node Maps, or on something else. Hidden by default. -->
 <div id="route-debug" style="display:none;position:fixed;bottom:16px;right:16px;background:rgba(0,0,0,0.85);color:#0f0;font:11px/1.45 ui-monospace,monospace;padding:8px 10px;max-width:360px;border-radius:6px;z-index:9999;white-space:pre-wrap;pointer-events:none;"></div>
-<!-- Always-visible build stamp. Tiny, top-left, click to copy. Lets
+<!-- Build stamp for the /drive/ PWA. Tiny, top-left, click to copy. Lets
      you instantly tell which deploy the page is from. Populated by
-     a fetch('/drive/build-info.js') below. -->
+     a fetch('/drive/build-info.js') below; hidden everywhere else. -->
 <div id="viewer-build-stamp" style="position:fixed;top:calc(6px + var(--top-inset, 0px));left:8px;background:rgba(0,0,0,0.55);color:#0f0;font:10px/1 ui-monospace,monospace;padding:3px 6px;border-radius:4px;z-index:1;pointer-events:auto;cursor:copy;opacity:0.7;" title="StreetZim build (click to copy)">…</div>
 <script>
+// True only when the viewer runs inside the /drive/ PWA (web/drive/sw.js
+// serves it at /drive/viewer/). Files that live beside the PWA rather than
+// in the ZIM -- /drive/build-info.js, /drive/wiki-qid-titles.json -- are
+// fetched only then. kiwix-serve also serves over http(s), so the protocol
+// alone cannot tell the two apart: every page load there asked for both and
+// got two 404s.
+var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
 (function() {
   var el = document.getElementById('viewer-build-stamp');
   if (!el) return;
   // Phones hide the stamp (CSS above) unless ?debug=1 asks for it.
   if (/[?&]debug=1/.test(window.location.search)) document.body.classList.add('sz-debug');
-  // /drive/build-info.js only exists on the PWA origin. Inside Kiwix the
-  // viewer loads from zim:// (or content://), so the fetch would 404 and
-  // log noise to the console. Hide the widget entirely off-PWA.
-  var proto = window.location.protocol;
+  // /drive/build-info.js is the PWA deploy stamp (scripts/sync-drive-viewer.sh).
+  // A ZIM does not contain it: in Kiwix (zim://, content://, or kiwix-serve
+  // over http) the fetch would only 404. Hide the widget entirely off-PWA.
   // No fetch: the page below (025) explains; do not die here first.
-  if ((proto !== 'http:' && proto !== 'https:') || typeof fetch !== 'function') {
+  if (!SZ_ON_DRIVE_PWA || typeof fetch !== 'function') {
     el.style.display = 'none';
     return;
   }
@@ -1488,8 +1494,9 @@ var baseUrl = (function() {
 // one level above the viewer base). When present, wiki popups gain a
 // "Read full article" button that opens the in-ZIM wiki-article/<Title> page
 // (served by the drive service worker). Absent (e.g. plain Kiwix) -> popups
-// just show the wikidata blurb as before. This is a transitional side-load;
-// once the bridge is baked into the ZIM the fetch simply falls back to it.
+// just show the wikidata blurb as before. This is a transitional side-load,
+// requested only inside the PWA (SZ_ON_DRIVE_PWA); ZIMs with bundled
+// articles carry wiki-geo-index.json, which supersedes it.
 var WIKI_QID_TITLES = null;   // optional side-load bridge (transitional)
 var WIKI_GEO_INDEX = null;    // {title:[lat,lon,type,qid]} from the ZIM's wiki-geo-index.json
 var WIKI_GEO_QID = null;      // reverse {qid:title} built from WIKI_GEO_INDEX
@@ -1535,6 +1542,9 @@ function wikiGeoTitlesInBounds(W, E, S, N) {
   return out;
 }
 (function loadWikiTitleBridge() {
+  // The bridge sits beside the PWA, never in a ZIM: under kiwix-serve this
+  // fetch was a 404 on every page load.
+  if (typeof SZ_ON_DRIVE_PWA === 'undefined' || !SZ_ON_DRIVE_PWA) return;
   try {
     fetch(baseUrl + '../wiki-qid-titles.json')
       .then(function(r) { return r && r.ok ? r.json() : null; })
