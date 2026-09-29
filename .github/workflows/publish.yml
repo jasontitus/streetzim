@@ -1,0 +1,74 @@
+# Publish streetzim to PyPI with trusted publishing (no API token).
+#
+# Manual only until the maintainer has set PyPI up (docs/packaging.md):
+# Actions -> "Publish to PyPI" -> Run workflow, giving an existing tag such
+# as v1.0.0. The tag must match streetzim/__about__.py. To publish on every
+# pushed tag instead, uncomment the `push: tags` trigger below.
+#
+# The build job builds and checks the wheel exactly as CI's wheel job does;
+# the publish job only uploads it, from the `pypi` environment (where the
+# maintainer can require an approval), and is the only job with id-token.
+name: Publish to PyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v1.0.0)"
+        required: true
+  # push:
+  #   tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'jasontitus/streetzim'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: The tag matches the package version
+        run: |
+          version=$(python -c "import runpy; print(runpy.run_path('streetzim/__about__.py')['__version__'])")
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::tag $TAG does not match streetzim/__about__.py ($version)"; exit 1
+          fi
+      - name: Build the sdist and wheel
+        run: |
+          pip install build==1.6.1
+          python -m build
+      - name: Check the installed wheel (as CI's wheel job)
+        run: |
+          python -m venv /tmp/wheel-venv
+          /tmp/wheel-venv/bin/pip install dist/streetzim-*.whl
+          cd /tmp
+          /tmp/wheel-venv/bin/streetzim --help > /dev/null
+          /tmp/wheel-venv/bin/python "$GITHUB_WORKSPACE/tools/check_wheel_install.py"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/streetzim
+    permissions:
+      id-token: write     # trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

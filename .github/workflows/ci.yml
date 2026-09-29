@@ -1,5 +1,8 @@
-# Five jobs (docker builds the image and runs `streetzim` in it as Zimfarm would):
-#   checks     - lint gate, Python unit tests, Node viewer/PWA tests. Fast, offline.
+# Six jobs (docker builds the image and runs `streetzim` in it as Zimfarm would):
+#   checks     - lint gate, Python unit tests (with coverage), Node viewer/PWA
+#                tests. Fast, offline.
+#   wheel      - `python -m build`, then the wheel installed into a fresh venv
+#                and run from outside the checkout (docs/packaging.md).
 #   python-3-14 - the unit tests on Python 3.14 with zimscraperlib installed.
 #   openfreemap-tiles - builds from the same OpenFreeMap MBTiles openzim/maps
 #                uses (no tilemaker), validates, and loads it through kiwix-serve.
@@ -82,12 +85,45 @@ jobs:
             "SQLAlchemy==2.0.41" "PyJWT==2.13.0" "pytz==2025.2" "humanfriendly==10.0" \
             "pycountry==24.6.1" "regex==2025.9.1" "requests==2.33.0"
           PYTHONPATH=/tmp/zimfarm/backend/src /tmp/zfvenv/bin/python tools/check_zimfarm_schema.py
+      - name: Install pytest-cov (pyproject.toml's test extra)
+        run: pip install pytest-cov==7.1.0
       - name: Python tests
-        run: python -m pytest tests -q
+        run: python -m pytest tests -q --cov --cov-report=
       - name: Core/ops boundary (ops/README.md)
         run: python tools/check_boundary.py
       - name: Ops tests (ops/tests)
-        run: python -m pytest ops/tests -q
+        run: python -m pytest ops/tests -q --cov --cov-append --cov-report=
+      # Coverage of both test runs above ([tool.coverage] in pyproject.toml;
+      # code run in subprocesses is not counted). The table goes to the job
+      # summary, the XML and HTML reports to the `coverage` artifact.
+      - name: Coverage report
+        run: |
+          coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+          coverage report | tail -1
+          coverage xml -o coverage.xml
+          coverage html -d htmlcov -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage.xml
+            htmlcov
+          retention-days: 14
+      # Optional: upload to Codecov once the maintainer adds a CODECOV_TOKEN
+      # repository secret (docs/packaging.md); without it this is skipped.
+      - name: Codecov token set?
+        id: codecov
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: |
+          if [ -n "$CODECOV_TOKEN" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Upload coverage to Codecov
+        if: steps.codecov.outputs.enabled == 'true'
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          fail_ci_if_error: false
       - name: Node tests
         env:
           PYTHON: python
@@ -101,6 +137,43 @@ jobs:
             node "$t"
             echo "::endgroup::"
           done
+
+  wheel:
+    # What `pip install streetzim` would get: the sdist and wheel from
+    # `python -m build` (the wheel is built from the sdist), installed into a
+    # fresh venv and run from /tmp, so nothing comes from the checkout.
+    # tools/check_wheel_install.py needs no network; the proxy variables
+    # point at a closed port so a download attempt would fail.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Build the sdist and wheel
+        run: |
+          pip install build==1.6.1
+          python -m build
+          ls -l dist
+      - name: Install the wheel into a fresh venv
+        run: |
+          python -m venv /tmp/wheel-venv
+          /tmp/wheel-venv/bin/pip install dist/streetzim-*.whl
+      - name: Run the installed `streetzim` from outside the checkout
+        working-directory: /tmp
+        env:
+          http_proxy: http://127.0.0.1:9
+          https_proxy: http://127.0.0.1:9
+        run: |
+          /tmp/wheel-venv/bin/streetzim --help > /dev/null
+          /tmp/wheel-venv/bin/python "$GITHUB_WORKSPACE/tools/check_wheel_install.py"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          retention-days: 14
 
   python-3-14:
     # openZIM's scrapers and the Docker image run Python 3.14, where

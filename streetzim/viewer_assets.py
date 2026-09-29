@@ -28,9 +28,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any, NamedTuple
 
-ROOT = Path(__file__).resolve().parent.parent
-LOCK = ROOT / "resources" / "viewer-assets.lock.json"
-VENDOR = ROOT / "resources" / "vendor"
+from streetzim.paths import LOCK_NAME, REPO_ROOT, RESOURCES_DIR
+
+ROOT = REPO_ROOT
+LOCK = RESOURCES_DIR / LOCK_NAME
+VENDOR = RESOURCES_DIR / "vendor"
 # Filled when the Docker image is built (tools/pin_viewer_assets.py
 # --prefetch); read-only at run time, searched after the cache.
 BAKED = ROOT / "viewer-assets"

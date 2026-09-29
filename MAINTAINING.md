@@ -76,9 +76,15 @@ for t in tests/chip_rules_js.test.mjs tests/chip_shards_js.test.mjs \
          tests/test_zim_http_source.mjs tests/viewer_style_js.test.mjs; do node "$t"; done
 ```
 
-CI (`.github/workflows/ci.yml`) runs all of that, then builds Monaco end to
-end, validates it (including `zimcheck`) and loads the in-ZIM viewer in
-headless Chrome. It also runs weekly, to catch upstream drift.
+CI (`.github/workflows/ci.yml`) runs all of that, with coverage, then builds
+Monaco end to end, validates it (including `zimcheck`) and loads the in-ZIM
+viewer in headless Chrome. It also builds the wheel and checks it installed
+outside the checkout. It runs weekly too, to catch upstream drift.
+Coverage, the wheel and the (manual) PyPI workflow are in
+[docs/packaging.md](docs/packaging.md). A file the build reads at run time
+goes in `resources/` and in `RUNTIME_FILES` (`streetzim/paths.py`) and the
+package data in `pyproject.toml`; `tests/test_packaging.py` checks the two
+lists agree.
 
 **Python versions.** The builder runs on 3.12 (the production host) and 3.14
 (the Docker image and openZIM's scrapers). On 3.14 `requirements.txt` also

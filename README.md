@@ -101,7 +101,7 @@ flags are described for Zimfarm in `offliner-definition.json`;
 build costs.
 
 ```bash
-pip install -e .              # or use the Docker image, which has it
+pip install -e .              # or a wheel (python -m build; docs/packaging.md), or the Docker image
 streetzim --name osm_en_monaco --title Monaco \
     --description "Offline map of Monaco with search and routing" \
     --area monaco --output out --stats-filename out/task_progress.json

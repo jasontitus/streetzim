@@ -1,11 +1,15 @@
 # StreetZim as an installable scraper, openZIM style.
 #
 #   pip install -e .          # from a checkout (or use the Docker image)
+#   python -m build           # or a wheel: dist/streetzim-*.whl
 #   streetzim --help
 #
-# The builder reads its viewer, tilemaker profile and fonts from resources/
-# next to the code, so install from a checkout (editable) or use the Docker
-# image; a plain wheel would not carry resources/.
+# The builder reads its viewer, tilemaker profile, vendored MapLibre and lock
+# file from resources/. A checkout (or editable install) reads them there; a
+# wheel carries them as the streetzim.resources package (package-dir and
+# package-data below; streetzim/paths.py finds either). The wheel still needs
+# tilemaker and osmium on PATH, as the Docker image has. docs/packaging.md
+# covers the wheel check in CI and the (manual) PyPI workflow.
 # requirements.txt stays the single list of runtime dependencies (the Docker
 # image and the production host install from it).
 
@@ -23,7 +27,7 @@ dynamic = ["version", "dependencies"]
 
 [project.optional-dependencies]
 qa = ["ruff==0.15.8", "pyright==1.1.409"]
-test = ["pytest>=8.0"]
+test = ["pytest>=8.0", "pytest-cov>=6.0"]
 
 [project.scripts]
 streetzim = "streetzim.cli:main"
@@ -34,9 +38,31 @@ Homepage = "https://github.com/jasontitus/streetzim"
 [tool.setuptools]
 py-modules = ["create_osm_zim", "wikidata_cache"]
 
-[tool.setuptools.packages.find]
-include = ["streetzim*", "cloud"]
-namespaces = true
+# Listed rather than found, because streetzim.resources is resources/
+# (tests/test_packaging.py fails when a new streetzim subpackage is missing).
+# Its data folders are listed too, as setuptools asks of folders it ships.
+packages = [
+  "streetzim",
+  "streetzim.routing",
+  "streetzim.resources",
+  "streetzim.resources.tilemaker",
+  "streetzim.resources.vendor",
+  "streetzim.resources.viewer",
+  "cloud",
+]
+
+[tool.setuptools.package-dir]
+"streetzim.resources" = "resources"
+
+# What the build reads at run time: streetzim/paths.py RUNTIME_FILES, plus
+# cloud/regions.tsv (create_osm_zim.registry_anchor). Not the viewer's
+# sources (resources/viewer/src/), which only tools/build_viewer.py reads.
+[tool.setuptools.package-data]
+"streetzim.resources" = ["viewer-assets.lock.json"]
+"streetzim.resources.tilemaker" = ["*"]
+"streetzim.resources.vendor" = ["*/*"]
+"streetzim.resources.viewer" = ["*.html", "*.js"]
+cloud = ["regions.tsv"]
 
 [tool.setuptools.dynamic]
 version = { attr = "streetzim.__about__.__version__" }
@@ -63,6 +89,7 @@ include = [
   "cloud/wikidata_titles.py",
   "tools/build_viewer.py",
   "tools/check_openzim_output.py",
+  "tools/check_wheel_install.py",
   "tools/measure_build.py",
   "tools/offliner_definition.py",
   "tools/pin_viewer_assets.py",
@@ -75,6 +102,7 @@ strict = [
   "streetzim/__about__.py",
   "streetzim/__init__.py",
   "streetzim/cli.py",
+  "streetzim/paths.py",
   "streetzim/progress.py",
   "streetzim/routing/__init__.py",
   "streetzim/routing/reader.py",
@@ -86,3 +114,12 @@ strict = [
   "tools/offliner_definition.py",
   "tools/pin_viewer_assets.py",
 ]
+
+# Coverage of the unit tests (CI's checks job: pytest --cov; docs/packaging.md).
+# Measures the files the tests import, anywhere in the repository.
+[tool.coverage.run]
+source = ["."]
+omit = ["*/tests/*", "*/node_modules/*", "build/*", "tmp/*"]
+
+[tool.coverage.report]
+skip_empty = true

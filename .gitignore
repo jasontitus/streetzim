@@ -76,3 +76,10 @@ salvage/
 
 # pip wheel .
 /build/
+
+# python -m build; pytest --cov (docs/packaging.md)
+/dist/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
