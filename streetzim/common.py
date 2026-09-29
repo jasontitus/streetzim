@@ -7,7 +7,8 @@ build progress import ``print`` from here so lines flush immediately and
 "[N/total] Title..." headers feed PHASE_TIMER.
 
 SCRIPT_DIR / REPO_ROOT are the repository root (the directory holding
-create_osm_zim.py), not this package.
+create_osm_zim.py), not this package; RESOURCES_DIR is the checkout's
+resources/ or an installed wheel's copy (streetzim/paths.py).
 """
 import os
 import re
@@ -15,6 +16,8 @@ import subprocess
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
+
+from streetzim import paths as _paths
 
 
 # Wrap print to auto-flush step/progress lines so monitoring never sees stale output.
@@ -223,11 +226,12 @@ def print(*args, **kwargs):
 
 SCRIPT_DIR = Path(__file__).parent.parent.resolve()
 # Where the heavy download caches live (satellite, DEM/terrain, Wikidata,
-# Wikipedia articles): $STREETZIM_CACHE_DIR, else the repo root as always.
+# Wikipedia articles): $STREETZIM_CACHE_DIR, else the repo root as always
+# (installed from a wheel: ~/.cache/streetzim; streetzim/paths.py cache_root).
 # The Docker image points it at the mounted /output volume so the caches
 # survive `docker run --rm`.
-CACHE_DIR = Path(os.environ.get("STREETZIM_CACHE_DIR") or SCRIPT_DIR)
-RESOURCES_DIR = SCRIPT_DIR / "resources"
+CACHE_DIR = _paths.cache_root()
+RESOURCES_DIR = _paths.RESOURCES_DIR
 TILEMAKER_CONFIG = RESOURCES_DIR / "tilemaker" / "config-openmaptiles.json"
 TILEMAKER_PROCESS = RESOURCES_DIR / "tilemaker" / "process-openmaptiles.lua"
 VIEWER_DIR = RESOURCES_DIR / "viewer"
@@ -287,20 +291,22 @@ def log_viewer_freshness():
             warned = True
     # index.html is built from resources/viewer/src/index/ (tools/build_viewer.py);
     # a part edited without rebuilding would silently ship the old viewer.
-    try:
-        import importlib.util as _ilu
-        _spec = _ilu.spec_from_file_location(
-            "_build_viewer", SCRIPT_DIR / "tools" / "build_viewer.py")
-        if _spec is None or _spec.loader is None:
-            raise ImportError("tools/build_viewer.py not loadable")
-        _bv = _ilu.module_from_spec(_spec)
-        _spec.loader.exec_module(_bv)
-        if _bv.build() != (VIEWER_DIR / "index.html").read_bytes():
-            print("    ⚠️  index.html does not match resources/viewer/src/index/ — "
-                  "run: python tools/build_viewer.py (packaging the OLD index.html)")
-            warned = True
-    except (Exception, SystemExit) as _e:
-        print(f"    (viewer parts check skipped: {_e})")
+    # Only a checkout has the parts; an installed wheel ships the built file.
+    builder = SCRIPT_DIR / "tools" / "build_viewer.py"
+    if builder.is_file():
+        try:
+            import importlib.util as _ilu
+            _spec = _ilu.spec_from_file_location("_build_viewer", builder)
+            if _spec is None or _spec.loader is None:
+                raise ImportError("tools/build_viewer.py not loadable")
+            _bv = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(_bv)
+            if _bv.build() != (VIEWER_DIR / "index.html").read_bytes():
+                print("    ⚠️  index.html does not match resources/viewer/src/index/ — "
+                      "run: python tools/build_viewer.py (packaging the OLD index.html)")
+                warned = True
+        except (Exception, SystemExit) as _e:
+            print(f"    (viewer parts check skipped: {_e})")
     if not warned:
         print("    viewer freshness OK")
     print()

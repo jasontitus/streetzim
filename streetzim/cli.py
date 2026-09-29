@@ -39,6 +39,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:     # also runnable as `python streetzim/cli.py`
     sys.path.insert(0, str(REPO_ROOT))
+from streetzim.paths import RESOURCES_DIR, missing_runtime_files  # noqa: E402
 GEOFABRIK_POLY = re.compile(r"^https?://download\.geofabrik\.de/(.+)\.poly$")
 USER_AGENT = "streetzim (https://github.com/jasontitus/streetzim)"
 
@@ -468,8 +469,8 @@ def ensure_shapefiles(folder: Path) -> Path:
         return folder
     print(f"  Fetching coastline and Natural Earth shapefiles into {folder}")
     folder.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["bash", str(REPO_ROOT / "scripts" / "fetch-shapefiles.sh"), str(folder)],
-                   check=True)
+    subprocess.run(["bash", str(RESOURCES_DIR / "tilemaker" / "fetch-shapefiles.sh"),
+                    str(folder)], check=True)
     return folder
 
 
@@ -480,9 +481,10 @@ def _error(msg: object) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if not (REPO_ROOT / "resources" / "viewer" / "index.html").exists():
-        return _error("resources/ not found next to the code; install from a "
-                      "checkout (pip install -e .) or use the Docker image")
+    missing = missing_runtime_files()
+    if missing:
+        return _error(f"missing from {RESOURCES_DIR}: {', '.join(missing)}; "
+                      "reinstall streetzim, or run it from a checkout")
     out_dir = Path(args.output).resolve()
     tmp = Path(args.tmp or (Path(tempfile.gettempdir()) / "streetzim")).resolve()
     tmp.mkdir(parents=True, exist_ok=True)

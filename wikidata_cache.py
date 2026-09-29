@@ -25,7 +25,6 @@ to allow incremental updates and efficient loading.
 
 import argparse
 import json
-import os
 import sqlite3
 import sys
 import time
@@ -35,8 +34,11 @@ import urllib.parse
 from collections import defaultdict
 from pathlib import Path
 
+from streetzim.paths import cache_root
+
 SCRIPT_DIR = Path(__file__).parent.resolve()
-DEFAULT_CACHE_DIR = Path(os.environ.get("STREETZIM_CACHE_DIR") or SCRIPT_DIR) / "wikidata_cache"
+# $STREETZIM_CACHE_DIR, else this checkout, else a user cache dir when installed.
+DEFAULT_CACHE_DIR = cache_root() / "wikidata_cache"
 
 # Wikidata SPARQL endpoint
 WIKIDATA_SPARQL = "https://query.wikidata.org/sparql"
