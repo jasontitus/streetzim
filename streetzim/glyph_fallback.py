@@ -133,35 +133,72 @@ def ranges_for(blocks: Iterable[tuple[int, int]]) -> list[str]:
     return [f"{s}-{s + 255}" for s in starts]
 
 
+# The fallback glyphs (maplibre/font-maker) put the baseline one pixel of
+# the 24 px SDF (1/24 em) lower in the cell than Open Sans's (node-fontnik):
+# the same outline gets ``top`` + 1, so unadjusted Noto letters sit 1/24 em
+# higher than Open Sans on a shared line. Copied glyphs get this added to
+# ``top`` (checked on U+0500-0513, which both fonts draw identically).
+FALLBACK_TOP_SHIFT = -1
+
+
+def _zigzag(n: int) -> int:
+    return (n >> 1) ^ -(n & 1)
+
+
+def _enc_zigzag(v: int) -> int:
+    return v * 2 if v >= 0 else -v * 2 - 1
+
+
+def _shift_top(glyph: bytes, shift: int) -> bytes:
+    """A glyph message with ``shift`` added to its ``top`` (field 6,
+    sint32), every other field kept byte for byte and in order."""
+    out = bytearray()
+    seen = False
+    for field, value, raw in _fields(glyph):
+        if field == 6 and isinstance(value, int):
+            out += b"\x30" + _enc_varint(_enc_zigzag(_zigzag(value) + shift))
+            seen = True
+        else:
+            out += raw
+    if not seen:  # top absent means 0
+        out += b"\x30" + _enc_varint(_enc_zigzag(shift))
+    return bytes(out)
+
+
+def _stack_head(name: str, range_key: str) -> bytes:
+    return (b"\x0a" + _enc_varint(len(name.encode())) + name.encode()
+            + b"\x12" + _enc_varint(len(range_key.encode())) + range_key.encode())
+
+
 def merge_range(primary: bytes | None, fallback: bytes,
                 blocks: Iterable[tuple[int, int]], *, name: str = "",
-                range_key: str = "") -> bytes:
+                range_key: str = "", top_shift: int = FALLBACK_TOP_SHIFT) -> bytes:
     """``primary`` plus the glyphs of ``fallback`` whose codepoint lies in
-    ``blocks`` and that ``primary`` has no glyph for.
+    ``blocks`` and that ``primary`` has no glyph for, each moved by
+    ``top_shift`` onto the primary's baseline.
 
     Returns ``primary`` itself when nothing is added. ``primary`` None (the
-    range is absent from the primary font) starts an empty fontstack called
-    ``name``."""
+    range is absent from the primary font), or one without a fontstack,
+    gets a fontstack called ``name`` for ``range_key``."""
     blocks = list(blocks)
     have: set[int] = glyph_ids(primary) if primary is not None else set()
     extra: dict[int, bytes] = {}
     for field, stack, _ in _fields(fallback):
         if field != 1 or not isinstance(stack, bytes):
             continue
-        for f2, glyph, raw in _fields(stack):
+        for f2, glyph, _raw in _fields(stack):
             if f2 != 3 or not isinstance(glyph, bytes):
                 continue
             gid = _glyph_id(glyph)
             if (gid is not None and gid not in have and gid not in extra
                     and any(a <= gid <= b for a, b in blocks)):
-                extra[gid] = raw
+                moved = _shift_top(glyph, top_shift) if top_shift else glyph
+                extra[gid] = b"\x1a" + _enc_varint(len(moved)) + moved
     if not extra and primary is not None:
         return primary
     added = b"".join(extra[k] for k in sorted(extra))
     if primary is None:
-        head = (b"\x0a" + _enc_varint(len(name.encode())) + name.encode()
-                + b"\x12" + _enc_varint(len(range_key.encode())) + range_key.encode())
-        stack_msg = head + added
+        stack_msg = _stack_head(name, range_key) + added
         return b"\x0a" + _enc_varint(len(stack_msg)) + stack_msg
     out = bytearray()
     merged = False
@@ -172,9 +209,8 @@ def merge_range(primary: bytes | None, fallback: bytes,
             merged = True
         else:
             out += raw
-    if not merged:  # no fontstack at all: add one
-        head = b"\x0a" + _enc_varint(len(name.encode())) + name.encode()
-        stack_msg = head + added
+    if not merged:  # no fontstack at all: add a complete one
+        stack_msg = _stack_head(name, range_key) + added
         out += b"\x0a" + _enc_varint(len(stack_msg)) + stack_msg
     return bytes(out)
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import io
+import json
 import sys
 from pathlib import Path
 
@@ -275,13 +276,68 @@ def test_no_fallback_scripts_fetches_no_fallback_ranges(monkeypatch):
     assert ("NotoSans", "OFL.txt") not in fonts
 
 
-def test_unreachable_fallback_stops_the_build_unless_waived(monkeypatch):
+def test_unreachable_fallback_stops_the_build_unless_waived(monkeypatch, capsys):
     _serve(monkeypatch, fail="fb.example")
     with pytest.raises(SystemExit, match="failed to download"):
         tiles.generate_sdf_font_glyphs(make_lock(), scripts=None)
     monkeypatch.setenv("STREETZIM_ALLOW_FONT_ERRORS", "1")
-    fonts = tiles.generate_sdf_font_glyphs(make_lock(), scripts=None)
+    capsys.readouterr()
+    fonts = tiles.generate_sdf_font_glyphs(make_lock(), scripts={"Arabic"})
     assert gf.glyph_ids(fonts[("OpenSansRegular", "1536-1791")]) == {1537}  # unmerged
+    out = capsys.readouterr().out
+    # the loss is named: which style, which range, which script
+    assert "WARNING: OpenSansBold lost glyphs in 1536-1791 for Arabic" in out
+    assert "WARNING: OpenSansRegular lost glyphs in 1536-1791 for Arabic" in out
+    assert "Hebrew" not in out.split("WARNING", 1)[1]
+    assert "1280-1535" not in out  # Arabic's blocks do not reach that range
+
+
+def test_pinning_uses_the_tools_settings_unless_told_to_keep_the_lock(tmp_path, monkeypatch, capsys):
+    lock = va.load_lock()
+    lock["fonts"]["fallback"]["scripts"] = {"Arabic": ["0600-06FF"]}
+    lock["fonts"]["fallback"]["base_url"] = "https://old.example/fonts"
+    path = tmp_path / "lock.json"
+    pin.write_lock(lock, path)
+    monkeypatch.setattr(pin, "read_lock_or_empty", lambda: va.load_lock(path))
+    monkeypatch.setattr(pin, "write_lock", lambda lk: path.write_text(json.dumps(lk)))
+    monkeypatch.setattr(pin, "_pin_ranges", lambda base, stacks, ranges, old: (
+        {s: dict.fromkeys(ranges) for s in stacks}, 0, 0))
+    pin.pin_fonts()
+    fb = va.load_lock(path)["fonts"]["fallback"]
+    assert fb["scripts"] == pin.DEFAULT_FALLBACK["scripts"]
+    assert fb["base_url"] == pin.DEFAULT_FALLBACK["base_url"]
+    assert "7168-7423" in fb["ranges"]["NotoSansRegular"]      # Mtavruli
+    lock["fonts"]["fallback"]["scripts"] = {"Arabic": ["0600-06FF"]}
+    path.write_text(json.dumps(lock))
+    pin.pin_fonts(keep_lock=True)
+    kept = va.load_lock(path)
+    fb = kept["fonts"]["fallback"]
+    assert fb["scripts"] == {"Arabic": ["0600-06FF"]}
+    assert list(fb["ranges"]["NotoSansRegular"]) == ["1536-1791"]
+    assert kept["fonts"]["kept_lock_settings"] is True
+    assert pin.settings_drift(kept) == [
+        'fonts.fallback.base_url: "https://old.example/fonts" -> '
+        + json.dumps(pin.DEFAULT_FALLBACK["base_url"]),
+        'fonts.fallback.scripts: {"Arabic": ["0600-06FF"]} -> '
+        + json.dumps(pin.DEFAULT_FALLBACK["scripts"], ensure_ascii=False)]
+    # a plain --fonts announces what it resets and drops the marker
+    capsys.readouterr()
+    pin.pin_fonts()
+    out = capsys.readouterr().out
+    assert "setting reset to the tool's default: fonts.fallback.scripts: " in out
+    assert "kept_lock_settings" not in va.load_lock(path)["fonts"]
+
+
+def test_check_fails_on_settings_edited_in_the_lock(monkeypatch):
+    assert pin.settings_drift(va.load_lock()) == []   # the repository's lock
+    lock = va.load_lock()
+    lock["fonts"]["fallback"]["scripts"]["Arabic"] = ["0600-06FF"]
+    monkeypatch.setattr(va, "load_lock", lambda path=None: json.loads(json.dumps(lock)))
+    with pytest.raises(SystemExit, match=r"fonts\.fallback\.scripts"):
+        pin.check()
+    lock["fonts"]["kept_lock_settings"] = True       # pinned with --keep-lock: accepted,
+    with pytest.raises(SystemExit, match="fallback fontstack"):
+        pin.check()   # so the next check is reached (the ranges no longer match)
 
 
 def test_tampered_fallback_is_fatal_even_when_waived(monkeypatch):
