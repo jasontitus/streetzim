@@ -228,3 +228,30 @@ def test_terrain_credits_copernicus_and_packs_from_its_min_zoom(tmp_path):
     assert b"Copernicus DEM (GLO-30 and GLO-90)" in html
     assert b"['attr-terrain-section', config.hasTerrain]" in html
     assert b"minzoom: config.terrainMinZoom || 0" in html
+
+
+@pytest.mark.parametrize("terrain", [False, True])
+def test_openzim_check_tells_the_dem_credit_from_the_satellite_one(tmp_path, terrain):
+    # --satellite --no-terrain: EOX's credit names "Copernicus Sentinel"
+    # data; only "Copernicus DEM" means terrain (tools/check_openzim_output.py).
+    sys.path.insert(0, str(ROOT / "tools"))
+    from check_openzim_output import terrain_problems
+    from streetzim import satellite_sources as ss
+    src = ss.SOURCES["s2cloudless-2016"]
+    (tmp_path / "sat").mkdir()
+    extra = {"hasSatellite": True, **ss.map_config(src)}
+    kw = {}
+    if terrain:
+        ter = tmp_path / "ter" / "12" / "2132"
+        ter.mkdir(parents=True)
+        (ter / "1493.webp").write_bytes(b"RIFF" + b"x" * 300)
+        kw = {"terrain_dir": str(tmp_path / "ter"), "terrain_max_zoom": 12}
+        extra.update(hasTerrain=True, terrainMaxZoom=12)
+    md = _build(tmp_path, satellite_dir=str(tmp_path / "sat"), map_config_extra=extra, **kw)
+    assert b"Copernicus" in md["License"]           # the satellite credit alone
+    assert terrain_problems(md, md["map-config"], terrain, terrain) == []
+    assert terrain_problems(md, md["map-config"], True, terrain) != [] or terrain
+    lic = md["License"].replace(b"Copernicus DEM", b"Copernicus")
+    assert terrain_problems({**md, "License": lic}, md["map-config"], terrain, terrain) \
+        == ([] if not terrain else
+            ["License must credit the Copernicus DEM exactly when the ZIM has terrain"])

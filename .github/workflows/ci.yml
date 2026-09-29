@@ -331,9 +331,10 @@ jobs:
           zimcheck -A osm-monaco-patched.zim
           python -c "import sys; from libzim.reader import Archive; a = Archive('osm-monaco-patched.zim'); b = bytes(a.get_entry_by_path('index.html').get_item().content); sys.exit(0 if a.check() and b'ci-patch' in b else 'in-place patch not applied or checksum wrong')"
 
-      # The default profile includes terrain: Monaco fetches one GLO-30 cell
-      # (about 13 MB) from the public Copernicus bucket on S3 and adds a few
-      # seconds, so CI keeps it on rather than passing --no-terrain.
+      # The default profile includes terrain: Monaco fetches a GLO-30 and a
+      # GLO-90 cell (about 18 MB) from the public Copernicus buckets on S3
+      # and adds a few seconds, so CI keeps it on rather than passing
+      # --no-terrain.
       - name: Build through the openZIM-style command (streetzim --area)
         env:
           STREETZIM_REQUIRE_SHAPEFILES: "1"

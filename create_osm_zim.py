@@ -376,6 +376,14 @@ KNOWN_AREAS = {
 }
 
 
+def _existing_file(path):
+    """argparse type: a path that is a file. --low-zoom-world-vrt must not
+    silently fall back to the fresh-machine terrain layout when missing."""
+    if not os.path.isfile(path):
+        raise argparse.ArgumentTypeError(f"{path} is not a file")
+    return path
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         description="Create a ZIM file with offline OpenStreetMap viewer",
@@ -501,6 +509,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "target to keep each chunk fetch fast on "
                              "iOS Safari. Default 0 = off.")
     parser.add_argument("--low-zoom-world-vrt", metavar="PATH", default=None,
+                        type=_existing_file,
                         help="Use a world-coverage DEM VRT (e.g. "
                              "terrain_cache/dem_sources/world_dem_32k.tif) "
                              "for z=0-7 terrain tiles instead of the "
@@ -508,9 +517,10 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "stripe bug where z=0-7 tiles that extend "
                              "past the bbox get zero-fill outside the "
                              "region. z=8+ still use the regional VRT "
-                             "(fine-grained, no stripe risk). Default "
-                             "None = regional VRT everywhere (matches "
-                             "pre-2026-04-24 behavior).")
+                             "(fine-grained, no stripe risk). Must be a "
+                             "file. Default None = the fresh-machine layout "
+                             "(streetzim/terrain.py: terrain from the lowest "
+                             "zoom the viewer can show, low zooms from GLO-90).")
     parser.add_argument("--overture-addresses", metavar="PARQUET",
                         help="Merge Overture Maps address records from a parquet extract. "
                              "Use download_overture_data.py to produce the parquet first. "

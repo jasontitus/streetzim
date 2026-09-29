@@ -475,7 +475,7 @@ Found on the way; these affect production whatever happens to the branch:
   `--low-zoom-world-vrt` it was given lacked those cells; without one,
   the z0-z7 tiles came out 0 m past bbox + 1 degree and the check, which
   read the same short DEM, let them through. Fixed without a world DEM
-  (every `streetzim` build): terrain starts at the lowest zoom the viewer
-  can show, every tile is filled over its whole square (GLO-90 for
-  z <= 9), and the audit compares each tile with that DEM. See
+  (every `streetzim` build): terrain starts just below the lowest zoom
+  the viewer can show, every tile is filled over its whole square
+  (GLO-90 for z <= 9), and the audit compares each tile with that DEM. See
   [zimfarm.md](zimfarm.md#terrain-cost).

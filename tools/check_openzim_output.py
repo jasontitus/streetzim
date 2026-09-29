@@ -67,6 +67,21 @@ def satellite_problems(md: dict[str, bytes], cfg: dict[str, Any],
     return out
 
 
+def terrain_problems(md: dict[str, bytes], cfg: dict[str, Any], want: bool,
+                     has_tiles: bool) -> list[str]:
+    """What is wrong with the terrain layer and its credit."""
+    out: list[str] = []
+    if want and not cfg.get("hasTerrain"):
+        out.append("terrain was requested but map-config has no hasTerrain")
+    elif want and not has_tiles:
+        out.append("map-config has hasTerrain but the ZIM has no terrain/ tiles")
+    # "Copernicus DEM", not "Copernicus": EOX's satellite credit names
+    # Copernicus Sentinel data.
+    if bool(cfg.get("hasTerrain")) != (b"Copernicus DEM" in md.get("License", b"")):
+        out.append("License must credit the Copernicus DEM exactly when the ZIM has terrain")
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=next(iter((__doc__ or "").splitlines()), ""))
     ap.add_argument("out")
@@ -118,16 +133,10 @@ def main() -> int:
     problems += satellite_problems(md, cfg, a.satellite)
     if a.routing and not cfg.get("hasRouting"):
         problems.append("routing was requested but map-config has no hasRouting")
-    if a.terrain:
-        if not cfg.get("hasTerrain"):
-            problems.append("terrain was requested but map-config has no hasTerrain")
-        elif not any(arc._get_entry_by_id(i).path.startswith("terrain/")  # pyright: ignore[reportPrivateUsage]
-                     for i in range(arc.entry_count)):
-            problems.append("map-config has hasTerrain but the ZIM has no terrain/ tiles")
-    # "Copernicus DEM", not "Copernicus": EOX's satellite credit names
-    # Copernicus Sentinel data.
-    if bool(cfg.get("hasTerrain")) != (b"Copernicus DEM" in md.get("License", b"")):
-        problems.append("License must credit Copernicus exactly when the ZIM has terrain")
+    problems += terrain_problems(
+        md, cfg, a.terrain,
+        any(arc._get_entry_by_id(i).path.startswith("terrain/")  # pyright: ignore[reportPrivateUsage]
+            for i in range(arc.entry_count)))
 
     for p in problems:
         print(f"FAIL: {p}")

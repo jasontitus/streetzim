@@ -286,7 +286,7 @@ def _bbox_tile_total(minlon, minlat, maxlon, maxlat, max_zoom, min_zoom=0):
             n = 2 ** z
             x_min = int((minlon + 180) / 360 * n)
             x_max = int((maxlon + 180) / 360 * n)
-            lat_hi, lat_lo = maxlat, max(minlat, -85)
+            lat_hi, lat_lo = min(maxlat, 85.0511), max(minlat, -85)
             y_min = int((1 - math.log(math.tan(math.radians(lat_hi)) +
                                       1 / math.cos(math.radians(lat_hi))) / math.pi) / 2 * n)
             y_max = int((1 - math.log(math.tan(math.radians(lat_lo)) +
@@ -346,25 +346,30 @@ def _terrain_tile_usable(path):
 # far past the region), and a tile that is wrong for any other region that
 # reuses it from the cache. So:
 #
-#  - no tile is made below the zoom the viewer can show. The viewer pins the
-#    view to the region (maxBounds), so the lowest zoom it can reach follows
-#    from the bbox (viewer_min_map_zoom). Tiles below it (z0 for Monaco is
-#    the whole world) are never displayed, and filling them would take a
-#    world DEM;
+#  - no tile is made below the zoom the viewer can use. The viewer pins the
+#    view to the region's box (maxBounds, no margin), so the lowest zoom it
+#    can reach follows from the bbox (viewer_min_map_zoom); terrain starts
+#    two levels below that (terrain_min_zoom). Tiles below it (z0 for
+#    Monaco is the whole world) are never displayed, and filling them would
+#    take a world DEM;
 #  - every tile that is made is filled over its whole square: z >= 10 from
 #    GLO-30 (30 m), z <= 9 from a 3-arc-second (90 m) mosaic of GLO-30
 #    where it was fetched anyway and GLO-90 around it. A 256-px tile at
 #    z9 has 10-arc-second pixels, so GLO-90 loses nothing there, and a
-#    GLO-90 cell is about a tenth of the size of a GLO-30 one;
+#    GLO-90 cell is about an eighth of the size of a GLO-30 one;
 #  - GLO-30 is fetched for the cells under the region's z10 tiles only,
 #    not bbox + 1 degree: Monaco needs 1 cell instead of 9, Luxembourg 4
 #    instead of 16.
 #
-# The low-zoom GLO-90 ring is capped (LOWZOOM_CELL_BUDGET): for a very large
-# area the full square of its lowest tiles would be most of a continent. Past
-# the cap, the lowest zooms are filled over the part the budget covers and
-# are 0 m beyond it; the health check reads the same mosaic, so it holds
-# them to what the plan fetched rather than tolerating gaps.
+# The low-zoom mosaic is capped: for a very large area the full square of
+# its lowest tiles would be most of a continent. It may span at most
+# max(LOWZOOM_MIN_CELLS, LOWZOOM_CELL_BUDGET x the cells under the area's
+# z10 tiles) 1-degree cells, counted as the squares cover them, sea cells
+# (a cheap 404) and cells shared with GLO-30 included. Past the cap it
+# covers the full squares of the lowest zoom that fits (TerrainPlan.
+# low_zoom); the zooms below that are filled over that part and are 0 m
+# beyond it, far outside the area. The health check holds them to what the
+# plan fetched (audit_terrain).
 
 # Zooms at or below this read the 3-arc-second mosaic; above it, GLO-30.
 LOWRES_MAX_ZOOM = 9
@@ -373,8 +378,8 @@ LOWRES_RES = 1.0 / 1200.0
 # The smallest viewport (CSS px, both sides) the lowest zoom is sized for.
 # Phones are at least 320 px wide; a larger viewport only raises the zoom.
 VIEWER_MIN_VIEWPORT_PX = 320
-# GLO-90 cells the low-zoom ring may add: this many times the GLO-30 cells
-# under the region, but never fewer than LOWZOOM_MIN_CELLS.
+# Cells the low-zoom mosaic may span: this many times the cells under the
+# region's z10 tiles, but never fewer than LOWZOOM_MIN_CELLS (see above).
 LOWZOOM_CELL_BUDGET = 3
 LOWZOOM_MIN_CELLS = 64
 
@@ -402,15 +407,28 @@ def viewer_min_map_zoom(bbox, viewport_px=VIEWER_MIN_VIEWPORT_PX):
 def terrain_min_zoom(bbox, max_zoom, low_zoom_world_vrt=None):
     """Lowest terrain zoom to make for `bbox` (0 with a world DEM).
 
-    The viewer's hillshade reads 256-px DEM tiles one zoom above the map's
-    (at map zoom m it loads tiles at m + 1), and 3D terrain one below that,
-    at m. One more level is kept for the far side of a tilted view, which
-    MapLibre draws from coarser tiles."""
+    At map zoom m (MapLibre's 512-px zoom) the hillshade reads the 256-px
+    DEM tiles at about m + 1. 3D terrain reads coarser ones: MapLibre's
+    terrain uses a deltaZoom of 1, so it asks for tiles one level below the
+    tiles it draws, and the far side of a tilted view is drawn from coarser
+    tiles again. floor(m) - 2 covers both; measured, a 320x440 view of
+    Monaco fully zoomed out and tilted still reads real elevation."""
     import math
-    if low_zoom_world_vrt and os.path.isfile(low_zoom_world_vrt):
+    if low_zoom_world_vrt:
+        _require_world_dem(low_zoom_world_vrt)
         return 0
-    z = math.floor(viewer_min_map_zoom(bbox)) - 1
+    z = math.floor(viewer_min_map_zoom(bbox)) - 2
     return max(0, min(max_zoom, z))
+
+
+def _require_world_dem(path):
+    """A world DEM that was asked for must exist: falling back to the fresh
+    layout without a word would change a production build's tiles."""
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"--low-zoom-world-vrt {path} is not a file")
+
+
+_MERC_MAX_LAT = 85.0511
 
 
 def _tiles_footprint(bbox, z):
@@ -418,13 +436,17 @@ def _tiles_footprint(bbox, z):
     `bbox`, widened by the rasteriser's 2-px halo and a few source pixels."""
     import mercantile
     minlon, minlat, maxlon, maxlat = bbox
+    # Web Mercator ends at +-85.0511: a box reaching a pole would otherwise
+    # ask mercantile for a tile at infinity.
+    minlat = min(max(minlat, -_MERC_MAX_LAT), _MERC_MAX_LAT)
+    maxlat = min(max(maxlat, -_MERC_MAX_LAT), _MERC_MAX_LAT)
     ul = mercantile.tile(minlon, maxlat, z)
-    lr = mercantile.tile(min(maxlon, 180.0 - 1e-9), max(minlat, -85.0511), z)
+    lr = mercantile.tile(min(maxlon, 180.0 - 1e-9), minlat, z)
     west, north = mercantile.bounds(ul).west, mercantile.bounds(ul).north
     east, south = mercantile.bounds(lr).east, mercantile.bounds(lr).south
     pad = 3.0 * (360.0 / (1 << z)) / 256.0 + 0.001
-    return (max(west - pad, -180.0), max(south - pad, -90.0),
-            min(east + pad, 180.0), min(north + pad, 90.0))
+    return (max(west - pad, -180.0), max(south - pad, -_MERC_MAX_LAT),
+            min(east + pad, 180.0), min(north + pad, _MERC_MAX_LAT))
 
 
 def _cells(box):
@@ -448,8 +470,9 @@ class TerrainPlan:
         import math
         self.bbox = tuple(float(v) for v in bbox)
         self.max_zoom = max_zoom
-        self.world_vrt = (low_zoom_world_vrt if low_zoom_world_vrt
-                          and os.path.isfile(low_zoom_world_vrt) else None)
+        if low_zoom_world_vrt:
+            _require_world_dem(low_zoom_world_vrt)
+        self.world_vrt = low_zoom_world_vrt or None
         if min_zoom is None:
             min_zoom = terrain_min_zoom(self.bbox, max_zoom, self.world_vrt)
         self.min_zoom = min_zoom
@@ -525,6 +548,28 @@ def _cell_name(lat, lon):
     return ns, abs(lat), ew, abs(lon)
 
 
+# Seconds a DEM request may wait to connect or between two reads (it was
+# 120: a dead route then took 12 minutes per cell before failing).
+DEM_HTTP_TIMEOUT_S = 30.0
+# Wall-clock budget for all of a fresh build's DEM downloads, in seconds
+# (TERRAIN_DOWNLOAD_BUDGET_S overrides it; 0 = none). Switzerland's 815 MB
+# is 14 minutes at 1 MB/s. Builds with a world DEM have no budget by
+# default: the production host fetches whole continents.
+DEM_DOWNLOAD_BUDGET_S = 1800.0
+
+
+class DemDownloadError(RuntimeError):
+    """The DEM could not be fetched; the message says how to build without."""
+
+
+def _dem_failure(what):
+    return DemDownloadError(
+        f"Terrain: {what}. Refusing to rasterise the missing DEM as 0 m. Re-run "
+        "the build when the Copernicus buckets on S3 are reachable, or build "
+        "without terrain: --no-terrain (the \"No terrain\" recipe option on "
+        "Zimfarm).")
+
+
 class _DemStats:
     """What the DEM step fetched, for the build log (and docs/zimfarm.md)."""
 
@@ -533,6 +578,10 @@ class _DemStats:
         self.bytes = {"GLO-30": 0, "GLO-90": 0}
         self.cached = 0
         self.sea = 0
+        self.deadline = None        # time.monotonic() past which to give up
+
+    def out_of_time(self):
+        return self.deadline is not None and time.monotonic() > self.deadline
 
     def summary(self):
         mb = sum(self.bytes.values()) / 1e6
@@ -551,13 +600,16 @@ def _download_dem(sources, fpath, stats):
         req = urllib.request.Request(try_url, headers={"User-Agent": "streetzim/1.0"})
         print(f"    Downloading {os.path.basename(fpath)} ({label})...")
         for attempt in range(1, 4):
+            if stats.out_of_time():
+                return "failed"
             # Download to a temp file and rename only when the body is
             # complete + looks like a TIFF. Writing in place left a
             # truncated .tif (> 1000 bytes passes every size check) that
             # gdalbuildvrt then used.
             tmp_path = fpath + ".part"
             try:
-                with urllib.request.urlopen(req, timeout=120) as resp:
+                with urllib.request.urlopen(req, timeout=float(os.environ.get(
+                        "TERRAIN_HTTP_TIMEOUT_S", DEM_HTTP_TIMEOUT_S))) as resp:
                     with open(tmp_path, "wb") as f:
                         while True:
                             chunk = resp.read(1024 * 1024)
@@ -670,17 +722,33 @@ def _glo90_path(dem_dir, lat, lon):
 def fetch_plan_dems(plan, dem_dir, stats=None):
     """Download (or find cached) every DEM cell of `plan`.
 
-    Returns (glo30 paths, low-zoom paths). Raises when a cell failed for a
-    reason other than a 404: rasterising it as 0 m and writing the
-    COMPLETED marker would make the "retry" never happen."""
+    Returns (glo30 paths, low-zoom paths). Raises DemDownloadError at the
+    first cell that every source failed for a reason other than a 404
+    (rasterising it as 0 m and writing the COMPLETED marker would make the
+    "retry" never happen), and when the download budget runs out: a task
+    whose route to S3 is broken fails in minutes, not hours."""
     stats = stats or _DemStats()
-    transient = []
+    budget = float(os.environ.get("TERRAIN_DOWNLOAD_BUDGET_S",
+                                  DEM_DOWNLOAD_BUDGET_S if plan.fresh else 0) or 0)
+    if budget > 0:
+        stats.deadline = time.monotonic() + budget
+
+    def check(got, path):
+        if got == "failed":
+            raise _dem_failure(
+                f"{os.path.basename(path)} could not be downloaded"
+                + (f" within the {budget:.0f} s download budget "
+                   "(TERRAIN_DOWNLOAD_BUDGET_S)" if stats.out_of_time() else ""))
+        if stats.out_of_time():
+            raise _dem_failure(f"the DEM download took longer than its {budget:.0f} s "
+                               "budget (TERRAIN_DOWNLOAD_BUDGET_S)")
+        return got
+
     glo30 = {}
     for lat, lon in plan.glo30_cells:
-        got = _resolve_cell(_glo30_path(dem_dir, lat, lon), _glo30_sources(lat, lon), stats)
-        if got == "failed":
-            transient.append(os.path.basename(_glo30_path(dem_dir, lat, lon)))
-        elif got:
+        path = _glo30_path(dem_dir, lat, lon)
+        got = check(_resolve_cell(path, _glo30_sources(lat, lon), stats), path)
+        if got:
             glo30[(lat, lon)] = got
     low = []
     for lat, lon in plan.low_cells:
@@ -688,7 +756,7 @@ def fetch_plan_dems(plan, dem_dir, stats=None):
             low.append(glo30[(lat, lon)])
             continue
         if (lat, lon) in plan.glo30_cells:
-            continue                           # sea (or failed, reported above)
+            continue                           # sea
         p30 = _glo30_path(dem_dir, lat, lon)
         if _dem_tif_is_usable(p30):            # fetched for another region
             stats.cached += 1
@@ -699,17 +767,10 @@ def fetch_plan_dems(plan, dem_dir, stats=None):
             continue
         ns, alat, ew, alon = _cell_name(lat, lon)
         url = COPERNICUS_DEM_URL_GLO90.format(ns=ns, lat=alat, ew=ew, lon=alon)
-        got = _resolve_cell(_glo90_path(dem_dir, lat, lon), [(url, "GLO-90")], stats)
-        if got == "failed":
-            transient.append(os.path.basename(_glo90_path(dem_dir, lat, lon)))
-        elif got:
+        p90 = _glo90_path(dem_dir, lat, lon)
+        got = check(_resolve_cell(p90, [(url, "GLO-90")], stats), p90)
+        if got:
             low.append(got)
-    if transient:
-        raise RuntimeError(
-            f"{len(transient)} DEM cell(s) could not be downloaded "
-            f"this run ({', '.join(transient[:8])}"
-            f"{'…' if len(transient) > 8 else ''}); refusing to "
-            f"rasterise them as 0 m and cache the result. Re-run the build.")
     print(f"    {stats.summary()}", flush=True)
     return [glo30[c] for c in plan.glo30_cells if c in glo30], low
 
@@ -969,7 +1030,7 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
             n = 2 ** z
             x_min = int((minlon + 180) / 360 * n)
             x_max = int((maxlon + 180) / 360 * n)
-            y_min = int((1 - math.log(math.tan(math.radians(maxlat)) + 1/math.cos(math.radians(maxlat))) / math.pi) / 2 * n)
+            y_min = int((1 - math.log(math.tan(math.radians(min(maxlat, 85.0511))) + 1/math.cos(math.radians(min(maxlat, 85.0511)))) / math.pi) / 2 * n)
             y_max = int((1 - math.log(math.tan(math.radians(max(minlat, -85))) + 1/math.cos(math.radians(max(minlat, -85)))) / math.pi) / 2 * n)
             total_at_z = (x_max - x_min + 1) * (y_max - y_min + 1)
 
@@ -1035,11 +1096,13 @@ def _decode_terrain(path):
 
 
 # Pixel rows/columns sampled per tile, and what counts as land the tile lost:
-# the DEM reads above LAND_M where the tile says exactly 0 m, at MIN_MISSES
-# or more of the 25 points. 50 m and 3 points keep coastlines out: a tile
-# pixel averages a neighbourhood, so a single coastal point can disagree.
+# the DEM reads more than LAND_M from 0 (above, or below sea level like the
+# Caspian's -28 m) where the tile says exactly 0 m, at MIN_MISSES or more of
+# the 25 points. The tile is quantised to 10 m, so anything within 5 m of 0
+# legitimately reads 0; 15 m leaves 10 m for resampling, and 3 points keep
+# single coastal points out (a tile pixel averages a neighbourhood).
 _AUDIT_PIXELS = (25, 76, 128, 179, 230)
-_AUDIT_LAND_M = 50.0
+_AUDIT_LAND_M = 15.0
 _AUDIT_MIN_MISSES = 3
 
 
@@ -1070,7 +1133,7 @@ def tile_lost_land(path, t, dem):
     samples = dem.sample([(p.lng, p.lat) for p in pts], indexes=1)
     pixels = [(py, px) for py in _AUDIT_PIXELS for px in _AUDIT_PIXELS]
     lost = sum(1 for (py, px), v in zip(pixels, samples)
-               if len(v) and float(v[0]) > _AUDIT_LAND_M
+               if len(v) and abs(float(v[0])) > _AUDIT_LAND_M
                and abs(float(elev[py, px])) < 0.05)
     return lost >= _AUDIT_MIN_MISSES
 
@@ -1092,11 +1155,48 @@ def _blank_over_land(path, t, dem):
     return land >= 6
 
 
+def _cell_resolved(dem_dir, lat, lon, low):
+    """The cell was fetched (GLO-30, or GLO-90 when `low`) or is known sea
+    (a 404 from every source)."""
+    paths = [_glo30_path(dem_dir, lat, lon)] + ([_glo90_path(dem_dir, lat, lon)] if low else [])
+    return any(_dem_tif_is_usable(p) or os.path.exists(p + ".nodata") for p in paths)
+
+
+def missing_dem_cells(plan, dem_dir, t, z, _seen=None):
+    """1-degree cells under tile `t` that should be on disk but are not.
+
+    Independent of the plan's cell lists: it asks the disk about every cell
+    the tile's square touches. Zooms below a capped low-zoom mosaic
+    (plan.low_zoom) only need the part of their square the mosaic covers."""
+    import mercantile
+    b = mercantile.bounds(t)
+    box = (b.west, b.south, b.east, b.north)
+    low = z <= LOWRES_MAX_ZOOM and plan.low_zoom is not None
+    if low and z < plan.low_zoom:
+        f = _tiles_footprint(plan.bbox, plan.low_zoom)
+        box = (max(box[0], f[0]), max(box[1], f[1]), min(box[2], f[2]), min(box[3], f[3]))
+        if box[0] >= box[2] or box[1] >= box[3]:
+            return []
+    seen = {} if _seen is None else _seen
+    out = []
+    for lat, lon in _cells(box):
+        key = (lat, lon, low)
+        if key not in seen:
+            seen[key] = _cell_resolved(dem_dir, lat, lon, low)
+        if not seen[key]:
+            out.append((lat, lon))
+    return out
+
+
 def audit_terrain(plan, dest_dir):
     """Repair and check every tile of a fresh plan (no world DEM).
 
-    Each tile is checked against the mosaic it was made from, so the check
-    holds without tolerances: nothing is 0 m where that mosaic has land.
+    Two checks that do not trust each other: every 1-degree cell under every
+    tile's square must be on disk or known sea (missing_dem_cells, asked of
+    the disk, not of the plan), and z <= LOWRES_MAX_ZOOM and bbox-edge tiles
+    are compared with the low-zoom (resp. GLO-30) mosaic at 25 points, chosen
+    here by zoom and not by the generator's vrt_for_zoom: nothing may be 0 m
+    where the mosaic has land or sea floor below sea level.
     Missing tiles are made first; a tile still wrong after that fails the
     build (TERRAIN_BLANK_TOLERATE=N, the operator's escape hatch for DEM
     gaps, still applies)."""
@@ -1126,12 +1226,19 @@ def audit_terrain(plan, dest_dir):
     broken = []
     checked = 0
     handles = {}
+    seen = {}
+    dem_dir = dem_sources_dir()
     try:
         for z in plan.zooms():
-            vrt = plan.vrt_for_zoom(z, glo30_vrt, low_vrt)
+            vrt = (low_vrt if z <= LOWRES_MAX_ZOOM and low_vrt else glo30_vrt or low_vrt)
             dem = handles.get(vrt) or handles.setdefault(vrt, rasterio.open(vrt))
             for t in mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z):
                 fp = os.path.join(dest_dir, str(z), str(t.x), f"{t.y}.webp")
+                gone = missing_dem_cells(plan, dem_dir, t, z, seen)
+                if gone:
+                    broken.append((z, t.x, t.y, "DEM cell(s) not fetched: "
+                                   + ", ".join(f"{la},{lo}" for la, lo in gone[:3])))
+                    continue
                 if not os.path.isfile(fp):
                     broken.append((z, t.x, t.y, "missing"))
                     continue
@@ -1152,8 +1259,8 @@ def audit_terrain(plan, dest_dir):
         for h in handles.values():
             h.close()
     if not broken:
-        print(f"    Terrain audit passed — every tile matches its DEM "
-              f"({checked} low-zoom/edge tiles sampled in full)")
+        print(f"    Terrain audit passed — every tile's DEM cells are on disk, and "
+              f"{checked} low-zoom/edge tiles match their mosaic at 25 points")
         return
     tolerate = int(os.environ.get("TERRAIN_BLANK_TOLERATE", "0") or 0)
     sample = "\n  ".join(f"z={z} x={x} y={y} ({why})" for z, x, y, why in broken[:5])
@@ -1163,6 +1270,7 @@ def audit_terrain(plan, dest_dir):
         return
     raise RuntimeError(
         f"Terrain build unhealthy: {len(broken)} tile(s) wrong after the repair "
-        f"pass. Sample:\n  {sample}\nThe DEM mosaic has land where these tiles "
-        "read 0 m. Delete them and rerun, or set TERRAIN_BLANK_TOLERATE=N to "
-        f"accept up to N (currently {tolerate}). Aborting.")
+        f"pass. Sample:\n  {sample}\nEither a DEM cell under them was never "
+        "fetched, or the DEM has land where they read 0 m. Delete them and "
+        f"rerun, or set TERRAIN_BLANK_TOLERATE=N to accept up to N (currently "
+        f"{tolerate}). Aborting.")

@@ -74,7 +74,14 @@ ARGS=(
     --keep-temp
     --output "$OUT_RAW"
 )
-[ -f "$LOWZ" ]   && ARGS+=( --low-zoom-world-vrt "$LOWZ" )
+# Terrain is always on here: without the world DEM the builder would
+# switch to its fresh-machine layout (streetzim/terrain.py). Refuse instead.
+if [ -f "$LOWZ" ]; then
+    ARGS+=( --low-zoom-world-vrt "$LOWZ" )
+else
+    echo "FATAL: world DEM $LOWZ is missing" >&2
+    exit 1
+fi
 [ -f "$ADDR" ]   && ARGS+=( --overture-addresses "$ADDR" )
 [ -f "$PLACES" ] && ARGS+=( --overture-places "$PLACES" )
 

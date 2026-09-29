@@ -124,8 +124,13 @@ fi
 # ------------------------------------------------------------------
 vrt32k="terrain_cache/dem_sources/world_dem_32k.tif"
 LOW_ZOOM_VRT_ARG=()
+# Terrain is always on here: without the world DEM the builder would
+# switch to its fresh-machine layout (streetzim/terrain.py). Refuse instead.
 if [ -s "$vrt32k" ]; then
     LOW_ZOOM_VRT_ARG=(--low-zoom-world-vrt "$vrt32k")
+else
+    echo "[FATAL] world DEM $vrt32k is missing or empty"
+    exit 1
 fi
 
 # URL liveness cache (commit c950da8 — drop POIs with dead websites).
