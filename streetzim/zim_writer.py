@@ -5,6 +5,7 @@ import gzip
 import html as html_mod
 import json
 import os
+import tempfile
 import time
 import urllib.parse
 from pathlib import Path
@@ -570,7 +571,13 @@ def create_zim(
     creator.config_nbworkers(num_workers)
     creator.set_mainpath("index.html")
     has_wikidata = bool(wikidata_data)      # as map-config's hasWikidata
-    with creator:
+    # The search chunk files (GBs for a country; with --xapian builder, also
+    # the Xapian databases, which libzim reads only as the creator closes).
+    # Entered before the creator, so it is removed after the creator has
+    # closed, after a failure as well: it used to be left behind in the
+    # system temp dir whenever a build failed or used --xapian builder.
+    with tempfile.TemporaryDirectory(prefix="streetzim_chunks_", dir=xapian_workdir,
+                                     ignore_cleanup_errors=True) as chunk_tmp, creator:
         _add_viewer(creator, MapItem, maplibre_js_path=maplibre_js_path,
                     maplibre_css_path=maplibre_css_path,
                     viewer_html_path=viewer_html_path, map_config=map_config,
@@ -626,7 +633,7 @@ def create_zim(
                     overture_sources=overture_sources,
                     overture_themes=overture_themes, xapian_mode=xapian_mode,
                     xapianbuilder_bin=xapianbuilder_bin,
-                    xapian_workdir=xapian_workdir)
+                    xapian_workdir=xapian_workdir, chunk_tmp=chunk_tmp)
         print("    Finalizing ZIM (ZSTD compression + Xapian indexing)...", flush=True)
         finalize_start = time.time()
 
@@ -665,9 +672,10 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                 split_hot_search_chunks_mb, split_find_chips, no_llm_bundle,
                 map_config, name, bbox, routing_graph_path, address_count,
                 overture_sources, overture_themes, xapian_mode,
-                xapianbuilder_bin, xapian_workdir):
+                xapianbuilder_bin, xapian_workdir, chunk_tmp):
     """Search data: JSON chunks, category index, chips, streetzim-meta.json,
-    overture-sources.json and the Kiwix full-text pages."""
+    overture-sources.json and the Kiwix full-text pages. The chunk files go
+    to `chunk_tmp`, which create_zim removes after the creator has closed."""
 
     # Build location index for search feature enrichment
     loc_lookup = None
@@ -680,7 +688,8 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
         b = _search_bucket(search_features_path=search_features_path,
                            wikidata_data=wikidata_data,
                            wiki_cross_refs=wiki_cross_refs,
-                           loc_lookup=loc_lookup, _bundled_set=_bundled_set)
+                           loc_lookup=loc_lookup, _bundled_set=_bundled_set,
+                           chunk_tmp=chunk_tmp)
         _search_emit_chunks(creator, MapItem,
                             split_hot_search_chunks_mb=split_hot_search_chunks_mb,
                             chunk_tmp=b.chunk_tmp, chunk_counts=b.chunk_counts,
@@ -706,12 +715,6 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                              chunk_tmp=b.chunk_tmp, xapian_path=b.xapian_path,
                              total_features=b.total_features,
                              xapian_count=b.xapian_count)
-
-        # Clean up chunk temp dir
-        try:
-            os.rmdir(b.chunk_tmp)
-        except OSError:
-            pass
 
     elif search_features:
         _add_search_in_memory(creator, MapItem, search_features=search_features,
@@ -1512,11 +1515,9 @@ def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_ch
                  + (f" + {routing_graph_chunk_mb} MB chunks" if routing_graph_chunk_mb else ""))
 
 
-def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set):
+def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp):
     """Search pass 1: stream the search JSONL into per-prefix and per-category
-    chunk files on disk, plus the Xapian candidates file."""
-    import tempfile
-    chunk_tmp = tempfile.mkdtemp(prefix="streetzim_chunks_")
+    chunk files in `chunk_tmp`, plus the Xapian candidates file."""
     xapian_types = {"place", "airport", "park", "peak", "water"}
 
     # Pass 1: stream JSONL -> per-prefix chunk files + xapian file
