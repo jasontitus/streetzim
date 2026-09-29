@@ -93,8 +93,6 @@ from streetzim.common import (  # noqa: F401
     SATELLITE_TILE_URL,
     COPERNICUS_DEM_URL,
     COPERNICUS_DEM_URL_GLO90,
-    MAPLIBRE_VERSION,
-    MAPLIBRE_CDN,
     download_file,
     _SEARCH_COORD_DP,
     parse_bbox,
@@ -113,7 +111,7 @@ from streetzim.tiles import (  # noqa: F401
     iter_tiles_from_mbtiles,
     extract_tiles_from_mbtiles,
     generate_sdf_font_glyphs,
-    download_maplibre,
+    vendored_maplibre,
 )
 from streetzim.satellite import (  # noqa: F401
     download_satellite_tiles,
@@ -1374,14 +1372,11 @@ def _verify_terrain(*, args, bbox_str, include_terrain, terrain_dir, terrain_max
 
 
 def _download_maplibre(*, tmpdir, total_steps):
-    """MapLibre GL JS and CSS."""
-    # Download MapLibre GL JS
+    """MapLibre GL JS and CSS: the vendored copy, checked against the lock file."""
     step_maplibre = total_steps - 1
     print()
-    print(f"[{step_maplibre}/{total_steps}] Downloading MapLibre GL JS...")
-    maplibre_dir = os.path.join(tmpdir, "maplibre")
-    os.makedirs(maplibre_dir, exist_ok=True)
-    maplibre_js, maplibre_css = download_maplibre(maplibre_dir)
+    print(f"[{step_maplibre}/{total_steps}] Checking MapLibre GL JS...")
+    maplibre_js, maplibre_css = vendored_maplibre()
     return maplibre_css, maplibre_js
 
 

@@ -7,7 +7,9 @@
 #       create_osm_zim.py --area monaco --routing -o /output/osm-monaco.zim
 #
 # The image fetches nothing at run time except what a build needs (OSM
-# extract, fonts, MapLibre). The coastline / Natural Earth shapefiles
+# extract, DEM, Wikidata). MapLibre is vendored and the font glyphs are
+# fetched and checked against their pinned sha256s when the image is built
+# (docs/viewer-supply-chain.md). The coastline / Natural Earth shapefiles
 # (~900 MB) are not baked in; fetch them once into the output volume, which
 # is also the working directory tilemaker reads them from:
 #   docker run --rm -v "$PWD/out:/output" streetzim scripts/fetch-shapefiles.sh /output
@@ -44,6 +46,9 @@ ENV PATH=/venv/bin:$PATH
 COPY . /app
 # The `streetzim` command (openZIM-style flags; see offliner-definition.json).
 RUN /venv/bin/pip install --no-cache-dir --no-deps -e /app && mkdir -p /output
+# The pinned glyph ranges, verified, where the builder looks after its cache.
+RUN python tools/pin_viewer_assets.py --check \
+    && python tools/pin_viewer_assets.py --prefetch /app/viewer-assets
 WORKDIR /output
 # Download caches (satellite, DEM, Wikidata, Wikipedia) go to the mounted
 # volume, so they survive `docker run --rm` and work with a non-root --user.

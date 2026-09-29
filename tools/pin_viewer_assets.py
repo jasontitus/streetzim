@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""Pin, check and prefetch the viewer's third-party files
+(resources/viewer-assets.lock.json; docs/viewer-supply-chain.md).
+
+    python tools/pin_viewer_assets.py --check              # offline; CI runs it
+    python tools/pin_viewer_assets.py --maplibre 5.24.0    # vendor another MapLibre
+    python tools/pin_viewer_assets.py --fonts              # re-pin the glyph ranges
+    python tools/pin_viewer_assets.py --prefetch DIR       # fill a cache (Docker image)
+
+--maplibre downloads the npm tarball, checks it against the sha512 the npm
+registry publishes for that version, and writes dist/maplibre-gl.js,
+dist/maplibre-gl.css and LICENSE.txt to resources/vendor/maplibre-gl/ with
+their SHA-256s in the lock file. --fonts downloads every range of every
+fontstack from the font CDN and records its SHA-256 (null for a range the
+CDN answers 404), printing how many changed. Review the diff and commit
+both. --prefetch downloads every pinned range, checks it, and stores it in
+DIR as the builder's cache (streetzim/viewer_assets.py) expects, so builds
+that use DIR need no network for fonts.
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import io
+import json
+import sys
+import tarfile
+import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from streetzim import viewer_assets as va  # noqa: E402
+
+NPM_REGISTRY = "https://registry.npmjs.org"
+# npm tarball member -> vendored file name
+MAPLIBRE_FILES = {
+    "package/dist/maplibre-gl.js": "maplibre-gl.js",
+    "package/dist/maplibre-gl.css": "maplibre-gl.css",
+    "package/LICENSE.txt": "LICENSE.txt",
+}
+DEFAULT_FONTS: dict[str, Any] = {
+    "base_url": "https://fonts.openmaptiles.org",
+    "licence": "Open Sans, as served by openmaptiles/fonts; see "
+               "https://github.com/openmaptiles/fonts",
+    # our name (style + ZIM path, no spaces) -> CDN fontstack name
+    "fontstacks": {
+        "OpenSansRegular": "Open Sans Regular",
+        "OpenSansBold": "Open Sans Bold",
+        "OpenSansItalic": "Open Sans Italic",
+    },
+}
+RANGES = [f"{s}-{s + 255}" for s in range(0, 65536, 256)]
+
+
+def write_lock(lock: dict[str, Any], path: Path = va.LOCK) -> None:
+    lock["_comment"] = ("Written by tools/pin_viewer_assets.py; see "
+                        "docs/viewer-supply-chain.md. Do not edit by hand.")
+    ordered = {"_comment": lock["_comment"]}
+    ordered.update((k, v) for k, v in lock.items() if k != "_comment")
+    path.write_text(json.dumps(ordered, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def read_lock_or_empty() -> dict[str, Any]:
+    return va.load_lock() if va.LOCK.exists() else {}
+
+
+def check_npm_integrity(data: bytes, integrity: str) -> None:
+    algo, _, b64 = integrity.partition("-")
+    if algo != "sha512":
+        raise SystemExit(f"unexpected npm integrity algorithm: {integrity}")
+    got = base64.b64encode(hashlib.sha512(data).digest()).decode()
+    if got != b64:
+        raise SystemExit(f"npm tarball sha512 {got} != registry's {b64}")
+
+
+def pin_maplibre(version: str) -> None:
+    meta = json.loads(va.fetch(f"{NPM_REGISTRY}/maplibre-gl/{version}"))
+    tarball_url: str = meta["dist"]["tarball"]
+    integrity: str = meta["dist"]["integrity"]
+    tgz = va.fetch(tarball_url)
+    check_npm_integrity(tgz, integrity)
+    out_dir = va.VENDOR / "maplibre-gl"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    files: dict[str, str] = {}
+    with tarfile.open(fileobj=io.BytesIO(tgz), mode="r:gz") as tar:
+        for member, name in MAPLIBRE_FILES.items():
+            f = tar.extractfile(member)
+            if f is None:
+                raise SystemExit(f"{member} not in {tarball_url}")
+            data = f.read()
+            (out_dir / name).write_bytes(data)
+            files[name] = va.sha256_hex(data)
+            print(f"  {name}: {len(data):,} bytes, sha256 {files[name]}")
+    lock = read_lock_or_empty()
+    lock["maplibre-gl"] = {
+        "version": version,
+        "licence": "BSD-3-Clause (LICENSE.txt)",
+        "tarball": tarball_url,
+        "integrity": integrity,
+        "files": files,
+    }
+    write_lock(lock)
+    print(f"vendored maplibre-gl {version} in {out_dir.relative_to(ROOT)}; "
+          f"run scripts/sync-drive-viewer.sh for the website copy")
+
+
+def pin_fonts() -> None:
+    lock = read_lock_or_empty()
+    old = lock.get("fonts", {})
+    fonts: dict[str, Any] = {k: old.get(k, v) for k, v in DEFAULT_FONTS.items()}
+    ranges: dict[str, dict[str, str | None]] = {}
+    fonts["ranges"] = ranges
+    tasks = [(stack, cdn, r) for stack, cdn in fonts["fontstacks"].items() for r in RANGES]
+
+    def one(task: tuple[str, str, str]) -> tuple[str, str, str | None]:
+        stack, cdn, r = task
+        url = f"{fonts['base_url'].rstrip('/')}/{urllib.parse.quote(cdn)}/{r}.pbf"
+        try:
+            return stack, r, va.sha256_hex(va.fetch(url))
+        except va.DownloadError as e:
+            if str(e).endswith("HTTP 404"):
+                return stack, r, None
+            raise SystemExit(f"not pinning fonts: {e}") from None
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        results = list(pool.map(one, tasks))
+    changed = 0
+    for stack, r, digest in results:
+        ranges.setdefault(stack, {})[r] = digest
+        if old.get("ranges", {}).get(stack, {}).get(r, "?") != digest:
+            changed += 1
+    lock["fonts"] = fonts
+    write_lock(lock)
+    empty = sum(1 for *_, d in results if d is None)
+    print(f"pinned {len(results)} glyph ranges ({empty} absent on the CDN); "
+          f"{changed} differ from the previous lock file")
+
+
+def prefetch(dest: Path) -> None:
+    ranges = [fr for fr in va.font_ranges() if fr.sha256]
+
+    def one(fr: va.FontRange) -> None:
+        assert fr.sha256
+        path = va.cache_path(dest, fr.sha256)
+        if path.is_file() and va.sha256_hex(path.read_bytes()) == fr.sha256:
+            return
+        data = va.fetch(fr.url)
+        got = va.sha256_hex(data)
+        if got != fr.sha256:
+            raise va.IntegrityError(f"{fr.url}: sha256 {got}, lock file says {fr.sha256}")
+        va.store(fr.sha256, data, root=dest)
+        if not path.is_file():
+            raise SystemExit(f"could not write {path}")
+
+    try:
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            list(pool.map(one, ranges))
+    except (va.IntegrityError, va.DownloadError) as e:
+        raise SystemExit(f"prefetch failed: {e}") from None
+    print(f"ok: {len(ranges)} verified glyph ranges in {dest}")
+
+
+def check() -> None:
+    lock = va.load_lock()
+    va.vendored_maplibre(lock)
+    ranges = va.font_ranges(lock)
+    stacks = lock["fonts"]["fontstacks"]
+    for stack in stacks:
+        if list(lock["fonts"]["ranges"].get(stack, {})) != RANGES:
+            raise SystemExit(f"lock file: fontstack {stack} does not list all {len(RANGES)} ranges")
+    bad = [fr for fr in ranges if fr.sha256 is not None and
+           (len(fr.sha256) != 64 or any(c not in "0123456789abcdef" for c in fr.sha256))]
+    if bad:
+        raise SystemExit(f"lock file: malformed sha256 for {bad[0].stack}/{bad[0].range_key}")
+    print(f"ok: maplibre-gl {lock['maplibre-gl']['version']} matches the lock file; "
+          f"{len(ranges)} glyph ranges pinned")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=next(iter((__doc__ or "").splitlines()), ""))
+    g = ap.add_mutually_exclusive_group(required=True)
+    g.add_argument("--check", action="store_true", help="verify vendored files (offline)")
+    g.add_argument("--maplibre", metavar="VERSION", help="vendor this MapLibre GL JS version")
+    g.add_argument("--fonts", action="store_true", help="re-pin every glyph range from the CDN")
+    g.add_argument("--prefetch", metavar="DIR", type=Path,
+                   help="download the pinned glyph ranges into this cache directory")
+    args = ap.parse_args()
+    try:
+        if args.check:
+            check()
+        elif args.maplibre:
+            pin_maplibre(args.maplibre)
+        elif args.fonts:
+            pin_fonts()
+        else:
+            prefetch(args.prefetch)
+    except va.IntegrityError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

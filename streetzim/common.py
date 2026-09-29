@@ -327,9 +327,8 @@ COPERNICUS_DEM_URL_GLO90 = (
     "Copernicus_DSM_COG_30_{ns}{lat:02d}_00_{ew}{lon:03d}_00_DEM.tif"
 )
 
-# MapLibre GL JS version to bundle
-MAPLIBRE_VERSION = "5.23.0"
-MAPLIBRE_CDN = f"https://unpkg.com/maplibre-gl@{MAPLIBRE_VERSION}/dist"
+# MapLibre GL JS is vendored in resources/vendor/maplibre-gl/, its version
+# and hashes in resources/viewer-assets.lock.json (streetzim/viewer_assets.py).
 
 
 def download_file(url, dest, desc=None):

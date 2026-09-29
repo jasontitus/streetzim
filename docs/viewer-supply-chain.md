@@ -1,0 +1,115 @@
+# Viewer supply chain: pinned assets, ESLint, and why no bundler
+
+openZIM's review asked for three things about the viewer: third-party files
+that are checked rather than fetched blind, a linter, and "a proper front-end
+build". This note records what was done and why.
+
+## 1. Pinned third-party files
+
+Every ZIM ships MapLibre GL JS (`maplibre-gl.js`, `maplibre-gl.css`) and
+768 SDF glyph ranges (`fonts/<stack>/<start>-<end>.pbf`, 3 Open Sans
+fontstacks × 256 ranges, about 1.2 MB). Builds used to download both from
+unpkg and the openmaptiles font CDN each time, with no check on the bytes.
+
+Now `resources/viewer-assets.lock.json` records a SHA-256 for each file, and
+`streetzim/viewer_assets.py` enforces them:
+
+| | MapLibre GL JS | font glyphs |
+|---|---|---|
+| where the bytes come from | **vendored** in `resources/vendor/maplibre-gl/` (with its `LICENSE.txt`) | fetched from `fonts.openmaptiles.org` |
+| checked | on every build, against the lock file, before packing | on every download and every cache read |
+| provenance when pinned | the npm tarball, checked against the sha512 the npm registry publishes | the CDN's bytes at pin time (the same bytes earlier builds shipped) |
+| cache | not needed | content-addressed: `$STREETZIM_CACHE_DIR/viewer-assets/sha256/..` (the `streetzim` command sets it to `<--dl>/cache`), else `<repo>/viewer-assets/`, then `/app/viewer-assets/` baked into the Docker image |
+| on a mismatch | the build stops | the build stops; `STREETZIM_ALLOW_FONT_ERRORS=1` does **not** waive it |
+| when unreachable | n/a | 5 attempts per range, then the build stops unless `STREETZIM_ALLOW_FONT_ERRORS=1` (unchanged) |
+
+**Why vendor MapLibre but not the fonts.** MapLibre is BSD-3-Clause and two
+files; the repository already carried byte-identical copies in
+`web/drive/viewer/` for the PWA, so git stores the vendored copy as the same
+objects and it costs nothing. Vendoring removes the unpkg dependency outright.
+The fonts are 768 small binary files that change only if openmaptiles
+changes them; a 67 KB lock file of hashes is easier to review than 768
+committed blobs, the cache makes repeat and offline builds network-free, and
+the Docker image bakes them in (`--prefetch` at image build), so a Zimfarm
+task fetches no fonts at all.
+
+### Operating it
+
+```
+python tools/pin_viewer_assets.py --check            # offline: vendored files vs lock (CI)
+python tools/pin_viewer_assets.py --maplibre 5.24.0  # vendor another MapLibre from npm
+python tools/pin_viewer_assets.py --fonts            # re-pin every range from the CDN
+python tools/pin_viewer_assets.py --prefetch DIR     # fill a cache, e.g. <--dl>/cache/viewer-assets
+```
+
+After `--maplibre`, run `scripts/sync-drive-viewer.sh` (the PWA copy comes
+from the vendored files) and commit the vendor directory, the lock file and
+`web/drive/`. `--fonts` prints how many ranges changed; review that before
+committing.
+
+- **Offline builds.** MapLibre needs nothing. For the fonts, run
+  `--prefetch <dl>/cache/viewer-assets` once while online (or reuse a
+  `--dl` from an earlier build); later builds with that `--dl` do not touch
+  the network for them.
+- **The CDN changes a file.** Builds that need that range stop with the URL
+  and both hashes. Machines whose cache (or image) already holds the pinned
+  bytes keep building. To accept the change: `--fonts`, check the diff, commit.
+  The weekly CI run of the Monaco job is where such drift shows up first.
+- **Published ZIMs.** In-place viewer patching (`docs/viewer-slots.md`)
+  replaces only the three slot files, never `maplibre-gl.js`. A MapLibre bump
+  therefore reaches new builds only, and a viewer change must keep working
+  with the MapLibre that older ZIMs carry (5.23.0 at the time of writing).
+
+`tests/test_viewer_assets.py` and `tests/test_font_download.py` cover a
+tampered vendored file, a wrong hash, a CDN serving other bytes (fatal even
+with the escape hatch), a corrupt cache entry, and an offline second build.
+
+## 2. ESLint
+
+`npm run lint:viewer` (`tools/lint_viewer.mjs`, config `eslint.config.mjs`,
+versions pinned in `package.json`/`package-lock.json`) lints
+`routing-worker.js` and the inline scripts of `index.html` and
+`places.html`. The `index.html` parts are fragments (a function can open in
+one part and close in another), so the runner joins them as
+`tools/build_viewer.py` does, blanks everything outside `<script>` so line
+numbers are unchanged, lints the page as one program (its scripts share one
+global scope), and reports each finding against its part file. CI runs it
+in the `checks` job.
+
+The rules are `@eslint/js` recommended with three changes, each explained in
+the config: unused function arguments, caught errors and page-level globals
+are allowed; `no-redeclare` and `no-useless-assignment` are off (all 21 hits
+were legal `var` idioms, each checked). The first run found no undefined
+names, duplicate keys or unreachable code; its only real findings were six
+pieces of dead code (unused locals and two never-called helpers), removed.
+
+## 3. No bundler, on purpose
+
+Published ZIMs are updated by overwriting fixed-size, uncompressed slots in
+place (`docs/viewer-slots.md`, `cloud/viewer_slots.py`), and a ZIM can
+never gain an entry. So the viewer has to stay exactly three self-contained
+files (`index.html` ≤ 1 MB, `places.html` ≤ 256 KB, `routing-worker.js`
+≤ 128 KB, padding included) that work with whatever `maplibre-gl.js` the ZIM
+already has. `tools/build_viewer.py` meets that by concatenation with a
+byte-identity check. A bundler today would add risk (rewriting the code
+that every published ZIM and the PWA serve) and no capability the ZIM can
+use: no extra chunks, no hashed file names, no separate source maps.
+
+A bundler would be acceptable once it can guarantee all of the following:
+
+- it emits exactly those three files, everything inlined (no dynamic
+  `import()`, no code-split chunks, no external CSS or source maps), each
+  under its slot size with room for the slot marker;
+- the output is deterministic and committed, with a CI check that rebuilding
+  gives identical bytes, as `build_viewer.py --check` does now, so building a
+  ZIM (Zimfarm, the Docker image) still needs no Node;
+- the target stays what old Kiwix WebViews and iOS Safari run (no syntax
+  newer than the current code), and it is not minified by default, since
+  the tests read marked blocks of the viewer source
+  (`tests/chip_rules_js.test.mjs`, `tests/search_shards_js.test.mjs`);
+- the parts become real modules first: shared page globals, functions used
+  from inline handlers, and `initRouting` spanning parts 500–610 all need
+  explicit exports, which is a rewrite to review on its own.
+
+Until then ESLint gives the static checking a bundler's parse would, without
+touching the shipped bytes.

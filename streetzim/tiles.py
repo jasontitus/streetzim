@@ -1,13 +1,10 @@
 """OSM extract download, tilemaker, MBTiles readers, SDF fonts and the
-MapLibre download (moved verbatim from create_osm_zim.py, which re-exports
+vendored MapLibre (moved verbatim from create_osm_zim.py, which re-exports
 these names)."""
 import json
 import os
 import sqlite3
 import subprocess
-import time
-import urllib.error
-import urllib.request
 
 # The builder's flushing, phase-timing print (see streetzim/common.py).
 from streetzim.common import (
@@ -15,9 +12,9 @@ from streetzim.common import (
     TILEMAKER_CONFIG,
     TILEMAKER_PROCESS,
     GEOFABRIK_BASE,
-    MAPLIBRE_CDN,
     download_file,
 )
+from streetzim import viewer_assets
 
 
 def download_osm_extract(geofabrik_path, dest):
@@ -318,87 +315,64 @@ def extract_tiles_from_mbtiles(mbtiles_path, max_zoom=None):
     return tiles, metadata
 
 
-def generate_sdf_font_glyphs():
-    """Generate SDF font glyphs for MapLibre GL JS.
+def generate_sdf_font_glyphs(lock=None):
+    """SDF font glyphs for MapLibre GL JS, as pinned in the lock file.
 
-    MapLibre GL JS requires SDF (Signed Distance Field) font glyphs in
-    protocol buffer format. Each range covers 256 Unicode codepoints.
-    Downloads real SDF fonts from the openmaptiles font CDN.
+    MapLibre needs SDF (Signed Distance Field) glyphs in protocol-buffer
+    form, one file per 256 codepoints: fonts/{fontstack}/{start}-{end}.pbf.
+    Every BMP range of each fontstack comes from the openmaptiles font CDN
+    (so labels in all scripts render -- e.g. General Punctuation 8192-8447
+    for the en dash in "Paris-Dakar", Arabic 1536-1791), each checked
+    against its SHA-256 in resources/viewer-assets.lock.json and cached
+    (streetzim/viewer_assets.py). A range the lock records as absent is
+    skipped; MapLibre falls back to local rendering for it.
 
-    Downloads every BMP range the CDN serves so that labels across all
-    European scripts render correctly — in particular the General
-    Punctuation block (8192-8447, includes U+2013 en dash used in names
-    like "Paris-Dakar") and Arabic (1536-1791), which are required for
-    continental Europe builds. Ranges that 404 on the CDN are skipped;
-    MapLibre falls back to local rendering for missing ranges.
+    A range whose content does not match its hash stops the build, always.
+    One that cannot be downloaded after 5 attempts stops it too, unless
+    STREETZIM_ALLOW_FONT_ERRORS=1.
     """
-    print("  Downloading SDF font glyphs...")
+    print("  Downloading SDF font glyphs (pinned, verified)...")
     fonts = {}
+    # Our fontstack names have no spaces (URL-encoding differs between
+    # Kiwix implementations); the lock maps them to the CDN's names.
+    tasks = viewer_assets.font_ranges(lock)
 
-    # MapLibre expects: fonts/{fontstack}/{start}-{end}.pbf
-    # Use hyphenated names (no spaces) to avoid URL-encoding issues
-    # across different Kiwix implementations (kiwix-serve, Kiwix JS PWA, etc.)
-    #
-    # Map our style font names → openmaptiles CDN font names
-    font_map = {
-        "OpenSansRegular": "Open Sans Regular",
-        "OpenSansBold": "Open Sans Bold",
-        "OpenSansItalic": "Open Sans Italic",
-    }
-
-    font_cdn = "https://fonts.openmaptiles.org"
-
-    # Build the full list of (local_name, cdn_name, range_key) tasks so
-    # we can parallelize the downloads.
-    tasks = []
-    for local_name, cdn_name in font_map.items():
-        for start in range(0, 65536, 256):
-            range_key = f"{start}-{start + 255}"
-            tasks.append((local_name, cdn_name, range_key))
-
-    def fetch_one(task):
-        local_name, cdn_name, range_key = task
-        cdn_encoded = cdn_name.replace(" ", "%20")
-        url = f"{font_cdn}/{cdn_encoded}/{range_key}.pbf"
-        err = None
-        # Transient errors (timeouts, resets, 5xx) are retried: a range lost
-        # here ships as missing glyphs and those labels never render. Seen
-        # in 2 of 6 CI-sized builds: 1-9 of 768 ranges silently dropped.
-        for attempt in range(5):
-            try:
-                req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    return (local_name, range_key, resp.read(), None)
-            except urllib.error.HTTPError as e:
-                # 404 means this range has no glyphs in this font — skip it.
-                # MapLibre falls back to local rendering on 404.
-                if e.code == 404:
-                    return (local_name, range_key, None, "HTTP 404")
-                err = f"HTTP {e.code}"
-            except Exception as e:
-                err = str(e)
-            time.sleep(min(2 ** attempt, 10))
-        return (local_name, range_key, None, err)
+    def fetch_one(fr):
+        if fr.sha256 is None:
+            return (fr, None, "absent")
+        try:
+            return (fr, viewer_assets.fetch_verified(fr.url, fr.sha256), None)
+        except viewer_assets.IntegrityError as e:
+            return (fr, None, e)
+        except viewer_assets.DownloadError as e:
+            return (fr, None, str(e))
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
     skipped = 0
     failed = 0
+    mismatched = []
     with ThreadPoolExecutor(max_workers=16) as pool:
         futures = [pool.submit(fetch_one, t) for t in tasks]
         done = 0
         for fut in as_completed(futures):
-            local_name, range_key, data, err = fut.result()
+            fr, data, err = fut.result()
             done += 1
             if data is not None:
-                fonts[(local_name, range_key)] = data
-            elif err and err.startswith("HTTP 404"):
+                fonts[(fr.stack, fr.range_key)] = data
+            elif err == "absent":
                 skipped += 1
+            elif isinstance(err, viewer_assets.IntegrityError):
+                mismatched.append(str(err))
             else:
                 failed += 1
             if done % 100 == 0:
-                print(f"\r    Downloaded {len(fonts)} ranges ({done}/{len(tasks)} checked, {skipped} empty, {failed} errors)...", end="", flush=True)
+                print(f"\r    Got {len(fonts)} ranges ({done}/{len(tasks)} checked, {skipped} empty, {failed} errors)...", end="", flush=True)
 
-    print(f"\r    Downloaded {len(fonts)} font range files ({skipped} empty ranges skipped, {failed} errors)       ", flush=True)
+    print(f"\r    Got {len(fonts)} verified font range files ({skipped} empty ranges skipped, {failed} errors)       ", flush=True)
+    if mismatched:
+        # Never waived: content that is not what was reviewed and pinned.
+        raise SystemExit(f"{len(mismatched)} font glyph range(s) do not match their pinned "
+                         f"sha256, e.g. {sorted(mismatched)[0]}")
     if failed and os.environ.get("STREETZIM_ALLOW_FONT_ERRORS") != "1":
         # Fail rather than ship a map whose labels in some scripts never render.
         # STREETZIM_ALLOW_FONT_ERRORS=1 ships anyway (e.g. during a CDN outage).
@@ -407,16 +381,12 @@ def generate_sdf_font_glyphs():
     return fonts
 
 
-def download_maplibre(dest_dir):
-    """Download MapLibre GL JS files for embedding in the ZIM."""
-    print("  Downloading MapLibre GL JS...")
-    js_url = f"{MAPLIBRE_CDN}/maplibre-gl.js"
-    css_url = f"{MAPLIBRE_CDN}/maplibre-gl.css"
-
-    js_path = os.path.join(dest_dir, "maplibre-gl.js")
-    css_path = os.path.join(dest_dir, "maplibre-gl.css")
-
-    download_file(js_url, js_path, "maplibre-gl.js")
-    download_file(css_url, css_path, "maplibre-gl.css")
-
-    return js_path, css_path
+def vendored_maplibre():
+    """MapLibre GL JS and CSS from resources/vendor/maplibre-gl/, after
+    checking them against the lock file (nothing is downloaded)."""
+    try:
+        files = viewer_assets.vendored_maplibre()
+    except viewer_assets.IntegrityError as e:
+        raise SystemExit(str(e)) from None
+    print(f"  MapLibre GL JS {viewer_assets.maplibre_version()} (vendored, sha256 verified)")
+    return str(files["maplibre-gl.js"]), str(files["maplibre-gl.css"])

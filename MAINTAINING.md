@@ -101,7 +101,10 @@ Rules that keep published ZIMs working:
   feature: search, find, wiki, the routing formats, A*, the worker bridge,
   driving mode…). Edit a part, then run `python tools/build_viewer.py`. CI
   fails if `index.html` and the parts differ. `places.html` and
-  `routing-worker.js` are edited directly. Then run
+  `routing-worker.js` are edited directly. `npm run lint:viewer` runs
+  ESLint over all three (CI does too). MapLibre is vendored and the font
+  glyphs are pinned by hash; bumping either is in
+  [docs/viewer-supply-chain.md](docs/viewer-supply-chain.md). Then run
   `scripts/sync-drive-viewer.sh` to refresh the PWA copy in
   `web/drive/viewer/` (the tests compare the shared blocks). Published ZIMs
   get viewer updates by in-place slot patching (`docs/viewer-slots.md`,
@@ -132,7 +135,7 @@ Rules that keep published ZIMs working:
 | `STREETZIM_PACK_BIN`, `XAPIANBUILDER_BIN` | optional accelerators only (see §1) |
 | `ZSTD_CLEVEL` | ZIM compression level (production uses 22) |
 | `STREETZIM_MERGE_STREETS=0` | keep one search record per tile for streets instead of merging the pieces (docs/search-records.md). Merging is the default since merge #19, so regions built before it have more street records |
-| `STREETZIM_ALLOW_FONT_ERRORS=1` | ship even if some font ranges failed to download (e.g. during a CDN outage); by default the build stops after 5 attempts per range |
+| `STREETZIM_ALLOW_FONT_ERRORS=1` | ship even if some font ranges failed to download (e.g. during a CDN outage); by default the build stops after 5 attempts per range. A range whose bytes do not match its pinned sha256 always stops the build ([docs/viewer-supply-chain.md](docs/viewer-supply-chain.md)) |
 | `PYTHON` | interpreter the Node tests shell out to |
 
 ## 3. How production releases are made

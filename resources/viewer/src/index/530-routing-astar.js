@@ -155,8 +155,6 @@
   // fails.
   var __routeStatusTimer = null;
   var __routeStatusStart = 0;
-  var __routeStatusEtaSec = 0;
-  var __ROUTE_SPINNER_FRAMES = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
   // Route progress UI v2: clean stage label + slim animated bar
   // instead of the busy spinner/ETA/pops/cells string. The ETA
   // heuristic was wrong post-worker (a 1100 km route now finishes in

@@ -422,9 +422,6 @@
   function markOriginEditing() {
     window.__streetzim_originBeingEdited = true;
   }
-  function clearOriginEditing() {
-    window.__streetzim_originBeingEdited = false;
-  }
   originInput.addEventListener('focus', markOriginEditing);
   originInput.addEventListener('input', markOriginEditing);
   // When the user clicks into either input, cancel any route still
