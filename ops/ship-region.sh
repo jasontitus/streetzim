@@ -19,7 +19,13 @@ unset _ops_real _ops_old
 # Usage: ./ship-region.sh <id> [--no-upload]
 #   Region id must exist in cloud/regions.tsv (bbox, smoke pair and
 #   search term all come from there).
-# Env: OVERTURE_RELEASE (default 2026-08-19.0)
+# Env: OVERTURE_RELEASE (default 2026-08-19.0, the round's pinned release, so
+#      callers that do not set it, e.g. .after-round-rebuild-ca-dc.sh, keep
+#      using the round's cached parquets). OVERTURE_RELEASE=latest opts in to
+#      the newest complete release: resolved once at start, logged, and used
+#      in the cache names.
+#      OVERTURE_TRANSPORT (default s3, the transport the host has always
+#      used; https opts in to the downloader's anonymous-HTTPS reads)
 #      WAIT_FOR_PBF=1  block until the extractor has finished this
 #                      region's PBF instead of failing
 set -uo pipefail
@@ -60,6 +66,10 @@ log() { printf "[%s] %s\n" "$(date -Iseconds)" "$*" | tee -a "$LOG"; }
 IFS=$'\t' read -r RID NAME BBOX TIER SRC DST SEARCH NOTES < <(
   awk -F'\t' -v id="$ID" '$1==id {print; exit}' cloud/regions.tsv)
 [ "${RID:-}" = "$ID" ] || { echo "no such region in cloud/regions.tsv: $ID" >&2; exit 2; }
+if [ "$OVERTURE_RELEASE" = latest ]; then
+  OVERTURE_RELEASE=$("$PY" download_overture_data.py addresses places --print-release) || {
+    log "FATAL: could not resolve OVERTURE_RELEASE=latest; pin one: OVERTURE_RELEASE=<release>"; exit 1; }
+fi
 log "=== ship $ID ($NAME) bbox=$BBOX overture=$OVERTURE_RELEASE"
 
 PBF=world-data/regions/${ID}.osm.pbf
@@ -83,7 +93,7 @@ for theme in addresses places; do
     rm -f "$PQ" "$PQ.bbox"
     log "downloading Overture $theme $OVERTURE_RELEASE"
     "$PY" download_overture_data.py "$theme" --bbox="$BBOX" \
-      --release "$OVERTURE_RELEASE" --out "$PQ" >> "$LOG" 2>&1 \
+      --release "$OVERTURE_RELEASE" --transport "${OVERTURE_TRANSPORT:-s3}" --out "$PQ" >> "$LOG" 2>&1 \
       || { log "FATAL: Overture $theme download failed"; rm -f "$PQ"; exit 1; }
     bbox_mark "$PQ" "$BBOX"
   fi

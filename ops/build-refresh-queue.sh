@@ -20,7 +20,22 @@ unset _ops_real _ops_old
 #      symlink, or older than $PLANET   (pre-run ./extract-region-pbfs.sh to
 #      do all of these in one planet pass instead)
 #   3. overture_cache/{addresses,places}-<id>-$OVERTURE_RELEASE.parquet
-#      downloaded if absent (DuckDB → S3, minutes per region)
+#      downloaded if absent (DuckDB → S3 over HTTPS, minutes per region).
+#      OVERTURE_RELEASE defaults to the pinned round release below, so a
+#      queue started without it (run-continent-chain.sh, the after-round
+#      scripts) stays on the round's cached parquets. OVERTURE_RELEASE=latest
+#      opts in to the newest complete release: resolved ONCE at queue start
+#      (download_overture_data.py --print-release; STAC catalog), logged in
+#      the start line, and used for every cache name of the run.
+#      The run's release is recorded in queue-refresh.release (next to
+#      $RESULTS). --continue refuses when it differs from this run's release
+#      unless OVERTURE_RELEASE is set to a release name explicitly (to resume
+#      on it, or to switch on purpose). --dry-run and --regate never resolve
+#      over the network: `latest` becomes the recorded release, else the
+#      newest release in overture_cache/.
+#      Downloads use the s3:// transport the host has always used
+#      (--transport "${OVERTURE_TRANSPORT:-s3}"); OVERTURE_TRANSPORT=https
+#      opts in to the downloader's anonymous-HTTPS reads.
 #   4. OVERTURE_RELEASE=… ./build-region-fast.sh <id> <bbox> <name>
 #   5. gates, all mandatory except the browser smoke (see --browser-smoke):
 #        terrain coverage (cloud/check_terrain_coverage.py, catches blank land)
@@ -36,7 +51,7 @@ unset _ops_real _ops_old
 #                            [--no-upload] [--dry-run] [--browser-smoke soft|hard|off]
 #                            [--continue]   # skip regions already OK in today's .tsv
 # Detach:  setsid nohup ./build-refresh-queue.sh … > queue-refresh.out 2>&1 < /dev/null &
-# Env:     PLANET OVERTURE_RELEASE WORLD_MBTILES WORLD_SEARCH REGISTRY URL_DEAD_STATUSES
+# Env:     PLANET OVERTURE_RELEASE OVERTURE_TRANSPORT WORLD_MBTILES WORLD_SEARCH REGISTRY URL_DEAD_STATUSES
 # Results: queue-refresh-<date>.log (narrative) + queue-refresh-<date>.tsv (one row per region)
 set -uo pipefail
 cd /storage/streetzim
@@ -45,6 +60,8 @@ export TMPDIR=/storage/streetzim/tmp
 . ops/region-bbox.sh || exit 1
 
 PLANET="${PLANET:-/storage/streetzim/world-data/planet-2026-08-31.osm.pbf}"
+# Explicit = set to a release name by the caller (not unset, not `latest`).
+case "${OVERTURE_RELEASE:-latest}" in latest) OV_EXPLICIT=0 ;; *) OV_EXPLICIT=1 ;; esac
 export OVERTURE_RELEASE="${OVERTURE_RELEASE:-2026-08-19.0}"
 # No defaults on purpose. The previous round's world-tiles-v2.mbtiles and
 # world.jsonl are still on disk; defaulting to them would staple an August
@@ -66,6 +83,8 @@ LOG=/storage/streetzim/queue-refresh-${TODAY}.log
 # resumed on a later date, and a fresh empty TSV would make --continue
 # rebuild and re-upload every region that already shipped.
 TSV="${RESULTS:-/storage/streetzim/queue-refresh.tsv}"
+# The Overture release of the round, for --continue (see the header).
+RELFILE="${TSV%.tsv}.release"
 NODE=/storage/streetzim/.browser-libs/node-v20.18.1-linux-x64/bin/node
 export CHROME_PATH="${CHROME_PATH:-/home/ot/.cache/ms-playwright/chromium-1217/chrome-linux64/chrome}"
 export LD_LIBRARY_PATH=/storage/streetzim/.browser-libs/ex/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}
@@ -99,6 +118,31 @@ fail=0
 [ -s "$WORLD_SEARCH" ] || { echo "WORLD_SEARCH missing: $WORLD_SEARCH"; fail=1; }
 [ -s "$REGISTRY" ] || { echo "REGISTRY missing: $REGISTRY"; fail=1; }
 "$PY" -c "import libzim, duckdb, osmium" 2>/dev/null || { echo "venv-linux lacks libzim/duckdb/osmium"; fail=1; }
+# Once per run: every overture_cache/ name and build-region-fast.sh below
+# use this name, so it must not move mid-queue.
+if [ "$OVERTURE_RELEASE" = latest ]; then
+  if [ "$DRY" -eq 1 ] || [ "$REGATE" -eq 1 ]; then
+    # No network: the round's recorded release, else the newest cached one.
+    OVERTURE_RELEASE=$(cat "$RELFILE" 2>/dev/null || true)
+    [ -n "$OVERTURE_RELEASE" ] || OVERTURE_RELEASE=$(ls overture_cache/ 2>/dev/null \
+      | sed -nE 's/^places-.*-([0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+)\.parquet$/\1/p' | sort -V | tail -1)
+    if [ -n "$OVERTURE_RELEASE" ]; then
+      echo "Overture release: latest -> $OVERTURE_RELEASE (recorded/cached; not resolved for --dry-run/--regate)"
+    else
+      echo "OVERTURE_RELEASE=latest: nothing recorded or cached to use offline; pin one: OVERTURE_RELEASE=<release>"; fail=1
+    fi
+  elif OVERTURE_RELEASE=$("$PY" download_overture_data.py addresses places --print-release); then
+    echo "Overture release: latest -> $OVERTURE_RELEASE"
+  else
+    echo "could not resolve OVERTURE_RELEASE=latest (above); pin one: OVERTURE_RELEASE=<release>"; fail=1
+  fi
+fi
+REC_RELEASE=$(cat "$RELFILE" 2>/dev/null || true)
+if [ "$CONTINUE" -eq 1 ] && [ -n "$REC_RELEASE" ] && [ "$REC_RELEASE" != "$OVERTURE_RELEASE" ] \
+   && [ "$OV_EXPLICIT" -eq 0 ]; then
+  echo "--continue: this round used Overture $REC_RELEASE ($RELFILE), this run would use $OVERTURE_RELEASE."
+  echo "  Resume on it with OVERTURE_RELEASE=$REC_RELEASE, or switch on purpose with OVERTURE_RELEASE=$OVERTURE_RELEASE."; fail=1
+fi
 command -v osmium >/dev/null || { echo "osmium not on PATH"; fail=1; }
 [ -x rust/streetzim-pack/target/release/streetzim-pack ] || { echo "streetzim-pack binary missing (cargo build --release in rust/streetzim-pack)"; fail=1; }
 [ -f terrain_cache/dem_sources/comprehensive.vrt ] || { echo "terrain DEM VRT missing (terrain gate needs it)"; fail=1; }
@@ -137,6 +181,7 @@ if [ "$BROWSER" != off ] && ! [ -x "$NODE" -a -x "$CHROME_PATH" ]; then
 fi
 [ $fail -eq 0 ] || { echo "preflight FAILED"; exit 1; }
 [ -f "$TSV" ] || printf "id\tstatus\tminutes\tsize\tnote\tfinished\n" > "$TSV"
+[ "$DRY" -eq 1 ] || echo "$OVERTURE_RELEASE" > "$RELFILE"
 
 log "=== refresh queue start: planet=$(basename "$PLANET") overture=$OVERTURE_RELEASE tiles=$(basename "$WORLD_MBTILES") search=$(basename "$WORLD_SEARCH") upload=$UPLOAD browser=$BROWSER dry=$DRY"
 
@@ -271,7 +316,7 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
       # must go first, or it would be relabelled with the new bbox.
       rm -f "$PQ" "$PQ.bbox"
       log "  download Overture $theme $OVERTURE_RELEASE"
-      if ! "$PY" download_overture_data.py "$theme" --bbox="$BBOX" --release "$OVERTURE_RELEASE" --out "$PQ" >> "$LOG" 2>&1; then
+      if ! "$PY" download_overture_data.py "$theme" --bbox="$BBOX" --release "$OVERTURE_RELEASE" --transport "${OVERTURE_TRANSPORT:-s3}" --out "$PQ" >> "$LOG" 2>&1; then
         log "  OVERTURE $theme DOWNLOAD FAILED"; rm -f "$PQ"; ov_ok=0
       else
         bbox_mark "$PQ" "$BBOX"

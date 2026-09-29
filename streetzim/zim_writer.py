@@ -431,6 +431,7 @@ def create_zim(
     address_count=0,
     overture_sources=None,
     overture_themes=None,
+    overture_release=None,
     split_hot_search_chunks_mb=0,
     split_find_chips=False,
     zim_builder="python",
@@ -636,7 +637,8 @@ def create_zim(
                     routing_graph_path=routing_graph_path,
                     address_count=address_count,
                     overture_sources=overture_sources,
-                    overture_themes=overture_themes, xapian_mode=xapian_mode,
+                    overture_themes=overture_themes,
+                    overture_release=overture_release, xapian_mode=xapian_mode,
                     xapianbuilder_bin=xapianbuilder_bin,
                     xapian_workdir=xapian_workdir, chunk_tmp=chunk_tmp)
         print("    Finalizing ZIM (ZSTD compression + Xapian indexing)...", flush=True)
@@ -677,7 +679,8 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                 split_hot_search_chunks_mb, split_find_chips, no_llm_bundle,
                 map_config, name, bbox, routing_graph_path, address_count,
                 overture_sources, overture_themes, xapian_mode,
-                xapianbuilder_bin, xapian_workdir, chunk_tmp):
+                xapianbuilder_bin, xapian_workdir, chunk_tmp,
+                overture_release=None):
     """Search data: JSON chunks, category index, chips, streetzim-meta.json,
     overture-sources.json and the Kiwix full-text pages. The chunk files go
     to `chunk_tmp`, which create_zim removes after the creator has closed."""
@@ -713,7 +716,8 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                        type_counts=b.type_counts,
                        wiki_fields_added=b.wiki_fields_added)
         _add_overture_credits(creator, MapItem, overture_sources=overture_sources,
-                              overture_themes=overture_themes)
+                              overture_themes=overture_themes,
+                              overture_release=overture_release)
         _search_xapian_pages(creator, MapItem, xapian_mode=xapian_mode,
                              xapianbuilder_bin=xapianbuilder_bin,
                              xapian_workdir=xapian_workdir,
@@ -2287,8 +2291,13 @@ def _add_meta_json(creator, MapItem, *, map_config, name, bbox, wikidata_data, r
           f"types={len(type_counts)}, addresses={address_count})")
 
 
-def _add_overture_credits(creator, MapItem, *, overture_sources, overture_themes):
-    """overture-sources.json (always written; empty without Overture data)."""
+def _add_overture_credits(creator, MapItem, *, overture_sources, overture_themes,
+                          overture_release=None):
+    """overture-sources.json (always written; empty without Overture data).
+
+    `overture_release` is {theme: release} for the parquets merged (see
+    streetzim.overture.overture_release). `release` is written when they
+    agree, `releases` always; neither when no release is known."""
     # Overture dataset credits. Written when --overture-addresses
     # was used so the viewer's Sources panel (and the ZIM-level
     # License metadata) can point readers at the actual upstream
@@ -2324,8 +2333,13 @@ def _add_overture_credits(creator, MapItem, *, overture_sources, overture_themes
             if is_salvage_stub
             else "credits for each underlying dataset follow."
         )
-        overture_doc = {
-            "release": "2026-04-15.0",
+        releases = {t: r for t, r in (overture_release or {}).items() if r}
+        overture_doc = {}
+        if releases and len(set(releases.values())) == 1:
+            overture_doc["release"] = next(iter(releases.values()))
+        if releases:
+            overture_doc["releases"] = releases
+        overture_doc.update({
             "themes": themes,
             "attribution": (
                 "© OpenStreetMap contributors and Overture Maps "
@@ -2335,7 +2349,7 @@ def _add_overture_credits(creator, MapItem, *, overture_sources, overture_themes
             ),
             "datasets": real_datasets,
             "canonicalCredits": "https://docs.overturemaps.org/attribution/",
-        }
+        })
         if is_salvage_stub:
             overture_doc["_note"] = (
                 "Salvage rebuild — upstream dataset list not "
@@ -2356,7 +2370,8 @@ def _add_overture_credits(creator, MapItem, *, overture_sources, overture_themes
                   "not retained)")
         else:
             print(f"    Added overture-sources.json "
-                  f"({len(real_datasets)} upstream datasets)")
+                  f"({len(real_datasets)} upstream datasets, "
+                  f"release {overture_doc.get('release') or releases or 'unknown'})")
     else:
         # index.html links overture-sources.json statically, so a
         # build without Overture data must still ship the file —

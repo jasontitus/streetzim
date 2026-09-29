@@ -31,6 +31,8 @@ unset _ops_real _ops_old
 #    does not cover; `places` returning 0 is not. Only places is checked.
 #  * create_osm_zim.py writes viewer slots as of 2026-09-21, so these builds
 #    are patchable from birth. markers() FAILS a region that lacks them.
+#  * Overture downloads keep the host's s3:// transport
+#    (--transport "${OVERTURE_TRANSPORT:-s3}"; https opts in).
 #  * osmium extracts serialise on tmp/.regions-pbf.lock -- two writers on one
 #    path yield a truncated-but-valid PBF that nothing downstream notices.
 set -uo pipefail
@@ -189,7 +191,7 @@ for ID in $ORDER; do
     [ -s "$OUT" ] && ! bbox_stale "$OUT" "$BBOX" && continue
     rm -f "$OUT" "$OUT.bbox"               # cut for another bbox (or absent)
     log "  overture $THEME"
-    if "$PY" download_overture_data.py "$THEME" --bbox="$BBOX" --release "$REL" --out "$OUT" >> "$LOG" 2>&1; then
+    if "$PY" download_overture_data.py "$THEME" --bbox="$BBOX" --release "$REL" --transport "${OVERTURE_TRANSPORT:-s3}" --out "$OUT" >> "$LOG" 2>&1; then
       bbox_mark "$OUT" "$BBOX"
     else
       log "  overture $THEME failed (continuing; build guards on file presence)"

@@ -31,10 +31,21 @@ set -euo pipefail
 id="$1"
 name="$2"
 bbox="$3"
-release="${OVERTURE_RELEASE:-2026-04-15.0}"
+# Pinned by default (the round's release, whose parquets are cached);
+# OVERTURE_RELEASE=latest opts in to the newest complete release. Downloads
+# use --transport "${OVERTURE_TRANSPORT:-s3}", the host's tested s3:// reads.
+release="${OVERTURE_RELEASE:-2026-08-19.0}"
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
+
+# `latest` is resolved once, here, because the release is part of the cache
+# file names below (and both themes must come from the same release).
+if [ "$release" = latest ]; then
+    release=$(./venv312/bin/python3 download_overture_data.py addresses places --print-release) || {
+        echo "[FATAL] could not resolve OVERTURE_RELEASE=latest; pin one: OVERTURE_RELEASE=<release>"; exit 5; }
+    echo "[build $id] overture release: latest -> $release"
+fi
 
 addr="overture_cache/addresses-${id}-${release}.parquet"
 places="overture_cache/places-${id}-${release}.parquet"
@@ -56,13 +67,13 @@ if [ ${#missing[@]} -gt 0 ]; then
     log "overture cache miss: ${missing[*]} — downloading..."
     if [ ! -s "$addr" ]; then
         ./venv312/bin/python3 download_overture_data.py addresses \
-            --bbox="$bbox" --release "$release" --out "$addr" \
+            --bbox="$bbox" --release "$release" --transport "${OVERTURE_TRANSPORT:-s3}" --out "$addr" \
             > "overture-${id}-addresses.log" 2>&1 &
         addr_pid=$!
     fi
     if [ ! -s "$places" ]; then
         ./venv312/bin/python3 download_overture_data.py places \
-            --bbox="$bbox" --release "$release" --out "$places" \
+            --bbox="$bbox" --release "$release" --transport "${OVERTURE_TRANSPORT:-s3}" --out "$places" \
             > "overture-${id}-places.log" 2>&1 &
         places_pid=$!
     fi
