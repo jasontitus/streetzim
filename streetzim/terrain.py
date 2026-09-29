@@ -958,7 +958,10 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
             print(f"    Using {total} cached terrain tiles")
             return total
 
-    glo30_vrt, low_vrt = plan_vrts(plan, dem_dir)
+    stats = _DemStats()
+    glo30_vrt, low_vrt = plan_vrts(plan, dem_dir, stats)
+    from streetzim import source_report
+    source_report.note("Copernicus DEM", stats.summary().replace("DEM cells: ", ""))
     if not glo30_vrt and not low_vrt:
         # Open sea only (every cell 404s): nothing to draw.
         print("    No DEM tiles downloaded, skipping terrain")

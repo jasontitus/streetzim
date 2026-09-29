@@ -189,6 +189,7 @@ def fake_dem(tmp_path, monkeypatch):
                            dtype="float32", crs="EPSG:4326",
                            transform=from_origin(lon, lat + 1, 1 / px, 1 / px)) as ds:
             ds.write(data, 1)
+        stats.downloaded["GLO-90" if kind == "dem90" else "GLO-30"] += 1
         return "ok"
 
     monkeypatch.setattr(T, "_download_dem", download)
@@ -238,6 +239,8 @@ def test_a_fresh_build_fetches_only_its_plan_and_passes_the_audit(tmp_path, fake
         for t in mercantile.tiles(*T.parse_bbox(BBOX), zooms=z):
             assert _elev(dest / str(z) / str(t.x) / f"{t.y}.webp").min() > 200, (z, t)
     T.audit_terrain(plan, str(dest))                      # passes, strictly
+    from streetzim import source_report
+    assert "Copernicus DEM 1 GLO-30 + 5 GLO-90 downloaded" in source_report.summary()
 
 
 def _zero(path, cols=slice(None)):
