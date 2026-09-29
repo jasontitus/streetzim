@@ -812,9 +812,12 @@ def test_merge_overture_preserves_existing_feed_rows(duckdb_available, tmp_path)
 # ---------------------------------------------------------------------------
 
 from streetzim.overture import (  # noqa: E402
-    TAXONOMY_TO_LEGACY,
     overture_category,
     overture_release,
+)
+from streetzim.overture_taxonomy import (  # noqa: E402
+    LEGACY_NAMES,
+    TAXONOMY_TO_LEGACY,
 )
 
 
@@ -822,23 +825,47 @@ def test_overture_category_prefers_categories_then_maps_taxonomy():
     assert overture_category({"primary": "dentist"}, {"primary": "dental_clinic"}) == "dentist"
     assert overture_category(None, {"primary": "dental_clinic"}) == "dentist"
     assert overture_category({"primary": None}, {"primary": "auto_dealer"}) == "car_dealer"
-    # Same name in both vocabularies, and a category newer than the table.
+    # Same name in both vocabularies.
     assert overture_category(None, {"primary": "museum"}) == "museum"
-    assert overture_category(None, {"primary": "sport_league"}) == "sport_league"
+    # Newer than the table: nearest ancestor with an old name (mapped or
+    # unchanged), else the leaf itself.
+    assert overture_category(None, {"primary": "sport_league", "hierarchy": [
+        "sports_and_recreation", "sport_league"]}) == "active_life"
+    assert overture_category(None, {"primary": "counseling", "hierarchy": [
+        "health_care", "outpatient_care_facility", "behavioral_or_mental_health_clinic",
+        "counseling"]}) == "counseling_and_mental_health"
+    assert overture_category(None, {"primary": "brand_new", "hierarchy": [
+        "not_a_category", "brand_new"]}) == "brand_new"
+    assert overture_category(None, {"primary": "brand_new"}) == "brand_new"
     assert overture_category(None, None) == ""
     assert overture_category(None, {"primary": None, "hierarchy": None}) == ""
 
 
-def test_taxonomy_table_is_one_step():
+def test_taxonomy_table_is_sorted_and_one_step():
+    assert list(TAXONOMY_TO_LEGACY) == sorted(TAXONOMY_TO_LEGACY)
     # A mapped name is never itself a taxonomy key: one lookup is final.
     assert not set(TAXONOMY_TO_LEGACY.values()) & set(TAXONOMY_TO_LEGACY)
     assert all(k != v for k, v in TAXONOMY_TO_LEGACY.items())
+    # Every mapped name is an old name.
+    assert set(TAXONOMY_TO_LEGACY.values()) <= LEGACY_NAMES
+    assert len(TAXONOMY_TO_LEGACY) == 607 and len(LEGACY_NAMES) == 1984
     # Renames that land in chips (cloud/chip_rules.py) or the generic
     # buckets merge_overture_places refines.
     for new, old in [("dental_clinic", "dentist"), ("lodging", "accommodation"),
                      ("historic_site", "landmark_and_historical_building"),
                      ("shopping_mall", "shopping_center"), ("atm", "atms")]:
         assert TAXONOMY_TO_LEGACY[new] == old
+
+
+def test_new_taxonomy_leaf_lands_in_its_old_chip():
+    # 2026-09-23.1 split `hospital` into general_hospital etc.: the leaf has
+    # no old name, its parent does, and the Health chip keeps the place.
+    from cloud.chip_rules import CHIP_RULES, record_matches_chip
+    cat = overture_category(None, {"primary": "general_hospital", "hierarchy": [
+        "health_care", "hospital", "general_hospital"]})
+    assert cat == "hospital"
+    rec = {"t": "poi", "s": cat, "n": "Centre Hospitalier Princesse Grace"}
+    assert [c.id for c in CHIP_RULES if record_matches_chip(rec, c)] == ["health"]
 
 
 @pytest.mark.parametrize("shape", ["categories", "taxonomy", "both"])
