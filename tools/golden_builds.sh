@@ -93,6 +93,6 @@ build "$src_before" "$work/control" "$@"
 build "$src_after" "$work/after" "$@"
 
 decode=()
-if [ "$tilemaker" = 1 ]; then decode=(--decode-tiles --coord-tolerance 0.001); fi
+if [ "$tilemaker" = 1 ]; then decode=(--decode-tiles --coord-tolerance 0.0001); fi
 "$py" "$repo/tools/golden_diff.py" "$work/before/monaco.zim" "$work/after/monaco.zim" \
     --control "$work/control/monaco.zim" ${decode[@]+"${decode[@]}"}

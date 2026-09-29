@@ -62,29 +62,31 @@ pipeline. It needs tilemaker 3 on `PATH` and the coastline and Natural
 Earth shapefiles in `WORKDIR/inputs` (`scripts/fetch-shapefiles.sh
 WORKDIR/inputs`). tilemaker writes features in a different order on each
 run, which changes tile bytes and, through them, where a street's search
-record is placed (a few metres either way) and which of two
+record is placed (a few metres either way) and, rarely, which of two
 near-duplicate records is kept. So this mode compares tiles by their
-decoded features (`--decode-tiles`), accepts search records whose
-coordinates moved by up to 0.001° (`--coord-tolerance 0.001`, about
-100 m), and uses the control build for the rest. Expected result:
-`changed`, `only-before` and `only-after` 0; a few `noise` entries are
-possible (see below).
+decoded features (`--decode-tiles`) and accepts search records whose
+coordinates moved by up to 0.0001° (`--coord-tolerance 0.0001`, about
+11 m; the largest shift measured between two builds of one commit was
+0.00005°, and the tool prints the largest it accepted). Expected
+result: `changed`, `only-before` and `only-after` 0.
 
 ## What the comparison reports
 
 `tools/golden_diff.py before.zim after.zim [--control control.zim]
-[--decode-tiles] [--coord-tolerance DEG]` reads every entry of both archives (content, metadata,
-and libzim's own listings and indexes) and puts each path in one class:
+[--decode-tiles] [--coord-tolerance DEG]` reads every entry of both
+archives (content, metadata, and libzim's own listings and indexes) and
+compares path, title, MIME type and content (a redirect by its target).
+Each path lands in one class:
 
 | class | meaning | fails? |
 |---|---|---|
-| `identical` | same MIME type and bytes (or the same redirect target) | no |
+| `identical` | same title, MIME type and bytes (or the same redirect target) | no |
 | `volatile` | differs in every build, by design: see the table below | no |
-| `reordered` | a JSON list with the same items in another order, or Kiwix search pages (`search/*.html`) whose contents moved between page numbers | no |
+| `reordered` | a list of search records (`search-data/`, `category-index/`) with the same records, in which only records that tie on the builder's sort key (type, then name; `streetzim/search_extract.py`) swapped places. The sequence of (type, name), which is the order the viewer lists results in, must be unchanged. Also Kiwix search pages (`search/*.html`) whose contents moved between page numbers | no |
 | `tiles-equal` | (`--decode-tiles`) a vector tile with the same features in another order | no |
-| `moved` | (`--coord-tolerance`) a JSON list of search records that match apart from coordinates (`a`, `o`) that moved by at most DEG degrees | no |
-| `noise` | (`--control`) also differs between before and the control build | no, but read it |
-| `changed` | different content, MIME type or redirect target | **yes** |
+| `moved` | (`--coord-tolerance`) as `reordered`, except that records' coordinates (`a`, `o`) may also have moved by at most DEG degrees | no |
+| `noise` | (`--control`) differs from before, the control differs from before too, and after's entry equals the control's (or is equivalent to it by the rules above) | no, but read it |
+| `changed` | different content, title, MIME type or redirect target | **yes** |
 | `only-before`, `only-after` | an entry dropped or added | **yes** |
 
 It lists up to `--show` (default 20) paths per class.
@@ -99,21 +101,21 @@ commit.
 |---|---|
 | archive UUID | libzim makes a new one per file; printed, not compared |
 | `Date` metadata | the build date |
-| `buildDate` in `map-config.json`, dates in `streetzim-meta.json` | the build month/date; compared with dates masked |
+| `buildDate` in `map-config.json` and `streetzim-meta.json` | the build month/date; only this key is ignored, every other value is compared |
 | `fulltext/xapian`, `title/xapian` | libzim's Xapian indexes are not written reproducibly |
-| order of tied records in `search-data/*.json` and `category-index/*.json` | records that sort equal (e.g. "Monaco" the country and "Commune de Monaco") come out in either order |
+| order of tied records in `search-data/*.json` and `category-index/*.json` | records with the same type and name (e.g. two places called "Monaco": the country and the commune) come out in either order |
 | page numbers of Kiwix search pages | `search/monaco-6.html` and `search/monaco-7.html` can swap contents |
 | tilemaker mode only: tile bytes | feature order (reported as `tiles-equal`) |
-| tilemaker mode only: street records in `search-data/` and `category-index/street.json` | the record's point moves in the fifth decimal (reported as `moved`) |
-| tilemaker mode only, rarely: a different near-duplicate record kept | e.g. an empty vs a filled field; `noise` when the control shows it too, otherwise `changed` (then judge it as below) |
+| tilemaker mode only: street records in `search-data/` and `category-index/street.json` | the record's point moves in the fifth decimal, at most 0.00005° measured (reported as `moved`) |
+| tilemaker mode only, rarely: a different near-duplicate record kept | e.g. an empty vs a filled field; `noise` when after matches the control, otherwise `changed` (then judge it as below) |
 
 Measured results for comparison:
 
-| run | identical | volatile | reordered | tiles-equal | moved | noise | changed |
-|---|---|---|---|---|---|---|---|
-| OpenFreeMap tiles, same commit twice | 1,361 of 1,367 | 2 | 4 | – | – | – | 0 |
-| tilemaker, same commit twice | 1,098 of 1,168 | 2 | 40 | 19 | 9 | – | 0 |
-| tilemaker, same commit twice, without `--coord-tolerance` | 1,098 of 1,168 | 2 | 40 | 19 | – | – | 9 |
+| run | identical | volatile | reordered | tiles-equal | moved | changed |
+|---|---|---|---|---|---|---|
+| OpenFreeMap tiles, same commit twice (two pairs) | 1,330–1,361 of 1,367 | 2 | 4–35 | – | – | 0 |
+| tilemaker, same commit twice (four pairs) | 1,098–1,134 of 1,168 | 2 | 14–46 | 18–20 | 0–9, largest shift 0.00005° | 0 |
+| tilemaker, same commit twice, without `--coord-tolerance` | 1,098 of 1,168 | 2 | 40 | 19 | – | 9 |
 
 The counts depend on the extract and the code; what matters is that a
 refactor's run looks like its own control. As a check that the procedure
@@ -152,14 +154,14 @@ decide which it is:
   of a kind listed above.
 - **A bug.** Anything else.
 
-`noise` needs a look too. An entry is `noise` when the control build also
-changed it, which says nothing about *how* after changed it. In the
-tilemaker mode, compare the count with the control's and check the
-records: `python tools/golden_diff.py before.zim control.zim` shows the
-control's own differences, and the search records should differ only in
-near-duplicates, as described in
-[head-to-head-dc.md](head-to-head-dc.md#main-vs-branch). In the default
-mode there should be no noise at all.
+`noise` means after produced one of the variants the control produced, so
+it is run-to-run variation, not the change under test. It should be rare
+(none in the measured runs); `python tools/golden_diff.py before.zim
+control.zim` shows the control's own differences, and search records
+should differ only in near-duplicates, as described in
+[head-to-head-dc.md](head-to-head-dc.md#main-vs-branch). An entry that
+varies between runs but matches neither before nor the control is
+reported as `changed`: rerun, or judge it as above.
 
 ## Covering more of the builder
 
@@ -205,7 +207,7 @@ for side in before control after; do
     --split-hot-search-chunks-mb 10 --split-find-chips -o dc.zim > build.log 2>&1
 done
 python /path/to/streetzim/tools/golden_diff.py "$W/before/dc.zim" "$W/after/dc.zim" \
-  --control "$W/control/dc.zim" --decode-tiles --coord-tolerance 0.001
+  --control "$W/control/dc.zim" --decode-tiles --coord-tolerance 0.0001
 ```
 
 The D.C. control run of 28 September 2026 (production flags, see

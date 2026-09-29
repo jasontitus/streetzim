@@ -1,6 +1,8 @@
 """tools/golden_diff.py: which differences between two builds it accepts
-(dates, Xapian, reordered JSON lists, renumbered Kiwix search pages, tile
-feature order, control-build noise) and which it reports."""
+(dates, Xapian, tied search records swapping places, renumbered Kiwix
+search pages, tile feature order, small coordinate moves, control-build
+noise) and which it reports. The last group of tests mutates real ZIMs
+written with python-libzim, one regression per review finding."""
 from __future__ import annotations
 
 import json
@@ -19,20 +21,28 @@ from tools import golden_diff as gd  # noqa: E402
 from tools.golden_diff import Entry  # noqa: E402
 
 
-def J(obj):
-    return Entry("application/json", json.dumps(obj).encode())
+def J(obj, title=""):
+    return Entry("application/json", json.dumps(obj).encode(), None, title)
 
 
 def H(text):
     return Entry("text/html", text.encode())
 
 
+def rec(n, t="place", a=43.73235, o=7.42769, **extra):
+    return {"n": n, "t": t, "s": "", "a": a, "o": o, "l": "", **extra}
+
+
+# Two records tie on the builder's sort key (type, name): "Monaco" the
+# country and "Monaco" the commune.
+TIED = [rec("Les Moneghetti"), rec("Monaco", w="fr:Monaco"),
+        rec("Monaco", w="fr:Commune de Monaco"), rec("Monte-Carlo")]
 BASE = {
     "Date": Entry("text/plain", b"2026-09-28"),
     "Title": Entry("text/plain", b"Monaco"),
     "fulltext/xapian": Entry("application/octet-stream+xapian", b"x1"),
     "map-config.json": J({"name": "Monaco", "buildDate": "2026/09"}),
-    "search-data/mo.json": J([{"n": "Monaco"}, {"n": "Commune de Monaco"}]),
+    "search-data/mo.json": J(TIED),
     "search/monaco-6.html": H("<p>A</p>"),
     "search/monaco-7.html": H("<p>B</p>"),
     "mainPage": Entry("", b"", "index.html"),
@@ -51,7 +61,7 @@ def test_expected_differences_are_accepted():
     new["Date"] = Entry("text/plain", b"2026-10-01")
     new["fulltext/xapian"] = Entry("application/octet-stream+xapian", b"x2")
     new["map-config.json"] = J({"name": "Monaco", "buildDate": "2026/10"})
-    new["search-data/mo.json"] = J([{"n": "Commune de Monaco"}, {"n": "Monaco"}])
+    new["search-data/mo.json"] = J([TIED[0], TIED[2], TIED[1], TIED[3]])
     new["search/monaco-6.html"], new["search/monaco-7.html"] = BASE["search/monaco-7.html"], \
         BASE["search/monaco-6.html"]
     c = gd.classify(BASE, new, META)
@@ -65,7 +75,9 @@ def test_expected_differences_are_accepted():
 @pytest.mark.parametrize("path,entry", [
     ("Title", Entry("text/plain", b"Monte Carlo")),                    # metadata
     ("map-config.json", J({"name": "Monaco", "buildDate": "2026/09", "hasRouting": True})),
-    ("search-data/mo.json", J([{"n": "Monaco"}])),                     # a record lost
+    ("search-data/mo.json", J(TIED[:3])),                              # a record lost
+    ("search-data/mo.json", J(TIED[::-1])),                            # ranking reversed
+    ("search-data/mo.json", J(TIED, title="other")),                   # entry title
     ("search/monaco-6.html", H("<p>C</p>")),                           # page content
     ("mainPage", Entry("", b"", "places.html")),                      # redirect target
     ("fulltext/xapian", Entry("application/octet-stream", b"x1")),    # MIME type
@@ -78,6 +90,14 @@ def test_real_changes_are_reported(path, entry):
     assert not gd.report(c, 5, out=lambda _s: None)
 
 
+def test_only_the_build_date_key_is_volatile():
+    old = {"streetzim-meta.json": J({"buildDate": "2026-09-28", "osmDate": "2026-09-01"})}
+    date = {"streetzim-meta.json": J({"buildDate": "2026-09-29", "osmDate": "2026-09-01"})}
+    other = {"streetzim-meta.json": J({"buildDate": "2026-09-28", "osmDate": "2026-08-01"})}
+    assert gd.classify(old, date, set())["volatile"] == ["streetzim-meta.json"]
+    assert gd.classify(old, other, set())["changed"] == ["streetzim-meta.json"]
+
+
 def test_added_and_dropped_entries():
     new = dict(BASE)
     del new["search/monaco-7.html"]
@@ -87,15 +107,18 @@ def test_added_and_dropped_entries():
     assert c["only-after"] == ["tiles/0/0/0.pbf"]
 
 
-def test_control_marks_run_to_run_noise():
-    new = dict(BASE)
-    new["search-data/mo.json"] = J([{"n": "Monaco", "a": 1.0}])
-    new["Title"] = Entry("text/plain", b"Monte Carlo")
+def test_control_noise_needs_after_to_match_the_control():
     control = dict(BASE)
-    control["search-data/mo.json"] = J([{"n": "Monaco", "a": 2.0}])
-    c = gd.classify(BASE, new, META, control=control)
-    assert c["noise"] == ["search-data/mo.json"]
-    assert c["changed"] == ["Title"]      # the control did not change it
+    control["search-data/mo.json"] = J([rec("Monaco", a=1.0)])
+    like_control = dict(BASE)
+    like_control["search-data/mo.json"] = J([rec("Monaco", a=1.0)])
+    like_neither = dict(BASE)
+    like_neither["search-data/mo.json"] = J([rec("Monaco", a=2.0)])
+    like_neither["Title"] = Entry("text/plain", b"Monte Carlo")
+    c = gd.classify(BASE, like_control, META, control=control)
+    assert c["noise"] == ["search-data/mo.json"] and not c["changed"]
+    c = gd.classify(BASE, like_neither, META, control=control)
+    assert c["changed"] == ["Title", "search-data/mo.json"] and not c["noise"]
 
 
 def test_decode_tiles_ignores_feature_order():
@@ -114,48 +137,119 @@ def test_decode_tiles_ignores_feature_order():
     assert gd.classify(old, fewer, set(), decode_tiles=True)["changed"] == ["tiles/1/0/0.pbf"]
 
 
-def test_main_on_real_zims(tmp_path, capsys):
-    pytest.importorskip("libzim")
+def test_coord_tolerance_accepts_small_moves_only():
+    street = {"n": "Impasse", "t": "street", "s": "path"}
+    old = {"search-data/im.json": J([{**street, "a": 43.74248, "o": 7.42267}])}
+    near = {"search-data/im.json": J([{**street, "a": 43.74253, "o": 7.42271}])}
+    far = {"search-data/im.json": J([{**street, "a": 43.75, "o": 7.42271}])}
+    renamed = {"search-data/im.json": J([{**street, "n": "Impasse X", "a": 43.74253,
+                                          "o": 7.42271}])}
+    shifts: list[float] = []
+    assert gd.classify(old, near, set())["changed"] == ["search-data/im.json"]
+    assert gd.classify(old, near, set(), coord_tol=1e-4, shifts=shifts)["moved"] \
+        == ["search-data/im.json"]
+    assert shifts == [pytest.approx(5e-5)]
+    assert gd.classify(old, far, set(), coord_tol=1e-4)["changed"] == ["search-data/im.json"]
+    assert gd.classify(old, renamed, set(), coord_tol=1e-4)["changed"] == ["search-data/im.json"]
+
+
+# --- Regressions on real ZIMs (python-libzim), one per review finding ------
+
+RECORDS = [rec(f"Place {i:02d}", a=43.7 + i / 1000, o=7.4 + i / 1000) for i in range(20)]
+RECORDS += [rec("Tied", w="one"), rec("Tied", w="two")]
+
+
+def _zim(tmp_path, name, *, records=RECORDS, index_title="Monaco", date="2026-09-28",
+         meta_extra=None):
+    libzim = pytest.importorskip("libzim")
     from libzim.writer import Creator, Hint, Item, StringProvider
+    del libzim
 
     class _Item(Item):
-        def __init__(self, path, data):
+        def __init__(self, path, title, mime, data):
             super().__init__()
-            self._p, self._d = path, data
+            self._a = (path, title, mime, data)
 
-        def get_path(self): return self._p
-        def get_title(self): return self._p
-        def get_mimetype(self): return "application/json"
-        def get_contentprovider(self): return StringProvider(self._d)
+        def get_path(self): return self._a[0]
+        def get_title(self): return self._a[1]
+        def get_mimetype(self): return self._a[2]
+        def get_contentprovider(self): return StringProvider(self._a[3])
         def get_hints(self): return {Hint.FRONT_ARTICLE: False, Hint.COMPRESS: True}
 
-    def build(name, date, records):
-        path = tmp_path / name
-        with Creator(str(path)).config_indexing(True, "en") as c:
-            c.add_metadata("Title", "t")
-            c.add_metadata("Date", date)
-            c.add_item(_Item("search-data/mo.json", json.dumps(records)))
-        return str(path)
-
-    a = build("a.zim", "2026-09-28", [1, 2])
-    b = build("b.zim", "2026-09-29", [2, 1])
-    d = build("d.zim", "2026-09-28", [1, 2, 3])
-    assert gd.main([a, b]) == 0
-    assert "no differences beyond the expected ones" in capsys.readouterr().out
-    assert gd.main([a, d]) == 1
-    assert "search-data/mo.json" in capsys.readouterr().out
+    path = tmp_path / name
+    meta = {"name": "Monaco", "buildDate": date[:7].replace("-", "/"), **(meta_extra or {})}
+    with Creator(str(path)).config_indexing(True, "en") as c:
+        c.add_metadata("Title", "t")
+        c.add_metadata("Date", date)
+        c.add_item(_Item("index.html", index_title, "text/html", "<p>map</p>"))
+        c.add_item(_Item("map-config.json", "", "application/json", json.dumps(meta)))
+        c.add_item(_Item("search-data/10.json", "Search chunk 10", "application/json",
+                         json.dumps(records, separators=(",", ":"))))
+    return str(path)
 
 
-def test_coord_tolerance_accepts_small_moves_only():
-    rec = {"n": "Impasse", "t": "street", "s": "path"}
-    old = {"search-data/im.json": J([{**rec, "a": 43.74248, "o": 7.42267}])}
-    near = {"search-data/im.json": J([{**rec, "a": 43.74253, "o": 7.42271}])}
-    far = {"search-data/im.json": J([{**rec, "a": 43.75, "o": 7.42271}])}
-    renamed = {"search-data/im.json": J([{**rec, "n": "Impasse X", "a": 43.74253, "o": 7.42271}])}
-    assert gd.classify(old, near, set())["changed"] == ["search-data/im.json"]
-    assert gd.classify(old, near, set(), coord_tol=0.001)["moved"] == ["search-data/im.json"]
-    assert gd.classify(old, far, set(), coord_tol=0.001)["changed"] == ["search-data/im.json"]
-    assert gd.classify(old, renamed, set(), coord_tol=0.001)["changed"] == ["search-data/im.json"]
+def _run(capsys, *argv):
+    rc = gd.main([*argv, "--show", "50"])
+    return rc, capsys.readouterr().out
+
+
+def test_zim_same_build_passes(tmp_path, capsys):
+    a = _zim(tmp_path, "a.zim")
+    b = _zim(tmp_path, "b.zim", date="2026-10-02", records=RECORDS[:20] + RECORDS[20:][::-1])
+    rc, out = _run(capsys, a, b)
+    assert rc == 0, out
+    assert "reordered          1" in out.replace(",", "")
+
+
+def test_zim_reversed_search_chunk_fails(tmp_path, capsys):
+    """HIGH: a chunk with its ranking reversed is not a harmless reorder."""
+    a = _zim(tmp_path, "a.zim")
+    b = _zim(tmp_path, "b.zim", records=RECORDS[::-1])
+    rc, out = _run(capsys, a, b)
+    assert rc == 1 and "search-data/10.json" in out.split("changed:")[1]
+
+
+def test_zim_changed_entry_title_fails(tmp_path, capsys):
+    """MEDIUM a: an entry's title is part of the output."""
+    a = _zim(tmp_path, "a.zim")
+    b = _zim(tmp_path, "b.zim", index_title="Monte Carlo")
+    rc, out = _run(capsys, a, b)
+    assert rc == 1 and "index.html" in out.split("changed:")[1]
+
+
+def test_zim_coordinate_shift_above_tolerance_fails(tmp_path, capsys):
+    """MEDIUM b: +0.0009 degrees on every record is not tilemaker jitter."""
+    a = _zim(tmp_path, "a.zim")
+    shifted = [{**r, "a": round(r["a"] + 0.0009, 5)} for r in RECORDS]
+    jitter = [{**r, "a": round(r["a"] + 0.00005, 5)} for r in RECORDS]
+    b = _zim(tmp_path, "b.zim", records=shifted)
+    j = _zim(tmp_path, "j.zim", records=jitter)
+    rc, out = _run(capsys, a, b, "--coord-tolerance", "1e-4")
+    assert rc == 1 and "search-data/10.json" in out.split("changed:")[1]
+    rc, out = _run(capsys, a, j, "--coord-tolerance", "1e-4")
+    assert rc == 0 and "largest coordinate shift accepted: 0.000050" in out
+
+
+def test_zim_noise_must_match_the_control(tmp_path, capsys):
+    """MEDIUM c: the control varying does not excuse an unrelated change."""
+    a = _zim(tmp_path, "a.zim")
+    control = _zim(tmp_path, "c.zim", records=RECORDS[1:])
+    same_as_control = _zim(tmp_path, "s.zim", records=RECORDS[1:])
+    broken = _zim(tmp_path, "b.zim", records=RECORDS[5:])
+    rc, out = _run(capsys, a, same_as_control, "--control", control)
+    assert rc == 0 and "search-data/10.json" in out.split("noise:")[1]
+    rc, out = _run(capsys, a, broken, "--control", control)
+    assert rc == 1 and "search-data/10.json" in out.split("changed:")[1]
+
+
+def test_zim_only_build_date_is_masked(tmp_path, capsys):
+    """LOW: another date-like value in map-config.json is compared."""
+    a = _zim(tmp_path, "a.zim", meta_extra={"dataDate": "2026-09-01"})
+    b = _zim(tmp_path, "b.zim", date="2026-10-02", meta_extra={"dataDate": "2026-09-01"})
+    d = _zim(tmp_path, "d.zim", meta_extra={"dataDate": "2026-08-01"})
+    assert _run(capsys, a, b)[0] == 0
+    rc, out = _run(capsys, a, d)
+    assert rc == 1 and "map-config.json" in out.split("changed:")[1]
 
 
 def test_golden_builds_usage():
