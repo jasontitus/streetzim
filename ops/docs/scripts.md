@@ -14,8 +14,8 @@ sometimes while you edit them).
 
 Verdicts:
 - **KEEP**: live and canonical.
-- **RETIRE**: move to `attic/` with `git mv`, which keeps the history. Nothing
-  tracked executes it.
+- **RETIRE**: delete it (`git rm`; history keeps it). Phase 1 moved these to
+  `attic/`, which was deleted with the ops split. Nothing tracked executes it.
 - **RETIRE after check**: needs a look at the prod host first (it may be
   running, or an untracked prod script may call it).
 - **SHIM**: keep the filename, and replace the body with an `exec` of the
@@ -35,7 +35,9 @@ These come from how the scripts reference each other today:
      ```
    - Any hit blocks that script.
 2. **Never edit a running script in place.** bash reads a script while it
-   runs. Write `X.new`, then `mv -f X.new X`, as commit 273184a did. A
+   runs. Write `X.new`, then `mv -f X.new X`, as commit 273184a did. **X is
+   the `ops/` path** (`ops/build-region-fast.sh`), never the old-path
+   symlink, which `mv` would replace with a regular file (ops/README.md). A
    `git pull` also replaces files by rename, so it is safe for running
    scripts. Moving or deleting a file is safe for a process already running
    it; only *future* invocations by that path break.

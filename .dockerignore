@@ -2,7 +2,6 @@
 # retired scripts.
 .git
 .claude
-attic
 node_modules
 **/__pycache__
 *.zim

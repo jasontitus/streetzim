@@ -51,6 +51,6 @@ def pad_to_slot(name, data, slot_len=None):
         raise SystemExit(
             f"viewer slot overflow: {name} is {len(data)} B + {overhead} B "
             f"marker > {slot_len} B slot. Raise SLOT_SIZES[{name!r}] in "
-            f"cloud/viewer_slots.py and re-pack that region with "
-            f"swap_viewer_rust.py; do NOT truncate.")
+            f"cloud/viewer_slots.py and re-pack that region (a full "
+            f"viewer swap); do NOT truncate.")
     return data + head + (b"\n" * (slot_len - len(data) - overhead)) + closer

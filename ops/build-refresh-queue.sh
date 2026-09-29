@@ -79,7 +79,9 @@ while [ $# -gt 0 ]; do
     --browser-smoke) BROWSER="$2"; shift 2 ;;
     --continue) CONTINUE=1; shift ;;
     --regate) REGATE=1; shift ;;      # today's ZIM exists: skip the build, re-run gates + upload
-    -h|--help) sed -n 2,30p "$0"; exit 0 ;;
+    # The help is lines 2-30 of the original header: drop the ops-split guard
+    # block first (its first and last lines are the markers below).
+    -h|--help) sed '/^# ops split, stage 1:/,/^unset _ops_real _ops_old$/d' "$0" | sed -n 2,30p; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done

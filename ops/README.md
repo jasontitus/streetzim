@@ -23,7 +23,8 @@ A Zimfarm or openZIM build needs none of this.
 **A symlink at each old path** that the build host runs or reads points
 into `ops/`. So `/storage/streetzim/build-region-fast.sh`, cron entries,
 untracked host scripts and `pgrep` patterns keep working after a
-`git pull`. Moved docs and tests have no symlink.
+`git pull`. Files moved from `docs/` and `tests/` have no symlink
+(nothing runs them by path).
 
 **Run ops scripts by their old path.** They were written for it:
 - **Shell scripts** compute the checkout from `dirname "$0"`, and `pgrep`
@@ -36,11 +37,45 @@ untracked host scripts and `pgrep` patterns keep working after a
   `ops/tests/test_streetzim_root.py` checks every copy.
 - **`ops/tmp/map-health.mjs`** does the same in JavaScript.
 
-**Edit the file under `ops/`, never through the old path with
-`sed -i`.** `sed -i` replaces the symlink with a regular file: the edit
-never reaches `ops/`, and the next pull conflicts. Editors and `>`
-redirections write through the link, which is fine. On the host, the
-older rule still applies: write `X.new`, then `mv -f X.new X`.
+**Edit and replace files at their `ops/` path.** For an atomic replace of a
+script that may be running, write `ops/X.new`, then `mv -f ops/X.new ops/X`.
+Never replace a file at its old path: `mv`, `sed -i`, `perl -pi`, `install`,
+`rsync` (without `--inplace`) and Python's `os.replace` all swap the symlink
+for a regular file. Then:
+- the host silently keeps running that copy;
+- `git status` shows `T`;
+- later upstream changes to `ops/X` are pulled but never run.
+
+Editors that write in place, and `>` redirections, write through the link,
+which is fine. Change scripts on a development machine and commit them
+there; the host only pulls.
+
+**Pulling on the build host (stage 1).**
+1. `git -C /storage/streetzim status --short` first. On a symlinked old
+   path, or under `ops/`, any `T`, `M` or `D` must be resolved before
+   pulling.
+2. To keep a host change to a script:
+   - `cp X ops/X`, then `git checkout -- X` (that restores the symlink);
+   - commit `ops/X` on a development machine, not on the host.
+3. To drop a change: `git checkout -- <path>`.
+4. Never `git checkout --` the in-place data files (`*.list`,
+   `viewer-refresh.tsv`, `cloud/region-variants.tsv`). The host edits those
+   by design.
+5. Pull with `git pull --ff-only`. A pull that stops on local changes has
+   changed nothing: resolve and pull again.
+6. The build VMs (`ops/cloud/build-vm-startup.sh`) also `git pull --ff-only`.
+   On failure they warn and build with the old checkout.
+
+[`TESTING-STAGE1.md`](TESTING-STAGE1.md) is the step-by-step check to run
+before, and just after, the build host takes this change.
+
+**Caveats:**
+- The guard does not keep bash options: `bash -x ops/X.sh` re-runs without
+  `-x`. Trace with `bash -x <old path>`.
+- Every Python ops file, and `ops/tests/test_render_gate_anchors.py`,
+  honours `$STREETZIM_ROOT`. Leave it unset for normal runs.
+- The root is found with `realpath`. If `/storage/streetzim` is itself a
+  symlink, printed paths show the resolved directory.
 
 **Some operations files are still at their old paths,** listed in
 [`in-place.txt`](in-place.txt):
@@ -71,14 +106,27 @@ On the build host, in this order:
    - a grep of the untracked `/storage/streetzim/.*.sh` scripts for
      every path in `ops/` and in `in-place.txt`.
 2. **Create `streetzim-ops`** from this repository's history:
-   `git filter-repo --path ops/ --path-rename ops/:`, plus the in-place
-   paths. The ops repository then holds today's `ops/` at its root: the
+   `git filter-repo`, keeping `ops/` **and every old path** (so the
+   history from before the move survives), then renaming the old paths
+   into place, plus the in-place paths. The ops repository then holds today's `ops/` at its root: the
    same relative layout, with `docs/` and `tests/` in it.
 3. **Clone it next to the builder,** for example at `/storage/streetzim-ops`.
    Export `STREETZIM_ROOT=/storage/streetzim` for the ops jobs.
 4. **Switch the callers:** crontab, the untracked host scripts, and any
-   absolute `/storage/streetzim/<ops script>` inside the ops scripts. Stop
-   and restart the long-running queues by their new paths.
+   absolute `/storage/streetzim/<ops script>` inside the ops scripts.
+   Also:
+   - the eight shell scripts that compute the checkout from their own
+     path must read `$STREETZIM_ROOT` instead. They are in `ops/cloud/`:
+     `build_region.sh`, `launch-build-vm.sh`,
+     `spot-to-ondemand-watcher.sh`, `upload-caches.sh`,
+     `upload_url_cache.sh`, `upload_validated.sh`, `vm-health-cron.sh`,
+     `wait-and-launch.sh`;
+   - the scripts that `cd /storage/streetzim` and call ops scripts
+     relatively need the ops checkout's path. Examples:
+     `QUEUE=./build-refresh-queue.sh`, and the `sed` extractions from
+     `retrofit-chips-queue.sh`.
+
+   Then stop the long-running queues and restart them by their new paths.
 5. **Remove from this repository:**
    - `ops/`;
    - the old-path symlinks;
