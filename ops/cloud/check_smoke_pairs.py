@@ -19,9 +19,25 @@ Usage:
 """
 import argparse, glob, math, os, re, sys, time
 
+
+def _streetzim_root():
+    """The streetzim checkout (builder, data, ZIMs): $STREETZIM_ROOT, else the
+    nearest directory above this file that holds create_osm_zim.py. (This file
+    lives in ops/ and usually runs through a symlink at its old path.)"""
+    env = os.environ.get("STREETZIM_ROOT")
+    if env:
+        return os.path.abspath(env)
+    d = os.path.dirname(os.path.realpath(__file__))
+    while d != os.path.dirname(d):
+        if os.path.isfile(os.path.join(d, "create_osm_zim.py")):
+            return d
+        d = os.path.dirname(d)
+    raise SystemExit("cannot find the streetzim checkout; set STREETZIM_ROOT")
+
+
 # The checkout holding the ZIMs and cloud/regions.tsv: $STREETZIM_ROOT, else
 # the checkout this script lives in (/storage/streetzim on the build host).
-ROOT = os.environ.get("STREETZIM_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = _streetzim_root()
 sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(ROOT, "cloud"))
 from streetzim.routing.spatial import load_spatial_from_zim  # noqa: E402
 from streetzim.routing.spatial_astar import find_route_spatial  # noqa: E402

@@ -1,0 +1,1 @@
+../ops/cloud/regen_all_low_zoom.py

@@ -1,0 +1,1 @@
+ops/ship-switzerland-light.sh

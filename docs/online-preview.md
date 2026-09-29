@@ -227,7 +227,7 @@ them — the proxy's traffic *is* the visitors' data usage:
 | `Range` header reaching the code | yes | not documented; the `?bytes=` query form is what makes it work regardless |
 
 **Cloudflare is the recommendation**; the step-by-step plan is
-[`preview-proxy-cloudflare.md`](preview-proxy-cloudflare.md).
+[`preview-proxy-cloudflare.md`](../ops/docs/preview-proxy-cloudflare.md).
 
 The Firebase route is packaged in `preview-proxy/firebase/`
 (`index.mjs`, a 2nd-gen `onRequest` wrapping the same handler, with its

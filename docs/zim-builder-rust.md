@@ -209,7 +209,7 @@ this by:
    resulting ZIM identically to one libzim emitted itself.
 
 Wired up by `create_osm_zim.py --xapian=builder` (see
-`docs/remote-rebuild.md` for the full flag set). Roughly **40-60×
+`ops/docs/remote-rebuild.md` for the full flag set). Roughly **40-60×
 faster** than libzim's auto-indexer on continent-scale corpora
 (California: 252,947 docs in ~3 s vs. ~hours for libzim's
 HTML-stub-feed flow).

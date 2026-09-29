@@ -1,4 +1,14 @@
 #!/bin/bash
+# ops split, stage 1: this file lives in ops/ and a symlink at its old path
+# runs it; the paths below assume that path (and so do pgrep and the locks).
+# Started directly (ops/..., or from inside ops/), it re-runs by the old path.
+if [ ! -L "$0" ] && _ops_real="$(readlink -f "$0" 2>/dev/null)"; then
+  case "$_ops_real" in
+    */ops/*) _ops_old="${_ops_real%/ops/*}/${_ops_real##*/ops/}"
+             if [ -L "$_ops_old" ]; then exec bash "$_ops_old" "$@"; fi ;;
+  esac
+fi
+unset _ops_real _ops_old
 # Records upload/failure events to upload-events.log, detached from any
 # Claude session. The in-session Monitors die when the session ends; this
 # does not. Append-only, deduplicated.

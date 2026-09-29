@@ -1,0 +1,1 @@
+ops/build-world-z12.sh

@@ -1,5 +1,20 @@
 import puppeteer from 'puppeteer-core';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+// The streetzim checkout: $STREETZIM_ROOT, else the nearest directory above
+// this file holding create_osm_zim.py. (This file lives in ops/ and runs
+// through a symlink at its old path; Node resolves the link, so a path
+// relative to this file would point into ops/.)
+function streetzimRoot() {
+  if (process.env.STREETZIM_ROOT) return process.env.STREETZIM_ROOT;
+  let d = dirname(fileURLToPath(import.meta.url));
+  while (d !== dirname(d)) {
+    if (existsSync(join(d, 'create_osm_zim.py'))) return d;
+    d = dirname(d);
+  }
+  throw new Error('cannot find the streetzim checkout; set STREETZIM_ROOT');
+}
 const origin=process.env.ZIM_ORIGIN, tag=process.env.TAG||'x';
 
 // Where to point the camera before counting features.
@@ -29,7 +44,7 @@ function anchorFor(tagName) {
   const m = /^osm-(.+)-\d{4}-\d{2}-\d{2}[a-z]?$/.exec(tagName);
   const id = process.env.REGION_ID || (m ? m[1] : tagName);
   let tsv;
-  try { tsv = readFileSync(new URL('../cloud/regions.tsv', import.meta.url), 'utf8'); }
+  try { tsv = readFileSync(join(streetzimRoot(), 'cloud', 'regions.tsv'), 'utf8'); }
   catch (e) {
     // The dangerous one: an unreadable regions.tsv reverts EVERY region to
     // the pre-5e3fe72 probe, reinstating the false FAILs this exists to stop

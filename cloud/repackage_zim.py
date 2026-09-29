@@ -1319,9 +1319,8 @@ def main() -> int:
     p.add_argument("--refresh-terrain-tiles", metavar="DIR", default=None,
                    help="Swap every terrain/z/x/y.webp entry whose "
                         "filesystem counterpart in DIR is strictly newer "
-                        "than the source ZIM. Use after "
-                        "cloud/fix_stale_terrain_tiles.py regenerates "
-                        "cached tiles, to roll them into the ZIM without "
+                        "than the source ZIM. Use after regenerating "
+                        "cached terrain tiles, to roll them into the ZIM without "
                         "a full rebuild. Typical DIR: terrain_cache")
     p.add_argument("--unchunk-graph", action="store_true",
                    help="Reassemble a chunked routing-data/graph-chunk-*.bin "

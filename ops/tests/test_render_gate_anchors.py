@@ -16,7 +16,25 @@ import math
 import re
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+import os  # noqa: E402 (for _streetzim_root)
+
+
+def _streetzim_root():
+    """The streetzim checkout (builder, data, ZIMs): $STREETZIM_ROOT, else the
+    nearest directory above this file that holds create_osm_zim.py. (This file
+    lives in ops/ and usually runs through a symlink at its old path.)"""
+    env = os.environ.get("STREETZIM_ROOT")
+    if env:
+        return os.path.abspath(env)
+    d = os.path.dirname(os.path.realpath(__file__))
+    while d != os.path.dirname(d):
+        if os.path.isfile(os.path.join(d, "create_osm_zim.py")):
+            return d
+        d = os.path.dirname(d)
+    raise SystemExit("cannot find the streetzim checkout; set STREETZIM_ROOT")
+
+
+ROOT = Path(_streetzim_root())
 
 # Mirrors the regex in tmp/map-health.mjs: /^osm-(.+)-\d{4}-\d{2}-\d{2}[a-z]?$/
 TAG_RE = re.compile(r"^osm-(.+)-\d{4}-\d{2}-\d{2}[a-z]?$")

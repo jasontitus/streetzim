@@ -3,7 +3,7 @@
 > This is the author's production runbook. It uses the optional
 > accelerators (`--zim-builder rust`, `--xapian builder`, zimru's
 > `zimcheck`) for continent-scale speed. None of them is required: see
-> [README.md](../README.md) for the standard libzim build.
+> [README.md](../../README.md) for the standard libzim build.
 
 For the 128 GB / 14 TB remote box (Europe-located, with the full
 satellite tile cache + world build currently in progress, which means
@@ -153,7 +153,7 @@ viewer can't ship them without rebuilt chip files (see each entry
 for migration notes).
 
 - **Merge Restaurants + Cafés into a single Food & Drink chip.**
-  See [`docs/in-zim-apps.md` § "Queued for next rebuild"](in-zim-apps.md#queued-for-next-rebuild--merge-restaurants--cafés).
+  See [`docs/in-zim-apps.md` § "Queued for next rebuild"](../../docs/in-zim-apps.md#queued-for-next-rebuild--merge-restaurants--cafés).
   Touches `cloud/chip_rules.py`, `resources/viewer/places.html`,
   `resources/viewer/index.html`, `cloud/validate_zim.py`. Also fixes
   the `ice_cream` / `ice_cream_parlor` cross-bucket bug.

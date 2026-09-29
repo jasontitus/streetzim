@@ -25,7 +25,23 @@ import multiprocessing
 import os
 import sys
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def _streetzim_root():
+    """The streetzim checkout (builder, data, ZIMs): $STREETZIM_ROOT, else the
+    nearest directory above this file that holds create_osm_zim.py. (This file
+    lives in ops/ and usually runs through a symlink at its old path.)"""
+    env = os.environ.get("STREETZIM_ROOT")
+    if env:
+        return os.path.abspath(env)
+    d = os.path.dirname(os.path.realpath(__file__))
+    while d != os.path.dirname(d):
+        if os.path.isfile(os.path.join(d, "create_osm_zim.py")):
+            return d
+        d = os.path.dirname(d)
+    raise SystemExit("cannot find the streetzim checkout; set STREETZIM_ROOT")
+
+
+SCRIPT_DIR = _streetzim_root()
 SATELLITE_CACHE = os.path.join(SCRIPT_DIR, "satellite_cache_avif_256")
 TERRAIN_CACHE   = os.path.join(SCRIPT_DIR, "terrain_cache")
 DEM_SOURCES     = os.path.join(TERRAIN_CACHE, "dem_sources")

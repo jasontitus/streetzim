@@ -1,0 +1,1 @@
+../ops/cloud/rebuild_old_regions.sh

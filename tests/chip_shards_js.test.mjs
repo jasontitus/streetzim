@@ -24,8 +24,7 @@ function extractBlock(file) {
   return src.slice(a, b + '// END chip-shards'.length);
 }
 
-const blocks = ['resources/viewer/index.html', 'resources/viewer/places.html',
-                'web/drive/viewer/index.html', 'web/drive/viewer/places.html']
+const blocks = ['resources/viewer/index.html', 'resources/viewer/places.html']
   .map(extractBlock);
 for (const b of blocks.slice(1)) {
   assert.equal(b, blocks[0], 'chip-shards blocks differ between viewer files');

@@ -1,0 +1,1 @@
+../ops/cloud/spot-to-ondemand-watcher.sh

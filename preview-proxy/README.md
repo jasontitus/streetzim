@@ -39,5 +39,5 @@ npx wrangler deploy          # prints https://streetzim-preview-proxy.<acct>.wor
 
 Then set that URL in `web/drive/preview-config.js`, regenerate and deploy
 the site (`python3 web/generate.py --deploy`). Step-by-step plan with the
-checks for each step: `docs/preview-proxy-cloudflare.md`. Design,
+checks for each step: `ops/docs/preview-proxy-cloudflare.md`. Design,
 alternatives and measurements: `docs/online-preview.md`.

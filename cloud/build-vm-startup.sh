@@ -1,0 +1,1 @@
+../ops/cloud/build-vm-startup.sh

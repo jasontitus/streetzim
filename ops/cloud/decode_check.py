@@ -14,6 +14,22 @@ import time
 from concurrent.futures import ProcessPoolExecutor as Pool
 from pathlib import Path
 
+
+def _streetzim_root():
+    """The streetzim checkout (builder, data, ZIMs): $STREETZIM_ROOT, else the
+    nearest directory above this file that holds create_osm_zim.py. (This file
+    lives in ops/ and usually runs through a symlink at its old path.)"""
+    env = os.environ.get("STREETZIM_ROOT")
+    if env:
+        return os.path.abspath(env)
+    d = os.path.dirname(os.path.realpath(__file__))
+    while d != os.path.dirname(d):
+        if os.path.isfile(os.path.join(d, "create_osm_zim.py")):
+            return d
+        d = os.path.dirname(d)
+    raise SystemExit("cannot find the streetzim checkout; set STREETZIM_ROOT")
+
+
 TERRAIN = Path("/Users/jasontitus/experiments/streetzim/terrain_cache")
 
 
@@ -68,7 +84,7 @@ def main() -> int:
     # Write the bad list so a follow-up `xargs rm -f` can delete, then
     # verify_terrain_freshness --regenerate will rewrite them atomically.
     if bad:
-        out = Path(__file__).resolve().parent.parent / ".decode-errors.txt"
+        out = Path(_streetzim_root()) / ".decode-errors.txt"
         out.write_text("\n".join(p for p, _ in bad))
         print(f"wrote {len(bad)} paths → {out.name}")
         return 1

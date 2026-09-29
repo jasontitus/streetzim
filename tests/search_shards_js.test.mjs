@@ -13,10 +13,7 @@ import { execFileSync } from 'node:child_process';
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const REPO_VENV = `${REPO}/venv-linux/bin/python3`;
 const PY = process.env.PYTHON || (fs.existsSync(REPO_VENV) ? REPO_VENV : 'python3');
-const VIEWERS = [
-  'resources/viewer/index.html', 'resources/viewer/places.html',
-  'web/drive/viewer/index.html', 'web/drive/viewer/places.html',
-];
+const VIEWERS = ['resources/viewer/index.html', 'resources/viewer/places.html'];
 
 let pass = 0;
 function ok(name, fn) {

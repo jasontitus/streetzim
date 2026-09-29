@@ -56,6 +56,10 @@ jobs:
         run: python tools/build_viewer.py --check
       - name: Python tests
         run: python -m pytest tests -q
+      - name: Core/ops boundary (ops/README.md)
+        run: python tools/check_boundary.py
+      - name: Ops tests (ops/tests)
+        run: python -m pytest ops/tests -q
       - name: Node tests
         env:
           PYTHON: python

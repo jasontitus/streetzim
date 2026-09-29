@@ -1,0 +1,1 @@
+../ops/cloud/finish_pending_uploads.sh

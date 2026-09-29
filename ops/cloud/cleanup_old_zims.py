@@ -28,6 +28,22 @@ import subprocess
 import sys
 from typing import Dict, List, Tuple
 
+
+def _streetzim_root():
+    """The streetzim checkout (builder, data, ZIMs): $STREETZIM_ROOT, else the
+    nearest directory above this file that holds create_osm_zim.py. (This file
+    lives in ops/ and usually runs through a symlink at its old path.)"""
+    env = os.environ.get("STREETZIM_ROOT")
+    if env:
+        return os.path.abspath(env)
+    d = os.path.dirname(os.path.realpath(__file__))
+    while d != os.path.dirname(d):
+        if os.path.isfile(os.path.join(d, "create_osm_zim.py")):
+            return d
+        d = os.path.dirname(d)
+    raise SystemExit("cannot find the streetzim checkout; set STREETZIM_ROOT")
+
+
 # Filename shapes we manage, oldest-style first:
 #   osm-<id>.zim                                 (legacy undated)
 #   osm-<id>-YYYY-MM.zim                         (legacy year-month)
@@ -119,7 +135,7 @@ def torrent_protected_name(item: str):
     (its webseed), or None. Deleting that file strands every torrent
     client that fetched the .torrent from the site."""
     region_id = item[len("streetzim-"):] if item.startswith("streetzim-") else item
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+    path = os.path.join(_streetzim_root(),
                         "web", "torrents", f"{region_id}.torrent")
     try:
         data = open(path, "rb").read()

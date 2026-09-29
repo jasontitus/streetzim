@@ -1,6 +1,6 @@
 # Rolling a viewer change into every shipped region
 
-Companion to [viewer-slots.md](viewer-slots.md), which explains the slot
+Companion to [viewer-slots.md](../../docs/viewer-slots.md), which explains the slot
 mechanism. This page is the operational procedure: how to get a viewer change
 into all ~57 live regions, what it costs, and what the gates are.
 

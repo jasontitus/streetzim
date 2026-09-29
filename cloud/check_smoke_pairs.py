@@ -1,0 +1,1 @@
+../ops/cloud/check_smoke_pairs.py

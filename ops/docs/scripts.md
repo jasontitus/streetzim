@@ -1,5 +1,10 @@
 # Shell scripts: inventory and consolidation plan
 
+> **Paths.** Since the ops split (stage 1, [ops/README.md](../README.md)) the
+> scripts below live in `ops/`, at the same relative paths, with a symlink at
+> each old path. The host keeps running them by the old paths used here.
+> Phase 1's `attic/` has been deleted; the tag `pre-ops-split` still has it.
+
 Status 2026-09-28: 73 tracked `*.sh` files. Phase 1 moved 31 dead ones to
 `attic/`, leaving **42** in use; about 23 are actually needed. The rest are
 one-offs or wrappers superseded by `build-region-fast.sh`. This file lists every script with a verdict and gives

@@ -1,0 +1,40 @@
+# Operations files that stage 1 of the ops split left at their old paths.
+# They move to the ops repository in stage 2, with a step on the build host
+# (see ops/README.md). tools/check_boundary.py treats them as ops.
+#
+# Whole directories: the website / PWA and the online-preview proxy.
+web/
+preview-proxy/
+#
+# Edited in place on the build host (queue lists, rollout lists, the
+# variants registry, an inventory): a symlink there would be replaced by
+# the host's next sed -i, and a pull over a local edit would fail.
+cloud/region-variants.tsv
+continent-queue.list
+rebuild-old.list
+rebuild-queue.list
+retrofit-chips.list
+tmp/live-inventory.out
+viewer-refresh.tsv
+#
+# Tied to web/ by relative paths (tests, the viewer sync, the deploy and
+# the PWA smoke tests); they move with it.
+.firebaserc
+cloud/deploy_pwa.sh
+cloud/preview_smoke_test.mjs
+cloud/pwa_smoke_test.mjs
+cloud/quick-worker-test.mjs
+cloud/route_browser_test.mjs
+cloud/route_compare.mjs
+firebase.json
+scripts/serve-web-local.py
+scripts/sync-drive-viewer.sh
+tests/lib/synthetic_zim.mjs
+tests/test_generate_card_date.py
+tests/test_generate_preview_button.py
+tests/test_picker.mjs
+tests/test_preview_proxy.mjs
+tests/test_sw_streaming.mjs
+tests/test_zim_http_source.mjs
+tests/zim_reader_js.test.mjs
+tests/test_drive_viewer_copy.py

@@ -1,0 +1,1 @@
+../ops/cloud/stamp_item_metadata.py

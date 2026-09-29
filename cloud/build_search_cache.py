@@ -1,0 +1,1 @@
+../ops/cloud/build_search_cache.py

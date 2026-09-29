@@ -17,9 +17,8 @@
 //   * index.html `EXPLORE_CHIPS` (block `chip-rail`) has exactly the same
 //     ids and labels (order is a deliberate UI choice, so it is free) and
 //     every entry has an emoji.
-//   * The resources/viewer and web/drive/viewer copies of each block are
-//     byte-identical (web/drive/viewer is a copy made by
-//     scripts/sync-drive-viewer.sh).
+//   (The website's copy, web/drive/viewer, is checked against resources/viewer
+//   by tests/test_drive_viewer_copy.py, with the rest of the web/ code.)
 //   * On a shared corpus, places.html's legacy client-side filter gives the
 //     same answer as record_matches_chip() in Python, so a regex that means
 //     different things in the two dialects fails here. One known, accepted
@@ -48,12 +47,7 @@ function extractBlock(file, name) {
 }
 
 function sameAcrossCopies(file, name) {
-  const blocks = [`resources/viewer/${file}`, `web/drive/viewer/${file}`]
-    .map(f => extractBlock(f, name));
-  assert.equal(blocks[1], blocks[0],
-    `${name} differs between resources/viewer/${file} and web/drive/viewer/${file}; ` +
-    'run scripts/sync-drive-viewer.sh');
-  return blocks[0];
+  return extractBlock(`resources/viewer/${file}`, name);
 }
 
 // Python side, as plain JSON. Regexes travel as (source, ignoreCase).

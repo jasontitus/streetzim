@@ -1,4 +1,14 @@
 #!/bin/bash
+# ops split, stage 1: this file lives in ops/ and a symlink at its old path
+# runs it; the paths below assume that path (and so do pgrep and the locks).
+# Started directly (ops/..., or from inside ops/), it re-runs by the old path.
+if [ ! -L "$0" ] && _ops_real="$(readlink -f "$0" 2>/dev/null)"; then
+  case "$_ops_real" in
+    */ops/*) _ops_old="${_ops_real%/ops/*}/${_ops_real##*/ops/}"
+             if [ -L "$_ops_old" ]; then exec bash "$_ops_old" "$@"; fi ;;
+  esac
+fi
+unset _ops_real _ops_old
 # Canada is the one live region whose viewer is NOT in fixed slots (built
 # before create_osm_zim.py started padding them, 2026-09-21), so
 # patch_viewer_inplace.py cannot touch it and the rollout skips it.
