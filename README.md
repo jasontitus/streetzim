@@ -49,7 +49,9 @@ pip install -r requirements.txt
 
 `requirements.txt` pulls stock `libzim` (python-libzim), which includes the
 libzim fixes StreetZim contributed upstream; the old patches in `patches/`
-are kept for history only.
+are kept for history only. It lists only what the builder needs; to run
+the tests and linters, install `requirements-dev.txt` instead
+([MAINTAINING.md](MAINTAINING.md)).
 
 **3. Coastline and Natural Earth shapefiles.** tilemaker reads them relative to
 the directory you build in. Without them the build still succeeds but has no

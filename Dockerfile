@@ -39,6 +39,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 COPY --from=tilemaker /src/tilemaker/build/tilemaker /usr/local/bin/tilemaker
 
 WORKDIR /app
+# Runtime dependencies only (no pytest, no internetarchive; see
+# requirements-dev.txt and requirements-ops.txt).
 COPY requirements.txt /app/
 RUN python3 -m venv /venv && /venv/bin/pip install --no-cache-dir -r requirements.txt
 ENV PATH=/venv/bin:$PATH

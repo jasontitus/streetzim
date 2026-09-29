@@ -96,6 +96,24 @@ computes the checkout from its own path.
 Checks (in CI): `python tools/check_boundary.py` and
 `python -m pytest ops/tests -q`.
 
+**Python packages for ops: `requirements-ops.txt`.** `requirements.txt`
+lists only what the builder imports. The Internet Archive client
+(`internetarchive`, which provides the `ia` command the upload, rollout
+and cleanup scripts run) is in `requirements-ops.txt`, which includes
+`requirements.txt`. On the build host, install from it:
+
+```bash
+/storage/streetzim/venv-linux/bin/pip install -r requirements-ops.txt
+/storage/streetzim/venv-linux/bin/ia --version     # must print a version
+```
+
+A venv that already has `ia` keeps it: `pip install -r requirements.txt`
+never uninstalls anything. Use `requirements-ops.txt` whenever a host
+venv is created or rebuilt, or `ia` will be missing and uploads fail.
+The build VMs (`ops/cloud/build-vm-startup.sh`) install `internetarchive`
+by name. Tests and lint tools (pytest, ruff, pyright) are in
+`requirements-dev.txt`.
+
 ## Stage 2: a separate repository
 
 On the build host, in this order:

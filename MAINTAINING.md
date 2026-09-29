@@ -66,7 +66,16 @@ builder from depending on any of it.
 
 ## 2. Day-to-day development
 
+Three requirement files:
+- `requirements.txt`: what the builder and the `streetzim` command import;
+  the Docker image installs only this;
+- `requirements-dev.txt`: that plus pytest, ruff and pyright (CI's
+  versions);
+- `requirements-ops.txt`: that plus `internetarchive` (the `ia` command),
+  for the build host's publishing scripts ([ops/README.md](ops/README.md)).
+
 ```bash
+pip install -r requirements-dev.txt
 ruff check .                       # bug-catching lint families (ruff.toml)
 python tools/pyright_gate.py       # type check: strict modules clean, no new findings
 python tools/offliner_definition.py --check   # Zimfarm definition matches the flags

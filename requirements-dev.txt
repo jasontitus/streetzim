@@ -1,0 +1,7 @@
+# Development: the runtime dependencies plus the test and lint tools CI uses
+# (.github/workflows/ci.yml). The ruff and pyright versions match CI's and
+# .pre-commit-config.yaml's.
+-r requirements.txt
+pytest>=8.0
+ruff==0.15.8
+pyright==1.1.409

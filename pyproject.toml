@@ -7,7 +7,9 @@
 # next to the code, so install from a checkout (editable) or use the Docker
 # image; a plain wheel would not carry resources/.
 # requirements.txt stays the single list of runtime dependencies (the Docker
-# image and the production host install from it).
+# image installs only it). requirements-dev.txt adds the test and lint tools
+# (the `qa` and `test` extras); requirements-ops.txt adds what the build
+# host's publishing scripts need (the `ops` extra).
 
 [build-system]
 requires = ["setuptools>=77"]
@@ -24,6 +26,7 @@ dynamic = ["version", "dependencies"]
 [project.optional-dependencies]
 qa = ["ruff==0.15.8", "pyright==1.1.409"]
 test = ["pytest>=8.0"]
+ops = ["internetarchive>=4.0"]
 
 [project.scripts]
 streetzim = "streetzim.cli:main"

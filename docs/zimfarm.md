@@ -17,6 +17,8 @@ The image is Python 3.14 on Debian trixie, like openZIM's scrapers, so
 zimscraperlib is installed and `streetzim` uses it for the metadata rules,
 the illustration (PNG, JPEG, WebP or SVG, cropped to 48x48), downloads and
 the output-folder check. The ZIM itself is written with python-libzim.
+The image installs only the runtime dependencies (`requirements.txt`): no
+test tools and no upload client.
 
 ## The default profile
 

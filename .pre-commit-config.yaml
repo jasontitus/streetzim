@@ -1,7 +1,7 @@
 # The fast checks of CI's `checks` job (.github/workflows/ci.yml), before each
 # commit:
 #
-#   pip install pre-commit -r requirements.txt pyright==1.1.409
+#   pip install pre-commit -r requirements-dev.txt
 #   pre-commit install            # then: pre-commit run --all-files
 #
 # The versions match CI's. The tests (pytest, node) stay in CI and are run by
