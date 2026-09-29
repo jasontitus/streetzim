@@ -2008,13 +2008,20 @@ function prettyKind(s) {
   return s.replace(/_/g, ' ');
 }
 
-// In the units the map's scale bar is set to (the viewer keeps the choice
-// in localStorage 'streetzim.units'; imperial until it is switched).
-function distanceUnit() {
+// In the units the map's scale bar is set to: the viewer keeps the choice
+// in localStorage 'streetzim.units'; with none saved, the locale decides as
+// in the viewer (szLocaleUnit): imperial for en-US or a US/LR/MM region.
+function distanceUnit(nav) {
   try {
     const u = window.localStorage.getItem('streetzim.units');
-    return u === 'metric' ? 'metric' : 'imperial';
-  } catch (e) { return 'imperial'; }
+    if (u === 'metric' || u === 'imperial') return u;
+  } catch (e) { /* no storage: fall through */ }
+  nav = nav === undefined ? (typeof navigator !== 'undefined' ? navigator : null) : nav;
+  let tag = '';
+  try { tag = String((nav && nav.languages && nav.languages[0]) || (nav && nav.language) || ''); } catch (e) { /* none */ }
+  const m = /^[a-z]{2,3}(?:-[a-z]{4})?-([a-z]{2})\b/i.exec(tag);
+  const region = m ? m[1].toUpperCase() : '';
+  return region === 'US' || region === 'LR' || region === 'MM' ? 'imperial' : 'metric';
 }
 
 function formatDistance(m, unit) {

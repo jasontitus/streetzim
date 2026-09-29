@@ -73,7 +73,7 @@ function loadView(env = {}) {
     VIEW_SRC + '\nreturn { SZ_VIEWER_VERSION, _szStorage, _szViewKey, _szHashSetsView,' +
     ' _szReadView, _szWriteView, _szOpeningCamera, _szMaxBounds, _szClearZoom, initViewMemory, initHomeButton,' +
     ' _szAboutText, _szMonth, initAbout, _szSatellite, _szSatelliteCreditHtml,' +
-    ' szReadUnit, szWriteUnit, szUnit, szFormatDistance };');
+    ' szLocaleUnit, szReadUnit, szWriteUnit, szUnit, szFormatDistance };');
   // Fake timers: `timers` holds the pending ones; runTimers() fires them.
   const timers = new Map();
   let next = 1;
@@ -394,7 +394,7 @@ await ok('a result held at the box edge under a sheet is cleared by zooming in',
   }
 });
 
-await ok('units: one setting for every distance, imperial by default, kept across visits', () => {
+await ok('units: one setting for every distance, locale default, kept across visits', () => {
   const v = loadView({ storage: memStorage() });
   const f = v.szFormatDistance;
   for (const [m, unit, want] of [[850, 'metric', '850 m'], [1400, 'metric', '1.4 km'], [12400, 'metric', '12 km'],
@@ -402,15 +402,30 @@ await ok('units: one setting for every distance, imperial by default, kept acros
                                  [19312, 'imperial', '12 mi'], [null, 'metric', ''], [NaN, 'imperial', '']]) {
     assert.strictEqual(f(m, unit), want, `${m} ${unit}`);
   }
+  // Nothing saved: the locale decides. Imperial for US English and a US,
+  // Liberian or Myanmar region; metric otherwise (en-GB included).
+  const nav = (...l) => ({ languages: l, language: l[0] });
+  for (const [n, want] of [[nav('en-US'), 'imperial'], [nav('en-us', 'de'), 'imperial'],
+                           [nav('es-US'), 'imperial'], [nav('en-LR'), 'imperial'], [nav('my-MM'), 'imperial'],
+                           [nav('de-CH'), 'metric'], [nav('en-GB'), 'metric'], [nav('fr'), 'metric'],
+                           [nav('en'), 'metric'], [nav('de-CH', 'en-US'), 'metric'],
+                           [nav('zh-Hant-TW'), 'metric'], [{ language: 'en-US' }, 'imperial'],
+                           [{}, 'metric'], [null, 'metric']]) {
+    assert.strictEqual(v.szLocaleUnit(n), want, JSON.stringify(n));
+  }
   const s = v._szStorage();
-  assert.strictEqual(v.szReadUnit(s), 'imperial');                  // the scale bar's old default
+  assert.strictEqual(v.szReadUnit(s, nav('en-US')), 'imperial');
+  assert.strictEqual(v.szReadUnit(s, nav('de-CH')), 'metric');
+  // A saved choice wins over the locale, both ways.
   v.szWriteUnit(s, 'metric');
-  assert.strictEqual(v.szReadUnit(s), 'metric');
-  assert.strictEqual(v.szUnit(), 'metric');                          // no map yet: the stored choice
-  v.window.__szMap = { _streetzimUnit: 'imperial' };
-  assert.strictEqual(v.szUnit(), 'imperial');                        // the map's live setting wins
-  assert.strictEqual(v.szReadUnit(null), 'imperial');
-  assert.strictEqual(v.szReadUnit({ getItem() { throw new Error('SecurityError'); } }), 'imperial');
+  assert.strictEqual(v.szReadUnit(s, nav('en-US')), 'metric');
+  v.szWriteUnit(s, 'imperial');
+  assert.strictEqual(v.szReadUnit(s, nav('de-CH')), 'imperial');
+  assert.strictEqual(v.szUnit(), 'imperial');                        // no map yet: the stored choice
+  v.window.__szMap = { _streetzimUnit: 'metric' };
+  assert.strictEqual(v.szUnit(), 'metric');                          // the map's live setting wins
+  assert.strictEqual(v.szReadUnit(null, nav('en-GB')), 'metric');
+  assert.strictEqual(v.szReadUnit({ getItem() { throw new Error('SecurityError'); } }, nav('en-US')), 'imperial');
   // The scale bar starts from and saves the setting; Find cards, "Nearby",
   // the place sheet and the routing panel format through it.
   assert.match(HTML, /var scaleUnit = szReadUnit\(_szStorage\(\)\);/);
@@ -421,13 +436,18 @@ await ok('units: one setting for every distance, imperial by default, kept acros
   assert.doesNotMatch(HTML, /1\.5 km/);
   // places.html reads the same key and prints the same strings.
   const P = fs.readFileSync(`${REPO}/resources/viewer/places.html`, 'utf8');
-  const src = P.slice(P.indexOf('function distanceUnit()'), P.indexOf('\n}\n', P.indexOf('function formatDistance(m, unit)')) + 3);
+  const src = P.slice(P.indexOf('function distanceUnit(nav)'), P.indexOf('\n}\n', P.indexOf('function formatDistance(m, unit)')) + 3);
   const store = new Map();
   const window = { localStorage: { getItem: (k) => store.get(k) ?? null } };
   const places = new Function('window', src + '\nreturn { distanceUnit, formatDistance };')(window);
-  assert.strictEqual(places.distanceUnit(), 'imperial');
+  // Same locale default and the same saved-choice rule as the viewer.
+  for (const n of [nav('en-US'), nav('de-CH'), nav('en-GB'), nav('my-MM'), nav('en'), {}, null]) {
+    assert.strictEqual(places.distanceUnit(n), v.szLocaleUnit(n), JSON.stringify(n));
+  }
   store.set('streetzim.units', 'metric');
-  assert.strictEqual(places.distanceUnit(), 'metric');
+  assert.strictEqual(places.distanceUnit(nav('en-US')), 'metric');
+  store.set('streetzim.units', 'imperial');
+  assert.strictEqual(places.distanceUnit(nav('de-CH')), 'imperial');
   for (const m of [150, 850, 1400, 2253, 12400, 19312]) {
     for (const unit of ['metric', 'imperial']) assert.strictEqual(places.formatDistance(m, unit), f(m, unit));
   }

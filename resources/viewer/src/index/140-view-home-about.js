@@ -43,14 +43,27 @@ function _szStorage() {
 // Distance units. One setting for the whole viewer: the scale bar (click
 // it to switch), search distances, Find cards and "Nearby", the place
 // sheet, the routing panel and places.html, which reads it from
-// localStorage ('streetzim.units'). Default imperial, as the scale bar
-// always was.
+// localStorage ('streetzim.units'). A saved choice wins; otherwise the
+// reader's locale decides: imperial for US English or a US, Liberian or
+// Myanmar region, metric for everyone else (en-GB too, for simplicity).
 var SZ_UNITS_KEY = 'streetzim.units';
-function szReadUnit(storage) {
+function szLocaleUnit(nav) {
+  var langs = [];
+  try {
+    if (nav && nav.languages && nav.languages.length) langs = Array.prototype.slice.call(nav.languages);
+    else if (nav && nav.language) langs = [nav.language];
+  } catch (e) {}
+  var tag = String(langs[0] || '');
+  var region = (/^[a-z]{2,3}(?:-[a-z]{4})?-([a-z]{2})\b/i.exec(tag) || [])[1];
+  region = region ? region.toUpperCase() : '';
+  return region === 'US' || region === 'LR' || region === 'MM' ? 'imperial' : 'metric';
+}
+function szReadUnit(storage, nav) {
   try {
     var u = storage && storage.getItem(SZ_UNITS_KEY);
-    return u === 'metric' || u === 'imperial' ? u : 'imperial';
-  } catch (e) { return 'imperial'; }
+    if (u === 'metric' || u === 'imperial') return u;
+  } catch (e) {}
+  return szLocaleUnit(nav === undefined ? (typeof navigator !== 'undefined' ? navigator : null) : nav);
 }
 function szWriteUnit(storage, unit) {
   try { if (storage) storage.setItem(SZ_UNITS_KEY, unit); } catch (e) {}
