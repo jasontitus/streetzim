@@ -84,3 +84,4 @@ salvage/
 .coverage.*
 coverage.xml
 htmlcov/
+!tests/fixtures/monaco-full/monaco.osm.pbf
