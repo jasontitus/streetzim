@@ -117,8 +117,10 @@ from streetzim.tiles import (  # noqa: F401
 )
 from streetzim.satellite import (  # noqa: F401
     download_satellite_tiles,
+    satellite_cache_dirs,
     stitch_satellite_image,
 )
+from streetzim import satellite_sources
 from streetzim.terrain import (  # noqa: F401
     _DEM_HANDLES,
     _generate_one_terrain_tile,
@@ -427,6 +429,12 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Skip tilemaker and use existing MBTiles file")
     parser.add_argument("--satellite", action="store_true",
                         help="Include Sentinel-2 Cloudless satellite imagery tiles")
+    parser.add_argument("--satellite-source", choices=sorted(satellite_sources.SOURCES),
+                        default=satellite_sources.BUILDER_DEFAULT,
+                        help="Which EOX mosaic: s2cloudless-2016 is CC BY 4.0; "
+                             "s2cloudless-2021 is CC BY-NC-SA 4.0, non-commercial "
+                             "use only (default: %(default)s). The License metadata "
+                             "and the viewer's credits follow the choice")
     parser.add_argument("--satellite-zoom", type=int, default=None,
                         help="Max zoom for satellite tiles (default: same as --max-zoom)")
     parser.add_argument("--satellite-download-zoom", type=int, default=None,
@@ -652,6 +660,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                            "WebP, or SVG where zimscraperlib is installed; cropped "
                            "to fill). Default: a generated map icon")
     meta.add_argument("--scraper", help=argparse.SUPPRESS)
+    meta.add_argument("--flavour", help="Flavour metadata. Default: maxi")
     meta.add_argument("--stats-filename", metavar="PATH",
                       help="Write Zimfarm progress JSON ({\"done\": N, "
                            "\"total\": M}) here as the build moves through "
@@ -670,14 +679,15 @@ def _openzim_options(*, args):
     zim_metadata = zim_illustration = None
     if any(getattr(args, k) is not None for k in (
             "zim_name", "title", "description", "long_description", "creator",
-            "publisher", "tags", "scraper")):
+            "publisher", "tags", "scraper", "flavour")):
         from streetzim.zim_metadata import build_overrides
         try:
             zim_metadata = build_overrides(
                 name=args.zim_name, title=args.title,
                 description=args.description,
                 long_description=args.long_description, creator=args.creator,
-                publisher=args.publisher, tags=args.tags, scraper=args.scraper)
+                publisher=args.publisher, tags=args.tags, scraper=args.scraper,
+                flavour=args.flavour)
         except ValueError as e:
             raise SystemExit(f"Error: {e}") from None
     if args.illustration:
@@ -1094,9 +1104,9 @@ def _satellite_and_terrain(
     terrain_future = None
 
     if include_satellite and bbox_str:
-        # Use format/size-specific cache dir to avoid mixing tile formats
-        sat_cache_suffix = f"_{satellite_format}_{satellite_tile_size}"
-        satellite_dir = os.path.join(CACHE_DIR, f"satellite_cache{sat_cache_suffix}")
+        # A cache per source, format and size, so none of them is mixed.
+        satellite_dir = satellite_cache_dirs(
+            args.satellite_source, satellite_format, satellite_tile_size)[1]
     if include_terrain and bbox_str:
         terrain_dir = args.terrain_dir or os.path.join(CACHE_DIR, "terrain_cache")
 
@@ -1111,7 +1121,7 @@ def _satellite_and_terrain(
             sat_future = step_pool.submit(
                 download_satellite_tiles, bbox_str, satellite_dir, satellite_download_zoom,
                 sat_format=satellite_format, sat_quality=satellite_quality,
-                tile_size=satellite_tile_size)
+                tile_size=satellite_tile_size, source=args.satellite_source)
             terrain_future = step_pool.submit(
                 generate_terrain_tiles, bbox_str, terrain_dir, terrain_max_zoom,
                 low_zoom_world_vrt=getattr(args, "low_zoom_world_vrt", None))
@@ -1129,7 +1139,8 @@ def _satellite_and_terrain(
             else:
                 download_satellite_tiles(bbox_str, satellite_dir, max_zoom=satellite_download_zoom,
                                          sat_format=satellite_format, sat_quality=satellite_quality,
-                                         tile_size=satellite_tile_size)
+                                         tile_size=satellite_tile_size,
+                                         source=args.satellite_source)
 
         if include_terrain:
             step_terrain = step_sat + (1 if include_satellite else 0)
@@ -1462,6 +1473,9 @@ def _build_map_config(
         map_config["satelliteMaxZoom"] = satellite_max_zoom
         map_config["satelliteFormat"] = satellite_format
         map_config["satelliteTileSize"] = satellite_tile_size
+        # Which mosaic, its licence and the credit EOX requires.
+        map_config.update(satellite_sources.map_config(
+            satellite_sources.get(args.satellite_source)))
     if terrain_dir and os.path.isdir(str(terrain_dir)):
         map_config["hasTerrain"] = True
         map_config["terrainMaxZoom"] = terrain_max_zoom
@@ -1626,7 +1640,10 @@ def main(argv=None):
     print(f"=== Creating Offline OSM ZIM: {name} ===")
     if include_satellite:
         sat_desc = f"{satellite_format} q{satellite_quality} {satellite_tile_size}px"
-        print(f"  Including Sentinel-2 satellite imagery (z0-{satellite_max_zoom}, {sat_desc})")
+        _src = satellite_sources.get(args.satellite_source)
+        print(f"  Including Sentinel-2 satellite imagery (z0-{satellite_max_zoom}, {sat_desc}); "
+              f"{_src.key}, {_src.license}"
+              + (", NON-COMMERCIAL use only" if _src.noncommercial else ""))
     if include_terrain:
         print(f"  Including Copernicus GLO-30 terrain (z0-{terrain_max_zoom})")
     if include_wikidata:

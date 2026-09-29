@@ -225,9 +225,15 @@ if (!window.__szUnsupported) fetchConfig(1)
         var satExt = config.satelliteFormat || 'webp';
         var satTileSize = config.satelliteTileSize || 256;
         // Use zimtile:// protocol for retry logic on Kiwix service worker
+        // EOX requires its credit in the map itself; MapLibre shows a
+        // source's attribution while one of its layers is visible.
+        var sat = _szSatellite(config);
+        var satCredit = String(sat.attribution + ' \u00b7 ' + sat.license)
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         map.addSource('satellite', {
           type: 'raster',
           tiles: ['zimtile://' + baseUrl + 'satellite/{z}/{x}/{y}.' + satExt],
+          attribution: satCredit,
           tileSize: satTileSize,
           minzoom: 0,
           maxzoom: config.satelliteMaxZoom || 14

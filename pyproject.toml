@@ -127,6 +127,7 @@ strict = [
   "streetzim/glyph_fallback.py",
   "streetzim/paths.py",
   "streetzim/progress.py",
+  "streetzim/satellite_sources.py",
   "streetzim/routing/__init__.py",
   "streetzim/routing/reader.py",
   "streetzim/viewer_assets.py",

@@ -29,7 +29,7 @@ test tools and no upload client.
 | Offline routing (drive / walk / bike) | on, spatial layout (SZCI v3) | `--no-routing` |
 | Wikidata place details | off | `--wikidata` (queries Wikidata) |
 | Terrain / hillshade | off | `--terrain` (downloads Copernicus DEM tiles) |
-| Satellite imagery | **never** | not offered: the imagery is CC BY-NC-SA |
+| Satellite imagery | **off**; opt-in | `--satellite`: EOX Sentinel-2 cloudless 2016, **CC BY 4.0**. The 2021 mosaic, **CC BY-NC-SA 4.0 (non-commercial)**, only with `--satellite-source s2cloudless-2021 --satellite-accept-noncommercial`, as a variant labelled restricted ([below](#satellite-imagery)) |
 
 The area is exactly one of `--area` (a preset), `--include-poly` (a `.poly`
 URL; a Geofabrik one also selects its extract) or `--bbox`. Areas are
@@ -58,6 +58,171 @@ polygon. So:
 
 `License` metadata and the viewer's credits list only the sources a ZIM
 actually contains.
+
+## Satellite imagery
+
+Off by default, and one flag to turn on. The imagery is EOX's Sentinel-2
+cloudless mosaic ("EOxCloudless"), which EOX licenses **per year**:
+
+| `--satellite-source` | EOX WMTS layer | licence | use | flag(s) |
+|---|---|---|---|---|
+| `s2cloudless-2016` (default) | `s2cloudless_3857` | **CC BY 4.0** | any, with attribution | `--satellite` |
+| `s2cloudless-2021` | `s2cloudless-2021_3857` | **CC BY-NC-SA 4.0** | non-commercial only | `--satellite-source s2cloudless-2021 --satellite-accept-noncommercial` |
+
+Why the 2021 mosaic stays off in openZIM's main distribution: NC-SA forbids
+commercial use of the imagery and of anything adapted from it, and passes
+that on to everyone downstream. openZIM's ZIMs are mirrored, bundled and
+resold by others (device makers, library projects, app stores), so a ZIM with
+NC imagery cannot go wherever the rest of openZIM's catalogue goes. That is a
+reason to keep it out of the default and to label it clearly when it is in,
+not a reason to make it unavailable: for non-commercial users it is the better
+imagery. A freely licensed source (2016) has no such restriction and needs no
+acknowledgement.
+
+### The licences, from EOX's own pages
+
+Checked on 2026-09-29 (copies of the pages were kept with the evidence for
+this change):
+
+- <https://cloudless.eox.at/license-non-commercial> (EOX's "License
+  Non-Commercial" page):
+  - "The conditions for use are the attribution when publishing any imagery
+    or content from EOxCloudless WM(T)S layers as well as the non-commercial
+    use for the 2018 - 2025 data."
+  - "For the years 2018 to 2025, EOxCloudless WM(T)S layers is licensed under
+    the Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+    International License."
+  - "For the year 2016, EOxCloudless is licensed under the Creative Commons
+    Attribution 4.0 International License."
+  - Required attribution, 2016: "EOxCloudless https://cloudless.eox.at by EOX
+    IT Services GmbH (Contains modified Copernicus Sentinel data 2016 &
+    2017)"; 2021: "… (Contains modified Copernicus Sentinel data 2021)"; 2018:
+    "… (Contains modified Copernicus Sentinel data 2017 & 2018)"; the other
+    years name their own year.
+  - "The attribution shall be displayed legibly and in proximity to the usage".
+- <https://tiles.maps.eox.at/wmts/1.0.0/WMTSCapabilities.xml>, the layer
+  abstracts:
+  - `s2cloudless_3857` ("Sentinel-2 cloudless layer for 2016 by EOX"):
+    "EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains
+    modified Copernicus Sentinel data 2016) released under Creative Commons
+    Attribution 4.0 International License."
+  - `s2cloudless-2021_3857`: "… (Contains modified Copernicus Sentinel data
+    2021) released under Creative Commons Attribution-NonCommercial-ShareAlike
+    4.0 International License. For commercial usage please see
+    https://cloudless.eox.at"; 2018 to 2025 read the same.
+  - the service's AccessConstraints: "Proper attribution is required for any
+    usage. … Additional restrictions may apply for individual layers as
+    indicated in the respective abstract."
+- <https://cloudless.eox.at/documentation/license> ("License Summary"):
+  "Attribution must be clearly visible wherever the imagery is displayed. For
+  interactive maps, the credit should appear in the map interface. In cases
+  where direct display is not possible, the attribution should be included
+  under credits, data sources, or as a part of metadata." It describes the
+  non-commercial CC BY-NC-SA terms and EOX's commercial licence, and does not
+  mention the 2016 layer; its sub-licensing limits are stated for those two.
+
+`s2maps.eu` now redirects to <https://cloudless.eox.at/preview>.
+
+Notes:
+- The 2016 attribution differs between the two sources ("2016 & 2017" on the
+  licence page, "2016" in the WMTS abstract). StreetZim uses the licence
+  page's, which covers both.
+- The WMTS also serves `s2cloudless-2017_3857`, whose abstract says CC BY 4.0,
+  but the licence page lists no 2017 layer, and the layer has holes (no
+  imagery around Singapore at z10). It is not offered.
+- The 2016 layer is served today as `s2cloudless_3857` (and `s2cloudless`
+  in EPSG:4326), the only yearly layer without a year in its id, in the same
+  `GoogleMapsCompatible` grid as the 2021 layer; Monaco's tiles came back at
+  every zoom to z15. How long EOX has kept that id could not be checked (the
+  Web Archive was not reachable from the build machine), and EOX could
+  rename or retire it: the build log would then warn about every tile it
+  failed to download, and no other year's tiles are used in their place,
+  since each source has its own cache.
+- If openZIM wants certainty beyond the published pages, EOX's contact for
+  licensing is cloudless@eox.at.
+
+### Which is the default, and the quality difference
+
+The default is the most permissive source, 2016. It is usable but older and
+softer: at the viewer's deepest zoom, buildings and streets that are distinct
+in 2021 are blurred, colours are lighter with bluer water, and some tile
+seams show (a straight edge across Monaco at z13-14, patchy sea off Iceland
+at z6). Cloud cover was similar in the places compared (Monaco, Edinburgh,
+Bergen, Singapore, northern Iceland): both are cloud-free composites, with
+snow and glaciers where expected. The 2021 mosaic is sharper, darker and more
+saturated.
+
+### What a satellite ZIM carries
+
+| | `--satellite` (2016, CC BY 4.0) | 2021, CC BY-NC-SA 4.0 (restricted) |
+|---|---|---|
+| Flavour | `satellite` | `satellite-nc` |
+| Tags (added) | `satellite` | `satellite;non-commercial` |
+| File name (default) | `{name}_satellite_{period}.zim` | `{name}_satellite-nc_{period}.zim` |
+| LongDescription | unchanged | ends with "Restricted: the satellite imagery (…) is licensed CC BY-NC-SA 4.0 and may be used for non-commercial purposes only; the rest of this map is openly licensed." (after `--long-description`, or after the Description when there is none) |
+| License | adds "Satellite imagery: CC BY 4.0 (<attribution>)" | opens with "Non-commercial use only: the satellite imagery is CC BY-NC-SA 4.0" and adds "Satellite imagery: CC BY-NC-SA 4.0, non-commercial use only (<attribution>)" |
+| viewer | Satellite button; the credit and licence on the map while imagery shows, and under Data Sources | the same, plus a "Restricted: …" notice at the top of About |
+| `map-config.json` | `satelliteSource`, `satelliteLicense`, `satelliteAttribution`, `satelliteNonCommercial: false` | the same, `satelliteNonCommercial: true` |
+
+Kiwix identifies a book by Name and Flavour, so the variants of one area are
+separate books under the same Name, and a recipe or a library filter can
+pick the restricted ones out by Flavour `satellite-nc` or the tag
+`non-commercial`. Without satellite imagery, Flavour stays `maxi` as before.
+`--file-name` also takes `{flavour}`. `--satellite-max-zoom` caps the imagery
+(default: `--max-zoom`, and z13 for areas centred 45° or more from the
+equator, where Sentinel-2's 10 m pixels make z14 an upscale).
+
+`tools/check_openzim_output.py --satellite SOURCE` checks all of this on a
+built ZIM.
+
+### Recipes
+
+The flags as a Zimfarm recipe's offliner config (dash form, as in step 5 of
+the local run below):
+
+Basic (the default profile: no satellite imagery):
+
+```json
+{"offliner_id": "streetzim", "name": "osm_en_luxembourg", "title": "Luxembourg",
+ "description": "Offline map of Luxembourg with search and routing",
+ "include-poly": "https://download.geofabrik.de/europe/luxembourg.poly"}
+```
+
+Full: every optional layer, with the freely licensed imagery (one flag for
+the imagery; terrain as in the default profile table above):
+
+```json
+{"offliner_id": "streetzim", "name": "osm_en_luxembourg", "title": "Luxembourg",
+ "description": "Offline map of Luxembourg with satellite imagery",
+ "include-poly": "https://download.geofabrik.de/europe/luxembourg.poly",
+ "wikidata": true, "satellite": true}
+```
+
+Full, restricted: the 2021 imagery, labelled non-commercial (two flags for
+the imagery; `satellite-source` implies `satellite`):
+
+```json
+{"offliner_id": "streetzim", "name": "osm_en_luxembourg", "title": "Luxembourg",
+ "description": "Offline map of Luxembourg with satellite imagery",
+ "include-poly": "https://download.geofabrik.de/europe/luxembourg.poly",
+ "wikidata": true, "satellite-source": "s2cloudless-2021",
+ "satellite-accept-noncommercial": true}
+```
+
+Without `satellite-accept-noncommercial` that last recipe fails at once,
+before any download, with a message naming the licence, so NC imagery cannot
+end up in a ZIM by accident. The same on the command line:
+
+```sh
+streetzim --name osm_en_monaco --title Monaco --description "Offline map of Monaco" \
+  --area monaco --output out --satellite                       # 2016, CC BY 4.0
+streetzim --name osm_en_monaco --title Monaco --description "Offline map of Monaco" \
+  --area monaco --output out --satellite-source s2cloudless-2021 \
+  --satellite-accept-noncommercial                             # restricted variant
+```
+
+Satellite tiles are downloaded from EOX during the build: Monaco at z0-14
+is 29 tiles and about 15 s. They are cached under `--dl`, per source.
 
 ## What Zimfarm needs on its side
 

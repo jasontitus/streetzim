@@ -72,7 +72,7 @@ function loadView(env = {}) {
   const fn = new Function('window', 'document', 'location', 'setTimeout', 'clearTimeout',
     VIEW_SRC + '\nreturn { SZ_VIEWER_VERSION, _szStorage, _szViewKey, _szHashSetsView,' +
     ' _szReadView, _szWriteView, _szOpeningCamera, initViewMemory, initHomeButton,' +
-    ' _szAboutText, _szMonth, initAbout };');
+    ' _szAboutText, _szMonth, initAbout, _szSatellite };');
   // Fake timers: `timers` holds the pending ones; runTimers() fires them.
   const timers = new Map();
   let next = 1;
@@ -366,6 +366,42 @@ await ok('About text from new and old map-config.json', () => {
   }
   w.initAbout({ name: '<b>x</b>' });
   assert.strictEqual(doc.getElementById('about-title').textContent, '<b>x</b>');
+});
+
+await ok('About and credits name the satellite source and flag non-commercial imagery', () => {
+  const v = loadView({});
+  const free = { hasSatellite: true, satelliteSource: 's2cloudless-2016', satelliteLicense: 'CC BY 4.0',
+    satelliteLicenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+    satelliteAttribution: 'EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH' +
+      ' (Contains modified Copernicus Sentinel data 2016 & 2017)',
+    satelliteNonCommercial: false };
+  const nc = Object.assign({}, free, { satelliteSource: 's2cloudless-2021',
+    satelliteLicense: 'CC BY-NC-SA 4.0', satelliteNonCommercial: true,
+    satelliteLicenseUrl: 'https://creativecommons.org/licenses/by-nc-sa/4.0/',
+    satelliteAttribution: 'EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH' +
+      ' (Contains modified Copernicus Sentinel data 2021)' });
+  assert.strictEqual(v._szSatellite({}), null);
+  assert.strictEqual(v._szAboutText({}).notice, '');
+  assert.strictEqual(v._szAboutText(free).notice, '');
+  assert.strictEqual(v._szAboutText(free).satLicense,
+    'CC BY 4.0 \u2014 creativecommons.org/licenses/by/4.0/');
+  assert.match(v._szAboutText(nc).notice, /^Restricted: .*CC BY-NC-SA 4\.0.*non-commercial/);
+  assert.match(v._szAboutText(nc).satLicense, /^CC BY-NC-SA 4\.0, non-commercial use only/);
+  // A ZIM from before the choice: the 2021 mosaic, non-commercial.
+  const old = v._szSatellite({ hasSatellite: true });
+  assert.ok(old.nonCommercial && old.license === 'CC BY-NC-SA 4.0');
+  for (const [cfg, restricted] of [[nc, true], [free, false], [{ name: 'x' }, false]]) {
+    const doc = fakeDocument();
+    const w = loadView({ document: doc });
+    for (const id of ['about-title', 'about-desc', 'about-meta', 'about-notice',
+                      'attr-satellite-by', 'attr-satellite-license']) {
+      const e = doc._el('p'); e.id = id; e.textContent = 'static'; doc.body.appendChild(e);
+    }
+    w.initAbout(cfg);
+    assert.strictEqual(doc.getElementById('about-notice').style.display, restricted ? '' : 'none');
+    assert.strictEqual(doc.getElementById('attr-satellite-by').textContent,
+      cfg.hasSatellite ? cfg.satelliteAttribution : 'static');
+  }
 });
 
 await ok('viewer version matches streetzim/__about__.py', () => {

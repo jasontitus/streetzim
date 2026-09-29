@@ -51,7 +51,7 @@
       "type": "string",
       "required": false,
       "title": "ZIM filename",
-      "description": "ZIM file name, without .zim; {name} and {period} (YYYY-MM) are replaced. Default: {name}_{period}"
+      "description": "ZIM file name, without .zim; {name}, {period} (YYYY-MM) and {flavour} are replaced. Default: {name}_{period}, or {name}_{flavour}_{period} with --satellite"
     },
     "tags": {
       "type": "string",
@@ -164,6 +164,36 @@
       "title": "ZIM workers",
       "description": "Compression threads for libzim. Default: the CPU count, at most 20",
       "min": 1
+    },
+    "satellite": {
+      "type": "boolean",
+      "required": false,
+      "title": "Satellite imagery",
+      "description": "Add a satellite imagery layer (a Satellite button in the viewer). Off by default. The source defaults to s2cloudless-2016, CC BY 4.0; the ZIM's Flavour becomes 'satellite'"
+    },
+    "satellite_source": {
+      "type": "string-enum",
+      "required": false,
+      "title": "Satellite source",
+      "description": "Satellite imagery source (implies --satellite). s2cloudless-2016: EOX Sentinel-2 cloudless 2016, CC BY 4.0, free for any use with attribution (softer, bluer, some seams). s2cloudless-2021: EOX Sentinel-2 cloudless 2021, CC BY-NC-SA 4.0, NON-COMMERCIAL use only (sharper); needs --satellite-accept-noncommercial and labels the ZIM as restricted (Flavour 'satellite-nc', tag 'non-commercial'). Default: s2cloudless-2016",
+      "choices": [
+        "s2cloudless-2016",
+        "s2cloudless-2021"
+      ]
+    },
+    "satellite_accept_noncommercial": {
+      "type": "boolean",
+      "required": false,
+      "title": "Accept non-commercial imagery",
+      "description": "Required with a non-commercial --satellite-source: confirms that this ZIM may be used and redistributed for non-commercial purposes only"
+    },
+    "satellite_max_zoom": {
+      "type": "integer",
+      "required": false,
+      "title": "Satellite max zoom",
+      "description": "Maximum zoom of the satellite tiles (the viewer over-zooms past it). Default: --max-zoom, and at most 13 for areas centred 45 degrees or more from the equator",
+      "min": 0,
+      "max": 14
     }
   },
   "modelValidators": [

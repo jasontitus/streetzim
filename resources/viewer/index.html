@@ -577,6 +577,10 @@
   #attr-dialog .license {
     font-size: 11px; color: var(--text-tertiary); font-style: italic;
   }
+  #about-notice {
+    font-size: 13px; font-weight: 600; color: var(--text-primary);
+    border-left: 3px solid var(--accent); padding-left: 8px;
+  }
   #attr-close {
     position: absolute; top: 12px; right: 14px;
     background: none; border: none; font-size: 20px; color: var(--text-tertiary);
@@ -1291,6 +1295,7 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
       <p id="about-title">Offline OpenStreetMap</p>
       <p id="about-desc"></p>
       <p class="license" id="about-meta"></p>
+      <p id="about-notice" style="display:none;"></p>
     </section>
     <h2>Data Sources &amp; Licenses</h2>
     <section>
@@ -1310,8 +1315,8 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
     </section>
     <section id="attr-satellite-section" style="display:none;">
       <h3>Satellite Imagery</h3>
-      <p>Sentinel-2 Cloudless by EOX IT Services GmbH</p>
-      <p class="license">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA 4.0) &mdash; s2maps.eu</p>
+      <p id="attr-satellite-by">Sentinel-2 Cloudless by EOX IT Services GmbH</p>
+      <p class="license" id="attr-satellite-license">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA 4.0) &mdash; s2maps.eu</p>
     </section>
     <section id="attr-terrain-section" style="display:none;">
       <h3>Terrain / Elevation</h3>
@@ -2015,9 +2020,15 @@ if (!window.__szUnsupported) fetchConfig(1)
         var satExt = config.satelliteFormat || 'webp';
         var satTileSize = config.satelliteTileSize || 256;
         // Use zimtile:// protocol for retry logic on Kiwix service worker
+        // EOX requires its credit in the map itself; MapLibre shows a
+        // source's attribution while one of its layers is visible.
+        var sat = _szSatellite(config);
+        var satCredit = String(sat.attribution + ' \u00b7 ' + sat.license)
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         map.addSource('satellite', {
           type: 'raster',
           tiles: ['zimtile://' + baseUrl + 'satellite/{z}/{x}/{y}.' + satExt],
+          attribution: satCredit,
           tileSize: satTileSize,
           minzoom: 0,
           maxzoom: config.satelliteMaxZoom || 14
@@ -3733,6 +3744,24 @@ function _szMonth(d) {
 // Text for the About panel. Newer ZIMs carry title/description/
 // generator in map-config.json (streetzim/zim_writer.py _add_map_config);
 // older ones only name and buildDate, and every field is optional.
+// The satellite imagery's credit (EOX requires it wherever the imagery is
+// shown) and licence. map-config.json names them since the source became a
+// choice (streetzim/satellite_sources.py); a ZIM from before carries the
+// 2021 mosaic, CC BY-NC-SA 4.0. null without a satellite layer.
+function _szSatellite(config) {
+  if (!config || !config.hasSatellite) return null;
+  if (!config.satelliteAttribution) {
+    return { attribution: 'Sentinel-2 cloudless - https://s2maps.eu by EOX IT Services GmbH' +
+             ' (Contains modified Copernicus Sentinel data 2021)',
+             license: 'CC BY-NC-SA 4.0', licenseUrl: 'https://creativecommons.org/licenses/by-nc-sa/4.0/',
+             nonCommercial: true };
+  }
+  return { attribution: String(config.satelliteAttribution),
+           license: String(config.satelliteLicense || ''),
+           licenseUrl: String(config.satelliteLicenseUrl || ''),
+           nonCommercial: !!config.satelliteNonCommercial };
+}
+
 function _szAboutText(config) {
   config = config || {};
   var meta = [];
@@ -3742,10 +3771,18 @@ function _szAboutText(config) {
     meta.push('Built' + (when ? ' ' + when : '') + (config.generator ? ' with ' + config.generator : ''));
   }
   meta.push('viewer: streetzim ' + SZ_VIEWER_VERSION);
+  var sat = _szSatellite(config);
   return {
     title: config.title || config.name || 'Offline OpenStreetMap',
     desc: config.description || '',
-    meta: meta.join(' · ')
+    meta: meta.join(' · '),
+    // A ZIM with non-commercial imagery says so first thing in About.
+    notice: sat && sat.nonCommercial ?
+      'Restricted: the satellite imagery is licensed ' + sat.license +
+      ' and may be used for non-commercial purposes only; the rest of this map is openly licensed.' : '',
+    satCredit: sat ? sat.attribution : '',
+    satLicense: sat ? sat.license + (sat.nonCommercial ? ', non-commercial use only' : '') +
+      (sat.licenseUrl ? ' \u2014 ' + sat.licenseUrl.replace(/^https?:\/\//, '') : '') : ''
   };
 }
 
@@ -3758,6 +3795,13 @@ function initAbout(config) {
   set('about-title', t.title);
   set('about-desc', t.desc);
   set('about-meta', t.meta);
+  set('about-notice', t.notice);
+  var notice = document.getElementById('about-notice');
+  if (notice) notice.style.display = t.notice ? '' : 'none';
+  if (t.satCredit) {
+    set('attr-satellite-by', t.satCredit);
+    set('attr-satellite-license', t.satLicense);
+  }
   // Focus moves into the dialog on open, Tab stays inside it, and focus
   // returns to the button however it closes (it is aria-modal); Escape
   // closes it without reaching the other Escape handlers (find results,

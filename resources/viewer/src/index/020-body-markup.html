@@ -259,6 +259,7 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
       <p id="about-title">Offline OpenStreetMap</p>
       <p id="about-desc"></p>
       <p class="license" id="about-meta"></p>
+      <p id="about-notice" style="display:none;"></p>
     </section>
     <h2>Data Sources &amp; Licenses</h2>
     <section>
@@ -278,8 +279,8 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
     </section>
     <section id="attr-satellite-section" style="display:none;">
       <h3>Satellite Imagery</h3>
-      <p>Sentinel-2 Cloudless by EOX IT Services GmbH</p>
-      <p class="license">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA 4.0) &mdash; s2maps.eu</p>
+      <p id="attr-satellite-by">Sentinel-2 Cloudless by EOX IT Services GmbH</p>
+      <p class="license" id="attr-satellite-license">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA 4.0) &mdash; s2maps.eu</p>
     </section>
     <section id="attr-terrain-section" style="display:none;">
       <h3>Terrain / Elevation</h3>
