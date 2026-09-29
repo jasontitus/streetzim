@@ -265,7 +265,7 @@ class OnOff(argparse.Action):
         setattr(namespace, self.dest, value)
 
 
-def _add_feature(group: argparse._ArgumentGroup, dest: str, help: str) -> None:
+def _add_feature(group: Any, dest: str, help: str) -> None:   # an argument group
     name = "--" + dest.replace("_", "-")
     group.add_argument(name, dest=dest, action=OnOff, nargs="?", const="on",
                        choices=ON_OFF, default=None, help=help)
