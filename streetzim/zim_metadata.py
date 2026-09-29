@@ -47,9 +47,11 @@ def _text(label: str, value: str, max_len: int = 0) -> str:
 
 
 def parse_tags(value: str) -> list[str]:
-    """Semicolon-delimited tags, cleaned and de-duplicated (order kept)."""
+    """Semicolon-delimited tags, cleaned and de-duplicated (order kept).
+    Exactly zimscraperlib's rule: only a tag that is empty after cleanup is
+    refused. build_overrides also refuses whitespace-only tags."""
     tags = [clean_str(t) for t in value.split(";")]
-    if not all(t.strip() for t in tags):
+    if not all(tags):
         raise ValueError(f"Tags: empty tag in {value!r}")
     return list(dict.fromkeys(tags))
 
@@ -67,6 +69,11 @@ def _check(label: str, value: str, max_len: int = 0) -> str:
 
 
 def _check_tags(value: str) -> list[str]:
+    # Stricter than zimscraperlib, on both paths: clean_str strips only
+    # ASCII whitespace, so "maps; " with a no-break space would pass as a
+    # blank tag.
+    if any(not t.strip() for t in value.split(";")):
+        raise ValueError(f"Tags: empty tag in {value!r}")
     if _scraperlib():
         from streetzim import scraperlib
         return scraperlib.tags(value.split(";"))

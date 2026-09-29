@@ -78,6 +78,14 @@ def test_illustration_becomes_48x48_png(size, fmt):
     assert (img.format, img.size) == ("PNG", (48, 48))
 
 
+@pytest.mark.parametrize("sep", ["\u00a0", "\u3000", "\u2003", "\u0085"])
+def test_blank_unicode_tag_refused(sep):
+    # zimscraperlib's cleanup strips ASCII whitespace only; build_overrides
+    # refuses such a tag on both paths.
+    with pytest.raises(ValueError, match="empty tag"):
+        zm.build_overrides(tags=f"maps;{sep}")
+
+
 SVG = (b'<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="20" '
        b'height="10"><rect width="20" height="10" fill="red"/></svg>')
 

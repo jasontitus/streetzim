@@ -82,3 +82,59 @@ def test_illustration_matches(size, mode, fmt):
     # Both crop to fill; resampling filters differ, the picture must not.
     diff = ImageStat.Stat(ImageChops.difference(a.convert("RGB"), b.convert("RGB"))).mean
     assert max(diff) < 12, diff
+
+
+def _random_text(rng, n):
+    pools = [range(0x20, 0x7f), range(0x00, 0x20), range(0x80, 0x250), range(0x2000, 0x2070),
+             range(0x300, 0x370), range(0x1f300, 0x1f6ff), range(0xe000, 0xe010),
+             range(0xfe00, 0xfe10), [0x200d, 0xfeff, 0xa0, 0x3000, 0x85]]
+    return "".join(chr(rng.choice(rng.choice(pools))) for _ in range(n))
+
+
+def test_fuzz_text_and_tags_match():
+    import random
+    rng = random.Random(1729)
+    for _ in range(1500):
+        v = _random_text(rng, rng.choice([0, 1, 2, 5, 29, 30, 31, 79, 81, 200]))
+        for key in ("Title", "Description", "Name"):
+            assert _outcome(zm._text, key, v, LIMITS[key]) == \
+                _outcome(scraperlib.text, key, v), (key, v)
+        tags = ";".join(_random_text(rng, rng.choice([0, 1, 3, 8]))
+                        for _ in range(rng.randint(1, 4)))
+        assert _outcome(zm.parse_tags, tags) == \
+            _outcome(scraperlib.tags, tags.split(";")), tags
+
+
+# ------------------------------------------------ zimscraperlib path only
+
+
+RECT = (b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32">'
+        b'<rect width="64" height="32" fill="#22aa77"/></svg>')
+
+
+@pytest.mark.parametrize("data", [
+    RECT,
+    b"\n\n  " + RECT,                                  # no <?xml>, leading whitespace
+    b"<!-- icon -->\n" + RECT,                          # leading comment
+    b"\xef\xbb\xbf" + RECT,                            # byte-order mark
+    __import__("gzip").compress(RECT),                 # .svgz
+])
+def test_svg_variants_crop_to_fill(data):
+    from PIL import Image
+    img = Image.open(io.BytesIO(zm.illustration_png(data))).convert("RGBA")
+    assert img.size == (48, 48)
+    # Cropped to fill: no transparent letterbox bands at the edges.
+    for xy in [(24, 0), (24, 47), (0, 24), (47, 24), (24, 24)]:
+        assert img.getpixel(xy)[3] == 255, xy
+
+
+def test_download_timeouts_and_retries(monkeypatch):
+    calls = []
+    monkeypatch.setattr(scraperlib, "stream_file",
+                        lambda url, **kw: calls.append(kw) or (0, {}))
+    scraperlib.download("https://example.org/x.pbf", user_agent="t", dest=Path("x"))
+    scraperlib.download("https://example.org/icon.png", user_agent="t")
+    big, small = calls
+    assert big["timeout"] >= 60 and "session" not in big
+    retry = small["session"].get_adapter("https://example.org").max_retries
+    assert small["timeout"] <= 30 and retry.total <= 2 and retry.backoff_factor <= 1
