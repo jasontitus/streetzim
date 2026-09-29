@@ -71,7 +71,7 @@ function loadView(env = {}) {
   }
   const fn = new Function('window', 'document', 'location', 'setTimeout', 'clearTimeout',
     VIEW_SRC + '\nreturn { SZ_VIEWER_VERSION, _szStorage, _szViewKey, _szHashSetsView,' +
-    ' _szReadView, _szWriteView, _szOpeningCamera, _szMaxBounds, initViewMemory, initHomeButton,' +
+    ' _szReadView, _szWriteView, _szOpeningCamera, _szMaxBounds, _szClearZoom, initViewMemory, initHomeButton,' +
     ' _szAboutText, _szMonth, initAbout, _szSatellite, _szSatelliteCreditHtml };');
   // Fake timers: `timers` holds the pending ones; runTimers() fires them.
   const timers = new Map();
@@ -369,6 +369,28 @@ await ok('maxBounds is the built box itself: no margin of empty map around it', 
   // showed as a blank strip -- the sea cut off -- at every edge).
   assert.match(HTML, /maxBounds: _szMaxBounds\(config\)/);
   assert.doesNotMatch(HTML, /config\.bounds\[\d\] [-+] 0\.01/);
+});
+
+await ok('a result held at the box edge under a sheet is cleared by zooming in', () => {
+  const v = loadView({});
+  // 844 px phone, 200 px strip at the bottom, 110 px of search box on top.
+  const Z = (y, z, yN, yS) => v._szClearZoom(y, 844, 110, 200, z, 20, yN, yS);
+  assert.strictEqual(Z(312, 17, -5000, 5000), null);             // clear: nothing to do
+  // Under the strip, 100 px from the south edge: zoom in log2(240/100).
+  assert.ok(Math.abs(Z(744, 17, -5000, 844) - (17 + Math.log2(2.4))) < 1e-9);
+  // Above the screen (MapLibre's offset at the north edge), 32 px below the
+  // north edge: log2(150/32).
+  assert.ok(Math.abs(Z(-78, 15, -110, 3000) - (15 + Math.log2(150 / 32))) < 1e-9);
+  // Hidden but far from any edge: recentre at the same zoom.
+  assert.strictEqual(Z(800, 15, -3000, 3000), 15);
+  // Capped at maxZoom; nothing to do on the edge itself.
+  assert.strictEqual(Z(834, 18, -5000, 844), 20);
+  assert.strictEqual(Z(844, 17, -5000, 844), null);
+  // The find strip, search and wiki fly through it.
+  for (const pat of [/_szFlyToClear\(map, \{\s*center: \[r\.o, r\.a\]/, /_szFlyToClear\(map, \{ center: \[lon, lat\], zoom: zoom/,
+                     /_szFlyToClear\(map, \{ center: \[lon, lat\], zoom: targetZoom/, /_szFlyToClear\(map, \{ center: \[lng, lat\]/]) {
+    assert.match(HTML, pat);
+  }
 });
 
 await ok('About text from new and old map-config.json', () => {

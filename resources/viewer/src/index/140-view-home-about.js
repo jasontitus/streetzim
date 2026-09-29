@@ -131,6 +131,70 @@ function _szMaxBounds(config) {
   return [[b[0], s], [b[2], n]];
 }
 
+// A result near the box edge cannot be flown to the middle of the free map:
+// maxBounds stops the camera at the edge, so flyTo's offset is lost and the
+// pin can end up under the find strip, the place sheet or the search box
+// (at the north edge MapLibre 5.23 even puts it above the screen). Moving
+// the camera cannot help; zooming in can, because the pin's distance in
+// pixels from the box edge doubles with each zoom level.
+//
+// y: the pin's y after the move; h: canvas height; top/bottom: px covered
+// by chrome; yNorth/ySouth: the box's north and south edges projected at
+// the same zoom (they may be off screen). Returns the zoom at which, centred
+// on the pin with no offset, it clears the chrome by `margin` px, or null
+// when it is clear already (or cannot be cleared).
+function _szClearZoom(y, h, top, bottom, zoom, maxZoom, yNorth, ySouth, margin) {
+  margin = margin || 40;
+  if (y > top + margin / 2 && y < h - bottom - margin / 2) return null;
+  var dTop = y - yNorth, dBottom = ySouth - y;   // px from each edge
+  var d = Math.min(dTop, dBottom);
+  var want = dBottom <= dTop ? bottom + margin : top + margin;
+  if (d * 2 >= h) return zoom;                   // not at an edge: just recentre
+  if (!(d > 1)) return null;
+  var z = Math.min(maxZoom, zoom + Math.max(0, Math.log(want / d) / Math.LN2));
+  return z;
+}
+
+// How much of the canvas the chrome covers: the search box at the top, and
+// at the bottom whichever sheet is open (find strip, place details, the
+// wiki panel when it is a bottom sheet).
+function _szCoveredEdges(map) {
+  var c = map.getCanvas().getBoundingClientRect(), top = 0, bottom = 0;
+  function rect(id) {
+    var el = document.getElementById(id);
+    // Not offsetParent: it is null for the position:fixed sheets.
+    if (!el || !el.getClientRects().length) return null;
+    var r = el.getBoundingClientRect();
+    return r.height > 0 ? r : null;
+  }
+  var sc = rect('search-container');
+  if (sc) top = Math.max(0, sc.bottom - c.top);
+  ['find-results-strip', 'place-detail', 'wiki-panel'].forEach(function(id) {
+    var r = rect(id);
+    if (r && r.top > c.top + c.height * 0.3) bottom = Math.max(bottom, c.bottom - r.top);
+  });
+  return { top: top, bottom: bottom };
+}
+
+// flyTo; then, if maxBounds left the target under the chrome, ease in on it.
+function _szFlyToClear(map, opts) {
+  var mb = map.getMaxBounds && map.getMaxBounds();
+  if (!mb) { map.flyTo(opts); return; }
+  // Listen first: a flyTo with duration 0 ends inside the call.
+  map.once('moveend', function() {
+    try {
+      var c = maplibregl.LngLat.convert(opts.center);
+      var h = map.getCanvas().clientHeight, e = _szCoveredEdges(map);
+      var z = _szClearZoom(map.project(c).y, h, e.top, e.bottom, map.getZoom(),
+                           map.getMaxZoom(), map.project([c.lng, mb.getNorth()]).y,
+                           map.project([c.lng, mb.getSouth()]).y);
+      if (z !== null) map.easeTo({ center: c, zoom: z, duration: 300 });
+    } catch (err) {}
+  });
+  map.flyTo(opts);
+}
+window.__szFlyToClear = _szFlyToClear;   // for tests and probes
+
 function _szDriving() {
   var hud = document.getElementById('drive-hud');
   return !!(hud && hud.classList && hud.classList.contains('visible'));

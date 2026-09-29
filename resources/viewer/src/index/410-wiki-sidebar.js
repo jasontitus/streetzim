@@ -116,7 +116,7 @@ function initWikiSidebar(map, config) {
       // latitude span; when zoomed out to explore a few cities that span is
       // large, so it flew ~0.1-0.2° (many km) SOUTH of the real location.
       var _dy = Math.round((map.getCanvas().clientHeight || 600) * 0.22);
-      map.flyTo({ center: [lon, lat], zoom: targetZoom, duration: 1000, offset: [0, -_dy] });
+      _szFlyToClear(map, { center: [lon, lat], zoom: targetZoom, duration: 1000, offset: [0, -_dy] });
     } else {
       map.flyTo({ center: [lon, lat], zoom: targetZoom, duration: 1000 });
     }
@@ -467,7 +467,7 @@ function initWikiSidebar(map, config) {
               // the old latitude-span shift flew kilometres south of the
               // target when the map was zoomed out.
               var _dy2 = Math.round((map.getCanvas().clientHeight || 600) * 0.22);
-              map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 1200, offset: [0, -_dy2] });
+              _szFlyToClear(map, { center: [lng, lat], zoom: targetZoom, duration: 1200, offset: [0, -_dy2] });
             } else {
               map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 1200 });
             }

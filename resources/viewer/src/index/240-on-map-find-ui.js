@@ -1008,11 +1008,12 @@ function _setActiveResult(map, idx, flyTo) {
   }
   if (flyTo) {
     var r = _findResultsState.items[idx];
-    map.flyTo({
+    _szFlyToClear(map, {
       center: [r.o, r.a],
       zoom: Math.max(map.getZoom(), 14),
       // Offset the camera up by the strip's height so the active
-      // pin sits in the visible map area, not behind the carousel.
+      // pin sits in the visible map area, not behind the carousel
+      // (and zoom in when maxBounds holds it at the box edge, 140).
       offset: [0, -110],
       duration: 500,
     });

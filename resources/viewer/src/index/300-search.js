@@ -851,7 +851,7 @@ var SEARCH_SHARDS = (function () {
     // as "the map jumped past my result". 0.18*h capped at chrome+60 lands
     // it around 60% with the popup clear of the search box.
     var _dy = Math.min(Math.round(_h * 0.18), _topChrome + 60);
-    map.flyTo({ center: [lon, lat], zoom: zoom, duration: 1500, offset: [0, _dy] });
+    _szFlyToClear(map, { center: [lon, lat], zoom: zoom, duration: 1500, offset: [0, _dy] });
     placeSearchPin(map, lat, lon, name, enrich);
     resultsEl.style.display = 'none';
     input.blur();
