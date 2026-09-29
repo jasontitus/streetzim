@@ -4,13 +4,16 @@
 
     python tools/pin_viewer_assets.py --check              # offline; CI runs it
     python tools/pin_viewer_assets.py --maplibre 5.24.0    # vendor another MapLibre
+    python tools/pin_viewer_assets.py --rtl-text 0.3.0     # vendor the RTL text plugin
     python tools/pin_viewer_assets.py --fonts              # re-pin the glyph ranges
     python tools/pin_viewer_assets.py --prefetch DIR       # fill a cache (Docker image)
 
 --maplibre downloads the npm tarball, checks it against the sha512 the npm
 registry publishes for that version, and writes dist/maplibre-gl.js,
 dist/maplibre-gl.css and LICENSE.txt to resources/vendor/maplibre-gl/ with
-their SHA-256s in the lock file. --fonts downloads every range of every
+their SHA-256s in the lock file. --rtl-text does the same for
+@mapbox/mapbox-gl-rtl-text (dist/mapbox-gl-rtl-text.js and LICENSE.md, to
+resources/vendor/mapbox-gl-rtl-text/). --fonts downloads every range of every
 fontstack from the font CDN and records its SHA-256 (null for a range the
 CDN answers 404), printing how many changed. Review the diff and commit
 both. --prefetch downloads every pinned range, checks it, and stores it in
@@ -38,11 +41,18 @@ if str(ROOT) not in sys.path:
 from streetzim import viewer_assets as va  # noqa: E402
 
 NPM_REGISTRY = "https://registry.npmjs.org"
-# npm tarball member -> vendored file name
-MAPLIBRE_FILES = {
-    "package/dist/maplibre-gl.js": "maplibre-gl.js",
-    "package/dist/maplibre-gl.css": "maplibre-gl.css",
-    "package/LICENSE.txt": "LICENSE.txt",
+# lock-file key -> (npm package, licence, {tarball member: vendored file name})
+NPM_PACKAGES: dict[str, tuple[str, str, dict[str, str]]] = {
+    "maplibre-gl": ("maplibre-gl", "BSD-3-Clause (LICENSE.txt)", {
+        "package/dist/maplibre-gl.js": "maplibre-gl.js",
+        "package/dist/maplibre-gl.css": "maplibre-gl.css",
+        "package/LICENSE.txt": "LICENSE.txt",
+    }),
+    va.RTL_TEXT_PLUGIN: ("@mapbox/mapbox-gl-rtl-text",
+                         "BSD-2-Clause, ICU under the Unicode licence (LICENSE.md)", {
+        "package/dist/mapbox-gl-rtl-text.js": "mapbox-gl-rtl-text.js",
+        "package/LICENSE.md": "LICENSE.md",
+    }),
 }
 DEFAULT_FONTS: dict[str, Any] = {
     "base_url": "https://fonts.openmaptiles.org",
@@ -79,35 +89,42 @@ def check_npm_integrity(data: bytes, integrity: str) -> None:
         raise SystemExit(f"npm tarball sha512 {got} != registry's {b64}")
 
 
-def pin_maplibre(version: str) -> None:
-    meta = json.loads(va.fetch(f"{NPM_REGISTRY}/maplibre-gl/{version}"))
+def pin_npm(name: str, version: str) -> None:
+    """Vendor package ``name`` (a key of NPM_PACKAGES) at ``version`` from
+    its npm tarball, checked against the registry's sha512."""
+    package, licence, members = NPM_PACKAGES[name]
+    meta = json.loads(va.fetch(f"{NPM_REGISTRY}/{package}/{version}"))
     tarball_url: str = meta["dist"]["tarball"]
     integrity: str = meta["dist"]["integrity"]
     tgz = va.fetch(tarball_url)
     check_npm_integrity(tgz, integrity)
-    out_dir = va.VENDOR / "maplibre-gl"
+    out_dir = va.VENDOR / name
     out_dir.mkdir(parents=True, exist_ok=True)
     files: dict[str, str] = {}
     with tarfile.open(fileobj=io.BytesIO(tgz), mode="r:gz") as tar:
-        for member, name in MAPLIBRE_FILES.items():
+        for member, fname in members.items():
             f = tar.extractfile(member)
             if f is None:
                 raise SystemExit(f"{member} not in {tarball_url}")
             data = f.read()
-            (out_dir / name).write_bytes(data)
-            files[name] = va.sha256_hex(data)
-            print(f"  {name}: {len(data):,} bytes, sha256 {files[name]}")
+            (out_dir / fname).write_bytes(data)
+            files[fname] = va.sha256_hex(data)
+            print(f"  {fname}: {len(data):,} bytes, sha256 {files[fname]}")
     lock = read_lock_or_empty()
-    lock["maplibre-gl"] = {
+    lock[name] = {
         "version": version,
-        "licence": "BSD-3-Clause (LICENSE.txt)",
+        "licence": licence,
         "tarball": tarball_url,
         "integrity": integrity,
         "files": files,
     }
     write_lock(lock)
-    print(f"vendored maplibre-gl {version} in {out_dir.relative_to(ROOT)}; "
-          f"run scripts/sync-drive-viewer.sh for the website copy")
+    print(f"vendored {package} {version} in {out_dir.relative_to(ROOT)}")
+
+
+def pin_maplibre(version: str) -> None:
+    pin_npm("maplibre-gl", version)
+    print("run scripts/sync-drive-viewer.sh for the website copy")
 
 
 def pin_fonts() -> None:
@@ -168,7 +185,8 @@ def prefetch(dest: Path) -> None:
 
 def check() -> None:
     lock = va.load_lock()
-    va.vendored_maplibre(lock)
+    for name in NPM_PACKAGES:
+        va.vendored(name, lock)
     ranges = va.font_ranges(lock)
     stacks = lock["fonts"]["fontstacks"]
     for stack in stacks:
@@ -178,7 +196,8 @@ def check() -> None:
            (len(fr.sha256) != 64 or any(c not in "0123456789abcdef" for c in fr.sha256))]
     if bad:
         raise SystemExit(f"lock file: malformed sha256 for {bad[0].stack}/{bad[0].range_key}")
-    print(f"ok: maplibre-gl {lock['maplibre-gl']['version']} matches the lock file; "
+    print(f"ok: maplibre-gl {lock['maplibre-gl']['version']} and "
+          f"{va.RTL_TEXT_PLUGIN} {lock[va.RTL_TEXT_PLUGIN]['version']} match the lock file; "
           f"{len(ranges)} glyph ranges pinned")
 
 
@@ -187,6 +206,8 @@ def main() -> int:
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--check", action="store_true", help="verify vendored files (offline)")
     g.add_argument("--maplibre", metavar="VERSION", help="vendor this MapLibre GL JS version")
+    g.add_argument("--rtl-text", metavar="VERSION",
+                   help="vendor this @mapbox/mapbox-gl-rtl-text version")
     g.add_argument("--fonts", action="store_true", help="re-pin every glyph range from the CDN")
     g.add_argument("--prefetch", metavar="DIR", type=Path,
                    help="download the pinned glyph ranges into this cache directory")
@@ -196,6 +217,8 @@ def main() -> int:
             check()
         elif args.maplibre:
             pin_maplibre(args.maplibre)
+        elif args.rtl_text:
+            pin_npm(va.RTL_TEXT_PLUGIN, args.rtl_text)
         elif args.fonts:
             pin_fonts()
         else:

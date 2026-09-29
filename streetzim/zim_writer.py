@@ -30,6 +30,7 @@ from streetzim.tiles import (
     iter_tiles_from_mbtiles,
 )
 from streetzim.tile_alias import TileAliaser, max_alias_bytes
+from streetzim import viewer_assets
 
 
 def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
@@ -820,36 +821,19 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
 
 
 # MapLibre's RTL text plugin (Arabic/Hebrew shaping and bidi), vendored from
-# @mapbox/mapbox-gl-rtl-text 0.3.0 (BSD-2-Clause; the ICU parts under the
-# Unicode licence, both in LICENSE.md next to it) -- the version MapLibre's
-# setRTLTextPlugin documentation pins. Written into every ZIM and named in
-# map-config.json as `rtlTextPlugin`; the viewer (137-rtl-text.js) loads it
-# only once a tile carries RTL text. Vendored rather than downloaded so a
-# build needs no network for it; the hash guards the copy.
-RTL_TEXT_PLUGIN_ENTRY = "mapbox-gl-rtl-text.js"
-RTL_TEXT_PLUGIN_PATH = VIEWER_DIR.parent / "vendor" / "mapbox-gl-rtl-text" / RTL_TEXT_PLUGIN_ENTRY
-RTL_TEXT_PLUGIN_SHA256 = "d1c69035295613baaf83fe23fd9266b0eaed7e5e472e9632b0b5438afc3f589e"
+# @mapbox/mapbox-gl-rtl-text (the version MapLibre's setRTLTextPlugin
+# documentation pins) and pinned in resources/viewer-assets.lock.json like
+# MapLibre itself (streetzim/viewer_assets.py). Written into every ZIM and
+# named in map-config.json as `rtlTextPlugin`; the viewer (137-rtl-text.js)
+# loads it only once a tile carries RTL text. A missing or altered copy
+# stops the build (viewer_assets.IntegrityError), as for MapLibre.
+RTL_TEXT_PLUGIN_ENTRY = viewer_assets.RTL_TEXT_PLUGIN_ENTRY
 
 
 def _rtl_text_plugin_bytes():
-    """The ZIM entry: the vendored plugin behind a comment carrying its
-    licence (the minified dist has none, and BSD-2 and the ICU licence both
-    ask for the notice to travel with the copy). None if this checkout does
-    not carry the plugin (the viewer then leaves RTL labels unshaped, as
-    before). A copy that does not match the pinned hash is an error, not a
-    silent skip."""
-    import hashlib
-    if not RTL_TEXT_PLUGIN_PATH.is_file():
-        return None
-    data = RTL_TEXT_PLUGIN_PATH.read_bytes()
-    got = hashlib.sha256(data).hexdigest()
-    if got != RTL_TEXT_PLUGIN_SHA256:
-        raise RuntimeError(f"{RTL_TEXT_PLUGIN_PATH}: sha256 {got}, expected {RTL_TEXT_PLUGIN_SHA256}")
-    licence = (RTL_TEXT_PLUGIN_PATH.parent / "LICENSE.md").read_bytes()
-    if b"*/" in licence:
-        raise RuntimeError("LICENSE.md would close the comment it is wrapped in")
-    return (b"/*! @mapbox/mapbox-gl-rtl-text 0.3.0\n\n" + licence.rstrip()
-            + b"\n*/\n" + data)
+    """The ZIM entry (viewer_assets.rtl_text_plugin_entry): the verified
+    plugin behind a comment carrying its licence."""
+    return viewer_assets.rtl_text_plugin_entry()
 
 
 def _add_viewer(creator, MapItem, *, maplibre_js_path, maplibre_css_path, viewer_html_path, map_config, name):
@@ -912,11 +896,10 @@ def _add_viewer(creator, MapItem, *, maplibre_js_path, maplibre_css_path, viewer
         "maplibre-gl.css", "MapLibre GL CSS", "text/css",
         maplibre_css_path,
     ))
-    rtl = _rtl_text_plugin_bytes()
-    if rtl is not None:
-        creator.add_item(MapItem(
-            RTL_TEXT_PLUGIN_ENTRY, "MapLibre RTL text plugin", "application/javascript", rtl,
-        ))
+    creator.add_item(MapItem(
+        RTL_TEXT_PLUGIN_ENTRY, "MapLibre RTL text plugin", "application/javascript",
+        _rtl_text_plugin_bytes(),
+    ))
 
 
 
@@ -924,11 +907,8 @@ def _add_map_config(creator, MapItem, *, map_config, has_wiki_articles):
     """map-config.json, with hasWikiArticles only when articles were stored
     (the viewer's credits list Wikipedia on it)."""
     map_config = dict(map_config)
-    # Same predicate as _add_viewer, which wrote (or skipped) the file.
-    if _rtl_text_plugin_bytes() is not None:
-        map_config["rtlTextPlugin"] = RTL_TEXT_PLUGIN_ENTRY
-    else:
-        map_config.pop("rtlTextPlugin", None)
+    # _add_viewer wrote the file (or stopped the build).
+    map_config["rtlTextPlugin"] = RTL_TEXT_PLUGIN_ENTRY
     if has_wiki_articles:
         map_config["hasWikiArticles"] = True
     else:
