@@ -352,3 +352,59 @@ def test_golden_builds_usage():
                            capture_output=True, text=True)
         assert r.returncode == 2, args
         assert "BEFORE AFTER WORKDIR" in r.stderr
+
+
+@pytest.mark.parametrize("new,volatile", [
+    ("2026/10", True),                       # same shape: YYYY/MM
+    ("2026-10", False),                      # different shape
+    ("garbage", False),
+    (202610, False),
+    (None, False),
+])
+def test_build_date_must_keep_its_date_shape(new, volatile):
+    p = "C/map-config.json"
+    c = gd.classify({p: J({"buildDate": "2026/09", "x": 1})}, {p: J({"buildDate": new, "x": 1})})
+    assert c["volatile" if volatile else "changed"] == [p]
+
+
+def test_zim_entries_do_not_keep_content_in_memory(tmp_path):
+    a = _zim(tmp_path, "a.zim")
+    entries, _ = gd.read_zim(a)
+    items = [e for e in entries.values() if e.redirect is None]
+    assert items and all(e._data is None for e in items)             # only digests kept
+    assert json.loads(entries["C/search-data/10.json"].data) == RECORDS  # re-read on demand
+
+
+class _FakeEntry:
+    def __init__(self, index, path):
+        self._index, self.path, self.title, self.is_redirect = index, path, "", False
+
+    def get_item(self):
+        class _It:
+            mimetype, content = "text/plain", b"x"
+        return _It()
+
+
+class _FakeArchive:
+    """Two non-content entries on the same path, which no real writer makes."""
+    metadata_keys = ("Title",)
+    all_entry_count = entry_count = 3
+    uuid = "u"
+
+    def __init__(self, _path):
+        self._e = [_FakeEntry(0, "index.html"), _FakeEntry(1, "listing/x"),
+                   _FakeEntry(2, "listing/x")]
+
+    def _get_entry_by_id(self, i): return self._e[i]
+    def has_entry_by_path(self, p): return p == "index.html"
+    def get_entry_by_path(self, p): return self._e[0]
+
+
+def test_colliding_paths_exit_2(monkeypatch, capsys, tmp_path):
+    reader = pytest.importorskip("libzim.reader")
+    good = _zim(tmp_path, "a.zim")
+    monkeypatch.setattr(reader, "Archive", _FakeArchive)
+    with pytest.raises(gd.ZimError, match="two entries on X/listing/x"):
+        gd.read_zim(good)
+    rc, cap = _run(capsys, good, good)
+    assert rc == 2 and "two entries" in cap.err

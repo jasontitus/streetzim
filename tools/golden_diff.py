@@ -12,18 +12,22 @@ listings and Xapian indexes. Each entry lands in one class:
 
   identical     same bytes;
   volatile      expected to differ between any two builds: the M/Date
-                metadata (a YYYY-MM-DD date on both sides), the Xapian indexes (libzim does not write them
-                reproducibly), and the `buildDate` value of map-config.json
-                and streetzim-meta.json (present on both sides; everything
-                else in those files compared type-strictly);
+                metadata (a YYYY-MM-DD date on both sides), the Xapian
+                indexes (libzim does not write them reproducibly, so their
+                contents are not compared: only that both sides have them,
+                with the same M/Language), and the `buildDate` value of
+                map-config.json and streetzim-meta.json (on both sides, as
+                date strings of the same shape, e.g. 2026/09 or 2026-09-29;
+                everything else in those files compared type-strictly);
   reordered     a list of search records (JSON objects with "t" and "n")
                 holding the same records, whose sequence of (type, name) --
                 the order the viewer lists them in -- is unchanged: only
                 records with the same type and name swapped places (they
                 may differ in other fields: two builds of one commit swap
                 such records, see docs/golden-builds.md). Also the same
-                JSON written differently (escapes), and Kiwix search pages (C/search/*.html) whose entries (title,
-                MIME type, content) moved to other page numbers;
+                JSON written differently (escapes), and Kiwix search pages
+                (C/search/*.html) whose entries (title, MIME type or
+                redirect target, content) moved to other page numbers;
   tiles-equal   (--decode-tiles) a vector tile with the same features in
                 another order, as tilemaker writes them;
   moved         (--coord-tolerance) as reordered, but records' coordinates
@@ -38,13 +42,20 @@ listings and Xapian indexes. Each entry lands in one class:
                 real differences.
 
 Exit status 0 when nothing is changed, only-before or only-after; 1
-otherwise; 2 on a usage error or an archive that cannot be read or is
-empty. The archive UUIDs always differ and are printed for reference only.
+otherwise; 2 on a usage error or an archive that cannot be read, is empty,
+or has two non-content entries on one path. The archive UUIDs always differ
+and are printed for reference only.
+
+Memory: each archive is read once, keeping per entry only its path, title,
+MIME type and a SHA-256 of its content; content is re-read from the archive
+only for entries whose hashes differ. So memory grows with the number of
+entries (roughly 200 bytes each), not their size.
 """
 from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
 import json
 import math
 import re
@@ -60,19 +71,37 @@ ORDER = ("identical", "volatile", "reordered", "tiles-equal", "moved", "noise", 
 DATED_JSON = {"C/map-config.json": "buildDate", "C/streetzim-meta.json": "buildDate"}
 SEARCH_PAGE = re.compile(r"^C/search/.*\.html$")
 ISO_DATE = re.compile(rb"\d{4}-\d{2}-\d{2}")
+# buildDate: an ISO-style date, month or datetime ("2026/09", "2026-09-29",
+# "2026-09-29T12:00:00Z").
+BUILD_DATE = re.compile(r"\d{4}[-/]\d{2}(?:[-/]\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z?)?)?")
 
 
 class Entry:
     """One entry. A redirect has no item, so no MIME type or content: it is
-    stored with mime "" and data b"" and compared by its target (and title)."""
-    __slots__ = ("data", "mime", "redirect", "title")
+    stored with mime "" and data b"" and compared by its target (and title).
 
-    def __init__(self, mime: str, data: bytes, redirect: str | None = None,
-                 title: str = "") -> None:
-        self.mime, self.data, self.redirect, self.title = mime, data, redirect, title
+    Entries read from an archive keep only a digest of their content and
+    `loader`, which re-reads it on demand; `data` is not cached, so memory
+    stays bounded whatever the archive's size."""
+    __slots__ = ("_data", "_loader", "digest", "mime", "redirect", "title")
 
-    def key(self) -> tuple[str, str, str | None, bytes]:
-        return (self.mime, self.title, self.redirect, self.data)
+    def __init__(self, mime: str, data: bytes = b"", redirect: str | None = None,
+                 title: str = "", loader: Callable[[], bytes] | None = None,
+                 digest: str | None = None) -> None:
+        self.mime, self.redirect, self.title = mime, redirect, title
+        self._data = None if loader else data
+        self._loader = loader
+        self.digest = digest if digest is not None else hashlib.sha256(data).hexdigest()
+
+    @property
+    def data(self) -> bytes:
+        if self._data is not None:
+            return self._data
+        assert self._loader is not None
+        return self._loader()
+
+    def key(self) -> tuple[str, str, str | None, str]:
+        return (self.mime, self.title, self.redirect, self.digest)
 
 
 class Log:
@@ -99,6 +128,10 @@ def read_zim(path: str) -> tuple[dict[str, Entry], str]:
     meta = set(a.metadata_keys)
     n = getattr(a, "all_entry_count", a.entry_count)
     out: dict[str, Entry] = {}
+
+    def loader(i: int) -> Callable[[], bytes]:
+        return lambda: bytes(a._get_entry_by_id(i).get_item().content)
+
     for i in range(n):
         e = a._get_entry_by_id(i)
         p = e.path
@@ -110,11 +143,15 @@ def read_zim(path: str) -> tuple[dict[str, Entry], str]:
             ns = "M"
         else:
             ns = "W" if e.is_redirect else "X"
+        key = f"{ns}/{p}"
+        if key in out:
+            raise ZimError(f"{path}: two entries on {key}; cannot tell them apart")
         if e.is_redirect:
-            out[f"{ns}/{p}"] = Entry("", b"", e.get_redirect_entry().path, e.title)
+            out[key] = Entry("", b"", e.get_redirect_entry().path, e.title)
             continue
         it = e.get_item()
-        out[f"{ns}/{p}"] = Entry(it.mimetype, bytes(it.content), None, e.title)
+        digest = hashlib.sha256(bytes(it.content)).hexdigest()
+        out[key] = Entry(it.mimetype, b"", None, e.title, loader(i), digest)
     if not any(k.startswith("C/") for k in out):
         raise ZimError(f"{path} has no content entries")
     return out, str(a.uuid)
@@ -221,6 +258,11 @@ def _is_volatile(path: str, a: Entry, b: Entry) -> bool:
             return False
         if not (isinstance(ja, dict) and isinstance(jb, dict) and key in ja and key in jb):
             return False
+        da, db = ja[key], jb[key]
+        if not (isinstance(da, str) and isinstance(db, str) and BUILD_DATE.fullmatch(da)
+                and BUILD_DATE.fullmatch(db)
+                and re.sub(r"\d", "9", da) == re.sub(r"\d", "9", db)):
+            return False
         ja.pop(key)
         jb.pop(key)
         return _canon(ja) == _canon(jb)
@@ -314,7 +356,12 @@ def report(classes: dict[str, list[str]], show: int,
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
+    ap = argparse.ArgumentParser(
+        description=(__doc__ or "").split("\n\n")[0],
+        epilog="Keeps a SHA-256 per entry, not the content: memory grows with the number "
+               "of entries (a few hundred bytes each), time with archive size (every "
+               "cluster is decompressed once). Xapian index contents are not compared. "
+               "See docs/golden-builds.md.")
     ap.add_argument("before")
     ap.add_argument("after")
     ap.add_argument("--control", help="a second build of `before` (same code, same inputs); "

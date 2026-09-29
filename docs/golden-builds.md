@@ -43,7 +43,8 @@ tools/golden_builds.sh --tilemaker main WORKTREE ~/golden/run2
   one of them (`--split-find-chips`, `--spatial-chunk-scale`) fails to
   build; compare such refs by hand with `tools/golden_diff.py`.
 - The exit status is 0 when the only differences are the expected ones,
-  1 otherwise, and 2 when an archive cannot be read or has no content.
+  1 otherwise, and 2 when an archive cannot be read, has no content, or
+  has two non-content entries on one path.
 
 Each Monaco build takes under a minute, and a run needs about 100 MB of
 disk (mostly the exported source trees), plus about 1.2 GB for the
@@ -94,6 +95,14 @@ Xapian indexes. Each path lands in one class:
 
 It lists up to `--show` (default 20) paths per class.
 
+**Size limits.** Each archive is read once and only a SHA-256 per entry is
+kept; content is re-read only for entries that differ. Memory grows with
+the number of entries, not their size: comparing a 115 MB, 9,000-entry
+ZIM with itself plus a control peaked at 162 MB and took about 30 s per
+archive (reading means decompressing every cluster). Monaco and D.C. are
+quick; a region with millions of entries needs proportionally more time
+and a few hundred bytes of memory per entry.
+
 ### Expected differences
 
 These differ between any two builds of the same code and inputs. They
@@ -104,8 +113,8 @@ commit.
 |---|---|
 | archive UUID | libzim makes a new one per file; printed, not compared |
 | `M/Date` | the build date (must be `YYYY-MM-DD` on both sides) |
-| `buildDate` in `map-config.json` and `streetzim-meta.json` | the build month/date; the key must be present on both sides and is the only thing ignored; every other value is compared type-strictly (`true` is not `1`, `13` is not `13.0`) |
-| `X/fulltext/xapian`, `X/title/xapian` | libzim's Xapian indexes are not written reproducibly |
+| `buildDate` in `map-config.json` and `streetzim-meta.json` | the build month/date; the key must be present on both sides as a date string of the same shape (`2026/09` then `2026/10`, `2026-09-29` then `2026-10-01`) and is the only thing ignored; every other value is compared type-strictly (`true` is not `1`, `13` is not `13.0`) |
+| `X/fulltext/xapian`, `X/title/xapian` | libzim's Xapian indexes are not written reproducibly, so **their contents are not compared**: only that both sides have them (a missing one is `only-before`/`only-after`) and the same `M/Language`. Kiwix's full-text and title search is not checked here |
 | order of records with the same type and name in `search-data/*.json` and `category-index/*.json` | e.g. two places called "Monaco" (the country and the commune) come out in either order. Such records can differ in other displayed fields: across five same-commit pairs, the swapped records differed in label (`l`), subtype (`s`), coordinates, Wikidata ID or Wikipedia link, so requiring the whole record sequence to match would fail every run |
 | page numbers of Kiwix search pages | `C/search/monaco-6.html` and `C/search/monaco-7.html` can swap contents |
 | tilemaker mode only: tile bytes | feature order (reported as `tiles-equal`) |
