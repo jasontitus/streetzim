@@ -10,7 +10,9 @@ articles.
 The working files (build script, comparison script, outputs) were in a
 scratch directory that has since been deleted. The numbers below come from
 the session's recorded tool output. Where something was not measured, or
-the explanation was not verified, it says so.
+the explanation was not verified, it says so. The comparison can now be
+rerun from the repository: see
+[golden-builds.md](golden-builds.md#optionally-washington-dc).
 
 **Result:** apart from three deliberate changes, `main` and the branch
 differed only in the same ways that two `main` builds differ from each
@@ -347,9 +349,13 @@ That estimate is for fetching over the API. It was not measured.
   `hasWikiArticles` fix, none of which the run above includes.
 - [ ] Build one small region through `build-region-fast.sh` on the build
   host, to exercise `--zim-builder=rust`.
-- [ ] Make the golden and D.C. comparison scripts (entry fingerprint diff,
+- [x] Make the golden and D.C. comparison scripts (entry fingerprint diff,
   decoded-tile diff, search-record multiset diff) a documented,
   rerunnable procedure. They lived in the deleted scratch directory.
+  Done: `tools/golden_builds.sh` and `tools/golden_diff.py` replace them,
+  and [golden-builds.md](golden-builds.md#optionally-washington-dc) has a
+  D.C. recipe. The recipe uses fewer flags than the run above; add the
+  others as that page's "Covering more of the builder" describes.
 - [ ] Optional: confirm the two missing place labels come from production's
   tile input.
 

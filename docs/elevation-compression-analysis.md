@@ -221,6 +221,8 @@ encoded = ((elev + 10000.0) / 0.1).astype(np.uint32)
 
 ## Test Script
 
+Removed in `a436aa8`; the path below is where commit `0792d0d` has it.
+
 ```bash
 python3 attic/research/test_terrain_compression.py [--max-zoom 12]
 ```

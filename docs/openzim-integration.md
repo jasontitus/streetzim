@@ -3,7 +3,7 @@
 openZIM plans to keep [openzim/maps](https://github.com/openzim/maps)
 (`maps2zim`) as its scraper and add StreetZim's features to it
 ([review](https://github.com/openzim/maps/blob/763a9bea611e2a64da90146636ce821c5e40d253/Streetzim%20vs%20Maps.md),
-[our response](openzim-review-response.md)). This page is a concrete plan
+[our first response](openzim-review-response.md)). This page is a concrete plan
 for doing that. It is based on maps2zim at `707fc44` (2026-09) and StreetZim
 at this commit. Everything here uses libzim / zimscraperlib and the standard
 openZIM tools.
