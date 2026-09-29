@@ -11,6 +11,9 @@
 #          if present, else python3)
 # Exit status: 0 if every check passed, 1 otherwise. Warnings don't fail.
 set -u
+# git status must not take index.lock or rewrite the index while host
+# scripts may be running git.
+export GIT_OPTIONAL_LOCKS=0
 
 ROOT=""
 PY=""
@@ -25,7 +28,8 @@ done
 if [ -z "$ROOT" ]; then
   ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 fi
-ROOT="$(cd "$ROOT" && pwd)"
+ROOT="$(cd "$ROOT" 2>/dev/null && pwd)" || { echo "no such directory: --root" >&2; exit 2; }
+[ -n "$ROOT" ] || { echo "no such directory: --root" >&2; exit 2; }
 if [ -z "$PY" ]; then
   if [ -x "$ROOT/venv-linux/bin/python3" ]; then PY="$ROOT/venv-linux/bin/python3"; else PY=python3; fi
 fi
@@ -35,8 +39,11 @@ ok()   { printf '  ok    %s\n' "$*"; }
 bad()  { printf '  FAIL  %s\n' "$*"; fails=$((fails + 1)); }
 warn() { printf '  warn  %s\n' "$*"; }
 
-cd "$ROOT" || exit 1
-echo "checkout: $ROOT ($(git rev-parse --short HEAD), branch $(git rev-parse --abbrev-ref HEAD))"
+cd "$ROOT" || exit 2
+if ! head=$(git rev-parse --short HEAD 2>&1); then
+  echo "not a usable git checkout: $ROOT ($head)"; echo "1 CHECK(S) FAILED"; exit 1
+fi
+echo "checkout: $ROOT ($head, branch $(git rev-parse --abbrev-ref HEAD))"
 
 echo "1. layout"
 if [ -f ops/README.md ] && [ -f ops/in-place.txt ]; then ok "ops/ is present"; else bad "ops/ missing: this checkout is not at the split"; echo "FAILED"; exit 1; fi
@@ -48,12 +55,16 @@ while IFS= read -r -d '' rec; do
   [ -e "$path" ] || { bad "dangling symlink: $path"; dangling=$((dangling + 1)); continue; }
   [ -L "$path" ] || { bad "tracked symlink is not a symlink on disk: $path (replaced by mv/sed -i?)"; wrong=$((wrong + 1)); }
 done < <(git ls-files -s -z)
-[ "$dangling" -eq 0 ] && [ "$wrong" -eq 0 ] && ok "$nlinks old-path symlinks resolve into ops/"
+if [ "$nlinks" -eq 0 ]; then bad "no tracked symlinks found (is this the split? did git ls-files fail?)"
+elif [ "$dangling" -eq 0 ] && [ "$wrong" -eq 0 ]; then ok "$nlinks old-path symlinks resolve into ops/"; fi
 
 echo "2. local changes that would block or undo a pull"
-inplace_re='^(web/|preview-proxy/)'
+# Only the data files the host edits by design are expected to differ: the
+# *.list / *.tsv / *.out entries of ops/in-place.txt. A change to any other
+# tracked file (web/, scripts, tests) is reported.
+inplace_re='^$'
 while IFS= read -r e; do inplace_re="$inplace_re|^$(printf '%s' "$e" | sed 's/[.[\*^$()+?{|]/\\&/g')\$"; done \
-  < <(grep -v '^#' ops/in-place.txt | grep -v '/$' | sed '/^$/d')
+  < <(grep -v '^#' ops/in-place.txt | grep -E '\.(list|tsv|out)$')
 blocking=0
 while IFS= read -r line; do
   [ -z "$line" ] && continue
@@ -67,6 +78,13 @@ while IFS= read -r line; do
   fi
 done < <(git status --porcelain)
 [ "$blocking" -eq 0 ] && ok "no local changes to tracked code"
+if counts=$(git rev-list --left-right --count '@{u}...HEAD' 2>/dev/null); then
+  ahead=${counts##*[[:space:]]}
+  [ "$ahead" = "0" ] && ok "no local commits (a fast-forward pull is possible)" \
+    || bad "$ahead local commit(s) not upstream: git pull --ff-only will refuse"
+else
+  warn "no upstream branch configured; local commits not checked"
+fi
 
 echo "3. shell scripts under ops/ parse"
 nsh=0; synerr=0
@@ -74,7 +92,8 @@ while IFS= read -r -d '' f; do
   nsh=$((nsh + 1))
   bash -n "$f" 2>/dev/null || { bad "syntax: $f"; synerr=$((synerr + 1)); }
 done < <(git ls-files -z 'ops/*.sh' 'ops/**/*.sh')
-[ "$synerr" -eq 0 ] && ok "$nsh scripts parse (bash -n)"
+if [ "$nsh" -eq 0 ]; then bad "no shell scripts found under ops/"
+elif [ "$synerr" -eq 0 ]; then ok "$nsh scripts parse (bash -n)"; fi
 # every moved script (one with a symlink at its old path) carries the guard
 nmoved=0; noguard=0
 while IFS= read -r -d '' f; do
@@ -82,10 +101,11 @@ while IFS= read -r -d '' f; do
   nmoved=$((nmoved + 1))
   grep -q '^# ops split, stage 1:' "$f" || { bad "no old-path guard: $f"; noguard=$((noguard + 1)); }
 done < <(git ls-files -z 'ops/*.sh' 'ops/**/*.sh')
-[ "$noguard" -eq 0 ] && ok "all $nmoved moved scripts carry the old-path guard"
+if [ "$nmoved" -eq 0 ]; then bad "no moved shell scripts found"
+elif [ "$noguard" -eq 0 ]; then ok "all $nmoved moved scripts carry the old-path guard"; fi
 
 echo "4. Python ops files find this checkout"
-if "$PY" - "$ROOT" <<'EOF'
+if "$PY" -I - "$ROOT" <<'EOF'
 import ast, os, sys, subprocess
 root = sys.argv[1]
 def defines_root(p):
@@ -108,17 +128,25 @@ for rel in files:
         got = ns["_streetzim_root"]()
         if os.path.realpath(got) != os.path.realpath(root):
             print(f"  FAIL  {f}: root {got}"); bad += 1
+if not files:
+    print("  FAIL  no Python ops files define _streetzim_root", end=""); sys.exit(1)
 print(f"  ok    {len(files)} files, by old and ops/ paths" if not bad else "", end="")
 sys.exit(1 if bad else 0)
 EOF
 then echo; else fails=$((fails + 1)); fi
 
 echo "5. boundary check"
-if "$PY" tools/check_boundary.py --root "$ROOT" >/tmp/check_stage1.$$ 2>&1; then ok "$(tail -1 /tmp/check_stage1.$$)"; else bad "$(tail -3 /tmp/check_stage1.$$)"; fi
-rm -f /tmp/check_stage1.$$
+if out=$("$PY" -I tools/check_boundary.py --root "$ROOT" 2>&1); then ok "$(printf '%s\n' "$out" | tail -1)"; else bad "$(printf '%s\n' "$out" | tail -3)"; fi
 
 echo "6. host view (informational)"
-running=$(ps -eo pid=,args= | awk -v r="$ROOT/" 'index($0, r) && /\.(sh|py|mjs)( |$)/ && !/check_stage1/' )
+# By path on the command line, or started from inside the checkout (cwd).
+running=$( { ps -eo pid=,args= | awk -v r="$ROOT/" 'index($0, r) && /\.(sh|py|mjs)( |$)/ && !/check_stage1/';
+             for d in /proc/[0-9]*; do
+               [ "$(readlink "$d/cwd" 2>/dev/null)" = "$ROOT" ] || continue
+               pid=${d#/proc/}; [ "$pid" = "$$" ] && continue
+               args=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)
+               case "$args" in *check_stage1*|"") ;; *.sh*|*.py*|*.mjs*) printf '%s %s (cwd)\n' "$pid" "$args" ;; esac
+             done; } | sort -u -n )
 if [ -n "$running" ]; then warn "scripts running from this checkout (they keep running across a pull):"; printf '%s\n' "$running" | sed 's/^/          /'; else ok "no scripts from this checkout are running"; fi
 if command -v crontab >/dev/null && crontab -l >/dev/null 2>&1; then
   n=$(crontab -l 2>/dev/null | grep -v '^#' | grep -c "$ROOT")

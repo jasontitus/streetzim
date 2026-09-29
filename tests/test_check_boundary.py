@@ -35,15 +35,18 @@ def repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", "-q", str(r)], check=True)
     _write(r, "ops/cloud/opsmod.py", "X = 1\n")
     _write(r, "ops/cloud/opsjob.sh", "#!/bin/bash\necho ops\n")
+    _write(r, "ops/tools/opstool.py", "Z = 3\n")
     _write(r, "ops/in-place.txt", "# ops left in place\nweb/\ncloud/queue.list\n")
-    _write(r, "ruff.toml", 'extend-exclude = [\n  "cloud/opsmod.py",\n]\n')
+    _write(r, "ruff.toml", 'extend-exclude = [\n  "cloud/opsmod.py",\n  "tools/opstool.py",\n]\n')
     _write(r, "cloud/coremod.py", '"""Core. Mentions cloud/opsjob.sh in a docstring."""\n'
                                   "# and cloud.opsmod in a comment\nY = 2\n")
     _write(r, "web/app.js", "fetch('cloud/opsjob.sh')\n")          # in place: ops
     _write(r, "cloud/queue.list", "cloud/opsjob.sh\n")             # in place: ops
     (r / "cloud").mkdir(exist_ok=True)
+    (r / "tools").mkdir(exist_ok=True)
     _link(r, "cloud/opsmod.py")
     _link(r, "cloud/opsjob.sh")
+    _link(r, "tools/opstool.py")
     return r
 
 
@@ -72,6 +75,10 @@ def test_clean_repo_passes(repo):
     ("Dockerfile", "FROM x\nRUN bash cloud/opsjob.sh\n", "names ops 'cloud/opsjob.sh'"),
     ("pyproject.toml", '[x]\nscript = "cloud/opsjob.sh"\n', "names ops 'cloud/opsjob.sh'"),
     ("config.json", '{"run": "cloud/opsjob.sh"}\n', "names ops 'cloud/opsjob.sh'"),
+    ("cloud/k.py", "import tools.opstool\n", "imports ops module tools.opstool"),
+    ("cloud/l.py", "from tools import opstool\n", "imports ops module tools.opstool"),
+    ("cloud/m.sh", "#!/bin/bash\ncase $1 in\n  *) bash opsjob.sh ;;\nesac\n",
+     "names ops 'opsjob.sh'"),
 ])
 def test_each_rule_flags(repo, rel, text, expect):
     _write(repo, rel, text)
@@ -85,6 +92,15 @@ def test_allowed_mentions_are_not_flagged(repo):
     _write(repo, "docs/x.md", "Run `cloud/opsjob.sh` on the host.\n")
     _write(repo, "cloud/opsjob_notes.py", "S = 'myopsjob.shx'\n")   # not the name
     assert _check(repo) == []
+
+
+def test_symlink_replaced_by_regular_file(repo):
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    (repo / "cloud" / "opsjob.sh").unlink()
+    (repo / "cloud" / "opsjob.sh").write_text("#!/bin/bash\necho edited\n")   # sed -i did this
+    errors, _ = cb.check(repo)                 # no git add: still tracked as a link
+    assert any("cloud/opsjob.sh: tracked as a symlink but is a regular file" in e
+               for e in errors), errors
 
 
 def test_symlink_target_and_ruff_list(repo):

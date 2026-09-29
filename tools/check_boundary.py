@@ -78,6 +78,10 @@ def check(root: Path) -> tuple[list[str], str]:
 
     # 1. every symlink points to ops/<same path>, which is tracked
     for p in links:
+        if not os.path.islink(root / p):
+            errors.append(f"{p}: tracked as a symlink but is a regular file on disk "
+                          "(replaced by mv or sed -i?)")
+            continue
         target = os.readlink(root / p)
         want = os.path.relpath(os.path.join("ops", p), os.path.dirname(p) or ".")
         if target != want:
@@ -90,8 +94,9 @@ def check(root: Path) -> tuple[list[str], str]:
     core_stems = {Path(p).stem for p in core if p.endswith(".py")}
     core_names = {Path(p).name for p in core}
     ops_py_stems = {Path(p).stem for p in links if p.endswith(".py")} - core_stems
-    ops_modules = {f"cloud.{Path(p).stem}" for p in links
-                   if p.startswith("cloud/") and p.endswith(".py")}
+    # Dotted names of moved modules: cloud.X, tools.X, ...
+    ops_modules = {p[:-3].replace("/", ".") for p in links
+                   if p.endswith(".py") and "/" in p}
     ops_names = {Path(p).name for p in links
                  if p.endswith((".sh", ".py", ".mjs", ".js"))} - core_names
     alts = sorted(set(links) | ops_modules | ops_names, key=len, reverse=True)
@@ -136,8 +141,10 @@ def check(root: Path) -> tuple[list[str], str]:
             for i, line in enumerate(full.read_text(encoding="utf-8",
                                                     errors="replace").splitlines(), 1):
                 code = line.strip()
-                if (hash_comments and code.startswith("#")) or \
-                        code.startswith(("//", "*", "/*", "<!--")):
+                if hash_comments:
+                    if code.startswith("#"):
+                        continue
+                elif code.startswith(("//", "*", "/*", "<!--")):   # JS / HTML / JSON
                     continue
                 m = name_re.search(line)
                 if m:
