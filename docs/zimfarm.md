@@ -29,6 +29,7 @@ test tools and no upload client.
 | Offline routing (drive / walk / bike) | on, spatial layout (SZCI v3) | `--no-routing` |
 | Wikidata place details | off | `--wikidata` (queries Wikidata) |
 | Terrain / hillshade | off | `--terrain` (downloads Copernicus DEM tiles) |
+| POIs in Kiwix's own search | off: Kiwix's full-text search covers places, parks, peaks, water and airports | `--kiwix-poi-pages` |
 | Satellite imagery | **off**; opt-in | `--satellite`: EOX Sentinel-2 cloudless 2016, **CC BY 4.0**. The 2021 mosaic, **CC BY-NC-SA 4.0 (non-commercial)**, only with `--satellite-source s2cloudless-2021 --satellite-accept-noncommercial`, as a variant labelled restricted ([below](#satellite-imagery)) |
 
 The area is exactly one of `--area` (a preset), `--include-poly` (a `.poly`
@@ -58,6 +59,46 @@ polygon. So:
 
 `License` metadata and the viewer's credits list only the sources a ZIM
 actually contains.
+
+### POIs in Kiwix's own search (`--kiwix-poi-pages`)
+
+The map's own search (the search box, Find chips, places list) covers every
+named feature. Kiwix's search, the one in the Kiwix app's bar and on
+kiwix-serve, only sees the features that have a detail page
+(`search/<slug>.html`): places, parks, peaks, water and airports. Without
+the flag, "Casino" on the Monaco ZIM finds the Fontaine du Casino and not
+the Casino, the shops or the bus stops named after it.
+`--kiwix-poi-pages` gives every named POI a page too, which Kiwix's
+full-text search and its title suggestions both find. It costs about 440 B
+per POI: roughly 40 B of compressed page, 80 B of directory entry and
+pointers, 125 B of full-text index and 195 B of title index. Measured on
+2026-09-29 with the default profile:
+
+| area | POI pages | ZIM | build time |
+|---|---|---|---|
+| Monaco (`--area monaco`) | +1,812 | 2.90 -> 3.70 MB (+28%) | within noise |
+| Luxembourg | +21,214 | 56.7 -> 66.0 MB (+16%) | within noise |
+| Switzerland (from its POI count) | +274,806 | about +121 MB on 624 MB (+19%) | |
+| Netherlands (from its POI count) | +324,793 | about +143 MB on 1,164 MB (+12%) | |
+
+Without the flag the pages that exist anyway (places, parks, peaks, water,
+airports) are in the title index too; that costs Monaco 15 KB (+0.5%) and
+Luxembourg 1.2 MB for 7,984 pages (+2.2%).
+
+The search pages are front articles (that is what puts them in the title
+index), so they count as the ZIM's articles: the "articles" number in the
+Kiwix library and the ZIM's article count are the main page plus one per
+search page. Monaco: 1 before this change, 18 without the flag, 1,830 with
+it; Luxembourg: 1, 7,985 and 29,199. `M/Counter` (entries by MIME type) and
+zimcheck's output do not change. Kiwix's "random article" can now open a
+search page (a place's detail page with "Directions to here" and "View on
+map").
+
+It is off by default for now. The planned `--profile full` is meant to turn
+it on, and so a full-profile ZIM carries the cost above (about +12% to +19%
+for a country, +28% for Monaco); `--profile basic` leaves it off. That
+branch will also make the option an on/off choice (an enum) in
+offliner-definition.json rather than the boolean it is here.
 
 ## Satellite imagery
 

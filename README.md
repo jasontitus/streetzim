@@ -7,7 +7,7 @@ file that opens in [Kiwix](https://kiwix.org) (iOS, Android, desktop) or in a
 browser, with no network at all. A ZIM contains:
 
 - **Vector map** rendered on the device by MapLibre GL JS (OpenMapTiles schema, z0–14, overzoomed beyond).
-- **Search** over places, streets, addresses, POIs, peaks, parks and water, plus Kiwix's own title/full-text search and one detail page per feature.
+- **Search** over places, streets, addresses, POIs, peaks, parks and water, plus Kiwix's own full-text search over a detail page for each place, park, peak, water feature and airport (POIs too with `--kiwix-poi-pages`; never streets or addresses: see `KIWIX_PAGE_TYPES` in streetzim/zim_writer.py and docs/zimfarm.md).
 - **Find page** with category chips (Food & Drink, Bars, Hotels, Museums, Parks, Health, Shops, Gas…) and distance sorting.
 - **Offline routing** (drive / walk / bike) in a Web Worker, with a GPS turn-by-turn HUD.
 - Optional **terrain** (hillshade / 3D from Copernicus DEM), **satellite imagery** (see the licence note below), **Wikidata** facts and bundled **Wikipedia** articles.

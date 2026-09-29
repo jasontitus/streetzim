@@ -80,6 +80,19 @@ function _szPrefersDark() {
   } catch (e) { return false; }
 }
 
+// The page chrome follows the map: html.sz-dark switches the search box,
+// chips, panels and MapLibre's controls to their dark colours (010-styles).
+// Applied once as the script loads, before the map exists, so the chrome
+// does not flash light, and again on every live scheme change.
+function _szApplyUiTheme(dark) {
+  try {
+    var root = document.documentElement;
+    if (dark) root.classList.add('sz-dark');
+    else root.classList.remove('sz-dark');
+  } catch (e) {}
+}
+_szApplyUiTheme(_szPrefersDark());
+
 function _szThemeStyle(style, dark) {
   if (!dark) return style;
   style.layers.forEach(function(layer) {
@@ -106,6 +119,7 @@ function initMapTheme(map, config) {
     var dark = _szPrefersDark();
     if (dark === current) return;
     current = dark;
+    _szApplyUiTheme(dark);
     var style = makeStyle(config);
     style.layers.forEach(function(layer) {
       if (!layer.paint || !map.getLayer(layer.id)) return;

@@ -71,8 +71,9 @@ function loadView(env = {}) {
   }
   const fn = new Function('window', 'document', 'location', 'setTimeout', 'clearTimeout',
     VIEW_SRC + '\nreturn { SZ_VIEWER_VERSION, _szStorage, _szViewKey, _szHashSetsView,' +
-    ' _szReadView, _szWriteView, _szOpeningCamera, initViewMemory, initHomeButton,' +
-    ' _szAboutText, _szMonth, initAbout, _szSatellite, _szSatelliteCreditHtml };');
+    ' _szReadView, _szWriteView, _szOpeningCamera, _szMaxBounds, _szClearZoom, initViewMemory, initHomeButton,' +
+    ' _szAboutText, _szMonth, initAbout, _szSatellite, _szSatelliteCreditHtml,' +
+    ' szLocaleUnit, szReadUnit, szWriteUnit, szUnit, szFormatDistance };');
   // Fake timers: `timers` holds the pending ones; runTimers() fires them.
   const timers = new Map();
   let next = 1;
@@ -341,6 +342,115 @@ await ok('Home returns to the config view, and not while driving', () => {
   v.document.body.appendChild(hud);
   btn.on.click();
   assert.strictEqual(map.eased, null);
+});
+
+await ok('maxBounds is the built box itself: no margin of empty map around it', () => {
+  const v = loadView({});
+  assert.deepStrictEqual(v._szMaxBounds(CONFIG), [[7.40, 43.72], [7.44, 43.76]]);
+  // Across the antimeridian the box is unwrapped (east past 180) and passes through.
+  assert.deepStrictEqual(v._szMaxBounds({ bounds: [172.8, -23.2, 183.5, -11.2] }), [[172.8, -23.2], [183.5, -11.2]]);
+  for (const bad of [undefined, null, [], [1, 2, 3], [7.44, 43.72, 7.40, 43.76], [7.4, 43.76, 7.44, 43.72],
+                     ['7.4', 43.72, 7.44, 43.76], [7.4, NaN, 7.44, 43.76]]) {
+    assert.strictEqual(v._szMaxBounds({ bounds: bad }), undefined, JSON.stringify(bad));
+  }
+  assert.strictEqual(v._szMaxBounds({}), undefined);
+  // World and near-world boxes: no maxBounds (a 360-degree one makes
+  // MapLibre 5.23 throw in _calcMatrices and the viewer shows "Error
+  // loading map"). World ZIMs are built with -180,-85,180,85.
+  for (const w of [[-180, -85, 180, 85], [-180, -85.0511, 180, 85.0511], [-180, -90, 180, 90],
+                   [-180, -60, 180, 75], [-179.95, -85, 179.95, 85], [100, -60, 460, 75]]) {
+    assert.strictEqual(v._szMaxBounds({ bounds: w }), undefined, JSON.stringify(w));
+  }
+  assert.deepStrictEqual(v._szMaxBounds({ bounds: [-179.9, -85, 179.9, 85] }), [[-179.9, -85], [179.9, 85]]);
+  // Latitudes past Web Mercator's limit are clamped to it.
+  assert.deepStrictEqual(v._szMaxBounds({ bounds: [-10, -90, 10, 90] }), [[-10, -85.0511], [10, 85.0511]]);
+  assert.deepStrictEqual(v._szMaxBounds({ bounds: [-170, -85.06, 170, 85.06] }), [[-170, -85.0511], [170, 85.0511]]);
+  assert.strictEqual(v._szMaxBounds({ bounds: [0, 86, 10, 89] }), undefined);
+  // The map is built with it (the old code padded by 0.01 degrees, which
+  // showed as a blank strip -- the sea cut off -- at every edge).
+  assert.match(HTML, /maxBounds: _szMaxBounds\(config\)/);
+  assert.doesNotMatch(HTML, /config\.bounds\[\d\] [-+] 0\.01/);
+});
+
+await ok('a result held at the box edge under a sheet is cleared by zooming in', () => {
+  const v = loadView({});
+  // 844 px phone, 200 px strip at the bottom, 110 px of search box on top.
+  const Z = (y, z, yN, yS) => v._szClearZoom(y, 844, 110, 200, z, 20, yN, yS);
+  assert.strictEqual(Z(312, 17, -5000, 5000), null);             // clear: nothing to do
+  // Under the strip, 100 px from the south edge: zoom in log2(240/100).
+  assert.ok(Math.abs(Z(744, 17, -5000, 844) - (17 + Math.log2(2.4))) < 1e-9);
+  // Above the screen (MapLibre's offset at the north edge), 32 px below the
+  // north edge: log2(150/32).
+  assert.ok(Math.abs(Z(-78, 15, -110, 3000) - (15 + Math.log2(150 / 32))) < 1e-9);
+  // Hidden but far from any edge: recentre at the same zoom.
+  assert.strictEqual(Z(800, 15, -3000, 3000), 15);
+  // Capped at maxZoom; nothing to do on the edge itself.
+  assert.strictEqual(Z(834, 18, -5000, 844), 20);
+  assert.strictEqual(Z(844, 17, -5000, 844), null);
+  // The find strip, search and wiki fly through it.
+  for (const pat of [/_szFlyToClear\(map, \{\s*center: \[r\.o, r\.a\]/, /_szFlyToClear\(map, \{ center: \[lon, lat\], zoom: zoom/,
+                     /_szFlyToClear\(map, \{ center: \[lon, lat\], zoom: targetZoom/, /_szFlyToClear\(map, \{ center: \[lng, lat\]/]) {
+    assert.match(HTML, pat);
+  }
+});
+
+await ok('units: one setting for every distance, locale default, kept across visits', () => {
+  const v = loadView({ storage: memStorage() });
+  const f = v.szFormatDistance;
+  for (const [m, unit, want] of [[850, 'metric', '850 m'], [1400, 'metric', '1.4 km'], [12400, 'metric', '12 km'],
+                                 [150, 'imperial', '492 ft'], [1500, 'imperial', '0.9 mi'], [2253, 'imperial', '1.4 mi'],
+                                 [19312, 'imperial', '12 mi'], [null, 'metric', ''], [NaN, 'imperial', '']]) {
+    assert.strictEqual(f(m, unit), want, `${m} ${unit}`);
+  }
+  // Nothing saved: the locale decides. Imperial for US English and a US,
+  // Liberian or Myanmar region; metric otherwise (en-GB included).
+  const nav = (...l) => ({ languages: l, language: l[0] });
+  for (const [n, want] of [[nav('en-US'), 'imperial'], [nav('en-us', 'de'), 'imperial'],
+                           [nav('es-US'), 'imperial'], [nav('en-LR'), 'imperial'], [nav('my-MM'), 'imperial'],
+                           [nav('de-CH'), 'metric'], [nav('en-GB'), 'metric'], [nav('fr'), 'metric'],
+                           [nav('en'), 'metric'], [nav('de-CH', 'en-US'), 'metric'],
+                           [nav('zh-Hant-TW'), 'metric'], [{ language: 'en-US' }, 'imperial'],
+                           [{}, 'metric'], [null, 'metric']]) {
+    assert.strictEqual(v.szLocaleUnit(n), want, JSON.stringify(n));
+  }
+  const s = v._szStorage();
+  assert.strictEqual(v.szReadUnit(s, nav('en-US')), 'imperial');
+  assert.strictEqual(v.szReadUnit(s, nav('de-CH')), 'metric');
+  // A saved choice wins over the locale, both ways.
+  v.szWriteUnit(s, 'metric');
+  assert.strictEqual(v.szReadUnit(s, nav('en-US')), 'metric');
+  v.szWriteUnit(s, 'imperial');
+  assert.strictEqual(v.szReadUnit(s, nav('de-CH')), 'imperial');
+  assert.strictEqual(v.szUnit(), 'imperial');                        // no map yet: the stored choice
+  v.window.__szMap = { _streetzimUnit: 'metric' };
+  assert.strictEqual(v.szUnit(), 'metric');                          // the map's live setting wins
+  assert.strictEqual(v.szReadUnit(null, nav('en-GB')), 'metric');
+  assert.strictEqual(v.szReadUnit({ getItem() { throw new Error('SecurityError'); } }, nav('en-US')), 'imperial');
+  // The scale bar starts from and saves the setting; Find cards, "Nearby",
+  // the place sheet and the routing panel format through it.
+  assert.match(HTML, /var scaleUnit = szReadUnit\(_szStorage\(\)\);/);
+  assert.match(HTML, /szWriteUnit\(_szStorage\(\), scaleUnit\);/);
+  assert.match(HTML, /function _formatDistanceStrip\(m\) \{\s*return szFormatDistance\(m, szUnit\(\)\);/);
+  assert.match(HTML, /'Nearby \(within ' \+ szFormatDistance\(1500, szUnit\(\)\) \+ '\)'/);
+  assert.match(HTML, /function formatDistance\(meters\) \{\s*return szFormatDistance\(meters, szUnit\(\)\);/);
+  assert.doesNotMatch(HTML, /1\.5 km/);
+  // places.html reads the same key and prints the same strings.
+  const P = fs.readFileSync(`${REPO}/resources/viewer/places.html`, 'utf8');
+  const src = P.slice(P.indexOf('function distanceUnit(nav)'), P.indexOf('\n}\n', P.indexOf('function formatDistance(m, unit)')) + 3);
+  const store = new Map();
+  const window = { localStorage: { getItem: (k) => store.get(k) ?? null } };
+  const places = new Function('window', src + '\nreturn { distanceUnit, formatDistance };')(window);
+  // Same locale default and the same saved-choice rule as the viewer.
+  for (const n of [nav('en-US'), nav('de-CH'), nav('en-GB'), nav('my-MM'), nav('en'), {}, null]) {
+    assert.strictEqual(places.distanceUnit(n), v.szLocaleUnit(n), JSON.stringify(n));
+  }
+  store.set('streetzim.units', 'metric');
+  assert.strictEqual(places.distanceUnit(nav('en-US')), 'metric');
+  store.set('streetzim.units', 'imperial');
+  assert.strictEqual(places.distanceUnit(nav('de-CH')), 'imperial');
+  for (const m of [150, 850, 1400, 2253, 12400, 19312]) {
+    for (const unit of ['metric', 'imperial']) assert.strictEqual(places.formatDistance(m, unit), f(m, unit));
+  }
 });
 
 await ok('About text from new and old map-config.json', () => {
@@ -890,6 +1000,29 @@ await ok('the /drive/ PWA still loads its stamp and Q-ID bridge', () => {
     assert.strictEqual(fetched[1], 'http://h/drive/viewer/../wiki-qid-titles.json');
     assert.notStrictEqual(stamp.style.display, 'none');
   }
+});
+
+// ---- Search result distance (300-search.js) ------------------------------
+const PROX_SRC = slice('// BEGIN proximity-label', '// END proximity-label');
+const proxLabel = new Function(PROX_SRC + '\nreturn _szProximityLabel;')();
+
+await ok('search distance: lower-case unit symbols, in the scale bar\'s units', () => {
+  const cases = [
+    [0.2, undefined, 'nearby'], [1.2, 'imperial', '1 mi'], [12, 'imperial', '10 mi'],
+    [123, 'imperial', '120 mi'], [1234, 'imperial', '1200 mi'],
+    [0.2, 'metric', 'nearby'], [1.2, 'metric', '2 km'], [12, 'metric', '20 km'],
+    [123, 'metric', '200 km'], [1234, 'metric', '2000 km'],
+  ];
+  for (const [miles, unit, want] of cases) assert.strictEqual(proxLabel(miles, unit), want, `${miles} ${unit}`);
+  assert.strictEqual(proxLabel(NaN, 'metric'), '');
+  for (const [miles, unit] of cases) assert.match(proxLabel(miles, unit), /^(nearby|\d+ (mi|km))$/);
+});
+
+await ok('search results: the subline is printed as written ("1 mi", not "1 Mi")', () => {
+  // The whole line used to be text-transform: capitalize ("1 Mi", "Nearby").
+  const css = slice('.search-result-type {', '.search-no-results');
+  assert.doesNotMatch(css, /text-transform/);
+  assert.match(HTML, /proximityLabel = _szProximityLabel\(dist \* 69, map\._streetzimUnit\);/);
 });
 
 console.log(`\n${pass} passed`);

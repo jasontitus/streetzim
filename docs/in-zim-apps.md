@@ -7,7 +7,7 @@ already inside it.
 
 | File | What it is | Triggered when |
 | --- | --- | --- |
-| `search/<slug>.html` | One detail page per indexed feature (place, airport, peak, park, water). Title, kind, coords, two CTAs. | User taps a Kiwix search result, or visits the title-index entry. |
+| `search/<slug>.html` | One detail page per indexed feature (place, airport, peak, park, water; named POIs too with `--kiwix-poi-pages`). Title, kind, coords, two CTAs. Front articles, so they are in both of Kiwix's indexes: full text and titles. | User taps a Kiwix full-text search result or a title suggestion in the Kiwix search bar. |
 | `index.html` (chip rail) | On-map chip rail under the search input. Tapping a chip fetches the matching `category-index/chip-<id>.json` and renders the result set as pins + carousel directly on the map (no navigation). Also exposes a *"Search this area"* pill once the user pans/zooms. | Default UX for chip-based browsing as of 2026-05-10. |
 | `places.html` | Search-and-browse mini-app — full list view, sort options, sub-filter chips, recent-searches dropdown, "Limit to map area" toggle. | User taps the **Find** link in the main viewer's controls strip, or hits `places.html` directly. Now a secondary surface; the on-map chip rail covers the common case. |
 

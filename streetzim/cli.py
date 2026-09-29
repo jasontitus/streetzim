@@ -74,6 +74,7 @@ ZIMFARM: dict[str, dict[str, Any]] = {
                    "description": "Leave out offline routing (on by default)"},
     "wikidata": {"title": "Wikidata"},
     "terrain": {"title": "Terrain"},
+    "kiwix_poi_pages": {"title": "POIs in Kiwix search"},
     "default_view": {"title": "Default view"},
     "output": {"pattern": r"^/output$"},
     "stats_filename": {"pattern": r"^/output/task_progress\.json$"},
@@ -168,6 +169,11 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Wikidata place details (needs network access to Wikidata)")
     feat.add_argument("--terrain", action="store_true",
                       help="Hillshade from Copernicus DEM (downloads DEM tiles)")
+    feat.add_argument("--kiwix-poi-pages", action="store_true",
+                      help="Also list every named POI in Kiwix's own search, "
+                           "not only "
+                           "places, parks, peaks, water and airports. Adds "
+                           "about 440 B per POI (+16%% on Luxembourg). Default: off")
     feat.add_argument("--max-zoom", type=int, choices=range(0, 15), metavar="{0..14}",
                       help="Maximum zoom of the vector tiles. Default: 14")
     feat.add_argument("--default-view",
@@ -601,6 +607,8 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
         argv += ["--wikidata"]
     if args.terrain:
         argv += ["--terrain"]
+    if args.kiwix_poi_pages:
+        argv += ["--kiwix-poi-pages"]
     if args.max_zoom is not None:
         argv += ["--max-zoom", str(args.max_zoom)]
     if args.zim_workers:

@@ -40,6 +40,51 @@ function _szStorage() {
   } catch (e) { return null; }
 }
 
+// Distance units. One setting for the whole viewer: the scale bar (click
+// it to switch), search distances, Find cards and "Nearby", the place
+// sheet, the routing panel and places.html, which reads it from
+// localStorage ('streetzim.units'). A saved choice wins; otherwise the
+// reader's locale decides: imperial for US English or a US, Liberian or
+// Myanmar region, metric for everyone else (en-GB too, for simplicity).
+var SZ_UNITS_KEY = 'streetzim.units';
+function szLocaleUnit(nav) {
+  var langs = [];
+  try {
+    if (nav && nav.languages && nav.languages.length) langs = Array.prototype.slice.call(nav.languages);
+    else if (nav && nav.language) langs = [nav.language];
+  } catch (e) {}
+  var tag = String(langs[0] || '');
+  var region = (/^[a-z]{2,3}(?:-[a-z]{4})?-([a-z]{2})\b/i.exec(tag) || [])[1];
+  region = region ? region.toUpperCase() : '';
+  return region === 'US' || region === 'LR' || region === 'MM' ? 'imperial' : 'metric';
+}
+function szReadUnit(storage, nav) {
+  try {
+    var u = storage && storage.getItem(SZ_UNITS_KEY);
+    if (u === 'metric' || u === 'imperial') return u;
+  } catch (e) {}
+  return szLocaleUnit(nav === undefined ? (typeof navigator !== 'undefined' ? navigator : null) : nav);
+}
+function szWriteUnit(storage, unit) {
+  try { if (storage) storage.setItem(SZ_UNITS_KEY, unit); } catch (e) {}
+}
+function szUnit() {
+  var m = window.__szMap;
+  return (m && m._streetzimUnit) || szReadUnit(_szStorage());
+}
+// 850 m / 1.4 km / 12 km, or 500 ft / 1.4 mi / 12 mi. Unit symbols lower case.
+function szFormatDistance(meters, unit) {
+  if (meters == null || !isFinite(meters)) return '';
+  if (unit === 'imperial') {
+    var feet = meters * 3.28084;
+    if (feet < 1000) return Math.round(feet) + ' ft';
+    var miles = meters / 1609.344;
+    return (miles < 10 ? miles.toFixed(1) : Math.round(miles)) + ' mi';
+  }
+  if (meters < 1000) return Math.round(meters) + ' m';
+  return (meters / 1000).toFixed(meters < 10000 ? 1 : 0) + ' km';
+}
+
 function _szViewKey(config) {
   var b = config && config.bounds;
   var id = (config && config.name) || '';
@@ -105,6 +150,95 @@ function _szOpeningCamera(config, hash, storage) {
   if (_szHashSetsView(hash)) return home;
   return _szReadView(config, storage) || home;
 }
+
+// How far the reader can pan: exactly the built box (map-config.json's
+// "bounds", which is also what tilemaker clipped every layer to). MapLibre
+// keeps the whole viewport inside maxBounds, zooming in when it must, so no
+// part of the screen can show the area outside the box, where there is no
+// data at all -- not even the sea, whose polygons are clipped too. The
+// viewer used to add 0.01 degrees on every side, and that strip was drawn as
+// bare background: the sea stopped in a straight line at the edge of every
+// coastal region (Monaco's east and south edges). Longitudes past 180
+// (areas across the antimeridian) are passed through; MapLibre wraps them.
+// A box as wide as the world (world ZIMs: -180,-85,180,85) gets none:
+// MapLibre 5.23 throws in _calcMatrices on a 360-degree maxBounds ("Error
+// loading map"), and there is no edge to hide anyway. Latitudes are kept
+// inside Web Mercator's +-85.0511.
+var SZ_MERC_LAT = 85.0511;
+function _szMaxBounds(config) {
+  var b = config && config.bounds;
+  if (!b || b.length !== 4) return undefined;
+  for (var i = 0; i < 4; i++) if (typeof b[i] !== 'number' || !isFinite(b[i])) return undefined;
+  if (!(b[0] < b[2] && b[1] < b[3])) return undefined;
+  if (b[2] - b[0] >= 359.9) return undefined;
+  var s = Math.max(b[1], -SZ_MERC_LAT), n = Math.min(b[3], SZ_MERC_LAT);
+  if (!(s < n)) return undefined;
+  return [[b[0], s], [b[2], n]];
+}
+
+// A result near the box edge cannot be flown to the middle of the free map:
+// maxBounds stops the camera at the edge, so flyTo's offset is lost and the
+// pin can end up under the find strip, the place sheet or the search box
+// (at the north edge MapLibre 5.23 even puts it above the screen). Moving
+// the camera cannot help; zooming in can, because the pin's distance in
+// pixels from the box edge doubles with each zoom level.
+//
+// y: the pin's y after the move; h: canvas height; top/bottom: px covered
+// by chrome; yNorth/ySouth: the box's north and south edges projected at
+// the same zoom (they may be off screen). Returns the zoom at which, centred
+// on the pin with no offset, it clears the chrome by `margin` px, or null
+// when it is clear already (or cannot be cleared).
+function _szClearZoom(y, h, top, bottom, zoom, maxZoom, yNorth, ySouth, margin) {
+  margin = margin || 40;
+  if (y > top + margin / 2 && y < h - bottom - margin / 2) return null;
+  var dTop = y - yNorth, dBottom = ySouth - y;   // px from each edge
+  var d = Math.min(dTop, dBottom);
+  var want = dBottom <= dTop ? bottom + margin : top + margin;
+  if (d * 2 >= h) return zoom;                   // not at an edge: just recentre
+  if (!(d > 1)) return null;
+  var z = Math.min(maxZoom, zoom + Math.max(0, Math.log(want / d) / Math.LN2));
+  return z;
+}
+
+// How much of the canvas the chrome covers: the search box at the top, and
+// at the bottom whichever sheet is open (find strip, place details, the
+// wiki panel when it is a bottom sheet).
+function _szCoveredEdges(map) {
+  var c = map.getCanvas().getBoundingClientRect(), top = 0, bottom = 0;
+  function rect(id) {
+    var el = document.getElementById(id);
+    // Not offsetParent: it is null for the position:fixed sheets.
+    if (!el || !el.getClientRects().length) return null;
+    var r = el.getBoundingClientRect();
+    return r.height > 0 ? r : null;
+  }
+  var sc = rect('search-container');
+  if (sc) top = Math.max(0, sc.bottom - c.top);
+  ['find-results-strip', 'place-detail', 'wiki-panel'].forEach(function(id) {
+    var r = rect(id);
+    if (r && r.top > c.top + c.height * 0.3) bottom = Math.max(bottom, c.bottom - r.top);
+  });
+  return { top: top, bottom: bottom };
+}
+
+// flyTo; then, if maxBounds left the target under the chrome, ease in on it.
+function _szFlyToClear(map, opts) {
+  var mb = map.getMaxBounds && map.getMaxBounds();
+  if (!mb) { map.flyTo(opts); return; }
+  // Listen first: a flyTo with duration 0 ends inside the call.
+  map.once('moveend', function() {
+    try {
+      var c = maplibregl.LngLat.convert(opts.center);
+      var h = map.getCanvas().clientHeight, e = _szCoveredEdges(map);
+      var z = _szClearZoom(map.project(c).y, h, e.top, e.bottom, map.getZoom(),
+                           map.getMaxZoom(), map.project([c.lng, mb.getNorth()]).y,
+                           map.project([c.lng, mb.getSouth()]).y);
+      if (z !== null) map.easeTo({ center: c, zoom: z, duration: 300 });
+    } catch (err) {}
+  });
+  map.flyTo(opts);
+}
+window.__szFlyToClear = _szFlyToClear;   // for tests and probes
 
 function _szDriving() {
   var hud = document.getElementById('drive-hud');
