@@ -19,7 +19,7 @@ openZIM tools.
 | categories | — | Find chips over `category-index/` |
 | routing | — | graph from the PBF, loaded in cells by a Web Worker |
 | viewer | Vite + ES modules, `content/config.json` | single-file viewer, `map-config.json` |
-| QA | ruff, pyright strict, pytest, daily Monaco build + `zimcheck` | ruff (narrow), pytest + Node tests, Monaco build + validator + `zimcheck` + browser test through `kiwix-serve` |
+| QA | ruff, pyright strict, pytest, daily Monaco build + `zimcheck` | ruff with pyflakes, bugbear and other bug-catching families (`ruff.toml`; `ops/` stays on E9 + F), pyright strict on 20 files (18 baselined findings elsewhere, no new ones allowed), pytest with coverage + Node tests, ESLint on the viewer, pre-commit hooks for the lint and type checks, Monaco build (every push and weekly) + validator + `zimcheck` + browser test through `kiwix-serve` |
 
 ## What we verified
 
