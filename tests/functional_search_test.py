@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
 
 
 def fnv1a32(s: str) -> int:
@@ -48,7 +47,7 @@ def main() -> int:
     mani = json.loads(bytes(arc.get_entry_by_path("search-data/manifest.json").get_item().content))
     chunks = mani.get("chunks", {})
     sub_chunks = mani.get("sub_chunks", {})
-    print(f"search-data manifest:")
+    print("search-data manifest:")
     print(f"  chunks:      {len(chunks)}")
     print(f"  sub_chunks:  {len(sub_chunks)} hot prefixes split")
     if not sub_chunks:
@@ -97,7 +96,7 @@ def main() -> int:
         print(f"  total across sub-chunks: {records_total:,} records")
 
     # --- Geocode probe: pick a query that should land in a hot-split bucket ---
-    print(f"\n>> geocode probes:")
+    print("\n>> geocode probes:")
     probes = ("大阪", "Avenue", "Tokyo", "東京", "Cairo")
     for q in probes:
         # Compute prefix via the writer's rule
@@ -144,7 +143,7 @@ def main() -> int:
             print(f"    → {hits} hits found; sample: "
                   f"{first.get('n')!r} @ ({first.get('a'):.3f}, {first.get('o'):.3f})")
         else:
-            print(f"    → 0 hits")
+            print("    → 0 hits")
 
     print()
     if total_errors:

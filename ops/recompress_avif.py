@@ -58,7 +58,7 @@ def recompress_tile(args):
         with counter_lock:
             counter.value += 1
         return os.path.getsize(dst_path)
-    except Exception as e:
+    except Exception:
         return 0
 
 

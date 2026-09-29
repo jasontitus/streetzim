@@ -5,9 +5,9 @@ v5 split pair (main buf, SZGM geoms buf) WITHOUT going through the full
 ZIM-builder. That lets the route-identity suite run in seconds instead
 of the 5–20 min a real rebuild costs.
 
-Byte-identical to what ``extract_routing_graph(split_graph=True)`` in
-``create_osm_zim.py`` emits — if this converter ever drifts, the end-
-to-end test will catch it.
+It produces the SZRG v5 + SZGM layout of docs/formats.md, which the
+builder no longer writes (the --split-graph writer was retired); the
+readers still accept it, so these tests keep that path covered.
 """
 
 from __future__ import annotations

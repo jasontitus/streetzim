@@ -241,7 +241,7 @@ def load_from_zim(zim_path: str | Path) -> SZRG:
     ``streetzim.routing.spatial.load_spatial_from_zim`` for those.
     """
     from libzim.reader import Archive
-    arc = Archive(str(zim_path))
+    arc = Archive(Path(zim_path))
 
     main_bytes = _try_load_blob(
         arc,
@@ -283,7 +283,7 @@ def load_from_zim(zim_path: str | Path) -> SZRG:
         else:
             import warnings
             warnings.warn(
-                f"v5 SZRG without graph-geoms.bin companion (chunked or inline)"
+                "v5 SZRG without graph-geoms.bin companion (chunked or inline)"
             )
     return g
 
