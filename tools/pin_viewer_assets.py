@@ -18,8 +18,10 @@ fontstack from the font CDN and records its SHA-256 (null for a range the
 CDN answers 404), printing how many changed, and does the same for the
 fallback Noto Sans ranges (``fonts.fallback``: the ranges holding the
 Unicode blocks of its scripts, from a commit-pinned URL) and the hash of its
-vendored licence. A download that is not a glyph range (an HTML error page)
-stops it. Review the diff and commit both. --prefetch downloads every pinned range, checks it, and stores it in
+vendored licence. The settings (URLs, fontstacks, fallback scripts) come
+from DEFAULT_FONTS and DEFAULT_FALLBACK below, so edit those and re-pin;
+--keep-lock keeps the lock file's settings instead. A download that is not
+a glyph range (an HTML error page) stops it. Review the diff and commit both. --prefetch downloads every pinned range, checks it, and stores it in
 DIR as the builder's cache (streetzim/viewer_assets.py) expects, so builds
 that use DIR need no network for fonts.
 """
@@ -98,8 +100,11 @@ DEFAULT_FALLBACK: dict[str, Any] = {
     # left out: their glyphs would render in the wrong order and shape.
     "scripts": {
         "Arabic": ["0600-06FF", "FB50-FBFF", "FE70-FEFF"],
-        "Armenian": ["0530-058F"],
-        "Georgian": ["10A0-10FF"],
+        # with the small ligatures (U+FB13-FB17, e.g. U+FB13 men-now)
+        "Armenian": ["0530-058F", "FB13-FB17"],
+        # Mkhedruli, Mtavruli (what text-transform uppercase makes of
+        # Mkhedruli: suburb/state/country labels) and Nuskhuri
+        "Georgian": ["10A0-10FF", "1C90-1CBF", "2D00-2D2F"],
         "Hebrew": ["0590-05FF", "FB1D-FB4F"],
         "Lao": ["0E80-0EFF"],
         "Thai": ["0E00-0E7F"],
@@ -203,10 +208,18 @@ def _pin_ranges(base_url: str, fontstacks: dict[str, str], ranges: list[str],
     return out, changed, sum(1 for *_, d in results if d is None)
 
 
-def pin_fonts() -> None:
+def pin_fonts(keep_lock: bool = False) -> None:
+    """Re-pin every range. The settings (URLs, fontstacks, scripts, ...) are
+    DEFAULT_FONTS and DEFAULT_FALLBACK, so editing those and re-pinning
+    takes effect; ``keep_lock`` keeps the lock file's settings instead
+    (e.g. a base_url changed there by hand) and only refreshes the hashes."""
     lock = read_lock_or_empty()
     old = lock.get("fonts", {})
-    fonts: dict[str, Any] = {k: old.get(k, v) for k, v in DEFAULT_FONTS.items()}
+
+    def settings(defaults: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+        return {k: (current.get(k, v) if keep_lock else v) for k, v in defaults.items()}
+
+    fonts: dict[str, Any] = settings(DEFAULT_FONTS, old)
     fonts["ranges"], changed, empty = _pin_ranges(
         fonts["base_url"], fonts["fontstacks"], RANGES, old.get("ranges", {}))
     n = len(fonts["fontstacks"]) * len(RANGES)
@@ -214,7 +227,7 @@ def pin_fonts() -> None:
           f"{changed} differ from the previous lock file")
 
     old_fb = old.get("fallback", {})
-    fb: dict[str, Any] = {k: old_fb.get(k, v) for k, v in DEFAULT_FALLBACK.items()}
+    fb: dict[str, Any] = settings(DEFAULT_FALLBACK, old_fb)
     fb_ranges = fallback_ranges(fb)
     fb["ranges"], changed, empty = _pin_ranges(
         fb["base_url"], fb["fontstacks"], fb_ranges, old_fb.get("ranges", {}))
@@ -297,7 +310,12 @@ def main() -> int:
     g.add_argument("--fonts", action="store_true", help="re-pin every glyph range from the CDN")
     g.add_argument("--prefetch", metavar="DIR", type=Path,
                    help="download the pinned glyph ranges into this cache directory")
+    ap.add_argument("--keep-lock", action="store_true",
+                    help="with --fonts: keep the lock file's font settings (URLs, "
+                         "fontstacks, scripts) instead of this tool's defaults")
     args = ap.parse_args()
+    if args.keep_lock and not args.fonts:
+        ap.error("--keep-lock only goes with --fonts")
     try:
         if args.check:
             check()
@@ -306,7 +324,7 @@ def main() -> int:
         elif args.rtl_text:
             pin_npm(va.RTL_TEXT_PLUGIN, args.rtl_text)
         elif args.fonts:
-            pin_fonts()
+            pin_fonts(keep_lock=args.keep_lock)
         else:
             prefetch(args.prefetch)
     except va.IntegrityError as e:

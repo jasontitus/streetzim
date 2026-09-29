@@ -15,9 +15,6 @@ Three layers:
 * the build around it (generate_sdf_font_glyphs, fallback_scripts_in_tiles)
   against fake servers: shared ranges, absent ranges, waived errors,
   thread counts, offline and prefetched caches.
-
-Tests marked xfail are known bugs (see each reason); they turn into
-XPASS -> failure (strict) once fixed, so the marker must then go.
 """
 from __future__ import annotations
 
@@ -276,8 +273,6 @@ def test_absent_open_sans_range_and_nothing_to_add():
     assert decoded(out) == {}
 
 
-@pytest.mark.xfail(strict=True, reason="BUG glyph-range-field (LOW): merge_range's 'no fontstack "
-                   "at all' branch writes the name but not the required range field")
 def test_primary_without_a_fontstack_gets_a_complete_one():
     out = gf.merge_range(b"", rng_pbf("Noto", "1536-1791", [glyph(0x627)]), [(0x600, 0x6FF)],
                          name="Open Sans Bold", range_key="1536-1791")
@@ -383,21 +378,25 @@ def shipped_ids(stack: str, scripts) -> set[int]:
 def composite_oracle(primary: bytes, fallback: bytes, blocks, name: str) -> list[tuple]:
     """@mapbox/glyph-pbf-composite's combine([primary, fallback-in-blocks],
     name), as tileserver-gl composes font stacks: decode both, keep the
-    first font's glyph for an id, append the others, sort by id. Returned as
+    first font's glyph for an id, append the others (their ``top`` moved by
+    FALLBACK_TOP_SHIFT, as ours are by design), sort by id. Returned as
     comparable tuples (id, bitmap, width, height, left, top, advance) plus
     the fontstack name and range. (The npm module itself was run over every
-    subset of scripts for the report: 720 files, 103,152 glyphs, 0 diffs.)"""
+    subset of scripts for the report, before Mtavruli and Nuskhuri joined
+    Georgian: 720 files, 103,152 glyphs, 0 diffs.)"""
     p = GlyphsMsg()
     p.ParseFromString(primary)
     f = GlyphsMsg()
     f.ParseFromString(fallback)
     seen = {g.id for g in p.stacks[0].glyphs}
-    glyphs = list(p.stacks[0].glyphs)
+    rows = [(g.id, g.bitmap, g.width, g.height, g.left, g.top, g.advance) for g in p.stacks[0].glyphs]
     for g in f.stacks[0].glyphs:
         if g.id not in seen and any(a <= g.id <= b for a, b in blocks):
-            glyphs.append(g)
+            # by design, fallback glyphs move onto the Open Sans baseline
+            rows.append((g.id, g.bitmap, g.width, g.height, g.left,
+                         g.top + gf.FALLBACK_TOP_SHIFT, g.advance))
             seen.add(g.id)
-    rows = sorted((g.id, g.bitmap, g.width, g.height, g.left, g.top, g.advance) for g in glyphs)
+    rows.sort()
     return [(name, p.stacks[0].range)] + rows
 
 
@@ -426,7 +425,7 @@ def test_merge_matches_the_composite_oracle_for_every_subset_of_scripts():
                 assert _as_rows(ours) == composite_oracle(prim, fb, blocks, STACK_NAMES[stack]), \
                     (subset, stack, rng)
                 checked += 1
-    assert checked == 720
+    assert checked == 936
 
 
 def test_merged_ranges_keep_every_open_sans_byte():
@@ -451,7 +450,7 @@ def test_vendored_maplibre_parses_every_merged_range(tmp_path):
     res = subprocess.run([NODE, str(PARSER_JS), *files], capture_output=True, text=True, timeout=120)
     lines = [json.loads(line) for line in res.stdout.splitlines()]
     assert res.returncode == 0, [x for x in lines if "error" in x] or res.stderr
-    assert len(lines) == len(files) == 18
+    assert len(lines) == len(files) == 24
     for x in lines:
         assert len(x["ids"]) == len(set(x["ids"])) == x["n"]
         assert set(x["ids"]) == files[x["file"]]
@@ -515,9 +514,6 @@ def test_noto_sits_one_twentyfourth_em_higher():
         assert decoded(_pinned(fb_stack, "65024-65279"))[0xFEFF].top == -25
 
 
-@pytest.mark.xfail(strict=True, reason="BUG glyph-baseline (LOW): fallback glyphs are copied with "
-                   "font-maker's top, one px (1/24 em) above node-fontnik's baseline; fix: subtract "
-                   "1 from `top` of each copied glyph in merge_range")
 def test_merged_glyphs_share_the_open_sans_baseline():
     out = decoded(shipped("OpenSansRegular", "1280-1535", FB.scripts))
     noto = decoded(_pinned("NotoSansRegular", "1280-1535"))
@@ -622,11 +618,6 @@ def test_style_uppercases_place_labels():
     assert "ვაკე".upper() == "ᲕᲐᲙᲔ"  # Mkhedruli uppercases to Mtavruli (Unicode 11)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG georgian-uppercase (HIGH): uppercased Georgian place "
-                   "labels become Mtavruli U+1C90-1CBF (range 7168-7423), which is neither in the "
-                   "Georgian blocks nor pinned: every suburb/state/country label of a Georgian map "
-                   "draws blank. Fix: add 1C90-1CBF (and 2D00-2D2F) to Georgian in "
-                   "DEFAULT_FALLBACK and the lock, re-pin (adds Noto 7168-7423 and 11520-11775)")
 def test_uppercased_labels_keep_their_glyphs():
     for stack in FB.for_stack:
         assert _uppercase_needs(stack) == {}, stack
@@ -639,9 +630,6 @@ def test_uppercase_gap_is_only_georgian():
         assert set(_uppercase_needs(stack)) <= {"Georgian"}
 
 
-@pytest.mark.xfail(strict=True, reason="BUG armenian-ligatures (LOW): U+FB13-FB17 (Armenian small "
-                   "ligatures, range 64256-64511, pinned in Noto) are not in the Armenian blocks, so "
-                   "a label using them draws blank; fix: add FB13-FB17 to Armenian")
 def test_armenian_ligatures_are_merged():
     ids = shipped_ids("OpenSansRegular", {"Armenian"})
     assert set(ARMENIAN_LIGS) <= ids
@@ -681,13 +669,10 @@ def test_script_found_at_any_zoom_among_other_tiles():
     assert tiles.fallback_scripts_in_tiles(tset, LOCK) == {"Arabic", "Hebrew"}
 
 
-@pytest.mark.xfail(strict=True, reason="BUG georgian-uppercase (HIGH): a name written in Mtavruli "
-                   "(U+1C90-1CBF) is not recognised as Georgian, and would have no glyphs anyway")
 def test_mtavruli_only_label_is_georgian():
     assert tiles.fallback_scripts_in_tiles({(14, 0, 0): mvt("ᲗᲑᲘᲚᲘᲡᲘ")}, LOCK) == {"Georgian"}
 
 
-@pytest.mark.xfail(strict=True, reason="BUG armenian-ligatures (LOW): U+FB13-FB17 are not Armenian")
 def test_armenian_ligature_only_label_is_armenian():
     assert tiles.fallback_scripts_in_tiles({(14, 0, 0): mvt("ﬓ")}, LOCK) == {"Armenian"}
 
@@ -869,7 +854,7 @@ def test_prefetched_image_cache_serves_the_fallback(fake_net, tmp_path, monkeypa
 
 
 def test_merge_cost_is_small():
-    """All 18 pinned ranges merge in well under a second (measured ~25 ms)."""
+    """All 24 pinned ranges merge in well under a second (measured ~25 ms)."""
     for stack, fb_stack in FB.for_stack.items():
         for rng in MERGE_RANGES:
             _pinned(stack, rng), _pinned(fb_stack, rng)
