@@ -54,10 +54,11 @@ ls -1 .*.sh 2>/dev/null            # untracked host scripts
 ## 2. The change, in a scratch clone (read-only for the host)
 
 ```bash
+UPSTREAM="$(git -C /storage/streetzim remote get-url origin)"   # GitHub
 rm -rf /tmp/sz-stage1
 git clone -q /storage/streetzim /tmp/sz-stage1
 cd /tmp/sz-stage1
-git fetch -q origin claude/adoring-dijkstra-i2vge7    # or the merged branch
+git fetch -q "$UPSTREAM" claude/adoring-dijkstra-i2vge7    # or the merged branch
 git checkout -q FETCH_HEAD
 PY=/storage/streetzim/venv-linux/bin/python3          # the host's venv
 bash ops/check_stage1.sh --root /tmp/sz-stage1 --python "$PY"
@@ -68,8 +69,10 @@ bash ops/check_stage1.sh --root /tmp/sz-stage1 --python "$PY"
 - `ALL CHECKS PASSED`, with no `FAIL` lines;
 - the tests pass.
 
-The scratch clone is at another path, so the checks resolve against
-`/tmp/sz-stage1`. That is intended: nothing there runs against the real
+The clone's own `origin` is the host checkout, which does not have the
+branch; `$UPSTREAM` is the host checkout's remote (GitHub). Fetching reads
+from it and changes nothing in `/storage/streetzim`. The scratch clone is at
+another path, so the checks resolve against `/tmp/sz-stage1`. That is intended: nothing there runs against the real
 data.
 
 **Optional: the pull itself, on a copy of the checkout.** This needs disk
@@ -78,7 +81,7 @@ for a code-only copy (no data), about the size of `.git`:
 ```bash
 rm -rf /tmp/sz-pull && git clone -q /storage/streetzim /tmp/sz-pull
 cd /tmp/sz-pull
-git fetch -q origin claude/adoring-dijkstra-i2vge7
+git fetch -q "$UPSTREAM" claude/adoring-dijkstra-i2vge7
 git merge --ff-only FETCH_HEAD      # must fast-forward, as on the host
 bash ops/check_stage1.sh --root /tmp/sz-pull --python "$PY"
 ```
