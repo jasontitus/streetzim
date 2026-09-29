@@ -578,7 +578,7 @@ class _DemStats:
         self.bytes = {"GLO-30": 0, "GLO-90": 0}
         self.cached = 0
         self.sea = 0
-        self.deadline = None        # time.monotonic() past which to give up
+        self.deadline: float | None = None   # time.monotonic() past which to give up
 
     def out_of_time(self):
         return self.deadline is not None and time.monotonic() > self.deadline
