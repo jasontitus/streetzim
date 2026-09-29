@@ -831,4 +831,27 @@ await ok('the /drive/ PWA still loads its stamp and Q-ID bridge', () => {
   }
 });
 
+// ---- Search result distance (300-search.js) ------------------------------
+const PROX_SRC = slice('// BEGIN proximity-label', '// END proximity-label');
+const proxLabel = new Function(PROX_SRC + '\nreturn _szProximityLabel;')();
+
+await ok('search distance: lower-case unit symbols, in the scale bar\'s units', () => {
+  const cases = [
+    [0.2, undefined, 'nearby'], [1.2, 'imperial', '1 mi'], [12, 'imperial', '10 mi'],
+    [123, 'imperial', '120 mi'], [1234, 'imperial', '1200 mi'],
+    [0.2, 'metric', 'nearby'], [1.2, 'metric', '2 km'], [12, 'metric', '20 km'],
+    [123, 'metric', '200 km'], [1234, 'metric', '2000 km'],
+  ];
+  for (const [miles, unit, want] of cases) assert.strictEqual(proxLabel(miles, unit), want, `${miles} ${unit}`);
+  assert.strictEqual(proxLabel(NaN, 'metric'), '');
+  for (const [miles, unit] of cases) assert.match(proxLabel(miles, unit), /^(nearby|\d+ (mi|km))$/);
+});
+
+await ok('search results: the subline is printed as written ("1 mi", not "1 Mi")', () => {
+  // The whole line used to be text-transform: capitalize ("1 Mi", "Nearby").
+  const css = slice('.search-result-type {', '.search-no-results');
+  assert.doesNotMatch(css, /text-transform/);
+  assert.match(HTML, /proximityLabel = _szProximityLabel\(dist \* 69, map\._streetzimUnit\);/);
+});
+
 console.log(`\n${pass} passed`);

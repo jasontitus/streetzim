@@ -290,9 +290,14 @@
   .search-result:last-child { border-bottom: none; }
   .search-result:hover, .search-result.active { background: var(--hover-bg); }
   .search-result-name { font-size: 13px; color: var(--text-primary); font-weight: 500; letter-spacing: -0.01em; }
+  /* No text-transform: capitalize here. It turned the distance into
+     "1 Mi" and "Nearby" and recapitalised place names ("Ravin De ..."),
+     while the category it was meant for never changed: the category
+     follows the name with no space between, so Chrome and WebKit count
+     "Casinogrocery" as one word. The category keeps that lower case. */
   .search-result-type {
     font-size: 11px; color: var(--text-tertiary); margin-left: 6px;
-    text-transform: capitalize; font-weight: 400;
+    font-weight: 400;
   }
   .search-no-results {
     padding: 16px 14px; color: var(--text-tertiary); font-size: 13px; text-align: center;

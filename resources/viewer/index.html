@@ -419,9 +419,14 @@
   .search-result:last-child { border-bottom: none; }
   .search-result:hover, .search-result.active { background: var(--hover-bg); }
   .search-result-name { font-size: 13px; color: var(--text-primary); font-weight: 500; letter-spacing: -0.01em; }
+  /* No text-transform: capitalize here. It turned the distance into
+     "1 Mi" and "Nearby" and recapitalised place names ("Ravin De ..."),
+     while the category it was meant for never changed: the category
+     follows the name with no space between, so Chrome and WebKit count
+     "Casinogrocery" as one word. The category keeps that lower case. */
   .search-result-type {
     font-size: 11px; color: var(--text-tertiary); margin-left: 6px;
-    text-transform: capitalize; font-weight: 400;
+    font-weight: 400;
   }
   .search-no-results {
     padding: 16px 14px; color: var(--text-tertiary); font-size: 13px; text-align: center;
@@ -6255,6 +6260,29 @@ function clearFindResults() {
 // bounded even for world-scale datasets (millions of features).
 var searchMarker = null;
 
+// BEGIN proximity-label
+// The distance after a search result ("Casino  grocery · Jardin Exotique ·
+// 1 mi"), in the units the scale bar shows (map._streetzimUnit, switched by
+// clicking the scale). Unit symbols are lower case -- mi, km -- and the
+// line is no longer text-transform: capitalize (010), which printed "1 Mi".
+function _szProximityLabel(miles, unit) {
+  if (!(miles >= 0)) return '';
+  if (unit === 'metric') {
+    var km = miles * 1.609344;
+    if (km < 0.8) return 'nearby';
+    if (km < 8) return Math.round(km) + ' km';
+    if (km < 80) return Math.round(km / 5) * 5 + ' km';
+    if (km < 800) return Math.round(km / 10) * 10 + ' km';
+    return Math.round(km / 100) * 100 + ' km';
+  }
+  if (miles < 0.5) return 'nearby';
+  if (miles < 5) return Math.round(miles) + ' mi';
+  if (miles < 50) return Math.round(miles / 5) * 5 + ' mi';
+  if (miles < 500) return Math.round(miles / 10) * 10 + ' mi';
+  return Math.round(miles / 100) * 100 + ' mi';
+}
+// END proximity-label
+
 // Drop a red marker at (lat, lon) with a "Directions to here" popup.
 // Shared by the search-result picker and the #pin= deep-link path
 // (Find-page "Map" button). Replaces any existing search marker.
@@ -6918,13 +6946,8 @@ var SEARCH_SHARDS = (function () {
         var proxMultiplier = 1 + 9 * Math.exp(-ratio * 0.5);
         score = textScore * proxMultiplier;
 
-        // Generate human-readable distance for display
-        var miles = dist * 69;
-        if (miles < 0.5) proximityLabel = 'nearby';
-        else if (miles < 5) proximityLabel = Math.round(miles) + ' mi';
-        else if (miles < 50) proximityLabel = Math.round(miles / 5) * 5 + ' mi';
-        else if (miles < 500) proximityLabel = Math.round(miles / 10) * 10 + ' mi';
-        else proximityLabel = Math.round(miles / 100) * 100 + ' mi';
+        // Human-readable distance, in the scale bar's units.
+        proximityLabel = _szProximityLabel(dist * 69, map._streetzimUnit);
       }
 
       matches.push({ item: item, score: score, dist: proximityLabel });
