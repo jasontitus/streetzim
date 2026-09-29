@@ -148,20 +148,43 @@ Go on to step 4 only if all of these hold:
 
 ## 4. The pull (the only step that changes the host)
 
-One command. It records the commit before the pull (the rollback point),
-pulls only if that record was written, then records the commit the pull
-reached. Both files are in `$HOME`, so they survive a reboot. If the
-checkout is already at the split, it stops and keeps the earlier records.
+One block, run as one command. It:
+- stops if it can't read the checkout, or if the checkout is already at
+  the split (and says whether a rollback point was recorded);
+- records the commit before the pull (the rollback point);
+- pulls only if that record was written. `--no-rebase --no-autostash`
+  keep git's settings from rebasing, or from stashing the host-edited
+  lists during the pull;
+- records the commit the pull reached, and says whether it is the split.
+
+Both records are in `$HOME`, so they survive a reboot.
 
 ```bash
-if git -C /storage/streetzim cat-file -e HEAD:ops/in-place.txt 2>/dev/null; then echo "STOP: already at the split; the recorded rollback point is kept"; else rm -f "$HOME/sz-after-stage1.txt" && git -C /storage/streetzim rev-parse HEAD > "$HOME/sz-before-stage1.txt" && git -C /storage/streetzim pull --ff-only && git -C /storage/streetzim rev-parse HEAD > "$HOME/sz-after-stage1.txt"; fi
-cat "$HOME/sz-before-stage1.txt" "$HOME/sz-after-stage1.txt"
+if ! git -C /storage/streetzim rev-parse -q --verify HEAD >/dev/null; then
+  echo "STOP: cannot read /storage/streetzim; ask"
+elif git -C /storage/streetzim cat-file -e HEAD:ops/in-place.txt 2>/dev/null; then
+  echo "STOP: already at the split"
+  cat "$HOME/sz-before-stage1.txt" "$HOME/sz-after-stage1.txt" || echo "no rollback point recorded: no scripted rollback; ask"
+else
+  rm -f "$HOME/sz-after-stage1.txt" &&
+  git -C /storage/streetzim rev-parse HEAD > "$HOME/sz-before-stage1.txt.new" &&
+  mv "$HOME/sz-before-stage1.txt.new" "$HOME/sz-before-stage1.txt" &&
+  git -C /storage/streetzim pull --ff-only --no-rebase --no-autostash &&
+  git -C /storage/streetzim rev-parse HEAD > "$HOME/sz-after-stage1.txt" &&
+  if git -C /storage/streetzim cat-file -e HEAD:ops/in-place.txt 2>/dev/null; then
+    echo "OK: pulled to the split"
+  else
+    echo "STOP: pulled, but not to the split (is the branch merged?); ask"
+  fi
+fi
 ```
 
 - **If the pull refuses** (local changes, or not a fast-forward), it has
   changed nothing, and there is no `sz-after-stage1.txt`. Go back to
-  step 1. Running the command again later records the rollback point
+  step 1. Running the block again later records the rollback point
   afresh.
+- **"Pulled, but not to the split"** means the host took commits that
+  step 2 didn't test. Don't roll back on your own; ask.
 - **The build VMs** (`ops/cloud/build-vm-startup.sh`) pull on their own
   when they start.
 
@@ -193,15 +216,29 @@ Both must work, from any directory.
 
 ## 6. Rollback, if anything is wrong
 
-The rollback runs only if HEAD is still the commit the pull reached. If
-anything committed since (`ops/cloud/upload_validated.sh` commits torrent
-files on the host), a rollback would take those files back off the disk,
-so the command stops instead. Then ask.
+The rollback runs only if HEAD is still the commit the pull reached, and
+that commit is upstream (not one the host made). If anything committed
+since (`ops/cloud/upload_validated.sh` commits torrent files on the host),
+a rollback would take those files back off the disk, so the block stops
+instead. Then ask.
 
 ```bash
 # host-edited lists may show M: they are kept
 git -C /storage/streetzim --no-optional-locks status --short
-if test -s "$HOME/sz-before-stage1.txt" && test "$(git -C /storage/streetzim rev-parse HEAD)" = "$(cat "$HOME/sz-after-stage1.txt" 2>/dev/null)"; then git -C /storage/streetzim reset --keep "$(cat "$HOME/sz-before-stage1.txt")"; else echo "STOP: HEAD moved since the pull, or no rollback point was recorded; ask"; fi
+```
+
+```bash
+if test -s "$HOME/sz-before-stage1.txt" &&
+   test "$(git -C /storage/streetzim rev-parse HEAD)" = "$(cat "$HOME/sz-after-stage1.txt" 2>/dev/null)" &&
+   git -C /storage/streetzim merge-base --is-ancestor HEAD '@{u}'; then
+  git -C /storage/streetzim reset --keep "$(cat "$HOME/sz-before-stage1.txt")" &&
+  rm -f "$HOME/sz-after-stage1.txt" && echo "ROLLED BACK"
+else
+  echo "STOP: HEAD moved since the pull, has a host commit, or no rollback point was recorded; ask"
+fi
+```
+
+```bash
 # expect the same lines as before: the host-edited lists, plus ?? lines
 git -C /storage/streetzim --no-optional-locks status --short
 git -C /storage/streetzim log --oneline -1
