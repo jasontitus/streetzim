@@ -235,7 +235,7 @@ def _streetzim_to_xapianbuilder_jsonl(src_jsonl: str, dst_jsonl: str,
     constant memory regardless of corpus size.
     """
     n = 0
-    with open(src_jsonl, "r", encoding="utf-8") as src, \
+    with open(src_jsonl, encoding="utf-8") as src, \
          open(dst_jsonl, "w", encoding="utf-8") as dst:
         for line in src:
             line = line.strip()
@@ -1043,7 +1043,7 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
                 break
 
             add_start = time.time()
-            for i, (z, x, y, tile_data) in enumerate(results):
+            for z, x, y, tile_data in results:
                 # See note above: 0-byte tiles are MVT placeholders for
                 # bbox cells with no features. Drop them — MapLibre
                 # rendering is unaffected, ZIM entries dedup, zimcheck
@@ -1285,7 +1285,7 @@ def _add_wikidata(creator, MapItem, *, tiles, mbtiles_path, bbox, wikidata_data,
             print("    Scanning tiles for Wikidata Q-IDs in bbox...")
             import mapbox_vector_tile as _mvt
             bbox_qids = set()
-            for z, x, y, data in _tile_src:
+            for _z, _x, _y, data in _tile_src:
                 tile_data = data
                 if data[:2] == b"\x1f\x8b":
                     try:
@@ -1655,7 +1655,7 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
     _bucket_t0 = time.time()
     print("    Streaming search features from disk...", flush=True)
     with open(xapian_path, "w") as xf:
-        with open(search_features_path, "r") as sf:
+        with open(search_features_path) as sf:
             for line in sf:
                 feat = json.loads(line)
                 total_features += 1
@@ -1842,7 +1842,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
     def _emit_whole_chunk(prefix, chunk_path):
         """Small prefix: one file, exactly as before."""
         entries = []
-        with open(chunk_path, "r", encoding="utf-8") as cf:
+        with open(chunk_path, encoding="utf-8") as cf:
             for cline in cf:
                 entries.append(json.loads(cline))
         creator.add_item(MapItem(
@@ -1871,7 +1871,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
         from cloud.search_shards import split_records_recursive as _split_records_recursive
         agg = Aggregator(prefix)
         total_chunk_bytes = 0
-        with open(chunk_path, "r", encoding="utf-8") as cf:
+        with open(chunk_path, encoding="utf-8") as cf:
             for cline in cf:
                 size = len(cline.encode("utf-8"))
                 total_chunk_bytes += size
@@ -1899,7 +1899,10 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
         leaf_seen: set[str] = set()
         LEAF_FD_CAP = 256
 
-        def _leaf_fd(name):
+        # The per-prefix state is bound as defaults: this function is
+        # redefined on each prefix and must never see another prefix's.
+        def _leaf_fd(name, leaf_fds=leaf_fds, leaf_seen=leaf_seen,
+                     leaf_dir=leaf_dir, cap=LEAF_FD_CAP):
             fd = leaf_fds.get(name)
             if fd is not None:
                 # Refresh recency. dict order is insertion order, so
@@ -1909,7 +1912,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
                 # one of 19.6 M writes would reopen a file.
                 leaf_fds[name] = leaf_fds.pop(name)
                 return fd
-            if len(leaf_fds) >= LEAF_FD_CAP:
+            if len(leaf_fds) >= cap:
                 leaf_fds.pop(next(iter(leaf_fds))).close()
             leaf_seen.add(name)
             fd = open(os.path.join(leaf_dir, name + ".jsonl"), "a",
@@ -1919,7 +1922,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
 
         orphans = 0
         first_orphan = ""
-        with open(chunk_path, "r", encoding="utf-8") as cf:
+        with open(chunk_path, encoding="utf-8") as cf:
             for cline in cf:
                 rec = json.loads(cline)
                 paths = planned_paths.get(tier_for(rec), ())
@@ -1959,7 +1962,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
         for lname in sorted(leaf_seen):
             lpath = os.path.join(leaf_dir, lname + ".jsonl")
             lrecs = []
-            with open(lpath, "r", encoding="utf-8") as lf:
+            with open(lpath, encoding="utf-8") as lf:
                 for lineno, lline in enumerate(lf):
                     if not lline.strip():
                         continue
@@ -1976,7 +1979,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
                         raise RuntimeError(
                             f"search-data {prefix}: leaf {lname} line "
                             f"{lineno} did not round-trip ({exc}); "
-                            f"{len(lline)} bytes: {lline[:80]!r}")
+                            f"{len(lline)} bytes: {lline[:80]!r}") from exc
             os.unlink(lpath)
             lbytes = json.dumps(lrecs, separators=(",", ":"),
                                 ensure_ascii=False).encode("utf-8")
@@ -2074,7 +2077,7 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
                 # streaming and move on.
                 if split_find_chips and cat_slug in ("poi", "park"):
                     entries = []
-                    with open(cat_path, "r", encoding="utf-8") as cf:
+                    with open(cat_path, encoding="utf-8") as cf:
                         for cline in cf:
                             entries.append(json.loads(cline))
                     records_by_cat[cat_slug] = entries
@@ -2086,7 +2089,7 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
                 _llm_skipped.append(cat_slug)
                 continue
             entries = []
-            with open(cat_path, "r", encoding="utf-8") as cf:
+            with open(cat_path, encoding="utf-8") as cf:
                 for cline in cf:
                     entries.append(json.loads(cline))
             os.unlink(cat_path)
@@ -2357,7 +2360,7 @@ def _search_xapian_pages(creator, MapItem, *, xapian_mode, xapianbuilder_bin, xa
         print(f"    Adding {xapian_count} Xapian search pages (of {total_features} total)...", flush=True)
         xapian_start = time.time()
         i = 0
-        with open(xapian_path, "r") as xf:
+        with open(xapian_path) as xf:
             for line in xf:
                 feat = json.loads(line)
                 slug = feat["name"].lower()

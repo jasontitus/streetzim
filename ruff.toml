@@ -70,11 +70,6 @@ ignore = [
 # ops/ (production scripts; see ops/README.md) stays on the original gate.
 "ops/**" = ["E7", "W6", "B", "C4", "PLE", "PLW", "PGH", "RUF", "UP", "YTT",
             "ASYNC", "T10", "LOG", "INT", "RSE"]
-# Being edited concurrently (tile aliasing, font/MapLibre downloads); the
-# findings here are reviewed (B023 is a closure used only inside its own loop
-# iteration; B007/UP015/UP034 are cosmetic; B904 only changes traceback
-# chaining) and are fixed in a follow-up rather than in a conflicting diff.
-"streetzim/zim_writer.py" = ["B007", "B023", "B904", "UP015"]
 # A compatibility facade: names moved to streetzim/ are re-exported, and
 # tests patch create_osm_zim.time / create_osm_zim.urllib.request.
-"create_osm_zim.py" = ["F401", "B904", "UP015", "UP034"]  # the last three: see zim_writer.py
+"create_osm_zim.py" = ["F401"]
