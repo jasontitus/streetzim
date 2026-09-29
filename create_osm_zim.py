@@ -1371,8 +1371,9 @@ def _verify_terrain(*, args, bbox_str, include_terrain, terrain_dir, terrain_max
                 print("    Terrain audit passed — no blank tiles in bbox")
 
 
-def _download_maplibre(*, tmpdir, total_steps):
-    """MapLibre GL JS and CSS: the vendored copy, checked against the lock file."""
+def _verified_maplibre(*, total_steps):
+    """MapLibre GL JS and CSS: the vendored copy, checked against the lock
+    file (nothing is downloaded)."""
     step_maplibre = total_steps - 1
     print()
     print(f"[{step_maplibre}/{total_steps}] Checking MapLibre GL JS...")
@@ -1646,8 +1647,8 @@ def main(argv=None):
         # A stricter content-based check (pure uniform RGB → broken) could be
         # added later, but tile-size alone is not a valid signal for satellite.
 
-        maplibre_css, maplibre_js = _download_maplibre(
-            tmpdir=tmpdir, total_steps=total_steps)
+        maplibre_css, maplibre_js = _verified_maplibre(
+            total_steps=total_steps)
 
         bbox, map_config = _build_map_config(
             args=args, bbox_str=bbox_str, name=name, overture_sources=overture_sources,

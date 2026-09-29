@@ -141,11 +141,13 @@ def check_inputs() -> list[CheckResult]:
 
 
 def check_viewer_assets() -> list[CheckResult]:
-    """Source files the build embeds: index.html, places.html, maplibre."""
+    """Source files the build embeds: index.html, places.html, and the
+    vendored MapLibre and RTL text plugin."""
     out = []
     # Hard requirements — build will ship these verbatim from here.
-    # maplibre-gl.js/.css are downloaded from CDN during build, not
-    # stored in resources/viewer, so not listed here.
+    # maplibre-gl.js/.css and mapbox-gl-rtl-text.js are vendored in
+    # resources/vendor/ (nothing is downloaded) and checked against
+    # resources/viewer-assets.lock.json below, as the build does.
     must = [
         ("index.html",    VIEWER_DIR / "index.html"),
         ("places.html",   VIEWER_DIR / "places.html"),
@@ -164,6 +166,20 @@ def check_viewer_assets() -> list[CheckResult]:
             continue
         out.append(CheckResult(f"viewer.{label}", "pass",
             f"{p.name} = {size_kb:.1f} KB"))
+
+    try:
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from streetzim import viewer_assets as va
+        lock = va.load_lock()
+        for pkg in ("maplibre-gl", va.RTL_TEXT_PLUGIN):
+            va.vendored(pkg, lock)
+        out.append(CheckResult("viewer.vendored", "pass",
+            f"maplibre-gl {lock['maplibre-gl']['version']}, "
+            f"{va.RTL_TEXT_PLUGIN} {lock[va.RTL_TEXT_PLUGIN]['version']} match the lock"))
+    except Exception as e:
+        out.append(CheckResult("viewer.vendored", "fail", str(e),
+            "git checkout resources/vendor/ resources/viewer-assets.lock.json"))
 
     # Quick content-level sanity — index.html must reference the key
     # APIs we know are present in the current code (e.g., `map._queryPlaces`

@@ -2,6 +2,7 @@
 # commit:
 #
 #   pip install pre-commit -r requirements.txt pyright==1.1.409
+#   PUPPETEER_SKIP_DOWNLOAD=1 npm ci   # ESLint for the viewer-eslint hook
 #   pre-commit install            # then: pre-commit run --all-files
 #
 # The versions match CI's. The tests (pytest, node) stay in CI and are run by
@@ -25,6 +26,18 @@ repos:
         entry: python tools/build_viewer.py --check
         language: system
         files: ^(resources/viewer/|tools/build_viewer\.py$)
+        pass_filenames: false
+      - id: viewer-assets
+        name: vendored viewer files match resources/viewer-assets.lock.json
+        entry: python tools/pin_viewer_assets.py --check
+        language: system
+        files: ^(resources/vendor/|resources/viewer-assets\.lock\.json$|streetzim/viewer_assets\.py$|tools/pin_viewer_assets\.py$)
+        pass_filenames: false
+      - id: viewer-eslint
+        name: ESLint (viewer JavaScript; eslint.config.mjs)
+        entry: npm run --silent lint:viewer
+        language: system
+        files: ^(resources/viewer/|eslint\.config\.mjs$|tools/lint_viewer\.mjs$|package(-lock)?\.json$)
         pass_filenames: false
       - id: offliner-definition
         name: offliner-definition.json matches the streetzim flags
