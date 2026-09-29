@@ -64,27 +64,35 @@ Checked against openzim/zimfarm at `917d7bc`:
    `.github/workflows/update-zim-offliner-definition.yaml`, which calls
    `openzim/overview`'s reusable workflow with a `ZIMFARM_CI_SECRET`. The
    same workflow works here once openZIM provides the secret. The offliner
-   is registered with `base_model: DashModel` (flags are passed as
-   `--flag-name value`).
+   is registered with `base_model: DashModel`: Zimfarm passes flags as
+   `--flag-name=value` (its `compute_flags`), which also keeps a value
+   starting with `-`, such as a western `--bbox`, from being read as a flag.
 
-`offliner-definition.json` itself validates against Zimfarm's
-`OfflinerSpecSchema`, and the command line Zimfarm generates from it is
-accepted by `streetzim` (`tests/test_offliner_definition.py` checks the
-second part in CI).
+`offliner-definition.json` validates against Zimfarm's own
+`OfflinerSpecSchema` (`tools/check_zimfarm_schema.py`, run in CI against a
+pinned Zimfarm commit), and the command line Zimfarm generates from it is
+accepted by `streetzim` (`tests/test_offliner_definition.py`).
 
 ## What a build costs
 
 Measured with `tools/measure_build.py` on a 4-core, 15 GB machine,
 default profile (tilemaker, search, chips, routing), OSM extracts from
-2026-09-28. Memory is PSS summed over every process of the build; disk is
-the temp and output folders (the downloaded extract is not counted).
+openstreetmap.fr on 2026-09-28, Python 3.11 outside Docker. Memory is PSS
+summed over every process of the build (RSS, which counts shared pages
+once per worker, in brackets); disk is the temp and output folders (the
+downloaded extract is not counted).
 
 | region | OSM extract | wall time | CPU time | peak memory | peak disk | ZIM |
 |---|---|---|---|---|---|---|
-| Luxembourg | 56 MB | 3.2 min | 6.7 min | 4.0 GB | 0.35 GB | 55 MB |
+| Luxembourg | 56 MB | 3.2 min | 6.7 min | 4.0 GB (4.0) | 0.35 GB | 55 MB |
+| Switzerland | 679 MB | 70 min | 195 min | 4.6 GB (6.3) | 4.4 GB | 654 MB |
 
-Switzerland and the Netherlands are being measured; this table will be
-completed.
+The Switzerland run shared the machine with low-priority test builds, so
+its wall time is an upper bound. 49 of its 70 minutes are the search step
+(feature extraction from the tiles, location labels for every named
+feature, and addresses from the extract); the next largest are writing
+the ZIM (11 min) and the routing graph (5 min). The Netherlands (1.6 GB
+extract) is being measured.
 
 ### Downloads per task
 

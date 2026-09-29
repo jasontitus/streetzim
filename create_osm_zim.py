@@ -1447,9 +1447,8 @@ def _build_map_config(
         map_config["terrainMaxZoom"] = terrain_max_zoom
     if wikidata_data:
         map_config["hasWikidata"] = True
-    if getattr(args, "bundle_wiki_articles", False) and wiki_cross_refs:
-        # Bundled Wikipedia pages; the viewer's credits list Wikipedia.
-        map_config["hasWikiArticles"] = True
+    # hasWikiArticles is set by create_zim, once it knows whether any
+    # article was actually stored.
     if routing_graph_path:
         map_config["hasRouting"] = True
     if overture_sources:

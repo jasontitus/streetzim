@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 import io
+import json
 import sys
 from pathlib import Path
 
@@ -131,7 +132,10 @@ def _build(tmp_path, **kw):
                           "lat": 43.739, "lon": 7.428}],
         xapian_mode="none", **kw)
     a = libzim.Archive(str(out))
-    return {k: a.get_metadata(k) for k in a.metadata_keys}
+    md = {k: a.get_metadata(k) for k in a.metadata_keys}
+    md["map-config"] = json.loads(bytes(a.get_entry_by_path("map-config.json")
+                                        .get_item().content))
+    return md
 
 
 def test_defaults_unchanged_and_license_lists_only_present_layers(tmp_path):
@@ -152,6 +156,25 @@ def test_osm_wiki_tags_alone_do_not_claim_wikipedia(tmp_path):
     lic = _build(tmp_path, wiki_cross_refs={("X", 43.7, 7.4): {"wikipedia": "en:X"}}
                  )["License"].decode()
     assert "Wikipedia" not in lic and "Wikidata" not in lic
+
+
+@pytest.mark.parametrize("stored", [0, 1])
+def test_wikipedia_credited_only_when_articles_are_stored(tmp_path, monkeypatch, stored):
+    # Bundling requested with Wikipedia links, but the source may yield
+    # nothing (an unreachable API, the wrong offline ZIM): then neither
+    # map-config nor License may claim Wikipedia content.
+    import cloud.wiki_articles as wa
+
+    def fake_bundle(titles, add, **kw):
+        if stored:
+            add("wiki-article/X", "X", "text/html", b"<p>X</p>")
+        return {"bundled": stored, "bytes": 8 * stored, "failed": 1 - stored,
+                "stored_titles": {"X"} if stored else set()}
+    monkeypatch.setattr(wa, "bundle_wiki_articles", fake_bundle)
+    md = _build(tmp_path, wiki_cross_refs={("X", 43.7, 7.4): {"wikipedia": "en:X"}},
+                bundle_wiki_articles=True)
+    assert ("Wikipedia" in md["License"].decode()) == bool(stored)
+    assert md["map-config"].get("hasWikiArticles", False) == bool(stored)
 
 
 def test_license_names_satellite_terrain_and_wiki_when_present(tmp_path):

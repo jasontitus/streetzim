@@ -61,6 +61,19 @@ jobs:
         run: python tools/build_viewer.py --check
       - name: offliner-definition.json matches the streetzim flags
         run: python tools/offliner_definition.py --check
+      - name: offliner-definition.json validates against Zimfarm's own schema
+        # zimfarm_backend's OfflinerSpecSchema at a pinned commit, in its own
+        # venv with just the packages its models import.
+        env:
+          ZIMFARM_REF: 917d7bc
+        run: |
+          git clone -q --filter=blob:none --no-checkout https://github.com/openzim/zimfarm /tmp/zimfarm
+          git -C /tmp/zimfarm checkout -q "$ZIMFARM_REF" -- backend/src
+          python -m venv /tmp/zfvenv
+          /tmp/zfvenv/bin/pip install -q "pydantic[email]==2.11.4" "pydantic-extra-types==2.10.6" \
+            "SQLAlchemy==2.0.41" "PyJWT==2.13.0" "pytz==2025.2" "humanfriendly==10.0" \
+            "pycountry==24.6.1" "regex==2025.9.1" "requests==2.33.0"
+          PYTHONPATH=/tmp/zimfarm/backend/src /tmp/zfvenv/bin/python tools/check_zimfarm_schema.py
       - name: Python tests
         run: python -m pytest tests -q
       - name: Node tests

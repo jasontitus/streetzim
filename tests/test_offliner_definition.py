@@ -42,8 +42,9 @@ def test_shape_matches_what_zimfarm_expects():
 
 
 def _argv_for(config: dict) -> list[str]:
-    """What Zimfarm runs for a flags config: --key-with-dashes value,
-    booleans as bare flags when true."""
+    """What Zimfarm runs for a flags config: --key-with-dashes=value
+    (zimfarm_backend compute_flags, use_equals=True), booleans as bare flags
+    when true."""
     argv = []
     for key, value in config.items():
         opt = "--" + key.replace("_", "-")
@@ -51,7 +52,7 @@ def _argv_for(config: dict) -> list[str]:
             if value:
                 argv.append(opt)
         else:
-            argv += [opt, str(value)]
+            argv.append(f"{opt}={value}")
     return argv
 
 

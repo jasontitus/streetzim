@@ -195,9 +195,12 @@ scripts that may be running on the production host (see
   full satellite z14 ZIMs under "light" names.
 - **Large units.** `create_osm_zim.py`'s `main()` and `create_zim` are now
   sequences of phase functions (`build_parser` plus `_openzim_options` ...
-  `_print_summary` in `create_osm_zim.py`; `streetzim/zim_writer.py`), none over
-  ~290 lines. The phases pass state as keyword arguments and tuple returns,
-  so a new option usually means a parameter on the phase that reads it. And
+  `_print_summary` in `create_osm_zim.py`; the phases in
+  `streetzim/zim_writer.py`), none of them over ~290 lines. The phases pass
+  state as keyword arguments and tuple returns, so a new option usually
+  means a parameter on the phase that reads it. The largest functions left
+  are `extract_routing_graph` (`streetzim/routing/build.py`, ~650 lines) and
+  the published-ZIM tools `repackage` and `swap_viewer_rust` in `cloud/`.
   `index.html` is edited as parts in `resources/viewer/src/index/`.
   `places.html` (2.5k) and `routing-worker.js` (1.7k) are unsplit.
 - **Legacy format readers.** The builder writes only current formats

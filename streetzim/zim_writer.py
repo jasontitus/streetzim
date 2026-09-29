@@ -569,17 +569,8 @@ def create_zim(
     print(f"    ZIM compression workers: {num_workers} (tiles: {tile_count if tiles is None else len(tiles)})", flush=True)
     creator.config_nbworkers(num_workers)
     creator.set_mainpath("index.html")
+    has_wikidata = bool(wikidata_data)      # as map-config's hasWikidata
     with creator:
-        _add_metadata(creator, name=name, description=description,
-                      overture_sources=overture_sources, xapian_mode=xapian_mode,
-                      metadata=metadata, illustration=illustration,
-                      has_satellite=bool(satellite_dir and os.path.isdir(satellite_dir)),
-                      has_terrain=bool(terrain_dir and os.path.isdir(terrain_dir)),
-                      # wiki_cross_refs alone are OSM's wikipedia=/wikidata=
-                      # tags (ODbL); articles are bundled only from them.
-                      # Same condition as map-config's hasWikiArticles.
-                      has_wiki=bool(wikidata_data or (bundle_wiki_articles
-                                                      and wiki_cross_refs)))
         _add_viewer(creator, MapItem, maplibre_js_path=maplibre_js_path,
                     maplibre_css_path=maplibre_css_path,
                     viewer_html_path=viewer_html_path, map_config=map_config,
@@ -604,6 +595,19 @@ def create_zim(
             wiki_articles_source=wiki_articles_source,
             wiki_images=wiki_images, wiki_image_max_kb=wiki_image_max_kb,
             wiki_images_per_article=wiki_images_per_article)
+        # map-config.json and the License metadata come after the articles
+        # (libzim does not care about order), so both credit Wikipedia only
+        # when at least one article was stored. wiki_cross_refs alone are
+        # OSM's wikipedia=/wikidata= tags (ODbL), not Wikipedia content.
+        has_articles = bool(_bundled_set)
+        _add_map_config(creator, MapItem, map_config=map_config,
+                        has_wiki_articles=has_articles)
+        _add_metadata(creator, name=name, description=description,
+                      overture_sources=overture_sources, xapian_mode=xapian_mode,
+                      metadata=metadata, illustration=illustration,
+                      has_satellite=bool(satellite_dir and os.path.isdir(satellite_dir)),
+                      has_terrain=bool(terrain_dir and os.path.isdir(terrain_dir)),
+                      has_wiki=has_wikidata or has_articles)
         _add_routing_graph(creator, MapItem,
                            routing_graph_path=routing_graph_path,
                            routing_graph_chunk_mb=routing_graph_chunk_mb,
@@ -813,7 +817,8 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
 
 def _add_viewer(creator, MapItem, *, maplibre_js_path, maplibre_css_path, viewer_html_path, map_config, name):
     """The viewer: index.html, routing-worker.js and places.html in their
-    fixed uncompressed slots, MapLibre, and map-config.json."""
+    fixed uncompressed slots, and MapLibre. (map-config.json is written by
+    _add_map_config, after the Wikipedia articles.)"""
     # Add the viewer HTML (main page).
     #
     # The three viewer files go into fixed-size UNCOMPRESSED slots
@@ -871,7 +876,16 @@ def _add_viewer(creator, MapItem, *, maplibre_js_path, maplibre_css_path, viewer
         maplibre_css_path,
     ))
 
-    # Add map config
+
+
+def _add_map_config(creator, MapItem, *, map_config, has_wiki_articles):
+    """map-config.json, with hasWikiArticles only when articles were stored
+    (the viewer's credits list Wikipedia on it)."""
+    map_config = dict(map_config)
+    if has_wiki_articles:
+        map_config["hasWikiArticles"] = True
+    else:
+        map_config.pop("hasWikiArticles", None)
     config_json = json.dumps(map_config, indent=2)
     creator.add_item(MapItem(
         "map-config.json", "Map Config", "application/json",
