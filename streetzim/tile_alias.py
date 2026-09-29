@@ -23,10 +23,12 @@ up to a size cap are hashed (``max_alias_bytes``):
   are 56-57 B). A 4 KiB cap let 81 of Monaco's 108 distinct tiles into the
   table, 128 B lets in 2, the two fill tiles themselves;
 * raster tiles (``satellite/``, ``terrain/``): ``RASTER_MAX_ALIAS_BYTES`` =
-  1 KiB. A one-colour tile is 44-54 B as terrain (lossless WebP), 198-338 B
-  as a 256 px satellite tile (WebP q65/q80, AVIF) and 354-560 B at 512 px,
-  while real imagery is several KB. Raster tiles sit in uncompressed
-  clusters, so a repeat costs its full size and the cap is set higher.
+  512 B. A one-colour tile is 44-54 B as terrain (lossless WebP) and 198-338
+  B as a 256 px satellite tile (the default; WebP q65/q80, AVIF), and
+  deep-ocean Sentinel-2 imagery is ~300-500 B, while imagery with any
+  content is several KB. (A one-colour 512 px WebP, ~560 B, is not aliased;
+  a 512 px AVIF, ~354 B, is.) Raster tiles sit in uncompressed clusters, so
+  a repeat costs its full size and the cap is set higher than for vector.
 
 The table remembers every DISTINCT tile under the cap, not only the ones
 that turn out to repeat (a later copy can only be known by remembering the
@@ -51,7 +53,7 @@ import re
 from typing import Any
 
 VECTOR_MAX_ALIAS_BYTES = 128
-RASTER_MAX_ALIAS_BYTES = 1024
+RASTER_MAX_ALIAS_BYTES = 512
 ENV_VAR = "STREETZIM_TILE_ALIASES"
 # Approximate memory per remembered tile (see the module docstring).
 ENTRY_BYTES = 110

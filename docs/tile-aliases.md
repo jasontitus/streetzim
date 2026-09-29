@@ -20,11 +20,12 @@ aliases as tiles, because it skips only `is_redirect` entries.
 
 - **Turning it off:** set `STREETZIM_TILE_ALIASES=0`.
 - **Size limit:** only small tiles are hashed: vector tiles up to 128 B,
-  raster tiles up to 1 KiB (`max_alias_bytes` in `streetzim/tile_alias.py`).
+  raster tiles up to 512 B (`max_alias_bytes` in `streetzim/tile_alias.py`).
   Only a tile with nothing specific to its position (open sea, the inside of
   one landcover polygon, flat terrain) can repeat, and those are small: every
   vector duplicate seen is 55–77 B; a one-colour raster tile is 44–54 B as
-  terrain and 198–560 B as satellite imagery.
+  terrain and 198–338 B as a 256 px satellite tile, and deep-ocean
+  Sentinel-2 imagery is about 300–500 B.
 - **Memory:** the table remembers every *distinct* tile under the cap (the
   first copy has to be remembered before anyone knows it repeats), at about
   110 B each (an 88-bit BLAKE2b digest and the packed z/x/y target, both as

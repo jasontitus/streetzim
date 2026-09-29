@@ -71,9 +71,9 @@ def _mbtiles(path: Path) -> dict[str, bytes]:
 def _satellite(root: Path) -> dict[str, bytes]:
     """A raster cache: raster tiles go in uncompressed clusters, so a repeat
     costs its full size unless aliased."""
-    # 772 B, identical: a one-colour 512 px WebP is ~560 B, under the
-    # raster cap (RASTER_MAX_ALIAS_BYTES).
-    blue = b"RIFF" + bytes(range(256)) * 3
+    # 452 B, identical: deep-ocean imagery is ~300-500 B, under the raster
+    # cap (RASTER_MAX_ALIAS_BYTES).
+    blue = b"RIFF" + bytes(range(224)) * 2
     out = {}
     for x in (8528, 8529, 8530):
         for y in (5973, 5974):
@@ -168,8 +168,8 @@ def test_env_var_turns_aliases_off(tmp_path, inputs, monkeypatch):
     assert len(_groups(dirent_blobs(off), expected)) == len(expected)
     monkeypatch.delenv("STREETZIM_TILE_ALIASES")
     on = _build(tmp_path, "on.zim", mb, sat)
-    # 4 duplicate 772 B satellite tiles in uncompressed clusters.
-    assert off.stat().st_size - on.stat().st_size > 4 * 700
+    # 4 duplicate 452 B satellite tiles in uncompressed clusters.
+    assert off.stat().st_size - on.stat().st_size > 4 * 400
 
 
 def test_first_copy_is_deterministic(tmp_path, inputs, monkeypatch):
