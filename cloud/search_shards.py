@@ -28,6 +28,7 @@ if it drifts, readers ask for leaves the writer never wrote.
 """
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from typing import Iterable, Iterator
@@ -210,3 +211,86 @@ def char_split_paths(leaves: Iterable[tuple[str, Path, int, int]]) -> list[str]:
     sorted. Clients pick the longest matching what was typed; a typed
     character with no path means no records, so they say so at once."""
     return sorted({LEAF_SEP.join(path) for _tier, path, _c, _b in leaves})
+
+
+# --- Hash splitting of oversized chunks (--split-hot-search-chunks-mb) ---
+# Moved from cloud/repackage_zim.py so the builder and repackage share one
+# copy without importing each other.
+
+def sub_bucket_for_name(name: str, n_buckets: int) -> int:
+    """Deterministic, language-agnostic hash mapping a record's name to
+    one of ``n_buckets`` sub-chunks. Must match the client-side logic
+    in resources/viewer/index.html (``subBucketFor``) and Swift
+    (``Geocoder.subBucketFor``).
+
+    Uses FNV-1a 32-bit hash over the UTF-8 bytes of the full name —
+    cheap, no external deps, and reproducible across Python / JS / Swift
+    to the bit.
+    """
+    h = 0x811C9DC5  # FNV offset basis (32-bit)
+    for b in name.encode("utf-8"):
+        h ^= b
+        h = (h * 0x01000193) & 0xFFFFFFFF  # FNV prime
+    return h % n_buckets
+
+
+def split_records_recursive(
+    records: list, prefix: str, threshold_bytes: int,
+    n_buckets: int, max_depth: int,
+) -> list[tuple[str, bytes, int]]:
+    """Recursively split records into sub-chunks until each fits under
+    ``threshold_bytes`` or ``max_depth`` is reached. Returns a list of
+    ``(leaf_prefix, serialized_bytes, record_count)`` tuples — only leaves, no
+    intermediate nodes.
+
+    Strategy:
+      1. Try FNV-1a hash by record's ``n`` field across ``n_buckets``.
+      2. If degenerate (≥75% of records collapsed into one bucket — happens
+         when records share an empty/identical name), fall back to
+         **size-based slicing**: distribute records by index modulo
+         n_buckets. Client behavior is unaffected because the client
+         already fetches every sub-chunk under a prefix and filters by
+         query content (see resources/viewer/index.html ``expandPrefix``).
+
+    The serialized payload is checked against ``threshold_bytes`` before
+    splitting — if the chunk is already small enough (or recursion is
+    exhausted), it's returned as a leaf.
+    """
+    serialized = json.dumps(records, separators=(",", ":"),
+                            ensure_ascii=False).encode("utf-8")
+    if len(serialized) <= threshold_bytes or max_depth <= 0 or len(records) <= 1:
+        return [(prefix, serialized, len(records))]
+
+    # By-name FNV-1a bucketing (deterministic; preferred when distribution
+    # is reasonable).
+    by_name: list[list] = [[] for _ in range(n_buckets)]
+    for rec in records:
+        name = rec.get("n", "") or ""
+        by_name[sub_bucket_for_name(name, n_buckets)].append(rec)
+    largest_share = max(len(b) for b in by_name) / max(1, len(records))
+
+    if largest_share <= 0.75:
+        buckets = by_name
+        strategy = "name"
+    else:
+        # Degenerate — anonymous records (empty `n`) or 1.5M records sharing
+        # the same `n`. Split by record index instead, breaking the FNV tie.
+        buckets = [[] for _ in range(n_buckets)]
+        for i, rec in enumerate(records):
+            buckets[i % n_buckets].append(rec)
+        strategy = "index"
+
+    out: list[tuple[str, bytes, int]] = []
+    hex_width = len(format(n_buckets - 1, "x"))
+    for i, bucket in enumerate(buckets):
+        if not bucket:
+            continue
+        sub_prefix = f"{prefix}-{format(i, f'0{hex_width}x')}"
+        out.extend(split_records_recursive(
+            bucket, sub_prefix, threshold_bytes, n_buckets, max_depth - 1,
+        ))
+    if strategy == "index":
+        # Surfaced for log diagnostics; the actual recursion already wrote
+        # uniform sub-chunks. (No extra effect — just informational.)
+        pass
+    return out

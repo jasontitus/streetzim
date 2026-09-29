@@ -130,7 +130,7 @@ leave:
 * ties in distance are broken by scan order (nearer cell first,
   ascending local index) in both the JS and the Python snapper, so
   equal-distance candidates across a cell boundary resolve the same
-  way. `tests/szrg_spatial.SpatialGraph.nearest_node` mirrors all of
+  way. `streetzim/routing/spatial.SpatialGraph.nearest_node` mirrors all of
   this and is what `cloud/route_cli.py` calls, so the differential
   harness snaps exactly like the viewer. Its `raw=True` form is a
   plain nearest-vertex lookup for harnesses that replay recorded

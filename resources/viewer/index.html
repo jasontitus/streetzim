@@ -1304,7 +1304,7 @@
     <section>
       <h3>Place Information</h3>
       <p>Wikidata &amp; Wikipedia</p>
-      <p class="license">Creative Commons CC0 (Wikidata) / Creative Commons Attribution-ShareAlike 3.0 (Wikipedia) &mdash; wikidata.org / wikipedia.org</p>
+      <p class="license">Creative Commons CC0 (Wikidata) / Creative Commons Attribution-ShareAlike 4.0 (Wikipedia) &mdash; wikidata.org / wikipedia.org</p>
     </section>
     <section id="attr-overture-section" style="display:none;">
       <h3>Address Enrichment</h3>
@@ -3971,9 +3971,11 @@ function _detailFmtNumber(n) {
 // CATEGORIES). The build still emits chip files keyed by these IDs;
 // regions without a particular category just show "0 matches" on
 // places.html — graceful degrade.
-// Chip IDs MUST match the build's chip_rules.py — see
-// project_chip_rules_duplicated.md memory. Used by both
+// Chip IDs MUST match the build's cloud/chip_rules.py —
+// tests/chip_rules_js.test.mjs fails CI when they drift. Used by both
 // initFindChips (on-map rail) and initExplore (corner menu).
+// BEGIN chip-rail  (ids + labels must equal cloud/chip_rules.py CHIP_RULES;
+// enforced by tests/chip_rules_js.test.mjs)
 var EXPLORE_CHIPS = [
   // Must cover every chip cloud/chip_rules.py can emit, or the map rail
   // silently drops categories the ZIM contains: Health, Landmarks and
@@ -4001,6 +4003,7 @@ var EXPLORE_CHIPS = [
   { id: 'fuel',        label: 'Gas',         emoji: '⛽' },
   { id: 'hotels',      label: 'Hotels',      emoji: '🏨' },
 ];
+// END chip-rail
 
 // --- On-map Find UI: chip rail beneath the search input ---
 // Tapping a chip fetches its category-index file (with sub-bucket
@@ -7540,7 +7543,7 @@ function initRouting(map, config) {
 
     var textDecoder = new TextDecoder('utf-8');
 
-    // cell_of(lat_e7, lon_e7, scale) — must match tests/szrg_spatial.cell_of
+    // cell_of(lat_e7, lon_e7, scale) — must match streetzim/routing/spatial.cell_of
     // EXACTLY (floor semantics on negatives, which JS's Math.floor does
     // correctly unlike the // operator).
     function cellOf(latE7, lonE7) {
@@ -8162,7 +8165,7 @@ function initRouting(map, config) {
   // emits (create_osm_zim.SPEED: motorway = 100 km/h) or the heuristic
   // over-estimates remaining time and the "optimal" pass silently
   // returns suboptimal routes. Matches routing-worker.js and the
-  // Python references (tests/szrg_astar.py, cloud/route_cli.py).
+  // Python references (streetzim/routing/astar.py, cloud/route_cli.py).
   var HEURISTIC_SPEED_KMH = 100;
   var HEURISTIC_MPS = HEURISTIC_SPEED_KMH / 3.6;
 

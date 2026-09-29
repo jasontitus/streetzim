@@ -456,3 +456,55 @@ def test_known_good_sv_structural_checks_pass():
         "known-good SV ZIM fails structural validation: "
         + "\n".join(f"{r.name}: {r.detail}" for r in failed)
     )
+
+
+def _zim_with_tiles(tmp_path: Path, tiles: dict[str, bytes],
+                    bbox=(7.40, 43.72, 7.44, 43.76)) -> Path:
+    from libzim.writer import Creator
+    zim_path = tmp_path / "tiles.zim"
+    with Creator(str(zim_path)) as cc:
+        cc.add_item(_mk_item("index.html", "text/html", b"<html></html>"))
+        cc.set_mainpath("index.html")
+        cc.add_item(_mk_item("map-config.json", "application/json",
+                             json.dumps({"bbox": list(bbox)}).encode()))
+        for path, data in tiles.items():
+            cc.add_item(_mk_item(path, "application/x-protobuf", data))
+    return zim_path
+
+
+def test_small_region_without_z0_tile_is_only_a_warning(tmp_path: Path):
+    """A Monaco-sized build has nothing left at z0 after tilemaker's
+    low-zoom filters, and the builder drops the 0-byte tile. That used to
+    crash the check with KeyError and fail the ZIM. Deeper zooms present
+    -> warn."""
+    pytest.importorskip("libzim")
+    from libzim.reader import Archive
+    # Tiles covering the bbox centre (7.42, 43.74) at the probed zooms.
+    tiles = {"tiles/8/133/93.pbf": b"\x1a\x01x",
+             "tiles/11/1066/746.pbf": b"\x1a\x01x",
+             "tiles/14/8529/5973.pbf": b"\x1a\x01x"}
+    status, detail = validate_zim._chk_vector_tiles(Archive(str(_zim_with_tiles(tmp_path, tiles))))
+    assert status == "warn", detail
+    assert "tiles/0/0/0.pbf=missing" in detail
+
+
+def test_no_tiles_at_all_still_fails(tmp_path: Path):
+    pytest.importorskip("libzim")
+    from libzim.reader import Archive
+    status, detail = validate_zim._chk_vector_tiles(
+        Archive(str(_zim_with_tiles(tmp_path, {"tiles/3/1/1.pbf": b"\x1a\x01x"}))))
+    assert status == "fail", detail
+
+
+def test_large_region_without_z0_tile_still_fails(tmp_path: Path):
+    """The small-region allowance must not let a country/continent ZIM that
+    lost its z0 tile through."""
+    pytest.importorskip("libzim")
+    from libzim.reader import Archive
+    # bbox centred on (7.42, 43.74) but 4 degrees wide.
+    tiles = {"tiles/8/133/93.pbf": b"\x1a\x01x",
+             "tiles/11/1066/746.pbf": b"\x1a\x01x",
+             "tiles/14/8529/5973.pbf": b"\x1a\x01x"}
+    zim = _zim_with_tiles(tmp_path, tiles, bbox=(5.42, 42.74, 9.42, 44.74))
+    status, detail = validate_zim._chk_vector_tiles(Archive(str(zim)))
+    assert status == "fail", detail

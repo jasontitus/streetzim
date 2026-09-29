@@ -1,4 +1,11 @@
-# Rust ZIM builder (Path D)
+# Optional accelerator: the Rust ZIM packer
+
+> **You probably don't need this.** StreetZim writes ZIMs with libzim
+> (python-libzim) by default, and every feature works that way. CI builds,
+> checks, rewrites and serves ZIMs with only the standard openZIM tools. This
+> page describes a speed-up used for continent-scale builds on the author's
+> production host.
+
 
 `create_osm_zim.py` ships two ZIM emit backends:
 
@@ -11,8 +18,19 @@
 
 Both paths are wire-compatible — they emit ZIMs that pass `zimcheck`
 and read identically in Kiwix. The Rust path exists to break specific
-limits of `python-libzim` (peak RSS, GIL-bound emit loop, no per-item
-compression knob) on multi-GB builds.
+limits of `python-libzim` on multi-GB builds (peak RSS, a GIL-bound emit
+loop, and the time libzim's own Xapian indexer takes).
+
+**The libzim path is complete.** Every feature, viewer slot and routing
+layout works on stock libzim (python-libzim bundling libzim ≥ 9.6), and
+so do the tools that rewrite published ZIMs (`cloud/repackage_zim.py`,
+`cloud/patch_viewer_inplace.py`). Per-item compression works there too,
+through `Hint.COMPRESS`; `tests/test_libzim_contract.py` pins that
+behaviour. CI builds, repackages, patches and serves its Monaco ZIM
+through libzim only. What needs zimru: `--zim-builder rust`,
+`--xapian builder`, and `cloud/swap_viewer_rust.py` (for
+viewer swaps, use `cloud/repackage_zim.py` or, on slotted ZIMs,
+`cloud/patch_viewer_inplace.py`).
 
 ## When to use which
 
@@ -20,7 +38,7 @@ compression knob) on multi-GB builds.
 |----------------------------------------------------------|----------------------|
 | <1 GB ZIM, no routing graph                              | `python` (simplest)  |
 | Large multi-GB ZIM, peak RSS pressure                    | `rust`               |
-| Routing graph >500 MB needs `compress=False`             | `rust`               |
+| Routing graph >500 MB needs `compress=False`             | either (both honour it) |
 | Need a build that the libzim C++ stack already supports  | `python` is fine     |
 
 The Rust path supports per-item compression natively (the patched

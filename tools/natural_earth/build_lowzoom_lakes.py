@@ -7,7 +7,8 @@ Natural Earth is public domain. Source (not committed; cache/ is ignored):
     https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_lakes.geojson
   python3 tools/natural_earth/build_lowzoom_lakes.py \
     cache/natural-earth/ne_50m_lakes.geojson cache/natural-earth/lowzoom-lakes.json
-then paste the JSON into _SZ_LAKES in resources/viewer/index.html.
+then paste the JSON into _SZ_LAKES in
+resources/viewer/src/index/130-lowzoom-lakes.js and run tools/build_viewer.py.
 
 Coordinates are rounded to 0.01 deg (~1 km,
 under a pixel at z5) and each feature keeps only NE's min_zoom so small lakes

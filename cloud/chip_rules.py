@@ -15,15 +15,23 @@ This module owns the chip-definitions. It's imported by:
   * tests — assertions that every chip rule has at least one match in a
     known-good ZIM
 
-The viewer (``places.html``) now only needs the chip ids + labels;
-filtering is done upstream. Keep the ``CHIP_RULES`` list here as the
-authoritative source, mirror ``{id, label}`` minimal entries in
-places.html for the chip-bar UI.
+``CHIP_RULES`` here is the authoritative source. The viewer keeps two
+inline copies because published ZIMs get their viewer patched in place
+and cannot gain a new rules file:
+  * ``resources/viewer/places.html`` ``CATEGORIES`` (block ``chip-rules``):
+    the full rules, used by the legacy client-side filter on ZIMs built
+    without per-chip files.
+  * ``resources/viewer/index.html`` ``EXPLORE_CHIPS`` (block ``chip-rail``,
+    edited in ``resources/viewer/src/index/220-explore-menu-and-chip-rail.js``):
+    ids, labels and emoji for the map's chip rail.
+``tests/chip_rules_js.test.mjs`` fails when either copy drifts from this
+list, so change them in the same commit (then run
+``scripts/sync-drive-viewer.sh``).
 """
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -117,6 +125,23 @@ def record_matches_chip(rec: dict, chip: ChipRule) -> bool:
         if chip.name_pattern.search(n):
             return True
     return False
+
+
+def rules_as_json() -> list[dict]:
+    """``CHIP_RULES`` as plain JSON, in order, for another implementation to
+    load (a viewer, or openzim/maps emitting it at build time). Regexes travel
+    as their source plus an ignore-case flag, which reads the same in Python
+    and JavaScript for these patterns (see tests/chip_rules_js.test.mjs for
+    the one \\b caveat)."""
+    def rx(p: re.Pattern | None) -> dict | None:
+        if p is None:
+            return None
+        return {"source": p.pattern, "i": bool(p.flags & re.IGNORECASE)}
+    return [{
+        "id": c.id, "label": c.label, "cat": c.from_cat,
+        "subtypes": list(c.subtypes), "includeRegex": rx(c.include_regex),
+        "nameSubtypes": list(c.name_subtypes), "namePattern": rx(c.name_pattern),
+    } for c in CHIP_RULES]
 
 
 def split_records_by_chip(records_by_cat: dict) -> dict[str, list]:

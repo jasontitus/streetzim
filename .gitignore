@@ -64,3 +64,6 @@ tmp/*.bin
 rejected-zims/
 salvage/
 /cache/natural-earth/
+
+# Git worktrees created by Claude Code sub-agents.
+/.claude/worktrees/

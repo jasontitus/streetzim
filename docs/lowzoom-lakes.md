@@ -80,8 +80,11 @@ python3 tools/natural_earth/build_lowzoom_lakes.py \
   cache/natural-earth/ne_50m_lakes.geojson cache/natural-earth/lowzoom-lakes.json
 ```
 
-Then paste the JSON as `_SZ_LAKES` in `resources/viewer/index.html` and copy
-the file to `web/drive/viewer/index.html` (the two must stay byte-identical).
+Then paste the JSON as `_SZ_LAKES` in
+`resources/viewer/src/index/130-lowzoom-lakes.js`, run
+`python tools/build_viewer.py` to rebuild `resources/viewer/index.html`, and
+run `scripts/sync-drive-viewer.sh` so `web/drive/viewer/index.html` stays
+byte-identical.
 `cache/` is gitignored; the source GeoJSON is not committed.
 
 ## If you ever can rebuild tiles

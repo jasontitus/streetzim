@@ -236,7 +236,7 @@ their layout. If there's nothing to rebuild from at all, it exits instead
 of writing a ZIM with no chips. See `docs/find-chip-shards.md`. The probe
 above is still harmless.
 
-### Both checks live in `build-region-and-upload.sh`
+### Both checks lived in `build-region-and-upload.sh` (now in `attic/`; `ship-region.sh` gates today)
 
 The wrapper now detects both conditions and conditionally drops the
 problematic flags. Replicate the same probe if you write a one-off
