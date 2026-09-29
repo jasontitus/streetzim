@@ -151,7 +151,7 @@ def test_duplicates_share_one_blob(tmp_path, inputs, monkeypatch):
     zim = _build(tmp_path, "a.zim", mb, sat)
     _check_bytes(zim, expected)
     blobs = dirent_blobs(zim)
-    distinct = {d for d in expected.values()}
+    distinct = set(expected.values())
     # One blob per distinct content, per mimetype (SEA/LAND are vector only).
     assert len(_groups(blobs, expected)) == len(distinct)
     n_sea = sum(d == SEA for d in expected.values())

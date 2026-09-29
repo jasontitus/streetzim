@@ -33,7 +33,7 @@ repos:
         files: ^(streetzim/cli\.py|offliner-definition\.json|tools/offliner_definition\.py|create_osm_zim\.py)$
         pass_filenames: false
       - id: core-ops-boundary
-        name: core/ops boundary (ops/README.md)
+        name: core/ops boundary check
         entry: python tools/check_boundary.py
         language: system
         pass_filenames: false

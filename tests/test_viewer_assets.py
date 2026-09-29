@@ -68,7 +68,7 @@ def test_tampered_vendored_maplibre_fails(tmp_path):
     vendor = _vendor_copy(tmp_path)
     js = vendor / "maplibre-gl" / "maplibre-gl.js"
     js.write_bytes(js.read_bytes() + b"\n// injected\n")
-    with pytest.raises(va.IntegrityError, match="maplibre-gl.js: sha256"):
+    with pytest.raises(va.IntegrityError, match=r"maplibre-gl\.js: sha256"):
         va.vendored_maplibre(vendor=vendor)
 
 
