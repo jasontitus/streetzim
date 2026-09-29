@@ -115,12 +115,20 @@ function _szOpeningCamera(config, hash, storage) {
 // bare background: the sea stopped in a straight line at the edge of every
 // coastal region (Monaco's east and south edges). Longitudes past 180
 // (areas across the antimeridian) are passed through; MapLibre wraps them.
+// A box as wide as the world (world ZIMs: -180,-85,180,85) gets none:
+// MapLibre 5.23 throws in _calcMatrices on a 360-degree maxBounds ("Error
+// loading map"), and there is no edge to hide anyway. Latitudes are kept
+// inside Web Mercator's +-85.0511.
+var SZ_MERC_LAT = 85.0511;
 function _szMaxBounds(config) {
   var b = config && config.bounds;
   if (!b || b.length !== 4) return undefined;
   for (var i = 0; i < 4; i++) if (typeof b[i] !== 'number' || !isFinite(b[i])) return undefined;
   if (!(b[0] < b[2] && b[1] < b[3])) return undefined;
-  return [[b[0], b[1]], [b[2], b[3]]];
+  if (b[2] - b[0] >= 359.9) return undefined;
+  var s = Math.max(b[1], -SZ_MERC_LAT), n = Math.min(b[3], SZ_MERC_LAT);
+  if (!(s < n)) return undefined;
+  return [[b[0], s], [b[2], n]];
 }
 
 function _szDriving() {

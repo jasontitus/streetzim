@@ -353,6 +353,18 @@ await ok('maxBounds is the built box itself: no margin of empty map around it', 
     assert.strictEqual(v._szMaxBounds({ bounds: bad }), undefined, JSON.stringify(bad));
   }
   assert.strictEqual(v._szMaxBounds({}), undefined);
+  // World and near-world boxes: no maxBounds (a 360-degree one makes
+  // MapLibre 5.23 throw in _calcMatrices and the viewer shows "Error
+  // loading map"). World ZIMs are built with -180,-85,180,85.
+  for (const w of [[-180, -85, 180, 85], [-180, -85.0511, 180, 85.0511], [-180, -90, 180, 90],
+                   [-180, -60, 180, 75], [-179.95, -85, 179.95, 85], [100, -60, 460, 75]]) {
+    assert.strictEqual(v._szMaxBounds({ bounds: w }), undefined, JSON.stringify(w));
+  }
+  assert.deepStrictEqual(v._szMaxBounds({ bounds: [-179.9, -85, 179.9, 85] }), [[-179.9, -85], [179.9, 85]]);
+  // Latitudes past Web Mercator's limit are clamped to it.
+  assert.deepStrictEqual(v._szMaxBounds({ bounds: [-10, -90, 10, 90] }), [[-10, -85.0511], [10, 85.0511]]);
+  assert.deepStrictEqual(v._szMaxBounds({ bounds: [-170, -85.06, 170, 85.06] }), [[-170, -85.0511], [170, 85.0511]]);
+  assert.strictEqual(v._szMaxBounds({ bounds: [0, 86, 10, 89] }), undefined);
   // The map is built with it (the old code padded by 0.01 degrees, which
   // showed as a blank strip -- the sea cut off -- at every edge).
   assert.match(HTML, /maxBounds: _szMaxBounds\(config\)/);
