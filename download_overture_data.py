@@ -14,15 +14,22 @@ Transport: by default the theme's files are listed with an anonymous S3
 ListObjectsV2 request over HTTPS and DuckDB reads those https:// URLs. That
 is the same endpoint DuckDB's s3:// (vhost style) talks to, and works where
 s3:// does not (a proxy that injects its own credentials makes s3:// fail
-with "Invalid Access Key"). `--transport s3` keeps the old s3:// glob.
+with "Invalid Access Key"). When Overture's STAC catalog lists the same
+files, only those whose bbox meets the requested bbox are read.
+`--transport s3` keeps the old s3:// glob over every file.
 
-Release: `--release latest` (the default) picks the newest release under
-`release/` that has every requested theme, and prints the name it
-resolved. The name is written into the output parquet's key-value metadata
-(`overture_release`), and create_osm_zim.py records it in the ZIM's
-overture-sources.json. Pin a release (`--release 2026-09-23.1`) for a
-reproducible rebuild; `--print-release` resolves and prints the name only,
-which wrappers use to fix the release once per run.
+Release: `--release latest` (the default) is the release Overture's STAC
+catalog (https://stac.overturemaps.org/catalog.json) marks "latest",
+walking back through its `prev` links to the newest one that is complete
+for every requested theme: its S3 file count per theme/type equals the
+STAC collection's item count, so a release still being uploaded is never
+picked. Only when STAC is down does it fall back to the S3 listing, and
+then only to releases dated more than 2 days ago. The resolved name is
+printed (stderr for --print-release) and written into the output parquet's
+key-value metadata (`overture_release`); create_osm_zim.py records it in
+the ZIM's overture-sources.json. Pin a release (`--release 2026-09-23.1`)
+for a reproducible rebuild; `--print-release` resolves and prints the name
+only, which wrappers use to fix the release once per run.
 
 Usage:
   python3 download_overture_data.py addresses \\
@@ -35,6 +42,8 @@ Supported themes: `addresses`, `places`. `transportation` is out of
 scope — see docs/overture-matching.md for the integration plan.
 """
 import argparse
+import datetime
+import json
 import os
 import re
 import sys
@@ -42,6 +51,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from xml.etree import ElementTree
 
 # Run as a script from the repository root, which is then on sys.path.
@@ -54,6 +64,12 @@ OVERTURE_S3_BUCKET = f"s3://{OVERTURE_BUCKET}"
 OVERTURE_HTTPS = f"https://{OVERTURE_BUCKET}.s3.us-west-2.amazonaws.com"
 DEFAULT_RELEASE = "latest"
 RELEASE_CALENDAR = "https://docs.overturemaps.org/release-calendar/"
+STAC_ROOT = "https://stac.overturemaps.org"
+# Without STAC, a release counts as complete only once it is this old.
+S3_FALLBACK_MIN_AGE_DAYS = 2
+# DuckDB's reads of the parquet files: retry transient HTTP failures.
+DUCKDB_HTTP_SETTINGS = ("SET http_retries=8; SET http_retry_backoff=2; "
+                        "SET http_retry_wait_ms=500;")
 _RELEASE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.(\d+)$")
 
 # Each theme needs its own S3 path suffix + column projection.
@@ -62,6 +78,7 @@ _RELEASE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.(\d+)$")
 THEME_SPECS = {
     "addresses": {
         "s3_glob": "theme=addresses/type=address/*",
+        "type": "address",
         "columns": (
             "id, number, street, postcode, unit, country, "
             "address_levels, sources, "
@@ -70,6 +87,7 @@ THEME_SPECS = {
     },
     "places": {
         "s3_glob": "theme=places/type=place/*",
+        "type": "place",
         # Struct-typed fields (names / categories / brand / addresses /
         # sources) come across as DuckDB STRUCT / LIST values which
         # fetch_record_batch materializes as Python dicts / lists in
@@ -95,6 +113,31 @@ class ReleaseListingError(RuntimeError):
     theme's files over HTTPS) failed."""
 
 
+class StacUnavailable(RuntimeError):
+    """The STAC catalog could not be read (outage, timeout, bad JSON)."""
+
+
+class StacMissing(RuntimeError):
+    """The STAC catalog has no such document (HTTP 404)."""
+
+
+def _get(url: str, *, timeout: float = 60, retries: int = 3) -> bytes:
+    """GET with retries on timeouts, connection errors and 5xx. Any other
+    HTTP error (403, 404, ...) is raised at once: retrying cannot fix it."""
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or attempt == retries - 1:
+                raise
+        except (urllib.error.URLError, OSError):
+            if attempt == retries - 1:
+                raise
+        time.sleep(2 ** attempt)
+    raise AssertionError("unreachable")
+
+
 def _theme_prefix(release: str, theme: str) -> str:
     return f"release/{release}/{THEME_SPECS[theme]['s3_glob'].rstrip('*')}"
 
@@ -116,15 +159,10 @@ def _list_bucket(prefix: str, *, delimiter: str | None = None,
         if token:
             q["continuation-token"] = token
         url = f"{OVERTURE_HTTPS}/?{urllib.parse.urlencode(q)}"
-        for attempt in range(retries):
-            try:
-                with urllib.request.urlopen(url, timeout=timeout) as resp:
-                    body = resp.read()
-                break
-            except (urllib.error.URLError, OSError) as e:
-                if attempt == retries - 1:
-                    raise ReleaseListingError(f"{url}: {e}") from e
-                time.sleep(2 ** attempt)
+        try:
+            body = _get(url, timeout=timeout, retries=retries)
+        except (urllib.error.URLError, OSError) as e:
+            raise ReleaseListingError(f"{url}: {e}") from e
         try:
             root = ElementTree.fromstring(body)
         except ElementTree.ParseError as e:
@@ -173,22 +211,156 @@ def _pin_hint(detail: str) -> str:
             f"{OVERTURE_S3_BUCKET}/release/`.")
 
 
-def resolve_release(release: str, themes) -> str:
-    """`latest` → the newest release that has every theme in `themes`;
-    anything else is returned as given (an explicit pin)."""
+def stac_json(url: str) -> dict:
+    try:
+        body = _get(url)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise StacMissing(url) from e
+        raise StacUnavailable(f"{url}: {e}") from e
+    except (urllib.error.URLError, OSError) as e:
+        raise StacUnavailable(f"{url}: {e}") from e
+    try:
+        doc = json.loads(body)
+    except ValueError as e:
+        raise StacUnavailable(f"{url}: not JSON ({e})") from e
+    if not isinstance(doc, dict):
+        raise StacUnavailable(f"{url}: not a STAC object")
+    return doc
+
+
+def _links(doc: dict, rel: str) -> list[dict]:
+    return [ln for ln in doc.get("links") or [] if ln.get("rel") == rel and ln.get("href")]
+
+
+def stac_collection(release: str, theme: str) -> dict:
+    """The STAC collection of the theme's type in `release`
+    (StacMissing when the release has no such collection)."""
+    return stac_json(f"{STAC_ROOT}/{release}/{theme}/{THEME_SPECS[theme]['type']}/collection.json")
+
+
+def release_complete(release: str, theme: str) -> str | None:
+    """None if `release` is complete for `theme`: STAC has the collection
+    and S3 holds exactly as many parquet files as it has items. Otherwise
+    why not. StacUnavailable / ReleaseListingError propagate."""
+    try:
+        coll = stac_collection(release, theme)
+    except StacMissing:
+        return "no STAC collection"
+    n_stac = len(_links(coll, "item"))
+    n_s3 = len(theme_files(release, theme))
+    if n_stac == 0 or n_s3 != n_stac:
+        return f"{n_s3} files on S3, STAC lists {n_stac}"
+    return None
+
+
+def _resolve_via_stac(themes) -> str:
+    try:
+        root = stac_json(f"{STAC_ROOT}/catalog.json")
+    except StacMissing as e:
+        raise StacUnavailable(str(e)) from e
+    latest = root.get("latest")
+    if not isinstance(latest, str) or not latest:
+        raise StacUnavailable(f"{STAC_ROOT}/catalog.json has no 'latest'")
+    url = next((ln["href"] for ln in _links(root, "child") if ln.get("latest")),
+               f"{STAC_ROOT}/{latest}/catalog.json")
+    seen: set[str] = set()
+    skipped: list[str] = []
+    while url and url not in seen:
+        seen.add(url)
+        try:
+            cat = stac_json(url)
+        except StacMissing as e:
+            raise StacUnavailable(str(e)) from e
+        name = str(cat.get("id") or "")
+        if not _RELEASE_RE.match(name):
+            raise StacUnavailable(f"{url}: unexpected release id {name!r}")
+        why = [f"{t}: {w}" for t in themes if (w := release_complete(name, t))]
+        if not why:
+            return name
+        skipped.append(f"{name} ({'; '.join(why)})")
+        print(f"  Overture release {name} is incomplete ({'; '.join(why)}); trying the previous one",
+              file=sys.stderr, flush=True)
+        prev = _links(cat, "prev")
+        url = prev[0]["href"] if prev else ""
+    raise SystemExit(_pin_hint(
+        "Could not resolve --release latest: no release in the STAC catalog is complete "
+        f"for {', '.join(themes)} (checked {', '.join(skipped) or 'none'})."))
+
+
+def _release_date(name: str) -> datetime.date:
+    return datetime.date.fromisoformat(release_sort_key(name)[0])
+
+
+def _resolve_via_s3(themes, today: datetime.date) -> str:
+    names = list_releases()
+    for name in names:
+        age = (today - _release_date(name)).days
+        if age <= S3_FALLBACK_MIN_AGE_DAYS:
+            print(f"  skipping {name}: {age} day(s) old, may still be uploading "
+                  "(and STAC cannot confirm it)", file=sys.stderr, flush=True)
+            continue
+        if all(has_theme(name, t) for t in themes):
+            return name
+    raise SystemExit(_pin_hint(
+        f"Could not resolve --release latest: STAC is unavailable and no release under "
+        f"{OVERTURE_HTTPS}/release/ older than {S3_FALLBACK_MIN_AGE_DAYS} days has "
+        f"theme(s) {', '.join(themes)} (found: {', '.join(names) or 'none'})."))
+
+
+def resolve_release(release: str, themes, *, today: datetime.date | None = None) -> str:
+    """`latest` → the newest complete release with every theme in
+    `themes` (see the module docstring); anything else is returned as
+    given (an explicit pin), with no network access."""
     if release != "latest":
         return release
     try:
-        names = list_releases()
-        for name in names:
-            if all(has_theme(name, t) for t in themes):
-                return name
+        try:
+            return _resolve_via_stac(themes)
+        except StacUnavailable as e:
+            print(f"  STAC catalog unavailable ({e}); falling back to the S3 listing, "
+                  f"releases older than {S3_FALLBACK_MIN_AGE_DAYS} days only",
+                  file=sys.stderr, flush=True)
+            return _resolve_via_s3(themes, today or datetime.date.today())
     except ReleaseListingError as e:
         raise SystemExit(_pin_hint(
             f"Could not resolve --release latest: listing {OVERTURE_HTTPS}/release/ failed ({e}).")) from e
-    raise SystemExit(_pin_hint(
-        f"Could not resolve --release latest: no release under {OVERTURE_HTTPS}/release/ "
-        f"has theme(s) {', '.join(themes)} (found: {', '.join(names) or 'none'})."))
+
+
+def _boxes(bbox: tuple[float, float, float, float]) -> list[tuple[float, float, float, float]]:
+    """The bbox as plain boxes: two across the antimeridian (streetzim/area.py)."""
+    minlon, _minlat, maxlon, _maxlat = bbox
+    if minlon > maxlon or maxlon > 180:
+        from streetzim import area
+        return list(area.sides(bbox))
+    return [bbox]
+
+
+def _meets(a, b) -> bool:
+    return a[0] <= b[2] and a[2] >= b[0] and a[1] <= b[3] and a[3] >= b[1]
+
+
+def stac_files(release: str, theme: str, bbox) -> tuple[list[str], int] | None:
+    """(URLs of the theme's files whose STAC item bbox meets `bbox`, number
+    of items), or None when STAC cannot say. A row inside the bbox lies
+    inside its file's bbox, so skipping the other files loses nothing."""
+    try:
+        coll = stac_collection(release, theme)
+        hrefs = [ln["href"] for ln in _links(coll, "item")]
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            items = list(pool.map(stac_json, hrefs))
+    except (StacUnavailable, StacMissing):
+        return None
+    boxes = _boxes(bbox)
+    out = []
+    for it in items:
+        href = ((it.get("assets") or {}).get("aws") or {}).get("href")
+        if not href:
+            return None
+        bb = it.get("bbox")
+        if not bb or any(_meets(bb, b) for b in boxes):
+            out.append(href)
+    return out, len(items)
 
 
 def _sql_str(value: str) -> str:
@@ -200,7 +372,8 @@ def overture_sql(columns: str, source, bbox: tuple[float, float, float, float],
     """The COPY statement for the bbox.
 
     `source` is one path/glob, or a list of files (the HTTPS transport
-    lists them, since DuckDB cannot glob plain https:// URLs).
+    lists them, since DuckDB cannot glob plain https:// URLs), read with
+    union_by_name.
     `kv_metadata` goes into the parquet footer (the release it was cut
     from).
 
@@ -209,15 +382,14 @@ def overture_sql(columns: str, source, bbox: tuple[float, float, float, float],
     the antimeridian (minlon > maxlon, streetzim/area.py) is one SELECT per
     side joined by UNION ALL, each with a plain box filter: an OR of the two
     boxes is not pushed down (about 10x slower)."""
-    minlon, minlat, maxlon, maxlat = bbox
-    boxes = [bbox]
-    if minlon > maxlon or maxlon > 180:
-        from streetzim import area
-        boxes = area.sides(bbox)
-    src = (f"'{source}'" if isinstance(source, str)
-           else "[" + ", ".join(_sql_str(s) for s in source) + "]")
+    boxes = _boxes(bbox)
+    # A file list may mix schemas (a column added mid-release): union by
+    # name, so a column missing from some files reads as NULL there.
+    src = (f"'{source}', hive_partitioning=1" if isinstance(source, str)
+           else "[" + ", ".join(_sql_str(s) for s in source) + "], "
+                "hive_partitioning=1, union_by_name=true")
     selects = "\n      UNION ALL\n".join(f"""      SELECT {columns}
-      FROM read_parquet({src}, hive_partitioning=1)
+      FROM read_parquet({src})
       WHERE bbox.xmin >= {w} AND bbox.xmax <= {e}
         AND bbox.ymin >= {s} AND bbox.ymax <= {n}""" for w, s, e, n in boxes)
     kv = ""
@@ -277,12 +449,14 @@ def download_overture(theme: str, bbox: str, release: str, out_path: str,
     # httpfs + spatial are bundled extensions; first INSTALL auto-
     # downloads into ~/.duckdb/extensions, subsequent runs are a no-op.
     con.execute("INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs;")
+    con.execute(DUCKDB_HTTP_SETTINGS)
 
     spec = THEME_SPECS[theme]
+    box = (minlon, minlat, maxlon, maxlat)
     if transport == "s3":
         con.execute("SET s3_region='us-west-2'; SET s3_url_style='vhost';")
         source = f"{OVERTURE_S3_BUCKET}/release/{resolved}/{spec['s3_glob']}"
-        probe = source
+        probe = f"'{source}'"
     else:
         try:
             keys = theme_files(resolved, theme)
@@ -293,13 +467,24 @@ def download_overture(theme: str, bbox: str, release: str, out_path: str,
             raise SystemExit(_pin_hint(f"Overture release {resolved!r} has no {theme} "
                                        f"files under {OVERTURE_HTTPS}/{_theme_prefix(resolved, theme)}."))
         source = [f"{OVERTURE_HTTPS}/{k}" for k in keys]
-        probe = source[0]
+        # Read only the files whose STAC bbox meets ours, when STAC lists
+        # exactly the files S3 has; otherwise all of them.
+        picked = stac_files(resolved, theme, box)
+        if picked and picked[1] == len(source) and set(picked[0]) <= set(source):
+            print(f"  STAC: {len(picked[0])} of {len(source)} {theme} files meet the bbox",
+                  flush=True)
+            # Keep one file when none meets it, for the schema of an empty result.
+            source = picked[0] or source[:1]
+        else:
+            print(f"  STAC file list unavailable or different from S3: reading all "
+                  f"{len(source)} {theme} files", flush=True)
+        probe = "[" + ", ".join(_sql_str(u) for u in source) + "], union_by_name=true"
     columns = spec["columns"]
     if spec.get("optional_columns"):
         available = {r[0] for r in con.execute(
-            f"DESCRIBE SELECT * FROM read_parquet({_sql_str(probe)})").fetchall()}
+            f"DESCRIBE SELECT * FROM read_parquet({probe})").fetchall()}
         columns = theme_columns(spec, available)
-    sql = overture_sql(columns, source, (minlon, minlat, maxlon, maxlat), out_path,
+    sql = overture_sql(columns, source, box, out_path,
                        kv_metadata={KV_RELEASE: resolved})
     print(f"  Downloading Overture {theme} for bbox={bbox} (release {resolved}, {transport})...")
     con.execute(sql)
