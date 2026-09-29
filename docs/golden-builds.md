@@ -42,7 +42,8 @@ tools/golden_builds.sh --tilemaker main WORKTREE ~/golden/run2
 - Both sides get the same `create_osm_zim.py` flags. A ref too old for
   one of them (`--split-find-chips`, `--spatial-chunk-scale`) fails to
   build; compare such refs by hand with `tools/golden_diff.py`.
-- The exit status is 0 when the only differences are the expected ones.
+- The exit status is 0 when the only differences are the expected ones,
+  1 otherwise, and 2 when an archive cannot be read or has no content.
 
 Each Monaco build takes under a minute, and a run needs about 100 MB of
 disk (mostly the exported source trees), plus about 1.2 GB for the
@@ -75,17 +76,19 @@ result: `changed`, `only-before` and `only-after` 0.
 `tools/golden_diff.py before.zim after.zim [--control control.zim]
 [--decode-tiles] [--coord-tolerance DEG]` reads every entry of both
 archives (content, metadata, and libzim's own listings and indexes) and
-compares path, title, MIME type and content (a redirect by its target).
-Each path lands in one class:
+compares namespace and path, title, MIME type and content (a redirect by
+its target). Paths are printed with their namespace: `C/` content, `M/`
+metadata, `W/` libzim's `mainPage` redirect, `X/` libzim's listings and
+Xapian indexes. Each path lands in one class:
 
 | class | meaning | fails? |
 |---|---|---|
 | `identical` | same title, MIME type and bytes (or the same redirect target) | no |
 | `volatile` | differs in every build, by design: see the table below | no |
-| `reordered` | a list of search records (`search-data/`, `category-index/`) with the same records, in which only records that tie on the builder's sort key (type, then name; `streetzim/search_extract.py`) swapped places. The sequence of (type, name), which is the order the viewer lists results in, must be unchanged. Also Kiwix search pages (`search/*.html`) whose contents moved between page numbers | no |
+| `reordered` | a list of search records (`search-data/`, `category-index/`) with the same records whose sequence of (type, name) is unchanged: only records with the same type and name swapped places. The viewer lists results in list order, so any other move is `changed`. (This is what the check requires; it is not a claim that chunks are sorted by (type, name) — many are not.) Also the same JSON written differently (string escapes), and Kiwix search pages (`C/search/*.html`) whose entries (title, MIME type or redirect target, content) moved between page numbers | no |
 | `tiles-equal` | (`--decode-tiles`) a vector tile with the same features in another order | no |
-| `moved` | (`--coord-tolerance`) as `reordered`, except that records' coordinates (`a`, `o`) may also have moved by at most DEG degrees | no |
-| `noise` | (`--control`) differs from before, the control differs from before too, and after's entry equals the control's (or is equivalent to it by the rules above) | no, but read it |
+| `moved` | (`--coord-tolerance`) as `reordered`, except that records' coordinates (`a`, `o`) may also have moved by at most DEG degrees. A coordinate that is not a finite number (NaN, a string) is `changed`, with a note | no |
+| `noise` | (`--control`) the control differs from before too, and after's entry is the control's variant: identical to it, or equal up to reordering. No coordinate tolerance applies here, so noise cannot carry after further from before than `moved` allows | no, but read it |
 | `changed` | different content, title, MIME type or redirect target | **yes** |
 | `only-before`, `only-after` | an entry dropped or added | **yes** |
 
@@ -100,11 +103,11 @@ commit.
 | what | why |
 |---|---|
 | archive UUID | libzim makes a new one per file; printed, not compared |
-| `Date` metadata | the build date |
-| `buildDate` in `map-config.json` and `streetzim-meta.json` | the build month/date; only this key is ignored, every other value is compared |
-| `fulltext/xapian`, `title/xapian` | libzim's Xapian indexes are not written reproducibly |
-| order of tied records in `search-data/*.json` and `category-index/*.json` | records with the same type and name (e.g. two places called "Monaco": the country and the commune) come out in either order |
-| page numbers of Kiwix search pages | `search/monaco-6.html` and `search/monaco-7.html` can swap contents |
+| `M/Date` | the build date (must be `YYYY-MM-DD` on both sides) |
+| `buildDate` in `map-config.json` and `streetzim-meta.json` | the build month/date; the key must be present on both sides and is the only thing ignored; every other value is compared type-strictly (`true` is not `1`, `13` is not `13.0`) |
+| `X/fulltext/xapian`, `X/title/xapian` | libzim's Xapian indexes are not written reproducibly |
+| order of records with the same type and name in `search-data/*.json` and `category-index/*.json` | e.g. two places called "Monaco" (the country and the commune) come out in either order. Such records can differ in other displayed fields: across five same-commit pairs, the swapped records differed in label (`l`), subtype (`s`), coordinates, Wikidata ID or Wikipedia link, so requiring the whole record sequence to match would fail every run |
+| page numbers of Kiwix search pages | `C/search/monaco-6.html` and `C/search/monaco-7.html` can swap contents |
 | tilemaker mode only: tile bytes | feature order (reported as `tiles-equal`) |
 | tilemaker mode only: street records in `search-data/` and `category-index/street.json` | the record's point moves in the fifth decimal, at most 0.00005° measured (reported as `moved`) |
 | tilemaker mode only, rarely: a different near-duplicate record kept | e.g. an empty vs a filled field; `noise` when after matches the control, otherwise `changed` (then judge it as below) |
@@ -126,7 +129,8 @@ reworded one message in the viewer, and both modes reported exactly one
 ### Judging any other difference
 
 Every `changed`, `only-before` or `only-after` entry needs an explanation
-before the change is merged. Look at the entry in both ZIMs:
+before the change is merged. Look at the entry in both ZIMs (content
+paths without their `C/` prefix):
 
 ```bash
 python - before/monaco.zim after/monaco.zim map-config.json <<'EOF'
