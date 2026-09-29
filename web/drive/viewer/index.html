@@ -3481,7 +3481,14 @@ function initRtlText(map, config, lib) {
 // Last view: the camera (centre, zoom, and bearing/pitch when not 0) is kept
 // in localStorage per map and reopened on the next visit -- unless the URL
 // names a view or a place itself (#map=, #dest=, #origin=, #pin=,
-// #find=results): a deep link always wins. The key is the map's name and
+// #find=results): a deep link always wins. Only a move the reader made
+// (drag, pinch, wheel, the zoom buttons: MapLibre gives those an
+// originalEvent) is saved; opening, deep links, Home, search and route
+// framing are not, so merely opening the map never pins a view. The saved
+// view also records map-config's centre and zoom and is dropped when they
+// change: a rebuild that moves the opening view (repackage_zim.py
+// --map-center, e.g. hawaii's mid-Pacific fix) keeps the name and bounds,
+// and must not be masked by a view saved on the old build. The key is the map's name and
 // bounds from map-config.json, not the page path: the /drive/ PWA serves
 // every ZIM at the same /drive/viewer/, and a Kiwix book's path changes
 // with each new release of the same region, whose saved view still fits.
@@ -3537,6 +3544,7 @@ function _szReadView(config, storage) {
   var v = null;
   try { v = JSON.parse(storage.getItem(_szViewKey(config)) || 'null'); } catch (e) { return null; }
   if (!v || !v.c || v.c.length !== 2) return null;
+  if (v.h !== _szHomeFingerprint(config)) return null;   // opening view changed
   var lon = v.c[0], lat = v.c[1];
   if (!_szNum(lon, -180, 180) || !_szNum(lat, -90, 90)) return null;
   var minZ = (config && config.minZoom) || 0;
@@ -3552,10 +3560,16 @@ function _szReadView(config, storage) {
   };
 }
 
+// map-config's opening view, as saved alongside a view.
+function _szHomeFingerprint(config) {
+  var c = (config && config.center) || [];
+  return [c[0], c[1], config && config.zoom].join(',');
+}
+
 function _szWriteView(config, storage, cam) {
   if (!storage || !cam) return false;
   function r(x, n) { var f = Math.pow(10, n); return Math.round(x * f) / f; }
-  var v = { c: [r(cam.lng, 5), r(cam.lat, 5)], z: r(cam.zoom, 2) };
+  var v = { c: [r(cam.lng, 5), r(cam.lat, 5)], z: r(cam.zoom, 2), h: _szHomeFingerprint(config) };
   if (Math.abs(cam.bearing || 0) >= 0.5) v.b = r(cam.bearing, 1);
   if ((cam.pitch || 0) >= 0.5) v.p = r(cam.pitch, 1);
   try { storage.setItem(_szViewKey(config), JSON.stringify(v)); return true; }
@@ -3579,6 +3593,9 @@ function initViewMemory(map, config) {
   var storage = _szStorage();
   if (!storage) return;
   var timer = null;
+  // True from a reader-made movestart until the move's end is saved. A
+  // gesture's inertia and the zoom buttons' ease carry originalEvent too.
+  var byUser = false;
   function save() {
     clearTimeout(timer);
     timer = null;
@@ -3589,7 +3606,15 @@ function initViewMemory(map, config) {
       bearing: map.getBearing(), pitch: map.getPitch()
     });
   }
-  map.on('moveend', function() {
+  map.on('movestart', function(e) {
+    // Programmatic moves (flyTo, Home's easeTo, deep links, route fitting)
+    // have no originalEvent and are not saved.
+    if (e && e.originalEvent) byUser = true;
+  });
+  map.on('moveend', function(e) {
+    if (e && e.originalEvent) byUser = true;
+    if (!byUser) return;
+    byUser = false;
     clearTimeout(timer);
     timer = setTimeout(save, 400);
   });
@@ -3635,15 +3660,17 @@ function _szMonth(d) {
   return names[i] ? names[i] + ' ' + m[1] : String(d);
 }
 
-// Text for the About panel. Newer ZIMs carry title/description/date/
+// Text for the About panel. Newer ZIMs carry title/description/
 // generator in map-config.json (streetzim/zim_writer.py _add_map_config);
 // older ones only name and buildDate, and every field is optional.
 function _szAboutText(config) {
   config = config || {};
   var meta = [];
-  var when = _szMonth(config.date || config.buildDate);
-  if (when) meta.push('Map data from ' + when);
-  if (config.generator) meta.push('built with ' + config.generator);
+  // buildDate is when the ZIM was built, not the OSM data's timestamp.
+  var when = _szMonth(config.buildDate);
+  if (when || config.generator) {
+    meta.push('Built' + (when ? ' ' + when : '') + (config.generator ? ' with ' + config.generator : ''));
+  }
   meta.push('viewer: streetzim ' + SZ_VIEWER_VERSION);
   return {
     title: config.title || config.name || 'Offline OpenStreetMap',
@@ -3661,10 +3688,29 @@ function initAbout(config) {
   set('about-title', t.title);
   set('about-desc', t.desc);
   set('about-meta', t.meta);
+  // Focus moves into the dialog on open and back to the button on close
+  // (it is aria-modal); Escape closes it without reaching the other
+  // Escape handlers (find results, routing pickers) underneath.
   var overlay = document.getElementById('attr-overlay');
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && overlay && overlay.style.display === 'block') overlay.style.display = 'none';
+  var btn = document.getElementById('attr-btn');
+  var closeBtn = document.getElementById('attr-close');
+  if (!overlay) return;
+  var isOpen = function() { return overlay.style.display === 'block'; };
+  if (btn) btn.addEventListener('click', function() {
+    // After 120's listener has shown the overlay.
+    setTimeout(function() { if (closeBtn && closeBtn.focus && isOpen()) closeBtn.focus(); }, 0);
   });
+  var close = function() {
+    overlay.style.display = 'none';
+    if (btn && btn.focus) btn.focus();
+  };
+  if (closeBtn) closeBtn.addEventListener('click', function() { if (btn && btn.focus) btn.focus(); });
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape' || !isOpen()) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    close();
+  }, true);
 }
 // END view-home-about
 // --- Find-results map view ---

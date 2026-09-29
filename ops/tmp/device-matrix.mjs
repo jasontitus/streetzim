@@ -17,6 +17,7 @@ const CONTROLS=[
  ['zoom in','.maplibregl-ctrl-zoom-in'],
  ['zoom out','.maplibregl-ctrl-zoom-out'],
  ['geolocate','.maplibregl-ctrl-geolocate'],
+ ['home','.sz-home-btn'],
 ];
 const b=await puppeteer.launch({executablePath:process.env.CHROME_PATH,
   args:['--no-sandbox','--disable-dev-shm-usage'],headless:'new'});

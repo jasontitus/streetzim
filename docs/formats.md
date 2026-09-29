@@ -244,7 +244,7 @@ reader branch is only dead when no published ZIM needs it.
 |---|---|
 | `index.html`, `places.html`, `routing-worker.js` | viewer, padded into fixed uncompressed slots with an `SZVSLOT1` marker so `cloud/patch_viewer_inplace.py` can replace them in a published ZIM (`docs/viewer-slots.md`) |
 | `maplibre-gl.js`, `maplibre-gl.css` | MapLibre GL JS (vendored; version in `resources/viewer-assets.lock.json`) |
-| `map-config.json` | name, center, zoom, minZoom, maxZoom, buildDate, bounds, `hasSatellite`/`satelliteMaxZoom`/`satelliteFormat`/`satelliteTileSize`, `hasTerrain`/`terrainMaxZoom`, `hasWikidata`, `hasRouting`, `hasOvertureAddresses` |
+| `map-config.json` | name, center, zoom, minZoom, maxZoom, buildDate, bounds, `hasSatellite`/`satelliteMaxZoom`/`satelliteFormat`/`satelliteTileSize`, `hasTerrain`/`terrainMaxZoom`, `hasWikidata`, `hasRouting`, `hasOvertureAddresses`; `title`, `description` (the ZIM's Title/Description metadata) and `generator` (`streetzim <version>`) for the viewer's About panel |
 | `streetzim-meta.json` | build metadata for other consumers. `routingGraph.version` is the SZRG version of the intermediate graph (4 or 5), even when the ZIM ships SZCI v3 cells |
 | `tiles/{z}/{x}/{y}.pbf` | OpenMapTiles-schema MVT; empty tiles are dropped; repeats of an identical tile are ZIM aliases of the first (`docs/tile-aliases.md`) |
 | `satellite/{z}/{x}/{y}.{avif,webp}` | optional, uncompressed |

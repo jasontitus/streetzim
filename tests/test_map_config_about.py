@@ -1,8 +1,7 @@
 """map-config.json carries what the viewer's About panel shows (title,
-description, date, the streetzim release that built it), matching the ZIM
+description, the streetzim release that built it), matching the ZIM
 metadata, without overriding anything the config already sets."""
 import json
-import re
 
 from streetzim import zim_writer
 from streetzim.__about__ import __version__
@@ -32,7 +31,7 @@ def test_defaults_follow_the_zim_metadata_defaults():
     cfg = _config({"name": "Monaco"}, name="OSM - Monaco", description="Offline map of Monaco.")
     assert cfg["title"] == "OSM - Monaco"
     assert cfg["description"] == "Offline map of Monaco."
-    assert re.fullmatch(r"\d{4}-\d\d-\d\d", cfg["date"])
+    assert "date" not in cfg   # the build month is buildDate
     assert cfg["generator"] == f"streetzim {__version__}"
     assert cfg["name"] == "Monaco"
 
@@ -48,4 +47,4 @@ def test_without_about_the_config_is_unchanged():
     c = FakeCreator()
     zim_writer._add_map_config(c, FakeItem, map_config={"name": "t"}, has_wiki_articles=False)
     cfg = json.loads(c.items["map-config.json"].content)
-    assert not {"title", "description", "date", "generator"} & set(cfg)
+    assert not {"title", "description", "generator"} & set(cfg)

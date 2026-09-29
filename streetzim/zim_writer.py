@@ -924,15 +924,14 @@ def _add_viewer(creator, MapItem, *, maplibre_js_path, maplibre_css_path, viewer
 
 def _about_fields(*, name, description, metadata=None):
     """What the viewer's About panel shows (140-view-home-about.js): the
-    same Title / Description / Date _add_metadata writes, since a page in
-    the ZIM cannot read M/ metadata portably, and the release that built it."""
-    import time as _time
+    same Title / Description _add_metadata writes, since a page in the ZIM
+    cannot read M/ metadata portably, and the release that built it. The
+    build month is map-config's existing buildDate."""
     from streetzim.__about__ import __version__
     md = metadata or {}
     return {
         "title": md.get("Title", name),
         "description": md.get("Description", description),
-        "date": _time.strftime("%Y-%m-%d"),
         "generator": f"streetzim {__version__}",
     }
 

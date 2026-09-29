@@ -94,7 +94,7 @@ await ok('a saved view reopens; bearing and pitch only when used', () => {
   const s = v._szStorage();
   assert.ok(v._szWriteView(CONFIG, s, { lng: 7.43123456, lat: 43.7312345, zoom: 15.456, bearing: 0, pitch: 0 }));
   const raw = JSON.parse([...s.m.values()][0]);
-  assert.deepStrictEqual(raw, { c: [7.43123, 43.73123], z: 15.46 });
+  assert.deepStrictEqual(raw, { c: [7.43123, 43.73123], z: 15.46, h: '7.42,43.74,13' });
   assert.deepStrictEqual(v._szOpeningCamera(CONFIG, '', s),
     { center: [7.43123, 43.73123], zoom: 15.46, bearing: 0, pitch: 0 });
   v._szWriteView(CONFIG, s, { lng: 7.43, lat: 43.73, zoom: 16, bearing: -30.26, pitch: 45 });
@@ -134,7 +134,7 @@ await ok('views are kept per map and invalid ones ignored', () => {
     s.m.set(key, bad);
     assert.strictEqual(v._szReadView(CONFIG, s), null, bad);
   }
-  s.m.set(key, '{"c":[7.43,43.73],"z":14,"b":"x","p":400}');
+  s.m.set(key, '{"c":[7.43,43.73],"z":14,"b":"x","p":400,"h":"7.42,43.74,13"}');
   assert.deepStrictEqual(v._szReadView(CONFIG, s), { center: [7.43, 43.73], zoom: 14, bearing: 0, pitch: 0 });
   assert.strictEqual(v._szReadView(CONFIG, null), null);
   assert.strictEqual(v._szWriteView(CONFIG, memStorage({ throwOnSet: true }), { lng: 1, lat: 1, zoom: 1 }), false);
@@ -143,7 +143,7 @@ await ok('views are kept per map and invalid ones ignored', () => {
 function fakeMap() {
   const on = {};
   return {
-    on: (t, f) => { on[t] = f; }, fire: (t) => on[t] && on[t](),
+    on: (t, f) => { on[t] = f; }, fire: (t, e) => on[t] && on[t](e || {}),
     controls: [], eased: null,
     addControl(c, pos) { this.controls.push([c, pos]); },
     easeTo(o) { this.eased = o; },
@@ -151,27 +151,59 @@ function fakeMap() {
   };
 }
 
-await ok('moves are saved, but not while driving', () => {
+const GESTURE = { originalEvent: { type: 'mousedown' } };
+
+await ok('reader moves are saved, but not while driving', () => {
   const storage = memStorage();
   const v = loadView({ storage });
   const map = fakeMap();
   v.initViewMemory(map, CONFIG);
-  map.fire('moveend');
+  map.fire('movestart', GESTURE);
+  map.fire('moveend', {});          // e.g. the end of a drag's inertia
   v.timers.pop()();
-  assert.deepStrictEqual(JSON.parse(storage.m.get(v._szViewKey(CONFIG))), { c: [7.425, 43.735], z: 17 });
+  assert.deepStrictEqual(JSON.parse(storage.m.get(v._szViewKey(CONFIG))),
+    { c: [7.425, 43.735], z: 17, h: '7.42,43.74,13' });
   storage.m.clear();
   const hud = v.document._el('div'); hud.id = 'drive-hud'; hud.classList.add('visible');
   v.document.body.appendChild(hud);
-  map.fire('moveend');
+  map.fire('movestart', GESTURE);
+  map.fire('moveend', GESTURE);
   v.timers.pop()();
   assert.strictEqual(storage.m.size, 0);
+});
+
+await ok('opening, deep links and other programmatic moves save nothing', () => {
+  const storage = memStorage();
+  const v = loadView({ storage });
+  v._szWriteView(CONFIG, storage, { lng: 7.43, lat: 43.73, zoom: 16 });
+  const before = storage.m.get(v._szViewKey(CONFIG));
+  const map = fakeMap();
+  v.initViewMemory(map, CONFIG);
+  map.fire('moveend', {});                            // the opening camera
+  map.fire('movestart', {}); map.fire('moveend', {}); // #map= / #pin= flyTo, Home, route fit
+  assert.strictEqual(v.timers.length, 0);
+  assert.strictEqual(storage.m.get(v._szViewKey(CONFIG)), before);
+});
+
+await ok('a changed opening view in map-config drops the saved view', () => {
+  const v = loadView({ storage: memStorage() });
+  const s = v._szStorage();
+  v._szWriteView(CONFIG, s, { lng: 7.43, lat: 43.73, zoom: 16 });
+  assert.ok(v._szReadView(CONFIG, s));
+  // Same name and bounds (the key), new --map-center / --map-zoom.
+  assert.strictEqual(v._szViewKey({ ...CONFIG, center: [7.41, 43.73] }), v._szViewKey(CONFIG));
+  assert.strictEqual(v._szReadView({ ...CONFIG, center: [7.41, 43.73] }, s), null);
+  assert.strictEqual(v._szReadView({ ...CONFIG, zoom: 12 }, s), null);
+  // A view saved without the fingerprint is not trusted either.
+  s.m.set(v._szViewKey(CONFIG), '{"c":[7.43,43.73],"z":16}');
+  assert.strictEqual(v._szReadView(CONFIG, s), null);
 });
 
 await ok('no storage: memory is off and nothing throws', () => {
   const v = loadView({ storage: 'throws' });
   const map = fakeMap();
   v.initViewMemory(map, CONFIG);
-  map.fire('moveend');
+  map.fire('moveend', GESTURE);
   assert.strictEqual(v.timers.length, 0);
 });
 
@@ -196,17 +228,19 @@ await ok('Home returns to the config view, and not while driving', () => {
 await ok('About text from new and old map-config.json', () => {
   const v = loadView({});
   const full = v._szAboutText({ name: 'Monaco', title: 'OSM - Monaco', description: 'Offline map.',
-    date: '2026-09-29', buildDate: '2026/09', generator: 'streetzim 1.0.0' });
+    buildDate: '2026/09', generator: 'streetzim 1.0.0' });
   assert.strictEqual(full.title, 'OSM - Monaco');
   assert.strictEqual(full.desc, 'Offline map.');
-  assert.strictEqual(full.meta, 'Map data from September 2026 · built with streetzim 1.0.0 · viewer: streetzim '
+  assert.strictEqual(full.meta, 'Built September 2026 with streetzim 1.0.0 · viewer: streetzim '
     + v.SZ_VIEWER_VERSION);
   const old = v._szAboutText({ name: 'Hawaii', buildDate: '2026/04' });
   assert.strictEqual(old.title, 'Hawaii');
   assert.strictEqual(old.desc, '');
-  assert.match(old.meta, /^Map data from April 2026 · viewer: streetzim /);
+  assert.match(old.meta, /^Built April 2026 · viewer: streetzim /);
   assert.strictEqual(v._szAboutText(null).title, 'Offline OpenStreetMap');
   assert.strictEqual(v._szMonth('sometime'), 'sometime');
+  assert.strictEqual(v._szMonth('2026-07-14'), 'July 2026');
+  assert.strictEqual(v._szAboutText({ generator: 'streetzim 2.0.0' }).meta.split(' \u00b7 ')[0], 'Built with streetzim 2.0.0');
   const doc = fakeDocument();
   const w = loadView({ document: doc });
   for (const id of ['about-title', 'about-desc', 'about-meta']) {
