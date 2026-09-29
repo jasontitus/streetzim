@@ -12,6 +12,6 @@
  "streetzim/terrain.py | reportCallIssue | Expected 0 positional arguments": 1,
  "streetzim/zim_writer.py | reportArgumentType | Argument of type \"bytes | None\" cannot be assigned to parameter \"content\" of type \"str | bytes\" in function \"__init__\"": 1,
  "streetzim/zim_writer.py | reportArgumentType | Argument of type \"str\" cannot be assigned to parameter \"filename\" of type \"Path\" in function \"__init__\"": 1,
- "streetzim/zim_writer.py | reportAttributeAccessIssue | Cannot access attribute \"close\" for class \"object\"": 2,
+ "streetzim/zim_writer.py | reportAttributeAccessIssue | Cannot access attribute \"close\" for class \"object\"": 1,
  "streetzim/zim_writer.py | reportAttributeAccessIssue | Cannot access attribute \"write\" for class \"object\"": 1
 }
