@@ -28,7 +28,7 @@ test tools and no upload client.
 | Search over every named feature, Find chips, places list | on | always |
 | Offline routing (drive / walk / bike) | on, spatial layout (SZCI v3) | `--no-routing` |
 | Wikidata place details | off | `--wikidata` (queries Wikidata) |
-| Terrain / hillshade | off | `--terrain` (downloads Copernicus DEM tiles) |
+| Terrain (hillshade and 3D) | on, from the lowest zoom the viewer can show to z12 | `--no-terrain`; downloads Copernicus DEM tiles ([cost](#terrain-cost)) |
 | Satellite imagery | **never** | not offered: the imagery is CC BY-NC-SA |
 
 The area is exactly one of `--area` (a preset), `--include-poly` (a `.poly`
@@ -114,7 +114,8 @@ different name to the enum.
 ## What a build costs
 
 Measured with `tools/measure_build.py` on a 4-core, 15 GB machine,
-default profile (tilemaker, search, chips, routing), OSM extracts from
+default profile as it was before terrain became the default (tilemaker,
+search, chips, routing; add [Terrain cost](#terrain-cost)), OSM extracts from
 openstreetmap.fr on 2026-09-28 (the Netherlands: 2026-09-29), Python
 3.11 outside Docker. Memory is PSS
 summed over every process of the build (RSS, which counts shared pages
@@ -176,6 +177,105 @@ temporary and output folders held 2.1 GB at that point. Tiles had taken
 2.3 min, the search step 7.8 min and the routing graph 2.7 min. No peak
 memory was recorded, as the measuring script writes it at the end.
 
+### Terrain cost
+
+Terrain is on by default: hillshade and 3D are part of the StreetZim
+experience, and the Copernicus DEM is free and open (attribution only;
+`License` and the viewer's credits name it whenever a ZIM has terrain).
+`--no-terrain` leaves it out. The numbers below are what it costs.
+
+**What a build fetches.** A terrain tile covers its whole square, and at
+low zoom that square is far larger than a small region (Luxembourg's z7
+tile spans 2.8 degrees). The builder used to fetch GLO-30 for the bbox
+plus one degree and leave the rest of each low-zoom tile at 0 m: a cliff
+where the DEM stopped, visible in a tilted 3D view, and a health check that
+passed only because it read the same short DEM. On a fresh machine it also
+fetched far more GLO-30 than the region needed. Without a world DEM
+(`--low-zoom-world-vrt`, which only the production host has, so on every
+`streetzim` build and every Zimfarm task) it now works like this
+(`streetzim/terrain.py`):
+- tiles start at the lowest zoom the viewer can show. The viewer keeps the
+  view inside the area, so on a 320-px screen Monaco never shows below map
+  zoom 12.5 and Luxembourg below 8.1; terrain starts one zoom below the 3D
+  view's (z11 and z7). map-config.json says so (`terrainMinZoom`) and the
+  viewer asks for nothing lower;
+- every tile is filled over its whole square: z10 and above from GLO-30
+  (30 m), z9 and below from a 90 m mosaic of GLO-30 and GLO-90 cells. At
+  z9 a 256-px tile has 10-arc-second pixels, so GLO-90 loses nothing, and a
+  GLO-90 cell is about an eighth of the size of a GLO-30 one;
+- GLO-30 is fetched only for the cells under the area's z10 tiles;
+- for a very large area the GLO-90 ring is capped (64 cells, or three times
+  the GLO-30 cells); the lowest zooms are then filled over the part the cap
+  covers, and are 0 m beyond it, far outside the area;
+- the health check compares every tile at z9 and below, and every tile on
+  the edge of the area, with the mosaic it was made from (25 points each):
+  a tile reading 0 m where that mosaic has land fails the build, whatever
+  its file size, and so does a missing tile the repair pass could not
+  make. Sea reads 0 m in both and passes; no `TERRAIN_BLANK_TOLERATE` is
+  needed. Builds given a world DEM (production) keep their layout and check.
+
+**Measured** on 2026-09-29 with `tools/measure_build.py`, through the
+`streetzim` command, each run with an empty `--dl` so the DEM was
+downloaded; extracts as `file://` URLs (Monaco from openstreetmap.fr,
+Luxembourg the same extract as above), 4-core 15 GB machine shared with
+other jobs (1-minute load 13 to 50, median 29), so wall times are upper
+bounds and CPU time is the steadier figure. Peak disk counts `--dl`'s cache
+(where the DEM goes) as well as the temp and output folders.
+
+| region | terrain | wall time | CPU time | terrain phase | peak memory | peak disk | DEM downloaded | ZIM |
+|---|---|---|---|---|---|---|---|---|
+| Monaco | off | 58 s | 52 s | | 3.23 GB | 0.01 GB | | 2,906,595 B |
+| Monaco | on | 54 s | 59 s | 1.9 s | 3.19 GB | 0.02 GB | 12.6 MB (1 GLO-30 cell) | 2,934,867 B (+28 kB: 2 tiles, z11-z12) |
+| Luxembourg | off | 4.8 min | 5.4 min | | 3.99 GB | 0.36 GB | | 55.6 MB |
+| Luxembourg | on | 6.3 min | 5.6 min | 33 s | 3.99 GB | 0.56 GB | 189 MB (4 GLO-30 + 8 GLO-90) | 58.3 MB (+2.75 MB, +5%: 207 tiles, z7-z12, 2.78 MB of entries) |
+
+The terrain phase alone, with the DEM already on disk, took 12 s for
+Luxembourg (11 s to make the tiles, 1 s for the health check), 0.2 CPU
+minutes and 0.6 GB of memory: the other 21 s of the phase were the
+download (189 MB at about 9 MB/s through this machine's proxy). The build's
+peak memory is unchanged, as terrain is not the step where it peaks. Before
+this change the same two areas fetched 178 MB (Monaco, bbox + 1 degree: 9
+cells) and 608 MB (Luxembourg, 16).
+
+**Switzerland and the Netherlands**, extrapolated, not built:
+- DEM bytes are exact: the cells each area's plan needs, sized with an HTTP
+  HEAD on the S3 objects (a 404 is sea);
+- tile counts are exact (the plan's zooms over the area);
+- ZIM bytes and CPU time per tile come from making every z10-z12 tile of
+  sample GLO-30 cells: Alps (N46E007) and Plateau (N47E008) for
+  Switzerland, inland (N52E005) and coast (N53E006) for the Netherlands.
+  Luxembourg's own cell (N49E006) gave 10.8 kB and 36 ms per z12 tile,
+  against 13.4 kB per tile over all zooms in its ZIM;
+- download time at 25 MB/s, the rate [Disk for a Zimfarm recipe](#disk-for-a-zimfarm-recipe)
+  assumes for the shapefiles.
+
+| region | zooms | DEM to download | tiles | ZIM bytes | CPU | download | vs. the build (tables above) |
+|---|---|---|---|---|---|---|---|
+| Switzerland | z5-z12 | 815 MB (18 GLO-30 + 10 GLO-90 cells) | 2,534 | about 45 MB | about 2 min | about 35 s | ZIM +7%, disk +0.9 GB, time +1-2% |
+| Netherlands | z4-z12 | 598 MB (20 GLO-30 + 20 GLO-90 land cells) | 3,895 | about 7 MB (flat; sea tiles are aliased) | about 1.5 min | about 25 s | ZIM +0.6%, disk +0.6 GB, time +1% |
+
+For the Netherlands the GLO-90 ring is capped at the z7 squares (49 cells),
+so its z4-z6 tiles are filled over those squares and are 0 m beyond them:
+far outside the country, in the part of a tilted view nearest the horizon.
+Before this change Switzerland would have fetched 1.71 GB and the
+Netherlands 0.95 GB.
+
+So terrain costs a Zimfarm task a DEM download about the size of the OSM
+extract (1.2 times it for Switzerland, 0.4 times for the Netherlands, 3.4
+times for Luxembourg, whose extract is small), under a minute of CPU for
+countries of this size, and a few percent of the ZIM at most (hilly
+areas); peak memory does not change. Add the DEM to the recipe's disk.
+
+A recipe that leaves terrain out ticks **No terrain**, which Zimfarm passes
+as `--no-terrain`:
+
+```json
+{"offliner_id": "streetzim", "name": "osm_en_luxembourg", "title": "Luxembourg",
+ "description": "Offline map of Luxembourg with search and routing",
+ "include-poly": "https://download.geofabrik.de/europe/luxembourg.poly",
+ "no-terrain": true}
+```
+
 ### Downloads per task
 
 A fresh Zimfarm container downloads, besides the OSM extract:
@@ -183,7 +283,11 @@ A fresh Zimfarm container downloads, besides the OSM extract:
   tilemaker (see below). Building from `--mbtiles` avoids this;
 - nothing for the viewer: MapLibre GL JS is vendored and the Docker image
   carries the pinned font glyphs ([viewer-supply-chain.md](viewer-supply-chain.md));
-- with `--terrain`, Copernicus DEM tiles for the area.
+- Copernicus DEM tiles for the area, unless `--no-terrain`: from the
+  public `copernicus-dem-30m` and `copernicus-dem-90m` buckets on AWS S3,
+  over HTTPS with no credentials, into `--dl` (on Zimfarm the default
+  `/tmp/streetzim/dl`, never the output folder). 12.6 MB for Monaco,
+  189 MB for Luxembourg; see [Terrain cost](#terrain-cost).
 
 ### Disk for a Zimfarm recipe
 
@@ -195,7 +299,8 @@ water polygons zip is 864 MB (plus three small Natural Earth zips), about
 At about 25 MB/s that is 35 to 50 s per task. Zimfarm counts the image and
 the writable layer toward the task's disk, so **give every recipe at least
 4 GiB of disk, even for tiny areas**, and add the build's own peak disk
-(the tables above) for larger ones.
+(the tables above) and the DEM ([Terrain cost](#terrain-cost)) for larger
+ones.
 
 Monaco on the local Zimfarm below (default profile, recipe resources cpu 2,
 memory 6 GiB, disk 4 GiB), as Zimfarm reported it: memory max 3.49 GiB

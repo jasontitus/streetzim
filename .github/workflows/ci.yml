@@ -331,6 +331,9 @@ jobs:
           zimcheck -A osm-monaco-patched.zim
           python -c "import sys; from libzim.reader import Archive; a = Archive('osm-monaco-patched.zim'); b = bytes(a.get_entry_by_path('index.html').get_item().content); sys.exit(0 if a.check() and b'ci-patch' in b else 'in-place patch not applied or checksum wrong')"
 
+      # The default profile includes terrain: Monaco fetches one GLO-30 cell
+      # (about 13 MB) from the public Copernicus bucket on S3 and adds a few
+      # seconds, so CI keeps it on rather than passing --no-terrain.
       - name: Build through the openZIM-style command (streetzim --area)
         env:
           STREETZIM_REQUIRE_SHAPEFILES: "1"
@@ -341,7 +344,7 @@ jobs:
             --description "Offline map of Monaco with search and routing" \
             --tags openstreetmap --area monaco --shapefiles "$PWD" \
             --output out --stats-filename out/task_progress.json
-          python tools/check_openzim_output.py out osm_en_monaco --title Monaco --routing
+          python tools/check_openzim_output.py out osm_en_monaco --title Monaco --routing --terrain
           python cloud/validate_zim.py out/osm_en_monaco_*.zim
 
       - name: Upload ZIM
@@ -461,8 +464,9 @@ jobs:
           tar -xzf /tmp/zt.tgz -C ~/.local/zim-tools --strip-components=1
 
       - name: Build Monaco inside the image with the default profile
-        # No --mbtiles and no --no-routing: the flags Zimfarm's recipe would
-        # pass. The shapefiles are mounted read-only (the image does not bake
+        # No --mbtiles, --no-routing or --no-terrain: the flags Zimfarm's
+        # recipe would pass. Terrain runs the image's rasterio/GDAL and
+        # fetches its DEM cell from S3, as a Zimfarm task does. The shapefiles are mounted read-only (the image does not bake
         # them in); STREETZIM_REQUIRE_SHAPEFILES makes a missing one fatal
         # instead of a ZIM without ocean. /output and task_progress.json are
         # what offliner-definition.json pins.
@@ -487,5 +491,5 @@ jobs:
         run: |
           pip install -q -r requirements.txt
           python tools/check_openzim_output.py out osm_en_monaco-docker --title Monaco \
-            --file osm-monaco-docker.zim --routing
+            --file osm-monaco-docker.zim --routing --terrain
           PATH="$HOME/.local/zim-tools:$PATH" python cloud/validate_zim.py out/osm-monaco-docker.zim

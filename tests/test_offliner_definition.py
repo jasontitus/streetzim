@@ -65,6 +65,7 @@ def test_every_offered_flag_parses():
                   bbox="7.4,43.72,7.44,43.76", default_view="43.7,7.4,12", max_zoom=12)
     args = build_parser().parse_args(_argv_for(config))
     assert args.routing is False             # no_routing ticked
+    assert args.terrain is False             # no_terrain ticked
     assert args.stats_filename == "/output/task_progress.json"
 
 
@@ -73,3 +74,13 @@ def test_required_flags_agree_with_the_parser():
     assert required == {"name", "title", "description"}
     with pytest.raises(SystemExit):
         build_parser().parse_args(_argv_for({"name": "n", "title": "t"}))
+
+
+def test_terrain_is_on_unless_the_recipe_ticks_no_terrain():
+    flags = DEF["flags"]
+    assert "terrain" not in flags
+    assert flags["no_terrain"]["type"] == "boolean"
+    assert not flags["no_terrain"]["required"]
+    args = build_parser().parse_args(_argv_for({"name": "n", "title": "t",
+                                                "description": "d", "area": "monaco"}))
+    assert args.terrain is True and args.routing is True

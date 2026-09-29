@@ -96,6 +96,15 @@ def test_area_uses_geofabrik_extract_and_forwards_metadata(tmp_path, no_network)
     assert ns.routing and not ns.satellite
 
 
+def test_terrain_is_on_by_default_and_no_terrain_turns_it_off(tmp_path, no_network):
+    argv, _ = plan(["--area", "monaco"], tmp_path)
+    assert builder_args(argv).terrain
+    argv, _ = plan(["--area", "monaco", "--no-terrain"], tmp_path)
+    assert not builder_args(argv).terrain
+    argv, _ = plan(["--area", "monaco", "--terrain"], tmp_path)   # still accepted
+    assert builder_args(argv).terrain
+
+
 def test_geofabrik_poly_selects_its_extract(tmp_path, no_network):
     argv, info = plan(["--include-poly", "https://download.geofabrik.de/europe/monaco.poly"],
                       tmp_path)

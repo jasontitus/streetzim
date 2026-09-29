@@ -68,7 +68,8 @@ ZIMFARM: dict[str, dict[str, Any]] = {
     "no_routing": {"title": "No routing",
                    "description": "Leave out offline routing (on by default)"},
     "wikidata": {"title": "Wikidata"},
-    "terrain": {"title": "Terrain"},
+    "no_terrain": {"title": "No terrain",
+                   "description": "Leave out hillshade and 3D terrain (on by default)"},
     "default_view": {"title": "Default view"},
     "output": {"pattern": r"^/output$"},
     "stats_filename": {"pattern": r"^/output/task_progress\.json$"},
@@ -155,8 +156,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Offline routing (driving, walking, cycling). Default: on")
     feat.add_argument("--wikidata", action="store_true",
                       help="Wikidata place details (needs network access to Wikidata)")
-    feat.add_argument("--terrain", action="store_true",
-                      help="Hillshade from Copernicus DEM (downloads DEM tiles)")
+    feat.add_argument("--terrain", action=argparse.BooleanOptionalAction, default=True,
+                      help="Hillshade and 3D terrain from the Copernicus DEM "
+                           "(downloads DEM tiles for the area). Default: on")
     feat.add_argument("--max-zoom", type=int, choices=range(0, 15), metavar="{0..14}",
                       help="Maximum zoom of the vector tiles. Default: 14")
     feat.add_argument("--default-view",

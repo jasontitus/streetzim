@@ -138,11 +138,11 @@
       "title": "Wikidata",
       "description": "Wikidata place details (needs network access to Wikidata)"
     },
-    "terrain": {
+    "no_terrain": {
       "type": "boolean",
       "required": false,
-      "title": "Terrain",
-      "description": "Hillshade from Copernicus DEM (downloads DEM tiles)"
+      "title": "No terrain",
+      "description": "Leave out hillshade and 3D terrain (on by default)"
     },
     "max_zoom": {
       "type": "integer",

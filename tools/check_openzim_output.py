@@ -2,13 +2,15 @@
 """Check what a `streetzim` run left in its output folder, the way Zimfarm
 would see it (used by CI after building with the openZIM-style command).
 
-    python tools/check_openzim_output.py OUT NAME --title T [--file F] [--routing]
+    python tools/check_openzim_output.py OUT NAME --title T [--file F] [--routing] [--terrain]
 
 Checks: exactly one finished .zim and no .tmp left behind; the progress
 file reached done == total; openZIM's mandatory metadata is present (Name,
 Title, Description, Language, Creator, Publisher, Date, 48x48 PNG
 Illustration) with the requested Name and Title; the licence never claims
-the non-commercial satellite layer; routing is present when asked for.
+the non-commercial satellite layer; routing is present when asked for;
+terrain tiles are present when asked for, and the licence credits
+Copernicus exactly when the ZIM has terrain.
 """
 from __future__ import annotations
 
@@ -29,6 +31,7 @@ def main() -> int:
     ap.add_argument("--title", required=True)
     ap.add_argument("--file", help="expected file name (default: <name>_<period>.zim)")
     ap.add_argument("--routing", action="store_true")
+    ap.add_argument("--terrain", action="store_true")
     ap.add_argument("--stats", default="task_progress.json")
     a = ap.parse_args()
 
@@ -71,12 +74,21 @@ def main() -> int:
     cfg = json.loads(bytes(arc.get_entry_by_path("map-config.json").get_item().content))
     if a.routing and not cfg.get("hasRouting"):
         problems.append("routing was requested but map-config has no hasRouting")
+    if a.terrain:
+        if not cfg.get("hasTerrain"):
+            problems.append("terrain was requested but map-config has no hasTerrain")
+        elif not any(arc._get_entry_by_id(i).path.startswith("terrain/")  # pyright: ignore[reportPrivateUsage]
+                     for i in range(arc.entry_count)):
+            problems.append("map-config has hasTerrain but the ZIM has no terrain/ tiles")
+    if bool(cfg.get("hasTerrain")) != (b"Copernicus" in md.get("License", b"")):
+        problems.append("License must credit Copernicus exactly when the ZIM has terrain")
 
     for p in problems:
         print(f"FAIL: {p}")
     if not problems:
         print(f"ok: {zim.name}: metadata, illustration, progress "
-              f"({stats['done']}/{stats['total']})" + (", routing" if a.routing else ""))
+              f"({stats['done']}/{stats['total']})" + (", routing" if a.routing else "")
+              + (", terrain" if a.terrain else ""))
     return 1 if problems else 0
 
 
