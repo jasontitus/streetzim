@@ -561,6 +561,13 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "JSON search-data chunks). Saves another "
                              "1-2h of libzim finalize time. Kiwix's "
                              "native search bar degrades to title-prefix.")
+    parser.add_argument("--kiwix-poi-pages", action="store_true",
+                        help="Also give every named POI a Kiwix page, so "
+                             "Kiwix's own search finds shops, stops and "
+                             "sights, not "
+                             "only places, parks, peaks, water and airports. "
+                             "About 245 B per POI: +9%% on Luxembourg. Off by "
+                             "default (docs/zimfarm.md).")
     parser.add_argument("--xapianbuilder-bin", metavar="PATH", default=None,
                         help="Path to the xapianbuilder binary. Defaults to "
                              "$XAPIANBUILDER_BIN, then "
@@ -1547,6 +1554,7 @@ def _write_zim(
         zim_builder=getattr(args, "zim_builder", "python"),
         max_zoom=args.max_zoom,
         xapian_mode=getattr(args, "xapian", "libzim"),
+        kiwix_poi_pages=bool(getattr(args, "kiwix_poi_pages", False)),
         xapianbuilder_bin=getattr(args, "xapianbuilder_bin", None),
         xapian_workdir=tmpdir,
         no_llm_bundle=bool(getattr(args, "no_llm_bundle", False)),

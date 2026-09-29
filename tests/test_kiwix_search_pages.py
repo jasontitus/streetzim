@@ -3,8 +3,9 @@ entry in kiwix-serve's full-text search: places, parks, peaks, water and
 airports (streetzim.zim_writer.KIWIX_PAGE_TYPES), the same set on the
 streaming and the in-memory path. POIs, streets and addresses do not, so
 "Casino" in the Monaco ZIM finds the Fontaine du Casino (a lake) and not the
-shops, stops and sights named Casino; the in-map search has those. Adding
-"poi" costs ~245 B per POI (+9.4% on Luxembourg), see KIWIX_PAGE_TYPES."""
+shops, stops and sights named Casino; the in-map search has those.
+kiwix_poi_pages (--kiwix-poi-pages) adds the POIs, at ~245 B per POI (+9.4%
+on Luxembourg, docs/zimfarm.md)."""
 from __future__ import annotations
 
 import gzip
@@ -28,12 +29,15 @@ FEATURES = [
 
 
 def test_page_types():
-    from streetzim.zim_writer import KIWIX_PAGE_TYPES
+    from streetzim.zim_writer import KIWIX_PAGE_TYPES, kiwix_page_types
     assert KIWIX_PAGE_TYPES == {"place", "park", "peak", "water", "airport"}
+    assert kiwix_page_types() == KIWIX_PAGE_TYPES
+    assert kiwix_page_types(True) == KIWIX_PAGE_TYPES | {"poi"}
 
 
+@pytest.mark.parametrize("poi_pages", [False, True])
 @pytest.mark.parametrize("source", ["path", "in-memory"])
-def test_kiwix_full_text_search_covers_the_page_types(tmp_path, source):
+def test_kiwix_full_text_search_covers_the_page_types(tmp_path, source, poi_pages):
     pytest.importorskip("libzim.writer")
     mvt = pytest.importorskip("mapbox_vector_tile")
     from libzim.reader import Archive
@@ -61,14 +65,15 @@ def test_kiwix_full_text_search_covers_the_page_types(tmp_path, source):
         viewer_html_path=str(ROOT / "resources/viewer/index.html"),
         map_config={"name": "Monaco"}, name="OSM - Monaco",
         bbox=(7.40, 43.72, 7.44, 43.76), xapian_mode="libzim",
-        xapian_workdir=str(work), **kw)
+        xapian_workdir=str(work), kiwix_poi_pages=poi_pages, **kw)
 
     a = Archive(str(tmp_path / "t.zim"))
     pages = sorted(a._get_entry_by_id(i).title for i in range(a.all_entry_count)
                    if a._get_entry_by_id(i).path.startswith("search/"))
-    assert pages == ["Fontaine du Casino", "Monte-Carlo"]
+    pois = ["Casino", "Monte-Carlo Casino"] if poi_pages else []
+    assert pages == sorted(["Fontaine du Casino", "Monte-Carlo"] + pois)
     assert a.has_fulltext_index
     search = Searcher(a).search(Query().set_query("casino"))
     hits = sorted(a.get_entry_by_path(p).title
                   for p in search.getResults(0, search.getEstimatedMatches()))
-    assert hits == ["Fontaine du Casino"]
+    assert hits == sorted(["Fontaine du Casino"] + pois)

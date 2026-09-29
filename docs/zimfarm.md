@@ -29,6 +29,7 @@ test tools and no upload client.
 | Offline routing (drive / walk / bike) | on, spatial layout (SZCI v3) | `--no-routing` |
 | Wikidata place details | off | `--wikidata` (queries Wikidata) |
 | Terrain / hillshade | off | `--terrain` (downloads Copernicus DEM tiles) |
+| POIs in Kiwix's own search | off: Kiwix's full-text search covers places, parks, peaks, water and airports | `--kiwix-poi-pages` |
 | Satellite imagery | **never** | not offered: the imagery is CC BY-NC-SA |
 
 The area is exactly one of `--area` (a preset), `--include-poly` (a `.poly`
@@ -58,6 +59,28 @@ polygon. So:
 
 `License` metadata and the viewer's credits list only the sources a ZIM
 actually contains.
+
+### POIs in Kiwix's own search (`--kiwix-poi-pages`)
+
+The map's own search (the search box, Find chips, places list) covers every
+named feature. Kiwix's search, the one in the Kiwix app's bar and on
+kiwix-serve, only sees the features that have a detail page
+(`search/<slug>.html`): places, parks, peaks, water and airports. Without
+the flag, "Casino" on the Monaco ZIM finds the Fontaine du Casino and not
+the Casino, the shops or the bus stops named after it.
+`--kiwix-poi-pages` gives every named POI a page too. It costs about 245 B
+per POI (the page, its directory entry and the Xapian index), measured on
+2026-09-29 with the default profile:
+
+| area | POI pages | ZIM | build time |
+|---|---|---|---|
+| Monaco (`--area monaco`) | +1,812 | 2.88 -> 3.32 MB (+15%) | within noise |
+| Luxembourg | +21,214 | 55.4 -> 60.6 MB (+9.4%) | within noise |
+| Switzerland (from its POI count) | +274,806 | about +67 MB on 624 MB (+11%) | |
+| Netherlands (from its POI count) | +324,793 | about +80 MB on 1,164 MB (+7%) | |
+
+It is off by default for now. The planned `--profile full` is meant to turn
+it on and `--profile basic` to leave it off.
 
 ## What Zimfarm needs on its side
 

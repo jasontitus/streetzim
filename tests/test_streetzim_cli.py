@@ -94,6 +94,12 @@ def test_area_uses_geofabrik_extract_and_forwards_metadata(tmp_path, no_network)
     assert ns.tags == "a;b"
     assert ns.map_center == "7.42,43.73" and ns.map_zoom == 13
     assert ns.routing and not ns.satellite
+    assert not ns.kiwix_poi_pages                      # off unless asked for
+
+
+def test_kiwix_poi_pages_is_forwarded(tmp_path, no_network):
+    argv, _ = plan(["--area", "monaco", "--kiwix-poi-pages"], tmp_path)
+    assert builder_args(argv).kiwix_poi_pages
 
 
 def test_monaco_preset_frames_all_of_monaco_with_sea_around_it():
