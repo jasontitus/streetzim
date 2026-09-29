@@ -22,14 +22,19 @@ test tools and no upload client.
 
 ## The default profile
 
+The default is `--profile full` ([Profiles](#profiles)); `--profile basic`
+turns off everything below that says "full".
+
 | | default | how |
 |---|---|---|
 | Vector tiles | built with tilemaker from the OSM extract | or `--mbtiles-url` for a ready-made OpenMapTiles MBTiles, e.g. OpenFreeMap's ([below](#building-from-ready-made-tiles---mbtiles-url)); `--mbtiles` for a local file (command line only) |
 | Search over every named feature, Find chips, places list | on | always |
 | Offline routing (drive / walk / bike) | on, spatial layout (SZCI v3) | `--no-routing` |
-| Wikidata place details | off | `--wikidata` (queries Wikidata) |
-| Terrain (hillshade and 3D) | on, from the lowest zoom the viewer can show to z12 | `--no-terrain`; downloads Copernicus DEM tiles ([cost](#terrain-cost)) |
-| POIs in Kiwix's own search | off: Kiwix's full-text search covers places, parks, peaks, water and airports | `--kiwix-poi-pages` |
+| Overture Maps addresses and place details | on with full | `--overture` / `--no-overture` (reads Overture's public bucket) |
+| Wikipedia articles (text) | on with full | `--wikipedia` / `--no-wikipedia` (Wikipedia API; images with `--wikipedia-zim-url`) |
+| Wikidata place details | on with full | `--wikidata` / `--no-wikidata` (queries Wikidata) |
+| Terrain (hillshade and 3D) | on with full, from just below the lowest zoom the viewer can show to z12 | `--terrain` / `--no-terrain` (downloads Copernicus DEM tiles; [cost](#terrain-cost)) |
+| POIs in Kiwix's own search | on with full (without it, Kiwix's full-text search covers places, parks, peaks, water and airports) | `--kiwix-poi-pages` / `--kiwix-poi-pages=off` ([below](#pois-in-kiwixs-own-search---kiwix-poi-pages)) |
 | Satellite imagery | **off**; opt-in | `--satellite`: EOX Sentinel-2 cloudless 2016, **CC BY 4.0**. The 2021 mosaic, **CC BY-NC-SA 4.0 (non-commercial)**, only with `--satellite-source s2cloudless-2021 --satellite-accept-noncommercial`, as a variant labelled restricted ([below](#satellite-imagery)) |
 
 The area is exactly one of `--area` (a preset), `--include-poly` (a `.poly`
@@ -72,7 +77,7 @@ the Casino, the shops or the bus stops named after it.
 full-text search and its title suggestions both find. It costs about 440 B
 per POI: roughly 40 B of compressed page, 80 B of directory entry and
 pointers, 125 B of full-text index and 195 B of title index. Measured on
-2026-09-29 with the default profile:
+2026-09-29 with what is now `--profile basic`:
 
 | area | POI pages | ZIM | build time |
 |---|---|---|---|
@@ -94,11 +99,166 @@ zimcheck's output do not change. Kiwix's "random article" can now open a
 search page (a place's detail page with "Directions to here" and "View on
 map").
 
-It is off by default for now. The planned `--profile full` is meant to turn
-it on, and so a full-profile ZIM carries the cost above (about +12% to +19%
-for a country, +28% for Monaco); `--profile basic` leaves it off. That
-branch will also make the option an on/off choice (an enum) in
-offliner-definition.json rather than the boolean it is here.
+`--profile full` turns it on, so a full-profile ZIM carries the cost above
+(about +12% to +19% for a country, +28% for Monaco); `--profile basic`
+leaves it off. Like every profile feature it is an on/off choice
+(`--kiwix-poi-pages=off`; an enum in offliner-definition.json), unset
+meaning "as the profile says".
+
+## Profiles
+
+`--profile` picks the content; any feature flag given explicitly wins over
+it, in either direction (`--profile basic --wikidata`, or
+`--wikipedia=off` on the default `full`). Routing is on in both (`--no-routing`
+turns it off).
+
+| feature | `full` (default) | `basic` |
+|---|---|---|
+| Wikidata place details | on | off |
+| Wikipedia articles (text from the API; images only with `--wikipedia-zim-url`) | on | off |
+| Overture Maps addresses and places | on | off |
+| Terrain / hillshade | on | off |
+| Every named POI in Kiwix's own search (`--kiwix-poi-pages`) | on | off |
+| Satellite imagery | off: opt-in (`--satellite`); the 2021 source is non-commercial | off |
+| Search, Find chips, places page, routing, fonts, dark style, icons | on | on |
+
+`full` is everything StreetZim's own builds ship that openZIM can ship too;
+`basic` fetches nothing besides the OSM extract and the shapefiles, and is
+the cheapest (the "What a build costs" tables below are `basic` builds).
+Satellite is in neither, by choice: it stays off for openZIM's main
+distribution and is one flag to turn on (the default source is CC BY 4.0;
+the sharper 2021 one is non-commercial and needs an explicit
+acknowledgement).
+
+Each feature is one flag with three states: on (`--x`, `--x=on`), off
+(`--x=off`, `--no-x`), or not given, when the profile decides. Saying both
+on and off is refused before anything is downloaded, and flag names cannot
+be abbreviated. Two features come from other branches and joined the
+profile when their flag existed: `--kiwix-poi-pages`, and `--terrain` once
+it could also be turned off (`--no-terrain`, topic-terrain-openzim).
+`add_profile_arguments` in `streetzim/cli.py` turns such a flag into the
+same three-state flag.
+
+On Zimfarm, `profile` is a **required** string-enum (`full`, `basic`), so
+every recipe states its profile next to the resources it is given, and each
+feature is one optional string-enum (`on`, `off`; unset: as the profile
+says). A recipe therefore cannot switch a feature both ways.
+`tests/test_offliner_definition.py` runs recipes through Zimfarm's own
+models and `compute_flags` and checks the features `streetzim` then builds.
+
+Recipe flags (the `offliner` part of `POST /v2/recipes`, dash form):
+
+```json
+{"offliner_id": "streetzim", "name": "osm_en_luxembourg", "title": "Luxembourg",
+ "description": "Offline map of Luxembourg with search and routing",
+ "include-poly": "https://download.geofabrik.de/europe/luxembourg.poly",
+ "profile": "full"}
+```
+
+```json
+{"offliner_id": "streetzim", "name": "osm_en_luxembourg-basic", "title": "Luxembourg",
+ "description": "Offline map of Luxembourg with search and routing",
+ "include-poly": "https://download.geofabrik.de/europe/luxembourg.poly",
+ "profile": "basic", "wikidata": "on"}
+```
+
+(the second is `basic` plus Wikidata), and the same on the command line:
+
+```sh
+streetzim --name osm_en_luxembourg --title Luxembourg \
+  --description "Offline map of Luxembourg with search and routing" \
+  --include-poly https://download.geofabrik.de/europe/luxembourg.poly \
+  --profile full --output /output          # or --profile basic
+streetzim ... --profile basic --wikidata    # basic plus Wikidata
+streetzim ... --overture=off                # full without Overture (or --no-overture)
+```
+
+### Failure policy
+
+- **Overture** failing is fatal: if the release cannot be resolved, the
+  files listed or read (network, DuckDB), the task fails with a message
+  naming the source (`--overture=off` builds without it). A ZIM that says
+  it has Overture data has it.
+- **Wikidata** and **Wikipedia** degrade: the builder retries (honouring
+  `Retry-After`, within a wait budget, `cloud/wikimedia_http.py`) and then
+  leaves out what the APIs did not answer. It never caches a rate limit as
+  "no article", so the next run asks again. The ZIM's `hasWikidata` /
+  `hasWikiArticles` flags and its `License` describe what it holds.
+  `STREETZIM_REQUIRE_WIKI=1` makes a missing article fatal instead.
+- `streetzim` ends with one line saying what each source delivered, e.g.
+  `streetzim: sources: Overture addresses 4087 rows (4012 added); Overture
+  places 36 enriched, 3028 added; Wikipedia titles 0/95 Q-IDs resolved;
+  Wikidata 45 entries; Wikipedia articles 16/53 (37 not fetched, 37
+  rate-limited)` (`streetzim/source_report.py`).
+
+### Wikimedia API etiquette for periodic recipes
+
+A `full` recipe queries Wikimedia on every run, and Zimfarm runs recipes
+periodically, so:
+- requests carry a descriptive User-Agent naming the project and its issue
+  tracker (`cloud/wikimedia_http.py`, per Wikimedia's User-Agent policy);
+  an operator can add a contact address with `STREETZIM_WIKI_CONTACT` (set
+  it on the worker, not in the recipe or the repository);
+- one run makes one SPARQL request per 40 Q-IDs (1 s apart), one
+  extracts request per 20 articles, one `wbgetentities` request per 50
+  Q-IDs for titles, and one `action=parse` request per article, serially, with pauses that widen after a 429. For
+  Monaco that is about 60 requests; for California (11,613 linked
+  articles) about 12,000. That is within Wikimedia's guidance for a
+  single serial client, but schedule large-region `full` recipes no more
+  often than their data changes (monthly), not in parallel with each
+  other from one worker IP;
+- the caches live in the task's `--dl` and die with it, so every run asks
+  again. A worker with persistent storage could keep `--dl` between runs;
+  Zimfarm has no such mount today.
+
+### Wikipedia articles on Zimfarm: the API, not a Wikipedia ZIM
+
+StreetZim's own builds read articles and images from a local copy of the
+English Wikipedia maxi ZIM (`--wiki-articles-source`, 124 GB, kept on the
+build host). A Zimfarm task has no persistent storage, so it would have to
+download one per task. The candidates on download.kiwix.org (2026-09):
+
+| Kiwix ZIM | size | articles | images |
+|---|---|---|---|
+| `wikipedia_en_all_maxi_2026-08` | 119 GB | all | yes |
+| `wikipedia_en_all_nopic_2026-06` | 49 GB | all | no |
+| `wikipedia_en_all_mini_2026-09` | 13 GB | all, lead section only | no |
+| `wikipedia_en_top_maxi_2026-09` | 6.5 GB | the most read ones only | yes |
+
+The full ZIMs cost 50 to 120 GB of disk and download per task (about 35 to
+80 minutes at 25 MB/s) for what is, for a region, a few hundred to ten
+thousand articles (California: 11,613); the `top` ZIMs miss most of the
+long-tail places a map links to. So **the default is the API**
+(`action=parse`, one request per article, cached in `--dl` for the task),
+which gives the article text but no images. `--wikipedia-zim-url` takes
+any of the ZIMs above (or a `file://` URL on a worker that has one) and
+then also bundles images (`--wikipedia-images`, default `all`, as
+production), for workers with the disk to spare.
+
+The API is rate limited. `cloud/wikimedia_http.py` honours `Retry-After`
+within a wait budget and never caches a 429 as a missing article; an
+article still unanswered after that is left out and the build carries on
+([Failure policy](#failure-policy)). From this sandbox's shared IP the
+Wikimedia APIs were rate limiting on 2026-09-29, so the `full` Monaco
+builds measured below got only part of their articles; that is the
+sandbox's IP, not the flag.
+
+### What CI checks
+
+- Per push, the `docker` job builds Monaco with `--profile full` inside the
+  image, as a non-root user (`--user`) and with `--network none`, from
+  `tests/fixtures/monaco-full`: the extract, Overture parquets of a pinned
+  release, and the Wikidata and Wikipedia caches of a live run
+  (`SOURCES.txt` there says how to refresh them). So it tests the code and
+  the image (DuckDB extensions in `/opt/duckdb-ext`), not the APIs, and
+  takes about 20 s outside Docker. `tools/check_full_profile.py` then
+  checks that `map-config.json` has `hasOvertureAddresses`, `hasWikidata`
+  and `hasWikiArticles` and that `License` credits Overture and Wikipedia.
+- Weekly and on demand, `live-full` builds the same with the live sources
+  and runs the same check with `--soft-wikimedia`: Overture must work,
+  Wikidata and Wikipedia only warn.
+- `monaco-e2e` builds `--profile basic` from Geofabrik, and the Zimfarm
+  schema step runs recipes for both profiles through Zimfarm's own models.
 
 ## Satellite imagery
 
@@ -230,22 +390,15 @@ built ZIM.
 The flags as a Zimfarm recipe's offliner config (dash form, as in step 5 of
 the local run below):
 
-Basic (the default profile: no satellite imagery):
-
-```json
-{"offliner_id": "streetzim", "name": "osm_en_luxembourg", "title": "Luxembourg",
- "description": "Offline map of Luxembourg with search and routing",
- "include-poly": "https://download.geofabrik.de/europe/luxembourg.poly"}
-```
-
-Full: every optional layer, with the freely licensed imagery (one flag for
-the imagery; terrain as in the default profile table above):
+Satellite is outside both profiles, so a recipe adds it to either; the
+recipes without it are in [Profiles](#profiles). `full` plus the freely
+licensed imagery (one flag):
 
 ```json
 {"offliner_id": "streetzim", "name": "osm_en_luxembourg", "title": "Luxembourg",
  "description": "Offline map of Luxembourg with satellite imagery",
  "include-poly": "https://download.geofabrik.de/europe/luxembourg.poly",
- "wikidata": true, "satellite": true}
+ "profile": "full", "satellite": true}
 ```
 
 Full, restricted: the 2021 imagery, labelled non-commercial (two flags for
@@ -255,7 +408,7 @@ the imagery; `satellite-source` implies `satellite`):
 {"offliner_id": "streetzim", "name": "osm_en_luxembourg", "title": "Luxembourg",
  "description": "Offline map of Luxembourg with satellite imagery",
  "include-poly": "https://download.geofabrik.de/europe/luxembourg.poly",
- "wikidata": true, "satellite-source": "s2cloudless-2021",
+ "profile": "full", "satellite-source": "s2cloudless-2021",
  "satellite-accept-noncommercial": true}
 ```
 
@@ -273,6 +426,47 @@ streetzim --name osm_en_monaco --title Monaco --description "Offline map of Mona
 
 Satellite tiles are downloaded from EOX during the build: Monaco at z0-14
 is 29 tiles and about 15 s. They are cached under `--dl`, per source.
+
+## Feature parity with StreetZim's own builds
+
+The production builds are `ops/build-region-fast.sh` (which
+`ops/ship-region.sh` runs after fetching the Overture parquets) and the
+older `cloud/build_region.sh`. Both call `create_osm_zim.py`
+directly. "streetzim" below is `streetzim/cli.py` and
+`offliner-definition.json` on this branch.
+
+| feature | production | `streetzim` | default | licence | data source | works in a Zimfarm task? |
+|---|---|---|---|---|---|---|
+| Vector map (OpenMapTiles schema, z0-14) | planet tiles (`--mbtiles`) | tilemaker from the extract, or `--mbtiles` (not offered on Zimfarm) | on | ODbL (OSM), CC BY 4.0 (OpenMapTiles schema) | OSM extract (Geofabrik, or `--pbf-url`) | yes |
+| Ocean, glaciers, urban areas at low zoom | yes | yes | on | ODbL (water polygons), public domain (Natural Earth) | osmdata.openstreetmap.de, naturalearthdata.com shapefiles | yes, about 900 MB download per task ([Disk](#disk-for-a-zimfarm-recipe)) |
+| Low-zoom lakes | yes | yes | on | public domain (Natural Earth, inlined in the viewer) | none at build time | yes |
+| Search (places, streets, addresses, POIs; Kiwix title and full-text) | yes | yes | on | ODbL | the extract | yes |
+| OSM addresses | yes | yes | on | ODbL | the extract | yes |
+| Find chips, places page, detail pages | yes (`--split-find-chips`) | yes | on | ODbL | the extract | yes |
+| Large search chunks split for iOS (`--split-hot-search-chunks-mb 10`) | yes | **was missing; now always** | on | - | - | yes |
+| No bulk `category-index/{addr,poi,street}.json` (`--no-llm-bundle`) | yes | **was missing (ZIMs carried them); now always** | on | - | - | yes |
+| Routing, drive / walk / bike, 0.1° cells | yes | yes | on | ODbL | the extract | yes |
+| Wikidata facts (population, description, Wikipedia extract) | yes | `--wikidata` existed, off; **now on in `full`**, `--wikidata=off` / `--no-wikidata` added | full: on | CC0 (Wikidata), CC BY-SA 4.0 (extracts) | query.wikidata.org SPARQL, en.wikipedia.org API | yes: network, no credentials; anonymous rate limits (backs off on 429) |
+| Q-ID to Wikipedia title backfill (`--resolve-wikidata-titles`) | yes | **was missing; now part of `--wikipedia`** | full: on | CC0 | www.wikidata.org API | yes, as above |
+| Wikipedia articles bundled (`--bundle-wiki-articles`) | yes, from the enwiki maxi ZIM | **was missing; now `--wikipedia`**, text from the API | full: on | CC BY-SA 4.0 (each page keeps its source link and licence) | en.wikipedia.org `action=parse` | yes, rate limited ([above](#wikipedia-articles-on-zimfarm-the-api-not-a-wikipedia-zim)) |
+| Wikipedia images (`--wiki-images all`) | yes | **was missing; now `--wikipedia-zim-url` + `--wikipedia-images`** | off (no URL): the only source is a Wikipedia ZIM, 6.5 to 119 GB per task | per image, as in the Kiwix ZIM | download.kiwix.org | only with the disk and time for the download |
+| Overture addresses (`--overture-addresses`) | yes | **was missing; now `--overture`** | full: on | per source, listed in the ZIM's `overture-sources.json` (CDLA-Permissive-2.0, CC0, CC BY, ODbL, ...) | overturemaps-us-west-2 S3 over HTTPS, STAC catalog | yes: anonymous HTTPS, `latest` resolved via STAC; tested here |
+| Overture places: websites, phones, brands, categories (`--overture-places`) | yes | **was missing; now `--overture`** | full: on | CDLA-Permissive-2.0 | as above | yes, as above |
+| Dead-website filter for Overture places (`--url-cache`) | yes | no | - | - | a crawl of every Overture website, kept on StreetZim's build host | no: the crawl result is not published anywhere a task could fetch it; without it, Overture places keep websites that may be dead |
+| Terrain / hillshade / 3D terrain (`--terrain`, `--low-zoom-world-vrt`) | yes | yes: `--terrain` / `--no-terrain` | full: on | Copernicus DEM licence (free, attribution) | Copernicus DEM on AWS S3 | yes: measured on Monaco and Luxembourg ([Terrain cost](#terrain-cost)) |
+| Satellite imagery (`--satellite`) | yes (the 2021 mosaic), except `satellite=no` variants | opt-in, labelled ([Satellite imagery](#satellite-imagery)) | off, in no profile | 2016 mosaic (the default source): CC BY 4.0; 2021 mosaic: CC BY-NC-SA 4.0, non-commercial | EOX Sentinel-2 cloudless | yes, about 15 s for Monaco |
+| Every named POI in Kiwix's own search (`--kiwix-poi-pages`) | no | yes | full: on | ODbL | the extract | yes (+12 to 28% ZIM size, [above](#pois-in-kiwixs-own-search---kiwix-poi-pages)) |
+| 3D buildings | no (the viewer has no building extrusion; "3D" is terrain) | no | - | - | - | - |
+| Fonts: Open Sans, Noto Sans for Arabic, Hebrew, Armenian, Georgian, Lao, Thai; RTL shaping | yes | yes | on | Apache 2.0, OFL 1.1, BSD-2-Clause (RTL plugin) | glyphs pinned by sha256; in the Docker image, fetched otherwise | yes |
+| Dark map style, POI icons (Maki) | yes | yes | on | CC0 (Maki) | inlined in the viewer | yes |
+| GPS, driving HUD, `#dest=` deep links | yes | yes | on | - | the viewer | yes |
+| Offline PWA (`/drive/`: install, service worker, streaming from archive.org) | the website's, not in the ZIM | no | - | - | - | not applicable: Kiwix ignores in-ZIM manifests (docs/in-zim-apps.md) |
+| Max-zoom variants (`cloud/region-variants.tsv`) | yes | `--max-zoom` | 14 | - | - | yes |
+| Rust packer, external Xapian builder | yes (speed only; same ZIM content) | no | - | - | local binaries | not needed |
+
+All gaps that can work on Zimfarm are closed except the dead-website filter,
+which has no public source. Terrain is left to its branch; satellite is
+opt-in by choice, outside both profiles.
 
 ## What Zimfarm needs on its side
 
@@ -329,8 +523,7 @@ different name to the enum.
 ## What a build costs
 
 Measured with `tools/measure_build.py` on a 4-core, 15 GB machine,
-default profile as it was before terrain became the default (tilemaker,
-search, chips, routing; add [Terrain cost](#terrain-cost)), OSM extracts from
+`basic` profile (tilemaker, search, chips, routing), OSM extracts from
 openstreetmap.fr on 2026-09-28 (the Netherlands: 2026-09-29), Python
 3.11 outside Docker. Memory is PSS
 summed over every process of the build (RSS, which counts shared pages
@@ -392,12 +585,82 @@ temporary and output folders held 2.1 GB at that point. Tiles had taken
 2.3 min, the search step 7.8 min and the routing graph 2.7 min. No peak
 memory was recorded, as the measuring script writes it at the end.
 
+### Per profile, and the resources a recipe needs
+
+All the measurements above are `basic` builds (then called the default
+profile: tiles, search, chips, routing), made before `streetzim` passed
+`--no-llm-bundle` and `--split-hot-search-chunks-mb 10` as production does;
+the first only leaves files out and the second only splits chunks over
+10 MB, so they are if anything upper bounds for the ZIM size. Monaco was
+measured for both profiles on 2026-09-29 with `tools/measure_build.py` and
+`streetzim` from this branch, outside Docker (Python 3.11), on the same
+4-core, 15 GB machine, shared with other jobs (load average about 36), so
+the wall times are upper bounds. Each run started with an empty `--dl`, as
+a Zimfarm task does, so it includes downloading the extract (from
+openstreetmap.fr: Geofabrik is blocked here), the font glyphs and, for
+`full`, the Overture data; the shapefiles were given with `--shapefiles`.
+Terrain had not joined `full` yet ([Terrain cost](#terrain-cost) measures
+it) and satellite is in no profile, so `full` here is Wikidata, Wikipedia
+articles and Overture on top of `basic`; these runs predate `--kiwix-poi-pages` joining `full`
+(+28% ZIM size on Monaco, [above](#pois-in-kiwixs-own-search---kiwix-poi-pages)).
+They used the monaco preset's box before `next` widened it. Disk is the
+temp, output and download folders.
+
+| Monaco | wall time | CPU time | peak memory | peak disk | ZIM | sources |
+|---|---|---|---|---|---|---|
+| `basic` | 1.0 min | 0.9 min | 2.1 GB (2.1) | 0.03 GB | 2.9 MB | none besides OSM |
+| `full` minus terrain | 25.2 min | 1.1 min | 3.4 GB (3.4) | 0.02 GB | 3.3 MB | Overture addresses 4,087 rows, places 3,181 (36 enriched, 3,028 added); Wikidata 207 entries; titles 0/95; articles 8/53 |
+| `full`, earlier the same day, before the 429 fix merged | 7.1 and 7.7 min | 1.4 min | 2.8 to 3.3 GB | 0.02 GB | 3.3 MB | articles 16/53 |
+
+`full` spends its extra time waiting, not computing: the Overture download
+(latest release resolved through STAC, 1 of 64 address files and 1 of 16
+place files read) takes about 13 s. The rest is Wikimedia rate limiting
+this sandbox's shared IP: with the 429 fix now on `next`, each source waits
+out `Retry-After` up to its budget (`STREETZIM_WIKI_WAIT_BUDGET`, 15 min),
+so the 25 minutes are the title backfill (2 min, then it stops asking),
+Wikidata SPARQL (6 min) and the articles (15 min, the budget, then "not
+requesting the rest"). That is the worst case the budgets allow per
+source, not a normal run; from an IP that is not rate limited, Monaco's
+~60 requests take about a minute. The ZIMs passed
+`tools/check_openzim_output.py --routing`, `cloud/validate_zim.py`
+(zimcheck included) and `tools/check_full_profile.py`.
+
+What to give a recipe (`resources` in `POST /v2/recipes`). The `basic`
+rows follow from the measurements above; the `full` rows are **estimates**
+from them, since only Monaco was measured with `full`:
+
+| extract size (example) | profile | cpu | memory | disk |
+|---|---|---|---|---|
+| up to about 60 MB (Monaco, Luxembourg, Rhode Island) | `basic` | 2 | 6 GiB (measured 1.9 to 4.1 GB) | 4 GiB (measured 3.5 GiB on Zimfarm for Monaco) |
+| | `full` | 2 | 6 GiB (Monaco measured 2.8 to 3.4 GB) | 4 GiB |
+| about 700 MB (Switzerland) | `basic` | 4 | 8 GiB (measured 4.6 GB) | 10 GiB (4 + 4.4 measured + extract) |
+| | `full` | 4 | 10 GiB (estimated) | 12 GiB (estimated: Overture parquets and article cache on top) |
+| about 1.6 GB (the Netherlands) | `basic` | 4 | 12 GiB (measured 10.8 GB) | 20 GiB (4 + 11.0 measured + extract; less failed with ENOSPC) |
+| | `full` | 4 | 14 GiB (estimated) | 22 GiB (estimated) |
+
+- Memory in `full` grows with the Overture merge (DuckDB, and more search
+  records to write) and the Wikidata cache: Monaco's peak went from 1.9 to
+  2.8 to 3.4 GB. For larger regions the added records are a larger share of the
+  search step (Overture addresses are dense where national registries feed
+  them, as in the Netherlands), hence the extra 2 GiB estimated.
+- Time in `full` is dominated by the Wikimedia APIs: one SPARQL request per
+  40 Q-IDs with a 1 s pause, and one request per article with at least
+  0.1 s between them (California links 11,613 articles: over 20 minutes
+  before any rate limiting), plus up to 15 minutes of rate-limit waiting
+  per source (`STREETZIM_WIKI_WAIT_BUDGET`). A recipe for a large region
+  should allow hours on top of `basic`'s time, not minutes.
+- Terrain (on in `full`) adds the Copernicus DEM download and the
+  hillshade tiles ([Terrain cost](#terrain-cost): 0.3 GB for Luxembourg,
+  about 0.8 GB for Switzerland), and satellite (opt-in) the imagery. Add
+  their disk and time to the `full` rows.
+
 ### Terrain cost
 
-Terrain is on by default: hillshade and 3D are part of the StreetZim
-experience, and the Copernicus DEM is free and open (attribution only;
+Terrain is on with `--profile full`, the default: hillshade and 3D are
+part of the StreetZim experience, and the Copernicus DEM is free and open (attribution only;
 `License` and the viewer's credits name it whenever a ZIM has terrain).
-`--no-terrain` leaves it out. The numbers below are what it costs.
+`--no-terrain` (on Zimfarm: `terrain` off) or `--profile basic` leaves it
+out. The numbers below are what it costs.
 
 **What a build fetches.** A terrain tile covers its whole square, and at
 low zoom that square is far larger than a small region (Luxembourg's z7
@@ -442,7 +705,7 @@ fetched far more GLO-30 than the region needed. Without a world DEM
 - a DEM download that fails for any reason but a 404 stops the build at
   that cell, requests time out after 30 s, and all downloads together
   have a 30-minute budget (`TERRAIN_DOWNLOAD_BUDGET_S`); the error names
-  `--no-terrain` (the "No terrain" recipe option).
+  `--no-terrain` (on Zimfarm, `terrain` set to `off`).
 
 Builds given a world DEM (production) keep their layout and check; a
 `--low-zoom-world-vrt` that is not a file is refused, and the production
@@ -507,14 +770,14 @@ times for Luxembourg, whose extract is small), under a minute of CPU for
 countries of this size, and a few percent of the ZIM at most (hilly
 areas); peak memory does not change. Add the DEM to the recipe's disk.
 
-A recipe that leaves terrain out ticks **No terrain**, which Zimfarm passes
-as `--no-terrain`:
+A recipe that leaves terrain out of `full` sets **terrain** to `off`,
+which Zimfarm passes as `--terrain=off`:
 
 ```json
 {"offliner_id": "streetzim", "name": "osm_en_luxembourg", "title": "Luxembourg",
  "description": "Offline map of Luxembourg with search and routing",
  "include-poly": "https://download.geofabrik.de/europe/luxembourg.poly",
- "no-terrain": true}
+ "profile": "full", "terrain": "off"}
 ```
 
 ### Downloads per task
@@ -524,11 +787,19 @@ A fresh Zimfarm container downloads, besides the OSM extract:
   tilemaker (see below). Building from `--mbtiles-url` avoids this;
 - nothing for the viewer: MapLibre GL JS is vendored and the Docker image
   carries the pinned font glyphs ([viewer-supply-chain.md](viewer-supply-chain.md));
-- Copernicus DEM tiles for the area, unless `--no-terrain`: from the
-  public `copernicus-dem-30m` and `copernicus-dem-90m` buckets on AWS S3,
-  over HTTPS with no credentials, into `--dl` (on Zimfarm the default
-  `/tmp/streetzim/dl`, never the output folder). 17.8 MB for Monaco,
-  283 MB for Luxembourg; see [Terrain cost](#terrain-cost).
+- with `--profile full` (or the flags): Overture's addresses and places for
+  the box (DuckDB reads only the files whose STAC bbox meets it, and only
+  the row groups inside it: 0.1 and 0.3 MB for Monaco), Wikidata facts by
+  SPARQL, and one Wikipedia API request per article. The DuckDB `spatial`
+  and `httpfs` extensions are installed in the image; outside it, DuckDB
+  fetches them (about 100 MB) from extensions.duckdb.org on first use;
+- with `--wikipedia-zim-url`, the whole Wikipedia ZIM;
+- with terrain (`--profile full`, or `--terrain`): Copernicus DEM tiles
+  for the area, from the public `copernicus-dem-30m` and
+  `copernicus-dem-90m` buckets on AWS S3, over HTTPS with no credentials,
+  into `--dl` (on Zimfarm the default `/tmp/streetzim/dl`, never the
+  output folder). 17.8 MB for Monaco, 283 MB for Luxembourg; see
+  [Terrain cost](#terrain-cost).
 
 ### Disk for a Zimfarm recipe
 
@@ -543,7 +814,7 @@ the writable layer toward the task's disk, so **give every recipe at least
 (the tables above) and the DEM ([Terrain cost](#terrain-cost)) for larger
 ones.
 
-Monaco on the local Zimfarm below (default profile, recipe resources cpu 2,
+Monaco on the local Zimfarm below (what is now `--profile basic`, recipe resources cpu 2,
 memory 6 GiB, disk 4 GiB), as Zimfarm reported it: memory max 3.49 GiB
 (Docker's usage figure, which includes page cache), disk max 3.51 GiB
 (image 1.54 GB, shapefiles, a 2.8 MB ZIM), and 72 s of scraper time, about

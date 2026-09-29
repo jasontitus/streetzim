@@ -396,7 +396,7 @@ def test_a_failed_glo30_cell_stops_the_build_at_once(tmp_path, fake_dem):
     fail.add((50, 5))
     with pytest.raises(T.DemDownloadError) as e:
         T.generate_terrain_tiles(BBOX, str(tmp_path / "terrain"), max_zoom=10)
-    assert "--no-terrain" in str(e.value) and '"No terrain"' in str(e.value)
+    assert "--no-terrain" in str(e.value) and '"terrain" to "off"' in str(e.value)
     assert len(calls) == 1                         # fail fast: nothing after it
     assert not [p for p in os.listdir(T.dem_sources_dir()) if p.endswith(".nodata")]
 

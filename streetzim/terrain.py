@@ -566,8 +566,8 @@ def _dem_failure(what):
     return DemDownloadError(
         f"Terrain: {what}. Refusing to rasterise the missing DEM as 0 m. Re-run "
         "the build when the Copernicus buckets on S3 are reachable, or build "
-        "without terrain: --no-terrain (the \"No terrain\" recipe option on "
-        "Zimfarm).")
+        "without terrain: --no-terrain (on Zimfarm, set \"terrain\" to "
+        "\"off\").")
 
 
 class _DemStats:

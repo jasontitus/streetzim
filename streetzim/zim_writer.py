@@ -1453,6 +1453,7 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
     # its narration cleaner de-noises for TTS. Cached so rebuilds don't
     # re-crawl. Source: a local Wikipedia ZIM (offline) or the API.
     _bundled_set = None  # title_us actually stored — gates the geo-index
+    _wa_stats = None
     if bundle_wiki_articles and wiki_cross_refs:
         _wa_titles = {e["wikipedia"] for e in wiki_cross_refs.values()
                       if e.get("wikipedia")}
@@ -1478,6 +1479,12 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
                      f"({_wa_stats.get('unfetched', 0)} unfetched), "
                      f"{_wa_stats.get('images', 0)} images "
                      f"{_wa_stats.get('image_bytes', 0) // 1048576} MB")
+    if _wa_stats:
+        from streetzim.source_report import note
+        note("Wikipedia articles",
+             f"{_wa_stats.get('bundled', 0)}/{_wa_stats.get('requested', '?')} "
+             f"({_wa_stats.get('unfetched', 0)} not fetched, "
+             f"{_wa_stats.get('rate_limited', 0)} rate-limited)")
     return _bundled_set
 
 

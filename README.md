@@ -10,7 +10,7 @@ browser, with no network at all. A ZIM contains:
 - **Search** over places, streets, addresses, POIs, peaks, parks and water, plus Kiwix's own full-text search over a detail page for each place, park, peak, water feature and airport (POIs too with `--kiwix-poi-pages`; never streets or addresses: see `KIWIX_PAGE_TYPES` in streetzim/zim_writer.py and docs/zimfarm.md).
 - **Find page** with category chips (Food & Drink, Bars, Hotels, Museums, Parks, Health, Shops, Gas…) and distance sorting.
 - **Offline routing** (drive / walk / bike) in a Web Worker, with a GPS turn-by-turn HUD.
-- **Terrain**: hillshade and 3D from the Copernicus DEM (on by default in the `streetzim` command; `--terrain` for `create_osm_zim.py`).
+- **Terrain**: hillshade and 3D from the Copernicus DEM (on in the `streetzim` command with `--profile full`, the default; `--terrain` for `create_osm_zim.py`).
 - Optional **satellite imagery** (see the licence note below), **Wikidata** facts and bundled **Wikipedia** articles.
 - Optional **Overture Maps** addresses and place details (websites, phones, brands).
 
@@ -100,8 +100,10 @@ docker run --rm -v "$PWD/out:/output" streetzim \
 maps2zim's flag names, ZIM metadata flags checked before any download,
 `{name}_{period}.zim` in an output folder, and a Zimfarm progress file. Its
 flags are described for Zimfarm in `offliner-definition.json`;
-[docs/zimfarm.md](docs/zimfarm.md) covers the default profile and what a
-build costs.
+[docs/zimfarm.md](docs/zimfarm.md) covers the profiles (`--profile full`,
+the default, adds Wikidata, Wikipedia articles and Overture Maps like
+StreetZim's own builds; `--profile basic` fetches nothing but the OSM data),
+how they compare with the production builds, and what a build costs.
 
 ```bash
 pip install -e .              # or a wheel (python -m build; docs/packaging.md), or the Docker image

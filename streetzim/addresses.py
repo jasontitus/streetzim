@@ -12,7 +12,7 @@ from streetzim import area
 from streetzim.common import (
     print,
 )
-from streetzim.overture import overture_category, overture_release
+from streetzim.overture import duckdb_connect, overture_category, overture_release
 
 
 def extract_addresses_pbf(pbf_path, output_path, bbox=None):
@@ -367,7 +367,6 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     schema with `subtype="overture"` so downstream code and mcpzim can
     spot the provenance. Returns the count of rows added.
     """
-    import duckdb  # local import — only needed when the flag is set
     print(f"  Merging Overture addresses from {overture_parquet} "
           f"(release {overture_release(overture_parquet) or 'unknown'})...")
 
@@ -474,7 +473,7 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     # whole parquet OOMs a Mac for continent-scale bboxes; batch of
     # 2048 keeps working-set bounded.
     # ------------------------------------------------------------------
-    con = duckdb.connect()
+    con = duckdb_connect()
     # The parquet is already bbox-filtered by download_overture_data.py;
     # a second WHERE here would need a `bbox` struct the downloader doesn't
     # project. Instead, filter row-side in Python if the caller passes a
@@ -631,7 +630,8 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
           f"{orphan_skipped} orphan (missing num/street), "
           f"{added} added, "
           f"{len(source_datasets)} distinct upstream datasets")
-    return {"added": added, "datasets": sorted(source_datasets)}
+    return {"added": added, "scanned": total_overture,
+            "datasets": sorted(source_datasets)}
 
 
 # Subtypes too generic to keep when Overture has a category for the POI.
@@ -685,7 +685,6 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
     Returns {"enriched": N, "added": M, "datasets": [...], "size_bytes": {...}}
     so the caller can log the size impact without re-stat'ing the jsonl.
     """
-    import duckdb
     print(f"  Merging Overture places from {overture_parquet} "
           f"(release {overture_release(overture_parquet) or 'unknown'})...")
 
@@ -732,7 +731,7 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
           f"bounded memory)")
 
     # Stream Overture places from parquet via arrow batches.
-    con = duckdb.connect()
+    con = duckdb_connect()
     con.execute("INSTALL spatial; LOAD spatial;")
     parquet_sql = _sql_string_literal(overture_parquet)
     # Category columns differ by release: `categories` up to 2026-08-19.0,

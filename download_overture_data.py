@@ -55,7 +55,7 @@ from concurrent.futures import ThreadPoolExecutor
 from xml.etree import ElementTree
 
 # Run as a script from the repository root, which is then on sys.path.
-from streetzim.overture import KV_RELEASE, parquet_release
+from streetzim.overture import KV_RELEASE, duckdb_connect, parquet_release
 
 OVERTURE_BUCKET = "overturemaps-us-west-2"
 OVERTURE_S3_BUCKET = f"s3://{OVERTURE_BUCKET}"
@@ -433,7 +433,7 @@ def download_overture(theme: str, bbox: str, release: str, out_path: str,
         return out_path
 
     try:
-        import duckdb  # local import — only required when Overture is used
+        import duckdb  # noqa: F401  (only required when Overture is used: fail clearly)
     except ImportError:
         sys.exit("duckdb not installed. Run `pip install duckdb` inside venv312.")
 
@@ -445,7 +445,7 @@ def download_overture(theme: str, bbox: str, release: str, out_path: str,
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
-    con = duckdb.connect()
+    con = duckdb_connect()
     # httpfs + spatial are bundled extensions; first INSTALL auto-
     # downloads into ~/.duckdb/extensions, subsequent runs are a no-op.
     con.execute("INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs;")

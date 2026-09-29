@@ -73,7 +73,10 @@ def no_network(monkeypatch, tmp_path):
 
 
 def plan(argv, tmp_path):
-    return cli.plan(cli.build_parser().parse_args(REQ + argv), tmp_path)
+    """plan() as main() reaches it (through --profile), with basic, which
+    fetches nothing but the extract (tests/test_streetzim_profiles.py
+    covers full)."""
+    return cli.plan(cli.parse_args(REQ + ["--profile", "basic"] + argv), tmp_path)
 
 
 def builder_args(argv):
@@ -117,13 +120,14 @@ def test_monaco_preset_frames_all_of_monaco_with_sea_around_it():
     assert e - w <= 0.1 and n - s <= 0.1                 # still a small CI build
 
 
-def test_terrain_is_on_by_default_and_no_terrain_turns_it_off(tmp_path, no_network):
-    argv, _ = plan(["--area", "monaco"], tmp_path)
-    assert builder_args(argv).terrain
-    argv, _ = plan(["--area", "monaco", "--no-terrain"], tmp_path)
-    assert not builder_args(argv).terrain
-    argv, _ = plan(["--area", "monaco", "--terrain"], tmp_path)   # still accepted
-    assert builder_args(argv).terrain
+def test_terrain_follows_the_profile_and_its_flags(tmp_path, no_network):
+    def terrain(extra):
+        args = cli.parse_args(REQ + ["--area", "monaco"] + extra)
+        return builder_args(cli.plan(args, tmp_path)[0]).terrain
+    assert terrain([]) and terrain(["--profile", "full"])      # full is the default
+    assert not terrain(["--profile", "basic"])
+    assert not terrain(["--no-terrain"]) and not terrain(["--terrain=off"])
+    assert terrain(["--profile", "basic", "--terrain"])
 
 
 def test_geofabrik_poly_selects_its_extract(tmp_path, no_network):
@@ -324,7 +328,7 @@ def test_illustration_checked_before_downloads_and_resolved(tmp_path, no_network
     assert no_network == []
     from PIL import Image
     Image.new("RGB", (64, 64)).save(tmp_path / "icon.png")
-    argv, _ = cli.plan(cli.build_parser().parse_args(REQ + ["--area", "monaco"]), tmp_path,
+    argv, _ = cli.plan(cli.parse_args(REQ + ["--area", "monaco", "--profile=basic"]), tmp_path,
                        illustration=(tmp_path / "icon.png"))
     ill = argv[argv.index("--illustration") + 1]
     assert Path(ill).is_absolute()
