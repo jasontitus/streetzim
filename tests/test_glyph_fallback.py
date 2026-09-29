@@ -111,16 +111,75 @@ def test_names_the_style_does_not_display_do_not_count():
     assert gf.scripts_in_tiles([mvt("موناكو", key="name_int")], SCRIPTS) == {"Arabic"}
 
 
-def test_label_keys_are_what_the_style_displays():
+def _js_value(src: str, i: int) -> str:
+    """The JS array or string literal starting at src[i] (quotes of either
+    kind, escapes, nesting and line breaks allowed); AssertionError for
+    anything else, e.g. a variable, which this test cannot see through."""
+    while src[i].isspace():
+        i += 1
+    start, depth, quote = i, 0, None
+    assert src[i] in "[\"'", f"text-field is not a literal: {src[i:i + 60]!r}"
+    while True:
+        c = src[i]
+        if quote:
+            if c == "\\":
+                i += 1
+            elif c == quote:
+                quote = None
+                if depth == 0:
+                    return src[start:i + 1]
+        elif c in "\"'":
+            quote = c
+        elif c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+            if depth == 0:
+                return src[start:i + 1]
+        i += 1
+
+
+def text_field_keys(src: str) -> set[str]:
+    """Every property a text-field reads, as a style layout key
+    ("text-field": ...) or a setLayoutProperty(id, 'text-field', ...) call."""
     import re
-    src = "\n".join(p.read_text(encoding="utf-8")
-                    for p in sorted((ROOT / "resources" / "viewer" / "src" / "index").glob("*.js")))
-    fields = re.findall(r'"text-field"\s*:\s*(\[.*?\])\s*,?\s*$', src, re.M)
-    assert fields, "no text-field in the style"
-    keys = {k for f in fields for k in re.findall(r'\["get",\s*"([^"]+)"\]', f)}
+    keys: set[str] = set()
+    found = 0
+    for m in re.finditer(r"""(["']?)text-field\1\s*[:,]""", src):
+        found += 1
+        expr = _js_value(src, m.end())
+        gets = re.findall(r"""\[\s*(["'])get\1\s*,\s*(["'])(.*?)\2\s*[\],]""", expr, re.S)
+        assert len(gets) == len(re.findall(r"""(["'])get\1""", expr)), \
+            f"a get with a computed key: {expr!r}"
+        keys |= {g[2] for g in gets}
+        keys |= set(re.findall(r"\{([^{}]+)\}", expr)) if expr[0] in "\"'" else set()
+    assert found, "no text-field found"
+    return keys
+
+
+def test_text_field_parser_sees_through_quotes_and_line_breaks():
+    src = ("'text-field': ['get','ref'],\n"
+           '"text-field": ["concat",\n  ["get", "name"],\n  " ",\n  [\'get\', "ele"]],\n'
+           "map.setLayoutProperty('x', 'text-field', '{housenumber}');\n")
+    assert text_field_keys(src) == {"ref", "name", "ele", "housenumber"}
+    with pytest.raises(AssertionError):
+        text_field_keys('"text-field": labelExpr,')
+    with pytest.raises(AssertionError):
+        text_field_keys('"text-field": ["get", key],')
+
+
+def test_label_keys_are_what_the_style_displays():
+    src = (ROOT / "resources" / "viewer" / "index.html").read_text(encoding="utf-8")
+    keys = text_field_keys(src)
     assert keys and keys <= gf.LABEL_KEYS, keys - gf.LABEL_KEYS
-    # every text-field reads tile properties only through ["get", ...]
-    assert all('"get"' in f for f in fields)
+
+
+def test_corrupt_tiles_are_skipped_and_counted():
+    stats: dict = {}
+    corrupt_gzip = gzip.compress(mvt("شارع"))[:-12]
+    bad_mvt = mvt("شارع")[:-3]  # truncated
+    assert gf.scripts_in_tiles([corrupt_gzip, bad_mvt, mvt("רחוב")], SCRIPTS, stats) == {"Hebrew"}
+    assert stats["unreadable"] == 2
 
 
 def test_scan_stops_once_every_script_is_found():

@@ -29,7 +29,8 @@ from __future__ import annotations
 import gzip
 import re
 import zlib
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from typing import Any
 
 
 def _varint(buf: bytes, i: int) -> tuple[int, int]:
@@ -209,57 +210,59 @@ def _byte_pattern(blocks: Iterable[tuple[int, int]]) -> re.Pattern[bytes]:
     return re.compile(char)
 
 
-# The tile properties the style draws as text: every "text-field" in
-# resources/viewer/src/index/*.js reads only these (tests/test_glyph_fallback.py
-# checks). Other keys, e.g. an OpenMapTiles tile's name:ar or name:he, are
-# never displayed and must not pull in glyphs.
+# The properties the style draws as text: every "text-field" in the viewer
+# reads only these (tests/test_glyph_fallback.py parses the viewer to check).
+# Other keys, e.g. an OpenMapTiles tile's name:ar or name:he, are never
+# displayed and must not pull in glyphs. "label" is the driving HUD's
+# runtime GeoJSON layer, never a tile key; listing it is harmless (and the
+# scan cannot see runtime labels anyway).
 LABEL_KEYS = frozenset({"name", "name:latin", "name_int", "label"})
 
 
-def _tile_strings(tile: bytes, keys: frozenset[str] = LABEL_KEYS) -> Iterator[str]:
+def _tile_strings(tile: bytes, keys: frozenset[str] = LABEL_KEYS,
+                  match: re.Pattern[str] | None = None) -> Iterator[str]:
     """The non-ASCII string values of a Mapbox Vector Tile that some feature
-    carries under one of ``keys``."""
-    for field, layer, _ in _fields(tile):
-        if field != 3 or not isinstance(layer, bytes):
+    carries under one of ``keys`` (and, with ``match``, that it matches).
+
+    The tile is parsed by the protobuf runtime (C, via mapbox-vector-tile's
+    generated module); only the features of layers that have both a
+    displayed key and a matching string are walked, in Python."""
+    import importlib
+    # mapbox-vector-tile (a builder dependency) ships the generated module
+    pb2: Any = importlib.import_module("mapbox_vector_tile.Mapbox.vector_tile_pb2")
+    parsed: Any = pb2.tile()
+    try:
+        parsed.ParseFromString(tile)
+    except Exception as e:  # google.protobuf.message.DecodeError
+        raise ValueError(f"not a vector tile: {e}") from None
+    layers: Sequence[Any] = parsed.layers
+    for layer in layers:
+        layer_keys: Sequence[str] = layer.keys
+        wanted = {i for i, k in enumerate(layer_keys) if k in keys}
+        if not wanted:
             continue
-        layer_keys: list[bytes] = []
-        values: list[bytes | None] = []
-        features: list[bytes] = []
-        for f2, v, _ in _fields(layer):
-            if not isinstance(v, bytes):
-                continue
-            if f2 == 2:
-                features.append(v)
-            elif f2 == 3:
-                layer_keys.append(v)
-            elif f2 == 4:
-                sv = None
-                for f3, s, _ in _fields(v):
-                    if f3 == 1 and isinstance(s, bytes):
-                        sv = s
-                values.append(sv)
-        wanted = {i for i, k in enumerate(layer_keys) if k.decode("utf-8", "replace") in keys}
-        # only non-ASCII strings can hold these scripts
-        candidates = {i for i, v in enumerate(values) if v is not None and not v.isascii()}
-        if not wanted or not candidates:
+        strings: dict[int, str] = {}
+        values: Sequence[Any] = layer.values
+        for i, value in enumerate(values):
+            s: str = value.string_value
+            if s and not s.isascii() and (match is None or match.search(s)):
+                strings[i] = s
+        if not strings:
             continue
         shown: set[int] = set()
+        cand = strings.keys()
+        features: Sequence[Any] = layer.features
         for feature in features:
-            for f3, tags, _ in _fields(feature):
-                if f3 != 2 or not isinstance(tags, bytes):
-                    continue
-                i = 0
-                pairs: list[int] = []
-                while i < len(tags):
-                    n, i = _varint(tags, i)
-                    pairs.append(n)
-                for k, v in zip(pairs[0::2], pairs[1::2]):
-                    if k in wanted and v in candidates:
-                        shown.add(v)
+            tags: Sequence[int] = feature.tags
+            if cand.isdisjoint(tags[1::2]):  # the common case, decided in C
+                continue
+            for k, v in zip(tags[0::2], tags[1::2]):
+                if v in strings and k in wanted:
+                    shown.add(v)
+            if len(shown) == len(strings):
+                break
         for i in sorted(shown):
-            sv = values[i]
-            if sv is not None:
-                yield sv.decode("utf-8", "replace")
+            yield strings[i]
 
 
 def _decompress(data: bytes) -> bytes:
@@ -274,27 +277,40 @@ def _decompress(data: bytes) -> bytes:
 
 
 def scripts_in_tiles(tiles: Iterable[bytes],
-                     scripts: Mapping[str, Iterable[tuple[int, int]]]) -> set[str]:
+                     scripts: Mapping[str, Iterable[tuple[int, int]]],
+                     stats: dict[str, int] | None = None) -> set[str]:
     """The names of ``scripts`` whose characters occur in a string value of
     any of ``tiles`` (Mapbox Vector Tiles, gzip-compressed or not) that the
     style displays (a feature's LABEL_KEYS). Stops reading once every script
-    has been seen. A tile that does not parse is skipped (MapLibre cannot
-    draw it either)."""
+    has been seen. A tile that does not decompress or parse is skipped
+    (MapLibre cannot draw it either) and counted in ``stats["unreadable"]``."""
     todo = {name: (_byte_pattern(blocks), re.compile(f"[{_utf8_class(blocks)}]"))
             for name, blocks in ((n, list(b)) for n, b in scripts.items())}
     found: set[str] = set()
+    if stats is not None:
+        stats.setdefault("unreadable", 0)
     if not todo:
         return found
+    # A displayed key is written in the layer's key table as field 3.
+    key_bytes = [b"\x1a" + _enc_varint(len(k.encode())) + k.encode() for k in LABEL_KEYS]
     for data in tiles:
         if not data:
             continue
-        raw = _decompress(data)
-        hits = [name for name, (bpat, _) in todo.items() if bpat.search(raw)]
-        if not hits:
-            continue
         try:
-            texts = list(_tile_strings(raw))
+            raw = _decompress(data)
+        except (OSError, EOFError, zlib.error):
+            if stats is not None:
+                stats["unreadable"] += 1
+            continue
+        hits = [name for name, (bpat, _) in todo.items() if bpat.search(raw)]
+        if not hits or not any(k in raw for k in key_bytes):
+            continue
+        match = re.compile("|".join(todo[name][1].pattern for name in hits))
+        try:
+            texts = list(_tile_strings(raw, match=match))
         except (ValueError, IndexError):
+            if stats is not None:
+                stats["unreadable"] += 1
             continue
         for name in hits:
             if any(todo[name][1].search(t) for t in texts):

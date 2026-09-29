@@ -326,7 +326,10 @@ def fallback_scripts_in_tiles(tiles, lock=None):
     None (all of them, about 0.5 MB in the ZIM) when the tiles are not in
     memory (a streamed, continent-sized build) or are more than
     FALLBACK_SCAN_MAX_BYTES: in a ZIM that large the glyphs cost under 0.3%,
-    less than the scan's time is worth (it reads 25-100 MB/s)."""
+    less than the scan's time is worth. Measured 15-18 MB/s of stored tiles
+    (tilemaker tiles of Fiji, 366k tiles; OpenMapTiles-schema Monaco x100,
+    whose name:xx translations match nearly every tile), so seconds below
+    the cap (about 13 s)."""
     import time
     from streetzim import glyph_fallback
     fallback = viewer_assets.font_fallback(lock)
@@ -340,9 +343,12 @@ def fallback_scripts_in_tiles(tiles, lock=None):
               f"shipping every fallback script")
         return None
     t0 = time.monotonic()
-    found = glyph_fallback.scripts_in_tiles(tiles.values(), fallback.scripts)
+    stats = {}
+    found = glyph_fallback.scripts_in_tiles(tiles.values(), fallback.scripts, stats)
+    unreadable = stats.get("unreadable", 0)
     print(f"  Label scripts needing fallback glyphs: {', '.join(sorted(found)) or 'none'} "
-          f"({len(tiles):,} tiles scanned in {time.monotonic() - t0:.1f}s)")
+          f"({len(tiles):,} tiles scanned in {time.monotonic() - t0:.1f}s"
+          + (f"; {unreadable:,} unreadable tiles skipped" if unreadable else "") + ")")
     return found
 
 

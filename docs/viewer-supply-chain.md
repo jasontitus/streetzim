@@ -85,11 +85,16 @@ browser (`localIdeographFontFamily`).
 
 Only the scripts a map's labels use are merged: the builder reads the
 values its vector tiles carry under the keys the style displays
-(`LABEL_KEYS`: `name`, `name:latin`, `name_int`, `label`; a test ties it to
-every `text-field`), stopping once each script is found
-(`fallback_scripts_in_tiles`). Translations such as `name:ar` in
-OpenMapTiles-schema tiles (OpenFreeMap, `--mbtiles`) are never drawn and do
-not count. A ZIM whose labels have none of them
+(`LABEL_KEYS`: `name`, `name:latin`, `name_int`; a test parses every
+`text-field` of the built viewer and fails on any other key), stopping once
+each script is found (`fallback_scripts_in_tiles`). Translations such as
+`name:ar` in OpenMapTiles-schema tiles (OpenFreeMap, `--mbtiles`) are never
+drawn and do not count. `label` is also listed because the driving HUD's
+runtime GeoJSON layer draws it; the scan cannot see such runtime labels,
+so an Arabic place pushed into a map without Arabic tiles still draws
+blank. The scan reads 15-18 MB/s of stored tiles (up to ~13 s at the cap);
+tiles that do not decompress or parse are skipped and counted. A ZIM whose
+labels use none of these scripts
 is exactly as before. Builds with over 200 MB of tiles, or streamed ones,
 skip the scan and merge every script. Cost in the ZIM: Arabic ~150 KB,
 Hebrew ~27 KB, Armenian ~45 KB, Georgian ~55 KB, Thai or Lao ~34 KB each;
