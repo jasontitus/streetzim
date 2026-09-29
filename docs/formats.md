@@ -169,7 +169,7 @@ valid with SZCI v3 (it needs `base_node`).
 - **SZCI v1**: v3 header with version 1, then `nodes_scaled` i32[2N] in
   original node order, then 20-byte cell records (no `base_node`), then
   names.
-- **SZCI v2** (written by `build_spatial` from 2026-05-03 to 2026-06-02, and by the retired `attic/upgrade_spatial_zim.py`): 40-byte header (the seven
+- **SZCI v2** (written by `build_spatial` from 2026-05-03 to 2026-06-02, and by `cloud/upgrade_spatial_zim.py`, retired in `056261e` and removed in `a436aa8`): 40-byte header (the seven
   v1 fields, then u32 `num_node_shards`, u32 `nodes_per_shard`), no inline
   nodes; coordinates live in `routing-data/nodes-scaled-NNN.bin` (raw i32
   lat/lon pairs).
@@ -217,7 +217,7 @@ built today, by StreetZim or by openZIM, never needs a legacy branch.
 | SZCI v3 + SZRC v2 | `build_spatial` (`--spatial-chunk-scale`) | JS, Python | canonical |
 | SZRG v4 (+ chunk manifest) | `extract_routing_graph` (plain `--routing`) | JS, Python | current (small regions) |
 | SZRG v5 + SZGM v1 | none (retired 2026-09) | JS, Python | drop the readers once `validate_zim` finds no `routing-data/graph-geoms*` in the catalog |
-| SZCI v1/v2, SZRC v1 | none (`upgrade_spatial_zim.py` retired to `attic/`) | JS, Python | in continent ZIMs built before 2026-06-02; drop after those are rebuilt |
+| SZCI v1/v2, SZRC v1 | none (`upgrade_spatial_zim.py` removed in `a436aa8`) | JS, Python | in continent ZIMs built before 2026-06-02; drop after those are rebuilt |
 | SZRG v2/v3 | none | JS, Python | pre-April 2026 files only; first candidate for removal |
 
 ### Where the legacy read branches are

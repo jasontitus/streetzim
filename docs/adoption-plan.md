@@ -22,7 +22,7 @@ Rule for every split: **behaviour-neutral and verified mechanically.**
 
 | file | before | now | how it's verified |
 |---|---|---|---|
-| `resources/viewer/index.html` | 11,007 lines, edited by hand | 24 parts in `resources/viewer/src/index/` (largest 976 lines), joined by `tools/build_viewer.py` | the joined output is byte-identical to the file; CI and a test fail if they drift |
+| `resources/viewer/index.html` | 11,007 lines, edited by hand | 29 parts in `resources/viewer/src/index/` (11,897 lines in all, largest 979), joined by `tools/build_viewer.py` | the joined output is byte-identical to the file; CI and a test fail if they drift |
 | search extraction | inside `create_osm_zim.py` | `streetzim/search_extract.py` | golden-build diff |
 | routing formats | under `tests/` | `streetzim/routing/` | golden-build diff |
 | `create_osm_zim.py` | 7,188 lines | a ~1,700-line CLI (about 290 lines of it flag definitions); the work happens in `streetzim/{common,tiles,satellite,terrain,addresses,zim_writer}.py` and `streetzim/routing/build.py`. | golden-build diff (fixed inputs, every entry compared), an independent review that ran every production flag on old and new code, and a production-flag Washington, D.C. head-to-head against `main` ([head-to-head-dc.md](head-to-head-dc.md); bundled Wikipedia articles not yet covered) |
@@ -70,7 +70,7 @@ Order, because the build host runs these by absolute path:
   ([head-to-head-dc.md](head-to-head-dc.md)) used a test article source
   because Wikipedia was rate-limiting the machine, so article bundling was
   not compared on real content. It also predates the `main()` split.
-- **The pyright baseline** (19 findings in older modules, down from 39) only shrinks:
+- **The pyright baseline** (18 findings in older modules, down from 39) only shrinks:
   fix them as those files are touched.
 
 ## Would it be worth it?

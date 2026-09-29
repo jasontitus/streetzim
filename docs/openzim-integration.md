@@ -3,9 +3,11 @@
 openZIM plans to keep [openzim/maps](https://github.com/openzim/maps)
 (`maps2zim`) as its scraper and add StreetZim's features to it
 ([review](https://github.com/openzim/maps/blob/763a9bea611e2a64da90146636ce821c5e40d253/Streetzim%20vs%20Maps.md),
-[our response](openzim-review-response.md)). This page is a concrete plan
-for doing that. It is based on maps2zim at `707fc44` (2026-09) and StreetZim
-at this commit. Everything here uses libzim / zimscraperlib and the standard
+[our first response](openzim-review-response.md)). This page is a concrete plan
+for doing that. Our own proposal has since changed: we now suggest openZIM
+adopt StreetZim as its maps scraper after a Zimfarm pilot. This page stays
+as the plan if openZIM keeps openzim/maps. It is based on maps2zim at
+`707fc44` (2026-09) and StreetZim at this commit. Everything here uses libzim / zimscraperlib and the standard
 openZIM tools.
 
 ## The two pipelines side by side
@@ -19,7 +21,7 @@ openZIM tools.
 | categories | — | Find chips over `category-index/` |
 | routing | — | graph from the PBF, loaded in cells by a Web Worker |
 | viewer | Vite + ES modules, `content/config.json` | single-file viewer, `map-config.json` |
-| QA | ruff, pyright strict, pytest, daily Monaco build + `zimcheck` | ruff (narrow), pytest + Node tests, Monaco build + validator + `zimcheck` + browser test through `kiwix-serve` |
+| QA | ruff, pyright strict, pytest, daily Monaco build + `zimcheck` | ruff with pyflakes, bugbear and other bug-catching families (`ruff.toml`; `ops/` stays on E9 + F), pyright strict on 20 files (18 baselined findings elsewhere, no new ones allowed), pytest with coverage + Node tests, ESLint on the viewer, pre-commit hooks for the lint and type checks, Monaco build (every push and weekly) + validator + `zimcheck` + browser test through `kiwix-serve` |
 
 ## What we verified
 
@@ -52,7 +54,8 @@ reads the MBTiles it already has.
 
 ## Options
 
-1. **Port the code into maps2zim** (recommended). MIT code may be
+1. **Port the code into maps2zim** (our recommendation if openzim/maps
+   stays the scraper). MIT code may be
    included in GPL-3.0 maps2zim; keep the MIT notice in each ported file.
    The ported code follows maps2zim's conventions: pydantic models, `Context`,
    zimscraperlib `add_item_for`, pyright strict, and tests in their tree. The
