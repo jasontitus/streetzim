@@ -183,6 +183,7 @@ def zim_filename(pattern: str, name: str, today: datetime.date | None = None) ->
 
 
 BBox = tuple[float, float, float, float]
+_Group = tuple[BBox, list[BBox], float]      # a box, its member boxes, land area
 
 
 def check_bbox(b: BBox, what: str) -> BBox:
@@ -208,8 +209,23 @@ def parse_bbox_arg(value: str) -> BBox:
     return check_bbox((a, b, c, d), "--bbox")
 
 
-def parse_poly(text: str) -> BBox:
-    """Bounding box of an Osmosis .poly file (holes, marked '!', ignored)."""
+def poly_parts(text: str) -> list[BBox]:
+    """Bounding box of each outer ring of an Osmosis .poly file (holes,
+    marked '!', ignored)."""
+    return [b for b, _ in _poly_rings(text)]
+
+
+def _ring_area(lons: list[float], lats: list[float]) -> float:
+    """Shoelace area in degrees², scaled by cos(latitude): a size to compare
+    parts by, not a measurement."""
+    import math
+    a = sum(lons[k] * lats[k + 1] - lons[k + 1] * lats[k] for k in range(len(lons) - 1))
+    a += lons[-1] * lats[0] - lons[0] * lats[-1]
+    return abs(a) / 2 * math.cos(math.radians((min(lats) + max(lats)) / 2))
+
+
+def _poly_rings(text: str) -> list[tuple[BBox, float]]:
+    parts: list[tuple[BBox, float]] = []
     lons: list[float] = []
     lats: list[float] = []
     lines = [ln.strip() for ln in text.splitlines()]
@@ -222,7 +238,10 @@ def parse_poly(text: str) -> BBox:
         if ln == "END":
             if depth == 0:
                 break
-            depth, hole = 0, False
+            if lons:
+                parts.append(((min(lons), min(lats), max(lons), max(lats)),
+                              _ring_area(lons, lats)))
+            depth, hole, lons, lats = 0, False, [], []
             continue
         if depth == 0:
             depth, hole = 1, ln.startswith("!")
@@ -231,9 +250,67 @@ def parse_poly(text: str) -> BBox:
             x, y = ln.split()[:2]
             lons.append(float(x))
             lats.append(float(y))
-    if not lons:
+    if not parts:
         raise ValueError("no coordinates in .poly file")
-    return min(lons), min(lats), max(lons), max(lats)
+    return parts
+
+
+def parse_poly(text: str) -> BBox:
+    """Bounding box of an Osmosis .poly file (holes ignored)."""
+    return _union(poly_parts(text))
+
+
+def _union(boxes: list[BBox]) -> BBox:
+    return (min(b[0] for b in boxes), min(b[1] for b in boxes),
+            max(b[2] for b in boxes), max(b[3] for b in boxes))
+
+
+def _area(b: BBox) -> float:
+    import math
+    return (b[2] - b[0]) * (b[3] - b[1]) * math.cos(math.radians((b[1] + b[3]) / 2))
+
+
+# Two groups of polygon parts share one box when they are less than
+# MERGE_GAP degrees apart (coastal islands), or when that box is at most
+# MERGE_WASTE times the size of the two boxes it replaces.
+MERGE_GAP = 1.0
+MERGE_WASTE = 3.0
+
+
+def _gap(a: BBox, b: BBox) -> float:
+    return max(0.0, a[0] - b[2], b[0] - a[2], a[1] - b[3], b[1] - a[3])
+
+
+def area_bbox(rings: list[tuple[BBox, float]]) -> tuple[BBox, list[BBox]]:
+    """The box to build for a polygon's rings (each a box and its area), and
+    the ring boxes it leaves out.
+
+    Areas are bounding boxes, so parts far apart (the Netherlands and its
+    Caribbean islands, 70 degrees west) cannot share one: the box would be
+    mostly ocean, millions of tiles. Parts are grouped while they are near
+    each other or a group's box stays close to the size of its members
+    (Spain keeps the Balearics and the Canaries); the group with the most
+    land is built, and the others are returned so they can be named.
+    """
+    groups: list[_Group] = [(b, [b], a) for b, a in rings]
+    while len(groups) > 1:
+        best: tuple[float, int, int, BBox] | None = None
+        for i in range(len(groups)):
+            for j in range(i + 1, len(groups)):
+                u = _union([groups[i][0], groups[j][0]])
+                waste = _area(u) / max(_area(groups[i][0]) + _area(groups[j][0]), 1e-12)
+                if _gap(groups[i][0], groups[j][0]) < MERGE_GAP:
+                    waste = 0.0
+                if best is None or waste < best[0]:
+                    best = (waste, i, j, u)
+        assert best is not None
+        waste, i, j, u = best
+        if waste > MERGE_WASTE:
+            break
+        merged: _Group = (u, groups[i][1] + groups[j][1], groups[i][2] + groups[j][2])
+        groups = [g for k, g in enumerate(groups) if k not in (i, j)] + [merged]
+    groups.sort(key=lambda g: g[2], reverse=True)
+    return groups[0][0], [p for g in groups[1:] for p in g[1]]
 
 
 def parse_default_view(value: str) -> tuple[float, float, float | None]:
@@ -322,14 +399,16 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
         geofabrik, bbox = area["geofabrik"], area["bbox"]
     elif args.include_poly:
         urls = [u.strip() for u in args.include_poly.split(",") if u.strip()]
-        boxes: list[BBox] = []
+        rings: list[tuple[BBox, float]] = []
         for u in urls:
-            text = fetch(u, dl / "poly" / _name_of_url(u)).read_text()
-            boxes.append(check_bbox(parse_poly(text), u))
-        union = check_bbox((min(b[0] for b in boxes), min(b[1] for b in boxes),
-                            max(b[2] for b in boxes), max(b[3] for b in boxes)),
-                           "--include-poly")
-        bbox = ",".join(f"{v:.6f}" for v in union)
+            rings += _poly_rings(fetch(u, dl / "poly" / _name_of_url(u)).read_text())
+        box, left_out = area_bbox(rings)
+        if left_out:
+            print(f"  WARNING: --include-poly has parts too far apart for one box; "
+                  f"building {box} and leaving out {len(left_out)} part(s): "
+                  + "; ".join(",".join(f"{v:.2f}" for v in b) for b in left_out)
+                  + ". Build those with --bbox.", flush=True)
+        bbox = ",".join(f"{v:.6f}" for v in check_bbox(box, "--include-poly"))
         m = GEOFABRIK_POLY.match(urls[0])
         if len(urls) == 1 and m:
             geofabrik = m.group(1)
@@ -345,18 +424,20 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
     if not pbf_url and args.routing:
         raise ValueError("--routing needs an OSM extract: give --pbf-url, or --no-routing")
 
-    argv = ["--bbox", bbox, "--name", args.title, "--zim-name", args.name,
-            "--title", args.title, "--description", args.description,
-            "--creator", args.creator, "--publisher", args.publisher,
-            "--scraper", f"streetzim v{version()}", "--split-find-chips"]
+    # --flag=value throughout: a value may start with "-" (a western
+    # longitude, a title), which argparse would otherwise read as a flag.
+    argv = [f"--bbox={bbox}", f"--name={args.title}", f"--zim-name={args.name}",
+            f"--title={args.title}", f"--description={args.description}",
+            f"--creator={args.creator}", f"--publisher={args.publisher}",
+            f"--scraper=streetzim v{version()}", "--split-find-chips"]
     if pbf_url:
         argv += ["--pbf", str(fetch(pbf_url, dl / "osm" / _name_of_url(pbf_url)))]
     if args.mbtiles:
         argv += ["--mbtiles", str(Path(args.mbtiles).resolve())]
     if args.long_description:
-        argv += ["--long-description", args.long_description]
+        argv += [f"--long-description={args.long_description}"]
     if args.tags:
-        argv += ["--tags", args.tags]
+        argv += [f"--tags={args.tags}"]
     if illustration:
         argv += ["--illustration", str(illustration)]
     if args.stats_filename:
@@ -373,7 +454,7 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
         argv += ["--workers", str(args.zim_workers)]
     if args.default_view:
         lat, lon, zoom = parse_default_view(args.default_view)
-        argv += ["--map-center", f"{lon},{lat}"]
+        argv += [f"--map-center={lon},{lat}"]
         if zoom is not None:
             argv += ["--map-zoom", str(round(zoom))]
     if args.debug or args.keep_temp:

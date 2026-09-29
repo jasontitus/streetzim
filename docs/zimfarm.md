@@ -32,8 +32,18 @@ the output-folder check. The ZIM itself is written with python-libzim.
 The area is exactly one of `--area` (a preset), `--include-poly` (a `.poly`
 URL; a Geofabrik one also selects its extract) or `--bbox`. Areas are
 bounding boxes: the extract and the tiles are cut to the box, not the
-polygon, and an area that reaches the antimeridian (Russia, Fiji) is refused
-rather than turned into a band around the world.
+polygon. So:
+- an area that reaches the antimeridian (Russia, Fiji) is refused rather
+  than turned into a band around the world;
+- a polygon whose parts are far apart is built from the part with the most
+  land, and the log names the parts left out. Parts are kept together while
+  they are less than 1° apart or their shared box is at most 3 times their
+  own boxes: Spain keeps the Balearics and the Canaries, but the
+  Netherlands leaves out its Caribbean islands and Portugal the Azores and
+  Madeira. Build those separately with `--bbox`;
+- a single ring that spans open sea (Norway's includes Svalbard and
+  Jan Mayen) gives a large, mostly empty box; prefer a smaller polygon or
+  `--bbox`.
 
 `License` metadata and the viewer's credits list only the sources a ZIM
 actually contains.

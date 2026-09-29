@@ -76,18 +76,24 @@ def plan(argv, tmp_path):
     return cli.plan(cli.build_parser().parse_args(REQ + argv), tmp_path)
 
 
+def builder_args(argv):
+    """What create_osm_zim itself parses from the arguments plan() built."""
+    import create_osm_zim
+    return create_osm_zim.build_parser().parse_args(argv)
+
+
 def test_area_uses_geofabrik_extract_and_forwards_metadata(tmp_path, no_network):
     argv, info = plan(["--area", "monaco", "--tags", "a;b", "--default-view", "43.73,7.42,13"],
                       tmp_path)
     assert info["pbf_url"] == "https://download.geofabrik.de/europe/monaco-latest.osm.pbf"
     assert no_network == [info["pbf_url"]]
-    get = lambda f: argv[argv.index(f) + 1]  # noqa: E731
-    assert get("--bbox") == "7.40,43.72,7.44,43.76"
-    assert get("--zim-name") == "osm_en_monaco" and get("--title") == "Monaco"
-    assert get("--publisher") == "openZIM"
-    assert get("--tags") == "a;b"
-    assert get("--map-center") == "7.42,43.73" and get("--map-zoom") == "13"
-    assert "--routing" in argv and "--satellite" not in argv
+    ns = builder_args(argv)
+    assert ns.bbox == "7.40,43.72,7.44,43.76"
+    assert ns.zim_name == "osm_en_monaco" and ns.title == "Monaco"
+    assert ns.publisher == "openZIM"
+    assert ns.tags == "a;b"
+    assert ns.map_center == "7.42,43.73" and ns.map_zoom == 13
+    assert ns.routing and not ns.satellite
 
 
 def test_geofabrik_poly_selects_its_extract(tmp_path, no_network):
@@ -95,6 +101,51 @@ def test_geofabrik_poly_selects_its_extract(tmp_path, no_network):
                       tmp_path)
     assert info["pbf_url"].endswith("/europe/monaco-latest.osm.pbf")
     assert info["bbox"] == "7.400000,43.700000,7.510000,43.760000"
+
+
+def _ring(minlon, minlat, maxlon, maxlat):
+    return (f"{minlon} {minlat}\n{maxlon} {minlat}\n{maxlon} {maxlat}\n"
+            f"{minlon} {maxlat}\n")
+
+
+def _poly(*boxes):
+    return "p\n" + "".join(f"{i}\n{_ring(*b)}END\n" for i, b in enumerate(boxes, 1)) + "END\n"
+
+
+def test_poly_parts_far_apart_build_the_largest(tmp_path, monkeypatch, capsys):
+    # openstreetmap.fr's netherlands.poly: the mainland and, 70 degrees west,
+    # the Caribbean islands. One box around both is mostly Atlantic.
+    nl = _poly((3.2, 50.7, 7.3, 53.8), (-68.7, 11.8, -68.1, 12.4),
+               (-70.1, 12.4, -69.8, 12.7), (-63.3, 17.4, -62.9, 17.7))
+    monkeypatch.setattr(cli, "fetch", lambda url, dest: (
+        dest.parent.mkdir(parents=True, exist_ok=True), dest.write_text(nl), dest)[2])
+    argv, info = plan(["--include-poly", "https://example.org/nl.poly", "--pbf-url",
+                       "https://example.org/nl.pbf"], tmp_path)
+    assert info["bbox"] == "3.200000,50.700000,7.300000,53.800000"
+    out = capsys.readouterr().out
+    assert "leaving out 3 part(s)" in out and "-68.70,11.80,-68.10,12.40" in out
+    # Spain and the Balearics share a box; the Canaries do not.
+    # Spain keeps the Balearics; Portugal is built from the mainland, not the
+    # Azores, whose scattered islands have the bigger box but less land.
+    spain = [((-9.3, 36.0, 3.3, 43.8), 50.0), ((1.2, 38.6, 4.3, 40.1), 0.5)]
+    assert cli.area_bbox(spain) == ((-9.3, 36.0, 4.3, 43.8), [])
+    portugal = [((-9.5, 36.9, -6.2, 42.2), 9.0), ((-31.3, 36.9, -25.0, 39.8), 0.2),
+                ((-17.3, 32.6, -16.3, 33.1), 0.08)]
+    box, left = cli.area_bbox(portugal)
+    assert box == (-9.5, 36.9, -6.2, 42.2) and len(left) == 2
+
+
+def test_values_starting_with_a_dash_reach_the_builder(tmp_path, no_network):
+    # A western bbox (every --area preset in the Americas) and a title
+    # starting with "-" used to be read by argparse as flags.
+    # (Zimfarm passes --key=value, as here; so must a person.)
+    argv, _ = plan(["--bbox=-122.52,37.70,-122.35,37.83", "--pbf-url",
+                    "https://example.org/sf.pbf", "--default-view", "37.77,-122.42,12",
+                    "--long-description=-- offline --", "--tags=-x"], tmp_path)
+    ns = builder_args(argv)
+    assert ns.bbox == "-122.52,37.70,-122.35,37.83"
+    assert ns.map_center == "-122.42,37.77"
+    assert ns.long_description == "-- offline --" and ns.tags == "-x"
 
 
 def test_errors_are_raised_before_downloading_the_extract(tmp_path, no_network):
