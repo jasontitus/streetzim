@@ -158,7 +158,9 @@ def test_errors_are_raised_before_downloading_the_extract(tmp_path, no_network):
     with pytest.raises(ValueError, match="needs an OSM extract"):
         plan(["--bbox", "7.4,43.72,7.44,43.76", "--mbtiles", "t.mbtiles"], tmp_path)
     assert all(u.endswith(".poly") for u in no_network)
-    argv, _ = plan(["--bbox", "7.4,43.72,7.44,43.76", "--mbtiles", "t.mbtiles",
+    from tests.mbtiles_fixture import make_mbtiles
+    t = make_mbtiles(tmp_path / "t.mbtiles", [(0, 0, 0)])
+    argv, _ = plan(["--bbox", "7.4,43.72,7.44,43.76", "--mbtiles", str(t),
                     "--no-routing"], tmp_path)
     assert "--routing" not in argv and "--pbf" not in argv
 

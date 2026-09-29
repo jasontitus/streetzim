@@ -620,7 +620,9 @@ def create_zim(
                       metadata=metadata, illustration=illustration,
                       has_satellite=bool(satellite_dir and os.path.isdir(satellite_dir)),
                       has_terrain=bool(terrain_dir and os.path.isdir(terrain_dir)),
-                      has_wiki=has_wikidata or has_articles)
+                      has_wiki=has_wikidata or has_articles,
+                      tile_credit=(_tile_credit(tile_metadata)
+                                   if map_config.get("tileSource") else None))
         _add_routing_graph(creator, MapItem,
                            routing_graph_path=routing_graph_path,
                            routing_graph_chunk_mb=routing_graph_chunk_mb,
@@ -730,9 +732,14 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                               loc_lookup=loc_lookup)
 
 
+def _tile_credit(tile_metadata):
+    from streetzim import mbtiles
+    return mbtiles.license_text(tile_metadata or {})
+
+
 def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
                   metadata=None, illustration=None, has_satellite=True,
-                  has_terrain=True, has_wiki=True):
+                  has_terrain=True, has_wiki=True, tile_credit=None):
     """ZIM metadata (Name, Title, Tags, License, ...) and the 48x48 illustration.
 
     ``metadata`` holds openZIM-flag overrides validated by
@@ -783,6 +790,9 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
         "Map data: ODbL (OpenStreetMap)",
         "Tile schema: CC-BY 4.0 (OpenMapTiles)",
     ]
+    if tile_credit:
+        # Ready-made tiles (streetzim --mbtiles/--mbtiles-url): whose they are.
+        license_parts.append(tile_credit)
     if has_satellite:
         license_parts.append(
             "Satellite imagery: CC BY-NC-SA 4.0 (Sentinel-2 cloudless by EOX)")

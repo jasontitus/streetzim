@@ -425,6 +425,11 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Path for tilemaker on-disk temp storage (reduces RAM usage)")
     parser.add_argument("--mbtiles", metavar="PATH",
                         help="Skip tilemaker and use existing MBTiles file")
+    parser.add_argument("--record-tile-source", action="store_true",
+                        help="With --mbtiles: record the MBTiles' name, version and "
+                             "OSM date in map-config.json (tileSource) and License")
+    parser.add_argument("--tile-source-url", metavar="URL",
+                        help="With --record-tile-source: the URL the MBTiles came from")
     parser.add_argument("--satellite", action="store_true",
                         help="Include Sentinel-2 Cloudless satellite imagery tiles")
     parser.add_argument("--satellite-zoom", type=int, default=None,
@@ -1691,6 +1696,10 @@ def main(argv=None):
             terrain_dir=terrain_dir, terrain_max_zoom=terrain_max_zoom,
             total_steps=total_steps, wiki_cross_refs=wiki_cross_refs,
             wikidata_data=wikidata_data)
+        if args.mbtiles and args.record_tile_source:
+            from streetzim import mbtiles as _mbt
+            map_config["tileSource"] = _mbt.source_record(
+                tile_metadata, args.tile_source_url)
 
         _write_zim(
             address_count=address_count, args=args, bbox_str=bbox_str, fonts=fonts,

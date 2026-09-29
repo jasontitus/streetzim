@@ -125,6 +125,7 @@ strict = [
   "streetzim/area.py",
   "streetzim/cli.py",
   "streetzim/glyph_fallback.py",
+  "streetzim/mbtiles.py",
   "streetzim/paths.py",
   "streetzim/progress.py",
   "streetzim/routing/__init__.py",

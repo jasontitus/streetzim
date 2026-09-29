@@ -23,6 +23,7 @@ from __future__ import annotations
 import io
 import zlib
 from pathlib import Path
+from typing import Any
 
 try:
     from zimscraperlib.download import stream_file  # pyright: ignore[reportMissingImports]
@@ -143,6 +144,14 @@ def download(url: str, *, user_agent: str, dest: Path | None = None) -> bytes | 
     stream_file(url, byte_stream=buf, headers=headers, session=_quick_session(),
                 timeout=30)
     return buf.getvalue()
+
+
+def download_to(url: str, sink: Any, *, user_agent: str,
+                headers: dict[str, str] | None = None) -> None:
+    """Stream `url` into `sink` (anything with write()) with zimscraperlib's
+    retrying session, sending `headers` too (a Range to resume)."""
+    stream_file(url, byte_stream=sink, headers={"User-Agent": user_agent, **(headers or {})},
+                block_size=1 << 20, timeout=READ_TIMEOUT)
 
 
 def check_output(folder: Path, filename: str) -> None:

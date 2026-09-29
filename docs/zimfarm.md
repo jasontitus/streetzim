@@ -24,7 +24,7 @@ test tools and no upload client.
 
 | | default | how |
 |---|---|---|
-| Vector tiles | built with tilemaker from the OSM extract | or `--mbtiles` for ready-made OpenMapTiles (e.g. OpenFreeMap) |
+| Vector tiles | built with tilemaker from the OSM extract | or `--mbtiles-url` for a ready-made OpenMapTiles MBTiles, e.g. OpenFreeMap's ([below](#building-from-ready-made-tiles---mbtiles-url)); `--mbtiles` for a local file (command line only) |
 | Search over every named feature, Find chips, places list | on | always |
 | Offline routing (drive / walk / bike) | on, spatial layout (SZCI v3) | `--no-routing` |
 | Wikidata place details | off | `--wikidata` (queries Wikidata) |
@@ -180,7 +180,7 @@ memory was recorded, as the measuring script writes it at the end.
 
 A fresh Zimfarm container downloads, besides the OSM extract:
 - the coastline and Natural Earth shapefiles when tiles are built with
-  tilemaker (see below). Building from `--mbtiles` avoids this;
+  tilemaker (see below). Building from `--mbtiles-url` avoids this;
 - nothing for the viewer: MapLibre GL JS is vendored and the Docker image
   carries the pinned font glyphs ([viewer-supply-chain.md](viewer-supply-chain.md));
 - with `--terrain`, Copernicus DEM tiles for the area.
@@ -216,6 +216,68 @@ Ways to cut this, none taken yet:
   zip right after unzipping it does not lower the peak, which is reached
   while both exist; `fetch-shapefiles.sh` already removes it when it
   finishes.
+
+## Building from ready-made tiles (`--mbtiles-url`)
+
+`--mbtiles-url` (a Zimfarm `url` flag) builds from an OpenMapTiles MBTiles
+instead of running tilemaker, as maps2zim builds from OpenFreeMap's. On the
+command line, `--mbtiles` takes a local file instead.
+
+- **http(s)://** URLs are downloaded into the download folder
+  (`<dl>/mbtiles/`) with the same helper as the OSM extract (zimscraperlib
+  where it is installed), logging progress every 5%. An interrupted
+  download is resumed with a Range request when the server takes them and
+  the file is unchanged upstream (same ETag, Last-Modified and size);
+  otherwise it starts over. A finished download is reused while it is
+  unchanged upstream, and a file already in place with the upstream size
+  (a pre-seeded download folder) is used without downloading.
+- **file://** URLs are used in place, never copied: a host or worker that
+  keeps one planet file (on a mounted volume, or in `/output`) passes
+  `file:///path/planet.mbtiles` to every task. Zimfarm's `url` type
+  accepts `file://` URLs, not bare paths.
+- The file is refused early if it is not an MBTiles: a download stops at
+  its first bytes unless they are an SQLite header, and the file must have
+  `tiles` and `metadata` tables (a `tiles` view, as OpenFreeMap's, counts).
+- Its metadata goes into the build log (`MBTiles: OpenFreeMap, version
+  3.16.0, planetiler 0.10.3-SNAPSHOT, OSM data 2026-09-27, bounds …`) and
+  into the ZIM: `map-config.json` gets `tileSource` (name, version, OSM
+  date, generator, homepage and, for `--mbtiles-url`, the URL), and
+  `License` credits the tiles ("Vector tiles: OpenFreeMap
+  (https://openfreemap.org)").
+- **Only the area's tiles go into the ZIM.** When the file's `bounds` are
+  not inside the area's box, it is cut into a temporary MBTiles holding the
+  tiles that touch the box, z0 to z14 (or `--max-zoom`): maps2zim's
+  `TileFilter` rule, edges included; a box across the antimeridian keeps
+  both sides. The cut is one index search per tile column on the tiles'
+  `(zoom_level, tile_column, tile_row)` primary key (`SEARCH tiles_shallow
+  USING PRIMARY KEY (zoom_level=? AND tile_column=? AND tile_row>? AND
+  tile_row<?)`, then the tile data by its id). It never counts or scans
+  the whole file, so its cost follows the area: a country is some
+  hundred seeks and its own tiles copied (Switzerland: 426 seeks, 37,326
+  tiles; Germany: 849 seeks, 318,186 tiles), whatever the size of the
+  file. Measured on a synthetic planet-shaped file in OpenFreeMap's layout
+  (26.3 million tiles, 1.7 GB: every tile to z12, z13-14 over Europe),
+  after dropping the page cache: Switzerland 0.19 s, Germany 0.72 s, peak
+  memory 18 MB. On the real planet the copy dominates: it reads the
+  area's own tile data (a few GB for Germany), so it runs at disk speed.
+  A file that fits inside the area is used as it is.
+
+The trade-off:
+- **No tilemaker and no shapefiles.** The task skips the 864 MB shapefile
+  download and the tilemaker run, so the 4 GiB disk floor above does not
+  apply; disk is the MBTiles, the cut and the ZIM.
+- **But OpenFreeMap publishes only `planet` (about 103 GB, some 276
+  million tiles) and `monaco`** (`scripts/fetch-openfreemap-mbtiles.py`
+  finds the newest). A per-task download of the planet is out of the
+  question, so a real recipe needs either a regional MBTiles hosted
+  somewhere, or a planet kept on the worker and passed as `file://`.
+- **The tiles are OpenFreeMap's, not ours**: a different feature mix, with
+  fewer named places and streets to search (on Monaco our tilemaker tiles
+  give 31% more street names and about twice as many named places; see
+  [tile-sources.md](tile-sources.md)).
+  Search, addresses and routing still come from the OSM extract when there
+  is one (`--pbf-url`, or the Geofabrik extract of the area); without one,
+  give `--no-routing`.
 
 ## Tested on a local Zimfarm
 
