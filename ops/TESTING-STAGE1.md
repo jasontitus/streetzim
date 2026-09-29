@@ -36,12 +36,16 @@ git --no-optional-locks status -sb        # anything but ?? lines: see below
 git rev-list --left-right --count '@{u}...HEAD'   # "behind ahead": ahead must be 0
 crontab -l                                # note entries that call scripts here
 ps -eo pid,lstart,args | grep -E '/storage/streetzim/.*\.(sh|py|mjs)' | grep -v grep
-ls -l /proc/*/cwd 2>/dev/null | grep ' /storage/streetzim$'   # scripts started relatively
+# started from inside the checkout (best effort; also matches the physical path)
+for d in /proc/[0-9]*; do c=$(readlink "$d/cwd" 2>/dev/null); case "$c" in /storage/streetzim|/storage/streetzim/*|"$(cd /storage/streetzim && pwd -P)"|"$(cd /storage/streetzim && pwd -P)"/*) echo "${d#/proc/} $(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)";; esac; done
 ls -1 .*.sh 2>/dev/null                   # untracked host scripts
 ```
 
 (`--no-optional-locks` keeps `git status` from rewriting the index while
 host scripts may be running git.)
+
+The process listings are best effort. They see other users' processes
+only as root, and they include your own shell and commands; ignore those.
 
 **What to record:**
 - the current commit, and whether the host has **local commits**. Some
@@ -62,51 +66,60 @@ host scripts may be running git.)
 
 ## 2. The change, in a scratch clone (read-only for the host)
 
-Run it as one block. The subshell stops at the first error, and every git
-command names the scratch clone with `-C`. So nothing can land in
-`/storage/streetzim`, even if the clone fails (a full `/tmp`, say).
+Every line below is safe **on its own**. Paths are written out (no
+variables), and every git command names the scratch clone with `-C`. So it
+doesn't matter whether the lines run as one block, one at a time, or as
+separate commands in a Claude Code session (where the working directory
+carries over between commands but variables don't). If the clone fails,
+the later `git -C /tmp/sz-stage1 …` lines fail with "cannot change to" and
+touch nothing else.
 
 ```bash
-(
-  set -eu
-  UPSTREAM="$(git -C /storage/streetzim remote get-url origin)"   # GitHub
-  S=/tmp/sz-stage1
-  rm -rf "$S"
-  git clone -q /storage/streetzim "$S"
-  git -C "$S" fetch -q "$UPSTREAM" claude/adoring-dijkstra-i2vge7   # or the merged branch
-  git -C "$S" checkout -q FETCH_HEAD
-  PY=/storage/streetzim/venv-linux/bin/python3                     # the host's venv
-  bash "$S/ops/check_stage1.sh" --root "$S" --python "$PY"
-  "$PY" -m pytest -q --rootdir "$S" "$S/ops/tests" "$S/tests/test_check_boundary.py" \
-    || echo "(pytest failed or is missing in the host venv; the checker above is the main test)"
-)
+cd /tmp
+rm -rf /tmp/sz-stage1
+git clone -q /storage/streetzim /tmp/sz-stage1
+git -C /tmp/sz-stage1 fetch -q "$(git -C /storage/streetzim remote get-url origin)" claude/adoring-dijkstra-i2vge7
+git -C /tmp/sz-stage1 checkout -q FETCH_HEAD
+bash /tmp/sz-stage1/ops/check_stage1.sh --root /tmp/sz-stage1 --python /storage/streetzim/venv-linux/bin/python3
+/storage/streetzim/venv-linux/bin/python3 -m pytest -q -p no:cacheprovider /tmp/sz-stage1/ops/tests /tmp/sz-stage1/tests/test_check_boundary.py
 ```
 
 **Expect:**
 - `ALL CHECKS PASSED`, with no `FAIL` lines;
-- the tests pass.
+- the tests pass. If pytest is missing from the host venv, skip that
+  line; the checker is the main test.
 
-The clone's own `origin` is the host checkout, which does not have the
-branch; `$UPSTREAM` is the host checkout's remote (GitHub). Fetching reads
-from it and changes nothing in `/storage/streetzim`. The scratch clone is at
-another path, so the checks resolve against `/tmp/sz-stage1`. That is intended: nothing there runs against the real
-data.
+**Notes:**
+- The fetch reads from the host checkout's remote (GitHub). It changes
+  nothing in `/storage/streetzim`, and the clone's own `origin` (the host
+  checkout) doesn't have the branch.
+- If the fetch fails for want of credentials or an SSH setting, stop and
+  report. Don't fetch from inside `/storage/streetzim` instead.
+- The checks resolve against `/tmp/sz-stage1`, not the real data.
 
 **Optional: the pull itself, on a copy of the checkout.** This needs disk
-for a code-only copy (no data), about the size of `.git`:
+for a code-only copy (no data), about the size of `.git`. The same rule
+applies: literal paths, each line safe alone.
 
 ```bash
-(
-  set -eu
-  UPSTREAM="$(git -C /storage/streetzim remote get-url origin)"
-  S=/tmp/sz-pull
-  rm -rf "$S"
-  git clone -q /storage/streetzim "$S"
-  git -C "$S" fetch -q "$UPSTREAM" claude/adoring-dijkstra-i2vge7
-  git -C "$S" merge --ff-only FETCH_HEAD     # must fast-forward, as on the host
-  bash "$S/ops/check_stage1.sh" --root "$S" --python /storage/streetzim/venv-linux/bin/python3
-)
+cd /tmp
+rm -rf /tmp/sz-pull
+git clone -q /storage/streetzim /tmp/sz-pull
+git -C /tmp/sz-pull branch --unset-upstream
+git -C /tmp/sz-pull fetch -q "$(git -C /storage/streetzim remote get-url origin)" claude/adoring-dijkstra-i2vge7
+git -C /tmp/sz-pull merge -q --ff-only FETCH_HEAD
+bash /tmp/sz-pull/ops/check_stage1.sh --root /tmp/sz-pull --python /storage/streetzim/venv-linux/bin/python3
 ```
+
+**Three details:**
+- `merge --ff-only` must succeed: that is the same fast-forward the host
+  will do.
+- `--unset-upstream` stops the checker from counting the new commits as
+  "local commits". In the copy, the upstream is the host's own branch.
+- A clone doesn't carry the host's uncommitted edits to the lists. They
+  don't block the real pull because the split doesn't change those files;
+  this prints nothing if that still holds:
+  `git -C /tmp/sz-pull diff --name-only ORIG_HEAD HEAD -- '*.list' viewer-refresh.tsv cloud/region-variants.tsv tmp/live-inventory.out`
 
 ## 3. Decide
 
@@ -126,7 +139,9 @@ Go on to step 4 only if all of these hold:
 
 ```bash
 cd /storage/streetzim
-git rev-parse HEAD > "$HOME/sz-before-stage1.txt"   # for a rollback (survives a reboot)
+# the commit to roll back to; kept in $HOME (survives a reboot), recorded once
+[ -e "$HOME/sz-before-stage1.txt" ] || git rev-parse HEAD > "$HOME/sz-before-stage1.txt"
+cat "$HOME/sz-before-stage1.txt"
 git pull --ff-only
 ```
 
@@ -167,11 +182,19 @@ Both must work, from any directory.
 
 ## 6. Rollback, if anything is wrong
 
+First make sure the host has made **no commits of its own since the
+pull**. `ops/cloud/upload_validated.sh` commits torrent files on the host,
+and a rollback would silently drop them.
+
 ```bash
 cd /storage/streetzim
-git --no-optional-locks status --short   # host-edited lists may show M: they are kept
+# must print nothing; if it lists commits, stop and ask
+git log --oneline "$(cat "$HOME/sz-before-stage1.txt")"..HEAD --not '@{u}'
+# host-edited lists may show M: they are kept
+git --no-optional-locks status --short
 git reset --keep "$(cat "$HOME/sz-before-stage1.txt")"
-git --no-optional-locks status --short   # expect only the host-edited lists
+# expect only the host-edited lists
+git --no-optional-locks status --short
 ```
 
 `git reset --keep` moves the branch back and updates the files, but keeps
@@ -193,18 +216,29 @@ Report what failed, with the check output.
 
 ## Prompt for a Claude Code session on the host
 
-> Follow `ops/TESTING-STAGE1.md` in the streetzim repository, from branch
-> `claude/adoring-dijkstra-i2vge7`. Fetch the branch **only into the scratch
-> clone**, using the step-2 block exactly as written (one subshell with
-> `set -e` and `git -C`). Never run `git fetch`, `checkout`, `pull`,
-> `merge`, `reset` or `stash` in `/storage/streetzim`. To read the
-> runbook before step 2, use
-> `git -C /storage/streetzim show origin/claude/adoring-dijkstra-i2vge7:ops/TESTING-STAGE1.md`
-> only if that ref exists; otherwise read it on GitHub.
+> Test the streetzim ops split on this host, read-only.
 >
-> - Do steps 1–3 only.
-> - Report the step-1 findings (commit, git status lines, running
->   scripts, crontab entries, untracked host scripts) and the full output
->   of step 2.
-> - Change nothing in `/storage/streetzim`, and run no production script.
+> 1. First run exactly these commands, each as written. Every git command
+>    must name `/tmp/sz-stage1` with `-C`; never run git inside
+>    `/storage/streetzim`:
+>    ```
+>    cd /tmp
+>    rm -rf /tmp/sz-stage1
+>    git clone -q /storage/streetzim /tmp/sz-stage1
+>    git -C /tmp/sz-stage1 fetch -q "$(git -C /storage/streetzim remote get-url origin)" claude/adoring-dijkstra-i2vge7
+>    git -C /tmp/sz-stage1 checkout -q FETCH_HEAD
+>    ```
+> 2. Then read `/tmp/sz-stage1/ops/TESTING-STAGE1.md` and do its steps 1–3
+>    only, running the commands exactly as written there.
+>
+> Report:
+> - the step-1 findings: commit, `status -sb` lines, the local-commit
+>   count, running scripts, crontab entries, untracked host scripts;
+> - the full output of step 2.
+>
+> Rules:
+> - Never run `git fetch`, `checkout`, `pull`, `merge`, `reset`, `stash`
+>   or `commit` in `/storage/streetzim`, and change nothing there.
+> - Run no production script.
+> - If anything fails, stop and report; don't improvise a workaround.
 > - Stop at step 3 and wait for my go-ahead before the pull in step 4.

@@ -140,14 +140,18 @@ if out=$("$PY" -I tools/check_boundary.py --root "$ROOT" 2>&1); then ok "$(print
 
 echo "6. host view (informational)"
 # By path on the command line, or started from inside the checkout (cwd).
-running=$( { ps -eo pid=,args= | awk -v r="$ROOT/" 'index($0, r) && /\.(sh|py|mjs)( |$)/ && !/check_stage1/';
+# Best effort: other users' processes show only to root, and /proc gives the
+# physical cwd, so both the given and the physical path are matched.
+PHYS="$(pwd -P)"
+running=$( { ps -eo pid=,args= | awk -v r="$ROOT/" -v p="$PHYS/" '(index($0, r) || index($0, p)) && /\.(sh|py|mjs)( |$)/ && !/check_stage1/';
              for d in /proc/[0-9]*; do
-               [ "$(readlink "$d/cwd" 2>/dev/null)" = "$ROOT" ] || continue
+               c=$(readlink "$d/cwd" 2>/dev/null) || continue
+               case "$c" in "$ROOT"|"$ROOT"/*|"$PHYS"|"$PHYS"/*) ;; *) continue ;; esac
                pid=${d#/proc/}; [ "$pid" = "$$" ] && continue
                args=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)
                case "$args" in *check_stage1*|"") ;; *.sh*|*.py*|*.mjs*) printf '%s %s (cwd)\n' "$pid" "$args" ;; esac
              done; } | sort -u -n )
-if [ -n "$running" ]; then warn "scripts running from this checkout (they keep running across a pull):"; printf '%s\n' "$running" | sed 's/^/          /'; else ok "no scripts from this checkout are running"; fi
+if [ -n "$running" ]; then warn "scripts running from this checkout, best effort (they keep running across a pull):"; printf '%s\n' "$running" | sed 's/^/          /'; else ok "no scripts from this checkout found running (best effort)"; fi
 if command -v crontab >/dev/null && crontab -l >/dev/null 2>&1; then
   n=$(crontab -l 2>/dev/null | grep -v '^#' | grep -c "$ROOT")
   warn "$n crontab line(s) name this checkout (they keep working through the symlinks)"
