@@ -22,6 +22,13 @@ if TYPE_CHECKING:
     from libzim.reader import Archive
 
 
+def _le_array(buf: bytes, code: str, count: int, offset: int) -> np.ndarray:
+    """np.frombuffer for the formats' little-endian integer arrays (``code``
+    is "<i4" or "<u4"). One place for the call, because numpy's stubs type
+    frombuffer's overloads differently from version to version."""
+    return np.frombuffer(buf, dtype=code, count=count, offset=offset)  # pyright: ignore[reportUnknownMemberType]
+
+
 NO_GEOM_V2 = 0xFFFFFF
 NO_GEOM_V3_V4 = 0xFFFFFFFF
 
@@ -107,11 +114,11 @@ def parse_szrg_bytes(buf: bytes) -> SZRG:
     edge_stride = 5 if version in (4, 5) else 4
 
     off = 32
-    nodes_scaled = np.frombuffer(buf, dtype="<i4", count=num_nodes * 2, offset=off)
+    nodes_scaled = _le_array(buf, "<i4", count=num_nodes * 2, offset=off)
     off += num_nodes * 2 * 4
-    adj_offsets = np.frombuffer(buf, dtype="<u4", count=num_nodes + 1, offset=off)
+    adj_offsets = _le_array(buf, "<u4", count=num_nodes + 1, offset=off)
     off += (num_nodes + 1) * 4
-    edges = np.frombuffer(buf, dtype="<u4", count=num_edges * edge_stride, offset=off)
+    edges = _le_array(buf, "<u4", count=num_edges * edge_stride, offset=off)
     off += num_edges * edge_stride * 4
 
     has_geoms = True
@@ -124,12 +131,12 @@ def parse_szrg_bytes(buf: bytes) -> SZRG:
         geom_blob = b""
         has_geoms = False
     else:
-        geom_offsets = np.frombuffer(buf, dtype="<u4", count=num_geoms + 1, offset=off)
+        geom_offsets = _le_array(buf, "<u4", count=num_geoms + 1, offset=off)
         off += (num_geoms + 1) * 4
         geom_blob = bytes(buf[off:off + geom_bytes_total])
         off += geom_bytes_total
 
-    name_offsets = np.frombuffer(buf, dtype="<u4", count=num_names + 1, offset=off)
+    name_offsets = _le_array(buf, "<u4", count=num_names + 1, offset=off)
     off += (num_names + 1) * 4
     names_blob = bytes(buf[off:off + names_bytes])
 
@@ -163,7 +170,7 @@ def parse_szgm_bytes(buf: bytes) -> tuple[np.ndarray, bytes, int]:
     if version != 1:
         raise ValueError(f"Unsupported SZGM version: {version}")
     off = 16
-    geom_offsets = np.frombuffer(buf, dtype="<u4", count=num_geoms + 1, offset=off)
+    geom_offsets = _le_array(buf, "<u4", count=num_geoms + 1, offset=off)
     off += (num_geoms + 1) * 4
     geom_blob = bytes(buf[off:off + geom_bytes_total])
     return geom_offsets, geom_blob, num_geoms
