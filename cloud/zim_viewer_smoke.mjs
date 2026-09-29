@@ -140,10 +140,29 @@ try {
   }
 
   // ---- 5. the chip rail is the current one -------------------------------
+  // The viewer hides chips the ZIM's category manifest does not list (or
+  // lists with count 0), and the whole rail when it lists none. Wait for
+  // that reconcile, then count only chips a reader can see. Both CI builds
+  // use --split-find-chips, but key the rail check on the manifest itself.
+  const chipInfo = await page.evaluate(async () => {
+    let hasChips = null;
+    try {
+      const r = await fetch('category-index/manifest.json');
+      if (r.ok) { const m = await r.json(); hasChips = !!(m && m.chips && Object.keys(m.chips).length); }
+      else hasChips = false;
+    } catch (e) { /* unknown */ }
+    return { hasChips };
+  });
+  if (EXPECT_FIXES) {
+    await page.waitForFunction(() => typeof _findCatManifest === 'undefined'
+      || _findCatManifest !== null, { timeout: 30_000 }).catch(() => {});
+    await sleep(300);
+  }
   const chips = await page.evaluate(() => {
     const ids = new Set();
     for (const el of document.querySelectorAll(
         '[data-chip],[data-chip-id],.chip,.explore-chip,button')) {
+      if (el.offsetParent === null) continue;   // hidden: not offered
       const id = el.getAttribute('data-chip') || el.getAttribute('data-chip-id');
       if (id) ids.add(id.toLowerCase());
       const t = (el.textContent || '').trim().toLowerCase();
@@ -152,7 +171,14 @@ try {
     return [...ids];
   });
   const chipBlob = chips.join('|');
-  if (EXPECT_FIXES) {
+  if (EXPECT_FIXES && chipInfo.hasChips) {
+    const railShown = await page.evaluate(() => {
+      const r = document.getElementById('find-chips');
+      return !!r && !r.hidden && r.offsetParent !== null;
+    });
+    ok('chip rail shown (the manifest lists chips)', railShown);
+  }
+  if (EXPECT_FIXES && chipInfo.hasChips !== false) {
     for (const c of REQUIRED_CHIPS)
       ok('chip rail offers "' + c + '"', chipBlob.includes(c),
          'chips seen: ' + chipBlob.slice(0, 300));
