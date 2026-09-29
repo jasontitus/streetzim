@@ -34,6 +34,18 @@ from streetzim.tile_alias import TileAliaser, max_alias_bytes
 from streetzim import viewer_assets
 
 
+# Search records that get a Kiwix page (search/<slug>.html), and with it an
+# entry in kiwix-serve's full-text search (libzim indexes the page). POIs,
+# streets and addresses do not: kiwix-serve's search for "Casino" in Monaco
+# finds the Fontaine du Casino (a lake) and none of the shops, stops and
+# sights named Casino; the in-map search has them all. Adding "poi" was
+# measured on 2026-09-29: about 245 B per named POI (pages, dirents and the
+# Xapian index), Monaco +15% (1.8k pages), Luxembourg +9.4% (55.4 -> 60.6 MB,
+# 21k pages), so ~ +11% for Switzerland and +7% for the Netherlands; build
+# time within noise. Not done by default for that reason.
+KIWIX_PAGE_TYPES = frozenset({"place", "airport", "park", "peak", "water"})
+
+
 def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
     """HTML for a search-result detail page (`search/<slug>.html`).
 
@@ -1603,7 +1615,7 @@ def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_ch
 def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp):
     """Search pass 1: stream the search JSONL into per-prefix and per-category
     chunk files in `chunk_tmp`, plus the Xapian candidates file."""
-    xapian_types = {"place", "airport", "park", "peak", "water"}
+    xapian_types = KIWIX_PAGE_TYPES
 
     # Pass 1: stream JSONL -> per-prefix chunk files + xapian file
     chunk_counts = {}
@@ -2523,8 +2535,7 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup):
 
     print(f"    Added {len(chunks)} search chunks ({total_features} features)")
 
-    xapian_types = {"place", "airport", "park", "peak", "water"}
-    xapian_features = [f for f in search_features if f["type"] in xapian_types]
+    xapian_features = [f for f in search_features if f["type"] in KIWIX_PAGE_TYPES]
     print(f"    Adding {len(xapian_features)} Xapian search pages (of {len(search_features)} total)...", flush=True)
 
     xapian_start = time.time()
