@@ -3,6 +3,10 @@
 #
 #   pip install pre-commit -r requirements.txt pyright==1.1.409
 #   PUPPETEER_SKIP_DOWNLOAD=1 npm ci   # ESLint for the viewer-eslint hook
+#
+# viewer-eslint fails (it does not skip) when node or node_modules/eslint is
+# missing, saying what to install: CI runs the same lint, so a skipped hook
+# would only move the failure to the pull request.
 #   pre-commit install            # then: pre-commit run --all-files
 #
 # The versions match CI's. The tests (pytest, node) stay in CI and are run by
@@ -35,7 +39,12 @@ repos:
         pass_filenames: false
       - id: viewer-eslint
         name: ESLint (viewer JavaScript; eslint.config.mjs)
-        entry: npm run --silent lint:viewer
+        entry: >-
+          sh -c 'command -v node >/dev/null 2>&1 ||
+          { echo "viewer-eslint: node not found; install Node.js, then run npm ci" >&2; exit 1; };
+          [ -f node_modules/eslint/package.json ] ||
+          { echo "viewer-eslint: ESLint is not installed; run npm ci first" >&2; exit 1; };
+          exec node tools/lint_viewer.mjs'
         language: system
         files: ^(resources/viewer/|eslint\.config\.mjs$|tools/lint_viewer\.mjs$|package(-lock)?\.json$)
         pass_filenames: false
