@@ -19,7 +19,8 @@ unset _ops_real _ops_old
 # Usage: ./ship-region.sh <id> [--no-upload]
 #   Region id must exist in cloud/regions.tsv (bbox, smoke pair and
 #   search term all come from there).
-# Env: OVERTURE_RELEASE (default 2026-08-19.0)
+# Env: OVERTURE_RELEASE (default latest: resolved once at start to the newest
+#      release with addresses + places, logged, and used in the cache names)
 #      WAIT_FOR_PBF=1  block until the extractor has finished this
 #                      region's PBF instead of failing
 set -uo pipefail
@@ -27,7 +28,7 @@ cd /storage/streetzim
 # bbox_stale / bbox_mark
 . ops/region-bbox.sh || exit 1
 export TMPDIR=/storage/streetzim/tmp
-export OVERTURE_RELEASE="${OVERTURE_RELEASE:-2026-08-19.0}"
+export OVERTURE_RELEASE="${OVERTURE_RELEASE:-latest}"
 # 403/429/5xx/timeouts in the liveness cache are mostly bot-blocked live
 # sites, not closed businesses — only these statuses drop a record.
 # `parked` (redirects to a domain-squatter page) and `url` (syntactically
@@ -60,6 +61,10 @@ log() { printf "[%s] %s\n" "$(date -Iseconds)" "$*" | tee -a "$LOG"; }
 IFS=$'\t' read -r RID NAME BBOX TIER SRC DST SEARCH NOTES < <(
   awk -F'\t' -v id="$ID" '$1==id {print; exit}' cloud/regions.tsv)
 [ "${RID:-}" = "$ID" ] || { echo "no such region in cloud/regions.tsv: $ID" >&2; exit 2; }
+if [ "$OVERTURE_RELEASE" = latest ]; then
+  OVERTURE_RELEASE=$("$PY" download_overture_data.py addresses places --print-release) || {
+    log "FATAL: could not resolve OVERTURE_RELEASE=latest; pin one: OVERTURE_RELEASE=<release>"; exit 1; }
+fi
 log "=== ship $ID ($NAME) bbox=$BBOX overture=$OVERTURE_RELEASE"
 
 PBF=world-data/regions/${ID}.osm.pbf

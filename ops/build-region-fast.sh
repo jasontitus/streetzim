@@ -56,6 +56,11 @@ WD=/storage/streetzim/wikidata_cache
 TERRAIN=/storage/streetzim/terrain_cache
 LOWZ=/storage/streetzim/terrain_cache/dem_sources/world_dem_32k.tif
 OVERTURE_RELEASE="${OVERTURE_RELEASE:-2026-04-15.0}"
+# Only reads the cache: the callers resolve `latest` to a name first.
+if [ "$OVERTURE_RELEASE" = latest ]; then
+    echo "FATAL: OVERTURE_RELEASE=latest — pass the resolved name (download_overture_data.py addresses places --print-release)" >&2
+    exit 1
+fi
 ADDR=/storage/streetzim/overture_cache/addresses-${SRC_ID}-${OVERTURE_RELEASE}.parquet
 PLACES=/storage/streetzim/overture_cache/places-${SRC_ID}-${OVERTURE_RELEASE}.parquet
 # Offline Wikipedia: every linkable POI gets its article (trimmed reader

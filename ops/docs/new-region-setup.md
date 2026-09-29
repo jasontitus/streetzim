@@ -126,16 +126,20 @@ ln -sf /storage/streetzim/search_cache/world.jsonl          ${ID}.search.jsonl
 
 Use `download_overture_data.py` for both themes. Cache lives in
 `overture_cache/`. Filename pattern is what `build-region-fast.sh` looks for
-(with `OVERTURE_RELEASE` set to match):
+(with `OVERTURE_RELEASE` set to match). Resolve the release once and use the
+name for both files (the downloader's default, `--release latest`, is the
+newest release on the bucket, which moves when Overture publishes):
 
 ```sh
+REL=$(venv-linux/bin/python3 download_overture_data.py addresses places --print-release)
+
 venv-linux/bin/python3 download_overture_data.py addresses \
-    --bbox="$BBOX" \
-    --out overture_cache/addresses-${ID}-2026-04-15.0.parquet
+    --bbox="$BBOX" --release "$REL" \
+    --out overture_cache/addresses-${ID}-${REL}.parquet
 
 venv-linux/bin/python3 download_overture_data.py places \
-    --bbox="$BBOX" \
-    --out overture_cache/places-${ID}-2026-04-15.0.parquet
+    --bbox="$BBOX" --release "$REL" \
+    --out overture_cache/places-${ID}-${REL}.parquet
 ```
 
 addresses + places can run in parallel (DuckDB+S3, separate row groups). Some
@@ -160,7 +164,7 @@ Once the four inputs are in place, the canonical command is
 (it is what `build-refresh-queue.sh` calls):
 
 ```sh
-setsid nohup env OVERTURE_RELEASE=2026-08-19.0 WIKI_IMAGES=all \
+setsid nohup env OVERTURE_RELEASE="$REL" WIKI_IMAGES=all \
     bash build-region-fast.sh "$ID" "$BBOX" "$DISPLAY_NAME" \
     > "${ID}-build.out" 2>&1 < /dev/null &
 ```

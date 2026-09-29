@@ -20,7 +20,12 @@ unset _ops_real _ops_old
 #      symlink, or older than $PLANET   (pre-run ./extract-region-pbfs.sh to
 #      do all of these in one planet pass instead)
 #   3. overture_cache/{addresses,places}-<id>-$OVERTURE_RELEASE.parquet
-#      downloaded if absent (DuckDB → S3, minutes per region)
+#      downloaded if absent (DuckDB → S3 over HTTPS, minutes per region).
+#      OVERTURE_RELEASE defaults to `latest`, resolved ONCE at queue start
+#      to the newest release with both themes and logged in the start line;
+#      the resolved name keys the cache files for the whole run. To resume a
+#      round with --continue after Overture publishes again, pin the logged
+#      name (OVERTURE_RELEASE=2026-09-23.1 ./build-refresh-queue.sh …).
 #   4. OVERTURE_RELEASE=… ./build-region-fast.sh <id> <bbox> <name>
 #   5. gates, all mandatory except the browser smoke (see --browser-smoke):
 #        terrain coverage (cloud/check_terrain_coverage.py, catches blank land)
@@ -45,7 +50,7 @@ export TMPDIR=/storage/streetzim/tmp
 . ops/region-bbox.sh || exit 1
 
 PLANET="${PLANET:-/storage/streetzim/world-data/planet-2026-08-31.osm.pbf}"
-export OVERTURE_RELEASE="${OVERTURE_RELEASE:-2026-08-19.0}"
+export OVERTURE_RELEASE="${OVERTURE_RELEASE:-latest}"
 # No defaults on purpose. The previous round's world-tiles-v2.mbtiles and
 # world.jsonl are still on disk; defaulting to them would staple an August
 # road graph to March vector tiles and a March POI index, and no gate can
@@ -99,6 +104,15 @@ fail=0
 [ -s "$WORLD_SEARCH" ] || { echo "WORLD_SEARCH missing: $WORLD_SEARCH"; fail=1; }
 [ -s "$REGISTRY" ] || { echo "REGISTRY missing: $REGISTRY"; fail=1; }
 "$PY" -c "import libzim, duckdb, osmium" 2>/dev/null || { echo "venv-linux lacks libzim/duckdb/osmium"; fail=1; }
+# Once per run: every overture_cache/ name and build-region-fast.sh below
+# use this name, so it must not move mid-queue.
+if [ "$OVERTURE_RELEASE" = latest ]; then
+  if OVERTURE_RELEASE=$("$PY" download_overture_data.py addresses places --print-release); then
+    echo "Overture release: latest -> $OVERTURE_RELEASE"
+  else
+    echo "could not resolve OVERTURE_RELEASE=latest (above); pin one: OVERTURE_RELEASE=<release>"; fail=1
+  fi
+fi
 command -v osmium >/dev/null || { echo "osmium not on PATH"; fail=1; }
 [ -x rust/streetzim-pack/target/release/streetzim-pack ] || { echo "streetzim-pack binary missing (cargo build --release in rust/streetzim-pack)"; fail=1; }
 [ -f terrain_cache/dem_sources/comprehensive.vrt ] || { echo "terrain DEM VRT missing (terrain gate needs it)"; fail=1; }
