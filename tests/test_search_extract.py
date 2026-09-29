@@ -146,29 +146,45 @@ def test_raw_key_list_matches_the_tilemaker_profile():
     import re
 
     from streetzim.search_extract import RAW_OSM_KEY_CLASSES
-    lua = (ROOT / "resources/tilemaker/process-openmaptiles.lua").read_text(encoding="utf-8")
-    assert "class = poiClasses[v] or k" in lua
-    defs = list(re.finditer(r"^poiTags\s*=\s*\{", lua, re.M))
-    assert len(defs) == 1
+    src = (ROOT / "resources/tilemaker/process-openmaptiles.lua").read_text(encoding="utf-8")
+    # Without comments: --[[ ... ]] / --[==[ ... ]==] blocks, then -- lines.
+    lua = re.sub(r"--\[(=*)\[.*?\]\1\]", "", src, flags=re.S)
+    lua = re.sub(r"--[^\n]*", "", lua)
+    reshape = ("the tilemaker profile's poiTags / GetPOIRank changed shape; "
+               "re-check RAW_OSM_KEY_CLASSES in streetzim/search_extract.py "
+               "and update this test")
+    assert re.search(r"class\s*=\s*poiClasses\[v\]\s+or\s+k\b", lua), (
+        f"{reshape}: GetPOIRank's `class = poiClasses[v] or k` fallback is gone")
+    defs = list(re.finditer(r"^[ \t]*(?:local\s+)?poiTags\s*=\s*\{", lua, re.M))
+    assert len(defs) == 1, f"{reshape}: poiTags is defined {len(defs)} times"
     start = defs[0].start()
-    block = lua[start:lua.index("poiClasses", start)]
+    end = lua.find("poiClasses", start)
+    assert end > start, f"{reshape}: poiClasses no longer follows poiTags"
+    block = lua[start:end]
     # Keys as `amenity = Set {` or `["amenity"] = Set {`.
-    keys = set(re.findall(
-        r"""(?:\b(\w+)|\[\s*["'](\w+)["']\s*\])\s*=\s*Set\s*\{""", block))
-    keys = {a or b for a, b in keys}
-    assert "amenity" in keys and "tourism" in keys
+    keys = {a or b for a, b in re.findall(
+        r"""(?:\b(\w+)|\[\s*["'](\w+)["']\s*\])\s*=\s*Set\s*\{""", block)}
+    keys.discard("poiTags")
+    assert "amenity" in keys and "tourism" in keys, (
+        f"{reshape}: read poiTags keys {sorted(keys)}")
     # No key added to poiTags anywhere else (poiTags.x = / poiTags["x"] =),
     # which the block above would miss: the table is defined once and
     # otherwise only iterated.
-    assert not re.search(r"poiTags\s*(?:\.\s*\w+|\[[^\]]*\])\s*=", lua)
-    assert len(re.findall(r"\bpoiTags\b", lua)) == 1 + len(
-        re.findall(r"pairs\(\s*poiTags\s*\)", lua))
+    later = re.findall(r"poiTags\s*(?:\.\s*\w+|\[[^\]]*\])\s*=", lua)
+    assert not later, f"{reshape}: poiTags is assigned to later: {later}"
+    uses = len(re.findall(r"\bpoiTags\b", lua))
+    iterations = len(re.findall(r"pairs\(\s*poiTags\s*\)", lua))
+    assert uses == 1 + iterations, (
+        f"{reshape}: poiTags is used other than defined once and iterated")
     # Real OpenMapTiles classes: Planetiler writes them too (OpenFreeMap's
     # Monaco tiles have shop, railway and office POIs), so they stay as the
     # subtype. The profile has no office key today; office is listed so
     # adding one would not turn it into a raw key and change OpenFreeMap.
     omt_classes = {"shop", "railway", "aerialway", "office"}
-    assert keys - omt_classes == RAW_OSM_KEY_CLASSES
+    assert keys - omt_classes == RAW_OSM_KEY_CLASSES, (
+        f"{reshape}: poiTags keys that are not OpenMapTiles classes are "
+        f"{sorted(keys - omt_classes)}, RAW_OSM_KEY_CLASSES is "
+        f"{sorted(RAW_OSM_KEY_CLASSES)}")
     assert not RAW_OSM_KEY_CLASSES & omt_classes
 
 

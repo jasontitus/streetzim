@@ -892,6 +892,9 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
                     rec[k] = v
             if extra.get("cat") and _overture_may_refine(rec):
                 rec["subtype"] = extra["cat"]
+                # Refined: no longer a generic bucket, so a second merge
+                # leaves it alone, as it did when the subtype was the key.
+                rec.pop("osm_key", None)
             out.write(json.dumps(rec, separators=(",", ":"),
                                  ensure_ascii=False))
             out.write("\n")

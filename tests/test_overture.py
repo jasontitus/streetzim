@@ -576,9 +576,39 @@ def test_merge_overture_places_refines_by_tile_source(
     jsonl = tmp_path / "feed.jsonl"
     _write_jsonl(str(jsonl), [search_record("Da Mario", "poi", props, 43.73, 7.42)])
     merge_overture_places(str(parquet), str(jsonl))
-    rec = [json.loads(l) for l in open(jsonl) if l.strip()][0]
+    rows = [json.loads(l) for l in open(jsonl) if l.strip()]
+    assert len(rows) == 1, "enriched in place, not added"
+    rec = rows[0]
     assert rec["subtype"] == subtype_after, source
     assert rec["cat"] == "italian_restaurant"
+
+
+def test_merge_overture_places_twice_is_a_no_op_for_raw_key_records(
+    duckdb_available, tmp_path
+):
+    # The first merge refines a tilemaker amenity=restaurant and drops
+    # osm_key; a second merge (another Overture category for the same
+    # place) must not refine it again, as when its subtype was "amenity".
+    from streetzim.search_extract import search_record
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [search_record(
+        "Da Mario", "poi", {"class": "amenity", "subclass": "restaurant"},
+        43.73, 7.42)])
+    first = tmp_path / "ov1.parquet"
+    _write_places_parquet(str(first), [{
+        "name": "Da Mario", "category": "italian_restaurant",
+        "lat": 43.73, "lon": 7.42}])
+    merge_overture_places(str(first), str(jsonl))
+    once = open(jsonl, encoding="utf-8").read()
+    rec = json.loads(once)
+    assert rec["subtype"] == "italian_restaurant"
+    assert "osm_key" not in rec
+    second = tmp_path / "ov2.parquet"
+    _write_places_parquet(str(second), [{
+        "name": "Da Mario", "category": "pizza_restaurant",
+        "lat": 43.73, "lon": 7.42}])
+    merge_overture_places(str(second), str(jsonl))
+    assert open(jsonl, encoding="utf-8").read() == once
 
 
 def test_overture_may_refine():
@@ -758,3 +788,88 @@ def test_merge_overture_preserves_existing_feed_rows(duckdb_available, tmp_path)
     after = pathlib.Path(jsonl).read_text(encoding="utf-8")
     # Original lines must still appear verbatim as the file prefix.
     assert after.startswith(before), "merge must not rewrite existing rows"
+
+
+# ---------------------------------------------------------------------------
+# osm_key: tilemaker's raw-key class survives extraction for this merge.
+# ---------------------------------------------------------------------------
+
+# Tile 14/8529/5973 covers Monaco; MVT coordinates are 0..4096 in tile space.
+_OSM_KEY_TILE = (14, 8529, 5973)
+_OSM_KEY_POIS = [
+    # tilemaker: no OpenMapTiles class for amenity=restaurant.
+    {"name": "Da Mario", "class": "amenity", "subclass": "restaurant"},
+    # OpenFreeMap / Planetiler: the class is already specific.
+    {"name": "Chez Paul", "class": "restaurant", "subclass": "restaurant"},
+]
+
+
+def _osm_key_tile():
+    import gzip
+    mvt = pytest.importorskip("mapbox_vector_tile")
+    return gzip.compress(mvt.encode([{"name": "poi", "features": [
+        {"geometry": f"POINT({1000 + 1000 * i} 2000)", "properties": p}
+        for i, p in enumerate(_OSM_KEY_POIS)]}]))
+
+
+def _extract_streaming(tmp_path) -> list[dict]:
+    """extract_searchable_features(mbtiles_path=...), as builds call it
+    (the _process_tile_partition workers), in a subprocess because spawn
+    workers need an importable __main__."""
+    import sqlite3
+    import subprocess
+    import textwrap
+    mbtiles = tmp_path / "t.mbtiles"
+    con = sqlite3.connect(mbtiles)
+    con.execute("CREATE TABLE metadata (name TEXT, value TEXT)")
+    con.execute("CREATE TABLE tiles (zoom_level INT, tile_column INT, "
+                "tile_row INT, tile_data BLOB)")
+    z, x, y = _OSM_KEY_TILE
+    con.execute("INSERT INTO tiles VALUES (?, ?, ?, ?)",
+                (z, x, (1 << z) - 1 - y, _osm_key_tile()))
+    con.commit()
+    con.close()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    script = tmp_path / "run.py"
+    script.write_text(textwrap.dedent(f"""
+        import sys
+        sys.path.insert(0, {str(_REPO_ROOT)!r})
+        from streetzim.search_extract import extract_searchable_features
+        if __name__ == "__main__":
+            print("PATH=" + extract_searchable_features(
+                mbtiles_path={str(mbtiles)!r}, output_dir={str(out_dir)!r}))
+    """))
+    res = subprocess.run([sys.executable, str(script)], capture_output=True,
+                         text=True, timeout=300)
+    assert res.returncode == 0, res.stderr[-2000:]
+    path = [l for l in res.stdout.splitlines() if l.startswith("PATH=")][0][5:]
+    return [json.loads(l) for l in open(path, encoding="utf-8")]
+
+
+def test_streaming_extraction_writes_osm_key_and_overture_refines(
+    duckdb_available, tmp_path
+):
+    recs = {r["name"]: r for r in _extract_streaming(tmp_path)}
+    assert recs["Da Mario"]["subtype"] == "restaurant"
+    assert recs["Da Mario"]["osm_key"] == "amenity"
+    assert "osm_key" not in recs["Chez Paul"]
+
+    jsonl = tmp_path / "feed.jsonl"
+    # Written as extraction writes it (compact: the merge pre-filters on
+    # '"type":"poi"').
+    jsonl.write_text("".join(json.dumps(r, separators=(",", ":")) + "\n"
+                             for r in recs.values()))
+    parquet = tmp_path / "ov.parquet"
+    _write_places_parquet(str(parquet), [
+        {"name": r["name"], "category": "italian_restaurant",
+         "lat": r["lat"], "lon": r["lon"]} for r in recs.values()])
+    merge_overture_places(str(parquet), str(jsonl))
+    after_rows = [json.loads(l) for l in open(jsonl, encoding="utf-8")]
+    assert len(after_rows) == 2, "both must be enriched in place, not added"
+    after = {r["name"]: r for r in after_rows}
+    # The tilemaker record is refined, as when its subtype was "amenity";
+    # the OpenFreeMap one keeps its specific class.
+    assert after["Da Mario"]["subtype"] == "italian_restaurant"
+    assert after["Chez Paul"]["subtype"] == "restaurant"
+    assert "osm_key" not in after["Da Mario"]
