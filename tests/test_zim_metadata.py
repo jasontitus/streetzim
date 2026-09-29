@@ -78,10 +78,21 @@ def test_illustration_becomes_48x48_png(size, fmt):
     assert (img.format, img.size) == ("PNG", (48, 48))
 
 
-def test_illustration_rejects_svg_and_garbage(tmp_path):
-    with pytest.raises(ValueError, match="SVG"):
-        zm.illustration_png(b'<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"/>')
-    with pytest.raises(ValueError, match="not a readable image"):
+SVG = (b'<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="20" '
+       b'height="10"><rect width="20" height="10" fill="red"/></svg>')
+
+
+def test_illustration_svg_and_garbage(tmp_path):
+    from streetzim import scraperlib
+    if scraperlib.AVAILABLE:
+        # zimscraperlib converts SVG (cairosvg), as maps2zim's illustration does.
+        from PIL import Image
+        img = Image.open(io.BytesIO(zm.illustration_png(SVG)))
+        assert (img.format, img.size) == ("PNG", (48, 48))
+    else:
+        with pytest.raises(ValueError, match="SVG"):
+            zm.illustration_png(SVG)
+    with pytest.raises(ValueError, match="not a (readable|usable) image"):
         zm.illustration_png(b"not an image")
     p = tmp_path / "i.png"
     p.write_bytes(_png((64, 64)))

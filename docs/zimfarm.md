@@ -13,6 +13,11 @@ docker run --rm -v "$PWD/out:/output" streetzim \
     --output /output --stats-filename /output/task_progress.json
 ```
 
+The image is Python 3.14 on Debian trixie, like openZIM's scrapers, so
+zimscraperlib is installed and `streetzim` uses it for the metadata rules,
+the illustration (PNG, JPEG, WebP or SVG, cropped to 48x48), downloads and
+the output-folder check. The ZIM itself is written with python-libzim.
+
 ## The default profile
 
 | | default | how |

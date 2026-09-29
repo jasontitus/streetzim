@@ -63,7 +63,7 @@
       "type": "url",
       "required": false,
       "title": "Illustration URL",
-      "description": "URL (or path) of a PNG, JPEG or WebP used for the ZIM illustration. Default: a generated map icon"
+      "description": "URL (or path) of a PNG, JPEG, WebP or SVG (SVG needs zimscraperlib, as in the Docker image) used for the ZIM illustration. Default: a generated map icon"
     },
     "output": {
       "type": "string",

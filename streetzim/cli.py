@@ -112,7 +112,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "are replaced. Default: {name}_{period}")
     p.add_argument("--tags", help="Semicolon (;) delimited list of tags to add to the ZIM")
     p.add_argument("--illustration-url",
-                   help="URL (or path) of a PNG, JPEG or WebP used for the ZIM "
+                   help="URL (or path) of a PNG, JPEG, WebP or SVG (SVG needs "
+                        "zimscraperlib, as in the Docker image) used for the ZIM "
                         "illustration. Default: a generated map icon")
     p.add_argument("--output", default=os.environ.get("STREETZIM_OUTPUT", "output"),
                    help="Output folder for the ZIM. Default: ./output")
@@ -277,9 +278,13 @@ def fetch(url: str, dest: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
     print(f"  Downloading {url}")
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=60) as r, open(part, "wb") as f:
-        shutil.copyfileobj(r, f, 1 << 20)
+    from streetzim import scraperlib
+    if scraperlib.AVAILABLE and not url.startswith("file://"):
+        scraperlib.download(url, user_agent=USER_AGENT, dest=part)   # retries
+    else:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=60) as r, open(part, "wb") as f:
+            shutil.copyfileobj(r, f, 1 << 20)
     os.replace(part, dest)
     if stamp is not None:
         meta.write_text(json.dumps(stamp))
@@ -432,6 +437,18 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     if final.exists() and not args.overwrite:
         return _error(f"{final} exists (use --overwrite)")
+    # The build writes <final>.tmp. Check that name, not the final one: the
+    # check creates and deletes the file it is given.
+    building = final.with_name(final.name + ".tmp")
+    try:
+        from streetzim import scraperlib
+        if scraperlib.AVAILABLE:
+            scraperlib.check_output(out_dir, building.name)
+        else:
+            with tempfile.NamedTemporaryFile(dir=out_dir):
+                pass
+    except OSError as e:
+        return _error(f"cannot write to {out_dir}: {e}")
     if args.stats_filename:
         # Before the downloads, which can take a while on big regions.
         from streetzim.progress import StatsFile
@@ -445,7 +462,6 @@ def main(argv: list[str] | None = None) -> int:
     # Build next to the target and rename at the end, so a failed or
     # interrupted run never leaves (or replaces) a .zim in the output folder.
     # (libzim itself writes <path>.tmp and renames it when it finishes.)
-    building = final.with_name(final.name + ".tmp")
     for stale in (building, building.with_name(building.name + ".tmp")):
         stale.unlink(missing_ok=True)       # left by an interrupted run
     build_args += ["-o", str(building)]

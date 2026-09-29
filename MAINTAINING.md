@@ -75,6 +75,15 @@ CI (`.github/workflows/ci.yml`) runs all of that, then builds Monaco end to
 end, validates it (including `zimcheck`) and loads the in-ZIM viewer in
 headless Chrome. It also runs weekly, to catch upstream drift.
 
+**Python versions.** The builder runs on 3.12 (the production host) and 3.14
+(the Docker image and openZIM's scrapers). On 3.14 `requirements.txt` also
+installs zimscraperlib, and the `streetzim` command uses it
+(`streetzim/scraperlib.py`); on 3.12 `streetzim/zim_metadata.py` applies its
+own copy of the same metadata rules. CI runs the unit tests on both, and
+`tests/test_scraperlib_parity.py` fails on 3.14 if the copy and zimscraperlib
+disagree. Keep the builder itself 3.12-compatible until the production host
+moves.
+
 Rules that keep published ZIMs working:
 
 - **Formats are frozen.** A change to any binary or JSON layout gets a new

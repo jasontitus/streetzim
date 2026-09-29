@@ -1,4 +1,6 @@
-# StreetZim builder image: tilemaker 3, osmium and the Python stack (libzim).
+# StreetZim builder image: tilemaker 3, osmium and the Python stack (libzim),
+# on Python 3.14 like openZIM's scrapers, so zimscraperlib is installed and
+# the `streetzim` command uses it (see streetzim/scraperlib.py).
 #
 #   docker build -t streetzim .
 #   docker run --rm -v "$PWD/out:/output" streetzim \
@@ -11,7 +13,7 @@
 #   docker run --rm -v "$PWD/out:/output" streetzim scripts/fetch-shapefiles.sh /output
 # Builds from OpenFreeMap tiles (--mbtiles) need neither tilemaker nor shapefiles.
 
-FROM ubuntu:24.04 AS tilemaker
+FROM debian:trixie-slim AS tilemaker
 ARG TILEMAKER_REF=v3.0.0
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential cmake git ca-certificates \
@@ -22,12 +24,15 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && cmake -S /src/tilemaker -B /src/tilemaker/build -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /src/tilemaker/build -j"$(nproc)"
 
-FROM ubuntu:24.04
+# Same Debian release as the tilemaker stage, so its shared libraries match.
+FROM python:3.14-slim-trixie
 LABEL org.opencontainers.image.source=https://github.com/jasontitus/streetzim
+# libmagic and cairo are for zimscraperlib (file types, SVG illustrations).
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        python3 python3-venv ca-certificates curl unzip osmium-tool \
+        ca-certificates curl unzip osmium-tool \
         libboost-filesystem1.83.0 libboost-iostreams1.83.0 \
         libboost-program-options1.83.0 liblua5.1-0 libshp4 libsqlite3-0 \
+        libmagic1t64 libcairo2 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=tilemaker /src/tilemaker/build/tilemaker /usr/local/bin/tilemaker
 

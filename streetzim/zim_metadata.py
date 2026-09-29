@@ -1,10 +1,11 @@
 """openZIM metadata rules for the flags --title, --description, --tags, ...
 
-These mirror zimscraperlib 5.4 (zimscraperlib/zim/metadata.py), which
-maps2zim uses. We don't depend on zimscraperlib itself: every 5.x release
-requires Python 3.14, while this builder runs on Ubuntu 24.04's 3.12 with
-rasterio and osmium. When the image moves to 3.14 this module can become a
-thin wrapper around zimscraperlib.
+Where zimscraperlib is installed (Python 3.14: the Docker image, CI's 3.14
+job) the checks are zimscraperlib's own, through streetzim.scraperlib. On
+3.12, where the builder also runs and zimscraperlib 5.x cannot be installed,
+this module applies its copy of the same rules (zimscraperlib 5.4,
+zimscraperlib/zim/metadata.py). tests/test_scraperlib_parity.py runs both on
+the same inputs under 3.14 and fails if they disagree.
 
 Validation runs when the flags are parsed, so a bad title fails in a second,
 not after a multi-hour build. Nothing here is imported on the default build
@@ -20,6 +21,7 @@ TITLE_MAX = 30
 DESCRIPTION_MAX = 80
 LONG_DESCRIPTION_MAX = 4000
 ILLUSTRATION_SIZE = 48
+USER_AGENT = "streetzim (https://github.com/jasontitus/streetzim)"
 
 
 def nb_graphemes(value: str) -> int:
@@ -52,6 +54,25 @@ def parse_tags(value: str) -> list[str]:
     return list(dict.fromkeys(tags))
 
 
+def _scraperlib() -> bool:
+    from streetzim import scraperlib
+    return scraperlib.AVAILABLE
+
+
+def _check(label: str, value: str, max_len: int = 0) -> str:
+    if _scraperlib():
+        from streetzim import scraperlib
+        return scraperlib.text(label, value)
+    return _text(label, value, max_len)
+
+
+def _check_tags(value: str) -> list[str]:
+    if _scraperlib():
+        from streetzim import scraperlib
+        return scraperlib.tags(value.split(";"))
+    return parse_tags(value)
+
+
 def build_overrides(*, name: str | None = None, title: str | None = None,
                     description: str | None = None,
                     long_description: str | None = None,
@@ -62,22 +83,22 @@ def build_overrides(*, name: str | None = None, title: str | None = None,
     actually given are returned; the builder keeps its defaults for the rest."""
     md: dict[str, str | list[str]] = {}
     if name is not None:
-        md["Name"] = _text("Name", name)
+        md["Name"] = _check("Name", name)
     if title is not None:
-        md["Title"] = _text("Title", title, TITLE_MAX)
+        md["Title"] = _check("Title", title, TITLE_MAX)
     if description is not None:
-        md["Description"] = _text("Description", description, DESCRIPTION_MAX)
+        md["Description"] = _check("Description", description, DESCRIPTION_MAX)
     if long_description is not None:
-        md["LongDescription"] = _text("LongDescription", long_description,
+        md["LongDescription"] = _check("LongDescription", long_description,
                                       LONG_DESCRIPTION_MAX)
     if creator is not None:
-        md["Creator"] = _text("Creator", creator)
+        md["Creator"] = _check("Creator", creator)
     if publisher is not None:
-        md["Publisher"] = _text("Publisher", publisher)
+        md["Publisher"] = _check("Publisher", publisher)
     if tags is not None:
-        md["Tags"] = parse_tags(tags)
+        md["Tags"] = _check_tags(tags)
     if scraper is not None:
-        md["Scraper"] = _text("Scraper", scraper)
+        md["Scraper"] = _check("Scraper", scraper)
     return md
 
 
@@ -93,8 +114,12 @@ def merge_tags(builder_tags: str, extra: list[str] | None) -> str:
 
 
 def illustration_png(data: bytes) -> bytes:
-    """Any image Pillow can read -> a 48x48 PNG, cropped to fill ("cover",
-    as maps2zim does). SVG is not supported (it would need cairosvg)."""
+    """An image -> a 48x48 PNG, cropped to fill ("cover", as maps2zim does).
+    With zimscraperlib, anything it reads, SVG included; without it, what
+    Pillow reads (no SVG)."""
+    if _scraperlib():
+        from streetzim import scraperlib
+        return scraperlib.illustration_png(data, ILLUSTRATION_SIZE)
     from PIL import Image, ImageOps
     if data.lstrip()[:5] in (b"<?xml", b"<svg ") or b"<svg" in data[:512]:
         raise ValueError("Illustration: SVG is not supported; give a PNG, JPEG or WebP")
@@ -112,10 +137,12 @@ def illustration_png(data: bytes) -> bytes:
 
 def load_illustration(src: str, *, timeout: int = 30) -> bytes:
     """Read an illustration from a local path, file:// or http(s) URL."""
-    if re.match(r"^https?://", src, re.I):
+    if re.match(r"^https?://", src, re.I) and _scraperlib():
+        from streetzim import scraperlib
+        data = scraperlib.download(src, user_agent=USER_AGENT) or b""
+    elif re.match(r"^https?://", src, re.I):
         import urllib.request
-        req = urllib.request.Request(src, headers={
-            "User-Agent": "streetzim (https://github.com/jasontitus/streetzim)"})
+        req = urllib.request.Request(src, headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             data = r.read()
     else:

@@ -12,7 +12,7 @@ which covers the other route: porting features into maps2zim.
 | 2 | Remove the hosting/operations layer | **Separated, not removed yet.** 31 dead scripts retired to `attic/`; the 42 live ones are catalogued in [scripts.md](scripts.md). Next step below. |
 | 3 | Replace zimru/xapianbuilder with libzim, or bring them under openZIM | **Done.** libzim is the default; CI builds, rewrites and serves ZIMs with libzim, zim-tools and kiwix-tools only. The Rust packer is an optional speed-up. |
 | 4 | Freeze and document the binary formats; drop legacy versions | **Documented and frozen** ([formats.md](formats.md), [search-records.md](search-records.md)). **The builder writes only current versions** (legacy writers retired); the legacy *readers* stay while published ZIMs need them, each listed in formats.md with its removal condition. |
-| 5 | openZIM conventions: CLI, metadata, illustration, Zimfarm progress file, `offliner-definition.json`, Docker image, typing, linting, CI | **Done.** `streetzim` command with maps2zim's flags and zimscraperlib's metadata rules, progress file, generated `offliner-definition.json` (validated against Zimfarm's schema), `pyproject.toml`, pyright (strict on the pure modules, no new findings elsewhere), pyflakes on the whole tree. Zimfarm-side registration steps: [zimfarm.md](zimfarm.md). |
+| 5 | openZIM conventions: CLI, metadata, illustration, Zimfarm progress file, `offliner-definition.json`, Docker image, typing, linting, CI | **Done.** `streetzim` command with maps2zim's flags and zimscraperlib (on Python 3.14, as in the image; a tested copy of its metadata rules on 3.12), progress file, generated `offliner-definition.json` (validated against Zimfarm's schema), `pyproject.toml`, pyright (strict on the pure modules, no new findings elsewhere), pyflakes on the whole tree. Zimfarm-side registration steps: [zimfarm.md](zimfarm.md). |
 | 6 | tilemaker/osmium/GDAL in the image; fit Zimfarm resources | **Done.** tilemaker 3 and osmium are in the image, GDAL arrives as rasterio wheels, and build costs are measured for three regions in [zimfarm.md](zimfarm.md). |
 | 7 | Drop or replace the non-commercial satellite layer | **Done for openZIM.** `streetzim` never offers it; `License` metadata and the viewer's credits list only the layers a ZIM contains. StreetZim's own builds keep it opt-in. |
 
@@ -56,9 +56,12 @@ Order, because the build host runs these by absolute path:
   checks on the production host, which runs them by path.
 - **Zimfarm registration**: an image name, the progress-capable list and the
   definition-upload secret are on openZIM's side ([zimfarm.md](zimfarm.md)).
-- **zimscraperlib**: our metadata rules mirror it because its 5.x releases
-  need Python 3.14; switch once the image does.
-- **The pyright baseline** (41 findings in older modules) only shrinks:
+- **zimscraperlib's `Creator`**: the image runs Python 3.14 and the
+  `streetzim` command uses zimscraperlib for metadata rules, the illustration
+  (SVG included), downloads and the output-folder check. The ZIM is still
+  written with python-libzim's `Creator` directly: moving the writer to
+  zimscraperlib's needs the 3.12 production host to move to 3.14 first.
+- **The pyright baseline** (39 findings in older modules) only shrinks:
   fix them as those files are touched.
 
 ## Would it be worth it?

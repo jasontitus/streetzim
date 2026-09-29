@@ -640,8 +640,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     meta.add_argument("--tags", help="Extra tags, semicolon-delimited; added "
                                      "after the builder's own")
     meta.add_argument("--illustration", metavar="PATH_OR_URL",
-                      help="Image for the 48x48 ZIM illustration (PNG, JPEG or "
-                           "WebP; cropped to fill). Default: a generated map icon")
+                      help="Image for the 48x48 ZIM illustration (PNG, JPEG, "
+                           "WebP, or SVG where zimscraperlib is installed; cropped "
+                           "to fill). Default: a generated map icon")
     meta.add_argument("--scraper", help=argparse.SUPPRESS)
     meta.add_argument("--stats-filename", metavar="PATH",
                       help="Write Zimfarm progress JSON ({\"done\": N, "

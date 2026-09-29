@@ -1,5 +1,6 @@
-# Four jobs (docker builds the image and runs `streetzim` in it as Zimfarm would):
+# Five jobs (docker builds the image and runs `streetzim` in it as Zimfarm would):
 #   checks     - lint gate, Python unit tests, Node viewer/PWA tests. Fast, offline.
+#   python-3-14 - the unit tests on Python 3.14 with zimscraperlib installed.
 #   openfreemap-tiles - builds from the same OpenFreeMap MBTiles openzim/maps
 #                uses (no tilemaker), validates, and loads it through kiwix-serve.
 #   monaco-e2e - builds a real Monaco ZIM from Geofabrik with tilemaker v3 and the
@@ -75,6 +76,29 @@ jobs:
             node "$t"
             echo "::endgroup::"
           done
+
+  python-3-14:
+    # openZIM's scrapers and the Docker image run Python 3.14, where
+    # zimscraperlib is installed and the `streetzim` command uses it; the
+    # other jobs run 3.12 (the production host), where it is not. This runs
+    # the unit tests with zimscraperlib, including the check that
+    # streetzim/zim_metadata.py's copy of its rules still agrees with it.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install dependencies (zimscraperlib needs libmagic and cairo)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libmagic1t64 libcairo2
+          pip install -r requirements.txt
+          python -c "from streetzim import scraperlib; assert scraperlib.AVAILABLE"
+      - name: Python tests
+        run: python -m pytest tests -q
 
   monaco-e2e:
     runs-on: ubuntu-24.04
@@ -300,14 +324,19 @@ jobs:
         run: |
           mkdir -p out && chmod 777 out
           python3 scripts/fetch-openfreemap-mbtiles.py monaco -o out/monaco.mbtiles
+          # An SVG illustration: zimscraperlib (Python 3.14 in the image) converts it.
+          printf '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><rect width="64" height="32" fill="#2a7"/></svg>' > out/icon.svg
           docker run --rm -v "$PWD/out:/output" streetzim \
             streetzim --name osm_en_monaco-docker --title Monaco \
             --description "Offline map of Monaco with search" \
+            --illustration-url /output/icon.svg \
             --bbox 7.40,43.72,7.44,43.76 --mbtiles /output/monaco.mbtiles --no-routing \
             --output /output --stats-filename /output/task_progress.json \
             --file-name osm-monaco-docker
-      - name: tilemaker works in the image
-        run: docker run --rm streetzim tilemaker --help | head -3
+      - name: tilemaker works in the image; the image uses zimscraperlib
+        run: |
+          docker run --rm streetzim tilemaker --help | head -3
+          docker run --rm streetzim python -c "import sys; from streetzim import scraperlib; assert scraperlib.AVAILABLE, 'zimscraperlib missing'; print(sys.version)"
       - name: Validate the ZIM
         run: |
           pip install -q -r requirements.txt
