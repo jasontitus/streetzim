@@ -27,14 +27,15 @@ turns off everything below that says "full".
 
 | | default | how |
 |---|---|---|
-| Vector tiles | built with tilemaker from the OSM extract | or `--mbtiles` for ready-made OpenMapTiles (e.g. OpenFreeMap) |
+| Vector tiles | built with tilemaker from the OSM extract | or `--mbtiles-url` for a ready-made OpenMapTiles MBTiles, e.g. OpenFreeMap's ([below](#building-from-ready-made-tiles---mbtiles-url)); `--mbtiles` for a local file (command line only) |
 | Search over every named feature, Find chips, places list | on | always |
 | Offline routing (drive / walk / bike) | on, spatial layout (SZCI v3) | `--no-routing` |
 | Overture Maps addresses and place details | on with full | `--overture` / `--no-overture` (reads Overture's public bucket) |
 | Wikipedia articles (text) | on with full | `--wikipedia` / `--no-wikipedia` (Wikipedia API; images with `--wikipedia-zim-url`) |
 | Wikidata place details | on with full | `--wikidata` / `--no-wikidata` (queries Wikidata) |
 | Terrain / hillshade | off | `--terrain` (downloads Copernicus DEM tiles) |
-| Satellite imagery | **never** | not offered: the imagery is CC BY-NC-SA |
+| POIs in Kiwix's own search | on with full (without it, Kiwix's full-text search covers places, parks, peaks, water and airports) | `--kiwix-poi-pages` / `--kiwix-poi-pages=off` ([below](#pois-in-kiwixs-own-search---kiwix-poi-pages)) |
+| Satellite imagery | **off**; opt-in | `--satellite`: EOX Sentinel-2 cloudless 2016, **CC BY 4.0**. The 2021 mosaic, **CC BY-NC-SA 4.0 (non-commercial)**, only with `--satellite-source s2cloudless-2021 --satellite-accept-noncommercial`, as a variant labelled restricted ([below](#satellite-imagery)) |
 
 The area is exactly one of `--area` (a preset), `--include-poly` (a `.poly`
 URL; a Geofabrik one also selects its extract) or `--bbox`. Areas are
@@ -63,6 +64,46 @@ polygon. So:
 
 `License` metadata and the viewer's credits list only the sources a ZIM
 actually contains.
+
+### POIs in Kiwix's own search (`--kiwix-poi-pages`)
+
+The map's own search (the search box, Find chips, places list) covers every
+named feature. Kiwix's search, the one in the Kiwix app's bar and on
+kiwix-serve, only sees the features that have a detail page
+(`search/<slug>.html`): places, parks, peaks, water and airports. Without
+the flag, "Casino" on the Monaco ZIM finds the Fontaine du Casino and not
+the Casino, the shops or the bus stops named after it.
+`--kiwix-poi-pages` gives every named POI a page too, which Kiwix's
+full-text search and its title suggestions both find. It costs about 440 B
+per POI: roughly 40 B of compressed page, 80 B of directory entry and
+pointers, 125 B of full-text index and 195 B of title index. Measured on
+2026-09-29 with what is now `--profile basic`:
+
+| area | POI pages | ZIM | build time |
+|---|---|---|---|
+| Monaco (`--area monaco`) | +1,812 | 2.90 -> 3.70 MB (+28%) | within noise |
+| Luxembourg | +21,214 | 56.7 -> 66.0 MB (+16%) | within noise |
+| Switzerland (from its POI count) | +274,806 | about +121 MB on 624 MB (+19%) | |
+| Netherlands (from its POI count) | +324,793 | about +143 MB on 1,164 MB (+12%) | |
+
+Without the flag the pages that exist anyway (places, parks, peaks, water,
+airports) are in the title index too; that costs Monaco 15 KB (+0.5%) and
+Luxembourg 1.2 MB for 7,984 pages (+2.2%).
+
+The search pages are front articles (that is what puts them in the title
+index), so they count as the ZIM's articles: the "articles" number in the
+Kiwix library and the ZIM's article count are the main page plus one per
+search page. Monaco: 1 before this change, 18 without the flag, 1,830 with
+it; Luxembourg: 1, 7,985 and 29,199. `M/Counter` (entries by MIME type) and
+zimcheck's output do not change. Kiwix's "random article" can now open a
+search page (a place's detail page with "Directions to here" and "View on
+map").
+
+`--profile full` turns it on, so a full-profile ZIM carries the cost above
+(about +12% to +19% for a country, +28% for Monaco); `--profile basic`
+leaves it off. Like every profile feature it is an on/off choice
+(`--kiwix-poi-pages=off`; an enum in offliner-definition.json), unset
+meaning "as the profile says".
 
 ## Profiles
 
@@ -93,9 +134,10 @@ Each feature is one flag with three states: on (`--x`, `--x=on`), off
 (`--x=off`, `--no-x`), or not given, when the profile decides. Saying both
 on and off is refused before anything is downloaded, and flag names cannot
 be abbreviated. Two features come from other branches and join the
-profile when their flag exists: `--terrain` once it can also be turned off
-(`--no-terrain`, topic-terrain-openzim; the older `--terrain` on `next`
-keeps its default, off), and `--kiwix-poi-pages` (topic-viewer-polish).
+profile when their flag exists: `--kiwix-poi-pages` (now on `next`), and
+`--terrain` once it can also be turned off (`--no-terrain`,
+topic-terrain-openzim; the older `--terrain` on `next` keeps its default,
+off, under either profile until then).
 `add_profile_arguments` in `streetzim/cli.py` turns such a flag into the
 same three-state flag.
 
@@ -203,6 +245,190 @@ Wikimedia APIs were rate limiting on 2026-09-29, so the `full` Monaco
 builds measured below got only part of their articles; that is the
 sandbox's IP, not the flag.
 
+### What CI checks
+
+- Per push, the `docker` job builds Monaco with `--profile full` inside the
+  image, as a non-root user (`--user`) and with `--network none`, from
+  `tests/fixtures/monaco-full`: the extract, Overture parquets of a pinned
+  release, and the Wikidata and Wikipedia caches of a live run
+  (`SOURCES.txt` there says how to refresh them). So it tests the code and
+  the image (DuckDB extensions in `/opt/duckdb-ext`), not the APIs, and
+  takes about 20 s outside Docker. `tools/check_full_profile.py` then
+  checks that `map-config.json` has `hasOvertureAddresses`, `hasWikidata`
+  and `hasWikiArticles` and that `License` credits Overture and Wikipedia.
+- Weekly and on demand, `live-full` builds the same with the live sources
+  and runs the same check with `--soft-wikimedia`: Overture must work,
+  Wikidata and Wikipedia only warn.
+- `monaco-e2e` builds `--profile basic` from Geofabrik, and the Zimfarm
+  schema step runs recipes for both profiles through Zimfarm's own models.
+
+## Satellite imagery
+
+Off by default, and one flag to turn on. The imagery is EOX's Sentinel-2
+cloudless mosaic ("EOxCloudless"), which EOX licenses **per year**:
+
+| `--satellite-source` | EOX WMTS layer | licence | use | flag(s) |
+|---|---|---|---|---|
+| `s2cloudless-2016` (default) | `s2cloudless_3857` | **CC BY 4.0** | any, with attribution | `--satellite` |
+| `s2cloudless-2021` | `s2cloudless-2021_3857` | **CC BY-NC-SA 4.0** | non-commercial only | `--satellite-source s2cloudless-2021 --satellite-accept-noncommercial` |
+
+Why the 2021 mosaic stays off in openZIM's main distribution: NC-SA forbids
+commercial use of the imagery and of anything adapted from it, and passes
+that on to everyone downstream. openZIM's ZIMs are mirrored, bundled and
+resold by others (device makers, library projects, app stores), so a ZIM with
+NC imagery cannot go wherever the rest of openZIM's catalogue goes. That is a
+reason to keep it out of the default and to label it clearly when it is in,
+not a reason to make it unavailable: for non-commercial users it is the better
+imagery. A freely licensed source (2016) has no such restriction and needs no
+acknowledgement.
+
+### The licences, from EOX's own pages
+
+Checked on 2026-09-29 (copies of the pages were kept with the evidence for
+this change):
+
+- <https://cloudless.eox.at/license-non-commercial> (EOX's "License
+  Non-Commercial" page):
+  - "The conditions for use are the attribution when publishing any imagery
+    or content from EOxCloudless WM(T)S layers as well as the non-commercial
+    use for the 2018 - 2025 data."
+  - "For the years 2018 to 2025, EOxCloudless WM(T)S layers is licensed under
+    the Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+    International License."
+  - "For the year 2016, EOxCloudless is licensed under the Creative Commons
+    Attribution 4.0 International License."
+  - Required attribution, 2016: "EOxCloudless https://cloudless.eox.at by EOX
+    IT Services GmbH (Contains modified Copernicus Sentinel data 2016 &
+    2017)"; 2021: "… (Contains modified Copernicus Sentinel data 2021)"; 2018:
+    "… (Contains modified Copernicus Sentinel data 2017 & 2018)"; the other
+    years name their own year.
+  - "The attribution shall be displayed legibly and in proximity to the usage".
+- <https://tiles.maps.eox.at/wmts/1.0.0/WMTSCapabilities.xml>, the layer
+  abstracts:
+  - `s2cloudless_3857` ("Sentinel-2 cloudless layer for 2016 by EOX"):
+    "EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains
+    modified Copernicus Sentinel data 2016) released under Creative Commons
+    Attribution 4.0 International License."
+  - `s2cloudless-2021_3857`: "… (Contains modified Copernicus Sentinel data
+    2021) released under Creative Commons Attribution-NonCommercial-ShareAlike
+    4.0 International License. For commercial usage please see
+    https://cloudless.eox.at"; 2018 to 2025 read the same.
+  - the service's AccessConstraints: "Proper attribution is required for any
+    usage. … Additional restrictions may apply for individual layers as
+    indicated in the respective abstract."
+- <https://cloudless.eox.at/documentation/license> ("License Summary"):
+  "Attribution must be clearly visible wherever the imagery is displayed. For
+  interactive maps, the credit should appear in the map interface. In cases
+  where direct display is not possible, the attribution should be included
+  under credits, data sources, or as a part of metadata." It describes the
+  non-commercial CC BY-NC-SA terms and EOX's commercial licence, and does not
+  mention the 2016 layer; its sub-licensing limits are stated for those two.
+
+`s2maps.eu` now redirects to <https://cloudless.eox.at/preview>.
+
+Notes:
+- The 2016 attribution differs between the two sources ("2016 & 2017" on the
+  licence page, "2016" in the WMTS abstract). StreetZim uses the licence
+  page's, which covers both.
+- The WMTS also serves `s2cloudless-2017_3857`, whose abstract says CC BY 4.0,
+  but the licence page lists no 2017 layer, and the layer has holes (no
+  imagery around Singapore at z10). It is not offered.
+- The 2016 layer is served today as `s2cloudless_3857` (and `s2cloudless`
+  in EPSG:4326), the only yearly layer without a year in its id, in the same
+  `GoogleMapsCompatible` grid as the 2021 layer; Monaco's tiles came back at
+  every zoom to z15. How long EOX has kept that id could not be checked (the
+  Web Archive was not reachable from the build machine), and EOX could
+  rename or retire it: the build log would then warn about every tile it
+  failed to download, and no other year's tiles are used in their place,
+  since each source has its own cache.
+- **Before openZIM publishes 2016-satellite ZIMs widely, get written
+  confirmation from EOX (cloudless@eox.at)** that redistributing the 2016
+  imagery inside ZIMs under CC BY 4.0 is fine. The licence page and the WMTS
+  abstract both say CC BY 4.0 for 2016, but EOX's License Summary page does
+  not carve 2016 out of its general terms (which limit sub-licensing and
+  redistribution), so a short written answer removes the doubt.
+
+### Which is the default, and the quality difference
+
+The default is the most permissive source, 2016. It is usable but older and
+softer: at the viewer's deepest zoom, buildings and streets that are distinct
+in 2021 are blurred, colours are lighter with bluer water, and some tile
+seams show (a straight edge across Monaco at z13-14, patchy sea off Iceland
+at z6). Cloud cover was similar in the places compared (Monaco, Edinburgh,
+Bergen, Singapore, northern Iceland): both are cloud-free composites, with
+snow and glaciers where expected. The 2021 mosaic is sharper, darker and more
+saturated.
+
+### What a satellite ZIM carries
+
+| | `--satellite` (2016, CC BY 4.0) | 2021, CC BY-NC-SA 4.0 (restricted) |
+|---|---|---|
+| Flavour | `satellite` | `satellite-nc` |
+| Tags (added) | `satellite` | `satellite;non-commercial` |
+| File name (default) | `{name}_satellite_{period}.zim` | `{name}_satellite-nc_{period}.zim` |
+| LongDescription | unchanged | ends with "Restricted: the satellite imagery (…) is licensed CC BY-NC-SA 4.0 and may be used for non-commercial purposes only; the rest of this map is openly licensed." (after `--long-description`, or after the Description when there is none) |
+| License | adds "Satellite imagery: CC BY 4.0, <licence URL> (<attribution>)" | opens with "Non-commercial use only: the satellite imagery is CC BY-NC-SA 4.0" and adds "Satellite imagery: CC BY-NC-SA 4.0, non-commercial use only, <licence URL> (<attribution>)" |
+| viewer | Satellite button; while imagery shows, a short linked credit on the map ("© EOxCloudless 2016 by EOX · CC BY 4.0"); EOX's full attribution under Data Sources in About | the same, the map credit ending "(non-commercial)", plus a "Restricted: …" notice at the top of About |
+| `map-config.json` | `satelliteSource`, `satelliteLicense`, `satelliteAttribution`, `satelliteNonCommercial: false` | the same, `satelliteNonCommercial: true` |
+
+Kiwix identifies a book by Name and Flavour, so the variants of one area are
+separate books under the same Name, and a recipe or a library filter can
+pick the restricted ones out by Flavour `satellite-nc` or the tag
+`non-commercial`. Without satellite imagery, Flavour stays `maxi` as before.
+`--file-name` also takes `{flavour}`. `--satellite-max-zoom` caps the imagery
+(default: `--max-zoom`, and z13 for areas centred 45° or more from the
+equator, where Sentinel-2's 10 m pixels make z14 an upscale); like
+`--satellite-source`, it turns the imagery on. `--satellite-accept-noncommercial`
+on its own is refused. A `--long-description` too long to take the
+restricted note is shortened (ending in "…") so the note always fits
+openZIM's 4000 characters. The builder refuses a `--flavour` that
+contradicts its imagery (for example `satellite` with the 2021 layer).
+
+`tools/check_openzim_output.py --satellite SOURCE` checks all of this on a
+built ZIM.
+
+### Recipes
+
+The flags as a Zimfarm recipe's offliner config (dash form, as in step 5 of
+the local run below):
+
+Satellite is outside both profiles, so a recipe adds it to either; the
+recipes without it are in [Profiles](#profiles). `full` plus the freely
+licensed imagery (one flag):
+
+```json
+{"offliner_id": "streetzim", "name": "osm_en_luxembourg", "title": "Luxembourg",
+ "description": "Offline map of Luxembourg with satellite imagery",
+ "include-poly": "https://download.geofabrik.de/europe/luxembourg.poly",
+ "profile": "full", "satellite": true}
+```
+
+Full, restricted: the 2021 imagery, labelled non-commercial (two flags for
+the imagery; `satellite-source` implies `satellite`):
+
+```json
+{"offliner_id": "streetzim", "name": "osm_en_luxembourg", "title": "Luxembourg",
+ "description": "Offline map of Luxembourg with satellite imagery",
+ "include-poly": "https://download.geofabrik.de/europe/luxembourg.poly",
+ "profile": "full", "satellite-source": "s2cloudless-2021",
+ "satellite-accept-noncommercial": true}
+```
+
+Without `satellite-accept-noncommercial` that last recipe fails at once,
+before any download, with a message naming the licence, so NC imagery cannot
+end up in a ZIM by accident. The same on the command line:
+
+```sh
+streetzim --name osm_en_monaco --title Monaco --description "Offline map of Monaco" \
+  --area monaco --output out --satellite                       # 2016, CC BY 4.0
+streetzim --name osm_en_monaco --title Monaco --description "Offline map of Monaco" \
+  --area monaco --output out --satellite-source s2cloudless-2021 \
+  --satellite-accept-noncommercial                             # restricted variant
+```
+
+Satellite tiles are downloaded from EOX during the build: Monaco at z0-14
+is 29 tiles and about 15 s. They are cached under `--dl`, per source.
+
 ## Feature parity with StreetZim's own builds
 
 The production builds are `ops/build-region-fast.sh` (which
@@ -230,8 +456,8 @@ directly. "streetzim" below is `streetzim/cli.py` and
 | Overture places: websites, phones, brands, categories (`--overture-places`) | yes | **was missing; now `--overture`** | full: on | CDLA-Permissive-2.0 | as above | yes, as above |
 | Dead-website filter for Overture places (`--url-cache`) | yes | no | - | - | a crawl of every Overture website, kept on StreetZim's build host | no: the crawl result is not published anywhere a task could fetch it; without it, Overture places keep websites that may be dead |
 | Terrain / hillshade / 3D terrain (`--terrain`, `--low-zoom-world-vrt`) | yes | `--terrain` off; on by default in `topic-terrain-openzim` | full: on (once `--no-terrain` exists) | Copernicus DEM licence (free, attribution) | Copernicus DEM on AWS S3 | yes (that branch) |
-| Satellite imagery (`--satellite`) | yes (the 2021 mosaic), except `satellite=no` variants | not offered here; opt-in with licence labelling in `topic-satellite-optin` | off, in no profile | 2016 mosaic (that branch's default): CC BY 4.0; 2021 mosaic: CC BY-NC-SA 4.0, non-commercial | EOX Sentinel-2 cloudless | that branch |
-| Every named POI in Kiwix's own search (`--kiwix-poi-pages`) | no | from `topic-viewer-polish` | full: on (once merged) | ODbL | the extract | yes (+9 to 15% ZIM size) |
+| Satellite imagery (`--satellite`) | yes (the 2021 mosaic), except `satellite=no` variants | opt-in, labelled ([Satellite imagery](#satellite-imagery)) | off, in no profile | 2016 mosaic (the default source): CC BY 4.0; 2021 mosaic: CC BY-NC-SA 4.0, non-commercial | EOX Sentinel-2 cloudless | yes, about 15 s for Monaco |
+| Every named POI in Kiwix's own search (`--kiwix-poi-pages`) | no | yes | full: on | ODbL | the extract | yes (+12 to 28% ZIM size, [above](#pois-in-kiwixs-own-search---kiwix-poi-pages)) |
 | 3D buildings | no (the viewer has no building extrusion; "3D" is terrain) | no | - | - | - | - |
 | Fonts: Open Sans, Noto Sans for Arabic, Hebrew, Armenian, Georgian, Lao, Thai; RTL shaping | yes | yes | on | Apache 2.0, OFL 1.1, BSD-2-Clause (RTL plugin) | glyphs pinned by sha256; in the Docker image, fetched otherwise | yes |
 | Dark map style, POI icons (Maki) | yes | yes | on | CC0 (Maki) | inlined in the viewer | yes |
@@ -241,7 +467,8 @@ directly. "streetzim" below is `streetzim/cli.py` and
 | Rust packer, external Xapian builder | yes (speed only; same ZIM content) | no | - | - | local binaries | not needed |
 
 All gaps that can work on Zimfarm are closed except the dead-website filter,
-which has no public source. Terrain and satellite are left to their branches.
+which has no public source. Terrain is left to its branch; satellite is
+opt-in by choice, outside both profiles.
 
 ## What Zimfarm needs on its side
 
@@ -366,35 +593,39 @@ All the measurements above are `basic` builds (then called the default
 profile: tiles, search, chips, routing), made before `streetzim` passed
 `--no-llm-bundle` and `--split-hot-search-chunks-mb 10` as production does;
 the first only leaves files out and the second only splits chunks over
-10 MB, so they are if anything upper bounds for the ZIM size. Monaco was measured for both
-profiles on 2026-09-29 with `tools/measure_build.py`, `streetzim` from this
-branch, outside Docker (Python 3.11), on the same 4-core, 15 GB machine,
-shared with other jobs (load average about 36), so the wall times are upper
-bounds. Each run started with an empty `--dl`, as a Zimfarm task does, so
-it includes downloading the extract (from openstreetmap.fr: Geofabrik is
-blocked here), the font glyphs and, for `full`, the Overture data; the
-shapefiles were given with `--shapefiles`. Terrain and satellite are not on
-this branch (`topic-terrain-openzim`, `topic-satellite-optin`), so `full`
-here is full minus terrain: Wikidata, Wikipedia articles and Overture on
-top of `basic`. Disk is the temp, output and download folders.
+10 MB, so they are if anything upper bounds for the ZIM size. Monaco was
+measured for both profiles on 2026-09-29 with `tools/measure_build.py` and
+`streetzim` from this branch, outside Docker (Python 3.11), on the same
+4-core, 15 GB machine, shared with other jobs (load average about 36), so
+the wall times are upper bounds. Each run started with an empty `--dl`, as
+a Zimfarm task does, so it includes downloading the extract (from
+openstreetmap.fr: Geofabrik is blocked here), the font glyphs and, for
+`full`, the Overture data; the shapefiles were given with `--shapefiles`.
+Terrain is not on this branch (`topic-terrain-openzim`) and satellite is in
+no profile, so `full` here is Wikidata, Wikipedia articles and Overture on
+top of `basic`; these runs predate `--kiwix-poi-pages` joining `full`
+(+28% ZIM size on Monaco, [above](#pois-in-kiwixs-own-search---kiwix-poi-pages)).
+They used the monaco preset's box before `next` widened it. Disk is the
+temp, output and download folders.
 
-| Monaco | wall time | CPU time | peak memory | peak disk | ZIM |
-|---|---|---|---|---|---|
-| `basic` | 1.2 min | 0.9 min | 1.9 GB (1.9) | 0.01 GB | 2.9 MB |
-| `full` minus terrain | 7.7 min | 1.4 min | 2.8 GB (2.8) | 0.02 GB | 3.3 MB |
+| Monaco | wall time | CPU time | peak memory | peak disk | ZIM | sources |
+|---|---|---|---|---|---|---|
+| `basic` | 1.0 min | 0.9 min | 2.1 GB (2.1) | 0.03 GB | 2.9 MB | none besides OSM |
+| `full` minus terrain | 25.2 min | 1.1 min | 3.4 GB (3.4) | 0.02 GB | 3.3 MB | Overture addresses 4,087 rows, places 3,181 (36 enriched, 3,028 added); Wikidata 207 entries; titles 0/95; articles 8/53 |
+| `full`, earlier the same day, before the 429 fix merged | 7.1 and 7.7 min | 1.4 min | 2.8 to 3.3 GB | 0.02 GB | 3.3 MB | articles 16/53 |
 
-`full` spent its extra time waiting, not computing: the Overture download
+`full` spends its extra time waiting, not computing: the Overture download
 (latest release resolved through STAC, 1 of 64 address files and 1 of 16
-place files read, 4,087 and 3,181 rows) took about 13 s, and the rest was
-Wikimedia's rate limiting. Every Wikimedia API answered this sandbox's
-shared IP with 429 that day: Wikidata SPARQL backed off for 2 minutes, the
-Q-ID to title backfill resolved 0 of 95 Q-IDs, and 16 of 53 articles got
-through (the other 37 were still rate limited after four tries). An earlier
-run the same day, identical but for a bug since fixed in the title cache
-path, peaked at 3.3 GB and took 7.1 min. The ZIM passed
-`tools/check_openzim_output.py --routing` and `cloud/validate_zim.py`
-(zimcheck included), with `hasOvertureAddresses`, `hasWikidata` and
-`hasWikiArticles` set and the Overture and Wikipedia licences in `License`.
+place files read) takes about 13 s. The rest is Wikimedia rate limiting
+this sandbox's shared IP: with the 429 fix now on `next`, each source waits
+out `Retry-After` up to its budget (`STREETZIM_WIKI_WAIT_BUDGET`, 15 min),
+so the 25 minutes are the title backfill (2 min, then it stops asking),
+Wikidata SPARQL (6 min) and the articles (15 min, the budget, then "not
+requesting the rest"). That is the worst case the budgets allow per
+source, not a normal run; from an IP that is not rate limited, Monaco's
+~60 requests take about a minute. The ZIMs passed
+`tools/check_openzim_output.py --routing`, `cloud/validate_zim.py`
+(zimcheck included) and `tools/check_full_profile.py`.
 
 What to give a recipe (`resources` in `POST /v2/recipes`). The `basic`
 rows follow from the measurements above; the `full` rows are **estimates**
@@ -403,7 +634,7 @@ from them, since only Monaco was measured with `full`:
 | extract size (example) | profile | cpu | memory | disk |
 |---|---|---|---|---|
 | up to about 60 MB (Monaco, Luxembourg, Rhode Island) | `basic` | 2 | 6 GiB (measured 1.9 to 4.1 GB) | 4 GiB (measured 3.5 GiB on Zimfarm for Monaco) |
-| | `full` | 2 | 6 GiB (Monaco measured 2.8 to 3.3 GB) | 4 GiB |
+| | `full` | 2 | 6 GiB (Monaco measured 2.8 to 3.4 GB) | 4 GiB |
 | about 700 MB (Switzerland) | `basic` | 4 | 8 GiB (measured 4.6 GB) | 10 GiB (4 + 4.4 measured + extract) |
 | | `full` | 4 | 10 GiB (estimated) | 12 GiB (estimated: Overture parquets and article cache on top) |
 | about 1.6 GB (the Netherlands) | `basic` | 4 | 12 GiB (measured 10.8 GB) | 20 GiB (4 + 11.0 measured + extract; less failed with ENOSPC) |
@@ -411,14 +642,15 @@ from them, since only Monaco was measured with `full`:
 
 - Memory in `full` grows with the Overture merge (DuckDB, and more search
   records to write) and the Wikidata cache: Monaco's peak went from 1.9 to
-  2.8 GB. For larger regions the added records are a larger share of the
+  2.8 to 3.4 GB. For larger regions the added records are a larger share of the
   search step (Overture addresses are dense where national registries feed
   them, as in the Netherlands), hence the extra 2 GiB estimated.
 - Time in `full` is dominated by the Wikimedia APIs: one SPARQL request per
   40 Q-IDs with a 1 s pause, and one request per article with at least
   0.1 s between them (California links 11,613 articles: over 20 minutes
-  before any rate limiting). A recipe for a large region should allow hours
-  on top of `basic`'s time, not minutes.
+  before any rate limiting), plus up to 15 minutes of rate-limit waiting
+  per source (`STREETZIM_WIKI_WAIT_BUDGET`). A recipe for a large region
+  should allow hours on top of `basic`'s time, not minutes.
 - Terrain (on in `full` once merged) adds the Copernicus DEM tiles and the
   hillshade tiles to z12, and satellite (opt-in) the imagery; their
   branches measure them. Add their disk and time to the `full` rows.
@@ -427,7 +659,7 @@ from them, since only Monaco was measured with `full`:
 
 A fresh Zimfarm container downloads, besides the OSM extract:
 - the coastline and Natural Earth shapefiles when tiles are built with
-  tilemaker (see below). Building from `--mbtiles` avoids this;
+  tilemaker (see below). Building from `--mbtiles-url` avoids this;
 - nothing for the viewer: MapLibre GL JS is vendored and the Docker image
   carries the pinned font glyphs ([viewer-supply-chain.md](viewer-supply-chain.md));
 - with `--profile full` (or the flags): Overture's addresses and places for
@@ -470,6 +702,120 @@ Ways to cut this, none taken yet:
   zip right after unzipping it does not lower the peak, which is reached
   while both exist; `fetch-shapefiles.sh` already removes it when it
   finishes.
+
+## Building from ready-made tiles (`--mbtiles-url`)
+
+`--mbtiles-url` (a Zimfarm `url` flag) builds from an OpenMapTiles MBTiles
+instead of running tilemaker, as maps2zim builds from OpenFreeMap's. On the
+command line, `--mbtiles` takes a local file instead.
+
+**On Zimfarm today, only a downloaded MBTiles works, and in practice only a
+regional one.** A Zimfarm worker starts the scraper with a single bind
+mount, the task's own work folder at `/output`
+(`worker/src/zimfarm_worker/common/docker.py`, `start_scraper`), created
+empty for each task and counted in the task's disk. So:
+- every task downloads its MBTiles again; nothing is shared between tasks,
+  and the reuse, resume and pre-seeding below only help a retry inside the
+  same container;
+- a `file://` URL can only name a file inside the container: nothing kept
+  on the worker is visible, so `file://` is for the build host and direct
+  command-line runs, not for Zimfarm recipes;
+- the planet (about 103 GB) would be downloaded per task and needs that
+  much task disk, so a recipe needs a regional MBTiles hosted somewhere.
+Sharing one planet between tasks would need an openZIM change: a
+worker-side, read-only volume (say, a `ZIMFARM_SHARED_DATA` folder on the
+worker mounted into scrapers at a fixed path) that `start_scraper` adds to
+the scraper's mounts, a recipe-level way to ask for it, and a way to fill
+and refresh it on each worker; or a cache that the worker manager keeps
+across tasks. Neither exists at `917d7bc`.
+
+How the flag behaves:
+- **http(s)://** URLs are downloaded into `<dl>/mbtiles/` with
+  zimscraperlib's retrying session where it is installed (urllib
+  otherwise), logging progress every 5% (`streetzim/download.py`).
+  - An interrupted download (`.part`) is resumed only when the server
+    takes ranges, the file has an ETag or Last-Modified, and it is
+    unchanged upstream (same ETag, Last-Modified and size as when it
+    started). The request carries `If-Range`; the answer must be a 206
+    starting at the offset. A 200 is the whole file again and is written
+    from the start, without a second request. A `.part` already complete
+    is renamed without downloading.
+  - A finished download is reused while unchanged upstream. A file
+    already in place with the upstream size and no record of its version
+    (a pre-seeded download folder) is used; for OpenFreeMap only if it
+    also has the published SHA-256. Offline, what is there is used.
+  - OpenFreeMap downloads (`https://*.openfreemap.com/areas/<area>/
+    <version>/tiles.mbtiles`) are checked against that version's
+    `SHA256SUMS`; a mismatch is an error. Once a new version is in place,
+    the other versions of that area in `<dl>/mbtiles/` are deleted (and
+    logged), since each is as large as the new one; one in use by another
+    task is kept.
+  - When HEAD is refused, a one-byte ranged GET gives the headers
+    instead. Two tasks sharing a download folder take turns on
+    `<file>.lock`.
+- **file://** URLs are used in place, never copied (see above for where
+  that works). Zimfarm's `url` type accepts `file://` URLs, not bare paths.
+- The file is refused early if it is not an MBTiles: a download stops at
+  its first bytes unless they are an SQLite header, and the file must have
+  `tiles` and `metadata` tables (a `tiles` view, as OpenFreeMap's, counts).
+- Its metadata goes into the build log (`MBTiles: OpenFreeMap, version
+  3.16.0, planetiler 0.10.3-SNAPSHOT, OSM data 2026-09-27, bounds …`) and
+  into the ZIM: `map-config.json` gets `tileSource` (name, version, OSM
+  date, generator, homepage and the source: an http(s) URL without user
+  name, password or query, or for `file://` only the file name), the
+  viewer's About dialog shows it under "Vector Tiles", and `License`
+  credits the tiles ("Vector tiles: OpenFreeMap (https://openfreemap.org)",
+  the name cleaned of control characters and cut at 80 characters).
+- **Only the area's tiles go into the ZIM.** The file is always cut to the
+  tiles that touch the area's box, z0 to z14 (its `bounds` metadata is not
+  trusted): maps2zim's `TileFilter` rule, edges included; a box across the
+  antimeridian keeps both sides. `--max-zoom` then caps the tiles stored,
+  as for tilemaker builds; the cut keeps z14, which search reads. The cut
+  goes to `<tmp>/mbtiles-cut/`, which is cleared at start and removed at
+  the end, also when the build fails or is stopped with SIGTERM.
+  - It is one index search per tile column on the tiles'
+    `(zoom_level, tile_column, tile_row)` primary key (`SEARCH
+    tiles_shallow USING PRIMARY KEY (zoom_level=? AND tile_column=? AND
+    tile_row>? AND tile_row<?)`), then each distinct tile's data by its id
+    (`SEARCH tiles_data USING INTEGER PRIMARY KEY`). It never counts or
+    scans the source, so its cost follows the area: Switzerland is 426
+    seeks and 37,326 tiles, Germany 849 seeks and 318,186 tiles, whatever
+    the size of the file.
+  - OpenFreeMap's layout is kept: each distinct tile is stored once (its
+    ocean and land tiles repeat). Other files get a plain tiles table.
+  - Measured on a synthetic planet-shaped file in OpenFreeMap's layout
+    (26.3 million tiles, 1.7 GB: every tile to z12 drawn from 1,000
+    shared blobs, z13-14 unique over Europe), after dropping the page
+    cache: Switzerland 0.19 s (12.0 MB, 13% smaller than without the
+    deduplication), Germany 0.87 s (100 MB, 15% smaller), Fiji, which is
+    all shared ocean-like tiles, 0.04 s (0.7 MB instead of 8.5 MB); peak
+    memory 18 MB. The whole of `monaco.mbtiles` cut this way is 9%
+    smaller than a plain copy. On the real planet the copy dominates: it
+    reads the area's own tile data (a few GB for Germany), at disk speed.
+
+`--mbtiles` on the command line (a local file) now goes through the same
+check, cut and record as `--mbtiles-url`; before, it passed every tile of
+the file to the ZIM and recorded nothing. A missing file is an error before
+anything is downloaded. `create_osm_zim.py --mbtiles`, which production
+uses, is unchanged: it records the source only with `--record-tile-source`.
+
+The trade-off:
+- **No tilemaker and no shapefiles.** The task skips the 864 MB shapefile
+  download and the tilemaker run, so the 4 GiB disk floor above does not
+  apply; disk is the MBTiles, the cut and the ZIM.
+- **But OpenFreeMap publishes only `planet` (about 103 GB, some 276
+  million tiles) and `monaco`** (`scripts/fetch-openfreemap-mbtiles.py`
+  finds the newest). On Zimfarm, a real recipe therefore needs a regional
+  MBTiles hosted somewhere (cut from the planet with this same code:
+  `streetzim.mbtiles.cut`). The build host can use the planet in place
+  with `file://`.
+- **The tiles are OpenFreeMap's, not ours**: a different feature mix, with
+  fewer named places and streets to search (on Monaco our tilemaker tiles
+  give 31% more street names and about twice as many named places; see
+  [tile-sources.md](tile-sources.md)).
+  Search, addresses and routing still come from the OSM extract when there
+  is one (`--pbf-url`, or the Geofabrik extract of the area); without one,
+  give `--no-routing`.
 
 ## Tested on a local Zimfarm
 

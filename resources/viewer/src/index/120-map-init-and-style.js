@@ -73,10 +73,7 @@ if (!window.__szUnsupported) fetchConfig(1)
       minZoom: config.minZoom || 0,
       maxZoom: 20,
       attributionControl: true,
-      maxBounds: config.bounds ? [
-        [config.bounds[0] - 0.01, config.bounds[1] - 0.01],
-        [config.bounds[2] + 0.01, config.bounds[3] + 0.01]
-      ] : undefined
+      maxBounds: _szMaxBounds(config)   // the built box, no margin (140)
     });
     // Exposed so module-scope helpers (e.g. openWikiArticle) can stamp the
     // current view into the URL hash before navigating away.
@@ -151,8 +148,9 @@ if (!window.__szUnsupported) fetchConfig(1)
     initHomeButton(map, config);
     initViewMemory(map, config);
     initAbout(config);
-    // Scale bar with mi/km toggle — click to switch units
-    var scaleUnit = 'imperial';
+    // Scale bar with mi/km toggle — click to switch units. The choice is
+    // kept (szReadUnit/szWriteUnit, 140) and every distance follows it.
+    var scaleUnit = szReadUnit(_szStorage());
     map._streetzimUnit = scaleUnit;  // shared with driving-mode HUD
     var scaleControl = new maplibregl.ScaleControl({ unit: scaleUnit });
     map.addControl(scaleControl, 'bottom-left');
@@ -161,6 +159,7 @@ if (!window.__szUnsupported) fetchConfig(1)
         scaleUnit = scaleUnit === 'imperial' ? 'metric' : 'imperial';
         scaleControl.setUnit(scaleUnit);
         map._streetzimUnit = scaleUnit;
+        szWriteUnit(_szStorage(), scaleUnit);
         map.fire('streetzim.units', { unit: scaleUnit });
       }
     });
@@ -205,6 +204,17 @@ if (!window.__szUnsupported) fetchConfig(1)
     map.addControl(geolocate, 'bottom-right');
     geolocate.on('geolocate', function(pos) { _onLocated(pos); });
 
+    // #info, #attr-btn and the scale bar sit above MapLibre's attribution,
+    // which wraps to more lines on a phone when the satellite credit joins
+    // it: its height is published as --sz-attrib-h for their CSS.
+    (function () {
+      var attrib = document.querySelector('.maplibregl-ctrl-attrib');
+      if (!attrib || typeof ResizeObserver === 'undefined') return;
+      new ResizeObserver(function () {
+        document.documentElement.style.setProperty('--sz-attrib-h', attrib.offsetHeight + 'px');
+      }).observe(attrib);
+    })();
+
     // Satellite layer toggle
     if (config.hasSatellite) {
       var toggleBtn = document.getElementById('layer-toggle');
@@ -225,9 +235,13 @@ if (!window.__szUnsupported) fetchConfig(1)
         var satExt = config.satelliteFormat || 'webp';
         var satTileSize = config.satelliteTileSize || 256;
         // Use zimtile:// protocol for retry logic on Kiwix service worker
+        // EOX requires its credit in the map itself; MapLibre shows a
+        // source's attribution while one of its layers is visible.
+        var satCredit = _szSatelliteCreditHtml(config);
         map.addSource('satellite', {
           type: 'raster',
           tiles: ['zimtile://' + baseUrl + 'satellite/{z}/{x}/{y}.' + satExt],
+          attribution: satCredit,
           tileSize: satTileSize,
           minzoom: 0,
           maxzoom: config.satelliteMaxZoom || 14
@@ -573,6 +587,21 @@ if (!window.__szUnsupported) fetchConfig(1)
     if (config.hasOvertureAddresses) {
       var overtureSection = document.getElementById('attr-overture-section');
       if (overtureSection) overtureSection.style.display = '';
+    }
+    // Ready-made tiles (streetzim --mbtiles-url): whose they are, as
+    // map-config.json's tileSource records them. Text only, never HTML.
+    var ts = config.tileSource;
+    if (ts && typeof ts.name === 'string' && ts.name) {
+      var tsSection = document.getElementById('attr-tiles-section');
+      var tsName = document.getElementById('attr-tiles-name');
+      var tsMeta = document.getElementById('attr-tiles-meta');
+      if (tsSection && tsName && tsMeta) {
+        tsName.textContent = ts.name;
+        tsMeta.textContent = [ts.version && 'version ' + ts.version,
+                              ts.osmDate && 'OSM data ' + ts.osmDate,
+                              ts.homepage].filter(Boolean).join(' \u2014 ');
+        tsSection.style.display = '';
+      }
     }
     // Same for the other optional layers: a ZIM without satellite imagery
     // must not show the imagery's non-commercial licence as if it applied.

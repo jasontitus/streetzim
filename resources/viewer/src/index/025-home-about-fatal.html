@@ -2,8 +2,9 @@
      error shown when the map cannot start at all: a browser without Fetch /
      Promise / MapLibre, no WebGL, or a map-config.json that never loaded.
      The styles sit here rather than in 010 so this feature is one part.
-     Panels stay light in both map themes, as every other panel does; only
-     the full-page error, which has no map behind it, follows the OS scheme. -->
+     The Home button and About panel follow the map theme through
+     html.sz-dark (010); the full-page error, which can appear before any
+     of that code runs, follows the OS scheme directly. -->
 <style>
   .sz-home-btn svg { display: block; margin: auto; width: 18px; height: 18px; fill: #333; }
   #about-section { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }

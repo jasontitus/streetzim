@@ -259,4 +259,6 @@ scripts that may be running on the production host (see
 - **Docs that point at files that don't exist:** `docs/mcpzim-contract.md`
   and `docs/STREETZIM_CONSUMPTION.md` are cited from `create_osm_zim.py`.
 - **Satellite licence.** The EOX 2021 layer is CC BY-NC-SA and ships in most
-  published ZIMs; see the README's licence section.
+  published ZIMs; see the README's licence section. The 2016 layer is CC BY
+  4.0 and is what `streetzim --satellite` uses (docs/zimfarm.md,
+  "Satellite imagery").

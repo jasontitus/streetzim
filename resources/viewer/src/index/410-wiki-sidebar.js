@@ -116,7 +116,7 @@ function initWikiSidebar(map, config) {
       // latitude span; when zoomed out to explore a few cities that span is
       // large, so it flew ~0.1-0.2° (many km) SOUTH of the real location.
       var _dy = Math.round((map.getCanvas().clientHeight || 600) * 0.22);
-      map.flyTo({ center: [lon, lat], zoom: targetZoom, duration: 1000, offset: [0, -_dy] });
+      _szFlyToClear(map, { center: [lon, lat], zoom: targetZoom, duration: 1000, offset: [0, -_dy] });
     } else {
       map.flyTo({ center: [lon, lat], zoom: targetZoom, duration: 1000 });
     }
@@ -235,7 +235,7 @@ function initWikiSidebar(map, config) {
     listEl.appendChild(wrap);
 
     var back = createEl('button', 'wiki-detail-back', '← Back to list');
-    back.style.cssText = 'display:block;margin:0 0 12px;padding:6px 10px;border:0;border-radius:6px;background:#eef2fa;color:#2a4a7a;font-size:13px;font-weight:600;cursor:pointer;';
+    back.style.cssText = 'display:block;margin:0 0 12px;padding:6px 10px;border:0;border-radius:6px;background:var(--szd-btn2-bg, #eef2fa);color:var(--szd-btn2-fg, #2a4a7a);font-size:13px;font-weight:600;cursor:pointer;';
     back.addEventListener('click', function() { staleView = false; updateSidebar(); });
     wrap.appendChild(back);
 
@@ -245,7 +245,7 @@ function initWikiSidebar(map, config) {
     if (coords && map._buildDirectionsButton) {
       wrap.appendChild(map._buildDirectionsButton(coords[1], coords[0], name));
     }
-    nm.style.cssText = 'font-size:17px;font-weight:700;margin-bottom:6px;color:#1a1a2a;line-height:1.25;word-wrap:break-word;';
+    nm.style.cssText = 'font-size:17px;font-weight:700;margin-bottom:6px;color:var(--szd-fg, #1a1a2a);line-height:1.25;word-wrap:break-word;';
     wrap.appendChild(nm);
 
     // Prefer the description baked into the geo-index (instant, no fetch). Fall
@@ -256,7 +256,7 @@ function initWikiSidebar(map, config) {
     var desc = bakedDesc || (wd ? (wd.x || wd.d || '') : '');
     if (desc) {
       var dd = createEl('div', 'wiki-detail-desc', desc);
-      dd.style.cssText = 'font-size:13.5px;line-height:1.5;color:#444;margin-bottom:10px;word-wrap:break-word;';
+      dd.style.cssText = 'font-size:13.5px;line-height:1.5;color:var(--szd-fg-2, #444);margin-bottom:10px;word-wrap:break-word;';
       wrap.appendChild(dd);
     }
 
@@ -270,7 +270,7 @@ function initWikiSidebar(map, config) {
       wrap.appendChild(ab);
     } else {
       var noa = createEl('div', 'wiki-detail-noarticle', 'No bundled article for this place.');
-      noa.style.cssText = 'font-size:12px;color:#888;margin-bottom:8px;';
+      noa.style.cssText = 'font-size:12px;color:var(--szd-fg-3, #888);margin-bottom:8px;';
       wrap.appendChild(noa);
     }
   }
@@ -467,7 +467,7 @@ function initWikiSidebar(map, config) {
               // the old latitude-span shift flew kilometres south of the
               // target when the map was zoomed out.
               var _dy2 = Math.round((map.getCanvas().clientHeight || 600) * 0.22);
-              map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 1200, offset: [0, -_dy2] });
+              _szFlyToClear(map, { center: [lng, lat], zoom: targetZoom, duration: 1200, offset: [0, -_dy2] });
             } else {
               map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 1200 });
             }

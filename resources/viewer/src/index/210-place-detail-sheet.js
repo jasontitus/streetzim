@@ -20,8 +20,8 @@ function _showPlaceDetail(map, r, idx) {
   panel.style.cssText = (
     'position:fixed; left:0; right:0; bottom:var(--bottom-inset, 0px); z-index:1701;'
     + 'max-height:calc(var(--app-height, 100vh) * 0.78); overflow-y:auto;'
-    + 'background:#fff; color:#222;'
-    + 'border-top:1px solid #ddd;'
+    + 'background:var(--szd-surface, #fff); color:var(--szd-fg, #222);'
+    + 'border-top:1px solid var(--szd-line, #ddd);'
     + 'border-radius:18px 18px 0 0;'
     + 'box-shadow:0 -8px 28px rgba(0,0,0,0.28);'
     + 'transform:translateY(100%); transition:transform .25s ease;'
@@ -33,7 +33,7 @@ function _showPlaceDetail(map, r, idx) {
   var handle = document.createElement('div');
   handle.style.cssText = (
     'width:40px; height:4px; border-radius:2px;'
-    + 'background:#d8dadd; margin:6px auto 12px;'
+    + 'background:var(--szd-handle, #d8dadd); margin:6px auto 12px;'
   );
   panel.appendChild(handle);
 
@@ -51,7 +51,7 @@ function _showPlaceDetail(map, r, idx) {
   close.textContent = '×';
   close.style.cssText = (
     'flex:0 0 auto; background:transparent; border:none;'
-    + 'font-size:28px; line-height:1; cursor:pointer; color:#666;'
+    + 'font-size:28px; line-height:1; cursor:pointer; color:var(--szd-fg-3, #666);'
     + 'padding:0 6px; margin-top:-4px;'
   );
   close.addEventListener('click', _hidePlaceDetail);
@@ -66,7 +66,7 @@ function _showPlaceDetail(map, r, idx) {
   if (r.l) subParts.push(r.l);
   if (subParts.length) {
     var sub = document.createElement('div');
-    sub.style.cssText = 'color:#666; font-size:13px; margin:4px 0 10px;';
+    sub.style.cssText = 'color:var(--szd-fg-3, #666); font-size:13px; margin:4px 0 10px;';
     sub.textContent = subParts.join(' · ');
     panel.appendChild(sub);
   }
@@ -114,7 +114,7 @@ function _showPlaceDetail(map, r, idx) {
   // Plus phone/website spelled out for accessibility / copy-paste
   var info = document.createElement('div');
   info.style.cssText = (
-    'border-top:1px solid #eee; margin-top:6px; padding-top:10px;'
+    'border-top:1px solid var(--szd-line, #eee); margin-top:6px; padding-top:10px;'
     + 'display:flex; flex-direction:column; gap:6px; font-size:13px;'
   );
   if (r.p) {
@@ -230,7 +230,7 @@ function _detailActionBtn(label, emoji, primary, onClick) {
     + 'transition:transform .08s ease, filter .08s ease;'
     + (primary
        ? 'background:#1a73e8; color:#fff; border:1px solid #1a73e8;'
-       : 'background:#fff; color:#1a73e8;'
+       : 'background:var(--szd-surface, #fff); color:var(--szd-link, #1a73e8);'
          + 'border:1px solid #1a73e8;')
   );
   // Tap feedback: dim + slight scale on press so the user gets
@@ -255,7 +255,7 @@ function _detailFactRow(label, value, href, target) {
   var lbl = document.createElement('span');
   lbl.textContent = label;
   lbl.style.cssText = (
-    'flex:0 0 70px; color:#888; font-size:12px; padding-top:2px;'
+    'flex:0 0 70px; color:var(--szd-fg-3, #888); font-size:12px; padding-top:2px;'
   );
   row.appendChild(lbl);
   var val;
@@ -270,9 +270,9 @@ function _detailFactRow(label, value, href, target) {
   val.style.cssText = (
     'flex:1 1 auto; min-width:0;'
     + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
-    + 'color:#1a73e8; text-decoration:none;'
+    + 'color:var(--szd-link, #1a73e8); text-decoration:none;'
   );
-  if (!href) val.style.color = '#222';
+  if (!href) val.style.color = 'var(--szd-fg, #222)';
   row.appendChild(val);
   return row;
 }
@@ -301,7 +301,7 @@ function _detailTravelTimesLine(r) {
   var driveMin = fmtMin(m / 11);
   var line = document.createElement('div');
   line.style.cssText = (
-    'color:#666; font-size:12px; margin:2px 0 0;'
+    'color:var(--szd-fg-3, #666); font-size:12px; margin:2px 0 0;'
   );
   // Drop walking estimate when it would exceed 2 hours; switch to
   // drive-only display so we're not telling the user to walk for
@@ -326,7 +326,7 @@ function _detailDistanceLine(r) {
   var o = _findResultsState.origin;
   var m = _haversineMetersStrip(o.lat, o.lon, r.a, r.o);
   var line = document.createElement('div');
-  line.style.cssText = 'color:#444; font-size:13px; margin:4px 0 0;';
+  line.style.cssText = 'color:var(--szd-fg-2, #444); font-size:13px; margin:4px 0 0;';
   var label = (o.label && o.label !== 'Current location')
     ? o.label : 'current location';
   line.textContent = _formatDistanceStrip(m) + ' from ' + label;
@@ -374,7 +374,7 @@ function _populateWikipediaExtract(slot, wd) {
   if (wd.d) {
     var desc = document.createElement('div');
     desc.style.cssText = (
-      'color:#555; font-size:13px; font-style:italic; margin-bottom:8px;'
+      'color:var(--szd-fg-2, #555); font-size:13px; font-style:italic; margin-bottom:8px;'
     );
     desc.textContent = wd.d;
     slot.appendChild(desc);
@@ -382,13 +382,13 @@ function _populateWikipediaExtract(slot, wd) {
   if (wd.x) {
     var head = document.createElement('div');
     head.style.cssText = (
-      'font-size:11px; color:#888; text-transform:uppercase;'
+      'font-size:11px; color:var(--szd-fg-3, #888); text-transform:uppercase;'
       + 'letter-spacing:0.04em; margin:0 0 4px;'
     );
     head.textContent = 'About';
     slot.appendChild(head);
     var body = document.createElement('div');
-    body.style.cssText = 'color:#333; font-size:14px; line-height:1.5;';
+    body.style.cssText = 'color:var(--szd-fg, #333); font-size:14px; line-height:1.5;';
     body.textContent = wd.x;
     slot.appendChild(body);
   }
@@ -407,10 +407,10 @@ function _populateWikipediaExtract(slot, wd) {
     );
     for (var i = 0; i < facts.length; i++) {
       var k = document.createElement('div');
-      k.style.cssText = 'color:#888;';
+      k.style.cssText = 'color:var(--szd-fg-3, #888);';
       k.textContent = facts[i][0];
       var v = document.createElement('div');
-      v.style.cssText = 'color:#222;';
+      v.style.cssText = 'color:var(--szd-fg, #222);';
       v.textContent = facts[i][1];
       grid.appendChild(k); grid.appendChild(v);
     }

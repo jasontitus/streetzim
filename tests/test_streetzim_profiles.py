@@ -197,7 +197,8 @@ def test_full_plan_asks_the_builder_for_every_feature(tmp_path, offline):
     assert Path(ns.wiki_articles_cache).is_relative_to(tmp_path)
     assert ns.overture_addresses.endswith("addresses.parquet")
     assert ns.overture_places.endswith("places.parquet")
-    assert offline["overture"] == [("7.40,43.72,7.44,43.76", "latest")]
+    from create_osm_zim import KNOWN_AREAS
+    assert offline["overture"] == [(KNOWN_AREAS["monaco"]["bbox"], "latest")]
     assert ns.split_hot_search_chunks_mb == 10 and ns.no_llm_bundle
     assert not ns.satellite
 
