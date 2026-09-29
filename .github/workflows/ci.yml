@@ -480,7 +480,7 @@ jobs:
         # what offliner-definition.json pins. --network none: the fixture's
         # caches must be enough (a lookup they lack fails softly and shows
         # in the "sources:" line). --user: the DuckDB extensions must load
-        # from /opt/duckdb-ext, not root's home.
+        # from /opt/duckdb-ext, not root's home. About 20 s outside Docker.
         timeout-minutes: 15
         run: |
           set -o pipefail
@@ -488,8 +488,11 @@ jobs:
           cp -r tests/fixtures/monaco-full/dl/. dl/
           # An SVG illustration: zimscraperlib (Python 3.14 in the image) converts it.
           printf '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><rect width="64" height="32" fill="#2a7"/></svg>' > out/icon.svg
+          # STREETZIM_WIKI_WAIT_BUDGET=0: the first Wikimedia request that
+          # fails (no network) stops the rest instead of retrying each one
+          # (38 articles the fixture lacks would take 10 minutes).
           docker run --rm --network none --user "$(id -u):$(id -g)" \
-            -e STREETZIM_REQUIRE_SHAPEFILES=1 \
+            -e STREETZIM_REQUIRE_SHAPEFILES=1 -e STREETZIM_WIKI_WAIT_BUDGET=0 \
             -v "$PWD/out:/output" -v "$PWD/dl:/dl" \
             -v "$PWD/tests/fixtures/monaco-full:/fixture:ro" \
             -v "$PWD/coastline:/shapefiles/coastline:ro" \

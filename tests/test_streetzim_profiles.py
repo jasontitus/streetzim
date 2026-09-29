@@ -269,7 +269,7 @@ def test_an_interrupted_overture_download_is_never_reused(tmp_path, monkeypatch)
         Path(out).write_bytes(b"PAR1 half")
         raise OSError("connection reset")
     _fake_overture(monkeypatch, half)
-    with pytest.raises(ValueError, match="Overture Maps: could not fetch.*connection reset"):
+    with pytest.raises(ValueError, match=r"Overture Maps: could not fetch.*connection reset"):
         cli.fetch_overture("7.4,43.72,7.44,43.76", "latest", tmp_path)
     assert written and all(w.endswith(".part") for w in written)
     assert not [p for p in (tmp_path / "overture").iterdir() if p.suffix == ".parquet"]
@@ -289,7 +289,7 @@ def test_a_duckdb_error_is_a_clear_overture_failure(tmp_path, monkeypatch):
     def broken(theme, bbox, release, out):
         raise duckdb.IOException("HTTP 403")
     _fake_overture(monkeypatch, broken)
-    with pytest.raises(ValueError, match="Overture Maps: could not fetch.*HTTP 403.*--no-overture"):
+    with pytest.raises(ValueError, match=r"Overture Maps: could not fetch.*HTTP 403.*--no-overture"):
         cli.fetch_overture("7.4,43.72,7.44,43.76", "latest", tmp_path)
 
 

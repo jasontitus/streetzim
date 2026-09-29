@@ -1,0 +1,25 @@
+Inputs for building Monaco with `streetzim --profile full` offline (CI's
+docker job, .github/workflows/ci.yml). Copy dl/ to a writable --dl and
+pass --pbf-url file://.../monaco.osm.pbf and
+--overture-release "$(cat OVERTURE_RELEASE)": nothing then needs the network.
+
+Made on 2026-09-29 from a live `streetzim --profile full --area monaco`
+run (docs/zimfarm.md, "What CI checks"); the Wikimedia APIs were rate
+limiting that day, so the Wikipedia part is partial (7 articles, no Q-ID
+titles). To refresh: run that command with an empty --dl, then copy
+  <dl>/osm/*monaco-latest.osm.pbf        -> monaco.osm.pbf
+  <dl>/overture/*.parquet                 -> dl/overture/
+  <dl>/cache/wikidata_cache/[0-9]*.json, manifest.json -> dl/cache/wikidata_cache/
+  <dl>/wikipedia/qid_titles.json, articles/ -> dl/wikipedia/
+and put the Overture release in OVERTURE_RELEASE. The Overture file names
+carry the release and a hash of the area's bbox (streetzim/cli.py
+fetch_overture), so they only match --area monaco and that release.
+
+Licences:
+- monaco.osm.pbf: OpenStreetMap data, (c) OpenStreetMap contributors, ODbL 1.0
+  (extract from download.openstreetmap.fr).
+- dl/overture/: Overture Maps Foundation, release 2026-09-23.1; places
+  CDLA-Permissive-2.0, addresses per source (see the parquet's sources).
+- dl/cache/wikidata_cache/: Wikidata, CC0; its Wikipedia extracts CC BY-SA 4.0.
+- dl/wikipedia/articles/: English Wikipedia article HTML, CC BY-SA 4.0,
+  Wikipedia contributors (https://en.wikipedia.org).
