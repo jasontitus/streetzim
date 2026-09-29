@@ -19,11 +19,11 @@ var EXPLORE_CHIPS = [
   // Libraries were missing here while present in every build and in
   // places.html, so the map offered two food chips and no hospitals.
   //
-  // Restaurants + Cafés merged into Food & Drink 2026-09-16. All three stay
-  // listed because ZIMs built before that ship the old pair and no
-  // chip-food.json; _findChipsReconcile() hides whichever the ZIM's
-  // manifest does not declare, so a retrofitted ZIM shows the old pair and
-  // a freshly built one shows the merged chip.
+  // Restaurants + Cafés merged into Food & Drink 2026-09-16; ZIMs built
+  // before that ship chip-restaurants.json + chip-cafes.json and no
+  // chip-food.json. The rail still lists only the merged chip.
+  // _findChipsReconcile() hides the chips the manifest does not list (or
+  // lists with count 0), keeping Food & Drink when either old file exists.
   // ONE food chip on the rail. A pre-merge ZIM has no chip-food.json, so
   // _findResolveChipDef() maps this button onto that ZIM's restaurants +
   // cafes and loadChipOnMap merges them — the rail reads the same whatever

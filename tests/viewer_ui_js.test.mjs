@@ -414,11 +414,45 @@ await ok('the main script stays out when the browser is unsupported', () => {
 
 const CHIP_AVAIL_SRC = slice('// BEGIN chip-availability', '// END chip-availability');
 const RESOLVE_SRC = slice('async function _findResolveChipDef', 'async function loadChipOnMap');
-function loadChips(manifest) {
-  const fn = new Function('_findFetchCatManifest',
-    CHIP_AVAIL_SRC + RESOLVE_SRC + '\nreturn { _findChipHas, _findChipsPlan, _findResolveChipDef };');
-  return fn(() => Promise.resolve(manifest));
+// env.manifest: what category-index/manifest.json serves (200), or
+// env.fetch: a fetch stub. env.document: a fake DOM for the rail.
+function loadChips(env = {}) {
+  const fetch = env.fetch || ((u) => Promise.resolve({ ok: true, status: 200,
+    json: () => Promise.resolve(env.manifest) }));
+  const fn = new Function('baseUrl', 'fetch', 'document',
+    CHIP_AVAIL_SRC + RESOLVE_SRC + '\nreturn { _findChipHas, _findChipsPlan, _findResolveChipDef,' +
+    ' _findFetchCatManifest, _findChipsReconcile, _findChipsApply,' +
+    ' cached: () => _findCatManifest };');
+  return fn('http://z/C/', fetch, env.document || railDocument([]).document);
 }
+// fetch stub answering the manifest URL from a script of responses:
+// a number is an HTTP status (200 serves `manifest`), 'net' throws.
+function scriptedFetch(script, manifest) {
+  const calls = [];
+  const fetch = (u) => {
+    calls.push(u);
+    const step = script.length > 1 ? script.shift() : script[0];
+    if (step === 'net') return Promise.reject(new TypeError('Failed to fetch'));
+    return Promise.resolve({ ok: step === 200, status: step,
+                             json: () => Promise.resolve(manifest) });
+  };
+  return { fetch, calls };
+}
+// A rail of chip buttons, enough DOM for _findChipsApply.
+function railDocument(ids) {
+  const input = { id: 'search-input', focus() { doc.activeElement = input; } };
+  const btns = ids.map((id) => {
+    const b = { hidden: false, dataset: { chip: id }, cls: new Set(),
+                classList: { contains: (c) => b.cls.has(c) },
+                focus() { doc.activeElement = b; } };
+    return b;
+  });
+  const rail = { hidden: false, querySelectorAll: () => btns };
+  const doc = { activeElement: null,
+                getElementById: (id) => (id === 'search-input' ? input : id === 'find-chips' ? rail : null) };
+  return { document: doc, rail, btns, input };
+}
+const flush = () => new Promise((r) => setTimeout(r, 0));
 const RAIL = ['food', 'bars', 'shops', 'health', 'museums', 'landmarks',
               'libraries', 'parks', 'fuel', 'hotels'];
 const chipEntry = (count) => ({ label: 'x', count, bytes: 10 });
@@ -468,28 +502,156 @@ await ok('chips: Food & Drink stands for a pre-merge restaurants/cafes pair', ()
 });
 
 await ok('chips: a tap resolves to nothing when the ZIM cannot serve it', async () => {
-  const noChips = loadChips({ total: 1, categories: { poi: 1 } });
+  const noChips = loadChips({ manifest: { total: 1, categories: { poi: 1 } } });
   assert.strictEqual(await noChips._findResolveChipDef({ id: 'food', label: 'Food & Drink' }), null);
-  const tm = loadChips({ chips: { parks: chipEntry(0), bars: chipEntry(2),
-                                  restaurants: chipEntry(1), cafes: chipEntry(0) } });
+  const tm = loadChips({ manifest: { chips: { parks: chipEntry(0), bars: chipEntry(2),
+                                  restaurants: chipEntry(1), cafes: chipEntry(0) } } });
   assert.strictEqual(await tm._findResolveChipDef({ id: 'parks', label: 'Parks' }), null);
   assert.deepStrictEqual((await tm._findResolveChipDef({ id: 'bars', label: 'Bars' })).sources, ['bars']);
   assert.deepStrictEqual((await tm._findResolveChipDef({ id: 'food', label: 'Food' })).sources,
     ['restaurants']);
-  // Manifest unreadable: try the chip's own file.
-  const unk = loadChips({ _szUnknown: true });
+  // Manifest unreadable (a 503 here): try the chip's own file.
+  const unk = loadChips({ fetch: scriptedFetch([503]).fetch });
   assert.deepStrictEqual((await unk._findResolveChipDef({ id: 'bars', label: 'Bars' })).sources, ['bars']);
 });
 
 await ok('chips: hidden chips and rail are really hidden, and taps always say something', () => {
   // `display: inline-flex` on the chip outranks the UA [hidden] rule.
   assert.match(HTML, /#find-chips\[hidden\], #find-chips \.find-chip\[hidden\] \{ display: none; \}/);
-  assert.match(HTML, /rail\.hidden = !plan\.rail;/);
-  assert.match(HTML, /Category search is not available in this map/);
+  assert.match(HTML, /No category search in this map/);
   // Legacy-layout chip that loaded nothing, and a failed fetch, both toast.
   const legacy = slice("console.warn('[streetzim] chip fetch failed:'", 'var bounds = map.getBounds();');
   assert.match(legacy, /_showFindToast\('Couldn\\u2019t load '/);
   assert.match(legacy, /if \(!Array\.isArray\(data\) \|\| !data\.length\) \{\s*_showFindToast\('No '/);
+});
+
+await ok('manifest: only 404 / 410 mean "no chip data"; the answer is cached', async () => {
+  for (const status of [404, 410]) {
+    const f = scriptedFetch([status]);
+    const c = loadChips({ fetch: f.fetch });
+    assert.deepStrictEqual(await c._findFetchCatManifest(), {}, String(status));
+    assert.deepStrictEqual(c.cached(), {});
+    await c._findFetchCatManifest();
+    assert.strictEqual(f.calls.length, 1, 'cached, not fetched again');
+    assert.strictEqual(c._findChipsPlan(await c._findFetchCatManifest(), RAIL).rail, false);
+  }
+  const f = scriptedFetch([200], { chips: { bars: chipEntry(2) } });
+  const c = loadChips({ fetch: f.fetch });
+  assert.deepStrictEqual(await c._findFetchCatManifest(), { chips: { bars: chipEntry(2) } });
+  assert.strictEqual(f.calls[0], 'http://z/C/category-index/manifest.json');
+});
+
+await ok('manifest: 5xx and network errors are unknown, not cached, and retried', async () => {
+  for (const first of [500, 503, 502, 'net']) {
+    const f = scriptedFetch([first, 200], { chips: { bars: chipEntry(2) } });
+    const c = loadChips({ fetch: f.fetch });
+    const m1 = await c._findFetchCatManifest();
+    assert.deepStrictEqual(m1, { _szUnknown: true }, String(first));
+    assert.strictEqual(c.cached(), null);
+    // The rail stays whole on an unknown answer.
+    assert.deepStrictEqual(shown(c._findChipsPlan(m1, RAIL)), RAIL);
+    const m2 = await c._findFetchCatManifest();
+    assert.deepStrictEqual(m2, { chips: { bars: chipEntry(2) } });
+    assert.strictEqual(f.calls.length, 2);
+    await c._findFetchCatManifest();
+    assert.strictEqual(f.calls.length, 2, 'the real manifest is cached');
+  }
+});
+
+await ok('reconcile: runs again once a later fetch reads the real manifest', async () => {
+  const d = railDocument(RAIL);
+  const f = scriptedFetch([503, 200], { chips: { bars: chipEntry(3), parks: chipEntry(0) } });
+  const c = loadChips({ fetch: f.fetch, document: d.document });
+  await c._findChipsReconcile(d.rail);
+  assert.ok(d.btns.every((b) => !b.hidden) && !d.rail.hidden, '503: full rail kept');
+  await c._findFetchCatManifest();          // e.g. a chip tap, later
+  await flush();
+  assert.deepStrictEqual(d.btns.filter((b) => !b.hidden).map((b) => b.dataset.chip), ['bars']);
+  // No chips key at all, after an unknown first answer: rail goes.
+  const d2 = railDocument(RAIL);
+  const c2 = loadChips({ fetch: scriptedFetch(['net', 200], { total: 3 }).fetch, document: d2.document });
+  await c2._findChipsReconcile(d2.rail);
+  assert.strictEqual(d2.rail.hidden, false);
+  await c2._findFetchCatManifest();
+  assert.strictEqual(d2.rail.hidden, true);
+});
+
+await ok('reconcile: leaves an active or loading chip alone', () => {
+  const d = railDocument(RAIL);
+  const c = loadChips({ document: d.document });
+  d.btns[7].dataset.szLoading = '1';       // parks, tap still resolving
+  d.btns[8].cls.add('on');                 // fuel, active
+  c._findChipsApply(d.rail, { chips: { bars: chipEntry(1), parks: chipEntry(0), fuel: chipEntry(0) } });
+  assert.deepStrictEqual(d.btns.filter((b) => !b.hidden).map((b) => b.dataset.chip),
+    ['bars', 'parks', 'fuel']);
+  // Even with no chip data the rail stays while a chip is busy.
+  const d2 = railDocument(RAIL);
+  const c2 = loadChips({ document: d2.document });
+  d2.btns[0].dataset.szLoading = '1';
+  c2._findChipsApply(d2.rail, {});
+  assert.strictEqual(d2.rail.hidden, false);
+  assert.deepStrictEqual(d2.btns.filter((b) => !b.hidden).map((b) => b.dataset.chip), ['food']);
+});
+
+await ok('reconcile: focus moves off a chip before it is hidden', () => {
+  const d = railDocument(RAIL);
+  const c = loadChips({ document: d.document });
+  d.btns[7].focus();                       // parks, count 0
+  c._findChipsApply(d.rail, { chips: { bars: chipEntry(1), parks: chipEntry(0), hotels: chipEntry(2) } });
+  assert.strictEqual(d.document.activeElement, d.btns[9], 'next visible chip (hotels)');
+  const d2 = railDocument(RAIL);
+  const c2 = loadChips({ document: d2.document });
+  d2.btns[9].focus();                      // hotels; wraps to the first visible
+  c2._findChipsApply(d2.rail, { chips: { bars: chipEntry(1), hotels: chipEntry(0) } });
+  assert.strictEqual(d2.document.activeElement, d2.btns[1]);
+  const d3 = railDocument(RAIL);
+  const c3 = loadChips({ document: d3.document });
+  d3.btns[2].focus();                      // whole rail goes: the search box
+  c3._findChipsApply(d3.rail, { total: 1 });
+  assert.strictEqual(d3.rail.hidden, true);
+  assert.strictEqual(d3.document.activeElement, d3.input);
+  // Focus elsewhere is not touched.
+  const d4 = railDocument(RAIL);
+  const c4 = loadChips({ document: d4.document });
+  d4.btns[1].focus();
+  c4._findChipsApply(d4.rail, { chips: { bars: chipEntry(1) } });
+  assert.strictEqual(d4.document.activeElement, d4.btns[1]);
+});
+
+// _findFetchChipData's sub_chunks fan-out (legacy name-hash buckets).
+const CHIP_DATA_SRC = slice('var _FIND_CHIP_CACHE_MAX', '// Helper for the "no results" toast');
+function loadChipData(manifest, bucketStatus) {
+  const calls = [];
+  const fetch = (u) => {
+    calls.push(u);
+    const st = bucketStatus(u);
+    if (st === 'net') return Promise.reject(new TypeError('Failed to fetch'));
+    return Promise.resolve({ ok: st === 200, status: st, json: () => Promise.resolve([{ n: u }]) });
+  };
+  const fn = new Function('baseUrl', 'fetch', 'navigator', '_findFetchCatManifest', '_findChipCache',
+    CHIP_DATA_SRC + '\nreturn _findFetchChipData;');
+  return { get: fn('http://z/C/', fetch, {}, () => Promise.resolve(manifest), new Map()), calls };
+}
+
+await ok('chip buckets: all failing rejects ("Couldn\'t load"), some failing still shows the rest', async () => {
+  const m = { chips: { shops: { count: 4, sub_chunks: ['0', '1', '2'] } } };
+  const all = loadChipData(m, (u) => (/-1\.json$/.test(u) ? 'net' : 503));
+  await assert.rejects(all.get('shops'), /all 3 buckets failed/);
+  assert.strictEqual(all.calls.length, 3);
+  const some = loadChipData(m, (u) => (/-1\.json$/.test(u) ? 500 : 200));
+  const recs = await some.get('shops');
+  assert.deepStrictEqual(recs.map((r) => r.n.replace('http://z/C/category-index/', '')),
+    ['chip-shops-0.json', 'chip-shops-2.json']);
+  // An empty bucket that loaded fine is not a failure.
+  const empty = loadChipData({ chips: { shops: { count: 0, sub_chunks: ['0'] } } }, () => 200);
+  assert.strictEqual((await empty.get('shops')).length, 1);
+});
+
+await ok('toast: announced politely, wraps as a box', () => {
+  const t = slice('function _showFindToast', '// Generation counter');
+  assert.match(t, /setAttribute\('role', 'status'\)/);
+  assert.match(t, /setAttribute\('aria-live', 'polite'\)/);
+  assert.match(t, /border-radius:18px/);
 });
 
 // ---- Files that live beside the /drive/ PWA, never in a ZIM (020, 100)
