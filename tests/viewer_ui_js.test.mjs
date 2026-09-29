@@ -72,7 +72,7 @@ function loadView(env = {}) {
   const fn = new Function('window', 'document', 'location', 'setTimeout', 'clearTimeout',
     VIEW_SRC + '\nreturn { SZ_VIEWER_VERSION, _szStorage, _szViewKey, _szHashSetsView,' +
     ' _szReadView, _szWriteView, _szOpeningCamera, initViewMemory, initHomeButton,' +
-    ' _szAboutText, _szMonth, initAbout, _szSatellite };');
+    ' _szAboutText, _szMonth, initAbout, _szSatellite, _szSatelliteCreditHtml };');
   // Fake timers: `timers` holds the pending ones; runTimers() fires them.
   const timers = new Map();
   let next = 1;
@@ -402,6 +402,31 @@ await ok('About and credits name the satellite source and flag non-commercial im
     assert.strictEqual(doc.getElementById('attr-satellite-by').textContent,
       cfg.hasSatellite ? cfg.satelliteAttribution : 'static');
   }
+});
+
+await ok('on-map satellite credit: short, linked, escaped, wired into the source', () => {
+  const v = loadView({});
+  const free = v._szSatelliteCreditHtml({ hasSatellite: true, satelliteYear: '2016',
+    satelliteLicense: 'CC BY 4.0', satelliteLicenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+    satelliteAttribution: 'EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (x)',
+    satelliteNonCommercial: false });
+  assert.strictEqual(free, '&copy; <a href="https://cloudless.eox.at" target="_blank" rel="noopener">EOxCloudless</a> 2016' +
+    ' by <a href="https://eox.at" target="_blank" rel="noopener">EOX</a> &middot; ' +
+    '<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>');
+  const nc = v._szSatelliteCreditHtml({ hasSatellite: true, satelliteYear: '2021', satelliteLicense: 'CC BY-NC-SA 4.0',
+    satelliteLicenseUrl: 'https://creativecommons.org/licenses/by-nc-sa/4.0/', satelliteAttribution: 'a',
+    satelliteNonCommercial: true });
+  assert.match(nc, /EOxCloudless<\/a> 2021 .*CC BY-NC-SA 4\.0<\/a> \(non-commercial\)$/);
+  assert.match(v._szSatelliteCreditHtml({ hasSatellite: true }), /EOxCloudless<\/a> 2021 .*CC BY-NC-SA 4\.0/);
+  assert.strictEqual(v._szSatelliteCreditHtml({}), '');
+  // map-config values are data: escaped, and only a CC 4.0 URL becomes a link.
+  const bad = v._szSatelliteCreditHtml({ hasSatellite: true, satelliteYear: '<img src=x onerror=alert(1)>',
+    satelliteLicense: '<b>L</b>', satelliteLicenseUrl: 'javascript:alert(1)', satelliteAttribution: 'a' });
+  assert.ok(!bad.includes('<img') && !bad.includes('<b>') && !bad.includes('javascript:'));
+  assert.match(bad, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  const init = fs.readFileSync(`${REPO}/resources/viewer/src/index/120-map-init-and-style.js`, 'utf8');
+  assert.match(init, /var satCredit = _szSatelliteCreditHtml\(config\);/);
+  assert.match(init, /map\.addSource\('satellite', \{\s*type: 'raster',\s*tiles: \[[^\]]*\],\s*attribution: satCredit,/);
 });
 
 await ok('viewer version matches streetzim/__about__.py', () => {
