@@ -794,6 +794,62 @@
     "65024-65279": "45615b018bf33aaad7fe6ecaabb9a2bf2c0026654be59afd31737702ef6f5785",
     "65280-65535": "8c0acd4b907725b4264e6aa973ec18a50c076e984e514f5781110e670948708e"
    }
+  },
+  "fallback": {
+   "base_url": "https://raw.githubusercontent.com/protomaps/basemaps-assets/028c18f713baecad011301ff7a69acc39bcc2ae7/fonts",
+   "licence": "Noto Sans, SIL Open Font License 1.1 (Copyright 2022 The Noto Project Authors); glyphs made by maplibre/font-maker, as published by https://github.com/protomaps/basemaps-assets",
+   "licence_file": "resources/vendor/noto-sans/OFL.txt",
+   "fontstacks": {
+    "NotoSansRegular": "Noto Sans Regular",
+    "NotoSansMedium": "Noto Sans Medium"
+   },
+   "for": {
+    "OpenSansRegular": "NotoSansRegular",
+    "OpenSansBold": "NotoSansMedium",
+    "OpenSansItalic": "NotoSansRegular"
+   },
+   "scripts": {
+    "Arabic": [
+     "0600-06FF",
+     "FB50-FBFF",
+     "FE70-FEFF"
+    ],
+    "Armenian": [
+     "0530-058F"
+    ],
+    "Georgian": [
+     "10A0-10FF"
+    ],
+    "Hebrew": [
+     "0590-05FF",
+     "FB1D-FB4F"
+    ],
+    "Lao": [
+     "0E80-0EFF"
+    ],
+    "Thai": [
+     "0E00-0E7F"
+    ]
+   },
+   "ranges": {
+    "NotoSansRegular": {
+     "1280-1535": "34345ffc1a3c6748147e079a7971a4ef10561f721fdf76a4a91491280ab8bccb",
+     "1536-1791": "f46850e6574d817d58d96b91196739c77c1b570a7b4f992ff1380d2b4d5d631f",
+     "3584-3839": "6ddbd10873186e1bdd270232b64819587edc06e1d8432baa2a163ace2331bd61",
+     "4096-4351": "f08764a2e60f5d2e5b1d072668aee1be18a04fe542af38dcee419f529c13433c",
+     "64256-64511": "f4de4e219fb88e4856a6c278181d610761d39db843aef1461d1be11e0a391217",
+     "65024-65279": "79839b70b48fa9c4cae32f946571481c167adc35eae404044d1ca74514f731b1"
+    },
+    "NotoSansMedium": {
+     "1280-1535": "655ca6c720bba0bbfc5c6e916eac896a38f6c92346cead859dcbbc7a6ee7544e",
+     "1536-1791": "e998806d6e6b4c03950564e64be0d91c0cfc576c886d698953a42d33f2ccc099",
+     "3584-3839": "b0369e98743aa59c5901b91914eac9280547a259307231308a2ab26c71b1fe60",
+     "4096-4351": "08b5ec865c28a4b151f5b7bd6c7bd83e6a015ef992257620f69a7f576f256f44",
+     "64256-64511": "1bf32ff4dfc08579c5efe334bd618700fcf00a30018d0ae59d3053b4e7decaa1",
+     "65024-65279": "f24c9ca288019e1aabe98bd48a2c480adfa379e6ef8b70da0c7f076a94570136"
+    }
+   },
+   "licence_sha256": "7713cfc8e3c36d5ec4aa3d6cffe7500a1b3310f8a86d914b8ea09c2a9dee7c2d"
   }
  }
 }

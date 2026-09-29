@@ -1263,6 +1263,12 @@ def _add_font_glyphs(creator, MapItem, *, fonts):
         for (font_name, range_key), data in fonts.items():
             # font_name has no spaces (e.g. "OpenSansRegular") to avoid
             # URL-encoding issues across Kiwix implementations
+            if range_key.endswith(".txt"):  # a font licence (fonts/NotoSans/OFL.txt)
+                creator.add_item(MapItem(
+                    f"fonts/{font_name}/{range_key}", f"{font_name} font licence",
+                    "text/plain", data,
+                ))
+                continue
             path = f"fonts/{font_name}/{range_key}.pbf"
             creator.add_item(MapItem(
                 path, f"Font {font_name} {range_key}",

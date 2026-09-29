@@ -9,6 +9,10 @@ writes (docs/viewer-supply-chain.md):
 - The SDF glyph ranges (fonts/<stack>/<start>-<end>.pbf): fetched from the
   openmaptiles font CDN, each checked against its SHA-256, and kept in a
   content-addressed cache so later and offline builds need no network.
+- The fallback glyph ranges (lock ``fonts.fallback``): Noto Sans ranges for
+  the scripts Open Sans lacks (Arabic, Hebrew, ...), fetched from a
+  commit-pinned URL and checked and cached the same way, then merged into
+  the Open Sans ranges (streetzim/glyph_fallback.py).
 
 A file that does not match its hash stops the build (IntegrityError); there
 is no switch to ship it anyway. A range that cannot be downloaded at all is a
@@ -94,6 +98,45 @@ def font_ranges(lock: dict[str, Any] | None = None) -> list[FontRange]:
         for range_key, digest in fonts["ranges"][stack].items():
             out.append(FontRange(stack, range_key, f"{base}/{encoded}/{range_key}.pbf", digest))
     return out
+
+
+class FontFallback(NamedTuple):
+    for_stack: dict[str, str]                   # our stack -> fallback stack
+    scripts: dict[str, list[tuple[int, int]]]   # script -> codepoint blocks
+    ranges: list[FontRange]                     # the fallback stacks' ranges
+    licence_file: str | None                    # vendored licence, repo-relative
+
+
+def font_fallback(lock: dict[str, Any] | None = None) -> FontFallback | None:
+    """The lock file's fallback glyphs (``fonts.fallback``), or None."""
+    from streetzim.glyph_fallback import parse_blocks
+    fb = (lock or load_lock())["fonts"].get("fallback")
+    if not fb:
+        return None
+    base = fb["base_url"].rstrip("/")
+    ranges = [FontRange(stack, range_key,
+                        f"{base}/{urllib.parse.quote(src)}/{range_key}.pbf", digest)
+              for stack, src in fb["fontstacks"].items()
+              for range_key, digest in fb["ranges"][stack].items()]
+    return FontFallback(dict(fb["for"]),
+                        {name: parse_blocks(blocks) for name, blocks in fb["scripts"].items()},
+                        ranges, fb.get("licence_file"))
+
+
+def fallback_licence(lock: dict[str, Any] | None = None) -> bytes | None:
+    """The fallback font's vendored licence text, checked against the lock."""
+    fb: dict[str, Any] = (lock or load_lock())["fonts"].get("fallback") or {}
+    rel: str | None = fb.get("licence_file")
+    want: str | None = fb.get("licence_sha256")
+    if not rel:
+        return None
+    path = ROOT / rel
+    if not path.is_file():
+        raise IntegrityError(f"{path} is missing; {PIN_HELP}")
+    data = path.read_bytes()
+    if sha256_hex(data) != want:
+        raise IntegrityError(f"{path}: sha256 {sha256_hex(data)}, lock file says {want}; {PIN_HELP}")
+    return data
 
 
 def cache_dirs() -> list[Path]:
