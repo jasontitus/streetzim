@@ -42,7 +42,7 @@ set -uo pipefail
 cd /storage/streetzim
 export TMPDIR=/storage/streetzim/tmp
 # bbox_crosses / bbox_stale / bbox_mark / bbox_osmium_area
-. ops/region-bbox.sh
+. ops/region-bbox.sh || exit 1
 
 PLANET="${PLANET:-/storage/streetzim/world-data/planet-2026-08-31.osm.pbf}"
 export OVERTURE_RELEASE="${OVERTURE_RELEASE:-2026-08-19.0}"
@@ -267,6 +267,9 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
   for theme in addresses places; do
     PQ="/storage/streetzim/overture_cache/${theme}-${ID}-${OVERTURE_RELEASE}.parquet"
     if [ ! -s "$PQ" ] || bbox_stale "$PQ" "$BBOX"; then
+      # The downloader keeps any non-empty file ("Cached:"): a stale one
+      # must go first, or it would be relabelled with the new bbox.
+      rm -f "$PQ" "$PQ.bbox"
       log "  download Overture $theme $OVERTURE_RELEASE"
       if ! "$PY" download_overture_data.py "$theme" --bbox="$BBOX" --release "$OVERTURE_RELEASE" --out "$PQ" >> "$LOG" 2>&1; then
         log "  OVERTURE $theme DOWNLOAD FAILED"; rm -f "$PQ"; ov_ok=0

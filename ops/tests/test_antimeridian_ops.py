@@ -291,3 +291,53 @@ def test_derive_region_search_writes_sidecars(tmp_path, monkeypatch):
     m.main()
     assert len((tmp_path / "alaska.search.jsonl").read_text().splitlines()) == 2
     assert (tmp_path / "alaska.search.jsonl.bbox").read_text() == ALASKA + "\n"
+
+
+OVERTURE = {
+    "queue": ("ops/build-refresh-queue.sh", "  ov_ok=1", "  if [ $ov_ok -eq 0 ]"),
+    "ship": ("ops/ship-region.sh", "for theme in addresses places; do", "T0=$(date +%s)"),
+    "rebuild": ("ops/cloud/rebuild_old_regions.sh", "  for THEME in addresses places; do",
+                "  PLACES="),
+}
+
+
+@pytest.mark.parametrize("which", sorted(OVERTURE))
+def test_overture_parquet_cut_for_another_bbox_is_refetched(tmp_path, which):
+    """download_overture_data.py keeps any non-empty file ("Cached:"). A
+    parquet cut for another bbox must be deleted before it runs, or the
+    old file would be relabelled with the new bbox; a valid cached one
+    for a normal row must be kept."""
+    script, start, end = OVERTURE[which]
+    block = _block(script, start, end).replace("/storage/streetzim/", f"{tmp_path}/")
+    (tmp_path / "overture_cache").mkdir()
+    py = tmp_path / "py"
+    py.write_text('#!/bin/bash\nout=""; while [ $# -gt 0 ]; do [ "$1" = --out ] && out="$2"; '
+                  'shift; done\nif [ -s "$out" ]; then echo "  Cached: $out"; exit 0; fi\n'
+                  'echo fetched >> "$STUB_LOG"; echo NEW > "$out"\n')
+    py.chmod(0o755)
+    env = {"PY": str(py), "STUB_LOG": str(tmp_path / "calls.log")}
+    pre = "OVERTURE_RELEASE=rel; REL=rel; LOG=/dev/null"
+
+    def pq(theme):
+        return tmp_path / "overture_cache" / f"{theme}-r-rel.parquet"
+
+    def side(theme):
+        return pq(theme).with_name(pq(theme).name + ".bbox")
+
+    for theme in ("addresses", "places"):              # cut for the old alaska bbox
+        pq(theme).write_text("OLD")
+        side(theme).write_text("-180.0,51.0,-130.0,72.0\n")
+    calls = _run(tmp_path, block, ALASKA, env, pre)
+    assert calls.count("fetched") == 2
+    for theme in ("addresses", "places"):
+        assert pq(theme).read_text() == "NEW\n"
+        assert side(theme).read_text() == ALASKA + "\n"
+    # A normal row with a valid cached parquet (no sidecar yet): kept.
+    for theme in ("addresses", "places"):
+        pq(theme).write_text("CACHED")
+        side(theme).unlink()
+    calls = _run(tmp_path, block, NORMAL, env, pre)
+    assert "fetched" not in calls
+    for theme in ("addresses", "places"):
+        assert pq(theme).read_text() == "CACHED"
+        assert side(theme).read_text() == NORMAL + "\n"

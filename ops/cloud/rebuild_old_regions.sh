@@ -41,7 +41,7 @@ export LD_LIBRARY_PATH=/storage/streetzim/.browser-libs/ex/usr/lib/x86_64-linux-
 export CHROME_PATH="${CHROME_PATH:-/home/ot/.cache/ms-playwright/chromium-1217/chrome-linux64/chrome}"
 PY=/storage/streetzim/venv-linux/bin/python3
 # bbox_crosses / bbox_stale / bbox_mark / bbox_osmium_area
-. ops/region-bbox.sh
+. ops/region-bbox.sh || exit 1
 NODE=/storage/streetzim/.browser-libs/node-v20.18.1-linux-x64/bin/node
 KS=$(readlink -f /storage/streetzim/tools/kiwix-tools_*/kiwix-serve)
 PLANET=/storage/streetzim/world-data/planet-2026-08-31.osm.pbf
@@ -187,7 +187,7 @@ for ID in $ORDER; do
   for THEME in addresses places; do
     OUT=overture_cache/${THEME}-${ID}-${REL}.parquet
     [ -s "$OUT" ] && ! bbox_stale "$OUT" "$BBOX" && continue
-    [ -s "$OUT" ] && rm -f "$OUT"          # cut for another bbox
+    rm -f "$OUT" "$OUT.bbox"               # cut for another bbox (or absent)
     log "  overture $THEME"
     if "$PY" download_overture_data.py "$THEME" --bbox="$BBOX" --release "$REL" --out "$OUT" >> "$LOG" 2>&1; then
       bbox_mark "$OUT" "$BBOX"

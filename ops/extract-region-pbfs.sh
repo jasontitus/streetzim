@@ -25,7 +25,7 @@ unset _ops_real _ops_old
 set -euo pipefail
 cd /storage/streetzim
 # bbox_crosses / bbox_stale / bbox_mark
-. ops/region-bbox.sh
+. ops/region-bbox.sh || exit 1
 PLANET="${PLANET:-/storage/streetzim/world-data/planet-2026-08-31.osm.pbf}"
 REGISTRY="${REGISTRY:-cloud/regions.tsv}"
 BATCH="${BATCH:-16}"

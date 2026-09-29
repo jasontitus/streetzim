@@ -25,7 +25,7 @@ unset _ops_real _ops_old
 set -uo pipefail
 cd /storage/streetzim
 # bbox_stale / bbox_mark
-. ops/region-bbox.sh
+. ops/region-bbox.sh || exit 1
 export TMPDIR=/storage/streetzim/tmp
 export OVERTURE_RELEASE="${OVERTURE_RELEASE:-2026-08-19.0}"
 # 403/429/5xx/timeouts in the liveness cache are mostly bot-blocked live
@@ -78,6 +78,9 @@ log "PBF: $(du -h "$PBF" | cut -f1)"
 for theme in addresses places; do
   PQ="overture_cache/${theme}-${ID}-${OVERTURE_RELEASE}.parquet"
   if [ ! -s "$PQ" ] || bbox_stale "$PQ" "$BBOX"; then
+    # The downloader keeps any non-empty file ("Cached:"): a stale one
+    # must go first, or it would be relabelled with the new bbox.
+    rm -f "$PQ" "$PQ.bbox"
     log "downloading Overture $theme $OVERTURE_RELEASE"
     "$PY" download_overture_data.py "$theme" --bbox="$BBOX" \
       --release "$OVERTURE_RELEASE" --out "$PQ" >> "$LOG" 2>&1 \

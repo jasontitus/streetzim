@@ -19,8 +19,9 @@ deliberately, so nothing depends on that fallback.
 **Rules for the session:**
 - Run only the commands below, from `/storage/streetzim`, one step at a
   time.
-- Do not run it while `build-refresh-queue.sh` or `extract-region-pbfs.sh`
-  is running (both hold the regions lock; step 1 checks it).
+- Do not run it while any script that extracts, downloads or builds a
+  region is running (`build-refresh-queue.sh`, `extract-region-pbfs.sh`,
+  `cloud/rebuild_old_regions.sh`, `ship-region.sh`; step 1 checks).
 - **Stop and report at any `STOP`.** Don't work around it.
 
 ## 1. Check the row and that nothing else is extracting
@@ -28,7 +29,7 @@ deliberately, so nothing depends on that fallback.
 ```sh
 cd /storage/streetzim
 awk -F'\t' '$1=="alaska"{print NF, $3}' cloud/regions.tsv
-pgrep -a -f 'extract-region-pbfs|build-refresh-queue' || echo "idle"
+pgrep -a -f 'extract-region-pbfs|build-refresh-queue|rebuild_old_regions|ship-region' || echo "idle"
 ```
 
 Expect `8 172.0,51.0,-130.0,72.0` and `idle`. Otherwise: STOP.
@@ -59,13 +60,15 @@ writes their sidecars.
 ## 4. Re-derive the tile and search slices
 
 ```sh
+: "${WORLD_MBTILES:?set WORLD_MBTILES to the queue's world tiles}" "${WORLD_SEARCH:?set WORLD_SEARCH to the queue's world search cache}"
+ls -l "$WORLD_MBTILES" "$WORLD_SEARCH"
 ./derive-region-mbtiles.py --only alaska --src "$WORLD_MBTILES"
 ./derive-region-search.py  --only alaska --src "$WORLD_SEARCH"
 cat world-data/regions/alaska.mbtiles.bbox world-data/regions/alaska.search.jsonl.bbox
 ```
 
 Use the same world files the queue is given (`WORLD_MBTILES`,
-`WORLD_SEARCH`). Expect both sidecars to read `172.0,51.0,-130.0,72.0`.
+`WORLD_SEARCH`); if either is unset or missing: STOP. Expect both sidecars to read `172.0,51.0,-130.0,72.0`.
 Otherwise: STOP.
 
 ## 5. Build
@@ -75,3 +78,15 @@ Run the queue for alaska as usual (`./build-refresh-queue.sh --only alaska
 Overture download for both themes, and, from the build,
 `Joined N road(s) split at the antimeridian` and
 `opening centre: [-149.9003, 61.2181] from registry anchor (Alaska)`.
+
+## 6. Free the parked files
+
+Only after the alaska build passed its gates:
+
+```sh
+ls -l world-data/regions/alaska.*.stale-* 2>/dev/null
+rm -f world-data/regions/alaska.*.stale-*
+```
+
+These are the old slices the queue parked (`.stale-<date>`) when their
+bbox no longer matched; they can be tens of GB.
