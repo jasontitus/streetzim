@@ -29,16 +29,23 @@ step 4.
 
 ## 1. Before: look at the host (read-only)
 
+Every git command names the checkout with `-C`, so nothing depends on the
+working directory.
+
 ```bash
-cd /storage/streetzim
-git rev-parse --short HEAD; git rev-parse --abbrev-ref HEAD
-git --no-optional-locks status -sb        # anything but ?? lines: see below
-git rev-list --left-right --count '@{u}...HEAD'   # "behind ahead": ahead must be 0
-crontab -l                                # note entries that call scripts here
+git -C /storage/streetzim rev-parse --short HEAD
+git -C /storage/streetzim rev-parse --abbrev-ref HEAD
+# anything but ?? lines: see below
+git -C /storage/streetzim --no-optional-locks status -sb
+# "behind ahead": ahead must be 0
+git -C /storage/streetzim rev-list --left-right --count '@{u}...HEAD'
+# note entries that call scripts in the checkout
+crontab -l
 ps -eo pid,lstart,args | grep -E '/storage/streetzim/.*\.(sh|py|mjs)' | grep -v grep
 # started from inside the checkout (best effort; also matches the physical path)
 for d in /proc/[0-9]*; do c=$(readlink "$d/cwd" 2>/dev/null); case "$c" in /storage/streetzim|/storage/streetzim/*|"$(cd /storage/streetzim && pwd -P)"|"$(cd /storage/streetzim && pwd -P)"/*) echo "${d#/proc/} $(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)";; esac; done
-ls -1 .*.sh 2>/dev/null                   # untracked host scripts
+# untracked host scripts
+ls -1 /storage/streetzim/.*.sh 2>/dev/null
 ```
 
 (`--no-optional-locks` keeps `git status` from rewriting the index while
@@ -111,11 +118,15 @@ git -C /tmp/sz-pull merge -q --ff-only FETCH_HEAD
 bash /tmp/sz-pull/ops/check_stage1.sh --root /tmp/sz-pull --python /storage/streetzim/venv-linux/bin/python3
 ```
 
-**Three details:**
+**Four details:**
 - `merge --ff-only` must succeed: that is the same fast-forward the host
   will do.
 - `--unset-upstream` stops the checker from counting the new commits as
   "local commits". In the copy, the upstream is the host's own branch.
+- It fast-forwards to the feature branch. If the host already has commits
+  of the branch it pulls that the feature branch lacks, this fails although
+  the real pull may not; once the branch is merged, fetch that branch
+  instead.
 - A clone doesn't carry the host's uncommitted edits to the lists. They
   don't block the real pull because the split doesn't change those files;
   this prints nothing if that still holds:
@@ -137,27 +148,27 @@ Go on to step 4 only if all of these hold:
 
 ## 4. The pull (the only step that changes the host)
 
+One command. It records the commit before the pull (the rollback point),
+pulls only if that record was written, then records the commit the pull
+reached. Both files are in `$HOME`, so they survive a reboot. If the
+checkout is already at the split, it stops and keeps the earlier records.
+
 ```bash
-cd /storage/streetzim
-# the commit to roll back to; kept in $HOME (survives a reboot), recorded once
-[ -e "$HOME/sz-before-stage1.txt" ] || git rev-parse HEAD > "$HOME/sz-before-stage1.txt"
-cat "$HOME/sz-before-stage1.txt"
-git pull --ff-only
+if git -C /storage/streetzim cat-file -e HEAD:ops/in-place.txt 2>/dev/null; then echo "STOP: already at the split; the recorded rollback point is kept"; else rm -f "$HOME/sz-after-stage1.txt" && git -C /storage/streetzim rev-parse HEAD > "$HOME/sz-before-stage1.txt" && git -C /storage/streetzim pull --ff-only && git -C /storage/streetzim rev-parse HEAD > "$HOME/sz-after-stage1.txt"; fi
+cat "$HOME/sz-before-stage1.txt" "$HOME/sz-after-stage1.txt"
 ```
 
-(After a pull, `ORIG_HEAD` also names the commit before it, until the next
-pull or reset.)
-
-- **If it refuses** (local changes, or not a fast-forward), it has
-  changed nothing. Go back to step 1.
+- **If the pull refuses** (local changes, or not a fast-forward), it has
+  changed nothing, and there is no `sz-after-stage1.txt`. Go back to
+  step 1. Running the command again later records the rollback point
+  afresh.
 - **The build VMs** (`ops/cloud/build-vm-startup.sh`) pull on their own
   when they start.
 
 ## 5. After: verify on the host (read-only)
 
 ```bash
-cd /storage/streetzim
-bash ops/check_stage1.sh --python venv-linux/bin/python3
+bash /storage/streetzim/ops/check_stage1.sh --root /storage/streetzim --python /storage/streetzim/venv-linux/bin/python3
 ps -eo pid,lstart,args | grep -E '/storage/streetzim/.*\.(sh|py|mjs)' | grep -v grep
 ```
 
@@ -174,27 +185,26 @@ ps -eo pid,lstart,args | grep -E '/storage/streetzim/.*\.(sh|py|mjs)' | grep -v 
 **Optional smoke check.** Python tools that only print help:
 
 ```bash
-venv-linux/bin/python3 cloud/serve_zims.py --help
-venv-linux/bin/python3 ops/cloud/serve_zims.py --help
+/storage/streetzim/venv-linux/bin/python3 /storage/streetzim/cloud/serve_zims.py --help
+/storage/streetzim/venv-linux/bin/python3 /storage/streetzim/ops/cloud/serve_zims.py --help
 ```
 
 Both must work, from any directory.
 
 ## 6. Rollback, if anything is wrong
 
-First make sure the host has made **no commits of its own since the
-pull**. `ops/cloud/upload_validated.sh` commits torrent files on the host,
-and a rollback would silently drop them.
+The rollback runs only if HEAD is still the commit the pull reached. If
+anything committed since (`ops/cloud/upload_validated.sh` commits torrent
+files on the host), a rollback would take those files back off the disk,
+so the command stops instead. Then ask.
 
 ```bash
-cd /storage/streetzim
-# must print nothing; if it lists commits, stop and ask
-git log --oneline "$(cat "$HOME/sz-before-stage1.txt")"..HEAD --not '@{u}'
 # host-edited lists may show M: they are kept
-git --no-optional-locks status --short
-git reset --keep "$(cat "$HOME/sz-before-stage1.txt")"
-# expect only the host-edited lists
-git --no-optional-locks status --short
+git -C /storage/streetzim --no-optional-locks status --short
+if test -s "$HOME/sz-before-stage1.txt" && test "$(git -C /storage/streetzim rev-parse HEAD)" = "$(cat "$HOME/sz-after-stage1.txt" 2>/dev/null)"; then git -C /storage/streetzim reset --keep "$(cat "$HOME/sz-before-stage1.txt")"; else echo "STOP: HEAD moved since the pull, or no rollback point was recorded; ask"; fi
+# expect the same lines as before: the host-edited lists, plus ?? lines
+git -C /storage/streetzim --no-optional-locks status --short
+git -C /storage/streetzim log --oneline -1
 ```
 
 `git reset --keep` moves the branch back and updates the files, but keeps
@@ -204,8 +214,8 @@ changes nothing. Then stop and ask.
 
 **Don't use:**
 - `git reset --hard`: it discards the host-edited lists;
-- `git checkout <sha> -- .`: it overwrites them, and leaves `ops/`
-  staged.
+- `git checkout <sha> -- .`: it overwrites them, leaves the `ops/` files
+  in place, and stages regular files over the old-path symlinks.
 
 **What a rollback brings back:**
 - the regular files replace the symlinks;
@@ -214,13 +224,15 @@ changes nothing. Then stop and ask.
 
 Report what failed, with the check output.
 
+Once stage 1 is accepted (or rolled back), delete
+`$HOME/sz-before-stage1.txt` and `$HOME/sz-after-stage1.txt`.
+
 ## Prompt for a Claude Code session on the host
 
 > Test the streetzim ops split on this host, read-only.
 >
 > 1. First run exactly these commands, each as written. Every git command
->    must name `/tmp/sz-stage1` with `-C`; never run git inside
->    `/storage/streetzim`:
+>    names `/tmp/sz-stage1` with `-C`:
 >    ```
 >    cd /tmp
 >    rm -rf /tmp/sz-stage1
@@ -237,8 +249,11 @@ Report what failed, with the check output.
 > - the full output of step 2.
 >
 > Rules:
-> - Never run `git fetch`, `checkout`, `pull`, `merge`, `reset`, `stash`
->   or `commit` in `/storage/streetzim`, and change nothing there.
+> - The only git commands on `/storage/streetzim` are the read-only
+>   `git -C /storage/streetzim` ones written in the runbook (`rev-parse`,
+>   `status`, `rev-list`, `remote get-url`). Never run `fetch`,
+>   `checkout`, `pull`, `merge`, `reset`, `stash` or `commit` there, and
+>   change nothing there.
 > - Run no production script.
 > - If anything fails, stop and report; don't improvise a workaround.
 > - Stop at step 3 and wait for my go-ahead before the pull in step 4.

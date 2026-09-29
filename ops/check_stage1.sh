@@ -26,7 +26,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 if [ -z "$ROOT" ]; then
-  ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+  # the path it was started by (logical, e.g. /storage/streetzim), not the
+  # physical one: step 6 matches both
+  ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 fi
 ROOT="$(cd "$ROOT" 2>/dev/null && pwd)" || { echo "no such directory: --root" >&2; exit 2; }
 [ -n "$ROOT" ] || { echo "no such directory: --root" >&2; exit 2; }
@@ -153,7 +155,7 @@ running=$( { ps -eo pid=,args= | awk -v r="$ROOT/" -v p="$PHYS/" '(index($0, r) 
              done; } | sort -u -n )
 if [ -n "$running" ]; then warn "scripts running from this checkout, best effort (they keep running across a pull):"; printf '%s\n' "$running" | sed 's/^/          /'; else ok "no scripts from this checkout found running (best effort)"; fi
 if command -v crontab >/dev/null && crontab -l >/dev/null 2>&1; then
-  n=$(crontab -l 2>/dev/null | grep -v '^#' | grep -c "$ROOT")
+  n=$(crontab -l 2>/dev/null | grep -v '^#' | grep -cF -e "$ROOT" -e "$PHYS")
   warn "$n crontab line(s) name this checkout (they keep working through the symlinks)"
 fi
 hidden=$(git ls-files --others -- '.*.sh' | grep -vc '/' )
