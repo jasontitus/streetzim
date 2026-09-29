@@ -43,7 +43,8 @@ class SatelliteSource:
     def license_metadata(self) -> str:
         """The satellite part of the ZIM's License metadata."""
         use = ", non-commercial use only" if self.noncommercial else ""
-        return f"Satellite imagery: {self.license}{use} ({self.attribution})"
+        return (f"Satellite imagery: {self.license}{use}, {self.license_url} "
+                f"({self.attribution})")
 
 
 _BY = "EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH"
@@ -90,6 +91,20 @@ def flavour(src: SatelliteSource) -> str:
 
 def tags(src: SatelliteSource) -> list[str]:
     return [TAG, TAG_NONCOMMERCIAL] if src.noncommercial else [TAG]
+
+
+def check_flavour(flavour_: str | None, src: SatelliteSource | None) -> None:
+    """ValueError when a --flavour contradicts the imagery: a satellite
+    flavour on a ZIM without it, or not the source's own flavour (a
+    non-commercial ZIM must never pass for a free one)."""
+    if flavour_ is None:
+        return
+    if src is None:
+        if flavour_ in (FLAVOUR_FREE, FLAVOUR_NONCOMMERCIAL):
+            raise ValueError(f"--flavour {flavour_} but the ZIM has no satellite imagery")
+    elif flavour_ != flavour(src):
+        raise ValueError(f"--flavour {flavour_} but the satellite imagery is {src.key} "
+                         f"({src.license}); its flavour is {flavour(src)}")
 
 
 def restricted_note(src: SatelliteSource) -> str:

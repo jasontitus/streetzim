@@ -192,7 +192,8 @@ def add_satellite_flags(p: argparse.ArgumentParser) -> None:
     sat.add_argument("--satellite", action="store_true",
                      help="Add a satellite imagery layer (a Satellite button in the "
                           f"viewer). Off by default. The source defaults to {free}, "
-                          "CC BY 4.0; the ZIM's Flavour becomes 'satellite'")
+                          "CC BY 4.0; the ZIM's Flavour becomes 'satellite'. "
+                          "--satellite-source and --satellite-max-zoom also turn it on")
     sat.add_argument("--satellite-source", choices=sorted(satellite_sources.SOURCES),
                      help=f"Satellite imagery source (implies --satellite). {free}: EOX Sentinel-2 "
                           "cloudless 2016, CC BY 4.0, free for any use with "
@@ -203,26 +204,28 @@ def add_satellite_flags(p: argparse.ArgumentParser) -> None:
                           "ZIM as restricted (Flavour 'satellite-nc', tag "
                           f"'non-commercial'). Default: {free}")
     sat.add_argument("--satellite-accept-noncommercial", action="store_true",
-                     help="Required with a non-commercial --satellite-source: "
+                     help="Required with a non-commercial --satellite-source "
+                          "(s2cloudless-2021), refused without satellite imagery: "
                           "confirms that this ZIM may be used and redistributed "
                           "for non-commercial purposes only")
     sat.add_argument("--satellite-max-zoom", type=int, choices=range(0, 15),
                      metavar="{0..14}",
-                     help="Maximum zoom of the satellite tiles (the viewer "
-                          "over-zooms past it). Default: --max-zoom, and at most "
-                          "13 for areas centred 45 degrees or more from the equator")
+                     help="Maximum zoom of the satellite tiles (implies "
+                          "--satellite; the viewer over-zooms past it). Default: "
+                          "--max-zoom, and at most 13 for areas centred 45 degrees "
+                          "or more from the equator")
+
+
+LONG_DESCRIPTION_MAX = 4000      # zimscraperlib; streetzim/zim_metadata.py
 
 
 def satellite_source(args: argparse.Namespace) -> satellite_sources.SatelliteSource | None:
     """The satellite source the flags ask for (None: no satellite), after
     checking them. ValueError when they are inconsistent, or a
     non-commercial source is not acknowledged."""
-    if not (args.satellite or args.satellite_source):
-        extra = ["satellite_max_zoom"] if args.satellite_max_zoom is not None else []
-        extra += ["satellite_accept_noncommercial"] if args.satellite_accept_noncommercial else []
-        if extra:
-            raise ValueError("--" + ", --".join(f.replace("_", "-") for f in extra)
-                             + " needs --satellite")
+    if not (args.satellite or args.satellite_source or args.satellite_max_zoom is not None):
+        if args.satellite_accept_noncommercial:
+            raise ValueError("--satellite-accept-noncommercial needs --satellite-source")
         return None
     src = satellite_sources.get(args.satellite_source or satellite_sources.OPENZIM_DEFAULT)
     if src.noncommercial and not args.satellite_accept_noncommercial:
@@ -249,8 +252,14 @@ def apply_satellite(args: argparse.Namespace) -> None:
         return
     args.tags = ";".join(([args.tags] if args.tags else []) + satellite_sources.tags(src))
     if src.noncommercial:
+        # The note always fits: the text before it is cut to leave room
+        # (code points, which are never fewer than graphemes).
         note = satellite_sources.restricted_note(src)
-        args.long_description = f"{args.long_description or args.description}\n\n{note}"
+        text = args.long_description or args.description
+        room = LONG_DESCRIPTION_MAX - len(note) - 2
+        if len(text) > room:
+            text = text[:room - 1].rstrip() + "\u2026"
+        args.long_description = f"{text}\n\n{note}"
 
 
 def satellite_argv(args: argparse.Namespace) -> list[str]:

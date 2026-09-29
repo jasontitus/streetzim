@@ -677,6 +677,12 @@ def _openzim_options(*, args):
 
     # Validate the openZIM metadata now, not after a multi-hour build.
     zim_metadata = zim_illustration = None
+    try:
+        satellite_sources.check_flavour(
+            args.flavour,
+            satellite_sources.get(args.satellite_source) if args.satellite else None)
+    except ValueError as e:
+        raise SystemExit(f"Error: {e}") from None
     if any(getattr(args, k) is not None for k in (
             "zim_name", "title", "description", "long_description", "creator",
             "publisher", "tags", "scraper", "flavour")):
@@ -749,7 +755,8 @@ def _layer_options(*, args, bbox_str):
     """Satellite, terrain, Wikidata and routing options."""
     # Satellite options
     include_satellite = args.satellite
-    satellite_max_zoom = args.satellite_zoom or args.max_zoom
+    satellite_max_zoom = (args.satellite_zoom if args.satellite_zoom is not None
+                          else args.max_zoom)
     # Latitude-aware satellite cap.
     #
     # The imagery is Sentinel-2 Cloudless, natively 10 m/pixel. A 256 px tile
@@ -785,7 +792,9 @@ def _layer_options(*, args, bbox_str):
                 satellite_max_zoom = 13
         except Exception as _e:   # never fail a build over a progress nicety
             print(f"    satellite: latitude cap skipped ({_e})", flush=True)
-    satellite_download_zoom = args.satellite_download_zoom or satellite_max_zoom
+    satellite_download_zoom = (args.satellite_download_zoom
+                               if args.satellite_download_zoom is not None
+                               else satellite_max_zoom)
     satellite_format = args.satellite_format
     satellite_quality = args.satellite_quality
     satellite_tile_size = args.satellite_tile_size
@@ -1642,8 +1651,12 @@ def main(argv=None):
         sat_desc = f"{satellite_format} q{satellite_quality} {satellite_tile_size}px"
         _src = satellite_sources.get(args.satellite_source)
         print(f"  Including Sentinel-2 satellite imagery (z0-{satellite_max_zoom}, {sat_desc}); "
-              f"{_src.key}, {_src.license}"
-              + (", NON-COMMERCIAL use only" if _src.noncommercial else ""))
+              f"{_src.key}, {_src.license}")
+        if _src.noncommercial:
+            print("  " + "!" * 72)
+            print(f"  !! NON-COMMERCIAL: {_src.key} imagery is {_src.license}. This ZIM may")
+            print("  !! only be used and redistributed for non-commercial purposes.")
+            print("  " + "!" * 72)
     if include_terrain:
         print(f"  Including Copernicus GLO-30 terrain (z0-{terrain_max_zoom})")
     if include_wikidata:

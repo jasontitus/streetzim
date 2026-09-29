@@ -171,11 +171,102 @@ def test_acknowledging_is_harmless_for_a_free_source():
     assert a.flavour == "satellite" and "non-commercial" not in a.tags
 
 
-@pytest.mark.parametrize("extra", [["--satellite-accept-noncommercial"],
-                                   ["--satellite-max-zoom", "12"]])
-def test_satellite_options_without_satellite_are_refused(extra):
-    with pytest.raises(ValueError, match="needs --satellite"):
-        _args(extra)
+def test_acknowledgement_alone_is_refused():
+    with pytest.raises(ValueError, match="needs --satellite-source"):
+        _args(["--satellite-accept-noncommercial"])
+
+
+def test_satellite_max_zoom_implies_satellite_and_zero_is_honoured(no_network, tmp_path):
+    a = _args(["--satellite-max-zoom", "0"])
+    assert a.flavour == "satellite"
+    ns = _builder(cli.plan(a, tmp_path)[0])
+    assert ns.satellite and ns.satellite_zoom == 0
+    import create_osm_zim as coz
+    opts = coz._layer_options(args=ns, bbox_str=ns.bbox)
+    assert opts[1] is True and opts[6] == 0 and opts[4] == 0   # max and download zoom
+
+
+def test_note_always_fits_a_long_description():
+    from streetzim.zim_metadata import LONG_DESCRIPTION_MAX, build_overrides
+    a = _args(["--satellite-source", NC.key, "--satellite-accept-noncommercial",
+               "--long-description", "x" * LONG_DESCRIPTION_MAX])
+    assert a.long_description.endswith(ss.restricted_note(NC))
+    assert "\u2026\n\nRestricted:" in a.long_description
+    assert build_overrides(long_description=a.long_description)["LongDescription"]
+
+
+def test_license_metadata_names_the_licence_url():
+    assert FREE.license_url in FREE.license_metadata
+    assert NC.license_url in NC.license_metadata
+
+
+# ------------------------------------------------------------ the builder glue
+
+
+@pytest.fixture
+def glue(no_network, tmp_path, monkeypatch):
+    """create_osm_zim's arguments for a `streetzim` command line, with the
+    tile download recorded instead of run."""
+    import create_osm_zim as coz
+    import streetzim.satellite as sat
+    monkeypatch.setattr(sat, "CACHE_DIR", str(tmp_path / "cache"))
+    calls = []
+
+    def fake_download(bbox_str, dest_dir, *a, **kw):
+        calls.append({"dest_dir": dest_dir, **kw})
+        import os
+        os.makedirs(dest_dir, exist_ok=True)
+        return 1
+    monkeypatch.setattr(coz, "download_satellite_tiles", fake_download)
+    monkeypatch.setattr(coz, "generate_terrain_tiles", lambda *a, **kw: None)
+
+    def run(extra, terrain=False):
+        a = _args(extra)
+        ns = _builder(cli.plan(a, tmp_path)[0])
+        sat_dir, _ = coz._satellite_and_terrain(
+            args=ns, bbox_str=ns.bbox, include_routing=False, include_satellite=True,
+            include_terrain=terrain, include_wikidata=False, satellite_download_zoom=12,
+            satellite_format="avif", satellite_quality=40, satellite_tile_size=256,
+            terrain_max_zoom=12, total_steps=8)
+        _, cfg = coz._build_map_config(
+            args=ns, bbox_str=ns.bbox, name="Monaco", overture_sources=None,
+            routing_graph_path=None, satellite_dir=sat_dir, satellite_format="avif",
+            satellite_max_zoom=12, satellite_tile_size=256, search_features=[],
+            terrain_dir=None, terrain_max_zoom=12, total_steps=8,
+            wiki_cross_refs=None, wikidata_data=None)
+        _, _, md = coz._openzim_options(args=ns)
+        return sat_dir, cfg, md
+    run.calls = calls
+    return run
+
+
+@pytest.mark.parametrize("terrain", [False, True])     # sequential / in parallel
+@pytest.mark.parametrize("extra,src", [(["--satellite"], FREE),
+                                       (["--satellite-source", NC.key,
+                                         "--satellite-accept-noncommercial"], NC)])
+def test_builder_downloads_labels_and_credits_the_chosen_year(glue, extra, src, terrain):
+    sat_dir, cfg, md = glue(extra, terrain)
+    (call,) = glue.calls
+    assert call["source"] == src.key
+    want = ("satellite_s2cloudless-2016" if src is FREE else "satellite_cache_avif_256")
+    assert Path(call["dest_dir"]).parts[-2 if src is FREE else -1] == want
+    assert call["dest_dir"] == sat_dir
+    assert cfg["satelliteSource"] == src.key
+    assert cfg["satelliteNonCommercial"] == src.noncommercial
+    assert md["Flavour"] == ss.flavour(src)
+
+
+@pytest.mark.parametrize("argv", [
+    ["--satellite", "--satellite-source", "s2cloudless-2021", "--flavour", "satellite"],
+    ["--satellite", "--flavour", "satellite"],                 # builder default is 2021
+    ["--flavour", "satellite-nc"],
+])
+def test_builder_refuses_a_flavour_that_contradicts_the_imagery(argv):
+    import create_osm_zim as coz
+    with pytest.raises(SystemExit, match="flavour"):
+        coz._openzim_options(args=_builder(["--bbox", "7.4,43.72,7.44,43.76"] + argv))
+    ok = _builder(["--bbox", "7.4,43.72,7.44,43.76", "--satellite", "--flavour", "satellite-nc"])
+    assert coz._openzim_options(args=ok)[2]["Flavour"] == "satellite-nc"
 
 
 def test_file_name_flavour_placeholder():
