@@ -34,6 +34,11 @@ DST_DIR = os.path.join(ROOT, "world-data", "regions")
 TMP = os.path.join(ROOT, "tmp")
 
 
+# Registry bbox text per region, written to <output>.bbox (ops/region-bbox.sh:
+# the queue treats a slice cut for another bbox as stale).
+BBOX_TEXT = {}
+
+
 def load_regions(registry, only=None):
     out = {}
     with open(registry, encoding="utf-8") as fh:
@@ -46,6 +51,7 @@ def load_regions(registry, only=None):
             rid, _name, bbox = parts[0], parts[1], parts[2]
             if only and rid not in only:
                 continue
+            BBOX_TEXT[rid] = bbox
             out[rid] = tuple(float(v) for v in bbox.split(","))
     return out
 
@@ -180,6 +186,8 @@ def main():
         if os.path.islink(final) or os.path.exists(final):
             os.unlink(final)
         os.rename(part[rid], final)
+        with open(final + ".bbox", "w") as fh:
+            fh.write(BBOX_TEXT[rid] + "\n")
         sz = os.path.getsize(final) / 1e9
         print(f"      {rid:28s} {counts[rid]:>12,} tiles  {sz:6.2f} GB", flush=True)
 

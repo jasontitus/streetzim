@@ -40,6 +40,8 @@ export ZSTD_CLEVEL="${ZSTD_CLEVEL:-22}"
 export LD_LIBRARY_PATH=/storage/streetzim/.browser-libs/ex/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}
 export CHROME_PATH="${CHROME_PATH:-/home/ot/.cache/ms-playwright/chromium-1217/chrome-linux64/chrome}"
 PY=/storage/streetzim/venv-linux/bin/python3
+# bbox_crosses / bbox_stale / bbox_mark / bbox_osmium_area
+. ops/region-bbox.sh
 NODE=/storage/streetzim/.browser-libs/node-v20.18.1-linux-x64/bin/node
 KS=$(readlink -f /storage/streetzim/tools/kiwix-tools_*/kiwix-serve)
 PLANET=/storage/streetzim/world-data/planet-2026-08-31.osm.pbf
@@ -151,15 +153,14 @@ for ID in $ORDER; do
   log "=== $ID ($NAME) bbox=$BBOX"
 
   PBF=world-data/regions/${ID}.osm.pbf
-  if [ ! -s "$PBF" ]; then
+  if [ ! -s "$PBF" ] || bbox_stale "$PBF" "$BBOX"; then
     log "  osmium extract -> $PBF"
-    AREA=(-b "$BBOX")
-    # Across the antimeridian (minlon > maxlon): a box each side of 180.
-    if awk -F, '{ exit !($1 > $3 || $3 > 180) }' <<< "$BBOX"; then
-      "$PY" -m streetzim.area poly "$BBOX" "$PBF.poly" && AREA=(-p "$PBF.poly")
-    fi
+    # -b "$BBOX"; across the antimeridian a two-ring .poly, never -b.
+    bbox_osmium_area "$BBOX" "$PBF.poly" \
+      || { log "  POLY FAILED for $ID (bbox $BBOX crosses the antimeridian)"; row "$ID" extract-failed "-"; continue; }
     flock "$PBFLOCK" osmium extract "${AREA[@]}" "$PLANET" -o "$PBF" --overwrite >> "$LOG" 2>&1 \
       || { log "  EXTRACT FAILED"; rm -f "$PBF"; row "$ID" extract-failed "-"; continue; }
+    bbox_mark "$PBF" "$BBOX"
     log "  pbf $(du -h "$PBF" | cut -f1)"
   else log "  pbf present ($(du -h "$PBF" | cut -f1))"; fi
 
@@ -172,7 +173,11 @@ for ID in $ORDER; do
   # world file. Symlink ONLY when nothing is there.
   for _pair in "${ID}.mbtiles:$WORLD_MB" "${ID}.search.jsonl:$WORLD_SEARCH"; do
     _dst="world-data/regions/${_pair%%:*}"; _src="${_pair#*:}"
-    if [ -e "$_dst" ] && [ ! -L "$_dst" ]; then
+    if [ -e "$_dst" ] && [ ! -L "$_dst" ] && bbox_stale "$_dst" "$BBOX"; then
+      # Cut for another bbox: park it (never delete; see above), use the world file.
+      mv -f "$_dst" "$_dst.stale-$(date +%F)"; ln -sfn "$_src" "$_dst"
+      log "  $(basename "$_dst"): cut for another bbox, parked; now -> world file"
+    elif [ -e "$_dst" ] && [ ! -L "$_dst" ]; then
       log "  keeping existing extract $(basename "$_dst") ($(du -h "$_dst" | cut -f1))"
     else
       ln -sfn "$_src" "$_dst"
@@ -181,10 +186,14 @@ for ID in $ORDER; do
 
   for THEME in addresses places; do
     OUT=overture_cache/${THEME}-${ID}-${REL}.parquet
-    [ -s "$OUT" ] && continue
+    [ -s "$OUT" ] && ! bbox_stale "$OUT" "$BBOX" && continue
+    [ -s "$OUT" ] && rm -f "$OUT"          # cut for another bbox
     log "  overture $THEME"
-    "$PY" download_overture_data.py "$THEME" --bbox="$BBOX" --release "$REL" --out "$OUT" >> "$LOG" 2>&1 \
-      || log "  overture $THEME failed (continuing; build guards on file presence)"
+    if "$PY" download_overture_data.py "$THEME" --bbox="$BBOX" --release "$REL" --out "$OUT" >> "$LOG" 2>&1; then
+      bbox_mark "$OUT" "$BBOX"
+    else
+      log "  overture $THEME failed (continuing; build guards on file presence)"
+    fi
   done
   PLACES=overture_cache/places-${ID}-${REL}.parquet
   if [ ! -s "$PLACES" ]; then

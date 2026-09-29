@@ -41,6 +41,8 @@ unset _ops_real _ops_old
 set -uo pipefail
 cd /storage/streetzim
 export TMPDIR=/storage/streetzim/tmp
+# bbox_crosses / bbox_stale / bbox_mark / bbox_osmium_area
+. ops/region-bbox.sh
 
 PLANET="${PLANET:-/storage/streetzim/world-data/planet-2026-08-31.osm.pbf}"
 export OVERTURE_RELEASE="${OVERTURE_RELEASE:-2026-08-19.0}"
@@ -141,7 +143,7 @@ log "=== refresh queue start: planet=$(basename "$PLANET") overture=$OVERTURE_RE
 link_world() {  # link_world <world-file> <regions/<id>.ext>
   local target="$1" link="$2"
   if [ -L "$link" ] || [ ! -e "$link" ]; then ln -sfn "$target" "$link"; return; fi
-  if [ "$link" -nt "$target" ]; then log "  keeping dedicated $(basename "$link") (newer than $(basename "$target"))"; return; fi
+  if [ "$link" -nt "$target" ] && ! bbox_stale "$link" "$BBOX"; then log "  keeping dedicated $(basename "$link") (newer than $(basename "$target"))"; return; fi
   mv -f "$link" "$link.stale-$TODAY"; ln -sfn "$target" "$link"
   log "  $(basename "$link"): stale regional extract parked as .stale-$TODAY, now → $(basename "$target")"
 }
@@ -244,29 +246,32 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
   link_world "$WORLD_SEARCH"  "$REGDIR/$ID.search.jsonl"
 
   PBF="$REGDIR/$ID.osm.pbf"
-  if [ ! -f "$PBF" ] || [ -L "$PBF" ] || [ ! "$PBF" -nt "$PLANET" ]; then
+  if [ ! -f "$PBF" ] || [ -L "$PBF" ] || [ ! "$PBF" -nt "$PLANET" ] || bbox_stale "$PBF" "$BBOX"; then
     log "  extract PBF from $(basename "$PLANET")"
     rm -f "$PBF"
-    AREA=(-b "$BBOX")
-    # Across the antimeridian (minlon > maxlon, e.g. alaska): a box each
-    # side of 180, as a two-ring .poly (streetzim/area.py).
-    if awk -F, '{ exit !($1 > $3 || $3 > 180) }' <<< "$BBOX"; then
-      "$PY" -m streetzim.area poly "$BBOX" "$PBF.poly" && AREA=(-p "$PBF.poly")
+    # -b "$BBOX"; across the antimeridian (minlon > maxlon, e.g. alaska) a
+    # two-ring .poly, and never -b (region-bbox.sh).
+    if ! bbox_osmium_area "$BBOX" "$PBF.poly"; then
+      log "  POLY FAILED for $ID (bbox $BBOX crosses the antimeridian)"; row "$ID" extract-failed 0 - "poly"; n_fail=$((n_fail+1)); continue
     fi
-    if ! osmium extract "${AREA[@]}" "$PLANET" -o "$PBF.part" --overwrite --strategy complete_ways >> "$LOG" 2>&1; then
+    # -f pbf: osmium cannot tell the format of a *.part name.
+    if ! osmium extract "${AREA[@]}" "$PLANET" -o "$PBF.part" -f pbf --overwrite --strategy complete_ways >> "$LOG" 2>&1; then
       log "  EXTRACT FAILED"; row "$ID" extract-failed 0 - "osmium extract"; n_fail=$((n_fail+1)); continue
     fi
     mv -f "$PBF.part" "$PBF"
+    bbox_mark "$PBF" "$BBOX"
   fi
   log "  PBF: $(du -h "$PBF" | cut -f1)"
 
   ov_ok=1
   for theme in addresses places; do
     PQ="/storage/streetzim/overture_cache/${theme}-${ID}-${OVERTURE_RELEASE}.parquet"
-    if [ ! -s "$PQ" ]; then
+    if [ ! -s "$PQ" ] || bbox_stale "$PQ" "$BBOX"; then
       log "  download Overture $theme $OVERTURE_RELEASE"
       if ! "$PY" download_overture_data.py "$theme" --bbox="$BBOX" --release "$OVERTURE_RELEASE" --out "$PQ" >> "$LOG" 2>&1; then
         log "  OVERTURE $theme DOWNLOAD FAILED"; rm -f "$PQ"; ov_ok=0
+      else
+        bbox_mark "$PQ" "$BBOX"
       fi
     fi
   done

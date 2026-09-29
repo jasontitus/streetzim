@@ -55,16 +55,29 @@ THEME_SPECS = {
 SUPPORTED_THEMES = set(THEME_SPECS.keys())
 
 
-def bbox_where(minlon: float, minlat: float, maxlon: float, maxlat: float) -> str:
-    """The SQL filter for the bbox. Across the antimeridian (minlon >
-    maxlon, streetzim/area.py): one box each side of 180."""
+def overture_sql(columns: str, source: str, bbox: tuple[float, float, float, float],
+                 out_path: str) -> str:
+    """The COPY statement for the bbox.
+
+    The bbox filter exploits Overture's per-row `bbox` struct, which DuckDB
+    can push into the parquet predicate and cut >99% of IO. A bbox across
+    the antimeridian (minlon > maxlon, streetzim/area.py) is one SELECT per
+    side joined by UNION ALL, each with a plain box filter: an OR of the two
+    boxes is not pushed down (about 10x slower)."""
+    minlon, minlat, maxlon, maxlat = bbox
+    boxes = [bbox]
     if minlon > maxlon or maxlon > 180:
         from streetzim import area
-        return " OR ".join(
-            f"(bbox.xmin >= {w} AND bbox.xmax <= {e} AND bbox.ymin >= {s} AND bbox.ymax <= {n})"
-            for w, s, e, n in area.sides((minlon, minlat, maxlon, maxlat)))
-    return (f"bbox.xmin >= {minlon} AND bbox.xmax <= {maxlon}\n"
-            f"        AND bbox.ymin >= {minlat} AND bbox.ymax <= {maxlat}")
+        boxes = area.sides(bbox)
+    selects = "\n      UNION ALL\n".join(f"""      SELECT {columns}
+      FROM read_parquet('{source}', hive_partitioning=1)
+      WHERE bbox.xmin >= {w} AND bbox.xmax <= {e}
+        AND bbox.ymin >= {s} AND bbox.ymax <= {n}""" for w, s, e, n in boxes)
+    return f"""
+    COPY (
+{selects}
+    ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+    """
 
 
 def download_overture(theme: str, bbox: str, release: str, out_path: str) -> str:
@@ -98,16 +111,7 @@ def download_overture(theme: str, bbox: str, release: str, out_path: str) -> str
 
     spec = THEME_SPECS[theme]
     source = f"{OVERTURE_S3_BUCKET}/release/{release}/{spec['s3_glob']}"
-    # The bbox filter exploits Overture's per-row `bbox` struct, which
-    # DuckDB can push into the parquet predicate and cut >99% of IO.
-    where = bbox_where(minlon, minlat, maxlon, maxlat)
-    sql = f"""
-    COPY (
-      SELECT {spec['columns']}
-      FROM read_parquet('{source}', hive_partitioning=1)
-      WHERE {where}
-    ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
-    """
+    sql = overture_sql(spec['columns'], source, (minlon, minlat, maxlon, maxlat), out_path)
     print(f"  Downloading Overture {theme} for bbox={bbox} (release {release})...")
     con.execute(sql)
     size_mb = os.path.getsize(out_path) / 1024 / 1024

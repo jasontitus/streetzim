@@ -17,6 +17,11 @@ ROOT = "/storage/streetzim"
 DST_DIR = os.path.join(ROOT, "world-data", "regions")
 
 
+# Registry bbox text per region, written to <output>.bbox (ops/region-bbox.sh:
+# the queue treats a slice cut for another bbox as stale).
+BBOX_TEXT = {}
+
+
 def load_regions(registry, only=None):
     out = {}
     with open(registry, encoding="utf-8") as fh:
@@ -29,6 +34,7 @@ def load_regions(registry, only=None):
             rid, bbox = parts[0], parts[2]
             if only and rid not in only:
                 continue
+            BBOX_TEXT[rid] = bbox
             out[rid] = tuple(float(v) for v in bbox.split(","))
     return out
 
@@ -91,6 +97,8 @@ def main():
         if os.path.islink(final) or os.path.exists(final):
             os.unlink(final)
         os.rename(part[rid], final)
+        with open(final + ".bbox", "w") as fh:
+            fh.write(BBOX_TEXT[rid] + "\n")
     print(f"\nDone in {time.time()-t0:.0f}s; {total:,} features scanned, {bad} unparseable", flush=True)
     for rid in regions:
         sz = os.path.getsize(os.path.join(DST_DIR, f"{rid}.search.jsonl"))

@@ -80,6 +80,31 @@ scripts (`cloud/build_region.sh`, `cloud/preflight.py`,
 `verify_tile_cache.py`) still assume minlon < maxlon; do not run them on
 such a region.
 
+Never hand such a bbox to `osmium extract -b`: osmium 1.16 accepts
+minlon > maxlon, exits 0, and extracts the complement (the band round the
+other side of the world). `ops/region-bbox.sh` (`bbox_osmium_area`) is the
+one place that builds the extract arguments; if the .poly cannot be
+written the row fails.
+
+**Bbox sidecars.** Region files are named by id, not bbox, so each producer
+writes `<file>.bbox` with the registry bbox it was cut for (the queue,
+`rebuild_old_regions.sh`, `extract-region-pbfs.sh`, `ship-region.sh` for
+PBFs and Overture parquets; `derive-region-{mbtiles,search}.py` for the
+slices). A file whose sidecar names another bbox is stale: re-extracted,
+re-downloaded, or (a slice) parked as `.stale-<date>` in favour of the world
+file. A file without a sidecar is trusted for a normal row and gets one;
+for a row across the antimeridian it is treated as stale with a loud
+`WARNING … no .bbox sidecar` in the log. After changing a row's bbox, run
+the one-time steps in [alaska-antimeridian-runbook.md](alaska-antimeridian-runbook.md)
+(written for alaska; the same four commands with another id):
+
+```sh
+./extract-region-pbfs.sh --only alaska --force
+rm -f overture_cache/addresses-alaska-*.parquet overture_cache/places-alaska-*.parquet
+./derive-region-mbtiles.py --only alaska --src "$WORLD_MBTILES"
+./derive-region-search.py  --only alaska --src "$WORLD_SEARCH"
+```
+
 ## MBTiles + search-cache: symlinks are fine
 
 Unlike the PBF, both of these are **already bbox-aware** at read time:

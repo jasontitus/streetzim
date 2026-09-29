@@ -24,6 +24,8 @@ unset _ops_real _ops_old
 # docs/new-region-setup.md "extract a real regional PBF").
 set -euo pipefail
 cd /storage/streetzim
+# bbox_crosses / bbox_stale / bbox_mark
+. ops/region-bbox.sh
 PLANET="${PLANET:-/storage/streetzim/world-data/planet-2026-08-31.osm.pbf}"
 REGISTRY="${REGISTRY:-cloud/regions.tsv}"
 BATCH="${BATCH:-16}"
@@ -49,7 +51,7 @@ while IFS=$'\t' read -r id name bbox tier src dst search notes; do
   [ -z "$id" ] || [ "${id:0:1}" = "#" ] && continue
   [ -n "$ONLY" ] && [[ "$ONLY" != *",$id,"* ]] && continue
   out="$OUTDIR/$id.osm.pbf"
-  if [ $FORCE -eq 0 ] && [ -f "$out" ] && [ ! -L "$out" ] && [ "$out" -nt "$PLANET" ]; then
+  if [ $FORCE -eq 0 ] && [ -f "$out" ] && [ ! -L "$out" ] && [ "$out" -nt "$PLANET" ] && ! bbox_stale "$out" "$bbox"; then
     echo "skip $id (extract newer than planet)"; continue
   fi
   todo+=("$id|$bbox")
@@ -68,7 +70,7 @@ while [ $i -lt ${#todo[@]} ]; do
       [ $first -eq 1 ] || echo ","
       first=0
       # write to a .part name; renamed after the pass so a crash never leaves a truncated <id>.osm.pbf
-      if awk -F, '{ exit !($1 > $3 || $3 > 180) }' <<< "$bbox"; then
+      if bbox_crosses "$bbox"; then
         # Across the antimeridian (minlon > maxlon): a box each side of 180.
         printf '  {"output": "%s.osm.pbf.part", "output_format": "pbf", %s}' "$id" "$(awk -F, '{
           e = ($3 > 180) ? $3 - 360 : $3
@@ -84,9 +86,10 @@ while [ $i -lt ${#todo[@]} ]; do
   echo "--- pass $((i/BATCH+1)): ${chunk[*]%%|*}"
   osmium extract -c "$cfg" "$PLANET" --overwrite --strategy complete_ways --progress
   for spec in "${chunk[@]}"; do
-    id=${spec%%|*}
+    id=${spec%%|*}; bbox=${spec#*|}
     rm -f "$OUTDIR/$id.osm.pbf"           # drops parent-region symlinks too
     mv -f "$OUTDIR/$id.osm.pbf.part" "$OUTDIR/$id.osm.pbf"
+    bbox_mark "$OUTDIR/$id.osm.pbf" "$bbox"
     printf "  %-28s %s\n" "$id" "$(du -h "$OUTDIR/$id.osm.pbf" | cut -f1)"
   done
   rm -f "$cfg"
