@@ -55,6 +55,7 @@ CLOUD_MODULES = (
     "viewer_slots",
     "wiki_articles",
     "wikidata_titles",
+    "wikimedia_http",
 )
 
 

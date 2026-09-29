@@ -202,6 +202,17 @@ if (!window.__szUnsupported) fetchConfig(1)
     map.addControl(geolocate, 'bottom-right');
     geolocate.on('geolocate', function(pos) { _onLocated(pos); });
 
+    // #info, #attr-btn and the scale bar sit above MapLibre's attribution,
+    // which wraps to more lines on a phone when the satellite credit joins
+    // it: its height is published as --sz-attrib-h for their CSS.
+    (function () {
+      var attrib = document.querySelector('.maplibregl-ctrl-attrib');
+      if (!attrib || typeof ResizeObserver === 'undefined') return;
+      new ResizeObserver(function () {
+        document.documentElement.style.setProperty('--sz-attrib-h', attrib.offsetHeight + 'px');
+      }).observe(attrib);
+    })();
+
     // Satellite layer toggle
     if (config.hasSatellite) {
       var toggleBtn = document.getElementById('layer-toggle');
@@ -222,9 +233,13 @@ if (!window.__szUnsupported) fetchConfig(1)
         var satExt = config.satelliteFormat || 'webp';
         var satTileSize = config.satelliteTileSize || 256;
         // Use zimtile:// protocol for retry logic on Kiwix service worker
+        // EOX requires its credit in the map itself; MapLibre shows a
+        // source's attribution while one of its layers is visible.
+        var satCredit = _szSatelliteCreditHtml(config);
         map.addSource('satellite', {
           type: 'raster',
           tiles: ['zimtile://' + baseUrl + 'satellite/{z}/{x}/{y}.' + satExt],
+          attribution: satCredit,
           tileSize: satTileSize,
           minzoom: 0,
           maxzoom: config.satelliteMaxZoom || 14

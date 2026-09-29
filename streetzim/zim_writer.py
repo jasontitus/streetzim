@@ -641,6 +641,7 @@ def create_zim(
                       overture_sources=overture_sources, xapian_mode=xapian_mode,
                       metadata=metadata, illustration=illustration,
                       has_satellite=bool(satellite_dir and os.path.isdir(satellite_dir)),
+                      satellite_source=map_config.get("satelliteSource"),
                       has_terrain=bool(terrain_dir and os.path.isdir(terrain_dir)),
                       has_wiki=has_wikidata or has_articles)
         _add_routing_graph(creator, MapItem,
@@ -755,7 +756,7 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
 
 def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
                   metadata=None, illustration=None, has_satellite=True,
-                  has_terrain=True, has_wiki=True):
+                  has_terrain=True, has_wiki=True, satellite_source=None):
     """ZIM metadata (Name, Title, Tags, License, ...) and the 48x48 illustration.
 
     ``metadata`` holds openZIM-flag overrides validated by
@@ -764,8 +765,11 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
     keeps the builder's default. ``illustration`` is a 48x48 PNG.
     ``has_*`` say which optional layers the ZIM contains, so License names
     only the licences that apply (a ZIM without the satellite layer must not
-    claim CC BY-NC-SA).
+    claim CC BY-NC-SA). ``satellite_source`` names the mosaic
+    (streetzim.satellite_sources; default the builder's, 2021): with a
+    non-commercial one, License opens with a "Non-commercial use only" notice.
     """
+    from streetzim import satellite_sources
     md = metadata or {}
     # Add metadata — Name and Illustration are required by Kiwix to register the ZIM
     import re as _re_name
@@ -800,15 +804,18 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
         _tags = merge_tags(_tags, md["Tags"])
     creator.add_metadata("Tags", _tags)
     creator.add_metadata("Name", md.get("Name", f"osm_{zim_name}"))
-    creator.add_metadata("Flavour", "maxi")
+    creator.add_metadata("Flavour", md.get("Flavour", "maxi"))
     creator.add_metadata("Scraper", md.get("Scraper", "streetzim/1.0"))
     license_parts = [
         "Map data: ODbL (OpenStreetMap)",
         "Tile schema: CC-BY 4.0 (OpenMapTiles)",
     ]
     if has_satellite:
-        license_parts.append(
-            "Satellite imagery: CC BY-NC-SA 4.0 (Sentinel-2 cloudless by EOX)")
+        sat = satellite_sources.get(satellite_source or satellite_sources.BUILDER_DEFAULT)
+        if sat.noncommercial:
+            license_parts.insert(0, f"Non-commercial use only: the satellite imagery "
+                                    f"is {sat.license}")
+        license_parts.append(sat.license_metadata)
     if has_terrain:
         license_parts.append(
             "Elevation: Copernicus GLO-30 DEM © DLR/Airbus, provided under "
@@ -1448,7 +1455,8 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
                 "zim-pack: wiki-articles", time.time() - _wa_t0,
                 note=f"{_wa_stats['bundled']} articles, "
                      f"{_wa_stats['bytes'] // 1024} KB, "
-                     f"{_wa_stats['failed']} missing, "
+                     f"{_wa_stats['failed']} missing "
+                     f"({_wa_stats.get('unfetched', 0)} unfetched), "
                      f"{_wa_stats.get('images', 0)} images "
                      f"{_wa_stats.get('image_bytes', 0) // 1048576} MB")
     return _bundled_set

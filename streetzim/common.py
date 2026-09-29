@@ -314,8 +314,10 @@ def log_viewer_freshness():
 # Geofabrik base URL for downloading OSM extracts
 GEOFABRIK_BASE = "https://download.geofabrik.de"
 
-# Sentinel-2 Cloudless satellite tile service (EOX, CC BY-NC-SA 4.0 for 2021 vintage)
-SATELLITE_TILE_URL = "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/g/{z}/{y}/{x}.jpg"
+# The builder's default satellite tiles (EOX Sentinel-2 cloudless 2021,
+# CC BY-NC-SA 4.0). Every source and its licence: streetzim/satellite_sources.py.
+SATELLITE_TILE_URL = (
+    "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/g/{z}/{y}/{x}.jpg")
 
 # Copernicus GLO-30 DEM tile URL (public S3, no auth)
 COPERNICUS_DEM_URL = (

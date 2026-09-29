@@ -88,8 +88,19 @@ opt-in could add it later — high record coverage, ~hundreds of articles).
 1. **Wikidata Action API (default).** `wbgetentities?props=sitelinks&
    sitefilter=enwiki`, 50 ids/request, results cached to disk (hits *and*
    known-misses, so rebuilds never re-query). ~`distinct_q / 50` requests
-   (≈178 for CA). Public data only; User-Agent identifies the project by
-   its public repo URL — no personal contact info.
+   (≈178 for CA), sent serially with `maxlag=5` and a 0.1 s gap after each
+   response (Wikimedia asks for serial API requests rather than a fixed
+   rate; the gap widens only on 429 or maxlag), honouring `Retry-After`
+   (`cloud/wikimedia_http.py`). A 429/5xx/maxlag/network failure caches
+   nothing. A 400/401/403/404 stops the run at once; a batch refused with
+   an `error` body is halved until the bad id is found, and that id alone
+   is cached as having no article. The build host resolves Q-IDs this way
+   (`ops/build-region-fast.sh` passes no `--wikidata-title-map`): pacing
+   costs about what the old fixed 0.1 s sleep did, and a title cache that
+   holds malformed ids (from a batch an older build had refused) has its
+   `""` entries dropped once and asked again, logged with the count.
+   Public data only; the User-Agent names the project's public issue
+   tracker (`STREETZIM_WIKI_CONTACT` adds an operator address at run time).
 2. **Offline `Q-ID<TAB>Title` map (air-gapped builds).** Pass
    `--wikidata-title-map`. Build one from the enwiki `page` +
    `page_props` (`pp_propname='wikibase_item'`) SQL dumps, or a tool like
@@ -161,8 +172,18 @@ Sources + caching:
   fast, no crawl. Use a FULL enwiki ZIM; a `top`/subset misses long-tail
   POIs.
 - **Wikipedia API** (default) — cached to `wiki_articles_cache/` (repo-
-  relative, like `wikidata_cache/`; gitignored). Both hits and known-misses
-  are cached, so **a rebuild never re-crawls**.
+  relative, like `wikidata_cache/`; gitignored). Hits (`<sha1>.html`) and
+  definitive misses (`<sha1>.miss`: no such page, no text, with the reason)
+  are cached, so **a rebuild never re-crawls**. Requests are serial with a
+  1 s gap after each response and honour `Retry-After`; a 429, 5xx,
+  network failure, unexpected body, or a 400/404/410 without a
+  `MediaWiki-API-Error: missingtitle` header is never cached. A 401/403/404,
+  25 unanswered titles in a row, or a spent wait budget
+  (`STREETZIM_WIKI_WAIT_BUDGET`, 15 min) stops the requests; cached
+  articles are still bundled. The build ends with a WARNING counting the
+  unfetched articles (`STREETZIM_REQUIRE_WIKI=1` makes it fail). An empty
+  `<sha1>.html` is the old miss marker, which a 429 could also leave; each
+  is re-checked once, at most `STREETZIM_WIKI_RECHECK_MAX` (1000) per build.
 
 ```sh
 # Offline (fast) — read articles from a local enwiki ZIM:
