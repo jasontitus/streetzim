@@ -66,6 +66,7 @@ include = [
   "cloud/wikidata_titles.py",
   "tools/build_viewer.py",
   "tools/check_openzim_output.py",
+  "tools/golden_diff.py",
   "tools/measure_build.py",
   "tools/offliner_definition.py",
   "tools/pin_viewer_assets.py",

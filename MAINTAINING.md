@@ -89,6 +89,11 @@ CI (`.github/workflows/ci.yml`) runs all of that, then builds Monaco end to
 end, validates it (including `zimcheck`) and loads the in-ZIM viewer in
 headless Chrome. It also runs weekly, to catch upstream drift.
 
+**Refactors.** A change meant to leave the output alone is checked with a
+golden build: `tools/golden_builds.sh main WORKTREE <dir>` builds Monaco
+from both and compares the ZIMs entry by entry
+([docs/golden-builds.md](docs/golden-builds.md)).
+
 **Python versions.** The builder runs on 3.12 (the production host) and 3.14
 (the Docker image and openZIM's scrapers). On 3.14 `requirements.txt` also
 installs zimscraperlib, and the `streetzim` command uses it
