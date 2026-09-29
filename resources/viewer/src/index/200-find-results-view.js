@@ -132,8 +132,11 @@ function renderFindResultsFromStash(map) {
       });
     })(i);
     _findResultsState.markers.push(marker);
-    if (!bounds) bounds = new maplibregl.LngLatBounds([r.o, r.a], [r.o, r.a]);
-    else         bounds.extend([r.o, r.a]);
+    // Longitudes the short way from the first result, so results either
+    // side of the antimeridian frame the gap between them, not the globe.
+    var ro = bounds ? r.o - 360 * Math.round((r.o - bounds.getWest()) / 360) : r.o;
+    if (!bounds) bounds = new maplibregl.LngLatBounds([ro, r.a], [ro, r.a]);
+    else         bounds.extend([ro, r.a]);
   }
   if (bounds) {
     // Leave room for the carousel at the bottom — extra bottom

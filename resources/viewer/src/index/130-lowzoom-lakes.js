@@ -39,7 +39,11 @@ function makeStyle(config) {
     "attribution": '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors | <a href="https://openmaptiles.org/">OpenMapTiles</a>'
   };
   if (config.bounds) {
-    sourceConfig.bounds = config.bounds;
+    // An area across the antimeridian has east past 180 (streetzim/area.py).
+    // MapLibre clamps source bounds to [-180, 180] and cannot express one
+    // that wraps, so such a source keeps its latitudes only.
+    sourceConfig.bounds = config.bounds[2] > 180
+      ? [-180, config.bounds[1], 180, config.bounds[3]] : config.bounds;
   }
   return _szThemeStyle({
     "version": 8,

@@ -258,6 +258,21 @@ reader branch is only dead when no published ZIM needs it.
 | `search/{slug}.html` | per-feature detail pages (libzim Xapian mode only) |
 | `overture-sources.json` | Overture attribution, when Overture data was merged |
 
+### Areas across the antimeridian
+
+An area is one box. One across the antimeridian (Fiji, Chukotka,
+Kiribati) is kept **unwrapped**: `minLon` in [-180, 180) and `maxLon`
+past 180, so `minLon < maxLon` still holds; Fiji is
+`[172.84, -23.12, 183.47, -11.24]`. `map-config.json` `bounds` and
+`streetzim-meta.json` `bbox` carry it that way, and a reader that tests a
+longitude against them also tests it plus 360°. `center` stays in
+[-180, 180]. A box whose `maxLon` is at most 180 does not cross, and every
+such ZIM is built exactly as before. `streetzim/area.py` holds the rules:
+tools limited to [-180, 180] (osmium, tilemaker, MapLibre's source
+`bounds`) get the two sides as separate boxes. Tile, search-record and
+graph coordinates are always in [-180, 180]; a route or way geometry that
+steps across ±180° is continued the short way (see geometry blobs above).
+
 ## Known debt
 
 - `map-config.json` has no routing format field; readers probe for

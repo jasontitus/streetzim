@@ -2376,7 +2376,11 @@ function makeStyle(config) {
     "attribution": '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors | <a href="https://openmaptiles.org/">OpenMapTiles</a>'
   };
   if (config.bounds) {
-    sourceConfig.bounds = config.bounds;
+    // An area across the antimeridian has east past 180 (streetzim/area.py).
+    // MapLibre clamps source bounds to [-180, 180] and cannot express one
+    // that wraps, so such a source keeps its latitudes only.
+    sourceConfig.bounds = config.bounds[2] > 180
+      ? [-180, config.bounds[1], 180, config.bounds[3]] : config.bounds;
   }
   return _szThemeStyle({
     "version": 8,
@@ -3461,8 +3465,11 @@ function renderFindResultsFromStash(map) {
       });
     })(i);
     _findResultsState.markers.push(marker);
-    if (!bounds) bounds = new maplibregl.LngLatBounds([r.o, r.a], [r.o, r.a]);
-    else         bounds.extend([r.o, r.a]);
+    // Longitudes the short way from the first result, so results either
+    // side of the antimeridian frame the gap between them, not the globe.
+    var ro = bounds ? r.o - 360 * Math.round((r.o - bounds.getWest()) / 360) : r.o;
+    if (!bounds) bounds = new maplibregl.LngLatBounds([ro, r.a], [ro, r.a]);
+    else         bounds.extend([ro, r.a]);
   }
   if (bounds) {
     // Leave room for the carousel at the bottom — extra bottom
@@ -6264,7 +6271,10 @@ var SEARCH_SHARDS = (function () {
         var dlat = item.a - clat;
         // Scale longitude by cos(lat) so the degree-space distance is
         // isotropic; raw Δlng overstated E–W distances 2x at 60°N.
-        var dlng = (item.o - clng) * Math.cos(clat * Math.PI / 180);
+        // The short way round, for maps across the antimeridian.
+        var dlng0 = item.o - clng;
+        dlng0 -= 360 * Math.round(dlng0 / 360);
+        var dlng = dlng0 * Math.cos(clat * Math.PI / 180);
         var dist = Math.sqrt(dlat * dlat + dlng * dlng);
         var viewSpan = Math.max(
           bounds.getNorth() - bounds.getSouth(),
@@ -9724,6 +9734,21 @@ function initRouting(map, config) {
     };
   }
 
+  // A route across the antimeridian steps from 179.99 to -179.99; drawn
+  // as given, that step is a line round the whole globe. Continue the
+  // longitude past +-180 instead, which MapLibre draws where it belongs.
+  function unwrapLngs(coords) {
+    var out = [];
+    var prev = null;
+    for (var i = 0; i < coords.length; i++) {
+      var lng = coords[i][0];
+      if (prev !== null) lng -= 360 * Math.round((lng - prev) / 360);
+      out.push([lng, coords[i][1]]);
+      prev = lng;
+    }
+    return out;
+  }
+
   function drawRoute(coords) {
     if (routeDrawn) {
       map.getSource('route').setData({
@@ -10001,7 +10026,7 @@ function initRouting(map, config) {
           mid: result.coords[Math.floor(result.coords.length / 2)],
           last: result.coords[result.coords.length - 1],
         });
-        drawRoute(result.coords);
+        drawRoute(unwrapLngs(result.coords));
         distEl.textContent = formatDistance(result.distance);
         timeEl.textContent = formatTime(result.time);
         renderRoads(result.roads);
@@ -10022,8 +10047,9 @@ function initRouting(map, config) {
         // location; fitBounds would yank the camera out to the whole
         // route and blow up the follow-cam.
         if (!driveMode.active) {
-          var bounds = result.coords.reduce(function(b, c) { return b.extend(c); },
-            new maplibregl.LngLatBounds(result.coords[0], result.coords[0]));
+          var shown = unwrapLngs(result.coords);
+          var bounds = shown.reduce(function(b, c) { return b.extend(c); },
+            new maplibregl.LngLatBounds(shown[0], shown[0]));
           map.fitBounds(bounds, { padding: 60, duration: 1000 });
         }
         // Auto-minimize when the routing panel would otherwise cover

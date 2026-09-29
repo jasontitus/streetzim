@@ -5,10 +5,36 @@ import os
 import subprocess
 import time
 
+from streetzim import area
 # The builder's flushing, phase-timing print (see streetzim/common.py).
 from streetzim.common import (
     print,
 )
+
+
+def _antimeridian_twins(osmium, pbf, excluded):
+    """{ref: ref it joins} for highway way ends at longitude -180 that sit
+    at the latitude of a highway way end at +180 (the same point, split in
+    two by OSM at the antimeridian)."""
+    ends = {1: {}, -1: {}}           # side -> lat_e7 -> smallest ref
+
+    class _Ends(osmium.SimpleHandler):
+        def way(self, w):
+            hw = w.tags.get("highway")
+            if not hw or hw in excluded or len(w.nodes) < 2:
+                return
+            for n in (w.nodes[0], w.nodes[-1]):
+                if not n.location.valid():
+                    continue
+                lon_e7 = int(round(n.location.lon * 1e7))
+                if abs(lon_e7) == 1_800_000_000:
+                    lat_e7 = int(round(n.location.lat * 1e7))
+                    side = ends[1 if lon_e7 > 0 else -1]
+                    side[lat_e7] = min(n.ref, side.get(lat_e7, n.ref))
+
+    _Ends().apply_file(pbf, locations=True)
+    return {ref: ends[1][lat] for lat, ref in ends[-1].items()
+            if lat in ends[1] and ends[1][lat] != ref}
 
 
 def extract_routing_graph(pbf_path, output_dir, bbox=None):
@@ -61,7 +87,7 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
         print(f"    Extracting bbox {minlon},{minlat},{maxlon},{maxlat} from planet PBF...")
         subprocess.run([
             "osmium", "extract",
-            "-b", f"{minlon},{minlat},{maxlon},{maxlat}",
+            *area.osmium_extract_args(bbox, output_dir),
             source_pbf, "-o", bbox_pbf, "--overwrite",
         ], check=True)
         size_mb = os.path.getsize(bbox_pbf) / (1024 * 1024)
@@ -223,10 +249,25 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
     p1.endpoints = None
     print(f"    Found {len(junction_arr)} junction nodes (graph vertices)")
 
+    # Across the antimeridian, OSM splits a road at ±180: one way ends on a
+    # node at 180.0, the next starts on a different node at -180.0, same
+    # latitude. Both are way endpoints, so both are junctions; make them one
+    # graph vertex so a route can cross. Only for an area that crosses:
+    # every other graph is unchanged.
+    stitched = {}
+    if bbox and area.crosses(bbox):
+        stitched = _antimeridian_twins(osmium, source_pbf, EXCLUDED)
+        if stitched:
+            junction_arr = junction_arr[~np.isin(junction_arr, list(stitched))]
+            print(f"    Joined {len(stitched)} road(s) split at the antimeridian")
+
     # Map junction ref -> graph index (0-based, sorted for determinism).
     # Dict lookup is hot in Pass 2 — Python dict is ~25 M lookups/s which is
     # fine for tens of millions of ways.
     ref_to_idx = {int(r): i for i, r in enumerate(junction_arr)}
+    for twin, kept in stitched.items():
+        if kept in ref_to_idx:
+            ref_to_idx[twin] = ref_to_idx[kept]
     num_nodes = len(junction_arr)
     del junction_arr
 

@@ -13,6 +13,7 @@ from typing import NamedTuple
 
 from cloud.viewer_slots import pad_to_slot as _pad_to_slot
 from streetzim.search_extract import build_location_index
+from streetzim import area as _area
 # The builder's flushing, phase-timing print (see streetzim/common.py).
 from streetzim.common import (
     PHASE_TIMER,
@@ -1145,9 +1146,10 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
         """Check if tile (z,x,y) overlaps with bbox. Uses mercantile for accuracy."""
         import mercantile
         tile_bounds = mercantile.bounds(mercantile.Tile(x, y, z))
-        minlon, minlat, maxlon, maxlat = bbox_coords
-        return not (tile_bounds.east < minlon or tile_bounds.west > maxlon or
-                    tile_bounds.north < minlat or tile_bounds.south > maxlat)
+        # Each side of the antimeridian separately (streetzim/area.py).
+        return any(not (tile_bounds.east < minlon or tile_bounds.west > maxlon or
+                        tile_bounds.north < minlat or tile_bounds.south > maxlat)
+                   for minlon, minlat, maxlon, maxlat in _area.split(bbox_coords))
 
     def _add_raster_tiles(source_dir, zim_prefix, max_zoom, label, ext="webp", mimetype="image/webp"):
         """Walk a tile cache dir and add tiles to ZIM, filtering by bbox."""

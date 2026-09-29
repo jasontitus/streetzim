@@ -346,8 +346,16 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
     extends past the region and zero-fills outside. z=8+ still use the
     regional mosaic (fine-grained detail, no stripe risk since each
     tile is small).
+
+    An area across the antimeridian is generated one side at a time.
     """
     import math
+    from streetzim import area
+
+    if area.crosses(parse_bbox(bbox_str)):
+        return sum(generate_terrain_tiles(area.to_str(part), dest_dir, max_zoom=max_zoom,
+                                          low_zoom_world_vrt=low_zoom_world_vrt) or 0
+                   for part in area.split(parse_bbox(bbox_str)))
 
     bbox = parse_bbox(bbox_str)
     minlon, minlat, maxlon, maxlat = bbox

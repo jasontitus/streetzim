@@ -35,10 +35,12 @@ from typing import Any
 
 # Keep the imports above stdlib-only: --dl must reach STREETZIM_CACHE_DIR
 # before streetzim.common is first imported (it reads it at import time).
+# streetzim.area is stdlib-only.
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:     # also runnable as `python streetzim/cli.py`
     sys.path.insert(0, str(REPO_ROOT))
+from streetzim import area  # noqa: E402  (after the path fix above)
 GEOFABRIK_POLY = re.compile(r"^https?://download\.geofabrik\.de/(.+)\.poly$")
 USER_AGENT = "streetzim (https://github.com/jasontitus/streetzim)"
 
@@ -134,7 +136,9 @@ def build_parser() -> argparse.ArgumentParser:
                      help="URL of a .poly file bounding the area. A Geofabrik "
                           "URL also selects its OSM extract; otherwise give "
                           "--pbf-url")
-    src.add_argument("--bbox", help="minlon,minlat,maxlon,maxlat")
+    src.add_argument("--bbox", help="minlon,minlat,maxlon,maxlat. For an area across "
+                                    "the antimeridian, minlon > maxlon (Fiji: "
+                                    "172.8,-23.2,-176.5,-11.2)")
     src.add_argument("--pbf-url",
                      help="OSM extract (.osm.pbf) to build from. Default: the "
                           "Geofabrik extract of --area / --include-poly")
@@ -187,18 +191,23 @@ _Group = tuple[BBox, list[BBox], float]      # a box, its member boxes, land are
 
 
 def check_bbox(b: BBox, what: str) -> BBox:
+    """The box, unwrapped (streetzim/area.py). An area across the
+    antimeridian is given with minlon > maxlon (170,-20,-175,-10) or with
+    maxlon past 180 (170,-20,185,-10); both mean the same box."""
     minlon, minlat, maxlon, maxlat = b
-    if not (-180 <= minlon < maxlon <= 180 and -90 <= minlat < maxlat <= 90):
+    wrapped = -180 <= minlon <= 180 and -180 <= maxlon <= 180 and minlon != maxlon
+    unwrapped = -180 <= minlon < 180 < maxlon < minlon + 360
+    if not ((wrapped or unwrapped) and -90 <= minlat < maxlat <= 90):
         raise ValueError(f"{what}: {b} is not minlon,minlat,maxlon,maxlat "
-                         "with min < max in range")
-    # Areas are bounding boxes (tiles and the OSM extract are cut to the
-    # box, not the polygon), so one that wraps the antimeridian would become
-    # a band around the whole world.
-    if maxlon - minlon > 180 or minlon <= -179.99 or maxlon >= 179.99:
-        raise ValueError(f"{what}: {b} reaches the antimeridian (±180°); areas "
-                         "are bounding boxes and can't wrap it. Use --bbox for "
-                         "the part on one side.")
-    return b
+                         "with min < max in range (minlon > maxlon, or maxlon "
+                         "past 180, for an area across the antimeridian)")
+    nb = area.normalize(b)
+    if area.crosses(nb) and nb[2] - nb[0] > 180:
+        # Most likely minlon and maxlon swapped, not a band round the world.
+        raise ValueError(f"{what}: {b} would cross the antimeridian and be "
+                         f"{nb[2] - nb[0]:.0f}° wide; an area across it is at "
+                         "most 180° wide (are minlon and maxlon swapped?)")
+    return nb
 
 
 def parse_bbox_arg(value: str) -> BBox:
@@ -207,6 +216,25 @@ def parse_bbox_arg(value: str) -> BBox:
         raise ValueError(f"--bbox {value!r}: need minlon,minlat,maxlon,maxlat")
     a, b, c, d = (float(x) for x in parts)
     return check_bbox((a, b, c, d), "--bbox")
+
+
+def _unwrap_ring(lons: list[float]) -> list[float]:
+    """A ring's longitudes, unwrapped when it crosses the antimeridian:
+    followed the short way from point to point, as a ring drawn across ±180
+    (179.9 then -179.9) means. Unchanged otherwise."""
+    if max(lons) - min(lons) <= 180:
+        return lons
+    run = [lons[0]]
+    for x in lons[1:]:
+        run.append(x - 360 * round((x - run[-1]) / 360))
+    return run
+
+
+def _canon(b: BBox) -> BBox:
+    """West back in [-180, 180), keeping the width (see streetzim/area.py)."""
+    w, s, e, n = b
+    k = 360.0 if w < -180 else -360.0 if w >= 180 else 0.0
+    return (w + k, s, e + k, n) if k else b
 
 
 def poly_parts(text: str) -> list[BBox]:
@@ -239,7 +267,8 @@ def _poly_rings(text: str) -> list[tuple[BBox, float]]:
             if depth == 0:
                 break
             if lons:
-                parts.append(((min(lons), min(lats), max(lons), max(lats)),
+                lons = _unwrap_ring(lons)
+                parts.append((_canon((min(lons), min(lats), max(lons), max(lats))),
                               _ring_area(lons, lats)))
             depth, hole, lons, lats = 0, False, [], []
             continue
@@ -261,8 +290,15 @@ def parse_poly(text: str) -> BBox:
 
 
 def _union(boxes: list[BBox]) -> BBox:
-    return (min(b[0] for b in boxes), min(b[1] for b in boxes),
-            max(b[2] for b in boxes), max(b[3] for b in boxes))
+    """The narrowest box holding all of `boxes`, which may be the one across
+    the antimeridian (Fiji's parts at 177E and 179W)."""
+    u = boxes[0]
+    for b in boxes[1:]:
+        u = min(((min(u[0], b[0] + k), min(u[1], b[1]), max(u[2], b[2] + k), max(u[3], b[3]))
+                 for k in (0.0, -360.0, 360.0)),
+                key=lambda c: c[2] - c[0])        # ties: no shift, as before
+        u = _canon(u)
+    return u
 
 
 def _area(b: BBox) -> float:
@@ -278,7 +314,9 @@ MERGE_WASTE = 3.0
 
 
 def _gap(a: BBox, b: BBox) -> float:
-    return max(0.0, a[0] - b[2], b[0] - a[2], a[1] - b[3], b[1] - a[3])
+    """Degrees between two boxes, the short way round in longitude."""
+    lon = min(max(0.0, a[0] - (b[2] + k), (b[0] + k) - a[2]) for k in (0.0, -360.0, 360.0))
+    return max(lon, a[1] - b[3], b[1] - a[3])
 
 
 def area_bbox(rings: list[tuple[BBox, float]]) -> tuple[BBox, list[BBox]]:

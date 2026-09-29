@@ -1714,7 +1714,11 @@ function _prewarmCorridor(startLat, startLon, endLat, endLon, crowM) {
   for (var i = 0; i <= samples; i++) {
     var t = i / samples;
     var lat = startLat + (endLat - startLat) * t;
-    var lon = startLon + (endLon - startLon) * t;
+    // The short way round across the antimeridian, back into [-180, 180].
+    var dLon = endLon - startLon;
+    dLon -= 360 * Math.round(dLon / 360);
+    var lon = startLon + dLon * t;
+    lon -= 360 * Math.round(lon / 360);
     var latE7 = Math.round(lat * 1e7);
     var lonE7 = Math.round(lon * 1e7);
     var cid = graph._index.cellForCoords(latE7, lonE7);

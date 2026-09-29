@@ -27,7 +27,15 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
     Supported formats: "webp", "avif".
 
     Returns the number of output tiles produced.
+
+    An area across the antimeridian is downloaded one side at a time.
     """
+    from streetzim import area
+    if area.crosses(parse_bbox(bbox_str)):
+        return sum(download_satellite_tiles(
+            area.to_str(part), dest_dir, max_zoom=max_zoom, webp_quality=webp_quality,
+            sat_format=sat_format, sat_quality=sat_quality, tile_size=tile_size) or 0
+            for part in area.split(parse_bbox(bbox_str)))
     import io
     import math
     import time

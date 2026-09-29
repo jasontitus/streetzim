@@ -115,8 +115,12 @@ Input, one of:
 |---|---|
 | `--area NAME` | a preset: `monaco`, `liechtenstein`, `dc`, `manhattan`, `san-francisco`, `austin`, `portland`, `virginia`, `colorado`, `california`, `iran`, `united-states` |
 | `--geofabrik europe/liechtenstein --name …` | any [Geofabrik](https://download.geofabrik.de/) extract |
-| `--pbf file.osm.pbf --name …` | a local PBF; add `--bbox minlon,minlat,maxlon,maxlat` to cut it |
+| `--pbf file.osm.pbf --name …` | a local PBF; add `--bbox minlon,minlat,maxlon,maxlat` to cut it (minlon > maxlon for an area across the antimeridian, e.g. Fiji) |
 | `--mbtiles tiles.mbtiles` | skip tilemaker and reuse existing tiles (with `--pbf` for search/routing) |
+
+Areas across the antimeridian (Fiji, Chukotka, Kiribati) are supported: the
+extract, tiles, map bounds, search and routing cover both sides of ±180°
+([docs/zimfarm.md](docs/zimfarm.md), [docs/formats.md](docs/formats.md#areas-across-the-antimeridian)).
 
 Main feature flags (all off by default; `python create_osm_zim.py --help` lists all ~50):
 

@@ -98,6 +98,7 @@ from streetzim.common import (  # noqa: F401
     parse_bbox,
     _re_phase,
 )
+from streetzim import area as _area
 from streetzim.routing.build import (  # noqa: F401
     extract_routing_graph,
     chunk_graph_file,
@@ -235,10 +236,12 @@ def center_from_places(search_features_path, bbox, sample_limit=400_000):
                     continue
                 lat, lon = rec.get("lat"), rec.get("lon")
                 if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
-                    if bbox and not (bbox[1] <= lat <= bbox[3] and bbox[0] <= lon <= bbox[2]):
+                    if bbox and not _area.contains(bbox, lon, lat):
                         continue
                     lats.append(lat)
-                    lons.append(lon)
+                    # In the bbox's frame, so the median of an area across
+                    # the antimeridian is not pulled to the far side.
+                    lons.append(_area.unwrap_lon(bbox, lon) if bbox else lon)
     except OSError:
         return None
     if len(lats) < 50:
@@ -246,13 +249,13 @@ def center_from_places(search_features_path, bbox, sample_limit=400_000):
     lats.sort()
     lons.sort()
     mid = len(lats) // 2
-    return [round(lons[mid], 5), round(lats[mid], 5)]
+    return [round(_area.wrap_lon(lons[mid]), 5), round(lats[mid], 5)]
 
 
 def get_center_and_zoom(bbox):
     """Calculate center point and initial zoom from a bounding box."""
     minlon, minlat, maxlon, maxlat = bbox
-    center_lon = (minlon + maxlon) / 2
+    center_lon = _area.wrap_lon((minlon + maxlon) / 2)   # past 180 across it
     center_lat = (minlat + maxlat) / 2
 
     # Rough zoom level based on extent
@@ -393,7 +396,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--area", help="Well-known area name (see list above)")
     parser.add_argument("--geofabrik", help="Geofabrik download path (e.g., europe/liechtenstein)")
     parser.add_argument("--pbf", help="Path to local OSM PBF file")
-    parser.add_argument("--bbox", help="Bounding box: minlon,minlat,maxlon,maxlat")
+    parser.add_argument("--bbox", help="Bounding box: minlon,minlat,maxlon,maxlat "
+                        "(minlon > maxlon for an area across the antimeridian)")
     parser.add_argument("--map-center", metavar="LON,LAT",
                         help="Override initial map center. Default = bbox "
                              "centroid, which lands in empty water for "
@@ -702,6 +706,13 @@ def _resolve_area(*, args, parser):
         bbox_str = bbox_str or area.get("bbox")
         name = name or area["name"]
 
+    if bbox_str:
+        # One spelling from here on for a box crossing the antimeridian:
+        # unwrapped, east past 180 (streetzim/area.py). Others unchanged.
+        _bb = parse_bbox(bbox_str)
+        if _area.crosses(_bb):
+            bbox_str = _area.to_str(_bb)
+
     if not pbf_path and not geofabrik_path and not args.mbtiles:
         print("Error: Must specify --area, --geofabrik, --pbf, or --mbtiles")
         parser.print_help()
@@ -869,7 +880,7 @@ def _build_search(
                     total += 1
                     feat = json.loads(line)
                     lat, lon = feat["lat"], feat["lon"]
-                    if minlat <= lat <= maxlat and minlon <= lon <= maxlon:
+                    if minlat <= lat <= maxlat and _area.contains_lon(bbox, lon):
                         fout.write(line)
                         kept += 1
                     if total % 5_000_000 == 0:
@@ -1133,6 +1144,13 @@ def _verify_terrain(*, args, bbox_str, include_terrain, terrain_dir, terrain_max
     # seam tiles before packaging. Boundary tiles (straddling 1-degree DEM
     # cell edges) may have partial zero data if generated from a VRT that
     # didn't include all neighboring cells.
+    if include_terrain and bbox_str and terrain_dir and _area.crosses(parse_bbox(bbox_str)):
+        # Across the antimeridian: each side, as it was generated.
+        for part in _area.split(parse_bbox(bbox_str)):
+            _verify_terrain(args=args, bbox_str=_area.to_str(part),
+                            include_terrain=include_terrain, terrain_dir=terrain_dir,
+                            terrain_max_zoom=terrain_max_zoom)
+        return
     if include_terrain and bbox_str and terrain_dir:
         import mercantile
         import math as _math
