@@ -138,8 +138,12 @@ Notes:
   rename or retire it: the build log would then warn about every tile it
   failed to download, and no other year's tiles are used in their place,
   since each source has its own cache.
-- If openZIM wants certainty beyond the published pages, EOX's contact for
-  licensing is cloudless@eox.at.
+- **Before openZIM publishes 2016-satellite ZIMs widely, get written
+  confirmation from EOX (cloudless@eox.at)** that redistributing the 2016
+  imagery inside ZIMs under CC BY 4.0 is fine. The licence page and the WMTS
+  abstract both say CC BY 4.0 for 2016, but EOX's License Summary page does
+  not carve 2016 out of its general terms (which limit sub-licensing and
+  redistribution), so a short written answer removes the doubt.
 
 ### Which is the default, and the quality difference
 
@@ -160,8 +164,8 @@ saturated.
 | Tags (added) | `satellite` | `satellite;non-commercial` |
 | File name (default) | `{name}_satellite_{period}.zim` | `{name}_satellite-nc_{period}.zim` |
 | LongDescription | unchanged | ends with "Restricted: the satellite imagery (…) is licensed CC BY-NC-SA 4.0 and may be used for non-commercial purposes only; the rest of this map is openly licensed." (after `--long-description`, or after the Description when there is none) |
-| License | adds "Satellite imagery: CC BY 4.0 (<attribution>)" | opens with "Non-commercial use only: the satellite imagery is CC BY-NC-SA 4.0" and adds "Satellite imagery: CC BY-NC-SA 4.0, non-commercial use only (<attribution>)" |
-| viewer | Satellite button; the credit and licence on the map while imagery shows, and under Data Sources | the same, plus a "Restricted: …" notice at the top of About |
+| License | adds "Satellite imagery: CC BY 4.0, <licence URL> (<attribution>)" | opens with "Non-commercial use only: the satellite imagery is CC BY-NC-SA 4.0" and adds "Satellite imagery: CC BY-NC-SA 4.0, non-commercial use only, <licence URL> (<attribution>)" |
+| viewer | Satellite button; while imagery shows, a short linked credit on the map ("© EOxCloudless 2016 by EOX · CC BY 4.0"); EOX's full attribution under Data Sources in About | the same, the map credit ending "(non-commercial)", plus a "Restricted: …" notice at the top of About |
 | `map-config.json` | `satelliteSource`, `satelliteLicense`, `satelliteAttribution`, `satelliteNonCommercial: false` | the same, `satelliteNonCommercial: true` |
 
 Kiwix identifies a book by Name and Flavour, so the variants of one area are
@@ -170,7 +174,12 @@ pick the restricted ones out by Flavour `satellite-nc` or the tag
 `non-commercial`. Without satellite imagery, Flavour stays `maxi` as before.
 `--file-name` also takes `{flavour}`. `--satellite-max-zoom` caps the imagery
 (default: `--max-zoom`, and z13 for areas centred 45° or more from the
-equator, where Sentinel-2's 10 m pixels make z14 an upscale).
+equator, where Sentinel-2's 10 m pixels make z14 an upscale); like
+`--satellite-source`, it turns the imagery on. `--satellite-accept-noncommercial`
+on its own is refused. A `--long-description` too long to take the
+restricted note is shortened (ending in "…") so the note always fits
+openZIM's 4000 characters. The builder refuses a `--flavour` that
+contradicts its imagery (for example `satellite` with the 2021 layer).
 
 `tools/check_openzim_output.py --satellite SOURCE` checks all of this on a
 built ZIM.

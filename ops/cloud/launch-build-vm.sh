@@ -121,7 +121,7 @@ Includes vector maps (MapLibre GL JS + OpenMapTiles), Sentinel-2 satellite image
 
 How to use: install Kiwix from https://kiwix.org and open the .zim file.
 
-Data sources: OpenStreetMap (ODbL), OpenMapTiles (CC-BY 4.0), Sentinel-2 cloudless by EOX (CC BY-NC-SA 4.0), Copernicus GLO-30 DEM (ESA/DLR/Airbus), Wikidata (CC0), Wikipedia (CC BY-SA 3.0).
+Data sources: OpenStreetMap (ODbL), OpenMapTiles (CC-BY 4.0), EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2021; CC BY-NC-SA 4.0, non-commercial use only), Copernicus GLO-30 DEM (ESA/DLR/Airbus), Wikidata (CC0), Wikipedia (CC BY-SA 3.0).
 
 Built with StreetZim: https://github.com/jasontitus/streetzim"
 
