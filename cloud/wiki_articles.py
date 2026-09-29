@@ -38,8 +38,11 @@ from typing import Any
 from cloud.wikimedia_http import (
     Pacer,
     TransientError,
+    api_error_code,
+    env_number,
     get_json,
     require_complete,
+    stop_error,
 )
 from cloud.wikimedia_http import user_agent as _user_agent
 from streetzim.paths import cache_root
@@ -382,25 +385,48 @@ class _OfflineZim:
 #   .html, empty      the old miss marker. Before the .miss files, a 429 or
 #                     5xx that outlived the retries was written this way too,
 #                     so an empty .html says nothing: it is re-checked once
-#                     and replaced by a .html or a .miss (see _fetch_online).
-# Only the API's own answers are cached. A rate limit, 5xx, timeout or
-# connection error raises TransientError and leaves the cache alone.
+#                     (at most STREETZIM_WIKI_RECHECK_MAX per build) and
+#                     replaced by a .html or a .miss.
+# Only the API's own answers are cached. A rate limit, 5xx, timeout,
+# connection error or unexpected body raises TransientError and leaves the
+# cache alone.
 _MISS_SUFFIX = ".miss"
-# Stop requesting after this many titles in a row the API could not answer.
-_GIVE_UP_AFTER = 25
 # API error codes that are an answer about the page (anything else in an
 # `error` body, e.g. ratelimited / maxlag / internal_api_error_*, is not).
 _DEFINITIVE_API_ERRORS = frozenset({"missingtitle", "invalidtitle",
                                     "pagecannotexist", "nosuchpageid"})
-# HTTP statuses that answer for the page itself. 403 and 401 are about the
-# client (a blocked User-Agent), so they are not cached either.
-_DEFINITIVE_HTTP = frozenset({400, 404, 410, 414})
+# HTTP statuses that answer for the page itself whatever the headers say:
+# only 414 (the title is too long to ask about). A 400/404/410 from api.php
+# is a proxy or a wrong endpoint unless its MediaWiki-API-Error header names
+# one of the codes above; 401/403 refuse the client. Those stop the run.
+_DEFINITIVE_HTTP = frozenset({414})
+# Stop requesting after this many titles in a row the API could not answer.
+_GIVE_UP_AFTER = 25
+RECHECK_ENV = "STREETZIM_WIKI_RECHECK_MAX"
+_DEFAULT_RECHECK_MAX = 1000
 
 
 def _cache_paths(cache_dir: str, title_us: str) -> tuple[str, str]:
     key = hashlib.sha1(title_us.encode("utf-8")).hexdigest()
     base = os.path.join(cache_dir, key)
     return base + ".html", base + _MISS_SUFFIX
+
+
+def _cache_state(title_us: str, cache_dir: str | None) -> tuple[str, str | None]:
+    """What the cache knows, without the network: ("hit", html),
+    ("miss", None), ("legacy", None) for an old empty marker, or
+    ("none", None)."""
+    if not cache_dir:
+        return "none", None
+    html_file, miss_file = _cache_paths(cache_dir, title_us)
+    if os.path.exists(html_file) and os.path.getsize(html_file) > 0:
+        with open(html_file, encoding="utf-8") as f:
+            return "hit", f.read()
+    if os.path.exists(miss_file):
+        return "miss", None
+    if os.path.exists(html_file):
+        return "legacy", None
+    return "none", None
 
 
 def _write_atomic(path: str, text: str) -> None:
@@ -418,21 +444,15 @@ def _record_miss(html_file: str, miss_file: str, title_us: str, reason: str) -> 
         os.remove(html_file)
 
 
-def _fetch_online(title_us: str, cache_dir: str | None, ua: str,
-                  pacer: Pacer | None = None) -> str | None:
-    """Article HTML from the cache or the API; None for a definitive miss
-    (no such page, no text). Raises TransientError when the API could not
-    answer (rate limit, 5xx, network) — that is never cached."""
+def _fetch_network(title_us: str, cache_dir: str | None, ua: str,
+                   pacer: Pacer | None = None) -> str | None:
+    """Ask the API (no cache read) and cache its answer: the HTML, or a
+    .miss for a definitive miss (returns None). Raises TransientError when
+    the API did not answer about the page — nothing is cached then."""
     html_file = miss_file = None
     if cache_dir:
         os.makedirs(cache_dir, exist_ok=True)
         html_file, miss_file = _cache_paths(cache_dir, title_us)
-        if os.path.exists(html_file) and os.path.getsize(html_file) > 0:
-            with open(html_file, encoding="utf-8") as f:
-                return f.read()
-        if os.path.exists(miss_file):
-            return None
-        # An empty .html (the legacy marker) falls through: re-checked once.
     params = urllib.parse.urlencode({
         "action": "parse", "page": title_us.replace("_", " "),
         "prop": "text", "redirects": "1", "format": "json",
@@ -441,12 +461,19 @@ def _fetch_online(title_us: str, cache_dir: str | None, ua: str,
     try:
         data = get_json(f"{PARSE_API}?{params}", user_agent=ua, pacer=pacer)
     except urllib.error.HTTPError as e:
-        if e.code not in _DEFINITIVE_HTTP:
-            raise TransientError(f"HTTP {e.code}", e.code) from e
+        code = api_error_code(e)
+        if code in _DEFINITIVE_API_ERRORS:
+            reason = code
+        elif e.code in _DEFINITIVE_HTTP:
+            reason = f"http-{e.code}"
+        else:
+            raise stop_error(e) from e
         if html_file and miss_file:
-            _record_miss(html_file, miss_file, title_us, f"http-{e.code}")
+            _record_miss(html_file, miss_file, title_us, reason)
         return None
-    err = data.get("error") if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        raise TransientError(f"unexpected {type(data).__name__} body")
+    err = data.get("error")
     if err is not None:
         code = str((err or {}).get("code", "")) if isinstance(err, dict) else ""
         if code not in _DEFINITIVE_API_ERRORS:
@@ -454,7 +481,10 @@ def _fetch_online(title_us: str, cache_dir: str | None, ua: str,
         if html_file and miss_file:
             _record_miss(html_file, miss_file, title_us, code)
         return None
-    text: Any = (data.get("parse") or {}).get("text") if isinstance(data, dict) else None
+    parse = data.get("parse")
+    if not isinstance(parse, dict):
+        raise TransientError("body has neither parse nor error")
+    text: Any = parse.get("text")
     if isinstance(text, dict):  # formatversion=1 shape
         text = text.get("*")
     html = text if isinstance(text, str) and text.strip() else None
@@ -464,6 +494,19 @@ def _fetch_online(title_us: str, cache_dir: str | None, ua: str,
         else:
             _record_miss(html_file, miss_file, title_us, "no-text")
     return html
+
+
+def _fetch_online(title_us: str, cache_dir: str | None, ua: str,
+                  pacer: Pacer | None = None) -> str | None:
+    """Article HTML from the cache or the API; None for a definitive miss
+    (no such page, no text). An old empty marker is re-checked. Raises
+    TransientError when the API could not answer (never cached)."""
+    state, html = _cache_state(title_us, cache_dir)
+    if state == "hit":
+        return html
+    if state == "miss":
+        return None
+    return _fetch_network(title_us, cache_dir, ua, pacer)
 
 
 def bundle_wiki_articles(
@@ -487,11 +530,14 @@ def bundle_wiki_articles(
     (wired to `creator.add_item(MapItem(...))` in the build; a plain dict
     collector in tests). Returns stats.
 
-    Online, `sleep` is the polite gap between API requests (cache hits cost
-    none); rate limits widen it. A title the API could not answer (429,
-    5xx, network) is counted in stats["unfetched"], never cached as a miss,
-    and reported in a WARNING; with STREETZIM_REQUIRE_WIKI=1 it stops the
-    build (SystemExit) instead of shipping fewer articles.
+    Online, `sleep` is the polite gap after each API response (cache hits
+    cost none); rate limits widen it. A title the API could not answer
+    (429, 5xx, network, refused) is counted in stats["unfetched"], never
+    cached as a miss, and reported in a WARNING; with
+    STREETZIM_REQUIRE_WIKI=1 it stops the build (SystemExit) instead of
+    shipping fewer articles. Requests stop for the rest of the run after a
+    401/403/404, 25 unanswered requests in a row, or a spent wait budget
+    (STREETZIM_WIKI_WAIT_BUDGET); cached articles are still bundled.
     """
     seen: set[str] = set()
     norm: list[str] = []
@@ -525,32 +571,54 @@ def bundle_wiki_articles(
 
     bundled = failed = total_bytes = 0
     unfetched = rate_limited = 0   # the API could not answer; not cached
-    streak = 0                     # consecutive unanswered titles
-    gave_up = False
+    streak = 0                     # consecutive network requests unanswered
+    stopped = False                # no more requests this run (cache still read)
+    rechecked = recheck_left = 0   # old empty markers re-checked / left for later
+    recheck_max = int(env_number(RECHECK_ENV, _DEFAULT_RECHECK_MAX))
     pacer = Pacer(sleep)
     ua = user_agent or _user_agent("wiki")
+    if src is None:
+        states: dict[str, int] = {}
+        for t in norm:
+            st = _cache_state(t, cache_dir)[0]
+            states[st] = states.get(st, 0) + 1
+        legacy = states.get("legacy", 0)
+        log(f"    bundle-wiki-articles: cache has {states.get('hit', 0)} articles, "
+            f"{states.get('miss', 0)} known misses; {states.get('none', 0)} to fetch"
+            + (f", {min(legacy, recheck_max)} of {legacy} old empty markers to re-check"
+               f" ({RECHECK_ENV}={recheck_max})" if legacy else ""))
     stored_titles: set = set()   # title_us actually written — for the geo-index
     for i, title_us in enumerate(norm, 1):
         raw: str | None = None
         if src:
             raw = src.html(title_us)
-        elif gave_up:
-            unfetched += 1
         else:
-            try:
-                raw = _fetch_online(title_us, cache_dir, ua, pacer)
-                streak = 0
-            except TransientError as e:
+            state, raw = _cache_state(title_us, cache_dir)
+            ask = state in ("none", "legacy")
+            if state == "legacy" and rechecked >= recheck_max:
+                ask = False          # stays an unverified miss until a later build
+                recheck_left += 1
+            elif ask and stopped:
+                ask = False
                 unfetched += 1
-                rate_limited += e.rate_limited
-                streak += 1
-                if streak >= _GIVE_UP_AFTER:
-                    # The API is down or throttling hard: every further
-                    # title would spend its full retry budget. Cache hits
-                    # still count; the rest wait for the next build.
-                    gave_up = True
-                    log(f"    bundle-wiki-articles: {streak} titles in a row "
-                        f"unanswered ({e.reason}); not requesting the rest")
+            if ask:
+                rechecked += state == "legacy"
+                try:
+                    raw = _fetch_online(title_us, cache_dir, ua, pacer)
+                    streak = 0
+                except TransientError as e:
+                    unfetched += 1
+                    rate_limited += e.rate_limited
+                    streak += 1
+                    if e.stop or streak >= _GIVE_UP_AFTER:
+                        # Refused, out of wait budget, or down: every
+                        # further request would fail the same way. Cache
+                        # hits still count; the rest wait for the next build.
+                        stopped = True
+                        log(f"    bundle-wiki-articles: not requesting the rest "
+                            f"({e.reason}" + ("" if e.stop else
+                                              f"; {streak} titles in a row unanswered")
+                            + ")")
         if raw and _is_disambiguation(raw):
             # A non-English `wikipedia=` tag whose enwiki namesake is a
             # disambiguation page ("it:Roma" -> "Roma may refer to:") would
@@ -614,16 +682,20 @@ def bundle_wiki_articles(
              "bytes": total_bytes, "stored_titles": stored_titles,
              "images": images_stored, "image_bytes": image_bytes,
              "disambiguation_skipped": disambig,
-             "unfetched": unfetched, "rate_limited": rate_limited}
+             "unfetched": unfetched, "rate_limited": rate_limited,
+             "rechecked": rechecked, "recheck_left": recheck_left}
     log(f"    bundle-wiki-articles: stored {bundled} articles "
         f"({total_bytes / 1024:.0f} KB), {failed} unavailable"
         + (f" ({disambig} were enwiki disambiguation pages)" if disambig else "")
         + (f"; {images_stored} images ({image_bytes / 1024 / 1024:.0f} MB, mode={images})"
            if images != "none" else ""))
+    if rechecked or recheck_left:
+        log(f"    bundle-wiki-articles: re-checked {rechecked} old empty cache markers"
+            + (f"; {recheck_left} left for later builds" if recheck_left else ""))
     if unfetched:
         msg = (f"WARNING: bundle-wiki-articles: {unfetched} of {len(norm)} articles "
                f"were NOT fetched ({rate_limited} rate-limited by Wikipedia, the "
-               f"rest 5xx/network). They are not cached as missing, so the next "
+               f"rest 5xx/network/refused). They are not cached as missing, so the next "
                f"build fetches them; this ZIM ships without them.")
         log("    " + msg)
         if require_complete():

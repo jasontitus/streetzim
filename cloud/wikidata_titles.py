@@ -30,7 +30,9 @@ enwiki article or does not exist. A 429, 5xx or network failure (retried
 with Retry-After honoured) caches nothing, so the next build asks again.
 This cache never held rate-limit misses (a failed batch always raised
 before its Q-IDs were written). It could hold misses from a batch Wikidata
-refused because of one malformed id; `_heal` re-checks those.
+refused because of one malformed id; `_heal` re-checks those. Requests
+are serial with maxlag=5 and a small gap after each response; a refused
+client (400/401/403/404) or a spent wait budget stops the run.
 """
 from __future__ import annotations
 
@@ -47,6 +49,7 @@ from cloud.wikimedia_http import (
     TransientError,
     get_json,
     require_complete,
+    stop_error,
 )
 from cloud.wikimedia_http import user_agent as _user_agent
 
@@ -55,12 +58,17 @@ ENWIKI = "enwiki"
 BATCH = 50  # wbgetentities accepts up to 50 ids per request
 
 
-# API error codes that come back with HTTP 200 but say nothing about the
-# Q-IDs (a lagged or read-only replica, a throttle). Any other `error` body
-# (e.g. no-such-entity for a malformed id) is not an answer per Q-ID either,
-# so neither kind is ever cached as "no article".
+# `error` codes that come back with HTTP 200 but say nothing about the
+# Q-IDs: a read-only or failing replica (maxlag and ratelimited are retried
+# inside get_json with their Retry-After). Never cached.
 _TRANSIENT_API_ERRORS = frozenset({"maxlag", "ratelimited", "readonly"})
-_QID_RE = re.compile(r"Q[1-9][0-9]*")
+# Wikidata item ids: Q + up to 10 digits, no leading zero. Anything else
+# (an OSM "Q1;Q2", "Q05", a 20-digit typo) is never requested.
+_QID_RE = re.compile(r"Q[1-9][0-9]{0,9}")
+# Requests refused in a row (error bodies) before a run stops asking: one
+# bad id costs at most two in a row while its batch is halved around it; a
+# refusal of everything reaches this before any single id is written off.
+_MAX_REFUSALS_IN_A_ROW = 6
 
 
 class BatchError(Exception):
@@ -72,9 +80,11 @@ def _api_batch(qids: list[str], *, api: str = WIKIDATA_API,
                pacer: Pacer | None = None) -> dict:
     """One ``wbgetentities`` call for <=50 Q-IDs; returns parsed JSON.
 
-    Retries 429/5xx/transport errors, honouring Retry-After
+    Sends maxlag=5 (Wikimedia's advice for automated clients) and retries
+    429/5xx/maxlag/transport errors, honouring Retry-After
     (cloud/wikimedia_http.py). Raises TransientError when they outlive the
-    retries, BatchError for an `error` body that is not transient.
+    retries (`stop` for 400/401/403/404: every batch would get the same),
+    BatchError for an `error` body that is an answer about the ids.
     """
     params = urllib.parse.urlencode({
         "action": "wbgetentities",
@@ -82,13 +92,13 @@ def _api_batch(qids: list[str], *, api: str = WIKIDATA_API,
         "props": "sitelinks",
         "sitefilter": ENWIKI,
         "format": "json",
+        "maxlag": "5",
     })
     try:
         data = get_json(f"{api}?{params}", user_agent=user_agent or _user_agent("wikidata"),
                         pacer=pacer, retries=retries, timeout=30)
     except urllib.error.HTTPError as e:
-        # A 4xx other than 408/429 is no answer about these Q-IDs either.
-        raise BatchError(f"HTTP {e.code}") from e
+        raise stop_error(e) from e
     if not isinstance(data, dict):
         raise TransientError("non-object JSON body")
     err = data.get("error")
@@ -97,7 +107,39 @@ def _api_batch(qids: list[str], *, api: str = WIKIDATA_API,
         if code in _TRANSIENT_API_ERRORS or code.startswith("internal_api_error"):
             raise TransientError(f"API error {code}")
         raise BatchError(f"API error {code or '?'}")
+    if not isinstance(data.get("entities"), dict):
+        raise TransientError("body has neither entities nor error")
     return data
+
+
+class _Resolver:
+    """Answers for batches, halving a refused batch to isolate a bad id."""
+
+    def __init__(self, user_agent: str | None, pacer: Pacer) -> None:
+        self.user_agent = user_agent
+        self.pacer = pacer
+        self.refusals = 0           # refused requests in a row
+        self.written_off: list[str] = []
+
+    def answers(self, batch: list[str]) -> dict[str, str]:
+        try:
+            data = _api_batch(batch, user_agent=self.user_agent, pacer=self.pacer)
+        except BatchError as exc:
+            self.refusals += 1
+            if self.refusals >= _MAX_REFUSALS_IN_A_ROW:
+                raise TransientError(f"{self.refusals} requests in a row refused ({exc})",
+                                     stop=True) from exc
+            if len(batch) == 1:
+                # Wikidata refuses this id on its own: it names no item, so
+                # it has no article. Cached as a miss so it is not asked again.
+                self.written_off.append(batch[0])
+                return {batch[0]: ""}
+            half = len(batch) // 2
+            out = self.answers(batch[:half])
+            out.update(self.answers(batch[half:]))
+            return out
+        self.refusals = 0
+        return _titles_from_response(data, batch)
 
 
 def _titles_from_response(data: dict, qids: list[str]) -> dict[str, str]:
@@ -155,7 +197,7 @@ def resolve_qids(
     cache_path: str | None = None,
     offline_map=None,
     user_agent: str | None = None,
-    sleep: float = 1.0,
+    sleep: float = 0.1,
     progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, str]:
     """Return ``{qid: enwiki_title}`` for Q-IDs with an English sitelink.
@@ -168,7 +210,9 @@ def resolve_qids(
         hits and known-misses (stored as "") are cached so repeated builds
         never re-query the same Q-ID. Only Wikidata's answers are cached;
         a rate limit or outage caches nothing (see the module docstring).
-    sleep: the polite gap between API requests; rate limits widen it.
+    sleep: the gap between one response and the next request. Requests
+        are serial, so the API's own response time paces them; 429 and
+        maxlag answers widen the gap (cloud/wikimedia_http.Pacer).
 
     Q-IDs left unresolved because the API could not answer are reported in
     a WARNING; with STREETZIM_REQUIRE_WIKI=1 they stop the build.
@@ -190,8 +234,10 @@ def resolve_qids(
             cache = {}
     healed = _heal(cache)
     if healed:
-        print(f"    wikidata->title: re-checking {healed} cached misses from a batch "
-              f"an older build could not resolve", file=sys.stderr, flush=True)
+        print(f"    wikidata->title: the cache holds malformed ids from a batch an "
+              f"older build could not resolve; dropping {healed} cached misses to "
+              f"re-check them once (up to ~{-(-healed // BATCH)} requests)",
+              file=sys.stderr, flush=True)
 
     todo = [q for q in want if q not in cache]
 
@@ -216,18 +262,16 @@ def resolve_qids(
     # answer, resolution stops (hammering a rate limit is rude) and returns
     # what it has, loudly; a refused batch is skipped, not cached.
     pacer = Pacer(sleep)
+    resolver = _Resolver(user_agent, pacer)
     failed_at = None
     for n, i in enumerate(range(0, len(todo), BATCH)):
         batch = todo[i:i + BATCH]
         try:
-            answers = _titles_from_response(
-                _api_batch(batch, user_agent=user_agent, pacer=pacer), batch)
-        except BatchError as exc:
-            print(f"    WARNING: Wikidata refused a batch of {len(batch)} Q-IDs "
-                  f"({exc}); not cached, retried on the next build",
-                  file=sys.stderr, flush=True)
-            continue
+            answers = resolver.answers(batch)
         except Exception as exc:  # noqa: BLE001 — network/API; keep what we have
+            # TransientError after its retries, a refused client (401/403/
+            # 404), a spent wait budget: the next batch would fare no
+            # better, and hammering a throttled API is rude. Stop, loudly.
             failed_at = (i, exc)
             _flush()
             break
@@ -236,6 +280,10 @@ def resolve_qids(
             _flush()
         if progress:
             progress(min(i + BATCH, len(todo)), len(todo))
+    if resolver.written_off:
+        print(f"    wikidata->title: Wikidata refused {len(resolver.written_off)} ids "
+              f"on their own (e.g. {resolver.written_off[0]}); cached as having no article",
+              file=sys.stderr, flush=True)
 
     if cache_path and (todo or healed):
         tmp = cache_path + ".tmp"
