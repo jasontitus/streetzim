@@ -57,7 +57,7 @@ streetzim = "streetzim.cli:main"
 Homepage = "https://github.com/jasontitus/streetzim"
 
 [tool.setuptools]
-py-modules = ["create_osm_zim", "wikidata_cache"]
+py-modules = ["create_osm_zim", "wikidata_cache", "download_overture_data"]
 
 # Listed rather than found, because streetzim.resources is resources/
 # (tests/test_packaging.py fails when a new streetzim subpackage is missing).

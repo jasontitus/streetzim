@@ -86,6 +86,10 @@ jobs:
             "SQLAlchemy==2.0.41" "PyJWT==2.13.0" "pytz==2025.2" "humanfriendly==10.0" \
             "pycountry==24.6.1" "regex==2025.9.1" "requests==2.33.0"
           PYTHONPATH=/tmp/zimfarm/backend/src /tmp/zfvenv/bin/python tools/check_zimfarm_schema.py
+          # Recipes per --profile through Zimfarm's own models and compute_flags.
+          /tmp/zfvenv/bin/pip install -q "pytest>=8.0"
+          PYTHONPATH=/tmp/zimfarm/backend/src:$PWD /tmp/zfvenv/bin/python -m pytest -q \
+            -p no:cacheprovider -W ignore tests/test_offliner_definition.py -k zimfarm
       - name: Install pytest-cov (pyproject.toml's test extra)
         run: pip install pytest-cov==7.1.0
       - name: Python tests
@@ -339,7 +343,7 @@ jobs:
           pip install --no-deps -e .
           streetzim --name osm_en_monaco --title Monaco \
             --description "Offline map of Monaco with search and routing" \
-            --tags openstreetmap --area monaco --shapefiles "$PWD" \
+            --tags openstreetmap --area monaco --shapefiles "$PWD" --profile basic \
             --output out --stats-filename out/task_progress.json
           python tools/check_openzim_output.py out osm_en_monaco --title Monaco --routing
           python cloud/validate_zim.py out/osm_en_monaco_*.zim
@@ -413,9 +417,11 @@ jobs:
             node cloud/zim_viewer_smoke.mjs
 
   docker:
-    # The image as Zimfarm runs it: the default profile (Geofabrik extract,
-    # tilemaker tiles, search and routing) on Monaco, entirely with the
-    # image's own tilemaker, osmium and Python; then the host validates it.
+    # The image as Zimfarm runs it: the default profile (full: Geofabrik
+    # extract, tilemaker tiles, search, routing, Wikidata, Wikipedia articles,
+    # Overture) on Monaco, entirely with the image's own tilemaker, osmium,
+    # Python and DuckDB extensions; then the host validates it. (monaco-e2e
+    # runs streetzim with --profile basic.)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:

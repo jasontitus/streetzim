@@ -12,6 +12,9 @@ fetches the inputs into --dl, and runs create_osm_zim.main() with the
 matching arguments. Production scripts keep calling create_osm_zim.py
 directly; both paths produce the same ZIM for the same inputs.
 
+--profile picks the feature set (full, the default, or basic; see PROFILES
+and docs/zimfarm.md); a feature flag given explicitly overrides it.
+
     streetzim --name osm_en_monaco --title Monaco \\
         --description "Offline map of Monaco with search and routing" \\
         --area monaco --output /output
@@ -89,6 +92,40 @@ ZIM_METADATA_FLAGS = {"Name": "name", "Title": "title", "Description": "descript
                       "LongDescription": "long_description", "Creator": "creator",
                       "Publisher": "publisher", "Illustration": "illustration_url"}
 
+# ---------------------------------------------------------------- profiles
+# --profile sets the content features; any of them given explicitly on the
+# command line (--wikidata, --no-wikidata, ...) wins over the profile.
+#   full:  what StreetZim's own builds ship that openZIM can ship too
+#          (docs/zimfarm.md, "Feature parity"). Satellite is never part of
+#          a profile: it is non-commercial and only ever opted into.
+#   basic: nothing fetched besides the OSM extract and the shapefiles.
+# A profile sets a feature only when the parser can switch it both ways
+# (--x and --no-x), so a feature whose flag cannot yet be turned off (terrain
+# while --terrain is a plain store_true) keeps its own default.
+PROFILES: dict[str, dict[str, bool]] = {
+    "full": {"wikidata": True, "wikipedia": True, "overture": True, "terrain": True},
+    "basic": {"wikidata": False, "wikipedia": False, "overture": False, "terrain": False},
+}
+DEFAULT_PROFILE = "full"
+FEATURE_NAMES = {"wikidata": "Wikidata", "wikipedia": "Wikipedia articles",
+                 "overture": "Overture Maps", "terrain": "terrain"}
+WIKIPEDIA_IMAGES = ("none", "lead", "all")
+OVERTURE_THEMES = ("addresses", "places")
+ZIMFARM.update({
+    "profile": {"title": "Profile", "default": DEFAULT_PROFILE},
+    "no_wikidata": {"title": "No Wikidata"},
+    "wikipedia": {"title": "Wikipedia articles"},
+    "no_wikipedia": {"title": "No Wikipedia articles",
+                     "description": "Leave out Wikipedia articles, whatever the profile"},
+    "wikipedia_zim_url": {"title": "Wikipedia ZIM URL", "type": "url"},
+    "wikipedia_images": {"title": "Wikipedia images"},
+    "overture": {"title": "Overture Maps"},
+    "no_overture": {"title": "No Overture Maps",
+                    "description": "Leave out Overture Maps data, whatever the profile"},
+    "overture_release": {"title": "Overture release",
+                         "pattern": r"^(latest|[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+)$"},
+})
+
 
 def version() -> str:
     from streetzim.__about__ import __version__
@@ -165,7 +202,107 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Compression threads for libzim. Default: the CPU "
                            "count, at most 20")
     feat.add_argument("--keep-temp", action="store_true", help=argparse.SUPPRESS)
+    add_profile_arguments(p)
     return p
+
+
+def _profile_default_text(dest: str) -> str:
+    on = [name for name, feats in PROFILES.items() if feats.get(dest)]
+    off = [name for name, feats in PROFILES.items() if dest in feats and not feats[dest]]
+    return (f"Default: on with --profile {', '.join(on)}, off with "
+            f"{', '.join(off)}")
+
+
+def add_profile_arguments(p: argparse.ArgumentParser) -> None:
+    """--profile and the features it sets (see PROFILES)."""
+    prof = p.add_argument_group("Profile (a feature flag given explicitly wins)")
+    profile = prof.add_argument("--profile", choices=list(PROFILES))
+    prof.add_argument("--no-wikidata", dest="wikidata", action="store_false",
+                      help="Leave out Wikidata place details, whatever the profile")
+    prof.add_argument("--wikipedia", action=argparse.BooleanOptionalAction, default=None,
+                      help="English Wikipedia articles for the places that have one, "
+                           "stored in the ZIM (CC BY-SA). Text from the Wikipedia API, "
+                           "or text and images from --wikipedia-zim-url")
+    prof.add_argument("--wikipedia-zim-url",
+                      help="Kiwix Wikipedia ZIM (download.kiwix.org) to read the "
+                           "articles and their images from instead of the API. "
+                           "Downloaded for every task: a full English one is 50 to "
+                           "120 GB. Default: none (the API, text only)")
+    prof.add_argument("--wikipedia-images", choices=WIKIPEDIA_IMAGES, default="all",
+                      help="With --wikipedia-zim-url: the articles' images to store "
+                           "(lead: the first picture). Default: all")
+    prof.add_argument("--overture", action=argparse.BooleanOptionalAction, default=None,
+                      help="Overture Maps addresses and place details (websites, "
+                           "phones, brands, categories), read from Overture's public "
+                           "S3 bucket over HTTPS")
+    prof.add_argument("--overture-release", default="latest",
+                      help="Overture release, e.g. 2026-09-23.1. Default: latest "
+                           "(the newest complete release)")
+    both = switchable(p)
+    sets = {name: [FEATURE_NAMES.get(d, d) for d, on in feats.items() if on and d in both]
+            for name, feats in PROFILES.items()}
+    profile.help = ("Feature set: "
+                    + "; ".join(f"{name}: {', '.join(on) or 'none of them'}"
+                                for name, on in sets.items())
+                    + f" (routing is on in both). Default: {DEFAULT_PROFILE}")
+    for action in p._actions:     # the profile's default, in each feature's help
+        if action.dest in both and action.dest in PROFILES[DEFAULT_PROFILE] \
+                and action.help and not action.option_strings[0].startswith("--no-"):
+            action.help = f"{action.help.rstrip('.')}. {_profile_default_text(action.dest)}"
+
+
+def switchable(parser: argparse.ArgumentParser) -> dict[str, tuple[set[str], set[str]]]:
+    """Boolean dests the parser can set both ways: dest -> (on, off options)."""
+    opts: dict[str, tuple[set[str], set[str]]] = {}
+    for a in parser._actions:
+        if a.nargs != 0 or not a.option_strings or a.dest in ("help", "version"):
+            continue
+        on, off = opts.setdefault(a.dest, (set(), set()))
+        for o in a.option_strings:
+            (off if o.startswith("--no-") else on).add(o)
+    return {d: v for d, v in opts.items() if v[0] and v[1]}
+
+
+def given_dests(parser: argparse.ArgumentParser, argv: list[str]) -> set[str]:
+    """The dests set by an option on this command line (not by a default)."""
+    import copy
+    bare = copy.deepcopy(parser)
+    for a in bare._actions:
+        a.default = argparse.SUPPRESS
+        a.required = False
+    return set(vars(bare.parse_args(argv)))
+
+
+def apply_profile(args: argparse.Namespace, argv: list[str],
+                  parser: argparse.ArgumentParser | None = None) -> argparse.Namespace:
+    """Fill the features the command line leaves unset from --profile.
+    Raises ValueError when a feature is both switched on and off."""
+    parser = parser or build_parser()
+    both = switchable(parser)
+    words = {w.split("=", 1)[0] for w in argv}
+    for on, off in both.values():
+        if words & on and words & off:
+            raise ValueError(f"{sorted(words & on)[0]} and {sorted(words & off)[0]} "
+                             "both given")
+    given = given_dests(parser, argv)
+    args.profile = args.profile or DEFAULT_PROFILE
+    for dest, value in PROFILES[args.profile].items():
+        if dest in both and dest not in given:
+            setattr(args, dest, value)
+    if args.wikipedia_zim_url and not args.wikipedia:
+        raise ValueError("--wikipedia-zim-url needs --wikipedia (off with "
+                         f"--profile {args.profile})")
+    return args
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return apply_profile(args, argv, parser)
+    except ValueError as e:
+        parser.error(str(e))
 
 
 # ---------------------------------------------------------------- helpers
@@ -506,7 +643,68 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
             argv += ["--map-zoom", str(round(zoom))]
     if args.debug or args.keep_temp:
         argv += ["--keep-temp"]
+    argv += LAYOUT_ARGS + profile_feature_args(args, dl, bbox)
     return argv, {"bbox": bbox, "pbf_url": pbf_url}
+
+
+# What StreetZim's own builds (ops/build-region-fast.sh) pass whatever the
+# content: search-data chunks over 10 MB split in 16 (slow to fetch on iOS
+# otherwise), and no category-index/{addr,poi,street}.json, the bulk
+# records only an external LLM tool read (the Find page uses the chip files).
+LAYOUT_ARGS = ["--split-hot-search-chunks-mb", "10", "--no-llm-bundle"]
+
+
+def profile_feature_args(args: argparse.Namespace, dl: Path, bbox: str) -> list[str]:
+    """create_osm_zim arguments for the features --profile sets (other than
+    Wikidata and terrain, which plan() passes), fetching their inputs into
+    `dl`. Overture data or a Wikipedia ZIM that cannot be fetched fails the
+    build rather than shipping without it; the Wikimedia APIs are
+    best-effort in the builder (an article still rate limited after its
+    retries is left out)."""
+    out: list[str] = []
+    if getattr(args, "wikipedia", None):
+        (dl / "wikipedia").mkdir(parents=True, exist_ok=True)   # the builder's caches
+        out += ["--resolve-wikidata-titles",
+                "--wikidata-title-cache", str(dl / "wikipedia" / "qid_titles.json"),
+                "--bundle-wiki-articles",
+                "--wiki-articles-cache", str(dl / "wikipedia" / "articles")]
+        if getattr(args, "wikipedia_zim_url", None):
+            url = args.wikipedia_zim_url
+            src = fetch(url, dl / "wikipedia" / _name_of_url(url))
+            out += ["--wiki-articles-source", str(src),
+                    "--wiki-images", args.wikipedia_images, "--wiki-image-max-kb", "128"]
+    if getattr(args, "overture", None):
+        for theme, path in fetch_overture(bbox, args.overture_release, dl).items():
+            out += [f"--overture-{theme}", str(path)]
+    return out
+
+
+def fetch_overture(bbox: str, release: str, dl: Path) -> dict[str, Path]:
+    """Overture's addresses and places for the box, as parquet files in
+    `dl`, from one release (`latest` is resolved once, for both themes)."""
+    import hashlib
+
+    import download_overture_data as ov  # repository root, or the wheel's module
+    try:
+        # The script is not typed (`themes` has no annotation).
+        resolved: str = ov.resolve_release(  # pyright: ignore[reportUnknownMemberType]
+            release, list(OVERTURE_THEMES))
+        key = hashlib.sha1(bbox.encode()).hexdigest()[:12]
+        out: dict[str, Path] = {}
+        for theme in OVERTURE_THEMES:
+            dest = dl / "overture" / f"{theme}-{resolved}-{key}.parquet"
+            if not dest.exists():
+                # download_overture reuses any file at its path: write
+                # elsewhere so an interrupted run leaves nothing to reuse.
+                part = dest.with_name(dest.name + ".part")
+                part.parent.mkdir(parents=True, exist_ok=True)
+                part.unlink(missing_ok=True)
+                ov.download_overture(theme, bbox, resolved, str(part))
+                os.replace(part, dest)
+            out[theme] = dest
+        return out
+    except SystemExit as e:        # the script's way of reporting a failure
+        raise ValueError(f"Overture Maps: {e.code}") from e
 
 
 def ensure_shapefiles(folder: Path) -> Path:
@@ -526,7 +724,7 @@ def _error(msg: object) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    args = parse_args(argv)
     missing = missing_runtime_files()
     if missing:
         return _error(f"missing from {RESOURCES_DIR}: {', '.join(missing)}; "

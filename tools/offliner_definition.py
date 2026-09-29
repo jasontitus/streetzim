@@ -23,9 +23,35 @@ sys.path.insert(0, str(ROOT))
 TARGET = ROOT / "offliner-definition.json"
 
 from streetzim.cli import (  # noqa: E402
-    MODEL_VALIDATORS, ZIM_METADATA_FLAGS, ZIMFARM, build_parser)
+    MODEL_VALIDATORS, PROFILES, ZIM_METADATA_FLAGS, ZIMFARM, build_parser)
 
 SKIP_ACTIONS = (argparse._HelpAction, argparse._VersionAction)  # pyright: ignore[reportPrivateUsage]
+BOOLEAN_ACTIONS = (argparse._StoreTrueAction,  # pyright: ignore[reportPrivateUsage]
+                   argparse._StoreFalseAction,  # pyright: ignore[reportPrivateUsage]
+                   argparse.BooleanOptionalAction)
+PROFILE_FEATURES = {d for feats in PROFILES.values() for d in feats}
+
+
+def _offered(action: argparse.Action) -> list[str]:
+    """The long options of `action` Zimfarm gets a flag for. Zimfarm passes a
+    boolean only when it is ticked, so a flag that defaults to on is offered
+    as its --no- form ("routing" -> "no_routing"), and a feature --profile
+    sets is offered both ways, to override either profile."""
+    longs = [o for o in action.option_strings if o.startswith("--")]
+    if isinstance(action, argparse.BooleanOptionalAction):
+        if action.dest in PROFILE_FEATURES:
+            return longs
+        if action.default:
+            return [o for o in longs if o.startswith("--no-")]
+    return longs[:1]
+
+
+def _description(action: argparse.Action, option: str) -> str:
+    text = (action.help or "").replace("%%", "%")
+    if option.startswith("--no-") and isinstance(action, argparse.BooleanOptionalAction):
+        # One help text serves --x and --no-x; say which way this one goes.
+        text = f"Turn {option.replace('--no-', '--', 1)} off, whatever the profile"
+    return text
 
 
 def definition() -> dict[str, Any]:
@@ -33,37 +59,11 @@ def definition() -> dict[str, Any]:
     for action in build_parser()._actions:
         if isinstance(action, SKIP_ACTIONS) or action.help == argparse.SUPPRESS:
             continue
-        longs = [o for o in action.option_strings if o.startswith("--")]
-        if not longs:
-            continue
-        # Zimfarm passes a boolean flag only when it is ticked, so a flag that
-        # defaults to on is offered as its --no- form ("routing" -> "no_routing").
-        if isinstance(action, argparse.BooleanOptionalAction) and action.default:
-            longs = [o for o in longs if o.startswith("--no-")]
-        key = longs[0][2:].replace("-", "_")
-        extra = dict(ZIMFARM.get(key, {}))
-        if extra.pop("offliner", True) is False:
-            continue
-        if isinstance(action, (argparse._StoreTrueAction,  # pyright: ignore[reportPrivateUsage]
-                               argparse.BooleanOptionalAction)):
-            typ = "boolean"
-        elif action.type is int:
-            typ = "integer"
-        else:
-            typ = "string"
-        entry: dict[str, Any] = {
-            "type": typ,
-            "required": bool(action.required),
-            "title": extra.pop("title", key.replace("_", " ").capitalize()),
-            "description": (action.help or "").replace("%%", "%"),
-        }
-        if isinstance(action.choices, range):
-            entry["min"], entry["max"] = action.choices.start, action.choices.stop - 1
-        if extra.get("choices") == "KNOWN_AREAS":
-            from create_osm_zim import KNOWN_AREAS
-            extra["choices"] = sorted(KNOWN_AREAS)
-        entry.update(extra)
-        flags[key] = entry
+        for option in _offered(action):
+            key = option[2:].replace("-", "_")
+            entry = _entry(action, option, key)
+            if entry is not None:
+                flags[key] = entry
     return {
         "offliner_id": "streetzim",
         "stdOutput": True,
@@ -73,6 +73,35 @@ def definition() -> dict[str, Any]:
         "zimMetadata": [{"metadata": m, "flag": f} for m, f in ZIM_METADATA_FLAGS.items()
                         if f in flags],
     }
+
+
+def _entry(action: argparse.Action, option: str, key: str) -> dict[str, Any] | None:
+    extra = dict(ZIMFARM.get(key, {}))
+    if extra.pop("offliner", True) is False:
+        return None
+    if isinstance(action, BOOLEAN_ACTIONS):
+        typ = "boolean"
+    elif action.type is int:
+        typ = "integer"
+    elif isinstance(action.choices, (list, tuple)):
+        typ = "string-enum"
+    else:
+        typ = "string"
+    entry: dict[str, Any] = {
+        "type": typ,
+        "required": bool(action.required),
+        "title": extra.pop("title", key.replace("_", " ").capitalize()),
+        "description": _description(action, option),
+    }
+    if isinstance(action.choices, range):
+        entry["min"], entry["max"] = action.choices.start, action.choices.stop - 1
+    elif typ == "string-enum":
+        entry["choices"] = list(action.choices or ())
+    if extra.get("choices") == "KNOWN_AREAS":
+        from create_osm_zim import KNOWN_AREAS
+        extra["choices"] = sorted(KNOWN_AREAS)
+    entry.update(extra)
+    return entry
 
 
 def render() -> str:
