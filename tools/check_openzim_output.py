@@ -36,7 +36,7 @@ def main() -> int:
     from PIL import Image
 
     out = Path(a.out)
-    problems = []
+    problems: list[str] = []
     zims = sorted(out.glob("*.zim"))
     leftovers = sorted(p.name for p in out.glob("*.tmp"))
     if leftovers:

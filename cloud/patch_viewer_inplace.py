@@ -110,7 +110,7 @@ def main() -> int:
                 print("  dry-run: nothing written")
                 return 0
 
-            for name, start, slot_len, new, head, closer in plan:
+            for _name, start, slot_len, new, head, closer in plan:
                 filler = b"\n" * (slot_len - len(new) - len(head) - len(closer))
                 mm[start:start + slot_len] = new + head + filler + closer
             mm.flush()

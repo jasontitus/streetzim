@@ -355,7 +355,7 @@ def test_manifest_agrees_with_the_chunks_on_disk(archive):
     except Exception:                                        # noqa: BLE001
         pytest.skip("no search manifest")
     chunks = man.get("chunks") or {}
-    names = list(chunks) if isinstance(chunks, dict) else list(chunks)
+    names = list(chunks)  # a {prefix: count} dict; its keys are the chunk names
     missing = [c for c in names[:200]
                if not archive.has_entry_by_path(f"search-data/{c}.json")]
     assert not missing, f"manifest names chunks that are absent: {missing[:5]}"

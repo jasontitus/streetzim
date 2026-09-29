@@ -1381,7 +1381,8 @@ def _chk_category_index(arc) -> tuple[str, str]:
                     f"category_shards.{slug} declares no shards")
         def _missing(suffix: str) -> bool:
             try:
-                arc.get_entry_by_path(f"category-index/{slug}-{suffix}.json")
+                # Called only within this iteration, so the current slug.
+                arc.get_entry_by_path(f"category-index/{slug}-{suffix}.json")  # noqa: B023
                 return False
             except Exception:
                 return True
@@ -1808,7 +1809,7 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
     # If zimcheck itself can't load (xapian symbol mismatch etc.),
     # the binary exits early with a dyld error — treat as skipped
     # so a broken local install doesn't hard-fail the whole pipeline.
-    if "Symbol not found" in out or "dyld" in out and "Library not loaded" in out:
+    if "Symbol not found" in out or ("dyld" in out and "Library not loaded" in out):
         return "pass", "zimcheck binary failed to load libraries (skipped)"
     # zimcheck groups errors into multi-line blocks: a "[ERROR] Foo:"
     # header followed by indented child lines. zimru's "Invalid internal

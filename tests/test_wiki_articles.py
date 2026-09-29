@@ -161,7 +161,7 @@ IMAGES = {
 class ImageBundlingTests(unittest.TestCase):
     def _run(self, mode, titles=("Exampleville",), pages=None):
         stored = {}
-        src = FakeWikiSource(pages or {t: ARTICLE for t in titles}, IMAGES)
+        src = FakeWikiSource(pages or dict.fromkeys(titles, ARTICLE), IMAGES)
         stats = wa.bundle_wiki_articles(
             list(titles), lambda p, t, m, c: stored.__setitem__(p, (t, m, c)),
             sleep=0, log=lambda *_: None, images=mode, image_max_kb=128, source=src)

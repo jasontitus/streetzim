@@ -517,7 +517,7 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
                                 magic = f.read(4)
                             # Classic TIFF or BigTIFF (download_dem.py accepts both).
                             if magic not in _TIFF_MAGICS:
-                                raise IOError("response is not a TIFF (truncated or HTML error page)")
+                                raise OSError("response is not a TIFF (truncated or HTML error page)")
                             os.replace(tmp_path, fpath)
                             size_mb = os.path.getsize(fpath) / (1024 * 1024)
                             print(f"      {size_mb:.1f} MB ({label})")

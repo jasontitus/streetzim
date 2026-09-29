@@ -802,7 +802,7 @@ def repackage(src_path: str, dst_path: str,
                     raise SystemExit(
                         f"search-data/manifest.json in {src_path} is "
                         f"unparseable ({ex}); refusing to emit a ZIM "
-                        f"without search chunks")
+                        f"without search chunks") from ex
                 replaced_search_paths.add(path)
                 continue
             # When we're emitting a new category-index/manifest.json

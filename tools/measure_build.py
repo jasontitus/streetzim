@@ -25,6 +25,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 PAGE = os.sysconf("SC_PAGE_SIZE")
 
@@ -100,7 +101,7 @@ def main() -> int:
 
     watch = [Path(w) for w in a.watch]
     peak = {"rss": 0, "pss": 0, "disk": 0}
-    samples = []
+    samples: list[tuple[float, int, int, int]] = []
     log = open(a.log, "w") if a.log else None
     t0 = time.time()
     proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT if log else None)
@@ -123,7 +124,7 @@ def main() -> int:
     th.join()
     wall = time.time() - t0
     ru = resource.getrusage(resource.RUSAGE_CHILDREN)
-    result = {
+    result: dict[str, Any] = {
         "command": cmd,
         "exit_code": rc,
         "wall_s": round(wall, 1),

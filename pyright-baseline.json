@@ -1,17 +1,6 @@
 {
- "cloud/chip_shards.py | reportArgumentType | Argument of type \"Unknown | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\"": 4,
- "cloud/chip_shards.py | reportArgumentType | Argument of type \"list[ndarray[_AnyShape, dtype[Any]]] | None\" cannot be assigned to parameter \"iter1\" of type \"Iterable[_T1@__new__]\" in function \"__new__\"": 2,
- "cloud/chip_shards.py | reportArgumentType | Argument of type \"list[ndarray[_AnyShape, dtype[Any]]] | None\" cannot be assigned to parameter \"iter2\" of type \"Iterable[_T2@__new__]\" in function \"__new__\"": 2,
- "cloud/chip_shards.py | reportOperatorIssue | Operator \"<=\" not supported for types \"float\" and \"Unknown | None\"": 2,
- "cloud/chip_shards.py | reportOptionalOperand | Operator \"<=\" not supported for \"None\"": 2,
- "cloud/wiki_articles.py | reportArgumentType | Argument of type \"Unknown | Any | dict[Unknown, Unknown] | Literal['']\" cannot be assigned to parameter \"s\" of type \"str\" in function \"write\"": 1,
- "cloud/wiki_articles.py | reportOptionalMemberAccess | \"image\" is not a known attribute of \"None\"": 1,
- "cloud/wiki_articles.py | reportReturnType | Type \"Unknown | Any | dict[Unknown, Unknown] | None\" is not assignable to return type \"str | None\"": 1,
- "cloud/wikidata_titles.py | reportArgumentType | Argument of type \"str\" cannot be assigned to parameter \"filename\" of type \"Path\" in function \"__init__\"": 1,
  "create_osm_zim.py | reportIndexIssue | \"__getitem__\" method not defined on type \"float\"": 1,
  "create_osm_zim.py | reportOptionalSubscript | Object of type \"None\" is not subscriptable": 3,
- "streetzim/addresses.py | reportArgumentType | Argument of type \"Generator[str | None, None, None]\" cannot be assigned to parameter \"iterable\" of type \"Iterable[str]\" in function \"join\"": 1,
- "streetzim/addresses.py | reportCallIssue | No overloads for \"join\" match the provided arguments": 1,
  "streetzim/common.py | reportOperatorIssue | Operator \"-\" not supported for types \"float\" and \"float | None\"": 1,
  "streetzim/routing/build.py | reportAttributeAccessIssue | \"index\" is not a known attribute of module \"osmium\"": 1,
  "streetzim/routing/build.py | reportAttributeAccessIssue | Cannot assign to attribute \"endpoints\" for class \"_Pass1\"": 1,
@@ -24,7 +13,5 @@
  "streetzim/zim_writer.py | reportArgumentType | Argument of type \"bytes | None\" cannot be assigned to parameter \"content\" of type \"str | bytes\" in function \"__init__\"": 1,
  "streetzim/zim_writer.py | reportArgumentType | Argument of type \"str\" cannot be assigned to parameter \"filename\" of type \"Path\" in function \"__init__\"": 1,
  "streetzim/zim_writer.py | reportAttributeAccessIssue | Cannot access attribute \"close\" for class \"object\"": 2,
- "streetzim/zim_writer.py | reportAttributeAccessIssue | Cannot access attribute \"write\" for class \"object\"": 1,
- "wikidata_cache.py | reportArgumentType | Argument of type \"Unknown | None\" cannot be assigned to parameter \"number\" of type \"_SupportsRound2[_T@round]\" in function \"round\"": 1,
- "wikidata_cache.py | reportCallIssue | No overloads for \"round\" match the provided arguments": 1
+ "streetzim/zim_writer.py | reportAttributeAccessIssue | Cannot access attribute \"write\" for class \"object\"": 1
 }

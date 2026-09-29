@@ -25,7 +25,7 @@ LIMITS = {"Name": 0, "Title": zm.TITLE_MAX, "Description": zm.DESCRIPTION_MAX,
 
 TEXTS = [
     "Monaco", "  padded\t\n", "", "   ", "\t\r\n", "a\x00b", "a\x07b\x1bc",
-    "line\nbreak", "tab\there", "zero​width", "soft­hyphen", "bidi‮flip",
+    "line\nbreak", "tab\there", "zero\u200bwidth", "soft\xadhyphen", "bidi\u202eflip",
     "é" * 30, "é" * 31, "🇫🇷" * 30, "🇫🇷" * 31,
     "👩‍👩‍👧‍👦" * 30, "👩‍👩‍👧‍👦" * 31, "x" * 30, "x" * 31, "x" * 80, "x" * 81,
     "y" * 4000, "y" * 4001, " " + "x" * 30 + " ", "﻿bom", "private",

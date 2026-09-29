@@ -30,8 +30,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Callable, Iterable, Optional
+from typing import Any
 
 USER_AGENT = "streetzim-wiki/1.0 (+https://github.com/jasontitus/streetzim)"
 PARSE_API = "https://en.wikipedia.org/w/api.php"
@@ -335,7 +336,7 @@ class _OfflineZim:
         from libzim.reader import Archive  # lazy: only when offline source used
         self.a = Archive(Path(path))
 
-    def image(self, src: str, max_bytes: Optional[int] = None):
+    def image(self, src: str, max_bytes: int | None = None):
         """Bytes + mimetype for an <img src> as written in a Kiwix article
         ("./_assets_/<hash>/<name>", percent-encoded once more than the
         entry path is). None when the entry is absent or larger than
@@ -354,7 +355,7 @@ class _OfflineZim:
                 continue
         return None
 
-    def html(self, title_us: str) -> Optional[str]:
+    def html(self, title_us: str) -> str | None:
         ws = title_us.replace("_", " ")
         for p in (f"A/{title_us}", title_us, f"A/{ws}", ws):
             try:
@@ -367,7 +368,7 @@ class _OfflineZim:
         return None
 
 
-def _fetch_online(title_us: str, cache_dir: Optional[str], ua: str) -> Optional[str]:
+def _fetch_online(title_us: str, cache_dir: str | None, ua: str) -> str | None:
     cache_file = None
     if cache_dir:
         os.makedirs(cache_dir, exist_ok=True)
@@ -382,15 +383,16 @@ def _fetch_online(title_us: str, cache_dir: Optional[str], ua: str) -> Optional[
         "disableeditsection": "1", "disablelimitreport": "1", "formatversion": "2",
     })
     req = urllib.request.Request(f"{PARSE_API}?{params}", headers={"User-Agent": ua})
-    html = None
+    html: str | None = None
     cacheable_miss = False  # API answered with no article (vs transient net error)
     for attempt in range(4):
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
                 data = json.load(r)
-            html = (data.get("parse") or {}).get("text")
-            if isinstance(html, dict):  # formatversion=1 shape
-                html = html.get("*")
+            text: Any = (data.get("parse") or {}).get("text")
+            if isinstance(text, dict):  # formatversion=1 shape
+                text = text.get("*")
+            html = text
             cacheable_miss = not html
             break
         except urllib.error.HTTPError as e:
@@ -415,10 +417,10 @@ def bundle_wiki_articles(
     titles: Iterable[str],
     add_item: Callable[[str, str, str, bytes], None],
     *,
-    cache_dir: Optional[str] = None,
+    cache_dir: str | None = None,
     user_agent: str = USER_AGENT,
-    offline_zim: Optional[str] = None,
-    limit: Optional[int] = None,
+    offline_zim: str | None = None,
+    limit: int | None = None,
     sleep: float = 0.1,
     log: Callable[[str], None] = print,
     images: str = "none",
@@ -484,7 +486,7 @@ def bundle_wiki_articles(
             # "Expo_Park/USC_station" — a fixed "../" left every one of
             # them with dangling links and a failed validate gate).
             up = "../" * (title_us.count("/") + 1)
-            if images != "none":
+            if images != "none" and src is not None:  # src is set when images are on
                 figs = []
                 for isrc, caption in image_candidates(raw):
                     if len(figs) >= max_images_per_article:

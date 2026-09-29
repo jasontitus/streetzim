@@ -46,8 +46,10 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from types import TracebackType
+from typing import Any
 
 
 # Mime types we'll inline directly in the manifest as `content` strings.
@@ -117,7 +119,7 @@ def _manifest_zstd_enabled() -> bool:
     if os.environ.get("STREETZIM_MANIFEST_ZSTD", "1") == "0":
         return False
     try:
-        import zstandard  # noqa: F401
+        import zstandard  # noqa: F401  # pyright: ignore[reportUnusedImport]
     except ImportError:
         return False
     return True
@@ -226,11 +228,12 @@ class ManifestCreator:
 
     # ---- context manager: writes config + opens for items ------------
 
-    def __enter__(self) -> "ManifestCreator":
+    def __enter__(self) -> ManifestCreator:
         self._write_record(self._config)
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> bool:
+    def __exit__(self, exc_type: type[BaseException] | None,
+                 exc: BaseException | None, tb: TracebackType | None) -> bool:
         if self._closed:
             return False
         self._closed = True
@@ -389,7 +392,7 @@ class ManifestCreator:
             # which is the packer and nothing else.
             _peak_kb = [0]
 
-            def _watch_hwm(pid, out):
+            def _watch_hwm(pid: int, out: list[int]) -> None:
                 path = f"/proc/{pid}/status"
                 while True:
                     try:
@@ -474,7 +477,7 @@ class ManifestCreator:
             for mod_name in ("__main__", "create_osm_zim"):
                 mod = sys.modules.get(mod_name)
                 if mod is not None and hasattr(mod, "PHASE_TIMER"):
-                    timer = getattr(mod, "PHASE_TIMER")
+                    timer = mod.PHASE_TIMER
                     break
         if timer is not None:
             try:
@@ -510,7 +513,7 @@ def _open_manifest_text(manifest_path: str):
         return io.TextIOWrapper(
             zstandard.ZstdDecompressor().stream_reader(raw, closefd=True),
             encoding="utf-8")
-    return open(manifest_path, "r", encoding="utf-8")
+    return open(manifest_path, encoding="utf-8")
 
 
 def iter_records(manifest_path: str) -> Iterable[dict[str, Any]]:
@@ -532,7 +535,8 @@ if __name__ == "__main__":
     out = sys.argv[1]
 
     class _FakeItem:
-        def __init__(self, path, title, mimetype, data, is_front=False, compress=True):
+        def __init__(self, path: str, title: str, mimetype: str, data: bytes,
+                     is_front: bool = False, compress: bool = True) -> None:
             self._path = path
             self._title = title
             self._mimetype = mimetype

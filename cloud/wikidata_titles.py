@@ -33,7 +33,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Callable, Iterable, Optional
+from collections.abc import Callable, Iterable
 
 USER_AGENT = "streetzim-wikidata/1.0 (+https://github.com/jasontitus/streetzim)"
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
@@ -56,7 +56,7 @@ def _api_batch(qids: list[str], *, api: str = WIKIDATA_API,
     })
     req = urllib.request.Request(f"{api}?{params}",
                                  headers={"User-Agent": user_agent})
-    last: Optional[Exception] = None
+    last: Exception | None = None
     for attempt in range(retries):
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
@@ -103,11 +103,11 @@ def _load_tsv(path: str) -> dict[str, str]:
 def resolve_qids(
     qids: Iterable[str],
     *,
-    cache_path: Optional[str] = None,
+    cache_path: str | None = None,
     offline_map=None,
     user_agent: str = USER_AGENT,
     sleep: float = 0.1,
-    progress: Optional[Callable[[int, int], None]] = None,
+    progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, str]:
     """Return ``{qid: enwiki_title}`` for Q-IDs with an English sitelink.
 
@@ -191,9 +191,9 @@ def resolve_qids(
 
 
 def augment_wiki_cross_refs(
-    wiki_cross_refs: Optional[dict],
+    wiki_cross_refs: dict | None,
     *,
-    cache_path: Optional[str] = None,
+    cache_path: str | None = None,
     offline_map=None,
     log: Callable[[str], None] = print,
 ) -> dict:
@@ -254,10 +254,12 @@ def augment_wiki_cross_refs(
 # Measurement CLI: reproduce the link-lift analysis on a built ZIM.
 #   python -m cloud.wikidata_titles --measure path/to/osm-*.zim [--sample N]
 # --------------------------------------------------------------------------
-def _measure(zim_path: str, sample: int = 0, cache_path: Optional[str] = None) -> None:
+def _measure(zim_path: str, sample: int = 0, cache_path: str | None = None) -> None:
+    from pathlib import Path
+
     from libzim.reader import Archive  # lazy: only needed for measurement
 
-    a = Archive(zim_path)
+    a = Archive(Path(zim_path))
 
     def raw(p):
         return bytes(a.get_entry_by_path(p).get_item().content)

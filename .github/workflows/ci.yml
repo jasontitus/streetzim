@@ -51,7 +51,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - name: Install Python dependencies
         run: pip install -r requirements.txt ruff==0.15.8 pyright==1.1.409
-      - name: Lint (ruff E9 + pyflakes, see ruff.toml)
+      - name: Lint (ruff; the rule families are in ruff.toml)
         run: ruff check .
       - name: Type check (pyright; strict modules clean, no new findings elsewhere)
         env:
@@ -328,35 +328,77 @@ jobs:
             node cloud/zim_viewer_smoke.mjs
 
   docker:
+    # The image as Zimfarm runs it: the default profile (Geofabrik extract,
+    # tilemaker tiles, search and routing) on Monaco, entirely with the
+    # image's own tilemaker, osmium and Python; then the host validates it.
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
       - name: Build the image
         run: docker build -t streetzim .
-      - name: Build a ZIM inside it the way Zimfarm runs an offliner
-        # OpenFreeMap tiles, so no tilemaker or shapefiles; --no-routing
-        # because there is no OSM extract. /output and task_progress.json
-        # are what offliner-definition.json pins.
-        run: |
-          mkdir -p out && chmod 777 out
-          python3 scripts/fetch-openfreemap-mbtiles.py monaco -o out/monaco.mbtiles
-          # An SVG illustration: zimscraperlib (Python 3.14 in the image) converts it.
-          printf '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><rect width="64" height="32" fill="#2a7"/></svg>' > out/icon.svg
-          docker run --rm -v "$PWD/out:/output" streetzim \
-            streetzim --name osm_en_monaco-docker --title Monaco \
-            --description "Offline map of Monaco with search" \
-            --illustration-url /output/icon.svg \
-            --bbox 7.40,43.72,7.44,43.76 --mbtiles /output/monaco.mbtiles --no-routing \
-            --output /output --stats-filename /output/task_progress.json \
-            --file-name osm-monaco-docker
-      - name: tilemaker works in the image; the image uses zimscraperlib
+      - name: The image has tilemaker and osmium, and uses zimscraperlib
         run: |
           docker run --rm streetzim tilemaker --help | head -3
+          docker run --rm streetzim osmium --version | head -1
           docker run --rm streetzim python -c "import sys; from streetzim import scraperlib; assert scraperlib.AVAILABLE, 'zimscraperlib missing'; print(sys.version)"
-      - name: Validate the ZIM
+
+      # The same paths and keys as monaco-e2e, so the two jobs share the caches.
+      - name: Cache coastline and Natural Earth shapefiles
+        id: shp-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            coastline
+            landcover
+          key: shapefiles-v1
+      - name: Fetch shapefiles
+        if: steps.shp-cache.outputs.cache-hit != 'true'
+        run: scripts/fetch-shapefiles.sh .
+      - name: Cache zim-tools ${{ env.ZIM_TOOLS_VERSION }}
+        id: zimtools-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/zim-tools
+          key: zim-tools-${{ env.ZIM_TOOLS_VERSION }}-linux-x86_64
+      - name: Download zim-tools ${{ env.ZIM_TOOLS_VERSION }}
+        if: steps.zimtools-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL --retry 3 --max-time 1200 -o /tmp/zt.tgz \
+            "https://download.openzim.org/release/zim-tools/zim-tools_linux-x86_64-${ZIM_TOOLS_VERSION}.tar.gz"
+          mkdir -p ~/.local/zim-tools
+          tar -xzf /tmp/zt.tgz -C ~/.local/zim-tools --strip-components=1
+
+      - name: Build Monaco inside the image with the default profile
+        # No --mbtiles and no --no-routing: the flags Zimfarm's recipe would
+        # pass. The shapefiles are mounted read-only (the image does not bake
+        # them in); STREETZIM_REQUIRE_SHAPEFILES makes a missing one fatal
+        # instead of a ZIM without ocean. /output and task_progress.json are
+        # what offliner-definition.json pins.
+        run: |
+          mkdir -p out && chmod 777 out
+          # An SVG illustration: zimscraperlib (Python 3.14 in the image) converts it.
+          printf '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><rect width="64" height="32" fill="#2a7"/></svg>' > out/icon.svg
+          docker run --rm -e STREETZIM_REQUIRE_SHAPEFILES=1 \
+            -v "$PWD/out:/output" \
+            -v "$PWD/coastline:/shapefiles/coastline:ro" \
+            -v "$PWD/landcover:/shapefiles/landcover:ro" \
+            streetzim \
+            streetzim --name osm_en_monaco-docker --title Monaco \
+            --description "Offline map of Monaco with search and routing" \
+            --illustration-url /output/icon.svg \
+            --area monaco --shapefiles /shapefiles \
+            --output /output --stats-filename /output/task_progress.json \
+            --file-name osm-monaco-docker
+      - name: Validate the ZIM (openZIM output, cloud/validate_zim.py + zimcheck)
+        env:
+          STREETZIM_REQUIRE_ZIMCHECK: "1"
         run: |
           pip install -q -r requirements.txt
           python tools/check_openzim_output.py out osm_en_monaco-docker --title Monaco \
-            --file osm-monaco-docker.zim
-          python cloud/validate_zim.py out/osm-monaco-docker.zim
+            --file osm-monaco-docker.zim --routing
+          PATH="$HOME/.local/zim-tools:$PATH" python cloud/validate_zim.py out/osm-monaco-docker.zim

@@ -12,7 +12,7 @@ which covers the other route: porting features into maps2zim.
 | 2 | Remove the hosting/operations layer | **Separated in the tree (stage 1); a separate repository is stage 2.** Operations files live in [`ops/`](../ops/README.md) with symlinks at their old paths for the build host; `web/`, `preview-proxy/` and host-edited lists follow in stage 2. `tools/check_boundary.py` (CI) keeps the builder independent of `ops/`. The 31 dead scripts are deleted (commit `0792d0d` still has them). |
 | 3 | Replace zimru/xapianbuilder with libzim, or bring them under openZIM | **Done.** libzim is the default; CI builds, rewrites and serves ZIMs with libzim, zim-tools and kiwix-tools only. The Rust packer is an optional speed-up. |
 | 4 | Freeze and document the binary formats; drop legacy versions | **Documented and frozen** ([formats.md](formats.md), [search-records.md](search-records.md)). **The builder writes only current versions** (legacy writers retired); the legacy *readers* stay while published ZIMs need them, each listed in formats.md with its removal condition. |
-| 5 | openZIM conventions: CLI, metadata, illustration, Zimfarm progress file, `offliner-definition.json`, Docker image, typing, linting, CI | **Done.** `streetzim` command with maps2zim's flags and zimscraperlib (on Python 3.14, as in the image; a tested copy of its metadata rules on 3.12), progress file, generated `offliner-definition.json` (validated against Zimfarm's schema), `pyproject.toml`, pyright (strict on the pure modules, no new findings elsewhere), pyflakes on the whole tree. Zimfarm-side registration steps: [zimfarm.md](zimfarm.md). |
+| 5 | openZIM conventions: CLI, metadata, illustration, Zimfarm progress file, `offliner-definition.json`, Docker image, typing, linting, CI | **Done.** `streetzim` command with maps2zim's flags and zimscraperlib (on Python 3.14, as in the image; a tested copy of its metadata rules on 3.12), progress file, generated `offliner-definition.json` (validated against Zimfarm's schema), `pyproject.toml`, pyright (strict on the pure modules, no new findings elsewhere), ruff (pyflakes, bugbear and other bug-catching families; see `ruff.toml`) on the whole tree, and a `.pre-commit-config.yaml` with the same checks. Zimfarm-side registration steps: [zimfarm.md](zimfarm.md). |
 | 6 | tilemaker/osmium/GDAL in the image; fit Zimfarm resources | **Done.** tilemaker 3 and osmium are in the image, GDAL arrives as rasterio wheels, and build costs are measured in [zimfarm.md](zimfarm.md) (two regions so far; more to come). |
 | 7 | Drop or replace the non-commercial satellite layer | **Done for openZIM.** `streetzim` never offers it; `License` metadata and the viewer's credits list only the layers a ZIM contains. StreetZim's own builds keep it opt-in. |
 
@@ -68,7 +68,7 @@ Order, because the build host runs these by absolute path:
   ([head-to-head-dc.md](head-to-head-dc.md)) used a test article source
   because Wikipedia was rate-limiting the machine, so article bundling was
   not compared on real content. It also predates the `main()` split.
-- **The pyright baseline** (39 findings in older modules) only shrinks:
+- **The pyright baseline** (19 findings in older modules, down from 39) only shrinks:
   fix them as those files are touched.
 
 ## Would it be worth it?

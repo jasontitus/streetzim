@@ -13,8 +13,8 @@ import os
 import re
 import subprocess
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 
 # Wrap print to auto-flush step/progress lines so monitoring never sees stale output.

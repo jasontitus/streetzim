@@ -47,9 +47,9 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
 
     try:
         import osmium
-    except ImportError:
+    except ImportError as exc:
         raise RuntimeError("pyosmium is required for routing extraction "
-                           "(pip install osmium)")
+                           "(pip install osmium)") from exc
 
     print("  Extracting routing graph from OSM data...")
 
@@ -491,7 +491,7 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
                     # don't come close, but clamp for safety.
                     dist_dm_packed = min(dist_dm, 0xFFFFFF)
                     dist_speed = ((speed & 0xFF) << 24) | dist_dm_packed
-                    # noqa F821 below: these are closure arrays from
+                    # The F821 noqa below: these are closure arrays from
                     # extract_routing_graph; ruff flags them only because the
                     # function `del`s them after this pass.
                     if oneway != -1:

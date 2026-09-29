@@ -106,7 +106,7 @@ def test_v5_converter_preserves_routing(corpus: Path):
     checked = 0
     with corpus.open() as fh:
         fh.readline()  # skip _meta line
-        for i, line in enumerate(fh):
+        for _i, line in enumerate(fh):
             if checked >= 50:
                 break
             rec = json.loads(line)
