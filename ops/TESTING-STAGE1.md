@@ -12,8 +12,8 @@ just after the host takes the change. Background: [README.md](README.md).
 - Nothing under `web/` moved, and neither did the files the host edits in
   place ([in-place.txt](in-place.txt)).
 - **No build code changes.** `create_osm_zim.py`, `streetzim/`, `routing/`
-  and `resources/` are untouched; in `cloud/`, only help text and comments
-  change. Step 2 checks this.
+  and `resources/` are untouched; in `cloud/`, only help text, error
+  messages and comments change. Step 2 checks this.
 
 **Commits:** branch `claude/adoring-dijkstra-i2vge7` is main (`0792d0d`)
 plus the ops split. Builder changes that were once on this branch are on
@@ -64,6 +64,8 @@ The process listings are best effort. They see other users' processes
 only as root, and they include your own shell and commands; ignore those.
 
 **What to record:**
+- the branch name. If the second line prints `HEAD` (a detached checkout),
+  stop and ask: the pull and step 2's checks need a branch;
 - the current commit, and whether the host has **local commits**. Some
   ops scripts commit on the host; the "ahead" count of `rev-list` is the
   number of those local commits. If it isn't 0, `git pull --ff-only` will
@@ -100,13 +102,18 @@ bash /tmp/sz-stage1/ops/check_stage1.sh --root /tmp/sz-stage1 --python /storage/
 /storage/streetzim/venv-linux/bin/python3 -m pytest -q -p no:cacheprovider /tmp/sz-stage1/ops/tests /tmp/sz-stage1/tests/test_check_boundary.py
 git -C /tmp/sz-stage1 merge-base --is-ancestor origin/HEAD HEAD && echo "OK: the branch contains the host's commit" || echo "STOP: the host has commits the branch lacks; ask"
 git -C /tmp/sz-stage1 diff --stat origin/HEAD HEAD -- create_osm_zim.py streetzim routing resources
+git -C /tmp/sz-stage1 diff --stat --diff-filter=M origin/HEAD HEAD -- cloud
 ```
 
 **Expect:**
 - `ALL CHECKS PASSED`, with no `FAIL` lines;
 - `OK: the branch contains the host's commit` (`origin/HEAD` in the clone
   is the host's current commit);
-- nothing from the last line: no build code changes;
+- nothing from the second-to-last line: no build code changes;
+- from the last line, only `cloud/patch_viewer_inplace.py`,
+  `cloud/repackage_zim.py`, `cloud/validate_zim.py` and
+  `cloud/viewer_slots.py`, a few lines each (help text, error messages,
+  comments). The files that became symlinks don't show here;
 - the tests pass. If pytest is missing from the host venv, skip that
   line; the checker is the main test.
 
@@ -185,6 +192,8 @@ Both records are in `$HOME`, so they survive a reboot.
 ```bash
 if ! git -C /storage/streetzim rev-parse -q --verify HEAD >/dev/null; then
   echo "STOP: cannot read /storage/streetzim; ask"
+elif ! command -v pgrep >/dev/null; then
+  echo "STOP: pgrep is missing, so a running build can't be detected; ask"
 elif pgrep -f '[c]reate_osm_zim' >/dev/null; then
   echo "STOP: a build is running; pull between builds (step 3)"
 elif git -C /storage/streetzim cat-file -e HEAD:ops/in-place.txt 2>/dev/null; then
