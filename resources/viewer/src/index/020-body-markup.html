@@ -19,7 +19,8 @@
   // viewer loads from zim:// (or content://), so the fetch would 404 and
   // log noise to the console. Hide the widget entirely off-PWA.
   var proto = window.location.protocol;
-  if (proto !== 'http:' && proto !== 'https:') {
+  // No fetch: the page below (025) explains; do not die here first.
+  if ((proto !== 'http:' && proto !== 'https:') || typeof fetch !== 'function') {
     el.style.display = 'none';
     return;
   }
@@ -242,10 +243,17 @@
   <h3>Offline OSM</h3>
   <p>Vector tiles &middot; OpenStreetMap data</p>
 </div>
-<button id="attr-btn" title="Data sources &amp; licenses">Sources</button>
+<button id="attr-btn" title="About this map, data sources &amp; licenses">About</button>
 <div id="attr-overlay">
-  <div id="attr-dialog">
-    <button id="attr-close" title="Close">&times;</button>
+  <div id="attr-dialog" role="dialog" aria-modal="true" aria-labelledby="about-h">
+    <button id="attr-close" title="Close" aria-label="Close">&times;</button>
+    <!-- Filled from map-config.json by initAbout() (140-view-home-about.js). -->
+    <h2 id="about-h">About this map</h2>
+    <section id="about-section">
+      <p id="about-title">Offline OpenStreetMap</p>
+      <p id="about-desc"></p>
+      <p class="license" id="about-meta"></p>
+    </section>
     <h2>Data Sources &amp; Licenses</h2>
     <section>
       <h3>Map Data</h3>
