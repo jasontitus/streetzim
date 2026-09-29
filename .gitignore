@@ -85,3 +85,4 @@ salvage/
 coverage.xml
 htmlcov/
 !tests/fixtures/monaco-full/monaco.osm.pbf
+!tests/fixtures/monaco-full/dl/cache/wikidata_cache/
