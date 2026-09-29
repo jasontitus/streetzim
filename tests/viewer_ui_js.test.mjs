@@ -410,4 +410,86 @@ await ok('the main script stays out when the browser is unsupported', () => {
   assert.ok(HTML.indexOf('window.__szUnsupported = missing') < HTML.indexOf('maplibregl.addProtocol'));
 });
 
+// ---- Find chip rail: which chips this ZIM can serve (240-on-map-find-ui.js)
+
+const CHIP_AVAIL_SRC = slice('// BEGIN chip-availability', '// END chip-availability');
+const RESOLVE_SRC = slice('async function _findResolveChipDef', 'async function loadChipOnMap');
+function loadChips(manifest) {
+  const fn = new Function('_findFetchCatManifest',
+    CHIP_AVAIL_SRC + RESOLVE_SRC + '\nreturn { _findChipHas, _findChipsPlan, _findResolveChipDef };');
+  return fn(() => Promise.resolve(manifest));
+}
+const RAIL = ['food', 'bars', 'shops', 'health', 'museums', 'landmarks',
+              'libraries', 'parks', 'fuel', 'hotels'];
+const chipEntry = (count) => ({ label: 'x', count, bytes: 10 });
+const shown = (plan) => RAIL.filter((id) => plan.show[id]);
+
+await ok('chips: no chip data in the manifest hides the whole rail', () => {
+  const { _findChipsPlan } = loadChips();
+  // Built without --split-find-chips: a manifest with categories, no chips.
+  for (const m of [{ total: 5, categories: { poi: 3 } }, { chips: {} }, {}]) {
+    const plan = _findChipsPlan(m, RAIL);
+    assert.strictEqual(plan.rail, false, JSON.stringify(m));
+    assert.deepStrictEqual(shown(plan), []);
+  }
+});
+
+await ok('chips: an unreadable manifest keeps every chip', () => {
+  const { _findChipsPlan } = loadChips();
+  for (const m of [null, { _szUnknown: true }]) {
+    const plan = _findChipsPlan(m, RAIL);
+    assert.strictEqual(plan.rail, true);
+    assert.deepStrictEqual(shown(plan), RAIL);
+  }
+});
+
+await ok('chips: count-0 chips are hidden (tilemaker Parks / Gas)', () => {
+  const { _findChipsPlan } = loadChips();
+  const chips = Object.fromEntries(RAIL.map((id) => [id, chipEntry(7)]));
+  chips.parks = chipEntry(0);
+  chips.fuel = chipEntry(0);
+  const plan = _findChipsPlan({ chips }, RAIL);
+  assert.strictEqual(plan.rail, true);
+  assert.deepStrictEqual(shown(plan), RAIL.filter((id) => id !== 'parks' && id !== 'fuel'));
+  // Every listed chip empty: nothing to show, rail hidden.
+  const empty = Object.fromEntries(RAIL.map((id) => [id, chipEntry(0)]));
+  assert.strictEqual(_findChipsPlan({ chips: empty }, RAIL).rail, false);
+  // An entry without a count (older manifests) counts as present.
+  assert.ok(_findChipsPlan({ chips: { bars: { label: 'Bars' } } }, RAIL).show.bars);
+});
+
+await ok('chips: Food & Drink stands for a pre-merge restaurants/cafes pair', () => {
+  const { _findChipsPlan } = loadChips();
+  const plan = _findChipsPlan({ chips: { restaurants: chipEntry(3), cafes: chipEntry(0) } }, RAIL);
+  assert.deepStrictEqual(shown(plan), ['food']);
+  assert.deepStrictEqual(shown(_findChipsPlan({ chips: { cafes: chipEntry(0) } }, RAIL)), []);
+  // A chip set the rail does not know at all: better all than none.
+  assert.deepStrictEqual(shown(_findChipsPlan({ chips: { zzz: chipEntry(4) } }, RAIL)), RAIL);
+});
+
+await ok('chips: a tap resolves to nothing when the ZIM cannot serve it', async () => {
+  const noChips = loadChips({ total: 1, categories: { poi: 1 } });
+  assert.strictEqual(await noChips._findResolveChipDef({ id: 'food', label: 'Food & Drink' }), null);
+  const tm = loadChips({ chips: { parks: chipEntry(0), bars: chipEntry(2),
+                                  restaurants: chipEntry(1), cafes: chipEntry(0) } });
+  assert.strictEqual(await tm._findResolveChipDef({ id: 'parks', label: 'Parks' }), null);
+  assert.deepStrictEqual((await tm._findResolveChipDef({ id: 'bars', label: 'Bars' })).sources, ['bars']);
+  assert.deepStrictEqual((await tm._findResolveChipDef({ id: 'food', label: 'Food' })).sources,
+    ['restaurants']);
+  // Manifest unreadable: try the chip's own file.
+  const unk = loadChips({ _szUnknown: true });
+  assert.deepStrictEqual((await unk._findResolveChipDef({ id: 'bars', label: 'Bars' })).sources, ['bars']);
+});
+
+await ok('chips: hidden chips and rail are really hidden, and taps always say something', () => {
+  // `display: inline-flex` on the chip outranks the UA [hidden] rule.
+  assert.match(HTML, /#find-chips\[hidden\], #find-chips \.find-chip\[hidden\] \{ display: none; \}/);
+  assert.match(HTML, /rail\.hidden = !plan\.rail;/);
+  assert.match(HTML, /Category search is not available in this map/);
+  // Legacy-layout chip that loaded nothing, and a failed fetch, both toast.
+  const legacy = slice("console.warn('[streetzim] chip fetch failed:'", 'var bounds = map.getBounds();');
+  assert.match(legacy, /_showFindToast\('Couldn\\u2019t load '/);
+  assert.match(legacy, /if \(!Array\.isArray\(data\) \|\| !data\.length\) \{\s*_showFindToast\('No '/);
+});
+
 console.log(`\n${pass} passed`);
