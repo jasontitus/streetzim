@@ -250,28 +250,67 @@ def test_table_holds_only_tiles_under_the_cap():
     "terrain/12/07/3.webp",          # not canonical decimals: kept as a str
     "tiles/14/8529/5975",            # no extension
     "tiles/31/1/1.pbf", "tiles/14/99999999/1.pbf",   # too wide to pack
-    "a/b/c.pbf",
 ])
 def test_target_path_round_trips(path):
     from streetzim.tile_alias import TileAliaser
     a = TileAliaser(None, enabled=True)
+    other = path.split("/", 1)[0] + "/1/0/0.x"
     assert a.target_for(path, b"sea") is None
-    assert a.target_for("tiles/1/0/0.pbf", b"sea") == path
+    assert a.target_for(other, b"sea") == path
 
 
-def test_table_memory_per_entry():
-    """The docstring's per-entry figure (ENTRY_BYTES) holds, with slack for
-    dict resizes and other CPython versions."""
+def test_unknown_prefix_has_no_cap():
+    """A new tile kind must choose its cap rather than inherit one."""
+    from streetzim.tile_alias import TileAliaser, max_alias_bytes
+    with pytest.raises(ValueError, match="MAX_ALIAS_BYTES"):
+        max_alias_bytes("hillshade/1/0/0.png")
+    with pytest.raises(ValueError):
+        TileAliaser(None, enabled=True).target_for("a/b/c.pbf", b"sea")
+
+
+def test_raster_keys_include_the_length(monkeypatch):
+    """Two raster tiles whose digests collide but whose lengths differ are
+    not aliased; vector tiles are keyed on their bytes, so no digest is
+    involved at all."""
+    from streetzim import tile_alias
+    monkeypatch.setattr(tile_alias.hashlib, "blake2b", _ConstantDigest)
+    a = tile_alias.TileAliaser(None, enabled=True)
+    assert a.target_for("satellite/1/0/0.webp", b"blue sea") is None
+    assert a.target_for("satellite/1/0/1.webp", b"green field!") is None
+    assert a.target_for("tiles/1/0/0.pbf", b"sea") is None
+    assert a.target_for("tiles/1/0/1.pbf", b"sky") is None
+    assert a.target_for("tiles/1/0/2.pbf", b"sea") == "tiles/1/0/0.pbf"
+    assert len(a) == 4
+
+
+class _ConstantDigest:
+    """A hash whose every digest collides."""
+    def __init__(self, data, digest_size):
+        self._n = digest_size
+
+    def digest(self):
+        return b"\x07" * self._n
+
+
+@pytest.mark.parametrize("prefix,size,cap_name", [
+    ("satellite", 64, "ENTRY_BYTES"),
+    ("tiles", 128, "VECTOR_ENTRY_BYTES"),
+])
+def test_table_memory_per_entry(prefix, size, cap_name):
+    """The docstring's per-entry figures hold, with slack for dict resizes
+    and other CPython versions."""
     import tracemalloc
 
-    from streetzim.tile_alias import ENTRY_BYTES, TileAliaser
-    a = TileAliaser(None, enabled=True)
+    from streetzim import tile_alias
+    a = tile_alias.TileAliaser(None, enabled=True)
     n = 50_000
     tracemalloc.start()
     base = tracemalloc.get_traced_memory()[0]
     for i in range(n):
-        a.target_for(f"tiles/14/{i // 300}/{i % 300}.pbf", i.to_bytes(8, "little") * 8)
+        a.target_for(f"{prefix}/14/{i // 300}/{i % 300}.x",
+                     i.to_bytes(8, "little") * (size // 8))
     used = tracemalloc.get_traced_memory()[0] - base
     tracemalloc.stop()
     assert len(a) == n
-    assert used / n < 1.5 * ENTRY_BYTES
+    assert used / n < 1.5 * getattr(tile_alias, cap_name)
+    assert a.table_bytes() == n * getattr(tile_alias, cap_name)
