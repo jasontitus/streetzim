@@ -1,0 +1,6 @@
+# StreetZim's own build host and publishing (ops/, see ops/README.md): the
+# runtime dependencies plus the Internet Archive client, whose `ia` command
+# the upload and rollout scripts run. A Zimfarm or openZIM build needs none
+# of this.
+-r requirements.txt
+internetarchive>=4.0

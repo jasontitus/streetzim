@@ -51,7 +51,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - name: Install Python dependencies
-        run: pip install -r requirements.txt ruff==0.15.8 pyright==1.1.409
+        run: pip install -r requirements-dev.txt
       - name: Lint (ruff; the rule families are in ruff.toml)
         run: ruff check .
       - name: Type check (pyright; strict modules clean, no new findings elsewhere)
@@ -121,7 +121,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q libmagic1t64 libcairo2
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
           python -c "from streetzim import scraperlib; assert scraperlib.AVAILABLE"
       - name: Python tests
         run: python -m pytest tests -q

@@ -1,7 +1,7 @@
 # The fast checks of CI's `checks` job (.github/workflows/ci.yml), before each
 # commit:
 #
-#   pip install pre-commit -r requirements.txt pyright==1.1.409
+#   pip install pre-commit -r requirements-dev.txt
 #   PUPPETEER_SKIP_DOWNLOAD=1 npm ci   # ESLint for the viewer-eslint hook
 #
 # viewer-eslint fails (it does not skip) when node or node_modules/eslint is

@@ -49,7 +49,9 @@ pip install -r requirements.txt
 
 `requirements.txt` pulls stock `libzim` (python-libzim), which includes the
 libzim fixes StreetZim contributed upstream; the old patches in `patches/`
-are kept for history only.
+are kept for history only. It lists only what the builder needs; to run
+the tests and linters, install `requirements-dev.txt` instead
+([MAINTAINING.md](MAINTAINING.md)).
 
 **3. Coastline and Natural Earth shapefiles.** tilemaker reads them relative to
 the directory you build in. Without them the build still succeeds but has no
@@ -221,10 +223,3 @@ speed-ups, both switched off by default:
 Both produce ordinary ZIMs, the same as libzim's. Neither is needed for
 anything in this README. [docs/zim-builder-rust.md](docs/zim-builder-rust.md)
 explains when they help.
-
-## Legacy: raster (Leaflet) variant
-
-`create_osm_zim_leaflet.py` is the original experiment that renders the same
-vector tiles to PNG with Pillow and shows them with Leaflet, for readers
-without WebGL. It is not used by any build, has far fewer features, and is
-kept only for comparison.

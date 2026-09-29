@@ -69,20 +69,16 @@ BUNDLED SOFTWARE LICENSES
    License: BSD 3-Clause License
    Details: https://github.com/maplibre/maplibre-gl-js/blob/main/LICENSE.txt
 
-8. Leaflet.js (alternative viewer)
-   License: BSD 2-Clause License
-   Details: https://github.com/Leaflet/Leaflet/blob/main/LICENSE
-
 ===============================================================================
 
 BUILD-TIME DEPENDENCIES (not included in ZIM output)
 
-9. libzim / python-libzim
+8. libzim / python-libzim
    License: GNU General Public License v2 (GPLv2)
    Details: https://github.com/openzim/libzim
    Note: Used as a build tool only. ZIM file output is data, not a
          derivative work of libzim.
 
-10. Tilemaker
-    License: BSD 2-Clause License
-    Details: https://github.com/systemed/tilemaker
+9. Tilemaker
+   License: BSD 2-Clause License
+   Details: https://github.com/systemed/tilemaker
