@@ -12,6 +12,7 @@
 // Usage:
 //   ZIM_ORIGIN=http://localhost:8899 node cloud/zim_viewer_smoke.mjs
 //   SMOKE_SEARCH=Zurich ZIM_ORIGIN=... node cloud/zim_viewer_smoke.mjs
+//   SMOKE_NO_CHIPS=1 ...  # the ZIM was built without --split-find-chips
 //   EXPECT_FIXES=0 ...    # invert: assert the viewer is the OLD one
 //                         # (the control that proves this test can fail)
 
@@ -21,6 +22,8 @@ const ORIGIN = process.env.ZIM_ORIGIN || 'http://localhost:8899';
 const SMOKE_SEARCH = process.env.SMOKE_SEARCH || 'Zurich';
 const EXPECT_FIXES = process.env.EXPECT_FIXES !== '0';
 const HEADFUL = process.env.HEADFUL === '1';
+// A build made without --split-find-chips: expect no chips and no rail.
+const NO_CHIPS = process.env.SMOKE_NO_CHIPS === '1';
 const CHROME_PATH = process.env.CHROME_PATH ||
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
@@ -140,24 +143,46 @@ try {
   }
 
   // ---- 5. the chip rail is the current one -------------------------------
-  // The viewer hides chips the ZIM's category manifest does not list (or
-  // lists with count 0), and the whole rail when it lists none. Wait for
-  // that reconcile, then count only chips a reader can see. Both CI builds
-  // use --split-find-chips, but key the rail check on the manifest itself.
-  const chipInfo = await page.evaluate(async () => {
-    let hasChips = null;
+  // The viewer shows exactly the chips the ZIM's category manifest lists
+  // with records (count > 0; Food & Drink also stands for a pre-merge
+  // restaurants/cafes pair) and hides the whole rail when it lists none.
+  // So the expectation comes from the manifest, not a fixed list: the
+  // weekly CI build uses live OSM data, and a category that drops to 0
+  // there is a data change, not a viewer bug. Both CI builds use
+  // --split-find-chips, so a manifest with no chips fails unless the
+  // caller says the build has none (SMOKE_NO_CHIPS=1) — that is how the
+  // 2026-04 Japan build shipped without chips.
+  const counts = await page.evaluate(async () => {
     try {
       const r = await fetch('category-index/manifest.json');
-      if (r.ok) { const m = await r.json(); hasChips = !!(m && m.chips && Object.keys(m.chips).length); }
-      else hasChips = false;
-    } catch (e) { /* unknown */ }
-    return { hasChips };
+      if (!r.ok) return { status: r.status };
+      const m = await r.json();
+      if (!m || !m.chips) return { chips: null };
+      const out = {};
+      for (const [id, meta] of Object.entries(m.chips)) {
+        out[id] = meta && typeof meta.count === 'number' ? meta.count : 1;
+      }
+      return { chips: out };
+    } catch (e) { return { error: String(e) }; }
   });
+  const hasChips = !!(counts.chips && Object.keys(counts.chips).length);
   if (EXPECT_FIXES) {
+    ok(NO_CHIPS ? 'manifest lists no chips (SMOKE_NO_CHIPS=1)'
+                : 'manifest lists Find chips (--split-find-chips build)',
+       hasChips === !NO_CHIPS, JSON.stringify(counts).slice(0, 300));
     await page.waitForFunction(() => typeof _findCatManifest === 'undefined'
       || _findCatManifest !== null, { timeout: 30_000 }).catch(() => {});
     await sleep(300);
   }
+  const rail = await page.evaluate(() => {
+    const r = document.getElementById('find-chips');
+    const all = [...document.querySelectorAll('#find-chips [data-chip]')];
+    return {
+      shown: !!r && !r.hidden && r.offsetParent !== null,
+      ids: all.map(e => e.getAttribute('data-chip')),
+      visible: all.filter(e => e.offsetParent !== null).map(e => e.getAttribute('data-chip')),
+    };
+  });
   const chips = await page.evaluate(() => {
     const ids = new Set();
     for (const el of document.querySelectorAll(
@@ -171,17 +196,23 @@ try {
     return [...ids];
   });
   const chipBlob = chips.join('|');
-  if (EXPECT_FIXES && chipInfo.hasChips) {
-    const railShown = await page.evaluate(() => {
-      const r = document.getElementById('find-chips');
-      return !!r && !r.hidden && r.offsetParent !== null;
-    });
-    ok('chip rail shown (the manifest lists chips)', railShown);
-  }
-  if (EXPECT_FIXES && chipInfo.hasChips !== false) {
-    for (const c of REQUIRED_CHIPS)
-      ok('chip rail offers "' + c + '"', chipBlob.includes(c),
-         'chips seen: ' + chipBlob.slice(0, 300));
+  if (EXPECT_FIXES) {
+    const n = (id) => (counts.chips && counts.chips[id]) || 0;
+    const alts = { food: ['food', 'restaurants', 'cafes'] };
+    const want = rail.ids.filter(id => (alts[id] || [id]).some(a => n(a) > 0));
+    ok('chip rail ' + (want.length ? 'shown' : 'hidden') + ' as the manifest says',
+       rail.shown === want.length > 0, 'rail shown=' + rail.shown);
+    ok('visible chips are exactly those with records',
+       JSON.stringify(rail.visible) === JSON.stringify(want),
+       'visible ' + rail.visible.join(',') + ' / expected ' + want.join(','));
+    for (const c of REQUIRED_CHIPS) {
+      if (n(c) > 0) {
+        ok('chip rail offers "' + c + '"', rail.visible.includes(c),
+           'chips seen: ' + rail.visible.join(','));
+      } else if (hasChips) {
+        console.log('skip  chip "' + c + '" (0 records in this build; hidden, as it should be)');
+      }
+    }
     const foodCount = RETIRED_CHIPS.filter(c => chipBlob.includes(c)).length;
     ok('old separate food chips are gone', foodCount === 0,
        'still present: ' + RETIRED_CHIPS.filter(c => chipBlob.includes(c)));
