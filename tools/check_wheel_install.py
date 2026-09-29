@@ -14,7 +14,6 @@ cloud/regions.tsv the way a build does. CI's `wheel` job runs it
 """
 from __future__ import annotations
 
-import hashlib
 import sys
 from pathlib import Path
 
@@ -22,7 +21,8 @@ from pathlib import Path
 def check() -> list[str]:
     try:
         import create_osm_zim
-        from streetzim import paths, tiles, viewer_assets, zim_writer
+        from streetzim import paths, tiles, viewer_assets
+        from streetzim import zim_writer  # noqa: F401  (must import from the wheel)
     except ImportError as e:
         return [f"streetzim is not installed in this interpreter ({e})"]
 
@@ -53,9 +53,9 @@ def check() -> list[str]:
         problems.append("the lock file lists no font ranges")
     if not tiles.required_shapefiles():
         problems.append("the tilemaker config names no shapefiles")
-    rtl = zim_writer.RTL_TEXT_PLUGIN_PATH
-    if hashlib.sha256(rtl.read_bytes()).hexdigest() != zim_writer.RTL_TEXT_PLUGIN_SHA256:
-        problems.append(f"{rtl}: hash does not match the pinned one")
+    viewer_assets.vendored(viewer_assets.RTL_TEXT_PLUGIN)   # raises on a mismatch
+    if viewer_assets.font_fallback() and viewer_assets.fallback_licence() is None:
+        problems.append("the fallback fonts' licence (vendor/noto-sans/OFL.txt) is missing")
     regions = cloud_dir / "regions.tsv"
     if not regions.is_file():
         problems.append(f"missing: {regions}")

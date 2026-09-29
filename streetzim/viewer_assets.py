@@ -167,7 +167,10 @@ def fallback_licence(lock: dict[str, Any] | None = None) -> bytes | None:
     want: str | None = fb.get("licence_sha256")
     if not rel:
         return None
-    path = ROOT / rel
+    # The lock names it from the checkout (resources/...); an installed wheel
+    # keeps resources/ under streetzim/resources, so resolve against RESOURCES_DIR.
+    path = (RESOURCES_DIR / rel.removeprefix("resources/")
+            if rel.startswith("resources/") else ROOT / rel)
     if not path.is_file():
         raise IntegrityError(f"{path} is missing; {PIN_HELP}")
     data = path.read_bytes()

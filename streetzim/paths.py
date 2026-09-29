@@ -38,6 +38,7 @@ RUNTIME_FILES = (
     "vendor/maplibre-gl/LICENSE.txt",
     "vendor/mapbox-gl-rtl-text/mapbox-gl-rtl-text.js",
     "vendor/mapbox-gl-rtl-text/LICENSE.md",
+    "vendor/noto-sans/OFL.txt",
 )
 
 
