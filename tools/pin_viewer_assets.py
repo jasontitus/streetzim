@@ -20,7 +20,9 @@ fallback Noto Sans ranges (``fonts.fallback``: the ranges holding the
 Unicode blocks of its scripts, from a commit-pinned URL) and the hash of its
 vendored licence. The settings (URLs, fontstacks, fallback scripts) come
 from DEFAULT_FONTS and DEFAULT_FALLBACK below, so edit those and re-pin;
---keep-lock keeps the lock file's settings instead. A download that is not
+--keep-lock keeps the lock file's settings instead (and records that it
+did; --check fails on settings that differ from the defaults otherwise,
+and --fonts prints each setting it resets). A download that is not
 a glyph range (an HTML error page) stops it. Review the diff and commit both. --prefetch downloads every pinned range, checks it, and stores it in
 DIR as the builder's cache (streetzim/viewer_assets.py) expects, so builds
 that use DIR need no network for fonts.
@@ -208,6 +210,20 @@ def _pin_ranges(base_url: str, fontstacks: dict[str, str], ranges: list[str],
     return out, changed, sum(1 for *_, d in results if d is None)
 
 
+def settings_drift(lock: dict[str, Any]) -> list[str]:
+    """Each font setting of ``lock`` that differs from this tool's defaults,
+    as "fonts.fallback.scripts: <lock> -> <default>"."""
+    fonts = lock.get("fonts", {})
+    out: list[str] = []
+    for prefix, defaults, current in (("fonts", DEFAULT_FONTS, fonts),
+                                      ("fonts.fallback", DEFAULT_FALLBACK, fonts.get("fallback", {}))):
+        for k, v in defaults.items():
+            if current.get(k) != v:
+                out.append(f"{prefix}.{k}: {json.dumps(current.get(k), ensure_ascii=False)}"
+                           f" -> {json.dumps(v, ensure_ascii=False)}")
+    return out
+
+
 def pin_fonts(keep_lock: bool = False) -> None:
     """Re-pin every range. The settings (URLs, fontstacks, scripts, ...) are
     DEFAULT_FONTS and DEFAULT_FALLBACK, so editing those and re-pinning
@@ -215,6 +231,9 @@ def pin_fonts(keep_lock: bool = False) -> None:
     (e.g. a base_url changed there by hand) and only refreshes the hashes."""
     lock = read_lock_or_empty()
     old = lock.get("fonts", {})
+    if not keep_lock:
+        for line in settings_drift(lock) if lock else []:
+            print(f"setting reset to the tool's default: {line}")
 
     def settings(defaults: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
         return {k: (current.get(k, v) if keep_lock else v) for k, v in defaults.items()}
@@ -233,6 +252,9 @@ def pin_fonts(keep_lock: bool = False) -> None:
         fb["base_url"], fb["fontstacks"], fb_ranges, old_fb.get("ranges", {}))
     fb["licence_sha256"] = va.sha256_hex((ROOT / fb["licence_file"]).read_bytes())
     fonts["fallback"] = fb
+    if keep_lock:
+        # --check accepts settings that differ from the defaults only then
+        fonts["kept_lock_settings"] = True
     lock["fonts"] = fonts
     write_lock(lock)
     print(f"pinned {len(fb['fontstacks']) * len(fb_ranges)} fallback glyph ranges "
@@ -271,6 +293,11 @@ def prefetch(dest: Path) -> None:
 
 def check() -> None:
     lock = va.load_lock()
+    drift = settings_drift(lock)
+    if drift and not lock["fonts"].get("kept_lock_settings"):
+        raise SystemExit("lock file: font settings differ from tools/pin_viewer_assets.py's "
+                         "defaults (edit DEFAULT_FONTS/DEFAULT_FALLBACK and run --fonts, or "
+                         "pin with --fonts --keep-lock to keep them):\n  " + "\n  ".join(drift))
     for name in NPM_PACKAGES:
         va.vendored(name, lock)
     ranges = va.font_ranges(lock)

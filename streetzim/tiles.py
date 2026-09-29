@@ -459,7 +459,7 @@ def generate_sdf_font_glyphs(lock=None, scripts=None):
     fonts, fb_fonts = _fetch_font_ranges(tasks, fb_stacks=set(merge_stacks.values()))
     merged = 0
     pinned = {(fr.stack, fr.range_key) for fr in fallback.ranges if fr.sha256} if fallback else set()
-    lost = {}  # stack -> scripts left without glyphs by a waived download error
+    lost = []  # (stack, range, scripts) left without glyphs by a waived download error
     for stack, fb_stack in merge_stacks.items():
         name = lock["fonts"]["fontstacks"].get(stack, stack)
         for r in merge_ranges:
@@ -467,21 +467,21 @@ def generate_sdf_font_glyphs(lock=None, scripts=None):
             if fb_data is None:  # absent from the fallback, or waived download error
                 if fallback is not None and (fb_stack, r) in pinned:
                     lo, hi = (int(x) for x in r.split("-"))
-                    lost.setdefault(stack, set()).update(
+                    lost.append((stack, r, sorted(
                         s for s in wanted
-                        if any(a <= hi and lo <= b for a, b in fallback.scripts[s]))
+                        if any(a <= hi and lo <= b for a, b in fallback.scripts[s]))))
                 continue
             old = fonts.get((stack, r))
             new = glyph_fallback.merge_range(old, fb_data, blocks, name=name, range_key=r)
             if new is not old:
                 fonts[(stack, r)] = new
                 merged += 1
-    for stack, lost_scripts in sorted(lost.items()):
+    for stack, r, lost_scripts in lost:
         # Only reachable under STREETZIM_ALLOW_FONT_ERRORS=1 (otherwise the
         # failed download already stopped the build).
-        print(f"    WARNING: {stack} ships without fallback glyphs for "
-              f"{', '.join(sorted(lost_scripts))} (the {merge_stacks[stack]} range(s) "
-              f"failed to download); those labels will draw blank in that style")
+        print(f"    WARNING: {stack} lost glyphs in {r} for {', '.join(lost_scripts)} "
+              f"({merge_stacks[stack]} {r} failed to download); characters of that "
+              f"range draw blank in that style")
     if merged:
         print(f"    Merged fallback glyphs into {merged} ranges")
         licence = viewer_assets.fallback_licence(lock)

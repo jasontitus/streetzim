@@ -74,8 +74,11 @@ ranges holding those scripts' Unicode blocks are pinned: 8 per stack, 16
 files. The settings (source URL, fontstacks, scripts and their blocks) live
 in `DEFAULT_FALLBACK` in `tools/pin_viewer_assets.py`: edit them there and
 run `--fonts`, which writes them and the new hashes to the lock file
-(`--fonts --keep-lock` keeps the lock file's settings and only refreshes
-hashes).
+(`--fonts --keep-lock` keeps the lock file's settings, only refreshes
+hashes, and records that it did). `--check` fails when the lock's settings
+differ from the defaults and were not pinned with `--keep-lock`, so a hand
+edit cannot pass CI and be reverted later; `--fonts` prints every setting
+it resets.
 
 MapLibre asks for one fontstack name per layer and range; listing a second
 font in `text-font` would make it ask for `OpenSansBold,NotoSans…` for
