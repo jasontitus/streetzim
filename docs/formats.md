@@ -246,7 +246,7 @@ reader branch is only dead when no published ZIM needs it.
 | `maplibre-gl.js`, `maplibre-gl.css` | MapLibre GL JS (version in `MAPLIBRE_VERSION`) |
 | `map-config.json` | name, center, zoom, minZoom, maxZoom, buildDate, bounds, `hasSatellite`/`satelliteMaxZoom`/`satelliteFormat`/`satelliteTileSize`, `hasTerrain`/`terrainMaxZoom`, `hasWikidata`, `hasRouting`, `hasOvertureAddresses` |
 | `streetzim-meta.json` | build metadata for other consumers. `routingGraph.version` is the SZRG version of the intermediate graph (4 or 5), even when the ZIM ships SZCI v3 cells |
-| `tiles/{z}/{x}/{y}.pbf` | OpenMapTiles-schema MVT; empty tiles are dropped |
+| `tiles/{z}/{x}/{y}.pbf` | OpenMapTiles-schema MVT; empty tiles are dropped; repeats of an identical tile are ZIM aliases of the first (`docs/tile-aliases.md`) |
 | `satellite/{z}/{x}/{y}.{avif,webp}` | optional, uncompressed |
 | `terrain/{z}/{x}/{y}.webp` | optional, Mapbox terrain-RGB |
 | `fonts/{Font}/{start}-{end}.pbf` | SDF glyphs (Open Sans Regular/Bold/Italic) |

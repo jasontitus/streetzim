@@ -46,6 +46,7 @@ if str(SCRIPT_DIR) not in sys.path:
 # ZIM without ANY category-index/manifest.json.
 from cloud.chip_rules import CHIP_RULES, record_matches_chip  # noqa: E402
 from cloud.viewer_slots import pad_to_slot as _pad_to_slot  # noqa: E402
+from streetzim.tile_alias import MAX_ALIAS_BYTES, TileAliaser  # noqa: E402
 from cloud.chip_shards import (  # noqa: E402
     CHIP_SHARD_TARGET_BYTES, plan_chip, read_chip_records,
 )
@@ -346,6 +347,10 @@ def _emit_upgraded_graph(creator, graph_bytes: bytes, *,
     )
 
 
+# Entries whose identical copies are written as aliases (streetzim/tile_alias.py).
+_TILE_PREFIXES = ("tiles/", "satellite/", "terrain/")
+
+
 def repackage(src_path: str, dst_path: str,
               swap_viewer: bool = True,
               uncompress_graph: bool = True,
@@ -638,7 +643,9 @@ def repackage(src_path: str, dst_path: str,
     # etc). Reassembled into a single buffer below when the source
     # shipped chunked but not monolithic.
     captured_graph_chunks: dict | None = None
+    tile_aliasers: dict[str, TileAliaser] = {}
     with creator as c:
+        tile_aliaser_on = TileAliaser(c).enabled
         _tick("setup")
         # Passthrough all entries. The bulk of entries (tiles, search-
         # data chunks, wikidata, terrain when not refreshing) pass
@@ -886,6 +893,23 @@ def repackage(src_path: str, dst_path: str,
                 if size >= 200 * 1024 * 1024:
                     compress = False
                     raw_clusters += 1
+            # Keep identical tiles stored once. An alias in the source reads
+            # as an ordinary item (the reader API does not say which entries
+            # share a blob), so re-find them by content. One table per
+            # mimetype: an alias takes its target's mimetype. Entry order is
+            # path order, so the output is deterministic.
+            if (path.startswith(_TILE_PREFIXES) and size <= MAX_ALIAS_BYTES
+                    and tile_aliaser_on):
+                aliaser = tile_aliasers.get(mime)
+                if aliaser is None:
+                    aliaser = tile_aliasers[mime] = TileAliaser(c, enabled=True)
+                data = (modified_content if modified_content is not None
+                        else bytes(item.content))
+                alias_of = aliaser.target_for(path, data)
+                if alias_of is not None:
+                    aliaser.add_alias(path, title, alias_of, size)
+                    kept += 1
+                    continue
             if modified_content is not None:
                 # A viewer slot MUST be stored uncompressed: bytes inside a
                 # compressed cluster do not map to file offsets, so
@@ -1190,6 +1214,9 @@ def repackage(src_path: str, dst_path: str,
     extra = f"; {refreshed_terrain} terrain tiles refreshed" if refreshed_terrain else ""
     if rewritten_search:
         extra += f"; {rewritten_search} search detail page(s) link-fixed"
+    n_aliases = sum(a.aliases for a in tile_aliasers.values())
+    if n_aliases:
+        extra += f"; {n_aliases} duplicate tiles aliased"
     print(f"\n  kept {kept} entries; {swapped} viewer swaps; "
           f"{added_missing} added; {raw_clusters} raw cluster(s){extra}")
     # Per-section timing — useful when planning what to optimize
