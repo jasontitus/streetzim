@@ -105,6 +105,35 @@ a region this size
 give the task at least 12 GB of RAM and 15 GB of disk, besides the extract
 and shapefiles.
 
+A US region and a Docker comparison, measured the same way on 2026-09-29
+with the code as of that day and the inputs given as `file://` URLs (so no
+download time): the US states from Geofabrik (2026-09-28 extracts),
+Luxembourg the same openstreetmap.fr extract as above. The machine was shared with other
+jobs this time (mean 1-minute load 12 to 15 on its 4 cores), so wall times
+are upper bounds; CPU time and memory are the steadier numbers.
+
+| region | where | OSM extract | wall time | CPU time | peak memory | peak disk | ZIM |
+|---|---|---|---|---|---|---|---|
+| Luxembourg | Docker image (Python 3.14.7) | 56 MB | 3.2 min | 4.7 min | 4.1 GB (4.1) | 0.34 GB | 55 MB |
+| Luxembourg | outside Docker (Python 3.11.15) | 56 MB | 4.3 min | 5.1 min | 4.0 GB (4.0) | 0.36 GB | 55 MB |
+| Rhode Island | outside Docker (Python 3.11.15) | 52 MB | 4.2 min | 4.7 min | 4.0 GB (4.0) | 0.28 GB | 52 MB |
+
+Inside Docker, `tools/measure_build.py` ran in the container, around the
+`streetzim` process, as the image runs it. The two Luxembourg runs agree on
+memory, disk and the ZIM; the wall-time gap is not the container. 31 s of
+it is the font glyphs, which the image carries and a fresh `--dl` outside
+it downloads, and most of the rest is tile generation (47 s against 14 s,
+same tilemaker v3.0.0 release build), which moved with the machine's load.
+Rhode Island, a US state of Luxembourg's size, costs the same: the ~4 GB
+of memory is the floor for any small region.
+
+Massachusetts (a 310 MB extract, between Luxembourg and Switzerland) was
+stopped by the measuring script 15 minutes in, during the ZIM step, when
+the machine's free disk (shared with the other jobs) reached 2 GB; its
+temporary and output folders held 2.1 GB at that point. Tiles had taken
+2.3 min, the search step 7.8 min and the routing graph 2.7 min. No peak
+memory was recorded, as the measuring script writes it at the end.
+
 ### Downloads per task
 
 A fresh Zimfarm container downloads, besides the OSM extract:
