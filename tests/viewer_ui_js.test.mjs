@@ -71,7 +71,7 @@ function loadView(env = {}) {
   }
   const fn = new Function('window', 'document', 'location', 'setTimeout', 'clearTimeout',
     VIEW_SRC + '\nreturn { SZ_VIEWER_VERSION, _szStorage, _szViewKey, _szHashSetsView,' +
-    ' _szReadView, _szWriteView, _szOpeningCamera, initViewMemory, initHomeButton,' +
+    ' _szReadView, _szWriteView, _szOpeningCamera, _szMaxBounds, initViewMemory, initHomeButton,' +
     ' _szAboutText, _szMonth, initAbout };');
   // Fake timers: `timers` holds the pending ones; runTimers() fires them.
   const timers = new Map();
@@ -341,6 +341,22 @@ await ok('Home returns to the config view, and not while driving', () => {
   v.document.body.appendChild(hud);
   btn.on.click();
   assert.strictEqual(map.eased, null);
+});
+
+await ok('maxBounds is the built box itself: no margin of empty map around it', () => {
+  const v = loadView({});
+  assert.deepStrictEqual(v._szMaxBounds(CONFIG), [[7.40, 43.72], [7.44, 43.76]]);
+  // Across the antimeridian the box is unwrapped (east past 180) and passes through.
+  assert.deepStrictEqual(v._szMaxBounds({ bounds: [172.8, -23.2, 183.5, -11.2] }), [[172.8, -23.2], [183.5, -11.2]]);
+  for (const bad of [undefined, null, [], [1, 2, 3], [7.44, 43.72, 7.40, 43.76], [7.4, 43.76, 7.44, 43.72],
+                     ['7.4', 43.72, 7.44, 43.76], [7.4, NaN, 7.44, 43.76]]) {
+    assert.strictEqual(v._szMaxBounds({ bounds: bad }), undefined, JSON.stringify(bad));
+  }
+  assert.strictEqual(v._szMaxBounds({}), undefined);
+  // The map is built with it (the old code padded by 0.01 degrees, which
+  // showed as a blank strip -- the sea cut off -- at every edge).
+  assert.match(HTML, /maxBounds: _szMaxBounds\(config\)/);
+  assert.doesNotMatch(HTML, /config\.bounds\[\d\] [-+] 0\.01/);
 });
 
 await ok('About text from new and old map-config.json', () => {

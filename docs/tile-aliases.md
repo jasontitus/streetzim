@@ -67,7 +67,7 @@ tile. The OpenFreeMap cut has the same 138 duplicates at 56–57 B. Counting the
 stored (gzipped) bytes gives the same tile counts, with 2.2% and 3.6% of
 stored bytes.
 
-The CI build (`--area monaco`, clipped to the 7.40,43.72,7.44,43.76 bbox) has
+The CI build (`--area monaco`, clipped to the 7.40,43.72,7.44,43.76 bbox the preset had then) had
 only 28 non-empty tiles and no duplicates.
 
 ### Effect on the ZIM file

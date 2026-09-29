@@ -327,9 +327,17 @@ KNOWN_AREAS = {
         "bbox": "9.47,47.04,9.64,47.27",
         "name": "Liechtenstein",
     },
+    # Monaco runs 7.409-7.440 E, 43.725-43.752 N. The old box
+    # (7.40,43.72,7.44,43.76) ended on its eastern border and 500 m into
+    # the sea, so the sea stopped in a straight line at Larvotto and off
+    # Fontvieille, and a desktop window could not fit all of Monaco. This
+    # one adds about 1.5 km of sea to the south and east and the edge of
+    # the neighbouring towns. The Geofabrik extract stops near the border
+    # (7.409-7.449, 43.723-43.752), so French land beyond it has only the
+    # ways that cross it; the sea comes from the coastline shapefile.
     "monaco": {
         "geofabrik": "europe/monaco",
-        "bbox": "7.40,43.72,7.44,43.76",
+        "bbox": "7.39,43.715,7.46,43.765",
         "name": "Monaco",
     },
     "california": {

@@ -73,10 +73,7 @@ if (!window.__szUnsupported) fetchConfig(1)
       minZoom: config.minZoom || 0,
       maxZoom: 20,
       attributionControl: true,
-      maxBounds: config.bounds ? [
-        [config.bounds[0] - 0.01, config.bounds[1] - 0.01],
-        [config.bounds[2] + 0.01, config.bounds[3] + 0.01]
-      ] : undefined
+      maxBounds: _szMaxBounds(config)   // the built box, no margin (140)
     });
     // Exposed so module-scope helpers (e.g. openWikiArticle) can stamp the
     // current view into the URL hash before navigating away.

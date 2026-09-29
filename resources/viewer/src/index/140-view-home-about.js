@@ -106,6 +106,23 @@ function _szOpeningCamera(config, hash, storage) {
   return _szReadView(config, storage) || home;
 }
 
+// How far the reader can pan: exactly the built box (map-config.json's
+// "bounds", which is also what tilemaker clipped every layer to). MapLibre
+// keeps the whole viewport inside maxBounds, zooming in when it must, so no
+// part of the screen can show the area outside the box, where there is no
+// data at all -- not even the sea, whose polygons are clipped too. The
+// viewer used to add 0.01 degrees on every side, and that strip was drawn as
+// bare background: the sea stopped in a straight line at the edge of every
+// coastal region (Monaco's east and south edges). Longitudes past 180
+// (areas across the antimeridian) are passed through; MapLibre wraps them.
+function _szMaxBounds(config) {
+  var b = config && config.bounds;
+  if (!b || b.length !== 4) return undefined;
+  for (var i = 0; i < 4; i++) if (typeof b[i] !== 'number' || !isFinite(b[i])) return undefined;
+  if (!(b[0] < b[2] && b[1] < b[3])) return undefined;
+  return [[b[0], b[1]], [b[2], b[3]]];
+}
+
 function _szDriving() {
   var hud = document.getElementById('drive-hud');
   return !!(hud && hud.classList && hud.classList.contains('visible'));
