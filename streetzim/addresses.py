@@ -12,6 +12,7 @@ from streetzim import area
 from streetzim.common import (
     print,
 )
+from streetzim.overture import overture_category, overture_release
 
 
 def extract_addresses_pbf(pbf_path, output_path, bbox=None):
@@ -367,7 +368,8 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     spot the provenance. Returns the count of rows added.
     """
     import duckdb  # local import — only needed when the flag is set
-    print(f"  Merging Overture addresses from {overture_parquet}...")
+    print(f"  Merging Overture addresses from {overture_parquet} "
+          f"(release {overture_release(overture_parquet) or 'unknown'})...")
 
     # ------------------------------------------------------------------
     # Build the OSM-side index from the existing JSONL. We scan only
@@ -644,8 +646,10 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
         search feed by rounded coord + normalized name. If found, add
         the Overture fields to that record in place. This is the main
         win — OSM's `subtype` is noisy (museums bucketed under `tourism`,
-        hotels under `amenity`); Overture's `categories.primary` gives
-        a clean label we can drive chips + popups off.
+        hotels under `amenity`); Overture's category (`categories.primary`,
+        or `taxonomy.primary` mapped back to those names on releases from
+        2026-09-23.0, see streetzim/overture.py) gives a clean label we
+        can drive chips + popups off.
       Pass 2 (add-new): Overture rows with no OSM match become fresh
         `type: "poi"` records tagged `subtype` = Overture primary
         category and `source: "overture"`.
@@ -663,7 +667,8 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
     so the caller can log the size impact without re-stat'ing the jsonl.
     """
     import duckdb
-    print(f"  Merging Overture places from {overture_parquet}...")
+    print(f"  Merging Overture places from {overture_parquet} "
+          f"(release {overture_release(overture_parquet) or 'unknown'})...")
 
     size_before = os.path.getsize(search_jsonl_path)
 
@@ -711,8 +716,15 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
     con = duckdb.connect()
     con.execute("INSTALL spatial; LOAD spatial;")
     parquet_sql = _sql_string_literal(overture_parquet)
+    # Category columns differ by release: `categories` up to 2026-08-19.0,
+    # `taxonomy` from then on (streetzim/overture.py). Select whichever
+    # the parquet has and let overture_category pick.
+    have = {r[0] for r in con.execute(
+        f"DESCRIBE SELECT * FROM read_parquet('{parquet_sql}')").fetchall()}
+    cat_cols = ", ".join(c if c in have else f"NULL AS {c}"
+                         for c in ("categories", "taxonomy"))
     sql = f"""
-      SELECT names, categories, phones, websites, socials, brand, sources,
+      SELECT names, {cat_cols}, phones, websites, socials, brand, sources,
              ST_X(ST_GeomFromText(wkt)) AS lon,
              ST_Y(ST_GeomFromText(wkt)) AS lat
       FROM read_parquet('{parquet_sql}')
@@ -754,8 +766,8 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
                     unnamed += 1
                     continue
 
-                cats = row.get("categories") or {}
-                primary = (cats.get("primary") or "").strip()
+                primary = overture_category(row.get("categories"),
+                                            row.get("taxonomy"))
 
                 phones = row.get("phones") or []
                 websites = row.get("websites") or []

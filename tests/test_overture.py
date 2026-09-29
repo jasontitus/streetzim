@@ -393,13 +393,19 @@ def test_merge_overture_handles_empty_parquet(duckdb_available, tmp_path):
     assert added == 0
 
 
-def _write_places_parquet(path: str, rows: list[dict]) -> None:
+def _write_places_parquet(path: str, rows: list[dict],
+                          shape: str = "categories") -> None:
     """Build an Overture-places-shaped parquet from plain dicts.
 
     Matches the columns `merge_overture_places` selects via DuckDB:
-    `names.primary`, `categories.primary`, `phones[]`, `websites[]`,
+    `names.primary`, the category, `phones[]`, `websites[]`,
     `socials[]`, `brand.names.primary` + `brand.wikidata`, `sources[]`,
     and a WKT point for the geometry.
+
+    `shape` is the release's category layout: "categories" (up to
+    2026-08-19.0: `categories.primary` = row["category"]), "taxonomy"
+    (2026-09-23.0 on: `taxonomy.primary` = row["taxonomy"], no
+    `categories` column) or "both" (2026-08-19.0 carries both).
     """
     import duckdb
     con = duckdb.connect()
@@ -412,6 +418,9 @@ def _write_places_parquet(path: str, rows: list[dict]) -> None:
         CREATE TABLE places (
             names STRUCT("primary" VARCHAR),
             categories STRUCT("primary" VARCHAR),
+            taxonomy STRUCT("primary" VARCHAR, hierarchy VARCHAR[],
+                            alternates VARCHAR[]),
+            basic_category VARCHAR,
             phones VARCHAR[],
             websites VARCHAR[],
             socials VARCHAR[],
@@ -430,6 +439,10 @@ def _write_places_parquet(path: str, rows: list[dict]) -> None:
     for r in rows:
         name = (r.get("name") or "").replace("'", "''")
         cat = (r.get("category") or "").replace("'", "''")
+        tax = r.get("taxonomy")
+        tax_lit = ("NULL" if tax is None else
+                   f"{{\"primary\": '{tax}', 'hierarchy': ['x', '{tax}'], "
+                   f"'alternates': []}}")
         brand_name = (r.get("brand") or "").replace("'", "''")
         brand_wd = (r.get("brand_wd") or "").replace("'", "''")
         sources_lit = (
@@ -442,7 +455,7 @@ def _write_places_parquet(path: str, rows: list[dict]) -> None:
         con.execute(
             "INSERT INTO places VALUES ("
             f"  {{\"primary\": '{name}'}}, "
-            f"  {{\"primary\": '{cat}'}}, "
+            f"  {{\"primary\": '{cat}'}}, {tax_lit}, 'basic', "
             f"  {_lit_list(r.get('phones', []))}, "
             f"  {_lit_list(r.get('websites', []))}, "
             f"  {_lit_list(r.get('socials', []))}, "
@@ -451,7 +464,9 @@ def _write_places_parquet(path: str, rows: list[dict]) -> None:
             f"  {sources_lit}, '{wkt}'"
             f")"
         )
-    con.execute(f"COPY places TO '{path}' (FORMAT PARQUET)")
+    drop = {"categories": "EXCLUDE (taxonomy, basic_category)",
+            "taxonomy": "EXCLUDE (categories)", "both": ""}[shape]
+    con.execute(f"COPY (SELECT * {drop} FROM places) TO '{path}' (FORMAT PARQUET)")
     con.close()
 
 
@@ -711,3 +726,124 @@ def test_merge_overture_preserves_existing_feed_rows(duckdb_available, tmp_path)
     after = pathlib.Path(jsonl).read_text(encoding="utf-8")
     # Original lines must still appear verbatim as the file prefix.
     assert after.startswith(before), "merge must not rewrite existing rows"
+
+
+# ---------------------------------------------------------------------------
+# Category schema change: `categories` (to 2026-08-19.0) → `taxonomy`
+# (2026-09-23.0 on). streetzim/overture.py maps taxonomy back to the old
+# names the chips and the generic-bucket refinement use.
+# ---------------------------------------------------------------------------
+
+from streetzim.overture import (  # noqa: E402
+    TAXONOMY_TO_LEGACY,
+    overture_category,
+    overture_release,
+)
+
+
+def test_overture_category_prefers_categories_then_maps_taxonomy():
+    assert overture_category({"primary": "dentist"}, {"primary": "dental_clinic"}) == "dentist"
+    assert overture_category(None, {"primary": "dental_clinic"}) == "dentist"
+    assert overture_category({"primary": None}, {"primary": "auto_dealer"}) == "car_dealer"
+    # Same name in both vocabularies, and a category newer than the table.
+    assert overture_category(None, {"primary": "museum"}) == "museum"
+    assert overture_category(None, {"primary": "sport_league"}) == "sport_league"
+    assert overture_category(None, None) == ""
+    assert overture_category(None, {"primary": None, "hierarchy": None}) == ""
+
+
+def test_taxonomy_table_is_one_step():
+    # A mapped name is never itself a taxonomy key: one lookup is final.
+    assert not set(TAXONOMY_TO_LEGACY.values()) & set(TAXONOMY_TO_LEGACY)
+    assert all(k != v for k, v in TAXONOMY_TO_LEGACY.items())
+    # Renames that land in chips (cloud/chip_rules.py) or the generic
+    # buckets merge_overture_places refines.
+    for new, old in [("dental_clinic", "dentist"), ("lodging", "accommodation"),
+                     ("historic_site", "landmark_and_historical_building"),
+                     ("shopping_mall", "shopping_center"), ("atm", "atms")]:
+        assert TAXONOMY_TO_LEGACY[new] == old
+
+
+@pytest.mark.parametrize("shape", ["categories", "taxonomy", "both"])
+def test_merge_overture_places_each_category_shape(duckdb_available, tmp_path, shape):
+    # One fixture per release layout; every layout yields the old names.
+    parquet = tmp_path / "ov.parquet"
+    rows = [
+        {"name": "HP Garage", "category": "museum", "taxonomy": "museum",
+         "lat": 37.44453, "lon": -122.15269},
+        {"name": "Smile Dental", "category": "dentist", "taxonomy": "dental_clinic",
+         "lat": 37.40, "lon": -122.10},
+        {"name": "Grand Hotel", "category": "accommodation", "taxonomy": "lodging",
+         "lat": 37.41, "lon": -122.11},
+        {"name": "Nameless Cat", "category": "", "taxonomy": None,
+         "lat": 37.42, "lon": -122.12},
+    ]
+    _write_places_parquet(str(parquet), rows, shape=shape)
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [{
+        "name": "HP Garage", "type": "poi", "subtype": "tourism",
+        "lat": 37.44453, "lon": -122.15269,
+    }])
+    out = merge_overture_places(str(parquet), str(jsonl))
+    assert (out["enriched"], out["added"]) == (1, 2)
+    recs = {r["name"]: r for r in (json.loads(l) for l in open(jsonl) if l.strip())}
+    assert recs["HP Garage"]["subtype"] == recs["HP Garage"]["cat"] == "museum"
+    assert recs["Smile Dental"]["subtype"] == recs["Smile Dental"]["cat"] == "dentist"
+    assert recs["Grand Hotel"]["cat"] == "accommodation"
+    assert "Nameless Cat" not in recs, "uncategorized add-new rows are skipped"
+
+
+def test_merge_overture_places_both_columns_prefers_categories(duckdb_available, tmp_path):
+    # 2026-08-19.0 carries both; `categories` decides, so builds on that
+    # release are unchanged.
+    parquet = tmp_path / "ov.parquet"
+    _write_places_parquet(str(parquet), [{
+        "name": "Odd One", "category": "museum", "taxonomy": "dental_clinic",
+        "lat": 37.5, "lon": -122.2}], shape="both")
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [])
+    merge_overture_places(str(parquet), str(jsonl))
+    assert json.loads(open(jsonl).readline())["cat"] == "museum"
+
+
+def test_overture_release_from_metadata_or_name(duckdb_available, tmp_path):
+    import duckdb
+    tagged = tmp_path / "anything.parquet"
+    duckdb.connect().execute(
+        f"COPY (SELECT 1 a) TO '{tagged}' (FORMAT PARQUET, "
+        "KV_METADATA {overture_release: '2026-09-23.1'})")
+    assert overture_release(str(tagged)) == "2026-09-23.1"
+    named = tmp_path / "places-monaco-2026-08-19.0.parquet"
+    duckdb.connect().execute(f"COPY (SELECT 1 a) TO '{named}' (FORMAT PARQUET)")
+    assert overture_release(str(named)) == "2026-08-19.0"
+    assert overture_release(str(tmp_path / "missing.parquet")) is None
+    assert overture_release(None) is None
+
+
+def test_overture_credits_record_release():
+    from streetzim.zim_writer import _add_overture_credits
+
+    class Creator:
+        def __init__(self):
+            self.items = []
+
+        def add_item(self, item):
+            self.items.append(item)
+
+    def item(path, title, mime, data):
+        return json.loads(data)
+
+    def credits(release):
+        c = Creator()
+        _add_overture_credits(c, item, overture_sources=["meta"],
+                              overture_themes=["addresses", "places"],
+                              overture_release=release)
+        return c.items[0]
+
+    doc = credits({"addresses": "2026-09-23.1", "places": "2026-09-23.1"})
+    assert doc["release"] == "2026-09-23.1"
+    doc = credits({"addresses": "2026-08-19.0", "places": "2026-09-23.1"})
+    assert "release" not in doc
+    assert doc["releases"] == {"addresses": "2026-08-19.0", "places": "2026-09-23.1"}
+    doc = credits({"addresses": None, "places": None})
+    assert "release" not in doc and "releases" not in doc

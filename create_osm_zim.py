@@ -148,6 +148,7 @@ from streetzim.addresses import (  # noqa: F401
     merge_overture_places,
     extract_wiki_tags_pbf,
 )
+from streetzim.overture import overture_release
 from streetzim.zim_writer import (  # noqa: F401
     search_detail_html,
     _split_big_search_chunk,
@@ -1478,6 +1479,14 @@ def _build_map_config(
     return bbox, map_config
 
 
+def _overture_releases(args, overture_themes):
+    """{theme: release} of the Overture parquets merged, for
+    overture-sources.json (read from the parquet, or its file name)."""
+    paths = {"addresses": getattr(args, "overture_addresses", None),
+             "places": getattr(args, "overture_places", None)}
+    return {t: overture_release(paths.get(t)) for t in (overture_themes or [])}
+
+
 def _write_zim(
         *, address_count, args, bbox_str, fonts, map_config, maplibre_css, maplibre_js,
         mbtiles_path, name, output_path, overture_sources, overture_themes,
@@ -1525,6 +1534,7 @@ def _write_zim(
         wiki_cross_refs=wiki_cross_refs,
         overture_sources=overture_sources,
         overture_themes=overture_themes,
+        overture_release=_overture_releases(args, overture_themes),
         address_count=address_count,
         zim_builder=getattr(args, "zim_builder", "python"),
         max_zoom=args.max_zoom,
