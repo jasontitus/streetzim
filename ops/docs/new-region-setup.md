@@ -54,6 +54,32 @@ done
 
 Each extract takes ~10–30 min depending on the region's bbox area.
 
+### Regions across the antimeridian (alaska)
+
+A region that crosses ±180° is written in `cloud/regions.tsv` with
+minlon > maxlon: alaska is `172.0,51.0,-130.0,72.0` (the Aleutians west to
+Attu, 172.4E, through Anchorage). `osmium extract -b` cannot take such a
+box, so cut it as one box each side of 180 with a two-ring .poly:
+
+```sh
+./venv-linux/bin/python3 -m streetzim.area poly "$BBOX" "world-data/regions/${ID}.poly"
+osmium extract -p "world-data/regions/${ID}.poly" world-data/planet-2026-03-10.osm.pbf \
+    -o "world-data/regions/${ID}.osm.pbf" --overwrite
+```
+
+The queue does this by itself: `build-refresh-queue.sh`,
+`cloud/rebuild_old_regions.sh` (a .poly next to the PBF) and
+`extract-region-pbfs.sh` (a two-part `multipolygon` in its osmium config)
+switch only for such a row; every other row runs the same `-b` command as
+before. `derive-region-mbtiles.py`, `derive-region-search.py`,
+`download_overture_data.py` and `cloud/check_terrain_coverage.py` take both
+sides too, and `create_osm_zim.py` accepts the bbox as written
+(docs/formats.md, "Areas across the antimeridian"). The legacy cloud-VM
+scripts (`cloud/build_region.sh`, `cloud/preflight.py`,
+`cloud/verify_terrain_freshness.py`, `cloud/fix_terrain_seams.py`,
+`verify_tile_cache.py`) still assume minlon < maxlon; do not run them on
+such a region.
+
 ## MBTiles + search-cache: symlinks are fine
 
 Unlike the PBF, both of these are **already bbox-aware** at read time:

@@ -116,3 +116,36 @@ def osmium_extract_args(b: Sequence[float], workdir: str, bbox_arg: str | None =
     with open(path, "w", encoding="utf-8") as f:
         f.write(poly_text(b))
     return ["-p", path]
+
+
+def sides(b: Sequence[float]) -> list[BBox]:
+    """A box as written anywhere (either spelling), as the one or two boxes
+    inside [-180, 180] it covers. A box that does not cross comes back as
+    itself, unchanged (no rounding, no validation)."""
+    w, s, e, n = (float(v) for v in b)
+    if w <= e <= 180.0:
+        return [(w, s, e, n)]
+    return split(normalize((w, s, e, n)))
+
+
+def _main(argv: list[str]) -> int:
+    """For shell scripts (ops/):
+
+        python -m streetzim.area poly BBOX FILE   # write a two-ring .poly
+        python -m streetzim.area sides BBOX       # one box per line, w,s,e,n
+    """
+    if len(argv) == 3 and argv[0] == "poly":
+        with open(argv[2], "w", encoding="utf-8") as f:
+            f.write(poly_text(normalize([float(v) for v in argv[1].split(",")])))
+        return 0
+    if len(argv) == 2 and argv[0] == "sides":
+        for part in sides([float(v) for v in argv[1].split(",")]):
+            print(",".join(repr(v) for v in part))
+        return 0
+    print(_main.__doc__)
+    return 2
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(_main(sys.argv[1:]))

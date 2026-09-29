@@ -68,7 +68,16 @@ while [ $i -lt ${#todo[@]} ]; do
       [ $first -eq 1 ] || echo ","
       first=0
       # write to a .part name; renamed after the pass so a crash never leaves a truncated <id>.osm.pbf
-      printf '  {"output": "%s.osm.pbf.part", "output_format": "pbf", "bbox": [%s]}' "$id" "$bbox"
+      if awk -F, '{ exit !($1 > $3 || $3 > 180) }' <<< "$bbox"; then
+        # Across the antimeridian (minlon > maxlon): a box each side of 180.
+        printf '  {"output": "%s.osm.pbf.part", "output_format": "pbf", %s}' "$id" "$(awk -F, '{
+          e = ($3 > 180) ? $3 - 360 : $3
+          printf "\"multipolygon\": [[[[%s,%s],[180,%s],[180,%s],[%s,%s],[%s,%s]]],", $1, $2, $2, $4, $1, $4, $1, $2
+          printf "[[[-180,%s],[%s,%s],[%s,%s],[-180,%s],[-180,%s]]]]", $2, e, $2, e, $4, $4, $2
+        }' <<< "$bbox")"
+      else
+        printf '  {"output": "%s.osm.pbf.part", "output_format": "pbf", "bbox": [%s]}' "$id" "$bbox"
+      fi
     done
     echo "] }"
   } > "$cfg"

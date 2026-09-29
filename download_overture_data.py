@@ -55,6 +55,18 @@ THEME_SPECS = {
 SUPPORTED_THEMES = set(THEME_SPECS.keys())
 
 
+def bbox_where(minlon: float, minlat: float, maxlon: float, maxlat: float) -> str:
+    """The SQL filter for the bbox. Across the antimeridian (minlon >
+    maxlon, streetzim/area.py): one box each side of 180."""
+    if minlon > maxlon or maxlon > 180:
+        from streetzim import area
+        return " OR ".join(
+            f"(bbox.xmin >= {w} AND bbox.xmax <= {e} AND bbox.ymin >= {s} AND bbox.ymax <= {n})"
+            for w, s, e, n in area.sides((minlon, minlat, maxlon, maxlat)))
+    return (f"bbox.xmin >= {minlon} AND bbox.xmax <= {maxlon}\n"
+            f"        AND bbox.ymin >= {minlat} AND bbox.ymax <= {maxlat}")
+
+
 def download_overture(theme: str, bbox: str, release: str, out_path: str) -> str:
     """Fetch the given Overture theme for the bbox into a local parquet.
 
@@ -88,12 +100,12 @@ def download_overture(theme: str, bbox: str, release: str, out_path: str) -> str
     source = f"{OVERTURE_S3_BUCKET}/release/{release}/{spec['s3_glob']}"
     # The bbox filter exploits Overture's per-row `bbox` struct, which
     # DuckDB can push into the parquet predicate and cut >99% of IO.
+    where = bbox_where(minlon, minlat, maxlon, maxlat)
     sql = f"""
     COPY (
       SELECT {spec['columns']}
       FROM read_parquet('{source}', hive_partitioning=1)
-      WHERE bbox.xmin >= {minlon} AND bbox.xmax <= {maxlon}
-        AND bbox.ymin >= {minlat} AND bbox.ymax <= {maxlat}
+      WHERE {where}
     ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
     """
     print(f"  Downloading Overture {theme} for bbox={bbox} (release {release})...")

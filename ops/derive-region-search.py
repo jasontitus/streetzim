@@ -33,6 +33,15 @@ def load_regions(registry, only=None):
     return out
 
 
+def _sides(b):
+    """The box, or its two sides when it crosses the antimeridian."""
+    if b[0] <= b[2] <= 180:
+        return [b]
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    from streetzim import area
+    return area.sides(b)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", required=True)
@@ -49,7 +58,9 @@ def main():
 
     # (rid, minlon, minlat, maxlon, maxlat) tuples: the hot loop is
     # 123M lines x 49 regions, keep it to tuple indexing.
-    boxes = [(rid, b[0], b[1], b[2], b[3]) for rid, b in regions.items()]
+    # A region across the antimeridian (minlon > maxlon) is one box per side.
+    boxes = [(rid, b[0], b[1], b[2], b[3]) for rid, rb in regions.items()
+             for b in _sides(rb)]
     part = {rid: os.path.join(DST_DIR, f"{rid}.search.jsonl.part") for rid in regions}
     outs = {rid: open(p, "w", encoding="utf-8") for rid, p in part.items()}
     counts = {rid: 0 for rid in regions}

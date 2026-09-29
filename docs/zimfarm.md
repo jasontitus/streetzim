@@ -41,7 +41,9 @@ polygon. So:
   would then be wider than 180° is refused as swapped coordinates. The
   extract, the tiles (tilemaker runs once per side) and the map bounds
   cover both sides, and search and routing work across it
-  ([formats](formats.md#areas-across-the-antimeridian));
+  ([formats](formats.md#areas-across-the-antimeridian)). The production
+  queue takes such regions too (`cloud/regions.tsv` alaska; see
+  `ops/docs/new-region-setup.md`);
 - a polygon whose parts are far apart is built from the part with the most
   land, and the log names the parts left out. Parts are kept together while
   they are less than 1° apart or their shared box is at most 3 times their

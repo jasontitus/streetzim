@@ -188,9 +188,13 @@ def registry_anchor(bbox, registry_path=None):
                     lat, lon = (float(x) for x in c[4].split(","))
                 except ValueError:
                     continue
+                if len(rb) == 4 and _area.crosses(bbox) and rb[0] > rb[2]:
+                    # A row across the antimeridian is written minlon >
+                    # maxlon; the build has it unwrapped (streetzim/area.py).
+                    rb = list(_area.normalize(rb))
                 if len(rb) != 4 or any(abs(a - b) > 1e-6 for a, b in zip(rb, bbox)):
                     continue
-                if not (rb[1] <= lat <= rb[3] and rb[0] <= lon <= rb[2]):
+                if not (rb[1] <= lat <= rb[3] and _area.contains_lon(rb, lon)):
                     return None          # anchor outside its own bbox: ignore
                 # c[1] is the region NAME. Do NOT label with c[6]: that is
                 # the full-text search term, which for united-states is

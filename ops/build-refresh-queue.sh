@@ -247,7 +247,13 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
   if [ ! -f "$PBF" ] || [ -L "$PBF" ] || [ ! "$PBF" -nt "$PLANET" ]; then
     log "  extract PBF from $(basename "$PLANET")"
     rm -f "$PBF"
-    if ! osmium extract -b "$BBOX" "$PLANET" -o "$PBF.part" --overwrite --strategy complete_ways >> "$LOG" 2>&1; then
+    AREA=(-b "$BBOX")
+    # Across the antimeridian (minlon > maxlon, e.g. alaska): a box each
+    # side of 180, as a two-ring .poly (streetzim/area.py).
+    if awk -F, '{ exit !($1 > $3 || $3 > 180) }' <<< "$BBOX"; then
+      "$PY" -m streetzim.area poly "$BBOX" "$PBF.poly" && AREA=(-p "$PBF.poly")
+    fi
+    if ! osmium extract "${AREA[@]}" "$PLANET" -o "$PBF.part" --overwrite --strategy complete_ways >> "$LOG" 2>&1; then
       log "  EXTRACT FAILED"; row "$ID" extract-failed 0 - "osmium extract"; n_fail=$((n_fail+1)); continue
     fi
     mv -f "$PBF.part" "$PBF"

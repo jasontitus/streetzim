@@ -153,7 +153,12 @@ for ID in $ORDER; do
   PBF=world-data/regions/${ID}.osm.pbf
   if [ ! -s "$PBF" ]; then
     log "  osmium extract -> $PBF"
-    flock "$PBFLOCK" osmium extract -b "$BBOX" "$PLANET" -o "$PBF" --overwrite >> "$LOG" 2>&1 \
+    AREA=(-b "$BBOX")
+    # Across the antimeridian (minlon > maxlon): a box each side of 180.
+    if awk -F, '{ exit !($1 > $3 || $3 > 180) }' <<< "$BBOX"; then
+      "$PY" -m streetzim.area poly "$BBOX" "$PBF.poly" && AREA=(-p "$PBF.poly")
+    fi
+    flock "$PBFLOCK" osmium extract "${AREA[@]}" "$PLANET" -o "$PBF" --overwrite >> "$LOG" 2>&1 \
       || { log "  EXTRACT FAILED"; rm -f "$PBF"; row "$ID" extract-failed "-"; continue; }
     log "  pbf $(du -h "$PBF" | cut -f1)"
   else log "  pbf present ($(du -h "$PBF" | cut -f1))"; fi
