@@ -109,6 +109,8 @@ dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAg
     }
     return attempt(1);
   }
+  // Also used for one-off ZIM files outside a style (the RTL text plugin).
+  window.__szFetchWithRetry = fetchWithRetry;
 
   maplibregl.addProtocol('zimtile', function(params, abortController) {
     var url = params.url.replace('zimtile://', '');

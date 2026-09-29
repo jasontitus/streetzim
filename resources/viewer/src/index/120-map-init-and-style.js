@@ -73,6 +73,11 @@ fetchConfig(1)
     // Exposed so module-scope helpers (e.g. openWikiArticle) can stamp the
     // current view into the URL hash before navigating away.
     window.__szMap = map;
+    // POI icons are drawn on demand, the theme follows the OS scheme, and
+    // the RTL plugin loads when the first RTL label appears (135-137).
+    initPoiIcons(map);
+    initMapTheme(map, config);
+    initRtlText(map, config);
 
     // NOTE: the opening view is deliberately left as map-config.json ships
     // it. See docs/todo-opening-view.md.
@@ -339,6 +344,14 @@ fetchConfig(1)
         });
       }
 
+      // The theme repainted the base layers from makeStyle(): what
+      // hideSatellite restores is now stale, and while satellite is on its
+      // label/road overrides were just overwritten. Recapture, re-apply.
+      map.on('streetzim.theme', function() {
+        satSavedPaint = null;
+        if (satelliteVisible) showSatellite();
+      });
+
       toggleBtn.addEventListener('click', function() {
         satelliteVisible = !satelliteVisible;
         toggleBtn.classList.toggle('active-control', satelliteVisible);
@@ -554,7 +567,8 @@ fetchConfig(1)
     // must not show the imagery's non-commercial licence as if it applied.
     [['attr-satellite-section', config.hasSatellite],
      ['attr-terrain-section', config.hasTerrain],
-     ['attr-wiki-section', config.hasWikidata || config.hasWikiArticles]
+     ['attr-wiki-section', config.hasWikidata || config.hasWikiArticles],
+     ['attr-rtl-section', config.rtlTextPlugin]
     ].forEach(function (s) {
       var el = document.getElementById(s[0]);
       if (el && s[1]) el.style.display = '';

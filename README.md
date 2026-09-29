@@ -197,7 +197,11 @@ and the known technical debt.
 | [Wikidata](https://www.wikidata.org/) | CC0 | — |
 | [Wikipedia](https://en.wikipedia.org/) text | CC BY-SA 4.0 | Wikipedia contributors |
 
-**Bundled software:** [MapLibre GL JS](https://maplibre.org/) (BSD-3-Clause).
+**Bundled software:** [MapLibre GL JS](https://maplibre.org/) (BSD-3-Clause);
+[mapbox-gl-rtl-text](https://github.com/mapbox/mapbox-gl-rtl-text) 0.3.0
+(BSD-2-Clause, with ICU under the Unicode licence; vendored in
+`resources/vendor/mapbox-gl-rtl-text/`, shaping Arabic/Hebrew labels);
+[Maki](https://github.com/mapbox/maki) 8.2.0 POI icons (CC0 1.0, inlined in the viewer).
 
 > **Satellite imagery is non-commercial.** The Sentinel-2 cloudless 2021 layer
 > is CC BY-NC-SA 4.0. `create_osm_zim.py` only includes it with `--satellite`,
