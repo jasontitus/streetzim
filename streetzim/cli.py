@@ -21,12 +21,14 @@ The satellite layer (CC BY-NC-SA) is deliberately not offered here.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import http.client
 import json
 import os
 import re
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -43,7 +45,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:     # also runnable as `python streetzim/cli.py`
     sys.path.insert(0, str(REPO_ROOT))
-from streetzim import area  # noqa: E402  (after the path fix above)
+from streetzim import area, download  # noqa: E402  (after the path fix above)
 from streetzim.paths import RESOURCES_DIR, missing_runtime_files  # noqa: E402
 GEOFABRIK_POLY = re.compile(r"^https?://download\.geofabrik\.de/(.+)\.poly$")
 USER_AGENT = "streetzim (https://github.com/jasontitus/streetzim)"
@@ -381,17 +383,10 @@ def parse_default_view(value: str) -> tuple[float, float, float | None]:
     return lat, lon, (float(parts[2]) if len(parts) == 3 else None)
 
 
-STAMP_KEYS = ("ETag", "Last-Modified", "Content-Length")
-
-
 def _head(url: str) -> dict[str, str] | None:
-    """The response headers of a HEAD request; None when it fails (offline)."""
-    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": USER_AGENT})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return dict(r.headers.items())
-    except OSError:
-        return None
+    """The response headers for `url` (HEAD, or a one-byte GET when HEAD is
+    refused); None when it fails (offline)."""
+    return download.head(url, USER_AGENT)
 
 
 def _source_stamp(url: str, head: dict[str, str] | None = None) -> dict[str, str] | None:
@@ -400,118 +395,14 @@ def _source_stamp(url: str, head: dict[str, str] | None = None) -> dict[str, str
     if url.startswith("file://"):
         st = os.stat(url[len("file://"):])
         return {"size": str(st.st_size), "mtime": str(int(st.st_mtime))}
-    h = head if head is not None else _head(url)
-    if h is None:
-        return None
-    return {k: h.get(k, "") for k in STAMP_KEYS}
-
-
-class _Progress:
-    """A file being downloaded into: writes through, logs progress every 5%
-    (every GB when the size is unknown) and hands the first bytes of a new
-    file to `check_head`, which may stop the download by raising."""
-
-    def __init__(self, f: Any, done: int, total: int,
-                 check_head: Callable[[bytes], None] | None = None) -> None:
-        self.f, self.done, self.total = f, done, total
-        self.check_head = check_head if done == 0 else None
-        self.head = b""
-        self.step = max(total // 20, 1) if total else 1 << 30
-        self.next = (done // self.step + 1) * self.step
-
-    def write(self, data: bytes) -> int:
-        if self.check_head is not None:
-            self.head += data[:64 - len(self.head)]
-            if len(self.head) >= 64:
-                self.check_head(self.head)
-                self.check_head = None
-        self.f.write(data)
-        self.done += len(data)
-        if self.done >= self.next:
-            self.next = (self.done // self.step + 1) * self.step
-            pct = f" ({self.done * 100 // self.total}%)" if self.total else ""
-            print(f"    {self.done / 1e6:,.0f} MB{pct}", flush=True)
-        return len(data)
-
-
-def _download(url: str, part: Path, offset: int, total: int,
-              check_head: Callable[[bytes], None] | None) -> None:
-    """Append `url` from byte `offset` to `part` (a Range request when
-    offset > 0), with zimscraperlib where it is installed."""
-    headers = {"Range": f"bytes={offset}-"} if offset else {}
-    from streetzim import scraperlib
-    with open(part, "ab" if offset else "wb") as f:
-        sink = _Progress(f, offset, total, check_head)
-        if scraperlib.AVAILABLE:
-            scraperlib.download_to(url, sink, user_agent=USER_AGENT, headers=headers)
-            return
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **headers})
-        with urllib.request.urlopen(req, timeout=60) as r:
-            if offset and r.status != 206:      # the server sent the whole file
-                f.truncate(0)
-                f.seek(0)
-                sink = _Progress(f, 0, total, check_head)
-            shutil.copyfileobj(r, sink, 1 << 20)
+    return download.stamp_of(head if head is not None else _head(url))
 
 
 def fetch_resumable(url: str, dest: Path, *,
                     check_head: Callable[[bytes], None] | None = None) -> Path:
-    """fetch() for large files: an interrupted download (dest.part, with the
-    upstream version it was started from) is resumed with a Range request
-    when the server takes them and the file is unchanged upstream; a file
-    already in place with the upstream size (a pre-seeded download folder)
-    is used as is. Progress is logged every 5%."""
-    meta = dest.with_name(dest.name + ".source.json")
-    part = dest.with_name(dest.name + ".part")
-    part_meta = part.with_name(part.name + ".source.json")
-    head = _head(url)
-    stamp = _source_stamp(url, head)
-    if dest.exists() and dest.stat().st_size > 0:
-        if stamp is None:
-            print(f"  Reusing {dest} (could not check {url} for updates)")
-            return dest
-        if meta.exists() and json.loads(meta.read_text()) == stamp:
-            print(f"  Reusing {dest} (unchanged upstream)")
-            return dest
-        if not meta.exists() and stamp["Content-Length"] == str(dest.stat().st_size):
-            print(f"  Reusing {dest} (same size as upstream)")
-            meta.write_text(json.dumps(stamp))
-            return dest
-    if head is None or stamp is None:
-        raise OSError(f"cannot reach {url}")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    total = int(stamp["Content-Length"] or 0)
-    offset = part.stat().st_size if part.exists() else 0
-    can_resume = (head.get("Accept-Ranges", "").lower() == "bytes"
-                  and part_meta.exists() and json.loads(part_meta.read_text()) == stamp
-                  and 0 < offset < total)
-    if not can_resume:
-        offset = 0
-    part_meta.write_text(json.dumps(stamp))
-    for attempt in (1, 2):
-        if offset:
-            print(f"  Resuming {url} at {offset / 1e6:,.0f} of {total / 1e6:,.0f} MB")
-            with open(part, "rb") as f:
-                if check_head is not None:
-                    check_head(f.read(64))
-        else:
-            print(f"  Downloading {url}" + (f" ({total / 1e6:,.0f} MB)" if total else ""))
-        try:
-            _download(url, part, offset, total, check_head)
-        except ValueError:                      # not the file wanted: don't resume it
-            part.unlink(missing_ok=True)
-            part_meta.unlink(missing_ok=True)
-            raise
-        size = part.stat().st_size
-        if not total or size == total:
-            break
-        if attempt == 2 or not offset:
-            raise OSError(f"{url}: got {size:,} bytes, expected {total:,}")
-        offset = 0                              # a resume that went wrong: start over
-    os.replace(part, dest)
-    meta.write_text(json.dumps(stamp))
-    part_meta.unlink(missing_ok=True)
-    return dest
+    """A large download into --dl: resumed, reused, checked and locked as
+    streetzim/download.py describes."""
+    return download.fetch_resumable(url, dest, user_agent=USER_AGENT, check_head=check_head)
 
 
 def fetch(url: str, dest: Path) -> Path:
@@ -552,12 +443,31 @@ def _check_mbtiles_head(head: bytes) -> None:
         raise ValueError("--mbtiles-url is not an MBTiles file (not SQLite)")
 
 
+def record_url(url: str) -> str:
+    """The URL as the ZIM records it: no user name, password, query or
+    fragment (which may carry a token); for file://, the file name only
+    (a path on the build host means nothing to a reader)."""
+    from urllib.parse import unquote, urlsplit, urlunsplit
+    u = urlsplit(url)
+    if u.scheme == "file":
+        return unquote(u.path).rsplit("/", 1)[-1]
+    netloc = u.hostname or ""
+    if ":" in netloc:
+        netloc = f"[{netloc}]"
+    if u.port:
+        netloc += f":{u.port}"
+    return urlunsplit((u.scheme, netloc, u.path, "", ""))
+
+
 def mbtiles_source(args: argparse.Namespace, dl: Path) -> tuple[Path, str | None] | None:
     """The MBTiles to build from and the URL to record for it: --mbtiles as
     given, a file:// --mbtiles-url in place, or an http(s) one downloaded
-    into <dl>/mbtiles. ValueError if it is not an MBTiles."""
+    into <dl>/mbtiles. ValueError if it is missing or not an MBTiles."""
     if args.mbtiles:
-        return Path(args.mbtiles).resolve(), None
+        path = Path(args.mbtiles).resolve()
+        if not path.is_file():
+            raise ValueError(f"--mbtiles {args.mbtiles}: no such file")
+        return path, None
     url: str | None = args.mbtiles_url
     if not url:
         return None
@@ -565,42 +475,44 @@ def mbtiles_source(args: argparse.Namespace, dl: Path) -> tuple[Path, str | None
         from urllib.parse import unquote, urlparse
         path = Path(unquote(urlparse(url).path))
         if not path.is_file():
-            raise ValueError(f"--mbtiles-url {url}: no such file")
-        return path, url
+            raise ValueError(f"--mbtiles-url {record_url(url)}: no such file")
+        return path, record_url(url)
     if not url.startswith(("http://", "https://")):
-        raise ValueError(f"--mbtiles-url {url!r}: need an http(s):// or file:// URL "
-                         "(or --mbtiles for a local path)")
+        raise ValueError(f"--mbtiles-url {record_url(url)!r}: need an http(s):// or "
+                         "file:// URL (or --mbtiles for a local path)")
     try:
         return fetch_resumable(url, dl / "mbtiles" / _name_of_url(url),
-                               check_head=_check_mbtiles_head), url
+                               check_head=_check_mbtiles_head), record_url(url)
     except (OSError, http.client.HTTPException) as e:
-        raise ValueError(f"--mbtiles-url {url}: {e}") from e
+        raise ValueError(f"--mbtiles-url {record_url(url)}: {e}") from e
 
 
 def prepare_mbtiles(path: Path, bbox: BBox | None, work: Path,
-                    max_zoom: int | None) -> tuple[Path, dict[str, str]]:
-    """Check the MBTiles and log what it is; when it covers more than
-    `bbox`, cut it to the tiles touching the box (streetzim/mbtiles.py) into
-    `work`. Without a box, every tile is kept."""
+                    max_zoom: int | None = None) -> tuple[Path, dict[str, str]]:
+    """Check the MBTiles and log what it is; with an area, cut it to the
+    tiles touching the area's box into `work` (streetzim/mbtiles.py). The
+    cut goes to z14 whatever --max-zoom says: the builder caps the tiles
+    it stores, and still reads z14 for search. Without a box every tile is
+    kept. `max_zoom` is accepted for callers and ignored."""
     from streetzim import mbtiles
+    del max_zoom
     meta = mbtiles.check(path)
     print(f"  MBTiles: {mbtiles.describe(meta)}", flush=True)
-    if bbox is None or not mbtiles.covers_more(meta, bbox):
+    if bbox is None:
         return path, meta
     import time
     t0 = time.monotonic()
     work.mkdir(parents=True, exist_ok=True)
     out = work / "area.mbtiles"
-    counts = mbtiles.cut(path, out, bbox, max_zoom=mbtiles.MAX_ZOOM if max_zoom is None
-                         else max_zoom)
+    counts = mbtiles.cut(path, out, bbox, max_zoom=mbtiles.MAX_ZOOM)
     print(f"  Cut to the area: {sum(counts.values()):,} tiles "
           f"({', '.join(f'z{z} {n:,}' for z, n in counts.items() if n)}) "
-          f"in {time.monotonic() - t0:.1f}s", flush=True)
+          f"in {time.monotonic() - t0:.1f}s, {out.stat().st_size / 1e6:,.1f} MB", flush=True)
     return out, meta
 
 
 def _name_of_url(url: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]", "_", url.split("://", 1)[-1])
+    return download.name_of_url(url)
 
 
 # ---------------------------------------------------------------- main
@@ -666,13 +578,31 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
         work = work or Path(tempfile.mkdtemp(prefix="streetzim-mbtiles-"))
         from streetzim.area import normalize    # (`area` is the preset here)
         box = normalize([float(v) for v in bbox.split(",")])
-        path, _ = prepare_mbtiles(source[0], box, work, args.max_zoom)
+        path, _ = prepare_mbtiles(source[0], box, work)
         if path != source[0]:
             cut = str(path)
         tiles_argv = ["--mbtiles", str(path), "--record-tile-source"]
         if source[1]:
             tiles_argv.append(f"--tile-source-url={source[1]}")
+    try:
+        argv = _builder_argv(args, bbox, pbf_url, dl, illustration) + tiles_argv
+    except BaseException:
+        drop_cut(cut)                           # a failed extract download, or SIGTERM
+        raise
+    return argv, {"bbox": bbox, "pbf_url": pbf_url, "mbtiles_cut": cut}
 
+
+def drop_cut(cut: str | None) -> None:
+    """Remove the cut MBTiles (and its folder when that is left empty)."""
+    if cut:
+        Path(cut).unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            Path(cut).parent.rmdir()
+
+
+def _builder_argv(args: argparse.Namespace, bbox: str, pbf_url: str | None, dl: Path,
+                  illustration: Path | None) -> list[str]:
+    """create_osm_zim's arguments, but for the tiles; downloads the extract."""
     # --flag=value throughout: a value may start with "-" (a western
     # longitude, a title), which argparse would otherwise read as a flag.
     argv = [f"--bbox={bbox}", f"--name={args.title}", f"--zim-name={args.name}",
@@ -681,7 +611,6 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
             f"--scraper=streetzim v{version()}", "--split-find-chips"]
     if pbf_url:
         argv += ["--pbf", str(fetch(pbf_url, dl / "osm" / _name_of_url(pbf_url)))]
-    argv += tiles_argv
     if args.long_description:
         argv += [f"--long-description={args.long_description}"]
     if args.tags:
@@ -707,7 +636,7 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
             argv += ["--map-zoom", str(round(zoom))]
     if args.debug or args.keep_temp:
         argv += ["--keep-temp"]
-    return argv, {"bbox": bbox, "pbf_url": pbf_url, "mbtiles_cut": cut}
+    return argv
 
 
 def ensure_shapefiles(folder: Path) -> Path:
@@ -784,9 +713,38 @@ def main(argv: list[str] | None = None) -> int:
         from streetzim.progress import StatsFile
         StatsFile(Path(args.stats_filename).resolve()).write(0, 1)
 
+    # The MBTiles cut goes to a fixed folder under --tmp, cleared first (a
+    # killed run may have left one) and removed afterwards, also on failure
+    # or SIGTERM (Zimfarm stops a task with it), unless --debug.
+    work = tmp / "mbtiles-cut"
+    shutil.rmtree(work, ignore_errors=True)
+    previous = _exit_on_sigterm()
     try:
-        build_args, inputs = plan(args, dl, illustration=illustration)
-    except (ValueError, sqlite3.Error) as e:
+        return _build(args, dl, illustration, work, building, final)
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGTERM, previous)
+        if not (args.debug or args.keep_temp):
+            shutil.rmtree(work, ignore_errors=True)
+
+
+def _exit_on_sigterm() -> Any:
+    """Make SIGTERM raise SystemExit, so cleanup code runs; returns the
+    handler it replaced (None off the main thread, where it cannot be set)."""
+    import threading
+    if threading.current_thread() is not threading.main_thread():
+        return None
+
+    def stop(signum: int, frame: object) -> None:
+        raise SystemExit(128 + signum)
+    return signal.signal(signal.SIGTERM, stop)
+
+
+def _build(args: argparse.Namespace, dl: Path, illustration: Path | None, work: Path,
+           building: Path, final: Path) -> int:
+    try:
+        build_args, _ = plan(args, dl, illustration=illustration, work=work)
+    except (ValueError, OSError, sqlite3.Error) as e:
         return _error(e)
 
     # Build next to the target and rename at the end, so a failed or
@@ -805,9 +763,6 @@ def main(argv: list[str] | None = None) -> int:
         create_osm_zim.main(build_args)  # pyright: ignore[reportUnknownMemberType]
     finally:
         os.chdir(cwd)
-        cut = inputs.get("mbtiles_cut")
-        if cut and not (args.debug or args.keep_temp):
-            shutil.rmtree(Path(cut).parent, ignore_errors=True)
     os.replace(building, final)
     print(f"streetzim: wrote {final}")
     return 0

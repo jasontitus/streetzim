@@ -9,14 +9,15 @@ touching). A box across the antimeridian is cut as its two sides
 is one index search on the tiles' (zoom_level, tile_column, tile_row) key,
 so its cost follows the area's tile count, not the file's. OpenFreeMap's
 planet (about 276 million tiles) is cut to a country in the time it takes
-to copy that country's tiles.
+to copy that country's tiles. OpenFreeMap's layout (a tiles view over
+tiles_shallow and tiles_data, each distinct tile stored once) is kept.
+The file's `bounds` metadata is not trusted: an area is always cut.
 
 Stdlib only (streetzim.cli imports it).
 """
 from __future__ import annotations
 
 import math
-import re
 import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
@@ -103,14 +104,21 @@ def source_record(meta: dict[str, str], url: str | None = None) -> dict[str, str
         rec["homepage"] = meta["description"]
     if url:
         rec["url"] = url
-    return {k: v for k, v in rec.items() if v}
+    return {k: clean(v, 200) for k, v in rec.items() if v}
+
+
+def clean(value: str, limit: int = 80) -> str:
+    """A metadata value fit for one line of ZIM metadata: control characters
+    and runs of spaces collapsed, at most `limit` characters."""
+    text = " ".join("".join(c if c.isprintable() else " " for c in value).split())
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "\u2026"
 
 
 def license_text(meta: dict[str, str]) -> str:
     """The License metadata's credit for the tiles."""
-    home = meta.get("description", "")
-    home = f" ({home})" if home.startswith(("http://", "https://")) else ""
-    return f"Vector tiles: {meta.get('name') or 'MBTiles'}{home}"
+    home = clean(meta.get("description", ""), 100)
+    home = f" ({home})" if home.startswith(("http://", "https://")) and " " not in home else ""
+    return f"Vector tiles: {clean(meta.get('name', '')) or 'MBTiles'}{home}"
 
 
 # ---------------------------------------------------------------- the cut
@@ -196,38 +204,34 @@ def tile_touches(bbox: Sequence[float], z: int, x: int, y: int) -> bool:
     return any(c0 <= x <= c1 and r0 <= y <= r1 for c0, c1, r0, r1 in tile_ranges(bbox, z))
 
 
-def _parse_bounds(value: str) -> tuple[float, float, float, float] | None:
-    parts = [p for p in re.split(r"[,\s]+", value.strip()) if p]
-    if len(parts) != 4:
-        return None
-    try:
-        w, s, e, n = (float(p) for p in parts)
-    except ValueError:
-        return None
-    return w, s, e, n
-
-
-def covers_more(meta: dict[str, str], bbox: Sequence[float]) -> bool:
-    """Whether the MBTiles may hold tiles beyond `bbox`: True unless its
-    `bounds` metadata lies inside the box (then every tile touches it)."""
-    bounds = _parse_bounds(meta.get("bounds", ""))
-    if bounds is None:
-        return True
-    w, s, e, n = bounds
-    b = area.normalize(bbox)
-    if not (b[1] <= s and n <= b[3]) or w > e:
-        return True
-    ww, ee = area.unwrap_lon(b, w), area.unwrap_lon(b, e)
-    return not (b[0] <= ww <= ee <= b[2])
-
-
-_SELECT = ("SELECT zoom_level, tile_column, tile_row, tile_data FROM src.tiles "
-           "WHERE zoom_level = ? AND tile_column = ? AND tile_row BETWEEN ? AND ?")
+_WHERE = "WHERE zoom_level = ? AND tile_column = ? AND tile_row BETWEEN ? AND ?"
+_SELECT = "SELECT zoom_level, tile_column, tile_row, tile_data FROM src.tiles " + _WHERE
+# OpenFreeMap's layout: tiles is a view over tiles_shallow (the key and a
+# tile_data_id) and tiles_data (each distinct tile once).
+_SELECT_SHALLOW = ("SELECT zoom_level, tile_column, tile_row, tile_data_id "
+                   "FROM src.tiles_shallow " + _WHERE)
+_COPY_DATA = ("INSERT INTO main.tiles_data SELECT d.tile_data_id, d.tile_data FROM "
+              "(SELECT DISTINCT tile_data_id AS id FROM main.tiles_shallow ORDER BY id) AS s "
+              "CROSS JOIN src.tiles_data AS d ON d.tile_data_id = s.id")
+_DEDUP_SCHEMA = """
+CREATE TABLE tiles_shallow (zoom_level integer, tile_column integer, tile_row integer,
+  tile_data_id integer, primary key(zoom_level, tile_column, tile_row)) without rowid;
+CREATE TABLE tiles_data (tile_data_id integer primary key, tile_data blob);
+CREATE VIEW tiles AS SELECT tiles_shallow.zoom_level AS zoom_level,
+  tiles_shallow.tile_column AS tile_column, tiles_shallow.tile_row AS tile_row,
+  tiles_data.tile_data AS tile_data FROM tiles_shallow
+  JOIN tiles_data ON tiles_shallow.tile_data_id = tiles_data.tile_data_id;
+"""
+_PLAIN_SCHEMA = """
+CREATE TABLE tiles (zoom_level integer, tile_column integer, tile_row integer,
+  tile_data blob, primary key(zoom_level, tile_column, tile_row)) without rowid;
+"""
 
 
 def column_queries(bbox: Sequence[float], min_zoom: int = 0,
                    max_zoom: int = MAX_ZOOM) -> list[tuple[int, int, int, int]]:
-    """(zoom, column, first TMS row, last TMS row) for each column to read."""
+    """(zoom, column, first TMS row, last TMS row) for each column to read,
+    in key order."""
     out: list[tuple[int, int, int, int]] = []
     for z in range(min_zoom, max_zoom + 1):
         n = 1 << z
@@ -236,47 +240,86 @@ def column_queries(bbox: Sequence[float], min_zoom: int = 0,
     return out
 
 
-def query_plan(path: Path) -> list[str]:
-    """SQLite's plan for one column read of the cut (for the docs and tests)."""
-    conn = sqlite3.connect("file::memory:", uri=True)
+def _attach(main_uri: str, src: Path) -> sqlite3.Connection:
+    """A connection to `main_uri` with `src` attached read-only as "src".
+    The new database takes src's text encoding (tilemaker writes UTF-16
+    files, and SQLite attaches only databases of the main one's encoding)."""
+    probe = _connect(src)
     try:
-        conn.execute("ATTACH DATABASE ? AS src", (_ro_uri(path),))
-        return [str(r[-1]) for r in conn.execute("EXPLAIN QUERY PLAN " + _SELECT,
-                                                 (14, 0, 0, 0))]
+        encoding = str(probe.execute("PRAGMA encoding").fetchone()[0])
+    finally:
+        probe.close()
+    conn = sqlite3.connect(main_uri, uri=True)
+    try:
+        conn.execute(f"PRAGMA encoding = '{encoding}'")
+        conn.execute("ATTACH DATABASE ? AS src", (_ro_uri(src),))
+    except BaseException:
+        conn.close()
+        raise
+    return conn
+
+
+def _deduplicated(conn: sqlite3.Connection) -> bool:
+    """Whether the attached `src` has OpenFreeMap's tiles_shallow/tiles_data."""
+    cols: dict[str, set[str]] = {}
+    for t in ("tiles_shallow", "tiles_data"):
+        cols[t] = {str(r[1]) for r in conn.execute(f"PRAGMA src.table_info({t})")}
+    return ({"zoom_level", "tile_column", "tile_row", "tile_data_id"} <= cols["tiles_shallow"]
+            and {"tile_data_id", "tile_data"} <= cols["tiles_data"])
+
+
+def query_plan(path: Path) -> list[str]:
+    """SQLite's plan for the cut's reads of `path` (for the docs and tests):
+    one column's tiles, and for the deduplicated layout the tile data."""
+    conn = _attach("file::memory:", path)
+    try:
+        args = (14, 0, 0, 0)
+        if not _deduplicated(conn):
+            return [str(r[-1]) for r in conn.execute("EXPLAIN QUERY PLAN " + _SELECT, args)]
+        conn.executescript(_DEDUP_SCHEMA)
+        return [str(r[-1]) for q in (_SELECT_SHALLOW, _COPY_DATA)
+                for r in conn.execute("EXPLAIN QUERY PLAN " + q,
+                                      args if q is _SELECT_SHALLOW else ())]
     finally:
         conn.close()
 
 
 def cut(src: Path, dest: Path, bbox: Sequence[float], *, min_zoom: int = 0,
         max_zoom: int = MAX_ZOOM) -> dict[int, int]:
-    """Write to `dest` a plain MBTiles holding the tiles of `src` that touch
-    `bbox`, z`min_zoom` to z`max_zoom`, and its metadata. Returns the tile
-    count per zoom."""
+    """Write to `dest` an MBTiles holding the tiles of `src` that touch
+    `bbox`, z`min_zoom` to z`max_zoom`, and its metadata. OpenFreeMap's
+    layout is kept, with each distinct tile stored once (its ocean and land
+    tiles repeat); other files get a plain tiles table. Returns the tile
+    count per zoom. Nothing is left behind if it fails."""
     dest = Path(dest)
     dest.unlink(missing_ok=True)
     part = dest.with_name(dest.name + ".part")
     part.unlink(missing_ok=True)
-    conn = sqlite3.connect(part.resolve().as_uri(), uri=True)
     counts: dict[int, int] = {}
     try:
-        conn.execute("PRAGMA journal_mode = OFF")
-        conn.execute("PRAGMA synchronous = OFF")
-        conn.execute("ATTACH DATABASE ? AS src", (_ro_uri(src),))
-        conn.execute("CREATE TABLE metadata (name text, value text)")
-        conn.execute("CREATE TABLE tiles (zoom_level integer, tile_column integer, "
-                     "tile_row integer, tile_data blob)")
-        conn.execute("INSERT INTO metadata SELECT name, value FROM src.metadata")
-        queries = column_queries(bbox, min_zoom, max_zoom)
-        for z in range(min_zoom, max_zoom + 1):
-            before = conn.total_changes
-            conn.executemany("INSERT INTO main.tiles " + _SELECT,
-                             [q for q in queries if q[0] == z])
-            counts[z] = conn.total_changes - before
-        conn.execute("CREATE UNIQUE INDEX name ON metadata (name)")
-        conn.execute("CREATE UNIQUE INDEX tile_index ON tiles "
-                     "(zoom_level, tile_column, tile_row)")
-        conn.commit()
-    finally:
-        conn.close()
-    part.replace(dest)
+        conn = _attach(part.resolve().as_uri(), src)
+        try:
+            conn.execute("PRAGMA journal_mode = OFF")
+            conn.execute("PRAGMA synchronous = OFF")
+            dedup = _deduplicated(conn)
+            conn.executescript(_DEDUP_SCHEMA if dedup else _PLAIN_SCHEMA)
+            conn.execute("CREATE TABLE metadata (name text, value text)")
+            conn.execute("INSERT INTO metadata SELECT name, value FROM src.metadata")
+            conn.execute("CREATE UNIQUE INDEX name ON metadata (name)")
+            insert = ("INSERT INTO main.tiles_shallow " + _SELECT_SHALLOW if dedup
+                      else "INSERT INTO main.tiles " + _SELECT)
+            queries = column_queries(bbox, min_zoom, max_zoom)
+            for z in range(min_zoom, max_zoom + 1):
+                before = conn.total_changes
+                conn.executemany(insert, [q for q in queries if q[0] == z])
+                counts[z] = conn.total_changes - before
+            if dedup:
+                conn.execute(_COPY_DATA)
+            conn.commit()
+        finally:
+            conn.close()
+        part.replace(dest)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
     return counts

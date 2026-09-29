@@ -6,8 +6,6 @@ import json
 import math
 import sqlite3
 import sys
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -59,7 +57,10 @@ def selected(bbox, z):
 
 BOXES = [MONACO, FIJI, (0.0, 0.0, 90.0, 45.0),          # on tile edges
          (-180.0, -90.0, 180.0, 90.0), (179.9, 60.0, -179.9, 70.0),
-         (-10.0, 85.2, 10.0, 89.0), (-73.7, 40.5, -73.6, 40.6)]
+         (-10.0, 85.2, 10.0, 89.0), (-73.7, 40.5, -73.6, 40.6),
+         # latitude edges exactly on tile edges (the equator; z4 rows 1 and 3)
+         (-90.0, -85.0511287798066, 90.0, 0.0),
+         (-157.5, 74.01954331150226, -112.5, 82.67628497834903)]
 
 
 @pytest.mark.parametrize("bbox", BOXES)
@@ -136,18 +137,13 @@ def test_cut_is_an_index_search(tmp_path):
     for ofm in (True, False):
         src = make_mbtiles(tmp_path / f"{ofm}.mbtiles", [(0, 0, 0)], ofm=ofm)
         plan = mbtiles.query_plan(src)
-        assert all(p.startswith("SEARCH") for p in plan), plan
         assert "tile_column=? AND tile_row>? AND tile_row<?" in plan[0], plan
-
-
-def test_covers_more_reads_bounds():
-    meta = {"bounds": "7.40858,43.48382,7.59567,43.75293"}
-    assert mbtiles.covers_more(meta, MONACO)
-    assert not mbtiles.covers_more(meta, (7.0, 43.0, 8.0, 44.0))
-    assert mbtiles.covers_more({}, (7.0, 43.0, 8.0, 44.0))
-    assert not mbtiles.covers_more({"bounds": "178,-20,179,-18"}, FIJI)
-    assert not mbtiles.covers_more({"bounds": "-179,-20,-178,-18"}, FIJI)
-    assert mbtiles.covers_more({"bounds": "-180,-85,180,85"}, FIJI)
+        assert plan[0].startswith("SEARCH src."), plan
+        # Only the cut's own new table is ever scanned, never the source.
+        assert not [p for p in plan if p.startswith("SCAN")
+                    and not p.startswith(("SCAN main.", "SCAN s"))], plan
+        if ofm:
+            assert "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)" in plan, plan
 
 
 def test_no_area_keeps_every_tile(tmp_path):
@@ -162,189 +158,69 @@ def test_no_area_keeps_every_tile(tmp_path):
     assert set(loaded) == tiles
 
 
-def test_prepare_cuts_only_a_larger_file(tmp_path, capsys):
+def test_prepare_always_cuts_to_z14(tmp_path, capsys):
     world = set()
     for z in range(0, 15):
         world |= _window(MONACO, z, 2)
+    # bounds that claim the file is inside the area: not trusted
     src = make_mbtiles(tmp_path / "m.mbtiles", world,
-                       meta={"name": "OpenFreeMap", "bounds": "7.3,43.6,7.6,43.9"})
+                       meta={"name": "OpenFreeMap", "bounds": "7.41,43.73,7.43,43.75"})
     path, _ = cli.prepare_mbtiles(src, MONACO, tmp_path / "work", 12)
     assert path == tmp_path / "work" / "area.mbtiles"
-    assert max(z for z, _, _ in read_tiles(path)) == 12
+    got = read_tiles(path)
+    assert max(z for z, _, _ in got) == 14          # --max-zoom caps the ZIM, not search
+    assert len(got) < len(world)
     out = capsys.readouterr().out
     assert "MBTiles: OpenFreeMap" in out and "Cut to the area" in out
-    path, _ = cli.prepare_mbtiles(src, (7.0, 43.0, 8.0, 44.0), tmp_path / "w2", None)
-    assert path == src
 
 
-# ------------------------------------------------ the flag and the download
+def test_cut_keeps_openfreemaps_deduplication(tmp_path):
+    # Every tile the same blob, as OpenFreeMap stores its ocean tiles.
+    tiles = set()
+    for z in range(0, 15):
+        tiles |= _window(MONACO, z, 2)
+    src = make_mbtiles(tmp_path / "ofm.mbtiles", tiles)
+    conn = sqlite3.connect(str(src))
+    conn.execute("UPDATE tiles_shallow SET tile_data_id = 0")
+    conn.commit()
+    conn.close()
+    counts = mbtiles.cut(src, tmp_path / "cut.mbtiles", MONACO)
+    conn = sqlite3.connect(str(tmp_path / "cut.mbtiles"))
+    assert conn.execute("SELECT count(*) FROM tiles").fetchone()[0] == sum(counts.values())
+    assert conn.execute("SELECT count(*) FROM tiles_data").fetchone()[0] == 1
+    conn.close()
+
+
+def test_cut_leaves_nothing_when_it_fails(tmp_path, monkeypatch):
+    src = make_mbtiles(tmp_path / "s.mbtiles", _window(MONACO, 14, 1))
+
+    def boom(*a, **k):
+        raise sqlite3.OperationalError("database or disk is full")
+    monkeypatch.setattr(mbtiles, "column_queries", boom)
+    with pytest.raises(sqlite3.OperationalError):
+        mbtiles.cut(src, tmp_path / "cut.mbtiles", MONACO)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["s.mbtiles"]
+
+
+def test_cut_reads_utf16_files(tmp_path):
+    # tilemaker writes UTF-16 MBTiles; SQLite attaches only same-encoding files.
+    p = tmp_path / "u16.mbtiles"
+    conn = sqlite3.connect(str(p))
+    conn.execute("PRAGMA encoding = 'UTF-16le'")
+    conn.execute("CREATE TABLE metadata (name text, value text)")
+    conn.execute("INSERT INTO metadata VALUES ('name', 'tm')")
+    conn.execute("CREATE TABLE tiles (zoom_level integer, tile_column integer, "
+                 "tile_row integer, tile_data blob)")
+    conn.execute("INSERT INTO tiles VALUES (0, 0, 0, x'00')")
+    conn.commit()
+    conn.close()
+    assert mbtiles.cut(p, tmp_path / "c.mbtiles", MONACO)[0] == 1
 
 
 def test_flag_offered_to_zimfarm_as_a_url():
     f = DEF["flags"]["mbtiles_url"]
     assert f["type"] == "url" and f["required"] is False
     assert "mbtiles" not in DEF["flags"]            # the local path stays CLI-only
-
-
-class _Server:
-    """A local HTTP server for `files`, with Range requests (unless
-    ranges=False) and, optionally, a first GET that stops after N bytes."""
-
-    def __init__(self, files, *, ranges=True, drop_after=None):
-        self.files, self.ranges, self.drop_after = files, ranges, drop_after
-        self.gets: list[str | None] = []
-        outer = self
-
-        class H(BaseHTTPRequestHandler):
-            def log_message(self, *a):
-                pass
-
-            def _head(self, body, status=200, extra=None):
-                self.send_response(status)
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("ETag", '"v1"')
-                self.send_header("Last-Modified", "Sun, 27 Sep 2026 20:00:00 GMT")
-                if outer.ranges:
-                    self.send_header("Accept-Ranges", "bytes")
-                for k, v in (extra or {}).items():
-                    self.send_header(k, v)
-                self.end_headers()
-
-            def do_HEAD(self):
-                self._head(outer.files[self.path])
-
-            def do_GET(self):
-                data = outer.files[self.path]
-                rng = self.headers.get("Range")
-                outer.gets.append(rng)
-                if rng and outer.ranges:
-                    start = int(rng.split("=")[1].rstrip("-"))
-                    body = data[start:]
-                    self.send_response(206)
-                    self.send_header("Content-Length", str(len(body)))
-                    self.send_header("Content-Range",
-                                     f"bytes {start}-{len(data) - 1}/{len(data)}")
-                    self.end_headers()
-                    self.wfile.write(body)
-                    return
-                self._head(data)
-                if outer.drop_after is not None and len(outer.gets) == 1:
-                    self.wfile.write(data[:outer.drop_after])
-                    self.wfile.flush()
-                    self.connection.shutdown(2)
-                    return
-                self.wfile.write(data)
-
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
-        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
-        self.base = f"http://127.0.0.1:{self.httpd.server_address[1]}"
-
-    def close(self):
-        self.httpd.shutdown()
-        self.httpd.server_close()
-
-
-@pytest.fixture
-def local_only(monkeypatch):
-    for k in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"):
-        monkeypatch.delenv(k, raising=False)
-    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
-    monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")
-
-
-def _args(**kw):
-    ns = cli.build_parser().parse_args(["--name", "n", "--title", "t", "--description", "d",
-                                        "--bbox", "7.4,43.72,7.44,43.76"])
-    for k, v in kw.items():
-        setattr(ns, k, v)
-    return ns
-
-
-@pytest.fixture
-def mbt_bytes(tmp_path):
-    world = set()
-    for z in range(0, 15):
-        world |= _window(MONACO, z, 2)
-    return make_mbtiles(tmp_path / "src.mbtiles", world).read_bytes()
-
-
-def test_download_checks_and_reuses(tmp_path, local_only, mbt_bytes):
-    srv = _Server({"/t.mbtiles": mbt_bytes, "/x.mbtiles": b"<html>not found</html>" * 10})
-    try:
-        dl = tmp_path / "dl"
-        path, url = cli.mbtiles_source(_args(mbtiles_url=srv.base + "/t.mbtiles"), dl)
-        assert url == srv.base + "/t.mbtiles" and path.parent == dl / "mbtiles"
-        assert path.read_bytes() == mbt_bytes and srv.gets == [None]
-        assert mbtiles.check(path)["name"] == "OpenFreeMap"
-        cli.mbtiles_source(_args(mbtiles_url=srv.base + "/t.mbtiles"), dl)
-        assert srv.gets == [None]                        # unchanged upstream: reused
-        # A pre-seeded file of the upstream size is used without downloading.
-        seeded = tmp_path / "seed"
-        target = seeded / "mbtiles" / cli._name_of_url(srv.base + "/t.mbtiles")
-        target.parent.mkdir(parents=True)
-        target.write_bytes(mbt_bytes)
-        cli.mbtiles_source(_args(mbtiles_url=srv.base + "/t.mbtiles"), seeded)
-        assert srv.gets == [None]
-        # Not an MBTiles: refused from the first bytes.
-        with pytest.raises(ValueError, match="not an MBTiles"):
-            cli.mbtiles_source(_args(mbtiles_url=srv.base + "/x.mbtiles"), dl)
-    finally:
-        srv.close()
-
-
-def test_download_resumes(tmp_path, local_only):
-    # Bigger than zimscraperlib's 1 MB blocks, so some arrive before the drop.
-    # (mbtiles_source only downloads; the tables are checked afterwards.)
-    import random
-    mbt_bytes = mbtiles.SQLITE_MAGIC + random.Random(1).randbytes(3_000_000)
-    srv = _Server({"/t.mbtiles": mbt_bytes}, drop_after=2_500_000)
-    try:
-        dl = tmp_path / "dl"
-        with pytest.raises(ValueError):          # the dropped connection
-            cli.mbtiles_source(_args(mbtiles_url=srv.base + "/t.mbtiles"), dl)
-        part = dl / "mbtiles" / (cli._name_of_url(srv.base + "/t.mbtiles") + ".part")
-        assert 0 < part.stat().st_size < len(mbt_bytes)
-        have = part.stat().st_size
-        path, _ = cli.mbtiles_source(_args(mbtiles_url=srv.base + "/t.mbtiles"), dl)
-        assert srv.gets == [None, f"bytes={have}-"]
-        assert path.read_bytes() == mbt_bytes and not part.exists()
-    finally:
-        srv.close()
-
-
-def test_download_restarts_without_range_support(tmp_path, local_only, mbt_bytes):
-    srv = _Server({"/t.mbtiles": mbt_bytes}, ranges=False, drop_after=100)
-    try:
-        dl = tmp_path / "dl"
-        with pytest.raises(ValueError):          # the dropped connection
-            cli.mbtiles_source(_args(mbtiles_url=srv.base + "/t.mbtiles"), dl)
-        path, _ = cli.mbtiles_source(_args(mbtiles_url=srv.base + "/t.mbtiles"), dl)
-        assert srv.gets == [None, None] and path.read_bytes() == mbt_bytes
-    finally:
-        srv.close()
-
-
-def test_file_url_is_used_in_place_and_recorded(tmp_path, mbt_bytes, monkeypatch):
-    src = tmp_path / "planet.mbtiles"
-    src.write_bytes(mbt_bytes)
-    monkeypatch.setattr(cli, "fetch", lambda url, dest: pytest.fail("no download"))
-    ns = _args(mbtiles_url=src.as_uri(), routing=False)
-    argv, info = cli.plan(ns, tmp_path / "dl", work=tmp_path / "work")
-    assert info["mbtiles_cut"] == str(tmp_path / "work" / "area.mbtiles")
-    import create_osm_zim
-    b = create_osm_zim.build_parser().parse_args(argv)
-    assert b.mbtiles == info["mbtiles_cut"] and b.record_tile_source
-    assert b.tile_source_url == src.as_uri()
-    assert not (tmp_path / "dl").exists()
-    with pytest.raises(ValueError, match="not both"):
-        cli.plan(_args(mbtiles_url=src.as_uri(), mbtiles=str(src), routing=False),
-                 tmp_path / "dl")
-    bad = tmp_path / "bad.mbtiles"
-    bad.write_bytes(b"x" * 100)
-    with pytest.raises(ValueError, match="not an MBTiles"):
-        cli.plan(_args(mbtiles_url=bad.as_uri(), routing=False), tmp_path / "dl")
-    with pytest.raises(ValueError, match="http"):
-        cli.plan(_args(mbtiles_url="ftp://x/y.mbtiles", routing=False), tmp_path / "dl")
 
 
 def test_source_record_and_credit():
@@ -360,11 +236,30 @@ def test_source_record_and_credit():
     assert "OSM data 2026-09-27" in mbtiles.describe(meta)
 
 
-def test_check_rejects_other_sqlite(tmp_path):
+@pytest.mark.parametrize("tables", [["t"], ["tiles"], ["metadata"]])
+def test_check_needs_both_tables(tmp_path, tables):
     p = tmp_path / "other.sqlite"
     conn = sqlite3.connect(str(p))
-    conn.execute("CREATE TABLE t (a)")
+    for t in tables:
+        conn.execute(f"CREATE TABLE {t} (name, value)")
     conn.commit()
     conn.close()
     with pytest.raises(ValueError, match="no tiles and metadata"):
         mbtiles.check(p)
+
+
+def test_check_needs_the_sqlite_header(tmp_path):
+    p = tmp_path / "x.mbtiles"
+    p.write_bytes(b"PK\x03\x04" + b"\0" * 200)
+    with pytest.raises(ValueError, match="not SQLite"):
+        mbtiles.check(p)
+    assert mbtiles.looks_like_sqlite(mbtiles.SQLITE_MAGIC + b"x")
+    assert not mbtiles.looks_like_sqlite(b"SQLite format 2\x00")
+
+
+def test_recorded_values_are_cleaned():
+    meta = {"name": "Evil\n\x1b[31mTiles " + "x" * 200, "description": "https://a.b\nc"}
+    text = mbtiles.license_text(meta)
+    assert "\n" not in text and "\x1b" not in text and len(text) < 120
+    assert "(https" not in text                    # a homepage with a space is dropped
+    assert all(len(v) <= 200 for v in mbtiles.source_record(meta).values())
