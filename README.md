@@ -221,10 +221,3 @@ speed-ups, both switched off by default:
 Both produce ordinary ZIMs, the same as libzim's. Neither is needed for
 anything in this README. [docs/zim-builder-rust.md](docs/zim-builder-rust.md)
 explains when they help.
-
-## Legacy: raster (Leaflet) variant
-
-`create_osm_zim_leaflet.py` is the original experiment that renders the same
-vector tiles to PNG with Pillow and shows them with Leaflet, for readers
-without WebGL. It is not used by any build, has far fewer features, and is
-kept only for comparison.
