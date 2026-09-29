@@ -29,6 +29,7 @@ from streetzim.tiles import (
     estimate_tile_total,
     iter_tiles_from_mbtiles,
 )
+from streetzim.tile_alias import MAX_ALIAS_BYTES, TileAliaser
 
 
 def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
@@ -1003,6 +1004,10 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
     # still take that path, so the guard must stay for them.
     _libzim_backpressure = (zim_builder != "rust")
     backpressure_sleep = 0.0
+    # Identical tiles (open sea, tiles inside one landcover polygon) are
+    # stored once; tile_source yields in (z, x, y) order, so the first-seen
+    # target, and the ZIM, are the same on every build.
+    aliaser = TileAliaser(creator)
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
         while True:
             batch = list(itertools.islice(tile_source, batch_size))
@@ -1024,11 +1029,19 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
                     tiles_skipped_empty += 1
                     continue
                 item_start = time.time() if _libzim_backpressure else 0.0
-                creator.add_item(MapItem(
-                    f"tiles/{z}/{x}/{y}.pbf", f"Tile {z}/{x}/{y}",
-                    "application/x-protobuf",
-                    tile_data,
-                ))
+                tile_path = f"tiles/{z}/{x}/{y}.pbf"
+                alias_of = aliaser.target_for(tile_path, tile_data)
+                if alias_of is not None:
+                    # Same bytes as an earlier tile: a second dirent on its
+                    # blob (see streetzim/tile_alias.py).
+                    aliaser.add_alias(tile_path, f"Tile {z}/{x}/{y}",
+                                      alias_of, len(tile_data))
+                else:
+                    creator.add_item(MapItem(
+                        tile_path, f"Tile {z}/{x}/{y}",
+                        "application/x-protobuf",
+                        tile_data,
+                    ))
                 tiles_added += 1
                 _watchdog_tile_count[0] = tiles_added
                 if _libzim_backpressure:
@@ -1072,11 +1085,13 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
             f"re-run tilemaker before packaging")
     skip_str = (f" (skipped {tiles_skipped_empty} empty)"
                 if tiles_skipped_empty else "")
-    print(f"\r    Added {tiles_added} tiles in {elapsed:.0f}s ({rate_str}){skip_str}                ", flush=True)
+    print(f"\r    Added {tiles_added} tiles in {elapsed:.0f}s ({rate_str}){skip_str}; "
+          f"{aliaser.summary()}                ", flush=True)
     PHASE_TIMER.record_subphase(
         "zim-pack: vector tiles", elapsed,
         note=f"{tiles_added:,} tiles ({rate_str})"
-             + (f", skipped {tiles_skipped_empty} empty" if tiles_skipped_empty else ""))
+             + (f", skipped {tiles_skipped_empty} empty" if tiles_skipped_empty else "")
+             + (f", {aliaser.aliases:,} aliased" if aliaser.aliases else ""))
     _watchdog_stop.set()  # stop watchdog after tiles
 
 
@@ -1100,6 +1115,7 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
         unreadable = 0
         suffix = f".{ext}"
         strip_len = len(suffix)
+        aliaser = TileAliaser(creator)
         for z in range(0, max_zoom + 1):
             z_dir = os.path.join(source_dir, str(z))
             if not os.path.isdir(z_dir):
@@ -1112,7 +1128,9 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
                     x = int(x_name)
                 except ValueError:
                     continue
-                for fname in os.listdir(x_dir):
+                # Sorted: alias targets (first-seen) must not depend on
+                # the filesystem's directory order.
+                for fname in sorted(os.listdir(x_dir)):
                     if not fname.endswith(suffix):
                         continue
                     try:
@@ -1131,7 +1149,8 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
                     # tiles cached empty on 2026-04-13. The vector-tile
                     # loop already drops empty tiles; do the same here.
                     try:
-                        if os.path.getsize(fpath) == 0:
+                        fsize = os.path.getsize(fpath)
+                        if fsize == 0:
                             empty += 1
                             continue
                     except OSError:
@@ -1140,18 +1159,29 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
                         unreadable += 1
                         continue
                     zim_path = f"{zim_prefix}/{z}/{x_name}/{fname}"
-                    creator.add_item(MapItem(
-                        zim_path, f"{label} {z}/{x_name}/{fname}",
-                        mimetype,
-                        fpath,
-                        compress=False,
-                    ))
+                    title = f"{label} {z}/{x_name}/{fname}"
                     count += 1
+                    # Raster tiles sit in uncompressed clusters, so a repeat
+                    # (sea, flat terrain) costs its full size unless aliased.
+                    alias_of = None
+                    if aliaser.enabled and fsize <= MAX_ALIAS_BYTES:
+                        with open(fpath, "rb") as fh:
+                            alias_of = aliaser.target_for(zim_path, fh.read())
+                    if alias_of is not None:
+                        aliaser.add_alias(zim_path, title, alias_of, fsize)
+                    else:
+                        creator.add_item(MapItem(
+                            zim_path, title,
+                            mimetype,
+                            fpath,
+                            compress=False,
+                        ))
                     if count % 2000 == 0:
                         print(f"\r    Added {count} {label.lower()} tiles...", end="", flush=True)
         elapsed = time.time() - _t0
         rate = (count / elapsed) if elapsed > 0 else 0
-        print(f"\r    Added {count} {label.lower()} tiles in {elapsed:.0f}s ({rate:.0f}/s)" +
+        print(f"\r    Added {count} {label.lower()} tiles in {elapsed:.0f}s ({rate:.0f}/s); "
+              f"{aliaser.summary()}" +
               (f" (skipped {skipped} outside bbox)" if skipped else "") +
               (f" (dropped {empty} zero-byte cache files)" if empty else "") +
               (f" (skipped {unreadable} unreadable files)" if unreadable else ""),
@@ -1164,7 +1194,8 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
                  # check (it can only count entries that exist), so record
                  # them where the build summary keeps them.
                  + (f", dropped {empty} zero-byte cache files" if empty else "")
-                 + (f", {unreadable} unreadable" if unreadable else ""))
+                 + (f", {unreadable} unreadable" if unreadable else "")
+                 + (f", {aliaser.aliases:,} aliased" if aliaser.aliases else ""))
         return count
 
     # Add satellite tiles if provided
