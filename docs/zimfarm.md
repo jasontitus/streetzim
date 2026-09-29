@@ -77,7 +77,8 @@ accepted by `streetzim` (`tests/test_offliner_definition.py`).
 
 Measured with `tools/measure_build.py` on a 4-core, 15 GB machine,
 default profile (tilemaker, search, chips, routing), OSM extracts from
-openstreetmap.fr on 2026-09-28, Python 3.11 outside Docker. Memory is PSS
+openstreetmap.fr on 2026-09-28 (the Netherlands: 2026-09-29), Python
+3.11 outside Docker. Memory is PSS
 summed over every process of the build (RSS, which counts shared pages
 once per worker, in brackets); disk is the temp and output folders (the
 downloaded extract is not counted).
@@ -86,13 +87,23 @@ downloaded extract is not counted).
 |---|---|---|---|---|---|---|
 | Luxembourg | 56 MB | 3.2 min | 6.7 min | 4.0 GB (4.0) | 0.35 GB | 55 MB |
 | Switzerland | 679 MB | 70 min | 195 min | 4.6 GB (6.3) | 4.4 GB | 654 MB |
+| Netherlands | 1.63 GB | 92 min | 162 min | 10.8 GB (11.2) | 11.0 GB | 1.22 GB |
 
 The Switzerland run shared the machine with low-priority test builds, so
 its wall time is an upper bound. 49 of its 70 minutes are the search step
 (feature extraction from the tiles, location labels for every named
 feature, and addresses from the extract); the next largest are writing
-the ZIM (11 min) and the routing graph (5 min). The Netherlands (1.6 GB
-extract) is being measured.
+the ZIM (11 min) and the routing graph (5 min).
+
+The Netherlands had the machine to itself. Its time splits between the
+search step (40 min) and writing the ZIM (34 min); tiles take 8 min and
+routing 7. Writing the ZIM is also where memory and disk peak (10.8 GB
+PSS, 11.0 GB): the search step peaks at 5.4 GB PSS (11.2 GB RSS, shared
+pages counted per worker) and 8.1 GB of disk. Two earlier runs with less
+free disk failed with ENOSPC while writing the ZIM's search index, so for
+a region this size
+give the task at least 12 GB of RAM and 15 GB of disk, besides the extract
+and shapefiles.
 
 ### Downloads per task
 
