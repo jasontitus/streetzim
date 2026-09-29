@@ -12,7 +12,8 @@ What is used from zimscraperlib:
   zimscraperlib.zim.metadata (cleanup, grapheme limits, tag de-duplication);
 - the illustration: format detection, SVG to PNG, conversion, the "cover"
   resize to 48x48, and the final 48x48 PNG check;
-- downloads: stream_file, with its retrying session;
+- downloads: stream_file, and its retrying session for the resumable
+  MBTiles download (streetzim/download.py);
 - the output folder check: validate_file_creatable.
 
 The ZIM itself is still written by create_osm_zim (python-libzim directly,
@@ -23,9 +24,11 @@ from __future__ import annotations
 import io
 import zlib
 from pathlib import Path
+from typing import Any
 
 try:
-    from zimscraperlib.download import stream_file  # pyright: ignore[reportMissingImports]
+    from zimscraperlib.download import (  # pyright: ignore[reportMissingImports]
+        get_session, stream_file)
     from zimscraperlib.image.conversion import (  # pyright: ignore[reportMissingImports]
         convert_image, convert_svg2png)
     from zimscraperlib.image.probing import format_for  # pyright: ignore[reportMissingImports]
@@ -144,6 +147,12 @@ def download(url: str, *, user_agent: str, dest: Path | None = None) -> bytes | 
     stream_file(url, byte_stream=buf, headers=headers, session=_quick_session(),
                 timeout=30)
     return buf.getvalue()
+
+
+def session() -> Any:
+    """zimscraperlib's retrying requests session (5 retries, backoff), for
+    downloads streamed by the caller (streetzim/download.py)."""
+    return get_session(5)
 
 
 def check_output(folder: Path, filename: str) -> None:

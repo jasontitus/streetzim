@@ -591,6 +591,21 @@ if (!window.__szUnsupported) fetchConfig(1)
       var overtureSection = document.getElementById('attr-overture-section');
       if (overtureSection) overtureSection.style.display = '';
     }
+    // Ready-made tiles (streetzim --mbtiles-url): whose they are, as
+    // map-config.json's tileSource records them. Text only, never HTML.
+    var ts = config.tileSource;
+    if (ts && typeof ts.name === 'string' && ts.name) {
+      var tsSection = document.getElementById('attr-tiles-section');
+      var tsName = document.getElementById('attr-tiles-name');
+      var tsMeta = document.getElementById('attr-tiles-meta');
+      if (tsSection && tsName && tsMeta) {
+        tsName.textContent = ts.name;
+        tsMeta.textContent = [ts.version && 'version ' + ts.version,
+                              ts.osmDate && 'OSM data ' + ts.osmDate,
+                              ts.homepage].filter(Boolean).join(' \u2014 ');
+        tsSection.style.display = '';
+      }
+    }
     // Same for the other optional layers: a ZIM without satellite imagery
     // must not show the imagery's non-commercial licence as if it applied.
     [['attr-satellite-section', config.hasSatellite],

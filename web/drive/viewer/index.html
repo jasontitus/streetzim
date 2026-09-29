@@ -1430,6 +1430,11 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
       <p>OpenMapTiles</p>
       <p class="license">Creative Commons Attribution 4.0 (CC-BY 4.0) &mdash; openmaptiles.org</p>
     </section>
+    <section id="attr-tiles-section" style="display:none;">
+      <h3>Vector Tiles</h3>
+      <p id="attr-tiles-name"></p>
+      <p class="license" id="attr-tiles-meta"></p>
+    </section>
     <section id="attr-satellite-section" style="display:none;">
       <h3>Satellite Imagery</h3>
       <p id="attr-satellite-by">Sentinel-2 Cloudless by EOX IT Services GmbH</p>
@@ -2503,6 +2508,21 @@ if (!window.__szUnsupported) fetchConfig(1)
     if (config.hasOvertureAddresses) {
       var overtureSection = document.getElementById('attr-overture-section');
       if (overtureSection) overtureSection.style.display = '';
+    }
+    // Ready-made tiles (streetzim --mbtiles-url): whose they are, as
+    // map-config.json's tileSource records them. Text only, never HTML.
+    var ts = config.tileSource;
+    if (ts && typeof ts.name === 'string' && ts.name) {
+      var tsSection = document.getElementById('attr-tiles-section');
+      var tsName = document.getElementById('attr-tiles-name');
+      var tsMeta = document.getElementById('attr-tiles-meta');
+      if (tsSection && tsName && tsMeta) {
+        tsName.textContent = ts.name;
+        tsMeta.textContent = [ts.version && 'version ' + ts.version,
+                              ts.osmDate && 'OSM data ' + ts.osmDate,
+                              ts.homepage].filter(Boolean).join(' \u2014 ');
+        tsSection.style.display = '';
+      }
     }
     // Same for the other optional layers: a ZIM without satellite imagery
     // must not show the imagery's non-commercial licence as if it applied.
