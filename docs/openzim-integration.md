@@ -4,8 +4,10 @@ openZIM plans to keep [openzim/maps](https://github.com/openzim/maps)
 (`maps2zim`) as its scraper and add StreetZim's features to it
 ([review](https://github.com/openzim/maps/blob/763a9bea611e2a64da90146636ce821c5e40d253/Streetzim%20vs%20Maps.md),
 [our first response](openzim-review-response.md)). This page is a concrete plan
-for doing that. It is based on maps2zim at `707fc44` (2026-09) and StreetZim
-at this commit. Everything here uses libzim / zimscraperlib and the standard
+for doing that. Our own proposal has since changed: we now suggest openZIM
+adopt StreetZim as its maps scraper after a Zimfarm pilot. This page stays
+as the plan if openZIM keeps openzim/maps. It is based on maps2zim at
+`707fc44` (2026-09) and StreetZim at this commit. Everything here uses libzim / zimscraperlib and the standard
 openZIM tools.
 
 ## The two pipelines side by side
@@ -52,7 +54,8 @@ reads the MBTiles it already has.
 
 ## Options
 
-1. **Port the code into maps2zim** (recommended). MIT code may be
+1. **Port the code into maps2zim** (our recommendation if openzim/maps
+   stays the scraper). MIT code may be
    included in GPL-3.0 maps2zim; keep the MIT notice in each ported file.
    The ported code follows maps2zim's conventions: pydantic models, `Context`,
    zimscraperlib `add_item_for`, pyright strict, and tests in their tree. The
