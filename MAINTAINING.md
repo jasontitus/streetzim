@@ -149,6 +149,8 @@ Rules that keep published ZIMs working:
 | variable | effect |
 |---|---|
 | `STREETZIM_REQUIRE_SHAPEFILES=1` | fail the build if the coastline / Natural Earth shapefiles are missing (otherwise a warning) |
+| `STREETZIM_REQUIRE_WIKI=1` | fail the build when Wikipedia articles (`--bundle-wiki-articles`, online) or Wikidata titles (`--resolve-wikidata-titles`) could not be fetched because of rate limits, 5xx or network errors (otherwise a WARNING with the count; those are never cached as misses, so the next build fetches them) |
+| `STREETZIM_WIKI_CONTACT` | optional: an operator address appended to the Wikipedia/Wikidata User-Agent (`cloud/wikimedia_http.py`); the default names the project's issue tracker |
 | `STREETZIM_REQUIRE_ZIMCHECK=1` | `validate_zim.py` fails when `zimcheck` is not installed (otherwise skipped) |
 | `STREETZIM_SKIP_ZIMCHECK=1` | skip zimcheck in the validator |
 | `ZIMRU_ZIMCHECK` | optional: a faster drop-in `zimcheck` for very large ZIMs; the standard `zimcheck` is used otherwise |

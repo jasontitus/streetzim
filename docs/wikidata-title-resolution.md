@@ -88,8 +88,10 @@ opt-in could add it later — high record coverage, ~hundreds of articles).
 1. **Wikidata Action API (default).** `wbgetentities?props=sitelinks&
    sitefilter=enwiki`, 50 ids/request, results cached to disk (hits *and*
    known-misses, so rebuilds never re-query). ~`distinct_q / 50` requests
-   (≈178 for CA). Public data only; User-Agent identifies the project by
-   its public repo URL — no personal contact info.
+   (≈178 for CA), 1 s apart, honouring `Retry-After`
+   (`cloud/wikimedia_http.py`). A 429/5xx/network failure caches nothing.
+   Public data only; the User-Agent names the project's public issue
+   tracker (`STREETZIM_WIKI_CONTACT` adds an operator address at run time).
 2. **Offline `Q-ID<TAB>Title` map (air-gapped builds).** Pass
    `--wikidata-title-map`. Build one from the enwiki `page` +
    `page_props` (`pp_propname='wikibase_item'`) SQL dumps, or a tool like
@@ -161,8 +163,13 @@ Sources + caching:
   fast, no crawl. Use a FULL enwiki ZIM; a `top`/subset misses long-tail
   POIs.
 - **Wikipedia API** (default) — cached to `wiki_articles_cache/` (repo-
-  relative, like `wikidata_cache/`; gitignored). Both hits and known-misses
-  are cached, so **a rebuild never re-crawls**.
+  relative, like `wikidata_cache/`; gitignored). Hits (`<sha1>.html`) and
+  definitive misses (`<sha1>.miss`: no such page, no text, with the reason)
+  are cached, so **a rebuild never re-crawls**. Requests are 1 s apart and
+  honour `Retry-After`; a 429, 5xx or network failure is never cached, and
+  the build ends with a WARNING counting those articles
+  (`STREETZIM_REQUIRE_WIKI=1` makes it fail). An empty `<sha1>.html` is the
+  old miss marker, which a 429 could also leave; each is re-checked once.
 
 ```sh
 # Offline (fast) — read articles from a local enwiki ZIM:

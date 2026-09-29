@@ -21,31 +21,60 @@ imports) with no enwiki article — nothing to link to. See
 ``docs/wikidata-title-resolution.md``.
 
 Privacy: public data only (Q-IDs + article titles). The User-Agent
-identifies the project by its PUBLIC repo URL — never personal contact
-info — per the repo's outbound-HTTP convention.
+identifies the project by its PUBLIC issue tracker (Wikimedia's policy
+wants a way to reach the operator; STREETZIM_WIKI_CONTACT can add one at
+run time, never in the repo).
+
+Only Wikidata's answers are cached: a sitelink, or "" when the item has no
+enwiki article or does not exist. A 429, 5xx or network failure (retried
+with Retry-After honoured) caches nothing, so the next build asks again.
+This cache never held rate-limit misses (a failed batch always raised
+before its Q-IDs were written). It could hold misses from a batch Wikidata
+refused because of one malformed id; `_heal` re-checks those.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import sys
-import time
 import urllib.error
 import urllib.parse
-import urllib.request
 from collections.abc import Callable, Iterable
 
-USER_AGENT = "streetzim-wikidata/1.0 (+https://github.com/jasontitus/streetzim)"
+from cloud.wikimedia_http import (
+    Pacer,
+    TransientError,
+    get_json,
+    require_complete,
+)
+from cloud.wikimedia_http import user_agent as _user_agent
+
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 ENWIKI = "enwiki"
 BATCH = 50  # wbgetentities accepts up to 50 ids per request
 
 
+# API error codes that come back with HTTP 200 but say nothing about the
+# Q-IDs (a lagged or read-only replica, a throttle). Any other `error` body
+# (e.g. no-such-entity for a malformed id) is not an answer per Q-ID either,
+# so neither kind is ever cached as "no article".
+_TRANSIENT_API_ERRORS = frozenset({"maxlag", "ratelimited", "readonly"})
+_QID_RE = re.compile(r"Q[1-9][0-9]*")
+
+
+class BatchError(Exception):
+    """wbgetentities refused the whole batch (an `error` body)."""
+
+
 def _api_batch(qids: list[str], *, api: str = WIKIDATA_API,
-               user_agent: str = USER_AGENT, retries: int = 4) -> dict:
+               user_agent: str | None = None, retries: int = 5,
+               pacer: Pacer | None = None) -> dict:
     """One ``wbgetentities`` call for <=50 Q-IDs; returns parsed JSON.
 
-    Retries 429/503/transport errors with exponential backoff.
+    Retries 429/5xx/transport errors, honouring Retry-After
+    (cloud/wikimedia_http.py). Raises TransientError when they outlive the
+    retries, BatchError for an `error` body that is not transient.
     """
     params = urllib.parse.urlencode({
         "action": "wbgetentities",
@@ -54,38 +83,38 @@ def _api_batch(qids: list[str], *, api: str = WIKIDATA_API,
         "sitefilter": ENWIKI,
         "format": "json",
     })
-    req = urllib.request.Request(f"{api}?{params}",
-                                 headers={"User-Agent": user_agent})
-    last: Exception | None = None
-    for attempt in range(retries):
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.load(resp)
-        except urllib.error.HTTPError as e:
-            last = e
-            if (e.code == 429 or 500 <= e.code < 600) and attempt < retries - 1:
-                time.sleep(2 ** attempt)
-                continue
-            raise
-        except (urllib.error.URLError, TimeoutError) as e:
-            last = e
-            if attempt < retries - 1:
-                time.sleep(2 ** attempt)
-                continue
-            raise
-    if last:
-        raise last
-    return {}
+    try:
+        data = get_json(f"{api}?{params}", user_agent=user_agent or _user_agent("wikidata"),
+                        pacer=pacer, retries=retries, timeout=30)
+    except urllib.error.HTTPError as e:
+        # A 4xx other than 408/429 is no answer about these Q-IDs either.
+        raise BatchError(f"HTTP {e.code}") from e
+    if not isinstance(data, dict):
+        raise TransientError("non-object JSON body")
+    err = data.get("error")
+    if err is not None:
+        code = str(err.get("code", "")) if isinstance(err, dict) else ""
+        if code in _TRANSIENT_API_ERRORS or code.startswith("internal_api_error"):
+            raise TransientError(f"API error {code}")
+        raise BatchError(f"API error {code or '?'}")
+    return data
 
 
 def _titles_from_response(data: dict, qids: list[str]) -> dict[str, str]:
+    """{qid: title, or "" for a definitive no-enwiki-article}; a Q-ID the
+    response does not mention is left out (unknown, not a miss)."""
     out: dict[str, str] = {}
     entities = data.get("entities", {}) or {}
     for q in qids:
-        sitelinks = (entities.get(q, {}) or {}).get("sitelinks", {}) or {}
+        ent = entities.get(q)
+        if not isinstance(ent, dict):
+            continue
+        if "missing" in ent:
+            out[q] = ""
+            continue
+        sitelinks = ent.get("sitelinks", {}) or {}
         title = (sitelinks.get(ENWIKI) or {}).get("title")
-        if title:
-            out[q] = title
+        out[q] = title or ""
     return out
 
 
@@ -100,13 +129,33 @@ def _load_tsv(path: str) -> dict[str, str]:
     return m
 
 
+def _heal(cache: dict[str, str]) -> int:
+    """Drop entries an old build may have cached wrongly; returns how many.
+
+    Before the Q-ID check below, a malformed id (an OSM `wikidata=Q1;Q2`)
+    went into a batch; Wikidata refuses such a batch with an `error` body,
+    and every Q-ID in it was cached as "" (no article). A malformed key in
+    the cache is the trace of that, and which batch it spoiled is not
+    recorded, so all "" entries of such a cache are asked again, once. Hits
+    are kept. A cache without malformed keys is untouched: a 429 or 5xx
+    never reached it (a failed batch raised before anything was cached).
+    """
+    bad = [q for q in cache if not _QID_RE.fullmatch(q)]
+    if not bad:
+        return 0
+    drop = bad + [q for q, t in cache.items() if not t and q not in bad]
+    for q in drop:
+        del cache[q]
+    return len(drop)
+
+
 def resolve_qids(
     qids: Iterable[str],
     *,
     cache_path: str | None = None,
     offline_map=None,
-    user_agent: str = USER_AGENT,
-    sleep: float = 0.1,
+    user_agent: str | None = None,
+    sleep: float = 1.0,
     progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, str]:
     """Return ``{qid: enwiki_title}`` for Q-IDs with an English sitelink.
@@ -117,9 +166,14 @@ def resolve_qids(
         resolves entirely offline, no network.
     cache_path: JSON file persisting resolutions across rebuilds. Both
         hits and known-misses (stored as "") are cached so repeated builds
-        never re-query the same Q-ID.
+        never re-query the same Q-ID. Only Wikidata's answers are cached;
+        a rate limit or outage caches nothing (see the module docstring).
+    sleep: the polite gap between API requests; rate limits widen it.
+
+    Q-IDs left unresolved because the API could not answer are reported in
+    a WARNING; with STREETZIM_REQUIRE_WIKI=1 they stop the build.
     """
-    want = sorted({q for q in qids if q and q.startswith("Q")})
+    want = sorted({q for q in qids if q and _QID_RE.fullmatch(q)})
     if not want:
         return {}
 
@@ -134,6 +188,10 @@ def resolve_qids(
                 cache = json.load(f)
         except (ValueError, OSError):
             cache = {}
+    healed = _heal(cache)
+    if healed:
+        print(f"    wikidata->title: re-checking {healed} cached misses from a batch "
+              f"an older build could not resolve", file=sys.stderr, flush=True)
 
     todo = [q for q in want if q not in cache]
 
@@ -153,39 +211,51 @@ def resolve_qids(
     # through, the cache was never written, and the build carried on
     # with ZERO backfilled titles (about 60% of the linkable set) and no
     # gate to notice — and the next rebuild repeated every request.
-    # Now: 5xx retried, the cache flushed every 50 batches and on any
-    # failure, and a failure returns what was resolved so far, loudly.
+    # Now: 429/5xx retried with Retry-After honoured, the cache flushed
+    # every 50 batches and on any failure. When the API still cannot
+    # answer, resolution stops (hammering a rate limit is rude) and returns
+    # what it has, loudly; a refused batch is skipped, not cached.
+    pacer = Pacer(sleep)
     failed_at = None
     for n, i in enumerate(range(0, len(todo), BATCH)):
         batch = todo[i:i + BATCH]
         try:
-            hits = _titles_from_response(_api_batch(batch, user_agent=user_agent), batch)
+            answers = _titles_from_response(
+                _api_batch(batch, user_agent=user_agent, pacer=pacer), batch)
+        except BatchError as exc:
+            print(f"    WARNING: Wikidata refused a batch of {len(batch)} Q-IDs "
+                  f"({exc}); not cached, retried on the next build",
+                  file=sys.stderr, flush=True)
+            continue
         except Exception as exc:  # noqa: BLE001 — network/API; keep what we have
             failed_at = (i, exc)
             _flush()
             break
-        for q in batch:
-            cache[q] = hits.get(q, "")  # "" == known to have no enwiki article
+        cache.update(answers)  # "" == known to have no enwiki article
         if n % 50 == 49:
             _flush()
         if progress:
             progress(min(i + BATCH, len(todo)), len(todo))
-        if sleep and i + BATCH < len(todo):
-            time.sleep(sleep)
 
-    if cache_path and todo:
+    if cache_path and (todo or healed):
         tmp = cache_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(cache, f)
         os.replace(tmp, cache_path)
 
-    if failed_at is not None:
-        i, exc = failed_at
+    unresolved = sum(1 for q in want if q not in cache)
+    if unresolved:
         resolved = sum(1 for q in want if cache.get(q))
-        print(f"    WARNING: Wikidata title resolution stopped at Q-ID {i}/{len(todo)} "
-              f"({type(exc).__name__}: {exc}); continuing with the {resolved} titles "
-              f"resolved so far — the rest will be retried on the next build",
-              file=sys.stderr, flush=True)
+        why = ""
+        if failed_at is not None:
+            i, exc = failed_at
+            why = f"stopped at Q-ID {i}/{len(todo)} ({type(exc).__name__}: {exc}); "
+        msg = (f"WARNING: Wikidata title resolution left {unresolved} of {len(want)} "
+               f"Q-IDs unresolved: {why}continuing with the {resolved} titles "
+               f"resolved so far — the rest will be retried on the next build")
+        print("    " + msg, file=sys.stderr, flush=True)
+        if require_complete():
+            raise SystemExit(f"STREETZIM_REQUIRE_WIKI=1: {msg}")
 
     return {q: cache[q] for q in want if cache.get(q)}
 

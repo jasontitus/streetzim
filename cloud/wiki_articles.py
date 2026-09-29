@@ -16,9 +16,11 @@ Measured (California): the linkable set bundles to ~0.2-1% of the ZIM as
 trimmed reader HTML. Off by default (`--bundle-wiki-articles`).
 
 Sources: a local Wikipedia ZIM (offline, fast — pass `offline_zim`) or the
-public Wikipedia API (cached to disk). Public data only; the User-Agent is
-the project's public repo URL, never personal contact info. Wikipedia text
-is CC BY-SA — every page keeps a source link + license footer.
+public Wikipedia API (cached to disk; cloud/wikimedia_http.py paces the
+requests and honours Retry-After). Public data only; the User-Agent names
+the project's public issue tracker (an operator may add an address with
+STREETZIM_WIKI_CONTACT). Wikipedia text is CC BY-SA — every page keeps a
+source link + license footer.
 """
 from __future__ import annotations
 
@@ -29,14 +31,19 @@ import re
 import time
 import urllib.error
 import urllib.parse
-import urllib.request
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
+from cloud.wikimedia_http import (
+    Pacer,
+    TransientError,
+    get_json,
+    require_complete,
+)
+from cloud.wikimedia_http import user_agent as _user_agent
 from streetzim.paths import cache_root
 
-USER_AGENT = "streetzim-wiki/1.0 (+https://github.com/jasontitus/streetzim)"
 PARSE_API = "https://en.wikipedia.org/w/api.php"
 # Next to wikidata_cache.py's: $STREETZIM_CACHE_DIR, else the checkout, else
 # a user cache dir when installed (streetzim/paths.py cache_root).
@@ -369,48 +376,93 @@ class _OfflineZim:
         return None
 
 
-def _fetch_online(title_us: str, cache_dir: str | None, ua: str) -> str | None:
-    cache_file = None
+# Cache layout (cache_dir/<sha1 of the title>.*):
+#   .html, non-empty  the article HTML (a hit; never refetched)
+#   .miss             a definitive "no article": JSON {title, reason, checked}
+#   .html, empty      the old miss marker. Before the .miss files, a 429 or
+#                     5xx that outlived the retries was written this way too,
+#                     so an empty .html says nothing: it is re-checked once
+#                     and replaced by a .html or a .miss (see _fetch_online).
+# Only the API's own answers are cached. A rate limit, 5xx, timeout or
+# connection error raises TransientError and leaves the cache alone.
+_MISS_SUFFIX = ".miss"
+# Stop requesting after this many titles in a row the API could not answer.
+_GIVE_UP_AFTER = 25
+# API error codes that are an answer about the page (anything else in an
+# `error` body, e.g. ratelimited / maxlag / internal_api_error_*, is not).
+_DEFINITIVE_API_ERRORS = frozenset({"missingtitle", "invalidtitle",
+                                    "pagecannotexist", "nosuchpageid"})
+# HTTP statuses that answer for the page itself. 403 and 401 are about the
+# client (a blocked User-Agent), so they are not cached either.
+_DEFINITIVE_HTTP = frozenset({400, 404, 410, 414})
+
+
+def _cache_paths(cache_dir: str, title_us: str) -> tuple[str, str]:
+    key = hashlib.sha1(title_us.encode("utf-8")).hexdigest()
+    base = os.path.join(cache_dir, key)
+    return base + ".html", base + _MISS_SUFFIX
+
+
+def _write_atomic(path: str, text: str) -> None:
+    tmp = f"{path}.{os.getpid()}.part"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def _record_miss(html_file: str, miss_file: str, title_us: str, reason: str) -> None:
+    _write_atomic(miss_file, json.dumps({
+        "title": title_us, "reason": reason,
+        "checked": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}))
+    if os.path.exists(html_file):   # the legacy empty marker it replaces
+        os.remove(html_file)
+
+
+def _fetch_online(title_us: str, cache_dir: str | None, ua: str,
+                  pacer: Pacer | None = None) -> str | None:
+    """Article HTML from the cache or the API; None for a definitive miss
+    (no such page, no text). Raises TransientError when the API could not
+    answer (rate limit, 5xx, network) — that is never cached."""
+    html_file = miss_file = None
     if cache_dir:
         os.makedirs(cache_dir, exist_ok=True)
-        key = hashlib.sha1(title_us.encode("utf-8")).hexdigest()
-        cache_file = os.path.join(cache_dir, key + ".html")
-        if os.path.exists(cache_file):
-            with open(cache_file, encoding="utf-8") as f:
-                return f.read() or None
+        html_file, miss_file = _cache_paths(cache_dir, title_us)
+        if os.path.exists(html_file) and os.path.getsize(html_file) > 0:
+            with open(html_file, encoding="utf-8") as f:
+                return f.read()
+        if os.path.exists(miss_file):
+            return None
+        # An empty .html (the legacy marker) falls through: re-checked once.
     params = urllib.parse.urlencode({
         "action": "parse", "page": title_us.replace("_", " "),
         "prop": "text", "redirects": "1", "format": "json",
         "disableeditsection": "1", "disablelimitreport": "1", "formatversion": "2",
     })
-    req = urllib.request.Request(f"{PARSE_API}?{params}", headers={"User-Agent": ua})
-    html: str | None = None
-    cacheable_miss = False  # API answered with no article (vs transient net error)
-    for attempt in range(4):
-        try:
-            with urllib.request.urlopen(req, timeout=60) as r:
-                data = json.load(r)
-            text: Any = (data.get("parse") or {}).get("text")
-            if isinstance(text, dict):  # formatversion=1 shape
-                text = text.get("*")
-            html = text
-            cacheable_miss = not html
-            break
-        except urllib.error.HTTPError as e:
-            if (e.code in (429, 500, 502, 503, 504)) and attempt < 3:
-                time.sleep(2 ** attempt); continue
-            cacheable_miss = 400 <= e.code < 500
-            break
-        except Exception:
-            if attempt < 3:
-                time.sleep(2 ** attempt); continue
-            break                   # network/timeout — do NOT poison the cache
-    # Persist the result so rebuilds never re-crawl: real HTML, or an empty
-    # file as a known-miss marker (read back as "" -> None, no refetch).
-    # Skip only transient network failures so they retry next build.
-    if cache_file is not None and (html or cacheable_miss):
-        with open(cache_file, "w", encoding="utf-8") as f:
-            f.write(html or "")
+    try:
+        data = get_json(f"{PARSE_API}?{params}", user_agent=ua, pacer=pacer)
+    except urllib.error.HTTPError as e:
+        if e.code not in _DEFINITIVE_HTTP:
+            raise TransientError(f"HTTP {e.code}", e.code) from e
+        if html_file and miss_file:
+            _record_miss(html_file, miss_file, title_us, f"http-{e.code}")
+        return None
+    err = data.get("error") if isinstance(data, dict) else None
+    if err is not None:
+        code = str((err or {}).get("code", "")) if isinstance(err, dict) else ""
+        if code not in _DEFINITIVE_API_ERRORS:
+            raise TransientError(f"API error {code or '?'}")
+        if html_file and miss_file:
+            _record_miss(html_file, miss_file, title_us, code)
+        return None
+    text: Any = (data.get("parse") or {}).get("text") if isinstance(data, dict) else None
+    if isinstance(text, dict):  # formatversion=1 shape
+        text = text.get("*")
+    html = text if isinstance(text, str) and text.strip() else None
+    if html_file and miss_file:
+        if html:
+            _write_atomic(html_file, html)
+        else:
+            _record_miss(html_file, miss_file, title_us, "no-text")
     return html
 
 
@@ -419,10 +471,10 @@ def bundle_wiki_articles(
     add_item: Callable[[str, str, str, bytes], None],
     *,
     cache_dir: str | None = None,
-    user_agent: str = USER_AGENT,
+    user_agent: str | None = None,
     offline_zim: str | None = None,
     limit: int | None = None,
-    sleep: float = 0.1,
+    sleep: float = 1.0,
     log: Callable[[str], None] = print,
     images: str = "none",
     image_max_kb: int = 128,
@@ -434,6 +486,12 @@ def bundle_wiki_articles(
     `add_item(path, title, mimetype, content_bytes)` is the storage callback
     (wired to `creator.add_item(MapItem(...))` in the build; a plain dict
     collector in tests). Returns stats.
+
+    Online, `sleep` is the polite gap between API requests (cache hits cost
+    none); rate limits widen it. A title the API could not answer (429,
+    5xx, network) is counted in stats["unfetched"], never cached as a miss,
+    and reported in a WARNING; with STREETZIM_REQUIRE_WIKI=1 it stops the
+    build (SystemExit) instead of shipping fewer articles.
     """
     seen: set[str] = set()
     norm: list[str] = []
@@ -466,9 +524,33 @@ def bundle_wiki_articles(
            if src else f" via Wikipedia API (cache: {cache_dir})"))
 
     bundled = failed = total_bytes = 0
+    unfetched = rate_limited = 0   # the API could not answer; not cached
+    streak = 0                     # consecutive unanswered titles
+    gave_up = False
+    pacer = Pacer(sleep)
+    ua = user_agent or _user_agent("wiki")
     stored_titles: set = set()   # title_us actually written — for the geo-index
     for i, title_us in enumerate(norm, 1):
-        raw = src.html(title_us) if src else _fetch_online(title_us, cache_dir, user_agent)
+        raw: str | None = None
+        if src:
+            raw = src.html(title_us)
+        elif gave_up:
+            unfetched += 1
+        else:
+            try:
+                raw = _fetch_online(title_us, cache_dir, ua, pacer)
+                streak = 0
+            except TransientError as e:
+                unfetched += 1
+                rate_limited += e.rate_limited
+                streak += 1
+                if streak >= _GIVE_UP_AFTER:
+                    # The API is down or throttling hard: every further
+                    # title would spend its full retry budget. Cache hits
+                    # still count; the rest wait for the next build.
+                    gave_up = True
+                    log(f"    bundle-wiki-articles: {streak} titles in a row "
+                        f"unanswered ({e.reason}); not requesting the rest")
         if raw and _is_disambiguation(raw):
             # A non-English `wikipedia=` tag whose enwiki namesake is a
             # disambiguation page ("it:Roma" -> "Roma may refer to:") would
@@ -525,18 +607,25 @@ def bundle_wiki_articles(
             stored_titles.add(title_us)
             bundled += 1
             total_bytes += len(page)
-        if not src and sleep:
-            time.sleep(sleep)
         if i % 250 == 0:
             log(f"    ... {i}/{len(norm)} bundled={bundled} failed={failed} "
                 f"{total_bytes // 1024} KB")
     stats = {"requested": len(norm), "bundled": bundled, "failed": failed,
              "bytes": total_bytes, "stored_titles": stored_titles,
              "images": images_stored, "image_bytes": image_bytes,
-             "disambiguation_skipped": disambig}
+             "disambiguation_skipped": disambig,
+             "unfetched": unfetched, "rate_limited": rate_limited}
     log(f"    bundle-wiki-articles: stored {bundled} articles "
         f"({total_bytes / 1024:.0f} KB), {failed} unavailable"
         + (f" ({disambig} were enwiki disambiguation pages)" if disambig else "")
         + (f"; {images_stored} images ({image_bytes / 1024 / 1024:.0f} MB, mode={images})"
            if images != "none" else ""))
+    if unfetched:
+        msg = (f"WARNING: bundle-wiki-articles: {unfetched} of {len(norm)} articles "
+               f"were NOT fetched ({rate_limited} rate-limited by Wikipedia, the "
+               f"rest 5xx/network). They are not cached as missing, so the next "
+               f"build fetches them; this ZIM ships without them.")
+        log("    " + msg)
+        if require_complete():
+            raise SystemExit(f"STREETZIM_REQUIRE_WIKI=1: {msg}")
     return stats

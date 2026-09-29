@@ -409,6 +409,11 @@ headless Chromium:
 - `cloud/wikidata_titles.py` also ignores `Retry-After`.
 - Both default User-Agents lack a contact address, which Wikimedia's
   User-Agent policy asks for.
+- Fixed since (`cloud/wikimedia_http.py`): 429/5xx/network failures are
+  never cached, `Retry-After` is honoured with a cap, requests are paced,
+  the User-Agent names the issue tracker, legacy empty cache files are
+  re-checked once, and unfetched articles are counted in a WARNING
+  (`STREETZIM_REQUIRE_WIKI=1` fails the build).
 - One stored title contains a fragment (`McKeldin_Mall#The_Peace_Garden`),
   so the page is the whole McKeldin Mall article under that name.
 
