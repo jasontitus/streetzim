@@ -33,6 +33,9 @@ unset _ops_real _ops_old
 #      on it, or to switch on purpose). --dry-run and --regate never resolve
 #      over the network: `latest` becomes the recorded release, else the
 #      newest release in overture_cache/.
+#      Downloads use the s3:// transport the host has always used
+#      (--transport "${OVERTURE_TRANSPORT:-s3}"); OVERTURE_TRANSPORT=https
+#      opts in to the downloader's anonymous-HTTPS reads.
 #   4. OVERTURE_RELEASE=… ./build-region-fast.sh <id> <bbox> <name>
 #   5. gates, all mandatory except the browser smoke (see --browser-smoke):
 #        terrain coverage (cloud/check_terrain_coverage.py, catches blank land)
@@ -48,7 +51,7 @@ unset _ops_real _ops_old
 #                            [--no-upload] [--dry-run] [--browser-smoke soft|hard|off]
 #                            [--continue]   # skip regions already OK in today's .tsv
 # Detach:  setsid nohup ./build-refresh-queue.sh … > queue-refresh.out 2>&1 < /dev/null &
-# Env:     PLANET OVERTURE_RELEASE WORLD_MBTILES WORLD_SEARCH REGISTRY URL_DEAD_STATUSES
+# Env:     PLANET OVERTURE_RELEASE OVERTURE_TRANSPORT WORLD_MBTILES WORLD_SEARCH REGISTRY URL_DEAD_STATUSES
 # Results: queue-refresh-<date>.log (narrative) + queue-refresh-<date>.tsv (one row per region)
 set -uo pipefail
 cd /storage/streetzim
@@ -313,7 +316,7 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
       # must go first, or it would be relabelled with the new bbox.
       rm -f "$PQ" "$PQ.bbox"
       log "  download Overture $theme $OVERTURE_RELEASE"
-      if ! "$PY" download_overture_data.py "$theme" --bbox="$BBOX" --release "$OVERTURE_RELEASE" --out "$PQ" >> "$LOG" 2>&1; then
+      if ! "$PY" download_overture_data.py "$theme" --bbox="$BBOX" --release "$OVERTURE_RELEASE" --transport "${OVERTURE_TRANSPORT:-s3}" --out "$PQ" >> "$LOG" 2>&1; then
         log "  OVERTURE $theme DOWNLOAD FAILED"; rm -f "$PQ"; ov_ok=0
       else
         bbox_mark "$PQ" "$BBOX"

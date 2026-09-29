@@ -137,13 +137,21 @@ resolve it once:
 REL=$(venv-linux/bin/python3 download_overture_data.py addresses places --print-release)
 
 venv-linux/bin/python3 download_overture_data.py addresses \
-    --bbox="$BBOX" --release "$REL" \
+    --bbox="$BBOX" --release "$REL" --transport s3 \
     --out overture_cache/addresses-${ID}-${REL}.parquet
 
 venv-linux/bin/python3 download_overture_data.py places \
-    --bbox="$BBOX" --release "$REL" \
+    --bbox="$BBOX" --release "$REL" --transport s3 \
     --out overture_cache/places-${ID}-${REL}.parquet
 ```
+
+`--transport s3` is what the host has always used and what the ops wrappers
+pass by default (`--transport "${OVERTURE_TRANSPORT:-s3}"`). The downloader's
+own default is `https`: it lists the files anonymously and reads them over
+HTTPS (only those whose STAC bbox meets yours), which also works behind a
+proxy that breaks s3:// signing, but is untested on the host; set
+`OVERTURE_TRANSPORT=https` for a wrapper to opt in. Release resolution
+(`--print-release`) uses the STAC catalog either way.
 
 addresses + places can run in parallel (DuckDB+S3, separate row groups). Some
 regions have very sparse address coverage in Overture (e.g. India's addresses

@@ -32,7 +32,8 @@ id="$1"
 name="$2"
 bbox="$3"
 # Pinned by default (the round's release, whose parquets are cached);
-# OVERTURE_RELEASE=latest opts in to the newest complete release.
+# OVERTURE_RELEASE=latest opts in to the newest complete release. Downloads
+# use --transport "${OVERTURE_TRANSPORT:-s3}", the host's tested s3:// reads.
 release="${OVERTURE_RELEASE:-2026-08-19.0}"
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -66,13 +67,13 @@ if [ ${#missing[@]} -gt 0 ]; then
     log "overture cache miss: ${missing[*]} — downloading..."
     if [ ! -s "$addr" ]; then
         ./venv312/bin/python3 download_overture_data.py addresses \
-            --bbox="$bbox" --release "$release" --out "$addr" \
+            --bbox="$bbox" --release "$release" --transport "${OVERTURE_TRANSPORT:-s3}" --out "$addr" \
             > "overture-${id}-addresses.log" 2>&1 &
         addr_pid=$!
     fi
     if [ ! -s "$places" ]; then
         ./venv312/bin/python3 download_overture_data.py places \
-            --bbox="$bbox" --release "$release" --out "$places" \
+            --bbox="$bbox" --release "$release" --transport "${OVERTURE_TRANSPORT:-s3}" --out "$places" \
             > "overture-${id}-places.log" 2>&1 &
         places_pid=$!
     fi

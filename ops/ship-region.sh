@@ -24,6 +24,8 @@ unset _ops_real _ops_old
 #      using the round's cached parquets). OVERTURE_RELEASE=latest opts in to
 #      the newest complete release: resolved once at start, logged, and used
 #      in the cache names.
+#      OVERTURE_TRANSPORT (default s3, the transport the host has always
+#      used; https opts in to the downloader's anonymous-HTTPS reads)
 #      WAIT_FOR_PBF=1  block until the extractor has finished this
 #                      region's PBF instead of failing
 set -uo pipefail
@@ -91,7 +93,7 @@ for theme in addresses places; do
     rm -f "$PQ" "$PQ.bbox"
     log "downloading Overture $theme $OVERTURE_RELEASE"
     "$PY" download_overture_data.py "$theme" --bbox="$BBOX" \
-      --release "$OVERTURE_RELEASE" --out "$PQ" >> "$LOG" 2>&1 \
+      --release "$OVERTURE_RELEASE" --transport "${OVERTURE_TRANSPORT:-s3}" --out "$PQ" >> "$LOG" 2>&1 \
       || { log "FATAL: Overture $theme download failed"; rm -f "$PQ"; exit 1; }
     bbox_mark "$PQ" "$BBOX"
   fi

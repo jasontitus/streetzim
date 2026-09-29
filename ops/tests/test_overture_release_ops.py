@@ -161,3 +161,49 @@ def test_build_region_fast_needs_a_resolved_release(tmp_path, value, ok):
                        capture_output=True, text=True)
     assert (r.returncode == 0 and "built" in r.stdout) == ok
     assert "2026-04-15.0" not in text
+
+
+TRANSPORT = '--transport "${OVERTURE_TRANSPORT:-s3}"'
+
+
+def _download_calls() -> list[tuple[str, str]]:
+    """Every download_overture_data.py call in an ops shell script that
+    downloads (not --print-release), with its continuation lines joined."""
+    calls = []
+    for path in sorted((ROOT / "ops").rglob("*.sh")):
+        joined = path.read_text().replace("\\\n", " ")
+        for line in joined.splitlines():
+            if ("download_overture_data.py" in line and "--print-release" not in line
+                    and not line.lstrip().startswith("#") and "--bbox" in line):
+                calls.append((str(path.relative_to(ROOT)), line))
+    return calls
+
+
+def test_every_ops_download_keeps_the_s3_transport_by_default():
+    calls = _download_calls()
+    scripts = {s for s, _ in calls}
+    assert {"ops/build-refresh-queue.sh", "ops/ship-region.sh", "ops/cloud/build_region.sh",
+            "ops/cloud/rebuild_old_regions.sh"} <= scripts
+    for script, line in calls:
+        assert TRANSPORT in line, f"{script}: {line.strip()}"
+
+
+@pytest.mark.parametrize("env,want", [({}, "s3"), ({"OVERTURE_TRANSPORT": "https"}, "https")])
+def test_transport_reaches_the_downloader(tmp_path, env, want):
+    """The ship-region download loop, run against a stub python."""
+    text = (ROOT / "ops/ship-region.sh").read_text()
+    i = text.index("for theme in addresses places; do")
+    block = text[i:text.index("\ndone\n", i) + 6]
+    py = tmp_path / "py"
+    py.write_text('#!/bin/sh\necho "$*" >> "$STUB_LOG"\n'
+                  'while [ $# -gt 0 ]; do [ "$1" = --out ] && echo x > "$2"; shift; done\n')
+    py.chmod(0o755)
+    (tmp_path / "overture_cache").mkdir()
+    log = tmp_path / "calls.log"
+    body = (f'log() {{ :; }}; bbox_stale() {{ return 1; }}; bbox_mark() {{ :; }}\n'
+            f'PY="{py}"; ID=r; BBOX=1,2,3,4; LOG=/dev/null; OVERTURE_RELEASE={PIN}\n{block}')
+    e = {k: v for k, v in os.environ.items() if k != "OVERTURE_TRANSPORT"}
+    subprocess.run(["bash", "-c", body], cwd=tmp_path, check=True,
+                   env={**e, **env, "STUB_LOG": str(log)})
+    lines = log.read_text().splitlines()
+    assert len(lines) == 2 and all(f"--transport {want} " in ln for ln in lines)
