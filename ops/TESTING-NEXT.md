@@ -38,9 +38,14 @@ west-asia was building, and pushed to `origin/main` seven times since
 26 September (`fe02ced`, `423f65f`, `2db4fa0`, `273184a`, `abdb891` on
 09-26; `0792d0d`, `37403b8` on 09-29), at the user's request. So every
 region built after 05:23 CEST on 29 September was built on the
-refactored `main`. And **nobody merges `builder` or `next` into `main`
-while the host is on `main`** (§3): any later pull there would bring
-their code into the round.
+refactored `main`. **The host never pulls `main`:** its one move before
+the migration is §1.0's stage-1 step, a fast-forward to the exact commit
+`M` the lead names (`merge --ff-only <M>`), not a `git pull`. So
+`builder` and `next` may merge into `main` at any time (§3): nothing on
+the host follows `origin/main` on its own (no production script pulls or
+fetches; only `ops/cloud/build-vm-startup.sh` on a build VM does). Never
+run `git pull` in `/storage/streetzim` until the migration step of §3,
+and never TESTING-STAGE1.md step 4 on this host (§1.0 replaces it).
 
 **Until the round is over** (`sz-round.sh`, §0, prints `OVER`, which
 needs the user's word), production moves only once: the stage-1 pull of
@@ -97,6 +102,10 @@ export PY=/storage/streetzim/venv-linux/bin/python3
 # can rewrite /storage/streetzim/.git/index.
 export GIT_CEILING_DIRECTORIES=/storage/streetzim
 export TMPDIR=$SZT/tmp
+mkdir -p "$TMPDIR" 2>/dev/null
+# Never source this file in a shell that then starts production (a round, a
+# resume, ship-region.sh): it sets TMPDIR and GIT_CEILING_DIRECTORIES, and git
+# run from a subfolder of the checkout then finds no repository.
 # Tests of §2d-2h start only while no round driver runs (paused or over).
 sz_round_quiet() { bash "$HOME/sz-round.sh" > /dev/null; case $? in 1|3) return 0 ;; *) echo "STOP: the round runs (sz-round.sh); tests wait"; return 1 ;; esac; }
 EOF2
@@ -124,24 +133,37 @@ while read -r pid args; do
   grep -qE 'docker|containerd|libpod' "/proc/$pid/cgroup" 2>/dev/null && continue
   echo "$pid $args"; n=$((n + 1))
 done < <(pgrep -af '[c]reate_osm_zim|[b]uild-region|[s]hip-region|[u]pload_validated|[f]inish_pending_uploads|[f]inish-pending-loop|[d]ownload_overture_data|[o]smium (extract|cat|merge)|[e]xtract-region-pbfs|[c]heck_terrain_coverage|[v]alidate_zim|[r]oute_cli|[c]heck_smoke_pairs|[p]wa_smoke_test|[s]erve-web-local|[k]iwix_viewer_gate|[d]evice-matrix|[o]verlap-check|[m]ap-health|[g]enerate\.py|[f]irebase|[s]ync-drive-viewer|[s]treetzim-pack|[x]apianbuilder|[t]ilemaker|[b]uild-world-|[b]uild-refresh-queue|[r]ebuild_old_regions|[r]un-continent-chain|[r]etrofit-chips|[v]iewer-refresh|[r]ollout_viewer_patch|[r]epackage_zim|[e]urope-safety-net|[r]egate-stranded|[b]uild_torrent|[/]bin/ia |bash .*[q]ueue.*\.sh|bash .*[r]ebuild.*\.sh')
+# The round's drivers, as sz-round.sh finds them (it also counts unknown
+# scripts in the checkout, which the name list above can miss).
+r=$(bash "$HOME/sz-round.sh" 2>&1); rc=$?
+case $rc in
+  1|3) ;;
+  0) printf '%s\n' "$r" | grep '^RUNNING'; n=$((n + 1)) ;;
+  *) echo "sz-busy: sz-round.sh failed (exit $rc): $r"; n=$((n + 1)) ;;
+esac
 [ "$n" -gt 0 ] && exit 0
 echo IDLE; exit 1
 EOF2
 cat > "$HOME/sz-round.sh" <<'EOF2'
 #!/usr/bin/env bash
 # Is a production round running, paused, or over?  Only reads.
-#   exit 0  RUNNING: a driver runs. Production waits; so do the §2d-2h tests.
+#   exit 0  RUNNING: a driver (or an unknown script in the checkout) runs.
 #   exit 3  NOT OVER: no driver runs, but the user has not said the round is
-#           over (it is paused). Production waits; tests may run.
-#   exit 1  OVER: no driver runs and $HOME/sz-round-over.txt holds the user's word.
+#           over (it is paused), or something ran after the user said so.
+#   exit 1  OVER: no driver runs, $HOME/sz-round-over.txt holds the user's
+#           word, and no round file or pidfile changed after it was written.
 #   other   error: treat as running.
-# A driver is a pidfile /storage/streetzim/.*.pid whose process lives
-# (.rebuild-old.pid, .rollout-viewer.pid, .canada-repack.pid, ...), or a bash
-# process whose script is a queue/rebuild/chain driver (build-refresh-queue.sh,
-# cloud/rebuild_old_regions.sh, .queue-*.sh, run-continent-chain.sh, ...).
+# Fail-safe: any bash/sh process running a script inside /storage/streetzim
+# counts as a driver unless it is a known per-region step (sz-busy.sh counts
+# those). A stale pidfile whose PID now belongs to something else is shown
+# and counted too: ask.
 . "$HOME/sz-env.sh" 2>/dev/null && [ -n "${SZT:-}" ] || { echo "sz-round: \$HOME/sz-env.sh missing"; exit 2; }
+command -v pgrep >/dev/null || { echo "sz-round: no pgrep"; exit 2; }
 P=/storage/streetzim
-seen=" "
+PR=$(cd "$P" 2>/dev/null && pwd -P) || { echo "sz-round: cannot read $P"; exit 2; }
+# Per-region steps a driver runs; never drivers themselves.
+LEAF='build-region-fast.sh|build-region.sh|ship-region.sh|upload_validated.sh|kiwix_viewer_gate.sh|extract-region-pbfs.sh|sync-drive-viewer.sh|check_stage1.sh'
+seen=" "; running=0
 files() {  # $1 pid, $2 script or command line
   case "$2" in
     *rebuild_old_regions*)
@@ -155,33 +177,59 @@ files() {  # $1 pid, $2 script or command line
       ls -l "/proc/$1/fd" 2>/dev/null | grep -o "$P/[^ ]*" | sort -u | sed 's/^/      /' ;;
   esac
 }
-running=0
+# 1. Pidfiles. A live PID whose command line is not a shell script is a
+#    stale pidfile with a reused PID: shown, counted (ask the user).
 for f in "$P"/.*.pid; do
   [ -s "$f" ] || continue
   pid=$(tr -dc 0-9 < "$f")
   [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ] || continue
   args=$(tr '\0' ' ' < "/proc/$pid/cmdline")
   [ -n "$args" ] || continue
-  echo "RUNNING  pidfile $(basename "$f") -> $pid $args"
+  case "$args" in
+    *.sh*) echo "RUNNING  pidfile $(basename "$f") -> $pid $args" ;;
+    *)     echo "RUNNING? pidfile $(basename "$f") -> $pid $args  (not a script: a stale pidfile whose PID was reused? ask)" ;;
+  esac
   files "$pid" "$args"; seen="$seen$pid "; running=1
 done
-for pid in $(pgrep -x bash); do
+# 2. Every bash/sh/dash process: find its script argument.
+for pid in $(pgrep -x 'bash|sh|dash'); do
   case "$seen" in *" $pid "*) continue ;; esac
   mapfile -d '' -t a < "/proc/$pid/cmdline" 2>/dev/null || continue
-  s=""
+  s=""; skip=0
   for x in "${a[@]:1}"; do
-    case "$x" in -c) s=""; break ;; -*) continue ;; *) s=$x; break ;; esac
+    if [ "$skip" = 1 ]; then skip=0; continue; fi
+    case "$x" in
+      -o|+o|-O|+O|--rcfile|--init-file) skip=1; continue ;;
+      --*) continue ;;
+      -*c*) s=""; break ;;          # -c, or combined flags such as -ec: no script
+      -*|+*) continue ;;
+      *) s=$x; break ;;
+    esac
   done
-  case "$s" in "") continue ;; *"$SZT"*) continue ;; esac
-  case "${s##*/}" in
-    *queue*|*rebuild*|run-continent-chain*|retrofit-chips*|europe-safety-net*|finish-pending-loop*|rollout_viewer*|viewer-refresh*)
+  [ -n "$s" ] || continue
+  case "$s" in /*) abs=$s ;; *) abs="$(readlink "/proc/$pid/cwd" 2>/dev/null)/$s" ;; esac
+  real=$(readlink -f "$abs" 2>/dev/null || echo "$abs")
+  case "$abs$real" in *"$SZT"*) continue ;; esac
+  base=${s##*/}
+  case "$base" in
+    *queue*|*rebuild*|run-continent-chain*|retrofit-chips*|europe-safety-net*|finish-pending-loop*|rollout_viewer*|viewer-refresh*|canada_viewer_repack*)
       echo "RUNNING  $pid ${a[*]}  (cwd $(readlink "/proc/$pid/cwd" 2>/dev/null))"
-      files "$pid" "$s"; running=1 ;;
+      files "$pid" "$s"; running=1; continue ;;
   esac
+  case "$real" in "$P"/*|"$PR"/*) ;; *) continue ;; esac
+  printf '%s\n' "$base" | grep -q -x -E "$LEAF" && continue
+  echo "RUNNING  $pid ${a[*]}  (an unknown script in the checkout, counted as a driver; ask if it is not one)"
+  files "$pid" "$s"; running=1
 done
 [ "$running" = 1 ] && exit 0
-if [ -s "$HOME/sz-round-over.txt" ]; then
-  echo "OVER (no driver runs; the user's word, $HOME/sz-round-over.txt):"; sed 's/^/    /' "$HOME/sz-round-over.txt"; exit 1
+O=$HOME/sz-round-over.txt
+if [ -s "$O" ]; then
+  newer=$(find "$P" -maxdepth 1 \( -name '.*.pid' -o -name 'rebuild-old.*' -o -name 'queue-refresh*' \) -newer "$O" 2>/dev/null)
+  if [ -n "$newer" ]; then
+    echo "NOT OVER: these changed after the user's word in $O (a round ran again?); ask:"; echo "$newer" | sed 's/^/    /'
+    exit 3
+  fi
+  echo "OVER (no driver runs; the user's word, $O):"; sed 's/^/    /' "$O"; exit 1
 fi
 echo "NOT OVER: no driver runs, but the user has not said the round is over (\$HOME/sz-round-over.txt is missing)."
 [ -s "$HOME/sz-round-paused.txt" ] && echo "    paused: see $HOME/sz-round-paused.txt"
@@ -236,9 +284,11 @@ bash "$HOME/sz-round.sh"; echo "sz-round exit $?"
 ```bash
 pid=2691498
 a=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null); pp=$(awk '/^PPid:/ {print $2}' "/proc/$pid/status" 2>/dev/null)
-echo "cmdline: ${a:-<gone>}"; echo "parent: ${pp:-<gone>}"
+st=$(ps -o lstart= -p "$pid" 2>/dev/null)
+echo "cmdline: ${a:-<gone>}"; echo "parent: ${pp:-<gone>}"; echo "started: ${st:-<gone>}"
 if [ -z "$a" ]; then echo "OK: already gone"
 elif [ "$pp" != 1 ]; then echo "STOP: its parent is $pp, not init; ask"
+elif [ "$(date -d "$st" +%F 2>/dev/null)" != 2026-09-16 ]; then echo "STOP: it did not start on 2026-09-16 (a reused PID?); ask"
 else
   case "$a" in
     *python*" scripts/serve-web-local.py 18770 /storage/streetzim/web ")
@@ -253,9 +303,15 @@ fi
   Then `sz-busy.sh` keeps its normal filter: a new `serve-web-local`
   process is production's (a smoke gate) and counts as busy.
 - **The round** is whatever driver `sz-round.sh` finds: a live pidfile
-  (`.rebuild-old.pid`, `.rollout-viewer.pid`, `.canada-repack.pid`), or a
-  bash process running a `*queue*`, `*rebuild*` or chain script. It
-  prints each driver with its files. The two known drivers:
+  (`.rebuild-old.pid`, `.rollout-viewer.pid`, `.canada-repack.pid`), a
+  bash/sh process running a `*queue*`, `*rebuild*` or chain script, or
+  **any other script inside `/storage/streetzim`** that isn't a per-region
+  step (`build-region-fast.sh`, `ship-region.sh`, `upload_validated.sh`,
+  …; `sz-busy.sh` counts those): host scripts such as
+  `.carolinas-fast-ship.sh` or `.build-africa-light.sh` drive builds
+  under names no list foresees. It prints each driver with its files; a
+  pidfile whose PID now runs something that isn't a script is shown as
+  `RUNNING?` (a stale pidfile: ask). The two known drivers:
 
   | driver | its files | world tiles |
   |---|---|---|
@@ -265,6 +321,9 @@ fi
   A round is **over** only when no driver runs **and** the user has said
   so: then, on their word, write it down (their words and the date):
   `printf '%s\n' "<the user's words>" "$(date -Is)" > "$HOME/sz-round-over.txt"`.
+  If a pidfile or a round file (`rebuild-old.*`, `queue-refresh*`)
+  changes after that file was written, `sz-round.sh` falls back to
+  `NOT OVER` (something ran again): ask.
   `sz-round.sh` exits 0 while a driver runs (`RUNNING`), 3 while none
   runs but the round isn't over (`NOT OVER`: paused), and 1 once it is
   `OVER`. §1.4, §1.6 and §2c need 1. The tests of §2d–2h need 1 or 3:
@@ -350,37 +409,51 @@ after steps 1 and 3):
    (`claude/adoring-dijkstra-i2vge7`), `builder` and `next` (a merge
    commit on each), then opens a PR ops → `main` and, once CI is green,
    merges it with **Create a merge commit**. The result `M` contains
-   `bd09db9` and the host's commits. The lead tells the host `M`.
+   `bd09db9` and the host's commits. The lead tells the host `M`'s full
+   40-character hash.
 3. **The host runs the checks** below (read-only), reports them, and
-   **waits** for the lead's go if anything is not as expected.
-4. **The host pulls** `main` (TESTING-STAGE1.md steps 1, 4 and 5, below),
-   with `sz-busy.sh` inside the block, while the round is paused.
+   **waits** for the lead's go in every case.
+4. **The host moves to `M`** (the "stage-1 move" block below, then
+   TESTING-STAGE1.md step 5), with `sz-busy.sh` inside the block, while
+   the round is paused. It is a fast-forward to exactly `M`, not a `git
+   pull`: whatever reached `main` after `M` (`builder`, `next`) stays
+   off the host. TESTING-STAGE1.md step 4 is **not** used on this host.
 
 The push (step 1):
 
 ```bash
 . "$HOME/sz-env.sh" || exit
 G="git -C /storage/streetzim"
-if [ "$($G rev-parse HEAD | cut -c1-7)" != 21b3ffd ]; then
+B=refs/heads/host-torrents-2026-09-29
+H=$($G rev-parse HEAD)
+$G ls-remote --exit-code origin "$B" >/dev/null 2>&1; lr=$?
+if [ "$(printf %.7s "$H")" != 21b3ffd ]; then
   echo "STOP: HEAD is not 21b3ffd any more:"; $G log --oneline -3; echo "ask"
-elif [ "$($G rev-parse '@{u}' | cut -c1-7)" != 37403b8 ]; then
-  echo "STOP: the host's origin/main is not 37403b8; ask"
+elif [ "$($G rev-parse --abbrev-ref '@{u}')" != origin/main ] || [ "$($G rev-parse '@{u}' | cut -c1-7)" != 37403b8 ]; then
+  echo "STOP: the upstream is not origin/main at 37403b8; ask"
 elif [ "$($G rev-list '@{u}..HEAD' | cut -c1-7 | tr '\n' ' ')" != "21b3ffd 7af110c " ]; then
   echo "STOP: the host's own commits are not exactly 7af110c and 21b3ffd:"; $G log --oneline '@{u}..HEAD'; echo "ask"
-elif $G ls-remote --exit-code origin refs/heads/host-torrents-2026-09-29 >/dev/null 2>&1; then
+elif [ "$lr" = 0 ]; then
   echo "STOP: origin already has host-torrents-2026-09-29; ask"
-elif bash "$HOME/sz-busy.sh"; [ $? -ne 1 ]; then
-  echo "STOP: an upload may be about to commit; push between them"
+elif [ "$lr" != 2 ]; then
+  echo "STOP: could not list origin (ls-remote exit $lr: network or credentials); ask"
+elif pgrep -af '[u]pload_validated|[f]inish_pending|[f]inish-pending-loop' || [ -e /storage/streetzim/.git/index.lock ]; then
+  echo "STOP: an upload is running (above) or git holds the index lock; push after it"
 else
-  $G push origin "$($G rev-parse HEAD):refs/heads/host-torrents-2026-09-29" &&
-  echo "OK: pushed $($G rev-parse HEAD) to host-torrents-2026-09-29; now wait for the lead" ||
-  echo "STOP: the push failed; ask"
+  $G push --no-follow-tags origin "$H:$B" &&
+  [ "$($G ls-remote origin "$B" | cut -f1)" = "$H" ] &&
+  echo "OK: pushed $H to host-torrents-2026-09-29 (checked on origin); now wait for the lead" ||
+  echo "STOP: the push failed or origin shows another commit; ask"
 fi
 ```
 
 (The push names the commit, not a branch, and a new ref, so it can't
-touch `main` or any `claude/*` branch. It changes no file and no local
-branch.)
+touch `main` or any `claude/*` branch; without `+` or `--force` it can't
+overwrite anything, and `--no-follow-tags` keeps a `push.followTags`
+setting from sending tags. It changes no file and no local branch; it
+may add the remote-tracking ref `origin/host-torrents-2026-09-29`. A
+build may run meanwhile: the push only reads the object store; it waits
+only for an upload, which commits.)
 
 **Never squash or rebase-merge** ops into `main`: either gives `main`
 commits that don't contain `bd09db9` or the host's commits, and the
@@ -401,42 +474,96 @@ be an ancestor of the target) until the branch owner merges the new
 the two), the pull refuses (safely): stop and ask; the new commits need
 the same way to `main`.
 
-**Checks before the host pulls** (`origin/main` is fetched into the host's
-remote-tracking ref only; nothing else changes):
+**Checks before the host moves** (`origin/main` is fetched into the
+host's remote-tracking ref only; nothing else changes). Set `M` to the
+full hash the lead sent:
 
 ```bash
+M=<the 40-character hash of main's merge commit, from the lead>
 . "$HOME/sz-env.sh" || exit
 G="git -C /storage/streetzim"
-$G fetch -q origin +refs/heads/main:refs/remotes/origin/main
-$G rev-parse --abbrev-ref '@{u}'
-$G merge-base --is-ancestor HEAD origin/main && echo "OK: main contains the host's commits" || echo "STOP: the host has commits main lacks"
-$G merge-base --is-ancestor bd09db94d89dca6b97b36cdbf153a46ea13ab228 origin/main && echo "OK: main contains bd09db9" || echo "STOP: bd09db9 is not on main"
-$G diff --stat bd09db94d89dca6b97b36cdbf153a46ea13ab228 origin/main
-$G cat-file -e origin/main:ops/in-place.txt && echo "OK: main has the split"
+$G -c gc.auto=0 -c maintenance.auto=false fetch -q origin +refs/heads/main:refs/remotes/origin/main
+$G --version
+$G rev-parse --abbrev-ref HEAD '@{u}'
+[ ${#M} = 40 ] && $G rev-parse -q --verify "$M^{commit}" >/dev/null && echo "OK: M is a commit here" || echo "STOP: M is not a full hash of a fetched commit"
+$G merge-base --is-ancestor "$M" origin/main && echo "OK: M is on main" || echo "STOP: M is not on main"
+$G merge-base --is-ancestor HEAD "$M" && echo "OK: M contains the host's commits" || echo "STOP: the host has commits M lacks"
+$G merge-base --is-ancestor bd09db94d89dca6b97b36cdbf153a46ea13ab228 "$M" && echo "OK: M contains bd09db9" || echo "STOP: bd09db9 is not in M"
+$G diff --stat bd09db94d89dca6b97b36cdbf153a46ea13ab228 "$M"
+$G cat-file -e "$M:ops/in-place.txt" && echo "OK: M has the split" || echo "STOP: M lacks the split"
+$G log --oneline "$M..origin/main" | head -5; echo "(commits on main after M: they stay off the host)"
 $G --no-optional-locks status --short
-c=$($G --no-optional-locks diff --name-only HEAD | sort | comm -12 - <($G diff --name-only HEAD origin/main | sort)); [ -z "$c" ] && echo "OK: the pull touches no locally modified file" || { echo "STOP: locally modified and changed by the pull:"; echo "$c"; }
+[ -z "$($G diff --cached --name-only)" ] && echo "OK: nothing staged" || echo "STOP: staged changes in production's index"
+c=$($G --no-optional-locks diff --name-only HEAD | sort | comm -12 - <($G diff --name-only HEAD "$M" | sort)); [ -z "$c" ] && echo "OK: the move touches no locally modified file" || { echo "STOP: locally modified and changed by the move:"; echo "$c"; }
+u=$($G diff --name-only --diff-filter=A HEAD "$M" | while read -r f; do [ -e "/storage/streetzim/$f" ] || [ -L "/storage/streetzim/$f" ] && echo "$f"; done); [ -z "$u" ] && echo "OK: no untracked file in the way" || { echo "STOP: untracked files where M adds tracked ones:"; echo "$u"; }
 ```
 
-**Expect:** the upstream is `origin/main`, four `OK` lines, and the diff
-lists nothing or only `web/torrents/*.torrent` files (the two host
-commits: east-coast-us and indian-subcontinent). Anything else: STOP.
+**Expect:** the branch `main` and upstream `origin/main`, git 2.23 or
+later (for `switch` and `restore`), eight `OK` lines, and the diff listing
+nothing or only `web/torrents/*.torrent` files (the two host commits:
+east-coast-us and indian-subcontinent). Commits on `main` after `M` are
+fine. Anything else: STOP. Report all of it and **wait** for the lead.
 
 **The deploy output doesn't block this pull.** `web/index.html` and
 `web/drive/build-info.js` are `M` (and after another upload
 `web/drive/viewer/.version` and `web/drive/sw.js` can be): the split
-changes none of them, and the last check line says so, so they stay as
-they are. The move to `next` changes them; §1.4 saves and restores them
+changes none of them, and the "touches no locally modified file" line
+says so, so they stay as they are. The move to `next` changes them; §1.4 saves and restores them
 then. `check_stage1.sh` step 2 reports them (`FAIL local change`);
 record them.
 
-**When:** the pull needs an idle window: `sz-busy.sh` prints `IDLE`
+**When:** the move needs an idle window: `sz-busy.sh` prints `IDLE`
 (after the orphaned server is dealt with, §0). With the round paused,
 the window opens once `build-region-fast.sh brazil` has finished. Then
-run TESTING-STAGE1.md **step 1**, then its **step 4** exactly as written
-there (it runs `sz-busy.sh` inside the block, records
-`$HOME/sz-before-stage1.txt` and `$HOME/sz-after-stage1.txt`, and must
-print `OK: pulled to the split`), then its **step 5**. Its step 2 line
-"the branch contains the host's commit" is replaced by the checks above.
+run TESTING-STAGE1.md **step 1** (read-only), this block, and
+TESTING-STAGE1.md **step 5**. Its step 2 line "the branch contains the
+host's commit" is replaced by the checks above, and its step 4 by this
+block. It records `$HOME/sz-before-stage1.txt` and
+`$HOME/sz-after-stage1.txt` (the same records step 4 writes), and must
+print `OK: moved to the split`:
+
+```bash
+M=<the same 40-character hash>
+. "$HOME/sz-env.sh" || exit
+G="git -C /storage/streetzim"
+if [ ${#M} != 40 ] || ! $G rev-parse -q --verify "$M^{commit}" >/dev/null; then
+  echo "STOP: M is not a full hash of a fetched commit (run the checks first)"
+elif [ ! -s "$HOME/sz-busy.sh" ] || ! command -v pgrep >/dev/null; then
+  echo "STOP: \$HOME/sz-busy.sh or pgrep is missing; ask"
+elif bash "$HOME/sz-busy.sh"; [ $? -ne 1 ]; then
+  echo "STOP: the processes above are running (or sz-busy.sh failed); move between them"
+elif $G cat-file -e HEAD:ops/in-place.txt 2>/dev/null; then
+  echo "STOP: already at the split"; cat "$HOME/sz-before-stage1.txt" "$HOME/sz-after-stage1.txt" || echo "records incomplete; ask"
+elif [ "$($G rev-parse --abbrev-ref HEAD)" != main ]; then
+  echo "STOP: not on main; ask"
+elif ! $G merge-base --is-ancestor "$M" refs/remotes/origin/main || ! $G merge-base --is-ancestor HEAD "$M"; then
+  echo "STOP: M is not on main, or lacks the host's commits; ask"
+elif [ -n "$($G diff --cached --name-only)" ]; then
+  echo "STOP: staged changes in production's index; ask"
+elif c=$($G --no-optional-locks diff --name-only HEAD | sort | comm -12 - <($G diff --name-only HEAD "$M" | sort)); [ -n "$c" ]; then
+  echo "STOP: modified here and changed by the move; ask:"; echo "$c"
+else
+  rm -f "$HOME/sz-after-stage1.txt" &&
+  $G rev-parse HEAD > "$HOME/sz-before-stage1.txt.new" &&
+  mv "$HOME/sz-before-stage1.txt.new" "$HOME/sz-before-stage1.txt" &&
+  $G -c merge.autoStash=false merge -q --ff-only "$M" &&
+  $G rev-parse HEAD > "$HOME/sz-after-stage1.txt" &&
+  if [ "$(cat "$HOME/sz-after-stage1.txt")" = "$M" ]; then echo "OK: moved to the split ($M)"
+  else echo "STOP: HEAD is not M after the move; don't run this block again; ask"; fi ||
+  echo "STOP: the move did not finish (a fast-forward refusal changes nothing); check git log -1; ask"
+fi
+```
+
+(`merge --ff-only <M>` is the fast-forward `pull --ff-only` would do,
+without its fetch: it can only move `main` forward to `M`, and refuses,
+changing nothing, if it can't. A local branch's `git pull` would take
+whatever `main` holds by then.)
+
+**From here until the migration (§3): never `git pull` on the host.**
+`main` may gain `builder` and `next` at any time; the host stays at `M`
+(plus its own torrent commits once the round resumes). The one way the
+host takes a later `main` is the §1.4 block with `T=main`, after the
+round, on the user's word.
 
 **Rollback of this pull** (instead of TESTING-STAGE1.md step 6, which
 uses `reset --keep`; this runbook uses no `reset`: the old commit gets a
@@ -513,10 +640,18 @@ script):
   §1.0 the split's (the same code behind symlinks).
 
 To resume, on the user's word and only with `sz-busy.sh` printing
-`IDLE`: run exactly the start command in `$HOME/sz-round-paused.txt`
-(if it has none, ask), append the time to that file, and release
-`finish_pending_uploads.sh` only if the user says so too. Then remove
-`$HOME/sz-round-over.txt` if it exists: the round runs again.
+`IDLE`:
+1. Check that no test of ours runs: `pgrep -af "$SZT/run-one.sh"`,
+   `docker ps --format '{{.Names}}' | grep -E '^cmp-'`, and any
+   `create_osm_zim`/`osmium` naming `$SZT` (`sz-busy.sh` skips all of
+   these). If one does, ask the user whether to stop it first (a 16 GiB
+   test next to a continent build is how the host OOMs).
+2. Remove `$HOME/sz-round-over.txt` if it exists.
+3. In a **fresh shell that has not sourced `sz-env.sh`** (its
+   `TMPDIR` and `GIT_CEILING_DIRECTORIES` must not reach production),
+   run exactly the start command in `$HOME/sz-round-paused.txt` (if it
+   has none, ask), and append the time to that file.
+4. Release `finish_pending_uploads.sh` only if the user says so too.
 
 ### 1.1 Look (read-only)
 
@@ -658,6 +793,8 @@ elif o=$($G --no-optional-locks diff --name-only HEAD | grep -v -x -E "$DEPLOY|$
   echo "STOP: tracked files modified that are neither deploy output nor host-edited; ask:"; echo "$o"
 elif c=$($G --no-optional-locks diff --name-only HEAD | sort | comm -12 - <($G diff --name-only HEAD "refs/remotes/origin/$T" | sort)); echo "$c" | grep -q -v -x -E "$DEPLOY|"; then
   echo "STOP: host-edited files that the move changes; ask:"; echo "$c"
+elif u=$($G diff --name-only --diff-filter=A HEAD "refs/remotes/origin/$T" | while read -r f; do [ -e "/storage/streetzim/$f" ] || [ -L "/storage/streetzim/$f" ] && echo "$f"; done); [ -n "$u" ]; then
+  echo "STOP: untracked or ignored files where $T adds tracked ones (the pull would refuse, or overwrite ignored ones); ask:"; echo "$u"
 elif bash "$HOME/sz-busy.sh" >/dev/null; [ $? -ne 1 ]; then
   echo "STOP: something started meanwhile; run the block again later"
 else
@@ -699,7 +836,11 @@ changes any of them, the block copies exactly those files to
 `$SZT/results/deploy-output-<time>/` and restores them to `HEAD`, then
 moves; the next upload's deploy regenerates them from the new code. It
 stops instead if any other tracked file is modified (apart from the
-host-edited lists, which no move changes), or if anything is staged.
+host-edited lists, which no move changes), if anything is staged, or if
+an untracked or ignored file sits where the target adds a tracked one.
+`git restore` needs git 2.23 or later (§1.0's checks print the version;
+`switch` needs the same). On an older git, stop and ask; don't substitute
+`checkout --`.
 Never commit them on the host: that makes the `main` → `builder` →
 `next` merges conflict in `build-info.js`. (`web/sitemap.xml` is tracked
 but nothing writes it, so it is not deploy output.) Taking the four out
@@ -759,6 +900,8 @@ elif o=$($G --no-optional-locks diff --name-only HEAD | grep -v -x -E "$DEPLOY|$
   echo "STOP: tracked files modified that are neither deploy output nor host-edited; ask:"; echo "$o"
 elif c=$($G --no-optional-locks diff --name-only HEAD | sort | comm -12 - <($G diff --name-only HEAD '@{u}' | sort)); echo "$c" | grep -q -v -x -E "$DEPLOY|"; then
   echo "STOP: host-edited files that the pull changes; ask:"; echo "$c"
+elif u=$($G diff --name-only --diff-filter=A HEAD '@{u}' | while read -r f; do [ -e "/storage/streetzim/$f" ] || [ -L "/storage/streetzim/$f" ] && echo "$f"; done); [ -n "$u" ]; then
+  echo "STOP: untracked or ignored files where the pull adds tracked ones; ask:"; echo "$u"
 else
   if [ -n "$c" ]; then   # deploy output the pull changes: save, then restore exactly those (§1.4)
     K=$SZT/results/deploy-output-$(date +%Y%m%d-%H%M%S) &&
@@ -1207,6 +1350,7 @@ records a 429 as a miss). Run this until two runs in a row print the same
 
 ```bash
 . "$HOME/sz-env.sh" && sz_round_quiet || exit
+[ "$(awk '/^MemAvailable:/ {print int($2/1048576)}' /proc/meminfo)" -ge 16 ] || { echo "STOP: under 16 GiB MemAvailable (swap is full)"; exit; }
 cd "$SZT/dcwiki/next" && STREETZIM_CACHE_DIR="$SZT/dcwiki/cache" "$PY" "$SZT/next/create_osm_zim.py" --pbf /storage/streetzim/world-data/regions/washington-dc.osm.pbf --mbtiles /storage/streetzim/world-data/regions/washington-dc.mbtiles --bbox=-77.12,38.79,-76.91,38.99 --name "Washington, D.C." --wikidata --wikidata-cache "$SZT/dcwiki/wd" --resolve-wikidata-titles --wikidata-title-cache "$SZT/dcwiki/titles.json" --bundle-wiki-articles --wiki-articles-source /storage/streetzim/wiki-src/wikipedia_en_all_maxi_2026-02.zim --wiki-images all --wiki-image-max-kb 128 -o "$SZT/dcwiki/next/dc-next.zim" > "$SZT/dcwiki/next/build.log" 2>&1; echo "exit $?"; grep -a -e 'distinct titles' -e 'stored' -e 429 "$SZT/dcwiki/next/build.log" | tail -5
 ```
 
@@ -1387,8 +1531,19 @@ download OpenFreeMap's newest planet, the file maps2zim itself would fetch
 (on 29 September `areas/planet/20260927_080001_pt/tiles.mbtiles`,
 102,753,779,712 B):
 
+The download is 103 GB on `/storage` and the image about 1–2 GB on the
+docker filesystem (57 GB, 85 % used, shared with another tenant), so the
+block checks both first: at least **650 GB** free on `/storage` (the
+500 GB run floor after the planet, plus margin) and **10 GB** on the
+docker filesystem, and no round running:
+
 ```bash
-. "$HOME/sz-env.sh" || exit
+. "$HOME/sz-env.sh" && sz_round_quiet || exit
+DR=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
+fs=$(df -BG --output=avail "$SZT" | tail -1 | tr -dc 0-9); fd=$(df -BG --output=avail "$DR" | tail -1 | tr -dc 0-9)
+echo "free: $fs GB on the test root, $fd GB on docker ($DR)"
+[ -e "$SZT/planet/planet.mbtiles" ] || [ "${fs:-0}" -ge 650 ] || { echo "STOP: under 650 GB free for the planet; ask"; exit; }
+docker image inspect ghcr.io/openzim/maps:0.2.1 >/dev/null 2>&1 || [ "${fd:-0}" -ge 10 ] || { echo "STOP: under 10 GB free on the docker filesystem; ask"; exit; }
 mkdir -p "$SZT/planet"
 curl -fsS https://btrfs.openfreemap.com/files.txt | grep -E '^areas/planet/[0-9]+_[^/]+/tiles\.mbtiles$' | sort | tail -1 | tee "$SZT/planet/SOURCE.txt"
 curl -fL -C - --retry 5 -o "$SZT/planet/planet.mbtiles" "https://btrfs.openfreemap.com/$(head -1 "$SZT/planet/SOURCE.txt")"
@@ -1398,6 +1553,12 @@ docker pull ghcr.io/openzim/maps:0.2.1
 docker image inspect --format '{{json .RepoDigests}}' ghcr.io/openzim/maps:0.2.1 >> "$SZT/planet/SOURCE.txt"
 cat "$SZT/results/image-id.txt" >> "$SZT/planet/SOURCE.txt"
 ```
+
+(If the download stops early, run the block again: `-C -` resumes, and the
+floor check is skipped once the file exists; `df` then still shows what
+is left. The same docker floor applies to every image rebuild of §2.0:
+record the old image ID first and remove that ID after the rebuild, since
+the old image stays on the docker filesystem untagged.)
 
 The build id is the `<timestamp>_<suffix>` on the first line of
 `SOURCE.txt`. If the download restarted (`-C -`), check the final size
@@ -1431,14 +1592,18 @@ name=cmp-$region-$tool-$n
 [ -e "$d" ] && { echo "exists: $d"; exit 2; }
 bash "$HOME/sz-round.sh" > /dev/null; rr=$?
 [ "$rr" -eq 1 ] || [ "$rr" -eq 3 ] || { echo "not started: the round is running (sz-round.sh exit $rr)"; exit 3; }
-free_gb() { df -BG --output=avail /storage | tail -1 | tr -dc 0-9; }
+free_gb() { df -BG --output=avail "$SZT" | tail -1 | tr -dc 0-9; }   # the test root's filesystem (/storage)
 avail_gib() { awk '/^MemAvailable:/ {print int($2/1048576)}' /proc/meminfo; }
 [ "$(free_gb)" -ge 500 ] || { echo "not started: $(free_gb) GB free on /storage (want >= 500)"; exit 3; }
 [ "$(avail_gib)" -ge 24 ] || { echo "not started: $(avail_gib) GiB MemAvailable (want >= 24)"; exit 3; }
+docker ps --format '{{.Names}}' | grep -q -E '^(cmp-|sz-test-)' && { echo "not started: another test container runs:"; docker ps --format '{{.Names}}' | grep -E '^(cmp-|sz-test-)'; exit 3; }
 mkdir -p "$d/out" "$d/tmp" "$d/dl"
 host() { date -Is; cat /proc/loadavg /proc/pressure/cpu 2>/dev/null; free -g | sed -n 2p; bash "$HOME/sz-busy.sh" || true; df -h /storage | tail -1; }
 host > "$d/host-start.txt"
-lim=(-d --name "$name" --user "$(id -u):$(id -g)" --memory 16g --memory-swap 16g --cpu-shares 3072)
+# As Zimfarm's worker: cpu 3 -> cpu-shares 3072, memory 16 GiB, swappiness 0
+# (it sets no memory-swap; here swap is full, so 16g/16g). --user: without it
+# the files would be root's, and this account can't delete them (no sudo).
+lim=(-d --name "$name" --user "$(id -u):$(id -g)" -e HOME=/tmp --memory 16g --memory-swap 16g --memory-swappiness 0 --cpu-shares 3072)
 desc="Full map, including roads and landmarks"
 case $tool in
   maps2zim)
@@ -1498,6 +1663,14 @@ exit 4
 EOF
 bash -n "$SZT/run-one.sh" && echo "OK: runner written"
 ```
+
+**Deviations from the Zimfarm task, all deliberate:** the planet is
+seeded read-only instead of downloaded; `/tmp` is a folder on `/storage`,
+not the container's layer (the docker filesystem can't hold 100 GB); the
+tool runs under `measure_build.py` and as this account (`--user`, with
+`HOME=/tmp`), not root; `--memory-swap 16g` (Zimfarm leaves swap to the
+default with swappiness 0). The maps2zim arguments themselves are the
+recipe's, unchanged. List these under the table.
 
 maps2zim runs with its image's own paths (`--tmp /tmp`, `--dl /tmp/dl`,
 `--output /output`), all mounted from the run folder; its measurement
@@ -1630,14 +1803,23 @@ is a poly extract of the planet (`python -m streetzim.area poly` in the
 clone, then `osmium extract -p`), which reads all of it and costs hours
 of disk contention with the builds.
 
+The build runs on the host, not in a container, so it has no memory cap
+while swap is full: it starts only with 24 GiB `MemAvailable` and no §2e
+run in progress, and runs under a 16 GiB limit when `systemd-run --user`
+works (otherwise say so, and watch `free -g`):
+
 ```bash
 . "$HOME/sz-env.sh" && sz_round_quiet || exit
 A=$SZT/alaska
+[ "$(awk '/^MemAvailable:/ {print int($2/1048576)}' /proc/meminfo)" -ge 24 ] || { echo "STOP: under 24 GiB MemAvailable"; exit; }
+if pgrep -f "$SZT/run-one.sh" >/dev/null || docker ps --format '{{.Names}}' | grep -q '^cmp-'; then echo "STOP: a §2e/§2h run is in progress; wait for it"; exit; fi
+CAP=(systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0); "${CAP[@]}" true 2>/dev/null || CAP=()
+echo "memory cap: ${CAP[*]:-none (systemd-run --user unavailable)}"
 osmium extract -b 172.0,51.0,180.0,72.0 "$PROD/world-data/regions/russia.osm.pbf" -o "$A/west.osm.pbf" --overwrite &&
 osmium extract -b -180.0,51.0,-130.0,72.0 "$PROD/world-data/regions/alaska.osm.pbf" -o "$A/east.osm.pbf" --overwrite &&
 osmium merge "$A/west.osm.pbf" "$A/east.osm.pbf" -o "$A/alaska.osm.pbf" --overwrite; echo "extract exit $?"
 osmium fileinfo -e "$A/alaska.osm.pbf" | grep -A1 -i 'bounding box'
-cd "$A" && STREETZIM_CACHE_DIR="$A/cache" "$PY" "$SZT/next/create_osm_zim.py" --pbf "$A/alaska.osm.pbf" --mbtiles "$(cat "$A/WORLD_MBTILES.txt")" --bbox=172.0,51.0,-130.0,72.0 --name Alaska --routing --spatial-chunk-scale 10 --split-find-chips -o "$A/alaska.zim" > "$A/build.log" 2>&1; echo "exit $?"
+cd "$A" && STREETZIM_CACHE_DIR="$A/cache" "${CAP[@]}" "$PY" "$SZT/next/create_osm_zim.py" --pbf "$A/alaska.osm.pbf" --mbtiles "$(cat "$A/WORLD_MBTILES.txt")" --bbox=172.0,51.0,-130.0,72.0 --name Alaska --routing --spatial-chunk-scale 10 --split-find-chips -o "$A/alaska.zim" > "$A/build.log" 2>&1; echo "exit $?"
 grep -a -e 'antimeridian' -e 'opening centre' "$A/build.log" | head
 ```
 
@@ -1678,10 +1860,13 @@ row was measured with what is now `basic`.
 
 ```bash
 . "$HOME/sz-env.sh" && sz_round_quiet || exit
+[ "$(awk '/^MemAvailable:/ {print int($2/1048576)}' /proc/meminfo)" -ge 24 ] || { echo "STOP: under 24 GiB MemAvailable"; exit; }
+[ "$(df -BG --output=avail "$SZT" | tail -1 | tr -dc 0-9)" -ge 100 ] || { echo "STOP: under 100 GB free on /storage"; exit; }
+if pgrep -f "$SZT/run-one.sh" >/dev/null || docker ps --format '{{.Names}}' | grep -q -E '^(cmp-|sz-test-)'; then echo "STOP: another test run is in progress; wait for it"; exit; fi
 mkdir -p "$SZT/ma/in"
 curl -fL --retry 3 -o "$SZT/ma/in/massachusetts-latest.osm.pbf" https://download.geofabrik.de/north-america/us/massachusetts-latest.osm.pbf
 stat -c%s "$SZT/ma/in/massachusetts-latest.osm.pbf"
-docker run --rm --memory 16g --memory-swap 16g --user "$(id -u):$(id -g)" -e STREETZIM_CACHE_DIR=/work/cache -v "$SZT/ma:/work" streetzim:hosttest python /app/tools/measure_build.py --json /work/measure.json --watch /work/tmp --watch /work/out --watch /work/dl --log /work/build.log -- streetzim --profile basic --name osm_en_massachusetts --title Massachusetts --description "Offline map of Massachusetts with search and routing" --include-poly https://download.geofabrik.de/north-america/us/massachusetts.poly --pbf-url file:///work/in/massachusetts-latest.osm.pbf --output /work/out --tmp /work/tmp --dl /work/dl --stats-filename /work/out/task_progress.json; echo "exit $?"
+docker run --rm --name sz-test-ma --memory 16g --memory-swap 16g --user "$(id -u):$(id -g)" -e HOME=/tmp -e STREETZIM_CACHE_DIR=/work/cache -v "$SZT/ma:/work" streetzim:hosttest python /app/tools/measure_build.py --json /work/measure.json --watch /work/tmp --watch /work/out --watch /work/dl --log /work/build.log -- streetzim --profile basic --name osm_en_massachusetts --title Massachusetts --description "Offline map of Massachusetts with search and routing" --include-poly https://download.geofabrik.de/north-america/us/massachusetts.poly --pbf-url file:///work/in/massachusetts-latest.osm.pbf --output /work/out --tmp /work/tmp --dl /work/dl --stats-filename /work/out/task_progress.json; echo "exit $?"
 cat /proc/loadavg; head -12 "$SZT/ma/measure.json"
 ```
 
@@ -1743,23 +1928,26 @@ Order: ops branch (§1.0) → `builder` → `next`. For each, the user:
 3. merges with **a merge commit** (not squash or rebase), so the commits
    the host is on stay ancestors of `main` and the host can fast-forward.
 
-**The `builder` and `next` PRs wait while the host is on `main`.** The
-host's upstream there is `origin/main`, so any pull on it (by anyone, or a
-re-run of TESTING-STAGE1.md step 4, which refuses only "already at the
-split") would bring `builder`'s or `next`'s code and viewer into the
-round (§1.0, "Why production waits"). They can merge once the host is on
-`host-builder` or `host-next` (§1.4, after the round), whose upstreams are
-those branches. This conflicts with the promise to openZIM of everything
-on `main` by the end of 29 September (Pacific): which gives way is the
-user's decision (for example: merge them anyway and the host doesn't
-pull at all until the round is over, accepting that one stray pull would
-mix code into the round). Build VMs
-(`ops/cloud/build-vm-startup.sh` clones or `pull --ff-only`s `main` at
-start) get the new code as soon as it is on `main`.
+**The `builder` and `next` PRs don't wait for the host.** The host moves
+to `main`'s merge commit `M` by an exact fast-forward (§1.0), never by a
+`pull`, and nothing on the host fetches or pulls by itself: the round's
+scripts only commit torrents locally (`cloud/upload_validated.sh`), and
+Firebase deploys `web/` from the checkout as it is. So `builder` and
+`next` can be on `main` today; the host keeps running `M`'s code until
+§1.4 (`T=main`) after the round. The one guard: **never `git pull` in
+`/storage/streetzim`, and never TESTING-STAGE1.md step 4 there, until
+that step** (§0, §1.0). Before merging them, the user checks that no
+build VM runs or can be relaunched, because VMs build from `main` and
+upload to archive.org: `ops/cloud/build-vm-startup.sh` clones (or, after
+a spot restart, `pull --ff-only`s) `main`, and `vm-health-cron.sh` and
+`spot-to-ondemand-watcher.sh` relaunch VMs on their own
+(`gcloud compute instances list --project streetzim --filter='name~^streetzim-build-'`
+empty, and neither script in any crontab). The host's later torrent
+commits reach `main` as the first two did (a pushed branch, merged).
 
 After each merge, on the host:
-- the ops branch: the host pulls `main` as §1.0 says (its upstream is
-  already `origin/main`), in an idle window;
+- the ops branch: the host moves to `M` as §1.0 says (a fast-forward to
+  that commit, not a pull), in an idle window;
 - after the round: if the host is on `main`, the §1.4 block with
   `T=main`, `L=host-main` moves it (it then pulls the merged `main`); if
   it is on `host-builder` or `host-next`, the same block after the

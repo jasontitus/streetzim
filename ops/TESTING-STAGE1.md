@@ -87,9 +87,9 @@ The cwd loop also lists test processes started under the test root
 - On the `*.list` files, `viewer-refresh.tsv`, `cloud/region-variants.tsv`
   or `tmp/live-inventory.out`, they are expected: the host edits those.
   Leave them.
-- On the deploy output (`web/index.html`, `web/sitemap.xml`,
-  `web/drive/build-info.js`, `web/drive/sw.js`,
-  `web/drive/viewer/.version`), they are expected after any upload: every
+- On the deploy output (`web/index.html`, `web/drive/build-info.js`,
+  `web/drive/sw.js`, `web/drive/viewer/.version`), they are expected
+  after any upload: every
   deploy rewrites them. They don't block this pull, because the split
   changes none of them (step 4 checks that and stops otherwise). Never
   `checkout --` them, even though "Pulling on the build host" in
@@ -196,6 +196,12 @@ Go on to step 4 only if all of these hold:
   layout, which resolves to the same code plus the guard.
 
 ## 4. The pull (the only step that changes the host)
+
+**Not on `ot-hel1` in September 2026:** a host that follows
+[TESTING-NEXT.md](TESTING-NEXT.md) uses its §1.0 "stage-1 move" instead,
+a fast-forward to the exact commit the lead names. This block pulls
+whatever the upstream holds when it runs, which can include branches
+merged after the one step 2 tested.
 
 One block, run as one command. It:
 - stops if it can't read the checkout, if `sz-busy.sh` is missing or
