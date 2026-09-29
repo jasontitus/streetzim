@@ -48,6 +48,7 @@ _TEXT = {
     "Creator": "CreatorMetadata",
     "Publisher": "PublisherMetadata",
     "Scraper": "ScraperMetadata",
+    "Flavour": "FlavourMetadata",
 }
 
 

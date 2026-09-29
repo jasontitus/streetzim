@@ -8,14 +8,36 @@ import urllib.request
 from streetzim.common import (
     print,
     CACHE_DIR,
-    SATELLITE_TILE_URL,
     parse_bbox,
 )
+from streetzim import satellite_sources
+
+
+def satellite_cache_dirs(source=satellite_sources.BUILDER_DEFAULT,
+                         sat_format="avif", tile_size=256):
+    """(JPEG source cache, encoded-tile cache) for a satellite source.
+
+    The 2021 mosaic keeps the cache names every existing cache uses
+    (satellite_cache_sources/, satellite_cache_<fmt>_<size>/). Any other
+    source gets its own satellite_<source>/ folder, so one year's tiles are
+    never reused for another."""
+    if source == satellite_sources.BUILDER_DEFAULT:
+        return (os.path.join(CACHE_DIR, "satellite_cache_sources"),
+                os.path.join(CACHE_DIR, f"satellite_cache_{sat_format}_{tile_size}"))
+    satellite_sources.get(source)
+    root = os.path.join(CACHE_DIR, f"satellite_{source}")
+    return (os.path.join(root, "sources"),
+            os.path.join(root, f"{sat_format}_{tile_size}"))
 
 
 def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
-                              sat_format="webp", sat_quality=None, tile_size=256):
+                              sat_format="webp", sat_quality=None, tile_size=256,
+                              source=satellite_sources.BUILDER_DEFAULT):
     """Download Sentinel-2 Cloudless satellite tiles for a bounding box.
+
+    ``source`` is a key of streetzim.satellite_sources.SOURCES (which EOX
+    mosaic, hence which licence); dest_dir should be that source's cache
+    (satellite_cache_dirs).
 
     Downloads JPEG tiles from the EOX Sentinel-2 Cloudless WMTS service,
     converts them to the specified format, and stores them as
@@ -34,7 +56,8 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
     if area.crosses(parse_bbox(bbox_str)):
         return sum(download_satellite_tiles(
             area.to_str(part), dest_dir, max_zoom=max_zoom, webp_quality=webp_quality,
-            sat_format=sat_format, sat_quality=sat_quality, tile_size=tile_size) or 0
+            sat_format=sat_format, sat_quality=sat_quality, tile_size=tile_size,
+            source=source) or 0
             for part in area.split(parse_bbox(bbox_str)))
     import io
     import math
@@ -60,8 +83,10 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
     minlon, minlat, maxlon, maxlat = bbox
 
     os.makedirs(dest_dir, exist_ok=True)
-    # Shared source cache for original JPEG tiles (download once, encode to any format)
-    source_cache_dir = os.path.join(CACHE_DIR, "satellite_cache_sources")
+    # Shared source cache for original JPEG tiles (download once, encode to
+    # any format), one per satellite source.
+    tile_url = satellite_sources.get(source).tile_url
+    source_cache_dir = satellite_cache_dirs(source)[0]
     os.makedirs(source_cache_dir, exist_ok=True)
     total_downloaded = 0
     total_skipped = 0
@@ -69,22 +94,28 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
     total_bytes_jpeg = 0
     total_bytes_out = 0
 
-    # Collect existing format caches for transcoding fallback. Only
-    # caches holding 256 px tiles qualify: the source tiles stitched
-    # below are 256 px, and a 512 px cache tile (satellite_cache_avif_512)
-    # pasted at (dx*256, dy*256) overflowed the canvas and overwrote its
-    # neighbouring quadrants.
+    # Collect existing format caches of the same source for transcoding
+    # fallback. Only caches holding 256 px tiles qualify: the source tiles
+    # stitched below are 256 px, and a 512 px cache tile
+    # (satellite_cache_avif_512) pasted at (dx*256, dy*256) overflowed the
+    # canvas and overwrote its neighbouring quadrants.
     _format_caches = []
-    for d in sorted(glob.glob(os.path.join(CACHE_DIR, "satellite_cache_*_*"))):
-        if os.path.isdir(d) and d != dest_dir and d != source_cache_dir:
-            # Dir name: satellite_cache_<ext>_<size>
-            parts = os.path.basename(d).replace("satellite_cache_", "").split("_")
-            if len(parts) >= 2 and parts[1] == "256":
-                _format_caches.append((d, parts[0]))
-    # Also check the legacy satellite_cache/ (256 px WebP tiles)
-    legacy_cache = os.path.join(CACHE_DIR, "satellite_cache")
-    if os.path.isdir(legacy_cache) and legacy_cache != dest_dir:
-        _format_caches.append((legacy_cache, "webp"))
+    if source == satellite_sources.BUILDER_DEFAULT:
+        for d in sorted(glob.glob(os.path.join(CACHE_DIR, "satellite_cache_*_*"))):
+            if os.path.isdir(d) and d != dest_dir and d != source_cache_dir:
+                # Dir name: satellite_cache_<ext>_<size>
+                parts = os.path.basename(d).replace("satellite_cache_", "").split("_")
+                if len(parts) == 2 and parts[1] == "256":
+                    _format_caches.append((d, parts[0]))
+        # Also check the legacy satellite_cache/ (256 px WebP tiles)
+        legacy_cache = os.path.join(CACHE_DIR, "satellite_cache")
+        if os.path.isdir(legacy_cache) and legacy_cache != dest_dir:
+            _format_caches.append((legacy_cache, "webp"))
+    else:
+        root = os.path.dirname(source_cache_dir)
+        for d in sorted(glob.glob(os.path.join(root, "*_256"))):
+            if os.path.isdir(d) and d != dest_dir:
+                _format_caches.append((d, os.path.basename(d).split("_")[0]))
 
     def _fetch_source_tile(z, x, y):
         """Get a single 256px tile, using source cache if available.
@@ -112,7 +143,7 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
                     pass
 
         # Download from network
-        url = SATELLITE_TILE_URL.format(z=z, x=x, y=y)
+        url = tile_url.format(z=z, x=x, y=y)
         for attempt in range(4):
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})

@@ -178,7 +178,7 @@
      occupies bottom 10..54, so the scale bar at bottom:0 (+10px of
      MapLibre's own margin) printed straight on top of its second line.
      Verified by injection at 320/390/430 before editing. */
-  .maplibregl-ctrl-bottom-left { bottom: calc(48px + var(--safe-bottom, 0px)); }
+  .maplibregl-ctrl-bottom-left { bottom: calc(max(48px, var(--sz-attrib-h, 0px) + 4px) + var(--safe-bottom, 0px)); }
   /* Keep the locate button above the DEAD TOUCH BAND next to the app's bottom
      toolbar: in the Kiwix WebView, taps in the lowest ~50px are swallowed by
      the native toolbar hit-slop / home-indicator gestures even though the
@@ -227,7 +227,9 @@
        this label inside it — an 18 px overlap the detector confirmed at 320,
        390 and 430. Pre-dates the mobile merge; the Kiwix safe-area inset was
        masking it by lifting everything bottom-anchored clear. */
-    position: absolute; bottom: calc(84px + var(--safe-bottom, 0px)); left: 10px; z-index: 1;
+    /* --sz-attrib-h: the attribution's height when it wraps further
+       (120-map-init-and-style.js). */
+    position: absolute; bottom: calc(max(84px, var(--sz-attrib-h, 0px) + 40px) + var(--safe-bottom, 0px)); left: 10px; z-index: 1;
     background: rgba(255,255,255,0.65); padding: 3px 8px;
     border-radius: 4px; font-family: var(--ui-font);
     font-size: 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
@@ -419,9 +421,14 @@
   .search-result:last-child { border-bottom: none; }
   .search-result:hover, .search-result.active { background: var(--hover-bg); }
   .search-result-name { font-size: 13px; color: var(--text-primary); font-weight: 500; letter-spacing: -0.01em; }
+  /* No text-transform: capitalize here. It turned the distance into
+     "1 Mi" and "Nearby" and recapitalised place names ("Ravin De ..."),
+     while the category it was meant for never changed: the category
+     follows the name with no space between, so Chrome and WebKit count
+     "Casinogrocery" as one word. The category keeps that lower case. */
   .search-result-type {
     font-size: 11px; color: var(--text-tertiary); margin-left: 6px;
-    text-transform: capitalize; font-weight: 400;
+    font-weight: 400;
   }
   .search-no-results {
     padding: 16px 14px; color: var(--text-tertiary); font-size: 13px; text-align: center;
@@ -542,7 +549,7 @@
     /* Left of MapLibre's bottom-right control stack (the locate button,
        44 px wide on a coarse pointer): at right:10px its lower third sat
        under that button on phones. */
-    position: absolute; bottom: calc(58px + var(--safe-bottom, 0px)); right: 64px; z-index: 2;
+    position: absolute; bottom: calc(max(58px, var(--sz-attrib-h, 0px) + 14px) + var(--safe-bottom, 0px)); right: 64px; z-index: 2;
     background: rgba(255,255,255,0.65); border: none; border-radius: 4px;
     padding: 2px 7px; font-size: 11px; cursor: pointer;
     font-family: var(--ui-font); color: var(--text-secondary);
@@ -575,7 +582,12 @@
     margin: 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5;
   }
   #attr-dialog .license {
-    font-size: 11px; color: var(--text-tertiary); font-style: italic;
+    /* --text-secondary: 4.8:1 on the white dialog (tertiary was 2.5:1). */
+    font-size: 11px; color: var(--text-secondary); font-style: italic;
+  }
+  #attr-dialog #about-notice {
+    margin-top: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);
+    border-left: 3px solid var(--accent); padding-left: 8px;
   }
   #attr-close {
     position: absolute; top: 12px; right: 14px;
@@ -1028,6 +1040,115 @@
   @media (max-width: 480px) {
     body:not(.sz-debug) #viewer-build-stamp { display: none !important; }
   }
+  /* --- Dark UI chrome ---
+     html.sz-dark is set by 135-map-theme.js from the same choice as the dark
+     map (?theme=, a host that inverts the page, prefers-color-scheme, live
+     changes), so the panels can never disagree with the map. A class, not
+     @media, because ?theme=light must win over a dark OS and Kiwix JS's
+     invert mode must get light. Light mode reads none of this: the --szd-*
+     tokens are undefined there, so each var(--szd-..., <light value>) in the
+     JS-built sheets (find results, place details, wiki panel) falls back to
+     the light colour it always had. Text pairs keep WCAG AA (4.5:1) on the
+     panel colour (tests/viewer_style_js.test.mjs checks them). */
+  html.sz-dark {
+    color-scheme: dark;
+    --panel-bg: rgba(35,38,45,0.96);
+    --panel-shadow: 0 2px 12px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.08);
+    --text-primary: #e8eaed;
+    --text-secondary: #b9bec7;
+    --text-tertiary: #9ea4ae;
+    --border: rgba(255,255,255,0.10);
+    --hover-bg: rgba(138,180,248,0.12);
+    --szd-surface: #23262d;
+    --szd-surface-a: rgba(35,38,45,0.96);
+    --szd-surface-hover: #2e323a;
+    --szd-fg: #e8eaed;
+    --szd-fg-2: #c9cdd3;
+    --szd-fg-3: #a9afb8;
+    --szd-line: #3c414a;
+    --szd-link: #8ab4f8;
+    --szd-handle: #4b5059;
+    --szd-warn: #fca5a5;
+    --szd-btn2-bg: #2b3546;
+    --szd-btn2-fg: #a8c7fa;
+  }
+  html.sz-dark #info { background: rgba(35,38,45,0.92); }
+  html.sz-dark #attr-btn { background: rgba(35,38,45,0.92); }
+  html.sz-dark #attr-btn:hover { background: #2e323a; }
+  html.sz-dark #attr-dialog { background: #23262d; box-shadow: 0 8px 32px rgba(0,0,0,0.6); }
+  html.sz-dark #attr-overlay { background: rgba(0,0,0,0.6); }
+  html.sz-dark #info .sz-recover a, html.sz-dark #info a.sz-change { color: #8ab4f8; }
+  html.sz-dark #wiki-panel-count { background: rgba(255,255,255,0.08); }
+  html.sz-dark #preview-banner-note:not(:empty) { color: #fbbf24; }
+  html.sz-dark #find-chips .find-chip:not(.on) {
+    background: rgba(35,38,45,0.96); border-color: rgba(255,255,255,0.14);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+  }
+  html.sz-dark #find-chips .find-chip:not(.on):hover { background: #2e323a; }
+  /* --accent (#2563eb) stays for filled buttons (white text, 5.2:1); as
+     text on a dark panel it is too dark, so text uses a lighter blue. */
+  html.sz-dark .pin-popup .pin-link,
+  html.sz-dark #routing-panel.minimized #routing-minimize { color: #8ab4f8; }
+  html.sz-dark .sz-home-btn svg { fill: #e8eaed; }
+  /* Focus rings: the light ones (15-20% blue) vanish on a dark panel.
+     #8ab4f8 is 7.9:1 on it (WCAG 2.2 wants 3:1 for focus indicators). */
+  html.sz-dark #search-input:focus,
+  html.sz-dark .routing-input:focus { box-shadow: 0 0 0 2px #8ab4f8; border-color: #8ab4f8; }
+  /* MapLibre's own controls (maplibre-gl.css is light only). */
+  html.sz-dark .maplibregl-ctrl-group { background: #23262d; }
+  html.sz-dark .maplibregl-ctrl-group:not(:empty) { box-shadow: 0 0 0 2px rgba(255,255,255,0.10); }
+  html.sz-dark .maplibregl-ctrl-group button + button { border-top-color: #3c414a; }
+  html.sz-dark .maplibregl-ctrl button:not(:disabled):hover { background-color: rgba(255,255,255,0.08); }
+  /* The icons are black SVGs; invert + hue-rotate keeps the geolocate blue blue. */
+  html.sz-dark .maplibregl-ctrl button .maplibregl-ctrl-icon,
+  html.sz-dark .maplibregl-ctrl-attrib-button { filter: invert(1) hue-rotate(180deg); }
+  html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-scale {
+    background-color: rgba(35,38,45,0.92); border-color: #c9cdd3; color: #e8eaed;
+  }
+  html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-attrib,
+  html.sz-dark .maplibregl-ctrl-attrib.maplibregl-compact {
+    background-color: rgba(35,38,45,0.92); color: #c9cdd3;
+  }
+  html.sz-dark .maplibregl-ctrl-attrib a { color: #c9cdd3; }
+  html.sz-dark .maplibregl-popup-content {
+    background: #23262d; color: var(--text-primary); box-shadow: 0 2px 12px rgba(0,0,0,0.55);
+  }
+  html.sz-dark .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+  html.sz-dark .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+  html.sz-dark .maplibregl-popup-anchor-top-right .maplibregl-popup-tip { border-bottom-color: #23262d; }
+  html.sz-dark .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+  html.sz-dark .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+  html.sz-dark .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip { border-top-color: #23262d; }
+  html.sz-dark .maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: #23262d; }
+  html.sz-dark .maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: #23262d; }
+  html.sz-dark .maplibregl-popup-close-button { color: var(--text-secondary); }
+  /* Printing: paper is white, so print the chrome in its light colours.
+     The --szd-* tokens go back to "guaranteed invalid", so every
+     var(--szd-..., <light>) falls back to its light colour again. */
+  @media print {
+    html.sz-dark {
+      color-scheme: light;
+      --panel-bg: rgba(255,255,255,0.96);
+      --panel-shadow: 0 2px 12px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.04);
+      --text-primary: #1a1a1a;
+      --text-secondary: #6b7280;
+      --text-tertiary: #9ca3af;
+      --border: rgba(0,0,0,0.06);
+      --hover-bg: rgba(37,99,235,0.04);
+      --szd-surface: initial; --szd-surface-a: initial; --szd-surface-hover: initial;
+      --szd-fg: initial; --szd-fg-2: initial; --szd-fg-3: initial; --szd-line: initial;
+      --szd-link: initial; --szd-handle: initial; --szd-warn: initial;
+      --szd-btn2-bg: initial; --szd-btn2-fg: initial;
+    }
+    html.sz-dark #info, html.sz-dark #attr-btn,
+    html.sz-dark #find-chips .find-chip:not(.on),
+    html.sz-dark .maplibregl-ctrl-group, html.sz-dark .maplibregl-popup-content,
+    html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-scale,
+    html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-attrib { background: #fff; color: #1a1a1a; }
+    html.sz-dark .maplibregl-ctrl button .maplibregl-ctrl-icon,
+    html.sz-dark .maplibregl-ctrl-attrib-button { filter: none; }
+    html.sz-dark .sz-home-btn svg { fill: #333; }
+  }
 </style>
 </head>
 <body>
@@ -1291,6 +1412,7 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
       <p id="about-title">Offline OpenStreetMap</p>
       <p id="about-desc"></p>
       <p class="license" id="about-meta"></p>
+      <p id="about-notice" role="note" style="display:none;"></p>
     </section>
     <h2>Data Sources &amp; Licenses</h2>
     <section>
@@ -1315,8 +1437,8 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
     </section>
     <section id="attr-satellite-section" style="display:none;">
       <h3>Satellite Imagery</h3>
-      <p>Sentinel-2 Cloudless by EOX IT Services GmbH</p>
-      <p class="license">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA 4.0) &mdash; s2maps.eu</p>
+      <p id="attr-satellite-by">Sentinel-2 Cloudless by EOX IT Services GmbH</p>
+      <p class="license" id="attr-satellite-license">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA 4.0) &mdash; s2maps.eu</p>
     </section>
     <section id="attr-terrain-section" style="display:none;">
       <h3>Terrain / Elevation</h3>
@@ -1372,8 +1494,9 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
      error shown when the map cannot start at all: a browser without Fetch /
      Promise / MapLibre, no WebGL, or a map-config.json that never loaded.
      The styles sit here rather than in 010 so this feature is one part.
-     Panels stay light in both map themes, as every other panel does; only
-     the full-page error, which has no map behind it, follows the OS scheme. -->
+     The Home button and About panel follow the map theme through
+     html.sz-dark (010); the full-page error, which can appear before any
+     of that code runs, follows the OS scheme directly. -->
 <style>
   .sz-home-btn svg { display: block; margin: auto; width: 18px; height: 18px; fill: #333; }
   #about-section { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
@@ -1694,7 +1817,7 @@ function showFatalError(title, err, url) {
   if (url) html += '<p style="font-size:8px;opacity:0.7;word-break:break-all;">URL: ' + url + '</p>';
   html += '<p style="font-size:8px;opacity:0.7;">UA: ' + (navigator.userAgent || '?').substring(0, 80) + '</p>';
   html += '<p style="font-size:8px;opacity:0.7;">Base: ' + baseUrl + '</p>';
-  html += '<p style="font-size:9px;"><a href="#" id="debug-show" style="color:#2563eb;">Show debug log</a></p>';
+  html += '<p style="font-size:9px;"><a href="#" id="debug-show" style="color:var(--szd-link, #2563eb);">Show debug log</a></p>';
   info.innerHTML = html;
   info.style.maxWidth = '420px';
   var link = document.getElementById('debug-show');
@@ -1702,7 +1825,7 @@ function showFatalError(title, err, url) {
     link.addEventListener('click', function(e) {
       e.preventDefault();
       var pre = document.createElement('pre');
-      pre.style.cssText = 'max-height:200px;overflow:auto;font-size:9px;background:#fff;padding:6px;margin-top:6px;border:1px solid #ddd;white-space:pre-wrap;word-break:break-all;';
+      pre.style.cssText = 'max-height:200px;overflow:auto;font-size:9px;background:var(--szd-surface, #fff);padding:6px;margin-top:6px;border:1px solid var(--szd-line, #ddd);white-space:pre-wrap;word-break:break-all;';
       pre.textContent = _debugLog.join('\n') || '(empty)';
       info.appendChild(pre);
       link.style.display = 'none';
@@ -1868,10 +1991,7 @@ if (!window.__szUnsupported) fetchConfig(1)
       minZoom: config.minZoom || 0,
       maxZoom: 20,
       attributionControl: true,
-      maxBounds: config.bounds ? [
-        [config.bounds[0] - 0.01, config.bounds[1] - 0.01],
-        [config.bounds[2] + 0.01, config.bounds[3] + 0.01]
-      ] : undefined
+      maxBounds: _szMaxBounds(config)   // the built box, no margin (140)
     });
     // Exposed so module-scope helpers (e.g. openWikiArticle) can stamp the
     // current view into the URL hash before navigating away.
@@ -1946,8 +2066,9 @@ if (!window.__szUnsupported) fetchConfig(1)
     initHomeButton(map, config);
     initViewMemory(map, config);
     initAbout(config);
-    // Scale bar with mi/km toggle — click to switch units
-    var scaleUnit = 'imperial';
+    // Scale bar with mi/km toggle — click to switch units. The choice is
+    // kept (szReadUnit/szWriteUnit, 140) and every distance follows it.
+    var scaleUnit = szReadUnit(_szStorage());
     map._streetzimUnit = scaleUnit;  // shared with driving-mode HUD
     var scaleControl = new maplibregl.ScaleControl({ unit: scaleUnit });
     map.addControl(scaleControl, 'bottom-left');
@@ -1956,6 +2077,7 @@ if (!window.__szUnsupported) fetchConfig(1)
         scaleUnit = scaleUnit === 'imperial' ? 'metric' : 'imperial';
         scaleControl.setUnit(scaleUnit);
         map._streetzimUnit = scaleUnit;
+        szWriteUnit(_szStorage(), scaleUnit);
         map.fire('streetzim.units', { unit: scaleUnit });
       }
     });
@@ -2000,6 +2122,17 @@ if (!window.__szUnsupported) fetchConfig(1)
     map.addControl(geolocate, 'bottom-right');
     geolocate.on('geolocate', function(pos) { _onLocated(pos); });
 
+    // #info, #attr-btn and the scale bar sit above MapLibre's attribution,
+    // which wraps to more lines on a phone when the satellite credit joins
+    // it: its height is published as --sz-attrib-h for their CSS.
+    (function () {
+      var attrib = document.querySelector('.maplibregl-ctrl-attrib');
+      if (!attrib || typeof ResizeObserver === 'undefined') return;
+      new ResizeObserver(function () {
+        document.documentElement.style.setProperty('--sz-attrib-h', attrib.offsetHeight + 'px');
+      }).observe(attrib);
+    })();
+
     // Satellite layer toggle
     if (config.hasSatellite) {
       var toggleBtn = document.getElementById('layer-toggle');
@@ -2020,9 +2153,13 @@ if (!window.__szUnsupported) fetchConfig(1)
         var satExt = config.satelliteFormat || 'webp';
         var satTileSize = config.satelliteTileSize || 256;
         // Use zimtile:// protocol for retry logic on Kiwix service worker
+        // EOX requires its credit in the map itself; MapLibre shows a
+        // source's attribution while one of its layers is visible.
+        var satCredit = _szSatelliteCreditHtml(config);
         map.addSource('satellite', {
           type: 'raster',
           tiles: ['zimtile://' + baseUrl + 'satellite/{z}/{x}/{y}.' + satExt],
+          attribution: satCredit,
           tileSize: satTileSize,
           minzoom: 0,
           maxzoom: config.satelliteMaxZoom || 14
@@ -3217,6 +3354,19 @@ function _szPrefersDark() {
   } catch (e) { return false; }
 }
 
+// The page chrome follows the map: html.sz-dark switches the search box,
+// chips, panels and MapLibre's controls to their dark colours (010-styles).
+// Applied once as the script loads, before the map exists, so the chrome
+// does not flash light, and again on every live scheme change.
+function _szApplyUiTheme(dark) {
+  try {
+    var root = document.documentElement;
+    if (dark) root.classList.add('sz-dark');
+    else root.classList.remove('sz-dark');
+  } catch (e) {}
+}
+_szApplyUiTheme(_szPrefersDark());
+
 function _szThemeStyle(style, dark) {
   if (!dark) return style;
   style.layers.forEach(function(layer) {
@@ -3243,6 +3393,7 @@ function initMapTheme(map, config) {
     var dark = _szPrefersDark();
     if (dark === current) return;
     current = dark;
+    _szApplyUiTheme(dark);
     var style = makeStyle(config);
     style.layers.forEach(function(layer) {
       if (!layer.paint || !map.getLayer(layer.id)) return;
@@ -3561,6 +3712,51 @@ function _szStorage() {
   } catch (e) { return null; }
 }
 
+// Distance units. One setting for the whole viewer: the scale bar (click
+// it to switch), search distances, Find cards and "Nearby", the place
+// sheet, the routing panel and places.html, which reads it from
+// localStorage ('streetzim.units'). A saved choice wins; otherwise the
+// reader's locale decides: imperial for US English or a US, Liberian or
+// Myanmar region, metric for everyone else (en-GB too, for simplicity).
+var SZ_UNITS_KEY = 'streetzim.units';
+function szLocaleUnit(nav) {
+  var langs = [];
+  try {
+    if (nav && nav.languages && nav.languages.length) langs = Array.prototype.slice.call(nav.languages);
+    else if (nav && nav.language) langs = [nav.language];
+  } catch (e) {}
+  var tag = String(langs[0] || '');
+  var region = (/^[a-z]{2,3}(?:-[a-z]{4})?-([a-z]{2})\b/i.exec(tag) || [])[1];
+  region = region ? region.toUpperCase() : '';
+  return region === 'US' || region === 'LR' || region === 'MM' ? 'imperial' : 'metric';
+}
+function szReadUnit(storage, nav) {
+  try {
+    var u = storage && storage.getItem(SZ_UNITS_KEY);
+    if (u === 'metric' || u === 'imperial') return u;
+  } catch (e) {}
+  return szLocaleUnit(nav === undefined ? (typeof navigator !== 'undefined' ? navigator : null) : nav);
+}
+function szWriteUnit(storage, unit) {
+  try { if (storage) storage.setItem(SZ_UNITS_KEY, unit); } catch (e) {}
+}
+function szUnit() {
+  var m = window.__szMap;
+  return (m && m._streetzimUnit) || szReadUnit(_szStorage());
+}
+// 850 m / 1.4 km / 12 km, or 500 ft / 1.4 mi / 12 mi. Unit symbols lower case.
+function szFormatDistance(meters, unit) {
+  if (meters == null || !isFinite(meters)) return '';
+  if (unit === 'imperial') {
+    var feet = meters * 3.28084;
+    if (feet < 1000) return Math.round(feet) + ' ft';
+    var miles = meters / 1609.344;
+    return (miles < 10 ? miles.toFixed(1) : Math.round(miles)) + ' mi';
+  }
+  if (meters < 1000) return Math.round(meters) + ' m';
+  return (meters / 1000).toFixed(meters < 10000 ? 1 : 0) + ' km';
+}
+
 function _szViewKey(config) {
   var b = config && config.bounds;
   var id = (config && config.name) || '';
@@ -3626,6 +3822,95 @@ function _szOpeningCamera(config, hash, storage) {
   if (_szHashSetsView(hash)) return home;
   return _szReadView(config, storage) || home;
 }
+
+// How far the reader can pan: exactly the built box (map-config.json's
+// "bounds", which is also what tilemaker clipped every layer to). MapLibre
+// keeps the whole viewport inside maxBounds, zooming in when it must, so no
+// part of the screen can show the area outside the box, where there is no
+// data at all -- not even the sea, whose polygons are clipped too. The
+// viewer used to add 0.01 degrees on every side, and that strip was drawn as
+// bare background: the sea stopped in a straight line at the edge of every
+// coastal region (Monaco's east and south edges). Longitudes past 180
+// (areas across the antimeridian) are passed through; MapLibre wraps them.
+// A box as wide as the world (world ZIMs: -180,-85,180,85) gets none:
+// MapLibre 5.23 throws in _calcMatrices on a 360-degree maxBounds ("Error
+// loading map"), and there is no edge to hide anyway. Latitudes are kept
+// inside Web Mercator's +-85.0511.
+var SZ_MERC_LAT = 85.0511;
+function _szMaxBounds(config) {
+  var b = config && config.bounds;
+  if (!b || b.length !== 4) return undefined;
+  for (var i = 0; i < 4; i++) if (typeof b[i] !== 'number' || !isFinite(b[i])) return undefined;
+  if (!(b[0] < b[2] && b[1] < b[3])) return undefined;
+  if (b[2] - b[0] >= 359.9) return undefined;
+  var s = Math.max(b[1], -SZ_MERC_LAT), n = Math.min(b[3], SZ_MERC_LAT);
+  if (!(s < n)) return undefined;
+  return [[b[0], s], [b[2], n]];
+}
+
+// A result near the box edge cannot be flown to the middle of the free map:
+// maxBounds stops the camera at the edge, so flyTo's offset is lost and the
+// pin can end up under the find strip, the place sheet or the search box
+// (at the north edge MapLibre 5.23 even puts it above the screen). Moving
+// the camera cannot help; zooming in can, because the pin's distance in
+// pixels from the box edge doubles with each zoom level.
+//
+// y: the pin's y after the move; h: canvas height; top/bottom: px covered
+// by chrome; yNorth/ySouth: the box's north and south edges projected at
+// the same zoom (they may be off screen). Returns the zoom at which, centred
+// on the pin with no offset, it clears the chrome by `margin` px, or null
+// when it is clear already (or cannot be cleared).
+function _szClearZoom(y, h, top, bottom, zoom, maxZoom, yNorth, ySouth, margin) {
+  margin = margin || 40;
+  if (y > top + margin / 2 && y < h - bottom - margin / 2) return null;
+  var dTop = y - yNorth, dBottom = ySouth - y;   // px from each edge
+  var d = Math.min(dTop, dBottom);
+  var want = dBottom <= dTop ? bottom + margin : top + margin;
+  if (d * 2 >= h) return zoom;                   // not at an edge: just recentre
+  if (!(d > 1)) return null;
+  var z = Math.min(maxZoom, zoom + Math.max(0, Math.log(want / d) / Math.LN2));
+  return z;
+}
+
+// How much of the canvas the chrome covers: the search box at the top, and
+// at the bottom whichever sheet is open (find strip, place details, the
+// wiki panel when it is a bottom sheet).
+function _szCoveredEdges(map) {
+  var c = map.getCanvas().getBoundingClientRect(), top = 0, bottom = 0;
+  function rect(id) {
+    var el = document.getElementById(id);
+    // Not offsetParent: it is null for the position:fixed sheets.
+    if (!el || !el.getClientRects().length) return null;
+    var r = el.getBoundingClientRect();
+    return r.height > 0 ? r : null;
+  }
+  var sc = rect('search-container');
+  if (sc) top = Math.max(0, sc.bottom - c.top);
+  ['find-results-strip', 'place-detail', 'wiki-panel'].forEach(function(id) {
+    var r = rect(id);
+    if (r && r.top > c.top + c.height * 0.3) bottom = Math.max(bottom, c.bottom - r.top);
+  });
+  return { top: top, bottom: bottom };
+}
+
+// flyTo; then, if maxBounds left the target under the chrome, ease in on it.
+function _szFlyToClear(map, opts) {
+  var mb = map.getMaxBounds && map.getMaxBounds();
+  if (!mb) { map.flyTo(opts); return; }
+  // Listen first: a flyTo with duration 0 ends inside the call.
+  map.once('moveend', function() {
+    try {
+      var c = maplibregl.LngLat.convert(opts.center);
+      var h = map.getCanvas().clientHeight, e = _szCoveredEdges(map);
+      var z = _szClearZoom(map.project(c).y, h, e.top, e.bottom, map.getZoom(),
+                           map.getMaxZoom(), map.project([c.lng, mb.getNorth()]).y,
+                           map.project([c.lng, mb.getSouth()]).y);
+      if (z !== null) map.easeTo({ center: c, zoom: z, duration: 300 });
+    } catch (err) {}
+  });
+  map.flyTo(opts);
+}
+window.__szFlyToClear = _szFlyToClear;   // for tests and probes
 
 function _szDriving() {
   var hud = document.getElementById('drive-hud');
@@ -3753,6 +4038,47 @@ function _szMonth(d) {
 // Text for the About panel. Newer ZIMs carry title/description/
 // generator in map-config.json (streetzim/zim_writer.py _add_map_config);
 // older ones only name and buildDate, and every field is optional.
+// The satellite imagery's credit (EOX requires it wherever the imagery is
+// shown) and licence. map-config.json names them since the source became a
+// choice (streetzim/satellite_sources.py); a ZIM from before carries the
+// 2021 mosaic, CC BY-NC-SA 4.0. null without a satellite layer.
+function _szSatellite(config) {
+  if (!config || !config.hasSatellite) return null;
+  if (!config.satelliteAttribution) {
+    return { attribution: 'Sentinel-2 cloudless - https://s2maps.eu by EOX IT Services GmbH' +
+             ' (Contains modified Copernicus Sentinel data 2021)',
+             license: 'CC BY-NC-SA 4.0', licenseUrl: 'https://creativecommons.org/licenses/by-nc-sa/4.0/',
+             nonCommercial: true };
+  }
+  return { attribution: String(config.satelliteAttribution),
+           license: String(config.satelliteLicense || ''),
+           licenseUrl: String(config.satelliteLicenseUrl || ''),
+           year: String(config.satelliteYear || ''),
+           nonCommercial: !!config.satelliteNonCommercial };
+}
+
+function _szEsc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// The short credit on the map itself while the imagery is shown (the full
+// one is in About): links are fixed EOX addresses, and the licence link only
+// a Creative Commons 4.0 URL; everything taken from map-config is escaped.
+function _szSatelliteCreditHtml(config) {
+  var sat = _szSatellite(config);
+  if (!sat) return '';
+  var year = sat.year || (config.satelliteAttribution ? '' : '2021');
+  var lic = _szEsc(sat.license);
+  if (/^https:\/\/creativecommons\.org\/licenses\/[a-z-]+\/4\.0\/$/.test(sat.licenseUrl)) {
+    lic = '<a href="' + sat.licenseUrl + '" target="_blank" rel="noopener">' + lic + '</a>';
+  }
+  return '&copy; <a href="https://cloudless.eox.at" target="_blank" rel="noopener">EOxCloudless</a>' +
+    (year ? ' ' + _szEsc(year) : '') +
+    ' by <a href="https://eox.at" target="_blank" rel="noopener">EOX</a> &middot; ' + lic +
+    (sat.nonCommercial ? ' (non-commercial)' : '');
+}
+
 function _szAboutText(config) {
   config = config || {};
   var meta = [];
@@ -3762,10 +4088,18 @@ function _szAboutText(config) {
     meta.push('Built' + (when ? ' ' + when : '') + (config.generator ? ' with ' + config.generator : ''));
   }
   meta.push('viewer: streetzim ' + SZ_VIEWER_VERSION);
+  var sat = _szSatellite(config);
   return {
     title: config.title || config.name || 'Offline OpenStreetMap',
     desc: config.description || '',
-    meta: meta.join(' · ')
+    meta: meta.join(' · '),
+    // A ZIM with non-commercial imagery says so first thing in About.
+    notice: sat && sat.nonCommercial ?
+      'Restricted: the satellite imagery is licensed ' + sat.license +
+      ' and may be used for non-commercial purposes only; the rest of this map is openly licensed.' : '',
+    satCredit: sat ? sat.attribution : '',
+    satLicense: sat ? sat.license + (sat.nonCommercial ? ', non-commercial use only' : '') +
+      (sat.licenseUrl ? ' \u2014 ' + sat.licenseUrl.replace(/^https?:\/\//, '') : '') : ''
   };
 }
 
@@ -3778,6 +4112,13 @@ function initAbout(config) {
   set('about-title', t.title);
   set('about-desc', t.desc);
   set('about-meta', t.meta);
+  set('about-notice', t.notice);
+  var notice = document.getElementById('about-notice');
+  if (notice) notice.style.display = t.notice ? '' : 'none';
+  if (t.satCredit) {
+    set('attr-satellite-by', t.satCredit);
+    set('attr-satellite-license', t.satLicense);
+  }
   // Focus moves into the dialog on open, Tab stays inside it, and focus
   // returns to the button however it closes (it is aria-modal); Escape
   // closes it without reaching the other Escape handlers (find results,
@@ -4092,8 +4433,8 @@ function _renderSubfilterRow(map, stash) {
       + (active
         ? 'background:#1a73e8; color:#fff;'
           + 'border:1px solid #1a73e8;'
-        : 'background:#fff; color:#222;'
-          + 'border:1px solid #ddd;')
+        : 'background:var(--szd-surface, #fff); color:var(--szd-fg, #222);'
+          + 'border:1px solid var(--szd-line, #ddd);')
     );
     chip.textContent = (count != null) ? (label + ' · ' + count) : label;
     chip.addEventListener('click', function() {
@@ -4156,9 +4497,9 @@ function _renderFindResultsStrip(map, stash) {
   strip.id = 'find-results-strip';
   strip.style.cssText = (
     'position:fixed; left:0; right:0; bottom:var(--bottom-inset, 0px); z-index:1500;'
-    + 'background:rgba(255,255,255,0.96); border-top:1px solid #ccc;'
+    + 'background:var(--szd-surface-a, rgba(255,255,255,0.96)); border-top:1px solid var(--szd-line, #ccc);'
     + 'box-shadow:0 -4px 16px rgba(0,0,0,0.12);'
-    + 'font:13px/1.35 -apple-system,system-ui,sans-serif; color:#222;'
+    + 'font:13px/1.35 -apple-system,system-ui,sans-serif; color:var(--szd-fg, #222);'
     + 'padding-top:6px;'
     // Clear the dead touch band next to the app's bottom toolbar (see the
     // locate-button rule): without this the cards' lower half renders fine
@@ -4169,7 +4510,7 @@ function _renderFindResultsStrip(map, stash) {
   var header = document.createElement('div');
   header.style.cssText = (
     'padding:2px 14px 6px; display:flex; align-items:center; gap:8px;'
-    + 'font-size:12px; color:#555;'
+    + 'font-size:12px; color:var(--szd-fg-2, #555);'
   );
   var title = document.createElement('span');
   title.style.cssText = (
@@ -4184,7 +4525,7 @@ function _renderFindResultsStrip(map, stash) {
   closeBtn.textContent = '×';
   closeBtn.style.cssText = (
     'flex:0 0 auto; background:transparent; border:none;'
-    + 'font-size:18px; line-height:1; cursor:pointer; color:#666;'
+    + 'font-size:18px; line-height:1; cursor:pointer; color:var(--szd-fg-3, #666);'
     + 'padding:2px 6px;'
   );
   closeBtn.addEventListener('click', clearFindResults);
@@ -4293,7 +4634,7 @@ function _showSearchAreaPill(map) {
   btn.style.cssText = (
     'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
     + 'z-index:1600; padding:9px 18px;'
-    + 'background:rgba(255,255,255,0.92); color:#222;'
+    + 'background:var(--szd-surface-a, rgba(255,255,255,0.92)); color:var(--szd-fg, #222);'
     + 'border:1px solid rgba(0,0,0,0.12); border-radius:999px;'
     + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
     + 'box-shadow:0 4px 14px rgba(0,0,0,0.18);'
@@ -4302,10 +4643,10 @@ function _showSearchAreaPill(map) {
     + 'pointer-events:auto;'
   );
   btn.addEventListener('mouseenter', function() {
-    btn.style.background = 'rgba(255,255,255,1)';
+    btn.style.background = 'var(--szd-surface-hover, rgba(255,255,255,1))';
   });
   btn.addEventListener('mouseleave', function() {
-    btn.style.background = 'rgba(255,255,255,0.92)';
+    btn.style.background = 'var(--szd-surface-a, rgba(255,255,255,0.92))';
   });
   btn.addEventListener('click', function() {
     _searchAreaApply(map);
@@ -4382,7 +4723,7 @@ function _searchAreaApply(map) {
     btn.style.cssText = (
       'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
       + 'z-index:1600; padding:9px 18px;'
-      + 'background:rgba(255,255,255,0.95); color:#a33;'
+      + 'background:var(--szd-surface-a, rgba(255,255,255,0.95)); color:var(--szd-warn, #a33);'
       + 'border:1px solid rgba(170,50,50,0.25); border-radius:999px;'
       + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
       + 'box-shadow:0 4px 14px rgba(0,0,0,0.18); pointer-events:none;'
@@ -4471,8 +4812,8 @@ function _showPlaceDetail(map, r, idx) {
   panel.style.cssText = (
     'position:fixed; left:0; right:0; bottom:var(--bottom-inset, 0px); z-index:1701;'
     + 'max-height:calc(var(--app-height, 100vh) * 0.78); overflow-y:auto;'
-    + 'background:#fff; color:#222;'
-    + 'border-top:1px solid #ddd;'
+    + 'background:var(--szd-surface, #fff); color:var(--szd-fg, #222);'
+    + 'border-top:1px solid var(--szd-line, #ddd);'
     + 'border-radius:18px 18px 0 0;'
     + 'box-shadow:0 -8px 28px rgba(0,0,0,0.28);'
     + 'transform:translateY(100%); transition:transform .25s ease;'
@@ -4484,7 +4825,7 @@ function _showPlaceDetail(map, r, idx) {
   var handle = document.createElement('div');
   handle.style.cssText = (
     'width:40px; height:4px; border-radius:2px;'
-    + 'background:#d8dadd; margin:6px auto 12px;'
+    + 'background:var(--szd-handle, #d8dadd); margin:6px auto 12px;'
   );
   panel.appendChild(handle);
 
@@ -4502,7 +4843,7 @@ function _showPlaceDetail(map, r, idx) {
   close.textContent = '×';
   close.style.cssText = (
     'flex:0 0 auto; background:transparent; border:none;'
-    + 'font-size:28px; line-height:1; cursor:pointer; color:#666;'
+    + 'font-size:28px; line-height:1; cursor:pointer; color:var(--szd-fg-3, #666);'
     + 'padding:0 6px; margin-top:-4px;'
   );
   close.addEventListener('click', _hidePlaceDetail);
@@ -4517,7 +4858,7 @@ function _showPlaceDetail(map, r, idx) {
   if (r.l) subParts.push(r.l);
   if (subParts.length) {
     var sub = document.createElement('div');
-    sub.style.cssText = 'color:#666; font-size:13px; margin:4px 0 10px;';
+    sub.style.cssText = 'color:var(--szd-fg-3, #666); font-size:13px; margin:4px 0 10px;';
     sub.textContent = subParts.join(' · ');
     panel.appendChild(sub);
   }
@@ -4565,7 +4906,7 @@ function _showPlaceDetail(map, r, idx) {
   // Plus phone/website spelled out for accessibility / copy-paste
   var info = document.createElement('div');
   info.style.cssText = (
-    'border-top:1px solid #eee; margin-top:6px; padding-top:10px;'
+    'border-top:1px solid var(--szd-line, #eee); margin-top:6px; padding-top:10px;'
     + 'display:flex; flex-direction:column; gap:6px; font-size:13px;'
   );
   if (r.p) {
@@ -4681,7 +5022,7 @@ function _detailActionBtn(label, emoji, primary, onClick) {
     + 'transition:transform .08s ease, filter .08s ease;'
     + (primary
        ? 'background:#1a73e8; color:#fff; border:1px solid #1a73e8;'
-       : 'background:#fff; color:#1a73e8;'
+       : 'background:var(--szd-surface, #fff); color:var(--szd-link, #1a73e8);'
          + 'border:1px solid #1a73e8;')
   );
   // Tap feedback: dim + slight scale on press so the user gets
@@ -4706,7 +5047,7 @@ function _detailFactRow(label, value, href, target) {
   var lbl = document.createElement('span');
   lbl.textContent = label;
   lbl.style.cssText = (
-    'flex:0 0 70px; color:#888; font-size:12px; padding-top:2px;'
+    'flex:0 0 70px; color:var(--szd-fg-3, #888); font-size:12px; padding-top:2px;'
   );
   row.appendChild(lbl);
   var val;
@@ -4721,9 +5062,9 @@ function _detailFactRow(label, value, href, target) {
   val.style.cssText = (
     'flex:1 1 auto; min-width:0;'
     + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
-    + 'color:#1a73e8; text-decoration:none;'
+    + 'color:var(--szd-link, #1a73e8); text-decoration:none;'
   );
-  if (!href) val.style.color = '#222';
+  if (!href) val.style.color = 'var(--szd-fg, #222)';
   row.appendChild(val);
   return row;
 }
@@ -4752,7 +5093,7 @@ function _detailTravelTimesLine(r) {
   var driveMin = fmtMin(m / 11);
   var line = document.createElement('div');
   line.style.cssText = (
-    'color:#666; font-size:12px; margin:2px 0 0;'
+    'color:var(--szd-fg-3, #666); font-size:12px; margin:2px 0 0;'
   );
   // Drop walking estimate when it would exceed 2 hours; switch to
   // drive-only display so we're not telling the user to walk for
@@ -4777,7 +5118,7 @@ function _detailDistanceLine(r) {
   var o = _findResultsState.origin;
   var m = _haversineMetersStrip(o.lat, o.lon, r.a, r.o);
   var line = document.createElement('div');
-  line.style.cssText = 'color:#444; font-size:13px; margin:4px 0 0;';
+  line.style.cssText = 'color:var(--szd-fg-2, #444); font-size:13px; margin:4px 0 0;';
   var label = (o.label && o.label !== 'Current location')
     ? o.label : 'current location';
   line.textContent = _formatDistanceStrip(m) + ' from ' + label;
@@ -4825,7 +5166,7 @@ function _populateWikipediaExtract(slot, wd) {
   if (wd.d) {
     var desc = document.createElement('div');
     desc.style.cssText = (
-      'color:#555; font-size:13px; font-style:italic; margin-bottom:8px;'
+      'color:var(--szd-fg-2, #555); font-size:13px; font-style:italic; margin-bottom:8px;'
     );
     desc.textContent = wd.d;
     slot.appendChild(desc);
@@ -4833,13 +5174,13 @@ function _populateWikipediaExtract(slot, wd) {
   if (wd.x) {
     var head = document.createElement('div');
     head.style.cssText = (
-      'font-size:11px; color:#888; text-transform:uppercase;'
+      'font-size:11px; color:var(--szd-fg-3, #888); text-transform:uppercase;'
       + 'letter-spacing:0.04em; margin:0 0 4px;'
     );
     head.textContent = 'About';
     slot.appendChild(head);
     var body = document.createElement('div');
-    body.style.cssText = 'color:#333; font-size:14px; line-height:1.5;';
+    body.style.cssText = 'color:var(--szd-fg, #333); font-size:14px; line-height:1.5;';
     body.textContent = wd.x;
     slot.appendChild(body);
   }
@@ -4858,10 +5199,10 @@ function _populateWikipediaExtract(slot, wd) {
     );
     for (var i = 0; i < facts.length; i++) {
       var k = document.createElement('div');
-      k.style.cssText = 'color:#888;';
+      k.style.cssText = 'color:var(--szd-fg-3, #888);';
       k.textContent = facts[i][0];
       var v = document.createElement('div');
-      v.style.cssText = 'color:#222;';
+      v.style.cssText = 'color:var(--szd-fg, #222);';
       v.textContent = facts[i][1];
       grid.appendChild(k); grid.appendChild(v);
     }
@@ -5538,8 +5879,9 @@ function _showFindToast(text, opts) {
     // broke a one-line message into three on a phone.
     + 'width:max-content; max-width:calc(100vw - 32px); box-sizing:border-box;'
     + 'text-align:center;'
-    + 'background:rgba(255,255,255,0.95);'
-    + 'color:' + (opts.color || '#a33') + ';'
+    + 'background:var(--szd-surface-a, rgba(255,255,255,0.95));'
+    // A caller's colour is a neutral hint (#333); the default is the warning red.
+    + 'color:' + (opts.color ? 'var(--szd-fg, ' + opts.color + ')' : 'var(--szd-warn, #a33)') + ';'
     // 18px, not a pill: a message that wraps at 320px stays a tidy box.
     + 'border:1px solid rgba(170,50,50,0.25); border-radius:18px;'
     + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
@@ -5904,15 +6246,15 @@ function _populateNearby(slot, map, r, selfIdx) {
 
   var head = document.createElement('div');
   head.style.cssText = (
-    'font-size:11px; color:#888; text-transform:uppercase;'
+    'font-size:11px; color:var(--szd-fg-3, #888); text-transform:uppercase;'
     + 'letter-spacing:0.04em; margin:0 0 6px;'
   );
-  head.textContent = 'Nearby (within 1.5 km)';
+  head.textContent = 'Nearby (within ' + szFormatDistance(1500, szUnit()) + ')';
   slot.appendChild(head);
   var list = document.createElement('div');
   list.style.cssText = (
     'display:flex; flex-direction:column;'
-    + 'border:1px solid #eee; border-radius:10px; overflow:hidden;'
+    + 'border:1px solid var(--szd-line, #eee); border-radius:10px; overflow:hidden;'
   );
   for (var j = 0; j < ranked.length; j++) {
     list.appendChild(_nearbyRow(map, ranked[j], j === ranked.length - 1));
@@ -5925,15 +6267,15 @@ function _nearbyRow(map, entry, isLast) {
   row.type = 'button';
   row.style.cssText = (
     'display:flex; align-items:center; gap:10px; width:100%;'
-    + 'padding:10px 12px; background:#fff; cursor:pointer;'
-    + 'border:none;' + (isLast ? '' : 'border-bottom:1px solid #f0f0f0;')
+    + 'padding:10px 12px; background:var(--szd-surface, #fff); cursor:pointer;'
+    + 'border:none;' + (isLast ? '' : 'border-bottom:1px solid var(--szd-line, #f0f0f0);')
     + 'text-align:left; font:inherit;'
   );
   row.addEventListener('mouseenter', function() {
-    row.style.background = '#f5f9ff';
+    row.style.background = 'var(--szd-surface-hover, #f5f9ff)';
   });
   row.addEventListener('mouseleave', function() {
-    row.style.background = '#fff';
+    row.style.background = 'var(--szd-surface, #fff)';
   });
 
   var col = document.createElement('div');
@@ -5947,7 +6289,7 @@ function _nearbyRow(map, entry, isLast) {
   col.appendChild(name);
   var meta = document.createElement('div');
   meta.style.cssText = (
-    'color:#777; font-size:12px;'
+    'color:var(--szd-fg-3, #777); font-size:12px;'
     + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
   );
   var kind = entry.item.cat || entry.item.s || entry.item.t;
@@ -5960,7 +6302,7 @@ function _nearbyRow(map, entry, isLast) {
 
   var dist = document.createElement('div');
   dist.style.cssText = (
-    'flex:0 0 auto; color:#1a73e8; font-size:13px; font-weight:600;'
+    'flex:0 0 auto; color:var(--szd-link, #1a73e8); font-size:13px; font-weight:600;'
   );
   dist.textContent = _formatDistanceStrip(entry.dist);
   row.appendChild(dist);
@@ -5982,7 +6324,7 @@ function _findResultCard(map, r, idx) {
   card.style.cssText = (
     'flex:0 0 76vw; max-width:340px; min-width:240px;'
     + 'scroll-snap-align:center; scroll-snap-stop:always;'
-    + 'background:#fff; border:1px solid #ddd; border-radius:12px;'
+    + 'background:var(--szd-surface, #fff); border:1px solid var(--szd-line, #ddd); border-radius:12px;'
     + 'padding:10px 12px; cursor:pointer; transition:border-color .15s, box-shadow .15s;'
     + 'display:flex; flex-direction:column; gap:4px;'
   );
@@ -5997,7 +6339,7 @@ function _findResultCard(map, r, idx) {
 
   var sub = document.createElement('div');
   sub.style.cssText = (
-    'color:#777; font-size:12px;'
+    'color:var(--szd-fg-3, #777); font-size:12px;'
     + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
   );
   var subParts = [];
@@ -6061,7 +6403,7 @@ function _findResultCard(map, r, idx) {
       'flex:0 0 auto; display:inline-flex; align-items:center;'
       + 'justify-content:center; width:36px; padding:7px 0;'
       + 'border-radius:8px; text-decoration:none; font-size:14px;'
-      + 'border:1px solid #ddd; background:#fff; color:#222;'
+      + 'border:1px solid var(--szd-line, #ddd); background:var(--szd-surface, #fff); color:var(--szd-fg, #222);'
     );
     a.addEventListener('click', function(e) { e.stopPropagation(); });
     return a;
@@ -6122,7 +6464,7 @@ function _setActiveResult(map, idx, flyTo) {
   var track = _findResultsState.track;
   if (track) {
     if (prev >= 0 && track.children[prev]) {
-      track.children[prev].style.borderColor = '#ddd';
+      track.children[prev].style.borderColor = 'var(--szd-line, #ddd)';
       track.children[prev].style.boxShadow = '';
     }
     var active = track.children[idx];
@@ -6173,11 +6515,12 @@ function _setActiveResult(map, idx, flyTo) {
   }
   if (flyTo) {
     var r = _findResultsState.items[idx];
-    map.flyTo({
+    _szFlyToClear(map, {
       center: [r.o, r.a],
       zoom: Math.max(map.getZoom(), 14),
       // Offset the camera up by the strip's height so the active
-      // pin sits in the visible map area, not behind the carousel.
+      // pin sits in the visible map area, not behind the carousel
+      // (and zoom in when maxBounds holds it at the box edge, 140).
       offset: [0, -110],
       duration: 500,
     });
@@ -6215,9 +6558,7 @@ function _haversineMetersStrip(lat1, lon1, lat2, lon2) {
 }
 
 function _formatDistanceStrip(m) {
-  if (m == null || isNaN(m)) return '';
-  if (m < 1000) return Math.round(m) + ' m';
-  return (m / 1000).toFixed(m < 10000 ? 1 : 0) + ' km';
+  return szFormatDistance(m, szUnit());
 }
 
 function clearFindResults() {
@@ -6274,6 +6615,29 @@ function clearFindResults() {
 // and search-data/{prefix}.json files are loaded on demand. This keeps RAM
 // bounded even for world-scale datasets (millions of features).
 var searchMarker = null;
+
+// BEGIN proximity-label
+// The distance after a search result ("Casino  grocery · Jardin Exotique ·
+// 1 mi"), in the units the scale bar shows (map._streetzimUnit, switched by
+// clicking the scale). Unit symbols are lower case -- mi, km -- and the
+// line is no longer text-transform: capitalize (010), which printed "1 Mi".
+function _szProximityLabel(miles, unit) {
+  if (!(miles >= 0)) return '';
+  if (unit === 'metric') {
+    var km = miles * 1.609344;
+    if (km < 0.8) return 'nearby';
+    if (km < 8) return Math.round(km) + ' km';
+    if (km < 80) return Math.round(km / 5) * 5 + ' km';
+    if (km < 800) return Math.round(km / 10) * 10 + ' km';
+    return Math.round(km / 100) * 100 + ' km';
+  }
+  if (miles < 0.5) return 'nearby';
+  if (miles < 5) return Math.round(miles) + ' mi';
+  if (miles < 50) return Math.round(miles / 5) * 5 + ' mi';
+  if (miles < 500) return Math.round(miles / 10) * 10 + ' mi';
+  return Math.round(miles / 100) * 100 + ' mi';
+}
+// END proximity-label
 
 // Drop a red marker at (lat, lon) with a "Directions to here" popup.
 // Shared by the search-result picker and the #pin= deep-link path
@@ -6938,13 +7302,8 @@ var SEARCH_SHARDS = (function () {
         var proxMultiplier = 1 + 9 * Math.exp(-ratio * 0.5);
         score = textScore * proxMultiplier;
 
-        // Generate human-readable distance for display
-        var miles = dist * 69;
-        if (miles < 0.5) proximityLabel = 'nearby';
-        else if (miles < 5) proximityLabel = Math.round(miles) + ' mi';
-        else if (miles < 50) proximityLabel = Math.round(miles / 5) * 5 + ' mi';
-        else if (miles < 500) proximityLabel = Math.round(miles / 10) * 10 + ' mi';
-        else proximityLabel = Math.round(miles / 100) * 100 + ' mi';
+        // Human-readable distance, in the scale bar's units.
+        proximityLabel = _szProximityLabel(dist * 69, map._streetzimUnit);
       }
 
       matches.push({ item: item, score: score, dist: proximityLabel });
@@ -7104,7 +7463,7 @@ var SEARCH_SHARDS = (function () {
     // as "the map jumped past my result". 0.18*h capped at chrome+60 lands
     // it around 60% with the popup clear of the search box.
     var _dy = Math.min(Math.round(_h * 0.18), _topChrome + 60);
-    map.flyTo({ center: [lon, lat], zoom: zoom, duration: 1500, offset: [0, _dy] });
+    _szFlyToClear(map, { center: [lon, lat], zoom: zoom, duration: 1500, offset: [0, _dy] });
     placeSearchPin(map, lat, lon, name, enrich);
     resultsEl.style.display = 'none';
     input.blur();
@@ -7327,7 +7686,7 @@ function initWikidataPopups(map, config) {
     h += '<div style="font-size:16px;font-weight:600;margin-bottom:4px;">' + escapeHtml(name) + '</div>';
 
     if (wd.d) {
-      h += '<div style="color:#555;font-size:12px;margin-bottom:6px;font-style:italic;">' + escapeHtml(wd.d) + '</div>';
+      h += '<div style="color:var(--szd-fg-2, #555);font-size:12px;margin-bottom:6px;font-style:italic;">' + escapeHtml(wd.d) + '</div>';
     }
 
     // Info grid
@@ -7342,19 +7701,19 @@ function initWikidataPopups(map, config) {
     if (facts.length > 0) {
       h += '<table style="border-collapse:collapse;width:100%;margin-bottom:6px;">';
       facts.forEach(function(f) {
-        h += '<tr><td style="color:#888;font-size:11px;padding:1px 8px 1px 0;white-space:nowrap;">' +
+        h += '<tr><td style="color:var(--szd-fg-3, #888);font-size:11px;padding:1px 8px 1px 0;white-space:nowrap;">' +
              f[0] + '</td><td style="font-size:12px;padding:1px 0;">' + escapeHtml(String(f[1])) + '</td></tr>';
       });
       h += '</table>';
     }
 
     if (wd.x) {
-      h += '<div style="color:#444;font-size:12px;line-height:1.4;border-top:1px solid #eee;padding-top:6px;">' +
+      h += '<div style="color:var(--szd-fg-2, #444);font-size:12px;line-height:1.4;border-top:1px solid var(--szd-line, #eee);padding-top:6px;">' +
            escapeHtml(wd.x) + '</div>';
     }
 
     if (wd.i) {
-      h += '<div style="color:#999;font-size:10px;margin-top:4px;">' + escapeHtml(wd.i) + '</div>';
+      h += '<div style="color:var(--szd-fg-3, #999);font-size:10px;margin-top:4px;">' + escapeHtml(wd.i) + '</div>';
     }
 
     h += '</div>';
@@ -7664,7 +8023,7 @@ function initWikiSidebar(map, config) {
       // latitude span; when zoomed out to explore a few cities that span is
       // large, so it flew ~0.1-0.2° (many km) SOUTH of the real location.
       var _dy = Math.round((map.getCanvas().clientHeight || 600) * 0.22);
-      map.flyTo({ center: [lon, lat], zoom: targetZoom, duration: 1000, offset: [0, -_dy] });
+      _szFlyToClear(map, { center: [lon, lat], zoom: targetZoom, duration: 1000, offset: [0, -_dy] });
     } else {
       map.flyTo({ center: [lon, lat], zoom: targetZoom, duration: 1000 });
     }
@@ -7783,7 +8142,7 @@ function initWikiSidebar(map, config) {
     listEl.appendChild(wrap);
 
     var back = createEl('button', 'wiki-detail-back', '← Back to list');
-    back.style.cssText = 'display:block;margin:0 0 12px;padding:6px 10px;border:0;border-radius:6px;background:#eef2fa;color:#2a4a7a;font-size:13px;font-weight:600;cursor:pointer;';
+    back.style.cssText = 'display:block;margin:0 0 12px;padding:6px 10px;border:0;border-radius:6px;background:var(--szd-btn2-bg, #eef2fa);color:var(--szd-btn2-fg, #2a4a7a);font-size:13px;font-weight:600;cursor:pointer;';
     back.addEventListener('click', function() { staleView = false; updateSidebar(); });
     wrap.appendChild(back);
 
@@ -7793,7 +8152,7 @@ function initWikiSidebar(map, config) {
     if (coords && map._buildDirectionsButton) {
       wrap.appendChild(map._buildDirectionsButton(coords[1], coords[0], name));
     }
-    nm.style.cssText = 'font-size:17px;font-weight:700;margin-bottom:6px;color:#1a1a2a;line-height:1.25;word-wrap:break-word;';
+    nm.style.cssText = 'font-size:17px;font-weight:700;margin-bottom:6px;color:var(--szd-fg, #1a1a2a);line-height:1.25;word-wrap:break-word;';
     wrap.appendChild(nm);
 
     // Prefer the description baked into the geo-index (instant, no fetch). Fall
@@ -7804,7 +8163,7 @@ function initWikiSidebar(map, config) {
     var desc = bakedDesc || (wd ? (wd.x || wd.d || '') : '');
     if (desc) {
       var dd = createEl('div', 'wiki-detail-desc', desc);
-      dd.style.cssText = 'font-size:13.5px;line-height:1.5;color:#444;margin-bottom:10px;word-wrap:break-word;';
+      dd.style.cssText = 'font-size:13.5px;line-height:1.5;color:var(--szd-fg-2, #444);margin-bottom:10px;word-wrap:break-word;';
       wrap.appendChild(dd);
     }
 
@@ -7818,7 +8177,7 @@ function initWikiSidebar(map, config) {
       wrap.appendChild(ab);
     } else {
       var noa = createEl('div', 'wiki-detail-noarticle', 'No bundled article for this place.');
-      noa.style.cssText = 'font-size:12px;color:#888;margin-bottom:8px;';
+      noa.style.cssText = 'font-size:12px;color:var(--szd-fg-3, #888);margin-bottom:8px;';
       wrap.appendChild(noa);
     }
   }
@@ -8015,7 +8374,7 @@ function initWikiSidebar(map, config) {
               // the old latitude-span shift flew kilometres south of the
               // target when the map was zoomed out.
               var _dy2 = Math.round((map.getCanvas().clientHeight || 600) * 0.22);
-              map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 1200, offset: [0, -_dy2] });
+              _szFlyToClear(map, { center: [lng, lat], zoom: targetZoom, duration: 1200, offset: [0, -_dy2] });
             } else {
               map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 1200 });
             }
@@ -10440,8 +10799,7 @@ function initRouting(map, config) {
   }
 
   function formatDistance(meters) {
-    if (meters < 1000) return Math.round(meters) + ' m';
-    return (meters / 1000).toFixed(1) + ' km';
+    return szFormatDistance(meters, szUnit());
   }
 
   function formatTime(seconds) {
@@ -11905,7 +12263,7 @@ function initRouting(map, config) {
             + '<div style="font-weight:600;font-size:14px;margin-bottom:2px;">'
             + (props.label || "").replace(/</g, "&lt;") + "</div>";
           if (props.description) {
-            html += '<div style="font-size:12px;color:#555;">'
+            html += '<div style="font-size:12px;color:var(--szd-fg-2, #555);">'
               + props.description.replace(/</g, "&lt;") + "</div>";
           }
           html += "</div>";

@@ -34,6 +34,7 @@ import urllib.parse
 from collections import defaultdict
 from pathlib import Path
 
+from cloud.wikimedia_http import get_json, user_agent
 from streetzim.paths import cache_root
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -58,9 +59,9 @@ WIKIDATA_PROPERTIES = {
     "P31": "instance_of",
 }
 
-# Wikimedia's User-Agent policy wants a real contact URL; github.com/user/…
-# was a placeholder.
-USER_AGENT = "StreetZIM/1.0 (https://github.com/jasontitus/streetzim; wikidata cache builder)"
+# Wikimedia's User-Agent policy wants a way to reach the operator: the
+# project's issue tracker, plus STREETZIM_WIKI_CONTACT when set.
+USER_AGENT = user_agent("wikidata-cache")
 
 
 def _qid_cache_path(pbf_path, cache_dir):
@@ -367,37 +368,19 @@ def _lookup_qids_by_name(features, batch_size=50):
 
 
 def _run_sparql(query, retries=3):
-    """Execute a SPARQL query against the Wikidata endpoint."""
+    """Execute a SPARQL query against the Wikidata endpoint.
+
+    429/5xx/network errors are retried honouring Retry-After
+    (cloud/wikimedia_http.py); raises when they outlive the retries, and
+    the callers skip that batch (nothing is cached for it).
+    """
     url = WIKIDATA_SPARQL + "?" + urllib.parse.urlencode({
         "query": query,
         "format": "json",
     })
-    headers = {
-        "User-Agent": USER_AGENT,
-        "Accept": "application/sparql-results+json",
-    }
-
-    for attempt in range(retries):
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                return data.get("results", {}).get("bindings", [])
-        except urllib.error.HTTPError as e:
-            if e.code == 429:  # Rate limited
-                wait = 2 ** (attempt + 2)
-                print(f"    Rate limited, waiting {wait}s...")
-                time.sleep(wait)
-            elif e.code == 500 and attempt < retries - 1:
-                time.sleep(2 ** attempt)
-            else:
-                raise
-        except Exception:
-            if attempt < retries - 1:
-                time.sleep(2 ** attempt)
-            else:
-                raise
-    return []
+    data = get_json(url, user_agent=USER_AGENT, retries=retries, timeout=60,
+                    accept="application/sparql-results+json")
+    return (data or {}).get("results", {}).get("bindings", [])
 
 
 def fetch_wikidata_batch(qids, batch_size=40, cache_dir=None, save_interval=10000):

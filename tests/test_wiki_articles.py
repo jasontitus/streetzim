@@ -112,8 +112,9 @@ class BundleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.object(wa.urllib.request, "urlopen",
                                    side_effect=err), \
-                    mock.patch.object(wa.time, "sleep"):
-                self.assertIsNone(wa._fetch_online("No_Such_Page", td, "ua"))
+                    mock.patch.object(wa.time, "sleep"), \
+                    self.assertRaises(wa.TransientError):
+                wa._fetch_online("No_Such_Page", td, "ua")
             self.assertEqual(os.listdir(td), [])
 
 

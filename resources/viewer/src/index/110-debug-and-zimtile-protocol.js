@@ -33,7 +33,7 @@ function showFatalError(title, err, url) {
   if (url) html += '<p style="font-size:8px;opacity:0.7;word-break:break-all;">URL: ' + url + '</p>';
   html += '<p style="font-size:8px;opacity:0.7;">UA: ' + (navigator.userAgent || '?').substring(0, 80) + '</p>';
   html += '<p style="font-size:8px;opacity:0.7;">Base: ' + baseUrl + '</p>';
-  html += '<p style="font-size:9px;"><a href="#" id="debug-show" style="color:#2563eb;">Show debug log</a></p>';
+  html += '<p style="font-size:9px;"><a href="#" id="debug-show" style="color:var(--szd-link, #2563eb);">Show debug log</a></p>';
   info.innerHTML = html;
   info.style.maxWidth = '420px';
   var link = document.getElementById('debug-show');
@@ -41,7 +41,7 @@ function showFatalError(title, err, url) {
     link.addEventListener('click', function(e) {
       e.preventDefault();
       var pre = document.createElement('pre');
-      pre.style.cssText = 'max-height:200px;overflow:auto;font-size:9px;background:#fff;padding:6px;margin-top:6px;border:1px solid #ddd;white-space:pre-wrap;word-break:break-all;';
+      pre.style.cssText = 'max-height:200px;overflow:auto;font-size:9px;background:var(--szd-surface, #fff);padding:6px;margin-top:6px;border:1px solid var(--szd-line, #ddd);white-space:pre-wrap;word-break:break-all;';
       pre.textContent = _debugLog.join('\n') || '(empty)';
       info.appendChild(pre);
       link.style.display = 'none';

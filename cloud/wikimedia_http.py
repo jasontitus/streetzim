@@ -1,0 +1,278 @@
+"""Polite JSON GETs against the Wikimedia APIs (Wikipedia, Wikidata).
+
+Shared by cloud/wiki_articles.py (`action=parse`) and
+cloud/wikidata_titles.py (`wbgetentities`). It exists because both used a
+fixed 1/2/4 s backoff that ignored `Retry-After`, and the article fetcher
+then cached a 429 that outlived its retries as a permanent "no article"
+(docs/head-to-head-dc.md, "Follow-up: real article text": a cold D.C.
+build lost 177 real articles that way).
+
+What a caller gets:
+- `get_json` returns the parsed body, raises `urllib.error.HTTPError` for
+  a definitive HTTP answer (404 and other non-transient 4xx), and raises
+  `TransientError` when a 429, 408, 5xx, timeout, connection or truncated
+  body error outlives the retries. A caller must never cache a
+  `TransientError` as a miss: the next build asks again.
+- Retries honour `Retry-After` (delta-seconds or HTTP-date), capped at
+  `max_wait`, and otherwise back off exponentially with jitter.
+- A `Pacer` keeps a polite gap between requests, widens it after each 429
+  and eases back towards the base gap as requests succeed.
+
+User-Agent: Wikimedia's policy (meta.wikimedia.org/wiki/User-Agent_policy)
+asks for a descriptive agent with a way to reach its operator. The default
+names the project and its public issue tracker; an operator can add their
+own address with STREETZIM_WIKI_CONTACT (never committed to the repo).
+"""
+from __future__ import annotations
+
+import datetime
+import email.utils
+import http.client
+import json
+import os
+import random
+import re
+import sys
+import time
+import urllib.error
+import urllib.request
+from collections.abc import Callable
+from typing import Any
+
+PROJECT_URL = "https://github.com/jasontitus/streetzim"
+CONTACT_URL = PROJECT_URL + "/issues"
+CONTACT_ENV = "STREETZIM_WIKI_CONTACT"
+REQUIRE_ENV = "STREETZIM_REQUIRE_WIKI"
+BUDGET_ENV = "STREETZIM_WIKI_WAIT_BUDGET"
+DEFAULT_WAIT_BUDGET = 900.0   # seconds of rate-limit waiting per run
+
+# HTTP statuses worth retrying.
+TRANSIENT_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
+# Statuses from api.php that mean the client itself is refused or pointed
+# at the wrong place (a blocked User-Agent, a proxy's 404): every further
+# request would get the same, so a run stops asking. A MediaWiki-API-Error
+# header naming a page-level code overrides this (the caller checks).
+STOP_STATUSES = frozenset({400, 401, 403, 404, 405, 410})
+# `error` codes in an HTTP 200 body that mean "slow down", not an answer.
+THROTTLE_CODES = frozenset({"maxlag", "ratelimited"})
+
+
+def user_agent(tool: str, version: str = "1.1") -> str:
+    """`streetzim-<tool>/<version> (<issues URL>[; <contact>]) python-urllib/X.Y`."""
+    contact = os.environ.get(CONTACT_ENV, "").strip()
+    reach = CONTACT_URL + (f"; {contact}" if contact else "")
+    py = f"{sys.version_info.major}.{sys.version_info.minor}"
+    return f"streetzim-{tool}/{version} ({reach}) python-urllib/{py}"
+
+
+def require_complete() -> bool:
+    """STREETZIM_REQUIRE_WIKI=1: fail rather than ship a partial Wikipedia set."""
+    return os.environ.get(REQUIRE_ENV) == "1"
+
+
+def env_number(name: str, default: float) -> float:
+    """A non-negative number from the environment, else `default`."""
+    try:
+        v = float(os.environ.get(name, ""))
+    except ValueError:
+        return default
+    return v if v >= 0 else default
+
+
+class TransientError(Exception):
+    """A failure that says nothing about the page: rate limit, 5xx, network.
+
+    `stop` marks one that every further request would repeat (a refused
+    client, a spent wait budget): the run should stop asking."""
+
+    def __init__(self, reason: str, status: int | None = None, *,
+                 throttled: bool = False, stop: bool = False) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.status = status
+        self.throttled = throttled or status == 429
+        self.stop = stop
+
+    @property
+    def rate_limited(self) -> bool:
+        return self.throttled
+
+
+def api_error_code(e: urllib.error.HTTPError) -> str:
+    """The MediaWiki-API-Error header of an HTTP error, or ""."""
+    headers = e.headers
+    return (headers.get("MediaWiki-API-Error") or "").strip() if headers else ""
+
+
+def stop_error(e: urllib.error.HTTPError) -> TransientError:
+    """TransientError for a non-transient HTTP status: `stop` when the
+    status says the client is refused (STOP_STATUSES)."""
+    return TransientError(f"HTTP {e.code}", e.code, stop=e.code in STOP_STATUSES)
+
+
+def parse_retry_after(value: str | None, now: float | None = None) -> float | None:
+    """Seconds to wait from a `Retry-After` header, or None when absent or
+    unparseable. Accepts delta-seconds ("120") and an HTTP-date; a date in
+    the past means 0. Never raises."""
+    if value is None:
+        return None
+    v = value.strip()
+    if not v:
+        return None
+    if re.fullmatch(r"[0-9]+", v):
+        return float(min(int(v), 10 ** 9))
+    try:
+        when = email.utils.parsedate_to_datetime(v)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if when.tzinfo is None:  # "-0000": an HTTP-date is GMT anyway
+        when = when.replace(tzinfo=datetime.timezone.utc)
+    t = time.time() if now is None else now
+    return max(0.0, when.timestamp() - t)
+
+
+def backoff_delay(attempt: int, retry_after: float | None, *, base: float = 2.0,
+                  max_wait: float = 120.0,
+                  rng: Callable[[], float] | None = None) -> float:
+    """Wait before retry number `attempt` (0-based): the server's
+    `Retry-After` when it gave one, else exponential backoff with jitter
+    (between half and all of base * 2**attempt). Never more than max_wait."""
+    rng = rng or random.random
+    if retry_after is not None:
+        # A little jitter on top so parallel builds do not return in step.
+        return min(max_wait, retry_after + rng() * min(1.0, base))
+    exp = base * (2 ** attempt)
+    return min(max_wait, exp / 2 + rng() * exp / 2)
+
+
+class Pacer:
+    """Serial requests with a polite gap, widened by rate limits, and a
+    per-run budget for waiting on them.
+
+    The gap runs from the end of one response to the start of the next
+    request, so a slow API is paced by its own response time (Wikimedia's
+    API etiquette asks for serial requests, not a fixed rate). `interval`
+    is the base gap. Each 429 or maxlag/ratelimited answer doubles the
+    current gap (to at least the server's `Retry-After`, capped at
+    `max_interval`); each success eases it 10% back towards the base.
+
+    `budget` (seconds; default STREETZIM_WIKI_WAIT_BUDGET, else 15 min)
+    bounds the waiting a run spends on failures: retry backoff and any gap
+    beyond the base. Once spent, `get_json` raises a stopping
+    TransientError instead of sleeping, so a hard throttle costs a build
+    minutes, not hours."""
+
+    def __init__(self, interval: float, max_interval: float = 30.0,
+                 budget: float | None = None) -> None:
+        self.base = max(0.0, interval)
+        self.current = self.base
+        self.max_interval = max(max_interval, self.base)
+        self.budget = env_number(BUDGET_ENV, DEFAULT_WAIT_BUDGET) if budget is None else budget
+        self.spent = 0.0
+        self._last: float | None = None
+
+    @property
+    def exhausted(self) -> bool:
+        return self.spent >= self.budget
+
+    def can_wait(self, seconds: float) -> bool:
+        return self.spent + seconds <= self.budget
+
+    def charge(self, seconds: float) -> None:
+        self.spent += max(0.0, seconds)
+
+    def wait(self) -> None:
+        if self._last is not None and self.current > 0:
+            gap = self._last + self.current - time.monotonic()
+            if gap > 0:
+                self.charge(min(gap, self.current - self.base))
+                time.sleep(gap)
+
+    def done(self) -> None:
+        """A response (or failure) came back: the gap starts now."""
+        self._last = time.monotonic()
+
+    def rate_limited(self, retry_after: float | None = None) -> None:
+        widened = max(self.current * 2, self.base, 1.0, retry_after or 0.0)
+        self.current = min(self.max_interval, widened)
+
+    def succeeded(self) -> None:
+        self.current = max(self.base, self.current * 0.9)
+
+
+def _body_throttle(data: Any) -> str:
+    """The code of a maxlag/ratelimited `error` body, else ""."""
+    if isinstance(data, dict):
+        err = data.get("error")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        if isinstance(err, dict):
+            code = str(err.get("code", ""))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+            if code in THROTTLE_CODES:
+                return code
+    return ""
+
+
+def get_json(url: str, *, user_agent: str, pacer: Pacer | None = None,
+             retries: int = 5, timeout: float = 60.0, base: float = 2.0,
+             max_wait: float = 120.0, accept: str = "application/json",
+             log: Callable[[str], None] | None = None) -> Any:
+    """GET `url` and parse its JSON body, retrying transient failures
+    (including a maxlag/ratelimited `error` body, with its Retry-After).
+
+    Raises `urllib.error.HTTPError` for a non-transient HTTP status and
+    `TransientError` once the `retries` attempts, or the pacer's wait
+    budget, are spent."""
+    req = urllib.request.Request(url, headers={"User-Agent": user_agent,
+                                               "Accept": accept})
+    retries = max(1, retries)
+    if pacer is not None and pacer.exhausted:
+        raise TransientError(f"wait budget of {pacer.budget:.0f}s spent", stop=True)
+    last: TransientError | None = None
+    for attempt in range(retries):
+        if pacer is not None:
+            pacer.wait()
+        retry_after: float | None = None
+        ra_header: str | None = None
+        try:
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    data = json.load(resp)
+                    hdrs = getattr(resp, "headers", None)
+                    ra_header = hdrs.get("Retry-After") if hdrs is not None else None
+            finally:
+                if pacer is not None:
+                    pacer.done()
+            code = _body_throttle(data)
+            if not code:
+                if pacer is not None:
+                    pacer.succeeded()
+                return data
+            retry_after = parse_retry_after(ra_header)
+            last = TransientError(f"API error {code}", throttled=True)
+        except urllib.error.HTTPError as e:
+            if e.code not in TRANSIENT_STATUSES:
+                raise
+            headers = e.headers
+            retry_after = parse_retry_after(headers.get("Retry-After") if headers else None)
+            last = TransientError(f"HTTP {e.code}", e.code)
+        except (urllib.error.URLError, TimeoutError, OSError,
+                http.client.HTTPException, ValueError) as e:
+            # URLError: DNS/refused; OSError: resets; HTTPException:
+            # IncompleteRead; ValueError: a truncated or non-JSON body.
+            last = TransientError(f"{type(e).__name__}: {e}")
+        if last.throttled and pacer is not None:
+            pacer.rate_limited(retry_after)
+        if attempt < retries - 1:
+            delay = backoff_delay(attempt, retry_after, base=base, max_wait=max_wait)
+            if pacer is not None:
+                if not pacer.can_wait(delay):
+                    pacer.charge(pacer.budget)   # spent: later calls stop at once
+                    raise TransientError(
+                        f"{last.reason}; wait budget of {pacer.budget:.0f}s spent",
+                        last.status, throttled=last.throttled, stop=True)
+                pacer.charge(delay)
+            if log is not None:
+                log(f"    {last.reason}; retrying in {delay:.1f}s"
+                    + (f" (Retry-After {retry_after:.0f}s)" if retry_after is not None else ""))
+            time.sleep(delay)
+    assert last is not None
+    raise last

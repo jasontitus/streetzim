@@ -430,6 +430,11 @@ def repackage(src_path: str, dst_path: str,
     # write no title index at all. Filled once the main entry is resolved.
     front_paths: set[str] = set()
 
+    def _front(path: str) -> bool:
+        # The main page, and the Kiwix search pages, which the builder
+        # writes as front articles so they are in the title index.
+        return path in front_paths or (path.startswith("search/") and path.endswith(".html"))
+
     class PassthroughItem(Item):
         """An item copied from the source ZIM, preserving its bytes."""
         def __init__(self, path, title, mimetype, data, compress=True):
@@ -445,7 +450,7 @@ def repackage(src_path: str, dst_path: str,
         def get_mimetype(self):  return self._mimetype
         def get_contentprovider(self): return StringProvider(self._data)
         def get_hints(self):
-            return {Hint.FRONT_ARTICLE: self._path in front_paths,
+            return {Hint.FRONT_ARTICLE: _front(self._path),
                     Hint.COMPRESS: self._compress}
 
     class FilePathItem(Item):
@@ -466,7 +471,7 @@ def repackage(src_path: str, dst_path: str,
         def get_mimetype(self):  return self._mimetype
         def get_contentprovider(self): return FileProvider(self._file_path)
         def get_hints(self):
-            return {Hint.FRONT_ARTICLE: self._path in front_paths,
+            return {Hint.FRONT_ARTICLE: _front(self._path),
                     Hint.COMPRESS: self._compress}
 
     class LazyZimEntryProvider(ContentProvider):
@@ -520,7 +525,7 @@ def repackage(src_path: str, dst_path: str,
         def get_contentprovider(self):
             return LazyZimEntryProvider(self._src, self._path, self._size)
         def get_hints(self):
-            return {Hint.FRONT_ARTICLE: self._path in front_paths,
+            return {Hint.FRONT_ARTICLE: _front(self._path),
                     Hint.COMPRESS: self._compress}
 
     # Return the raw metadata bytes. The illustration entry is a PNG,

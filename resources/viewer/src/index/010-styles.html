@@ -49,7 +49,7 @@
      occupies bottom 10..54, so the scale bar at bottom:0 (+10px of
      MapLibre's own margin) printed straight on top of its second line.
      Verified by injection at 320/390/430 before editing. */
-  .maplibregl-ctrl-bottom-left { bottom: calc(48px + var(--safe-bottom, 0px)); }
+  .maplibregl-ctrl-bottom-left { bottom: calc(max(48px, var(--sz-attrib-h, 0px) + 4px) + var(--safe-bottom, 0px)); }
   /* Keep the locate button above the DEAD TOUCH BAND next to the app's bottom
      toolbar: in the Kiwix WebView, taps in the lowest ~50px are swallowed by
      the native toolbar hit-slop / home-indicator gestures even though the
@@ -98,7 +98,9 @@
        this label inside it — an 18 px overlap the detector confirmed at 320,
        390 and 430. Pre-dates the mobile merge; the Kiwix safe-area inset was
        masking it by lifting everything bottom-anchored clear. */
-    position: absolute; bottom: calc(84px + var(--safe-bottom, 0px)); left: 10px; z-index: 1;
+    /* --sz-attrib-h: the attribution's height when it wraps further
+       (120-map-init-and-style.js). */
+    position: absolute; bottom: calc(max(84px, var(--sz-attrib-h, 0px) + 40px) + var(--safe-bottom, 0px)); left: 10px; z-index: 1;
     background: rgba(255,255,255,0.65); padding: 3px 8px;
     border-radius: 4px; font-family: var(--ui-font);
     font-size: 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
@@ -290,9 +292,14 @@
   .search-result:last-child { border-bottom: none; }
   .search-result:hover, .search-result.active { background: var(--hover-bg); }
   .search-result-name { font-size: 13px; color: var(--text-primary); font-weight: 500; letter-spacing: -0.01em; }
+  /* No text-transform: capitalize here. It turned the distance into
+     "1 Mi" and "Nearby" and recapitalised place names ("Ravin De ..."),
+     while the category it was meant for never changed: the category
+     follows the name with no space between, so Chrome and WebKit count
+     "Casinogrocery" as one word. The category keeps that lower case. */
   .search-result-type {
     font-size: 11px; color: var(--text-tertiary); margin-left: 6px;
-    text-transform: capitalize; font-weight: 400;
+    font-weight: 400;
   }
   .search-no-results {
     padding: 16px 14px; color: var(--text-tertiary); font-size: 13px; text-align: center;
@@ -413,7 +420,7 @@
     /* Left of MapLibre's bottom-right control stack (the locate button,
        44 px wide on a coarse pointer): at right:10px its lower third sat
        under that button on phones. */
-    position: absolute; bottom: calc(58px + var(--safe-bottom, 0px)); right: 64px; z-index: 2;
+    position: absolute; bottom: calc(max(58px, var(--sz-attrib-h, 0px) + 14px) + var(--safe-bottom, 0px)); right: 64px; z-index: 2;
     background: rgba(255,255,255,0.65); border: none; border-radius: 4px;
     padding: 2px 7px; font-size: 11px; cursor: pointer;
     font-family: var(--ui-font); color: var(--text-secondary);
@@ -446,7 +453,12 @@
     margin: 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5;
   }
   #attr-dialog .license {
-    font-size: 11px; color: var(--text-tertiary); font-style: italic;
+    /* --text-secondary: 4.8:1 on the white dialog (tertiary was 2.5:1). */
+    font-size: 11px; color: var(--text-secondary); font-style: italic;
+  }
+  #attr-dialog #about-notice {
+    margin-top: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);
+    border-left: 3px solid var(--accent); padding-left: 8px;
   }
   #attr-close {
     position: absolute; top: 12px; right: 14px;
@@ -898,6 +910,115 @@
      band of the search box (§C). ?debug=1 keeps it. */
   @media (max-width: 480px) {
     body:not(.sz-debug) #viewer-build-stamp { display: none !important; }
+  }
+  /* --- Dark UI chrome ---
+     html.sz-dark is set by 135-map-theme.js from the same choice as the dark
+     map (?theme=, a host that inverts the page, prefers-color-scheme, live
+     changes), so the panels can never disagree with the map. A class, not
+     @media, because ?theme=light must win over a dark OS and Kiwix JS's
+     invert mode must get light. Light mode reads none of this: the --szd-*
+     tokens are undefined there, so each var(--szd-..., <light value>) in the
+     JS-built sheets (find results, place details, wiki panel) falls back to
+     the light colour it always had. Text pairs keep WCAG AA (4.5:1) on the
+     panel colour (tests/viewer_style_js.test.mjs checks them). */
+  html.sz-dark {
+    color-scheme: dark;
+    --panel-bg: rgba(35,38,45,0.96);
+    --panel-shadow: 0 2px 12px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.08);
+    --text-primary: #e8eaed;
+    --text-secondary: #b9bec7;
+    --text-tertiary: #9ea4ae;
+    --border: rgba(255,255,255,0.10);
+    --hover-bg: rgba(138,180,248,0.12);
+    --szd-surface: #23262d;
+    --szd-surface-a: rgba(35,38,45,0.96);
+    --szd-surface-hover: #2e323a;
+    --szd-fg: #e8eaed;
+    --szd-fg-2: #c9cdd3;
+    --szd-fg-3: #a9afb8;
+    --szd-line: #3c414a;
+    --szd-link: #8ab4f8;
+    --szd-handle: #4b5059;
+    --szd-warn: #fca5a5;
+    --szd-btn2-bg: #2b3546;
+    --szd-btn2-fg: #a8c7fa;
+  }
+  html.sz-dark #info { background: rgba(35,38,45,0.92); }
+  html.sz-dark #attr-btn { background: rgba(35,38,45,0.92); }
+  html.sz-dark #attr-btn:hover { background: #2e323a; }
+  html.sz-dark #attr-dialog { background: #23262d; box-shadow: 0 8px 32px rgba(0,0,0,0.6); }
+  html.sz-dark #attr-overlay { background: rgba(0,0,0,0.6); }
+  html.sz-dark #info .sz-recover a, html.sz-dark #info a.sz-change { color: #8ab4f8; }
+  html.sz-dark #wiki-panel-count { background: rgba(255,255,255,0.08); }
+  html.sz-dark #preview-banner-note:not(:empty) { color: #fbbf24; }
+  html.sz-dark #find-chips .find-chip:not(.on) {
+    background: rgba(35,38,45,0.96); border-color: rgba(255,255,255,0.14);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+  }
+  html.sz-dark #find-chips .find-chip:not(.on):hover { background: #2e323a; }
+  /* --accent (#2563eb) stays for filled buttons (white text, 5.2:1); as
+     text on a dark panel it is too dark, so text uses a lighter blue. */
+  html.sz-dark .pin-popup .pin-link,
+  html.sz-dark #routing-panel.minimized #routing-minimize { color: #8ab4f8; }
+  html.sz-dark .sz-home-btn svg { fill: #e8eaed; }
+  /* Focus rings: the light ones (15-20% blue) vanish on a dark panel.
+     #8ab4f8 is 7.9:1 on it (WCAG 2.2 wants 3:1 for focus indicators). */
+  html.sz-dark #search-input:focus,
+  html.sz-dark .routing-input:focus { box-shadow: 0 0 0 2px #8ab4f8; border-color: #8ab4f8; }
+  /* MapLibre's own controls (maplibre-gl.css is light only). */
+  html.sz-dark .maplibregl-ctrl-group { background: #23262d; }
+  html.sz-dark .maplibregl-ctrl-group:not(:empty) { box-shadow: 0 0 0 2px rgba(255,255,255,0.10); }
+  html.sz-dark .maplibregl-ctrl-group button + button { border-top-color: #3c414a; }
+  html.sz-dark .maplibregl-ctrl button:not(:disabled):hover { background-color: rgba(255,255,255,0.08); }
+  /* The icons are black SVGs; invert + hue-rotate keeps the geolocate blue blue. */
+  html.sz-dark .maplibregl-ctrl button .maplibregl-ctrl-icon,
+  html.sz-dark .maplibregl-ctrl-attrib-button { filter: invert(1) hue-rotate(180deg); }
+  html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-scale {
+    background-color: rgba(35,38,45,0.92); border-color: #c9cdd3; color: #e8eaed;
+  }
+  html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-attrib,
+  html.sz-dark .maplibregl-ctrl-attrib.maplibregl-compact {
+    background-color: rgba(35,38,45,0.92); color: #c9cdd3;
+  }
+  html.sz-dark .maplibregl-ctrl-attrib a { color: #c9cdd3; }
+  html.sz-dark .maplibregl-popup-content {
+    background: #23262d; color: var(--text-primary); box-shadow: 0 2px 12px rgba(0,0,0,0.55);
+  }
+  html.sz-dark .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+  html.sz-dark .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+  html.sz-dark .maplibregl-popup-anchor-top-right .maplibregl-popup-tip { border-bottom-color: #23262d; }
+  html.sz-dark .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+  html.sz-dark .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+  html.sz-dark .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip { border-top-color: #23262d; }
+  html.sz-dark .maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: #23262d; }
+  html.sz-dark .maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: #23262d; }
+  html.sz-dark .maplibregl-popup-close-button { color: var(--text-secondary); }
+  /* Printing: paper is white, so print the chrome in its light colours.
+     The --szd-* tokens go back to "guaranteed invalid", so every
+     var(--szd-..., <light>) falls back to its light colour again. */
+  @media print {
+    html.sz-dark {
+      color-scheme: light;
+      --panel-bg: rgba(255,255,255,0.96);
+      --panel-shadow: 0 2px 12px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.04);
+      --text-primary: #1a1a1a;
+      --text-secondary: #6b7280;
+      --text-tertiary: #9ca3af;
+      --border: rgba(0,0,0,0.06);
+      --hover-bg: rgba(37,99,235,0.04);
+      --szd-surface: initial; --szd-surface-a: initial; --szd-surface-hover: initial;
+      --szd-fg: initial; --szd-fg-2: initial; --szd-fg-3: initial; --szd-line: initial;
+      --szd-link: initial; --szd-handle: initial; --szd-warn: initial;
+      --szd-btn2-bg: initial; --szd-btn2-fg: initial;
+    }
+    html.sz-dark #info, html.sz-dark #attr-btn,
+    html.sz-dark #find-chips .find-chip:not(.on),
+    html.sz-dark .maplibregl-ctrl-group, html.sz-dark .maplibregl-popup-content,
+    html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-scale,
+    html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-attrib { background: #fff; color: #1a1a1a; }
+    html.sz-dark .maplibregl-ctrl button .maplibregl-ctrl-icon,
+    html.sz-dark .maplibregl-ctrl-attrib-button { filter: none; }
+    html.sz-dark .sz-home-btn svg { fill: #333; }
   }
 </style>
 </head>

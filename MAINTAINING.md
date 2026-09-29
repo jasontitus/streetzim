@@ -149,6 +149,10 @@ Rules that keep published ZIMs working:
 | variable | effect |
 |---|---|
 | `STREETZIM_REQUIRE_SHAPEFILES=1` | fail the build if the coastline / Natural Earth shapefiles are missing (otherwise a warning) |
+| `STREETZIM_REQUIRE_WIKI=1` | fail the build when Wikipedia articles (`--bundle-wiki-articles`, online) or Wikidata titles (`--resolve-wikidata-titles`) could not be fetched because of rate limits, 5xx or network errors (otherwise a WARNING with the count; those are never cached as misses, so the next build fetches them) |
+| `STREETZIM_WIKI_WAIT_BUDGET` | seconds a run may spend waiting on Wikipedia/Wikidata rate limits and retries (default 900); once spent it stops requesting and counts the rest as unfetched |
+| `STREETZIM_WIKI_RECHECK_MAX` | how many old empty article-cache markers (written before `.miss` files, possibly by a 429) one build re-checks (default 1000); the rest stay misses until a later build |
+| `STREETZIM_WIKI_CONTACT` | optional: an operator address appended to the Wikipedia/Wikidata User-Agent (`cloud/wikimedia_http.py`); the default names the project's issue tracker |
 | `STREETZIM_REQUIRE_ZIMCHECK=1` | `validate_zim.py` fails when `zimcheck` is not installed (otherwise skipped) |
 | `STREETZIM_SKIP_ZIMCHECK=1` | skip zimcheck in the validator |
 | `ZIMRU_ZIMCHECK` | optional: a faster drop-in `zimcheck` for very large ZIMs; the standard `zimcheck` is used otherwise |
@@ -255,4 +259,6 @@ scripts that may be running on the production host (see
 - **Docs that point at files that don't exist:** `docs/mcpzim-contract.md`
   and `docs/STREETZIM_CONSUMPTION.md` are cited from `create_osm_zim.py`.
 - **Satellite licence.** The EOX 2021 layer is CC BY-NC-SA and ships in most
-  published ZIMs; see the README's licence section.
+  published ZIMs; see the README's licence section. The 2016 layer is CC BY
+  4.0 and is what `streetzim --satellite` uses (docs/zimfarm.md,
+  "Satellite imagery").

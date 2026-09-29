@@ -77,7 +77,7 @@ function initWikidataPopups(map, config) {
     h += '<div style="font-size:16px;font-weight:600;margin-bottom:4px;">' + escapeHtml(name) + '</div>';
 
     if (wd.d) {
-      h += '<div style="color:#555;font-size:12px;margin-bottom:6px;font-style:italic;">' + escapeHtml(wd.d) + '</div>';
+      h += '<div style="color:var(--szd-fg-2, #555);font-size:12px;margin-bottom:6px;font-style:italic;">' + escapeHtml(wd.d) + '</div>';
     }
 
     // Info grid
@@ -92,19 +92,19 @@ function initWikidataPopups(map, config) {
     if (facts.length > 0) {
       h += '<table style="border-collapse:collapse;width:100%;margin-bottom:6px;">';
       facts.forEach(function(f) {
-        h += '<tr><td style="color:#888;font-size:11px;padding:1px 8px 1px 0;white-space:nowrap;">' +
+        h += '<tr><td style="color:var(--szd-fg-3, #888);font-size:11px;padding:1px 8px 1px 0;white-space:nowrap;">' +
              f[0] + '</td><td style="font-size:12px;padding:1px 0;">' + escapeHtml(String(f[1])) + '</td></tr>';
       });
       h += '</table>';
     }
 
     if (wd.x) {
-      h += '<div style="color:#444;font-size:12px;line-height:1.4;border-top:1px solid #eee;padding-top:6px;">' +
+      h += '<div style="color:var(--szd-fg-2, #444);font-size:12px;line-height:1.4;border-top:1px solid var(--szd-line, #eee);padding-top:6px;">' +
            escapeHtml(wd.x) + '</div>';
     }
 
     if (wd.i) {
-      h += '<div style="color:#999;font-size:10px;margin-top:4px;">' + escapeHtml(wd.i) + '</div>';
+      h += '<div style="color:var(--szd-fg-3, #999);font-size:10px;margin-top:4px;">' + escapeHtml(wd.i) + '</div>';
     }
 
     h += '</div>';
