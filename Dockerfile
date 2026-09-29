@@ -56,5 +56,9 @@ WORKDIR /output
 # volume, so they survive `docker run --rm` and work with a non-root --user.
 ENV STREETZIM_CACHE_DIR=/output/cache
 ENV PATH=/app:/app/scripts:$PATH
+# Unbuffered stdout/stderr: Zimfarm (like `docker logs` or a pipe) reads a
+# non-TTY stdout, where Python block-buffers, so the scraper's own lines came
+# out after its subprocesses' output and Zimfarm's live log lagged.
+ENV PYTHONUNBUFFERED=1
 ENTRYPOINT []
 CMD ["create_osm_zim.py", "--help"]

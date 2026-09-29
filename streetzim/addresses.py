@@ -634,6 +634,25 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     return {"added": added, "datasets": sorted(source_datasets)}
 
 
+# Subtypes too generic to keep when Overture has a category for the POI.
+_OVERTURE_REFINABLE_SUBTYPES = frozenset({
+    "", "tourism", "amenity", "shop", "attraction", "leisure", "car",
+    "historic", "landuse",
+})
+
+
+def _overture_may_refine(rec):
+    """True if Overture's category may replace ``rec``'s subtype: the
+    subtype is a generic bucket, or it is tilemaker's subclass for a POI
+    whose class was one (``osm_key``, see search_record in
+    streetzim/search_extract.py). The second case keeps tilemaker +
+    Overture builds as they were when such a record's subtype was the raw
+    key itself: an amenity=restaurant still becomes italian_restaurant.
+    OpenFreeMap records never carry ``osm_key``."""
+    return ((rec.get("subtype") or "") in _OVERTURE_REFINABLE_SUBTYPES
+            or rec.get("osm_key") in _OVERTURE_REFINABLE_SUBTYPES)
+
+
 def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
                           url_cache=None, url_cache_policy="drop-record"):
     """Enrich OSM POIs with Overture places' websites / phones / socials /
@@ -883,12 +902,11 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
             for k, v in extra.items():
                 if k not in rec:
                     rec[k] = v
-            s_old = rec.get("subtype") or ""
-            if extra.get("cat") and s_old in (
-                    "", "tourism", "amenity", "shop",
-                    "attraction", "leisure", "car",
-                    "historic", "landuse"):
+            if extra.get("cat") and _overture_may_refine(rec):
                 rec["subtype"] = extra["cat"]
+                # Refined: no longer a generic bucket, so a second merge
+                # leaves it alone, as it did when the subtype was the key.
+                rec.pop("osm_key", None)
             out.write(json.dumps(rec, separators=(",", ":"),
                                  ensure_ascii=False))
             out.write("\n")

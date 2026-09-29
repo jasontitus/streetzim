@@ -384,6 +384,26 @@ def _chk_places_categories(arc) -> tuple[str, str]:
             f"{len(cats)} categories; sample {slug} has {len(recs):,} records")
 
 
+def _probe_chip_files(arc) -> str | None:
+    """First chip file found at a path a chip split would write, else None.
+
+    Probes paths rather than listing the archive (millions of entries on a
+    continent): every chip id cloud/chip_rules.py knows plus the pre-merge
+    pair, as a single file, the first geo shard, or the first name-hash
+    bucket. Enough to catch a split whose manifest entry went missing."""
+    from cloud.chip_rules import CHIP_RULES
+    ids = [c.id for c in CHIP_RULES] + ["restaurants", "cafes"]
+    for cid in ids:
+        for sfx in ("", "-g000", "-0", "-00"):
+            path = f"category-index/chip-{cid}{sfx}.json"
+            try:
+                arc.get_entry_by_path(path)
+            except Exception:
+                continue
+            return path
+    return None
+
+
 def _chk_find_chips(arc) -> tuple[str, str]:
     """When `--split-find-chips` was used, the manifest must declare a
     `chips` map AND every referenced `chip-{id}.json` file must exist
@@ -405,6 +425,12 @@ def _chk_find_chips(arc) -> tuple[str, str]:
         if isinstance(chips, dict):
             return ("fail", "manifest declares an empty chips map — every "
                             "Find chip was dropped (bad --split-find-chips repack?)")
+        # No `chips` key but chip files present: the split ran and its
+        # manifest entry was lost (the viewer then hides the whole rail).
+        orphan = _probe_chip_files(arc)
+        if orphan:
+            return ("fail", f"chip files present ({orphan}) but the manifest "
+                            f"declares no chips — the viewer will hide Find")
         return ("skip", "no chips declared in manifest")
     # Every declared chip must have a corresponding file that parses.
     # Sub-bucketed chips are split into chip-{cid}-{suffix}.json files,

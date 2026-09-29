@@ -67,11 +67,18 @@ Checked against openzim/zimfarm at `917d7bc`:
    names in `DockerImageName` (`backend/src/zimfarm_backend/common/enums.py`).
    StreetZim's image would have to be published under a name added there
    (for example `openzim/streetzim` if the repository moved to openZIM).
-2. **Progress bar.** The worker reads `task_progress.json` only for
-   offliners listed in `PROGRESS_CAPABLE_OFFLINERS`
-   (`worker/.../common/constants.py`); `stdStats: true` has no effect until
-   `streetzim` is added there.
-3. **Definition upload.** maps2zim publishes its definition with
+2. **Worker offliner list.** A worker advertises only the offliners in
+   `ALL_OFFLINERS` (`worker/src/zimfarm_worker/common/constants.py`;
+   `SUPPORTED_OFFLINERS` filters on it), and Zimfarm will not request a
+   task for a worker that does not advertise the recipe's offliner
+   ("Worker '…' offliners do not match the offliner for recipe '…'").
+   `streetzim` has to be added there. Existing workers pick it up only when
+   they update their task-worker image; workers that set
+   `ZIMFARM_OFFLINERS` explicitly also have to add it to that list.
+3. **Progress bar.** The worker reads `task_progress.json` only for
+   offliners listed in `PROGRESS_CAPABLE_OFFLINERS` (same file);
+   `stdStats: true` has no effect until `streetzim` is added there.
+4. **Definition upload.** maps2zim publishes its definition with
    `.github/workflows/update-zim-offliner-definition.yaml`, which calls
    `openzim/overview`'s reusable workflow with a `ZIMFARM_CI_SECRET`. The
    same workflow works here once openZIM provides the secret. The offliner
@@ -83,6 +90,26 @@ Checked against openzim/zimfarm at `917d7bc`:
 `OfflinerSpecSchema` (`tools/check_zimfarm_schema.py`, run in CI against a
 pinned Zimfarm commit), and the command line Zimfarm generates from it is
 accepted by `streetzim` (`tests/test_offliner_definition.py`).
+
+The patch this amounts to on openZIM's side, as used in the local run below:
+- `backend/src/zimfarm_backend/common/enums.py`: `streetzim =
+  "openzim/streetzim"` in `DockerImageName`, and `cls.streetzim` in its
+  `all()` set;
+- `worker/src/zimfarm_worker/common/constants.py`: `OFFLINER_STREETZIM =
+  "streetzim"`, added to both `ALL_OFFLINERS` and
+  `PROGRESS_CAPABLE_OFFLINERS`;
+- optional: `streetzim` appended to `ZIMFARM_OFFLINERS` in
+  `worker/contrib/zimfarm.config.example`, and a `streetzim` entry
+  (`DashModel`, image `openzim/streetzim`, command `streetzim`) in the
+  offliner config map of `dev/contrib/create-offliners.sh`. That script
+  fetches each definition from `openzim/<id>` on GitHub, so `streetzim` can
+  go in its fetch list only once the repository is there.
+
+Zimfarm pulls the image from `ghcr.io/openzim/streetzim:<tag>`: the
+`ghcr.io` prefix is the default and `openzim/` comes from
+`DockerImageName`, so the image (or at least the package) has to be
+published under the openzim organisation, or openZIM has to add a
+different name to the enum.
 
 ## What a build costs
 
@@ -152,9 +179,82 @@ memory was recorded, as the measuring script writes it at the end.
 ### Downloads per task
 
 A fresh Zimfarm container downloads, besides the OSM extract:
-- the coastline and Natural Earth shapefiles (about 900 MB, unzipped
-  about 1.2 GB) when tiles are built with tilemaker. Baking them into the
-  image, or building from `--mbtiles`, avoids this;
+- the coastline and Natural Earth shapefiles when tiles are built with
+  tilemaker (see below). Building from `--mbtiles` avoids this;
 - nothing for the viewer: MapLibre GL JS is vendored and the Docker image
   carries the pinned font glyphs ([viewer-supply-chain.md](viewer-supply-chain.md));
 - with `--terrain`, Copernicus DEM tiles for the area.
+
+### Disk for a Zimfarm recipe
+
+`--shapefiles` and `--dl` are not offliner flags, so on Zimfarm the
+shapefiles go to the default `/tmp/streetzim/dl/shapefiles`, in the
+container's writable layer, and every task downloads them again: the
+water polygons zip is 864 MB (plus three small Natural Earth zips), about
+1.2 GB unzipped, and about 2.1 GB at peak while the zip is being unpacked.
+At about 25 MB/s that is 35 to 50 s per task. Zimfarm counts the image and
+the writable layer toward the task's disk, so **give every recipe at least
+4 GiB of disk, even for tiny areas**, and add the build's own peak disk
+(the tables above) for larger ones.
+
+Monaco on the local Zimfarm below (default profile, recipe resources cpu 2,
+memory 6 GiB, disk 4 GiB), as Zimfarm reported it: memory max 3.49 GiB
+(Docker's usage figure, which includes page cache), disk max 3.51 GiB
+(image 1.54 GB, shapefiles, a 2.8 MB ZIM), and 72 s of scraper time, about
+50 s of it the shapefile download.
+
+Ways to cut this, none taken yet:
+- **Bake the shapefiles into the image.** No download per task, and the
+  layer is shared by every task on a worker, but the image grows by about
+  1.2 GB for every pull, including `--mbtiles` builds that do not need
+  them.
+- **Unzip while downloading.** Piping the download into a streaming
+  extractor (`bsdtar -xf -`, from libarchive-tools, which the image does
+  not have) would drop the 864 MB zip from the peak (about 1.2 GB instead
+  of 2.1 GB), but curl's `--retry` cannot resume into a pipe, so a dropped
+  connection would need its own retry around the whole pipe. Deleting the
+  zip right after unzipping it does not lower the peak, which is reached
+  while both exist; `fetch-shapefiles.sh` already removes it when it
+  finishes.
+
+## Tested on a local Zimfarm
+
+On 2026-09-29 a Monaco recipe ran end to end on a local Zimfarm at
+openzim/zimfarm `917d7bc` with the patch above: the worker pulled the image,
+ran `streetzim`, Zimfarm showed its progress (7/7), and the uploaded ZIM
+passed Zimfarm's zimcheck, `tools/check_openzim_output.py --routing` and
+`cloud/validate_zim.py`. To reproduce:
+
+1. Build the image and push it to a local registry
+   (`docker run -d -p 127.0.0.1:5000:5000 registry:2`, then
+   `docker build -t localhost:5000/openzim/streetzim:dev . && docker push …`).
+2. Apply the patch above to a zimfarm checkout and start its dev compose
+   stack (`dev/docker-compose.yml`: postgres and backend, then the
+   `worker` profile's receiver, worker manager and task worker). On the backend, set
+   `DOCKER_REGISTRY_openzim/streetzim=localhost:5000` (the key contains the
+   image name's slash): the backend builds the pull reference as
+   `getenv("DOCKER_REGISTRY_<image name>", "ghcr.io")/<image name>:<tag>`,
+   so no code change is needed for a local registry. With that variable
+   set, `PATCH /recipes/<name>` with an `image` fails with "Image name must
+   match selected offliner", as the check reads two different keys; create
+   recipes with the image instead. The upstream `minio/minio` image the
+   dev stack uses for logs is gone from Docker Hub; uploading logs and
+   zimcheck results to the receiver over SFTP works instead.
+3. Register the offliner as `dev/contrib/create-offliners.sh` does for
+   the others, but with the definition from this repository:
+   `POST /v2/offliners` with `{"offliner_id": "streetzim", "base_model":
+   "DashModel", "docker_image_name": "openzim/streetzim", "command_name":
+   "streetzim", "ci_secret_hash": …}`, then
+   `POST /v2/offliners/streetzim/versions` with `{"version": "dev",
+   "ci_secret": …, "spec": <offliner-definition.json>}`.
+4. Create the worker with `POST /v2/workers {"name": "test-worker",
+   "ssh_key": {"key": "<public key>"}}`. `dev/contrib/create_worker.sh` is stale at
+   this commit (it posts to `/v2/users`, and worker accounts can no longer
+   be created through `/v2/accounts`), and worker names must match
+   `^[a-z0-9-]+$`.
+5. `POST /v2/recipes` with warehouse path `/maps`, platform `maps`, image
+   `openzim/streetzim:dev`, resources as above and offliner flags in their
+   dash form (`"offliner_id": "streetzim", "name": …, "title": …,
+   "description": …, "illustration-url": …, "area": "monaco"`), then
+   `POST /v2/requested-tasks {"recipe_names": [...], "worker":
+   "test-worker"}` once the worker manager has checked in.

@@ -18,8 +18,9 @@ var baseUrl = (function() {
 // one level above the viewer base). When present, wiki popups gain a
 // "Read full article" button that opens the in-ZIM wiki-article/<Title> page
 // (served by the drive service worker). Absent (e.g. plain Kiwix) -> popups
-// just show the wikidata blurb as before. This is a transitional side-load;
-// once the bridge is baked into the ZIM the fetch simply falls back to it.
+// just show the wikidata blurb as before. This is a transitional side-load,
+// requested only inside the PWA (SZ_ON_DRIVE_PWA); ZIMs with bundled
+// articles carry wiki-geo-index.json, which supersedes it.
 var WIKI_QID_TITLES = null;   // optional side-load bridge (transitional)
 var WIKI_GEO_INDEX = null;    // {title:[lat,lon,type,qid]} from the ZIM's wiki-geo-index.json
 var WIKI_GEO_QID = null;      // reverse {qid:title} built from WIKI_GEO_INDEX
@@ -65,6 +66,9 @@ function wikiGeoTitlesInBounds(W, E, S, N) {
   return out;
 }
 (function loadWikiTitleBridge() {
+  // The bridge sits beside the PWA, never in a ZIM: under kiwix-serve this
+  // fetch was a 404 on every page load.
+  if (typeof SZ_ON_DRIVE_PWA === 'undefined' || !SZ_ON_DRIVE_PWA) return;
   try {
     fetch(baseUrl + '../wiki-qid-titles.json')
       .then(function(r) { return r && r.ok ? r.json() : null; })
