@@ -15,8 +15,11 @@ their SHA-256s in the lock file. --rtl-text does the same for
 @mapbox/mapbox-gl-rtl-text (dist/mapbox-gl-rtl-text.js and LICENSE.md, to
 resources/vendor/mapbox-gl-rtl-text/). --fonts downloads every range of every
 fontstack from the font CDN and records its SHA-256 (null for a range the
-CDN answers 404), printing how many changed. Review the diff and commit
-both. --prefetch downloads every pinned range, checks it, and stores it in
+CDN answers 404), printing how many changed, and does the same for the
+fallback Noto Sans ranges (``fonts.fallback``: the ranges holding the
+Unicode blocks of its scripts, from a commit-pinned URL) and the hash of its
+vendored licence. A download that is not a glyph range (an HTML error page)
+stops it. Review the diff and commit both. --prefetch downloads every pinned range, checks it, and stores it in
 DIR as the builder's cache (streetzim/viewer_assets.py) expects, so builds
 that use DIR need no network for fonts.
 """
@@ -39,6 +42,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from streetzim import viewer_assets as va  # noqa: E402
+from streetzim.glyph_fallback import is_glyph_pbf  # noqa: E402
 
 NPM_REGISTRY = "https://registry.npmjs.org"
 # lock-file key -> (npm package, licence, {tarball member: vendored file name})
@@ -66,6 +70,46 @@ DEFAULT_FONTS: dict[str, Any] = {
     },
 }
 RANGES = [f"{s}-{s + 255}" for s in range(0, 65536, 256)]
+# Noto Sans glyphs for the scripts Open Sans has none for, merged into the
+# Open Sans ranges at build time (streetzim/glyph_fallback.py). The URL names
+# a git commit, so its files cannot change under the pins.
+FALLBACK_COMMIT = "028c18f713baecad011301ff7a69acc39bcc2ae7"
+DEFAULT_FALLBACK: dict[str, Any] = {
+    "base_url": ("https://raw.githubusercontent.com/protomaps/basemaps-assets/"
+                 f"{FALLBACK_COMMIT}/fonts"),
+    "licence": "Noto Sans, SIL Open Font License 1.1 (Copyright 2022 The Noto Project "
+               "Authors); glyphs made by maplibre/font-maker, as published by "
+               "https://github.com/protomaps/basemaps-assets",
+    "licence_file": "resources/vendor/noto-sans/OFL.txt",
+    # our name -> the source's fontstack name
+    "fontstacks": {
+        "NotoSansRegular": "Noto Sans Regular",
+        "NotoSansMedium": "Noto Sans Medium",
+    },
+    # which fallback each Open Sans stack gets (Noto Sans Italic has none of
+    # these scripts; Medium is the source's boldest weight)
+    "for": {
+        "OpenSansRegular": "NotoSansRegular",
+        "OpenSansBold": "NotoSansMedium",
+        "OpenSansItalic": "NotoSansRegular",
+    },
+    # script -> Unicode blocks merged when the map's labels use it. Scripts
+    # that need shaping MapLibre does not do (Devanagari, Bengali, ...) are
+    # left out: their glyphs would render in the wrong order and shape.
+    "scripts": {
+        "Arabic": ["0600-06FF", "FB50-FBFF", "FE70-FEFF"],
+        "Armenian": ["0530-058F"],
+        "Georgian": ["10A0-10FF"],
+        "Hebrew": ["0590-05FF", "FB1D-FB4F"],
+        "Lao": ["0E80-0EFF"],
+        "Thai": ["0E00-0E7F"],
+    },
+}
+
+
+def fallback_ranges(fb: dict[str, Any]) -> list[str]:
+    from streetzim.glyph_fallback import parse_blocks, ranges_for
+    return ranges_for([b for blocks in fb["scripts"].values() for b in parse_blocks(blocks)])
 
 
 def write_lock(lock: dict[str, Any], path: Path = va.LOCK) -> None:
@@ -127,40 +171,69 @@ def pin_maplibre(version: str) -> None:
     print("run scripts/sync-drive-viewer.sh for the website copy")
 
 
-def pin_fonts() -> None:
-    lock = read_lock_or_empty()
-    old = lock.get("fonts", {})
-    fonts: dict[str, Any] = {k: old.get(k, v) for k, v in DEFAULT_FONTS.items()}
-    ranges: dict[str, dict[str, str | None]] = {}
-    fonts["ranges"] = ranges
-    tasks = [(stack, cdn, r) for stack, cdn in fonts["fontstacks"].items() for r in RANGES]
+def _pin_ranges(base_url: str, fontstacks: dict[str, str], ranges: list[str],
+                old: dict[str, Any]) -> tuple[dict[str, dict[str, str | None]], int, int]:
+    """Download each range of each stack: ({stack: {range: sha256 or None}},
+    how many differ from ``old``, how many are absent)."""
+    tasks = [(stack, src, r) for stack, src in fontstacks.items() for r in ranges]
 
     def one(task: tuple[str, str, str]) -> tuple[str, str, str | None]:
-        stack, cdn, r = task
-        url = f"{fonts['base_url'].rstrip('/')}/{urllib.parse.quote(cdn)}/{r}.pbf"
+        stack, src, r = task
+        url = f"{base_url.rstrip('/')}/{urllib.parse.quote(src)}/{r}.pbf"
         try:
-            return stack, r, va.sha256_hex(va.fetch(url))
+            data = va.fetch(url)
         except va.DownloadError as e:
             if str(e).endswith("HTTP 404"):
                 return stack, r, None
             raise SystemExit(f"not pinning fonts: {e}") from None
+        if not is_glyph_pbf(data):
+            # e.g. the font CDN answers an unknown fontstack with an HTML page
+            raise SystemExit(f"not pinning fonts: {url} is not a glyph range "
+                             f"({len(data)} bytes starting {data[:16]!r})")
+        return stack, r, va.sha256_hex(data)
 
     with ThreadPoolExecutor(max_workers=16) as pool:
         results = list(pool.map(one, tasks))
+    out: dict[str, dict[str, str | None]] = {}
     changed = 0
     for stack, r, digest in results:
-        ranges.setdefault(stack, {})[r] = digest
-        if old.get("ranges", {}).get(stack, {}).get(r, "?") != digest:
+        out.setdefault(stack, {})[r] = digest
+        if old.get(stack, {}).get(r, "?") != digest:
             changed += 1
+    return out, changed, sum(1 for *_, d in results if d is None)
+
+
+def pin_fonts() -> None:
+    lock = read_lock_or_empty()
+    old = lock.get("fonts", {})
+    fonts: dict[str, Any] = {k: old.get(k, v) for k, v in DEFAULT_FONTS.items()}
+    fonts["ranges"], changed, empty = _pin_ranges(
+        fonts["base_url"], fonts["fontstacks"], RANGES, old.get("ranges", {}))
+    n = len(fonts["fontstacks"]) * len(RANGES)
+    print(f"pinned {n} glyph ranges ({empty} absent on the CDN); "
+          f"{changed} differ from the previous lock file")
+
+    old_fb = old.get("fallback", {})
+    fb: dict[str, Any] = {k: old_fb.get(k, v) for k, v in DEFAULT_FALLBACK.items()}
+    fb_ranges = fallback_ranges(fb)
+    fb["ranges"], changed, empty = _pin_ranges(
+        fb["base_url"], fb["fontstacks"], fb_ranges, old_fb.get("ranges", {}))
+    fb["licence_sha256"] = va.sha256_hex((ROOT / fb["licence_file"]).read_bytes())
+    fonts["fallback"] = fb
     lock["fonts"] = fonts
     write_lock(lock)
-    empty = sum(1 for *_, d in results if d is None)
-    print(f"pinned {len(results)} glyph ranges ({empty} absent on the CDN); "
-          f"{changed} differ from the previous lock file")
+    print(f"pinned {len(fb['fontstacks']) * len(fb_ranges)} fallback glyph ranges "
+          f"({empty} absent); {changed} differ from the previous lock file")
+
+
+def all_ranges(lock: dict[str, Any] | None = None) -> list[va.FontRange]:
+    """The pinned glyph ranges and the fallback ranges."""
+    fb = va.font_fallback(lock)
+    return va.font_ranges(lock) + (fb.ranges if fb else [])
 
 
 def prefetch(dest: Path) -> None:
-    ranges = [fr for fr in va.font_ranges() if fr.sha256]
+    ranges = [fr for fr in all_ranges() if fr.sha256]
 
     def one(fr: va.FontRange) -> None:
         assert fr.sha256
@@ -192,13 +265,26 @@ def check() -> None:
     for stack in stacks:
         if list(lock["fonts"]["ranges"].get(stack, {})) != RANGES:
             raise SystemExit(f"lock file: fontstack {stack} does not list all {len(RANGES)} ranges")
+    fb = lock["fonts"].get("fallback")
+    if fb:
+        want = fallback_ranges(fb)
+        for stack in fb["fontstacks"]:
+            if list(fb["ranges"].get(stack, {})) != want:
+                raise SystemExit(f"lock file: fallback fontstack {stack} does not list "
+                                 f"the ranges of its scripts ({want})")
+        for stack, fb_stack in fb["for"].items():
+            if stack not in stacks or fb_stack not in fb["fontstacks"]:
+                raise SystemExit(f"lock file: fallback {stack} -> {fb_stack} names an unknown fontstack")
+        va.fallback_licence(lock)
+    fb_count = len(all_ranges(lock)) - len(ranges)
+    ranges = all_ranges(lock)
     bad = [fr for fr in ranges if fr.sha256 is not None and
            (len(fr.sha256) != 64 or any(c not in "0123456789abcdef" for c in fr.sha256))]
     if bad:
         raise SystemExit(f"lock file: malformed sha256 for {bad[0].stack}/{bad[0].range_key}")
     print(f"ok: maplibre-gl {lock['maplibre-gl']['version']} and "
           f"{va.RTL_TEXT_PLUGIN} {lock[va.RTL_TEXT_PLUGIN]['version']} match the lock file; "
-          f"{len(ranges)} glyph ranges pinned")
+          f"{len(ranges) - fb_count} glyph ranges and {fb_count} fallback ranges pinned")
 
 
 def main() -> int:

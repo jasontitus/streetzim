@@ -315,27 +315,116 @@ def extract_tiles_from_mbtiles(mbtiles_path, max_zoom=None):
     return tiles, metadata
 
 
-def generate_sdf_font_glyphs(lock=None):
+FALLBACK_SCAN_MAX_BYTES = 200_000_000
+
+
+def fallback_scripts_in_tiles(tiles, lock=None):
+    """The fallback scripts (lock ``fonts.fallback.scripts``) that occur in
+    the labels of ``tiles`` ({(z, x, y): tile bytes}), for
+    generate_sdf_font_glyphs.
+
+    None (all of them, about 0.5 MB in the ZIM) when the tiles are not in
+    memory (a streamed, continent-sized build) or are more than
+    FALLBACK_SCAN_MAX_BYTES: in a ZIM that large the glyphs cost under 0.3%,
+    less than the scan's time is worth. Measured 15-18 MB/s of stored tiles
+    (tilemaker tiles of Fiji, 366k tiles; OpenMapTiles-schema Monaco x100,
+    whose name:xx translations match nearly every tile), so seconds below
+    the cap (about 13 s)."""
+    import time
+    from streetzim import glyph_fallback
+    fallback = viewer_assets.font_fallback(lock)
+    if fallback is None:
+        return set()
+    if tiles is None:
+        return None
+    total = sum(len(t) for t in tiles.values())
+    if total > FALLBACK_SCAN_MAX_BYTES:
+        print(f"  Label scripts: not scanned ({total / 1e6:,.0f} MB of tiles); "
+              f"shipping every fallback script")
+        return None
+    t0 = time.monotonic()
+    stats = {}
+    found = glyph_fallback.scripts_in_tiles(tiles.values(), fallback.scripts, stats)
+    unreadable = stats.get("unreadable", 0)
+    print(f"  Label scripts needing fallback glyphs: {', '.join(sorted(found)) or 'none'} "
+          f"({len(tiles):,} tiles scanned in {time.monotonic() - t0:.1f}s"
+          + (f"; {unreadable:,} unreadable tiles skipped" if unreadable else "") + ")")
+    return found
+
+
+def generate_sdf_font_glyphs(lock=None, scripts=None):
     """SDF font glyphs for MapLibre GL JS, as pinned in the lock file.
 
     MapLibre needs SDF (Signed Distance Field) glyphs in protocol-buffer
     form, one file per 256 codepoints: fonts/{fontstack}/{start}-{end}.pbf.
     Every BMP range of each fontstack comes from the openmaptiles font CDN
-    (so labels in all scripts render -- e.g. General Punctuation 8192-8447
-    for the en dash in "Paris-Dakar", Arabic 1536-1791), each checked
+    (e.g. General Punctuation 8192-8447 for the en dash in
+    "Paris-Dakar"), each checked
     against its SHA-256 in resources/viewer-assets.lock.json and cached
     (streetzim/viewer_assets.py). A range the lock records as absent is
     skipped; MapLibre falls back to local rendering for it.
 
+    Open Sans has no glyphs for some scripts (Arabic, Hebrew, ...). For
+    those in ``scripts`` (names from the lock's ``fonts.fallback.scripts``;
+    None: all of them), the pinned Noto Sans glyphs are merged into the
+    ranges that hold them (streetzim/glyph_fallback.py); every other range
+    is shipped exactly as pinned.
+
     A range whose content does not match its hash stops the build, always.
     One that cannot be downloaded after 5 attempts stops it too, unless
-    STREETZIM_ALLOW_FONT_ERRORS=1.
+    STREETZIM_ALLOW_FONT_ERRORS=1 (a fallback range that could not be
+    fetched then leaves its Open Sans range as it was).
     """
+    from streetzim import glyph_fallback
+    lock = lock or viewer_assets.load_lock()
     print("  Downloading SDF font glyphs (pinned, verified)...")
-    fonts = {}
     # Our fontstack names have no spaces (URL-encoding differs between
     # Kiwix implementations); the lock maps them to the CDN's names.
     tasks = viewer_assets.font_ranges(lock)
+    fallback = viewer_assets.font_fallback(lock)
+    merge_stacks, blocks, merge_ranges = {}, [], []
+    if fallback is not None:
+        wanted = sorted(fallback.scripts if scripts is None
+                        else set(scripts) & set(fallback.scripts))
+        blocks = [b for name in wanted for b in fallback.scripts[name]]
+        merge_ranges = glyph_fallback.ranges_for(blocks)
+        stacks = {fr.stack for fr in tasks}
+        merge_stacks = {s: f for s, f in fallback.for_stack.items() if s in stacks}
+        fb_stacks = set(merge_stacks.values())
+        tasks = tasks + [fr for fr in fallback.ranges
+                         if fr.stack in fb_stacks and fr.range_key in merge_ranges]
+        if wanted:
+            print(f"    Fallback glyphs for: {', '.join(wanted)}")
+    fonts, fb_fonts = _fetch_font_ranges(tasks, fb_stacks=set(merge_stacks.values()))
+    merged = 0
+    for stack, fb_stack in merge_stacks.items():
+        name = lock["fonts"]["fontstacks"].get(stack, stack)
+        for r in merge_ranges:
+            fb_data = fb_fonts.get((fb_stack, r))
+            if fb_data is None:  # absent from the fallback, or waived download error
+                continue
+            old = fonts.get((stack, r))
+            new = glyph_fallback.merge_range(old, fb_data, blocks, name=name, range_key=r)
+            if new is not old:
+                fonts[(stack, r)] = new
+                merged += 1
+    if merged:
+        print(f"    Merged fallback glyphs into {merged} ranges")
+        licence = viewer_assets.fallback_licence(lock)
+        if licence is not None:
+            # The OFL travels with the glyphs: fonts/NotoSans/OFL.txt
+            fonts[(FALLBACK_LICENCE_DIR, "OFL.txt")] = licence
+    return fonts
+
+
+FALLBACK_LICENCE_DIR = "NotoSans"
+
+
+def _fetch_font_ranges(tasks, *, fb_stacks=()):
+    """Download (or read from the cache) and verify each range: (primary
+    ranges, fallback ranges), both keyed by (stack, range)."""
+    fonts = {}
+    fb_fonts = {}
 
     def fetch_one(fr):
         if fr.sha256 is None:
@@ -358,7 +447,7 @@ def generate_sdf_font_glyphs(lock=None):
             fr, data, err = fut.result()
             done += 1
             if data is not None:
-                fonts[(fr.stack, fr.range_key)] = data
+                (fb_fonts if fr.stack in fb_stacks else fonts)[(fr.stack, fr.range_key)] = data
             elif err == "absent":
                 skipped += 1
             elif isinstance(err, viewer_assets.IntegrityError):
@@ -378,7 +467,7 @@ def generate_sdf_font_glyphs(lock=None):
         # STREETZIM_ALLOW_FONT_ERRORS=1 ships anyway (e.g. during a CDN outage).
         raise SystemExit(f"{failed} font glyph range(s) failed to download after retries; "
                          f"not building a ZIM with missing glyphs")
-    return fonts
+    return fonts, fb_fonts
 
 
 def vendored_maplibre():

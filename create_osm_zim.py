@@ -111,6 +111,7 @@ from streetzim.tiles import (  # noqa: F401
     iter_tiles_from_mbtiles,
     extract_tiles_from_mbtiles,
     generate_sdf_font_glyphs,
+    fallback_scripts_in_tiles,
     vendored_maplibre,
 )
 from streetzim.satellite import (  # noqa: F401
@@ -838,8 +839,8 @@ def _process_tiles(*, args, mbtiles_path, total_steps):
             mbtiles_path, max_zoom=args.max_zoom)
         total_tile_count = len(tiles)
 
-    # Generate font glyphs
-    fonts = generate_sdf_font_glyphs()
+    # Generate font glyphs (with fallback glyphs for the scripts the labels use)
+    fonts = generate_sdf_font_glyphs(scripts=fallback_scripts_in_tiles(tiles))
     return fonts, tile_metadata, tiles, total_tile_count, use_streaming
 
 

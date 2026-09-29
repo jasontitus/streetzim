@@ -79,6 +79,7 @@ strict = [
   "streetzim/__about__.py",
   "streetzim/__init__.py",
   "streetzim/cli.py",
+  "streetzim/glyph_fallback.py",
   "streetzim/progress.py",
   "streetzim/routing/__init__.py",
   "streetzim/routing/reader.py",
