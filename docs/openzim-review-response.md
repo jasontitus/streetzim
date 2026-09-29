@@ -1,5 +1,15 @@
 # Response to "openzim/maps vs. streetzim"
 
+> **This is our first response, written on 2026-09-28. Our position has
+> since changed.** After a Zimfarm pilot we now propose that openZIM adopt
+> StreetZim directly (Option B); a second update follows on the openZIM
+> issue. The text below is kept as it was written. Several items it lists
+> as not done are done now: the builder and `index.html` are split, the
+> routing writer is out of `tests/`, and the operations scripts are in
+> `ops/` (the `attic/` it mentions has been deleted). For the current state
+> see [MAINTAINING.md](../MAINTAINING.md) and
+> [adoption-plan.md](adoption-plan.md).
+
 The openZIM team compared the two tools in
 [`Streetzim vs Maps.md`](https://github.com/openzim/maps/blob/763a9bea611e2a64da90146636ce821c5e40d253/Streetzim%20vs%20Maps.md),
 reviewing streetzim at `abdb891`. It recommends that openZIM keep

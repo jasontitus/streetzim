@@ -2,9 +2,11 @@
 
 openZIM's review (§6.1, "Why not Option B") listed what StreetZim would need
 before openZIM could use it as its maps scraper, rather than porting features
-into openzim/maps. This page tracks each item: done, in progress, or left,
-with the reasoning. It complements [openzim-integration.md](openzim-integration.md),
-which covers the other route: porting features into maps2zim.
+into openzim/maps. We propose that openZIM adopt StreetZim (Option B) after
+a Zimfarm pilot ([zimfarm.md](zimfarm.md)). This page tracks each item:
+done, in progress, or left, with the reasoning.
+[openzim-integration.md](openzim-integration.md) compares the two tools and
+sets out the porting route (Option A) for reference.
 
 | # | the review asked for | status |
 |---|---|---|
@@ -22,7 +24,7 @@ Rule for every split: **behaviour-neutral and verified mechanically.**
 
 | file | before | now | how it's verified |
 |---|---|---|---|
-| `resources/viewer/index.html` | 11,007 lines, edited by hand | 24 parts in `resources/viewer/src/index/` (largest 976 lines), joined by `tools/build_viewer.py` | the joined output is byte-identical to the file; CI and a test fail if they drift |
+| `resources/viewer/index.html` | 11,007 lines, edited by hand | 29 parts in `resources/viewer/src/index/` (11,897 lines in all, largest 979), joined by `tools/build_viewer.py` | the joined output is byte-identical to the file; CI and a test fail if they drift |
 | search extraction | inside `create_osm_zim.py` | `streetzim/search_extract.py` | golden-build diff |
 | routing formats | under `tests/` | `streetzim/routing/` | golden-build diff |
 | `create_osm_zim.py` | 7,188 lines | a ~1,700-line CLI (about 290 lines of it flag definitions); the work happens in `streetzim/{common,tiles,satellite,terrain,addresses,zim_writer}.py` and `streetzim/routing/build.py`. | golden-build diff (fixed inputs, every entry compared), an independent review that ran every production flag on old and new code, and a production-flag Washington, D.C. head-to-head against `main` ([head-to-head-dc.md](head-to-head-dc.md); bundled Wikipedia articles not yet covered) |
@@ -70,7 +72,7 @@ Order, because the build host runs these by absolute path:
   ([head-to-head-dc.md](head-to-head-dc.md)) used a test article source
   because Wikipedia was rate-limiting the machine, so article bundling was
   not compared on real content. It also predates the `main()` split.
-- **The pyright baseline** (19 findings in older modules, down from 39) only shrinks:
+- **The pyright baseline** (18 findings in older modules, down from 39) only shrinks:
   fix them as those files are touched.
 
 ## Would it be worth it?
@@ -85,11 +87,12 @@ maps2zim:
   [tile-sources.md](tile-sources.md)).
 
 What it would cost:
-- taking on a larger codebase (about 95k lines, most of it viewer and
-  operations);
+- taking on a larger codebase (about 42k lines of code after the
+  operations split, plus 13k of tests; most of it viewer and builder);
 - custom formats to maintain;
 - one author's history.
 
-The items above lower that cost, but openZIM decides whether it is low
-enough. Either way, the same work makes the porting route (Option A)
-cheaper too.
+The items above lower that cost enough, we think, for openZIM to adopt
+StreetZim rather than port it: a Zimfarm pilot next to maps2zim is the way
+to check. The same work would also make the porting route (Option A)
+cheaper, should openZIM still prefer it.

@@ -1,11 +1,15 @@
-# Bringing StreetZim features into openzim/maps
+# StreetZim and openzim/maps
 
-openZIM plans to keep [openzim/maps](https://github.com/openzim/maps)
-(`maps2zim`) as its scraper and add StreetZim's features to it
-([review](https://github.com/openzim/maps/blob/763a9bea611e2a64da90146636ce821c5e40d253/Streetzim%20vs%20Maps.md),
-[our response](openzim-review-response.md)). This page is a concrete plan
-for doing that. It is based on maps2zim at `707fc44` (2026-09) and StreetZim
-at this commit. Everything here uses libzim / zimscraperlib and the standard
+We propose that openZIM adopt StreetZim as its maps scraper (Option B in
+openZIM's
+[review](https://github.com/openzim/maps/blob/763a9bea611e2a64da90146636ce821c5e40d253/Streetzim%20vs%20Maps.md)),
+after a Zimfarm pilot: [zimfarm.md](zimfarm.md) covers running it there and
+[adoption-plan.md](adoption-plan.md) tracks the work. The review instead
+planned to keep [openzim/maps](https://github.com/openzim/maps) (`maps2zim`)
+and port StreetZim's features into it (Option A). This page compares the
+two pipelines and, for reference, sets out what such a port would involve.
+It is based on maps2zim at `707fc44` (2026-09) and StreetZim at this
+commit. Everything here uses libzim / zimscraperlib and the standard
 openZIM tools.
 
 ## The two pipelines side by side
@@ -13,13 +17,13 @@ openZIM tools.
 | step | maps2zim | StreetZim |
 |---|---|---|
 | vector tiles | downloads OpenFreeMap's OpenMapTiles MBTiles (`planet` or `monaco`); cuts by `.poly` (shapely `TileFilter`) | tilemaker on a Geofabrik PBF, **or `--mbtiles` any OpenMapTiles MBTiles, OpenFreeMap included** |
-| ZIM paths for tiles | `tiles/{z}/{x}/{y}.pbf`, identical tiles written once plus ZIM aliases | `tiles/{z}/{x}/{y}.pbf` (the same paths); empty tiles dropped |
+| ZIM paths for tiles | `tiles/{z}/{x}/{y}.pbf`, identical tiles written once plus ZIM aliases | `tiles/{z}/{x}/{y}.pbf` (the same paths), identical tiles written once plus ZIM aliases ([tile-aliases.md](tile-aliases.md)); empty tiles dropped |
 | ZIM writer | zimscraperlib `Creator` (libzim) | python-libzim `Creator` (libzim) |
 | search | Kiwix title index over GeoNames ADM1–4 `search/<label>` redirect pages; full-text off | in-map search over sharded JSON (`search-data/`) of every named place, POI, street, peak, park and water feature, plus Kiwix full-text over detail pages |
 | categories | — | Find chips over `category-index/` |
 | routing | — | graph from the PBF, loaded in cells by a Web Worker |
-| viewer | Vite + ES modules, `content/config.json` | single-file viewer, `map-config.json` |
-| QA | ruff, pyright strict, pytest, daily Monaco build + `zimcheck` | ruff (narrow), pytest + Node tests, Monaco build + validator + `zimcheck` + browser test through `kiwix-serve` |
+| viewer | Vite + ES modules, `content/config.json` | single-file viewer built from 29 parts, pinned MapLibre and fonts, `map-config.json` ([viewer-supply-chain.md](viewer-supply-chain.md)) |
+| QA | ruff, pyright strict, pytest, daily Monaco build + `zimcheck` | ruff with pyflakes, bugbear and other bug-catching families (`ruff.toml`; `ops/` stays on E9 + F), pyright strict on 20 files (18 baselined findings elsewhere, no new ones allowed), pytest with coverage + Node tests, ESLint on the viewer, pre-commit hooks for the lint and type checks, Monaco build (every push and weekly) + validator + `zimcheck` + browser test through `kiwix-serve` |
 
 ## What we verified
 
@@ -52,20 +56,24 @@ reads the MBTiles it already has.
 
 ## Options
 
-1. **Port the code into maps2zim** (recommended). MIT code may be
+1. **Adopt StreetZim** (our proposal). Run the `streetzim` command on
+   Zimfarm next to maps2zim for a few recipes, compare, then switch the
+   maps recipes over ([zimfarm.md](zimfarm.md)).
+2. **Port the code into maps2zim** (the review's plan). If openZIM keeps
+   maps2zim, this is the way to do it. MIT code may be
    included in GPL-3.0 maps2zim; keep the MIT notice in each ported file.
    The ported code follows maps2zim's conventions: pydantic models, `Context`,
    zimscraperlib `add_item_for`, pyright strict, and tests in their tree. The
    shared contract is the data formats ([search-records.md](search-records.md),
    [formats.md](formats.md)), plus fixture tests on both sides.
-2. **A small shared library** (for example `streetzim-core` on PyPI) with the
+3. **A small shared library** (for example `streetzim-core` on PyPI) with the
    pure modules. This makes sense only if routing ends up co-maintained;
    otherwise it gives openZIM a dependency it doesn't control.
-3. **StreetZim as a post-processor** on a maps2zim ZIM. We advise against
+4. **StreetZim as a post-processor** on a maps2zim ZIM. We advise against
    it: a ZIM can't be appended to, so this means a full repack, and it hides
    the features from Zimfarm.
 
-## Proposed PR sequence for maps2zim
+## If openZIM ports instead: a PR sequence for maps2zim
 
 Each PR stands on its own, ships behind a flag where it adds content, and
 keeps the Monaco daily build green. Efforts are rough, for someone familiar
@@ -121,9 +129,7 @@ Still to do:
    size, so measure on a large region first.
 2. Move the search-data/category emitters out of `create_zim` into a
    function that returns `(path, bytes)` pairs.
-3. Type-annotate the pure modules and check them with pyright, since
-   maps2zim runs pyright strict.
-4. Publish a small shared fixture corpus (MBTiles in, records and shards
+3. Publish a small shared fixture corpus (MBTiles in, records and shards
    out). `tests/test_search_extract.py` has the first fixture.
 
 ## Small things we noticed in maps2zim

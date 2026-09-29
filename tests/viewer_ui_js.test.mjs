@@ -410,4 +410,425 @@ await ok('the main script stays out when the browser is unsupported', () => {
   assert.ok(HTML.indexOf('window.__szUnsupported = missing') < HTML.indexOf('maplibregl.addProtocol'));
 });
 
+// ---- Find chip rail: which chips this ZIM can serve (240-on-map-find-ui.js)
+
+const CHIP_AVAIL_SRC = slice('// BEGIN chip-availability', '// END chip-availability');
+const RESOLVE_SRC = slice('async function _findResolveChipDef', 'async function loadChipOnMap');
+// env.manifest: what category-index/manifest.json serves (200), or
+// env.fetch: a fetch stub. env.document: a fake DOM for the rail.
+function loadChips(env = {}) {
+  const fetch = env.fetch || ((u) => Promise.resolve({ ok: true, status: 200,
+    json: () => Promise.resolve(env.manifest) }));
+  const fn = new Function('baseUrl', 'fetch', 'document', '_showFindToast',
+    CHIP_AVAIL_SRC + RESOLVE_SRC + '\nreturn { _findChipHas, _findChipsPlan, _findResolveChipDef,' +
+    ' _findFetchCatManifest, _findChipsReconcile, _findChipsApply, _findChipsRecheck,' +
+    ' _findChipUnavailable, cached: () => _findCatManifest };');
+  const toasts = env.toasts || [];
+  return fn('http://z/C/', fetch, env.document || railDocument([]).document,
+    (t) => toasts.push(t));
+}
+// fetch stub answering the manifest URL from a script of responses:
+// a number is an HTTP status (200 serves `manifest`), 'net' throws.
+function scriptedFetch(script, manifest) {
+  const calls = [];
+  const fetch = (u) => {
+    calls.push(u);
+    const step = script.length > 1 ? script.shift() : script[0];
+    if (step === 'net') return Promise.reject(new TypeError('Failed to fetch'));
+    return Promise.resolve({ ok: step === 200, status: step,
+                             json: () => Promise.resolve(manifest) });
+  };
+  return { fetch, calls };
+}
+// A rail of chip buttons, enough DOM for _findChipsApply.
+function railDocument(ids) {
+  const input = { id: 'search-input', focus() { doc.activeElement = input; } };
+  const btns = ids.map((id) => {
+    // kbd: focused from the keyboard (matches :focus-visible).
+    const b = { hidden: false, dataset: { chip: id }, cls: new Set(), kbd: false,
+                classList: { contains: (c) => b.cls.has(c) },
+                matches: (q) => q === ':focus-visible' && b.kbd,
+                focus(kbd = true) { doc.activeElement = b; b.kbd = kbd; },
+                blur() { if (doc.activeElement === b) doc.activeElement = null; } };
+    return b;
+  });
+  const rail = { hidden: false, querySelectorAll: () => btns };
+  const doc = { activeElement: null,
+                getElementById: (id) => (id === 'search-input' ? input : id === 'find-chips' ? rail : null) };
+  return { document: doc, rail, btns, input };
+}
+const flush = () => new Promise((r) => setTimeout(r, 0));
+const RAIL = ['food', 'bars', 'shops', 'health', 'museums', 'landmarks',
+              'libraries', 'parks', 'fuel', 'hotels'];
+const chipEntry = (count) => ({ label: 'x', count, bytes: 10 });
+const shown = (plan) => RAIL.filter((id) => plan.show[id]);
+
+await ok('chips: no chip data in the manifest hides the whole rail', () => {
+  const { _findChipsPlan } = loadChips();
+  // Built without --split-find-chips: a manifest with categories, no chips.
+  for (const m of [{ total: 5, categories: { poi: 3 } }, { chips: {} }, {}]) {
+    const plan = _findChipsPlan(m, RAIL);
+    assert.strictEqual(plan.rail, false, JSON.stringify(m));
+    assert.deepStrictEqual(shown(plan), []);
+  }
+});
+
+await ok('chips: an unreadable manifest keeps every chip', () => {
+  const { _findChipsPlan } = loadChips();
+  for (const m of [null, { _szUnknown: true }]) {
+    const plan = _findChipsPlan(m, RAIL);
+    assert.strictEqual(plan.rail, true);
+    assert.deepStrictEqual(shown(plan), RAIL);
+  }
+});
+
+await ok('chips: count-0 chips are hidden (tilemaker Parks / Gas)', () => {
+  const { _findChipsPlan } = loadChips();
+  const chips = Object.fromEntries(RAIL.map((id) => [id, chipEntry(7)]));
+  chips.parks = chipEntry(0);
+  chips.fuel = chipEntry(0);
+  const plan = _findChipsPlan({ chips }, RAIL);
+  assert.strictEqual(plan.rail, true);
+  assert.deepStrictEqual(shown(plan), RAIL.filter((id) => id !== 'parks' && id !== 'fuel'));
+  // Every listed chip empty: nothing to show, rail hidden.
+  const empty = Object.fromEntries(RAIL.map((id) => [id, chipEntry(0)]));
+  assert.strictEqual(_findChipsPlan({ chips: empty }, RAIL).rail, false);
+  // An entry without a count (older manifests) counts as present.
+  assert.ok(_findChipsPlan({ chips: { bars: { label: 'Bars' } } }, RAIL).show.bars);
+});
+
+await ok('chips: Food & Drink stands for a pre-merge restaurants/cafes pair', () => {
+  const { _findChipsPlan } = loadChips();
+  const plan = _findChipsPlan({ chips: { restaurants: chipEntry(3), cafes: chipEntry(0) } }, RAIL);
+  assert.deepStrictEqual(shown(plan), ['food']);
+  assert.deepStrictEqual(shown(_findChipsPlan({ chips: { cafes: chipEntry(0) } }, RAIL)), []);
+  // A chip set the rail does not know at all: better all than none.
+  assert.deepStrictEqual(shown(_findChipsPlan({ chips: { zzz: chipEntry(4) } }, RAIL)), RAIL);
+});
+
+await ok('chips: a tap resolves to nothing when the ZIM cannot serve it', async () => {
+  const noChips = loadChips({ manifest: { total: 1, categories: { poi: 1 } } });
+  assert.strictEqual(await noChips._findResolveChipDef({ id: 'food', label: 'Food & Drink' }), null);
+  const tm = loadChips({ manifest: { chips: { parks: chipEntry(0), bars: chipEntry(2),
+                                  restaurants: chipEntry(1), cafes: chipEntry(0) } } });
+  assert.strictEqual(await tm._findResolveChipDef({ id: 'parks', label: 'Parks' }), null);
+  assert.deepStrictEqual((await tm._findResolveChipDef({ id: 'bars', label: 'Bars' })).sources, ['bars']);
+  assert.deepStrictEqual((await tm._findResolveChipDef({ id: 'food', label: 'Food' })).sources,
+    ['restaurants']);
+  // Manifest unreadable (a 503 here): try the chip's own file.
+  const unk = loadChips({ fetch: scriptedFetch([503]).fetch });
+  assert.deepStrictEqual((await unk._findResolveChipDef({ id: 'bars', label: 'Bars' })).sources, ['bars']);
+});
+
+await ok('chips: hidden chips and rail are really hidden, and taps always say something', () => {
+  // `display: inline-flex` on the chip outranks the UA [hidden] rule.
+  assert.match(HTML, /#find-chips\[hidden\], #find-chips \.find-chip\[hidden\] \{ display: none; \}/);
+  assert.match(HTML, /No category search in this map/);
+  // Legacy-layout chip that loaded nothing, and a failed fetch, both toast.
+  const legacy = slice("console.warn('[streetzim] chip fetch failed:'", 'var bounds = map.getBounds();');
+  assert.match(legacy, /_showFindToast\('Couldn\\u2019t load '/);
+  assert.match(legacy, /if \(!Array\.isArray\(data\) \|\| !data\.length\) \{\s*_showFindToast\('No '/);
+});
+
+await ok('manifest: only 404 / 410 mean "no chip data"; the answer is cached', async () => {
+  for (const status of [404, 410]) {
+    const f = scriptedFetch([status]);
+    const c = loadChips({ fetch: f.fetch });
+    assert.deepStrictEqual(await c._findFetchCatManifest(), {}, String(status));
+    assert.deepStrictEqual(c.cached(), {});
+    await c._findFetchCatManifest();
+    assert.strictEqual(f.calls.length, 1, 'cached, not fetched again');
+    assert.strictEqual(c._findChipsPlan(await c._findFetchCatManifest(), RAIL).rail, false);
+  }
+  const f = scriptedFetch([200], { chips: { bars: chipEntry(2) } });
+  const c = loadChips({ fetch: f.fetch });
+  assert.deepStrictEqual(await c._findFetchCatManifest(), { chips: { bars: chipEntry(2) } });
+  assert.strictEqual(f.calls[0], 'http://z/C/category-index/manifest.json');
+});
+
+await ok('manifest: 5xx and network errors are unknown, not cached, and retried', async () => {
+  for (const first of [500, 503, 502, 'net']) {
+    const f = scriptedFetch([first, 200], { chips: { bars: chipEntry(2) } });
+    const c = loadChips({ fetch: f.fetch });
+    const m1 = await c._findFetchCatManifest();
+    assert.deepStrictEqual(m1, { _szUnknown: true }, String(first));
+    assert.strictEqual(c.cached(), null);
+    // The rail stays whole on an unknown answer.
+    assert.deepStrictEqual(shown(c._findChipsPlan(m1, RAIL)), RAIL);
+    const m2 = await c._findFetchCatManifest();
+    assert.deepStrictEqual(m2, { chips: { bars: chipEntry(2) } });
+    assert.strictEqual(f.calls.length, 2);
+    await c._findFetchCatManifest();
+    assert.strictEqual(f.calls.length, 2, 'the real manifest is cached');
+  }
+});
+
+await ok('reconcile: runs again once a later fetch reads the real manifest', async () => {
+  const d = railDocument(RAIL);
+  const f = scriptedFetch([503, 200], { chips: { bars: chipEntry(3), parks: chipEntry(0) } });
+  const c = loadChips({ fetch: f.fetch, document: d.document });
+  await c._findChipsReconcile(d.rail);
+  assert.ok(d.btns.every((b) => !b.hidden) && !d.rail.hidden, '503: full rail kept');
+  await c._findFetchCatManifest();          // e.g. a chip tap, later
+  await flush();
+  assert.deepStrictEqual(d.btns.filter((b) => !b.hidden).map((b) => b.dataset.chip), ['bars']);
+  // No chips key at all, after an unknown first answer: rail goes.
+  const d2 = railDocument(RAIL);
+  const c2 = loadChips({ fetch: scriptedFetch(['net', 200], { total: 3 }).fetch, document: d2.document });
+  await c2._findChipsReconcile(d2.rail);
+  assert.strictEqual(d2.rail.hidden, false);
+  await c2._findFetchCatManifest();
+  assert.strictEqual(d2.rail.hidden, true);
+});
+
+await ok('reconcile: leaves an active or loading chip alone', () => {
+  const d = railDocument(RAIL);
+  const c = loadChips({ document: d.document });
+  d.btns[7].dataset.szLoading = '1';       // parks, tap still resolving
+  d.btns[8].cls.add('on');                 // fuel, active
+  c._findChipsApply(d.rail, { chips: { bars: chipEntry(1), parks: chipEntry(0), fuel: chipEntry(0) } });
+  assert.deepStrictEqual(d.btns.filter((b) => !b.hidden).map((b) => b.dataset.chip),
+    ['bars', 'parks', 'fuel']);
+  // Even with no chip data the rail stays while a chip is busy.
+  const d2 = railDocument(RAIL);
+  const c2 = loadChips({ document: d2.document });
+  d2.btns[0].dataset.szLoading = '1';
+  c2._findChipsApply(d2.rail, {});
+  assert.strictEqual(d2.rail.hidden, false);
+  assert.deepStrictEqual(d2.btns.filter((b) => !b.hidden).map((b) => b.dataset.chip), ['food']);
+});
+
+await ok('reconcile: focus moves off a chip before it is hidden', () => {
+  const d = railDocument(RAIL);
+  const c = loadChips({ document: d.document });
+  d.btns[7].focus();                       // parks, count 0
+  c._findChipsApply(d.rail, { chips: { bars: chipEntry(1), parks: chipEntry(0), hotels: chipEntry(2) } });
+  assert.strictEqual(d.document.activeElement, d.btns[9], 'next visible chip (hotels)');
+  const d2 = railDocument(RAIL);
+  const c2 = loadChips({ document: d2.document });
+  d2.btns[9].focus();                      // hotels; wraps to the first visible
+  c2._findChipsApply(d2.rail, { chips: { bars: chipEntry(1), hotels: chipEntry(0) } });
+  assert.strictEqual(d2.document.activeElement, d2.btns[1]);
+  const d3 = railDocument(RAIL);
+  const c3 = loadChips({ document: d3.document });
+  d3.btns[2].focus();                      // whole rail goes: the search box
+  c3._findChipsApply(d3.rail, { total: 1 });
+  assert.strictEqual(d3.rail.hidden, true);
+  assert.strictEqual(d3.document.activeElement, d3.input);
+  // After a tap (no :focus-visible) focus is dropped, never sent to the
+  // search box — that would pop the soft keyboard on Android.
+  const d5 = railDocument(RAIL);
+  const c5 = loadChips({ document: d5.document });
+  d5.btns[7].focus(false);
+  c5._findChipsApply(d5.rail, { chips: { bars: chipEntry(1), parks: chipEntry(0) } });
+  assert.strictEqual(d5.document.activeElement, null);
+  // Focus elsewhere is not touched.
+  const d4 = railDocument(RAIL);
+  const c4 = loadChips({ document: d4.document });
+  d4.btns[1].focus();
+  c4._findChipsApply(d4.rail, { chips: { bars: chipEntry(1) } });
+  assert.strictEqual(d4.document.activeElement, d4.btns[1]);
+});
+
+await ok('reconcile: the rail goes whenever no chip is left visible', () => {
+  const d = railDocument(['bars', 'parks']);
+  const c = loadChips({ document: d.document });
+  // An unrecognised chip set keeps all; one recognised chip at 0 hides all.
+  c._findChipsApply(d.rail, { chips: { parks: chipEntry(0) } });
+  assert.strictEqual(d.rail.hidden, true);
+  assert.ok(d.btns.every((b) => b.hidden));
+});
+
+await ok('unresolved tap: chip hidden, rail hidden when it was the last, tap focus dropped', () => {
+  const d = railDocument(['bars', 'parks', 'fuel']);
+  const toasts = [];
+  const c = loadChips({ document: d.document, toasts,
+    manifest: { chips: { bars: chipEntry(1), parks: chipEntry(0), fuel: chipEntry(0) } } });
+  return c._findFetchCatManifest().then(() => {
+    d.btns[1].focus(false);                 // tapped Parks
+    c._findChipUnavailable({ id: 'parks', label: 'Parks' });
+    assert.deepStrictEqual(d.btns.map((b) => b.hidden), [false, true, false]);
+    assert.strictEqual(d.rail.hidden, false);
+    assert.strictEqual(d.document.activeElement, null, 'blurred, not the search box');
+    assert.deepStrictEqual(toasts, ['No parks in this map']);
+    // Bars and Gas go too (Gas by keyboard): the rail goes, focus to the input.
+    d.btns[0].hidden = true;
+    d.btns[2].focus(true);
+    c._findChipUnavailable({ id: 'fuel', label: 'Gas' });
+    assert.strictEqual(d.rail.hidden, true);
+    assert.strictEqual(d.document.activeElement, d.input);
+  });
+});
+
+await ok('unresolved tap on a ZIM with no chip data hides the rail', async () => {
+  const d = railDocument(RAIL);
+  const toasts = [];
+  const c = loadChips({ document: d.document, toasts, manifest: { total: 3 } });
+  await c._findFetchCatManifest();
+  c._findChipUnavailable({ id: 'food', label: 'Food & Drink' });
+  assert.strictEqual(d.rail.hidden, true);
+  assert.deepStrictEqual(toasts, ['No category search in this map']);
+});
+
+// A fetch whose answers the test releases one at a time.
+function deferredFetch(manifest) {
+  const pending = [];
+  const fetch = () => new Promise((res, rej) => pending.push({ res, rej }));
+  const answer = (status) => {
+    const p = pending.shift();
+    if (status === 'net') p.rej(new TypeError('Failed to fetch'));
+    else p.res({ ok: status === 200, status, json: () => Promise.resolve(manifest) });
+    return flush();
+  };
+  return { fetch, pending, answer };
+}
+
+await ok('manifest: concurrent callers share one fetch', async () => {
+  const f = deferredFetch({ chips: { bars: chipEntry(1) } });
+  const d = railDocument(RAIL);
+  const c = loadChips({ fetch: f.fetch, document: d.document });
+  const r = c._findChipsReconcile(d.rail);
+  const tap = c._findFetchCatManifest();
+  assert.strictEqual(f.pending.length, 1, 'one request in flight');
+  await f.answer(200);
+  await r;
+  assert.deepStrictEqual(await tap, { chips: { bars: chipEntry(1) } });
+  assert.deepStrictEqual(d.btns.filter((b) => !b.hidden).map((b) => b.dataset.chip), ['bars']);
+});
+
+await ok('reconcile answers first (503), the tap\'s later fetch second (200)', async () => {
+  const f = deferredFetch({ chips: { bars: chipEntry(1), parks: chipEntry(0) } });
+  const d = railDocument(RAIL);
+  const c = loadChips({ fetch: f.fetch, document: d.document });
+  const r = c._findChipsReconcile(d.rail);
+  await f.answer(503);
+  await r;
+  assert.ok(d.btns.every((b) => !b.hidden), 'full rail after the 503');
+  d.btns[7].dataset.szLoading = '1';       // Parks tapped: its fetch goes out
+  const tap = c._findFetchCatManifest();
+  assert.strictEqual(f.pending.length, 1);
+  await f.answer(200);
+  await tap;
+  // Reconciled — except the busy Parks chip, which the tap's done() rechecks.
+  assert.deepStrictEqual(d.btns.filter((b) => !b.hidden).map((b) => b.dataset.chip), ['bars', 'parks']);
+  delete d.btns[7].dataset.szLoading;
+  c._findChipsRecheck();
+  assert.deepStrictEqual(d.btns.filter((b) => !b.hidden).map((b) => b.dataset.chip), ['bars']);
+});
+
+// initFindChips' act(): data-sz-loading while the tap runs, cleared after.
+const INIT_CHIPS_SRC = slice('function initFindChips(map)', 'function _findChipPaintActive');
+function runInitChips(loadChipOnMap) {
+  const btns = [];
+  const el = (tag) => {
+    const e = { tag, children: [], dataset: {}, on: {}, setAttribute() {},
+      appendChild(c) { e.children.push(c); if (tag === 'div') btns.push(c); return c; },
+      addEventListener(t, f) { e.on[t] = f; } };
+    return e;
+  };
+  const rail = el('div');
+  const document = { createElement: el,
+    getElementById: (id) => (id === 'find-chips' ? rail : null) };
+  const calls = { recheck: 0, toasts: [] };
+  new Function('document', 'EXPLORE_CHIPS', 'loadChipOnMap', '_findChipsReconcile',
+    '_findChipsRecheck', '_findChipPaintActive', '_showFindToast', 'console',
+    'var _szChipSynth = 0, _chipOrigPlaceholder = null;\n' + INIT_CHIPS_SRC +
+    '\ninitFindChips({});')(document, [{ id: 'bars', label: 'Bars', emoji: 'b' }],
+    loadChipOnMap, () => {}, () => { calls.recheck++; }, () => {},
+    (t) => calls.toasts.push(t), { warn() {} });
+  return { btn: btns[0], calls };
+}
+
+await ok('act(): a chip is marked loading while its tap runs', async () => {
+  let release;
+  const run = runInitChips(() => new Promise((r) => { release = r; }));
+  run.btn.on.click();
+  assert.strictEqual(run.btn.dataset.szLoading, '1');
+  release();
+  await flush();
+  assert.strictEqual(run.btn.dataset.szLoading, undefined);
+  assert.strictEqual(run.calls.recheck, 1, 'plan re-applied after the tap');
+  // A failed load clears it too, and says so.
+  let fail;
+  const run2 = runInitChips(() => new Promise((_r, j) => { fail = j; }));
+  run2.btn.on.click();
+  assert.strictEqual(run2.btn.dataset.szLoading, '1');
+  fail(new Error('boom'));
+  await flush();
+  assert.strictEqual(run2.btn.dataset.szLoading, undefined);
+  assert.strictEqual(run2.calls.recheck, 1);
+  assert.match(run2.calls.toasts[0], /Couldn.t load bars/);
+});
+
+// _findFetchChipData's sub_chunks fan-out (legacy name-hash buckets).
+const CHIP_DATA_SRC = slice('var _FIND_CHIP_CACHE_MAX', '// Helper for the "no results" toast');
+function loadChipData(manifest, bucketStatus) {
+  const calls = [];
+  const fetch = (u) => {
+    calls.push(u);
+    const st = bucketStatus(u);
+    if (st === 'net') return Promise.reject(new TypeError('Failed to fetch'));
+    return Promise.resolve({ ok: st === 200, status: st, json: () => Promise.resolve([{ n: u }]) });
+  };
+  const fn = new Function('baseUrl', 'fetch', 'navigator', '_findFetchCatManifest', '_findChipCache',
+    CHIP_DATA_SRC + '\nreturn _findFetchChipData;');
+  return { get: fn('http://z/C/', fetch, {}, () => Promise.resolve(manifest), new Map()), calls };
+}
+
+await ok('chip buckets: all failing rejects ("Couldn\'t load"), some failing still shows the rest', async () => {
+  const m = { chips: { shops: { count: 4, sub_chunks: ['0', '1', '2'] } } };
+  const all = loadChipData(m, (u) => (/-1\.json$/.test(u) ? 'net' : 503));
+  await assert.rejects(all.get('shops'), /all 3 buckets failed/);
+  assert.strictEqual(all.calls.length, 3);
+  const some = loadChipData(m, (u) => (/-1\.json$/.test(u) ? 500 : 200));
+  const recs = await some.get('shops');
+  assert.deepStrictEqual(recs.map((r) => r.n.replace('http://z/C/category-index/', '')),
+    ['chip-shops-0.json', 'chip-shops-2.json']);
+  // An empty bucket that loaded fine is not a failure.
+  const empty = loadChipData({ chips: { shops: { count: 0, sub_chunks: ['0'] } } }, () => 200);
+  assert.strictEqual((await empty.get('shops')).length, 1);
+});
+
+await ok('toast: announced politely, wraps as a box', () => {
+  const t = slice('function _showFindToast', '// Generation counter');
+  assert.match(t, /setAttribute\('role', 'status'\)/);
+  assert.match(t, /setAttribute\('aria-live', 'polite'\)/);
+  assert.match(t, /border-radius:18px/);
+});
+
+// ---- Files that live beside the /drive/ PWA, never in a ZIM (020, 100)
+
+const STAMP_SRC = slice('var SZ_ON_DRIVE_PWA', '</script>');
+const BRIDGE_SRC = slice('(function loadWikiTitleBridge()', '// Resolve the in-ZIM article path');
+function runPageLoad(pathname, protocol = 'http:') {
+  const fetched = [];
+  const fetch = (u) => { fetched.push(u); return new Promise(() => {}); };
+  const stamp = { style: {}, textContent: '…', addEventListener() {} };
+  const document = { getElementById: (id) => (id === 'viewer-build-stamp' ? stamp : null),
+                     body: { classList: { add() {} } } };
+  const window = { location: { pathname, protocol, search: '' } };
+  new Function('window', 'document', 'fetch', 'baseUrl',
+    STAMP_SRC + '\n' + BRIDGE_SRC)(window, document, fetch, 'http://h' + pathname.replace(/[^/]*$/, ''));
+  return { fetched, stamp };
+}
+
+await ok('kiwix-serve: no build-info.js or wiki-qid-titles.json requests', () => {
+  for (const path of ['/content/monaco/index.html', '/viewer#monaco/index.html',
+                      '/C/index.html', '/drive/index.html']) {
+    const { fetched, stamp } = runPageLoad(path);
+    assert.deepStrictEqual(fetched, [], path);
+    assert.strictEqual(stamp.style.display, 'none', path);
+  }
+});
+
+await ok('the /drive/ PWA still loads its stamp and Q-ID bridge', () => {
+  for (const path of ['/drive/viewer/', '/drive/viewer/index.html']) {
+    const { fetched, stamp } = runPageLoad(path, 'https:');
+    assert.strictEqual(fetched.length, 2, path);
+    assert.match(fetched[0], /^\/drive\/build-info\.js\?t=/);
+    assert.strictEqual(fetched[1], 'http://h/drive/viewer/../wiki-qid-titles.json');
+    assert.notStrictEqual(stamp.style.display, 'none');
+  }
+});
+
 console.log(`\n${pass} passed`);

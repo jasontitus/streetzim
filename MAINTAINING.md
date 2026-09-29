@@ -3,12 +3,13 @@
 For whoever picks this up next. [README.md](README.md) covers building a ZIM;
 this file covers how the repository is organised, how to change it safely,
 how production releases are made, and what is known to be wrong.
-[docs/openzim-review-response.md](docs/openzim-review-response.md) records
-how the 2026-09 openZIM review of this codebase was addressed, and
-[docs/openzim-integration.md](docs/openzim-integration.md) is the plan for
-bringing StreetZim features into openzim/maps.
-[docs/adoption-plan.md](docs/adoption-plan.md) tracks what it would take for
-openZIM to adopt StreetZim directly.
+We propose that openZIM adopt StreetZim as its maps scraper;
+[docs/adoption-plan.md](docs/adoption-plan.md) tracks that work and
+[docs/zimfarm.md](docs/zimfarm.md) covers running on Zimfarm.
+[docs/openzim-integration.md](docs/openzim-integration.md) compares
+StreetZim with openzim/maps and sets out what porting its features there
+would involve. [docs/openzim-review-response.md](docs/openzim-review-response.md)
+is our first, superseded response to the 2026-09 openZIM review.
 
 ## 1. What is core and what is operations
 
@@ -202,8 +203,13 @@ In rough priority order. The items marked **bug** were found during the
 scripts that may be running on the production host (see
 [ops/docs/scripts.md](ops/docs/scripts.md) for how to change those safely).
 
-- **Script sprawl.** 42 live shell scripts (73 before Phase 1 moved the dead
-  ones to `attic/`); about 23 are needed. The remaining phases are in
+- **Script sprawl.** 42 live shell scripts (73 before Phase 1 retired 31
+  dead ones; they are deleted, and commit `0792d0d` still has them); about
+  23 are needed. Of the 42, 38 are now in `ops/` (plus two new helpers
+  there, `check_stage1.sh` and `region-bbox.sh`), 2 move with `web/` in
+  stage 2 (`cloud/deploy_pwa.sh`, `scripts/sync-drive-viewer.sh`), and 2
+  are core (`scripts/fetch-shapefiles.sh`, `tests/run_identity_suite.sh`),
+  joined since by `tools/golden_builds.sh`. The remaining phases are in
   ops/docs/scripts.md.
 - **Shared gate code is copy-pasted, or `sed`-extracted at runtime from
   `retrofit-chips-queue.sh`** by six other scripts. It should become a sourced

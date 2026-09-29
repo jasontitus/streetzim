@@ -5,9 +5,24 @@
 > each old path. The host keeps running them by the old paths used here.
 > Phase 1's `attic/` has been deleted; commit `0792d0d` (main, the last before the ops split) still has it.
 
-Status 2026-09-28: 73 tracked `*.sh` files. Phase 1 moved 31 dead ones to
-`attic/`, leaving **42** in use; about 23 are actually needed. The rest are
-one-offs or wrappers superseded by `build-region-fast.sh`. This file lists every script with a verdict and gives
+Status 2026-09-29: 73 tracked `*.sh` files before Phase 1, which retired 31
+dead ones, leaving **42** in use; about 23 are actually needed. The rest are
+one-offs or wrappers superseded by `build-region-fast.sh`. Of the 42:
+- 38 are in `ops/`;
+- 2 stay at their old paths until they move with `web/` in stage 2:
+  `cloud/deploy_pwa.sh` and `scripts/sync-drive-viewer.sh`
+  ([in-place.txt](../in-place.txt));
+- 2 are core: `scripts/fetch-shapefiles.sh` (a wrapper that runs
+  `resources/tilemaker/fetch-shapefiles.sh`, kept there so the wheel carries
+  it) and `tests/run_identity_suite.sh`.
+
+Added since: two helpers in `ops/` with no old-path symlink,
+`check_stage1.sh` (read-only checks for stage 1, see
+[TESTING-STAGE1.md](../TESTING-STAGE1.md)) and `region-bbox.sh` (bbox
+functions sourced by the build and queue scripts), and one core runner,
+`tools/golden_builds.sh` ([docs/golden-builds.md](../../docs/golden-builds.md)).
+
+This file lists every script with a verdict and gives
 the order for cutting the count down **without breaking the production host**,
 which runs these scripts from `/storage/streetzim` (often by absolute path,
 sometimes while you edit them).
@@ -188,4 +203,5 @@ tooling stays, 30.
 | viewer rollout | `cloud/rollout_viewer_patch.sh`, `cloud/kiwix_viewer_gate.sh` |
 | upload / web | `cloud/upload_validated.sh` (the only upload path), `cloud/upload_url_cache.sh`, `cloud/deploy_pwa.sh`, `scripts/sync-drive-viewer.sh` |
 | host hygiene | `scripts/nvme-guard.sh`, `scripts/resource-watch.sh`, `scripts/ssd-reap.sh`, `tmp/upload-recorder.sh` |
-| setup / tests | `scripts/fetch-shapefiles.sh`, `tests/run_identity_suite.sh` |
+| ops helpers | `ops/region-bbox.sh` (sourced, not run), `ops/check_stage1.sh` (read-only) |
+| setup / tests (core) | `scripts/fetch-shapefiles.sh` (wrapper for `resources/tilemaker/fetch-shapefiles.sh`), `tests/run_identity_suite.sh`, `tools/golden_builds.sh` |

@@ -1,15 +1,185 @@
 
-var _findCatManifest = null;
 var _findChipCache = new Map();    // chipId -> Promise<Array<record>>
 // Geo-sharded chips: bounded LRU of shard fetches instead of whole chips.
 var _chipShardCache = CHIP_SHARDS.makeCache(CHIP_SHARDS.budgetBytes());
 window.addEventListener('pagehide', function() { _chipShardCache.clear(); });
 
-// Hide chips this ZIM has no file for. Restaurants + Cafés became one
-// "Food & Drink" chip on 2026-09-16, but ZIMs built before that ship the
-// old pair and no chip-food.json — and the rail is built before the
-// category manifest is fetched, so reconcile once it arrives rather than
-// guessing. A ZIM with no chips at all keeps every chip (legacy path).
+// BEGIN chip-availability
+// Which rail chips THIS ZIM can serve, read from category-index/manifest.json.
+// Chip files are only written by --split-find-chips, and every build that
+// writes them also lists them under the manifest's `chips` key, so:
+//   - manifest unknown (network error, or an HTTP error other than 404 /
+//     410, e.g. a 503 from the /drive/ service worker) -> keep every chip,
+//     try on tap, and reconcile again once a later fetch reads it;
+//   - manifest has no `chips` (or no category index at all) -> no chip
+//     data: hide the whole rail. It used to show all ten chips, and a tap
+//     fetched chip-<id>.json, got a 404 and showed nothing;
+//   - a chip whose manifest count is 0 (Parks / Gas on a tilemaker
+//     build) -> hide it; the tap had nothing to show.
+// Restaurants + Cafés became one "Food & Drink" chip on 2026-09-16, but
+// ZIMs built before that ship the old pair and no chip-food.json, so the
+// food button stands for either.
+var _FIND_CHIP_ALT = { food: ['food', 'restaurants', 'cafes'] };
+function _findChipHas(chips, id) {
+  var c = chips && chips[id];
+  if (!c) return false;
+  return !(typeof c.count === 'number' && c.count <= 0);
+}
+// manifest: the parsed manifest; { _szUnknown: true } when it could not be
+// read. ids: the rail's chip ids. -> { rail: bool, show: { id: bool } }
+function _findChipsPlan(manifest, ids) {
+  var show = {}, i;
+  if (!manifest || manifest._szUnknown) {
+    for (i = 0; i < ids.length; i++) show[ids[i]] = true;
+    return { rail: true, show: show };
+  }
+  var chips = manifest.chips;
+  var known = chips ? Object.keys(chips) : [];
+  var shown = 0, recognised = 0;
+  for (i = 0; i < ids.length; i++) {
+    var alts = _FIND_CHIP_ALT[ids[i]] || [ids[i]];
+    var ok = false;
+    for (var a = 0; a < alts.length; a++) {
+      if (chips && chips[alts[a]]) recognised++;
+      if (_findChipHas(chips, alts[a])) ok = true;
+    }
+    show[ids[i]] = ok;
+    if (ok) shown++;
+  }
+  if (known.length && !recognised) {
+    // Unrecognised chip set (ids drifted from chip_rules.py): better all
+    // than none — a tap then says what is missing.
+    for (i = 0; i < ids.length; i++) show[ids[i]] = true;
+    return { rail: true, show: show };
+  }
+  return { rail: shown > 0, show: show };
+}
+
+var _findCatManifest = null;
+var _findCatManifestP = null;      // the one in-flight manifest fetch
+var _findChipsRail = null;         // the rail, once initFindChips built it
+var _findChipsStale = false;       // reconciled against an unknown manifest
+
+// Resolves the manifest. Only 404 / 410 mean "this ZIM has no category
+// index" ({}, cached). Any other failure — a network error, a 5xx (the
+// /drive/ service worker answers 503 while a streamed ZIM stalls), bad
+// JSON — resolves to { _szUnknown: true } and is NOT cached, so a later
+// call tries again. Caching {} for a 503 hid the rail for the session.
+function _findFetchCatManifest() {
+  if (_findCatManifest) return Promise.resolve(_findCatManifest);
+  // Callers arriving while a fetch is in flight share it (the rail's
+  // reconcile and an early chip tap used to request it twice).
+  if (_findCatManifestP) return _findCatManifestP;
+  var p = fetch(baseUrl + 'category-index/manifest.json')
+    .then(function(r) {
+      if (r.ok) return r.json();
+      if (r.status === 404 || r.status === 410) return {};
+      throw new Error('category manifest HTTP ' + r.status);
+    })
+    .then(function(m) {
+      _findCatManifest = (m && typeof m === 'object') ? m : {};
+      if (_findChipsStale && _findChipsRail) {
+        _findChipsStale = false;
+        _findChipsApply(_findChipsRail, _findCatManifest);
+      }
+      return _findCatManifest;
+    })
+    .catch(function() { return { _szUnknown: true }; })
+    .then(function(m) { _findCatManifestP = null; return m; });
+  _findCatManifestP = p;
+  return p;
+}
+
+// After a tap settles: re-apply the plan, so a chip the late reconcile
+// skipped while it was busy is checked again.
+function _findChipsRecheck() {
+  if (_findCatManifest && _findChipsRail) _findChipsApply(_findChipsRail, _findCatManifest);
+}
+
+// A tapped chip this ZIM cannot serve: hide it (and the rail when no chip
+// is left) and say why.
+function _findChipUnavailable(chipDef) {
+  var m = _findCatManifest || {};
+  var none = !m.chips || !Object.keys(m.chips).length;
+  var rail = document.getElementById('find-chips');
+  if (rail) {
+    var btns = rail.querySelectorAll('.find-chip'), hide = [];
+    for (var i = 0; i < btns.length; i++) {
+      hide.push(btns[i].hidden || btns[i].dataset.chip === chipDef.id);
+    }
+    _findChipsSetHidden(rail, btns, hide, none || rail.hidden);
+  }
+  _showFindToast(none ? 'No category search in this map'
+                      : 'No ' + chipDef.label.toLowerCase() + ' in this map');
+}
+
+// Hide what the manifest says this ZIM cannot serve. A chip that is active
+// or still resolving a tap is left alone (its own load reports the
+// outcome), and focus never stays on an element that is being hidden.
+function _findChipsApply(rail, m) {
+  var btns = rail.querySelectorAll('.find-chip');
+  var ids = [];
+  for (var i = 0; i < btns.length; i++) ids.push(btns[i].dataset.chip);
+  var plan = _findChipsPlan(m, ids);
+  var hide = [], kept = false;
+  for (var j = 0; j < btns.length; j++) {
+    var b = btns[j];
+    var busy = b.classList.contains('on') || !!(b.dataset && b.dataset.szLoading);
+    var h = !plan.show[ids[j]] && !busy;
+    if (!h && busy) kept = true;
+    hide.push(h);
+  }
+  var railHidden = !plan.rail && !kept;
+  _findChipsSetHidden(rail, btns, hide, railHidden);
+}
+
+// Apply hidden flags. The rail goes whenever no chip is left visible.
+// Focus leaves anything about to vanish: after keyboard use
+// (:focus-visible) to the next visible chip, else the search box; after a
+// tap it is just dropped — focusing the search box would pop the soft
+// keyboard on Android.
+function _findChipsSetHidden(rail, btns, hide, railHidden) {
+  var anyShown = false;
+  for (var s = 0; s < btns.length; s++) if (!hide[s]) { anyShown = true; break; }
+  if (!anyShown) railHidden = true;
+  var act = document.activeElement;
+  var target = null, drop = false;
+  for (var i = 0; i < btns.length; i++) {
+    if (btns[i] !== act) continue;
+    if (!hide[i] && !railHidden) break;
+    var keyboard = false;
+    try { keyboard = !!(act.matches && act.matches(':focus-visible')); } catch (e) {}
+    if (!keyboard) { drop = true; break; }
+    for (var k = 1; k < btns.length && !railHidden; k++) {
+      var n = (i + k) % btns.length;
+      if (!hide[n]) { target = btns[n]; break; }
+    }
+    target = target || document.getElementById('search-input');
+    break;
+  }
+  for (var j = 0; j < btns.length; j++) btns[j].hidden = !!hide[j];
+  rail.hidden = !!railHidden;
+  if (target && typeof target.focus === 'function') target.focus();
+  else if (drop && typeof act.blur === 'function') act.blur();
+}
+
+// The rail is built before the category manifest is fetched, so reconcile
+// once it arrives — and again when an unknown result is later replaced by
+// a real manifest (_findFetchCatManifest).
+function _findChipsReconcile(rail) {
+  _findChipsRail = rail;
+  return _findFetchCatManifest().then(function(m) {
+    if (m && m._szUnknown) {
+      // A concurrent fetch (a chip tap) may already have cached the real
+      // manifest; otherwise the next one that does reconciles.
+      if (!_findCatManifest) { _findChipsStale = true; return; }
+      m = _findCatManifest;
+    }
+    _findChipsApply(rail, m);
+  }).catch(function() { /* keep the full rail */ });
+}
+// END chip-availability
+
 var _szChipSynth = 0;   // ts of the last tap-synthesised chip activation
 // A MapLibre popup anchors ABOVE its marker, so on a phone it can open flush
 // against — or overlapping — the search box + chip rail, even now that it
@@ -34,29 +204,6 @@ function _szPopupGap(map, popup) {
     });
   });
 }
-function _findChipsReconcile(rail) {
-  _findFetchCatManifest().then(function(m) {
-    var chips = m && m.chips;
-    if (!chips || !Object.keys(chips).length) return;
-    var btns = rail.querySelectorAll('.find-chip');
-    var shown = 0;
-    // The merged Food & Drink button stands in for a pre-merge ZIM's
-    // restaurants/cafes pair, so keep it when EITHER of those exists —
-    // hiding it on the absence of chip-food.json alone would remove the
-    // only way to reach food on every region retrofitted this round.
-    var alt = { food: ['food', 'restaurants', 'cafes'] };
-    for (var i = 0; i < btns.length; i++) {
-      var ids = alt[btns[i].dataset.chip] || [btns[i].dataset.chip];
-      var ok = false;
-      for (var a = 0; a < ids.length; a++) { if (chips[ids[a]]) { ok = true; break; } }
-      if (ok) { shown++; } else { btns[i].hidden = true; }
-    }
-    if (!shown) {   // unrecognised chip set: better all than none
-      for (var j = 0; j < btns.length; j++) btns[j].hidden = false;
-    }
-  }).catch(function() { /* keep the full rail */ });
-}
-
 function initFindChips(map) {
   var rail = document.getElementById('find-chips');
   if (!rail) return;
@@ -80,7 +227,10 @@ function initFindChips(map) {
       // the touch-tap fallback below can invoke. _szChipSynth suppresses
       // the double-fire when a real click arrives after a synthetic tap.
       var act = function() {
-        loadChipOnMap(map, c).catch(function(err) {
+        btn.dataset.szLoading = '1';     // the reconcile leaves it alone
+        var done = function() { delete btn.dataset.szLoading; _findChipsRecheck(); };
+        loadChipOnMap(map, c).then(done, function(err) {
+          done();
           // A chip tapped before the rail reconciles (or one whose file this
           // ZIM lacks) used to leave the search box reading
           // "Loading food & drink…" for ever, with only a console warning.
@@ -134,17 +284,6 @@ function _findChipPaintActive(chipId) {
   }
 }
 
-function _findFetchCatManifest() {
-  if (_findCatManifest) return Promise.resolve(_findCatManifest);
-  return fetch(baseUrl + 'category-index/manifest.json')
-    .then(function(r) {
-      if (!r.ok) throw new Error('category manifest HTTP ' + r.status);
-      return r.json();
-    })
-    .then(function(m) { _findCatManifest = m; return m; })
-    .catch(function() { _findCatManifest = {}; return {}; });
-}
-
 // Whole-chip arrays (pre-geo-shard ZIMs) run to 100 MB+ each; keeping
 // every chip tapped in a session added up on a phone. Keep the last few.
 var _FIND_CHIP_CACHE_MAX = (navigator.deviceMemory && navigator.deviceMemory <= 2) ? 1 : 3;
@@ -162,12 +301,23 @@ function _findFetchChipData(chipId) {
       // Fan-out fetch when the build sub-bucketed this chip
       // (cloud/repackage_zim.py --split-find-chips). Concatenate the
       // per-bucket arrays.
+      // A failed bucket counts as empty so one bad bucket still shows the
+      // rest — but if EVERY bucket failed, reject: resolving [] would read
+      // as "No X in this map" instead of "Couldn't load X".
+      var failed = 0;
       return Promise.all(subs.map(function(suffix) {
         return fetch(baseUrl + 'category-index/chip-' + chipId
                      + '-' + suffix + '.json')
-          .then(function(r) { return r.ok ? r.json() : []; })
-          .catch(function() { return []; });
+          .then(function(r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function(a) { return Array.isArray(a) ? a : []; })
+          .catch(function() { failed++; return []; });
       })).then(function(blobs) {
+        if (failed === subs.length) {
+          throw new Error('chip-' + chipId + ': all ' + failed + ' buckets failed');
+        }
         var out = [];
         for (var i = 0; i < blobs.length; i++) {
           for (var j = 0; j < blobs[i].length; j++) out.push(blobs[i][j]);
@@ -213,12 +363,19 @@ function _hillshadeBeforeId(map) {
 function _showFindToast(text, opts) {
   opts = opts || {};
   var d = document.createElement('div');
+  d.setAttribute('role', 'status');
+  d.setAttribute('aria-live', 'polite');
   d.style.cssText = (
     'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
     + 'z-index:1600; padding:9px 18px;'
+    // left:50% alone caps a shrink-to-fit box at half the screen, which
+    // broke a one-line message into three on a phone.
+    + 'width:max-content; max-width:calc(100vw - 32px); box-sizing:border-box;'
+    + 'text-align:center;'
     + 'background:rgba(255,255,255,0.95);'
     + 'color:' + (opts.color || '#a33') + ';'
-    + 'border:1px solid rgba(170,50,50,0.25); border-radius:999px;'
+    // 18px, not a pill: a message that wraps at 320px stays a tidy box.
+    + 'border:1px solid rgba(170,50,50,0.25); border-radius:18px;'
     + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
     + 'box-shadow:0 4px 14px rgba(0,0,0,0.18); pointer-events:none;'
   );
@@ -249,13 +406,17 @@ var _chipOrigPlaceholder = null;
 // "chip-food HTTP 404" (seen on central-asia, 2026-09-18). Resolve first,
 // across the merge in both directions, and bail quietly when the ZIM has
 // nothing to show rather than requesting a 404.
+// A manifest that lists no chips means the ZIM has no chip files at all
+// (built without --split-find-chips), and a count-0 entry has nothing to
+// show: both resolve to null too.
 async function _findResolveChipDef(chipDef) {
   var m = await _findFetchCatManifest().catch(function() { return null; });
-  var chips = m && m.chips;
-  if (!chips || !Object.keys(chips).length) {
+  if (!m || m._szUnknown) {   // unreadable manifest: try the file anyway
     return { id: chipDef.id, label: chipDef.label, sources: [chipDef.id] };
   }
-  if (chips[chipDef.id]) {
+  var chips = m.chips;
+  if (!chips || !Object.keys(chips).length) return null;
+  if (_findChipHas(chips, chipDef.id)) {
     return { id: chipDef.id, label: chipDef.label, sources: [chipDef.id] };
   }
   // Food & Drink merged Restaurants + Cafés on 2026-09-16, but a retrofit
@@ -268,7 +429,7 @@ async function _findResolveChipDef(chipDef) {
                 restaurants: ['food'], cafes: ['food'] }[chipDef.id] || [];
   var have = [];
   for (var i = 0; i < alias.length; i++) {
-    if (chips[alias[i]]) have.push(alias[i]);
+    if (_findChipHas(chips, alias[i])) have.push(alias[i]);
   }
   if (!have.length) return null;
   return { id: chipDef.id, label: chipDef.label, sources: have };
@@ -278,9 +439,7 @@ async function loadChipOnMap(map, chipDef, opts) {
   opts = opts || {};
   var _resolved = await _findResolveChipDef(chipDef);
   if (!_resolved) {
-    var _btn = document.querySelector('.find-chip[data-chip="' + chipDef.id + '"]');
-    if (_btn) _btn.hidden = true;          // the reconcile is about to do this anyway
-    _showFindToast('No ' + chipDef.label.toLowerCase() + ' in this map');
+    _findChipUnavailable(chipDef);
     _findChipPaintActive(null);
     return;
   }
@@ -417,6 +576,7 @@ async function loadChipOnMap(map, chipDef, opts) {
       if (mySeq !== _chipLoadSeq) return;
       restorePlaceholder();
       _findChipPaintActive(null);
+      _showFindToast('Couldn\u2019t load ' + chipDef.label.toLowerCase());
       return;
     }
     if (!res || mySeq !== _chipLoadSeq) return;  // superseded while loading
@@ -450,10 +610,18 @@ async function loadChipOnMap(map, chipDef, opts) {
     if (mySeq !== _chipLoadSeq) return;  // a newer chip owns the UI now
     restorePlaceholder();
     _findChipPaintActive(null);
+    _showFindToast('Couldn\u2019t load ' + chipDef.label.toLowerCase());
     return;
   }
   if (mySeq !== _chipLoadSeq) return;  // superseded while loading
   restorePlaceholder();
+  // An empty chip used to render an empty carousel with no word said.
+  if (!Array.isArray(data) || !data.length) {
+    _showFindToast('No ' + chipDef.label.toLowerCase()
+      + (opts.requireInBounds ? ' in this area' : ' in this map'));
+    if (!opts.requireInBounds) _findChipPaintActive(null);
+    return;
+  }
 
   // Filter to the current map viewport. If that wipes everything,
   // fall back to the unfiltered set (matches places.html behaviour
