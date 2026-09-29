@@ -35,14 +35,16 @@ from streetzim import viewer_assets
 
 
 # Search records that get a Kiwix page (search/<slug>.html), and with it an
-# entry in Kiwix's full-text search (libzim indexes the page). Streets and addresses never
+# entry in Kiwix's full-text search (libzim indexes the page) and in its
+# title suggestions (the pages are front articles; libzim's title index
+# holds only those, so without it Kiwix suggested nothing). Streets and addresses never
 # do; the in-map search has them. POIs do only with --kiwix-poi-pages
 # (kiwix_poi_pages=True): without them kiwix-serve's search for "Casino" in
 # Monaco finds the Fontaine du Casino (a lake) and none of the shops, stops
-# and sights named Casino. Measured on 2026-09-29: about 245 B per named POI
-# (pages, dirents and the Xapian index), Monaco +15% (1.8k pages),
-# Luxembourg +9.4% (55.4 -> 60.6 MB, 21k pages), so ~ +11% for Switzerland
-# and +7% for the Netherlands; build time within noise. docs/zimfarm.md.
+# and sights named Casino. Measured on 2026-09-29: about 440 B per named POI
+# (page, dirent, full-text and title index), Monaco +28% (1.8k pages),
+# Luxembourg +16% (56.7 -> 66.0 MB, 21k pages), so ~ +19% for Switzerland
+# and +12% for the Netherlands; build time within noise. docs/zimfarm.md.
 KIWIX_PAGE_TYPES = frozenset({"place", "airport", "park", "peak", "water"})
 
 
@@ -2449,7 +2451,7 @@ def _search_xapian_pages(creator, MapItem, *, xapian_mode, xapianbuilder_bin, xa
                     feat["name"],
                     "text/html",
                     page_html.encode("utf-8"),
-                    is_front=False,
+                    is_front=True,      # in the title index: Kiwix suggestions
                 ))
 
                 i += 1
@@ -2570,7 +2572,7 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup, page
             feat["name"],
             "text/html",
             page_html.encode("utf-8"),
-            is_front=False,
+            is_front=True,      # in the title index: Kiwix suggestions
         ))
 
         if (i + 1) % 2000 == 0:

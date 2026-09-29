@@ -566,7 +566,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "Kiwix's own search finds shops, stops and "
                              "sights, not "
                              "only places, parks, peaks, water and airports. "
-                             "About 245 B per POI: +9%% on Luxembourg. Off by "
+                             "About 440 B per POI: +16%% on Luxembourg. Off by "
                              "default (docs/zimfarm.md).")
     parser.add_argument("--xapianbuilder-bin", metavar="PATH", default=None,
                         help="Path to the xapianbuilder binary. Defaults to "

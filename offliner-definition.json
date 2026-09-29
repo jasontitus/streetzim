@@ -148,7 +148,7 @@
       "type": "boolean",
       "required": false,
       "title": "POIs in Kiwix search",
-      "description": "Also list every named POI in Kiwix's own search, not only places, parks, peaks, water and airports. Adds about 245 B per POI (+9% on Luxembourg). Default: off"
+      "description": "Also list every named POI in Kiwix's own search, not only places, parks, peaks, water and airports. Adds about 440 B per POI (+16% on Luxembourg). Default: off"
     },
     "max_zoom": {
       "type": "integer",

@@ -162,7 +162,7 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Also list every named POI in Kiwix's own search, "
                            "not only "
                            "places, parks, peaks, water and airports. Adds "
-                           "about 245 B per POI (+9%% on Luxembourg). Default: off")
+                           "about 440 B per POI (+16%% on Luxembourg). Default: off")
     feat.add_argument("--max-zoom", type=int, choices=range(0, 15), metavar="{0..14}",
                       help="Maximum zoom of the vector tiles. Default: 14")
     feat.add_argument("--default-view",

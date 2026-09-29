@@ -4,7 +4,7 @@ airports (streetzim.zim_writer.KIWIX_PAGE_TYPES), the same set on the
 streaming and the in-memory path. POIs, streets and addresses do not, so
 "Casino" in the Monaco ZIM finds the Fontaine du Casino (a lake) and not the
 shops, stops and sights named Casino; the in-map search has those.
-kiwix_poi_pages (--kiwix-poi-pages) adds the POIs, at ~245 B per POI (+9.4%
+kiwix_poi_pages (--kiwix-poi-pages) adds the POIs, at ~440 B per POI (+16%
 on Luxembourg, docs/zimfarm.md)."""
 from __future__ import annotations
 
@@ -77,3 +77,19 @@ def test_kiwix_full_text_search_covers_the_page_types(tmp_path, source, poi_page
     hits = sorted(a.get_entry_by_path(p).title
                   for p in search.getResults(0, search.getEstimatedMatches()))
     assert hits == sorted(["Fontaine du Casino"] + pois)
+    # Title suggestions (the Kiwix search bar) need the pages to be front
+    # articles; libzim leaves everything else out of the title index.
+    assert a.has_title_index
+    assert "Fontaine du Casino" in _suggest(a, "Fontaine")
+    assert _suggest(a, "Place du") == []                  # streets: no page
+    # repackage_zim (run on published ZIMs) keeps them front.
+    from cloud.repackage_zim import repackage
+    repackage(str(tmp_path / "t.zim"), str(tmp_path / "r.zim"))
+    assert "Fontaine du Casino" in _suggest(Archive(str(tmp_path / "r.zim")), "Fontaine")
+
+
+def _suggest(archive, text):
+    from libzim.suggestion import SuggestionSearcher
+    s = SuggestionSearcher(archive).suggest(text)
+    return [archive.get_entry_by_path(p).title
+            for p in s.getResults(0, s.getEstimatedMatches())]

@@ -68,16 +68,22 @@ kiwix-serve, only sees the features that have a detail page
 (`search/<slug>.html`): places, parks, peaks, water and airports. Without
 the flag, "Casino" on the Monaco ZIM finds the Fontaine du Casino and not
 the Casino, the shops or the bus stops named after it.
-`--kiwix-poi-pages` gives every named POI a page too. It costs about 245 B
-per POI (the page, its directory entry and the Xapian index), measured on
+`--kiwix-poi-pages` gives every named POI a page too, which Kiwix's
+full-text search and its title suggestions both find. It costs about 440 B
+per POI: roughly 40 B of compressed page, 80 B of directory entry and
+pointers, 125 B of full-text index and 195 B of title index. Measured on
 2026-09-29 with the default profile:
 
 | area | POI pages | ZIM | build time |
 |---|---|---|---|
-| Monaco (`--area monaco`) | +1,812 | 2.88 -> 3.32 MB (+15%) | within noise |
-| Luxembourg | +21,214 | 55.4 -> 60.6 MB (+9.4%) | within noise |
-| Switzerland (from its POI count) | +274,806 | about +67 MB on 624 MB (+11%) | |
-| Netherlands (from its POI count) | +324,793 | about +80 MB on 1,164 MB (+7%) | |
+| Monaco (`--area monaco`) | +1,812 | 2.90 -> 3.70 MB (+28%) | within noise |
+| Luxembourg | +21,214 | 56.7 -> 66.0 MB (+16%) | within noise |
+| Switzerland (from its POI count) | +274,806 | about +121 MB on 624 MB (+19%) | |
+| Netherlands (from its POI count) | +324,793 | about +143 MB on 1,164 MB (+12%) | |
+
+Without the flag the pages that exist anyway (places, parks, peaks, water,
+airports) are in the title index too; that costs Monaco 15 KB (+0.5%) and
+Luxembourg 1.2 MB for 7,984 pages (+2.2%).
 
 It is off by default for now. The planned `--profile full` is meant to turn
 it on and `--profile basic` to leave it off.
