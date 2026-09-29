@@ -152,9 +152,10 @@ One block, run as one command. It:
 - stops if it can't read the checkout, or if the checkout is already at
   the split (and says whether a rollback point was recorded);
 - records the commit before the pull (the rollback point);
-- pulls only if that record was written. `--no-rebase --no-autostash`
-  keep git's settings from rebasing, or from stashing the host-edited
-  lists during the pull;
+- pulls only if that record was written. `--no-rebase` and the two
+  `autoStash=false` settings keep the host's git configuration from
+  rebasing, or from stashing the host-edited lists during the pull (they
+  work on any git version);
 - records the commit the pull reached, and says whether it is the split.
 
 Both records are in `$HOME`, so they survive a reboot.
@@ -164,27 +165,30 @@ if ! git -C /storage/streetzim rev-parse -q --verify HEAD >/dev/null; then
   echo "STOP: cannot read /storage/streetzim; ask"
 elif git -C /storage/streetzim cat-file -e HEAD:ops/in-place.txt 2>/dev/null; then
   echo "STOP: already at the split"
-  cat "$HOME/sz-before-stage1.txt" "$HOME/sz-after-stage1.txt" || echo "no rollback point recorded: no scripted rollback; ask"
+  cat "$HOME/sz-before-stage1.txt" "$HOME/sz-after-stage1.txt" || echo "records incomplete: no scripted rollback; ask"
 else
   rm -f "$HOME/sz-after-stage1.txt" &&
   git -C /storage/streetzim rev-parse HEAD > "$HOME/sz-before-stage1.txt.new" &&
   mv "$HOME/sz-before-stage1.txt.new" "$HOME/sz-before-stage1.txt" &&
-  git -C /storage/streetzim pull --ff-only --no-rebase --no-autostash &&
+  git -c merge.autoStash=false -c rebase.autoStash=false -C /storage/streetzim pull --ff-only --no-rebase &&
   git -C /storage/streetzim rev-parse HEAD > "$HOME/sz-after-stage1.txt" &&
   if git -C /storage/streetzim cat-file -e HEAD:ops/in-place.txt 2>/dev/null; then
     echo "OK: pulled to the split"
   else
-    echo "STOP: pulled, but not to the split (is the branch merged?); ask"
-  fi
+    echo "STOP: pulled, but not to the split (is the branch merged?); don't run this block again; ask"
+  fi || echo "STOP: step 4 did not finish (the pull refused, or a record could not be written); check git log -1; ask"
 fi
 ```
 
-- **If the pull refuses** (local changes, or not a fast-forward), it has
-  changed nothing, and there is no `sz-after-stage1.txt`. Go back to
-  step 1. Running the block again later records the rollback point
-  afresh.
+- **"Step 4 did not finish"**: usually the pull refused (local changes,
+  or not a fast-forward) and changed nothing; `git -C /storage/streetzim
+  log -1` still shows the commit in `sz-before-stage1.txt`. Then go back
+  to step 1; running the block again later records the rollback point
+  afresh. If HEAD did move (a record couldn't be written after the pull),
+  ask.
 - **"Pulled, but not to the split"** means the host took commits that
-  step 2 didn't test. Don't roll back on your own; ask.
+  step 2 didn't test. Don't roll back and don't run step 4 again (it
+  would record the new commit as the rollback point); ask.
 - **The build VMs** (`ops/cloud/build-vm-startup.sh`) pull on their own
   when they start.
 

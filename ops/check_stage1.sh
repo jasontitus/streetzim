@@ -28,7 +28,7 @@ done
 if [ -z "$ROOT" ]; then
   # the path it was started by (logical, e.g. /storage/streetzim), not the
   # physical one: step 6 matches both
-  # (through a symlink to this file: the real location)
+  # (started through a symlink to this file: its real, physical location)
   if [ -L "$0" ]; then here="$(dirname "$(readlink -f "$0")")"; else here="$(dirname "$0")"; fi
   ROOT="$(cd "$here/.." && pwd)"
 fi
