@@ -456,10 +456,12 @@ This needs no network for articles. In a sandbox, `wikipedia_en_top_maxi`
   tile input.
 
 Found on the way; these affect production whatever happens to the branch:
-- [ ] Overture release 2026-04-15.0, which production pins, has been
-  deleted.
-- [ ] `download_overture_data.py places` fails on 2026-09-23.1, which
-  dropped `categories`.
+- [x] Overture release 2026-04-15.0 has been deleted. The ops wrappers pin
+  2026-08-19.0 (`OVERTURE_RELEASE=latest` opts in to the newest complete
+  release) and `build-region-fast.sh` refuses to run without a release.
+- [x] `download_overture_data.py places` failed on 2026-09-23.1, which
+  dropped `categories`. It now reads `taxonomy` and maps it to the old
+  category names (`streetzim/overture_taxonomy.py`).
 - [ ] Low-zoom terrain tiles need elevation data far outside a small
   region's bbox. On a fresh machine this trips the terrain health check
   unless `TERRAIN_BLANK_TOLERATE` is set.
