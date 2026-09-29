@@ -1667,10 +1667,13 @@ def _audit_tiles(arc) -> tuple[str, str]:
         if not any(k == kind for (k, _z) in counts):
             continue
         zmax = 14 if kind == "vector" else declared_max
+        # Terrain built without a world DEM starts at the lowest zoom the
+        # viewer can show (map-config terrainMinZoom, streetzim/terrain.py).
+        zmin = int(cfg.get("terrainMinZoom") or 0) if kind == "terrain" else 0
 
         zoom_frac: dict[int, float] = {}
         per_zoom_summary: list[str] = []
-        for z in range(0, zmax + 1):
+        for z in range(zmin, zmax + 1):
             actual = counts.get((kind, z), 0)
             expected = _expected_tile_count(bbox, z)
             if expected == 0:

@@ -119,6 +119,7 @@ from streetzim.satellite import (  # noqa: F401
     download_satellite_tiles,
     stitch_satellite_image,
 )
+from streetzim import terrain as _terrain
 from streetzim.terrain import (  # noqa: F401
     _DEM_HANDLES,
     _generate_one_terrain_tile,
@@ -1144,20 +1145,34 @@ def _satellite_and_terrain(
     return satellite_dir, terrain_dir
 
 
-def _verify_terrain(*, args, bbox_str, include_terrain, terrain_dir, terrain_max_zoom):
+def _verify_terrain(*, args, bbox_str, include_terrain, terrain_dir, terrain_max_zoom,
+                    terrain_min_zoom=None):
     """Terrain audit: regenerate missing and seam tiles, fail on remaining gaps."""
     # Verify terrain completeness — regen missing tiles AND fix boundary
     # seam tiles before packaging. Boundary tiles (straddling 1-degree DEM
     # cell edges) may have partial zero data if generated from a VRT that
     # didn't include all neighboring cells.
+    world_vrt = getattr(args, "low_zoom_world_vrt", None)
+    if include_terrain and bbox_str and terrain_min_zoom is None:
+        # From the whole area, as generate_terrain_tiles does.
+        terrain_min_zoom = _terrain.terrain_min_zoom(
+            parse_bbox(bbox_str), terrain_max_zoom, world_vrt)
     if include_terrain and bbox_str and terrain_dir and _area.crosses(parse_bbox(bbox_str)):
         # Across the antimeridian: each side, as it was generated.
         for part in _area.split(parse_bbox(bbox_str)):
             _verify_terrain(args=args, bbox_str=_area.to_str(part),
                             include_terrain=include_terrain, terrain_dir=terrain_dir,
-                            terrain_max_zoom=terrain_max_zoom)
+                            terrain_max_zoom=terrain_max_zoom,
+                            terrain_min_zoom=terrain_min_zoom)
         return
     if include_terrain and bbox_str and terrain_dir:
+        plan = _terrain.TerrainPlan(parse_bbox(bbox_str), terrain_max_zoom,
+                                    terrain_min_zoom, world_vrt)
+        if plan.fresh:
+            # No world DEM (every `streetzim` build): each tile is checked
+            # against the mosaic it was made from (streetzim/terrain.py).
+            _terrain.audit_terrain(plan, terrain_dir)
+            return
         import mercantile
         import math as _math
         bbox_parsed = parse_bbox(bbox_str)
@@ -1465,6 +1480,15 @@ def _build_map_config(
     if terrain_dir and os.path.isdir(str(terrain_dir)):
         map_config["hasTerrain"] = True
         map_config["terrainMaxZoom"] = terrain_max_zoom
+        if bbox:
+            # Without a world DEM, terrain starts at the lowest zoom the
+            # viewer can show (streetzim/terrain.py); the viewer's DEM source
+            # and the packer start there too. 0 (the production layout) is
+            # left out, so those map-configs are unchanged.
+            _tmin = _terrain.terrain_min_zoom(
+                bbox, terrain_max_zoom, getattr(args, "low_zoom_world_vrt", None))
+            if _tmin:
+                map_config["terrainMinZoom"] = _tmin
     if wikidata_data:
         map_config["hasWikidata"] = True
     # hasWikiArticles is set by create_zim, once it knows whether any
@@ -1628,7 +1652,10 @@ def main(argv=None):
         sat_desc = f"{satellite_format} q{satellite_quality} {satellite_tile_size}px"
         print(f"  Including Sentinel-2 satellite imagery (z0-{satellite_max_zoom}, {sat_desc})")
     if include_terrain:
-        print(f"  Including Copernicus GLO-30 terrain (z0-{terrain_max_zoom})")
+        _tmin = (_terrain.terrain_min_zoom(parse_bbox(bbox_str), terrain_max_zoom,
+                                           getattr(args, "low_zoom_world_vrt", None))
+                 if bbox_str else 0)
+        print(f"  Including Copernicus DEM terrain (z{_tmin}-{terrain_max_zoom})")
     if include_wikidata:
         print("  Including Wikidata info for places and POIs")
     if include_routing:

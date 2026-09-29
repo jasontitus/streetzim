@@ -385,7 +385,10 @@ if (!window.__szUnsupported) fetchConfig(1)
           type: 'raster-dem',
           tiles: ['zimtile://' + baseUrl + 'terrain/{z}/{x}/{y}.webp'],
           tileSize: 256,
-          minzoom: 0,
+          // Without a world DEM the build starts terrain at the lowest zoom
+          // this view can reach (streetzim/terrain.py), so nothing is asked
+          // for below it.
+          minzoom: config.terrainMinZoom || 0,
           maxzoom: config.terrainMaxZoom || 12,
           encoding: 'mapbox'
         });
