@@ -9,31 +9,68 @@ builder changes and this round's work, and runs the tests that only the
 host can run. Merging to `main` is the user's action, through PRs;
 nobody pushes `main`.
 
-**Branches** (on the host checkout's `origin`, GitHub):
+**The rebuild round is running.** Until it has finished (no
+`build-refresh-queue.sh` process, and the user says the round is over),
+production moves only once: the stage-1 pull of §1.0, which changes no
+code. The moves to `builder` and `next` (§1.4, §1.6) and the production
+smoke build (§2c) wait for the end of the round. Reasons, in §1.0 ("Why
+production waits for the round").
 
-| short name | branch | contains |
-|---|---|---|
-| ops | `claude/adoring-dijkstra-i2vge7` | `main` (`37403b8`) merged into the ops split (`bd09db9`, CI green: run 36528140810) |
-| builder | `claude/adoring-dijkstra-i2vge7-builder` | the builder commits on the ops split (`3d8e7d7`) |
-| next | `claude/adoring-dijkstra-i2vge7-next` | builder plus this round's work (`d5238cb` when this was written) |
+**Branches** (on the host checkout's `origin`, GitHub; heads as of
+29 September, late):
+
+| short name | branch | head | contains |
+|---|---|---|---|
+| ops | `claude/adoring-dijkstra-i2vge7` | `bd09db9` | `main` (`37403b8`) merged into the ops split (CI green: run 36528140810) |
+| builder | `claude/adoring-dijkstra-i2vge7-builder` | `dbfe993` | the builder commits (`3d8e7d7`) with `bd09db9` merged in |
+| next | `claude/adoring-dijkstra-i2vge7-next` | `d8c6795` | `builder` (`dbfe993`) merged in, this round's work, and `topic-wiki-429` (`e94474c`) |
+
+`main` ⊂ `bd09db9` ⊂ `dbfe993` ⊂ `d8c6795` (checked with
+`merge-base --is-ancestor`). In the `builder` → `next` merge the three
+stamp files (`web/drive/build-info.js`, `web/drive/sw.js`,
+`web/drive/viewer/.version`) were resolved to `next`'s side.
+
+Landed on `next`: `topic-wiki-429` (`e94474c`; check: `git -C /storage/sz-tests/next grep -qi retry-after gh/next -- cloud/wiki_articles.py && echo yes` prints `yes`).
 
 Still to land on `next` (each step that needs one says so, with its check):
 
 | topic branch | what | check (in the test clone, step 1.2) |
 |---|---|---|
 | `topic-viewer-polish` | viewer fixes | `git -C /storage/sz-tests/next log --oneline --first-parent --grep=topic-viewer-polish gh/next` prints a merge |
-| `topic-wiki-429` | Wikipedia/Wikidata fetch: a 429 is never cached as a miss; `Retry-After` honoured | `--grep=topic-wiki-429` prints a merge, and `git -C /storage/sz-tests/next grep -qi retry-after gh/next -- cloud/wiki_articles.py && echo yes` prints `yes` |
-| `topic-mbtiles-flag` | `streetzim --mbtiles-url`, and planet-size MBTiles cut to the area | `--grep=topic-mbtiles-flag` prints a merge, and `git -C /storage/sz-tests/next grep -q -- --mbtiles-url gh/next -- streetzim/cli.py && echo yes` prints `yes` |
-| (the profile branch) | `streetzim --profile` (full profile: terrain etc.) | `git -C /storage/sz-tests/next grep -q -- "--profile" gh/next -- streetzim/cli.py && echo yes` prints `yes`; `git -C /storage/sz-tests/next log --oneline --first-parent -i --grep=profile gh/next` names the merge |
+| `topic-mbtiles-flag` | `streetzim --mbtiles-url` (type url; `http(s)://` is downloaded, `file://` is read in place), and planet-size MBTiles cut to the area | `--grep=topic-mbtiles-flag` prints a merge, and `git -C /storage/sz-tests/next grep -q -- --mbtiles-url gh/next -- streetzim/cli.py && echo yes` prints `yes` |
+| `topic-full-profile` | `streetzim --profile` (full profile: terrain etc.) | `git -C /storage/sz-tests/next grep -q -- "--profile" gh/next -- streetzim/cli.py && echo yes` prints `yes`, and `git -C /storage/sz-tests/next log --oneline --first-parent --grep=topic-full-profile gh/next` prints a merge (not `-i --grep=profile`: that matches a dozen unrelated commits) |
+| `topic-satellite-optin`, `topic-terrain-openzim` | satellite opt-in; terrain for openZIM | not needed by any test here; if they land, rerun §2a `main → next` and attribute every new difference |
 
 ## 0. Rules for the session
 
-- **Nothing moves while a build runs.** Before any step that changes
-  `/storage/streetzim`, `pgrep -f '[c]reate_osm_zim|[u]pload_validated'`
-  must print nothing. A spawned build worker re-imports code from disk,
-  and an upload deploys `web/` from the checkout. The blocks below check
-  this themselves. If the round's queue starts the next region at once,
-  there is no gap: ask the user how to pause it.
+- **Nothing moves while a build, a gate or an upload runs.** Write the
+  guard once (it only reads the process table):
+
+```bash
+cat > "$HOME/sz-busy.sh" <<'EOF2'
+#!/usr/bin/env bash
+# Prints the production processes that forbid a change to /storage/streetzim
+# and exits 0 if there are any; prints IDLE and exits 1 if there are none.
+pgrep -af '[c]reate_osm_zim|[b]uild-region|[s]hip-region|[u]pload_validated|[f]inish_pending_uploads|[f]inish-pending-loop|[d]ownload_overture_data|[o]smium (extract|cat|merge)|[e]xtract-region-pbfs|[c]heck_terrain_coverage|[v]alidate_zim|[r]oute_cli|[c]heck_smoke_pairs|[p]wa_smoke_test|[s]erve-web-local|[g]enerate\.py|[f]irebase|[s]ync-drive-viewer|[s]treetzim-pack|[x]apianbuilder|[t]ilemaker|[b]uild-world-|[r]ebuild_old_regions|[r]un-continent-chain|[r]etrofit-chips|[v]iewer-refresh|[r]ollout_viewer_patch|[r]epackage_zim|[e]urope-safety-net|[/]bin/ia ' | grep -v /storage/sz-tests && exit 0
+echo IDLE; exit 1
+EOF2
+bash "$HOME/sz-busy.sh"
+```
+
+  Every block that changes `/storage/streetzim` runs it and stops unless
+  it prints `IDLE`. `create_osm_zim|upload_validated` alone (the old
+  guard) is not enough: the round's queue runs the gates (terrain up to
+  4 h, validator up to 2 h, routing, the browser smoke that serves
+  `web/`), the PBF extract and the Overture download outside both, and
+  `finish_pending_uploads.sh` starts `upload_validated.sh` exactly when no
+  `create_osm_zim` runs. Test builds under `/storage/sz-tests` are
+  filtered out (a `docker run` of a test shows its container's processes
+  without that path: if a line is yours, say so and ask). If the round's
+  queue starts the next region at once, there is no gap: ask the user how
+  to pause it.
+- **While the round runs, production does not move** beyond the §1.0
+  stage-1 pull. `pgrep -af '[b]uild-refresh-queue'` printing anything
+  means the round runs; §1.4, §1.6 and §2c STOP then.
 - **Git on `/storage/streetzim`:** only the commands written here. Moves
   are fast-forward only (`pull --ff-only --no-rebase` with
   `merge.autoStash=false` and `rebase.autoStash=false`). Never
@@ -65,41 +102,58 @@ Still to land on `next` (each step that needs one says so, with its check):
 ## 1. Moving the host: main → ops split → builder → next
 
 **Which branch, when.** First `main` gets the ops split and the host pulls
-it (§1.0). The production checkout then stays there while the tests of
-§2a–b run in the clone. It moves to `builder` when §1.2–1.3 and §2a pass
-and the user says go; to `next` after §2c passed on `builder` and the user
-says go; to `main` after the merges (§3).
+it (§1.0), in an idle window while the round runs (the split changes no
+code). The production checkout then stays there while the tests of
+§2a–b, §2d–2g run in the clone. It moves to `builder` only after the
+round has ended, §1.2–1.3 and §2a pass, `builder` contains the new `main`
+(§1.2), and the user says go; to `next` after §2c passed on `builder` and
+the user says go (that move changes the public site: see below); to
+`main` after the merges (§3).
 
 ### 1.0 The ops split onto `main`, and the host's stage-1 pull
 
-`main` (`37403b8`) is an ancestor of `bd09db9`, so either way below keeps
-`bd09db9` verifiable and lets the host fast-forward:
+`main` (`37403b8`) is an ancestor of `bd09db9`, and `main` is not a
+protected branch on GitHub (the branches API reports `protected: false`
+on 29 September; repository rulesets can't be seen from here). The way:
 
-| way | result on `main` | CI | verdict |
-|---|---|---|---|
-| PR from `claude/adoring-dijkstra-i2vge7`, merged with **Create a merge commit** | a new merge commit whose tree is exactly `bd09db9`'s (plus any host commit merged first); `bd09db9` is its second parent | runs on the PR | **recommended**: follows the PRs-only rule and works with branch protection |
-| the user fast-forwards `main` to `bd09db9` (`git push origin bd09db9:main`, by the user or with their explicit approval) | `main` = `bd09db9` exactly | already green on `bd09db9` (run 36528140810) | acceptable only if `main` is still `37403b8` and branch protection allows it; it is a direct push to `main` |
+| way | result on `main` | verdict |
+|---|---|---|
+| PR from `claude/adoring-dijkstra-i2vge7` (after the host's commits are merged into it, below), merged with **Create a merge commit** | a new merge commit `M` whose tree is `bd09db9`'s plus the host's torrent files; `bd09db9` and the host's commits are its ancestors; CI runs on the PR | **recommended**: the user's PRs-only rule, and it works whatever rulesets exist, as long as merge commits are allowed |
+| the user fast-forwards `main` (`git push origin <ops head>:main`) | `main` = the ops head exactly, no extra merge for `builder`/`next` | only on the user's explicit word; a direct push to `main`. Possible only if `main` is still `37403b8` **and** the ops head already contains every host commit |
 
 Never squash or rebase-merge: either gives `main` commits that don't
 contain `bd09db9` or the host's commits, and the host's `pull --ff-only`
-then refuses.
+then refuses. **If the PR page offers no "Create a merge commit"** (a
+ruleset requiring linear history), stop and ask; don't fall back to
+squash or rebase.
 
-**The host's own commits come first.** The round is running
-(east-coast-us built at 05:41 PDT; its torrent commit is pending).
-`upload_validated.sh` commits torrents on the host after each upload. Any
-such commit must be on `main` before the host can pull, or the pull
-refuses (and changes nothing). So:
-1. On the host, after the pending torrent commit exists, list what `main`
-   lacks: `git -C /storage/streetzim log --oneline '@{u}..HEAD'`.
+**The cost of the merge commit:** `M` is on `main` but not on `builder`
+(`dbfe993`) or `next` (`d8c6795`). After the host pulls `M`, the moves of
+§1.4 refuse (`HEAD` must be an ancestor of the target) until the branch
+owner merges the new `main` into `builder`, then `builder` into `next`.
+Those merges bring only the host's torrent files (the stamp-file
+conflicts were resolved in `d8c6795`), so they should be conflict-free;
+§1.2's `origin/HEAD` lines check them.
+
+**The host's own commits come first.** `upload_validated.sh` commits
+`web/torrents/<id>.torrent` on the host after every upload of the round
+(ops/cloud/upload_validated.sh, "4c"); it commits nothing else. Any such
+commit must be on `main` before the host can pull, or the pull refuses
+(and changes nothing). So, in this order:
+1. On the host, after the latest upload's torrent commit exists, list
+   what `main` lacks: `git -C /storage/streetzim log --oneline '@{u}..HEAD'`.
 2. If that lists commits: the user gets them to GitHub (for example
    `git -C /storage/streetzim push origin HEAD:refs/heads/host-commits-2026-09-29`,
-   run only on the user's explicit word) and merges that branch into
-   `main` with a merge commit, **before** or **together with** the ops
-   split PR.
-3. The user merges the ops split PR.
+   run only on the user's explicit word), and the branch owner merges
+   that branch into the ops branch (and into `builder` and `next`), so
+   that one PR carries both and CI runs on the result.
+3. The user merges the ops split PR with a merge commit.
+4. Every further upload of the round adds another host commit. If one
+   lands between step 1 and the pull, the pull refuses (safely): repeat
+   from step 1.
 
-**Checks before the host pulls** (read-only; `origin/main` is fetched into
-the host's remote-tracking ref only):
+**Checks before the host pulls** (`origin/main` is fetched into the host's
+remote-tracking ref only; nothing else changes):
 
 ```bash
 git -C /storage/streetzim fetch -q origin +refs/heads/main:refs/remotes/origin/main
@@ -108,41 +162,79 @@ git -C /storage/streetzim merge-base --is-ancestor HEAD origin/main && echo "OK:
 git -C /storage/streetzim merge-base --is-ancestor bd09db94d89dca6b97b36cdbf153a46ea13ab228 origin/main && echo "OK: main contains bd09db9" || echo "STOP: bd09db9 is not on main"
 git -C /storage/streetzim diff --stat bd09db94d89dca6b97b36cdbf153a46ea13ab228 origin/main
 git -C /storage/streetzim cat-file -e origin/main:ops/in-place.txt && echo "OK: main has the split"
+git -C /storage/streetzim --no-optional-locks status --short
 ```
 
 **Expect:** the upstream is `origin/main`, three `OK` lines, and the diff
-lists nothing, or only files of the host's own commits
-(`web/torrents/*.torrent`, `web/index.html`, `web/drive/*` stamps).
-Anything else: STOP.
+lists nothing or only `web/torrents/*.torrent` files. Anything else: STOP.
 
-**When:** the pull needs an idle window: no `create_osm_zim` and no
-`upload_validated.sh` running, and the region's torrent commit already
-made. The best window is right after an upload finished (its torrent
-commit is on `main` by then) and before the queue's next build starts; if
-the queue starts the next build at once, ask the user to pause it. Then
-run TESTING-STAGE1.md **step 1 and step 4** exactly as written there
-(its step 4 checks for a running build itself, records
+**The deploy leaves tracked files modified.** Every upload runs
+`web/generate.py --deploy`, which rewrites `web/index.html` (and may
+touch `web/sitemap.xml`), and Firebase's predeploy
+(`scripts/sync-drive-viewer.sh`) rewrites `web/drive/build-info.js`
+(always: it holds the build time), `web/drive/viewer/.version` and
+possibly `web/drive/sw.js`. All are tracked and none is in
+`in-place.txt`, so the last `status` line and `check_stage1.sh` step 2
+report them (`FAIL local change`). Record them. They don't block the
+pull to `main`, `builder` or `next` for `web/index.html` and
+`web/sitemap.xml` (no branch changes those), but `next` changes the three
+stamp files, so the pull to `next` refuses while they are modified.
+Resolving them is the user's call (for example, committing them on the
+host with the torrents). Don't `checkout --` them, even though
+ops/README.md's "Pulling on the build host" suggests it.
+
+**When:** the pull needs an idle window: `bash "$HOME/sz-busy.sh"` prints
+`IDLE` (TESTING-STAGE1.md step 4 checks only `create_osm_zim` itself; an
+upload, a pending-upload finisher or a gate can be running while it
+passes). The window is after an upload finished and before the queue's
+next region starts its PBF extract, Overture download or build; if the
+queue starts the next region at once, ask the user to pause it. Then run
+TESTING-STAGE1.md **step 1**, then, in one command:
+
+```bash
+bash "$HOME/sz-busy.sh" || echo "then run TESTING-STAGE1.md step 4 now"
+```
+
+and step 4 exactly as written there (it records
 `$HOME/sz-before-stage1.txt` and `$HOME/sz-after-stage1.txt`, and must
 print `OK: pulled to the split`), then its **step 5**. Its step 2 line
 "the branch contains the host's commit" is replaced by the checks above.
 
 **Rollback of this pull,** only if HEAD is still the commit in
-`$HOME/sz-after-stage1.txt` and no build runs (this runbook uses no
-`reset`; the old commit gets a branch of its own):
-`git -C /storage/streetzim switch -q -c host-rollback-stage1 "$(cat "$HOME/sz-before-stage1.txt")"`, then ask.
+`$HOME/sz-after-stage1.txt` and `sz-busy.sh` prints `IDLE` (this runbook
+uses no `reset`; the old commit gets a branch of its own):
+`git -C /storage/streetzim switch -q -c host-rollback-stage1 "$(cat "$HOME/sz-before-stage1.txt")"`,
+then ask. (That leaves the checkout on `host-rollback-stage1`, which has
+no upstream; later `@{u}` commands fail there until the user decides.)
 
-**Moving to `next` changes the public site at the next deploy.** `next`
-carries a new `/drive/` viewer (`web/drive/viewer/`), and every upload
-runs `web/generate.py --deploy` from the checkout. `builder` changes no
-`web/` file beyond the host's own commits. The user decides when `next`'s
-viewer may go live.
+**Why production waits for the round** before moving to `builder` or
+`next`:
+- **Overture transport.** The running `build-refresh-queue.sh` is the
+  copy bash opened at start (main's), which calls
+  `download_overture_data.py` by relative path and without `--transport`.
+  On `next` that downloader defaults to `https` (untested on the host;
+  §2b tests both), so every remaining region without a cached parquet
+  would switch transport mid-round. The old queue does export
+  `OVERTURE_RELEASE`, so `next`'s `build-region-fast.sh` refusal doesn't
+  trip. (`builder`'s downloader is still `main`'s, s3 only.)
+- **Mixed code in one round.** The queue calls `build-region-fast.sh`,
+  the gates and `upload_validated.sh` by path for each region, so every
+  region after a move is built, gated and published with the new code.
+- **The public site.** Every upload deploys `web/` from the checkout.
+  `next` carries the new `/drive/` viewer (`web/drive/viewer/index.html`,
+  +1,277 lines). `builder` also changes it (the licence sections for
+  satellite, terrain and Wikipedia are hidden unless the ZIM has them):
+  small, but not "no `web/` change".
+- **Host commits.** Each upload adds a torrent commit to whatever branch
+  the host is on; §1.4 then refuses until that commit is on the target,
+  so a move during the round needs a push and a merge per region.
+- **No safe window.** The queue has no pause; between two regions there
+  are seconds, and the gates run for hours outside `create_osm_zim`.
 
-**Moving to `next` while the round's queue runs:** a running
-`build-refresh-queue.sh` keeps executing its old copy, which calls
-`download_overture_data.py` without `--transport`. On `next` that
-downloader defaults to `https` (untested on the host; §2b tests both).
-The old copy does pass `OVERTURE_RELEASE`, so `build-region-fast.sh`'s new
-refusal doesn't trip. Tell the user; restarting the queue is their call.
+Once the round is over, none of this applies: the ops scripts on
+`builder`/`next` pass `--transport "${OVERTURE_TRANSPORT:-s3}"`
+explicitly (ops/tests/test_overture_release_ops.py checks every call), so
+no downloader change is needed.
 
 ### 1.1 Look (read-only)
 
@@ -160,21 +252,36 @@ grep -h 'refresh queue start' /storage/streetzim/queue-refresh-*.log | tail -2
 crontab -l
 grep -l -e build-region-fast -e create_osm_zim_leaflet -e upgrade_spatial_zim /storage/streetzim/.*.sh 2>/dev/null
 df -h /storage /storage/streetzim/tmp /tmp
-bash /storage/streetzim/ops/check_stage1.sh --root /storage/streetzim --python /storage/streetzim/venv-linux/bin/python3
+free -g; swapon --show
+git -C /storage/streetzim config --get-all remote.origin.fetch
+wc -l /storage/streetzim/pending-uploads.tsv 2>/dev/null || echo "no pending uploads"
+tail -5 /storage/streetzim/queue-refresh.tsv 2>/dev/null
+grep -P '^washington-dc\t' /storage/streetzim/queue-refresh.tsv 2>/dev/null || echo "washington-dc not yet in the round's results"
+bash "$HOME/sz-busy.sh"
+git -C /storage/streetzim cat-file -e HEAD:ops/check_stage1.sh 2>/dev/null && bash /storage/streetzim/ops/check_stage1.sh --root /storage/streetzim --python /storage/streetzim/venv-linux/bin/python3 || echo "no ops/check_stage1.sh at HEAD: the host is not at the split yet (expected before §1.0)"
 ```
 
+(Every line only reads. The results TSV is read with `tail`/`grep`, never
+opened in an editor.)
+
 **Record:** the commit and branch (a detached `HEAD`: STOP), the upstream,
-the "ahead" count and the host's own commits (torrents and site stamps
-from `upload_validated.sh`), running scripts and the queue's environment,
-crontab lines, and the checker's output (expect `ALL CHECKS PASSED`; its
-step 5 is `tools/check_boundary.py`).
+the "ahead" count and the host's own commits (torrent commits from
+`upload_validated.sh`), every `M` line of `status` (expect the in-place
+lists, and after any upload `web/index.html` and the `web/drive/` stamps:
+see §1.0), running scripts and the queue's environment, crontab lines,
+memory and swap, the fetch refspec (a line other than
+`+refs/heads/*:refs/remotes/origin/*`: say so, §1.4 needs it), pending
+uploads, the round's last rows and D.C.'s row, and the checker's output
+once the host is at the split (expect `ALL CHECKS PASSED` apart from the
+`web/` deploy files; its step 5 is `tools/check_boundary.py`).
 
 - **Ahead is not 0:** the host has commits the branches lack. The move
   will STOP until the user has them on `origin` and merged into `builder`
   and `next`. Don't push them yourself.
 - **Host scripts that call `build-region-fast.sh`** without
-  `OVERTURE_RELEASE` will now refuse to start (before, they defaulted to the
-  deleted 2026-04-15.0 and silently lost Overture). List them for the user.
+  `OVERTURE_RELEASE`: on `next` they refuse to start; on `main`, the ops
+  branch and `builder` they still default to the deleted 2026-04-15.0 and
+  silently lose Overture. List them for the user.
   `next` deletes `create_osm_zim_leaflet.py` and
   `cloud/upgrade_spatial_zim.py`; any host script or cron line naming them:
   report.
@@ -190,18 +297,24 @@ git -C /storage/sz-tests/next log -1 --format='%H %s'
 for p in "gh/main gh/ops" "gh/ops gh/builder" "gh/builder gh/next" "origin/HEAD gh/builder" "origin/HEAD gh/next"; do set -- $p; git -C /storage/sz-tests/next merge-base --is-ancestor "$1" "$2" && echo "OK    $1 is in $2" || echo "STOP  $1 is not in $2"; done
 ```
 
-(`origin/HEAD` in the clone is the host's current commit.) To refresh the
-clone later, run the `fetch` and `switch` lines again.
+(`origin/HEAD` in the clone is the host's commit when the clone was
+made.) To refresh the clone later, run
+`git -C /storage/sz-tests/next fetch -q origin` (so `origin/HEAD` follows
+the host), then the `fetch` and `switch` lines again, and the ancestry
+loop.
 
-**Expect** all five `OK`. **Known on 29 September:** `builder` and `next`
-were cut before `bd09db9` (their base is `5eb8a4f`), so `gh/ops
-gh/builder` prints `STOP`, and after §1.0 so do both `origin/HEAD` lines.
-The branch owner must merge the new `main` into `builder`, then `builder`
-into `next`. The conflicts are the three
-generated stamp files (`web/drive/build-info.js`, `web/drive/sw.js`,
-`web/drive/viewer/.version`): regenerate them with
-`scripts/sync-drive-viewer.sh` on the merged tree. Until then, run §1.3
-and the clone-only tests (§2a, 2b, 2d–2g), and don't move production.
+**Expect:** `gh/next` is `d8c6795…` (or later) and the first three lines
+`OK` (true since the lead's merges: `bd09db9` ⊂ `dbfe993` ⊂ `d8c6795`).
+The two `origin/HEAD` lines:
+- before §1.0, with no host commits beyond `37403b8`: `OK`;
+- before §1.0, with host torrent commits: `STOP` until those commits are
+  merged into `builder` and `next` (§1.0 step 2);
+- after §1.0 (the host on `main`'s merge commit): `STOP` until the branch
+  owner merges the new `main` into `builder`, then `builder` into `next`.
+
+Report the lines as they are; a `STOP` here stops only the production
+moves (which wait for the end of the round anyway), not §1.3 or the
+clone-only tests (§2a, 2b, 2d–2g).
 
 ### 1.3 Checks in the clone
 
@@ -232,10 +345,12 @@ T=claude/adoring-dijkstra-i2vge7-builder
 L=host-builder
 R=$HOME/sz-move-builder
 G="git -C /storage/streetzim"
-if ! command -v pgrep >/dev/null; then
-  echo "STOP: pgrep is missing, so a running build can't be detected; ask"
-elif pgrep -f '[c]reate_osm_zim|[u]pload_validated' >/dev/null; then
-  echo "STOP: a build or upload is running; move between builds"
+if ! command -v pgrep >/dev/null || [ ! -s "$HOME/sz-busy.sh" ]; then
+  echo "STOP: pgrep or \$HOME/sz-busy.sh (§0) is missing, so a running build can't be detected; ask"
+elif pgrep -f '[b]uild-refresh-queue' >/dev/null; then
+  echo "STOP: the rebuild round is still running; production moves wait for its end (§1.0)"
+elif bash "$HOME/sz-busy.sh"; then
+  echo "STOP: the processes above are running; move between them"
 elif [ -e "$R.before" ]; then
   echo "STOP: this move was started before:"; cat "$R.before" "$R.after" 2>/dev/null
 elif [ "$($G rev-parse --abbrev-ref HEAD)" = HEAD ]; then
@@ -261,8 +376,20 @@ fi
 `switch -c` creates `$L` at the current commit, so nothing on disk changes
 until the pull, and the old branch is left untouched for rollback. The pull
 refuses if it isn't a fast-forward or would overwrite a local edit; the
-host-edited lists are identical on every branch here, so their edits carry
-over.
+host-edited lists (and `web/index.html`) are identical on every branch
+here, so their edits carry over. The `web/drive/` stamp files are not:
+`next` changes them, so a deploy-modified `build-info.js`, `sw.js` or
+`viewer/.version` makes the pull to `next` refuse (§1.0); the block then
+prints the last STOP line with the checkout on `$L` at the old commit
+and nothing else changed. §1.7 doesn't apply (there is no `.after`);
+report `git -C /storage/streetzim rev-parse HEAD` (it must equal line 2
+of `$R.before`) and ask. The way back, on the user's word, is
+`git -C /storage/streetzim switch -q "$(sed -n 1p "$R.before")"`, while
+`sz-busy.sh` prints `IDLE`. Until then, torrent commits of any upload
+land on `$L`.
+
+If `--set-upstream-to` fails ("not a branch" or similar: the host's fetch
+refspec, recorded in §1.1, doesn't map `origin/$T`), the same applies.
 
 ### 1.5 After each move (read-only)
 
@@ -276,7 +403,9 @@ ps -eo pid,lstart,args | grep -E '/storage/streetzim/.*\.(sh|py|mjs)' | grep -v 
 ```
 
 **Pass:** `ALL CHECKS PASSED` (including "no local commits" and the
-boundary check), the same `M` lines on the host-edited lists as in §1.1,
+boundary check; the only acceptable `FAIL local change` lines are the
+`web/` deploy files of §1.0, if §1.1 showed them too), the same `M` lines
+on the host-edited lists as in §1.1,
 the §1.1 PIDs still running, both `OK` lines. Then run §2c on this branch.
 
 ### 1.6 Later commits on the same branch
@@ -287,7 +416,8 @@ builds:
 ```bash
 R=$HOME/sz-pull-next-$(date +%Y%m%d-%H%M)
 G="git -C /storage/streetzim"
-if pgrep -f '[c]reate_osm_zim|[u]pload_validated' >/dev/null; then echo "STOP: a build or upload is running"
+if pgrep -f '[b]uild-refresh-queue' >/dev/null; then echo "STOP: the round is running"
+elif bash "$HOME/sz-busy.sh"; then echo "STOP: a build, gate or upload is running"
 elif [ "$($G rev-parse --abbrev-ref HEAD)" != host-next ]; then echo "STOP: not on host-next"
 else
   $G rev-parse HEAD > "$R.before" &&
@@ -312,7 +442,7 @@ R=$HOME/sz-move-builder
 G="git -C /storage/streetzim"
 if [ -s "$R.before" ] && [ -s "$R.after" ] &&
    [ "$($G rev-parse HEAD)" = "$(cat "$R.after")" ] &&
-   ! pgrep -f '[c]reate_osm_zim|[u]pload_validated' >/dev/null; then
+   ! bash "$HOME/sz-busy.sh" >/dev/null; then
   $G switch -q "$(sed -n 1p "$R.before")" &&
   [ "$($G rev-parse HEAD)" = "$(sed -n 2p "$R.before")" ] &&
   echo "ROLLED BACK to $(sed -n 1p "$R.before") $(sed -n 2p "$R.before")" ||
@@ -357,8 +487,13 @@ TMPDIR=/storage/sz-tests/tmp PYTHON=/storage/streetzim/venv-linux/bin/python3 ba
 TMPDIR=/storage/sz-tests/tmp PYTHON=/storage/streetzim/venv-linux/bin/python3 bash /storage/sz-tests/next/tools/golden_builds.sh gh/next gh/next /storage/sz-tests/golden/next-next > /storage/sz-tests/results/golden-next-next.txt 2>&1; echo "exit $?"
 ```
 
-**Expected** (measured in a sandbox on 29 September with the same
-commits and Monaco inputs):
+**Expected** (measured in a sandbox on 29 September with Monaco inputs,
+on `bd09db9`, `builder` `3d8e7d7` and `next` `d5238cb`; the heads have
+moved since, to `dbfe993` and `d8c6795`, by merges that change no Monaco
+output: `bd09db9` changes no build code, and `topic-wiki-429` touches the
+Wikipedia/Wikidata fetchers and one log line of `streetzim/zim_writer.py`,
+none of which a Monaco golden build runs. `next → next` was not run in
+the sandbox; its row is the control's expectation):
 
 | pair | exit | `changed` | `only-before` / `only-after` |
 |---|---|---|---|
@@ -373,6 +508,10 @@ Look at each such entry as the golden-builds page describes, and report
 it. After a topic branch lands on `next`, rerun `main → next`: a new
 difference must belong to that branch (the viewer polish touches
 `C/index.html` and `C/places.html` only).
+
+(§2a writes only under `/storage/sz-tests`; it needs no idle window, but
+it does load the host: run it when `sz-busy.sh` shows no continent-tier
+build.)
 
 **tilemaker mode.** The host has no tilemaker binary, so use the image's
 (v3.0.0) through a wrapper. Everything tilemaker reads must be under
@@ -445,7 +584,8 @@ sidecar printed above: another bbox explains it).
 
 ### 2c. A small region end to end, without uploading (production checkout)
 
-Runs after each move (§1.5), on the branch the host is then on. It runs
+Runs after each move (§1.5), on the branch the host is then on, and only
+once the round has ended. It runs
 the production wrappers, which `cd /storage/streetzim` and use its code,
 caches and `overture_cache/`.
 
@@ -457,16 +597,46 @@ caches and `overture_cache/`.
 | `ship-region.sh <id> --no-upload` | not with `--no-upload` (must be the second argument); it stops after the gates. Without it: `cloud/upload_validated.sh` (archive.org, torrent commit, `web/generate.py --deploy`) | |
 | `build-refresh-queue.sh` | unless `--no-upload` | `--dry-run` builds nothing but still takes the queue lock and appends to `queue-refresh-<date>.log`. With `--no-upload` a good region is recorded `built-ok`, which `--continue` then skips: never run a test against the round's `queue-refresh.tsv` (set `RESULTS=/storage/sz-tests/...`), and not while the round runs |
 
-Use `ship-region.sh` on D.C.:
+**Only after the round has ended** (a production build of its own, in
+production's directory: it would compete with the round's builds for CPU,
+memory and `/storage`, and a D.C. ZIM dated today would be reused and
+*uploaded* by the round if the round reached D.C. later). The block also
+saves the round's D.C. logs first: `washington-dc-build.out` has no date
+in its name and the test overwrites it.
+
+Use `ship-region.sh` on D.C. (`--no-upload` exists on every branch here,
+must be the second argument, and exits 0 right after `=== all gates
+passed`, before `cloud/upload_validated.sh`: no archive.org upload, no
+torrent, no commit, no `generate.py --deploy`, no Firebase). Run it as
+one command:
 
 ```bash
-ls -l /storage/streetzim/osm-washington-dc-$(date +%F).zim 2>/dev/null && echo "STOP: today's D.C. ZIM exists; the wrapper would reuse it" || echo "OK: no D.C. ZIM today"
-pgrep -af '[c]reate_osm_zim|[s]hip-region' || echo "OK: idle"
-cd /storage/streetzim && OVERTURE_RELEASE=2026-08-19.0 STAGE_MBTILES_NVME=0 ./ship-region.sh washington-dc --no-upload; echo "exit $?"
+D=$(date +%F); K=/storage/sz-tests/results/2c-$(git -C /storage/streetzim rev-parse --short HEAD)
+if pgrep -af '[b]uild-refresh-queue'; then echo "STOP: the round is running; §2c waits for its end"
+elif bash "$HOME/sz-busy.sh"; then echo "STOP: the processes above are running"
+elif ls /storage/streetzim/osm-washington-dc-"$D".zim 2>/dev/null; then echo "STOP: today's D.C. ZIM exists; the wrapper would reuse it"
+elif [ -e "$K" ]; then echo "STOP: $K exists (this commit was tested already)"
+else
+  mkdir -p "$K/round-logs-before" &&
+  cp -p /storage/streetzim/washington-dc-build.out /storage/streetzim/washington-dc-rebuild-"$D".log /storage/streetzim/washington-dc-smoke-"$D".log /storage/streetzim/ship-washington-dc-"$D".log "$K/round-logs-before/" 2>/dev/null
+  ( cd /storage/streetzim && OVERTURE_RELEASE=2026-08-19.0 OVERTURE_TRANSPORT=s3 STAGE_MBTILES_NVME=0 ./ship-region.sh washington-dc --no-upload ); echo "exit $?"
+fi
 ```
+
+(The subshell keeps this session's working directory out of
+`/storage/streetzim`. If the script prints `FATAL: … run
+./extract-region-pbfs.sh …` or any other FATAL: that is a FAIL; don't run
+what it suggests, it writes production's region files.)
 
 (`STAGE_MBTILES_NVME=0`: D.C.'s `.mbtiles` is a symlink to the world tile
 file, which the wrapper would otherwise copy to the shared NVMe.)
+
+**Side effects to expect** (and report): `.bbox` sidecars written next to
+`world-data/regions/washington-dc.osm.pbf` and D.C.'s Overture parquets
+(on `next`); on `next`, if a D.C. parquet's sidecar names another bbox,
+the script deletes that parquet and downloads it again over s3; the
+Wikidata/Wikipedia caches gain entries; `web/osm-washington-dc-<date>.zim`
+exists as a symlink during the browser smoke (Firebase ignores `*.zim`).
 
 **Pass:** exit 0; `ship-washington-dc-<date>.log` ends with `=== all gates
 passed` and `--no-upload: stopping here with osm-washington-dc-<date>.zim`;
@@ -479,11 +649,16 @@ Then take the test output out of production's way (a later queue run
 would otherwise reuse today's ZIM) and free its scratch:
 
 ```bash
-mkdir -p /storage/sz-tests/results/2c-$(git -C /storage/streetzim rev-parse --short HEAD)
-mv /storage/streetzim/osm-washington-dc-$(date +%F).zim /storage/sz-tests/results/2c-$(git -C /storage/streetzim rev-parse --short HEAD)/
-cp /storage/streetzim/ship-washington-dc-$(date +%F).log /storage/streetzim/washington-dc-build.out /storage/streetzim/washington-dc-rebuild-$(date +%F).log /storage/streetzim/washington-dc-smoke-$(date +%F).log /storage/sz-tests/results/2c-$(git -C /storage/streetzim rev-parse --short HEAD)/
-grep -a '^Temp files kept at: ' /storage/streetzim/washington-dc-rebuild-$(date +%F).log | tail -1
+D=$(date +%F); K=/storage/sz-tests/results/2c-$(git -C /storage/streetzim rev-parse --short HEAD)
+mv /storage/streetzim/osm-washington-dc-"$D".zim "$K"/
+cp /storage/streetzim/ship-washington-dc-"$D".log /storage/streetzim/washington-dc-build.out /storage/streetzim/washington-dc-rebuild-"$D".log /storage/streetzim/washington-dc-smoke-"$D".log "$K"/
+git -C /storage/streetzim --no-optional-locks status --short
+grep -a '^Temp files kept at: ' /storage/streetzim/washington-dc-rebuild-"$D".log | tail -1
 ```
+
+(`K` must be the same folder as in the run block: if HEAD moved in
+between, use that folder by hand.) `status` must show the same lines as
+before the run.
 
 Delete the directory that last line names, only if it is under
 `/storage/streetzim/tmp/osm_zim_` (`rm -rf <that directory>`). If the
@@ -492,7 +667,7 @@ build crossed midnight, use the date in the ZIM's name instead of
 
 ### 2d. D.C. with offline Wikipedia, `main` vs `next`
 
-**After `next` contains `topic-wiki-429`** (check in the table at the top).
+**`next` contains `topic-wiki-429`** (`e94474c`, merged; check at the top).
 The comparison [head-to-head-dc.md](../docs/head-to-head-dc.md#what-is-still-not-compared)
 asks for: images and the offline-ZIM path, from production's Wikipedia
 ZIM. Both sides read the same PBF, the same tiles (the host has no
@@ -503,12 +678,18 @@ tilemaker, so `--mbtiles`) and the same warm caches, copied under
 test "$(stat -c%s /storage/streetzim/wiki-src/wikipedia_en_all_maxi_2026-02.zim)" = 123980647016 && echo "OK: wiki ZIM" || echo "STOP: wiki ZIM missing or wrong size"
 mkdir -p /storage/sz-tests/dcwiki/src-main /storage/sz-tests/dcwiki/main /storage/sz-tests/dcwiki/next
 git -C /storage/sz-tests/next archive gh/main | tar -x -C /storage/sz-tests/dcwiki/src-main
-du -sh /storage/streetzim/wikidata_cache
+du -sh /storage/streetzim/wikidata_cache; df -h /storage
+```
+
+If the Wikidata cache is larger than a few GB, or copying it would leave
+`/storage` with less free space than §2g's floor, stop and ask. Otherwise:
+
+```bash
 cp -a /storage/streetzim/wikidata_cache /storage/sz-tests/dcwiki/wd
 cp /storage/streetzim/wiki_articles_cache/washington-dc_qid_titles.json /storage/sz-tests/dcwiki/titles.json 2>/dev/null || echo "no D.C. title cache; starts cold"
 ```
 
-(If the Wikidata cache is too large to copy, stop and ask.) Warm the
+(Both are copies: the tests never write production's caches.) Warm the
 caches with `next` (which no longer records a 429 as a miss). Run this
 until two runs in a row print the same `distinct titles` count and the
 log has no `429`:
@@ -621,13 +802,29 @@ doesn't gate the merges (§3). Budget: 3 regions × 4 variants × 2 runs =
 24 runs, maps2zim an hour or more each; a day or more in all. Run region by
 region and report as each finishes.
 
+**Resources, checked before every run** (the runner does it): this test
+shares `/storage` and the host's memory with the production round.
+`build-refresh-queue.sh` refuses to *start* below 500 GB free on
+`/storage`, and its continent builds keep 20–120 GB of scratch each and
+have OOMed without swap. So:
+- disk: the planet (about 103 GB) once, plus per maps2zim run up to about
+  105 GB in `tmp/` (openZIM's production Switzerland task peaked at
+  208.7 GB of disk *with* its own 103 GB planet download), plus the
+  StreetZim cuts, extracts and DEM tiles, plus the ZIMs kept. A run
+  starts only with at least **500 GB** free on `/storage`, and is
+  aborted (and its round voided) below **300 GB**;
+- memory: each container is capped at 16 GiB; a run starts only if
+  `MemAvailable` is at least 24 GiB;
+- while the round is running, run §2g only if the user agrees, and mark
+  every such run `contended`. Best: after the round.
+
 **Variants:**
 
 | id | what | needs |
 |---|---|---|
 | `maps2zim` | `ghcr.io/openzim/maps:0.2.1`, unmodified, with its own planet path (`/tmp/dl/planet.mbtiles`, its default download folder) seeded with the shared planet file | — |
-| `sz-basic` | StreetZim, default profile, tiles from the same planet file (`--mbtiles-url file://…`) | `next` contains `topic-mbtiles-flag` |
-| `sz-full` | as `sz-basic`, with the full profile (terrain etc.) | `next` contains the `--profile` branch |
+| `sz-basic` | StreetZim, default profile, tiles from the same planet file (`--mbtiles-url file:///planet/planet.mbtiles`: a `file://` URL is read in place, not copied) | `next` contains `topic-mbtiles-flag` |
+| `sz-full` | as `sz-basic`, with the full profile (terrain etc.) | `next` contains `topic-full-profile` |
 | `sz-tm` | StreetZim, default profile, its own tilemaker tiles from the Geofabrik extract | — |
 
 Check the two gates in the table at the top of this page, then refresh
@@ -638,8 +835,26 @@ If `--profile` takes its value differently, change the one line marked
 
 **Regions** (Geofabrik polys, as openZIM's recipes use): Luxembourg
 (`europe/luxembourg.poly`), D.C. (`north-america/us/district-of-columbia.poly`)
-and Switzerland (`europe/switzerland.poly`: the mid-size country, with a
-production maps2zim task of 72.4 min).
+and **Switzerland, which is required** (the user's requirement: openZIM
+is based there; don't substitute another mid-size country). maps2zim runs
+exactly as openZIM's production recipes do: the runner's maps2zim command
+is the recipe's command (same poly, name, title, description, publisher,
+output and stats file; same limits: `cpu: 3` → `--cpu-shares 3072`,
+`memory: 17179869184` → `--memory 16g`), checked against the Zimfarm API
+on 29 September:
+
+| recipe | poly | latest production task |
+|---|---|---|
+| `maps_en_switzerland` (annual) | `https://download.geofabrik.de/europe/switzerland.poly` | `625d6b2d-bd75-47ed-ae4f-dba447810e88`, worker `duncan`, 2026-06-12: scraper 72.4 min (06:17:17–07:29:41 UTC), task 73.7 min; ZIM `maps_en_switzerland_2026-06.zim`, 684,493,202 bytes, zimcheck 0; container peaks: memory 17.18 GB (at the 16 GiB cap), CPU max 426 % / avg 77 %, disk 208.7 GB |
+| `maps_en_luxembourg` | `https://download.geofabrik.de/europe/luxembourg.poly` | `46f2ea98-8200-4984-81b0-ccfddbf3acee`, worker `badger2`, 2026-06-11: scraper 75.0 min, ZIM `maps_en_luxembourg_2026-06.zim`, 176,649,821 bytes; peaks: memory 17.18 GB, CPU max 132 % / avg 69 %, disk 208.0 GB |
+| (none for D.C.: `maps_en_district-of-columbia` and similar return 404) | | |
+
+Refresh these before the report
+(`curl -s https://api.farm.openzim.org/v2/recipes/maps_en_switzerland`, and
+`/v2/tasks/<id>` of its `most_recent_task`) and cite them under the table
+as the real-world reference. They are *not* a run of this test: each
+production task downloaded the ~103 GB planet itself (inside its 72–75
+min), ran on another machine, and its disk peak includes that planet.
 
 **Fairness and measurement** (the plan's §3, §6 and §8):
 - one planet file for every tile-reading run, and the same container
@@ -650,6 +865,9 @@ production maps2zim task of 72.4 min).
   tree, peak disk of its folders), `docker stats` every 5 s, `docker
   inspect` (start, finish, `OOMKilled`), and the host's load
   (`/proc/loadavg`, `/proc/pressure/cpu`) at start and end;
+- network use differs by design and is listed, not equalised: StreetZim
+  may fetch Overture and Wikidata/Wikipedia over the network, and a 429
+  there changes its work; record each run's fetch and 429 lines;
 - every run starts network-cold except for the planet file: a fresh
   download folder, so GeoNames (maps2zim), and the extract, shapefiles and
   DEM (StreetZim) download as they would on Zimfarm;
@@ -659,8 +877,10 @@ production maps2zim task of 72.4 min).
   than B" only when the ranges don't overlap **and** the ratio of medians
   is at least 1.5×; otherwise "no clear difference". CPU time is the main
   speed figure; wall time is shown with the load;
-- a run that overlapped a production build is marked `contended`; when a
-  clean pair is available, it stays out of the headline;
+- a run that overlapped a production build, gate or upload (sampled
+  every 5 s with `sz-busy.sh`, not only at start and end) is marked
+  `contended`; when a clean pair is available, it stays out of the
+  headline;
 - every table carries the coverage and feature notes: maps2zim keeps the
   tiles meeting the poly; `sz-basic` and `sz-full` cut the planet's tiles
   to the poly's bbox; `sz-tm` builds tiles from the extract; all
@@ -668,7 +888,8 @@ production maps2zim task of 72.4 min).
   which is clipped to the poly. The features differ (StreetZim: search
   over every named feature, routing, a full-text index; maps2zim:
   sprites, the Natural Earth raster, GeoNames search);
-- abort a run if `/storage` falls below 50 GB free, and void its round.
+- abort a run if `/storage` falls below 300 GB free, and void its round
+  (the runner does both).
 
 **The planet tiles, once.** First, what the host's world tiles are (the
 queue's `WORLD_MBTILES`, written to a file in §2e). They come from
@@ -721,19 +942,27 @@ PROFILE=(--profile full)   # the full profile's flag, as it landed on next
 case $region in
   luxembourg)  poly=https://download.geofabrik.de/europe/luxembourg.poly; title=Luxembourg ;;
   dc)          poly=https://download.geofabrik.de/north-america/us/district-of-columbia.poly; title="District of Columbia" ;;
-  switzerland) poly=https://download.geofabrik.de/europe/switzerland.poly; title=Switzerland ;;
+  switzerland) poly=https://download.geofabrik.de/europe/switzerland.poly; title=Switzerland ;;  # = recipe maps_en_switzerland
   *) echo "unknown region"; exit 2 ;;
 esac
 d=/storage/sz-tests/results/planet/${region}__${tool}__$n
 name=cmp-$region-$tool-$n
 [ -e "$d" ] && { echo "exists: $d"; exit 2; }
+free_gb() { df -BG --output=avail /storage | tail -1 | tr -dc 0-9; }
+avail_gib() { awk '/^MemAvailable:/ {print int($2/1048576)}' /proc/meminfo; }
+[ "$(free_gb)" -ge 500 ] || { echo "not started: $(free_gb) GB free on /storage (want >= 500)"; exit 3; }
+[ "$(avail_gib)" -ge 24 ] || { echo "not started: $(avail_gib) GiB MemAvailable (want >= 24)"; exit 3; }
 mkdir -p "$d/out" "$d/tmp" "$d/dl"
-host() { date -Is; cat /proc/loadavg /proc/pressure/cpu 2>/dev/null; pgrep -af '[c]reate_osm_zim' || echo "no production build"; df -h /storage | tail -1; }
+host() { date -Is; cat /proc/loadavg /proc/pressure/cpu 2>/dev/null; free -g | sed -n 2p; bash "$HOME/sz-busy.sh" || true; df -h /storage | tail -1; }
 host > "$d/host-start.txt"
 lim=(-d --name "$name" --user "$(id -u):$(id -g)" --memory 16g --memory-swap 16g --cpu-shares 3072)
 desc="Full map, including roads and landmarks"
 case $tool in
   maps2zim)
+    # The production recipe's command, unchanged. The planet is seeded where
+    # maps2zim 0.2.1 looks for it (MAPS_TMP=/tmp in the image, dl=/tmp/dl,
+    # area "planet" -> /tmp/dl/planet.mbtiles): it logs "using mbtiles file
+    # already available" and skips files.txt and the download.
     docker run "${lim[@]}" -v "$d/out:/output" -v "$d/tmp:/tmp" -v "$d/dl:/tmp/dl" \
       -v /storage/sz-tests/planet/planet.mbtiles:/tmp/dl/planet.mbtiles:ro \
       -v /storage/sz-tests/next/tools/measure_build.py:/measure_build.py:ro \
@@ -746,17 +975,22 @@ case $tool in
     extra=(--mbtiles-url file:///planet/planet.mbtiles)
     [ "$tool" = sz-full ] && extra+=("${PROFILE[@]}")
     [ "$tool" = sz-tm ] && extra=()
-    docker run "${lim[@]}" -v "$d:/run" -e STREETZIM_CACHE_DIR=/run/tmp/cache \
+    docker run "${lim[@]}" -v "$d:/work" -e STREETZIM_CACHE_DIR=/work/tmp/cache \
       -v /storage/sz-tests/planet/planet.mbtiles:/planet/planet.mbtiles:ro \
-      streetzim:hosttest python /app/tools/measure_build.py --json /run/measure.json \
-      --watch /run/tmp --watch /run/dl --watch /run/out --log /run/build.log -- \
+      streetzim:hosttest python /app/tools/measure_build.py --json /work/measure.json \
+      --watch /work/tmp --watch /work/dl --watch /work/out --log /work/build.log -- \
       streetzim --name "streetzim_en_$region" --title "$title" --description "$desc" \
-      --include-poly "$poly" ${extra[@]+"${extra[@]}"} --output /run/out --tmp /run/tmp --dl /run/dl \
-      --stats-filename /run/out/task_progress.json ;;
+      --include-poly "$poly" ${extra[@]+"${extra[@]}"} --output /work/out --tmp /work/tmp --dl /work/dl \
+      --stats-filename /work/out/task_progress.json ;;
   *) echo "unknown tool"; exit 2 ;;
 esac > "$d/container.id" || exit 1
 while [ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null)" = true ]; do
   docker stats --no-stream --format '{{.CPUPerc}}\t{{.MemUsage}}\t{{.BlockIO}}\t{{.NetIO}}' "$name" | sed "s/^/$(date +%s)\t/"
+  bash "$HOME/sz-busy.sh" > /dev/null && date +%s >> "$d/contended.txt"
+  if [ "$(free_gb)" -lt 300 ]; then
+    echo "$(date -Is) /storage below 300 GB free: killing $name; this round is void" >> "$d/VOID.txt"
+    docker kill "$name" > /dev/null
+  fi
   sleep 5
 done > "$d/docker-stats.tsv"
 docker wait "$name" > "$d/exit.txt"
@@ -764,7 +998,9 @@ docker inspect "$name" > "$d/inspect.json"
 docker logs --timestamps "$name" > "$d/docker.log" 2>&1
 docker rm "$name" > /dev/null
 host > "$d/host-end.txt"
+stat -L -c%s /storage/sz-tests/planet/planet.mbtiles > "$d/planet-bytes.txt"
 rm -rf "${d:?}/tmp" "${d:?}/dl"
+[ -e "$d/VOID.txt" ] && cat "$d/VOID.txt"
 echo "$d: exit $(cat "$d/exit.txt")"
 EOF
 ```
@@ -772,19 +1008,27 @@ EOF
 maps2zim runs with its image's own paths (`--tmp /tmp`, `--dl /tmp/dl`,
 `--output /output`), all mounted from the run folder; its measurement
 watches `/tmp`, which holds its download folder. StreetZim's watches its
-temp, download and output folders. Both count their downloads but not the
-planet file (maps2zim reads it in place; StreetZim's cut of it lands in
-its temp folder and is counted).
+temp, download and output folders (mounted at `/work`, not over the
+container's `/run`). **`measure_build.py` sums every regular file under a
+watched folder and doesn't stop at mount points, so maps2zim's
+`peak_disk_gb` includes the 103 GB planet bind-mounted at
+`/tmp/dl/planet.mbtiles`**; the table below subtracts it
+(`planet-bytes.txt`), so both tools count their downloads and working
+files but not the shared planet. StreetZim's cut of it lands in its temp
+folder and is counted.
 
 **Runs,** one at a time, per region (Luxembourg first, then `dc`, then
 `switzerland`):
 
 ```bash
-for t in maps2zim sz-basic sz-full sz-tm; do bash /storage/sz-tests/run-one.sh $t luxembourg 1; done
-for t in sz-tm sz-full sz-basic maps2zim; do bash /storage/sz-tests/run-one.sh $t luxembourg 2; done
+for t in maps2zim sz-basic sz-full sz-tm; do bash /storage/sz-tests/run-one.sh $t luxembourg 1; [ $? -eq 3 ] && break; done
+for t in sz-tm sz-full sz-basic maps2zim; do bash /storage/sz-tests/run-one.sh $t luxembourg 2; [ $? -eq 3 ] && break; done
 ```
 
-Until the `--profile` branch lands, leave `sz-full` out of the loops and
+(Exit 3: the run didn't start for want of disk or memory; the loop
+stops so that the order isn't silently changed. Report and ask.)
+
+Until `topic-full-profile` lands, leave `sz-full` out of the loops and
 run it later in its own two rounds.
 
 **Per-run checks** (a run failing one is a FAIL for that run; rerun it
@@ -792,8 +1036,9 @@ once, within its round):
 - exit 0, and a ZIM in `out/`;
 - maps2zim's `build.log` shows `using mbtiles file already available at
   /tmp/dl/planet.mbtiles` (it used the shared planet, not a download). If
-  it can't open the read-only file, drop `:ro` from that mount, say so,
-  and rerun;
+  it can't open the read-only file, stop and ask (don't drop `:ro`: the
+  same file feeds every run, and a write to it would void them all);
+- no `VOID.txt` in the run folder;
 - the `sz-basic` and `sz-full` logs show `Cut to the area: N tiles`;
 - the `sz-full` log shows the terrain being built; the `sz-tm` log shows
   tilemaker;
@@ -814,7 +1059,13 @@ for d in sorted(glob.glob("/storage/sz-tests/results/planet/*__*__*")):
             m = json.load(open(f))
     zims = glob.glob(f"{d}/out/*.zim")
     ends = [f"{d}/host-start.txt", f"{d}/host-end.txt"]
-    busy = not all(os.path.exists(f) and "no production build" in open(f).read() for f in ends)
+    busy = os.path.exists(f"{d}/contended.txt") or not all(
+        os.path.exists(f) and "IDLE" in open(f).read() for f in ends)
+    if os.path.exists(f"{d}/VOID.txt"):
+        tool += " (VOID)"
+    planet_gb = int(open(f"{d}/planet-bytes.txt").read()) / 1e9 if os.path.exists(f"{d}/planet-bytes.txt") else 0
+    if tool.startswith("maps2zim") and m.get("peak_disk_gb") is not None:
+        m["peak_disk_gb"] = round(m["peak_disk_gb"] - planet_gb, 2)   # the shared planet is under its watched /tmp
     runs[(region, tool)].append(dict(n=n, exit=m.get("exit_code"), wall=m.get("wall_s", 0) / 60,
         cpu=m.get("cpu_s", 0) / 60, pss=m.get("peak_pss_gb"), disk=m.get("peak_disk_gb"),
         zim=sum(os.path.getsize(z) for z in zims) / 1e6, busy=busy))
@@ -837,18 +1088,28 @@ Under the table, write for each region and metric either "A uses less X
 than B (ratio, ranges)" or "no clear difference", by the 1.5× rule; then
 the coverage and feature notes, the planet build id, both image digests
 and the StreetZim commit. Add the entry count of each ZIM, and zimcheck
-where the host has it (`command -v zimcheck && zimcheck -A <zim>`).
+where the host has it (`command -v zimcheck && zimcheck -A <zim>`). Add
+one reference row per region with a production recipe, marked
+**production (not this test)**: `maps_en_switzerland` (task
+`625d6b2d…`, 72.4 min scraper, 684.5 MB ZIM, peaks 17.18 GB memory / 208.7
+GB disk incl. its planet download) and `maps_en_luxembourg` (task
+`46f2ea98…`, 75.0 min, 176.6 MB), refreshed from the API, with the note
+that production times include the ~103 GB planet download and ran on
+other hardware. Switzerland's row is the one openZIM will read first.
 
 **Pack for the user:**
 
 ```bash
 cp /storage/sz-tests/planet/SOURCE.txt /storage/sz-tests/results/planet/
-tar -C /storage/sz-tests -czf /storage/sz-tests/results-$(date +%F).tgz results
+find /storage/sz-tests/results -name '*.zim' -printf '%s\t%p\n' | sort -k2 > /storage/sz-tests/results/ZIMS.tsv
+tar -C /storage/sz-tests --exclude='*.zim' -czf /storage/sz-tests/results-$(date +%F).tgz results
 ls -l /storage/sz-tests/results-$(date +%F).tgz
 ```
 
-(The ZIMs are in the tarball; if it is too large, add
-`--exclude='*.zim'` and list the ZIM sizes instead.)
+(ZIMs are already compressed and can be tens of GB, so the tarball
+leaves them out and `ZIMS.tsv` lists them; the user fetches the ones
+they want. The tarball stays under `/storage/sz-tests`; don't upload it
+anywhere.)
 
 ## 3. Merging to `main` (the user), and the host after each merge
 
@@ -860,18 +1121,30 @@ Order: ops branch (§1.0) → `builder` → `next`. For each, the user:
 3. merges with **a merge commit** (not squash or rebase), so the commits
    the host is on stay ancestors of `main` and the host can fast-forward.
 
-After each merge, on the host, between builds:
+After each merge, on the host:
 - the ops branch: the host pulls `main` as §1.0 says (its upstream is
-  already `origin/main`);
-- if it is on `host-builder` or `host-next`: nothing needs to move until
-  the last merge, since `main` then equals what the host runs. After the
-  `next` PR merges, §1.4 with `T=main` moves it to `host-main`;
+  already `origin/main`), in an idle window;
+- **`builder` and `next` merged into `main` while the round runs:** the
+  host does not pull again until the round has ended: its upstream is
+  `origin/main`, so any `git pull` there (by anyone, or a re-run of
+  TESTING-STAGE1.md step 4, which refuses only "already at the split")
+  would now bring `builder`'s or `next`'s code and viewer into the
+  running round (§1.0, "Why production waits"). Say this to the user
+  when the `builder` PR merges. Build VMs (`ops/cloud/build-vm-startup.sh`
+  clones or `pull --ff-only`s `main` at start) get the new code from
+  then on;
+- after the round: if the host is on `main`, the §1.4 block with
+  `T=main`, `L=host-main` moves it (it then pulls the merged `main`); if
+  it is on `host-builder` or `host-next`, the same block after the
+  `next` PR merges (the host's torrent commits must be on `main` first);
 - §1.5 (check_stage1, boundary);
 - a smoke build: §2c (`ship-region.sh washington-dc --no-upload`), then
   move its ZIM out as §2c says.
 
 The promise to openZIM is everything on `main` by the end of 29 September
-(Pacific). The merges don't wait for §2d–2g; report those as they finish.
+(Pacific). The merges don't wait for §2d–2g, and they don't need the host
+to move: production can stay on the ops split until the round ends.
+Report §2d–2g as they finish.
 
 ## 4. Report back (fill in)
 
@@ -880,9 +1153,12 @@ The promise to openZIM is everything on `main` by the end of 29 September
       line and step 5's result, the two `sz-*-stage1.txt` records.
 - [ ] §1.1: host commit, branch, upstream, ahead count and host commits,
       `status -sb` lines, running scripts and queue environment, crontab
-      lines, host scripts calling `build-region-fast.sh`, disk, checker
-      result.
-- [ ] §1.2: the clone's `gh/next` commit; the five ancestry lines.
+      lines, host scripts calling `build-region-fast.sh`, disk, memory
+      and swap, fetch refspec, pending uploads, the round's last rows and
+      D.C.'s row, checker result (after §1.0).
+- [ ] §0: the output of `sz-busy.sh` each time a block used it.
+- [ ] §1.2: the clone's `gh/next` commit (expect `d8c6795` or later); the
+      five ancestry lines.
 - [ ] §1.3: checker, boundary, pytest results.
 - [ ] §1.4/1.5 per move: `.before`/`.after` contents, `OK`/`STOP` line,
       check_stage1 result, PIDs still running; any rollback.
@@ -891,16 +1167,18 @@ The promise to openZIM is everything on `main` by the end of 29 September
       cache, columns.
 - [ ] §2c per branch: exit, gate lines, Overture and Wikipedia lines, Rust
       packer, where the ZIM went, scratch removed.
-- [ ] §2d: (after `topic-wiki-429`) warm-up runs, the diff classes,
+- [ ] §2d: warm-up runs, the diff classes,
       article/image counts for main, next and published.
 - [ ] §2e: PBF box, antimeridian log lines, tile and search counts (new
       and published).
 - [ ] §2f: `measure.json` figures, extract and ZIM size, load.
 - [ ] §2g: world-tiles metadata and whether it was reused; planet build
       id, size, sha256 and image digests; which variants ran (`sz-basic`
-      after `topic-mbtiles-flag`, `sz-full` after `--profile`); per-run
-      check failures; TABLE.md with the 1.5× verdicts; contended runs; the
-      tarball path and size.
+      after `topic-mbtiles-flag`, `sz-full` after `topic-full-profile`);
+      per-run check failures and any `VOID.txt`; TABLE.md with the 1.5×
+      verdicts (maps2zim's disk with the planet subtracted); contended
+      runs; the production reference rows for Switzerland and
+      Luxembourg, refreshed; `ZIMS.tsv`; the tarball path and size.
 - [ ] Anything that printed `STOP` or `FAIL`, with its output.
 - [ ] Leftovers: `/storage/sz-tests` size (`du -sh`), and the records in
       `$HOME/sz-move-*` and `$HOME/sz-pull-*`.
