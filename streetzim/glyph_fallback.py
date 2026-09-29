@@ -189,10 +189,9 @@ def _byte_class(values: Iterable[int]) -> bytes:
 
 
 def _byte_pattern(blocks: Iterable[tuple[int, int]]) -> re.Pattern[bytes]:
-    """Two UTF-8 encoded characters from the blocks in a row: a byte-level
-    prefilter. A label in the script matches (names are longer than one
-    letter); tile geometry almost never does, and a tile that matches is
-    then parsed to be sure.
+    """A UTF-8 encoded character from the blocks: a byte-level prefilter.
+    Tile geometry rarely matches, and a tile that matches is then parsed to
+    be sure.
 
     Each character is written as ``[first bytes](?:(?<=first)rest|...)``: a
     pattern that starts with a byte class lets the regex engine skip ahead
@@ -207,20 +206,60 @@ def _byte_pattern(blocks: Iterable[tuple[int, int]]) -> re.Pattern[bytes]:
         rest = b"|".join(re.escape(mid) + _byte_class(lasts) for mid, lasts in sorted(mids.items()))
         alts.append(b"(?<=\\x%02x)(?:%s)" % (lead, rest))
     char = _byte_class(by_lead) + b"(?:" + b"|".join(alts) + b")"
-    return re.compile(char + char)
+    return re.compile(char)
 
 
-def _tile_strings(tile: bytes) -> Iterator[str]:
-    """The string values of a Mapbox Vector Tile (layer field 4, value field 1)."""
+# The tile properties the style draws as text: every "text-field" in
+# resources/viewer/src/index/*.js reads only these (tests/test_glyph_fallback.py
+# checks). Other keys, e.g. an OpenMapTiles tile's name:ar or name:he, are
+# never displayed and must not pull in glyphs.
+LABEL_KEYS = frozenset({"name", "name:latin", "name_int", "label"})
+
+
+def _tile_strings(tile: bytes, keys: frozenset[str] = LABEL_KEYS) -> Iterator[str]:
+    """The non-ASCII string values of a Mapbox Vector Tile that some feature
+    carries under one of ``keys``."""
     for field, layer, _ in _fields(tile):
         if field != 3 or not isinstance(layer, bytes):
             continue
-        for f2, value, _ in _fields(layer):
-            if f2 != 4 or not isinstance(value, bytes):
+        layer_keys: list[bytes] = []
+        values: list[bytes | None] = []
+        features: list[bytes] = []
+        for f2, v, _ in _fields(layer):
+            if not isinstance(v, bytes):
                 continue
-            for f3, s, _ in _fields(value):
-                if f3 == 1 and isinstance(s, bytes):
-                    yield s.decode("utf-8", "replace")
+            if f2 == 2:
+                features.append(v)
+            elif f2 == 3:
+                layer_keys.append(v)
+            elif f2 == 4:
+                sv = None
+                for f3, s, _ in _fields(v):
+                    if f3 == 1 and isinstance(s, bytes):
+                        sv = s
+                values.append(sv)
+        wanted = {i for i, k in enumerate(layer_keys) if k.decode("utf-8", "replace") in keys}
+        # only non-ASCII strings can hold these scripts
+        candidates = {i for i, v in enumerate(values) if v is not None and not v.isascii()}
+        if not wanted or not candidates:
+            continue
+        shown: set[int] = set()
+        for feature in features:
+            for f3, tags, _ in _fields(feature):
+                if f3 != 2 or not isinstance(tags, bytes):
+                    continue
+                i = 0
+                pairs: list[int] = []
+                while i < len(tags):
+                    n, i = _varint(tags, i)
+                    pairs.append(n)
+                for k, v in zip(pairs[0::2], pairs[1::2]):
+                    if k in wanted and v in candidates:
+                        shown.add(v)
+        for i in sorted(shown):
+            sv = values[i]
+            if sv is not None:
+                yield sv.decode("utf-8", "replace")
 
 
 def _decompress(data: bytes) -> bytes:
@@ -237,9 +276,10 @@ def _decompress(data: bytes) -> bytes:
 def scripts_in_tiles(tiles: Iterable[bytes],
                      scripts: Mapping[str, Iterable[tuple[int, int]]]) -> set[str]:
     """The names of ``scripts`` whose characters occur in a string value of
-    any of ``tiles`` (Mapbox Vector Tiles, gzip-compressed or not). Stops
-    reading once every script has been seen. A tile that does not parse is
-    judged by its raw bytes (a stray match only costs size)."""
+    any of ``tiles`` (Mapbox Vector Tiles, gzip-compressed or not) that the
+    style displays (a feature's LABEL_KEYS). Stops reading once every script
+    has been seen. A tile that does not parse is skipped (MapLibre cannot
+    draw it either)."""
     todo = {name: (_byte_pattern(blocks), re.compile(f"[{_utf8_class(blocks)}]"))
             for name, blocks in ((n, list(b)) for n, b in scripts.items())}
     found: set[str] = set()
@@ -255,7 +295,7 @@ def scripts_in_tiles(tiles: Iterable[bytes],
         try:
             texts = list(_tile_strings(raw))
         except (ValueError, IndexError):
-            texts = [raw.decode("utf-8", "ignore")]
+            continue
         for name in hits:
             if any(todo[name][1].search(t) for t in texts):
                 found.add(name)

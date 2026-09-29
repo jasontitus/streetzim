@@ -84,8 +84,12 @@ not do (Devanagari, Bengali, …) are left out, and CJK is drawn by the
 browser (`localIdeographFontFamily`).
 
 Only the scripts a map's labels use are merged: the builder reads the
-string values of its vector tiles first (`fallback_scripts_in_tiles`,
-stopping once each script is found). A ZIM whose labels have none of them
+values its vector tiles carry under the keys the style displays
+(`LABEL_KEYS`: `name`, `name:latin`, `name_int`, `label`; a test ties it to
+every `text-field`), stopping once each script is found
+(`fallback_scripts_in_tiles`). Translations such as `name:ar` in
+OpenMapTiles-schema tiles (OpenFreeMap, `--mbtiles`) are never drawn and do
+not count. A ZIM whose labels have none of them
 is exactly as before. Builds with over 200 MB of tiles, or streamed ones,
 skip the scan and merge every script. Cost in the ZIM: Arabic ~150 KB,
 Hebrew ~27 KB, Armenian ~45 KB, Georgian ~55 KB, Thai or Lao ~34 KB each;
@@ -96,6 +100,13 @@ lock file). Hashes, the cache, `--prefetch` and
 range that cannot be fetched under the escape hatch leaves its Open Sans
 range as it was. `tests/test_glyph_fallback.py` covers the merge and the
 scan.
+
+Known limits: MapLibre does no complex shaping beyond what the RTL plugin
+does for Arabic, so Thai and Lao combining marks are placed by their glyph
+offsets alone and stacked marks (a tone mark over an upper vowel) can
+collide. The Noto glyphs sit about 1/24 em lower than Open Sans on the
+shared baseline (about 1 px at the 24 px SDF size), visible only in labels
+that mix the two.
 
 `tests/test_viewer_assets.py` and `tests/test_font_download.py` cover a
 tampered vendored file, a wrong hash, a CDN serving other bytes (fatal even

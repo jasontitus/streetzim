@@ -78,8 +78,12 @@ def test_blocks_and_ranges():
         gf.parse_blocks(["06FF-0600"])
 
 
-def mvt(*values: str, layer_extra: bytes = b"") -> bytes:
-    layer = _ld(1, b"poi") + layer_extra + b"".join(_ld(4, _ld(1, s.encode())) for s in values)
+def mvt(*values: str, key: str = "name", layer_extra: bytes = b"") -> bytes:
+    """One layer, one feature per value, each tagged ``key=value``."""
+    feats = b"".join(_ld(2, _ld(2, _v(0) + _v(i)) + _ld(4, _v(9) + _v(2) + _v(2)))
+                     for i in range(len(values)))
+    layer = (_ld(1, b"poi") + layer_extra + feats + _ld(3, key.encode())
+             + b"".join(_ld(4, _ld(1, s.encode())) for s in values))
     return _ld(3, layer)
 
 
@@ -97,6 +101,26 @@ def test_script_bytes_outside_string_values_do_not_count():
     # Hebrew bytes inside a feature (geometry), not a string value.
     feature = _ld(2, _ld(4, "שלום".encode()))
     assert gf.scripts_in_tiles([mvt("Main Street", layer_extra=feature)], SCRIPTS) == set()
+
+
+def test_names_the_style_does_not_display_do_not_count():
+    # An OpenMapTiles-schema tile (OpenFreeMap, --mbtiles) carries name:ar,
+    # name:he, ... on every feature; the style shows name:latin/name_int/name.
+    tile = gzip.compress(mvt("موناكو", key="name:ar"))
+    assert gf.scripts_in_tiles([tile, mvt("Monaco")], SCRIPTS) == set()
+    assert gf.scripts_in_tiles([mvt("موناكو", key="name_int")], SCRIPTS) == {"Arabic"}
+
+
+def test_label_keys_are_what_the_style_displays():
+    import re
+    src = "\n".join(p.read_text(encoding="utf-8")
+                    for p in sorted((ROOT / "resources" / "viewer" / "src" / "index").glob("*.js")))
+    fields = re.findall(r'"text-field"\s*:\s*(\[.*?\])\s*,?\s*$', src, re.M)
+    assert fields, "no text-field in the style"
+    keys = {k for f in fields for k in re.findall(r'\["get",\s*"([^"]+)"\]', f)}
+    assert keys and keys <= gf.LABEL_KEYS, keys - gf.LABEL_KEYS
+    # every text-field reads tile properties only through ["get", ...]
+    assert all('"get"' in f for f in fields)
 
 
 def test_scan_stops_once_every_script_is_found():
