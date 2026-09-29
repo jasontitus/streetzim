@@ -49,6 +49,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
       - name: Install Python dependencies
         run: pip install -r requirements.txt ruff==0.15.8 pyright==1.1.409
       - name: Lint (ruff; the rule families are in ruff.toml)
@@ -59,7 +60,7 @@ jobs:
         run: python tools/pyright_gate.py
       - name: Viewer index.html matches its parts
         run: python tools/build_viewer.py --check
-      - name: Vendored MapLibre matches resources/viewer-assets.lock.json
+      - name: Vendored MapLibre and RTL plugin match resources/viewer-assets.lock.json
         run: python tools/pin_viewer_assets.py --check
       - name: ESLint (viewer JavaScript; eslint.config.mjs)
         env:
@@ -137,6 +138,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
       - name: Install Python and Node dependencies
         env:
           PUPPETEER_SKIP_DOWNLOAD: "1"
@@ -289,6 +291,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
       - name: Install Python and Node dependencies
         env:
           PUPPETEER_SKIP_DOWNLOAD: "1"

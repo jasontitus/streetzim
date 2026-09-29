@@ -46,7 +46,8 @@ if str(SCRIPT_DIR) not in sys.path:
 # ZIM without ANY category-index/manifest.json.
 from cloud.chip_rules import CHIP_RULES, record_matches_chip  # noqa: E402
 from cloud.viewer_slots import pad_to_slot as _pad_to_slot  # noqa: E402
-from streetzim.tile_alias import MAX_ALIAS_BYTES, TileAliaser  # noqa: E402
+from streetzim.tile_alias import TileAliaser, max_alias_bytes  # noqa: E402
+from streetzim import viewer_assets  # noqa: E402
 from cloud.chip_shards import (  # noqa: E402
     CHIP_SHARD_TARGET_BYTES, plan_chip, read_chip_records,
 )
@@ -415,6 +416,13 @@ def repackage(src_path: str, dst_path: str,
                 replacements[name] = _pad_to_slot(name, raw)
                 print(f"  will swap {name} ← {p} "
                       f"({len(raw)} B → {len(replacements[name])} B slotted)")
+    # MapLibre's RTL text plugin and the map-config key that names it. ZIMs
+    # built before it have neither, and the swapped viewer then leaves
+    # Arabic/Hebrew labels unshaped; it loads the plugin only when the key
+    # is set, so adding both is safe. A source entry is kept as it is. The
+    # vendored copy is checked against the lock file, as in a build.
+    rtl_plugin = viewer_assets.rtl_text_plugin_entry() if swap_viewer else None
+    rtl_path = viewer_assets.RTL_TEXT_PLUGIN_ENTRY
 
     # Paths re-added as front articles. libzim builds its title index (Kiwix's
     # search suggestions) only from front articles, and the builder marks
@@ -703,6 +711,13 @@ def repackage(src_path: str, dst_path: str,
                     cfg["zoom"] = map_zoom
                 modified_content = json.dumps(cfg, indent=2).encode("utf-8")
                 size = len(modified_content)
+            if rtl_plugin is not None and path == "map-config.json":
+                cfg = json.loads((modified_content if modified_content is not None
+                                  else bytes(item.content)).decode("utf-8"))
+                if cfg.get("rtlTextPlugin") != rtl_path:
+                    cfg["rtlTextPlugin"] = rtl_path
+                    modified_content = json.dumps(cfg, indent=2).encode("utf-8")
+                    size = len(modified_content)
             # Optionally swap terrain tiles for the filesystem version.
             # Used after ``cloud/fix_stale_terrain_tiles.py`` regenerates
             # cached tiles — ``--refresh-terrain-tiles terrain_cache``
@@ -898,7 +913,7 @@ def repackage(src_path: str, dst_path: str,
             # share a blob), so re-find them by content. One table per
             # mimetype: an alias takes its target's mimetype. Entry order is
             # path order, so the output is deterministic.
-            if (path.startswith(_TILE_PREFIXES) and size <= MAX_ALIAS_BYTES
+            if (path.startswith(_TILE_PREFIXES) and size <= max_alias_bytes(path)
                     and tile_aliaser_on):
                 aliaser = tile_aliasers.get(mime)
                 if aliaser is None:
@@ -1208,6 +1223,11 @@ def repackage(src_path: str, dst_path: str,
             c.add_item(NewViewerItem(name, data, title, mime, is_front))
             added_missing += 1
             print(f"  added missing {name} from viewer set ({len(data)} B)")
+        if rtl_plugin is not None and not src.has_entry_by_path(rtl_path):
+            c.add_item(PassthroughItem(rtl_path, "MapLibre RTL text plugin",
+                                       "application/javascript", rtl_plugin))
+            added_missing += 1
+            print(f"  added missing {rtl_path} ({len(rtl_plugin)} B)")
 
     size_mb = os.path.getsize(dst_path) / (1024 * 1024)
     _tick("finalize")

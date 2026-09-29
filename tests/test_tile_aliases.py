@@ -71,7 +71,9 @@ def _mbtiles(path: Path) -> dict[str, bytes]:
 def _satellite(root: Path) -> dict[str, bytes]:
     """A raster cache: raster tiles go in uncompressed clusters, so a repeat
     costs its full size unless aliased."""
-    blue = b"RIFF" + bytes(range(256)) * 8          # 2 KiB, identical
+    # 452 B, identical: deep-ocean imagery is ~300-500 B, under the raster
+    # cap (RASTER_MAX_ALIAS_BYTES).
+    blue = b"RIFF" + bytes(range(224)) * 2
     out = {}
     for x in (8528, 8529, 8530):
         for y in (5973, 5974):
@@ -166,8 +168,8 @@ def test_env_var_turns_aliases_off(tmp_path, inputs, monkeypatch):
     assert len(_groups(dirent_blobs(off), expected)) == len(expected)
     monkeypatch.delenv("STREETZIM_TILE_ALIASES")
     on = _build(tmp_path, "on.zim", mb, sat)
-    # 4 duplicate 2 KiB satellite tiles in uncompressed clusters.
-    assert off.stat().st_size - on.stat().st_size > 4 * 2000
+    # 4 duplicate 452 B satellite tiles in uncompressed clusters.
+    assert off.stat().st_size - on.stat().st_size > 4 * 400
 
 
 def test_first_copy_is_deterministic(tmp_path, inputs, monkeypatch):
@@ -219,3 +221,96 @@ console.log(JSON.stringify(out));
     assert res.returncode == 0, res.stderr
     got = json.loads(res.stdout)
     assert got == {p: d.hex() for p, d in expected.items()}
+
+
+# -- the hash table itself ---------------------------------------------------
+
+def test_table_holds_only_tiles_under_the_cap():
+    """Distinct tiles above the cap are never remembered, so the table grows
+    with the small (fill) tiles only, not with every distinct tile."""
+    from streetzim.tile_alias import (RASTER_MAX_ALIAS_BYTES,
+                                      VECTOR_MAX_ALIAS_BYTES, TileAliaser)
+    a = TileAliaser(None, enabled=True)
+    for i in range(2000):
+        big = i.to_bytes(4, "little") * (VECTOR_MAX_ALIAS_BYTES // 4 + 1)
+        assert a.target_for(f"tiles/14/{i}/0.pbf", big) is None
+        assert a.target_for(f"tiles/14/{i}/1.pbf", big) is None   # not aliased
+        sat = i.to_bytes(4, "little") * (RASTER_MAX_ALIAS_BYTES // 4 + 1)
+        assert a.target_for(f"satellite/14/{i}/0.webp", sat) is None
+    assert len(a) == 0
+    # At the cap it is remembered, and a copy is aliased.
+    edge = b"s" * VECTOR_MAX_ALIAS_BYTES
+    assert a.target_for("tiles/14/1/2.pbf", edge) is None
+    assert a.target_for("tiles/14/1/3.pbf", edge) == "tiles/14/1/2.pbf"
+    assert len(a) == 1
+
+
+@pytest.mark.parametrize("path", [
+    "tiles/0/0/0.pbf", "tiles/14/8529/5975.pbf", "satellite/22/4194303/4194303.avif",
+    "terrain/12/07/3.webp",          # not canonical decimals: kept as a str
+    "tiles/14/8529/5975",            # no extension
+    "tiles/31/1/1.pbf", "tiles/14/99999999/1.pbf",   # too wide to pack
+])
+def test_target_path_round_trips(path):
+    from streetzim.tile_alias import TileAliaser
+    a = TileAliaser(None, enabled=True)
+    other = path.split("/", 1)[0] + "/1/0/0.x"
+    assert a.target_for(path, b"sea") is None
+    assert a.target_for(other, b"sea") == path
+
+
+def test_unknown_prefix_has_no_cap():
+    """A new tile kind must choose its cap rather than inherit one."""
+    from streetzim.tile_alias import TileAliaser, max_alias_bytes
+    with pytest.raises(ValueError, match="MAX_ALIAS_BYTES"):
+        max_alias_bytes("hillshade/1/0/0.png")
+    with pytest.raises(ValueError):
+        TileAliaser(None, enabled=True).target_for("a/b/c.pbf", b"sea")
+
+
+def test_raster_keys_include_the_length(monkeypatch):
+    """Two raster tiles whose digests collide but whose lengths differ are
+    not aliased; vector tiles are keyed on their bytes, so no digest is
+    involved at all."""
+    from streetzim import tile_alias
+    monkeypatch.setattr(tile_alias.hashlib, "blake2b", _ConstantDigest)
+    a = tile_alias.TileAliaser(None, enabled=True)
+    assert a.target_for("satellite/1/0/0.webp", b"blue sea") is None
+    assert a.target_for("satellite/1/0/1.webp", b"green field!") is None
+    assert a.target_for("tiles/1/0/0.pbf", b"sea") is None
+    assert a.target_for("tiles/1/0/1.pbf", b"sky") is None
+    assert a.target_for("tiles/1/0/2.pbf", b"sea") == "tiles/1/0/0.pbf"
+    assert len(a) == 4
+
+
+class _ConstantDigest:
+    """A hash whose every digest collides."""
+    def __init__(self, data, digest_size):
+        self._n = digest_size
+
+    def digest(self):
+        return b"\x07" * self._n
+
+
+@pytest.mark.parametrize("prefix,size,cap_name", [
+    ("satellite", 64, "ENTRY_BYTES"),
+    ("tiles", 128, "VECTOR_ENTRY_BYTES"),
+])
+def test_table_memory_per_entry(prefix, size, cap_name):
+    """The docstring's per-entry figures hold, with slack for dict resizes
+    and other CPython versions."""
+    import tracemalloc
+
+    from streetzim import tile_alias
+    a = tile_alias.TileAliaser(None, enabled=True)
+    n = 50_000
+    tracemalloc.start()
+    base = tracemalloc.get_traced_memory()[0]
+    for i in range(n):
+        a.target_for(f"{prefix}/14/{i // 300}/{i % 300}.x",
+                     i.to_bytes(8, "little") * (size // 8))
+    used = tracemalloc.get_traced_memory()[0] - base
+    tracemalloc.stop()
+    assert len(a) == n
+    assert used / n < 1.5 * getattr(tile_alias, cap_name)
+    assert a.table_bytes() == n * getattr(tile_alias, cap_name)

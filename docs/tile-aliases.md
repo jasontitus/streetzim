@@ -19,10 +19,30 @@ target's mimetype and bytes, with no HTTP 302. `cloud/validate_zim.py` counts
 aliases as tiles, because it skips only `is_redirect` entries.
 
 - **Turning it off:** set `STREETZIM_TILE_ALIASES=0`.
-- **Size limit:** only tiles up to 4 KiB are hashed (BLAKE2b-128). That bounds
-  the memory of the hash table on continent builds. Duplicate tiles are small
-  anyway, because only a tile with nothing specific to its position (open
-  sea, the inside of one landcover polygon) can repeat.
+- **Size limit:** only small tiles are remembered: vector tiles up to 128 B,
+  satellite and terrain tiles up to 640 B (`MAX_ALIAS_BYTES` in
+  `streetzim/tile_alias.py`, per path prefix; a prefix without a cap is an
+  error). Only a tile with nothing specific to its position (open sea, the
+  inside of one landcover polygon, flat terrain) can repeat, and those are
+  small: every vector duplicate seen is 55–77 B; a one-colour raster tile is
+  44–54 B as terrain, 198–338 B as a 256 px satellite tile and 354–560 B at
+  512 px, and deep-ocean Sentinel-2 imagery is about 300–500 B.
+- **Keys:** a vector tile is keyed on its bytes, so an alias always has
+  identical bytes. A raster tile is keyed on an 88-bit BLAKE2b digest plus
+  its length. The remaining risk is two raster tiles of the same length
+  with the same digest; for 30 M remembered tiles the chance of any such
+  pair is about 1e-12.
+- **Memory:** the table remembers every *distinct* tile under the cap (the
+  first copy has to be remembered before anyone knows it repeats). Measured
+  with tracemalloc (CPython 3.11, 1 M distinct tiles): 114 B per raster
+  entry and 171–235 B per vector entry of 64–128 B; the old table took
+  162 B. A million distinct small raster tiles is ~115 MB. The caps keep
+  the count low: Monaco has 108 distinct vector tiles, of which 2 are under
+  128 B (the old 4 KiB cap let 81 in). On a synthetic stream of 1 M
+  distinct tiles of 64–2,080 B, the table holds 46,875 entries (10.2 MB) as
+  vector tiles or 296,875 (31.9 MB) as raster tiles; with the old cap and
+  table it held all of them (162 MB). The build log's alias summary prints
+  the count and the estimate.
 - **Reproducible builds:** tiles are added in a fixed order (z, x, then TMS
   row from the MBTiles; sorted file names for raster caches). The first copy
   is therefore the same on every build.

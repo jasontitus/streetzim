@@ -6,6 +6,11 @@ writes (docs/viewer-supply-chain.md):
 - MapLibre GL JS: vendored in resources/vendor/maplibre-gl/ from the npm
   tarball (checked against the registry's sha512 when pinned); the build
   checks each file's SHA-256 before packing it and never fetches it.
+- mapbox-gl-rtl-text (MapLibre's RTL text plugin): vendored in
+  resources/vendor/mapbox-gl-rtl-text/ from its npm tarball, and checked
+  the same way. Required like MapLibre: a missing or altered copy stops the
+  build (the viewer would still work, but every Arabic/Hebrew label would be
+  drawn unshaped, which is not worth shipping silently).
 - The SDF glyph ranges (fonts/<stack>/<start>-<end>.pbf): fetched from the
   openmaptiles font CDN, each checked against its SHA-256, and kept in a
   content-addressed cache so later and offline builds need no network.
@@ -67,22 +72,52 @@ def maplibre_version(lock: dict[str, Any] | None = None) -> str:
     return str((lock or load_lock())["maplibre-gl"]["version"])
 
 
-def vendored_maplibre(lock: dict[str, Any] | None = None,
-                      vendor: Path = VENDOR) -> dict[str, Path]:
-    """The vendored MapLibre files by name, each checked against the lock."""
-    entry = (lock or load_lock())["maplibre-gl"]
+def vendored(name: str, lock: dict[str, Any] | None = None,
+             vendor: Path = VENDOR) -> dict[str, Path]:
+    """The vendored files of package ``name`` (a key of the lock file, and
+    its directory under resources/vendor/), by file name, each checked
+    against the lock. Missing or altered files raise IntegrityError."""
+    entry = (lock or load_lock())[name]
     out: dict[str, Path] = {}
-    for name, want in entry["files"].items():
-        path = vendor / "maplibre-gl" / name
+    for fname, want in entry["files"].items():
+        path = vendor / name / fname
         if not path.is_file():
             raise IntegrityError(f"{path} is missing; {PIN_HELP}")
         got = sha256_hex(path.read_bytes())
         if got != want:
             raise IntegrityError(
                 f"{path}: sha256 {got}, lock file says {want} "
-                f"(maplibre-gl {entry['version']}); {PIN_HELP}")
-        out[name] = path
+                f"({name} {entry['version']}); {PIN_HELP}")
+        out[fname] = path
     return out
+
+
+def vendored_maplibre(lock: dict[str, Any] | None = None,
+                      vendor: Path = VENDOR) -> dict[str, Path]:
+    """The vendored MapLibre files by name, each checked against the lock."""
+    return vendored("maplibre-gl", lock, vendor)
+
+
+# The ZIM entry for the RTL plugin, named in map-config.json as
+# `rtlTextPlugin`; the viewer (137-rtl-text.js) loads it only once a tile
+# carries RTL text.
+RTL_TEXT_PLUGIN = "mapbox-gl-rtl-text"
+RTL_TEXT_PLUGIN_ENTRY = "mapbox-gl-rtl-text.js"
+
+
+def rtl_text_plugin_entry(lock: dict[str, Any] | None = None,
+                          vendor: Path = VENDOR) -> bytes:
+    """The ZIM entry's bytes: the verified vendored plugin behind a comment
+    carrying its licence (the minified dist has none, and BSD-2 and the ICU
+    licence both ask for the notice to travel with the copy)."""
+    lock = lock or load_lock()
+    files = vendored(RTL_TEXT_PLUGIN, lock, vendor)
+    licence = files["LICENSE.md"].read_bytes()
+    if b"*/" in licence:
+        raise IntegrityError("LICENSE.md would close the comment it is wrapped in")
+    version = lock[RTL_TEXT_PLUGIN]["version"]
+    return (f"/*! @mapbox/mapbox-gl-rtl-text {version}\n\n".encode() + licence.rstrip()
+            + b"\n*/\n" + files[RTL_TEXT_PLUGIN_ENTRY].read_bytes())
 
 
 def font_ranges(lock: dict[str, Any] | None = None) -> list[FontRange]:

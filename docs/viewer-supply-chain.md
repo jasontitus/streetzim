@@ -6,21 +6,22 @@ build". This note records what was done and why.
 
 ## 1. Pinned third-party files
 
-Every ZIM ships MapLibre GL JS (`maplibre-gl.js`, `maplibre-gl.css`) and
-768 SDF glyph ranges (`fonts/<stack>/<start>-<end>.pbf`, 3 Open Sans
+Every ZIM ships MapLibre GL JS (`maplibre-gl.js`, `maplibre-gl.css`),
+MapLibre's RTL text plugin (`mapbox-gl-rtl-text.js`, which shapes Arabic and
+Hebrew labels) and 768 SDF glyph ranges (`fonts/<stack>/<start>-<end>.pbf`, 3 Open Sans
 fontstacks × 256 ranges, about 1.2 MB). Builds used to download both from
 unpkg and the openmaptiles font CDN each time, with no check on the bytes.
 
 Now `resources/viewer-assets.lock.json` records a SHA-256 for each file, and
 `streetzim/viewer_assets.py` enforces them:
 
-| | MapLibre GL JS | font glyphs |
+| | MapLibre GL JS, RTL text plugin | font glyphs |
 |---|---|---|
-| where the bytes come from | **vendored** in `resources/vendor/maplibre-gl/` (with its `LICENSE.txt`) | fetched from `fonts.openmaptiles.org` |
+| where the bytes come from | **vendored** in `resources/vendor/maplibre-gl/` and `resources/vendor/mapbox-gl-rtl-text/` (each with its licence file) | fetched from `fonts.openmaptiles.org` |
 | checked | on every build, against the lock file, before packing | on every download and every cache read |
-| provenance when pinned | the npm tarball, checked against the sha512 the npm registry publishes | the CDN's bytes at pin time (the same bytes earlier builds shipped) |
+| provenance when pinned | the npm tarball (`maplibre-gl`, `@mapbox/mapbox-gl-rtl-text`), checked against the sha512 the npm registry publishes; recorded as `tarball` and `integrity` in the lock | the CDN's bytes at pin time (the same bytes earlier builds shipped) |
 | cache | not needed | content-addressed: `$STREETZIM_CACHE_DIR/viewer-assets/sha256/..` (the `streetzim` command sets it to `<--dl>/cache`), else `<repo>/viewer-assets/`, then `/app/viewer-assets/` baked into the Docker image |
-| on a mismatch | the build stops | the build stops; `STREETZIM_ALLOW_FONT_ERRORS=1` does **not** waive it |
+| on a mismatch, or a missing file | the build stops. The RTL plugin is required like MapLibre: without it the viewer still works but draws every Arabic/Hebrew label unshaped, and that should not ship by accident | the build stops; `STREETZIM_ALLOW_FONT_ERRORS=1` does **not** waive it |
 | when unreachable | n/a | 5 attempts per range, then the build stops unless `STREETZIM_ALLOW_FONT_ERRORS=1` (unchanged) |
 
 **Why vendor MapLibre but not the fonts.** MapLibre is BSD-3-Clause and two
@@ -38,6 +39,7 @@ task fetches no fonts at all.
 ```
 python tools/pin_viewer_assets.py --check            # offline: vendored files vs lock (CI)
 python tools/pin_viewer_assets.py --maplibre 5.24.0  # vendor another MapLibre from npm
+python tools/pin_viewer_assets.py --rtl-text 0.3.0   # vendor another RTL text plugin from npm
 python tools/pin_viewer_assets.py --fonts            # re-pin every range from the CDN
 python tools/pin_viewer_assets.py --prefetch DIR     # fill a cache, e.g. <--dl>/cache/viewer-assets
 ```
@@ -60,7 +62,8 @@ committing.
   therefore reaches new builds only, and a viewer change must keep working
   with the MapLibre that older ZIMs carry (5.23.0 at the time of writing).
 
-`tests/test_viewer_assets.py` and `tests/test_font_download.py` cover a
+`tests/test_viewer_assets.py`, `tests/test_rtl_text_plugin.py` and
+`tests/test_font_download.py` cover a
 tampered vendored file, a wrong hash, a CDN serving other bytes (fatal even
 with the escape hatch), a corrupt cache entry, and an offline second build.
 

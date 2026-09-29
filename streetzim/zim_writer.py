@@ -29,7 +29,8 @@ from streetzim.tiles import (
     estimate_tile_total,
     iter_tiles_from_mbtiles,
 )
-from streetzim.tile_alias import MAX_ALIAS_BYTES, TileAliaser
+from streetzim.tile_alias import TileAliaser, max_alias_bytes
+from streetzim import viewer_assets
 
 
 def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
@@ -234,7 +235,7 @@ def _streetzim_to_xapianbuilder_jsonl(src_jsonl: str, dst_jsonl: str,
     constant memory regardless of corpus size.
     """
     n = 0
-    with open(src_jsonl, "r", encoding="utf-8") as src, \
+    with open(src_jsonl, encoding="utf-8") as src, \
          open(dst_jsonl, "w", encoding="utf-8") as dst:
         for line in src:
             line = line.strip()
@@ -820,36 +821,19 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
 
 
 # MapLibre's RTL text plugin (Arabic/Hebrew shaping and bidi), vendored from
-# @mapbox/mapbox-gl-rtl-text 0.3.0 (BSD-2-Clause; the ICU parts under the
-# Unicode licence, both in LICENSE.md next to it) -- the version MapLibre's
-# setRTLTextPlugin documentation pins. Written into every ZIM and named in
-# map-config.json as `rtlTextPlugin`; the viewer (137-rtl-text.js) loads it
-# only once a tile carries RTL text. Vendored rather than downloaded so a
-# build needs no network for it; the hash guards the copy.
-RTL_TEXT_PLUGIN_ENTRY = "mapbox-gl-rtl-text.js"
-RTL_TEXT_PLUGIN_PATH = VIEWER_DIR.parent / "vendor" / "mapbox-gl-rtl-text" / RTL_TEXT_PLUGIN_ENTRY
-RTL_TEXT_PLUGIN_SHA256 = "d1c69035295613baaf83fe23fd9266b0eaed7e5e472e9632b0b5438afc3f589e"
+# @mapbox/mapbox-gl-rtl-text (the version MapLibre's setRTLTextPlugin
+# documentation pins) and pinned in resources/viewer-assets.lock.json like
+# MapLibre itself (streetzim/viewer_assets.py). Written into every ZIM and
+# named in map-config.json as `rtlTextPlugin`; the viewer (137-rtl-text.js)
+# loads it only once a tile carries RTL text. A missing or altered copy
+# stops the build (viewer_assets.IntegrityError), as for MapLibre.
+RTL_TEXT_PLUGIN_ENTRY = viewer_assets.RTL_TEXT_PLUGIN_ENTRY
 
 
 def _rtl_text_plugin_bytes():
-    """The ZIM entry: the vendored plugin behind a comment carrying its
-    licence (the minified dist has none, and BSD-2 and the ICU licence both
-    ask for the notice to travel with the copy). None if this checkout does
-    not carry the plugin (the viewer then leaves RTL labels unshaped, as
-    before). A copy that does not match the pinned hash is an error, not a
-    silent skip."""
-    import hashlib
-    if not RTL_TEXT_PLUGIN_PATH.is_file():
-        return None
-    data = RTL_TEXT_PLUGIN_PATH.read_bytes()
-    got = hashlib.sha256(data).hexdigest()
-    if got != RTL_TEXT_PLUGIN_SHA256:
-        raise RuntimeError(f"{RTL_TEXT_PLUGIN_PATH}: sha256 {got}, expected {RTL_TEXT_PLUGIN_SHA256}")
-    licence = (RTL_TEXT_PLUGIN_PATH.parent / "LICENSE.md").read_bytes()
-    if b"*/" in licence:
-        raise RuntimeError("LICENSE.md would close the comment it is wrapped in")
-    return (b"/*! @mapbox/mapbox-gl-rtl-text 0.3.0\n\n" + licence.rstrip()
-            + b"\n*/\n" + data)
+    """The ZIM entry (viewer_assets.rtl_text_plugin_entry): the verified
+    plugin behind a comment carrying its licence."""
+    return viewer_assets.rtl_text_plugin_entry()
 
 
 def _add_viewer(creator, MapItem, *, maplibre_js_path, maplibre_css_path, viewer_html_path, map_config, name):
@@ -912,11 +896,10 @@ def _add_viewer(creator, MapItem, *, maplibre_js_path, maplibre_css_path, viewer
         "maplibre-gl.css", "MapLibre GL CSS", "text/css",
         maplibre_css_path,
     ))
-    rtl = _rtl_text_plugin_bytes()
-    if rtl is not None:
-        creator.add_item(MapItem(
-            RTL_TEXT_PLUGIN_ENTRY, "MapLibre RTL text plugin", "application/javascript", rtl,
-        ))
+    creator.add_item(MapItem(
+        RTL_TEXT_PLUGIN_ENTRY, "MapLibre RTL text plugin", "application/javascript",
+        _rtl_text_plugin_bytes(),
+    ))
 
 
 
@@ -924,11 +907,8 @@ def _add_map_config(creator, MapItem, *, map_config, has_wiki_articles):
     """map-config.json, with hasWikiArticles only when articles were stored
     (the viewer's credits list Wikipedia on it)."""
     map_config = dict(map_config)
-    # Same predicate as _add_viewer, which wrote (or skipped) the file.
-    if _rtl_text_plugin_bytes() is not None:
-        map_config["rtlTextPlugin"] = RTL_TEXT_PLUGIN_ENTRY
-    else:
-        map_config.pop("rtlTextPlugin", None)
+    # _add_viewer wrote the file (or stopped the build).
+    map_config["rtlTextPlugin"] = RTL_TEXT_PLUGIN_ENTRY
     if has_wiki_articles:
         map_config["hasWikiArticles"] = True
     else:
@@ -1063,7 +1043,7 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
                 break
 
             add_start = time.time()
-            for i, (z, x, y, tile_data) in enumerate(results):
+            for z, x, y, tile_data in results:
                 # See note above: 0-byte tiles are MVT placeholders for
                 # bbox cells with no features. Drop them — MapLibre
                 # rendering is unaffected, ZIM entries dedup, zimcheck
@@ -1207,7 +1187,7 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
                     # Raster tiles sit in uncompressed clusters, so a repeat
                     # (sea, flat terrain) costs its full size unless aliased.
                     alias_of = None
-                    if aliaser.enabled and fsize <= MAX_ALIAS_BYTES:
+                    if aliaser.enabled and fsize <= max_alias_bytes(zim_path):
                         with open(fpath, "rb") as fh:
                             alias_of = aliaser.target_for(zim_path, fh.read())
                     if alias_of is not None:
@@ -1305,7 +1285,7 @@ def _add_wikidata(creator, MapItem, *, tiles, mbtiles_path, bbox, wikidata_data,
             print("    Scanning tiles for Wikidata Q-IDs in bbox...")
             import mapbox_vector_tile as _mvt
             bbox_qids = set()
-            for z, x, y, data in _tile_src:
+            for _z, _x, _y, data in _tile_src:
                 tile_data = data
                 if data[:2] == b"\x1f\x8b":
                     try:
@@ -1675,7 +1655,7 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
     _bucket_t0 = time.time()
     print("    Streaming search features from disk...", flush=True)
     with open(xapian_path, "w") as xf:
-        with open(search_features_path, "r") as sf:
+        with open(search_features_path) as sf:
             for line in sf:
                 feat = json.loads(line)
                 total_features += 1
@@ -1862,7 +1842,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
     def _emit_whole_chunk(prefix, chunk_path):
         """Small prefix: one file, exactly as before."""
         entries = []
-        with open(chunk_path, "r", encoding="utf-8") as cf:
+        with open(chunk_path, encoding="utf-8") as cf:
             for cline in cf:
                 entries.append(json.loads(cline))
         creator.add_item(MapItem(
@@ -1891,7 +1871,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
         from cloud.search_shards import split_records_recursive as _split_records_recursive
         agg = Aggregator(prefix)
         total_chunk_bytes = 0
-        with open(chunk_path, "r", encoding="utf-8") as cf:
+        with open(chunk_path, encoding="utf-8") as cf:
             for cline in cf:
                 size = len(cline.encode("utf-8"))
                 total_chunk_bytes += size
@@ -1919,7 +1899,10 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
         leaf_seen: set[str] = set()
         LEAF_FD_CAP = 256
 
-        def _leaf_fd(name):
+        # The per-prefix state is bound as defaults: this function is
+        # redefined on each prefix and must never see another prefix's.
+        def _leaf_fd(name, leaf_fds=leaf_fds, leaf_seen=leaf_seen,
+                     leaf_dir=leaf_dir, cap=LEAF_FD_CAP):
             fd = leaf_fds.get(name)
             if fd is not None:
                 # Refresh recency. dict order is insertion order, so
@@ -1929,7 +1912,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
                 # one of 19.6 M writes would reopen a file.
                 leaf_fds[name] = leaf_fds.pop(name)
                 return fd
-            if len(leaf_fds) >= LEAF_FD_CAP:
+            if len(leaf_fds) >= cap:
                 leaf_fds.pop(next(iter(leaf_fds))).close()
             leaf_seen.add(name)
             fd = open(os.path.join(leaf_dir, name + ".jsonl"), "a",
@@ -1939,7 +1922,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
 
         orphans = 0
         first_orphan = ""
-        with open(chunk_path, "r", encoding="utf-8") as cf:
+        with open(chunk_path, encoding="utf-8") as cf:
             for cline in cf:
                 rec = json.loads(cline)
                 paths = planned_paths.get(tier_for(rec), ())
@@ -1979,7 +1962,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
         for lname in sorted(leaf_seen):
             lpath = os.path.join(leaf_dir, lname + ".jsonl")
             lrecs = []
-            with open(lpath, "r", encoding="utf-8") as lf:
+            with open(lpath, encoding="utf-8") as lf:
                 for lineno, lline in enumerate(lf):
                     if not lline.strip():
                         continue
@@ -1996,7 +1979,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
                         raise RuntimeError(
                             f"search-data {prefix}: leaf {lname} line "
                             f"{lineno} did not round-trip ({exc}); "
-                            f"{len(lline)} bytes: {lline[:80]!r}")
+                            f"{len(lline)} bytes: {lline[:80]!r}") from exc
             os.unlink(lpath)
             lbytes = json.dumps(lrecs, separators=(",", ":"),
                                 ensure_ascii=False).encode("utf-8")
@@ -2094,7 +2077,7 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
                 # streaming and move on.
                 if split_find_chips and cat_slug in ("poi", "park"):
                     entries = []
-                    with open(cat_path, "r", encoding="utf-8") as cf:
+                    with open(cat_path, encoding="utf-8") as cf:
                         for cline in cf:
                             entries.append(json.loads(cline))
                     records_by_cat[cat_slug] = entries
@@ -2106,7 +2089,7 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
                 _llm_skipped.append(cat_slug)
                 continue
             entries = []
-            with open(cat_path, "r", encoding="utf-8") as cf:
+            with open(cat_path, encoding="utf-8") as cf:
                 for cline in cf:
                     entries.append(json.loads(cline))
             os.unlink(cat_path)
@@ -2377,7 +2360,7 @@ def _search_xapian_pages(creator, MapItem, *, xapian_mode, xapianbuilder_bin, xa
         print(f"    Adding {xapian_count} Xapian search pages (of {total_features} total)...", flush=True)
         xapian_start = time.time()
         i = 0
-        with open(xapian_path, "r") as xf:
+        with open(xapian_path) as xf:
             for line in xf:
                 feat = json.loads(line)
                 slug = feat["name"].lower()

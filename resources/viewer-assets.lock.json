@@ -795,5 +795,15 @@
     "65280-65535": "8c0acd4b907725b4264e6aa973ec18a50c076e984e514f5781110e670948708e"
    }
   }
+ },
+ "mapbox-gl-rtl-text": {
+  "version": "0.3.0",
+  "licence": "BSD-2-Clause, ICU under the Unicode licence (LICENSE.md)",
+  "tarball": "https://registry.npmjs.org/@mapbox/mapbox-gl-rtl-text/-/mapbox-gl-rtl-text-0.3.0.tgz",
+  "integrity": "sha512-OwQplFqAAEYRobrTKm2wiVP+wcpUVlgXXiUMNQ8tcm5gPN5SQRXFADmITdQOaec4LhDhuuFchS7TS8ua8dUl4w==",
+  "files": {
+   "mapbox-gl-rtl-text.js": "d1c69035295613baaf83fe23fd9266b0eaed7e5e472e9632b0b5438afc3f589e",
+   "LICENSE.md": "7dca3646879aae2fa04f9d77f98ddeeabe4898be6a592a59985c112fd817300b"
+  }
  }
 }

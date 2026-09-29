@@ -225,7 +225,7 @@ def center_from_places(search_features_path, bbox, sample_limit=400_000):
         return None
     lats, lons = [], []
     try:
-        with open(search_features_path, "r", encoding="utf-8") as fh:
+        with open(search_features_path, encoding="utf-8") as fh:
             for i, line in enumerate(fh):
                 if i >= sample_limit:
                     break
@@ -669,13 +669,13 @@ def _openzim_options(*, args):
                 long_description=args.long_description, creator=args.creator,
                 publisher=args.publisher, tags=args.tags, scraper=args.scraper)
         except ValueError as e:
-            raise SystemExit(f"Error: {e}")
+            raise SystemExit(f"Error: {e}") from None
     if args.illustration:
         from streetzim.zim_metadata import load_illustration
         try:
             zim_illustration = load_illustration(args.illustration)
         except (OSError, ValueError) as e:
-            raise SystemExit(f"Error: illustration {args.illustration!r}: {e}")
+            raise SystemExit(f"Error: illustration {args.illustration!r}: {e}") from None
     stats = None
     if args.stats_filename:
         from streetzim.progress import StatsFile
@@ -864,7 +864,7 @@ def _build_search(
             filtered_path = os.path.join(tmpdir, "search_features.jsonl")
             total = 0
             kept = 0
-            with open(search_cache_path, "r") as fin, open(filtered_path, "w") as fout:
+            with open(search_cache_path) as fin, open(filtered_path, "w") as fout:
                 for line in fin:
                     total += 1
                     feat = json.loads(line)
@@ -1256,7 +1256,7 @@ def _verify_terrain(*, args, bbox_str, include_terrain, terrain_dir, terrain_max
                     encoded = (im[:, :, 0].astype(_np.uint32) << 16) | \
                               (im[:, :, 1].astype(_np.uint32) << 8) | \
                               im[:, :, 2].astype(_np.uint32)
-                    zero_code = int((10000.0 / 0.1))  # encoded value for 0 m
+                    zero_code = int(10000.0 / 0.1)  # encoded value for 0 m
                     nonzero = (encoded != zero_code).sum()
                     return float(nonzero) / encoded.size
                 except Exception:
@@ -1371,8 +1371,9 @@ def _verify_terrain(*, args, bbox_str, include_terrain, terrain_dir, terrain_max
                 print("    Terrain audit passed — no blank tiles in bbox")
 
 
-def _download_maplibre(*, tmpdir, total_steps):
-    """MapLibre GL JS and CSS: the vendored copy, checked against the lock file."""
+def _verified_maplibre(*, total_steps):
+    """MapLibre GL JS and CSS: the vendored copy, checked against the lock
+    file (nothing is downloaded)."""
     step_maplibre = total_steps - 1
     print()
     print(f"[{step_maplibre}/{total_steps}] Checking MapLibre GL JS...")
@@ -1417,7 +1418,7 @@ def _build_map_config(
         except (ValueError, TypeError) as e:
             raise SystemExit(
                 f"--map-center {args.map_center!r} must be 'LON,LAT': {e}"
-            )
+            ) from None
     if args.map_zoom is not None:
         zoom = args.map_zoom
 
@@ -1646,8 +1647,8 @@ def main(argv=None):
         # A stricter content-based check (pure uniform RGB → broken) could be
         # added later, but tile-size alone is not a valid signal for satellite.
 
-        maplibre_css, maplibre_js = _download_maplibre(
-            tmpdir=tmpdir, total_steps=total_steps)
+        maplibre_css, maplibre_js = _verified_maplibre(
+            total_steps=total_steps)
 
         bbox, map_config = _build_map_config(
             args=args, bbox_str=bbox_str, name=name, overture_sources=overture_sources,
