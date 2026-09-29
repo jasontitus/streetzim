@@ -2008,10 +2008,25 @@ function prettyKind(s) {
   return s.replace(/_/g, ' ');
 }
 
-function formatDistance(m) {
-  if (m == null) return '';
+// In the units the map's scale bar is set to (the viewer keeps the choice
+// in localStorage 'streetzim.units'; imperial until it is switched).
+function distanceUnit() {
+  try {
+    const u = window.localStorage.getItem('streetzim.units');
+    return u === 'metric' ? 'metric' : 'imperial';
+  } catch (e) { return 'imperial'; }
+}
+
+function formatDistance(m, unit) {
+  if (m == null || !isFinite(m)) return '';
+  if ((unit || distanceUnit()) === 'imperial') {
+    const feet = m * 3.28084;
+    if (feet < 1000) return Math.round(feet) + ' ft';
+    const miles = m / 1609.344;
+    return (miles < 10 ? miles.toFixed(1) : Math.round(miles)) + ' mi';
+  }
   if (m < 1000) return Math.round(m) + ' m';
-  return (m / 1000).toFixed(1) + ' km';
+  return (m / 1000).toFixed(m < 10000 ? 1 : 0) + ' km';
 }
 
 // ---------- Origin selection ----------

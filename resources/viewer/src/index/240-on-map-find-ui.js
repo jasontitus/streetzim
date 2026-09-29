@@ -742,7 +742,7 @@ function _populateNearby(slot, map, r, selfIdx) {
     'font-size:11px; color:var(--szd-fg-3, #888); text-transform:uppercase;'
     + 'letter-spacing:0.04em; margin:0 0 6px;'
   );
-  head.textContent = 'Nearby (within 1.5 km)';
+  head.textContent = 'Nearby (within ' + szFormatDistance(1500, szUnit()) + ')';
   slot.appendChild(head);
   var list = document.createElement('div');
   list.style.cssText = (
@@ -1051,9 +1051,7 @@ function _haversineMetersStrip(lat1, lon1, lat2, lon2) {
 }
 
 function _formatDistanceStrip(m) {
-  if (m == null || isNaN(m)) return '';
-  if (m < 1000) return Math.round(m) + ' m';
-  return (m / 1000).toFixed(m < 10000 ? 1 : 0) + ' km';
+  return szFormatDistance(m, szUnit());
 }
 
 function clearFindResults() {

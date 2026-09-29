@@ -72,7 +72,8 @@ function loadView(env = {}) {
   const fn = new Function('window', 'document', 'location', 'setTimeout', 'clearTimeout',
     VIEW_SRC + '\nreturn { SZ_VIEWER_VERSION, _szStorage, _szViewKey, _szHashSetsView,' +
     ' _szReadView, _szWriteView, _szOpeningCamera, _szMaxBounds, _szClearZoom, initViewMemory, initHomeButton,' +
-    ' _szAboutText, _szMonth, initAbout, _szSatellite, _szSatelliteCreditHtml };');
+    ' _szAboutText, _szMonth, initAbout, _szSatellite, _szSatelliteCreditHtml,' +
+    ' szReadUnit, szWriteUnit, szUnit, szFormatDistance };');
   // Fake timers: `timers` holds the pending ones; runTimers() fires them.
   const timers = new Map();
   let next = 1;
@@ -390,6 +391,45 @@ await ok('a result held at the box edge under a sheet is cleared by zooming in',
   for (const pat of [/_szFlyToClear\(map, \{\s*center: \[r\.o, r\.a\]/, /_szFlyToClear\(map, \{ center: \[lon, lat\], zoom: zoom/,
                      /_szFlyToClear\(map, \{ center: \[lon, lat\], zoom: targetZoom/, /_szFlyToClear\(map, \{ center: \[lng, lat\]/]) {
     assert.match(HTML, pat);
+  }
+});
+
+await ok('units: one setting for every distance, imperial by default, kept across visits', () => {
+  const v = loadView({ storage: memStorage() });
+  const f = v.szFormatDistance;
+  for (const [m, unit, want] of [[850, 'metric', '850 m'], [1400, 'metric', '1.4 km'], [12400, 'metric', '12 km'],
+                                 [150, 'imperial', '492 ft'], [1500, 'imperial', '0.9 mi'], [2253, 'imperial', '1.4 mi'],
+                                 [19312, 'imperial', '12 mi'], [null, 'metric', ''], [NaN, 'imperial', '']]) {
+    assert.strictEqual(f(m, unit), want, `${m} ${unit}`);
+  }
+  const s = v._szStorage();
+  assert.strictEqual(v.szReadUnit(s), 'imperial');                  // the scale bar's old default
+  v.szWriteUnit(s, 'metric');
+  assert.strictEqual(v.szReadUnit(s), 'metric');
+  assert.strictEqual(v.szUnit(), 'metric');                          // no map yet: the stored choice
+  v.window.__szMap = { _streetzimUnit: 'imperial' };
+  assert.strictEqual(v.szUnit(), 'imperial');                        // the map's live setting wins
+  assert.strictEqual(v.szReadUnit(null), 'imperial');
+  assert.strictEqual(v.szReadUnit({ getItem() { throw new Error('SecurityError'); } }), 'imperial');
+  // The scale bar starts from and saves the setting; Find cards, "Nearby",
+  // the place sheet and the routing panel format through it.
+  assert.match(HTML, /var scaleUnit = szReadUnit\(_szStorage\(\)\);/);
+  assert.match(HTML, /szWriteUnit\(_szStorage\(\), scaleUnit\);/);
+  assert.match(HTML, /function _formatDistanceStrip\(m\) \{\s*return szFormatDistance\(m, szUnit\(\)\);/);
+  assert.match(HTML, /'Nearby \(within ' \+ szFormatDistance\(1500, szUnit\(\)\) \+ '\)'/);
+  assert.match(HTML, /function formatDistance\(meters\) \{\s*return szFormatDistance\(meters, szUnit\(\)\);/);
+  assert.doesNotMatch(HTML, /1\.5 km/);
+  // places.html reads the same key and prints the same strings.
+  const P = fs.readFileSync(`${REPO}/resources/viewer/places.html`, 'utf8');
+  const src = P.slice(P.indexOf('function distanceUnit()'), P.indexOf('\n}\n', P.indexOf('function formatDistance(m, unit)')) + 3);
+  const store = new Map();
+  const window = { localStorage: { getItem: (k) => store.get(k) ?? null } };
+  const places = new Function('window', src + '\nreturn { distanceUnit, formatDistance };')(window);
+  assert.strictEqual(places.distanceUnit(), 'imperial');
+  store.set('streetzim.units', 'metric');
+  assert.strictEqual(places.distanceUnit(), 'metric');
+  for (const m of [150, 850, 1400, 2253, 12400, 19312]) {
+    for (const unit of ['metric', 'imperial']) assert.strictEqual(places.formatDistance(m, unit), f(m, unit));
   }
 });
 

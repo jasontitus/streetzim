@@ -2030,8 +2030,9 @@ if (!window.__szUnsupported) fetchConfig(1)
     initHomeButton(map, config);
     initViewMemory(map, config);
     initAbout(config);
-    // Scale bar with mi/km toggle — click to switch units
-    var scaleUnit = 'imperial';
+    // Scale bar with mi/km toggle — click to switch units. The choice is
+    // kept (szReadUnit/szWriteUnit, 140) and every distance follows it.
+    var scaleUnit = szReadUnit(_szStorage());
     map._streetzimUnit = scaleUnit;  // shared with driving-mode HUD
     var scaleControl = new maplibregl.ScaleControl({ unit: scaleUnit });
     map.addControl(scaleControl, 'bottom-left');
@@ -2040,6 +2041,7 @@ if (!window.__szUnsupported) fetchConfig(1)
         scaleUnit = scaleUnit === 'imperial' ? 'metric' : 'imperial';
         scaleControl.setUnit(scaleUnit);
         map._streetzimUnit = scaleUnit;
+        szWriteUnit(_szStorage(), scaleUnit);
         map.fire('streetzim.units', { unit: scaleUnit });
       }
     });
@@ -3657,6 +3659,38 @@ function _szStorage() {
     s.removeItem('streetzim.probe');
     return s;
   } catch (e) { return null; }
+}
+
+// Distance units. One setting for the whole viewer: the scale bar (click
+// it to switch), search distances, Find cards and "Nearby", the place
+// sheet, the routing panel and places.html, which reads it from
+// localStorage ('streetzim.units'). Default imperial, as the scale bar
+// always was.
+var SZ_UNITS_KEY = 'streetzim.units';
+function szReadUnit(storage) {
+  try {
+    var u = storage && storage.getItem(SZ_UNITS_KEY);
+    return u === 'metric' || u === 'imperial' ? u : 'imperial';
+  } catch (e) { return 'imperial'; }
+}
+function szWriteUnit(storage, unit) {
+  try { if (storage) storage.setItem(SZ_UNITS_KEY, unit); } catch (e) {}
+}
+function szUnit() {
+  var m = window.__szMap;
+  return (m && m._streetzimUnit) || szReadUnit(_szStorage());
+}
+// 850 m / 1.4 km / 12 km, or 500 ft / 1.4 mi / 12 mi. Unit symbols lower case.
+function szFormatDistance(meters, unit) {
+  if (meters == null || !isFinite(meters)) return '';
+  if (unit === 'imperial') {
+    var feet = meters * 3.28084;
+    if (feet < 1000) return Math.round(feet) + ' ft';
+    var miles = meters / 1609.344;
+    return (miles < 10 ? miles.toFixed(1) : Math.round(miles)) + ' mi';
+  }
+  if (meters < 1000) return Math.round(meters) + ' m';
+  return (meters / 1000).toFixed(meters < 10000 ? 1 : 0) + ' km';
 }
 
 function _szViewKey(config) {
@@ -6151,7 +6185,7 @@ function _populateNearby(slot, map, r, selfIdx) {
     'font-size:11px; color:var(--szd-fg-3, #888); text-transform:uppercase;'
     + 'letter-spacing:0.04em; margin:0 0 6px;'
   );
-  head.textContent = 'Nearby (within 1.5 km)';
+  head.textContent = 'Nearby (within ' + szFormatDistance(1500, szUnit()) + ')';
   slot.appendChild(head);
   var list = document.createElement('div');
   list.style.cssText = (
@@ -6460,9 +6494,7 @@ function _haversineMetersStrip(lat1, lon1, lat2, lon2) {
 }
 
 function _formatDistanceStrip(m) {
-  if (m == null || isNaN(m)) return '';
-  if (m < 1000) return Math.round(m) + ' m';
-  return (m / 1000).toFixed(m < 10000 ? 1 : 0) + ' km';
+  return szFormatDistance(m, szUnit());
 }
 
 function clearFindResults() {
@@ -10703,8 +10735,7 @@ function initRouting(map, config) {
   }
 
   function formatDistance(meters) {
-    if (meters < 1000) return Math.round(meters) + ' m';
-    return (meters / 1000).toFixed(1) + ' km';
+    return szFormatDistance(meters, szUnit());
   }
 
   function formatTime(seconds) {

@@ -148,8 +148,9 @@ if (!window.__szUnsupported) fetchConfig(1)
     initHomeButton(map, config);
     initViewMemory(map, config);
     initAbout(config);
-    // Scale bar with mi/km toggle — click to switch units
-    var scaleUnit = 'imperial';
+    // Scale bar with mi/km toggle — click to switch units. The choice is
+    // kept (szReadUnit/szWriteUnit, 140) and every distance follows it.
+    var scaleUnit = szReadUnit(_szStorage());
     map._streetzimUnit = scaleUnit;  // shared with driving-mode HUD
     var scaleControl = new maplibregl.ScaleControl({ unit: scaleUnit });
     map.addControl(scaleControl, 'bottom-left');
@@ -158,6 +159,7 @@ if (!window.__szUnsupported) fetchConfig(1)
         scaleUnit = scaleUnit === 'imperial' ? 'metric' : 'imperial';
         scaleControl.setUnit(scaleUnit);
         map._streetzimUnit = scaleUnit;
+        szWriteUnit(_szStorage(), scaleUnit);
         map.fire('streetzim.units', { unit: scaleUnit });
       }
     });

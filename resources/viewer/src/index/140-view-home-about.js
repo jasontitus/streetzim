@@ -40,6 +40,38 @@ function _szStorage() {
   } catch (e) { return null; }
 }
 
+// Distance units. One setting for the whole viewer: the scale bar (click
+// it to switch), search distances, Find cards and "Nearby", the place
+// sheet, the routing panel and places.html, which reads it from
+// localStorage ('streetzim.units'). Default imperial, as the scale bar
+// always was.
+var SZ_UNITS_KEY = 'streetzim.units';
+function szReadUnit(storage) {
+  try {
+    var u = storage && storage.getItem(SZ_UNITS_KEY);
+    return u === 'metric' || u === 'imperial' ? u : 'imperial';
+  } catch (e) { return 'imperial'; }
+}
+function szWriteUnit(storage, unit) {
+  try { if (storage) storage.setItem(SZ_UNITS_KEY, unit); } catch (e) {}
+}
+function szUnit() {
+  var m = window.__szMap;
+  return (m && m._streetzimUnit) || szReadUnit(_szStorage());
+}
+// 850 m / 1.4 km / 12 km, or 500 ft / 1.4 mi / 12 mi. Unit symbols lower case.
+function szFormatDistance(meters, unit) {
+  if (meters == null || !isFinite(meters)) return '';
+  if (unit === 'imperial') {
+    var feet = meters * 3.28084;
+    if (feet < 1000) return Math.round(feet) + ' ft';
+    var miles = meters / 1609.344;
+    return (miles < 10 ? miles.toFixed(1) : Math.round(miles)) + ' mi';
+  }
+  if (meters < 1000) return Math.round(meters) + ' m';
+  return (meters / 1000).toFixed(meters < 10000 ? 1 : 0) + ' km';
+}
+
 function _szViewKey(config) {
   var b = config && config.bounds;
   var id = (config && config.name) || '';
