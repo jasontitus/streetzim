@@ -11,12 +11,21 @@ just after the host takes the change. Background: [README.md](README.md).
   checkout with `_streetzim_root()`.
 - Nothing under `web/` moved, and neither did the files the host edits in
   place ([in-place.txt](in-place.txt)).
+- **No build code changes.** `create_osm_zim.py`, `streetzim/`, `routing/`
+  and `resources/` are untouched; in `cloud/`, only help text and comments
+  change. Step 2 checks this.
 
-**Commits:** `3d0a2c4` (moves) and `835226f` (symlinks, guard, root
-finder), plus the review fixes after them, on branch
-`claude/adoring-dijkstra-i2vge7`. The commit before the split is `8334eb6`.
-Merge the branch to the branch the host pulls (usually via a PR) before
-step 4.
+**Commits:** branch `claude/adoring-dijkstra-i2vge7` is main (`0792d0d`)
+plus the ops split. Builder changes that were once on this branch are on
+`claude/adoring-dijkstra-i2vge7-builder`, with their own test plan; this
+pull doesn't include them. Merge the branch to the branch the host pulls
+(usually via a PR) before step 4.
+
+**The host's own commits:** while a queue runs, `upload_validated.sh`
+commits torrent files on the host after each region. The pull can only
+fast-forward if the host has none that aren't upstream, and the branch
+must contain the host's current commit. So before step 4: push the host's
+commits, have the branch updated onto the new main, and repeat steps 1–3.
 
 **Rules for the session:**
 - **Run no production script,** except where a step names one, and never
@@ -89,10 +98,15 @@ git -C /tmp/sz-stage1 fetch -q "$(git -C /storage/streetzim remote get-url origi
 git -C /tmp/sz-stage1 checkout -q FETCH_HEAD
 bash /tmp/sz-stage1/ops/check_stage1.sh --root /tmp/sz-stage1 --python /storage/streetzim/venv-linux/bin/python3
 /storage/streetzim/venv-linux/bin/python3 -m pytest -q -p no:cacheprovider /tmp/sz-stage1/ops/tests /tmp/sz-stage1/tests/test_check_boundary.py
+git -C /tmp/sz-stage1 merge-base --is-ancestor origin/HEAD HEAD && echo "OK: the branch contains the host's commit" || echo "STOP: the host has commits the branch lacks; ask"
+git -C /tmp/sz-stage1 diff --stat origin/HEAD HEAD -- create_osm_zim.py streetzim routing resources
 ```
 
 **Expect:**
 - `ALL CHECKS PASSED`, with no `FAIL` lines;
+- `OK: the branch contains the host's commit` (`origin/HEAD` in the clone
+  is the host's current commit);
+- nothing from the last line: no build code changes;
 - the tests pass. If pytest is missing from the host venv, skip that
   line; the checker is the main test.
 
@@ -123,10 +137,9 @@ bash /tmp/sz-pull/ops/check_stage1.sh --root /tmp/sz-pull --python /storage/stre
   will do.
 - `--unset-upstream` stops the checker from counting the new commits as
   "local commits". In the copy, the upstream is the host's own branch.
-- It fast-forwards to the feature branch. If the host already has commits
-  of the branch it pulls that the feature branch lacks, this fails although
-  the real pull may not; once the branch is merged, fetch that branch
-  instead.
+- It fast-forwards to the feature branch, which is what the host pulls
+  once the branch is merged without other changes. If main has moved since,
+  fetch main instead.
 - A clone doesn't carry the host's uncommitted edits to the lists. They
   don't block the real pull because the split doesn't change those files;
   this prints nothing if that still holds:
@@ -135,22 +148,31 @@ bash /tmp/sz-pull/ops/check_stage1.sh --root /tmp/sz-pull --python /storage/stre
 ## 3. Decide
 
 Go on to step 4 only if all of these hold:
-- step 1 shows no blocking local changes;
-- step 2 passed;
-- the branch is merged where the host pulls from.
+- step 1 shows no blocking local changes, and no local commits (ahead 0);
+- step 2 passed, including "the branch contains the host's commit";
+- the branch is merged where the host pulls from;
+- no build is running (below).
 
-**Timing:**
-- Running scripts keep running across the pull; bash keeps the file it
-  opened.
-- A queue that starts a new script by path picks up the new layout, which
-  resolves to the same code plus the guard.
-- If you want no overlap at all, pull between queue runs.
+**Timing: pull only while no build is running.**
+- The builder runs `spawn` process pools (terrain repair in
+  `create_osm_zim.py`, `streetzim/terrain.py`, `streetzim/search_extract.py`).
+  A spawned child imports the code again from disk, so a pull during a
+  build could mix code into a running build. This pull changes no build
+  code, but keep the rule: it is the safe habit for every pull.
+- `pgrep -f '[c]reate_osm_zim'` prints nothing when no build runs (the same
+  test `finish_pending_uploads.sh` uses). If the queue starts the next
+  region at once, there is no gap: pause it the queue's own way, or wait
+  until it finishes. Step 4 refuses while a build runs.
+- Running bash scripts keep running across the pull; bash keeps the file it
+  opened. A queue that starts a new script by path picks up the new
+  layout, which resolves to the same code plus the guard.
 
 ## 4. The pull (the only step that changes the host)
 
 One block, run as one command. It:
-- stops if it can't read the checkout, or if the checkout is already at
-  the split (and says whether a rollback point was recorded);
+- stops if it can't read the checkout, if a build is running, or if the
+  checkout is already at the split (and says whether a rollback point was
+  recorded);
 - records the commit before the pull (the rollback point);
 - pulls only if that record was written. `--no-rebase` and the two
   `autoStash=false` settings keep the host's git configuration from
@@ -163,6 +185,8 @@ Both records are in `$HOME`, so they survive a reboot.
 ```bash
 if ! git -C /storage/streetzim rev-parse -q --verify HEAD >/dev/null; then
   echo "STOP: cannot read /storage/streetzim; ask"
+elif pgrep -f '[c]reate_osm_zim' >/dev/null; then
+  echo "STOP: a build is running; pull between builds (step 3)"
 elif git -C /storage/streetzim cat-file -e HEAD:ops/in-place.txt 2>/dev/null; then
   echo "STOP: already at the split"
   cat "$HOME/sz-before-stage1.txt" "$HOME/sz-after-stage1.txt" || echo "records incomplete: no scripted rollback; ask"

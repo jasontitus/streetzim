@@ -11,6 +11,7 @@ preview-proxy/
 # the host's next sed -i, and a pull over a local edit would fail.
 cloud/region-variants.tsv
 continent-queue.list
+rebuild-followup.list
 rebuild-old.list
 rebuild-queue.list
 retrofit-chips.list
@@ -26,6 +27,7 @@ cloud/pwa_smoke_test.mjs
 cloud/quick-worker-test.mjs
 cloud/route_browser_test.mjs
 cloud/route_compare.mjs
+cloud/site_filter_gate.mjs
 firebase.json
 scripts/serve-web-local.py
 scripts/sync-drive-viewer.sh
@@ -34,6 +36,8 @@ tests/test_generate_card_date.py
 tests/test_generate_preview_button.py
 tests/test_picker.mjs
 tests/test_preview_proxy.mjs
+tests/test_site_contrast.py
+tests/test_site_filter.py
 tests/test_sw_streaming.mjs
 tests/test_zim_http_source.mjs
 tests/zim_reader_js.test.mjs
