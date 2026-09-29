@@ -226,10 +226,11 @@ def print(*args, **kwargs):
 
 SCRIPT_DIR = Path(__file__).parent.parent.resolve()
 # Where the heavy download caches live (satellite, DEM/terrain, Wikidata,
-# Wikipedia articles): $STREETZIM_CACHE_DIR, else the repo root as always.
+# Wikipedia articles): $STREETZIM_CACHE_DIR, else the repo root as always
+# (installed from a wheel: ~/.cache/streetzim; streetzim/paths.py cache_root).
 # The Docker image points it at the mounted /output volume so the caches
 # survive `docker run --rm`.
-CACHE_DIR = Path(os.environ.get("STREETZIM_CACHE_DIR") or SCRIPT_DIR)
+CACHE_DIR = _paths.cache_root()
 RESOURCES_DIR = _paths.RESOURCES_DIR
 TILEMAKER_CONFIG = RESOURCES_DIR / "tilemaker" / "config-openmaptiles.json"
 TILEMAKER_PROCESS = RESOURCES_DIR / "tilemaker" / "process-openmaptiles.lua"

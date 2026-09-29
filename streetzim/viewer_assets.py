@@ -28,7 +28,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from streetzim.paths import LOCK_NAME, REPO_ROOT, RESOURCES_DIR
+from streetzim.paths import LOCK_NAME, REPO_ROOT, RESOURCES_DIR, cache_root
 
 ROOT = REPO_ROOT
 LOCK = RESOURCES_DIR / LOCK_NAME
@@ -101,8 +101,9 @@ def font_ranges(lock: dict[str, Any] | None = None) -> list[FontRange]:
 def cache_dirs() -> list[Path]:
     """Where verified files are looked for, first one written to:
     $STREETZIM_CACHE_DIR/viewer-assets (the `streetzim` command sets it to
-    <--dl>/cache), else <repo>/viewer-assets, then the image's baked copy."""
-    first = Path(os.environ.get("STREETZIM_CACHE_DIR") or ROOT) / "viewer-assets"
+    <--dl>/cache), else <repo>/viewer-assets (installed: the user cache dir,
+    streetzim/paths.py cache_root), then the image's baked copy."""
+    first = cache_root() / "viewer-assets"
     return [first] if first == BAKED else [first, BAKED]
 
 

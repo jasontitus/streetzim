@@ -5,6 +5,7 @@ tools/check_wheel_install.py; these catch the same drift without a build.
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -70,3 +71,81 @@ def test_shapefile_script_wrapper_runs_the_packaged_copy():
     wrapper = (ROOT / "scripts" / "fetch-shapefiles.sh").read_text()
     assert "resources/tilemaker/fetch-shapefiles.sh" in wrapper
     assert (ROOT / "resources" / "tilemaker" / "fetch-shapefiles.sh").is_file()
+
+
+def _cloud_imports(source: Path) -> set[str]:
+    """cloud modules a file imports: `cloud.x`, `from cloud import x`, and
+    (inside cloud/) sibling imports."""
+    import ast
+    found: set[str] = set()
+    in_cloud = source.parent.name == "cloud"
+    for node in ast.walk(ast.parse(source.read_text())):
+        names: list[str] = []
+        if isinstance(node, ast.ImportFrom) and node.module:
+            if node.module == "cloud":
+                names = [a.name for a in node.names]
+            elif node.module.startswith("cloud."):
+                names = [node.module.split(".", 1)[1]]
+            elif in_cloud and node.level == 0:
+                names = [node.module]
+        elif isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name.startswith("cloud."):
+                    names.append(a.name.split(".", 1)[1])
+                elif in_cloud:
+                    names.append(a.name)
+        found |= {n for n in names if (ROOT / "cloud" / f"{n}.py").is_file()}
+    return found
+
+
+def test_cloud_modules_are_what_the_builder_imports():
+    queue = [*(ROOT / "streetzim").rglob("*.py"),
+             ROOT / "create_osm_zim.py", ROOT / "wikidata_cache.py"]
+    seen: set[Path] = set()
+    needed: set[str] = set()
+    while queue:
+        f = queue.pop()
+        if f in seen:
+            continue
+        seen.add(f)
+        for name in _cloud_imports(f):
+            needed.add(name)
+            queue.append(ROOT / "cloud" / f"{name}.py")
+    assert needed == set(paths.CLOUD_MODULES)
+
+
+def _requirements(lines: list[str]) -> dict[str, str]:
+    """{normalized name: spec without spaces or comments}."""
+    out: dict[str, str] = {}
+    for line in lines:
+        line = line.split("#", 1)[0].strip()
+        if not line or line.startswith("-"):
+            continue
+        name = re.split(r"[<>=!~;\s\[]", line, maxsplit=1)[0].lower().replace("_", "-")
+        out[name] = re.sub(r"\s+", "", line).replace('"', "'")
+    return out
+
+
+def test_wheel_dependencies_match_requirements_txt():
+    with open(ROOT / "pyproject.toml", "rb") as f:
+        wheel = _requirements(tomllib.load(f)["project"]["dependencies"])
+    reqs = _requirements((ROOT / "requirements.txt").read_text().splitlines())
+    # Test and ops tools requirements.txt carries until it is split into
+    # runtime / dev / ops files; never dependencies of the wheel.
+    not_runtime = {"pytest", "internetarchive"}
+    assert not (set(wheel) & not_runtime)
+    assert {k: v for k, v in reqs.items() if k not in not_runtime} == wheel
+
+
+def test_cache_root(monkeypatch, tmp_path):
+    monkeypatch.setenv("STREETZIM_CACHE_DIR", str(tmp_path / "c"))
+    assert paths.cache_root() == tmp_path / "c"
+    monkeypatch.delenv("STREETZIM_CACHE_DIR")
+    assert paths.cache_root() == ROOT            # a checkout: as always
+    # Installed from a wheel: a user cache dir, never site-packages.
+    monkeypatch.setattr(paths, "RESOURCES_DIR", paths.PACKAGED_RESOURCES)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    assert paths.cache_root() == tmp_path / "xdg" / "streetzim"
+    monkeypatch.delenv("XDG_CACHE_HOME")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    assert paths.cache_root() == tmp_path / "home" / ".cache" / "streetzim"

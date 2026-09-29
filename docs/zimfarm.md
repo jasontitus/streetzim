@@ -108,9 +108,12 @@ and shapefiles.
 A US region and a Docker comparison, measured the same way on 2026-09-29
 with the code as of that day and the inputs given as `file://` URLs (so no
 download time): the US states from Geofabrik (2026-09-28 extracts),
-Luxembourg the same openstreetmap.fr extract as above. The machine was shared with other
-jobs this time (mean 1-minute load 12 to 15 on its 4 cores), so wall times
-are upper bounds; CPU time and memory are the steadier numbers.
+Luxembourg the same openstreetmap.fr extract as above. The machine was shared
+with other jobs this time, so wall times are upper bounds: the mean 1-minute
+load over the run was 15.4 for Rhode Island and 14.2 for Massachusetts (on 4
+cores), and was not recorded for the Luxembourg runs. CPU time varies too:
+Luxembourg took 6.7 CPU minutes in the run above (older code) and 5.1 and
+4.7 in the two here.
 
 | region | where | OSM extract | wall time | CPU time | peak memory | peak disk | ZIM |
 |---|---|---|---|---|---|---|---|
@@ -120,12 +123,13 @@ are upper bounds; CPU time and memory are the steadier numbers.
 
 Inside Docker, `tools/measure_build.py` ran in the container, around the
 `streetzim` process, as the image runs it. The two Luxembourg runs agree on
-memory, disk and the ZIM; the wall-time gap is not the container. 31 s of
-it is the font glyphs, which the image carries and a fresh `--dl` outside
-it downloads, and most of the rest is tile generation (47 s against 14 s,
-same tilemaker v3.0.0 release build), which moved with the machine's load.
-Rhode Island, a US state of Luxembourg's size, costs the same: the ~4 GB
-of memory is the floor for any small region.
+memory, disk and the ZIM. Of the 1.1 min wall-time gap, 31 s is the font
+glyphs, which the image carries and a fresh `--dl` outside it downloads,
+and most of the rest is tile generation (47 s against 14 s, the same
+tilemaker v3.0.0 release build), which these two runs alone cannot
+attribute to the container rather than the shared machine. Rhode Island, a
+US state of Luxembourg's size, costs the same: about 4 GB of memory for
+both small regions measured.
 
 Massachusetts (a 310 MB extract, between Luxembourg and Switzerland) was
 stopped by the measuring script 15 minutes in, during the ZIM step, when
