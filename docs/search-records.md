@@ -15,7 +15,7 @@ millions of records.
 |---|---|---|
 | `n` | string | display name (`name:latin` when the tile has it, else `name`) |
 | `t` | string | type, see below |
-| `s` | string | subtype: the tile's `class` or `subclass` (for example `restaurant`, `cafe`, `primary`); may be `""` |
+| `s` | string | subtype: the tile's `class` or `subclass` (for example `restaurant`, `cafe`, `primary`); `subclass` when `class` is only the raw OSM key tilemaker writes for values it has no class for (`amenity`, `tourism`, …; see `feature_subtype` in `streetzim/search_extract.py`); may be `""` |
 | `a` | number | latitude, rounded to 5 decimal places (about 1 m; `SEARCH_COORD_DP` changes it) |
 | `o` | number | longitude, likewise |
 | `l` | string | location label: the nearest OSM place at extraction time (for example "Monte-Carlo"); records without one get "City, Region" from GeoNames via `reverse_geocoder` when the ZIM is written; may be `""` |

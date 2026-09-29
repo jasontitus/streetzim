@@ -49,6 +49,33 @@ def tile_to_lnglat(z, x, y, px, py, extent=4096):
     return lon, lat
 
 
+# OSM keys that tilemaker's profile (resources/tilemaker/
+# process-openmaptiles.lua, GetPOIRank: ``class = poiClasses[v] or k``)
+# writes as a POI's ``class`` when it has no OpenMapTiles class for the
+# value, e.g. amenity=pharmacy becomes class "amenity", subclass
+# "pharmacy". None of them is an OpenMapTiles class, so a Planetiler tile
+# (OpenFreeMap) never carries one. The profile's other fallback keys are
+# real OpenMapTiles classes that Planetiler writes too (shop, railway,
+# aerialway) and are kept; tests/test_search_extract.py checks this list
+# against the profile's poiTags.
+RAW_OSM_KEY_CLASSES = frozenset({
+    "amenity", "barrier", "building", "highway", "historic", "landuse",
+    "leisure", "sport", "tourism", "waterway",
+})
+
+
+def feature_subtype(props):
+    """A search record's ``s`` from a tile feature's properties: its
+    ``class``, or ``subclass`` when there is no class or the class is only
+    the raw OSM key (``RAW_OSM_KEY_CLASSES``), so a tilemaker pharmacy is
+    ``pharmacy`` as on OpenFreeMap, not ``amenity``."""
+    cls = props.get("class", "")
+    sub = props.get("subclass", "")
+    if cls in RAW_OSM_KEY_CLASSES and sub:
+        return sub
+    return cls or sub
+
+
 def build_location_index(mbtiles_path):
     """Build a spatial index that maps (lat, lon) to "City, State".
 
@@ -464,7 +491,7 @@ def _process_tile_partition(args):
                 except (IndexError, ZeroDivisionError, TypeError):
                     continue
                 lon, lat = tile_to_lnglat(z, x, y, px, py, extent)
-                subtype = props.get("class", "") or props.get("subclass", "")
+                subtype = feature_subtype(props)
                 dedup_key = (name.lower(), feature_type, round(lat, 4), round(lon, 4))
                 if dedup_key in seen:
                     continue
@@ -540,7 +567,7 @@ def _process_tile_for_search(args):
                 continue
 
             lon, lat = tile_to_lnglat(z, x, y, px, py, extent)
-            subtype = props.get("class", "") or props.get("subclass", "")
+            subtype = feature_subtype(props)
 
             results.append({
                 "name": name,

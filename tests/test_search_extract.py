@@ -28,7 +28,15 @@ def _make_mbtiles(path: Path) -> None:
     tile = mvt.encode([
         {"name": "poi", "features": [
             {"geometry": "POINT(2000 2000)",
-             "properties": {"name": "Café de Paris", "class": "cafe", "subclass": "cafe"}}]},
+             "properties": {"name": "Café de Paris", "class": "cafe", "subclass": "cafe"}},
+            # tilemaker's profile has no class for amenity=pharmacy, so it
+            # writes the OSM key; shop is a real OpenMapTiles class.
+            {"geometry": "POINT(3000 2000)",
+             "properties": {"name": "Pharmacie Centrale", "class": "amenity",
+                            "subclass": "pharmacy"}},
+            {"geometry": "POINT(3000 3000)",
+             "properties": {"name": "Boulangerie", "class": "shop",
+                            "subclass": "bakery"}}]},
         {"name": "transportation_name", "features": [
             {"geometry": "LINESTRING(100 100, 2000 100, 4000 100)",
              "properties": {"name": "Avenue des Beaux-Arts", "class": "tertiary"}}]},
@@ -69,9 +77,13 @@ def test_extracts_records_without_the_builder(tmp_path: Path):
     path = [l for l in res.stdout.splitlines() if l.startswith("PATH=")][0][5:]
     recs = [json.loads(l) for l in open(path, encoding="utf-8")]
     by_name = {r["name"]: r for r in recs}
-    assert set(by_name) == {"Café de Paris", "Avenue des Beaux-Arts", "Monte-Carlo"}
+    assert set(by_name) == {"Café de Paris", "Pharmacie Centrale", "Boulangerie",
+                            "Avenue des Beaux-Arts", "Monte-Carlo"}
     assert by_name["Café de Paris"]["type"] == "poi"
     assert by_name["Café de Paris"]["subtype"] == "cafe"
+    assert by_name["Pharmacie Centrale"]["subtype"] == "pharmacy"
+    assert by_name["Boulangerie"]["subtype"] == "shop"
+    assert by_name["Avenue des Beaux-Arts"]["subtype"] == "tertiary"
     assert by_name["Avenue des Beaux-Arts"]["type"] == "street"
     assert by_name["Monte-Carlo"]["type"] == "place"
     import mercantile
@@ -89,3 +101,65 @@ def test_builder_reexports_the_same_functions():
     for name in ("extract_searchable_features", "build_location_index",
                  "_finish_features_streaming", "_process_tile_partition"):
         assert getattr(coz, name) is getattr(se, name)
+
+
+@pytest.mark.parametrize(("props", "expected"), [
+    # OpenMapTiles classes are kept, as before.
+    ({"class": "cafe", "subclass": "cafe"}, "cafe"),
+    ({"class": "grocery", "subclass": "supermarket"}, "grocery"),
+    ({"class": "shop", "subclass": "bakery"}, "shop"),
+    ({"class": "railway", "subclass": "station"}, "railway"),
+    ({"class": "office", "subclass": "company"}, "office"),
+    ({"class": "primary"}, "primary"),
+    # tilemaker's raw-key fallback: the subclass is the POI type.
+    ({"class": "amenity", "subclass": "fuel"}, "fuel"),
+    ({"class": "amenity", "subclass": "pharmacy"}, "pharmacy"),
+    ({"class": "amenity", "subclass": "restaurant"}, "restaurant"),
+    ({"class": "tourism", "subclass": "museum"}, "museum"),
+    ({"class": "historic", "subclass": "monument"}, "monument"),
+    ({"class": "leisure", "subclass": "playground"}, "playground"),
+    # Nothing better to use: the key, the subclass alone, or nothing.
+    ({"class": "amenity", "subclass": ""}, "amenity"),
+    ({"class": "amenity"}, "amenity"),
+    ({"subclass": "pharmacy"}, "pharmacy"),
+    ({}, ""),
+])
+def test_feature_subtype(props, expected):
+    from streetzim.search_extract import feature_subtype
+    assert feature_subtype(props) == expected
+
+
+def test_in_memory_worker_uses_the_subclass_for_raw_keys():
+    from streetzim.search_extract import _process_tile_for_search
+    tile = mvt.encode([{"name": "poi", "features": [
+        {"geometry": "POINT(2000 2000)",
+         "properties": {"name": "Esso", "class": "amenity", "subclass": "fuel"}}]}])
+    recs = _process_tile_for_search((14, 8529, 5973, gzip.compress(tile), {"poi": "poi"}))
+    assert [(r["name"], r["subtype"]) for r in recs] == [("Esso", "fuel")]
+
+
+def test_raw_key_list_matches_the_tilemaker_profile():
+    """Every key GetPOIRank can fall back to as a class (the keys of
+    poiTags, plus the shop catch-all) is either in RAW_OSM_KEY_CLASSES or a
+    real OpenMapTiles class Planetiler also writes, which must stay as is so
+    OpenFreeMap builds do not change."""
+    import re
+
+    from streetzim.search_extract import RAW_OSM_KEY_CLASSES
+    lua = (ROOT / "resources/tilemaker/process-openmaptiles.lua").read_text(encoding="utf-8")
+    assert "class = poiClasses[v] or k" in lua
+    block = lua[lua.index("poiTags"):lua.index("poiClasses")]
+    keys = set(re.findall(r"(\w+)\s*=\s*Set\s*\{", block))
+    assert "amenity" in keys and "tourism" in keys
+    omt_classes = {"shop", "railway", "aerialway", "office"}
+    assert keys - omt_classes == RAW_OSM_KEY_CLASSES
+    assert not RAW_OSM_KEY_CLASSES & omt_classes
+
+
+def test_tilemaker_fuel_and_pharmacy_reach_their_chips():
+    from cloud.chip_rules import CHIP_RULES, record_matches_chip
+    from streetzim.search_extract import feature_subtype
+    chips = {c.id: c for c in CHIP_RULES}
+    for sub, chip in (("fuel", "fuel"), ("pharmacy", "health"), ("restaurant", "food")):
+        rec = {"t": "poi", "n": "x", "s": feature_subtype({"class": "amenity", "subclass": sub})}
+        assert record_matches_chip(rec, chips[chip]), (sub, chip)
