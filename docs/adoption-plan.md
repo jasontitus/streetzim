@@ -33,8 +33,10 @@ Rule for every split: **behaviour-neutral and verified mechanically.**
 "A proper front-end build" in openZIM's sense (ES modules, bundler, npm) is
 a larger step. The viewer must still ship as the same three slot files,
 because published ZIMs are updated in place and can't gain files. The part
-split keeps that constraint and adds no tooling. A bundler can come later,
-as long as it emits the same three files.
+split keeps that constraint and adds no build tooling. A bundler can come
+later, as long as it emits the same three files; what it would need, and the
+ESLint gate and pinned MapLibre/fonts added instead, are in
+[viewer-supply-chain.md](viewer-supply-chain.md).
 
 ## 2. Separating the operations layer
 

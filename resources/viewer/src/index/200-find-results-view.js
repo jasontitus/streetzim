@@ -197,7 +197,6 @@ function _searchAreaThresholdReached(map) {
   var az = _findResultsState.anchorZoom;
   if (!ac || az == null) return false;
   if (Math.abs(map.getZoom() - az) >= 0.5) return true;
-  var c = map.getCenter();
   var b = map.getBounds();
   // Outside the current viewport box → user has clearly panned away.
   return ac.lng < b.getWest() || ac.lng > b.getEast()

@@ -11,7 +11,7 @@
 #                stock libzim (python-libzim, zim-tools, kiwix-tools); nothing
 #                needs the optional Rust packer. It also exercises the tools
 #                that rewrite published ZIMs (repackage, in-place viewer patch). Also runs weekly so
-#                upstream drift (Geofabrik, fonts CDN, MapLibre on unpkg,
+#                upstream drift (Geofabrik, the pinned fonts on their CDN,
 #                tilemaker, libzim) shows up without a code change.
 name: CI
 
@@ -59,6 +59,14 @@ jobs:
         run: python tools/pyright_gate.py
       - name: Viewer index.html matches its parts
         run: python tools/build_viewer.py --check
+      - name: Vendored MapLibre matches resources/viewer-assets.lock.json
+        run: python tools/pin_viewer_assets.py --check
+      - name: ESLint (viewer JavaScript; eslint.config.mjs)
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "1"
+        run: |
+          npm ci --no-audit --no-fund
+          npm run lint:viewer
       - name: offliner-definition.json matches the streetzim flags
         run: python tools/offliner_definition.py --check
       - name: offliner-definition.json validates against Zimfarm's own schema
@@ -352,6 +360,8 @@ jobs:
             --file-name osm-monaco-docker
       - name: tilemaker works in the image; the image uses zimscraperlib
         run: |
+          # The pinned font glyphs are baked in: re-checking them needs no network.
+          docker run --rm --network none streetzim python /app/tools/pin_viewer_assets.py --prefetch /app/viewer-assets
           docker run --rm streetzim tilemaker --help | head -3
           docker run --rm streetzim python -c "import sys; from streetzim import scraperlib; assert scraperlib.AVAILABLE, 'zimscraperlib missing'; print(sys.version)"
       - name: Validate the ZIM

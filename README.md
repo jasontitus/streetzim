@@ -166,6 +166,7 @@ resources/viewer/ (MapLibre app) ───┤
 | `create_osm_zim.py` | the builder's command line |
 | `streetzim/cli.py` | `streetzim`, the openZIM-style command (maps2zim's flags; `offliner-definition.json`) |
 | `resources/viewer/` | the viewer shipped inside every ZIM (`index.html`, built from `src/index/` by `tools/build_viewer.py`; `places.html`; `routing-worker.js`) |
+| `resources/vendor/`, `resources/viewer-assets.lock.json` | vendored MapLibre GL JS and the sha256 pins for it and the font glyphs (`tools/pin_viewer_assets.py`, [docs/viewer-supply-chain.md](docs/viewer-supply-chain.md)) |
 | `resources/tilemaker/` | tilemaker config and Lua profile |
 | `cloud/` | Python modules the builder imports (`chip_rules`, `search_shards`, `viewer_slots`, …) and the ZIM tools (`validate_zim`, `repackage_zim`, `patch_viewer_inplace`, …) |
 | `streetzim/` | the builder's modules: `tiles`, `terrain`, `satellite`, `addresses`, `search_extract`, `zim_writer` (one function per ZIM phase), `zim_metadata` (openZIM metadata rules), `progress` (Zimfarm progress file), `common`, and `routing/` (graph build, formats, reference routers) |

@@ -22,6 +22,9 @@ wiki_articles_cache/
 # Re-run scripts/sync-drive-viewer.sh after changing resources/viewer/
 # or bumping the MapLibre / fzstd versions.
 overture_cache/
+# Verified font glyph cache (streetzim/viewer_assets.py) when
+# STREETZIM_CACHE_DIR is unset.
+/viewer-assets/
 
 # Cache-dir symlinks in worktrees (pointed at main tree)
 /satellite_cache_avif_256

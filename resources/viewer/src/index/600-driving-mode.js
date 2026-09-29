@@ -230,11 +230,6 @@
     var GLYPH_ENTER = '⛶';  // ⛶ corners-box
     var GLYPH_EXIT = '✕';   // ✕
 
-    function isStandalone() {
-      return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
-             window.navigator.standalone === true;
-    }
-
     function realFullscreenActive() {
       return !!(document.fullscreenElement || document.webkitFullscreenElement);
     }

@@ -379,7 +379,6 @@
     }
     var nodesScaled = graph.nodesScaled;
     var adjOffsets = graph.adjOffsets;
-    var edges = graph.edges;
     var numNodes = graph.numNodes;
 
     var endLat = nodesScaled[endNode * 2] / 1e7;

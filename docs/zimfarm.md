@@ -111,5 +111,6 @@ A fresh Zimfarm container downloads, besides the OSM extract:
 - the coastline and Natural Earth shapefiles (about 900 MB, unzipped
   about 1.2 GB) when tiles are built with tilemaker. Baking them into the
   image, or building from `--mbtiles`, avoids this;
-- MapLibre GL JS and the font glyphs (a few MB);
+- nothing for the viewer: MapLibre GL JS is vendored and the Docker image
+  carries the pinned font glyphs ([viewer-supply-chain.md](viewer-supply-chain.md));
 - with `--terrain`, Copernicus DEM tiles for the area.

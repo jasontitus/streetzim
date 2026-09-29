@@ -3110,7 +3110,6 @@ function _searchAreaThresholdReached(map) {
   var az = _findResultsState.anchorZoom;
   if (!ac || az == null) return false;
   if (Math.abs(map.getZoom() - az) >= 0.5) return true;
-  var c = map.getCenter();
   var b = map.getBounds();
   // Outside the current viewport box → user has clearly panned away.
   return ac.lng < b.getWest() || ac.lng > b.getEast()
@@ -8372,8 +8371,6 @@ function initRouting(map, config) {
   // fails.
   var __routeStatusTimer = null;
   var __routeStatusStart = 0;
-  var __routeStatusEtaSec = 0;
-  var __ROUTE_SPINNER_FRAMES = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
   // Route progress UI v2: clean stage label + slim animated bar
   // instead of the busy spinner/ETA/pops/cells string. The ETA
   // heuristic was wrong post-worker (a 1100 km route now finishes in
@@ -9172,7 +9169,6 @@ function initRouting(map, config) {
     }
     var nodesScaled = graph.nodesScaled;
     var adjOffsets = graph.adjOffsets;
-    var edges = graph.edges;
     var numNodes = graph.numNodes;
 
     var endLat = nodesScaled[endNode * 2] / 1e7;
@@ -9822,9 +9818,6 @@ function initRouting(map, config) {
   function markOriginEditing() {
     window.__streetzim_originBeingEdited = true;
   }
-  function clearOriginEditing() {
-    window.__streetzim_originBeingEdited = false;
-  }
   originInput.addEventListener('focus', markOriginEditing);
   originInput.addEventListener('input', markOriginEditing);
   // When the user clicks into either input, cancel any route still
@@ -10131,11 +10124,6 @@ function initRouting(map, config) {
     var htmlEl = document.documentElement;
     var GLYPH_ENTER = '⛶';  // ⛶ corners-box
     var GLYPH_EXIT = '✕';   // ✕
-
-    function isStandalone() {
-      return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
-             window.navigator.standalone === true;
-    }
 
     function realFullscreenActive() {
       return !!(document.fullscreenElement || document.webkitFullscreenElement);
