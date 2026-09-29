@@ -609,7 +609,9 @@ def create_zim(
         # OSM's wikipedia=/wikidata= tags (ODbL), not Wikipedia content.
         has_articles = bool(_bundled_set)
         _add_map_config(creator, MapItem, map_config=map_config,
-                        has_wiki_articles=has_articles)
+                        has_wiki_articles=has_articles,
+                        about=_about_fields(name=name, description=description,
+                                            metadata=metadata))
         _add_metadata(creator, name=name, description=description,
                       overture_sources=overture_sources, xapian_mode=xapian_mode,
                       metadata=metadata, illustration=illustration,
@@ -920,10 +922,28 @@ def _add_viewer(creator, MapItem, *, maplibre_js_path, maplibre_css_path, viewer
 
 
 
-def _add_map_config(creator, MapItem, *, map_config, has_wiki_articles):
+def _about_fields(*, name, description, metadata=None):
+    """What the viewer's About panel shows (140-view-home-about.js): the
+    same Title / Description / Date _add_metadata writes, since a page in
+    the ZIM cannot read M/ metadata portably, and the release that built it."""
+    import time as _time
+    from streetzim.__about__ import __version__
+    md = metadata or {}
+    return {
+        "title": md.get("Title", name),
+        "description": md.get("Description", description),
+        "date": _time.strftime("%Y-%m-%d"),
+        "generator": f"streetzim {__version__}",
+    }
+
+
+def _add_map_config(creator, MapItem, *, map_config, has_wiki_articles, about=None):
     """map-config.json, with hasWikiArticles only when articles were stored
-    (the viewer's credits list Wikipedia on it)."""
+    (the viewer's credits list Wikipedia on it) and the About fields."""
     map_config = dict(map_config)
+    for k, v in (about or {}).items():
+        if v:
+            map_config.setdefault(k, v)
     # Same predicate as _add_viewer, which wrote (or skipped) the file.
     if _rtl_text_plugin_bytes() is not None:
         map_config["rtlTextPlugin"] = RTL_TEXT_PLUGIN_ENTRY

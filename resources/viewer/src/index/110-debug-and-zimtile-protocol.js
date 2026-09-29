@@ -55,6 +55,7 @@ dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAg
 // fire at once — terrain zoom-in triggers 30-50+ parallel tile fetches.
 // We queue requests and allow at most MAX_CONCURRENT in-flight at a time.
 (function() {
+  if (window.__szUnsupported) return;   // 025: no MapLibre/Fetch; page already explains
   var MAX_CONCURRENT = 6;
   var inflight = 0;
   var queue = [];

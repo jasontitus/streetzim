@@ -34,7 +34,9 @@ function fetchConfig(n) {
       throw err;
     });
 }
-fetchConfig(1)
+// 025-home-about-fatal.html has already replaced the page when the browser
+// lacks what the viewer needs (Fetch, Promise, MapLibre).
+if (!window.__szUnsupported) fetchConfig(1)
   .then(function(config) {
     // Check WebGL support before initializing MapLibre
     try {
@@ -42,9 +44,13 @@ fetchConfig(1)
       var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
       if (!gl) throw new Error('WebGL not available');
     } catch (e) {
-      document.getElementById('info').innerHTML =
-        '<h3>WebGL Required</h3><p>This map needs WebGL support. ' +
-        'Try the Leaflet/raster version instead.</p>';
+      szFatalPage({
+        title: 'This map needs WebGL',
+        lines: ['The map is drawn with WebGL, which this app or browser has turned off or does not support.'],
+        tips: ['Turn on hardware acceleration / WebGL in the browser or app settings, or update it.',
+               'Try another reader: a current Kiwix app, Kiwix JS, or a recent desktop browser.'],
+        details: describeError(e) + '\nUser agent: ' + (navigator.userAgent || '?')
+      });
       return;
     }
 
@@ -55,13 +61,15 @@ fetchConfig(1)
     // docs/todo-opening-view.md record why, so the next attempt does not
     // repeat them. The zoom is already extent-based (create_osm_zim's
     // get_center_and_zoom), so only the centre needs work.
+    // The last view of this map, unless the URL names one (140).
+    var openCam = _szOpeningCamera(config, location.hash, _szStorage());
     var map = new maplibregl.Map({
       container: 'map',
       style: makeStyle(config),
-      // Framed by fitBounds below when we have bounds; these stay as the
-      // pre-fit camera (and the whole answer for a ZIM with no bounds).
-      center: config.center,
-      zoom: config.zoom,
+      center: openCam.center,
+      zoom: openCam.zoom,
+      bearing: openCam.bearing,
+      pitch: openCam.pitch,
       minZoom: config.minZoom || 0,
       maxZoom: 20,
       attributionControl: true,
@@ -140,6 +148,9 @@ fetchConfig(1)
     })();
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    initHomeButton(map, config);
+    initViewMemory(map, config);
+    initAbout(config);
     // Scale bar with mi/km toggle — click to switch units
     var scaleUnit = 'imperial';
     map._streetzimUnit = scaleUnit;  // shared with driving-mode HUD
@@ -680,6 +691,23 @@ fetchConfig(1)
         retry.firstChild.addEventListener('click', function(ev) { ev.preventDefault(); location.reload(); });
         infoEl.appendChild(retry);
       }
+      return;
+    }
+    // map-config.json never arrived: nothing can be drawn, so say so on
+    // a full page. A failure after the map exists keeps the small #info
+    // note, so a bug in one feature does not hide a working map.
+    if (isConfig && !window.__szMap) {
+      szFatalPage({
+        title: 'This map could not be opened',
+        lines: ['Its settings file, map-config.json, could not be read' +
+                (status ? ' (the reader answered HTTP ' + status + ')' : '') + '.'],
+        tips: ['Try again: a reader that is still opening the file can miss the first requests.',
+               'If it keeps failing, the file may be incomplete: check its size, or download it again.',
+               'In Kiwix JS, use ServiceWorker mode, not JQuery mode.'],
+        retry: true,
+        details: describeError(err) + '\nURL: ' + err._url + '\nUser agent: ' +
+                 (navigator.userAgent || '?') + '\n\n' + _debugLog.join('\n')
+      });
       return;
     }
     showFatalError('Error loading map', err, err && err._url);

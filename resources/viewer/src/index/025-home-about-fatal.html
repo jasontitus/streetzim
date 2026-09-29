@@ -1,0 +1,111 @@
+<!-- Home button, the About panel (the top of #attr-dialog) and the full-page
+     error shown when the map cannot start at all: a browser without Fetch /
+     Promise / MapLibre, no WebGL, or a map-config.json that never loaded.
+     The styles sit here rather than in 010 so this feature is one part.
+     Panels stay light in both map themes, as every other panel does; only
+     the full-page error, which has no map behind it, follows the OS scheme. -->
+<style>
+  .sz-home-btn svg { display: block; margin: auto; width: 18px; height: 18px; fill: #333; }
+  #about-section { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+  #about-section #about-title { color: var(--text-primary); font-weight: 600; font-size: 14px; }
+  #about-section #about-desc:empty { display: none; }
+  #sz-fatal {
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 10000; overflow-y: auto;
+    display: flex; align-items: center; justify-content: center;
+    /* Plain values first: a browser too old for var() drops those lines. */
+    padding: 16px; padding: calc(16px + var(--top-inset, 0px)) 16px calc(16px + var(--safe-bottom, 0px));
+    box-sizing: border-box; background: #f3f4f6; color: #1a1a1a;
+    font-family: sans-serif; font-family: var(--ui-font); line-height: 1.5;
+  }
+  #sz-fatal .card {
+    max-width: 480px; width: 100%; background: #fff; border-radius: 10px;
+    padding: 24px 28px; box-shadow: 0 8px 32px rgba(0,0,0,0.12); box-sizing: border-box;
+  }
+  #sz-fatal h1 { margin: 0 0 10px; font-size: 19px; font-weight: 700; }
+  #sz-fatal p, #sz-fatal li { margin: 0 0 10px; font-size: 14px; color: #374151; }
+  #sz-fatal ul { margin: 0 0 10px; padding-left: 20px; }
+  #sz-fatal button {
+    font: inherit; font-size: 14px; font-weight: 600; min-height: 44px; padding: 0 18px;
+    border: none; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer;
+  }
+  #sz-fatal details { margin-top: 14px; font-size: 12px; color: #6b7280; }
+  #sz-fatal pre {
+    white-space: pre-wrap; word-break: break-all; font-size: 11px; max-height: 40vh;
+    overflow: auto; background: rgba(127,127,127,0.12); padding: 8px; border-radius: 4px;
+  }
+  @media (prefers-color-scheme: dark) {
+    #sz-fatal { background: #111418; color: #e5e7eb; }
+    #sz-fatal .card { background: #1f2329; box-shadow: none; }
+    #sz-fatal p, #sz-fatal li { color: #d1d5db; }
+    #sz-fatal details { color: #9ca3af; }
+  }
+</style>
+<script>
+// Replace the page with a readable explanation of why the map cannot run.
+// ES5 only: this must work in the very browsers it is written for. opts:
+//   title, lines (paragraphs), tips (list items), retry (show "Try again"),
+//   details (technical text, collapsed). Built with textContent, so an error
+//   message or URL can never inject markup.
+function szFatalPage(opts) {
+  var old = document.getElementById('sz-fatal');
+  if (old && old.parentNode) old.parentNode.removeChild(old);
+  var page = document.createElement('div');
+  page.id = 'sz-fatal';
+  page.setAttribute('role', 'alert');
+  var card = document.createElement('div');
+  card.className = 'card';
+  page.appendChild(card);
+  function add(tag, text, parent) {
+    var el = document.createElement(tag);
+    if (text != null) el.textContent = text;
+    (parent || card).appendChild(el);
+    return el;
+  }
+  add('h1', opts.title);
+  var i;
+  for (i = 0; opts.lines && i < opts.lines.length; i++) add('p', opts.lines[i]);
+  if (opts.tips && opts.tips.length) {
+    var ul = add('ul');
+    for (i = 0; i < opts.tips.length; i++) add('li', opts.tips[i], ul);
+  }
+  if (opts.retry) {
+    add('button', 'Try again').addEventListener('click', function() { location.reload(); });
+  }
+  if (opts.details) {
+    var det = add('details');
+    add('summary', 'Technical details', det);
+    add('pre', opts.details, det);
+  }
+  (document.body || document.documentElement).appendChild(page);
+  try { document.title = opts.title; } catch (e) {}
+  return page;
+}
+
+// Check what the viewer cannot run without before any of it runs. Old
+// WebViews (an outdated Kiwix, Android 4.x System WebView, IE) lack Fetch
+// or Promise, and a MapLibre that failed to load or parse leaves no
+// `maplibregl`; each used to stop the script at its first use and leave
+// a blank map. The main script checks window.__szUnsupported and stays out.
+(function() {
+  var missing = [];
+  if (typeof window.fetch !== 'function') missing.push('Fetch API');
+  if (typeof window.Promise !== 'function') missing.push('Promise');
+  if (typeof window.maplibregl === 'undefined') missing.push('MapLibre GL (maplibre-gl.js did not load or run)');
+  if (!missing.length) return;
+  window.__szUnsupported = missing;
+  szFatalPage({
+    title: 'This reader cannot show the map',
+    lines: [
+      'The offline map needs a web engine newer than the one this app or browser uses. It is missing: ' +
+        missing.join(', ') + '.'
+    ],
+    tips: [
+      'Update your Kiwix app, or open this file in a current Kiwix (Android, iOS, macOS, Windows, Linux) or Kiwix JS.',
+      'In Kiwix JS, use ServiceWorker mode, not JQuery mode.',
+      'In a browser, use a recent Firefox, Chrome, Edge or Safari.'
+    ],
+    details: 'Missing: ' + missing.join(', ') + '\nUser agent: ' + (navigator.userAgent || '?') +
+      '\nPage: ' + location.href
+  });
+})();
+</script>
