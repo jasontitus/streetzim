@@ -25,7 +25,7 @@ Rule for every split: **behaviour-neutral and verified mechanically.**
 | `resources/viewer/index.html` | 11,007 lines, edited by hand | 24 parts in `resources/viewer/src/index/` (largest 976 lines), joined by `tools/build_viewer.py` | the joined output is byte-identical to the file; CI and a test fail if they drift |
 | search extraction | inside `create_osm_zim.py` | `streetzim/search_extract.py` | golden-build diff |
 | routing formats | under `tests/` | `streetzim/routing/` | golden-build diff |
-| `create_osm_zim.py` | 7,188 lines | a ~1,700-line CLI (about 290 lines of it flag definitions); the work happens in `streetzim/{common,tiles,satellite,terrain,addresses,zim_writer}.py` and `streetzim/routing/build.py`. | golden-build diff (fixed inputs, every entry compared) and an independent review that ran every production flag on old and new code |
+| `create_osm_zim.py` | 7,188 lines | a ~1,700-line CLI (about 290 lines of it flag definitions); the work happens in `streetzim/{common,tiles,satellite,terrain,addresses,zim_writer}.py` and `streetzim/routing/build.py`. | golden-build diff (fixed inputs, every entry compared), an independent review that ran every production flag on old and new code, and a production-flag Washington, D.C. head-to-head against `main` ([head-to-head-dc.md](head-to-head-dc.md); bundled Wikipedia articles not yet covered) |
 | `create_zim` | one 1,900-line function | 16 phase functions (metadata, viewer, vector tiles, rasters, fonts, Wikidata, articles, routing, and the search passes); `create_zim` itself is ~260 lines (mostly its signature and docstring), the largest phase ~250 | bodies moved verbatim by script; golden-build diff on three CLI configurations plus direct calls for the in-memory and Xapian-off paths; independent review with seven more runtime cases |
 | `main()` | one 1,181-line function | `build_parser()` (290 lines of flags) and 14 phase functions (openZIM options, area, layer options, tiles, tile processing, search, Wikidata, routing, satellite/terrain, terrain audit, MapLibre, map config, ZIM, summary); `main()` is ~110 lines of calls, the largest phase ~240 | bodies moved verbatim by script (checked statement by statement against the original AST); golden-build diff on the CLI configurations; independent review |
 | `places.html`, `routing-worker.js` | 2.5k / 1.7k lines | unchanged | small enough for now |
@@ -64,6 +64,10 @@ Order, because the build host runs these by absolute path:
   (SVG included), downloads and the output-folder check. The ZIM is still
   written with python-libzim's `Creator` directly: moving the writer to
   zimscraperlib's needs the 3.12 production host to move to 3.14 first.
+- **A head-to-head with real Wikipedia articles**: the D.C. comparison
+  ([head-to-head-dc.md](head-to-head-dc.md)) used a test article source
+  because Wikipedia was rate-limiting the machine, so article bundling was
+  not compared on real content. It also predates the `main()` split.
 - **The pyright baseline** (39 findings in older modules) only shrinks:
   fix them as those files are touched.
 
