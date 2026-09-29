@@ -101,7 +101,7 @@ def test_illustration_svg_and_garbage(tmp_path):
     else:
         with pytest.raises(ValueError, match="SVG"):
             zm.illustration_png(SVG)
-    with pytest.raises(ValueError, match="not a (readable|usable) image"):
+    with pytest.raises(ValueError, match=r"not a (readable|usable) image"):
         zm.illustration_png(b"not an image")
     p = tmp_path / "i.png"
     p.write_bytes(_png((64, 64)))

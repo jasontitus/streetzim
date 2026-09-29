@@ -32,7 +32,8 @@ from __future__ import annotations
 
 import json
 import math
-from typing import Callable, Iterator
+from collections.abc import Callable, Iterator
+from typing import cast
 
 import numpy as np
 
@@ -51,9 +52,11 @@ def _usable_coords(rec: dict) -> tuple[float, float] | None:
             return None
         if not math.isfinite(v):
             return None
-    if not (-90.0 <= a <= 90.0 and -180.0 <= o <= 180.0):
+    # The loop checked both are finite numbers (pyright can't see that).
+    fa, fo = cast(float, a), cast(float, o)
+    if not (-90.0 <= fa <= 90.0 and -180.0 <= fo <= 180.0):
         return None
-    return float(a), float(o)
+    return float(fa), float(fo)
 
 
 def _floor_grid(x: float) -> float:
@@ -142,7 +145,7 @@ class ChipPlan:
         entry: dict = {"label": label, "count": self.count, "bytes": self.bytes}
         if self.sharded:
             rows = []
-            for ix, bbox in zip(self._leaves, self._bboxes):
+            for ix, bbox in zip(self._leaves or (), self._bboxes):
                 box = bbox if bbox is not None else [None, None, None, None]
                 rows.append([*box, int(len(ix)), self._leaf_bytes(ix)])
             entry["sub_chunks"] = self._suffixes()
@@ -164,7 +167,7 @@ class ChipPlan:
                    f"{title_kind} {label}",
                    b"[" + b",".join(self._parts) + b"]")
             return
-        for suffix, ix in zip(self._suffixes(), self._leaves):
+        for suffix, ix in zip(self._suffixes(), self._leaves or ()):
             yield (f"category-index/{name_prefix}{chip_id}-{suffix}.json",
                    f"{title_kind} {label} (area {suffix})",
                    b"[" + b",".join(self._parts[i] for i in ix) + b"]")

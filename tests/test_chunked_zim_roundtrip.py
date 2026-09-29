@@ -173,5 +173,5 @@ def test_torn_chunk_rejected(tmp_path):
                 Path(cp).read_bytes(),
             ))
 
-    with pytest.raises(Exception, match="(size mismatch|sha256|total bytes)"):
+    with pytest.raises(Exception, match=r"(size mismatch|sha256|total bytes)"):
         load_from_zim(zim_path)

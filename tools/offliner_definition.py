@@ -16,6 +16,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -24,11 +25,11 @@ TARGET = ROOT / "offliner-definition.json"
 from streetzim.cli import (  # noqa: E402
     MODEL_VALIDATORS, ZIM_METADATA_FLAGS, ZIMFARM, build_parser)
 
-SKIP_ACTIONS = (argparse._HelpAction, argparse._VersionAction)
+SKIP_ACTIONS = (argparse._HelpAction, argparse._VersionAction)  # pyright: ignore[reportPrivateUsage]
 
 
-def definition() -> dict:
-    flags: dict = {}
+def definition() -> dict[str, Any]:
+    flags: dict[str, dict[str, Any]] = {}
     for action in build_parser()._actions:
         if isinstance(action, SKIP_ACTIONS) or action.help == argparse.SUPPRESS:
             continue
@@ -43,13 +44,14 @@ def definition() -> dict:
         extra = dict(ZIMFARM.get(key, {}))
         if extra.pop("offliner", True) is False:
             continue
-        if isinstance(action, (argparse._StoreTrueAction, argparse.BooleanOptionalAction)):
+        if isinstance(action, (argparse._StoreTrueAction,  # pyright: ignore[reportPrivateUsage]
+                               argparse.BooleanOptionalAction)):
             typ = "boolean"
         elif action.type is int:
             typ = "integer"
         else:
             typ = "string"
-        entry = {
+        entry: dict[str, Any] = {
             "type": typ,
             "required": bool(action.required),
             "title": extra.pop("title", key.replace("_", " ").capitalize()),

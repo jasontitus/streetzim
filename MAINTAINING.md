@@ -67,7 +67,7 @@ builder from depending on any of it.
 ## 2. Day-to-day development
 
 ```bash
-ruff check .                       # syntax errors + pyflakes (ruff.toml)
+ruff check .                       # bug-catching lint families (ruff.toml)
 python tools/pyright_gate.py       # type check: strict modules clean, no new findings
 python tools/offliner_definition.py --check   # Zimfarm definition matches the flags
 python -m pytest tests -q          # ~30 s; tests needing big local ZIMs skip themselves

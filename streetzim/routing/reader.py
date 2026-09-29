@@ -14,8 +14,12 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from libzim.reader import Archive
 
 
 NO_GEOM_V2 = 0xFFFFFF
@@ -165,7 +169,7 @@ def parse_szgm_bytes(buf: bytes) -> tuple[np.ndarray, bytes, int]:
     return geom_offsets, geom_blob, num_geoms
 
 
-def _fetch_chunked_blob(arc, manifest_path: str, chunk_path_prefix: str) -> bytes:
+def _fetch_chunked_blob(arc: Archive, manifest_path: str, chunk_path_prefix: str) -> bytes:
     """Reassemble a chunked entry from a ZIM.
 
     Checks: manifest schema, declared total bytes, sha256 of concatenation.
@@ -206,7 +210,7 @@ def _fetch_chunked_blob(arc, manifest_path: str, chunk_path_prefix: str) -> byte
     return bytes(out)
 
 
-def _try_load_blob(arc, primary_path: str,
+def _try_load_blob(arc: Archive, primary_path: str,
                    chunk_manifest_path: str,
                    chunk_path_prefix: str) -> bytes | None:
     """Try primary path first (single entry). Fall back to the chunk
@@ -283,7 +287,8 @@ def load_from_zim(zim_path: str | Path) -> SZRG:
         else:
             import warnings
             warnings.warn(
-                "v5 SZRG without graph-geoms.bin companion (chunked or inline)"
+                "v5 SZRG without graph-geoms.bin companion (chunked or inline)",
+                stacklevel=2,  # attribute it to load_from_zim's caller
             )
     return g
 

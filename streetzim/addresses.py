@@ -85,7 +85,7 @@ def extract_addresses_pbf(pbf_path, output_path, bbox=None):
         # identically, so cells -1/-2 (a ~22 m strip south of the equator or
         # west of Greenwich) aliased and stretched dedup by one cell there.
         _CELL0 = 1 << 21
-        with open(addr_geojson, "r", encoding="utf-8") as fin, \
+        with open(addr_geojson, encoding="utf-8") as fin, \
              open(output_path, "a", encoding="utf-8") as fout:
             for line in fin:
                 line = line.strip().lstrip("\x1e")
@@ -187,7 +187,7 @@ def extract_addresses_pbf(pbf_path, output_path, bbox=None):
 # regions the worst outcome is an extra Overture row slipping in
 # alongside an equivalent OSM row, which degrades gracefully (dup at
 # same coordinate) and can be tightened later per docs/overture-matching.md.
-_STREET_ABBREV = {
+_STREET_ABBREV: dict[str, str] = {
     "st": "street", "str": "street",
     "ave": "avenue", "av": "avenue",
     "blvd": "boulevard", "bl": "boulevard",
@@ -220,7 +220,7 @@ def _normalize_street(name):
     folded = "".join(
         c for c in _ud.normalize("NFKD", name.lower()) if not _ud.combining(c)
     )
-    tokens = _re.findall(r"[a-z0-9]+", folded)
+    tokens: list[str] = _re.findall(r"[a-z0-9]+", folded)
     return " ".join(_STREET_ABBREV.get(t, t) for t in tokens)
 
 
@@ -304,7 +304,7 @@ def _load_url_cache(path):
     if not path:
         return {}
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return {}
@@ -405,7 +405,7 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     _near_lat = _array("d")
     _near_lon = _array("d")
     osm_count = 0
-    with open(search_jsonl_path, "r", encoding="utf-8") as f:
+    with open(search_jsonl_path, encoding="utf-8") as f:
         for line in f:
             if '"type":"addr"' not in line:
                 # Fast path: ~98% of lines in the world feed aren't
@@ -581,7 +581,7 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
             near_lo = _np.searchsorted(near_keys, k_near, side="left")
             near_hi = _np.searchsorted(near_keys, k_near, side="right")
 
-            for j, (row, num, street_raw, lat, lon, city, attr_key) in enumerate(cand):
+            for j, (row, num, street_raw, lat, lon, city, _attr_key) in enumerate(cand):
                 nearby_attr_dup = False
                 if not dup[j]:
                     lo_j, hi_j = int(near_lo[j]), int(near_hi[j])
@@ -685,7 +685,7 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
     # No intermediate full-feature materialization. Memory bounded by
     # POI count + Overture row count, not total feature count.
     poi_keys = set()  # POI keys seen in source JSONL
-    with open(search_jsonl_path, "r", encoding="utf-8") as f:
+    with open(search_jsonl_path, encoding="utf-8") as f:
         for line in f:
             # Fast pre-filter: skip lines that aren't POIs without
             # parsing JSON. Saves minutes on continent-scale where
@@ -842,7 +842,7 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
     # then append the additions sidecar.
     tmp_path = search_jsonl_path + ".overture_tmp"
     applied = set()  # keys already enriched ("first match wins")
-    with open(search_jsonl_path, "r", encoding="utf-8") as fin, \
+    with open(search_jsonl_path, encoding="utf-8") as fin, \
          open(tmp_path, "w", encoding="utf-8") as out:
         for line in fin:
             if '"type":"poi"' not in line:
@@ -882,7 +882,7 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
             out.write("\n")
         # Append the additions sidecar (already JSONL formatted).
         if additions_count:
-            with open(additions_path, "r", encoding="utf-8") as add_fh:
+            with open(additions_path, encoding="utf-8") as add_fh:
                 shutil.copyfileobj(add_fh, out, length=8 * 1024 * 1024)
     os.replace(tmp_path, search_jsonl_path)
     try:
@@ -958,7 +958,7 @@ def extract_wiki_tags_pbf(pbf_path, bbox=None):
 
         lookup = {}
         count = 0
-        with open(wiki_geojson, "r", encoding="utf-8") as fin:
+        with open(wiki_geojson, encoding="utf-8") as fin:
             for line in fin:
                 line = line.strip().lstrip("\x1e")
                 if not line:

@@ -106,7 +106,7 @@ def get_font(bold=False, size=11):
         path = FONT_BOLD if bold else FONT_REGULAR
         try:
             _font_cache[key] = ImageFont.truetype(path, scaled_size)
-        except (IOError, OSError):
+        except OSError:
             _font_cache[key] = ImageFont.load_default()
     return _font_cache[key]
 
@@ -859,7 +859,7 @@ def create_zim(
 
         # Raster tiles
         tile_count = 0
-        for root, dirs, files in os.walk(raster_tile_dir):
+        for root, _dirs, files in os.walk(raster_tile_dir):
             for fname in files:
                 if not fname.endswith(".png"):
                     continue
@@ -880,7 +880,7 @@ def create_zim(
         # Add satellite tiles if provided
         if satellite_dir and os.path.isdir(satellite_dir):
             sat_count = 0
-            for root, dirs, files in os.walk(satellite_dir):
+            for root, _dirs, files in os.walk(satellite_dir):
                 for fname in files:
                     if not fname.endswith(".webp"):
                         continue

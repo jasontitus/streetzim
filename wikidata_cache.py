@@ -166,7 +166,7 @@ def extract_qids_from_pbf(pbf_path, cache_dir=None):
                     pass
 
             feature = {"name": name, "type": ftype}
-            if lat is not None:
+            if lat is not None and lon is not None:  # set together above
                 feature["lat"] = round(lat, 6)
                 feature["lon"] = round(lon, 6)
 

@@ -68,9 +68,18 @@ include = [
 ]
 strict = [
   "cloud/chip_rules.py",
+  "cloud/manifest_writer.py",
   "cloud/search_shards.py",
   "cloud/viewer_slots.py",
+  "streetzim/__about__.py",
+  "streetzim/__init__.py",
   "streetzim/cli.py",
   "streetzim/progress.py",
+  "streetzim/routing/__init__.py",
+  "streetzim/routing/reader.py",
   "streetzim/zim_metadata.py",
+  "tools/build_viewer.py",
+  "tools/check_openzim_output.py",
+  "tools/measure_build.py",
+  "tools/offliner_definition.py",
 ]

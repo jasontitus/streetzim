@@ -554,7 +554,7 @@ def main():
     if len(results) > 1:
         print("\n=== summary ===")
         print(f"{'mode':10s}  {'time':>9s}  {'dist':>8s}  {'cells':>6s}")
-        for m, t, d, cl, ca in results:
+        for m, t, d, cl, _ca in results:
             d_str = f"{d:.1f}km" if d is not None else "n/a"
             print(f"{m:10s}  {t:>7.1f}s   {d_str:>8s}  {cl:>6d}")
 

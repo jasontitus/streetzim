@@ -1,0 +1,40 @@
+# The fast checks of CI's `checks` job (.github/workflows/ci.yml), before each
+# commit:
+#
+#   pip install pre-commit -r requirements.txt pyright==1.1.409
+#   pre-commit install            # then: pre-commit run --all-files
+#
+# The versions match CI's. The tests (pytest, node) stay in CI and are run by
+# hand: they take longer than a commit hook should.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.8
+    hooks:
+      - id: ruff-check          # rules in ruff.toml; lints, never reformats
+
+  - repo: local
+    hooks:
+      - id: pyright-gate
+        name: pyright (strict modules clean, no new findings elsewhere)
+        entry: env PYRIGHT_PYTHON_FORCE_VERSION=1.1.409 python tools/pyright_gate.py
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: viewer-parts
+        name: viewer index.html matches its parts
+        entry: python tools/build_viewer.py --check
+        language: system
+        files: ^(resources/viewer/|tools/build_viewer\.py$)
+        pass_filenames: false
+      - id: offliner-definition
+        name: offliner-definition.json matches the streetzim flags
+        entry: python tools/offliner_definition.py --check
+        language: system
+        files: ^(streetzim/cli\.py|offliner-definition\.json|tools/offliner_definition\.py|create_osm_zim\.py)$
+        pass_filenames: false
+      - id: core-ops-boundary
+        name: core/ops boundary (ops/README.md)
+        entry: python tools/check_boundary.py
+        language: system
+        pass_filenames: false
+        always_run: true

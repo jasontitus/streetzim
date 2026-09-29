@@ -633,7 +633,7 @@ def _finish_features_streaming(raw_path, output_dir, n_unique):
     print("    Assigning location context to features...", flush=True)
     place_grid = defaultdict(list)
     n_places = 0
-    with open(raw_path, "r", encoding="utf-8") as fin:
+    with open(raw_path, encoding="utf-8") as fin:
         for line in fin:
             f = json.loads(line)
             if f.get("type") == "place":
@@ -661,7 +661,7 @@ def _finish_features_streaming(raw_path, output_dir, n_unique):
 
     t_ann = time.time()
     done_rows = 0
-    with open(raw_path, "r", encoding="utf-8") as fin, \
+    with open(raw_path, encoding="utf-8") as fin, \
             open(keyed_path, "w", encoding="utf-8") as fout, \
             ProcessPoolExecutor(max_workers=workers,
                                 initializer=_init_location_worker,
@@ -711,7 +711,7 @@ def _finish_features_streaming(raw_path, output_dir, n_unique):
     os.unlink(keyed_path)
 
     features_path = os.path.join(output_dir, "search_features.jsonl")
-    with open(sorted_path, "r", encoding="utf-8") as fin, \
+    with open(sorted_path, encoding="utf-8") as fin, \
             open(features_path, "w", encoding="utf-8") as fout:
         for line in fin:
             parts = line.split("\t", 2)
@@ -820,7 +820,7 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
         total_features = 0
         ctx = multiprocessing.get_context("spawn")
         with ctx.Pool(num_workers) as pool:
-            for output_file, batch_count, batch_feats in pool.imap_unordered(
+            for _output_file, batch_count, batch_feats in pool.imap_unordered(
                 _process_tile_partition, partitions
             ):
                 processed += batch_count
@@ -859,7 +859,7 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
             tmp_file = part_args[4]
             if not os.path.exists(tmp_file):
                 continue
-            with open(tmp_file, "r") as f:
+            with open(tmp_file) as f:
                 for line in f:
                     feat = json.loads(line)
                     dedup_key = int.from_bytes(hashlib.blake2b(
@@ -1142,7 +1142,7 @@ def merge_streets_in_file(path):
         return (0, 0)
     tmp = path + ".merging"
     n_in = n_out = 0
-    with open(path, "r", encoding="utf-8") as fin, \
+    with open(path, encoding="utf-8") as fin, \
             open(tmp, "w", encoding="utf-8") as fout:
         group, group_name = [], None
 
