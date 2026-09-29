@@ -8,6 +8,7 @@ All caches live alongside `create_osm_zim.py` in the project root. They are desi
 |-------|------|---------|-------------|
 | `satellite_cache_sources/` | ~38 GB | JPEG source tiles | All satellite builds (any format/size) |
 | `satellite_cache_{fmt}_{size}/` | 6–23 GB | Encoded tiles | Builds with matching format+size |
+| `satellite_<source>/` | small | JPEG sources + encoded tiles of another EOX year (e.g. `satellite_s2cloudless-2016/{sources,avif_256}/`) | Builds with `--satellite-source <source>` |
 | `terrain_cache/` | ~633 GB | Terrain-RGB + DEM sources | All terrain builds |
 | `wikidata_cache/` | ~1 GB | 3.15M Q-IDs | All builds with `--wikidata` |
 | `search_cache/` | ~16 GB | World search JSONL | All builds with `--search-cache` |
@@ -20,6 +21,12 @@ Total footprint: ~1 TB.
 ## Satellite Tile Cache
 
 **Two-tier architecture:** raw JPEG sources are downloaded once, then transcoded to the target format (WebP or AVIF) per-build.
+
+The two caches below hold the 2021 mosaic (`s2cloudless-2021`, the builder's
+default source). Any other `--satellite-source` gets its own folder,
+`satellite_<source>/sources/` and `satellite_<source>/<format>_<size>/`, so
+tiles of one year are never reused for another (the years have different
+licences; `streetzim/satellite_sources.py`).
 
 ### Source Cache (`satellite_cache_sources/`)
 

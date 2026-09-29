@@ -111,7 +111,7 @@ def test_illustration_svg_and_garbage(tmp_path):
 # ------------------------------------------------------------ create_zim
 
 
-def _build(tmp_path, **kw):
+def _build(tmp_path, map_config_extra=None, **kw):
     libzim = pytest.importorskip("libzim.reader")
     mvt = pytest.importorskip("mapbox_vector_tile")
     from streetzim.zim_writer import create_zim
@@ -126,7 +126,7 @@ def _build(tmp_path, **kw):
         maplibre_js_path=str(tmp_path / "ml.js"),
         maplibre_css_path=str(tmp_path / "ml.css"),
         viewer_html_path=str(ROOT / "resources/viewer/index.html"),
-        map_config={"name": "Monaco"}, name="OSM - Monaco",
+        map_config={"name": "Monaco", **(map_config_extra or {})}, name="OSM - Monaco",
         bbox=(7.40, 43.72, 7.44, 43.76),
         search_features=[{"name": "Casino", "type": "poi", "subtype": "casino",
                           "lat": 43.739, "lon": 7.428}],

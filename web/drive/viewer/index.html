@@ -178,7 +178,7 @@
      occupies bottom 10..54, so the scale bar at bottom:0 (+10px of
      MapLibre's own margin) printed straight on top of its second line.
      Verified by injection at 320/390/430 before editing. */
-  .maplibregl-ctrl-bottom-left { bottom: calc(48px + var(--safe-bottom, 0px)); }
+  .maplibregl-ctrl-bottom-left { bottom: calc(max(48px, var(--sz-attrib-h, 0px) + 4px) + var(--safe-bottom, 0px)); }
   /* Keep the locate button above the DEAD TOUCH BAND next to the app's bottom
      toolbar: in the Kiwix WebView, taps in the lowest ~50px are swallowed by
      the native toolbar hit-slop / home-indicator gestures even though the
@@ -227,7 +227,9 @@
        this label inside it — an 18 px overlap the detector confirmed at 320,
        390 and 430. Pre-dates the mobile merge; the Kiwix safe-area inset was
        masking it by lifting everything bottom-anchored clear. */
-    position: absolute; bottom: calc(84px + var(--safe-bottom, 0px)); left: 10px; z-index: 1;
+    /* --sz-attrib-h: the attribution's height when it wraps further
+       (120-map-init-and-style.js). */
+    position: absolute; bottom: calc(max(84px, var(--sz-attrib-h, 0px) + 40px) + var(--safe-bottom, 0px)); left: 10px; z-index: 1;
     background: rgba(255,255,255,0.65); padding: 3px 8px;
     border-radius: 4px; font-family: var(--ui-font);
     font-size: 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
@@ -542,7 +544,7 @@
     /* Left of MapLibre's bottom-right control stack (the locate button,
        44 px wide on a coarse pointer): at right:10px its lower third sat
        under that button on phones. */
-    position: absolute; bottom: calc(58px + var(--safe-bottom, 0px)); right: 64px; z-index: 2;
+    position: absolute; bottom: calc(max(58px, var(--sz-attrib-h, 0px) + 14px) + var(--safe-bottom, 0px)); right: 64px; z-index: 2;
     background: rgba(255,255,255,0.65); border: none; border-radius: 4px;
     padding: 2px 7px; font-size: 11px; cursor: pointer;
     font-family: var(--ui-font); color: var(--text-secondary);
@@ -575,7 +577,12 @@
     margin: 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5;
   }
   #attr-dialog .license {
-    font-size: 11px; color: var(--text-tertiary); font-style: italic;
+    /* --text-secondary: 4.8:1 on the white dialog (tertiary was 2.5:1). */
+    font-size: 11px; color: var(--text-secondary); font-style: italic;
+  }
+  #attr-dialog #about-notice {
+    margin-top: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);
+    border-left: 3px solid var(--accent); padding-left: 8px;
   }
   #attr-close {
     position: absolute; top: 12px; right: 14px;
@@ -1291,6 +1298,7 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
       <p id="about-title">Offline OpenStreetMap</p>
       <p id="about-desc"></p>
       <p class="license" id="about-meta"></p>
+      <p id="about-notice" role="note" style="display:none;"></p>
     </section>
     <h2>Data Sources &amp; Licenses</h2>
     <section>
@@ -1310,8 +1318,8 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
     </section>
     <section id="attr-satellite-section" style="display:none;">
       <h3>Satellite Imagery</h3>
-      <p>Sentinel-2 Cloudless by EOX IT Services GmbH</p>
-      <p class="license">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA 4.0) &mdash; s2maps.eu</p>
+      <p id="attr-satellite-by">Sentinel-2 Cloudless by EOX IT Services GmbH</p>
+      <p class="license" id="attr-satellite-license">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA 4.0) &mdash; s2maps.eu</p>
     </section>
     <section id="attr-terrain-section" style="display:none;">
       <h3>Terrain / Elevation</h3>
@@ -1995,6 +2003,17 @@ if (!window.__szUnsupported) fetchConfig(1)
     map.addControl(geolocate, 'bottom-right');
     geolocate.on('geolocate', function(pos) { _onLocated(pos); });
 
+    // #info, #attr-btn and the scale bar sit above MapLibre's attribution,
+    // which wraps to more lines on a phone when the satellite credit joins
+    // it: its height is published as --sz-attrib-h for their CSS.
+    (function () {
+      var attrib = document.querySelector('.maplibregl-ctrl-attrib');
+      if (!attrib || typeof ResizeObserver === 'undefined') return;
+      new ResizeObserver(function () {
+        document.documentElement.style.setProperty('--sz-attrib-h', attrib.offsetHeight + 'px');
+      }).observe(attrib);
+    })();
+
     // Satellite layer toggle
     if (config.hasSatellite) {
       var toggleBtn = document.getElementById('layer-toggle');
@@ -2015,9 +2034,13 @@ if (!window.__szUnsupported) fetchConfig(1)
         var satExt = config.satelliteFormat || 'webp';
         var satTileSize = config.satelliteTileSize || 256;
         // Use zimtile:// protocol for retry logic on Kiwix service worker
+        // EOX requires its credit in the map itself; MapLibre shows a
+        // source's attribution while one of its layers is visible.
+        var satCredit = _szSatelliteCreditHtml(config);
         map.addSource('satellite', {
           type: 'raster',
           tiles: ['zimtile://' + baseUrl + 'satellite/{z}/{x}/{y}.' + satExt],
+          attribution: satCredit,
           tileSize: satTileSize,
           minzoom: 0,
           maxzoom: config.satelliteMaxZoom || 14
@@ -3733,6 +3756,47 @@ function _szMonth(d) {
 // Text for the About panel. Newer ZIMs carry title/description/
 // generator in map-config.json (streetzim/zim_writer.py _add_map_config);
 // older ones only name and buildDate, and every field is optional.
+// The satellite imagery's credit (EOX requires it wherever the imagery is
+// shown) and licence. map-config.json names them since the source became a
+// choice (streetzim/satellite_sources.py); a ZIM from before carries the
+// 2021 mosaic, CC BY-NC-SA 4.0. null without a satellite layer.
+function _szSatellite(config) {
+  if (!config || !config.hasSatellite) return null;
+  if (!config.satelliteAttribution) {
+    return { attribution: 'Sentinel-2 cloudless - https://s2maps.eu by EOX IT Services GmbH' +
+             ' (Contains modified Copernicus Sentinel data 2021)',
+             license: 'CC BY-NC-SA 4.0', licenseUrl: 'https://creativecommons.org/licenses/by-nc-sa/4.0/',
+             nonCommercial: true };
+  }
+  return { attribution: String(config.satelliteAttribution),
+           license: String(config.satelliteLicense || ''),
+           licenseUrl: String(config.satelliteLicenseUrl || ''),
+           year: String(config.satelliteYear || ''),
+           nonCommercial: !!config.satelliteNonCommercial };
+}
+
+function _szEsc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// The short credit on the map itself while the imagery is shown (the full
+// one is in About): links are fixed EOX addresses, and the licence link only
+// a Creative Commons 4.0 URL; everything taken from map-config is escaped.
+function _szSatelliteCreditHtml(config) {
+  var sat = _szSatellite(config);
+  if (!sat) return '';
+  var year = sat.year || (config.satelliteAttribution ? '' : '2021');
+  var lic = _szEsc(sat.license);
+  if (/^https:\/\/creativecommons\.org\/licenses\/[a-z-]+\/4\.0\/$/.test(sat.licenseUrl)) {
+    lic = '<a href="' + sat.licenseUrl + '" target="_blank" rel="noopener">' + lic + '</a>';
+  }
+  return '&copy; <a href="https://cloudless.eox.at" target="_blank" rel="noopener">EOxCloudless</a>' +
+    (year ? ' ' + _szEsc(year) : '') +
+    ' by <a href="https://eox.at" target="_blank" rel="noopener">EOX</a> &middot; ' + lic +
+    (sat.nonCommercial ? ' (non-commercial)' : '');
+}
+
 function _szAboutText(config) {
   config = config || {};
   var meta = [];
@@ -3742,10 +3806,18 @@ function _szAboutText(config) {
     meta.push('Built' + (when ? ' ' + when : '') + (config.generator ? ' with ' + config.generator : ''));
   }
   meta.push('viewer: streetzim ' + SZ_VIEWER_VERSION);
+  var sat = _szSatellite(config);
   return {
     title: config.title || config.name || 'Offline OpenStreetMap',
     desc: config.description || '',
-    meta: meta.join(' · ')
+    meta: meta.join(' · '),
+    // A ZIM with non-commercial imagery says so first thing in About.
+    notice: sat && sat.nonCommercial ?
+      'Restricted: the satellite imagery is licensed ' + sat.license +
+      ' and may be used for non-commercial purposes only; the rest of this map is openly licensed.' : '',
+    satCredit: sat ? sat.attribution : '',
+    satLicense: sat ? sat.license + (sat.nonCommercial ? ', non-commercial use only' : '') +
+      (sat.licenseUrl ? ' \u2014 ' + sat.licenseUrl.replace(/^https?:\/\//, '') : '') : ''
   };
 }
 
@@ -3758,6 +3830,13 @@ function initAbout(config) {
   set('about-title', t.title);
   set('about-desc', t.desc);
   set('about-meta', t.meta);
+  set('about-notice', t.notice);
+  var notice = document.getElementById('about-notice');
+  if (notice) notice.style.display = t.notice ? '' : 'none';
+  if (t.satCredit) {
+    set('attr-satellite-by', t.satCredit);
+    set('attr-satellite-license', t.satLicense);
+  }
   // Focus moves into the dialog on open, Tab stays inside it, and focus
   // returns to the button however it closes (it is aria-modal); Escape
   // closes it without reaching the other Escape handlers (find results,

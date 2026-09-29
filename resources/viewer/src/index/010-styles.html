@@ -49,7 +49,7 @@
      occupies bottom 10..54, so the scale bar at bottom:0 (+10px of
      MapLibre's own margin) printed straight on top of its second line.
      Verified by injection at 320/390/430 before editing. */
-  .maplibregl-ctrl-bottom-left { bottom: calc(48px + var(--safe-bottom, 0px)); }
+  .maplibregl-ctrl-bottom-left { bottom: calc(max(48px, var(--sz-attrib-h, 0px) + 4px) + var(--safe-bottom, 0px)); }
   /* Keep the locate button above the DEAD TOUCH BAND next to the app's bottom
      toolbar: in the Kiwix WebView, taps in the lowest ~50px are swallowed by
      the native toolbar hit-slop / home-indicator gestures even though the
@@ -98,7 +98,9 @@
        this label inside it — an 18 px overlap the detector confirmed at 320,
        390 and 430. Pre-dates the mobile merge; the Kiwix safe-area inset was
        masking it by lifting everything bottom-anchored clear. */
-    position: absolute; bottom: calc(84px + var(--safe-bottom, 0px)); left: 10px; z-index: 1;
+    /* --sz-attrib-h: the attribution's height when it wraps further
+       (120-map-init-and-style.js). */
+    position: absolute; bottom: calc(max(84px, var(--sz-attrib-h, 0px) + 40px) + var(--safe-bottom, 0px)); left: 10px; z-index: 1;
     background: rgba(255,255,255,0.65); padding: 3px 8px;
     border-radius: 4px; font-family: var(--ui-font);
     font-size: 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
@@ -413,7 +415,7 @@
     /* Left of MapLibre's bottom-right control stack (the locate button,
        44 px wide on a coarse pointer): at right:10px its lower third sat
        under that button on phones. */
-    position: absolute; bottom: calc(58px + var(--safe-bottom, 0px)); right: 64px; z-index: 2;
+    position: absolute; bottom: calc(max(58px, var(--sz-attrib-h, 0px) + 14px) + var(--safe-bottom, 0px)); right: 64px; z-index: 2;
     background: rgba(255,255,255,0.65); border: none; border-radius: 4px;
     padding: 2px 7px; font-size: 11px; cursor: pointer;
     font-family: var(--ui-font); color: var(--text-secondary);
@@ -446,7 +448,12 @@
     margin: 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5;
   }
   #attr-dialog .license {
-    font-size: 11px; color: var(--text-tertiary); font-style: italic;
+    /* --text-secondary: 4.8:1 on the white dialog (tertiary was 2.5:1). */
+    font-size: 11px; color: var(--text-secondary); font-style: italic;
+  }
+  #attr-dialog #about-notice {
+    margin-top: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);
+    border-left: 3px solid var(--accent); padding-left: 8px;
   }
   #attr-close {
     position: absolute; top: 12px; right: 14px;

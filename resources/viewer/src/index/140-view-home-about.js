@@ -232,6 +232,47 @@ function _szMonth(d) {
 // Text for the About panel. Newer ZIMs carry title/description/
 // generator in map-config.json (streetzim/zim_writer.py _add_map_config);
 // older ones only name and buildDate, and every field is optional.
+// The satellite imagery's credit (EOX requires it wherever the imagery is
+// shown) and licence. map-config.json names them since the source became a
+// choice (streetzim/satellite_sources.py); a ZIM from before carries the
+// 2021 mosaic, CC BY-NC-SA 4.0. null without a satellite layer.
+function _szSatellite(config) {
+  if (!config || !config.hasSatellite) return null;
+  if (!config.satelliteAttribution) {
+    return { attribution: 'Sentinel-2 cloudless - https://s2maps.eu by EOX IT Services GmbH' +
+             ' (Contains modified Copernicus Sentinel data 2021)',
+             license: 'CC BY-NC-SA 4.0', licenseUrl: 'https://creativecommons.org/licenses/by-nc-sa/4.0/',
+             nonCommercial: true };
+  }
+  return { attribution: String(config.satelliteAttribution),
+           license: String(config.satelliteLicense || ''),
+           licenseUrl: String(config.satelliteLicenseUrl || ''),
+           year: String(config.satelliteYear || ''),
+           nonCommercial: !!config.satelliteNonCommercial };
+}
+
+function _szEsc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// The short credit on the map itself while the imagery is shown (the full
+// one is in About): links are fixed EOX addresses, and the licence link only
+// a Creative Commons 4.0 URL; everything taken from map-config is escaped.
+function _szSatelliteCreditHtml(config) {
+  var sat = _szSatellite(config);
+  if (!sat) return '';
+  var year = sat.year || (config.satelliteAttribution ? '' : '2021');
+  var lic = _szEsc(sat.license);
+  if (/^https:\/\/creativecommons\.org\/licenses\/[a-z-]+\/4\.0\/$/.test(sat.licenseUrl)) {
+    lic = '<a href="' + sat.licenseUrl + '" target="_blank" rel="noopener">' + lic + '</a>';
+  }
+  return '&copy; <a href="https://cloudless.eox.at" target="_blank" rel="noopener">EOxCloudless</a>' +
+    (year ? ' ' + _szEsc(year) : '') +
+    ' by <a href="https://eox.at" target="_blank" rel="noopener">EOX</a> &middot; ' + lic +
+    (sat.nonCommercial ? ' (non-commercial)' : '');
+}
+
 function _szAboutText(config) {
   config = config || {};
   var meta = [];
@@ -241,10 +282,18 @@ function _szAboutText(config) {
     meta.push('Built' + (when ? ' ' + when : '') + (config.generator ? ' with ' + config.generator : ''));
   }
   meta.push('viewer: streetzim ' + SZ_VIEWER_VERSION);
+  var sat = _szSatellite(config);
   return {
     title: config.title || config.name || 'Offline OpenStreetMap',
     desc: config.description || '',
-    meta: meta.join(' · ')
+    meta: meta.join(' · '),
+    // A ZIM with non-commercial imagery says so first thing in About.
+    notice: sat && sat.nonCommercial ?
+      'Restricted: the satellite imagery is licensed ' + sat.license +
+      ' and may be used for non-commercial purposes only; the rest of this map is openly licensed.' : '',
+    satCredit: sat ? sat.attribution : '',
+    satLicense: sat ? sat.license + (sat.nonCommercial ? ', non-commercial use only' : '') +
+      (sat.licenseUrl ? ' \u2014 ' + sat.licenseUrl.replace(/^https?:\/\//, '') : '') : ''
   };
 }
 
@@ -257,6 +306,13 @@ function initAbout(config) {
   set('about-title', t.title);
   set('about-desc', t.desc);
   set('about-meta', t.meta);
+  set('about-notice', t.notice);
+  var notice = document.getElementById('about-notice');
+  if (notice) notice.style.display = t.notice ? '' : 'none';
+  if (t.satCredit) {
+    set('attr-satellite-by', t.satCredit);
+    set('attr-satellite-license', t.satLicense);
+  }
   // Focus moves into the dialog on open, Tab stays inside it, and focus
   // returns to the button however it closes (it is aria-modal); Escape
   // closes it without reaching the other Escape handlers (find results,

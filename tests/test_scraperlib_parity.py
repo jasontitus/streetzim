@@ -21,7 +21,7 @@ pytestmark = pytest.mark.skipif(not scraperlib.AVAILABLE,
 
 LIMITS = {"Name": 0, "Title": zm.TITLE_MAX, "Description": zm.DESCRIPTION_MAX,
           "LongDescription": zm.LONG_DESCRIPTION_MAX, "Creator": 0,
-          "Publisher": 0, "Scraper": 0}
+          "Publisher": 0, "Scraper": 0, "Flavour": 0}
 
 TEXTS = [
     "Monaco", "  padded\t\n", "", "   ", "\t\r\n", "a\x00b", "a\x07b\x1bc",
