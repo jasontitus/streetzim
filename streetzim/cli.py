@@ -202,11 +202,13 @@ def check_bbox(b: BBox, what: str) -> BBox:
                          "with min < max in range (minlon > maxlon, or maxlon "
                          "past 180, for an area across the antimeridian)")
     nb = area.normalize(b)
-    if area.crosses(nb) and nb[2] - nb[0] > 180:
-        # Most likely minlon and maxlon swapped, not a band round the world.
-        raise ValueError(f"{what}: {b} would cross the antimeridian and be "
-                         f"{nb[2] - nb[0]:.0f}° wide; an area across it is at "
-                         "most 180° wide (are minlon and maxlon swapped?)")
+    if nb[2] - nb[0] > 180:
+        # Areas are bounding boxes: one this wide is a band round the world
+        # (or, across the antimeridian, most likely swapped minlon/maxlon).
+        hint = (" (are minlon and maxlon swapped?)" if area.crosses(nb) else
+                "; build the parts separately")
+        raise ValueError(f"{what}: {b} is {nb[2] - nb[0]:.0f}° wide; an area is "
+                         f"at most 180° wide{hint}")
     return nb
 
 
@@ -227,6 +229,12 @@ def _unwrap_ring(lons: list[float]) -> list[float]:
     run = [lons[0]]
     for x in lons[1:]:
         run.append(x - 360 * round((x - run[-1]) / 360))
+    if max(run) - min(run) <= 0 or abs(run[-1] - run[0]) >= 180:
+        # Followed point to point, the ring goes all the way round (a
+        # whole-world or polar ring): there is no box to cut.
+        raise ValueError("a .poly ring goes all the way round the world; an "
+                         "area is at most 180° wide — use a smaller polygon "
+                         "or --bbox")
     return run
 
 

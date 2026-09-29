@@ -244,7 +244,6 @@ def test_polys_and_bboxes_across_the_antimeridian_are_one_unwrapped_box(tmp_path
     assert cli.parse_bbox_arg("172.8,-23,-176.5,-11") == (172.8, -23.0, 183.5, -11.0)
     assert cli.parse_bbox_arg("172.8,-23,183.5,-11") == (172.8, -23.0, 183.5, -11.0)
     assert cli.parse_bbox_arg("170,10,180,20") == (170.0, 10.0, 180.0, 20.0)
-    assert cli.parse_bbox_arg("-180,-90,180,90") == (-180.0, -90.0, 180.0, 90.0)
     for bad in ("10,20,5,30", "1,2,3", "0,-91,1,1", "170,10,550,20", "5,1,5,2"):
         with pytest.raises(ValueError):
             cli.parse_bbox_arg(bad)
@@ -306,3 +305,21 @@ def test_help_renders(module):
     import importlib
     text = importlib.import_module(module).build_parser().format_help()
     assert "option_strings" not in text and "_ArgumentGroup" not in text
+
+
+def test_bands_round_the_world_are_still_refused(tmp_path, monkeypatch):
+    # The old guard: an area is a box, and one wider than 180° is a band
+    # round the world, crossing or not.
+    for band in ("-170,0,170,10", "-180,-85,180,85", "-180,-90,180,90", "10,0,-10,10"):
+        with pytest.raises(ValueError, match="at most 180"):
+            cli.parse_bbox_arg(band)
+    assert cli.parse_bbox_arg("-90,0,90,10") == (-90.0, 0.0, 90.0, 10.0)   # exactly 180
+    # A whole-world ring has no box: a clear error, not "min < max".
+    _fake_poly(monkeypatch, "world\n1\n  -180 -90\n  180 -90\n  180 90\n"
+                            "  -180 90\n  -180 -90\nEND\nEND\n")
+    with pytest.raises(ValueError, match="all the way round"):
+        plan(["--include-poly", "https://example.org/world.poly", "--pbf-url", "x"], tmp_path)
+    ring = "ring\n1\n" + "".join(f"  {x} -70\n" for x in (-180, -90, 0, 90, 180)) + "END\nEND\n"
+    _fake_poly(monkeypatch, ring)
+    with pytest.raises(ValueError, match="all the way round"):
+        plan(["--include-poly", "https://example.org/ring.poly", "--pbf-url", "x"], tmp_path)
