@@ -419,11 +419,13 @@ const RESOLVE_SRC = slice('async function _findResolveChipDef', 'async function 
 function loadChips(env = {}) {
   const fetch = env.fetch || ((u) => Promise.resolve({ ok: true, status: 200,
     json: () => Promise.resolve(env.manifest) }));
-  const fn = new Function('baseUrl', 'fetch', 'document',
+  const fn = new Function('baseUrl', 'fetch', 'document', '_showFindToast',
     CHIP_AVAIL_SRC + RESOLVE_SRC + '\nreturn { _findChipHas, _findChipsPlan, _findResolveChipDef,' +
-    ' _findFetchCatManifest, _findChipsReconcile, _findChipsApply,' +
-    ' cached: () => _findCatManifest };');
-  return fn('http://z/C/', fetch, env.document || railDocument([]).document);
+    ' _findFetchCatManifest, _findChipsReconcile, _findChipsApply, _findChipsRecheck,' +
+    ' _findChipUnavailable, cached: () => _findCatManifest };');
+  const toasts = env.toasts || [];
+  return fn('http://z/C/', fetch, env.document || railDocument([]).document,
+    (t) => toasts.push(t));
 }
 // fetch stub answering the manifest URL from a script of responses:
 // a number is an HTTP status (200 serves `manifest`), 'net' throws.
@@ -442,9 +444,12 @@ function scriptedFetch(script, manifest) {
 function railDocument(ids) {
   const input = { id: 'search-input', focus() { doc.activeElement = input; } };
   const btns = ids.map((id) => {
-    const b = { hidden: false, dataset: { chip: id }, cls: new Set(),
+    // kbd: focused from the keyboard (matches :focus-visible).
+    const b = { hidden: false, dataset: { chip: id }, cls: new Set(), kbd: false,
                 classList: { contains: (c) => b.cls.has(c) },
-                focus() { doc.activeElement = b; } };
+                matches: (q) => q === ':focus-visible' && b.kbd,
+                focus(kbd = true) { doc.activeElement = b; b.kbd = kbd; },
+                blur() { if (doc.activeElement === b) doc.activeElement = null; } };
     return b;
   });
   const rail = { hidden: false, querySelectorAll: () => btns };
@@ -610,12 +615,149 @@ await ok('reconcile: focus moves off a chip before it is hidden', () => {
   c3._findChipsApply(d3.rail, { total: 1 });
   assert.strictEqual(d3.rail.hidden, true);
   assert.strictEqual(d3.document.activeElement, d3.input);
+  // After a tap (no :focus-visible) focus is dropped, never sent to the
+  // search box — that would pop the soft keyboard on Android.
+  const d5 = railDocument(RAIL);
+  const c5 = loadChips({ document: d5.document });
+  d5.btns[7].focus(false);
+  c5._findChipsApply(d5.rail, { chips: { bars: chipEntry(1), parks: chipEntry(0) } });
+  assert.strictEqual(d5.document.activeElement, null);
   // Focus elsewhere is not touched.
   const d4 = railDocument(RAIL);
   const c4 = loadChips({ document: d4.document });
   d4.btns[1].focus();
   c4._findChipsApply(d4.rail, { chips: { bars: chipEntry(1) } });
   assert.strictEqual(d4.document.activeElement, d4.btns[1]);
+});
+
+await ok('reconcile: the rail goes whenever no chip is left visible', () => {
+  const d = railDocument(['bars', 'parks']);
+  const c = loadChips({ document: d.document });
+  // An unrecognised chip set keeps all; one recognised chip at 0 hides all.
+  c._findChipsApply(d.rail, { chips: { parks: chipEntry(0) } });
+  assert.strictEqual(d.rail.hidden, true);
+  assert.ok(d.btns.every((b) => b.hidden));
+});
+
+await ok('unresolved tap: chip hidden, rail hidden when it was the last, tap focus dropped', () => {
+  const d = railDocument(['bars', 'parks', 'fuel']);
+  const toasts = [];
+  const c = loadChips({ document: d.document, toasts,
+    manifest: { chips: { bars: chipEntry(1), parks: chipEntry(0), fuel: chipEntry(0) } } });
+  return c._findFetchCatManifest().then(() => {
+    d.btns[1].focus(false);                 // tapped Parks
+    c._findChipUnavailable({ id: 'parks', label: 'Parks' });
+    assert.deepStrictEqual(d.btns.map((b) => b.hidden), [false, true, false]);
+    assert.strictEqual(d.rail.hidden, false);
+    assert.strictEqual(d.document.activeElement, null, 'blurred, not the search box');
+    assert.deepStrictEqual(toasts, ['No parks in this map']);
+    // Bars and Gas go too (Gas by keyboard): the rail goes, focus to the input.
+    d.btns[0].hidden = true;
+    d.btns[2].focus(true);
+    c._findChipUnavailable({ id: 'fuel', label: 'Gas' });
+    assert.strictEqual(d.rail.hidden, true);
+    assert.strictEqual(d.document.activeElement, d.input);
+  });
+});
+
+await ok('unresolved tap on a ZIM with no chip data hides the rail', async () => {
+  const d = railDocument(RAIL);
+  const toasts = [];
+  const c = loadChips({ document: d.document, toasts, manifest: { total: 3 } });
+  await c._findFetchCatManifest();
+  c._findChipUnavailable({ id: 'food', label: 'Food & Drink' });
+  assert.strictEqual(d.rail.hidden, true);
+  assert.deepStrictEqual(toasts, ['No category search in this map']);
+});
+
+// A fetch whose answers the test releases one at a time.
+function deferredFetch(manifest) {
+  const pending = [];
+  const fetch = () => new Promise((res, rej) => pending.push({ res, rej }));
+  const answer = (status) => {
+    const p = pending.shift();
+    if (status === 'net') p.rej(new TypeError('Failed to fetch'));
+    else p.res({ ok: status === 200, status, json: () => Promise.resolve(manifest) });
+    return flush();
+  };
+  return { fetch, pending, answer };
+}
+
+await ok('manifest: concurrent callers share one fetch', async () => {
+  const f = deferredFetch({ chips: { bars: chipEntry(1) } });
+  const d = railDocument(RAIL);
+  const c = loadChips({ fetch: f.fetch, document: d.document });
+  const r = c._findChipsReconcile(d.rail);
+  const tap = c._findFetchCatManifest();
+  assert.strictEqual(f.pending.length, 1, 'one request in flight');
+  await f.answer(200);
+  await r;
+  assert.deepStrictEqual(await tap, { chips: { bars: chipEntry(1) } });
+  assert.deepStrictEqual(d.btns.filter((b) => !b.hidden).map((b) => b.dataset.chip), ['bars']);
+});
+
+await ok('reconcile answers first (503), the tap\'s later fetch second (200)', async () => {
+  const f = deferredFetch({ chips: { bars: chipEntry(1), parks: chipEntry(0) } });
+  const d = railDocument(RAIL);
+  const c = loadChips({ fetch: f.fetch, document: d.document });
+  const r = c._findChipsReconcile(d.rail);
+  await f.answer(503);
+  await r;
+  assert.ok(d.btns.every((b) => !b.hidden), 'full rail after the 503');
+  d.btns[7].dataset.szLoading = '1';       // Parks tapped: its fetch goes out
+  const tap = c._findFetchCatManifest();
+  assert.strictEqual(f.pending.length, 1);
+  await f.answer(200);
+  await tap;
+  // Reconciled — except the busy Parks chip, which the tap's done() rechecks.
+  assert.deepStrictEqual(d.btns.filter((b) => !b.hidden).map((b) => b.dataset.chip), ['bars', 'parks']);
+  delete d.btns[7].dataset.szLoading;
+  c._findChipsRecheck();
+  assert.deepStrictEqual(d.btns.filter((b) => !b.hidden).map((b) => b.dataset.chip), ['bars']);
+});
+
+// initFindChips' act(): data-sz-loading while the tap runs, cleared after.
+const INIT_CHIPS_SRC = slice('function initFindChips(map)', 'function _findChipPaintActive');
+function runInitChips(loadChipOnMap) {
+  const btns = [];
+  const el = (tag) => {
+    const e = { tag, children: [], dataset: {}, on: {}, setAttribute() {},
+      appendChild(c) { e.children.push(c); if (tag === 'div') btns.push(c); return c; },
+      addEventListener(t, f) { e.on[t] = f; } };
+    return e;
+  };
+  const rail = el('div');
+  const document = { createElement: el,
+    getElementById: (id) => (id === 'find-chips' ? rail : null) };
+  const calls = { recheck: 0, toasts: [] };
+  new Function('document', 'EXPLORE_CHIPS', 'loadChipOnMap', '_findChipsReconcile',
+    '_findChipsRecheck', '_findChipPaintActive', '_showFindToast', 'console',
+    'var _szChipSynth = 0, _chipOrigPlaceholder = null;\n' + INIT_CHIPS_SRC +
+    '\ninitFindChips({});')(document, [{ id: 'bars', label: 'Bars', emoji: 'b' }],
+    loadChipOnMap, () => {}, () => { calls.recheck++; }, () => {},
+    (t) => calls.toasts.push(t), { warn() {} });
+  return { btn: btns[0], calls };
+}
+
+await ok('act(): a chip is marked loading while its tap runs', async () => {
+  let release;
+  const run = runInitChips(() => new Promise((r) => { release = r; }));
+  run.btn.on.click();
+  assert.strictEqual(run.btn.dataset.szLoading, '1');
+  release();
+  await flush();
+  assert.strictEqual(run.btn.dataset.szLoading, undefined);
+  assert.strictEqual(run.calls.recheck, 1, 'plan re-applied after the tap');
+  // A failed load clears it too, and says so.
+  let fail;
+  const run2 = runInitChips(() => new Promise((_r, j) => { fail = j; }));
+  run2.btn.on.click();
+  assert.strictEqual(run2.btn.dataset.szLoading, '1');
+  fail(new Error('boom'));
+  await flush();
+  assert.strictEqual(run2.btn.dataset.szLoading, undefined);
+  assert.strictEqual(run2.calls.recheck, 1);
+  assert.match(run2.calls.toasts[0], /Couldn.t load bars/);
 });
 
 // _findFetchChipData's sub_chunks fan-out (legacy name-hash buckets).

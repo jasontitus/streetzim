@@ -56,6 +56,7 @@ function _findChipsPlan(manifest, ids) {
 }
 
 var _findCatManifest = null;
+var _findCatManifestP = null;      // the one in-flight manifest fetch
 var _findChipsRail = null;         // the rail, once initFindChips built it
 var _findChipsStale = false;       // reconciled against an unknown manifest
 
@@ -66,7 +67,10 @@ var _findChipsStale = false;       // reconciled against an unknown manifest
 // call tries again. Caching {} for a 503 hid the rail for the session.
 function _findFetchCatManifest() {
   if (_findCatManifest) return Promise.resolve(_findCatManifest);
-  return fetch(baseUrl + 'category-index/manifest.json')
+  // Callers arriving while a fetch is in flight share it (the rail's
+  // reconcile and an early chip tap used to request it twice).
+  if (_findCatManifestP) return _findCatManifestP;
+  var p = fetch(baseUrl + 'category-index/manifest.json')
     .then(function(r) {
       if (r.ok) return r.json();
       if (r.status === 404 || r.status === 410) return {};
@@ -80,7 +84,33 @@ function _findFetchCatManifest() {
       }
       return _findCatManifest;
     })
-    .catch(function() { return { _szUnknown: true }; });
+    .catch(function() { return { _szUnknown: true }; })
+    .then(function(m) { _findCatManifestP = null; return m; });
+  _findCatManifestP = p;
+  return p;
+}
+
+// After a tap settles: re-apply the plan, so a chip the late reconcile
+// skipped while it was busy is checked again.
+function _findChipsRecheck() {
+  if (_findCatManifest && _findChipsRail) _findChipsApply(_findChipsRail, _findCatManifest);
+}
+
+// A tapped chip this ZIM cannot serve: hide it (and the rail when no chip
+// is left) and say why.
+function _findChipUnavailable(chipDef) {
+  var m = _findCatManifest || {};
+  var none = !m.chips || !Object.keys(m.chips).length;
+  var rail = document.getElementById('find-chips');
+  if (rail) {
+    var btns = rail.querySelectorAll('.find-chip'), hide = [];
+    for (var i = 0; i < btns.length; i++) {
+      hide.push(btns[i].hidden || btns[i].dataset.chip === chipDef.id);
+    }
+    _findChipsSetHidden(rail, btns, hide, none || rail.hidden);
+  }
+  _showFindToast(none ? 'No category search in this map'
+                      : 'No ' + chipDef.label.toLowerCase() + ' in this map');
 }
 
 // Hide what the manifest says this ZIM cannot serve. A chip that is active
@@ -103,14 +133,23 @@ function _findChipsApply(rail, m) {
   _findChipsSetHidden(rail, btns, hide, railHidden);
 }
 
-// Apply hidden flags, first moving focus off anything about to vanish: to
-// the next chip that stays visible, else to the search box.
+// Apply hidden flags. The rail goes whenever no chip is left visible.
+// Focus leaves anything about to vanish: after keyboard use
+// (:focus-visible) to the next visible chip, else the search box; after a
+// tap it is just dropped — focusing the search box would pop the soft
+// keyboard on Android.
 function _findChipsSetHidden(rail, btns, hide, railHidden) {
+  var anyShown = false;
+  for (var s = 0; s < btns.length; s++) if (!hide[s]) { anyShown = true; break; }
+  if (!anyShown) railHidden = true;
   var act = document.activeElement;
-  var target = null;
+  var target = null, drop = false;
   for (var i = 0; i < btns.length; i++) {
     if (btns[i] !== act) continue;
     if (!hide[i] && !railHidden) break;
+    var keyboard = false;
+    try { keyboard = !!(act.matches && act.matches(':focus-visible')); } catch (e) {}
+    if (!keyboard) { drop = true; break; }
     for (var k = 1; k < btns.length && !railHidden; k++) {
       var n = (i + k) % btns.length;
       if (!hide[n]) { target = btns[n]; break; }
@@ -121,6 +160,7 @@ function _findChipsSetHidden(rail, btns, hide, railHidden) {
   for (var j = 0; j < btns.length; j++) btns[j].hidden = !!hide[j];
   rail.hidden = !!railHidden;
   if (target && typeof target.focus === 'function') target.focus();
+  else if (drop && typeof act.blur === 'function') act.blur();
 }
 
 // The rail is built before the category manifest is fetched, so reconcile
@@ -188,7 +228,7 @@ function initFindChips(map) {
       // the double-fire when a real click arrives after a synthetic tap.
       var act = function() {
         btn.dataset.szLoading = '1';     // the reconcile leaves it alone
-        var done = function() { delete btn.dataset.szLoading; };
+        var done = function() { delete btn.dataset.szLoading; _findChipsRecheck(); };
         loadChipOnMap(map, c).then(done, function(err) {
           done();
           // A chip tapped before the rail reconciles (or one whose file this
@@ -399,18 +439,7 @@ async function loadChipOnMap(map, chipDef, opts) {
   opts = opts || {};
   var _resolved = await _findResolveChipDef(chipDef);
   if (!_resolved) {
-    var _m = _findCatManifest || {};
-    var _none = !_m.chips || !Object.keys(_m.chips).length;
-    var _rail = document.getElementById('find-chips');
-    if (_rail) {                           // the reconcile does this too
-      var _btns = _rail.querySelectorAll('.find-chip'), _hide = [];
-      for (var _i = 0; _i < _btns.length; _i++) {
-        _hide.push(_btns[_i].hidden || _btns[_i].dataset.chip === chipDef.id);
-      }
-      _findChipsSetHidden(_rail, _btns, _hide, _none || _rail.hidden);
-    }
-    _showFindToast(_none ? 'No category search in this map'
-                         : 'No ' + chipDef.label.toLowerCase() + ' in this map');
+    _findChipUnavailable(chipDef);
     _findChipPaintActive(null);
     return;
   }
