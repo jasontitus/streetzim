@@ -88,7 +88,7 @@ jobs:
         run: |
           for t in tests/chip_rules_js.test.mjs tests/chip_shards_js.test.mjs \
                    tests/search_shards_js.test.mjs tests/zim_reader_js.test.mjs \
-                   tests/test_zim_http_source.mjs; do
+                   tests/test_zim_http_source.mjs tests/viewer_style_js.test.mjs; do
             echo "::group::$t"
             node "$t"
             echo "::endgroup::"

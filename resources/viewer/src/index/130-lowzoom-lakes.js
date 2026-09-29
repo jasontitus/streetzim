@@ -41,7 +41,7 @@ function makeStyle(config) {
   if (config.bounds) {
     sourceConfig.bounds = config.bounds;
   }
-  return {
+  return _szThemeStyle({
     "version": 8,
     "name": "OSM Offline",
     "sources": {
@@ -572,21 +572,28 @@ function makeStyle(config) {
           "text-halo-width": 1
         }
       },
-      // POI Labels — show more POIs as zoom increases
+      // POI Labels — show more POIs as zoom increases. Icons (136-poi-icons.js)
+      // share the label's symbol, so icon and name collide as one unit and a
+      // POI shows both or neither; the label sits under the disc. A POI with
+      // an icon but no name appears only from z16, where there is room.
       {
         "id": "poi-label",
         "type": "symbol",
         "source": "openmaptiles",
         "source-layer": "poi",
         "minzoom": 14,
-        "filter": ["<=", ["get", "rank"],
-          ["step", ["zoom"], 4, 15, 10, 16, 25]
+        "filter": ["all",
+          ["<=", ["get", "rank"], ["step", ["zoom"], 4, 15, 10, 16, 25]],
+          ["any", ["has", "name"], ["has", "name:latin"], [">=", ["zoom"], 16]]
         ],
         "layout": {
           "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansRegular"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 14, 11, 18, 18],
-          "text-offset": [0, 0.5],
+          "icon-image": _szPoiIconExpr(),
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 14, 0.8, 17, 1],
+          "text-offset": ["case", ["==", _szPoiIconExpr(), ""],
+            ["literal", [0, 0.5]], ["literal", [0, 0.85]]],
           "text-anchor": "top"
         },
         "paint": {
@@ -596,6 +603,6 @@ function makeStyle(config) {
         }
       }
     ]
-  };
+  }, _szPrefersDark());
 }
 
