@@ -99,8 +99,10 @@ docker run --rm -v "$PWD/out:/output" streetzim \
 maps2zim's flag names, ZIM metadata flags checked before any download,
 `{name}_{period}.zim` in an output folder, and a Zimfarm progress file. Its
 flags are described for Zimfarm in `offliner-definition.json`;
-[docs/zimfarm.md](docs/zimfarm.md) covers the default profile and what a
-build costs.
+[docs/zimfarm.md](docs/zimfarm.md) covers the profiles (`--profile full`,
+the default, adds Wikidata, Wikipedia articles and Overture Maps like
+StreetZim's own builds; `--profile basic` fetches nothing but the OSM data),
+how they compare with the production builds, and what a build costs.
 
 ```bash
 pip install -e .              # or a wheel (python -m build; docs/packaging.md), or the Docker image

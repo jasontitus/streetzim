@@ -1,4 +1,4 @@
-# Six jobs (docker builds the image and runs `streetzim` in it as Zimfarm would):
+# Seven jobs (docker builds the image and runs `streetzim` in it as Zimfarm would):
 #   checks     - lint gate, Python unit tests (with coverage), Node viewer/PWA
 #                tests. Fast, offline.
 #   wheel      - `python -m build`, then the wheel installed into a fresh venv
@@ -16,6 +16,8 @@
 #                that rewrite published ZIMs (repackage, in-place viewer patch). Also runs weekly so
 #                upstream drift (Geofabrik, the pinned fonts on their CDN,
 #                tilemaker, libzim) shows up without a code change.
+#   live-full  - weekly and on demand: `streetzim --profile full` in the image against
+#                the live sources (Overture must work; Wikimedia only warns).
 name: CI
 
 on:
@@ -86,6 +88,10 @@ jobs:
             "SQLAlchemy==2.0.41" "PyJWT==2.13.0" "pytz==2025.2" "humanfriendly==10.0" \
             "pycountry==24.6.1" "regex==2025.9.1" "requests==2.33.0"
           PYTHONPATH=/tmp/zimfarm/backend/src /tmp/zfvenv/bin/python tools/check_zimfarm_schema.py
+          # Recipes per --profile through Zimfarm's own models and compute_flags.
+          /tmp/zfvenv/bin/pip install -q "pytest>=8.0"
+          PYTHONPATH=/tmp/zimfarm/backend/src:$PWD /tmp/zfvenv/bin/python -m pytest -q \
+            -p no:cacheprovider -W ignore tests/test_offliner_definition.py -k zimfarm
       - name: Install pytest-cov (pyproject.toml's test extra)
         run: pip install pytest-cov==7.1.0
       - name: Python tests
@@ -339,7 +345,7 @@ jobs:
           pip install --no-deps -e .
           streetzim --name osm_en_monaco --title Monaco \
             --description "Offline map of Monaco with search and routing" \
-            --tags openstreetmap --area monaco --shapefiles "$PWD" \
+            --tags openstreetmap --area monaco --shapefiles "$PWD" --profile basic \
             --output out --stats-filename out/task_progress.json
           python tools/check_openzim_output.py out osm_en_monaco --title Monaco --routing
           python cloud/validate_zim.py out/osm_en_monaco_*.zim
@@ -413,9 +419,15 @@ jobs:
             node cloud/zim_viewer_smoke.mjs
 
   docker:
-    # The image as Zimfarm runs it: the default profile (Geofabrik extract,
-    # tilemaker tiles, search and routing) on Monaco, entirely with the
-    # image's own tilemaker, osmium and Python; then the host validates it.
+    # The image as Zimfarm runs it: --profile full (tilemaker tiles, search,
+    # routing, Wikidata, Wikipedia articles, Overture) on Monaco, entirely
+    # with the image's own tilemaker, osmium, Python and DuckDB extensions,
+    # as a non-root user and with no network: every input comes from
+    # tests/fixtures/monaco-full (the extract, Overture parquets of a pinned
+    # release, the Wikidata and Wikipedia caches), so the job checks the
+    # code, not the APIs. Then the host validates it and checks that the
+    # full features are in it. (monaco-e2e runs streetzim with --profile
+    # basic; live-full runs full against the live sources weekly.)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -460,27 +472,41 @@ jobs:
           mkdir -p ~/.local/zim-tools
           tar -xzf /tmp/zt.tgz -C ~/.local/zim-tools --strip-components=1
 
-      - name: Build Monaco inside the image with the default profile
+      - name: Build Monaco inside the image, --profile full, offline and not as root
         # No --mbtiles and no --no-routing: the flags Zimfarm's recipe would
         # pass. The shapefiles are mounted read-only (the image does not bake
         # them in); STREETZIM_REQUIRE_SHAPEFILES makes a missing one fatal
         # instead of a ZIM without ocean. /output and task_progress.json are
-        # what offliner-definition.json pins.
+        # what offliner-definition.json pins. --network none: the fixture's
+        # caches must be enough (a lookup they lack fails softly and shows
+        # in the "sources:" line). --user: the DuckDB extensions must load
+        # from /opt/duckdb-ext, not root's home. About 20 s outside Docker.
+        timeout-minutes: 15
         run: |
-          mkdir -p out && chmod 777 out
+          set -o pipefail
+          mkdir -p out dl && chmod 777 out dl
+          cp -r tests/fixtures/monaco-full/dl/. dl/
           # An SVG illustration: zimscraperlib (Python 3.14 in the image) converts it.
           printf '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><rect width="64" height="32" fill="#2a7"/></svg>' > out/icon.svg
-          docker run --rm -e STREETZIM_REQUIRE_SHAPEFILES=1 \
-            -v "$PWD/out:/output" \
+          # STREETZIM_WIKI_WAIT_BUDGET=0: the first Wikimedia request that
+          # fails (no network) stops the rest instead of retrying each one
+          # (38 articles the fixture lacks would take 10 minutes).
+          docker run --rm --network none --user "$(id -u):$(id -g)" \
+            -e STREETZIM_REQUIRE_SHAPEFILES=1 -e STREETZIM_WIKI_WAIT_BUDGET=0 \
+            -v "$PWD/out:/output" -v "$PWD/dl:/dl" \
+            -v "$PWD/tests/fixtures/monaco-full:/fixture:ro" \
             -v "$PWD/coastline:/shapefiles/coastline:ro" \
             -v "$PWD/landcover:/shapefiles/landcover:ro" \
             streetzim \
             streetzim --name osm_en_monaco-docker --title Monaco \
             --description "Offline map of Monaco with search and routing" \
             --illustration-url /output/icon.svg \
-            --area monaco --shapefiles /shapefiles \
+            --area monaco --pbf-url file:///fixture/monaco.osm.pbf \
+            --profile full --overture-release "$(cat tests/fixtures/monaco-full/OVERTURE_RELEASE)" \
+            --dl /dl --shapefiles /shapefiles \
             --output /output --stats-filename /output/task_progress.json \
-            --file-name osm-monaco-docker
+            --file-name osm-monaco-docker 2>&1 | tee build.log
+          grep '^streetzim: sources: ' build.log
       - name: Validate the ZIM (openZIM output, cloud/validate_zim.py + zimcheck)
         env:
           STREETZIM_REQUIRE_ZIMCHECK: "1"
@@ -489,3 +515,53 @@ jobs:
           python tools/check_openzim_output.py out osm_en_monaco-docker --title Monaco \
             --file osm-monaco-docker.zim --routing
           PATH="$HOME/.local/zim-tools:$PATH" python cloud/validate_zim.py out/osm-monaco-docker.zim
+          python tools/check_full_profile.py out/osm-monaco-docker.zim
+
+  live-full:
+    # Weekly (and on demand): --profile full against the live sources, as a
+    # Zimfarm task would fetch them: the Geofabrik extract, Overture's latest
+    # release, Wikidata and the Wikipedia API. Overture must work (a build
+    # without it fails); Wikidata and Wikipedia only warn, since their APIs
+    # rate limit and the build degrades by design.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Build the image
+        run: docker build -t streetzim .
+      - name: Cache coastline and Natural Earth shapefiles
+        id: shp-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            coastline
+            landcover
+          key: shapefiles-v1
+      - name: Fetch shapefiles
+        if: steps.shp-cache.outputs.cache-hit != 'true'
+        run: scripts/fetch-shapefiles.sh .
+      - name: Build Monaco inside the image, --profile full, live
+        timeout-minutes: 40
+        run: |
+          set -o pipefail
+          mkdir -p out && chmod 777 out
+          docker run --rm --user "$(id -u):$(id -g)" -e STREETZIM_REQUIRE_SHAPEFILES=1 \
+            -v "$PWD/out:/output" \
+            -v "$PWD/coastline:/shapefiles/coastline:ro" \
+            -v "$PWD/landcover:/shapefiles/landcover:ro" \
+            streetzim \
+            streetzim --name osm_en_monaco --title Monaco \
+            --description "Offline map of Monaco with search and routing" \
+            --area monaco --profile full --shapefiles /shapefiles \
+            --output /output --stats-filename /output/task_progress.json 2>&1 | tee build.log
+          grep '^streetzim: sources: ' build.log
+      - name: Check the full features (Wikimedia softly)
+        run: |
+          pip install -q -r requirements.txt
+          python tools/check_openzim_output.py out osm_en_monaco --title Monaco --routing
+          python tools/check_full_profile.py --soft-wikimedia out/osm_en_monaco_*.zim

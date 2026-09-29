@@ -984,6 +984,10 @@ def _build_search(
                         args.overture_addresses, search_features,
                         bbox=addr_bbox)
                     address_count += merge_result.get("added", 0) or 0
+                    from streetzim.source_report import note
+                    note("Overture addresses",
+                         f"{merge_result.get('scanned', '?')} rows "
+                         f"({merge_result.get('added', 0)} added)")
                     overture_datasets.update(merge_result.get("datasets") or [])
                     overture_themes.append("addresses")
                 except Exception as _e:
@@ -1009,6 +1013,10 @@ def _build_search(
                         url_cache_policy=args.url_cache_policy)
                     overture_datasets.update(places_result.get("datasets") or [])
                     overture_themes.append("places")
+                    from streetzim.source_report import note
+                    note("Overture places",
+                         f"{places_result.get('enriched', 0)} enriched, "
+                         f"{places_result.get('added', 0)} added")
                 except Exception as _e:
                     raise SystemExit(
                         f"Overture places merge failed: {_e} — "
@@ -1057,11 +1065,14 @@ def _build_search(
             if getattr(args, "resolve_wikidata_titles", False) and wiki_cross_refs:
                 try:
                     from cloud.wikidata_titles import augment_wiki_cross_refs
-                    augment_wiki_cross_refs(
+                    _t = augment_wiki_cross_refs(
                         wiki_cross_refs,
                         cache_path=getattr(args, "wikidata_title_cache", None),
                         offline_map=getattr(args, "wikidata_title_map", None),
-                    )
+                    ) or {}
+                    from streetzim.source_report import note
+                    note("Wikipedia titles", f"{_t.get('resolved', '?')}/"
+                         f"{_t.get('distinct_qids', '?')} Q-IDs resolved")
                 except Exception as _e:
                     print(f"    Warning: wikidata->title resolution failed: {_e}")
     return address_count, overture_sources, overture_themes, search_features, wiki_cross_refs
@@ -1097,6 +1108,8 @@ def _build_wikidata(
             print(f"    Loaded {len(wikidata_data)} Wikidata entries for ZIM")
         else:
             print("    No Wikidata entries available")
+        from streetzim.source_report import note
+        note("Wikidata", f"{len(wikidata_data or {})} entries")
     return wikidata_data
 
 

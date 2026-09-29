@@ -73,7 +73,10 @@ def no_network(monkeypatch, tmp_path):
 
 
 def plan(argv, tmp_path):
-    return cli.plan(cli.build_parser().parse_args(REQ + argv), tmp_path)
+    """plan() as main() reaches it (through --profile), with basic, which
+    fetches nothing but the extract (tests/test_streetzim_profiles.py
+    covers full)."""
+    return cli.plan(cli.parse_args(REQ + ["--profile", "basic"] + argv), tmp_path)
 
 
 def builder_args(argv):
@@ -315,7 +318,7 @@ def test_illustration_checked_before_downloads_and_resolved(tmp_path, no_network
     assert no_network == []
     from PIL import Image
     Image.new("RGB", (64, 64)).save(tmp_path / "icon.png")
-    argv, _ = cli.plan(cli.build_parser().parse_args(REQ + ["--area", "monaco"]), tmp_path,
+    argv, _ = cli.plan(cli.parse_args(REQ + ["--area", "monaco", "--profile=basic"]), tmp_path,
                        illustration=(tmp_path / "icon.png"))
     ill = argv[argv.index("--illustration") + 1]
     assert Path(ill).is_absolute()

@@ -138,23 +138,11 @@
       "title": "No routing",
       "description": "Leave out offline routing (on by default)"
     },
-    "wikidata": {
-      "type": "boolean",
-      "required": false,
-      "title": "Wikidata",
-      "description": "Wikidata place details (needs network access to Wikidata)"
-    },
     "terrain": {
       "type": "boolean",
       "required": false,
       "title": "Terrain",
       "description": "Hillshade from Copernicus DEM (downloads DEM tiles)"
-    },
-    "kiwix_poi_pages": {
-      "type": "boolean",
-      "required": false,
-      "title": "POIs in Kiwix search",
-      "description": "Also list every named POI in Kiwix's own search, not only places, parks, peaks, water and airports. Adds about 440 B per POI (+16% on Luxembourg). Default: off"
     },
     "max_zoom": {
       "type": "integer",
@@ -176,6 +164,80 @@
       "title": "ZIM workers",
       "description": "Compression threads for libzim. Default: the CPU count, at most 20",
       "min": 1
+    },
+    "profile": {
+      "type": "string-enum",
+      "required": true,
+      "title": "Profile",
+      "description": "Feature set: full: Wikidata, Wikipedia articles, Overture Maps, POIs in Kiwix search; basic: none of them (routing is on in both). Default: full",
+      "choices": [
+        "full",
+        "basic"
+      ]
+    },
+    "wikidata": {
+      "type": "string-enum",
+      "required": false,
+      "title": "Wikidata",
+      "description": "Wikidata place details (needs network access to Wikidata). Default: on with --profile full, off with basic",
+      "choices": [
+        "on",
+        "off"
+      ]
+    },
+    "wikipedia": {
+      "type": "string-enum",
+      "required": false,
+      "title": "Wikipedia articles",
+      "description": "English Wikipedia articles for the places that have one, stored in the ZIM (CC BY-SA). Text from the Wikipedia API, or text and images from --wikipedia-zim-url. Default: on with --profile full, off with basic",
+      "choices": [
+        "on",
+        "off"
+      ]
+    },
+    "overture": {
+      "type": "string-enum",
+      "required": false,
+      "title": "Overture Maps",
+      "description": "Overture Maps addresses and place details (websites, phones, brands, categories), read from Overture's public S3 bucket over HTTPS. Default: on with --profile full, off with basic",
+      "choices": [
+        "on",
+        "off"
+      ]
+    },
+    "kiwix_poi_pages": {
+      "type": "string-enum",
+      "required": false,
+      "title": "POIs in Kiwix search",
+      "description": "Also list every named POI in Kiwix's own search, not only places, parks, peaks, water and airports. Adds about 440 B per POI (+16% on Luxembourg). Default: on with --profile full, off with basic",
+      "choices": [
+        "on",
+        "off"
+      ]
+    },
+    "wikipedia_zim_url": {
+      "type": "url",
+      "required": false,
+      "title": "Wikipedia ZIM URL",
+      "description": "Kiwix Wikipedia ZIM (download.kiwix.org) to read the articles and their images from instead of the API. Downloaded for every task: a full English one is 50 to 120 GB. Default: none (the API, text only)"
+    },
+    "wikipedia_images": {
+      "type": "string-enum",
+      "required": false,
+      "title": "Wikipedia images",
+      "description": "With --wikipedia-zim-url: the articles' images to store (lead: the first picture). Default: all",
+      "choices": [
+        "none",
+        "lead",
+        "all"
+      ]
+    },
+    "overture_release": {
+      "type": "string",
+      "required": false,
+      "title": "Overture release",
+      "description": "Overture release, e.g. 2026-09-23.1. Default: latest (the newest complete release)",
+      "pattern": "^(latest|[0-9]{4}-[0-9]{2}-[0-9]{2}\\.[0-9]+)$"
     },
     "satellite": {
       "type": "boolean",

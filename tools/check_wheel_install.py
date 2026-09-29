@@ -21,6 +21,7 @@ from pathlib import Path
 def check() -> list[str]:
     try:
         import create_osm_zim
+        import download_overture_data  # noqa: F401  (--overture)
         from streetzim import paths, tiles, viewer_assets
         from streetzim import zim_writer  # noqa: F401  (must import from the wheel)
     except ImportError as e:
