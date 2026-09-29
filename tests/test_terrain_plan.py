@@ -73,6 +73,8 @@ def test_a_missing_world_dem_is_refused_not_ignored(tmp_path):
         T.TerrainPlan(MONACO, 12, low_zoom_world_vrt=missing)
     with pytest.raises(FileNotFoundError):
         T.terrain_min_zoom(MONACO, 12, missing)
+    with pytest.raises(FileNotFoundError):
+        T.TerrainPlan(MONACO, 12, 0, missing)          # min zoom given too
     import create_osm_zim as coz
     with pytest.raises(SystemExit):
         coz.build_parser().parse_args(["--area", "monaco", "--low-zoom-world-vrt", missing])
@@ -87,6 +89,10 @@ def test_glo30_only_under_the_regions_own_tiles():
     assert sorted(T.TerrainPlan(LUXEMBOURG, 12).glo30_cells) == [
         (49, 5), (49, 6), (50, 5), (50, 6)]                          # was 16
     assert T.TerrainPlan(LUXEMBOURG, 9).glo30_cells == []            # z<=9: GLO-90
+    # The z10 squares, not the z12 ones: here they reach into row 48.
+    box = (5.0, 49.06, 5.1, 49.16)
+    assert sorted(T.TerrainPlan(box, 12).glo30_cells) == [(48, 4), (48, 5), (49, 4), (49, 5)]
+    assert sorted(T._cells(T._tiles_footprint(box, 12))) == [(49, 4), (49, 5)]
 
 
 def test_the_generator_reads_the_low_zoom_mosaic_up_to_z9():
@@ -238,6 +244,10 @@ def _zero(path, cols=slice(None)):
     """Rewrite a tile with 0 m over `cols` (the bbox-edge bug: everything)."""
     e = _elev(path)
     e[:, cols] = 0.0
+    _write(path, e)
+
+
+def _write(path, e):
     enc = np.clip(((e + 10000.0) / 0.1).astype(np.uint32), 0, 16777215)
     rgb = np.stack([(enc >> 16) & 255, (enc >> 8) & 255, enc & 255], axis=-1).astype("uint8")
     Image.fromarray(rgb).save(path, "WEBP", lossless=True)
@@ -254,6 +264,31 @@ def test_the_audit_fails_a_tile_that_lost_land(tmp_path, fake_dem, monkeypatch, 
     monkeypatch.setenv("TERRAIN_BLANK_TOLERATE", "1")
     T.audit_terrain(plan, str(dest))
     assert "TERRAIN_BLANK_TOLERATE=1" in capsys.readouterr().out
+
+
+def test_one_disagreeing_point_is_not_lost_land(tmp_path, fake_dem):
+    # A coastline can put one sample point on 0 m next to land; it takes 3.
+    dest, plan = _build(tmp_path)
+    _, tile = _tile(dest, 9)
+    e = _elev(tile)
+    _zero(tile, slice(15, 36))                     # hits one column of points...
+    _write(tile, np.where(np.arange(256)[:, None] < 50, _elev(tile), e))  # ...in 1 row
+    T.audit_terrain(plan, str(dest))
+    _zero(tile, slice(15, 36))                     # the whole column: 5 points
+    with pytest.raises(RuntimeError, match="0 m over land"):
+        T.audit_terrain(plan, str(dest))
+
+
+def test_an_edge_tile_above_z9_is_held_to_its_mosaic(tmp_path, fake_dem):
+    dest, plan = _build(tmp_path)
+    t, tile = _tile(dest, 10)
+    b = mercantile.bounds(t)
+    lon0, _, lon1, _ = T.parse_bbox(BBOX)
+    assert b.west < lon0 or b.east > lon1          # on the edge of the area
+    _zero(tile, slice(128, None))
+    assert os.path.getsize(tile) > 500
+    with pytest.raises(RuntimeError, match="0 m over land"):
+        T.audit_terrain(plan, str(dest))
 
 
 def test_the_audit_fails_an_interior_blank_tile_by_the_size_rule(tmp_path, fake_dem):
@@ -330,6 +365,29 @@ def test_z9_is_audited_against_the_low_zoom_mosaic(tmp_path, fake_dem, monkeypat
         T.audit_terrain(_plan(), str(dest))
 
 
+BIG = "5.6,49.3,7.0,50.1"      # z5-z9, capped at the z7 squares, one inner z9 tile
+
+
+def test_a_capped_build_passes_and_holds_inner_low_tiles_to_the_dem(tmp_path, fake_dem):
+    dest = tmp_path / "terrain"
+    T.generate_terrain_tiles(BIG, str(dest), max_zoom=9)
+    plan = T.TerrainPlan(T.parse_bbox(BIG), 9)
+    assert (plan.min_zoom, plan.low_zoom, len(plan.low_cells)) == (5, 7, 21)
+    # z5-z6 squares reach past the capped mosaic: 0 m there is the plan,
+    # not a gap, and the coverage check only asks for the capped part.
+    assert _elev(dest / "5" / "16" / "10.webp").min() == 0
+    T.audit_terrain(plan, str(dest))
+    lo = T.parse_bbox(BIG)
+    inner = [t for t in mercantile.tiles(*lo, zooms=9)
+             if (lambda b: b.west >= lo[0] and b.east <= lo[2]
+                 and b.south >= lo[1] and b.north <= lo[3])(mercantile.bounds(t))]
+    assert len(inner) == 1
+    tile = dest / "9" / str(inner[0].x) / f"{inner[0].y}.webp"
+    _zero(tile, slice(128, None))
+    with pytest.raises(RuntimeError, match="0 m over land"):
+        T.audit_terrain(plan, str(dest))
+
+
 # ------------------------------------------------------------- the download
 
 
@@ -387,6 +445,11 @@ def test_http_404_is_sea_and_anything_else_is_a_failure(tmp_path, monkeypatch, c
     # 404: each source once. 500: three attempts per source.
     assert len(seen) == {"sea": 2, "failed": 6, "ok": 1}[want]
     assert "copernicus-dem-30m" in seen[0][0]
+    # Past the budget, no further request is made at all.
+    seen.clear()
+    stats.deadline = 0.0
+    got = T._resolve_cell(str(tmp_path / "dem_N51_E005.tif"), T._glo30_sources(51, 5), stats)
+    assert seen == [] and got == "failed"
 
 
 # ----------------------------------------------------- markers and wiring
@@ -412,6 +475,20 @@ def test_fresh_and_production_markers_and_caches_stay_apart(tmp_path, fake_dem):
     T.generate_terrain_tiles(BBOX, str(dest), max_zoom=10)
     assert len(calls) == n
     assert {p: os.path.getmtime(p) for p in dest.rglob("*.webp")} == before
+
+
+def test_a_fresh_build_does_not_take_old_tiles_for_its_own(tmp_path, fake_dem):
+    # A cache full of tiles made the old way (every zoom present, no fresh
+    # marker) must not satisfy a fresh build: it still fetches its DEM.
+    calls = fake_dem[0]
+    dest = tmp_path / "terrain"
+    for z in range(8, 11):
+        for t in mercantile.tiles(*T.parse_bbox(BBOX), zooms=z):
+            d = dest / str(z) / str(t.x)
+            d.mkdir(parents=True, exist_ok=True)
+            (d / f"{t.y}.webp").write_bytes(b"x" * 300)
+    T.generate_terrain_tiles(BBOX, str(dest), max_zoom=10)
+    assert calls
 
 
 @pytest.mark.parametrize("world", [False, True])

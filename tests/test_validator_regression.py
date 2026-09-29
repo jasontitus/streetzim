@@ -546,3 +546,47 @@ def test_routing_check_reports_szrg_version(tmp_path, version, geoms, status):
     assert got == status, detail
     assert f"SZRG v{version}" in detail
     assert ("legacy" in detail) == (status == "warn")
+
+
+@pytest.mark.parametrize("tmin", [0, 9])
+def test_terrain_coverage_starts_at_terrain_min_zoom(tmp_path: Path, tmin: int):
+    """A ZIM whose terrain starts at map-config terrainMinZoom (the fresh-
+    machine layout, streetzim/terrain.py) has no terrain below it; the
+    coverage audit must not expect any, and must still expect it above."""
+    import math
+    from libzim.writer import Creator
+    zim = tmp_path / "terrain_min.zim"
+    bbox = [10.0, 10.0, 10.001, 10.001]
+
+    def _ll_to_tile(lon, lat, z):
+        n = 1 << z
+        rad = math.radians(lat)
+        return (int((lon + 180) / 360 * n),
+                int((1 - math.log(math.tan(rad) + 1 / math.cos(rad)) / math.pi) / 2 * n))
+    cfg = {"bbox": bbox, "hasTerrain": True, "terrainMaxZoom": 11}
+    if tmin:
+        cfg["terrainMinZoom"] = tmin
+    with Creator(str(zim)) as cc:
+        for k, v in (("Title", "t"), ("Description", "d"), ("Language", "en"),
+                     ("Creator", "x"), ("Publisher", "x"), ("Date", "2026-09-29"),
+                     ("Name", "n")):
+            cc.add_metadata(k, v)
+        cc.add_item(_mk_item("index.html", "text/html", b"<html></html>"))
+        cc.set_mainpath("index.html")
+        cc.add_item(_mk_item("map-config.json", "application/json",
+                             json.dumps(cfg).encode()))
+        for z in range(0, 15):
+            x, y = _ll_to_tile(10.0005, 10.0005, z)
+            cc.add_item(_mk_item(f"tiles/{z}/{x}/{y}.pbf", "application/x-protobuf",
+                                 b"\x00" * 1024))
+            if 9 <= z <= 11:               # terrain from z9 only
+                cc.add_item(_mk_item(f"terrain/{z}/{x}/{y}.webp", "image/webp",
+                                     b"\x00" * 2048))
+        cc.add_item(_mk_item("search-data/manifest.json", "application/json",
+                             json.dumps({"chunks": {}}).encode()))
+    r = _find(_run_validator(zim, audit_tiles=True), "tile_coverage")
+    assert r is not None
+    if tmin:
+        assert r.status == "pass" and "terrain: z9=1/1" in r.detail, r.detail
+    else:
+        assert r.status == "fail" and "terrain-z0" in r.detail, r.detail
