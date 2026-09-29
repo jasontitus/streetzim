@@ -38,6 +38,22 @@ import os
 import re
 from typing import Any
 
+# Where DuckDB keeps its extensions (spatial, httpfs). Default: ~/.duckdb,
+# which a non-root `docker run --user` cannot write or may not have; the
+# Docker image installs them in /opt/duckdb-ext and sets this to it.
+DUCKDB_EXT_ENV = "STREETZIM_DUCKDB_EXT"
+
+
+def duckdb_connect() -> Any:
+    """An in-memory DuckDB connection that finds its extensions in
+    $STREETZIM_DUCKDB_EXT when that is set."""
+    import duckdb
+    con = duckdb.connect()
+    ext = os.environ.get(DUCKDB_EXT_ENV)
+    if ext:
+        con.execute("SET extension_directory = '" + ext.replace("'", "''") + "'")
+    return con
+
 from streetzim.overture_taxonomy import LEGACY_NAMES, TAXONOMY_TO_LEGACY
 
 # Parquet key-value metadata key holding the release a file was cut from.

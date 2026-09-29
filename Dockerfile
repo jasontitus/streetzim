@@ -45,7 +45,15 @@ COPY requirements.txt /app/
 RUN python3 -m venv /venv && /venv/bin/pip install --no-cache-dir -r requirements.txt
 # DuckDB's spatial and httpfs extensions (--overture) in the image, so a task
 # does not fetch them from extensions.duckdb.org (about 100 MB) every run.
-RUN /venv/bin/python -c "import duckdb; duckdb.connect().execute('INSTALL spatial; INSTALL httpfs')"
+# In /opt, readable by any user: under ~/.duckdb (root's) a
+# `docker run --user` build could not load them. streetzim/overture.py
+# duckdb_connect() points DuckDB here through STREETZIM_DUCKDB_EXT.
+ENV STREETZIM_DUCKDB_EXT=/opt/duckdb-ext
+RUN mkdir -p /opt/duckdb-ext \
+    && /venv/bin/python -c "import duckdb; c = duckdb.connect(); \
+c.execute(\"SET extension_directory = '/opt/duckdb-ext'\"); \
+c.execute('INSTALL spatial; INSTALL httpfs; LOAD spatial; LOAD httpfs')" \
+    && chmod -R a+rX /opt/duckdb-ext
 ENV PATH=/venv/bin:$PATH
 
 COPY . /app

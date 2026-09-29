@@ -23,34 +23,29 @@ sys.path.insert(0, str(ROOT))
 TARGET = ROOT / "offliner-definition.json"
 
 from streetzim.cli import (  # noqa: E402
-    MODEL_VALIDATORS, PROFILES, ZIM_METADATA_FLAGS, ZIMFARM, build_parser)
+    FEATURE_NAMES, MODEL_VALIDATORS, ZIM_METADATA_FLAGS, ZIMFARM, OnOff, build_parser)
 
 SKIP_ACTIONS = (argparse._HelpAction, argparse._VersionAction)  # pyright: ignore[reportPrivateUsage]
 BOOLEAN_ACTIONS = (argparse._StoreTrueAction,  # pyright: ignore[reportPrivateUsage]
                    argparse._StoreFalseAction,  # pyright: ignore[reportPrivateUsage]
                    argparse.BooleanOptionalAction)
-PROFILE_FEATURES = {d for feats in PROFILES.values() for d in feats}
 
 
 def _offered(action: argparse.Action) -> list[str]:
     """The long options of `action` Zimfarm gets a flag for. Zimfarm passes a
     boolean only when it is ticked, so a flag that defaults to on is offered
-    as its --no- form ("routing" -> "no_routing"), and a feature --profile
-    sets is offered both ways, to override either profile."""
+    as its --no- form ("routing" -> "no_routing"). A profile feature is one
+    string-enum (on/off; unset: the profile decides), from its --x form."""
     longs = [o for o in action.option_strings if o.startswith("--")]
-    if isinstance(action, argparse.BooleanOptionalAction):
-        if action.dest in PROFILE_FEATURES:
-            return longs
-        if action.default:
-            return [o for o in longs if o.startswith("--no-")]
+    if isinstance(action, OnOff) and action.nargs == 0:
+        return []                          # --no-x: the enum's "off"
+    if isinstance(action, argparse.BooleanOptionalAction) and action.default:
+        return [o for o in longs if o.startswith("--no-")]
     return longs[:1]
 
 
 def _description(action: argparse.Action, option: str) -> str:
     text = (action.help or "").replace("%%", "%")
-    if option.startswith("--no-") and isinstance(action, argparse.BooleanOptionalAction):
-        # One help text serves --x and --no-x; say which way this one goes.
-        text = f"Turn {option.replace('--no-', '--', 1)} off, whatever the profile"
     return text
 
 
@@ -85,6 +80,8 @@ def _entry(action: argparse.Action, option: str, key: str) -> dict[str, Any] | N
         typ = "integer"
     elif isinstance(action.choices, (list, tuple)):
         typ = "string-enum"
+        if isinstance(action, OnOff):
+            extra.setdefault("title", FEATURE_NAMES.get(key, key))
     else:
         typ = "string"
     entry: dict[str, Any] = {

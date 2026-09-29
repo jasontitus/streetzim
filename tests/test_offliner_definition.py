@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
 od = pytest.importorskip("offliner_definition")
-from streetzim.cli import PROFILES, build_parser, parse_args, switchable  # noqa: E402
+from streetzim.cli import PROFILES, build_parser, parse_args, profile_features  # noqa: E402
 
 DEF = json.loads((ROOT / "offliner-definition.json").read_text())
 
@@ -61,8 +61,6 @@ def test_every_offered_flag_parses():
     config = {k: (f["choices"][0] if f["type"] == "string-enum" else sample[f["type"]])
               for k, f in DEF["flags"].items()}
     del config["area"], config["include_poly"]      # exclusive with bbox
-    for key in [k for k in config if k.startswith("no_") and k[3:] in config]:
-        del config[key]                     # --x and --no-x together are refused
     config.update(output="/output", stats_filename="/output/task_progress.json",
                   bbox="7.4,43.72,7.44,43.76", default_view="43.7,7.4,12", max_zoom=12,
                   overture_release="2026-09-23.1")
@@ -74,33 +72,36 @@ def test_every_offered_flag_parses():
 
 def test_required_flags_agree_with_the_parser():
     required = {k for k, f in DEF["flags"].items() if f["required"]}
-    assert required == {"name", "title", "description"}
+    # profile too, on Zimfarm only: every recipe states it next to its
+    # resources, while the command line defaults to full.
+    assert required == {"name", "title", "description", "profile"}
     with pytest.raises(SystemExit):
         build_parser().parse_args(_argv_for({"name": "n", "title": "t"}))
 
 
-def test_profile_is_a_string_enum_with_its_default():
+def test_profile_is_a_required_string_enum():
     f = DEF["flags"]["profile"]
     assert f["type"] == "string-enum" and f["choices"] == list(PROFILES)
-    assert f["default"] in f["choices"]
-    assert not f["required"]
+    assert f["required"] and "default" not in f
 
 
-def test_every_profile_feature_can_be_switched_both_ways_on_zimfarm():
-    # Zimfarm passes a boolean only when it is ticked: a feature a profile
-    # sets needs a flag for each direction, or one profile could not be
-    # overridden from a recipe.
-    both = switchable(build_parser())
-    for dest in {d for feats in PROFILES.values() for d in feats} & set(both):
-        assert dest in DEF["flags"] and f"no_{dest}" in DEF["flags"], dest
-        assert DEF["flags"][dest]["type"] == DEF["flags"][f"no_{dest}"]["type"] == "boolean"
+def test_each_profile_feature_is_one_on_off_enum():
+    # One key per feature, unset meaning "as the profile says": a recipe
+    # cannot switch a feature on and off at once.
+    features = profile_features(build_parser())
+    assert {"wikidata", "wikipedia", "overture"} <= features
+    for dest in features:
+        f = DEF["flags"][dest]
+        assert f["type"] == "string-enum" and f["choices"] == ["on", "off"], dest
+        assert not f["required"] and "default" not in f, dest
+        assert f"no_{dest}" not in DEF["flags"], dest
 
 
 @pytest.mark.parametrize("config, expect", [
     ({"profile": "basic"}, {"wikidata": False, "wikipedia": False, "overture": False}),
-    ({"profile": "basic", "wikidata": True}, {"wikidata": True, "overture": False}),
-    ({"profile": "full", "no_overture": True}, {"overture": False, "wikipedia": True}),
-    ({}, {"wikidata": True, "wikipedia": True, "overture": True, "profile": "full"}),
+    ({"profile": "basic", "wikidata": "on"}, {"wikidata": True, "overture": False}),
+    ({"profile": "full", "overture": "off"}, {"overture": False, "wikipedia": True}),
+    ({"profile": "full"}, {"wikidata": True, "wikipedia": True, "overture": True}),
 ])
 def test_recipe_configs_become_the_features_they_say(config, expect):
     base = {"name": "osm_en_monaco", "title": "Monaco", "description": "d", "area": "monaco"}
@@ -129,16 +130,19 @@ def test_zimfarm_accepts_the_definition_and_its_recipes():
     model = build_offliner_model(off, spec)
     base = {"offliner_id": "streetzim", "name": "osm_en_monaco", "title": "Monaco",
             "description": "Offline Monaco", "area": "monaco"}
-    for extra, expect in [({"profile": "basic", "overture": True},
+    for extra, expect in [({"profile": "basic", "overture": "on"},
                            {"profile": "basic", "overture": True, "wikidata": False}),
-                          ({"no-wikipedia": True}, {"profile": "full", "wikipedia": False}),
-                          ({}, {"profile": "full", "wikipedia": True})]:
+                          ({"profile": "full", "wikipedia": "off"},
+                           {"profile": "full", "wikipedia": False, "overture": True}),
+                          ({"profile": "full"}, {"profile": "full", "wikipedia": True})]:
         recipe = model.model_validate({**base, **extra})
         flags = recipe.model_dump(mode="json")
         argv = compute_flags(flags)
         args = parse_args([a.replace("'", "") for a in argv])
         assert {k: getattr(args, k) for k in expect} == expect, argv
-    with pytest.raises(ValidationError):
-        model.model_validate({**base, "profile": "everything"})
+    for bad in ({"profile": "everything"}, {}, {"profile": "full", "wikidata": "yes"},
+                {"profile": "full", "wikidata": True}):
+        with pytest.raises(ValidationError):
+            model.model_validate({**base, **bad})
     with pytest.raises(ValidationError):
         model.model_validate({**base, "overture-release": "newest"})

@@ -132,12 +132,6 @@
       "title": "No routing",
       "description": "Leave out offline routing (on by default)"
     },
-    "wikidata": {
-      "type": "boolean",
-      "required": false,
-      "title": "Wikidata",
-      "description": "Wikidata place details (needs network access to Wikidata). Default: on with --profile full, off with basic"
-    },
     "terrain": {
       "type": "boolean",
       "required": false,
@@ -167,32 +161,43 @@
     },
     "profile": {
       "type": "string-enum",
-      "required": false,
+      "required": true,
       "title": "Profile",
       "description": "Feature set: full: Wikidata, Wikipedia articles, Overture Maps; basic: none of them (routing is on in both). Default: full",
       "choices": [
         "full",
         "basic"
-      ],
-      "default": "full"
+      ]
     },
-    "no_wikidata": {
-      "type": "boolean",
+    "wikidata": {
+      "type": "string-enum",
       "required": false,
-      "title": "No Wikidata",
-      "description": "Leave out Wikidata place details, whatever the profile"
+      "title": "Wikidata",
+      "description": "Wikidata place details (needs network access to Wikidata). Default: on with --profile full, off with basic",
+      "choices": [
+        "on",
+        "off"
+      ]
     },
     "wikipedia": {
-      "type": "boolean",
+      "type": "string-enum",
       "required": false,
       "title": "Wikipedia articles",
-      "description": "English Wikipedia articles for the places that have one, stored in the ZIM (CC BY-SA). Text from the Wikipedia API, or text and images from --wikipedia-zim-url. Default: on with --profile full, off with basic"
+      "description": "English Wikipedia articles for the places that have one, stored in the ZIM (CC BY-SA). Text from the Wikipedia API, or text and images from --wikipedia-zim-url. Default: on with --profile full, off with basic",
+      "choices": [
+        "on",
+        "off"
+      ]
     },
-    "no_wikipedia": {
-      "type": "boolean",
+    "overture": {
+      "type": "string-enum",
       "required": false,
-      "title": "No Wikipedia articles",
-      "description": "Leave out Wikipedia articles, whatever the profile"
+      "title": "Overture Maps",
+      "description": "Overture Maps addresses and place details (websites, phones, brands, categories), read from Overture's public S3 bucket over HTTPS. Default: on with --profile full, off with basic",
+      "choices": [
+        "on",
+        "off"
+      ]
     },
     "wikipedia_zim_url": {
       "type": "url",
@@ -210,18 +215,6 @@
         "lead",
         "all"
       ]
-    },
-    "overture": {
-      "type": "boolean",
-      "required": false,
-      "title": "Overture Maps",
-      "description": "Overture Maps addresses and place details (websites, phones, brands, categories), read from Overture's public S3 bucket over HTTPS. Default: on with --profile full, off with basic"
-    },
-    "no_overture": {
-      "type": "boolean",
-      "required": false,
-      "title": "No Overture Maps",
-      "description": "Leave out Overture Maps data, whatever the profile"
     },
     "overture_release": {
       "type": "string",

@@ -68,7 +68,7 @@ actually contains.
 
 `--profile` picks the content; any feature flag given explicitly wins over
 it, in either direction (`--profile basic --wikidata`, or
-`--no-wikipedia` on the default `full`). Routing is on in both (`--no-routing`
+`--wikipedia=off` on the default `full`). Routing is on in both (`--no-routing`
 turns it off).
 
 | feature | `full` (default) | `basic` |
@@ -77,29 +77,34 @@ turns it off).
 | Wikipedia articles (text from the API; images only with `--wikipedia-zim-url`) | on | off |
 | Overture Maps addresses and places | on | off |
 | Terrain / hillshade | on | off |
-| Satellite imagery | never: opt-in only, and labelled | never |
+| Every named POI in Kiwix's own search (`--kiwix-poi-pages`) | on | off |
+| Satellite imagery | off: opt-in (`--satellite`); the 2021 source is non-commercial | off |
 | Search, Find chips, places page, routing, fonts, dark style, icons | on | on |
 
 `full` is everything StreetZim's own builds ship that openZIM can ship too;
 `basic` fetches nothing besides the OSM extract and the shapefiles, and is
 the cheapest (the "What a build costs" tables below are `basic` builds).
-Satellite is in neither: its imagery is CC BY-NC-SA, so it is only ever
-turned on explicitly.
+Satellite is in neither, by choice: it stays off for openZIM's main
+distribution and is one flag to turn on (the default source is CC BY 4.0;
+the sharper 2021 one is non-commercial and needs an explicit
+acknowledgement).
 
-Terrain is on in `full` only once `--terrain` can also be turned off
-(`--no-terrain`, from the terrain branch). A profile sets only features the
-command line can switch both ways (`streetzim/cli.py`, `PROFILES` and
-`switchable`), so until then `--terrain` keeps its old default (off) under
-either profile, and a recipe adds it explicitly.
+Each feature is one flag with three states: on (`--x`, `--x=on`), off
+(`--x=off`, `--no-x`), or not given, when the profile decides. Saying both
+on and off is refused before anything is downloaded, and flag names cannot
+be abbreviated. Two features come from other branches and join the
+profile when their flag exists: `--terrain` once it can also be turned off
+(`--no-terrain`, topic-terrain-openzim; the older `--terrain` on `next`
+keeps its default, off), and `--kiwix-poi-pages` (topic-viewer-polish).
+`add_profile_arguments` in `streetzim/cli.py` turns such a flag into the
+same three-state flag.
 
-On Zimfarm, `profile` is a string-enum flag (`full`, `basic`, default
-`full`). Zimfarm passes a boolean only when it is ticked, so every feature a
-profile sets is offered both ways (`wikidata` and `no_wikidata`,
-`wikipedia` and `no_wikipedia`, `overture` and `no_overture`, and
-`terrain`/`no_terrain` once terrain has both); ticking both is refused
-before anything is downloaded. `tests/test_offliner_definition.py` runs
-recipes through Zimfarm's own models and `compute_flags` and checks the
-features `streetzim` then builds.
+On Zimfarm, `profile` is a **required** string-enum (`full`, `basic`), so
+every recipe states its profile next to the resources it is given, and each
+feature is one optional string-enum (`on`, `off`; unset: as the profile
+says). A recipe therefore cannot switch a feature both ways.
+`tests/test_offliner_definition.py` runs recipes through Zimfarm's own
+models and `compute_flags` and checks the features `streetzim` then builds.
 
 Recipe flags (the `offliner` part of `POST /v2/recipes`, dash form):
 
@@ -114,10 +119,10 @@ Recipe flags (the `offliner` part of `POST /v2/recipes`, dash form):
 {"offliner_id": "streetzim", "name": "osm_en_luxembourg-basic", "title": "Luxembourg",
  "description": "Offline map of Luxembourg with search and routing",
  "include-poly": "https://download.geofabrik.de/europe/luxembourg.poly",
- "profile": "basic"}
+ "profile": "basic", "wikidata": "on"}
 ```
 
-and the same on the command line:
+(the second is `basic` plus Wikidata), and the same on the command line:
 
 ```sh
 streetzim --name osm_en_luxembourg --title Luxembourg \
@@ -125,8 +130,46 @@ streetzim --name osm_en_luxembourg --title Luxembourg \
   --include-poly https://download.geofabrik.de/europe/luxembourg.poly \
   --profile full --output /output          # or --profile basic
 streetzim ... --profile basic --wikidata    # basic plus Wikidata
-streetzim ... --no-overture                 # full without Overture
+streetzim ... --overture=off                # full without Overture (or --no-overture)
 ```
+
+### Failure policy
+
+- **Overture** failing is fatal: if the release cannot be resolved, the
+  files listed or read (network, DuckDB), the task fails with a message
+  naming the source (`--overture=off` builds without it). A ZIM that says
+  it has Overture data has it.
+- **Wikidata** and **Wikipedia** degrade: the builder retries (honouring
+  `Retry-After`, within a wait budget, `cloud/wikimedia_http.py`) and then
+  leaves out what the APIs did not answer. It never caches a rate limit as
+  "no article", so the next run asks again. The ZIM's `hasWikidata` /
+  `hasWikiArticles` flags and its `License` describe what it holds.
+  `STREETZIM_REQUIRE_WIKI=1` makes a missing article fatal instead.
+- `streetzim` ends with one line saying what each source delivered, e.g.
+  `streetzim: sources: Overture addresses 4087 rows (4012 added); Overture
+  places 36 enriched, 3028 added; Wikipedia titles 0/95 Q-IDs resolved;
+  Wikidata 45 entries; Wikipedia articles 16/53 (37 not fetched, 37
+  rate-limited)` (`streetzim/source_report.py`).
+
+### Wikimedia API etiquette for periodic recipes
+
+A `full` recipe queries Wikimedia on every run, and Zimfarm runs recipes
+periodically, so:
+- requests carry a descriptive User-Agent naming the project and its issue
+  tracker (`cloud/wikimedia_http.py`, per Wikimedia's User-Agent policy);
+  an operator can add a contact address with `STREETZIM_WIKI_CONTACT` (set
+  it on the worker, not in the recipe or the repository);
+- one run makes one SPARQL request per 40 Q-IDs (1 s apart), one
+  extracts request per 20 articles, one `wbgetentities` request per 50
+  Q-IDs for titles, and one `action=parse` request per article, serially, with pauses that widen after a 429. For
+  Monaco that is about 60 requests; for California (11,613 linked
+  articles) about 12,000. That is within Wikimedia's guidance for a
+  single serial client, but schedule large-region `full` recipes no more
+  often than their data changes (monthly), not in parallel with each
+  other from one worker IP;
+- the caches live in the task's `--dl` and die with it, so every run asks
+  again. A worker with persistent storage could keep `--dl` between runs;
+  Zimfarm has no such mount today.
 
 ### Wikipedia articles on Zimfarm: the API, not a Wikipedia ZIM
 
@@ -152,14 +195,13 @@ any of the ZIMs above (or a `file://` URL on a worker that has one) and
 then also bundles images (`--wikipedia-images`, default `all`, as
 production), for workers with the disk to spare.
 
-The API is rate limited. Until `topic-wiki-429` is merged (a shared
-`cloud/wikimedia_http.py` that honours `Retry-After` and never caches a 429
-as a missing article), an article that is still rate limited after four
-tries is left out, and the build carries on without it. On Zimfarm that
-loss is per task (the cache dies with the container), so the next run asks
-again. From this sandbox's shared IP the Wikimedia APIs were rate
-limiting on 2026-09-29, so the `full` Monaco build measured below got 16 of
-its 53 articles; that is the sandbox's IP, not the flag.
+The API is rate limited. `cloud/wikimedia_http.py` honours `Retry-After`
+within a wait budget and never caches a 429 as a missing article; an
+article still unanswered after that is left out and the build carries on
+([Failure policy](#failure-policy)). From this sandbox's shared IP the
+Wikimedia APIs were rate limiting on 2026-09-29, so the `full` Monaco
+builds measured below got only part of their articles; that is the
+sandbox's IP, not the flag.
 
 ## Feature parity with StreetZim's own builds
 
@@ -180,7 +222,7 @@ directly. "streetzim" below is `streetzim/cli.py` and
 | Large search chunks split for iOS (`--split-hot-search-chunks-mb 10`) | yes | **was missing; now always** | on | - | - | yes |
 | No bulk `category-index/{addr,poi,street}.json` (`--no-llm-bundle`) | yes | **was missing (ZIMs carried them); now always** | on | - | - | yes |
 | Routing, drive / walk / bike, 0.1° cells | yes | yes | on | ODbL | the extract | yes |
-| Wikidata facts (population, description, Wikipedia extract) | yes | `--wikidata` existed, off; **now on in `full`**, `--no-wikidata` added | full: on | CC0 (Wikidata), CC BY-SA 4.0 (extracts) | query.wikidata.org SPARQL, en.wikipedia.org API | yes: network, no credentials; anonymous rate limits (backs off on 429) |
+| Wikidata facts (population, description, Wikipedia extract) | yes | `--wikidata` existed, off; **now on in `full`**, `--wikidata=off` / `--no-wikidata` added | full: on | CC0 (Wikidata), CC BY-SA 4.0 (extracts) | query.wikidata.org SPARQL, en.wikipedia.org API | yes: network, no credentials; anonymous rate limits (backs off on 429) |
 | Q-ID to Wikipedia title backfill (`--resolve-wikidata-titles`) | yes | **was missing; now part of `--wikipedia`** | full: on | CC0 | www.wikidata.org API | yes, as above |
 | Wikipedia articles bundled (`--bundle-wiki-articles`) | yes, from the enwiki maxi ZIM | **was missing; now `--wikipedia`**, text from the API | full: on | CC BY-SA 4.0 (each page keeps its source link and licence) | en.wikipedia.org `action=parse` | yes, rate limited ([above](#wikipedia-articles-on-zimfarm-the-api-not-a-wikipedia-zim)) |
 | Wikipedia images (`--wiki-images all`) | yes | **was missing; now `--wikipedia-zim-url` + `--wikipedia-images`** | off (no URL): the only source is a Wikipedia ZIM, 6.5 to 119 GB per task | per image, as in the Kiwix ZIM | download.kiwix.org | only with the disk and time for the download |
@@ -188,7 +230,8 @@ directly. "streetzim" below is `streetzim/cli.py` and
 | Overture places: websites, phones, brands, categories (`--overture-places`) | yes | **was missing; now `--overture`** | full: on | CDLA-Permissive-2.0 | as above | yes, as above |
 | Dead-website filter for Overture places (`--url-cache`) | yes | no | - | - | a crawl of every Overture website, kept on StreetZim's build host | no: the crawl result is not published anywhere a task could fetch it; without it, Overture places keep websites that may be dead |
 | Terrain / hillshade / 3D terrain (`--terrain`, `--low-zoom-world-vrt`) | yes | `--terrain` off; on by default in `topic-terrain-openzim` | full: on (once `--no-terrain` exists) | Copernicus DEM licence (free, attribution) | Copernicus DEM on AWS S3 | yes (that branch) |
-| Satellite imagery (`--satellite`) | yes, except `satellite=no` variants | not offered; opt-in with licence labelling in `topic-satellite-optin` | off, in no profile | **CC BY-NC-SA 4.0** | EOX Sentinel-2 cloudless | that branch |
+| Satellite imagery (`--satellite`) | yes (the 2021 mosaic), except `satellite=no` variants | not offered here; opt-in with licence labelling in `topic-satellite-optin` | off, in no profile | 2016 mosaic (that branch's default): CC BY 4.0; 2021 mosaic: CC BY-NC-SA 4.0, non-commercial | EOX Sentinel-2 cloudless | that branch |
+| Every named POI in Kiwix's own search (`--kiwix-poi-pages`) | no | from `topic-viewer-polish` | full: on (once merged) | ODbL | the extract | yes (+9 to 15% ZIM size) |
 | 3D buildings | no (the viewer has no building extrusion; "3D" is terrain) | no | - | - | - | - |
 | Fonts: Open Sans, Noto Sans for Arabic, Hebrew, Armenian, Georgian, Lao, Thai; RTL shaping | yes | yes | on | Apache 2.0, OFL 1.1, BSD-2-Clause (RTL plugin) | glyphs pinned by sha256; in the Docker image, fetched otherwise | yes |
 | Dark map style, POI icons (Maki) | yes | yes | on | CC0 (Maki) | inlined in the viewer | yes |
