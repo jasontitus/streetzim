@@ -163,3 +163,15 @@ def test_tilemaker_fuel_and_pharmacy_reach_their_chips():
     for sub, chip in (("fuel", "fuel"), ("pharmacy", "health"), ("restaurant", "food")):
         rec = {"t": "poi", "n": "x", "s": feature_subtype({"class": "amenity", "subclass": sub})}
         assert record_matches_chip(rec, chips[chip]), (sub, chip)
+
+
+def test_search_record_keeps_the_raw_key_internally():
+    from streetzim.search_extract import search_record
+    tm = search_record("Esso", "poi", {"class": "amenity", "subclass": "fuel"}, 43.7, 7.4)
+    assert tm == {"name": "Esso", "type": "poi", "subtype": "fuel",
+                  "osm_key": "amenity", "lat": 43.7, "lon": 7.4}
+    # OpenFreeMap's classes, and tilemaker's real OpenMapTiles ones, add nothing.
+    for props in ({"class": "fuel", "subclass": "fuel"},
+                  {"class": "shop", "subclass": "bakery"},
+                  {"class": "amenity"}, {}):
+        assert "osm_key" not in search_record("x", "poi", props, 0, 0), props

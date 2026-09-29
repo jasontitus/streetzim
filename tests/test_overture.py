@@ -545,6 +545,53 @@ def test_merge_overture_places_keeps_specific_subtype_over_category(
         "Overture's category still lands in `cat` for display/filtering")
 
 
+@pytest.mark.parametrize(("source", "props", "subtype_after"), [
+    # tilemaker's profile has no class for amenity=restaurant and writes
+    # the key; the record keeps the key in osm_key, so Overture still
+    # refines it, as when its subtype was "amenity" itself.
+    ("tilemaker", {"class": "amenity", "subclass": "restaurant"},
+     "italian_restaurant"),
+    ("tilemaker", {"class": "tourism", "subclass": "museum"},
+     "italian_restaurant"),
+    # sport was never a refinable bucket, raw or not.
+    ("tilemaker", {"class": "sport", "subclass": "tennis"}, "tennis"),
+    # A real OpenMapTiles class from the tilemaker profile.
+    ("tilemaker", {"class": "shop", "subclass": "bakery"},
+     "italian_restaurant"),
+    # OpenFreeMap (Planetiler) has the specific class: unchanged.
+    ("openfreemap", {"class": "restaurant", "subclass": "restaurant"},
+     "restaurant"),
+    ("openfreemap", {"class": "shop", "subclass": "books"},
+     "italian_restaurant"),
+])
+def test_merge_overture_places_refines_by_tile_source(
+    duckdb_available, tmp_path, source, props, subtype_after
+):
+    from streetzim.search_extract import search_record
+    parquet = tmp_path / "ov.parquet"
+    _write_places_parquet(str(parquet), [{
+        "name": "Da Mario", "category": "italian_restaurant",
+        "lat": 43.73, "lon": 7.42,
+    }])
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [search_record("Da Mario", "poi", props, 43.73, 7.42)])
+    merge_overture_places(str(parquet), str(jsonl))
+    rec = [json.loads(l) for l in open(jsonl) if l.strip()][0]
+    assert rec["subtype"] == subtype_after, source
+    assert rec["cat"] == "italian_restaurant"
+
+
+def test_overture_may_refine():
+    from streetzim.addresses import _overture_may_refine
+    assert _overture_may_refine({"subtype": "amenity"})
+    assert _overture_may_refine({"subtype": ""})
+    assert _overture_may_refine({"subtype": "restaurant", "osm_key": "amenity"})
+    assert _overture_may_refine({"subtype": "garden", "osm_key": "leisure"})
+    assert not _overture_may_refine({"subtype": "restaurant"})
+    assert not _overture_may_refine({"subtype": "tennis", "osm_key": "sport"})
+    assert not _overture_may_refine({"subtype": "gate", "osm_key": "barrier"})
+
+
 def test_merge_overture_places_adds_new_poi(duckdb_available, tmp_path):
     # Overture knows about a place OSM doesn't — e.g. a new restaurant
     # in the middle of nowhere. Pass-2 creates a fresh POI record
