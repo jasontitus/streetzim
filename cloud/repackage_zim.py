@@ -46,7 +46,7 @@ if str(SCRIPT_DIR) not in sys.path:
 # ZIM without ANY category-index/manifest.json.
 from cloud.chip_rules import CHIP_RULES, record_matches_chip  # noqa: E402
 from cloud.viewer_slots import pad_to_slot as _pad_to_slot  # noqa: E402
-from streetzim.tile_alias import MAX_ALIAS_BYTES, TileAliaser  # noqa: E402
+from streetzim.tile_alias import TileAliaser, max_alias_bytes  # noqa: E402
 from cloud.chip_shards import (  # noqa: E402
     CHIP_SHARD_TARGET_BYTES, plan_chip, read_chip_records,
 )
@@ -898,7 +898,7 @@ def repackage(src_path: str, dst_path: str,
             # share a blob), so re-find them by content. One table per
             # mimetype: an alias takes its target's mimetype. Entry order is
             # path order, so the output is deterministic.
-            if (path.startswith(_TILE_PREFIXES) and size <= MAX_ALIAS_BYTES
+            if (path.startswith(_TILE_PREFIXES) and size <= max_alias_bytes(path)
                     and tile_aliaser_on):
                 aliaser = tile_aliasers.get(mime)
                 if aliaser is None:

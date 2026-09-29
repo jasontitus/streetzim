@@ -29,7 +29,7 @@ from streetzim.tiles import (
     estimate_tile_total,
     iter_tiles_from_mbtiles,
 )
-from streetzim.tile_alias import MAX_ALIAS_BYTES, TileAliaser
+from streetzim.tile_alias import TileAliaser, max_alias_bytes
 
 
 def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
@@ -1207,7 +1207,7 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
                     # Raster tiles sit in uncompressed clusters, so a repeat
                     # (sea, flat terrain) costs its full size unless aliased.
                     alias_of = None
-                    if aliaser.enabled and fsize <= MAX_ALIAS_BYTES:
+                    if aliaser.enabled and fsize <= max_alias_bytes(zim_path):
                         with open(fpath, "rb") as fh:
                             alias_of = aliaser.target_for(zim_path, fh.read())
                     if alias_of is not None:

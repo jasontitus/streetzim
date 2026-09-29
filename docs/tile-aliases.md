@@ -19,10 +19,21 @@ target's mimetype and bytes, with no HTTP 302. `cloud/validate_zim.py` counts
 aliases as tiles, because it skips only `is_redirect` entries.
 
 - **Turning it off:** set `STREETZIM_TILE_ALIASES=0`.
-- **Size limit:** only tiles up to 4 KiB are hashed (BLAKE2b-128). That bounds
-  the memory of the hash table on continent builds. Duplicate tiles are small
-  anyway, because only a tile with nothing specific to its position (open
-  sea, the inside of one landcover polygon) can repeat.
+- **Size limit:** only small tiles are hashed: vector tiles up to 128 B,
+  raster tiles up to 1 KiB (`max_alias_bytes` in `streetzim/tile_alias.py`).
+  Only a tile with nothing specific to its position (open sea, the inside of
+  one landcover polygon, flat terrain) can repeat, and those are small: every
+  vector duplicate seen is 55–77 B; a one-colour raster tile is 44–54 B as
+  terrain and 198–560 B as satellite imagery.
+- **Memory:** the table remembers every *distinct* tile under the cap (the
+  first copy has to be remembered before anyone knows it repeats), at about
+  110 B each (an 88-bit BLAKE2b digest and the packed z/x/y target, both as
+  ints). A million distinct small tiles is ~110 MB. The cap keeps that count
+  low: Monaco has 108 distinct vector tiles, of which 2 are under 128 B (the
+  old 4 KiB cap let 81 in). On a synthetic stream of 1 M distinct tiles of
+  64–2,080 B, the table holds 46,875 entries (5.8 MB); with the old cap and
+  table it held all of them (162 MB). The build log's alias summary prints
+  the count and the estimate.
 - **Reproducible builds:** tiles are added in a fixed order (z, x, then TMS
   row from the MBTiles; sorted file names for raster caches). The first copy
   is therefore the same on every build.
