@@ -7925,13 +7925,26 @@ function initWikidataPopups(map, config) {
   // second popup after a later tap).
   var TAP_SLOP = 10;
   var DOUBLE_TAP_MS = 250;
+  // MapLibre takes two taps up to 500 ms apart as a double-tap zoom, but
+  // waiting that long to open every popup would feel slow. So a popup opens
+  // after DOUBLE_TAP_MS, and a zoom that starts within ZOOM_AFTER_TAP_MS of
+  // the tap that opened it closes it again.
+  var ZOOM_AFTER_TAP_MS = 500;
   var tapSeq = 0;
   var tapTimer = null;
+  var tapAt = 0;
+  var popupSeq = 0;           // the tap that opened currentPopup
   function cancelPendingTap() {
     if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; }
   }
-  map.on('zoomstart', cancelPendingTap);
-  map.on('dblclick', cancelPendingTap);
+  function onZoomGesture() {
+    cancelPendingTap();
+    if (currentPopup && popupSeq === tapSeq && Date.now() - tapAt < ZOOM_AFTER_TAP_MS) {
+      currentPopup.remove(); currentPopup = null;
+    }
+  }
+  map.on('zoomstart', onZoomGesture);
+  map.on('dblclick', onZoomGesture);
 
   function named(f) {
     var p = f.properties || {};
@@ -7960,9 +7973,10 @@ function initWikidataPopups(map, config) {
 
   map.on('click', function(e) {
     var target = e.originalEvent && e.originalEvent.target;
-    if (target && target.closest && target.closest('.maplibregl-marker')) return;
     var seq = ++tapSeq;
     cancelPendingTap();
+    tapAt = Date.now();
+    if (target && target.closest && target.closest('.maplibregl-marker')) return;
     if (currentPopup) { currentPopup.remove(); currentPopup = null; }
     // Close find-result marker popups too — same reason as above.
     if (typeof _findResultsState !== 'undefined'
@@ -7993,6 +8007,7 @@ function initWikidataPopups(map, config) {
     fetchWdChunk(getWdPrefix(qid)).then(function(chunk) {
       if (seq !== tapSeq) return;
       var wd = (chunk && chunk[qid]) ? chunk[qid] : null;
+      popupSeq = seq;
       currentPopup = new maplibregl.Popup({ maxWidth: '320px' })
         .setLngLat(e.lngLat)
         .setDOMContent(buildWikiPopupDOM(name, wd, e.lngLat,
@@ -8019,6 +8034,7 @@ function initWikidataPopups(map, config) {
       .setLngLat([lon, lat])
       .setDOMContent(_szPlacePopupDOM(lat, lon, name, { cat: kind }));
     currentPopup = popup;
+    popupSeq = seq;
     _szPopupGap(map, popup);
     popup.addTo(map);
     if (!config.hasOvertureAddresses

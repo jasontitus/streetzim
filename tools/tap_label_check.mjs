@@ -82,12 +82,16 @@ try {
       const closeAll = () => p.evaluate(() =>
         document.querySelectorAll('.maplibregl-popup-close-button').forEach(b => b.click()));
       const popups = () => p.evaluate(() => document.querySelectorAll('.maplibregl-popup').length);
-      // A double-tap (zoom) on the label must not leave a popup open.
-      await closeAll(); await sleep(300);
-      await p.touchscreen.tap(target.x, target.y); await sleep(80);
-      await p.touchscreen.tap(target.x, target.y); await sleep(1200); await idle(p);
-      if (await popups()) errs.push('a double-tap on the label left a popup open');
-      else console.log('double-tap: no popup');
+      // A double-tap (zoom) on the label must not leave a popup open, fast
+      // or slow: MapLibre takes taps up to 500 ms apart as a double-tap.
+      for (const gap of [80, 300, 420]) {
+        await p.evaluate((c, z) => window.__szMap.jumpTo({ center: c, zoom: z }), CENTER, ZOOM);
+        await idle(p); await closeAll(); await sleep(300);
+        await p.touchscreen.tap(target.x, target.y); await sleep(gap);
+        await p.touchscreen.tap(target.x, target.y); await sleep(1200); await idle(p);
+        if (await popups()) errs.push(`a double-tap ${gap} ms apart left a popup open`);
+        else console.log(`double-tap ${gap} ms: no popup`);
+      }
       await p.evaluate((c, z) => window.__szMap.jumpTo({ center: c, zoom: z }), CENTER, ZOOM);
       await idle(p); await closeAll();
       // With the routing panel open, a tap picks a route point instead.
@@ -121,7 +125,31 @@ try {
       const n = await popups();
       if (n !== 1) errs.push(`tapping a search pin opened ${n} popups, not 1`);
       else console.log('search pin tap: one popup');
-      await closeAll();
+      await closeAll(); await sleep(300);
+      // A label tap, then the pin within the popup delay: the pin's popup only.
+      const other = await p.evaluate(t => {
+        const m = window.__szMap, W = m.getCanvas().clientWidth, H = m.getCanvas().clientHeight;
+        const fs = m.queryRenderedFeatures([[W * 0.15, H * 0.3], [W * 0.85, H * 0.7]], { layers: ['poi-label'] });
+        for (const f of fs) {
+          const nm = f.properties['name:latin'] || f.properties.name;
+          if (!nm || nm === t.name || f.geometry.type !== 'Point') continue;
+          const q = m.project(f.geometry.coordinates);
+          for (let dy = -30; dy <= 40; dy += 2) {
+            const hits = m.queryRenderedFeatures([q.x, q.y + dy], { layers: ['poi-label'] })
+              .map(h => h.properties['name:latin'] || h.properties.name);
+            if (hits.length && hits.every(h => h === nm)) return { x: q.x, y: q.y + dy };
+          }
+        }
+        return null;
+      }, target);
+      if (other) {
+        await p.touchscreen.tap(other.x, other.y); await sleep(100);
+        await p.touchscreen.tap(pinPt.x, pinPt.y); await sleep(1000);
+        const n2 = await popups();
+        if (n2 !== 1) errs.push(`a label tap then a pin tap 100 ms later left ${n2} popups, not 1`);
+        else console.log('label then pin: one popup');
+        await closeAll();
+      }
     }
   }
 } finally {
