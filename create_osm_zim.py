@@ -858,6 +858,10 @@ def _layer_options(*, args, bbox_str):
 def _acquire_tiles(*, args, bbox_str, geofabrik_path, pbf_path, tmpdir, total_steps):
     """Steps 1-2: the OSM extract (downloaded, or cut to the bbox) and its vector tiles, or an existing MBTiles."""
     work_pbf = None
+    # True when work_pbf is our own cut of the extract to bbox_str: the
+    # address, wiki-tag and routing steps then skip cutting it again (each
+    # osmium extract took 3.7 GB even for Luxembourg).
+    work_pbf_cut = False
     if args.mbtiles:
         # Skip OSM download and tilemaker — reuse existing MBTiles
         print(f"[1/{total_steps}] Skipping OSM data (using existing MBTiles)...")
@@ -878,9 +882,11 @@ def _acquire_tiles(*, args, bbox_str, geofabrik_path, pbf_path, tmpdir, total_st
         if bbox_str and not args.area:
             work_pbf = os.path.join(tmpdir, "area.osm.pbf")
             extract_bbox_from_pbf(source_pbf, bbox_str, work_pbf)
+            work_pbf_cut = True
         elif bbox_str and args.area and geofabrik_path != KNOWN_AREAS.get(args.area.lower().replace(" ", "-"), {}).get("geofabrik"):
             work_pbf = os.path.join(tmpdir, "area.osm.pbf")
             extract_bbox_from_pbf(source_pbf, bbox_str, work_pbf)
+            work_pbf_cut = True
         else:
             work_pbf = source_pbf
 
@@ -890,7 +896,7 @@ def _acquire_tiles(*, args, bbox_str, geofabrik_path, pbf_path, tmpdir, total_st
         mbtiles_path = os.path.join(tmpdir, "tiles.mbtiles")
         generate_tiles(work_pbf, mbtiles_path, bbox=bbox_str,
                        fast=args.fast, store=args.store)
-    return mbtiles_path, work_pbf
+    return mbtiles_path, work_pbf, work_pbf_cut
 
 
 def _process_tiles(*, args, mbtiles_path, total_steps):
@@ -920,7 +926,7 @@ def _process_tiles(*, args, mbtiles_path, total_steps):
 
 def _build_search(
         *, args, bbox_str, mbtiles_path, pbf_path, tiles, tmpdir, total_steps,
-        use_streaming, work_pbf):
+        use_streaming, work_pbf, work_pbf_cut=False):
     """Step 4: search features (from a cache or the tiles), addresses, Wikipedia cross-refs and Overture enrichment."""
     # Step 5: Extract search features from tiles (or use cached)
     print()
@@ -981,11 +987,12 @@ def _build_search(
         addr_pbf = work_pbf or pbf_path or args.pbf
         if addr_pbf:
             addr_bbox = parse_bbox(bbox_str) if bbox_str else None
+            addr_precut = bool(work_pbf_cut and addr_pbf == work_pbf)
             if args.skip_address_extract:
                 print("    [--skip-address-extract] reusing cached addresses + overture enrichment")
             else:
                 address_count = extract_addresses_pbf(
-                    addr_pbf, search_features, bbox=addr_bbox) or 0
+                    addr_pbf, search_features, bbox=addr_bbox, precut=addr_precut) or 0
             # Overture address enrichment — runs after OSM extraction so
             # the dedup index is populated. Only adds rows the OSM pass
             # didn't cover (the 1029-block gaps on Ramona St and friends).
@@ -1074,7 +1081,8 @@ def _build_search(
             # Same PBF feeds the wiki-tag lookup so the chunker can enrich
             # POI records with wikipedia/wikidata for offline cross-ref.
             try:
-                wiki_cross_refs = extract_wiki_tags_pbf(addr_pbf, bbox=addr_bbox)
+                wiki_cross_refs = extract_wiki_tags_pbf(addr_pbf, bbox=addr_bbox,
+                                                        precut=addr_precut)
             except Exception as _e:
                 print(f"    Warning: wiki cross-ref extraction failed: {_e}")
                 wiki_cross_refs = None
@@ -1134,7 +1142,7 @@ def _build_wikidata(
 
 def _build_routing(
         *, args, bbox_str, include_routing, include_wikidata, pbf_path, tmpdir,
-        total_steps, work_pbf):
+        total_steps, work_pbf, work_pbf_cut=False):
     """The routing graph (SZRG v4) from the extract."""
     # Extract routing graph if requested
     routing_graph_path = None
@@ -1148,7 +1156,9 @@ def _build_routing(
             print("    (routing requires a PBF file — not available with --mbtiles only)")
         else:
             rt_bbox = parse_bbox(bbox_str) if bbox_str else None
-            routing_graph_path = extract_routing_graph(rt_pbf, tmpdir, bbox=rt_bbox)
+            routing_graph_path = extract_routing_graph(
+                rt_pbf, tmpdir, bbox=rt_bbox,
+                precut=bool(work_pbf_cut and rt_pbf == work_pbf))
     return routing_graph_path
 
 
@@ -1753,7 +1763,7 @@ def main(argv=None):
     # Create temp directory
     tmpdir = tempfile.mkdtemp(prefix="osm_zim_")
     try:
-        mbtiles_path, work_pbf = _acquire_tiles(
+        mbtiles_path, work_pbf, work_pbf_cut = _acquire_tiles(
             args=args, bbox_str=bbox_str, geofabrik_path=geofabrik_path,
             pbf_path=pbf_path, tmpdir=tmpdir, total_steps=total_steps)
 
@@ -1764,7 +1774,7 @@ def main(argv=None):
          wiki_cross_refs) = _build_search(
             args=args, bbox_str=bbox_str, mbtiles_path=mbtiles_path, pbf_path=pbf_path,
             tiles=tiles, tmpdir=tmpdir, total_steps=total_steps,
-            use_streaming=use_streaming, work_pbf=work_pbf)
+            use_streaming=use_streaming, work_pbf=work_pbf, work_pbf_cut=work_pbf_cut)
 
         wikidata_data = _build_wikidata(
             args=args, include_wikidata=include_wikidata, mbtiles_path=mbtiles_path,
@@ -1774,7 +1784,7 @@ def main(argv=None):
         routing_graph_path = _build_routing(
             args=args, bbox_str=bbox_str, include_routing=include_routing,
             include_wikidata=include_wikidata, pbf_path=pbf_path, tmpdir=tmpdir,
-            total_steps=total_steps, work_pbf=work_pbf)
+            total_steps=total_steps, work_pbf=work_pbf, work_pbf_cut=work_pbf_cut)
 
         satellite_dir, terrain_dir = _satellite_and_terrain(
             args=args, bbox_str=bbox_str, include_routing=include_routing,
