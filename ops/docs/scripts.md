@@ -104,10 +104,11 @@ links; `pytest.ini` keeps bare `pytest` from collecting them),
 `.smoke_viewer_playwright.py`, and the unreferenced `tmp/chip-test*.mjs`,
 `tmp/search-probe.mjs`, `tmp/shim-test.js`, `tmp/try-css.mjs`.
 
-After the move, update the few docs that mention them:
-`docs/remote-rebuild.md` and `docs/zim-packaging-gotchas.md` (mentions of
-`build-region-and-upload.sh`, which should now point to `ship-region.sh`),
-and the compression-analysis docs.
+After the move, update the few docs that mention them. (Done: the
+compression-analysis docs cite `attic/research/`; the remote-box runbook is
+now `ops/docs/remote-rebuild.md`, a record under a banner that points to
+the current path; and it and `docs/zim-packaging-gotchas.md` say
+`build-region-and-upload.sh` is retired and `ship-region.sh` gates today.)
 
 ## Phase 2: retire after the step-0 check
 

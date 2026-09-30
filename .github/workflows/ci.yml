@@ -197,10 +197,10 @@ jobs:
         with:
           python-version: "3.14"
           cache: pip
-      - name: Install dependencies (zimscraperlib needs libmagic and cairo)
+      - name: Install dependencies (zimscraperlib needs libmagic and cairo; osmium-tool runs tests/test_precut.py and the routing tests)
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q libmagic1t64 libcairo2
+          sudo apt-get install -y -q libmagic1t64 libcairo2 osmium-tool
           pip install -r requirements-dev.txt
           python -c "from streetzim import scraperlib; assert scraperlib.AVAILABLE"
       - name: Python tests

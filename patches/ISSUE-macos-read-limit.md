@@ -1,5 +1,7 @@
 # libzim macOS read() size limit causes "Cannot read chars" on large ZIM files
 
+> Record of the issue as filed. Fixed upstream in libzim 9.6.0 (openzim/libzim#1053).
+
 ## Summary
 
 ZIM files with more than ~268 million entries fail to open on macOS with:

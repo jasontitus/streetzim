@@ -1,5 +1,7 @@
 # StreetZIM Research Notes
 
+> Early research notes from the project's start (March 2026), not kept up to date. openzim/maps now builds from OpenFreeMap vector tiles ([docs/openzim-integration.md](docs/openzim-integration.md)), and StreetZim runs in the Kiwix apps ([README.md](README.md)).
+
 Research into ZIM file format, Kiwix ecosystem, and approaches for packaging
 OpenStreetMap data for offline use.
 

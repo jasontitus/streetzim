@@ -6,8 +6,12 @@ implementation is tuned for memory-constrained mobile WebViews.
 
 ## Algorithm chain
 
-`findRoute()` in `resources/viewer/index.html` runs a **strategy
-chain**: try the cheapest, most accurate option first, fall back only
+`findRoute()` in the viewer (`resources/viewer/src/index/540-routing-worker-bridge.js`,
+built into `resources/viewer/index.html` by `tools/build_viewer.py`)
+hands spatial graphs to `resources/viewer/routing-worker.js`, which runs a **strategy
+chain** (the main-thread fallback, `findRouteMainThread` in
+`540-routing-worker-bridge.js`, runs the same chain with the engines in
+`530-routing-astar.js`): try the cheapest, most accurate option first, fall back only
 when one fails to converge inside its budget. As of 2026-04-25 the
 chain is:
 
@@ -16,7 +20,7 @@ chain is:
    by a pop budget (worker numbers; the main-thread fallback keeps
    smaller ones, see *Memory budget*):
    1. *Optimal pass* — admissible heuristic (haversine ÷ 100 km/h,
-      the fastest edge speed `create_osm_zim.SPEED` emits, so the
+      the fastest edge speed in `SPEED` (`streetzim/routing/build.py`), so the
       estimate can never exceed the true remaining time), 500,000
       pops, only for crow-fly ≤ 200 km. Returns the guaranteed-
       shortest route. Every Silicon Valley metro pair that the
@@ -100,8 +104,8 @@ or taken tens of seconds.
 
 ### Snapping and non-drivable edges
 
-Both snappers (`snapNearestNode` in the worker and in
-`index.html`) rank vertices by planar distance with longitude scaled
+Both snappers (`SpatialGraph.prototype.snapNearestNode` in the worker
+and in the viewer's `510-routing-graph-formats.js`) rank vertices by planar distance with longitude scaled
 by cos(lat), and they never return a vertex the car A* could not
 leave:
 
@@ -143,7 +147,7 @@ one pair that snapped onto a pier and returned no route.
 ### Highway-tier filter
 
 Edges carry a `class_access` u32 from `CLASS_ORDINAL` in
-`create_osm_zim.py` (bits 0..4). The two-pass middle leg only
+`streetzim/routing/build.py` (bits 0..4). The two-pass middle leg only
 expands edges whose ordinal is in {1..6} (motorway, trunk, primary,
 and the corresponding `*_link` variants). On Japan this collapses
 the search from ~18M nodes to a few hundred thousand highway
@@ -176,7 +180,10 @@ stay well under that. Per-route memory budget at peak:
 | MapLibre tiles + DOM | ~100 MB | Constant-ish. |
 | **Routing peak** | **~500–600 MB** | Measured on Tokyo→Oita with the harness. |
 
-Knobs in `resources/viewer/index.html`:
+Knobs in `resources/viewer/routing-worker.js` (the main-thread fallback's
+copies are in `resources/viewer/src/index/`: `SpatialGraph` in
+`510-routing-graph-formats.js`, the engines in `530-routing-astar.js`, and
+`findRouteMainThread` in `540-routing-worker-bridge.js`):
 
 * `SpatialGraph` constructor: `maxResidentBytes = 64 MB`. Drops cells
   aggressively during long-distance routing. Cell I/O is capped at four
@@ -227,9 +234,8 @@ est. visited Maps: 73 MB
 est. heap (no Safari): ~832 MB (144 cells + 73 visit, ×2 overhead)
 ```
 
-The flag is sticky via `localStorage` — set it once on any URL
-(`?debug=1`) and it survives the picker → viewer redirect. Turn
-off with `?debug=0`.
+The flag holds for one page load only. It used to be sticky via
+`localStorage`; the viewer now removes that old key on load.
 
 ### Build stamps
 
@@ -239,7 +245,8 @@ Every screen shows the deploy stamp:
   the "Last updated" line.
 * **PWA picker** (`/drive/`) — in the footer.
 * **Viewer** (`/drive/viewer/`) — green badge in the top-left
-  corner. Click to copy.
+  corner. Click to copy. Hidden on screens 480 px wide or less unless
+  `?debug=1` is set.
 
 The stamp is `<git-short>[-d<HHMMSS>]` from
 `cloud/deploy_pwa.sh`. The `-dHHMMSS` suffix appears whenever the
@@ -409,13 +416,17 @@ through two doublings): 14 / 14 pairs bit-exact with the reference.
 
 ## Files
 
-* `resources/viewer/index.html` — viewer JS, including
+* `resources/viewer/routing-worker.js` — the routing worker:
   `findRouteSpatial`, `findRouteSpatialFiltered`,
   `findRouteSpatialTwoPass`, `findNearestHighwayNode`,
-  `SpatialGraph.compact()`.
+  `SpatialGraph.compact()`, `NodeTable` / `NodeHeap`.
+* `resources/viewer/src/index/510-routing-graph-formats.js` to
+  `540-routing-worker-bridge.js` — the viewer's graph readers,
+  main-thread fallback engine and worker bridge (built into
+  `resources/viewer/index.html`; see `docs/viewer-supply-chain.md`).
 * `web/drive/sw.js` — service worker, network-first.
 * `cloud/route_cli.py` — Python prototype that mirrors the JS
-  algorithm. Used as a differential reference while iterating
+  algorithm (on `streetzim/routing/spatial.py`). Used as a differential reference while iterating
   on the JS port.
 * `cloud/route_browser_test.mjs` — Puppeteer harness.
 * `cloud/route_compare.mjs` — default-vs-full diff runner.

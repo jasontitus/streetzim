@@ -36,7 +36,7 @@ var cancelledRoutes = new Set();
 var activeRoutes = new Set();
 
 // A* heuristic speed. MUST be >= the fastest edge speed the builder
-// emits (create_osm_zim.SPEED: motorway = 100 km/h) or the heuristic
+// emits (SPEED in streetzim/routing/build.py: motorway = 100 km/h) or the heuristic
 // over-estimates remaining time and the "optimal" pass silently
 // returns suboptimal routes. Matches tests/szrg_astar.HEURISTIC_SPEED_KPH
 // and cloud/route_cli.py, which are the differential references.
@@ -417,8 +417,9 @@ function isHighwayClass(classAccess) {
 // detour over ~200 m and cars were routed down stairs.
 var NO_MOTOR_BIT = 0x200;
 // Class ordinals 16..20 (path, footway, cycleway, pedestrian, steps —
-// create_osm_zim.CLASS_ORDINAL) are never drivable either. ZIMs built
-// before the builder set bit 9 still carry these ways in the car graph
+// CLASS_ORDINAL in extract_routing_graph, streetzim/routing/build.py)
+// are never drivable either. ZIMs built before the builder set bit 9
+// still carry these ways in the car graph
 // with 3–5 km/h speeds, so the ordinal is checked alongside the bit.
 var NO_MOTOR_ORD_MIN = 16, NO_MOTOR_ORD_MAX = 20;
 function isNoMotor(classAccess) {

@@ -6,7 +6,8 @@ bytes becomes a ZIM **alias** (`Creator.add_alias`): a second directory entry
 that points at the same cluster and blob. openzim/maps stores tiles the same
 way. The code is in `streetzim/tile_alias.py`, and it covers:
 
-- vector tiles (`tiles/`), after gzip decompression, in `create_zim`;
+- vector tiles (`tiles/`), after gzip decompression, in `create_zim`
+  (`streetzim/zim_writer.py`);
 - raster tiles (`satellite/`, `terrain/`) in `create_zim`. These sit in
   uncompressed clusters, so each repeat would otherwise cost its full size;
 - `cloud/repackage_zim.py`. The reader API does not say which entries share
@@ -47,7 +48,7 @@ aliases as tiles, because it skips only `is_redirect` entries.
   row from the MBTiles; sorted file names for raster caches). The first copy
   is therefore the same on every build.
 - **Where aliases are not written:** `--zim-builder rust` (the path that
-  `build-region-fast.sh` uses) has no alias record in the manifest or in
+  `ops/build-region-fast.sh` uses) has no alias record in the manifest or in
   zimru, so it still writes every copy. `ops/cloud/swap_viewer_rust.py` also
   rewrites through that packer, so it turns aliases back into copies. The
   output is still correct, just without the saving.

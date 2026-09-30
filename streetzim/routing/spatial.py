@@ -11,7 +11,8 @@ contiguous global-node range, which lets readers resolve node ownership
 with a binary search over the small metadata table. Cells are sequential
 IDs; their (lat_cell, lon_cell) keys live in the index.
 
-Companion format to resources/viewer/index.html + mcpzim SZRGGraph. This
+Companion format to the viewer's reader
+(resources/viewer/src/index/510-routing-graph-formats.js) + mcpzim SZRGGraph. This
 module is the reference implementation; language ports mirror it.
 
 File formats (little-endian, u32 unless stated):

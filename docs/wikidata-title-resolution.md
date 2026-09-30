@@ -93,7 +93,7 @@ opt-in could add it later — high record coverage, ~hundreds of articles).
    rather than a fixed rate; the gap widens only on 429, maxlag or a 5xx
    with `Retry-After`), honouring `Retry-After`
    (`cloud/wikimedia_http.py`). A 429/5xx/maxlag/network failure caches
-   nothing. A 400/401/403/404 stops the run at once; a batch refused with
+   nothing. A 400/401/403/404/405/410 stops the run at once; a batch refused with
    an `error` body is halved until the bad id is found, and that id alone
    is cached as having no article. The build host resolves Q-IDs this way
    (`ops/build-region-fast.sh` passes no `--wikidata-title-map`): pacing
@@ -123,27 +123,30 @@ python -m cloud.wikidata_titles --measure osm-california-2026-05-09.zim \
     --cache build/wd_titles.json
 ```
 
-The flag is **off by default** so stock builds stay hermetic/offline
-unless explicitly opted in.
+The flag is **off by default** in `create_osm_zim.py` so stock builds stay
+hermetic/offline unless explicitly opted in. The `streetzim` command turns
+it on, with `--bundle-wiki-articles`, when Wikipedia is on (`--profile full`
+or `--wikipedia`; `profile_feature_args` in `streetzim/cli.py`).
 
 ## Web viewer (dual-use)
 
 The enriched `w` field is the standard, shared OSM-Wikipedia field — not an
-mcpzim-only path — so the in-ZIM web viewer surfaces it too. The place
-detail panel (`resources/viewer/index.html`) and the Find-page cards
-(`places.html`) now render a 📖 **Wikipedia** link whenever a record has
-`w`, including the titles backfilled here. So the lift is visible on the
-web Find page, not just to the offline LLM.
+mcpzim-only path — so the in-ZIM web viewer surfaces it too, including
+the titles backfilled here:
 
-Link target:
-
-- **Default** — the public site, `https://<lang>.wikipedia.org/wiki/<Title>`
-  (matches the viewer's existing external Wikidata link).
-- **Local** — most hosts (incl. kiwix-serve) **can't deep-link across
-  ZIMs**, so `wikipediaBase` is unset by default. A custom host that can
-  serve a local Wikipedia (e.g. an app WebView with its own URL scheme)
-  may set `wikipediaBase` in `map-config.json` to resolve offline. The
-  viewer reads it gracefully whether or not it's present.
+- **Find-page cards** (`places.html`) render a 📖 link to the public site,
+  `https://<lang>.wikipedia.org/wiki/<Title>`, whenever a record has `w`.
+- **Place detail panel** (`resources/viewer/index.html`, source
+  `src/index/210-place-detail-sheet.js`) shows a 📖 **Wikipedia** button
+  when the ZIM bundles Wikipedia articles (`--bundle-wiki-articles`,
+  below) and a title is known, and opens it inside the ZIM.
+  `_wikiArticlePath` (`src/index/100-wiki-bridge-and-viewport.js`) returns
+  a path only when `wiki-geo-index.json` exists; the title is the record's
+  `w`, else the geo index's Q-ID map, else the PWA's `wiki-qid-titles.json`
+  (drive PWA only). It does not check that this particular article is in
+  the ZIM. Most hosts (incl. kiwix-serve) **can't deep-link across ZIMs**, so
+  there is no link to a separate Wikipedia ZIM (the old `wikipediaBase`
+  setting is gone).
 
 This keeps the design honest: one shared field, two consumers (mcpzim's
 `articleByTitle` and the web viewer), zero parallel blobs.
@@ -172,8 +175,10 @@ Sources + caching:
 - **Local Wikipedia ZIM** (`--wiki-articles-source <enwiki.zim>`) — offline,
   fast, no crawl. Use a FULL enwiki ZIM; a `top`/subset misses long-tail
   POIs.
-- **Wikipedia API** (default) — cached to `wiki_articles_cache/` (repo-
-  relative, like `wikidata_cache/`; gitignored). Hits (`<sha1>.html`) and
+- **Wikipedia API** (default) — cached to `--wiki-articles-cache`, else
+  `wiki_articles_cache/` under `$STREETZIM_CACHE_DIR`, the checkout, or (an
+  installed package) the user cache directory (`streetzim/paths.py`
+  `cache_root`, like `wikidata_cache/`; gitignored). Hits (`<sha1>.html`) and
   definitive misses (`<sha1>.miss`: no such page, no text, with the reason)
   are cached, so **a rebuild never re-crawls**. Requests are serial with a
   0.1 s gap after each response, at most 120 a minute and 5 s after an
@@ -214,7 +219,8 @@ but works alone (bundles just the OSM-tagged `w` titles).
 - `cloud/wikidata_titles.py` — `resolve_qids()`, `augment_wiki_cross_refs()`,
   and a `--measure` CLI that reproduces the lift analysis on any ZIM.
 - `create_osm_zim.py` — the `--resolve-wikidata-titles` flag + a one-call
-  hook right after `extract_wiki_tags_pbf`, plus the `wsrc` provenance
-  field on emitted records.
+  hook right after `extract_wiki_tags_pbf` (`streetzim/addresses.py`); the
+  `wsrc` provenance field is written with the search records
+  (`streetzim/zim_writer.py`).
 - `tests/test_wikidata_titles.py` — unit tests (network mocked): batching,
   cache hit/miss persistence, offline map, and the augment contract.

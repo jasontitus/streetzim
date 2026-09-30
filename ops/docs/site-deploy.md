@@ -5,9 +5,10 @@ backed by the `streetzim-<id>` items on archive.org. After uploading a new
 ZIM (or any time you want a fresh card grid), the site needs to be
 regenerated and redeployed.
 
-The deploy step needs `firebase` CLI logged in. The Linux build host doesn't
-have firebase configured — run from your Mac (or any machine with `firebase
-login` done).
+The deploy step needs `firebase` CLI logged in. The Linux build host has it
+(`/usr/local/bin/firebase`, logged in): `cloud/upload_validated.sh` runs
+`web/generate.py --deploy` there after every upload it completes. By hand,
+run it from the build host or any machine with `firebase login` done.
 
 ## Prereqs
 
@@ -36,8 +37,8 @@ python3 web/generate.py --deploy
    ZIMs show up here automatically — no client-side state to update.
 2. **Renders `web/index.html`** from `web/template.html` using the fetched
    item list, joined with the static `REGIONS` registry inside
-   `web/generate.py` (which has display names, descriptions, and the
-   default zoom).
+   `web/generate.py` (id, tier, title, `zim_file` and description per
+   region).
 3. **Runs `firebase deploy --only hosting`**, which fires the predeploy
    hook `bash scripts/sync-drive-viewer.sh` (pulls the right MapLibre /
    fzstd versions into `web/drive/viewer/`) and then pushes everything
@@ -52,10 +53,14 @@ open web/index.html            # local preview in browser
 
 ## Common gotchas
 
-- **The Linux build host's `web/index.html` is stale.** The upload
-  pipeline regenerates it on each upload but the firebase deploy step
-  fails (no firebase login there) and the file just sits. Don't pull
-  it back to your Mac — let your Mac re-query archive.org freshly.
+- **Don't commit regenerated site files by hand.** Every deploy on the
+  build host rewrites `web/index.html` (and `cloud/deploy_pwa.sh` rewrites
+  `web/drive/build-info.js`, `web/drive/sw.js`, `web/drive/viewer/.version`).
+  Don't copy them to another machine either — `web/generate.py` re-queries
+  archive.org. (The host has committed them at times, e.g. 37403b8 and
+  dcaee75 on 2026-09-29.) The one site file committed automatically is
+  `web/torrents/<id>.torrent`, which `cloud/upload_validated.sh` commits
+  after an upload.
 - **Item metadata is eventually consistent.** Right after `ia upload`
   finishes, archive.org's metadata API can lag by minutes. If a brand-
   new ZIM doesn't appear in the homepage card grid after a deploy,
@@ -75,14 +80,17 @@ open web/index.html            # local preview in browser
   ids in `TIERS`), `title`, `zim_file`, and `description`; see the
   existing entries). The card won't appear on
   the homepage until both (a) the entry is in `REGIONS` and (b) the
-  archive.org item exists. Push the registry change and redeploy.
+  archive.org item exists. `web/generate.py` refuses to generate (and so
+  to deploy) when a `cloud/regions.tsv` region is live on archive.org but
+  has no `REGIONS` entry. Push the registry change and redeploy.
 
 ## What runs where
 
 | Step | Machine | Why |
 |---|---|---|
-| `cloud/upload_validated.sh` (validate + ia upload + cleanup) | Linux build host | Has the freshly built ZIMs locally; ia configured. |
-| `web/generate.py --deploy` (regenerate + firebase deploy) | Mac (or any host with `firebase login`) | Source of truth is archive.org, not the build host's filesystem. |
+| `cloud/upload_validated.sh` (validate + ia upload + torrent + prune + deploy) | Linux build host | Has the freshly built ZIMs locally; ia and firebase configured. |
+| `web/generate.py --deploy` by hand (after a deferred listing, or a site-only change) | build host, or any host with `firebase login` | Source of truth is archive.org, not the build host's filesystem. |
 
-After uploads complete on the build host, deploying is a single command
-on your Mac. No file transfer needed between hosts.
+An upload that exits 6 ("listing pending") skips the deploy;
+`cloud/finish_pending_uploads.sh` completes it later. No file transfer is
+needed between hosts.

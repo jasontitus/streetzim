@@ -10,6 +10,8 @@ import time
 import urllib.error
 import urllib.request
 
+from streetzim.cpus import build_cpus
+
 # The builder's flushing, phase-timing print (see streetzim/common.py).
 from streetzim.common import (
     print,
@@ -977,7 +979,7 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
     cached = 0
     import multiprocessing
 
-    num_workers = min(os.cpu_count() or 4, 16)  # cap at 16 to limit I/O contention
+    num_workers = min(build_cpus(), 16)  # cap at 16 to limit I/O contention
 
     for z in plan.zooms():
         # For z=0-7, prefer the world-coverage VRT if supplied — those
@@ -1223,7 +1225,7 @@ def audit_terrain(plan, dest_dir):
     if repair:
         print(f"    Making {len(repair)} missing terrain tiles...")
         import multiprocessing as _mp
-        with _mp.get_context("spawn").Pool(min(4, os.cpu_count() or 4)) as pool:
+        with _mp.get_context("spawn").Pool(min(4, build_cpus())) as pool:
             pool.map(_generate_one_terrain_tile, repair)
 
     broken = []

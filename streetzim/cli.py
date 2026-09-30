@@ -52,7 +52,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:     # also runnable as `python streetzim/cli.py`
     sys.path.insert(0, str(REPO_ROOT))
-from streetzim import area, download  # noqa: E402  (after the path fix above)
+from streetzim import area, cpus, download  # noqa: E402  (after the path fix above)
 from streetzim.paths import RESOURCES_DIR, missing_runtime_files  # noqa: E402
 from streetzim import satellite_sources  # noqa: E402
 GEOFABRIK_POLY = re.compile(r"^https?://download\.geofabrik\.de/(.+)\.poly$")
@@ -88,6 +88,7 @@ ZIMFARM: dict[str, dict[str, Any]] = {
     "output": {"pattern": r"^/output$"},
     "stats_filename": {"pattern": r"^/output/task_progress\.json$"},
     "zim_workers": {"title": "ZIM workers", "min": 1},
+    "cpus": {"title": "CPU cores", "min": 1},
     "max_zoom": {"min": 0, "max": 14},
     "satellite": {"title": "Satellite imagery"},
     "satellite_source": {"title": "Satellite source", "type": "string-enum",
@@ -117,9 +118,9 @@ ZIM_METADATA_FLAGS = {"Name": "name", "Title": "title", "Description": "descript
 #          it is opt-in (the 2021 source is non-commercial).
 #   basic: nothing fetched besides the OSM extract and the shapefiles.
 # Each feature is one on/off flag (a string-enum on Zimfarm; unset: the
-# profile decides), so a recipe cannot say both. Features whose flag another
-# branch defines (--terrain, --kiwix-poi-pages) join in when the parser has
-# that flag: add_profile_arguments turns it into an on/off flag.
+# profile decides), so a recipe cannot say both. --terrain and
+# --kiwix-poi-pages are defined as plain flags in the "Content" group below;
+# add_profile_arguments (_adopt) replaces each with an on/off flag.
 PROFILES: dict[str, dict[str, bool]] = {
     "full": {"wikidata": True, "wikipedia": True, "overture": True, "terrain": True,
              "kiwix_poi_pages": True},
@@ -130,8 +131,8 @@ DEFAULT_PROFILE = "full"
 FEATURE_NAMES = {"wikidata": "Wikidata", "wikipedia": "Wikipedia articles",
                  "overture": "Overture Maps", "terrain": "terrain",
                  "kiwix_poi_pages": "POIs in Kiwix search"}
-# Joins the profile only once it can also be turned off where it is defined
-# (--terrain/--no-terrain, since topic-terrain-openzim).
+# Joins the profile only when it can also be turned off where it is defined
+# (--terrain/--no-terrain).
 NEEDS_OFF_SWITCH = {"terrain"}
 ON_OFF = ("on", "off")
 WIKIPEDIA_IMAGES = ("none", "lead", "all")
@@ -153,6 +154,18 @@ def version() -> str:
     from streetzim.__about__ import __version__
     return __version__
 
+
+
+def positive_int(text: str) -> int:
+    """argparse type for a count of at least 1, so a bad value fails before
+    any download."""
+    try:
+        n = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a whole number: {text!r}") from None
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, not {n}")
+    return n
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -234,9 +247,16 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Maximum zoom of the vector tiles. Default: 14")
     feat.add_argument("--default-view",
                       help="Initial map view as latitude,longitude[,zoom]")
-    feat.add_argument("--zim-workers", type=int,
-                      help="Compression threads for libzim. Default: the CPU "
-                           "count, at most 20")
+    feat.add_argument("--zim-workers", type=positive_int,
+                      help="Compression threads for libzim. Default: --cpus, "
+                           "else the usable cores within any CPU quota, at most 20")
+    feat.add_argument("--cpus", type=positive_int,
+                      help="CPU cores the build uses at once (tilemaker, "
+                           "search, terrain, compression). Set it to the task's "
+                           "CPUs: a CPU share hides no cores, and each core "
+                           "costs memory. Default: the usable cores, at most "
+                           "the container's CPU quota and one per "
+                           f"{cpus.GIB_PER_CPU} GiB of its memory limit")
     feat.add_argument("--keep-temp", action="store_true", help=argparse.SUPPRESS)
     add_profile_arguments(p)
     add_satellite_flags(p)
@@ -910,8 +930,10 @@ def _builder_argv(args: argparse.Namespace, bbox: str, pbf_url: str | None, dl: 
         argv += ["--kiwix-poi-pages"]
     if args.max_zoom is not None:
         argv += ["--max-zoom", str(args.max_zoom)]
-    if args.zim_workers:
+    if args.zim_workers is not None:
         argv += ["--workers", str(args.zim_workers)]
+    if args.cpus is not None:
+        argv += ["--cpus", str(args.cpus)]
     if args.default_view:
         lat, lon, zoom = parse_default_view(args.default_view)
         argv += [f"--map-center={lon},{lat}"]

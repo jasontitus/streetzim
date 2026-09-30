@@ -1,7 +1,7 @@
 # StreetZim data formats (frozen reference)
 
-This is the contract between the builder (`create_osm_zim.py` and the
-`cloud/` tools that write ZIMs) and every reader: the viewer
+This is the contract between the builder (`create_osm_zim.py`, the
+`streetzim/` modules it drives, and the `cloud/` tools that write ZIMs) and every reader: the viewer
 (`resources/viewer/index.html`, `routing-worker.js`), the PWA at
 `/drive/` (which serves the *current* viewer against *any* ZIM a user
 opens), and the Python reference readers used by tests.
@@ -27,7 +27,7 @@ disagrees.
 
 ### Geometry blob encoding
 
-`_encode_geom` in `extract_routing_graph` (`create_osm_zim.py`):
+`_encode_geom` in `extract_routing_graph` (`streetzim/routing/build.py`):
 
 - First point: `<ii` = `lon_e7, lat_e7`.
 - Each later point: `varint(zigzag32(dlon))`, `varint(zigzag32(dlat))`.
@@ -79,7 +79,7 @@ Speeds come from the `SPEED` table (`DEFAULT_SPEED` = 30 km/h).
 
 ### SZRG v4 — `routing-data/graph.bin` (default for `--routing`)
 
-Writer: `extract_routing_graph`, `create_osm_zim.py`.
+Writer: `extract_routing_graph`, `streetzim/routing/build.py`.
 
 | offset | type | field |
 |---|---|---|
@@ -118,10 +118,9 @@ Readers keep v5 support in case a published file carries one;
 
 ### SZCI v3 + SZRC v2 — spatial cells (`--spatial-chunk-scale N`, what production ships)
 
-Writer: `build_spatial` in `streetzim/routing/spatial.py` (called by
-`create_osm_zim.py` and `cloud/repackage_zim.py`; see
-[Known debt](#known-debt)). The SZRG v4 file is only an intermediate
-input in this mode.
+Writer: `build_spatial` in `streetzim/routing/spatial.py` (called by the
+builder's `streetzim/zim_writer.py` and by `cloud/repackage_zim.py`). The
+SZRG v4 file is only an intermediate input in this mode.
 
 `routing-data/graph-cells-index.bin`:
 
@@ -246,18 +245,18 @@ reader branch is only dead when no published ZIM needs it.
 | `maplibre-gl.js`, `maplibre-gl.css` | MapLibre GL JS (vendored; version in `resources/viewer-assets.lock.json`) |
 | `mapbox-gl-rtl-text.js` | MapLibre's RTL text plugin (Arabic/Hebrew shaping), vendored and pinned the same way, behind a comment carrying its licence; the viewer loads it only once a tile has RTL text. Older ZIMs lack it; `cloud/repackage_zim.py` adds it with the viewer swap |
 | `map-config.json` | name, center, zoom, minZoom, maxZoom, buildDate, bounds, `hasSatellite`/`satelliteMaxZoom`/`satelliteFormat`/`satelliteTileSize`, `satelliteSource`/`satelliteYear`/`satelliteLicense`/`satelliteLicenseUrl`/`satelliteAttribution`/`satelliteNonCommercial` (which EOX mosaic and the credit it needs, `streetzim/satellite_sources.py`; absent in older ZIMs, which all carry the 2021 mosaic, CC BY-NC-SA 4.0), `hasTerrain`/`terrainMaxZoom`/`terrainMinZoom` (the lowest terrain zoom stored, when not 0; see [zimfarm.md](zimfarm.md#terrain-cost)), `hasWikidata`, `hasRouting`, `hasOvertureAddresses`, `hasWikiArticles`, `rtlTextPlugin` (the RTL plugin's entry path, `mapbox-gl-rtl-text.js`; absent in older ZIMs, whose viewer then leaves RTL labels unshaped); `title`, `description` (the ZIM's Title/Description metadata) and `generator` (`streetzim <version>`) for the viewer's About panel |
-| `streetzim-meta.json` | build metadata for other consumers. `routingGraph.version` is the SZRG version of the intermediate graph (4 or 5), even when the ZIM ships SZCI v3 cells |
+| `streetzim-meta.json` | build metadata for other consumers. `routingGraph.version` is the SZRG version of the intermediate graph (4; 5 in ZIMs built with the retired `--split-graph`), even when the ZIM ships SZCI v3 cells |
 | `tiles/{z}/{x}/{y}.pbf` | OpenMapTiles-schema MVT; empty tiles are dropped; repeats of an identical tile are ZIM aliases of the first (`docs/tile-aliases.md`) |
 | `satellite/{z}/{x}/{y}.{avif,webp}` | optional, uncompressed; repeats of an identical tile are ZIM aliases of the first, as for `tiles/` |
 | `terrain/{z}/{x}/{y}.webp` | optional, Mapbox terrain-RGB, from `terrainMinZoom` (default 0) to `terrainMaxZoom`; repeats are aliased too |
-| `fonts/{Font}/{start}-{end}.pbf` | SDF glyphs (Open Sans Regular/Bold/Italic) |
-| `search-data/manifest.json`, `search-data/{prefix}.json` | prefix-sharded search records `{n, t, s, a, o, l, …}`; see `docs/search-prefix-locality.md` |
+| `fonts/{Font}/{start}-{end}.pbf` | SDF glyphs (`OpenSansRegular`/`OpenSansBold`/`OpenSansItalic`). The ranges holding scripts Open Sans lacks (Arabic, Hebrew, ...) get Noto Sans glyphs merged in when the map's labels use them (`streetzim/glyph_fallback.py`), with the licence at `fonts/NotoSans/OFL.txt` |
+| `search-data/manifest.json`, `search-data/{prefix}.json` | prefix-sharded search records `{n, t, s, a, o, l, …}`; see `docs/search-records.md` |
 | `category-index/manifest.json`, `category-index/{cat}.json`, `category-index/chip-{id}[…].json` | Find page data; chip ids come from `cloud/chip_rules.py`, shard layout from `cloud/chip_shards.py` |
 | `wikidata/manifest.json`, `wikidata/{NN}.json` | optional Wikidata facts, bucketed by the first two digits of the Q-number |
 | `wiki-article/{Title}`, `wiki-image/{sha1}.{ext}` | optional bundled Wikipedia (`cloud/wiki_articles.py`) |
 | `wiki-geo-index.json` | `{title: [lat, lon, type]}` |
-| `search/{slug}.html` | per-feature detail pages (libzim Xapian mode only) |
-| `overture-sources.json` | Overture attribution, when Overture data was merged |
+| `search/{slug}.html` | per-feature detail pages, front articles, for places, airports, parks, peaks and water (POIs too with `--kiwix-poi-pages`; `KIWIX_PAGE_TYPES` in `streetzim/zim_writer.py`). The streaming search path writes them only in `--xapian libzim` mode; the in-memory path (`_add_search_in_memory`) writes them in any mode |
+| `overture-sources.json` | Overture attribution; always written (the viewer links it), with empty `themes`/`datasets` when no Overture data was merged |
 
 ### Areas across the antimeridian
 

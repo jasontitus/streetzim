@@ -1,5 +1,7 @@
 # Plan: the preview proxy on Cloudflare Workers
 
+> **Done.** The worker is deployed (`https://streetzim-preview-proxy.tiltastech.workers.dev`) and `web/drive/preview-config.js` names it; the steps below remain the procedure for redeploying, checking or switching it off.
+
 The online preview (`docs/online-preview.md`) needs one small service
 that Firebase Hosting cannot provide: something that forwards a byte
 range request to archive.org and returns the bytes with CORS headers.

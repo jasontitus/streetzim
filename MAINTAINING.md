@@ -25,8 +25,17 @@ ZIM.
   (tilemaker, MBTiles readers, fonts, MapLibre), `satellite.py`, `terrain.py`,
   `addresses.py` (PBF addresses, Overture merges, wiki tags),
   `search_extract.py`, `routing/build.py` (graph extraction + chunking) and
-  `zim_writer.py` (`create_zim`). `create_osm_zim.py` re-exports every name
-  those modules define, so `import create_osm_zim` callers keep working. At
+  `zim_writer.py` (`create_zim`), plus modules added since: `cpus.py` (the
+  `--cpus` budget), `area.py` (boxes across the antimeridian), `mbtiles.py`,
+  `download.py`, `overture.py`, `overture_taxonomy.py` (generated),
+  `tile_alias.py`, `viewer_assets.py`, `glyph_fallback.py` (Noto glyphs for
+  scripts Open Sans lacks), `satellite_sources.py`, `paths.py`, `cli.py` (the
+  `streetzim` command), `zim_metadata.py` and `scraperlib.py` (openZIM
+  metadata rules), `progress.py` (Zimfarm progress file) and
+  `source_report.py`. `create_osm_zim.py` re-exports every top-level name
+  that used to be defined in it except the MapLibre download helpers
+  (`MAPLIBRE_CDN`, `MAPLIBRE_VERSION`, `download_maplibre`), retired when
+  MapLibre was vendored, so `import create_osm_zim` callers keep working. At
   import time it also needs `cloud/viewer_slots.py` and
   `cloud/search_shards.py`; later it lazily imports `cloud/{manifest_writer,
   wiki_articles, chip_shards, chip_rules, wikidata_titles}.py`,
@@ -80,10 +89,11 @@ pip install -r requirements-dev.txt
 ruff check .                       # bug-catching lint families (ruff.toml)
 python tools/pyright_gate.py       # type check: strict modules clean, no new findings
 python tools/offliner_definition.py --check   # Zimfarm definition matches the flags
-python -m pytest tests -q          # ~30 s; tests needing big local ZIMs skip themselves
+python -m pytest tests -q          # ~2 min; tests needing big local ZIMs or tools skip themselves
 for t in tests/chip_rules_js.test.mjs tests/chip_shards_js.test.mjs \
          tests/search_shards_js.test.mjs tests/zim_reader_js.test.mjs \
-         tests/test_zim_http_source.mjs tests/viewer_style_js.test.mjs; do node "$t"; done
+         tests/test_zim_http_source.mjs tests/viewer_style_js.test.mjs \
+         tests/viewer_ui_js.test.mjs; do node "$t"; done
 ```
 
 CI (`.github/workflows/ci.yml`) runs all of that, with coverage, then builds
@@ -160,7 +170,7 @@ Rules that keep published ZIMs working:
 | `ZIMRU_ZIMCHECK` | optional: a faster drop-in `zimcheck` for very large ZIMs; the standard `zimcheck` is used otherwise |
 | `STREETZIM_NODE_LOC_DIR` | fast scratch volume for the routing node-location store (default `/data`, falling back to the output directory) |
 | `STREETZIM_PACK_BIN`, `XAPIANBUILDER_BIN` | optional accelerators only (see §1) |
-| `ZSTD_CLEVEL` | ZIM compression level (production uses 22) |
+| `ZSTD_CLEVEL` | zstd level for `--zim-builder rust` only (default 22, which the production wrappers set); libzim ignores it and compresses at its fixed level 19 |
 | `STREETZIM_MERGE_STREETS=0` | keep one search record per tile for streets instead of merging the pieces (docs/search-records.md). Merging is the default since merge #19, so regions built before it have more street records |
 | `STREETZIM_ALLOW_FONT_ERRORS=1` | ship even if some font ranges failed to download (e.g. during a CDN outage); by default the build stops after 5 attempts per range. A range whose bytes do not match its pinned sha256 always stops the build ([docs/viewer-supply-chain.md](docs/viewer-supply-chain.md)) |
 | `PYTHON` | interpreter the Node tests shell out to |
@@ -168,8 +178,9 @@ Rules that keep published ZIMs working:
 ## 3. How production releases are made
 
 On the build host, from `/storage/streetzim`. The details are in
-`ops/docs/remote-rebuild.md`, `ops/docs/new-region-setup.md` and
-`ops/docs/rebuild-2026-09-plan.md`; this is the map.
+`ops/README.md`, `ops/docs/scripts.md` and `ops/docs/new-region-setup.md`
+(`ops/docs/remote-rebuild.md` and `ops/docs/rebuild-2026-09-plan.md` are
+records of earlier rounds); this is the map.
 
 1. **Inputs.** A planet PBF (`download-planet.sh`), regional extracts
    (`extract-region-pbfs.sh`), world vector tiles (`build-world-tiles.sh`,
@@ -185,12 +196,24 @@ On the build host, from `/storage/streetzim`. The details are in
    turns on the two optional accelerators (§1) for speed. The same
    `create_osm_zim.py` command without `--zim-builder rust --xapian builder`
    produces an equivalent ZIM with plain libzim.
-4. **Gate and ship.** `ship-region.sh <id>` builds, then runs its gates
-   (terrain, `validate_zim.py`, route checks, search + Find smoke tests,
-   `cloud/pwa_smoke_test.mjs`), then uploads with
-   `cloud/upload_validated.sh`, **the only upload path**. The Kiwix UI gate
-   `cloud/kiwix_viewer_gate.sh` is run by the viewer-rollout scripts.
-   `build-refresh-queue.sh` does the same for the whole registry.
+4. **Gate and ship.** The drivers run different gates.
+   `ship-region.sh <id>` builds, then runs terrain coverage
+   (`cloud/check_terrain_coverage.py`), `validate_zim.py`, live routing
+   (`cloud/route_cli.py`, A*), search + the Find chip record count and the
+   browser smoke (`cloud/pwa_smoke_test.mjs`), then uploads with
+   `cloud/upload_validated.sh`, **the only upload path**.
+   `build-refresh-queue.sh` runs the same gates over a queue of regions (the
+   browser smoke soft by default). `cloud/rebuild_old_regions.sh`, the
+   driver of a rebuild round, builds each region with `build-region-fast.sh`,
+   then runs `validate_zim.py` (inline), marker checks and its own gates
+   (the overlap check at 320, 390 and 430 px, the device matrix, which
+   checks layout and chip taps only, a map render check and the Kiwix
+   in-ZIM viewer gate `cloud/kiwix_viewer_gate.sh`, which runs a search)
+   before `cloud/upload_validated.sh`. It does **not** run terrain
+   coverage, live routing or the Find record count. For a hand build, run
+   `ship-region.sh <id> --no-upload`: it builds and runs the first set of
+   gates without uploading. The viewer-rollout scripts run the Kiwix gate
+   too.
 5. **Viewer-only updates** go out with `cloud/rollout_viewer_patch.sh`
    (in-place slot patch, gates, upload). There is no rebuild.
 6. **Catalogue and torrents.** `web/generate.py` produces `streetzim.web.app`,
@@ -237,11 +260,12 @@ scripts that may be running on the production host (see
 - **Large units.** `create_osm_zim.py`'s `main()` and `create_zim` are now
   sequences of phase functions (`build_parser` plus `_openzim_options` ...
   `_print_summary` in `create_osm_zim.py`; the phases in
-  `streetzim/zim_writer.py`), none of them over ~290 lines. The phases pass
+  `streetzim/zim_writer.py`), none of them over ~320 lines. The phases pass
   state as keyword arguments and tuple returns, so a new option usually
   means a parameter on the phase that reads it. The largest functions left
-  are `extract_routing_graph` (`streetzim/routing/build.py`, ~650 lines) and
-  the published-ZIM tools `repackage` and `swap_viewer_rust` in `cloud/`.
+  are `extract_routing_graph` (`streetzim/routing/build.py`, ~670 lines) and
+  the published-ZIM tools `repackage` (`cloud/repackage_zim.py`) and
+  `swap_viewer_rust` (`ops/cloud/swap_viewer_rust.py`).
   `index.html` is edited as parts in `resources/viewer/src/index/`.
   `places.html` (2.5k) and `routing-worker.js` (1.7k) are unsplit.
 - **Legacy format readers.** The builder writes only current formats
@@ -259,7 +283,8 @@ scripts that may be running on the production host (see
   those equivalents. A maintainer without the accelerators can run the same
   wrappers without the two flags. Only the largest regions get slower.
 - **Docs that point at files that don't exist:** `docs/mcpzim-contract.md`
-  and `docs/STREETZIM_CONSUMPTION.md` are cited from `create_osm_zim.py`.
+  and `docs/STREETZIM_CONSUMPTION.md` are cited from `streetzim/routing/build.py`
+  and `streetzim/zim_writer.py`.
 - **Satellite licence.** The EOX 2021 layer is CC BY-NC-SA and ships in most
   published ZIMs; see the README's licence section. The 2016 layer is CC BY
   4.0 and is what `streetzim --satellite` uses (docs/zimfarm.md,

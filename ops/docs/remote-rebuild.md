@@ -1,5 +1,7 @@
 # Remote-box rebuild runbook
 
+> **Record (May 2026).** This was the runbook for the Europe remote box (`venv312`, `world-tiles-v2`, Overture `2026-04-15.0`, a post-build repack in the queue wrapper). Production today builds with `build-region-fast.sh` through `ship-region.sh` or `cloud/rebuild_old_regions.sh`: see [MAINTAINING.md](../../MAINTAINING.md) §3, [new-region-setup.md](new-region-setup.md) and [scripts.md](scripts.md).
+
 > This is the author's production runbook. It uses the optional
 > accelerators (`--zim-builder rust`, `--xapian builder`, zimru's
 > `zimcheck`) for continent-scale speed. None of them is required: see
@@ -147,13 +149,18 @@ touched.
 
 ## Pending changes to apply before the next rebuild
 
+> Since landed (checked 2026-09-30): the Food & Drink merge (2026-09-16),
+> the character-path search split (`cloud/search_shards.py`),
+> `--spatial-chunk-scale 10` (`build-region-fast.sh` passes it) and the
+> URL-cache filter (`--url-cache`). The list below is kept as written.
+
 These are repo-wide changes that should land in the same PR as the
 next regional rebuild — they're not in `main` yet because the PWA
 viewer can't ship them without rebuilt chip files (see each entry
 for migration notes).
 
 - **Merge Restaurants + Cafés into a single Food & Drink chip.**
-  See [`docs/in-zim-apps.md` § "Queued for next rebuild"](../../docs/in-zim-apps.md#queued-for-next-rebuild--merge-restaurants--cafés).
+  See [`docs/in-zim-apps.md` § "Landed 2026-09-16"](../../docs/in-zim-apps.md#landed-2026-09-16--restaurants--cafés-merged-into-food--drink).
   Touches `cloud/chip_rules.py`, `resources/viewer/places.html`,
   `resources/viewer/index.html`, `cloud/validate_zim.py`. Also fixes
   the `ice_cream` / `ice_cream_parlor` cross-bucket bug.

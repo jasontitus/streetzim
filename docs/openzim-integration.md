@@ -23,7 +23,7 @@ openZIM tools.
 | categories | — | Find chips over `category-index/` |
 | routing | — | graph from the PBF, loaded in cells by a Web Worker |
 | viewer | Vite + ES modules, `content/config.json` | single-file viewer built from 29 parts, pinned MapLibre and fonts, `map-config.json` ([viewer-supply-chain.md](viewer-supply-chain.md)) |
-| QA | ruff, pyright strict, pytest, daily Monaco build + `zimcheck` | ruff with pyflakes, bugbear and other bug-catching families (`ruff.toml`; `ops/` stays on E9 + F), pyright strict on 20 files (18 baselined findings elsewhere, no new ones allowed), pytest with coverage + Node tests, ESLint on the viewer, pre-commit hooks for the lint and type checks, Monaco build (every push and weekly) + validator + `zimcheck` + browser test through `kiwix-serve` |
+| QA | ruff, pyright strict, pytest, daily Monaco build + `zimcheck` | ruff with pyflakes, bugbear and other bug-catching families (`ruff.toml`; `ops/` stays on E9 + F), pyright strict on 24 files (18 baselined findings elsewhere, no new ones allowed), pytest with coverage + Node tests, ESLint on the viewer, pre-commit hooks for the lint and type checks, Monaco build (every push and weekly) + validator + `zimcheck` + browser test through `kiwix-serve` |
 
 ## What we verified
 
@@ -81,7 +81,7 @@ with both codebases.
 
 | # | PR | touches in maps2zim | source in StreetZim | effort |
 |---|---|---|---|---|
-| 1 | **Tile fetch retry + concurrency cap** (Kiwix service-worker drops) | new `zimui/zimtile.js`, registered with `maplibre.addProtocol`; `transformRequest` prefixes Tile/Glyphs URLs | `zimtile` protocol in `resources/viewer/index.html`; `docs/zim-packaging-gotchas.md` | 0.5–1 d |
+| 1 | **Tile fetch retry + concurrency cap** (Kiwix service-worker drops) | new `zimui/zimtile.js`, registered with `maplibre.addProtocol`; `transformRequest` prefixes Tile/Glyphs URLs | `zimtile` protocol in `resources/viewer/src/index/110-debug-and-zimtile-protocol.js` (built into `index.html`); `docs/zim-packaging-gotchas.md` | 0.5–1 d |
 | 2 | **Populated places in search** | `_parse_geonames`: accept `PPL`, `PPLA*`, `PPLC` with a zoom per code | — | 0.5–1 d |
 | 3 | **Search records from the MBTiles** | new `search_records.py`; `Processor._write_search_data` after `_write_tilejson`; filter with `TileFilter`; new dep `mapbox-vector-tile` | `streetzim/search_extract.py` (z14 decode, one point per feature, dedup, street merge), [search-records.md](search-records.md) | 2–3 d |
 | 4 | **Search box in zimui** | `zimui/search.js`: normalize + prefix, fetch manifest and chunk, rank, fly to | the viewer's `search-shards` block; `tests/search_shards_js.test.mjs` pattern for JS/Python parity | 2–3 d |

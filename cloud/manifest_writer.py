@@ -2,7 +2,7 @@
 writes a JSONL manifest and shells out to `streetzim-pack` (Rust binary
 backed by zimru) to emit the actual ZIM.
 
-The libzim API surface used by `create_osm_zim.py` is small:
+The libzim API surface used by `streetzim/zim_writer.py` is small:
 
     Creator(str(output_path))
     creator.config_indexing(True, "en")

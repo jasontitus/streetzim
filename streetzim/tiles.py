@@ -17,6 +17,7 @@ from streetzim.common import (
     download_file,
 )
 from streetzim import viewer_assets
+from streetzim.cpus import build_cpus
 
 
 def download_osm_extract(geofabrik_path, dest):
@@ -80,6 +81,9 @@ def generate_tiles(pbf_path, mbtiles_path, bbox=None, fast=False, store=None):
             "--config", str(TILEMAKER_CONFIG),
             "--process", str(TILEMAKER_PROCESS),
             "--skip-integrity",
+            # Without it tilemaker starts a thread per core it sees, and its
+            # memory grows with them (streetzim/cpus.py).
+            "--threads", str(build_cpus()),
         ]
         if bbox:
             cmd.extend(["--bbox", bbox])

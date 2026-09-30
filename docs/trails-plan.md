@@ -2,6 +2,11 @@
 
 Status 2026-09-21. Pilot regions: **switzerland** and **california**.
 
+Update 2026-09-30: Phase 1 is done except the `subclass` split and its
+alpine render check; Phases 2–5 are not started. The graph builder named
+below is now `streetzim/routing/build.py`, still without a relation
+handler.
+
 ## What is actually in the ZIMs today
 
 Measured, not assumed — one z14 tile over Zermatt
@@ -33,7 +38,7 @@ route on it, and cannot search it.
 | layer | state | verdict |
 |---|---|---|
 | **Vector tiles** | `path` + `track` present with `subclass`/`surface` | ✅ already good |
-| **Style** | one rule: `class == path`, `minzoom 14`, 1 px dashed `#cba090`. `track` never drawn. `subclass`/`surface` never consulted | ❌ the visible gap |
+| **Style** | (as measured, before Phase 1) one rule: `class == path`, `minzoom 14`, 1 px dashed `#cba090`; `track` never drawn. Now three layers from z12: `road-track` (dashed), `road-path-paved` (solid, by `surface`) and `road-path` (dashed); `subclass` still not consulted | ✅ drawn since Phase 1 |
 | **Routing graph** | `path`/`footway`/`steps`/`cycleway`/`bridleway`/`track` kept, with speeds (path 5 km/h, track 15) and class ordinals, flagged bit-9 "no motor vehicle" | ✅ data present, unusable |
 | **Routing UI** | car profile only; every consumer skips bit-9 edges (`routing-worker.js`, `index.html`, `streetzim/routing/astar.py`, `cloud/route_cli.py`) | ❌ no foot/hike mode |
 | **Search** | named trails effectively absent — 400k switzerland rows yielded 5 trail-ish hits, all coincidental place names | ❌ |
@@ -43,6 +48,11 @@ route on it, and cannot search it.
 ## Plan, cheapest first
 
 ### Phase 1 — draw what we already have (viewer only, ~10 s/region)
+**Done 2026-09-21, committed 2026-09-23** (in `f78011a`): layers `road-track`,
+`road-path-paved` (solid) and `road-path` (dashed) from z12, in
+`resources/viewer/src/index/130-lowzoom-lakes.js`; trail names draw through
+`road-label`. Footway, path and track `subclass` are not told apart.
+
 No rebuild. Ships through the slot patch (`cloud/patch_viewer_inplace.py`).
 
 - style `class=track` (currently invisible)
@@ -55,6 +65,7 @@ No rebuild. Ships through the slot patch (`cloud/patch_viewer_inplace.py`).
 
 **Verification:** the device matrix already fails on overlap and unreachable
 controls; add a check that a known alpine tile renders ≥ N path features.
+(Not added: no gate counts rendered path features yet.)
 
 ### Phase 2 — foot/hiking routing (viewer + worker, no rebuild)
 The graph already holds the edges and speeds. Today bit-9 is a hard exclude;

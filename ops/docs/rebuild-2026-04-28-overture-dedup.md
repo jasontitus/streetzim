@@ -9,7 +9,7 @@ This doc lists which regions to rebuild on the big remote box tonight,
 ordered by how many addresses the bug was silently dropping.
 
 The actual build commands haven't changed — see
-`docs/remote-rebuild.md` Path B (FULL REBUILD). This file is just the
+`ops/docs/remote-rebuild.md` Path B (FULL REBUILD). This file is just the
 prioritized queue and the survey numbers behind it.
 
 ---
@@ -48,7 +48,7 @@ built before `e4c388e` carries the same bug. Address-rich regions
 ## Tonight's queue (ordered by impact)
 
 These all use the canonical full-rebuild flow from
-`docs/remote-rebuild.md` Path B — same flags, same post-processing.
+`ops/docs/remote-rebuild.md` Path B — same flags, same post-processing.
 Estimated runtimes from that doc; assume world MBTiles + terrain cache
 + satellite cache are still warm from the world build.
 
@@ -89,7 +89,7 @@ Skip on this pass:
 
 ## Run command
 
-Use the existing wrapper at the bottom of `docs/remote-rebuild.md`
+Use the existing wrapper at the bottom of `ops/docs/remote-rebuild.md`
 ("Wrapper script for the queue") and replace its inline list with:
 
 ```sh
@@ -102,7 +102,7 @@ for row in \
   "africa        -18.0,-35.0,52.0,38.0 'Africa'"          \
 ; do
   read -r id bbox name <<< "$row"
-  # … rest of the wrapper from docs/remote-rebuild.md …
+  # … rest of the wrapper from ops/docs/remote-rebuild.md …
 done
 ```
 

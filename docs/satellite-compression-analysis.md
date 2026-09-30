@@ -1,5 +1,7 @@
 # Satellite Imagery Compression Analysis
 
+> Analysis record, 2026-03-12. Current builder settings differ: satellite is opt-in, the default is AVIF quality 40 (`--satellite-quality`), 256 px tiles, EOX's 2021 mosaic (or 2016, `streetzim/satellite_sources.py`); the ZIM layout is in [formats.md](formats.md#other-zim-entries).
+
 ## Current Approach
 
 - **Source:** Sentinel-2 Cloudless (EOX, 10m/pixel native resolution, 2021 vintage)

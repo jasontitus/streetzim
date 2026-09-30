@@ -1,6 +1,6 @@
 # StreetZim Caching
 
-All caches live alongside `create_osm_zim.py` in the project root. They are designed for incremental reuse across builds — a world-scale cache is automatically reused when building regional extracts (US, DC, etc.).
+The download caches (satellite, terrain unless `--terrain-dir` names another folder, Wikidata, Wikipedia articles, viewer assets) live in `$STREETZIM_CACHE_DIR` when it is set (the `streetzim` command sets it to `<--dl>/cache`), otherwise in the checkout's root, next to `create_osm_zim.py` (an installed wheel uses `$XDG_CACHE_HOME/streetzim`, else `~/.cache/streetzim`; `cache_root` in `streetzim/paths.py`). `search_cache/` and `world-data/` below are not under it: they are whatever paths `--search-cache`, `--pbf` and `--mbtiles` name. The caches are designed for incremental reuse across builds — a world-scale cache is automatically reused when building regional extracts (US, DC, etc.).
 
 ## Cache Summary
 
@@ -11,10 +11,10 @@ All caches live alongside `create_osm_zim.py` in the project root. They are desi
 | `satellite_<source>/` | small | JPEG sources + encoded tiles of another EOX year (e.g. `satellite_s2cloudless-2016/{sources,avif_256}/`) | Builds with `--satellite-source <source>` |
 | `terrain_cache/` | ~633 GB | Terrain-RGB + DEM sources | All terrain builds |
 | `wikidata_cache/` | ~1 GB | 3.15M Q-IDs | All builds with `--wikidata` |
-| `search_cache/` | ~16 GB | World search JSONL | All builds with `--search-cache` |
-| `world-data/` | ~307 GB | Planet PBF + MBTiles | World/regional builds via `--pbf`/`--mbtiles` |
+| `search_cache/` | ~18 GB per world file | World search JSONL | All builds with `--search-cache` |
+| `world-data/` | ~780 GB | Planet PBF + MBTiles + regional slices | World/regional builds via `--pbf`/`--mbtiles` |
 
-Total footprint: ~1 TB.
+Total footprint: ~1.5 TB.
 
 ---
 
@@ -32,7 +32,7 @@ licences; `streetzim/satellite_sources.py`).
 
 - **Contents:** Raw JPEG tiles from EOX Sentinel-2 WMTS (`tiles.maps.eox.at`)
 - **Structure:** `{z}/{x}/{y}.jpg` (zoom 0–14)
-- **Population:** `download_satellite_tiles()` with 32 parallel threads
+- **Population:** `download_satellite_tiles()` with up to 32 parallel threads
 - **Reuse:** Any satellite build checks here before re-downloading
 - **Invalidation:** None — Sentinel-2 cloudless mosaics are static yearly composites
 - **Size:** ~38 GB (full US coverage at z0–14)
@@ -58,22 +58,22 @@ licences; `streetzim/satellite_sources.py`).
 
 ### Terrain Tiles (`terrain_cache/`)
 
-- **Contents:** Terrain-RGB WebP tiles (lossless) derived from Copernicus GLO-30 DEM
+- **Contents:** Terrain-RGB WebP tiles (lossless) derived from the Copernicus GLO-30 DEM. Without `--low-zoom-world-vrt` (every `streetzim` build, fresh Zimfarm tasks) z <= 9 read a 90 m mosaic of GLO-30 and GLO-90, and GLO-90 fills where GLO-30 has no cell; with it (the production builds) z0–7 read that world DEM and z8+ GLO-30 (`streetzim/terrain.py`)
 - **Structure:** `{z}/{x}/{y}.webp` (zoom 0–12 typical)
 - **Population:** `generate_terrain_tiles()` — downloads DEM sources, builds VRT mosaic, generates terrain-RGB
 - **CLI controls:**
   - `--terrain` — enable terrain tiles
   - `--terrain-zoom N` — max zoom (default: 12)
   - `--terrain-dir PATH` — cache directory (default: `terrain_cache/`)
-- **Reuse detection:** Samples 10 random tiles at max zoom; if all present, skips regeneration
+- **Reuse detection:** A per-bbox completion marker skips generation only when every tile of the bbox is present and not blank; without a marker, a build given `--low-zoom-world-vrt` samples five max-zoom tiles (corners and centre) and then checks every tile the same way. Missing or blank tiles are regenerated (`generate_terrain_tiles()` in `streetzim/terrain.py`)
 - **Invalidation:** None — Copernicus DEM data is static
 - **Size:** ~633 GB (includes DEM sources)
 
 ### DEM Source Sub-Cache (`terrain_cache/dem_sources/`)
 
-- **Contents:** Copernicus GLO-30 GeoTIFF files (1-degree tiles, ~40–50 MB each)
-- **Naming:** `dem_{N|S}{lat:02d}_{E|W}{lon:03d}.tif` (e.g., `dem_N38_W077.tif`)
-- **VRT:** `mosaic_4326.vrt` — virtual raster index for efficient multi-tile reads
+- **Contents:** Copernicus GLO-30 GeoTIFF files (1-degree tiles, ~40–50 MB each), and GLO-90 cells
+- **Naming:** `dem_{N|S}{lat:02d}_{E|W}{lon:03d}.tif` (e.g., `dem_N38_W077.tif`); GLO-90 cells are `dem90_…tif`
+- **VRT:** `mosaic_<bbox key>.vrt` per area, and `lowzoom_<bbox key>_z<N>.vrt` for the low zooms — virtual raster indexes for efficient multi-tile reads
 - **Reuse:** Tiles checked before downloading; corrupted files (< 1000 bytes) are re-fetched
 - **Size:** ~547 GB (26,000+ tiles for global coverage)
 
@@ -120,7 +120,7 @@ licences; `streetzim/satellite_sources.py`).
 
 ## Search Features Cache
 
-### Cache File (`search_cache/world.jsonl`)
+### Cache File (`search_cache/world-2026-08-31.jsonl`)
 
 - **Contents:** All named features extracted from z14 vector tiles (places, POIs, streets, water, parks, peaks, airports)
 - **Format:** JSONL — one JSON object per line
@@ -133,7 +133,7 @@ licences; `streetzim/satellite_sources.py`).
 - **CLI control:** `--search-cache PATH` — use pre-built cache instead of extracting from tiles
 - **Reuse:** When `--search-cache` is provided with a bbox, features are filtered to the bounding box at runtime without modifying the cache file
 - **Invalidation:** None — tied to the planet snapshot used to generate it. Rebuild when updating planet data.
-- **Size:** ~16 GB (world.jsonl, ~121M features)
+- **Size:** ~18 GB (`world-2026-08-31.jsonl`, 2026-09; `ops/build-world-tiles.sh` writes it after the world tiles)
 
 ---
 
@@ -142,13 +142,14 @@ licences; `streetzim/satellite_sources.py`).
 ### Directory (`world-data/`)
 
 - **Contents:**
-  - `planet-{date}.osm.pbf` — full OpenStreetMap planet extract (~91 GB)
-  - `world-tiles-v2.mbtiles` — pre-built vector tiles (~120 GB)
-  - `world-tiles.mbtiles` — older vector tiles (~117 GB)
-- **Population:** Manual — download planet PBF from Geofabrik, run tilemaker
+  - `planet-{date}.osm.pbf` — full OpenStreetMap planet (~95 GB for `planet-2026-08-31`)
+  - `world-tiles-v3.mbtiles` — pre-built vector tiles (~115 GB), what the current builds read
+  - `world-tiles-v2.mbtiles` — the previous round's tiles (~120 GB)
+  - `regions/` — per-region PBF, MBTiles and search slices (~390 GB)
+- **Population:** `ops/download-planet.sh` fetches the planet from planet.openstreetmap.org; `ops/build-world-tiles.sh` runs tilemaker v3 in Docker to make `world-tiles-v3.mbtiles` and the world search cache
 - **Reuse:** Pass via `--pbf` or `--mbtiles` to skip download/tile generation
 - **Invalidation:** Manual — user decides when to update planet data (versioned by date in filename)
-- **Size:** ~307 GB
+- **Size:** ~780 GB (2026-09, with an older planet and `regions/`)
 
 ---
 
@@ -166,7 +167,7 @@ satellite_cache_avif_256/ ───────────→ same (bbox-filter
 terrain_cache/dem_sources/ ──────────→ same (bbox-filtered tiles)
 terrain_cache/{z}/{x}/{y}.webp ──────→ same (sampling detects existing)
 wikidata_cache/ (3.15M Q-IDs) ───────→ same (only 459 new Q-IDs fetched)
-search_cache/world.jsonl ────────────→ same (filtered to US bbox at runtime)
+search_cache/world-2026-08-31.jsonl ─→ same (filtered to US bbox at runtime)
 ```
 
 ## CLI Quick Reference
@@ -180,7 +181,7 @@ python3 create_osm_zim.py \
   --satellite --satellite-format avif \
   --terrain --terrain-zoom 12 \
   --wikidata \
-  --search-cache search_cache/world.jsonl \
+  --search-cache search_cache/world-2026-08-31.jsonl \
   --keep-temp
 
 # Just rebuild wikidata cache

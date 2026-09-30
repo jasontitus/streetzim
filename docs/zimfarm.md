@@ -133,11 +133,10 @@ acknowledgement).
 Each feature is one flag with three states: on (`--x`, `--x=on`), off
 (`--x=off`, `--no-x`), or not given, when the profile decides. Saying both
 on and off is refused before anything is downloaded, and flag names cannot
-be abbreviated. Two features come from other branches and joined the
-profile when their flag existed: `--kiwix-poi-pages`, and `--terrain` once
-it could also be turned off (`--no-terrain`, topic-terrain-openzim).
-`add_profile_arguments` in `streetzim/cli.py` turns such a flag into the
-same three-state flag.
+be abbreviated. `--kiwix-poi-pages` and `--terrain` are defined as plain
+flags in the parser's "Content" group (`--terrain` with `--no-terrain`);
+`add_profile_arguments` in `streetzim/cli.py` turns each into the same
+three-state flag.
 
 On Zimfarm, `profile` is a **required** string-enum (`full`, `basic`), so
 every recipe states its profile next to the resources it is given, and each
@@ -152,7 +151,7 @@ Recipe flags (the `offliner` part of `POST /v2/recipes`, dash form):
 {"offliner_id": "streetzim", "name": "osm_en_luxembourg", "title": "Luxembourg",
  "description": "Offline map of Luxembourg with search and routing",
  "include-poly": "https://download.geofabrik.de/europe/luxembourg.poly",
- "profile": "full"}
+ "profile": "full", "cpus": 2}
 ```
 
 ```json
@@ -168,7 +167,7 @@ Recipe flags (the `offliner` part of `POST /v2/recipes`, dash form):
 streetzim --name osm_en_luxembourg --title Luxembourg \
   --description "Offline map of Luxembourg with search and routing" \
   --include-poly https://download.geofabrik.de/europe/luxembourg.poly \
-  --profile full --output /output          # or --profile basic
+  --profile full --cpus 2 --output /output # or --profile basic
 streetzim ... --profile basic --wikidata    # basic plus Wikidata
 streetzim ... --overture=off                # full without Overture (or --no-overture)
 ```
@@ -353,7 +352,7 @@ sandbox's IP, not the flag.
 - Weekly and on demand, `live-full` builds the same with the live sources
   and runs the same check with `--soft-wikimedia`: Overture must work,
   Wikidata and Wikipedia only warn.
-- `monaco-e2e` builds `--profile basic` from Geofabrik, and the Zimfarm
+- `monaco-e2e` builds `--profile basic --terrain` from Geofabrik, and the Zimfarm
   schema step runs recipes for both profiles through Zimfarm's own models.
 
 ## Satellite imagery
@@ -561,8 +560,8 @@ directly. "streetzim" below is `streetzim/cli.py` and
 | Rust packer, external Xapian builder | yes (speed only; same ZIM content) | no | - | - | local binaries | not needed |
 
 All gaps that can work on Zimfarm are closed except the dead-website filter,
-which has no public source. Terrain is left to its branch; satellite is
-opt-in by choice, outside both profiles.
+which has no public source. Satellite is opt-in by choice, outside both
+profiles.
 
 ## What Zimfarm needs on its side
 
@@ -648,6 +647,17 @@ a region this size
 give the task at least 12 GB of RAM and 15 GB of disk, besides the extract
 and shapefiles.
 
+These runs predate several changes, and the memory figures above are not
+what the current code does. The Netherlands `basic` again on 2026-09-30,
+with the `streetzim` command in its Docker image, on a 36-core machine
+(before `--cpus`; the search processes held to 4 with `PYTHON_CPU_COUNT=4`,
+tilemaker at every core): 83 min wall, 135 CPU minutes, a 1.13 GB ZIM, and
+memory (PSS) peaking at 12.6 GB in tilemaker's 36 threads. Each of the four
+`osmium extract` cuts took about 3.8 GB (5.1 GB with the Python process),
+the routing graph 4.7 GB, and writing the ZIM stayed near 2 GB: the 10.8 GB
+above came from code since replaced. [CPUs and memory](#cpus-and-memory---cpus)
+covers what `--cpus` and cutting the extract once do to these numbers.
+
 A US region and a Docker comparison, measured the same way on 2026-09-29
 with the code as of that day and the inputs given as `file://` URLs (so no
 download time): the US states from Geofabrik (2026-09-28 extracts),
@@ -711,7 +721,7 @@ temp, output and download folders.
 `full` spends its extra time waiting, not computing: the Overture download
 (latest release resolved through STAC, 1 of 64 address files and 1 of 16
 place files read) takes about 13 s. The rest is Wikimedia rate limiting
-this sandbox's shared IP: with the 429 fix now on `next`, each source waits
+this sandbox's shared IP: with the 429 fix, each source waits
 out `Retry-After` up to its budget (`STREETZIM_WIKI_WAIT_BUDGET`, 15 min),
 so the 25 minutes are the title backfill (2 min, then it stops asking),
 Wikidata SPARQL (6 min) and the articles (15 min, the budget, then "not
@@ -723,7 +733,9 @@ source, not a normal run; from an IP that is not rate limited, Monaco's
 
 What to give a recipe (`resources` in `POST /v2/recipes`). The `basic`
 rows follow from the measurements above; the `full` rows are **estimates**
-from them, since only Monaco was measured with `full`:
+from them, since only Monaco was measured with `full`. Every recipe should
+also pass the flag `cpus` equal to its `cpu`
+([CPUs and memory](#cpus-and-memory---cpus)); the memory figures assume it:
 
 | extract size (example) | profile | cpu | memory | disk |
 |---|---|---|---|---|
@@ -731,7 +743,7 @@ from them, since only Monaco was measured with `full`:
 | | `full` | 2 | 6 GiB (Monaco measured 2.8 to 3.4 GB) | 4 GiB |
 | about 700 MB (Switzerland) | `basic` | 4 | 8 GiB (measured 4.6 GB) | 10 GiB (4 + 4.4 measured + extract) |
 | | `full` | 4 | 10 GiB (estimated) | 12 GiB (estimated: Overture parquets and article cache on top) |
-| about 1.6 GB (the Netherlands) | `basic` | 4 | 12 GiB (measured 10.8 GB) | 20 GiB (4 + 11.0 measured + extract; less failed with ENOSPC) |
+| about 1.6 GB (the Netherlands) | `basic` | 4 | 12 GiB (measured 10.8 GB with older code; see below the first table) | 20 GiB (4 + 11.0 measured + extract; less failed with ENOSPC) |
 | | `full` | 4 | 14 GiB (estimated) | 22 GiB (estimated) |
 
 - Memory in `full` grows with the Overture merge (DuckDB, and more search
@@ -750,6 +762,69 @@ from them, since only Monaco was measured with `full`:
   hillshade tiles ([Terrain cost](#terrain-cost): 0.3 GB for Luxembourg,
   about 0.8 GB for Switzerland), and satellite (opt-in) the imagery. Add
   their disk and time to the `full` rows.
+
+### CPUs and memory (`--cpus`)
+
+Zimfarm gives a task its CPUs as a CPU share (`docker run --cpu-shares`),
+which hides none of the machine's cores: inside the container Python's
+`os.cpu_count()` and tilemaker both see every core of the worker. Before
+`--cpus`, a build started a tilemaker thread and a search process per core
+it saw, so its memory grew with the machine it landed on, not with the map.
+The measurements above were made on a 4-core machine and do not show it.
+tilemaker alone, on a 36-core machine (peak RSS, and time with the machine
+otherwise shared):
+
+| region | 1 thread | 4 | 8 | 16 | 36 (every core) |
+|---|---|---|---|---|---|
+| Luxembourg | 0.70 GB, 28 s | 1.42 GB, 10.7 s | 2.48 GB, 8.3 s | 4.07 GB, 8.4 s | 7.96 GB, 10.0 s |
+| Switzerland | 1.88 GB, 332 s | 2.62 GB, 102 s | 3.76 GB, 58 s | 5.95 GB, 71 s | 11.4 GB, 36 s |
+| the Netherlands | | 3.78 GB, 185 s | 4.74 GB, 106 s | 7.11 GB, 69 s | 11.9 GB, 60 s |
+
+Each thread costs about 0.25 GB whatever the region; the fixed part grows
+with it. tilemaker's own detection ignores `docker run --cpus` and
+`--cpuset-cpus` (it picked 36 under both), and with every core Luxembourg
+was killed in a 4 GB container. At about 50 cores the Netherlands' tiles
+alone would pass 16 GiB. Fewer threads cost time on a large region (the
+Netherlands' tiles: 60 s with 36, 106 s with 8, 185 s with 4), minutes on
+a build of an hour or more.
+
+`streetzim/cpus.py` decides the count once: `--cpus N` when given,
+otherwise the cores the process may run on, capped by a CPU quota
+(`cpu.max`, as `docker run --cpus` sets) and by the memory limit
+(`memory.max`, as `--memory` sets, rounded to whole GiB) at one core per
+2 GiB. tilemaker's threads and the search and terrain processes use it.
+libzim's compression threads (at most 20) and the tile decompression threads
+leave the memory rule out: they cost about 43 MB each, and capping them costs
+time (4 compression threads took 71 s where 20 took 17 s). `--cpus` and a CPU
+quota do limit them: a recipe that passes `cpus` gets that many. A CPU share is
+relative to the other containers and says nothing about a core count, so it
+is not read. cgroup v1 limits are read when the process has no cgroup v2
+hierarchy of its own (a v1 or hybrid machine).
+Outside a container, with no limits, the count is every core, as before.
+
+**A recipe should pass `--cpus` equal to its `cpu` resource** (`"cpus": 4`
+next to `"resources": {"cpu": 4, ...}`), so the build uses what the task
+pays for whatever machine it lands on. Without it the memory rule decides:
+the recipes in the table above get 3 to 7 cores, a 16 GiB task 8.
+
+The address, wiki-tag and routing steps also no longer cut the extract to
+the area again: each did so with `osmium extract` on the file the tile step
+had already cut to the same box (the result was byte-identical), and each
+took about 3.8 GB, even for a 1 km box (2.3 GB): osmium's ID sets span the
+planet's ID range, not the extract's. One cut remains, before the tiles.
+
+Luxembourg `basic` in a container limited like a Zimfarm task
+(`--memory 16g --cpu-shares 3072`) on the 36-core machine:
+
+| | peak memory | wall time | CPU time |
+|---|---|---|---|
+| before (36 tilemaker threads, 32 to 36 search processes, 20 compression threads) | 8.4 GB | 3.0 min | 5.8 min |
+| 4 cores for everything (an earlier rule: one per 4 GiB) | 4.0 GB | 3.3 min | 5.7 min |
+| 4 cores, and the extract cut once | 3.9 GB | 2.5 min | 4.0 min |
+
+Peak memory here is PSS sampled every 2 s (`tools/measure_build.py`), which
+can miss a spike of a few seconds. At this size the peak is the one
+remaining `osmium extract` (3.7 GB), a fixed cost of about 4 GB per build.
 
 ### Terrain cost
 

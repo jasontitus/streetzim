@@ -24,7 +24,7 @@ the whole chip::
 to trailing shards whose bbox fields are all ``null``. ``n_sub_buckets`` is
 deliberately absent: it means "route by name hash", which no longer holds.
 
-Imported by create_osm_zim.py (build) and cloud/repackage_zim.py
+Imported by streetzim/zim_writer.py (build) and cloud/repackage_zim.py
 (``--split-find-chips`` retrofit). The viewer side is the
 ``chip-shards`` block in resources/viewer/{index,places}.html.
 """

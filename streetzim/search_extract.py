@@ -25,6 +25,8 @@ import os
 import sqlite3
 import time
 
+from streetzim.cpus import build_cpus
+
 # Line-buffered like create_osm_zim's logging, so progress shows up live in
 # build logs.
 print = functools.partial(builtins.print, flush=True)  # noqa: A001
@@ -696,7 +698,7 @@ def _finish_features_streaming(raw_path, output_dir, n_unique):
     # are consumed in submission order so the keyed file is deterministic.
     from collections import deque
     from concurrent.futures import ProcessPoolExecutor
-    workers = min(32, os.cpu_count() or 4)
+    workers = min(32, build_cpus())
     window = workers * 2
 
     t_ann = time.time()
@@ -823,9 +825,8 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
         conn.close()
 
         import multiprocessing
-        import os as _os
         import tempfile
-        num_workers = min(_os.cpu_count() or 4, len(col_counts))
+        num_workers = min(build_cpus(), len(col_counts))
         # Use 4x more partitions than workers for dynamic load balancing —
         # dense urban partitions take longer per tile, so small partitions let
         # idle workers pick up the next chunk instead of waiting on one straggler.
@@ -940,8 +941,7 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
 
         features = []
         import multiprocessing
-        import os as _os
-        num_workers = _os.cpu_count() or 4
+        num_workers = build_cpus()
         total_tiles = len(z14_tiles)
         print(f"    Processing {total_tiles} z14 tiles with {num_workers} workers...")
 
@@ -1002,9 +1002,9 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
         # For small feature sets, run directly; for large ones, use multiprocessing
         if len(features) > 100_000:
             from concurrent.futures import ProcessPoolExecutor
-            batch_size = max(10_000, len(features) // (os.cpu_count() or 4))
+            batch_size = max(10_000, len(features) // build_cpus())
             batches = [features[i:i + batch_size] for i in range(0, len(features), batch_size)]
-            num_workers = min(os.cpu_count() or 4, len(batches))
+            num_workers = min(build_cpus(), len(batches))
 
             assigned = 0
             with ProcessPoolExecutor(

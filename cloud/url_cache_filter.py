@@ -2,8 +2,10 @@
 url_cache_filter.py — helpers the build pipeline can use to consult
 the URL liveness cache produced by `validate_overture_urls.py`.
 
-Pure-Python (no aiohttp dependency) so create_osm_zim.py can import
-this without pulling in extra packages on the build box.
+Pure-Python (no aiohttp dependency). Nothing in the build imports it
+today: the builder applies the same rule itself (`_is_url_dead` in
+streetzim/addresses.py), and tests/test_url_dead_statuses.py checks
+that the two agree.
 
 Usage in the build:
 
@@ -83,7 +85,7 @@ def is_url_dead(url: str | None, cache: dict[str, dict]) -> bool:
     # STREETZIM_URL_DEAD_STATUSES=404,410,dns narrows "dead" to those
     # cache statuses (403/429/5xx/timeouts are mostly bot-blocked, live
     # sites). Unset keeps the historical any-alive=False rule. Mirrors
-    # create_osm_zim._is_url_dead.
+    # _is_url_dead in streetzim/addresses.py.
     raw = os.environ.get("STREETZIM_URL_DEAD_STATUSES", "").strip()
     if not raw:
         return True

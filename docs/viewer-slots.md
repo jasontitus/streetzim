@@ -2,7 +2,8 @@
 
 ## The problem
 
-`cloud/swap_viewer_rust.py` replaces the three viewer files by rewriting the
+`cloud/swap_viewer_rust.py` (an ops script, `ops/cloud/swap_viewer_rust.py`,
+run by its old path) replaces the three viewer files by rewriting the
 **entire** ZIM: every entry is re-emitted and every cluster re-compressed.
 Changing 600 KB of viewer therefore costs:
 
@@ -41,8 +42,9 @@ overwrite in place.
 3. writes `content + header + filler + closer` over exactly the slot,
 4. recomputes the MD5 that libzim stores in the final 16 bytes.
 
-Single source of truth for the format is `cloud/viewer_slots.py`; the writer
-and the patcher both import it. They previously built the header
+Single source of truth for the format is `cloud/viewer_slots.py`; the writers
+(the builder's `streetzim/zim_writer.py`, `cloud/repackage_zim.py`,
+`swap_viewer_rust.py`) and the patcher all import it. They previously built the header
 independently, which would have drifted.
 
 ## Cost
@@ -51,7 +53,7 @@ Slots are right-sized per file rather than a flat 1 MB each:
 
 | file | slot | typical content | headroom |
 |---|---|---|---|
-| index.html | 1 MB | ~555 KB (2026-09-29: dark theme + inline POI icons) | 1.9x |
+| index.html | 1 MB | ~607 KB (2026-09-30: dark theme, inline POI icons, RTL text) | 1.7x |
 | places.html | 256 KB | ~101 KB | 2.5x |
 | routing-worker.js | 128 KB | ~68 KB | 1.9x |
 
@@ -63,7 +65,8 @@ of trailing comment boots and renders with no page errors.
 ## Usage
 
 ```sh
-# Build a ZIM with slots (the normal swap path; slots are automatic)
+# Every build writes slots (create_osm_zim.py / streetzim, repackage_zim.py).
+# Give an older ZIM slots by swapping its viewer once:
 python3 cloud/swap_viewer_rust.py <src.zim> <out.zim>
 
 # Later, replace just the viewer -- 0.1 s instead of a re-pack
@@ -155,7 +158,7 @@ build already carries the newest fix marker is skipped entirely.
 2. **Xapian goes stale.** `index.html`'s bytes change but the fulltext index
    is not rebuilt, so Kiwix's own search can return stale text for the app
    shell. Harmless today; it matters once city stubs land (see the city-stub
-   TODO in STATUS-2026-09-18.md).
+   TODO in `ops/STATUS-2026-09-18.md`).
 3. **UUID behaviour differs between the two paths, and Kiwix cares.**
    `swap_viewer_rust.py` creates a fresh archive and therefore a **new**
    UUID; `patch_viewer_inplace.py` **preserves** it.

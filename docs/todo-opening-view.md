@@ -1,5 +1,13 @@
 # TODO: open on the whole region, not the middle of its bbox
 
+> **Status 2026-09-30.** New builds: done. `create_osm_zim.py` opens on the
+> region's anchor city from `cloud/regions.tsv` (`registry_anchor`, `423f65f`),
+> else the median place position (`center_from_places`, `e789a52`). The zoom
+> was never fixed at 6: `get_center_and_zoom` buckets it by extent (4 for the
+> US, 11 for washington-dc). Viewer side (fit the whole region, city rescue):
+> tried on 2026-09-25 and reverted, reasons in the comment in
+> `resources/viewer/src/index/120-map-init-and-style.js`; still open.
+
 Reported 2026-09-25: *"I sometimes see zims open to random fairly empty
 areas. Ideally it shows the whole region but if it can't — then center on an
 anchor city."*
@@ -7,9 +15,11 @@ anchor city."*
 Confirmed, and it is the same root cause as the render-gate bug fixed in
 `5e3fe72`.
 
-## What happens now
+## What happened on 2026-09-25
 
-`create_osm_zim.py` writes `map-config.json` with the bbox **centre** and a
+The diagnosis at the time (before the fixes in the status note above,
+which also corrects the zoom: it was always extent-based) was that
+`create_osm_zim.py` wrote `map-config.json` with the bbox **centre** and a
 **fixed zoom 6**, for every region regardless of size:
 
 | region | opening centre | what is there |
@@ -18,8 +28,10 @@ Confirmed, and it is the same root cause as the render-gate bug fixed in
 | hawaii | -166.5, 23.5 | open Pacific, west of the islands |
 | nordics | 18.05, 62.85 | Gulf of Bothnia |
 
-The viewer applies it directly (`resources/viewer/index.html`, the
-`new maplibregl.Map({ center: config.center, zoom: config.zoom, ... })` call).
+The viewer applies it directly (`resources/viewer/src/index/120-map-init-and-style.js`,
+built into `index.html`: the `new maplibregl.Map({ center: openCam.center,
+zoom: openCam.zoom, ... })` call, where `_szOpeningCamera` gives
+`config.center`/`config.zoom` unless the reader's last view is restored).
 `config.bounds` is already written and used for `maxBounds`, so the geometry
 needed to do better is present in every ZIM already shipped.
 
@@ -43,7 +55,8 @@ anchor at z11. That reuses the check we already trust.
 ## Two places, and they must agree
 
 - **New builds**: write a better `center`/`zoom` (or an explicit
-  `initialView`) in `create_osm_zim.py` around line 7829.
+  `initialView`) in `_build_map_config` in `create_osm_zim.py`. (Done for
+  the centre: see the status note.)
 - **Every shipped ZIM**: the opening view is read from `map-config.json`,
   which is **not** in a viewer slot — so a viewer-only patch cannot change
   it unless the viewer ignores `config.center`/`config.zoom` and derives the

@@ -130,8 +130,8 @@ def test_wheel_dependencies_match_requirements_txt():
     with open(ROOT / "pyproject.toml", "rb") as f:
         wheel = _requirements(tomllib.load(f)["project"]["dependencies"])
     reqs = _requirements((ROOT / "requirements.txt").read_text().splitlines())
-    # Test and ops tools requirements.txt carries until it is split into
-    # runtime / dev / ops files; never dependencies of the wheel.
+    # Test and ops tools (requirements-dev.txt, requirements-ops.txt): never
+    # dependencies of the wheel, and no longer in requirements.txt.
     not_runtime = {"pytest", "internetarchive"}
     assert not (set(wheel) & not_runtime)
     assert {k: v for k, v in reqs.items() if k not in not_runtime} == wheel

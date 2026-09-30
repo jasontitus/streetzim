@@ -14,6 +14,7 @@ from typing import NamedTuple
 from cloud.viewer_slots import pad_to_slot as _pad_to_slot
 from streetzim.search_extract import build_location_index
 from streetzim import area as _area
+from streetzim.cpus import compression_cpus
 # The builder's flushing, phase-timing print (see streetzim/common.py).
 from streetzim.common import (
     PHASE_TIMER,
@@ -59,7 +60,7 @@ def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
     CTAs: "Directions to here" + "View on map" (no auto-redirect any
     more). The viewer parses `index.html#dest=lat,lon&label=…` on load
     and pops the routing panel open — see `applyHash` in
-    `resources/viewer/index.html`.
+    `resources/viewer/src/index/120-map-init-and-style.js`.
 
     `enrich` is an optional dict sourced from Overture's places theme:
         {"ws": website, "p": phone, "soc": [social urls],
@@ -491,11 +492,10 @@ def create_zim(
     """
     from libzim.writer import Creator as LibzimCreator, Item, StringProvider, FileProvider
     from libzim.writer import Hint
-    # ZSTD compression level. Match the libzim path's default
-    # (ZSTD_CLEVEL=22 in shipped builds — see build_command_template
-    # memory) so the rust path produces ZIMs of comparable size.
-    # ZSTD_CLEVEL env var overrides for parity with the libzim
-    # convention. Range is 1..22; 22 is "max" (slow but smallest).
+    # ZSTD compression level for the rust path (--zim-builder rust) only:
+    # libzim does not read ZSTD_CLEVEL and compresses at its own fixed
+    # level (19). The production wrappers set ZSTD_CLEVEL=22. Range is
+    # 1..22; 22 is "max" (slow but smallest).
     zstd_level = int(os.environ.get("ZSTD_CLEVEL", "22"))
     if zim_builder == "rust":
         from cloud.manifest_writer import ManifestCreator
@@ -512,9 +512,12 @@ def create_zim(
             "zim-pack: zstd level", str(zstd_level), "")
     else:
         Creator = LibzimCreator
-        print(f"  ZIM compression: zstd level {zstd_level} (libzim path)", flush=True)
+        # python-libzim's config_compression picks the algorithm, not a
+        # level, and libzim does not read ZSTD_CLEVEL: it compresses at its
+        # own default level.
+        print("  ZIM compression: zstd at libzim's default level (libzim path)", flush=True)
         PHASE_TIMER.record_metric(
-            "zim-pack: zstd level", str(zstd_level), "")
+            "zim-pack: zstd level", "libzim default", "")
 
     if xapian_mode == "builder" and zim_builder != "rust":
         # libzim's public Creator API doesn't accept items at the X
@@ -587,12 +590,9 @@ def create_zim(
     # rely on the in-ZIM places.html (JSON search-data) for search.
     creator.config_indexing(xapian_mode == "libzim", "en")
     creator.config_clustersize(cluster_size)
-    # Use 2 compression workers for large builds to avoid libzim's
-    # spin-lock death spiral. With many workers + ZSTD level 22, all
-    # workers busy-wait in queue.h pushToQueue()/popFromQueue() and
-    # the build stalls permanently. 2 workers avoids contention while
-    # still allowing the main thread to fill the queue ahead.
-    num_workers = zim_workers or min(os.cpu_count() or 4, 20)
+    # One compression thread per core, at most 20 (about 43 MB each; see
+    # streetzim/cpus.py for why the memory rule does not apply here).
+    num_workers = zim_workers or min(compression_cpus(), 20)
     print(f"    ZIM compression workers: {num_workers} (tiles: {tile_count if tiles is None else len(tiles)})", flush=True)
     creator.config_nbworkers(num_workers)
     creator.set_mainpath("index.html")
@@ -1091,16 +1091,16 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
     # is ManifestCreator, which appends a line to a file: there is no queue
     # to drain, so a slow batch means slow disk, and sleeping only made
     # central-asia's tile phase slower. build-region-fast.sh uses rust, but
-    # --zim-builder defaults to "python" (libzim) and several wrappers
-    # (cloud/build_region.sh, build-region.sh, the salvage and VM scripts)
-    # still take that path, so the guard must stay for them.
+    # --zim-builder defaults to "python" (libzim), which every build
+    # without that flag takes (the `streetzim` command, Zimfarm, the older
+    # ops wrappers), so the guard must stay for them.
     _libzim_backpressure = (zim_builder != "rust")
     backpressure_sleep = 0.0
     # Identical tiles (open sea, tiles inside one landcover polygon) are
     # stored once; tile_source yields in (z, x, y) order, so the first-seen
     # target, and the ZIM, are the same on every build.
     aliaser = TileAliaser(creator)
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
+    with ThreadPoolExecutor(max_workers=compression_cpus()) as pool:
         while True:
             batch = list(itertools.islice(tile_source, batch_size))
             if not batch:
@@ -2145,9 +2145,10 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
         records_by_cat: dict[str, list] = {}
         # The LLM bundle (addr/poi/street.json) is the heaviest
         # part of category-index — hundreds of MB to multi-GB on
-        # continent regions. Today the post-build repack drops
-        # them by default; with `no_llm_bundle=True` we skip
-        # writing them in the first place. Chip emission still
+        # continent regions. With `no_llm_bundle=True` (what
+        # build-region-fast.sh passes) we skip writing them;
+        # cloud/repackage_zim.py drops them from older ZIMs by
+        # default. Chip emission still
         # gets `records_by_cat` populated below so chip-*.json
         # files are derivable. The category manifest also drops
         # the entries we skipped, so validators don't complain
