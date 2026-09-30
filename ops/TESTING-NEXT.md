@@ -211,7 +211,7 @@ done
 #    run directly (./x.sh) is named after the script but runs /bin/bash x.sh.
 for pid in $(pgrep -f '^([^ ]*/)?(bash|sh|dash)( |$)'); do
   case "$seen" in *" $pid "*) continue ;; esac
-  mapfile -d '' -t a < "/proc/$pid/cmdline" 2>/dev/null || continue
+  mapfile -d '' -t a 2>/dev/null < "/proc/$pid/cmdline" || continue
   s=""; skip=0
   for x in "${a[@]:1}"; do
     if [ "$skip" = 1 ]; then skip=0; continue; fi
