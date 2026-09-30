@@ -1,6 +1,11 @@
-// --- Wikidata info popup on feature click ---
+// --- Place popup on feature click ---
+// A tapped label with a Wikidata ID (on a ZIM with Wikidata) gets the
+// Wikidata popup; any other named place gets its name, type and
+// "Directions to here", filled in from its search record when one is found.
+// Before, a place without a Wikidata ID (most shops, restaurants and
+// services) did nothing, and on a ZIM without Wikidata nothing was tappable.
 function initWikidataPopups(map, config) {
-  if (!config.hasWikidata) return;
+  var hasWikidata = !!config.hasWikidata;
 
   // Cache for loaded Wikidata chunks: prefix -> {Q123: {...}, ...}
   var wdCache = {};
@@ -248,18 +253,20 @@ function initWikidataPopups(map, config) {
       }
     }
 
-    // Query rendered features at click point
+    // Query rendered features around the tap: a fingertip rarely lands
+    // exactly on a label's glyphs or icon (the point itself sits in the gap
+    // between a POI's icon and its name), so allow TAP_SLOP pixels.
     var queryOpts = {};
     var layers = getQueryLayers();
     if (layers) queryOpts.layers = layers;
 
-    var features = map.queryRenderedFeatures(e.point, queryOpts);
+    var features = map.queryRenderedFeatures(_tapBox(e.point), queryOpts);
     if (!features || features.length === 0) return;
 
     // Find the first feature with a wikidata Q-ID in tile properties
     var feat = null;
     var qid = null;
-    for (var i = 0; i < features.length; i++) {
+    for (var i = 0; hasWikidata && i < features.length; i++) {
       var props = features[i].properties || {};
       if (props.wikidata && props.wikidata.match(/^Q\d+$/)) {
         feat = features[i];
@@ -267,7 +274,12 @@ function initWikidataPopups(map, config) {
         break;
       }
     }
-    if (!qid) return;
+    if (!qid) {
+      // While the routing panel is open a tap picks a route point.
+      if (window.streetzimRouting && window.streetzimRouting.panelActive) return;
+      _placeLabelPopup(e, features);
+      return;
+    }
 
     var name = feat.properties['name:latin'] || feat.properties.name || feat.properties.label || qid;
     var prefix = getWdPrefix(qid);
@@ -283,16 +295,57 @@ function initWikidataPopups(map, config) {
     });
   });
 
+  // A named place without a Wikidata popup: name and type at once, then
+  // the search record's details (the same popup a search result opens).
+  function _placeLabelPopup(e, features) {
+    var feat = null;
+    for (var i = 0; i < features.length; i++) {
+      var p = features[i].properties || {};
+      if (p['name:latin'] || p.name) { feat = features[i]; break; }
+    }
+    if (!feat) return;
+    var props = feat.properties;
+    var name = props['name:latin'] || props.name;
+    var g = feat.geometry;
+    var lat = e.lngLat.lat, lon = e.lngLat.lng;
+    if (g && g.type === 'Point' && g.coordinates) {
+      lon = g.coordinates[0]; lat = g.coordinates[1];
+    }
+    var kind = props.subclass || props.class || '';
+    var popup = new maplibregl.Popup({ maxWidth: '320px' })
+      .setLngLat([lon, lat])
+      .setDOMContent(_szPlacePopupDOM(lat, lon, name, { cat: kind }));
+    currentPopup = popup;
+    _szPopupGap(map, popup);
+    popup.addTo(map);
+    if (typeof window.__streetzimLookupPlace !== 'function') return;
+    window.__streetzimLookupPlace(name, lat, lon).then(function(r) {
+      if (!r || currentPopup !== popup || !popup.isOpen()) return;
+      popup.setDOMContent(_szPlacePopupDOM(lat, lon, name, {
+        // Overture's category, else the tile's ("copyshop"), which is
+        // finer than the record's type ("shop").
+        cat: r.cat || kind || r.s, subtype: r.s, ws: r.ws, p: r.p,
+        soc: r.soc, brand: r.brand, wd: r.wd,
+      }));
+    });
+  }
+
+  var TAP_SLOP = 10;
+  function _tapBox(pt) {
+    return [[pt.x - TAP_SLOP, pt.y - TAP_SLOP], [pt.x + TAP_SLOP, pt.y + TAP_SLOP]];
+  }
+
   // Change cursor on hover over clickable features
   map.on('mousemove', function(e) {
     var queryOpts = {};
     var layers = getQueryLayers();
     if (layers) queryOpts.layers = layers;
     var features = map.queryRenderedFeatures(e.point, queryOpts);
-    var hasWd = features && features.some(function(f) {
-      return !!(f.properties || {}).wikidata;
+    var tappable = features && features.some(function(f) {
+      var p = f.properties || {};
+      return !!(p.wikidata || p.name || p['name:latin']);
     });
-    map.getCanvas().style.cursor = hasWd ? 'pointer' : '';
+    map.getCanvas().style.cursor = tappable ? 'pointer' : '';
   });
 }
 

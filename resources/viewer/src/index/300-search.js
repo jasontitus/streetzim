@@ -40,6 +40,42 @@ function placeSearchPin(map, lat, lon, name, enrich) {
       typeof window.streetzimRouting.open !== 'function') {
     return searchMarker;
   }
+  var box = _szPlacePopupDOM(lat, lon, name, enrich);
+  var popup = new maplibregl.Popup({ offset: 28, closeButton: true,
+                                     closeOnClick: false,
+                                     maxWidth: '320px' })
+    .setDOMContent(box);
+  searchMarker.setPopup(popup);
+  _szPopupGap(map, popup);
+  // Auto-open once the camera settles — or right away when no camera
+  // move is in flight (`#pin=` without `map=`), otherwise the popup
+  // used to pop on whatever unrelated pan came next. A pending
+  // listener from an earlier pin is detached so two rapid pins can't
+  // toggle the newer popup open and then closed again.
+  if (_searchPinOpenHandler) {
+    try { map.off('moveend', _searchPinOpenHandler); } catch (e) {}
+    _searchPinOpenHandler = null;
+  }
+  var thisMarker = searchMarker;
+  if (map.isMoving && map.isMoving()) {
+    _searchPinOpenHandler = function() {
+      _searchPinOpenHandler = null;
+      if (searchMarker === thisMarker && !thisMarker.getPopup().isOpen()) {
+        thisMarker.togglePopup();
+      }
+    };
+    map.once('moveend', _searchPinOpenHandler);
+  } else {
+    thisMarker.togglePopup();
+  }
+  return searchMarker;
+}
+var _searchPinOpenHandler = null;
+
+// The body of a place popup: name, brand, category, contact links and
+// "Directions to here" (when the ZIM has routing). Used by search-result
+// pins and by labels tapped on the map (initWikidataPopups).
+function _szPlacePopupDOM(lat, lon, name, enrich) {
   enrich = enrich || {};
   var box = document.createElement('div');
   box.className = 'pin-popup';
@@ -99,6 +135,10 @@ function placeSearchPin(map, lat, lon, name, enrich) {
     });
   }
   if (any) box.appendChild(contact);
+  if (!window.streetzimRouting ||
+      typeof window.streetzimRouting.open !== 'function') {
+    return box;
+  }
 
   // NOTE: see project_directions_button_duplicated.md memory.
   // This is the SEARCH-PIN copy of the Directions button. There's
@@ -158,36 +198,8 @@ function placeSearchPin(map, lat, lon, name, enrich) {
     }
   });
   box.appendChild(btn);
-  var popup = new maplibregl.Popup({ offset: 28, closeButton: true,
-                                     closeOnClick: false,
-                                     maxWidth: '320px' })
-    .setDOMContent(box);
-  searchMarker.setPopup(popup);
-  _szPopupGap(map, popup);
-  // Auto-open once the camera settles — or right away when no camera
-  // move is in flight (`#pin=` without `map=`), otherwise the popup
-  // used to pop on whatever unrelated pan came next. A pending
-  // listener from an earlier pin is detached so two rapid pins can't
-  // toggle the newer popup open and then closed again.
-  if (_searchPinOpenHandler) {
-    try { map.off('moveend', _searchPinOpenHandler); } catch (e) {}
-    _searchPinOpenHandler = null;
-  }
-  var thisMarker = searchMarker;
-  if (map.isMoving && map.isMoving()) {
-    _searchPinOpenHandler = function() {
-      _searchPinOpenHandler = null;
-      if (searchMarker === thisMarker && !thisMarker.getPopup().isOpen()) {
-        thisMarker.togglePopup();
-      }
-    };
-    map.once('moveend', _searchPinOpenHandler);
-  } else {
-    thisMarker.togglePopup();
-  }
-  return searchMarker;
+  return box;
 }
-var _searchPinOpenHandler = null;
 
 function initSearch(map) {
   var input = document.getElementById('search-input');
@@ -943,6 +955,28 @@ var SEARCH_SHARDS = (function () {
   // Expose map globally for DevTools diagnostics. Safe to leave in shipping
   // builds — it's just a property on window.
   try { window.__streetzim_map = map; } catch (e) {}
+
+  // The search record for a place labelled on the map: the record with the
+  // same name nearest (lat, lon), within 300 m. Tapped labels use it for
+  // the details a search result shows (category, website, phone). Resolves
+  // to null when the index has no such record.
+  window.__streetzimLookupPlace = function(name, lat, lon) {
+    if (!manifest || !name || name.length < 2) return Promise.resolve(null);
+    var prefixes = getPrefixes(name);
+    if (!prefixes.length) return Promise.resolve(null);
+    var want = normalizeText(name);
+    return streamFilterChunks(prefixes, name).then(function(recs) {
+      var best = null, bestD = 300;
+      for (var i = 0; i < recs.length; i++) {
+        var r = recs[i];
+        if (!r || typeof r.a !== 'number' || typeof r.o !== 'number') continue;
+        if (normalizeText(r.n || '') !== want) continue;
+        var d = _haversineMetersStrip(lat, lon, r.a, r.o);
+        if (d < bestD) { bestD = d; best = r; }
+      }
+      return best;
+    }, function() { return null; });
+  };
 
   // Stash the current viewport in sessionStorage so the Find page can
   // offer a "Limit to map area" filter when the user just zoomed in

@@ -6672,6 +6672,42 @@ function placeSearchPin(map, lat, lon, name, enrich) {
       typeof window.streetzimRouting.open !== 'function') {
     return searchMarker;
   }
+  var box = _szPlacePopupDOM(lat, lon, name, enrich);
+  var popup = new maplibregl.Popup({ offset: 28, closeButton: true,
+                                     closeOnClick: false,
+                                     maxWidth: '320px' })
+    .setDOMContent(box);
+  searchMarker.setPopup(popup);
+  _szPopupGap(map, popup);
+  // Auto-open once the camera settles — or right away when no camera
+  // move is in flight (`#pin=` without `map=`), otherwise the popup
+  // used to pop on whatever unrelated pan came next. A pending
+  // listener from an earlier pin is detached so two rapid pins can't
+  // toggle the newer popup open and then closed again.
+  if (_searchPinOpenHandler) {
+    try { map.off('moveend', _searchPinOpenHandler); } catch (e) {}
+    _searchPinOpenHandler = null;
+  }
+  var thisMarker = searchMarker;
+  if (map.isMoving && map.isMoving()) {
+    _searchPinOpenHandler = function() {
+      _searchPinOpenHandler = null;
+      if (searchMarker === thisMarker && !thisMarker.getPopup().isOpen()) {
+        thisMarker.togglePopup();
+      }
+    };
+    map.once('moveend', _searchPinOpenHandler);
+  } else {
+    thisMarker.togglePopup();
+  }
+  return searchMarker;
+}
+var _searchPinOpenHandler = null;
+
+// The body of a place popup: name, brand, category, contact links and
+// "Directions to here" (when the ZIM has routing). Used by search-result
+// pins and by labels tapped on the map (initWikidataPopups).
+function _szPlacePopupDOM(lat, lon, name, enrich) {
   enrich = enrich || {};
   var box = document.createElement('div');
   box.className = 'pin-popup';
@@ -6731,6 +6767,10 @@ function placeSearchPin(map, lat, lon, name, enrich) {
     });
   }
   if (any) box.appendChild(contact);
+  if (!window.streetzimRouting ||
+      typeof window.streetzimRouting.open !== 'function') {
+    return box;
+  }
 
   // NOTE: see project_directions_button_duplicated.md memory.
   // This is the SEARCH-PIN copy of the Directions button. There's
@@ -6790,36 +6830,8 @@ function placeSearchPin(map, lat, lon, name, enrich) {
     }
   });
   box.appendChild(btn);
-  var popup = new maplibregl.Popup({ offset: 28, closeButton: true,
-                                     closeOnClick: false,
-                                     maxWidth: '320px' })
-    .setDOMContent(box);
-  searchMarker.setPopup(popup);
-  _szPopupGap(map, popup);
-  // Auto-open once the camera settles — or right away when no camera
-  // move is in flight (`#pin=` without `map=`), otherwise the popup
-  // used to pop on whatever unrelated pan came next. A pending
-  // listener from an earlier pin is detached so two rapid pins can't
-  // toggle the newer popup open and then closed again.
-  if (_searchPinOpenHandler) {
-    try { map.off('moveend', _searchPinOpenHandler); } catch (e) {}
-    _searchPinOpenHandler = null;
-  }
-  var thisMarker = searchMarker;
-  if (map.isMoving && map.isMoving()) {
-    _searchPinOpenHandler = function() {
-      _searchPinOpenHandler = null;
-      if (searchMarker === thisMarker && !thisMarker.getPopup().isOpen()) {
-        thisMarker.togglePopup();
-      }
-    };
-    map.once('moveend', _searchPinOpenHandler);
-  } else {
-    thisMarker.togglePopup();
-  }
-  return searchMarker;
+  return box;
 }
-var _searchPinOpenHandler = null;
 
 function initSearch(map) {
   var input = document.getElementById('search-input');
@@ -7576,6 +7588,28 @@ var SEARCH_SHARDS = (function () {
   // builds — it's just a property on window.
   try { window.__streetzim_map = map; } catch (e) {}
 
+  // The search record for a place labelled on the map: the record with the
+  // same name nearest (lat, lon), within 300 m. Tapped labels use it for
+  // the details a search result shows (category, website, phone). Resolves
+  // to null when the index has no such record.
+  window.__streetzimLookupPlace = function(name, lat, lon) {
+    if (!manifest || !name || name.length < 2) return Promise.resolve(null);
+    var prefixes = getPrefixes(name);
+    if (!prefixes.length) return Promise.resolve(null);
+    var want = normalizeText(name);
+    return streamFilterChunks(prefixes, name).then(function(recs) {
+      var best = null, bestD = 300;
+      for (var i = 0; i < recs.length; i++) {
+        var r = recs[i];
+        if (!r || typeof r.a !== 'number' || typeof r.o !== 'number') continue;
+        if (normalizeText(r.n || '') !== want) continue;
+        var d = _haversineMetersStrip(lat, lon, r.a, r.o);
+        if (d < bestD) { bestD = d; best = r; }
+      }
+      return best;
+    }, function() { return null; });
+  };
+
   // Stash the current viewport in sessionStorage so the Find page can
   // offer a "Limit to map area" filter when the user just zoomed in
   // somewhere. Debounced so a fast pan doesn't pound the storage. The
@@ -7627,9 +7661,14 @@ var SEARCH_SHARDS = (function () {
   };
 }
 
-// --- Wikidata info popup on feature click ---
+// --- Place popup on feature click ---
+// A tapped label with a Wikidata ID (on a ZIM with Wikidata) gets the
+// Wikidata popup; any other named place gets its name, type and
+// "Directions to here", filled in from its search record when one is found.
+// Before, a place without a Wikidata ID (most shops, restaurants and
+// services) did nothing, and on a ZIM without Wikidata nothing was tappable.
 function initWikidataPopups(map, config) {
-  if (!config.hasWikidata) return;
+  var hasWikidata = !!config.hasWikidata;
 
   // Cache for loaded Wikidata chunks: prefix -> {Q123: {...}, ...}
   var wdCache = {};
@@ -7877,18 +7916,20 @@ function initWikidataPopups(map, config) {
       }
     }
 
-    // Query rendered features at click point
+    // Query rendered features around the tap: a fingertip rarely lands
+    // exactly on a label's glyphs or icon (the point itself sits in the gap
+    // between a POI's icon and its name), so allow TAP_SLOP pixels.
     var queryOpts = {};
     var layers = getQueryLayers();
     if (layers) queryOpts.layers = layers;
 
-    var features = map.queryRenderedFeatures(e.point, queryOpts);
+    var features = map.queryRenderedFeatures(_tapBox(e.point), queryOpts);
     if (!features || features.length === 0) return;
 
     // Find the first feature with a wikidata Q-ID in tile properties
     var feat = null;
     var qid = null;
-    for (var i = 0; i < features.length; i++) {
+    for (var i = 0; hasWikidata && i < features.length; i++) {
       var props = features[i].properties || {};
       if (props.wikidata && props.wikidata.match(/^Q\d+$/)) {
         feat = features[i];
@@ -7896,7 +7937,12 @@ function initWikidataPopups(map, config) {
         break;
       }
     }
-    if (!qid) return;
+    if (!qid) {
+      // While the routing panel is open a tap picks a route point.
+      if (window.streetzimRouting && window.streetzimRouting.panelActive) return;
+      _placeLabelPopup(e, features);
+      return;
+    }
 
     var name = feat.properties['name:latin'] || feat.properties.name || feat.properties.label || qid;
     var prefix = getWdPrefix(qid);
@@ -7912,16 +7958,57 @@ function initWikidataPopups(map, config) {
     });
   });
 
+  // A named place without a Wikidata popup: name and type at once, then
+  // the search record's details (the same popup a search result opens).
+  function _placeLabelPopup(e, features) {
+    var feat = null;
+    for (var i = 0; i < features.length; i++) {
+      var p = features[i].properties || {};
+      if (p['name:latin'] || p.name) { feat = features[i]; break; }
+    }
+    if (!feat) return;
+    var props = feat.properties;
+    var name = props['name:latin'] || props.name;
+    var g = feat.geometry;
+    var lat = e.lngLat.lat, lon = e.lngLat.lng;
+    if (g && g.type === 'Point' && g.coordinates) {
+      lon = g.coordinates[0]; lat = g.coordinates[1];
+    }
+    var kind = props.subclass || props.class || '';
+    var popup = new maplibregl.Popup({ maxWidth: '320px' })
+      .setLngLat([lon, lat])
+      .setDOMContent(_szPlacePopupDOM(lat, lon, name, { cat: kind }));
+    currentPopup = popup;
+    _szPopupGap(map, popup);
+    popup.addTo(map);
+    if (typeof window.__streetzimLookupPlace !== 'function') return;
+    window.__streetzimLookupPlace(name, lat, lon).then(function(r) {
+      if (!r || currentPopup !== popup || !popup.isOpen()) return;
+      popup.setDOMContent(_szPlacePopupDOM(lat, lon, name, {
+        // Overture's category, else the tile's ("copyshop"), which is
+        // finer than the record's type ("shop").
+        cat: r.cat || kind || r.s, subtype: r.s, ws: r.ws, p: r.p,
+        soc: r.soc, brand: r.brand, wd: r.wd,
+      }));
+    });
+  }
+
+  var TAP_SLOP = 10;
+  function _tapBox(pt) {
+    return [[pt.x - TAP_SLOP, pt.y - TAP_SLOP], [pt.x + TAP_SLOP, pt.y + TAP_SLOP]];
+  }
+
   // Change cursor on hover over clickable features
   map.on('mousemove', function(e) {
     var queryOpts = {};
     var layers = getQueryLayers();
     if (layers) queryOpts.layers = layers;
     var features = map.queryRenderedFeatures(e.point, queryOpts);
-    var hasWd = features && features.some(function(f) {
-      return !!(f.properties || {}).wikidata;
+    var tappable = features && features.some(function(f) {
+      var p = f.properties || {};
+      return !!(p.wikidata || p.name || p['name:latin']);
     });
-    map.getCanvas().style.cursor = hasWd ? 'pointer' : '';
+    map.getCanvas().style.cursor = tappable ? 'pointer' : '';
   });
 }
 
@@ -12093,7 +12180,10 @@ function initRouting(map, config) {
     // feature-detect. Callers that need a given method should test
     // for it (`typeof window.streetzimRouting.foo === "function"`),
     // but the version helps diagnostics attribute "host vs ZIM" skew.
-    version: 4,
+    version: 5,
+    /// True while the routing panel is open: a map tap then picks a route
+    /// point, so the place popups stay out of the way.
+    get panelActive() { return !!active; },
     setOrigin: setOriginFromLatLon,
     setDest:   setDestFromLatLon,
     /// Reset the routing panel to "no route picked" — clears both
