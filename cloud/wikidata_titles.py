@@ -200,10 +200,14 @@ def resolve_qids(
     user_agent: str | None = None,
     sleep: float = 0.1,
     progress: Callable[[int, int], None] | None = None,
+    misses: set[str] | None = None,
 ) -> dict[str, str]:
     """Return ``{qid: enwiki_title}`` for Q-IDs with an English sitelink.
 
     Q-IDs with no enwiki article are simply absent from the result.
+    misses: when given, filled with the Q-IDs Wikidata answered have NO
+        enwiki article (not those it could not answer, nor an offline
+        map's gaps, which say nothing either way).
 
     offline_map: path to a ``Q-ID<TAB>Title`` TSV, or a pre-loaded dict —
         resolves entirely offline, no network.
@@ -307,7 +311,20 @@ def resolve_qids(
         if require_complete():
             raise SystemExit(f"STREETZIM_REQUIRE_WIKI=1: {msg}")
 
+    if misses is not None:
+        misses.update(q for q in want if cache.get(q) == "")
     return {q: cache[q] for q in want if cache.get(q)}
+
+
+def is_english_title(tag: str) -> bool:
+    """Whether an OSM ``wikipedia=`` value names an English article:
+    ``en:Title``, or a title without a language prefix."""
+    ci = tag.find(":")
+    pre = tag[:ci]
+    # Language codes are lower case: "Foo: a bar" is an English title.
+    if 2 <= ci <= 3 and pre.isalpha() and pre.lower() == pre:
+        return pre == "en"
+    return True
 
 
 def augment_wiki_cross_refs(
@@ -321,24 +338,34 @@ def augment_wiki_cross_refs(
 
     ``wiki_cross_refs`` is the ``extract_wiki_tags_pbf`` lookup:
     ``{key: {"wikipedia"?: "en:...", "wikidata"?: "Q..."}}``. For every
-    entry that has ``wikidata`` but no ``wikipedia``, resolve the Q-ID and
+    entry that has ``wikidata`` and no English ``wikipedia`` (none, or a
+    non-English one such as ``nl:Utrecht (stad)``), resolve the Q-ID and
     set::
 
         entry["wikipedia"]     = "en:" + Title_With_Underscores
         entry["wikipedia_src"] = "wd"        # provenance: derived, not OSM-tagged
+        entry["wikipedia_osm"] = "nl:..."    # the non-English tag it replaced
 
     The downstream chunker then writes these into ``rec["w"]`` exactly as
     it does for OSM-tagged titles — so mcpzim links them with no change.
+    A non-English tag was looked up as-is on English Wikipedia before:
+    mostly missing (13,019 of 16,848 titles in the Netherlands), and a
+    namesake is a different article. When Wikidata answers the item has
+    no English article, the entry keeps its tag and gets
+    ``entry["wikipedia_no_en"] = True``: nothing English to bundle.
 
-    Returns stats: ``{distinct_qids, resolved, entries_upgraded}``.
+    Returns stats: ``{distinct_qids, resolved, entries_upgraded,
+    non_english_upgraded, non_english_no_en}``.
     """
-    empty = {"distinct_qids": 0, "resolved": 0, "entries_upgraded": 0}
+    empty = {"distinct_qids": 0, "resolved": 0, "entries_upgraded": 0,
+             "non_english_upgraded": 0, "non_english_no_en": 0}
     if not wiki_cross_refs:
         return empty
 
     pending: dict[str, list] = {}
     for entry in wiki_cross_refs.values():
-        if entry.get("wikipedia"):
+        tag = entry.get("wikipedia")
+        if tag and is_english_title(tag):
             continue
         q = entry.get("wikidata")
         if q:
@@ -349,24 +376,33 @@ def augment_wiki_cross_refs(
     log(f"    wikidata->title: resolving {len(pending)} distinct Q-IDs"
         + (" (offline map)" if offline_map is not None else " via Wikidata API")
         + "...")
+    misses: set[str] = set()
     titles = resolve_qids(pending.keys(), cache_path=cache_path,
-                          offline_map=offline_map)
+                          offline_map=offline_map, misses=misses)
 
-    upgraded = 0
+    upgraded = non_en = no_en = 0
     for q, entries in pending.items():
         title = titles.get(q)
-        if not title:
-            continue
-        tag = "en:" + title.replace(" ", "_")
         for entry in entries:
-            entry["wikipedia"] = tag
-            entry["wikipedia_src"] = "wd"
-            upgraded += 1
+            orig = entry.get("wikipedia")
+            if title:
+                if orig:
+                    entry["wikipedia_osm"] = orig
+                    non_en += 1
+                entry["wikipedia"] = "en:" + title.replace(" ", "_")
+                entry["wikipedia_src"] = "wd"
+                upgraded += 1
+            elif orig and q in misses:
+                entry["wikipedia_no_en"] = True
+                no_en += 1
 
     stats = {"distinct_qids": len(pending), "resolved": len(titles),
-             "entries_upgraded": upgraded}
+             "entries_upgraded": upgraded, "non_english_upgraded": non_en,
+             "non_english_no_en": no_en}
     log(f"    wikidata->title: {stats['resolved']}/{stats['distinct_qids']} "
-        f"Q-IDs resolved, {upgraded} cross-ref entries upgraded")
+        f"Q-IDs resolved, {upgraded} cross-ref entries upgraded "
+        f"({non_en} of them from a non-English tag; {no_en} non-English tags "
+        f"with no English article)")
     return stats
 
 

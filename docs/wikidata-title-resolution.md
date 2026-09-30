@@ -83,6 +83,33 @@ scope for v1**: it resolves to the brand's article ("Starbucks"), not the
 specific place, so it's a different feature (a `--resolve-brand-wikidata`
 opt-in could add it later — high record coverage, ~hundreds of articles).
 
+### Non-English `wikipedia=` tags (2026-09-30)
+
+Outside English-speaking countries most OSM `wikipedia=` tags name an
+article in the local language (`nl:Utrecht (stad)`). These used to be
+kept as they were and looked up, title as-is, on English Wikipedia: in the
+Netherlands full build 13,019 of 16,848 titles were missing. Such a tag is
+now resolved through its `wikidata=` Q-ID like an untagged one
+(`is_english_title` decides which tags are English: `en:` or no language
+prefix): the English sitelink replaces it (`wikipedia_osm` keeps the OSM
+tag). When Wikidata answers that the item has no English article, the tag
+stays and is flagged `wikipedia_no_en`, and the bundler skips it: its
+English namesake would be a different page. A tag without a Q-ID, or one
+Wikidata could not answer, is looked up as before.
+
+Measured on 500 random Dutch-tagged places of the Netherlands map (with a
+Q-ID; 7,076 of its 7,361 non-English links have one):
+
+```
+English article per Wikidata:            204  (41%; 203 in the 2026-02 enwiki ZIM)
+no English article:                      295  (59%)
+old lookup (Dutch title in enwiki):      140 found, 24 of them a different article
+```
+
+So the English articles found go from ~116 correct (plus 24 wrong) to 204,
+all correct. The 59% with no English article could only be covered by
+bundling the local-language Wikipedia (not done).
+
 ## Resolution sources
 
 1. **Wikidata Action API (default).** `wbgetentities?props=sitelinks&

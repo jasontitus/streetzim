@@ -1619,8 +1619,10 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
     _bundled_set = None  # title_us actually stored — gates the geo-index
     _wa_stats = None
     if bundle_wiki_articles and wiki_cross_refs:
+        # Not a non-English tag whose item has no English article: its
+        # English namesake would be a different page.
         _wa_titles = {e["wikipedia"] for e in wiki_cross_refs.values()
-                      if e.get("wikipedia")}
+                      if e.get("wikipedia") and not e.get("wikipedia_no_en")}
         if _wa_titles:
             from cloud.wiki_articles import bundle_wiki_articles as _bundle_wa
             _wa_t0 = time.time()
