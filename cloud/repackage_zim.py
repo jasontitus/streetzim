@@ -682,8 +682,10 @@ def repackage(src_path: str, dst_path: str,
                     # libzim ≥ 3 requires the hints argument; the 3-arg
                     # call raised TypeError and the except below silently
                     # dropped every redirect in the source.
+                    # An admin area's other titles (search/<slug>~<k>.html)
+                    # stay front: they are what Kiwix suggests.
                     c.add_redirection(entry.path, entry.title or entry.path,
-                                      target.path, {Hint.FRONT_ARTICLE: False})
+                                      target.path, {Hint.FRONT_ARTICLE: _front(entry.path)})
                 except Exception as e:
                     print(f"    skip redirect {entry.path}: {e}")
                 continue

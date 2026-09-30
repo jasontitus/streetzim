@@ -1649,7 +1649,7 @@ def _audit_tiles(arc) -> tuple[str, str]:
         # close to a decompress, but libzim caches the cluster so
         # neighboring entries amortize).
         try:
-            size = len(bytes(e.get_item().content))
+            size = e.get_item().size
         except Exception:
             continue
         if size <= BLANK_TILE_BYTES:

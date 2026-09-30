@@ -1,0 +1,3 @@
+#!/bin/sh
+# szim: inspect and trim streetzim ZIM files without the build toolchain (cloud/szim.py).
+exec python3 "$(dirname "$0")/cloud/szim.py" "$@"

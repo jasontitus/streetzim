@@ -6,6 +6,7 @@
 //   node tests/viewer_ui_js.test.mjs
 import assert from 'node:assert';
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const HTML = fs.readFileSync(`${REPO}/resources/viewer/index.html`, 'utf8');
@@ -1023,6 +1024,54 @@ await ok('search results: the subline is printed as written ("1 mi", not "1 Mi")
   const css = slice('.search-result-type {', '.search-no-results');
   assert.doesNotMatch(css, /text-transform/);
   assert.match(HTML, /proximityLabel = _szProximityLabel\(dist \* 69, map\._streetzimUnit\);/);
+});
+
+// ---- the in-ZIM Wikipedia button (100-wiki-bridge-and-viewport.js) ----
+// A record's `w` gets a button only when its article was bundled, which
+// wiki-geo-index.json lists; before, any `w` did, and most opened a
+// missing page in a non-English country's map.
+function wikiPath(index, qidTitles) {
+  return new Function('WIKI_GEO_INDEX', 'WIKI_GEO_QID', 'WIKI_QID_TITLES',
+    slice('// BEGIN wiki-article-path', '// END wiki-article-path') +
+    '\nreturn { _wikiArticlePath, _wikiTagTitle };')(
+    index, index && Object.fromEntries(Object.entries(index).map(([t, g]) => [g[3], t])),
+    qidTitles || null);
+}
+
+await ok('a Wikipedia button only for a bundled article', () => {
+  const index = { 'Utrecht': [52.09, 5.12, 'admin', 'Q803', ''],
+                  'Aalten_(dorp)': [51.92, 6.58, 'place', 'Q2', ''] };
+  const W = wikiPath(index, { Q9: 'Not Bundled' });
+  assert.strictEqual(W._wikiArticlePath('Q803', 'en:Utrecht'), 'Utrecht');
+  assert.strictEqual(W._wikiArticlePath(null, 'EN:Utrecht'), 'Utrecht');
+  assert.strictEqual(W._wikiArticlePath(null, 'nl:Aalten (dorp)'), 'Aalten_(dorp)');
+  // A Dutch title English Wikipedia does not have: no page, no button.
+  assert.strictEqual(W._wikiArticlePath('Q7', 'nl:Utrecht (stad)'), null);
+  assert.strictEqual(W._wikiArticlePath('Q803', null), 'Utrecht');     // by Q-ID
+  assert.strictEqual(W._wikiArticlePath('Q9', null), null);            // bridge, not bundled
+  assert.strictEqual(W._wikiArticlePath(null, 'constructor'), null);
+  // No index (not loaded yet, or a ZIM without articles): no button.
+  assert.strictEqual(wikiPath(null)._wikiArticlePath('Q803', 'en:Utrecht'), null);
+});
+
+await ok('the tag-to-title rule is the build\'s (cloud/wiki_articles._strip_lang)', () => {
+  const W = wikiPath({});
+  const tags = ['en:Golden Gate Bridge', 'NL:Utrecht (stad)', 'Foo: a bar', 'Mission: Impossible',
+                'nds-nl:Foo', 'a:b', 'Ål:Bø', '12:x', 'Q1:x', 'Expo Park/USC station'];
+  const py = process.env.PYTHON || (fs.existsSync(`${REPO}/venv-linux/bin/python3`)
+    ? `${REPO}/venv-linux/bin/python3` : 'python3');
+  let want;
+  try {
+    want = JSON.parse(execFileSync(py, ['-c',
+      'import json,sys; from cloud.wiki_articles import _underscore; ' +
+      'print(json.dumps([_underscore(t) for t in json.loads(sys.argv[1])]))',
+      JSON.stringify(tags)], { cwd: REPO, encoding: 'utf8' }));
+  } catch (e) {
+    console.log('      (no python with the repo importable; checking the known answers)');
+    want = ['Golden_Gate_Bridge', 'Utrecht_(stad)', '_a_bar', 'Mission:_Impossible',
+            'nds-nl:Foo', 'a:b', 'Bø', '12:x', 'Q1:x', 'Expo_Park/USC_station'];
+  }
+  assert.deepStrictEqual(tags.map(W._wikiTagTitle), want);
 });
 
 console.log(`\n${pass} passed`);

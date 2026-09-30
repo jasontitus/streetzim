@@ -83,6 +83,102 @@ scope for v1**: it resolves to the brand's article ("Starbucks"), not the
 specific place, so it's a different feature (a `--resolve-brand-wikidata`
 opt-in could add it later — high record coverage, ~hundreds of articles).
 
+### Non-English `wikipedia=` tags (2026-09-30)
+
+Outside English-speaking countries most OSM `wikipedia=` tags name an
+article in the local language (`nl:Utrecht (stad)`). These used to be
+kept as they were and looked up, title as-is, on English Wikipedia: in the
+Netherlands full build 13,019 of 16,848 titles were missing. Such a tag is
+now resolved through its `wikidata=` Q-ID like an untagged one: the
+English sitelink replaces it (`wikipedia_osm` keeps the OSM tag).
+
+Which tags are English (`is_english_title`): `en:` or no language prefix.
+A language prefix is 2-3 letters before the first colon, in any case
+(`NL:Foo` is Dutch, `EN:Foo` English), the rule the bundler
+(`cloud/wiki_articles._strip_lang`), the geo-index (`zim_writer`) and the
+viewer (`_wikiTagTitle`) use to turn a tag into a title; so "Foo: a bar"
+reads as language `foo` everywhere, and is resolved through its Q-ID.
+Longer codes (`simple:`, `nds-nl:`, `zh-yue:`, `be-tarask:`) are rare; they
+are not English either (resolved through the Q-ID), but nothing strips
+them, so one left unresolved is looked up whole and misses, as before.
+
+When Wikidata answers that the item has no English article, the tag stays
+and is flagged `wikipedia_no_en`. Its English namesake is usually absent,
+and when present usually another subject; it is bundled only when English
+Wikipedia has it as a **redirect to an article bundled for this map**
+(`bundle_wiki_articles(redirect_only=...)`), written as a ZIM redirect
+`wiki-article/<the redirect's title>` -> the bundled article (no second
+copy, so no duplicate full-text hit; the geo-index lists it). When the two
+titles sit at different depths (`AC-DC` -> `AC/DC`) a copy is stored
+instead: the PWA serves a redirect entry's content at the redirect's own
+URL, where the article's relative `../wiki-image/` links would miss. A redirect
+is an editor's alias (`Aalten (dorp)` -> `Aalten`, `De Bilt (dorp)` ->
+`De Bilt`), but not always one for this place: `Pannenberg` redirects to
+Wolfhart Pannenberg, a theologian, and `VVAC` to the Verde Valley
+Archaeology Center. Requiring the target to be an article of another place
+in the map (the municipality, the city) keeps the first kind. The target
+is matched by the page each bundled title opens, so an article bundled
+under an alias of its own (`AEGON` -> Aegon; 451 of the Netherlands' 3,829
+bundled titles are such aliases) counts. Offline the source ZIM's redirect
+entries tell; online, `action=query&redirects=1` for up to 50 titles a
+request (fewer when long: at most 6,000 characters of encoded titles, so a
+batch of Cyrillic or CJK titles is not refused with a 414), no text (about
+84 requests for the Netherlands' ~4,170 such titles, once: each answer is
+cached as `<sha1>.redirect`; an article fetch records the page it opened
+there too, and bundled titles fetched before that are looked up the same
+way, only when a target is not matched directly). A title with another
+wiki's prefix (`zh-yue:`, `simple:`: longer than the 2-3 letters that are
+stripped) is answered under `interwiki`, and one MediaWiki cannot take as
+a title as `invalid`; both are cached as "no such page".
+
+The **first online build after this change** asks about every bundled
+article once (about 50 titles a request: ~77 requests for the Netherlands'
+3,829), when a target is not matched directly: article caches written
+before it have no `.redirect` files. Later builds ask nothing.
+
+The flag goes with the title: the same title in another non-English tag
+of an object without a Q-ID (`li:Limmel`, `NL:Limmel`, `nl:Sint_Pieter`
+for `nl:Sint Pieter`) is bundled by the same rule, not as-is (the
+geo-index and the viewer go by title, so its namesake would otherwise show
+for the flagged object too). An English tag (`en:Limmel`, OSM's or
+resolved) names that article itself and is bundled as usual.
+
+"Wikidata could not answer" (a 5xx, a stopped run, an offline map's gap)
+is never "no English article": such a tag is looked up as before. Nor is an
+id Wikidata refused on its own (cached as `#refused`, not asked again).
+
+Administrative areas take their tags from their own boundary relation.
+Those tags join the cross-ref lookup keyed by relation
+(`admin_areas.add_admin_wiki_refs`, before titles are resolved), so they
+are resolved and flagged like the rest and their articles are bundled for
+them. They used to be read off the records at write time, unresolved, and
+bundled only when a place node happened to carry the same tag: 96 Dutch
+areas lost their article when non-English tags stopped being looked up as
+they were. `append_admin_areas` hands the tags over as it extracts the
+areas; a salvage build (`--skip-address-extract`) reads them from the
+search JSONL. An admin record present only in a reused `--search-cache`
+(its relation no longer extracted) is not in the lookup: its record keeps
+its raw tags, unresolved.
+
+Measured on 500 random Dutch-tagged places of the Netherlands map (with a
+Q-ID; 7,076 of its 7,361 non-English links have one):
+
+```
+English article per Wikidata:            204  (41%; 203 in the 2026-02 enwiki ZIM,
+                                               absent: "Spui (tram station)")
+no English article:                      295  (59%)
+old lookup (Dutch title in enwiki):      140 found: 116 the same article,
+                                               11 a redirect to it,
+                                               13 a different one (~5 a
+                                               reasonable parent article)
+no English article, namesake in enwiki:  10: 6 redirects (4 right, 2 wrong),
+                                               4 articles of their own
+```
+
+So the English articles found go from ~127 to 204. The 59% with no English
+article could only be covered by bundling the local-language Wikipedia (not
+done); the redirect rule adds back the few English aliases.
+
 ## Resolution sources
 
 1. **Wikidata Action API (default).** `wbgetentities?props=sitelinks&
@@ -93,9 +189,15 @@ opt-in could add it later — high record coverage, ~hundreds of articles).
    rather than a fixed rate; the gap widens only on 429, maxlag or a 5xx
    with `Retry-After`), honouring `Retry-After`
    (`cloud/wikimedia_http.py`). A 429/5xx/maxlag/network failure caches
-   nothing. A 400/401/403/404/405/410 stops the run at once; a batch refused with
-   an `error` body is halved until the bad id is found, and that id alone
-   is cached as having no article. The build host resolves Q-IDs this way
+   nothing; a maxlag (replication lag) or ratelimited answer is retried
+   until the step's wait budget (`STREETZIM_WIKI_WAIT_BUDGET`, 15 min) is
+   spent, not five times: the two builds before this change stopped at
+   Q-ID 0 on a lag episode. A 400/401/403/404/405/410 stops the run at
+   once; a batch refused with an `error` body is halved until the bad id
+   is found (wherever it sits in the batch), and that id alone is cached
+   as `#refused`: not asked again, and not taken as having no article.
+   Three ids in a row refused on their own, with nothing answered between
+   them, mean the API refuses everything and stop the run. The build host resolves Q-IDs this way
    (`ops/build-region-fast.sh` passes no `--wikidata-title-map`): pacing
    costs about what the old fixed 0.1 s sleep did, and a title cache that
    holds malformed ids (from a batch an older build had refused) has its
@@ -180,7 +282,8 @@ Sources + caching:
   installed package) the user cache directory (`streetzim/paths.py`
   `cache_root`, like `wikidata_cache/`; gitignored). Hits (`<sha1>.html`) and
   definitive misses (`<sha1>.miss`: no such page, no text, with the reason)
-  are cached, so **a rebuild never re-crawls**. Requests are serial with a
+  are cached, and so is whether a title with no English article of its own
+  is a redirect (`<sha1>.redirect`), so **a rebuild never re-crawls**. Requests are serial with a
   0.1 s gap after each response, at most 120 a minute and 5 s after an
   answer over 1 s (`polite_pacer`), and honour `Retry-After`; a 429, 5xx,
   network failure, unexpected body, or a 400/404/410 without a

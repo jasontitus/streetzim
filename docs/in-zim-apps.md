@@ -7,7 +7,7 @@ already inside it.
 
 | File | What it is | Triggered when |
 | --- | --- | --- |
-| `search/<slug>.html` | One detail page per indexed feature (place, airport, peak, park, water; named POIs too with `--kiwix-poi-pages`). Title, kind, coords, two CTAs. Front articles, so they are in both of Kiwix's indexes: full text and titles. | User taps a Kiwix full-text search result or a title suggestion in the Kiwix search bar. |
+| `search/<slug>.html` | One detail page per indexed feature (place, airport, peak, park, water, administrative area; named POIs too with `--kiwix-poi-pages`). Title, kind, coords, two CTAs. Front articles, so they are in both of Kiwix's indexes: full text and titles. | User taps a Kiwix full-text search result or a title suggestion in the Kiwix search bar. |
 | `index.html` (chip rail) | On-map chip rail under the search input. Tapping a chip fetches the matching `category-index/chip-<id>.json` and renders the result set as pins + carousel directly on the map (no navigation). Also exposes a *"Search this area"* pill once the user pans/zooms. | Default UX for chip-based browsing as of 2026-05-10. |
 | `places.html` | Search-and-browse mini-app — full list view, sort options, sub-filter chips, recent-searches dropdown, "Limit to map area" toggle. | User opens `places.html` directly (the viewer's **Find** link was removed 2026-05-10; see below). A secondary surface; the on-map chip rail covers the common case. |
 
@@ -22,6 +22,7 @@ built into `index.html`) recognises these fragments. They can mix freely:
 | Fragment | Behaviour |
 | --- | --- |
 | `map=<zoom>/<lat>/<lon>` | Fly the map to that view. Legacy "show this on the map" link — also produced by the auto-redirect search detail pages used to do. |
+| `bounds=<w>,<s>,<e>,<n>` | Fit the map to that box (an administrative area's page and Find result); takes the place of `map=`, which the same links carry for viewers without `bounds=`. |
 | `dest=<lat>,<lon>` | Open the routing panel with `window.streetzimRouting.open()`, then call `streetzimRouting.setDest` with the supplied coords. The panel queues the pick if the routing graph hasn't loaded yet, so timing isn't an issue. |
 | `origin=<lat>,<lon>` | Sets the origin slot. Only read together with `dest=`. |
 | `label=<text>` | URL-encoded display label for the destination pin/input. Optional. |

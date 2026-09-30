@@ -1,0 +1,32 @@
+diff --git a/src/writer.rs b/src/writer.rs
+index e1f9c83..84e844a 100644
+--- a/src/writer.rs
++++ b/src/writer.rs
+@@ -1039,8 +1039,27 @@ impl Creator {
+         self
+     }
+ 
++    /// Close every cluster currently being filled so the next item starts a
++    /// new one. Lets a producer put a boundary between groups of items that
++    /// should never share a cluster (streetzim: zoom levels of map tiles, so
++    /// a later tool can drop or copy a zoom as whole clusters). A no-op
++    /// before `start_writing` (nothing is buffered into clusters yet) and
++    /// when no bucket holds data, so calling it twice costs nothing and
++    /// never produces an empty cluster.
++    pub fn flush_cluster(&mut self) -> Result<()> {
++        if let Some(s) = self.stream.as_mut() {
++            s.flush_all_buckets()?;
++        }
++        Ok(())
++    }
++
+     pub fn set_cluster_size_target(&mut self, bytes: usize) -> &mut Self {
+         self.cluster_size_target = bytes.max(1);
++        // Once streaming, the target lives in the streamer; a mid-stream
++        // change (a manifest `cluster_break` with a new target) must reach it.
++        if let Some(s) = self.stream.as_mut() {
++            s.cluster_size_target = self.cluster_size_target;
++        }
+         self
+     }
+ 

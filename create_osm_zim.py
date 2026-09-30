@@ -154,6 +154,7 @@ from streetzim.addresses import (  # noqa: F401
     extract_wiki_tags_pbf,
 )
 from streetzim.overture import overture_release
+from streetzim.admin_areas import append_admin_areas
 from streetzim.zim_writer import (  # noqa: F401
     search_detail_html,
     _split_big_search_chunk,
@@ -499,6 +500,11 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Skip extract_addresses_pbf and merge_overture_{addresses,places}. "
                              "Use when --search-cache already contains the address records and "
                              "overture enrichment from a prior run that crashed in a later phase.")
+    parser.add_argument("--no-admin-areas", action="store_true",
+                        help="Leave administrative areas (countries, states, counties, "
+                             "cities, wards: OSM boundary relations) out of search. "
+                             "They need the OSM extract (--pbf, --area or --geofabrik); "
+                             "see docs/search-records.md.")
     parser.add_argument("--routing", action="store_true",
                         help="Include offline routing graph for turn-by-turn directions")
     # Retired: the SZRG v5 split writer (never used in production). Kept as
@@ -1080,6 +1086,29 @@ def _build_search(
                     print(f"    [--skip-address-extract] overture content "
                           f"detected in cache (themes={sampled_themes}); "
                           f"will emit stub overture-sources.json", flush=True)
+            # Administrative areas, from the extract before any bbox cut
+            # (so an area the cut clips still has its whole polygon). A
+            # search cache reused with --skip-address-extract has them.
+            # Their wikipedia/wikidata tags are collected on the way
+            # (admin_refs); None: not extracted here, read from the JSONL.
+            admin_refs = None
+            if not args.skip_address_extract and not args.no_admin_areas:
+                _src = os.path.join(tmpdir, "source.osm.pbf")
+                admin_pbf = (pbf_path or args.pbf
+                             or (_src if os.path.isfile(_src) else None) or addr_pbf)
+                try:
+                    _refs: dict = {}
+                    n_admin = append_admin_areas(admin_pbf, search_features, bbox=addr_bbox,
+                                                 wiki_refs=_refs)
+                    # Nothing collected (osmium missing, or no area has a
+                    # tag): the JSONL is read, as for a salvage build.
+                    admin_refs = _refs or None
+                    from streetzim.source_report import note
+                    note("Administrative areas",
+                         f"{n_admin} (OSM boundary relations; regions and clipped "
+                         "areas' points from GeoNames, CC BY 4.0)")
+                except Exception as _e:
+                    print(f"    Warning: administrative-area extraction failed: {_e}")
             # Same PBF feeds the wiki-tag lookup so the chunker can enrich
             # POI records with wikipedia/wikidata for offline cross-ref.
             try:
@@ -1088,23 +1117,60 @@ def _build_search(
             except Exception as _e:
                 print(f"    Warning: wiki cross-ref extraction failed: {_e}")
                 wiki_cross_refs = None
-            # Optionally backfill `wikipedia` from `wikidata` so records
-            # that carry only a Q-ID become title-linkable to a Wikipedia
-            # ZIM (the chunker writes the filled title into rec["w"]).
-            if getattr(args, "resolve_wikidata_titles", False) and wiki_cross_refs:
-                try:
-                    from cloud.wikidata_titles import augment_wiki_cross_refs
-                    _t = augment_wiki_cross_refs(
-                        wiki_cross_refs,
-                        cache_path=getattr(args, "wikidata_title_cache", None),
-                        offline_map=getattr(args, "wikidata_title_map", None),
-                    ) or {}
-                    from streetzim.source_report import note
-                    note("Wikipedia titles", f"{_t.get('resolved', '?')}/"
-                         f"{_t.get('distinct_qids', '?')} Q-IDs resolved")
-                except Exception as _e:
-                    print(f"    Warning: wikidata->title resolution failed: {_e}")
+            wiki_cross_refs = _finish_wiki_cross_refs(args, wiki_cross_refs,
+                                                      search_features, admin_refs)
     return address_count, overture_sources, overture_themes, search_features, wiki_cross_refs
+
+
+def _finish_wiki_cross_refs(args, wiki_cross_refs, search_features, admin_refs=None):
+    """The wiki cross-ref lookup as the ZIM writer gets it: the
+    administrative areas' tags added, then (--resolve-wikidata-titles)
+    every entry's English title resolved from its Q-ID.
+
+    admin_refs: the areas' tags as append_admin_areas collected them. None
+    (a salvage build reusing a search cache, --no-admin-areas, nothing
+    collected): they are read from the search JSONL instead, one pass over
+    it (about 4.6 min for Europe's 26.6 GB)."""
+    # The administrative areas' own wikipedia/wikidata tags join the lookup
+    # (keyed by relation), so they are resolved below and their articles
+    # bundled like any other. They used to be read straight off the records
+    # at write time: never resolved, and bundled only when a place node
+    # happened to carry the same tag (96 Dutch areas lost their article
+    # when non-English tags stopped being looked up as they were).
+    try:
+        from streetzim.admin_areas import add_admin_wiki_refs
+        refs = wiki_cross_refs or {}
+        if admin_refs is not None:
+            n_admin = 0
+            for key, tags in admin_refs.items():
+                if key not in refs:
+                    refs[key] = tags
+                    n_admin += 1
+        else:
+            n_admin = add_admin_wiki_refs(refs, search_features)
+        if n_admin:
+            wiki_cross_refs = refs
+            print(f"    {n_admin} administrative areas with wikipedia/wikidata tags",
+                  flush=True)
+    except Exception as _e:
+        print(f"    Warning: administrative-area wiki tags not read: {_e}")
+    # Optionally backfill `wikipedia` from `wikidata` so records
+    # that carry only a Q-ID become title-linkable to a Wikipedia
+    # ZIM (the chunker writes the filled title into rec["w"]).
+    if getattr(args, "resolve_wikidata_titles", False) and wiki_cross_refs:
+        try:
+            from cloud.wikidata_titles import augment_wiki_cross_refs
+            _t = augment_wiki_cross_refs(
+                wiki_cross_refs,
+                cache_path=getattr(args, "wikidata_title_cache", None),
+                offline_map=getattr(args, "wikidata_title_map", None),
+            ) or {}
+            from streetzim.source_report import note
+            note("Wikipedia titles", f"{_t.get('resolved', '?')}/"
+                 f"{_t.get('distinct_qids', '?')} Q-IDs resolved")
+        except Exception as _e:
+            print(f"    Warning: wikidata->title resolution failed: {_e}")
+    return wiki_cross_refs
 
 
 def _build_wikidata(

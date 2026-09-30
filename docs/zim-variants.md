@@ -1,0 +1,828 @@
+# ZIM variants: deriving light builds in minutes, not hours
+
+Status: design note (2026-09-20), with a first implementation of tiers 0-1
+measured on real files. See **What exists now** at the end for the tools,
+the numbers and what is still open.
+
+## What the viewer slot actually bought us, and what it did not
+
+`docs/viewer-slots.md` describes one mechanism: three entries padded into
+fixed-size **uncompressed** slots so a same-or-smaller replacement is a seek,
+a write and an MD5. It turned a re-pack (8-22 min for a 3-7 GB region, hours
+for europe) into 3-10 s.
+
+It generalises along exactly one axis: **replace a known entry with bytes
+that fit**. It does not generalise to **removing** content. Dropping
+satellite tiles or a zoom level changes the entry count, the URL pointer
+list, the cluster table and every offset after the first removed cluster.
+There is no slot for that. So "light variants" need a second mechanism, and
+the two compose: derive the variant once (minutes), then keep patching its
+viewer in place forever (seconds).
+
+There are four cost tiers. Today we have tiers 0, 2 and 3. The gap is tier 1,
+and tier 2 exists as three separate tools that each re-implement the same
+walk.
+
+| tier | operation | cost | exists today |
+|---|---|---|---|
+| 0 | in-place slot patch | seconds | `patch_viewer_inplace.py` (viewer only) |
+| 1 | cluster-level subset copy, no recompression | I/O bound, ~minutes | **no** |
+| 2 | entry-level walk + filter/transform + re-pack | 5-22 min per 2-7 GB; hours for europe | `swap_viewer_rust.py`, `repackage_zim.py`, `upgrade_spatial_zim.py` |
+| 3 | full rebuild from planet/mbtiles/search cache | hours | `create_osm_zim.py` |
+
+The important observation is that **tier 2 already delivers "light in
+minutes" for every region except the continents**, using only code we have.
+Switzerland re-packs in ~5 min. The work is consolidation and a recipe
+format, not new infrastructure. Tier 1 is what makes continents cheap and it
+needs a small ordering contract in the builder first.
+
+## What is in a ZIM, and how each part can be trimmed
+
+Every component the viewer uses is discovered through `map-config.json`
+(`hasSatellite`, `satelliteMaxZoom`, `hasTerrain`, `terrainMaxZoom`,
+`maxZoom`, `hasRouting`, `hasWikidata`) or through a per-component
+manifest. Nothing is hard-wired to paths in `index.html`. That is what makes
+derivation safe: **drop the entries and rewrite one small JSON file** and the
+viewer adapts.
+
+| component | paths | drop by prefix? | what else must change |
+|---|---|---|---|
+| satellite | `satellite/{z}/{x}/{y}.avif` | yes, whole or `z > N` | `hasSatellite`, `satelliteMaxZoom` |
+| terrain | `terrain/{z}/{x}/{y}.png` | yes, whole or `z > N` | `hasTerrain`, `terrainMaxZoom`; terrain coverage gate must be skipped |
+| vector tiles, deep zooms | `tiles/14/...` | yes, `z > N` | `maxZoom` (viewer falls back to 14 if absent, so it MUST be written) |
+| routing | `routing-data/*`, `routing-worker.js` | yes | `hasRouting`; routing gate skipped; the worker slot can stay (68 KB) |
+| Wikipedia articles | `wiki-article/*`, `wiki-geo-index.json` | yes | filter `wiki-geo-index.json` (the filter already exists in `swap_viewer_rust.py`); Xapian fulltext keeps dead docs, see below |
+| addresses in search | inside `search-data/*.json` leaves, records with `"type":"addr"` | **no** | every leaf re-serialised without addr records; both manifests rewritten; Xapian title/fulltext rebuilt if addresses were indexed |
+| Find chips | `category-index/chip-*.json` | per chip | `category-index/manifest.json` |
+| fonts, MapLibre, CSS | small | never worth it | |
+
+Two components are always regenerated whatever the tier, and both are cheap:
+the title listing (`listing/titleOrdered/*`, an array of entry indexes that
+is garbage after any entry removal; zimru rebuilds it on write) and the
+16-byte MD5 trailer.
+
+**Where the bytes are is not where intuition says.** Measured on Switzerland
+(STATUS-2026-09-18.md): satellite is 6.5% of the file, search-data is 53%
+and 58% of that is addresses. The current `switzerland-light` recipe
+(no satellite, cap at z13) drops the cheap part and keeps the expensive part.
+The first deliverable below is therefore an inventory tool, so recipes are
+chosen from numbers rather than guesses. The z14 share is unmeasured; the
+1.40 GB figure quoted for the z13 build came from a defective lineage and is
+void.
+
+## Tier 2 now: one derive tool with recipes
+
+`swap_viewer_rust.py`, `repackage_zim.py` and `upgrade_spatial_zim.py` all do
+the same thing: open the source with `libzim.reader.Archive`, walk
+`all_entry_count`, carry Xapian into namespace X raw, keep big routing
+entries raw, filter or rewrite a few paths, emit through `ManifestCreator`.
+Each grew its own flags (`--reshard-chips`, `--reshard-search`,
+`--split-find-chips`, `--spatial-chunk-scale`) and each has a documented
+trap when run against the wrong source (gotchas #5). A fourth copy for
+"light" would be the wrong move.
+
+Proposal: `cloud/derive_zim.py SRC.zim DST.zim --recipe light` where a
+recipe is a small declarative file:
+
+```yaml
+# cloud/recipes/light.yaml
+name: light
+title_suffix: " (Light)"
+drop_prefixes: [satellite/]
+max_tile_zoom: 13
+map_config:
+  hasSatellite: false
+  satelliteMaxZoom: null
+  maxZoom: 13
+gates_skip: []
+```
+
+```yaml
+# cloud/recipes/no-addresses.yaml
+name: noaddr
+drop_search_record_types: [addr]     # forces a search-data rewrite
+gates_skip: [address-search]
+```
+
+Operations the walk needs, all already written somewhere in the three tools:
+
+- `drop_prefix` / `max_zoom` for a raster or vector prefix
+- `rewrite_json(path, patch)` for `map-config.json` and the two manifests
+- `filter_records(prefix, predicate)` for search leaves, streaming one leaf
+  at a time (the `av` prefix on united-states is 2.9 GB of JSON; the
+  streaming aggregator in `swap_viewer_rust.py --reshard-search` already
+  handles this)
+- the existing viewer swap into slots, so a derived ZIM is always born with
+  the current viewer and patchable slots
+- metadata: `Name`, `Title`, `Description` from the recipe; a **fresh UUID**
+  (a variant is a different book to Kiwix, so this is the right default,
+  unlike a viewer update to a shipped file)
+
+Cost is the tier 2 re-pack: ~5 min for Switzerland, ~20 min for mexico,
+hours for europe. Fine for everything but continents; and recipes that only
+drop content re-pack fewer bytes than the source, so they are faster than the
+viewer swap numbers above.
+
+## Tier 1: cluster-level copy, and the ordering contract it needs
+
+A ZIM is a header, a MIME list, a URL-sorted dirent table, a title index, a
+cluster pointer table, the clusters, and an MD5. A dirent points at
+(cluster number, blob number). **A cluster that contains only kept entries
+can be copied byte for byte**: no decompression, no recompression, no
+gotcha #6 window-log concerns because the bytes are unchanged. The derive
+tool then only re-encodes clusters that straddle a keep/drop boundary or
+whose entries are being transformed (search leaves under `noaddr`). The
+rest is `sendfile`. For europe that is the difference between hours and
+however long it takes to stream 71 GB off the disk.
+
+For this to work, droppable components must not share clusters with kept
+ones, which is an **ordering contract** on the builder:
+
+1. **Component-major emit order**, already true in practice: viewer,
+   libs, config, tiles, satellite, terrain, fonts, wikidata, routing,
+   search, Xapian (the phases of `streetzim/zim_writer.py` on main; this
+   was written against the pre-refactor `create_osm_zim.py`).
+2. **Zoom-major within a raster or vector prefix.** When this was written,
+   regions whose mbtiles was under 5 GB read tiles `ORDER BY tile_column,
+   tile_row`, interleaving zooms in every cluster. On main (2026-09-30)
+   `streetzim/tiles.py` reads one zoom at a time (`WHERE zoom_level = ?`),
+   so vector tiles are already zoom-major; only the cluster breaks below
+   are missing.
+3. **A cluster break at each component and zoom boundary.** Cheapest
+   implementation: a `{"kind":"cluster_break"}` manifest record that makes
+   `streetzim-pack` close the current cluster (a few lines in
+   `rust/streetzim-pack/src/main.rs` plus a `flush()` on zimru's `Creator`
+   if it lacks one). Cost is one under-filled 8 MiB cluster per boundary,
+   roughly 25 boundaries per ZIM, so well under 200 MB of slack in the worst
+   case and typically far less since the last cluster of a run is partial
+   anyway. The alternative, `cluster_strategy: by_first_path_segment`, gets
+   component grouping for free but has to be re-measured against the 15 s
+   typeahead smoke that killed `by_mime` (gotcha #7) and gives no zoom
+   grouping.
+
+With the contract in place, tier 1 needs a raw-format subset writer:
+read dirents and cluster offsets (the in-place patcher and
+`verify_slot_integrity.py` already work at this level in Python), decide
+keep/drop/re-encode per cluster, write a new dirent table and cluster table,
+copy kept clusters, regenerate the title listing, write the MD5. This is
+either a `subset` subcommand in zimru (preferred, since it owns the writer
+and the title-listing code) or ~400 lines of Python against the format spec.
+Entries dropped from a *kept* boundary cluster can simply be left as
+unreferenced blobs; libzim and zimcheck do not walk blobs, only dirents.
+
+Until the contract lands, every shipped ZIM is "pre-contract" in the same
+way ~40 regions were "pre-slot": the first derive is a tier 2 re-pack, and
+from then on the full build carries the layout and every variant is tier 1.
+The gate in `.allzims-v2.sh` that refuses a build without slot markers
+should grow a sibling that refuses a build whose clusters mix components.
+
+## Extending slots: config and provenance
+
+Two more entries deserve slots, both tiny:
+
+- **`map-config.json` (4 KB slot).** Lets a viewer change that needs a new
+  config key ship in the same in-place patch. Also lets a variant be flipped
+  without a re-pack (`hasSatellite: false` with the satellite bytes still in
+  the file), which is useless for size but useful for A/B testing a viewer
+  behaviour on a device against the same file. JSON has no comment syntax, so
+  the padding goes in a trailing `"_slot": "SZVSLOT1:..."` key rather than a
+  comment; `viewer_slots.py` already parameterises the delimiters per type.
+- **`build-info.json` (4 KB slot), new.** Provenance the tooling can read
+  back out of the file without guessing from markers: source ZIM UUID and
+  filename, recipe name and hash, viewer build stamp, build date. Today
+  `.allzims-v2.sh` decides "already has the newest fix" by grepping for a
+  fix-specific marker string in `index.html`; a stamp it can compare is the
+  general form of that. Kiwix-visible metadata (`M/` namespace) lives in a
+  compressed cluster and cannot be patched in place, which is exactly why
+  this belongs in a slot.
+
+`cloud/viewer_slots.py` becomes a registry of slotted paths with sizes and
+delimiter styles, and the patcher takes `--set path=file` for any of them.
+The known gap about the patch being destructive and non-atomic applies more
+as more things become patchable; patching a copy (or a reflink where the
+filesystem allows) and renaming over the original is a one-afternoon fix
+and should land with the registry.
+
+## The pipeline this gives us
+
+```
+full rebuild (hours, only when inputs change)
+   └─ derive variants: light, noaddr, no-routing ... (tier 1: minutes; tier 2 until the contract ships)
+        └─ patch viewer / config / build-info in place (seconds, forever after)
+             └─ gate (recipe-aware) → upload (the remaining cost)
+```
+
+Variants are always derived from the **full** build, never from another
+variant, so there is one canonical source per region and every variant is
+a pure function of (source UUID, recipe, viewer). That is also what makes
+the catalog row for a variant derivable: `web/generate.py` and
+`cloud/regions.tsv` currently carry hand-copied duplicates of the parent's
+bbox, smoke coordinates and search term for `switzerland-light`; a recipe
+can generate the row.
+
+Gates need to know the recipe. `ship-switzerland-light.sh` runs the terrain
+coverage and routing gates unconditionally; a `no-terrain` recipe would fail
+its own gate. Recipes carry `gates_skip` for that reason.
+
+## Xapian and dropped content
+
+Xapian indexes store the entry **path** per document, not the dirent index,
+so dropping tiles, satellite, terrain or routing leaves the indexes correct.
+Dropping `wiki-article/*` or address records leaves documents whose target
+no longer exists, so Kiwix's own search can offer a dead result. Two
+options: rebuild the glass DBs with `xapianbuilder` from what is left (3 s
+for California's 250k docs, so cheap, but it needs the search features,
+which a tier 2 walk can stream from `search-data/`), or accept the dead
+results as the existing "Xapian goes stale" gap already does for the app
+shell. Recipes that touch indexed content should rebuild; recipes that only
+drop tiles need not.
+
+## Order of work
+
+1. **`cloud/zim_inventory.py`** (half a day). One pass over dirents and
+   cluster offsets, reporting compressed bytes per component and per zoom,
+   plus how many clusters are mixed. Run it on switzerland, japan and europe
+   before choosing any recipe. Also proves the ordering-contract violation
+   on a sub-5 GB region.
+2. **`cloud/derive_zim.py` + `cloud/recipes/`** (one to two days). Tier 2,
+   consolidating the three walk tools behind recipes. Delivers light
+   variants in minutes for every non-continent region immediately. Tests
+   follow `tests/test_upgrade_spatial_zim.py`: build a small fixture, derive,
+   assert entry set, `map-config.json`, fresh UUID, `Archive.check()`.
+3. **Ordering contract** in the builder (zoom-major SQL, `cluster_break`
+   records) and the matching gate (one day, small zimru change).
+4. **Tier 1 cluster-copy path** in `derive_zim.py` (three to five days,
+   mostly the raw writer). Measure on a continent; expect I/O bound.
+5. **Slot registry**: `map-config.json` and `build-info.json` slots, patcher
+   `--set`, non-destructive patch via copy-and-rename (half a day).
+6. Recipe-aware gates and recipe-generated catalog rows (half a day).
+
+Steps 1, 2 and 5 are independent of each other and of zimru. Step 4 depends
+on 3.
+
+## Quick start: `szim`
+
+One command, no toolchain: Python 3.10+ and `pip install zstandard`, nothing
+else (`libzim` only for `verify`; numpy is not used). Reads and writes ordinary ZIM; libzim, Kiwix
+and zimru read the output unchanged.
+
+```
+./szim inspect osm-argentina.zim --by-zoom        # what is large (works on an archive.org URL too)
+./szim plan    osm-argentina.zim --max-tile-zoom 13 --terrain-max-zoom 11 --satellite-max-zoom 11
+./szim trim    osm-argentina.zim ar-light.zim --max-tile-zoom 13 --terrain-max-zoom 11 \
+               --satellite-max-zoom 11 --title "OSM - Argentina (Light)" --name osm_argentina_light
+./szim verify  osm-argentina.zim ar-light.zim --expect-dropped tiles/14/ terrain/12/ satellite/12/
+./szim sim     osm-argentina.zim ar-light.zim --all --lat -34.60 --lon -58.38 --measure
+```
+
+`inspect` ends with a table of every trim option and the on-disk bytes it
+would remove, so the recipe can be chosen from the numbers; addresses show
+up as their own line (the tier-a search leaves). `trim` copies every cluster
+it can byte-for-byte and re-encodes only the few it must, so a prefix or zoom drop on a multi-GB file takes well under a
+minute; `--strip-addresses` re-encodes the search clusters and takes
+minutes. `inspect` on a URL fetches only the tables.
+
+## What exists now (2026-09-20, measured)
+
+Files: `cloud/zimfmt.py` (raw format), `cloud/zim_inventory.py`,
+`cloud/derive_zim.py` (the `streetzim-derive` CLI), `cloud/verify_derived.py`,
+`cloud/zim_access_sim.py`, `tests/test_derive_zim.py`. None of them need
+zimru or the libzim Creator; the verifier and the tests use python-libzim as
+the independent reader.
+
+### Inventory: where the bytes are
+
+`zim_inventory.py` reads every dirent and inflates every cluster once. 2 s on
+washington-dc, 10 s on switzerland.
+
+switzerland 2026-09-20d, 2.20 GB, 159,936 entries, 903 clusters, 19 mixed:
+
+| component | entries | on disk | share |
+|---|---|---|---|
+| tiles/14 | 44,520 | 489 MB | 22.2% |
+| search-data | 13,047 | 480 MB | 21.8% |
+| routing-data | 1,620 | 408 MB | 18.5% |
+| tiles/13 | 11,305 | 203 MB | 9.2% |
+| wiki articles + images | 20,963 | 124 MB | 5.6% |
+| wikidata | 91 | 109 MB | 5.0% |
+| satellite (all zooms) | 59,730 | 123 MB | 5.6% |
+| xapian | 2 | 70 MB | 3.2% |
+| terrain (all zooms) | 3,904 | 65 MB | 3.0% |
+| tiles z0-12 | 3,903 | 95 MB | 4.3% |
+
+Two things the table settles. First, the shipped "light" recipe (no
+satellite, z13 cap) removes 28% and z14 is four fifths of that; satellite is
+a rounding error next to search-data and routing. Second, the source is
+**already component-major and zoom-major**: only 19 of 903 clusters mix
+components, all at run boundaries. The ordering-contract concern above holds
+for the sub-5 GB SQL path in principle, but this build did not exhibit it, so
+a cluster-copy derive re-encodes a handful of boundary clusters, not the file.
+
+washington-dc for contrast is 48% wikidata and 28% wiki, with tiles at 7.7%.
+A recipe that helps one region can be irrelevant to another; run the
+inventory first.
+
+### Derive: tier 1 on real files
+
+```
+python3 cloud/derive_zim.py SRC.zim DST.zim --light            # = --no-satellite --max-tile-zoom 13
+python3 cloud/derive_zim.py SRC.zim DST.zim --no-terrain --no-routing --no-wiki
+python3 cloud/derive_zim.py SRC.zim DST.zim --satellite-max-zoom 12 --drop-prefix wiki-image/
+python3 cloud/derive_zim.py SRC.zim DST.zim --light --title "... (Light)" --name osm_x_light
+python3 cloud/derive_zim.py SRC.zim --light --dry-run          # cluster plan only
+python3 cloud/derive_zim.py SRC.zim DST.zim --regroup-tiles --tile-order hilbert --cluster-target 8388608
+python3 cloud/verify_derived.py SRC.zim DST.zim --expect-dropped satellite/ tiles/14/
+```
+
+| run | source | plan | time | output |
+|---|---|---|---|---|
+| washington-dc `--light` | 226 MB | copy 313 / re-encode 5 / drop 13 clusters | 4.6 s | 213 MB |
+| switzerland `--light` | 2.20 GB | copy 769 / re-encode 7 / drop 127 | **31 s** | 1.578 GB |
+| switzerland `--regroup-tiles hilbert` | 2.20 GB | copy 708 / re-encode 194 (1.6 GB of tiles) | 185 s, 4 cores | 2.214 GB (+0.6%) |
+
+The switzerland light derive produces a file the same size, to the megabyte,
+as the shipped `osm-switzerland-light-2026-09-20.zim` (1.578 GB), which took
+a rebuild plus a viewer re-pack. 31 s against ~5 min for the re-pack path and
+hours for the rebuild. The work is `sendfile`-shaped: 769 clusters copied
+through the source mmap, 7 clusters inflated and re-deflated (map-config,
+metadata, the two boundary clusters, the raw satellite/xapian cluster), one
+title listing regenerated, one MD5.
+
+What `verify_derived.py` proved for each output, with python-libzim:
+`Archive.check()` true, MD5 trailer valid, main page resolves, fulltext and
+title indexes present and answering queries, every kept entry byte-identical
+(55,667 on switzerland light), every expected-dropped entry absent (104,249),
+redirects to dropped targets dropped, `Counter` metadata recomputed, UUID
+fresh unless `--keep-uuid`.
+
+What the derive rewrites: `map-config.json` (flags, `maxZoom`, a `derived`
+block naming the recipe), `streetzim-meta.json` (`derivedFrom`: source UUID,
+filename, recipe, date), `M/Name`, `M/Title`, `M/Description`, `M/Flavour`,
+`M/Counter`, and `wiki-geo-index.json` under `--no-wiki`.
+
+### Known limits of the current tool
+
+- **Not yet a search-data or Xapian transform.** `--no-wiki` leaves dead
+  documents in the fulltext index, as predicted above. The address-stripping
+  recipe (the 53% lever on switzerland) needs the leaf rewrite and an
+  `xapianbuilder` rerun; that is tier 2 work the tool does not do yet.
+- **Regroup memory.** The first switzerland regroup peaked at 3.95 GB RSS;
+  blobs now spill to bucketed files (1/256 of a zoom per bucket) so memory
+  is bounded, but a continent regroup is still a 4-core re-encode of every
+  tile at zstd-22 (~3 MB/s per core), i.e. hours for europe. Regroup is an
+  experiment knob, not the shipping path; the builder should emit the layout
+  directly.
+- **Viewer slots are not re-padded.** A pre-slot source stays pre-slot; run
+  `swap_viewer_rust.py` once as today. A slotted source copies its slot
+  cluster verbatim, so `patch_viewer_inplace.py` keeps working on the output.
+- **Peak RSS figures include mmap'd file pages** and overstate heap use.
+
+## Sparse regions (2026-09-20, second pass)
+
+Switzerland is the wrong file to size a light recipe on: it is a small dense
+country where search and routing dominate. `zim_inventory.py` now runs
+against a URL, reading only the tables (header, dirents, cluster pointers,
+raw-cluster offset tables) over HTTP range requests: 191 MB fetched for
+argentina, 872 MB for south-america, no download.
+
+| region | size | tiles | of which z14 | satellite | terrain | search-data | routing |
+|---|---|---|---|---|---|---|---|
+| switzerland | 2.2 GB | 36% | 22% | 5.6% | 3.0% | 22% | 18% |
+| argentina | 3.4 GB | 25% | 13% | 9.6% (z12: 7.0%) | **20%** (z12: 12.8%, z11: 4.9%) | 21% | 10% |
+| australia-nz | 7.2 GB | 18% | 10% | **29%** (z13: 1.4 GB) | 12% (z12: 575 MB) | 14% | 7% |
+| south-america | 21 GB | 18% | 9.5% | 4.5% | 15% (z12: 2.0 GB) | **47%** | 8.6% |
+| brazil | 16.8 GB | 16% | 8.3% | 4.2% | 13% (z12: 1.4 GB) | **53%** (9.0 GB) | 7.6% |
+
+So the lever differs per region and the inventory has to come first:
+
+- **argentina**: terrain z12 alone is 13%; satellite z12 another 7%; z14
+  tiles 13%. A light recipe that only drops z14 vectors and satellite
+  leaves the biggest raster component untouched.
+- **australia-nz**: satellite is the file. Its z13 satellite is 1.4 GB, so
+  `--satellite-max-zoom 12` alone saves 20%.
+- **south-america** and **brazil**: search-data is 10 GB of 21 and 9 GB
+  of 16.8. Addresses, not imagery, are the lever; `--strip-addresses` and
+  `inspect --exact` (below) exist for exactly these files. Terrain z12 is
+  the second lever on both (2.0 GB and 1.4 GB); satellite is 4%.
+
+### Argentina: the sparse-light recipe
+
+```
+python3 cloud/derive_zim.py osm-argentina.zim ar-light.zim \
+    --max-tile-zoom 13 --terrain-max-zoom 11 --satellite-max-zoom 11 \
+    --title "OSM - Argentina (Light)" --name osm_argentina_light
+```
+
+| recipe (dry-run) | copy / re-encode / drop clusters | dropped |
+|---|---|---|
+| `--light` (no sat, z13) | 1181 / 7 / 170 | 769 MB |
+| z13 + terrain ≤ z11 + satellite ≤ z11 | 1139 / 9 / 210 | **1113 MB** |
+| `--no-terrain --no-satellite` | 1224 / 6 / 128 | 1016 MB |
+| `--terrain-max-zoom 11` | 1300 / 5 / 53 | 434 MB |
+
+The second recipe ran in **47 s**: 3.43 GB to 2.17 GB (63%), 736,142 of
+2,599,702 entries kept, verified identical, all `tiles/14/`, `terrain/12/`,
+`satellite/12/` entries absent, search and suggestions working.
+
+The re-encoded clusters are the same nine every time: map-config, metadata,
+the raw satellite/terrain/xapian cluster at the component boundary, and the
+six clusters where two zooms meet. Everything else is copied.
+
+### Does zoom-major clustering slow down zooming? Measured.
+
+The worry: if every zoom level lives in its own clusters, a zoom-in sequence
+touches a new cluster at every step instead of finding neighbouring zooms in
+one. `zim_access_sim.py` replays three interactions (first view, zoom 4→14,
+six-screen pan at z14) on a phone viewport, counting distinct clusters read
+and their compressed bytes, and with `--measure` timing the same fetches
+through python-libzim (warm page cache, so this is dirent lookup plus
+inflate, which is the part a phone pays in CPU).
+
+Four layouts of the same content: the shipped file (component-major, zoom
+runs with mixed boundary clusters, ~8 MiB uncompressed clusters), a Hilbert
+zoom-major regroup at 8 MiB, the same at 2 MiB, and the sparse-light derive.
+
+**argentina, Buenos Aires, tiles + satellite + terrain, zoom 4→14:**
+
+| layout | clusters read | MB inflated | libzim ms |
+|---|---|---|---|
+| shipped | 23 | 141 | 715 |
+| hilbert, 8 MiB | 30 | 121 | 289 |
+| hilbert, 2 MiB | 35 | **44** | **109** |
+| sparse-light (shipped layout) | 18 | 98 | 435 |
+
+**argentina, El Calafate (Patagonia), same:** shipped 23 reads / 152 MB /
+816 ms; hilbert 8 MiB 27 / 110 / 116 ms; hilbert 2 MiB 30 / 40 / 48 ms.
+
+**first view (startup, z6):** shipped 6 reads / 33.9 MB / 116 ms; regrouped
+5 reads / 9.0 MB / 11-15 ms, both cluster sizes. The shipped file's low-zoom
+tiles share clusters with unrelated bulk, so the first paint inflates 34 MB
+to draw 84 tiles.
+
+**pan at z14, six screens, Calafate:** shipped 6 reads / 37 MB / 434 ms;
+hilbert 8 MiB 2 / 12 MB / 21 ms; 2 MiB 3 / 4 MB / 12 ms.
+
+**switzerland, Zurich, tiles only, zoom 4→14:** shipped 13 reads / 63 MB /
+540 ms; hilbert 8 MiB 15 / 50 MB / 338 ms. Zermatt with all layers: 22 / 135
+MB / 692 ms against 32 / 112 MB / 262 ms.
+
+Reading of the numbers:
+
+1. **Zoom-major does add cluster reads on a zoom-in**, 15-40% more, exactly
+   as feared: each zoom step lands in its own cluster. But each of those
+   clusters is smaller and contains nothing but that zoom, so bytes inflated
+   fall 15-30% and measured time falls 2-7x. The reads were never the cost;
+   inflating megabytes of unrelated tiles to get at one was.
+2. **Cluster size is the bigger knob.** 2 MiB clusters cut inflated bytes
+   another 2.7x over 8 MiB at the cost of 1.8% file size (argentina; 0.6% on
+   switzerland). MapLibre fetches 12-20 tiles per view; a 2 MiB cluster
+   holds ~100 z14 tiles, so most views still resolve in 1-3 clusters.
+3. **Hilbert order within a zoom** is what keeps the pan cheap: six screens
+   east at z14 cost 2-3 cluster reads total because neighbouring tiles are
+   neighbouring blobs.
+4. The light derive inherits the shipped layout and so inherits its startup
+   and zoom costs; a variant should be derived from a well-laid-out source,
+   or regrouped once.
+
+Caveat: `--measure` times python-libzim on this container with the file in
+page cache and libzim's own cluster cache in play, so absolute ms are not a
+phone's, and the per-step numbers wobble by tens of ms. The ratios between
+layouts on the same file are the result.
+
+### What this asks of the builder
+
+Emit tiles, satellite and terrain **zoom-major with a cluster break per
+zoom and Hilbert order within a zoom**, and use a smaller cluster target for
+those three components (2 MiB) than for search and routing (8 MiB, where the
+typeahead measurements in gotcha #7 want big clusters). That is an insertion
+order and two config values, no format change, and it makes every later
+derive a pure cluster copy. `--regroup-tiles` exists to measure this on
+shipped files, not to be the production path: it re-encodes every tile
+(argentina: 2.5 M tiles, 285 s on 4 cores; a continent is hours).
+
+### Costs observed
+
+| run | source | time | peak RSS |
+|---|---|---|---|
+| argentina sparse-light | 3.43 GB, 2.6 M entries | 47 s | 3.9 GB |
+| argentina regroup hilbert 8 MiB | 3.43 GB | 285 s | 5.5 GB |
+| argentina regroup hilbert 2 MiB | 3.43 GB | 218 s | 7.3 GB |
+
+RSS counts the mmap'd source pages the run touched, so it scales with bytes
+read rather than heap; the real heap cost is the in-memory dirent list (2.6 M
+Dirent objects for argentina). A continent with 12 M entries (south-america)
+will want dirents parsed into arrays instead of objects before this tool is
+run on one. Open item.
+
+## Address stripping, builder ordering, inventory sizes (2026-09-20, third pass)
+
+### `--strip-addresses`
+
+South-america is 47% search-data and addresses are most of that; the
+inventory made this the lever, so it is now a derive option:
+
+```
+python3 cloud/derive_zim.py SRC.zim DST.zim --strip-addresses
+python3 cloud/verify_derived.py SRC.zim DST.zim --expect-stripped-addresses
+```
+
+How the search data is laid out decides the mechanics. Character-split
+prefixes (`docs/search-prefix-locality.md`, `cloud/search_shards.py`) put
+each record tier in its own leaf: `10~0~0~a` is tier **a**, address records
+only, and the viewer fetches tier-a leaves solely for digit queries of four
+or more characters. Legacy hash-bucket leaves (`ab-3`, or an unsplit `ab`)
+mix types. So:
+
+- a tier-a leaf is rewritten as `[]`, not deleted: the viewer looks every
+  leaf name up in the manifest before fetching and a *missing* name sends
+  it into `expandPrefix`'s miss branch (four scans of `sub_chunks` and
+  `chunks`, measured at 1 s per keystroke on korea-mongolia), while an
+  empty leaf is a direct hit and a two-byte fetch;
+- every other leaf is filtered record by record on `t` (or legacy `type`)
+  in `TIER_TYPES["a"]`;
+- `search-data/manifest.json` keeps `sub_chunks` and `char_split` as they
+  were, sets each touched chunk's count, and reduces `total` by the build's
+  unique address count from `streetzim-meta.json` (chunk counts count leaf
+  records, a record appears in every character path that reaches it, so
+  summing them is wrong; argentina: 41.7 M leaf records vs 8.9 M addresses);
+- `streetzim-meta.json` gets `hasAddresses: false`, `counts.addresses: 0`
+  and no `addr` in `byType`; `map-config.json` gets `hasAddresses` and
+  `hasOvertureAddresses` false (the Overture attribution is for address
+  data that is no longer there).
+
+Addresses are not in the Xapian index (`xapian_types` is place, airport,
+park, peak, water), so no dead documents result.
+
+Cost: unlike a prefix drop, this touches nearly every search-data cluster
+(leaves of all tiers interleave in insertion order), so those clusters are
+inflated and re-deflated with only the kept records. Re-encoding runs on a
+process pool with a bounded window and cluster order preserved.
+
+Measured on argentina: 797 of 1358 clusters re-encoded, **423 s** on 4
+cores, 3.43 GB to 3.04 GB (88.6%), 41.7 M leaf records removed, verified
+(every non-search entry identical, every search leaf equal to its source
+minus address records, search and suggestions working).
+
+The saving is smaller than the record count suggests: addresses are 70% of
+the records but only ~55% of search-data's *on-disk* bytes, because house
+numbers on the same street compress far better than POI names. On
+argentina that is 392 MB, about the same as dropping terrain z12. For
+south-america, where search-data is 10 GB, the same ratio would give ~5 GB,
+and the re-encode would take an hour or two. Run `szim inspect` first; the
+tier-a leaves show the exact on-disk share of addresses before deciding.
+
+### Builder: `--tile-order zoom-hilbert --tile-cluster-mb 2`
+
+> **Not on main.** This builder option was written against the
+> pre-refactor `create_osm_zim.py` and was not ported when the rest of
+> this work was brought in (2026-09-30); tile writing now lives in
+> `streetzim/tiles.py` and `streetzim/zim_writer.py`. The manifest record
+> (`ManifestCreator.cluster_break`), the packer feature, the ordering
+> helpers (`cloud/tile_order.py`) and `cloud/derive_zim.py` are on main;
+> nothing calls `cluster_break` yet. The description below is the design.
+
+The builder change emitted the layout the measurements asked for:
+
+- vector tiles from MBTiles are streamed zoom-major with Hilbert order
+  inside each zoom (`_iter_tiles_ordered`: list one zoom's coordinates,
+  sort, fetch each tile by key; an indexed lookup that is fine for a
+  regional MBTiles in page cache and deliberately not the rowid scan the
+  world file needs);
+- satellite and terrain cache directories are listed per zoom and added in
+  the same order;
+- a `cluster_break` manifest record is written before the tile components,
+  at every zoom change, and after them, carrying `--tile-cluster-mb` on the
+  way in and the build's `--cluster-size` on the way out;
+- the libzim (`--zim-builder python`) path gets the ordering only:
+  `cluster_break` is looked up with `getattr`, so it is a no-op there;
+- a world-sized bbox falls back to source order with a warning (the ordered
+  path fetches each tile by key, which is the access pattern the rowid scan
+  exists to avoid on the 113 GB world file).
+
+Note that the build's default cluster target is `--cluster-size 2048` KiB
+(create_zim always passes it, overriding ManifestCreator's 8 MiB), so the
+"2 MiB tiles / 8 MiB search" layout needs `--tile-cluster-mb 2
+--cluster-size 8192` spelled out; the world build scripts already pass 8192.
+A packer binary older than the record fails at the first break, after the
+viewer items were written; there is no preflight yet.
+
+The packer side (`rust/streetzim-pack`) parses the record; the flush calls
+`Creator::flush_cluster()` on zimru (`patches/zimru-flush-cluster.patch`),
+so it is behind a cargo feature: `cargo build --release --features
+cluster_break`. Without the feature the binary warns once and does not
+split, and the record's size target reaches the running streamer only with
+the zimru patch; with an older binary the manifest fails to parse.
+`docs/zim-builder-rust.md` carries the record spec. The Python ordering and
+the manifest record are unit-tested (`tests/test_tile_order.py`), and
+`tests/e2e_cluster_break.py` passes with the feature build against patched
+zimru (see below).
+
+### Inventory: sizes on both sides, by MIME too
+
+`zim_inventory.py` always prints uncompressed, on-disk, and the ratio.
+Remote (URL) mode reads the zstd frame header of every cluster (18 bytes,
+via the same multipart range requests), which carries the content size, so
+uncompressed totals are exact remotely too; only the split of a *mixed*
+compressed cluster between components is by blob count. `--by-mime` groups
+by content type instead of path component:
+
+```
+$ python3 cloud/zim_inventory.py osm-washington-dc.zim --by-mime
+component                 entries  uncompressed     on disk  ratio  share
+application/json             1188      965.8 MB    132.7 MB   7.3x  58.7%
+image/webp                   5085       60.0 MB     50.7 MB   1.2x  22.4%
+application/x-protobuf        953       37.6 MB     18.0 MB   2.1x   7.9%
+```
+
+### Adversarial review (2026-09-20) and what it changed
+
+Two independent review passes over the tooling and the builder change found
+the following, all fixed and covered by tests where a test was possible:
+
+- **Redirect chains were dropped** when the outer alias sorted before its
+  target (`keep[]` read before it was decided). Chains are now followed to
+  their final item, with a cycle guard.
+- **`trim SRC SRC` truncated the source** to zero bytes and exited 0. The
+  derive refuses a DST that is the SRC, and writes to `DST.derive-tmp`,
+  renaming over DST only after the MD5 is written; a failure removes the
+  temp file, terminates the encode pool and clears the spill directory.
+- **Cluster extents swallowed the dirent table** for ZimWriter-layout files
+  (last cluster "ended" at the URL pointer list). The dirent table start is
+  now a boundary; a second-generation derive no longer risks carrying the
+  table forward as junk.
+- **The plan phase inflated every kept cluster** to count blobs, which for a
+  multi-GB raw routing cluster meant materialising it. It now compares kept
+  dirents against dirents referencing the cluster, so `--dry-run` and the
+  copy decision read no payload.
+- **`--strip-addresses` inflated a cluster once per leaf**; the cache clear
+  moved out of the loop. `counts.total` no longer zeroes when `byType` is
+  absent. Rewrites for absent entries and a missing address count now warn.
+- Builder (not on main: the builder change was not ported, see above):
+  the cluster target was **not restored after satellite/terrain**; raster
+  zoom breaks are emitted lazily so an all-skipped zoom yields no empty
+  cluster; a world-sized bbox falls back to source order;
+  `--tile-cluster-mb` rejects non-positive values.
+- Simulator: duplicate wrapped tiles at z0-1 are deduplicated.
+
+Not changed, noted: the in-memory dirent list is still Python objects
+(measured 1.1-1.3 GB peak for an 825k-entry trim and 1.8 GB for `plan` on
+2.6 M entries; a continent of tens of millions of entries would need tens
+of GB), and an old packer binary fails at the first `cluster_break` after
+the viewer items are written (no preflight). (The regenerated
+`titleOrdered/v1` listed every entry at the time; it now lists front
+articles only, as libzim's does, see below.)
+
+### Compressed size is what the tool has to track (2026-09-20, fourth pass)
+
+The address-strip estimate above was reasoned from record counts and was
+wrong by 2x; the inventory's default attribution (a mixed cluster's on-disk
+bytes split in proportion to uncompressed bytes) has the same flaw in a
+milder form, because addresses compress much better than the POI names
+they share clusters with. Two additions make the tool report what a trim
+will actually save:
+
+- **`szim inspect --exact`** recompresses every mixed compressed cluster
+  with and without each component, scales the marginal sizes to the
+  cluster's real on-disk size, and splits address records out of legacy
+  (untiered) search leaves as their own component.
+- **`szim plan ... --estimate`** compresses the clusters a trim would
+  re-encode and projects the output size before anything is written.
+
+Measured on argentina against the real `--strip-addresses` run (3.432 GB
+to 3.040 GB, 392 MB saved):
+
+| method | addresses on disk | time |
+|---|---|---|
+| default attribution (tier-a leaves, uncompressed share) | 271 MB | 12 s |
+| `--exact --exact-level 3` | 416 MB | 3 m 43 s |
+| `--exact` (level 22, the file's own level) | **401 MB** | 24 m |
+| `plan --strip-addresses --estimate` | saves 434 MB, projects 2.998 GB (actual 3.040) | 3 m 55 s |
+
+On washington-dc the split is starker: addresses are 79% of search-data's
+uncompressed bytes and 46% of its on-disk bytes (24x vs 5.6x compression).
+
+Level 3 is a usable proxy for the level-22 answer (4% high here) at a sixth
+of the cost, so `--exact --exact-level 3` is the practical first look; the
+default output still labels its address line as an underestimate and points
+at `--exact`. `--estimate` runs the same compression the trim would, so it
+costs the trim's CPU without its I/O; it is worth it before a multi-hour
+continent strip, not for a prefix drop, where the plan's dropped-bytes line
+is already exact.
+
+## zimru, libzim and the format-drift question (2026-09-21)
+
+`szim` reads and writes the ZIM container itself (`cloud/zimfmt.py`) and
+needs neither libzim nor zimru. That was a deliberate choice, and worth
+defending against the obvious worry that the format could move under it.
+
+**Why it is its own implementation.** The one thing the trim needs that no
+library offers is copying a compressed cluster verbatim into a new archive.
+zimru's `Creator` (checked at `061afbc`) takes items and compresses them
+into clusters; there is no `add_raw_cluster`. libzim's Creator is the same.
+So a trim built on either is a full re-encode, tiers 2 and 3 above, the
+5 to 22 minute path for a 3 to 7 GB region instead of 40 seconds. The
+container format is ~300 lines of tables; re-implementing them was cheaper
+than the alternative and is what makes the tool fast.
+
+**What guards against drift.**
+
+- The format has been at 6.x since 2020 and libzim is its reference
+  implementation; zimru itself is a from-scratch implementation of the same
+  spec and rejects majors other than 5 and 6. `zimfmt` now applies the same
+  rule and refuses anything else rather than misreading it.
+- `szim verify` reads every derived file with **two independent readers**:
+  python-libzim (`Archive.check()`, search, byte comparison of every kept
+  entry) and zimru's `zimcheck -A` when a binary is present (`ZIMCHECK_BIN`,
+  `$PATH`, or `../zimru/target/release`). A format detail this tool got
+  subtly wrong would have to fool both.
+- The end-to-end builder check (`tests/e2e_cluster_break.py`) packs through
+  zimru and reads back through `zimfmt`, so the two implementations cross-
+  check each other in both directions.
+
+**What the second reader found immediately.** zimru's current `zimcheck`
+fails every shipped streetzim ZIM with `invalid title indices`: the
+`X/listing/titleOrdered/v1` written by the zimru those builds used lists
+every entry, while current zimru (and libzim's meaning of v1) lists front
+articles only, content-namespace entries whose mime resolves to
+`text/html`. libzim accepts both, which is why nothing noticed. `szim trim`
+now writes the modern form, so derived files pass `zimcheck` even though
+their sources do not (washington-dc light: libzim PASS, zimcheck Pass). The
+shipped files will pick this up at their next viewer re-pack.
+
+**What was done on the zimru side.** The builder's `cluster_break` needs a
+`Creator::flush_cluster()` and a `set_cluster_size_target` that reaches the
+running streamer (today it is read once at `start_writing`, so a mid-stream
+change is silently ignored). Both are 19 lines,
+`patches/zimru-flush-cluster.patch`, applied to a local checkout here and
+compiled; `streetzim-pack --features cluster_break` built against it and
+`tests/e2e_cluster_break.py` passed: 18 tile clusters, no cluster with two
+zooms, the 16 KiB target inside and 64 KiB restored after. This session
+cannot push to zimru, so the patch travels in this repo until it lands.
+
+**If the trim should live in zimru anyway.** The port is bounded: an
+`Archive::cluster_byte_range` already exists (public) for the raw bytes, and
+the writer would need `add_raw_cluster(bytes, blob_count) -> cluster_idx`
+plus items that reference an existing (cluster, blob). Everything else in
+`derive_zim.py` is planning and JSON rewriting. Doing it would make zimru
+the single format implementation streetzim depends on; the cost is that
+`szim` then needs a Rust build rather than `pip install zstandard`. The
+Python tool is the reference for what that port must do, and the verifier
+would check it the same way.
+
+## Two follow-ups (2026-09-21)
+
+### Why the shipped ZIMs fail zimru's `zimcheck`, and whether that check is right
+
+zimru commit `6e6f39c` (2026-09-18, "Harden reader/writer/CLIs ...", a
+review-driven sweep) did two things to the title listing:
+
+- the **checker** now validates every title table present. For
+  `X/listing/titleOrdered/v1` it requires that each index points at a
+  content-namespace (`C/`) entry, appears once, and is in title order; the
+  header table and `v0` must also cover every entry;
+- the **writer** now emits `v1` as front articles only: `C/` entries whose
+  mime resolves through redirects to `text/html`. `zimrecreate` had been
+  gated this way since `ba2ec05` (2026-06-11), noting that indexing every
+  tile and font bloated the title index ~1000x; September moved the rule
+  into the core writer.
+
+The shipped streetzim files were packed by the older writer, whose `v1` was
+a snapshot of every dirent: on washington-dc all 9,010, including `M/`
+metadata, `W/mainPage` and the `X/` Xapian entries. The new checker rejects
+the non-`C/` indices. It does not object to tiles being listed; only the
+writer excludes those.
+
+The check is correct by the format's semantics: `v1` is the front-article
+listing readers binary-search for title suggestions, and offering
+`Counter`, `mainPage` or `fulltext/xapian` as suggestible titles is wrong.
+It went unnoticed because libzim tolerates the extra indices and Kiwix
+draws suggestions from `X/title/xapian`, which streetzim always ships. It
+would surface on a variant that dropped the Xapian index, where libzim
+falls back to `v1`. `szim trim` writes the modern listing, so derived files
+pass `zimcheck` where their sources do not; the sources are corrected at
+their next re-pack through the updated zimru (the listing is in a
+compressed cluster, so the in-place viewer patch cannot fix it).
+
+### A trim rewrites the container, not the payload
+
+Every trim writes a whole new file. The 80-byte header points at tables
+that all change when anything is removed: the URL pointer list (one offset
+per entry into the dirent table, which shrinks and renumbers), the cluster
+pointer list (one offset per cluster; every remaining cluster moves), and
+the dirents themselves, each carrying a cluster number and any redirect
+target index, both renumbered. The title tables and the MD5 trailer follow.
+
+What the derive avoids is not writing bytes but re-compressing them. The
+clusters, 95-99% of the file, are copied unchanged from the source mmap
+into the new file and their new offsets recorded as they land. Argentina
+sparse-light: 2.1 GB copied, 49 MB inflated and re-deflated, ~30 MB of
+tables built; 38-47 s, i.e. one sequential write at disk speed, which is
+why trim time scales with file size rather than with content.
+
+That makes the operation naturally atomic (`DST.derive-tmp` renamed over
+`DST` after the checksum) and makes it the opposite trade from the viewer
+slot: the slot avoids rewriting the file, so it cannot remove anything and
+keeps the UUID; a trim rewrites the container but not the payload, so it
+can remove anything and costs seconds per gigabyte. Upload is unchanged
+either way: archive.org has no partial update, so a new layout is a full
+transfer however it was produced.

@@ -111,6 +111,96 @@ class AugmentTests(unittest.TestCase):
         self.assertEqual(stats["resolved"], 1)
         self.assertEqual(stats["entries_upgraded"], 1)
 
+    def test_non_english_tags_take_the_english_article_of_their_item(self):
+        xref = {
+            "nl": {"wikipedia": "nl:Utrecht (stad)", "wikidata": "Q803"},   # English article
+            "gone": {"wikipedia": "nl:Limmel", "wikidata": "Q2"},          # none: no namesake
+            "noq": {"wikipedia": "nl:Ergens"},                              # no Q-ID: as before
+            "en": {"wikipedia": "en:Rotterdam", "wikidata": "Q34370"},      # English: untouched
+            "bare": {"wikipedia": "Delft", "wikidata": "Q690"},             # no prefix = English
+        }
+        payload = _fake_entities({"Q803": "Utrecht", "Q2": None})
+        with mock.patch.object(wt.urllib.request, "urlopen",
+                               return_value=_resp(payload)) as m:
+            stats = wt.augment_wiki_cross_refs(xref, log=lambda *_: None)
+        asked = m.call_args[0][0].full_url
+        self.assertIn("Q803", asked)
+        self.assertNotIn("Q34370", asked)
+        self.assertNotIn("Q690", asked)
+        self.assertEqual(xref["nl"]["wikipedia"], "en:Utrecht")
+        self.assertEqual(xref["nl"]["wikipedia_src"], "wd")
+        self.assertEqual(xref["nl"]["wikipedia_osm"], "nl:Utrecht (stad)")
+        self.assertEqual(xref["gone"]["wikipedia"], "nl:Limmel")
+        self.assertTrue(xref["gone"]["wikipedia_no_en"])
+        self.assertEqual(xref["noq"], {"wikipedia": "nl:Ergens"})
+        self.assertEqual(xref["en"], {"wikipedia": "en:Rotterdam", "wikidata": "Q34370"})
+        self.assertEqual(xref["bare"], {"wikipedia": "Delft", "wikidata": "Q690"})
+        self.assertEqual((stats["non_english_upgraded"], stats["non_english_no_en"]), (1, 1))
+
+    def test_an_unanswered_item_is_not_marked_as_having_no_article(self):
+        # A 5xx or a network failure says nothing: the tag stays as it was
+        # (looked up as before), not flagged as having no English article.
+        xref = {"nl": {"wikipedia": "nl:Utrecht (stad)", "wikidata": "Q803"}}
+        with mock.patch.object(wt, "resolve_qids", return_value={}):
+            wt.augment_wiki_cross_refs(xref, log=lambda *_: None)
+        self.assertEqual(xref["nl"], {"wikipedia": "nl:Utrecht (stad)", "wikidata": "Q803"})
+
+    def test_is_english_title(self):
+        for t in ("en:Foo", "EN:Foo", "Foo", "Mission: Impossible", "Star-Lord: x",
+                  "Everything: The Game"):
+            self.assertTrue(wt.is_english_title(t), t)
+        # Any case: "NL:Foo" is Dutch. "Foo: a bar" reads as language "foo"
+        # (so it is resolved through its Q-ID), as the bundler and the
+        # geo-index read it. Longer codes are not English either.
+        for t in ("nl:Foo", "NL:Foo", "fy:Foo", "als:Foo", "Foo: a bar",
+                  "simple:Foo", "nds-nl:Foo", "zh-yue:Foo", "be-tarask:Foo"):
+            self.assertFalse(wt.is_english_title(t), t)
+
+    def test_is_english_title_agrees_with_the_bundler_prefix_rule(self):
+        # The title the bundler and the geo-index derive from a tag is the
+        # English one exactly when is_english_title says the tag is English.
+        from cloud.wiki_articles import _strip_lang
+        for t in ("en:Foo", "EN:Foo", "En:Foo", "nl:Foo", "NL:Foo", "Foo: a bar",
+                  "Foo", "Mission: Impossible", "ab:c", "a:b", "abcd:e", "日本:x",
+                  "Q1:x", "12:x"):
+            prefixed = _strip_lang(t) != t
+            if prefixed:
+                self.assertEqual(wt.is_english_title(t), t[:t.find(":")].lower() == "en", t)
+            else:
+                self.assertTrue(wt.is_english_title(t), t)
+
+    def test_bundling_skips_tags_with_no_english_article(self):
+        # A flagged non-English tag is not looked up on English Wikipedia
+        # (its namesake there is a different article).
+        from streetzim import zim_writer as zw
+        xref = {"a": {"wikipedia": "en:Utrecht", "wikidata": "Q803", "wikipedia_src": "wd"},
+                "b": {"wikipedia": "nl:Limmel", "wikidata": "Q2", "wikipedia_no_en": True},
+                "c": {"wikipedia": "nl:Ergens"},
+                # the flagged title again, on objects without a Q-ID, in
+                # any language, case or spelling of its spaces
+                "d": {"wikipedia": "nl:Limmel"},
+                "e": {"wikipedia": "li:Limmel"},
+                "f": {"wikipedia": "NL:Limmel"},
+                "g": {"wikipedia": "nl:Sint Pieter", "wikidata": "Q5",
+                      "wikipedia_no_en": True},
+                "h": {"wikipedia": "nl:Sint_Pieter"},
+                # an English tag names that article itself: kept
+                "i": {"wikipedia": "en:Limmel"}}
+        seen = {}
+
+        def fake_bundle(titles, add, **kw):
+            seen["titles"] = set(titles)
+            seen["redirect_only"] = set(kw.get("redirect_only") or ())
+            return {"bundled": 0, "bytes": 0, "failed": 0, "stored_titles": set()}
+        with mock.patch("cloud.wiki_articles.bundle_wiki_articles", fake_bundle):
+            zw._add_wiki_articles(None, None, wiki_cross_refs=xref, bundle_wiki_articles=True,
+                                  wiki_articles_cache=None, wiki_articles_source=None,
+                                  wiki_images="none", wiki_image_max_kb=0,
+                                  wiki_images_per_article=0)
+        self.assertEqual(seen["titles"], {"en:Utrecht", "nl:Ergens", "en:Limmel"})
+        # Only as a redirect to a bundled article (cloud/wiki_articles).
+        self.assertEqual(seen["redirect_only"], {"nl:Limmel", "nl:Sint Pieter"})
+
     def test_empty_and_none_are_safe(self):
         self.assertEqual(wt.augment_wiki_cross_refs(None)["entries_upgraded"], 0)
         self.assertEqual(wt.augment_wiki_cross_refs({})["entries_upgraded"], 0)

@@ -97,7 +97,7 @@ function _szViewKey(config) {
 
 // Does the URL fragment choose the view or a place? Then it wins.
 function _szHashSetsView(hash) {
-  return /(?:^#|[#&?])(?:map|dest|origin|pin)=|find=results/.test(hash || '');
+  return /(?:^#|[#&?])(?:map|bounds|dest|origin|pin)=|find=results/.test(hash || '');
 }
 
 function _szNum(v, lo, hi) {

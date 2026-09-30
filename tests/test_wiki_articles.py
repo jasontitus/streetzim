@@ -333,3 +333,135 @@ class EscapedMarkupTests(unittest.TestCase):
         page = self._body('<p>If a &lt; b and x &lt;= y then f(a) &lt; f(b).</p>')
         self.assertIn("a &lt; b", page)
         self.assertIn("&lt;= y", page)
+
+
+class FakeRedirectingSource(FakeWikiSource):
+    """A source ZIM with redirect entries: `redirects` maps a title to the
+    article it redirects to (html() follows it, as libzim's get_item does)."""
+    def __init__(self, pages, redirects):
+        super().__init__(pages, {})
+        self.redirects = redirects
+
+    def html(self, title_us):
+        return self.pages.get(self.redirects.get(title_us, title_us))
+
+    def redirect_target(self, title_us):
+        return self.redirects.get(title_us)
+
+
+REDIRECT_PAGES = {"Aalten": "<p>Aalten is a municipality.</p>",
+                  "Aegon": "<p>Aegon is an insurer.</p>",
+                  "Wolfhart_Pannenberg": "<p>A German theologian.</p>",
+                  "De_Camp": "<p>A different De Camp.</p>"}
+REDIRECTS = {"Aalten_(dorp)": "Aalten", "Pannenberg": "Wolfhart_Pannenberg",
+             "AEGON": "Aegon", "Aegon_N.V.": "Aegon", "AC-DC": "AC/DC"}
+REDIRECT_PAGES["AC/DC"] = "<p>AC/DC is a rock band.</p>"
+
+
+class RedirectOnlyTests(unittest.TestCase):
+    """Non-English tags whose item has no English article: bundled only as
+    an English redirect to an article bundled here."""
+
+    def _run(self, source, redirect_only):
+        stored = {}
+        stats = wa.bundle_wiki_articles(
+            ["en:Aalten"], lambda p, t, m, c: stored.__setitem__(p, (t, c)),
+            sleep=0, log=lambda *_: None, source=source, redirect_only=redirect_only)
+        return stored, stats
+
+    def test_only_a_redirect_to_a_bundled_article_is_kept(self):
+        stored, stats = self._run(
+            FakeRedirectingSource(REDIRECT_PAGES, REDIRECTS),
+            ["nl:Aalten (dorp)",   # redirect to Aalten, bundled here: kept
+             "nl:Pannenberg",      # redirect to a theologian: not a place here
+             "nl:De Camp",         # an English article of its own: another subject
+             "nl:Nergens",         # not on English Wikipedia
+             "nl:Aalten"])         # also an English title: bundled once, as usual
+        self.assertEqual(sorted(stored), ["wiki-article/Aalten", "wiki-article/Aalten_(dorp)"])
+        title, page = stored["wiki-article/Aalten_(dorp)"]
+        self.assertEqual(title, "Aalten")
+        self.assertIn(b"municipality", page)
+        self.assertIn(b"en.wikipedia.org/wiki/Aalten", page)
+        self.assertEqual((stats["redirects"], stats["redirects_skipped"]), (1, 3))
+        self.assertEqual(stats["bundled"], 1)
+
+    def test_a_redirect_to_an_article_stored_under_an_alias(self):
+        # "AEGON" was bundled (html() followed it to Aegon); "Aegon N.V."
+        # redirects to Aegon, the same page: it links to AEGON's, as a
+        # ZIM redirect, not a copy.
+        stored, links = {}, {}
+        stats = wa.bundle_wiki_articles(
+            ["en:AEGON"], lambda p, t, m, c: stored.__setitem__(p, t), sleep=0,
+            log=lambda *_: None, source=FakeRedirectingSource(REDIRECT_PAGES, REDIRECTS),
+            redirect_only=["nl:Aegon N.V.", "nl:Pannenberg"],
+            add_redirect=lambda p, t, target: links.__setitem__(p, (t, target)))
+        self.assertEqual(sorted(stored), ["wiki-article/AEGON"])
+        self.assertEqual(links, {"wiki-article/Aegon_N.V.": ("Aegon N.V.", "wiki-article/AEGON")})
+        self.assertEqual(stats["stored_titles"], {"AEGON", "Aegon_N.V."})
+        self.assertEqual(stats["redirects"], 1)
+
+    def test_a_redirect_to_another_depth_is_a_copy(self):
+        # "AC-DC" -> "AC/DC": the PWA serves a redirect entry's content at
+        # the redirect's own URL, one level up from the article, where its
+        # ../../wiki-image/ links would miss. So a copy, with links for its
+        # own depth; a redirect at the same depth stays a redirect.
+        stored, links = {}, {}
+        wa.bundle_wiki_articles(
+            ["en:AC/DC", "en:Aalten"], lambda p, t, m, c: stored.__setitem__(p, (t, c)),
+            sleep=0, log=lambda *_: None,
+            source=FakeRedirectingSource(REDIRECT_PAGES, REDIRECTS),
+            redirect_only=["de:AC-DC", "nl:Aalten (dorp)"],
+            add_redirect=lambda p, t, target: links.__setitem__(p, target))
+        self.assertEqual(links, {"wiki-article/Aalten_(dorp)": "wiki-article/Aalten"})
+        title, page = stored["wiki-article/AC-DC"]
+        self.assertEqual(title, "AC/DC")
+        self.assertIn(b"rock band", page)
+        self.assertIn(b'href="../index.html"', page)    # the back bar, for its depth
+
+    def test_a_source_that_cannot_tell_bundles_none(self):
+        stored, stats = self._run(FakeWikiSource(REDIRECT_PAGES, {}), ["nl:Aalten (dorp)",
+                                                                 "nl:De Camp"])
+        self.assertEqual(sorted(stored), ["wiki-article/Aalten"])
+        self.assertEqual(stats["redirects"], 0)
+
+    def test_offline_zim_reads_redirect_entries(self):
+        try:
+            from libzim.writer import Creator, Hint, Item, StringProvider
+        except ImportError:
+            self.skipTest("libzim not installed")
+
+        class Page(Item):
+            def __init__(self, path, html):
+                super().__init__()
+                self.path, self.html = path, html
+
+            def get_path(self):
+                return self.path
+
+            def get_title(self):
+                return self.path
+
+            def get_mimetype(self):
+                return "text/html"
+
+            def get_contentprovider(self):
+                return StringProvider(self.html)
+
+            def get_hints(self):
+                return {Hint.FRONT_ARTICLE: True}
+
+        with tempfile.TemporaryDirectory() as d:
+            zim = os.path.join(d, "wp.zim")
+            with Creator(zim) as c:
+                c.set_mainpath("Aalten")
+                c.add_item(Page("Aalten", "<p>Aalten is a municipality.</p>"))
+                c.add_item(Page("De_Camp", "<p>Another.</p>"))
+                c.add_redirection("Aalten_(dorp)", "Aalten (dorp)", "Aalten",
+                                  {Hint.FRONT_ARTICLE: False})
+            src = wa._OfflineZim(zim)
+            self.assertEqual(src.redirect_target("Aalten_(dorp)"), "Aalten")
+            self.assertIsNone(src.redirect_target("De_Camp"))
+            self.assertIsNone(src.redirect_target("Nergens"))
+            stored, stats = self._run(src, ["nl:Aalten (dorp)", "nl:De Camp"])
+            self.assertEqual(sorted(stored), ["wiki-article/Aalten",
+                                              "wiki-article/Aalten_(dorp)"])

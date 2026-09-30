@@ -19,7 +19,7 @@ openZIM tools.
 | vector tiles | downloads OpenFreeMap's OpenMapTiles MBTiles (`planet` or `monaco`); cuts by `.poly` (shapely `TileFilter`) | tilemaker on a Geofabrik PBF, **or `--mbtiles` any OpenMapTiles MBTiles, OpenFreeMap included** |
 | ZIM paths for tiles | `tiles/{z}/{x}/{y}.pbf`, identical tiles written once plus ZIM aliases | `tiles/{z}/{x}/{y}.pbf` (the same paths), identical tiles written once plus ZIM aliases ([tile-aliases.md](tile-aliases.md)); empty tiles dropped |
 | ZIM writer | zimscraperlib `Creator` (libzim) | python-libzim `Creator` (libzim) |
-| search | Kiwix title index over GeoNames ADM1–4 `search/<label>` redirect pages; full-text off | in-map search over sharded JSON (`search-data/`) of every named place, POI, street, peak, park and water feature, plus Kiwix full-text over detail pages |
+| search | Kiwix title index over GeoNames ADM1–4 `search/<label>` redirect pages; full-text off | in-map search over sharded JSON (`search-data/`) of every named place, POI, street, peak, park and water feature and every administrative area (OSM boundary relations, admin_level 2-10), plus Kiwix title suggestions and full-text over detail pages |
 | categories | — | Find chips over `category-index/` |
 | routing | — | graph from the PBF, loaded in cells by a Web Worker |
 | viewer | Vite + ES modules, `content/config.json` | single-file viewer built from 29 parts, pinned MapLibre and fonts, `map-config.json` ([viewer-supply-chain.md](viewer-supply-chain.md)) |

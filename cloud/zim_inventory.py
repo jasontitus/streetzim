@@ -1,0 +1,371 @@
+#!/usr/bin/env python3
+"""Where the bytes are in a streetzim ZIM, per component and per zoom.
+
+One pass over dirents plus one decompression of every cluster. Reports, per
+component (tiles/z, satellite/z, terrain/z, routing-data, search-data, ...):
+
+  entries, uncompressed bytes, attributed compressed bytes, clusters touched
+
+and, for the derive tool's benefit, how many clusters mix components (each
+one is a cluster that a prefix-drop must re-encode instead of copy).
+
+Compressed bytes are attributed to a component as the cluster's on-disk size
+times the component's share of the cluster's uncompressed payload.
+
+Usage:
+    python3 cloud/zim_inventory.py FILE.zim [--json] [--by-zoom] [--clusters]
+    python3 cloud/zim_inventory.py https://archive.org/download/streetzim-brazil/osm-brazil-2026-09-14.zim
+
+A URL is inventoried from its tables alone (header, dirents, cluster pointer
+list, raw-cluster offset tables) via HTTP range requests: a few hundred MB
+for a 20 GB continent, no download. Compressed clusters that mix components
+(a handful per file) are then split by blob count rather than bytes.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from collections import Counter, defaultdict
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from cloud.zimfmt import ZimReader  # noqa: E402
+
+ZOOMED = ("tiles", "satellite", "terrain")
+
+
+def component_of(path: str, namespace: str, by_zoom: bool, mime: str | None = None) -> str:
+    if mime is not None:            # --by-mime: group by content type instead of path
+        if namespace == "X":
+            return "X/" + mime
+        if namespace == "M":
+            return "metadata"
+        return mime
+    if namespace == "X":
+        return "xapian" if "xapian" in path else "zim-listing"
+    if namespace == "M":
+        return "metadata"
+    if namespace != "C":
+        return f"ns-{namespace}"
+    seg = path.split("/", 2)
+    if seg[0] in ZOOMED:
+        return f"{seg[0]}/{seg[1]}" if by_zoom and len(seg) > 1 else seg[0]
+    if seg[0] in ("wiki-article", "wiki-image"):
+        return "wiki"
+    if seg[0] == "search-data" and len(seg) > 1 and path.endswith(".json"):
+        name = seg[1][:-len(".json")] if len(seg) == 2 else path[len("search-data/"):-len(".json")]
+        if "~" in name and name.rsplit("~", 1)[-1] == "a":
+            return "search-data/addresses"       # tier-a leaves hold only address records
+    if len(seg) > 1:
+        return seg[0]
+    return "app"
+
+
+ADDR_TYPES = frozenset({"addr"})
+
+
+def _split_legacy_search_leaf(data: bytes) -> tuple[int, int] | None:
+    """For a search leaf that is not tier-named, the uncompressed byte split
+    (address records, other records); None if it is not a record list."""
+    try:
+        recs = json.loads(data)
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(recs, list):
+        return None
+    addr = other = 0
+    for rec in recs:
+        n = len(json.dumps(rec, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) + 1
+        if isinstance(rec, dict) and (rec.get("t") or rec.get("type")) in ADDR_TYPES:
+            addr += n
+        else:
+            other += n
+    return addr, other
+
+
+def _exact_cluster_job(args):
+    """Marginal compressed bytes per component of one cluster: compress the
+    payload with everything, then without each component in turn; the
+    difference is what that component really costs on disk, which for a
+    component that compresses far better than its neighbours (addresses
+    next to POI names) is much less than its uncompressed share. Marginals
+    are then scaled to sum to the cluster's real on-disk size."""
+    import zstandard
+    from cloud.zimfmt import zstd_window_log
+    blobs, comps, level, on_disk = args     # blobs: list[bytes]; comps: list[str] parallel
+
+    def size(parts):
+        body = b"".join(parts)
+        if not body:
+            return 0
+        params = zstandard.ZstdCompressionParameters.from_level(
+            level, window_log=zstd_window_log(len(body)))
+        return len(zstandard.ZstdCompressor(compression_params=params).compress(body))
+    full = size(blobs)
+    marg = {}
+    for comp in set(comps):
+        without = [b for b, c in zip(blobs, comps) if c != comp]
+        marg[comp] = max(1, full - size(without))
+    total = sum(marg.values()) or 1
+    return {c: on_disk * v / total for c, v in marg.items()}
+
+
+def inventory(path: str, *, by_zoom: bool = False, tables_only: bool | None = None,
+              verbose: bool = False, by_mime: bool = False, exact: bool = False,
+              exact_level: int = 22):
+    """``tables_only`` skips inflating clusters: compressed clusters are then
+    attributed to components by blob COUNT share instead of byte share (raw
+    clusters stay exact via their offset table). Default for URLs.
+
+    ``exact`` recompresses every mixed compressed cluster with and without
+    each component to attribute on-disk bytes by marginal compressed size,
+    and splits address records out of legacy (untiered) search leaves. This
+    is what ``--strip-addresses`` or a prefix drop will actually save."""
+    r = ZimReader(path, verbose=verbose)
+    if tables_only is None:
+        tables_only = r.remote
+    if exact and tables_only:
+        raise SystemExit("--exact needs the payload; not available for URLs / --tables-only")
+    # per cluster: component -> uncompressed bytes, and blob->component map
+    cluster_comp_bytes: dict[int, Counter] = defaultdict(Counter)
+    comp_entries = Counter()
+    redirects = 0
+    # First pass: dirents (cheap), record which blobs belong to which component
+    blob_comp: dict[int, dict[int, str]] = defaultdict(dict)
+    for _, d in r.dirents():
+        if d.is_redirect:
+            redirects += 1
+            continue
+        comp = component_of(d.path, d.namespace, by_zoom, r.mime_of(d) if by_mime else None)
+        comp_entries[comp] += 1
+        blob_comp[d.cluster][d.blob] = comp
+    # Second pass: clusters (one decompression each)
+    comp_uncomp = Counter()
+    comp_comp = Counter()      # attributed on-disk bytes (float)
+    comp_clusters: dict[str, set] = defaultdict(set)
+    mixed: list[tuple[int, dict]] = []
+    unreferenced = 0
+    raw_bytes = 0
+    approx_clusters = 0
+    exact_jobs: list[tuple[int, tuple]] = []      # (cluster, job args)
+    exact_uncomp: dict[int, Counter] = {}
+    if tables_only:
+        r.preload_cluster_infos()
+        r.preload_frame_headers()
+        r.preload_raw_tables([c for c in range(r.header.cluster_count) if not r.cluster_info(c).compressed])
+    for c in range(r.header.cluster_count):
+        ci = r.cluster_info(c)
+        if exact and ci.compressed:
+            offs, body = r.cluster_offsets(c)
+            blobs, comps_l = [], []
+            for b in range(len(offs) - 1):
+                data = body[offs[b]:offs[b + 1]]
+                comp = blob_comp[c].get(b, "unreferenced")
+                if comp == "search-data" and not by_mime:
+                    split = _split_legacy_search_leaf(data)
+                    if split and split[0]:
+                        # treat the leaf's address records as their own blob
+                        recs = json.loads(data)
+                        addr = [x for x in recs if isinstance(x, dict) and (x.get("t") or x.get("type")) in ADDR_TYPES]
+                        rest = [x for x in recs if not (isinstance(x, dict) and (x.get("t") or x.get("type")) in ADDR_TYPES)]
+                        blobs.append(json.dumps(addr, separators=(",", ":"), ensure_ascii=False).encode()); comps_l.append("search-data/addresses")
+                        blobs.append(json.dumps(rest, separators=(",", ":"), ensure_ascii=False).encode()); comps_l.append("search-data")
+                        continue
+                blobs.append(bytes(data)); comps_l.append(comp)
+            per_u = Counter()
+            for b_, c_ in zip(blobs, comps_l):
+                per_u[c_] += len(b_)
+            exact_uncomp[c] = per_u
+            if len(per_u) > 1:
+                exact_jobs.append((c, (blobs, comps_l, exact_level, ci.size)))
+            else:
+                exact_jobs.append((c, None))
+            continue
+        if tables_only:
+            sizes = r.raw_cluster_blob_sizes(c)
+            if sizes is None:
+                # compressed: no payload read. The zstd frame header carries the
+                # uncompressed size, so the cluster total is exact; only its
+                # split between components (blob count share) is approximate.
+                comps_here = blob_comp.get(c, {})
+                nb = max(len(comps_here), 1)
+                unc = r.cluster_uncompressed_size(c) or ci.size
+                sizes = [unc / nb] * nb
+                if len(set(comps_here.values())) > 1:
+                    approx_clusters += 1
+        else:
+            sizes = r.blob_sizes(c)
+        total = sum(sizes) or 1
+        if not ci.compressed:
+            raw_bytes += ci.size
+        per = Counter()
+        for b, s in enumerate(sizes):
+            comp = blob_comp[c].get(b)
+            if comp is None:
+                unreferenced += s
+                comp = "unreferenced"
+            per[comp] += s
+        for comp, s in per.items():
+            comp_uncomp[comp] += s
+            comp_comp[comp] += ci.size * (s / total)
+            comp_clusters[comp].add(c)
+        cluster_comp_bytes[c] = per
+        real = {k: v for k, v in per.items() if k != "unreferenced"}
+        if len(real) > 1:
+            mixed.append((c, real))
+    if exact:
+        from multiprocessing import Pool
+        jobs = [(c, a) for c, a in exact_jobs if a is not None]
+        results: dict[int, dict] = {}
+        if jobs:
+            with Pool(max(1, os.cpu_count() or 1)) as pool:
+                for (c, _), res in zip(jobs, pool.imap(_exact_cluster_job, [a for _, a in jobs], chunksize=1)):
+                    results[c] = res
+        for c, _a in exact_jobs:
+            ci = r.cluster_info(c)
+            per_u = exact_uncomp[c]
+            shares = results.get(c) or {next(iter(per_u)): ci.size}
+            for comp, u in per_u.items():
+                comp_uncomp[comp] += u
+                comp_comp[comp] += shares.get(comp, 0.0)
+                comp_clusters[comp].add(c)
+            cluster_comp_bytes[c] = per_u
+            real = {k: v for k, v in per_u.items() if k != "unreferenced"}
+            if len(real) > 1:
+                mixed.append((c, real))
+        comp_entries["search-data/addresses"] = comp_entries.get("search-data/addresses", 0)
+    rows = []
+    for comp in sorted(comp_uncomp, key=lambda k: -comp_comp[k]):
+        rows.append({
+            "component": comp,
+            "entries": comp_entries.get(comp, 0),
+            "uncompressed": comp_uncomp[comp],
+            "on_disk": int(round(comp_comp[comp])),
+            "clusters": len(comp_clusters[comp]),
+        })
+    savings = _trim_savings(rows, by_zoom, exact)
+    return {
+        "file": path,
+        "size": r.size,
+        "savings": savings,
+        "entries": r.header.entry_count,
+        "redirects": redirects,
+        "clusters": r.header.cluster_count,
+        "raw_cluster_bytes": raw_bytes,
+        "mixed_clusters": len(mixed),
+        "mixed": [(c, dict(per)) for c, per in mixed],
+        "rows": rows,
+        "tables_only": tables_only,
+        "exact": exact,
+        "approx_mixed_clusters": approx_clusters,
+        "fetched_bytes": getattr(r.src, "bytes_fetched", None),
+    }
+
+
+def _trim_savings(rows: list[dict], by_zoom: bool, exact: bool = False) -> list[tuple[str, int]]:
+    """What each `szim trim` option would remove, from the inventory rows.
+    On-disk bytes; exact for whole-component drops, and for per-zoom drops
+    when the inventory ran --by-zoom."""
+    disk = {row["component"]: row["on_disk"] for row in rows}
+    out: list[tuple[str, int]] = []
+
+    def zoom_rows(comp):
+        return sorted(((int(k.split("/")[1]), v) for k, v in disk.items()
+                       if k.startswith(comp + "/") and k.split("/")[1].isdigit()))
+
+    for comp, flag in (("satellite", "--no-satellite"), ("terrain", "--no-terrain")):
+        zr = zoom_rows(comp)
+        total = sum(v for _, v in zr) if zr else disk.get(comp, 0)
+        if total:
+            out.append((flag, total))
+        if zr:
+            acc = 0
+            for z, v in list(reversed(zr))[:3]:      # the three deepest zooms carry the bytes
+                acc += v
+                if z - 1 >= 0 and acc != total:
+                    out.append((f"--{comp}-max-zoom {z - 1}", acc))
+    zr = zoom_rows("tiles")
+    if zr:
+        acc = 0
+        for z, v in list(reversed(zr))[:3]:
+            acc += v
+            if z - 1 >= 10:
+                out.append((f"--max-tile-zoom {z - 1}", acc))
+    if disk.get("routing-data"):
+        out.append(("--no-routing", disk["routing-data"]))
+    if disk.get("wiki"):
+        out.append(("--no-wiki", disk["wiki"]))
+    if disk.get("search-data/addresses"):
+        out.append(("--strip-addresses" + ("" if exact else " (tier-a leaves only; legacy mixed leaves add more; see --exact)"),
+                    disk["search-data/addresses"]))
+    return out
+
+
+def _fmt(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if abs(n) < 1000 or unit == "GB":
+            return f"{n:7.1f} {unit}" if unit != "B" else f"{int(n):7d} B "
+        n /= 1000
+    return str(n)
+
+
+def main() -> int:
+    import signal
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)   # `| head` must not traceback
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("zim")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--by-zoom", action="store_true", help="split tiles/satellite/terrain per zoom")
+    ap.add_argument("--by-mime", action="store_true", help="group by MIME type instead of path component")
+    ap.add_argument("--clusters", action="store_true", help="list every mixed cluster")
+    ap.add_argument("--tables-only", action="store_true",
+                    help="do not inflate clusters (default for URLs); byte shares of compressed "
+                         "mixed clusters become approximate")
+    ap.add_argument("--exact", action="store_true",
+                    help="attribute on-disk bytes by marginal compressed size (recompresses mixed "
+                         "clusters; splits address records out of legacy search leaves). Slow but "
+                         "it is what a trim will really save")
+    ap.add_argument("--exact-level", type=int, default=22, help="zstd level for --exact (default 22)")
+    ap.add_argument("-v", "--verbose", action="store_true")
+    a = ap.parse_args()
+    inv = inventory(a.zim, by_zoom=a.by_zoom, tables_only=a.tables_only or None, verbose=a.verbose,
+                    by_mime=a.by_mime, exact=a.exact, exact_level=a.exact_level)
+    if a.json:
+        print(json.dumps(inv, indent=1, default=list))
+        return 0
+    if inv["fetched_bytes"] is not None:
+        print(f"(remote: fetched {_fmt(inv['fetched_bytes']).strip()} of tables)")
+    if inv["tables_only"]:
+        print(f"(tables only: cluster sizes from headers; {inv['approx_mixed_clusters']} compressed mixed "
+              f"clusters split by blob count)")
+    elif inv["exact"]:
+        print(f"(exact: on-disk bytes of {inv['mixed_clusters']} mixed clusters attributed by marginal "
+              f"compressed size; address records split out of legacy search leaves)")
+    else:
+        print(f"(on-disk bytes of {inv['mixed_clusters']} mixed clusters split by uncompressed share; "
+              f"--exact measures the compressed share)")
+    print(f"{inv['file']}: {_fmt(inv['size'])}, {inv['entries']} entries "
+          f"({inv['redirects']} redirects), {inv['clusters']} clusters, "
+          f"{inv['mixed_clusters']} mixed, {_fmt(inv['raw_cluster_bytes'])} in raw clusters")
+    w = max(22, max((len(r_["component"]) for r_ in inv["rows"]), default=0) + 1)
+    print(f"{'component':<{w}}{'entries':>9}{'uncompressed':>14}{'on disk':>12}{'ratio':>7}{'share':>7}{'clusters':>9}")
+    for row in inv["rows"]:
+        ratio = row["uncompressed"] / row["on_disk"] if row["on_disk"] else 0
+        print(f"{row['component']:<{w}}{row['entries']:>9}{_fmt(row['uncompressed']):>14}"
+              f"{_fmt(row['on_disk']):>12}{ratio:>6.1f}x{100*row['on_disk']/inv['size']:>6.1f}%{row['clusters']:>9}")
+    if inv["savings"]:
+        print("\ntrim options and what each removes (on disk):")
+        for flag, b in inv["savings"]:
+            print(f"  {flag:<32}{_fmt(b):>12}{100*b/inv['size']:>6.1f}%")
+        if not a.by_zoom:
+            print("  (run with --by-zoom for per-zoom options)")
+    if a.clusters:
+        for c, per in inv["mixed"]:
+            print(f"  mixed c{c}: " + ", ".join(f"{k}={_fmt(v).strip()}" for k, v in sorted(per.items(), key=lambda kv: -kv[1])))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

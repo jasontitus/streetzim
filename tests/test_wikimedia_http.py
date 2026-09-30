@@ -349,7 +349,8 @@ def test_article_429_that_exhausts_retries_is_not_cached_and_is_warned(
     assert stats["stored_titles"] == {"Lincoln_Memorial"}      # hasWikiArticles stays true
     # Nothing on disk says National Mall is missing.
     lincoln = wa._cache_paths(str(tmp_path), "Lincoln_Memorial")[0]
-    assert os.listdir(tmp_path) == [os.path.basename(lincoln)]
+    assert sorted(os.listdir(tmp_path)) == sorted([os.path.basename(lincoln),
+                                                   os.path.basename(lincoln)[:-5] + ".redirect"])
     warn = [m for m in logs if "WARNING" in m]
     assert warn and "1 of 2 articles were NOT fetched" in warn[0]
     assert "1 rate-limited" in warn[0]
@@ -533,6 +534,150 @@ def test_default_user_agent_is_sent(monkeypatch, sleeps, tmp_path):
     assert wm.CONTACT_URL in api.ua
 
 
+class FakeQueryAPI:
+    """action=query&redirects=1 stand-in over a tiny English Wikipedia:
+    `pages` exist, `redirects` point at pages; a title is normalized by
+    capitalizing its first letter, as MediaWiki does."""
+    def __init__(self, pages, redirects):
+        self.pages, self.redirects = set(pages), dict(redirects)
+        self.batches: list[list[str]] = []
+
+    def __call__(self, req, timeout=None):
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(req.full_url).query)
+        assert q["action"] == ["query"] and q["redirects"] == ["1"] and "prop" not in q
+        titles = q["titles"][0].split("|")
+        self.batches.append(titles)
+        norm, redir, pages = [], [], {}
+        for t in titles:
+            n = t[:1].upper() + t[1:]
+            if n != t:
+                norm.append({"from": t, "to": n})
+            if n in self.redirects:
+                redir.append({"from": n, "to": self.redirects[n]})
+                n = self.redirects[n]
+            pages[n] = {"title": n} if n in self.pages else {"title": n, "missing": True}
+        return _body({"batchcomplete": True, "query": {
+            "normalized": norm, "redirects": redir, "pages": list(pages.values())}})
+
+
+def test_redirect_only_titles_online(monkeypatch, sleeps, tmp_path):
+    # Batched: 50 titles a request, no text. The target is matched by the
+    # page each bundled title opens, so "Aegon N.V." -> "Aegon" finds the
+    # article stored as "AEGON" (an alias the article fetch followed).
+    d = str(tmp_path)
+    for t in ("Aalten", "AEGON"):           # cached by an earlier build
+        open(wa._cache_paths(d, t)[0], "w").write(ARTICLE)
+    api = FakeQueryAPI(pages={"Aalten", "Aegon", "Wolfhart Pannenberg", "De Camp"},
+                       redirects={"Aalten (dorp)": "Aalten", "AEGON": "Aegon",
+                                  "Aegon N.V.": "Aegon", "Pannenberg": "Wolfhart Pannenberg"})
+    monkeypatch.setattr(wm.urllib.request, "urlopen", api)
+    only = ["nl:Aalten (dorp)", "nl:aegon N.V.", "nl:Pannenberg", "nl:De Camp",
+            "nl:Nergens"] + [f"nl:Dorp {i}" for i in range(57)]
+    stored, links = {}, {}
+
+    def run():
+        stored.clear()
+        links.clear()
+        return wa.bundle_wiki_articles(
+            ["en:Aalten", "en:AEGON"], lambda p, t, m, c: stored.__setitem__(p, t),
+            cache_dir=d, sleep=0, log=lambda *_: None, redirect_only=only,
+            add_redirect=lambda p, t, target: links.__setitem__(p, (t, target)))
+    stats = run()
+    assert [len(b) for b in api.batches] == [50, 12, 2]    # then the stored titles
+    assert sorted(api.batches[2]) == ["AEGON", "Aalten"]
+    assert links == {"wiki-article/Aalten_(dorp)": ("Aalten (dorp)", "wiki-article/Aalten"),
+                     "wiki-article/aegon_N.V.": ("aegon N.V.", "wiki-article/AEGON")}
+    assert sorted(stored) == ["wiki-article/AEGON", "wiki-article/Aalten"]   # no copies
+    assert {"Aalten_(dorp)", "aegon_N.V."} <= stats["stored_titles"]         # geo-index
+    assert (stats["redirects"], stats["redirects_skipped"], stats["unfetched"]) == (2, 60, 0)
+    assert wa._redirect_cached("Pannenberg", d) == ("Wolfhart_Pannenberg", "Wolfhart_Pannenberg")
+    assert wa._redirect_cached("De_Camp", d) == (None, "De_Camp")       # an article
+    assert wa._redirect_cached("Nergens", d) == (None, None)            # no such page
+    assert wa._redirect_cached("aegon_N.V.", d) == ("Aegon", "Aegon")   # normalized
+    # The next build asks nothing.
+    api.batches.clear()
+    run()
+    assert api.batches == [] and len(links) == 2
+
+
+def test_interwiki_and_invalid_titles_are_answers(monkeypatch, sleeps, tmp_path):
+    # A flagged tag with a code _strip_lang leaves on ("zh-yue:", "simple:")
+    # comes back under `interwiki`, and one MediaWiki cannot take as a
+    # title as an `invalid` page. Both mean "no such page here": cached,
+    # not left unfetched (a WARNING, or a failed build with
+    # STREETZIM_REQUIRE_WIKI=1, every build).
+    d = str(tmp_path)
+    answer = {"batchcomplete": True, "query": {
+        "normalized": [{"from": "simple:foo", "to": "simple:Foo"}],
+        "interwiki": [{"title": "zh-yue:Foo", "iw": "zh-yue"},
+                      {"title": "simple:Foo", "iw": "simple"}],
+        "pages": [{"title": "Foo[bar]", "invalidreason": "invalid characters",
+                   "invalid": True}]}}
+    api = use(monkeypatch, FakeAPI(parse_ok(ARTICLE), answer))
+    only = ["zh-yue:Foo", "simple:foo", "nl:Foo[bar]", "de:", "nl: _"]   # the last two: no title
+    stats = wa.bundle_wiki_articles(["en:A"], lambda *a: None, cache_dir=d, sleep=0,
+                                    log=lambda *_: None, redirect_only=only)
+    assert stats["unfetched"] == 0 and stats["redirects_skipped"] == 3
+    asked = urllib.parse.parse_qs(urllib.parse.urlsplit(api.urls[1]).query)["titles"]
+    assert asked == ["zh-yue:Foo|simple:foo|Foo[bar]"]
+    for t in ("zh-yue:Foo", "simple:foo", "Foo[bar]"):
+        assert wa._redirect_cached(t, d) == (None, None), t
+    # The next build asks nothing.
+    api = use(monkeypatch, FakeAPI())
+    stats = wa.bundle_wiki_articles(["en:A"], lambda *a: None, cache_dir=d, sleep=0,
+                                    log=lambda *_: None, redirect_only=only)
+    assert api.urls == [] and stats["unfetched"] == 0
+
+
+def test_long_titles_split_a_query_batch(monkeypatch, sleeps, tmp_path):
+    # 50 Cyrillic titles of 44 letters encode to 12.5 KB of URL: a 414 for
+    # the whole batch. Batches stop at QUERY_MAX_CHARS of encoded titles.
+    long_titles = [f"Р{i:02d}" + "ж" * 41 for i in range(50)]
+    batches = wa._query_batches(long_titles)
+    assert len(batches) > 1 and [t for b in batches for t in b] == long_titles
+    for b in batches:
+        assert len(urllib.parse.quote("|".join(b), safe="")) <= wa.QUERY_MAX_CHARS
+    assert [len(b) for b in wa._query_batches([f"T{i}" for i in range(120)])] == [50, 50, 20]
+    assert [len(b) for b in wa._query_batches(["ж" * 2000, "a", "b"])] == [1, 2]
+    api = FakeQueryAPI(pages=set(), redirects={})
+    monkeypatch.setattr(wm.urllib.request, "urlopen", _record_urls(api))
+    wa.bundle_wiki_articles([], lambda *a: None, cache_dir=str(tmp_path), sleep=0,
+                            log=lambda *_: None, redirect_only=["ru:" + t for t in long_titles])
+    assert len(api.batches) == len(batches)
+    assert max(len(u) for u in _record_urls.urls) < 8000
+
+
+def _record_urls(inner):
+    _record_urls.urls = []
+
+    def call(req, timeout=None):
+        _record_urls.urls.append(req.full_url)
+        return inner(req, timeout)
+    return call
+
+
+def test_article_fetch_records_the_page_it_opened(monkeypatch, sleeps, tmp_path):
+    # An article fetched now needs no lookup later: action=parse followed
+    # the alias, and the page it opened is cached with it.
+    d = str(tmp_path)
+    use(monkeypatch, FakeAPI({"parse": {"title": "Aegon", "text": ARTICLE,
+                                        "redirects": [{"from": "AEGON", "to": "Aegon"}]}},
+                             {"parse": {"title": "Aalten", "text": ARTICLE}}))
+    wa.bundle_wiki_articles(["en:AEGON", "en:Aalten"], lambda *a: None, cache_dir=d,
+                            sleep=0, log=lambda *_: None)
+    assert wa._redirect_cached("AEGON", d) == ("Aegon", "Aegon")
+    assert wa._redirect_cached("Aalten", d) == (None, "Aalten")
+
+
+def test_redirect_only_title_unanswered_is_not_cached(monkeypatch, sleeps, tmp_path):
+    d = str(tmp_path)
+    use(monkeypatch, FakeAPI(parse_ok(ARTICLE), default=http_error(503)))
+    stats = wa.bundle_wiki_articles(["en:A"], lambda *a: None, cache_dir=d, sleep=0,
+                                    log=lambda *_: None, redirect_only=["nl:B"])
+    assert stats["unfetched"] == 1 and stats["requested"] == 2
+    assert wa._redirect_cached("B", d) is None
+
+
 # ---- Wikidata titles --------------------------------------------------------
 
 def entities(mapping: dict) -> dict:
@@ -601,12 +746,83 @@ def test_wikidata_refused_batch_is_halved_around_the_bad_id(monkeypatch, sleeps,
     out = wt.resolve_qids(qids, cache_path=cache, sleep=0)
     assert set(out) == set(qids) - {"Q7"}
     saved = json.load(open(cache))
-    assert saved["Q7"] == "" and len(saved) == 60
+    assert saved["Q7"] == wt._REFUSED and len(saved) == 60
     assert len(calls) <= 2 + 2 * 6                  # halving costs O(log n) requests
     assert "refused 1 ids on their own (e.g. Q7)" in capsys.readouterr().err
     calls.clear()
-    wt.resolve_qids(qids, cache_path=cache, sleep=0)
+    misses: set = set()
+    wt.resolve_qids(qids, cache_path=cache, sleep=0, misses=misses)
     assert calls == []                               # the next build asks nothing
+    assert misses == set()                           # and Q7 is still not a "no article"
+
+
+def test_wikidata_bad_id_at_the_head_of_a_batch_is_isolated(monkeypatch, sleeps, tmp_path,
+                                                            capsys):
+    # Refused whole, the first batch is halved 50, 25, 12, 6, 3, 1 with the
+    # bad id always in the first half: six refusals in a row, which used to
+    # stop the run before the id was isolated (nothing resolved at all).
+    cache = str(tmp_path / "t.json")
+    qids = [f"Q{i}" for i in range(1, 101)]          # "Q1" sorts first
+    calls: list = []
+    monkeypatch.setattr(wm.urllib.request, "urlopen", wikidata_api({"Q1"}, calls))
+    misses: set = set()
+    out = wt.resolve_qids(qids, cache_path=cache, sleep=0, misses=misses)
+    assert calls[0][0] == "Q1" and len(calls[0]) == 50
+    assert set(out) == set(qids) - {"Q1"}
+    assert misses == set()
+    assert json.load(open(cache))["Q1"] == wt._REFUSED
+    assert "WARNING" not in capsys.readouterr().err
+
+
+def test_wikidata_written_off_id_is_never_a_miss(monkeypatch, sleeps, tmp_path):
+    # An id refused on its own may have been refused for something else
+    # (a refusal of a tiny batch); it must not become "no English article",
+    # which drops a non-English tag from bundling for good.
+    cache = str(tmp_path / "t.json")
+    monkeypatch.setattr(wm.urllib.request, "urlopen", wikidata_api({"Q5"}))
+    misses: set = set()
+    assert wt.resolve_qids(["Q4", "Q5", "Q6"], cache_path=cache, sleep=0,
+                           misses=misses) == {"Q4": "TQ4", "Q6": "TQ6"}
+    assert misses == set()
+    # Read back from the cache on a later build: still not a miss, not a
+    # title, and not asked again.
+    use(monkeypatch, FakeAPI())
+    misses = set()
+    assert wt.resolve_qids(["Q5"], cache_path=cache, sleep=0, misses=misses) == {}
+    assert misses == set()
+    # An older cache wrote "" for it: that stays a miss (it cannot be told
+    # from a real one), as before.
+    json.dump({"Q5": ""}, open(cache, "w"))
+    wt.resolve_qids(["Q5"], cache_path=cache, sleep=0, misses=misses)
+    assert misses == {"Q5"}
+
+
+def test_wikidata_unanswered_ids_are_not_misses(monkeypatch, sleeps, tmp_path, capsys):
+    # The first batch is answered (Q10: no article, Q11: no such item);
+    # the second meets 503 after 503 and the run stops. Only the answered
+    # no-article ids are misses: "Wikidata could not answer" never is.
+    cache = str(tmp_path / "t.json")
+    qids = sorted(f"Q{i}" for i in range(10, 80))    # two batches
+    first = entities({q: f"T{q}" for q in qids[:50]} | {"Q10": "", "Q11": None})
+    use(monkeypatch, FakeAPI(first, default=http_error(503)))
+    misses: set = set()
+    out = wt.resolve_qids(qids, cache_path=cache, sleep=0, misses=misses)
+    assert misses == {"Q10", "Q11"}
+    assert len(out) == 48 and not set(out) & set(qids[50:])
+    assert "HTTP 503" in capsys.readouterr().err
+    # The same ids on the next build, from the cache, while it stays down.
+    misses = set()
+    wt.resolve_qids(qids, cache_path=cache, sleep=0, misses=misses)
+    assert misses == {"Q10", "Q11"}
+
+
+def test_wikidata_offline_map_reports_no_misses(monkeypatch):
+    # An offline map's gaps say nothing either way (a partial dump).
+    api = use(monkeypatch, FakeAPI())
+    misses: set = set()
+    assert wt.resolve_qids(["Q1", "Q2"], offline_map={"Q1": "One", "Q2": ""},
+                           misses=misses) == {"Q1": "One"}
+    assert misses == set() and api.urls == []
 
 
 def test_wikidata_refusing_everything_stops_and_caches_nothing(monkeypatch, sleeps,
@@ -615,8 +831,11 @@ def test_wikidata_refusing_everything_stops_and_caches_nothing(monkeypatch, slee
     api = use(monkeypatch, FakeAPI(default={"error": {"code": "mustbeposted"}}))
     out = wt.resolve_qids([f"Q{i}" for i in range(1, 200)], cache_path=cache, sleep=0)
     assert out == {} and json.load(open(cache)) == {}
-    assert len(api.urls) == wt._MAX_REFUSALS_IN_A_ROW
-    assert "left 199 of 199 Q-IDs unresolved" in capsys.readouterr().err
+    # 50, 25, 12, 6, 3, then three ids refused on their own (1, 2, 1, 1).
+    assert len(api.urls) == 9
+    err = capsys.readouterr().err
+    assert "left 199 of 199 Q-IDs unresolved" in err
+    assert f"{wt._MAX_WRITTEN_OFF_IN_A_ROW} ids in a row refused" in err
 
 
 @pytest.mark.parametrize("code", [400, 401, 403, 404])
@@ -646,8 +865,39 @@ def test_wikidata_maxlag_is_waited_out_then_answered(monkeypatch, sleeps, tmp_pa
     assert json.load(open(cache)) == {"Q1": "One"}
 
 
+@contextmanager
+def _lagged(retry_after: str = "5"):
+    """A maxlag answer as Wikidata sends it: HTTP 200, Retry-After set."""
+    resp = io.BytesIO(json.dumps({"error": {"code": "maxlag", "lag": 7}}).encode())
+    resp.headers = email.message.Message()   # type: ignore[attr-defined]
+    resp.headers["Retry-After"] = retry_after  # type: ignore[attr-defined]
+    yield resp
+
+
+def test_wikidata_waits_out_a_replication_lag_episode(monkeypatch, sleeps, tmp_path, capsys):
+    # Two minutes of maxlag (Retry-After 5, the gap widening to 30 s): the
+    # build used to give up after five tries and resolve nothing
+    # ("stopped at Q-ID 0 (TransientError: API error maxlag)").
+    cache = str(tmp_path / "t.json")
+    script = [_lagged] * 8 + [lambda: _body(entities({"Q1": "One", "Q2": ""}))]
+    urls: list = []
+
+    def answer(req, timeout=None):
+        urls.append(req.full_url)
+        return script.pop(0)()
+    monkeypatch.setattr(wm.urllib.request, "urlopen", answer)
+    misses: set = set()
+    assert wt.resolve_qids(["Q1", "Q2"], cache_path=cache, sleep=0, misses=misses) == {
+        "Q1": "One"}
+    assert len(urls) == 9 and misses == {"Q2"}
+    assert 120 < sum(sleeps) < wm.DEFAULT_WAIT_BUDGET
+    # Never sooner than Retry-After: each retry waits at least 5 s.
+    assert sum(1 for s in sleeps if s >= 5) >= 8
+    assert "WARNING" not in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("code", ["maxlag", "ratelimited"])
-def test_wikidata_throttle_that_outlasts_retries_stops_and_caches_nothing(
+def test_wikidata_throttle_that_outlasts_the_wait_budget_stops_and_caches_nothing(
         monkeypatch, sleeps, tmp_path, capsys, code):
     cache = str(tmp_path / "t.json")
     qids = sorted(f"Q{i}" for i in range(1, 121))
@@ -655,8 +905,56 @@ def test_wikidata_throttle_that_outlasts_retries_stops_and_caches_nothing(
                                    default={"error": {"code": code}}))
     out = wt.resolve_qids(qids, cache_path=cache, sleep=0)
     assert len(out) == 50 and set(json.load(open(cache))) == set(qids[:50])
-    assert len(api.urls) == 1 + 5                    # one batch's retries, then stop
-    assert f"API error {code}" in capsys.readouterr().err
+    # Retried past get_json's usual five tries, until the wait budget ran
+    # out; then the run stops (one batch, never the next).
+    assert 1 + 5 < len(api.urls) < 1 + 60
+    assert qids[50] in urllib.parse.unquote(api.urls[-1])
+    assert sum(sleeps) <= wm.DEFAULT_WAIT_BUDGET + 60
+    err = capsys.readouterr().err
+    assert f"API error {code}" in err and "wait budget of 900s spent" in err
+
+
+def test_a_5xx_after_a_long_lag_still_gets_its_retries(monkeypatch, sleeps, tmp_path):
+    # Six maxlag answers, then a 503, then the answer: the 503 has five
+    # tries of its own (they used to share one count with the lag, so the
+    # 503 ended the call and the whole run: "stopped at Q-ID 0/2").
+    script = [_lagged] * 6 + [http_error(503), entities({"Q1": "One", "Q2": "Two"})]
+    urls: list = []
+
+    def answer(req, timeout=None):
+        urls.append(req.full_url)
+        item = script.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return item() if callable(item) else _body(item)
+    monkeypatch.setattr(wm.urllib.request, "urlopen", answer)
+    out = wt.resolve_qids(["Q1", "Q2"], cache_path=str(tmp_path / "t.json"), sleep=0)
+    assert out == {"Q1": "One", "Q2": "Two"} and len(urls) == 8
+
+
+def test_throttle_retries_is_opt_in_and_only_for_throttles(monkeypatch, sleeps):
+    # Other callers keep five tries for a maxlag answer ...
+    api = use(monkeypatch, FakeAPI(default={"error": {"code": "maxlag"}}))
+    with pytest.raises(wm.TransientError):
+        wm.get_json("https://x.test/a", user_agent="ua")
+    assert len(api.urls) == 5
+    # ... and a 5xx keeps its five tries even when throttles get more.
+    api = use(monkeypatch, FakeAPI(default=http_error(502)))
+    with pytest.raises(wm.TransientError, match="HTTP 502"):
+        wm.get_json("https://x.test/a", user_agent="ua", throttle_retries=100)
+    assert len(api.urls) == 5
+    # A long throttle without a pacer is bounded by the count, and the
+    # backoff stays a capped float however many tries it takes.
+    api = use(monkeypatch, FakeAPI(default=http_error(429)))
+    with pytest.raises(wm.TransientError, match="HTTP 429"):
+        wm.get_json("https://x.test/a", user_agent="ua", throttle_retries=40)
+    assert len(api.urls) == 40 and max(sleeps) <= 120
+    # Other failures keep their own count after throttles: five 502s
+    # after many 429s end the call, not the first.
+    api = use(monkeypatch, FakeAPI(*[http_error(429)] * 10, default=http_error(502)))
+    with pytest.raises(wm.TransientError, match="HTTP 502"):
+        wm.get_json("https://x.test/a", user_agent="ua", throttle_retries=100)
+    assert len(api.urls) == 15
 
 
 def test_wikidata_readonly_body_is_transient(monkeypatch, sleeps, tmp_path):

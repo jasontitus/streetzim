@@ -275,6 +275,27 @@ class ManifestCreator:
         rec = self._item_record(item)
         self._write_record(rec)
 
+    def cluster_break(self, cluster_size_target: int | None = None) -> None:
+        """Close the cluster being filled so the next item starts a new one,
+        optionally changing the cluster size target from here on.
+
+        Meant to be emitted by the builder between zoom levels of the tile
+        components (--tile-order zoom-hilbert, designed in
+        docs/zim-variants.md but not yet ported: nothing calls this on
+        main) so a zoom never shares a
+        cluster with its neighbours and cloud/derive_zim.py can drop or copy
+        it whole. streetzim-pack honours the flush only when built with the
+        ``cluster_break`` cargo feature (it needs zimru's flush); otherwise
+        it warns once, and the size target reaches the running streamer
+        only if zimru carries patches/zimru-flush-cluster.patch. A packer
+        older than this record rejects it (unknown kinds are an error), so
+        a builder that writes it must not be used with such a packer.
+        """
+        rec: dict[str, Any] = {"kind": "cluster_break"}
+        if cluster_size_target is not None:
+            rec["cluster_size_target"] = int(cluster_size_target)
+        self._write_record(rec)
+
     # ---- helpers -----------------------------------------------------
 
     def _metadata_record(

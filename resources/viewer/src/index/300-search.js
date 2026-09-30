@@ -27,6 +27,123 @@ function _szProximityLabel(miles, unit) {
 }
 // END proximity-label
 
+// BEGIN admin-search
+// Administrative areas (records with t: 'admin', docs/search-records.md):
+// countries, states, counties, cities, wards, from OSM boundary relations.
+// They answer to their other names (`alt`) and to their name with their type
+// ("Alexandria city", "City of Alexandria"), rank above a POI or place of the
+// same name by admin_level, and a pick fits the area's box (`bb`).
+// Pure functions, so tests/viewer_search_js.test.mjs runs them as they ship.
+var SZ_ADMIN_CONNECTORS = { of: 1, de: 1, du: 1, des: 1, del: 1, di: 1, la: 1, le: 1, the: 1 };
+var SZ_ADMIN_LEVEL_BONUS = { 2: 200, 3: 150, 4: 120, 5: 100, 6: 80, 7: 60, 8: 40, 9: 15, 10: 10 };
+var SZ_ADMIN_ZOOM = { 2: 5, 3: 6, 4: 7, 5: 8, 6: 10, 7: 11, 8: 12, 9: 13, 10: 14 };
+var SZ_TYPE_BONUS = { admin: 25, place: 20, airport: 15, peak: 10, park: 10, water: 5, poi: 5, building: 3, street: 0 };
+// Cities and counties carry far more public relevance than a same-named
+// neighbourhood or hamlet, but they're often FAR from the user's current
+// view (San Diego when typing "san" in SF) and would otherwise be crushed by
+// the proximity multiplier. A sizable subtype bonus lifts them above local
+// non-place hits even at 1x prox.
+var SZ_PLACE_SUB_BONUS = { city: 200, county: 80, region: 60, town: 30,
+                           suburb: 10, village: 8, neighbourhood: 4 };
+
+// The normalized texts a record answers to: its name; for an admin area
+// also each other name, "<name> <type>" and "<type> of <name>".
+function _szSearchForms(rec, norm) {
+  var n = norm(String(rec.n || ''));
+  if (rec.t !== 'admin') return [n];
+  var names = [rec.n].concat(Array.isArray(rec.alt) ? rec.alt : []);
+  var label = rec.s ? norm(String(rec.s)) : '';
+  var out = [];
+  for (var i = 0; i < names.length; i++) {
+    var h = norm(String(names[i] || ''));
+    if (!h) continue;
+    out.push(h);
+    if (label) { out.push(h + ' ' + label); out.push(label + ' of ' + h); }
+  }
+  return out;
+}
+
+// Score of the query words against one form, or -1: every word must
+// appear (+11 at a word start, +1 inside one). An admin area may skip the
+// connector words, but must match at least one other word.
+function _szWordsScore(name, words, admin) {
+  var textScore = 0, real = 0;
+  for (var w = 0; w < words.length; w++) {
+    var pos = name.indexOf(words[w]);
+    if (pos === -1) {
+      if (admin && SZ_ADMIN_CONNECTORS[words[w]]) continue;
+      return -1;
+    }
+    if (!(admin && SZ_ADMIN_CONNECTORS[words[w]])) real++;
+    if (pos === 0 || name[pos - 1] === ' ') textScore += 10;
+    textScore += 1;
+  }
+  return (admin && !real) ? -1 : textScore;
+}
+
+// The streaming filter: could the record match? Other records: the name
+// contains the whole query (as before). An admin area: _szTextScore's own
+// rule on any of its forms, so the filter never drops what it would rank.
+function _szFormsContain(rec, qNorm, norm) {
+  if (!qNorm) return true;
+  if (rec.t !== 'admin') return norm(String(rec.n || '')).indexOf(qNorm) >= 0;
+  var words = qNorm.split(/\s+/).filter(function(w) { return w; });
+  var forms = _szSearchForms(rec, norm);
+  for (var i = 0; i < forms.length; i++) if (_szWordsScore(forms[i], words, true) >= 0) return true;
+  return false;
+}
+
+// Text score before proximity, or -1 when the record does not match: every
+// query word must appear in the name (an admin area may skip "of", "de", ...).
+function _szTextScore(item, q, words, norm) {
+  var forms = _szSearchForms(item, norm);
+  var admin = item.t === 'admin';
+  var best = -1;
+  for (var f = 0; f < forms.length; f++) {
+    var name = forms[f];
+    var textScore = _szWordsScore(name, words, admin);
+    if (textScore < 0) continue;
+    if (name === q) textScore += 50;
+    if (name.indexOf(q) === 0) textScore += 25;
+    if (textScore > best) best = textScore;
+  }
+  if (best < 0) return -1;
+  best += SZ_TYPE_BONUS[item.t] || 0;
+  if (item.t === 'place' && item.s) best += SZ_PLACE_SUB_BONUS[item.s] || 0;
+  if (admin) best += SZ_ADMIN_LEVEL_BONUS[item.al] || 0;
+  return best;
+}
+
+// Where a pick of an admin area goes: its box when it has a sane one, else
+// its point at a zoom for its level.
+function _szAdminCamera(item) {
+  var bb = item && item.bb;
+  if (Array.isArray(bb) && bb.length === 4) {
+    var ok = true;
+    for (var i = 0; i < 4; i++) if (typeof bb[i] !== 'number' || !isFinite(bb[i])) ok = false;
+    if (ok && bb[0] <= bb[2] && bb[1] <= bb[3] && bb[1] >= -90 && bb[3] <= 90 &&
+        bb[0] >= -180 && bb[2] <= 540) {
+      return { bounds: [[bb[0], bb[1]], [bb[2], bb[3]]] };
+    }
+  }
+  return { zoom: SZ_ADMIN_ZOOM[item && item.al] || 12 };
+}
+
+// The name|lat|lon keys of the administrative-area records among
+// `entries`. An area is often placed at its label node, which is also a
+// place record with the same name and point (Monaco the country and
+// Monaco the place): the search keeps the area's record, with its box,
+// and drops the place record with the same key, whichever comes first.
+function _szAdminKeys(entries) {
+  var keys = {};
+  for (var i = 0; i < entries.length; i++) {
+    var e = entries[i];
+    if (e && e.t === 'admin') keys[e.n + '|' + e.a + '|' + e.o] = true;
+  }
+  return keys;
+}
+// END admin-search
+
 // Drop a red marker at (lat, lon) with a "Directions to here" popup.
 // Shared by the search-result picker and the #pin= deep-link path
 // (Find-page "Map" button). Replaces any existing search marker.
@@ -449,7 +566,7 @@ var SEARCH_SHARDS = (function () {
                   var name = rec && rec.n;
                   if (!name) continue;
                   if (!includeAddrs && rec.t === 'addr') continue;
-                  if (qNorm && normalizeText(name).indexOf(qNorm) < 0) continue;
+                  if (qNorm && !_szFormsContain(rec, qNorm, normalizeText)) continue;
                   matches.push(rec);
                   if (matches.length >= MAX_RESULTS) break;
                 }
@@ -646,43 +763,17 @@ var SEARCH_SHARDS = (function () {
     var clng = center.lng;
     var bounds = map.getBounds();
 
+    var adminKeys = _szAdminKeys(entries);   // an area beats a place at its point
     for (var i = 0; i < entries.length; i++) {
       var item = entries[i];
       // Dedup: same entry may appear in multiple word-keyed chunks.
       var dedupKey = item.n + '|' + item.a + '|' + item.o;
       if (seenKeys[dedupKey]) continue;
+      if (item.t !== 'admin' && adminKeys[dedupKey]) continue;
       seenKeys[dedupKey] = true;
 
-      var name = normalizeText(item.n);
-
-      // All words must appear in the name
-      var allMatch = true;
-      var textScore = 0;
-      for (var w = 0; w < words.length; w++) {
-        var pos = name.indexOf(words[w]);
-        if (pos === -1) { allMatch = false; break; }
-        if (pos === 0 || name[pos - 1] === ' ') textScore += 10;
-        textScore += 1;
-      }
-      if (!allMatch) continue;
-
-      if (name === q) textScore += 50;
-      if (name.indexOf(q) === 0) textScore += 25;
-      var typeBonus = {place: 20, airport: 15, peak: 10, park: 10, water: 5, poi: 5, building: 3, street: 0};
-      textScore += typeBonus[item.t] || 0;
-      // Subtype boost — cities and counties carry far more public
-      // relevance than a same-named neighbourhood or hamlet, but
-      // they're often FAR from the user's current view (San Diego
-      // when typing "san" in SF) and would otherwise be crushed by
-      // the proximity multiplier. Adding a sizable subtype bonus
-      // lifts them above local non-place hits even at 1× prox.
-      var placeSubBonus = {
-        city: 200, county: 80, region: 60, town: 30,
-        suburb: 10, village: 8, neighbourhood: 4,
-      };
-      if (item.t === 'place' && item.s) {
-        textScore += placeSubBonus[item.s] || 0;
-      }
+      var textScore = _szTextScore(item, q, words, normalizeText);
+      if (textScore < 0) continue;
 
       // Proximity is the PRIMARY signal — multiply text score by proximity factor
       // This means a mediocre text match nearby always beats a perfect match far away
@@ -828,6 +919,8 @@ var SEARCH_SHARDS = (function () {
     var type = el.getAttribute('data-type');
     var name = el.getAttribute('data-name') || (item && item.n) || '';
     var zoom = {place: 14, airport: 14, peak: 15, park: 15, water: 14, poi: 17, street: 16}[type] || 15;
+    var adminCam = (item && item.t === 'admin') ? _szAdminCamera(item) : null;
+    if (adminCam && adminCam.zoom) zoom = adminCam.zoom;
     // Pull Overture enrichment fields when the result has them
     // (websites, phones, socials, brand, normalized category).
     var enrich = null;
@@ -868,7 +961,13 @@ var SEARCH_SHARDS = (function () {
     // as "the map jumped past my result". 0.18*h capped at chrome+60 lands
     // it around 60% with the popup clear of the search box.
     var _dy = Math.min(Math.round(_h * 0.18), _topChrome + 60);
-    _szFlyToClear(map, { center: [lon, lat], zoom: zoom, duration: 1500, offset: [0, _dy] });
+    if (adminCam && adminCam.bounds) {
+      // An area: show all of it, clear of the search box.
+      map.fitBounds(adminCam.bounds, { duration: 1500, maxZoom: 16,
+        padding: { top: _topChrome + 20, bottom: 30, left: 30, right: 30 } });
+    } else {
+      _szFlyToClear(map, { center: [lon, lat], zoom: zoom, duration: 1500, offset: [0, _dy] });
+    }
     placeSearchPin(map, lat, lon, name, enrich);
     resultsEl.style.display = 'none';
     input.blur();
