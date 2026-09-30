@@ -7,10 +7,11 @@ file that opens in [Kiwix](https://kiwix.org) (iOS, Android, desktop) or in a
 browser, with no network at all. A ZIM contains:
 
 - **Vector map** rendered on the device by MapLibre GL JS (OpenMapTiles schema, z0–14, overzoomed beyond).
-- **Search** over places, streets, addresses, POIs, peaks, parks and water, plus Kiwix's own title/full-text search and one detail page per feature.
+- **Search** over places, streets, addresses, POIs, peaks, parks and water, plus Kiwix's own full-text search over a detail page for each place, park, peak, water feature and airport (POIs too with `--kiwix-poi-pages`; never streets or addresses: see `KIWIX_PAGE_TYPES` in streetzim/zim_writer.py and docs/zimfarm.md).
 - **Find page** with category chips (Food & Drink, Bars, Hotels, Museums, Parks, Health, Shops, Gas…) and distance sorting.
 - **Offline routing** (drive / walk / bike) in a Web Worker, with a GPS turn-by-turn HUD.
-- Optional **terrain** (hillshade / 3D from Copernicus DEM), **satellite imagery** (see the licence note below), **Wikidata** facts and bundled **Wikipedia** articles.
+- **Terrain**: hillshade and 3D from the Copernicus DEM (on in the `streetzim` command with `--profile full`, the default; `--terrain` for `create_osm_zim.py`).
+- Optional **satellite imagery** (see the licence note below), **Wikidata** facts and bundled **Wikipedia** articles.
 - Optional **Overture Maps** addresses and place details (websites, phones, brands).
 
 Published ZIMs are listed at <https://streetzim.web.app>. That site also has a
@@ -49,7 +50,9 @@ pip install -r requirements.txt
 
 `requirements.txt` pulls stock `libzim` (python-libzim), which includes the
 libzim fixes StreetZim contributed upstream; the old patches in `patches/`
-are kept for history only.
+are kept for history only. It lists only what the builder needs; to run
+the tests and linters, install `requirements-dev.txt` instead
+([MAINTAINING.md](MAINTAINING.md)).
 
 **3. Coastline and Natural Earth shapefiles.** tilemaker reads them relative to
 the directory you build in. Without them the build still succeeds but has no
@@ -97,15 +100,22 @@ docker run --rm -v "$PWD/out:/output" streetzim \
 maps2zim's flag names, ZIM metadata flags checked before any download,
 `{name}_{period}.zim` in an output folder, and a Zimfarm progress file. Its
 flags are described for Zimfarm in `offliner-definition.json`;
-[docs/zimfarm.md](docs/zimfarm.md) covers the default profile and what a
-build costs.
+[docs/zimfarm.md](docs/zimfarm.md) covers the profiles (`--profile full`,
+the default, adds Wikidata, Wikipedia articles and Overture Maps like
+StreetZim's own builds; `--profile basic` fetches nothing but the OSM data),
+how they compare with the production builds, and what a build costs.
 
 ```bash
-pip install -e .              # or use the Docker image, which has it
+pip install -e .              # or a wheel (python -m build; docs/packaging.md), or the Docker image
 streetzim --name osm_en_monaco --title Monaco \
     --description "Offline map of Monaco with search and routing" \
     --area monaco --output out --stats-filename out/task_progress.json
 ```
+
+Satellite imagery is off by default in `streetzim`. `--satellite` adds EOX's
+2016 mosaic (CC BY 4.0); the sharper 2021 mosaic is non-commercial and takes
+`--satellite-source s2cloudless-2021 --satellite-accept-noncommercial`, which
+also labels the ZIM as restricted ([docs/zimfarm.md](docs/zimfarm.md#satellite-imagery)).
 
 ## Choosing what goes in
 
@@ -115,8 +125,12 @@ Input, one of:
 |---|---|
 | `--area NAME` | a preset: `monaco`, `liechtenstein`, `dc`, `manhattan`, `san-francisco`, `austin`, `portland`, `virginia`, `colorado`, `california`, `iran`, `united-states` |
 | `--geofabrik europe/liechtenstein --name …` | any [Geofabrik](https://download.geofabrik.de/) extract |
-| `--pbf file.osm.pbf --name …` | a local PBF; add `--bbox minlon,minlat,maxlon,maxlat` to cut it |
+| `--pbf file.osm.pbf --name …` | a local PBF; add `--bbox minlon,minlat,maxlon,maxlat` to cut it (minlon > maxlon for an area across the antimeridian, e.g. Fiji) |
 | `--mbtiles tiles.mbtiles` | skip tilemaker and reuse existing tiles (with `--pbf` for search/routing) |
+
+Areas across the antimeridian (Fiji, Chukotka, Kiribati) are supported: the
+extract, tiles, map bounds, search and routing cover both sides of ±180°
+([docs/zimfarm.md](docs/zimfarm.md), [docs/formats.md](docs/formats.md#areas-across-the-antimeridian)).
 
 Main feature flags (all off by default; `python create_osm_zim.py --help` lists all ~50):
 
@@ -126,7 +140,7 @@ Main feature flags (all off by default; `python create_osm_zim.py --help` lists 
 | `--spatial-chunk-scale 10` | routing split into 0.1° cells loaded on demand (what production ships; needed for large regions on phones) | `--routing` |
 | `--split-find-chips` | one file per Find chip instead of the whole POI list | — |
 | `--terrain` | hillshade / 3D terrain tiles to z12 | GDAL (via `rasterio`), network to AWS S3 |
-| `--satellite` | Sentinel-2 imagery, **non-commercial licence** | network to EOX |
+| `--satellite` | Sentinel-2 imagery; `--satellite-source` picks the year: `s2cloudless-2021` (default here, **CC BY-NC-SA 4.0, non-commercial**) or `s2cloudless-2016` (CC BY 4.0) | network to EOX |
 | `--wikidata` | population, descriptions, Wikipedia extracts | network to Wikidata/Wikipedia |
 | `--bundle-wiki-articles --wiki-articles-source enwiki.zim` | full Wikipedia articles, read from a local Wikipedia ZIM | a Wikipedia ZIM |
 | `--overture-addresses/--overture-places PARQUET` | Overture data, from `download_overture_data.py` | DuckDB, network to S3 |
@@ -154,7 +168,7 @@ resources/viewer/ (MapLibre app) ───┤
 
 - Every byte format and ZIM path is specified in [docs/formats.md](docs/formats.md); search records and category files in [docs/search-records.md](docs/search-records.md).
 - Tile sources: StreetZim's tilemaker tiles give +31% street names and about 2x named places compared with OpenFreeMap's ([docs/tile-sources.md](docs/tile-sources.md)).
-- Working with openzim/maps: StreetZim also builds from the OpenFreeMap tiles maps2zim uses (`scripts/fetch-openfreemap-mbtiles.py`, then `--mbtiles`); [docs/openzim-integration.md](docs/openzim-integration.md) is the plan for porting features into maps2zim.
+- Working with openzim/maps: StreetZim also builds from the OpenFreeMap tiles maps2zim uses (`scripts/fetch-openfreemap-mbtiles.py`, then `--mbtiles`); we propose openZIM adopt StreetZim as its maps scraper ([docs/adoption-plan.md](docs/adoption-plan.md), [docs/zimfarm.md](docs/zimfarm.md)); [docs/openzim-integration.md](docs/openzim-integration.md) compares the two and sets out the porting route for reference.
 - Routing internals: [docs/routing.md](docs/routing.md). Search sharding: [docs/search-prefix-locality.md](docs/search-prefix-locality.md).
 - Kiwix reader quirks the design works around (service-worker request drops, cluster size limits, zstd windows): [docs/zim-packaging-gotchas.md](docs/zim-packaging-gotchas.md).
 - The in-ZIM apps (`places.html`, detail pages, the `#dest=` deep-link protocol): [docs/in-zim-apps.md](docs/in-zim-apps.md).
@@ -166,6 +180,7 @@ resources/viewer/ (MapLibre app) ───┤
 | `create_osm_zim.py` | the builder's command line |
 | `streetzim/cli.py` | `streetzim`, the openZIM-style command (maps2zim's flags; `offliner-definition.json`) |
 | `resources/viewer/` | the viewer shipped inside every ZIM (`index.html`, built from `src/index/` by `tools/build_viewer.py`; `places.html`; `routing-worker.js`) |
+| `resources/vendor/`, `resources/viewer-assets.lock.json` | vendored MapLibre GL JS and the sha256 pins for it and the font glyphs (`tools/pin_viewer_assets.py`, [docs/viewer-supply-chain.md](docs/viewer-supply-chain.md)) |
 | `resources/tilemaker/` | tilemaker config and Lua profile |
 | `cloud/` | Python modules the builder imports (`chip_rules`, `search_shards`, `viewer_slots`, …) and the ZIM tools (`validate_zim`, `repackage_zim`, `patch_viewer_inplace`, …) |
 | `streetzim/` | the builder's modules: `tiles`, `terrain`, `satellite`, `addresses`, `search_extract`, `zim_writer` (one function per ZIM phase), `zim_metadata` (openZIM metadata rules), `progress` (Zimfarm progress file), `common`, and `routing/` (graph build, formats, reference routers) |
@@ -191,19 +206,36 @@ and the known technical debt.
 | OSM [water polygons](https://osmdata.openstreetmap.de/data/water-polygons.html) | ODbL 1.0 | © OpenStreetMap contributors |
 | [Natural Earth](https://www.naturalearthdata.com/) | public domain | — |
 | [Copernicus GLO-30 / GLO-90 DEM](https://dataspace.copernicus.eu) (`--terrain`) | Copernicus free & open | © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the EU and ESA |
-| [Sentinel-2 cloudless 2021](https://s2maps.eu) by EOX (`--satellite`) | **CC BY-NC-SA 4.0** | Sentinel-2 cloudless by EOX (contains modified Copernicus Sentinel data 2021) |
+| [EOxCloudless](https://cloudless.eox.at/license-non-commercial) Sentinel-2 cloudless **2016** by EOX (`--satellite-source s2cloudless-2016`; `streetzim --satellite`) | CC BY 4.0 | EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016 & 2017) |
+| [EOxCloudless](https://cloudless.eox.at/license-non-commercial) Sentinel-2 cloudless **2021** by EOX (`create_osm_zim.py --satellite`) | **CC BY-NC-SA 4.0** | EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2021) |
 | [Overture Maps](https://overturemaps.org/) (`--overture-*`) | CDLA-Permissive-2.0 and others per source; written to `overture-sources.json` | per source |
 | [Wikidata](https://www.wikidata.org/) | CC0 | — |
 | [Wikipedia](https://en.wikipedia.org/) text | CC BY-SA 4.0 | Wikipedia contributors |
 
-**Bundled software:** [MapLibre GL JS](https://maplibre.org/) (BSD-3-Clause).
+**Bundled software:** [MapLibre GL JS](https://maplibre.org/) (BSD-3-Clause);
+[mapbox-gl-rtl-text](https://github.com/mapbox/mapbox-gl-rtl-text) 0.3.0
+(BSD-2-Clause, with ICU under the Unicode licence; vendored in
+`resources/vendor/mapbox-gl-rtl-text/`, shaping Arabic/Hebrew labels);
+[Maki](https://github.com/mapbox/maki) 8.2.0 POI icons (CC0 1.0, inlined in the viewer);
+label glyphs from [Open Sans](https://github.com/openmaptiles/fonts) (Apache 2.0) and,
+for Arabic, Armenian, Georgian, Hebrew, Lao and Thai labels when a map has them,
+[Noto Sans](https://github.com/protomaps/basemaps-assets) (SIL Open Font License 1.1,
+shipped in the ZIM as `fonts/NotoSans/OFL.txt`; pinned in
+`resources/viewer-assets.lock.json`, licence in `resources/vendor/noto-sans/`).
 
-> **Satellite imagery is non-commercial.** The Sentinel-2 cloudless 2021 layer
-> is CC BY-NC-SA 4.0. `create_osm_zim.py` only includes it with `--satellite`,
-> but the production wrappers pass that flag, so most **published** StreetZim
-> ZIMs contain it and may only be redistributed non-commercially. Build without
-> `--satellite` (or use a variant with `satellite=no` in
-> `cloud/region-variants.tsv`) for a ZIM with no non-commercial data.
+> **Satellite imagery: check which year a ZIM has.** EOX licenses each year
+> of its Sentinel-2 cloudless mosaic separately. The 2021 layer is CC BY-NC-SA
+> 4.0: non-commercial use only. `create_osm_zim.py` only includes it with
+> `--satellite`, but the production wrappers pass that flag, so most
+> **published** StreetZim ZIMs contain it and may only be used and
+> redistributed non-commercially. Build without `--satellite` (or use a variant
+> with `satellite=no` in `cloud/region-variants.tsv`) for a ZIM with no
+> non-commercial data. The 2016 layer is CC BY 4.0 (attribution only), and is
+> what the openZIM-style `streetzim --satellite` adds; `streetzim` takes the
+> 2021 layer only with `--satellite-accept-noncommercial`, and then labels the
+> ZIM as restricted. A ZIM's `License` metadata, its viewer credits and the
+> on-map attribution name the year it contains. Details:
+> [docs/zimfarm.md](docs/zimfarm.md#satellite-imagery).
 
 ## Optional accelerators for very large builds
 
@@ -216,10 +248,3 @@ speed-ups, both switched off by default:
 Both produce ordinary ZIMs, the same as libzim's. Neither is needed for
 anything in this README. [docs/zim-builder-rust.md](docs/zim-builder-rust.md)
 explains when they help.
-
-## Legacy: raster (Leaflet) variant
-
-`create_osm_zim_leaflet.py` is the original experiment that renders the same
-vector tiles to PNG with Pillow and shows them with Leaflet, for readers
-without WebGL. It is not used by any build, has far fewer features, and is
-kept only for comparison.

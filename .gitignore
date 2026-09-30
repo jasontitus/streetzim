@@ -9,6 +9,7 @@ venv/
 coastline/
 landcover/
 satellite_cache*/
+satellite_s2cloudless-*/
 terrain_cache*/
 terrain_compression_test/
 world-data/
@@ -22,6 +23,9 @@ wiki_articles_cache/
 # Re-run scripts/sync-drive-viewer.sh after changing resources/viewer/
 # or bumping the MapLibre / fzstd versions.
 overture_cache/
+# Verified font glyph cache (streetzim/viewer_assets.py) when
+# STREETZIM_CACHE_DIR is unset.
+/viewer-assets/
 
 # Cache-dir symlinks in worktrees (pointed at main tree)
 /satellite_cache_avif_256
@@ -73,3 +77,12 @@ salvage/
 
 # pip wheel .
 /build/
+
+# python -m build; pytest --cov (docs/packaging.md)
+/dist/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+!tests/fixtures/monaco-full/monaco.osm.pbf
+!tests/fixtures/monaco-full/dl/cache/wikidata_cache/

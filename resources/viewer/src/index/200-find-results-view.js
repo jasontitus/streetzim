@@ -132,8 +132,11 @@ function renderFindResultsFromStash(map) {
       });
     })(i);
     _findResultsState.markers.push(marker);
-    if (!bounds) bounds = new maplibregl.LngLatBounds([r.o, r.a], [r.o, r.a]);
-    else         bounds.extend([r.o, r.a]);
+    // Longitudes the short way from the first result, so results either
+    // side of the antimeridian frame the gap between them, not the globe.
+    var ro = bounds ? r.o - 360 * Math.round((r.o - bounds.getWest()) / 360) : r.o;
+    if (!bounds) bounds = new maplibregl.LngLatBounds([ro, r.a], [ro, r.a]);
+    else         bounds.extend([ro, r.a]);
   }
   if (bounds) {
     // Leave room for the carousel at the bottom — extra bottom
@@ -197,7 +200,6 @@ function _searchAreaThresholdReached(map) {
   var az = _findResultsState.anchorZoom;
   if (!ac || az == null) return false;
   if (Math.abs(map.getZoom() - az) >= 0.5) return true;
-  var c = map.getCenter();
   var b = map.getBounds();
   // Outside the current viewport box → user has clearly panned away.
   return ac.lng < b.getWest() || ac.lng > b.getEast()
@@ -273,8 +275,8 @@ function _renderSubfilterRow(map, stash) {
       + (active
         ? 'background:#1a73e8; color:#fff;'
           + 'border:1px solid #1a73e8;'
-        : 'background:#fff; color:#222;'
-          + 'border:1px solid #ddd;')
+        : 'background:var(--szd-surface, #fff); color:var(--szd-fg, #222);'
+          + 'border:1px solid var(--szd-line, #ddd);')
     );
     chip.textContent = (count != null) ? (label + ' · ' + count) : label;
     chip.addEventListener('click', function() {
@@ -337,9 +339,9 @@ function _renderFindResultsStrip(map, stash) {
   strip.id = 'find-results-strip';
   strip.style.cssText = (
     'position:fixed; left:0; right:0; bottom:var(--bottom-inset, 0px); z-index:1500;'
-    + 'background:rgba(255,255,255,0.96); border-top:1px solid #ccc;'
+    + 'background:var(--szd-surface-a, rgba(255,255,255,0.96)); border-top:1px solid var(--szd-line, #ccc);'
     + 'box-shadow:0 -4px 16px rgba(0,0,0,0.12);'
-    + 'font:13px/1.35 -apple-system,system-ui,sans-serif; color:#222;'
+    + 'font:13px/1.35 -apple-system,system-ui,sans-serif; color:var(--szd-fg, #222);'
     + 'padding-top:6px;'
     // Clear the dead touch band next to the app's bottom toolbar (see the
     // locate-button rule): without this the cards' lower half renders fine
@@ -350,7 +352,7 @@ function _renderFindResultsStrip(map, stash) {
   var header = document.createElement('div');
   header.style.cssText = (
     'padding:2px 14px 6px; display:flex; align-items:center; gap:8px;'
-    + 'font-size:12px; color:#555;'
+    + 'font-size:12px; color:var(--szd-fg-2, #555);'
   );
   var title = document.createElement('span');
   title.style.cssText = (
@@ -365,7 +367,7 @@ function _renderFindResultsStrip(map, stash) {
   closeBtn.textContent = '×';
   closeBtn.style.cssText = (
     'flex:0 0 auto; background:transparent; border:none;'
-    + 'font-size:18px; line-height:1; cursor:pointer; color:#666;'
+    + 'font-size:18px; line-height:1; cursor:pointer; color:var(--szd-fg-3, #666);'
     + 'padding:2px 6px;'
   );
   closeBtn.addEventListener('click', clearFindResults);
@@ -474,7 +476,7 @@ function _showSearchAreaPill(map) {
   btn.style.cssText = (
     'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
     + 'z-index:1600; padding:9px 18px;'
-    + 'background:rgba(255,255,255,0.92); color:#222;'
+    + 'background:var(--szd-surface-a, rgba(255,255,255,0.92)); color:var(--szd-fg, #222);'
     + 'border:1px solid rgba(0,0,0,0.12); border-radius:999px;'
     + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
     + 'box-shadow:0 4px 14px rgba(0,0,0,0.18);'
@@ -483,10 +485,10 @@ function _showSearchAreaPill(map) {
     + 'pointer-events:auto;'
   );
   btn.addEventListener('mouseenter', function() {
-    btn.style.background = 'rgba(255,255,255,1)';
+    btn.style.background = 'var(--szd-surface-hover, rgba(255,255,255,1))';
   });
   btn.addEventListener('mouseleave', function() {
-    btn.style.background = 'rgba(255,255,255,0.92)';
+    btn.style.background = 'var(--szd-surface-a, rgba(255,255,255,0.92))';
   });
   btn.addEventListener('click', function() {
     _searchAreaApply(map);
@@ -563,7 +565,7 @@ function _searchAreaApply(map) {
     btn.style.cssText = (
       'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
       + 'z-index:1600; padding:9px 18px;'
-      + 'background:rgba(255,255,255,0.95); color:#a33;'
+      + 'background:var(--szd-surface-a, rgba(255,255,255,0.95)); color:var(--szd-warn, #a33);'
       + 'border:1px solid rgba(170,50,50,0.25); border-radius:999px;'
       + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
       + 'box-shadow:0 4px 14px rgba(0,0,0,0.18); pointer-events:none;'

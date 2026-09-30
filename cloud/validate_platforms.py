@@ -223,10 +223,10 @@ def validate_one(zim_path: str, verbose: bool = True) -> dict:
         print()
         print(f"  {'platform':<16}{'peak':>9}  {'ceiling':>9}  {'status':>6}")
         print(f"  {'-'*16}{'-'*9:>9}  {'-'*9:>9}  {'-'*6:>6}")
-        for platform, (status, peak, why) in results.items():
+        for platform, (status, peak, _why) in results.items():
             ceiling = CEILINGS[platform]
             print(f"  {platform:<16}{peak:>6} MB  {ceiling:>6} MB  {status:>6}")
-        for platform, (status, peak, why) in results.items():
+        for platform, (status, _peak, why) in results.items():
             if status == "FAIL":
                 print(f"  FAIL {platform}: {why}")
 

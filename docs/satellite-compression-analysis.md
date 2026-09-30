@@ -146,6 +146,8 @@ python3 create_osm_zim.py --area dc --satellite --satellite-tile-size 512
 
 ## Test Script
 
+Removed in `a436aa8`; the path below is where commit `0792d0d` has it.
+
 ```bash
 python3 attic/research/test_satellite_compression.py
 ```

@@ -3,7 +3,7 @@
 uses), so a ZIM can be built without running tilemaker:
 
     python scripts/fetch-openfreemap-mbtiles.py monaco -o monaco.mbtiles
-    python create_osm_zim.py --mbtiles monaco.mbtiles --bbox 7.40,43.72,7.44,43.76 \\
+    python create_osm_zim.py --mbtiles monaco.mbtiles --bbox 7.39,43.715,7.46,43.765 \\
         --name Monaco -o osm-monaco.zim
 
 OpenFreeMap publishes `monaco` (a small test area) and `planet` (~90 GB).

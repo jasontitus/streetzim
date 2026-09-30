@@ -11,11 +11,13 @@ node_modules
 coastline
 landcover
 /satellite_cache*/
+/satellite_s2cloudless-*/
 /terrain_cache*/
 /wikidata_cache/
 /wiki_articles_cache/
 /search_cache/
 /overture_cache/
+/viewer-assets/
 world-data
 wiki-src
 wiki_articles_cache

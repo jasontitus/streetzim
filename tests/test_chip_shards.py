@@ -126,7 +126,7 @@ class TestPlanChip(unittest.TestCase):
             lon = rng.uniform(178.5, 180.0) if i % 2 else rng.uniform(-180.0, -178.5)
             recs.append(_rec(i, rng.uniform(51, 53), lon))
         _, entry, _ = self._check(recs, 32 * 1024)
-        for s, w, n, e, _c, _b in entry["shards"]:
+        for _s, w, _n, e, _c, _b in entry["shards"]:
             width = (e - w) if w <= e else (e + 360 - w)
             self.assertLess(width, 5.0, (w, e))
         # (The k-d split cuts raw longitude, so both sides of ±180 end up
@@ -180,7 +180,7 @@ class TestPlanChip(unittest.TestCase):
                  "o": 139.0} for i in range(400)]
         _, entry, files = self._check(recs, 16 * 1024)
         blob = next(iter(files.values()))
-        self.assertIn("東京".encode("utf-8"), blob)
+        self.assertIn("東京".encode(), blob)
 
 
 class _FakeArchive:
@@ -274,6 +274,20 @@ class TestValidatorGeoChips(unittest.TestCase):
         status, msg = _chk_find_chips(self._zim(hide))
         self.assertEqual(status, "fail")
         self.assertIn("no-bbox shard", msg)
+
+    def test_no_chips_key(self):
+        from cloud.validate_zim import _chk_find_chips
+        mani = json.dumps({"total": 0, "categories": {}}).encode()
+        # Built without --split-find-chips: nothing to check.
+        status, _ = _chk_find_chips(_FakeArchive({"category-index/manifest.json": mani}))
+        self.assertEqual(status, "skip")
+        # Chip files but no `chips` key: the split's manifest entry was lost.
+        for path in ("category-index/chip-shops.json", "category-index/chip-food-g000.json",
+                     "category-index/chip-cafes-00.json"):
+            status, msg = _chk_find_chips(_FakeArchive(
+                {"category-index/manifest.json": mani, path: b"[]"}))
+            self.assertEqual(status, "fail", path)
+            self.assertIn(path, msg)
 
     def test_legacy_single_file_verdicts_unchanged(self):
         from cloud.validate_zim import _chk_find_chips

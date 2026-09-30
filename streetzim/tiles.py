@@ -1,23 +1,22 @@
 """OSM extract download, tilemaker, MBTiles readers, SDF fonts and the
-MapLibre download (moved verbatim from create_osm_zim.py, which re-exports
+vendored MapLibre (moved verbatim from create_osm_zim.py, which re-exports
 these names)."""
 import json
 import os
 import sqlite3
 import subprocess
-import time
-import urllib.error
-import urllib.request
 
+from streetzim import area
 # The builder's flushing, phase-timing print (see streetzim/common.py).
 from streetzim.common import (
     print,
+    parse_bbox,
     TILEMAKER_CONFIG,
     TILEMAKER_PROCESS,
     GEOFABRIK_BASE,
-    MAPLIBRE_CDN,
     download_file,
 )
+from streetzim import viewer_assets
 
 
 def download_osm_extract(geofabrik_path, dest):
@@ -30,11 +29,16 @@ def download_osm_extract(geofabrik_path, dest):
 
 
 def extract_bbox_from_pbf(pbf_path, bbox, output_path):
-    """Extract a bounding box from a PBF file using osmium."""
+    """Extract a bounding box from a PBF file using osmium.
+
+    A box across the antimeridian is cut as two boxes, one each side
+    (streetzim/area.py)."""
     print(f"  Extracting bbox {bbox} from PBF...")
+    workdir = os.path.dirname(os.path.abspath(str(output_path)))
     cmd = [
         "osmium", "extract",
-        "--bbox", bbox,
+        *area.osmium_extract_args(parse_bbox(bbox), workdir, bbox_arg=bbox,
+                                  flag="--bbox"),
         "--strategy", "complete_ways",
         "--overwrite",
         "-o", str(output_path),
@@ -68,23 +72,47 @@ def generate_tiles(pbf_path, mbtiles_path, bbox=None, fast=False, store=None):
               "the directory you build in.")
         if os.environ.get("STREETZIM_REQUIRE_SHAPEFILES") == "1":
             raise SystemExit("STREETZIM_REQUIRE_SHAPEFILES=1 and shapefiles are missing")
-    cmd = [
-        "tilemaker",
-        "--input", str(pbf_path),
-        "--output", str(mbtiles_path),
-        "--config", str(TILEMAKER_CONFIG),
-        "--process", str(TILEMAKER_PROCESS),
-        "--skip-integrity",
-    ]
-    if bbox:
-        cmd.extend(["--bbox", bbox])
-    if fast:
-        cmd.append("--fast")
-        print("    Using --fast mode (trades RAM for speed)")
-    if store:
-        cmd.extend(["--store", str(store)])
-        print(f"    Using on-disk store: {store}")
-    subprocess.run(cmd, check=True)
+    def tilemaker(input_pbf, bbox, merge=False):
+        cmd = [
+            "tilemaker",
+            "--input", str(input_pbf),
+            "--output", str(mbtiles_path),
+            "--config", str(TILEMAKER_CONFIG),
+            "--process", str(TILEMAKER_PROCESS),
+            "--skip-integrity",
+        ]
+        if bbox:
+            cmd.extend(["--bbox", bbox])
+        if merge:
+            cmd.append("--merge")
+        if fast:
+            cmd.append("--fast")
+            print("    Using --fast mode (trades RAM for speed)")
+        if store:
+            cmd.extend(["--store", str(store)])
+            print(f"    Using on-disk store: {store}")
+        subprocess.run(cmd, check=True)
+
+    parts = area.split(parse_bbox(bbox)) if bbox else []
+    if len(parts) < 2:
+        tilemaker(pbf_path, bbox)
+    else:
+        # Across the antimeridian. tilemaker clips to one box in [-180, 180]
+        # (and one spanning the world would fill it with ocean tiles), so
+        # each side is its own run over that side's data, the second
+        # merged into the first MBTiles. Only z0 covers both sides;
+        # --merge combines its layers.
+        for i, part in enumerate(parts):
+            side = area.to_str(part)
+            side_pbf = f"{mbtiles_path}.side{i}.osm.pbf"
+            print(f"    Side {i + 1} of the antimeridian: {side}")
+            subprocess.run(["osmium", "extract", "--bbox", side,
+                            "--strategy", "complete_ways", "--overwrite",
+                            "-o", side_pbf, str(pbf_path)], check=True)
+            try:
+                tilemaker(side_pbf, side, merge=i > 0)
+            finally:
+                os.remove(side_pbf)
     size_mb = os.path.getsize(mbtiles_path) / (1024 * 1024)
     print(f"    Generated MBTiles: {size_mb:.1f} MB")
 
@@ -142,7 +170,17 @@ def estimate_tile_total(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None)
         if lat_lo > lat_hi:
             return 0
         total = 0
+        parts = area.split(bbox)
         for z in range(zoom_min, zoom_max + 1):
+            if len(parts) > 1:
+                # Across the antimeridian: the columns of both sides, once
+                # each (at z0 both sides are the one tile).
+                cols = _merge_ranges([(mercantile.tile(p[0], lat_hi, z).x,
+                                       mercantile.tile(p[2], lat_lo, z).x) for p in parts])
+                ny = (mercantile.tile(parts[0][0], lat_lo, z).y
+                      - mercantile.tile(parts[0][0], lat_hi, z).y + 1)
+                total += sum(c1 - c0 + 1 for c0, c1 in cols) * ny
+                continue
             ul = mercantile.tile(minlon, lat_hi, z)
             lr = mercantile.tile(maxlon, lat_lo, z)
             nx = lr.x - ul.x + 1
@@ -164,6 +202,17 @@ def estimate_tile_total(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None)
     # walks all 345 M index entries on the 113 GB world file, minutes of IO
     # bought for a progress number.
     return 0
+
+
+def _merge_ranges(ranges):
+    """Inclusive integer ranges, sorted, with overlapping ones joined."""
+    out = []
+    for lo, hi in sorted(ranges):
+        if out and lo <= out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], hi))
+        else:
+            out.append((lo, hi))
+    return out
 
 
 def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None):
@@ -207,29 +256,38 @@ def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=N
         else:
             zoom_max = 14
 
+        # One box, or two across the antimeridian (streetzim/area.py).
+        parts = area.split((minlon, minlat, maxlon, maxlat))
         for z in range(zoom_min, zoom_max + 1):
-            # Get tile column/row bounds for this zoom
-            tiles_in_bbox = list(mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z))
-            if not tiles_in_bbox:
-                continue
-            min_col = min(t.x for t in tiles_in_bbox)
-            max_col = max(t.x for t in tiles_in_bbox)
-            # Convert XYZ y to TMS y for SQL filter
             n = 1 << z
-            min_tms_row = min(n - 1 - t.y for t in tiles_in_bbox)
-            max_tms_row = max(n - 1 - t.y for t in tiles_in_bbox)
+            col_ranges = []
+            min_tms_row = max_tms_row = 0
+            for part in parts:
+                # Get tile column/row bounds for this zoom
+                tiles_in_bbox = list(mercantile.tiles(*part, zooms=z))
+                if not tiles_in_bbox:
+                    continue
+                min_col = min(t.x for t in tiles_in_bbox)
+                max_col = max(t.x for t in tiles_in_bbox)
+                # Convert XYZ y to TMS y for SQL filter
+                min_tms_row = min(n - 1 - t.y for t in tiles_in_bbox)
+                max_tms_row = max(n - 1 - t.y for t in tiles_in_bbox)
+                col_ranges.append((min_col, max_col))
 
-            cursor.execute(
-                "SELECT zoom_level, tile_column, tile_row, tile_data "
-                "FROM tiles WHERE zoom_level = ? "
-                "AND tile_column >= ? AND tile_column <= ? "
-                "AND tile_row >= ? AND tile_row <= ? "
-                "ORDER BY tile_column, tile_row",
-                (z, min_col, max_col, min_tms_row, max_tms_row),
-            )
-            for zz, x, tms_y, data in cursor:
-                y = n - 1 - tms_y
-                yield zz, x, y, data
+            # Columns ascending, each once: the two sides of the
+            # antimeridian are the two ends of the row (one tile at z0).
+            for min_col, max_col in _merge_ranges(col_ranges):
+                cursor.execute(
+                    "SELECT zoom_level, tile_column, tile_row, tile_data "
+                    "FROM tiles WHERE zoom_level = ? "
+                    "AND tile_column >= ? AND tile_column <= ? "
+                    "AND tile_row >= ? AND tile_row <= ? "
+                    "ORDER BY tile_column, tile_row",
+                    (z, min_col, max_col, min_tms_row, max_tms_row),
+                )
+                for zz, x, tms_y, data in cursor:
+                    y = n - 1 - tms_y
+                    yield zz, x, y, data
     else:
         if zoom_level is not None:
             cursor.execute(
@@ -318,105 +376,180 @@ def extract_tiles_from_mbtiles(mbtiles_path, max_zoom=None):
     return tiles, metadata
 
 
-def generate_sdf_font_glyphs():
-    """Generate SDF font glyphs for MapLibre GL JS.
+FALLBACK_SCAN_MAX_BYTES = 200_000_000
 
-    MapLibre GL JS requires SDF (Signed Distance Field) font glyphs in
-    protocol buffer format. Each range covers 256 Unicode codepoints.
-    Downloads real SDF fonts from the openmaptiles font CDN.
 
-    Downloads every BMP range the CDN serves so that labels across all
-    European scripts render correctly — in particular the General
-    Punctuation block (8192-8447, includes U+2013 en dash used in names
-    like "Paris-Dakar") and Arabic (1536-1791), which are required for
-    continental Europe builds. Ranges that 404 on the CDN are skipped;
-    MapLibre falls back to local rendering for missing ranges.
+def fallback_scripts_in_tiles(tiles, lock=None):
+    """The fallback scripts (lock ``fonts.fallback.scripts``) that occur in
+    the labels of ``tiles`` ({(z, x, y): tile bytes}), for
+    generate_sdf_font_glyphs.
+
+    None (all of them, about 0.6 MB in the ZIM) when the tiles are not in
+    memory (a streamed, continent-sized build) or are more than
+    FALLBACK_SCAN_MAX_BYTES: in a ZIM that large the glyphs cost under 0.3%,
+    less than the scan's time is worth. Measured 15-18 MB/s of stored tiles
+    (tilemaker tiles of Fiji, 366k tiles; OpenMapTiles-schema Monaco x100,
+    whose name:xx translations match nearly every tile), so seconds below
+    the cap (about 13 s)."""
+    import time
+    from streetzim import glyph_fallback
+    fallback = viewer_assets.font_fallback(lock)
+    if fallback is None:
+        return set()
+    if tiles is None:
+        return None
+    total = sum(len(t) for t in tiles.values())
+    if total > FALLBACK_SCAN_MAX_BYTES:
+        print(f"  Label scripts: not scanned ({total / 1e6:,.0f} MB of tiles); "
+              f"shipping every fallback script")
+        return None
+    t0 = time.monotonic()
+    stats = {}
+    found = glyph_fallback.scripts_in_tiles(tiles.values(), fallback.scripts, stats)
+    unreadable = stats.get("unreadable", 0)
+    print(f"  Label scripts needing fallback glyphs: {', '.join(sorted(found)) or 'none'} "
+          f"({len(tiles):,} tiles scanned in {time.monotonic() - t0:.1f}s"
+          + (f"; {unreadable:,} unreadable tiles skipped" if unreadable else "") + ")")
+    return found
+
+
+def generate_sdf_font_glyphs(lock=None, scripts=None):
+    """SDF font glyphs for MapLibre GL JS, as pinned in the lock file.
+
+    MapLibre needs SDF (Signed Distance Field) glyphs in protocol-buffer
+    form, one file per 256 codepoints: fonts/{fontstack}/{start}-{end}.pbf.
+    Every BMP range of each fontstack comes from the openmaptiles font CDN
+    (e.g. General Punctuation 8192-8447 for the en dash in
+    "Paris-Dakar"), each checked
+    against its SHA-256 in resources/viewer-assets.lock.json and cached
+    (streetzim/viewer_assets.py). A range the lock records as absent is
+    skipped; MapLibre falls back to local rendering for it.
+
+    Open Sans has no glyphs for some scripts (Arabic, Hebrew, ...). For
+    those in ``scripts`` (names from the lock's ``fonts.fallback.scripts``;
+    None: all of them), the pinned Noto Sans glyphs are merged into the
+    ranges that hold them (streetzim/glyph_fallback.py); every other range
+    is shipped exactly as pinned.
+
+    A range whose content does not match its hash stops the build, always.
+    One that cannot be downloaded after 5 attempts stops it too, unless
+    STREETZIM_ALLOW_FONT_ERRORS=1 (a fallback range that could not be
+    fetched then leaves its Open Sans range as it was).
     """
-    print("  Downloading SDF font glyphs...")
+    from streetzim import glyph_fallback
+    lock = lock or viewer_assets.load_lock()
+    print("  Downloading SDF font glyphs (pinned, verified)...")
+    # Our fontstack names have no spaces (URL-encoding differs between
+    # Kiwix implementations); the lock maps them to the CDN's names.
+    tasks = viewer_assets.font_ranges(lock)
+    fallback = viewer_assets.font_fallback(lock)
+    merge_stacks, blocks, merge_ranges, wanted = {}, [], [], []
+    if fallback is not None:
+        wanted = sorted(fallback.scripts if scripts is None
+                        else set(scripts) & set(fallback.scripts))
+        blocks = [b for name in wanted for b in fallback.scripts[name]]
+        merge_ranges = glyph_fallback.ranges_for(blocks)
+        stacks = {fr.stack for fr in tasks}
+        merge_stacks = {s: f for s, f in fallback.for_stack.items() if s in stacks}
+        fb_stacks = set(merge_stacks.values())
+        tasks = tasks + [fr for fr in fallback.ranges
+                         if fr.stack in fb_stacks and fr.range_key in merge_ranges]
+        if wanted:
+            print(f"    Fallback glyphs for: {', '.join(wanted)}")
+    fonts, fb_fonts = _fetch_font_ranges(tasks, fb_stacks=set(merge_stacks.values()))
+    merged = 0
+    pinned = {(fr.stack, fr.range_key) for fr in fallback.ranges if fr.sha256} if fallback else set()
+    lost = []  # (stack, range, scripts) left without glyphs by a waived download error
+    for stack, fb_stack in merge_stacks.items():
+        name = lock["fonts"]["fontstacks"].get(stack, stack)
+        for r in merge_ranges:
+            fb_data = fb_fonts.get((fb_stack, r))
+            if fb_data is None:  # absent from the fallback, or waived download error
+                if fallback is not None and (fb_stack, r) in pinned:
+                    lo, hi = (int(x) for x in r.split("-"))
+                    lost.append((stack, r, sorted(
+                        s for s in wanted
+                        if any(a <= hi and lo <= b for a, b in fallback.scripts[s]))))
+                continue
+            old = fonts.get((stack, r))
+            new = glyph_fallback.merge_range(old, fb_data, blocks, name=name, range_key=r)
+            if new is not old:
+                fonts[(stack, r)] = new
+                merged += 1
+    for stack, r, lost_scripts in lost:
+        # Only reachable under STREETZIM_ALLOW_FONT_ERRORS=1 (otherwise the
+        # failed download already stopped the build).
+        print(f"    WARNING: {stack} lost glyphs in {r} for {', '.join(lost_scripts)} "
+              f"({merge_stacks[stack]} {r} failed to download); characters of that "
+              f"range draw blank in that style")
+    if merged:
+        print(f"    Merged fallback glyphs into {merged} ranges")
+        licence = viewer_assets.fallback_licence(lock)
+        if licence is not None:
+            # The OFL travels with the glyphs: fonts/NotoSans/OFL.txt
+            fonts[(FALLBACK_LICENCE_DIR, "OFL.txt")] = licence
+    return fonts
+
+
+FALLBACK_LICENCE_DIR = "NotoSans"
+
+
+def _fetch_font_ranges(tasks, *, fb_stacks=()):
+    """Download (or read from the cache) and verify each range: (primary
+    ranges, fallback ranges), both keyed by (stack, range)."""
     fonts = {}
+    fb_fonts = {}
 
-    # MapLibre expects: fonts/{fontstack}/{start}-{end}.pbf
-    # Use hyphenated names (no spaces) to avoid URL-encoding issues
-    # across different Kiwix implementations (kiwix-serve, Kiwix JS PWA, etc.)
-    #
-    # Map our style font names → openmaptiles CDN font names
-    font_map = {
-        "OpenSansRegular": "Open Sans Regular",
-        "OpenSansBold": "Open Sans Bold",
-        "OpenSansItalic": "Open Sans Italic",
-    }
-
-    font_cdn = "https://fonts.openmaptiles.org"
-
-    # Build the full list of (local_name, cdn_name, range_key) tasks so
-    # we can parallelize the downloads.
-    tasks = []
-    for local_name, cdn_name in font_map.items():
-        for start in range(0, 65536, 256):
-            range_key = f"{start}-{start + 255}"
-            tasks.append((local_name, cdn_name, range_key))
-
-    def fetch_one(task):
-        local_name, cdn_name, range_key = task
-        cdn_encoded = cdn_name.replace(" ", "%20")
-        url = f"{font_cdn}/{cdn_encoded}/{range_key}.pbf"
-        err = None
-        # Transient errors (timeouts, resets, 5xx) are retried: a range lost
-        # here ships as missing glyphs and those labels never render. Seen
-        # in 2 of 6 CI-sized builds: 1-9 of 768 ranges silently dropped.
-        for attempt in range(5):
-            try:
-                req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    return (local_name, range_key, resp.read(), None)
-            except urllib.error.HTTPError as e:
-                # 404 means this range has no glyphs in this font — skip it.
-                # MapLibre falls back to local rendering on 404.
-                if e.code == 404:
-                    return (local_name, range_key, None, "HTTP 404")
-                err = f"HTTP {e.code}"
-            except Exception as e:
-                err = str(e)
-            time.sleep(min(2 ** attempt, 10))
-        return (local_name, range_key, None, err)
+    def fetch_one(fr):
+        if fr.sha256 is None:
+            return (fr, None, "absent")
+        try:
+            return (fr, viewer_assets.fetch_verified(fr.url, fr.sha256), None)
+        except viewer_assets.IntegrityError as e:
+            return (fr, None, e)
+        except viewer_assets.DownloadError as e:
+            return (fr, None, str(e))
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
     skipped = 0
     failed = 0
+    mismatched = []
     with ThreadPoolExecutor(max_workers=16) as pool:
         futures = [pool.submit(fetch_one, t) for t in tasks]
         done = 0
         for fut in as_completed(futures):
-            local_name, range_key, data, err = fut.result()
+            fr, data, err = fut.result()
             done += 1
             if data is not None:
-                fonts[(local_name, range_key)] = data
-            elif err and err.startswith("HTTP 404"):
+                (fb_fonts if fr.stack in fb_stacks else fonts)[(fr.stack, fr.range_key)] = data
+            elif err == "absent":
                 skipped += 1
+            elif isinstance(err, viewer_assets.IntegrityError):
+                mismatched.append(str(err))
             else:
                 failed += 1
             if done % 100 == 0:
-                print(f"\r    Downloaded {len(fonts)} ranges ({done}/{len(tasks)} checked, {skipped} empty, {failed} errors)...", end="", flush=True)
+                print(f"\r    Got {len(fonts)} ranges ({done}/{len(tasks)} checked, {skipped} empty, {failed} errors)...", end="", flush=True)
 
-    print(f"\r    Downloaded {len(fonts)} font range files ({skipped} empty ranges skipped, {failed} errors)       ", flush=True)
+    print(f"\r    Got {len(fonts)} verified font range files ({skipped} empty ranges skipped, {failed} errors)       ", flush=True)
+    if mismatched:
+        # Never waived: content that is not what was reviewed and pinned.
+        raise SystemExit(f"{len(mismatched)} font glyph range(s) do not match their pinned "
+                         f"sha256, e.g. {sorted(mismatched)[0]}")
     if failed and os.environ.get("STREETZIM_ALLOW_FONT_ERRORS") != "1":
         # Fail rather than ship a map whose labels in some scripts never render.
         # STREETZIM_ALLOW_FONT_ERRORS=1 ships anyway (e.g. during a CDN outage).
         raise SystemExit(f"{failed} font glyph range(s) failed to download after retries; "
                          f"not building a ZIM with missing glyphs")
-    return fonts
+    return fonts, fb_fonts
 
 
-def download_maplibre(dest_dir):
-    """Download MapLibre GL JS files for embedding in the ZIM."""
-    print("  Downloading MapLibre GL JS...")
-    js_url = f"{MAPLIBRE_CDN}/maplibre-gl.js"
-    css_url = f"{MAPLIBRE_CDN}/maplibre-gl.css"
-
-    js_path = os.path.join(dest_dir, "maplibre-gl.js")
-    css_path = os.path.join(dest_dir, "maplibre-gl.css")
-
-    download_file(js_url, js_path, "maplibre-gl.js")
-    download_file(css_url, css_path, "maplibre-gl.css")
-
-    return js_path, css_path
+def vendored_maplibre():
+    """MapLibre GL JS and CSS from resources/vendor/maplibre-gl/, after
+    checking them against the lock file (nothing is downloaded)."""
+    try:
+        files = viewer_assets.vendored_maplibre()
+    except viewer_assets.IntegrityError as e:
+        raise SystemExit(str(e)) from None
+    print(f"  MapLibre GL JS {viewer_assets.maplibre_version()} (vendored, sha256 verified)")
+    return str(files["maplibre-gl.js"]), str(files["maplibre-gl.css"])

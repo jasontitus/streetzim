@@ -126,7 +126,9 @@ def test_anchors_sit_inside_their_region_bbox():
             w, s, e, n = (float(x) for x in c[2].split(","))
         except (ValueError, IndexError):
             continue
-        if not (s <= lat <= n and w <= lon <= e):
+        if w > e:                    # across the antimeridian (alaska)
+            e += 360
+        if not (s <= lat <= n and (w <= lon <= e or w <= lon + 360 <= e)):
             outside.append((rid, c[4], c[2]))
     assert not outside, f"anchor outside its own bbox: {outside}"
 

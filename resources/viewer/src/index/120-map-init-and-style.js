@@ -34,7 +34,9 @@ function fetchConfig(n) {
       throw err;
     });
 }
-fetchConfig(1)
+// 025-home-about-fatal.html has already replaced the page when the browser
+// lacks what the viewer needs (Fetch, Promise, MapLibre).
+if (!window.__szUnsupported) fetchConfig(1)
   .then(function(config) {
     // Check WebGL support before initializing MapLibre
     try {
@@ -42,9 +44,13 @@ fetchConfig(1)
       var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
       if (!gl) throw new Error('WebGL not available');
     } catch (e) {
-      document.getElementById('info').innerHTML =
-        '<h3>WebGL Required</h3><p>This map needs WebGL support. ' +
-        'Try the Leaflet/raster version instead.</p>';
+      szFatalPage({
+        title: 'This map needs WebGL',
+        lines: ['The map is drawn with WebGL, which this app or browser has turned off or does not support.'],
+        tips: ['Turn on hardware acceleration / WebGL in the browser or app settings, or update it.',
+               'Try another reader: a current Kiwix app, Kiwix JS, or a recent desktop browser.'],
+        details: describeError(e) + '\nUser agent: ' + (navigator.userAgent || '?')
+      });
       return;
     }
 
@@ -55,24 +61,28 @@ fetchConfig(1)
     // docs/todo-opening-view.md record why, so the next attempt does not
     // repeat them. The zoom is already extent-based (create_osm_zim's
     // get_center_and_zoom), so only the centre needs work.
+    // The last view of this map, unless the URL names one (140).
+    var openCam = _szOpeningCamera(config, location.hash, _szStorage());
     var map = new maplibregl.Map({
       container: 'map',
       style: makeStyle(config),
-      // Framed by fitBounds below when we have bounds; these stay as the
-      // pre-fit camera (and the whole answer for a ZIM with no bounds).
-      center: config.center,
-      zoom: config.zoom,
+      center: openCam.center,
+      zoom: openCam.zoom,
+      bearing: openCam.bearing,
+      pitch: openCam.pitch,
       minZoom: config.minZoom || 0,
       maxZoom: 20,
       attributionControl: true,
-      maxBounds: config.bounds ? [
-        [config.bounds[0] - 0.01, config.bounds[1] - 0.01],
-        [config.bounds[2] + 0.01, config.bounds[3] + 0.01]
-      ] : undefined
+      maxBounds: _szMaxBounds(config)   // the built box, no margin (140)
     });
     // Exposed so module-scope helpers (e.g. openWikiArticle) can stamp the
     // current view into the URL hash before navigating away.
     window.__szMap = map;
+    // POI icons are drawn on demand, the theme follows the OS scheme, and
+    // the RTL plugin loads when the first RTL label appears (135-137).
+    initPoiIcons(map);
+    initMapTheme(map, config);
+    initRtlText(map, config);
 
     // NOTE: the opening view is deliberately left as map-config.json ships
     // it. See docs/todo-opening-view.md.
@@ -135,8 +145,12 @@ fetchConfig(1)
     })();
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
-    // Scale bar with mi/km toggle — click to switch units
-    var scaleUnit = 'imperial';
+    initHomeButton(map, config);
+    initViewMemory(map, config);
+    initAbout(config);
+    // Scale bar with mi/km toggle — click to switch units. The choice is
+    // kept (szReadUnit/szWriteUnit, 140) and every distance follows it.
+    var scaleUnit = szReadUnit(_szStorage());
     map._streetzimUnit = scaleUnit;  // shared with driving-mode HUD
     var scaleControl = new maplibregl.ScaleControl({ unit: scaleUnit });
     map.addControl(scaleControl, 'bottom-left');
@@ -145,6 +159,7 @@ fetchConfig(1)
         scaleUnit = scaleUnit === 'imperial' ? 'metric' : 'imperial';
         scaleControl.setUnit(scaleUnit);
         map._streetzimUnit = scaleUnit;
+        szWriteUnit(_szStorage(), scaleUnit);
         map.fire('streetzim.units', { unit: scaleUnit });
       }
     });
@@ -189,6 +204,17 @@ fetchConfig(1)
     map.addControl(geolocate, 'bottom-right');
     geolocate.on('geolocate', function(pos) { _onLocated(pos); });
 
+    // #info, #attr-btn and the scale bar sit above MapLibre's attribution,
+    // which wraps to more lines on a phone when the satellite credit joins
+    // it: its height is published as --sz-attrib-h for their CSS.
+    (function () {
+      var attrib = document.querySelector('.maplibregl-ctrl-attrib');
+      if (!attrib || typeof ResizeObserver === 'undefined') return;
+      new ResizeObserver(function () {
+        document.documentElement.style.setProperty('--sz-attrib-h', attrib.offsetHeight + 'px');
+      }).observe(attrib);
+    })();
+
     // Satellite layer toggle
     if (config.hasSatellite) {
       var toggleBtn = document.getElementById('layer-toggle');
@@ -209,9 +235,13 @@ fetchConfig(1)
         var satExt = config.satelliteFormat || 'webp';
         var satTileSize = config.satelliteTileSize || 256;
         // Use zimtile:// protocol for retry logic on Kiwix service worker
+        // EOX requires its credit in the map itself; MapLibre shows a
+        // source's attribution while one of its layers is visible.
+        var satCredit = _szSatelliteCreditHtml(config);
         map.addSource('satellite', {
           type: 'raster',
           tiles: ['zimtile://' + baseUrl + 'satellite/{z}/{x}/{y}.' + satExt],
+          attribution: satCredit,
           tileSize: satTileSize,
           minzoom: 0,
           maxzoom: config.satelliteMaxZoom || 14
@@ -339,6 +369,14 @@ fetchConfig(1)
         });
       }
 
+      // The theme repainted the base layers from makeStyle(): what
+      // hideSatellite restores is now stale, and while satellite is on its
+      // label/road overrides were just overwritten. Recapture, re-apply.
+      map.on('streetzim.theme', function() {
+        satSavedPaint = null;
+        if (satelliteVisible) showSatellite();
+      });
+
       toggleBtn.addEventListener('click', function() {
         satelliteVisible = !satelliteVisible;
         toggleBtn.classList.toggle('active-control', satelliteVisible);
@@ -361,7 +399,10 @@ fetchConfig(1)
           type: 'raster-dem',
           tiles: ['zimtile://' + baseUrl + 'terrain/{z}/{x}/{y}.webp'],
           tileSize: 256,
-          minzoom: 0,
+          // Without a world DEM the build starts terrain at the lowest zoom
+          // this view can reach (streetzim/terrain.py), so nothing is asked
+          // for below it.
+          minzoom: config.terrainMinZoom || 0,
           maxzoom: config.terrainMaxZoom || 12,
           encoding: 'mapbox'
         });
@@ -550,11 +591,27 @@ fetchConfig(1)
       var overtureSection = document.getElementById('attr-overture-section');
       if (overtureSection) overtureSection.style.display = '';
     }
+    // Ready-made tiles (streetzim --mbtiles-url): whose they are, as
+    // map-config.json's tileSource records them. Text only, never HTML.
+    var ts = config.tileSource;
+    if (ts && typeof ts.name === 'string' && ts.name) {
+      var tsSection = document.getElementById('attr-tiles-section');
+      var tsName = document.getElementById('attr-tiles-name');
+      var tsMeta = document.getElementById('attr-tiles-meta');
+      if (tsSection && tsName && tsMeta) {
+        tsName.textContent = ts.name;
+        tsMeta.textContent = [ts.version && 'version ' + ts.version,
+                              ts.osmDate && 'OSM data ' + ts.osmDate,
+                              ts.homepage].filter(Boolean).join(' \u2014 ');
+        tsSection.style.display = '';
+      }
+    }
     // Same for the other optional layers: a ZIM without satellite imagery
     // must not show the imagery's non-commercial licence as if it applied.
     [['attr-satellite-section', config.hasSatellite],
      ['attr-terrain-section', config.hasTerrain],
-     ['attr-wiki-section', config.hasWikidata || config.hasWikiArticles]
+     ['attr-wiki-section', config.hasWikidata || config.hasWikiArticles],
+     ['attr-rtl-section', config.rtlTextPlugin]
     ].forEach(function (s) {
       var el = document.getElementById(s[0]);
       if (el && s[1]) el.style.display = '';
@@ -666,6 +723,23 @@ fetchConfig(1)
         retry.firstChild.addEventListener('click', function(ev) { ev.preventDefault(); location.reload(); });
         infoEl.appendChild(retry);
       }
+      return;
+    }
+    // map-config.json never arrived: nothing can be drawn, so say so on
+    // a full page. A failure after the map exists keeps the small #info
+    // note, so a bug in one feature does not hide a working map.
+    if (isConfig && !window.__szMap) {
+      szFatalPage({
+        title: 'This map could not be opened',
+        lines: ['Its settings file, map-config.json, could not be read' +
+                (status ? ' (the reader answered HTTP ' + status + ')' : '') + '.'],
+        tips: ['Try again: a reader that is still opening the file can miss the first requests.',
+               'If it keeps failing, the file may be incomplete: check its size, or download it again.',
+               'In Kiwix JS, use ServiceWorker mode, not JQuery mode.'],
+        retry: true,
+        details: describeError(err) + '\nURL: ' + err._url + '\nUser agent: ' +
+                 (navigator.userAgent || '?') + '\n\n' + _debugLog.join('\n')
+      });
       return;
     }
     showFatalError('Error loading map', err, err && err._url);

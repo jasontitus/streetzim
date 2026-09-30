@@ -49,6 +49,54 @@ def tile_to_lnglat(z, x, y, px, py, extent=4096):
     return lon, lat
 
 
+# OSM keys that tilemaker's profile (resources/tilemaker/
+# process-openmaptiles.lua, GetPOIRank: ``class = poiClasses[v] or k``)
+# writes as a POI's ``class`` when it has no OpenMapTiles class for the
+# value, e.g. amenity=pharmacy becomes class "amenity", subclass
+# "pharmacy". None of them is an OpenMapTiles class, so a Planetiler tile
+# (OpenFreeMap) never carries one. The profile's other fallback keys are
+# real OpenMapTiles classes that Planetiler writes too (shop, railway,
+# aerialway) and are kept; tests/test_search_extract.py checks this list
+# against the profile's poiTags.
+RAW_OSM_KEY_CLASSES = frozenset({
+    "amenity", "barrier", "building", "highway", "historic", "landuse",
+    "leisure", "sport", "tourism", "waterway",
+})
+
+
+def feature_subtype(props):
+    """A search record's ``s`` from a tile feature's properties: its
+    ``class``, or ``subclass`` when there is no class or the class is only
+    the raw OSM key (``RAW_OSM_KEY_CLASSES``). So a tilemaker pharmacy is
+    ``pharmacy``, as on OpenFreeMap, not ``amenity``. This brings the two
+    tile sources closer, not level: where tilemaker's profile falls back to
+    a real OpenMapTiles class, that class stays (a bakery is ``shop`` on
+    tilemaker tiles; on OpenFreeMap it is ``bakery``)."""
+    cls = props.get("class", "")
+    sub = props.get("subclass", "")
+    if cls in RAW_OSM_KEY_CLASSES and sub:
+        return sub
+    return cls or sub
+
+
+def search_record(name, feature_type, props, lat, lon):
+    """The raw search-feature dict for one tile feature. When
+    ``feature_subtype`` replaced a raw-key class by the subclass, the key
+    is kept in ``osm_key``, so a later pass can still tell a generic
+    bucket (``--overture-places`` refines ``amenity`` POIs to Overture's
+    finer category, see streetzim/addresses.py). ``osm_key`` is internal
+    to the feature JSONL: the ZIM's search records are built field by
+    field and never carry it. OpenFreeMap tiles never produce it."""
+    subtype = feature_subtype(props)
+    rec = {"name": name, "type": feature_type, "subtype": subtype}
+    cls = props.get("class", "")
+    if cls and subtype != cls and cls in RAW_OSM_KEY_CLASSES:
+        rec["osm_key"] = cls
+    rec["lat"] = lat
+    rec["lon"] = lon
+    return rec
+
+
 def build_location_index(mbtiles_path):
     """Build a spatial index that maps (lat, lon) to "City, State".
 
@@ -464,13 +512,12 @@ def _process_tile_partition(args):
                 except (IndexError, ZeroDivisionError, TypeError):
                     continue
                 lon, lat = tile_to_lnglat(z, x, y, px, py, extent)
-                subtype = props.get("class", "") or props.get("subclass", "")
                 dedup_key = (name.lower(), feature_type, round(lat, 4), round(lon, 4))
                 if dedup_key in seen:
                     continue
                 seen.add(dedup_key)
-                json.dump({"name": name, "type": feature_type, "subtype": subtype,
-                           "lat": lat, "lon": lon}, out_f, separators=(",", ":"))
+                json.dump(search_record(name, feature_type, props, lat, lon),
+                          out_f, separators=(",", ":"))
                 out_f.write("\n")
                 feat_count += 1
         count += 1
@@ -540,15 +587,8 @@ def _process_tile_for_search(args):
                 continue
 
             lon, lat = tile_to_lnglat(z, x, y, px, py, extent)
-            subtype = props.get("class", "") or props.get("subclass", "")
-
-            results.append({
-                "name": name,
-                "type": feature_type,
-                "subtype": subtype,
-                "lat": round(lat, 6),
-                "lon": round(lon, 6),
-            })
+            results.append(search_record(name, feature_type, props,
+                                         round(lat, 6), round(lon, 6)))
 
     return results
 
@@ -633,7 +673,7 @@ def _finish_features_streaming(raw_path, output_dir, n_unique):
     print("    Assigning location context to features...", flush=True)
     place_grid = defaultdict(list)
     n_places = 0
-    with open(raw_path, "r", encoding="utf-8") as fin:
+    with open(raw_path, encoding="utf-8") as fin:
         for line in fin:
             f = json.loads(line)
             if f.get("type") == "place":
@@ -661,7 +701,7 @@ def _finish_features_streaming(raw_path, output_dir, n_unique):
 
     t_ann = time.time()
     done_rows = 0
-    with open(raw_path, "r", encoding="utf-8") as fin, \
+    with open(raw_path, encoding="utf-8") as fin, \
             open(keyed_path, "w", encoding="utf-8") as fout, \
             ProcessPoolExecutor(max_workers=workers,
                                 initializer=_init_location_worker,
@@ -711,7 +751,7 @@ def _finish_features_streaming(raw_path, output_dir, n_unique):
     os.unlink(keyed_path)
 
     features_path = os.path.join(output_dir, "search_features.jsonl")
-    with open(sorted_path, "r", encoding="utf-8") as fin, \
+    with open(sorted_path, encoding="utf-8") as fin, \
             open(features_path, "w", encoding="utf-8") as fout:
         for line in fin:
             parts = line.split("\t", 2)
@@ -820,7 +860,7 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
         total_features = 0
         ctx = multiprocessing.get_context("spawn")
         with ctx.Pool(num_workers) as pool:
-            for output_file, batch_count, batch_feats in pool.imap_unordered(
+            for _output_file, batch_count, batch_feats in pool.imap_unordered(
                 _process_tile_partition, partitions
             ):
                 processed += batch_count
@@ -859,7 +899,7 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
             tmp_file = part_args[4]
             if not os.path.exists(tmp_file):
                 continue
-            with open(tmp_file, "r") as f:
+            with open(tmp_file) as f:
                 for line in f:
                     feat = json.loads(line)
                     dedup_key = int.from_bytes(hashlib.blake2b(
@@ -1142,7 +1182,7 @@ def merge_streets_in_file(path):
         return (0, 0)
     tmp = path + ".merging"
     n_in = n_out = 0
-    with open(path, "r", encoding="utf-8") as fin, \
+    with open(path, encoding="utf-8") as fin, \
             open(tmp, "w", encoding="utf-8") as fout:
         group, group_name = [], None
 

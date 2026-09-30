@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
 od = pytest.importorskip("offliner_definition")
-from streetzim.cli import build_parser  # noqa: E402
+from streetzim.cli import PROFILES, build_parser, parse_args, profile_features  # noqa: E402
 
 DEF = json.loads((ROOT / "offliner-definition.json").read_text())
 
@@ -35,7 +35,17 @@ def test_shape_matches_what_zimfarm_expects():
     flags = set(DEF["flags"])
     assert all(m["flag"] in flags for m in DEF["zimMetadata"])
     assert {m["metadata"] for m in DEF["zimMetadata"]} >= {"Name", "Title", "Description"}
-    assert "satellite" not in flags          # never offered: CC BY-NC-SA
+    # Satellite: opt-in, off by default, each source's licence stated.
+    sat = DEF["flags"]["satellite"]
+    assert sat["type"] == "boolean" and not sat["required"]
+    assert "Off by default" in sat["description"] and "CC BY 4.0" in sat["description"]
+    src = DEF["flags"]["satellite_source"]
+    assert src["choices"] == ["s2cloudless-2016", "s2cloudless-2021"]
+    assert "CC BY 4.0" in src["description"] and "CC BY-NC-SA 4.0" in src["description"]
+    assert "NON-COMMERCIAL" in src["description"]
+    assert DEF["flags"]["satellite_accept_noncommercial"]["type"] == "boolean"
+    assert (DEF["flags"]["satellite_max_zoom"]["min"],
+            DEF["flags"]["satellite_max_zoom"]["max"]) == (0, 14)
     assert DEF["modelValidators"] == [{"name": "check_exclusive_fields",
                                        "fields": ["area", "include_poly", "bbox"]}]
     assert "monaco" in DEF["flags"]["area"]["choices"]
@@ -62,14 +72,101 @@ def test_every_offered_flag_parses():
               for k, f in DEF["flags"].items()}
     del config["area"], config["include_poly"]      # exclusive with bbox
     config.update(output="/output", stats_filename="/output/task_progress.json",
-                  bbox="7.4,43.72,7.44,43.76", default_view="43.7,7.4,12", max_zoom=12)
-    args = build_parser().parse_args(_argv_for(config))
+                  bbox="7.4,43.72,7.44,43.76", default_view="43.7,7.4,12", max_zoom=12,
+                  overture_release="2026-09-23.1")
+    args = parse_args(_argv_for(config))
     assert args.routing is False             # no_routing ticked
+    assert args.terrain is True              # terrain: "on"
     assert args.stats_filename == "/output/task_progress.json"
+    assert args.wikipedia and args.wikipedia_zim_url == "https://example.org/x"
 
 
 def test_required_flags_agree_with_the_parser():
     required = {k for k, f in DEF["flags"].items() if f["required"]}
-    assert required == {"name", "title", "description"}
+    # profile too, on Zimfarm only: every recipe states it next to its
+    # resources, while the command line defaults to full.
+    assert required == {"name", "title", "description", "profile"}
     with pytest.raises(SystemExit):
         build_parser().parse_args(_argv_for({"name": "n", "title": "t"}))
+
+
+def test_profile_is_a_required_string_enum():
+    f = DEF["flags"]["profile"]
+    assert f["type"] == "string-enum" and f["choices"] == list(PROFILES)
+    assert f["required"] and "default" not in f
+
+
+def test_each_profile_feature_is_one_on_off_enum():
+    # One key per feature, unset meaning "as the profile says": a recipe
+    # cannot switch a feature on and off at once.
+    features = profile_features(build_parser())
+    assert {"wikidata", "wikipedia", "overture"} <= features
+    for dest in features:
+        f = DEF["flags"][dest]
+        assert f["type"] == "string-enum" and f["choices"] == ["on", "off"], dest
+        assert not f["required"] and "default" not in f, dest
+        assert f"no_{dest}" not in DEF["flags"], dest
+
+
+@pytest.mark.parametrize("config, expect", [
+    ({"profile": "basic"}, {"wikidata": False, "wikipedia": False, "overture": False}),
+    ({"profile": "basic", "wikidata": "on"}, {"wikidata": True, "overture": False}),
+    ({"profile": "full", "overture": "off"}, {"overture": False, "wikipedia": True}),
+    ({"profile": "full"}, {"wikidata": True, "wikipedia": True, "overture": True}),
+])
+def test_recipe_configs_become_the_features_they_say(config, expect):
+    base = {"name": "osm_en_monaco", "title": "Monaco", "description": "d", "area": "monaco"}
+    args = parse_args(_argv_for({**base, **config}))
+    assert {k: getattr(args, k) for k in expect} == expect
+
+
+def test_zimfarm_accepts_the_definition_and_its_recipes():
+    """Zimfarm's own models (zimfarm_backend on PYTHONPATH; CI pins the
+    commit): the definition, a recipe per profile, a bad profile refused,
+    and the command Zimfarm builds from a recipe parses here."""
+    import os
+    for key in ("POSTGRES_URI", "JWT_SECRET"):
+        os.environ.setdefault(key, "unused")
+    models = pytest.importorskip("zimfarm_backend.common.schemas.offliners.models")
+    from pydantic import ValidationError
+    from zimfarm_backend.common.schemas.offliners.builder import build_offliner_model
+    from zimfarm_backend.common.schemas.orms import OfflinerSchema
+    from zimfarm_backend.utils.offliners import compute_flags
+    spec = models.OfflinerSpecSchema.model_validate(DEF)
+    # model_construct: upstream's image-name enum has no streetzim yet
+    # (docs/zimfarm.md, "What Zimfarm needs on its side").
+    off = OfflinerSchema.model_construct(
+        id="streetzim", base_model="DashModel", docker_image_name="openzim/streetzim",
+        command_name="streetzim", ci_secret_hash=None)
+    model = build_offliner_model(off, spec)
+    base = {"offliner_id": "streetzim", "name": "osm_en_monaco", "title": "Monaco",
+            "description": "Offline Monaco", "area": "monaco"}
+    for extra, expect in [({"profile": "basic", "overture": "on"},
+                           {"profile": "basic", "overture": True, "wikidata": False}),
+                          ({"profile": "full", "wikipedia": "off"},
+                           {"profile": "full", "wikipedia": False, "overture": True}),
+                          ({"profile": "full"}, {"profile": "full", "wikipedia": True})]:
+        recipe = model.model_validate({**base, **extra})
+        flags = recipe.model_dump(mode="json")
+        argv = compute_flags(flags)
+        args = parse_args([a.replace("'", "") for a in argv])
+        assert {k: getattr(args, k) for k in expect} == expect, argv
+    for bad in ({"profile": "everything"}, {}, {"profile": "full", "wikidata": "yes"},
+                {"profile": "full", "wikidata": True}):
+        with pytest.raises(ValidationError):
+            model.model_validate({**base, **bad})
+    with pytest.raises(ValidationError):
+        model.model_validate({**base, "overture-release": "newest"})
+
+
+def test_terrain_is_a_profile_feature():
+    # --terrain/--no-terrain (streetzim/terrain.py's openZIM layout) joins
+    # the profile: on with full, off with basic, "terrain" on/off on Zimfarm.
+    f = DEF["flags"]["terrain"]
+    assert f["type"] == "string-enum" and f["choices"] == ["on", "off"]
+    assert "no_terrain" not in DEF["flags"]
+    base = {"name": "osm_en_monaco", "title": "Monaco", "description": "d", "area": "monaco"}
+    for config, want in [({"profile": "full"}, True), ({"profile": "basic"}, False),
+                         ({"profile": "full", "terrain": "off"}, False),
+                         ({"profile": "basic", "terrain": "on"}, True)]:
+        assert parse_args(_argv_for({**base, **config})).terrain is want, config

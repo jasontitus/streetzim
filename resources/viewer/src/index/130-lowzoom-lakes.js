@@ -39,9 +39,13 @@ function makeStyle(config) {
     "attribution": '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors | <a href="https://openmaptiles.org/">OpenMapTiles</a>'
   };
   if (config.bounds) {
-    sourceConfig.bounds = config.bounds;
+    // An area across the antimeridian has east past 180 (streetzim/area.py).
+    // MapLibre clamps source bounds to [-180, 180] and cannot express one
+    // that wraps, so such a source keeps its latitudes only.
+    sourceConfig.bounds = config.bounds[2] > 180
+      ? [-180, config.bounds[1], 180, config.bounds[3]] : config.bounds;
   }
-  return {
+  return _szThemeStyle({
     "version": 8,
     "name": "OSM Offline",
     "sources": {
@@ -572,21 +576,28 @@ function makeStyle(config) {
           "text-halo-width": 1
         }
       },
-      // POI Labels — show more POIs as zoom increases
+      // POI Labels — show more POIs as zoom increases. Icons (136-poi-icons.js)
+      // share the label's symbol, so icon and name collide as one unit and a
+      // POI shows both or neither; the label sits under the disc. A POI with
+      // an icon but no name appears only from z16, where there is room.
       {
         "id": "poi-label",
         "type": "symbol",
         "source": "openmaptiles",
         "source-layer": "poi",
         "minzoom": 14,
-        "filter": ["<=", ["get", "rank"],
-          ["step", ["zoom"], 4, 15, 10, 16, 25]
+        "filter": ["all",
+          ["<=", ["get", "rank"], ["step", ["zoom"], 4, 15, 10, 16, 25]],
+          ["any", ["has", "name"], ["has", "name:latin"], [">=", ["zoom"], 16]]
         ],
         "layout": {
           "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansRegular"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 14, 11, 18, 18],
-          "text-offset": [0, 0.5],
+          "icon-image": _szPoiIconExpr(),
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 14, 0.8, 17, 1],
+          "text-offset": ["case", ["==", _szPoiIconExpr(), ""],
+            ["literal", [0, 0.5]], ["literal", [0, 0.85]]],
           "text-anchor": "top"
         },
         "paint": {
@@ -596,6 +607,6 @@ function makeStyle(config) {
         }
       }
     ]
-  };
+  }, _szPrefersDark());
 }
 

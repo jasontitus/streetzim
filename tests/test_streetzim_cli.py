@@ -73,7 +73,10 @@ def no_network(monkeypatch, tmp_path):
 
 
 def plan(argv, tmp_path):
-    return cli.plan(cli.build_parser().parse_args(REQ + argv), tmp_path)
+    """plan() as main() reaches it (through --profile), with basic, which
+    fetches nothing but the extract (tests/test_streetzim_profiles.py
+    covers full)."""
+    return cli.plan(cli.parse_args(REQ + ["--profile", "basic"] + argv), tmp_path)
 
 
 def builder_args(argv):
@@ -88,12 +91,43 @@ def test_area_uses_geofabrik_extract_and_forwards_metadata(tmp_path, no_network)
     assert info["pbf_url"] == "https://download.geofabrik.de/europe/monaco-latest.osm.pbf"
     assert no_network == [info["pbf_url"]]
     ns = builder_args(argv)
-    assert ns.bbox == "7.40,43.72,7.44,43.76"
+    assert ns.bbox == "7.39,43.715,7.46,43.765"
     assert ns.zim_name == "osm_en_monaco" and ns.title == "Monaco"
     assert ns.publisher == "openZIM"
     assert ns.tags == "a;b"
     assert ns.map_center == "7.42,43.73" and ns.map_zoom == 13
     assert ns.routing and not ns.satellite
+    assert not ns.kiwix_poi_pages                      # off unless asked for
+
+
+def test_kiwix_poi_pages_is_forwarded(tmp_path, no_network):
+    argv, _ = plan(["--area", "monaco", "--kiwix-poi-pages"], tmp_path)
+    assert builder_args(argv).kiwix_poi_pages
+
+
+def test_monaco_preset_frames_all_of_monaco_with_sea_around_it():
+    """--area monaco is what CI and the Zimfarm recipe build. Its box used to
+    stop on Monaco's eastern border (7.44) and 500 m out to sea, so the sea
+    ended in a straight line and a desktop window could not fit the whole
+    country. Monaco: 7.409-7.440 E, 43.725-43.752 N."""
+    from create_osm_zim import KNOWN_AREAS
+    w, s, e, n = (float(v) for v in KNOWN_AREAS["monaco"]["bbox"].split(","))
+    assert w <= 7.409 - 0.01 and e >= 7.440 + 0.015      # ~1 km of margin east
+    assert s <= 43.725 - 0.009 and n >= 43.752 + 0.009   # ~1 km of sea south
+    # Wide enough for a 1280x800 window at the zoom that shows it all
+    # (MapLibre keeps the viewport inside the box): 3 km tall needs >= 0.06 deg.
+    assert e - w >= 0.06
+    assert e - w <= 0.1 and n - s <= 0.1                 # still a small CI build
+
+
+def test_terrain_follows_the_profile_and_its_flags(tmp_path, no_network):
+    def terrain(extra):
+        args = cli.parse_args(REQ + ["--area", "monaco"] + extra)
+        return builder_args(cli.plan(args, tmp_path)[0]).terrain
+    assert terrain([]) and terrain(["--profile", "full"])      # full is the default
+    assert not terrain(["--profile", "basic"])
+    assert not terrain(["--no-terrain"]) and not terrain(["--terrain=off"])
+    assert terrain(["--profile", "basic", "--terrain"])
 
 
 def test_geofabrik_poly_selects_its_extract(tmp_path, no_network):
@@ -158,7 +192,9 @@ def test_errors_are_raised_before_downloading_the_extract(tmp_path, no_network):
     with pytest.raises(ValueError, match="needs an OSM extract"):
         plan(["--bbox", "7.4,43.72,7.44,43.76", "--mbtiles", "t.mbtiles"], tmp_path)
     assert all(u.endswith(".poly") for u in no_network)
-    argv, _ = plan(["--bbox", "7.4,43.72,7.44,43.76", "--mbtiles", "t.mbtiles",
+    from tests.mbtiles_fixture import make_mbtiles
+    t = make_mbtiles(tmp_path / "t.mbtiles", [(0, 0, 0)])
+    argv, _ = plan(["--bbox", "7.4,43.72,7.44,43.76", "--mbtiles", str(t),
                     "--no-routing"], tmp_path)
     assert "--routing" not in argv and "--pbf" not in argv
 
@@ -201,19 +237,67 @@ END
 """
 
 
-def test_polys_and_bboxes_reaching_the_antimeridian_are_refused(tmp_path, monkeypatch):
+# Fiji as Geofabrik-style rings split at the antimeridian.
+FIJI_LIKE = """fiji
+1
+   172.84 -17.76
+   176.01 -23.12
+   180.0  -20.48
+   180.0  -12.65
+   176.51 -11.24
+   172.84 -17.76
+END
+2
+   -180.0   -14.72
+   -176.53  -19.27
+   -180.0   -20.94
+   -180.0   -14.72
+END
+END
+"""
+
+
+def _fake_poly(monkeypatch, text):
     def fake_fetch(url, dest):
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(RUSSIA_LIKE)
+        dest.write_text(text)
         return dest
     monkeypatch.setattr(cli, "fetch", fake_fetch)
-    with pytest.raises(ValueError, match="antimeridian"):
-        plan(["--include-poly", "https://example.org/russia.poly", "--pbf-url", "x"],
-             tmp_path)
-    for bad in ("170,10,180,20", "10,20,5,30", "1,2,3", "0,-91,1,1"):
+
+
+def test_polys_and_bboxes_across_the_antimeridian_are_one_unwrapped_box(tmp_path, monkeypatch):
+    # A ring drawn across ±180 (Russia's) is followed the short way.
+    _fake_poly(monkeypatch, RUSSIA_LIKE)
+    _, info = plan(["--include-poly", "https://example.org/russia.poly", "--pbf-url", "x"],
+                   tmp_path)
+    assert info["bbox"] == "19.600000,54.300000,191.000000,66.000000"
+    # Rings split at ±180 (Fiji's) join into one box, not a world band.
+    _fake_poly(monkeypatch, FIJI_LIKE)
+    _, info = plan(["--include-poly", "https://example.org/fiji.poly", "--pbf-url", "x"],
+                   tmp_path)
+    assert info["bbox"] == "172.840000,-23.120000,183.470000,-11.240000"
+    # Either spelling of a box across the antimeridian.
+    assert cli.parse_bbox_arg("172.8,-23,-176.5,-11") == (172.8, -23.0, 183.5, -11.0)
+    assert cli.parse_bbox_arg("172.8,-23,183.5,-11") == (172.8, -23.0, 183.5, -11.0)
+    assert cli.parse_bbox_arg("170,10,180,20") == (170.0, 10.0, 180.0, 20.0)
+    for bad in ("10,20,5,30", "1,2,3", "0,-91,1,1", "170,10,550,20", "5,1,5,2"):
         with pytest.raises(ValueError):
             cli.parse_bbox_arg(bad)
     assert cli.parse_bbox_arg("7.40,43.72,7.44,43.76") == (7.40, 43.72, 7.44, 43.76)
+
+
+def test_far_apart_parts_still_split_the_short_way_round():
+    # New Caledonia (165E) and French Polynesia (150W) are 45° apart
+    # across the antimeridian, not 315° the other way; France is still
+    # the part built.
+    france = ((-5.0, 42.0, 8.0, 51.0), 60.0)
+    nc = ((163.5, -22.7, 168.2, -19.5), 2.0)
+    pf = ((-154.0, -28.0, -134.0, -7.0), 1.0)
+    box, left_out = cli.area_bbox([france, nc, pf])
+    assert box == france[0] and len(left_out) == 2
+    assert cli._gap(nc[0], (-179.5, -21.0, -178.0, -20.0)) == pytest.approx(12.3)
+    assert cli._union([(177.0, -20.0, 180.0, -16.0), (-180.0, -18.0, -179.0, -15.0)]) \
+        == (177.0, -20.0, 181.0, -15.0)
 
 
 def test_placeholders_are_filled_like_maps2zim():
@@ -244,7 +328,7 @@ def test_illustration_checked_before_downloads_and_resolved(tmp_path, no_network
     assert no_network == []
     from PIL import Image
     Image.new("RGB", (64, 64)).save(tmp_path / "icon.png")
-    argv, _ = cli.plan(cli.build_parser().parse_args(REQ + ["--area", "monaco"]), tmp_path,
+    argv, _ = cli.plan(cli.parse_args(REQ + ["--area", "monaco", "--profile=basic"]), tmp_path,
                        illustration=(tmp_path / "icon.png"))
     ill = argv[argv.index("--illustration") + 1]
     assert Path(ill).is_absolute()
@@ -257,3 +341,21 @@ def test_help_renders(module):
     import importlib
     text = importlib.import_module(module).build_parser().format_help()
     assert "option_strings" not in text and "_ArgumentGroup" not in text
+
+
+def test_bands_round_the_world_are_still_refused(tmp_path, monkeypatch):
+    # The old guard: an area is a box, and one wider than 180° is a band
+    # round the world, crossing or not.
+    for band in ("-170,0,170,10", "-180,-85,180,85", "-180,-90,180,90", "10,0,-10,10"):
+        with pytest.raises(ValueError, match="at most 180"):
+            cli.parse_bbox_arg(band)
+    assert cli.parse_bbox_arg("-90,0,90,10") == (-90.0, 0.0, 90.0, 10.0)   # exactly 180
+    # A whole-world ring has no box: a clear error, not "min < max".
+    _fake_poly(monkeypatch, "world\n1\n  -180 -90\n  180 -90\n  180 90\n"
+                            "  -180 90\n  -180 -90\nEND\nEND\n")
+    with pytest.raises(ValueError, match="all the way round"):
+        plan(["--include-poly", "https://example.org/world.poly", "--pbf-url", "x"], tmp_path)
+    ring = "ring\n1\n" + "".join(f"  {x} -70\n" for x in (-180, -90, 0, 90, 180)) + "END\nEND\n"
+    _fake_poly(monkeypatch, ring)
+    with pytest.raises(ValueError, match="all the way round"):
+        plan(["--include-poly", "https://example.org/ring.poly", "--pbf-url", "x"], tmp_path)

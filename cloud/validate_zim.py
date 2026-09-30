@@ -384,6 +384,26 @@ def _chk_places_categories(arc) -> tuple[str, str]:
             f"{len(cats)} categories; sample {slug} has {len(recs):,} records")
 
 
+def _probe_chip_files(arc) -> str | None:
+    """First chip file found at a path a chip split would write, else None.
+
+    Probes paths rather than listing the archive (millions of entries on a
+    continent): every chip id cloud/chip_rules.py knows plus the pre-merge
+    pair, as a single file, the first geo shard, or the first name-hash
+    bucket. Enough to catch a split whose manifest entry went missing."""
+    from cloud.chip_rules import CHIP_RULES
+    ids = [c.id for c in CHIP_RULES] + ["restaurants", "cafes"]
+    for cid in ids:
+        for sfx in ("", "-g000", "-0", "-00"):
+            path = f"category-index/chip-{cid}{sfx}.json"
+            try:
+                arc.get_entry_by_path(path)
+            except Exception:
+                continue
+            return path
+    return None
+
+
 def _chk_find_chips(arc) -> tuple[str, str]:
     """When `--split-find-chips` was used, the manifest must declare a
     `chips` map AND every referenced `chip-{id}.json` file must exist
@@ -405,6 +425,12 @@ def _chk_find_chips(arc) -> tuple[str, str]:
         if isinstance(chips, dict):
             return ("fail", "manifest declares an empty chips map — every "
                             "Find chip was dropped (bad --split-find-chips repack?)")
+        # No `chips` key but chip files present: the split ran and its
+        # manifest entry was lost (the viewer then hides the whole rail).
+        orphan = _probe_chip_files(arc)
+        if orphan:
+            return ("fail", f"chip files present ({orphan}) but the manifest "
+                            f"declares no chips — the viewer will hide Find")
         return ("skip", "no chips declared in manifest")
     # Every declared chip must have a corresponding file that parses.
     # Sub-bucketed chips are split into chip-{cid}-{suffix}.json files,
@@ -929,6 +955,8 @@ def _chk_vector_tiles(arc) -> tuple[str, str]:
     probes: list[str] = []
     if bbox and all(v is not None for v in bbox):
         lon = (bbox[0] + bbox[2]) / 2
+        if lon > 180:       # an area across the antimeridian (east past 180)
+            lon -= 360
         lat = (bbox[1] + bbox[3]) / 2
         for z in (8, 11, 14):
             x, y = _lonlat_to_tile(lon, lat, z)
@@ -1381,7 +1409,8 @@ def _chk_category_index(arc) -> tuple[str, str]:
                     f"category_shards.{slug} declares no shards")
         def _missing(suffix: str) -> bool:
             try:
-                arc.get_entry_by_path(f"category-index/{slug}-{suffix}.json")
+                # Called only within this iteration, so the current slug.
+                arc.get_entry_by_path(f"category-index/{slug}-{suffix}.json")  # noqa: B023
                 return False
             except Exception:
                 return True
@@ -1520,9 +1549,22 @@ def _bbox_from_zim(arc) -> tuple[float, float, float, float] | None:
 
 
 def _expected_tile_count(bbox, zoom: int) -> int:
-    """Number of z/x/y tiles whose extent intersects bbox at zoom ``zoom``."""
+    """Number of z/x/y tiles whose extent intersects bbox at zoom ``zoom``.
+
+    A bbox across the antimeridian has maxLon past 180 (streetzim/area.py):
+    its two sides are counted, the columns they share (z0) once."""
     import math
     minlon, minlat, maxlon, maxlat = bbox
+    if maxlon > 180:
+        n = 1 << zoom
+        west = _expected_tile_count((minlon, minlat, 180.0, maxlat), zoom)
+        east = _expected_tile_count((-180.0, minlat, maxlon - 360.0, maxlat), zoom)
+        rows = _expected_tile_count((-180.0, minlat, -180.0, maxlat), zoom)
+        # Columns of each side; a column both have is counted once.
+        west_cols = west // rows if rows else 0
+        east_cols = east // rows if rows else 0
+        shared = max(0, west_cols + east_cols - n)
+        return (west_cols + east_cols - shared) * rows
     n = 1 << zoom
     def lon2x(lon: float) -> int:
         return int((lon + 180.0) / 360.0 * n)
@@ -1625,10 +1667,13 @@ def _audit_tiles(arc) -> tuple[str, str]:
         if not any(k == kind for (k, _z) in counts):
             continue
         zmax = 14 if kind == "vector" else declared_max
+        # Terrain built without a world DEM starts at the lowest zoom the
+        # viewer can show (map-config terrainMinZoom, streetzim/terrain.py).
+        zmin = int(cfg.get("terrainMinZoom") or 0) if kind == "terrain" else 0
 
         zoom_frac: dict[int, float] = {}
         per_zoom_summary: list[str] = []
-        for z in range(0, zmax + 1):
+        for z in range(zmin, zmax + 1):
             actual = counts.get((kind, z), 0)
             expected = _expected_tile_count(bbox, z)
             if expected == 0:
@@ -1808,7 +1853,7 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
     # If zimcheck itself can't load (xapian symbol mismatch etc.),
     # the binary exits early with a dyld error — treat as skipped
     # so a broken local install doesn't hard-fail the whole pipeline.
-    if "Symbol not found" in out or "dyld" in out and "Library not loaded" in out:
+    if "Symbol not found" in out or ("dyld" in out and "Library not loaded" in out):
         return "pass", "zimcheck binary failed to load libraries (skipped)"
     # zimcheck groups errors into multi-line blocks: a "[ERROR] Foo:"
     # header followed by indented child lines. zimru's "Invalid internal

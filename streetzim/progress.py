@@ -38,7 +38,7 @@ class StatsFile:
         """Phase N of M is starting, so N-1 phases are done."""
         self.write(number - 1, total)
 
-    def attach(self) -> "StatsFile":
+    def attach(self) -> StatsFile:
         common.PHASE_LISTENERS.append(self.on_phase)
         return self
 

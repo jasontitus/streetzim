@@ -25,18 +25,20 @@ to allow incremental updates and efficient loading.
 
 import argparse
 import json
-import os
 import sqlite3
 import sys
 import time
 import urllib.error
-import urllib.request
 import urllib.parse
 from collections import defaultdict
 from pathlib import Path
 
+from cloud.wikimedia_http import Pacer, TransientError, get_json, polite_pacer, user_agent
+from streetzim.paths import cache_root
+
 SCRIPT_DIR = Path(__file__).parent.resolve()
-DEFAULT_CACHE_DIR = Path(os.environ.get("STREETZIM_CACHE_DIR") or SCRIPT_DIR) / "wikidata_cache"
+# $STREETZIM_CACHE_DIR, else this checkout, else a user cache dir when installed.
+DEFAULT_CACHE_DIR = cache_root() / "wikidata_cache"
 
 # Wikidata SPARQL endpoint
 WIKIDATA_SPARQL = "https://query.wikidata.org/sparql"
@@ -56,9 +58,9 @@ WIKIDATA_PROPERTIES = {
     "P31": "instance_of",
 }
 
-# Wikimedia's User-Agent policy wants a real contact URL; github.com/user/…
-# was a placeholder.
-USER_AGENT = "StreetZIM/1.0 (https://github.com/jasontitus/streetzim; wikidata cache builder)"
+# Wikimedia's User-Agent policy wants a way to reach the operator: the
+# project's issue tracker, plus STREETZIM_WIKI_CONTACT when set.
+USER_AGENT = user_agent("wikidata-cache")
 
 
 def _qid_cache_path(pbf_path, cache_dir):
@@ -166,7 +168,7 @@ def extract_qids_from_pbf(pbf_path, cache_dir=None):
                     pass
 
             feature = {"name": name, "type": ftype}
-            if lat is not None:
+            if lat is not None and lon is not None:  # set together above
                 feature["lat"] = round(lat, 6)
                 feature["lon"] = round(lon, 6)
 
@@ -313,6 +315,8 @@ def _lookup_qids_by_name(features, batch_size=50):
     qid_features = {}
     total = len(features)
 
+    # 0.5 s from each response to the next query; 429s widen it.
+    pacer = Pacer(0.5)
     for i in range(0, total, batch_size):
         batch = features[i:i + batch_size]
         # Build SPARQL VALUES block
@@ -344,7 +348,7 @@ def _lookup_qids_by_name(features, batch_size=50):
         """
 
         try:
-            results = _run_sparql(sparql)
+            results = _run_sparql(sparql, pacer=pacer)
             for r in results:
                 qid = r["item"]["value"].rsplit("/", 1)[-1]
                 name = r.get("name", {}).get("value", "")
@@ -353,49 +357,36 @@ def _lookup_qids_by_name(features, batch_size=50):
                     if f["name"] == name:
                         qid_features[qid] = f
                         break
+        except TransientError as e:
+            print(f"    Warning: SPARQL lookup failed for batch {i}: {e}")
+            if e.stop:
+                print("    Warning: not looking up the rest (the endpoint will not answer)")
+                break
         except Exception as e:
             print(f"    Warning: SPARQL lookup failed for batch {i}: {e}")
 
         if (i + batch_size) % 200 == 0:
             print(f"    Looked up {min(i + batch_size, total)}/{total} features...")
-        time.sleep(0.5)  # Rate limit
 
     print(f"    Resolved {len(qid_features)} Q-IDs from name lookups")
     return qid_features
 
 
-def _run_sparql(query, retries=3):
-    """Execute a SPARQL query against the Wikidata endpoint."""
+def _run_sparql(query, retries=3, pacer=None):
+    """Execute a SPARQL query against the Wikidata endpoint.
+
+    429/5xx/network errors are retried honouring Retry-After
+    (cloud/wikimedia_http.py), paced by `pacer` when given; raises when
+    they outlive the retries, and the callers skip that batch (nothing is
+    cached for it), or stop when the error says to.
+    """
     url = WIKIDATA_SPARQL + "?" + urllib.parse.urlencode({
         "query": query,
         "format": "json",
     })
-    headers = {
-        "User-Agent": USER_AGENT,
-        "Accept": "application/sparql-results+json",
-    }
-
-    for attempt in range(retries):
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                return data.get("results", {}).get("bindings", [])
-        except urllib.error.HTTPError as e:
-            if e.code == 429:  # Rate limited
-                wait = 2 ** (attempt + 2)
-                print(f"    Rate limited, waiting {wait}s...")
-                time.sleep(wait)
-            elif e.code == 500 and attempt < retries - 1:
-                time.sleep(2 ** attempt)
-            else:
-                raise
-        except Exception:
-            if attempt < retries - 1:
-                time.sleep(2 ** attempt)
-            else:
-                raise
-    return []
+    data = get_json(url, user_agent=USER_AGENT, retries=retries, timeout=60,
+                    accept="application/sparql-results+json", pacer=pacer)
+    return (data or {}).get("results", {}).get("bindings", [])
 
 
 def fetch_wikidata_batch(qids, batch_size=40, cache_dir=None, save_interval=10000):
@@ -412,6 +403,9 @@ def fetch_wikidata_batch(qids, batch_size=40, cache_dir=None, save_interval=1000
 
     print(f"  Fetching Wikidata properties for {total} Q-IDs...")
     start_time = time.time()
+    # 1 s from each response to the next query (the query service allows
+    # about 60 a minute to an anonymous client); 429s widen it.
+    pacer = Pacer(1.0)
 
     for i in range(0, total, batch_size):
         batch = qid_list[i:i + batch_size]
@@ -443,10 +437,15 @@ def fetch_wikidata_batch(qids, batch_size=40, cache_dir=None, save_interval=1000
         """
 
         try:
-            bindings = _run_sparql(sparql)
+            bindings = _run_sparql(sparql, pacer=pacer)
+        except TransientError as e:
+            print(f"    Warning: SPARQL failed for batch {i}: {e}")
+            if e.stop:
+                print("    Warning: not fetching the rest (the endpoint will not answer)")
+                break
+            continue
         except Exception as e:
             print(f"    Warning: SPARQL failed for batch {i}: {e}")
-            time.sleep(2)
             continue
 
         # Process results — may have multiple rows per Q-ID (multiple instance_of, etc.)
@@ -523,9 +522,6 @@ def fetch_wikidata_batch(qids, batch_size=40, cache_dir=None, save_interval=1000
             save_cache(cache_dir, results)
             last_save = done
 
-        # Rate limit: Wikidata SPARQL allows ~60 req/min for anonymous users
-        time.sleep(1.0)
-
     print(f"\r    Fetched properties for {len(results)}/{total} Q-IDs in {time.time() - start_time:.0f}s")
     return results
 
@@ -538,23 +534,47 @@ def _val(row, key):
     return ""
 
 
-def fetch_wikipedia_extracts(wikidata_entries, batch_size=20):
+# An entry the API answered for but gave no extract (no such page, an
+# empty lead) carries NO_EXTRACT: True and is not asked again. An entry
+# with a wikipedia_title and neither field was never answered (a rate
+# limit, 5xx, a skipped or stopped batch) and is asked on the next build.
+NO_EXTRACT = "no_extract"
+
+
+def extract_pending(entry):
+    """True when `entry` has an article whose extract was never answered."""
+    return bool(entry.get("wikipedia_title")) and not entry.get("extract") \
+        and not entry.get(NO_EXTRACT)
+
+
+def fetch_wikipedia_extracts(wikidata_entries, batch_size=20, pacer=None):
     """Fetch short Wikipedia extracts for entries that have wikipedia_title.
 
-    Modifies entries in-place, adding an 'extract' field.
+    Modifies entries in-place, adding an 'extract' field, or NO_EXTRACT
+    when the API answered without one. Entries that already have either
+    are skipped. Returns the number of entries still pending (never
+    answered; the next build asks again).
+
+    Requests go through cloud/wikimedia_http.get_json, paced by `pacer`
+    (default polite_pacer(): serial, at most STREETZIM_WIKI_MAX_PER_MIN a
+    minute): 429/5xx are retried honouring Retry-After; a batch the API
+    still cannot answer, or answers with another 4xx, is skipped; a
+    refused client (401/403), a Retry-After beyond the retry cap or a
+    spent wait budget stops the rest.
     """
     titles_to_fetch = []
     for qid, entry in wikidata_entries.items():
-        title = entry.get("wikipedia_title")
-        if title:
-            titles_to_fetch.append((qid, title))
+        if extract_pending(entry):
+            titles_to_fetch.append((qid, entry["wikipedia_title"]))
 
     if not titles_to_fetch:
-        return
+        return 0
 
     total = len(titles_to_fetch)
     print(f"  Fetching Wikipedia extracts for {total} articles...")
     start_time = time.time()
+    if pacer is None:
+        pacer = polite_pacer()
 
     for i in range(0, total, batch_size):
         batch = titles_to_fetch[i:i + batch_size]
@@ -572,14 +592,22 @@ def fetch_wikipedia_extracts(wikidata_entries, batch_size=20):
         })
 
         url = f"{WIKIPEDIA_API}?{params}"
-        headers = {"User-Agent": USER_AGENT}
 
         try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+            try:
+                data = get_json(url, user_agent=USER_AGENT, pacer=pacer, timeout=30)
+            except urllib.error.HTTPError as e:
+                # 401/403: this client is refused, so every batch would be.
+                # Any other 4xx is about this batch: skip it (left pending).
+                raise TransientError(f"HTTP {e.code}", e.code,
+                                     stop=e.code in (401, 403)) from e
+            if not isinstance(data, dict) or not isinstance(data.get("query"), dict):
+                raise TransientError("body has no query (an error or unexpected body)")
 
-            pages = data.get("query", {}).get("pages", [])
+            pages = data["query"].get("pages", [])
+            # A continued answer may hold the rest of the extracts in a
+            # later page: only a complete answer says "no extract".
+            complete = "continue" not in data
             # Build title -> extract map
             extract_map = {}
             for page in pages:
@@ -606,17 +634,27 @@ def fetch_wikipedia_extracts(wikidata_entries, batch_size=20):
                         else:
                             extract = extract[:500] + "..."
                     wikidata_entries[qid]["extract"] = extract
+                elif complete:
+                    wikidata_entries[qid][NO_EXTRACT] = True
 
+        except TransientError as e:
+            print(f"    Warning: Wikipedia API failed for batch {i}: {e}")
+            if e.stop:
+                print(f"    Warning: not fetching the remaining {total - i - len(batch)} "
+                      "extracts (the API will not answer)")
+                break
         except Exception as e:
             print(f"    Warning: Wikipedia API failed for batch {i}: {e}")
 
         done = min(i + batch_size, total)
         if done % 100 == 0 or done == total:
             print(f"\r    Fetched {done}/{total} extracts...", end="", flush=True)
-        time.sleep(0.2)
 
     count = sum(1 for e in wikidata_entries.values() if "extract" in e)
-    print(f"\r    Fetched {count} Wikipedia extracts in {time.time() - start_time:.0f}s")
+    pending = sum(1 for e in wikidata_entries.values() if extract_pending(e))
+    print(f"\r    Fetched {count} Wikipedia extracts in {time.time() - start_time:.0f}s"
+          + (f"; {pending} not answered, asked again next build" if pending else ""))
+    return pending
 
 
 def load_cache(cache_dir):
@@ -760,19 +798,27 @@ def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=
     # Step 2: Check what's already cached
     existing = load_cache(cache_dir)
     new_qids = [qid for qid in qid_features if qid not in existing]
+    # Cached entries whose extract was never answered (a rate limit, a
+    # stopped run): asked again, since a transient failure is never a miss.
+    retry = {} if skip_extracts else {
+        qid: e for qid, e in existing.items()
+        if qid in qid_features and extract_pending(e)}
 
-    if not new_qids:
+    if not new_qids and not retry:
         print(f"  All {len(qid_features)} Q-IDs already cached")
         return cache_dir
 
-    print(f"  {len(new_qids)} new Q-IDs to fetch ({len(existing)} already cached)")
+    new_entries = {}
+    if new_qids:
+        print(f"  {len(new_qids)} new Q-IDs to fetch ({len(existing)} already cached)")
+        # Step 3: Fetch Wikidata properties (with incremental saves)
+        new_entries = fetch_wikidata_batch(new_qids, cache_dir=cache_dir)
+    if retry:
+        print(f"  {len(retry)} cached entries have no extract yet; asking again")
 
-    # Step 3: Fetch Wikidata properties (with incremental saves)
-    new_entries = fetch_wikidata_batch(new_qids, cache_dir=cache_dir)
-
-    # Step 4: Fetch Wikipedia extracts
+    # Step 4: Fetch Wikipedia extracts (new entries and the retries)
     if not skip_extracts:
-        fetch_wikipedia_extracts(new_entries)
+        fetch_wikipedia_extracts({**retry, **new_entries})
 
     # Step 5: Merge and save
     all_entries = {**existing, **new_entries}

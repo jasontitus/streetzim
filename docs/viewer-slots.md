@@ -51,7 +51,7 @@ Slots are right-sized per file rather than a flat 1 MB each:
 
 | file | slot | typical content | headroom |
 |---|---|---|---|
-| index.html | 1 MB | ~450 KB | 2.3x |
+| index.html | 1 MB | ~555 KB (2026-09-29: dark theme + inline POI icons) | 1.9x |
 | places.html | 256 KB | ~101 KB | 2.5x |
 | routing-worker.js | 128 KB | ~68 KB | 1.9x |
 

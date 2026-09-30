@@ -393,13 +393,19 @@ def test_merge_overture_handles_empty_parquet(duckdb_available, tmp_path):
     assert added == 0
 
 
-def _write_places_parquet(path: str, rows: list[dict]) -> None:
+def _write_places_parquet(path: str, rows: list[dict],
+                          shape: str = "categories") -> None:
     """Build an Overture-places-shaped parquet from plain dicts.
 
     Matches the columns `merge_overture_places` selects via DuckDB:
-    `names.primary`, `categories.primary`, `phones[]`, `websites[]`,
+    `names.primary`, the category, `phones[]`, `websites[]`,
     `socials[]`, `brand.names.primary` + `brand.wikidata`, `sources[]`,
     and a WKT point for the geometry.
+
+    `shape` is the release's category layout: "categories" (up to
+    2026-08-19.0: `categories.primary` = row["category"]), "taxonomy"
+    (2026-09-23.0 on: `taxonomy.primary` = row["taxonomy"], no
+    `categories` column) or "both" (2026-08-19.0 carries both).
     """
     import duckdb
     con = duckdb.connect()
@@ -412,6 +418,9 @@ def _write_places_parquet(path: str, rows: list[dict]) -> None:
         CREATE TABLE places (
             names STRUCT("primary" VARCHAR),
             categories STRUCT("primary" VARCHAR),
+            taxonomy STRUCT("primary" VARCHAR, hierarchy VARCHAR[],
+                            alternates VARCHAR[]),
+            basic_category VARCHAR,
             phones VARCHAR[],
             websites VARCHAR[],
             socials VARCHAR[],
@@ -430,6 +439,10 @@ def _write_places_parquet(path: str, rows: list[dict]) -> None:
     for r in rows:
         name = (r.get("name") or "").replace("'", "''")
         cat = (r.get("category") or "").replace("'", "''")
+        tax = r.get("taxonomy")
+        tax_lit = ("NULL" if tax is None else
+                   f"{{\"primary\": '{tax}', 'hierarchy': ['x', '{tax}'], "
+                   f"'alternates': []}}")
         brand_name = (r.get("brand") or "").replace("'", "''")
         brand_wd = (r.get("brand_wd") or "").replace("'", "''")
         sources_lit = (
@@ -442,7 +455,7 @@ def _write_places_parquet(path: str, rows: list[dict]) -> None:
         con.execute(
             "INSERT INTO places VALUES ("
             f"  {{\"primary\": '{name}'}}, "
-            f"  {{\"primary\": '{cat}'}}, "
+            f"  {{\"primary\": '{cat}'}}, {tax_lit}, 'basic', "
             f"  {_lit_list(r.get('phones', []))}, "
             f"  {_lit_list(r.get('websites', []))}, "
             f"  {_lit_list(r.get('socials', []))}, "
@@ -451,7 +464,9 @@ def _write_places_parquet(path: str, rows: list[dict]) -> None:
             f"  {sources_lit}, '{wkt}'"
             f")"
         )
-    con.execute(f"COPY places TO '{path}' (FORMAT PARQUET)")
+    drop = {"categories": "EXCLUDE (taxonomy, basic_category)",
+            "taxonomy": "EXCLUDE (categories)", "both": ""}[shape]
+    con.execute(f"COPY (SELECT * {drop} FROM places) TO '{path}' (FORMAT PARQUET)")
     con.close()
 
 
@@ -543,6 +558,83 @@ def test_merge_overture_places_keeps_specific_subtype_over_category(
         "specific OSM subtype must survive Overture enrichment")
     assert rec["cat"] == "pizza_restaurant", (
         "Overture's category still lands in `cat` for display/filtering")
+
+
+@pytest.mark.parametrize(("source", "props", "subtype_after"), [
+    # tilemaker's profile has no class for amenity=restaurant and writes
+    # the key; the record keeps the key in osm_key, so Overture still
+    # refines it, as when its subtype was "amenity" itself.
+    ("tilemaker", {"class": "amenity", "subclass": "restaurant"},
+     "italian_restaurant"),
+    ("tilemaker", {"class": "tourism", "subclass": "museum"},
+     "italian_restaurant"),
+    # sport was never a refinable bucket, raw or not.
+    ("tilemaker", {"class": "sport", "subclass": "tennis"}, "tennis"),
+    # A real OpenMapTiles class from the tilemaker profile.
+    ("tilemaker", {"class": "shop", "subclass": "bakery"},
+     "italian_restaurant"),
+    # OpenFreeMap (Planetiler) has the specific class: unchanged.
+    ("openfreemap", {"class": "restaurant", "subclass": "restaurant"},
+     "restaurant"),
+    ("openfreemap", {"class": "shop", "subclass": "books"},
+     "italian_restaurant"),
+])
+def test_merge_overture_places_refines_by_tile_source(
+    duckdb_available, tmp_path, source, props, subtype_after
+):
+    from streetzim.search_extract import search_record
+    parquet = tmp_path / "ov.parquet"
+    _write_places_parquet(str(parquet), [{
+        "name": "Da Mario", "category": "italian_restaurant",
+        "lat": 43.73, "lon": 7.42,
+    }])
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [search_record("Da Mario", "poi", props, 43.73, 7.42)])
+    merge_overture_places(str(parquet), str(jsonl))
+    rows = [json.loads(l) for l in open(jsonl) if l.strip()]
+    assert len(rows) == 1, "enriched in place, not added"
+    rec = rows[0]
+    assert rec["subtype"] == subtype_after, source
+    assert rec["cat"] == "italian_restaurant"
+
+
+def test_merge_overture_places_twice_is_a_no_op_for_raw_key_records(
+    duckdb_available, tmp_path
+):
+    # The first merge refines a tilemaker amenity=restaurant and drops
+    # osm_key; a second merge (another Overture category for the same
+    # place) must not refine it again, as when its subtype was "amenity".
+    from streetzim.search_extract import search_record
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [search_record(
+        "Da Mario", "poi", {"class": "amenity", "subclass": "restaurant"},
+        43.73, 7.42)])
+    first = tmp_path / "ov1.parquet"
+    _write_places_parquet(str(first), [{
+        "name": "Da Mario", "category": "italian_restaurant",
+        "lat": 43.73, "lon": 7.42}])
+    merge_overture_places(str(first), str(jsonl))
+    once = open(jsonl, encoding="utf-8").read()
+    rec = json.loads(once)
+    assert rec["subtype"] == "italian_restaurant"
+    assert "osm_key" not in rec
+    second = tmp_path / "ov2.parquet"
+    _write_places_parquet(str(second), [{
+        "name": "Da Mario", "category": "pizza_restaurant",
+        "lat": 43.73, "lon": 7.42}])
+    merge_overture_places(str(second), str(jsonl))
+    assert open(jsonl, encoding="utf-8").read() == once
+
+
+def test_overture_may_refine():
+    from streetzim.addresses import _overture_may_refine
+    assert _overture_may_refine({"subtype": "amenity"})
+    assert _overture_may_refine({"subtype": ""})
+    assert _overture_may_refine({"subtype": "restaurant", "osm_key": "amenity"})
+    assert _overture_may_refine({"subtype": "garden", "osm_key": "leisure"})
+    assert not _overture_may_refine({"subtype": "restaurant"})
+    assert not _overture_may_refine({"subtype": "tennis", "osm_key": "sport"})
+    assert not _overture_may_refine({"subtype": "gate", "osm_key": "barrier"})
 
 
 def test_merge_overture_places_adds_new_poi(duckdb_available, tmp_path):
@@ -711,3 +803,236 @@ def test_merge_overture_preserves_existing_feed_rows(duckdb_available, tmp_path)
     after = pathlib.Path(jsonl).read_text(encoding="utf-8")
     # Original lines must still appear verbatim as the file prefix.
     assert after.startswith(before), "merge must not rewrite existing rows"
+
+
+# ---------------------------------------------------------------------------
+# Category schema change: `categories` (to 2026-08-19.0) → `taxonomy`
+# (2026-09-23.0 on). streetzim/overture.py maps taxonomy back to the old
+# names the chips and the generic-bucket refinement use.
+# ---------------------------------------------------------------------------
+
+from streetzim.overture import (  # noqa: E402
+    overture_category,
+    overture_release,
+)
+from streetzim.overture_taxonomy import (  # noqa: E402
+    LEGACY_NAMES,
+    TAXONOMY_TO_LEGACY,
+)
+
+
+def test_overture_category_prefers_categories_then_maps_taxonomy():
+    assert overture_category({"primary": "dentist"}, {"primary": "dental_clinic"}) == "dentist"
+    assert overture_category(None, {"primary": "dental_clinic"}) == "dentist"
+    assert overture_category({"primary": None}, {"primary": "auto_dealer"}) == "car_dealer"
+    # Same name in both vocabularies.
+    assert overture_category(None, {"primary": "museum"}) == "museum"
+    # Newer than the table: nearest ancestor with an old name (mapped or
+    # unchanged), else the leaf itself.
+    assert overture_category(None, {"primary": "sport_league", "hierarchy": [
+        "sports_and_recreation", "sport_league"]}) == "active_life"
+    assert overture_category(None, {"primary": "counseling", "hierarchy": [
+        "health_care", "outpatient_care_facility", "behavioral_or_mental_health_clinic",
+        "counseling"]}) == "counseling_and_mental_health"
+    assert overture_category(None, {"primary": "brand_new", "hierarchy": [
+        "not_a_category", "brand_new"]}) == "brand_new"
+    assert overture_category(None, {"primary": "brand_new"}) == "brand_new"
+    assert overture_category(None, None) == ""
+    assert overture_category(None, {"primary": None, "hierarchy": None}) == ""
+
+
+def test_taxonomy_table_is_sorted_and_one_step():
+    assert list(TAXONOMY_TO_LEGACY) == sorted(TAXONOMY_TO_LEGACY)
+    # A mapped name is never itself a taxonomy key: one lookup is final.
+    assert not set(TAXONOMY_TO_LEGACY.values()) & set(TAXONOMY_TO_LEGACY)
+    assert all(k != v for k, v in TAXONOMY_TO_LEGACY.items())
+    # Every mapped name is an old name.
+    assert set(TAXONOMY_TO_LEGACY.values()) <= LEGACY_NAMES
+    assert len(TAXONOMY_TO_LEGACY) == 607 and len(LEGACY_NAMES) == 1984
+    # Renames that land in chips (cloud/chip_rules.py) or the generic
+    # buckets merge_overture_places refines.
+    for new, old in [("dental_clinic", "dentist"), ("lodging", "accommodation"),
+                     ("historic_site", "landmark_and_historical_building"),
+                     ("shopping_mall", "shopping_center"), ("atm", "atms")]:
+        assert TAXONOMY_TO_LEGACY[new] == old
+
+
+def test_new_taxonomy_leaf_lands_in_its_old_chip():
+    # 2026-09-23.1 split `hospital` into general_hospital etc.: the leaf has
+    # no old name, its parent does, and the Health chip keeps the place.
+    from cloud.chip_rules import CHIP_RULES, record_matches_chip
+    cat = overture_category(None, {"primary": "general_hospital", "hierarchy": [
+        "health_care", "hospital", "general_hospital"]})
+    assert cat == "hospital"
+    rec = {"t": "poi", "s": cat, "n": "Centre Hospitalier Princesse Grace"}
+    assert [c.id for c in CHIP_RULES if record_matches_chip(rec, c)] == ["health"]
+
+
+@pytest.mark.parametrize("shape", ["categories", "taxonomy", "both"])
+def test_merge_overture_places_each_category_shape(duckdb_available, tmp_path, shape):
+    # One fixture per release layout; every layout yields the old names.
+    parquet = tmp_path / "ov.parquet"
+    rows = [
+        {"name": "HP Garage", "category": "museum", "taxonomy": "museum",
+         "lat": 37.44453, "lon": -122.15269},
+        {"name": "Smile Dental", "category": "dentist", "taxonomy": "dental_clinic",
+         "lat": 37.40, "lon": -122.10},
+        {"name": "Grand Hotel", "category": "accommodation", "taxonomy": "lodging",
+         "lat": 37.41, "lon": -122.11},
+        {"name": "Nameless Cat", "category": "", "taxonomy": None,
+         "lat": 37.42, "lon": -122.12},
+    ]
+    _write_places_parquet(str(parquet), rows, shape=shape)
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [{
+        "name": "HP Garage", "type": "poi", "subtype": "tourism",
+        "lat": 37.44453, "lon": -122.15269,
+    }])
+    out = merge_overture_places(str(parquet), str(jsonl))
+    assert (out["enriched"], out["added"]) == (1, 2)
+    recs = {r["name"]: r for r in (json.loads(l) for l in open(jsonl) if l.strip())}
+    assert recs["HP Garage"]["subtype"] == recs["HP Garage"]["cat"] == "museum"
+    assert recs["Smile Dental"]["subtype"] == recs["Smile Dental"]["cat"] == "dentist"
+    assert recs["Grand Hotel"]["cat"] == "accommodation"
+    assert "Nameless Cat" not in recs, "uncategorized add-new rows are skipped"
+
+
+def test_merge_overture_places_both_columns_prefers_categories(duckdb_available, tmp_path):
+    # 2026-08-19.0 carries both; `categories` decides, so builds on that
+    # release are unchanged.
+    parquet = tmp_path / "ov.parquet"
+    _write_places_parquet(str(parquet), [{
+        "name": "Odd One", "category": "museum", "taxonomy": "dental_clinic",
+        "lat": 37.5, "lon": -122.2}], shape="both")
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [])
+    merge_overture_places(str(parquet), str(jsonl))
+    assert json.loads(open(jsonl).readline())["cat"] == "museum"
+
+
+def test_overture_release_from_metadata_or_name(duckdb_available, tmp_path):
+    import duckdb
+    tagged = tmp_path / "anything.parquet"
+    duckdb.connect().execute(
+        f"COPY (SELECT 1 a) TO '{tagged}' (FORMAT PARQUET, "
+        "KV_METADATA {overture_release: '2026-09-23.1'})")
+    assert overture_release(str(tagged)) == "2026-09-23.1"
+    named = tmp_path / "places-monaco-2026-08-19.0.parquet"
+    duckdb.connect().execute(f"COPY (SELECT 1 a) TO '{named}' (FORMAT PARQUET)")
+    assert overture_release(str(named)) == "2026-08-19.0"
+    assert overture_release(str(tmp_path / "missing.parquet")) is None
+    assert overture_release(None) is None
+
+
+def test_overture_credits_record_release():
+    from streetzim.zim_writer import _add_overture_credits
+
+    class Creator:
+        def __init__(self):
+            self.items = []
+
+        def add_item(self, item):
+            self.items.append(item)
+
+    def item(path, title, mime, data):
+        return json.loads(data)
+
+    def credits(release):
+        c = Creator()
+        _add_overture_credits(c, item, overture_sources=["meta"],
+                              overture_themes=["addresses", "places"],
+                              overture_release=release)
+        return c.items[0]
+
+    doc = credits({"addresses": "2026-09-23.1", "places": "2026-09-23.1"})
+    assert doc["release"] == "2026-09-23.1"
+    doc = credits({"addresses": "2026-08-19.0", "places": "2026-09-23.1"})
+    assert "release" not in doc
+    assert doc["releases"] == {"addresses": "2026-08-19.0", "places": "2026-09-23.1"}
+    doc = credits({"addresses": None, "places": None})
+    assert "release" not in doc and "releases" not in doc
+
+
+# ---------------------------------------------------------------------------
+# osm_key: tilemaker's raw-key class survives extraction for this merge.
+# ---------------------------------------------------------------------------
+
+# Tile 14/8529/5973 covers Monaco; MVT coordinates are 0..4096 in tile space.
+_OSM_KEY_TILE = (14, 8529, 5973)
+_OSM_KEY_POIS = [
+    # tilemaker: no OpenMapTiles class for amenity=restaurant.
+    {"name": "Da Mario", "class": "amenity", "subclass": "restaurant"},
+    # OpenFreeMap / Planetiler: the class is already specific.
+    {"name": "Chez Paul", "class": "restaurant", "subclass": "restaurant"},
+]
+
+
+def _osm_key_tile():
+    import gzip
+    mvt = pytest.importorskip("mapbox_vector_tile")
+    return gzip.compress(mvt.encode([{"name": "poi", "features": [
+        {"geometry": f"POINT({1000 + 1000 * i} 2000)", "properties": p}
+        for i, p in enumerate(_OSM_KEY_POIS)]}]))
+
+
+def _extract_streaming(tmp_path) -> list[dict]:
+    """extract_searchable_features(mbtiles_path=...), as builds call it
+    (the _process_tile_partition workers), in a subprocess because spawn
+    workers need an importable __main__."""
+    import sqlite3
+    import subprocess
+    import textwrap
+    mbtiles = tmp_path / "t.mbtiles"
+    con = sqlite3.connect(mbtiles)
+    con.execute("CREATE TABLE metadata (name TEXT, value TEXT)")
+    con.execute("CREATE TABLE tiles (zoom_level INT, tile_column INT, "
+                "tile_row INT, tile_data BLOB)")
+    z, x, y = _OSM_KEY_TILE
+    con.execute("INSERT INTO tiles VALUES (?, ?, ?, ?)",
+                (z, x, (1 << z) - 1 - y, _osm_key_tile()))
+    con.commit()
+    con.close()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    script = tmp_path / "run.py"
+    script.write_text(textwrap.dedent(f"""
+        import sys
+        sys.path.insert(0, {str(_REPO_ROOT)!r})
+        from streetzim.search_extract import extract_searchable_features
+        if __name__ == "__main__":
+            print("PATH=" + extract_searchable_features(
+                mbtiles_path={str(mbtiles)!r}, output_dir={str(out_dir)!r}))
+    """))
+    res = subprocess.run([sys.executable, str(script)], capture_output=True,
+                         text=True, timeout=300)
+    assert res.returncode == 0, res.stderr[-2000:]
+    path = [l for l in res.stdout.splitlines() if l.startswith("PATH=")][0][5:]
+    return [json.loads(l) for l in open(path, encoding="utf-8")]
+
+
+def test_streaming_extraction_writes_osm_key_and_overture_refines(
+    duckdb_available, tmp_path
+):
+    recs = {r["name"]: r for r in _extract_streaming(tmp_path)}
+    assert recs["Da Mario"]["subtype"] == "restaurant"
+    assert recs["Da Mario"]["osm_key"] == "amenity"
+    assert "osm_key" not in recs["Chez Paul"]
+
+    jsonl = tmp_path / "feed.jsonl"
+    # Written as extraction writes it (compact: the merge pre-filters on
+    # '"type":"poi"').
+    jsonl.write_text("".join(json.dumps(r, separators=(",", ":")) + "\n"
+                             for r in recs.values()))
+    parquet = tmp_path / "ov.parquet"
+    _write_places_parquet(str(parquet), [
+        {"name": r["name"], "category": "italian_restaurant",
+         "lat": r["lat"], "lon": r["lon"]} for r in recs.values()])
+    merge_overture_places(str(parquet), str(jsonl))
+    after_rows = [json.loads(l) for l in open(jsonl, encoding="utf-8")]
+    assert len(after_rows) == 2, "both must be enriched in place, not added"
+    after = {r["name"]: r for r in after_rows}
+    # The tilemaker record is refined, as when its subtype was "amenity";
+    # the OpenFreeMap one keeps its specific class.
+    assert after["Da Mario"]["subtype"] == "italian_restaurant"
+    assert after["Chez Paul"]["subtype"] == "restaurant"
+    assert "osm_key" not in after["Da Mario"]

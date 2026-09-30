@@ -169,7 +169,7 @@ valid with SZCI v3 (it needs `base_node`).
 - **SZCI v1**: v3 header with version 1, then `nodes_scaled` i32[2N] in
   original node order, then 20-byte cell records (no `base_node`), then
   names.
-- **SZCI v2** (written by `build_spatial` from 2026-05-03 to 2026-06-02, and by the retired `attic/upgrade_spatial_zim.py`): 40-byte header (the seven
+- **SZCI v2** (written by `build_spatial` from 2026-05-03 to 2026-06-02, and by `cloud/upgrade_spatial_zim.py`, retired in `056261e` and removed in `a436aa8`): 40-byte header (the seven
   v1 fields, then u32 `num_node_shards`, u32 `nodes_per_shard`), no inline
   nodes; coordinates live in `routing-data/nodes-scaled-NNN.bin` (raw i32
   lat/lon pairs).
@@ -217,7 +217,7 @@ built today, by StreetZim or by openZIM, never needs a legacy branch.
 | SZCI v3 + SZRC v2 | `build_spatial` (`--spatial-chunk-scale`) | JS, Python | canonical |
 | SZRG v4 (+ chunk manifest) | `extract_routing_graph` (plain `--routing`) | JS, Python | current (small regions) |
 | SZRG v5 + SZGM v1 | none (retired 2026-09) | JS, Python | drop the readers once `validate_zim` finds no `routing-data/graph-geoms*` in the catalog |
-| SZCI v1/v2, SZRC v1 | none (`upgrade_spatial_zim.py` retired to `attic/`) | JS, Python | in continent ZIMs built before 2026-06-02; drop after those are rebuilt |
+| SZCI v1/v2, SZRC v1 | none (`upgrade_spatial_zim.py` removed in `a436aa8`) | JS, Python | in continent ZIMs built before 2026-06-02; drop after those are rebuilt |
 | SZRG v2/v3 | none | JS, Python | pre-April 2026 files only; first candidate for removal |
 
 ### Where the legacy read branches are
@@ -243,12 +243,13 @@ reader branch is only dead when no published ZIM needs it.
 | path | content |
 |---|---|
 | `index.html`, `places.html`, `routing-worker.js` | viewer, padded into fixed uncompressed slots with an `SZVSLOT1` marker so `cloud/patch_viewer_inplace.py` can replace them in a published ZIM (`docs/viewer-slots.md`) |
-| `maplibre-gl.js`, `maplibre-gl.css` | MapLibre GL JS (version in `MAPLIBRE_VERSION`) |
-| `map-config.json` | name, center, zoom, minZoom, maxZoom, buildDate, bounds, `hasSatellite`/`satelliteMaxZoom`/`satelliteFormat`/`satelliteTileSize`, `hasTerrain`/`terrainMaxZoom`, `hasWikidata`, `hasRouting`, `hasOvertureAddresses` |
+| `maplibre-gl.js`, `maplibre-gl.css` | MapLibre GL JS (vendored; version in `resources/viewer-assets.lock.json`) |
+| `mapbox-gl-rtl-text.js` | MapLibre's RTL text plugin (Arabic/Hebrew shaping), vendored and pinned the same way, behind a comment carrying its licence; the viewer loads it only once a tile has RTL text. Older ZIMs lack it; `cloud/repackage_zim.py` adds it with the viewer swap |
+| `map-config.json` | name, center, zoom, minZoom, maxZoom, buildDate, bounds, `hasSatellite`/`satelliteMaxZoom`/`satelliteFormat`/`satelliteTileSize`, `satelliteSource`/`satelliteYear`/`satelliteLicense`/`satelliteLicenseUrl`/`satelliteAttribution`/`satelliteNonCommercial` (which EOX mosaic and the credit it needs, `streetzim/satellite_sources.py`; absent in older ZIMs, which all carry the 2021 mosaic, CC BY-NC-SA 4.0), `hasTerrain`/`terrainMaxZoom`/`terrainMinZoom` (the lowest terrain zoom stored, when not 0; see [zimfarm.md](zimfarm.md#terrain-cost)), `hasWikidata`, `hasRouting`, `hasOvertureAddresses`, `hasWikiArticles`, `rtlTextPlugin` (the RTL plugin's entry path, `mapbox-gl-rtl-text.js`; absent in older ZIMs, whose viewer then leaves RTL labels unshaped); `title`, `description` (the ZIM's Title/Description metadata) and `generator` (`streetzim <version>`) for the viewer's About panel |
 | `streetzim-meta.json` | build metadata for other consumers. `routingGraph.version` is the SZRG version of the intermediate graph (4 or 5), even when the ZIM ships SZCI v3 cells |
-| `tiles/{z}/{x}/{y}.pbf` | OpenMapTiles-schema MVT; empty tiles are dropped |
-| `satellite/{z}/{x}/{y}.{avif,webp}` | optional, uncompressed |
-| `terrain/{z}/{x}/{y}.webp` | optional, Mapbox terrain-RGB |
+| `tiles/{z}/{x}/{y}.pbf` | OpenMapTiles-schema MVT; empty tiles are dropped; repeats of an identical tile are ZIM aliases of the first (`docs/tile-aliases.md`) |
+| `satellite/{z}/{x}/{y}.{avif,webp}` | optional, uncompressed; repeats of an identical tile are ZIM aliases of the first, as for `tiles/` |
+| `terrain/{z}/{x}/{y}.webp` | optional, Mapbox terrain-RGB, from `terrainMinZoom` (default 0) to `terrainMaxZoom`; repeats are aliased too |
 | `fonts/{Font}/{start}-{end}.pbf` | SDF glyphs (Open Sans Regular/Bold/Italic) |
 | `search-data/manifest.json`, `search-data/{prefix}.json` | prefix-sharded search records `{n, t, s, a, o, l, …}`; see `docs/search-prefix-locality.md` |
 | `category-index/manifest.json`, `category-index/{cat}.json`, `category-index/chip-{id}[…].json` | Find page data; chip ids come from `cloud/chip_rules.py`, shard layout from `cloud/chip_shards.py` |
@@ -257,6 +258,21 @@ reader branch is only dead when no published ZIM needs it.
 | `wiki-geo-index.json` | `{title: [lat, lon, type]}` |
 | `search/{slug}.html` | per-feature detail pages (libzim Xapian mode only) |
 | `overture-sources.json` | Overture attribution, when Overture data was merged |
+
+### Areas across the antimeridian
+
+An area is one box. One across the antimeridian (Fiji, Chukotka,
+Kiribati) is kept **unwrapped**: `minLon` in [-180, 180) and `maxLon`
+past 180, so `minLon < maxLon` still holds; Fiji is
+`[172.84, -23.12, 183.47, -11.24]`. `map-config.json` `bounds` and
+`streetzim-meta.json` `bbox` carry it that way, and a reader that tests a
+longitude against them also tests it plus 360°. `center` stays in
+[-180, 180]. A box whose `maxLon` is at most 180 does not cross, and every
+such ZIM is built exactly as before. `streetzim/area.py` holds the rules:
+tools limited to [-180, 180] (osmium, tilemaker, MapLibre's source
+`bounds`) get the two sides as separate boxes. Tile, search-record and
+graph coordinates are always in [-180, 180]; a route or way geometry that
+steps across ±180° is continued the short way (see geometry blobs above).
 
 ## Known debt
 

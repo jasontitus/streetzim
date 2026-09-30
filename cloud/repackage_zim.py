@@ -46,6 +46,8 @@ if str(SCRIPT_DIR) not in sys.path:
 # ZIM without ANY category-index/manifest.json.
 from cloud.chip_rules import CHIP_RULES, record_matches_chip  # noqa: E402
 from cloud.viewer_slots import pad_to_slot as _pad_to_slot  # noqa: E402
+from streetzim.tile_alias import TileAliaser, max_alias_bytes  # noqa: E402
+from streetzim import viewer_assets  # noqa: E402
 from cloud.chip_shards import (  # noqa: E402
     CHIP_SHARD_TARGET_BYTES, plan_chip, read_chip_records,
 )
@@ -346,6 +348,10 @@ def _emit_upgraded_graph(creator, graph_bytes: bytes, *,
     )
 
 
+# Entries whose identical copies are written as aliases (streetzim/tile_alias.py).
+_TILE_PREFIXES = ("tiles/", "satellite/", "terrain/")
+
+
 def repackage(src_path: str, dst_path: str,
               swap_viewer: bool = True,
               uncompress_graph: bool = True,
@@ -410,12 +416,24 @@ def repackage(src_path: str, dst_path: str,
                 replacements[name] = _pad_to_slot(name, raw)
                 print(f"  will swap {name} ← {p} "
                       f"({len(raw)} B → {len(replacements[name])} B slotted)")
+    # MapLibre's RTL text plugin and the map-config key that names it. ZIMs
+    # built before it have neither, and the swapped viewer then leaves
+    # Arabic/Hebrew labels unshaped; it loads the plugin only when the key
+    # is set, so adding both is safe. A source entry is kept as it is. The
+    # vendored copy is checked against the lock file, as in a build.
+    rtl_plugin = viewer_assets.rtl_text_plugin_entry() if swap_viewer else None
+    rtl_path = viewer_assets.RTL_TEXT_PLUGIN_ENTRY
 
     # Paths re-added as front articles. libzim builds its title index (Kiwix's
     # search suggestions) only from front articles, and the builder marks
     # the main page front; re-adding everything as non-front made libzim
     # write no title index at all. Filled once the main entry is resolved.
     front_paths: set[str] = set()
+
+    def _front(path: str) -> bool:
+        # The main page, and the Kiwix search pages, which the builder
+        # writes as front articles so they are in the title index.
+        return path in front_paths or (path.startswith("search/") and path.endswith(".html"))
 
     class PassthroughItem(Item):
         """An item copied from the source ZIM, preserving its bytes."""
@@ -432,7 +450,7 @@ def repackage(src_path: str, dst_path: str,
         def get_mimetype(self):  return self._mimetype
         def get_contentprovider(self): return StringProvider(self._data)
         def get_hints(self):
-            return {Hint.FRONT_ARTICLE: self._path in front_paths,
+            return {Hint.FRONT_ARTICLE: _front(self._path),
                     Hint.COMPRESS: self._compress}
 
     class FilePathItem(Item):
@@ -453,7 +471,7 @@ def repackage(src_path: str, dst_path: str,
         def get_mimetype(self):  return self._mimetype
         def get_contentprovider(self): return FileProvider(self._file_path)
         def get_hints(self):
-            return {Hint.FRONT_ARTICLE: self._path in front_paths,
+            return {Hint.FRONT_ARTICLE: _front(self._path),
                     Hint.COMPRESS: self._compress}
 
     class LazyZimEntryProvider(ContentProvider):
@@ -507,7 +525,7 @@ def repackage(src_path: str, dst_path: str,
         def get_contentprovider(self):
             return LazyZimEntryProvider(self._src, self._path, self._size)
         def get_hints(self):
-            return {Hint.FRONT_ARTICLE: self._path in front_paths,
+            return {Hint.FRONT_ARTICLE: _front(self._path),
                     Hint.COMPRESS: self._compress}
 
     # Return the raw metadata bytes. The illustration entry is a PNG,
@@ -638,7 +656,9 @@ def repackage(src_path: str, dst_path: str,
     # etc). Reassembled into a single buffer below when the source
     # shipped chunked but not monolithic.
     captured_graph_chunks: dict | None = None
+    tile_aliasers: dict[str, TileAliaser] = {}
     with creator as c:
+        tile_aliaser_on = TileAliaser(c).enabled
         _tick("setup")
         # Passthrough all entries. The bulk of entries (tiles, search-
         # data chunks, wikidata, terrain when not refreshing) pass
@@ -696,6 +716,13 @@ def repackage(src_path: str, dst_path: str,
                     cfg["zoom"] = map_zoom
                 modified_content = json.dumps(cfg, indent=2).encode("utf-8")
                 size = len(modified_content)
+            if rtl_plugin is not None and path == "map-config.json":
+                cfg = json.loads((modified_content if modified_content is not None
+                                  else bytes(item.content)).decode("utf-8"))
+                if cfg.get("rtlTextPlugin") != rtl_path:
+                    cfg["rtlTextPlugin"] = rtl_path
+                    modified_content = json.dumps(cfg, indent=2).encode("utf-8")
+                    size = len(modified_content)
             # Optionally swap terrain tiles for the filesystem version.
             # Used after ``cloud/fix_stale_terrain_tiles.py`` regenerates
             # cached tiles — ``--refresh-terrain-tiles terrain_cache``
@@ -795,7 +822,7 @@ def repackage(src_path: str, dst_path: str,
                     raise SystemExit(
                         f"search-data/manifest.json in {src_path} is "
                         f"unparseable ({ex}); refusing to emit a ZIM "
-                        f"without search chunks")
+                        f"without search chunks") from ex
                 replaced_search_paths.add(path)
                 continue
             # When we're emitting a new category-index/manifest.json
@@ -886,6 +913,23 @@ def repackage(src_path: str, dst_path: str,
                 if size >= 200 * 1024 * 1024:
                     compress = False
                     raw_clusters += 1
+            # Keep identical tiles stored once. An alias in the source reads
+            # as an ordinary item (the reader API does not say which entries
+            # share a blob), so re-find them by content. One table per
+            # mimetype: an alias takes its target's mimetype. Entry order is
+            # path order, so the output is deterministic.
+            if (path.startswith(_TILE_PREFIXES) and size <= max_alias_bytes(path)
+                    and tile_aliaser_on):
+                aliaser = tile_aliasers.get(mime)
+                if aliaser is None:
+                    aliaser = tile_aliasers[mime] = TileAliaser(c, enabled=True)
+                data = (modified_content if modified_content is not None
+                        else bytes(item.content))
+                alias_of = aliaser.target_for(path, data)
+                if alias_of is not None:
+                    aliaser.add_alias(path, title, alias_of, size)
+                    kept += 1
+                    continue
             if modified_content is not None:
                 # A viewer slot MUST be stored uncompressed: bytes inside a
                 # compressed cluster do not map to file offsets, so
@@ -1184,12 +1228,20 @@ def repackage(src_path: str, dst_path: str,
             c.add_item(NewViewerItem(name, data, title, mime, is_front))
             added_missing += 1
             print(f"  added missing {name} from viewer set ({len(data)} B)")
+        if rtl_plugin is not None and not src.has_entry_by_path(rtl_path):
+            c.add_item(PassthroughItem(rtl_path, "MapLibre RTL text plugin",
+                                       "application/javascript", rtl_plugin))
+            added_missing += 1
+            print(f"  added missing {rtl_path} ({len(rtl_plugin)} B)")
 
     size_mb = os.path.getsize(dst_path) / (1024 * 1024)
     _tick("finalize")
     extra = f"; {refreshed_terrain} terrain tiles refreshed" if refreshed_terrain else ""
     if rewritten_search:
         extra += f"; {rewritten_search} search detail page(s) link-fixed"
+    n_aliases = sum(a.aliases for a in tile_aliasers.values())
+    if n_aliases:
+        extra += f"; {n_aliases} duplicate tiles aliased"
     print(f"\n  kept {kept} entries; {swapped} viewer swaps; "
           f"{added_missing} added; {raw_clusters} raw cluster(s){extra}")
     # Per-section timing — useful when planning what to optimize

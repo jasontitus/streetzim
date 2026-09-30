@@ -7,10 +7,12 @@ import shutil
 import subprocess
 import tempfile
 
+from streetzim import area
 # The builder's flushing, phase-timing print (see streetzim/common.py).
 from streetzim.common import (
     print,
 )
+from streetzim.overture import duckdb_connect, overture_category, overture_release
 
 
 def extract_addresses_pbf(pbf_path, output_path, bbox=None):
@@ -30,11 +32,10 @@ def extract_addresses_pbf(pbf_path, output_path, bbox=None):
     tmp = tempfile.mkdtemp(prefix="streetzim_addr_")
     try:
         if bbox:
-            minlon, minlat, maxlon, maxlat = bbox
             bbox_pbf = os.path.join(tmp, "region.osm.pbf")
             subprocess.run([
                 "osmium", "extract",
-                "-b", f"{minlon},{minlat},{maxlon},{maxlat}",
+                *area.osmium_extract_args(bbox, tmp),
                 source_pbf, "-o", bbox_pbf, "--overwrite",
             ], check=True)
             source_pbf = bbox_pbf
@@ -85,7 +86,7 @@ def extract_addresses_pbf(pbf_path, output_path, bbox=None):
         # identically, so cells -1/-2 (a ~22 m strip south of the equator or
         # west of Greenwich) aliased and stretched dedup by one cell there.
         _CELL0 = 1 << 21
-        with open(addr_geojson, "r", encoding="utf-8") as fin, \
+        with open(addr_geojson, encoding="utf-8") as fin, \
              open(output_path, "a", encoding="utf-8") as fout:
             for line in fin:
                 line = line.strip().lstrip("\x1e")
@@ -187,7 +188,7 @@ def extract_addresses_pbf(pbf_path, output_path, bbox=None):
 # regions the worst outcome is an extra Overture row slipping in
 # alongside an equivalent OSM row, which degrades gracefully (dup at
 # same coordinate) and can be tightened later per docs/overture-matching.md.
-_STREET_ABBREV = {
+_STREET_ABBREV: dict[str, str] = {
     "st": "street", "str": "street",
     "ave": "avenue", "av": "avenue",
     "blvd": "boulevard", "bl": "boulevard",
@@ -220,7 +221,7 @@ def _normalize_street(name):
     folded = "".join(
         c for c in _ud.normalize("NFKD", name.lower()) if not _ud.combining(c)
     )
-    tokens = _re.findall(r"[a-z0-9]+", folded)
+    tokens: list[str] = _re.findall(r"[a-z0-9]+", folded)
     return " ".join(_STREET_ABBREV.get(t, t) for t in tokens)
 
 
@@ -304,7 +305,7 @@ def _load_url_cache(path):
     if not path:
         return {}
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return {}
@@ -366,8 +367,8 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     schema with `subtype="overture"` so downstream code and mcpzim can
     spot the provenance. Returns the count of rows added.
     """
-    import duckdb  # local import — only needed when the flag is set
-    print(f"  Merging Overture addresses from {overture_parquet}...")
+    print(f"  Merging Overture addresses from {overture_parquet} "
+          f"(release {overture_release(overture_parquet) or 'unknown'})...")
 
     # ------------------------------------------------------------------
     # Build the OSM-side index from the existing JSONL. We scan only
@@ -405,7 +406,7 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     _near_lat = _array("d")
     _near_lon = _array("d")
     osm_count = 0
-    with open(search_jsonl_path, "r", encoding="utf-8") as f:
+    with open(search_jsonl_path, encoding="utf-8") as f:
         for line in f:
             if '"type":"addr"' not in line:
                 # Fast path: ~98% of lines in the world feed aren't
@@ -472,7 +473,7 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     # whole parquet OOMs a Mac for continent-scale bboxes; batch of
     # 2048 keeps working-set bounded.
     # ------------------------------------------------------------------
-    con = duckdb.connect()
+    con = duckdb_connect()
     # The parquet is already bbox-filtered by download_overture_data.py;
     # a second WHERE here would need a `bbox` struct the downloader doesn't
     # project. Instead, filter row-side in Python if the caller passes a
@@ -521,7 +522,7 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
                     orphan_skipped += 1
                     continue
                 if not (bbox_minlat <= lat <= bbox_maxlat and
-                        bbox_minlon <= lon <= bbox_maxlon):
+                        area.contains_lon((bbox_minlon, 0, bbox_maxlon, 0), lon)):
                     continue
 
                 # Pass 1: Overture-to-OSM provenance link. Today we
@@ -581,7 +582,7 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
             near_lo = _np.searchsorted(near_keys, k_near, side="left")
             near_hi = _np.searchsorted(near_keys, k_near, side="right")
 
-            for j, (row, num, street_raw, lat, lon, city, attr_key) in enumerate(cand):
+            for j, (row, num, street_raw, lat, lon, city, _attr_key) in enumerate(cand):
                 nearby_attr_dup = False
                 if not dup[j]:
                     lo_j, hi_j = int(near_lo[j]), int(near_hi[j])
@@ -629,7 +630,27 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
           f"{orphan_skipped} orphan (missing num/street), "
           f"{added} added, "
           f"{len(source_datasets)} distinct upstream datasets")
-    return {"added": added, "datasets": sorted(source_datasets)}
+    return {"added": added, "scanned": total_overture,
+            "datasets": sorted(source_datasets)}
+
+
+# Subtypes too generic to keep when Overture has a category for the POI.
+_OVERTURE_REFINABLE_SUBTYPES = frozenset({
+    "", "tourism", "amenity", "shop", "attraction", "leisure", "car",
+    "historic", "landuse",
+})
+
+
+def _overture_may_refine(rec):
+    """True if Overture's category may replace ``rec``'s subtype: the
+    subtype is a generic bucket, or it is tilemaker's subclass for a POI
+    whose class was one (``osm_key``, see search_record in
+    streetzim/search_extract.py). The second case keeps tilemaker +
+    Overture builds as they were when such a record's subtype was the raw
+    key itself: an amenity=restaurant still becomes italian_restaurant.
+    OpenFreeMap records never carry ``osm_key``."""
+    return ((rec.get("subtype") or "") in _OVERTURE_REFINABLE_SUBTYPES
+            or rec.get("osm_key") in _OVERTURE_REFINABLE_SUBTYPES)
 
 
 def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
@@ -644,8 +665,10 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
         search feed by rounded coord + normalized name. If found, add
         the Overture fields to that record in place. This is the main
         win — OSM's `subtype` is noisy (museums bucketed under `tourism`,
-        hotels under `amenity`); Overture's `categories.primary` gives
-        a clean label we can drive chips + popups off.
+        hotels under `amenity`); Overture's category (`categories.primary`,
+        or `taxonomy.primary` mapped back to those names on releases from
+        2026-09-23.0, see streetzim/overture.py) gives a clean label we
+        can drive chips + popups off.
       Pass 2 (add-new): Overture rows with no OSM match become fresh
         `type: "poi"` records tagged `subtype` = Overture primary
         category and `source: "overture"`.
@@ -662,8 +685,8 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
     Returns {"enriched": N, "added": M, "datasets": [...], "size_bytes": {...}}
     so the caller can log the size impact without re-stat'ing the jsonl.
     """
-    import duckdb
-    print(f"  Merging Overture places from {overture_parquet}...")
+    print(f"  Merging Overture places from {overture_parquet} "
+          f"(release {overture_release(overture_parquet) or 'unknown'})...")
 
     size_before = os.path.getsize(search_jsonl_path)
 
@@ -685,7 +708,7 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
     # No intermediate full-feature materialization. Memory bounded by
     # POI count + Overture row count, not total feature count.
     poi_keys = set()  # POI keys seen in source JSONL
-    with open(search_jsonl_path, "r", encoding="utf-8") as f:
+    with open(search_jsonl_path, encoding="utf-8") as f:
         for line in f:
             # Fast pre-filter: skip lines that aren't POIs without
             # parsing JSON. Saves minutes on continent-scale where
@@ -708,11 +731,18 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
           f"bounded memory)")
 
     # Stream Overture places from parquet via arrow batches.
-    con = duckdb.connect()
+    con = duckdb_connect()
     con.execute("INSTALL spatial; LOAD spatial;")
     parquet_sql = _sql_string_literal(overture_parquet)
+    # Category columns differ by release: `categories` up to 2026-08-19.0,
+    # `taxonomy` from then on (streetzim/overture.py). Select whichever
+    # the parquet has and let overture_category pick.
+    have = {r[0] for r in con.execute(
+        f"DESCRIBE SELECT * FROM read_parquet('{parquet_sql}')").fetchall()}
+    cat_cols = ", ".join(c if c in have else f"NULL AS {c}"
+                         for c in ("categories", "taxonomy"))
     sql = f"""
-      SELECT names, categories, phones, websites, socials, brand, sources,
+      SELECT names, {cat_cols}, phones, websites, socials, brand, sources,
              ST_X(ST_GeomFromText(wkt)) AS lon,
              ST_Y(ST_GeomFromText(wkt)) AS lat
       FROM read_parquet('{parquet_sql}')
@@ -745,7 +775,7 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
                 if lat is None or lon is None:
                     continue
                 if not (bbox_minlat <= lat <= bbox_maxlat and
-                        bbox_minlon <= lon <= bbox_maxlon):
+                        area.contains_lon((bbox_minlon, 0, bbox_maxlon, 0), lon)):
                     continue
 
                 names = row.get("names") or {}
@@ -754,8 +784,8 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
                     unnamed += 1
                     continue
 
-                cats = row.get("categories") or {}
-                primary = (cats.get("primary") or "").strip()
+                primary = overture_category(row.get("categories"),
+                                            row.get("taxonomy"))
 
                 phones = row.get("phones") or []
                 websites = row.get("websites") or []
@@ -842,7 +872,7 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
     # then append the additions sidecar.
     tmp_path = search_jsonl_path + ".overture_tmp"
     applied = set()  # keys already enriched ("first match wins")
-    with open(search_jsonl_path, "r", encoding="utf-8") as fin, \
+    with open(search_jsonl_path, encoding="utf-8") as fin, \
          open(tmp_path, "w", encoding="utf-8") as out:
         for line in fin:
             if '"type":"poi"' not in line:
@@ -871,18 +901,17 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
             for k, v in extra.items():
                 if k not in rec:
                     rec[k] = v
-            s_old = rec.get("subtype") or ""
-            if extra.get("cat") and s_old in (
-                    "", "tourism", "amenity", "shop",
-                    "attraction", "leisure", "car",
-                    "historic", "landuse"):
+            if extra.get("cat") and _overture_may_refine(rec):
                 rec["subtype"] = extra["cat"]
+                # Refined: no longer a generic bucket, so a second merge
+                # leaves it alone, as it did when the subtype was the key.
+                rec.pop("osm_key", None)
             out.write(json.dumps(rec, separators=(",", ":"),
                                  ensure_ascii=False))
             out.write("\n")
         # Append the additions sidecar (already JSONL formatted).
         if additions_count:
-            with open(additions_path, "r", encoding="utf-8") as add_fh:
+            with open(additions_path, encoding="utf-8") as add_fh:
                 shutil.copyfileobj(add_fh, out, length=8 * 1024 * 1024)
     os.replace(tmp_path, search_jsonl_path)
     try:
@@ -932,11 +961,10 @@ def extract_wiki_tags_pbf(pbf_path, bbox=None):
     tmp = tempfile.mkdtemp(prefix="streetzim_wiki_")
     try:
         if bbox:
-            minlon, minlat, maxlon, maxlat = bbox
             bbox_pbf = os.path.join(tmp, "region.osm.pbf")
             subprocess.run([
                 "osmium", "extract",
-                "-b", f"{minlon},{minlat},{maxlon},{maxlat}",
+                *area.osmium_extract_args(bbox, tmp),
                 source_pbf, "-o", bbox_pbf, "--overwrite",
             ], check=True)
             source_pbf = bbox_pbf
@@ -958,7 +986,7 @@ def extract_wiki_tags_pbf(pbf_path, bbox=None):
 
         lookup = {}
         count = 0
-        with open(wiki_geojson, "r", encoding="utf-8") as fin:
+        with open(wiki_geojson, encoding="utf-8") as fin:
             for line in fin:
                 line = line.strip().lstrip("\x1e")
                 if not line:

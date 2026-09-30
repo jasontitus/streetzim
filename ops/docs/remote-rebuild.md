@@ -245,7 +245,7 @@ cd streetzim
 #    patches — see patches/README.md if a fresh build is needed).
 python3.12 -m venv venv312
 source venv312/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-ops.txt   # the builder's requirements.txt + internetarchive (ia)
 # IMPORTANT: drop the patched libzim in. From the local Mac:
 #   tar czf /tmp/libzim-patched.tgz \
 #     ~/experiments/python-libzim/libzim

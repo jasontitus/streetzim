@@ -15,17 +15,23 @@ just after the host takes the change. Background: [README.md](README.md).
   and `resources/` are untouched; in `cloud/`, only help text, error
   messages and comments change. Step 2 checks this.
 
-**Commits:** branch `claude/adoring-dijkstra-i2vge7` is main (`0792d0d`)
-plus the ops split. Builder changes that were once on this branch are on
-`claude/adoring-dijkstra-i2vge7-builder`, with their own test plan; this
-pull doesn't include them. Merge the branch to the branch the host pulls
-(usually via a PR) before step 4.
+**Commits:** branch `claude/adoring-dijkstra-i2vge7` is the ops split
+with main (`37403b8`) merged in (`bd09db9`). Builder changes that were
+once on this branch are on `claude/adoring-dijkstra-i2vge7-builder`, with
+their own test plan; this pull doesn't include them. Merge the branch to
+the branch the host pulls (a PR with a merge commit) before step 4.
 
-**The host's own commits:** while a queue runs, `upload_validated.sh`
+**The host's own commits:** while a round runs, `upload_validated.sh`
 commits torrent files on the host after each region. The pull can only
-fast-forward if the host has none that aren't upstream, and the branch
-must contain the host's current commit. So before step 4: push the host's
-commits, have the branch updated onto the new main, and repeat steps 1–3.
+fast-forward if the branch contains the host's current commit. So before
+step 4 the host's commits go to a branch, the branch owner merges it into
+this one, and the PR merges; the order and the push are in
+[TESTING-NEXT.md](TESTING-NEXT.md) §1.0 (on 29 September: `7af110c` and
+`21b3ffd`, on top of `37403b8`). Then repeat steps 1–3.
+
+**The helpers:** steps 4 and 6 run `$HOME/sz-busy.sh` inside their
+blocks. Write it (with `$HOME/sz-env.sh` and `$HOME/sz-round.sh`) first,
+from [TESTING-NEXT.md](TESTING-NEXT.md) §0; without it both blocks stop.
 
 **Rules for the session:**
 - **Run no production script,** except where a step names one, and never
@@ -50,7 +56,8 @@ git -C /storage/streetzim --no-optional-locks status -sb
 git -C /storage/streetzim rev-list --left-right --count '@{u}...HEAD'
 # note entries that call scripts in the checkout
 crontab -l
-ps -eo pid,lstart,args | grep -E '/storage/streetzim/.*\.(sh|py|mjs)' | grep -v grep
+# production scripts; our tests (under the test root of sz-env.sh) are left out
+. "$HOME/sz-env.sh" 2>/dev/null; ps -eo pid,lstart,args | grep -E '/storage/streetzim/.*\.(sh|py|mjs)' | grep -v -e grep ${SZT:+-e "$SZT"}
 # started from inside the checkout (best effort; also matches the physical path)
 for d in /proc/[0-9]*; do c=$(readlink "$d/cwd" 2>/dev/null); case "$c" in /storage/streetzim|/storage/streetzim/*|"$(cd /storage/streetzim && pwd -P)"|"$(cd /storage/streetzim && pwd -P)"/*) echo "${d#/proc/} $(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)";; esac; done
 # untracked host scripts
@@ -62,6 +69,8 @@ host scripts may be running git.)
 
 The process listings are best effort. They see other users' processes
 only as root, and they include your own shell and commands; ignore those.
+The cwd loop also lists test processes started under the test root
+(`/storage/streetzim/sz-tests`, inside the checkout): ignore those too.
 
 **What to record:**
 - the branch name. If the second line prints `HEAD` (a detached checkout),
@@ -75,12 +84,20 @@ only as root, and they include your own shell and commands; ignore those.
 - every `M`, `T` or `D` in `git status`.
 
 **How to judge the `git status` lines:**
-- On the `*.list` files, `viewer-refresh.tsv` or
-  `cloud/region-variants.tsv`, they are expected: the host edits those.
+- On the `*.list` files, `viewer-refresh.tsv`, `cloud/region-variants.tsv`
+  or `tmp/live-inventory.out`, they are expected: the host edits those.
   Leave them.
-- On anything else, they block the pull. Resolve them first: see
-  "Pulling on the build host" in [README.md](README.md). Don't discard
-  work you don't understand; ask.
+- On the deploy output (`web/index.html`, `web/drive/build-info.js`,
+  `web/drive/sw.js`, `web/drive/viewer/.version`), they are expected
+  after any upload: every
+  deploy rewrites them. They don't block this pull, because the split
+  changes none of them (step 4 checks that and stops otherwise). Never
+  `checkout --` them, even though "Pulling on the build host" in
+  [README.md](README.md) suggests it. A later move that changes them
+  saves and restores exactly those files itself (TESTING-NEXT.md §1.4);
+  never commit them on the host.
+- `?? sz-tests/` is the test root; expected.
+- On anything else, ask. Don't discard work you don't understand.
 
 ## 2. The change, in a scratch clone (read-only for the host)
 
@@ -155,7 +172,8 @@ bash /tmp/sz-pull/ops/check_stage1.sh --root /tmp/sz-pull --python /storage/stre
 ## 3. Decide
 
 Go on to step 4 only if all of these hold:
-- step 1 shows no blocking local changes, and no local commits (ahead 0);
+- step 1 shows no blocking local changes, and the host's local commits
+  (if any) are on the branch;
 - step 2 passed, including "the branch contains the host's commit";
 - the branch is merged where the host pulls from;
 - no build is running (below).
@@ -166,20 +184,30 @@ Go on to step 4 only if all of these hold:
   A spawned child imports the code again from disk, so a pull during a
   build could mix code into a running build. This pull changes no build
   code, but keep the rule: it is the safe habit for every pull.
-- `pgrep -f '[c]reate_osm_zim'` prints nothing when no build runs (the same
-  test `finish_pending_uploads.sh` uses). If the queue starts the next
-  region at once, there is no gap: pause it the queue's own way, or wait
-  until it finishes. Step 4 refuses while a build runs.
+- `bash "$HOME/sz-busy.sh"` prints `IDLE` when no build, gate, upload,
+  extract or download runs, and no round driver. `create_osm_zim` alone
+  is not enough: a round runs the extract, the Overture download,
+  `validate_zim` (up to 3 h), the gates and `upload_validated.sh` (which
+  commits: an `index.lock` race with the pull) outside it. Step 4 runs the
+  check inside its block and refuses while anything runs. Pausing a round
+  is the user's call (TESTING-NEXT.md §0).
 - Running bash scripts keep running across the pull; bash keeps the file it
   opened. A queue that starts a new script by path picks up the new
   layout, which resolves to the same code plus the guard.
 
 ## 4. The pull (the only step that changes the host)
 
+**Not on `ot-hel1` in September 2026:** a host that follows
+[TESTING-NEXT.md](TESTING-NEXT.md) uses its §1.0 "stage-1 move" instead,
+a fast-forward to the exact commit the lead names. This block pulls
+whatever the upstream holds when it runs, which can include branches
+merged after the one step 2 tested.
+
 One block, run as one command. It:
-- stops if it can't read the checkout, if a build is running, or if the
-  checkout is already at the split (and says whether a rollback point was
-  recorded);
+- stops if it can't read the checkout, if `sz-busy.sh` is missing or
+  doesn't print `IDLE`, if the checkout is already at the split (and says
+  whether a rollback point was recorded), or if a locally modified file is
+  one the pull changes (the pull would refuse);
 - records the commit before the pull (the rollback point);
 - pulls only if that record was written. `--no-rebase` and the two
   `autoStash=false` settings keep the host's git configuration from
@@ -192,13 +220,15 @@ Both records are in `$HOME`, so they survive a reboot.
 ```bash
 if ! git -C /storage/streetzim rev-parse -q --verify HEAD >/dev/null; then
   echo "STOP: cannot read /storage/streetzim; ask"
-elif ! command -v pgrep >/dev/null; then
-  echo "STOP: pgrep is missing, so a running build can't be detected; ask"
-elif pgrep -f '[c]reate_osm_zim' >/dev/null; then
-  echo "STOP: a build is running; pull between builds (step 3)"
+elif ! command -v pgrep >/dev/null || [ ! -s "$HOME/sz-busy.sh" ]; then
+  echo "STOP: pgrep or \$HOME/sz-busy.sh (TESTING-NEXT.md §0) is missing, so a running build can't be detected; ask"
+elif bash "$HOME/sz-busy.sh"; [ $? -ne 1 ]; then
+  echo "STOP: the processes above are running (or sz-busy.sh failed); pull between them (step 3)"
 elif git -C /storage/streetzim cat-file -e HEAD:ops/in-place.txt 2>/dev/null; then
   echo "STOP: already at the split"
   cat "$HOME/sz-before-stage1.txt" "$HOME/sz-after-stage1.txt" || echo "records incomplete: no scripted rollback; ask"
+elif c=$(git -C /storage/streetzim --no-optional-locks diff --name-only HEAD | sort | comm -12 - <(git -C /storage/streetzim diff --name-only HEAD '@{u}' | sort)); [ -n "$c" ]; then
+  echo "STOP: these files are modified here and changed by the pull; ask:"; echo "$c"
 else
   rm -f "$HOME/sz-after-stage1.txt" &&
   git -C /storage/streetzim rev-parse HEAD > "$HOME/sz-before-stage1.txt.new" &&
@@ -229,14 +259,16 @@ fi
 
 ```bash
 bash /storage/streetzim/ops/check_stage1.sh --root /storage/streetzim --python /storage/streetzim/venv-linux/bin/python3
-ps -eo pid,lstart,args | grep -E '/storage/streetzim/.*\.(sh|py|mjs)' | grep -v grep
+. "$HOME/sz-env.sh" 2>/dev/null; ps -eo pid,lstart,args | grep -E '/storage/streetzim/.*\.(sh|py|mjs)' | grep -v -e grep ${SZT:+-e "$SZT"}
 ```
 
 **Expect:**
-- `ALL CHECKS PASSED`. Warnings about host-edited files, crontab lines
+- `ALL CHECKS PASSED`, apart from `FAIL local change` on deploy output
+  that step 1 showed too. Warnings about host-edited files, crontab lines
   or untracked host scripts are informational: they keep working through
-  the symlinks.
-- Every PID from step 1 is still running.
+  the symlinks. The checker's step 6 lists test processes under
+  `/storage/streetzim/sz-tests` too: ignore them.
+- Every PID from step 1 is still running (test processes aside).
 - The host-edited lists still show the same `M` as in step 1.
 - New starts of the same scripts show the same old paths in `ps`.
 - **The next scheduled or queued run** of an ops script (cron, a queue
@@ -254,10 +286,14 @@ Both must work, from any directory.
 ## 6. Rollback, if anything is wrong
 
 The rollback runs only if HEAD is still the commit the pull reached, and
-that commit is upstream (not one the host made). If anything committed
-since (`ops/cloud/upload_validated.sh` commits torrent files on the host),
-a rollback would take those files back off the disk, so the block stops
-instead. Then ask.
+that commit is upstream (not one the host made), and only while
+`sz-busy.sh` prints `IDLE` (like the pull, it swaps files under running
+scripts). If anything committed since (`ops/cloud/upload_validated.sh`
+commits torrent files on the host after every upload), a rollback would
+take those files back off the disk, so the block stops instead; mid-round
+that happens at the first upload after the pull. Then ask. (A session
+following TESTING-NEXT.md uses its §1.0 rollback instead, which makes a
+branch at the old commit rather than `reset`.)
 
 ```bash
 # host-edited lists may show M: they are kept
@@ -265,7 +301,11 @@ git -C /storage/streetzim --no-optional-locks status --short
 ```
 
 ```bash
-if test -s "$HOME/sz-before-stage1.txt" &&
+if ! [ -s "$HOME/sz-busy.sh" ]; then
+  echo "STOP: \$HOME/sz-busy.sh (TESTING-NEXT.md §0) is missing; ask"
+elif bash "$HOME/sz-busy.sh"; [ $? -ne 1 ]; then
+  echo "STOP: the processes above are running (or sz-busy.sh failed); roll back between them"
+elif test -s "$HOME/sz-before-stage1.txt" &&
    test "$(git -C /storage/streetzim rev-parse HEAD)" = "$(cat "$HOME/sz-after-stage1.txt" 2>/dev/null)" &&
    git -C /storage/streetzim merge-base --is-ancestor HEAD '@{u}'; then
   git -C /storage/streetzim reset --keep "$(cat "$HOME/sz-before-stage1.txt")" &&

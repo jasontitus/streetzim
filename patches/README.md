@@ -53,8 +53,8 @@ This triggers when the compressed output **exactly** equals the output buffer si
 
 Two repos are involved:
 
-1. **`/Users/jasontitus/experiments/python-libzim`** — OpenZIM Python bindings (Cython wrapper + bundled `libzim.9.dylib`)
-2. **`/Users/jasontitus/experiments/streetzim/patches/`** — Our patches for the C++ libzim library
+1. **`~/src/python-libzim`** — OpenZIM Python bindings (Cython wrapper + bundled `libzim.9.dylib`)
+2. **`~/src/streetzim/patches/`** — Our patches for the C++ libzim library
 
 ### How the Python libzim Package Works
 
@@ -90,8 +90,8 @@ python3 -c "from libzim.writer import Creator; print('libzim loaded OK')"
 ### Rebuilding the Python Package from Scratch
 
 ```bash
-cd /Users/jasontitus/experiments/python-libzim
-source /Users/jasontitus/experiments/streetzim/venv312/bin/activate
+cd ~/src/python-libzim
+source ~/src/streetzim/venv312/bin/activate
 
 # Download the pre-built libzim binary (stock, unpatched)
 LIBZIM_DL_VERSION=9.4.0-1 python setup.py download_libzim
@@ -100,7 +100,7 @@ LIBZIM_DL_VERSION=9.4.0-1 python setup.py download_libzim
 python setup.py build_ext --inplace
 
 # Install into streetzim venv
-pip install -e /Users/jasontitus/experiments/python-libzim
+pip install -e ~/src/python-libzim
 
 # Fix linkage if needed (check with otool -L first)
 install_name_tool -change \
@@ -119,17 +119,17 @@ cd libzim
 git checkout v9.4.0
 
 # Apply patches
-git apply /Users/jasontitus/experiments/streetzim/patches/0001-Replace-spin-loop-polling-with-condition-variables-t.patch
-git apply /Users/jasontitus/experiments/streetzim/patches/0001-Fix-infinite-loop-in-Compressor-feed-when-output-buf.patch
+git apply ~/src/streetzim/patches/0001-Replace-spin-loop-polling-with-condition-variables-t.patch
+git apply ~/src/streetzim/patches/0001-Fix-infinite-loop-in-Compressor-feed-when-output-buf.patch
 
 # Build with meson (install into project dir, NOT /tmp)
-meson setup build --prefix=/Users/jasontitus/experiments/streetzim/libzim-install
+meson setup build --prefix="$HOME/src/streetzim/libzim-install"
 ninja -C build
 ninja -C build install
 
 # Replace the dylib in python-libzim
-cp /Users/jasontitus/experiments/streetzim/libzim-install/lib/libzim.9.dylib \
-   /Users/jasontitus/experiments/python-libzim/libzim/
+cp ~/src/streetzim/libzim-install/lib/libzim.9.dylib \
+   ~/src/python-libzim/libzim/
 
 # Then reinstall python-libzim into the venv (see above)
 ```
@@ -177,8 +177,8 @@ os.unlink(f)
 |------|---------|
 | `libzim-install/lib/libzim.9.dylib` | Patched build output (permanent, NOT in /tmp) |
 | `venv312/lib/python3.12/site-packages/libzim/libzim.9.dylib` | Active copy used by Python |
-| `/Users/jasontitus/experiments/libzim/` | C++ source with patches applied |
-| `/Users/jasontitus/experiments/python-libzim/` | Python bindings source |
+| `~/src/libzim/` | C++ source with patches applied |
+| `~/src/python-libzim/` | Python bindings source |
 
 ### Environment Variables
 

@@ -160,7 +160,7 @@ def find_route_spatial(
 
     # Road coalesce — matches streetzim/routing/astar.find_route
     roads: list = []
-    for (dist_m, geom_local, name_idx, class_access) in edge_seq:
+    for (dist_m, _geom_local, name_idx, class_access) in edge_seq:
         ca = class_access
         is_round = (ca >> 8) & 1
         cls = ca & 0x1F

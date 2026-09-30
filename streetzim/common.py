@@ -7,14 +7,17 @@ build progress import ``print`` from here so lines flush immediately and
 "[N/total] Title..." headers feed PHASE_TIMER.
 
 SCRIPT_DIR / REPO_ROOT are the repository root (the directory holding
-create_osm_zim.py), not this package.
+create_osm_zim.py), not this package; RESOURCES_DIR is the checkout's
+resources/ or an installed wheel's copy (streetzim/paths.py).
 """
 import os
 import re
 import subprocess
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
+
+from streetzim import paths as _paths
 
 
 # Wrap print to auto-flush step/progress lines so monitoring never sees stale output.
@@ -223,11 +226,12 @@ def print(*args, **kwargs):
 
 SCRIPT_DIR = Path(__file__).parent.parent.resolve()
 # Where the heavy download caches live (satellite, DEM/terrain, Wikidata,
-# Wikipedia articles): $STREETZIM_CACHE_DIR, else the repo root as always.
+# Wikipedia articles): $STREETZIM_CACHE_DIR, else the repo root as always
+# (installed from a wheel: ~/.cache/streetzim; streetzim/paths.py cache_root).
 # The Docker image points it at the mounted /output volume so the caches
 # survive `docker run --rm`.
-CACHE_DIR = Path(os.environ.get("STREETZIM_CACHE_DIR") or SCRIPT_DIR)
-RESOURCES_DIR = SCRIPT_DIR / "resources"
+CACHE_DIR = _paths.cache_root()
+RESOURCES_DIR = _paths.RESOURCES_DIR
 TILEMAKER_CONFIG = RESOURCES_DIR / "tilemaker" / "config-openmaptiles.json"
 TILEMAKER_PROCESS = RESOURCES_DIR / "tilemaker" / "process-openmaptiles.lua"
 VIEWER_DIR = RESOURCES_DIR / "viewer"
@@ -287,20 +291,22 @@ def log_viewer_freshness():
             warned = True
     # index.html is built from resources/viewer/src/index/ (tools/build_viewer.py);
     # a part edited without rebuilding would silently ship the old viewer.
-    try:
-        import importlib.util as _ilu
-        _spec = _ilu.spec_from_file_location(
-            "_build_viewer", SCRIPT_DIR / "tools" / "build_viewer.py")
-        if _spec is None or _spec.loader is None:
-            raise ImportError("tools/build_viewer.py not loadable")
-        _bv = _ilu.module_from_spec(_spec)
-        _spec.loader.exec_module(_bv)
-        if _bv.build() != (VIEWER_DIR / "index.html").read_bytes():
-            print("    ⚠️  index.html does not match resources/viewer/src/index/ — "
-                  "run: python tools/build_viewer.py (packaging the OLD index.html)")
-            warned = True
-    except (Exception, SystemExit) as _e:
-        print(f"    (viewer parts check skipped: {_e})")
+    # Only a checkout has the parts; an installed wheel ships the built file.
+    builder = SCRIPT_DIR / "tools" / "build_viewer.py"
+    if builder.is_file():
+        try:
+            import importlib.util as _ilu
+            _spec = _ilu.spec_from_file_location("_build_viewer", builder)
+            if _spec is None or _spec.loader is None:
+                raise ImportError("tools/build_viewer.py not loadable")
+            _bv = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(_bv)
+            if _bv.build() != (VIEWER_DIR / "index.html").read_bytes():
+                print("    ⚠️  index.html does not match resources/viewer/src/index/ — "
+                      "run: python tools/build_viewer.py (packaging the OLD index.html)")
+                warned = True
+        except (Exception, SystemExit) as _e:
+            print(f"    (viewer parts check skipped: {_e})")
     if not warned:
         print("    viewer freshness OK")
     print()
@@ -308,8 +314,10 @@ def log_viewer_freshness():
 # Geofabrik base URL for downloading OSM extracts
 GEOFABRIK_BASE = "https://download.geofabrik.de"
 
-# Sentinel-2 Cloudless satellite tile service (EOX, CC BY-NC-SA 4.0 for 2021 vintage)
-SATELLITE_TILE_URL = "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/g/{z}/{y}/{x}.jpg"
+# The builder's default satellite tiles (EOX Sentinel-2 cloudless 2021,
+# CC BY-NC-SA 4.0). Every source and its licence: streetzim/satellite_sources.py.
+SATELLITE_TILE_URL = (
+    "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/g/{z}/{y}/{x}.jpg")
 
 # Copernicus GLO-30 DEM tile URL (public S3, no auth)
 COPERNICUS_DEM_URL = (
@@ -327,9 +335,8 @@ COPERNICUS_DEM_URL_GLO90 = (
     "Copernicus_DSM_COG_30_{ns}{lat:02d}_00_{ew}{lon:03d}_00_DEM.tif"
 )
 
-# MapLibre GL JS version to bundle
-MAPLIBRE_VERSION = "5.23.0"
-MAPLIBRE_CDN = f"https://unpkg.com/maplibre-gl@{MAPLIBRE_VERSION}/dist"
+# MapLibre GL JS is vendored in resources/vendor/maplibre-gl/, its version
+# and hashes in resources/viewer-assets.lock.json (streetzim/viewer_assets.py).
 
 
 def download_file(url, dest, desc=None):
@@ -366,8 +373,15 @@ _SEARCH_COORD_DP = int(os.environ.get("SEARCH_COORD_DP", "5") or 5)
 
 
 def parse_bbox(bbox_str):
-    """Parse a bbox string 'minlon,minlat,maxlon,maxlat' into a list of floats."""
+    """Parse a bbox string 'minlon,minlat,maxlon,maxlat' into a list of floats.
+
+    A box crossing the antimeridian (minlon > maxlon, or maxlon > 180) comes
+    back unwrapped: minlon in [-180, 180), maxlon past 180."""
     parts = [float(x.strip()) for x in bbox_str.split(",")]
     if len(parts) != 4:
         raise ValueError(f"Invalid bbox format: {bbox_str}. Expected: minlon,minlat,maxlon,maxlat")
+    if parts[0] > parts[2] or parts[2] > 180:
+        # Crosses the antimeridian: unwrapped, east past 180 (streetzim/area.py).
+        from streetzim import area
+        return list(area.normalize(parts))
     return parts

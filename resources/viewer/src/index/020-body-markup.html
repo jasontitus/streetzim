@@ -5,21 +5,28 @@
      can tell whether a long route is OOMing on cell cache, on visited-
      node Maps, or on something else. Hidden by default. -->
 <div id="route-debug" style="display:none;position:fixed;bottom:16px;right:16px;background:rgba(0,0,0,0.85);color:#0f0;font:11px/1.45 ui-monospace,monospace;padding:8px 10px;max-width:360px;border-radius:6px;z-index:9999;white-space:pre-wrap;pointer-events:none;"></div>
-<!-- Always-visible build stamp. Tiny, top-left, click to copy. Lets
+<!-- Build stamp for the /drive/ PWA. Tiny, top-left, click to copy. Lets
      you instantly tell which deploy the page is from. Populated by
-     a fetch('/drive/build-info.js') below. -->
+     a fetch('/drive/build-info.js') below; hidden everywhere else. -->
 <div id="viewer-build-stamp" style="position:fixed;top:calc(6px + var(--top-inset, 0px));left:8px;background:rgba(0,0,0,0.55);color:#0f0;font:10px/1 ui-monospace,monospace;padding:3px 6px;border-radius:4px;z-index:1;pointer-events:auto;cursor:copy;opacity:0.7;" title="StreetZim build (click to copy)">…</div>
 <script>
+// True only when the viewer runs inside the /drive/ PWA (web/drive/sw.js
+// serves it at /drive/viewer/). Files that live beside the PWA rather than
+// in the ZIM -- /drive/build-info.js, /drive/wiki-qid-titles.json -- are
+// fetched only then. kiwix-serve also serves over http(s), so the protocol
+// alone cannot tell the two apart: every page load there asked for both and
+// got two 404s.
+var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
 (function() {
   var el = document.getElementById('viewer-build-stamp');
   if (!el) return;
   // Phones hide the stamp (CSS above) unless ?debug=1 asks for it.
   if (/[?&]debug=1/.test(window.location.search)) document.body.classList.add('sz-debug');
-  // /drive/build-info.js only exists on the PWA origin. Inside Kiwix the
-  // viewer loads from zim:// (or content://), so the fetch would 404 and
-  // log noise to the console. Hide the widget entirely off-PWA.
-  var proto = window.location.protocol;
-  if (proto !== 'http:' && proto !== 'https:') {
+  // /drive/build-info.js is the PWA deploy stamp (scripts/sync-drive-viewer.sh).
+  // A ZIM does not contain it: in Kiwix (zim://, content://, or kiwix-serve
+  // over http) the fetch would only 404. Hide the widget entirely off-PWA.
+  // No fetch: the page below (025) explains; do not die here first.
+  if (!SZ_ON_DRIVE_PWA || typeof fetch !== 'function') {
     el.style.display = 'none';
     return;
   }
@@ -242,10 +249,18 @@
   <h3>Offline OSM</h3>
   <p>Vector tiles &middot; OpenStreetMap data</p>
 </div>
-<button id="attr-btn" title="Data sources &amp; licenses">Sources</button>
+<button id="attr-btn" title="About this map, data sources &amp; licenses">About</button>
 <div id="attr-overlay">
-  <div id="attr-dialog">
-    <button id="attr-close" title="Close">&times;</button>
+  <div id="attr-dialog" role="dialog" aria-modal="true" aria-labelledby="about-h">
+    <button id="attr-close" title="Close" aria-label="Close">&times;</button>
+    <!-- Filled from map-config.json by initAbout() (140-view-home-about.js). -->
+    <h2 id="about-h">About this map</h2>
+    <section id="about-section">
+      <p id="about-title">Offline OpenStreetMap</p>
+      <p id="about-desc"></p>
+      <p class="license" id="about-meta"></p>
+      <p id="about-notice" role="note" style="display:none;"></p>
+    </section>
     <h2>Data Sources &amp; Licenses</h2>
     <section>
       <h3>Map Data</h3>
@@ -262,14 +277,19 @@
       <p>OpenMapTiles</p>
       <p class="license">Creative Commons Attribution 4.0 (CC-BY 4.0) &mdash; openmaptiles.org</p>
     </section>
+    <section id="attr-tiles-section" style="display:none;">
+      <h3>Vector Tiles</h3>
+      <p id="attr-tiles-name"></p>
+      <p class="license" id="attr-tiles-meta"></p>
+    </section>
     <section id="attr-satellite-section" style="display:none;">
       <h3>Satellite Imagery</h3>
-      <p>Sentinel-2 Cloudless by EOX IT Services GmbH</p>
-      <p class="license">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA 4.0) &mdash; s2maps.eu</p>
+      <p id="attr-satellite-by">Sentinel-2 Cloudless by EOX IT Services GmbH</p>
+      <p class="license" id="attr-satellite-license">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA 4.0) &mdash; s2maps.eu</p>
     </section>
     <section id="attr-terrain-section" style="display:none;">
       <h3>Terrain / Elevation</h3>
-      <p>Copernicus GLO-30 Digital Elevation Model</p>
+      <p>Copernicus DEM (GLO-30 and GLO-90) Digital Elevation Model</p>
       <p class="license">&copy; DLR e.V. 2010-2014 and &copy; Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the European Union and ESA; all rights reserved</p>
     </section>
     <section id="attr-wiki-section" style="display:none;">
@@ -293,6 +313,22 @@
       <h3>Map Renderer</h3>
       <p>MapLibre GL JS</p>
       <p class="license">BSD 3-Clause License &mdash; maplibre.org</p>
+      <div id="attr-rtl-section" style="display:none;">
+        <p>mapbox-gl-rtl-text (right-to-left labels)</p>
+        <p class="license">BSD 2-Clause License, &copy; 2017 Mapbox; includes ICU, &copy; Unicode, Inc., Unicode licence &mdash; github.com/mapbox/mapbox-gl-rtl-text</p>
+      </div>
+    </section>
+    <section>
+      <h3>Map Icons</h3>
+      <p>Maki by Mapbox</p>
+      <p class="license">Creative Commons CC0 1.0 (public domain) &mdash; github.com/mapbox/maki</p>
+    </section>
+    <section>
+      <h3>Map Fonts</h3>
+      <p>Open Sans (label glyphs, via openmaptiles/fonts)</p>
+      <p class="license">Apache License 2.0 &mdash; github.com/openmaptiles/fonts</p>
+      <p>Noto Sans (Arabic, Armenian, Georgian, Hebrew, Lao and Thai labels, when the map has them)</p>
+      <p class="license">SIL Open Font License 1.1, &copy; 2022 The Noto Project Authors (fonts/NotoSans/OFL.txt) &mdash; github.com/protomaps/basemaps-assets</p>
     </section>
     <section>
       <h3>Offline Packaging</h3>

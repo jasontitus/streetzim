@@ -1,8 +1,11 @@
-# Lint gate run by CI (.github/workflows/ci.yml): syntax errors (E9) and the
-# whole pyflakes family (F: undefined and unused names, unused imports and
-# variables, f-strings without placeholders, `is` misuse, bad return/yield
-# placement), enforced on the whole tree. Widen it one family at a time,
-# fixing the tree as you go.
+# Lint gate run by CI (.github/workflows/ci.yml) and .pre-commit-config.yaml.
+# Chosen for catching bugs rather than for style; nothing here reformats code.
+# Widen it one family at a time, fixing the tree as you go.
+#
+# Not selected, on purpose: I (isort; import order matters in this tree, e.g.
+# streetzim/cli.py sets STREETZIM_CACHE_DIR before heavier imports), SIM and
+# PERF (style, big rewrites), BLE/S110 (the broad excepts are deliberate
+# best-effort paths), EXE (shebangs on non-executable modules are harmless).
 target-version = "py310"
 # The symlinks left at old paths by the ops split (stage 1) point into ops/,
 # which is linted there; listed here so no file is linted twice.
@@ -34,9 +37,39 @@ extend-exclude = [
 ]
 
 [lint]
-select = ["E9", "F"]
+select = [
+  "E9",     # syntax errors
+  "F",      # pyflakes: undefined/unused names, bad f-strings, `is` misuse
+  "E711", "E712", "E713", "E714", "E721", "E722",  # None/bool/type comparisons, bare except
+  "W6",     # invalid escape sequences
+  "B",      # flake8-bugbear: loop-closure bugs, mutable defaults, lost tracebacks
+  "C4",     # comprehension mistakes
+  "PLE",    # pylint errors (invisible/bidi characters, bad format strings, ...)
+  "PLW",    # pylint warnings (self-assignment, useless-else-on-loop, ...)
+  "PGH",    # malformed noqa / type: ignore
+  "RUF",    # ruff's own (useless if-else, regex in pytest.raises, ...)
+  "UP",     # pyupgrade for the py310 floor (typing aliases, open modes, OSError)
+  "YTT", "ASYNC", "T10", "LOG", "INT", "RSE",
+]
+ignore = [
+  # zip(strict=True) turns a silent truncation into an exception: a
+  # behaviour change to be made per call site, not by a lint sweep.
+  "B905",
+  # The code and docs use typographic characters (×, –, ’) deliberately.
+  "RUF001", "RUF002", "RUF003",
+  # Style only.
+  "RUF005", "RUF015", "RUF023", "RUF046", "RUF059", "UP031",
+  "PLW0603",  # module-level caches use `global` on purpose
+  "PLW1510",  # subprocess.run without check=: callers inspect returncode
+  "PLW2901",  # rebinding a loop variable is used for normalisation
+  # Many noqa comments name rules of other linters people run locally.
+  "RUF100",
+]
 
 [lint.per-file-ignores]
+# ops/ (production scripts; see ops/README.md) stays on the original gate.
+"ops/**" = ["E7", "W6", "B", "C4", "PLE", "PLW", "PGH", "RUF", "UP", "YTT",
+            "ASYNC", "T10", "LOG", "INT", "RSE"]
 # A compatibility facade: names moved to streetzim/ are re-exported, and
 # tests patch create_osm_zim.time / create_osm_zim.urllib.request.
 "create_osm_zim.py" = ["F401"]

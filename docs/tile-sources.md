@@ -6,7 +6,8 @@ StreetZim can build from two kinds of OpenMapTiles vector tiles:
   `resources/tilemaker/process-openmaptiles.lua` from an OSM PBF. This is
   what production uses.
 - **OpenFreeMap**: the Planetiler-built tiles openzim/maps ships, used with
-  `--mbtiles` (see `scripts/fetch-openfreemap-mbtiles.py`).
+  `--mbtiles`, or `--mbtiles-url` on Zimfarm (see
+  `scripts/fetch-openfreemap-mbtiles.py` and [zimfarm.md](zimfarm.md#building-from-ready-made-tiles---mbtiles-url)).
 
 Both render with the same viewer style, and routing, addresses and Wikidata
 come from the PBF either way. The difference is **how much there is to

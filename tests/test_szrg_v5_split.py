@@ -99,11 +99,11 @@ def _tiny_graph(num_geoms=0, geom_bytes_total=0, geom_offsets_blob=None,
         (0, 1, 10000, 30, 0xFFFFFFFF, 0),
         (1, 2, 10000, 30, 0xFFFFFFFF, 0),
     ]
-    return dict(
-        nodes_e7=nodes_e7, edges=edges, names=("",),
-        num_geoms=num_geoms, geom_bytes_total=geom_bytes_total,
-        geom_offsets_blob=geom_offsets_blob, geom_blob=geom_blob,
-    )
+    return {
+        "nodes_e7": nodes_e7, "edges": edges, "names": ("",),
+        "num_geoms": num_geoms, "geom_bytes_total": geom_bytes_total,
+        "geom_offsets_blob": geom_offsets_blob, "geom_blob": geom_blob,
+    }
 
 
 def test_v5_header_declares_geom_blob_external():

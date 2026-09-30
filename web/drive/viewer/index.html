@@ -178,7 +178,7 @@
      occupies bottom 10..54, so the scale bar at bottom:0 (+10px of
      MapLibre's own margin) printed straight on top of its second line.
      Verified by injection at 320/390/430 before editing. */
-  .maplibregl-ctrl-bottom-left { bottom: calc(48px + var(--safe-bottom, 0px)); }
+  .maplibregl-ctrl-bottom-left { bottom: calc(max(48px, var(--sz-attrib-h, 0px) + 4px) + var(--safe-bottom, 0px)); }
   /* Keep the locate button above the DEAD TOUCH BAND next to the app's bottom
      toolbar: in the Kiwix WebView, taps in the lowest ~50px are swallowed by
      the native toolbar hit-slop / home-indicator gestures even though the
@@ -227,7 +227,9 @@
        this label inside it — an 18 px overlap the detector confirmed at 320,
        390 and 430. Pre-dates the mobile merge; the Kiwix safe-area inset was
        masking it by lifting everything bottom-anchored clear. */
-    position: absolute; bottom: calc(84px + var(--safe-bottom, 0px)); left: 10px; z-index: 1;
+    /* --sz-attrib-h: the attribution's height when it wraps further
+       (120-map-init-and-style.js). */
+    position: absolute; bottom: calc(max(84px, var(--sz-attrib-h, 0px) + 40px) + var(--safe-bottom, 0px)); left: 10px; z-index: 1;
     background: rgba(255,255,255,0.65); padding: 3px 8px;
     border-radius: 4px; font-family: var(--ui-font);
     font-size: 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
@@ -360,6 +362,9 @@
                   black calc(100% - 14px), transparent 100%);
   }
   #find-chips::-webkit-scrollbar { display: none; }
+  /* display:flex / inline-flex below outrank the UA [hidden] rule, so the
+     chips the manifest says this ZIM lacks stayed on screen. */
+  #find-chips[hidden], #find-chips .find-chip[hidden] { display: none; }
   #find-chips .find-chip {
     flex: 0 0 auto; padding: 7px 12px;
     border-radius: 999px;
@@ -416,9 +421,14 @@
   .search-result:last-child { border-bottom: none; }
   .search-result:hover, .search-result.active { background: var(--hover-bg); }
   .search-result-name { font-size: 13px; color: var(--text-primary); font-weight: 500; letter-spacing: -0.01em; }
+  /* No text-transform: capitalize here. It turned the distance into
+     "1 Mi" and "Nearby" and recapitalised place names ("Ravin De ..."),
+     while the category it was meant for never changed: the category
+     follows the name with no space between, so Chrome and WebKit count
+     "Casinogrocery" as one word. The category keeps that lower case. */
   .search-result-type {
     font-size: 11px; color: var(--text-tertiary); margin-left: 6px;
-    text-transform: capitalize; font-weight: 400;
+    font-weight: 400;
   }
   .search-no-results {
     padding: 16px 14px; color: var(--text-tertiary); font-size: 13px; text-align: center;
@@ -539,7 +549,7 @@
     /* Left of MapLibre's bottom-right control stack (the locate button,
        44 px wide on a coarse pointer): at right:10px its lower third sat
        under that button on phones. */
-    position: absolute; bottom: calc(58px + var(--safe-bottom, 0px)); right: 64px; z-index: 2;
+    position: absolute; bottom: calc(max(58px, var(--sz-attrib-h, 0px) + 14px) + var(--safe-bottom, 0px)); right: 64px; z-index: 2;
     background: rgba(255,255,255,0.65); border: none; border-radius: 4px;
     padding: 2px 7px; font-size: 11px; cursor: pointer;
     font-family: var(--ui-font); color: var(--text-secondary);
@@ -572,7 +582,12 @@
     margin: 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5;
   }
   #attr-dialog .license {
-    font-size: 11px; color: var(--text-tertiary); font-style: italic;
+    /* --text-secondary: 4.8:1 on the white dialog (tertiary was 2.5:1). */
+    font-size: 11px; color: var(--text-secondary); font-style: italic;
+  }
+  #attr-dialog #about-notice {
+    margin-top: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);
+    border-left: 3px solid var(--accent); padding-left: 8px;
   }
   #attr-close {
     position: absolute; top: 12px; right: 14px;
@@ -1025,6 +1040,115 @@
   @media (max-width: 480px) {
     body:not(.sz-debug) #viewer-build-stamp { display: none !important; }
   }
+  /* --- Dark UI chrome ---
+     html.sz-dark is set by 135-map-theme.js from the same choice as the dark
+     map (?theme=, a host that inverts the page, prefers-color-scheme, live
+     changes), so the panels can never disagree with the map. A class, not
+     @media, because ?theme=light must win over a dark OS and Kiwix JS's
+     invert mode must get light. Light mode reads none of this: the --szd-*
+     tokens are undefined there, so each var(--szd-..., <light value>) in the
+     JS-built sheets (find results, place details, wiki panel) falls back to
+     the light colour it always had. Text pairs keep WCAG AA (4.5:1) on the
+     panel colour (tests/viewer_style_js.test.mjs checks them). */
+  html.sz-dark {
+    color-scheme: dark;
+    --panel-bg: rgba(35,38,45,0.96);
+    --panel-shadow: 0 2px 12px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.08);
+    --text-primary: #e8eaed;
+    --text-secondary: #b9bec7;
+    --text-tertiary: #9ea4ae;
+    --border: rgba(255,255,255,0.10);
+    --hover-bg: rgba(138,180,248,0.12);
+    --szd-surface: #23262d;
+    --szd-surface-a: rgba(35,38,45,0.96);
+    --szd-surface-hover: #2e323a;
+    --szd-fg: #e8eaed;
+    --szd-fg-2: #c9cdd3;
+    --szd-fg-3: #a9afb8;
+    --szd-line: #3c414a;
+    --szd-link: #8ab4f8;
+    --szd-handle: #4b5059;
+    --szd-warn: #fca5a5;
+    --szd-btn2-bg: #2b3546;
+    --szd-btn2-fg: #a8c7fa;
+  }
+  html.sz-dark #info { background: rgba(35,38,45,0.92); }
+  html.sz-dark #attr-btn { background: rgba(35,38,45,0.92); }
+  html.sz-dark #attr-btn:hover { background: #2e323a; }
+  html.sz-dark #attr-dialog { background: #23262d; box-shadow: 0 8px 32px rgba(0,0,0,0.6); }
+  html.sz-dark #attr-overlay { background: rgba(0,0,0,0.6); }
+  html.sz-dark #info .sz-recover a, html.sz-dark #info a.sz-change { color: #8ab4f8; }
+  html.sz-dark #wiki-panel-count { background: rgba(255,255,255,0.08); }
+  html.sz-dark #preview-banner-note:not(:empty) { color: #fbbf24; }
+  html.sz-dark #find-chips .find-chip:not(.on) {
+    background: rgba(35,38,45,0.96); border-color: rgba(255,255,255,0.14);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+  }
+  html.sz-dark #find-chips .find-chip:not(.on):hover { background: #2e323a; }
+  /* --accent (#2563eb) stays for filled buttons (white text, 5.2:1); as
+     text on a dark panel it is too dark, so text uses a lighter blue. */
+  html.sz-dark .pin-popup .pin-link,
+  html.sz-dark #routing-panel.minimized #routing-minimize { color: #8ab4f8; }
+  html.sz-dark .sz-home-btn svg { fill: #e8eaed; }
+  /* Focus rings: the light ones (15-20% blue) vanish on a dark panel.
+     #8ab4f8 is 7.9:1 on it (WCAG 2.2 wants 3:1 for focus indicators). */
+  html.sz-dark #search-input:focus,
+  html.sz-dark .routing-input:focus { box-shadow: 0 0 0 2px #8ab4f8; border-color: #8ab4f8; }
+  /* MapLibre's own controls (maplibre-gl.css is light only). */
+  html.sz-dark .maplibregl-ctrl-group { background: #23262d; }
+  html.sz-dark .maplibregl-ctrl-group:not(:empty) { box-shadow: 0 0 0 2px rgba(255,255,255,0.10); }
+  html.sz-dark .maplibregl-ctrl-group button + button { border-top-color: #3c414a; }
+  html.sz-dark .maplibregl-ctrl button:not(:disabled):hover { background-color: rgba(255,255,255,0.08); }
+  /* The icons are black SVGs; invert + hue-rotate keeps the geolocate blue blue. */
+  html.sz-dark .maplibregl-ctrl button .maplibregl-ctrl-icon,
+  html.sz-dark .maplibregl-ctrl-attrib-button { filter: invert(1) hue-rotate(180deg); }
+  html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-scale {
+    background-color: rgba(35,38,45,0.92); border-color: #c9cdd3; color: #e8eaed;
+  }
+  html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-attrib,
+  html.sz-dark .maplibregl-ctrl-attrib.maplibregl-compact {
+    background-color: rgba(35,38,45,0.92); color: #c9cdd3;
+  }
+  html.sz-dark .maplibregl-ctrl-attrib a { color: #c9cdd3; }
+  html.sz-dark .maplibregl-popup-content {
+    background: #23262d; color: var(--text-primary); box-shadow: 0 2px 12px rgba(0,0,0,0.55);
+  }
+  html.sz-dark .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+  html.sz-dark .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+  html.sz-dark .maplibregl-popup-anchor-top-right .maplibregl-popup-tip { border-bottom-color: #23262d; }
+  html.sz-dark .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+  html.sz-dark .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+  html.sz-dark .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip { border-top-color: #23262d; }
+  html.sz-dark .maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: #23262d; }
+  html.sz-dark .maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: #23262d; }
+  html.sz-dark .maplibregl-popup-close-button { color: var(--text-secondary); }
+  /* Printing: paper is white, so print the chrome in its light colours.
+     The --szd-* tokens go back to "guaranteed invalid", so every
+     var(--szd-..., <light>) falls back to its light colour again. */
+  @media print {
+    html.sz-dark {
+      color-scheme: light;
+      --panel-bg: rgba(255,255,255,0.96);
+      --panel-shadow: 0 2px 12px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.04);
+      --text-primary: #1a1a1a;
+      --text-secondary: #6b7280;
+      --text-tertiary: #9ca3af;
+      --border: rgba(0,0,0,0.06);
+      --hover-bg: rgba(37,99,235,0.04);
+      --szd-surface: initial; --szd-surface-a: initial; --szd-surface-hover: initial;
+      --szd-fg: initial; --szd-fg-2: initial; --szd-fg-3: initial; --szd-line: initial;
+      --szd-link: initial; --szd-handle: initial; --szd-warn: initial;
+      --szd-btn2-bg: initial; --szd-btn2-fg: initial;
+    }
+    html.sz-dark #info, html.sz-dark #attr-btn,
+    html.sz-dark #find-chips .find-chip:not(.on),
+    html.sz-dark .maplibregl-ctrl-group, html.sz-dark .maplibregl-popup-content,
+    html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-scale,
+    html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-attrib { background: #fff; color: #1a1a1a; }
+    html.sz-dark .maplibregl-ctrl button .maplibregl-ctrl-icon,
+    html.sz-dark .maplibregl-ctrl-attrib-button { filter: none; }
+    html.sz-dark .sz-home-btn svg { fill: #333; }
+  }
 </style>
 </head>
 <body>
@@ -1034,21 +1158,28 @@
      can tell whether a long route is OOMing on cell cache, on visited-
      node Maps, or on something else. Hidden by default. -->
 <div id="route-debug" style="display:none;position:fixed;bottom:16px;right:16px;background:rgba(0,0,0,0.85);color:#0f0;font:11px/1.45 ui-monospace,monospace;padding:8px 10px;max-width:360px;border-radius:6px;z-index:9999;white-space:pre-wrap;pointer-events:none;"></div>
-<!-- Always-visible build stamp. Tiny, top-left, click to copy. Lets
+<!-- Build stamp for the /drive/ PWA. Tiny, top-left, click to copy. Lets
      you instantly tell which deploy the page is from. Populated by
-     a fetch('/drive/build-info.js') below. -->
+     a fetch('/drive/build-info.js') below; hidden everywhere else. -->
 <div id="viewer-build-stamp" style="position:fixed;top:calc(6px + var(--top-inset, 0px));left:8px;background:rgba(0,0,0,0.55);color:#0f0;font:10px/1 ui-monospace,monospace;padding:3px 6px;border-radius:4px;z-index:1;pointer-events:auto;cursor:copy;opacity:0.7;" title="StreetZim build (click to copy)">…</div>
 <script>
+// True only when the viewer runs inside the /drive/ PWA (web/drive/sw.js
+// serves it at /drive/viewer/). Files that live beside the PWA rather than
+// in the ZIM -- /drive/build-info.js, /drive/wiki-qid-titles.json -- are
+// fetched only then. kiwix-serve also serves over http(s), so the protocol
+// alone cannot tell the two apart: every page load there asked for both and
+// got two 404s.
+var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
 (function() {
   var el = document.getElementById('viewer-build-stamp');
   if (!el) return;
   // Phones hide the stamp (CSS above) unless ?debug=1 asks for it.
   if (/[?&]debug=1/.test(window.location.search)) document.body.classList.add('sz-debug');
-  // /drive/build-info.js only exists on the PWA origin. Inside Kiwix the
-  // viewer loads from zim:// (or content://), so the fetch would 404 and
-  // log noise to the console. Hide the widget entirely off-PWA.
-  var proto = window.location.protocol;
-  if (proto !== 'http:' && proto !== 'https:') {
+  // /drive/build-info.js is the PWA deploy stamp (scripts/sync-drive-viewer.sh).
+  // A ZIM does not contain it: in Kiwix (zim://, content://, or kiwix-serve
+  // over http) the fetch would only 404. Hide the widget entirely off-PWA.
+  // No fetch: the page below (025) explains; do not die here first.
+  if (!SZ_ON_DRIVE_PWA || typeof fetch !== 'function') {
     el.style.display = 'none';
     return;
   }
@@ -1271,10 +1402,18 @@
   <h3>Offline OSM</h3>
   <p>Vector tiles &middot; OpenStreetMap data</p>
 </div>
-<button id="attr-btn" title="Data sources &amp; licenses">Sources</button>
+<button id="attr-btn" title="About this map, data sources &amp; licenses">About</button>
 <div id="attr-overlay">
-  <div id="attr-dialog">
-    <button id="attr-close" title="Close">&times;</button>
+  <div id="attr-dialog" role="dialog" aria-modal="true" aria-labelledby="about-h">
+    <button id="attr-close" title="Close" aria-label="Close">&times;</button>
+    <!-- Filled from map-config.json by initAbout() (140-view-home-about.js). -->
+    <h2 id="about-h">About this map</h2>
+    <section id="about-section">
+      <p id="about-title">Offline OpenStreetMap</p>
+      <p id="about-desc"></p>
+      <p class="license" id="about-meta"></p>
+      <p id="about-notice" role="note" style="display:none;"></p>
+    </section>
     <h2>Data Sources &amp; Licenses</h2>
     <section>
       <h3>Map Data</h3>
@@ -1291,14 +1430,19 @@
       <p>OpenMapTiles</p>
       <p class="license">Creative Commons Attribution 4.0 (CC-BY 4.0) &mdash; openmaptiles.org</p>
     </section>
+    <section id="attr-tiles-section" style="display:none;">
+      <h3>Vector Tiles</h3>
+      <p id="attr-tiles-name"></p>
+      <p class="license" id="attr-tiles-meta"></p>
+    </section>
     <section id="attr-satellite-section" style="display:none;">
       <h3>Satellite Imagery</h3>
-      <p>Sentinel-2 Cloudless by EOX IT Services GmbH</p>
-      <p class="license">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA 4.0) &mdash; s2maps.eu</p>
+      <p id="attr-satellite-by">Sentinel-2 Cloudless by EOX IT Services GmbH</p>
+      <p class="license" id="attr-satellite-license">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA 4.0) &mdash; s2maps.eu</p>
     </section>
     <section id="attr-terrain-section" style="display:none;">
       <h3>Terrain / Elevation</h3>
-      <p>Copernicus GLO-30 Digital Elevation Model</p>
+      <p>Copernicus DEM (GLO-30 and GLO-90) Digital Elevation Model</p>
       <p class="license">&copy; DLR e.V. 2010-2014 and &copy; Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the European Union and ESA; all rights reserved</p>
     </section>
     <section id="attr-wiki-section" style="display:none;">
@@ -1322,6 +1466,22 @@
       <h3>Map Renderer</h3>
       <p>MapLibre GL JS</p>
       <p class="license">BSD 3-Clause License &mdash; maplibre.org</p>
+      <div id="attr-rtl-section" style="display:none;">
+        <p>mapbox-gl-rtl-text (right-to-left labels)</p>
+        <p class="license">BSD 2-Clause License, &copy; 2017 Mapbox; includes ICU, &copy; Unicode, Inc., Unicode licence &mdash; github.com/mapbox/mapbox-gl-rtl-text</p>
+      </div>
+    </section>
+    <section>
+      <h3>Map Icons</h3>
+      <p>Maki by Mapbox</p>
+      <p class="license">Creative Commons CC0 1.0 (public domain) &mdash; github.com/mapbox/maki</p>
+    </section>
+    <section>
+      <h3>Map Fonts</h3>
+      <p>Open Sans (label glyphs, via openmaptiles/fonts)</p>
+      <p class="license">Apache License 2.0 &mdash; github.com/openmaptiles/fonts</p>
+      <p>Noto Sans (Arabic, Armenian, Georgian, Hebrew, Lao and Thai labels, when the map has them)</p>
+      <p class="license">SIL Open Font License 1.1, &copy; 2022 The Noto Project Authors (fonts/NotoSans/OFL.txt) &mdash; github.com/protomaps/basemaps-assets</p>
     </section>
     <section>
       <h3>Offline Packaging</h3>
@@ -1330,6 +1490,118 @@
     </section>
   </div>
 </div>
+<!-- Home button, the About panel (the top of #attr-dialog) and the full-page
+     error shown when the map cannot start at all: a browser without Fetch /
+     Promise / MapLibre, no WebGL, or a map-config.json that never loaded.
+     The styles sit here rather than in 010 so this feature is one part.
+     The Home button and About panel follow the map theme through
+     html.sz-dark (010); the full-page error, which can appear before any
+     of that code runs, follows the OS scheme directly. -->
+<style>
+  .sz-home-btn svg { display: block; margin: auto; width: 18px; height: 18px; fill: #333; }
+  #about-section { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+  #about-section #about-title { color: var(--text-primary); font-weight: 600; font-size: 14px; }
+  #about-section #about-desc:empty { display: none; }
+  #sz-fatal {
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 10000; overflow-y: auto;
+    display: flex; align-items: center; justify-content: center;
+    /* Plain values first: a browser too old for var() drops those lines. */
+    padding: 16px; padding: calc(16px + var(--top-inset, 0px)) 16px calc(16px + var(--safe-bottom, 0px));
+    box-sizing: border-box; background: #f3f4f6; color: #1a1a1a;
+    font-family: sans-serif; font-family: var(--ui-font); line-height: 1.5;
+  }
+  #sz-fatal .card {
+    max-width: 480px; width: 100%; background: #fff; border-radius: 10px;
+    padding: 24px 28px; box-shadow: 0 8px 32px rgba(0,0,0,0.12); box-sizing: border-box;
+  }
+  #sz-fatal h1 { margin: 0 0 10px; font-size: 19px; font-weight: 700; }
+  #sz-fatal p, #sz-fatal li { margin: 0 0 10px; font-size: 14px; color: #374151; }
+  #sz-fatal ul { margin: 0 0 10px; padding-left: 20px; }
+  #sz-fatal button {
+    font: inherit; font-size: 14px; font-weight: 600; min-height: 44px; padding: 0 18px;
+    border: none; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer;
+  }
+  #sz-fatal details { margin-top: 14px; font-size: 12px; color: #6b7280; }
+  #sz-fatal pre {
+    white-space: pre-wrap; word-break: break-all; font-size: 11px; max-height: 40vh;
+    overflow: auto; background: rgba(127,127,127,0.12); padding: 8px; border-radius: 4px;
+  }
+  @media (prefers-color-scheme: dark) {
+    #sz-fatal { background: #111418; color: #e5e7eb; }
+    #sz-fatal .card { background: #1f2329; box-shadow: none; }
+    #sz-fatal p, #sz-fatal li { color: #d1d5db; }
+    #sz-fatal details { color: #9ca3af; }
+  }
+</style>
+<script>
+// Replace the page with a readable explanation of why the map cannot run.
+// ES5 only: this must work in the very browsers it is written for. opts:
+//   title, lines (paragraphs), tips (list items), retry (show "Try again"),
+//   details (technical text, collapsed). Built with textContent, so an error
+//   message or URL can never inject markup.
+function szFatalPage(opts) {
+  var old = document.getElementById('sz-fatal');
+  if (old && old.parentNode) old.parentNode.removeChild(old);
+  var page = document.createElement('div');
+  page.id = 'sz-fatal';
+  page.setAttribute('role', 'alert');
+  var card = document.createElement('div');
+  card.className = 'card';
+  page.appendChild(card);
+  function add(tag, text, parent) {
+    var el = document.createElement(tag);
+    if (text != null) el.textContent = text;
+    (parent || card).appendChild(el);
+    return el;
+  }
+  add('h1', opts.title);
+  var i;
+  for (i = 0; opts.lines && i < opts.lines.length; i++) add('p', opts.lines[i]);
+  if (opts.tips && opts.tips.length) {
+    var ul = add('ul');
+    for (i = 0; i < opts.tips.length; i++) add('li', opts.tips[i], ul);
+  }
+  if (opts.retry) {
+    add('button', 'Try again').addEventListener('click', function() { location.reload(); });
+  }
+  if (opts.details) {
+    var det = add('details');
+    add('summary', 'Technical details', det);
+    add('pre', opts.details, det);
+  }
+  (document.body || document.documentElement).appendChild(page);
+  try { document.title = opts.title; } catch (e) {}
+  return page;
+}
+
+// Check what the viewer cannot run without before any of it runs. Old
+// WebViews (an outdated Kiwix, Android 4.x System WebView, IE) lack Fetch
+// or Promise, and a MapLibre that failed to load or parse leaves no
+// `maplibregl`; each used to stop the script at its first use and leave
+// a blank map. The main script checks window.__szUnsupported and stays out.
+(function() {
+  var missing = [];
+  if (typeof window.fetch !== 'function') missing.push('Fetch API');
+  if (typeof window.Promise !== 'function') missing.push('Promise');
+  if (typeof window.maplibregl === 'undefined') missing.push('MapLibre GL (maplibre-gl.js did not load or run)');
+  if (!missing.length) return;
+  window.__szUnsupported = missing;
+  szFatalPage({
+    title: 'This reader cannot show the map',
+    lines: [
+      'The offline map needs a web engine newer than the one this app or browser uses. It is missing: ' +
+        missing.join(', ') + '.'
+    ],
+    tips: [
+      'Update your Kiwix app, or open this file in a current Kiwix (Android, iOS, macOS, Windows, Linux) or Kiwix JS.',
+      'In Kiwix JS, use ServiceWorker mode, not JQuery mode.',
+      'In a browser, use a recent Firefox, Chrome, Edge or Safari.'
+    ],
+    details: 'Missing: ' + missing.join(', ') + '\nUser agent: ' + (navigator.userAgent || '?') +
+      '\nPage: ' + location.href
+  });
+})();
+</script>
 <script>
 // Compute base URL for absolute resource paths. Strip `#` fragment and
 // `?` query first — deep-links like `index.html#map=16/37.4/-122.1`
@@ -1350,8 +1622,9 @@ var baseUrl = (function() {
 // one level above the viewer base). When present, wiki popups gain a
 // "Read full article" button that opens the in-ZIM wiki-article/<Title> page
 // (served by the drive service worker). Absent (e.g. plain Kiwix) -> popups
-// just show the wikidata blurb as before. This is a transitional side-load;
-// once the bridge is baked into the ZIM the fetch simply falls back to it.
+// just show the wikidata blurb as before. This is a transitional side-load,
+// requested only inside the PWA (SZ_ON_DRIVE_PWA); ZIMs with bundled
+// articles carry wiki-geo-index.json, which supersedes it.
 var WIKI_QID_TITLES = null;   // optional side-load bridge (transitional)
 var WIKI_GEO_INDEX = null;    // {title:[lat,lon,type,qid]} from the ZIM's wiki-geo-index.json
 var WIKI_GEO_QID = null;      // reverse {qid:title} built from WIKI_GEO_INDEX
@@ -1397,6 +1670,9 @@ function wikiGeoTitlesInBounds(W, E, S, N) {
   return out;
 }
 (function loadWikiTitleBridge() {
+  // The bridge sits beside the PWA, never in a ZIM: under kiwix-serve this
+  // fetch was a 404 on every page load.
+  if (typeof SZ_ON_DRIVE_PWA === 'undefined' || !SZ_ON_DRIVE_PWA) return;
   try {
     fetch(baseUrl + '../wiki-qid-titles.json')
       .then(function(r) { return r && r.ok ? r.json() : null; })
@@ -1541,7 +1817,7 @@ function showFatalError(title, err, url) {
   if (url) html += '<p style="font-size:8px;opacity:0.7;word-break:break-all;">URL: ' + url + '</p>';
   html += '<p style="font-size:8px;opacity:0.7;">UA: ' + (navigator.userAgent || '?').substring(0, 80) + '</p>';
   html += '<p style="font-size:8px;opacity:0.7;">Base: ' + baseUrl + '</p>';
-  html += '<p style="font-size:9px;"><a href="#" id="debug-show" style="color:#2563eb;">Show debug log</a></p>';
+  html += '<p style="font-size:9px;"><a href="#" id="debug-show" style="color:var(--szd-link, #2563eb);">Show debug log</a></p>';
   info.innerHTML = html;
   info.style.maxWidth = '420px';
   var link = document.getElementById('debug-show');
@@ -1549,7 +1825,7 @@ function showFatalError(title, err, url) {
     link.addEventListener('click', function(e) {
       e.preventDefault();
       var pre = document.createElement('pre');
-      pre.style.cssText = 'max-height:200px;overflow:auto;font-size:9px;background:#fff;padding:6px;margin-top:6px;border:1px solid #ddd;white-space:pre-wrap;word-break:break-all;';
+      pre.style.cssText = 'max-height:200px;overflow:auto;font-size:9px;background:var(--szd-surface, #fff);padding:6px;margin-top:6px;border:1px solid var(--szd-line, #ddd);white-space:pre-wrap;word-break:break-all;';
       pre.textContent = _debugLog.join('\n') || '(empty)';
       info.appendChild(pre);
       link.style.display = 'none';
@@ -1563,6 +1839,7 @@ dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAg
 // fire at once — terrain zoom-in triggers 30-50+ parallel tile fetches.
 // We queue requests and allow at most MAX_CONCURRENT in-flight at a time.
 (function() {
+  if (window.__szUnsupported) return;   // 025: no MapLibre/Fetch; page already explains
   var MAX_CONCURRENT = 6;
   var inflight = 0;
   var queue = [];
@@ -1617,6 +1894,8 @@ dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAg
     }
     return attempt(1);
   }
+  // Also used for one-off ZIM files outside a style (the RTL text plugin).
+  window.__szFetchWithRetry = fetchWithRetry;
 
   maplibregl.addProtocol('zimtile', function(params, abortController) {
     var url = params.url.replace('zimtile://', '');
@@ -1673,7 +1952,9 @@ function fetchConfig(n) {
       throw err;
     });
 }
-fetchConfig(1)
+// 025-home-about-fatal.html has already replaced the page when the browser
+// lacks what the viewer needs (Fetch, Promise, MapLibre).
+if (!window.__szUnsupported) fetchConfig(1)
   .then(function(config) {
     // Check WebGL support before initializing MapLibre
     try {
@@ -1681,9 +1962,13 @@ fetchConfig(1)
       var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
       if (!gl) throw new Error('WebGL not available');
     } catch (e) {
-      document.getElementById('info').innerHTML =
-        '<h3>WebGL Required</h3><p>This map needs WebGL support. ' +
-        'Try the Leaflet/raster version instead.</p>';
+      szFatalPage({
+        title: 'This map needs WebGL',
+        lines: ['The map is drawn with WebGL, which this app or browser has turned off or does not support.'],
+        tips: ['Turn on hardware acceleration / WebGL in the browser or app settings, or update it.',
+               'Try another reader: a current Kiwix app, Kiwix JS, or a recent desktop browser.'],
+        details: describeError(e) + '\nUser agent: ' + (navigator.userAgent || '?')
+      });
       return;
     }
 
@@ -1694,24 +1979,28 @@ fetchConfig(1)
     // docs/todo-opening-view.md record why, so the next attempt does not
     // repeat them. The zoom is already extent-based (create_osm_zim's
     // get_center_and_zoom), so only the centre needs work.
+    // The last view of this map, unless the URL names one (140).
+    var openCam = _szOpeningCamera(config, location.hash, _szStorage());
     var map = new maplibregl.Map({
       container: 'map',
       style: makeStyle(config),
-      // Framed by fitBounds below when we have bounds; these stay as the
-      // pre-fit camera (and the whole answer for a ZIM with no bounds).
-      center: config.center,
-      zoom: config.zoom,
+      center: openCam.center,
+      zoom: openCam.zoom,
+      bearing: openCam.bearing,
+      pitch: openCam.pitch,
       minZoom: config.minZoom || 0,
       maxZoom: 20,
       attributionControl: true,
-      maxBounds: config.bounds ? [
-        [config.bounds[0] - 0.01, config.bounds[1] - 0.01],
-        [config.bounds[2] + 0.01, config.bounds[3] + 0.01]
-      ] : undefined
+      maxBounds: _szMaxBounds(config)   // the built box, no margin (140)
     });
     // Exposed so module-scope helpers (e.g. openWikiArticle) can stamp the
     // current view into the URL hash before navigating away.
     window.__szMap = map;
+    // POI icons are drawn on demand, the theme follows the OS scheme, and
+    // the RTL plugin loads when the first RTL label appears (135-137).
+    initPoiIcons(map);
+    initMapTheme(map, config);
+    initRtlText(map, config);
 
     // NOTE: the opening view is deliberately left as map-config.json ships
     // it. See docs/todo-opening-view.md.
@@ -1774,8 +2063,12 @@ fetchConfig(1)
     })();
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
-    // Scale bar with mi/km toggle — click to switch units
-    var scaleUnit = 'imperial';
+    initHomeButton(map, config);
+    initViewMemory(map, config);
+    initAbout(config);
+    // Scale bar with mi/km toggle — click to switch units. The choice is
+    // kept (szReadUnit/szWriteUnit, 140) and every distance follows it.
+    var scaleUnit = szReadUnit(_szStorage());
     map._streetzimUnit = scaleUnit;  // shared with driving-mode HUD
     var scaleControl = new maplibregl.ScaleControl({ unit: scaleUnit });
     map.addControl(scaleControl, 'bottom-left');
@@ -1784,6 +2077,7 @@ fetchConfig(1)
         scaleUnit = scaleUnit === 'imperial' ? 'metric' : 'imperial';
         scaleControl.setUnit(scaleUnit);
         map._streetzimUnit = scaleUnit;
+        szWriteUnit(_szStorage(), scaleUnit);
         map.fire('streetzim.units', { unit: scaleUnit });
       }
     });
@@ -1828,6 +2122,17 @@ fetchConfig(1)
     map.addControl(geolocate, 'bottom-right');
     geolocate.on('geolocate', function(pos) { _onLocated(pos); });
 
+    // #info, #attr-btn and the scale bar sit above MapLibre's attribution,
+    // which wraps to more lines on a phone when the satellite credit joins
+    // it: its height is published as --sz-attrib-h for their CSS.
+    (function () {
+      var attrib = document.querySelector('.maplibregl-ctrl-attrib');
+      if (!attrib || typeof ResizeObserver === 'undefined') return;
+      new ResizeObserver(function () {
+        document.documentElement.style.setProperty('--sz-attrib-h', attrib.offsetHeight + 'px');
+      }).observe(attrib);
+    })();
+
     // Satellite layer toggle
     if (config.hasSatellite) {
       var toggleBtn = document.getElementById('layer-toggle');
@@ -1848,9 +2153,13 @@ fetchConfig(1)
         var satExt = config.satelliteFormat || 'webp';
         var satTileSize = config.satelliteTileSize || 256;
         // Use zimtile:// protocol for retry logic on Kiwix service worker
+        // EOX requires its credit in the map itself; MapLibre shows a
+        // source's attribution while one of its layers is visible.
+        var satCredit = _szSatelliteCreditHtml(config);
         map.addSource('satellite', {
           type: 'raster',
           tiles: ['zimtile://' + baseUrl + 'satellite/{z}/{x}/{y}.' + satExt],
+          attribution: satCredit,
           tileSize: satTileSize,
           minzoom: 0,
           maxzoom: config.satelliteMaxZoom || 14
@@ -1978,6 +2287,14 @@ fetchConfig(1)
         });
       }
 
+      // The theme repainted the base layers from makeStyle(): what
+      // hideSatellite restores is now stale, and while satellite is on its
+      // label/road overrides were just overwritten. Recapture, re-apply.
+      map.on('streetzim.theme', function() {
+        satSavedPaint = null;
+        if (satelliteVisible) showSatellite();
+      });
+
       toggleBtn.addEventListener('click', function() {
         satelliteVisible = !satelliteVisible;
         toggleBtn.classList.toggle('active-control', satelliteVisible);
@@ -2000,7 +2317,10 @@ fetchConfig(1)
           type: 'raster-dem',
           tiles: ['zimtile://' + baseUrl + 'terrain/{z}/{x}/{y}.webp'],
           tileSize: 256,
-          minzoom: 0,
+          // Without a world DEM the build starts terrain at the lowest zoom
+          // this view can reach (streetzim/terrain.py), so nothing is asked
+          // for below it.
+          minzoom: config.terrainMinZoom || 0,
           maxzoom: config.terrainMaxZoom || 12,
           encoding: 'mapbox'
         });
@@ -2189,11 +2509,27 @@ fetchConfig(1)
       var overtureSection = document.getElementById('attr-overture-section');
       if (overtureSection) overtureSection.style.display = '';
     }
+    // Ready-made tiles (streetzim --mbtiles-url): whose they are, as
+    // map-config.json's tileSource records them. Text only, never HTML.
+    var ts = config.tileSource;
+    if (ts && typeof ts.name === 'string' && ts.name) {
+      var tsSection = document.getElementById('attr-tiles-section');
+      var tsName = document.getElementById('attr-tiles-name');
+      var tsMeta = document.getElementById('attr-tiles-meta');
+      if (tsSection && tsName && tsMeta) {
+        tsName.textContent = ts.name;
+        tsMeta.textContent = [ts.version && 'version ' + ts.version,
+                              ts.osmDate && 'OSM data ' + ts.osmDate,
+                              ts.homepage].filter(Boolean).join(' \u2014 ');
+        tsSection.style.display = '';
+      }
+    }
     // Same for the other optional layers: a ZIM without satellite imagery
     // must not show the imagery's non-commercial licence as if it applied.
     [['attr-satellite-section', config.hasSatellite],
      ['attr-terrain-section', config.hasTerrain],
-     ['attr-wiki-section', config.hasWikidata || config.hasWikiArticles]
+     ['attr-wiki-section', config.hasWikidata || config.hasWikiArticles],
+     ['attr-rtl-section', config.rtlTextPlugin]
     ].forEach(function (s) {
       var el = document.getElementById(s[0]);
       if (el && s[1]) el.style.display = '';
@@ -2307,6 +2643,23 @@ fetchConfig(1)
       }
       return;
     }
+    // map-config.json never arrived: nothing can be drawn, so say so on
+    // a full page. A failure after the map exists keeps the small #info
+    // note, so a bug in one feature does not hide a working map.
+    if (isConfig && !window.__szMap) {
+      szFatalPage({
+        title: 'This map could not be opened',
+        lines: ['Its settings file, map-config.json, could not be read' +
+                (status ? ' (the reader answered HTTP ' + status + ')' : '') + '.'],
+        tips: ['Try again: a reader that is still opening the file can miss the first requests.',
+               'If it keeps failing, the file may be incomplete: check its size, or download it again.',
+               'In Kiwix JS, use ServiceWorker mode, not JQuery mode.'],
+        retry: true,
+        details: describeError(err) + '\nURL: ' + err._url + '\nUser agent: ' +
+                 (navigator.userAgent || '?') + '\n\n' + _debugLog.join('\n')
+      });
+      return;
+    }
     showFatalError('Error loading map', err, err && err._url);
   });
 
@@ -2351,9 +2704,13 @@ function makeStyle(config) {
     "attribution": '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors | <a href="https://openmaptiles.org/">OpenMapTiles</a>'
   };
   if (config.bounds) {
-    sourceConfig.bounds = config.bounds;
+    // An area across the antimeridian has east past 180 (streetzim/area.py).
+    // MapLibre clamps source bounds to [-180, 180] and cannot express one
+    // that wraps, so such a source keeps its latitudes only.
+    sourceConfig.bounds = config.bounds[2] > 180
+      ? [-180, config.bounds[1], 180, config.bounds[3]] : config.bounds;
   }
-  return {
+  return _szThemeStyle({
     "version": 8,
     "name": "OSM Offline",
     "sources": {
@@ -2884,21 +3241,28 @@ function makeStyle(config) {
           "text-halo-width": 1
         }
       },
-      // POI Labels — show more POIs as zoom increases
+      // POI Labels — show more POIs as zoom increases. Icons (136-poi-icons.js)
+      // share the label's symbol, so icon and name collide as one unit and a
+      // POI shows both or neither; the label sits under the disc. A POI with
+      // an icon but no name appears only from z16, where there is room.
       {
         "id": "poi-label",
         "type": "symbol",
         "source": "openmaptiles",
         "source-layer": "poi",
         "minzoom": 14,
-        "filter": ["<=", ["get", "rank"],
-          ["step", ["zoom"], 4, 15, 10, 16, 25]
+        "filter": ["all",
+          ["<=", ["get", "rank"], ["step", ["zoom"], 4, 15, 10, 16, 25]],
+          ["any", ["has", "name"], ["has", "name:latin"], [">=", ["zoom"], 16]]
         ],
         "layout": {
           "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
           "text-font": ["OpenSansRegular"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 14, 11, 18, 18],
-          "text-offset": [0, 0.5],
+          "icon-image": _szPoiIconExpr(),
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 14, 0.8, 17, 1],
+          "text-offset": ["case", ["==", _szPoiIconExpr(), ""],
+            ["literal", [0, 0.5]], ["literal", [0, 0.85]]],
           "text-anchor": "top"
         },
         "paint": {
@@ -2908,9 +3272,893 @@ function makeStyle(config) {
         }
       }
     ]
+  }, _szPrefersDark());
+}
+
+// Dark map theme. makeStyle() builds the light style; when the reader
+// prefers a dark colour scheme, _szThemeStyle() overwrites the colours
+// below layer by layer. Only paint values change -- layer ids, filters,
+// order and zooms are the light style's, so search, chips, satellite and
+// driving mode (which address layers by id) see the same map either way.
+// tests/viewer_style_js.test.mjs fails if a light layer gains a colour
+// this table does not darken, or the table names a layer that is gone.
+//
+// Chosen by, in order: ?theme=dark|light in the URL; light when the host
+// already inverts the page (Kiwix JS's "invert" dark mode filters the
+// article frame, so a dark map would come out light); else
+// prefers-color-scheme, followed live when it changes.
+// BEGIN map-theme
+var _SZ_DARK_HALO = 'rgba(0,0,0,0.75)';
+var _SZ_DARK = {
+  'background': { 'background-color': '#1b1e23' },
+  'landcover-grass': { 'fill-color': '#243325' },
+  'landcover-wood': { 'fill-color': '#1f3524' },
+  'landcover-farmland': { 'fill-color': '#262a22' },
+  'landuse-residential': { 'fill-color': '#34373d' },
+  'landuse-commercial': { 'fill-color': '#3b2c2e' },
+  'landuse-park': { 'fill-color': '#1f3d26' },
+  'water': { 'fill-color': '#1c3a50' },
+  'water-lowzoom': { 'fill-color': '#1c3a50' },
+  'waterway': { 'line-color': '#25506c' },
+  'building': { 'fill-color': '#2d3037' },
+  'building-outline': { 'line-color': '#3d4149' },
+  'boundary-country': { 'line-color': '#77748c' },
+  'boundary-state': { 'line-color': '#5d5b6d' },
+  'aeroway-runway': { 'line-color': '#43464d' },
+  'road-motorway-casing': { 'line-color': '#6e4524' },
+  'road-trunk-casing': { 'line-color': '#6e4524' },
+  'road-primary-casing': { 'line-color': '#5f4526' },
+  'road-secondary-casing': { 'line-color': '#4d4527' },
+  'road-motorway': { 'line-color': '#b8703a' },
+  'road-trunk': { 'line-color': '#b8703a' },
+  'road-primary': { 'line-color': '#937145' },
+  'road-secondary': { 'line-color': '#77714a' },
+  'road-tertiary': { 'line-color': '#50535b' },
+  'road-minor': { 'line-color': '#43464d' },
+  'road-track': { 'line-color': '#8f7250' },
+  'road-path-paved': { 'line-color': '#8c776a' },
+  'road-path': { 'line-color': '#a06e55' },
+  'rail': { 'line-color': '#5c5f66' },
+  'road-label': { 'text-color': '#c8c8c8', 'text-halo-color': _SZ_DARK_HALO },
+  'water-label': { 'text-color': ['case', ['has', 'wikidata'], '#9dbbe6', '#7ea3cc'],
+                   'text-halo-color': _SZ_DARK_HALO },
+  'place-country': { 'text-color': ['case', ['has', 'wikidata'], '#c3d2ee', '#d6d6de'],
+                     'text-halo-color': _SZ_DARK_HALO },
+  'place-state': { 'text-color': ['case', ['has', 'wikidata'], '#b3c4e4', '#b4b4bc'],
+                   'text-halo-color': _SZ_DARK_HALO },
+  'place-city': { 'text-color': ['case', ['has', 'wikidata'], '#cddcf5', '#ececec'],
+                  'text-halo-color': _SZ_DARK_HALO },
+  'place-town': { 'text-color': ['case', ['has', 'wikidata'], '#bccdea', '#dcdcdc'],
+                  'text-halo-color': _SZ_DARK_HALO },
+  'place-village': { 'text-color': ['case', ['has', 'wikidata'], '#b3c6e6', '#cdcdcd'],
+                     'text-halo-color': _SZ_DARK_HALO },
+  'place-suburb': { 'text-color': ['case', ['has', 'wikidata'], '#a7bde0', '#b8b8b8'],
+                    'text-halo-color': _SZ_DARK_HALO },
+  'poi-label': { 'text-color': ['case', ['has', 'wikidata'], '#a7bde0', '#bdbdbd'],
+                 'text-halo-color': _SZ_DARK_HALO }
+};
+
+function _szHostInvertsContent() {
+  function inverted(el) {
+    try { return !!el && /invert\(\s*(1|100%)/.test(getComputedStyle(el).filter || ''); }
+    catch (e) { return false; }
+  }
+  var fe = null;
+  try { fe = window.frameElement; } catch (e) {}   // cross-origin parent
+  return inverted(fe) || inverted(document.documentElement);
+}
+
+function _szPrefersDark() {
+  var forced = /[?&]theme=(dark|light)(?:&|$)/.exec(location.search || '');
+  if (forced) return forced[1] === 'dark';
+  if (_szHostInvertsContent()) return false;
+  try {
+    return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  } catch (e) { return false; }
+}
+
+// The page chrome follows the map: html.sz-dark switches the search box,
+// chips, panels and MapLibre's controls to their dark colours (010-styles).
+// Applied once as the script loads, before the map exists, so the chrome
+// does not flash light, and again on every live scheme change.
+function _szApplyUiTheme(dark) {
+  try {
+    var root = document.documentElement;
+    if (dark) root.classList.add('sz-dark');
+    else root.classList.remove('sz-dark');
+  } catch (e) {}
+}
+_szApplyUiTheme(_szPrefersDark());
+
+function _szThemeStyle(style, dark) {
+  if (!dark) return style;
+  style.layers.forEach(function(layer) {
+    var o = _SZ_DARK[layer.id];
+    if (!o) return;
+    layer.paint = layer.paint || {};
+    Object.keys(o).forEach(function(k) { layer.paint[k] = o[k]; });
+  });
+  style.name = (style.name || '') + ' (dark)';
+  return style;
+}
+
+// Follow a live change of the OS/browser scheme (evening auto-dark) without
+// setStyle(), which would drop every runtime layer (satellite, hillshade,
+// routes, find pins). Repaints the base layers from a fresh makeStyle(),
+// then fires 'streetzim.theme' so satellite mode can re-apply its overrides.
+function initMapTheme(map, config) {
+  if (/[?&]theme=(dark|light)(?:&|$)/.test(location.search || '')) return;
+  var mq = null;
+  try { mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)'); } catch (e) {}
+  if (!mq) return;
+  var current = _szPrefersDark();
+  function onChange() {
+    var dark = _szPrefersDark();
+    if (dark === current) return;
+    current = dark;
+    _szApplyUiTheme(dark);
+    var style = makeStyle(config);
+    style.layers.forEach(function(layer) {
+      if (!layer.paint || !map.getLayer(layer.id)) return;
+      Object.keys(layer.paint).forEach(function(k) {
+        try { map.setPaintProperty(layer.id, k, layer.paint[k]); }
+        catch (e) { dbg('theme paint failed', layer.id, k, describeError(e)); }
+      });
+    });
+    map.fire('streetzim.theme', { dark: dark });
+    map.triggerRepaint();
+  }
+  if (mq.addEventListener) mq.addEventListener('change', onChange);
+  else if (mq.addListener) mq.addListener(onChange);   // Safari < 14
+}
+// END map-theme
+// POI icons. Maki (CC0) glyphs, one SVG path each, drawn at runtime onto a
+// coloured disc and registered with map.addImage() the first time a tile
+// asks for them ('styleimagemissing'). Inline rather than a sprite.png in
+// the ZIM: in-place slot patching can replace index.html but never add a
+// ZIM entry (docs/viewer-slots.md), so a sprite would only reach rebuilt
+// regions while this reaches every shipped one. Only icons actually on
+// screen are rasterized, a few KB each.
+// BEGIN maki-icons (generated by tools/maki/build_poi_icons.py from Maki 8.2.0, CC0 1.0; do not edit)
+var _SZ_MAKI = {
+  "restaurant": "M3.5,0l-1,5.5c-0.1464,0.805,1.7815,1.181,1.75,2L4,14c-0.0384,0.9993,1,1,1,1s1.0384-0.0007,1-1L5.75,7.5 c-0.0314-0.8176,1.7334-1.1808,1.75-2L6.5,0H6l0.25,4L5.5,4.5L5.25,0h-0.5L4.5,4.5L3.75,4L4,0H3.5z M12,0 c-0.7364,0-1.9642,0.6549-2.4551,1.6367C9.1358,2.3731,9,4.0182,9,5v2.5c0,0.8182,1.0909,1,1.5,1L10,14c-0.0905,0.9959,1,1,1,1 s1,0,1-1V0z",
+  "fast-food": "M14,8c0,0.5523-0.4477,1-1,1H2C1.4477,9,1,8.5523,1,8s0.4477-1,1-1h11C13.5523,7,14,7.4477,14,8z M3.5,10H2 c0,1.6569,1.3431,3,3,3h5c1.6569,0,3-1.3431,3-3H3.5z M3,6H2V4c0-1.1046,0.8954-2,2-2h7c1.1046,0,2,0.8954,2,2v2H3z M11,4.5 C11,4.7761,11.2239,5,11.5,5S12,4.7761,12,4.5S11.7761,4,11.5,4S11,4.2239,11,4.5z M9,3.5C9,3.7761,9.2239,4,9.5,4S10,3.7761,10,3.5 S9.7761,3,9.5,3S9,3.2239,9,3.5z M7,4.5C7,4.7761,7.2239,5,7.5,5S8,4.7761,8,4.5S7.7761,4,7.5,4S7,4.2239,7,4.5z M5,3.5 C5,3.7761,5.2239,4,5.5,4S6,3.7761,6,3.5S5.7761,3,5.5,3S5,3.2239,5,3.5z M3,4.5C3,4.7761,3.2239,5,3.5,5S4,4.7761,4,4.5 S3.7761,4,3.5,4S3,4.2239,3,4.5z",
+  "cafe": "M12,5h-2V3H2v4c0.0133,2.2091,1.8149,3.9891,4.024,3.9758C7.4345,10.9673,8.7362,10.2166,9.45,9H12c1.1046,0,2-0.8954,2-2 S13.1046,5,12,5z M12,8H9.86C9.9487,7.6739,9.9958,7.3379,10,7V6h2c0.5523,0,1,0.4477,1,1S12.5523,8,12,8z M10,12.5 c0,0.2761-0.2239,0.5-0.5,0.5h-7C2.2239,13,2,12.7761,2,12.5S2.2239,12,2.5,12h7C9.7761,12,10,12.2239,10,12.5z",
+  "bar": "M7.5,1c-2,0-7,0.25-6.5,0.75L7,8v4 c0,1-3,0.5-3,2h7c0-1.5-3-1-3-2V8l6-6.25C14.5,1.25,9.5,1,7.5,1z M7.5,2c2.5,0,4.75,0.25,4.75,0.25L11.5,3h-8L2.75,2.25 C2.75,2.25,5,2,7.5,2z",
+  "beer": "M12,5V2c0,0-1-1-4.5-1S3,2,3,2v3c0.0288,1.3915,0.3706,2.7586,1,4c0.6255,1.4348,0.6255,3.0652,0,4.5c0,0,0,1,3.5,1 s3.5-1,3.5-1c-0.6255-1.4348-0.6255-3.0652,0-4.5C11.6294,7.7586,11.9712,6.3915,12,5z M7.5,13.5 c-0.7966,0.035-1.5937-0.0596-2.36-0.28c0.203-0.7224,0.304-1.4696,0.3-2.22h4.12c-0.004,0.7504,0.097,1.4976,0.3,2.22 C9.0937,13.4404,8.2966,13.535,7.5,13.5z M7.5,5C6.3136,5.0299,5.1306,4.8609,4,4.5v-2C5.131,2.1411,6.3137,1.9722,7.5,2 C8.6863,1.9722,9.869,2.1411,11,2.5v2C9.8694,4.8609,8.6864,5.0299,7.5,5z",
+  "ice-cream": "M5.44,8.17a3.473,3.473,0,0,0,2-.63A3.5,3.5,0,0,0,9,8.14h.44L8,13.7a.5.5,0,0,1-.92,0Zm6-3.473a2,2,0,0,1-4,0h0a2,2,0,1,1-2-2h.12a2,2,0,1,1,3.75,0h.13A2,2,0,0,1,11.439,4.7Z",
+  "bakery": "M5.294,4.382,6,9.5a.979.979,0,0,0,1,1H8a.979.979,0,0,0,1-1l.706-5.118C9.706,3,7.5,3,7.5,3S5.291,3,5.294,4.382ZM3.5,5C2,5,2,6,2,6l1,4H4.5a.793.793,0,0,0,.794-.765L4.5,5Zm-2,2.5a1.533,1.533,0,0,0-1.059.412A1.366,1.366,0,0,0,0,8.794V11H.882A1.02,1.02,0,0,0,2,10ZM11.5,5C13,5,13,6,13,6l-1,4H10.5a.793.793,0,0,1-.794-.765L10.5,5Zm2,2.5a1.533,1.533,0,0,1,1.059.412A1.366,1.366,0,0,1,15,8.794V11h-.882A1.02,1.02,0,0,1,13,10Z",
+  "grocery": "M 13.199219 1.5 C 13.199219 1.5 11.808806 1.4588 11.253906 2 C 10.720406 2.5202 10.5 2.9177 10.5 4 L 1.1992188 4 L 2.59375 8.8144531 C 2.59725 8.8217531 2.6036219 8.8287375 2.6074219 8.8359375 C 2.8418219 9.4932375 3.4545469 9.9666406 4.1855469 9.9941406 C 4.1885469 9.9954406 4.1992187 10 4.1992188 10 L 10.699219 10 L 10.699219 10.199219 C 10.699219 10.199219 10.7 10.500391 10.5 10.900391 C 10.3 11.300391 10.200391 11.5 9.4003906 11.5 L 2.9003906 11.5 C 1.9003906 11.5 1.9003906 13 2.9003906 13 L 4.0996094 13 L 4.1992188 13 L 9.0996094 13 L 9.1992188 13 L 9.3007812 13 C 10.500781 13 11.399219 12.299609 11.699219 11.599609 C 11.999219 10.899609 12 10.300781 12 10.300781 L 12 10 L 12 4 C 12 3.4764 12.228619 3 12.699219 3 L 13.25 3 C 13.6642 3 14 2.6642 14 2.25 C 14 1.8358 13.6642 1.5 13.25 1.5 L 13.199219 1.5 z M 9.1992188 13 C 8.5992188 13 8.1992188 13.4 8.1992188 14 C 8.1992188 14.6 8.5992187 15 9.1992188 15 C 9.7992187 15 10.199219 14.6 10.199219 14 C 10.199219 13.4 9.7992188 13 9.1992188 13 z M 4.1992188 13 C 3.5992188 13 3.1992188 13.4 3.1992188 14 C 3.1992188 14.6 3.5992187 15 4.1992188 15 C 4.7992188 15 5.1992188 14.6 5.1992188 14 C 5.1992188 13.4 4.7992187 13 4.1992188 13 z",
+  "shop": "m13.33 5h-1.83l-.39-2.33c-.1601-.7182-.7017-1.2905-1.41-1.49-.3493-.1124-.7131-.173-1.08-.18h-2.24c-.3669.007-.7307.0676-1.08.18-.7083.1995-1.2499.7718-1.41 1.49l-.39 2.33h-1.83c-.2761-.0017-.5013.2208-.503.497-.0003.0519.0074.1035.023.153l1.88 6.3c.1964.6246.7753 1.0496 1.43 1.05h6c.651-.0047 1.2247-.4289 1.42-1.05l1.88-6.3c.0829-.2634-.0635-.5441-.3269-.627-.0463-.0146-.0945-.0223-.1431-.023zm-8.81 0 .36-2.17c.0807-.3625.3736-.6395.74-.7.2463-.0776.5019-.1213.76-.13h2.24c.2614.0078.5205.0515.77.13.3664.0605.6593.3375.74.7l.35 2.17h-6z",
+  "clothing-store": "M4 2L1 4.5L1 7H4V13H11V7H14V4.5L11 2H9.5L7.5 6L5.5 2L4 2Z",
+  "alcohol-shop": "M14,4h-4v3.44l0,0c0,0,0,0,0,0.06c0.003,0.9096,0.6193,1.7026,1.5,1.93V13H11c-0.2761,0-0.5,0.2239-0.5,0.5 S10.7239,14,11,14h2c0.2761,0,0.5-0.2239,0.5-0.5S13.2761,13,13,13h-0.5V9.43c0.8807-0.2274,1.497-1.0204,1.5-1.93c0,0,0,0,0-0.06 l0,0V4z M13,7.5c0,0.5523-0.4477,1-1,1s-1-0.4477-1-1V5h2V7.5z M5.5,2.5V2C5.7761,2,6,1.7761,6,1.5S5.7761,1,5.5,1V0.5 C5.5,0.2239,5.2761,0,5,0H4C3.7239,0,3.5,0.2239,3.5,0.5V1C3.2239,1,3,1.2239,3,1.5S3.2239,2,3.5,2v0.5C3.5,3.93,1,5.57,1,7v6 c0,0.5523,0.4477,1,1,1h5c0.5318-0.0465,0.9535-0.4682,1-1V7C8,5.65,5.5,3.85,5.5,2.5z M4.5,12C3.1193,12,2,10.8807,2,9.5 S3.1193,7,4.5,7S7,8.1193,7,9.5S5.8807,12,4.5,12z",
+  "lodging": "M0.5,2.5C0.2,2.5,0,2.7,0,3v7.5v2C0,12.8,0.2,13,0.5,13S1,12.8,1,12.5V11h13v1.5 c0,0.3,0.2,0.5,0.5,0.5s0.5-0.2,0.5-0.5v-2c0-0.3-0.2-0.5-0.5-0.5H1V3C1,2.7,0.8,2.5,0.5,2.5z M3.5,3C2.7,3,2,3.7,2,4.5l0,0 C2,5.3,2.7,6,3.5,6l0,0C4.3,6,5,5.3,5,4.5l0,0C5,3.7,4.3,3,3.5,3L3.5,3z M7,4C5.5,4,5.5,5.5,5.5,5.5V7h-3C2.2,7,2,7.2,2,7.5v1 C2,8.8,2.2,9,2.5,9H6h9V6.5C15,4,12.5,4,12.5,4H7z",
+  "campsite": "M14 10V11C14 11.5523 13.5523 12 13 12H2C1.44772 12 1 11.5523 1 11V10C1 9.44772 1.44772 9.00001 2 9.00001H2.25L7.03206 1.25762C7.24699 0.90965 7.75302 0.909651 7.96794 1.25762L12.75 9.00001H13C13.5523 9.00001 14 9.44772 14 10ZM10.5 9.00001L7.5 4.00001L4.5 9.00001H10.5Z",
+  "hospital": "M7,1C6.4,1,6,1.4,6,2v4H2C1.4,6,1,6.4,1,7v1 c0,0.6,0.4,1,1,1h4v4c0,0.6,0.4,1,1,1h1c0.6,0,1-0.4,1-1V9h4c0.6,0,1-0.4,1-1V7c0-0.6-0.4-1-1-1H9V2c0-0.6-0.4-1-1-1H7z",
+  "doctor": "M5.5,7C4.1193,7,3,5.8807,3,4.5l0,0v-2C3,2.2239,3.2239,2,3.5,2H4c0.2761,0,0.5-0.2239,0.5-0.5S4.2761,1,4,1H3.5 C2.6716,1,2,1.6716,2,2.5v2c0.0013,1.1466,0.5658,2.2195,1.51,2.87l0,0C4.4131,8.1662,4.9514,9.297,5,10.5C5,12.433,6.567,14,8.5,14 s3.5-1.567,3.5-3.5V9.93c1.0695-0.2761,1.7126-1.367,1.4365-2.4365C13.1603,6.424,12.0695,5.7809,11,6.057 C9.9305,6.3332,9.2874,7.424,9.5635,8.4935C9.7454,9.198,10.2955,9.7481,11,9.93v0.57c0,1.3807-1.1193,2.5-2.5,2.5S6,11.8807,6,10.5 c0.0511-1.2045,0.5932-2.3356,1.5-3.13l0,0C8.4404,6.7172,9.001,5.6448,9,4.5v-2C9,1.6716,8.3284,1,7.5,1H7 C6.7239,1,6.5,1.2239,6.5,1.5S6.7239,2,7,2h0.5C7.7761,2,8,2.2239,8,2.5v2l0,0C8,5.8807,6.8807,7,5.5,7 M11.5,9 c-0.5523,0-1-0.4477-1-1s0.4477-1,1-1s1,0.4477,1,1S12.0523,9,11.5,9z",
+  "dentist": "M4.36,14c-1,0-0.56-2.67-0.86-5c-0.1-0.76-1-1.49-1.12-2.06C2,5,1.39,1.44,3.66,1S6,3,7.54,3s1.57-2.36,3.85-2 s1.59,3.9,1.29,5.9c-0.1,0.45-1.1,1.48-1.18,2.06c-0.33,2.4,0.32,5-0.8,5c-0.93,0-1.32-2.72-2-4.5C8.43,8.63,8.06,8,7.54,8 C6,8,5.75,14,4.36,14z",
+  "pharmacy": "M9.5,4l1.07-1.54c0.0599,0.0046,0.1201,0.0046,0.18,0c0.6904-0.0004,1.2497-0.5603,1.2494-1.2506 C11.999,0.519,11.4391-0.0404,10.7487-0.04C10.0584-0.0396,9.499,0.5203,9.4994,1.2106c0,0.0131,0.0002,0.0262,0.0006,0.0394 c0,0,0,0.07,0,0.1L7,4H9.5z M12,6V5H3v1l1.5,3.5L3,13v1h9v-1l-1-3.5L12,6z M10,10H8v2H7v-2H5V9h2V7h1v2h2V10z",
+  "school": "M5.542 3.647 3.106 3l.443-1.63a.505.505 0 0 1 .618-.352l1.46.392a.5.5 0 0 1 .355.613l-.44 1.624Zm-4.52 7.356a.496.496 0 0 1-.005-.276l1.819-6.726 2.435.647-1.819 6.726a.499.499 0 0 1-.143.237l-1.457 1.347a.152.152 0 0 1-.247-.066l-.583-1.889ZM10 5c-2.25 0-3-.75-3-3 2.25 0 3 .75 3 3Zm-1.4 7.984c-1.37.21-3.126-1.706-3.52-3.8L5.969 5.9c.399-.35.903-.533 1.419-.533a2.71 2.71 0 0 1 1.564.489.964.964 0 0 0 1.089-.01 2.438 2.438 0 0 1 1.46-.479c.77 0 1.643.489 2.05 1.201 1.536 2.696-1.194 6.709-3.144 6.417a.867.867 0 0 1-.255-.093 1.427 1.427 0 0 0-1.302 0 .866.866 0 0 1-.25.092Z",
+  "college": "M7.5,1L0,4.5l2,0.9v1.7C1.4,7.3,1,7.9,1,8.5s0.4,1.2,1,1.4V10l-0.9,2.1 C0.8,13,1,14,2.5,14s1.7-1,1.4-1.9L3,10c0.6-0.3,1-0.8,1-1.5S3.6,7.3,3,7.1V5.9L7.5,8L15,4.5L7.5,1z M11.9,7.5l-4.5,2L5,8.4v0.1 c0,0.7-0.3,1.3-0.8,1.8l0.6,1.4v0.1C4.9,12.2,5,12.6,4.9,13c0.7,0.3,1.5,0.5,2.5,0.5c3.3,0,4.5-2,4.5-3L11.9,7.5L11.9,7.5z",
+  "library": "M1.0819,9.9388C0.9871,9.867,1.0007,9.7479,1.0007,9.7479L1.5259,3.5c0,0,0.0082-0.0688,0.0388-0.104 C1.584,3.374,1.6084,3.342,1.6544,3.3232C2.1826,3.1072,5.0537,1.5519,6.5,3c0.2397,0.2777,0.4999,0.6876,0.4999,1v5.2879 c0,0,0.0062,0.1122-0.0953,0.1801c-0.0239,0.016-0.124,0.0616-0.242,0.0026c-2.2253-1.1134-4.711,0.1546-5.3381,0.4871 C1.1987,10.0244,1.1006,9.9531,1.0819,9.9388z M13.6754,9.9577c-0.6271-0.3325-3.1128-1.6005-5.3381-0.4871 c-0.118,0.059-0.2181,0.0134-0.242-0.0026C7.9939,9.4001,8.0001,9.2879,8.0001,9.2879V4c0-0.3124,0.2602-0.7223,0.4999-1 c1.4463-1.4481,4.2991,0.1071,4.8273,0.3232c0.046,0.0188,0.0704,0.0508,0.0897,0.0728C13.4476,3.4312,13.4558,3.5,13.4558,3.5 l0.5435,6.2479c0,0,0.0136,0.1191-0.0812,0.1909C13.8994,9.9531,13.8013,10.0244,13.6754,9.9577z M8.8647,12.6863 c0.0352-0.0085,0.0964-0.0443,0.1179-0.0775c0.0236-0.0364,0.0378-0.0617,0.0423-0.1088c0.0495-0.9379,1.6245-1.8119,4.6477-0.0298 c0.0775,0.0441,0.1666,0.0396,0.2425-0.0155C14.0014,12.392,14,12.2859,14,12.2859v-0.5542c0,0,0.0003-0.0764-0.0272-0.1184 c-0.0205-0.0312-0.0476-0.0643-0.0926-0.0858c-2.0254-1.3145-4.5858-1.8972-5.8854-0.1592 c-0.0181,0.0423-0.0353,0.0613-0.0728,0.0905C7.8654,11.5028,7.7964,11.5,7.7964,11.5H7.2109c0,0-0.069,0.0028-0.1256-0.0412 c-0.0375-0.0292-0.0547-0.0482-0.0728-0.0905c-1.2996-1.738-3.86-1.1828-5.8854,0.1317c-0.045,0.0215-0.0721,0.0546-0.0926,0.0858 c-0.0275,0.042-0.0272,0.1184-0.0272,0.1184v0.5542c0,0-0.0014,0.1061,0.0849,0.1688c0.0759,0.0551,0.165,0.0596,0.2425,0.0155 c3.0232-1.7821,4.5982-0.8806,4.6477,0.0573c0.0045,0.0471,0.0187,0.0724,0.0423,0.1088c0.0215,0.0332,0.0827,0.069,0.1179,0.0775 C6.8645,12.8656,7.9112,12.9363,8.8647,12.6863z",
+  "museum": "M7.5,0L1,3.5V4h13V3.5L7.5,0z M2,5v5l-1,1.6V13h13v-1.4L13,10V5H2z M4,6h1v5.5H4V6z M7,6h1v5.5H7V6z M10,6h1 v5.5h-1V6z",
+  "art-gallery": "m10.71 3-2.86-2.849996c-.1945-.1960996-.511-.1973996-.7071-.0029-.001.001-.0019.0019-.0029.0029l-2.85 2.849996h-2.79c-.2761 0-.5.2239-.5.5v9c0 .2761.2239.5.5.5h12c.2761 0 .5-.2239.5-.5v-9c0-.2761-.2239-.5-.5-.5zm-3.21-1.79 1.79 1.79h-3.58zm5.5 10.79h-11v-8h11zm-8-5c-.5523 0-1-.4477-1-1s.4477-1 1-1 1 .4477 1 1-.4477 1-1 1zm7 4h-7.5l1.5-3 1.25 2.5 2.25-4.5z",
+  "attraction": "M6,2C5.446,2,5.2478,2.5045,5,3L4.5,4h-2C1.669,4,1,4.669,1,5.5v5C1,11.331,1.669,12,2.5,12h10 c0.831,0,1.5-0.669,1.5-1.5v-5C14,4.669,13.331,4,12.5,4h-2L10,3C9.75,2.5,9.554,2,9,2H6z M2.5,5C2.7761,5,3,5.2239,3,5.5 S2.7761,6,2.5,6S2,5.7761,2,5.5S2.2239,5,2.5,5z M7.5,5c1.6569,0,3,1.3431,3,3s-1.3431,3-3,3s-3-1.3431-3-3S5.8431,5,7.5,5z M7.5,6.5C6.6716,6.5,6,7.1716,6,8l0,0c0,0.8284,0.6716,1.5,1.5,1.5l0,0C8.3284,9.5,9,8.8284,9,8l0,0C9,7.1716,8.3284,6.5,7.5,6.5 L7.5,6.5z",
+  "viewpoint": "M6.02,8.425a2.3859,2.3859,0,0,0-.46.44l-4.55-3.5a7.9976,7.9976,0,0,1,1.51-1.51Zm6.46-4.56-3.5,4.55a2.3971,2.3971,0,0,1,.45.45l4.56-3.5A7.945,7.945,0,0,0,12.48,3.865ZM7.3042,10.0129a1.5,1.5,0,1,0,1.6829,1.2914h0A1.5,1.5,0,0,0,7.3042,10.0129ZM6.43,2.235a7.9329,7.9329,0,0,0-2.06.55l2.2,5.32a2.0438,2.0438,0,0,1,.61-.17Zm2.14.01-.75,5.69a2.49,2.49,0,0,1,.61.16l2.2-5.3A7.2129,7.2129,0,0,0,8.57,2.245Z",
+  "monument": "M7.5,0L6,2.5v7h3v-7L7.5,0z M3,11.5 L3,15h9v-3.5L10.5,10h-6L3,11.5z",
+  "castle": "M11,4H4C3.4477,4,3,3.5523,3,3V0.5C3,0.2239,3.2239,0,3.5,0S4,0.2239,4,0.5V2h1V1c0-0.5523,0.4477-1,1-1s1,0.4477,1,1v1h1V1 c0-0.5523,0.4477-1,1-1s1,0.4477,1,1v1h1V0.5C11,0.2239,11.2239,0,11.5,0S12,0.2239,12,0.5V3C12,3.5523,11.5523,4,11,4z M14,14.5 c0,0.2761-0.2239,0.5-0.5,0.5h-12C1.2239,15,1,14.7761,1,14.5S1.2239,14,1.5,14H2c0.5523,0,1-0.4477,1-1c0,0,1-6,1-7 c0-0.5523,0.4477-1,1-1h5c0.5523,0,1,0.4477,1,1c0,1,1,7,1,7c0,0.5523,0.4477,1,1,1h0.5c0.2723-0.0001,0.4946,0.2178,0.5,0.49V14.5z M9,10.5C9,9.6716,8.3284,9,7.5,9S6,9.6716,6,10.5V14h3V10.5z",
+  "zoo": "M8.3879,3.8928C8.3879,3.8928,7.6818,5,7,5H4.5C3.8182,5,3.2016,5.4086,2.7273,5.8636L0.5,8C0.231,8.258,0.0072,8.7681,0,9 c-0.0156,0.5,0,1,0,1s1,0,1-1V8.5l1-1h0.5l0.158,0.2892c0,0-0.9535,1.8244-0.9535,3.5289C1.7046,12,2.3864,12,2.3864,12h0.6818 c0,0,0.3409,0,0-0.3409l-0.3409-0.3409C2.7273,10.6364,3.5002,9.6667,4,9c0,0,0.0168,1.1579,0,2c-0.008,0.4096,0.2721,1,0.6818,1 h0.6818c0,0,0.3409,0,0-0.3409l-0.3409-0.3409C4.7105,10.7495,5.5,8.5,5.5,8.5C6.7716,8.5,7,9,8.5,9l0.3636,2.3182 C8.975,12.0282,9.5,12,9.5,12H11c0.3409,0,0.9611-0.3115,0.3409-0.7736L11,11V9c1.2142-0.1722,2-1,2-2h1c0.3214,0,1,0,1-0.5v-1 l-1.7045-1.6818C12.5444,3.0772,12,2.5,11,2.5C9.5469,2.5,8.8636,3.0688,8.3879,3.8928z",
+  "aquarium": "M1.13505 8.57743C1.98919 6.14741 4.72075 2 10 2C12.6518 2 14 3 14 3C14 3 11.6865 3 10.6203 3.44512C10.54 3.47864 10.4747 3.53744 10.4329 3.61375C10.2432 3.95995 9.75252 5.04744 10.3231 6.19506C10.4172 6.38427 10.6364 6.46548 10.8383 6.40312C11.3474 6.24589 12.3301 5.89727 13.0761 5.35729C13.2973 5.1972 13.615 5.25773 13.6797 5.52298C13.9401 6.59045 13.9401 8.40955 13.6797 9.47702C13.615 9.74227 13.2973 9.8028 13.0761 9.64271C12.3301 9.10273 11.3474 8.75411 10.8383 8.59688C10.6364 8.53452 10.4172 8.61573 10.3231 8.80494C9.75252 9.95256 10.2432 11.04 10.4329 11.3863C10.4747 11.4626 10.54 11.5214 10.6203 11.5549C11.6865 12 14 12 14 12C13.5 12.3333 11.8 13 9.00001 13C4.51722 13 2.02736 10.3427 1.25972 9.35985C1.08546 9.13673 1.04117 8.84452 1.13505 8.57743ZM5.00001 9C5.69037 9 6.25001 8.44036 6.25001 7.75C6.25001 7.05964 5.69037 6.5 5.00001 6.5C4.30966 6.5 3.75001 7.05964 3.75001 7.75C3.75001 8.44036 4.30966 9 5.00001 9Z",
+  "theatre": "M2,1c0,0-1,0-1,1v5.1582C1,8.8885,1.354,11,4.5,11H5V8L2.5,9c0,0,0-2.5,2.5-2.5V5 c0-0.7078,0.0868-1.3209,0.5-1.7754C5.8815,2.805,6.5046,1.9674,8.1562,2.7539L9,3.3027V2c0,0,0-1-1-1C7.2922,1,6.0224,2,5,2 S2.7865,1,2,1z M3,3c0.5523,0,1,0.4477,1,1S3.5523,5,3,5S2,4.5523,2,4S2.4477,3,3,3z M7,4c0,0-1,0-1,1v5c0,2,1,4,4,4s4-2,4-4V5 c0-1-1-1-1-1c-0.7078,0-1.9776,1-3,1S7.7865,4,7,4z M8,6c0.5523,0,1,0.4477,1,1S8.5523,8,8,8S7,7.5523,7,7S7.4477,6,8,6z M12,6 c0.5523,0,1,0.4477,1,1s-0.4477,1-1,1s-1-0.4477-1-1S11.4477,6,12,6z M7.5,10H10h2.5c0,0,0,2.5-2.5,2.5S7.5,10,7.5,10z",
+  "cinema": "M14,7.5v2c0,0.2761-0.2239,0.5-0.5,0.5S13,9.7761,13,9.5c0,0,0.06-0.5-1-0.5h-1v2.5c0,0.2761-0.2239,0.5-0.5,0.5h-8 C2.2239,12,2,11.7761,2,11.5v-4C2,7.2239,2.2239,7,2.5,7h8C10.7761,7,11,7.2239,11,7.5V8h1c1.06,0,1-0.5,1-0.5 C13,7.2239,13.2239,7,13.5,7S14,7.2239,14,7.5z M4,3C2.8954,3,2,3.8954,2,5s0.8954,2,2,2s2-0.8954,2-2S5.1046,3,4,3z M4,6 C3.4477,6,3,5.5523,3,5s0.4477-1,1-1s1,0.4477,1,1S4.5523,6,4,6z M8.5,2C7.1193,2,6,3.1193,6,4.5S7.1193,7,8.5,7S11,5.8807,11,4.5 S9.8807,2,8.5,2z M8.5,6C7.6716,6,7,5.3284,7,4.5S7.6716,3,8.5,3S10,3.6716,10,4.5S9.3284,6,8.5,6z",
+  "music": "m12.5 0c-.0804.0008-.1594.0213999-.23.0599999l-8.77 2.4400001c-.2761 0-.5.2239-.5.5v6.28c-.3029-.1798-.6478-.2763-1-.28-1.1046 0-2 .8954-2 2s.8954 2 2 2 2-.8954 2-2v-4.64l8-2.22v3.64c-.3029-.1798-.6478-.2763-1-.28-1.1046 0-2 .8954-2 2s.8954 2 2 2 2-.8954 2-2v-9c0-.2761-.2239-.5-.5-.5zm-.5 3.14-8 2.22v-2l8-2.22z",
+  "information": "M7.5,1 C6.7,1,6,1.7,6,2.5S6.7,4,7.5,4S9,3.3,9,2.5S8.3,1,7.5,1z M4,5v1c0,0,2,0,2,2v2c0,2-2,2-2,2v1h7v-1c0,0-2,0-2-2V6c0-0.5-0.5-1-1-1H4 z",
+  "picnic-site": "M4,3C3.446,3,3,3.446,3,4s0.446,1,1,1h1.2969 L4.6523,7H2.5c-0.554,0-1,0.446-1,1s0.446,1,1,1h1.5098L3.041,12.0098c-0.1284,0.3939,0.0868,0.8173,0.4807,0.9457 s0.8173-0.0868,0.9457-0.4807c0.0005-0.0013,0.0009-0.0027,0.0013-0.004L5.5859,9h3.8281l1.1172,3.4707 c0.1273,0.3943,0.5501,0.6107,0.9443,0.4834s0.6107-0.5501,0.4834-0.9443l0,0L10.9902,9H12.5c0.554,0,1-0.446,1-1s-0.446-1-1-1 h-2.1523L9.7031,5H11c0.554,0,1-0.446,1-1s-0.446-1-1-1H4z M6.873,5H8.127l0.6445,2h-2.543L6.873,5z",
+  "stadium": "M7,1v2v1.5v0.5098C4.1695,5.1037,2.0021,5.9665,2,7v4.5c0,1.1046,2.4624,2,5.5,2s5.5-0.8954,5.5-2V7 c-0.0021-1.0335-2.1695-1.8963-5-1.9902V4.0625L11,2.75L7,1z M3,8.1465c0.5148,0.2671,1.2014,0.4843,2,0.6328v2.9668 C3.7948,11.477,3,11.0199,3,10.5V8.1465z M12,8.1484V10.5c0,0.5199-0.7948,0.977-2,1.2461V8.7812 C10.7986,8.6328,11.4852,8.4155,12,8.1484z M6,8.9219C6.4877,8.973,6.9925,8.9992,7.5,9C8.0073,8.9999,8.5121,8.9743,9,8.9238 v2.9844C8.5287,11.964,8.0288,12,7.5,12S6.4713,11.964,6,11.9082V8.9219z",
+  "swimming": "M10.1113,2C9.9989,2,9.6758,2.1465,9.6758,2.1465L6.3535,3.8262 C5.9111,4.0024,5.7358,4.7081,6.002,5.0605l0.9707,1.4082L3.002,8.498L5,9.998l2.502-1.5l2.5,1.5l1.002-1.002l-3-4l2.5566-1.5293 c0.5286-0.2662,0.4434-0.7045,0.4434-0.9707C10.9999,2.2861,10.6437,2,10.1113,2z M12.252,5C11.2847,5,10.5,5.7827,10.5,6.75 s0.7847,1.752,1.752,1.752s1.75-0.7847,1.75-1.752S13.2192,5,12.252,5z M2.5,10L0,11.5V13l2.5-1.5L5,13l2.502-1.5l2.5,1.5L12,11.5 l3,1.5v-1.5L12,10l-1.998,1.5l-2.5-1.5L5,11.5L2.5,10z",
+  "golf": "M3.3999,1.1c0,0.1,0,0.2,0,0.2c0,0.4,0.3,0.7,0.7,0.7c0.3,0,0.5-0.2,0.6-0.5l0,0L4.9,1l5.6,2.3L6.6,6C6.2,6.3,6.2,6.7,6.3,7.1 l0.9,2.1l-1.3,3.9C5.7,13.6,6.1,14,6.5,14c0.3,0,0.5-0.1,0.6-0.5l1.4-4l0.1,0.3v3.5c0,0,0,0.7,0.7,0.7s0.7-0.7,0.7-0.7V10 c0-0.2,0-0.3-0.1-0.5L8.5,6.1l2.7-1.9c0.2-0.2,0.4-0.3,0.4-0.6s-0.2-0.5-0.4-0.6L4,0.1c-0.0878,0-0.118,0.0179-0.2001,0.1 L3.3999,1.1z M5.5,3C4.7,3,4,3.7,4,4.5S4.7,6,5.5,6S7,5.3,7,4.5S6.2999,3,5.5,3z",
+  "park": "M14,5.75c0.0113-0.6863-0.3798-1.3159-1-1.61C12.9475,3.4906,12.4014,2.9926,11.75,3 c-0.0988,0.0079-0.1962,0.0281-0.29,0.06c-0.0607-0.66-0.6449-1.1458-1.3048-1.0851C9.8965,1.9987,9.6526,2.1058,9.46,2.28l0,0 c0-0.6904-0.5596-1.25-1.25-1.25S6.96,1.5896,6.96,2.28C6.96,2.28,7,2.3,7,2.33C6.4886,1.8913,5.7184,1.9503,5.2797,2.4618 C5.1316,2.6345,5.0347,2.8451,5,3.07C4.8417,3.0195,4.6761,2.9959,4.51,3C3.6816,2.9931,3.0044,3.659,2.9975,4.4874 C2.9958,4.6872,3.0341,4.8852,3.11,5.07C2.3175,5.2915,1.8546,6.1136,2.0761,6.9061C2.2163,7.4078,2.6083,7.7998,3.11,7.94 c0.2533,0.7829,1.0934,1.2123,1.8763,0.959C5.5216,8.7258,5.9137,8.2659,6,7.71C6.183,7.8691,6.4093,7.9701,6.65,8v5L5,14h5l-1.6-1 v-2c0.7381-0.8915,1.6915-1.5799,2.77-2c0.8012,0.1879,1.603-0.3092,1.7909-1.1103C12.9893,7.7686,13.0025,7.6444,13,7.52 c0.0029-0.0533,0.0029-0.1067,0-0.16C13.6202,7.0659,14.0113,6.4363,14,5.75z M8.4,10.26V6.82C8.6703,7.3007,9.1785,7.5987,9.73,7.6 h0.28c0.0156,0.4391,0.2242,0.849,0.57,1.12C9.7643,9.094,9.0251,9.6162,8.4,10.26z",
+  "garden": "M13,8c0,3.31-2.19,6-5.5,6S2,11.31,2,8c2.2643,0.0191,4.2694,1.4667,5,3.61V7H4.5C3.6716,7,3,6.3284,3,5.5v-3 C3,2.2239,3.2239,2,3.5,2c0.1574,0,0.3056,0.0741,0.4,0.2l1.53,2l1.65-3c0.1498-0.232,0.4593-0.2985,0.6913-0.1487 C7.8308,1.0898,7.8815,1.1404,7.92,1.2l1.65,3l1.53-2c0.1657-0.2209,0.4791-0.2657,0.7-0.1C11.9259,2.1944,12,2.3426,12,2.5v3 C12,6.3284,11.3284,7,10.5,7H8v4.61C8.7306,9.4667,10.7357,8.0191,13,8z",
+  "playground": "m3.00002 1.15c.2091-.8016 1.0284-1.2819 1.83-1.0729s1.2819 1.0284 1.0729 1.83c-.2003.7681-.9643 1.2471-1.7429 1.0929-.8126-.161-1.3409-.9502-1.18-1.7629.0058-.0292.0125-.0583.02-.0871zm10.99998 11.17c.1032.5426-.2531 1.066-.7956 1.1692-.0015.0003-.0029.0006-.0044.0008-.4252.086-.8574-.1119-1.07-.49l-1.68-3.37-1.44998.29-.22.08h-.06v2.15l.62-.15h.14c.2871.0054.5155.2425.5101.5297-.0039.2064-.1295.391-.3201.4703l-5 1c-.0563.0095-.1137.0095-.17 0-.2872 0-.52-.2328-.52-.52 0-.2099.1262-.3993.32-.48l4.15-.83v-2.17l-3.22.58c-.164.0423-.336.0423-.5 0-.3394-.0867-.6088-.3446-.71-.68h-.02l-1-4.07c-.0312-.1416-.0312-.2884 0-.43.0936-.387.4078-.6815.8-.75l4.7-.52v-4.13h.22v4.1h.06l.22-.02.4-.08h.21c.2673.0643.43258.3323.37.6-.0439.235-.251.4041-.49.4l-.49.08h-.22-.06v2.86h.06l.22-.06 1.80998-.36c.4275-.0352.8299.2062 1 .6l2 3.94c.077.0758.1411.1636.19.26zm-5.49998-7.19-2.5.27.74 2.94 1.76-.34z",
+  "bus": "M2 3C2 1.9 2.9 1 4 1H11C12.1 1 13 1.9 13 3V11C13 12 12 12 12 12V13C12 13.55 11.55 14 11 14C10.45 14 10 13.55 10 13V12H5V13C5 13.55 4.55 14 4 14C3.45 14 3 13.55 3 13V12C2 12 2 11 2 11V3ZM3.5 4C3.22 4 3 4.22 3 4.5V7.5C3 7.78 3.22 8 3.5 8H11.5C11.78 8 12 7.78 12 7.5V4.5C12 4.22 11.78 4 11.5 4H3.5ZM4 9C3.45 9 3 9.45 3 10C3 10.55 3.45 11 4 11C4.55 11 5 10.55 5 10C5 9.45 4.55 9 4 9ZM11 9C10.45 9 10 9.45 10 10C10 10.55 10.45 11 11 11C11.55 11 12 10.55 12 10C12 9.45 11.55 9 11 9ZM4 2.5C4 2.78 4.22 3 4.5 3H10.5C10.78 3 11 2.78 11 2.5C11 2.22 10.78 2 10.5 2H4.5C4.22 2 4 2.22 4 2.5Z",
+  "rail": "M 3 1 C 2.4477 1 2 1.4477 2 2 L 2 10 C 2 10.5523 2.4477 11 3 11 L 12 11 C 12.5523 11 13 10.5523 13 10 L 13 2 C 13 1.4477 12.5523 1 12 1 L 3 1 z M 5.75 1.5 L 5.7597656 1.5 L 9.2597656 1.5 C 9.3978656 1.5 9.5097656 1.6119 9.5097656 1.75 C 9.5097656 1.8881 9.3978656 2 9.2597656 2 L 5.75 2 C 5.6119 2 5.5 1.8881 5.5 1.75 C 5.5 1.6119 5.6119 1.5 5.75 1.5 z M 3.5 3 L 7 3 L 7 7 L 3.5 7 C 3.2239 7 3 6.7761 3 6.5 L 3 3.5 C 3 3.2239 3.2239 3 3.5 3 z M 8 3 L 11.5 3 C 11.7761 3 12 3.2239 12 3.5 L 12 6.5 C 12 6.7761 11.7761 7 11.5 7 L 8 7 L 8 3 z M 5 8 C 5.5523 8 6 8.4477 6 9 C 6 9.5523 5.5523 10 5 10 C 4.4477 10 4 9.5523 4 9 C 4 8.4477 4.4477 8 5 8 z M 10 8 C 10.5523 8 11 8.4477 11 9 C 11 9.5523 10.5523 10 10 10 C 9.4477 10 9 9.5523 9 9 C 9 8.4477 9.4477 8 10 8 z M 10.445312 11.994141 C 10.380597 11.999652 10.314981 12.018581 10.253906 12.050781 C 10.030606 12.168381 9.9302313 12.433922 10.019531 12.669922 L 10.189453 13 L 4.8105469 13 L 4.9394531 12.730469 C 5.0371531 12.472169 4.9067375 12.183637 4.6484375 12.085938 C 4.4124375 11.996738 4.1468969 12.097113 4.0292969 12.320312 L 3.0292969 14.320312 C 3.0080969 14.377912 2.9986 14.4387 3 14.5 C 3 14.7761 3.2239 15 3.5 15 C 3.6802 14.999 3.8450875 14.899434 3.9296875 14.740234 L 3.9296875 14.689453 L 4 14.689453 L 4.3105469 14 L 10.689453 14 L 11 14.689453 L 11 14.740234 C 11.0846 14.899434 11.249488 14.999 11.429688 15 C 11.705787 15 11.929688 14.7761 11.929688 14.5 C 11.949587 14.4212 11.949587 14.338566 11.929688 14.259766 L 10.929688 12.259766 C 10.833163 12.076541 10.639459 11.977608 10.445312 11.994141 z",
+  "rail-light": "M5.5,0C5,0,5,0.5,5,0.5v1C5,1.777,5.223,2,5.5,2S6,1.777,6,1.5V1h1v2H6c0,0-2,0-2,2v3c0,3,3,3,3,3h1 c0,0,3,0,3-3V5c0-2-2-2-2-2H8V1h1v0.5C9,1.777,9.223,2,9.5,2S10,1.777,10,1.5v-1C10,0,9.5,0,9.5,0H5.5z M7.5,4l2.0449,0.7734L10,6.5 C10.1316,7,9.5,7,9.5,7h-4c0,0-0.6316,0-0.5-0.5l0.4551-1.7266L7.5,4z M7.5,8C7.7761,8,8,8.2239,8,8.5S7.7761,9,7.5,9 S7,8.7761,7,8.5S7.2239,8,7.5,8z M4.125,12L3,15h1.5l0.375-1h5.25l0.375,1H12l-1.125-3h-1.5l0.375,1h-4.5l0.375-1H4.125z",
+  "rail-metro": "M5.5,0c0,0-0.75,0-1,1L3,6.5V10c0,1,1,1,1,1h7c0,0,1,0,1-1V6.5L10.5,1c-0.2727-1-1-1-1-1H5.5z M6.5,1.5h2 c0,0,0.5357,0,0.75,1L10,6c0.2146,1.0017-1,1-1,1H6c0,0-1.2146,0.0017-1-1l0.75-3.5C5.9643,1.5,6.5,1.5,6.5,1.5z M5,8 c0.5523,0,1,0.4477,1,1s-0.4477,1-1,1S4,9.5523,4,9S4.4477,8,5,8z M6.75,8h1.5C8.3885,8,8.5,8.1115,8.5,8.25S8.3885,8.5,8.25,8.5 h-1.5C6.6115,8.5,6.5,8.3885,6.5,8.25S6.6115,8,6.75,8z M10,8c0.5523,0,1,0.4477,1,1s-0.4477,1-1,1S9,9.5523,9,9S9.4477,8,10,8z M4.125,12L3,15h1.5l0.375-1h5.25l0.375,1H12l-1.125-3h-1.5l0.375,1h-4.5l0.375-1H4.125z",
+  "entrance": "m8 6.5v-1c0-.26522-.10536-.51957-.29289-.70711-.18754-.18753-.44189-.29289-.70711-.29289s-.51957.10536-.70711.29289c-.18753.18754-.29289.44189-.29289.70711v3zm-2-3.5c0-.19778.05865-.39112.16853-.55557s.26606-.29262.44879-.36831c.18272-.07569.38379-.09549.57777-.0569.19398.03858.37216.13382.51202.27367.13985.13986.23509.31804.27368.51202.03858.19398.01878.39505-.05691.57777-.07569.18273-.20386.33891-.36831.44879s-.35779.16853-.55557.16853c-.26522 0-.51957-.10536-.70711-.29289-.18753-.18754-.29289-.44189-.29289-.70711zm9 3c0 .26522-.1054.51957-.2929.70711-.1875.18753-.4419.29289-.7071.29289h-1.58c-.1316-.00076-.2621.02446-.3839.07423-.1218.04976-.2327.12309-.3261.21577l-5.42 5.42c-.18626.1847-.43766.2889-.7.29h-2.59c-.26522 0-.51957-.1054-.70711-.2929-.18753-.1875-.29289-.4419-.29289-.7071s.10536-.5196.29289-.7071c.18754-.1875.44189-.2929.70711-.2929h1.59c.26234-.0011.51374-.1053.7-.29l5.42-5.42c.0934-.09268.2043-.16601.3261-.21577.1218-.04977.2523-.07499.3839-.07423h2.58c.2652 0 .5196.10536.7071.29289.1875.18754.2929.44189.2929.70711z",
+  "airport": "M15,6.8182L15,8.5l-6.5-1 l-0.3182,4.7727L11,14v1l-3.5-0.6818L4,15v-1l2.8182-1.7273L6.5,7.5L0,8.5V6.8182L6.5,4.5v-3c0,0,0-1.5,1-1.5s1,1.5,1,1.5v2.8182 L15,6.8182z",
+  "fuel": "m14 6v5.5c0 .2761-.2239.5-.5.5s-.5-.2239-.5-.5v-2c0-.8284-.6716-1.5-1.5-1.5h-1.5v-6c0-.5523-.4477-1-1-1h-6c-.5523 0-1 .4477-1 1v11c0 .5523.4477 1 1 1h6c.5523 0 1-.4477 1-1v-4h1.5c.2761 0 .5.2239.5.5v2c0 .8284.6716 1.5 1.5 1.5s1.5-.6716 1.5-1.5v-6.5c0-.5523-.4477-1-1-1v-1.51c-.0054-.2722-.2277-.4901-.5-.49-.2816.0047-.5062.2367-.5015.5184.0002.0105.0007.0211.0015.0316v2.45c0 .5523.4477 1 1 1s1-.4477 1-1-.4477-1-1-1zm-5 .5c0 .2761-.2239.5-.5.5h-5c-.2761 0-.5-.2239-.5-.5v-3c0-.2761.2239-.5.5-.5h5c.2761 0 .5.2239.5.5z",
+  "parking": "M4 2V13H6V9H8.5C10.433 9 12 7.433 12 5.5C12 3.567 10.433 2 8.5 2H4ZM6 7V4H8.5C9.32843 4 10 4.67157 10 5.5C10 6.32843 9.32843 7 8.5 7H6Z",
+  "car": "M13.84,6.852,12.6,5.7,11.5,3.5a1.05,1.05,0,0,0-.9-.5H4.4a1.05,1.05,0,0,0-.9.5L2.4,5.7,1.16,6.852A.5.5,0,0,0,1,7.219V11.5a.5.5,0,0,0,.5.5h2c.2,0,.5-.2.5-.4V11h7v.5c0,.2.2.5.4.5h2.1a.5.5,0,0,0,.5-.5V7.219A.5.5,0,0,0,13.84,6.852ZM4.5,4h6l1,2h-8ZM5,8.6c0,.2-.3.4-.5.4H2.4C2.2,9,2,8.7,2,8.5V7.4c.1-.3.3-.5.6-.4l2,.4c.2,0,.4.3.4.5Zm8-.1c0,.2-.2.5-.4.5H10.5c-.2,0-.5-.2-.5-.4V7.9c0-.2.2-.5.4-.5l2-.4c.3-.1.5.1.6.4Z",
+  "bicycle": "M7.5,2c-0.6761-0.01-0.6761,1.0096,0,1H9v1.2656l-2.8027,2.334L5.2226,4H5.5c0.6761,0.01,0.6761-1.0096,0-1h-2 c-0.6761-0.01-0.6761,1.0096,0,1h0.6523L5.043,6.375C4.5752,6.1424,4.0559,6,3.5,6C1.5729,6,0,7.5729,0,9.5S1.5729,13,3.5,13 S7,11.4271,7,9.5c0-0.6699-0.2003-1.2911-0.5293-1.8242L9.291,5.3262l0.4629,1.1602C8.7114,7.0937,8,8.2112,8,9.5 c0,1.9271,1.5729,3.5,3.5,3.5S15,11.4271,15,9.5S13.4271,6,11.5,6c-0.2831,0-0.5544,0.0434-0.8184,0.1074L10,4.4023V2.5 c0-0.2761-0.2239-0.5-0.5-0.5H7.5z M3.5,7c0.5923,0,1.1276,0.2119,1.5547,0.5527l-1.875,1.5625 c-0.5109,0.4273,0.1278,1.1945,0.6406,0.7695l1.875-1.5625C5.8835,8.674,6,9.0711,6,9.5C6,10.8866,4.8866,12,3.5,12S1,10.8866,1,9.5 S2.1133,7,3.5,7L3.5,7z M11.5,7C12.8866,7,14,8.1134,14,9.5S12.8866,12,11.5,12S9,10.8866,9,9.5c0-0.877,0.4468-1.6421,1.125-2.0879 l0.9102,2.2734c0.246,0.6231,1.1804,0.2501,0.9297-0.3711l-0.9082-2.2695C11.2009,7.0193,11.3481,7,11.5,7L11.5,7z",
+  "harbor": "M7.5,0C5.5,0,4,1.567,4,3.5c0.0024,1.5629,1.0397,2.902,2.5,3.3379v6.0391 c-0.9305-0.1647-1.8755-0.5496-2.6484-1.2695C2.7992,10.6273,2.002,9.0676,2.002,6.498c0.0077-0.5646-0.4531-1.0236-1.0176-1.0137 C0.4329,5.493-0.0076,5.9465,0,6.498c0,3.0029,1.0119,5.1955,2.4902,6.5723C3.9685,14.4471,5.8379,15,7.5,15 c1.6656,0,3.535-0.5596,5.0117-1.9395S14.998,9.4868,14.998,6.498c0.0648-1.3953-2.0628-1.3953-1.998,0 c0,2.553-0.7997,4.1149-1.8535,5.0996C10.3731,12.3203,9.4288,12.7084,8.5,12.875V6.8418C9.9607,6.4058,10.9986,5.0642,11,3.5 C11,1.567,9.5,0,7.5,0z M7.5,2C8.3284,2,9,2.6716,9,3.5S8.3284,5,7.5,5S6,4.3284,6,3.5S6.6716,2,7.5,2z",
+  "ferry": "M5.33,11c0.6745,0.009,1.3262,0.245,1.85,0.67l0.26,0.23h0.05l0.31-0.28c0.9817-0.8115,2.379-0.8846,3.44-0.18L13.5,7L12,6 V2.45c-0.0466-0.8-0.6989-1.4305-1.5-1.45H10c0.0343-0.518-0.3579-0.9657-0.8759-1C9.0828-0.0027,9.0413-0.0027,9,0H6 C5.482-0.0343,5.0343,0.3579,5,0.8759C4.9973,0.9172,4.9973,0.9587,5,1H4.5C3.6989,1.0195,3.0466,1.65,3,2.45V6L1.5,7l2.25,4.53 C4.2143,11.2041,4.7631,11.02,5.33,11z M4,2.45c0.0105-0.2594,0.2293-0.4611,0.4886-0.4506C4.4924,1.9996,4.4962,1.9998,4.5,2h6 c0.259-0.0171,0.4829,0.1789,0.5,0.4379c0.0014,0.0207,0.0014,0.0414,0,0.0621v3l-3.5-2L4,5.45C4,5.45,4,2.45,4,2.45z M14,13v1 c-0.2626,0.0194-0.5069,0.1416-0.68,0.34c-0.2717,0.2883-0.6178,0.4959-1,0.6c-0.6147,0.1815-1.2795,0.0425-1.77-0.37l-0.39-0.35 c-0.3043-0.3026-0.7957-0.3026-1.1,0c-0.14,0.12-0.27,0.25-0.42,0.37c-0.7328,0.5856-1.7814,0.556-2.48-0.07l-0.39-0.35 c-0.2864-0.2502-0.7136-0.2502-1,0c-0.19,0.15-0.36,0.32-0.55,0.47c-0.7043,0.5215-1.6732,0.4968-2.35-0.06l-0.31-0.27 C1.4153,14.1443,1.2172,14.0346,1,14v-1c0.2585-0.032,0.5205,0.0169,0.75,0.14c0.2782,0.1722,0.5424,0.3661,0.79,0.58 c0.2051,0.2235,0.5147,0.319,0.81,0.25c0.1125-0.0333,0.2177-0.0876,0.31-0.16c0.16-0.12,0.29-0.26,0.45-0.39 c0.7106-0.5888,1.7394-0.5888,2.45,0c0.16,0.13,0.31,0.28,0.47,0.41c0.2864,0.2502,0.7136,0.2502,1,0c0.16-0.13,0.31-0.28,0.47-0.41 c0.7123-0.5943,1.7477-0.5943,2.46,0c0.15,0.13,0.29,0.27,0.44,0.39c0.2864,0.2502,0.7136,0.2502,1,0l0.47-0.41 C13.1895,13.1408,13.5886,12.9995,14,13z",
+  "bank": "M1,3C0.446,3,0,3.446,0,4v7c0,0.554,0.446,1,1,1h13c0.554,0,1-0.446,1-1V4c0-0.554-0.446-1-1-1H1z M1,4h1.5 C2.7761,4,3,4.2239,3,4.5S2.7761,5,2.5,5S2,4.7761,2,4.5L1.5,5C1.7761,5,2,5.2239,2,5.5S1.7761,6,1.5,6S1,5.7761,1,5.5V4z M7.5,4 C8.8807,4,10,5.567,10,7.5l0,0C10,9.433,8.8807,11,7.5,11S5,9.433,5,7.5S6.1193,4,7.5,4z M12.5,4H14v1.5C14,5.7761,13.7761,6,13.5,6 S13,5.7761,13,5.5S13.2239,5,13.5,5L13,4.5C13,4.7761,12.7761,5,12.5,5S12,4.7761,12,4.5S12.2239,4,12.5,4z M7.5,5.5 c-0.323,0-0.5336,0.1088-0.6816,0.25h1.3633C8.0336,5.6088,7.823,5.5,7.5,5.5z M6.625,6C6.5795,6.091,6.5633,6.1711,6.5449,6.25 h1.9102C8.4367,6.1711,8.4205,6.091,8.375,6H6.625z M6.5,6.5v0.25h2V6.5H6.5z M6.5,7v0.25h2V7H6.5z M6.5,7.5v0.25h2V7.5H6.5z M6.5,8 L6.25,8.25h2L8.5,8H6.5z M6,8.5c0,0,0.0353,0.1024,0.1016,0.25H8.375L8,8.5H6z M1.5,9C1.7761,9,2,9.2239,2,9.5S1.7761,10,1.5,10 L2,10.5C2,10.2239,2.2239,10,2.5,10S3,10.2239,3,10.5S2.7761,11,2.5,11H1V9.5C1,9.2239,1.2239,9,1.5,9z M6.2383,9 C6.2842,9.0856,6.3144,9.159,6.375,9.25h2.2676C8.7092,9.1121,8.75,9,8.75,9H6.2383z M13.5,9C13.7761,9,14,9.2239,14,9.5V11h-1.5 c-0.2761,0-0.5-0.2239-0.5-0.5s0.2239-0.5,0.5-0.5s0.5,0.2239,0.5,0.5l0.5-0.5C13.2239,10,13,9.7761,13,9.5S13.2239,9,13.5,9z M6.5664,9.5c0.0786,0.0912,0.1647,0.1763,0.2598,0.25h1.4199C8.3462,9.6727,8.4338,9.5883,8.5,9.5H6.5664z",
+  "post": "M13.5 3.65139C13.5 3.86918 13.3912 4.07257 13.2099 4.19338L7.5 8L1.79006 4.19338C1.60885 4.07257 1.5 3.86918 1.5 3.65139C1.5 3.29164 1.79164 3 2.15139 3L12.8486 3C13.2084 3 13.5 3.29164 13.5 3.65139Z M13.5 5.96713V11C13.5 11.5523 13.0523 12 12.5 12H2.5C1.94772 12 1.5 11.5523 1.5 11L1.5 5.96713C1.5 5.76746 1.72254 5.64836 1.88868 5.75912L7.5 9.5L13.1113 5.75912C13.2775 5.64836 13.5 5.76746 13.5 5.96713Z",
+  "police": "M5.5,1L6,2h5l0.5-1H5.5z M6,2.5v1.25c0,0,0,2.75,2.5,2.75S11,3.75,11,3.75V2.5H6z M1.9844,3.9863 C1.4329,3.9949,0.9924,4.4485,1,5v4c-0.0001,0.6398,0.5922,1.1152,1.2168,0.9766L5,9.3574V14l5.8789-6.9297 C10.7391,7.0294,10.5947,7,10.4414,7H6.5L3,7.7539V5C3.0077,4.4362,2.5481,3.9775,1.9844,3.9863z M11.748,7.7109L6.4121,14H12 V8.5586C12,8.2451,11.9061,7.9548,11.748,7.7109z",
+  "fire-station": "M7.5 14C11.0899 14 14 11 14 7.50003C14 4.5 11.5 2 11.5 2L10.5 5.5L7.5 1L4.5 5.5L3.5 2C3.5 2 1 4.5 1 7.50003C1 11 3.91015 14 7.5 14ZM7.5 12.5C6.11929 12.5 5 11.3807 5 10C5 8.61929 7.5 5.5 7.5 5.5C7.5 5.5 10 8.61929 10 10C10 11.3807 8.88071 12.5 7.5 12.5Z",
+  "town-hall": "M13,4H9l0-3L7.5,0L6,1v3H2L1,5v1h13V5L13,4z M7.5,1.5c0.4,0,0.7,0.3,0.7,0.8S7.9,3,7.5,3S6.7,2.7,6.7,2.2 C6.7,1.8,7.1,1.5,7.5,1.5z M13,7H2v4l-1,1.5V14h13v-1.5L13,11V7z M5,12.5H4V8h1V12.5z M8,12.5H7V8h1V12.5z M11,12.5h-1V8h1V12.5z",
+  "place-of-worship": "M7.5,0l-2,2v2h4V2 L7.5,0z M5.5,4.5L4,6h7L9.5,4.5H5.5z M2,6.5c-0.5523,0-1,0.4477-1,1V13h2V7.5C3,6.9477,2.5523,6.5,2,6.5z M4,6.5V13h7V6.5H4z M13,6.5c-0.5523,0-1,0.4477-1,1V13h2V7.5C14,6.9477,13.5523,6.5,13,6.5z",
+  "religious-christian": "M6,0.9552V4H3v3h3v8h3V7h3V4H9V1 c0-1-0.9776-1-0.9776-1H6.9887C6.9887,0,6,0,6,0.9552z",
+  "religious-jewish": "M7.50049 0.5L5.49949 4H1L3.49949 7.5L1 11H5.49949L7.50049 14.5L9.50049 11H14L11.5005 7.5L14 4H9.50049L7.50049 0.5Z",
+  "religious-muslim": "M12.0962 12.0962C9.55779 14.6346 5.44221 14.6346 2.90381 12.0962C0.365398 9.55779 0.365398 5.44221 2.90381 2.90381C5.44221 0.365398 9.55779 0.365398 12.0962 2.90381C12.2675 3.07512 12.4273 3.25362 12.5754 3.43832C10.5566 1.86336 7.63341 2.00437 5.77643 3.86135C3.76685 5.87092 3.76685 9.12908 5.77643 11.1387C7.63341 12.9956 10.5566 13.1366 12.5754 11.5617C12.4273 11.7464 12.2675 11.9249 12.0962 12.0962Z M10.1 6.5H8L9.7 8L9 10.5L11 9L13 10.5L12.3 8L14 6.5H11.9L11 4.5L10.1 6.5Z",
+  "religious-buddhist": "M13.4978,6.9989h-0.5329c-0.09997-1.10708-0.53528-2.15731-1.2478-3.0105l0.378-0.3784 c0.19605-0.19447,0.19733-0.51105,0.00286-0.7071C11.90698,2.71037,11.59733,2.70518,11.4,2.8912l0,0l-0.0123,0.0123L11.01,3.2815 c-0.85331-0.71298-1.90385-1.14864-3.0113-1.2488V1.5c0-0.27614-0.22386-0.5-0.5-0.5s-0.5,0.22386-0.5,0.5v0.5327 C5.8916,2.13306,4.84144,2.56871,3.9884,3.2815L3.61,2.9C3.41007,2.70952,3.09358,2.71717,2.9031,2.9171 c-0.184,0.19312-0.184,0.49668,0,0.6898l0.3784,0.3775C2.56787,4.83856,2.13216,5.89031,2.0327,6.9989H1.5 c-0.27614,0-0.5,0.22386-0.5,0.5s0.22386,0.5,0.5,0.5h0.5327c0.09987,1.10695,0.535,2.15711,1.2473,3.0103l-0.3779,0.3779 c-0.19538,0.19514-0.19557,0.51173-0.00043,0.70711c0.19053,0.19076,0.49798,0.19611,0.69503,0.01209L3.609,12.094l0.3779-0.3779 c0.8533,0.71312,1.90395,1.1488,3.0115,1.2488v0.5329c0,0.27614,0.22386,0.5,0.5,0.5s0.5-0.22386,0.5-0.5v-0.5329 c1.10719-0.10026,2.15744-0.53592,3.0105-1.2488l0.3779,0.3779c0.19514,0.19538,0.51173,0.19557,0.70711,0.00043 c0.19076-0.19053,0.19611-0.49798,0.01209-0.69503l-0.0123-0.0123l0,0l-0.3779-0.3779c0.71283-0.8531,1.14848-1.90333,1.2488-3.0105 h0.5329c0.27609-0.00544,0.49549-0.23366,0.49006-0.50975C13.98227,7.22064,13.76611,7.00435,13.4978,6.9989z M7.9987,3.0505 c0.83871,0.09248,1.63383,0.42154,2.2926,0.9488l-2.15,2.15c-0.04663-0.0218-0.09436-0.04116-0.143-0.058V3.0505H7.9987z M6.9987,3.0505V6.091c-0.04864,0.01684-0.09637,0.0362-0.143,0.058l-2.15-2.15c0.65897-0.52726,1.45431-0.85622,2.2932-0.9485 H6.9987z M3.9987,4.7062l2.15,2.15c-0.0218,0.04663-0.04116,0.09436-0.058,0.143H3.0505 c0.09243-0.83886,0.42154-1.63413,0.9489-2.293L3.9987,4.7062z M3.0505,7.9987H6.091c0.01687,0.04863,0.03623,0.09636,0.058,0.143 l-2.15,2.15C3.47173,9.63281,3.14276,8.83753,3.0505,7.9987z M6.9989,11.9471c-0.83871-0.09248-1.63383-0.42154-2.2926-0.9488 l2.15-2.15c0.04663,0.0218,0.09436,0.04116,0.143,0.058v3.0405L6.9989,11.9471z M7.9989,11.9471V8.9066 c0.04864-0.01683,0.09638-0.03619,0.143-0.058l2.15,2.15c-0.65895,0.5273-1.4543,0.85627-2.2932,0.9485H7.9989z M10.9989,10.2914 l-2.15-2.15c0.02177-0.04664,0.04113-0.09437,0.058-0.143h3.0415c-0.09276,0.83901-0.42232,1.6343-0.9502,2.293H10.9989z M8.9066,6.9989c-0.01684-0.04864-0.0362-0.09637-0.058-0.143l2.15-2.15c0.52726,0.65877,0.85632,1.45389,0.9488,2.2926H8.9066 V6.9989z",
+  "toilet": "M3 1.5a1.5 1.5 0 1 0 3 0 1.5 1.5 0 0 0-3 0ZM11.5 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM3.29 4a1 1 0 0 0-.868.504L.566 7.752a.5.5 0 1 0 .868.496l1.412-2.472A345.048 345.048 0 0 0 1 11h2v2.5a.5.5 0 0 0 1 0V11h1v2.5a.5.5 0 0 0 1 0V11h2L6.103 5.687l1.463 2.561a.5.5 0 1 0 .868-.496L6.578 4.504A1 1 0 0 0 5.71 4H3.29ZM9 4.5a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0v4a.5.5 0 0 1-1 0v-4h-1v4a.5.5 0 0 1-1 0v-4a.5.5 0 0 1-1 0v-5Z",
+  "drinking-water": "M6,1A2,2,0,0,0,4,3V6.5a.5.5,0,0,0,.5.5h2A.5.5,0,0,0,7,6.5v-2A.5.5,0,0,1,7.5,4H14V1ZM7,15H4a.5.5,0,0,1-.48-.38L2,8.62a.5.5,0,0,1,.365-.606A.558.558,0,0,1,2.5,8h6a.5.5,0,0,1,.514.485A.47.47,0,0,1,9,8.62l-1.5,6A.5.5,0,0,1,7,15ZM3.65,11H7.36l.5-2H3.14Z",
+  "cemetery": "M11.46,12h-0.68L12,3.55c0.0175-0.2867-0.2008-0.5332-0.4874-0.5507C11.4884,2.9979,11.4641,2.9981,11.44,3h-1.18 c0-0.92-1.23-2-2.75-2S4.77,2.08,4.77,3H3.54C3.253,2.9885,3.0111,3.2117,2.9995,3.4987C2.9988,3.5158,2.999,3.5329,3,3.55L4.2,12 H3.55C3.2609,11.9886,3.0162,12.2112,3,12.5V14h9v-1.51C11.9839,12.2067,11.7435,11.9886,11.46,12z M4.5,5h6v1h-6V5z",
+  "laundry": "M8,1L6,3H3c0,0-1,0-1,1v9c0,1,1,1,1,1h9c0,0,1,0,1-1V2c0-1-1-1-1-1 S8,1,8,1z M8.5,2h2C10.777,2,11,2.223,11,2.5S10.777,3,10.5,3h-2C8.223,3,8,2.777,8,2.5S8.223,2,8.5,2z M7.5,6 c1.6569,0,3,1.3431,3,3s-1.3431,3-3,3s-3-1.3431-3-3S5.8431,6,7.5,6z",
+  "hairdresser": "M15,3c0,0-2-0.6-3.5,0.5l-4.3,3C6.4,5.9,5.2,5.2,4,4.8V4c0-1.1-0.9-2-2-2C0.9,2,0,2.9,0,4v1.5 C0,6,0.5,6,0.5,6H2h0.5C4.5,6,6,7.5,6,7.5S4.5,9,2.5,9H2H0.5C0.5,9,0,9,0,9.5V11c0,1.1,0.9,2,2,2c1.1,0,2-0.9,2-2v-0.8 c1.2-0.4,2.4-1.1,3.2-1.7l4.3,3C13,12.6,15,12,15,12L8.5,7.5L15,3z M3,5H2H1V4c0-0.6,0.4-1,1-1c0.6,0,1,0.4,1,1V5z M3,11 c0,0.6-0.4,1-1,1c-0.6,0-1-0.4-1-1v-1h1h1V11z M7.25,8c-0.2761,0-0.5-0.2239-0.5-0.5S6.9739,7,7.25,7s0.5,0.2239,0.5,0.5 S7.5261,8,7.25,8z"
+};
+// END maki-icons
+
+// OpenMapTiles poi `subclass` (checked first) or `class` -> Maki icon.
+// The tile profile (resources/tilemaker/process-openmaptiles.lua) sets class
+// to the OMT class (cafe, lodging, ...) or the OSM key (amenity, shop, ...)
+// and subclass to the OSM value; place_of_worship carries the religion in
+// subclass. Anything unlisted gets no icon, as before.
+var _SZ_POI_ICON = {
+  restaurant: 'restaurant', fast_food: 'fast-food', food_court: 'fast-food',
+  cafe: 'cafe', bar: 'bar', nightclub: 'bar', pub: 'beer', biergarten: 'beer',
+  beer: 'beer', ice_cream: 'ice-cream', bakery: 'bakery',
+  grocery: 'grocery', supermarket: 'grocery', convenience: 'shop', shop: 'shop',
+  mall: 'shop', clothing_store: 'clothing-store', clothes: 'clothing-store',
+  alcohol_shop: 'alcohol-shop',
+  lodging: 'lodging', hotel: 'lodging', motel: 'lodging', hostel: 'lodging',
+  guest_house: 'lodging', campsite: 'campsite', camp_site: 'campsite',
+  caravan_site: 'campsite',
+  hospital: 'hospital', clinic: 'doctor', doctors: 'doctor', dentist: 'dentist',
+  pharmacy: 'pharmacy',
+  school: 'school', kindergarten: 'school', college: 'college',
+  university: 'college', library: 'library',
+  museum: 'museum', art_gallery: 'art-gallery', gallery: 'art-gallery',
+  artwork: 'art-gallery', attraction: 'attraction', viewpoint: 'viewpoint',
+  monument: 'monument', memorial: 'monument', castle: 'castle', ruins: 'castle',
+  zoo: 'zoo', aquarium: 'aquarium', theatre: 'theatre', cinema: 'cinema',
+  music: 'music', information: 'information', picnic_site: 'picnic-site',
+  stadium: 'stadium', swimming: 'swimming', swimming_pool: 'swimming',
+  golf: 'golf', park: 'park', garden: 'garden', playground: 'playground',
+  bus: 'bus', railway: 'rail', station: 'rail', halt: 'rail',
+  tram_stop: 'rail-light', subway: 'rail-metro', entrance: 'entrance',
+  aerodrome: 'airport', fuel: 'fuel', parking: 'parking', car: 'car',
+  bicycle: 'bicycle', bicycle_rental: 'bicycle', harbor: 'harbor',
+  ferry_terminal: 'ferry',
+  bank: 'bank', atm: 'bank', post: 'post', police: 'police',
+  fire_station: 'fire-station', town_hall: 'town-hall',
+  place_of_worship: 'place-of-worship', christian: 'religious-christian',
+  jewish: 'religious-jewish', muslim: 'religious-muslim',
+  buddhist: 'religious-buddhist',
+  toilets: 'toilet', drinking_water: 'drinking-water', cemetery: 'cemetery',
+  laundry: 'laundry', hairdresser: 'hairdresser'
+};
+
+// Disc colour per group, so a glance separates food from health from
+// transport. White glyph on a mid-tone disc reads on both map themes.
+var _SZ_POI_GROUP_COLOR = {
+  food: '#d9730d', shop: '#8e5cc6', lodging: '#2e7fb8', health: '#d23f3f',
+  education: '#946434', culture: '#b8437a', leisure: '#3a8f46',
+  transport: '#3a6ea5', civic: '#66707b'
+};
+var _SZ_POI_GROUP = {
+  food: ['restaurant', 'fast-food', 'cafe', 'bar', 'beer', 'ice-cream', 'bakery'],
+  shop: ['grocery', 'shop', 'clothing-store', 'alcohol-shop', 'hairdresser', 'laundry'],
+  lodging: ['lodging', 'campsite'],
+  health: ['hospital', 'doctor', 'dentist', 'pharmacy'],
+  education: ['school', 'college', 'library'],
+  culture: ['museum', 'art-gallery', 'attraction', 'viewpoint', 'monument', 'castle',
+            'zoo', 'aquarium', 'theatre', 'cinema', 'music', 'information'],
+  leisure: ['stadium', 'swimming', 'golf', 'park', 'garden', 'playground', 'picnic-site'],
+  transport: ['bus', 'rail', 'rail-light', 'rail-metro', 'entrance', 'airport', 'fuel',
+              'parking', 'car', 'bicycle', 'harbor', 'ferry'],
+  civic: ['bank', 'post', 'police', 'fire-station', 'town-hall', 'place-of-worship',
+          'religious-christian', 'religious-jewish', 'religious-muslim',
+          'religious-buddhist', 'toilet', 'drinking-water', 'cemetery']
+};
+var _SZ_POI_IMAGE_PREFIX = 'sz-poi-';
+
+// icon-image for the poi-label layer: subclass first, then class, else ''
+// (no icon). One `match` per key keeps it a plain lookup in the worker.
+function _szPoiIconExpr() {
+  function lookup(prop, fallback) {
+    var m = ['match', ['get', prop]];
+    Object.keys(_SZ_POI_ICON).forEach(function(k) {
+      m.push(k, _SZ_POI_IMAGE_PREFIX + _SZ_POI_ICON[k]);
+    });
+    m.push(fallback);
+    return m;
+  }
+  return lookup('subclass', lookup('class', ''));
+}
+
+function _szPoiIconColor(icon) {
+  for (var g in _SZ_POI_GROUP) {
+    if (_SZ_POI_GROUP[g].indexOf(icon) >= 0) return _SZ_POI_GROUP_COLOR[g];
+  }
+  return _SZ_POI_GROUP_COLOR.civic;
+}
+
+// Draw one icon: a 17px disc with a white ring and the 15-unit Maki glyph
+// scaled into it, at the device pixel ratio (capped at 2: at 3x each icon
+// would be 2.25x the memory for no visible gain at this size). Returns
+// {image: ImageData, pixelRatio} for map.addImage, or null when this browser cannot
+// draw SVG path strings (Path2D) -- the POI then shows its label alone.
+function _szRenderPoiIcon(icon, ratio) {
+  var d = _SZ_MAKI[icon];
+  if (!d || typeof Path2D === 'undefined') return null;
+  var r = Math.max(1, Math.min(2, Math.round(ratio || 1)));
+  var size = 17 * r;
+  try {
+    var canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    var ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, size / 2 - 0.5 * r, 0, Math.PI * 2);
+    ctx.fillStyle = _szPoiIconColor(icon);
+    ctx.fill();
+    ctx.lineWidth = r;
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.stroke();
+    var glyph = 11 * r;                         // 15-unit glyph in 11 CSS px
+    ctx.translate((size - glyph) / 2, (size - glyph) / 2);
+    ctx.scale(glyph / 15, glyph / 15);
+    ctx.fillStyle = '#fff';
+    ctx.fill(new Path2D(d));
+    return { image: ctx.getImageData(0, 0, size, size), pixelRatio: r };
+  } catch (e) {
+    return null;
+  }
+}
+
+function initPoiIcons(map) {
+  var failed = {};
+  map.on('styleimagemissing', function(e) {
+    var id = e && e.id;
+    if (!id || id.indexOf(_SZ_POI_IMAGE_PREFIX) !== 0 || failed[id]) return;
+    if (map.hasImage(id)) return;
+    var icon = _szRenderPoiIcon(id.slice(_SZ_POI_IMAGE_PREFIX.length), window.devicePixelRatio);
+    if (!icon) { failed[id] = true; return; }
+    try {
+      map.addImage(id, icon.image, { pixelRatio: icon.pixelRatio });
+    } catch (err) {
+      failed[id] = true;
+      dbg('poi icon failed', id, describeError(err));
+    }
+  });
+}
+// Right-to-left labels (Arabic, Hebrew, ...). MapLibre shapes them only with
+// the RTL text plugin (@mapbox/mapbox-gl-rtl-text, BSD-2-Clause), which the
+// builder writes into the ZIM next to maplibre-gl.js and names in
+// map-config.json as `rtlTextPlugin`. Older ZIMs lack both, and in-place
+// patching cannot add the file, so without the key this is a no-op and
+// labels render as they always have.
+//
+// Loaded only when needed: MapLibre flips its plugin status to 'requested'
+// the first time a tile carries RTL text, and nothing is fetched before
+// that, so a region without such labels never reads the ~150 KB file. It is
+// fetched with the zimtile retry helper (Kiwix drops requests under load)
+// and handed to MapLibre as a blob: URL, because MapLibre imports the plugin
+// inside its blob: workers, where a relative or zim: URL may not resolve.
+// Once loaded MapLibre re-lays out the tiles already shown.
+// BEGIN rtl-text
+function initRtlText(map, config, lib) {
+  lib = lib || window.maplibregl;
+  var file = config && config.rtlTextPlugin;
+  if (!file || typeof file !== 'string' || /^[a-z]+:|^\/|\.\./i.test(file)) return false;
+  if (!lib || typeof lib.setRTLTextPlugin !== 'function' ||
+      typeof lib.getRTLTextPluginStatus !== 'function') return false;
+  var started = false;
+  function check() {
+    if (started || lib.getRTLTextPluginStatus() !== 'requested') return;
+    started = true;
+    map.off('data', check);
+    var fetcher = window.__szFetchWithRetry;
+    var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    var got = fetcher
+      ? fetcher(baseUrl + file, ctl ? ctl.signal : { aborted: false })
+      : fetch(baseUrl + file).then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.arrayBuffer().then(function(b) { return { data: b }; });
+        });
+    got.then(function(res) {
+      var url = URL.createObjectURL(new Blob([res.data], { type: 'text/javascript' }));
+      return lib.setRTLTextPlugin(url, false);
+    }).then(function() {
+      dbg('rtl text plugin loaded');
+    }).catch(function(err) {
+      // Labels stay as they were (unshaped); nothing else depends on it.
+      dbg('rtl text plugin failed', describeError(err));
+    });
+  }
+  map.on('data', check);
+  check();
+  return true;
+}
+// END rtl-text
+
+// Last view, Home button and About panel.
+//
+// Last view: the camera (centre, zoom, and bearing/pitch when not 0) is kept
+// in localStorage per map and reopened on the next visit -- unless the URL
+// names a view or a place itself (#map=, #dest=, #origin=, #pin=,
+// #find=results): a deep link always wins. Only a move the reader made
+// (drag, pinch, wheel, keys, the zoom buttons; see initViewMemory) is
+// saved; opening, deep links, Home, search and route framing are not, so merely opening the map never pins a view. The saved
+// view also records map-config's centre and zoom and is dropped when they
+// change: a rebuild that moves the opening view (repackage_zim.py
+// --map-center, e.g. hawaii's mid-Pacific fix) keeps the name and bounds,
+// and must not be masked by a view saved on the old build. The key is the map's name and
+// bounds from map-config.json, not the page path: the /drive/ PWA serves
+// every ZIM at the same /drive/viewer/, and a Kiwix book's path changes
+// with each new release of the same region, whose saved view still fits.
+// Storage can be missing or throw (Kiwix iOS's zim: scheme, private
+// windows, a full quota, a sandboxed frame), so every access is guarded
+// and the viewer behaves as before without it. Nothing is saved while
+// driving mode moves the camera; the view it restores on exit is.
+//
+// Home returns to the opening view map-config.json ships (centre + zoom;
+// see docs/todo-opening-view.md for why that is not a fit to the bounds).
+// tests/viewer_ui_js.test.mjs runs this block against stubbed globals.
+// BEGIN view-home-about
+
+// The viewer's own release; tests/viewer_ui_js.test.mjs keeps it equal to
+// streetzim/__about__.py. A ZIM's map-config.json names the release that
+// built it (`generator`); the viewer is patched in later, so both are shown.
+var SZ_VIEWER_VERSION = '1.0.0';
+var SZ_VIEW_PREFIX = 'streetzim.view.';
+
+function _szStorage() {
+  try {
+    var s = window.localStorage;
+    if (!s) return null;
+    s.setItem('streetzim.probe', '1');
+    s.removeItem('streetzim.probe');
+    return s;
+  } catch (e) { return null; }
+}
+
+// Distance units. One setting for the whole viewer: the scale bar (click
+// it to switch), search distances, Find cards and "Nearby", the place
+// sheet, the routing panel and places.html, which reads it from
+// localStorage ('streetzim.units'). A saved choice wins; otherwise the
+// reader's locale decides: imperial for US English or a US, Liberian or
+// Myanmar region, metric for everyone else (en-GB too, for simplicity).
+var SZ_UNITS_KEY = 'streetzim.units';
+function szLocaleUnit(nav) {
+  var langs = [];
+  try {
+    if (nav && nav.languages && nav.languages.length) langs = Array.prototype.slice.call(nav.languages);
+    else if (nav && nav.language) langs = [nav.language];
+  } catch (e) {}
+  var tag = String(langs[0] || '');
+  var region = (/^[a-z]{2,3}(?:-[a-z]{4})?-([a-z]{2})\b/i.exec(tag) || [])[1];
+  region = region ? region.toUpperCase() : '';
+  return region === 'US' || region === 'LR' || region === 'MM' ? 'imperial' : 'metric';
+}
+function szReadUnit(storage, nav) {
+  try {
+    var u = storage && storage.getItem(SZ_UNITS_KEY);
+    if (u === 'metric' || u === 'imperial') return u;
+  } catch (e) {}
+  return szLocaleUnit(nav === undefined ? (typeof navigator !== 'undefined' ? navigator : null) : nav);
+}
+function szWriteUnit(storage, unit) {
+  try { if (storage) storage.setItem(SZ_UNITS_KEY, unit); } catch (e) {}
+}
+function szUnit() {
+  var m = window.__szMap;
+  return (m && m._streetzimUnit) || szReadUnit(_szStorage());
+}
+// 850 m / 1.4 km / 12 km, or 500 ft / 1.4 mi / 12 mi. Unit symbols lower case.
+function szFormatDistance(meters, unit) {
+  if (meters == null || !isFinite(meters)) return '';
+  if (unit === 'imperial') {
+    var feet = meters * 3.28084;
+    if (feet < 1000) return Math.round(feet) + ' ft';
+    var miles = meters / 1609.344;
+    return (miles < 10 ? miles.toFixed(1) : Math.round(miles)) + ' mi';
+  }
+  if (meters < 1000) return Math.round(meters) + ' m';
+  return (meters / 1000).toFixed(meters < 10000 ? 1 : 0) + ' km';
+}
+
+function _szViewKey(config) {
+  var b = config && config.bounds;
+  var id = (config && config.name) || '';
+  if (b && b.length === 4) {
+    id += '|' + b.map(function(v) { return Math.round(v * 1000) / 1000; }).join(',');
+  }
+  if (!id) id = location.pathname;
+  return SZ_VIEW_PREFIX + id;
+}
+
+// Does the URL fragment choose the view or a place? Then it wins.
+function _szHashSetsView(hash) {
+  return /(?:^#|[#&?])(?:map|dest|origin|pin)=|find=results/.test(hash || '');
+}
+
+function _szNum(v, lo, hi) {
+  return typeof v === 'number' && isFinite(v) && v >= lo && v <= hi;
+}
+
+// A stored view, checked: garbage, an old format or a view outside this
+// map's bounds (a ZIM whose extent shrank) is ignored, not obeyed.
+function _szReadView(config, storage) {
+  if (!storage) return null;
+  var v = null;
+  try { v = JSON.parse(storage.getItem(_szViewKey(config)) || 'null'); } catch (e) { return null; }
+  if (!v || !v.c || v.c.length !== 2) return null;
+  if (v.h !== _szHomeFingerprint(config)) return null;   // opening view changed
+  var lon = v.c[0], lat = v.c[1];
+  if (!_szNum(lon, -180, 180) || !_szNum(lat, -90, 90)) return null;
+  var minZ = (config && config.minZoom) || 0;
+  if (!_szNum(v.z, minZ, 22)) return null;
+  var b = config && config.bounds;
+  if (b && b.length === 4 &&
+      (lon < b[0] - 0.01 || lon > b[2] + 0.01 || lat < b[1] - 0.01 || lat > b[3] + 0.01)) return null;
+  return {
+    center: [lon, lat],
+    zoom: v.z,
+    bearing: _szNum(v.b, -360, 360) ? v.b : 0,
+    pitch: _szNum(v.p, 0, 85) ? v.p : 0
   };
 }
 
+// map-config's opening view, as saved alongside a view.
+function _szHomeFingerprint(config) {
+  var c = (config && config.center) || [];
+  return [c[0], c[1], config && config.zoom].join(',');
+}
+
+function _szWriteView(config, storage, cam) {
+  if (!storage || !cam) return false;
+  function r(x, n) { var f = Math.pow(10, n); return Math.round(x * f) / f; }
+  var v = { c: [r(cam.lng, 5), r(cam.lat, 5)], z: r(cam.zoom, 2), h: _szHomeFingerprint(config) };
+  if (Math.abs(cam.bearing || 0) >= 0.5) v.b = r(cam.bearing, 1);
+  if ((cam.pitch || 0) >= 0.5) v.p = r(cam.pitch, 1);
+  try { storage.setItem(_szViewKey(config), JSON.stringify(v)); return true; }
+  catch (e) { return false; }
+}
+
+// The camera the map opens with: the saved view when the URL leaves the
+// choice to us, else map-config.json's.
+function _szOpeningCamera(config, hash, storage) {
+  var home = { center: config.center, zoom: config.zoom, bearing: 0, pitch: 0 };
+  if (_szHashSetsView(hash)) return home;
+  return _szReadView(config, storage) || home;
+}
+
+// How far the reader can pan: exactly the built box (map-config.json's
+// "bounds", which is also what tilemaker clipped every layer to). MapLibre
+// keeps the whole viewport inside maxBounds, zooming in when it must, so no
+// part of the screen can show the area outside the box, where there is no
+// data at all -- not even the sea, whose polygons are clipped too. The
+// viewer used to add 0.01 degrees on every side, and that strip was drawn as
+// bare background: the sea stopped in a straight line at the edge of every
+// coastal region (Monaco's east and south edges). Longitudes past 180
+// (areas across the antimeridian) are passed through; MapLibre wraps them.
+// A box as wide as the world (world ZIMs: -180,-85,180,85) gets none:
+// MapLibre 5.23 throws in _calcMatrices on a 360-degree maxBounds ("Error
+// loading map"), and there is no edge to hide anyway. Latitudes are kept
+// inside Web Mercator's +-85.0511.
+var SZ_MERC_LAT = 85.0511;
+function _szMaxBounds(config) {
+  var b = config && config.bounds;
+  if (!b || b.length !== 4) return undefined;
+  for (var i = 0; i < 4; i++) if (typeof b[i] !== 'number' || !isFinite(b[i])) return undefined;
+  if (!(b[0] < b[2] && b[1] < b[3])) return undefined;
+  if (b[2] - b[0] >= 359.9) return undefined;
+  var s = Math.max(b[1], -SZ_MERC_LAT), n = Math.min(b[3], SZ_MERC_LAT);
+  if (!(s < n)) return undefined;
+  return [[b[0], s], [b[2], n]];
+}
+
+// A result near the box edge cannot be flown to the middle of the free map:
+// maxBounds stops the camera at the edge, so flyTo's offset is lost and the
+// pin can end up under the find strip, the place sheet or the search box
+// (at the north edge MapLibre 5.23 even puts it above the screen). Moving
+// the camera cannot help; zooming in can, because the pin's distance in
+// pixels from the box edge doubles with each zoom level.
+//
+// y: the pin's y after the move; h: canvas height; top/bottom: px covered
+// by chrome; yNorth/ySouth: the box's north and south edges projected at
+// the same zoom (they may be off screen). Returns the zoom at which, centred
+// on the pin with no offset, it clears the chrome by `margin` px, or null
+// when it is clear already (or cannot be cleared).
+function _szClearZoom(y, h, top, bottom, zoom, maxZoom, yNorth, ySouth, margin) {
+  margin = margin || 40;
+  if (y > top + margin / 2 && y < h - bottom - margin / 2) return null;
+  var dTop = y - yNorth, dBottom = ySouth - y;   // px from each edge
+  var d = Math.min(dTop, dBottom);
+  var want = dBottom <= dTop ? bottom + margin : top + margin;
+  if (d * 2 >= h) return zoom;                   // not at an edge: just recentre
+  if (!(d > 1)) return null;
+  var z = Math.min(maxZoom, zoom + Math.max(0, Math.log(want / d) / Math.LN2));
+  return z;
+}
+
+// How much of the canvas the chrome covers: the search box at the top, and
+// at the bottom whichever sheet is open (find strip, place details, the
+// wiki panel when it is a bottom sheet).
+function _szCoveredEdges(map) {
+  var c = map.getCanvas().getBoundingClientRect(), top = 0, bottom = 0;
+  function rect(id) {
+    var el = document.getElementById(id);
+    // Not offsetParent: it is null for the position:fixed sheets.
+    if (!el || !el.getClientRects().length) return null;
+    var r = el.getBoundingClientRect();
+    return r.height > 0 ? r : null;
+  }
+  var sc = rect('search-container');
+  if (sc) top = Math.max(0, sc.bottom - c.top);
+  ['find-results-strip', 'place-detail', 'wiki-panel'].forEach(function(id) {
+    var r = rect(id);
+    if (r && r.top > c.top + c.height * 0.3) bottom = Math.max(bottom, c.bottom - r.top);
+  });
+  return { top: top, bottom: bottom };
+}
+
+// flyTo; then, if maxBounds left the target under the chrome, ease in on it.
+function _szFlyToClear(map, opts) {
+  var mb = map.getMaxBounds && map.getMaxBounds();
+  if (!mb) { map.flyTo(opts); return; }
+  // Listen first: a flyTo with duration 0 ends inside the call.
+  map.once('moveend', function() {
+    try {
+      var c = maplibregl.LngLat.convert(opts.center);
+      var h = map.getCanvas().clientHeight, e = _szCoveredEdges(map);
+      var z = _szClearZoom(map.project(c).y, h, e.top, e.bottom, map.getZoom(),
+                           map.getMaxZoom(), map.project([c.lng, mb.getNorth()]).y,
+                           map.project([c.lng, mb.getSouth()]).y);
+      if (z !== null) map.easeTo({ center: c, zoom: z, duration: 300 });
+    } catch (err) {}
+  });
+  map.flyTo(opts);
+}
+window.__szFlyToClear = _szFlyToClear;   // for tests and probes
+
+function _szDriving() {
+  var hud = document.getElementById('drive-hud');
+  return !!(hud && hud.classList && hud.classList.contains('visible'));
+}
+
+function initViewMemory(map, config) {
+  var storage = _szStorage();
+  if (!storage) return;
+  var timer = null;
+  // Whose move is it? MapLibre marks most gesture moves with originalEvent,
+  // but not all: a plain mouse-wheel notch and the snap back to north after
+  // a small rotate come without one. So the reader's own input on the map
+  // (press, release, wheel, key) counts too while it is recent. A camera
+  // call from code (flyTo, Home's easeTo, deep links, route fitting) is
+  // caught at the call, so it is never saved, even when it cuts into a drag.
+  var byUser = false;   // the move in progress is the reader's
+  var prog = false;     // a camera call from code is running
+  var held = false;     // a pointer or finger is down on the map
+  var userAt = 0;       // time of the reader's last input on the map
+  var ending = false;   // inside a reader move's moveend, from which
+                        // MapLibre may snap to north as part of that move
+  function recent() { return held || Date.now() - userAt < 350; }
+  function save() {
+    clearTimeout(timer);
+    timer = null;
+    if (_szDriving()) return;
+    var c = map.getCenter();
+    _szWriteView(config, storage, {
+      lng: c.lng, lat: c.lat, zoom: map.getZoom(),
+      bearing: map.getBearing(), pitch: map.getPitch()
+    });
+  }
+  var el = map.getCanvasContainer && map.getCanvasContainer();
+  if (el && el.addEventListener) {
+    var press = function(e) {
+      userAt = Date.now();
+      if (e.type !== 'wheel' && e.type !== 'keydown') held = true;
+    };
+    ['pointerdown', 'mousedown', 'touchstart', 'wheel', 'keydown'].forEach(function(t) {
+      el.addEventListener(t, press, { capture: true, passive: true });
+    });
+    var release = function() { if (held) { held = false; userAt = Date.now(); } };
+    ['pointerup', 'mouseup', 'touchend', 'touchcancel', 'pointercancel'].forEach(function(t) {
+      window.addEventListener(t, release, true);
+    });
+  }
+  ['easeTo', 'flyTo', 'jumpTo'].forEach(function(name) {
+    var orig = map[name];
+    if (typeof orig !== 'function') return;
+    map[name] = function(opts, eventData) {
+      if (!(eventData && eventData.originalEvent) && !ending) {
+        // Keep the reader's last view (a pending save) before code moves on.
+        if (timer) save();
+        prog = true;
+        byUser = false;
+      }
+      var r = orig.apply(this, arguments);
+      // A call that did not move (or already finished) leaves no moveend
+      // to clear the flag with.
+      if (prog && typeof map.isMoving === 'function' && !map.isMoving()) prog = false;
+      return r;
+    };
+  });
+  map.on('movestart', function(e) {
+    clearTimeout(timer);
+    timer = null;
+    if (e && e.originalEvent) prog = false;   // the reader took over
+    byUser = !prog && !!((e && e.originalEvent) || recent());
+  });
+  map.on('moveend', function(e) {
+    var user = !prog && (byUser || !!(e && e.originalEvent) || recent());
+    prog = false;
+    byUser = false;
+    clearTimeout(timer);
+    timer = null;
+    if (!user) return;
+    ending = true;
+    setTimeout(function() { ending = false; }, 0);
+    // Read the camera once it has settled (after any snap to north).
+    timer = setTimeout(save, 400);
+  });
+  // A reader closed within the debounce still keeps where it was.
+  window.addEventListener('pagehide', function() { if (timer) save(); });
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'hidden' && timer) save();
+  });
+}
+
+function initHomeButton(map, config) {
+  var ctrl = {
+    onAdd: function() {
+      var div = document.createElement('div');
+      div.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'sz-home-btn';
+      btn.title = 'Show the whole map';
+      btn.setAttribute('aria-label', 'Show the whole map');
+      btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+        '<path d="M12 3 2 12h3v8h6v-6h2v6h6v-8h3z"/></svg>';
+      btn.addEventListener('click', function() {
+        // Driving mode's follow camera owns the view until EXIT.
+        if (_szDriving()) return;
+        map.easeTo({ center: config.center, zoom: config.zoom, bearing: 0, pitch: 0, duration: 800 });
+      });
+      div.appendChild(btn);
+      return div;
+    },
+    onRemove: function() {}
+  };
+  map.addControl(ctrl, 'top-right');
+}
+
+// "July 2026" from "2026-07-14" / "2026/07"; anything else as given.
+function _szMonth(d) {
+  var m = /^(\d{4})[-/](\d{1,2})/.exec(String(d || ''));
+  if (!m) return d ? String(d) : '';
+  var names = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+               'August', 'September', 'October', 'November', 'December'];
+  var i = parseInt(m[2], 10) - 1;
+  return names[i] ? names[i] + ' ' + m[1] : String(d);
+}
+
+// Text for the About panel. Newer ZIMs carry title/description/
+// generator in map-config.json (streetzim/zim_writer.py _add_map_config);
+// older ones only name and buildDate, and every field is optional.
+// The satellite imagery's credit (EOX requires it wherever the imagery is
+// shown) and licence. map-config.json names them since the source became a
+// choice (streetzim/satellite_sources.py); a ZIM from before carries the
+// 2021 mosaic, CC BY-NC-SA 4.0. null without a satellite layer.
+function _szSatellite(config) {
+  if (!config || !config.hasSatellite) return null;
+  if (!config.satelliteAttribution) {
+    return { attribution: 'Sentinel-2 cloudless - https://s2maps.eu by EOX IT Services GmbH' +
+             ' (Contains modified Copernicus Sentinel data 2021)',
+             license: 'CC BY-NC-SA 4.0', licenseUrl: 'https://creativecommons.org/licenses/by-nc-sa/4.0/',
+             nonCommercial: true };
+  }
+  return { attribution: String(config.satelliteAttribution),
+           license: String(config.satelliteLicense || ''),
+           licenseUrl: String(config.satelliteLicenseUrl || ''),
+           year: String(config.satelliteYear || ''),
+           nonCommercial: !!config.satelliteNonCommercial };
+}
+
+function _szEsc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// The short credit on the map itself while the imagery is shown (the full
+// one is in About): links are fixed EOX addresses, and the licence link only
+// a Creative Commons 4.0 URL; everything taken from map-config is escaped.
+function _szSatelliteCreditHtml(config) {
+  var sat = _szSatellite(config);
+  if (!sat) return '';
+  var year = sat.year || (config.satelliteAttribution ? '' : '2021');
+  var lic = _szEsc(sat.license);
+  if (/^https:\/\/creativecommons\.org\/licenses\/[a-z-]+\/4\.0\/$/.test(sat.licenseUrl)) {
+    lic = '<a href="' + sat.licenseUrl + '" target="_blank" rel="noopener">' + lic + '</a>';
+  }
+  return '&copy; <a href="https://cloudless.eox.at" target="_blank" rel="noopener">EOxCloudless</a>' +
+    (year ? ' ' + _szEsc(year) : '') +
+    ' by <a href="https://eox.at" target="_blank" rel="noopener">EOX</a> &middot; ' + lic +
+    (sat.nonCommercial ? ' (non-commercial)' : '');
+}
+
+function _szAboutText(config) {
+  config = config || {};
+  var meta = [];
+  // buildDate is when the ZIM was built, not the OSM data's timestamp.
+  var when = _szMonth(config.buildDate);
+  if (when || config.generator) {
+    meta.push('Built' + (when ? ' ' + when : '') + (config.generator ? ' with ' + config.generator : ''));
+  }
+  meta.push('viewer: streetzim ' + SZ_VIEWER_VERSION);
+  var sat = _szSatellite(config);
+  return {
+    title: config.title || config.name || 'Offline OpenStreetMap',
+    desc: config.description || '',
+    meta: meta.join(' · '),
+    // A ZIM with non-commercial imagery says so first thing in About.
+    notice: sat && sat.nonCommercial ?
+      'Restricted: the satellite imagery is licensed ' + sat.license +
+      ' and may be used for non-commercial purposes only; the rest of this map is openly licensed.' : '',
+    satCredit: sat ? sat.attribution : '',
+    satLicense: sat ? sat.license + (sat.nonCommercial ? ', non-commercial use only' : '') +
+      (sat.licenseUrl ? ' \u2014 ' + sat.licenseUrl.replace(/^https?:\/\//, '') : '') : ''
+  };
+}
+
+function initAbout(config) {
+  var t = _szAboutText(config);
+  var set = function(id, text) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  set('about-title', t.title);
+  set('about-desc', t.desc);
+  set('about-meta', t.meta);
+  set('about-notice', t.notice);
+  var notice = document.getElementById('about-notice');
+  if (notice) notice.style.display = t.notice ? '' : 'none';
+  if (t.satCredit) {
+    set('attr-satellite-by', t.satCredit);
+    set('attr-satellite-license', t.satLicense);
+  }
+  // Focus moves into the dialog on open, Tab stays inside it, and focus
+  // returns to the button however it closes (it is aria-modal); Escape
+  // closes it without reaching the other Escape handlers (find results,
+  // routing pickers) underneath.
+  var overlay = document.getElementById('attr-overlay');
+  var dialog = document.getElementById('attr-dialog');
+  var btn = document.getElementById('attr-btn');
+  var closeBtn = document.getElementById('attr-close');
+  if (!overlay) return;
+  var isOpen = function() { return overlay.style.display === 'block'; };
+  var refocus = function() { if (btn && btn.focus) btn.focus(); };
+  if (btn) btn.addEventListener('click', function() {
+    // After 120's listener has shown the overlay.
+    setTimeout(function() { if (closeBtn && closeBtn.focus && isOpen()) closeBtn.focus(); }, 0);
+  });
+  if (closeBtn) closeBtn.addEventListener('click', refocus);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) refocus(); });
+  document.addEventListener('keydown', function(e) {
+    if (!isOpen()) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      overlay.style.display = 'none';
+      refocus();
+    } else if (e.key === 'Tab' && dialog && dialog.querySelectorAll) {
+      var f = Array.prototype.filter.call(
+        dialog.querySelectorAll('button, a[href], [tabindex]:not([tabindex="-1"])'),
+        function(x) { return x.offsetParent !== null; });
+      if (!f.length) return;
+      var first = f[0], last = f[f.length - 1], at = document.activeElement;
+      var inside = dialog.contains && dialog.contains(at);
+      if (e.shiftKey && (at === first || !inside)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (at === last || !inside)) { e.preventDefault(); first.focus(); }
+    }
+  }, true);
+}
+// END view-home-about
 // --- Find-results map view ---
 // places.html stashes its current `state.results` in sessionStorage
 // when the user clicks "Map view"; we read that here, drop one pin
@@ -3045,8 +4293,11 @@ function renderFindResultsFromStash(map) {
       });
     })(i);
     _findResultsState.markers.push(marker);
-    if (!bounds) bounds = new maplibregl.LngLatBounds([r.o, r.a], [r.o, r.a]);
-    else         bounds.extend([r.o, r.a]);
+    // Longitudes the short way from the first result, so results either
+    // side of the antimeridian frame the gap between them, not the globe.
+    var ro = bounds ? r.o - 360 * Math.round((r.o - bounds.getWest()) / 360) : r.o;
+    if (!bounds) bounds = new maplibregl.LngLatBounds([ro, r.a], [ro, r.a]);
+    else         bounds.extend([ro, r.a]);
   }
   if (bounds) {
     // Leave room for the carousel at the bottom — extra bottom
@@ -3110,7 +4361,6 @@ function _searchAreaThresholdReached(map) {
   var az = _findResultsState.anchorZoom;
   if (!ac || az == null) return false;
   if (Math.abs(map.getZoom() - az) >= 0.5) return true;
-  var c = map.getCenter();
   var b = map.getBounds();
   // Outside the current viewport box → user has clearly panned away.
   return ac.lng < b.getWest() || ac.lng > b.getEast()
@@ -3186,8 +4436,8 @@ function _renderSubfilterRow(map, stash) {
       + (active
         ? 'background:#1a73e8; color:#fff;'
           + 'border:1px solid #1a73e8;'
-        : 'background:#fff; color:#222;'
-          + 'border:1px solid #ddd;')
+        : 'background:var(--szd-surface, #fff); color:var(--szd-fg, #222);'
+          + 'border:1px solid var(--szd-line, #ddd);')
     );
     chip.textContent = (count != null) ? (label + ' · ' + count) : label;
     chip.addEventListener('click', function() {
@@ -3250,9 +4500,9 @@ function _renderFindResultsStrip(map, stash) {
   strip.id = 'find-results-strip';
   strip.style.cssText = (
     'position:fixed; left:0; right:0; bottom:var(--bottom-inset, 0px); z-index:1500;'
-    + 'background:rgba(255,255,255,0.96); border-top:1px solid #ccc;'
+    + 'background:var(--szd-surface-a, rgba(255,255,255,0.96)); border-top:1px solid var(--szd-line, #ccc);'
     + 'box-shadow:0 -4px 16px rgba(0,0,0,0.12);'
-    + 'font:13px/1.35 -apple-system,system-ui,sans-serif; color:#222;'
+    + 'font:13px/1.35 -apple-system,system-ui,sans-serif; color:var(--szd-fg, #222);'
     + 'padding-top:6px;'
     // Clear the dead touch band next to the app's bottom toolbar (see the
     // locate-button rule): without this the cards' lower half renders fine
@@ -3263,7 +4513,7 @@ function _renderFindResultsStrip(map, stash) {
   var header = document.createElement('div');
   header.style.cssText = (
     'padding:2px 14px 6px; display:flex; align-items:center; gap:8px;'
-    + 'font-size:12px; color:#555;'
+    + 'font-size:12px; color:var(--szd-fg-2, #555);'
   );
   var title = document.createElement('span');
   title.style.cssText = (
@@ -3278,7 +4528,7 @@ function _renderFindResultsStrip(map, stash) {
   closeBtn.textContent = '×';
   closeBtn.style.cssText = (
     'flex:0 0 auto; background:transparent; border:none;'
-    + 'font-size:18px; line-height:1; cursor:pointer; color:#666;'
+    + 'font-size:18px; line-height:1; cursor:pointer; color:var(--szd-fg-3, #666);'
     + 'padding:2px 6px;'
   );
   closeBtn.addEventListener('click', clearFindResults);
@@ -3387,7 +4637,7 @@ function _showSearchAreaPill(map) {
   btn.style.cssText = (
     'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
     + 'z-index:1600; padding:9px 18px;'
-    + 'background:rgba(255,255,255,0.92); color:#222;'
+    + 'background:var(--szd-surface-a, rgba(255,255,255,0.92)); color:var(--szd-fg, #222);'
     + 'border:1px solid rgba(0,0,0,0.12); border-radius:999px;'
     + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
     + 'box-shadow:0 4px 14px rgba(0,0,0,0.18);'
@@ -3396,10 +4646,10 @@ function _showSearchAreaPill(map) {
     + 'pointer-events:auto;'
   );
   btn.addEventListener('mouseenter', function() {
-    btn.style.background = 'rgba(255,255,255,1)';
+    btn.style.background = 'var(--szd-surface-hover, rgba(255,255,255,1))';
   });
   btn.addEventListener('mouseleave', function() {
-    btn.style.background = 'rgba(255,255,255,0.92)';
+    btn.style.background = 'var(--szd-surface-a, rgba(255,255,255,0.92))';
   });
   btn.addEventListener('click', function() {
     _searchAreaApply(map);
@@ -3476,7 +4726,7 @@ function _searchAreaApply(map) {
     btn.style.cssText = (
       'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
       + 'z-index:1600; padding:9px 18px;'
-      + 'background:rgba(255,255,255,0.95); color:#a33;'
+      + 'background:var(--szd-surface-a, rgba(255,255,255,0.95)); color:var(--szd-warn, #a33);'
       + 'border:1px solid rgba(170,50,50,0.25); border-radius:999px;'
       + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
       + 'box-shadow:0 4px 14px rgba(0,0,0,0.18); pointer-events:none;'
@@ -3565,8 +4815,8 @@ function _showPlaceDetail(map, r, idx) {
   panel.style.cssText = (
     'position:fixed; left:0; right:0; bottom:var(--bottom-inset, 0px); z-index:1701;'
     + 'max-height:calc(var(--app-height, 100vh) * 0.78); overflow-y:auto;'
-    + 'background:#fff; color:#222;'
-    + 'border-top:1px solid #ddd;'
+    + 'background:var(--szd-surface, #fff); color:var(--szd-fg, #222);'
+    + 'border-top:1px solid var(--szd-line, #ddd);'
     + 'border-radius:18px 18px 0 0;'
     + 'box-shadow:0 -8px 28px rgba(0,0,0,0.28);'
     + 'transform:translateY(100%); transition:transform .25s ease;'
@@ -3578,7 +4828,7 @@ function _showPlaceDetail(map, r, idx) {
   var handle = document.createElement('div');
   handle.style.cssText = (
     'width:40px; height:4px; border-radius:2px;'
-    + 'background:#d8dadd; margin:6px auto 12px;'
+    + 'background:var(--szd-handle, #d8dadd); margin:6px auto 12px;'
   );
   panel.appendChild(handle);
 
@@ -3596,7 +4846,7 @@ function _showPlaceDetail(map, r, idx) {
   close.textContent = '×';
   close.style.cssText = (
     'flex:0 0 auto; background:transparent; border:none;'
-    + 'font-size:28px; line-height:1; cursor:pointer; color:#666;'
+    + 'font-size:28px; line-height:1; cursor:pointer; color:var(--szd-fg-3, #666);'
     + 'padding:0 6px; margin-top:-4px;'
   );
   close.addEventListener('click', _hidePlaceDetail);
@@ -3611,7 +4861,7 @@ function _showPlaceDetail(map, r, idx) {
   if (r.l) subParts.push(r.l);
   if (subParts.length) {
     var sub = document.createElement('div');
-    sub.style.cssText = 'color:#666; font-size:13px; margin:4px 0 10px;';
+    sub.style.cssText = 'color:var(--szd-fg-3, #666); font-size:13px; margin:4px 0 10px;';
     sub.textContent = subParts.join(' · ');
     panel.appendChild(sub);
   }
@@ -3659,7 +4909,7 @@ function _showPlaceDetail(map, r, idx) {
   // Plus phone/website spelled out for accessibility / copy-paste
   var info = document.createElement('div');
   info.style.cssText = (
-    'border-top:1px solid #eee; margin-top:6px; padding-top:10px;'
+    'border-top:1px solid var(--szd-line, #eee); margin-top:6px; padding-top:10px;'
     + 'display:flex; flex-direction:column; gap:6px; font-size:13px;'
   );
   if (r.p) {
@@ -3775,7 +5025,7 @@ function _detailActionBtn(label, emoji, primary, onClick) {
     + 'transition:transform .08s ease, filter .08s ease;'
     + (primary
        ? 'background:#1a73e8; color:#fff; border:1px solid #1a73e8;'
-       : 'background:#fff; color:#1a73e8;'
+       : 'background:var(--szd-surface, #fff); color:var(--szd-link, #1a73e8);'
          + 'border:1px solid #1a73e8;')
   );
   // Tap feedback: dim + slight scale on press so the user gets
@@ -3800,7 +5050,7 @@ function _detailFactRow(label, value, href, target) {
   var lbl = document.createElement('span');
   lbl.textContent = label;
   lbl.style.cssText = (
-    'flex:0 0 70px; color:#888; font-size:12px; padding-top:2px;'
+    'flex:0 0 70px; color:var(--szd-fg-3, #888); font-size:12px; padding-top:2px;'
   );
   row.appendChild(lbl);
   var val;
@@ -3815,9 +5065,9 @@ function _detailFactRow(label, value, href, target) {
   val.style.cssText = (
     'flex:1 1 auto; min-width:0;'
     + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
-    + 'color:#1a73e8; text-decoration:none;'
+    + 'color:var(--szd-link, #1a73e8); text-decoration:none;'
   );
-  if (!href) val.style.color = '#222';
+  if (!href) val.style.color = 'var(--szd-fg, #222)';
   row.appendChild(val);
   return row;
 }
@@ -3846,7 +5096,7 @@ function _detailTravelTimesLine(r) {
   var driveMin = fmtMin(m / 11);
   var line = document.createElement('div');
   line.style.cssText = (
-    'color:#666; font-size:12px; margin:2px 0 0;'
+    'color:var(--szd-fg-3, #666); font-size:12px; margin:2px 0 0;'
   );
   // Drop walking estimate when it would exceed 2 hours; switch to
   // drive-only display so we're not telling the user to walk for
@@ -3871,7 +5121,7 @@ function _detailDistanceLine(r) {
   var o = _findResultsState.origin;
   var m = _haversineMetersStrip(o.lat, o.lon, r.a, r.o);
   var line = document.createElement('div');
-  line.style.cssText = 'color:#444; font-size:13px; margin:4px 0 0;';
+  line.style.cssText = 'color:var(--szd-fg-2, #444); font-size:13px; margin:4px 0 0;';
   var label = (o.label && o.label !== 'Current location')
     ? o.label : 'current location';
   line.textContent = _formatDistanceStrip(m) + ' from ' + label;
@@ -3919,7 +5169,7 @@ function _populateWikipediaExtract(slot, wd) {
   if (wd.d) {
     var desc = document.createElement('div');
     desc.style.cssText = (
-      'color:#555; font-size:13px; font-style:italic; margin-bottom:8px;'
+      'color:var(--szd-fg-2, #555); font-size:13px; font-style:italic; margin-bottom:8px;'
     );
     desc.textContent = wd.d;
     slot.appendChild(desc);
@@ -3927,13 +5177,13 @@ function _populateWikipediaExtract(slot, wd) {
   if (wd.x) {
     var head = document.createElement('div');
     head.style.cssText = (
-      'font-size:11px; color:#888; text-transform:uppercase;'
+      'font-size:11px; color:var(--szd-fg-3, #888); text-transform:uppercase;'
       + 'letter-spacing:0.04em; margin:0 0 4px;'
     );
     head.textContent = 'About';
     slot.appendChild(head);
     var body = document.createElement('div');
-    body.style.cssText = 'color:#333; font-size:14px; line-height:1.5;';
+    body.style.cssText = 'color:var(--szd-fg, #333); font-size:14px; line-height:1.5;';
     body.textContent = wd.x;
     slot.appendChild(body);
   }
@@ -3952,10 +5202,10 @@ function _populateWikipediaExtract(slot, wd) {
     );
     for (var i = 0; i < facts.length; i++) {
       var k = document.createElement('div');
-      k.style.cssText = 'color:#888;';
+      k.style.cssText = 'color:var(--szd-fg-3, #888);';
       k.textContent = facts[i][0];
       var v = document.createElement('div');
-      v.style.cssText = 'color:#222;';
+      v.style.cssText = 'color:var(--szd-fg, #222);';
       v.textContent = facts[i][1];
       grid.appendChild(k); grid.appendChild(v);
     }
@@ -3991,11 +5241,11 @@ var EXPLORE_CHIPS = [
   // Libraries were missing here while present in every build and in
   // places.html, so the map offered two food chips and no hospitals.
   //
-  // Restaurants + Cafés merged into Food & Drink 2026-09-16. All three stay
-  // listed because ZIMs built before that ship the old pair and no
-  // chip-food.json; _findChipsReconcile() hides whichever the ZIM's
-  // manifest does not declare, so a retrofitted ZIM shows the old pair and
-  // a freshly built one shows the merged chip.
+  // Restaurants + Cafés merged into Food & Drink 2026-09-16; ZIMs built
+  // before that ship chip-restaurants.json + chip-cafes.json and no
+  // chip-food.json. The rail still lists only the merged chip.
+  // _findChipsReconcile() hides the chips the manifest does not list (or
+  // lists with count 0), keeping Food & Drink when either old file exists.
   // ONE food chip on the rail. A pre-merge ZIM has no chip-food.json, so
   // _findResolveChipDef() maps this button onto that ZIM's restaurants +
   // cafes and loadChipOnMap merges them — the rail reads the same whatever
@@ -4259,17 +5509,187 @@ var CHIP_SHARDS = (function() {
 })();
 // END chip-shards
 
-var _findCatManifest = null;
 var _findChipCache = new Map();    // chipId -> Promise<Array<record>>
 // Geo-sharded chips: bounded LRU of shard fetches instead of whole chips.
 var _chipShardCache = CHIP_SHARDS.makeCache(CHIP_SHARDS.budgetBytes());
 window.addEventListener('pagehide', function() { _chipShardCache.clear(); });
 
-// Hide chips this ZIM has no file for. Restaurants + Cafés became one
-// "Food & Drink" chip on 2026-09-16, but ZIMs built before that ship the
-// old pair and no chip-food.json — and the rail is built before the
-// category manifest is fetched, so reconcile once it arrives rather than
-// guessing. A ZIM with no chips at all keeps every chip (legacy path).
+// BEGIN chip-availability
+// Which rail chips THIS ZIM can serve, read from category-index/manifest.json.
+// Chip files are only written by --split-find-chips, and every build that
+// writes them also lists them under the manifest's `chips` key, so:
+//   - manifest unknown (network error, or an HTTP error other than 404 /
+//     410, e.g. a 503 from the /drive/ service worker) -> keep every chip,
+//     try on tap, and reconcile again once a later fetch reads it;
+//   - manifest has no `chips` (or no category index at all) -> no chip
+//     data: hide the whole rail. It used to show all ten chips, and a tap
+//     fetched chip-<id>.json, got a 404 and showed nothing;
+//   - a chip whose manifest count is 0 (Parks / Gas on a tilemaker
+//     build) -> hide it; the tap had nothing to show.
+// Restaurants + Cafés became one "Food & Drink" chip on 2026-09-16, but
+// ZIMs built before that ship the old pair and no chip-food.json, so the
+// food button stands for either.
+var _FIND_CHIP_ALT = { food: ['food', 'restaurants', 'cafes'] };
+function _findChipHas(chips, id) {
+  var c = chips && chips[id];
+  if (!c) return false;
+  return !(typeof c.count === 'number' && c.count <= 0);
+}
+// manifest: the parsed manifest; { _szUnknown: true } when it could not be
+// read. ids: the rail's chip ids. -> { rail: bool, show: { id: bool } }
+function _findChipsPlan(manifest, ids) {
+  var show = {}, i;
+  if (!manifest || manifest._szUnknown) {
+    for (i = 0; i < ids.length; i++) show[ids[i]] = true;
+    return { rail: true, show: show };
+  }
+  var chips = manifest.chips;
+  var known = chips ? Object.keys(chips) : [];
+  var shown = 0, recognised = 0;
+  for (i = 0; i < ids.length; i++) {
+    var alts = _FIND_CHIP_ALT[ids[i]] || [ids[i]];
+    var ok = false;
+    for (var a = 0; a < alts.length; a++) {
+      if (chips && chips[alts[a]]) recognised++;
+      if (_findChipHas(chips, alts[a])) ok = true;
+    }
+    show[ids[i]] = ok;
+    if (ok) shown++;
+  }
+  if (known.length && !recognised) {
+    // Unrecognised chip set (ids drifted from chip_rules.py): better all
+    // than none — a tap then says what is missing.
+    for (i = 0; i < ids.length; i++) show[ids[i]] = true;
+    return { rail: true, show: show };
+  }
+  return { rail: shown > 0, show: show };
+}
+
+var _findCatManifest = null;
+var _findCatManifestP = null;      // the one in-flight manifest fetch
+var _findChipsRail = null;         // the rail, once initFindChips built it
+var _findChipsStale = false;       // reconciled against an unknown manifest
+
+// Resolves the manifest. Only 404 / 410 mean "this ZIM has no category
+// index" ({}, cached). Any other failure — a network error, a 5xx (the
+// /drive/ service worker answers 503 while a streamed ZIM stalls), bad
+// JSON — resolves to { _szUnknown: true } and is NOT cached, so a later
+// call tries again. Caching {} for a 503 hid the rail for the session.
+function _findFetchCatManifest() {
+  if (_findCatManifest) return Promise.resolve(_findCatManifest);
+  // Callers arriving while a fetch is in flight share it (the rail's
+  // reconcile and an early chip tap used to request it twice).
+  if (_findCatManifestP) return _findCatManifestP;
+  var p = fetch(baseUrl + 'category-index/manifest.json')
+    .then(function(r) {
+      if (r.ok) return r.json();
+      if (r.status === 404 || r.status === 410) return {};
+      throw new Error('category manifest HTTP ' + r.status);
+    })
+    .then(function(m) {
+      _findCatManifest = (m && typeof m === 'object') ? m : {};
+      if (_findChipsStale && _findChipsRail) {
+        _findChipsStale = false;
+        _findChipsApply(_findChipsRail, _findCatManifest);
+      }
+      return _findCatManifest;
+    })
+    .catch(function() { return { _szUnknown: true }; })
+    .then(function(m) { _findCatManifestP = null; return m; });
+  _findCatManifestP = p;
+  return p;
+}
+
+// After a tap settles: re-apply the plan, so a chip the late reconcile
+// skipped while it was busy is checked again.
+function _findChipsRecheck() {
+  if (_findCatManifest && _findChipsRail) _findChipsApply(_findChipsRail, _findCatManifest);
+}
+
+// A tapped chip this ZIM cannot serve: hide it (and the rail when no chip
+// is left) and say why.
+function _findChipUnavailable(chipDef) {
+  var m = _findCatManifest || {};
+  var none = !m.chips || !Object.keys(m.chips).length;
+  var rail = document.getElementById('find-chips');
+  if (rail) {
+    var btns = rail.querySelectorAll('.find-chip'), hide = [];
+    for (var i = 0; i < btns.length; i++) {
+      hide.push(btns[i].hidden || btns[i].dataset.chip === chipDef.id);
+    }
+    _findChipsSetHidden(rail, btns, hide, none || rail.hidden);
+  }
+  _showFindToast(none ? 'No category search in this map'
+                      : 'No ' + chipDef.label.toLowerCase() + ' in this map');
+}
+
+// Hide what the manifest says this ZIM cannot serve. A chip that is active
+// or still resolving a tap is left alone (its own load reports the
+// outcome), and focus never stays on an element that is being hidden.
+function _findChipsApply(rail, m) {
+  var btns = rail.querySelectorAll('.find-chip');
+  var ids = [];
+  for (var i = 0; i < btns.length; i++) ids.push(btns[i].dataset.chip);
+  var plan = _findChipsPlan(m, ids);
+  var hide = [], kept = false;
+  for (var j = 0; j < btns.length; j++) {
+    var b = btns[j];
+    var busy = b.classList.contains('on') || !!(b.dataset && b.dataset.szLoading);
+    var h = !plan.show[ids[j]] && !busy;
+    if (!h && busy) kept = true;
+    hide.push(h);
+  }
+  var railHidden = !plan.rail && !kept;
+  _findChipsSetHidden(rail, btns, hide, railHidden);
+}
+
+// Apply hidden flags. The rail goes whenever no chip is left visible.
+// Focus leaves anything about to vanish: after keyboard use
+// (:focus-visible) to the next visible chip, else the search box; after a
+// tap it is just dropped — focusing the search box would pop the soft
+// keyboard on Android.
+function _findChipsSetHidden(rail, btns, hide, railHidden) {
+  var anyShown = false;
+  for (var s = 0; s < btns.length; s++) if (!hide[s]) { anyShown = true; break; }
+  if (!anyShown) railHidden = true;
+  var act = document.activeElement;
+  var target = null, drop = false;
+  for (var i = 0; i < btns.length; i++) {
+    if (btns[i] !== act) continue;
+    if (!hide[i] && !railHidden) break;
+    var keyboard = false;
+    try { keyboard = !!(act.matches && act.matches(':focus-visible')); } catch (e) {}
+    if (!keyboard) { drop = true; break; }
+    for (var k = 1; k < btns.length && !railHidden; k++) {
+      var n = (i + k) % btns.length;
+      if (!hide[n]) { target = btns[n]; break; }
+    }
+    target = target || document.getElementById('search-input');
+    break;
+  }
+  for (var j = 0; j < btns.length; j++) btns[j].hidden = !!hide[j];
+  rail.hidden = !!railHidden;
+  if (target && typeof target.focus === 'function') target.focus();
+  else if (drop && typeof act.blur === 'function') act.blur();
+}
+
+// The rail is built before the category manifest is fetched, so reconcile
+// once it arrives — and again when an unknown result is later replaced by
+// a real manifest (_findFetchCatManifest).
+function _findChipsReconcile(rail) {
+  _findChipsRail = rail;
+  return _findFetchCatManifest().then(function(m) {
+    if (m && m._szUnknown) {
+      // A concurrent fetch (a chip tap) may already have cached the real
+      // manifest; otherwise the next one that does reconciles.
+      if (!_findCatManifest) { _findChipsStale = true; return; }
+      m = _findCatManifest;
+    }
+    _findChipsApply(rail, m);
+  }).catch(function() { /* keep the full rail */ });
+}
+// END chip-availability
+
 var _szChipSynth = 0;   // ts of the last tap-synthesised chip activation
 // A MapLibre popup anchors ABOVE its marker, so on a phone it can open flush
 // against — or overlapping — the search box + chip rail, even now that it
@@ -4294,29 +5714,6 @@ function _szPopupGap(map, popup) {
     });
   });
 }
-function _findChipsReconcile(rail) {
-  _findFetchCatManifest().then(function(m) {
-    var chips = m && m.chips;
-    if (!chips || !Object.keys(chips).length) return;
-    var btns = rail.querySelectorAll('.find-chip');
-    var shown = 0;
-    // The merged Food & Drink button stands in for a pre-merge ZIM's
-    // restaurants/cafes pair, so keep it when EITHER of those exists —
-    // hiding it on the absence of chip-food.json alone would remove the
-    // only way to reach food on every region retrofitted this round.
-    var alt = { food: ['food', 'restaurants', 'cafes'] };
-    for (var i = 0; i < btns.length; i++) {
-      var ids = alt[btns[i].dataset.chip] || [btns[i].dataset.chip];
-      var ok = false;
-      for (var a = 0; a < ids.length; a++) { if (chips[ids[a]]) { ok = true; break; } }
-      if (ok) { shown++; } else { btns[i].hidden = true; }
-    }
-    if (!shown) {   // unrecognised chip set: better all than none
-      for (var j = 0; j < btns.length; j++) btns[j].hidden = false;
-    }
-  }).catch(function() { /* keep the full rail */ });
-}
-
 function initFindChips(map) {
   var rail = document.getElementById('find-chips');
   if (!rail) return;
@@ -4340,7 +5737,10 @@ function initFindChips(map) {
       // the touch-tap fallback below can invoke. _szChipSynth suppresses
       // the double-fire when a real click arrives after a synthetic tap.
       var act = function() {
-        loadChipOnMap(map, c).catch(function(err) {
+        btn.dataset.szLoading = '1';     // the reconcile leaves it alone
+        var done = function() { delete btn.dataset.szLoading; _findChipsRecheck(); };
+        loadChipOnMap(map, c).then(done, function(err) {
+          done();
           // A chip tapped before the rail reconciles (or one whose file this
           // ZIM lacks) used to leave the search box reading
           // "Loading food & drink…" for ever, with only a console warning.
@@ -4394,17 +5794,6 @@ function _findChipPaintActive(chipId) {
   }
 }
 
-function _findFetchCatManifest() {
-  if (_findCatManifest) return Promise.resolve(_findCatManifest);
-  return fetch(baseUrl + 'category-index/manifest.json')
-    .then(function(r) {
-      if (!r.ok) throw new Error('category manifest HTTP ' + r.status);
-      return r.json();
-    })
-    .then(function(m) { _findCatManifest = m; return m; })
-    .catch(function() { _findCatManifest = {}; return {}; });
-}
-
 // Whole-chip arrays (pre-geo-shard ZIMs) run to 100 MB+ each; keeping
 // every chip tapped in a session added up on a phone. Keep the last few.
 var _FIND_CHIP_CACHE_MAX = (navigator.deviceMemory && navigator.deviceMemory <= 2) ? 1 : 3;
@@ -4422,12 +5811,23 @@ function _findFetchChipData(chipId) {
       // Fan-out fetch when the build sub-bucketed this chip
       // (cloud/repackage_zim.py --split-find-chips). Concatenate the
       // per-bucket arrays.
+      // A failed bucket counts as empty so one bad bucket still shows the
+      // rest — but if EVERY bucket failed, reject: resolving [] would read
+      // as "No X in this map" instead of "Couldn't load X".
+      var failed = 0;
       return Promise.all(subs.map(function(suffix) {
         return fetch(baseUrl + 'category-index/chip-' + chipId
                      + '-' + suffix + '.json')
-          .then(function(r) { return r.ok ? r.json() : []; })
-          .catch(function() { return []; });
+          .then(function(r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function(a) { return Array.isArray(a) ? a : []; })
+          .catch(function() { failed++; return []; });
       })).then(function(blobs) {
+        if (failed === subs.length) {
+          throw new Error('chip-' + chipId + ': all ' + failed + ' buckets failed');
+        }
         var out = [];
         for (var i = 0; i < blobs.length; i++) {
           for (var j = 0; j < blobs[i].length; j++) out.push(blobs[i][j]);
@@ -4473,12 +5873,20 @@ function _hillshadeBeforeId(map) {
 function _showFindToast(text, opts) {
   opts = opts || {};
   var d = document.createElement('div');
+  d.setAttribute('role', 'status');
+  d.setAttribute('aria-live', 'polite');
   d.style.cssText = (
     'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
     + 'z-index:1600; padding:9px 18px;'
-    + 'background:rgba(255,255,255,0.95);'
-    + 'color:' + (opts.color || '#a33') + ';'
-    + 'border:1px solid rgba(170,50,50,0.25); border-radius:999px;'
+    // left:50% alone caps a shrink-to-fit box at half the screen, which
+    // broke a one-line message into three on a phone.
+    + 'width:max-content; max-width:calc(100vw - 32px); box-sizing:border-box;'
+    + 'text-align:center;'
+    + 'background:var(--szd-surface-a, rgba(255,255,255,0.95));'
+    // A caller's colour is a neutral hint (#333); the default is the warning red.
+    + 'color:' + (opts.color ? 'var(--szd-fg, ' + opts.color + ')' : 'var(--szd-warn, #a33)') + ';'
+    // 18px, not a pill: a message that wraps at 320px stays a tidy box.
+    + 'border:1px solid rgba(170,50,50,0.25); border-radius:18px;'
     + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
     + 'box-shadow:0 4px 14px rgba(0,0,0,0.18); pointer-events:none;'
   );
@@ -4509,13 +5917,17 @@ var _chipOrigPlaceholder = null;
 // "chip-food HTTP 404" (seen on central-asia, 2026-09-18). Resolve first,
 // across the merge in both directions, and bail quietly when the ZIM has
 // nothing to show rather than requesting a 404.
+// A manifest that lists no chips means the ZIM has no chip files at all
+// (built without --split-find-chips), and a count-0 entry has nothing to
+// show: both resolve to null too.
 async function _findResolveChipDef(chipDef) {
   var m = await _findFetchCatManifest().catch(function() { return null; });
-  var chips = m && m.chips;
-  if (!chips || !Object.keys(chips).length) {
+  if (!m || m._szUnknown) {   // unreadable manifest: try the file anyway
     return { id: chipDef.id, label: chipDef.label, sources: [chipDef.id] };
   }
-  if (chips[chipDef.id]) {
+  var chips = m.chips;
+  if (!chips || !Object.keys(chips).length) return null;
+  if (_findChipHas(chips, chipDef.id)) {
     return { id: chipDef.id, label: chipDef.label, sources: [chipDef.id] };
   }
   // Food & Drink merged Restaurants + Cafés on 2026-09-16, but a retrofit
@@ -4528,7 +5940,7 @@ async function _findResolveChipDef(chipDef) {
                 restaurants: ['food'], cafes: ['food'] }[chipDef.id] || [];
   var have = [];
   for (var i = 0; i < alias.length; i++) {
-    if (chips[alias[i]]) have.push(alias[i]);
+    if (_findChipHas(chips, alias[i])) have.push(alias[i]);
   }
   if (!have.length) return null;
   return { id: chipDef.id, label: chipDef.label, sources: have };
@@ -4538,9 +5950,7 @@ async function loadChipOnMap(map, chipDef, opts) {
   opts = opts || {};
   var _resolved = await _findResolveChipDef(chipDef);
   if (!_resolved) {
-    var _btn = document.querySelector('.find-chip[data-chip="' + chipDef.id + '"]');
-    if (_btn) _btn.hidden = true;          // the reconcile is about to do this anyway
-    _showFindToast('No ' + chipDef.label.toLowerCase() + ' in this map');
+    _findChipUnavailable(chipDef);
     _findChipPaintActive(null);
     return;
   }
@@ -4677,6 +6087,7 @@ async function loadChipOnMap(map, chipDef, opts) {
       if (mySeq !== _chipLoadSeq) return;
       restorePlaceholder();
       _findChipPaintActive(null);
+      _showFindToast('Couldn\u2019t load ' + chipDef.label.toLowerCase());
       return;
     }
     if (!res || mySeq !== _chipLoadSeq) return;  // superseded while loading
@@ -4710,10 +6121,18 @@ async function loadChipOnMap(map, chipDef, opts) {
     if (mySeq !== _chipLoadSeq) return;  // a newer chip owns the UI now
     restorePlaceholder();
     _findChipPaintActive(null);
+    _showFindToast('Couldn\u2019t load ' + chipDef.label.toLowerCase());
     return;
   }
   if (mySeq !== _chipLoadSeq) return;  // superseded while loading
   restorePlaceholder();
+  // An empty chip used to render an empty carousel with no word said.
+  if (!Array.isArray(data) || !data.length) {
+    _showFindToast('No ' + chipDef.label.toLowerCase()
+      + (opts.requireInBounds ? ' in this area' : ' in this map'));
+    if (!opts.requireInBounds) _findChipPaintActive(null);
+    return;
+  }
 
   // Filter to the current map viewport. If that wipes everything,
   // fall back to the unfiltered set (matches places.html behaviour
@@ -4830,15 +6249,15 @@ function _populateNearby(slot, map, r, selfIdx) {
 
   var head = document.createElement('div');
   head.style.cssText = (
-    'font-size:11px; color:#888; text-transform:uppercase;'
+    'font-size:11px; color:var(--szd-fg-3, #888); text-transform:uppercase;'
     + 'letter-spacing:0.04em; margin:0 0 6px;'
   );
-  head.textContent = 'Nearby (within 1.5 km)';
+  head.textContent = 'Nearby (within ' + szFormatDistance(1500, szUnit()) + ')';
   slot.appendChild(head);
   var list = document.createElement('div');
   list.style.cssText = (
     'display:flex; flex-direction:column;'
-    + 'border:1px solid #eee; border-radius:10px; overflow:hidden;'
+    + 'border:1px solid var(--szd-line, #eee); border-radius:10px; overflow:hidden;'
   );
   for (var j = 0; j < ranked.length; j++) {
     list.appendChild(_nearbyRow(map, ranked[j], j === ranked.length - 1));
@@ -4851,15 +6270,15 @@ function _nearbyRow(map, entry, isLast) {
   row.type = 'button';
   row.style.cssText = (
     'display:flex; align-items:center; gap:10px; width:100%;'
-    + 'padding:10px 12px; background:#fff; cursor:pointer;'
-    + 'border:none;' + (isLast ? '' : 'border-bottom:1px solid #f0f0f0;')
+    + 'padding:10px 12px; background:var(--szd-surface, #fff); cursor:pointer;'
+    + 'border:none;' + (isLast ? '' : 'border-bottom:1px solid var(--szd-line, #f0f0f0);')
     + 'text-align:left; font:inherit;'
   );
   row.addEventListener('mouseenter', function() {
-    row.style.background = '#f5f9ff';
+    row.style.background = 'var(--szd-surface-hover, #f5f9ff)';
   });
   row.addEventListener('mouseleave', function() {
-    row.style.background = '#fff';
+    row.style.background = 'var(--szd-surface, #fff)';
   });
 
   var col = document.createElement('div');
@@ -4873,7 +6292,7 @@ function _nearbyRow(map, entry, isLast) {
   col.appendChild(name);
   var meta = document.createElement('div');
   meta.style.cssText = (
-    'color:#777; font-size:12px;'
+    'color:var(--szd-fg-3, #777); font-size:12px;'
     + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
   );
   var kind = entry.item.cat || entry.item.s || entry.item.t;
@@ -4886,7 +6305,7 @@ function _nearbyRow(map, entry, isLast) {
 
   var dist = document.createElement('div');
   dist.style.cssText = (
-    'flex:0 0 auto; color:#1a73e8; font-size:13px; font-weight:600;'
+    'flex:0 0 auto; color:var(--szd-link, #1a73e8); font-size:13px; font-weight:600;'
   );
   dist.textContent = _formatDistanceStrip(entry.dist);
   row.appendChild(dist);
@@ -4908,7 +6327,7 @@ function _findResultCard(map, r, idx) {
   card.style.cssText = (
     'flex:0 0 76vw; max-width:340px; min-width:240px;'
     + 'scroll-snap-align:center; scroll-snap-stop:always;'
-    + 'background:#fff; border:1px solid #ddd; border-radius:12px;'
+    + 'background:var(--szd-surface, #fff); border:1px solid var(--szd-line, #ddd); border-radius:12px;'
     + 'padding:10px 12px; cursor:pointer; transition:border-color .15s, box-shadow .15s;'
     + 'display:flex; flex-direction:column; gap:4px;'
   );
@@ -4923,7 +6342,7 @@ function _findResultCard(map, r, idx) {
 
   var sub = document.createElement('div');
   sub.style.cssText = (
-    'color:#777; font-size:12px;'
+    'color:var(--szd-fg-3, #777); font-size:12px;'
     + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
   );
   var subParts = [];
@@ -4987,7 +6406,7 @@ function _findResultCard(map, r, idx) {
       'flex:0 0 auto; display:inline-flex; align-items:center;'
       + 'justify-content:center; width:36px; padding:7px 0;'
       + 'border-radius:8px; text-decoration:none; font-size:14px;'
-      + 'border:1px solid #ddd; background:#fff; color:#222;'
+      + 'border:1px solid var(--szd-line, #ddd); background:var(--szd-surface, #fff); color:var(--szd-fg, #222);'
     );
     a.addEventListener('click', function(e) { e.stopPropagation(); });
     return a;
@@ -5048,7 +6467,7 @@ function _setActiveResult(map, idx, flyTo) {
   var track = _findResultsState.track;
   if (track) {
     if (prev >= 0 && track.children[prev]) {
-      track.children[prev].style.borderColor = '#ddd';
+      track.children[prev].style.borderColor = 'var(--szd-line, #ddd)';
       track.children[prev].style.boxShadow = '';
     }
     var active = track.children[idx];
@@ -5099,11 +6518,12 @@ function _setActiveResult(map, idx, flyTo) {
   }
   if (flyTo) {
     var r = _findResultsState.items[idx];
-    map.flyTo({
+    _szFlyToClear(map, {
       center: [r.o, r.a],
       zoom: Math.max(map.getZoom(), 14),
       // Offset the camera up by the strip's height so the active
-      // pin sits in the visible map area, not behind the carousel.
+      // pin sits in the visible map area, not behind the carousel
+      // (and zoom in when maxBounds holds it at the box edge, 140).
       offset: [0, -110],
       duration: 500,
     });
@@ -5141,9 +6561,7 @@ function _haversineMetersStrip(lat1, lon1, lat2, lon2) {
 }
 
 function _formatDistanceStrip(m) {
-  if (m == null || isNaN(m)) return '';
-  if (m < 1000) return Math.round(m) + ' m';
-  return (m / 1000).toFixed(m < 10000 ? 1 : 0) + ' km';
+  return szFormatDistance(m, szUnit());
 }
 
 function clearFindResults() {
@@ -5200,6 +6618,29 @@ function clearFindResults() {
 // and search-data/{prefix}.json files are loaded on demand. This keeps RAM
 // bounded even for world-scale datasets (millions of features).
 var searchMarker = null;
+
+// BEGIN proximity-label
+// The distance after a search result ("Casino  grocery · Jardin Exotique ·
+// 1 mi"), in the units the scale bar shows (map._streetzimUnit, switched by
+// clicking the scale). Unit symbols are lower case -- mi, km -- and the
+// line is no longer text-transform: capitalize (010), which printed "1 Mi".
+function _szProximityLabel(miles, unit) {
+  if (!(miles >= 0)) return '';
+  if (unit === 'metric') {
+    var km = miles * 1.609344;
+    if (km < 0.8) return 'nearby';
+    if (km < 8) return Math.round(km) + ' km';
+    if (km < 80) return Math.round(km / 5) * 5 + ' km';
+    if (km < 800) return Math.round(km / 10) * 10 + ' km';
+    return Math.round(km / 100) * 100 + ' km';
+  }
+  if (miles < 0.5) return 'nearby';
+  if (miles < 5) return Math.round(miles) + ' mi';
+  if (miles < 50) return Math.round(miles / 5) * 5 + ' mi';
+  if (miles < 500) return Math.round(miles / 10) * 10 + ' mi';
+  return Math.round(miles / 100) * 100 + ' mi';
+}
+// END proximity-label
 
 // Drop a red marker at (lat, lon) with a "Directions to here" popup.
 // Shared by the search-result picker and the #pin= deep-link path
@@ -5849,7 +7290,10 @@ var SEARCH_SHARDS = (function () {
         var dlat = item.a - clat;
         // Scale longitude by cos(lat) so the degree-space distance is
         // isotropic; raw Δlng overstated E–W distances 2x at 60°N.
-        var dlng = (item.o - clng) * Math.cos(clat * Math.PI / 180);
+        // The short way round, for maps across the antimeridian.
+        var dlng0 = item.o - clng;
+        dlng0 -= 360 * Math.round(dlng0 / 360);
+        var dlng = dlng0 * Math.cos(clat * Math.PI / 180);
         var dist = Math.sqrt(dlat * dlat + dlng * dlng);
         var viewSpan = Math.max(
           bounds.getNorth() - bounds.getSouth(),
@@ -5861,13 +7305,8 @@ var SEARCH_SHARDS = (function () {
         var proxMultiplier = 1 + 9 * Math.exp(-ratio * 0.5);
         score = textScore * proxMultiplier;
 
-        // Generate human-readable distance for display
-        var miles = dist * 69;
-        if (miles < 0.5) proximityLabel = 'nearby';
-        else if (miles < 5) proximityLabel = Math.round(miles) + ' mi';
-        else if (miles < 50) proximityLabel = Math.round(miles / 5) * 5 + ' mi';
-        else if (miles < 500) proximityLabel = Math.round(miles / 10) * 10 + ' mi';
-        else proximityLabel = Math.round(miles / 100) * 100 + ' mi';
+        // Human-readable distance, in the scale bar's units.
+        proximityLabel = _szProximityLabel(dist * 69, map._streetzimUnit);
       }
 
       matches.push({ item: item, score: score, dist: proximityLabel });
@@ -6027,7 +7466,7 @@ var SEARCH_SHARDS = (function () {
     // as "the map jumped past my result". 0.18*h capped at chrome+60 lands
     // it around 60% with the popup clear of the search box.
     var _dy = Math.min(Math.round(_h * 0.18), _topChrome + 60);
-    map.flyTo({ center: [lon, lat], zoom: zoom, duration: 1500, offset: [0, _dy] });
+    _szFlyToClear(map, { center: [lon, lat], zoom: zoom, duration: 1500, offset: [0, _dy] });
     placeSearchPin(map, lat, lon, name, enrich);
     resultsEl.style.display = 'none';
     input.blur();
@@ -6250,7 +7689,7 @@ function initWikidataPopups(map, config) {
     h += '<div style="font-size:16px;font-weight:600;margin-bottom:4px;">' + escapeHtml(name) + '</div>';
 
     if (wd.d) {
-      h += '<div style="color:#555;font-size:12px;margin-bottom:6px;font-style:italic;">' + escapeHtml(wd.d) + '</div>';
+      h += '<div style="color:var(--szd-fg-2, #555);font-size:12px;margin-bottom:6px;font-style:italic;">' + escapeHtml(wd.d) + '</div>';
     }
 
     // Info grid
@@ -6265,19 +7704,19 @@ function initWikidataPopups(map, config) {
     if (facts.length > 0) {
       h += '<table style="border-collapse:collapse;width:100%;margin-bottom:6px;">';
       facts.forEach(function(f) {
-        h += '<tr><td style="color:#888;font-size:11px;padding:1px 8px 1px 0;white-space:nowrap;">' +
+        h += '<tr><td style="color:var(--szd-fg-3, #888);font-size:11px;padding:1px 8px 1px 0;white-space:nowrap;">' +
              f[0] + '</td><td style="font-size:12px;padding:1px 0;">' + escapeHtml(String(f[1])) + '</td></tr>';
       });
       h += '</table>';
     }
 
     if (wd.x) {
-      h += '<div style="color:#444;font-size:12px;line-height:1.4;border-top:1px solid #eee;padding-top:6px;">' +
+      h += '<div style="color:var(--szd-fg-2, #444);font-size:12px;line-height:1.4;border-top:1px solid var(--szd-line, #eee);padding-top:6px;">' +
            escapeHtml(wd.x) + '</div>';
     }
 
     if (wd.i) {
-      h += '<div style="color:#999;font-size:10px;margin-top:4px;">' + escapeHtml(wd.i) + '</div>';
+      h += '<div style="color:var(--szd-fg-3, #999);font-size:10px;margin-top:4px;">' + escapeHtml(wd.i) + '</div>';
     }
 
     h += '</div>';
@@ -6587,7 +8026,7 @@ function initWikiSidebar(map, config) {
       // latitude span; when zoomed out to explore a few cities that span is
       // large, so it flew ~0.1-0.2° (many km) SOUTH of the real location.
       var _dy = Math.round((map.getCanvas().clientHeight || 600) * 0.22);
-      map.flyTo({ center: [lon, lat], zoom: targetZoom, duration: 1000, offset: [0, -_dy] });
+      _szFlyToClear(map, { center: [lon, lat], zoom: targetZoom, duration: 1000, offset: [0, -_dy] });
     } else {
       map.flyTo({ center: [lon, lat], zoom: targetZoom, duration: 1000 });
     }
@@ -6706,7 +8145,7 @@ function initWikiSidebar(map, config) {
     listEl.appendChild(wrap);
 
     var back = createEl('button', 'wiki-detail-back', '← Back to list');
-    back.style.cssText = 'display:block;margin:0 0 12px;padding:6px 10px;border:0;border-radius:6px;background:#eef2fa;color:#2a4a7a;font-size:13px;font-weight:600;cursor:pointer;';
+    back.style.cssText = 'display:block;margin:0 0 12px;padding:6px 10px;border:0;border-radius:6px;background:var(--szd-btn2-bg, #eef2fa);color:var(--szd-btn2-fg, #2a4a7a);font-size:13px;font-weight:600;cursor:pointer;';
     back.addEventListener('click', function() { staleView = false; updateSidebar(); });
     wrap.appendChild(back);
 
@@ -6716,7 +8155,7 @@ function initWikiSidebar(map, config) {
     if (coords && map._buildDirectionsButton) {
       wrap.appendChild(map._buildDirectionsButton(coords[1], coords[0], name));
     }
-    nm.style.cssText = 'font-size:17px;font-weight:700;margin-bottom:6px;color:#1a1a2a;line-height:1.25;word-wrap:break-word;';
+    nm.style.cssText = 'font-size:17px;font-weight:700;margin-bottom:6px;color:var(--szd-fg, #1a1a2a);line-height:1.25;word-wrap:break-word;';
     wrap.appendChild(nm);
 
     // Prefer the description baked into the geo-index (instant, no fetch). Fall
@@ -6727,7 +8166,7 @@ function initWikiSidebar(map, config) {
     var desc = bakedDesc || (wd ? (wd.x || wd.d || '') : '');
     if (desc) {
       var dd = createEl('div', 'wiki-detail-desc', desc);
-      dd.style.cssText = 'font-size:13.5px;line-height:1.5;color:#444;margin-bottom:10px;word-wrap:break-word;';
+      dd.style.cssText = 'font-size:13.5px;line-height:1.5;color:var(--szd-fg-2, #444);margin-bottom:10px;word-wrap:break-word;';
       wrap.appendChild(dd);
     }
 
@@ -6741,7 +8180,7 @@ function initWikiSidebar(map, config) {
       wrap.appendChild(ab);
     } else {
       var noa = createEl('div', 'wiki-detail-noarticle', 'No bundled article for this place.');
-      noa.style.cssText = 'font-size:12px;color:#888;margin-bottom:8px;';
+      noa.style.cssText = 'font-size:12px;color:var(--szd-fg-3, #888);margin-bottom:8px;';
       wrap.appendChild(noa);
     }
   }
@@ -6938,7 +8377,7 @@ function initWikiSidebar(map, config) {
               // the old latitude-span shift flew kilometres south of the
               // target when the map was zoomed out.
               var _dy2 = Math.round((map.getCanvas().clientHeight || 600) * 0.22);
-              map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 1200, offset: [0, -_dy2] });
+              _szFlyToClear(map, { center: [lng, lat], zoom: targetZoom, duration: 1200, offset: [0, -_dy2] });
             } else {
               map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 1200 });
             }
@@ -8372,8 +9811,6 @@ function initRouting(map, config) {
   // fails.
   var __routeStatusTimer = null;
   var __routeStatusStart = 0;
-  var __routeStatusEtaSec = 0;
-  var __ROUTE_SPINNER_FRAMES = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
   // Route progress UI v2: clean stage label + slim animated bar
   // instead of the busy spinner/ETA/pops/cells string. The ETA
   // heuristic was wrong post-worker (a 1100 km route now finishes in
@@ -9172,7 +10609,6 @@ function initRouting(map, config) {
     }
     var nodesScaled = graph.nodesScaled;
     var adjOffsets = graph.adjOffsets;
-    var edges = graph.edges;
     var numNodes = graph.numNodes;
 
     var endLat = nodesScaled[endNode * 2] / 1e7;
@@ -9312,6 +10748,21 @@ function initRouting(map, config) {
     };
   }
 
+  // A route across the antimeridian steps from 179.99 to -179.99; drawn
+  // as given, that step is a line round the whole globe. Continue the
+  // longitude past +-180 instead, which MapLibre draws where it belongs.
+  function unwrapLngs(coords) {
+    var out = [];
+    var prev = null;
+    for (var i = 0; i < coords.length; i++) {
+      var lng = coords[i][0];
+      if (prev !== null) lng -= 360 * Math.round((lng - prev) / 360);
+      out.push([lng, coords[i][1]]);
+      prev = lng;
+    }
+    return out;
+  }
+
   function drawRoute(coords) {
     if (routeDrawn) {
       map.getSource('route').setData({
@@ -9351,8 +10802,7 @@ function initRouting(map, config) {
   }
 
   function formatDistance(meters) {
-    if (meters < 1000) return Math.round(meters) + ' m';
-    return (meters / 1000).toFixed(1) + ' km';
+    return szFormatDistance(meters, szUnit());
   }
 
   function formatTime(seconds) {
@@ -9589,7 +11039,7 @@ function initRouting(map, config) {
           mid: result.coords[Math.floor(result.coords.length / 2)],
           last: result.coords[result.coords.length - 1],
         });
-        drawRoute(result.coords);
+        drawRoute(unwrapLngs(result.coords));
         distEl.textContent = formatDistance(result.distance);
         timeEl.textContent = formatTime(result.time);
         renderRoads(result.roads);
@@ -9610,8 +11060,9 @@ function initRouting(map, config) {
         // location; fitBounds would yank the camera out to the whole
         // route and blow up the follow-cam.
         if (!driveMode.active) {
-          var bounds = result.coords.reduce(function(b, c) { return b.extend(c); },
-            new maplibregl.LngLatBounds(result.coords[0], result.coords[0]));
+          var shown = unwrapLngs(result.coords);
+          var bounds = shown.reduce(function(b, c) { return b.extend(c); },
+            new maplibregl.LngLatBounds(shown[0], shown[0]));
           map.fitBounds(bounds, { padding: 60, duration: 1000 });
         }
         // Auto-minimize when the routing panel would otherwise cover
@@ -9821,9 +11272,6 @@ function initRouting(map, config) {
   // editing so the GPS callbacks can skip auto-fill.
   function markOriginEditing() {
     window.__streetzim_originBeingEdited = true;
-  }
-  function clearOriginEditing() {
-    window.__streetzim_originBeingEdited = false;
   }
   originInput.addEventListener('focus', markOriginEditing);
   originInput.addEventListener('input', markOriginEditing);
@@ -10131,11 +11579,6 @@ function initRouting(map, config) {
     var htmlEl = document.documentElement;
     var GLYPH_ENTER = '⛶';  // ⛶ corners-box
     var GLYPH_EXIT = '✕';   // ✕
-
-    function isStandalone() {
-      return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
-             window.navigator.standalone === true;
-    }
 
     function realFullscreenActive() {
       return !!(document.fullscreenElement || document.webkitFullscreenElement);
@@ -10823,7 +12266,7 @@ function initRouting(map, config) {
             + '<div style="font-weight:600;font-size:14px;margin-bottom:2px;">'
             + (props.label || "").replace(/</g, "&lt;") + "</div>";
           if (props.description) {
-            html += '<div style="font-size:12px;color:#555;">'
+            html += '<div style="font-size:12px;color:var(--szd-fg-2, #555);">'
               + props.description.replace(/</g, "&lt;") + "</div>";
           }
           html += "</div>";

@@ -3,12 +3,13 @@
 For whoever picks this up next. [README.md](README.md) covers building a ZIM;
 this file covers how the repository is organised, how to change it safely,
 how production releases are made, and what is known to be wrong.
-[docs/openzim-review-response.md](docs/openzim-review-response.md) records
-how the 2026-09 openZIM review of this codebase was addressed, and
-[docs/openzim-integration.md](docs/openzim-integration.md) is the plan for
-bringing StreetZim features into openzim/maps.
-[docs/adoption-plan.md](docs/adoption-plan.md) tracks what it would take for
-openZIM to adopt StreetZim directly.
+We propose that openZIM adopt StreetZim as its maps scraper;
+[docs/adoption-plan.md](docs/adoption-plan.md) tracks that work and
+[docs/zimfarm.md](docs/zimfarm.md) covers running on Zimfarm.
+[docs/openzim-integration.md](docs/openzim-integration.md) compares
+StreetZim with openzim/maps and sets out what porting its features there
+would involve. [docs/openzim-review-response.md](docs/openzim-review-response.md)
+is our first, superseded response to the 2026-09 openZIM review.
 
 ## 1. What is core and what is operations
 
@@ -66,19 +67,39 @@ builder from depending on any of it.
 
 ## 2. Day-to-day development
 
+Three requirement files:
+- `requirements.txt`: what the builder and the `streetzim` command import;
+  the Docker image installs only this;
+- `requirements-dev.txt`: that plus pytest, ruff and pyright (CI's
+  versions);
+- `requirements-ops.txt`: that plus `internetarchive` (the `ia` command),
+  for the build host's publishing scripts ([ops/README.md](ops/README.md)).
+
 ```bash
-ruff check .                       # syntax errors + pyflakes (ruff.toml)
+pip install -r requirements-dev.txt
+ruff check .                       # bug-catching lint families (ruff.toml)
 python tools/pyright_gate.py       # type check: strict modules clean, no new findings
 python tools/offliner_definition.py --check   # Zimfarm definition matches the flags
 python -m pytest tests -q          # ~30 s; tests needing big local ZIMs skip themselves
 for t in tests/chip_rules_js.test.mjs tests/chip_shards_js.test.mjs \
          tests/search_shards_js.test.mjs tests/zim_reader_js.test.mjs \
-         tests/test_zim_http_source.mjs; do node "$t"; done
+         tests/test_zim_http_source.mjs tests/viewer_style_js.test.mjs; do node "$t"; done
 ```
 
-CI (`.github/workflows/ci.yml`) runs all of that, then builds Monaco end to
-end, validates it (including `zimcheck`) and loads the in-ZIM viewer in
-headless Chrome. It also runs weekly, to catch upstream drift.
+CI (`.github/workflows/ci.yml`) runs all of that, with coverage, then builds
+Monaco end to end, validates it (including `zimcheck`) and loads the in-ZIM
+viewer in headless Chrome. It also builds the wheel and checks it installed
+outside the checkout. It runs weekly too, to catch upstream drift.
+Coverage, the wheel and the (manual) PyPI workflow are in
+[docs/packaging.md](docs/packaging.md). A file the build reads at run time
+goes in `resources/` and in `RUNTIME_FILES` (`streetzim/paths.py`) and the
+package data in `pyproject.toml`; `tests/test_packaging.py` checks the two
+lists agree.
+
+**Refactors.** A change meant to leave the output alone is checked with a
+golden build: `tools/golden_builds.sh main WORKTREE <dir>` builds Monaco
+from both and compares the ZIMs entry by entry
+([docs/golden-builds.md](docs/golden-builds.md)).
 
 **Python versions.** The builder runs on 3.12 (the production host) and 3.14
 (the Docker image and openZIM's scrapers). On 3.14 `requirements.txt` also
@@ -101,7 +122,10 @@ Rules that keep published ZIMs working:
   feature: search, find, wiki, the routing formats, A*, the worker bridge,
   driving mode…). Edit a part, then run `python tools/build_viewer.py`. CI
   fails if `index.html` and the parts differ. `places.html` and
-  `routing-worker.js` are edited directly. Then run
+  `routing-worker.js` are edited directly. `npm run lint:viewer` runs
+  ESLint over all three (CI does too). MapLibre is vendored and the font
+  glyphs are pinned by hash; bumping either is in
+  [docs/viewer-supply-chain.md](docs/viewer-supply-chain.md). Then run
   `scripts/sync-drive-viewer.sh` to refresh the PWA copy in
   `web/drive/viewer/` (the tests compare the shared blocks). Published ZIMs
   get viewer updates by in-place slot patching (`docs/viewer-slots.md`,
@@ -125,6 +149,12 @@ Rules that keep published ZIMs working:
 | variable | effect |
 |---|---|
 | `STREETZIM_REQUIRE_SHAPEFILES=1` | fail the build if the coastline / Natural Earth shapefiles are missing (otherwise a warning) |
+| `STREETZIM_REQUIRE_WIKI=1` | fail the build when Wikipedia articles (`--bundle-wiki-articles`, online) or Wikidata titles (`--resolve-wikidata-titles`) could not be fetched because of rate limits, 5xx or network errors (otherwise a WARNING with the count; those are never cached as misses, so the next build fetches them) |
+| `STREETZIM_WIKI_WAIT_BUDGET` | seconds each Wikimedia step may spend waiting on rate limits and retries (default 900); once spent that step stops requesting and counts the rest as unfetched. The budget is per step, not per run: the Wikidata title backfill (`--resolve-wikidata-titles`), the Wikidata SPARQL properties, the SPARQL name lookups (`--mbtiles` input only), the Wikipedia extracts and the Wikipedia articles each have their own |
+| `STREETZIM_WIKI_GAP` | seconds from the end of each Wikimedia Action API response (Wikipedia articles and extracts, Wikidata titles) to the next request (default 0.1); a 429, maxlag or 5xx with `Retry-After` widens it and successes ease it back (`cloud/wikimedia_http.py`, `polite_pacer`) |
+| `STREETZIM_WIKI_MAX_PER_MIN` | at most this many of those requests start per minute (default 120, under Wikimedia's 200 a minute for an unauthenticated client with a descriptive User-Agent; 0 lifts the cap). The cap assumes one Wikimedia client per worker IP: lower it when several builds share an IP. An answer that took over 1 s is always followed by 5 s |
+| `STREETZIM_WIKI_RECHECK_MAX` | how many old empty article-cache markers (written before `.miss` files, possibly by a 429) one build re-checks (default 1000); the rest stay misses until a later build |
+| `STREETZIM_WIKI_CONTACT` | optional: an operator address appended to the Wikipedia/Wikidata User-Agent (`cloud/wikimedia_http.py`); the default names the project's issue tracker |
 | `STREETZIM_REQUIRE_ZIMCHECK=1` | `validate_zim.py` fails when `zimcheck` is not installed (otherwise skipped) |
 | `STREETZIM_SKIP_ZIMCHECK=1` | skip zimcheck in the validator |
 | `ZIMRU_ZIMCHECK` | optional: a faster drop-in `zimcheck` for very large ZIMs; the standard `zimcheck` is used otherwise |
@@ -132,7 +162,7 @@ Rules that keep published ZIMs working:
 | `STREETZIM_PACK_BIN`, `XAPIANBUILDER_BIN` | optional accelerators only (see §1) |
 | `ZSTD_CLEVEL` | ZIM compression level (production uses 22) |
 | `STREETZIM_MERGE_STREETS=0` | keep one search record per tile for streets instead of merging the pieces (docs/search-records.md). Merging is the default since merge #19, so regions built before it have more street records |
-| `STREETZIM_ALLOW_FONT_ERRORS=1` | ship even if some font ranges failed to download (e.g. during a CDN outage); by default the build stops after 5 attempts per range |
+| `STREETZIM_ALLOW_FONT_ERRORS=1` | ship even if some font ranges failed to download (e.g. during a CDN outage); by default the build stops after 5 attempts per range. A range whose bytes do not match its pinned sha256 always stops the build ([docs/viewer-supply-chain.md](docs/viewer-supply-chain.md)) |
 | `PYTHON` | interpreter the Node tests shell out to |
 
 ## 3. How production releases are made
@@ -179,8 +209,13 @@ In rough priority order. The items marked **bug** were found during the
 scripts that may be running on the production host (see
 [ops/docs/scripts.md](ops/docs/scripts.md) for how to change those safely).
 
-- **Script sprawl.** 42 live shell scripts (73 before Phase 1 moved the dead
-  ones to `attic/`); about 23 are needed. The remaining phases are in
+- **Script sprawl.** 42 live shell scripts (73 before Phase 1 retired 31
+  dead ones; they are deleted, and commit `0792d0d` still has them); about
+  23 are needed. Of the 42, 38 are now in `ops/` (plus two new helpers
+  there, `check_stage1.sh` and `region-bbox.sh`), 2 move with `web/` in
+  stage 2 (`cloud/deploy_pwa.sh`, `scripts/sync-drive-viewer.sh`), and 2
+  are core (`scripts/fetch-shapefiles.sh`, `tests/run_identity_suite.sh`),
+  joined since by `tools/golden_builds.sh`. The remaining phases are in
   ops/docs/scripts.md.
 - **Shared gate code is copy-pasted, or `sed`-extracted at runtime from
   `retrofit-chips-queue.sh`** by six other scripts. It should become a sourced
@@ -226,4 +261,6 @@ scripts that may be running on the production host (see
 - **Docs that point at files that don't exist:** `docs/mcpzim-contract.md`
   and `docs/STREETZIM_CONSUMPTION.md` are cited from `create_osm_zim.py`.
 - **Satellite licence.** The EOX 2021 layer is CC BY-NC-SA and ships in most
-  published ZIMs; see the README's licence section.
+  published ZIMs; see the README's licence section. The 2016 layer is CC BY
+  4.0 and is what `streetzim --satellite` uses (docs/zimfarm.md,
+  "Satellite imagery").

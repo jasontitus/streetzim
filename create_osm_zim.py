@@ -93,13 +93,12 @@ from streetzim.common import (  # noqa: F401
     SATELLITE_TILE_URL,
     COPERNICUS_DEM_URL,
     COPERNICUS_DEM_URL_GLO90,
-    MAPLIBRE_VERSION,
-    MAPLIBRE_CDN,
     download_file,
     _SEARCH_COORD_DP,
     parse_bbox,
     _re_phase,
 )
+from streetzim import area as _area
 from streetzim.routing.build import (  # noqa: F401
     extract_routing_graph,
     chunk_graph_file,
@@ -113,12 +112,16 @@ from streetzim.tiles import (  # noqa: F401
     iter_tiles_from_mbtiles,
     extract_tiles_from_mbtiles,
     generate_sdf_font_glyphs,
-    download_maplibre,
+    fallback_scripts_in_tiles,
+    vendored_maplibre,
 )
 from streetzim.satellite import (  # noqa: F401
     download_satellite_tiles,
+    satellite_cache_dirs,
     stitch_satellite_image,
 )
+from streetzim import satellite_sources
+from streetzim import terrain as _terrain
 from streetzim.terrain import (  # noqa: F401
     _DEM_HANDLES,
     _generate_one_terrain_tile,
@@ -148,6 +151,7 @@ from streetzim.addresses import (  # noqa: F401
     merge_overture_places,
     extract_wiki_tags_pbf,
 )
+from streetzim.overture import overture_release
 from streetzim.zim_writer import (  # noqa: F401
     search_detail_html,
     _split_big_search_chunk,
@@ -189,9 +193,13 @@ def registry_anchor(bbox, registry_path=None):
                     lat, lon = (float(x) for x in c[4].split(","))
                 except ValueError:
                     continue
+                if len(rb) == 4 and _area.crosses(bbox) and rb[0] > rb[2]:
+                    # A row across the antimeridian is written minlon >
+                    # maxlon; the build has it unwrapped (streetzim/area.py).
+                    rb = list(_area.normalize(rb))
                 if len(rb) != 4 or any(abs(a - b) > 1e-6 for a, b in zip(rb, bbox)):
                     continue
-                if not (rb[1] <= lat <= rb[3] and rb[0] <= lon <= rb[2]):
+                if not (rb[1] <= lat <= rb[3] and _area.contains_lon(rb, lon)):
                     return None          # anchor outside its own bbox: ignore
                 # c[1] is the region NAME. Do NOT label with c[6]: that is
                 # the full-text search term, which for united-states is
@@ -227,7 +235,7 @@ def center_from_places(search_features_path, bbox, sample_limit=400_000):
         return None
     lats, lons = [], []
     try:
-        with open(search_features_path, "r", encoding="utf-8") as fh:
+        with open(search_features_path, encoding="utf-8") as fh:
             for i, line in enumerate(fh):
                 if i >= sample_limit:
                     break
@@ -237,10 +245,12 @@ def center_from_places(search_features_path, bbox, sample_limit=400_000):
                     continue
                 lat, lon = rec.get("lat"), rec.get("lon")
                 if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
-                    if bbox and not (bbox[1] <= lat <= bbox[3] and bbox[0] <= lon <= bbox[2]):
+                    if bbox and not _area.contains(bbox, lon, lat):
                         continue
                     lats.append(lat)
-                    lons.append(lon)
+                    # In the bbox's frame, so the median of an area across
+                    # the antimeridian is not pulled to the far side.
+                    lons.append(_area.unwrap_lon(bbox, lon) if bbox else lon)
     except OSError:
         return None
     if len(lats) < 50:
@@ -248,13 +258,13 @@ def center_from_places(search_features_path, bbox, sample_limit=400_000):
     lats.sort()
     lons.sort()
     mid = len(lats) // 2
-    return [round(lons[mid], 5), round(lats[mid], 5)]
+    return [round(_area.wrap_lon(lons[mid]), 5), round(lats[mid], 5)]
 
 
 def get_center_and_zoom(bbox):
     """Calculate center point and initial zoom from a bounding box."""
     minlon, minlat, maxlon, maxlat = bbox
-    center_lon = (minlon + maxlon) / 2
+    center_lon = _area.wrap_lon((minlon + maxlon) / 2)   # past 180 across it
     center_lat = (minlat + maxlat) / 2
 
     # Rough zoom level based on extent
@@ -320,9 +330,17 @@ KNOWN_AREAS = {
         "bbox": "9.47,47.04,9.64,47.27",
         "name": "Liechtenstein",
     },
+    # Monaco runs 7.409-7.440 E, 43.725-43.752 N. The old box
+    # (7.40,43.72,7.44,43.76) ended on its eastern border and 500 m into
+    # the sea, so the sea stopped in a straight line at Larvotto and off
+    # Fontvieille, and a desktop window could not fit all of Monaco. This
+    # one adds about 1.5 km of sea to the south and east and the edge of
+    # the neighbouring towns. The Geofabrik extract stops near the border
+    # (7.409-7.449, 43.723-43.752), so French land beyond it has only the
+    # ways that cross it; the sea comes from the coastline shapefile.
     "monaco": {
         "geofabrik": "europe/monaco",
-        "bbox": "7.40,43.72,7.44,43.76",
+        "bbox": "7.39,43.715,7.46,43.765",
         "name": "Monaco",
     },
     "california": {
@@ -356,6 +374,14 @@ KNOWN_AREAS = {
         "name": "United States",
     },
 }
+
+
+def _existing_file(path):
+    """argparse type: a path that is a file. --low-zoom-world-vrt must not
+    silently fall back to the fresh-machine terrain layout when missing."""
+    if not os.path.isfile(path):
+        raise argparse.ArgumentTypeError(f"{path} is not a file")
+    return path
 
 
 def build_parser():
@@ -395,7 +421,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--area", help="Well-known area name (see list above)")
     parser.add_argument("--geofabrik", help="Geofabrik download path (e.g., europe/liechtenstein)")
     parser.add_argument("--pbf", help="Path to local OSM PBF file")
-    parser.add_argument("--bbox", help="Bounding box: minlon,minlat,maxlon,maxlat")
+    parser.add_argument("--bbox", help="Bounding box: minlon,minlat,maxlon,maxlat "
+                        "(minlon > maxlon for an area across the antimeridian)")
     parser.add_argument("--map-center", metavar="LON,LAT",
                         help="Override initial map center. Default = bbox "
                              "centroid, which lands in empty water for "
@@ -417,8 +444,19 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Path for tilemaker on-disk temp storage (reduces RAM usage)")
     parser.add_argument("--mbtiles", metavar="PATH",
                         help="Skip tilemaker and use existing MBTiles file")
+    parser.add_argument("--record-tile-source", action="store_true",
+                        help="With --mbtiles: record the MBTiles' name, version and "
+                             "OSM date in map-config.json (tileSource) and License")
+    parser.add_argument("--tile-source-url", metavar="URL",
+                        help="With --record-tile-source: the URL the MBTiles came from")
     parser.add_argument("--satellite", action="store_true",
                         help="Include Sentinel-2 Cloudless satellite imagery tiles")
+    parser.add_argument("--satellite-source", choices=sorted(satellite_sources.SOURCES),
+                        default=satellite_sources.BUILDER_DEFAULT,
+                        help="Which EOX mosaic: s2cloudless-2016 is CC BY 4.0; "
+                             "s2cloudless-2021 is CC BY-NC-SA 4.0, non-commercial "
+                             "use only (default: %(default)s). The License metadata "
+                             "and the viewer's credits follow the choice")
     parser.add_argument("--satellite-zoom", type=int, default=None,
                         help="Max zoom for satellite tiles (default: same as --max-zoom)")
     parser.add_argument("--satellite-download-zoom", type=int, default=None,
@@ -476,6 +514,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "target to keep each chunk fetch fast on "
                              "iOS Safari. Default 0 = off.")
     parser.add_argument("--low-zoom-world-vrt", metavar="PATH", default=None,
+                        type=_existing_file,
                         help="Use a world-coverage DEM VRT (e.g. "
                              "terrain_cache/dem_sources/world_dem_32k.tif) "
                              "for z=0-7 terrain tiles instead of the "
@@ -483,9 +522,10 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "stripe bug where z=0-7 tiles that extend "
                              "past the bbox get zero-fill outside the "
                              "region. z=8+ still use the regional VRT "
-                             "(fine-grained, no stripe risk). Default "
-                             "None = regional VRT everywhere (matches "
-                             "pre-2026-04-24 behavior).")
+                             "(fine-grained, no stripe risk). Must be a "
+                             "file. Default None = the fresh-machine layout "
+                             "(streetzim/terrain.py: terrain from the lowest "
+                             "zoom the viewer can show, low zooms from GLO-90).")
     parser.add_argument("--overture-addresses", metavar="PARQUET",
                         help="Merge Overture Maps address records from a parquet extract. "
                              "Use download_overture_data.py to produce the parquet first. "
@@ -545,6 +585,13 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "JSON search-data chunks). Saves another "
                              "1-2h of libzim finalize time. Kiwix's "
                              "native search bar degrades to title-prefix.")
+    parser.add_argument("--kiwix-poi-pages", action="store_true",
+                        help="Also give every named POI a Kiwix page, so "
+                             "Kiwix's own search finds shops, stops and "
+                             "sights, not "
+                             "only places, parks, peaks, water and airports. "
+                             "About 440 B per POI: +16%% on Luxembourg. Off by "
+                             "default (docs/zimfarm.md).")
     parser.add_argument("--xapianbuilder-bin", metavar="PATH", default=None,
                         help="Path to the xapianbuilder binary. Defaults to "
                              "$XAPIANBUILDER_BIN, then "
@@ -644,6 +691,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                            "WebP, or SVG where zimscraperlib is installed; cropped "
                            "to fill). Default: a generated map icon")
     meta.add_argument("--scraper", help=argparse.SUPPRESS)
+    meta.add_argument("--flavour", help="Flavour metadata. Default: maxi")
     meta.add_argument("--stats-filename", metavar="PATH",
                       help="Write Zimfarm progress JSON ({\"done\": N, "
                            "\"total\": M}) here as the build moves through "
@@ -660,24 +708,31 @@ def _openzim_options(*, args):
 
     # Validate the openZIM metadata now, not after a multi-hour build.
     zim_metadata = zim_illustration = None
+    try:
+        satellite_sources.check_flavour(
+            args.flavour,
+            satellite_sources.get(args.satellite_source) if args.satellite else None)
+    except ValueError as e:
+        raise SystemExit(f"Error: {e}") from None
     if any(getattr(args, k) is not None for k in (
             "zim_name", "title", "description", "long_description", "creator",
-            "publisher", "tags", "scraper")):
+            "publisher", "tags", "scraper", "flavour")):
         from streetzim.zim_metadata import build_overrides
         try:
             zim_metadata = build_overrides(
                 name=args.zim_name, title=args.title,
                 description=args.description,
                 long_description=args.long_description, creator=args.creator,
-                publisher=args.publisher, tags=args.tags, scraper=args.scraper)
+                publisher=args.publisher, tags=args.tags, scraper=args.scraper,
+                flavour=args.flavour)
         except ValueError as e:
-            raise SystemExit(f"Error: {e}")
+            raise SystemExit(f"Error: {e}") from None
     if args.illustration:
         from streetzim.zim_metadata import load_illustration
         try:
             zim_illustration = load_illustration(args.illustration)
         except (OSError, ValueError) as e:
-            raise SystemExit(f"Error: illustration {args.illustration!r}: {e}")
+            raise SystemExit(f"Error: illustration {args.illustration!r}: {e}") from None
     stats = None
     if args.stats_filename:
         from streetzim.progress import StatsFile
@@ -704,6 +759,13 @@ def _resolve_area(*, args, parser):
         bbox_str = bbox_str or area.get("bbox")
         name = name or area["name"]
 
+    if bbox_str:
+        # One spelling from here on for a box crossing the antimeridian:
+        # unwrapped, east past 180 (streetzim/area.py). Others unchanged.
+        _bb = parse_bbox(bbox_str)
+        if _area.crosses(_bb):
+            bbox_str = _area.to_str(_bb)
+
     if not pbf_path and not geofabrik_path and not args.mbtiles:
         print("Error: Must specify --area, --geofabrik, --pbf, or --mbtiles")
         parser.print_help()
@@ -724,7 +786,8 @@ def _layer_options(*, args, bbox_str):
     """Satellite, terrain, Wikidata and routing options."""
     # Satellite options
     include_satellite = args.satellite
-    satellite_max_zoom = args.satellite_zoom or args.max_zoom
+    satellite_max_zoom = (args.satellite_zoom if args.satellite_zoom is not None
+                          else args.max_zoom)
     # Latitude-aware satellite cap.
     #
     # The imagery is Sentinel-2 Cloudless, natively 10 m/pixel. A 256 px tile
@@ -760,7 +823,9 @@ def _layer_options(*, args, bbox_str):
                 satellite_max_zoom = 13
         except Exception as _e:   # never fail a build over a progress nicety
             print(f"    satellite: latitude cap skipped ({_e})", flush=True)
-    satellite_download_zoom = args.satellite_download_zoom or satellite_max_zoom
+    satellite_download_zoom = (args.satellite_download_zoom
+                               if args.satellite_download_zoom is not None
+                               else satellite_max_zoom)
     satellite_format = args.satellite_format
     satellite_quality = args.satellite_quality
     satellite_tile_size = args.satellite_tile_size
@@ -840,8 +905,8 @@ def _process_tiles(*, args, mbtiles_path, total_steps):
             mbtiles_path, max_zoom=args.max_zoom)
         total_tile_count = len(tiles)
 
-    # Generate font glyphs
-    fonts = generate_sdf_font_glyphs()
+    # Generate font glyphs (with fallback glyphs for the scripts the labels use)
+    fonts = generate_sdf_font_glyphs(scripts=fallback_scripts_in_tiles(tiles))
     return fonts, tile_metadata, tiles, total_tile_count, use_streaming
 
 
@@ -866,12 +931,12 @@ def _build_search(
             filtered_path = os.path.join(tmpdir, "search_features.jsonl")
             total = 0
             kept = 0
-            with open(search_cache_path, "r") as fin, open(filtered_path, "w") as fout:
+            with open(search_cache_path) as fin, open(filtered_path, "w") as fout:
                 for line in fin:
                     total += 1
                     feat = json.loads(line)
                     lat, lon = feat["lat"], feat["lon"]
-                    if minlat <= lat <= maxlat and minlon <= lon <= maxlon:
+                    if minlat <= lat <= maxlat and _area.contains_lon(bbox, lon):
                         fout.write(line)
                         kept += 1
                     if total % 5_000_000 == 0:
@@ -930,6 +995,10 @@ def _build_search(
                         args.overture_addresses, search_features,
                         bbox=addr_bbox)
                     address_count += merge_result.get("added", 0) or 0
+                    from streetzim.source_report import note
+                    note("Overture addresses",
+                         f"{merge_result.get('scanned', '?')} rows "
+                         f"({merge_result.get('added', 0)} added)")
                     overture_datasets.update(merge_result.get("datasets") or [])
                     overture_themes.append("addresses")
                 except Exception as _e:
@@ -955,6 +1024,10 @@ def _build_search(
                         url_cache_policy=args.url_cache_policy)
                     overture_datasets.update(places_result.get("datasets") or [])
                     overture_themes.append("places")
+                    from streetzim.source_report import note
+                    note("Overture places",
+                         f"{places_result.get('enriched', 0)} enriched, "
+                         f"{places_result.get('added', 0)} added")
                 except Exception as _e:
                     raise SystemExit(
                         f"Overture places merge failed: {_e} — "
@@ -1003,11 +1076,14 @@ def _build_search(
             if getattr(args, "resolve_wikidata_titles", False) and wiki_cross_refs:
                 try:
                     from cloud.wikidata_titles import augment_wiki_cross_refs
-                    augment_wiki_cross_refs(
+                    _t = augment_wiki_cross_refs(
                         wiki_cross_refs,
                         cache_path=getattr(args, "wikidata_title_cache", None),
                         offline_map=getattr(args, "wikidata_title_map", None),
-                    )
+                    ) or {}
+                    from streetzim.source_report import note
+                    note("Wikipedia titles", f"{_t.get('resolved', '?')}/"
+                         f"{_t.get('distinct_qids', '?')} Q-IDs resolved")
                 except Exception as _e:
                     print(f"    Warning: wikidata->title resolution failed: {_e}")
     return address_count, overture_sources, overture_themes, search_features, wiki_cross_refs
@@ -1043,6 +1119,8 @@ def _build_wikidata(
             print(f"    Loaded {len(wikidata_data)} Wikidata entries for ZIM")
         else:
             print("    No Wikidata entries available")
+        from streetzim.source_report import note
+        note("Wikidata", f"{len(wikidata_data or {})} entries")
     return wikidata_data
 
 
@@ -1079,9 +1157,9 @@ def _satellite_and_terrain(
     terrain_future = None
 
     if include_satellite and bbox_str:
-        # Use format/size-specific cache dir to avoid mixing tile formats
-        sat_cache_suffix = f"_{satellite_format}_{satellite_tile_size}"
-        satellite_dir = os.path.join(CACHE_DIR, f"satellite_cache{sat_cache_suffix}")
+        # A cache per source, format and size, so none of them is mixed.
+        satellite_dir = satellite_cache_dirs(
+            args.satellite_source, satellite_format, satellite_tile_size)[1]
     if include_terrain and bbox_str:
         terrain_dir = args.terrain_dir or os.path.join(CACHE_DIR, "terrain_cache")
 
@@ -1096,7 +1174,7 @@ def _satellite_and_terrain(
             sat_future = step_pool.submit(
                 download_satellite_tiles, bbox_str, satellite_dir, satellite_download_zoom,
                 sat_format=satellite_format, sat_quality=satellite_quality,
-                tile_size=satellite_tile_size)
+                tile_size=satellite_tile_size, source=args.satellite_source)
             terrain_future = step_pool.submit(
                 generate_terrain_tiles, bbox_str, terrain_dir, terrain_max_zoom,
                 low_zoom_world_vrt=getattr(args, "low_zoom_world_vrt", None))
@@ -1114,7 +1192,8 @@ def _satellite_and_terrain(
             else:
                 download_satellite_tiles(bbox_str, satellite_dir, max_zoom=satellite_download_zoom,
                                          sat_format=satellite_format, sat_quality=satellite_quality,
-                                         tile_size=satellite_tile_size)
+                                         tile_size=satellite_tile_size,
+                                         source=args.satellite_source)
 
         if include_terrain:
             step_terrain = step_sat + (1 if include_satellite else 0)
@@ -1129,13 +1208,34 @@ def _satellite_and_terrain(
     return satellite_dir, terrain_dir
 
 
-def _verify_terrain(*, args, bbox_str, include_terrain, terrain_dir, terrain_max_zoom):
+def _verify_terrain(*, args, bbox_str, include_terrain, terrain_dir, terrain_max_zoom,
+                    terrain_min_zoom=None):
     """Terrain audit: regenerate missing and seam tiles, fail on remaining gaps."""
     # Verify terrain completeness — regen missing tiles AND fix boundary
     # seam tiles before packaging. Boundary tiles (straddling 1-degree DEM
     # cell edges) may have partial zero data if generated from a VRT that
     # didn't include all neighboring cells.
+    world_vrt = getattr(args, "low_zoom_world_vrt", None)
+    if include_terrain and bbox_str and terrain_min_zoom is None:
+        # From the whole area, as generate_terrain_tiles does.
+        terrain_min_zoom = _terrain.terrain_min_zoom(
+            parse_bbox(bbox_str), terrain_max_zoom, world_vrt)
+    if include_terrain and bbox_str and terrain_dir and _area.crosses(parse_bbox(bbox_str)):
+        # Across the antimeridian: each side, as it was generated.
+        for part in _area.split(parse_bbox(bbox_str)):
+            _verify_terrain(args=args, bbox_str=_area.to_str(part),
+                            include_terrain=include_terrain, terrain_dir=terrain_dir,
+                            terrain_max_zoom=terrain_max_zoom,
+                            terrain_min_zoom=terrain_min_zoom)
+        return
     if include_terrain and bbox_str and terrain_dir:
+        plan = _terrain.TerrainPlan(parse_bbox(bbox_str), terrain_max_zoom,
+                                    terrain_min_zoom, world_vrt)
+        if plan.fresh:
+            # No world DEM (every `streetzim` build): each tile is checked
+            # against the mosaic it was made from (streetzim/terrain.py).
+            _terrain.audit_terrain(plan, terrain_dir)
+            return
         import mercantile
         import math as _math
         bbox_parsed = parse_bbox(bbox_str)
@@ -1258,7 +1358,7 @@ def _verify_terrain(*, args, bbox_str, include_terrain, terrain_dir, terrain_max
                     encoded = (im[:, :, 0].astype(_np.uint32) << 16) | \
                               (im[:, :, 1].astype(_np.uint32) << 8) | \
                               im[:, :, 2].astype(_np.uint32)
-                    zero_code = int((10000.0 / 0.1))  # encoded value for 0 m
+                    zero_code = int(10000.0 / 0.1)  # encoded value for 0 m
                     nonzero = (encoded != zero_code).sum()
                     return float(nonzero) / encoded.size
                 except Exception:
@@ -1373,15 +1473,13 @@ def _verify_terrain(*, args, bbox_str, include_terrain, terrain_dir, terrain_max
                 print("    Terrain audit passed — no blank tiles in bbox")
 
 
-def _download_maplibre(*, tmpdir, total_steps):
-    """MapLibre GL JS and CSS."""
-    # Download MapLibre GL JS
+def _verified_maplibre(*, total_steps):
+    """MapLibre GL JS and CSS: the vendored copy, checked against the lock
+    file (nothing is downloaded)."""
     step_maplibre = total_steps - 1
     print()
-    print(f"[{step_maplibre}/{total_steps}] Downloading MapLibre GL JS...")
-    maplibre_dir = os.path.join(tmpdir, "maplibre")
-    os.makedirs(maplibre_dir, exist_ok=True)
-    maplibre_js, maplibre_css = download_maplibre(maplibre_dir)
+    print(f"[{step_maplibre}/{total_steps}] Checking MapLibre GL JS...")
+    maplibre_js, maplibre_css = vendored_maplibre()
     return maplibre_css, maplibre_js
 
 
@@ -1422,7 +1520,7 @@ def _build_map_config(
         except (ValueError, TypeError) as e:
             raise SystemExit(
                 f"--map-center {args.map_center!r} must be 'LON,LAT': {e}"
-            )
+            ) from None
     if args.map_zoom is not None:
         zoom = args.map_zoom
 
@@ -1442,9 +1540,21 @@ def _build_map_config(
         map_config["satelliteMaxZoom"] = satellite_max_zoom
         map_config["satelliteFormat"] = satellite_format
         map_config["satelliteTileSize"] = satellite_tile_size
+        # Which mosaic, its licence and the credit EOX requires.
+        map_config.update(satellite_sources.map_config(
+            satellite_sources.get(args.satellite_source)))
     if terrain_dir and os.path.isdir(str(terrain_dir)):
         map_config["hasTerrain"] = True
         map_config["terrainMaxZoom"] = terrain_max_zoom
+        if bbox:
+            # Without a world DEM, terrain starts at the lowest zoom the
+            # viewer can show (streetzim/terrain.py); the viewer's DEM source
+            # and the packer start there too. 0 (the production layout) is
+            # left out, so those map-configs are unchanged.
+            _tmin = _terrain.terrain_min_zoom(
+                bbox, terrain_max_zoom, getattr(args, "low_zoom_world_vrt", None))
+            if _tmin:
+                map_config["terrainMinZoom"] = _tmin
     if wikidata_data:
         map_config["hasWikidata"] = True
     # hasWikiArticles is set by create_zim, once it knows whether any
@@ -1457,6 +1567,14 @@ def _build_map_config(
         # shipped as overture-sources.json at the ZIM root (below).
         map_config["hasOvertureAddresses"] = True
     return bbox, map_config
+
+
+def _overture_releases(args, overture_themes):
+    """{theme: release} of the Overture parquets merged, for
+    overture-sources.json (read from the parquet, or its file name)."""
+    paths = {"addresses": getattr(args, "overture_addresses", None),
+             "places": getattr(args, "overture_places", None)}
+    return {t: overture_release(paths.get(t)) for t in (overture_themes or [])}
 
 
 def _write_zim(
@@ -1506,10 +1624,12 @@ def _write_zim(
         wiki_cross_refs=wiki_cross_refs,
         overture_sources=overture_sources,
         overture_themes=overture_themes,
+        overture_release=_overture_releases(args, overture_themes),
         address_count=address_count,
         zim_builder=getattr(args, "zim_builder", "python"),
         max_zoom=args.max_zoom,
         xapian_mode=getattr(args, "xapian", "libzim"),
+        kiwix_poi_pages=bool(getattr(args, "kiwix_poi_pages", False)),
         xapianbuilder_bin=getattr(args, "xapianbuilder_bin", None),
         xapian_workdir=tmpdir,
         no_llm_bundle=bool(getattr(args, "no_llm_bundle", False)),
@@ -1597,9 +1717,19 @@ def main(argv=None):
     print(f"=== Creating Offline OSM ZIM: {name} ===")
     if include_satellite:
         sat_desc = f"{satellite_format} q{satellite_quality} {satellite_tile_size}px"
-        print(f"  Including Sentinel-2 satellite imagery (z0-{satellite_max_zoom}, {sat_desc})")
+        _src = satellite_sources.get(args.satellite_source)
+        print(f"  Including Sentinel-2 satellite imagery (z0-{satellite_max_zoom}, {sat_desc}); "
+              f"{_src.key}, {_src.license}")
+        if _src.noncommercial:
+            print("  " + "!" * 72)
+            print(f"  !! NON-COMMERCIAL: {_src.key} imagery is {_src.license}. This ZIM may")
+            print("  !! only be used and redistributed for non-commercial purposes.")
+            print("  " + "!" * 72)
     if include_terrain:
-        print(f"  Including Copernicus GLO-30 terrain (z0-{terrain_max_zoom})")
+        _tmin = (_terrain.terrain_min_zoom(parse_bbox(bbox_str), terrain_max_zoom,
+                                           getattr(args, "low_zoom_world_vrt", None))
+                 if bbox_str else 0)
+        print(f"  Including Copernicus DEM terrain (z{_tmin}-{terrain_max_zoom})")
     if include_wikidata:
         print("  Including Wikidata info for places and POIs")
     if include_routing:
@@ -1651,8 +1781,8 @@ def main(argv=None):
         # A stricter content-based check (pure uniform RGB → broken) could be
         # added later, but tile-size alone is not a valid signal for satellite.
 
-        maplibre_css, maplibre_js = _download_maplibre(
-            tmpdir=tmpdir, total_steps=total_steps)
+        maplibre_css, maplibre_js = _verified_maplibre(
+            total_steps=total_steps)
 
         bbox, map_config = _build_map_config(
             args=args, bbox_str=bbox_str, name=name, overture_sources=overture_sources,
@@ -1662,6 +1792,10 @@ def main(argv=None):
             terrain_dir=terrain_dir, terrain_max_zoom=terrain_max_zoom,
             total_steps=total_steps, wiki_cross_refs=wiki_cross_refs,
             wikidata_data=wikidata_data)
+        if args.mbtiles and args.record_tile_source:
+            from streetzim import mbtiles as _mbt
+            map_config["tileSource"] = _mbt.source_record(
+                tile_metadata, args.tile_source_url)
 
         _write_zim(
             address_count=address_count, args=args, bbox_str=bbox_str, fonts=fonts,

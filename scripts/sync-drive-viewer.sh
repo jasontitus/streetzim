@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Populate web/drive/viewer/ with the bits the Firebase PWA needs:
 #   - resources/viewer/index.html        (canonical viewer — unmodified)
-#   - maplibre-gl.js + .css               (same version the ZIM builder uses)
+#   - maplibre-gl.js + .css               (the vendored copy the ZIM builder uses)
 #   - fzstd.js                            (zstd decoder for ZIM clusters)
 #
 # The PWA's service worker caches these as the "shell" on install; after
@@ -17,8 +17,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 OUT="web/drive/viewer"
-MAPLIBRE_VERSION="5.23.0"
 FZSTD_VERSION="0.1.1"
+# sha256 of unpkg.com/fzstd@${FZSTD_VERSION}/umd/index.js; change both together.
+FZSTD_SHA256="fbea1c25c4413b620ca3f59e6037d9f6c675c5c7f690e4d660143188f686461d"
 
 mkdir -p "$OUT"
 
@@ -53,16 +54,12 @@ if [ -f "resources/viewer/routing-worker.js" ]; then
   echo "  routing wrkr → $OUT/routing-worker.js ($(wc -c < "$OUT/routing-worker.js") bytes)"
 fi
 
-# 2. Download MapLibre. Already on disk? Skip.
-MAPLIBRE_BASE="https://unpkg.com/maplibre-gl@${MAPLIBRE_VERSION}/dist"
+# 2. MapLibre: the vendored copy, checked against the lock file first
+#    (resources/viewer-assets.lock.json; docs/viewer-supply-chain.md).
+python3 tools/pin_viewer_assets.py --check
 for asset in maplibre-gl.js maplibre-gl.css; do
-  target="$OUT/$asset"
-  if [ ! -s "$target" ]; then
-    echo "  fetching     → $target"
-    fetch "$MAPLIBRE_BASE/$asset" "$target"
-  else
-    echo "  cached       → $target"
-  fi
+  cp "resources/vendor/maplibre-gl/$asset" "$OUT/$asset"
+  echo "  maplibre     → $OUT/$asset"
 done
 
 # 3. Download fzstd (MIT) for ZSTD cluster decompression. Lives one dir
@@ -75,6 +72,11 @@ if [ ! -s "$fzstd_target" ]; then
   fetch "$FZSTD_URL" "$fzstd_target"
 else
   echo "  cached       → $fzstd_target"
+fi
+if ! echo "$FZSTD_SHA256  $fzstd_target" | sha256sum -c --quiet -; then
+  echo "  $fzstd_target does not match FZSTD_SHA256; not deploying it" >&2
+  rm -f "$fzstd_target"
+  exit 1
 fi
 
 # 4. Emit a version stamp so the SW can bust the shell cache when we

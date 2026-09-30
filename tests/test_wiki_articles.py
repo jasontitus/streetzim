@@ -112,8 +112,9 @@ class BundleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.object(wa.urllib.request, "urlopen",
                                    side_effect=err), \
-                    mock.patch.object(wa.time, "sleep"):
-                self.assertIsNone(wa._fetch_online("No_Such_Page", td, "ua"))
+                    mock.patch.object(wa.time, "sleep"), \
+                    self.assertRaises(wa.TransientError):
+                wa._fetch_online("No_Such_Page", td, "ua")
             self.assertEqual(os.listdir(td), [])
 
 
@@ -161,7 +162,7 @@ IMAGES = {
 class ImageBundlingTests(unittest.TestCase):
     def _run(self, mode, titles=("Exampleville",), pages=None):
         stored = {}
-        src = FakeWikiSource(pages or {t: ARTICLE for t in titles}, IMAGES)
+        src = FakeWikiSource(pages or dict.fromkeys(titles, ARTICLE), IMAGES)
         stats = wa.bundle_wiki_articles(
             list(titles), lambda p, t, m, c: stored.__setitem__(p, (t, m, c)),
             sleep=0, log=lambda *_: None, images=mode, image_max_kb=128, source=src)

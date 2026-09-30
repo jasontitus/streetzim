@@ -4,6 +4,29 @@
 // bounded even for world-scale datasets (millions of features).
 var searchMarker = null;
 
+// BEGIN proximity-label
+// The distance after a search result ("Casino  grocery · Jardin Exotique ·
+// 1 mi"), in the units the scale bar shows (map._streetzimUnit, switched by
+// clicking the scale). Unit symbols are lower case -- mi, km -- and the
+// line is no longer text-transform: capitalize (010), which printed "1 Mi".
+function _szProximityLabel(miles, unit) {
+  if (!(miles >= 0)) return '';
+  if (unit === 'metric') {
+    var km = miles * 1.609344;
+    if (km < 0.8) return 'nearby';
+    if (km < 8) return Math.round(km) + ' km';
+    if (km < 80) return Math.round(km / 5) * 5 + ' km';
+    if (km < 800) return Math.round(km / 10) * 10 + ' km';
+    return Math.round(km / 100) * 100 + ' km';
+  }
+  if (miles < 0.5) return 'nearby';
+  if (miles < 5) return Math.round(miles) + ' mi';
+  if (miles < 50) return Math.round(miles / 5) * 5 + ' mi';
+  if (miles < 500) return Math.round(miles / 10) * 10 + ' mi';
+  return Math.round(miles / 100) * 100 + ' mi';
+}
+// END proximity-label
+
 // Drop a red marker at (lat, lon) with a "Directions to here" popup.
 // Shared by the search-result picker and the #pin= deep-link path
 // (Find-page "Map" button). Replaces any existing search marker.
@@ -652,7 +675,10 @@ var SEARCH_SHARDS = (function () {
         var dlat = item.a - clat;
         // Scale longitude by cos(lat) so the degree-space distance is
         // isotropic; raw Δlng overstated E–W distances 2x at 60°N.
-        var dlng = (item.o - clng) * Math.cos(clat * Math.PI / 180);
+        // The short way round, for maps across the antimeridian.
+        var dlng0 = item.o - clng;
+        dlng0 -= 360 * Math.round(dlng0 / 360);
+        var dlng = dlng0 * Math.cos(clat * Math.PI / 180);
         var dist = Math.sqrt(dlat * dlat + dlng * dlng);
         var viewSpan = Math.max(
           bounds.getNorth() - bounds.getSouth(),
@@ -664,13 +690,8 @@ var SEARCH_SHARDS = (function () {
         var proxMultiplier = 1 + 9 * Math.exp(-ratio * 0.5);
         score = textScore * proxMultiplier;
 
-        // Generate human-readable distance for display
-        var miles = dist * 69;
-        if (miles < 0.5) proximityLabel = 'nearby';
-        else if (miles < 5) proximityLabel = Math.round(miles) + ' mi';
-        else if (miles < 50) proximityLabel = Math.round(miles / 5) * 5 + ' mi';
-        else if (miles < 500) proximityLabel = Math.round(miles / 10) * 10 + ' mi';
-        else proximityLabel = Math.round(miles / 100) * 100 + ' mi';
+        // Human-readable distance, in the scale bar's units.
+        proximityLabel = _szProximityLabel(dist * 69, map._streetzimUnit);
       }
 
       matches.push({ item: item, score: score, dist: proximityLabel });
@@ -830,7 +851,7 @@ var SEARCH_SHARDS = (function () {
     // as "the map jumped past my result". 0.18*h capped at chrome+60 lands
     // it around 60% with the popup clear of the search box.
     var _dy = Math.min(Math.round(_h * 0.18), _topChrome + 60);
-    map.flyTo({ center: [lon, lat], zoom: zoom, duration: 1500, offset: [0, _dy] });
+    _szFlyToClear(map, { center: [lon, lat], zoom: zoom, duration: 1500, offset: [0, _dy] });
     placeSearchPin(map, lat, lon, name, enrich);
     resultsEl.style.display = 'none';
     input.blur();

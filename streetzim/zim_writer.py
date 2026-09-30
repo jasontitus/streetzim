@@ -13,6 +13,7 @@ from typing import NamedTuple
 
 from cloud.viewer_slots import pad_to_slot as _pad_to_slot
 from streetzim.search_extract import build_location_index
+from streetzim import area as _area
 # The builder's flushing, phase-timing print (see streetzim/common.py).
 from streetzim.common import (
     PHASE_TIMER,
@@ -29,6 +30,27 @@ from streetzim.tiles import (
     estimate_tile_total,
     iter_tiles_from_mbtiles,
 )
+from streetzim.tile_alias import TileAliaser, max_alias_bytes
+from streetzim import viewer_assets
+
+
+# Search records that get a Kiwix page (search/<slug>.html), and with it an
+# entry in Kiwix's full-text search (libzim indexes the page) and in its
+# title suggestions (the pages are front articles; libzim's title index
+# holds only those, so without it Kiwix suggested nothing). Streets and addresses never
+# do; the in-map search has them. POIs do only with --kiwix-poi-pages
+# (kiwix_poi_pages=True): without them kiwix-serve's search for "Casino" in
+# Monaco finds the Fontaine du Casino (a lake) and none of the shops, stops
+# and sights named Casino. Measured on 2026-09-29: about 440 B per named POI
+# (page, dirent, full-text and title index), Monaco +28% (1.8k pages),
+# Luxembourg +16% (56.7 -> 66.0 MB, 21k pages), so ~ +19% for Switzerland
+# and +12% for the Netherlands; build time within noise. docs/zimfarm.md.
+KIWIX_PAGE_TYPES = frozenset({"place", "airport", "park", "peak", "water"})
+
+
+def kiwix_page_types(poi_pages: bool = False) -> frozenset[str]:
+    """The record types that get a Kiwix page in this build."""
+    return KIWIX_PAGE_TYPES | {"poi"} if poi_pages else KIWIX_PAGE_TYPES
 
 
 def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
@@ -233,7 +255,7 @@ def _streetzim_to_xapianbuilder_jsonl(src_jsonl: str, dst_jsonl: str,
     constant memory regardless of corpus size.
     """
     n = 0
-    with open(src_jsonl, "r", encoding="utf-8") as src, \
+    with open(src_jsonl, encoding="utf-8") as src, \
          open(dst_jsonl, "w", encoding="utf-8") as dst:
         for line in src:
             line = line.strip()
@@ -428,6 +450,7 @@ def create_zim(
     address_count=0,
     overture_sources=None,
     overture_themes=None,
+    overture_release=None,
     split_hot_search_chunks_mb=0,
     split_find_chips=False,
     zim_builder="python",
@@ -445,6 +468,7 @@ def create_zim(
     wiki_images_per_article=12,
     metadata=None,
     illustration=None,
+    kiwix_poi_pages=False,
 ):
     """Create a ZIM file containing the map viewer and all tiles.
 
@@ -462,6 +486,8 @@ def create_zim(
 
     ``metadata`` / ``illustration``: openZIM metadata overrides and a 48x48
     PNG, from the --title/--description/... flags (see _add_metadata).
+
+    ``kiwix_poi_pages``: give named POIs a Kiwix page too (KIWIX_PAGE_TYPES).
     """
     from libzim.writer import Creator as LibzimCreator, Item, StringProvider, FileProvider
     from libzim.writer import Hint
@@ -589,7 +615,9 @@ def create_zim(
                            satellite_max_zoom=satellite_max_zoom,
                            satellite_format=satellite_format,
                            terrain_dir=terrain_dir,
-                           terrain_max_zoom=terrain_max_zoom, bbox=bbox)
+                           terrain_max_zoom=terrain_max_zoom,
+                           terrain_min_zoom=int((map_config or {}).get("terrainMinZoom") or 0),
+                           bbox=bbox)
         _add_font_glyphs(creator, MapItem, fonts=fonts)
         wikidata_data = _add_wikidata(creator, MapItem, tiles=tiles,
                                       mbtiles_path=mbtiles_path, bbox=bbox,
@@ -608,13 +636,18 @@ def create_zim(
         # OSM's wikipedia=/wikidata= tags (ODbL), not Wikipedia content.
         has_articles = bool(_bundled_set)
         _add_map_config(creator, MapItem, map_config=map_config,
-                        has_wiki_articles=has_articles)
+                        has_wiki_articles=has_articles,
+                        about=_about_fields(name=name, description=description,
+                                            metadata=metadata))
         _add_metadata(creator, name=name, description=description,
                       overture_sources=overture_sources, xapian_mode=xapian_mode,
                       metadata=metadata, illustration=illustration,
                       has_satellite=bool(satellite_dir and os.path.isdir(satellite_dir)),
+                      satellite_source=map_config.get("satelliteSource"),
                       has_terrain=bool(terrain_dir and os.path.isdir(terrain_dir)),
-                      has_wiki=has_wikidata or has_articles)
+                      has_wiki=has_wikidata or has_articles,
+                      tile_credit=(_tile_credit(tile_metadata)
+                                   if map_config.get("tileSource") else None))
         _add_routing_graph(creator, MapItem,
                            routing_graph_path=routing_graph_path,
                            routing_graph_chunk_mb=routing_graph_chunk_mb,
@@ -631,9 +664,11 @@ def create_zim(
                     routing_graph_path=routing_graph_path,
                     address_count=address_count,
                     overture_sources=overture_sources,
-                    overture_themes=overture_themes, xapian_mode=xapian_mode,
+                    overture_themes=overture_themes,
+                    overture_release=overture_release, xapian_mode=xapian_mode,
                     xapianbuilder_bin=xapianbuilder_bin,
-                    xapian_workdir=xapian_workdir, chunk_tmp=chunk_tmp)
+                    xapian_workdir=xapian_workdir, chunk_tmp=chunk_tmp,
+                    page_types=kiwix_page_types(kiwix_poi_pages))
         print("    Finalizing ZIM (ZSTD compression + Xapian indexing)...", flush=True)
         finalize_start = time.time()
 
@@ -672,7 +707,8 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                 split_hot_search_chunks_mb, split_find_chips, no_llm_bundle,
                 map_config, name, bbox, routing_graph_path, address_count,
                 overture_sources, overture_themes, xapian_mode,
-                xapianbuilder_bin, xapian_workdir, chunk_tmp):
+                xapianbuilder_bin, xapian_workdir, chunk_tmp,
+                overture_release=None, page_types=KIWIX_PAGE_TYPES):
     """Search data: JSON chunks, category index, chips, streetzim-meta.json,
     overture-sources.json and the Kiwix full-text pages. The chunk files go
     to `chunk_tmp`, which create_zim removes after the creator has closed."""
@@ -689,7 +725,7 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                            wikidata_data=wikidata_data,
                            wiki_cross_refs=wiki_cross_refs,
                            loc_lookup=loc_lookup, _bundled_set=_bundled_set,
-                           chunk_tmp=chunk_tmp)
+                           chunk_tmp=chunk_tmp, page_types=page_types)
         _search_emit_chunks(creator, MapItem,
                             split_hot_search_chunks_mb=split_hot_search_chunks_mb,
                             chunk_tmp=b.chunk_tmp, chunk_counts=b.chunk_counts,
@@ -708,7 +744,8 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                        type_counts=b.type_counts,
                        wiki_fields_added=b.wiki_fields_added)
         _add_overture_credits(creator, MapItem, overture_sources=overture_sources,
-                              overture_themes=overture_themes)
+                              overture_themes=overture_themes,
+                              overture_release=overture_release)
         _search_xapian_pages(creator, MapItem, xapian_mode=xapian_mode,
                              xapianbuilder_bin=xapianbuilder_bin,
                              xapian_workdir=xapian_workdir,
@@ -718,12 +755,18 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
 
     elif search_features:
         _add_search_in_memory(creator, MapItem, search_features=search_features,
-                              loc_lookup=loc_lookup)
+                              loc_lookup=loc_lookup, page_types=page_types)
+
+
+def _tile_credit(tile_metadata):
+    from streetzim import mbtiles
+    return mbtiles.license_text(tile_metadata or {})
 
 
 def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
                   metadata=None, illustration=None, has_satellite=True,
-                  has_terrain=True, has_wiki=True):
+                  has_terrain=True, has_wiki=True, satellite_source=None,
+                  tile_credit=None):
     """ZIM metadata (Name, Title, Tags, License, ...) and the 48x48 illustration.
 
     ``metadata`` holds openZIM-flag overrides validated by
@@ -732,8 +775,11 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
     keeps the builder's default. ``illustration`` is a 48x48 PNG.
     ``has_*`` say which optional layers the ZIM contains, so License names
     only the licences that apply (a ZIM without the satellite layer must not
-    claim CC BY-NC-SA).
+    claim CC BY-NC-SA). ``satellite_source`` names the mosaic
+    (streetzim.satellite_sources; default the builder's, 2021): with a
+    non-commercial one, License opens with a "Non-commercial use only" notice.
     """
+    from streetzim import satellite_sources
     md = metadata or {}
     # Add metadata — Name and Illustration are required by Kiwix to register the ZIM
     import re as _re_name
@@ -768,19 +814,27 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
         _tags = merge_tags(_tags, md["Tags"])
     creator.add_metadata("Tags", _tags)
     creator.add_metadata("Name", md.get("Name", f"osm_{zim_name}"))
-    creator.add_metadata("Flavour", "maxi")
+    creator.add_metadata("Flavour", md.get("Flavour", "maxi"))
     creator.add_metadata("Scraper", md.get("Scraper", "streetzim/1.0"))
     license_parts = [
         "Map data: ODbL (OpenStreetMap)",
         "Tile schema: CC-BY 4.0 (OpenMapTiles)",
     ]
+    if tile_credit:
+        # Ready-made tiles (streetzim --mbtiles/--mbtiles-url): whose they are.
+        license_parts.append(tile_credit)
     if has_satellite:
-        license_parts.append(
-            "Satellite imagery: CC BY-NC-SA 4.0 (Sentinel-2 cloudless by EOX)")
+        sat = satellite_sources.get(satellite_source or satellite_sources.BUILDER_DEFAULT)
+        if sat.noncommercial:
+            license_parts.insert(0, f"Non-commercial use only: the satellite imagery "
+                                    f"is {sat.license}")
+        license_parts.append(sat.license_metadata)
     if has_terrain:
         license_parts.append(
-            "Elevation: Copernicus GLO-30 DEM © DLR/Airbus, provided under "
-            "COPERNICUS by EU and ESA")
+            # GLO-90 too: low zooms, and cells GLO-30 leaves out. The same
+            # attribution covers both.
+            "Elevation: Copernicus DEM GLO-30/GLO-90 © DLR/Airbus, provided "
+            "under COPERNICUS by EU and ESA")
     if has_wiki:
         # Wikipedia text has been CC BY-SA 4.0 since June 2023.
         license_parts.append("Place info: CC0 (Wikidata) / CC BY-SA 4.0 (Wikipedia)")
@@ -816,6 +870,22 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
         creator.add_illustration(48, buf.getvalue())
     except ImportError:
         pass  # PIL not available, skip illustration
+
+
+# MapLibre's RTL text plugin (Arabic/Hebrew shaping and bidi), vendored from
+# @mapbox/mapbox-gl-rtl-text (the version MapLibre's setRTLTextPlugin
+# documentation pins) and pinned in resources/viewer-assets.lock.json like
+# MapLibre itself (streetzim/viewer_assets.py). Written into every ZIM and
+# named in map-config.json as `rtlTextPlugin`; the viewer (137-rtl-text.js)
+# loads it only once a tile carries RTL text. A missing or altered copy
+# stops the build (viewer_assets.IntegrityError), as for MapLibre.
+RTL_TEXT_PLUGIN_ENTRY = viewer_assets.RTL_TEXT_PLUGIN_ENTRY
+
+
+def _rtl_text_plugin_bytes():
+    """The ZIM entry (viewer_assets.rtl_text_plugin_entry): the verified
+    plugin behind a comment carrying its licence."""
+    return viewer_assets.rtl_text_plugin_entry()
 
 
 def _add_viewer(creator, MapItem, *, maplibre_js_path, maplibre_css_path, viewer_html_path, map_config, name):
@@ -878,13 +948,36 @@ def _add_viewer(creator, MapItem, *, maplibre_js_path, maplibre_css_path, viewer
         "maplibre-gl.css", "MapLibre GL CSS", "text/css",
         maplibre_css_path,
     ))
+    creator.add_item(MapItem(
+        RTL_TEXT_PLUGIN_ENTRY, "MapLibre RTL text plugin", "application/javascript",
+        _rtl_text_plugin_bytes(),
+    ))
 
 
 
-def _add_map_config(creator, MapItem, *, map_config, has_wiki_articles):
+def _about_fields(*, name, description, metadata=None):
+    """What the viewer's About panel shows (140-view-home-about.js): the
+    same Title / Description _add_metadata writes, since a page in the ZIM
+    cannot read M/ metadata portably, and the release that built it. The
+    build month is map-config's existing buildDate."""
+    from streetzim.__about__ import __version__
+    md = metadata or {}
+    return {
+        "title": md.get("Title", name),
+        "description": md.get("Description", description),
+        "generator": f"streetzim {__version__}",
+    }
+
+
+def _add_map_config(creator, MapItem, *, map_config, has_wiki_articles, about=None):
     """map-config.json, with hasWikiArticles only when articles were stored
-    (the viewer's credits list Wikipedia on it)."""
+    (the viewer's credits list Wikipedia on it) and the About fields."""
     map_config = dict(map_config)
+    for k, v in (about or {}).items():
+        if v:
+            map_config.setdefault(k, v)
+    # _add_viewer wrote the file (or stopped the build).
+    map_config["rtlTextPlugin"] = RTL_TEXT_PLUGIN_ENTRY
     if has_wiki_articles:
         map_config["hasWikiArticles"] = True
     else:
@@ -1003,6 +1096,10 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
     # still take that path, so the guard must stay for them.
     _libzim_backpressure = (zim_builder != "rust")
     backpressure_sleep = 0.0
+    # Identical tiles (open sea, tiles inside one landcover polygon) are
+    # stored once; tile_source yields in (z, x, y) order, so the first-seen
+    # target, and the ZIM, are the same on every build.
+    aliaser = TileAliaser(creator)
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
         while True:
             batch = list(itertools.islice(tile_source, batch_size))
@@ -1015,7 +1112,7 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
                 break
 
             add_start = time.time()
-            for i, (z, x, y, tile_data) in enumerate(results):
+            for z, x, y, tile_data in results:
                 # See note above: 0-byte tiles are MVT placeholders for
                 # bbox cells with no features. Drop them — MapLibre
                 # rendering is unaffected, ZIM entries dedup, zimcheck
@@ -1024,11 +1121,19 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
                     tiles_skipped_empty += 1
                     continue
                 item_start = time.time() if _libzim_backpressure else 0.0
-                creator.add_item(MapItem(
-                    f"tiles/{z}/{x}/{y}.pbf", f"Tile {z}/{x}/{y}",
-                    "application/x-protobuf",
-                    tile_data,
-                ))
+                tile_path = f"tiles/{z}/{x}/{y}.pbf"
+                alias_of = aliaser.target_for(tile_path, tile_data)
+                if alias_of is not None:
+                    # Same bytes as an earlier tile: a second dirent on its
+                    # blob (see streetzim/tile_alias.py).
+                    aliaser.add_alias(tile_path, f"Tile {z}/{x}/{y}",
+                                      alias_of, len(tile_data))
+                else:
+                    creator.add_item(MapItem(
+                        tile_path, f"Tile {z}/{x}/{y}",
+                        "application/x-protobuf",
+                        tile_data,
+                    ))
                 tiles_added += 1
                 _watchdog_tile_count[0] = tiles_added
                 if _libzim_backpressure:
@@ -1072,26 +1177,30 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
             f"re-run tilemaker before packaging")
     skip_str = (f" (skipped {tiles_skipped_empty} empty)"
                 if tiles_skipped_empty else "")
-    print(f"\r    Added {tiles_added} tiles in {elapsed:.0f}s ({rate_str}){skip_str}                ", flush=True)
+    print(f"\r    Added {tiles_added} tiles in {elapsed:.0f}s ({rate_str}){skip_str}; "
+          f"{aliaser.summary()}                ", flush=True)
     PHASE_TIMER.record_subphase(
         "zim-pack: vector tiles", elapsed,
         note=f"{tiles_added:,} tiles ({rate_str})"
-             + (f", skipped {tiles_skipped_empty} empty" if tiles_skipped_empty else ""))
+             + (f", skipped {tiles_skipped_empty} empty" if tiles_skipped_empty else "")
+             + (f", {aliaser.aliases:,} aliased" if aliaser.aliases else ""))
     _watchdog_stop.set()  # stop watchdog after tiles
 
 
-def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, satellite_format, terrain_dir, terrain_max_zoom, bbox):
+def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, satellite_format, terrain_dir, terrain_max_zoom, bbox, terrain_min_zoom=0):
     """Satellite and terrain raster tiles from their on-disk caches."""
     # Build bbox tile filter if bbox is provided (shared cache may have tiles from other areas)
     def _tile_in_bbox(z, x, y, bbox_coords):
         """Check if tile (z,x,y) overlaps with bbox. Uses mercantile for accuracy."""
         import mercantile
         tile_bounds = mercantile.bounds(mercantile.Tile(x, y, z))
-        minlon, minlat, maxlon, maxlat = bbox_coords
-        return not (tile_bounds.east < minlon or tile_bounds.west > maxlon or
-                    tile_bounds.north < minlat or tile_bounds.south > maxlat)
+        # Each side of the antimeridian separately (streetzim/area.py).
+        return any(not (tile_bounds.east < minlon or tile_bounds.west > maxlon or
+                        tile_bounds.north < minlat or tile_bounds.south > maxlat)
+                   for minlon, minlat, maxlon, maxlat in _area.split(bbox_coords))
 
-    def _add_raster_tiles(source_dir, zim_prefix, max_zoom, label, ext="webp", mimetype="image/webp"):
+    def _add_raster_tiles(source_dir, zim_prefix, max_zoom, label, ext="webp",
+                          mimetype="image/webp", min_zoom=0):
         """Walk a tile cache dir and add tiles to ZIM, filtering by bbox."""
         _t0 = time.time()
         count = 0
@@ -1100,7 +1209,8 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
         unreadable = 0
         suffix = f".{ext}"
         strip_len = len(suffix)
-        for z in range(0, max_zoom + 1):
+        aliaser = TileAliaser(creator)
+        for z in range(min_zoom, max_zoom + 1):
             z_dir = os.path.join(source_dir, str(z))
             if not os.path.isdir(z_dir):
                 continue
@@ -1112,7 +1222,9 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
                     x = int(x_name)
                 except ValueError:
                     continue
-                for fname in os.listdir(x_dir):
+                # Sorted: alias targets (first-seen) must not depend on
+                # the filesystem's directory order.
+                for fname in sorted(os.listdir(x_dir)):
                     if not fname.endswith(suffix):
                         continue
                     try:
@@ -1131,7 +1243,8 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
                     # tiles cached empty on 2026-04-13. The vector-tile
                     # loop already drops empty tiles; do the same here.
                     try:
-                        if os.path.getsize(fpath) == 0:
+                        fsize = os.path.getsize(fpath)
+                        if fsize == 0:
                             empty += 1
                             continue
                     except OSError:
@@ -1140,18 +1253,29 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
                         unreadable += 1
                         continue
                     zim_path = f"{zim_prefix}/{z}/{x_name}/{fname}"
-                    creator.add_item(MapItem(
-                        zim_path, f"{label} {z}/{x_name}/{fname}",
-                        mimetype,
-                        fpath,
-                        compress=False,
-                    ))
+                    title = f"{label} {z}/{x_name}/{fname}"
                     count += 1
+                    # Raster tiles sit in uncompressed clusters, so a repeat
+                    # (sea, flat terrain) costs its full size unless aliased.
+                    alias_of = None
+                    if aliaser.enabled and fsize <= max_alias_bytes(zim_path):
+                        with open(fpath, "rb") as fh:
+                            alias_of = aliaser.target_for(zim_path, fh.read())
+                    if alias_of is not None:
+                        aliaser.add_alias(zim_path, title, alias_of, fsize)
+                    else:
+                        creator.add_item(MapItem(
+                            zim_path, title,
+                            mimetype,
+                            fpath,
+                            compress=False,
+                        ))
                     if count % 2000 == 0:
                         print(f"\r    Added {count} {label.lower()} tiles...", end="", flush=True)
         elapsed = time.time() - _t0
         rate = (count / elapsed) if elapsed > 0 else 0
-        print(f"\r    Added {count} {label.lower()} tiles in {elapsed:.0f}s ({rate:.0f}/s)" +
+        print(f"\r    Added {count} {label.lower()} tiles in {elapsed:.0f}s ({rate:.0f}/s); "
+              f"{aliaser.summary()}" +
               (f" (skipped {skipped} outside bbox)" if skipped else "") +
               (f" (dropped {empty} zero-byte cache files)" if empty else "") +
               (f" (skipped {unreadable} unreadable files)" if unreadable else ""),
@@ -1164,7 +1288,8 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
                  # check (it can only count entries that exist), so record
                  # them where the build summary keeps them.
                  + (f", dropped {empty} zero-byte cache files" if empty else "")
-                 + (f", {unreadable} unreadable" if unreadable else ""))
+                 + (f", {unreadable} unreadable" if unreadable else "")
+                 + (f", {aliaser.aliases:,} aliased" if aliaser.aliases else ""))
         return count
 
     # Add satellite tiles if provided
@@ -1178,7 +1303,10 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
     # Add terrain tiles if provided
     if terrain_dir and os.path.isdir(terrain_dir):
         max_tz = terrain_max_zoom if terrain_max_zoom is not None else 99
-        _add_raster_tiles(terrain_dir, "terrain", max_tz, "Terrain")
+        # From the zoom the viewer starts at (map-config terrainMinZoom): a
+        # shared cache can hold lower tiles made for other areas.
+        _add_raster_tiles(terrain_dir, "terrain", max_tz, "Terrain",
+                          min_zoom=terrain_min_zoom)
 
 
 def _add_font_glyphs(creator, MapItem, *, fonts):
@@ -1189,6 +1317,12 @@ def _add_font_glyphs(creator, MapItem, *, fonts):
         for (font_name, range_key), data in fonts.items():
             # font_name has no spaces (e.g. "OpenSansRegular") to avoid
             # URL-encoding issues across Kiwix implementations
+            if range_key.endswith(".txt"):  # a font licence (fonts/NotoSans/OFL.txt)
+                creator.add_item(MapItem(
+                    f"fonts/{font_name}/{range_key}", f"{font_name} font licence",
+                    "text/plain", data,
+                ))
+                continue
             path = f"fonts/{font_name}/{range_key}.pbf"
             creator.add_item(MapItem(
                 path, f"Font {font_name} {range_key}",
@@ -1231,7 +1365,7 @@ def _add_wikidata(creator, MapItem, *, tiles, mbtiles_path, bbox, wikidata_data,
             print("    Scanning tiles for Wikidata Q-IDs in bbox...")
             import mapbox_vector_tile as _mvt
             bbox_qids = set()
-            for z, x, y, data in _tile_src:
+            for _z, _x, _y, data in _tile_src:
                 tile_data = data
                 if data[:2] == b"\x1f\x8b":
                     try:
@@ -1319,6 +1453,7 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
     # its narration cleaner de-noises for TTS. Cached so rebuilds don't
     # re-crawl. Source: a local Wikipedia ZIM (offline) or the API.
     _bundled_set = None  # title_us actually stored — gates the geo-index
+    _wa_stats = None
     if bundle_wiki_articles and wiki_cross_refs:
         _wa_titles = {e["wikipedia"] for e in wiki_cross_refs.values()
                       if e.get("wikipedia")}
@@ -1340,9 +1475,16 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
                 "zim-pack: wiki-articles", time.time() - _wa_t0,
                 note=f"{_wa_stats['bundled']} articles, "
                      f"{_wa_stats['bytes'] // 1024} KB, "
-                     f"{_wa_stats['failed']} missing, "
+                     f"{_wa_stats['failed']} missing "
+                     f"({_wa_stats.get('unfetched', 0)} unfetched), "
                      f"{_wa_stats.get('images', 0)} images "
                      f"{_wa_stats.get('image_bytes', 0) // 1048576} MB")
+    if _wa_stats:
+        from streetzim.source_report import note
+        note("Wikipedia articles",
+             f"{_wa_stats.get('bundled', 0)}/{_wa_stats.get('requested', '?')} "
+             f"({_wa_stats.get('unfetched', 0)} not fetched, "
+             f"{_wa_stats.get('rate_limited', 0)} rate-limited)")
     return _bundled_set
 
 
@@ -1515,10 +1657,10 @@ def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_ch
                  + (f" + {routing_graph_chunk_mb} MB chunks" if routing_graph_chunk_mb else ""))
 
 
-def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp):
+def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp, page_types=KIWIX_PAGE_TYPES):
     """Search pass 1: stream the search JSONL into per-prefix and per-category
     chunk files in `chunk_tmp`, plus the Xapian candidates file."""
-    xapian_types = {"place", "airport", "park", "peak", "water"}
+    xapian_types = page_types
 
     # Pass 1: stream JSONL -> per-prefix chunk files + xapian file
     chunk_counts = {}
@@ -1601,7 +1743,7 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
     _bucket_t0 = time.time()
     print("    Streaming search features from disk...", flush=True)
     with open(xapian_path, "w") as xf:
-        with open(search_features_path, "r") as sf:
+        with open(search_features_path) as sf:
             for line in sf:
                 feat = json.loads(line)
                 total_features += 1
@@ -1788,7 +1930,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
     def _emit_whole_chunk(prefix, chunk_path):
         """Small prefix: one file, exactly as before."""
         entries = []
-        with open(chunk_path, "r", encoding="utf-8") as cf:
+        with open(chunk_path, encoding="utf-8") as cf:
             for cline in cf:
                 entries.append(json.loads(cline))
         creator.add_item(MapItem(
@@ -1817,7 +1959,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
         from cloud.search_shards import split_records_recursive as _split_records_recursive
         agg = Aggregator(prefix)
         total_chunk_bytes = 0
-        with open(chunk_path, "r", encoding="utf-8") as cf:
+        with open(chunk_path, encoding="utf-8") as cf:
             for cline in cf:
                 size = len(cline.encode("utf-8"))
                 total_chunk_bytes += size
@@ -1845,7 +1987,10 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
         leaf_seen: set[str] = set()
         LEAF_FD_CAP = 256
 
-        def _leaf_fd(name):
+        # The per-prefix state is bound as defaults: this function is
+        # redefined on each prefix and must never see another prefix's.
+        def _leaf_fd(name, leaf_fds=leaf_fds, leaf_seen=leaf_seen,
+                     leaf_dir=leaf_dir, cap=LEAF_FD_CAP):
             fd = leaf_fds.get(name)
             if fd is not None:
                 # Refresh recency. dict order is insertion order, so
@@ -1855,7 +2000,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
                 # one of 19.6 M writes would reopen a file.
                 leaf_fds[name] = leaf_fds.pop(name)
                 return fd
-            if len(leaf_fds) >= LEAF_FD_CAP:
+            if len(leaf_fds) >= cap:
                 leaf_fds.pop(next(iter(leaf_fds))).close()
             leaf_seen.add(name)
             fd = open(os.path.join(leaf_dir, name + ".jsonl"), "a",
@@ -1865,7 +2010,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
 
         orphans = 0
         first_orphan = ""
-        with open(chunk_path, "r", encoding="utf-8") as cf:
+        with open(chunk_path, encoding="utf-8") as cf:
             for cline in cf:
                 rec = json.loads(cline)
                 paths = planned_paths.get(tier_for(rec), ())
@@ -1905,7 +2050,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
         for lname in sorted(leaf_seen):
             lpath = os.path.join(leaf_dir, lname + ".jsonl")
             lrecs = []
-            with open(lpath, "r", encoding="utf-8") as lf:
+            with open(lpath, encoding="utf-8") as lf:
                 for lineno, lline in enumerate(lf):
                     if not lline.strip():
                         continue
@@ -1922,7 +2067,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
                         raise RuntimeError(
                             f"search-data {prefix}: leaf {lname} line "
                             f"{lineno} did not round-trip ({exc}); "
-                            f"{len(lline)} bytes: {lline[:80]!r}")
+                            f"{len(lline)} bytes: {lline[:80]!r}") from exc
             os.unlink(lpath)
             lbytes = json.dumps(lrecs, separators=(",", ":"),
                                 ensure_ascii=False).encode("utf-8")
@@ -2020,7 +2165,7 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
                 # streaming and move on.
                 if split_find_chips and cat_slug in ("poi", "park"):
                     entries = []
-                    with open(cat_path, "r", encoding="utf-8") as cf:
+                    with open(cat_path, encoding="utf-8") as cf:
                         for cline in cf:
                             entries.append(json.loads(cline))
                     records_by_cat[cat_slug] = entries
@@ -2032,7 +2177,7 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
                 _llm_skipped.append(cat_slug)
                 continue
             entries = []
-            with open(cat_path, "r", encoding="utf-8") as cf:
+            with open(cat_path, encoding="utf-8") as cf:
                 for cline in cf:
                     entries.append(json.loads(cline))
             os.unlink(cat_path)
@@ -2203,8 +2348,13 @@ def _add_meta_json(creator, MapItem, *, map_config, name, bbox, wikidata_data, r
           f"types={len(type_counts)}, addresses={address_count})")
 
 
-def _add_overture_credits(creator, MapItem, *, overture_sources, overture_themes):
-    """overture-sources.json (always written; empty without Overture data)."""
+def _add_overture_credits(creator, MapItem, *, overture_sources, overture_themes,
+                          overture_release=None):
+    """overture-sources.json (always written; empty without Overture data).
+
+    `overture_release` is {theme: release} for the parquets merged (see
+    streetzim.overture.overture_release). `release` is written when they
+    agree, `releases` always; neither when no release is known."""
     # Overture dataset credits. Written when --overture-addresses
     # was used so the viewer's Sources panel (and the ZIM-level
     # License metadata) can point readers at the actual upstream
@@ -2240,8 +2390,13 @@ def _add_overture_credits(creator, MapItem, *, overture_sources, overture_themes
             if is_salvage_stub
             else "credits for each underlying dataset follow."
         )
-        overture_doc = {
-            "release": "2026-04-15.0",
+        releases = {t: r for t, r in (overture_release or {}).items() if r}
+        overture_doc = {}
+        if releases and len(set(releases.values())) == 1:
+            overture_doc["release"] = next(iter(releases.values()))
+        if releases:
+            overture_doc["releases"] = releases
+        overture_doc.update({
             "themes": themes,
             "attribution": (
                 "© OpenStreetMap contributors and Overture Maps "
@@ -2251,7 +2406,7 @@ def _add_overture_credits(creator, MapItem, *, overture_sources, overture_themes
             ),
             "datasets": real_datasets,
             "canonicalCredits": "https://docs.overturemaps.org/attribution/",
-        }
+        })
         if is_salvage_stub:
             overture_doc["_note"] = (
                 "Salvage rebuild — upstream dataset list not "
@@ -2272,7 +2427,8 @@ def _add_overture_credits(creator, MapItem, *, overture_sources, overture_themes
                   "not retained)")
         else:
             print(f"    Added overture-sources.json "
-                  f"({len(real_datasets)} upstream datasets)")
+                  f"({len(real_datasets)} upstream datasets, "
+                  f"release {overture_doc.get('release') or releases or 'unknown'})")
     else:
         # index.html links overture-sources.json statically, so a
         # build without Overture data must still ship the file —
@@ -2303,7 +2459,7 @@ def _search_xapian_pages(creator, MapItem, *, xapian_mode, xapianbuilder_bin, xa
         print(f"    Adding {xapian_count} Xapian search pages (of {total_features} total)...", flush=True)
         xapian_start = time.time()
         i = 0
-        with open(xapian_path, "r") as xf:
+        with open(xapian_path) as xf:
             for line in xf:
                 feat = json.loads(line)
                 slug = feat["name"].lower()
@@ -2329,7 +2485,7 @@ def _search_xapian_pages(creator, MapItem, *, xapian_mode, xapianbuilder_bin, xa
                     feat["name"],
                     "text/html",
                     page_html.encode("utf-8"),
-                    is_front=False,
+                    is_front=True,      # in the title index: Kiwix suggestions
                 ))
 
                 i += 1
@@ -2381,7 +2537,7 @@ def _search_xapian_pages(creator, MapItem, *, xapian_mode, xapianbuilder_bin, xa
               flush=True)
 
 
-def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup):
+def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup, page_types=KIWIX_PAGE_TYPES):
     """Search for an in-memory feature list (small builds and tests)."""
     print(f"    Adding {len(search_features)} search entries...")
 
@@ -2424,8 +2580,7 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup):
 
     print(f"    Added {len(chunks)} search chunks ({total_features} features)")
 
-    xapian_types = {"place", "airport", "park", "peak", "water"}
-    xapian_features = [f for f in search_features if f["type"] in xapian_types]
+    xapian_features = [f for f in search_features if f["type"] in page_types]
     print(f"    Adding {len(xapian_features)} Xapian search pages (of {len(search_features)} total)...", flush=True)
 
     xapian_start = time.time()
@@ -2451,7 +2606,7 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup):
             feat["name"],
             "text/html",
             page_html.encode("utf-8"),
-            is_front=False,
+            is_front=True,      # in the title index: Kiwix suggestions
         ))
 
         if (i + 1) % 2000 == 0:
