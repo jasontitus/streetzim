@@ -37,7 +37,7 @@ def _antimeridian_twins(osmium, pbf, excluded):
             if lat in ends[1] and ends[1][lat] != ref}
 
 
-def extract_routing_graph(pbf_path, output_dir, bbox=None):
+def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
     """Extract road network from OSM PBF and build a compact routing graph.
 
     Streams through the (bbox-filtered) PBF with pyosmium in two passes:
@@ -57,6 +57,8 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
                     and the final routing-graph.bin.
         bbox: Optional (minlon, minlat, maxlon, maxlat) to bbox-filter first.
               Critical for regional builds from a planet PBF.
+        precut: pbf_path is already cut to bbox: skip the cut, keep bbox for
+              the rest (the antimeridian stitching).
 
     Writes SZRG v4 (docs/formats.md). The SZRG v5 split layout (a separate
     SZGM geometry file) is no longer written: nothing in production used it,
@@ -81,7 +83,9 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None):
 
     # Step 0: Bbox-filter the PBF first so we never read ways outside the region.
     source_pbf = str(pbf_path)
-    if bbox:
+    # precut: pbf_path is already the build's own cut to this box, so the
+    # cut is skipped; bbox still decides the antimeridian stitching below.
+    if bbox and not precut:
         minlon, minlat, maxlon, maxlat = bbox
         bbox_pbf = os.path.join(output_dir, "region.osm.pbf")
         print(f"    Extracting bbox {minlon},{minlat},{maxlon},{maxlat} from planet PBF...")

@@ -21,12 +21,13 @@ with oneway streets. Adding a reverse adjacency would ~double the
 in-memory edge data — a real CH preprocessing pass would be the right
 fix if we ever go down that road.
 
-Reads a spatial-chunked ZIM (created by ``cloud/repackage_zim.py
---spatial-chunk-scale 10`` or ``cloud/build_region.sh`` post-build).
+Reads a spatial-chunked ZIM: built with ``--spatial-chunk-scale 10``
+(what build-region-fast.sh passes), or converted by
+``cloud/repackage_zim.py --spatial-chunk-scale 10``.
 Doesn't require any rebuild — runs against existing ZIMs.
 
 Usage:
-  ./venv312/bin/python3 cloud/route_cli.py \\
+  python3 cloud/route_cli.py \\
       --zim osm-west-asia.zim \\
       --src 35.6892,51.3890 \\
       --dst 33.7433,44.6260 \\
@@ -54,9 +55,9 @@ from streetzim.routing.astar import R_EARTH, HEURISTIC_SPEED_MPS, haversine_m
 
 
 # Bits 0..4 of class_access store the road-class ordinal (see
-# create_osm_zim.CLASS_ORDINAL). Highway tier = motorway + trunk + primary,
-# including each *_link variant. These are the edges intercity traffic
-# would actually use.
+# CLASS_ORDINAL in extract_routing_graph, streetzim/routing/build.py).
+# Highway tier = motorway + trunk + primary, including each *_link
+# variant. These are the edges intercity traffic would actually use.
 CLASS_ORD_MASK = 0x1F
 HIGHWAY_TIER_ORDS = frozenset({1, 2, 3, 4, 5, 6})  # motorway..primary_link
 NO_MOTOR_BIT = 0x200  # class_access bit 9 — see docs/driving-mode-road-class-warnings.md

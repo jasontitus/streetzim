@@ -435,7 +435,8 @@ def download_overture(theme: str, bbox: str, release: str, out_path: str,
     try:
         import duckdb  # noqa: F401  (only required when Overture is used: fail clearly)
     except ImportError:
-        sys.exit("duckdb not installed. Run `pip install duckdb` inside venv312.")
+        sys.exit("duckdb not installed. Run `pip install duckdb` in the Python "
+                 "that runs the build.")
 
     resolved = resolve_release(release, [theme])
     if resolved != release:

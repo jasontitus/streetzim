@@ -197,10 +197,10 @@ jobs:
         with:
           python-version: "3.14"
           cache: pip
-      - name: Install dependencies (zimscraperlib needs libmagic and cairo)
+      - name: Install dependencies (zimscraperlib needs libmagic and cairo; osmium-tool runs tests/test_precut.py and the routing tests)
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q libmagic1t64 libcairo2
+          sudo apt-get install -y -q libmagic1t64 libcairo2 osmium-tool
           pip install -r requirements-dev.txt
           python -c "from streetzim import scraperlib; assert scraperlib.AVAILABLE"
       - name: Python tests
@@ -322,6 +322,54 @@ jobs:
           ZIM_ORIGIN=http://127.0.0.1:8900/content/osm-monaco-ci \
             CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
             node cloud/zim_viewer_smoke.mjs
+
+      # The production gate's overlap check. The smoke tests above never
+      # measure layout, so a control drawn over another one passed CI: #22's
+      # "Show the whole map" button landed under the satellite/terrain/wiki
+      # panel and only the host's gates caught it.
+      - name: No overlapping controls at phone widths (overlap-check)
+        run: |
+          kiwix-serve --port 8902 osm-monaco-ci.zim &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8902/content/osm-monaco-ci/map-config.json >/dev/null && break; sleep 1; done
+          # SHOW_ALL_CONTROLS=1: Monaco has no satellite, terrain or Wikidata,
+          # so the layer panel is empty here unless forced visible. Portrait
+          # sizes from the device matrix, and landscape phones.
+          fail=0
+          for s in 320x568 375x667 390x844 430x932 844x390 667x375 932x430; do
+            ZIM_ORIGIN=http://127.0.0.1:8902/content/osm-monaco-ci VW=${s%x*} VH=${s#*x} SHOW_ALL_CONTROLS=1 \
+              CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
+              node tmp/overlap-check.mjs | tee "overlap-$s.txt"
+            grep -q '^NO OVERLAPS' "overlap-$s.txt" || { echo "::error::controls overlap at $s"; fail=1; }
+          done
+          exit $fail
+
+      # A chip tap and "Search this area" re-framed the results at zoom 14,
+      # pulling a reader at zoom 16 out to 14 (16 times the area) on every
+      # tap. Uses the kiwix-serve started by the overlap-check step.
+      # GEO_ORIGIN: the same ZIM with its chips as geographic shards (a
+      # tiny --chip-shard-mb; Monaco's chips are far under the 2 MB default,
+      # so CI's build never uses that code path otherwise).
+      - name: Search this area keeps the reader's view (search-area check)
+        run: |
+          python cloud/repackage_zim.py osm-monaco-ci.zim osm-monaco-geo.zim \
+            --split-find-chips --chip-shard-mb 0.003
+          kiwix-serve --port 8903 osm-monaco-geo.zim &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8903/content/osm-monaco-geo/map-config.json >/dev/null && break; sleep 1; done
+          ZIM_ORIGIN=http://127.0.0.1:8902/content/osm-monaco-ci \
+            GEO_ORIGIN=http://127.0.0.1:8903/content/osm-monaco-geo \
+            CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
+            node tools/search_area_check.mjs | tee search-area.txt
+          grep -q '^SEARCH AREA OK' search-area.txt
+
+      # Named places without a Wikidata ID (most shops, restaurants and
+      # services), and every place on a ZIM without Wikidata, did nothing
+      # when tapped. Uses the kiwix-serve started by the overlap-check step.
+      - name: Every named place can be tapped (tap-label check)
+        run: |
+          ZIM_ORIGIN=http://127.0.0.1:8902/content/osm-monaco-ci \
+            CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
+            node tools/tap_label_check.mjs | tee tap-label.txt
+          grep -q '^TAP LABEL OK' tap-label.txt
 
       - name: Rewrite tools on libzim (repackage, in-place viewer patch)
         env:

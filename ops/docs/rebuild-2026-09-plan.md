@@ -1,5 +1,7 @@
 # 2026-09 data refresh + full rebuild round — prep notes
 
+> **Record.** Prep notes for the 2026-09 round (written 09-04, updated to 09-14); the tooling tables describe the scripts as they were then. How builds run now: [MAINTAINING.md](../../MAINTAINING.md) §3 and [scripts.md](scripts.md).
+
 Written 2026-09-04 on the Linux build host. Everything below was measured
 or read from the host that day; nothing has been launched yet.
 

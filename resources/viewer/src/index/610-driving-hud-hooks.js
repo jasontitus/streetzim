@@ -19,7 +19,10 @@
     // feature-detect. Callers that need a given method should test
     // for it (`typeof window.streetzimRouting.foo === "function"`),
     // but the version helps diagnostics attribute "host vs ZIM" skew.
-    version: 4,
+    version: 5,
+    /// True while the routing panel is open: a map tap then picks a route
+    /// point, so the place popups stay out of the way.
+    get panelActive() { return !!active; },
     setOrigin: setOriginFromLatLon,
     setDest:   setDestFromLatLon,
     /// Reset the routing panel to "no route picked" — clears both

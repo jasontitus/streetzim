@@ -39,8 +39,9 @@ simply absent.
 ## The fix
 
 Fill exactly that gap, from the same source upstream uses, in the viewer
-rather than the tiles: regenerating the 113 GB world MBTiles is not possible
-on the build host (no tilemaker) and would require rebuilding every region.
+rather than the tiles: regenerating the 113 GB world MBTiles is a full world
+re-tile (`ops/build-world-tiles.sh`, tilemaker v3 in Docker on the build
+host) and would require rebuilding every region.
 
 `resources/viewer/index.html` carries `_SZ_LAKES`: Natural Earth 1:50m lakes
 (public domain), 409 polygons, simplified to 0.01° (~1 km, under one pixel at
@@ -91,5 +92,6 @@ byte-identical.
 
 The better fix is upstream: add a Natural Earth lakes source to
 `config-openmaptiles.json` for z0–5, writing to the `water` layer, and drop
-`_SZ_LAKES` from the viewer. That needs tilemaker on the build host and a
-full world re-tile, which is why it was not the fix taken here.
+`_SZ_LAKES` from the viewer. That needs a full world re-tile
+(`ops/build-world-tiles.sh` runs tilemaker v3 in Docker) and a rebuild of
+every region, which is why it was not the fix taken here.

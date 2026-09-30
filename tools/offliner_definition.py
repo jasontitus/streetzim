@@ -23,7 +23,8 @@ sys.path.insert(0, str(ROOT))
 TARGET = ROOT / "offliner-definition.json"
 
 from streetzim.cli import (  # noqa: E402
-    FEATURE_NAMES, MODEL_VALIDATORS, ZIM_METADATA_FLAGS, ZIMFARM, OnOff, build_parser)
+    FEATURE_NAMES, MODEL_VALIDATORS, ZIM_METADATA_FLAGS, ZIMFARM, OnOff, build_parser,
+    positive_int)
 
 SKIP_ACTIONS = (argparse._HelpAction, argparse._VersionAction)  # pyright: ignore[reportPrivateUsage]
 BOOLEAN_ACTIONS = (argparse._StoreTrueAction,  # pyright: ignore[reportPrivateUsage]
@@ -76,7 +77,7 @@ def _entry(action: argparse.Action, option: str, key: str) -> dict[str, Any] | N
         return None
     if isinstance(action, BOOLEAN_ACTIONS):
         typ = "boolean"
-    elif action.type is int:
+    elif action.type in (int, positive_int):
         typ = "integer"
     elif isinstance(action.choices, (list, tuple)):
         typ = "string-enum"

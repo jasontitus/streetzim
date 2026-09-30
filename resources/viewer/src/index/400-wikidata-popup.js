@@ -1,6 +1,11 @@
-// --- Wikidata info popup on feature click ---
+// --- Place popup on feature click ---
+// A tapped label with a Wikidata ID (on a ZIM with Wikidata) gets the
+// Wikidata popup; any other named place gets its name, type and
+// "Directions to here", filled in from its search record when one is found.
+// Before, a place without a Wikidata ID (most shops, restaurants and
+// services) did nothing, and on a ZIM without Wikidata nothing was tappable.
 function initWikidataPopups(map, config) {
-  if (!config.hasWikidata) return;
+  var hasWikidata = !!config.hasWikidata;
 
   // Cache for loaded Wikidata chunks: prefix -> {Q123: {...}, ...}
   var wdCache = {};
@@ -215,7 +220,10 @@ function initWikidataPopups(map, config) {
       });
       box.appendChild(ab);
     }
-    box.appendChild(buildDirectionsButton(lngLat.lat, lngLat.lng, name));
+    if (window.streetzimRouting
+        && typeof window.streetzimRouting.open === 'function') {
+      box.appendChild(buildDirectionsButton(lngLat.lat, lngLat.lng, name));
+    }
     return box;
   }
 
@@ -233,7 +241,98 @@ function initWikidataPopups(map, config) {
     if (currentPopup) { currentPopup.remove(); currentPopup = null; }
   };
 
+  // A tap opens one popup for the place under the finger. The rules, in
+  // order: a tap on a marker (search pin, Find result) belongs to that
+  // marker's own popup; while the routing panel is open a tap picks a route
+  // point; the place is the named label under the tap, else the nearest one
+  // within TAP_SLOP pixels (a fingertip on a POI's icon or name often misses
+  // both, and the point itself sits in the gap between them); the popup
+  // waits DOUBLE_TAP_MS so a double-tap zoom can cancel it; and only the
+  // latest tap's popup may open (a slow Wikidata chunk used to open a
+  // second popup after a later tap).
+  var TAP_SLOP = 10;
+  // Double-taps zoom; they must not open (or press) a popup. A tap within
+  // DOUBLE_TAP_WINDOW ms and DOUBLE_TAP_DIST px of the previous one is the
+  // second tap of a double-tap: it opens nothing, and the first tap's
+  // popup, pending or open, is dropped. This does not depend on when the
+  // zoom starts (on a slow phone that came more than 500 ms after the tap).
+  // A popup waits DOUBLE_TAP_MS, MapLibre's own limit for the gap between
+  // the taps of a double-tap zoom, so the second tap of any double-tap
+  // comes before the popup exists (at 250-300 ms it could land on the
+  // popup and press "Directions"). It is placed POPUP_GAP px away from the
+  // point the finger touched (not the place's point: a tap on a POI icon
+  // lands above that, where the popup's tip would be), so a late second tap
+  // cannot land on it either; and a zoom within ZOOM_AFTER_TAP_MS of the tap
+  // that opened it still closes it.
+  var DOUBLE_TAP_MS = 500;
+  var DOUBLE_TAP_WINDOW = 600;
+  var DOUBLE_TAP_DIST = 30;
+  var ZOOM_AFTER_TAP_MS = 1000;
+  // MapLibre picks the popup's side (above, below, left or right of the
+  // point) so it stays on screen; whichever it picks, the popup keeps
+  // POPUP_GAP px clear of the finger. A fixed 'bottom' anchor pushed
+  // popups half off the screen for taps near either edge.
+  var POPUP_GAP = 40;
+  var POPUP_OFFSET = {
+    'top': [0, POPUP_GAP], 'top-left': [0, POPUP_GAP], 'top-right': [0, POPUP_GAP],
+    'bottom': [0, -POPUP_GAP], 'bottom-left': [0, -POPUP_GAP], 'bottom-right': [0, -POPUP_GAP],
+    'left': [POPUP_GAP, 0], 'right': [-POPUP_GAP, 0],
+  };
+  var tapSeq = 0;
+  var tapTimer = null;
+  var lastTap = null;         // {at, x, y, seq}
+  var popupSeq = 0;           // the tap that opened currentPopup
+  function cancelPendingTap() {
+    if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; }
+  }
+  function onZoomGesture() {
+    if (!lastTap || Date.now() - lastTap.at > ZOOM_AFTER_TAP_MS) return;
+    cancelPendingTap();
+    tapSeq++;                 // a Wikidata chunk still loading must not open
+    if (currentPopup && popupSeq === lastTap.seq) {
+      currentPopup.remove(); currentPopup = null;
+    }
+  }
+  map.on('zoomstart', onZoomGesture);
+  map.on('dblclick', onZoomGesture);
+
+  function named(f) {
+    var p = f.properties || {};
+    return !!(p['name:latin'] || p.name);
+  }
+  function tappedFeature(pt) {
+    var queryOpts = {};
+    var layers = getQueryLayers();
+    if (layers) queryOpts.layers = layers;
+    var under = map.queryRenderedFeatures(pt, queryOpts).filter(named);
+    if (under.length) return under[0];
+    var near = map.queryRenderedFeatures(
+      [[pt.x - TAP_SLOP, pt.y - TAP_SLOP], [pt.x + TAP_SLOP, pt.y + TAP_SLOP]],
+      queryOpts).filter(named);
+    var best = null, bestD = Infinity;
+    for (var i = 0; i < near.length; i++) {
+      var g = near[i].geometry, d = TAP_SLOP * 2;   // lines, areas: behind points
+      if (g && g.type === 'Point' && g.coordinates) {
+        var q = map.project(g.coordinates);
+        d = Math.sqrt((q.x - pt.x) * (q.x - pt.x) + (q.y - pt.y) * (q.y - pt.y));
+      }
+      if (d < bestD) { bestD = d; best = near[i]; }
+    }
+    return best;
+  }
+
   map.on('click', function(e) {
+    var target = e.originalEvent && e.originalEvent.target;
+    var now = Date.now();
+    var second = !!lastTap && now - lastTap.at < DOUBLE_TAP_WINDOW
+      && Math.abs(e.point.x - lastTap.x) < DOUBLE_TAP_DIST
+      && Math.abs(e.point.y - lastTap.y) < DOUBLE_TAP_DIST;
+    var seq = ++tapSeq;
+    cancelPendingTap();
+    lastTap = second ? null : { at: now, x: e.point.x, y: e.point.y, seq: seq };
+    // A marker's tap opens the marker's own popup; it is not the first tap
+    // of a double-tap, so the next map tap must still open a popup.
+    if (target && target.closest && target.closest('.maplibregl-marker')) { lastTap = null; return; }
     if (currentPopup) { currentPopup.remove(); currentPopup = null; }
     // Close find-result marker popups too — same reason as above.
     if (typeof _findResultsState !== 'undefined'
@@ -247,41 +346,66 @@ function initWikidataPopups(map, config) {
         } catch (e3) {}
       }
     }
+    if (second) return;       // a double-tap zoom: no popup for either tap
+    if (window.streetzimRouting && window.streetzimRouting.panelActive) return;
+    var feat = tappedFeature(e.point);
+    if (!feat) return;
+    tapTimer = setTimeout(function() {
+      tapTimer = null;
+      if (seq !== tapSeq) return;
+      var qid = feat.properties.wikidata;
+      if (hasWikidata && qid && /^Q\d+$/.test(qid)) wikiPopup(e, feat, qid, seq);
+      else placeLabelPopup(e, feat, seq);
+    }, DOUBLE_TAP_MS);
+  });
 
-    // Query rendered features at click point
-    var queryOpts = {};
-    var layers = getQueryLayers();
-    if (layers) queryOpts.layers = layers;
-
-    var features = map.queryRenderedFeatures(e.point, queryOpts);
-    if (!features || features.length === 0) return;
-
-    // Find the first feature with a wikidata Q-ID in tile properties
-    var feat = null;
-    var qid = null;
-    for (var i = 0; i < features.length; i++) {
-      var props = features[i].properties || {};
-      if (props.wikidata && props.wikidata.match(/^Q\d+$/)) {
-        feat = features[i];
-        qid = props.wikidata;
-        break;
-      }
-    }
-    if (!qid) return;
-
+  function wikiPopup(e, feat, qid, seq) {
     var name = feat.properties['name:latin'] || feat.properties.name || feat.properties.label || qid;
-    var prefix = getWdPrefix(qid);
-
-    fetchWdChunk(prefix).then(function(chunk) {
+    fetchWdChunk(getWdPrefix(qid)).then(function(chunk) {
+      if (seq !== tapSeq) return;
       var wd = (chunk && chunk[qid]) ? chunk[qid] : null;
-      currentPopup = new maplibregl.Popup({ maxWidth: '320px' })
+      popupSeq = seq;
+      currentPopup = new maplibregl.Popup({ maxWidth: '320px', offset: POPUP_OFFSET })
         .setLngLat(e.lngLat)
         .setDOMContent(buildWikiPopupDOM(name, wd, e.lngLat,
                                          _wikiArticlePath(qid, null)));
       _szPopupGap(map, currentPopup);
       currentPopup.addTo(map);
     });
-  });
+  }
+
+  // A named place without a Wikidata popup: name, type and Directions at
+  // once; on a ZIM with Overture data, then the search record's details
+  // (website, phone, ...), the same popup a search result opens. Records
+  // in a ZIM without Overture carry none of those, so the lookup is skipped.
+  function placeLabelPopup(e, feat, seq) {
+    var props = feat.properties;
+    var name = props['name:latin'] || props.name;
+    var g = feat.geometry;
+    var lat = e.lngLat.lat, lon = e.lngLat.lng;
+    if (g && g.type === 'Point' && g.coordinates) {
+      lon = g.coordinates[0]; lat = g.coordinates[1];
+    }
+    var kind = props.subclass || props.class || '';
+    var popup = new maplibregl.Popup({ maxWidth: '320px', offset: POPUP_OFFSET })
+      .setLngLat(e.lngLat)
+      .setDOMContent(_szPlacePopupDOM(lat, lon, name, { cat: kind }));
+    currentPopup = popup;
+    popupSeq = seq;
+    _szPopupGap(map, popup);
+    popup.addTo(map);
+    if (!config.hasOvertureAddresses
+        || typeof window.__streetzimLookupPlace !== 'function') return;
+    window.__streetzimLookupPlace(name, lat, lon).then(function(r) {
+      if (!r || seq !== tapSeq || currentPopup !== popup || !popup.isOpen()) return;
+      popup.setDOMContent(_szPlacePopupDOM(lat, lon, name, {
+        // Overture's category, else the tile's ("copyshop"), which is
+        // finer than the record's type ("shop").
+        cat: r.cat || kind || r.s, subtype: r.s, ws: r.ws, p: r.p,
+        soc: r.soc, brand: r.brand, wd: r.wd,
+      }));
+    });
+  }
 
   // Change cursor on hover over clickable features
   map.on('mousemove', function(e) {
@@ -289,10 +413,11 @@ function initWikidataPopups(map, config) {
     var layers = getQueryLayers();
     if (layers) queryOpts.layers = layers;
     var features = map.queryRenderedFeatures(e.point, queryOpts);
-    var hasWd = features && features.some(function(f) {
-      return !!(f.properties || {}).wikidata;
+    var tappable = features && features.some(function(f) {
+      var p = f.properties || {};
+      return !!(p.wikidata || p.name || p['name:latin']);
     });
-    map.getCanvas().style.cursor = hasWd ? 'pointer' : '';
+    map.getCanvas().style.cursor = tappable ? 'pointer' : '';
   });
 }
 

@@ -74,7 +74,8 @@ try:
     import aiohttp
 except ImportError:
     print(
-        "ERROR: aiohttp not installed. Run: ./venv312/bin/pip install aiohttp",
+        "ERROR: aiohttp not installed. Run: pip install aiohttp "
+        "(on the build host, in venv-linux)",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -192,7 +193,8 @@ def _extract_urls_from_zim(zim_path: Path) -> set[str]:
     try:
         from libzim.reader import Archive
     except ImportError:
-        print("ERROR: libzim not installed; run from venv312", file=sys.stderr)
+        print("ERROR: libzim not installed; run with a Python that has "
+              "python-libzim (on the build host, venv-linux)", file=sys.stderr)
         sys.exit(1)
 
     print(f"  reading {zim_path}…", file=sys.stderr)

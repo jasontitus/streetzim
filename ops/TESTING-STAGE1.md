@@ -1,5 +1,7 @@
 # Testing the ops split (stage 1) on the build host
 
+> **Carried out.** The host took the stage-1 change on 30 September 2026 03:59 CEST, 29 September 18:59 PDT (fast-forward to `671c4fb`, PR #20), by TESTING-NEXT.md §1.0, not step 4 below. It is now on `host-main`, tracking `origin/main`. Kept as the record of the checks.
+
 This is a runbook for a person or a Claude Code session on the build host.
 It checks that the ops split keeps `/storage/streetzim` working before and
 just after the host takes the change. Background: [README.md](README.md).

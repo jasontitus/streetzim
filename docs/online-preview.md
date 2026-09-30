@@ -44,8 +44,10 @@ or store anything, and it refuses everything that is not a
 `streetzim-*` item, a `.zim` file, or a single-range request, so it is
 not a general archive.org proxy.
 
-Until the proxy is deployed the feature stays off: the picker reports
-that no proxy is configured and the catalog renders no Preview buttons.
+The proxy is deployed as a Cloudflare Worker, named in
+`web/drive/preview-config.js`. With that value empty the feature is off:
+the picker reports that no proxy is configured and the catalog renders
+no Preview buttons.
 
 ## Switching it on
 
@@ -66,7 +68,8 @@ that no proxy is configured and the catalog renders no Preview buttons.
 
    The handler is plain Fetch API (`handleRequest(Request) → Response`),
    so Deno Deploy or any Node ≥ 18 host works too
-   (`preview-proxy/serve-local.mjs` is the Node adapter). A Firebase
+   (`preview-proxy/node-adapter.mjs` is the Node adapter, run by
+  `preview-proxy/serve-local.mjs`). A Firebase
    Cloud Function / Cloud Run rewrite under the same origin would also
    work but needs the Blaze plan, pays egress per GB, and must stream
    the response (routing chunks are up to 100 MB).
@@ -121,15 +124,17 @@ look-alike — it has `size` and `slice(a, b).arrayBuffer()`, which is all
 - A server that answers a `Range` request with `200` is refused before
   its body is read — exactly what `archive.org/cors/` would otherwise
   have done to a 28 GB Canada file.
-- Transient failures (network errors, `5xx`, `429`) are retried three
-  times.
+- Transient failures (network errors, `5xx`) are retried: five attempts
+  over ~8 s. A `429` (the proxy's daily quota) is not retried; it fails
+  at once as an upstream error.
 
 `web/drive/sw.js` stores `{url, sourceUrl, name}` instead of `{blob}`
 when the picker sends a URL, builds the reader on an `HttpRangeSource`,
 and answers its `status` message with `source: 'url'`, the archive.org
 URL, the size and the request tally. The picker (`web/drive/index.html`)
 resolves `?zim=` and the URL box onto the proxy; the viewer
-(`resources/viewer/index.html`) asks the SW on `/drive/viewer/` and shows
+(`resources/viewer/src/index/020-body-markup.html`, built into
+`index.html`) asks the SW on `/drive/viewer/` and shows
 the banner when the source is a URL. Inside Kiwix there is no such
 service worker, so nothing changes there.
 

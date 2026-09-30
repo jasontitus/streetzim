@@ -34,7 +34,7 @@ b = bytes(Archive(sys.argv[1]).get_entry_by_path("index.html").get_item().conten
 checks = {
   "safe-area guard":   b"--top-inset: 0px" in b and b"sz-standalone" in b,
   "search gutter 128": b"calc(100% - 128px)" in b,
-  "controls at 152":   b"152px + var(--top-inset" in b,
+  "controls at 206":   b"206px + var(--top-inset" in b,
   "info at 84":        b"84px + var(--safe-bottom, 0px)); left: 10px" in b,
   "attr-btn at 58":    b"58px + var(--safe-bottom, 0px)); right: 64px" in b,
   "scale bar at 48":   b"48px + var(--safe-bottom, 0px)); }" in b,

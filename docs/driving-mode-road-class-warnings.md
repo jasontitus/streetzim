@@ -7,13 +7,21 @@ that travel mode (e.g. an Interstate motorway).
 Status: **not implemented**. The graph section below predates SZRG v4;
 the current byte layout, including the `class_access` bits this plan
 needed (they now ship), is in [`formats.md`](formats.md). This doc captures what would need to change
-so it can be picked up later without re-deriving the plan.
+so it can be picked up later without re-deriving the plan. File and line
+references are from before the split: the graph baker is now
+`extract_routing_graph` in `streetzim/routing/build.py` and the viewer's
+routing code `resources/viewer/src/index/5*.js` and `routing-worker.js`.
+The graph side (SZRG v4 `class_access`) and the reader's accessors ship;
+the route's `classes` summary (`summarizeClasses`, `route.classes`) and the
+UI warning below do not exist yet.
 
 ---
 
 ## Why
 
-The router in `create_osm_zim.py` uses a single graph with car speeds.
+The router (the viewer's routing worker and `streetzim/routing/`; it was
+in `create_osm_zim.py` when this was written) uses a single graph with car
+speeds.
 When a user asks for a route and hits **Walk** or **Bike**, the follow-
 mode will happily lead them along a motorway / trunk road. That's at
 minimum unpleasant and in many jurisdictions illegal (interstates in the
@@ -28,7 +36,8 @@ note covers only the **warning** pass, which is small and additive.
 
 ## Current state of the routing graph
 
-Baked by `create_osm_zim.py::build_routing_graph` (around line 1720+),
+Baked by `extract_routing_graph` (then in `create_osm_zim.py` around line
+1720+, now in `streetzim/routing/build.py`),
 written as **SZRG v3** (`resources/viewer/index.html::initRouting`
 parses it around line ~2370+). Per-edge record:
 
@@ -68,7 +77,7 @@ Bit layout of `class_access` (little-endian u32):
 | 0..4   | road class ordinal (see table below) — 5 bits, 32 values   |
 | 5..7   | access flags (bit 5=no-foot, bit 6=no-bicycle, bit 7=oneway — set for both `oneway=yes` and reversed `oneway=-1` edges) |
 | 8      | junction=roundabout / circular / mini_roundabout           |
-| 9      | no motor vehicles: footway/path/steps/pedestrian/cycleway/bridleway/corridor/escape/busway with no recognised access tag, or motorcar/motor_vehicle = `no` (else vehicle = `no`, else access = `no`; OSM hierarchy, the most specific recognised key wins). `private`, `destination`, `customers`, `delivery` are **allowed** like `yes` — they are the roads you must use to reach a destination inside a campus or gated community (`create_osm_zim._ACCESS_ALLOW`). The car router never expands bit-9 edges (routing-worker.js, index.html, streetzim/routing/astar.py, cloud/route_cli.py). Builders before 2026-09 leave it clear, so consumers also treat class ordinals 16..20 (path..steps) as no-motor. |
+| 9      | no motor vehicles: footway/path/steps/pedestrian/cycleway/bridleway/corridor/escape/busway with no recognised access tag, or motorcar/motor_vehicle = `no` (else vehicle = `no`, else access = `no`; OSM hierarchy, the most specific recognised key wins). `private`, `destination`, `customers`, `delivery` are **allowed** like `yes` — they are the roads you must use to reach a destination inside a campus or gated community (`_ACCESS_ALLOW` in `streetzim/routing/build.py`). The car router never expands bit-9 edges (routing-worker.js, index.html, streetzim/routing/astar.py, cloud/route_cli.py). Builders before 2026-09 leave it clear, so consumers also treat class ordinals 16..20 (path..steps) as no-motor. |
 | 10..31 | reserved — zero-fill, room for future use                  |
 
 Road-class ordinals (same 16 classes the speed table uses, packed):

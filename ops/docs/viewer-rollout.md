@@ -60,7 +60,8 @@ file. Without that a region can burn a 65 GB upload having changed nothing:
 
 Update those two lines for whatever the next rollout ships.
 
-Gates are the same four the build queues use — overlap at 320/390/430 px,
+Gates are the same four `cloud/rebuild_old_regions.sh` runs after its
+markers — overlap at 320/390/430 px,
 the 7-device matrix, the **render gate** (`tmp/map-health.mjs`, ≥100 rendered
 features: the only gate that fails a blank map) and
 `cloud/kiwix_viewer_gate.sh`.

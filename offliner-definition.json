@@ -156,7 +156,14 @@
       "type": "integer",
       "required": false,
       "title": "ZIM workers",
-      "description": "Compression threads for libzim. Default: the CPU count, at most 20",
+      "description": "Compression threads for libzim. Default: --cpus, else the usable cores within any CPU quota, at most 20",
+      "min": 1
+    },
+    "cpus": {
+      "type": "integer",
+      "required": false,
+      "title": "CPU cores",
+      "description": "CPU cores the build uses at once (tilemaker, search, terrain, compression). Set it to the task's CPUs: a CPU share hides no cores, and each core costs memory. Default: the usable cores, at most the container's CPU quota and one per 2 GiB of its memory limit",
       "min": 1
     },
     "profile": {

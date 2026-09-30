@@ -15,7 +15,7 @@ from streetzim.common import (
 from streetzim.overture import duckdb_connect, overture_category, overture_release
 
 
-def extract_addresses_pbf(pbf_path, output_path, bbox=None):
+def extract_addresses_pbf(pbf_path, output_path, bbox=None, precut=False):
     """Extract addr:housenumber + addr:street features from OSM PBF.
 
     Appends address entries to the given JSONL output path in the same
@@ -31,7 +31,10 @@ def extract_addresses_pbf(pbf_path, output_path, bbox=None):
     source_pbf = str(pbf_path)
     tmp = tempfile.mkdtemp(prefix="streetzim_addr_")
     try:
-        if bbox:
+        # precut: pbf_path is already the build's own cut to this box
+        # (create_osm_zim's area.osm.pbf); cutting it again changes nothing
+        # and costs an osmium run (3.7 GB even for Luxembourg).
+        if bbox and not precut:
             bbox_pbf = os.path.join(tmp, "region.osm.pbf")
             subprocess.run([
                 "osmium", "extract",
@@ -942,7 +945,7 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
     }
 
 
-def extract_wiki_tags_pbf(pbf_path, bbox=None):
+def extract_wiki_tags_pbf(pbf_path, bbox=None, precut=False):
     """Extract {wikipedia, wikidata} tags per OSM object with a name.
 
     Used to enrich the search index so offline agents can cross-link
@@ -960,7 +963,10 @@ def extract_wiki_tags_pbf(pbf_path, bbox=None):
     source_pbf = str(pbf_path)
     tmp = tempfile.mkdtemp(prefix="streetzim_wiki_")
     try:
-        if bbox:
+        # precut: pbf_path is already the build's own cut to this box
+        # (create_osm_zim's area.osm.pbf); cutting it again changes nothing
+        # and costs an osmium run (3.7 GB even for Luxembourg).
+        if bbox and not precut:
             bbox_pbf = os.path.join(tmp, "region.osm.pbf")
             subprocess.run([
                 "osmium", "extract",

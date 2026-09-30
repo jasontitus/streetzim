@@ -28,7 +28,7 @@ so do the tools that rewrite published ZIMs (`cloud/repackage_zim.py`,
 through `Hint.COMPRESS`; `tests/test_libzim_contract.py` pins that
 behaviour. CI builds, repackages, patches and serves its Monaco ZIM
 through libzim only. What needs zimru: `--zim-builder rust`,
-`--xapian builder`, and `cloud/swap_viewer_rust.py` (for
+`--xapian builder`, and `ops/cloud/swap_viewer_rust.py` (for
 viewer swaps, use `cloud/repackage_zim.py` or, on slotted ZIMs,
 `cloud/patch_viewer_inplace.py`).
 
@@ -70,7 +70,7 @@ pointing at the missing binary.
 Identical CLI to the existing path; just add the flag:
 
 ```sh
-python3 create_osm_zim.py --area silicon-valley --zim-builder=rust
+python3 create_osm_zim.py --area california --zim-builder=rust
 ```
 
 Internally, `create_zim()` swaps the libzim `Creator` for

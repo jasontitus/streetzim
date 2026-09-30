@@ -1,6 +1,7 @@
 """Pure-Python SZRG parser used by the routing differential test suite.
 
-Mirrors the viewer parser in resources/viewer/index.html:parseRoutingGraphBinary.
+Mirrors the viewer parser parseRoutingGraphBinary in
+resources/viewer/src/index/510-routing-graph-formats.js.
 Supports v2 / v3 / v4 (inline geoms) and v5 (split: main + SZGM companion
 ``routing-graph-geoms.bin``).
 

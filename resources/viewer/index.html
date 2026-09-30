@@ -265,9 +265,16 @@
 
   /* --- Unified control strip --- */
   #controls {
-    /* 152px, not 120px: the MapLibre control column runs to y=142 once
-       --top-inset is 0, which overlapped this panel by 44x22 px. */
-    position: absolute; top: calc(152px + var(--top-inset, 0px)); right: 10px; z-index: 2;
+    /* Below the whole MapLibre top-right column: zoom/compass (y=10-142),
+       then the "Show the whole map" button (initHomeButton, y=152-196), then
+       10px. At 152px this panel sat on the Home button: a tap on Home hit
+       "Toggle satellite imagery" instead (overlap-check and the device
+       matrix both caught it). On short screens this panel becomes a row
+       beside Home instead (see the max-height rule below): a landscape
+       phone has no vertical room left on the right edge. Adding a control
+       to that column means re-running the overlap check in portrait AND
+       landscape (CI runs it at seven sizes), not just moving this down. */
+    position: absolute; top: calc(206px + var(--top-inset, 0px)); right: 10px; z-index: 2;
     display: flex; flex-direction: column;
     background: var(--panel-bg); border-radius: var(--radius);
     box-shadow: var(--panel-shadow);
@@ -290,6 +297,16 @@
     background: var(--accent-hover);
   }
   #controls button + button { border-top: 1px solid var(--border); }
+  /* Landscape phones: the right edge holds zoom/compass (10-142), Home
+     (152-196) and, from the bottom, locate and attribution, which on a
+     375-390 px tall screen start around y=290. A 132 px column below Home
+     reaches y=338 and covered both. So the panel turns into a row at Home's
+     height, just left of the MapLibre column (10 + 44 + 10 = 64 px), below
+     the search band (which ends ~105) and above the bottom controls. */
+  @media (max-height: 500px) {
+    #controls { top: calc(152px + var(--top-inset, 0px)); right: 64px; flex-direction: row; }
+    #controls button + button { border-top: none; border-left: 1px solid var(--border); }
+  }
   /* (CSS for #places-link removed alongside the Find link on
      2026-05-10 — see HTML comment in #controls.) */
 
@@ -1977,9 +1994,11 @@ if (!window.__szUnsupported) fetchConfig(1)
       return;
     }
 
-    // Opening camera comes straight from map-config.json. Its centre is the
-    // bbox centre, which for some regions is empty water or desert -- hawaii
-    // opens on open Pacific west of the islands. Attempts to improve that
+    // Opening camera comes straight from map-config.json. Its centre was
+    // the bbox centre in ZIMs built before 2026-09-25 (newer builds write
+    // the region's anchor city or the median place position), which for
+    // some regions is empty water or desert -- hawaii opened on open
+    // Pacific west of the islands. Attempts to improve that viewer-side
     // were reverted on 2026-09-25; the note further down and
     // docs/todo-opening-view.md record why, so the next attempt does not
     // repeat them. The zoom is already extent-based (create_osm_zim's
@@ -4199,8 +4218,8 @@ var _findResultsState = {
   origin:  null,   // stash.origin (used for distance labels)
   active:  -1,     // index of the card currently centered
   searchAreaBtn: null,  // floating "Search this area" pill on the map
-  anchorCenter:  null,  // map center after the initial fitBounds settles
-  anchorZoom:    null,  // map zoom after the initial fitBounds settles
+  anchorCenter:  null,  // map center once the results' camera settles
+  anchorZoom:    null,  // map zoom once the results' camera settles
   moveHandler:   null,  // bound moveend handler (so we can detach on clear)
   renderSeq:     0,     // bumped per render; stale map.once('idle') callbacks bail
   detailPanel:   null,  // root <div> of the place detail bottom-sheet (or null)
@@ -4209,6 +4228,13 @@ var _findResultsState = {
 };
 
 function renderFindResultsFromStash(map) {
+  // A render that keeps the view must not let the previous render's
+  // camera flight carry on (tap Gas, which flies to the nearest
+  // stations, then Food & Drink: the food pins were left off screen).
+  if (_findResultsState.fitting) {
+    _findResultsState.fitting = false;
+    try { map.stop(); } catch (e) {}
+  }
   clearFindResults();
   var raw;
   try { raw = sessionStorage.getItem(FIND_RESULTS_STASH_KEY); }
@@ -4315,9 +4341,17 @@ function renderFindResultsFromStash(map) {
     if (!bounds) bounds = new maplibregl.LngLatBounds([ro, r.a], [ro, r.a]);
     else         bounds.extend([ro, r.a]);
   }
-  if (bounds) {
+  // Results found in what the reader can see (a chip tap that did not
+  // fall back to the nearest places, "Search this area": stash.fromView)
+  // leave the camera alone: re-framing them with maxZoom 14 pulled a
+  // reader at z16 out to z14 on every tap, 16 times the area they had
+  // chosen. Anything else (a name search handed over from places.html, a
+  // chip that fell back) is framed as before.
+  if (bounds && !stash.fromView) {
     // Leave room for the carousel at the bottom — extra bottom
     // padding so the camera doesn't park results behind the strip.
+    _findResultsState.fitting = true;
+    map.once('moveend', function() { _findResultsState.fitting = false; });
     map.fitBounds(bounds, {
       padding: { top: 60, right: 40, bottom: 200, left: 40 },
       maxZoom: 14, duration: 800,
@@ -4367,6 +4401,79 @@ function renderFindResultsFromStash(map) {
     };
     map.on('moveend', _findResultsState.moveHandler);
   });
+  // 'idle' fires only after a render. When the camera stays put (the view
+  // is kept) and nothing else redraws, it would never come and the pill
+  // would never arm; ask for one frame so it does.
+  map.triggerRepaint();
+}
+
+// The part of the map the reader can see, in canvas pixels, for a pin's
+// tip: the screen less 16 px at the sides and a pin's body (FIND_PIN_H)
+// at the top, since a pin is drawn upward from its tip; above the results
+// strip at its tallest (200 px, or the strip on screen if that is taller:
+// a strip without a sub-filter row is 34 px shorter than the next one may
+// be); and not under the search box and chip rail, the "Search this area"
+// pill, the layer buttons or MapLibre's top corner controls (holes: each
+// element's own rectangle, extended down by a pin's body). Holes, not a
+// band across the screen: on a landscape phone the search box covers only
+// the middle of the width, and a band below it left 11 px of a 360 px
+// screen.
+var FIND_PIN_H = 44;
+function _findVisibleRect(map) {
+  var canvas = map.getCanvas();
+  var cr = canvas.getBoundingClientRect();
+  var W = canvas.clientWidth, H = canvas.clientHeight;
+  var holes = [];
+  var els = ['search-container', 'find-search-area-btn', 'controls']
+    .map(function(id) { return document.getElementById(id); });
+  var ctrls = document.querySelectorAll(
+    '.maplibregl-ctrl-top-left > .maplibregl-ctrl, .maplibregl-ctrl-top-right > .maplibregl-ctrl');
+  for (var c = 0; c < ctrls.length; c++) els.push(ctrls[c]);
+  els.forEach(function(el) {
+    if (!el) return;
+    var r = el.getBoundingClientRect();
+    if (r.height > 0 && r.width > 0) {
+      holes.push({ x0: r.left - cr.left - 4, y0: r.top - cr.top - 4,
+                   x1: r.right - cr.left + 4, y1: r.bottom - cr.top + FIND_PIN_H - 4 });
+    }
+  });
+  var strip = document.getElementById('find-results-strip');
+  var sr = strip ? strip.getBoundingClientRect() : null;
+  var bottom = Math.min((sr && sr.height > 0) ? sr.top - cr.top : H, H - 200);
+  return { x0: 16, y0: FIND_PIN_H, x1: W - 16,
+           y1: Math.max(bottom - 8, FIND_PIN_H + 8), holes: holes };
+}
+
+// Whether a record's point is inside that area on screen. project() takes
+// longitudes as given, so a record across the antimeridian from the view
+// is tried shifted by ±360° too.
+function _findRecordVisible(map, rect, r) {
+  if (typeof r.a !== 'number' || typeof r.o !== 'number') return false;
+  for (var k = -1; k <= 1; k++) {
+    var p = map.project([r.o + 360 * k, r.a]);
+    if (p.x < rect.x0 || p.x > rect.x1 || p.y < rect.y0 || p.y > rect.y1) continue;
+    var covered = false;
+    for (var h = 0; h < rect.holes.length; h++) {
+      var o = rect.holes[h];
+      if (p.x >= o.x0 && p.x <= o.x1 && p.y >= o.y0 && p.y <= o.y1) { covered = true; break; }
+    }
+    if (!covered) return true;
+  }
+  return false;
+}
+
+// A lon/lat box around that rectangle (its four corners unprojected), for
+// queries that take a box. Wider than the rectangle on a rotated or tilted
+// map; callers filter with _findRecordVisible.
+function _findVisibleBox(map, rect) {
+  var pts = [[rect.x0, rect.y0], [rect.x1, rect.y0], [rect.x0, rect.y1], [rect.x1, rect.y1]]
+    .map(function(p) { return map.unproject(p); });
+  var box = { s: 90, n: -90, w: Infinity, e: -Infinity };
+  pts.forEach(function(ll) {
+    box.s = Math.min(box.s, ll.lat); box.n = Math.max(box.n, ll.lat);
+    box.w = Math.min(box.w, ll.lng); box.e = Math.max(box.e, ll.lng);
+  });
+  return box;
 }
 
 // Threshold: pill appears once the user has either zoomed by ≥ 0.5
@@ -4717,23 +4824,13 @@ function _searchAreaApply(map) {
     return;
   }
   if (!_findResultsState.items || !_findResultsState.items.length) return;
-  var b = map.getBounds();
-  var w = b.getWest(), e = b.getEast(),
-      s = b.getSouth(), n = b.getNorth();
-  // getBounds() returns unwrapped longitudes across the antimeridian
-  // (west=170, east=190) while records store [-180, 180] — test the
-  // record shifted by ±360° too, or a viewport over Fiji rejects
-  // every record with a negative longitude.
-  function lonInside(lon) {
-    if (w <= e) {
-      return (lon >= w && lon <= e)
-          || (lon + 360 >= w && lon + 360 <= e)
-          || (lon - 360 >= w && lon - 360 <= e);
-    }
-    return lon >= w || lon <= e;
-  }
+  // What the reader can see, not getBounds() (see _findVisibleRect). The
+  // pill hides the search box and chip rail while it is up; put them back
+  // first, or the rectangle would reach under them.
+  _hideSearchAreaPill();
+  var rect = _findVisibleRect(map);
   var filtered = _findResultsState.items.filter(function(r) {
-    return r.a >= s && r.a <= n && lonInside(r.o);
+    return _findRecordVisible(map, rect, r);
   });
   if (filtered.length === 0) {
     // Nothing in view — keep current state, just flash a hint.
@@ -4766,7 +4863,7 @@ function _searchAreaApply(map) {
   clearFindResults();
   try {
     sessionStorage.setItem(FIND_RESULTS_STASH_KEY, JSON.stringify({
-      label: label, origin: origin, items: filtered,
+      label: label, origin: origin, items: filtered, fromView: true,
     }));
   } catch (e2) {}
   renderFindResultsFromStash(map);
@@ -5400,8 +5497,12 @@ var CHIP_SHARDS = (function() {
 
   // opts: fetchShard(suffix) → Promise<Array>, cache (makeCache), cacheKey
   // (chip id), point {lat, lon} (required), bbox (optional viewport),
-  // k (300), predicate(rec) (optional), budgetBytes, isCancelled(),
-  // fallbackToNearest (retry without bbox when nothing is inside it).
+  // k (300), predicate(rec) (optional), inBox(rec) (optional: a further
+  // test with the bbox, e.g. "on screen, not under the search box"; it
+  // counts toward k like the bbox, so k records that pass it are found,
+  // and the fallback without the bbox skips it), budgetBytes,
+  // isCancelled(), fallbackToNearest (retry without bbox when nothing is
+  // inside it).
   // Resolves null when cancelled, else {records (nearest first, <= k),
   // dists (km), partial, radiusKm, failed, fellBack, shardsLoaded,
   // bytesLoaded}. partial: a shard that could still hold one of the k
@@ -5477,6 +5578,7 @@ var CHIP_SHARDS = (function() {
               var r = recs[j];
               if (!r || typeof r.a !== 'number' || typeof r.o !== 'number') continue;
               if (nb && !bboxHasPoint(nb, r.a, r.o)) continue;
+              if (nb && opts.inBox && !opts.inBox(r)) continue;
               if (opts.predicate && !opts.predicate(r)) continue;
               best.push({ r: r, d: distKm(plat, plon, r.a, r.o) });
             }
@@ -5528,6 +5630,10 @@ var CHIP_SHARDS = (function() {
 var _findChipCache = new Map();    // chipId -> Promise<Array<record>>
 // Geo-sharded chips: bounded LRU of shard fetches instead of whole chips.
 var _chipShardCache = CHIP_SHARDS.makeCache(CHIP_SHARDS.budgetBytes());
+// The most results a chip tap shows (the nearest the map centre), to keep
+// the pins and the carousel responsive. A var so a check can lower it on
+// a small map (tools/search_area_check.mjs).
+var FIND_RESULTS_MAX = 300;
 window.addEventListener('pagehide', function() { _chipShardCache.clear(); });
 
 // BEGIN chip-availability
@@ -6022,7 +6128,8 @@ async function loadChipOnMap(map, chipDef, opts) {
       var _sMeta = (catManifest.chips && catManifest.chips[_sid]) || null;
       try {
         if (CHIP_SHARDS.isGeo(_sMeta)) {
-          var _vb = map.getBounds(), _ctr = map.getCenter().wrap();
+          var _vr = _findVisibleRect(map);
+          var _vb = _findVisibleBox(map, _vr), _ctr = map.getCenter().wrap();
           var _r = await CHIP_SHARDS.load(_sMeta, {
             fetchShard: (function(sid) {
               return function(suffix) {
@@ -6036,9 +6143,11 @@ async function loadChipOnMap(map, chipDef, opts) {
             cache: _chipShardCache,
             cacheKey: _sid,
             point: { lat: _ctr.lat, lon: _ctr.lng },
-            bbox: { s: _vb.getSouth(), w: _vb.getWest(),
-                    n: _vb.getNorth(), e: _vb.getEast() },
-            k: 300,
+            bbox: _vb,
+            inBox: (function(vr) {
+              return function(r) { return _findRecordVisible(map, vr, r); };
+            })(_vr),
+            k: FIND_RESULTS_MAX,
             isCancelled: function() { return mySeq !== _chipLoadSeq; },
             fallbackToNearest: !opts.requireInBounds
           });
@@ -6077,8 +6186,12 @@ async function loadChipOnMap(map, chipDef, opts) {
   var chipMeta = (catManifest.chips && catManifest.chips[chipDef.id]) || null;
   if (!_mergedPath && CHIP_SHARDS.isGeo(chipMeta)) {
     // Geographic shards: load only what the 300 nearest records around
-    // the map centre need, scoped to the viewport.
-    var vb = map.getBounds();
+    // the map centre need, scoped to what the reader can see.
+    // Only records the reader can see count toward the 300 (the box
+    // includes the part under the search box; picking the 300 nearest
+    // first and dropping those afterwards left 46 on a landscape phone).
+    var vrect = _findVisibleRect(map);
+    var vb = _findVisibleBox(map, vrect);
     var ctr = map.getCenter().wrap();
     var res;
     try {
@@ -6093,8 +6206,9 @@ async function loadChipOnMap(map, chipDef, opts) {
       cache: _chipShardCache,
       cacheKey: chipDef.id,
       point: { lat: ctr.lat, lon: ctr.lng },
-      bbox: { s: vb.getSouth(), w: vb.getWest(), n: vb.getNorth(), e: vb.getEast() },
-      k: 300,
+      bbox: vb,
+      inBox: function(r) { return _findRecordVisible(map, vrect, r); },
+      k: FIND_RESULTS_MAX,
       isCancelled: function() { return mySeq !== _chipLoadSeq; },
       fallbackToNearest: !opts.requireInBounds
     });
@@ -6120,12 +6234,23 @@ async function loadChipOnMap(map, chipDef, opts) {
       }
       return;
     }
-    if (res.partial) {
-      _showFindToast('Showing the nearest ' + res.records.length
-        + ' — zoom in for more', { color: '#333', ms: 2600 });
-    }
     items = res.records;
     expanded = res.fellBack;
+    if (!expanded) {
+      // The box query is wider than the screen on a rotated or tilted map,
+      // and the chrome covers part of the box: keep what can be seen.
+      var _vrect = _findVisibleRect(map);
+      var _vis = items.filter(function(r) { return _findRecordVisible(map, _vrect, r); });
+      if (_vis.length) items = _vis;
+      else if (opts.requireInBounds) {
+        _showFindToast('No ' + chipDef.label.toLowerCase() + ' in this area');
+        return;
+      } else expanded = true;
+    }
+    if (res.partial) {
+      _showFindToast('Showing the nearest ' + items.length
+        + ' — zoom in for more', { color: '#333', ms: 2600 });
+    }
   } else {
   try {
     // Already filled by the multi-source merge above — re-fetching here
@@ -6150,29 +6275,13 @@ async function loadChipOnMap(map, chipDef, opts) {
     return;
   }
 
-  // Filter to the current map viewport. If that wipes everything,
-  // fall back to the unfiltered set (matches places.html behaviour
-  // — better to surface what's around than show "no results").
-  var bounds = map.getBounds();
-  var n = bounds.getNorth(), s = bounds.getSouth();
-  var e = bounds.getEast(),  w = bounds.getWest();
-  // getBounds() returns unwrapped longitudes across the antimeridian
-  // (west=170, east=190) while records store [-180, 180] — test the
-  // record shifted by ±360° too, or a viewport over Fiji rejects
-  // every record with a negative longitude.
-  function lonInside(lon) {
-    if (w <= e) {
-      return (lon >= w && lon <= e)
-          || (lon + 360 >= w && lon + 360 <= e)
-          || (lon - 360 >= w && lon - 360 <= e);
-    }
-    return lon >= w || lon <= e;
-  }
+  // Filter to what the reader can see (_findVisibleRect). If that wipes
+  // everything, fall back to the unfiltered set (matches places.html
+  // behaviour — better to surface what's around than show "no results").
+  var _rect = _findVisibleRect(map);
   var filtered = [];
   for (var i = 0; i < data.length; i++) {
-    var r = data[i];
-    if (typeof r.a !== 'number' || typeof r.o !== 'number') continue;
-    if (r.a >= s && r.a <= n && lonInside(r.o)) filtered.push(r);
+    if (_findRecordVisible(map, _rect, data[i])) filtered.push(data[i]);
   }
   // Behaviour split:
   //   - Initial chip-rail tap: viewport often empty (user just opened
@@ -6191,7 +6300,7 @@ async function loadChipOnMap(map, chipDef, opts) {
   // fallback returned 300 places strewn across the Baltics and fitBounds
   // flew the camera out to zoom 5.8 (baltics 2026-09-20, legacy layout).
   // The geo-shard path already falls back to nearest; this matches it.
-  if (items.length > 300) {
+  if (items.length > FIND_RESULTS_MAX) {
     var _c = map.getCenter().wrap();
     var _ranked = [];
     for (var ri = 0; ri < items.length; ri++) {
@@ -6201,7 +6310,7 @@ async function loadChipOnMap(map, chipDef, opts) {
     }
     _ranked.sort(function(x, y) { return x.d - y.d; });
     items = [];
-    for (var rj = 0; rj < _ranked.length && rj < 300; rj++) items.push(_ranked[rj].r);
+    for (var rj = 0; rj < _ranked.length && rj < FIND_RESULTS_MAX; rj++) items.push(_ranked[rj].r);
   }
   expanded = !filtered.length;
   }  // end legacy (single-file / name-hash bucket) layout
@@ -6223,6 +6332,9 @@ async function loadChipOnMap(map, chipDef, opts) {
     // first "Search this area" click had activeChip already null
     // and fell through to the old in-memory filter.
     chipId: chipDef.id,
+    // Found in what the reader can see (not a fall-back to the nearest):
+    // renderFindResultsFromStash then leaves the camera alone.
+    fromView: !expanded,
   };
   try {
     sessionStorage.setItem(FIND_RESULTS_STASH_KEY, JSON.stringify(stash));
@@ -6774,6 +6886,42 @@ function placeSearchPin(map, lat, lon, name, enrich) {
       typeof window.streetzimRouting.open !== 'function') {
     return searchMarker;
   }
+  var box = _szPlacePopupDOM(lat, lon, name, enrich);
+  var popup = new maplibregl.Popup({ offset: 28, closeButton: true,
+                                     closeOnClick: false,
+                                     maxWidth: '320px' })
+    .setDOMContent(box);
+  searchMarker.setPopup(popup);
+  _szPopupGap(map, popup);
+  // Auto-open once the camera settles — or right away when no camera
+  // move is in flight (`#pin=` without `map=`), otherwise the popup
+  // used to pop on whatever unrelated pan came next. A pending
+  // listener from an earlier pin is detached so two rapid pins can't
+  // toggle the newer popup open and then closed again.
+  if (_searchPinOpenHandler) {
+    try { map.off('moveend', _searchPinOpenHandler); } catch (e) {}
+    _searchPinOpenHandler = null;
+  }
+  var thisMarker = searchMarker;
+  if (map.isMoving && map.isMoving()) {
+    _searchPinOpenHandler = function() {
+      _searchPinOpenHandler = null;
+      if (searchMarker === thisMarker && !thisMarker.getPopup().isOpen()) {
+        thisMarker.togglePopup();
+      }
+    };
+    map.once('moveend', _searchPinOpenHandler);
+  } else {
+    thisMarker.togglePopup();
+  }
+  return searchMarker;
+}
+var _searchPinOpenHandler = null;
+
+// The body of a place popup: name, brand, category, contact links and
+// "Directions to here" (when the ZIM has routing). Used by search-result
+// pins and by labels tapped on the map (initWikidataPopups).
+function _szPlacePopupDOM(lat, lon, name, enrich) {
   enrich = enrich || {};
   var box = document.createElement('div');
   box.className = 'pin-popup';
@@ -6822,8 +6970,11 @@ function placeSearchPin(map, lat, lon, name, enrich) {
     ? enrich.ws.trim() : null;
   if (wsHref) addLink(wsHref, '🌐', wsHref);
   if (enrich.p)  addLink('tel:' + String(enrich.p).replace(/\s+/g, ''), '📞', String(enrich.p));
-  if (enrich.soc && enrich.soc.length) {
+  if (Array.isArray(enrich.soc)) {
     enrich.soc.forEach(function(s) {
+      // Same rule as the website: http(s) links only.
+      if (typeof s !== 'string' || !/^https?:\/\//i.test(s.trim())) return;
+      s = s.trim();
       var host = s.toLowerCase();
       var g = /facebook/.test(host) ? 'f' :
               /instagram/.test(host) ? 'IG' :
@@ -6833,6 +6984,10 @@ function placeSearchPin(map, lat, lon, name, enrich) {
     });
   }
   if (any) box.appendChild(contact);
+  if (!window.streetzimRouting ||
+      typeof window.streetzimRouting.open !== 'function') {
+    return box;
+  }
 
   // NOTE: see project_directions_button_duplicated.md memory.
   // This is the SEARCH-PIN copy of the Directions button. There's
@@ -6892,36 +7047,8 @@ function placeSearchPin(map, lat, lon, name, enrich) {
     }
   });
   box.appendChild(btn);
-  var popup = new maplibregl.Popup({ offset: 28, closeButton: true,
-                                     closeOnClick: false,
-                                     maxWidth: '320px' })
-    .setDOMContent(box);
-  searchMarker.setPopup(popup);
-  _szPopupGap(map, popup);
-  // Auto-open once the camera settles — or right away when no camera
-  // move is in flight (`#pin=` without `map=`), otherwise the popup
-  // used to pop on whatever unrelated pan came next. A pending
-  // listener from an earlier pin is detached so two rapid pins can't
-  // toggle the newer popup open and then closed again.
-  if (_searchPinOpenHandler) {
-    try { map.off('moveend', _searchPinOpenHandler); } catch (e) {}
-    _searchPinOpenHandler = null;
-  }
-  var thisMarker = searchMarker;
-  if (map.isMoving && map.isMoving()) {
-    _searchPinOpenHandler = function() {
-      _searchPinOpenHandler = null;
-      if (searchMarker === thisMarker && !thisMarker.getPopup().isOpen()) {
-        thisMarker.togglePopup();
-      }
-    };
-    map.once('moveend', _searchPinOpenHandler);
-  } else {
-    thisMarker.togglePopup();
-  }
-  return searchMarker;
+  return box;
 }
-var _searchPinOpenHandler = null;
 
 function initSearch(map) {
   var input = document.getElementById('search-input');
@@ -7203,7 +7330,7 @@ var SEARCH_SHARDS = (function () {
       // Latin-leading words keep the 2-char ASCII-alnum prefix. Non-ASCII
       // first chars (CJK, Cyrillic, Arabic, Thai, …) bucket into
       // 'u' + lowercase hex of their codepoint. Must match the writer
-      // ``_prefix_key`` in create_osm_zim.py and the Swift
+      // ``prefix_key`` in cloud/search_shards.py and the Swift
       // ``Geocoder.normalizePrefix``.
       if (!word) return '__';
       var c0 = word[0];
@@ -7334,7 +7461,9 @@ var SEARCH_SHARDS = (function () {
       }
     }
 
-    for (var i = 0; i < words.length; i++) addFor(words[i]);
+    if (!(opts && opts.wholeNameOnly)) {
+      for (var i = 0; i < words.length; i++) addFor(words[i]);
+    }
     // The whole name is indexed under its own first two characters, with
     // spaces folded — "45 Broadway" is findable by typing "45 b".
     addFor(q.replace(/\s/g, '_'));
@@ -7658,6 +7787,33 @@ var SEARCH_SHARDS = (function () {
   // builds — it's just a property on window.
   try { window.__streetzim_map = map; } catch (e) {}
 
+  // The search record for a place labelled on the map: the record with the
+  // same name nearest (lat, lon), within 300 m. Tapped labels use it for
+  // the details a search result shows (category, website, phone). Resolves
+  // to null when the index has no such record.
+  window.__streetzimLookupPlace = function(name, lat, lon) {
+    if (!manifest || !name || name.length < 2) return Promise.resolve(null);
+    // Only the leaves for the whole name (the writer always indexes it),
+    // and no lookup when that is not a targeted read: a name like "De
+    // Observant" read 176 leaves (97 MB of JSON) through its words.
+    var prefixes = getPrefixes(name, { wholeNameOnly: true });
+    if (!prefixes.length || (!prefixes.targeted && prefixes.length > 8)) {
+      return Promise.resolve(null);
+    }
+    var want = normalizeText(name);
+    return streamFilterChunks(prefixes, name).then(function(recs) {
+      var best = null, bestD = 300;
+      for (var i = 0; i < recs.length; i++) {
+        var r = recs[i];
+        if (!r || typeof r.a !== 'number' || typeof r.o !== 'number') continue;
+        if (normalizeText(r.n || '') !== want) continue;
+        var d = _haversineMetersStrip(lat, lon, r.a, r.o);
+        if (d < bestD) { bestD = d; best = r; }
+      }
+      return best;
+    }, function() { return null; });
+  };
+
   // Stash the current viewport in sessionStorage so the Find page can
   // offer a "Limit to map area" filter when the user just zoomed in
   // somewhere. Debounced so a fast pan doesn't pound the storage. The
@@ -7709,9 +7865,14 @@ var SEARCH_SHARDS = (function () {
   };
 }
 
-// --- Wikidata info popup on feature click ---
+// --- Place popup on feature click ---
+// A tapped label with a Wikidata ID (on a ZIM with Wikidata) gets the
+// Wikidata popup; any other named place gets its name, type and
+// "Directions to here", filled in from its search record when one is found.
+// Before, a place without a Wikidata ID (most shops, restaurants and
+// services) did nothing, and on a ZIM without Wikidata nothing was tappable.
 function initWikidataPopups(map, config) {
-  if (!config.hasWikidata) return;
+  var hasWikidata = !!config.hasWikidata;
 
   // Cache for loaded Wikidata chunks: prefix -> {Q123: {...}, ...}
   var wdCache = {};
@@ -7926,7 +8087,10 @@ function initWikidataPopups(map, config) {
       });
       box.appendChild(ab);
     }
-    box.appendChild(buildDirectionsButton(lngLat.lat, lngLat.lng, name));
+    if (window.streetzimRouting
+        && typeof window.streetzimRouting.open === 'function') {
+      box.appendChild(buildDirectionsButton(lngLat.lat, lngLat.lng, name));
+    }
     return box;
   }
 
@@ -7944,7 +8108,98 @@ function initWikidataPopups(map, config) {
     if (currentPopup) { currentPopup.remove(); currentPopup = null; }
   };
 
+  // A tap opens one popup for the place under the finger. The rules, in
+  // order: a tap on a marker (search pin, Find result) belongs to that
+  // marker's own popup; while the routing panel is open a tap picks a route
+  // point; the place is the named label under the tap, else the nearest one
+  // within TAP_SLOP pixels (a fingertip on a POI's icon or name often misses
+  // both, and the point itself sits in the gap between them); the popup
+  // waits DOUBLE_TAP_MS so a double-tap zoom can cancel it; and only the
+  // latest tap's popup may open (a slow Wikidata chunk used to open a
+  // second popup after a later tap).
+  var TAP_SLOP = 10;
+  // Double-taps zoom; they must not open (or press) a popup. A tap within
+  // DOUBLE_TAP_WINDOW ms and DOUBLE_TAP_DIST px of the previous one is the
+  // second tap of a double-tap: it opens nothing, and the first tap's
+  // popup, pending or open, is dropped. This does not depend on when the
+  // zoom starts (on a slow phone that came more than 500 ms after the tap).
+  // A popup waits DOUBLE_TAP_MS, MapLibre's own limit for the gap between
+  // the taps of a double-tap zoom, so the second tap of any double-tap
+  // comes before the popup exists (at 250-300 ms it could land on the
+  // popup and press "Directions"). It is placed POPUP_GAP px away from the
+  // point the finger touched (not the place's point: a tap on a POI icon
+  // lands above that, where the popup's tip would be), so a late second tap
+  // cannot land on it either; and a zoom within ZOOM_AFTER_TAP_MS of the tap
+  // that opened it still closes it.
+  var DOUBLE_TAP_MS = 500;
+  var DOUBLE_TAP_WINDOW = 600;
+  var DOUBLE_TAP_DIST = 30;
+  var ZOOM_AFTER_TAP_MS = 1000;
+  // MapLibre picks the popup's side (above, below, left or right of the
+  // point) so it stays on screen; whichever it picks, the popup keeps
+  // POPUP_GAP px clear of the finger. A fixed 'bottom' anchor pushed
+  // popups half off the screen for taps near either edge.
+  var POPUP_GAP = 40;
+  var POPUP_OFFSET = {
+    'top': [0, POPUP_GAP], 'top-left': [0, POPUP_GAP], 'top-right': [0, POPUP_GAP],
+    'bottom': [0, -POPUP_GAP], 'bottom-left': [0, -POPUP_GAP], 'bottom-right': [0, -POPUP_GAP],
+    'left': [POPUP_GAP, 0], 'right': [-POPUP_GAP, 0],
+  };
+  var tapSeq = 0;
+  var tapTimer = null;
+  var lastTap = null;         // {at, x, y, seq}
+  var popupSeq = 0;           // the tap that opened currentPopup
+  function cancelPendingTap() {
+    if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; }
+  }
+  function onZoomGesture() {
+    if (!lastTap || Date.now() - lastTap.at > ZOOM_AFTER_TAP_MS) return;
+    cancelPendingTap();
+    tapSeq++;                 // a Wikidata chunk still loading must not open
+    if (currentPopup && popupSeq === lastTap.seq) {
+      currentPopup.remove(); currentPopup = null;
+    }
+  }
+  map.on('zoomstart', onZoomGesture);
+  map.on('dblclick', onZoomGesture);
+
+  function named(f) {
+    var p = f.properties || {};
+    return !!(p['name:latin'] || p.name);
+  }
+  function tappedFeature(pt) {
+    var queryOpts = {};
+    var layers = getQueryLayers();
+    if (layers) queryOpts.layers = layers;
+    var under = map.queryRenderedFeatures(pt, queryOpts).filter(named);
+    if (under.length) return under[0];
+    var near = map.queryRenderedFeatures(
+      [[pt.x - TAP_SLOP, pt.y - TAP_SLOP], [pt.x + TAP_SLOP, pt.y + TAP_SLOP]],
+      queryOpts).filter(named);
+    var best = null, bestD = Infinity;
+    for (var i = 0; i < near.length; i++) {
+      var g = near[i].geometry, d = TAP_SLOP * 2;   // lines, areas: behind points
+      if (g && g.type === 'Point' && g.coordinates) {
+        var q = map.project(g.coordinates);
+        d = Math.sqrt((q.x - pt.x) * (q.x - pt.x) + (q.y - pt.y) * (q.y - pt.y));
+      }
+      if (d < bestD) { bestD = d; best = near[i]; }
+    }
+    return best;
+  }
+
   map.on('click', function(e) {
+    var target = e.originalEvent && e.originalEvent.target;
+    var now = Date.now();
+    var second = !!lastTap && now - lastTap.at < DOUBLE_TAP_WINDOW
+      && Math.abs(e.point.x - lastTap.x) < DOUBLE_TAP_DIST
+      && Math.abs(e.point.y - lastTap.y) < DOUBLE_TAP_DIST;
+    var seq = ++tapSeq;
+    cancelPendingTap();
+    lastTap = second ? null : { at: now, x: e.point.x, y: e.point.y, seq: seq };
+    // A marker's tap opens the marker's own popup; it is not the first tap
+    // of a double-tap, so the next map tap must still open a popup.
+    if (target && target.closest && target.closest('.maplibregl-marker')) { lastTap = null; return; }
     if (currentPopup) { currentPopup.remove(); currentPopup = null; }
     // Close find-result marker popups too — same reason as above.
     if (typeof _findResultsState !== 'undefined'
@@ -7958,41 +8213,66 @@ function initWikidataPopups(map, config) {
         } catch (e3) {}
       }
     }
+    if (second) return;       // a double-tap zoom: no popup for either tap
+    if (window.streetzimRouting && window.streetzimRouting.panelActive) return;
+    var feat = tappedFeature(e.point);
+    if (!feat) return;
+    tapTimer = setTimeout(function() {
+      tapTimer = null;
+      if (seq !== tapSeq) return;
+      var qid = feat.properties.wikidata;
+      if (hasWikidata && qid && /^Q\d+$/.test(qid)) wikiPopup(e, feat, qid, seq);
+      else placeLabelPopup(e, feat, seq);
+    }, DOUBLE_TAP_MS);
+  });
 
-    // Query rendered features at click point
-    var queryOpts = {};
-    var layers = getQueryLayers();
-    if (layers) queryOpts.layers = layers;
-
-    var features = map.queryRenderedFeatures(e.point, queryOpts);
-    if (!features || features.length === 0) return;
-
-    // Find the first feature with a wikidata Q-ID in tile properties
-    var feat = null;
-    var qid = null;
-    for (var i = 0; i < features.length; i++) {
-      var props = features[i].properties || {};
-      if (props.wikidata && props.wikidata.match(/^Q\d+$/)) {
-        feat = features[i];
-        qid = props.wikidata;
-        break;
-      }
-    }
-    if (!qid) return;
-
+  function wikiPopup(e, feat, qid, seq) {
     var name = feat.properties['name:latin'] || feat.properties.name || feat.properties.label || qid;
-    var prefix = getWdPrefix(qid);
-
-    fetchWdChunk(prefix).then(function(chunk) {
+    fetchWdChunk(getWdPrefix(qid)).then(function(chunk) {
+      if (seq !== tapSeq) return;
       var wd = (chunk && chunk[qid]) ? chunk[qid] : null;
-      currentPopup = new maplibregl.Popup({ maxWidth: '320px' })
+      popupSeq = seq;
+      currentPopup = new maplibregl.Popup({ maxWidth: '320px', offset: POPUP_OFFSET })
         .setLngLat(e.lngLat)
         .setDOMContent(buildWikiPopupDOM(name, wd, e.lngLat,
                                          _wikiArticlePath(qid, null)));
       _szPopupGap(map, currentPopup);
       currentPopup.addTo(map);
     });
-  });
+  }
+
+  // A named place without a Wikidata popup: name, type and Directions at
+  // once; on a ZIM with Overture data, then the search record's details
+  // (website, phone, ...), the same popup a search result opens. Records
+  // in a ZIM without Overture carry none of those, so the lookup is skipped.
+  function placeLabelPopup(e, feat, seq) {
+    var props = feat.properties;
+    var name = props['name:latin'] || props.name;
+    var g = feat.geometry;
+    var lat = e.lngLat.lat, lon = e.lngLat.lng;
+    if (g && g.type === 'Point' && g.coordinates) {
+      lon = g.coordinates[0]; lat = g.coordinates[1];
+    }
+    var kind = props.subclass || props.class || '';
+    var popup = new maplibregl.Popup({ maxWidth: '320px', offset: POPUP_OFFSET })
+      .setLngLat(e.lngLat)
+      .setDOMContent(_szPlacePopupDOM(lat, lon, name, { cat: kind }));
+    currentPopup = popup;
+    popupSeq = seq;
+    _szPopupGap(map, popup);
+    popup.addTo(map);
+    if (!config.hasOvertureAddresses
+        || typeof window.__streetzimLookupPlace !== 'function') return;
+    window.__streetzimLookupPlace(name, lat, lon).then(function(r) {
+      if (!r || seq !== tapSeq || currentPopup !== popup || !popup.isOpen()) return;
+      popup.setDOMContent(_szPlacePopupDOM(lat, lon, name, {
+        // Overture's category, else the tile's ("copyshop"), which is
+        // finer than the record's type ("shop").
+        cat: r.cat || kind || r.s, subtype: r.s, ws: r.ws, p: r.p,
+        soc: r.soc, brand: r.brand, wd: r.wd,
+      }));
+    });
+  }
 
   // Change cursor on hover over clickable features
   map.on('mousemove', function(e) {
@@ -8000,10 +8280,11 @@ function initWikidataPopups(map, config) {
     var layers = getQueryLayers();
     if (layers) queryOpts.layers = layers;
     var features = map.queryRenderedFeatures(e.point, queryOpts);
-    var hasWd = features && features.some(function(f) {
-      return !!(f.properties || {}).wikidata;
+    var tappable = features && features.some(function(f) {
+      var p = f.properties || {};
+      return !!(p.wikidata || p.name || p['name:latin']);
     });
-    map.getCanvas().style.cursor = hasWd ? 'pointer' : '';
+    map.getCanvas().style.cursor = tappable ? 'pointer' : '';
   });
 }
 
@@ -9709,7 +9990,7 @@ function initRouting(map, config) {
   }
 
   // A* heuristic speed. MUST be >= the fastest edge speed the builder
-  // emits (create_osm_zim.SPEED: motorway = 100 km/h) or the heuristic
+  // emits (SPEED in streetzim/routing/build.py: motorway = 100 km/h) or the heuristic
   // over-estimates remaining time and the "optimal" pass silently
   // returns suboptimal routes. Matches routing-worker.js and the
   // Python references (streetzim/routing/astar.py, cloud/route_cli.py).
@@ -9776,8 +10057,9 @@ function initRouting(map, config) {
 
   // Highway-tier ordinals (motorway, motorway_link, trunk, trunk_link,
   // primary, primary_link). Bit-encoded into class_access bits 0..4 by
-  // create_osm_zim.CLASS_ORDINAL. Edges in this set are the cross-country
-  // backbone — A* on just these is ~10× cheaper for long routes.
+  // CLASS_ORDINAL in extract_routing_graph (streetzim/routing/build.py).
+  // Edges in this set are the cross-country backbone — A* on just these
+  // is ~10× cheaper for long routes.
   function isHighwayClass(classAccess) {
     var ord = classAccess & 0x1F;
     return ord >= 1 && ord <= 6;
@@ -12175,7 +12457,10 @@ function initRouting(map, config) {
     // feature-detect. Callers that need a given method should test
     // for it (`typeof window.streetzimRouting.foo === "function"`),
     // but the version helps diagnostics attribute "host vs ZIM" skew.
-    version: 4,
+    version: 5,
+    /// True while the routing panel is open: a map tap then picks a route
+    /// point, so the place popups stay out of the way.
+    get panelActive() { return !!active; },
     setOrigin: setOriginFromLatLon,
     setDest:   setDestFromLatLon,
     /// Reset the routing panel to "no route picked" — clears both

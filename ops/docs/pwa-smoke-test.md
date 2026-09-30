@@ -1,7 +1,8 @@
 # PWA smoke test
 
-Headless Puppeteer harness that exercises the live `streetzim.web.app/drive/`
-PWA against a locally-served ZIM. Run after every change that touches the
+Headless Puppeteer harness that exercises the `/drive/` PWA (the live
+`streetzim.web.app`, or the site named by `STREETZIM_SITE`) against a
+locally-served ZIM. Run after every change that touches the
 service worker, viewer JS, places page, Firebase config, or the ZIM build —
 silent regressions in any of those land as user-visible breakage and the
 manual hand-test cycle is too slow.
@@ -32,10 +33,18 @@ HEADFUL=1 node cloud/pwa_smoke_test.mjs
 
 The script needs:
 - ZIMs served at `localhost:8765` (a `python -m http.server 8765` over the
-  repo root works).
-- System Chrome at `/Applications/Google Chrome.app/Contents/MacOS/Google
-  Chrome` — Puppeteer's bundled Chromium has its sandbox blocked from
-  reaching localhost, so we use the OS install.
+  repo root works), or `ZIM_URL`/`ZIM_FILE` naming one.
+- A Chrome: `CHROME_PATH`, default the system Chrome at
+  `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` —
+  Puppeteer's bundled Chromium has its sandbox blocked from reaching
+  localhost, so we use the OS install.
+
+On the Linux build host, `ship-region.sh` (gate 5) serves `web/` with
+`scripts/serve-web-local.py` on a random port, links the ZIM into it, and
+sets `STREETZIM_SITE`, `ZIM_URL`, `ZIM_FILE`, `SMOKE_ROUTE`,
+`SMOKE_SEARCH` and `CHROME_PATH` (Playwright's Chromium under
+`~/.cache/ms-playwright`), so the smoke tests the checkout's site, not the
+live one.
 
 ## What it checks
 
@@ -44,9 +53,12 @@ The script needs:
 | 1 | SW load               | Picker page → `set-zim` round-trip succeeds                  |
 | 2 | Viewer ready          | `window.streetzimRouting.open` exists after viewer load       |
 | 3 | Top-bar search        | Waits for the search manifest, types `SMOKE_SEARCH` (default "Palo Alto"), and requires at least one real result row. "Searching…" and "No results found" rows do not count. |
-| 4 | Find chip             | `places.html` Restaurants chip → `#results` has rows         |
-| 5 | Directions handoff    | Click Directions on first result → `#routing-dest-input` fills |
-| 6 | Origin typeahead      | Type "Mount" in origin → `#routing-origin-results` populates  |
+| 4 | Find chip             | `places.html` Food & Drink (or, on older ZIMs, Restaurants) chip → `#results` has rows; geo-sharded chips load a neighbourhood, not the whole chip |
+| 5 | Find-page search      | The first word of `SMOKE_SEARCH` typed on `places.html` renders rows within `SEARCH_BUDGET_MS` (default 20 s) |
+| 6 | Near + chip           | A city typed in "Search near" is picked, and the Gas chip's first result is close to it |
+| 7 | Directions handoff    | Click Directions on first result → `#routing-dest-input` fills |
+| 8 | Origin typeahead      | Type "Mount" in origin → `#routing-origin-results` populates  |
+| 9 | Route                 | `SMOKE_ROUTE` (or the region's built-in pair) routes; the line starts and ends within 100 m of the two points and is at least 80% of the crow-fly distance |
 
 It is also strict about:
 - **Console errors** — anything that lands as `console.error` or

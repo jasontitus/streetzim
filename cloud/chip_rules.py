@@ -9,7 +9,7 @@ Fix: at build time, pre-filter each chip's subset into its own smaller
 the file it needs for the chosen chip.
 
 This module owns the chip-definitions. It's imported by:
-  * create_osm_zim.py — during ZIM build, emits one chip file per entry
+  * streetzim/zim_writer.py — during ZIM build, emits one chip file per entry
   * cloud/repackage_zim.py — optional chip-split on existing ZIMs via
     ``--split-find-chips``
   * tests — assertions that every chip rule has at least one match in a

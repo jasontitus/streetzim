@@ -63,7 +63,8 @@ def _chunk_bytes_inmem(buf: bytes, chunk_size: int,
                        prefix: str) -> tuple[list[tuple[str, bytes]], dict]:
     """Chunk an in-memory buffer, returning (entries, manifest) where
     entries is [(name, bytes), ...]. Same manifest schema as
-    create_osm_zim.chunk_graph_file so the reader needs no branching."""
+    chunk_graph_file (streetzim/routing/build.py) so the reader needs no
+    branching."""
     import hashlib
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")

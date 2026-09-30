@@ -129,11 +129,12 @@ def test_tilemaker_runs_once_per_side_and_merges(tmp_path, monkeypatch):
     assert tm[0][tm[0].index("--input") + 1] == osm[0][osm[0].index("-o") + 1]
     # One box: the one command it always was.
     runs.clear()
+    monkeypatch.setattr(tiles, "build_cpus", lambda: 3)
     tiles.generate_tiles("in.pbf", out, bbox="7.40,43.72,7.44,43.76")
     assert runs == [["tilemaker", "--input", "in.pbf", "--output", out,
                      "--config", str(tiles.TILEMAKER_CONFIG),
                      "--process", str(tiles.TILEMAKER_PROCESS), "--skip-integrity",
-                     "--bbox", "7.40,43.72,7.44,43.76"]]
+                     "--threads", "3", "--bbox", "7.40,43.72,7.44,43.76"]]
     runs.clear()
     tiles.extract_bbox_from_pbf("in.pbf", "7.40,43.72,7.44,43.76", out)
     assert runs[0][:4] == ["osmium", "extract", "--bbox", "7.40,43.72,7.44,43.76"]

@@ -54,9 +54,11 @@ if (!window.__szUnsupported) fetchConfig(1)
       return;
     }
 
-    // Opening camera comes straight from map-config.json. Its centre is the
-    // bbox centre, which for some regions is empty water or desert -- hawaii
-    // opens on open Pacific west of the islands. Attempts to improve that
+    // Opening camera comes straight from map-config.json. Its centre was
+    // the bbox centre in ZIMs built before 2026-09-25 (newer builds write
+    // the region's anchor city or the median place position), which for
+    // some regions is empty water or desert -- hawaii opened on open
+    // Pacific west of the islands. Attempts to improve that viewer-side
     // were reverted on 2026-09-25; the note further down and
     // docs/todo-opening-view.md record why, so the next attempt does not
     // repeat them. The zoom is already extent-based (create_osm_zim's

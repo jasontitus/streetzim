@@ -3,7 +3,7 @@
 Hard-won lessons that aren't obvious from the code or the libzim
 docs. Each one cost real user time before being run down. Worth
 re-reading before changing anything in `cloud/repackage_zim.py`,
-`cloud/upload_validated.sh`, or the `places.html` chunk-loading path.
+`ops/cloud/upload_validated.sh` (run as `cloud/upload_validated.sh`), or the `places.html` chunk-loading path.
 
 ---
 
@@ -16,16 +16,21 @@ behaves the same way.
 
 **Cause.** The cells-index is parsed in one shot — the viewer fetches
 the whole file into a single ArrayBuffer before any cell can be
-looked up. When the cluster is zstd-22 compressed, decompression on
+looked up. When the cluster is zstd compressed (level 22 in the
+production `--zim-builder rust` builds, libzim's fixed 19 otherwise),
+decompression on
 the WebView thread takes longer than the watchdog will tolerate.
 Storing the file raw lets Kiwix's HTTP server hand the bytes through
 unmodified.
 
 **Where the rule lives.**
-- Fresh build (`_emit_spatial_graph`):
+- Fresh build (`_add_routing_graph` in `streetzim/zim_writer.py`):
+  `idx_compress = idx_size < 200 * 1024 * 1024`, and the same test per
+  cell.
+- Repack spatial conversion (`_emit_spatial_graph` in `cloud/repackage_zim.py`):
   ```python
   compress_idx = idx_mb < 200
-  compress_cell = len(data) < 200 * 1024 * 1024
+  compress_cell = size < 200 * 1024 * 1024
   ```
 - Repack passthrough (`cloud/repackage_zim.py`): same threshold
   applied to `graph-cells-index.bin` and any individual
@@ -38,7 +43,7 @@ repack. If bytes match but the repack ZIM is smaller overall, the
 index probably ended up in a compressed cluster:
 
 ```sh
-./venv312/bin/python3 - <<'PY'
+./venv-linux/bin/python3 - <<'PY'
 from libzim.reader import Archive
 import hashlib
 for p in ("osm-x.zim", "osm-x-fixed.zim"):
@@ -75,10 +80,17 @@ hot-split prefixes.
 3. **Recursively-split.** Hot-split children themselves split, leaves
    are 4-character names (`de-0-0-0`, …). Manifest *should* chain
    `sub_chunks['de'] = ['de-0', …]` then `sub_chunks['de-0'] =
-   ['de-0-0']` etc. **Current builds sometimes ship
-   `sub_chunks['de'] = []`** — a build-side bug worth fixing in the
-   prefix splitter. Until then, the client falls back to a chunks-map
-   scan for `<prefix>-*` keys.
+   ['de-0-0']` etc. **Builds before 2026-09-16 sometimes shipped
+   `sub_chunks['de'] = []`**; for those the client falls back to a
+   chunks-map scan for `<prefix>-*` keys. The builder no longer writes
+   an empty list (`streetzim/zim_writer.py`), and `--reshard-search`
+   flattens the old trees.
+
+Since 2026-09-16 hot prefixes are split by character path and tier
+instead (`ca~r~c`, with `-0…-f` hash children only where characters stop
+dividing), listed under `char_split` as well as `sub_chunks`; see
+[search-records.md](search-records.md#search-data). The client also scans
+for `<prefix>~*` keys.
 
 **Helper.** `expandPrefix(prefix)` in `resources/viewer/places.html`
 resolves a prefix to its leaf chunk filenames covering all three
@@ -112,9 +124,9 @@ cleanup still runs (best-effort) so we don't make outages worse.
 **Manual recovery if you discover a stale item right now.**
 
 ```sh
-PATH="$PWD/venv312/bin:$PATH" ./venv312/bin/python3 \
+PATH="$PWD/venv-linux/bin:$PATH" ./venv-linux/bin/python3 \
     cloud/cleanup_old_zims.py streetzim-<id> --keep 2
-./venv312/bin/python3 web/generate.py --deploy
+./venv-linux/bin/python3 web/generate.py --deploy
 ```
 
 (`cleanup_old_zims.py` shells out to bare `ia` via `subprocess.run`,
@@ -177,6 +189,12 @@ gate together.
 
 ## 5. Repackage flag traps when the source is already-repacked
 
+(The production wrapper, `build-region-fast.sh`, now passes
+`--no-llm-bundle` and `--spatial-chunk-scale 10` at build time, so its
+ZIMs need no post-build repack. The traps below apply when repacking an
+older ZIM, or one from `cloud/build_region.sh`, which is due for
+retirement.)
+
 `build_region.sh` runs `cloud/repackage_zim.py --spatial-chunk-scale 10`
 internally whenever the create_osm_zim graph exceeds 500 MB (Iran,
 California, Ukraine, Canada, …). That internal repack uses the
@@ -201,7 +219,7 @@ repack run before the validator caught it.
 pass `--spatial-chunk-scale` when the source is monolithic.
 
 ```sh
-./venv312/bin/python3 -c "
+./venv-linux/bin/python3 -c "
 from libzim.reader import Archive
 import sys
 a = Archive(sys.argv[1])
@@ -327,16 +345,17 @@ actual workload doesn't fan-out across mime types.
 ## 8. `ManifestCreator` swallows `ZSTD_CLEVEL` if `compression_level` is left unset
 
 **Symptom.** `build_region.sh` (and our wrappers) set
-`ZSTD_CLEVEL=22` in the environment to match the libzim path's
-production default. libzim's Creator reads the env var directly. But
+`ZSTD_CLEVEL=22` in the environment. libzim's Creator does not read it
+(it compresses at a fixed zstd level 19, `src/compression.cpp`), so the
+variable only matters to the rust path. But
 `cloud/manifest_writer.py` builds a manifest config dict and only
 emits `compression_level` if the caller explicitly passed one — the
 env var was being lost. The first XB1 build of California shipped
 silently at zstd-3 (the rust default) instead of zstd-22, producing
 a ~25 % larger ZIM than baseline.
 
-**Fix.** `create_osm_zim.py:create_zim` now reads `ZSTD_CLEVEL` and
-passes it to `ManifestCreator(compression_level=...)` explicitly,
-so the rust path matches libzim's behaviour. Logged via
+**Fix.** `create_zim` (now `streetzim/zim_writer.py`) reads `ZSTD_CLEVEL` (default 22) and
+passes it to `ManifestCreator(compression_level=...)` explicitly;
+the libzim path ignores it. Logged via
 `PHASE_TIMER.record_metric("zim-pack: zstd level", ...)` in every
 build summary so you can spot a level mismatch immediately.

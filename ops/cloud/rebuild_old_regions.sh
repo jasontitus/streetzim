@@ -16,7 +16,8 @@ unset _ops_real _ops_old
 # wikidata/ is not in a viewer slot, so only a rebuild fixes it.
 #
 # The list is rebuild-old.list, smallest first (washington-dc 0.2 GB ->
-# europe 65 GB), re-read every iteration so it can be trimmed mid-run.
+# europe 65 GB), read once when the driver starts (line ORDER= below): a
+# change to it takes effect only when the driver is restarted.
 #
 # Per region: osmium extract -> symlink world tiles/search -> Overture
 # download -> build-region-fast.sh -> validate -> markers -> gates -> upload.
@@ -24,7 +25,7 @@ unset _ops_real _ops_old
 # Notes earned elsewhere in this project:
 #  * The PBF must be a REAL extract, never a planet symlink: wikidata_cache's
 #    extract_qids_from_pbf walks the whole file with no bbox filter, so a
-#    symlink turns a 5-minute scan into 9+ hours (docs/new-region-setup.md).
+#    symlink turns a 5-minute scan into 9+ hours (ops/docs/new-region-setup.md).
 #  * mbtiles and search.jsonl ARE bbox-aware at read time, so symlinks are
 #    correct and save ~110 GB per region.
 #  * Overture `addresses` coming back ~0 rows is EXPECTED for regions Overture
@@ -204,7 +205,7 @@ for ID in $ORDER; do
   fi
 
   # PRODUCTION wrapper. The first run of this queue used build-region.sh
-  # (named in docs/new-region-setup.md), which is missing 12 flags that every
+  # (named in ops/docs/new-region-setup.md), which is missing 12 flags that every
   # shipped region was built with -- no --bundle-wiki-articles, no url-cache,
   # the python writer instead of rust. All four countries it built shipped
   # WITHOUT a Wikipedia layer; the in-ZIM Kiwix gate caught it.

@@ -22,9 +22,11 @@ The planner is two-pass and streaming: callers feed records once to an
 for the leaf set. Neither the build nor the retrofit ever holds a whole prefix
 in memory — ``av`` on united-states is 2.93 GB.
 
-The normalisation here MUST match ``create_osm_zim.py`` (``_norm``,
-``_word_re``, ``_prefix_key``) and the viewers' ``keyFor``/``normalizeText``;
-if it drifts, readers ask for leaves the writer never wrote.
+The normalisation here is the writer's: ``streetzim/zim_writer.py`` imports
+``norm`` and ``prefix_key`` as ``_norm`` and ``_prefix_key`` (and keeps its
+own copy of ``_word_re``). It MUST match the viewers'
+``keyFor``/``normalizeText``; if it drifts, readers ask for leaves the writer
+never wrote.
 """
 from __future__ import annotations
 
@@ -70,7 +72,7 @@ _word_re = re.compile(r"[^\W_]+", re.UNICODE)
 
 
 def norm(s: str) -> str:
-    """``create_osm_zim.py`` ``_norm``: accent-fold, then lowercase."""
+    """The writer's ``_norm``: accent-fold, then lowercase."""
     s = unicodedata.normalize("NFKD", s or "")
     s = "".join(c for c in s if not unicodedata.combining(c))
     return s.lower()
@@ -81,7 +83,7 @@ def _ascii_norm(ch: str) -> str:
 
 
 def prefix_key(word: str) -> str:
-    """``create_osm_zim.py`` ``_prefix_key``: the 2-char chunk key."""
+    """The writer's ``_prefix_key``: the 2-char chunk key."""
     pw = norm(word).replace(" ", "_")
     if not pw:
         return "__"
@@ -240,9 +242,10 @@ def char_split_paths(leaves: Iterable[tuple[str, Path, int, int]]) -> list[str]:
 
 def sub_bucket_for_name(name: str, n_buckets: int) -> int:
     """Deterministic, language-agnostic hash mapping a record's name to
-    one of ``n_buckets`` sub-chunks. Must match the client-side logic
-    in resources/viewer/index.html (``subBucketFor``) and Swift
-    (``Geocoder.subBucketFor``).
+    one of ``n_buckets`` sub-chunks. Swift (``Geocoder.subBucketFor``)
+    must compute the same bucket. The web viewer does not compute it: it
+    fetches every sub-chunk the manifest's ``sub_chunks`` lists for a
+    prefix and filters by the query (resources/viewer/src/index/300-search.js).
 
     Uses FNV-1a 32-bit hash over the UTF-8 bytes of the full name —
     cheap, no external deps, and reproducible across Python / JS / Swift
@@ -271,7 +274,7 @@ def split_records_recursive(
          **size-based slicing**: distribute records by index modulo
          n_buckets. Client behavior is unaffected because the client
          already fetches every sub-chunk under a prefix and filters by
-         query content (see resources/viewer/index.html ``expandPrefix``).
+         query content (see ``expandPrefix`` in resources/viewer/src/index/300-search.js).
 
     The serialized payload is checked against ``threshold_bytes`` before
     splitting — if the chunk is already small enough (or recursion is
