@@ -265,9 +265,13 @@
 
   /* --- Unified control strip --- */
   #controls {
-    /* 152px, not 120px: the MapLibre control column runs to y=142 once
-       --top-inset is 0, which overlapped this panel by 44x22 px. */
-    position: absolute; top: calc(152px + var(--top-inset, 0px)); right: 10px; z-index: 2;
+    /* Below the whole MapLibre top-right column: zoom/compass (y=10-142),
+       then the "Show the whole map" button (initHomeButton, y=152-196), then
+       10px. At 152px this panel sat on the Home button: a tap on Home hit
+       "Toggle satellite imagery" instead (overlap-check and the device
+       matrix both caught it). If a control is added to that column, move
+       this down by its height + 10px. */
+    position: absolute; top: calc(206px + var(--top-inset, 0px)); right: 10px; z-index: 2;
     display: flex; flex-direction: column;
     background: var(--panel-bg); border-radius: var(--radius);
     box-shadow: var(--panel-shadow);
