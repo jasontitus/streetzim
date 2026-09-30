@@ -745,9 +745,15 @@ async function main() {
             // or "<kind> · 230 m · …".
             const firstMeta = await page.$eval(
               '#results li .meta', el => el.textContent);
-            const m = firstMeta.match(/(\d+(?:\.\d+)?)\s*(m|km)\b/);
+            // The viewer prints the reader's units since 8da7cea: m/km for
+            // most locales, ft/mi for en-US (headless Chrome's default). A
+            // metric-only pattern read "383 ft" as no distance at all and
+            // failed every region on the new viewer. Longest unit first, so
+            // "mi" isn't taken as "m"; thousands separators are dropped.
+            const m = firstMeta.match(/(\d[\d,]*(?:\.\d+)?)\s*(km|mi|ft|m)\b/);
+            const KM_PER = { km: 1, m: 0.001, mi: 1.609344, ft: 0.0003048 };
             const distKm = m
-              ? parseFloat(m[1]) * (m[2] === 'km' ? 1 : 0.001)
+              ? parseFloat(m[1].replace(/,/g, '')) * KM_PER[m[2]]
               : null;
             // 50 km is generous — a city's nearest gas station is
             // typically <5 km, but small regions / rural areas may
