@@ -1089,12 +1089,20 @@ def _build_search(
             # Administrative areas, from the extract before any bbox cut
             # (so an area the cut clips still has its whole polygon). A
             # search cache reused with --skip-address-extract has them.
+            # Their wikipedia/wikidata tags are collected on the way
+            # (admin_refs); None: not extracted here, read from the JSONL.
+            admin_refs = None
             if not args.skip_address_extract and not args.no_admin_areas:
                 _src = os.path.join(tmpdir, "source.osm.pbf")
                 admin_pbf = (pbf_path or args.pbf
                              or (_src if os.path.isfile(_src) else None) or addr_pbf)
                 try:
-                    n_admin = append_admin_areas(admin_pbf, search_features, bbox=addr_bbox)
+                    _refs: dict = {}
+                    n_admin = append_admin_areas(admin_pbf, search_features, bbox=addr_bbox,
+                                                 wiki_refs=_refs)
+                    # Nothing collected (osmium missing, or no area has a
+                    # tag): the JSONL is read, as for a salvage build.
+                    admin_refs = _refs or None
                     from streetzim.source_report import note
                     note("Administrative areas",
                          f"{n_admin} (OSM boundary relations; regions and clipped "
@@ -1110,14 +1118,19 @@ def _build_search(
                 print(f"    Warning: wiki cross-ref extraction failed: {_e}")
                 wiki_cross_refs = None
             wiki_cross_refs = _finish_wiki_cross_refs(args, wiki_cross_refs,
-                                                      search_features)
+                                                      search_features, admin_refs)
     return address_count, overture_sources, overture_themes, search_features, wiki_cross_refs
 
 
-def _finish_wiki_cross_refs(args, wiki_cross_refs, search_features):
+def _finish_wiki_cross_refs(args, wiki_cross_refs, search_features, admin_refs=None):
     """The wiki cross-ref lookup as the ZIM writer gets it: the
     administrative areas' tags added, then (--resolve-wikidata-titles)
-    every entry's English title resolved from its Q-ID."""
+    every entry's English title resolved from its Q-ID.
+
+    admin_refs: the areas' tags as append_admin_areas collected them. None
+    (a salvage build reusing a search cache, --no-admin-areas, nothing
+    collected): they are read from the search JSONL instead, one pass over
+    it (about 4.6 min for Europe's 26.6 GB)."""
     # The administrative areas' own wikipedia/wikidata tags join the lookup
     # (keyed by relation), so they are resolved below and their articles
     # bundled like any other. They used to be read straight off the records
@@ -1127,7 +1140,14 @@ def _finish_wiki_cross_refs(args, wiki_cross_refs, search_features):
     try:
         from streetzim.admin_areas import add_admin_wiki_refs
         refs = wiki_cross_refs or {}
-        n_admin = add_admin_wiki_refs(refs, search_features)
+        if admin_refs is not None:
+            n_admin = 0
+            for key, tags in admin_refs.items():
+                if key not in refs:
+                    refs[key] = tags
+                    n_admin += 1
+        else:
+            n_admin = add_admin_wiki_refs(refs, search_features)
         if n_admin:
             wiki_cross_refs = refs
             print(f"    {n_admin} administrative areas with wikipedia/wikidata tags",

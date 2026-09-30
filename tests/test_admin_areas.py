@@ -230,9 +230,14 @@ def test_append_admin_areas(extract, no_rg, tmp_path, monkeypatch):
     lines = [json.loads(line) for line in out.read_text().splitlines()]
     assert lines[0]["name"] == "Cafe" and len(lines) == 10
     assert all(f["type"] == "admin" for f in lines[1:])
-    # A search cache that already has them (reused with --search-cache).
-    assert A.append_admin_areas(extract, str(out)) == 0
+    # A search cache that already has them (reused with --search-cache):
+    # none appended, but their wiki tags are still handed over.
+    refs: dict = {}
+    assert A.append_admin_areas(extract, str(out), wiki_refs=refs) == 0
     assert len(out.read_text().splitlines()) == 10
+    tagged = {f["osm"]: {k: f[k] for k in ("wikipedia", "wikidata") if f.get(k)}
+              for f in lines[1:] if f.get("wikipedia") or f.get("wikidata")}
+    assert tagged and refs == {A.admin_wiki_key(o): t for o, t in tagged.items()}
 
 
 def test_append_skips_without_osmium(tmp_path, monkeypatch, capsys):

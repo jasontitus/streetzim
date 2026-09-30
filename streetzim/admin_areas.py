@@ -1042,10 +1042,15 @@ def add_admin_wiki_refs(wiki_cross_refs: dict,
 
 
 def append_admin_areas(pbf_path: str, search_jsonl: str,
-                       bbox: Sequence[float] | None = None) -> int:
+                       bbox: Sequence[float] | None = None,
+                       wiki_refs: dict | None = None) -> int:
     """Append the admin areas to a search-feature JSONL, skipping any
     already in it; returns the count added. Skipped, with a message, when
-    the osmium CLI is not installed."""
+    the osmium CLI is not installed.
+
+    wiki_refs: when given, filled with every extracted area's wikipedia/
+    wikidata tags (add_admin_wiki_refs), those already in the JSONL too, so
+    the build need not read the whole JSONL again for them."""
     from streetzim.common import print  # the builder's flushing print
     print("  Extracting administrative areas from OSM data...")
     if not shutil.which("osmium"):
@@ -1053,6 +1058,8 @@ def append_admin_areas(pbf_path: str, search_jsonl: str,
         return 0
     stats: dict[str, int] = {}
     feats = extract_admin_areas(pbf_path, bbox, stats=stats)
+    if wiki_refs is not None:
+        add_admin_wiki_refs(wiki_refs, feats)
     have = (_admin_ids_in(search_jsonl)
             if os.path.exists(search_jsonl) and os.path.getsize(search_jsonl) else set())
     added = 0
