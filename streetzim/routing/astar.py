@@ -2,7 +2,8 @@
 two graphs with bit-identical node/edge arrays always produce identical
 routes.
 
-Matches resources/viewer/index.html:
+Matches the viewer's A* (resources/viewer/routing-worker.js and
+resources/viewer/src/index/530-routing-astar.js):
   - haversine distance (R = 6_371_000 m)
   - heuristic time = haversine / (100 / 3.6)   (speed = 100 km/h)
   - edge cost time  = dist_m / (speed / 3.6)

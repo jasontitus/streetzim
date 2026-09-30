@@ -36,7 +36,7 @@ var cancelledRoutes = new Set();
 var activeRoutes = new Set();
 
 // A* heuristic speed. MUST be >= the fastest edge speed the builder
-// emits (create_osm_zim.SPEED: motorway = 100 km/h) or the heuristic
+// emits (SPEED in streetzim/routing/build.py: motorway = 100 km/h) or the heuristic
 // over-estimates remaining time and the "optimal" pass silently
 // returns suboptimal routes. Matches tests/szrg_astar.HEURISTIC_SPEED_KPH
 // and cloud/route_cli.py, which are the differential references.

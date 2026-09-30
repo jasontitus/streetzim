@@ -60,7 +60,7 @@ def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
     CTAs: "Directions to here" + "View on map" (no auto-redirect any
     more). The viewer parses `index.html#dest=lat,lon&label=…` on load
     and pops the routing panel open — see `applyHash` in
-    `resources/viewer/index.html`.
+    `resources/viewer/src/index/120-map-init-and-style.js`.
 
     `enrich` is an optional dict sourced from Overture's places theme:
         {"ws": website, "p": phone, "soc": [social urls],

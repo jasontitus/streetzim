@@ -9627,7 +9627,7 @@ function initRouting(map, config) {
   }
 
   // A* heuristic speed. MUST be >= the fastest edge speed the builder
-  // emits (create_osm_zim.SPEED: motorway = 100 km/h) or the heuristic
+  // emits (SPEED in streetzim/routing/build.py: motorway = 100 km/h) or the heuristic
   // over-estimates remaining time and the "optimal" pass silently
   // returns suboptimal routes. Matches routing-worker.js and the
   // Python references (streetzim/routing/astar.py, cloud/route_cli.py).

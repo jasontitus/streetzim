@@ -223,9 +223,10 @@ def char_split_paths(leaves: Iterable[tuple[str, Path, int, int]]) -> list[str]:
 
 def sub_bucket_for_name(name: str, n_buckets: int) -> int:
     """Deterministic, language-agnostic hash mapping a record's name to
-    one of ``n_buckets`` sub-chunks. Must match the client-side logic
-    in resources/viewer/index.html (``subBucketFor``) and Swift
-    (``Geocoder.subBucketFor``).
+    one of ``n_buckets`` sub-chunks. Swift (``Geocoder.subBucketFor``)
+    must compute the same bucket. The web viewer does not compute it: it
+    fetches every sub-chunk the manifest's ``sub_chunks`` lists for a
+    prefix and filters by the query (resources/viewer/src/index/300-search.js).
 
     Uses FNV-1a 32-bit hash over the UTF-8 bytes of the full name —
     cheap, no external deps, and reproducible across Python / JS / Swift
@@ -254,7 +255,7 @@ def split_records_recursive(
          **size-based slicing**: distribute records by index modulo
          n_buckets. Client behavior is unaffected because the client
          already fetches every sub-chunk under a prefix and filters by
-         query content (see resources/viewer/index.html ``expandPrefix``).
+         query content (see ``expandPrefix`` in resources/viewer/src/index/300-search.js).
 
     The serialized payload is checked against ``threshold_bytes`` before
     splitting — if the chunk is already small enough (or recursion is
