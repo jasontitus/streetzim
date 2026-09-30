@@ -53,6 +53,8 @@ from pathlib import Path
 # with cloud/swap_viewer_rust.py -- they previously built the header
 # independently, which would have drifted.
 from cloud.viewer_slots import pad_to_slot as _pad_to_slot
+from streetzim import cpus as _cpus
+from streetzim.cpus import build_cpus
 # Search-feature extraction lives in streetzim/search_extract.py so it can be
 # used without the builder (openzim/maps integration, cloud/ tools). Names
 # are re-exported here for existing callers.
@@ -475,7 +477,13 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--terrain-dir", metavar="PATH", default=None,
                         help="Directory for terrain tile cache (default: terrain_cache/)")
     parser.add_argument("--workers", type=int, default=None,
-                        help="Number of ZIM compression workers (default: CPU_count/2)")
+                        help="Number of ZIM compression workers (default: --cpus, at most 20)")
+    parser.add_argument("--cpus", type=int, default=None, metavar="N",
+                        help="CPU cores the build uses at once: tilemaker threads, "
+                             "search and terrain processes, compression threads. "
+                             "Default: the usable cores, capped by the container's "
+                             "CPU quota and by its memory limit at "
+                             f"{_cpus.GIB_PER_CPU} GiB per core (streetzim/cpus.py)")
     parser.add_argument("--wikidata", action="store_true",
                         help="Include Wikidata info (population, description, etc.) for places/POIs")
     parser.add_argument("--wikidata-cache", metavar="PATH", default=None,
@@ -1314,7 +1322,7 @@ def _verify_terrain(*, args, bbox_str, include_terrain, terrain_dir, terrain_max
                 # each other's blocks.
                 import multiprocessing as _mp
                 _ctx = _mp.get_context("spawn")
-                with _ctx.Pool(min(4, os.cpu_count() or 4)) as pool:
+                with _ctx.Pool(min(4, build_cpus())) as pool:
                     pool.map(_generate_one_terrain_tile, repair_tiles)
                 print(f"    Repaired {len(repair_tiles)} terrain tiles")
             else:
@@ -1702,6 +1710,9 @@ def _print_summary(*, bbox, name, output_path, stats, total_tile_count):
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.cpus is not None and args.cpus < 1:
+        parser.error("--cpus must be at least 1")
+    _cpus.set_build_cpus(args.cpus)
     stats, zim_illustration, zim_metadata = _openzim_options(args=args)
 
     bbox_str, geofabrik_path, name, output_path, pbf_path = _resolve_area(
@@ -1715,6 +1726,8 @@ def main(argv=None):
     if stats:
         stats.write(0, total_steps)
     print(f"=== Creating Offline OSM ZIM: {name} ===")
+    print(f"  CPU cores: {build_cpus()} ("
+          + ("--cpus" if args.cpus is not None else _cpus.detect()[1]) + ")")
     if include_satellite:
         sat_desc = f"{satellite_format} q{satellite_quality} {satellite_tile_size}px"
         _src = satellite_sources.get(args.satellite_source)

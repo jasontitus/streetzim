@@ -14,6 +14,7 @@ from typing import NamedTuple
 from cloud.viewer_slots import pad_to_slot as _pad_to_slot
 from streetzim.search_extract import build_location_index
 from streetzim import area as _area
+from streetzim.cpus import build_cpus
 # The builder's flushing, phase-timing print (see streetzim/common.py).
 from streetzim.common import (
     PHASE_TIMER,
@@ -592,7 +593,7 @@ def create_zim(
     # workers busy-wait in queue.h pushToQueue()/popFromQueue() and
     # the build stalls permanently. 2 workers avoids contention while
     # still allowing the main thread to fill the queue ahead.
-    num_workers = zim_workers or min(os.cpu_count() or 4, 20)
+    num_workers = zim_workers or min(build_cpus(), 20)
     print(f"    ZIM compression workers: {num_workers} (tiles: {tile_count if tiles is None else len(tiles)})", flush=True)
     creator.config_nbworkers(num_workers)
     creator.set_mainpath("index.html")
@@ -1100,7 +1101,7 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
     # stored once; tile_source yields in (z, x, y) order, so the first-seen
     # target, and the ZIM, are the same on every build.
     aliaser = TileAliaser(creator)
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
+    with ThreadPoolExecutor(max_workers=build_cpus()) as pool:
         while True:
             batch = list(itertools.islice(tile_source, batch_size))
             if not batch:

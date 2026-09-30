@@ -52,7 +52,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:     # also runnable as `python streetzim/cli.py`
     sys.path.insert(0, str(REPO_ROOT))
-from streetzim import area, download  # noqa: E402  (after the path fix above)
+from streetzim import area, cpus, download  # noqa: E402  (after the path fix above)
 from streetzim.paths import RESOURCES_DIR, missing_runtime_files  # noqa: E402
 from streetzim import satellite_sources  # noqa: E402
 GEOFABRIK_POLY = re.compile(r"^https?://download\.geofabrik\.de/(.+)\.poly$")
@@ -88,6 +88,7 @@ ZIMFARM: dict[str, dict[str, Any]] = {
     "output": {"pattern": r"^/output$"},
     "stats_filename": {"pattern": r"^/output/task_progress\.json$"},
     "zim_workers": {"title": "ZIM workers", "min": 1},
+    "cpus": {"title": "CPU cores", "min": 1},
     "max_zoom": {"min": 0, "max": 14},
     "satellite": {"title": "Satellite imagery"},
     "satellite_source": {"title": "Satellite source", "type": "string-enum",
@@ -235,8 +236,15 @@ def build_parser() -> argparse.ArgumentParser:
     feat.add_argument("--default-view",
                       help="Initial map view as latitude,longitude[,zoom]")
     feat.add_argument("--zim-workers", type=int,
-                      help="Compression threads for libzim. Default: the CPU "
-                           "count, at most 20")
+                      help="Compression threads for libzim. Default: --cpus, "
+                           "at most 20")
+    feat.add_argument("--cpus", type=int,
+                      help="CPU cores the build uses at once (tilemaker, "
+                           "search, terrain, compression). Set it to the task's "
+                           "CPUs: a CPU share hides no cores, and each core "
+                           "costs memory. Default: the usable cores, at most "
+                           f"one per {cpus.GIB_PER_CPU} GiB of the container's "
+                           "memory limit")
     feat.add_argument("--keep-temp", action="store_true", help=argparse.SUPPRESS)
     add_profile_arguments(p)
     add_satellite_flags(p)
@@ -912,6 +920,8 @@ def _builder_argv(args: argparse.Namespace, bbox: str, pbf_url: str | None, dl: 
         argv += ["--max-zoom", str(args.max_zoom)]
     if args.zim_workers:
         argv += ["--workers", str(args.zim_workers)]
+    if args.cpus is not None:
+        argv += ["--cpus", str(args.cpus)]
     if args.default_view:
         lat, lon, zoom = parse_default_view(args.default_view)
         argv += [f"--map-center={lon},{lat}"]

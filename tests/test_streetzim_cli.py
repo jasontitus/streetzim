@@ -105,6 +105,13 @@ def test_kiwix_poi_pages_is_forwarded(tmp_path, no_network):
     assert builder_args(argv).kiwix_poi_pages
 
 
+def test_cpus_is_forwarded_only_when_given(tmp_path, no_network):
+    argv, _ = plan(["--area", "monaco", "--cpus", "3"], tmp_path)
+    assert builder_args(argv).cpus == 3
+    argv, _ = plan(["--area", "monaco"], tmp_path / "default")
+    assert builder_args(argv).cpus is None             # the builder detects it
+
+
 def test_monaco_preset_frames_all_of_monaco_with_sea_around_it():
     """--area monaco is what CI and the Zimfarm recipe build. Its box used to
     stop on Monaco's eastern border (7.44) and 500 m out to sea, so the sea
