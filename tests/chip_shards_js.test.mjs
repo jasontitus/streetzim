@@ -213,6 +213,27 @@ await test('no matches under a budget stop: partial, empty, not failed', async (
   assert.ok(got.partial && !got.failed, JSON.stringify({ p: got.partial, f: got.failed }));
 });
 
+await test('inBox: k counts only records that pass it; the fallback skips it', async () => {
+  const records = makeRecords(14, 8000, (R) => [40 + R() * 10, -80 + R() * 10]);
+  const { meta, files } = plan(records, 16 * 1024);
+  const point = { lat: 45, lon: -75 };
+  const bbox = { s: 44, w: -76, n: 46, e: -74 };
+  // The part of the box nearest the point is "under the search box".
+  const inBox = (r) => Math.abs(r.a - 45) > 0.4;
+  const got = await CHIP_SHARDS.load(meta, {
+    fetchShard: fetcherFor(files), point, bbox, inBox, k: 50, budgetBytes: 1 << 30 });
+  assert.equal(got.records.length, 50);
+  assert.ok(got.records.every(inBox), 'a record inBox rejects was returned');
+  sameDistances(got, brute(records, { point, bbox, predicate: inBox, k: 50 }), 'inBox');
+  // Nothing in the box passes: the fallback without the box finds the
+  // nearest records anywhere, inBox or not.
+  const none = await CHIP_SHARDS.load(meta, {
+    fetchShard: fetcherFor(files), point, bbox, inBox: () => false, k: 20,
+    fallbackToNearest: true, budgetBytes: 1 << 30 });
+  assert.ok(none.fellBack, 'expected the fallback');
+  sameDistances(none, brute(records, { point, k: 20 }), 'fallback');
+});
+
 await test('dense city: the first shard alone answers when it can', async () => {
   const R0 = rng(13);
   const records = makeRecords(13, 8000, (R, i) => i < 4000

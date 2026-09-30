@@ -211,33 +211,41 @@ function renderFindResultsFromStash(map) {
   map.triggerRepaint();
 }
 
-// The part of the map the reader can see, in canvas pixels: the screen
-// less 8 px at the sides, above the results strip at its tallest (200 px,
-// or the strip on screen if that is taller: a strip without a sub-filter
-// row is 34 px shorter than the next one may be), and not under the
-// search box and chip rail or the "Search this area" pill (holes: each
-// element's own rectangle, extended down by a pin's body, since a pin is
-// drawn upward from its tip). Holes, not a band across the screen: on a
-// landscape phone the search box covers only the middle of the width, and
-// a band below it left 11 px of a 360 px screen.
+// The part of the map the reader can see, in canvas pixels, for a pin's
+// tip: the screen less 16 px at the sides and a pin's body (FIND_PIN_H)
+// at the top, since a pin is drawn upward from its tip; above the results
+// strip at its tallest (200 px, or the strip on screen if that is taller:
+// a strip without a sub-filter row is 34 px shorter than the next one may
+// be); and not under the search box and chip rail, the "Search this area"
+// pill, the layer buttons or MapLibre's top corner controls (holes: each
+// element's own rectangle, extended down by a pin's body). Holes, not a
+// band across the screen: on a landscape phone the search box covers only
+// the middle of the width, and a band below it left 11 px of a 360 px
+// screen.
+var FIND_PIN_H = 44;
 function _findVisibleRect(map) {
   var canvas = map.getCanvas();
   var cr = canvas.getBoundingClientRect();
   var W = canvas.clientWidth, H = canvas.clientHeight;
   var holes = [];
-  ['search-container', 'find-search-area-btn'].forEach(function(id) {
-    var el = document.getElementById(id);
+  var els = ['search-container', 'find-search-area-btn', 'controls']
+    .map(function(id) { return document.getElementById(id); });
+  var ctrls = document.querySelectorAll(
+    '.maplibregl-ctrl-top-left > .maplibregl-ctrl, .maplibregl-ctrl-top-right > .maplibregl-ctrl');
+  for (var c = 0; c < ctrls.length; c++) els.push(ctrls[c]);
+  els.forEach(function(el) {
     if (!el) return;
     var r = el.getBoundingClientRect();
     if (r.height > 0 && r.width > 0) {
       holes.push({ x0: r.left - cr.left - 4, y0: r.top - cr.top - 4,
-                   x1: r.right - cr.left + 4, y1: r.bottom - cr.top + 36 });
+                   x1: r.right - cr.left + 4, y1: r.bottom - cr.top + FIND_PIN_H - 4 });
     }
   });
   var strip = document.getElementById('find-results-strip');
   var sr = strip ? strip.getBoundingClientRect() : null;
   var bottom = Math.min((sr && sr.height > 0) ? sr.top - cr.top : H, H - 200);
-  return { x0: 8, y0: 8, x1: W - 8, y1: Math.max(bottom - 8, 16), holes: holes };
+  return { x0: 16, y0: FIND_PIN_H, x1: W - 16,
+           y1: Math.max(bottom - 8, FIND_PIN_H + 8), holes: holes };
 }
 
 // Whether a record's point is inside that area on screen. project() takes

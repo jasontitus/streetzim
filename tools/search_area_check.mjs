@@ -18,7 +18,12 @@
 //   5. on a rotated map (bearing 45) every chip pin is on screen;
 //   6. Food & Drink after another chip, on a landscape phone, and "Search
 //      this area" on a name search's results leave no pin under the
-//      strip, the search box or the chip rail.
+//      strip, the search box, the chip rail or the map controls, or with
+//      its body off the top of the screen;
+//   7. with GEO_ORIGIN (the same map repacked with its chips as
+//      geographic shards, e.g. `--chip-shard-mb 0.003`), Food & Drink
+//      shows as many pins there as in the single-file layout, portrait
+//      and landscape, with the cap on results (300) lowered to 8.
 //
 //   ZIM_ORIGIN=http://127.0.0.1:8902/content/<book> CHROME_PATH=... \
 //     node tools/search_area_check.mjs
@@ -35,6 +40,7 @@ const START = pt(process.env.START, '7.4246,43.7396');   // Monte Carlo
 const PAN = pt(process.env.PAN, '7.4200,43.7355');       // towards the port
 const FAR = pt(process.env.FAR, '7.4160,43.7310');       // Fontvieille
 const ZOOMS = (process.env.ZOOMS || '15,16').split(',').map(Number);
+const GEO_ORIGIN = process.env.GEO_ORIGIN || '';  // optional: the same map, chips as geo shards
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const idle = p => p.evaluate(() => new Promise(res => {
@@ -52,15 +58,20 @@ const view = p => p.evaluate(() => {
 const same = (a, b) => Math.abs(a.z - b.z) < 0.01 && Math.abs(a.w * a.h / (b.w * b.h) - 1) < 0.01
   && Math.abs(a.lng - b.lng) < a.w * 0.01 && Math.abs(a.lat - b.lat) < a.h * 0.01;
 // Result pins: how many, and how many the reader cannot see: off the
-// screen's sides, at or below the results strip, or with the tip under the
-// search box / chip rail or the pill (each element's own rectangle).
-// Computed here rather than with the viewer's own helper, so the old
-// viewer is measured the same way.
-const pins = p => p.evaluate(() => {
+// screen's sides, with the pin's body (PIN_H px above its tip) off the
+// top, at or below the results strip, or with the tip under the search box
+// / chip rail, the pill, the layer buttons or MapLibre's top corner
+// controls (each element's own rectangle). Computed here rather than with
+// the viewer's own helper, so the old viewer is measured the same way.
+const PIN_H = 36;
+const pins = p => p.evaluate(PIN_H => {
   const m = window.__szMap, cv = m.getCanvas(), cr = cv.getBoundingClientRect();
   const covers = [];
-  for (const id of ['search-container', 'find-search-area-btn']) {
-    const el = document.getElementById(id), r = el && el.getBoundingClientRect();
+  const els = ['search-container', 'find-search-area-btn', 'controls'].map(id => document.getElementById(id))
+    .concat([...document.querySelectorAll(
+      '.maplibregl-ctrl-top-left > .maplibregl-ctrl, .maplibregl-ctrl-top-right > .maplibregl-ctrl')]);
+  for (const el of els) {
+    const r = el && el.getBoundingClientRect();
     if (r && r.height > 0 && r.width > 0) {
       covers.push({ x0: r.left - cr.left, y0: r.top - cr.top, x1: r.right - cr.left, y1: r.bottom - cr.top });
     }
@@ -71,16 +82,16 @@ const pins = p => p.evaluate(() => {
   const mk = ((typeof _findResultsState !== 'undefined' && _findResultsState.markers) || []).filter(Boolean);
   const hidden = mk.filter(k => {
     const q = m.project(k.getLngLat());
-    if (q.x < 8 || q.x > cv.clientWidth - 8 || q.y < 0 || q.y > bottom) return true;
+    if (q.x < 8 || q.x > cv.clientWidth - 8 || q.y < PIN_H || q.y > bottom) return true;
     return covers.some(c => q.x >= c.x0 && q.x <= c.x1 && q.y >= c.y0 && q.y <= c.y1);
   }).length;
   const label = document.querySelector('#find-results-strip span');
   return { n: mk.length, hidden, label: label ? label.textContent : '' };
-});
-const openPage = async (browser, w = 390, h = 844) => {
+}, PIN_H);
+const openPage = async (browser, w = 390, h = 844, from = origin) => {
   const p = await browser.newPage();
   await p.setViewport({ width: w, height: h, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
-  await p.goto(origin + '/index.html', { waitUntil: 'load', timeout: 120000 });
+  await p.goto(from + '/index.html', { waitUntil: 'load', timeout: 120000 });
   await p.waitForFunction(() => window.__szMap && window.__szMap.loaded()
     && document.querySelector('#find-chips .find-chip[data-chip="food"]'), { timeout: 120000 });
   return p;
@@ -208,6 +219,42 @@ try {
     } else errs.push('pill not shown');
     report(`landscape ${w}x${h}`, errs);
     await p.close();
+  }
+  if (GEO_ORIGIN) {
+    // The same map with its chips as geographic shards (GEO_ORIGIN) finds
+    // as many food pins the reader can see as the single-file layout: the
+    // shard loader took the 300 nearest in a box that included the part
+    // under the search box, and dropping those afterwards left 46 of 300
+    // on a landscape phone.
+    const errs = [];
+    const q = await openPage(browser, 390, 844, GEO_ORIGIN);
+    const layout = await q.evaluate(async () => {
+      const r = await fetch('category-index/manifest.json').then(x => x.json(), () => null);
+      return r && r.chips && r.chips.food ? r.chips.food.layout || 'single' : 'none';
+    });
+    await q.close();
+    if (layout !== 'geo') errs.push(`GEO_ORIGIN's Food & Drink is not geographic shards (layout ${layout})`);
+    else {
+      for (const [w, h, z] of [[390, 844, 15], [844, 390, 15], [844, 390, 14], [740, 360, 14]]) {
+        const n = [];
+        for (const from of [origin, GEO_ORIGIN]) {
+          const p = await openPage(browser, w, h, from);
+          // A small map has fewer than 300 in view: a cap of 8 makes the
+          // nearest (the ones next to the search box) decide the count.
+          await p.evaluate(() => { FIND_RESULTS_MAX = 8; });
+          await jump(p, START, z); await idle(p);
+          await tap(p, 'food');
+          await p.waitForSelector('#find-results-strip', { timeout: 60000 }); await settle(p);
+          const r = await pins(p);
+          if (r.hidden) errs.push(`${w}x${h} z${z} ${from === origin ? 'single-file' : 'geo'}: ${r.hidden} of ${r.n} pins hidden`);
+          n.push(r.n);
+          await p.close();
+        }
+        console.log(`  ${w}x${h} z${z}: single-file ${n[0]}, geo ${n[1]}`);
+        if (n[1] < Math.min(n[0], 8)) errs.push(`${w}x${h} z${z}: geo shards show ${n[1]} pins, single-file ${n[0]}`);
+      }
+    }
+    report('geographic shards find as many as one file', errs);
   }
   {
     // "Search this area" on a name search's results (no chip): the pill

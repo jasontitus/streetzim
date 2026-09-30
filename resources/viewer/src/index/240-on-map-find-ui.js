@@ -2,6 +2,10 @@
 var _findChipCache = new Map();    // chipId -> Promise<Array<record>>
 // Geo-sharded chips: bounded LRU of shard fetches instead of whole chips.
 var _chipShardCache = CHIP_SHARDS.makeCache(CHIP_SHARDS.budgetBytes());
+// The most results a chip tap shows (the nearest the map centre), to keep
+// the pins and the carousel responsive. A var so a check can lower it on
+// a small map (tools/search_area_check.mjs).
+var FIND_RESULTS_MAX = 300;
 window.addEventListener('pagehide', function() { _chipShardCache.clear(); });
 
 // BEGIN chip-availability
@@ -496,7 +500,8 @@ async function loadChipOnMap(map, chipDef, opts) {
       var _sMeta = (catManifest.chips && catManifest.chips[_sid]) || null;
       try {
         if (CHIP_SHARDS.isGeo(_sMeta)) {
-          var _vb = _findVisibleBox(map, _findVisibleRect(map)), _ctr = map.getCenter().wrap();
+          var _vr = _findVisibleRect(map);
+          var _vb = _findVisibleBox(map, _vr), _ctr = map.getCenter().wrap();
           var _r = await CHIP_SHARDS.load(_sMeta, {
             fetchShard: (function(sid) {
               return function(suffix) {
@@ -511,7 +516,10 @@ async function loadChipOnMap(map, chipDef, opts) {
             cacheKey: _sid,
             point: { lat: _ctr.lat, lon: _ctr.lng },
             bbox: _vb,
-            k: 300,
+            inBox: (function(vr) {
+              return function(r) { return _findRecordVisible(map, vr, r); };
+            })(_vr),
+            k: FIND_RESULTS_MAX,
             isCancelled: function() { return mySeq !== _chipLoadSeq; },
             fallbackToNearest: !opts.requireInBounds
           });
@@ -551,7 +559,11 @@ async function loadChipOnMap(map, chipDef, opts) {
   if (!_mergedPath && CHIP_SHARDS.isGeo(chipMeta)) {
     // Geographic shards: load only what the 300 nearest records around
     // the map centre need, scoped to what the reader can see.
-    var vb = _findVisibleBox(map, _findVisibleRect(map));
+    // Only records the reader can see count toward the 300 (the box
+    // includes the part under the search box; picking the 300 nearest
+    // first and dropping those afterwards left 46 on a landscape phone).
+    var vrect = _findVisibleRect(map);
+    var vb = _findVisibleBox(map, vrect);
     var ctr = map.getCenter().wrap();
     var res;
     try {
@@ -567,7 +579,8 @@ async function loadChipOnMap(map, chipDef, opts) {
       cacheKey: chipDef.id,
       point: { lat: ctr.lat, lon: ctr.lng },
       bbox: vb,
-      k: 300,
+      inBox: function(r) { return _findRecordVisible(map, vrect, r); },
+      k: FIND_RESULTS_MAX,
       isCancelled: function() { return mySeq !== _chipLoadSeq; },
       fallbackToNearest: !opts.requireInBounds
     });
@@ -659,7 +672,7 @@ async function loadChipOnMap(map, chipDef, opts) {
   // fallback returned 300 places strewn across the Baltics and fitBounds
   // flew the camera out to zoom 5.8 (baltics 2026-09-20, legacy layout).
   // The geo-shard path already falls back to nearest; this matches it.
-  if (items.length > 300) {
+  if (items.length > FIND_RESULTS_MAX) {
     var _c = map.getCenter().wrap();
     var _ranked = [];
     for (var ri = 0; ri < items.length; ri++) {
@@ -669,7 +682,7 @@ async function loadChipOnMap(map, chipDef, opts) {
     }
     _ranked.sort(function(x, y) { return x.d - y.d; });
     items = [];
-    for (var rj = 0; rj < _ranked.length && rj < 300; rj++) items.push(_ranked[rj].r);
+    for (var rj = 0; rj < _ranked.length && rj < FIND_RESULTS_MAX; rj++) items.push(_ranked[rj].r);
   }
   expanded = !filtered.length;
   }  // end legacy (single-file / name-hash bucket) layout

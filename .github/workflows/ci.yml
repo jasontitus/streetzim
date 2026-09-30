@@ -346,9 +346,17 @@ jobs:
       # A chip tap and "Search this area" re-framed the results at zoom 14,
       # pulling a reader at zoom 16 out to 14 (16 times the area) on every
       # tap. Uses the kiwix-serve started by the overlap-check step.
+      # GEO_ORIGIN: the same ZIM with its chips as geographic shards (a
+      # tiny --chip-shard-mb; Monaco's chips are far under the 2 MB default,
+      # so CI's build never uses that code path otherwise).
       - name: Search this area keeps the reader's view (search-area check)
         run: |
+          python cloud/repackage_zim.py osm-monaco-ci.zim osm-monaco-geo.zim \
+            --split-find-chips --chip-shard-mb 0.003
+          kiwix-serve --port 8903 osm-monaco-geo.zim &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8903/content/osm-monaco-geo/map-config.json >/dev/null && break; sleep 1; done
           ZIM_ORIGIN=http://127.0.0.1:8902/content/osm-monaco-ci \
+            GEO_ORIGIN=http://127.0.0.1:8903/content/osm-monaco-geo \
             CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
             node tools/search_area_check.mjs | tee search-area.txt
           grep -q '^SEARCH AREA OK' search-area.txt
