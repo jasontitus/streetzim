@@ -496,7 +496,7 @@ async function loadChipOnMap(map, chipDef, opts) {
       var _sMeta = (catManifest.chips && catManifest.chips[_sid]) || null;
       try {
         if (CHIP_SHARDS.isGeo(_sMeta)) {
-          var _vb = map.getBounds(), _ctr = map.getCenter().wrap();
+          var _vb = _findVisibleBox(map, _findVisibleRect(map)), _ctr = map.getCenter().wrap();
           var _r = await CHIP_SHARDS.load(_sMeta, {
             fetchShard: (function(sid) {
               return function(suffix) {
@@ -510,8 +510,7 @@ async function loadChipOnMap(map, chipDef, opts) {
             cache: _chipShardCache,
             cacheKey: _sid,
             point: { lat: _ctr.lat, lon: _ctr.lng },
-            bbox: { s: _vb.getSouth(), w: _vb.getWest(),
-                    n: _vb.getNorth(), e: _vb.getEast() },
+            bbox: _vb,
             k: 300,
             isCancelled: function() { return mySeq !== _chipLoadSeq; },
             fallbackToNearest: !opts.requireInBounds
@@ -551,8 +550,8 @@ async function loadChipOnMap(map, chipDef, opts) {
   var chipMeta = (catManifest.chips && catManifest.chips[chipDef.id]) || null;
   if (!_mergedPath && CHIP_SHARDS.isGeo(chipMeta)) {
     // Geographic shards: load only what the 300 nearest records around
-    // the map centre need, scoped to the viewport.
-    var vb = map.getBounds();
+    // the map centre need, scoped to what the reader can see.
+    var vb = _findVisibleBox(map, _findVisibleRect(map));
     var ctr = map.getCenter().wrap();
     var res;
     try {
@@ -567,7 +566,7 @@ async function loadChipOnMap(map, chipDef, opts) {
       cache: _chipShardCache,
       cacheKey: chipDef.id,
       point: { lat: ctr.lat, lon: ctr.lng },
-      bbox: { s: vb.getSouth(), w: vb.getWest(), n: vb.getNorth(), e: vb.getEast() },
+      bbox: vb,
       k: 300,
       isCancelled: function() { return mySeq !== _chipLoadSeq; },
       fallbackToNearest: !opts.requireInBounds
@@ -600,6 +599,17 @@ async function loadChipOnMap(map, chipDef, opts) {
     }
     items = res.records;
     expanded = res.fellBack;
+    if (!expanded) {
+      // The box query is wider than the screen on a rotated or tilted map,
+      // and the chrome covers part of the box: keep what can be seen.
+      var _vrect = _findVisibleRect(map);
+      var _vis = items.filter(function(r) { return _findRecordVisible(map, _vrect, r); });
+      if (_vis.length) items = _vis;
+      else if (opts.requireInBounds) {
+        _showFindToast('No ' + chipDef.label.toLowerCase() + ' in this area');
+        return;
+      } else expanded = true;
+    }
   } else {
   try {
     // Already filled by the multi-source merge above — re-fetching here
@@ -624,29 +634,13 @@ async function loadChipOnMap(map, chipDef, opts) {
     return;
   }
 
-  // Filter to the current map viewport. If that wipes everything,
-  // fall back to the unfiltered set (matches places.html behaviour
-  // — better to surface what's around than show "no results").
-  var bounds = map.getBounds();
-  var n = bounds.getNorth(), s = bounds.getSouth();
-  var e = bounds.getEast(),  w = bounds.getWest();
-  // getBounds() returns unwrapped longitudes across the antimeridian
-  // (west=170, east=190) while records store [-180, 180] — test the
-  // record shifted by ±360° too, or a viewport over Fiji rejects
-  // every record with a negative longitude.
-  function lonInside(lon) {
-    if (w <= e) {
-      return (lon >= w && lon <= e)
-          || (lon + 360 >= w && lon + 360 <= e)
-          || (lon - 360 >= w && lon - 360 <= e);
-    }
-    return lon >= w || lon <= e;
-  }
+  // Filter to what the reader can see (_findVisibleRect). If that wipes
+  // everything, fall back to the unfiltered set (matches places.html
+  // behaviour — better to surface what's around than show "no results").
+  var _rect = _findVisibleRect(map);
   var filtered = [];
   for (var i = 0; i < data.length; i++) {
-    var r = data[i];
-    if (typeof r.a !== 'number' || typeof r.o !== 'number') continue;
-    if (r.a >= s && r.a <= n && lonInside(r.o)) filtered.push(r);
+    if (_findRecordVisible(map, _rect, data[i])) filtered.push(data[i]);
   }
   // Behaviour split:
   //   - Initial chip-rail tap: viewport often empty (user just opened
@@ -697,8 +691,9 @@ async function loadChipOnMap(map, chipDef, opts) {
     // first "Search this area" click had activeChip already null
     // and fell through to the old in-memory filter.
     chipId: chipDef.id,
-    // "Search this area": the reader chose this view; keep it.
-    keepView: !!opts.requireInBounds,
+    // Found in what the reader can see (not a fall-back to the nearest):
+    // renderFindResultsFromStash then leaves the camera alone.
+    fromView: !expanded,
   };
   try {
     sessionStorage.setItem(FIND_RESULTS_STASH_KEY, JSON.stringify(stash));

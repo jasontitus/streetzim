@@ -22,7 +22,7 @@ var _findResultsState = {
   origin:  null,   // stash.origin (used for distance labels)
   active:  -1,     // index of the card currently centered
   searchAreaBtn: null,  // floating "Search this area" pill on the map
-  anchorCenter:  null,  // map center after the initial fitBounds settles
+  anchorCenter:  null,  // map center once the results' camera settles
   anchorZoom:    null,  // map zoom after the initial fitBounds settles
   moveHandler:   null,  // bound moveend handler (so we can detach on clear)
   renderSeq:     0,     // bumped per render; stale map.once('idle') callbacks bail
@@ -32,6 +32,13 @@ var _findResultsState = {
 };
 
 function renderFindResultsFromStash(map) {
+  // A render that keeps the view must not let the previous render's
+  // camera flight carry on (tap Gas, which flies to the nearest
+  // stations, then Food & Drink: the food pins were left off screen).
+  if (_findResultsState.fitting) {
+    _findResultsState.fitting = false;
+    try { map.stop(); } catch (e) {}
+  }
   clearFindResults();
   var raw;
   try { raw = sessionStorage.getItem(FIND_RESULTS_STASH_KEY); }
@@ -138,19 +145,20 @@ function renderFindResultsFromStash(map) {
     if (!bounds) bounds = new maplibregl.LngLatBounds([ro, r.a], [ro, r.a]);
     else         bounds.extend([ro, r.a]);
   }
-  // Move the camera only when some result is out of view (a name
-  // search handed over from places.html, or a chip that fell back to
-  // the nearest places). A "Search this area" tap (stash.keepView), or
-  // results that are all on screen already, leave the reader's view
-  // alone: re-framing them with maxZoom 14 zoomed a reader at z16 out
-  // to z14 on every tap, 16 times the area they had chosen.
-  if (bounds && !stash.keepView && !_findAllInView(map, stash.items)) {
+  // Results found in what the reader can see (a chip tap that did not
+  // fall back to the nearest places, "Search this area": stash.fromView)
+  // leave the camera alone: re-framing them with maxZoom 14 pulled a
+  // reader at z16 out to z14 on every tap, 16 times the area they had
+  // chosen. Anything else (a name search handed over from places.html, a
+  // chip that fell back) is framed as before.
+  if (bounds && !stash.fromView) {
     // Leave room for the carousel at the bottom — extra bottom
     // padding so the camera doesn't park results behind the strip.
-    // Never zoom in past where the reader already is.
+    _findResultsState.fitting = true;
+    map.once('moveend', function() { _findResultsState.fitting = false; });
     map.fitBounds(bounds, {
       padding: { top: 60, right: 40, bottom: 200, left: 40 },
-      maxZoom: Math.max(14, map.getZoom()), duration: 800,
+      maxZoom: 14, duration: 800,
     });
   }
   _renderFindResultsStrip(map, stash);
@@ -203,27 +211,59 @@ function renderFindResultsFromStash(map) {
   map.triggerRepaint();
 }
 
+// The part of the map the reader can see, in canvas pixels: below the
+// search box and chip rail (or the "Search this area" pill that replaces
+// them), above the results strip (or the 200 px it will take), 8 px in
+// from the sides. "In this area" means this rectangle, not getBounds(),
+// which also counts what the chrome covers and, on a rotated or tilted
+// map, ground that is not on screen at all.
+function _findVisibleRect(map) {
+  var canvas = map.getCanvas();
+  var cr = canvas.getBoundingClientRect();
+  var W = canvas.clientWidth, H = canvas.clientHeight;
+  var top = 0;
+  ['search-container', 'find-search-area-btn'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var r = el.getBoundingClientRect();
+    if (r.height > 0 && r.bottom - cr.top > top) top = r.bottom - cr.top;
+  });
+  var strip = document.getElementById('find-results-strip');
+  var sr = strip ? strip.getBoundingClientRect() : null;
+  var bottom = (sr && sr.height > 0) ? sr.top - cr.top : H - 200;
+  return { x0: 8, y0: Math.min(top + 8, H / 2), x1: W - 8,
+           y1: Math.max(bottom - 8, H / 2 + 1) };
+}
+
+// Whether a record's point is inside that rectangle on screen. project()
+// takes longitudes as given, so a record across the antimeridian from the
+// view is tried shifted by ±360° too.
+function _findRecordVisible(map, rect, r) {
+  if (typeof r.a !== 'number' || typeof r.o !== 'number') return false;
+  for (var k = -1; k <= 1; k++) {
+    var p = map.project([r.o + 360 * k, r.a]);
+    if (p.x >= rect.x0 && p.x <= rect.x1 && p.y >= rect.y0 && p.y <= rect.y1) return true;
+  }
+  return false;
+}
+
+// A lon/lat box around that rectangle (its four corners unprojected), for
+// queries that take a box. Wider than the rectangle on a rotated or tilted
+// map; callers filter with _findRecordVisible.
+function _findVisibleBox(map, rect) {
+  var pts = [[rect.x0, rect.y0], [rect.x1, rect.y0], [rect.x0, rect.y1], [rect.x1, rect.y1]]
+    .map(function(p) { return map.unproject(p); });
+  var box = { s: 90, n: -90, w: Infinity, e: -Infinity };
+  pts.forEach(function(ll) {
+    box.s = Math.min(box.s, ll.lat); box.n = Math.max(box.n, ll.lat);
+    box.w = Math.min(box.w, ll.lng); box.e = Math.max(box.e, ll.lng);
+  });
+  return box;
+}
+
 // Threshold: pill appears once the user has either zoomed by ≥ 0.5
 // levels or panned the centre out of the original viewport. Tighter
 // than "any move" so a small jitter doesn't flash the pill.
-// Every record with coordinates inside the map's current bounds.
-// getBounds() returns unwrapped longitudes across the antimeridian
-// (west=170, east=190) while records store [-180, 180], so a record is
-// also tested shifted by ±360°.
-function _findAllInView(map, items) {
-  var b = map.getBounds();
-  var w = b.getWest(), e = b.getEast(), s = b.getSouth(), n = b.getNorth();
-  for (var i = 0; i < items.length; i++) {
-    var r = items[i];
-    if (typeof r.a !== 'number' || typeof r.o !== 'number') continue;
-    if (r.a < s || r.a > n) return false;
-    var o = r.o;
-    if (!((o >= w && o <= e) || (o + 360 >= w && o + 360 <= e)
-          || (o - 360 >= w && o - 360 <= e))) return false;
-  }
-  return true;
-}
-
 function _searchAreaThresholdReached(map) {
   var ac = _findResultsState.anchorCenter;
   var az = _findResultsState.anchorZoom;
@@ -569,23 +609,10 @@ function _searchAreaApply(map) {
     return;
   }
   if (!_findResultsState.items || !_findResultsState.items.length) return;
-  var b = map.getBounds();
-  var w = b.getWest(), e = b.getEast(),
-      s = b.getSouth(), n = b.getNorth();
-  // getBounds() returns unwrapped longitudes across the antimeridian
-  // (west=170, east=190) while records store [-180, 180] — test the
-  // record shifted by ±360° too, or a viewport over Fiji rejects
-  // every record with a negative longitude.
-  function lonInside(lon) {
-    if (w <= e) {
-      return (lon >= w && lon <= e)
-          || (lon + 360 >= w && lon + 360 <= e)
-          || (lon - 360 >= w && lon - 360 <= e);
-    }
-    return lon >= w || lon <= e;
-  }
+  // What the reader can see, not getBounds() (see _findVisibleRect).
+  var rect = _findVisibleRect(map);
   var filtered = _findResultsState.items.filter(function(r) {
-    return r.a >= s && r.a <= n && lonInside(r.o);
+    return _findRecordVisible(map, rect, r);
   });
   if (filtered.length === 0) {
     // Nothing in view — keep current state, just flash a hint.
@@ -618,7 +645,7 @@ function _searchAreaApply(map) {
   clearFindResults();
   try {
     sessionStorage.setItem(FIND_RESULTS_STASH_KEY, JSON.stringify({
-      label: label, origin: origin, items: filtered, keepView: true,
+      label: label, origin: origin, items: filtered, fromView: true,
     }));
   } catch (e2) {}
   renderFindResultsFromStash(map);

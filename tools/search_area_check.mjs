@@ -1,18 +1,28 @@
-// Search this area must search the view the reader chose, not move it.
+// Find results: "Search this area" and chip taps search the view the reader
+// chose without moving it, show only pins the reader can see, and results
+// from elsewhere (a name search, a chip that fell back) are still framed.
 //
 // A chip tap, then "Search this area", each re-framed the results with
 // fitBounds(maxZoom 14): a reader at zoom 16 was pulled out to 14 on every
-// tap (16 times the area). This loads the viewer from a ZIM served by
-// kiwix-serve, taps the Food & Drink chip at zoom Z, pans to another spot
-// one zoom level closer, taps the pill, and checks that neither tap moved
-// the camera and that the pill appeared.
+// tap (16 times the area). Loads the viewer from a ZIM served by
+// kiwix-serve and checks, at each zoom in ZOOMS:
+//   1. tapping the chip leaves the camera where it was, and every result
+//      pin is in the visible area (below the chip rail, above the strip);
+//   2. after the reader moves, the "Search this area" pill appears, and
+//      tapping it re-renders the results without moving the camera;
+// and once:
+//   3. tapping Gas (which falls back to the nearest stations and flies
+//      there) then Food & Drink 100 ms later leaves the food pins visible;
+//   4. a name-search hand-off (a stash with one far result) still moves
+//      the camera to show it, at zoom 14 at most;
+//   5. on a rotated map (bearing 45) every chip pin is on screen.
 //
 //   ZIM_ORIGIN=http://127.0.0.1:8902/content/<book> CHROME_PATH=... \
 //     node tools/search_area_check.mjs
 //
-// START / PAN ("lon,lat") and ZOOMS ("15,16") default to Monaco (the CI ZIM).
-// Prints one line per zoom and "SEARCH AREA OK" when every check passed;
-// exits 1 otherwise.
+// START / PAN / FAR ("lon,lat") and ZOOMS default to Monaco (the CI ZIM);
+// START must have Food & Drink in view. Prints "SEARCH AREA OK" when every
+// check passed; exits 1 otherwise.
 import puppeteer from 'puppeteer-core';
 
 const origin = process.env.ZIM_ORIGIN;
@@ -20,8 +30,8 @@ if (!origin) { console.error('ZIM_ORIGIN is required'); process.exit(2); }
 const pt = (s, d) => (s || d).split(',').map(Number);
 const START = pt(process.env.START, '7.4246,43.7396');   // Monte Carlo
 const PAN = pt(process.env.PAN, '7.4200,43.7355');       // towards the port
+const FAR = pt(process.env.FAR, '7.4160,43.7310');       // Fontvieille
 const ZOOMS = (process.env.ZOOMS || '15,16').split(',').map(Number);
-const CHIP = process.env.CHIP || 'food';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const idle = p => p.evaluate(() => new Promise(res => {
@@ -30,48 +40,132 @@ const idle = p => p.evaluate(() => new Promise(res => {
   m.once('idle', () => setTimeout(res, 50));
   setTimeout(res, 6000);
 }));
+const settle = async p => { await sleep(1500); await idle(p); };
 const view = p => p.evaluate(() => {
-  const m = window.__szMap, b = m.getBounds();
-  return { z: m.getZoom(), w: b.getEast() - b.getWest(), h: b.getNorth() - b.getSouth() };
+  const m = window.__szMap, b = m.getBounds(), c = m.getCenter();
+  return { z: m.getZoom(), w: b.getEast() - b.getWest(), h: b.getNorth() - b.getSouth(),
+           lng: c.lng, lat: c.lat };
 });
-const same = (a, b) => Math.abs(a.z - b.z) < 0.01 && Math.abs(a.w * a.h / (b.w * b.h) - 1) < 0.01;
+const same = (a, b) => Math.abs(a.z - b.z) < 0.01 && Math.abs(a.w * a.h / (b.w * b.h) - 1) < 0.01
+  && Math.abs(a.lng - b.lng) < a.w * 0.01 && Math.abs(a.lat - b.lat) < a.h * 0.01;
+// Result pins: how many, and how many outside the area the reader can see
+// (below the search box / chip rail / pill, above the results strip, 8 px
+// in from the sides). Computed here rather than with the viewer's own
+// helper, so the old viewer is measured the same way.
+const pins = p => p.evaluate(() => {
+  const m = window.__szMap, cv = m.getCanvas(), cr = cv.getBoundingClientRect();
+  let top = 0;
+  for (const id of ['search-container', 'find-search-area-btn']) {
+    const el = document.getElementById(id), r = el && el.getBoundingClientRect();
+    if (r && r.height > 0) top = Math.max(top, r.bottom - cr.top);
+  }
+  const strip = document.getElementById('find-results-strip');
+  const sr = strip && strip.getBoundingClientRect();
+  const bottom = sr && sr.height > 0 ? sr.top - cr.top : cv.clientHeight;
+  const mk = ((typeof _findResultsState !== 'undefined' && _findResultsState.markers) || []).filter(Boolean);
+  const hidden = mk.filter(k => {
+    const q = m.project(k.getLngLat());
+    return !(q.x >= 8 && q.x <= cv.clientWidth - 8 && q.y >= top && q.y <= bottom);
+  }).length;
+  const label = document.querySelector('#find-results-strip span');
+  return { n: mk.length, hidden, label: label ? label.textContent : '' };
+});
+const openPage = async browser => {
+  const p = await browser.newPage();
+  await p.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  await p.goto(origin + '/index.html', { waitUntil: 'load', timeout: 120000 });
+  await p.waitForFunction(() => window.__szMap && window.__szMap.loaded()
+    && document.querySelector('#find-chips .find-chip[data-chip="food"]'), { timeout: 120000 });
+  return p;
+};
+const jump = (p, c, z) => p.evaluate((c, z) => window.__szMap.jumpTo({ center: c, zoom: z }), c, z);
+const tap = (p, chip) => p.evaluate(c => document.querySelector(
+  '#find-chips .find-chip[data-chip="' + c + '"]').click(), chip);
 
 const browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH,
   args: ['--no-sandbox', '--disable-dev-shm-usage'], headless: 'new' });
 let failed = 0;
+const report = (what, errs) => {
+  console.log(`${what}: ${errs.length ? 'FAIL ' + errs.join('; ') : 'ok'}`);
+  if (errs.length) failed++;
+};
 try {
   for (const z0 of ZOOMS) {
-    const p = await browser.newPage();
-    await p.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
-    await p.goto(origin + '/index.html', { waitUntil: 'load', timeout: 120000 });
-    await p.waitForFunction(c => window.__szMap && window.__szMap.loaded()
-      && document.querySelector('#find-chips .find-chip[data-chip="' + c + '"]'), { timeout: 120000 }, CHIP);
-    await p.evaluate((c, z) => window.__szMap.jumpTo({ center: c, zoom: z }), START, z0);
-    await idle(p);
+    const p = await openPage(browser), errs = [];
+    await jump(p, START, z0); await idle(p);
     const v0 = await view(p);
-    await p.evaluate(c => document.querySelector('#find-chips .find-chip[data-chip="' + c + '"]').click(), CHIP);
+    await tap(p, 'food');
     await p.waitForSelector('#find-results-strip', { timeout: 60000 });
-    await sleep(1200); await idle(p);
-    const v1 = await view(p);
-    const expanded = await p.evaluate(() => /expanded/.test(
-      (document.querySelector('#find-results-strip span') || {}).textContent || ''));
+    await settle(p);
+    const v1 = await view(p), r1 = await pins(p);
+    if (/expanded/.test(r1.label)) errs.push('Food & Drink found nothing in view at START (choose a START with food in view)');
+    if (!same(v0, v1)) errs.push(`chip tap moved the camera (z${v0.z.toFixed(2)} -> z${v1.z.toFixed(2)})`);
+    if (!r1.n) errs.push('chip tap showed no pins');
+    if (r1.hidden) errs.push(`${r1.hidden} of ${r1.n} pins are under the chrome or off screen after the chip tap`);
     // The reader moves to another spot, a little closer.
-    await p.evaluate((c, z) => window.__szMap.jumpTo({ center: c, zoom: z }), PAN, z0 + 1);
-    await idle(p);
+    await jump(p, PAN, z0 + 1); await idle(p);
     const pill = await p.waitForSelector('#find-search-area-btn', { timeout: 15000 }).then(() => true, () => false);
-    const v2 = await view(p);
-    let v3 = null;
-    if (pill) {
-      await p.evaluate(() => document.getElementById('find-search-area-btn').click());
-      await sleep(1500); await idle(p);
-      v3 = await view(p);
-    }
-    const errs = [];
-    if (!expanded && !same(v0, v1)) errs.push(`chip tap moved the camera (z${v0.z.toFixed(2)} -> z${v1.z.toFixed(2)})`);
     if (!pill) errs.push('pill not shown after the reader moved');
-    if (v3 && !same(v2, v3)) errs.push(`Search this area moved the camera (z${v2.z.toFixed(2)} -> z${v3.z.toFixed(2)}, area x${(v3.w * v3.h / (v2.w * v2.h)).toFixed(1)})`);
-    console.log(`z${z0}: ${errs.length ? 'FAIL ' + errs.join('; ') : 'ok'}${expanded ? ' (chip fell back to the nearest; its camera move is expected)' : ''}`);
-    failed += errs.length ? 1 : 0;
+    else {
+      const v2 = await view(p);
+      await p.evaluate(() => { document.getElementById('find-results-strip').dataset.old = '1'; });
+      await p.evaluate(() => document.getElementById('find-search-area-btn').click());
+      await settle(p);
+      const v3 = await view(p), r3 = await pins(p);
+      const rerendered = await p.evaluate(() => {
+        const s = document.getElementById('find-results-strip');
+        return !!s && !s.dataset.old;
+      });
+      if (!same(v2, v3)) errs.push(`Search this area moved the camera (z${v2.z.toFixed(2)} -> z${v3.z.toFixed(2)}, area x${(v3.w * v3.h / (v2.w * v2.h)).toFixed(1)})`);
+      if (!rerendered || !r3.n) errs.push('Search this area did not re-render the results');
+      if (r3.hidden) errs.push(`${r3.hidden} of ${r3.n} pins are under the chrome or off screen after Search this area`);
+    }
+    report(`z${z0}`, errs);
+    await p.close();
+  }
+  {
+    // A rotated map: getBounds() is the box around the rotated screen, so
+    // "in view" by bounds kept pins that were off screen.
+    const p = await openPage(browser), errs = [];
+    await p.evaluate(c => window.__szMap.jumpTo({ center: c, zoom: 16, bearing: 45 }), START);
+    await idle(p);
+    await tap(p, 'food');
+    await p.waitForSelector('#find-results-strip', { timeout: 60000 });
+    await settle(p);
+    const r = await pins(p);
+    if (!r.n) errs.push('no pins');
+    else if (r.hidden) errs.push(`${r.hidden} of ${r.n} pins not visible`);
+    report('rotated map (bearing 45)', errs);
+    await p.close();
+  }
+  {
+    // Tap Gas (falls back to the nearest stations and flies there), then
+    // Food & Drink before that flight ends.
+    const p = await openPage(browser), errs = [];
+    await jump(p, START, 17); await idle(p);
+    await tap(p, 'fuel'); await sleep(100); await tap(p, 'food');
+    await settle(p);
+    const r = await pins(p);
+    if (!r.n) errs.push('no food pins');
+    else if (r.hidden) errs.push(`${r.hidden} of ${r.n} food pins not visible`);
+    report('Gas then Food & Drink 100 ms later', errs);
+    await p.close();
+  }
+  {
+    // A name search handed over from places.html: one result far away.
+    const p = await openPage(browser), errs = [];
+    await jump(p, START, 16); await idle(p);
+    await p.evaluate(far => {
+      sessionStorage.setItem(FIND_RESULTS_STASH_KEY, JSON.stringify({
+        label: 'Name search', origin: null,
+        items: [{ n: 'Far place', t: 'poi', a: far[1], o: far[0] }] }));
+      renderFindResultsFromStash(window.__szMap);
+    }, FAR);
+    await settle(p);
+    const v = await view(p), r = await pins(p);
+    if (r.hidden) errs.push('the handed-over result is not visible');
+    if (v.z > 14.01) errs.push(`framed at z${v.z.toFixed(2)}, past 14`);
+    report('name search hand-off', errs);
     await p.close();
   }
 } finally {
