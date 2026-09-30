@@ -475,19 +475,40 @@ def test_encloses_across_the_antimeridian():
     assert A._encloses(us, (175.0, 51.0, 179.0, 53.0))
     assert not A._encloses(us, (-10.0, 50.0, -5.0, 55.0))
     assert A._encloses((0, 0, 10, 10), (1, 1, 2, 2)) and A._encloses((0, 0, 1, 1), None)
+    # Within the 2% tolerance west of a parent past 180: still held.
+    assert A._encloses(us, (171.99, 51.0, 190.0, 60.0))
+    # A parent box round the whole world holds a child written past 180.
+    assert A._encloses((-180.0, 18.0, 180.0, 72.0), (172.0, 51.0, 190.0, 60.0))
+
+
+def _wiggly(amp):
+    # A ring of radius 1 degree with 2000 wiggles `amp` degrees deep.
+    import math as m
+    n = 40000
+    return [(m.cos(2 * m.pi * k / n) * (1 + amp * m.sin(2 * m.pi * 2000 * k / n)),
+             m.sin(2 * m.pi * k / n) * (1 + amp * m.sin(2 * m.pi * 2000 * k / n)))
+            for k in range(n)]
 
 
 def test_big_rings_are_capped():
-    import math as m
-    n = 40000
-    ring = [(m.cos(2 * m.pi * k / n) * (1 + 0.01 * m.sin(2 * m.pi * 2000 * k / n)),
-             m.sin(2 * m.pi * k / n) * (1 + 0.01 * m.sin(2 * m.pi * 2000 * k / n)))
-            for k in range(n)]
+    ring = _wiggly(0.002)                                          # ~220 m wiggles
     assert len(A._simplified(ring, 8)) // 2 > A.MAX_BIG_RING      # a town keeps 50 m
     capped = A._simplified(ring, 2)
     assert len(capped) // 2 <= A.MAX_BIG_RING
     assert A.point_in_flat([A.prepare(capped)], 0, 0)
     assert not A.point_in_flat([A.prepare(capped)], 1.5, 0)
+
+
+def test_the_cap_never_moves_a_border_more_than_its_limit(monkeypatch):
+    # However many vertices remain, no thinning goes past
+    # MAX_BIG_RING_TOL_M: a ring that needs more keeps its vertices.
+    tols = []
+    thin = A._thin
+    monkeypatch.setattr(A, "_thin", lambda r, tol_m=A.SIMPLIFY_M: tols.append(tol_m) or thin(r, tol_m))
+    monkeypatch.setattr(A, "MAX_BIG_RING", 10)
+    out = A._simplified(_wiggly(0.01), 2)
+    assert max(tols) == A.MAX_BIG_RING_TOL_M <= 1000
+    assert len(out) // 2 > 10
 
 
 def test_prepared_rings_match_the_plain_test():
@@ -503,6 +524,9 @@ def test_prepared_rings_match_the_plain_test():
 def test_same_area_and_region_filters():
     assert A._same_area({"name": "Monaco"}, {"name": "monaco"})
     assert A._same_area({"name": "A", "wikidata": "Q1"}, {"name": "B", "wikidata": "Q1"})
+    # Twin towns: one name, two wikidata ids.
+    assert not A._same_area({"name": "Texarkana", "wikidata": "Q79468"},
+                            {"name": "Texarkana", "wikidata": "Q79466"})
     assert not A._same_area({"name": "A"}, {"name": "B"})
     # region_of_name drops the twin inside a polygon the extract has.
     tn = {"bbox": (2, 0, 4, 1.85), "level": 6, "tags": {},
@@ -532,3 +556,21 @@ def test_a_node_placed_area_takes_its_region_from_its_name(tmp_path, no_rg):
           if f["name"] == "Oberbillig"][0]
     assert (ob["lon"], ob["lat"]) == (3.95, 1.05)
     assert ob["location"] == "Rheinland-Pfalz" and ob["subtype"] == "municipality"
+
+
+@needs_osmium
+def test_a_closed_way_of_a_relation_is_not_an_area_of_its_own(tmp_path, no_rg):
+    """A closed member way tagged as a boundary (the Baarle enclaves'
+    "Nederland - Belgique" rings) is part of its relation's border, not a
+    second record; a closed boundary way no relation uses still is."""
+    pytest.importorskip("osmium")
+    o = Osm()
+    o.way(1, square(0, 0, 4, 4), tags={"boundary": "administrative", "admin_level": "2",
+                                       "name": "Border piece"})
+    o.rel(1, [("w", 1, "outer")], {"name": "Lux", "admin_level": "2", "ISO3166-1": "LU"})
+    o.way(9, square(1, 1, 2, 2), tags={"boundary": "administrative", "admin_level": "8",
+                                       "name": "Way Town"})
+    names = sorted(f["name"] for f in A.extract_admin_areas(o.write(tmp_path / "x.osm"),
+                                                            geonames=GEONAMES))
+    assert names == ["Lux", "Way Town"]
+

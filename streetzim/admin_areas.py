@@ -75,6 +75,8 @@ SIMPLIFY_M = 50.0
 # ... and a country's or state's ring (level <= 4) further, to this many
 # vertices at most (DP at 50 m leaves 10k-50k).
 MAX_BIG_RING = 4000
+# ... but never coarser than this: a border town must keep its parents.
+MAX_BIG_RING_TOL_M = 800.0
 # Margin around the build box when cutting the admin relations out of a
 # larger extract (osmium extract -s smart completes them): the box's own
 # size, clamped to these degrees, so an area around the box with a border
@@ -291,14 +293,16 @@ def representative_point(outers: Sequence[Sequence[Point]],
 
 
 def _simplified(ring: Sequence[Point], level: int) -> array:
-    """_thin at SIMPLIFY_M; a country's or state's ring (level <= 4) then
-    again at twice the tolerance until it has at most MAX_BIG_RING
-    vertices, so a point test on it stays cheap."""
+    """_thin at SIMPLIFY_M; a country's or state's ring (level <= 4) with
+    more than MAX_BIG_RING vertices is thinned again from the original at
+    twice the tolerance, up to MAX_BIG_RING_TOL_M, so a point test on it
+    stays cheap without moving a border by more than that (a very jagged
+    ring may keep more vertices)."""
     flat = _thin(ring)
     tol = SIMPLIFY_M
-    while level <= 4 and len(flat) // 2 > MAX_BIG_RING and tol < 20000:
+    while level <= 4 and len(flat) // 2 > MAX_BIG_RING and tol * 2 <= MAX_BIG_RING_TOL_M:
         tol *= 2
-        flat = _thin([(flat[i], flat[i + 1]) for i in range(0, len(flat), 2)], tol)
+        flat = _thin(ring, tol)
     return flat
 
 
@@ -712,6 +716,11 @@ def _collect_geometry(path: str, rels: dict[int, dict[str, Any]]) -> tuple[
 
         def area(self, a: Any) -> None:
             if a.from_way():
+                if a.orig_id() in way_owner:
+                    # A piece of a relation's border that happens to be a
+                    # closed way (the Baarle enclaves' "Nederland - Belgique"
+                    # rings, an island of a state): the relation is the area.
+                    return
                 tags = {t.k: t.v for t in a.tags}
                 lvl = admin_level(tags.get("admin_level"))
                 if (tags.get("boundary") != "administrative" or lvl is None
@@ -901,9 +910,11 @@ def extract_admin_areas(pbf_path: str, bbox: Sequence[float] | None = None, *,
 
 
 def _same_area(a: dict[str, str], b: dict[str, str]) -> bool:
-    """The same area mapped twice: the same wikidata, or the same name."""
-    if a.get("wikidata") and a.get("wikidata") == b.get("wikidata"):
-        return True
+    """The same area mapped twice: the same wikidata; or, when they do not
+    both have one, the same name (twin towns across a border, such as
+    Texarkana, have different wikidata and are not the same area)."""
+    if a.get("wikidata") and b.get("wikidata"):
+        return a["wikidata"] == b["wikidata"]
     return bool(a.get("name")) and _fold(a.get("name", "")) == _fold(b.get("name", ""))
 
 
@@ -914,13 +925,16 @@ def _encloses(outer: Sequence[float], inner: Sequence[float] | None) -> bool:
     Moselle, in a Luxembourg canton) does not. True without an inner box."""
     if inner is None:
         return True
-    if outer[2] > 180 and inner[0] < outer[0]:
-        # `outer` crosses the antimeridian (the US: 172 to 294); `inner`
-        # (Alaska's west, Hawaii) may be written at negative longitudes.
-        inner = (inner[0] + 360, inner[1], inner[2] + 360, inner[3])
     tol = 0.02 * max(inner[2] - inner[0], inner[3] - inner[1])
-    return (outer[0] - tol <= inner[0] and outer[1] - tol <= inner[1]
-            and inner[2] <= outer[2] + tol and inner[3] <= outer[3] + tol)
+
+    def fits(b: Sequence[float]) -> bool:
+        lon_ok = (outer[2] - outer[0] >= 360 - tol     # the whole world round
+                  or (outer[0] - tol <= b[0] and b[2] <= outer[2] + tol))
+        return lon_ok and outer[1] - tol <= b[1] and b[3] <= outer[3] + tol
+    # A box across the antimeridian runs past 180 (the US: 172 to 294), so
+    # a child may be written 360 degrees from its parent (Alaska's west,
+    # Hawaii at negative longitudes; or the other way round).
+    return any(fits((inner[0] + k, inner[1], inner[2] + k, inner[3])) for k in (0, 360, -360))
 
 
 def dedupe(feats: list[dict[str, Any]]) -> list[dict[str, Any]]:

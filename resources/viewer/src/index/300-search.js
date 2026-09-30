@@ -128,6 +128,20 @@ function _szAdminCamera(item) {
   }
   return { zoom: SZ_ADMIN_ZOOM[item && item.al] || 12 };
 }
+
+// The name|lat|lon keys of the administrative-area records among
+// `entries`. An area is often placed at its label node, which is also a
+// place record with the same name and point (Monaco the country and
+// Monaco the place): the search keeps the area's record, with its box,
+// and drops the place record with the same key, whichever comes first.
+function _szAdminKeys(entries) {
+  var keys = {};
+  for (var i = 0; i < entries.length; i++) {
+    var e = entries[i];
+    if (e && e.t === 'admin') keys[e.n + '|' + e.a + '|' + e.o] = true;
+  }
+  return keys;
+}
 // END admin-search
 
 // Drop a red marker at (lat, lon) with a "Directions to here" popup.
@@ -749,11 +763,13 @@ var SEARCH_SHARDS = (function () {
     var clng = center.lng;
     var bounds = map.getBounds();
 
+    var adminKeys = _szAdminKeys(entries);   // an area beats a place at its point
     for (var i = 0; i < entries.length; i++) {
       var item = entries[i];
       // Dedup: same entry may appear in multiple word-keyed chunks.
       var dedupKey = item.n + '|' + item.a + '|' + item.o;
       if (seenKeys[dedupKey]) continue;
+      if (item.t !== 'admin' && adminKeys[dedupKey]) continue;
       seenKeys[dedupKey] = true;
 
       var textScore = _szTextScore(item, q, words, normalizeText);

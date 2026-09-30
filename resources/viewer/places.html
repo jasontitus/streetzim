@@ -1406,7 +1406,7 @@ async function runNameQuery(q) {
 
   const prefixes = prefixesFor(q);
   let merged = [];
-  const seen = new Set();
+  const seen = new Map();
   for (const p of prefixes) {
     // Skip prefixes the manifest has nothing for. expandPrefix
     // covers the unsplit / hot-split / recursive-split layouts,
@@ -1424,11 +1424,7 @@ async function runNameQuery(q) {
     for (const rec of chunk) {
       // Substring match across name + subtype.
       const k = `${rec.n}@${rec.a},${rec.o}`;
-      if (seen.has(k)) continue;
-      if (matchesName(rec, q)) {
-        merged.push(rec);
-        seen.add(k);
-      }
+      if (matchesName(rec, q)) addOnce(merged, seen, k, rec);
     }
   }
   if (seq !== _querySeq) return;
@@ -2207,6 +2203,16 @@ function renderNearResults(cands, activeIdx) {
   els.nearResults.hidden = false;
 }
 
+// Add a record to `list` once per name and point (`seen`: key -> index).
+// An administrative area is often placed at its label node, which is also
+// a place record with the same name and point: the area's record, with
+// its box, wins that tie whichever comes first (as in the viewer).
+function addOnce(list, seen, key, rec) {
+  const at = seen.get(key);
+  if (at === undefined) { seen.set(key, list.length); list.push(rec); return; }
+  if (rec.t === 'admin' && list[at].t !== 'admin') list[at] = rec;
+}
+
 let nearActive = -1;
 let nearCandidates = [];
 
@@ -2217,7 +2223,7 @@ async function onNearInput() {
   if (q.length < 2 || q === 'My location') { hideNearResults(); return; }
   const seq = ++_nearSeq;
   const alive = () => seq === _nearSeq;
-  const seen = new Set();
+  const seen = new Map();
   const matches = [];
   const needle = q.toLowerCase();
 
@@ -2252,10 +2258,7 @@ async function onNearInput() {
     }
     for (const r of hits) {
       if (!r.n) continue;
-      const key = `${r.n}|${r.a}|${r.o}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      matches.push(r);
+      addOnce(matches, seen, `${r.n}|${r.a}|${r.o}`, r);
     }
   } else {
     // Legacy whole-prefix path, for ZIMs built without a character split.
@@ -2274,10 +2277,7 @@ async function onNearInput() {
         if (!r.n) continue;
         const lower = r.n.toLowerCase();
         if (!lower.includes(needle)) continue;
-        const key = `${r.n}|${r.a}|${r.o}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        matches.push(r);
+        addOnce(matches, seen, `${r.n}|${r.a}|${r.o}`, r);
       }
     }
   }

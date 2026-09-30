@@ -26,7 +26,7 @@ function slice(src, from, to) {
   return src.slice(a, b);
 }
 const V = new Function(slice(HTML, '// BEGIN admin-search', '// END admin-search') +
-  '\nreturn { _szSearchForms, _szFormsContain, _szTextScore, _szAdminCamera };')();
+  '\nreturn { _szSearchForms, _szFormsContain, _szTextScore, _szAdminCamera, _szAdminKeys };')();
 // The viewer's normalizeText (300-search.js, initSearch).
 const norm = (s) => s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
 
@@ -165,3 +165,11 @@ ok('Find page and Kiwix pages agree on the fitted zoom', () => {
 });
 
 console.log(`\n${pass} passed`);
+
+ok('an area wins over the place record at its point (same name and point)', () => {
+  const place = { n: 'Monaco', t: 'place', s: 'country', a: 43.73235, o: 7.42768 };
+  const area = { n: 'Monaco', t: 'admin', s: 'country', al: 2, a: 43.73235, o: 7.42768 };
+  const keys = V._szAdminKeys([place, area]);
+  assert.deepStrictEqual(Object.keys(keys), ['Monaco|43.73235|7.42768']);
+  assert.deepStrictEqual(V._szAdminKeys([place]), {});
+});
