@@ -168,9 +168,12 @@ are recommended for any `file:` field.
   clusters that `cloud/derive_zim.py` can copy or drop without re-encoding
   (docs/zim-variants.md). The flush needs zimru's `Creator::flush_cluster()`
   and is compiled in with `cargo build --release --features cluster_break`;
-  a binary built without it applies the size target, warns once, and does
-  not split. A packer older than this record rejects the manifest at parse
-  time (unknown `kind`), so keep `--tile-order source` for those.
+  a binary built without it warns once and does not split, and its size
+  target reaches the running streamer only if zimru carries
+  `patches/zimru-flush-cluster.patch` (unpatched zimru reads the target at
+  `start_writing` only). A packer older than this record rejects the
+  manifest at parse time (unknown `kind`), so a builder writing it needs a
+  current packer.
 
 ## Differences vs. the Python path
 

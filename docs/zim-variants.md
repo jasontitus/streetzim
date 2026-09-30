@@ -140,15 +140,14 @@ ones, which is an **ordering contract** on the builder:
 
 1. **Component-major emit order**, already true in practice: viewer,
    libs, config, tiles, satellite, terrain, fonts, wikidata, routing,
-   search, Xapian (`create_osm_zim.py` around lines 5072-6690).
-2. **Zoom-major within a raster or vector prefix.** True for the streaming
-   path (`ORDER BY rowid`, zoom-major from tilemaker) but **not** for regions
-   whose mbtiles is under 5 GB: `extract_tiles_from_mbtiles()` uses
-   `ORDER BY tile_column, tile_row` (line 1675), so z14 tiles are interleaved
-   with every other zoom in every cluster. Change to
-   `ORDER BY zoom_level, tile_column, tile_row`. Same content, same
-   `tiles/{z}/{x}/{y}` URLs, so no reader-visible change; compressed size
-   may move by a fraction of a percent either way.
+   search, Xapian (the phases of `streetzim/zim_writer.py` on main; this
+   was written against the pre-refactor `create_osm_zim.py`).
+2. **Zoom-major within a raster or vector prefix.** When this was written,
+   regions whose mbtiles was under 5 GB read tiles `ORDER BY tile_column,
+   tile_row`, interleaving zooms in every cluster. On main (2026-09-30)
+   `streetzim/tiles.py` reads one zoom at a time (`WHERE zoom_level = ?`),
+   so vector tiles are already zoom-major; only the cluster breaks below
+   are missing.
 3. **A cluster break at each component and zoom boundary.** Cheapest
    implementation: a `{"kind":"cluster_break"}` manifest record that makes
    `streetzim-pack` close the current cluster (a few lines in
@@ -607,15 +606,16 @@ Note that the build's default cluster target is `--cluster-size 2048` KiB
 A packer binary older than the record fails at the first break, after the
 viewer items were written; there is no preflight yet.
 
-The packer side (`rust/streetzim-pack`) parses the record and applies the
-size target, but the actual flush calls `Creator::flush_cluster()` on zimru,
-which the checkout here could not be verified against, so it is behind a
-cargo feature: `cargo build --release --features cluster_break`. Without
-the feature the binary warns once and does not split; with an older binary
-the manifest fails to parse. `docs/zim-builder-rust.md` carries the record
-spec. This is the one piece that could not be run end to end in this
-session: there is no tilemaker output, mercantile or zimru here. The Python
-ordering and the manifest record are unit-tested (`tests/test_tile_order.py`).
+The packer side (`rust/streetzim-pack`) parses the record; the flush calls
+`Creator::flush_cluster()` on zimru (`patches/zimru-flush-cluster.patch`),
+so it is behind a cargo feature: `cargo build --release --features
+cluster_break`. Without the feature the binary warns once and does not
+split, and the record's size target reaches the running streamer only with
+the zimru patch; with an older binary the manifest fails to parse.
+`docs/zim-builder-rust.md` carries the record spec. The Python ordering and
+the manifest record are unit-tested (`tests/test_tile_order.py`), and
+`tests/e2e_cluster_break.py` passes with the feature build against patched
+zimru (see below).
 
 ### Inventory: sizes on both sides, by MIME too
 
@@ -657,17 +657,20 @@ the following, all fixed and covered by tests where a test was possible:
 - **`--strip-addresses` inflated a cluster once per leaf**; the cache clear
   moved out of the loop. `counts.total` no longer zeroes when `byType` is
   absent. Rewrites for absent entries and a missing address count now warn.
-- Builder: the cluster target was **not restored after satellite/terrain**;
-  raster zoom breaks are emitted lazily so an all-skipped zoom yields no
-  empty cluster; a world-sized bbox falls back to source order;
+- Builder (not on main: the builder change was not ported, see above):
+  the cluster target was **not restored after satellite/terrain**; raster
+  zoom breaks are emitted lazily so an all-skipped zoom yields no empty
+  cluster; a world-sized bbox falls back to source order;
   `--tile-cluster-mb` rejects non-positive values.
 - Simulator: duplicate wrapped tiles at z0-1 are deduplicated.
 
-Not changed, noted: the regenerated `titleOrdered/v1` lists every entry as
-the zimru source does (libzim's own v1 is front articles only), the
-in-memory dirent list is still Python objects (fine to ~3 M entries,
-untested at 12 M), and an old packer binary fails at the first
-`cluster_break` after the viewer items are written (no preflight).
+Not changed, noted: the in-memory dirent list is still Python objects
+(measured 1.1-1.3 GB peak for an 825k-entry trim and 1.8 GB for `plan` on
+2.6 M entries; a continent of tens of millions of entries would need tens
+of GB), and an old packer binary fails at the first `cluster_break` after
+the viewer items are written (no preflight). (The regenerated
+`titleOrdered/v1` listed every entry at the time; it now lists front
+articles only, as libzim's does, see below.)
 
 ### Compressed size is what the tool has to track (2026-09-20, fourth pass)
 

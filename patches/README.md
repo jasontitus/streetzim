@@ -193,7 +193,8 @@ os.unlink(f)
 
 ## zimru-flush-cluster.patch (2026-09-21)
 
-Against zimru `061afbc`. Adds `Creator::flush_cluster()` (close every
+Written against zimru `061afbc`; applies cleanly to `9875705` (checked
+2026-09-30). Adds `Creator::flush_cluster()` (close every
 bucket so the next item starts a new cluster; a no-op when nothing is
 buffered, so it never yields an empty cluster) and makes
 `set_cluster_size_target` reach the running streamer, which previously

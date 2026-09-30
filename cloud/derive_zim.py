@@ -70,11 +70,19 @@ class SpillStore:
         shift = max(0, 2 * z - self.BUCKET_BITS)
         return key >> shift
 
+    # Open spill files at most (a world-wide regroup touches thousands of
+    # buckets; ulimit -n is 1024 on Linux and in Docker, 256 on macOS).
+    MAX_OPEN = 128
+
     def add(self, comp: str, z: int, key: int, data: bytes, ref: tuple[int, int]):
         k = (comp, z, self._bucket(z, key))
-        fh = self._fh.get(k)
+        fh = self._fh.pop(k, None)
         if fh is None:
-            fh = self._fh[k] = open(self.root / f"{comp}-{z}-{k[2]:04d}.spill", "ab")
+            if len(self._fh) >= self.MAX_OPEN:
+                old = next(iter(self._fh))            # least recently written
+                self._fh.pop(old).close()
+            fh = open(self.root / f"{comp}-{z}-{k[2]:04d}.spill", "ab")
+        self._fh[k] = fh                              # most recent last
         fh.write(struct.pack("<QIII", key, ref[0], ref[1], len(data)))
         fh.write(data)
         self.count[(comp, z)] += 1

@@ -91,7 +91,10 @@ def main() -> int:
         diff == 0 and missing == 0, f"({same} identical, {diff} differ, {missing} missing)")
     rep("dropped entries absent", present == 0, f"({dropped} expected dropped, {present} still present)")
     for k in ("Title", "Name", "Counter"):
-        print(f"       {k} = {dst.get_metadata(k)[:90]!r}")
+        try:
+            print(f"       {k} = {dst.get_metadata(k)[:90]!r}")
+        except RuntimeError:          # the source may not have it either
+            print(f"       {k} = (none)")
     print(f"       uuid {'changed' if src.uuid != dst.uuid else 'PRESERVED'}: {dst.uuid}")
     try:
         s = Searcher(dst).search(Query().set_query(a.query))
@@ -101,20 +104,44 @@ def main() -> int:
         rep("title suggestions", True, f"({g.getEstimatedMatches()} matches)")
     except Exception as ex:  # noqa: BLE001
         rep("search", False, str(ex))
-    # Second, independent reader: zimru's zimcheck (Rust), when a binary is
-    # around. Two implementations agreeing on the file is the real defence
-    # against a format detail this tool got subtly wrong.
-    zimcheck = os.environ.get("ZIMCHECK_BIN") or shutil.which("zimcheck") or next(
+    # Second, independent reader: a zimcheck (zimru's, preferred: ZIMCHECK_BIN,
+    # then ../zimru, then PATH, where libzim's zim-tools may answer). Two
+    # implementations agreeing on the file is the real defence against a
+    # format detail this tool got subtly wrong. The source is checked too:
+    # a derived file fails only on what the source does not (a streetzim
+    # source fails libzim's zimcheck on its search pages' links, for one).
+    zimcheck = os.environ.get("ZIMCHECK_BIN") or next(
         (p for p in (str(Path(__file__).resolve().parent.parent.parent / "zimru/target/release/zimcheck"),)
-         if os.path.exists(p)), None)
+         if os.path.exists(p)), None) or shutil.which("zimcheck")
     if zimcheck:
         res = subprocess.run([zimcheck, "-A", a.dst], capture_output=True, text=True, timeout=3600)
-        rep(f"zimcheck -A ({zimcheck})", res.returncode == 0,
-            (res.stdout.strip().splitlines() or [""])[-1][:100])
+        last = (res.stdout.strip().splitlines() or [""])[-1][:100]
+        if res.returncode == 0:
+            rep(f"zimcheck -A ({zimcheck})", True, last)
+        else:
+            sres = subprocess.run([zimcheck, "-A", a.src], capture_output=True, text=True, timeout=3600)
+            new = _zimcheck_findings(res.stdout) - _zimcheck_findings(sres.stdout)
+            rep(f"zimcheck -A ({zimcheck}): nothing the source does not have", sres.returncode != 0 and not new,
+                f"source rc={sres.returncode}; new: {sorted(new)[:3]}" if new or sres.returncode == 0 else last)
     else:
-        print("  skip zimru zimcheck (no binary; set ZIMCHECK_BIN or build ../zimru)")
+        print("  skip zimcheck (no binary; set ZIMCHECK_BIN or build ../zimru)")
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
+
+
+def _zimcheck_findings(out: str) -> set[str]:
+    """The kinds of problem zimcheck reports: its "[ERROR] ..." and
+    "[WARNING] ..." headlines, numbers and what follows a colon left out,
+    so a derived file's findings compare with its source's (fewer entries,
+    the same kinds of problem). The lines listing entries are skipped."""
+    import re
+    keep = set()
+    for line in out.splitlines():
+        line = line.strip()
+        if not line.startswith("[") or line.startswith("[INFO]"):
+            continue
+        keep.add(re.sub(r"\d+", "N", re.split(r"[:'\"]", line, maxsplit=1)[0]).strip())
+    return keep
 
 
 if __name__ == "__main__":

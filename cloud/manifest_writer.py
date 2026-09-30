@@ -286,9 +286,10 @@ class ManifestCreator:
         cluster with its neighbours and cloud/derive_zim.py can drop or copy
         it whole. streetzim-pack honours the flush only when built with the
         ``cluster_break`` cargo feature (it needs zimru's flush); otherwise
-        it applies the size target and warns once. The record is harmless to
-        older packers only if they ignore unknown kinds, which they do not:
-        keep --tile-order source for a packer that predates it.
+        it warns once, and the size target reaches the running streamer
+        only if zimru carries patches/zimru-flush-cluster.patch. A packer
+        older than this record rejects it (unknown kinds are an error), so
+        a builder that writes it must not be used with such a packer.
         """
         rec: dict[str, Any] = {"kind": "cluster_break"}
         if cluster_size_target is not None:

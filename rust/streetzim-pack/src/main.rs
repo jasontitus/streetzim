@@ -84,12 +84,14 @@ enum Record {
 
 /// `{"kind":"cluster_break","cluster_size_target":2097152}` — close the
 /// cluster being filled so the next item opens a new one, and optionally
-/// change the cluster size target from here on. create_osm_zim.py emits one
-/// between zoom levels of tiles/satellite/terrain (--tile-order zoom-hilbert)
-/// so each zoom is a run of whole clusters that cloud/derive_zim.py can copy
-/// or drop without re-encoding. The flush needs a `Creator::flush_cluster()`
+/// change the cluster size target from here on. Meant to be written between
+/// zoom levels of tiles/satellite/terrain (the builder's designed
+/// --tile-order zoom-hilbert, not yet ported: nothing writes it on main) so
+/// each zoom is a run of whole clusters that cloud/derive_zim.py can copy or
+/// drop without re-encoding. The flush needs a `Creator::flush_cluster()`
 /// on zimru and is compiled in only with `--features cluster_break`; without
-/// it the record still applies the size target and warns once.
+/// it the record warns once, and its size target reaches the running
+/// streamer only if zimru carries patches/zimru-flush-cluster.patch.
 #[derive(Debug, Deserialize)]
 struct ClusterBreakRec {
     #[serde(default)]
@@ -511,7 +513,8 @@ fn run(cli: &Cli) -> Result<()> {
                         eprintln!(
                             "streetzim-pack: cluster_break records present but this binary was \
                              built without the `cluster_break` feature; clusters will NOT be \
-                             split at zoom boundaries (size targets still apply)"
+                             split at zoom boundaries (a size target changes mid-stream only \
+                             with patches/zimru-flush-cluster.patch)"
                         );
                         warned_no_flush = true;
                     }

@@ -242,6 +242,10 @@ class MmapSource:
         self._fh.close()
 
 
+class RangeNotHonoured(RuntimeError):
+    """The server answered a byte-range request with something else."""
+
+
 class HttpSource:
     """A ZIM behind an HTTP server that honours Range (archive.org does).
     Reads go through a block cache; :meth:`prefetch` pulls one contiguous
@@ -272,8 +276,18 @@ class HttpSource:
         for attempt in range(4):
             try:
                 with urllib.request.urlopen(req, timeout=120) as resp:
+                    # A server that ignores Range answers 200 with the whole
+                    # file: stored at `start` that is garbage, and on a
+                    # 20 GB ZIM a download of all of it per block.
+                    cr = resp.headers.get("Content-Range", "")
+                    if resp.status != 206 or not cr.startswith(f"bytes {start}-"):
+                        raise RangeNotHonoured(
+                            f"{self.url} does not honour Range requests "
+                            f"(HTTP {resp.status}, Content-Range {cr!r})")
                     data = resp.read()
                 break
+            except RangeNotHonoured:
+                raise
             except Exception:  # noqa: BLE001
                 if attempt == 3:
                     raise

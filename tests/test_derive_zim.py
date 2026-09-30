@@ -310,3 +310,46 @@ def test_dry_run_writes_nothing(fixture_zim, tmp_path):
 def test_hilbert_key_is_a_bijection():
     keys = {tile_sort_key("hilbert", 4, x, y) for x in range(16) for y in range(16)}
     assert keys == set(range(256))
+
+
+def test_spill_store_caps_its_open_files(tmp_path, monkeypatch):
+    """A regroup touching more buckets than MAX_OPEN keeps at most that many
+    files open (ulimit -n), and still yields every item in key order."""
+    from cloud.derive_zim import SpillStore
+    monkeypatch.setattr(SpillStore, "MAX_OPEN", 4)
+    s = SpillStore(tmp_path / "spill")
+    z = 8
+    keys = [(i * 7919) % (1 << (2 * z)) for i in range(400)]   # many buckets, revisited
+    for i, k in enumerate(keys):
+        s.add("tiles", z, k, bytes([i % 251]) * 3, (i, 0))
+        assert len(s._fh) <= 4
+    got = list(s.iter_sorted("tiles", z))
+    assert sorted(k for k, _, _ in got) == sorted(keys) and len(got) == len(keys)
+    assert all(d == bytes([ref[0] % 251]) * 3 for _, d, ref in got)
+    s.close()
+
+
+def test_remote_reads_refuse_a_server_without_range(tmp_path):
+    """A server that answers a Range request with the whole file (200) is
+    refused, not read as if the file started at the requested offset."""
+    import functools
+    import http.server
+    import threading
+    (tmp_path / "f.zim").write_bytes(b"x" * 100_000)
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(tmp_path))
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        src = zimfmt.HttpSource(f"http://127.0.0.1:{httpd.server_address[1]}/f.zim")
+        with pytest.raises(zimfmt.RangeNotHonoured):
+            src._fetch(1000, 2000)
+    finally:
+        httpd.shutdown()
+
+
+def test_zimcheck_findings_compare_across_entry_counts():
+    from cloud.verify_derived import _zimcheck_findings
+    src = "[ERROR] Invalid internal links found: 1234\n  search/a.html: index.html#map=1\n"
+    dst = "[ERROR] Invalid internal links found: 87\n  search/b.html: index.html#map=2\n"
+    assert _zimcheck_findings(dst) <= _zimcheck_findings(src)
+    assert not _zimcheck_findings("[ERROR] Missing mandatory metadata: Name\n") <= _zimcheck_findings(src)
