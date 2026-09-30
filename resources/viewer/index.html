@@ -269,8 +269,11 @@
        then the "Show the whole map" button (initHomeButton, y=152-196), then
        10px. At 152px this panel sat on the Home button: a tap on Home hit
        "Toggle satellite imagery" instead (overlap-check and the device
-       matrix both caught it). If a control is added to that column, move
-       this down by its height + 10px. */
+       matrix both caught it). On short screens this panel becomes a row
+       beside Home instead (see the max-height rule below): a landscape
+       phone has no vertical room left on the right edge. Adding a control
+       to that column means re-running tmp/overlap-check.mjs in portrait
+       AND landscape, not just moving this down. */
     position: absolute; top: calc(206px + var(--top-inset, 0px)); right: 10px; z-index: 2;
     display: flex; flex-direction: column;
     background: var(--panel-bg); border-radius: var(--radius);
@@ -294,6 +297,16 @@
     background: var(--accent-hover);
   }
   #controls button + button { border-top: 1px solid var(--border); }
+  /* Landscape phones: the right edge holds zoom/compass (10-142), Home
+     (152-196) and, from the bottom, locate and attribution, which on a
+     375-390 px tall screen start around y=290. A 132 px column below Home
+     reaches y=338 and covered both. So the panel turns into a row at Home's
+     height, just left of the MapLibre column (10 + 44 + 10 = 64 px), below
+     the search band (which ends ~105) and above the bottom controls. */
+  @media (max-height: 500px) {
+    #controls { top: calc(152px + var(--top-inset, 0px)); right: 64px; flex-direction: row; }
+    #controls button + button { border-top: none; border-left: 1px solid var(--border); }
+  }
   /* (CSS for #places-link removed alongside the Find link on
      2026-05-10 — see HTML comment in #controls.) */
 
