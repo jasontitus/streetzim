@@ -94,3 +94,42 @@ def test_precut_routing_still_joins_at_the_antimeridian(tmp_path):
     g = extract_routing_graph(str(opl), str(tmp_path), precut=True,
                               bbox=list(area.normalize((179.9, -17.0, -179.9, -16.5))))
     assert _graph_counts(g) == (3, 4)
+
+
+def test_preset_area_from_another_extract_is_cut_once(seen, tmp_path):
+    # --area with an extract that is not the preset's own (the elif branch):
+    # the build cuts it, so the three steps skip their own cut.
+    w = _run(_args(area="monaco"), tmp_path, bbox_str=BOX,
+             geofabrik_path="europe/france", pbf_path=None)
+    assert seen["cut"] and w == str(tmp_path / "area.osm.pbf")
+    assert seen["addr"] == (w, True) and seen["rt"][2] is True
+
+
+@pytest.mark.parametrize("cut", [True, False])
+def test_main_passes_the_cut_flag_to_both_steps(monkeypatch, tmp_path, cut):
+    # main() itself, not just the helpers: what _acquire_tiles reports must
+    # reach _build_search and _build_routing unchanged.
+    class Stop(Exception):
+        pass
+    got = {}
+    monkeypatch.setattr(c, "_openzim_options", lambda **k: (None, None, {}))
+    monkeypatch.setattr(c, "_resolve_area", lambda **k: (
+        BOX, None, "x", str(tmp_path / "x.zim"), "in.pbf"))
+    monkeypatch.setattr(c, "_layer_options", lambda **k: (
+        True, False, False, False, 0, "webp", 0, 0, 256, 12, 6, None))
+    monkeypatch.setattr(c, "_acquire_tiles", lambda **k: ("t.mbtiles", "w.pbf", cut))
+    monkeypatch.setattr(c, "_process_tiles", lambda **k: ([], {}, None, 0, False))
+
+    def search(**k):
+        got["search"] = k["work_pbf_cut"]
+        return 0, None, None, None, None
+
+    def routing(**k):
+        got["routing"] = k["work_pbf_cut"]
+        raise Stop
+    monkeypatch.setattr(c, "_build_search", search)
+    monkeypatch.setattr(c, "_build_wikidata", lambda **k: None)
+    monkeypatch.setattr(c, "_build_routing", routing)
+    with pytest.raises(Stop):
+        c.main(["--bbox", BOX, "--pbf", "in.pbf"])
+    assert got == {"search": cut, "routing": cut}

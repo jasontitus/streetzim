@@ -928,7 +928,7 @@ def _process_tiles(*, args, mbtiles_path, total_steps):
 
 def _build_search(
         *, args, bbox_str, mbtiles_path, pbf_path, tiles, tmpdir, total_steps,
-        use_streaming, work_pbf, work_pbf_cut=False):
+        use_streaming, work_pbf, work_pbf_cut):
     """Step 4: search features (from a cache or the tiles), addresses, Wikipedia cross-refs and Overture enrichment."""
     # Step 5: Extract search features from tiles (or use cached)
     print()
@@ -1144,7 +1144,7 @@ def _build_wikidata(
 
 def _build_routing(
         *, args, bbox_str, include_routing, include_wikidata, pbf_path, tmpdir,
-        total_steps, work_pbf, work_pbf_cut=False):
+        total_steps, work_pbf, work_pbf_cut):
     """The routing graph (SZRG v4) from the extract."""
     # Extract routing graph if requested
     routing_graph_path = None

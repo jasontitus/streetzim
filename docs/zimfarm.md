@@ -795,7 +795,8 @@ otherwise the cores the process may run on, capped by a CPU quota
 2 GiB. tilemaker's threads and the search and terrain processes use it.
 libzim's compression threads (at most 20) and the tile decompression threads
 leave the memory rule out: they cost about 43 MB each, and capping them costs
-time (4 compression threads took 71 s where 20 took 17 s). A CPU share is
+time (4 compression threads took 71 s where 20 took 17 s). `--cpus` and a CPU
+quota do limit them: a recipe that passes `cpus` gets that many. A CPU share is
 relative to the other containers and says nothing about a core count, so it
 is not read. cgroup v1 limits are read when the process has no cgroup v2
 hierarchy of its own (a v1 or hybrid machine).
