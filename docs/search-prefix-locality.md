@@ -135,6 +135,35 @@ manifest size per region, and the validator must fail a manifest over 4 MB.
 * `places.html` additionally needs the map page's streaming fetcher and its
   addresses-only-on-a-digit rule; today it `Promise.all`s every leaf.
 
+### Text folding
+
+Every key and path above is computed from the **folded** name, and the viewer
+must fold exactly as the writer did or it asks for leaves the writer never
+wrote. The writer's fold is `cloud/search_shards.py` `norm` (used by
+`streetzim/zim_writer.py` `_prefixes_for` too): NFKD, drop every character
+whose **canonical combining class** is not 0 (`unicodedata.combining`), then
+lower-case. The viewers use `SEARCH_SHARDS.fold` (the search-shards block of
+`300-search.js` and `places.html`; `normalizeText` and `foldText` delegate to
+it) for names, queries, keys and paths alike.
+
+Not `/\p{M}/gu`: that drops every mark, including Indic vowel signs and Thai
+vowels, which are marks with class 0. Until 2026-10 the viewers did, so
+"कोलकाता" folded to "कलकत" in the viewer and stayed "कोलकाता" in the index —
+different keys, different paths, no results for Devanagari, Bengali, Tamil,
+Thai, Khmer, Sinhala, … names. The writer's rule is the fixed point: every
+published index was written with it and new viewers are patched into old ZIMs.
+
+JavaScript has no combining-class API, so `tools/gen_combining_marks.py`
+writes the class-≠-0 code points as ranges into both viewers (between
+`// BEGIN combining-marks` and `// END combining-marks`), from the newest
+Python in use (3.14, Unicode 16.0.0 — e.g. in the Docker image) and records
+that Unicode version. `--check` (CI) regenerates with the running Python: an
+exact match on the same version; on an older one (3.12, Unicode 15.0.0) the
+table must be a superset whose extras are unassigned there (combining classes
+never change once assigned); a newer Python fails until the table is
+regenerated with it. `tests/search_fold_js.test.mjs` compares the fold, the
+prefix keys and the leaf paths against the Python writer.
+
 ## Validation
 
 `cloud/validate_zim.py`:

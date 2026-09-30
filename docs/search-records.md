@@ -233,7 +233,9 @@ the same OSM extract (added in 2026-09; older ZIMs have none).
   appear only when big prefixes were split.
 - `search-data/{prefix}.json` is an array of records.
 - **Prefix rule**: `cloud/search_shards.py` `prefix_key`. Normalize the
-  word (NFKD, strip combining marks, lower-case, spaces become `_`).
+  word (NFKD, strip characters of canonical combining class ≠ 0 — not every
+  `\p{M}` mark: Indic vowel signs stay — lower-case, spaces become `_`;
+  docs/search-prefix-locality.md, "Text folding").
   - If the first character is non-ASCII, the key is `u<hex>` of that
     character.
   - Otherwise the key is the first two characters, with anything that isn't
