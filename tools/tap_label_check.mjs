@@ -6,6 +6,7 @@
 // label near the middle of the screen, taps it, and checks that a popup
 // opens with its name and "Directions to here"; then opens the routing panel
 // and checks that a tap there picks a point instead of opening a popup; a
+// tap on the label at either edge of the screen opens a popup that fits; a
 // double-tap zoom on the label leaves no popup; and a tap on a search pin
 // dropped on the label opens the pin's popup only.
 //
@@ -110,6 +111,31 @@ try {
         }
       }
       await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+      // A label near either edge of the screen: its popup stays on screen
+      // (a fixed 'bottom' anchor put half of it off the side).
+      const tapLL = await p.evaluate((c, z, t) => {
+        const m = window.__szMap; m.jumpTo({ center: c, zoom: z });
+        const ll = m.unproject([t.x, t.y]); return [ll.lng, ll.lat];
+      }, CENTER, ZOOM, target);
+      for (const side of ['left', 'right']) {
+        await p.evaluate((c, z) => window.__szMap.jumpTo({ center: c, zoom: z }), CENTER, ZOOM);
+        await idle(p); await closeAll();
+        const at = await p.evaluate((ll, side) => {
+          const m = window.__szMap, W = m.getCanvas().clientWidth, q = m.project(ll);
+          m.panBy([q.x - (side === 'left' ? 14 : W - 14), 0], { duration: 0 });
+          const r = m.project(ll); return { x: r.x, y: r.y, W };
+        }, tapLL, side);
+        await idle(p); await sleep(300);
+        await p.touchscreen.tap(at.x, at.y); await sleep(1500);
+        const box = await p.evaluate(() => {
+          const el = document.querySelector('.maplibregl-popup');
+          if (!el) return null;
+          const r = el.getBoundingClientRect(); return { left: r.left, right: r.right };
+        });
+        if (!box) errs.push(`a tap on "${target.name}" at the ${side} edge (x=${Math.round(at.x)}) opened no popup`);
+        else if (box.left < 0 || box.right > at.W) errs.push(`the popup for a tap at the ${side} edge runs off the screen: x ${Math.round(box.left)}..${Math.round(box.right)} of ${at.W}`);
+        else console.log(`${side} edge: popup on screen (x ${Math.round(box.left)}..${Math.round(box.right)} of ${at.W})`);
+      }
       await p.evaluate((c, z) => window.__szMap.jumpTo({ center: c, zoom: z }), CENTER, ZOOM);
       await idle(p); await closeAll();
       // With the routing panel open, a tap picks a route point instead.

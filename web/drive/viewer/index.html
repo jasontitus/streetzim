@@ -7932,7 +7932,7 @@ function initWikidataPopups(map, config) {
   // A popup waits DOUBLE_TAP_MS, MapLibre's own limit for the gap between
   // the taps of a double-tap zoom, so the second tap of any double-tap
   // comes before the popup exists (at 250-300 ms it could land on the
-  // popup and press "Directions"). It is anchored POPUP_OFFSET px above the
+  // popup and press "Directions"). It is placed POPUP_GAP px away from the
   // point the finger touched (not the place's point: a tap on a POI icon
   // lands above that, where the popup's tip would be), so a late second tap
   // cannot land on it either; and a zoom within ZOOM_AFTER_TAP_MS of the tap
@@ -7941,7 +7941,16 @@ function initWikidataPopups(map, config) {
   var DOUBLE_TAP_WINDOW = 600;
   var DOUBLE_TAP_DIST = 30;
   var ZOOM_AFTER_TAP_MS = 1000;
-  var POPUP_OFFSET = 40;
+  // MapLibre picks the popup's side (above, below, left or right of the
+  // point) so it stays on screen; whichever it picks, the popup keeps
+  // POPUP_GAP px clear of the finger. A fixed 'bottom' anchor pushed
+  // popups half off the screen for taps near either edge.
+  var POPUP_GAP = 40;
+  var POPUP_OFFSET = {
+    'top': [0, POPUP_GAP], 'top-left': [0, POPUP_GAP], 'top-right': [0, POPUP_GAP],
+    'bottom': [0, -POPUP_GAP], 'bottom-left': [0, -POPUP_GAP], 'bottom-right': [0, -POPUP_GAP],
+    'left': [POPUP_GAP, 0], 'right': [-POPUP_GAP, 0],
+  };
   var tapSeq = 0;
   var tapTimer = null;
   var lastTap = null;         // {at, x, y, seq}
@@ -7994,7 +8003,9 @@ function initWikidataPopups(map, config) {
     var seq = ++tapSeq;
     cancelPendingTap();
     lastTap = second ? null : { at: now, x: e.point.x, y: e.point.y, seq: seq };
-    if (target && target.closest && target.closest('.maplibregl-marker')) return;
+    // A marker's tap opens the marker's own popup; it is not the first tap
+    // of a double-tap, so the next map tap must still open a popup.
+    if (target && target.closest && target.closest('.maplibregl-marker')) { lastTap = null; return; }
     if (currentPopup) { currentPopup.remove(); currentPopup = null; }
     // Close find-result marker popups too — same reason as above.
     if (typeof _findResultsState !== 'undefined'
@@ -8027,7 +8038,7 @@ function initWikidataPopups(map, config) {
       if (seq !== tapSeq) return;
       var wd = (chunk && chunk[qid]) ? chunk[qid] : null;
       popupSeq = seq;
-      currentPopup = new maplibregl.Popup({ maxWidth: '320px', offset: POPUP_OFFSET, anchor: 'bottom' })
+      currentPopup = new maplibregl.Popup({ maxWidth: '320px', offset: POPUP_OFFSET })
         .setLngLat(e.lngLat)
         .setDOMContent(buildWikiPopupDOM(name, wd, e.lngLat,
                                          _wikiArticlePath(qid, null)));
@@ -8049,7 +8060,7 @@ function initWikidataPopups(map, config) {
       lon = g.coordinates[0]; lat = g.coordinates[1];
     }
     var kind = props.subclass || props.class || '';
-    var popup = new maplibregl.Popup({ maxWidth: '320px', offset: POPUP_OFFSET, anchor: 'bottom' })
+    var popup = new maplibregl.Popup({ maxWidth: '320px', offset: POPUP_OFFSET })
       .setLngLat(e.lngLat)
       .setDOMContent(_szPlacePopupDOM(lat, lon, name, { cat: kind }));
     currentPopup = popup;
