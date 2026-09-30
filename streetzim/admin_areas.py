@@ -66,12 +66,17 @@ MAX_ALT_NAMES = 6
 # The region (`location`) of an area is the deepest enclosing area up to
 # this level.
 MAX_PARENT_LEVEL = 6
-# Every polygon is kept thinned to this many vertices per ring, as flat
-# float arrays, for the region lookup and to check GeoNames placements.
-THIN_VERTICES = 256
-# Margin (degrees) around the build box when cutting the admin relations
-# out of a larger extract (osmium extract -s smart completes them anyway).
-EXTRACT_MARGIN_DEG = 0.5
+# Every polygon is kept simplified (Douglas-Peucker, this tolerance in
+# metres), as flat float arrays, for the region lookup and to check GeoNames
+# placements. Thinning by vertex count cut across river borders: at 256
+# vertices a ring, Echternacherbrueck and Oberbillig (Germany, on the Sauer
+# and the Moselle) fell inside Luxembourg's polygon.
+SIMPLIFY_M = 50.0
+# Margin around the build box when cutting the admin relations out of a
+# larger extract (osmium extract -s smart completes them): the box's own
+# size, clamped to these degrees, so an area around the box with a border
+# within that distance is kept.
+EXTRACT_MARGIN_DEG = (0.5, 5.0)
 # ... when the filtered boundaries are at least this big (a country's are
 # a few MB; the planet's are GBs).
 EXTRACT_MIN_BYTES = 16 * 1024 * 1024
@@ -282,14 +287,50 @@ def representative_point(outers: Sequence[Sequence[Point]],
     return big[0]
 
 
-def _thin(ring: Sequence[Point], most: int = THIN_VERTICES) -> array:
-    """A ring thinned to at most `most` vertices, as a flat array
-    x0, y0, x1, y1, ... (16 bytes a vertex)."""
-    step = max(1, math.ceil(len(ring) / most))
+def _thin(ring: Sequence[Point], tol_m: float = SIMPLIFY_M) -> array:
+    """A ring simplified with Douglas-Peucker (no vertex moves the outline
+    by more than tol_m metres), as a flat array x0, y0, x1, y1, ...
+    (16 bytes a vertex). Distances in a local equirectangular frame."""
+    n = len(ring)
     out = array("d")
-    for x, y in ring[::step]:
-        out.append(x)
-        out.append(y)
+    if n <= 3 or tol_m <= 0:
+        for x, y in ring:
+            out.append(x)
+            out.append(y)
+        return out
+    kx = math.cos(math.radians(sum(p[1] for p in ring[:: max(1, n // 64)])
+                               / len(ring[:: max(1, n // 64)]))) * 111320.0
+    ky = 110540.0
+    tol2 = tol_m * tol_m
+    keep = bytearray(n)
+    keep[0] = keep[n - 1] = 1
+    stack = [(0, n - 1)]
+    while stack:
+        i, j = stack.pop()
+        if j <= i + 1:
+            continue
+        ax, ay = ring[i][0] * kx, ring[i][1] * ky
+        dx, dy = ring[j][0] * kx - ax, ring[j][1] * ky - ay
+        ll = dx * dx + dy * dy
+        best, far = -1.0, -1
+        for k in range(i + 1, j):
+            px, py = ring[k][0] * kx - ax, ring[k][1] * ky - ay
+            if ll > 0:
+                t = max(0.0, min(1.0, (px * dx + py * dy) / ll))
+                qx, qy = px - t * dx, py - t * dy
+            else:
+                qx, qy = px, py
+            d = qx * qx + qy * qy
+            if d > best:
+                best, far = d, k
+        if best > tol2:
+            keep[far] = 1
+            stack.append((i, far))
+            stack.append((far, j))
+    for k in range(n):
+        if keep[k]:
+            out.append(ring[k][0])
+            out.append(ring[k][1])
     return out
 
 
@@ -508,6 +549,22 @@ def place_clipped(gn: GeoNamesPlaces, tags: dict[str, str], level: int,
     return None
 
 
+def region_of_name(gn: GeoNamesPlaces, tags: dict[str, str], level: int,
+                   near: Sequence[float]) -> dict[str, Any] | None:
+    """A GeoNames place of the area's name near its members, for its region
+    and country only (not its position), when all such places (those the
+    area's tags allow) are in one region; else None."""
+    max_km = GEONAMES_MAX_KM.get(level, GEONAMES_DEFAULT_MAX_KM)
+    want_cc, want_state = expected_region(tags)
+    for nm in dict.fromkeys(filter(None, (tags.get("name"), tags.get("name:en")))):
+        cands = [c for c in gn.candidates(nm, near, max_km)
+                 if (not want_cc or (c["cc"] or "").upper() == want_cc)
+                 and (not want_state or _fold(c["admin1"]) == _fold(want_state))]
+        if cands:
+            return cands[0] if len({(c["cc"], c["admin1"]) for c in cands}) == 1 else None
+    return None
+
+
 # ------------------------------------------------------------- reading
 
 def _osmium() -> Any:
@@ -555,7 +612,7 @@ def _collect_relations(path: str) -> dict[int, dict[str, Any]]:
 def _collect_geometry(path: str, rels: dict[int, dict[str, Any]]) -> tuple[
         dict[str, dict[str, Any]], dict[int, Point], dict[int, list[float]]]:
     """Pass 2: assembled areas (summarized as they come; each keeps only
-    a thinned copy of its rings), the label/admin_centre node locations,
+    a copy of its rings simplified to SIMPLIFY_M), the label/admin_centre node locations,
     and for each relation the box of the member ways the file has."""
     osmium = _osmium()
     want_nodes = {v for r in rels.values() for v in (r["label"], r["centre"]) if v}
@@ -631,7 +688,8 @@ def _filtered_input(pbf_path: str, tmp: str, bbox: Sequence[float] | None = None
     """The admin and place boundaries with their members, cut out with
     the osmium CLI; then, for a build box, when that is big (a planet or
     continent input), only those around the box: `osmium extract -s smart`
-    keeps each relation with a member in the box plus a margin and
+    keeps each relation with a member in the box plus a margin (the box's
+    size, clamped to EXTRACT_MARGIN_DEG) and
     completes it, so what Python reads stays small. Not for a country:
     extract's ID sets take ~3.8 GB whatever the input, and Belgium's
     boundaries are 6 MB, read in ~13 s."""
@@ -641,8 +699,8 @@ def _filtered_input(pbf_path: str, tmp: str, bbox: Sequence[float] | None = None
                     "-o", out, "--overwrite", "--no-progress"], check=True)
     if bbox is None or os.path.getsize(out) < EXTRACT_MIN_BYTES:
         return out
-    m = EXTRACT_MARGIN_DEG
     w, s, e, n = _area.normalize(bbox)
+    m = min(max(e - w, n - s, EXTRACT_MARGIN_DEG[0]), EXTRACT_MARGIN_DEG[1])
     box = _area.normalize([w - m, max(-90.0, s - m), min(e + m, w - m + 360.0),
                            min(90.0, n + m)])
     cut = os.path.join(tmp, "admin-box.osm.pbf")
@@ -702,6 +760,13 @@ def extract_admin_areas(pbf_path: str, bbox: Sequence[float] | None = None, *,
         if pt is None and centre is not None and box is not None and \
                 box[0] <= centre[0] <= box[2] and box[1] <= centre[1] <= box[3]:
             pt, how = centre, "admin_centre"
+        if pt is not None and any(a["level"] == r["level"] for a in grid.holding(*pt)):
+            # The node lies in another area of the same level that the
+            # extract has whole (a label mapped across a border river):
+            # not where this area is. (One of a lower level, its country,
+            # may well hold it.)
+            stats["node in another area"] = stats.get("node in another area", 0) + 1
+            pt = None
         hit = None
         if box is not None:
             if not gn_tried:
@@ -712,11 +777,18 @@ def extract_admin_areas(pbf_path: str, bbox: Sequence[float] | None = None, *,
             pt, how = hit["pt"], "geonames"
         if pt is None:
             continue
-        # The GeoNames place also names its region and country.
+        # The GeoNames place also names its region and country. Without one
+        # (a label node stood for the area), the places of its name near its
+        # members still do when they agree on one region: the nearest place
+        # to a label on a border river is often across it (Oberbillig's is
+        # Wasserbillig, Luxembourg).
+        region = hit
+        if region is None and gn is not None and box is not None:
+            region = region_of_name(gn, r["tags"], r["level"], box)
         found.append({"key": f"r{rid}", "tags": r["tags"], "level": r["level"],
                       "pt": pt, "bbox": None, "how": how,
-                      "admin1": hit["admin1"] if hit else "",
-                      "cc": hit["cc"] if hit else "", "gn": bool(hit)})
+                      "admin1": region["admin1"] if region else "",
+                      "cc": region["cc"] if region else "", "gn": bool(region)})
 
     if bbox is not None:
         found = [f for f in found if _area.contains(bbox, f["pt"][0], f["pt"][1])]
@@ -726,7 +798,8 @@ def extract_admin_areas(pbf_path: str, bbox: Sequence[float] | None = None, *,
     # nearest GeoNames place (reverse_geocoder).
     for f in found:
         f["parents"] = sorted(
-            (a for a in grid.holding(*f["pt"]) if a["level"] < f["level"]),
+            (a for a in grid.holding(*f["pt"]) if a["level"] < f["level"]
+             and _encloses(a["bbox"], f["bbox"])),
             key=lambda a: -a["level"])
     lookup = [f for f in found if not f["parents"] and not f.get("admin1")]
     for f, g in zip(lookup, _rg_lookup([f["pt"] for f in lookup])):
@@ -773,6 +846,18 @@ def extract_admin_areas(pbf_path: str, bbox: Sequence[float] | None = None, *,
     for f in found:
         stats[f["how"]] = stats.get(f["how"], 0) + 1
     return feats
+
+
+def _encloses(outer: Sequence[float], inner: Sequence[float] | None) -> bool:
+    """Whether box `outer` holds box `inner` (within 2% of `inner`'s size):
+    a parent holds its child whole, where a neighbour across a river whose
+    polygon happens to hold the child's point (Oberbillig's label, on the
+    Moselle, in a Luxembourg canton) does not. True without an inner box."""
+    if inner is None:
+        return True
+    tol = 0.02 * max(inner[2] - inner[0], inner[3] - inner[1])
+    return (outer[0] - tol <= inner[0] and outer[1] - tol <= inner[1]
+            and inner[2] <= outer[2] + tol and inner[3] <= outer[3] + tol)
 
 
 def dedupe(feats: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -843,7 +928,8 @@ def append_admin_areas(pbf_path: str, search_jsonl: str,
         return 0
     stats: dict[str, int] = {}
     feats = extract_admin_areas(pbf_path, bbox, stats=stats)
-    have = _admin_ids_in(search_jsonl) if os.path.getsize(search_jsonl) else set()
+    have = (_admin_ids_in(search_jsonl)
+            if os.path.exists(search_jsonl) and os.path.getsize(search_jsonl) else set())
     added = 0
     with open(search_jsonl, "a", encoding="utf-8") as f:
         for feat in feats:

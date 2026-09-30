@@ -96,10 +96,12 @@ the same OSM extract (added in 2026-09; older ZIMs have none).
   filtered boundaries are big (16 MB or more: a continent or the planet
   given with `--bbox`, as `cloud/build_region.sh` does), `osmium extract
   -s smart -S types=boundary,multipolygon` then keeps only the relations
-  with a member (a boundary node, the label or admin_centre) within 0.5°
-  of the box, completed, so Python never reads the world's boundaries. An
-  area around the whole box with no member that close is then missed (its
-  region name falls back to GeoNames). A build
+  with a member (a boundary node, the label or admin_centre) within a
+  margin of the box (the box's own size, at least 0.5° and at most 5°),
+  completed, so Python never reads the world's boundaries. An area around
+  the whole box with no member within that margin (a large country or
+  state whose borders are all more than 5° away) is then missed; its
+  region name falls back to GeoNames. A build
   from tiles alone (no PBF) has no admin areas, as it has no addresses.
   `--no-admin-areas` leaves them out.
 - **Which.** An area whose representative point lies inside the build
@@ -124,7 +126,12 @@ the same OSM extract (added in 2026-09; older ZIMs have none).
   generic label (2 country, 4 region, 8 municipality, 10 neighbourhood).
   The country comes from the area's own or an enclosing area's
   `ISO3166-*` tag, else from GeoNames.
-- **Region** (`l`): the name of the deepest enclosing area of level 6 or
+- **Region** (`l`): enclosing areas are found in copies of the polygons
+  simplified with Douglas-Peucker to 50 m (not thinned by vertex count,
+  which put German villages on the Sauer inside Luxembourg), and an
+  enclosing area must also hold the area's whole box (so a neighbour
+  across a river that holds only its point is not its parent): the name
+  of the deepest enclosing area of level 6 or
   less (a D.C. ward: "District of Columbia"; a state: its country), else
   the GeoNames region of the place below or nearest to the point; empty
   for a country.
@@ -137,7 +144,9 @@ the same OSM extract (added in 2026-09; older ZIMs have none).
   admin_level 5 or more (a clipped country or state is never "in" the map)
   is kept when a point can be found without its geometry: its `label`
   node when the extract has it, or its `admin_centre` node when that lies
-  in the box of the members the extract has; else a GeoNames populated
+  in the box of the members the extract has, unless the node lies in
+  another area of the same level that the extract has whole (a label
+  mapped across a border river); else a GeoNames populated
   place of the same name (or place X in the second-level division
   "X County") within 40 km (levels 5-6), 25 km (7) or 12 km (8-10) of those
   members. A miss is better than a wrong pin, so for twin border towns
@@ -146,7 +155,11 @@ the same OSM extract (added in 2026-09; older ZIMs have none).
   `is_in:state_code`, `is_in:country_code`) or when it lies inside a
   polygon the extract has of the same or a lower admin_level (that is
   another area: Bristol TN for Bristol VA), and the area is left out when
-  the candidates left are in more than one GeoNames region. The GeoNames table is the one the
+  the candidates left are in more than one GeoNames region. An area placed
+  by its node takes its region and country from the GeoNames places of
+  its name near its members when they agree on one region, not from the
+  place nearest the node (Oberbillig's label, on the Moselle, is nearest
+  to Wasserbillig in Luxembourg). The GeoNames table is the one the
   `reverse_geocoder` dependency ships (places over 1,000 people, CC BY 4.0,
   credited in the viewer's About panel), so nothing is downloaded. These
   records have no `bb`.

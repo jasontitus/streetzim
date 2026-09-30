@@ -102,9 +102,15 @@ def extract(tmp_path):
     # A named closed way that is itself an area.
     o.way(9, square(3.1, 0.1, 3.3, 0.3), tags={"boundary": "administrative",
                                                "admin_level": "8", "name": "Way Town"})
-    # Testland mapped a second time, at level 8: kept once, at level 2.
+    # Testland mapped a second time, at level 3: kept once, at level 2.
     o.way(10, square(0, 0, 4, 4))
-    o.rel(10, [("w", 10, "outer")], {"name": "Testland", "admin_level": "8"})
+    o.rel(10, [("w", 10, "outer")], {"name": "Testland", "admin_level": "3"})
+    # A clipped town whose label lies in another town the extract has whole
+    # (mapped across a border river): not placed there.
+    o.way(160, [(3.15, 0.2), (3.2, 0.2)], closed=False)
+    wrong = o.node(3.2, 0.2, nid=105)
+    o.rel(16, [("w", 160, "outer"), ("w", 161, "outer"), ("n", wrong, "label")],
+          {"name": "Across Town", "admin_level": "8"})
     o.way(11, square(0.5, 0.5, 0.6, 0.6))
     o.rel(11, [("w", 11, "outer")], {"name": "School Zone", "admin_level": "11"})
     # boundary=place: a city is kept (ranked as level 8), a hamlet is not.
@@ -408,3 +414,56 @@ def test_the_box_cut_keeps_whole_relations(tmp_path, no_rg, monkeypatch):
     assert sorted(f["name"] for f in feats) == ["Big", "Near"]
     assert [f["bbox"] for f in feats if f["name"] == "Big"] == [[0, 0, 10, 10]]
     assert stats["relations"] == 2
+
+
+def _metres_to_line(line, x, y):
+    best = float("inf")
+    from itertools import pairwise
+    for (x0, y0), (x1, y1) in pairwise(line):
+        ax, ay = (x0 - x) * 111320, (y0 - y) * 110540
+        dx, dy = (x1 - x0) * 111320, (y1 - y0) * 110540
+        ll = dx * dx + dy * dy
+        t = 0 if ll == 0 else max(0, min(1, -(ax * dx + ay * dy) / ll))
+        best = min(best, ((ax + t * dx) ** 2 + (ay + t * dy) ** 2) ** 0.5)
+    return best
+
+
+def test_simplified_rings_keep_a_meandering_border():
+    """A river border (Sauer, Moselle): thinning to 256 vertices a ring
+    put villages on the far bank inside the country. The simplified ring
+    classifies every point more than 50 m from the border as the full
+    ring does."""
+    import math as m
+    n = 4000
+    border = [(1 + 0.004 * m.sin(2 * m.pi * 37 * k / n) + 0.002 * m.sin(2 * m.pi * 211 * k / n),
+               k / n) for k in range(n + 1)]
+    ring = [(0.0, 0.0)] + border + [(0.0, 1.0)]
+    simple = A._thin(ring)
+    assert len(simple) // 2 < len(ring)
+    by_step = [A.array("d", [c for p in ring[::m.ceil(len(ring) / 256)] for c in p])]
+    wrong_by_step = 0
+    checked = 0
+    for k in range(1, n, 7):
+        bx, by = border[k]
+        for off in (-0.0008, 0.0008):              # ~89 m either side
+            x = bx + off
+            if _metres_to_line(border, x, by) < 60:
+                continue
+            full = A.point_in_rings([ring], x, by)
+            assert A.point_in_flat([simple], x, by) == full, (x, by)
+            wrong_by_step += A.point_in_flat(by_step, x, by) != full
+            checked += 1
+    assert checked > 300
+    assert wrong_by_step > 0        # the old thinning got some of these wrong
+
+
+def test_region_of_name():
+    """A clipped area placed by its label still takes its region from the
+    GeoNames places of its name when they agree (Oberbillig, whose label
+    sits on the Moselle, is in Rheinland-Pfalz, not Luxembourg)."""
+    near = (5.0, 1.0, 5.0, 1.5)
+    assert A.region_of_name(GEONAMES, {"name": "Arlington County"}, 6, near)["admin1"] == "Virginia"
+    assert A.region_of_name(BRISTOLS, BRISTOL_VA, 6, BORDER) is None          # two regions
+    assert A.region_of_name(BRISTOLS, dict(BRISTOL_VA, **{"ISO3166-2": "US-VA"}), 6,
+                            BORDER)["admin1"] == "Virginia"
+    assert A.region_of_name(GEONAMES, {"name": "Nowhere"}, 8, near) is None
