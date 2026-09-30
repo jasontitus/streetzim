@@ -196,3 +196,139 @@ def test_in_memory_path_keeps_an_empty_region():
     assert recs[0]["l"] == ""
     assert json.loads(items["search-data/al.json"].content)[0]["l"] == "Somewhere"
     assert redirects and redirects[0][1] == "D.C."
+
+
+# ---- Wikipedia articles of admin areas ------------------------------------
+
+UTRECHT = {"name": "Utrecht", "type": "admin", "subtype": "municipality",
+           "lat": 52.0907, "lon": 5.1214, "location": "Utrecht", "admin_level": 8,
+           "osm": "r47798", "wikidata": "Q803", "wikipedia": "nl:Utrecht (stad)"}
+LIMMEL = {"name": "Limmel", "type": "admin", "subtype": "neighbourhood",
+          "lat": 50.8666, "lon": 5.7087, "location": "Limburg", "admin_level": 10,
+          "osm": "r2", "wikidata": "Q2", "wikipedia": "nl:Limmel"}
+ONLY_Q = {"name": "Delft", "type": "admin", "subtype": "municipality",
+          "lat": 52.0116, "lon": 4.3571, "location": "South Holland", "admin_level": 8,
+          "osm": "r3", "wikidata": "Q690"}
+
+
+def _wikidata(mapping):
+    """urlopen stand-in answering wbgetentities from {qid: title | None}."""
+    import io
+    import urllib.parse
+    from contextlib import contextmanager
+
+    @contextmanager
+    def answer(req, timeout=None):
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(req.full_url).query)
+        ents = {}
+        for i in q["ids"][0].split("|"):
+            t = mapping.get(i)
+            ents[i] = {"id": i, "sitelinks": {"enwiki": {"title": t}} if t else {}}
+        yield io.BytesIO(json.dumps({"entities": ents}).encode())
+    return answer
+
+
+def _fake_bundler(seen):
+    from cloud.wiki_articles import _underscore
+
+    def bundle(titles, add_item, **kw):
+        seen["titles"] = set(titles)
+        stored = set()
+        for t in seen["titles"]:
+            add_item(f"wiki-article/{_underscore(t)}", t, "text/html", b"<p>x</p>")
+            stored.add(_underscore(t))
+        return {"bundled": len(stored), "bytes": 0, "failed": 0, "stored_titles": stored}
+    return bundle
+
+
+def test_admin_tags_are_resolved_and_their_articles_bundled(tmp_path, monkeypatch):
+    """An admin area's non-English tag becomes its item's English article
+    (create_osm_zim._finish_wiki_cross_refs, before titles are resolved),
+    the record carries that title, and the article is bundled for it, not
+    because a place node happens to carry the same tag."""
+    pytest.importorskip("libzim.writer")
+    mvt = pytest.importorskip("mapbox_vector_tile")
+    from types import SimpleNamespace
+
+    import create_osm_zim as c
+    from cloud import wiki_articles as wa
+    from cloud import wikidata_titles as wt
+    from libzim.reader import Archive
+    path = tmp_path / "features.jsonl"
+    path.write_text("".join(json.dumps(f) + "\n" for f in (UTRECHT, LIMMEL, ONLY_Q, SHOP)))
+    monkeypatch.setattr(wt.urllib.request, "urlopen",
+                        _wikidata({"Q803": "Utrecht", "Q2": None, "Q690": "Delft"}))
+    args = SimpleNamespace(resolve_wikidata_titles=True, wikidata_title_cache=None,
+                           wikidata_title_map=None)
+    refs = c._finish_wiki_cross_refs(args, None, str(path))
+    assert refs[("admin", "r47798")]["wikipedia"] == "en:Utrecht"
+    assert refs[("admin", "r2")]["wikipedia_no_en"] is True
+    assert refs[("admin", "r3")]["wikipedia"] == "en:Delft"
+
+    seen = {}
+    monkeypatch.setattr(wa, "bundle_wiki_articles", _fake_bundler(seen))
+    tile = gzip.compress(mvt.encode([{"name": "poi", "features": [
+        {"geometry": "POINT(10 10)", "properties": {"name": "X"}}]}]))
+    (tmp_path / "ml.js").write_text("//")
+    (tmp_path / "ml.css").write_text("/**/")
+    work = tmp_path / "work"
+    work.mkdir()
+    W.create_zim(
+        tmp_path / "t.zim", tiles={(14, 8424, 5399): tile}, tile_metadata={},
+        fonts={("OpenSansRegular", "0-255"): b"g"},
+        maplibre_js_path=str(tmp_path / "ml.js"),
+        maplibre_css_path=str(tmp_path / "ml.css"),
+        viewer_html_path=str(ROOT / "resources/viewer/index.html"),
+        map_config={"name": "NL"}, name="OSM - NL", bbox=(3.3, 50.7, 7.3, 53.6),
+        xapian_mode="none", xapian_workdir=str(work), search_features_path=str(path),
+        wiki_cross_refs=refs, bundle_wiki_articles=True)
+    # Bundled deliberately: the resolved titles, not the flagged Dutch one.
+    assert seen["titles"] == {"en:Utrecht", "en:Delft"}
+    a = Archive(str(tmp_path / "t.zim"))
+
+    def rec(key, name):
+        body = bytes(a.get_entry_by_path(f"search-data/{key}.json").get_item().content)
+        return [r for r in json.loads(body) if r["n"] == name and r["t"] == "admin"][0]
+    assert (rec("ut", "Utrecht")["w"], rec("ut", "Utrecht")["wsrc"]) == ("en:Utrecht", "wd")
+    assert rec("ut", "Utrecht")["q"] == "Q803"
+    assert rec("li", "Limmel")["w"] == "nl:Limmel" and "wsrc" not in rec("li", "Limmel")
+    assert rec("de", "Delft")["w"] == "en:Delft"
+    geo = json.loads(bytes(a.get_entry_by_path("wiki-geo-index.json").get_item().content))
+    assert set(geo) == {"Utrecht", "Delft"}
+
+
+def test_admin_articles_are_bundled_on_the_in_memory_path(tmp_path, monkeypatch):
+    """A feature list's admin areas join the wiki lookup inside create_zim
+    (no resolution there: create_osm_zim resolves a search JSONL's)."""
+    pytest.importorskip("libzim.writer")
+    mvt = pytest.importorskip("mapbox_vector_tile")
+    from cloud import wiki_articles as wa
+    from libzim.reader import Archive
+    seen = {}
+    monkeypatch.setattr(wa, "bundle_wiki_articles", _fake_bundler(seen))
+    tile = gzip.compress(mvt.encode([{"name": "poi", "features": [
+        {"geometry": "POINT(10 10)", "properties": {"name": "X"}}]}]))
+    (tmp_path / "ml.js").write_text("//")
+    (tmp_path / "ml.css").write_text("/**/")
+    work = tmp_path / "work"
+    work.mkdir()
+    W.create_zim(
+        tmp_path / "t.zim", tiles={(14, 4580, 6264): tile}, tile_metadata={},
+        fonts={("OpenSansRegular", "0-255"): b"g"},
+        maplibre_js_path=str(tmp_path / "ml.js"),
+        maplibre_css_path=str(tmp_path / "ml.css"),
+        viewer_html_path=str(ROOT / "resources/viewer/index.html"),
+        map_config={"name": "DC"}, name="OSM - DC", bbox=(-77.12, 38.79, -76.91, 39.0),
+        xapian_mode="none", xapian_workdir=str(work),
+        search_features=[dict(ALEXANDRIA), dict(DC), dict(SHOP)],
+        wiki_cross_refs={("x", 1, 2): {"wikipedia": "en:Other"},
+                         # resolved from DC's Q-ID by the caller
+                         ("admin", "r162069"): {"wikidata": "Q3551781", "wikipedia_src": "wd",
+                                                "wikipedia": "en:Washington,_D.C."}},
+        bundle_wiki_articles=True)
+    assert seen["titles"] == {"en:Alexandria, Virginia", "en:Other", "en:Washington,_D.C."}
+    a = Archive(str(tmp_path / "t.zim"))
+    assert a.has_entry_by_path("wiki-article/Alexandria,_Virginia")
+    dc = [r for r in json.loads(bytes(a.get_entry_by_path("search-data/di.json")
+                                      .get_item().content)) if r["t"] == "admin"][0]
+    assert (dc["w"], dc["wsrc"], dc["q"]) == ("en:Washington,_D.C.", "wd", "Q3551781")

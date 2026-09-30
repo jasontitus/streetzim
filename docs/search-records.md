@@ -137,7 +137,11 @@ the same OSM extract (added in 2026-09; older ZIMs have none).
   for a country.
 - **`w`/`q`**: the relation's own `wikipedia` / `wikidata` tags (not the
   name-and-point match other records get, which would pick the place node
-  at the area's admin_centre).
+  at the area's admin_centre). They join the wiki cross-ref lookup keyed by
+  the relation (`admin_areas.add_admin_wiki_refs`), so with
+  `--resolve-wikidata-titles` they are resolved like any other tag (a
+  non-English tag becomes the item's English article, `wsrc: "wd"`), and
+  with `--bundle-wiki-articles` their articles are bundled.
 - **Areas the extract clips.** A Geofabrik extract keeps its neighbours'
   relations but only the members inside its polygon, so the D.C. extract
   has Arlington County and Alexandria without a polygon. Such an area of

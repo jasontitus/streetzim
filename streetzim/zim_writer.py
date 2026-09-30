@@ -63,6 +63,20 @@ def kiwix_page_types(poi_pages: bool = False) -> frozenset[str]:
     return KIWIX_PAGE_TYPES | {"poi"} if poi_pages else KIWIX_PAGE_TYPES
 
 
+def admin_wiki(feat, wiki_cross_refs):
+    """The wiki cross-ref entry of an admin area: its relation's own
+    `wikipedia`/`wikidata` tags as the build resolved them (put in the
+    lookup by admin_areas.add_admin_wiki_refs, so a non-English tag may
+    have become its item's English article), else the tags on the record
+    itself. None when it has neither."""
+    if wiki_cross_refs and feat.get("osm"):
+        from streetzim.admin_areas import admin_wiki_key
+        entry = wiki_cross_refs.get(admin_wiki_key(feat["osm"]))
+        if entry:
+            return entry
+    return {k: feat[k] for k in ("wikipedia", "wikidata") if feat.get(k)} or None
+
+
 def admin_record_fields(feat):
     """The search-record keys an administrative area adds
     (docs/search-records.md): al, bb, alt, osm. Empty for other types."""
@@ -761,6 +775,14 @@ def create_zim(
     creator.config_nbworkers(num_workers)
     creator.set_mainpath("index.html")
     has_wikidata = bool(wikidata_data)      # as map-config's hasWikidata
+    if search_features and not isinstance(search_features, str):
+        # An in-memory feature list: its admin areas' tags join the wiki
+        # lookup here, so their articles are bundled like the rest (for a
+        # search JSONL, create_osm_zim adds them before resolving titles).
+        from streetzim.admin_areas import add_admin_wiki_refs
+        refs = dict(wiki_cross_refs or {})
+        if add_admin_wiki_refs(refs, search_features):
+            wiki_cross_refs = refs
     # The search chunk files (GBs for a country; with --xapian builder, also
     # the Xapian databases, which libzim reads only as the creator closes).
     # Entered before the creator, so it is removed after the creator has
@@ -919,7 +941,8 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
 
     elif search_features:
         _add_search_in_memory(creator, MapItem, search_features=search_features,
-                              loc_lookup=loc_lookup, page_types=page_types)
+                              loc_lookup=loc_lookup, page_types=page_types,
+                              wiki_cross_refs=wiki_cross_refs)
 
 
 def _tile_credit(tile_metadata):
@@ -1929,8 +1952,7 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                     # An admin area carries its relation's own tags; a
                     # name+point match could be another object (the place
                     # node at the area's admin_centre).
-                    wiki = {k: feat[k] for k in ("wikipedia", "wikidata")
-                            if feat.get(k)} or None
+                    wiki = admin_wiki(feat, wiki_cross_refs)
                     if wiki:
                         wiki_fields_added += 1
                 elif wiki_cross_refs:
@@ -2703,7 +2725,8 @@ def _search_xapian_pages(creator, MapItem, *, xapian_mode, xapianbuilder_bin, xa
               flush=True)
 
 
-def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup, page_types=KIWIX_PAGE_TYPES):
+def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup,
+                          page_types=KIWIX_PAGE_TYPES, wiki_cross_refs=None):
     """Search for an in-memory feature list (small builds and tests)."""
     print(f"    Adding {len(search_features)} search entries...")
 
@@ -2728,11 +2751,14 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup, page
                "a": f["lat"], "o": f["lon"], "l": f.get("location", ""),
                **admin_record_fields(f)}
         if f.get("type") == "admin":
-            # The relation's own tags (see _search_bucket).
-            if f.get("wikipedia"):
-                rec["w"] = f["wikipedia"]
-            if f.get("wikidata"):
-                rec["q"] = f["wikidata"]
+            # The relation's own tags, as resolved (see _search_bucket).
+            wiki = admin_wiki(f, wiki_cross_refs) or {}
+            if wiki.get("wikipedia"):
+                rec["w"] = wiki["wikipedia"]
+                if wiki.get("wikipedia_src"):
+                    rec["wsrc"] = wiki["wikipedia_src"]
+            if wiki.get("wikidata"):
+                rec["q"] = wiki["wikidata"]
         # Under its other names too, as _search_bucket does.
         for prefix in sorted({_key(n) for n in [f["name"], *rec.get("alt", ())]}):
             chunks[prefix].append(rec)

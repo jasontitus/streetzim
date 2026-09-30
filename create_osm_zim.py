@@ -1109,23 +1109,48 @@ def _build_search(
             except Exception as _e:
                 print(f"    Warning: wiki cross-ref extraction failed: {_e}")
                 wiki_cross_refs = None
-            # Optionally backfill `wikipedia` from `wikidata` so records
-            # that carry only a Q-ID become title-linkable to a Wikipedia
-            # ZIM (the chunker writes the filled title into rec["w"]).
-            if getattr(args, "resolve_wikidata_titles", False) and wiki_cross_refs:
-                try:
-                    from cloud.wikidata_titles import augment_wiki_cross_refs
-                    _t = augment_wiki_cross_refs(
-                        wiki_cross_refs,
-                        cache_path=getattr(args, "wikidata_title_cache", None),
-                        offline_map=getattr(args, "wikidata_title_map", None),
-                    ) or {}
-                    from streetzim.source_report import note
-                    note("Wikipedia titles", f"{_t.get('resolved', '?')}/"
-                         f"{_t.get('distinct_qids', '?')} Q-IDs resolved")
-                except Exception as _e:
-                    print(f"    Warning: wikidata->title resolution failed: {_e}")
+            wiki_cross_refs = _finish_wiki_cross_refs(args, wiki_cross_refs,
+                                                      search_features)
     return address_count, overture_sources, overture_themes, search_features, wiki_cross_refs
+
+
+def _finish_wiki_cross_refs(args, wiki_cross_refs, search_features):
+    """The wiki cross-ref lookup as the ZIM writer gets it: the
+    administrative areas' tags added, then (--resolve-wikidata-titles)
+    every entry's English title resolved from its Q-ID."""
+    # The administrative areas' own wikipedia/wikidata tags join the lookup
+    # (keyed by relation), so they are resolved below and their articles
+    # bundled like any other. They used to be read straight off the records
+    # at write time: never resolved, and bundled only when a place node
+    # happened to carry the same tag (96 Dutch areas lost their article
+    # when non-English tags stopped being looked up as they were).
+    try:
+        from streetzim.admin_areas import add_admin_wiki_refs
+        refs = wiki_cross_refs or {}
+        n_admin = add_admin_wiki_refs(refs, search_features)
+        if n_admin:
+            wiki_cross_refs = refs
+            print(f"    {n_admin} administrative areas with wikipedia/wikidata tags",
+                  flush=True)
+    except Exception as _e:
+        print(f"    Warning: administrative-area wiki tags not read: {_e}")
+    # Optionally backfill `wikipedia` from `wikidata` so records
+    # that carry only a Q-ID become title-linkable to a Wikipedia
+    # ZIM (the chunker writes the filled title into rec["w"]).
+    if getattr(args, "resolve_wikidata_titles", False) and wiki_cross_refs:
+        try:
+            from cloud.wikidata_titles import augment_wiki_cross_refs
+            _t = augment_wiki_cross_refs(
+                wiki_cross_refs,
+                cache_path=getattr(args, "wikidata_title_cache", None),
+                offline_map=getattr(args, "wikidata_title_map", None),
+            ) or {}
+            from streetzim.source_report import note
+            note("Wikipedia titles", f"{_t.get('resolved', '?')}/"
+                 f"{_t.get('distinct_qids', '?')} Q-IDs resolved")
+        except Exception as _e:
+            print(f"    Warning: wikidata->title resolution failed: {_e}")
+    return wiki_cross_refs
 
 
 def _build_wikidata(

@@ -8,6 +8,8 @@ the OSM admin_level conventions of its country.
 
     extract_admin_areas(pbf, bbox)      -> list of search features
     append_admin_areas(pbf, jsonl, bbox) -> count appended to the JSONL
+    add_admin_wiki_refs(refs, jsonl)    -> their wikipedia/wikidata tags,
+                                           into the wiki cross-ref lookup
 
 Which areas: `boundary=administrative` relations (and named closed ways)
 with an `admin_level` of 2-10 and a name, and named `boundary=place`
@@ -991,6 +993,52 @@ def _admin_ids_in(search_jsonl: str) -> set[str]:
             if rec.get("type") == "admin" and rec.get("osm"):
                 ids.add(rec["osm"])
     return ids
+
+
+def admin_wiki_key(osm: str) -> tuple[str, str]:
+    """An admin area's key in the wiki cross-ref lookup
+    (streetzim/addresses.extract_wiki_tags_pbf). That lookup's own keys are
+    (name, lat, lon) triples; an area is keyed by its relation instead, as
+    a name+point match could be another object (the place node at its
+    admin_centre)."""
+    return ("admin", osm)
+
+
+def add_admin_wiki_refs(wiki_cross_refs: dict,
+                        features: str | Iterable[dict[str, Any]]) -> int:
+    """Put the `wikipedia`/`wikidata` tags of the admin records in
+    `features` (a search JSONL, or a list of features) into
+    `wiki_cross_refs`, keyed by admin_wiki_key; returns how many.
+
+    There they are resolved like every other tag (cloud/wikidata_titles:
+    a non-English tag becomes its item's English article, one with none is
+    flagged) and their articles are bundled. The search records read
+    them back from there (zim_writer.admin_wiki). An entry already present
+    is kept: it may be resolved already."""
+    def admin_feats() -> Iterable[dict[str, Any]]:
+        if not isinstance(features, str):
+            yield from (f for f in features if f.get("type") == "admin")
+            return
+        with open(features, encoding="utf-8") as f:
+            for line in f:
+                if '"admin"' not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("type") == "admin":
+                    yield rec
+
+    added = 0
+    for feat in admin_feats():
+        tags = {k: feat[k] for k in ("wikipedia", "wikidata") if feat.get(k)}
+        if tags and feat.get("osm"):
+            key = admin_wiki_key(feat["osm"])
+            if key not in wiki_cross_refs:
+                wiki_cross_refs[key] = tags
+                added += 1
+    return added
 
 
 def append_admin_areas(pbf_path: str, search_jsonl: str,
