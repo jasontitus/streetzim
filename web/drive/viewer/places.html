@@ -537,8 +537,12 @@ var CHIP_SHARDS = (function() {
 
   // opts: fetchShard(suffix) → Promise<Array>, cache (makeCache), cacheKey
   // (chip id), point {lat, lon} (required), bbox (optional viewport),
-  // k (300), predicate(rec) (optional), budgetBytes, isCancelled(),
-  // fallbackToNearest (retry without bbox when nothing is inside it).
+  // k (300), predicate(rec) (optional), inBox(rec) (optional: a further
+  // test with the bbox, e.g. "on screen, not under the search box"; it
+  // counts toward k like the bbox, so k records that pass it are found,
+  // and the fallback without the bbox skips it), budgetBytes,
+  // isCancelled(), fallbackToNearest (retry without bbox when nothing is
+  // inside it).
   // Resolves null when cancelled, else {records (nearest first, <= k),
   // dists (km), partial, radiusKm, failed, fellBack, shardsLoaded,
   // bytesLoaded}. partial: a shard that could still hold one of the k
@@ -614,6 +618,7 @@ var CHIP_SHARDS = (function() {
               var r = recs[j];
               if (!r || typeof r.a !== 'number' || typeof r.o !== 'number') continue;
               if (nb && !bboxHasPoint(nb, r.a, r.o)) continue;
+              if (nb && opts.inBox && !opts.inBox(r)) continue;
               if (opts.predicate && !opts.predicate(r)) continue;
               best.push({ r: r, d: distKm(plat, plon, r.a, r.o) });
             }
