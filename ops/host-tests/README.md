@@ -16,3 +16,20 @@ reference, not as general tools.
   4 landscape phone sizes.
 - `run-viewer-compat.sh`: the old and new `/drive/` viewers against published
   ZIMs.
+- `gate-zim.sh <zim> <region id>`: `ops/ship-region.sh`'s five gates (terrain
+  coverage, validator, routing, search and Find, browser smoke) on a ZIM built
+  elsewhere, run in a test clone with its own `web/`; no build, no upload.
+- `run-measured.sh <tag> <image> <poly> <name> <title> [args]`: the openZIM
+  recipe in a container limited like a Zimfarm task (`--memory 16g
+  --cpu-shares 3072`), with `memprofile.sh` attached.
+- `memanon.sh <container> <out.tsv>`: the container's anonymous memory every
+  second from its cgroup (what a memory limit kills for; page cache is
+  reclaimed first), with the running peak.
+- `memprofile.sh <container> <build.log> <out.tsv>`: every 5 s, the
+  container's PSS, its three largest processes and the build log's last
+  line, to tie memory to a build step. Short spikes fall between samples.
+- `run-cpu-count-ab2.sh <tag> <count|default>`: Luxembourg `basic` with
+  Python's CPU count forced (`PYTHON_CPU_COUNT`), for worker-count A/B runs.
+- `recdiff.py A.zim B.zim`: for the search JSON lists, how many files are
+  identical, reordered, or hold different records.
+
