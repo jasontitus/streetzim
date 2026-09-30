@@ -95,7 +95,7 @@ echo "$STAMP" > "$OUT/.version"
 echo "  version stamp: $STAMP"
 
 # 4b. Bump the service worker's cache generation to the same stamp. A
-#     plain `firebase deploy` (the documented path in docs/site-deploy.md)
+#     plain `firebase deploy` (the documented path in ops/docs/site-deploy.md)
 #     used to leave sw.js byte-identical, so the browser never installed
 #     a new worker and the offline precache stayed stale indefinitely —
 #     only the network-first fetch path hid it. Portable (no sed -i

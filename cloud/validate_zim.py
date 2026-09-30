@@ -831,7 +831,7 @@ def _chk_fulltext(arc) -> tuple[str, str]:
     if not getattr(arc, "has_fulltext_index", False):
         # A ZIM that ADVERTISES a full-text index (Tags _ftindex:yes) but
         # has none shows Kiwix a search box that returns nothing — the
-        # failure docs/remote-rebuild.md warns about after a rust-built
+        # failure ops/docs/remote-rebuild.md warns about after a rust-built
         # ZIM is repacked through python-libzim (which drops X/). Fail
         # rather than skip in that case.
         try:
@@ -1865,7 +1865,7 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
         (indented "  - 'raw' (resolves to 'norm')" sub-lines). If you do
         move to it, re-derive _is_subblock_false_positive() against a few
         real regions BEFORE a release round — see
-        docs/rebuild-2026-09-plan.md.
+        ops/docs/rebuild-2026-09-plan.md.
         """
         if not header:
             return False

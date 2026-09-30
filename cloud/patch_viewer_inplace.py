@@ -89,7 +89,7 @@ def main() -> int:
                 if not found:
                     raise SystemExit(
                         f"{name}: no viewer slot in this ZIM. It was built "
-                        f"before slots existed -- use swap_viewer_rust.py.")
+                        f"before slots existed -- it needs a full viewer swap (re-pack).")
                 start, slot_len, head_len, is_js = found
                 new = (vdir / name).read_bytes()
                 _opener, closer = comment_delims(name)
@@ -100,7 +100,7 @@ def main() -> int:
                         f"{name}: new viewer is {len(new)} B + {overhead} B "
                         f"marker > {slot_len} B slot. Raise "
                         f"SLOT_SIZES[{name!r}] in cloud/viewer_slots.py and "
-                        f"re-pack this region with swap_viewer_rust.py; "
+                        f"re-pack this region (a full viewer swap); "
                         f"refusing to truncate.")
                 plan.append((name, start, slot_len, new, head, closer))
                 print(f"  {name:20} slot@{start} len={slot_len} "

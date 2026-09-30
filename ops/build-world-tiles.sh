@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# ops split, stage 1: this file lives in ops/ and a symlink at its old path
+# runs it; the paths below assume that path (and so do pgrep and the locks).
+# Started directly (ops/..., or from inside ops/), it re-runs by the old path.
+if [ ! -L "$0" ] && _ops_real="$(readlink -f "$0" 2>/dev/null)"; then
+  case "$_ops_real" in
+    */ops/*) _ops_old="${_ops_real%/ops/*}/${_ops_real##*/ops/}"
+             if [ -L "$_ops_old" ]; then exec bash "$_ops_old" "$@"; fi ;;
+  esac
+fi
+unset _ops_real _ops_old
+# Regenerate the planet vector-tile MBTiles from a planet PBF, then the
+# world search cache that the regional builds read.
+#
+# Runs tilemaker v3 in Docker (ghcr.io/systemed/tilemaker) because this
+# host has no tilemaker and no build toolchain — apt's 2.4 is too old for
+# resources/tilemaker/*, and cmake/boost/lua headers would need root.
+# The container runs as the invoking user so every file it writes is
+# ours to delete.
+#
+# Usage: ./build-world-tiles.sh [planet.osm.pbf] [out.mbtiles]
+# Env:
+#   STORE   node/way scratch store (default /mnt/data/tilemaker/store —
+#           NVMe; the store is random-I/O heavy and /storage is a single
+#           spinning disk). ALWAYS deleted when this script exits, however
+#           it exits: the NVMe is shared with other work and must not keep
+#           our files. Nothing else of ours is left there.
+#   MEMORY  container memory cap (default 48g). Most of what tilemaker
+#           holds is reclaimable page cache over the mmap'd store rather
+#           than anonymous memory, so this mainly bounds cache.
+#
+#           DO NOT `docker update --memory` a RUNNING tilemaker below its
+#           current usage. Tried on 2026-09-05: the container sat at
+#           28.9 GB (nearly all reclaimable cache) and dropping the cap
+#           32g -> 24g killed it with rc=137 at phase 6/6 block 469/471,
+#           losing 1.5 h and a 192 GB store just as it was about to start
+#           writing tiles. Shrinking a cgroup limit forces synchronous
+#           reclaim, and with --memory-swap pinned equal to --memory there
+#           is nowhere to spill, so the OOM killer wins the race against
+#           reclaim. Set MEMORY at launch and leave it alone.
+#   THREADS tilemaker worker threads (default 28 of 36, leaving cores for
+#           a concurrent regional build).
+#
+# The output MBTiles stays on /storage (it is ~120 GB and permanent).
+set -uo pipefail
+cd /storage/streetzim
+
+PLANET="${1:-/storage/streetzim/world-data/planet-2026-08-31.osm.pbf}"
+OUT="${2:-/storage/streetzim/world-data/world-tiles-v3.mbtiles}"
+STORE="${STORE:-/mnt/data/tilemaker/store}"
+MEMORY="${MEMORY:-48g}"
+THREADS="${THREADS:-28}"
+IMAGE="${IMAGE:-ghcr.io/systemed/tilemaker:master}"
+NAME="streetzim-tilemaker-$(date +%Y%m%d-%H%M%S)"
+# NOT "$OUT.part": tilemaker selects its output driver from the extension
+# ("target directory or .mbtiles/.pmtiles file"), so a .part suffix makes it
+# write a directory of ~350M loose tile files instead of an MBTiles, and the
+# failure only surfaces days later when build_search_cache.py cannot open it.
+PART="${OUT%.mbtiles}.part.mbtiles"
+LOG=/storage/streetzim/world-tiles-$(date +%Y-%m-%d).log
+
+log() { printf "[%s] %s\n" "$(date -Iseconds)" "$*" | tee -a "$LOG"; }
+
+cleanup() {
+    rc=$?
+    log "cleanup (rc=$rc): stopping container + wiping the NVMe store"
+    docker rm -f "$NAME" >/dev/null 2>&1 || true
+    if [ -n "${STORE:-}" ] && [ -d "$STORE" ]; then
+        du -sh "$STORE" 2>/dev/null | sed 's/^/    freeing /' | tee -a "$LOG"
+        rm -rf "$STORE"
+    fi
+    log "NVMe now: $(df -h "$(dirname "$STORE")" | tail -1 | awk '{print $4" free"}')"
+    exit $rc
+}
+trap 'exit 143' TERM
+trap 'exit 130' INT
+
+# One tile build at a time. Without this a second invocation would share the
+# store path and, once its EXIT trap armed, delete the running job's scratch.
+exec 8>/storage/streetzim/tmp/.world-tiles.lock
+flock -n 8 || { echo "another build-world-tiles.sh holds the lock — refusing" >&2; exit 1; }
+
+[ -s "$PLANET" ] || { echo "planet missing: $PLANET" >&2; exit 1; }
+[ -e "$OUT" ] && { echo "refusing to overwrite $OUT" >&2; exit 1; }
+[ -s coastline/water_polygons.shp ] || { echo "coastline/water_polygons.shp missing" >&2; exit 1; }
+[ -s resources/tilemaker/config-openmaptiles.json ] || { echo "tilemaker config missing" >&2; exit 1; }
+# Holding the flock proves no other run owns the store, so anything left
+# here is an orphan from a SIGKILL, an OOM kill or a reboot — the cases a
+# trap cannot cover. Reclaim it before we add to the shared SSD.
+if [ -d "$STORE" ]; then
+    echo "reaping orphaned store ($(du -sh "$STORE" 2>/dev/null | cut -f1)) from a previous run"
+    rm -rf "$STORE"
+fi
+mkdir -p "$STORE" || { echo "cannot create $STORE" >&2; exit 1; }
+trap cleanup EXIT   # armed only now: every check above exits without touching the store
+
+AVAIL_GB=$(df -BG --output=avail "$(dirname "$STORE")" | tail -1 | tr -dc 0-9)
+MIN_START_GB="${MIN_START_GB:-340}"
+if [ "$AVAIL_GB" -lt "$MIN_START_GB" ]; then
+    echo "only ${AVAIL_GB} GB free at $(dirname "$STORE") — a planet store needs ~300 GB and this volume is shared." >&2
+    echo "Set MIN_START_GB lower to override, or point STORE at /storage (slower)." >&2
+    exit 1
+fi
+
+log "=== world tiles: planet=$(basename "$PLANET") out=$(basename "$OUT")"
+log "    store=$STORE (${AVAIL_GB} GB free, wiped on exit)  mem=$MEMORY  threads=$THREADS"
+
+docker run --rm --name "$NAME" \
+    --user "$(id -u):$(id -g)" \
+    --memory "$MEMORY" --memory-swap "$MEMORY" \
+    -v /storage/streetzim:/srv \
+    -v "$STORE":/store \
+    -w /srv \
+    "$IMAGE" \
+    --input "/srv/${PLANET#/storage/streetzim/}" \
+    --output "/srv/${PART#/storage/streetzim/}" \
+    --config resources/tilemaker/config-openmaptiles.json \
+    --process resources/tilemaker/process-openmaptiles.lua \
+    --store /store \
+    --shard-stores \
+    --threads "$THREADS" \
+    --skip-integrity \
+    >> "$LOG" 2>&1 &
+DOCKER_PID=$!
+wait "$DOCKER_PID"
+rc=$?
+[ "$rc" -eq 0 ] || { log "tilemaker FAILED rc=$rc — leaving $PART for inspection"; [ "$rc" = "137" ] && log "  rc=137 = OOM-killed or stopped; if OOM, raise MEMORY (currently $MEMORY)"; exit "$rc"; }
+
+# NB: probe with a capped subquery and per-zoom indexed lookups, never a
+# bare `count(*)`. On a 114 GB / 342M-row MBTiles on a spinning disk that
+# full scan ran at ~3 MB/s — about 10 hours to verify a file tilemaker had
+# already finished writing.
+[ -f "$PART" ] || { log "FATAL: tilemaker produced $(ls -ld "$PART" 2>/dev/null || echo nothing) — expected an MBTiles file"; exit 6; }
+/storage/streetzim/venv-linux/bin/python3 -c "
+import sqlite3,sys
+c=sqlite3.connect('file:$PART?mode=ro', uri=True)
+n=c.execute('select count(*) from (select 1 from tiles limit 5001)').fetchone()[0]
+md=dict(c.execute('select name,value from metadata'))
+probe=[c.execute('select 1 from tiles where zoom_level=? limit 1',(z,)).fetchone() for z in (0,6,10,14)]
+print(f'  >={n} tiles (capped probe), maxzoom={md.get(\"maxzoom\")}, format={md.get(\"format\")}, zoom-probe={[bool(x) for x in probe]}')
+sys.exit(0 if n>1000 and all(probe) else 1)" 2>&1 | tee -a "$LOG" || { log "FATAL: $PART is not a usable MBTiles"; exit 6; }
+mv -f "$PART" "$OUT"
+log "=== mbtiles done: $(du -h "$OUT" | cut -f1)"
+
+DATED=$(basename "$PLANET" .osm.pbf); DATED=${DATED#planet-}
+SEARCH=/storage/streetzim/search_cache/world-${DATED}.jsonl
+log "=== search cache → $SEARCH"
+TMPDIR=/storage/streetzim/tmp /storage/streetzim/venv-linux/bin/python3 -u \
+    cloud/build_search_cache.py --mbtiles "$OUT" --out "$SEARCH" >> "$LOG" 2>&1
+src_rc=$?
+if [ "$src_rc" -ne 0 ] || [ ! -s "$SEARCH" ]; then
+    log "FATAL: search-cache extraction failed (rc=$src_rc). The MBTiles at $OUT is"
+    log "  good and kept; rerun cloud/build_search_cache.py alone to finish."
+    exit 7
+fi
+
+log "=== done. Point the queue at the new inputs:"
+log "    WORLD_MBTILES=$OUT WORLD_SEARCH=$SEARCH ./build-refresh-queue.sh ..."

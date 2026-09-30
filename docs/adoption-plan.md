@@ -9,7 +9,7 @@ which covers the other route: porting features into maps2zim.
 | # | the review asked for | status |
 |---|---|---|
 | 1 | Split the builder and viewer into modules, with a proper front-end build | **Done for the builder and `index.html`**; no bundler (see below). |
-| 2 | Remove the hosting/operations layer | **Separated, not removed yet.** 31 dead scripts retired to `attic/`; the 42 live ones are catalogued in [scripts.md](scripts.md). Next step below. |
+| 2 | Remove the hosting/operations layer | **Separated in the tree (stage 1); a separate repository is stage 2.** Operations files live in [`ops/`](../ops/README.md) with symlinks at their old paths for the build host; `web/`, `preview-proxy/` and host-edited lists follow in stage 2. `tools/check_boundary.py` (CI) keeps the builder independent of `ops/`. The 31 dead scripts are deleted (commit `0792d0d` still has them). |
 | 3 | Replace zimru/xapianbuilder with libzim, or bring them under openZIM | **Done.** libzim is the default; CI builds, rewrites and serves ZIMs with libzim, zim-tools and kiwix-tools only. The Rust packer is an optional speed-up. |
 | 4 | Freeze and document the binary formats; drop legacy versions | **Documented and frozen** ([formats.md](formats.md), [search-records.md](search-records.md)). Dropping readers waits on rebuilding the pre-June continent ZIMs (retirement table in formats.md). |
 | 5 | openZIM conventions: CLI, metadata, illustration, Zimfarm progress file, `offliner-definition.json`, Docker image, typing, linting, CI | **Partly done.** CI and the Docker image are done. Left: progress file, Zimfarm definition, `--title`/`--description`/`--creator`-style flags, type checking, wider lint rules. |
@@ -43,13 +43,18 @@ replaces them. The clean end state is a separate `streetzim-ops` repository
 round.
 
 Order, because the build host runs these by absolute path:
-1. Finish the phases in [scripts.md](scripts.md).
-2. Move the survivors under `ops/` with symlinks at the old paths for one
-   release.
-3. Split the repository.
+1. **Done:** move them under `ops/` with symlinks at the old paths (stage 1,
+   [ops/README.md](../ops/README.md)).
+2. Finish the phases in [scripts.md](../ops/docs/scripts.md) (optional,
+   either side of the split).
+3. Split the repository (stage 2: steps in ops/README.md, which need the
+   build host).
 
 ## 5. openZIM conventions still to add
 
+- **The repository split, stage 2** (item 2): the operations files are in
+  `ops/`; moving them to their own repository needs checks and a switch on
+  the production host, which runs them by path.
 - **Zimfarm progress file** (`--stats-filename`). The builder already
   announces phases ("[3/7] …"); writing `{"done": 2, "total": 7}` from that
   hook is small.

@@ -3,7 +3,34 @@
 # `is`, bad `return`/`yield` placement), so it can be enforced on the whole
 # tree today. Widen it one rule at a time, fixing the tree as you go.
 target-version = "py310"
-extend-exclude = ["attic"]
+# The symlinks left at old paths by the ops split (stage 1) point into ops/,
+# which is linted there; listed here so no file is linted twice.
+# tools/check_boundary.py keeps this list equal to the tracked .py symlinks.
+extend-exclude = [
+  "cloud/audit_dem_cache.py",
+  "cloud/build_search_cache.py",
+  "cloud/build_torrent.py",
+  "cloud/check_smoke_pairs.py",
+  "cloud/check_terrain_coverage.py",
+  "cloud/cleanup_old_zims.py",
+  "cloud/decode_check.py",
+  "cloud/finish_search_cache.py",
+  "cloud/fix_stale_terrain_tiles.py",
+  "cloud/fix_terrain_seams.py",
+  "cloud/generate_all_torrents.py",
+  "cloud/preflight.py",
+  "cloud/regen_all_low_zoom.py",
+  "cloud/regen_low_zoom.py",
+  "cloud/serve_zims.py",
+  "cloud/stamp_item_metadata.py",
+  "cloud/swap_viewer_rust.py",
+  "cloud/verify_terrain_freshness.py",
+  "derive-region-mbtiles.py",
+  "derive-region-search.py",
+  "recompress_avif.py",
+  "tools/make_rollout_list.py",
+  "verify_tile_cache.py",
+]
 
 [lint]
 select = ["E9", "F63", "F7", "F82"]

@@ -150,11 +150,12 @@ resources/viewer/ (MapLibre app) ───┤
 | `create_osm_zim.py` | the builder (single entry point) |
 | `resources/viewer/` | the viewer shipped inside every ZIM (`index.html`, built from `src/index/` by `tools/build_viewer.py`; `places.html`; `routing-worker.js`) |
 | `resources/tilemaker/` | tilemaker config and Lua profile |
-| `cloud/` | Python modules the builder imports (`chip_rules`, `search_shards`, `repackage_zim`, …), the validator, and operations scripts |
+| `cloud/` | Python modules the builder imports (`chip_rules`, `search_shards`, `repackage_zim`, …) and the ZIM tools (`validate_zim`, `patch_viewer_inplace`, …); the operations scripts moved to `ops/` (symlinks remain here) |
 | `streetzim/` | the builder's modules: `tiles`, `terrain`, `satellite`, `addresses`, `search_extract`, `zim_writer`, `common`, and `routing/` (graph build, formats, reference routers) |
 | `tests/` | pytest and Node tests |
-| `web/` | streetzim.web.app catalogue and the `/drive/` PWA |
+| `web/` | streetzim.web.app catalogue and the `/drive/` PWA (operations; moves to `ops/` in stage 2) |
 | `preview-proxy/` | archive.org range proxy for online previews |
+| `ops/` | StreetZim's own operations (build host, uploads, rollouts); not needed to build a ZIM. The old paths are symlinks into it for now: [ops/README.md](ops/README.md) |
 
 [MAINTAINING.md](MAINTAINING.md) explains which parts are core and which are
 the author's hosting/operations tooling, how releases are built and shipped,

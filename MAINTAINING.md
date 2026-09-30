@@ -32,7 +32,7 @@ ZIM.
   reference routers). `tests/szrg_*.py` are aliases of those modules, kept so
   old imports work.
 - `resources/viewer/`: the viewer baked into every ZIM. `resources/tilemaker/`: the tile profile.
-- `cloud/validate_zim.py`: the release gate. `cloud/repackage_zim.py` / `cloud/patch_viewer_inplace.py` (libzim), and the accelerator variant `cloud/swap_viewer_rust.py`: rewrite published ZIMs.
+- `cloud/validate_zim.py`: the release gate. `cloud/repackage_zim.py` / `cloud/patch_viewer_inplace.py` (libzim): rewrite published ZIMs. (The accelerator variant, `swap_viewer_rust.py`, is in `ops/cloud/`.)
 - **The ZIM writer is libzim** (python-libzim), which is the default. `zimcheck`
   and `kiwix-serve` are the reference checker and reader. CI uses only these.
 
@@ -44,7 +44,12 @@ to this repo. They make the same ZIM, faster. You can ignore them unless you
 are building continents.
 
 **Operations: the author's hosting.** Works only on the production host and
-with the author's accounts:
+with the author's accounts. It lives in [`ops/`](ops/README.md), with a
+symlink at each old path the host runs, so the host is unaffected; `web/`,
+`preview-proxy/` and the files the host edits in place are still at their
+old paths ([`ops/in-place.txt`](ops/in-place.txt)) and move with the second
+stage, a separate repository. `tools/check_boundary.py` (CI) keeps the
+builder from depending on any of it.
 
 - Build host layout: everything runs from `/storage/streetzim` (a checkout
   with `world-data/`, caches, `venv-linux/`, `wiki-src/`). Most wrappers `cd`
@@ -55,8 +60,8 @@ with the author's accounts:
   `cloud/upload-caches.sh`).
 
 **One-offs.** Dated scripts, queue lists (`*.list`, `viewer-refresh.tsv`),
-`tmp/`, `STATUS-*.md`. They record what was done. Most can be retired; see
-[docs/scripts.md](docs/scripts.md) for the full inventory and plan.
+`ops/tmp/`, `ops/STATUS-*.md`. They record what was done. Most can be retired; see
+[ops/docs/scripts.md](ops/docs/scripts.md) for the full inventory and plan.
 
 ## 2. Day-to-day development
 
@@ -88,7 +93,7 @@ Rules that keep published ZIMs working:
   `scripts/sync-drive-viewer.sh` to refresh the PWA copy in
   `web/drive/viewer/` (the tests compare the shared blocks). Published ZIMs
   get viewer updates by in-place slot patching (`docs/viewer-slots.md`,
-  `docs/viewer-rollout.md`). That can replace `index.html`, `places.html` and
+  `ops/docs/viewer-rollout.md`). That can replace `index.html`, `places.html` and
   `routing-worker.js`, but **cannot add a new file to a ZIM**. So a viewer
   change must not depend on a new ZIM entry unless it degrades gracefully
   when the entry is missing. Keep each file inside its slot (1 MiB / 256 KiB /
@@ -114,14 +119,15 @@ Rules that keep published ZIMs working:
 | `STREETZIM_NODE_LOC_DIR` | fast scratch volume for the routing node-location store (default `/data`, falling back to the output directory) |
 | `STREETZIM_PACK_BIN`, `XAPIANBUILDER_BIN` | optional accelerators only (see §1) |
 | `ZSTD_CLEVEL` | ZIM compression level (production uses 22) |
-| `STREETZIM_MERGE_STREETS=0` | keep one search record per tile for streets instead of merging the pieces (docs/search-records.md) |
+| `STREETZIM_MERGE_STREETS=0` | keep one search record per tile for streets instead of merging the pieces (docs/search-records.md). Merging is the default since merge #19, so regions built before it have more street records |
+| `STREETZIM_ALLOW_FONT_ERRORS=1` | ship even if some font ranges failed to download (e.g. during a CDN outage); by default the build stops after 5 attempts per range |
 | `PYTHON` | interpreter the Node tests shell out to |
 
 ## 3. How production releases are made
 
 On the build host, from `/storage/streetzim`. The details are in
-`docs/remote-rebuild.md`, `docs/new-region-setup.md` and
-`docs/rebuild-2026-09-plan.md`; this is the map.
+`ops/docs/remote-rebuild.md`, `ops/docs/new-region-setup.md` and
+`ops/docs/rebuild-2026-09-plan.md`; this is the map.
 
 1. **Inputs.** A planet PBF (`download-planet.sh`), regional extracts
    (`extract-region-pbfs.sh`), world vector tiles (`build-world-tiles.sh`,
@@ -159,14 +165,14 @@ GitHub repository.
 In rough priority order. The items marked **bug** were found during the
 2026-09 maintainability review and are not yet fixed, because they touch
 scripts that may be running on the production host (see
-[docs/scripts.md](docs/scripts.md) for how to change those safely).
+[ops/docs/scripts.md](ops/docs/scripts.md) for how to change those safely).
 
 - **Script sprawl.** 42 live shell scripts (73 before Phase 1 moved the dead
   ones to `attic/`); about 23 are needed. The remaining phases are in
-  docs/scripts.md.
+  ops/docs/scripts.md.
 - **Shared gate code is copy-pasted, or `sed`-extracted at runtime from
   `retrofit-chips-queue.sh`** by six other scripts. It should become a sourced
-  `scripts/lib/`; docs/scripts.md gives the order that avoids breaking the
+  `scripts/lib/`; ops/docs/scripts.md gives the order that avoids breaking the
   extractors.
 - **bug:** `build-refresh-queue.sh` and `ship-region.sh` upload without the
   `.retrofit-upload.lock` every other uploader takes. `build-refresh-queue.sh`
