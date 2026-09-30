@@ -41,6 +41,7 @@ from cloud.wikimedia_http import (
     api_error_code,
     env_number,
     get_json,
+    polite_pacer,
     require_complete,
     stop_error,
 )
@@ -405,41 +406,11 @@ _GIVE_UP_AFTER = 25
 RECHECK_ENV = "STREETZIM_WIKI_RECHECK_MAX"
 _DEFAULT_RECHECK_MAX = 1000
 
-# Pacing of the `action=parse` requests (docs/zimfarm.md, "Wikimedia API
-# etiquette"). Serial, as API:Etiquette asks ("waiting for one request to
-# finish before sending a new request, should result in a safe request
-# rate"), with:
-# - a 0.1 s gap after each response, as for Wikidata: the D.C. build
-#   paused a fixed 1 s after each of its 1,308 answers (1,308 of the
-#   1,541 s the fetch took, in a 39 minute build) and saw no 429;
-# - at most 170 request starts a minute. Wikimedia's API rate limit for an
-#   unauthenticated client with a descriptive User-Agent is 200 a minute
-#   (mediawiki.org Wikimedia_APIs/Rate_limits), and a parse answer can come
-#   back in 0.15 s, which with only a 0.1 s gap would be ~240 a minute;
-# - a 5 s gap after an answer that took over 1 s (the robot policy's
-#   Action API rule for expensive requests).
-# A 429, maxlag or 5xx with Retry-After widens the gap and successes ease
-# it back (cloud/wikimedia_http.Pacer).
-GAP_ENV = "STREETZIM_WIKI_GAP"
-MAX_PER_MIN_ENV = "STREETZIM_WIKI_MAX_PER_MIN"
-DEFAULT_GAP = 0.1
-DEFAULT_MAX_PER_MIN = 170.0
-SLOW_AFTER = 1.0
-SLOW_GAP = 5.0
-
-
-def article_pacer(gap: float | None = None, max_per_min: float | None = None) -> Pacer:
-    """The Pacer for `action=parse` requests: `gap` seconds from each
-    response to the next request (default STREETZIM_WIKI_GAP, else 0.1),
-    at most `max_per_min` request starts a minute (default
-    STREETZIM_WIKI_MAX_PER_MIN, else 170; 0 means no cap), and 5 s after
-    an answer that took over 1 s."""
-    if gap is None:
-        gap = env_number(GAP_ENV, DEFAULT_GAP)
-    if max_per_min is None:
-        max_per_min = env_number(MAX_PER_MIN_ENV, DEFAULT_MAX_PER_MIN)
-    return Pacer(gap, min_period=60.0 / max_per_min if max_per_min > 0 else 0.0,
-                 slow_after=SLOW_AFTER, slow_gap=SLOW_GAP)
+# Pacing of the `action=parse` requests: cloud/wikimedia_http.polite_pacer
+# (serial, 0.1 s from each response, at most 120 requests a minute, 5 s
+# after an answer over 1 s; docs/zimfarm.md, "Wikimedia API etiquette").
+# Until 2026-09 this paused a fixed 1 s after every answer: 1,308 of the
+# 1,541 s the D.C. fetch took, in a 39 minute build with no 429.
 
 
 def _cache_paths(cache_dir: str, title_us: str) -> tuple[str, str]:
@@ -570,8 +541,8 @@ def bundle_wiki_articles(
     Online, requests are serial and `sleep` is the gap from the end of
     each API response to the next request (cache hits cost none; default
     STREETZIM_WIKI_GAP, else 0.1 s), with at most `max_per_min` requests a
-    minute (STREETZIM_WIKI_MAX_PER_MIN, else 170) and 5 s after an answer
-    that took over 1 s (`article_pacer`); a 429, maxlag or 5xx with
+    minute (STREETZIM_WIKI_MAX_PER_MIN, else 120) and 5 s after an answer
+    that took over 1 s (`polite_pacer`); a 429, maxlag or 5xx with
     Retry-After widens the gap and successes ease it back. A title the
     API could not answer (429, 5xx, network, refused) is counted in stats["unfetched"], never
     cached as a miss, and reported in a WARNING; with
@@ -616,7 +587,7 @@ def bundle_wiki_articles(
     stopped = False                # no more requests this run (cache still read)
     rechecked = recheck_left = 0   # old empty markers re-checked / left for later
     recheck_max = int(env_number(RECHECK_ENV, _DEFAULT_RECHECK_MAX))
-    pacer = article_pacer(sleep, max_per_min)
+    pacer = polite_pacer(sleep, max_per_min)
     ua = user_agent or _user_agent("wiki")
     if src is None:
         states: dict[str, int] = {}

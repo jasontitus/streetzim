@@ -222,9 +222,12 @@ What Wikimedia asks (read 2026-09-30):
 - [Wikimedia APIs/Rate limits](https://www.mediawiki.org/wiki/Wikimedia_APIs/Rate_limits)
   (new in 2026, "subject to experimentation and change"): "Unauthenticated
   bot requests with a compliant User-Agent header" get **200 requests a
-  minute**, enforced per minute, across the Action and REST APIs; "limit
-  the number of concurrent requests to 3 or fewer"; on 429 or 503 respect
-  `Retry-After`, and without one "wait at least five seconds, or implement
+  minute**; the limits "apply across all sites and platforms, including
+  requests to the Action API and REST APIs, and are enforced per user",
+  counted "per-minute". Clients should "limit the number of concurrent
+  requests to 3 or fewer" and "respect the Retry-After header provided
+  with a 429 Too Many Requests status code"; when a 429 or 503 carries
+  none, "clients should wait at least five seconds, or implement
   exponential back-off".
 - [Robot policy](https://wikitech.wikimedia.org/wiki/Robot_policy), Action
   API: "If unauthenticated, keep the concurrency of your requests to 1 at
@@ -238,31 +241,45 @@ What Wikimedia asks (read 2026-09-30):
   `<client name>/<version> (<contact information>) <library>/<version>`;
   a generic agent (`Python-urllib` alone) gets HTTP 403.
 
-How the article fetch follows it (`cloud/wiki_articles.py`,
-`article_pacer`; `cloud/wikimedia_http.py`, `Pacer`):
-- serial, one request at a time; the pause runs from the end of each
-  response, 0.1 s by default (`STREETZIM_WIKI_GAP`), as for Wikidata;
-- at most 170 request starts a minute (`STREETZIM_WIKI_MAX_PER_MIN`), so a
-  run of fast answers stays under the 200 a minute with room for the
-  worker's other Wikimedia traffic. With 0.15 s answers and only the
-  0.1 s gap a run would make ~240 a minute;
+How the requests follow it (`cloud/wikimedia_http.py`: `polite_pacer`,
+`Pacer`, `get_json`). Wikipedia articles (`action=parse`), Wikipedia
+extracts and Wikidata title lookups (`wbgetentities`) each run one
+serial loop with a `polite_pacer`:
+- one request at a time; the pause runs from the end of each response,
+  0.1 s by default (`STREETZIM_WIKI_GAP`);
+- at most 120 request starts a minute (`STREETZIM_WIKI_MAX_PER_MIN`), so a
+  run of fast answers stays well under the 200 a minute. With 0.15 s
+  answers and only the 0.1 s gap a loop would make ~240 a minute. The cap
+  assumes **one Wikimedia client per worker IP**: the loops run one after
+  another, but two builds side by side from one IP would each take the
+  full rate, so lower `STREETZIM_WIKI_MAX_PER_MIN` for a worker that runs
+  several `full` tasks at once;
 - 5 s after an answer that took over 1 s;
-- a 429, maxlag, or 5xx with `Retry-After` doubles the gap (at least the
-  `Retry-After`, at most 30 s) and each success eases it 10% back;
-  retries honour `Retry-After`, and `STREETZIM_WIKI_WAIT_BUDGET` bounds the
-  waiting a run spends on them;
+- a 429, maxlag, or 5xx with `Retry-After` doubles the gap between
+  requests, up to 30 s, and each success eases it 10% back. The retry of
+  the refused request itself waits the whole `Retry-After` (at least 5 s
+  after a 429 without one); a `Retry-After` over 120 s stops the loop for
+  this run instead of retrying before the server allows it;
+- `STREETZIM_WIKI_WAIT_BUDGET` bounds the waiting a run spends on rate
+  limits and retries (the pauses above are not charged to it);
 - gzip is requested and decoded.
+The Wikidata SPARQL queries (query.wikidata.org, a separate service) keep
+their 1 s (properties) and 0.5 s (name lookup) pauses, now from the end of
+each response, widened by 429s and bounded by the same budget.
 
 Until 2026-09 the article fetch paused a fixed 1 s after every answer. In
 the D.C. `full` comparison (1,308 articles, no 429) that was 1,522 to
-1,541 s of a 39 minute build, 1.17 s an article. At 170 a minute the
-same 1,308 take at least 7.7 minutes; with answers slower than 0.25 s
-paced by their own time plus 0.1 s, and 5 s after each answer over 1 s,
-about 8 to 10 minutes, so the build takes about 23 minutes instead of 39. Switzerland
-has 10,639 distinct `wikipedia=` values and 37,271 `wikidata=` values in
-OSM (taginfo.geofabrik.de, 2026-09-30; D.C. has 1,085 and 1,992 and
-bundles 1,308 titles), so an estimated 13,000 to 16,000 titles: about 80
-to 100 minutes of article fetching instead of 4.2 to 5.2 hours.
+1,541 s of a 39 minute build, 1.17 s an article. **Estimates, not
+measured** (this sandbox's IP was rate limited when we tried): at 120 a
+minute the same 1,308 take at least 10.9 minutes, about 11 to 13 minutes
+with slower answers and the 5 s pauses, so the build would take about 25
+to 27 minutes instead of 39. For Switzerland the title count is an
+extrapolation: it has 10,639 distinct `wikipedia=` values and 37,271
+`wikidata=` values in OSM (taginfo.geofabrik.de, 2026-09-30), where D.C.
+has 1,085 and 1,992 and bundles 1,308 titles, which suggests 13,000 to
+16,000 titles. At 120 a minute that is at least about 2 hours of article
+fetching (1.8 to 2.2 hours), against an estimated 4.2 to 5.2 hours at the
+old 1.17 s an article.
 
 Why one `action=parse` per article and not something batched:
 - `action=parse` takes one page per request.
@@ -715,8 +732,8 @@ from them, since only Monaco was measured with `full`:
   them, as in the Netherlands), hence the extra 2 GiB estimated.
 - Time in `full` is dominated by the Wikimedia APIs: one SPARQL request per
   40 Q-IDs with a 1 s pause, and one request per article at no more than
-  170 a minute (California links 11,613 articles: over an hour before any
-  rate limiting), plus up to 15 minutes of rate-limit waiting
+  120 a minute (California links 11,613 articles: over an hour and a half
+  before any rate limiting, an estimate), plus up to 15 minutes of rate-limit waiting
   per source (`STREETZIM_WIKI_WAIT_BUDGET`). A recipe for a large region
   should allow hours on top of `basic`'s time, not minutes.
 - Terrain (on in `full`) adds the Copernicus DEM download and the

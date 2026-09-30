@@ -13,8 +13,10 @@ What a caller gets:
   `TransientError` when a 429, 408, 5xx, timeout, connection or truncated
   body error outlives the retries. A caller must never cache a
   `TransientError` as a miss: the next build asks again.
-- Retries honour `Retry-After` (delta-seconds or HTTP-date), capped at
-  `max_wait`, and otherwise back off exponentially with jitter.
+- Retries honour `Retry-After` (delta-seconds or HTTP-date); one longer
+  than `max_wait` stops the run (a stopping `TransientError`) rather than
+  retrying before the server allows it. Without one, retries back off
+  exponentially with jitter, at least 5 s after a 429.
 - A `Pacer` keeps a polite gap between requests (from the end of one
   response to the next request), widens it after each 429, maxlag or 5xx
   with Retry-After and eases back towards the base gap as requests
@@ -51,6 +53,15 @@ CONTACT_ENV = "STREETZIM_WIKI_CONTACT"
 REQUIRE_ENV = "STREETZIM_REQUIRE_WIKI"
 BUDGET_ENV = "STREETZIM_WIKI_WAIT_BUDGET"
 DEFAULT_WAIT_BUDGET = 900.0   # seconds of rate-limit waiting per run
+GAP_ENV = "STREETZIM_WIKI_GAP"
+MAX_PER_MIN_ENV = "STREETZIM_WIKI_MAX_PER_MIN"
+DEFAULT_GAP = 0.1             # seconds from one response to the next request
+DEFAULT_MAX_PER_MIN = 120.0   # request starts a minute (polite_pacer)
+SLOW_AFTER = 1.0              # an answer slower than this ...
+SLOW_GAP = 5.0                # ... is followed by at least this pause
+# A 429 without Retry-After waits at least this long before its retry
+# (Wikimedia APIs/Rate limits: "wait at least five seconds").
+MIN_THROTTLE_WAIT = 5.0
 
 # HTTP statuses worth retrying.
 TRANSIENT_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
@@ -179,7 +190,10 @@ class Pacer:
     beyond the base. Once spent, `get_json` raises a stopping
     TransientError instead of sleeping, so a hard throttle costs a build
     minutes, not hours. The floors are etiquette, not failures, and are
-    not charged to it."""
+    not charged to it: only the part of a wait beyond them is.
+
+    Not thread-safe: use one Pacer per serial request loop (the floors
+    assume nothing else is asking at the same time)."""
 
     def __init__(self, interval: float, max_interval: float = 30.0,
                  budget: float | None = None, *, min_period: float = 0.0,
@@ -209,16 +223,18 @@ class Pacer:
     def wait(self) -> None:
         """Sleep until the next request may start, then mark its start."""
         now = time.monotonic()
-        due = now
+        floor_due = gap_due = now
         if self._last is not None:
-            gap = max(self.current, self.slow_gap if self._slow else 0.0)
-            due = max(due, self._last + gap)
+            polite = max(self.base, self.slow_gap if self._slow else 0.0)
+            floor_due = max(floor_due, self._last + polite)
+            gap_due = self._last + self.current
         if self._start is not None:
-            due = max(due, self._start + self.min_period)
-        delay = due - now
+            floor_due = max(floor_due, self._start + self.min_period)
+        delay = max(floor_due, gap_due) - now
         if delay > 0:
-            # Only the widening a rate limit caused counts against the budget.
-            self.charge(min(delay, self.current - self.base))
+            # Only the widening a rate limit caused, beyond the floors that
+            # apply anyway, counts against the budget.
+            self.charge(min(delay, max(0.0, gap_due - floor_due)))
             time.sleep(delay)
         self._start = time.monotonic()
 
@@ -234,6 +250,25 @@ class Pacer:
 
     def succeeded(self) -> None:
         self.current = max(self.base, self.current * 0.9)
+
+
+def polite_pacer(gap: float | None = None, max_per_min: float | None = None,
+                 budget: float | None = None) -> Pacer:
+    """The Pacer for Wikimedia's Action API (docs/zimfarm.md, "Wikimedia
+    API etiquette"): serial, `gap` seconds from each response to the next
+    request (default STREETZIM_WIKI_GAP, else 0.1), at most `max_per_min`
+    request starts a minute (default STREETZIM_WIKI_MAX_PER_MIN, else 120;
+    0 means no cap), and 5 s after an answer that took over 1 s.
+
+    The cap is per Pacer, so it assumes one Wikimedia client per worker
+    IP: two builds side by side from one IP each get the full rate."""
+    if gap is None:
+        gap = env_number(GAP_ENV, DEFAULT_GAP)
+    if max_per_min is None:
+        max_per_min = env_number(MAX_PER_MIN_ENV, DEFAULT_MAX_PER_MIN)
+    return Pacer(gap, budget=budget,
+                 min_period=60.0 / max_per_min if max_per_min > 0 else 0.0,
+                 slow_after=SLOW_AFTER, slow_gap=SLOW_GAP)
 
 
 def _body_throttle(data: Any) -> str:
@@ -310,8 +345,19 @@ def get_json(url: str, *, user_agent: str, pacer: Pacer | None = None,
         overloaded = (last.status or 0) >= 500 and retry_after is not None
         if pacer is not None and (last.throttled or overloaded):
             pacer.rate_limited(retry_after)
+        if retry_after is not None and retry_after > max_wait:
+            # Retrying sooner than the server allows would be refused
+            # again (and is rude); waiting that long stalls the build.
+            # Stop asking; the next build tries again.
+            if pacer is not None:
+                pacer.charge(pacer.budget)
+            raise TransientError(
+                f"{last.reason}; Retry-After {retry_after:.0f}s is over {max_wait:.0f}s",
+                last.status, throttled=last.throttled, stop=True)
         if attempt < retries - 1:
             delay = backoff_delay(attempt, retry_after, base=base, max_wait=max_wait)
+            if last.throttled and retry_after is None:
+                delay = max(delay, MIN_THROTTLE_WAIT)
             if pacer is not None:
                 if not pacer.can_wait(delay):
                     pacer.charge(pacer.budget)   # spent: later calls stop at once
