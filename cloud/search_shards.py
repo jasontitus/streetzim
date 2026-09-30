@@ -72,7 +72,13 @@ _word_re = re.compile(r"[^\W_]+", re.UNICODE)
 
 
 def norm(s: str) -> str:
-    """The writer's ``_norm``: accent-fold, then lowercase."""
+    """The writer's ``_norm``: accent-fold, then lowercase.
+
+    Drops only characters of canonical combining class != 0 -- not every
+    mark: Indic vowel signs and Thai vowels stay. Every published index was
+    folded with this, and the viewers mirror it exactly (SEARCH_SHARDS.fold,
+    table from tools/gen_combining_marks.py), so it must not change.
+    """
     s = unicodedata.normalize("NFKD", s or "")
     s = "".join(c for c in s if not unicodedata.combining(c))
     return s.lower()

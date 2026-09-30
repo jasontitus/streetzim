@@ -55,7 +55,7 @@ const WORDS = [
 
 ok('JS tokens agree with the Python planner for one-word names', () => {
   for (const [prefix, name] of WORDS) {
-    const word = name.toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '')
+    const word = S.fold(name)
       .split(/[^\p{L}\p{N}]+/u).find(w => w.length >= 2 && jsKey(w) === prefix);
     if (!word) continue;                      // whole-name-only case
     const js = S.pathTokens(prefix, word);

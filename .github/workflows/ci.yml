@@ -67,6 +67,8 @@ jobs:
         run: python tools/pyright_gate.py
       - name: Viewer index.html matches its parts
         run: python tools/build_viewer.py --check
+      - name: Viewer search fold's combining-mark table matches unicodedata (tools/gen_combining_marks.py)
+        run: python tools/gen_combining_marks.py --check
       - name: Vendored MapLibre and RTL plugin match resources/viewer-assets.lock.json
         run: python tools/pin_viewer_assets.py --check
       - name: ESLint (viewer JavaScript; eslint.config.mjs)
@@ -140,7 +142,8 @@ jobs:
         # test_preview_proxy talks to archive.org; they are run by hand.
         run: |
           for t in tests/chip_rules_js.test.mjs tests/chip_shards_js.test.mjs \
-                   tests/search_shards_js.test.mjs tests/zim_reader_js.test.mjs \
+                   tests/search_shards_js.test.mjs tests/search_fold_js.test.mjs \
+                   tests/zim_reader_js.test.mjs \
                    tests/test_zim_http_source.mjs tests/viewer_style_js.test.mjs \
                    tests/viewer_ui_js.test.mjs tests/viewer_search_js.test.mjs; do
             echo "::group::$t"
@@ -205,6 +208,8 @@ jobs:
           sudo apt-get install -y -q libmagic1t64 libcairo2 osmium-tool
           pip install -r requirements-dev.txt
           python -c "from streetzim import scraperlib; assert scraperlib.AVAILABLE"
+      - name: Viewer search fold's combining-mark table is exactly this Unicode's (tools/gen_combining_marks.py)
+        run: python tools/gen_combining_marks.py --check --exact
       - name: Python tests
         run: python -m pytest tests -q
 
