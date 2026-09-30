@@ -144,6 +144,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=next(iter((__doc__ or "").splitlines()), ""))
     ap.add_argument("--check", action="store_true",
                     help="exit 1 if a table is stale for this Python's Unicode version")
+    ap.add_argument("--exact", action="store_true",
+                    help="with --check: the table must be from this Python's Unicode "
+                         "version (CI's newest Python), so a hand-edited version line "
+                         "cannot switch the exact comparison off")
     ap.add_argument("--allow-older", action="store_true",
                     help="write the table even if this Python's Unicode is older than it")
     args = ap.parse_args(argv)
@@ -159,6 +163,9 @@ def main(argv: list[str] | None = None) -> int:
             continue
         if args.check:
             why = check_block(blocks[0], running)
+            if not why and args.exact and parse_block(blocks[0])[0] != running:
+                why = (f"table is from Unicode {parse_block(blocks[0])[0]}, "
+                       f"--exact wants this Python's {running}")
             if why:
                 print(f"{rel}: {why}.\nRun tools/gen_combining_marks.py with the newest "
                       "Python in use (3.14, e.g. in the Docker image), then "

@@ -149,8 +149,12 @@ it) for names, queries, keys and paths alike.
 Not `/\p{M}/gu`: that drops every mark, including Indic vowel signs and Thai
 vowels, which are marks with class 0. Until 2026-10 the viewers did, so
 "कोलकाता" folded to "कलकत" in the viewer and stayed "कोलकाता" in the index —
-different keys, different paths, no results for Devanagari, Bengali, Tamil,
-Thai, Khmer, Sinhala, … names. The writer's rule is the fixed point: every
+different keys and, where a prefix is split into character-path leaves,
+different leaves: the viewer read the wrong ones (on southeast-asia
+2026-09-28, "พัทยา" found 8 matching records instead of 5,369, and
+"เชียงใหม่" only street names). Prefixes not split by character (Myanmar,
+Khmer and Lao there) were read whole and still matched, since both sides of
+the in-viewer filter used the same fold. The writer's rule is the fixed point: every
 published index was written with it and new viewers are patched into old ZIMs.
 
 JavaScript has no combining-class API, so `tools/gen_combining_marks.py`
