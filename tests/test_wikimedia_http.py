@@ -814,6 +814,24 @@ def test_wikidata_throttle_that_outlasts_the_wait_budget_stops_and_caches_nothin
     assert f"API error {code}" in err and "wait budget of 900s spent" in err
 
 
+def test_a_5xx_after_a_long_lag_still_gets_its_retries(monkeypatch, sleeps, tmp_path):
+    # Six maxlag answers, then a 503, then the answer: the 503 has five
+    # tries of its own (they used to share one count with the lag, so the
+    # 503 ended the call and the whole run: "stopped at Q-ID 0/2").
+    script = [_lagged] * 6 + [http_error(503), entities({"Q1": "One", "Q2": "Two"})]
+    urls: list = []
+
+    def answer(req, timeout=None):
+        urls.append(req.full_url)
+        item = script.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return item() if callable(item) else _body(item)
+    monkeypatch.setattr(wm.urllib.request, "urlopen", answer)
+    out = wt.resolve_qids(["Q1", "Q2"], cache_path=str(tmp_path / "t.json"), sleep=0)
+    assert out == {"Q1": "One", "Q2": "Two"} and len(urls) == 8
+
+
 def test_throttle_retries_is_opt_in_and_only_for_throttles(monkeypatch, sleeps):
     # Other callers keep five tries for a maxlag answer ...
     api = use(monkeypatch, FakeAPI(default={"error": {"code": "maxlag"}}))
@@ -831,6 +849,12 @@ def test_throttle_retries_is_opt_in_and_only_for_throttles(monkeypatch, sleeps):
     with pytest.raises(wm.TransientError, match="HTTP 429"):
         wm.get_json("https://x.test/a", user_agent="ua", throttle_retries=40)
     assert len(api.urls) == 40 and max(sleeps) <= 120
+    # Other failures keep their own count after throttles: five 502s
+    # after many 429s end the call, not the first.
+    api = use(monkeypatch, FakeAPI(*[http_error(429)] * 10, default=http_error(502)))
+    with pytest.raises(wm.TransientError, match="HTTP 502"):
+        wm.get_json("https://x.test/a", user_agent="ua", throttle_retries=100)
+    assert len(api.urls) == 15
 
 
 def test_wikidata_readonly_body_is_transient(monkeypatch, sleeps, tmp_path):

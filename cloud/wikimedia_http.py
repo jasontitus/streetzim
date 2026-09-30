@@ -295,23 +295,25 @@ def get_json(url: str, *, user_agent: str, pacer: Pacer | None = None,
     `TransientError` once the `retries` attempts, or the pacer's wait
     budget, are spent.
 
-    `throttle_retries` (opt-in; default `retries`): attempts in all while
-    the answers are "slow down" (a 429, maxlag or ratelimited). Wikidata's
-    maxlag means its replicas lag, which lasts minutes, not the ~30 s five
-    tries cover; a caller with a pacer can pass a large number and let the
-    pacer's wait budget bound the waiting. Any other failure still ends
-    the call once `retries` attempts in all have been made."""
+    `throttle_retries` (opt-in): when given, "slow down" answers (a 429,
+    maxlag or ratelimited) and other failures are counted apart: the call
+    ends after `throttle_retries` slow-down answers or `retries` other
+    failures, whichever comes first (or when the pacer's wait budget is
+    spent). Wikidata's maxlag means its replicas lag, which lasts minutes,
+    not the ~30 s five tries cover; a caller with a pacer can pass a large
+    number and let the budget bound the waiting, and a 503 after a long lag
+    still gets its own retries. Without it, `retries` counts every failed
+    attempt, whatever it was."""
     # gzip: the robot policy's "Always request content with an
     # Accept-Encoding: gzip HTTP header".
     req = urllib.request.Request(url, headers={"User-Agent": user_agent,
                                                "Accept": accept,
                                                "Accept-Encoding": "gzip"})
     retries = max(1, retries)
-    throttle_cap = retries if throttle_retries is None else max(retries, throttle_retries)
     if pacer is not None and pacer.exhausted:
         raise TransientError(f"wait budget of {pacer.budget:.0f}s spent", stop=True)
     last: TransientError | None = None
-    attempt = 0
+    throttled_n = other_n = 0   # failed attempts: slow-down answers, the rest
     while True:
         if pacer is not None:
             pacer.wait()
@@ -365,12 +367,20 @@ def get_json(url: str, *, user_agent: str, pacer: Pacer | None = None,
             raise TransientError(
                 f"{last.reason}; Retry-After {retry_after:.0f}s is over {max_wait:.0f}s",
                 last.status, throttled=last.throttled, stop=True)
-        attempt += 1
-        if attempt >= (throttle_cap if last.throttled else retries):
+        if last.throttled:
+            throttled_n += 1
+        else:
+            other_n += 1
+        if throttle_retries is None:
+            if throttled_n + other_n >= retries:
+                break
+        elif other_n >= retries or throttled_n >= max(1, throttle_retries):
             break
         # The exponent is capped: backoff_delay caps the wait anyway,
-        # and 2 ** attempt must stay a float for a long throttle.
-        delay = backoff_delay(min(attempt - 1, 16), retry_after, base=base,
+        # and 2 ** n must stay a float for a long throttle.
+        n = throttled_n + other_n if throttle_retries is None else (
+            throttled_n if last.throttled else other_n)
+        delay = backoff_delay(min(n - 1, 16), retry_after, base=base,
                               max_wait=max_wait)
         if retry_after is None and (last.throttled or last.status == 503):
             delay = max(delay, min(MIN_THROTTLE_WAIT, max_wait))
