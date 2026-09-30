@@ -128,13 +128,24 @@ n=0
 while read -r pid args; do
   case "$anc" in *" $pid "*) continue ;; esac
   case "$args" in *"$SZT"*) continue ;; esac        # our tests, by path
-  # Processes in a container: our test images (tilemaker, osmium and
-  # measure_build show /work/... or /run/... paths there). Production runs none.
-  grep -qE 'docker|containerd|libpod' "/proc/$pid/cgroup" 2>/dev/null && continue
+  # A session's own watcher that polls these helpers is not production.
+  case "$args" in *sz-busy.sh*|*sz-round.sh*) continue ;; esac
+  # Processes in a container: skip only our test containers (image
+  # streetzim:hosttest or ghcr.io/openzim/maps, or names cmp-* / sz-test-*).
+  # Production runs containers too (build-world-tiles.sh: tilemaker), and an
+  # unknown or unreadable container counts.
+  cid=$(grep -oE '[0-9a-f]{64}' "/proc/$pid/cgroup" 2>/dev/null | head -1)
+  if [ -n "$cid" ]; then
+    ci=$(timeout 10 docker inspect --type container -f '{{.Config.Image}} {{.Name}}' "$cid" 2>/dev/null)
+    case "$ci" in
+      "streetzim:hosttest "*|"ghcr.io/openzim/maps:"*|"ghcr.io/openzim/maps "*|*" /cmp-"*|*" /sz-test-"*) continue ;;
+    esac
+  fi
   echo "$pid $args"; n=$((n + 1))
-done < <(pgrep -af '[c]reate_osm_zim|[b]uild-region|[s]hip-region|[u]pload_validated|[f]inish_pending_uploads|[f]inish-pending-loop|[d]ownload_overture_data|[o]smium (extract|cat|merge)|[e]xtract-region-pbfs|[c]heck_terrain_coverage|[v]alidate_zim|[r]oute_cli|[c]heck_smoke_pairs|[p]wa_smoke_test|[s]erve-web-local|[k]iwix_viewer_gate|[d]evice-matrix|[o]verlap-check|[m]ap-health|[g]enerate\.py|[f]irebase|[s]ync-drive-viewer|[s]treetzim-pack|[x]apianbuilder|[t]ilemaker|[b]uild-world-|[b]uild-refresh-queue|[r]ebuild_old_regions|[r]un-continent-chain|[r]etrofit-chips|[v]iewer-refresh|[r]ollout_viewer_patch|[r]epackage_zim|[e]urope-safety-net|[r]egate-stranded|[b]uild_torrent|[/]bin/ia |bash .*[q]ueue.*\.sh|bash .*[r]ebuild.*\.sh')
-# The round's drivers, as sz-round.sh finds them (it also counts unknown
-# scripts in the checkout, which the name list above can miss).
+done < <(pgrep -af '[c]reate_osm_zim|[b]uild-region|[s]hip-region|[u]pload_validated|[f]inish_pending_uploads|[f]inish-pending-loop|[d]ownload_overture_data|[o]smium (extract|cat|merge)|[e]xtract-region-pbfs|[c]heck_terrain_coverage|[v]alidate_zim|[r]oute_cli|[c]heck_smoke_pairs|[p]wa_smoke_test|[s]erve-web-local|[k]iwix_viewer_gate|[d]evice-matrix|[o]verlap-check|[m]ap-health|[g]enerate\.py|[f]irebase|[s]ync-drive-viewer|[s]treetzim-pack|[x]apianbuilder|[t]ilemaker|[b]uild-world-|[b]uild-refresh-queue|[r]ebuild_old_regions|[r]un-continent-chain|[r]etrofit-chips|[v]iewer-refresh|[r]ollout_viewer_patch|[r]epackage_zim|[e]urope-safety-net|[r]egate-stranded|[b]uild_torrent|[c]anada_viewer_repack|[/]bin/ia ')
+# The round's drivers, as sz-round.sh finds them: every bash/sh script named
+# *queue* or *rebuild* (by its parsed script argument, so a `bash -c` text that
+# only mentions such a file does not count), and unknown scripts in the checkout.
 r=$(bash "$HOME/sz-round.sh" 2>&1); rc=$?
 case $rc in
   1|3) ;;
@@ -163,6 +174,10 @@ P=/storage/streetzim
 PR=$(cd "$P" 2>/dev/null && pwd -P) || { echo "sz-round: cannot read $P"; exit 2; }
 # Per-region steps a driver runs; never drivers themselves.
 LEAF='build-region-fast.sh|build-region.sh|ship-region.sh|upload_validated.sh|kiwix_viewer_gate.sh|extract-region-pbfs.sh|sync-drive-viewer.sh|check_stage1.sh'
+# Passive monitors in the checkout (read logs and /proc, write only their own
+# log; verified on the host 2026-09-29): shown, never counted. Exact paths only.
+# (The old paths are symlinks into ops/; both spellings are listed.)
+MON="$PR/ops/scripts/resource-watch.sh $PR/ops/tmp/upload-recorder.sh $PR/scripts/resource-watch.sh $PR/tmp/upload-recorder.sh"
 seen=" "; running=0
 files() {  # $1 pid, $2 script or command line
   case "$2" in
@@ -191,8 +206,10 @@ for f in "$P"/.*.pid; do
   esac
   files "$pid" "$args"; seen="$seen$pid "; running=1
 done
-# 2. Every bash/sh/dash process: find its script argument.
-for pid in $(pgrep -x 'bash|sh|dash'); do
+# 2. Every bash/sh/dash process: find its script argument. Selected by the
+#    command line's first word, not the process name: a `#!/bin/bash` script
+#    run directly (./x.sh) is named after the script but runs /bin/bash x.sh.
+for pid in $(pgrep -f '^([^ ]*/)?(bash|sh|dash)( |$)'); do
   case "$seen" in *" $pid "*) continue ;; esac
   mapfile -d '' -t a < "/proc/$pid/cmdline" 2>/dev/null || continue
   s=""; skip=0
@@ -218,6 +235,7 @@ for pid in $(pgrep -x 'bash|sh|dash'); do
   esac
   case "$real" in "$P"/*|"$PR"/*) ;; *) continue ;; esac
   printf '%s\n' "$base" | grep -q -x -E "$LEAF" && continue
+  case " $MON " in *" $real "*|*" $abs "*) echo "monitor  $pid ${a[*]}  (passive, not a driver)"; continue ;; esac
   echo "RUNNING  $pid ${a[*]}  (an unknown script in the checkout, counted as a driver; ask if it is not one)"
   files "$pid" "$s"; running=1
 done
