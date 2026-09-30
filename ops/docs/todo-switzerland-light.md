@@ -1,5 +1,7 @@
 # TODO: switzerland-light needs its own rebuild recipe
 
+> **Resolved 2026-09-26** (commit `273184a`): `build-region-fast.sh` reads `cloud/region-variants.tsv` (no satellite, `--max-zoom 13`, the parent's extracts). What is left is in [todo-rebuild-followup.md](todo-rebuild-followup.md).
+
 Dropped from `rebuild-old.list` on 2026-09-26.
 
 `cloud/rebuild_old_regions.sh` calls `build-region-fast.sh "$ID" "$BBOX" "$NAME"`

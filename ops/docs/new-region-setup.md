@@ -6,10 +6,12 @@ region drops into the existing build pipeline without code changes.
 
 ## Prereqs
 
-- `world-data/planet-2026-MM-DD.osm.pbf` (the canonical planet OSM dump)
-- `world-data/world-tiles-v2.mbtiles` (the planet MBTiles, ~120 GB, indexed
-  per-tile so bbox filtering is fast)
-- `search_cache/world.jsonl` (global searchable feature dump)
+- `world-data/planet-2026-MM-DD.osm.pbf` (the canonical planet OSM dump;
+  this round's is `planet-2026-08-31.osm.pbf`)
+- `world-data/world-tiles-v3.mbtiles` (the planet MBTiles built from that
+  planet, 107 GiB, indexed per-tile so bbox filtering is fast)
+- `search_cache/world-2026-08-31.jsonl` (global searchable feature dump,
+  extracted from those tiles)
 - A Linux box with `osmium-tool` and the `venv-linux` Python env
 
 ## Critical: extract the regional PBF — do NOT symlink the planet PBF
@@ -32,7 +34,7 @@ build, and that compounds for every region on the queue.
 cd /storage/streetzim
 osmium extract \
     -b "$BBOX" \
-    world-data/planet-2026-03-10.osm.pbf \
+    world-data/planet-2026-08-31.osm.pbf \
     -o world-data/regions/${ID}.osm.pbf \
     --overwrite
 ```
@@ -46,13 +48,16 @@ for spec in "argentina:-73.5,-55.5,-53.5,-21.5" \
             "south-america:-82.0,-56.0,-32.0,13.5" \
             "indian-subcontinent:60.0,5.0,98.0,38.0"; do
   ID="${spec%%:*}"; BBOX="${spec##*:}"
-  osmium extract -b "$BBOX" world-data/planet-2026-03-10.osm.pbf \
+  osmium extract -b "$BBOX" world-data/planet-2026-08-31.osm.pbf \
     -o "world-data/regions/${ID}.osm.pbf" --overwrite
 done
 ' > extract-queue.log 2>&1 < /dev/null &
 ```
 
-Each extract takes ~10–30 min depending on the region's bbox area.
+Each extract takes ~10–30 min depending on the region's bbox area. For
+regions that have a row in `cloud/regions.tsv`, `./extract-region-pbfs.sh
+--only <id>` does the same in one planet pass and writes the `.bbox`
+sidecar (below).
 
 ### Regions across the antimeridian (alaska)
 
@@ -63,7 +68,7 @@ box, so cut it as one box each side of 180 with a two-ring .poly:
 
 ```sh
 ./venv-linux/bin/python3 -m streetzim.area poly "$BBOX" "world-data/regions/${ID}.poly"
-osmium extract -p "world-data/regions/${ID}.poly" world-data/planet-2026-03-10.osm.pbf \
+osmium extract -p "world-data/regions/${ID}.poly" world-data/planet-2026-08-31.osm.pbf \
     -o "world-data/regions/${ID}.osm.pbf" --overwrite
 ```
 
@@ -109,18 +114,22 @@ rm -f overture_cache/addresses-alaska-*.parquet overture_cache/places-alaska-*.p
 
 Unlike the PBF, both of these are **already bbox-aware** at read time:
 
-- `world-tiles-v2.mbtiles` is a SQLite file — `--bbox` causes
+- `world-tiles-v3.mbtiles` is a SQLite file — `--bbox` causes
   `create_osm_zim.py` to query only the relevant tile rows.
-- `world.jsonl` is bbox-filtered in a single linear scan in `[4/10] Building
+- `world-2026-08-31.jsonl` is bbox-filtered in a single linear scan in `[4/10] Building
   search index` — that's a sequential read, not a random-IO scan.
 
 So symlinks save disk and don't hurt:
 
 ```sh
 cd /storage/streetzim/world-data/regions/
-ln -sf /storage/streetzim/world-data/world-tiles-v2.mbtiles ${ID}.mbtiles
-ln -sf /storage/streetzim/search_cache/world.jsonl          ${ID}.search.jsonl
+ln -sf /storage/streetzim/world-data/world-tiles-v3.mbtiles   ${ID}.mbtiles
+ln -sf /storage/streetzim/search_cache/world-2026-08-31.jsonl ${ID}.search.jsonl
 ```
+
+(`derive-region-mbtiles.py` and `derive-region-search.py` cut real
+per-region slices instead, which read faster on the HDD; see
+[alaska-antimeridian-runbook.md](alaska-antimeridian-runbook.md) step 4.)
 
 ## Overture parquets
 
@@ -172,7 +181,8 @@ takes BBOX as its second arg.
 
 Once the four inputs are in place, the canonical command is
 **`build-region-fast.sh`** — the wrapper every shipped region is built with
-(it is what `build-refresh-queue.sh` calls):
+(it is what `build-refresh-queue.sh`, `ship-region.sh` and
+`cloud/rebuild_old_regions.sh` call):
 
 ```sh
 setsid nohup env OVERTURE_RELEASE="$REL" WIKI_IMAGES=all \
@@ -210,9 +220,13 @@ European country builds made with it (benelux, greece, carpathians, balkans,
 3+ hours each) had **no Wikipedia layer at all**; the in-ZIM Kiwix gate
 caught it. This page previously named it as the canonical command.
 
-After the build, before `cloud/upload_validated.sh`, run the gates in
-`.queue-europe-countries.sh`: `validate_zim`, the archive marker check
-(viewer fixes, viewer slots, `wiki-geo-index.json`), overlap, the device
-matrix, the **render gate** (`tmp/map-health.mjs`, ≥100 rendered features —
-the only gate that fails a blank map; the device matrix and Kiwix gate both
-pass one), and `cloud/kiwix_viewer_gate.sh`.
+After the build, before `cloud/upload_validated.sh`, run the gates of
+`cloud/rebuild_old_regions.sh` (its `markers()` and `gate()`):
+`validate_zim`, the archive marker check (viewer fixes, viewer slots,
+`wiki-geo-index.json`), overlap, the device matrix, the **render gate**
+(`tmp/map-health.mjs`, ≥100 rendered features — the only gate that fails a
+blank map; the device matrix and Kiwix gate both pass one), and
+`cloud/kiwix_viewer_gate.sh`. For a region with a row in
+`cloud/regions.tsv`, `./ship-region.sh <id> [--no-upload]` runs the build
+and its own five gates (terrain coverage, validator, live routing, search +
+find chips, browser smoke) and uploads only if all pass.

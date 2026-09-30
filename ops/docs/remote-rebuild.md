@@ -1,5 +1,7 @@
 # Remote-box rebuild runbook
 
+> **Record (May 2026).** This was the runbook for the Europe remote box (`venv312`, `world-tiles-v2`, Overture `2026-04-15.0`, a post-build repack in the queue wrapper). Production today builds with `build-region-fast.sh` through `ship-region.sh` or `cloud/rebuild_old_regions.sh`: see [MAINTAINING.md](../../MAINTAINING.md) §3, [new-region-setup.md](new-region-setup.md) and [scripts.md](scripts.md).
+
 > This is the author's production runbook. It uses the optional
 > accelerators (`--zim-builder rust`, `--xapian builder`, zimru's
 > `zimcheck`) for continent-scale speed. None of them is required: see
