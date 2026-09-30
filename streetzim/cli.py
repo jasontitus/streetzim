@@ -249,7 +249,7 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Initial map view as latitude,longitude[,zoom]")
     feat.add_argument("--zim-workers", type=positive_int,
                       help="Compression threads for libzim. Default: --cpus, "
-                           "at most 20")
+                           "else the usable cores within any CPU quota, at most 20")
     feat.add_argument("--cpus", type=positive_int,
                       help="CPU cores the build uses at once (tilemaker, "
                            "search, terrain, compression). Set it to the task's "

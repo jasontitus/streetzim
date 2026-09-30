@@ -477,7 +477,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--terrain-dir", metavar="PATH", default=None,
                         help="Directory for terrain tile cache (default: terrain_cache/)")
     parser.add_argument("--workers", type=int, default=None,
-                        help="Number of ZIM compression workers (default: --cpus, at most 20)")
+                        help="Number of ZIM compression workers (default: --cpus, else the "
+                             "usable cores within any CPU quota, at most 20)")
     parser.add_argument("--cpus", type=int, default=None, metavar="N",
                         help="CPU cores the build uses at once: tilemaker threads, "
                              "search and terrain processes, compression threads. "

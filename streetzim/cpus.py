@@ -1,8 +1,11 @@
 """How many CPU cores a build uses at once.
 
 Every parallel step asks build_cpus(): tilemaker's threads, the search
-step's worker processes, libzim's compression threads, the tile
-decompression threads and terrain. Each step keeps its own cap on top.
+step's worker processes and terrain's. Each step keeps its own cap on top.
+libzim's compression threads and the tile decompression threads ask
+compression_cpus(), which leaves out the memory rule: they cost about 43 MB
+each (20 took 1 GB in all), and capping them costs time (4 compression
+threads took 71 s where 20 took 17 s).
 
 os.cpu_count() is not the answer inside a container. Docker's --cpu-shares,
 which is how Zimfarm gives a task its CPUs, hides no cores, so a build on a
@@ -28,11 +31,13 @@ from __future__ import annotations
 import math
 import os
 
-# Memory per core for the default. The recipes docs/zimfarm.md recommends
-# (2 cpu with 6 GiB, 4 cpu with 8 to 14 GiB) get 2, 2 to 4 cores; a 16 GiB
-# task gets 5. The Netherlands' search step took 5.4 GB at 4 workers, so
-# much less per core would not be safe.
-GIB_PER_CPU = 3
+# Memory per core for the default. tilemaker costs about 0.25 GB per thread
+# on top of a fixed part that grows with the region (the Netherlands: 3.8 GB
+# at 4 threads, 4.7 GB at 8, 11.9 GB at 36), and each thread saves time
+# (4 threads took 185 s there, 8 took 106 s, 36 took 60 s). A 16 GiB task
+# gets 8 cores; the recipes docs/zimfarm.md recommends (6 to 14 GiB) get
+# 3 to 7.
+GIB_PER_CPU = 2
 
 _requested: int | None = None
 
@@ -52,10 +57,19 @@ def build_cpus() -> int:
     return detect()[0]
 
 
+def compression_cpus() -> int:
+    """Cores for libzim's compression threads and the tile decompression
+    threads: --cpus, else build_cpus() without the memory rule."""
+    if _requested is not None:
+        return _requested
+    return detect(memory_rule=False)[0]
+
+
 def detect(cgroup_root: str = "/sys/fs/cgroup",
-           proc_self_cgroup: str = "/proc/self/cgroup") -> tuple[int, str]:
+           proc_self_cgroup: str = "/proc/self/cgroup",
+           memory_rule: bool = True) -> tuple[int, str]:
     """(cores, how they were found), from the cores this process may run on
-    and the cgroup's CPU quota and memory limit."""
+    and the cgroup's CPU quota and (with memory_rule) memory limit."""
     n = _usable_cores()
     why = [f"{n} usable cores"]
     # v2 when the root is a unified hierarchy (on a hybrid host it is a v1
@@ -69,7 +83,7 @@ def detect(cgroup_root: str = "/sys/fs/cgroup",
     if quota is not None and quota < n:
         n = quota
         why.append(f"CPU quota {quota}")
-    if mem is not None:
+    if mem is not None and memory_rule:
         gib = round(mem / (1 << 30))        # 7.99g and 8e9 bytes count as 8 and 7
         by_mem = max(1, gib // GIB_PER_CPU)
         if by_mem < n:

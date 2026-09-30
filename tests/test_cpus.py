@@ -53,18 +53,20 @@ def test_memory_limit_allows_one_core_per_gib_per_cpu(tmp_path, monkeypatch):
                                              "cpu.max": "max 100000\n",
                                              "cpu.weight": "240\n"}})
     n, why = cpus.detect(root, proc)
-    assert n == 16 // cpus.GIB_PER_CPU == 5
+    assert n == 16 // cpus.GIB_PER_CPU == 8
     assert "memory limit 16 GiB" in why
     # Less than one core's worth still gets one core.
     root, proc = cgroup(tmp_path / "small", "/", {"": {"memory.max": f"{GIB}\n"}})
     assert cpus.detect(root, proc)[0] == 1
+    # Compression threads leave the memory rule out.
+    assert cpus.detect(root, proc, memory_rule=False) == (36, "36 usable cores")
 
 
 @pytest.mark.parametrize("limit, cores", [
-    (6 * GIB, 2), (8 * GIB, 2), (10 * GIB, 3), (12 * GIB, 4), (14 * GIB, 4),
-    (int(7.99 * GIB), 2),        # rounded to 8 GiB first, not floored to 1 core
-    (16 * 10**9, 5),             # 14.9 GiB, as a limit given in decimal GB
-    (int(8.4 * GIB), 2), (int(8.6 * GIB), 3),
+    (6 * GIB, 3), (8 * GIB, 4), (10 * GIB, 5), (12 * GIB, 6), (14 * GIB, 7), (16 * GIB, 8),
+    (int(7.99 * GIB), 4),        # rounded to 8 GiB first, not floored to 3 cores
+    (16 * 10**9, 7),             # 14.9 GiB, as a limit given in decimal GB
+    (int(9.4 * GIB), 4), (int(9.6 * GIB), 5), (3 * GIB, 1),
 ])
 def test_memory_rule_for_the_recommended_recipes(tmp_path, monkeypatch, limit, cores):
     monkeypatch.setattr(cpus, "_usable_cores", lambda: 36)
@@ -83,7 +85,7 @@ def test_the_tightest_limit_of_any_ancestor_applies(tmp_path, monkeypatch):
     root, proc = cgroup(tmp_path, "/a/b", {
         "a": {"memory.max": f"{8 * GIB}\n", "cpu.max": "600000 100000\n"},
         "a/b": {"memory.max": f"{64 * GIB}\n", "cpu.max": "max 100000\n"}})
-    assert cpus.detect(root, proc)[0] == 2          # 8 GiB / 3, under the quota of 6
+    assert cpus.detect(root, proc)[0] == 4          # 8 GiB / 2, under the quota of 6
 
 
 def test_the_smallest_quota_of_any_ancestor_applies(tmp_path, monkeypatch):
@@ -113,7 +115,7 @@ def test_cgroup_v1_limits_are_read(tmp_path, monkeypatch):
     v1_tree(tmp_path / "a", quota="250000", mem=str(16 * GIB))
     assert cpus.detect(str(tmp_path / "a"), str(proc)) == (3, "36 usable cores, CPU quota 3")
     v1_tree(tmp_path / "b", quota="-1", mem=str(9 * GIB))
-    assert cpus.detect(str(tmp_path / "b"), str(proc))[0] == 3
+    assert cpus.detect(str(tmp_path / "b"), str(proc))[0] == 4
     # "No limit" in v1 is a huge number, not a limit.
     v1_tree(tmp_path / "c", quota="-1", mem="9223372036854771712")
     assert cpus.detect(str(tmp_path / "c"), str(proc)) == (36, "36 usable cores")
@@ -127,7 +129,7 @@ def test_hybrid_host_reads_v1_not_the_missing_v2_files(tmp_path, monkeypatch):
     root = tmp_path / "cg"
     (root / "docker" / "abc").mkdir(parents=True)
     v1_tree(root, mem=str(6 * GIB))
-    assert cpus.detect(str(root), str(proc))[0] == 2
+    assert cpus.detect(str(root), str(proc))[0] == 3
 
 
 def test_usable_cores_follow_the_affinity_mask(monkeypatch):
@@ -175,8 +177,20 @@ def test_no_unified_cgroup_or_unreadable_files(tmp_path, monkeypatch):
     assert cpus.detect(root, proc)[0] == 8
 
 
+def test_compression_cpus_keep_the_quota_and_the_flag(tmp_path, monkeypatch):
+    monkeypatch.setattr(cpus, "_usable_cores", lambda: 36)
+    root, proc = cgroup(tmp_path, "/", {"": {"memory.max": f"{4 * GIB}\n",
+                                             "cpu.max": "600000 100000\n"}})
+    assert cpus.detect(root, proc)[0] == 2
+    assert cpus.detect(root, proc, memory_rule=False)[0] == 6
+    monkeypatch.setattr(cpus, "detect", lambda memory_rule=True: (2 if memory_rule else 6, ""))
+    assert (cpus.build_cpus(), cpus.compression_cpus()) == (2, 6)
+    cpus.set_build_cpus(3)
+    assert (cpus.build_cpus(), cpus.compression_cpus()) == (3, 3)
+
+
 def test_cpus_flag_wins_and_none_goes_back_to_detecting(monkeypatch):
-    monkeypatch.setattr(cpus, "detect", lambda: (7, "detected"))
+    monkeypatch.setattr(cpus, "detect", lambda memory_rule=True: (7, "detected"))
     assert cpus.build_cpus() == 7
     cpus.set_build_cpus(3)
     assert cpus.build_cpus() == 3
@@ -252,10 +266,16 @@ def test_main_sets_the_count_and_a_second_run_does_not_keep_it(monkeypatch):
     def stop(**kw):
         raise Stop
     monkeypatch.setattr(create_osm_zim, "_openzim_options", stop)
-    monkeypatch.setattr(cpus, "detect", lambda: (7, "detected"))
+    monkeypatch.setattr(cpus, "detect", lambda memory_rule=True: (7, "detected"))
     with pytest.raises(Stop):
         create_osm_zim.main(["--cpus", "3"])
     assert cpus.build_cpus() == 3
     with pytest.raises(Stop):
         create_osm_zim.main([])
     assert cpus.build_cpus() == 7
+
+
+def test_zim_writer_sizes_compression_without_the_memory_rule():
+    src = (ROOT / "streetzim" / "zim_writer.py").read_text(encoding="utf-8")
+    assert "num_workers = zim_workers or min(compression_cpus(), 20)" in src
+    assert "ThreadPoolExecutor(max_workers=compression_cpus())" in src

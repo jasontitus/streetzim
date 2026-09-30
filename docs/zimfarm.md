@@ -756,51 +756,61 @@ from them, since only Monaco was measured with `full`:
 Zimfarm gives a task its CPUs as a CPU share (`docker run --cpu-shares`),
 which hides none of the machine's cores: inside the container Python's
 `os.cpu_count()` and tilemaker both see every core of the worker. Before
-`--cpus`, a build started a tilemaker thread, a search process and (up to
-20) a compression thread per core it saw, so its memory grew with the
-machine it landed on, not with the map. The measurements above were made on
-a 4-core machine and do not show it. On a 36-core machine, in a container
-limited like a Zimfarm task (`--memory 16g --cpu-shares 3072`), the same
-Luxembourg `basic` build peaked at 8.4 GB, and tilemaker alone, on the same
-input:
+`--cpus`, a build started a tilemaker thread and a search process per core
+it saw, so its memory grew with the machine it landed on, not with the map.
+The measurements above were made on a 4-core machine and do not show it.
+tilemaker alone, on a 36-core machine (peak RSS, and time with the machine
+otherwise shared):
 
-| tilemaker threads | peak memory | time |
-|---|---|---|
-| 36 (every core) | 7.9 GB | 10.3 s |
-| 4 | 1.4 GB | 10.6 s |
-| 1 | 0.7 GB | 28.0 s |
+| region | 1 thread | 4 | 8 | 16 | 36 (every core) |
+|---|---|---|---|---|---|
+| Luxembourg | 0.70 GB, 28 s | 1.42 GB, 10.7 s | 2.48 GB, 8.3 s | 4.07 GB, 8.4 s | 7.96 GB, 10.0 s |
+| Switzerland | 1.88 GB, 332 s | 2.62 GB, 102 s | 3.76 GB, 58 s | 5.95 GB, 71 s | 11.4 GB, 36 s |
+| the Netherlands | | 3.78 GB, 185 s | 4.74 GB, 106 s | 7.11 GB, 69 s | 11.9 GB, 60 s |
 
-With every core it was killed in a 4 GB container; with 4 threads it ran.
+Each thread costs about 0.25 GB whatever the region; the fixed part grows
+with it. tilemaker's own detection ignores `docker run --cpus` and
+`--cpuset-cpus` (it picked 36 under both), and with every core Luxembourg
+was killed in a 4 GB container. At about 50 cores the Netherlands' tiles
+alone would pass 16 GiB. Fewer threads cost time on a large region (the
+Netherlands' tiles: 60 s with 36, 106 s with 8, 185 s with 4), minutes on
+a build of an hour or more.
 
-`streetzim/cpus.py` now decides the count once for every step (tilemaker
-`--threads`, the search and terrain processes, the compression and tile
-threads): `--cpus N` when given, otherwise the cores the process may run on,
-capped by a CPU quota (`cpu.max`, as `docker run --cpus` sets) and by the
-memory limit (`memory.max`, as `--memory` sets, rounded to whole GiB) at one
-core per 3 GiB. A CPU share is relative to the other containers and says
-nothing about a core count, so it is not read. cgroup v1 limits are read
-when the machine has no cgroup v2. Outside a container, with no limits, the
-count is every core, as before.
+`streetzim/cpus.py` decides the count once: `--cpus N` when given,
+otherwise the cores the process may run on, capped by a CPU quota
+(`cpu.max`, as `docker run --cpus` sets) and by the memory limit
+(`memory.max`, as `--memory` sets, rounded to whole GiB) at one core per
+2 GiB. tilemaker's threads and the search and terrain processes use it.
+libzim's compression threads (at most 20) and the tile decompression threads
+leave the memory rule out: they cost about 43 MB each, and capping them costs
+time (4 compression threads took 71 s where 20 took 17 s). A CPU share is
+relative to the other containers and says nothing about a core count, so it
+is not read. cgroup v1 limits are read when the machine has no cgroup v2.
+Outside a container, with no limits, the count is every core, as before.
 
 **A recipe should pass `--cpus` equal to its `cpu` resource** (`"cpus": 4`
-next to `"resources": {"cpu": 4, ...}`). Without it the memory rule
-decides: the recipes in the table above get 2 cores for 6 or 8 GiB, 3 for
-10, 4 for 12 or 14, and a 16 GiB task gets 5.
+next to `"resources": {"cpu": 4, ...}`), so the build uses what the task
+pays for whatever machine it lands on. Without it the memory rule decides:
+the recipes in the table above get 3 to 7 cores, a 16 GiB task 8.
 
-The same Luxembourg build in the 16 GiB container, with every change on the
-branch (the count, and cutting the extract to the area once instead of four
-times):
+The address, wiki-tag and routing steps also no longer cut the extract to
+the area again: each did so with `osmium extract` on the file the tile step
+had already cut to the same box (the result was byte-identical), and each
+took about 3.8 GB, even for a 1 km box (2.3 GB): osmium's ID sets span the
+planet's ID range, not the extract's. One cut remains, before the tiles.
 
-| Luxembourg `basic`, 36-core machine, `--memory 16g` | peak memory | wall time | CPU time |
+Luxembourg `basic` in a container limited like a Zimfarm task
+(`--memory 16g --cpu-shares 3072`) on the 36-core machine:
+
+| | peak memory | wall time | CPU time |
 |---|---|---|---|
 | before (36 tilemaker threads, 36 search processes, 20 compression threads) | 8.4 GB | 3.0 min | 5.8 min |
-| 4 cores (the memory rule at the time: one per 4 GiB) | 4.0 GB | 3.3 min | 5.7 min |
+| 4 cores for everything (an earlier rule) | 4.0 GB | 3.3 min | 5.7 min |
 | and the extract cut once | 3.9 GB | 2.5 min | 4.0 min |
 
-What remains at the peak is the one cut of the extract: `osmium extract`
-took 3.7 GB even for Luxembourg's 48 MB, and did not change with its thread
-count (`OSMIUM_POOL_THREADS` 2, 4 and 8 gave the same), so it is a fixed
-cost of about 4 GB per build.
+Peak memory here is PSS sampled every 2 s (`tools/measure_build.py`), which
+can miss a spike of a few seconds. At this size the peak is the one
+remaining `osmium extract` (3.7 GB), a fixed cost of about 4 GB per build.
 
 ### Terrain cost
 
