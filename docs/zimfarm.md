@@ -258,10 +258,19 @@ serial loop with a `polite_pacer`:
 - a 429, maxlag, or 5xx with `Retry-After` doubles the gap between
   requests, up to 30 s, and each success eases it 10% back. The retry of
   the refused request itself waits the whole `Retry-After` (at least 5 s
-  after a 429 without one); a `Retry-After` over 120 s stops the loop for
+  after a 429 or 503 without one); a `Retry-After` over 120 s stops the loop for
   this run instead of retrying before the server allows it;
-- `STREETZIM_WIKI_WAIT_BUDGET` bounds the waiting a run spends on rate
-  limits and retries (the pauses above are not charged to it);
+- `STREETZIM_WIKI_WAIT_BUDGET` (default 900 s) bounds the waiting spent on
+  rate limits and retries **per step**, not per run: each of the Wikidata
+  title backfill (`--resolve-wikidata-titles`), the Wikidata SPARQL
+  properties, the SPARQL name lookups (`--mbtiles` input only), the
+  Wikipedia extracts and the Wikipedia articles has its own, so a hard
+  throttle can cost a `full` run up to four or five budgets. The pauses
+  above are not charged to it;
+- an extract or article the API did not answer (a rate limit, 5xx, a
+  stopped step) is never cached as missing: the next build asks again. A
+  page that has no extract is recorded as such (`no_extract`) and not
+  asked again;
 - gzip is requested and decoded.
 The Wikidata SPARQL queries (query.wikidata.org, a separate service) keep
 their 1 s (properties) and 0.5 s (name lookup) pauses, now from the end of
@@ -733,8 +742,9 @@ from them, since only Monaco was measured with `full`:
 - Time in `full` is dominated by the Wikimedia APIs: one SPARQL request per
   40 Q-IDs with a 1 s pause, and one request per article at no more than
   120 a minute (California links 11,613 articles: over an hour and a half
-  before any rate limiting, an estimate), plus up to 15 minutes of rate-limit waiting
-  per source (`STREETZIM_WIKI_WAIT_BUDGET`). A recipe for a large region
+  before any rate limiting, an estimate), plus up to 15 minutes of rate-limit
+  waiting per step (`STREETZIM_WIKI_WAIT_BUDGET`; the steps are listed under
+  [Wikimedia API etiquette](#wikimedia-api-etiquette-for-periodic-recipes)). A recipe for a large region
   should allow hours on top of `basic`'s time, not minutes.
 - Terrain (on in `full`) adds the Copernicus DEM download and the
   hillshade tiles ([Terrain cost](#terrain-cost): 0.3 GB for Luxembourg,

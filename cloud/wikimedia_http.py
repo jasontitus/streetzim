@@ -16,7 +16,7 @@ What a caller gets:
 - Retries honour `Retry-After` (delta-seconds or HTTP-date); one longer
   than `max_wait` stops the run (a stopping `TransientError`) rather than
   retrying before the server allows it. Without one, retries back off
-  exponentially with jitter, at least 5 s after a 429.
+  exponentially with jitter, at least 5 s after a 429 or 503.
 - A `Pacer` keeps a polite gap between requests (from the end of one
   response to the next request), widens it after each 429, maxlag or 5xx
   with Retry-After and eases back towards the base gap as requests
@@ -52,15 +52,16 @@ CONTACT_URL = PROJECT_URL + "/issues"
 CONTACT_ENV = "STREETZIM_WIKI_CONTACT"
 REQUIRE_ENV = "STREETZIM_REQUIRE_WIKI"
 BUDGET_ENV = "STREETZIM_WIKI_WAIT_BUDGET"
-DEFAULT_WAIT_BUDGET = 900.0   # seconds of rate-limit waiting per run
+DEFAULT_WAIT_BUDGET = 900.0   # seconds of rate-limit waiting per Pacer (per step)
 GAP_ENV = "STREETZIM_WIKI_GAP"
 MAX_PER_MIN_ENV = "STREETZIM_WIKI_MAX_PER_MIN"
 DEFAULT_GAP = 0.1             # seconds from one response to the next request
 DEFAULT_MAX_PER_MIN = 120.0   # request starts a minute (polite_pacer)
 SLOW_AFTER = 1.0              # an answer slower than this ...
 SLOW_GAP = 5.0                # ... is followed by at least this pause
-# A 429 without Retry-After waits at least this long before its retry
-# (Wikimedia APIs/Rate limits: "wait at least five seconds").
+# A 429 or 503 without Retry-After waits at least this long before its
+# retry, never more than max_wait (Wikimedia APIs/Rate limits: "clients
+# should wait at least five seconds").
 MIN_THROTTLE_WAIT = 5.0
 
 # HTTP statuses worth retrying.
@@ -186,10 +187,10 @@ class Pacer:
     Both default to off.
 
     `budget` (seconds; default STREETZIM_WIKI_WAIT_BUDGET, else 15 min)
-    bounds the waiting a run spends on failures: retry backoff and any gap
-    beyond the base. Once spent, `get_json` raises a stopping
-    TransientError instead of sleeping, so a hard throttle costs a build
-    minutes, not hours. The floors are etiquette, not failures, and are
+    bounds the waiting this Pacer's loop (one build step) spends on
+    failures: retry backoff and any gap beyond the base. Once spent,
+    `get_json` raises a stopping TransientError instead of sleeping, so a
+    hard throttle costs a step minutes, not hours. The floors are etiquette, not failures, and are
     not charged to it: only the part of a wait beyond them is.
 
     Not thread-safe: use one Pacer per serial request loop (the floors
@@ -356,8 +357,8 @@ def get_json(url: str, *, user_agent: str, pacer: Pacer | None = None,
                 last.status, throttled=last.throttled, stop=True)
         if attempt < retries - 1:
             delay = backoff_delay(attempt, retry_after, base=base, max_wait=max_wait)
-            if last.throttled and retry_after is None:
-                delay = max(delay, MIN_THROTTLE_WAIT)
+            if retry_after is None and (last.throttled or last.status == 503):
+                delay = max(delay, min(MIN_THROTTLE_WAIT, max_wait))
             if pacer is not None:
                 if not pacer.can_wait(delay):
                     pacer.charge(pacer.budget)   # spent: later calls stop at once

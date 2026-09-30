@@ -575,7 +575,7 @@ def test_wikidata_exhausted_429_caches_nothing_and_warns(monkeypatch, sleeps, tm
 def test_wikidata_5xx_then_answer(monkeypatch, sleeps):
     use(monkeypatch, FakeAPI(http_error(502), http_error(503), entities({"Q9": "Nine"})))
     assert wt.resolve_qids(["Q9"], sleep=0) == {"Q9": "Nine"}
-    assert sleeps == [1.5, 3.0]
+    assert sleeps == [1.5, 5.0]      # a 503 without Retry-After waits at least 5 s
 
 
 def wikidata_api(bad: set[str] = frozenset(), log: list | None = None):
@@ -813,3 +813,82 @@ def test_extracts_honour_retry_after_and_stop_when_told(monkeypatch, sleeps, cap
     wc.fetch_wikipedia_extracts(entries)
     assert len(api.urls) == 6
     assert sum(1 for e in entries.values() if e.get("extract")) == 20
+
+
+def test_throttle_floor_never_exceeds_max_wait_and_covers_503(monkeypatch, sleeps):
+    use(monkeypatch, FakeAPI(http_error(429), {"ok": 1}))
+    wm.get_json("https://x.test/a", user_agent="ua", max_wait=2)
+    assert sleeps == [2]                       # the 5 s floor, capped at max_wait
+    sleeps.clear()
+    use(monkeypatch, FakeAPI(http_error(503), {"ok": 1}))
+    wm.get_json("https://x.test/a", user_agent="ua")
+    assert sleeps == [5.0]
+    sleeps.clear()
+    use(monkeypatch, FakeAPI(http_error(502), {"ok": 1}))
+    wm.get_json("https://x.test/a", user_agent="ua")
+    assert sleeps == [1.5]                     # other 5xx: plain backoff
+
+
+def test_extracts_other_4xx_skips_the_batch_401_403_stop(monkeypatch, sleeps, capsys):
+    import wikidata_cache as wc
+    entries = {f"Q{i}": {"wikipedia_title": f"Place_{i}"} for i in range(40)}
+    api = use(monkeypatch, FakeAPI(http_error(414),
+                                   _extracts_answer([f"Place {i}" for i in range(20, 40)])))
+    assert wc.fetch_wikipedia_extracts(entries) == 20       # the first batch stays pending
+    assert len(api.urls) == 2
+    assert sum(1 for e in entries.values() if e.get("extract")) == 20
+    assert not any(e.get(wc.NO_EXTRACT) for e in entries.values())
+    for code in (401, 403):
+        entries = {f"Q{i}": {"wikipedia_title": f"Place_{i}"} for i in range(40)}
+        api = use(monkeypatch, FakeAPI(default=http_error(code)))
+        assert wc.fetch_wikipedia_extracts(entries) == 40
+        assert len(api.urls) == 1
+
+
+def test_unanswered_extracts_are_asked_again_real_misses_are_not(monkeypatch, sleeps,
+                                                                  tmp_path):
+    import wikidata_cache as wc
+    qids = {f"Q{i}": {"name": f"Place {i}"} for i in (11, 12, 13)}
+    monkeypatch.setattr(wc, "extract_qids_from_pbf", lambda *a, **k: qids)
+    fetched: list = []
+
+    def props(new_qids, cache_dir=None):
+        fetched.append(list(new_qids))
+        return {q: {"qid": q, "label": f"L{q}", "wikipedia_title": f"Place_{q[1:]}"}
+                for q in new_qids}
+    monkeypatch.setattr(wc, "fetch_wikidata_batch", props)
+    d = str(tmp_path)
+
+    # Build 1: the extracts API stops the run (Retry-After beyond the cap).
+    use(monkeypatch, FakeAPI(default=http_error(429, "900")))
+    wc.build_cache(pbf_path="x.pbf", cache_dir=d)
+    cached = wc.load_cache(d)
+    assert set(cached) == set(qids) and all(wc.extract_pending(e) for e in cached.values())
+
+    # Build 2: no new Q-IDs, but the unanswered extracts are asked again.
+    # Place 13 has no extract: that answer is recorded, not a pending one.
+    api = use(monkeypatch, FakeAPI({"query": {"pages": [
+        {"title": "Place 11", "extract": "Eleven is a place."},
+        {"title": "Place 12", "extract": "Twelve is a place."},
+        {"title": "Place 13", "missing": True}]}}))
+    wc.build_cache(pbf_path="x.pbf", cache_dir=d)
+    assert len(fetched) == 1 and len(api.urls) == 1
+    cached = wc.load_cache(d)
+    assert cached["Q11"]["extract"] == "Eleven is a place."
+    assert cached["Q13"].get(wc.NO_EXTRACT) and not cached["Q13"].get("extract")
+    assert not any(wc.extract_pending(e) for e in cached.values())
+
+    # Build 3: nothing is asked again.
+    api = use(monkeypatch, FakeAPI())
+    wc.build_cache(pbf_path="x.pbf", cache_dir=d)
+    assert api.urls == [] and len(fetched) == 1
+
+
+def test_a_continued_extracts_answer_marks_no_misses(monkeypatch, sleeps):
+    import wikidata_cache as wc
+    entries = {"Q1": {"wikipedia_title": "A"}, "Q2": {"wikipedia_title": "B"}}
+    use(monkeypatch, FakeAPI({"continue": {"excontinue": 1},
+                              "query": {"pages": [{"title": "A", "extract": "A is."},
+                                                  {"title": "B"}]}}))
+    assert wc.fetch_wikipedia_extracts(entries) == 1
+    assert entries["Q1"]["extract"] == "A is." and wc.extract_pending(entries["Q2"])

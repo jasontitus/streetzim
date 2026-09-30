@@ -534,24 +534,41 @@ def _val(row, key):
     return ""
 
 
+# An entry the API answered for but gave no extract (no such page, an
+# empty lead) carries NO_EXTRACT: True and is not asked again. An entry
+# with a wikipedia_title and neither field was never answered (a rate
+# limit, 5xx, a skipped or stopped batch) and is asked on the next build.
+NO_EXTRACT = "no_extract"
+
+
+def extract_pending(entry):
+    """True when `entry` has an article whose extract was never answered."""
+    return bool(entry.get("wikipedia_title")) and not entry.get("extract") \
+        and not entry.get(NO_EXTRACT)
+
+
 def fetch_wikipedia_extracts(wikidata_entries, batch_size=20, pacer=None):
     """Fetch short Wikipedia extracts for entries that have wikipedia_title.
 
-    Modifies entries in-place, adding an 'extract' field. Requests go
-    through cloud/wikimedia_http.get_json, paced by `pacer` (default
-    polite_pacer(): serial, at most STREETZIM_WIKI_MAX_PER_MIN a minute):
-    429/5xx are retried honouring Retry-After, a batch the API still
-    cannot answer is skipped, and a refused client, a Retry-After beyond
-    the retry cap or a spent wait budget stops the rest.
+    Modifies entries in-place, adding an 'extract' field, or NO_EXTRACT
+    when the API answered without one. Entries that already have either
+    are skipped. Returns the number of entries still pending (never
+    answered; the next build asks again).
+
+    Requests go through cloud/wikimedia_http.get_json, paced by `pacer`
+    (default polite_pacer(): serial, at most STREETZIM_WIKI_MAX_PER_MIN a
+    minute): 429/5xx are retried honouring Retry-After; a batch the API
+    still cannot answer, or answers with another 4xx, is skipped; a
+    refused client (401/403), a Retry-After beyond the retry cap or a
+    spent wait budget stops the rest.
     """
     titles_to_fetch = []
     for qid, entry in wikidata_entries.items():
-        title = entry.get("wikipedia_title")
-        if title:
-            titles_to_fetch.append((qid, title))
+        if extract_pending(entry):
+            titles_to_fetch.append((qid, entry["wikipedia_title"]))
 
     if not titles_to_fetch:
-        return
+        return 0
 
     total = len(titles_to_fetch)
     print(f"  Fetching Wikipedia extracts for {total} articles...")
@@ -579,12 +596,18 @@ def fetch_wikipedia_extracts(wikidata_entries, batch_size=20, pacer=None):
         try:
             try:
                 data = get_json(url, user_agent=USER_AGENT, pacer=pacer, timeout=30)
-            except urllib.error.HTTPError as e:   # 4xx: the client is refused
-                raise TransientError(f"HTTP {e.code}", e.code, stop=True) from e
-            if not isinstance(data, dict):
-                raise TransientError(f"unexpected {type(data).__name__} body")
+            except urllib.error.HTTPError as e:
+                # 401/403: this client is refused, so every batch would be.
+                # Any other 4xx is about this batch: skip it (left pending).
+                raise TransientError(f"HTTP {e.code}", e.code,
+                                     stop=e.code in (401, 403)) from e
+            if not isinstance(data, dict) or not isinstance(data.get("query"), dict):
+                raise TransientError("body has no query (an error or unexpected body)")
 
-            pages = data.get("query", {}).get("pages", [])
+            pages = data["query"].get("pages", [])
+            # A continued answer may hold the rest of the extracts in a
+            # later page: only a complete answer says "no extract".
+            complete = "continue" not in data
             # Build title -> extract map
             extract_map = {}
             for page in pages:
@@ -611,6 +634,8 @@ def fetch_wikipedia_extracts(wikidata_entries, batch_size=20, pacer=None):
                         else:
                             extract = extract[:500] + "..."
                     wikidata_entries[qid]["extract"] = extract
+                elif complete:
+                    wikidata_entries[qid][NO_EXTRACT] = True
 
         except TransientError as e:
             print(f"    Warning: Wikipedia API failed for batch {i}: {e}")
@@ -626,7 +651,10 @@ def fetch_wikipedia_extracts(wikidata_entries, batch_size=20, pacer=None):
             print(f"\r    Fetched {done}/{total} extracts...", end="", flush=True)
 
     count = sum(1 for e in wikidata_entries.values() if "extract" in e)
-    print(f"\r    Fetched {count} Wikipedia extracts in {time.time() - start_time:.0f}s")
+    pending = sum(1 for e in wikidata_entries.values() if extract_pending(e))
+    print(f"\r    Fetched {count} Wikipedia extracts in {time.time() - start_time:.0f}s"
+          + (f"; {pending} not answered, asked again next build" if pending else ""))
+    return pending
 
 
 def load_cache(cache_dir):
@@ -770,19 +798,27 @@ def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=
     # Step 2: Check what's already cached
     existing = load_cache(cache_dir)
     new_qids = [qid for qid in qid_features if qid not in existing]
+    # Cached entries whose extract was never answered (a rate limit, a
+    # stopped run): asked again, since a transient failure is never a miss.
+    retry = {} if skip_extracts else {
+        qid: e for qid, e in existing.items()
+        if qid in qid_features and extract_pending(e)}
 
-    if not new_qids:
+    if not new_qids and not retry:
         print(f"  All {len(qid_features)} Q-IDs already cached")
         return cache_dir
 
-    print(f"  {len(new_qids)} new Q-IDs to fetch ({len(existing)} already cached)")
+    new_entries = {}
+    if new_qids:
+        print(f"  {len(new_qids)} new Q-IDs to fetch ({len(existing)} already cached)")
+        # Step 3: Fetch Wikidata properties (with incremental saves)
+        new_entries = fetch_wikidata_batch(new_qids, cache_dir=cache_dir)
+    if retry:
+        print(f"  {len(retry)} cached entries have no extract yet; asking again")
 
-    # Step 3: Fetch Wikidata properties (with incremental saves)
-    new_entries = fetch_wikidata_batch(new_qids, cache_dir=cache_dir)
-
-    # Step 4: Fetch Wikipedia extracts
+    # Step 4: Fetch Wikipedia extracts (new entries and the retries)
     if not skip_extracts:
-        fetch_wikipedia_extracts(new_entries)
+        fetch_wikipedia_extracts({**retry, **new_entries})
 
     # Step 5: Merge and save
     all_entries = {**existing, **new_entries}
