@@ -297,12 +297,41 @@ jobs:
         if: steps.shp-cache.outputs.cache-hit != 'true'
         run: scripts/fetch-shapefiles.sh .
 
+      # The Monaco extract, fetched once a week and cached: from Geofabrik,
+      # else the openstreetmap.fr mirror, else last week's copy. A Geofabrik
+      # outage (2026-09-30: every extract a redirect loop, then a 404) used
+      # to fail this job, and with it the image publish.
+      - name: Week of the Monaco extract
+        id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      - name: Cache the Monaco extract
+        id: pbf-cache
+        uses: actions/cache@v4
+        with:
+          path: monaco-latest.osm.pbf
+          key: monaco-pbf-${{ steps.week.outputs.week }}
+          restore-keys: monaco-pbf-
+      - name: Fetch the Monaco extract
+        if: steps.pbf-cache.outputs.cache-hit != 'true'
+        run: |
+          for url in https://download.geofabrik.de/europe/monaco-latest.osm.pbf \
+                     https://download.openstreetmap.fr/extracts/europe/monaco-latest.osm.pbf; do
+            if curl -fsSL --retry 3 --max-redirs 5 -o monaco.part "$url" \
+               && head -c 32 monaco.part | LC_ALL=C grep -qa OSMHeader; then
+              mv monaco.part monaco-latest.osm.pbf; echo "fetched $url"; exit 0
+            fi
+            echo "::warning::could not fetch $url"
+          done
+          # Both down: last week's cached copy, if the cache had one.
+          test -s monaco-latest.osm.pbf && echo "using the cached copy" && exit 0
+          echo "::error::no Monaco extract"; exit 1
+
       - name: Build Monaco ZIM
         env:
           STREETZIM_REQUIRE_SHAPEFILES: "1"
         run: |
-          python create_osm_zim.py --area monaco --routing --spatial-chunk-scale 10 \
-            --split-find-chips -o osm-monaco-ci.zim
+          python create_osm_zim.py --area monaco --pbf monaco-latest.osm.pbf --routing \
+            --spatial-chunk-scale 10 --split-find-chips -o osm-monaco-ci.zim
 
       - name: Validate (cloud/validate_zim.py + zimcheck)
         env:
@@ -399,7 +428,8 @@ jobs:
           pip install --no-deps -e .
           streetzim --name osm_en_monaco --title Monaco \
             --description "Offline map of Monaco with search and routing" \
-            --tags openstreetmap --area monaco --shapefiles "$PWD" --profile basic --terrain \
+            --tags openstreetmap --area monaco --pbf-url "file://$PWD/monaco-latest.osm.pbf" \
+            --shapefiles "$PWD" --profile basic --terrain \
             --output out --stats-filename out/task_progress.json
           python tools/check_openzim_output.py out osm_en_monaco --title Monaco --routing --terrain
           python cloud/validate_zim.py out/osm_en_monaco_*.zim
