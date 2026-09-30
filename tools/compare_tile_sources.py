@@ -140,7 +140,7 @@ def main():
             "only_a": len(cx - cy), "only_b": len(cy - cx), "both": len(cx & cy)})
 
     qa, qb = search_counts(A, keys), search_counts(B, keys)
-    print(f"\nsearchable records (StreetZim extraction on the shared tiles)")
+    print("\nsearchable records (StreetZim extraction on the shared tiles)")
     for t in sorted(set(qa) | set(qb)):
         print(f"  {t:24s} {qa.get(t, 0):7d} {qb.get(t, 0):7d}  {pct(qa.get(t, 0), qb.get(t, 0))}")
     report["search"] = {la: qa, lb: qb}

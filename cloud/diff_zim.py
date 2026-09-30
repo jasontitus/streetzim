@@ -61,7 +61,7 @@ def main() -> int:
     both = src_paths & dst_paths
     modified = {p for p in both if src[p] != dst[p]}
 
-    print(f"\n=== summary ===")
+    print("\n=== summary ===")
     print(f"  src only:  {len(only_src):,}")
     print(f"  dst only:  {len(only_dst):,}")
     print(f"  modified:  {len(modified):,}")

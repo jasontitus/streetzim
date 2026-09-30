@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from test_validator_regression import _make_minimal_zim, _mk_item  # noqa: E402
+from tests.test_validator_regression import _make_minimal_zim, _mk_item  # noqa: E402
 
 
 def _records(n, s):

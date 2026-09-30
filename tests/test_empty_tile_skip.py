@@ -20,7 +20,6 @@ Both regressions are silent visual bugs — guard against them here.
 """
 from __future__ import annotations
 
-import io
 import sys
 import unittest
 from pathlib import Path

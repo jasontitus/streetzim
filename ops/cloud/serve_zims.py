@@ -29,7 +29,6 @@ import argparse
 import datetime
 import html
 import http.server
-import os
 import socketserver
 import sys
 import urllib.parse

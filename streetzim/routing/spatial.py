@@ -58,7 +58,7 @@ from pathlib import Path
 
 import numpy as np
 
-from streetzim.routing.reader import SZRG, parse_szrg_bytes
+from streetzim.routing.reader import SZRG
 
 # class_access bit 9 (see docs/driving-mode-road-class-warnings.md). Kept
 # local rather than imported from szrg_astar to avoid a circular import.
@@ -1022,7 +1022,7 @@ def load_spatial_from_zim(zim_path: str | Path,
     nodes_scaled shards); cell files are fetched lazily via the ZIM
     archive when A* walks into them."""
     from libzim.reader import Archive
-    arc = Archive(str(zim_path))
+    arc = Archive(Path(zim_path))
     idx_entry = arc.get_entry_by_path("routing-data/graph-cells-index.bin")
     idx_buf = bytes(idx_entry.get_item().content)
 

@@ -31,7 +31,6 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
     import io
     import math
     import time
-    import threading
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     from PIL import Image
@@ -61,7 +60,6 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
     total_missing = 0
     total_bytes_jpeg = 0
     total_bytes_out = 0
-    lock = threading.Lock()
 
     # Collect existing format caches for transcoding fallback. Only
     # caches holding 256 px tiles qualify: the source tiles stitched
@@ -215,7 +213,7 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
 
     if tile_size == 512:
         print(f"    Mode: 512px tiles ({sat_format} q{quality})")
-        print(f"    Stitching 4x source 256px tiles per output tile")
+        print("    Stitching 4x source 256px tiles per output tile")
     else:
         print(f"    Mode: 256px tiles ({sat_format} q{quality})")
 

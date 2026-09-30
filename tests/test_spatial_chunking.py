@@ -21,7 +21,6 @@ ZIM isn't locally present.
 from __future__ import annotations
 
 import json
-import os
 import struct
 import sys
 from pathlib import Path
@@ -34,7 +33,6 @@ sys.path.insert(0, str(ROOT))
 from tests.szrg_reader import parse_szrg_bytes
 from tests.szrg_astar import find_route
 from tests.szrg_spatial import (
-    SZCI_MAGIC, SZRC_MAGIC,
     build_spatial, cell_of,
     parse_szci, parse_szrc,
     spatial_graph_from_memory,

@@ -550,6 +550,15 @@ fetchConfig(1)
       var overtureSection = document.getElementById('attr-overture-section');
       if (overtureSection) overtureSection.style.display = '';
     }
+    // Same for the other optional layers: a ZIM without satellite imagery
+    // must not show the imagery's non-commercial licence as if it applied.
+    [['attr-satellite-section', config.hasSatellite],
+     ['attr-terrain-section', config.hasTerrain],
+     ['attr-wiki-section', config.hasWikidata || config.hasWikiArticles]
+    ].forEach(function (s) {
+      var el = document.getElementById(s[0]);
+      if (el && s[1]) el.style.display = '';
+    });
 
     // Initialize search
     initSearch(map);

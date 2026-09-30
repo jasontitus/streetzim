@@ -27,10 +27,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import pathlib
 import sys
-import tempfile
 
 import pytest
 
@@ -158,7 +156,7 @@ def test_street_abbrev_table_has_no_shadowed_canonicals():
     shortforms = set(_STREET_ABBREV.keys())
     collisions = canonicals & shortforms
     assert not collisions, (
-        f"_STREET_ABBREV maps to a key that's also a shortform: "
+        "_STREET_ABBREV maps to a key that's also a shortform: "
         + f"{collisions}")
 
 

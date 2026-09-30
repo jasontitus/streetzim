@@ -7,10 +7,8 @@ point directly at the offending column/bitshift.
 
 from __future__ import annotations
 
-import math
 import struct
 
-import numpy as np
 import pytest
 
 from tests.szrg_reader import parse_szrg_bytes

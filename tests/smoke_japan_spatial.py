@@ -272,8 +272,6 @@ def _probe_routing_spatial(zim_path: str) -> str:
     from tests.szrg_spatial_astar import find_route_spatial
     sg = load_spatial_from_zim(zim_path, cache_limit=32)
     # Pick two arbitrary graph-valid nodes + route between them
-    import numpy as np
-    adj_offsets = []
     # Spatial graphs don't expose global adjacency. Use the first cell's
     # local node range + a real route.
     cell0 = sg._ensure_cell(0)

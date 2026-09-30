@@ -14,6 +14,7 @@ import re
 import subprocess
 import urllib.request
 from pathlib import Path
+from typing import Callable
 
 
 # Wrap print to auto-flush step/progress lines so monitoring never sees stale output.
@@ -197,6 +198,10 @@ import re as _re_phase
 _HTTP_OK_RE = re.compile(r"^https?://", re.I)
 _PHASE_RE = _re_phase.compile(r"^\s*\[(\d+)/(\d+)\]\s+(.+?)(\.{3,})?\s*$")
 
+# Called as listener(number, total, title) when a phase header is printed.
+# streetzim.progress.StatsFile (--stats-filename) is the one user.
+PHASE_LISTENERS: list[Callable[[int, int, str], None]] = []
+
 
 def print(*args, **kwargs):
     kwargs.setdefault("flush", True)
@@ -206,6 +211,8 @@ def print(*args, **kwargs):
         if m:
             phase_name = f"[{m.group(1)}/{m.group(2)}] {m.group(3).strip()}"
             PHASE_TIMER.start(phase_name)
+            for listener in PHASE_LISTENERS:
+                listener(int(m.group(1)), int(m.group(2)), m.group(3).strip())
             # Add a wall-clock prefix so live monitors can see when each
             # phase started without parsing the eventual summary table.
             import time as _t
@@ -249,7 +256,6 @@ def log_viewer_freshness():
         "index.html": ["enrich.ws", "item.ws", "places-link"],
         "places.html": ["Search near", "near-input"],
     }
-    worst_age_mtime = None
     warned = False
     for name in ("index.html", "places.html"):
         p = VIEWER_DIR / name
@@ -285,6 +291,8 @@ def log_viewer_freshness():
         import importlib.util as _ilu
         _spec = _ilu.spec_from_file_location(
             "_build_viewer", SCRIPT_DIR / "tools" / "build_viewer.py")
+        if _spec is None or _spec.loader is None:
+            raise ImportError("tools/build_viewer.py not loadable")
         _bv = _ilu.module_from_spec(_spec)
         _spec.loader.exec_module(_bv)
         if _bv.build() != (VIEWER_DIR / "index.html").read_bytes():

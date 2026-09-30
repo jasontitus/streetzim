@@ -31,7 +31,10 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from typing import Iterable, Iterator
+from typing import Any, Iterable, Iterator
+
+# One search record, as written to search-data/*.json (docs/search-records.md).
+Record = dict[str, Any]
 
 Path = tuple[str, ...]
 
@@ -93,7 +96,7 @@ def prefix_key(word: str) -> str:
     return k0 + k1
 
 
-def tier_for(record: dict) -> str:
+def tier_for(record: Record) -> str:
     t = (record or {}).get("t") or ""
     for tier, types in TIER_TYPES.items():
         if t in types:
@@ -145,7 +148,7 @@ class Aggregator:
         self.max_depth = max_depth or max(TIER_MAX_DEPTH.values())
         self.counts: dict[tuple[str, Path], list[int]] = {}
 
-    def add(self, record: dict, size: int) -> None:
+    def add(self, record: Record, size: int) -> None:
         tier = tier_for(record)
         depth = min(TIER_MAX_DEPTH.get(tier, 1), self.max_depth)
         for path in paths_for(self.prefix, record.get("n") or "", depth):
@@ -188,7 +191,7 @@ def leaf_name(prefix: str, path: Path, tier: str) -> str:
     return LEAF_SEP.join((prefix, *path, tier))
 
 
-def leaf_for(prefix: str, record: dict,
+def leaf_for(prefix: str, record: Record,
              planned_paths: Iterable[Path]) -> Iterator[str]:
     """Leaf names a record belongs in, given the planned paths for its tier."""
     tier = tier_for(record)
@@ -235,7 +238,7 @@ def sub_bucket_for_name(name: str, n_buckets: int) -> int:
 
 
 def split_records_recursive(
-    records: list, prefix: str, threshold_bytes: int,
+    records: list[Record], prefix: str, threshold_bytes: int,
     n_buckets: int, max_depth: int,
 ) -> list[tuple[str, bytes, int]]:
     """Recursively split records into sub-chunks until each fits under
@@ -263,7 +266,7 @@ def split_records_recursive(
 
     # By-name FNV-1a bucketing (deterministic; preferred when distribution
     # is reasonable).
-    by_name: list[list] = [[] for _ in range(n_buckets)]
+    by_name: list[list[Record]] = [[] for _ in range(n_buckets)]
     for rec in records:
         name = rec.get("n", "") or ""
         by_name[sub_bucket_for_name(name, n_buckets)].append(rec)
@@ -275,7 +278,7 @@ def split_records_recursive(
     else:
         # Degenerate — anonymous records (empty `n`) or 1.5M records sharing
         # the same `n`. Split by record index instead, breaking the FNV tie.
-        buckets = [[] for _ in range(n_buckets)]
+        buckets: list[list[Record]] = [[] for _ in range(n_buckets)]
         for i, rec in enumerate(records):
             buckets[i % n_buckets].append(rec)
         strategy = "index"

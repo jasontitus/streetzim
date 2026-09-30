@@ -17,7 +17,8 @@ ZIM.
 
 **Core: builds a ZIM from OSM data.** Portable, tested, run by CI.
 
-- `create_osm_zim.py`: the builder's CLI (argparse + `main()`). The steps it
+- `create_osm_zim.py`: the builder's CLI (`build_parser()`, and `main()`
+  calling one function per build phase). The steps it
   runs live in the `streetzim/` package: `common.py` (the phase-timing `print`,
   `PHASE_TIMER`, repo paths, URLs, `download_file`, `parse_bbox`), `tiles.py`
   (tilemaker, MBTiles readers, fonts, MapLibre), `satellite.py`, `terrain.py`,
@@ -66,7 +67,9 @@ builder from depending on any of it.
 ## 2. Day-to-day development
 
 ```bash
-ruff check .                       # narrow bug-only gate (ruff.toml)
+ruff check .                       # syntax errors + pyflakes (ruff.toml)
+python tools/pyright_gate.py       # type check: strict modules clean, no new findings
+python tools/offliner_definition.py --check   # Zimfarm definition matches the flags
 python -m pytest tests -q          # ~30 s; tests needing big local ZIMs skip themselves
 for t in tests/chip_rules_js.test.mjs tests/chip_shards_js.test.mjs \
          tests/search_shards_js.test.mjs tests/zim_reader_js.test.mjs \
@@ -76,6 +79,15 @@ for t in tests/chip_rules_js.test.mjs tests/chip_shards_js.test.mjs \
 CI (`.github/workflows/ci.yml`) runs all of that, then builds Monaco end to
 end, validates it (including `zimcheck`) and loads the in-ZIM viewer in
 headless Chrome. It also runs weekly, to catch upstream drift.
+
+**Python versions.** The builder runs on 3.12 (the production host) and 3.14
+(the Docker image and openZIM's scrapers). On 3.14 `requirements.txt` also
+installs zimscraperlib, and the `streetzim` command uses it
+(`streetzim/scraperlib.py`); on 3.12 `streetzim/zim_metadata.py` applies its
+own copy of the same metadata rules. CI runs the unit tests on both, and
+`tests/test_scraperlib_parity.py` fails on 3.14 if the copy and zimscraperlib
+disagree. Keep the builder itself 3.12-compatible until the production host
+moves.
 
 Rules that keep published ZIMs working:
 
@@ -187,15 +199,21 @@ scripts that may be running on the production host (see
 - **trap:** `cloud/regions.tsv` still has `switzerland-nosat*` rows with no
   matching `region-variants.tsv` rows. A full registry run would build them as
   full satellite z14 ZIMs under "light" names.
-- **Monolithic files.** `streetzim/zim_writer.py` (`create_zim`, ~1.9k
-  lines), `create_osm_zim.py`'s `main()` (~1.1k lines) and
-  `resources/viewer/index.html` (~11k lines). The viewer's BEGIN/END blocks
-  (`chip-shards`, `search-shards`, `chip-rules`, `chip-rail`) are the seams for
-  splitting it. A split must keep shipping the same three slot files (inline
-  at build time), because published ZIMs can't gain new entries.
-- **Legacy format readers.** SZRG v2/v3, SZCI v1/v2 and SZRC v1 can go once
-  the continent ZIMs built before 2026-06-02 are rebuilt (see the retirement
-  table in formats.md). The `--split-graph` writer (v5) is unused.
+- **Large units.** `create_osm_zim.py`'s `main()` and `create_zim` are now
+  sequences of phase functions (`build_parser` plus `_openzim_options` ...
+  `_print_summary` in `create_osm_zim.py`; the phases in
+  `streetzim/zim_writer.py`), none of them over ~290 lines. The phases pass
+  state as keyword arguments and tuple returns, so a new option usually
+  means a parameter on the phase that reads it. The largest functions left
+  are `extract_routing_graph` (`streetzim/routing/build.py`, ~650 lines) and
+  the published-ZIM tools `repackage` and `swap_viewer_rust` in `cloud/`.
+  `index.html` is edited as parts in `resources/viewer/src/index/`.
+  `places.html` (2.5k) and `routing-worker.js` (1.7k) are unsplit.
+- **Legacy format readers.** The builder writes only current formats
+  (SZRG v4, SZCI v3 + SZRC v2); the v5 writer and the SZCI v2 upgrader are
+  retired. The readers for SZRG v2/v3/v5, SZCI v1/v2 and SZRC v1 stay while
+  published ZIMs carry them; formats.md lists every branch to delete and
+  when.
 - **`streetzim-meta.json` `routingGraph.version`** reports the intermediate
   SZRG version even when the ZIM ships SZCI v3 cells. `map-config.json` has no
   routing-format field.

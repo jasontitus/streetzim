@@ -30,14 +30,13 @@ import math
 import os
 import shutil
 import sqlite3
-import struct
 import subprocess
 import sys
 import tempfile
 import urllib.request
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont
 import mapbox_vector_tile
 
 SCRIPT_DIR = Path(__file__).parent.resolve()

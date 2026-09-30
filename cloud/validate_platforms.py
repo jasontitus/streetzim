@@ -179,8 +179,8 @@ def estimate_peak_mb(info: dict, platform: str) -> tuple[int, str]:
             # this fail on iOS for Iran even when the total size
             # would fit the memory budget. Hard fail.
             return (0,
-                    f"CHUNKED-ONLY: no graph.bin — Kiwix cannot load "
-                    f"this layout regardless of size")
+                    "CHUNKED-ONLY: no graph.bin — Kiwix cannot load "
+                    "this layout regardless of size")
         # PWA reassembles chunks into a single buffer, then parses.
         # Reassembly briefly holds both the source chunks and the
         # output buffer → 2×. Freed immediately after parseSZRG, but

@@ -8,7 +8,6 @@ Usage:
     python3 download_dem.py [--threads 32] [--dest terrain_cache/dem_sources]
 """
 import os
-import sys
 import time
 import argparse
 import urllib.request
@@ -95,7 +94,7 @@ def main():
         for lon in range(-180, 180):
             tasks.append((lat, lon, args.dest))
 
-    print(f"Downloading Copernicus GLO-30 DEM tiles")
+    print("Downloading Copernicus GLO-30 DEM tiles")
     print(f"  Cells to check: {len(tasks):,}")
     print(f"  Threads: {args.threads}")
     print(f"  Destination: {args.dest}")

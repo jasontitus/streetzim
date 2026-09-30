@@ -741,7 +741,7 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
     If output_dir is set, writes features to a JSONL file on disk and returns
     the file path (freeing the in-memory list). Otherwise returns a list of dicts.
     """
-    import mapbox_vector_tile
+    import mapbox_vector_tile  # noqa: F401 -- fail before forking workers if missing
 
     print("  Extracting searchable features from tiles...")
 

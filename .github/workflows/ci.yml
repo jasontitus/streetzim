@@ -1,5 +1,6 @@
-# Three jobs:
+# Five jobs (docker builds the image and runs `streetzim` in it as Zimfarm would):
 #   checks     - lint gate, Python unit tests, Node viewer/PWA tests. Fast, offline.
+#   python-3-14 - the unit tests on Python 3.14 with zimscraperlib installed.
 #   openfreemap-tiles - builds from the same OpenFreeMap MBTiles openzim/maps
 #                uses (no tilemaker), validates, and loads it through kiwix-serve.
 #   monaco-e2e - builds a real Monaco ZIM from Geofabrik with tilemaker v3 and the
@@ -49,11 +50,30 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Install Python dependencies
-        run: pip install -r requirements.txt ruff==0.15.8
-      - name: Lint (narrow gate, see ruff.toml)
+        run: pip install -r requirements.txt ruff==0.15.8 pyright==1.1.409
+      - name: Lint (ruff E9 + pyflakes, see ruff.toml)
         run: ruff check .
+      - name: Type check (pyright; strict modules clean, no new findings elsewhere)
+        env:
+          PYRIGHT_PYTHON_FORCE_VERSION: "1.1.409"
+        run: python tools/pyright_gate.py
       - name: Viewer index.html matches its parts
         run: python tools/build_viewer.py --check
+      - name: offliner-definition.json matches the streetzim flags
+        run: python tools/offliner_definition.py --check
+      - name: offliner-definition.json validates against Zimfarm's own schema
+        # zimfarm_backend's OfflinerSpecSchema at a pinned commit, in its own
+        # venv with just the packages its models import.
+        env:
+          ZIMFARM_REF: 917d7bc
+        run: |
+          git clone -q --filter=blob:none --no-checkout https://github.com/openzim/zimfarm /tmp/zimfarm
+          git -C /tmp/zimfarm checkout -q "$ZIMFARM_REF" -- backend/src
+          python -m venv /tmp/zfvenv
+          /tmp/zfvenv/bin/pip install -q "pydantic[email]==2.11.4" "pydantic-extra-types==2.10.6" \
+            "SQLAlchemy==2.0.41" "PyJWT==2.13.0" "pytz==2025.2" "humanfriendly==10.0" \
+            "pycountry==24.6.1" "regex==2025.9.1" "requests==2.33.0"
+          PYTHONPATH=/tmp/zimfarm/backend/src /tmp/zfvenv/bin/python tools/check_zimfarm_schema.py
       - name: Python tests
         run: python -m pytest tests -q
       - name: Core/ops boundary (ops/README.md)
@@ -73,6 +93,29 @@ jobs:
             node "$t"
             echo "::endgroup::"
           done
+
+  python-3-14:
+    # openZIM's scrapers and the Docker image run Python 3.14, where
+    # zimscraperlib is installed and the `streetzim` command uses it; the
+    # other jobs run 3.12 (the production host), where it is not. This runs
+    # the unit tests with zimscraperlib, including the check that
+    # streetzim/zim_metadata.py's copy of its rules still agrees with it.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install dependencies (zimscraperlib needs libmagic and cairo)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libmagic1t64 libcairo2
+          pip install -r requirements.txt
+          python -c "from streetzim import scraperlib; assert scraperlib.AVAILABLE"
+      - name: Python tests
+        run: python -m pytest tests -q
 
   monaco-e2e:
     runs-on: ubuntu-24.04
@@ -204,6 +247,19 @@ jobs:
           zimcheck -A osm-monaco-patched.zim
           python -c "import sys; from libzim.reader import Archive; a = Archive('osm-monaco-patched.zim'); b = bytes(a.get_entry_by_path('index.html').get_item().content); sys.exit(0 if a.check() and b'ci-patch' in b else 'in-place patch not applied or checksum wrong')"
 
+      - name: Build through the openZIM-style command (streetzim --area)
+        env:
+          STREETZIM_REQUIRE_SHAPEFILES: "1"
+          STREETZIM_REQUIRE_ZIMCHECK: "1"
+        run: |
+          pip install --no-deps -e .
+          streetzim --name osm_en_monaco --title Monaco \
+            --description "Offline map of Monaco with search and routing" \
+            --tags openstreetmap --area monaco --shapefiles "$PWD" \
+            --output out --stats-filename out/task_progress.json
+          python tools/check_openzim_output.py out osm_en_monaco --title Monaco --routing
+          python cloud/validate_zim.py out/osm_en_monaco_*.zim
+
       - name: Upload ZIM
         if: always()
         uses: actions/upload-artifact@v4
@@ -278,16 +334,29 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the image
         run: docker build -t streetzim .
-      - name: Build a ZIM inside it (OpenFreeMap tiles; no tilemaker, no shapefiles)
+      - name: Build a ZIM inside it the way Zimfarm runs an offliner
+        # OpenFreeMap tiles, so no tilemaker or shapefiles; --no-routing
+        # because there is no OSM extract. /output and task_progress.json
+        # are what offliner-definition.json pins.
         run: |
           mkdir -p out && chmod 777 out
           python3 scripts/fetch-openfreemap-mbtiles.py monaco -o out/monaco.mbtiles
+          # An SVG illustration: zimscraperlib (Python 3.14 in the image) converts it.
+          printf '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><rect width="64" height="32" fill="#2a7"/></svg>' > out/icon.svg
           docker run --rm -v "$PWD/out:/output" streetzim \
-            create_osm_zim.py --mbtiles /output/monaco.mbtiles --bbox 7.40,43.72,7.44,43.76 \
-            --name Monaco --split-find-chips -o /output/osm-monaco-docker.zim
-      - name: tilemaker works in the image
-        run: docker run --rm streetzim tilemaker --help | head -3
+            streetzim --name osm_en_monaco-docker --title Monaco \
+            --description "Offline map of Monaco with search" \
+            --illustration-url /output/icon.svg \
+            --bbox 7.40,43.72,7.44,43.76 --mbtiles /output/monaco.mbtiles --no-routing \
+            --output /output --stats-filename /output/task_progress.json \
+            --file-name osm-monaco-docker
+      - name: tilemaker works in the image; the image uses zimscraperlib
+        run: |
+          docker run --rm streetzim tilemaker --help | head -3
+          docker run --rm streetzim python -c "import sys; from streetzim import scraperlib; assert scraperlib.AVAILABLE, 'zimscraperlib missing'; print(sys.version)"
       - name: Validate the ZIM
         run: |
           pip install -q -r requirements.txt
+          python tools/check_openzim_output.py out osm_en_monaco-docker --title Monaco \
+            --file osm-monaco-docker.zim
           python cloud/validate_zim.py out/osm-monaco-docker.zim
