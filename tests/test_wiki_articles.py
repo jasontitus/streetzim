@@ -350,9 +350,11 @@ class FakeRedirectingSource(FakeWikiSource):
 
 
 REDIRECT_PAGES = {"Aalten": "<p>Aalten is a municipality.</p>",
+                  "Aegon": "<p>Aegon is an insurer.</p>",
                   "Wolfhart_Pannenberg": "<p>A German theologian.</p>",
                   "De_Camp": "<p>A different De Camp.</p>"}
-REDIRECTS = {"Aalten_(dorp)": "Aalten", "Pannenberg": "Wolfhart_Pannenberg"}
+REDIRECTS = {"Aalten_(dorp)": "Aalten", "Pannenberg": "Wolfhart_Pannenberg",
+             "AEGON": "Aegon", "Aegon_N.V.": "Aegon"}
 
 
 class RedirectOnlyTests(unittest.TestCase):
@@ -380,7 +382,22 @@ class RedirectOnlyTests(unittest.TestCase):
         self.assertIn(b"municipality", page)
         self.assertIn(b"en.wikipedia.org/wiki/Aalten", page)
         self.assertEqual((stats["redirects"], stats["redirects_skipped"]), (1, 3))
-        self.assertEqual(stats["bundled"], 2)
+        self.assertEqual(stats["bundled"], 1)
+
+    def test_a_redirect_to_an_article_stored_under_an_alias(self):
+        # "AEGON" was bundled (html() followed it to Aegon); "Aegon N.V."
+        # redirects to Aegon, the same page: it links to AEGON's, as a
+        # ZIM redirect, not a copy.
+        stored, links = {}, {}
+        stats = wa.bundle_wiki_articles(
+            ["en:AEGON"], lambda p, t, m, c: stored.__setitem__(p, t), sleep=0,
+            log=lambda *_: None, source=FakeRedirectingSource(REDIRECT_PAGES, REDIRECTS),
+            redirect_only=["nl:Aegon N.V.", "nl:Pannenberg"],
+            add_redirect=lambda p, t, target: links.__setitem__(p, (t, target)))
+        self.assertEqual(sorted(stored), ["wiki-article/AEGON"])
+        self.assertEqual(links, {"wiki-article/Aegon_N.V.": ("Aegon N.V.", "wiki-article/AEGON")})
+        self.assertEqual(stats["stored_titles"], {"AEGON", "Aegon_N.V."})
+        self.assertEqual(stats["redirects"], 1)
 
     def test_a_source_that_cannot_tell_bundles_none(self):
         stored, stats = self._run(FakeWikiSource(REDIRECT_PAGES, {}), ["nl:Aalten (dorp)",

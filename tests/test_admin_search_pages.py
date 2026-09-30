@@ -332,3 +332,108 @@ def test_admin_articles_are_bundled_on_the_in_memory_path(tmp_path, monkeypatch)
     dc = [r for r in json.loads(bytes(a.get_entry_by_path("search-data/di.json")
                                       .get_item().content)) if r["t"] == "admin"][0]
     assert (dc["w"], dc["wsrc"], dc["q"]) == ("en:Washington,_D.C.", "wd", "Q3551781")
+
+
+def _enwiki_zim(path):
+    """A tiny English Wikipedia ZIM: two articles and three redirects."""
+    from libzim.writer import Creator, Hint, Item, StringProvider
+
+    class Page(Item):
+        def __init__(self, p, html):
+            super().__init__()
+            self.p, self.html = p, html
+
+        def get_path(self):
+            return self.p
+
+        def get_title(self):
+            return self.p.replace("_", " ")
+
+        def get_mimetype(self):
+            return "text/html"
+
+        def get_contentprovider(self):
+            return StringProvider(self.html)
+
+        def get_hints(self):
+            return {Hint.FRONT_ARTICLE: True}
+    with Creator(str(path)) as c:
+        c.set_mainpath("Aalten")
+        c.add_item(Page("Aalten", "<p>Aalten is a municipality in Gelderland.</p>"))
+        c.add_item(Page("Wolfhart_Pannenberg", "<p>A German theologian.</p>"))
+        for alias, target in (("Aalten_(dorp)", "Aalten"),
+                              ("Pannenberg", "Wolfhart_Pannenberg")):
+            c.add_redirection(alias, alias.replace("_", " "), target,
+                              {Hint.FRONT_ARTICLE: False})
+
+
+def test_a_redirect_only_article_is_a_zim_redirect(tmp_path):
+    """A tag with no English article whose namesake redirects to a bundled
+    article is written as a ZIM redirect to it (no second copy, so no
+    duplicate full-text hit), and the geo-index lists it for the viewer."""
+    pytest.importorskip("libzim.writer")
+    mvt = pytest.importorskip("mapbox_vector_tile")
+    from libzim.reader import Archive
+    from libzim.search import Query, Searcher
+    _enwiki_zim(tmp_path / "enwiki.zim")
+    dorp = {"name": "Aalten", "type": "place", "subtype": "village",
+            "lat": 51.9251, "lon": 6.5808}
+    muni = dict(ALEXANDRIA, name="Aalten", lat=51.93, lon=6.59, osm="r9",
+                wikidata="Q9", wikipedia="en:Aalten", location="Gelderland")
+    pann = {"name": "Pannenberg", "type": "place", "subtype": "hamlet",
+            "lat": 51.3, "lon": 5.9}
+    path = tmp_path / "features.jsonl"
+    path.write_text("".join(json.dumps(f) + "\n" for f in (dorp, muni, pann)))
+    refs = {("aalten", 519251, 65808): {"wikipedia": "nl:Aalten (dorp)", "wikidata": "Q1",
+                                        "wikipedia_no_en": True},
+            ("pannenberg", 513000, 59000): {"wikipedia": "nl:Pannenberg", "wikidata": "Q2",
+                                            "wikipedia_no_en": True}}
+    tile = gzip.compress(mvt.encode([{"name": "poi", "features": [
+        {"geometry": "POINT(10 10)", "properties": {"name": "X"}}]}]))
+    (tmp_path / "ml.js").write_text("//")
+    (tmp_path / "ml.css").write_text("/**/")
+    work = tmp_path / "work"
+    work.mkdir()
+    from streetzim.admin_areas import add_admin_wiki_refs
+    add_admin_wiki_refs(refs, str(path))
+    W.create_zim(
+        tmp_path / "t.zim", tiles={(14, 8424, 5399): tile}, tile_metadata={},
+        fonts={("OpenSansRegular", "0-255"): b"g"},
+        maplibre_js_path=str(tmp_path / "ml.js"),
+        maplibre_css_path=str(tmp_path / "ml.css"),
+        viewer_html_path=str(ROOT / "resources/viewer/index.html"),
+        map_config={"name": "NL"}, name="OSM - NL", bbox=(3.3, 50.7, 7.3, 53.6),
+        xapian_mode="libzim", xapian_workdir=str(work), search_features_path=str(path),
+        wiki_cross_refs=refs, bundle_wiki_articles=True,
+        wiki_articles_source=str(tmp_path / "enwiki.zim"))
+    a = Archive(str(tmp_path / "t.zim"))
+    e = a.get_entry_by_path("wiki-article/Aalten_(dorp)")
+    assert e.is_redirect and e.get_redirect_entry().path == "wiki-article/Aalten"
+    assert b"municipality" in bytes(e.get_item().content)
+    assert not a.has_entry_by_path("wiki-article/Pannenberg")       # a theologian
+    geo = json.loads(bytes(a.get_entry_by_path("wiki-geo-index.json").get_item().content))
+    assert set(geo) == {"Aalten", "Aalten_(dorp)"}
+    s = Searcher(a).search(Query().set_query("Gelderland"))
+    hits = [a.get_entry_by_path(p).path for p in s.getResults(0, s.getEstimatedMatches())]
+    assert hits.count("wiki-article/Aalten") == 1 and "wiki-article/Aalten_(dorp)" not in hits
+
+
+def test_a_redirect_goes_to_either_writer():
+    """libzim's Creator takes hints; the Rust packer's manifest creator
+    (cloud/manifest_writer.py) takes none."""
+    import io
+
+    from cloud.manifest_writer import ManifestCreator
+    got = []
+
+    class Libzim:
+        def add_redirection(self, path, title, target, hints):
+            got.append((path, title, target, hints))
+    W._add_redirect(Libzim(), "wiki-article/A_(b)", "A (b)", "wiki-article/A")
+    assert got[0][:3] == ("wiki-article/A_(b)", "A (b)", "wiki-article/A")
+    buf = io.StringIO()
+    m = ManifestCreator.__new__(ManifestCreator)
+    m._write_record = lambda rec: buf.write(json.dumps(rec))
+    W._add_redirect(m, "wiki-article/A_(b)", "A (b)", "wiki-article/A")
+    assert json.loads(buf.getvalue()) == {"kind": "redirect", "path": "wiki-article/A_(b)",
+                                          "title": "A (b)", "target": "wiki-article/A"}

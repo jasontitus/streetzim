@@ -146,18 +146,23 @@ def kiwix_alt_titles(feat):
     return out[:MAX_ALT_TITLES]
 
 
+def _add_redirect(creator, path, title, target, front=False):
+    """A ZIM redirect, on either writer: libzim's Creator takes hints,
+    cloud/manifest_writer.py's (the Rust packer) takes none."""
+    try:
+        from libzim.writer import Hint
+        creator.add_redirection(path, title, target, {Hint.FRONT_ARTICLE: front})
+    except (ImportError, TypeError):
+        creator.add_redirection(path, title, target)
+
+
 def add_alt_titles(creator, page_path, feat):
     """The redirects for kiwix_alt_titles(feat) to `page_path`, as front
     articles so Kiwix suggests them. Returns how many were added."""
     alts = kiwix_alt_titles(feat)
     for k, title in enumerate(alts):
         path = f"{page_path[:-len('.html')]}~{k}.html"
-        try:
-            from libzim.writer import Hint
-            creator.add_redirection(path, title, page_path, {Hint.FRONT_ARTICLE: True})
-        except (ImportError, TypeError):
-            # cloud/manifest_writer.py's creator (the Rust packer) takes no hints.
-            creator.add_redirection(path, title, page_path)
+        _add_redirect(creator, path, title, page_path, front=True)
     return len(alts)
 
 
@@ -1663,6 +1668,8 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
                 image_max_kb=wiki_image_max_kb,
                 max_images_per_article=wiki_images_per_article,
                 redirect_only=_wa_redirect_only,
+                add_redirect=lambda path, title, target: _add_redirect(
+                    creator, path, title, target),
             )
             _bundled_set = _wa_stats.get("stored_titles") or set()
             PHASE_TIMER.record_subphase(

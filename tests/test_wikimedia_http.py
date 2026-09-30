@@ -349,7 +349,8 @@ def test_article_429_that_exhausts_retries_is_not_cached_and_is_warned(
     assert stats["stored_titles"] == {"Lincoln_Memorial"}      # hasWikiArticles stays true
     # Nothing on disk says National Mall is missing.
     lincoln = wa._cache_paths(str(tmp_path), "Lincoln_Memorial")[0]
-    assert os.listdir(tmp_path) == [os.path.basename(lincoln)]
+    assert sorted(os.listdir(tmp_path)) == sorted([os.path.basename(lincoln),
+                                                   os.path.basename(lincoln)[:-5] + ".redirect"])
     warn = [m for m in logs if "WARNING" in m]
     assert warn and "1 of 2 articles were NOT fetched" in warn[0]
     assert "1 rate-limited" in warn[0]
@@ -533,40 +534,83 @@ def test_default_user_agent_is_sent(monkeypatch, sleeps, tmp_path):
     assert wm.CONTACT_URL in api.ua
 
 
+class FakeQueryAPI:
+    """action=query&redirects=1 stand-in over a tiny English Wikipedia:
+    `pages` exist, `redirects` point at pages; a title is normalized by
+    capitalizing its first letter, as MediaWiki does."""
+    def __init__(self, pages, redirects):
+        self.pages, self.redirects = set(pages), dict(redirects)
+        self.batches: list[list[str]] = []
+
+    def __call__(self, req, timeout=None):
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(req.full_url).query)
+        assert q["action"] == ["query"] and q["redirects"] == ["1"] and "prop" not in q
+        titles = q["titles"][0].split("|")
+        self.batches.append(titles)
+        norm, redir, pages = [], [], {}
+        for t in titles:
+            n = t[:1].upper() + t[1:]
+            if n != t:
+                norm.append({"from": t, "to": n})
+            if n in self.redirects:
+                redir.append({"from": n, "to": self.redirects[n]})
+                n = self.redirects[n]
+            pages[n] = {"title": n} if n in self.pages else {"title": n, "missing": True}
+        return _body({"batchcomplete": True, "query": {
+            "normalized": norm, "redirects": redir, "pages": list(pages.values())}})
+
+
 def test_redirect_only_titles_online(monkeypatch, sleeps, tmp_path):
-    # One action=parse request per title tells whether it is a redirect
-    # (`redirects` in the answer); the answer is cached, and so is the
-    # target's text under its own title.
+    # Batched: 50 titles a request, no text. The target is matched by the
+    # page each bundled title opens, so "Aegon N.V." -> "Aegon" finds the
+    # article stored as "AEGON" (an alias the article fetch followed).
     d = str(tmp_path)
-    aalten = {"parse": {"title": "Aalten", "text": ARTICLE}}
-    dorp = {"parse": {"title": "Aalten", "text": ARTICLE,
-                      "redirects": [{"from": "Aalten (dorp)", "to": "Aalten"}]}}
-    pannenberg = {"parse": {"title": "Wolfhart Pannenberg", "text": ARTICLE,
-                            "redirects": [{"from": "Pannenberg", "to": "Wolfhart Pannenberg"}]}}
-    camp = {"parse": {"title": "De Camp", "text": ARTICLE}}
-    api = use(monkeypatch, FakeAPI(aalten, dorp, pannenberg, camp,
-                                   http_error(404, api_error="missingtitle")))
-    stored = {}
-    stats = wa.bundle_wiki_articles(
-        ["en:Aalten"], lambda p, t, m, c: stored.__setitem__(p, t), cache_dir=d, sleep=0,
-        log=lambda *_: None,
-        redirect_only=["nl:Aalten (dorp)", "nl:Pannenberg", "nl:De Camp", "nl:Nergens"])
-    assert stored == {"wiki-article/Aalten": "Aalten", "wiki-article/Aalten_(dorp)": "Aalten"}
-    assert len(api.urls) == 5 and "redirects=1" in api.urls[1]
-    assert (stats["redirects"], stats["redirects_skipped"], stats["unfetched"]) == (1, 3, 0)
-    assert wa._cache_state("Wolfhart_Pannenberg", d)[0] == "hit"
-    assert wa._redirect_cached("Pannenberg", d) == (True, "Wolfhart_Pannenberg")
-    assert wa._redirect_cached("De_Camp", d) == (True, None)      # an article
-    assert wa._redirect_cached("Nergens", d) == (True, None)      # no such page
+    for t in ("Aalten", "AEGON"):           # cached by an earlier build
+        open(wa._cache_paths(d, t)[0], "w").write(ARTICLE)
+    api = FakeQueryAPI(pages={"Aalten", "Aegon", "Wolfhart Pannenberg", "De Camp"},
+                       redirects={"Aalten (dorp)": "Aalten", "AEGON": "Aegon",
+                                  "Aegon N.V.": "Aegon", "Pannenberg": "Wolfhart Pannenberg"})
+    monkeypatch.setattr(wm.urllib.request, "urlopen", api)
+    only = ["nl:Aalten (dorp)", "nl:aegon N.V.", "nl:Pannenberg", "nl:De Camp",
+            "nl:Nergens"] + [f"nl:Dorp {i}" for i in range(57)]
+    stored, links = {}, {}
+
+    def run():
+        stored.clear()
+        links.clear()
+        return wa.bundle_wiki_articles(
+            ["en:Aalten", "en:AEGON"], lambda p, t, m, c: stored.__setitem__(p, t),
+            cache_dir=d, sleep=0, log=lambda *_: None, redirect_only=only,
+            add_redirect=lambda p, t, target: links.__setitem__(p, (t, target)))
+    stats = run()
+    assert [len(b) for b in api.batches] == [50, 12, 2]    # then the stored titles
+    assert sorted(api.batches[2]) == ["AEGON", "Aalten"]
+    assert links == {"wiki-article/Aalten_(dorp)": ("Aalten (dorp)", "wiki-article/Aalten"),
+                     "wiki-article/aegon_N.V.": ("aegon N.V.", "wiki-article/AEGON")}
+    assert sorted(stored) == ["wiki-article/AEGON", "wiki-article/Aalten"]   # no copies
+    assert {"Aalten_(dorp)", "aegon_N.V."} <= stats["stored_titles"]         # geo-index
+    assert (stats["redirects"], stats["redirects_skipped"], stats["unfetched"]) == (2, 60, 0)
+    assert wa._redirect_cached("Pannenberg", d) == ("Wolfhart_Pannenberg", "Wolfhart_Pannenberg")
+    assert wa._redirect_cached("De_Camp", d) == (None, "De_Camp")       # an article
+    assert wa._redirect_cached("Nergens", d) == (None, None)            # no such page
+    assert wa._redirect_cached("aegon_N.V.", d) == ("Aegon", "Aegon")   # normalized
     # The next build asks nothing.
-    api = use(monkeypatch, FakeAPI())
-    stored.clear()
-    wa.bundle_wiki_articles(
-        ["en:Aalten"], lambda p, t, m, c: stored.__setitem__(p, t), cache_dir=d, sleep=0,
-        log=lambda *_: None,
-        redirect_only=["nl:Aalten (dorp)", "nl:Pannenberg", "nl:De Camp", "nl:Nergens"])
-    assert api.urls == [] and sorted(stored) == ["wiki-article/Aalten",
-                                                 "wiki-article/Aalten_(dorp)"]
+    api.batches.clear()
+    run()
+    assert api.batches == [] and len(links) == 2
+
+
+def test_article_fetch_records_the_page_it_opened(monkeypatch, sleeps, tmp_path):
+    # An article fetched now needs no lookup later: action=parse followed
+    # the alias, and the page it opened is cached with it.
+    d = str(tmp_path)
+    use(monkeypatch, FakeAPI({"parse": {"title": "Aegon", "text": ARTICLE,
+                                        "redirects": [{"from": "AEGON", "to": "Aegon"}]}},
+                             {"parse": {"title": "Aalten", "text": ARTICLE}}))
+    wa.bundle_wiki_articles(["en:AEGON", "en:Aalten"], lambda *a: None, cache_dir=d,
+                            sleep=0, log=lambda *_: None)
+    assert wa._redirect_cached("AEGON", d) == ("Aegon", "Aegon")
+    assert wa._redirect_cached("Aalten", d) == (None, "Aalten")
 
 
 def test_redirect_only_title_unanswered_is_not_cached(monkeypatch, sleeps, tmp_path):
@@ -575,7 +619,7 @@ def test_redirect_only_title_unanswered_is_not_cached(monkeypatch, sleeps, tmp_p
     stats = wa.bundle_wiki_articles(["en:A"], lambda *a: None, cache_dir=d, sleep=0,
                                     log=lambda *_: None, redirect_only=["nl:B"])
     assert stats["unfetched"] == 1 and stats["requested"] == 2
-    assert wa._redirect_cached("B", d) == (False, None)
+    assert wa._redirect_cached("B", d) is None
 
 
 # ---- Wikidata titles --------------------------------------------------------

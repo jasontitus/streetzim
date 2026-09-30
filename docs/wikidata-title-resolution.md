@@ -106,15 +106,22 @@ When Wikidata answers that the item has no English article, the tag stays
 and is flagged `wikipedia_no_en`. Its English namesake is usually absent,
 and when present usually another subject; it is bundled only when English
 Wikipedia has it as a **redirect to an article bundled for this map**
-(`bundle_wiki_articles(redirect_only=...)`), stored at
-`wiki-article/<the redirect's title>` with the target's text. A redirect
+(`bundle_wiki_articles(redirect_only=...)`), written as a ZIM redirect
+`wiki-article/<the redirect's title>` -> the bundled article (no second
+copy, so no duplicate full-text hit; the geo-index lists it). A redirect
 is an editor's alias (`Aalten (dorp)` -> `Aalten`, `De Bilt (dorp)` ->
 `De Bilt`), but not always one for this place: `Pannenberg` redirects to
 Wolfhart Pannenberg, a theologian, and `VVAC` to the Verde Valley
 Archaeology Center. Requiring the target to be an article of another place
-in the map (the municipality, the city) keeps the first kind. Offline the
-source ZIM's redirect entries tell; online, one `action=parse` request per
-title (the answer's `redirects`), cached as `<sha1>.redirect`.
+in the map (the municipality, the city) keeps the first kind. The target
+is matched by the page each bundled title opens, so an article bundled
+under an alias of its own (`AEGON` -> Aegon; 451 of the Netherlands' 3,829
+bundled titles are such aliases) counts. Offline the source ZIM's redirect
+entries tell; online, `action=query&redirects=1` for 50 titles a request,
+no text (about 84 requests for the Netherlands' ~4,170 such titles, once:
+each answer is cached as `<sha1>.redirect`; an article fetch records the
+page it opened there too, and bundled titles fetched before that are looked
+up the same way, only when a target is not matched directly).
 
 "Wikidata could not answer" (a 5xx, a stopped run, an offline map's gap)
 is never "no English article": such a tag is looked up as before. Nor is an

@@ -410,9 +410,11 @@ class _OfflineZim:
 #                     so an empty .html says nothing: it is re-checked once
 #                     (at most STREETZIM_WIKI_RECHECK_MAX per build) and
 #                     replaced by a .html or a .miss.
-#   .redirect         for a title bundled only as a redirect: JSON {title,
-#                     to, checked}, `to` the article it redirects to, or
-#                     null (an article of its own, or no such page)
+#   .redirect         where a title leads on English Wikipedia: JSON {title,
+#                     to, page, checked}; `to` the article it redirects to
+#                     (null: an article of its own, or no such page),
+#                     `page` the page it opens (its own title, normalized,
+#                     or the redirect's target; null: no such page)
 # Only the API's own answers are cached. A rate limit, 5xx, timeout,
 # connection error or unexpected body raises TransientError and leaves the
 # cache alone.
@@ -439,6 +441,9 @@ _DEFAULT_RECHECK_MAX = 1000
 
 
 _REDIRECT_SUFFIX = ".redirect"
+# Titles per `action=query` redirect lookup (the API's limit for a client
+# without the apihighlimits right).
+QUERY_BATCH = 50
 
 
 def _cache_paths(cache_dir: str, title_us: str) -> tuple[str, str]:
@@ -533,49 +538,93 @@ def _fetch_network(title_us: str, cache_dir: str | None, ua: str,
     if html_file and miss_file:
         if html:
             _write_atomic(html_file, html)
+            # Where the title led (a redirect is followed): its canonical
+            # page, which the redirect-only titles are matched against.
+            assert parse is not None
+            page = str(parse.get("title") or "").replace(" ", "_") or title_us
+            _record_redirect(cache_dir, title_us,
+                             page if parse.get("redirects") else None, page)
         else:
             _record_miss(html_file, miss_file, title_us, reason or "no-text")
     return html
 
 
-def _redirect_cached(title_us: str, cache_dir: str | None) -> tuple[bool, str | None]:
-    """(known, target) from a .redirect answer in the cache."""
+def _redirect_path(cache_dir: str, title_us: str) -> str:
+    return _cache_paths(cache_dir, title_us)[0][:-len(".html")] + _REDIRECT_SUFFIX
+
+
+def _record_redirect(cache_dir: str | None, title_us: str, to: str | None,
+                     page: str | None) -> None:
     if not cache_dir:
-        return False, None
-    path = _cache_paths(cache_dir, title_us)[0][:-len(".html")] + _REDIRECT_SUFFIX
+        return
+    os.makedirs(cache_dir, exist_ok=True)
+    _write_atomic(_redirect_path(cache_dir, title_us), json.dumps({
+        "title": title_us, "to": to, "page": page,
+        "checked": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}))
+
+
+def _redirect_cached(title_us: str,
+                     cache_dir: str | None) -> tuple[str | None, str | None] | None:
+    """(to, page) from a .redirect answer in the cache (see the cache
+    layout above), or None when the cache has no answer for the title."""
+    if not cache_dir:
+        return None
     try:
-        with open(path, encoding="utf-8") as f:
-            to = json.load(f).get("to")
-    except (OSError, ValueError, AttributeError):
-        return False, None
-    return True, to if isinstance(to, str) and to else None
+        with open(_redirect_path(cache_dir, title_us), encoding="utf-8") as f:
+            rec = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(rec, dict) or "page" not in rec:
+        return None
+
+    def title(v: Any) -> str | None:
+        return v if isinstance(v, str) and v else None
+    return title(rec.get("to")), title(rec.get("page"))
 
 
-def _fetch_redirect(title_us: str, cache_dir: str | None, ua: str,
-                    pacer: Pacer | None = None) -> str | None:
-    """The underscored title `title_us` redirects to on English Wikipedia,
-    or None (an article of its own, or no such page); from the cache, else
-    one `action=parse` request, whose answer is cached (.redirect). The
-    parsed text is the target's article, cached under the target's own
-    title when the cache has nothing for it. Raises TransientError when
-    the API did not answer (nothing cached)."""
-    known, to = _redirect_cached(title_us, cache_dir)
-    if known:
-        return to
-    parse, _reason = _parse_request(title_us, ua, pacer)
-    to = None
-    if parse is not None and parse.get("redirects"):
-        to = str(parse.get("title") or "").replace(" ", "_") or None
-    if cache_dir:
-        os.makedirs(cache_dir, exist_ok=True)
-        html_file = _cache_paths(cache_dir, title_us)[0]
-        _write_atomic(html_file[:-len(".html")] + _REDIRECT_SUFFIX, json.dumps({
-            "title": title_us, "to": to,
-            "checked": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}))
-        html = _parse_html(parse) if parse is not None else None
-        if to and html and _cache_state(to, cache_dir)[0] in ("none", "legacy"):
-            _write_atomic(_cache_paths(cache_dir, to)[0], html)
-    return to
+def _query_redirects(titles_us: list[str], ua: str, pacer: Pacer | None = None
+                     ) -> dict[str, tuple[str | None, str | None]]:
+    """Where each title leads, from one `action=query&redirects=1` request
+    for up to QUERY_BATCH titles (no page text): {title_us: (to, page)},
+    underscored, as in the .redirect cache. A title the answer does not
+    account for is left out (unknown, not "no such page"). Raises
+    TransientError when the API did not answer."""
+    params = urllib.parse.urlencode({
+        "action": "query", "titles": "|".join(t.replace("_", " ") for t in titles_us),
+        "redirects": "1", "format": "json", "formatversion": "2",
+    })
+    try:
+        data = get_json(f"{PARSE_API}?{params}", user_agent=ua, pacer=pacer)
+    except urllib.error.HTTPError as e:
+        raise stop_error(e) from e
+    if not isinstance(data, dict):
+        raise TransientError(f"unexpected {type(data).__name__} body")
+    if data.get("error") is not None:
+        err = data["error"]
+        code = str(err.get("code", "")) if isinstance(err, dict) else ""
+        raise TransientError(f"API error {code or '?'}")
+    query = data.get("query")
+    if not isinstance(query, dict):
+        raise TransientError("body has neither query nor error")
+
+    def hops(key: str) -> dict[str, str]:
+        return {str(h.get("from")): str(h.get("to")) for h in query.get(key) or ()
+                if isinstance(h, dict) and h.get("from") and h.get("to")}
+    normalized, redirects = hops("normalized"), hops("redirects")
+    pages = {str(p.get("title")): not (p.get("missing") or p.get("invalid"))
+             for p in query.get("pages") or () if isinstance(p, dict) and p.get("title")}
+    out: dict[str, tuple[str | None, str | None]] = {}
+    for t in titles_us:
+        name = normalized.get(t.replace("_", " "), t.replace("_", " "))
+        seen = {name}
+        while name in redirects and redirects[name] not in seen:   # a chain, not a loop
+            name = redirects[name]
+            seen.add(name)
+        if name not in pages:
+            continue
+        page = name.replace(" ", "_") if pages[name] else None
+        out[t] = (page if len(seen) > 1 else None, page)
+    return out
 
 
 def _fetch_online(title_us: str, cache_dir: str | None, ua: str,
@@ -607,6 +656,7 @@ def bundle_wiki_articles(
     max_images_per_article: int = 12,
     source=None,
     redirect_only: Iterable[str] = (),
+    add_redirect: Callable[[str, str, str], None] | None = None,
 ) -> dict:
     """Fetch + clean + store each distinct article at `wiki-article/<Title>`.
 
@@ -635,11 +685,14 @@ def bundle_wiki_articles(
     and so is a redirect to one ("Pannenberg" -> "Wolfhart Pannenberg", a
     theologian; "VVAC" -> "Verde Valley Archaeology Center"). A redirect to
     an article of another place of this map (the municipality, the city)
-    is kept. The page is stored at `wiki-article/<the redirect's title>`
-    with the target's text. Offline, the source ZIM's redirect entries
-    tell; online, one `action=parse` request per title (its answer is
-    cached, .redirect), which also fetches the target's text. A title also
-    in `titles` is bundled as usual.
+    is kept. The target is matched by the page each bundled title opens, so
+    a target bundled under an alias of its own (AEGON -> Aegon) counts.
+    `add_redirect(path, title, target_path)` writes it as a ZIM redirect
+    to that article (creator.add_redirection); without it, a copy of the
+    article is stored. Offline, the source ZIM's redirect entries tell;
+    online, `action=query&redirects=1` for 50 titles a request, no text
+    (each answer cached, .redirect). A source that cannot tell bundles
+    none. A title also in `titles` is bundled as usual.
     """
     seen: set[str] = set()
     norm: list[str] = []
@@ -794,36 +847,81 @@ def bundle_wiki_articles(
                 f"{total_bytes // 1024} KB")
     # Titles bundled only as a redirect to an article stored above.
     redirects = redirects_skipped = 0
-    for title_us in redirect_titles:
-        target: str | None = None
+
+    def where(titles_us: list[str], counted: bool) -> dict[str, tuple[str | None, str | None]]:
+        """(to, page) for each title the source or the API could answer
+        (see _query_redirects). `counted`: an unanswered title is one of
+        the run's unfetched articles."""
+        nonlocal unfetched, rate_limited, streak, stopped
         if src is not None:
-            # A source without redirect entries cannot tell: skipped.
             lookup = getattr(src, "redirect_target", None)
-            target = lookup(title_us) if lookup else None
-        elif not stopped or _redirect_cached(title_us, cache_dir)[0]:
-            try:
-                target = _fetch_redirect(title_us, cache_dir, ua, pacer)
-                streak = 0
-            except TransientError as e:
-                unfetched += 1
-                rate_limited += e.rate_limited
-                streak += 1
-                if e.stop or streak >= _GIVE_UP_AFTER:
-                    stopped = True
-                    log(f"    bundle-wiki-articles: not requesting the rest ({e.reason})")
-        else:
-            unfetched += 1
-        if not target or target not in stored_titles:
-            redirects_skipped += 1
-            continue
-        raw = src.html(target) if src is not None else _cache_state(target, cache_dir)[1]
-        if not raw:
-            redirects_skipped += 1
-            continue
-        total_bytes += store(title_us, target, raw)
-        redirects += 1
-        bundled += 1
+            if lookup is None:    # a source without redirect entries cannot tell
+                return {}
+            out = {}
+            for t in titles_us:
+                to = lookup(t)
+                out[t] = (to, to or t)
+            return out
+        out, todo = {}, []
+        for t in titles_us:
+            known = _redirect_cached(t, cache_dir)
+            if known is not None:
+                out[t] = known
+            else:
+                todo.append(t)
+        for k in range(0, len(todo), QUERY_BATCH):
+            batch = todo[k:k + QUERY_BATCH]
+            got: dict = {}
+            if not stopped:
+                try:
+                    got = _query_redirects(batch, ua, pacer)
+                    streak = 0
+                except TransientError as e:
+                    rate_limited += e.rate_limited * counted
+                    streak += 1
+                    if e.stop or streak >= _GIVE_UP_AFTER:
+                        stopped = True
+                        log(f"    bundle-wiki-articles: not requesting the rest ({e.reason})")
+            for t, ans in got.items():
+                _record_redirect(cache_dir, t, *ans)
+                out[t] = ans
+            if counted:
+                unfetched += sum(1 for t in batch if t not in got)
+        return out
+
     if redirect_titles:
+        led = where(redirect_titles, counted=True)
+        targets = {led[t][0] for t in redirect_titles if t in led and led[t][0]}
+        # The page each bundled title opens: offline html() and the API
+        # follow redirects, so a title may be stored under an alias of the
+        # article a redirect-only title points to.
+        page_of = {t: t for t in stored_titles}
+        if targets - set(page_of):
+            for t, (_to, page) in where(sorted(stored_titles), counted=False).items():
+                if page:
+                    page_of[t] = page
+        stored_for: dict[str, str] = {}
+        for t in sorted(stored_titles):
+            stored_for.setdefault(page_of[t], t)
+        for t in sorted(stored_titles):
+            stored_for.setdefault(t, t)
+        for title_us in redirect_titles:
+            to = led.get(title_us, (None, None))[0]
+            article = stored_for.get(to) if to else None
+            if not article:
+                redirects_skipped += 1
+                continue
+            if add_redirect is not None:
+                add_redirect(f"wiki-article/{title_us}", title_us.replace("_", " "),
+                             f"wiki-article/{article}")
+            else:
+                raw = src.html(article) if src is not None else _cache_state(article, cache_dir)[1]
+                if not raw:
+                    redirects_skipped += 1
+                    continue
+                total_bytes += store(title_us, article, raw)
+            stored_titles.add(title_us)
+            redirects += 1
         log(f"    bundle-wiki-articles: {redirects} of {len(redirect_titles)} titles with "
             f"no English article of their own bundled as redirects to an article "
             f"bundled here; {redirects_skipped} skipped")
