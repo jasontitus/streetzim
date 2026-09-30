@@ -5,7 +5,9 @@
 // This loads the viewer from a ZIM served by kiwix-serve, finds a named POI
 // label near the middle of the screen, taps it, and checks that a popup
 // opens with its name and "Directions to here"; then opens the routing panel
-// and checks that a tap there picks a point instead of opening a popup.
+// and checks that a tap there picks a point instead of opening a popup; a
+// double-tap zoom on the label leaves no popup; and a tap on a search pin
+// dropped on the label opens the pin's popup only.
 //
 //   ZIM_ORIGIN=http://127.0.0.1:8902/content/<book> CHROME_PATH=... \
 //     node tools/tap_label_check.mjs
@@ -48,13 +50,13 @@ try {
     for (const f of fs) {
       const pr = f.properties || {};
       if (!(pr.name || pr['name:latin']) || pr.wikidata || !f.geometry || f.geometry.type !== 'Point') continue;
-      // Tap where the label is drawn (its icon or its name), found by
+      // Tap where only this label is drawn (its icon or its name), found by
       // hit-testing a column through the anchor, as a finger would land.
       const name = pr['name:latin'] || pr.name, pt = m.project(f.geometry.coordinates);
       for (let dy = -30; dy <= 40; dy += 2) {
-        const hit = m.queryRenderedFeatures([pt.x, pt.y + dy], { layers })
-          .some(h => (h.properties['name:latin'] || h.properties.name) === name);
-        if (hit) return { name, x: pt.x, y: pt.y + dy };
+        const hits = m.queryRenderedFeatures([pt.x, pt.y + dy], { layers })
+          .map(h => h.properties['name:latin'] || h.properties.name).filter(Boolean);
+        if (hits.length && hits.every(h => h === name)) return { name, x: pt.x, y: pt.y + dy };
       }
     }
     return null;
@@ -77,7 +79,19 @@ try {
       if (got.text.indexOf(target.name) < 0) errs.push(`popup does not name "${target.name}": ${got.text.slice(0, 80)}`);
       if (got.routing && !got.directions) errs.push('popup has no "Directions to here"');
       console.log(`tapped "${target.name}": popup ok${got.directions ? ', with Directions' : ''}`);
+      const closeAll = () => p.evaluate(() =>
+        document.querySelectorAll('.maplibregl-popup-close-button').forEach(b => b.click()));
+      const popups = () => p.evaluate(() => document.querySelectorAll('.maplibregl-popup').length);
+      // A double-tap (zoom) on the label must not leave a popup open.
+      await closeAll(); await sleep(300);
+      await p.touchscreen.tap(target.x, target.y); await sleep(80);
+      await p.touchscreen.tap(target.x, target.y); await sleep(1200); await idle(p);
+      if (await popups()) errs.push('a double-tap on the label left a popup open');
+      else console.log('double-tap: no popup');
+      await p.evaluate((c, z) => window.__szMap.jumpTo({ center: c, zoom: z }), CENTER, ZOOM);
+      await idle(p); await closeAll();
       // With the routing panel open, a tap picks a route point instead.
+      // (Before the pin below: a tap on the pin would open its own popup.)
       if (got.routing) {
         await p.evaluate(() => {
           document.querySelectorAll('.maplibregl-popup-close-button').forEach(b => b.click());
@@ -86,10 +100,28 @@ try {
         await sleep(800);
         await p.mouse.click(target.x, target.y);
         await sleep(1500);
-        const n = await p.evaluate(() => document.querySelectorAll('.maplibregl-popup').length);
+        const n = await popups();
         if (n) errs.push('a tap with the routing panel open still opened a place popup');
         else console.log('routing panel open: the tap opened no popup');
+        await p.evaluate(() => { window.streetzimRouting.clear(); window.streetzimRouting.close(); });
+        await sleep(500); await closeAll();
       }
+      // A search pin dropped on the label: tapping the pin opens its own
+      // popup only, not a second one for the label under it.
+      const pinPt = await p.evaluate(t => {
+        const m = window.__szMap, ll = m.unproject([t.x, t.y]);
+        placeSearchPin(m, ll.lat, ll.lng, 'Test pin');
+        document.querySelectorAll('.maplibregl-popup-close-button').forEach(b => b.click());
+        const r = document.querySelector('.maplibregl-marker').getBoundingClientRect();
+        // Near the tip, over the label: the spot that used to open both.
+        return { x: r.left + r.width / 2, y: r.top + r.height * 0.85 };
+      }, target);
+      await sleep(300);
+      await p.touchscreen.tap(pinPt.x, pinPt.y); await sleep(1000);
+      const n = await popups();
+      if (n !== 1) errs.push(`tapping a search pin opened ${n} popups, not 1`);
+      else console.log('search pin tap: one popup');
+      await closeAll();
     }
   }
 } finally {

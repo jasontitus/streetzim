@@ -220,7 +220,10 @@ function initWikidataPopups(map, config) {
       });
       box.appendChild(ab);
     }
-    box.appendChild(buildDirectionsButton(lngLat.lat, lngLat.lng, name));
+    if (window.streetzimRouting
+        && typeof window.streetzimRouting.open === 'function') {
+      box.appendChild(buildDirectionsButton(lngLat.lat, lngLat.lng, name));
+    }
     return box;
   }
 
@@ -238,7 +241,55 @@ function initWikidataPopups(map, config) {
     if (currentPopup) { currentPopup.remove(); currentPopup = null; }
   };
 
+  // A tap opens one popup for the place under the finger. The rules, in
+  // order: a tap on a marker (search pin, Find result) belongs to that
+  // marker's own popup; while the routing panel is open a tap picks a route
+  // point; the place is the named label under the tap, else the nearest one
+  // within TAP_SLOP pixels (a fingertip on a POI's icon or name often misses
+  // both, and the point itself sits in the gap between them); the popup
+  // waits DOUBLE_TAP_MS so a double-tap zoom can cancel it; and only the
+  // latest tap's popup may open (a slow Wikidata chunk used to open a
+  // second popup after a later tap).
+  var TAP_SLOP = 10;
+  var DOUBLE_TAP_MS = 250;
+  var tapSeq = 0;
+  var tapTimer = null;
+  function cancelPendingTap() {
+    if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; }
+  }
+  map.on('zoomstart', cancelPendingTap);
+  map.on('dblclick', cancelPendingTap);
+
+  function named(f) {
+    var p = f.properties || {};
+    return !!(p['name:latin'] || p.name);
+  }
+  function tappedFeature(pt) {
+    var queryOpts = {};
+    var layers = getQueryLayers();
+    if (layers) queryOpts.layers = layers;
+    var under = map.queryRenderedFeatures(pt, queryOpts).filter(named);
+    if (under.length) return under[0];
+    var near = map.queryRenderedFeatures(
+      [[pt.x - TAP_SLOP, pt.y - TAP_SLOP], [pt.x + TAP_SLOP, pt.y + TAP_SLOP]],
+      queryOpts).filter(named);
+    var best = null, bestD = Infinity;
+    for (var i = 0; i < near.length; i++) {
+      var g = near[i].geometry, d = TAP_SLOP * 2;   // lines, areas: behind points
+      if (g && g.type === 'Point' && g.coordinates) {
+        var q = map.project(g.coordinates);
+        d = Math.sqrt((q.x - pt.x) * (q.x - pt.x) + (q.y - pt.y) * (q.y - pt.y));
+      }
+      if (d < bestD) { bestD = d; best = near[i]; }
+    }
+    return best;
+  }
+
   map.on('click', function(e) {
+    var target = e.originalEvent && e.originalEvent.target;
+    if (target && target.closest && target.closest('.maplibregl-marker')) return;
+    var seq = ++tapSeq;
+    cancelPendingTap();
     if (currentPopup) { currentPopup.remove(); currentPopup = null; }
     // Close find-result marker popups too — same reason as above.
     if (typeof _findResultsState !== 'undefined'
@@ -252,39 +303,22 @@ function initWikidataPopups(map, config) {
         } catch (e3) {}
       }
     }
+    if (window.streetzimRouting && window.streetzimRouting.panelActive) return;
+    var feat = tappedFeature(e.point);
+    if (!feat) return;
+    tapTimer = setTimeout(function() {
+      tapTimer = null;
+      if (seq !== tapSeq) return;
+      var qid = feat.properties.wikidata;
+      if (hasWikidata && qid && /^Q\d+$/.test(qid)) wikiPopup(e, feat, qid, seq);
+      else placeLabelPopup(e, feat, seq);
+    }, DOUBLE_TAP_MS);
+  });
 
-    // Query rendered features around the tap: a fingertip rarely lands
-    // exactly on a label's glyphs or icon (the point itself sits in the gap
-    // between a POI's icon and its name), so allow TAP_SLOP pixels.
-    var queryOpts = {};
-    var layers = getQueryLayers();
-    if (layers) queryOpts.layers = layers;
-
-    var features = map.queryRenderedFeatures(_tapBox(e.point), queryOpts);
-    if (!features || features.length === 0) return;
-
-    // Find the first feature with a wikidata Q-ID in tile properties
-    var feat = null;
-    var qid = null;
-    for (var i = 0; hasWikidata && i < features.length; i++) {
-      var props = features[i].properties || {};
-      if (props.wikidata && props.wikidata.match(/^Q\d+$/)) {
-        feat = features[i];
-        qid = props.wikidata;
-        break;
-      }
-    }
-    if (!qid) {
-      // While the routing panel is open a tap picks a route point.
-      if (window.streetzimRouting && window.streetzimRouting.panelActive) return;
-      _placeLabelPopup(e, features);
-      return;
-    }
-
+  function wikiPopup(e, feat, qid, seq) {
     var name = feat.properties['name:latin'] || feat.properties.name || feat.properties.label || qid;
-    var prefix = getWdPrefix(qid);
-
-    fetchWdChunk(prefix).then(function(chunk) {
+    fetchWdChunk(getWdPrefix(qid)).then(function(chunk) {
+      if (seq !== tapSeq) return;
       var wd = (chunk && chunk[qid]) ? chunk[qid] : null;
       currentPopup = new maplibregl.Popup({ maxWidth: '320px' })
         .setLngLat(e.lngLat)
@@ -293,17 +327,13 @@ function initWikidataPopups(map, config) {
       _szPopupGap(map, currentPopup);
       currentPopup.addTo(map);
     });
-  });
+  }
 
-  // A named place without a Wikidata popup: name and type at once, then
-  // the search record's details (the same popup a search result opens).
-  function _placeLabelPopup(e, features) {
-    var feat = null;
-    for (var i = 0; i < features.length; i++) {
-      var p = features[i].properties || {};
-      if (p['name:latin'] || p.name) { feat = features[i]; break; }
-    }
-    if (!feat) return;
+  // A named place without a Wikidata popup: name, type and Directions at
+  // once; on a ZIM with Overture data, then the search record's details
+  // (website, phone, ...), the same popup a search result opens. Records
+  // in a ZIM without Overture carry none of those, so the lookup is skipped.
+  function placeLabelPopup(e, feat, seq) {
     var props = feat.properties;
     var name = props['name:latin'] || props.name;
     var g = feat.geometry;
@@ -318,9 +348,10 @@ function initWikidataPopups(map, config) {
     currentPopup = popup;
     _szPopupGap(map, popup);
     popup.addTo(map);
-    if (typeof window.__streetzimLookupPlace !== 'function') return;
+    if (!config.hasOvertureAddresses
+        || typeof window.__streetzimLookupPlace !== 'function') return;
     window.__streetzimLookupPlace(name, lat, lon).then(function(r) {
-      if (!r || currentPopup !== popup || !popup.isOpen()) return;
+      if (!r || seq !== tapSeq || currentPopup !== popup || !popup.isOpen()) return;
       popup.setDOMContent(_szPlacePopupDOM(lat, lon, name, {
         // Overture's category, else the tile's ("copyshop"), which is
         // finer than the record's type ("shop").
@@ -328,11 +359,6 @@ function initWikidataPopups(map, config) {
         soc: r.soc, brand: r.brand, wd: r.wd,
       }));
     });
-  }
-
-  var TAP_SLOP = 10;
-  function _tapBox(pt) {
-    return [[pt.x - TAP_SLOP, pt.y - TAP_SLOP], [pt.x + TAP_SLOP, pt.y + TAP_SLOP]];
   }
 
   // Change cursor on hover over clickable features

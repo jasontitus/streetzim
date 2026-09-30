@@ -124,8 +124,11 @@ function _szPlacePopupDOM(lat, lon, name, enrich) {
     ? enrich.ws.trim() : null;
   if (wsHref) addLink(wsHref, '🌐', wsHref);
   if (enrich.p)  addLink('tel:' + String(enrich.p).replace(/\s+/g, ''), '📞', String(enrich.p));
-  if (enrich.soc && enrich.soc.length) {
+  if (Array.isArray(enrich.soc)) {
     enrich.soc.forEach(function(s) {
+      // Same rule as the website: http(s) links only.
+      if (typeof s !== 'string' || !/^https?:\/\//i.test(s.trim())) return;
+      s = s.trim();
       var host = s.toLowerCase();
       var g = /facebook/.test(host) ? 'f' :
               /instagram/.test(host) ? 'IG' :
@@ -612,7 +615,9 @@ var SEARCH_SHARDS = (function () {
       }
     }
 
-    for (var i = 0; i < words.length; i++) addFor(words[i]);
+    if (!(opts && opts.wholeNameOnly)) {
+      for (var i = 0; i < words.length; i++) addFor(words[i]);
+    }
     // The whole name is indexed under its own first two characters, with
     // spaces folded — "45 Broadway" is findable by typing "45 b".
     addFor(q.replace(/\s/g, '_'));
@@ -962,8 +967,13 @@ var SEARCH_SHARDS = (function () {
   // to null when the index has no such record.
   window.__streetzimLookupPlace = function(name, lat, lon) {
     if (!manifest || !name || name.length < 2) return Promise.resolve(null);
-    var prefixes = getPrefixes(name);
-    if (!prefixes.length) return Promise.resolve(null);
+    // Only the leaves for the whole name (the writer always indexes it),
+    // and no lookup when that is not a targeted read: a name like "De
+    // Observant" read 176 leaves (97 MB of JSON) through its words.
+    var prefixes = getPrefixes(name, { wholeNameOnly: true });
+    if (!prefixes.length || (!prefixes.targeted && prefixes.length > 8)) {
+      return Promise.resolve(null);
+    }
     var want = normalizeText(name);
     return streamFilterChunks(prefixes, name).then(function(recs) {
       var best = null, bestD = 300;
