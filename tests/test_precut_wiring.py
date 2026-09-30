@@ -17,7 +17,7 @@ BOX = "7.40,43.72,7.44,43.76"
 def _args(**kw):
     base = {"mbtiles": None, "area": None, "fast": False, "store": None, "pbf": None,
             "search_cache": None, "skip_address_extract": False,
-            "overture_addresses": None, "overture_places": None}
+            "overture_addresses": None, "overture_places": None, "no_admin_areas": False}
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -35,6 +35,8 @@ def seen(monkeypatch, tmp_path):
                         lambda p, o, bbox=None, precut=False: calls.__setitem__("addr", (p, precut)) or 0)
     monkeypatch.setattr(c, "extract_wiki_tags_pbf",
                         lambda p, bbox=None, precut=False: calls.__setitem__("wiki", (p, precut)) or {})
+    monkeypatch.setattr(c, "append_admin_areas",
+                        lambda p, feats, bbox=None: calls.__setitem__("admin", p) or 0)
     monkeypatch.setattr(c, "extract_routing_graph",
                         lambda p, d, bbox=None, precut=False: calls.__setitem__("rt", (p, bbox, precut)))
     return calls
@@ -60,6 +62,9 @@ def test_own_cut_is_not_cut_again(seen, tmp_path):
     assert w == str(tmp_path / "area.osm.pbf")
     assert seen["addr"] == (w, True) and seen["wiki"] == (w, True)
     assert seen["rt"][0] == w and seen["rt"][2] is True and seen["rt"][1] is not None
+    # Administrative areas read the extract before the cut, so an area the
+    # cut clips still has its whole polygon.
+    assert seen["admin"] == "in.pbf"
 
 
 def test_preset_areas_own_extract_is_still_cut(seen, tmp_path):
