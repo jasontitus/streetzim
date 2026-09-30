@@ -130,9 +130,9 @@ def main() -> int:
         "wall_s": round(wall, 1),
         "cpu_s": round(ru.ru_utime + ru.ru_stime, 1),
         "cpus": os.cpu_count(),
-        # What the build itself chose (streetzim/cpus.py): inside a container
-        # os.cpu_count() is the machine's count, not the build's.
-        "build_cpus": _build_cpus(),
+        # What streetzim/cpus.py detects here (the build uses it unless given
+        # --cpus): inside a container os.cpu_count() is the machine's count.
+        "detected_cpus": _detected_cpus(),
         "peak_pss_gb": round(peak["pss"] / 1e9, 2),
         "peak_rss_gb": round(peak["rss"] / 1e9, 2),
         "peak_disk_gb": round(peak["disk"] / 1e9, 2),
@@ -147,7 +147,7 @@ def main() -> int:
     return rc
 
 
-def _build_cpus() -> list[Any] | None:
+def _detected_cpus() -> list[Any] | None:
     """streetzim.cpus.detect() as [cores, reason], when streetzim is importable."""
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent))

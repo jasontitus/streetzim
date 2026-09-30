@@ -112,6 +112,12 @@ streetzim --name osm_en_monaco --title Monaco \
     --area monaco --output out --stats-filename out/task_progress.json
 ```
 
+`--cpus N` sets how many cores the build uses at once. By default it is the
+usable cores, capped by a container's CPU quota and at one per 2 GiB of its
+memory limit; in Docker with only a CPU share (as on Zimfarm) pass it, since
+a share hides no cores and each core costs memory
+([docs/zimfarm.md](docs/zimfarm.md#cpus-and-memory---cpus)).
+
 Satellite imagery is off by default in `streetzim`. `--satellite` adds EOX's
 2016 mosaic (CC BY 4.0); the sharper 2021 mosaic is non-commercial and takes
 `--satellite-source s2cloudless-2021 --satellite-accept-noncommercial`, which

@@ -168,7 +168,7 @@ Recipe flags (the `offliner` part of `POST /v2/recipes`, dash form):
 streetzim --name osm_en_luxembourg --title Luxembourg \
   --description "Offline map of Luxembourg with search and routing" \
   --include-poly https://download.geofabrik.de/europe/luxembourg.poly \
-  --profile full --output /output          # or --profile basic
+  --profile full --cpus 2 --output /output # or --profile basic
 streetzim ... --profile basic --wikidata    # basic plus Wikidata
 streetzim ... --overture=off                # full without Overture (or --no-overture)
 ```
@@ -648,6 +648,17 @@ a region this size
 give the task at least 12 GB of RAM and 15 GB of disk, besides the extract
 and shapefiles.
 
+These runs predate several changes, and the memory figures above are not
+what the current code does. The Netherlands `basic` again on 2026-09-30,
+with the `streetzim` command in its Docker image, on a 36-core machine
+(before `--cpus`; the search processes held to 4 with `PYTHON_CPU_COUNT=4`,
+tilemaker at every core): 83 min wall, 135 CPU minutes, a 1.13 GB ZIM, and
+memory (PSS) peaking at 12.6 GB in tilemaker's 36 threads. Each of the four
+`osmium extract` cuts took about 3.8 GB (5.1 GB with the Python process),
+the routing graph 4.7 GB, and writing the ZIM stayed near 2 GB: the 10.8 GB
+above came from code since replaced. [CPUs and memory](#cpus-and-memory---cpus)
+covers what `--cpus` and cutting the extract once do to these numbers.
+
 A US region and a Docker comparison, measured the same way on 2026-09-29
 with the code as of that day and the inputs given as `file://` URLs (so no
 download time): the US states from Geofabrik (2026-09-28 extracts),
@@ -723,7 +734,9 @@ source, not a normal run; from an IP that is not rate limited, Monaco's
 
 What to give a recipe (`resources` in `POST /v2/recipes`). The `basic`
 rows follow from the measurements above; the `full` rows are **estimates**
-from them, since only Monaco was measured with `full`:
+from them, since only Monaco was measured with `full`. Every recipe should
+also pass the flag `cpus` equal to its `cpu`
+([CPUs and memory](#cpus-and-memory---cpus)); the memory figures assume it:
 
 | extract size (example) | profile | cpu | memory | disk |
 |---|---|---|---|---|
@@ -731,7 +744,7 @@ from them, since only Monaco was measured with `full`:
 | | `full` | 2 | 6 GiB (Monaco measured 2.8 to 3.4 GB) | 4 GiB |
 | about 700 MB (Switzerland) | `basic` | 4 | 8 GiB (measured 4.6 GB) | 10 GiB (4 + 4.4 measured + extract) |
 | | `full` | 4 | 10 GiB (estimated) | 12 GiB (estimated: Overture parquets and article cache on top) |
-| about 1.6 GB (the Netherlands) | `basic` | 4 | 12 GiB (measured 10.8 GB) | 20 GiB (4 + 11.0 measured + extract; less failed with ENOSPC) |
+| about 1.6 GB (the Netherlands) | `basic` | 4 | 12 GiB (measured 10.8 GB with older code; see below the first table) | 20 GiB (4 + 11.0 measured + extract; less failed with ENOSPC) |
 | | `full` | 4 | 14 GiB (estimated) | 22 GiB (estimated) |
 
 - Memory in `full` grows with the Overture merge (DuckDB, and more search
@@ -785,7 +798,8 @@ libzim's compression threads (at most 20) and the tile decompression threads
 leave the memory rule out: they cost about 43 MB each, and capping them costs
 time (4 compression threads took 71 s where 20 took 17 s). A CPU share is
 relative to the other containers and says nothing about a core count, so it
-is not read. cgroup v1 limits are read when the machine has no cgroup v2.
+is not read. cgroup v1 limits are read when the process has no cgroup v2
+hierarchy of its own (a v1 or hybrid machine).
 Outside a container, with no limits, the count is every core, as before.
 
 **A recipe should pass `--cpus` equal to its `cpu` resource** (`"cpus": 4`
@@ -804,9 +818,9 @@ Luxembourg `basic` in a container limited like a Zimfarm task
 
 | | peak memory | wall time | CPU time |
 |---|---|---|---|
-| before (36 tilemaker threads, 36 search processes, 20 compression threads) | 8.4 GB | 3.0 min | 5.8 min |
-| 4 cores for everything (an earlier rule) | 4.0 GB | 3.3 min | 5.7 min |
-| and the extract cut once | 3.9 GB | 2.5 min | 4.0 min |
+| before (36 tilemaker threads, 32 to 36 search processes, 20 compression threads) | 8.4 GB | 3.0 min | 5.8 min |
+| 4 cores for everything (an earlier rule: one per 4 GiB) | 4.0 GB | 3.3 min | 5.7 min |
+| 4 cores, and the extract cut once | 3.9 GB | 2.5 min | 4.0 min |
 
 Peak memory here is PSS sampled every 2 s (`tools/measure_build.py`), which
 can miss a spike of a few seconds. At this size the peak is the one
