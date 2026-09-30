@@ -7,7 +7,7 @@ file that opens in [Kiwix](https://kiwix.org) (iOS, Android, desktop) or in a
 browser, with no network at all. A ZIM contains:
 
 - **Vector map** rendered on the device by MapLibre GL JS (OpenMapTiles schema, z0–14, overzoomed beyond).
-- **Search** over places, streets, addresses, POIs, peaks, parks and water, plus Kiwix's own full-text search over a detail page for each place, park, peak, water feature and airport (POIs too with `--kiwix-poi-pages`; never streets or addresses: see `KIWIX_PAGE_TYPES` in streetzim/zim_writer.py and docs/zimfarm.md).
+- **Search** over places, administrative areas (countries to wards, from the extract's boundary relations), streets, addresses, POIs, peaks, parks and water, plus Kiwix's own title and full-text search over a detail page for each place, administrative area, park, peak, water feature and airport (POIs too with `--kiwix-poi-pages`; never streets or addresses: see `KIWIX_PAGE_TYPES` in streetzim/zim_writer.py and docs/zimfarm.md).
 - **Find page** with category chips (Food & Drink, Bars, Hotels, Museums, Parks, Health, Shops, Gas…) and distance sorting.
 - **Offline routing** (drive / walk / bike) in a Web Worker, with a GPS turn-by-turn HUD.
 - **Terrain**: hillshade and 3D from the Copernicus DEM (on in the `streetzim` command with `--profile full`, the default; `--terrain` for `create_osm_zim.py`).
@@ -183,7 +183,7 @@ resources/viewer/ (MapLibre app) ───┤
 | `resources/vendor/`, `resources/viewer-assets.lock.json` | vendored MapLibre GL JS and the sha256 pins for it and the font glyphs (`tools/pin_viewer_assets.py`, [docs/viewer-supply-chain.md](docs/viewer-supply-chain.md)) |
 | `resources/tilemaker/` | tilemaker config and Lua profile |
 | `cloud/` | Python modules the builder imports (`chip_rules`, `search_shards`, `viewer_slots`, …) and the ZIM tools (`validate_zim`, `repackage_zim`, `patch_viewer_inplace`, …) |
-| `streetzim/` | the builder's modules: `tiles`, `terrain`, `satellite`, `addresses`, `search_extract`, `zim_writer` (one function per ZIM phase), `zim_metadata` (openZIM metadata rules), `progress` (Zimfarm progress file), `common`, and `routing/` (graph build, formats, reference routers) |
+| `streetzim/` | the builder's modules: `tiles`, `terrain`, `satellite`, `addresses`, `admin_areas`, `search_extract`, `zim_writer` (one function per ZIM phase), `zim_metadata` (openZIM metadata rules), `progress` (Zimfarm progress file), `common`, and `routing/` (graph build, formats, reference routers) |
 | `tests/` | pytest and Node tests |
 | `web/` | streetzim.web.app catalogue and the `/drive/` PWA (operations; moves to `ops/` in stage 2) |
 | `preview-proxy/` | archive.org range proxy for online previews |

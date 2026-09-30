@@ -34,7 +34,7 @@ turns off everything below that says "full".
 | Wikipedia articles (text) | on with full | `--wikipedia` / `--no-wikipedia` (Wikipedia API; images with `--wikipedia-zim-url`) |
 | Wikidata place details | on with full | `--wikidata` / `--no-wikidata` (queries Wikidata) |
 | Terrain (hillshade and 3D) | on with full, from just below the lowest zoom the viewer can show to z12 | `--terrain` / `--no-terrain` (downloads Copernicus DEM tiles; [cost](#terrain-cost)) |
-| POIs in Kiwix's own search | on with full (without it, Kiwix's full-text search covers places, parks, peaks, water and airports) | `--kiwix-poi-pages` / `--kiwix-poi-pages=off` ([below](#pois-in-kiwixs-own-search---kiwix-poi-pages)) |
+| POIs in Kiwix's own search | on with full (without it, Kiwix's full-text search covers places, parks, peaks, water, airports and administrative areas) | `--kiwix-poi-pages` / `--kiwix-poi-pages=off` ([below](#pois-in-kiwixs-own-search---kiwix-poi-pages)) |
 | Satellite imagery | **off**; opt-in | `--satellite`: EOX Sentinel-2 cloudless 2016, **CC BY 4.0**. The 2021 mosaic, **CC BY-NC-SA 4.0 (non-commercial)**, only with `--satellite-source s2cloudless-2021 --satellite-accept-noncommercial`, as a variant labelled restricted ([below](#satellite-imagery)) |
 
 The area is exactly one of `--area` (a preset), `--include-poly` (a `.poly`
@@ -70,7 +70,8 @@ actually contains.
 The map's own search (the search box, Find chips, places list) covers every
 named feature. Kiwix's search, the one in the Kiwix app's bar and on
 kiwix-serve, only sees the features that have a detail page
-(`search/<slug>.html`): places, parks, peaks, water and airports. Without
+(`search/<slug>.html`): places, parks, peaks, water, airports and
+administrative areas ([search-records.md](search-records.md#administrative-areas-t-admin)). Without
 the flag, "Casino" on the Monaco ZIM finds the Fontaine du Casino and not
 the Casino, the shops or the bus stops named after it.
 `--kiwix-poi-pages` gives every named POI a page too, which Kiwix's

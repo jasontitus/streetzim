@@ -45,7 +45,16 @@ from streetzim import viewer_assets
 # (page, dirent, full-text and title index), Monaco +28% (1.8k pages),
 # Luxembourg +16% (56.7 -> 66.0 MB, 21k pages), so ~ +19% for Switzerland
 # and +12% for the Netherlands; build time within noise. docs/zimfarm.md.
-KIWIX_PAGE_TYPES = frozenset({"place", "airport", "park", "peak", "water"})
+# Administrative areas (`admin`, streetzim/admin_areas.py) always get one:
+# they are what maps2zim's Kiwix search is made of.
+KIWIX_PAGE_TYPES = frozenset({"place", "airport", "park", "peak", "water", "admin"})
+
+# The viewer zoom a search page's "View on map" opens at, by record type
+# (an admin area with a box is fitted to it instead).
+PAGE_ZOOM = {"place": 14, "airport": 14, "peak": 15, "park": 15,
+             "water": 14, "poi": 17, "street": 16}
+# An admin area without a box (one the extract clips), by admin_level.
+ADMIN_ZOOM = {2: 5, 3: 6, 4: 7, 5: 8, 6: 10, 7: 11, 8: 12, 9: 13, 10: 14}
 
 
 def kiwix_page_types(poi_pages: bool = False) -> frozenset[str]:
@@ -53,7 +62,129 @@ def kiwix_page_types(poi_pages: bool = False) -> frozenset[str]:
     return KIWIX_PAGE_TYPES | {"poi"} if poi_pages else KIWIX_PAGE_TYPES
 
 
-def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
+def admin_record_fields(feat):
+    """The search-record keys an administrative area adds
+    (docs/search-records.md): al, bb, alt, osm. Empty for other types."""
+    if feat.get("type") != "admin":
+        return {}
+    out = {}
+    if feat.get("admin_level") is not None:
+        out["al"] = int(feat["admin_level"])
+    bb = feat.get("bbox")
+    if bb and len(bb) == 4:
+        out["bb"] = [round(float(v), _SEARCH_COORD_DP) for v in bb]
+    if feat.get("alt"):
+        out["alt"] = list(feat["alt"])
+    if feat.get("osm"):
+        out["osm"] = feat["osm"]
+    return out
+
+
+def kiwix_page_title(feat):
+    """A search page's title (what Kiwix suggests). An admin area's name
+    gets its type when the name does not say it: "Alexandria (city)",
+    but "Arlington County"."""
+    name = feat["name"]
+    if feat.get("type") == "admin":
+        label = (feat.get("subtype") or "").strip()
+        if label and label.casefold() not in name.casefold():
+            return f"{name} ({label})"
+    return name
+
+
+# Types whose English official names read "<Type> of <Name>" ("City of
+# Alexandria", "Town of Capitol Heights", "Canton of Geneva").
+FORMAL_OF_LABELS = frozenset({"city", "town", "village", "borough",
+                              "municipality", "commune", "canton",
+                              "province", "state"})
+MAX_ALT_TITLES = 6
+
+
+def kiwix_alt_titles(feat):
+    """Other titles an admin area's page is suggested under (redirects to
+    it, front articles): its other names, and "<Type> of <Name>" for the
+    types in FORMAL_OF_LABELS when the name does not already say the
+    type. Kiwix's title search wants every word typed, so "City of
+    Alexandria" never found a page titled "Alexandria (city)"."""
+    if feat.get("type") != "admin":
+        return []
+    name = feat["name"]
+    label = (feat.get("subtype") or "").strip()
+    cands = list(feat.get("alt") or [])
+    if label in FORMAL_OF_LABELS and label.casefold() not in name.casefold():
+        cands.append(f"{label[:1].upper()}{label[1:]} of {name}")
+    seen = {name.casefold(), kiwix_page_title(feat).casefold()}
+    out = []
+    for c in cands:
+        if c and c.casefold() not in seen:
+            seen.add(c.casefold())
+            out.append(c)
+    return out[:MAX_ALT_TITLES]
+
+
+def add_alt_titles(creator, page_path, feat):
+    """The redirects for kiwix_alt_titles(feat) to `page_path`, as front
+    articles so Kiwix suggests them. Returns how many were added."""
+    alts = kiwix_alt_titles(feat)
+    for k, title in enumerate(alts):
+        path = f"{page_path[:-len('.html')]}~{k}.html"
+        try:
+            from libzim.writer import Hint
+            creator.add_redirection(path, title, page_path, {Hint.FRONT_ARTICLE: True})
+        except (ImportError, TypeError):
+            # cloud/manifest_writer.py's creator (the Rust packer) takes no hints.
+            creator.add_redirection(path, title, page_path)
+    return len(alts)
+
+
+def kiwix_page_hash(feat):
+    """The viewer fragment a search page's "View on map" opens. An admin
+    area with a box: centred on the box at the zoom that fits it, with
+    `bounds=` (which a viewer that knows it fits exactly) and a pin on
+    the area's point."""
+    lat, lon = feat["lat"], feat["lon"]
+    if feat.get("type") == "admin":
+        label_q = urllib.parse.quote(feat["name"], safe="")
+        bb = feat.get("bbox")
+        if bb and len(bb) == 4:
+            from streetzim.admin_areas import fit_zoom
+            w, s_, e, n = (float(v) for v in bb)
+            return (f"map={fit_zoom(bb)}/{(s_ + n) / 2:.5f}/{(w + e) / 2:.5f}"
+                    f"&bounds={w:.5f},{s_:.5f},{e:.5f},{n:.5f}"
+                    f"&pin={lat},{lon}&label={label_q}")
+        z = ADMIN_ZOOM.get(int(feat.get("admin_level") or 8), 12)
+        return f"map={z}/{lat}/{lon}&pin={lat},{lon}&label={label_q}"
+    return f"map={PAGE_ZOOM.get(feat['type'], 15)}/{lat}/{lon}"
+
+
+def search_page(feat, i):
+    """(path, title, html) of the Kiwix page for search feature `feat`,
+    the i-th page written."""
+    slug = feat["name"].lower()
+    slug = "".join(c if c.isalnum() or c in "-_ " else "" for c in slug)
+    slug = slug.strip().replace(" ", "-")[:80]
+    slug = f"{slug}-{i}"
+    # Prefer Overture's normalized category for display
+    # when present (falls back to OMT subtype / OSM type).
+    kind_raw = feat.get("cat") or feat.get("subtype") or feat["type"]
+    label = kind_raw.replace("_", " ").title()
+    also = None
+    if feat.get("type") == "admin":
+        label = label[:1].upper() + kind_raw.replace("_", " ")[1:]
+        if feat.get("location"):
+            label += f" in {feat['location']}"
+        also = feat.get("alt") or None
+    enrich = {k: feat[k] for k in ("ws", "p", "soc", "brand", "wd")
+              if feat.get(k)}
+    page_html = search_detail_html(
+        feat["name"], label, feat["lat"], feat["lon"], kiwix_page_hash(feat),
+        enrich=enrich, also_known_as=also, title=kiwix_page_title(feat),
+        record_type=feat.get("type"))
+    return f"search/{slug}.html", kiwix_page_title(feat), page_html
+
+
+def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None,
+                       also_known_as=None, title=None, record_type=None):
     """HTML for a search-result detail page (`search/<slug>.html`).
 
     CTAs: "Directions to here" + "View on map" (no auto-redirect any
@@ -75,7 +206,12 @@ def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
     URL breaks article lookup).
     """
     safe_name = html_mod.escape(name)
+    safe_title = html_mod.escape(title or name)
     safe_kind = html_mod.escape(kind_label)
+    also_html = ""
+    if also_known_as:
+        also_html = ('<p class="also">Also: '
+                     + html_mod.escape(", ".join(also_known_as)) + "</p>")
     label_q = urllib.parse.quote(name, safe="")
     dest_hash = f"dest={lat},{lon}&label={label_q}"
 
@@ -132,7 +268,7 @@ def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
         '<!DOCTYPE html><html><head>'
         '<meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        f'<title>{safe_name}</title>'
+        f'<title>{safe_title}</title>'
         '<style>'
         'body{font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;'
         'margin:0;padding:24px;max-width:640px;color:#1a1a1a;'
@@ -140,6 +276,7 @@ def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
         'h1{margin:0 0 4px;font-size:1.6rem}'
         'p.kind{margin:0 0 14px;color:#666;font-size:0.95rem}'
         'p.brand{margin:0 0 10px;color:#666;font-style:italic;font-size:0.95rem}'
+        'p.also{margin:0 0 14px;color:#666;font-size:0.95rem}'
         'ul.contact{list-style:none;padding:0;margin:0 0 18px;'
         'display:flex;flex-direction:column;gap:6px;font-size:0.95rem}'
         'ul.contact a{color:#0a7cff;text-decoration:none;word-break:break-all}'
@@ -157,9 +294,13 @@ def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None):
         '.cta a{background:#1c1c1c;border-color:#333;color:#eee}'
         '.cta a.primary{background:#0a7cff;color:#fff;border-color:#0a7cff}}'
         '</style>'
-        '</head><body>'
+        '</head>'
+        # The search record's type, for tools that read the page.
+        + (f'<body data-type="{html_mod.escape(record_type, quote=True)}">'
+           if record_type else '<body>') +
         f'<h1>{safe_name}</h1>'
         f'<p class="kind">{safe_kind}</p>'
+        f'{also_html}'
         f'{contact_html}'
         # Search detail pages live at `search/<slug>.html` inside the
         # ZIM. A bare `index.html#...` resolves to `search/index.html`
@@ -278,6 +419,7 @@ def _streetzim_to_xapianbuilder_jsonl(src_jsonl: str, dst_jsonl: str,
                 v = feat.get(k)
                 if v:
                     body_parts.append(str(v))
+            body_parts += [str(a) for a in feat.get("alt") or ()]
             body_text = " ".join(body_parts)
             lat = feat.get("lat", 0)
             lon = feat.get("lon", 0)
@@ -292,7 +434,7 @@ def _streetzim_to_xapianbuilder_jsonl(src_jsonl: str, dst_jsonl: str,
             )
             rec = {
                 "path": slug_path,
-                "title": name,
+                "title": kiwix_page_title(feat),
                 "mimetype": "text/html",
                 "body": body_html,
                 "language": language,
@@ -1751,13 +1893,23 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                 type_counts[t] = type_counts.get(t, 0) + 1
 
                 # Enrich with location (state, country) if missing
-                if loc_lookup and not feat.get("location"):
+                # (An admin area's `location` is its region, set when it
+                # was extracted, or none for a country.)
+                if loc_lookup and not feat.get("location") and t != "admin":
                     feat["location"] = loc_lookup(feat["lat"], feat["lon"])
 
                 # Enrich with wiki cross-refs if this POI has matching
                 # (name, coord) in the OSM-tag lookup built from the PBF.
                 wiki = None
-                if wiki_cross_refs:
+                if t == "admin":
+                    # An admin area carries its relation's own tags; a
+                    # name+point match could be another object (the place
+                    # node at the area's admin_centre).
+                    wiki = {k: feat[k] for k in ("wikipedia", "wikidata")
+                            if feat.get(k)} or None
+                    if wiki:
+                        wiki_fields_added += 1
+                elif wiki_cross_refs:
                     # A merged street keeps every piece's point in
                     # _pts (merge_streets_in_file); the OSM tag may
                     # match any of them.
@@ -1798,6 +1950,7 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                     v = feat.get(ov_key)
                     if v:
                         rec[ov_key] = v
+                rec.update(admin_record_fields(feat))
                 if wiki:
                     if wiki.get("wikipedia"):
                         rec["w"] = wiki["wikipedia"]
@@ -1845,7 +1998,11 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                 # Index under each word's prefix — duplicates entries
                 # across 1–4 chunks (avg ~2×) but enables substring
                 # hits like "cathedral" → "Washington National Cathedral".
-                for prefix in _prefixes_for(feat["name"]):
+                # An admin area is found by its other names too.
+                _keys = _prefixes_for(feat["name"])
+                for _alt in rec.get("alt", ()):
+                    _keys |= _prefixes_for(_alt)
+                for prefix in sorted(_keys):
                     if prefix not in chunk_fds:
                         if len(chunk_fds) >= _chunk_fd_budget:
                             # `u<hex>` buckets give one file per
@@ -2462,31 +2619,15 @@ def _search_xapian_pages(creator, MapItem, *, xapian_mode, xapianbuilder_bin, xa
         with open(xapian_path) as xf:
             for line in xf:
                 feat = json.loads(line)
-                slug = feat["name"].lower()
-                slug = "".join(c if c.isalnum() or c in "-_ " else "" for c in slug)
-                slug = slug.strip().replace(" ", "-")[:80]
-                slug = f"{slug}-{i}"
-
-                zoom = {"place": 14, "airport": 14, "peak": 15, "park": 15,
-                        "water": 14, "poi": 17, "street": 16}.get(feat["type"], 15)
-                map_hash = f"map={zoom}/{feat['lat']}/{feat['lon']}"
-                # Prefer Overture's normalized category for display
-                # when present (falls back to OMT subtype / OSM type).
-                kind_raw = feat.get("cat") or feat.get("subtype") or feat["type"]
-                label = kind_raw.replace("_", " ").title()
-                enrich = {k: feat[k] for k in ("ws", "p", "soc", "brand", "wd")
-                          if feat.get(k)}
-                page_html = search_detail_html(
-                    feat["name"], label,
-                    feat["lat"], feat["lon"], map_hash, enrich=enrich,
-                )
+                path, title, page_html = search_page(feat, i)
                 creator.add_item(MapItem(
-                    f"search/{slug}.html",
-                    feat["name"],
+                    path,
+                    title,
                     "text/html",
                     page_html.encode("utf-8"),
                     is_front=True,      # in the title index: Kiwix suggestions
                 ))
+                add_alt_titles(creator, path, feat)
 
                 i += 1
                 if i % 2000 == 0:
@@ -2558,7 +2699,8 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup, page
         prefix = prefix[:2].ljust(2, "_")
         chunks[prefix].append(
             {"n": f["name"], "t": f["type"], "s": f.get("subtype", ""),
-             "a": f["lat"], "o": f["lon"], "l": f.get("location", "")}
+             "a": f["lat"], "o": f["lon"], "l": f.get("location", ""),
+             **admin_record_fields(f)}
         )
 
     manifest = {k: len(v) for k, v in sorted(chunks.items())}
@@ -2585,29 +2727,15 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup, page
 
     xapian_start = time.time()
     for i, feat in enumerate(xapian_features):
-        slug = feat["name"].lower()
-        slug = "".join(c if c.isalnum() or c in "-_ " else "" for c in slug)
-        slug = slug.strip().replace(" ", "-")[:80]
-        slug = f"{slug}-{i}"
-
-        zoom = {"place": 14, "airport": 14, "peak": 15, "park": 15,
-                "water": 14, "poi": 17, "street": 16}.get(feat["type"], 15)
-        map_hash = f"map={zoom}/{feat['lat']}/{feat['lon']}"
-        kind_raw = feat.get("cat") or feat.get("subtype") or feat["type"]
-        label = kind_raw.replace("_", " ").title()
-        enrich = {k: feat[k] for k in ("ws", "p", "soc", "brand", "wd")
-                  if feat.get(k)}
-        page_html = search_detail_html(
-            feat["name"], label,
-            feat["lat"], feat["lon"], map_hash, enrich=enrich,
-        )
+        path, title, page_html = search_page(feat, i)
         creator.add_item(MapItem(
-            f"search/{slug}.html",
-            feat["name"],
+            path,
+            title,
             "text/html",
             page_html.encode("utf-8"),
             is_front=True,      # in the title index: Kiwix suggestions
         ))
+        add_alt_titles(creator, path, feat)
 
         if (i + 1) % 2000 == 0:
             elapsed = time.time() - xapian_start
