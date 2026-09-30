@@ -83,7 +83,7 @@ pip install -r requirements-dev.txt
 ruff check .                       # bug-catching lint families (ruff.toml)
 python tools/pyright_gate.py       # type check: strict modules clean, no new findings
 python tools/offliner_definition.py --check   # Zimfarm definition matches the flags
-python -m pytest tests -q          # ~30 s; tests needing big local ZIMs skip themselves
+python -m pytest tests -q          # ~2 min; tests needing big local ZIMs or tools skip themselves
 for t in tests/chip_rules_js.test.mjs tests/chip_shards_js.test.mjs \
          tests/search_shards_js.test.mjs tests/zim_reader_js.test.mjs \
          tests/test_zim_http_source.mjs tests/viewer_style_js.test.mjs \
@@ -172,8 +172,9 @@ Rules that keep published ZIMs working:
 ## 3. How production releases are made
 
 On the build host, from `/storage/streetzim`. The details are in
-`ops/docs/remote-rebuild.md`, `ops/docs/new-region-setup.md` and
-`ops/docs/rebuild-2026-09-plan.md`; this is the map.
+`ops/README.md`, `ops/docs/scripts.md` and `ops/docs/new-region-setup.md`
+(`ops/docs/remote-rebuild.md` and `ops/docs/rebuild-2026-09-plan.md` are
+records of earlier rounds); this is the map.
 
 1. **Inputs.** A planet PBF (`download-planet.sh`), regional extracts
    (`extract-region-pbfs.sh`), world vector tiles (`build-world-tiles.sh`,
@@ -192,9 +193,15 @@ On the build host, from `/storage/streetzim`. The details are in
 4. **Gate and ship.** `ship-region.sh <id>` builds, then runs its gates
    (terrain, `validate_zim.py`, route checks, search + Find smoke tests,
    `cloud/pwa_smoke_test.mjs`), then uploads with
-   `cloud/upload_validated.sh`, **the only upload path**. The Kiwix UI gate
-   `cloud/kiwix_viewer_gate.sh` is run by the viewer-rollout scripts.
-   `build-refresh-queue.sh` does the same for the whole registry.
+   `cloud/upload_validated.sh`, **the only upload path**.
+   `build-refresh-queue.sh` runs the same gates over a queue of regions (the
+   browser smoke soft by default). `cloud/rebuild_old_regions.sh`, the
+   driver of a rebuild round, builds each region with `build-region-fast.sh`,
+   then runs `validate_zim.py`, marker checks and its own gates (the overlap
+   check at 320, 390 and 430 px, the device matrix, a map render check and
+   the Kiwix in-ZIM viewer gate `cloud/kiwix_viewer_gate.sh`) before
+   `cloud/upload_validated.sh`. The viewer-rollout scripts run the Kiwix gate
+   too.
 5. **Viewer-only updates** go out with `cloud/rollout_viewer_patch.sh`
    (in-place slot patch, gates, upload). There is no rebuild.
 6. **Catalogue and torrents.** `web/generate.py` produces `streetzim.web.app`,

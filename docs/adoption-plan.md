@@ -87,8 +87,10 @@ maps2zim:
   [tile-sources.md](tile-sources.md)).
 
 What it would cost:
-- taking on a larger codebase (about 42k lines of code after the
-  operations split, plus 13k of tests; most of it viewer and builder);
+- taking on a larger codebase (about 57k lines of code outside `ops/`:
+  Python, the viewer's JavaScript, HTML and CSS, shell and Rust, not counting
+  vendored libraries or the generated viewer file; plus about 22k of tests;
+  most of it viewer and builder);
 - custom formats to maintain;
 - one author's history.
 
