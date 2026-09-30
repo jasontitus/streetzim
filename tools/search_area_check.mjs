@@ -15,7 +15,10 @@
 //      there) then Food & Drink 100 ms later leaves the food pins visible;
 //   4. a name-search hand-off (a stash with one far result) still moves
 //      the camera to show it, at zoom 14 at most;
-//   5. on a rotated map (bearing 45) every chip pin is on screen.
+//   5. on a rotated map (bearing 45) every chip pin is on screen;
+//   6. Food & Drink after another chip, on a landscape phone, and "Search
+//      this area" on a name search's results leave no pin under the
+//      strip, the search box or the chip rail.
 //
 //   ZIM_ORIGIN=http://127.0.0.1:8902/content/<book> CHROME_PATH=... \
 //     node tools/search_area_check.mjs
@@ -70,9 +73,9 @@ const pins = p => p.evaluate(() => {
   const label = document.querySelector('#find-results-strip span');
   return { n: mk.length, hidden, label: label ? label.textContent : '' };
 });
-const openPage = async browser => {
+const openPage = async (browser, w = 390, h = 844) => {
   const p = await browser.newPage();
-  await p.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  await p.setViewport({ width: w, height: h, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   await p.goto(origin + '/index.html', { waitUntil: 'load', timeout: 120000 });
   await p.waitForFunction(() => window.__szMap && window.__szMap.loaded()
     && document.querySelector('#find-chips .find-chip[data-chip="food"]'), { timeout: 120000 });
@@ -143,12 +146,73 @@ try {
     // Food & Drink before that flight ends.
     const p = await openPage(browser), errs = [];
     await jump(p, START, 17); await idle(p);
-    await tap(p, 'fuel'); await sleep(100); await tap(p, 'food');
+    // Tap Food & Drink while the Gas camera flight is under way: wait for
+    // the Gas results (their flight starts with them), then tap.
+    await tap(p, 'fuel');
+    await p.waitForFunction(() => /Gas/.test((document.querySelector('#find-results-strip span') || {}).textContent || ''),
+      { timeout: 30000 });
+    await tap(p, 'food');
     await settle(p);
     const r = await pins(p);
     if (!r.n) errs.push('no food pins');
     else if (r.hidden) errs.push(`${r.hidden} of ${r.n} food pins not visible`);
     report('Gas then Food & Drink 100 ms later', errs);
+    await p.close();
+  }
+  {
+    // Another chip's strip is up (without a sub-filter row, shorter than
+    // Food & Drink's will be): the food pins must clear the new strip.
+    const p = await openPage(browser), errs = [];
+    await jump(p, START, 16); await idle(p);
+    await tap(p, 'hotels');
+    await p.waitForSelector('#find-results-strip', { timeout: 60000 }); await settle(p);
+    await jump(p, START, 16); await idle(p);
+    await tap(p, 'food'); await settle(p);
+    const r = await pins(p);
+    if (!r.n) errs.push('no food pins');
+    else if (r.hidden) errs.push(`${r.hidden} of ${r.n} food pins under the strip or chrome`);
+    report('Hotels then Food & Drink', errs);
+    await p.close();
+  }
+  {
+    // A landscape phone: a small band between the chip rail and the strip.
+    const p = await openPage(browser, 844, 390), errs = [];
+    await jump(p, START, 16); await idle(p);
+    await tap(p, 'food');
+    await p.waitForSelector('#find-results-strip', { timeout: 60000 }); await settle(p);
+    const r = await pins(p);
+    if (r.hidden) errs.push(`${r.hidden} of ${r.n} pins under the strip or chrome`);
+    report('landscape 844x390', errs);
+    await p.close();
+  }
+  {
+    // "Search this area" on a name search's results (no chip): the pill
+    // hides the search box while it is up; the pins must clear it anyway.
+    const p = await openPage(browser), errs = [];
+    await jump(p, START, 14); await idle(p);
+    const n0 = await p.evaluate(() => {
+      const m = window.__szMap, b = m.getBounds(), items = [];
+      for (let i = 0; i < 400; i++) {
+        items.push({ n: 'Place ' + i, t: 'poi',
+          a: b.getSouth() + (b.getNorth() - b.getSouth()) * ((i * 37) % 400) / 400,
+          o: b.getWest() + (b.getEast() - b.getWest()) * ((i * 91) % 400) / 400 });
+      }
+      sessionStorage.setItem(FIND_RESULTS_STASH_KEY, JSON.stringify({ label: 'Name search', origin: null, items }));
+      renderFindResultsFromStash(m);
+      return items.length;
+    });
+    await settle(p);
+    await jump(p, START, 16); await idle(p);
+    const pill = await p.waitForSelector('#find-search-area-btn', { timeout: 15000 }).then(() => true, () => false);
+    if (!pill) errs.push('pill not shown');
+    else {
+      await p.evaluate(() => document.getElementById('find-search-area-btn').click());
+      await settle(p);
+      const r = await pins(p);
+      if (!r.n || r.n >= n0) errs.push(`Search this area kept ${r.n} of ${n0}`);
+      if (r.hidden) errs.push(`${r.hidden} of ${r.n} pins under the search box, chips or strip`);
+    }
+    report('Search this area on name-search results', errs);
     await p.close();
   }
   {

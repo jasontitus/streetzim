@@ -593,10 +593,6 @@ async function loadChipOnMap(map, chipDef, opts) {
       }
       return;
     }
-    if (res.partial) {
-      _showFindToast('Showing the nearest ' + res.records.length
-        + ' — zoom in for more', { color: '#333', ms: 2600 });
-    }
     items = res.records;
     expanded = res.fellBack;
     if (!expanded) {
@@ -609,6 +605,10 @@ async function loadChipOnMap(map, chipDef, opts) {
         _showFindToast('No ' + chipDef.label.toLowerCase() + ' in this area');
         return;
       } else expanded = true;
+    }
+    if (res.partial) {
+      _showFindToast('Showing the nearest ' + items.length
+        + ' — zoom in for more', { color: '#333', ms: 2600 });
     }
   } else {
   try {

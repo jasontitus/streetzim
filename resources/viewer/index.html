@@ -4201,7 +4201,7 @@ var _findResultsState = {
   active:  -1,     // index of the card currently centered
   searchAreaBtn: null,  // floating "Search this area" pill on the map
   anchorCenter:  null,  // map center once the results' camera settles
-  anchorZoom:    null,  // map zoom after the initial fitBounds settles
+  anchorZoom:    null,  // map zoom once the results' camera settles
   moveHandler:   null,  // bound moveend handler (so we can detach on clear)
   renderSeq:     0,     // bumped per render; stale map.once('idle') callbacks bail
   detailPanel:   null,  // root <div> of the place detail bottom-sheet (or null)
@@ -4391,8 +4391,10 @@ function renderFindResultsFromStash(map) {
 
 // The part of the map the reader can see, in canvas pixels: below the
 // search box and chip rail (or the "Search this area" pill that replaces
-// them), above the results strip (or the 200 px it will take), 8 px in
-// from the sides. "In this area" means this rectangle, not getBounds(),
+// them), with room for a pin's body above its tip; above the results
+// strip at its tallest (200 px, or the strip on screen if that is taller:
+// a strip without a sub-filter row is 34 px shorter than the next one may
+// be); 8 px in from the sides. "In this area" means this rectangle, not getBounds(),
 // which also counts what the chrome covers and, on a rotated or tilted
 // map, ground that is not on screen at all.
 function _findVisibleRect(map) {
@@ -4408,9 +4410,13 @@ function _findVisibleRect(map) {
   });
   var strip = document.getElementById('find-results-strip');
   var sr = strip ? strip.getBoundingClientRect() : null;
-  var bottom = (sr && sr.height > 0) ? sr.top - cr.top : H - 200;
-  return { x0: 8, y0: Math.min(top + 8, H / 2), x1: W - 8,
-           y1: Math.max(bottom - 8, H / 2 + 1) };
+  var bottom = Math.min((sr && sr.height > 0) ? sr.top - cr.top : H, H - 200);
+  // A pin is drawn upward from its tip (about 41 px): leave room for it
+  // under the chrome. On a landscape phone the band left is small; it
+  // never runs below the strip or inverts.
+  var y0 = top + 36, y1 = bottom - 8;
+  if (y1 <= y0) { y0 = top + 8; y1 = Math.max(bottom - 8, y0 + 1); }
+  return { x0: 8, y0: y0, x1: W - 8, y1: y1 };
 }
 
 // Whether a record's point is inside that rectangle on screen. project()
@@ -4787,7 +4793,10 @@ function _searchAreaApply(map) {
     return;
   }
   if (!_findResultsState.items || !_findResultsState.items.length) return;
-  // What the reader can see, not getBounds() (see _findVisibleRect).
+  // What the reader can see, not getBounds() (see _findVisibleRect). The
+  // pill hides the search box and chip rail while it is up; put them back
+  // first, or the rectangle would reach under them.
+  _hideSearchAreaPill();
   var rect = _findVisibleRect(map);
   var filtered = _findResultsState.items.filter(function(r) {
     return _findRecordVisible(map, rect, r);
@@ -6176,10 +6185,6 @@ async function loadChipOnMap(map, chipDef, opts) {
       }
       return;
     }
-    if (res.partial) {
-      _showFindToast('Showing the nearest ' + res.records.length
-        + ' — zoom in for more', { color: '#333', ms: 2600 });
-    }
     items = res.records;
     expanded = res.fellBack;
     if (!expanded) {
@@ -6192,6 +6197,10 @@ async function loadChipOnMap(map, chipDef, opts) {
         _showFindToast('No ' + chipDef.label.toLowerCase() + ' in this area');
         return;
       } else expanded = true;
+    }
+    if (res.partial) {
+      _showFindToast('Showing the nearest ' + items.length
+        + ' — zoom in for more', { color: '#333', ms: 2600 });
     }
   } else {
   try {
