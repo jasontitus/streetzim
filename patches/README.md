@@ -1,5 +1,7 @@
 # libzim Patches
 
+> Kept for history. StreetZim builds with stock python-libzim ([README.md](../README.md)). libzim's ChangeLog lists the Compressor fix in 9.5.1 and the macOS read-limit fix ([ISSUE-macos-read-limit.md](ISSUE-macos-read-limit.md)) in 9.6.0; it does not list the spin-loop change.
+
 Two patches for [openzim/libzim](https://github.com/openzim/libzim), both discovered while building large ZIM files (56M+ tiles, US and World map builds).
 
 Apply against libzim 9.x (tested on commit `f8cc2cb` / v9.2.3).

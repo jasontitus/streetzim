@@ -8,7 +8,7 @@ sdist). The wheel holds everything the `streetzim` command reads at run time:
 
 | in the wheel | from the checkout |
 |---|---|
-| `streetzim/`, `create_osm_zim.py`, `wikidata_cache.py` | the same paths |
+| `streetzim/`, `create_osm_zim.py`, `wikidata_cache.py`, `download_overture_data.py` | the same paths |
 | `cloud/`: only the modules the builder imports (`CLOUD_MODULES` in `streetzim/paths.py`) | the same paths; the rest of `cloud/` is operations code and is left out |
 | `streetzim/resources/viewer/{index.html,places.html,routing-worker.js}` | `resources/viewer/` (the built files, not `src/`) |
 | `streetzim/resources/tilemaker/` (config, Lua profile, `fetch-shapefiles.sh`) | `resources/tilemaker/` |
@@ -28,9 +28,9 @@ builder finds. `setup.py` applies `CLOUD_MODULES` to every build (`python -m
 build`, `pip install .`, `pip wheel .`).
 
 The wheel's dependencies are the runtime set, listed in `pyproject.toml`
-(not read from `requirements.txt`, which still carries pytest and
-internetarchive until it is split); `tests/test_packaging.py` checks the two
-lists agree apart from those.
+(not read from `requirements.txt`, which lists the same set; test tools are
+in `requirements-dev.txt`, the `ia` client in `requirements-ops.txt`);
+`tests/test_packaging.py` checks the two lists agree.
 
 Download caches (satellite, DEM, Wikidata, Wikipedia, font glyphs) go to
 `$STREETZIM_CACHE_DIR`, which the `streetzim` command sets to `<--dl>/cache`.
@@ -85,8 +85,9 @@ and the publish job uploads it. To publish on every pushed `v*` tag instead,
 uncomment the `push: tags` trigger in the workflow.
 
 **Blocker before any PyPI release: top-level names.** The wheel installs
-`cloud` (a namespace package, with no `__init__.py`), `create_osm_zim` and
-`wikidata_cache` at the top level of site-packages, next to `streetzim`.
+`cloud` (a namespace package, with no `__init__.py`), `create_osm_zim`,
+`wikidata_cache` and `download_overture_data` at the top level of
+site-packages, next to `streetzim`.
 Another distribution could ship the same names, and a namespace `cloud`
 would merge with or be shadowed by any other `cloud` on the path. The plan:
 move these under `streetzim.*` (for example `streetzim.builder`,

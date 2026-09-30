@@ -25,8 +25,11 @@ ZIM.
   (tilemaker, MBTiles readers, fonts, MapLibre), `satellite.py`, `terrain.py`,
   `addresses.py` (PBF addresses, Overture merges, wiki tags),
   `search_extract.py`, `routing/build.py` (graph extraction + chunking) and
-  `zim_writer.py` (`create_zim`). `create_osm_zim.py` re-exports every name
-  those modules define, so `import create_osm_zim` callers keep working. At
+  `zim_writer.py` (`create_zim`), plus modules added since: `cpus.py` (the
+  `--cpus` budget), `area.py` (boxes across the antimeridian), `mbtiles.py`,
+  `download.py`, `overture.py`, `tile_alias.py`, `viewer_assets.py` and
+  `paths.py`. `create_osm_zim.py` re-exports every top-level name that used
+  to be defined in it, so `import create_osm_zim` callers keep working. At
   import time it also needs `cloud/viewer_slots.py` and
   `cloud/search_shards.py`; later it lazily imports `cloud/{manifest_writer,
   wiki_articles, chip_shards, chip_rules, wikidata_titles}.py`,
@@ -83,7 +86,8 @@ python tools/offliner_definition.py --check   # Zimfarm definition matches the f
 python -m pytest tests -q          # ~30 s; tests needing big local ZIMs skip themselves
 for t in tests/chip_rules_js.test.mjs tests/chip_shards_js.test.mjs \
          tests/search_shards_js.test.mjs tests/zim_reader_js.test.mjs \
-         tests/test_zim_http_source.mjs tests/viewer_style_js.test.mjs; do node "$t"; done
+         tests/test_zim_http_source.mjs tests/viewer_style_js.test.mjs \
+         tests/viewer_ui_js.test.mjs; do node "$t"; done
 ```
 
 CI (`.github/workflows/ci.yml`) runs all of that, with coverage, then builds
@@ -237,11 +241,12 @@ scripts that may be running on the production host (see
 - **Large units.** `create_osm_zim.py`'s `main()` and `create_zim` are now
   sequences of phase functions (`build_parser` plus `_openzim_options` ...
   `_print_summary` in `create_osm_zim.py`; the phases in
-  `streetzim/zim_writer.py`), none of them over ~290 lines. The phases pass
+  `streetzim/zim_writer.py`), none of them over ~320 lines. The phases pass
   state as keyword arguments and tuple returns, so a new option usually
   means a parameter on the phase that reads it. The largest functions left
-  are `extract_routing_graph` (`streetzim/routing/build.py`, ~650 lines) and
-  the published-ZIM tools `repackage` and `swap_viewer_rust` in `cloud/`.
+  are `extract_routing_graph` (`streetzim/routing/build.py`, ~670 lines) and
+  the published-ZIM tools `repackage` (`cloud/repackage_zim.py`) and
+  `swap_viewer_rust` (`ops/cloud/swap_viewer_rust.py`).
   `index.html` is edited as parts in `resources/viewer/src/index/`.
   `places.html` (2.5k) and `routing-worker.js` (1.7k) are unsplit.
 - **Legacy format readers.** The builder writes only current formats
@@ -259,7 +264,8 @@ scripts that may be running on the production host (see
   those equivalents. A maintainer without the accelerators can run the same
   wrappers without the two flags. Only the largest regions get slower.
 - **Docs that point at files that don't exist:** `docs/mcpzim-contract.md`
-  and `docs/STREETZIM_CONSUMPTION.md` are cited from `create_osm_zim.py`.
+  and `docs/STREETZIM_CONSUMPTION.md` are cited from `streetzim/routing/build.py`
+  and `streetzim/zim_writer.py`.
 - **Satellite licence.** The EOX 2021 layer is CC BY-NC-SA and ships in most
   published ZIMs; see the README's licence section. The 2016 layer is CC BY
   4.0 and is what `streetzim --satellite` uses (docs/zimfarm.md,

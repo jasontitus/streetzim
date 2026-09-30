@@ -89,7 +89,7 @@ and makes a ZIM inside it on every push.
 ```bash
 docker build -t streetzim .
 mkdir -p out
-docker run --rm -v "$PWD/out:/output" streetzim scripts/fetch-shapefiles.sh /output   # once
+docker run --rm -v "$PWD/out:/output" streetzim fetch-shapefiles.sh /output   # once
 docker run --rm -v "$PWD/out:/output" streetzim \
     create_osm_zim.py --area monaco --routing -o /output/osm-monaco.zim
 ```
@@ -101,9 +101,10 @@ maps2zim's flag names, ZIM metadata flags checked before any download,
 `{name}_{period}.zim` in an output folder, and a Zimfarm progress file. Its
 flags are described for Zimfarm in `offliner-definition.json`;
 [docs/zimfarm.md](docs/zimfarm.md) covers the profiles (`--profile full`,
-the default, adds Wikidata, Wikipedia articles and Overture Maps like
-StreetZim's own builds; `--profile basic` fetches nothing but the OSM data),
-how they compare with the production builds, and what a build costs.
+the default, adds Wikidata, Wikipedia articles, Overture Maps and terrain
+like StreetZim's own builds, plus POIs in Kiwix's search; `--profile basic`
+fetches nothing but the OSM data), how they compare with the production
+builds, and what a build costs.
 
 ```bash
 pip install -e .              # or a wheel (python -m build; docs/packaging.md), or the Docker image
@@ -138,7 +139,7 @@ Areas across the antimeridian (Fiji, Chukotka, Kiribati) are supported: the
 extract, tiles, map bounds, search and routing cover both sides of ±180°
 ([docs/zimfarm.md](docs/zimfarm.md), [docs/formats.md](docs/formats.md#areas-across-the-antimeridian)).
 
-Main feature flags (all off by default; `python create_osm_zim.py --help` lists all ~50):
+Main feature flags (all off by default; `python create_osm_zim.py --help` lists all of them, about 70):
 
 | flag | adds | needs |
 |---|---|---|
@@ -189,7 +190,7 @@ resources/viewer/ (MapLibre app) ───┤
 | `resources/vendor/`, `resources/viewer-assets.lock.json` | vendored MapLibre GL JS and the sha256 pins for it and the font glyphs (`tools/pin_viewer_assets.py`, [docs/viewer-supply-chain.md](docs/viewer-supply-chain.md)) |
 | `resources/tilemaker/` | tilemaker config and Lua profile |
 | `cloud/` | Python modules the builder imports (`chip_rules`, `search_shards`, `viewer_slots`, …) and the ZIM tools (`validate_zim`, `repackage_zim`, `patch_viewer_inplace`, …) |
-| `streetzim/` | the builder's modules: `tiles`, `terrain`, `satellite`, `addresses`, `search_extract`, `zim_writer` (one function per ZIM phase), `zim_metadata` (openZIM metadata rules), `progress` (Zimfarm progress file), `common`, and `routing/` (graph build, formats, reference routers) |
+| `streetzim/` | the builder's modules: `tiles`, `terrain`, `satellite`, `addresses`, `search_extract`, `zim_writer` (one function per ZIM phase), `zim_metadata` (openZIM metadata rules), `progress` (Zimfarm progress file), `cpus` (the `--cpus` budget), `mbtiles`, `overture`, `tile_alias`, `viewer_assets`, `common`, and `routing/` (graph build, formats, reference routers) |
 | `tests/` | pytest and Node tests |
 | `web/` | streetzim.web.app catalogue and the `/drive/` PWA (operations; moves to `ops/` in stage 2) |
 | `preview-proxy/` | archive.org range proxy for online previews |

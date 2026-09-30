@@ -1,6 +1,6 @@
 # StreetZim Caching
 
-All caches live alongside `create_osm_zim.py` in the project root. They are designed for incremental reuse across builds — a world-scale cache is automatically reused when building regional extracts (US, DC, etc.).
+All caches live in `$STREETZIM_CACHE_DIR` when it is set (the `streetzim` command sets it to `<--dl>/cache`), otherwise in the checkout's root, next to `create_osm_zim.py` (an installed wheel uses `~/.cache/streetzim`; `cache_root` in `streetzim/paths.py`). They are designed for incremental reuse across builds — a world-scale cache is automatically reused when building regional extracts (US, DC, etc.).
 
 ## Cache Summary
 
@@ -32,7 +32,7 @@ licences; `streetzim/satellite_sources.py`).
 
 - **Contents:** Raw JPEG tiles from EOX Sentinel-2 WMTS (`tiles.maps.eox.at`)
 - **Structure:** `{z}/{x}/{y}.jpg` (zoom 0–14)
-- **Population:** `download_satellite_tiles()` with 32 parallel threads
+- **Population:** `download_satellite_tiles()` with up to 32 parallel threads
 - **Reuse:** Any satellite build checks here before re-downloading
 - **Invalidation:** None — Sentinel-2 cloudless mosaics are static yearly composites
 - **Size:** ~38 GB (full US coverage at z0–14)
@@ -58,22 +58,22 @@ licences; `streetzim/satellite_sources.py`).
 
 ### Terrain Tiles (`terrain_cache/`)
 
-- **Contents:** Terrain-RGB WebP tiles (lossless) derived from Copernicus GLO-30 DEM
+- **Contents:** Terrain-RGB WebP tiles (lossless) derived from the Copernicus GLO-30 DEM (GLO-90 for low zooms and where GLO-30 has no cell)
 - **Structure:** `{z}/{x}/{y}.webp` (zoom 0–12 typical)
 - **Population:** `generate_terrain_tiles()` — downloads DEM sources, builds VRT mosaic, generates terrain-RGB
 - **CLI controls:**
   - `--terrain` — enable terrain tiles
   - `--terrain-zoom N` — max zoom (default: 12)
   - `--terrain-dir PATH` — cache directory (default: `terrain_cache/`)
-- **Reuse detection:** Samples 10 random tiles at max zoom; if all present, skips regeneration
+- **Reuse detection:** A per-bbox completion marker skips generation only when every tile of the bbox is present and not blank; without a marker, a build given `--low-zoom-world-vrt` samples five max-zoom tiles (corners and centre) and then checks every tile the same way. Missing or blank tiles are regenerated (`generate_terrain_tiles()` in `streetzim/terrain.py`)
 - **Invalidation:** None — Copernicus DEM data is static
 - **Size:** ~633 GB (includes DEM sources)
 
 ### DEM Source Sub-Cache (`terrain_cache/dem_sources/`)
 
-- **Contents:** Copernicus GLO-30 GeoTIFF files (1-degree tiles, ~40–50 MB each)
-- **Naming:** `dem_{N|S}{lat:02d}_{E|W}{lon:03d}.tif` (e.g., `dem_N38_W077.tif`)
-- **VRT:** `mosaic_4326.vrt` — virtual raster index for efficient multi-tile reads
+- **Contents:** Copernicus GLO-30 GeoTIFF files (1-degree tiles, ~40–50 MB each), and GLO-90 cells
+- **Naming:** `dem_{N|S}{lat:02d}_{E|W}{lon:03d}.tif` (e.g., `dem_N38_W077.tif`); GLO-90 cells are `dem90_…tif`
+- **VRT:** `mosaic_<bbox key>.vrt` per area, and `lowzoom_<bbox key>_z<N>.vrt` for the low zooms — virtual raster indexes for efficient multi-tile reads
 - **Reuse:** Tiles checked before downloading; corrupted files (< 1000 bytes) are re-fetched
 - **Size:** ~547 GB (26,000+ tiles for global coverage)
 

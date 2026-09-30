@@ -353,7 +353,7 @@ sandbox's IP, not the flag.
 - Weekly and on demand, `live-full` builds the same with the live sources
   and runs the same check with `--soft-wikimedia`: Overture must work,
   Wikidata and Wikipedia only warn.
-- `monaco-e2e` builds `--profile basic` from Geofabrik, and the Zimfarm
+- `monaco-e2e` builds `--profile basic --terrain` from Geofabrik, and the Zimfarm
   schema step runs recipes for both profiles through Zimfarm's own models.
 
 ## Satellite imagery
@@ -561,8 +561,8 @@ directly. "streetzim" below is `streetzim/cli.py` and
 | Rust packer, external Xapian builder | yes (speed only; same ZIM content) | no | - | - | local binaries | not needed |
 
 All gaps that can work on Zimfarm are closed except the dead-website filter,
-which has no public source. Terrain is left to its branch; satellite is
-opt-in by choice, outside both profiles.
+which has no public source. Satellite is opt-in by choice, outside both
+profiles.
 
 ## What Zimfarm needs on its side
 
@@ -722,7 +722,7 @@ temp, output and download folders.
 `full` spends its extra time waiting, not computing: the Overture download
 (latest release resolved through STAC, 1 of 64 address files and 1 of 16
 place files read) takes about 13 s. The rest is Wikimedia rate limiting
-this sandbox's shared IP: with the 429 fix now on `next`, each source waits
+this sandbox's shared IP: with the 429 fix, each source waits
 out `Retry-After` up to its budget (`STREETZIM_WIKI_WAIT_BUDGET`, 15 min),
 so the 25 minutes are the title backfill (2 min, then it stops asking),
 Wikidata SPARQL (6 min) and the articles (15 min, the budget, then "not
