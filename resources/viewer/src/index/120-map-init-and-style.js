@@ -503,10 +503,21 @@ if (!window.__szUnsupported) fetchConfig(1)
     function applyHash() {
       var hash = window.location.hash || '';
       var m = hash.match(/map=(\d+\.?\d*)\/(-?\d+\.?\d*)\/(-?\d+\.?\d*)/);
+      // `bounds=w,s,e,n` (an administrative area's search page) fits the box
+      // this viewport has; `map=` beside it is for viewers without this.
+      var bm = hash.match(/bounds=(-?\d+\.?\d*),(-?\d+\.?\d*),(-?\d+\.?\d*),(-?\d+\.?\d*)/);
+      var fitted = false;
+      if (bm) {
+        var bw = parseFloat(bm[1]), bs = parseFloat(bm[2]), be = parseFloat(bm[3]), bn = parseFloat(bm[4]);
+        if (validLatLon(bs, bw) && validLatLon(bn, Math.min(be, 180)) && bw <= be && bs <= bn) {
+          map.fitBounds([[bw, bs], [be, bn]], { padding: 40, duration: 1500, maxZoom: 16 });
+          fitted = true;
+        }
+      }
       if (m) {
         var z = parseFloat(m[1]), lat = parseFloat(m[2]), lon = parseFloat(m[3]);
         if (validLatLon(lat, lon) && isFinite(z) && z >= 0 && z <= 24) {
-          map.flyTo({ center: [lon, lat], zoom: z, duration: 1500 });
+          if (!fitted) map.flyTo({ center: [lon, lat], zoom: z, duration: 1500 });
         } else {
           m = null;
         }

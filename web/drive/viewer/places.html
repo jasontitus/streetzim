@@ -1545,7 +1545,47 @@ function foldText(s) {
 
 function matchesName(rec, q) {
   const ql = foldText(q);
-  return foldText(rec.n).includes(ql) || foldText(rec.s).includes(ql);
+  if (foldText(rec.n).includes(ql) || foldText(rec.s).includes(ql)) return true;
+  // An administrative area (t: 'admin') also answers to its other names
+  // and to "<name> <type>" / "<type> of <name>" ("City of Alexandria"),
+  // as in the map's search box (index.html, admin-search).
+  if (rec.t !== 'admin') return false;
+  // Any word order; "of", "de", ... may be left out, but not every word.
+  const CONNECTORS = new Set(['of', 'de', 'du', 'des', 'del', 'di', 'la', 'le', 'the']);
+  const words = ql.split(/\s+/).filter((w) => w);
+  if (!words.some((w) => !CONNECTORS.has(w))) return false;
+  const label = foldText(rec.s);
+  for (const nm of [rec.n].concat(Array.isArray(rec.alt) ? rec.alt : [])) {
+    const h = foldText(nm);
+    if (!h) continue;
+    const forms = label ? [h, h + ' ' + label, label + ' of ' + h] : [h];
+    if (forms.some((f) => words.every((w) => f.includes(w) || CONNECTORS.has(w)))) return true;
+  }
+  return false;
+}
+
+// The viewer fragment for a record's "Map" button: an administrative area
+// with a box is fitted to it (`bounds=`; `map=` for older viewers).
+function mapHashFor(r, here) {
+  const pin = '&pin=' + r.a + ',' + r.o + '&label=' + encodeURIComponent(r.n || '');
+  const bb = r.bb;
+  if (r.t === 'admin' && Array.isArray(bb) && bb.length === 4
+      && bb.every((v) => typeof v === 'number' && isFinite(v))) {
+    const [w, s, e, n] = bb;
+    const merc = (lat) => {
+      const t = Math.max(-85, Math.min(85, lat)) * Math.PI / 180;
+      return (1 - Math.log(Math.tan(t) + 1 / Math.cos(t)) / Math.PI) / 2;
+    };
+    const fx = Math.max((e - w) / 360, 1e-9), fy = Math.max(Math.abs(merc(s) - merc(n)), 1e-9);
+    let z = Math.min(Math.log2(1024 / (512 * fx)), Math.log2(768 / (512 * fy))) - 0.25;
+    z = Math.round(Math.max(2, Math.min(16, z)) * 10) / 10;
+    return here + 'index.html#map=' + z + '/' + ((s + n) / 2).toFixed(5) + '/'
+         + ((w + e) / 2).toFixed(5) + '&bounds=' + bb.join(',') + pin;
+  }
+  const zoom = r.t === 'admin'
+    ? ({ 2: 5, 3: 6, 4: 7, 5: 8, 6: 10, 7: 11, 8: 12, 9: 13, 10: 14 }[r.al] || 12)
+    : (r.t === 'place' || r.t === 'park') ? 14 : 16;
+  return here + 'index.html#map=' + zoom + '/' + r.a + '/' + r.o + pin;
 }
 
 // Chunk key for a word — MUST match the writer's `_prefix_key` in
@@ -1993,10 +2033,7 @@ function renderResults() {
     ctas.appendChild(dirA);
     const mapA = document.createElement('a');
     mapA.textContent = 'Map';
-    const zoom = (r.t === 'place' || r.t === 'park') ? 14 : 16;
-    mapA.href = HERE + 'index.html#map=' + zoom + '/' + r.a + '/' + r.o
-              + '&pin=' + r.a + ',' + r.o
-              + '&label=' + encodeURIComponent(r.n || '');
+    mapA.href = mapHashFor(r, HERE);
     ctas.appendChild(mapA);
 
     li.appendChild(ctas);

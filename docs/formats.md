@@ -251,12 +251,13 @@ reader branch is only dead when no published ZIM needs it.
 | `satellite/{z}/{x}/{y}.{avif,webp}` | optional, uncompressed; repeats of an identical tile are ZIM aliases of the first, as for `tiles/` |
 | `terrain/{z}/{x}/{y}.webp` | optional, Mapbox terrain-RGB, from `terrainMinZoom` (default 0) to `terrainMaxZoom`; repeats are aliased too |
 | `fonts/{Font}/{start}-{end}.pbf` | SDF glyphs (Open Sans Regular/Bold/Italic) |
-| `search-data/manifest.json`, `search-data/{prefix}.json` | prefix-sharded search records `{n, t, s, a, o, l, …}`; see `docs/search-prefix-locality.md` |
+| `search-data/manifest.json`, `search-data/{prefix}.json` | prefix-sharded search records `{n, t, s, a, o, l, …}` ([search-records.md](search-records.md)); see `docs/search-prefix-locality.md` |
 | `category-index/manifest.json`, `category-index/{cat}.json`, `category-index/chip-{id}[…].json` | Find page data; chip ids come from `cloud/chip_rules.py`, shard layout from `cloud/chip_shards.py` |
 | `wikidata/manifest.json`, `wikidata/{NN}.json` | optional Wikidata facts, bucketed by the first two digits of the Q-number |
 | `wiki-article/{Title}`, `wiki-image/{sha1}.{ext}` | optional bundled Wikipedia (`cloud/wiki_articles.py`) |
 | `wiki-geo-index.json` | `{title: [lat, lon, type]}` |
-| `search/{slug}.html` | per-feature detail pages (libzim Xapian mode only) |
+| `search/{slug}.html` | per-feature detail pages (libzim Xapian mode only); `<body data-type>` is the record type |
+| `search/{slug}~{k}.html` | front-article redirects to an administrative area's page, titled with its other names and "<Type> of <Name>", for Kiwix's title suggestions ([search-records.md](search-records.md#administrative-areas-t-admin)) |
 | `overture-sources.json` | Overture attribution, when Overture data was merged |
 
 ### Areas across the antimeridian

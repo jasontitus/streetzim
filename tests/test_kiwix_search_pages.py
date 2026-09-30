@@ -1,6 +1,7 @@
 """Which search records get a Kiwix page (search/<slug>.html), and so an
-entry in kiwix-serve's full-text search: places, parks, peaks, water and
-airports (streetzim.zim_writer.KIWIX_PAGE_TYPES), the same set on the
+entry in kiwix-serve's full-text search: places, parks, peaks, water,
+airports and administrative areas (streetzim.zim_writer.KIWIX_PAGE_TYPES;
+the areas are in tests/test_admin_search_pages.py), the same set on the
 streaming and the in-memory path. POIs, streets and addresses do not, so
 "Casino" in the Monaco ZIM finds the Fontaine du Casino (a lake) and not the
 shops, stops and sights named Casino; the in-map search has those.
@@ -30,7 +31,7 @@ FEATURES = [
 
 def test_page_types():
     from streetzim.zim_writer import KIWIX_PAGE_TYPES, kiwix_page_types
-    assert KIWIX_PAGE_TYPES == {"place", "park", "peak", "water", "airport"}
+    assert KIWIX_PAGE_TYPES == {"place", "park", "peak", "water", "airport", "admin"}
     assert kiwix_page_types() == KIWIX_PAGE_TYPES
     assert kiwix_page_types(True) == KIWIX_PAGE_TYPES | {"poi"}
 

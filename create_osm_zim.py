@@ -152,6 +152,7 @@ from streetzim.addresses import (  # noqa: F401
     extract_wiki_tags_pbf,
 )
 from streetzim.overture import overture_release
+from streetzim.admin_areas import append_admin_areas
 from streetzim.zim_writer import (  # noqa: F401
     search_detail_html,
     _split_big_search_chunk,
@@ -489,6 +490,11 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Skip extract_addresses_pbf and merge_overture_{addresses,places}. "
                              "Use when --search-cache already contains the address records and "
                              "overture enrichment from a prior run that crashed in a later phase.")
+    parser.add_argument("--no-admin-areas", action="store_true",
+                        help="Leave administrative areas (countries, states, counties, "
+                             "cities, wards: OSM boundary relations) out of search. "
+                             "They need the OSM extract (--pbf, --area or --geofabrik); "
+                             "see docs/search-records.md.")
     parser.add_argument("--routing", action="store_true",
                         help="Include offline routing graph for turn-by-turn directions")
     # Retired: the SZRG v5 split writer (never used in production). Kept as
@@ -1063,6 +1069,21 @@ def _build_search(
                     print(f"    [--skip-address-extract] overture content "
                           f"detected in cache (themes={sampled_themes}); "
                           f"will emit stub overture-sources.json", flush=True)
+            # Administrative areas, from the extract before any bbox cut
+            # (so an area the cut clips still has its whole polygon). A
+            # search cache reused with --skip-address-extract has them.
+            if not args.skip_address_extract and not args.no_admin_areas:
+                _src = os.path.join(tmpdir, "source.osm.pbf")
+                admin_pbf = (pbf_path or args.pbf
+                             or (_src if os.path.isfile(_src) else None) or addr_pbf)
+                try:
+                    n_admin = append_admin_areas(admin_pbf, search_features, bbox=addr_bbox)
+                    from streetzim.source_report import note
+                    note("Administrative areas",
+                         f"{n_admin} (OSM boundary relations; regions and clipped "
+                         "areas' points from GeoNames, CC BY 4.0)")
+                except Exception as _e:
+                    print(f"    Warning: administrative-area extraction failed: {_e}")
             # Same PBF feeds the wiki-tag lookup so the chunker can enrich
             # POI records with wikipedia/wikidata for offline cross-ref.
             try:

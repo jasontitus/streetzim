@@ -44,7 +44,7 @@ Path = tuple[str, ...]
 # ranks with placeSubBonus), then "p", then "s", and "a" only for a digit
 # query of >= 4 characters.
 TIER_TYPES: dict[str, frozenset[str]] = {
-    "c": frozenset({"place", "airport", "peak", "park", "water"}),
+    "c": frozenset({"place", "airport", "peak", "park", "water", "admin"}),
     "s": frozenset({"street"}),
     "a": frozenset({"addr"}),
 }
@@ -118,6 +118,23 @@ def paths_for(prefix: str, name: str, depth: int) -> set[Path]:
     yields one path — the tokens of its characters after the prefix, at most
     ``depth`` of them. A word that IS the prefix yields ``("_",)``.
     """
+    return _word_paths(prefix, name, depth) or {(TERMINAL,)}
+
+
+def record_paths(prefix: str, record: Record, depth: int) -> set[Path]:
+    """``paths_for`` over the record's name and its other names (``alt``,
+    which administrative areas carry and are indexed under too)."""
+    names = [record.get("n") or ""]
+    alt = record.get("alt")
+    if isinstance(alt, list):
+        names += [a for a in alt if isinstance(a, str)]  # pyright: ignore[reportUnknownVariableType]
+    paths: set[Path] = set()
+    for nm in names:
+        paths |= _word_paths(prefix, nm, depth)
+    return paths or {(TERMINAL,)}
+
+
+def _word_paths(prefix: str, name: str, depth: int) -> set[Path]:
     nn = norm(name)
     paths: set[Path] = set()
     candidates: list[str] = [m.group(0) for m in _word_re.finditer(nn)]
@@ -137,7 +154,7 @@ def paths_for(prefix: str, name: str, depth: int) -> set[Path]:
         if len(toks) < depth:
             toks.append(TERMINAL)
         paths.add(tuple(toks))
-    return paths or {(TERMINAL,)}
+    return paths
 
 
 class Aggregator:
@@ -152,7 +169,7 @@ class Aggregator:
     def add(self, record: Record, size: int) -> None:
         tier = tier_for(record)
         depth = min(TIER_MAX_DEPTH.get(tier, 1), self.max_depth)
-        for path in paths_for(self.prefix, record.get("n") or "", depth):
+        for path in record_paths(self.prefix, record, depth):
             for d in range(1, len(path) + 1):
                 key = (tier, path[:d])
                 slot = self.counts.get(key)
@@ -199,7 +216,7 @@ def leaf_for(prefix: str, record: Record,
     depth = TIER_MAX_DEPTH.get(tier, 1)
     planned = set(planned_paths)
     emitted: set[str] = set()
-    for path in paths_for(prefix, record.get("n") or "", depth):
+    for path in record_paths(prefix, record, depth):
         for d in range(len(path), 0, -1):
             cand = path[:d]
             if cand in planned:

@@ -21,7 +21,7 @@ sys.path.insert(0, str(FsPath(__file__).resolve().parent.parent))
 from cloud.search_shards import (  # noqa: E402
     DEFAULT_TIER, SHARD_TARGET_BYTES, TERMINAL, TIER_MAX_DEPTH, Aggregator,
     char_split_paths, leaf_for, leaf_name, norm, paths_for, prefix_key,
-    tier_for, token_for,
+    record_paths, tier_for, token_for,
 )
 
 
@@ -78,7 +78,7 @@ def test_norm_folds_accents_and_case():
 
 @pytest.mark.parametrize("t,tier", [
     ("place", "c"), ("airport", "c"), ("peak", "c"), ("park", "c"),
-    ("water", "c"), ("poi", "p"), ("street", "s"), ("addr", "a"),
+    ("water", "c"), ("admin", "c"), ("poi", "p"), ("street", "s"), ("addr", "a"),
 ])
 def test_tier_for_known_types(t, tier):
     assert tier_for(_rec("x", t)) == tier
@@ -294,3 +294,18 @@ def test_record_with_unicode_line_separator_round_trips_through_a_temp_file(tmp_
     got = [json.loads(x) for x in raw.split("\n") if x]
     assert got == recs
     assert SHARD_TARGET_BYTES == 4 * 1024 * 1024
+
+
+def test_other_names_have_paths_too():
+    """An admin area is written under its other names' prefixes as well
+    (zim_writer indexes `alt`), so the planner must give it a leaf there:
+    else the split raises on an orphan."""
+    rec = dict(_rec("District of Columbia", "admin"), alt=["The District", "D.C."])
+    # "The" ends at once; the whole name "the_district" goes on.
+    assert record_paths("th", rec, 4) == {("e", TERMINAL), ("e", "_", "d", "i")}
+    assert record_paths("di", rec, 4) == {("s", "t", "r", "i")}
+    assert record_paths("zz", rec, 4) == {(TERMINAL,)}
+    agg = Aggregator("th")
+    agg.add(rec, 100)
+    planned = {p for _t, p, _c, _b in agg.leaves(target_bytes=10)}
+    assert sorted(leaf_for("th", rec, planned)) == ["th~e~_e~c", "th~e~_~d~i~c"]
