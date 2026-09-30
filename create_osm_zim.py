@@ -1079,7 +1079,9 @@ def _build_search(
                 try:
                     n_admin = append_admin_areas(admin_pbf, search_features, bbox=addr_bbox)
                     from streetzim.source_report import note
-                    note("Administrative areas", f"{n_admin} (OSM boundary relations)")
+                    note("Administrative areas",
+                         f"{n_admin} (OSM boundary relations; regions and clipped "
+                         "areas' points from GeoNames, CC BY 4.0)")
                 except Exception as _e:
                     print(f"    Warning: administrative-area extraction failed: {_e}")
             # Same PBF feeds the wiki-tag lookup so the chunker can enrich

@@ -10,7 +10,9 @@ the OSM admin_level conventions of its country.
     append_admin_areas(pbf, jsonl, bbox) -> count appended to the JSONL
 
 Which areas: `boundary=administrative` relations (and named closed ways)
-with an `admin_level` of 2-10 and a name, whose representative point lies
+with an `admin_level` of 2-10 and a name, and named `boundary=place`
+relations of a city, town, village, borough or suburb (the City of
+Washington), whose representative point lies
 inside the build box. That is the rule every other search record follows,
 and the one maps2zim applies to GeoNames' ADM points; an area that only
 touches the box (the United States in a D.C. build) is left out.
@@ -24,8 +26,9 @@ Areas the extract cuts: a Geofabrik extract keeps the relations of its
 neighbours but only their members inside its own polygon, so Arlington
 County has no polygon in the D.C. extract. Such an area (admin_level 5 or
 more; a clipped country or state is never "in" the map) is kept only when
-a point for it can be found without its geometry: its label or
-admin_centre node when the extract has it, else a GeoNames populated place
+a point for it can be found without its geometry: its label node, or its
+admin_centre node inside the members the extract has, else (see
+place_clipped for the checks against twin border towns) a GeoNames populated place
 of the same name (or, for "X County", the place X in the GeoNames second-
 level division "X County") within a few km of the members the extract
 does have. The GeoNames table is the one `reverse_geocoder` ships (cities
@@ -42,6 +45,7 @@ import shutil
 import subprocess
 import tempfile
 import unicodedata
+from array import array
 from collections.abc import Iterable, Sequence
 from typing import Any
 
@@ -59,10 +63,23 @@ MAX_CLIPPED_SKIP_LEVEL = 4
 GEONAMES_MAX_KM = {5: 40.0, 6: 40.0, 7: 25.0}
 GEONAMES_DEFAULT_MAX_KM = 12.0
 MAX_ALT_NAMES = 6
-# Areas up to this level keep a thinned polygon, to find the region
-# (`location`) and the country of the areas inside them.
+# The region (`location`) of an area is the deepest enclosing area up to
+# this level.
 MAX_PARENT_LEVEL = 6
+# Every polygon is kept thinned to this many vertices per ring, as flat
+# float arrays, for the region lookup and to check GeoNames placements.
+THIN_VERTICES = 256
+# Margin (degrees) around the build box when cutting the admin relations
+# out of a larger extract (osmium extract -s smart completes them anyway).
+EXTRACT_MARGIN_DEG = 0.5
+# ... when the filtered boundaries are at least this big (a country's are
+# a few MB; the planet's are GBs).
+EXTRACT_MIN_BYTES = 16 * 1024 * 1024
 COORD_DP = 5
+# boundary=place relations kept, and the admin_level they rank as: OSM
+# maps the City of Washington as one, coterminous with the District.
+PLACE_BOUNDARY_LEVELS = {"city": 8, "town": 8, "borough": 9, "village": 9,
+                         "suburb": 10}
 
 # The type label, by country and admin_level (English; after the OSM wiki's
 # admin_level table). A `border_type` on the relation wins; a `place` tag is
@@ -109,7 +126,7 @@ TAG_LABELS = {
     "department": "department", "arrondissement": "arrondissement",
     "canton": "canton", "commune": "commune", "parish": "parish",
     "township": "township", "prefecture": "prefecture",
-    "civil_parish": "parish", "city_county": "city",
+    "civil_parish": "parish", "city_county": "city", "suburb": "suburb",
 }
 
 
@@ -142,6 +159,8 @@ def type_label(tags: dict[str, str], level: int, cc: str | None) -> str:
     generic label. The convention comes before `place`, which says what
     the settlement is rather than the unit: Luxembourg's cantons carry
     place=county, Washington's wards place=borough."""
+    if tags.get("boundary") == "place":
+        return TAG_LABELS.get((tags.get("place") or "").strip().lower(), "place")
     bt = (tags.get("border_type") or "").strip().lower()
     if bt in TAG_LABELS:
         return TAG_LABELS[bt]
@@ -263,18 +282,81 @@ def representative_point(outers: Sequence[Sequence[Point]],
     return big[0]
 
 
-def _thin(ring: Sequence[Point], most: int = 1000) -> Ring:
+def _thin(ring: Sequence[Point], most: int = THIN_VERTICES) -> array:
+    """A ring thinned to at most `most` vertices, as a flat array
+    x0, y0, x1, y1, ... (16 bytes a vertex)."""
     step = max(1, math.ceil(len(ring) / most))
-    return list(ring[::step])
+    out = array("d")
+    for x, y in ring[::step]:
+        out.append(x)
+        out.append(y)
+    return out
+
+
+def point_in_flat(rings: Iterable[array], x: float, y: float) -> bool:
+    """point_in_rings over _thin's flat rings."""
+    inside = False
+    for r in rings:
+        n = len(r) // 2
+        j = n - 1
+        for i in range(n):
+            xi, yi, xj, yj = r[2 * i], r[2 * i + 1], r[2 * j], r[2 * j + 1]
+            if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+                inside = not inside
+            j = i
+    return inside
 
 
 def bbox_of(rings: Iterable[Sequence[Point]]) -> BBox:
+    """The box of the rings. One spanning over 180 degrees of longitude is
+    tried the other way round the globe: an area across the antimeridian
+    (Chukotka, Fiji) gets west in [-180, 180) and east past 180, the
+    unwrapped form streetzim/area.py uses (and the viewer accepts)."""
     xs: list[float] = []
     ys: list[float] = []
     for r in rings:
         xs += [p[0] for p in r]
         ys += [p[1] for p in r]
-    return min(xs), min(ys), max(xs), max(ys)
+    w, e = min(xs), max(xs)
+    if e - w > 180:
+        shifted = [x + 360 if x < 0 else x for x in xs]
+        w2, e2 = min(shifted), max(shifted)
+        if e2 - w2 < e - w:
+            w, e = w2, e2
+    return w, min(ys), e, max(ys)
+
+
+class Grid:
+    """Areas by the grid cells their box covers, to find the polygons
+    around a point without scanning them all. Each area goes in a grid
+    whose cell (a power of two degrees, 1/64 to 64) is at least a quarter
+    of its box, so it covers a handful of cells whatever its size, and a
+    cell holds few small areas (a 1-degree grid put ~2,500 municipalities
+    in each cell of a dense country)."""
+
+    def __init__(self, areas: Iterable[dict[str, Any]]):
+        self.cells: dict[tuple[float, int, int], list[dict[str, Any]]] = {}
+        self.sizes: set[float] = set()
+        for a in areas:
+            w, s, e, n = a["bbox"]
+            deg = 1 / 64
+            while deg < 64 and deg * 4 < max(e - w, n - s):
+                deg *= 2
+            self.sizes.add(deg)
+            for cx in range(math.floor(w / deg), math.floor(e / deg) + 1):
+                for cy in range(math.floor(s / deg), math.floor(n / deg) + 1):
+                    self.cells.setdefault((deg, cx, cy), []).append(a)
+
+    def holding(self, x: float, y: float) -> list[dict[str, Any]]:
+        """The areas whose polygon holds (x, y)."""
+        out: list[dict[str, Any]] = []
+        for deg in self.sizes:
+            for px in (x, x + 360.0):     # a box past 180 holds x + 360
+                for a in self.cells.get((deg, math.floor(px / deg), math.floor(y / deg)), ()):
+                    w, s, e, n = a["bbox"]
+                    if w <= px <= e and s <= y <= n and point_in_flat(a["rings"], x, y):
+                        out.append(a)
+        return out
 
 
 def fit_zoom(bb: Sequence[float], width: int = 1024, height: int = 768) -> float:
@@ -312,6 +394,38 @@ def _fold(s: str) -> str:
     return "".join(c for c in s if not unicodedata.combining(c)).casefold().strip()
 
 
+# GeoNames' admin1 names for the US state codes of ISO3166-2 / is_in tags.
+US_STATES = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+    "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+    "DC": "Washington, D.C.", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii",
+    "ID": "Idaho", "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas",
+    "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+    "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi",
+    "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+    "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York",
+    "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma",
+    "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+    "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+    "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+    "WI": "Wisconsin", "WY": "Wyoming",
+}
+
+
+def expected_region(tags: dict[str, str]) -> tuple[str | None, str | None]:
+    """(country code, GeoNames admin1 name) an area's own tags state:
+    ISO3166-2 ("US-VA"), is_in:state / is_in:state_code, is_in:country_code."""
+    cc = country_of(tags) or ((tags.get("is_in:country_code") or "").strip().upper() or None)
+    state = (tags.get("is_in:state") or "").strip() or None
+    code = (tags.get("is_in:state_code") or "").strip().upper()
+    iso2 = (tags.get("ISO3166-2") or "").strip().upper()
+    if not code and iso2.startswith("US-"):
+        code = iso2[3:]
+    if not state and code and (cc in (None, "US")) and code in US_STATES:
+        state, cc = US_STATES[code], "US"
+    return cc, state
+
+
 class GeoNamesPlaces:
     """reverse_geocoder's rg_cities1000.csv (GeoNames, CC BY 4.0), indexed
     by folded place name and by folded second-level division name."""
@@ -342,24 +456,56 @@ class GeoNamesPlaces:
         with open(path, encoding="utf-8", newline="") as f:
             return cls(csv.DictReader(f))
 
-    def locate(self, name: str, near: Sequence[float], max_km: float) -> dict[str, Any] | None:
-        """The place standing for area `name`, nearest to box `near`
-        (the members the extract has) and within max_km of it: a place of
-        that name, or place X of division "X <word>" ("Arlington" in
+    def candidates(self, name: str, near: Sequence[float], max_km: float) -> list[dict[str, Any]]:
+        """The places that could stand for area `name`, nearest first,
+        within max_km of box `near` (the members the extract has): a place
+        of that name, or place X of division "X <word>" ("Arlington" in
         "Arlington County")."""
         key = _fold(name)
         cands = list(self.by_name.get(key, []))
         for r in self.by_admin2.get(key, []):
             core = _fold(r["name"])
-            if key.startswith(core + " ") or key.endswith(" " + core):
+            if (key.startswith(core + " ") or key.endswith(" " + core)) and r not in cands:
                 cands.append(r)
-        best: dict[str, Any] | None = None
-        best_d = max_km
-        for r in cands:
-            d = _km_to_box(r["pt"], near)
-            if d <= best_d:
-                best, best_d = r, d
-        return best
+        scored = [(_km_to_box(r["pt"], near), r) for r in cands]
+        return [r for d, r in sorted(scored, key=lambda t: t[0]) if d <= max_km]
+
+    def locate(self, name: str, near: Sequence[float], max_km: float) -> dict[str, Any] | None:
+        """The nearest of candidates(), or None."""
+        c = self.candidates(name, near, max_km)
+        return c[0] if c else None
+
+
+def place_clipped(gn: GeoNamesPlaces, tags: dict[str, str], level: int,
+                  near: Sequence[float], grid: Grid | None,
+                  stats: dict[str, int] | None = None) -> dict[str, Any] | None:
+    """The GeoNames place standing for a clipped area, or None. A miss is
+    better than a wrong pin, so (twin border towns: Bristol TN/VA,
+    Texarkana, Delmar) a candidate is dropped when:
+    - the area's tags name a country or state (ISO3166-2, is_in:*) it is not in;
+    - it lies inside a polygon the extract has, of the same or a lower
+      admin_level (that polygon is another area: Bristol TN for Bristol VA);
+    and the area is left out when the candidates left are in more than one
+    GeoNames region."""
+    max_km = GEONAMES_MAX_KM.get(level, GEONAMES_DEFAULT_MAX_KM)
+    want_cc, want_state = expected_region(tags)
+    for nm in dict.fromkeys(filter(None, (tags.get("name"), tags.get("name:en")))):
+        cands = gn.candidates(nm, near, max_km)
+        if want_cc:
+            cands = [c for c in cands if (c["cc"] or "").upper() == want_cc]
+        if want_state:
+            cands = [c for c in cands if _fold(c["admin1"]) == _fold(want_state)]
+        if grid is not None:
+            cands = [c for c in cands
+                     if not any(a["level"] <= level for a in grid.holding(*c["pt"]))]
+        if not cands:
+            continue
+        if len({(c["cc"], c["admin1"]) for c in cands}) > 1:
+            if stats is not None:
+                stats["geonames ambiguous"] = stats.get("geonames ambiguous", 0) + 1
+            return None
+        return cands[0]
+    return None
 
 
 # ------------------------------------------------------------- reading
@@ -369,17 +515,25 @@ def _osmium() -> Any:
     return osmium
 
 
+def _relation_level(tags: dict[str, str]) -> int | None:
+    """The admin_level an admin or place boundary ranks as, else None."""
+    b = tags.get("boundary")
+    if b == "administrative":
+        return admin_level(tags.get("admin_level"))
+    if b == "place":
+        return PLACE_BOUNDARY_LEVELS.get((tags.get("place") or "").strip().lower())
+    return None
+
+
 def _collect_relations(path: str) -> dict[int, dict[str, Any]]:
-    """Pass 1: the admin relations, their tags and interesting members."""
+    """Pass 1: the admin (and place) relations, their tags and members."""
     osmium = _osmium()
     rels: dict[int, dict[str, Any]] = {}
 
     class H(osmium.SimpleHandler):
         def relation(self, r: Any) -> None:
             tags = {t.k: t.v for t in r.tags}
-            if tags.get("boundary") != "administrative":
-                return
-            lvl = admin_level(tags.get("admin_level"))
+            lvl = _relation_level(tags)
             if lvl is None or not (tags.get("name") or tags.get("name:en")):
                 return
             label = centre = None
@@ -400,9 +554,9 @@ def _collect_relations(path: str) -> dict[int, dict[str, Any]]:
 
 def _collect_geometry(path: str, rels: dict[int, dict[str, Any]]) -> tuple[
         dict[str, dict[str, Any]], dict[int, Point], dict[int, list[float]]]:
-    """Pass 2: assembled areas (summarized as they come, so no polygon is
-    kept), the label/admin_centre node locations, and for each relation the
-    box of the member ways the file has."""
+    """Pass 2: assembled areas (summarized as they come; each keeps only
+    a thinned copy of its rings), the label/admin_centre node locations,
+    and for each relation the box of the member ways the file has."""
     osmium = _osmium()
     want_nodes = {v for r in rels.values() for v in (r["label"], r["centre"]) if v}
     way_owner: dict[int, list[int]] = {}
@@ -424,12 +578,9 @@ def _collect_geometry(path: str, rels: dict[int, dict[str, Any]]) -> tuple[
         outers = [r for r in outers if len(r) >= 3]
         if not outers:
             return
-        bb = bbox_of(outers)
-        areas[key] = {"tags": tags, "level": lvl, "bbox": bb,
-                      "pt": representative_point(outers, inners, hints)}
-        if lvl <= MAX_PARENT_LEVEL:
-            # Kept, thinned, to name the region an area lies in.
-            areas[key]["rings"] = [_thin(r) for r in outers + inners]
+        areas[key] = {"tags": tags, "level": lvl, "bbox": bbox_of(outers),
+                      "pt": representative_point(outers, inners, hints),
+                      "rings": [_thin(r) for r in outers + inners]}
 
     class H(osmium.SimpleHandler):
         def node(self, n: Any) -> None:
@@ -440,15 +591,21 @@ def _collect_geometry(path: str, rels: dict[int, dict[str, Any]]) -> tuple[
             owners = way_owner.get(w.id)
             if not owners:
                 return
-            pts = [(nd.lon, nd.lat) for nd in w.nodes if nd.location.valid()]
+            # The box of each member's ends: enough to say where the part
+            # the extract has lies, without reading every node in Python.
+            nds = w.nodes
+            if not len(nds):
+                return
+            pts = [(nd.lon, nd.lat) for nd in (nds[0], nds[len(nds) // 2], nds[len(nds) - 1])
+                   if nd.location.valid()]
             if not pts:
                 return
-            bb = bbox_of([pts])
+            xs = [p[0] for p in pts]
+            ys = [p[1] for p in pts]
             for rid in owners:
                 cur = present.get(rid)
-                present[rid] = list(bb) if cur is None else [
-                    min(cur[0], bb[0]), min(cur[1], bb[1]),
-                    max(cur[2], bb[2]), max(cur[3], bb[3])]
+                present[rid] = [min(xs), min(ys), max(xs), max(ys)] if cur is None else [
+                    min(cur[0], *xs), min(cur[1], *ys), max(cur[2], *xs), max(cur[3], *ys)]
 
         def area(self, a: Any) -> None:
             if a.from_way():
@@ -470,16 +627,29 @@ def _collect_geometry(path: str, rels: dict[int, dict[str, Any]]) -> tuple[
     return areas, nodes, present
 
 
-def _filtered_input(pbf_path: str, tmp: str) -> str:
-    """The admin relations with their members, cut out with the osmium
-    CLI when it is installed (fast, C++); else the file itself."""
-    if not shutil.which("osmium"):
-        return pbf_path
+def _filtered_input(pbf_path: str, tmp: str, bbox: Sequence[float] | None = None) -> str:
+    """The admin and place boundaries with their members, cut out with
+    the osmium CLI; then, for a build box, when that is big (a planet or
+    continent input), only those around the box: `osmium extract -s smart`
+    keeps each relation with a member in the box plus a margin and
+    completes it, so what Python reads stays small. Not for a country:
+    extract's ID sets take ~3.8 GB whatever the input, and Belgium's
+    boundaries are 6 MB, read in ~13 s."""
     out = os.path.join(tmp, "admin.osm.pbf")
     subprocess.run(["osmium", "tags-filter", pbf_path,
-                    "wr/boundary=administrative", "-o", out, "--overwrite",
-                    "--no-progress"], check=True)
-    return out
+                    "wr/boundary=administrative", "r/boundary=place",
+                    "-o", out, "--overwrite", "--no-progress"], check=True)
+    if bbox is None or os.path.getsize(out) < EXTRACT_MIN_BYTES:
+        return out
+    m = EXTRACT_MARGIN_DEG
+    w, s, e, n = _area.normalize(bbox)
+    box = _area.normalize([w - m, max(-90.0, s - m), min(e + m, w - m + 360.0),
+                           min(90.0, n + m)])
+    cut = os.path.join(tmp, "admin-box.osm.pbf")
+    subprocess.run(["osmium", "extract", *_area.osmium_extract_args(box, tmp),
+                    "-s", "smart", "-S", "types=boundary,multipolygon",
+                    out, "-o", cut, "--overwrite", "--no-progress"], check=True)
+    return cut
 
 
 def _rg_lookup(points: list[Point]) -> list[dict[str, str]]:
@@ -500,14 +670,18 @@ def extract_admin_areas(pbf_path: str, bbox: Sequence[float] | None = None, *,
     """Admin areas of `pbf_path` whose representative point is in `bbox`
     (any when None), as search features (docs/search-records.md, `admin`).
     `geonames`: True loads reverse_geocoder's table when a clipped area
-    needs it, False never uses it, or pass a GeoNamesPlaces."""
+    needs it, False never uses it, or pass a GeoNamesPlaces. Needs the
+    osmium CLI (as the address extraction does)."""
     tmp = tempfile.mkdtemp(prefix="streetzim_admin_")
     try:
-        src = _filtered_input(pbf_path, tmp)
+        src = _filtered_input(pbf_path, tmp, bbox)
         rels = _collect_relations(src)
         areas, nodes, present = _collect_geometry(src, rels)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+    grid = Grid(areas.values())
+    if stats is None:
+        stats = {}
 
     found: list[dict[str, Any]] = []
     for key, a in areas.items():
@@ -518,22 +692,22 @@ def extract_admin_areas(pbf_path: str, bbox: Sequence[float] | None = None, *,
     for rid, r in rels.items():
         if f"r{rid}" in areas or r["level"] <= MAX_CLIPPED_SKIP_LEVEL:
             continue
-        # Clipped by the extract: no polygon, so no box either.
+        # Clipped by the extract: no polygon, so no box either. Its label
+        # node stands for it; its admin_centre only inside the members the
+        # extract has (a capital can lie far from the part in the box).
+        box = present.get(rid)
         pt = nodes.get(r["label"]) if r["label"] else None
         how = "label"
-        if pt is None and r["centre"]:
-            pt, how = nodes.get(r["centre"]), "admin_centre"
+        centre = nodes.get(r["centre"]) if r["centre"] else None
+        if pt is None and centre is not None and box is not None and \
+                box[0] <= centre[0] <= box[2] and box[1] <= centre[1] <= box[3]:
+            pt, how = centre, "admin_centre"
         hit = None
-        if rid in present:
+        if box is not None:
             if not gn_tried:
                 gn, gn_tried = GeoNamesPlaces.load(), True
             if gn is not None:
-                max_km = GEONAMES_MAX_KM.get(r["level"], GEONAMES_DEFAULT_MAX_KM)
-                for nm in dict.fromkeys(filter(None, (r["tags"].get("name"),
-                                                      r["tags"].get("name:en")))):
-                    hit = gn.locate(nm, present[rid], max_km)
-                    if hit:
-                        break
+                hit = place_clipped(gn, r["tags"], r["level"], box, grid, stats)
         if pt is None and hit:
             pt, how = hit["pt"], "geonames"
         if pt is None:
@@ -542,7 +716,7 @@ def extract_admin_areas(pbf_path: str, bbox: Sequence[float] | None = None, *,
         found.append({"key": f"r{rid}", "tags": r["tags"], "level": r["level"],
                       "pt": pt, "bbox": None, "how": how,
                       "admin1": hit["admin1"] if hit else "",
-                      "cc": hit["cc"] if hit else ""})
+                      "cc": hit["cc"] if hit else "", "gn": bool(hit)})
 
     if bbox is not None:
         found = [f for f in found if _area.contains(bbox, f["pt"][0], f["pt"][1])]
@@ -550,17 +724,13 @@ def extract_admin_areas(pbf_path: str, bbox: Sequence[float] | None = None, *,
     # Region and country: the areas (level <= MAX_PARENT_LEVEL) whose
     # polygon holds the point, else the GeoNames place above, else the
     # nearest GeoNames place (reverse_geocoder).
-    holders = [a for a in areas.values() if "rings" in a]
     for f in found:
-        x, y = f["pt"]
         f["parents"] = sorted(
-            (a for a in holders if a["level"] < f["level"]
-             and a["bbox"][0] <= x <= a["bbox"][2] and a["bbox"][1] <= y <= a["bbox"][3]
-             and point_in_rings(a["rings"], x, y)),
+            (a for a in grid.holding(*f["pt"]) if a["level"] < f["level"]),
             key=lambda a: -a["level"])
     lookup = [f for f in found if not f["parents"] and not f.get("admin1")]
     for f, g in zip(lookup, _rg_lookup([f["pt"] for f in lookup])):
-        f["admin1"], f["cc"] = g.get("admin1", ""), g.get("cc", "")
+        f["admin1"], f["cc"], f["gn"] = g.get("admin1", ""), g.get("cc", ""), bool(g)
     feats: list[dict[str, Any]] = []
     for f in found:
         tags = f["tags"]
@@ -571,12 +741,14 @@ def extract_admin_areas(pbf_path: str, bbox: Sequence[float] | None = None, *,
         for pa in parents:
             cc = cc or country_of(pa["tags"])
         cc = cc or (f.get("cc") or "").upper() or None
+        region = [pa for pa in parents if pa["level"] <= MAX_PARENT_LEVEL]
+        gn_region = False
         if lvl <= 2:
             loc = ""
-        elif parents:
-            loc = names(parents[0]["tags"])[0]
+        elif region:
+            loc = names(region[0]["tags"])[0]
         elif lvl > MAX_CLIPPED_SKIP_LEVEL and f.get("admin1") and _fold(f["admin1"]) != _fold(name):
-            loc = f["admin1"]
+            loc, gn_region = f["admin1"], bool(f.get("gn"))
         else:
             loc = _country_name(cc)
         feat: dict[str, Any] = {
@@ -592,33 +764,39 @@ def extract_admin_areas(pbf_path: str, bbox: Sequence[float] | None = None, *,
             feat["wikidata"] = tags["wikidata"]
         if tags.get("wikipedia"):
             feat["wikipedia"] = tags["wikipedia"]
+        if gn_region or f["how"] == "geonames":
+            # For the GeoNames credit on the Kiwix page.
+            feat["geonames"] = True
         feats.append(feat)
     feats = dedupe(feats)
-    if stats is not None:
-        stats["relations"] = len(rels)
-        for f in found:
-            stats[f["how"]] = stats.get(f["how"], 0) + 1
+    stats["relations"] = len(rels)
+    for f in found:
+        stats[f["how"]] = stats.get(f["how"], 0) + 1
     return feats
 
 
 def dedupe(feats: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """One record per (name, box): the same area mapped at two levels
     (Monaco the country and Monaco the municipality) keeps the lower
-    level. Boxes match when every edge is within 1% of the larger span."""
+    level. Boxes match when every edge is within 1% of the larger span.
+    Names are folded once and only records of one name are compared."""
+    by_name: dict[str, list[Sequence[float]]] = {}
     out: list[dict[str, Any]] = []
     for f in sorted(feats, key=lambda f: (f["admin_level"], f["osm"])):
         bb = f.get("bbox")
+        same = by_name.setdefault(_fold(f["name"]), [])
         dup = False
-        for g in out:
-            gb = g.get("bbox")
-            if _fold(g["name"]) != _fold(f["name"]) or not bb or not gb:
-                continue
-            tol = 0.01 * max(bb[2] - bb[0], bb[3] - bb[1], gb[2] - gb[0], gb[3] - gb[1])
-            if all(abs(x - y) <= tol for x, y in zip(bb, gb)):
-                dup = True
-                break
-        if not dup:
-            out.append(f)
+        if bb:
+            for gb in same:
+                tol = 0.01 * max(bb[2] - bb[0], bb[3] - bb[1], gb[2] - gb[0], gb[3] - gb[1])
+                if all(abs(x - y) <= tol for x, y in zip(bb, gb)):
+                    dup = True
+                    break
+        if dup:
+            continue
+        if bb:
+            same.append(bb)
+        out.append(f)
     return out
 
 
@@ -636,18 +814,46 @@ def _country_name(cc: str | None) -> str:
     return _COUNTRY_NAMES.get((cc or "").upper(), (cc or "").upper())
 
 
+def _admin_ids_in(search_jsonl: str) -> set[str]:
+    """The `osm` ids of the admin records already in a search JSONL (a
+    search cache from an earlier build may carry them)."""
+    ids: set[str] = set()
+    with open(search_jsonl, encoding="utf-8") as f:
+        for line in f:
+            if '"admin"' not in line:
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if rec.get("type") == "admin" and rec.get("osm"):
+                ids.add(rec["osm"])
+    return ids
+
+
 def append_admin_areas(pbf_path: str, search_jsonl: str,
                        bbox: Sequence[float] | None = None) -> int:
-    """Append the admin areas to a search-feature JSONL; returns the
-    count. Needs pyosmium; prints what it found."""
+    """Append the admin areas to a search-feature JSONL, skipping any
+    already in it; returns the count added. Skipped, with a message, when
+    the osmium CLI is not installed."""
     from streetzim.common import print  # the builder's flushing print
     print("  Extracting administrative areas from OSM data...")
+    if not shutil.which("osmium"):
+        print("    Skipping: osmium CLI not found on PATH")
+        return 0
     stats: dict[str, int] = {}
     feats = extract_admin_areas(pbf_path, bbox, stats=stats)
+    have = _admin_ids_in(search_jsonl) if os.path.getsize(search_jsonl) else set()
+    added = 0
     with open(search_jsonl, "a", encoding="utf-8") as f:
         for feat in feats:
+            if feat["osm"] in have:
+                continue
             f.write(json.dumps(feat, ensure_ascii=False) + "\n")
+            added += 1
     how = ", ".join(f"{k} {v}" for k, v in sorted(stats.items()) if k != "relations")
-    print(f"    {len(feats)} administrative areas in the box "
-          f"({stats.get('relations', 0)} admin relations read; points from: {how or 'none'})")
-    return len(feats)
+    print(f"    {added} administrative areas in the box"
+          + (f" ({len(feats) - added} already in the search cache)" if added < len(feats) else "")
+          + f" ({stats.get('relations', 0)} admin relations read; points from: {how or 'none'})")
+    stats["added"] = added
+    return added

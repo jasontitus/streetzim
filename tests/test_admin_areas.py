@@ -107,6 +107,23 @@ def extract(tmp_path):
     o.rel(10, [("w", 10, "outer")], {"name": "Testland", "admin_level": "8"})
     o.way(11, square(0.5, 0.5, 0.6, 0.6))
     o.rel(11, [("w", 11, "outer")], {"name": "School Zone", "admin_level": "11"})
+    # boundary=place: a city is kept (ranked as level 8), a hamlet is not.
+    o.way(12, square(2.0, 0.5, 2.5, 1.0))
+    o.rels.append((12, [("w", 12, "outer")], {"type": "boundary", "boundary": "place",
+                                              "place": "city", "name": "Placeville"}))
+    o.way(13, square(2.6, 0.5, 2.7, 0.6))
+    o.rels.append((13, [("w", 13, "outer")], {"type": "boundary", "boundary": "place",
+                                              "place": "hamlet", "name": "Tiny"}))
+    # Clipped, with an admin_centre: kept only when the node lies in the box
+    # of the members the extract has.
+    o.way(140, [(0.1, 3.4), (0.3, 3.6)], closed=False)
+    c1 = o.node(0.2, 3.5, nid=103)
+    o.rel(14, [("w", 140, "outer"), ("w", 141, "outer"), ("n", c1, "admin_centre")],
+          {"name": "Centre Town", "admin_level": "8"})
+    o.way(150, [(0.1, 1.4), (0.3, 1.6)], closed=False)
+    c2 = o.node(1.5, 1.5, nid=104)
+    o.rel(15, [("w", 150, "outer"), ("w", 151, "outer"), ("n", c2, "admin_centre")],
+          {"name": "Far Centre", "admin_level": "8"})
     return o.write(tmp_path / "x.osm")
 
 
@@ -125,20 +142,22 @@ def no_rg(monkeypatch):
                                                      for _ in pts])
 
 
-@pytest.mark.parametrize("cli", [True, False])
-def test_extract(extract, no_rg, monkeypatch, cli):
-    if cli:
-        if not A.shutil.which("osmium"):
-            pytest.skip("osmium CLI not installed")
-    else:
-        monkeypatch.setattr(A.shutil, "which", lambda name: None)
+needs_osmium = pytest.mark.skipif(not A.shutil.which("osmium"),
+                                  reason="osmium CLI not installed")
+
+
+@needs_osmium
+def test_extract(extract, no_rg):
     pytest.importorskip("osmium")
     stats = {}
     feats = {f["name"]: f for f in A.extract_admin_areas(extract, geonames=GEONAMES,
                                                          stats=stats)}
-    assert sorted(feats) == ["Arlington County", "Clip Town", "North State",
-                             "Testland", "Upper County", "Ward 1", "Way Town"]
-    assert stats["polygon"] == 6 and stats["label"] == 1 and stats["geonames"] == 1
+    assert sorted(feats) == ["Arlington County", "Centre Town", "Clip Town", "North State",
+                             "Placeville", "Testland", "Upper County", "Ward 1", "Way Town"]
+    assert stats["polygon"] == 7 and stats["label"] == 1 and stats["geonames"] == 1
+    assert stats["admin_centre"] == 1
+    assert feats["Placeville"]["subtype"] == "city" and feats["Placeville"]["admin_level"] == 8
+    assert (feats["Centre Town"]["lon"], feats["Centre Town"]["lat"]) == (0.2, 3.5)
 
     land = feats["Testland"]
     assert land["admin_level"] == 2 and land["subtype"] == "country"
@@ -168,34 +187,54 @@ def test_extract(extract, no_rg, monkeypatch, cli):
     assert (arl["lon"], arl["lat"]) == (5.1, 1.2) and "bbox" not in arl
     assert arl["location"] == "Virginia" and arl["subtype"] == "county"
     assert arl["osm"] == "r6" and arl["wikidata"] == "Q107126"
+    assert arl["geonames"] is True and "geonames" not in ward
 
     assert feats["Way Town"]["osm"] == "w9"
     assert feats["Way Town"]["bbox"] == [3.1, 0.1, 3.3, 0.3]
 
 
-def test_bbox_keeps_areas_whose_point_is_inside(extract, no_rg):
+@needs_osmium
+@pytest.mark.parametrize("cut", [False, True])
+def test_bbox_keeps_areas_whose_point_is_inside(extract, no_rg, monkeypatch, cut):
+    """`cut`: the boundaries cut to the box with osmium extract first, as
+    for a planet or continent input."""
     pytest.importorskip("osmium")
+    if cut:
+        monkeypatch.setattr(A, "EXTRACT_MIN_BYTES", 0)
     names = {f["name"] for f in A.extract_admin_areas(
         extract, (-1, -1, 4.5, 5), geonames=GEONAMES)}
     assert "Arlington County" not in names       # its point is at lon 5.1
     assert "Testland" in names and "Ward 1" in names
 
 
+@needs_osmium
 def test_clipped_areas_need_geonames_or_a_node(extract, no_rg):
     pytest.importorskip("osmium")
     names = {f["name"] for f in A.extract_admin_areas(extract, geonames=False)}
     assert "Arlington County" not in names and "Clip Town" in names
 
 
+@needs_osmium
 def test_append_admin_areas(extract, no_rg, tmp_path, monkeypatch):
     pytest.importorskip("osmium")
     monkeypatch.setattr(A.GeoNamesPlaces, "load", classmethod(lambda cls: GEONAMES))
     out = tmp_path / "search.jsonl"
     out.write_text('{"name": "Cafe", "type": "poi", "lat": 1, "lon": 1}\n')
-    assert A.append_admin_areas(extract, str(out)) == 7
+    assert A.append_admin_areas(extract, str(out)) == 9
     lines = [json.loads(line) for line in out.read_text().splitlines()]
-    assert lines[0]["name"] == "Cafe" and len(lines) == 8
+    assert lines[0]["name"] == "Cafe" and len(lines) == 10
     assert all(f["type"] == "admin" for f in lines[1:])
+    # A search cache that already has them (reused with --search-cache).
+    assert A.append_admin_areas(extract, str(out)) == 0
+    assert len(out.read_text().splitlines()) == 10
+
+
+def test_append_skips_without_osmium(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(A.shutil, "which", lambda name: None)
+    out = tmp_path / "search.jsonl"
+    out.write_text("")
+    assert A.append_admin_areas("/nonexistent.pbf", str(out)) == 0
+    assert "osmium CLI not found" in capsys.readouterr().out
 
 
 def test_names():
@@ -255,6 +294,80 @@ def test_fit_zoom():
     assert A.fit_zoom((7.0, 43.0, 7.0, 43.0)) == 16.0
 
 
+def test_dedupe_is_not_quadratic():
+    import time
+    feats = [{"name": f"Area {i % 20000}", "admin_level": 8, "osm": f"r{i}",
+              "bbox": [i, 0, i + 1, 1]} for i in range(40000)]
+    t = time.time()
+    assert len(A.dedupe(feats)) == 40000
+    assert time.time() - t < 2
+
+
+def test_bbox_across_the_antimeridian():
+    ring = [(179.0, 0.0), (-179.0, 0.0), (-179.0, 1.0), (179.0, 1.0)]
+    assert A.bbox_of([ring]) == (179.0, 0.0, 181.0, 1.0)
+    assert A.bbox_of([square(0, 0, 1, 1)]) == (0, 0, 1, 1)
+
+
+def test_grid():
+    rings = [A._thin(square(0, 0, 2, 2))]
+    a = {"bbox": (0, 0, 2, 2), "rings": rings, "level": 4}
+    b = {"bbox": (179.0, 0, 181.0, 1), "level": 6,
+         "rings": [A._thin([(179.0, 0.0), (180.0, 0.0), (180.0, 1.0), (179.0, 1.0)])]}
+    g = A.Grid([a, b])
+    assert g.holding(1, 1) == [a] and g.holding(3, 1) == []
+    assert g.holding(179.5, 0.5) == [b]
+
+
+# Bristol, Tennessee and Bristol, Virginia: twin towns across a state line.
+BRISTOLS = A.GeoNamesPlaces([
+    {"name": "Bristol", "admin1": "Tennessee", "admin2": "Sullivan County", "cc": "US",
+     "lat": "1.7", "lon": "3.25"},
+    {"name": "Bristol", "admin1": "Virginia", "admin2": "City of Bristol", "cc": "US",
+     "lat": "2.1", "lon": "3.3"},
+])
+BORDER = (3.2, 1.9, 3.6, 1.95)      # the members of Bristol VA a TN extract has
+BRISTOL_VA = {"name": "Bristol", "admin_level": "6", "border_type": "city"}
+
+
+def test_twin_towns_without_polygons_are_left_out():
+    stats = {}
+    assert A.place_clipped(BRISTOLS, BRISTOL_VA, 6, BORDER, None, stats) is None
+    assert stats["geonames ambiguous"] == 1
+
+
+@pytest.mark.parametrize("tags,state", [
+    ({"ISO3166-2": "US-VA"}, "Virginia"),
+    ({"is_in:state": "Tennessee"}, "Tennessee"),
+    ({"is_in:state_code": "VA"}, "Virginia"),
+])
+def test_twin_towns_by_their_tags(tags, state):
+    hit = A.place_clipped(BRISTOLS, dict(BRISTOL_VA, **tags), 6, BORDER, None)
+    assert hit["admin1"] == state
+
+
+@needs_osmium
+def test_bristol_va_in_a_tennessee_extract(tmp_path, no_rg):
+    """The TN extract has Sullivan County and Bristol TN whole, Bristol VA
+    clipped: GeoNames' Bristol TN lies in Sullivan County (level 6, as
+    Bristol VA), so only Bristol VA's own place stands for it."""
+    pytest.importorskip("osmium")
+    o = Osm()
+    o.way(1, square(0, 0, 4, 1.9))
+    o.rel(1, [("w", 1, "outer")], {"name": "Tennessee", "admin_level": "4",
+                                   "ISO3166-2": "US-TN"})
+    o.way(2, square(2, 0, 4, 1.85))
+    o.rel(2, [("w", 2, "outer")], {"name": "Sullivan County", "admin_level": "6"})
+    o.way(3, square(3.1, 1.6, 3.4, 1.8))
+    o.rel(3, [("w", 3, "outer")], {"name": "Bristol", "admin_level": "8"})
+    o.way(40, [(3.2, 1.9), (3.6, 1.95)], closed=False)
+    o.rel(4, [("w", 40, "outer"), ("w", 41, "outer")], dict(BRISTOL_VA))
+    feats = A.extract_admin_areas(o.write(tmp_path / "tn.osm"), geonames=BRISTOLS)
+    va = [f for f in feats if f["osm"] == "r4"]
+    assert len(va) == 1 and (va[0]["lon"], va[0]["lat"]) == (3.3, 2.1)
+    assert va[0]["location"] == "Virginia"
+
+
 def test_dedupe_keeps_the_lower_level():
     a = {"name": "Monaco", "admin_level": 8, "osm": "r2", "bbox": [0, 0, 1, 1]}
     b = {"name": "Monaco", "admin_level": 2, "osm": "r1", "bbox": [0, 0, 1, 1.005]}
@@ -269,3 +382,29 @@ def test_geonames_locate():
     assert GEONAMES.locate("Arlington", near, 40)["name"] == "Arlington"
     # "County of X" or a different division does not stand in.
     assert GEONAMES.locate("Arlington Heights", near, 40) is None
+
+
+@needs_osmium
+def test_the_box_cut_keeps_whole_relations(tmp_path, no_rg, monkeypatch):
+    """The cut keeps a relation with a member (a boundary node, its label or
+    admin_centre) in the box plus the margin, and completes it; one with
+    none there is dropped before Python reads it (documented: an area
+    around the whole box with no member near it)."""
+    pytest.importorskip("osmium")
+    monkeypatch.setattr(A, "EXTRACT_MIN_BYTES", 0)
+    o = Osm()
+    o.way(1, square(0, 0, 10, 10))
+    lab = o.node(5, 5, nid=100)
+    o.rel(1, [("w", 1, "outer"), ("n", lab, "label")], {"name": "Big", "admin_level": "4"})
+    o.way(2, square(0, 0, 10, 10.5))
+    o.rel(2, [("w", 2, "outer")], {"name": "Unlabelled", "admin_level": "2"})
+    o.way(3, square(20, 20, 21, 21))
+    o.rel(3, [("w", 3, "outer")], {"name": "Far", "admin_level": "8"})
+    o.way(4, square(6.2, 4, 8, 6))
+    o.rel(4, [("w", 4, "outer")], {"name": "Near", "admin_level": "8"})
+    stats = {}
+    feats = A.extract_admin_areas(o.write(tmp_path / "x.osm"), (4, 4, 7.5, 6),
+                                  geonames=False, stats=stats)
+    assert sorted(f["name"] for f in feats) == ["Big", "Near"]
+    assert [f["bbox"] for f in feats if f["name"] == "Big"] == [[0, 0, 10, 10]]
+    assert stats["relations"] == 2
