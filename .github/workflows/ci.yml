@@ -30,8 +30,10 @@ on:
 permissions:
   contents: read
 
+# Per event as well as ref: the weekly run and a manual run on main must not
+# cancel a push's run (its image is published after it passes).
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -494,8 +496,8 @@ jobs:
         run: |
           # The pinned font glyphs are baked in: re-checking them needs no network.
           docker run --rm --network none streetzim python /app/tools/pin_viewer_assets.py --prefetch /app/viewer-assets
-          docker run --rm streetzim tilemaker --help | head -3
-          docker run --rm streetzim osmium --version | head -1
+          docker run --rm streetzim tilemaker --help > /dev/null
+          docker run --rm streetzim osmium --version
           docker run --rm streetzim python -c "import sys; from streetzim import scraperlib; assert scraperlib.AVAILABLE, 'zimscraperlib missing'; print(sys.version)"
           # Terrain's GDAL (from the rasterio wheel); the build below is offline.
           docker run --rm --network none streetzim python -c "import rasterio; print('GDAL', rasterio.__gdal_version__)"
