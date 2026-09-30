@@ -180,6 +180,7 @@ class AugmentTests(unittest.TestCase):
 
         def fake_bundle(titles, add, **kw):
             seen["titles"] = set(titles)
+            seen["redirect_only"] = set(kw.get("redirect_only") or ())
             return {"bundled": 0, "bytes": 0, "failed": 0, "stored_titles": set()}
         with mock.patch("cloud.wiki_articles.bundle_wiki_articles", fake_bundle):
             zw._add_wiki_articles(None, None, wiki_cross_refs=xref, bundle_wiki_articles=True,
@@ -187,6 +188,8 @@ class AugmentTests(unittest.TestCase):
                                   wiki_images="none", wiki_image_max_kb=0,
                                   wiki_images_per_article=0)
         self.assertEqual(seen["titles"], {"en:Utrecht", "nl:Ergens"})
+        # Only as a redirect to a bundled article (cloud/wiki_articles).
+        self.assertEqual(seen["redirect_only"], {"nl:Limmel"})
 
     def test_empty_and_none_are_safe(self):
         self.assertEqual(wt.augment_wiki_cross_refs(None)["entries_upgraded"], 0)

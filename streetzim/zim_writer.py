@@ -1642,10 +1642,14 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
     _bundled_set = None  # title_us actually stored — gates the geo-index
     _wa_stats = None
     if bundle_wiki_articles and wiki_cross_refs:
-        # Not a non-English tag whose item has no English article: its
-        # English namesake would be a different page.
+        # A non-English tag whose item has no English article (Wikidata
+        # says so) is bundled only when its English namesake is a redirect
+        # to an article bundled here (an editor's alias: "Aalten (dorp)" ->
+        # "Aalten"); a namesake article is a different page.
         _wa_titles = {e["wikipedia"] for e in wiki_cross_refs.values()
                       if e.get("wikipedia") and not e.get("wikipedia_no_en")}
+        _wa_redirect_only = {e["wikipedia"] for e in wiki_cross_refs.values()
+                             if e.get("wikipedia") and e.get("wikipedia_no_en")}
         if _wa_titles:
             from cloud.wiki_articles import bundle_wiki_articles as _bundle_wa
             _wa_t0 = time.time()
@@ -1658,6 +1662,7 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
                 images=wiki_images,
                 image_max_kb=wiki_image_max_kb,
                 max_images_per_article=wiki_images_per_article,
+                redirect_only=_wa_redirect_only,
             )
             _bundled_set = _wa_stats.get("stored_titles") or set()
             PHASE_TIMER.record_subphase(

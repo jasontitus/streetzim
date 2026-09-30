@@ -379,6 +379,28 @@ class _OfflineZim:
                 continue
         return None
 
+    def redirect_target(self, title_us: str) -> str | None:
+        """The underscored title a redirect points to (a chain followed to
+        its end); None when the title is an article or is not in the ZIM."""
+        ws = title_us.replace("_", " ")
+        for p in (f"A/{title_us}", title_us, f"A/{ws}", ws):
+            try:
+                e = self.a.get_entry_by_path(p)
+            except Exception:
+                continue
+            if not e.is_redirect:
+                return None
+            try:
+                for _ in range(5):
+                    e = e.get_redirect_entry()
+                    if not e.is_redirect:
+                        break
+            except Exception:
+                return None
+            path = e.path[2:] if e.path.startswith("A/") else e.path
+            return path.replace(" ", "_")
+        return None
+
 
 # Cache layout (cache_dir/<sha1 of the title>.*):
 #   .html, non-empty  the article HTML (a hit; never refetched)
@@ -388,6 +410,9 @@ class _OfflineZim:
 #                     so an empty .html says nothing: it is re-checked once
 #                     (at most STREETZIM_WIKI_RECHECK_MAX per build) and
 #                     replaced by a .html or a .miss.
+#   .redirect         for a title bundled only as a redirect: JSON {title,
+#                     to, checked}, `to` the article it redirects to, or
+#                     null (an article of its own, or no such page)
 # Only the API's own answers are cached. A rate limit, 5xx, timeout,
 # connection error or unexpected body raises TransientError and leaves the
 # cache alone.
@@ -411,6 +436,9 @@ _DEFAULT_RECHECK_MAX = 1000
 # after an answer over 1 s; docs/zimfarm.md, "Wikimedia API etiquette").
 # Until 2026-09 this paused a fixed 1 s after every answer: 1,308 of the
 # 1,541 s the D.C. fetch took, in a 39 minute build with no 429.
+
+
+_REDIRECT_SUFFIX = ".redirect"
 
 
 def _cache_paths(cache_dir: str, title_us: str) -> tuple[str, str]:
@@ -451,15 +479,11 @@ def _record_miss(html_file: str, miss_file: str, title_us: str, reason: str) -> 
         os.remove(html_file)
 
 
-def _fetch_network(title_us: str, cache_dir: str | None, ua: str,
-                   pacer: Pacer | None = None) -> str | None:
-    """Ask the API (no cache read) and cache its answer: the HTML, or a
-    .miss for a definitive miss (returns None). Raises TransientError when
-    the API did not answer about the page — nothing is cached then."""
-    html_file = miss_file = None
-    if cache_dir:
-        os.makedirs(cache_dir, exist_ok=True)
-        html_file, miss_file = _cache_paths(cache_dir, title_us)
+def _parse_request(title_us: str, ua: str,
+                   pacer: Pacer | None = None) -> tuple[dict | None, str | None]:
+    """One `action=parse` request, redirects followed: (the `parse` object,
+    None), or (None, the reason) for a definitive miss (no such page).
+    Raises TransientError when the API did not answer about the page."""
     params = urllib.parse.urlencode({
         "action": "parse", "page": title_us.replace("_", " "),
         "prop": "text", "redirects": "1", "format": "json",
@@ -470,14 +494,10 @@ def _fetch_network(title_us: str, cache_dir: str | None, ua: str,
     except urllib.error.HTTPError as e:
         code = api_error_code(e)
         if code in _DEFINITIVE_API_ERRORS:
-            reason = code
-        elif e.code in _DEFINITIVE_HTTP:
-            reason = f"http-{e.code}"
-        else:
-            raise stop_error(e) from e
-        if html_file and miss_file:
-            _record_miss(html_file, miss_file, title_us, reason)
-        return None
+            return None, code
+        if e.code in _DEFINITIVE_HTTP:
+            return None, f"http-{e.code}"
+        raise stop_error(e) from e
     if not isinstance(data, dict):
         raise TransientError(f"unexpected {type(data).__name__} body")
     err = data.get("error")
@@ -485,22 +505,77 @@ def _fetch_network(title_us: str, cache_dir: str | None, ua: str,
         code = str((err or {}).get("code", "")) if isinstance(err, dict) else ""
         if code not in _DEFINITIVE_API_ERRORS:
             raise TransientError(f"API error {code or '?'}")
-        if html_file and miss_file:
-            _record_miss(html_file, miss_file, title_us, code)
-        return None
+        return None, code
     parse = data.get("parse")
     if not isinstance(parse, dict):
         raise TransientError("body has neither parse nor error")
+    return parse, None
+
+
+def _parse_html(parse: dict) -> str | None:
     text: Any = parse.get("text")
     if isinstance(text, dict):  # formatversion=1 shape
         text = text.get("*")
-    html = text if isinstance(text, str) and text.strip() else None
+    return text if isinstance(text, str) and text.strip() else None
+
+
+def _fetch_network(title_us: str, cache_dir: str | None, ua: str,
+                   pacer: Pacer | None = None) -> str | None:
+    """Ask the API (no cache read) and cache its answer: the HTML, or a
+    .miss for a definitive miss (returns None). Raises TransientError when
+    the API did not answer about the page — nothing is cached then."""
+    html_file = miss_file = None
+    if cache_dir:
+        os.makedirs(cache_dir, exist_ok=True)
+        html_file, miss_file = _cache_paths(cache_dir, title_us)
+    parse, reason = _parse_request(title_us, ua, pacer)
+    html = _parse_html(parse) if parse is not None else None
     if html_file and miss_file:
         if html:
             _write_atomic(html_file, html)
         else:
-            _record_miss(html_file, miss_file, title_us, "no-text")
+            _record_miss(html_file, miss_file, title_us, reason or "no-text")
     return html
+
+
+def _redirect_cached(title_us: str, cache_dir: str | None) -> tuple[bool, str | None]:
+    """(known, target) from a .redirect answer in the cache."""
+    if not cache_dir:
+        return False, None
+    path = _cache_paths(cache_dir, title_us)[0][:-len(".html")] + _REDIRECT_SUFFIX
+    try:
+        with open(path, encoding="utf-8") as f:
+            to = json.load(f).get("to")
+    except (OSError, ValueError, AttributeError):
+        return False, None
+    return True, to if isinstance(to, str) and to else None
+
+
+def _fetch_redirect(title_us: str, cache_dir: str | None, ua: str,
+                    pacer: Pacer | None = None) -> str | None:
+    """The underscored title `title_us` redirects to on English Wikipedia,
+    or None (an article of its own, or no such page); from the cache, else
+    one `action=parse` request, whose answer is cached (.redirect). The
+    parsed text is the target's article, cached under the target's own
+    title when the cache has nothing for it. Raises TransientError when
+    the API did not answer (nothing cached)."""
+    known, to = _redirect_cached(title_us, cache_dir)
+    if known:
+        return to
+    parse, _reason = _parse_request(title_us, ua, pacer)
+    to = None
+    if parse is not None and parse.get("redirects"):
+        to = str(parse.get("title") or "").replace(" ", "_") or None
+    if cache_dir:
+        os.makedirs(cache_dir, exist_ok=True)
+        html_file = _cache_paths(cache_dir, title_us)[0]
+        _write_atomic(html_file[:-len(".html")] + _REDIRECT_SUFFIX, json.dumps({
+            "title": title_us, "to": to,
+            "checked": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}))
+        html = _parse_html(parse) if parse is not None else None
+        if to and html and _cache_state(to, cache_dir)[0] in ("none", "legacy"):
+            _write_atomic(_cache_paths(cache_dir, to)[0], html)
+    return to
 
 
 def _fetch_online(title_us: str, cache_dir: str | None, ua: str,
@@ -531,6 +606,7 @@ def bundle_wiki_articles(
     image_max_kb: int = 128,
     max_images_per_article: int = 12,
     source=None,
+    redirect_only: Iterable[str] = (),
 ) -> dict:
     """Fetch + clean + store each distinct article at `wiki-article/<Title>`.
 
@@ -550,6 +626,20 @@ def bundle_wiki_articles(
     shipping fewer articles. Requests stop for the rest of the run after a
     401/403/404, 25 unanswered requests in a row, or a spent wait budget
     (STREETZIM_WIKI_WAIT_BUDGET); cached articles are still bundled.
+
+    `redirect_only`: titles bundled only when English Wikipedia has them
+    as a redirect to an article bundled here (from `titles`). These are
+    non-English tags whose item has no English article (Wikidata says so):
+    an English namesake that is a redirect is an editor's alias, such as
+    "Aalten (dorp)" -> "Aalten", but a namesake article is another subject,
+    and so is a redirect to one ("Pannenberg" -> "Wolfhart Pannenberg", a
+    theologian; "VVAC" -> "Verde Valley Archaeology Center"). A redirect to
+    an article of another place of this map (the municipality, the city)
+    is kept. The page is stored at `wiki-article/<the redirect's title>`
+    with the target's text. Offline, the source ZIM's redirect entries
+    tell; online, one `action=parse` request per title (its answer is
+    cached, .redirect), which also fetches the target's text. A title also
+    in `titles` is bundled as usual.
     """
     seen: set[str] = set()
     norm: list[str] = []
@@ -562,6 +652,12 @@ def bundle_wiki_articles(
             norm.append(u)
     if limit:
         norm = norm[:limit]
+    redirect_titles: list[str] = []
+    for t in redirect_only:
+        u = _underscore(t) if t else ""
+        if u and u not in seen:
+            seen.add(u)
+            redirect_titles.append(u)
 
     if images not in IMAGE_MODES:
         raise ValueError(f"images must be one of {IMAGE_MODES}, got {images!r}")
@@ -600,6 +696,57 @@ def bundle_wiki_articles(
             + (f", {min(legacy, recheck_max)} of {legacy} old empty markers to re-check"
                f" ({RECHECK_ENV}={recheck_max})" if legacy else ""))
     stored_titles: set = set()   # title_us actually written — for the geo-index
+    def store(title_us: str, article_us: str, raw: str) -> int:
+        """Store the page for `title_us` (the text of `article_us`, the
+        article itself or the one it redirects to); returns its size."""
+        nonlocal images_stored, image_bytes
+        disp = article_us.replace("_", " ")
+        url = "https://en.wikipedia.org/wiki/" + urllib.parse.quote(article_us)
+        lead_html = gallery_html = ""
+        # The page lives at wiki-article/<Title>; a title with N
+        # slashes is N levels deeper, so the image link must climb
+        # N+1 (108 of California's 11,613 titles are like
+        # "Expo_Park/USC_station" — a fixed "../" left every one of
+        # them with dangling links and a failed validate gate).
+        up = "../" * (title_us.count("/") + 1)
+        if images != "none" and src is not None:  # src is set when images are on
+            figs = []
+            for isrc, caption in image_candidates(raw):
+                if len(figs) >= max_images_per_article:
+                    break
+                got = src.image(isrc, image_max_kb * 1024)
+                if not got:
+                    continue
+                b, mt = got
+                ext = _EXT_FOR_MIME.get((mt or "").split(";")[0].strip())
+                if not ext or len(b) < _MIN_IMAGE_BYTES or len(b) > image_max_kb * 1024:
+                    continue
+                name = hashlib.sha1(b).hexdigest()[:20] + "." + ext
+                ipath = "wiki-image/" + name
+                if ipath not in image_paths:
+                    add_item(ipath, "", mt.split(";")[0].strip(), b)
+                    image_paths.add(ipath)
+                    images_stored += 1
+                    image_bytes += len(b)
+                figs.append((name, caption))
+                if images == "lead":
+                    break
+            if figs:
+                name, caption = figs[0]
+                cap = f"<figcaption>{caption}</figcaption>" if caption else ""
+                lead_html = (f'<figure class="lead"><img src="{up}wiki-image/{name}" '
+                             f'alt="{caption}" loading="lazy">{cap}</figure>\n')
+                if len(figs) > 1:
+                    cells = "".join(
+                        f'<figure><img src="{up}wiki-image/{n}" alt="{c}" loading="lazy">'
+                        + (f"<figcaption>{c}</figcaption>" if c else "") + "</figure>"
+                        for n, c in figs[1:])
+                    gallery_html = f'<section class="gallery">{cells}</section>\n'
+        page = clean_article_html(raw, disp, url, lead_html, gallery_html).encode("utf-8")
+        add_item(f"wiki-article/{title_us}", disp, "text/html", page)
+        stored_titles.add(title_us)
+        return len(page)
+
     for i, title_us in enumerate(norm, 1):
         raw: str | None = None
         if src:
@@ -640,62 +787,55 @@ def bundle_wiki_articles(
         if not raw:
             failed += 1
         else:
-            disp = title_us.replace("_", " ")
-            url = "https://en.wikipedia.org/wiki/" + urllib.parse.quote(title_us)
-            lead_html = gallery_html = ""
-            # The page lives at wiki-article/<Title>; a title with N
-            # slashes is N levels deeper, so the image link must climb
-            # N+1 (108 of California's 11,613 titles are like
-            # "Expo_Park/USC_station" — a fixed "../" left every one of
-            # them with dangling links and a failed validate gate).
-            up = "../" * (title_us.count("/") + 1)
-            if images != "none" and src is not None:  # src is set when images are on
-                figs = []
-                for isrc, caption in image_candidates(raw):
-                    if len(figs) >= max_images_per_article:
-                        break
-                    got = src.image(isrc, image_max_kb * 1024)
-                    if not got:
-                        continue
-                    b, mt = got
-                    ext = _EXT_FOR_MIME.get((mt or "").split(";")[0].strip())
-                    if not ext or len(b) < _MIN_IMAGE_BYTES or len(b) > image_max_kb * 1024:
-                        continue
-                    name = hashlib.sha1(b).hexdigest()[:20] + "." + ext
-                    ipath = "wiki-image/" + name
-                    if ipath not in image_paths:
-                        add_item(ipath, "", mt.split(";")[0].strip(), b)
-                        image_paths.add(ipath)
-                        images_stored += 1
-                        image_bytes += len(b)
-                    figs.append((name, caption))
-                    if images == "lead":
-                        break
-                if figs:
-                    name, caption = figs[0]
-                    cap = f"<figcaption>{caption}</figcaption>" if caption else ""
-                    lead_html = (f'<figure class="lead"><img src="{up}wiki-image/{name}" '
-                                 f'alt="{caption}" loading="lazy">{cap}</figure>\n')
-                    if len(figs) > 1:
-                        cells = "".join(
-                            f'<figure><img src="{up}wiki-image/{n}" alt="{c}" loading="lazy">'
-                            + (f"<figcaption>{c}</figcaption>" if c else "") + "</figure>"
-                            for n, c in figs[1:])
-                        gallery_html = f'<section class="gallery">{cells}</section>\n'
-            page = clean_article_html(raw, disp, url, lead_html, gallery_html).encode("utf-8")
-            add_item(f"wiki-article/{title_us}", disp, "text/html", page)
-            stored_titles.add(title_us)
+            total_bytes += store(title_us, title_us, raw)
             bundled += 1
-            total_bytes += len(page)
         if i % 250 == 0:
             log(f"    ... {i}/{len(norm)} bundled={bundled} failed={failed} "
                 f"{total_bytes // 1024} KB")
-    stats = {"requested": len(norm), "bundled": bundled, "failed": failed,
+    # Titles bundled only as a redirect to an article stored above.
+    redirects = redirects_skipped = 0
+    for title_us in redirect_titles:
+        target: str | None = None
+        if src is not None:
+            # A source without redirect entries cannot tell: skipped.
+            lookup = getattr(src, "redirect_target", None)
+            target = lookup(title_us) if lookup else None
+        elif not stopped or _redirect_cached(title_us, cache_dir)[0]:
+            try:
+                target = _fetch_redirect(title_us, cache_dir, ua, pacer)
+                streak = 0
+            except TransientError as e:
+                unfetched += 1
+                rate_limited += e.rate_limited
+                streak += 1
+                if e.stop or streak >= _GIVE_UP_AFTER:
+                    stopped = True
+                    log(f"    bundle-wiki-articles: not requesting the rest ({e.reason})")
+        else:
+            unfetched += 1
+        if not target or target not in stored_titles:
+            redirects_skipped += 1
+            continue
+        raw = src.html(target) if src is not None else _cache_state(target, cache_dir)[1]
+        if not raw:
+            redirects_skipped += 1
+            continue
+        total_bytes += store(title_us, target, raw)
+        redirects += 1
+        bundled += 1
+    if redirect_titles:
+        log(f"    bundle-wiki-articles: {redirects} of {len(redirect_titles)} titles with "
+            f"no English article of their own bundled as redirects to an article "
+            f"bundled here; {redirects_skipped} skipped")
+
+    stats = {"requested": len(norm) + len(redirect_titles), "bundled": bundled,
+             "failed": failed,
              "bytes": total_bytes, "stored_titles": stored_titles,
              "images": images_stored, "image_bytes": image_bytes,
              "disambiguation_skipped": disambig,
              "unfetched": unfetched, "rate_limited": rate_limited,
-             "rechecked": rechecked, "recheck_left": recheck_left}
+             "rechecked": rechecked, "recheck_left": recheck_left,
+             "redirects": redirects, "redirects_skipped": redirects_skipped}
     log(f"    bundle-wiki-articles: stored {bundled} articles "
         f"({total_bytes / 1024:.0f} KB), {failed} unavailable"
         + (f" ({disambig} were enwiki disambiguation pages)" if disambig else "")
@@ -705,7 +845,7 @@ def bundle_wiki_articles(
         log(f"    bundle-wiki-articles: re-checked {rechecked} old empty cache markers"
             + (f"; {recheck_left} left for later builds" if recheck_left else ""))
     if unfetched:
-        msg = (f"WARNING: bundle-wiki-articles: {unfetched} of {len(norm)} articles "
+        msg = (f"WARNING: bundle-wiki-articles: {unfetched} of {len(norm) + len(redirect_titles)} articles "
                f"were NOT fetched ({rate_limited} rate-limited by Wikipedia, the "
                f"rest 5xx/network/refused). They are not cached as missing, so the next "
                f"build fetches them; this ZIM ships without them.")

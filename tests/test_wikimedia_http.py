@@ -533,6 +533,51 @@ def test_default_user_agent_is_sent(monkeypatch, sleeps, tmp_path):
     assert wm.CONTACT_URL in api.ua
 
 
+def test_redirect_only_titles_online(monkeypatch, sleeps, tmp_path):
+    # One action=parse request per title tells whether it is a redirect
+    # (`redirects` in the answer); the answer is cached, and so is the
+    # target's text under its own title.
+    d = str(tmp_path)
+    aalten = {"parse": {"title": "Aalten", "text": ARTICLE}}
+    dorp = {"parse": {"title": "Aalten", "text": ARTICLE,
+                      "redirects": [{"from": "Aalten (dorp)", "to": "Aalten"}]}}
+    pannenberg = {"parse": {"title": "Wolfhart Pannenberg", "text": ARTICLE,
+                            "redirects": [{"from": "Pannenberg", "to": "Wolfhart Pannenberg"}]}}
+    camp = {"parse": {"title": "De Camp", "text": ARTICLE}}
+    api = use(monkeypatch, FakeAPI(aalten, dorp, pannenberg, camp,
+                                   http_error(404, api_error="missingtitle")))
+    stored = {}
+    stats = wa.bundle_wiki_articles(
+        ["en:Aalten"], lambda p, t, m, c: stored.__setitem__(p, t), cache_dir=d, sleep=0,
+        log=lambda *_: None,
+        redirect_only=["nl:Aalten (dorp)", "nl:Pannenberg", "nl:De Camp", "nl:Nergens"])
+    assert stored == {"wiki-article/Aalten": "Aalten", "wiki-article/Aalten_(dorp)": "Aalten"}
+    assert len(api.urls) == 5 and "redirects=1" in api.urls[1]
+    assert (stats["redirects"], stats["redirects_skipped"], stats["unfetched"]) == (1, 3, 0)
+    assert wa._cache_state("Wolfhart_Pannenberg", d)[0] == "hit"
+    assert wa._redirect_cached("Pannenberg", d) == (True, "Wolfhart_Pannenberg")
+    assert wa._redirect_cached("De_Camp", d) == (True, None)      # an article
+    assert wa._redirect_cached("Nergens", d) == (True, None)      # no such page
+    # The next build asks nothing.
+    api = use(monkeypatch, FakeAPI())
+    stored.clear()
+    wa.bundle_wiki_articles(
+        ["en:Aalten"], lambda p, t, m, c: stored.__setitem__(p, t), cache_dir=d, sleep=0,
+        log=lambda *_: None,
+        redirect_only=["nl:Aalten (dorp)", "nl:Pannenberg", "nl:De Camp", "nl:Nergens"])
+    assert api.urls == [] and sorted(stored) == ["wiki-article/Aalten",
+                                                 "wiki-article/Aalten_(dorp)"]
+
+
+def test_redirect_only_title_unanswered_is_not_cached(monkeypatch, sleeps, tmp_path):
+    d = str(tmp_path)
+    use(monkeypatch, FakeAPI(parse_ok(ARTICLE), default=http_error(503)))
+    stats = wa.bundle_wiki_articles(["en:A"], lambda *a: None, cache_dir=d, sleep=0,
+                                    log=lambda *_: None, redirect_only=["nl:B"])
+    assert stats["unfetched"] == 1 and stats["requested"] == 2
+    assert wa._redirect_cached("B", d) == (False, None)
+
+
 # ---- Wikidata titles --------------------------------------------------------
 
 def entities(mapping: dict) -> dict:
