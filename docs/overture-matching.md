@@ -122,7 +122,7 @@ rule is symmetric only when each side is already clean.
 ## 6. v1 implementation notes (what we actually shipped 2026-04-22)
 
 `merge_overture_addresses()` and `merge_overture_places()` are now live
-in `create_osm_zim.py`. v1 is intentionally simpler than the full
+in `streetzim/addresses.py` (called by `create_osm_zim.py`). v1 is intentionally simpler than the full
 checklist below — practical defaults first, tighten later as real-world
 failures surface:
 
@@ -154,7 +154,7 @@ failures surface:
 
 | field    | from                                 | typical size |
 |----------|--------------------------------------|-------------:|
-| `cat`    | `categories.primary`                 |  ~15 bytes   |
+| `cat`    | `categories.primary` (`taxonomy.primary`, mapped back, from 2026-09-23.0; `streetzim/overture.py`) |  ~15 bytes   |
 | `ws`     | `websites[0]`                        |  ~50 bytes   |
 | `p`      | `phones[0]`                          |  ~15 bytes   |
 | `soc`    | `socials[:3]` (array)                |  ~120 bytes  |

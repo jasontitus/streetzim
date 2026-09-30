@@ -1,5 +1,7 @@
 # Elevation Data Compression Analysis
 
+> Analysis record, 2026-03-12/13. Terrain is now on in the `streetzim` command's `full` profile (the default), z0 (or `terrainMinZoom` without a world DEM) to `--terrain-zoom` 12, and its WebP tiles sit in uncompressed clusters, with repeats aliased (`streetzim/terrain.py`, `streetzim/zim_writer.py`); see [formats.md](formats.md#other-zim-entries) and [tile-aliases.md](tile-aliases.md).
+
 ## Current Approach
 
 - **Source data:** Copernicus GLO-30 DEM (30m spatial resolution)

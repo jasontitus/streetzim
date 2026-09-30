@@ -1,5 +1,13 @@
 # TODO: open on the whole region, not the middle of its bbox
 
+> **Status 2026-09-30.** New builds: done. `create_osm_zim.py` opens on the
+> region's anchor city from `cloud/regions.tsv` (`registry_anchor`, `423f65f`),
+> else the median place position (`center_from_places`, `e789a52`). The zoom
+> was never fixed at 6: `get_center_and_zoom` buckets it by extent (4 for the
+> US, 11 for washington-dc). Viewer side (fit the whole region, city rescue):
+> tried on 2026-09-25 and reverted, reasons in the comment in
+> `resources/viewer/src/index/120-map-init-and-style.js`; still open.
+
 Reported 2026-09-25: *"I sometimes see zims open to random fairly empty
 areas. Ideally it shows the whole region but if it can't — then center on an
 anchor city."*

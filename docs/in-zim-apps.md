@@ -9,22 +9,24 @@ already inside it.
 | --- | --- | --- |
 | `search/<slug>.html` | One detail page per indexed feature (place, airport, peak, park, water; named POIs too with `--kiwix-poi-pages`). Title, kind, coords, two CTAs. Front articles, so they are in both of Kiwix's indexes: full text and titles. | User taps a Kiwix full-text search result or a title suggestion in the Kiwix search bar. |
 | `index.html` (chip rail) | On-map chip rail under the search input. Tapping a chip fetches the matching `category-index/chip-<id>.json` and renders the result set as pins + carousel directly on the map (no navigation). Also exposes a *"Search this area"* pill once the user pans/zooms. | Default UX for chip-based browsing as of 2026-05-10. |
-| `places.html` | Search-and-browse mini-app — full list view, sort options, sub-filter chips, recent-searches dropdown, "Limit to map area" toggle. | User taps the **Find** link in the main viewer's controls strip, or hits `places.html` directly. Now a secondary surface; the on-map chip rail covers the common case. |
+| `places.html` | Search-and-browse mini-app — full list view, sort options, sub-filter chips, recent-searches dropdown, "Limit to map area" toggle. | User opens `places.html` directly (the viewer's **Find** link was removed 2026-05-10; see below). A secondary surface; the on-map chip rail covers the common case. |
 
 Both compose into the main viewer through a small URL-fragment
 protocol the viewer parses on load and on every `hashchange`.
 
 ## URL fragment protocol (`index.html#…`)
 
-`applyHash()` in `resources/viewer/index.html` recognises three
-independent fragments. They can mix freely:
+`applyHash()` in the viewer (`resources/viewer/src/index/120-map-init-and-style.js`,
+built into `index.html`) recognises these fragments. They can mix freely:
 
 | Fragment | Behaviour |
 | --- | --- |
 | `map=<zoom>/<lat>/<lon>` | Fly the map to that view. Legacy "show this on the map" link — also produced by the auto-redirect search detail pages used to do. |
-| `dest=<lat>,<lon>` | Open the routing panel via a programmatic `route-toggle` click, then call `setDestFromLatLon` with the supplied coords. The panel queues the pick if the routing graph hasn't loaded yet, so timing isn't an issue. |
-| `origin=<lat>,<lon>` | Same as `dest=` but for the origin slot. Optional — usually paired with `dest=` when one app wants to dictate both endpoints. |
+| `dest=<lat>,<lon>` | Open the routing panel with `window.streetzimRouting.open()`, then call `streetzimRouting.setDest` with the supplied coords. The panel queues the pick if the routing graph hasn't loaded yet, so timing isn't an issue. |
+| `origin=<lat>,<lon>` | Sets the origin slot. Only read together with `dest=`. |
 | `label=<text>` | URL-encoded display label for the destination pin/input. Optional. |
+| `pin=<lat>,<lon>` | Drop a pin with a Directions popup there (with `label=` as its name). |
+| `find=results` | Render the result list `places.html` stashed in `sessionStorage` as pins plus a carousel. |
 
 Search detail pages emit `dest=lat,lon&label=name` from their
 **Directions to here** CTA. The Find-places mini-app emits the same
@@ -39,8 +41,8 @@ specific query or category pre-selected.
 
 ## Search detail pages
 
-Generated in `create_osm_zim.py` by `search_detail_html(name,
-kind_label, lat, lon, map_hash)`. Properties:
+Generated in `streetzim/zim_writer.py` by `search_detail_html(name,
+kind_label, lat, lon, map_hash, enrich=None)`. Properties:
 
 * No `<meta refresh>` — the previous behaviour was to instantly
   redirect to the map; that swallowed any chance to act on the
@@ -52,27 +54,31 @@ kind_label, lat, lon, map_hash)`. Properties:
 * Two stacked CTAs: **Directions to here** (primary, blue) →
   `index.html#dest=lat,lon&label=…`, and **View on map** →
   `index.html#map=zoom/lat/lon`.
+* A contact block (website, phone, socials, brand, Wikidata link)
+  when the record carries Overture places fields (`enrich`).
 * Inline CSS, dark-mode media query, mobile viewport meta. No
   external assets.
 
-Both build paths in `create_osm_zim.py` (the streamed-Xapian path
+Both build paths in `streetzim/zim_writer.py` (the streamed-Xapian path
 and the non-chunked search-features path) call the same helper, so
 the two emit byte-identical pages for equivalent input.
 
 ## Category chips (current set)
 
-> **Chip rules are duplicated** — they live in two files that must
-> stay in sync:
-> - `cloud/chip_rules.py` — `CHIP_RULES` list, consumed at build time
->   by `record_matches_chip` to slice records into per-chip JSONs.
-> - `resources/viewer/places.html` — `CATEGORIES` const, consumed at
->   runtime by the Find UI.
+> **Chip rules have three copies.** `cloud/chip_rules.py` `CHIP_RULES`
+> is the source of truth, consumed at build time by
+> `record_matches_chip` to slice records into per-chip JSONs. The
+> viewer keeps two inline copies, because published ZIMs get their
+> viewer patched in place and cannot gain a rules file:
+> - `resources/viewer/places.html` — `CATEGORIES` const (block
+>   `chip-rules`), used by the Find UI.
+> - `EXPLORE_CHIPS` in `resources/viewer/src/index/220-explore-menu-and-chip-rail.js`
+>   (block `chip-rail`) — ids, labels and emoji for the map's chip rail.
 >
-> A smaller hand-curated subset lives in `EXPLORE_CHIPS` at the top
-> of `resources/viewer/index.html` (the map's "Explore" menu). Any
-> chip change has to touch all relevant sites; the validator
-> (`cloud/validate_zim.py` ~line 424) also lists chip IDs in its
-> declared-count warnings.
+> `tests/chip_rules_js.test.mjs` fails when either copy drifts. The
+> validator (`cloud/validate_zim.py`) also lists chip IDs, including
+> the pre-merge `restaurants` and `cafes`. Each viewer shows only the
+> chips the ZIM's `category-index/manifest.json` lists.
 
 The Find-places mini-app's chip row is driven by the `CATEGORIES`
 table at the top of `resources/viewer/places.html`. Each chip
@@ -91,8 +97,7 @@ Current chips (order matters — left-to-right priority for horizontal space):
 
 | Chip | subtypes / regex | Notes |
 |---|---|---|
-| Restaurants | `restaurant`, `fast_food`, `food_court`, `ice_cream` + `/_restaurant$|^food_/` | pulls in Overture's `italian_restaurant`, `thai_restaurant`, `food_court`, … |
-| Cafés | `cafe`, `coffee_shop`, `bakery`, `tea_room`, `ice_cream_parlor` | — |
+| Food & Drink (`food`) | `restaurant`, `fast_food`, `food_court`, `ice_cream`, `ice_cream_parlor`, `cafe`, `coffee_shop`, `bakery`, `tea_room` + `/_restaurant$|^food_|^coffee_|_bakery$|_cafe$/` | pulls in Overture's `italian_restaurant`, `thai_restaurant`, …; replaced Restaurants + Cafés on 2026-09-16 (below) |
 | Bars | `bar`, `pub`, `biergarten`, `nightclub`, `beer`, `alcohol_shop`, `wine_bar`, `sports_bar`, `cocktail_bar`, `dive_bar`, `beer_bar`, `brewery`, `wine_store`, `liquor_store` | liquor retail lumped in alongside drinking establishments |
 | Hotels | `hotel`, `motel`, `hostel`, `bed_and_breakfast`, `lodging`, `inn`, `guest_house`, `resort`, `campsite` | — |
 | Museums | `museum`, `art_gallery`, `planetarium`, `observatory` + `/_museum$|_gallery$/` + `nameInclude` over `tourism`/`attraction` | separates from Landmarks below; people conflate museums + galleries |
@@ -180,7 +185,7 @@ so old ZIMs keep their old chip files. The PWA viewer at
 
 When the ZIM was built with `--overture-places <parquet>`, POI
 records gain cleaner categories + website / phone / socials /
-brand data. See `merge_overture_places` in `create_osm_zim.py`.
+brand data. See `merge_overture_places` in `streetzim/addresses.py`.
 
 Two-pass enrichment:
 
@@ -188,7 +193,9 @@ Two-pass enrichment:
    `(round(lat,4), round(lon,4), normalized_name)`. If hit, merge the
    Overture fields in place and rewrite `subtype` from noisy OMT
    buckets (`tourism`, `amenity`, `shop`, `attraction`, `leisure`,
-   `car`, `historic`, `landuse`) to Overture's `categories.primary`.
+   `car`, `historic`, `landuse`) to Overture's `categories.primary`
+   (or `taxonomy.primary`, mapped back to those names, on releases from
+   2026-09-23.0; `streetzim/overture.py`).
    Specific OSM subtypes like `restaurant` survive unchanged.
 2. **Pass 2 — add-new**: Overture rows with no OSM match become fresh
    `type: "poi"` records tagged `source: "overture"` and
@@ -200,7 +207,7 @@ Extra fields the merge writes onto enriched / new records:
 | Key | Value |
 |---|---|
 | `cat` | Overture primary category (`museum`, `hotel`, `ramen_restaurant`, …) |
-| `w` | first website URL |
+| `ws` | first website URL (`w` is the OSM Wikipedia tag, not a website). A URL the dead-URL cache lists drops the new record or just the link (`url_cache_policy`) |
 | `p` | first phone |
 | `soc` | first 3 social URLs (array) |
 | `brand` | brand primary name (string) |
@@ -220,12 +227,12 @@ row below each result (see `.rich .brand` + `.rich .links` styles in
 
 `tests/test_overture.py` covers all of the above:
 
-- 27 `_normalize_street` cases + idempotence guard,
-- 27 `_STREET_ABBREV` canary entries + "no shadowed canonicals" invariant,
-- 8 `merge_overture_addresses` end-to-end tests (pass-1 ID join,
+- `_normalize_street` cases + idempotence guard,
+- `_STREET_ABBREV` canary entries + "no shadowed canonicals" invariant,
+- `merge_overture_addresses` end-to-end tests (pass-1 ID join,
   pass-2 coord / attr match, bbox, orphan rejection, empty parquet,
   append-only guarantee),
-- 8 `merge_overture_places` end-to-end tests (enrich-existing,
+- `merge_overture_places` end-to-end tests (enrich-existing,
   specific-subtype preservation, add-new with provenance,
   unnamed/uncategorized rejection, empty-field pruning, non-POI
   pass-through, OSM-wikidata vs Overture-brand-wikidata precedence).
@@ -233,26 +240,30 @@ row below each result (see `.rich .brand` + `.rich .links` styles in
 Run with:
 
 ```sh
-./venv312/bin/python3 -m pytest tests/test_overture.py -q
+python -m pytest tests/test_overture.py -q
 ```
 
 ## On-map Find chip rail (in `index.html`)
 
 The primary chip-based find UX lives ON the map. A horizontal
 scroll-snap chip rail is rendered just under the map's
-`#search-input` (Restaurants · Cafés · Bars · Shops · Museums ·
-Parks · Gas · Hotels). Tapping a chip:
+`#search-input` (Food & Drink · Bars · Shops · Health · Museums ·
+Landmarks · Libraries · Parks · Gas · Hotels, minus those the ZIM's
+manifest does not list). Tapping a chip:
 
 1. Fetches `category-index/manifest.json` (cached after first
    load) to know whether the chip is sub-bucketed.
-2. Fetches `category-index/chip-<id>.json` (or fans out the
-   `chip-<id>-<NN>.json` sub-buckets in parallel and concatenates
-   when the chip is split).
+2. Fetches `category-index/chip-<id>.json`. A geographically sharded
+   chip (`docs/find-chip-shards.md`) loads only the shards the 300
+   nearest records around the map centre need; an older sub-bucketed
+   chip fans out its `chip-<id>-<NN>.json` files and concatenates them.
+   On a ZIM built before the Food & Drink merge, the `food` chip
+   loads `restaurants` and `cafes` and merges them.
 3. Filters records to the current map viewport. Initial chip-rail
    tap auto-falls-back to the unfiltered chip data when the
    viewport has 0 matches (better to surface what's around than
    show nothing).
-4. Caps to top 300 records.
+4. Caps to the 300 records nearest the map centre.
 5. Pulls cached GPS as the carousel's distance-label origin.
 6. Stashes a `{label, origin, items, chipId}` object and calls
    `renderFindResultsFromStash` so the existing pin/carousel/
@@ -272,9 +283,9 @@ a "No <chip> in this area" toast fires and the previous carousel
 stays put — the user explicitly asked for spatial constraint, so
 we don't surface unrelated results from elsewhere.
 
-`EXPLORE_CHIPS` in `index.html` is the chip-rail's source of truth
-(must match `cloud/chip_rules.py` IDs — see
-`project_chip_rules_duplicated.md`). The chip rail uses a CSS
+`EXPLORE_CHIPS` (`220-explore-menu-and-chip-rail.js`) is the chip-rail's
+list (its ids and labels must match `cloud/chip_rules.py`;
+`tests/chip_rules_js.test.mjs` checks). The chip rail uses a CSS
 `mask-image` gradient on its left/right edges so the horizontal-
 scroll affordance is visually obvious.
 
@@ -340,8 +351,8 @@ similar bridge logic if a third popup system is added later.
 ## Find-places mini-app (`places.html`)
 
 Pure vanilla JS, single file, no dependencies. Lives at
-`resources/viewer/places.html` and is added to the ZIM by
-`create_osm_zim.py` next to `index.html`. Now a secondary surface
+`resources/viewer/places.html` and is added to the ZIM by the
+builder (`streetzim/zim_writer.py`) next to `index.html`. Now a secondary surface
 — the on-map chip rail covers the common case; this page is for
 users who want the full controls (sort, sub-filter, recent
 searches).
@@ -356,7 +367,7 @@ Data sources (all read with `cache: 'force-cache'`):
 * `category-index/<slug>.json` — full list of features for one
   OSM top-level type. Loaded once per chip tap and cached for the
   session.
-* `category-index/<slug>-gNNN.json` — **a category can be sharded.**
+* `category-index/<slug>-gNNN.json` (`g` + three or more hex digits) — **a category can be sharded.**
   Since 2026-09-16 a category over 8 MB is cut geographically and the
   single file is not written at all: `place.json` is 109 MB on china and
   480 MB on europe, and the Find page only ever wanted the settlements
@@ -375,8 +386,9 @@ Behaviour:
   client-side. Capped at 300 visible rows so big indices stay
   snappy on phones.
 * **Category chip** loads the matching category index (one fetch,
-  cached). Some chips further filter by subtype — e.g. **Cafés**
-  loads the `poi` index and keeps `s == "cafe"`. Defined by the
+  cached). Some chips further filter by subtype — e.g. **Bars**
+  loads the `poi` index and keeps `s == "bar"`, `"pub"`, …. ZIMs with
+  per-chip files load `chip-<id>.json` (or its shards) instead. Defined by the
   `CATEGORIES` table at the top of the file.
 * **Origin / distance sort** — see "Distance sort is implicit"
   above. The sort row offers name / category / distance once a
@@ -407,13 +419,17 @@ offline once installed. `places.html` is treated the same as
   `scripts/sync-drive-viewer.sh`, the predeploy hook firebase.json
   invokes.
 
-When you change either viewer file, bump `SHELL_CACHE` in
-`sw.js` (e.g. `streetzim-drive-shell-vN` → `vN+1`) so existing
-installs invalidate the old cache on next visit.
+`cloud/deploy_pwa.sh` sets `SHELL_CACHE` in `sw.js` to the deploy
+stamp (`streetzim-drive-shell-<git-sha>[-d<HHMMSS>]`) on every deploy,
+so existing installs invalidate the old cache on next visit.
 
 ## What's not here yet
 
-* **"Everything within 5 km" spatial browse.** GPS sort works on
+* **"Everything within 5 km" spatial browse.** Partly there: chips
+  and categories over 8 MB are geographic shards with per-shard
+  bounding boxes (`docs/find-chip-shards.md`), so one chip or category
+  can be fetched for an area. There is still no index across all
+  features. GPS sort works on
   whatever results are already loaded (name search or category
   chip) but there's no spatial index that lets the app fetch all
   features in a bounding box without scanning every chunk. A

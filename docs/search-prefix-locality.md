@@ -1,5 +1,7 @@
 # Search: give hot prefix chunks locality (proposal v4, 2026-09-16)
 
+> Design record. Implemented in `aab3334` (2026-09-16): `cloud/search_shards.py`, the viewer's `search-shards` blocks, `--reshard-search`. The current layout is in [search-records.md](search-records.md#search-data).
+
 Status: design, revised after two adversarial reviews and four measurement
 passes over real ZIMs. Implement → retrofit in the same pass as the Find-chip
 shards (`docs/find-chip-shards.md`).

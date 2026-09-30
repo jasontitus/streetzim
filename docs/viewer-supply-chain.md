@@ -20,7 +20,7 @@ Now `resources/viewer-assets.lock.json` records a SHA-256 for each file, and
 | where the bytes come from | **vendored** in `resources/vendor/maplibre-gl/` and `resources/vendor/mapbox-gl-rtl-text/` (each with its licence file) | fetched from `fonts.openmaptiles.org` |
 | checked | on every build, against the lock file, before packing | on every download and every cache read |
 | provenance when pinned | the npm tarball (`maplibre-gl`, `@mapbox/mapbox-gl-rtl-text`), checked against the sha512 the npm registry publishes; recorded as `tarball` and `integrity` in the lock | the CDN's bytes at pin time (the same bytes earlier builds shipped) |
-| cache | not needed | content-addressed: `$STREETZIM_CACHE_DIR/viewer-assets/sha256/..` (the `streetzim` command sets it to `<--dl>/cache`), else `<repo>/viewer-assets/`, then `/app/viewer-assets/` baked into the Docker image |
+| cache | not needed | content-addressed: `$STREETZIM_CACHE_DIR/viewer-assets/sha256/..` (the `streetzim` command sets it to `<--dl>/cache`), else `<repo>/viewer-assets/` (an installed package: the user cache directory, `streetzim/paths.py`), then `/app/viewer-assets/` baked into the Docker image |
 | on a mismatch, or a missing file | the build stops. The RTL plugin is required like MapLibre: without it the viewer still works but draws every Arabic/Hebrew label unshaped, and that should not ship by accident | the build stops; `STREETZIM_ALLOW_FONT_ERRORS=1` does **not** waive it |
 | when unreachable | n/a | 5 attempts per range, then the build stops unless `STREETZIM_ALLOW_FONT_ERRORS=1` (unchanged) |
 
@@ -29,7 +29,7 @@ files; the repository already carried byte-identical copies in
 `web/drive/viewer/` for the PWA, so git stores the vendored copy as the same
 objects and it costs nothing. Vendoring removes the unpkg dependency outright.
 The fonts are 768 small binary files that change only if openmaptiles
-changes them; a 67 KB lock file of hashes is easier to review than 768
+changes them; a ~70 KB lock file of hashes is easier to review than 768
 committed blobs, the cache makes repeat and offline builds network-free, and
 the Docker image bakes them in (`--prefetch` at image build), so a Zimfarm
 task fetches no fonts at all.

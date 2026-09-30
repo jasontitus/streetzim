@@ -1,6 +1,6 @@
 # Find chips: geographic shards
 
-The Find chips (Restaurants, Cafés, Shops, …) read pre-filtered record
+The Find chips (Food & Drink, Shops, …) read pre-filtered record
 lists from `category-index/chip-{id}.json`; the rules live in
 `cloud/chip_rules.py`. This page covers how those lists are laid out in
 the ZIM and how the viewers load them.
@@ -47,10 +47,15 @@ order inside a shard. The manifest entry is a superset of the old one:
 Measured on east-coast-us: Shops becomes 128 shards of 1.15 MB each, and
 Manhattan falls in a single shard. Planning the whole chip takes 4.4 s.
 
+The builder cuts any `category-index/{t}.json` over 8 MB the same way,
+into `{t}-g000.json`, … (no `chip-` prefix), listed under the manifest's
+`category_shards` (`streetzim/zim_writer.py`).
+
 ## Loading (viewer)
 
-`resources/viewer/index.html` and `places.html` carry the same ES5 block
-between `// BEGIN chip-shards` and `// END chip-shards`.
+`resources/viewer/index.html` (source:
+`resources/viewer/src/index/230-chip-shards.js`) and `places.html` carry
+the same ES5 block between `// BEGIN chip-shards` and `// END chip-shards`.
 `tests/chip_shards_js.test.mjs` fails if the copies differ.
 `CHIP_SHARDS.load(meta, opts)` returns the **exact k nearest** matching
 records (k = 300) around a point:
@@ -60,7 +65,7 @@ records (k = 300) around a point:
    point to the box: `hav(d) ≥ hav(Δφmin) + cos φp · min(cos s, cos n) ·
    hav(Δλmin)`. Each term is at its minimum over the box, so the bound
    holds at any latitude and across ±180.
-2. **Load.** Shards are fetched in batches of up to 4 until the k-th
+2. **Load.** Shards are fetched in batches (the nearest one alone, then up to 4) until the k-th
    nearest record is closer than the next shard's bound. Results are
    then exact.
 3. **Stop on budget.** Loading also stops at a byte budget:
@@ -91,7 +96,8 @@ ZIMs with name-hash buckets or single files keep the old whole-chip path.
 ## Producing and checking
 
 - **Build:** `create_osm_zim.py --split-find-chips` emits geo shards.
-  `build-region-fast.sh` passes that flag.
+  The `streetzim` command (`streetzim/cli.py`) and
+  `ops/build-region-fast.sh` pass that flag.
 - **Retrofit:** `cloud/repackage_zim.py SRC DST --split-find-chips`
   re-shards an existing ZIM. When the source has no `poi.json`/`park.json`
   (every `--no-llm-bundle` build), it rebuilds each chip from the source's

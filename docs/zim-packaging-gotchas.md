@@ -3,7 +3,7 @@
 Hard-won lessons that aren't obvious from the code or the libzim
 docs. Each one cost real user time before being run down. Worth
 re-reading before changing anything in `cloud/repackage_zim.py`,
-`cloud/upload_validated.sh`, or the `places.html` chunk-loading path.
+`ops/cloud/upload_validated.sh` (run as `cloud/upload_validated.sh`), or the `places.html` chunk-loading path.
 
 ---
 
@@ -22,10 +22,13 @@ Storing the file raw lets Kiwix's HTTP server hand the bytes through
 unmodified.
 
 **Where the rule lives.**
-- Fresh build (`_emit_spatial_graph`):
+- Fresh build (`_add_routing_graph` in `streetzim/zim_writer.py`):
+  `idx_compress = idx_size < 200 * 1024 * 1024`, and the same test per
+  cell.
+- Repack spatial conversion (`_emit_spatial_graph` in `cloud/repackage_zim.py`):
   ```python
   compress_idx = idx_mb < 200
-  compress_cell = len(data) < 200 * 1024 * 1024
+  compress_cell = size < 200 * 1024 * 1024
   ```
 - Repack passthrough (`cloud/repackage_zim.py`): same threshold
   applied to `graph-cells-index.bin` and any individual
@@ -75,10 +78,17 @@ hot-split prefixes.
 3. **Recursively-split.** Hot-split children themselves split, leaves
    are 4-character names (`de-0-0-0`, …). Manifest *should* chain
    `sub_chunks['de'] = ['de-0', …]` then `sub_chunks['de-0'] =
-   ['de-0-0']` etc. **Current builds sometimes ship
-   `sub_chunks['de'] = []`** — a build-side bug worth fixing in the
-   prefix splitter. Until then, the client falls back to a chunks-map
-   scan for `<prefix>-*` keys.
+   ['de-0-0']` etc. **Builds before 2026-09-16 sometimes shipped
+   `sub_chunks['de'] = []`**; for those the client falls back to a
+   chunks-map scan for `<prefix>-*` keys. The builder no longer writes
+   an empty list (`streetzim/zim_writer.py`), and `--reshard-search`
+   flattens the old trees.
+
+Since 2026-09-16 hot prefixes are split by character path and tier
+instead (`ca~r~c`, with `-0…-f` hash children only where characters stop
+dividing), listed under `char_split` as well as `sub_chunks`; see
+[search-records.md](search-records.md#search-data). The client also scans
+for `<prefix>~*` keys.
 
 **Helper.** `expandPrefix(prefix)` in `resources/viewer/places.html`
 resolves a prefix to its leaf chunk filenames covering all three
@@ -335,7 +345,7 @@ env var was being lost. The first XB1 build of California shipped
 silently at zstd-3 (the rust default) instead of zstd-22, producing
 a ~25 % larger ZIM than baseline.
 
-**Fix.** `create_osm_zim.py:create_zim` now reads `ZSTD_CLEVEL` and
+**Fix.** `create_zim` (now `streetzim/zim_writer.py`) reads `ZSTD_CLEVEL` (default 22) and
 passes it to `ManifestCreator(compression_level=...)` explicitly,
 so the rust path matches libzim's behaviour. Logged via
 `PHASE_TIMER.record_metric("zim-pack: zstd level", ...)` in every

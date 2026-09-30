@@ -96,7 +96,10 @@ Known gap: only the Latin-script name is indexed.
 - `category-index/manifest.json`:
   `{"total": n, "categories": {"poi": n, …}, "category_shards"?: …, "chips"?: {…}}`
 - `category-index/{t}.json` holds every record of one type. Builds with
-  `--no-llm-bundle` omit these.
+  `--no-llm-bundle` (every `streetzim` and production build) omit
+  `addr`, `poi` and `street`. A category over 8 MB is written as
+  geographic shards `{t}-g{hex}.json` instead, listed under
+  `category_shards` in the manifest.
 - `category-index/chip-{id}.json` holds one Find chip. Chip ids, labels and
   matching rules come from `cloud/chip_rules.py`; `rules_as_json()`
   exports them. Large chips are geographic shards

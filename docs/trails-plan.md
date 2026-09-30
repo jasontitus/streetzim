@@ -2,6 +2,10 @@
 
 Status 2026-09-21. Pilot regions: **switzerland** and **california**.
 
+Update 2026-09-30: Phase 1 is done except the `subclass` split; Phases 2–5
+are not started. The graph builder named below is now
+`streetzim/routing/build.py`, still without a relation handler.
+
 ## What is actually in the ZIMs today
 
 Measured, not assumed — one z14 tile over Zermatt
@@ -43,6 +47,11 @@ route on it, and cannot search it.
 ## Plan, cheapest first
 
 ### Phase 1 — draw what we already have (viewer only, ~10 s/region)
+**Done 2026-09-21** (committed in `f78011a`): layers `road-track`,
+`road-path-paved` (solid) and `road-path` (dashed) from z12, in
+`resources/viewer/src/index/130-lowzoom-lakes.js`; trail names draw through
+`road-label`. Footway, path and track `subclass` are not told apart.
+
 No rebuild. Ships through the slot patch (`cloud/patch_viewer_inplace.py`).
 
 - style `class=track` (currently invisible)
