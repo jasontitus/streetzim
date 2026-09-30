@@ -143,8 +143,8 @@
        matrix both caught it). On short screens this panel becomes a row
        beside Home instead (see the max-height rule below): a landscape
        phone has no vertical room left on the right edge. Adding a control
-       to that column means re-running tmp/overlap-check.mjs in portrait
-       AND landscape, not just moving this down. */
+       to that column means re-running the overlap check in portrait AND
+       landscape (CI runs it at seven sizes), not just moving this down. */
     position: absolute; top: calc(206px + var(--top-inset, 0px)); right: 10px; z-index: 2;
     display: flex; flex-direction: column;
     background: var(--panel-bg); border-radius: var(--radius);
