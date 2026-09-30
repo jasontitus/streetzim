@@ -146,10 +146,28 @@ class AugmentTests(unittest.TestCase):
         self.assertEqual(xref["nl"], {"wikipedia": "nl:Utrecht (stad)", "wikidata": "Q803"})
 
     def test_is_english_title(self):
-        for t in ("en:Foo", "Foo", "Foo: a bar", "Mission: Impossible"):
+        for t in ("en:Foo", "EN:Foo", "Foo", "Mission: Impossible", "Star-Lord: x",
+                  "Everything: The Game"):
             self.assertTrue(wt.is_english_title(t), t)
-        for t in ("nl:Foo", "fy:Foo", "als:Foo"):
+        # Any case: "NL:Foo" is Dutch. "Foo: a bar" reads as language "foo"
+        # (so it is resolved through its Q-ID), as the bundler and the
+        # geo-index read it. Longer codes are not English either.
+        for t in ("nl:Foo", "NL:Foo", "fy:Foo", "als:Foo", "Foo: a bar",
+                  "simple:Foo", "nds-nl:Foo", "zh-yue:Foo", "be-tarask:Foo"):
             self.assertFalse(wt.is_english_title(t), t)
+
+    def test_is_english_title_agrees_with_the_bundler_prefix_rule(self):
+        # The title the bundler and the geo-index derive from a tag is the
+        # English one exactly when is_english_title says the tag is English.
+        from cloud.wiki_articles import _strip_lang
+        for t in ("en:Foo", "EN:Foo", "En:Foo", "nl:Foo", "NL:Foo", "Foo: a bar",
+                  "Foo", "Mission: Impossible", "ab:c", "a:b", "abcd:e", "日本:x",
+                  "Q1:x", "12:x"):
+            prefixed = _strip_lang(t) != t
+            if prefixed:
+                self.assertEqual(wt.is_english_title(t), t[:t.find(":")].lower() == "en", t)
+            else:
+                self.assertTrue(wt.is_english_title(t), t)
 
     def test_bundling_skips_tags_with_no_english_article(self):
         # A flagged non-English tag is not looked up on English Wikipedia

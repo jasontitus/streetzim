@@ -286,23 +286,33 @@ def _body_throttle(data: Any) -> str:
 def get_json(url: str, *, user_agent: str, pacer: Pacer | None = None,
              retries: int = 5, timeout: float = 60.0, base: float = 2.0,
              max_wait: float = 120.0, accept: str = "application/json",
-             log: Callable[[str], None] | None = None) -> Any:
+             log: Callable[[str], None] | None = None,
+             throttle_retries: int | None = None) -> Any:
     """GET `url` and parse its JSON body, retrying transient failures
     (including a maxlag/ratelimited `error` body, with its Retry-After).
 
     Raises `urllib.error.HTTPError` for a non-transient HTTP status and
     `TransientError` once the `retries` attempts, or the pacer's wait
-    budget, are spent."""
+    budget, are spent.
+
+    `throttle_retries` (opt-in; default `retries`): attempts in all while
+    the answers are "slow down" (a 429, maxlag or ratelimited). Wikidata's
+    maxlag means its replicas lag, which lasts minutes, not the ~30 s five
+    tries cover; a caller with a pacer can pass a large number and let the
+    pacer's wait budget bound the waiting. Any other failure still ends
+    the call once `retries` attempts in all have been made."""
     # gzip: the robot policy's "Always request content with an
     # Accept-Encoding: gzip HTTP header".
     req = urllib.request.Request(url, headers={"User-Agent": user_agent,
                                                "Accept": accept,
                                                "Accept-Encoding": "gzip"})
     retries = max(1, retries)
+    throttle_cap = retries if throttle_retries is None else max(retries, throttle_retries)
     if pacer is not None and pacer.exhausted:
         raise TransientError(f"wait budget of {pacer.budget:.0f}s spent", stop=True)
     last: TransientError | None = None
-    for attempt in range(retries):
+    attempt = 0
+    while True:
         if pacer is not None:
             pacer.wait()
         retry_after: float | None = None
@@ -355,20 +365,25 @@ def get_json(url: str, *, user_agent: str, pacer: Pacer | None = None,
             raise TransientError(
                 f"{last.reason}; Retry-After {retry_after:.0f}s is over {max_wait:.0f}s",
                 last.status, throttled=last.throttled, stop=True)
-        if attempt < retries - 1:
-            delay = backoff_delay(attempt, retry_after, base=base, max_wait=max_wait)
-            if retry_after is None and (last.throttled or last.status == 503):
-                delay = max(delay, min(MIN_THROTTLE_WAIT, max_wait))
-            if pacer is not None:
-                if not pacer.can_wait(delay):
-                    pacer.charge(pacer.budget)   # spent: later calls stop at once
-                    raise TransientError(
-                        f"{last.reason}; wait budget of {pacer.budget:.0f}s spent",
-                        last.status, throttled=last.throttled, stop=True)
-                pacer.charge(delay)
-            if log is not None:
-                log(f"    {last.reason}; retrying in {delay:.1f}s"
-                    + (f" (Retry-After {retry_after:.0f}s)" if retry_after is not None else ""))
-            time.sleep(delay)
+        attempt += 1
+        if attempt >= (throttle_cap if last.throttled else retries):
+            break
+        # The exponent is capped: backoff_delay caps the wait anyway,
+        # and 2 ** attempt must stay a float for a long throttle.
+        delay = backoff_delay(min(attempt - 1, 16), retry_after, base=base,
+                              max_wait=max_wait)
+        if retry_after is None and (last.throttled or last.status == 503):
+            delay = max(delay, min(MIN_THROTTLE_WAIT, max_wait))
+        if pacer is not None:
+            if not pacer.can_wait(delay):
+                pacer.charge(pacer.budget)   # spent: later calls stop at once
+                raise TransientError(
+                    f"{last.reason}; wait budget of {pacer.budget:.0f}s spent",
+                    last.status, throttled=last.throttled, stop=True)
+            pacer.charge(delay)
+        if log is not None:
+            log(f"    {last.reason}; retrying in {delay:.1f}s"
+                + (f" (Retry-After {retry_after:.0f}s)" if retry_after is not None else ""))
+        time.sleep(delay)
     assert last is not None
     raise last

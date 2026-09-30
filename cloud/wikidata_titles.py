@@ -25,14 +25,17 @@ identifies the project by its PUBLIC issue tracker (Wikimedia's policy
 wants a way to reach the operator; STREETZIM_WIKI_CONTACT can add one at
 run time, never in the repo).
 
-Only Wikidata's answers are cached: a sitelink, or "" when the item has no
-enwiki article or does not exist. A 429, 5xx or network failure (retried
-with Retry-After honoured) caches nothing, so the next build asks again.
+Only Wikidata's answers are cached: a sitelink, "" when the item has no
+enwiki article or does not exist, or _REFUSED for an id Wikidata refused
+on its own (neither a title nor a miss). A 429, 5xx or network failure
+(retried with Retry-After honoured; a maxlag episode is waited out within
+the wait budget) caches nothing, so the next build asks again.
 This cache never held rate-limit misses (a failed batch always raised
 before its Q-IDs were written). It could hold misses from a batch Wikidata
 refused because of one malformed id; `_heal` re-checks those. Requests
 are serial with maxlag=5 and a small gap after each response; a refused
-client (400/401/403/404) or a spent wait budget stops the run.
+client (400/401/403/404), ids refused one after another, or a spent wait
+budget stops the run.
 """
 from __future__ import annotations
 
@@ -66,10 +69,31 @@ _TRANSIENT_API_ERRORS = frozenset({"maxlag", "ratelimited", "readonly"})
 # Wikidata item ids: Q + up to 10 digits, no leading zero. Anything else
 # (an OSM "Q1;Q2", "Q05", a 20-digit typo) is never requested.
 _QID_RE = re.compile(r"Q[1-9][0-9]{0,9}")
-# Requests refused in a row (error bodies) before a run stops asking: one
-# bad id costs at most two in a row while its batch is halved around it; a
-# refusal of everything reaches this before any single id is written off.
-_MAX_REFUSALS_IN_A_ROW = 6
+# Ids refused on their own in a row, with no request answered between
+# them, before a run stops asking. A batch Wikidata refuses because of one
+# bad id is halved around it (50, 25, 12, 6, 3, 1: six refusals in a row
+# when the bad id comes first) and writes off that one id; the request
+# after it is answered. An API that refuses everything writes off one id
+# after another and stops here, after about nine requests, having cached
+# nothing. (Until 2026-09 six refusals in a row stopped the run, so a bad
+# id at the head of a batch stopped it before it was isolated.)
+_MAX_WRITTEN_OFF_IN_A_ROW = 3
+# The cache value of an id Wikidata refused on its own. Not a title (a
+# Wikipedia title cannot hold "#") and not "" (no article): the refusal may
+# have had nothing to do with the id, so it is not asked again but is not
+# taken as having no English article either. Caches written before this
+# marker hold such ids as "".
+_REFUSED = "#refused"
+# How many times one request answered with maxlag or ratelimited is
+# retried. Replication lag lasts minutes, far longer than get_json's usual
+# five tries; the pacer's wait budget (STREETZIM_WIKI_WAIT_BUDGET, 15 min a
+# run) is what bounds the waiting, not this count.
+_THROTTLE_RETRIES = 1000
+
+
+def _is_title(value: str | None) -> bool:
+    """Whether a cache value is an English title (not "" nor _REFUSED)."""
+    return bool(value) and value != _REFUSED
 
 
 class BatchError(Exception):
@@ -83,9 +107,13 @@ def _api_batch(qids: list[str], *, api: str = WIKIDATA_API,
 
     Sends maxlag=5 (Wikimedia's advice for automated clients) and retries
     429/5xx/maxlag/transport errors, honouring Retry-After
-    (cloud/wikimedia_http.py). Raises TransientError when they outlive the
-    retries (`stop` for 400/401/403/404: every batch would get the same),
-    BatchError for an `error` body that is an answer about the ids.
+    (cloud/wikimedia_http.py). A 429, maxlag or ratelimited answer is
+    retried until the pacer's wait budget is spent (_THROTTLE_RETRIES), so
+    a replication-lag episode of a few minutes is waited out instead of
+    ending the run; other failures get `retries` tries. Raises
+    TransientError when they outlive that (`stop` for 400/401/403/404:
+    every batch would get the same), BatchError for an `error` body that
+    is an answer about the ids.
     """
     params = urllib.parse.urlencode({
         "action": "wbgetentities",
@@ -97,7 +125,8 @@ def _api_batch(qids: list[str], *, api: str = WIKIDATA_API,
     })
     try:
         data = get_json(f"{api}?{params}", user_agent=user_agent or _user_agent("wikidata"),
-                        pacer=pacer, retries=retries, timeout=30)
+                        pacer=pacer, retries=retries, timeout=30,
+                        throttle_retries=_THROTTLE_RETRIES)
     except urllib.error.HTTPError as e:
         raise stop_error(e) from e
     if not isinstance(data, dict):
@@ -119,27 +148,30 @@ class _Resolver:
     def __init__(self, user_agent: str | None, pacer: Pacer) -> None:
         self.user_agent = user_agent
         self.pacer = pacer
-        self.refusals = 0           # refused requests in a row
+        self.alone_in_a_row = 0     # ids refused on their own since an answer
         self.written_off: list[str] = []
 
     def answers(self, batch: list[str]) -> dict[str, str]:
         try:
             data = _api_batch(batch, user_agent=self.user_agent, pacer=self.pacer)
         except BatchError as exc:
-            self.refusals += 1
-            if self.refusals >= _MAX_REFUSALS_IN_A_ROW:
-                raise TransientError(f"{self.refusals} requests in a row refused ({exc})",
-                                     stop=True) from exc
-            if len(batch) == 1:
-                # Wikidata refuses this id on its own: it names no item, so
-                # it has no article. Cached as a miss so it is not asked again.
-                self.written_off.append(batch[0])
-                return {batch[0]: ""}
-            half = len(batch) // 2
-            out = self.answers(batch[:half])
-            out.update(self.answers(batch[half:]))
-            return out
-        self.refusals = 0
+            if len(batch) > 1:
+                half = len(batch) // 2
+                out = self.answers(batch[:half])
+                out.update(self.answers(batch[half:]))
+                return out
+            self.alone_in_a_row += 1
+            if self.alone_in_a_row >= _MAX_WRITTEN_OFF_IN_A_ROW:
+                # Id after id refused on its own: the API refuses the
+                # requests, not the ids. Nothing of this batch is cached.
+                raise TransientError(f"{self.alone_in_a_row} ids in a row refused on "
+                                     f"their own ({exc})", stop=True) from exc
+            # Wikidata refuses this id on its own. Cached as refused, so it
+            # is not asked again, but not as having no article: the refusal
+            # may not have been about the id.
+            self.written_off.append(batch[0])
+            return {batch[0]: _REFUSED}
+        self.alone_in_a_row = 0
         return _titles_from_response(data, batch)
 
 
@@ -206,8 +238,10 @@ def resolve_qids(
 
     Q-IDs with no enwiki article are simply absent from the result.
     misses: when given, filled with the Q-IDs Wikidata answered have NO
-        enwiki article (not those it could not answer, nor an offline
-        map's gaps, which say nothing either way).
+        enwiki article (not those it could not answer, nor ids it refused
+        on their own, nor an offline map's gaps, which say nothing either
+        way). A caller may drop a tag for a miss, so a miss must be an
+        answer.
 
     offline_map: path to a ``Q-ID<TAB>Title`` TSV, or a pre-loaded dict —
         resolves entirely offline, no network.
@@ -281,14 +315,15 @@ def resolve_qids(
             failed_at = (i, exc)
             _flush()
             break
-        cache.update(answers)  # "" == known to have no enwiki article
+        cache.update(answers)  # "" == known to have no enwiki article; _REFUSED
         if n % 50 == 49:
             _flush()
         if progress:
             progress(min(i + BATCH, len(todo)), len(todo))
     if resolver.written_off:
         print(f"    wikidata->title: Wikidata refused {len(resolver.written_off)} ids "
-              f"on their own (e.g. {resolver.written_off[0]}); cached as having no article",
+              f"on their own (e.g. {resolver.written_off[0]}); cached as refused (not "
+              f"asked again, and not taken as having no English article)",
               file=sys.stderr, flush=True)
 
     if cache_path and (todo or healed):
@@ -299,7 +334,7 @@ def resolve_qids(
 
     unresolved = sum(1 for q in want if q not in cache)
     if unresolved:
-        resolved = sum(1 for q in want if cache.get(q))
+        resolved = sum(1 for q in want if _is_title(cache.get(q)))
         why = ""
         if failed_at is not None:
             i, exc = failed_at
@@ -312,19 +347,37 @@ def resolve_qids(
             raise SystemExit(f"STREETZIM_REQUIRE_WIKI=1: {msg}")
 
     if misses is not None:
+        # Only Wikidata's "no English article": not an id it could not
+        # answer (absent from the cache) nor one it refused (_REFUSED).
         misses.update(q for q in want if cache.get(q) == "")
-    return {q: cache[q] for q in want if cache.get(q)}
+    return {q: cache[q] for q in want if _is_title(cache.get(q))}
+
+
+# Wikipedia language codes longer than three letters ("simple", "nds-nl",
+# "zh-yue", "be-tarask"). Lower case only: an English title starts with a
+# capital, so "Star-Lord: ..." is a title, not a code.
+_LONG_LANG_RE = re.compile(r"simple|[a-z]{2,3}(?:-[a-z]{2,8})+")
 
 
 def is_english_title(tag: str) -> bool:
     """Whether an OSM ``wikipedia=`` value names an English article:
-    ``en:Title``, or a title without a language prefix."""
+    ``en:Title``, or a title without a language prefix.
+
+    A language prefix is 2-3 letters before the first colon, in any case
+    (``NL:Foo`` is Dutch, ``EN:Foo`` English): the rule the bundler
+    (cloud/wiki_articles._strip_lang), the geo-index (zim_writer) and the
+    viewer use to turn a tag into a title, so a tag is English here exactly
+    when they read its title as the English one. "Foo: a bar" is taken as
+    language "foo" by all of them, and is resolved through its Q-ID.
+    A longer code (``simple:``, ``nds-nl:``, ``zh-yue:``) is not English
+    either, so it is resolved through its Q-ID too; the others do not strip
+    it, so one left unresolved is looked up whole and misses, as before.
+    """
     ci = tag.find(":")
     pre = tag[:ci]
-    # Language codes are lower case: "Foo: a bar" is an English title.
-    if 2 <= ci <= 3 and pre.isalpha() and pre.lower() == pre:
-        return pre == "en"
-    return True
+    if 2 <= ci <= 3 and pre.isalpha():
+        return pre.lower() == "en"
+    return not (ci > 3 and _LONG_LANG_RE.fullmatch(pre))
 
 
 def augment_wiki_cross_refs(
