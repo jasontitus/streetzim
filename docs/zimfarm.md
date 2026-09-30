@@ -567,7 +567,10 @@ profiles.
 
 Checked against openzim/zimfarm at `917d7bc`:
 
-1. **Docker image name.** Zimfarm pulls `ghcr.io/<name>` and only accepts
+1. **Docker image name.** The image is published today as
+   `ghcr.io/jasontitus/streetzim` (linux/amd64; `dev` from main, `X.Y.Z`
+   and `latest` from release tags; `.github/workflows/docker-publish.yml`).
+   Zimfarm pulls `ghcr.io/<name>` and only accepts
    names in `DockerImageName` (`backend/src/zimfarm_backend/common/enums.py`).
    StreetZim's image would have to be published under a name added there
    (for example `openzim/streetzim` if the repository moved to openZIM).
