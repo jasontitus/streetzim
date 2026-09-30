@@ -6,15 +6,19 @@
 cd /storage/streetzim/sz-tests/next || exit
 Z=$(readlink -f "$1"); ID=$2; TODAY=gate-$(date +%H%M)
 IFS=$'\t' read -r _ NAME BBOX _ SRC DST SEARCH _ < <(grep -P "^$ID\t" /storage/streetzim/cloud/regions.tsv)
+# Overrides for a region not in regions.tsv (or a pair that fits a smaller area).
+BBOX=${GATE_BBOX:-$BBOX}; SRC=${GATE_SRC:-$SRC}; DST=${GATE_DST:-$DST}; SEARCH=${GATE_SEARCH:-$SEARCH}
 ln -sfn "$Z" "./$(basename "$Z")"; ZIM=$(basename "$Z")
 LOG=/storage/streetzim/sz-tests/results/gate-$ID-$TODAY.log; : > "$LOG"
 log() { echo "[$(date -Is)] $*" | tee -a "$LOG"; }
 log "gating $Z ($ID: $SRC -> $DST, search '$SEARCH')"
 FAILED=""
+if [ "${GATE_SKIP_TERRAIN:-0}" = 1 ]; then log "GATE 1/5 terrain coverage: SKIPPED (GATE_SKIP_TERRAIN=1: the ZIM has no terrain layer)"; else
 log "GATE 1/5 terrain coverage"
 timeout 900 "$PY" cloud/check_terrain_coverage.py --vrt /storage/streetzim/terrain_cache/dem_sources/comprehensive.vrt --zooms 10-12 -- "$ZIM" "$BBOX" >> "$LOG" 2>&1 \
   && log "  terrain OK" || { FAILED="$FAILED terrain"; log "  terrain FAIL"; }
 
+fi
 log "GATE 2/5 validator"
 TERRAIN_STRIPE_TOLERATE=10 timeout 1800 "$PY" cloud/validate_zim.py "$ZIM" >> "$LOG" 2>&1 \
   && log "  validate OK" || { FAILED="$FAILED validate"; log "  validate FAIL"; }

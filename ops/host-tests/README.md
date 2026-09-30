@@ -19,6 +19,8 @@ reference, not as general tools.
 - `gate-zim.sh <zim> <region id>`: `ops/ship-region.sh`'s five gates (terrain
   coverage, validator, routing, search and Find, browser smoke) on a ZIM built
   elsewhere, run in a test clone with its own `web/`; no build, no upload.
+  `GATE_BBOX`, `GATE_SRC`, `GATE_DST` and `GATE_SEARCH` stand in for a region
+  that is not in `cloud/regions.tsv`.
 - `run-measured.sh <tag> <image> <poly> <name> <title> [args]`: the openZIM
   recipe in a container limited like a Zimfarm task (`--memory 16g
   --cpu-shares 3072`), with `memprofile.sh` attached.
@@ -32,4 +34,14 @@ reference, not as general tools.
   Python's CPU count forced (`PYTHON_CPU_COUNT`), for worker-count A/B runs.
 - `recdiff.py A.zim B.zim`: for the search JSON lists, how many files are
   identical, reordered, or hold different records.
+- `validate-full.sh <out dir> <name> <title> <image>`: everything a
+  full-profile openZIM build must pass before upload, nothing skipped:
+  `tools/check_openzim_output.py` (metadata, illustration, progress, routing,
+  terrain), `tools/check_full_profile.py` (Overture, Wikidata and Wikipedia
+  content, credited), `gate-zim.sh` and `run-driver-gates.sh`.
+- `run-nl-full.sh <tag> <image>`: the Netherlands, full profile, the recipe's
+  Wikipedia ZIM option (the host's copy mounted read-only where the download
+  cache expects it), in a Zimfarm-sized container, memory sampled.
 
+`run-driver-gates.sh` now fails when its marker check fails (it used to log
+the failure and still report success).

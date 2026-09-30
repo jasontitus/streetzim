@@ -82,5 +82,7 @@ sys.exit(0 if ok else 1)' 2>/dev/null; then
   log "  GATES FAILED:$G"; return 1
 }
 log "=== driver gates on $1 (term: $2)"
-if markers "$1" >> "$LOG" 2>&1; then log "  markers OK"; else log "  MARKERS FAILED"; fi
-if gate "$1" "$2"; then log "  ALL DRIVER GATES PASSED"; else log "  DRIVER GATES FAILED"; fi
+M=0; if markers "$1" >> "$LOG" 2>&1; then log "  markers OK"; else log "  MARKERS FAILED"; M=1; fi
+# A failed marker check fails the run too (it used to be logged and then
+# ignored in the final line and the exit status).
+if gate "$1" "$2" && [ $M = 0 ]; then log "  ALL DRIVER GATES PASSED"; else log "  DRIVER GATES FAILED$( [ $M = 1 ] && echo ' (markers)')"; exit 1; fi
