@@ -63,11 +63,33 @@ function _szSearchForms(rec, norm) {
   return out;
 }
 
-// The streaming filter: does any form contain the whole query?
+// Score of the query words against one form, or -1: every word must
+// appear (+11 at a word start, +1 inside one). An admin area may skip the
+// connector words, but must match at least one other word.
+function _szWordsScore(name, words, admin) {
+  var textScore = 0, real = 0;
+  for (var w = 0; w < words.length; w++) {
+    var pos = name.indexOf(words[w]);
+    if (pos === -1) {
+      if (admin && SZ_ADMIN_CONNECTORS[words[w]]) continue;
+      return -1;
+    }
+    if (!(admin && SZ_ADMIN_CONNECTORS[words[w]])) real++;
+    if (pos === 0 || name[pos - 1] === ' ') textScore += 10;
+    textScore += 1;
+  }
+  return (admin && !real) ? -1 : textScore;
+}
+
+// The streaming filter: could the record match? Other records: the name
+// contains the whole query (as before). An admin area: _szTextScore's own
+// rule on any of its forms, so the filter never drops what it would rank.
 function _szFormsContain(rec, qNorm, norm) {
   if (!qNorm) return true;
+  if (rec.t !== 'admin') return norm(String(rec.n || '')).indexOf(qNorm) >= 0;
+  var words = qNorm.split(/\s+/).filter(function(w) { return w; });
   var forms = _szSearchForms(rec, norm);
-  for (var i = 0; i < forms.length; i++) if (forms[i].indexOf(qNorm) >= 0) return true;
+  for (var i = 0; i < forms.length; i++) if (_szWordsScore(forms[i], words, true) >= 0) return true;
   return false;
 }
 
@@ -79,17 +101,8 @@ function _szTextScore(item, q, words, norm) {
   var best = -1;
   for (var f = 0; f < forms.length; f++) {
     var name = forms[f];
-    var textScore = 0, allMatch = true;
-    for (var w = 0; w < words.length; w++) {
-      var pos = name.indexOf(words[w]);
-      if (pos === -1) {
-        if (admin && SZ_ADMIN_CONNECTORS[words[w]]) continue;
-        allMatch = false; break;
-      }
-      if (pos === 0 || name[pos - 1] === ' ') textScore += 10;
-      textScore += 1;
-    }
-    if (!allMatch) continue;
+    var textScore = _szWordsScore(name, words, admin);
+    if (textScore < 0) continue;
     if (name === q) textScore += 50;
     if (name.indexOf(q) === 0) textScore += 25;
     if (textScore > best) best = textScore;

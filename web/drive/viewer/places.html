@@ -1550,12 +1550,16 @@ function matchesName(rec, q) {
   // and to "<name> <type>" / "<type> of <name>" ("City of Alexandria"),
   // as in the map's search box (index.html, admin-search).
   if (rec.t !== 'admin') return false;
+  // Any word order; "of", "de", ... may be left out, but not every word.
+  const CONNECTORS = new Set(['of', 'de', 'du', 'des', 'del', 'di', 'la', 'le', 'the']);
+  const words = ql.split(/\s+/).filter((w) => w);
+  if (!words.some((w) => !CONNECTORS.has(w))) return false;
   const label = foldText(rec.s);
   for (const nm of [rec.n].concat(Array.isArray(rec.alt) ? rec.alt : [])) {
     const h = foldText(nm);
     if (!h) continue;
-    if (h.includes(ql) || (label && ((h + ' ' + label).includes(ql)
-                                      || (label + ' of ' + h).includes(ql)))) return true;
+    const forms = label ? [h, h + ' ' + label, label + ' of ' + h] : [h];
+    if (forms.some((f) => words.every((w) => f.includes(w) || CONNECTORS.has(w)))) return true;
   }
   return false;
 }

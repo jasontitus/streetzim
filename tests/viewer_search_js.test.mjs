@@ -88,6 +88,19 @@ ok('the stream filter lets admin forms through', () => {
   assert.ok(V._szFormsContain(ALEX_SHOP, '', norm));
 });
 
+ok('the stream filter keeps what the scorer would rank, and no more', () => {
+  const qs = ['county arlington', 'alexandria of city', 'city alexandria', 'the district',
+              'of', 'of the', 'arlington', 'arl', 'town alexandria', 'washington'];
+  for (const it of [ARLINGTON, ALEXANDRIA, DC]) {
+    for (const q of qs) {
+      assert.strictEqual(V._szFormsContain(it, norm(q), norm), score(it, q) >= 0, `${it.n} / ${q}`);
+    }
+  }
+  assert.strictEqual(score(ALEXANDRIA, 'of'), -1);            // connectors alone
+  assert.ok(!V._szFormsContain(ALEXANDRIA, 'of the', norm));
+  assert.ok(score(ARLINGTON, 'county arlington') > 0);        // any word order
+});
+
 ok('a pick fits the box, else zooms by level', () => {
   assert.deepStrictEqual(V._szAdminCamera(DC),
     { bounds: [[-77.11979, 38.79163], [-76.90937, 38.99597]] });
@@ -122,6 +135,9 @@ ok('Find page: admin areas match by other names and "<type> of <name>"', () => {
   assert.ok(P.matchesName(DC, 'D.C.'));
   assert.ok(!P.matchesName(ALEX_SHOP, 'City of Alexandria'));
   assert.ok(P.matchesName(ALEX_SHOP, 'clothes'));          // subtype, as before
+  assert.ok(P.matchesName(ARLINGTON, 'county arlington'));
+  assert.ok(!P.matchesName(ALEXANDRIA, 'of'));
+  assert.ok(!P.matchesName(ALEXANDRIA, 'town of alexandria'));
 });
 
 ok('Find page: "Map" fits an admin area with a box', () => {
