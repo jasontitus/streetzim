@@ -1703,24 +1703,40 @@ function wikiGeoTitlesInBounds(W, E, S, N) {
   } catch (e) {}
 })();
 
-// Resolve the in-ZIM article path for a place. Returns null UNLESS this ZIM
-// actually bundles Wikipedia articles — signalled by the presence of
-// wiki-geo-index.json (WIKI_GEO_INDEX). That gate is what makes the viewer
-// safe on other ZIMs that have no bundled articles: no broken article links.
-// When articles exist, prefer the OSM `wikipedia` tag (`w`, "en:Golden Gate
-// Bridge"), else the geo-index reverse map, else the side-load bridge.
+// BEGIN wiki-article-path
+// The title a `w` tag names, as the ZIM stores it (wiki-article/<Title>):
+// its language prefix (2-3 letters before the first colon, any case: "en:",
+// "NL:") dropped, spaces as underscores. The same rule as the build's
+// (cloud/wiki_articles._strip_lang, the geo-index in zim_writer).
+function _wikiTagTitle(w) {
+  var s = String(w), ci = s.indexOf(':');
+  var t = (ci >= 2 && ci <= 3 && /^\p{L}+$/u.test(s.slice(0, ci))) ? s.slice(ci + 1) : s;
+  return t.replace(/ /g, '_');
+}
+
+// Resolve the in-ZIM article path for a place, or null when this ZIM has
+// no article for it. wiki-geo-index.json (WIKI_GEO_INDEX) lists every
+// bundled article a record links to, so a title outside it has no page:
+// most `w` tags of a non-English country name an article English Wikipedia
+// does not have (7,519 of 10,767 records with `w` in the Netherlands map
+// showed a Wikipedia button that opened a missing page). Until the index
+// has loaded (or in a ZIM without bundled articles) there is no button:
+// the index is what says an article exists. Prefer the OSM `wikipedia` tag
+// (`w`, "en:Golden Gate Bridge"), else the geo-index reverse map, else the
+// side-load bridge.
 function _wikiArticlePath(qid, w) {
   if (!WIKI_GEO_INDEX) return null;
   var t = null;
   if (w) {
-    var s = String(w), ci = s.indexOf(':');
-    t = (ci >= 2 && ci <= 3 && /^[a-z]+$/i.test(s.slice(0, ci))) ? s.slice(ci + 1) : s;
+    t = _wikiTagTitle(w);
   } else if (qid) {
     t = (WIKI_GEO_QID && WIKI_GEO_QID[qid])
         || (WIKI_QID_TITLES && WIKI_QID_TITLES[qid]) || null;
+    t = t ? String(t).replace(/ /g, '_') : null;
   }
-  return t ? t.replace(/ /g, '_') : null;
+  return t && Object.prototype.hasOwnProperty.call(WIKI_GEO_INDEX, t) ? t : null;
 }
+// END wiki-article-path
 
 // Open a bundled Wikipedia article in a full-screen in-app overlay with a
 // "← Back to map" bar, instead of window.open('_blank'). In the Kiwix WebView
