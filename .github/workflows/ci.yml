@@ -323,6 +323,26 @@ jobs:
             CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
             node cloud/zim_viewer_smoke.mjs
 
+      # The production gate's overlap check. The smoke tests above never
+      # measure layout, so a control drawn over another one passed CI: #22's
+      # "Show the whole map" button landed under the satellite/terrain/wiki
+      # panel and only the host's gates caught it.
+      - name: No overlapping controls at phone widths (overlap-check)
+        run: |
+          kiwix-serve --port 8902 osm-monaco-ci.zim &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8902/content/osm-monaco-ci/map-config.json >/dev/null && break; sleep 1; done
+          # SHOW_ALL_CONTROLS=1: Monaco has no satellite, terrain or Wikidata,
+          # so the layer panel is empty here unless forced visible. Portrait
+          # sizes from the device matrix, and landscape phones.
+          fail=0
+          for s in 320x568 375x667 390x844 430x932 844x390 667x375 932x430; do
+            ZIM_ORIGIN=http://127.0.0.1:8902/content/osm-monaco-ci VW=${s%x*} VH=${s#*x} SHOW_ALL_CONTROLS=1 \
+              CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
+              node tmp/overlap-check.mjs | tee "overlap-$s.txt"
+            grep -q '^NO OVERLAPS' "overlap-$s.txt" || { echo "::error::controls overlap at $s"; fail=1; }
+          done
+          exit $fail
+
       - name: Rewrite tools on libzim (repackage, in-place viewer patch)
         env:
           STREETZIM_REQUIRE_ZIMCHECK: "1"

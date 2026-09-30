@@ -10,6 +10,16 @@ try {
   await p.goto(ORIGIN + '/index.html', { waitUntil: 'domcontentloaded', timeout: 90000 });
   await p.waitForSelector('canvas.maplibregl-canvas, .maplibregl-canvas', { timeout: 90000 });
   await new Promise(r => setTimeout(r, 10000));
+  // SHOW_ALL_CONTROLS=1: show every #controls button (satellite, terrain,
+  // wiki) before measuring. Each is display:none unless the ZIM has that
+  // feature, so a small test ZIM (CI's Monaco) measures an empty 0 px panel
+  // and can't see the panel covering anything. The production gates leave
+  // this unset and measure what the ZIM really shows.
+  if (process.env.SHOW_ALL_CONTROLS === '1') {
+    await p.evaluate(() => document.querySelectorAll('#controls button')
+      .forEach(el => { el.style.display = 'block'; }));
+    await new Promise(r => setTimeout(r, 300));
+  }
   const res = await p.evaluate(() => {
     // Measure REAL controls, not MapLibre's positioning wrappers: the
     // .maplibregl-ctrl-bottom-right container spans the full viewport width
