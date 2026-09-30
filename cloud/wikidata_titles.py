@@ -48,6 +48,7 @@ from cloud.wikimedia_http import (
     Pacer,
     TransientError,
     get_json,
+    polite_pacer,
     require_complete,
     stop_error,
 )
@@ -211,8 +212,9 @@ def resolve_qids(
         never re-query the same Q-ID. Only Wikidata's answers are cached;
         a rate limit or outage caches nothing (see the module docstring).
     sleep: the gap between one response and the next request. Requests
-        are serial, so the API's own response time paces them; 429 and
-        maxlag answers widen the gap (cloud/wikimedia_http.Pacer).
+        are serial, so the API's own response time paces them, at most
+        STREETZIM_WIKI_MAX_PER_MIN a minute (default 120); 429 and maxlag
+        answers widen the gap (cloud/wikimedia_http.polite_pacer).
 
     Q-IDs left unresolved because the API could not answer are reported in
     a WARNING; with STREETZIM_REQUIRE_WIKI=1 they stop the build.
@@ -261,7 +263,7 @@ def resolve_qids(
     # every 50 batches and on any failure. When the API still cannot
     # answer, resolution stops (hammering a rate limit is rude) and returns
     # what it has, loudly; a refused batch is skipped, not cached.
-    pacer = Pacer(sleep)
+    pacer = polite_pacer(sleep)
     resolver = _Resolver(user_agent, pacer)
     failed_at = None
     for n, i in enumerate(range(0, len(todo), BATCH)):

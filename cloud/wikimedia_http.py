@@ -13,10 +13,16 @@ What a caller gets:
   `TransientError` when a 429, 408, 5xx, timeout, connection or truncated
   body error outlives the retries. A caller must never cache a
   `TransientError` as a miss: the next build asks again.
-- Retries honour `Retry-After` (delta-seconds or HTTP-date), capped at
-  `max_wait`, and otherwise back off exponentially with jitter.
-- A `Pacer` keeps a polite gap between requests, widens it after each 429
-  and eases back towards the base gap as requests succeed.
+- Retries honour `Retry-After` (delta-seconds or HTTP-date); one longer
+  than `max_wait` stops the run (a stopping `TransientError`) rather than
+  retrying before the server allows it. Without one, retries back off
+  exponentially with jitter, at least 5 s after a 429 or 503.
+- A `Pacer` keeps a polite gap between requests (from the end of one
+  response to the next request), widens it after each 429, maxlag or 5xx
+  with Retry-After and eases back towards the base gap as requests
+  succeed; it can also hold a cap on the request rate and a longer pause
+  after a slow answer.
+- Requests ask for gzip and decompress it (Wikimedia's robot policy).
 
 User-Agent: Wikimedia's policy (meta.wikimedia.org/wiki/User-Agent_policy)
 asks for a descriptive agent with a way to reach its operator. The default
@@ -27,6 +33,7 @@ from __future__ import annotations
 
 import datetime
 import email.utils
+import gzip
 import http.client
 import json
 import os
@@ -36,6 +43,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import zlib
 from collections.abc import Callable
 from typing import Any
 
@@ -44,7 +52,17 @@ CONTACT_URL = PROJECT_URL + "/issues"
 CONTACT_ENV = "STREETZIM_WIKI_CONTACT"
 REQUIRE_ENV = "STREETZIM_REQUIRE_WIKI"
 BUDGET_ENV = "STREETZIM_WIKI_WAIT_BUDGET"
-DEFAULT_WAIT_BUDGET = 900.0   # seconds of rate-limit waiting per run
+DEFAULT_WAIT_BUDGET = 900.0   # seconds of rate-limit waiting per Pacer (per step)
+GAP_ENV = "STREETZIM_WIKI_GAP"
+MAX_PER_MIN_ENV = "STREETZIM_WIKI_MAX_PER_MIN"
+DEFAULT_GAP = 0.1             # seconds from one response to the next request
+DEFAULT_MAX_PER_MIN = 120.0   # request starts a minute (polite_pacer)
+SLOW_AFTER = 1.0              # an answer slower than this ...
+SLOW_GAP = 5.0                # ... is followed by at least this pause
+# A 429 or 503 without Retry-After waits at least this long before its
+# retry, never more than max_wait (Wikimedia APIs/Rate limits: "clients
+# should wait at least five seconds").
+MIN_THROTTLE_WAIT = 5.0
 
 # HTTP statuses worth retrying.
 TRANSIENT_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
@@ -152,24 +170,46 @@ class Pacer:
     The gap runs from the end of one response to the start of the next
     request, so a slow API is paced by its own response time (Wikimedia's
     API etiquette asks for serial requests, not a fixed rate). `interval`
-    is the base gap. Each 429 or maxlag/ratelimited answer doubles the
-    current gap (to at least the server's `Retry-After`, capped at
-    `max_interval`); each success eases it 10% back towards the base.
+    is the base gap. Each 429, maxlag/ratelimited answer or 5xx with a
+    Retry-After doubles the current gap (to at least the server's
+    `Retry-After`, capped at `max_interval`); each success eases it 10%
+    back towards the base.
+
+    Two floors keep a fast API polite without a fixed sleep:
+    - `min_period`: at least this long from the start of one request to
+      the start of the next, so a run of fast responses stays under a
+      per-minute limit (Wikimedia's is 200 requests a minute for an
+      unauthenticated client with a descriptive User-Agent);
+    - `slow_after`/`slow_gap`: a response that took longer than
+      `slow_after` seconds is followed by a gap of at least `slow_gap`
+      (the robot policy's "if your request takes more than 1 second to
+      serve, please wait 5 seconds before making another request").
+    Both default to off.
 
     `budget` (seconds; default STREETZIM_WIKI_WAIT_BUDGET, else 15 min)
-    bounds the waiting a run spends on failures: retry backoff and any gap
-    beyond the base. Once spent, `get_json` raises a stopping
-    TransientError instead of sleeping, so a hard throttle costs a build
-    minutes, not hours."""
+    bounds the waiting this Pacer's loop (one build step) spends on
+    failures: retry backoff and any gap beyond the base. Once spent,
+    `get_json` raises a stopping TransientError instead of sleeping, so a
+    hard throttle costs a step minutes, not hours. The floors are etiquette, not failures, and are
+    not charged to it: only the part of a wait beyond them is.
+
+    Not thread-safe: use one Pacer per serial request loop (the floors
+    assume nothing else is asking at the same time)."""
 
     def __init__(self, interval: float, max_interval: float = 30.0,
-                 budget: float | None = None) -> None:
+                 budget: float | None = None, *, min_period: float = 0.0,
+                 slow_after: float | None = None, slow_gap: float = 0.0) -> None:
         self.base = max(0.0, interval)
         self.current = self.base
         self.max_interval = max(max_interval, self.base)
+        self.min_period = max(0.0, min_period)
+        self.slow_after = slow_after
+        self.slow_gap = max(0.0, slow_gap)
         self.budget = env_number(BUDGET_ENV, DEFAULT_WAIT_BUDGET) if budget is None else budget
         self.spent = 0.0
-        self._last: float | None = None
+        self._start: float | None = None   # when the last request went out
+        self._last: float | None = None    # when its response came back
+        self._slow = False                 # it took longer than slow_after
 
     @property
     def exhausted(self) -> bool:
@@ -182,15 +222,28 @@ class Pacer:
         self.spent += max(0.0, seconds)
 
     def wait(self) -> None:
-        if self._last is not None and self.current > 0:
-            gap = self._last + self.current - time.monotonic()
-            if gap > 0:
-                self.charge(min(gap, self.current - self.base))
-                time.sleep(gap)
+        """Sleep until the next request may start, then mark its start."""
+        now = time.monotonic()
+        floor_due = gap_due = now
+        if self._last is not None:
+            polite = max(self.base, self.slow_gap if self._slow else 0.0)
+            floor_due = max(floor_due, self._last + polite)
+            gap_due = self._last + self.current
+        if self._start is not None:
+            floor_due = max(floor_due, self._start + self.min_period)
+        delay = max(floor_due, gap_due) - now
+        if delay > 0:
+            # Only the widening a rate limit caused, beyond the floors that
+            # apply anyway, counts against the budget.
+            self.charge(min(delay, max(0.0, gap_due - floor_due)))
+            time.sleep(delay)
+        self._start = time.monotonic()
 
     def done(self) -> None:
         """A response (or failure) came back: the gap starts now."""
         self._last = time.monotonic()
+        self._slow = (self.slow_after is not None and self._start is not None
+                      and self._last - self._start > self.slow_after)
 
     def rate_limited(self, retry_after: float | None = None) -> None:
         widened = max(self.current * 2, self.base, 1.0, retry_after or 0.0)
@@ -198,6 +251,25 @@ class Pacer:
 
     def succeeded(self) -> None:
         self.current = max(self.base, self.current * 0.9)
+
+
+def polite_pacer(gap: float | None = None, max_per_min: float | None = None,
+                 budget: float | None = None) -> Pacer:
+    """The Pacer for Wikimedia's Action API (docs/zimfarm.md, "Wikimedia
+    API etiquette"): serial, `gap` seconds from each response to the next
+    request (default STREETZIM_WIKI_GAP, else 0.1), at most `max_per_min`
+    request starts a minute (default STREETZIM_WIKI_MAX_PER_MIN, else 120;
+    0 means no cap), and 5 s after an answer that took over 1 s.
+
+    The cap is per Pacer, so it assumes one Wikimedia client per worker
+    IP: two builds side by side from one IP each get the full rate."""
+    if gap is None:
+        gap = env_number(GAP_ENV, DEFAULT_GAP)
+    if max_per_min is None:
+        max_per_min = env_number(MAX_PER_MIN_ENV, DEFAULT_MAX_PER_MIN)
+    return Pacer(gap, budget=budget,
+                 min_period=60.0 / max_per_min if max_per_min > 0 else 0.0,
+                 slow_after=SLOW_AFTER, slow_gap=SLOW_GAP)
 
 
 def _body_throttle(data: Any) -> str:
@@ -221,8 +293,11 @@ def get_json(url: str, *, user_agent: str, pacer: Pacer | None = None,
     Raises `urllib.error.HTTPError` for a non-transient HTTP status and
     `TransientError` once the `retries` attempts, or the pacer's wait
     budget, are spent."""
+    # gzip: the robot policy's "Always request content with an
+    # Accept-Encoding: gzip HTTP header".
     req = urllib.request.Request(url, headers={"User-Agent": user_agent,
-                                               "Accept": accept})
+                                               "Accept": accept,
+                                               "Accept-Encoding": "gzip"})
     retries = max(1, retries)
     if pacer is not None and pacer.exhausted:
         raise TransientError(f"wait budget of {pacer.budget:.0f}s spent", stop=True)
@@ -235,9 +310,13 @@ def get_json(url: str, *, user_agent: str, pacer: Pacer | None = None,
         try:
             try:
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    data = json.load(resp)
+                    body = resp.read()
                     hdrs = getattr(resp, "headers", None)
                     ra_header = hdrs.get("Retry-After") if hdrs is not None else None
+                    encoding = (hdrs.get("Content-Encoding") or "") if hdrs is not None else ""
+                if encoding.strip().lower() == "gzip":
+                    body = gzip.decompress(body)
+                data = json.loads(body)
             finally:
                 if pacer is not None:
                     pacer.done()
@@ -254,15 +333,32 @@ def get_json(url: str, *, user_agent: str, pacer: Pacer | None = None,
             headers = e.headers
             retry_after = parse_retry_after(headers.get("Retry-After") if headers else None)
             last = TransientError(f"HTTP {e.code}", e.code)
-        except (urllib.error.URLError, TimeoutError, OSError,
-                http.client.HTTPException, ValueError) as e:
-            # URLError: DNS/refused; OSError: resets; HTTPException:
-            # IncompleteRead; ValueError: a truncated or non-JSON body.
+        except (urllib.error.URLError, TimeoutError, OSError, EOFError,
+                zlib.error, http.client.HTTPException, ValueError) as e:
+            # URLError: DNS/refused; OSError: resets, a bad gzip header;
+            # EOFError/zlib.error: a truncated or corrupt gzip body;
+            # HTTPException: IncompleteRead; ValueError: a non-JSON body.
             last = TransientError(f"{type(e).__name__}: {e}")
-        if last.throttled and pacer is not None:
+        # 429/maxlag say "slow down". A 5xx with a Retry-After says the
+        # backend is overloaded (Wikimedia's 503) and widens the gap too; a
+        # bare 5xx is only retried with backoff, and a run of them stops
+        # the run (the callers' give-up streak).
+        overloaded = (last.status or 0) >= 500 and retry_after is not None
+        if pacer is not None and (last.throttled or overloaded):
             pacer.rate_limited(retry_after)
+        if retry_after is not None and retry_after > max_wait:
+            # Retrying sooner than the server allows would be refused
+            # again (and is rude); waiting that long stalls the build.
+            # Stop asking; the next build tries again.
+            if pacer is not None:
+                pacer.charge(pacer.budget)
+            raise TransientError(
+                f"{last.reason}; Retry-After {retry_after:.0f}s is over {max_wait:.0f}s",
+                last.status, throttled=last.throttled, stop=True)
         if attempt < retries - 1:
             delay = backoff_delay(attempt, retry_after, base=base, max_wait=max_wait)
+            if retry_after is None and (last.throttled or last.status == 503):
+                delay = max(delay, min(MIN_THROTTLE_WAIT, max_wait))
             if pacer is not None:
                 if not pacer.can_wait(delay):
                     pacer.charge(pacer.budget)   # spent: later calls stop at once

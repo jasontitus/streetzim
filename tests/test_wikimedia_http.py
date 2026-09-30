@@ -72,7 +72,8 @@ def sleeps(monkeypatch):
     monkeypatch.setattr(wm.time, "sleep", sleep)
     monkeypatch.setattr(wm.time, "monotonic", lambda: now[0])
     monkeypatch.setattr(wm.random, "random", lambda: 0.5)
-    monkeypatch.delenv(wm.REQUIRE_ENV, raising=False)
+    for env in (wm.REQUIRE_ENV, wm.GAP_ENV, wm.MAX_PER_MIN_ENV):
+        monkeypatch.delenv(env, raising=False)
     return got
 
 
@@ -148,9 +149,11 @@ def test_429_with_http_date_retry_after(monkeypatch, sleeps):
 
 
 def test_429_without_retry_after_backs_off_exponentially(monkeypatch, sleeps):
+    # At least 5 s after a 429 that names no time (Wikimedia's rate-limit
+    # page); a 5xx takes the plain exponential backoff.
     use(monkeypatch, FakeAPI(http_error(429), http_error(429), http_error(503), {"ok": 1}))
     wm.get_json("https://x.test/a", user_agent="ua", base=2)
-    assert sleeps == [1.5, 3.0, 6.0]
+    assert sleeps == [5.0, 5.0, 6.0]
 
 
 def test_exhausted_429_raises_transient(monkeypatch, sleeps):
@@ -164,7 +167,7 @@ def test_non_ascii_retry_after_does_not_crash_a_build(monkeypatch, sleeps, tmp_p
     use(monkeypatch, FakeAPI(http_error(429, "\u00b2"), parse_ok(ARTICLE)))
     stats = wa.bundle_wiki_articles(["en:A"], lambda *a: None, cache_dir=str(tmp_path),
                                     sleep=0, log=lambda *_: None)
-    assert stats["bundled"] == 1 and sleeps == [1.5]       # plain backoff instead
+    assert stats["bundled"] == 1 and sleeps == [5.0]       # as with no Retry-After
 
 
 def test_wait_budget_bounds_a_hard_throttle(monkeypatch, sleeps, tmp_path):
@@ -185,6 +188,141 @@ def test_404_is_an_answer_not_retried(monkeypatch, sleeps):
         wm.get_json("https://x.test/a", user_agent="ua")
     assert len(api.urls) == 1 and sleeps == []
 
+
+
+# ---- article pacing: from the end of each response, no fixed sleep ------
+
+class Clock:
+    """A fake clock: sleeps are recorded, and both sleeps and the time a
+    TimedAPI answer takes advance it."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+        self.sleeps: list[float] = []
+
+    def sleep(self, sec: float) -> None:
+        self.sleeps.append(sec)
+        self.now += sec
+
+
+@pytest.fixture
+def clock(monkeypatch) -> Clock:
+    c = Clock()
+    monkeypatch.setattr(wm.time, "sleep", c.sleep)
+    monkeypatch.setattr(wm.time, "monotonic", lambda: c.now)
+    monkeypatch.setattr(wm.random, "random", lambda: 0.5)
+    for env in (wm.REQUIRE_ENV, wm.GAP_ENV, wm.MAX_PER_MIN_ENV):
+        monkeypatch.delenv(env, raising=False)
+    return c
+
+
+class TimedAPI(FakeAPI):
+    """FakeAPI whose n-th answer takes `took(n)` seconds on `clock`;
+    records when each request started."""
+
+    def __init__(self, clock: Clock, *script, default=None, took=lambda n: 0.2):
+        super().__init__(*script, default=default)
+        self.clock = clock
+        self.took = took
+        self.starts: list[float] = []
+
+    def __call__(self, req, timeout=None):
+        self.starts.append(self.clock.now)
+        self.clock.now += self.took(len(self.starts) - 1)
+        return super().__call__(req, timeout)
+
+
+def test_no_fixed_sleep_after_a_response(monkeypatch, clock, tmp_path):
+    # Answers taking 0.5 s: the only wait is the 0.1 s gap after each one,
+    # not the old fixed 1 s.
+    api = use(monkeypatch, TimedAPI(clock, default=parse_ok(ARTICLE), took=lambda n: 0.5))
+    stats = wa.bundle_wiki_articles([f"en:T{i}" for i in range(6)], lambda *a: None,
+                                    cache_dir=str(tmp_path), log=lambda *_: None)
+    assert stats["bundled"] == 6
+    assert clock.sleeps == [pytest.approx(wm.DEFAULT_GAP)] * 5
+    assert all(b - a == pytest.approx(0.6) for a, b in zip(api.starts, api.starts[1:]))
+
+
+def test_fast_responses_stay_under_the_per_minute_limit(monkeypatch, clock, tmp_path):
+    # 0.05 s answers plus a 0.1 s gap would be 400 requests a minute; the
+    # request-rate floor holds them to 120 (Wikimedia allows 200).
+    api = use(monkeypatch, TimedAPI(clock, default=parse_ok(ARTICLE), took=lambda n: 0.05))
+    wa.bundle_wiki_articles([f"en:T{i}" for i in range(20)], lambda *a: None,
+                            cache_dir=str(tmp_path), log=lambda *_: None)
+    spacing = [b - a for a, b in zip(api.starts, api.starts[1:])]
+    assert min(spacing) >= 60 / wm.DEFAULT_MAX_PER_MIN - 1e-9
+    assert max(spacing) == pytest.approx(60 / wm.DEFAULT_MAX_PER_MIN)
+    # STREETZIM_WIKI_MAX_PER_MIN=0 lifts the cap: only the gap is left.
+    monkeypatch.setenv(wm.MAX_PER_MIN_ENV, "0")
+    clock.sleeps.clear()
+    use(monkeypatch, TimedAPI(clock, default=parse_ok(ARTICLE), took=lambda n: 0.05))
+    wa.bundle_wiki_articles([f"en:U{i}" for i in range(3)], lambda *a: None,
+                            cache_dir=str(tmp_path), log=lambda *_: None)
+    assert clock.sleeps == [pytest.approx(0.1)] * 2
+
+
+def test_slow_answer_is_followed_by_a_longer_pause(monkeypatch, clock, tmp_path):
+    # The robot policy: over 1 s to serve -> wait 5 s before the next.
+    use(monkeypatch, TimedAPI(clock, default=parse_ok(ARTICLE),
+                              took=lambda n: 1.5 if n == 1 else 0.45))
+    wa.bundle_wiki_articles([f"en:T{i}" for i in range(4)], lambda *a: None,
+                            cache_dir=str(tmp_path), log=lambda *_: None)
+    assert clock.sleeps == [pytest.approx(0.1), pytest.approx(5.0), pytest.approx(0.1)]
+
+
+def test_gap_widens_on_429_and_eases_back(monkeypatch, sleeps, tmp_path):
+    use(monkeypatch, FakeAPI(http_error(429, "4"), default=parse_ok(ARTICLE)))
+    stats = wa.bundle_wiki_articles([f"en:T{i}" for i in range(5)], lambda *a: None,
+                                    cache_dir=str(tmp_path), sleep=0.1,
+                                    log=lambda *_: None)
+    assert stats["bundled"] == 5 and stats["unfetched"] == 0
+    # Retry-After 4 s (+ jitter), then gaps of 4 s easing 10% per success.
+    assert sleeps == [pytest.approx(4.5), pytest.approx(3.6), pytest.approx(3.24),
+                      pytest.approx(2.916), pytest.approx(2.6244)]
+    p = wm.polite_pacer(0.1, 0)
+    p.rate_limited(4.0)
+    for _ in range(100):
+        p.succeeded()
+    assert p.current == pytest.approx(0.1)    # all the way back to the base
+
+
+@pytest.mark.parametrize("fault,widens", [(http_error(503, "7"), True),
+                                          (http_error(502), False),
+                                          ({"error": {"code": "maxlag"}}, True)])
+def test_overload_widens_the_gap_a_bare_5xx_only_retries(monkeypatch, sleeps, fault,
+                                                          widens):
+    use(monkeypatch, FakeAPI(fault, {"ok": 1}))
+    p = wm.Pacer(0.1)
+    assert wm.get_json("https://x.test/a", user_agent="ua", pacer=p) == {"ok": 1}
+    assert (p.current > 0.1) is widens
+
+
+def test_gzip_is_asked_for_and_decoded(monkeypatch, sleeps):
+    import gzip as _gzip
+
+    class Resp(io.BytesIO):
+        def __init__(self, data: bytes) -> None:
+            super().__init__(data)
+            self.headers = {"Content-Encoding": "gzip"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+    seen = {}
+
+    def urlopen(req, timeout=None):
+        seen["ae"] = req.get_header("Accept-encoding")
+        return Resp(_gzip.compress(json.dumps(parse_ok(ARTICLE)).encode()))
+    monkeypatch.setattr(wm.urllib.request, "urlopen", urlopen)
+    assert wm.get_json("https://x.test/a", user_agent="ua") == parse_ok(ARTICLE)
+    assert seen["ae"] == "gzip"
+    # A truncated gzip body is a transient failure, never a crash.
+    monkeypatch.setattr(wm.urllib.request, "urlopen",
+                        lambda req, timeout=None: Resp(_gzip.compress(b'{"a": 1}')[:-6]))
+    with pytest.raises(wm.TransientError):
+        wm.get_json("https://x.test/a", user_agent="ua", retries=1)
 
 # ---- Wikipedia articles ---------------------------------------------------
 
@@ -437,7 +575,7 @@ def test_wikidata_exhausted_429_caches_nothing_and_warns(monkeypatch, sleeps, tm
 def test_wikidata_5xx_then_answer(monkeypatch, sleeps):
     use(monkeypatch, FakeAPI(http_error(502), http_error(503), entities({"Q9": "Nine"})))
     assert wt.resolve_qids(["Q9"], sleep=0) == {"Q9": "Nine"}
-    assert sleeps == [1.5, 3.0]
+    assert sleeps == [1.5, 5.0]      # a 503 without Retry-After waits at least 5 s
 
 
 def wikidata_api(bad: set[str] = frozenset(), log: list | None = None):
@@ -531,6 +669,12 @@ def test_wikidata_readonly_body_is_transient(monkeypatch, sleeps, tmp_path):
 def test_wikidata_pacing_is_serial_with_a_small_gap(monkeypatch, sleeps):
     qids = [f"Q{i}" for i in range(1, 151)]          # three requests
     monkeypatch.setattr(wm.urllib.request, "urlopen", wikidata_api())
+    # Instant answers: the per-minute cap (120, one start per 0.5 s) paces them.
+    wt.resolve_qids(qids)
+    assert sleeps == [pytest.approx(60 / wm.DEFAULT_MAX_PER_MIN)] * 2
+    # Without the cap only the small gap after each answer is left.
+    monkeypatch.setenv(wm.MAX_PER_MIN_ENV, "0")
+    sleeps.clear()
     wt.resolve_qids(qids)
     assert sleeps == [pytest.approx(0.1)] * 2
 
@@ -581,3 +725,170 @@ def test_sparql_exhausted_raises_for_the_caller_to_skip(monkeypatch, sleeps):
     use(monkeypatch, FakeAPI(default=http_error(503)))
     with pytest.raises(wm.TransientError):
         wc._run_sparql("SELECT 1")
+
+
+# ---- review follow-ups: cap, budget, long Retry-After, headers, extracts ----
+
+def test_retries_count_toward_the_per_minute_cap(monkeypatch, clock):
+    # A 502 retried after a short backoff still waits for the next slot.
+    api = use(monkeypatch, TimedAPI(clock, http_error(502), {"ok": 1},
+                                    took=lambda n: 0.05))
+    p = wm.polite_pacer(0.1, 120)
+    assert wm.get_json("https://x.test/a", user_agent="ua", pacer=p, base=0.1) == {"ok": 1}
+    assert len(api.starts) == 2
+    assert api.starts[1] - api.starts[0] == pytest.approx(0.5)
+
+
+def test_floors_are_not_charged_to_the_wait_budget(monkeypatch, clock):
+    p = wm.polite_pacer(0.1, 120, budget=100)
+    for took in (0.05, 1.5, 0.05, 0.05):      # the cap, then a slow answer's 5 s
+        p.wait()
+        clock.now += took
+        p.done()
+    p.wait()
+    assert sum(clock.sleeps) > 5 and p.spent == 0
+    # A widened gap is charged only beyond the floor that applies anyway.
+    p.rate_limited(retry_after=2.0)           # 2 s gap; after a slow answer the floor is 5 s
+    clock.now += 1.5
+    p.done()
+    p.wait()
+    assert clock.sleeps[-1] == pytest.approx(5.0) and p.spent == 0
+    p.rate_limited(retry_after=8.0)           # an 8 s gap over the 0.5 s cap floor
+    clock.now += 0.05                         # (due 0.45 s after this answer)
+    p.done()
+    p.wait()
+    assert clock.sleeps[-1] == pytest.approx(8.0) and p.spent == pytest.approx(7.55)
+
+
+def test_retry_after_beyond_max_wait_stops_instead_of_retrying_early(monkeypatch,
+                                                                      sleeps, tmp_path):
+    api = use(monkeypatch, FakeAPI(http_error(429, "600"), {"ok": 1}))
+    with pytest.raises(wm.TransientError) as ei:
+        wm.get_json("https://x.test/a", user_agent="ua", max_wait=120)
+    assert ei.value.stop and ei.value.rate_limited and "600s" in ei.value.reason
+    assert len(api.urls) == 1 and sleeps == []
+    # A build stops requesting at once and caches nothing.
+    api = use(monkeypatch, FakeAPI(default=http_error(429, "3600")))
+    stats = wa.bundle_wiki_articles([f"en:T{i}" for i in range(5)], lambda *a: None,
+                                    cache_dir=str(tmp_path), log=lambda *_: None)
+    assert len(api.urls) == 1 and stats["unfetched"] == 5 and os.listdir(tmp_path) == []
+
+
+def test_response_with_headers_but_no_content_encoding(monkeypatch, sleeps):
+    @contextmanager
+    def plain(req, timeout=None):
+        resp = io.BytesIO(json.dumps({"ok": 1}).encode())
+        resp.headers = email.message.Message()   # type: ignore[attr-defined]
+        resp.headers["Content-Type"] = "application/json"  # type: ignore[attr-defined]
+        yield resp
+    monkeypatch.setattr(wm.urllib.request, "urlopen", plain)
+    assert wm.get_json("https://x.test/a", user_agent="ua") == {"ok": 1}
+
+
+def _extracts_answer(titles):
+    return {"query": {"pages": [{"title": t, "extract": f"{t} is a place."}
+                                for t in titles]}}
+
+
+def test_extracts_honour_retry_after_and_stop_when_told(monkeypatch, sleeps, capsys):
+    import wikidata_cache as wc
+    entries = {f"Q{i}": {"wikipedia_title": f"Place_{i}"} for i in range(40)}
+    api = use(monkeypatch, FakeAPI(http_error(429, "3"),
+                                   _extracts_answer([f"Place {i}" for i in range(20)]),
+                                   _extracts_answer([f"Place {i}" for i in range(20, 40)])))
+    wc.fetch_wikipedia_extracts(entries)
+    assert all(e.get("extract") for e in entries.values())
+    assert len(api.urls) == 3 and sleeps[0] == pytest.approx(3.5)
+    assert wm.CONTACT_URL in api.ua
+    # A Retry-After beyond the retry cap stops the rest: one request, no retry.
+    entries = {f"Q{i}": {"wikipedia_title": f"Place_{i}"} for i in range(100)}
+    api = use(monkeypatch, FakeAPI(default=http_error(429, "900")))
+    wc.fetch_wikipedia_extracts(entries)
+    assert len(api.urls) == 1 and not any("extract" in e for e in entries.values())
+    assert "not fetching the remaining 80 extracts" in capsys.readouterr().out
+    # A 429 that outlives its retries skips that batch and goes on.
+    entries = {f"Q{i}": {"wikipedia_title": f"Place_{i}"} for i in range(40)}
+    api = use(monkeypatch, FakeAPI(*[http_error(429)] * 5,
+                                   _extracts_answer([f"Place {i}" for i in range(20, 40)])))
+    wc.fetch_wikipedia_extracts(entries)
+    assert len(api.urls) == 6
+    assert sum(1 for e in entries.values() if e.get("extract")) == 20
+
+
+def test_throttle_floor_never_exceeds_max_wait_and_covers_503(monkeypatch, sleeps):
+    use(monkeypatch, FakeAPI(http_error(429), {"ok": 1}))
+    wm.get_json("https://x.test/a", user_agent="ua", max_wait=2)
+    assert sleeps == [2]                       # the 5 s floor, capped at max_wait
+    sleeps.clear()
+    use(monkeypatch, FakeAPI(http_error(503), {"ok": 1}))
+    wm.get_json("https://x.test/a", user_agent="ua")
+    assert sleeps == [5.0]
+    sleeps.clear()
+    use(monkeypatch, FakeAPI(http_error(502), {"ok": 1}))
+    wm.get_json("https://x.test/a", user_agent="ua")
+    assert sleeps == [1.5]                     # other 5xx: plain backoff
+
+
+def test_extracts_other_4xx_skips_the_batch_401_403_stop(monkeypatch, sleeps, capsys):
+    import wikidata_cache as wc
+    entries = {f"Q{i}": {"wikipedia_title": f"Place_{i}"} for i in range(40)}
+    api = use(monkeypatch, FakeAPI(http_error(414),
+                                   _extracts_answer([f"Place {i}" for i in range(20, 40)])))
+    assert wc.fetch_wikipedia_extracts(entries) == 20       # the first batch stays pending
+    assert len(api.urls) == 2
+    assert sum(1 for e in entries.values() if e.get("extract")) == 20
+    assert not any(e.get(wc.NO_EXTRACT) for e in entries.values())
+    for code in (401, 403):
+        entries = {f"Q{i}": {"wikipedia_title": f"Place_{i}"} for i in range(40)}
+        api = use(monkeypatch, FakeAPI(default=http_error(code)))
+        assert wc.fetch_wikipedia_extracts(entries) == 40
+        assert len(api.urls) == 1
+
+
+def test_unanswered_extracts_are_asked_again_real_misses_are_not(monkeypatch, sleeps,
+                                                                  tmp_path):
+    import wikidata_cache as wc
+    qids = {f"Q{i}": {"name": f"Place {i}"} for i in (11, 12, 13)}
+    monkeypatch.setattr(wc, "extract_qids_from_pbf", lambda *a, **k: qids)
+    fetched: list = []
+
+    def props(new_qids, cache_dir=None):
+        fetched.append(list(new_qids))
+        return {q: {"qid": q, "label": f"L{q}", "wikipedia_title": f"Place_{q[1:]}"}
+                for q in new_qids}
+    monkeypatch.setattr(wc, "fetch_wikidata_batch", props)
+    d = str(tmp_path)
+
+    # Build 1: the extracts API stops the run (Retry-After beyond the cap).
+    use(monkeypatch, FakeAPI(default=http_error(429, "900")))
+    wc.build_cache(pbf_path="x.pbf", cache_dir=d)
+    cached = wc.load_cache(d)
+    assert set(cached) == set(qids) and all(wc.extract_pending(e) for e in cached.values())
+
+    # Build 2: no new Q-IDs, but the unanswered extracts are asked again.
+    # Place 13 has no extract: that answer is recorded, not a pending one.
+    api = use(monkeypatch, FakeAPI({"query": {"pages": [
+        {"title": "Place 11", "extract": "Eleven is a place."},
+        {"title": "Place 12", "extract": "Twelve is a place."},
+        {"title": "Place 13", "missing": True}]}}))
+    wc.build_cache(pbf_path="x.pbf", cache_dir=d)
+    assert len(fetched) == 1 and len(api.urls) == 1
+    cached = wc.load_cache(d)
+    assert cached["Q11"]["extract"] == "Eleven is a place."
+    assert cached["Q13"].get(wc.NO_EXTRACT) and not cached["Q13"].get("extract")
+    assert not any(wc.extract_pending(e) for e in cached.values())
+
+    # Build 3: nothing is asked again.
+    api = use(monkeypatch, FakeAPI())
+    wc.build_cache(pbf_path="x.pbf", cache_dir=d)
+    assert api.urls == [] and len(fetched) == 1
+
+
+def test_a_continued_extracts_answer_marks_no_misses(monkeypatch, sleeps):
+    import wikidata_cache as wc
+    entries = {"Q1": {"wikipedia_title": "A"}, "Q2": {"wikipedia_title": "B"}}
+    use(monkeypatch, FakeAPI({"continue": {"excontinue": 1},
+                              "query": {"pages": [{"title": "A", "extract": "A is."},
+                                                  {"title": "B"}]}}))
+    assert wc.fetch_wikipedia_extracts(entries) == 1
+    assert entries["Q1"]["extract"] == "A is." and wc.extract_pending(entries["Q2"])

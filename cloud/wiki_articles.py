@@ -41,6 +41,7 @@ from cloud.wikimedia_http import (
     api_error_code,
     env_number,
     get_json,
+    polite_pacer,
     require_complete,
     stop_error,
 )
@@ -405,6 +406,12 @@ _GIVE_UP_AFTER = 25
 RECHECK_ENV = "STREETZIM_WIKI_RECHECK_MAX"
 _DEFAULT_RECHECK_MAX = 1000
 
+# Pacing of the `action=parse` requests: cloud/wikimedia_http.polite_pacer
+# (serial, 0.1 s from each response, at most 120 requests a minute, 5 s
+# after an answer over 1 s; docs/zimfarm.md, "Wikimedia API etiquette").
+# Until 2026-09 this paused a fixed 1 s after every answer: 1,308 of the
+# 1,541 s the D.C. fetch took, in a 39 minute build with no 429.
+
 
 def _cache_paths(cache_dir: str, title_us: str) -> tuple[str, str]:
     key = hashlib.sha1(title_us.encode("utf-8")).hexdigest()
@@ -517,7 +524,8 @@ def bundle_wiki_articles(
     user_agent: str | None = None,
     offline_zim: str | None = None,
     limit: int | None = None,
-    sleep: float = 1.0,
+    sleep: float | None = None,
+    max_per_min: float | None = None,
     log: Callable[[str], None] = print,
     images: str = "none",
     image_max_kb: int = 128,
@@ -530,9 +538,13 @@ def bundle_wiki_articles(
     (wired to `creator.add_item(MapItem(...))` in the build; a plain dict
     collector in tests). Returns stats.
 
-    Online, `sleep` is the polite gap after each API response (cache hits
-    cost none); rate limits widen it. A title the API could not answer
-    (429, 5xx, network, refused) is counted in stats["unfetched"], never
+    Online, requests are serial and `sleep` is the gap from the end of
+    each API response to the next request (cache hits cost none; default
+    STREETZIM_WIKI_GAP, else 0.1 s), with at most `max_per_min` requests a
+    minute (STREETZIM_WIKI_MAX_PER_MIN, else 120) and 5 s after an answer
+    that took over 1 s (`polite_pacer`); a 429, maxlag or 5xx with
+    Retry-After widens the gap and successes ease it back. A title the
+    API could not answer (429, 5xx, network, refused) is counted in stats["unfetched"], never
     cached as a miss, and reported in a WARNING; with
     STREETZIM_REQUIRE_WIKI=1 it stops the build (SystemExit) instead of
     shipping fewer articles. Requests stop for the rest of the run after a
@@ -575,7 +587,7 @@ def bundle_wiki_articles(
     stopped = False                # no more requests this run (cache still read)
     rechecked = recheck_left = 0   # old empty markers re-checked / left for later
     recheck_max = int(env_number(RECHECK_ENV, _DEFAULT_RECHECK_MAX))
-    pacer = Pacer(sleep)
+    pacer = polite_pacer(sleep, max_per_min)
     ua = user_agent or _user_agent("wiki")
     if src is None:
         states: dict[str, int] = {}
