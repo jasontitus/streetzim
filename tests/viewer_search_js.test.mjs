@@ -27,8 +27,9 @@ function slice(src, from, to) {
 }
 const V = new Function(slice(HTML, '// BEGIN admin-search', '// END admin-search') +
   '\nreturn { _szSearchForms, _szFormsContain, _szTextScore, _szAdminCamera, _szAdminKeys };')();
-// The viewer's normalizeText (300-search.js, initSearch).
-const norm = (s) => s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
+// The viewer's normalizeText (300-search.js, initSearch): SEARCH_SHARDS.fold.
+const norm = new Function(slice(HTML, '// BEGIN search-shards', '// END search-shards') +
+  '\nreturn SEARCH_SHARDS.fold;')();
 
 function score(item, query) {
   const q = norm(query);
@@ -125,6 +126,7 @@ ok('selectResult and applyHash use the box', () => {
 
 // ---- places.html -------------------------------------------------------
 const P = new Function(
+  slice(PLACES, '// BEGIN search-shards', '// END search-shards') +
   slice(PLACES, 'function foldText', '\n}\n') + '\n}\n' +
   slice(PLACES, 'function matchesName', '// Chunk key for a word') +
   '\nreturn { matchesName, mapHashFor };')();
