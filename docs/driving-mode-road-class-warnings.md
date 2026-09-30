@@ -9,15 +9,19 @@ the current byte layout, including the `class_access` bits this plan
 needed (they now ship), is in [`formats.md`](formats.md). This doc captures what would need to change
 so it can be picked up later without re-deriving the plan. File and line
 references are from before the split: the graph baker is now
-`streetzim/routing/build.py` and the viewer's routing code
-`resources/viewer/src/index/5*.js` and `routing-worker.js`; only the UI
-warning is left to do.
+`extract_routing_graph` in `streetzim/routing/build.py` and the viewer's
+routing code `resources/viewer/src/index/5*.js` and `routing-worker.js`.
+The graph side (SZRG v4 `class_access`) and the reader's accessors ship;
+the route's `classes` summary (`summarizeClasses`, `route.classes`) and the
+UI warning below do not exist yet.
 
 ---
 
 ## Why
 
-The router in `create_osm_zim.py` uses a single graph with car speeds.
+The router (the viewer's routing worker and `streetzim/routing/`; it was
+in `create_osm_zim.py` when this was written) uses a single graph with car
+speeds.
 When a user asks for a route and hits **Walk** or **Bike**, the follow-
 mode will happily lead them along a motorway / trunk road. That's at
 minimum unpleasant and in many jurisdictions illegal (interstates in the
@@ -32,7 +36,8 @@ note covers only the **warning** pass, which is small and additive.
 
 ## Current state of the routing graph
 
-Baked by `create_osm_zim.py::build_routing_graph` (around line 1720+),
+Baked by `extract_routing_graph` (then in `create_osm_zim.py` around line
+1720+, now in `streetzim/routing/build.py`),
 written as **SZRG v3** (`resources/viewer/index.html::initRouting`
 parses it around line ~2370+). Per-edge record:
 

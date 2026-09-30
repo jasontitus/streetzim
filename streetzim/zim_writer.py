@@ -492,11 +492,10 @@ def create_zim(
     """
     from libzim.writer import Creator as LibzimCreator, Item, StringProvider, FileProvider
     from libzim.writer import Hint
-    # ZSTD compression level. Match the libzim path's default
-    # (ZSTD_CLEVEL=22 in shipped builds — see build_command_template
-    # memory) so the rust path produces ZIMs of comparable size.
-    # ZSTD_CLEVEL env var overrides for parity with the libzim
-    # convention. Range is 1..22; 22 is "max" (slow but smallest).
+    # ZSTD compression level for the rust path (--zim-builder rust) only:
+    # libzim does not read ZSTD_CLEVEL and compresses at its own fixed
+    # level (19). The production wrappers set ZSTD_CLEVEL=22. Range is
+    # 1..22; 22 is "max" (slow but smallest).
     zstd_level = int(os.environ.get("ZSTD_CLEVEL", "22"))
     if zim_builder == "rust":
         from cloud.manifest_writer import ManifestCreator
@@ -1092,9 +1091,9 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
     # is ManifestCreator, which appends a line to a file: there is no queue
     # to drain, so a slow batch means slow disk, and sleeping only made
     # central-asia's tile phase slower. build-region-fast.sh uses rust, but
-    # --zim-builder defaults to "python" (libzim) and several wrappers
-    # (cloud/build_region.sh, build-region.sh, the salvage and VM scripts)
-    # still take that path, so the guard must stay for them.
+    # --zim-builder defaults to "python" (libzim), which every build
+    # without that flag takes (the `streetzim` command, Zimfarm, the older
+    # ops wrappers), so the guard must stay for them.
     _libzim_backpressure = (zim_builder != "rust")
     backpressure_sleep = 0.0
     # Identical tiles (open sea, tiles inside one landcover polygon) are
@@ -2146,9 +2145,10 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
         records_by_cat: dict[str, list] = {}
         # The LLM bundle (addr/poi/street.json) is the heaviest
         # part of category-index — hundreds of MB to multi-GB on
-        # continent regions. Today the post-build repack drops
-        # them by default; with `no_llm_bundle=True` we skip
-        # writing them in the first place. Chip emission still
+        # continent regions. With `no_llm_bundle=True` (what
+        # build-region-fast.sh passes) we skip writing them;
+        # cloud/repackage_zim.py drops them from older ZIMs by
+        # default. Chip emission still
         # gets `records_by_cat` populated below so chip-*.json
         # files are derivable. The category manifest also drops
         # the entries we skipped, so validators don't complain

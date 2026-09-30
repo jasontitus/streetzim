@@ -718,7 +718,7 @@
       return p;
     }
 
-    // One ranged GET, retried on network errors and 5xx/429 — five
+    // One ranged GET, retried on network errors and 5xx (not 429) — five
     // attempts over ~8 s (0.5, 1, 2, 4 s plus jitter), long enough for a
     // phone to come out of a tunnel, short enough not to hang a tile slot
     // for a server that is really down. Resolves with a verified 206

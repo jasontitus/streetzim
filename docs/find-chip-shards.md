@@ -74,8 +74,9 @@ records (k = 300) around a point:
    marks the result `partial` with `radiusKm`. Everything within that
    radius is exact.
 4. **Filter inside the search.** The name query and the sub-type filter
-   are applied while searching. Cafés + "Starbucks" returns the nearest
-   Starbucks, not the Starbucks among the nearest 300 cafés.
+   are applied while searching. "Starbucks" under Food & Drink's Cafe
+   sub-filter returns the nearest Starbucks, not the Starbucks among the
+   nearest 300 cafés.
 5. **Cache and cancel.** Shards sit in an LRU keyed `chipId/suffix`,
    capped at one budget. Failed fetches are never cached, and the cache is
    cleared on `pagehide`. A newer tap cancels an older load before its

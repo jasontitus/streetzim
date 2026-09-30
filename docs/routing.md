@@ -9,8 +9,9 @@ implementation is tuned for memory-constrained mobile WebViews.
 `findRoute()` in the viewer (`resources/viewer/src/index/540-routing-worker-bridge.js`,
 built into `resources/viewer/index.html` by `tools/build_viewer.py`)
 hands spatial graphs to `resources/viewer/routing-worker.js`, which runs a **strategy
-chain** (the main-thread fallback in `530-routing-astar.js` runs the same
-chain): try the cheapest, most accurate option first, fall back only
+chain** (the main-thread fallback, `findRouteMainThread` in
+`540-routing-worker-bridge.js`, runs the same chain with the engines in
+`530-routing-astar.js`): try the cheapest, most accurate option first, fall back only
 when one fails to converge inside its budget. As of 2026-04-25 the
 chain is:
 
@@ -180,7 +181,9 @@ stay well under that. Per-route memory budget at peak:
 | **Routing peak** | **~500–600 MB** | Measured on Tokyo→Oita with the harness. |
 
 Knobs in `resources/viewer/routing-worker.js` (the main-thread fallback's
-copies are in `resources/viewer/src/index/510-…` to `540-…`):
+copies are in `resources/viewer/src/index/`: `SpatialGraph` in
+`510-routing-graph-formats.js`, the engines in `530-routing-astar.js`, and
+`findRouteMainThread` in `540-routing-worker-bridge.js`):
 
 * `SpatialGraph` constructor: `maxResidentBytes = 64 MB`. Drops cells
   aggressively during long-distance routing. Cell I/O is capped at four

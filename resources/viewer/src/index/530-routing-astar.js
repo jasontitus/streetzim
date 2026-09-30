@@ -21,8 +21,9 @@
 
   // Highway-tier ordinals (motorway, motorway_link, trunk, trunk_link,
   // primary, primary_link). Bit-encoded into class_access bits 0..4 by
-  // create_osm_zim.CLASS_ORDINAL. Edges in this set are the cross-country
-  // backbone — A* on just these is ~10× cheaper for long routes.
+  // CLASS_ORDINAL in extract_routing_graph (streetzim/routing/build.py).
+  // Edges in this set are the cross-country backbone — A* on just these
+  // is ~10× cheaper for long routes.
   function isHighwayClass(classAccess) {
     var ord = classAccess & 0x1F;
     return ord >= 1 && ord <= 6;

@@ -133,11 +133,10 @@ acknowledgement).
 Each feature is one flag with three states: on (`--x`, `--x=on`), off
 (`--x=off`, `--no-x`), or not given, when the profile decides. Saying both
 on and off is refused before anything is downloaded, and flag names cannot
-be abbreviated. Two features come from other branches and joined the
-profile when their flag existed: `--kiwix-poi-pages`, and `--terrain` once
-it could also be turned off (`--no-terrain`, topic-terrain-openzim).
-`add_profile_arguments` in `streetzim/cli.py` turns such a flag into the
-same three-state flag.
+be abbreviated. `--kiwix-poi-pages` and `--terrain` are defined as plain
+flags in the parser's "Content" group (`--terrain` with `--no-terrain`);
+`add_profile_arguments` in `streetzim/cli.py` turns each into the same
+three-state flag.
 
 On Zimfarm, `profile` is a **required** string-enum (`full`, `basic`), so
 every recipe states its profile next to the resources it is given, and each

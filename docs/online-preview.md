@@ -124,15 +124,17 @@ look-alike — it has `size` and `slice(a, b).arrayBuffer()`, which is all
 - A server that answers a `Range` request with `200` is refused before
   its body is read — exactly what `archive.org/cors/` would otherwise
   have done to a 28 GB Canada file.
-- Transient failures (network errors, `5xx`, `429`) are retried: five
-  attempts over ~8 s.
+- Transient failures (network errors, `5xx`) are retried: five attempts
+  over ~8 s. A `429` (the proxy's daily quota) is not retried; it fails
+  at once as an upstream error.
 
 `web/drive/sw.js` stores `{url, sourceUrl, name}` instead of `{blob}`
 when the picker sends a URL, builds the reader on an `HttpRangeSource`,
 and answers its `status` message with `source: 'url'`, the archive.org
 URL, the size and the request tally. The picker (`web/drive/index.html`)
 resolves `?zim=` and the URL box onto the proxy; the viewer
-(`resources/viewer/index.html`) asks the SW on `/drive/viewer/` and shows
+(`resources/viewer/src/index/020-body-markup.html`, built into
+`index.html`) asks the SW on `/drive/viewer/` and shows
 the banner when the source is a URL. Inside Kiwix there is no such
 service worker, so nothing changes there.
 

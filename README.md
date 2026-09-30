@@ -190,7 +190,7 @@ resources/viewer/ (MapLibre app) ───┤
 | `resources/vendor/`, `resources/viewer-assets.lock.json` | vendored MapLibre GL JS and the sha256 pins for it and the font glyphs (`tools/pin_viewer_assets.py`, [docs/viewer-supply-chain.md](docs/viewer-supply-chain.md)) |
 | `resources/tilemaker/` | tilemaker config and Lua profile |
 | `cloud/` | Python modules the builder imports (`chip_rules`, `search_shards`, `viewer_slots`, …) and the ZIM tools (`validate_zim`, `repackage_zim`, `patch_viewer_inplace`, …) |
-| `streetzim/` | the builder's modules: `tiles`, `terrain`, `satellite`, `addresses`, `search_extract`, `zim_writer` (one function per ZIM phase), `zim_metadata` (openZIM metadata rules), `progress` (Zimfarm progress file), `cpus` (the `--cpus` budget), `mbtiles`, `overture`, `tile_alias`, `viewer_assets`, `common`, and `routing/` (graph build, formats, reference routers) |
+| `streetzim/` | the builder's modules: `tiles`, `terrain`, `satellite`, `addresses`, `search_extract`, `zim_writer` (one function per ZIM phase), `zim_metadata` (openZIM metadata rules), `progress` (Zimfarm progress file), `cpus` (the `--cpus` budget), `cli` (the `streetzim` command), `area`, `download`, `paths`, `mbtiles`, `overture`, `overture_taxonomy`, `tile_alias`, `viewer_assets`, `glyph_fallback`, `satellite_sources`, `scraperlib`, `source_report`, `common`, and `routing/` (graph build, formats, reference routers) |
 | `tests/` | pytest and Node tests |
 | `web/` | streetzim.web.app catalogue and the `/drive/` PWA (operations; moves to `ops/` in stage 2) |
 | `preview-proxy/` | archive.org range proxy for online previews |

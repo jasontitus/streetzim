@@ -1989,9 +1989,11 @@ if (!window.__szUnsupported) fetchConfig(1)
       return;
     }
 
-    // Opening camera comes straight from map-config.json. Its centre is the
-    // bbox centre, which for some regions is empty water or desert -- hawaii
-    // opens on open Pacific west of the islands. Attempts to improve that
+    // Opening camera comes straight from map-config.json. Its centre was
+    // the bbox centre in ZIMs built before 2026-09-25 (newer builds write
+    // the region's anchor city or the median place position), which for
+    // some regions is empty water or desert -- hawaii opened on open
+    // Pacific west of the islands. Attempts to improve that viewer-side
     // were reverted on 2026-09-25; the note further down and
     // docs/todo-opening-view.md record why, so the next attempt does not
     // repeat them. The zoom is already extent-based (create_osm_zim's
@@ -7101,7 +7103,7 @@ var SEARCH_SHARDS = (function () {
       // Latin-leading words keep the 2-char ASCII-alnum prefix. Non-ASCII
       // first chars (CJK, Cyrillic, Arabic, Thai, …) bucket into
       // 'u' + lowercase hex of their codepoint. Must match the writer
-      // ``_prefix_key`` in create_osm_zim.py and the Swift
+      // ``prefix_key`` in cloud/search_shards.py and the Swift
       // ``Geocoder.normalizePrefix``.
       if (!word) return '__';
       var c0 = word[0];
@@ -9694,8 +9696,9 @@ function initRouting(map, config) {
 
   // Highway-tier ordinals (motorway, motorway_link, trunk, trunk_link,
   // primary, primary_link). Bit-encoded into class_access bits 0..4 by
-  // create_osm_zim.CLASS_ORDINAL. Edges in this set are the cross-country
-  // backbone — A* on just these is ~10× cheaper for long routes.
+  // CLASS_ORDINAL in extract_routing_graph (streetzim/routing/build.py).
+  // Edges in this set are the cross-country backbone — A* on just these
+  // is ~10× cheaper for long routes.
   function isHighwayClass(classAccess) {
     var ord = classAccess & 0x1F;
     return ord >= 1 && ord <= 6;

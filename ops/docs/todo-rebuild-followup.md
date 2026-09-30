@@ -1,8 +1,9 @@
 # Rebuild follow-ups
 
-`cloud/rebuild_old_regions.sh` snapshots its work list once, at line 63
-(`ORDER=$(cat rebuild-old.list)`), before the loop. Appending to
-`rebuild-old.list` while the queue runs therefore does nothing, and
+`cloud/rebuild_old_regions.sh` snapshots its work list once, at the
+`ORDER=` line (`ORDER=$(cat /storage/streetzim/rebuild-old.list)`), before
+the loop. Appending to `rebuild-old.list` while the queue runs therefore
+does nothing, and
 restarting the queue to pick it up would re-run all 50 regions. Queue
 follow-ups here instead and run them after the current pass finishes.
 

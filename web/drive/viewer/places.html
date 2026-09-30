@@ -1230,8 +1230,9 @@ async function runChipQuery(def) {
 // Geo-sharded chips (cloud/chip_shards.py): fetch only the shards the
 // 300 nearest matches need, around the chosen origin, inside the map
 // area when that filter is on. The name query and sub-filter are part of
-// the search (predicate), so "Starbucks" under Cafés finds the nearest
-// Starbucks rather than filtering the nearest 300 cafés.
+// the search (predicate), so "Starbucks" under Food & Drink's Cafe
+// sub-filter finds the nearest Starbucks rather than filtering the
+// nearest 300 cafés.
 const LEGACY_CHIP = {};
 let _regionCentreP = null;
 
@@ -1531,8 +1532,8 @@ var SEARCH_SHARDS = (function () {
 })();
 // END search-shards
 
-// Accent-fold + lowercase, mirroring the writer's `_norm` in
-// create_osm_zim.py (NFKD, strip combining marks) so "ecouen" finds
+// Accent-fold + lowercase, mirroring the writer's `norm` in
+// cloud/search_shards.py (NFKD, strip combining marks) so "ecouen" finds
 // "Écouen" and vice versa.
 function foldText(s) {
   let t = String(s || '').toLowerCase();
@@ -1548,8 +1549,8 @@ function matchesName(rec, q) {
   return foldText(rec.n).includes(ql) || foldText(rec.s).includes(ql);
 }
 
-// Chunk key for a word — MUST match the writer's `_prefix_key` in
-// create_osm_zim.py (and `keyFor` in index.html): Latin-leading words
+// Chunk key for a word — MUST match the writer's `prefix_key` in
+// cloud/search_shards.py (and `keyFor` in index.html): Latin-leading words
 // use their first two ASCII-alnum chars (anything else → '_'),
 // non-ASCII first chars bucket into 'u' + hex codepoint. The previous
 // `q.slice(0, 2)` never matched the writer for accented, CJK, or

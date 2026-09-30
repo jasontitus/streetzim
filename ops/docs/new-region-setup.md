@@ -110,7 +110,7 @@ rm -f overture_cache/addresses-alaska-*.parquet overture_cache/places-alaska-*.p
 ./derive-region-search.py  --only alaska --src "$WORLD_SEARCH"
 ```
 
-## MBTiles + search-cache: symlinks are fine
+## MBTiles + search-cache: symlinks work, slices are faster
 
 Unlike the PBF, both of these are **already bbox-aware** at read time:
 
@@ -119,7 +119,7 @@ Unlike the PBF, both of these are **already bbox-aware** at read time:
 - `world-2026-08-31.jsonl` is bbox-filtered in a single linear scan in `[4/10] Building
   search index` — that's a sequential read, not a random-IO scan.
 
-So symlinks save disk and don't hurt:
+So symlinks to the world files give a correct build and save disk:
 
 ```sh
 cd /storage/streetzim/world-data/regions/
@@ -127,9 +127,12 @@ ln -sf /storage/streetzim/world-data/world-tiles-v3.mbtiles   ${ID}.mbtiles
 ln -sf /storage/streetzim/search_cache/world-2026-08-31.jsonl ${ID}.search.jsonl
 ```
 
-(`derive-region-mbtiles.py` and `derive-region-search.py` cut real
-per-region slices instead, which read faster on the HDD; see
-[alaska-antimeridian-runbook.md](alaska-antimeridian-runbook.md) step 4.)
+They are slow on the HDD, though: the tile-add phase reads the mbtiles
+randomly, which against the world file caps at ~120 tiles/s, against
+1,600+/s for a regional slice the page cache holds.
+`derive-region-mbtiles.py` and `derive-region-search.py` cut those
+per-region slices in one sequential scan each; see
+[alaska-antimeridian-runbook.md](alaska-antimeridian-runbook.md) step 4.
 
 ## Overture parquets
 
@@ -220,13 +223,23 @@ European country builds made with it (benelux, greece, carpathians, balkans,
 3+ hours each) had **no Wikipedia layer at all**; the in-ZIM Kiwix gate
 caught it. This page previously named it as the canonical command.
 
-After the build, before `cloud/upload_validated.sh`, run the gates of
-`cloud/rebuild_old_regions.sh` (its `markers()` and `gate()`):
-`validate_zim`, the archive marker check (viewer fixes, viewer slots,
-`wiki-geo-index.json`), overlap, the device matrix, the **render gate**
-(`tmp/map-health.mjs`, ≥100 rendered features — the only gate that fails a
-blank map; the device matrix and Kiwix gate both pass one), and
-`cloud/kiwix_viewer_gate.sh`. For a region with a row in
-`cloud/regions.tsv`, `./ship-region.sh <id> [--no-upload]` runs the build
-and its own five gates (terrain coverage, validator, live routing, search +
-find chips, browser smoke) and uploads only if all pass.
+After the build, gate the ZIM before `cloud/upload_validated.sh`. The three
+drivers do not run the same gates:
+
+- `./ship-region.sh <id>` and `build-refresh-queue.sh` run terrain coverage
+  (`cloud/check_terrain_coverage.py`), `validate_zim`, live routing
+  (`cloud/route_cli.py`, A*), search + the Find chip record count, and the
+  browser smoke (`cloud/pwa_smoke_test.mjs`; the queue treats a browser
+  failure as soft by default). They upload only if the gates pass.
+- `cloud/rebuild_old_regions.sh` runs `validate_zim` (inline, after the
+  build), its `markers()` check (viewer fixes, viewer slots,
+  `wiki-geo-index.json`) and its `gate()`: overlap, the device matrix
+  (layout and chip tap only), the **render gate** (`tmp/map-health.mjs`,
+  ≥100 rendered features — the only gate that fails a blank map; the
+  device matrix and Kiwix gate both pass one) and
+  `cloud/kiwix_viewer_gate.sh` (which runs a search). It does **not** run
+  terrain coverage, live routing or the Find record count.
+
+For a hand build of a region with a row in `cloud/regions.tsv`, run
+`./ship-region.sh <id> --no-upload`: it builds and runs the first list's
+gates without uploading.

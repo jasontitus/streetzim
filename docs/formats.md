@@ -255,7 +255,7 @@ reader branch is only dead when no published ZIM needs it.
 | `wikidata/manifest.json`, `wikidata/{NN}.json` | optional Wikidata facts, bucketed by the first two digits of the Q-number |
 | `wiki-article/{Title}`, `wiki-image/{sha1}.{ext}` | optional bundled Wikipedia (`cloud/wiki_articles.py`) |
 | `wiki-geo-index.json` | `{title: [lat, lon, type]}` |
-| `search/{slug}.html` | per-feature detail pages, front articles, for places, airports, parks, peaks and water (POIs too with `--kiwix-poi-pages`; `KIWIX_PAGE_TYPES` in `streetzim/zim_writer.py`); libzim Xapian mode only |
+| `search/{slug}.html` | per-feature detail pages, front articles, for places, airports, parks, peaks and water (POIs too with `--kiwix-poi-pages`; `KIWIX_PAGE_TYPES` in `streetzim/zim_writer.py`). The streaming search path writes them only in `--xapian libzim` mode; the in-memory path (`_add_search_in_memory`) writes them in any mode |
 | `overture-sources.json` | Overture attribution; always written (the viewer links it), with empty `themes`/`datasets` when no Overture data was merged |
 
 ### Areas across the antimeridian

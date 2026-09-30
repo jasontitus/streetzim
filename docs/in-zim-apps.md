@@ -81,9 +81,14 @@ the two emit byte-identical pages for equivalent input.
 > chips the ZIM's `category-index/manifest.json` lists.
 
 The Find-places mini-app's chip row is driven by the `CATEGORIES`
-table at the top of `resources/viewer/places.html`. Each chip
-filters the `category-index/poi.json` records (or its own named
-index for `parks`) by one or more of these selectors:
+table at the top of `resources/viewer/places.html`. A chip reads its
+own `category-index/chip-<id>.json` (or its shards) when the ZIM's
+manifest lists it, and that is the only path on production and
+`streetzim` builds, which omit `poi.json` (`--no-llm-bundle`). The
+selectors below are the build's rules for those files
+(`cloud/chip_rules.py`); on an older ZIM without chip files, places.html
+applies its copy of them to the `category-index/poi.json` records (or
+its own named index for `parks`):
 
 - **`subtypes`** — always-include when `r.s` (record subtype) exactly matches.
 - **`includeRegex`** — always-include when `r.s` matches a regex. Catches
@@ -156,12 +161,13 @@ in Cafés — same thing, different bucket.
    ```
 2. `resources/viewer/places.html` — same merge in the `CATEGORIES`
    const so `expandPrefix` / chip rendering matches.
-3. `resources/viewer/index.html` — replace the two food entries in
-   `EXPLORE_CHIPS` with `{ id: 'food', label: 'Food & Drink',
+3. `resources/viewer/src/index/220-explore-menu-and-chip-rail.js` (built
+   into `index.html` by `tools/build_viewer.py`) — replace the two food
+   entries in `EXPLORE_CHIPS` with `{ id: 'food', label: 'Food & Drink',
    emoji: '🍴' }`.
-4. `cloud/validate_zim.py` ~line 424 — update the
-   `("restaurants", "cafes", "shops")` declared==0 allowlist to
-   `("food", "shops")`.
+4. `cloud/validate_zim.py` (~line 492 today) — add `"food"` to the
+   declared==0 list. It kept `"restaurants"` and `"cafes"`, which
+   pre-merge ZIMs still carry: `("food", "restaurants", "cafes", "shops")`.
 5. Update the chip table earlier in this doc.
 
 **Migration order — important.** The viewer is baked into each ZIM,
@@ -252,7 +258,8 @@ Landmarks · Libraries · Parks · Gas · Hotels, minus those the ZIM's
 manifest does not list). Tapping a chip:
 
 1. Fetches `category-index/manifest.json` (cached after first
-   load) to know whether the chip is sub-bucketed.
+   load) to know whether the chip has its own file, and whether that
+   is geo-sharded or sub-bucketed.
 2. Fetches `category-index/chip-<id>.json`. A geographically sharded
    chip (`docs/find-chip-shards.md`) loads only the shards the 300
    nearest records around the map centre need; an older sub-bucketed

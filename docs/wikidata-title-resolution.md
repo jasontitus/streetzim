@@ -138,9 +138,13 @@ the titles backfilled here:
   `https://<lang>.wikipedia.org/wiki/<Title>`, whenever a record has `w`.
 - **Place detail panel** (`resources/viewer/index.html`, source
   `src/index/210-place-detail-sheet.js`) shows a 📖 **Wikipedia** button
-  only when the ZIM bundles that article (`--bundle-wiki-articles`, below;
-  `_wikiArticlePath` checks `wiki-geo-index.json`), and opens it inside the
-  ZIM. Most hosts (incl. kiwix-serve) **can't deep-link across ZIMs**, so
+  when the ZIM bundles Wikipedia articles (`--bundle-wiki-articles`,
+  below) and a title is known, and opens it inside the ZIM.
+  `_wikiArticlePath` (`src/index/100-wiki-bridge-and-viewport.js`) returns
+  a path only when `wiki-geo-index.json` exists; the title is the record's
+  `w`, else the geo index's Q-ID map, else the PWA's `wiki-qid-titles.json`
+  (drive PWA only). It does not check that this particular article is in
+  the ZIM. Most hosts (incl. kiwix-serve) **can't deep-link across ZIMs**, so
   there is no link to a separate Wikipedia ZIM (the old `wikipediaBase`
   setting is gone).
 

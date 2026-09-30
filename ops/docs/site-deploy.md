@@ -53,11 +53,14 @@ open web/index.html            # local preview in browser
 
 ## Common gotchas
 
-- **The build host's deploy output is never committed.** Every deploy
-  there rewrites `web/index.html` (and `cloud/deploy_pwa.sh` rewrites
-  `web/drive/build-info.js`, `web/drive/sw.js`, `web/drive/viewer/.version`),
-  so `git status` on the host shows them modified. Leave them; don't pull
-  them to another machine — `web/generate.py` re-queries archive.org.
+- **Don't commit regenerated site files by hand.** Every deploy on the
+  build host rewrites `web/index.html` (and `cloud/deploy_pwa.sh` rewrites
+  `web/drive/build-info.js`, `web/drive/sw.js`, `web/drive/viewer/.version`).
+  Don't copy them to another machine either — `web/generate.py` re-queries
+  archive.org. (The host has committed them at times, e.g. 37403b8 and
+  dcaee75 on 2026-09-29.) The one site file committed automatically is
+  `web/torrents/<id>.torrent`, which `cloud/upload_validated.sh` commits
+  after an upload.
 - **Item metadata is eventually consistent.** Right after `ia upload`
   finishes, archive.org's metadata API can lag by minutes. If a brand-
   new ZIM doesn't appear in the homepage card grid after a deploy,

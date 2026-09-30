@@ -118,9 +118,9 @@ ZIM_METADATA_FLAGS = {"Name": "name", "Title": "title", "Description": "descript
 #          it is opt-in (the 2021 source is non-commercial).
 #   basic: nothing fetched besides the OSM extract and the shapefiles.
 # Each feature is one on/off flag (a string-enum on Zimfarm; unset: the
-# profile decides), so a recipe cannot say both. Features whose flag another
-# branch defines (--terrain, --kiwix-poi-pages) join in when the parser has
-# that flag: add_profile_arguments turns it into an on/off flag.
+# profile decides), so a recipe cannot say both. --terrain and
+# --kiwix-poi-pages are defined as plain flags in the "Content" group below;
+# add_profile_arguments (_adopt) replaces each with an on/off flag.
 PROFILES: dict[str, dict[str, bool]] = {
     "full": {"wikidata": True, "wikipedia": True, "overture": True, "terrain": True,
              "kiwix_poi_pages": True},
@@ -131,8 +131,8 @@ DEFAULT_PROFILE = "full"
 FEATURE_NAMES = {"wikidata": "Wikidata", "wikipedia": "Wikipedia articles",
                  "overture": "Overture Maps", "terrain": "terrain",
                  "kiwix_poi_pages": "POIs in Kiwix search"}
-# Joins the profile only once it can also be turned off where it is defined
-# (--terrain/--no-terrain, since topic-terrain-openzim).
+# Joins the profile only when it can also be turned off where it is defined
+# (--terrain/--no-terrain).
 NEEDS_OFF_SWITCH = {"terrain"}
 ON_OFF = ("on", "off")
 WIKIPEDIA_IMAGES = ("none", "lead", "all")

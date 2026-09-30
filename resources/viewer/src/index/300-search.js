@@ -469,7 +469,7 @@ var SEARCH_SHARDS = (function () {
       // Latin-leading words keep the 2-char ASCII-alnum prefix. Non-ASCII
       // first chars (CJK, Cyrillic, Arabic, Thai, …) bucket into
       // 'u' + lowercase hex of their codepoint. Must match the writer
-      // ``_prefix_key`` in create_osm_zim.py and the Swift
+      // ``prefix_key`` in cloud/search_shards.py and the Swift
       // ``Geocoder.normalizePrefix``.
       if (!word) return '__';
       var c0 = word[0];

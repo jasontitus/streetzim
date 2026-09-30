@@ -1,6 +1,6 @@
 # Moving the build host to `-builder` and `-next`, and testing them there
 
-> **Carried out.** The ops split (PR #20, `671c4fb`), `builder` (PR #21) and `next` (PR #22) are merged into `main`. The host fast-forwarded to `671c4fb` on 30 September 03:59 CEST (29 September 18:59 PDT), then switched to branch `host-main` tracking `origin/main` (§3) and pulls with `--ff-only` (`d5c32b6` at 05:48 CEST, 20:48 PDT); it never checked out `host-builder` or `host-next`. The rest is kept as the record and for the §2 tests.
+> **Carried out.** The ops split (PR #20, `671c4fb`), `builder` (PR #21) and `next` (PR #22) are merged into `main`. The host fast-forwarded to `671c4fb` on 30 September 03:59 CEST (29 September 18:59 PDT), then switched to branch `host-main` tracking `origin/main` (§3) and pulls with `--ff-only` (`d5c32b6` at 05:48 CEST, 20:48 PDT); it never checked out `host-builder` or `host-next`. As of 30 September 2026 the rebuild round (`cloud/rebuild_old_regions.sh`) and uploads stay paused until the user says the migration is done. The rest is kept as the record and for the §2 tests.
 
 A runbook for a Claude Code session on the build host (`/storage/streetzim`,
 host `ot-hel1`). The host checked the ops split in a scratch clone (stage 1

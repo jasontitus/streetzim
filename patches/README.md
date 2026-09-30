@@ -189,4 +189,4 @@ os.unlink(f)
 | `LIBZIM_DL_VERSION` | Which libzim version to download (default: `9.4.0-1`) |
 | `USE_SYSTEM_LIBZIM` | Use system-installed libzim instead of bundled |
 | `DONT_DOWNLOAD_LIBZIM` | Skip download, use existing libzim in python-libzim/libzim/ |
-| `ZSTD_CLEVEL` | ZSTD compression level used by libzim at runtime (we use 22) |
+| `ZSTD_CLEVEL` | Not read by libzim, which compresses at a fixed zstd level 19; StreetZim passes it to the rust packer (`--zim-builder rust`), where the production wrappers set 22 |

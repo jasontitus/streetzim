@@ -610,11 +610,11 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--no-llm-bundle", action="store_true",
                         help="Skip writing category-index/{addr,poi,street}.json "
                              "(the LLM bundle). These files are hundreds of MB "
-                             "to multi-GB on continent regions; the post-build "
-                             "`cloud/repackage_zim.py` strips them by default. "
-                             "Set this flag on direct create_osm_zim builds to "
-                             "match the shipped output without an extra repack "
-                             "pass. The chip-*.json files (Find page) are still "
+                             "to multi-GB on continent regions. StreetZim's "
+                             "production builds set this flag, so shipped ZIMs "
+                             "omit them; `cloud/repackage_zim.py` "
+                             "also strips them by default from older ZIMs. "
+                             "The chip-*.json files (Find page) are still "
                              "derived from poi+park records — they survive the "
                              "drop.")
     parser.add_argument("--resolve-wikidata-titles", action="store_true",
