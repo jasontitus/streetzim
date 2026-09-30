@@ -300,7 +300,9 @@ jobs:
       # The Monaco extract, fetched once a week and cached: from Geofabrik,
       # else the openstreetmap.fr mirror, else last week's copy. A Geofabrik
       # outage (2026-09-30: every extract a redirect loop, then a 404) used
-      # to fail this job, and with it the image publish.
+      # to fail this job, and with it the image publish. When both sources
+      # fail, last week's copy is used and then cached under this week's key,
+      # so it stays until next week's fetch.
       - name: Week of the Monaco extract
         id: week
         run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
@@ -316,8 +318,10 @@ jobs:
         run: |
           for url in https://download.geofabrik.de/europe/monaco-latest.osm.pbf \
                      https://download.openstreetmap.fr/extracts/europe/monaco-latest.osm.pbf; do
-            if curl -fsSL --retry 3 --max-redirs 5 -o monaco.part "$url" \
-               && head -c 32 monaco.part | LC_ALL=C grep -qa OSMHeader; then
+            if curl -fsSL --retry 3 --connect-timeout 20 --max-time 300 --max-redirs 5 \
+                 -o monaco.part "$url" \
+               && head -c 32 monaco.part | LC_ALL=C grep -qa OSMHeader \
+               && osmium fileinfo -e monaco.part > /dev/null; then
               mv monaco.part monaco-latest.osm.pbf; echo "fetched $url"; exit 0
             fi
             echo "::warning::could not fetch $url"
