@@ -697,6 +697,8 @@ async function loadChipOnMap(map, chipDef, opts) {
     // first "Search this area" click had activeChip already null
     // and fell through to the old in-memory filter.
     chipId: chipDef.id,
+    // "Search this area": the reader chose this view; keep it.
+    keepView: !!opts.requireInBounds,
   };
   try {
     sessionStorage.setItem(FIND_RESULTS_STASH_KEY, JSON.stringify(stash));

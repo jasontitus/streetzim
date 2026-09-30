@@ -138,12 +138,19 @@ function renderFindResultsFromStash(map) {
     if (!bounds) bounds = new maplibregl.LngLatBounds([ro, r.a], [ro, r.a]);
     else         bounds.extend([ro, r.a]);
   }
-  if (bounds) {
+  // Move the camera only when some result is out of view (a name
+  // search handed over from places.html, or a chip that fell back to
+  // the nearest places). A "Search this area" tap (stash.keepView), or
+  // results that are all on screen already, leave the reader's view
+  // alone: re-framing them with maxZoom 14 zoomed a reader at z16 out
+  // to z14 on every tap, 16 times the area they had chosen.
+  if (bounds && !stash.keepView && !_findAllInView(map, stash.items)) {
     // Leave room for the carousel at the bottom — extra bottom
     // padding so the camera doesn't park results behind the strip.
+    // Never zoom in past where the reader already is.
     map.fitBounds(bounds, {
       padding: { top: 60, right: 40, bottom: 200, left: 40 },
-      maxZoom: 14, duration: 800,
+      maxZoom: Math.max(14, map.getZoom()), duration: 800,
     });
   }
   _renderFindResultsStrip(map, stash);
@@ -190,11 +197,33 @@ function renderFindResultsFromStash(map) {
     };
     map.on('moveend', _findResultsState.moveHandler);
   });
+  // 'idle' fires only after a render. When the camera stays put (the view
+  // is kept) and nothing else redraws, it would never come and the pill
+  // would never arm; ask for one frame so it does.
+  map.triggerRepaint();
 }
 
 // Threshold: pill appears once the user has either zoomed by ≥ 0.5
 // levels or panned the centre out of the original viewport. Tighter
 // than "any move" so a small jitter doesn't flash the pill.
+// Every record with coordinates inside the map's current bounds.
+// getBounds() returns unwrapped longitudes across the antimeridian
+// (west=170, east=190) while records store [-180, 180], so a record is
+// also tested shifted by ±360°.
+function _findAllInView(map, items) {
+  var b = map.getBounds();
+  var w = b.getWest(), e = b.getEast(), s = b.getSouth(), n = b.getNorth();
+  for (var i = 0; i < items.length; i++) {
+    var r = items[i];
+    if (typeof r.a !== 'number' || typeof r.o !== 'number') continue;
+    if (r.a < s || r.a > n) return false;
+    var o = r.o;
+    if (!((o >= w && o <= e) || (o + 360 >= w && o + 360 <= e)
+          || (o - 360 >= w && o - 360 <= e))) return false;
+  }
+  return true;
+}
+
 function _searchAreaThresholdReached(map) {
   var ac = _findResultsState.anchorCenter;
   var az = _findResultsState.anchorZoom;
@@ -589,7 +618,7 @@ function _searchAreaApply(map) {
   clearFindResults();
   try {
     sessionStorage.setItem(FIND_RESULTS_STASH_KEY, JSON.stringify({
-      label: label, origin: origin, items: filtered,
+      label: label, origin: origin, items: filtered, keepView: true,
     }));
   } catch (e2) {}
   renderFindResultsFromStash(map);
