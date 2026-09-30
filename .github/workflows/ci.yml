@@ -321,7 +321,7 @@ jobs:
             if curl -fsSL --retry 3 --connect-timeout 20 --max-time 300 --max-redirs 5 \
                  -o monaco.part "$url" \
                && head -c 32 monaco.part | LC_ALL=C grep -qa OSMHeader \
-               && osmium fileinfo -e monaco.part > /dev/null; then
+               && osmium fileinfo -e -F pbf monaco.part > /dev/null; then
               mv monaco.part monaco-latest.osm.pbf; echo "fetched $url"; exit 0
             fi
             echo "::warning::could not fetch $url"
