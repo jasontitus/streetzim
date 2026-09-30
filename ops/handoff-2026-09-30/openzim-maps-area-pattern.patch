@@ -1,0 +1,66 @@
+From ced8380e6d44c666996182a0caa0e785db692d19 Mon Sep 17 00:00:00 2001
+From: Jason Titus <jason.titus@gmail.com>
+Date: Tue, 29 Sep 2026 18:11:37 +0000
+Subject: [PATCH] Fix area pattern accepting values other than planet or monaco
+
+The area pattern in offliner-definition.json, ^planet|monaco$, means
+(^planet)|(monaco$). Zimfarm's backend (pydantic pattern) and recipe
+editor (RegExp.test) both search anywhere in the value, so planetx,
+planet-monaco or xmonaco passed validation and only failed at run time
+in _fetch_mbtiles, after fonts, Natural Earth and sprites were fetched.
+
+The pattern is now ^(planet|monaco)$, and --area gets matching choices
+so the CLI fails at startup. The default (planet when omitted) is
+unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01ViNq7TMHL8nh7QLxSYjbuQ
+---
+ CHANGELOG.md                       | 4 ++++
+ offliner-definition.json           | 2 +-
+ scraper/src/maps2zim/entrypoint.py | 1 +
+ 3 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 4f4c490..d2cef6b 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+ 
+ ## [Unreleased]
+ 
++### Fixed
++
++- Only accept `planet` or `monaco` as `--area` (offliner definition pattern and CLI)
++
+ ## [0.2.1] - 2026-05-29
+ 
+ ### Fixed
+diff --git a/offliner-definition.json b/offliner-definition.json
+index 54e78f1..88ac349 100644
+--- a/offliner-definition.json
++++ b/offliner-definition.json
+@@ -102,7 +102,7 @@
+       "required": false,
+       "title": "Area",
+       "description": "Area to download, either planet or monaco",
+-      "pattern": "^planet|monaco$"
++      "pattern": "^(planet|monaco)$"
+     },
+     "output": {
+       "type": "string",
+diff --git a/scraper/src/maps2zim/entrypoint.py b/scraper/src/maps2zim/entrypoint.py
+index 53da508..398f87c 100644
+--- a/scraper/src/maps2zim/entrypoint.py
++++ b/scraper/src/maps2zim/entrypoint.py
+@@ -177,6 +177,7 @@ def prepare_context(raw_args: list[str], tmpdir: str) -> None:
+ 
+     parser.add_argument(
+         "--area",
++        choices=["planet", "monaco"],
+         help=f"Area to download, either planet or monaco. Default: {Context.area!s}",
+     )
+ 
+-- 
+2.43.0
+
