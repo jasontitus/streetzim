@@ -51,16 +51,19 @@ const view = p => p.evaluate(() => {
 });
 const same = (a, b) => Math.abs(a.z - b.z) < 0.01 && Math.abs(a.w * a.h / (b.w * b.h) - 1) < 0.01
   && Math.abs(a.lng - b.lng) < a.w * 0.01 && Math.abs(a.lat - b.lat) < a.h * 0.01;
-// Result pins: how many, and how many outside the area the reader can see
-// (below the search box / chip rail / pill, above the results strip, 8 px
-// in from the sides). Computed here rather than with the viewer's own
-// helper, so the old viewer is measured the same way.
+// Result pins: how many, and how many the reader cannot see: off the
+// screen's sides, at or below the results strip, or with the tip under the
+// search box / chip rail or the pill (each element's own rectangle).
+// Computed here rather than with the viewer's own helper, so the old
+// viewer is measured the same way.
 const pins = p => p.evaluate(() => {
   const m = window.__szMap, cv = m.getCanvas(), cr = cv.getBoundingClientRect();
-  let top = 0;
+  const covers = [];
   for (const id of ['search-container', 'find-search-area-btn']) {
     const el = document.getElementById(id), r = el && el.getBoundingClientRect();
-    if (r && r.height > 0) top = Math.max(top, r.bottom - cr.top);
+    if (r && r.height > 0 && r.width > 0) {
+      covers.push({ x0: r.left - cr.left, y0: r.top - cr.top, x1: r.right - cr.left, y1: r.bottom - cr.top });
+    }
   }
   const strip = document.getElementById('find-results-strip');
   const sr = strip && strip.getBoundingClientRect();
@@ -68,7 +71,8 @@ const pins = p => p.evaluate(() => {
   const mk = ((typeof _findResultsState !== 'undefined' && _findResultsState.markers) || []).filter(Boolean);
   const hidden = mk.filter(k => {
     const q = m.project(k.getLngLat());
-    return !(q.x >= 8 && q.x <= cv.clientWidth - 8 && q.y >= top && q.y <= bottom);
+    if (q.x < 8 || q.x > cv.clientWidth - 8 || q.y < 0 || q.y > bottom) return true;
+    return covers.some(c => q.x >= c.x0 && q.x <= c.x1 && q.y >= c.y0 && q.y <= c.y1);
   }).length;
   const label = document.querySelector('#find-results-strip span');
   return { n: mk.length, hidden, label: label ? label.textContent : '' };
@@ -174,15 +178,35 @@ try {
     report('Hotels then Food & Drink', errs);
     await p.close();
   }
-  {
-    // A landscape phone: a small band between the chip rail and the strip.
-    const p = await openPage(browser, 844, 390), errs = [];
+  for (const [w, h] of [[844, 390], [740, 360]]) {
+    // A landscape phone: the search box covers the middle of the top, the
+    // strip half the height. The chip must still find food in view (not
+    // fall back and zoom out), and so must "Search this area".
+    const p = await openPage(browser, w, h), errs = [];
     await jump(p, START, 16); await idle(p);
+    const v0 = await view(p);
     await tap(p, 'food');
     await p.waitForSelector('#find-results-strip', { timeout: 60000 }); await settle(p);
-    const r = await pins(p);
+    const r = await pins(p), v1 = await view(p);
+    if (/expanded/.test(r.label)) errs.push('the chip fell back to the nearest (found nothing in view)');
+    if (!r.n) errs.push('no pins');
     if (r.hidden) errs.push(`${r.hidden} of ${r.n} pins under the strip or chrome`);
-    report('landscape 844x390', errs);
+    if (!same(v0, v1)) errs.push('the chip tap moved the camera');
+    // A little closer on the same dense spot (enough for the pill). At z17
+    // a 360 px landscape screen shows too little map under the strip for
+    // food to be certain there.
+    await jump(p, START, 16.6); await idle(p);
+    const pill = await p.waitForSelector('#find-search-area-btn', { timeout: 15000 }).then(() => true, () => false);
+    if (pill) {
+      await p.evaluate(() => { document.getElementById('find-results-strip').dataset.old = '1'; });
+      await p.evaluate(() => document.getElementById('find-search-area-btn').click());
+      await settle(p);
+      const r2 = await pins(p);
+      const redrawn = await p.evaluate(() => !document.getElementById('find-results-strip').dataset.old);
+      if (!redrawn || !r2.n) errs.push('Search this area found nothing in a dense spot');
+      if (r2.hidden) errs.push(`${r2.hidden} of ${r2.n} pins hidden after Search this area`);
+    } else errs.push('pill not shown');
+    report(`landscape ${w}x${h}`, errs);
     await p.close();
   }
   {

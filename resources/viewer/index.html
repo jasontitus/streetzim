@@ -4389,44 +4389,49 @@ function renderFindResultsFromStash(map) {
   map.triggerRepaint();
 }
 
-// The part of the map the reader can see, in canvas pixels: below the
-// search box and chip rail (or the "Search this area" pill that replaces
-// them), with room for a pin's body above its tip; above the results
-// strip at its tallest (200 px, or the strip on screen if that is taller:
-// a strip without a sub-filter row is 34 px shorter than the next one may
-// be); 8 px in from the sides. "In this area" means this rectangle, not getBounds(),
-// which also counts what the chrome covers and, on a rotated or tilted
-// map, ground that is not on screen at all.
+// The part of the map the reader can see, in canvas pixels: the screen
+// less 8 px at the sides, above the results strip at its tallest (200 px,
+// or the strip on screen if that is taller: a strip without a sub-filter
+// row is 34 px shorter than the next one may be), and not under the
+// search box and chip rail or the "Search this area" pill (holes: each
+// element's own rectangle, extended down by a pin's body, since a pin is
+// drawn upward from its tip). Holes, not a band across the screen: on a
+// landscape phone the search box covers only the middle of the width, and
+// a band below it left 11 px of a 360 px screen.
 function _findVisibleRect(map) {
   var canvas = map.getCanvas();
   var cr = canvas.getBoundingClientRect();
   var W = canvas.clientWidth, H = canvas.clientHeight;
-  var top = 0;
+  var holes = [];
   ['search-container', 'find-search-area-btn'].forEach(function(id) {
     var el = document.getElementById(id);
     if (!el) return;
     var r = el.getBoundingClientRect();
-    if (r.height > 0 && r.bottom - cr.top > top) top = r.bottom - cr.top;
+    if (r.height > 0 && r.width > 0) {
+      holes.push({ x0: r.left - cr.left - 4, y0: r.top - cr.top - 4,
+                   x1: r.right - cr.left + 4, y1: r.bottom - cr.top + 36 });
+    }
   });
   var strip = document.getElementById('find-results-strip');
   var sr = strip ? strip.getBoundingClientRect() : null;
   var bottom = Math.min((sr && sr.height > 0) ? sr.top - cr.top : H, H - 200);
-  // A pin is drawn upward from its tip (about 41 px): leave room for it
-  // under the chrome. On a landscape phone the band left is small; it
-  // never runs below the strip or inverts.
-  var y0 = top + 36, y1 = bottom - 8;
-  if (y1 <= y0) { y0 = top + 8; y1 = Math.max(bottom - 8, y0 + 1); }
-  return { x0: 8, y0: y0, x1: W - 8, y1: y1 };
+  return { x0: 8, y0: 8, x1: W - 8, y1: Math.max(bottom - 8, 16), holes: holes };
 }
 
-// Whether a record's point is inside that rectangle on screen. project()
-// takes longitudes as given, so a record across the antimeridian from the
-// view is tried shifted by ±360° too.
+// Whether a record's point is inside that area on screen. project() takes
+// longitudes as given, so a record across the antimeridian from the view
+// is tried shifted by ±360° too.
 function _findRecordVisible(map, rect, r) {
   if (typeof r.a !== 'number' || typeof r.o !== 'number') return false;
   for (var k = -1; k <= 1; k++) {
     var p = map.project([r.o + 360 * k, r.a]);
-    if (p.x >= rect.x0 && p.x <= rect.x1 && p.y >= rect.y0 && p.y <= rect.y1) return true;
+    if (p.x < rect.x0 || p.x > rect.x1 || p.y < rect.y0 || p.y > rect.y1) continue;
+    var covered = false;
+    for (var h = 0; h < rect.holes.length; h++) {
+      var o = rect.holes[h];
+      if (p.x >= o.x0 && p.x <= o.x1 && p.y >= o.y0 && p.y <= o.y1) { covered = true; break; }
+    }
+    if (!covered) return true;
   }
   return false;
 }
