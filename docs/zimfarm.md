@@ -259,7 +259,10 @@ serial loop with a `polite_pacer`:
   requests, up to 30 s, and each success eases it 10% back. The retry of
   the refused request itself waits the whole `Retry-After` (at least 5 s
   after a 429 or 503 without one); a `Retry-After` over 120 s stops the loop for
-  this run instead of retrying before the server allows it;
+  this run instead of retrying before the server allows it. The Wikidata
+  title backfill retries a 429/maxlag/ratelimited answer until the wait
+  budget below is spent rather than five times, since replication lag
+  lasts minutes; every other request keeps five tries;
 - `STREETZIM_WIKI_WAIT_BUDGET` (default 900 s) bounds the waiting spent on
   rate limits and retries **per step**, not per run: each of the Wikidata
   title backfill (`--resolve-wikidata-titles`), the Wikidata SPARQL
