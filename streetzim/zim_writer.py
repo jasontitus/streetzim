@@ -80,6 +80,14 @@ def admin_record_fields(feat):
     return out
 
 
+def _names_type(name, label):
+    """Whether `name` says `label` as a word: "Arlington County" says
+    county, "Georgetown" does not say town nor "Statesboro" state."""
+    import re
+    return bool(label) and re.search(
+        r"(?<!\w)" + re.escape(label.casefold()) + r"(?!\w)", name.casefold()) is not None
+
+
 def kiwix_page_title(feat):
     """A search page's title (what Kiwix suggests). An admin area's name
     gets its type when the name does not say it: "Alexandria (city)",
@@ -87,7 +95,7 @@ def kiwix_page_title(feat):
     name = feat["name"]
     if feat.get("type") == "admin":
         label = (feat.get("subtype") or "").strip()
-        if label and label.casefold() not in name.casefold():
+        if label and not _names_type(name, label):
             return f"{name} ({label})"
     return name
 
@@ -110,9 +118,10 @@ def kiwix_alt_titles(feat):
         return []
     name = feat["name"]
     label = (feat.get("subtype") or "").strip()
-    cands = list(feat.get("alt") or [])
-    if label in FORMAL_OF_LABELS and label.casefold() not in name.casefold():
+    cands = []
+    if label in FORMAL_OF_LABELS and not _names_type(name, label):
         cands.append(f"{label[:1].upper()}{label[1:]} of {name}")
+    cands += list(feat.get("alt") or [])
     seen = {name.casefold(), kiwix_page_title(feat).casefold()}
     out = []
     for c in cands:
@@ -157,6 +166,13 @@ def kiwix_page_hash(feat):
     return f"map={PAGE_ZOOM.get(feat['type'], 15)}/{lat}/{lon}"
 
 
+# The credit on an admin area's page whose region or point came from
+# GeoNames (streetzim/admin_areas.py); the viewer's About panel says the same.
+GEONAMES_CREDIT = ("Region names beside search results, and the location of "
+                   "administrative areas cut off by the OSM extract: GeoNames "
+                   "(geonames.org), CC BY 4.0")
+
+
 def search_page(feat, i):
     """(path, title, html) of the Kiwix page for search feature `feat`,
     the i-th page written."""
@@ -169,22 +185,26 @@ def search_page(feat, i):
     kind_raw = feat.get("cat") or feat.get("subtype") or feat["type"]
     label = kind_raw.replace("_", " ").title()
     also = None
+    credit = None
     if feat.get("type") == "admin":
         label = label[:1].upper() + kind_raw.replace("_", " ")[1:]
         if feat.get("location"):
             label += f" in {feat['location']}"
         also = feat.get("alt") or None
+        if feat.get("geonames"):
+            credit = GEONAMES_CREDIT
     enrich = {k: feat[k] for k in ("ws", "p", "soc", "brand", "wd")
               if feat.get(k)}
     page_html = search_detail_html(
         feat["name"], label, feat["lat"], feat["lon"], kiwix_page_hash(feat),
         enrich=enrich, also_known_as=also, title=kiwix_page_title(feat),
-        record_type=feat.get("type"))
+        record_type=feat.get("type"), credit=credit)
     return f"search/{slug}.html", kiwix_page_title(feat), page_html
 
 
 def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None,
-                       also_known_as=None, title=None, record_type=None):
+                       also_known_as=None, title=None, record_type=None,
+                       credit=None):
     """HTML for a search-result detail page (`search/<slug>.html`).
 
     CTAs: "Directions to here" + "View on map" (no auto-redirect any
@@ -277,6 +297,7 @@ def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None,
         'p.kind{margin:0 0 14px;color:#666;font-size:0.95rem}'
         'p.brand{margin:0 0 10px;color:#666;font-style:italic;font-size:0.95rem}'
         'p.also{margin:0 0 14px;color:#666;font-size:0.95rem}'
+        'p.credit{margin:8px 0 0;color:#888;font-size:0.8rem}'
         'ul.contact{list-style:none;padding:0;margin:0 0 18px;'
         'display:flex;flex-direction:column;gap:6px;font-size:0.95rem}'
         'ul.contact a{color:#0a7cff;text-decoration:none;word-break:break-all}'
@@ -316,6 +337,7 @@ def search_detail_html(name, kind_label, lat, lon, map_hash, enrich=None,
         f'<a href="../index.html#{map_hash}">View on map</a>'
         '</div>'
         f'<p class="coords">{lat:.5f}, {lon:.5f}</p>'
+        + (f'<p class="credit">{html_mod.escape(credit)}</p>' if credit else '') +
         '</body></html>'
     )
 
@@ -2683,28 +2705,37 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup, page
     print(f"    Adding {len(search_features)} search entries...")
 
     # Enrich with location if available
+    # (An admin area's `location` is its region, or none for a country:
+    # as in _search_bucket.)
     if loc_lookup:
         for f in search_features:
-            if not f.get("location"):
+            if not f.get("location") and f.get("type") != "admin":
                 f["location"] = loc_lookup(f["lat"], f["lon"])
+
+    def _key(name):
+        prefix = name.lower()[:2].replace(" ", "_")
+        prefix = "".join(c if c.isalnum() or c == "_" else "_" for c in prefix)
+        return (prefix or "__")[:2].ljust(2, "_")
 
     # Build chunked search index for scalable on-demand loading.
     from collections import defaultdict
     chunks = defaultdict(list)
     for f in search_features:
-        prefix = f["name"].lower()[:2].replace(" ", "_")
-        prefix = "".join(c if c.isalnum() or c == "_" else "_" for c in prefix)
-        if not prefix:
-            prefix = "__"
-        prefix = prefix[:2].ljust(2, "_")
-        chunks[prefix].append(
-            {"n": f["name"], "t": f["type"], "s": f.get("subtype", ""),
-             "a": f["lat"], "o": f["lon"], "l": f.get("location", ""),
-             **admin_record_fields(f)}
-        )
+        rec = {"n": f["name"], "t": f["type"], "s": f.get("subtype", ""),
+               "a": f["lat"], "o": f["lon"], "l": f.get("location", ""),
+               **admin_record_fields(f)}
+        if f.get("type") == "admin":
+            # The relation's own tags (see _search_bucket).
+            if f.get("wikipedia"):
+                rec["w"] = f["wikipedia"]
+            if f.get("wikidata"):
+                rec["q"] = f["wikidata"]
+        # Under its other names too, as _search_bucket does.
+        for prefix in sorted({_key(n) for n in [f["name"], *rec.get("alt", ())]}):
+            chunks[prefix].append(rec)
 
     manifest = {k: len(v) for k, v in sorted(chunks.items())}
-    total_features = sum(manifest.values())
+    total_features = len(search_features)   # a record under 2 keys counts once
     creator.add_item(MapItem(
         "search-data/manifest.json", "Search Manifest", "application/json",
         json.dumps({"total": total_features, "chunks": manifest},

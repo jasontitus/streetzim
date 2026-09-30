@@ -47,8 +47,32 @@ def test_alt_titles():
     assert W.kiwix_alt_titles(ALEXANDRIA) == ["City of Alexandria"]
     assert W.kiwix_alt_titles(DC) == ["D.C.", "The District"]      # names the type
     assert W.kiwix_alt_titles(dict(ALEXANDRIA, subtype="quarter")) == []
-    assert W.kiwix_alt_titles(dict(ALEXANDRIA, alt=["City of Alexandria", "Alex"])) == [
+    assert W.kiwix_alt_titles(dict(ALEXANDRIA, alt=["Alex", "City of Alexandria"])) == [
         "City of Alexandria", "Alex"]
+    # "<Type> of <Name>" first, so the cut to 6 never drops it.
+    many = dict(ALEXANDRIA, alt=[f"A{i}" for i in range(9)])
+    assert W.kiwix_alt_titles(many)[0] == "City of Alexandria"
+    assert len(W.kiwix_alt_titles(many)) == 6
+
+
+@pytest.mark.parametrize("name,label,title", [
+    ("Georgetown", "town", "Georgetown (town)"),
+    ("Statesboro", "state", "Statesboro (state)"),
+    ("Arlington County", "county", "Arlington County"),
+    ("Town of Colmar Manor", "town", "Town of Colmar Manor"),
+])
+def test_type_in_the_name_is_a_whole_word(name, label, title):
+    feat = dict(ALEXANDRIA, name=name, subtype=label)
+    assert W.kiwix_page_title(feat) == title
+    formal = f"{label.title()} of {name}"
+    assert (formal in W.kiwix_alt_titles(feat)) == (title != name)
+
+
+def test_geonames_credit_on_the_page():
+    _, _, html = W.search_page(dict(ALEXANDRIA, geonames=True), 0)
+    assert '<p class="credit">' in html and "GeoNames (geonames.org), CC BY 4.0" in html
+    _, _, html = W.search_page(DC, 0)
+    assert 'class="credit"' not in html.split("</style>")[1]
 
 
 def test_page_hash():
@@ -123,11 +147,12 @@ def test_written_zim(tmp_path, source):
     dc = [r for r in chunk("di") if r["t"] == "admin"][0]
     assert dc["bb"] == DC["bbox"] and dc["alt"] == ["D.C.", "The District"]
     assert dc["l"] == "United States"
-    if source == "path":
-        # The relation's own tags, and the other names' prefixes.
-        assert alex[0]["q"] == "Q88" and alex[0]["w"] == "en:Alexandria, Virginia"
-        assert any(r["n"] == "District of Columbia" for r in chunk("th"))
-        assert any(r["n"] == "District of Columbia" for r in chunk("d_"))
+    # The relation's own tags, and the other names' prefixes, on both paths.
+    assert alex[0]["q"] == "Q88" and alex[0]["w"] == "en:Alexandria, Virginia"
+    assert any(r["n"] == "District of Columbia" for r in chunk("th"))
+    assert any(r["n"] == "District of Columbia" for r in chunk("d_"))
+    meta = json.loads(bytes(a.get_entry_by_path("search-data/manifest.json").get_item().content))
+    assert meta["total"] == 3
 
     # Kiwix: title suggestions and full text.
     assert _suggest(a, "City of Alexandria") == ["City of Alexandria"]     # the redirect
@@ -146,3 +171,28 @@ def test_written_zim(tmp_path, source):
     hits = [a.get_entry_by_path(p).title
             for p in search.getResults(0, search.getEstimatedMatches())]
     assert "District of Columbia" in hits
+
+
+def test_in_memory_path_keeps_an_empty_region():
+    """A country's region is intentionally empty; the location lookup
+    fills other records only (as _search_bucket does)."""
+    items, redirects = {}, []
+
+    class Creator:
+        def add_item(self, item):
+            items[item.path] = item
+
+        def add_redirection(self, *a):
+            redirects.append(a)
+
+    class Item:
+        def __init__(self, path, title, mime, content, is_front=False):
+            self.path, self.content = path, content
+
+    feats = [dict(DC, location="", admin_level=2, subtype="country"), dict(SHOP)]
+    W._add_search_in_memory(Creator(), Item, search_features=feats,
+                            loc_lookup=lambda lat, lon: "Somewhere")
+    recs = json.loads(items["search-data/di.json"].content)
+    assert recs[0]["l"] == ""
+    assert json.loads(items["search-data/al.json"].content)[0]["l"] == "Somewhere"
+    assert redirects and redirects[0][1] == "D.C."
