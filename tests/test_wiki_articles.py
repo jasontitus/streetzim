@@ -349,13 +349,15 @@ class FakeRedirectingSource(FakeWikiSource):
         return self.redirects.get(title_us)
 
 
+REDIRECT_PAGES = {"Aalten": "<p>Aalten is a municipality.</p>",
+                  "Wolfhart_Pannenberg": "<p>A German theologian.</p>",
+                  "De_Camp": "<p>A different De Camp.</p>"}
+REDIRECTS = {"Aalten_(dorp)": "Aalten", "Pannenberg": "Wolfhart_Pannenberg"}
+
+
 class RedirectOnlyTests(unittest.TestCase):
     """Non-English tags whose item has no English article: bundled only as
     an English redirect to an article bundled here."""
-    PAGES = {"Aalten": "<p>Aalten is a municipality.</p>",
-             "Wolfhart_Pannenberg": "<p>A German theologian.</p>",
-             "De_Camp": "<p>A different De Camp.</p>"}
-    REDIRECTS = {"Aalten_(dorp)": "Aalten", "Pannenberg": "Wolfhart_Pannenberg"}
 
     def _run(self, source, redirect_only):
         stored = {}
@@ -366,7 +368,7 @@ class RedirectOnlyTests(unittest.TestCase):
 
     def test_only_a_redirect_to_a_bundled_article_is_kept(self):
         stored, stats = self._run(
-            FakeRedirectingSource(self.PAGES, self.REDIRECTS),
+            FakeRedirectingSource(REDIRECT_PAGES, REDIRECTS),
             ["nl:Aalten (dorp)",   # redirect to Aalten, bundled here: kept
              "nl:Pannenberg",      # redirect to a theologian: not a place here
              "nl:De Camp",         # an English article of its own: another subject
@@ -381,7 +383,7 @@ class RedirectOnlyTests(unittest.TestCase):
         self.assertEqual(stats["bundled"], 2)
 
     def test_a_source_that_cannot_tell_bundles_none(self):
-        stored, stats = self._run(FakeWikiSource(self.PAGES, {}), ["nl:Aalten (dorp)",
+        stored, stats = self._run(FakeWikiSource(REDIRECT_PAGES, {}), ["nl:Aalten (dorp)",
                                                                  "nl:De Camp"])
         self.assertEqual(sorted(stored), ["wiki-article/Aalten"])
         self.assertEqual(stats["redirects"], 0)
