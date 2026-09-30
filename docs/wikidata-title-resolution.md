@@ -123,6 +123,10 @@ each answer is cached as `<sha1>.redirect`; an article fetch records the
 page it opened there too, and bundled titles fetched before that are looked
 up the same way, only when a target is not matched directly).
 
+The flag goes with the tag: the same tag on an object without a Q-ID is
+bundled by the same rule, not as-is (the geo-index and the viewer go by
+title, so its namesake would otherwise show for the flagged object too).
+
 "Wikidata could not answer" (a 5xx, a stopped run, an offline map's gap)
 is never "no English article": such a tag is looked up as before. Nor is an
 id Wikidata refused on its own (cached as `#refused`, not asked again).

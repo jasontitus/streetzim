@@ -175,7 +175,9 @@ class AugmentTests(unittest.TestCase):
         from streetzim import zim_writer as zw
         xref = {"a": {"wikipedia": "en:Utrecht", "wikidata": "Q803", "wikipedia_src": "wd"},
                 "b": {"wikipedia": "nl:Limmel", "wikidata": "Q2", "wikipedia_no_en": True},
-                "c": {"wikipedia": "nl:Ergens"}}
+                "c": {"wikipedia": "nl:Ergens"},
+                # the flagged tag again, on an object without a Q-ID
+                "d": {"wikipedia": "nl:Limmel"}}
         seen = {}
 
         def fake_bundle(titles, add, **kw):

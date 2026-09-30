@@ -1655,6 +1655,11 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
                       if e.get("wikipedia") and not e.get("wikipedia_no_en")}
         _wa_redirect_only = {e["wikipedia"] for e in wiki_cross_refs.values()
                              if e.get("wikipedia") and e.get("wikipedia_no_en")}
+        # The same tag on another object without a Q-ID names the same
+        # article: it follows the flag, else its namesake would be bundled
+        # after all and shown for the flagged object too (the geo-index
+        # and the viewer go by title).
+        _wa_titles -= _wa_redirect_only
         if _wa_titles:
             from cloud.wiki_articles import bundle_wiki_articles as _bundle_wa
             _wa_t0 = time.time()
