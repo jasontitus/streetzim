@@ -201,15 +201,85 @@ periodically, so:
   it on the worker, not in the recipe or the repository);
 - one run makes one SPARQL request per 40 Q-IDs (1 s apart), one
   extracts request per 20 articles, one `wbgetentities` request per 50
-  Q-IDs for titles, and one `action=parse` request per article, serially, with pauses that widen after a 429. For
+  Q-IDs for titles, and one `action=parse` request per article. For
   Monaco that is about 60 requests; for California (11,613 linked
-  articles) about 12,000. That is within Wikimedia's guidance for a
-  single serial client, but schedule large-region `full` recipes no more
+  articles) about 12,000. Schedule large-region `full` recipes no more
   often than their data changes (monthly), not in parallel with each
   other from one worker IP;
 - the caches live in the task's `--dl` and die with it, so every run asks
   again. A worker with persistent storage could keep `--dl` between runs;
   Zimfarm has no such mount today.
+
+What Wikimedia asks (read 2026-09-30):
+- [API:Etiquette](https://www.mediawiki.org/wiki/API:Etiquette): "There
+  is no hard speed limit on read requests, but be considerate and try not
+  to take a site down." and "Making your requests in series rather than
+  in parallel, by waiting for one request to finish before sending a new
+  request, should result in a safe request rate." On `ratelimited`: "you
+  may retry that request, however you should increase the time between
+  subsequent requests." `maxlag` is for non-interactive tasks: "Higher
+  values mean more aggressive behaviour, lower values are nicer."
+- [Wikimedia APIs/Rate limits](https://www.mediawiki.org/wiki/Wikimedia_APIs/Rate_limits)
+  (new in 2026, "subject to experimentation and change"): "Unauthenticated
+  bot requests with a compliant User-Agent header" get **200 requests a
+  minute**, enforced per minute, across the Action and REST APIs; "limit
+  the number of concurrent requests to 3 or fewer"; on 429 or 503 respect
+  `Retry-After`, and without one "wait at least five seconds, or implement
+  exponential back-off".
+- [Robot policy](https://wikitech.wikimedia.org/wiki/Robot_policy), Action
+  API: "If unauthenticated, keep the concurrency of your requests to 1 at
+  a time, and below 5 requests per second overall", "if your request takes
+  more than 1 second to serve, please wait 5 seconds before making another
+  request", "Where supported, use batch requests", and "Always request
+  content with an `Accept-Encoding: gzip` HTTP header". It also says
+  "Avoid using the action API for HTML content of pages. Use the website
+  and/or the REST API instead."
+- [User-Agent policy](https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy):
+  `<client name>/<version> (<contact information>) <library>/<version>`;
+  a generic agent (`Python-urllib` alone) gets HTTP 403.
+
+How the article fetch follows it (`cloud/wiki_articles.py`,
+`article_pacer`; `cloud/wikimedia_http.py`, `Pacer`):
+- serial, one request at a time; the pause runs from the end of each
+  response, 0.1 s by default (`STREETZIM_WIKI_GAP`), as for Wikidata;
+- at most 170 request starts a minute (`STREETZIM_WIKI_MAX_PER_MIN`), so a
+  run of fast answers stays under the 200 a minute with room for the
+  worker's other Wikimedia traffic. With 0.15 s answers and only the
+  0.1 s gap a run would make ~240 a minute;
+- 5 s after an answer that took over 1 s;
+- a 429, maxlag, or 5xx with `Retry-After` doubles the gap (at least the
+  `Retry-After`, at most 30 s) and each success eases it 10% back;
+  retries honour `Retry-After`, and `STREETZIM_WIKI_WAIT_BUDGET` bounds the
+  waiting a run spends on them;
+- gzip is requested and decoded.
+
+Until 2026-09 the article fetch paused a fixed 1 s after every answer. In
+the D.C. `full` comparison (1,308 articles, no 429) that was 1,522 to
+1,541 s of a 39 minute build, 1.17 s an article. At 170 a minute the
+same 1,308 take at least 7.7 minutes; with answers slower than 0.25 s
+paced by their own time plus 0.1 s, and 5 s after each answer over 1 s,
+about 8 to 10 minutes, so the build takes about 23 minutes instead of 39. Switzerland
+has 10,639 distinct `wikipedia=` values and 37,271 `wikidata=` values in
+OSM (taginfo.geofabrik.de, 2026-09-30; D.C. has 1,085 and 1,992 and
+bundles 1,308 titles), so an estimated 13,000 to 16,000 titles: about 80
+to 100 minutes of article fetching instead of 4.2 to 5.2 hours.
+
+Why one `action=parse` per article and not something batched:
+- `action=parse` takes one page per request.
+- `prop=extracts` batches up to 20 titles, but "Multiple extracts can only
+  be returned if exintro is set to true" (lead sections only), so whole
+  articles are still one request each.
+- The REST API (`/api/rest_v1/page/html/<title>`) is one request per page
+  too; it is CDN-cached and what the robot policy prefers for HTML, but
+  its Parsoid HTML does not clean to the same page: on 50 D.C. articles
+  42 came out different and 11 leaked `data-mw` JSON and wikitext (the
+  geohack coordinate template) into the text, because
+  `clean_article_html` strips tags with a regex that a `>` inside an
+  attribute defeats. Switching would need a new cleaner and a separate
+  cache (the cache stores the raw parse HTML), so the fetch stays on
+  `action=parse`. The parse HTML is also what the builder uses: text
+  structure only online (links are unwrapped, images come from an
+  offline Wikipedia ZIM).
 
 ### Wikipedia articles on Zimfarm: the API, not a Wikipedia ZIM
 
@@ -644,9 +714,9 @@ from them, since only Monaco was measured with `full`:
   search step (Overture addresses are dense where national registries feed
   them, as in the Netherlands), hence the extra 2 GiB estimated.
 - Time in `full` is dominated by the Wikimedia APIs: one SPARQL request per
-  40 Q-IDs with a 1 s pause, and one request per article with at least
-  0.1 s between them (California links 11,613 articles: over 20 minutes
-  before any rate limiting), plus up to 15 minutes of rate-limit waiting
+  40 Q-IDs with a 1 s pause, and one request per article at no more than
+  170 a minute (California links 11,613 articles: over an hour before any
+  rate limiting), plus up to 15 minutes of rate-limit waiting
   per source (`STREETZIM_WIKI_WAIT_BUDGET`). A recipe for a large region
   should allow hours on top of `basic`'s time, not minutes.
 - Terrain (on in `full`) adds the Copernicus DEM download and the

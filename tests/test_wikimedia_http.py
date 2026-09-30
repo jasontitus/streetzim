@@ -186,6 +186,141 @@ def test_404_is_an_answer_not_retried(monkeypatch, sleeps):
     assert len(api.urls) == 1 and sleeps == []
 
 
+
+# ---- article pacing: from the end of each response, no fixed sleep ------
+
+class Clock:
+    """A fake clock: sleeps are recorded, and both sleeps and the time a
+    TimedAPI answer takes advance it."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+        self.sleeps: list[float] = []
+
+    def sleep(self, sec: float) -> None:
+        self.sleeps.append(sec)
+        self.now += sec
+
+
+@pytest.fixture
+def clock(monkeypatch) -> Clock:
+    c = Clock()
+    monkeypatch.setattr(wm.time, "sleep", c.sleep)
+    monkeypatch.setattr(wm.time, "monotonic", lambda: c.now)
+    monkeypatch.setattr(wm.random, "random", lambda: 0.5)
+    for env in (wm.REQUIRE_ENV, wa.GAP_ENV, wa.MAX_PER_MIN_ENV):
+        monkeypatch.delenv(env, raising=False)
+    return c
+
+
+class TimedAPI(FakeAPI):
+    """FakeAPI whose n-th answer takes `took(n)` seconds on `clock`;
+    records when each request started."""
+
+    def __init__(self, clock: Clock, *script, default=None, took=lambda n: 0.2):
+        super().__init__(*script, default=default)
+        self.clock = clock
+        self.took = took
+        self.starts: list[float] = []
+
+    def __call__(self, req, timeout=None):
+        self.starts.append(self.clock.now)
+        self.clock.now += self.took(len(self.starts) - 1)
+        return super().__call__(req, timeout)
+
+
+def test_no_fixed_sleep_after_a_response(monkeypatch, clock, tmp_path):
+    # Answers taking 0.5 s: the only wait is the 0.1 s gap after each one,
+    # not the old fixed 1 s.
+    api = use(monkeypatch, TimedAPI(clock, default=parse_ok(ARTICLE), took=lambda n: 0.5))
+    stats = wa.bundle_wiki_articles([f"en:T{i}" for i in range(6)], lambda *a: None,
+                                    cache_dir=str(tmp_path), log=lambda *_: None)
+    assert stats["bundled"] == 6
+    assert clock.sleeps == [pytest.approx(wa.DEFAULT_GAP)] * 5
+    assert all(b - a == pytest.approx(0.6) for a, b in zip(api.starts, api.starts[1:]))
+
+
+def test_fast_responses_stay_under_the_per_minute_limit(monkeypatch, clock, tmp_path):
+    # 0.05 s answers plus a 0.1 s gap would be 400 requests a minute; the
+    # request-rate floor holds them to 170 (Wikimedia allows 200).
+    api = use(monkeypatch, TimedAPI(clock, default=parse_ok(ARTICLE), took=lambda n: 0.05))
+    wa.bundle_wiki_articles([f"en:T{i}" for i in range(20)], lambda *a: None,
+                            cache_dir=str(tmp_path), log=lambda *_: None)
+    spacing = [b - a for a, b in zip(api.starts, api.starts[1:])]
+    assert min(spacing) >= 60 / wa.DEFAULT_MAX_PER_MIN - 1e-9
+    assert max(spacing) == pytest.approx(60 / wa.DEFAULT_MAX_PER_MIN)
+    # STREETZIM_WIKI_MAX_PER_MIN=0 lifts the cap: only the gap is left.
+    monkeypatch.setenv(wa.MAX_PER_MIN_ENV, "0")
+    clock.sleeps.clear()
+    use(monkeypatch, TimedAPI(clock, default=parse_ok(ARTICLE), took=lambda n: 0.05))
+    wa.bundle_wiki_articles([f"en:U{i}" for i in range(3)], lambda *a: None,
+                            cache_dir=str(tmp_path), log=lambda *_: None)
+    assert clock.sleeps == [pytest.approx(0.1)] * 2
+
+
+def test_slow_answer_is_followed_by_a_longer_pause(monkeypatch, clock, tmp_path):
+    # The robot policy: over 1 s to serve -> wait 5 s before the next.
+    use(monkeypatch, TimedAPI(clock, default=parse_ok(ARTICLE),
+                              took=lambda n: 1.5 if n == 1 else 0.3))
+    wa.bundle_wiki_articles([f"en:T{i}" for i in range(4)], lambda *a: None,
+                            cache_dir=str(tmp_path), log=lambda *_: None)
+    assert clock.sleeps == [pytest.approx(0.1), pytest.approx(5.0), pytest.approx(0.1)]
+
+
+def test_gap_widens_on_429_and_eases_back(monkeypatch, sleeps, tmp_path):
+    use(monkeypatch, FakeAPI(http_error(429, "4"), default=parse_ok(ARTICLE)))
+    stats = wa.bundle_wiki_articles([f"en:T{i}" for i in range(5)], lambda *a: None,
+                                    cache_dir=str(tmp_path), sleep=0.1,
+                                    log=lambda *_: None)
+    assert stats["bundled"] == 5 and stats["unfetched"] == 0
+    # Retry-After 4 s (+ jitter), then gaps of 4 s easing 10% per success.
+    assert sleeps == [pytest.approx(4.5), pytest.approx(3.6), pytest.approx(3.24),
+                      pytest.approx(2.916), pytest.approx(2.6244)]
+    p = wa.article_pacer(0.1, 0)
+    p.rate_limited(4.0)
+    for _ in range(100):
+        p.succeeded()
+    assert p.current == pytest.approx(0.1)    # all the way back to the base
+
+
+@pytest.mark.parametrize("fault,widens", [(http_error(503, "7"), True),
+                                          (http_error(502), False),
+                                          ({"error": {"code": "maxlag"}}, True)])
+def test_overload_widens_the_gap_a_bare_5xx_only_retries(monkeypatch, sleeps, fault,
+                                                          widens):
+    use(monkeypatch, FakeAPI(fault, {"ok": 1}))
+    p = wm.Pacer(0.1)
+    assert wm.get_json("https://x.test/a", user_agent="ua", pacer=p) == {"ok": 1}
+    assert (p.current > 0.1) is widens
+
+
+def test_gzip_is_asked_for_and_decoded(monkeypatch, sleeps):
+    import gzip as _gzip
+
+    class Resp(io.BytesIO):
+        def __init__(self, data: bytes) -> None:
+            super().__init__(data)
+            self.headers = {"Content-Encoding": "gzip"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+    seen = {}
+
+    def urlopen(req, timeout=None):
+        seen["ae"] = req.get_header("Accept-encoding")
+        return Resp(_gzip.compress(json.dumps(parse_ok(ARTICLE)).encode()))
+    monkeypatch.setattr(wm.urllib.request, "urlopen", urlopen)
+    assert wm.get_json("https://x.test/a", user_agent="ua") == parse_ok(ARTICLE)
+    assert seen["ae"] == "gzip"
+    # A truncated gzip body is a transient failure, never a crash.
+    monkeypatch.setattr(wm.urllib.request, "urlopen",
+                        lambda req, timeout=None: Resp(_gzip.compress(b'{"a": 1}')[:-6]))
+    with pytest.raises(wm.TransientError):
+        wm.get_json("https://x.test/a", user_agent="ua", retries=1)
+
 # ---- Wikipedia articles ---------------------------------------------------
 
 def test_article_after_429_with_retry_after_is_cached(monkeypatch, sleeps, tmp_path):
