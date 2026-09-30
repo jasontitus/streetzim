@@ -84,14 +84,32 @@ try {
       const popups = () => p.evaluate(() => document.querySelectorAll('.maplibregl-popup').length);
       // A double-tap (zoom) on the label must not leave a popup open, fast
       // or slow: MapLibre takes taps up to 500 ms apart as a double-tap.
-      for (const gap of [80, 300, 420]) {
-        await p.evaluate((c, z) => window.__szMap.jumpTo({ center: c, zoom: z }), CENTER, ZOOM);
-        await idle(p); await closeAll(); await sleep(300);
-        await p.touchscreen.tap(target.x, target.y); await sleep(gap);
-        await p.touchscreen.tap(target.x, target.y); await sleep(1200); await idle(p);
-        if (await popups()) errs.push(`a double-tap ${gap} ms apart left a popup open`);
-        else console.log(`double-tap ${gap} ms: no popup`);
+      // Also with the CPU slowed 4x (a phone): there the zoom used to start
+      // after the popup had opened. The second tap must not press anything
+      // in a popup either (it used to open routing via "Directions").
+      const cdp = await p.createCDPSession();
+      for (const rate of [1, 4]) {
+        await cdp.send('Emulation.setCPUThrottlingRate', { rate });
+        for (const gap of [80, 300, 420]) {
+          await p.evaluate((c, z) => window.__szMap.jumpTo({ center: c, zoom: z }), CENTER, ZOOM);
+          await idle(p); await closeAll(); await sleep(300);
+          const z0 = await p.evaluate(() => window.__szMap.getZoom());
+          await p.touchscreen.tap(target.x, target.y); await sleep(gap);
+          await p.touchscreen.tap(target.x, target.y); await sleep(1500 * rate); await idle(p);
+          const zoomed = await p.evaluate(z => window.__szMap.getZoom() > z + 0.5, z0);
+          const routing = await p.evaluate(() => !!(window.streetzimRouting && window.streetzimRouting.panelActive));
+          const n = await popups();
+          // A zoom means MapLibre took it as a double-tap: no popup. Two
+          // taps it did not take as one (too far apart) are two single
+          // taps: a popup is right. Either way the second tap must not
+          // press anything in a popup.
+          if (routing) errs.push(`a double-tap ${gap} ms apart (CPU x${rate}) opened routing`);
+          else if (zoomed && n) errs.push(`a double-tap ${gap} ms apart (CPU x${rate}) zoomed and left a popup open`);
+          else console.log(`double-tap ${gap} ms, CPU x${rate}: ${zoomed ? 'zoomed, no popup' : 'two single taps, ' + n + ' popup'}`);
+          if (routing) await p.evaluate(() => window.streetzimRouting.close());
+        }
       }
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
       await p.evaluate((c, z) => window.__szMap.jumpTo({ center: c, zoom: z }), CENTER, ZOOM);
       await idle(p); await closeAll();
       // With the routing panel open, a tap picks a route point instead.

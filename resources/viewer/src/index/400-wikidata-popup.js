@@ -251,22 +251,36 @@ function initWikidataPopups(map, config) {
   // latest tap's popup may open (a slow Wikidata chunk used to open a
   // second popup after a later tap).
   var TAP_SLOP = 10;
-  var DOUBLE_TAP_MS = 250;
-  // MapLibre takes two taps up to 500 ms apart as a double-tap zoom, but
-  // waiting that long to open every popup would feel slow. So a popup opens
-  // after DOUBLE_TAP_MS, and a zoom that starts within ZOOM_AFTER_TAP_MS of
-  // the tap that opened it closes it again.
-  var ZOOM_AFTER_TAP_MS = 500;
+  // Double-taps zoom; they must not open (or press) a popup. A tap within
+  // DOUBLE_TAP_WINDOW ms and DOUBLE_TAP_DIST px of the previous one is the
+  // second tap of a double-tap: it opens nothing, and the first tap's
+  // popup, pending or open, is dropped. This does not depend on when the
+  // zoom starts (on a slow phone that came more than 500 ms after the tap).
+  // A popup waits DOUBLE_TAP_MS, MapLibre's own limit for the gap between
+  // the taps of a double-tap zoom, so the second tap of any double-tap
+  // comes before the popup exists (at 250-300 ms it could land on the
+  // popup and press "Directions"). It is anchored POPUP_OFFSET px above the
+  // point the finger touched (not the place's point: a tap on a POI icon
+  // lands above that, where the popup's tip would be), so a late second tap
+  // cannot land on it either; and a zoom within ZOOM_AFTER_TAP_MS of the tap
+  // that opened it still closes it.
+  var DOUBLE_TAP_MS = 500;
+  var DOUBLE_TAP_WINDOW = 600;
+  var DOUBLE_TAP_DIST = 30;
+  var ZOOM_AFTER_TAP_MS = 1000;
+  var POPUP_OFFSET = 40;
   var tapSeq = 0;
   var tapTimer = null;
-  var tapAt = 0;
+  var lastTap = null;         // {at, x, y, seq}
   var popupSeq = 0;           // the tap that opened currentPopup
   function cancelPendingTap() {
     if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; }
   }
   function onZoomGesture() {
+    if (!lastTap || Date.now() - lastTap.at > ZOOM_AFTER_TAP_MS) return;
     cancelPendingTap();
-    if (currentPopup && popupSeq === tapSeq && Date.now() - tapAt < ZOOM_AFTER_TAP_MS) {
+    tapSeq++;                 // a Wikidata chunk still loading must not open
+    if (currentPopup && popupSeq === lastTap.seq) {
       currentPopup.remove(); currentPopup = null;
     }
   }
@@ -300,9 +314,13 @@ function initWikidataPopups(map, config) {
 
   map.on('click', function(e) {
     var target = e.originalEvent && e.originalEvent.target;
+    var now = Date.now();
+    var second = !!lastTap && now - lastTap.at < DOUBLE_TAP_WINDOW
+      && Math.abs(e.point.x - lastTap.x) < DOUBLE_TAP_DIST
+      && Math.abs(e.point.y - lastTap.y) < DOUBLE_TAP_DIST;
     var seq = ++tapSeq;
     cancelPendingTap();
-    tapAt = Date.now();
+    lastTap = second ? null : { at: now, x: e.point.x, y: e.point.y, seq: seq };
     if (target && target.closest && target.closest('.maplibregl-marker')) return;
     if (currentPopup) { currentPopup.remove(); currentPopup = null; }
     // Close find-result marker popups too — same reason as above.
@@ -317,6 +335,7 @@ function initWikidataPopups(map, config) {
         } catch (e3) {}
       }
     }
+    if (second) return;       // a double-tap zoom: no popup for either tap
     if (window.streetzimRouting && window.streetzimRouting.panelActive) return;
     var feat = tappedFeature(e.point);
     if (!feat) return;
@@ -335,7 +354,7 @@ function initWikidataPopups(map, config) {
       if (seq !== tapSeq) return;
       var wd = (chunk && chunk[qid]) ? chunk[qid] : null;
       popupSeq = seq;
-      currentPopup = new maplibregl.Popup({ maxWidth: '320px' })
+      currentPopup = new maplibregl.Popup({ maxWidth: '320px', offset: POPUP_OFFSET, anchor: 'bottom' })
         .setLngLat(e.lngLat)
         .setDOMContent(buildWikiPopupDOM(name, wd, e.lngLat,
                                          _wikiArticlePath(qid, null)));
@@ -357,8 +376,8 @@ function initWikidataPopups(map, config) {
       lon = g.coordinates[0]; lat = g.coordinates[1];
     }
     var kind = props.subclass || props.class || '';
-    var popup = new maplibregl.Popup({ maxWidth: '320px' })
-      .setLngLat([lon, lat])
+    var popup = new maplibregl.Popup({ maxWidth: '320px', offset: POPUP_OFFSET, anchor: 'bottom' })
+      .setLngLat(e.lngLat)
       .setDOMContent(_szPlacePopupDOM(lat, lon, name, { cat: kind }));
     currentPopup = popup;
     popupSeq = seq;
