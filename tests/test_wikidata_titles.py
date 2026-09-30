@@ -176,8 +176,16 @@ class AugmentTests(unittest.TestCase):
         xref = {"a": {"wikipedia": "en:Utrecht", "wikidata": "Q803", "wikipedia_src": "wd"},
                 "b": {"wikipedia": "nl:Limmel", "wikidata": "Q2", "wikipedia_no_en": True},
                 "c": {"wikipedia": "nl:Ergens"},
-                # the flagged tag again, on an object without a Q-ID
-                "d": {"wikipedia": "nl:Limmel"}}
+                # the flagged title again, on objects without a Q-ID, in
+                # any language, case or spelling of its spaces
+                "d": {"wikipedia": "nl:Limmel"},
+                "e": {"wikipedia": "li:Limmel"},
+                "f": {"wikipedia": "NL:Limmel"},
+                "g": {"wikipedia": "nl:Sint Pieter", "wikidata": "Q5",
+                      "wikipedia_no_en": True},
+                "h": {"wikipedia": "nl:Sint_Pieter"},
+                # an English tag names that article itself: kept
+                "i": {"wikipedia": "en:Limmel"}}
         seen = {}
 
         def fake_bundle(titles, add, **kw):
@@ -189,9 +197,9 @@ class AugmentTests(unittest.TestCase):
                                   wiki_articles_cache=None, wiki_articles_source=None,
                                   wiki_images="none", wiki_image_max_kb=0,
                                   wiki_images_per_article=0)
-        self.assertEqual(seen["titles"], {"en:Utrecht", "nl:Ergens"})
+        self.assertEqual(seen["titles"], {"en:Utrecht", "nl:Ergens", "en:Limmel"})
         # Only as a redirect to a bundled article (cloud/wiki_articles).
-        self.assertEqual(seen["redirect_only"], {"nl:Limmel"})
+        self.assertEqual(seen["redirect_only"], {"nl:Limmel", "nl:Sint Pieter"})
 
     def test_empty_and_none_are_safe(self):
         self.assertEqual(wt.augment_wiki_cross_refs(None)["entries_upgraded"], 0)

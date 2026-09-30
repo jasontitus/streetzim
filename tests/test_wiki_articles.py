@@ -354,7 +354,8 @@ REDIRECT_PAGES = {"Aalten": "<p>Aalten is a municipality.</p>",
                   "Wolfhart_Pannenberg": "<p>A German theologian.</p>",
                   "De_Camp": "<p>A different De Camp.</p>"}
 REDIRECTS = {"Aalten_(dorp)": "Aalten", "Pannenberg": "Wolfhart_Pannenberg",
-             "AEGON": "Aegon", "Aegon_N.V.": "Aegon"}
+             "AEGON": "Aegon", "Aegon_N.V.": "Aegon", "AC-DC": "AC/DC"}
+REDIRECT_PAGES["AC/DC"] = "<p>AC/DC is a rock band.</p>"
 
 
 class RedirectOnlyTests(unittest.TestCase):
@@ -398,6 +399,24 @@ class RedirectOnlyTests(unittest.TestCase):
         self.assertEqual(links, {"wiki-article/Aegon_N.V.": ("Aegon N.V.", "wiki-article/AEGON")})
         self.assertEqual(stats["stored_titles"], {"AEGON", "Aegon_N.V."})
         self.assertEqual(stats["redirects"], 1)
+
+    def test_a_redirect_to_another_depth_is_a_copy(self):
+        # "AC-DC" -> "AC/DC": the PWA serves a redirect entry's content at
+        # the redirect's own URL, one level up from the article, where its
+        # ../../wiki-image/ links would miss. So a copy, with links for its
+        # own depth; a redirect at the same depth stays a redirect.
+        stored, links = {}, {}
+        wa.bundle_wiki_articles(
+            ["en:AC/DC", "en:Aalten"], lambda p, t, m, c: stored.__setitem__(p, (t, c)),
+            sleep=0, log=lambda *_: None,
+            source=FakeRedirectingSource(REDIRECT_PAGES, REDIRECTS),
+            redirect_only=["de:AC-DC", "nl:Aalten (dorp)"],
+            add_redirect=lambda p, t, target: links.__setitem__(p, target))
+        self.assertEqual(links, {"wiki-article/Aalten_(dorp)": "wiki-article/Aalten"})
+        title, page = stored["wiki-article/AC-DC"]
+        self.assertEqual(title, "AC/DC")
+        self.assertIn(b"rock band", page)
+        self.assertIn(b'href="../index.html"', page)    # the back bar, for its depth
 
     def test_a_source_that_cannot_tell_bundles_none(self):
         stored, stats = self._run(FakeWikiSource(REDIRECT_PAGES, {}), ["nl:Aalten (dorp)",

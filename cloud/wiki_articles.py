@@ -252,11 +252,14 @@ def back_to_map_bar(title: str) -> str:
 
 
 def clean_article_html(html: str, title: str, source_url: str,
-                       lead_html: str = "", gallery_html: str = "") -> str:
+                       lead_html: str = "", gallery_html: str = "",
+                       path_title: str | None = None) -> str:
     """Trim raw article HTML (Kiwix or Parsoid) to a compact, self-
     contained reader page: drop scripts/styles/tables/figures/nav/refs/
     edit-links and the IPA/coord clutter, unwrap links to text, whitelist
-    structural tags, strip attributes, and add a CC BY-SA source footer."""
+    structural tags, strip attributes, and add a CC BY-SA source footer.
+    `path_title`: the title the page is stored under, when not `title` (a
+    redirect's copy of its article), for the depth of the back link."""
     h = html
     # Narrow to the article body when a full document is given.
     mbody = re.search(r"<body\b[^>]*>(.*)</body>", h, re.S | re.I)
@@ -330,7 +333,7 @@ def clean_article_html(html: str, title: str, source_url: str,
         ".gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.8em}"
         + BACK_BAR_CSS +
         "</style></head><body>"
-        + back_to_map_bar(title) +
+        + back_to_map_bar(title if path_title is None else path_title) +
         f"<h1>{safe_title}</h1>\n{lead_html}{h}\n{gallery_html}"
         f"<footer>From <a href=\"{source_url}\">Wikipedia</a> — text under "
         "<a href=\"https://creativecommons.org/licenses/by-sa/4.0/\">"
@@ -444,6 +447,27 @@ _REDIRECT_SUFFIX = ".redirect"
 # Titles per `action=query` redirect lookup (the API's limit for a client
 # without the apihighlimits right).
 QUERY_BATCH = 50
+# ... and at most this many characters of titles, percent-encoded: a GET
+# of 50 long Cyrillic or CJK titles (6-9 characters a letter encoded) runs
+# past 12 KB, which a server may refuse with a 414 (every title of the
+# batch unanswered, every build). 6,000 keeps the URL well under 8 KB.
+QUERY_MAX_CHARS = 6000
+
+
+def _query_batches(titles_us: list[str]) -> list[list[str]]:
+    """`titles_us` split into action=query batches: at most QUERY_BATCH
+    titles and QUERY_MAX_CHARS characters of encoded titles each (a
+    longer title goes alone)."""
+    out: list[list[str]] = []
+    size = 0
+    for t in titles_us:
+        n = len(urllib.parse.quote(t.replace("_", " "), safe="")) + 3   # + an encoded "|"
+        if not out or len(out[-1]) >= QUERY_BATCH or size + n > QUERY_MAX_CHARS:
+            out.append([])
+            size = 0
+        out[-1].append(t)
+        size += n
+    return out
 
 
 def _cache_paths(cache_dir: str, title_us: str) -> tuple[str, str]:
@@ -613,6 +637,13 @@ def _query_redirects(titles_us: list[str], ua: str, pacer: Pacer | None = None
     normalized, redirects = hops("normalized"), hops("redirects")
     pages = {str(p.get("title")): not (p.get("missing") or p.get("invalid"))
              for p in query.get("pages") or () if isinstance(p, dict) and p.get("title")}
+    # A title with another wiki's prefix ("zh-yue:Foo", "simple:Foo": codes
+    # _strip_lang leaves on) is listed under `interwiki`, not `pages`. It is
+    # no page of English Wikipedia: the definitive "no such page", cached
+    # like one (it used to go unanswered, so unfetched, every build).
+    for iw in query.get("interwiki") or ():
+        if isinstance(iw, dict) and iw.get("title"):
+            pages[str(iw["title"])] = False
     out: dict[str, tuple[str | None, str | None]] = {}
     for t in titles_us:
         name = normalized.get(t.replace("_", " "), t.replace("_", " "))
@@ -688,9 +719,12 @@ def bundle_wiki_articles(
     is kept. The target is matched by the page each bundled title opens, so
     a target bundled under an alias of its own (AEGON -> Aegon) counts.
     `add_redirect(path, title, target_path)` writes it as a ZIM redirect
-    to that article (creator.add_redirection); without it, a copy of the
-    article is stored. Offline, the source ZIM's redirect entries tell;
-    online, `action=query&redirects=1` for 50 titles a request, no text
+    to that article (creator.add_redirection); without it, or when the two
+    titles hold a different number of slashes (the PWA would serve the
+    article at the redirect's depth, breaking its image links), a copy of
+    the article is stored. Offline, the source ZIM's redirect entries tell;
+    online, `action=query&redirects=1` for up to 50 titles a request
+    (fewer when long: QUERY_MAX_CHARS), no text
     (each answer cached, .redirect). A source that cannot tell bundles
     none. A title also in `titles` is bundled as usual.
     """
@@ -708,7 +742,8 @@ def bundle_wiki_articles(
     redirect_titles: list[str] = []
     for t in redirect_only:
         u = _underscore(t) if t else ""
-        if u and u not in seen:
+        # "de:" or "nl: " names no page at all: not asked about.
+        if u.strip("_") and u not in seen:
             seen.add(u)
             redirect_titles.append(u)
 
@@ -795,7 +830,8 @@ def bundle_wiki_articles(
                         + (f"<figcaption>{c}</figcaption>" if c else "") + "</figure>"
                         for n, c in figs[1:])
                     gallery_html = f'<section class="gallery">{cells}</section>\n'
-        page = clean_article_html(raw, disp, url, lead_html, gallery_html).encode("utf-8")
+        page = clean_article_html(raw, disp, url, lead_html, gallery_html,
+                                  path_title=title_us).encode("utf-8")
         add_item(f"wiki-article/{title_us}", disp, "text/html", page)
         stored_titles.add(title_us)
         return len(page)
@@ -869,8 +905,7 @@ def bundle_wiki_articles(
                 out[t] = known
             else:
                 todo.append(t)
-        for k in range(0, len(todo), QUERY_BATCH):
-            batch = todo[k:k + QUERY_BATCH]
+        for batch in _query_batches(todo):
             got: dict = {}
             if not stopped:
                 try:
@@ -911,10 +946,14 @@ def bundle_wiki_articles(
             if not article:
                 redirects_skipped += 1
                 continue
-            if add_redirect is not None:
+            if add_redirect is not None and title_us.count("/") == article.count("/"):
                 add_redirect(f"wiki-article/{title_us}", title_us.replace("_", " "),
                              f"wiki-article/{article}")
             else:
+                # A copy when the two sit at different depths ("AC-DC" ->
+                # "AC/DC"): the PWA serves a redirect entry's content at the
+                # redirect's own URL, where the article's relative
+                # ../wiki-image/ links would climb the wrong number of levels.
                 raw = src.html(article) if src is not None else _cache_state(article, cache_dir)[1]
                 if not raw:
                     redirects_skipped += 1

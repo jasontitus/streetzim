@@ -1655,11 +1655,18 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
                       if e.get("wikipedia") and not e.get("wikipedia_no_en")}
         _wa_redirect_only = {e["wikipedia"] for e in wiki_cross_refs.values()
                              if e.get("wikipedia") and e.get("wikipedia_no_en")}
-        # The same tag on another object without a Q-ID names the same
-        # article: it follows the flag, else its namesake would be bundled
-        # after all and shown for the flagged object too (the geo-index
-        # and the viewer go by title).
-        _wa_titles -= _wa_redirect_only
+        # The same title in another non-English tag of an object without a
+        # Q-ID ("li:Limmel", "NL:Limmel", "nl:Sint_Pieter" for "nl:Sint
+        # Pieter") names the same article: it follows the flag, else its
+        # namesake would be bundled after all and shown for the flagged
+        # object too (the geo-index and the viewer go by the title, as
+        # _underscore makes it). An English tag, OSM's or resolved, names
+        # that article itself and stays.
+        from cloud.wiki_articles import _underscore
+        from cloud.wikidata_titles import is_english_title
+        _flagged = {_underscore(t) for t in _wa_redirect_only}
+        _wa_titles = {t for t in _wa_titles
+                      if is_english_title(t) or _underscore(t) not in _flagged}
         if _wa_titles:
             from cloud.wiki_articles import bundle_wiki_articles as _bundle_wa
             _wa_t0 = time.time()

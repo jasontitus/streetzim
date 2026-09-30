@@ -600,6 +600,62 @@ def test_redirect_only_titles_online(monkeypatch, sleeps, tmp_path):
     assert api.batches == [] and len(links) == 2
 
 
+def test_interwiki_and_invalid_titles_are_answers(monkeypatch, sleeps, tmp_path):
+    # A flagged tag with a code _strip_lang leaves on ("zh-yue:", "simple:")
+    # comes back under `interwiki`, and one MediaWiki cannot take as a
+    # title as an `invalid` page. Both mean "no such page here": cached,
+    # not left unfetched (a WARNING, or a failed build with
+    # STREETZIM_REQUIRE_WIKI=1, every build).
+    d = str(tmp_path)
+    answer = {"batchcomplete": True, "query": {
+        "normalized": [{"from": "simple:foo", "to": "simple:Foo"}],
+        "interwiki": [{"title": "zh-yue:Foo", "iw": "zh-yue"},
+                      {"title": "simple:Foo", "iw": "simple"}],
+        "pages": [{"title": "Foo[bar]", "invalidreason": "invalid characters",
+                   "invalid": True}]}}
+    api = use(monkeypatch, FakeAPI(parse_ok(ARTICLE), answer))
+    only = ["zh-yue:Foo", "simple:foo", "nl:Foo[bar]", "de:", "nl: _"]   # the last two: no title
+    stats = wa.bundle_wiki_articles(["en:A"], lambda *a: None, cache_dir=d, sleep=0,
+                                    log=lambda *_: None, redirect_only=only)
+    assert stats["unfetched"] == 0 and stats["redirects_skipped"] == 3
+    asked = urllib.parse.parse_qs(urllib.parse.urlsplit(api.urls[1]).query)["titles"]
+    assert asked == ["zh-yue:Foo|simple:foo|Foo[bar]"]
+    for t in ("zh-yue:Foo", "simple:foo", "Foo[bar]"):
+        assert wa._redirect_cached(t, d) == (None, None), t
+    # The next build asks nothing.
+    api = use(monkeypatch, FakeAPI())
+    stats = wa.bundle_wiki_articles(["en:A"], lambda *a: None, cache_dir=d, sleep=0,
+                                    log=lambda *_: None, redirect_only=only)
+    assert api.urls == [] and stats["unfetched"] == 0
+
+
+def test_long_titles_split_a_query_batch(monkeypatch, sleeps, tmp_path):
+    # 50 Cyrillic titles of 44 letters encode to 12.5 KB of URL: a 414 for
+    # the whole batch. Batches stop at QUERY_MAX_CHARS of encoded titles.
+    long_titles = [f"Р{i:02d}" + "ж" * 41 for i in range(50)]
+    batches = wa._query_batches(long_titles)
+    assert len(batches) > 1 and [t for b in batches for t in b] == long_titles
+    for b in batches:
+        assert len(urllib.parse.quote("|".join(b), safe="")) <= wa.QUERY_MAX_CHARS
+    assert [len(b) for b in wa._query_batches([f"T{i}" for i in range(120)])] == [50, 50, 20]
+    assert [len(b) for b in wa._query_batches(["ж" * 2000, "a", "b"])] == [1, 2]
+    api = FakeQueryAPI(pages=set(), redirects={})
+    monkeypatch.setattr(wm.urllib.request, "urlopen", _record_urls(api))
+    wa.bundle_wiki_articles([], lambda *a: None, cache_dir=str(tmp_path), sleep=0,
+                            log=lambda *_: None, redirect_only=["ru:" + t for t in long_titles])
+    assert len(api.batches) == len(batches)
+    assert max(len(u) for u in _record_urls.urls) < 8000
+
+
+def _record_urls(inner):
+    _record_urls.urls = []
+
+    def call(req, timeout=None):
+        _record_urls.urls.append(req.full_url)
+        return inner(req, timeout)
+    return call
+
+
 def test_article_fetch_records_the_page_it_opened(monkeypatch, sleeps, tmp_path):
     # An article fetched now needs no lookup later: action=parse followed
     # the alias, and the page it opened is cached with it.

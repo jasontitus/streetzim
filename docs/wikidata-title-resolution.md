@@ -108,7 +108,10 @@ and when present usually another subject; it is bundled only when English
 Wikipedia has it as a **redirect to an article bundled for this map**
 (`bundle_wiki_articles(redirect_only=...)`), written as a ZIM redirect
 `wiki-article/<the redirect's title>` -> the bundled article (no second
-copy, so no duplicate full-text hit; the geo-index lists it). A redirect
+copy, so no duplicate full-text hit; the geo-index lists it). When the two
+titles sit at different depths (`AC-DC` -> `AC/DC`) a copy is stored
+instead: the PWA serves a redirect entry's content at the redirect's own
+URL, where the article's relative `../wiki-image/` links would miss. A redirect
 is an editor's alias (`Aalten (dorp)` -> `Aalten`, `De Bilt (dorp)` ->
 `De Bilt`), but not always one for this place: `Pannenberg` redirects to
 Wolfhart Pannenberg, a theologian, and `VVAC` to the Verde Valley
@@ -117,15 +120,28 @@ in the map (the municipality, the city) keeps the first kind. The target
 is matched by the page each bundled title opens, so an article bundled
 under an alias of its own (`AEGON` -> Aegon; 451 of the Netherlands' 3,829
 bundled titles are such aliases) counts. Offline the source ZIM's redirect
-entries tell; online, `action=query&redirects=1` for 50 titles a request,
-no text (about 84 requests for the Netherlands' ~4,170 such titles, once:
-each answer is cached as `<sha1>.redirect`; an article fetch records the
-page it opened there too, and bundled titles fetched before that are looked
-up the same way, only when a target is not matched directly).
+entries tell; online, `action=query&redirects=1` for up to 50 titles a
+request (fewer when long: at most 6,000 characters of encoded titles, so a
+batch of Cyrillic or CJK titles is not refused with a 414), no text (about
+84 requests for the Netherlands' ~4,170 such titles, once: each answer is
+cached as `<sha1>.redirect`; an article fetch records the page it opened
+there too, and bundled titles fetched before that are looked up the same
+way, only when a target is not matched directly). A title with another
+wiki's prefix (`zh-yue:`, `simple:`: longer than the 2-3 letters that are
+stripped) is answered under `interwiki`, and one MediaWiki cannot take as
+a title as `invalid`; both are cached as "no such page".
 
-The flag goes with the tag: the same tag on an object without a Q-ID is
-bundled by the same rule, not as-is (the geo-index and the viewer go by
-title, so its namesake would otherwise show for the flagged object too).
+The **first online build after this change** asks about every bundled
+article once (about 50 titles a request: ~77 requests for the Netherlands'
+3,829), when a target is not matched directly: article caches written
+before it have no `.redirect` files. Later builds ask nothing.
+
+The flag goes with the title: the same title in another non-English tag
+of an object without a Q-ID (`li:Limmel`, `NL:Limmel`, `nl:Sint_Pieter`
+for `nl:Sint Pieter`) is bundled by the same rule, not as-is (the
+geo-index and the viewer go by title, so its namesake would otherwise show
+for the flagged object too). An English tag (`en:Limmel`, OSM's or
+resolved) names that article itself and is bundled as usual.
 
 "Wikidata could not answer" (a 5xx, a stopped run, an offline map's gap)
 is never "no English article": such a tag is looked up as before. Nor is an
@@ -138,7 +154,11 @@ are resolved and flagged like the rest and their articles are bundled for
 them. They used to be read off the records at write time, unresolved, and
 bundled only when a place node happened to carry the same tag: 96 Dutch
 areas lost their article when non-English tags stopped being looked up as
-they were.
+they were. `append_admin_areas` hands the tags over as it extracts the
+areas; a salvage build (`--skip-address-extract`) reads them from the
+search JSONL. An admin record present only in a reused `--search-cache`
+(its relation no longer extracted) is not in the lookup: its record keeps
+its raw tags, unresolved.
 
 Measured on 500 random Dutch-tagged places of the Netherlands map (with a
 Q-ID; 7,076 of its 7,361 non-English links have one):
