@@ -21,7 +21,7 @@ unset _ops_real _ops_old
 # Skips regions whose extract is already newer than $PLANET unless --force.
 # Output: world-data/regions/<id>.osm.pbf (old symlinks to a parent region
 # are replaced by real extracts, which is what every PBF phase wants — see
-# docs/new-region-setup.md "extract a real regional PBF").
+# ops/docs/new-region-setup.md "extract a real regional PBF").
 set -euo pipefail
 cd /storage/streetzim
 # bbox_crosses / bbox_stale / bbox_mark

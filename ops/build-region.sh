@@ -10,7 +10,7 @@ if [ ! -L "$0" ] && _ops_real="$(readlink -f "$0" 2>/dev/null)"; then
 fi
 unset _ops_real _ops_old
 # Build a regional ZIM from planet PBF + world MBTiles + caches.
-# Mirrors docs/remote-rebuild.md Path B canonical command.
+# Mirrors ops/docs/remote-rebuild.md Path B canonical command (a May 2026 record).
 #
 # Usage: build-region.sh <id> <bbox> <name>
 #   id    - region id (matches overture_cache filenames)
