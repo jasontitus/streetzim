@@ -14,10 +14,12 @@ for Luxembourg (1.4 GB with 4 threads, in the same time) and was killed in a
 The default is the cores this process may run on, capped by a CPU quota
 (cgroup cpu.max, as `docker run --cpus` sets) and by the memory limit
 (cgroup memory.max, as `docker run --memory` sets): one core per
-GIB_PER_CPU of memory. A CPU share (cpu.weight) is relative to the other
-containers on the machine and says nothing about a core count, so it is not
-read. With no limits, as on a build host outside Docker, the default is
-every core, as before. --cpus sets it outright.
+GIB_PER_CPU of memory, the limit first rounded to whole GiB. A CPU share
+(cpu.weight) is relative to the other containers on the machine and says
+nothing about a core count, so it is not read. cgroup v1 (memory.limit_in_bytes,
+cpu.cfs_quota_us) is read when there is no v2 hierarchy. With no limits, as
+on a build host outside Docker, the default is every core, as before.
+--cpus sets it outright; a Zimfarm recipe should set it to its `cpu`.
 
 Stdlib only.
 """
@@ -26,9 +28,11 @@ from __future__ import annotations
 import math
 import os
 
-# Memory per core for the default. A 16 GiB Zimfarm task gets 4 cores, the
-# count the builder's published measurements (docs/zimfarm.md) were made at.
-GIB_PER_CPU = 4
+# Memory per core for the default. The recipes docs/zimfarm.md recommends
+# (2 cpu with 6 GiB, 4 cpu with 8 to 14 GiB) get 2, 2 to 4 cores; a 16 GiB
+# task gets 5. The Netherlands' search step took 5.4 GB at 4 workers, so
+# much less per core would not be safe.
+GIB_PER_CPU = 3
 
 _requested: int | None = None
 
@@ -54,17 +58,23 @@ def detect(cgroup_root: str = "/sys/fs/cgroup",
     and the cgroup's CPU quota and memory limit."""
     n = _usable_cores()
     why = [f"{n} usable cores"]
-    dirs = _cgroup_dirs(cgroup_root, proc_self_cgroup)
-    quota = _cpu_quota(dirs)
+    # v2 when the root is a unified hierarchy (on a hybrid host it is a v1
+    # tmpfs, and the v2 files looked for below would simply be missing).
+    v2 = os.path.exists(os.path.join(cgroup_root, "cgroup.controllers"))
+    dirs = _cgroup_dirs(cgroup_root, proc_self_cgroup) if v2 else []
+    if dirs:
+        quota, mem = _cpu_quota(dirs), _memory_limit(dirs)
+    else:
+        quota, mem = _v1_limits(cgroup_root)
     if quota is not None and quota < n:
         n = quota
         why.append(f"CPU quota {quota}")
-    mem = _memory_limit(dirs)
     if mem is not None:
-        by_mem = max(1, mem // (GIB_PER_CPU << 30))
+        gib = round(mem / (1 << 30))        # 7.99g and 8e9 bytes count as 8 and 7
+        by_mem = max(1, gib // GIB_PER_CPU)
         if by_mem < n:
             n = by_mem
-            why.append(f"memory limit {mem / (1 << 30):.1f} GiB at {GIB_PER_CPU} GiB per core")
+            why.append(f"memory limit {gib} GiB at {GIB_PER_CPU} GiB per core")
     return max(1, n), ", ".join(why)
 
 
@@ -83,7 +93,7 @@ def _cgroup_dirs(root: str, proc_self_cgroup: str) -> list[str]:
     innermost first (a limit on any of them applies). Empty when the
     unified hierarchy is not in use."""
     try:
-        with open(proc_self_cgroup, encoding="utf-8") as f:
+        with open(proc_self_cgroup, encoding="utf-8", errors="surrogateescape") as f:
             lines = f.read().splitlines()
     except OSError:
         return []
@@ -97,10 +107,35 @@ def _cgroup_dirs(root: str, proc_self_cgroup: str) -> list[str]:
 
 def _read(path: str) -> str | None:
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             return f.read().strip()
     except OSError:
         return None
+
+
+# cgroup v1 reports "no limit" as a huge number (PAGE_COUNTER_MAX pages).
+_V1_UNLIMITED = 1 << 60
+
+
+def _v1_limits(root: str) -> tuple[int | None, int | None]:
+    """(CPU quota in cores, memory limit in bytes) from a cgroup v1 mount,
+    as a container sees its own limits at the controller roots."""
+    quota = None
+    q = _read(os.path.join(root, "cpu", "cpu.cfs_quota_us"))
+    p = _read(os.path.join(root, "cpu", "cpu.cfs_period_us"))
+    try:
+        if q is not None and p is not None and int(q) > 0 and int(p) > 0:
+            quota = max(1, math.ceil(int(q) / int(p)))
+    except ValueError:
+        pass
+    mem = None
+    m = _read(os.path.join(root, "memory", "memory.limit_in_bytes"))
+    try:
+        if m is not None and 0 < int(m) < _V1_UNLIMITED:
+            mem = int(m)
+    except ValueError:
+        pass
+    return quota, mem
 
 
 def _cpu_quota(dirs: list[str]) -> int | None:

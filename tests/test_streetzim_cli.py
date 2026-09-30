@@ -112,6 +112,20 @@ def test_cpus_is_forwarded_only_when_given(tmp_path, no_network):
     assert builder_args(argv).cpus is None             # the builder detects it
 
 
+@pytest.mark.parametrize("flag", ["--cpus", "--zim-workers"])
+@pytest.mark.parametrize("value", ["0", "-3", "two"])
+def test_counts_below_one_fail_before_any_download(tmp_path, no_network, capsys, flag, value):
+    with pytest.raises(SystemExit):
+        plan(["--area", "monaco", flag, value], tmp_path)
+    assert no_network == []
+    assert flag in capsys.readouterr().err
+
+
+def test_zim_workers_is_forwarded(tmp_path, no_network):
+    argv, _ = plan(["--area", "monaco", "--zim-workers", "1"], tmp_path)
+    assert builder_args(argv).workers == 1
+
+
 def test_monaco_preset_frames_all_of_monaco_with_sea_around_it():
     """--area monaco is what CI and the Zimfarm recipe build. Its box used to
     stop on Monaco's eastern border (7.44) and 500 m out to sea, so the sea

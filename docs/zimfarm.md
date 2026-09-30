@@ -152,7 +152,7 @@ Recipe flags (the `offliner` part of `POST /v2/recipes`, dash form):
 {"offliner_id": "streetzim", "name": "osm_en_luxembourg", "title": "Luxembourg",
  "description": "Offline map of Luxembourg with search and routing",
  "include-poly": "https://download.geofabrik.de/europe/luxembourg.poly",
- "profile": "full"}
+ "profile": "full", "cpus": 2}
 ```
 
 ```json
@@ -750,6 +750,57 @@ from them, since only Monaco was measured with `full`:
   hillshade tiles ([Terrain cost](#terrain-cost): 0.3 GB for Luxembourg,
   about 0.8 GB for Switzerland), and satellite (opt-in) the imagery. Add
   their disk and time to the `full` rows.
+
+### CPUs and memory (`--cpus`)
+
+Zimfarm gives a task its CPUs as a CPU share (`docker run --cpu-shares`),
+which hides none of the machine's cores: inside the container Python's
+`os.cpu_count()` and tilemaker both see every core of the worker. Before
+`--cpus`, a build started a tilemaker thread, a search process and (up to
+20) a compression thread per core it saw, so its memory grew with the
+machine it landed on, not with the map. The measurements above were made on
+a 4-core machine and do not show it. On a 36-core machine, in a container
+limited like a Zimfarm task (`--memory 16g --cpu-shares 3072`), the same
+Luxembourg `basic` build peaked at 8.4 GB, and tilemaker alone, on the same
+input:
+
+| tilemaker threads | peak memory | time |
+|---|---|---|
+| 36 (every core) | 7.9 GB | 10.3 s |
+| 4 | 1.4 GB | 10.6 s |
+| 1 | 0.7 GB | 28.0 s |
+
+With every core it was killed in a 4 GB container; with 4 threads it ran.
+
+`streetzim/cpus.py` now decides the count once for every step (tilemaker
+`--threads`, the search and terrain processes, the compression and tile
+threads): `--cpus N` when given, otherwise the cores the process may run on,
+capped by a CPU quota (`cpu.max`, as `docker run --cpus` sets) and by the
+memory limit (`memory.max`, as `--memory` sets, rounded to whole GiB) at one
+core per 3 GiB. A CPU share is relative to the other containers and says
+nothing about a core count, so it is not read. cgroup v1 limits are read
+when the machine has no cgroup v2. Outside a container, with no limits, the
+count is every core, as before.
+
+**A recipe should pass `--cpus` equal to its `cpu` resource** (`"cpus": 4`
+next to `"resources": {"cpu": 4, ...}`). Without it the memory rule
+decides: the recipes in the table above get 2 cores for 6 or 8 GiB, 3 for
+10, 4 for 12 or 14, and a 16 GiB task gets 5.
+
+The same Luxembourg build in the 16 GiB container, with every change on the
+branch (the count, and cutting the extract to the area once instead of four
+times):
+
+| Luxembourg `basic`, 36-core machine, `--memory 16g` | peak memory | wall time | CPU time |
+|---|---|---|---|
+| before (36 tilemaker threads, 36 search processes, 20 compression threads) | 8.4 GB | 3.0 min | 5.8 min |
+| 4 cores (the memory rule at the time: one per 4 GiB) | 4.0 GB | 3.3 min | 5.7 min |
+| and the extract cut once | 3.9 GB | 2.5 min | 4.0 min |
+
+What remains at the peak is the one cut of the extract: `osmium extract`
+took 3.7 GB even for Luxembourg's 48 MB, and did not change with its thread
+count (`OSMIUM_POOL_THREADS` 2, 4 and 8 gave the same), so it is a fixed
+cost of about 4 GB per build.
 
 ### Terrain cost
 

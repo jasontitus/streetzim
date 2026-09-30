@@ -483,7 +483,8 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "search and terrain processes, compression threads. "
                              "Default: the usable cores, capped by the container's "
                              "CPU quota and by its memory limit at "
-                             f"{_cpus.GIB_PER_CPU} GiB per core (streetzim/cpus.py)")
+                             f"{_cpus.GIB_PER_CPU} GiB per core, rounded to whole "
+                             "GiB (streetzim/cpus.py)")
     parser.add_argument("--wikidata", action="store_true",
                         help="Include Wikidata info (population, description, etc.) for places/POIs")
     parser.add_argument("--wikidata-cache", metavar="PATH", default=None,
@@ -1736,8 +1737,10 @@ def main(argv=None):
     if stats:
         stats.write(0, total_steps)
     print(f"=== Creating Offline OSM ZIM: {name} ===")
+    _detected = _cpus.detect()
     print(f"  CPU cores: {build_cpus()} ("
-          + ("--cpus" if args.cpus is not None else _cpus.detect()[1]) + ")")
+          + (f"--cpus; detected {_detected[0]}: " if args.cpus is not None else "")
+          + _detected[1] + ")")
     if include_satellite:
         sat_desc = f"{satellite_format} q{satellite_quality} {satellite_tile_size}px"
         _src = satellite_sources.get(args.satellite_source)

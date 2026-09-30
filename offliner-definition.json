@@ -163,7 +163,7 @@
       "type": "integer",
       "required": false,
       "title": "CPU cores",
-      "description": "CPU cores the build uses at once (tilemaker, search, terrain, compression). Set it to the task's CPUs: a CPU share hides no cores, and each core costs memory. Default: the usable cores, at most one per 4 GiB of the container's memory limit",
+      "description": "CPU cores the build uses at once (tilemaker, search, terrain, compression). Set it to the task's CPUs: a CPU share hides no cores, and each core costs memory. Default: the usable cores, at most the container's CPU quota and one per 3 GiB of its memory limit",
       "min": 1
     },
     "profile": {

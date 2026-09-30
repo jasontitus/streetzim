@@ -155,6 +155,18 @@ def version() -> str:
     return __version__
 
 
+
+def positive_int(text: str) -> int:
+    """argparse type for a count of at least 1, so a bad value fails before
+    any download."""
+    try:
+        n = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a whole number: {text!r}") from None
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, not {n}")
+    return n
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="streetzim", allow_abbrev=False,
@@ -235,16 +247,16 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Maximum zoom of the vector tiles. Default: 14")
     feat.add_argument("--default-view",
                       help="Initial map view as latitude,longitude[,zoom]")
-    feat.add_argument("--zim-workers", type=int,
+    feat.add_argument("--zim-workers", type=positive_int,
                       help="Compression threads for libzim. Default: --cpus, "
                            "at most 20")
-    feat.add_argument("--cpus", type=int,
+    feat.add_argument("--cpus", type=positive_int,
                       help="CPU cores the build uses at once (tilemaker, "
                            "search, terrain, compression). Set it to the task's "
                            "CPUs: a CPU share hides no cores, and each core "
                            "costs memory. Default: the usable cores, at most "
-                           f"one per {cpus.GIB_PER_CPU} GiB of the container's "
-                           "memory limit")
+                           "the container's CPU quota and one per "
+                           f"{cpus.GIB_PER_CPU} GiB of its memory limit")
     feat.add_argument("--keep-temp", action="store_true", help=argparse.SUPPRESS)
     add_profile_arguments(p)
     add_satellite_flags(p)
@@ -918,7 +930,7 @@ def _builder_argv(args: argparse.Namespace, bbox: str, pbf_url: str | None, dl: 
         argv += ["--kiwix-poi-pages"]
     if args.max_zoom is not None:
         argv += ["--max-zoom", str(args.max_zoom)]
-    if args.zim_workers:
+    if args.zim_workers is not None:
         argv += ["--workers", str(args.zim_workers)]
     if args.cpus is not None:
         argv += ["--cpus", str(args.cpus)]
