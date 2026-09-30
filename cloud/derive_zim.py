@@ -39,8 +39,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from cloud.tile_order import tile_sort_key as _tile_sort_key  # noqa: E402
 from cloud.search_shards import TIER_TYPES  # noqa: E402
 from cloud.zimfmt import (  # noqa: E402
-    COMP_NONE, MIME_REDIRECT, NO_MAIN_PAGE, TITLE_LISTING_V0, TITLE_LISTING_V1,
-    Dirent, ZimReader, ZimWriter, encode_cluster, sort_key_title, sort_key_url)
+    COMP_NONE, NO_MAIN_PAGE, TITLE_LISTING_V0, TITLE_LISTING_V1,
+    Dirent, ZimReader, ZimWriter, encode_cluster, sort_key_url)
 
 TILE_RE = re.compile(r"^(tiles|satellite|terrain)/(\d+)/(\d+)/(\d+)\.\w+$")
 DEFAULT_CLUSTER_TARGET = 8 << 20   # uncompressed bytes, matches manifest_writer
@@ -339,7 +339,7 @@ def derive(src_path: str, dst_path: str, recipe: Recipe, *, dry_run: bool = Fals
         if not isinstance(chunks, dict):
             raise SystemExit("--strip-addresses: manifest has no 'chunks' map")
         empty = json.dumps([]).encode()
-        for i, d in enumerate(dirents):
+        for d in dirents:
             if d.is_redirect or d.namespace != "C" or not d.url.startswith(SEARCH_PREFIX) \
                     or d.url == SEARCH_MANIFEST or not d.url.endswith(b".json"):
                 continue
@@ -513,9 +513,11 @@ def _emit(r, h, w, dirents, keep, kept_blobs, rewrite_refs, regroup_refs, plan, 
                 compress = comp == "tiles"   # satellite/terrain are pre-compressed images
                 n_clusters = 0
 
+                # batches() and drain() run within this iteration only: the
+                # loop variables they read cannot change under them.
                 def batches():
                     cur: list[bytes] = []; cur_refs: list[tuple] = []; size = 0
-                    for _key, data, ref in spill.iter_sorted(comp, z):
+                    for _key, data, ref in spill.iter_sorted(comp, z):  # noqa: B023
                         cur.append(data); cur_refs.append(ref); size += len(data)
                         if size >= recipe.cluster_target:
                             yield cur, cur_refs
@@ -528,8 +530,8 @@ def _emit(r, h, w, dirents, keep, kept_blobs, rewrite_refs, regroup_refs, plan, 
 
                 def drain(all_: bool):
                     nonlocal n_clusters
-                    while pending and (all_ or len(pending) >= window):
-                        refs, fut = pending.pop(0)
+                    while pending and (all_ or len(pending) >= window):  # noqa: B023
+                        refs, fut = pending.pop(0)  # noqa: B023
                         nc = w.add_cluster(fut.get())
                         for bi, ref in enumerate(refs):
                             remap[ref] = (nc, bi)

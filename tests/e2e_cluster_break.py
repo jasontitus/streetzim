@@ -13,6 +13,7 @@ the default target is back for what follows. Also runs zimru's zimcheck.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -91,8 +92,8 @@ def main() -> int:
     # search: 24 * 8 KB = 192 KB at 64 KiB -> ~3-4 clusters, each larger than a tile cluster
     if not (2 <= len(search_clusters) <= 5):
         print(f"FAIL: expected 2-5 search clusters at the restored 64 KiB target, got {len(search_clusters)}"); ok = False
-    zimcheck = os.environ.get("ZIMCHECK_BIN", "/home/user/zimru/target/release/zimcheck")
-    if os.path.exists(zimcheck):
+    zimcheck = os.environ.get("ZIMCHECK_BIN") or shutil.which("zimcheck")
+    if zimcheck and os.path.exists(zimcheck):
         res = subprocess.run([zimcheck, "-A", str(out)], capture_output=True, text=True)
         print("zimcheck:", (res.stdout.strip().splitlines() or [""])[-1]); ok &= res.returncode == 0
     print("PASS" if ok else "FAIL")

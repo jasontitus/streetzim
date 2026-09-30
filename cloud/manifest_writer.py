@@ -279,8 +279,10 @@ class ManifestCreator:
         """Close the cluster being filled so the next item starts a new one,
         optionally changing the cluster size target from here on.
 
-        Emitted by create_osm_zim.py between zoom levels of the tile
-        components (--tile-order zoom-hilbert) so a zoom never shares a
+        Meant to be emitted by the builder between zoom levels of the tile
+        components (--tile-order zoom-hilbert, designed in
+        docs/zim-variants.md but not yet ported: nothing calls this on
+        main) so a zoom never shares a
         cluster with its neighbours and cloud/derive_zim.py can drop or copy
         it whole. streetzim-pack honours the flush only when built with the
         ``cluster_break`` cargo feature (it needs zimru's flush); otherwise

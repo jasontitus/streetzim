@@ -160,8 +160,9 @@ are recommended for any `file:` field.
 
 - **`cluster_break`** — closes the cluster being filled so the next item
   starts a new one; optional `cluster_size_target` (bytes) changes the
-  target from this point on. Written by `create_osm_zim.py --tile-order
-  zoom-hilbert` at every zoom boundary of tiles/satellite/terrain and
+  target from this point on. Meant to be written by the builder's
+  `--tile-order zoom-hilbert` (designed, not yet ported to the refactored
+  builder: nothing writes it on main) at every zoom boundary of tiles/satellite/terrain and
   around those components (with `--tile-cluster-mb` as the target inside,
   the build default restored after), so each zoom is a run of whole
   clusters that `cloud/derive_zim.py` can copy or drop without re-encoding

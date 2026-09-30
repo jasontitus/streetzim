@@ -574,7 +574,15 @@ tier-a leaves show the exact on-disk share of addresses before deciding.
 
 ### Builder: `--tile-order zoom-hilbert --tile-cluster-mb 2`
 
-`create_osm_zim.py` can now emit the layout the measurements asked for:
+> **Not on main.** This builder option was written against the
+> pre-refactor `create_osm_zim.py` and was not ported when the rest of
+> this work was brought in (2026-09-30); tile writing now lives in
+> `streetzim/tiles.py` and `streetzim/zim_writer.py`. The manifest record
+> (`ManifestCreator.cluster_break`), the packer feature, the ordering
+> helpers (`cloud/tile_order.py`) and `cloud/derive_zim.py` are on main;
+> nothing calls `cluster_break` yet. The description below is the design.
+
+The builder change emitted the layout the measurements asked for:
 
 - vector tiles from MBTiles are streamed zoom-major with Hilbert order
   inside each zoom (`_iter_tiles_ordered`: list one zoom's coordinates,

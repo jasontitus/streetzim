@@ -193,7 +193,7 @@ def inventory(path: str, *, by_zoom: bool = False, tables_only: bool | None = No
                 nb = max(len(comps_here), 1)
                 unc = r.cluster_uncompressed_size(c) or ci.size
                 sizes = [unc / nb] * nb
-                if len({v for v in comps_here.values()}) > 1:
+                if len(set(comps_here.values())) > 1:
                     approx_clusters += 1
         else:
             sizes = r.blob_sizes(c)

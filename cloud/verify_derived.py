@@ -105,12 +105,11 @@ def main() -> int:
     # around. Two implementations agreeing on the file is the real defence
     # against a format detail this tool got subtly wrong.
     zimcheck = os.environ.get("ZIMCHECK_BIN") or shutil.which("zimcheck") or next(
-        (p for p in ("/home/user/zimru/target/release/zimcheck",
-                     str(Path(__file__).resolve().parent.parent.parent / "zimru/target/release/zimcheck"))
+        (p for p in (str(Path(__file__).resolve().parent.parent.parent / "zimru/target/release/zimcheck"),)
          if os.path.exists(p)), None)
     if zimcheck:
         res = subprocess.run([zimcheck, "-A", a.dst], capture_output=True, text=True, timeout=3600)
-        rep(f"zimru zimcheck -A ({Path(zimcheck).name})", res.returncode == 0,
+        rep(f"zimcheck -A ({zimcheck})", res.returncode == 0,
             (res.stdout.strip().splitlines() or [""])[-1][:100])
     else:
         print("  skip zimru zimcheck (no binary; set ZIMCHECK_BIN or build ../zimru)")

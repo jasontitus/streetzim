@@ -22,8 +22,8 @@ import hashlib
 import math
 import os
 import struct
-from dataclasses import dataclass, field
-from typing import Callable, Iterable, Iterator
+from dataclasses import dataclass
+from collections.abc import Callable, Iterator
 
 import sys
 from array import array
@@ -62,7 +62,7 @@ class Header:
     checksum_pos: int
 
     @classmethod
-    def parse(cls, buf: bytes) -> "Header":
+    def parse(cls, buf: bytes) -> Header:
         (magic, major, minor, uuid, entry_count, cluster_count, url_ptr_pos,
          title_ptr_pos, cluster_ptr_pos, mime_list_pos, main_page, layout_page,
          checksum_pos) = struct.unpack_from(HEADER_FMT, buf, 0)
@@ -118,7 +118,7 @@ class Dirent:
         return self.title if self.title else self.url
 
     @classmethod
-    def parse(cls, src, off: int) -> "Dirent":
+    def parse(cls, src, off: int) -> Dirent:
         """Parse from a bytes-like or a Source (anything sliceable). Reads a
         small window and grows it until the two NUL terminators are found."""
         n = 512
@@ -130,13 +130,13 @@ class Dirent:
                 return cls._parse_bytes(buf, 0)
             except _Short:
                 if off + n >= getattr(src, "size", len(src)) and n > len(buf):
-                    raise ValueError(f"truncated dirent at {off}")
+                    raise ValueError(f"truncated dirent at {off}") from None
                 n *= 4
 
     @classmethod
-    def _parse_bytes(cls, buf: bytes, off: int) -> "Dirent":
+    def _parse_bytes(cls, buf: bytes, off: int) -> Dirent:
         if len(buf) < off + 16:
-            raise _Short()
+            raise _Short
         mime, plen, ns = struct.unpack_from("<HBc", buf, off)
         revision, = struct.unpack_from("<I", buf, off + 4)
         p = off + 8
@@ -151,16 +151,16 @@ class Dirent:
             p += 8
         e = buf.find(b"\0", p)
         if e < 0:
-            raise _Short()
+            raise _Short
         url = bytes(buf[p:e])
         p = e + 1
         e = buf.find(b"\0", p)
         if e < 0:
-            raise _Short()
+            raise _Short
         title = bytes(buf[p:e])
         p = e + 1
         if len(buf) < p + plen:
-            raise _Short()
+            raise _Short
         param = bytes(buf[p:p + plen])
         return cls(mime, ns.decode("latin-1"), revision, url, title, param,
                    redirect, cluster, blob)
@@ -300,7 +300,7 @@ class HttpSource:
         and the offset tables of raw clusters."""
         import re
         import urllib.request
-        ranges = sorted(set((int(a), int(b)) for a, b in ranges if b > a))
+        ranges = sorted({(int(a), int(b)) for a, b in ranges if b > a})
         for i in range(0, len(ranges), per_request):
             batch = ranges[i:i + per_request]
             if len(batch) == 1:

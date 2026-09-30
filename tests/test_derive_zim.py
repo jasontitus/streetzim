@@ -90,7 +90,7 @@ def build_fixture(path: Path) -> dict:
             paths[p] = json.dumps(recs).encode()
             chunks[f"zu~r~{tier}"] = len(recs)
             c.add_item(_Item(p, "application/json", paths[p].decode()))
-        manifest = {"total": 100, "chunks": chunks, "sub_chunks": {"zu": list(k for k in chunks if k.startswith("zu"))},
+        manifest = {"total": 100, "chunks": chunks, "sub_chunks": {"zu": [k for k in chunks if k.startswith("zu")]},
                     "char_split": {"zu": ["r"]}}
         paths["search-data/manifest.json"] = json.dumps(manifest).encode()
         c.add_item(_Item("search-data/manifest.json", "application/json", paths["search-data/manifest.json"].decode()))

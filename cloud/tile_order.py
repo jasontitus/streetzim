@@ -7,7 +7,7 @@ clusters. ``hilbert_index`` is the standard d2xy inverse on a 2^z grid.
 """
 from __future__ import annotations
 
-from typing import Iterable, Iterator
+from collections.abc import Iterable, Iterator
 
 ORDERS = ("source", "zoom-hilbert", "zoom-xy")
 
