@@ -467,3 +467,68 @@ def test_region_of_name():
     assert A.region_of_name(BRISTOLS, dict(BRISTOL_VA, **{"ISO3166-2": "US-VA"}), 6,
                             BORDER)["admin1"] == "Virginia"
     assert A.region_of_name(GEONAMES, {"name": "Nowhere"}, 8, near) is None
+
+
+def test_encloses_across_the_antimeridian():
+    us = (172.0, 18.0, 294.0, 72.0)                      # past 180, as bbox_of gives it
+    assert A._encloses(us, (-170.0, 52.0, -165.0, 55.0))  # an Aleutian borough
+    assert A._encloses(us, (175.0, 51.0, 179.0, 53.0))
+    assert not A._encloses(us, (-10.0, 50.0, -5.0, 55.0))
+    assert A._encloses((0, 0, 10, 10), (1, 1, 2, 2)) and A._encloses((0, 0, 1, 1), None)
+
+
+def test_big_rings_are_capped():
+    import math as m
+    n = 40000
+    ring = [(m.cos(2 * m.pi * k / n) * (1 + 0.01 * m.sin(2 * m.pi * 2000 * k / n)),
+             m.sin(2 * m.pi * k / n) * (1 + 0.01 * m.sin(2 * m.pi * 2000 * k / n)))
+            for k in range(n)]
+    assert len(A._simplified(ring, 8)) // 2 > A.MAX_BIG_RING      # a town keeps 50 m
+    capped = A._simplified(ring, 2)
+    assert len(capped) // 2 <= A.MAX_BIG_RING
+    assert A.point_in_flat([A.prepare(capped)], 0, 0)
+    assert not A.point_in_flat([A.prepare(capped)], 1.5, 0)
+
+
+def test_prepared_rings_match_the_plain_test():
+    import random
+    rnd = random.Random(1)
+    rings = [U_RING, square(1.5, 3.0, 1.7, 3.2)]
+    prepared = [A.prepare(A._thin(r, 0)) for r in rings]
+    for _ in range(500):
+        x, y = rnd.uniform(0.5, 3.5), rnd.uniform(2, 4)
+        assert A.point_in_flat(prepared, x, y) == A.point_in_rings(rings, x, y)
+
+
+def test_same_area_and_region_filters():
+    assert A._same_area({"name": "Monaco"}, {"name": "monaco"})
+    assert A._same_area({"name": "A", "wikidata": "Q1"}, {"name": "B", "wikidata": "Q1"})
+    assert not A._same_area({"name": "A"}, {"name": "B"})
+    # region_of_name drops the twin inside a polygon the extract has.
+    tn = {"bbox": (2, 0, 4, 1.85), "level": 6, "tags": {},
+          "rings": [A.prepare(A._thin(square(2, 0, 4, 1.85), 0))]}
+    grid = A.Grid([tn])
+    assert A.region_of_name(BRISTOLS, BRISTOL_VA, 6, BORDER) is None
+    assert A.region_of_name(BRISTOLS, BRISTOL_VA, 6, BORDER, grid)["admin1"] == "Virginia"
+
+
+@needs_osmium
+def test_a_node_placed_area_takes_its_region_from_its_name(tmp_path, no_rg):
+    """A clipped area placed by its label node, which lies in a neighbour
+    country's polygon (the country is the node's only holder, so the node
+    is used): its region and country come from the GeoNames places of its
+    name, not from that polygon."""
+    pytest.importorskip("osmium")
+    o = Osm()
+    o.way(1, square(0, 0, 4, 4))
+    o.rel(1, [("w", 1, "outer")], {"name": "Lux", "admin_level": "2", "ISO3166-1": "LU"})
+    o.way(50, [(3.9, 1.0), (4.2, 1.1)], closed=False)
+    lab = o.node(3.95, 1.05, nid=100)
+    o.rel(5, [("w", 50, "outer"), ("w", 51, "outer"), ("n", lab, "label")],
+          {"name": "Oberbillig", "admin_level": "8"})
+    gn = A.GeoNamesPlaces([{"name": "Oberbillig", "admin1": "Rheinland-Pfalz", "admin2": "",
+                            "cc": "DE", "lat": "1.1", "lon": "4.1"}])
+    ob = [f for f in A.extract_admin_areas(o.write(tmp_path / "x.osm"), geonames=gn)
+          if f["name"] == "Oberbillig"][0]
+    assert (ob["lon"], ob["lat"]) == (3.95, 1.05)
+    assert ob["location"] == "Rheinland-Pfalz" and ob["subtype"] == "municipality"
