@@ -557,7 +557,7 @@ directly. "streetzim" below is `streetzim/cli.py` and
 | Every named POI in Kiwix's own search (`--kiwix-poi-pages`) | no | yes | full: on | ODbL | the extract | yes (+12 to 28% ZIM size, [above](#pois-in-kiwixs-own-search---kiwix-poi-pages)) |
 | 3D buildings | no (the viewer has no building extrusion; "3D" is terrain) | no | - | - | - | - |
 | Fonts: Open Sans, Noto Sans for Arabic, Hebrew, Armenian, Georgian, Lao, Thai; RTL shaping | yes | yes | on | Apache 2.0, OFL 1.1, BSD-2-Clause (RTL plugin) | glyphs pinned by sha256; in the Docker image, fetched otherwise | yes |
-| Dark map style, POI icons (Maki) | yes | yes | on | CC0 (Maki) | inlined in the viewer | yes |
+| Dark map style (Auto follows the system; in-map Auto/Light/Dark switch under Home, kept per browser; `?theme=` overrides), POI icons (Maki) | yes | yes | on | CC0 (Maki) | inlined in the viewer | yes |
 | GPS, driving HUD, `#dest=` deep links | yes | yes | on | - | the viewer | yes |
 | Offline PWA (`/drive/`: install, service worker, streaming from archive.org) | the website's, not in the ZIM | no | - | - | - | not applicable: Kiwix ignores in-ZIM manifests (docs/in-zim-apps.md) |
 | Max-zoom variants (`cloud/region-variants.tsv`) | yes | `--max-zoom` | 14 | - | - | yes |

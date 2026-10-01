@@ -6,10 +6,13 @@
 // tests/viewer_style_js.test.mjs fails if a light layer gains a colour
 // this table does not darken, or the table names a layer that is gone.
 //
-// Chosen by, in order: ?theme=dark|light in the URL; light when the host
-// already inverts the page (Kiwix JS's "invert" dark mode filters the
-// article frame, so a dark map would come out light); else
-// prefers-color-scheme, followed live when it changes.
+// Chosen by, in order: ?theme=dark|light in the URL (for that page load);
+// the reader's choice from the theme button (szThemeButton, under Home:
+// Auto -> Light -> Dark), kept in localStorage 'streetzim.theme'; then
+// Auto: light when the host already inverts the page (Kiwix JS's "invert"
+// dark mode filters the article frame, so a dark map would come out
+// light), else prefers-color-scheme, followed live when it changes.
+// places.html reads the same key for its own colours.
 // BEGIN map-theme
 var _SZ_DARK_HALO = 'rgba(0,0,0,0.75)';
 var _SZ_DARK = {
@@ -71,9 +74,45 @@ function _szHostInvertsContent() {
   return inverted(fe) || inverted(document.documentElement);
 }
 
+// The reader's choice. Storage can be missing or throw (Kiwix iOS's zim:
+// scheme, private windows, a sandboxed frame); anything unreadable or
+// unknown is Auto, and a failed write only loses the memory, not the switch.
+var SZ_THEME_KEY = 'streetzim.theme';
+var SZ_THEME_MODES = ['auto', 'light', 'dark'];
+function szReadThemeMode(storage) {
+  try {
+    var v = storage && storage.getItem(SZ_THEME_KEY);
+    if (v === 'light' || v === 'dark') return v;
+  } catch (e) {}
+  return 'auto';
+}
+function szWriteThemeMode(storage, mode) {
+  try {
+    if (!storage) return;
+    if (mode === 'light' || mode === 'dark') storage.setItem(SZ_THEME_KEY, mode);
+    else storage.removeItem(SZ_THEME_KEY);
+  } catch (e) {}
+}
+function szNextThemeMode(mode) {
+  return SZ_THEME_MODES[(SZ_THEME_MODES.indexOf(mode) + 1) % SZ_THEME_MODES.length];
+}
+function _szThemeStore() {
+  try { return window.localStorage || null; } catch (e) { return null; }
+}
+// 'dark' / 'light' from ?theme=, until the reader taps the theme button.
+var _szThemeUrlOff = false;
+function _szUrlTheme() {
+  if (_szThemeUrlOff) return null;
+  var m = /[?&]theme=(dark|light)(?:&|$)/.exec(location.search || '');
+  return m ? m[1] : null;
+}
+var _szThemeMode = szReadThemeMode(_szThemeStore());
+// What the button shows: the URL's theme while it rules, else the choice.
+function szThemeMode() { return _szUrlTheme() || _szThemeMode; }
+
 function _szPrefersDark() {
-  var forced = /[?&]theme=(dark|light)(?:&|$)/.exec(location.search || '');
-  if (forced) return forced[1] === 'dark';
+  var mode = szThemeMode();
+  if (mode !== 'auto') return mode === 'dark';
   if (_szHostInvertsContent()) return false;
   try {
     return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -105,17 +144,16 @@ function _szThemeStyle(style, dark) {
   return style;
 }
 
-// Follow a live change of the OS/browser scheme (evening auto-dark) without
-// setStyle(), which would drop every runtime layer (satellite, hillshade,
-// routes, find pins). Repaints the base layers from a fresh makeStyle(),
-// then fires 'streetzim.theme' so satellite mode can re-apply its overrides.
+// Restyle the running map when the theme changes -- a live change of the
+// OS/browser scheme (evening auto-dark) in Auto, or a tap on the theme
+// button -- without setStyle(), which would drop every runtime layer
+// (satellite, hillshade, wiki dots, routes, search and find pins).
+// Repaints the base layers from a fresh makeStyle(), then fires
+// 'streetzim.theme' so satellite mode can re-apply its overrides.
+var _szThemeRefresh = function() {};
 function initMapTheme(map, config) {
-  if (/[?&]theme=(dark|light)(?:&|$)/.test(location.search || '')) return;
-  var mq = null;
-  try { mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)'); } catch (e) {}
-  if (!mq) return;
   var current = _szPrefersDark();
-  function onChange() {
+  function refresh() {
     var dark = _szPrefersDark();
     if (dark === current) return;
     current = dark;
@@ -131,7 +169,54 @@ function initMapTheme(map, config) {
     map.fire('streetzim.theme', { dark: dark });
     map.triggerRepaint();
   }
-  if (mq.addEventListener) mq.addEventListener('change', onChange);
-  else if (mq.addListener) mq.addListener(onChange);   // Safari < 14
+  _szThemeRefresh = refresh;
+  var mq = null;
+  try { mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)'); } catch (e) {}
+  if (!mq) return;
+  if (mq.addEventListener) mq.addEventListener('change', refresh);
+  else if (mq.addListener) mq.addListener(refresh);   // Safari < 14
+}
+
+// Choose a mode (the button). A tap ends the URL's ?theme= for this page:
+// the reader asked for something else.
+function szSetThemeMode(mode) {
+  _szThemeUrlOff = true;
+  _szThemeMode = (mode === 'light' || mode === 'dark') ? mode : 'auto';
+  szWriteThemeMode(_szThemeStore(), _szThemeMode);
+  _szThemeRefresh();
+}
+
+// The switch: one square in the Home button's group (initHomeButton, 140),
+// so it adds a button's height, not another group, to the top-right column.
+// The icon shows the current mode: half-filled circle (auto), sun, moon.
+var _SZ_THEME_ICON = {
+  auto: '<path fill-rule="evenodd" d="M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20zm0 2v16a8 8 0 1 1 0-16z"/>',
+  light: '<circle cx="12" cy="12" r="4.5"/>' + [0, 45, 90, 135, 180, 225, 270, 315].map(function(a) {
+    return '<rect x="11" y="1" width="2" height="3.5" rx="1" transform="rotate(' + a + ' 12 12)"/>';
+  }).join(''),
+  dark: '<path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1z"/>'
+};
+var _SZ_THEME_LABEL = {
+  auto: 'Map theme: auto (follows the system)',
+  light: 'Map theme: light',
+  dark: 'Map theme: dark'
+};
+function _szThemeButtonShow(btn) {
+  var mode = szThemeMode();
+  btn.setAttribute('data-mode', mode);
+  btn.title = _SZ_THEME_LABEL[mode];
+  btn.setAttribute('aria-label', _SZ_THEME_LABEL[mode]);
+  btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + _SZ_THEME_ICON[mode] + '</svg>';
+}
+function szThemeButton() {
+  var btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'sz-theme-btn';
+  _szThemeButtonShow(btn);
+  btn.addEventListener('click', function() {
+    szSetThemeMode(szNextThemeMode(szThemeMode()));
+    _szThemeButtonShow(btn);
+  });
+  return btn;
 }
 // END map-theme

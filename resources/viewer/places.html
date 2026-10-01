@@ -27,6 +27,20 @@
   add('meta', { name: 'apple-mobile-web-app-title', content: 'StreetZim' });
   add('meta', { name: 'theme-color', content: '#0b1220' });
 })();
+// Light/dark: the same choice as the map viewer (135-map-theme.js), in the
+// same order -- ?theme= in the URL, then the reader's saved choice; with
+// neither, the CSS follows prefers-color-scheme. Storage may throw.
+(function() {
+  var m = /[?&]theme=(dark|light)(?:&|$)/.exec(location.search || '');
+  var mode = m ? m[1] : null;
+  if (!mode) {
+    try {
+      var v = window.localStorage && window.localStorage.getItem('streetzim.theme');
+      if (v === 'light' || v === 'dark') mode = v;
+    } catch (e) {}
+  }
+  if (mode) document.documentElement.setAttribute('data-sz-theme', mode);
+})();
 </script>
 <style>
   :root {
@@ -34,10 +48,16 @@
     --card:#fff; --accent:#0a7cff; --chip-bg:#f0f0f0; --chip-on:#0a7cff;
     --chip-on-fg:#fff;
   }
+  /* Dark follows the map viewer's theme switch (data-sz-theme, set by the
+     script below from ?theme= or localStorage 'streetzim.theme'); with no
+     choice (Auto) it follows the OS scheme. */
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#111; --fg:#eee; --muted:#aaa; --line:#2a2a2a;
+    :root:not([data-sz-theme=light]) { --bg:#111; --fg:#eee; --muted:#aaa; --line:#2a2a2a;
             --card:#1c1c1c; --chip-bg:#2a2a2a; }
   }
+  :root[data-sz-theme=dark] { --bg:#111; --fg:#eee; --muted:#aaa; --line:#2a2a2a;
+          --card:#1c1c1c; --chip-bg:#2a2a2a; color-scheme: dark; }
+  :root[data-sz-theme=light] { color-scheme: light; }
   * { box-sizing: border-box; }
   html,body { margin:0; padding:0; background:var(--bg); color:var(--fg);
               font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;

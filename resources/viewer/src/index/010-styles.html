@@ -137,15 +137,17 @@
   /* --- Unified control strip --- */
   #controls {
     /* Below the whole MapLibre top-right column: zoom/compass (y=10-142),
-       then the "Show the whole map" button (initHomeButton, y=152-196), then
-       10px. At 152px this panel sat on the Home button: a tap on Home hit
+       then the group of the "Show the whole map" button (initHomeButton,
+       y=152-196) and the light/dark switch under it (szThemeButton,
+       y=196-240), then 10px (206px before the switch was added). At 152px
+       this panel sat on the Home button: a tap on Home hit
        "Toggle satellite imagery" instead (overlap-check and the device
        matrix both caught it). On short screens this panel becomes a row
        beside Home instead (see the max-height rule below): a landscape
        phone has no vertical room left on the right edge. Adding a control
        to that column means re-running the overlap check in portrait AND
        landscape (CI runs it at seven sizes), not just moving this down. */
-    position: absolute; top: calc(206px + var(--top-inset, 0px)); right: 10px; z-index: 2;
+    position: absolute; top: calc(250px + var(--top-inset, 0px)); right: 10px; z-index: 2;
     display: flex; flex-direction: column;
     background: var(--panel-bg); border-radius: var(--radius);
     box-shadow: var(--panel-shadow);
@@ -170,13 +172,18 @@
   #controls button + button { border-top: 1px solid var(--border); }
   /* Landscape phones: the right edge holds zoom/compass (10-142), Home
      (152-196) and, from the bottom, locate and attribution, which on a
-     375-390 px tall screen start around y=290. A 132 px column below Home
-     reaches y=338 and covered both. So the panel turns into a row at Home's
-     height, just left of the MapLibre column (10 + 44 + 10 = 64 px), below
-     the search band (which ends ~105) and above the bottom controls. */
+     375-390 px tall screen start around y=290 (y=232 at 568x320). A 132 px
+     column below Home reaches y=338 and covered both. So the panel turns
+     into a row at Home's height, below the search band (which ends ~105)
+     and above the bottom controls. The light/dark switch would put Home's
+     group at 152-240, into the locate button at 568x320 (device matrix), so
+     here it goes beside Home instead: Home's group is a 89 px row (44 + 1 +
+     44) and the panel sits left of it (10 + 89 + 11 = 110 px). */
   @media (max-height: 500px) {
-    #controls { top: calc(152px + var(--top-inset, 0px)); right: 64px; flex-direction: row; }
+    #controls { top: calc(152px + var(--top-inset, 0px)); right: 110px; flex-direction: row; }
     #controls button + button { border-top: none; border-left: 1px solid var(--border); }
+    .sz-home-group { display: flex; flex-direction: row; }
+    .sz-home-group button + button { border-top: none; border-left: 1px solid #ddd; }
   }
   /* (CSS for #places-link removed alongside the Find link on
      2026-05-10 — see HTML comment in #controls.) */
@@ -931,7 +938,8 @@
   /* --- Dark UI chrome ---
      html.sz-dark is set by 135-map-theme.js from the same choice as the dark
      map (?theme=, a host that inverts the page, prefers-color-scheme, live
-     changes), so the panels can never disagree with the map. A class, not
+     changes, the theme button), so the panels can never disagree with the
+     map. A class, not
      @media, because ?theme=light must win over a dark OS and Kiwix JS's
      invert mode must get light. Light mode reads none of this: the --szd-*
      tokens are undefined there, so each var(--szd-..., <light value>) in the
@@ -977,7 +985,7 @@
      text on a dark panel it is too dark, so text uses a lighter blue. */
   html.sz-dark .pin-popup .pin-link,
   html.sz-dark #routing-panel.minimized #routing-minimize { color: #8ab4f8; }
-  html.sz-dark .sz-home-btn svg { fill: #e8eaed; }
+  html.sz-dark .sz-home-btn svg, html.sz-dark .sz-theme-btn svg { fill: #e8eaed; }
   /* Focus rings: the light ones (15-20% blue) vanish on a dark panel.
      #8ab4f8 is 7.9:1 on it (WCAG 2.2 wants 3:1 for focus indicators). */
   html.sz-dark #search-input:focus,
@@ -986,6 +994,7 @@
   html.sz-dark .maplibregl-ctrl-group { background: #23262d; }
   html.sz-dark .maplibregl-ctrl-group:not(:empty) { box-shadow: 0 0 0 2px rgba(255,255,255,0.10); }
   html.sz-dark .maplibregl-ctrl-group button + button { border-top-color: #3c414a; }
+  html.sz-dark .sz-home-group button + button { border-left-color: #3c414a; }
   html.sz-dark .maplibregl-ctrl button:not(:disabled):hover { background-color: rgba(255,255,255,0.08); }
   /* The icons are black SVGs; invert + hue-rotate keeps the geolocate blue blue. */
   html.sz-dark .maplibregl-ctrl button .maplibregl-ctrl-icon,
@@ -1035,7 +1044,7 @@
     html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-attrib { background: #fff; color: #1a1a1a; }
     html.sz-dark .maplibregl-ctrl button .maplibregl-ctrl-icon,
     html.sz-dark .maplibregl-ctrl-attrib-button { filter: none; }
-    html.sz-dark .sz-home-btn svg { fill: #333; }
+    html.sz-dark .sz-home-btn svg, html.sz-dark .sz-theme-btn svg { fill: #333; }
   }
 </style>
 </head>

@@ -39,6 +39,12 @@ function load(env = {}) {
     devicePixelRatio: env.dpr || 1,
     __szFetchWithRetry: env.fetcher,
   };
+  // env.storage: a Storage stub (see memStorage); env.storageGetterThrows:
+  // reading window.localStorage itself throws (sandboxed frame).
+  Object.defineProperty(window, 'localStorage', { get() {
+    if (env.storageGetterThrows) throw new Error('SecurityError');
+    return env.storage || null;
+  } });
   const classes = new Set();
   const document = {
     documentElement: { tag: 'html', classList: {
@@ -51,12 +57,52 @@ function load(env = {}) {
     'baseUrl', 'dbg', 'describeError', 'Path2D', 'fetch',
     SRC + '\nreturn { makeStyle, _SZ_DARK, _SZ_MAKI, _SZ_POI_ICON, _SZ_POI_GROUP,' +
     ' _szPoiIconExpr, _szPrefersDark, _szThemeStyle, initMapTheme, initPoiIcons,' +
-    ' _szRenderPoiIcon, initRtlText };');
+    ' _szRenderPoiIcon, initRtlText, SZ_THEME_KEY, szReadThemeMode, szWriteThemeMode,' +
+    ' szNextThemeMode, szThemeMode, szSetThemeMode, szThemeButton };');
   const api = fn(window, document, { search }, getComputedStyle, 'http://zim/C/',
     (...x) => logs.push(x), (e) => String(e && e.message || e), env.Path2D, env.fetch);
   return { ...api, window, mq, listeners, logs, htmlClasses: classes };
 }
 const CONFIG = { minZoom: 0, maxZoom: 14 };
+
+// localStorage stand-in; `fail` names methods that throw (quota, Kiwix iOS).
+function memStorage(init = {}, fail = []) {
+  const m = new Map(Object.entries(init));
+  const guard = (k) => { if (fail.includes(k)) throw new Error(k + ' denied'); };
+  return {
+    m,
+    getItem(k) { guard('getItem'); return m.has(k) ? m.get(k) : null; },
+    setItem(k, v) { guard('setItem'); m.set(k, String(v)); },
+    removeItem(k) { guard('removeItem'); m.delete(k); },
+  };
+}
+// A map that keeps the paint it is given, seeded from a style, plus layers
+// the viewer adds at run time (route, search pin) that no theme may touch.
+function paintMap(style) {
+  const paint = new Map(), fired = [];
+  for (const l of style.layers) paint.set(l.id, JSON.parse(JSON.stringify(l.paint || {})));
+  paint.set('route-line', { 'line-color': '#1a73e8' });
+  paint.set('search-pin', { 'circle-color': '#e11d48' });
+  return {
+    paint, fired,
+    getLayer: (id) => paint.has(id) ? { id } : undefined,
+    setPaintProperty: (id, k, v) => { paint.get(id)[k] = JSON.parse(JSON.stringify(v)); },
+    fire: (t, d) => fired.push([t, d && d.dark]),
+    triggerRepaint() {},
+  };
+}
+function paintOf(style) { return Object.fromEntries(style.layers.map(l => [l.id, l.paint || {}])); }
+// A <button> just big enough for szThemeButton.
+function fakeButton() {
+  const attrs = {}, handlers = {};
+  return {
+    attrs, handlers, innerHTML: '', title: '',
+    setAttribute(k, v) { attrs[k] = String(v); },
+    getAttribute(k) { return attrs[k]; },
+    addEventListener(t, f) { handlers[t] = f; },
+    click() { handlers.click(); },
+  };
+}
 
 function layerMap(style) { return Object.fromEntries(style.layers.map(l => [l.id, l])); }
 
@@ -312,6 +358,197 @@ await ok('theme: JS-built panels take their light colours through --szd-* tokens
   const bad = [...HTML.matchAll(/(?:background|color):(?:#[0-9a-fA-F]{3,6}\b|rgba\([^)]*\))/g)]
     .map(m => m[0]).filter(x => !allowed.test(x));
   assert.deepStrictEqual(bad, []);
+});
+
+// ---- Light/dark switch (szThemeButton, szSetThemeMode) --------------------
+await ok('switch: a tap cycles Auto -> Light -> Dark -> Auto; junk is Auto', () => {
+  const { szNextThemeMode } = load();
+  assert.strictEqual(szNextThemeMode('auto'), 'light');
+  assert.strictEqual(szNextThemeMode('light'), 'dark');
+  assert.strictEqual(szNextThemeMode('dark'), 'auto');
+  assert.strictEqual(szNextThemeMode('sepia'), 'auto');
+  assert.strictEqual(szNextThemeMode(undefined), 'auto');
+});
+
+await ok('switch: precedence is ?theme= > saved choice > auto (invert host, OS scheme)', () => {
+  const st = (v) => memStorage(v ? { 'streetzim.theme': v } : {});
+  const dark = (env) => load(env)._szPrefersDark();
+  // Saved choice beats the OS scheme both ways.
+  assert.strictEqual(dark({ dark: true, storage: st('light') }), false);
+  assert.strictEqual(dark({ dark: false, storage: st('dark') }), true);
+  // ... and beats the Kiwix JS invert guess: the reader asked for it.
+  assert.strictEqual(dark({ dark: true, storage: st('dark'), filters: { html: 'invert(1)' } }), true);
+  // The URL beats the saved choice.
+  assert.strictEqual(dark({ dark: true, storage: st('dark'), search: '?theme=light' }), false);
+  assert.strictEqual(dark({ dark: false, storage: st('light'), search: '?theme=dark' }), true);
+  // Nothing saved, or something unknown: auto as before.
+  assert.strictEqual(dark({ dark: true, storage: st() }), true);
+  assert.strictEqual(dark({ dark: true, storage: st('sepia') }), true);
+  assert.strictEqual(dark({ dark: false, storage: st('auto') }), false);
+  assert.strictEqual(dark({ dark: true, storage: st('auto'), filters: { html: 'invert(1)' } }), false);
+  // The chrome agrees from the first paint.
+  assert.ok(load({ dark: false, storage: st('dark') }).htmlClasses.has('sz-dark'));
+  assert.ok(!load({ dark: true, storage: st('light') }).htmlClasses.has('sz-dark'));
+  // What the button shows.
+  assert.strictEqual(load({ storage: st('light') }).szThemeMode(), 'light');
+  assert.strictEqual(load({ storage: st('light'), search: '?theme=dark' }).szThemeMode(), 'dark');
+  assert.strictEqual(load({ storage: st() }).szThemeMode(), 'auto');
+});
+
+await ok('switch: storage that throws or is missing means Auto, and switching still works', () => {
+  for (const env of [
+    { storageGetterThrows: true },
+    { storage: memStorage({ 'streetzim.theme': 'light' }, ['getItem', 'setItem', 'removeItem']) },
+    { storage: null },
+  ]) {
+    const e = load({ dark: true, ...env });
+    assert.strictEqual(e.szThemeMode(), 'auto', JSON.stringify(Object.keys(env)));
+    assert.ok(e.htmlClasses.has('sz-dark'));
+    const map = paintMap(e.makeStyle(CONFIG));
+    e.initMapTheme(map, CONFIG);
+    e.szSetThemeMode('light');                       // no throw
+    assert.strictEqual(e.szThemeMode(), 'light');
+    assert.ok(!e.htmlClasses.has('sz-dark'));
+    assert.strictEqual(map.paint.get('background')['background-color'], '#f8f4f0');
+  }
+  // Writes: light/dark saved, auto removes the key; a failing write is quiet.
+  const { szWriteThemeMode, szReadThemeMode, SZ_THEME_KEY } = load();
+  const s = memStorage();
+  szWriteThemeMode(s, 'dark'); assert.strictEqual(s.m.get(SZ_THEME_KEY), 'dark');
+  assert.strictEqual(szReadThemeMode(s), 'dark');
+  szWriteThemeMode(s, 'auto'); assert.ok(!s.m.has(SZ_THEME_KEY));
+  szWriteThemeMode(memStorage({}, ['setItem']), 'dark');
+  szWriteThemeMode(null, 'dark');
+  assert.strictEqual(szReadThemeMode(memStorage({ [SZ_THEME_KEY]: 'dark' }, ['getItem'])), 'auto');
+});
+
+await ok('switch: every dark-styled layer goes back to light and to dark again; runtime layers untouched', () => {
+  const storage = memStorage();
+  const e = load({ dark: true, storage });
+  const LIGHT = paintOf(load().makeStyle(CONFIG));
+  const DARK = paintOf(load({ dark: true }).makeStyle(CONFIG));
+  const map = paintMap(e.makeStyle(CONFIG));
+  e.initMapTheme(map, CONFIG);
+  const darkIds = Object.keys(e._SZ_DARK);
+  const base = (m) => Object.fromEntries([...m.paint].filter(([id]) => id in LIGHT));
+  assert.deepStrictEqual(base(map), DARK);
+  e.szSetThemeMode('light');
+  assert.deepStrictEqual(base(map), LIGHT);
+  for (const id of darkIds) {
+    for (const k of Object.keys(e._SZ_DARK[id])) {
+      assert.notDeepStrictEqual(map.paint.get(id)[k], e._SZ_DARK[id][k], `${id}.${k} still dark`);
+    }
+  }
+  assert.strictEqual(storage.m.get('streetzim.theme'), 'light');
+  assert.ok(!e.htmlClasses.has('sz-dark'));
+  e.szSetThemeMode('dark');
+  assert.deepStrictEqual(base(map), DARK);
+  assert.ok(e.htmlClasses.has('sz-dark'));
+  e.szSetThemeMode('auto');                          // OS is dark: nothing to do
+  assert.deepStrictEqual(base(map), DARK);
+  assert.ok(!storage.m.has('streetzim.theme'));
+  assert.deepStrictEqual(map.paint.get('route-line'), { 'line-color': '#1a73e8' });
+  assert.deepStrictEqual(map.paint.get('search-pin'), { 'circle-color': '#e11d48' });
+  // Satellite mode hears each real change, and only those.
+  assert.deepStrictEqual(map.fired, [['streetzim.theme', false], ['streetzim.theme', true]]);
+});
+
+await ok('switch: a chosen theme ignores OS scheme changes; Auto follows them again', () => {
+  let darkNow = false;
+  const e = load({ darkNow: () => darkNow, storage: memStorage() });
+  const map = paintMap(e.makeStyle(CONFIG));
+  e.initMapTheme(map, CONFIG);
+  e.szSetThemeMode('light');
+  darkNow = true; e.listeners[0]();
+  assert.strictEqual(map.paint.get('background')['background-color'], '#f8f4f0');
+  assert.ok(!e.htmlClasses.has('sz-dark'));
+  e.szSetThemeMode('auto');                          // back to the (now dark) OS
+  assert.strictEqual(map.paint.get('background')['background-color'], e._SZ_DARK.background['background-color']);
+  darkNow = false; e.listeners[0]();
+  assert.strictEqual(map.paint.get('background')['background-color'], '#f8f4f0');
+});
+
+await ok('switch: the button names and draws its mode, and a tap moves on and is saved', () => {
+  const storage = memStorage();
+  const e = load({ dark: true, storage, createElement: fakeButton });
+  const map = paintMap(e.makeStyle(CONFIG));
+  e.initMapTheme(map, CONFIG);
+  const btn = e.szThemeButton();
+  assert.strictEqual(btn.type, 'button');
+  assert.strictEqual(btn.className, 'sz-theme-btn');
+  const seen = [];
+  for (let i = 0; i < 4; i++) {
+    seen.push([btn.attrs['data-mode'], btn.title, btn.attrs['aria-label'] === btn.title,
+      storage.m.get('streetzim.theme') || null, e.htmlClasses.has('sz-dark')]);
+    if (i < 3) btn.click();
+  }
+  assert.deepStrictEqual(seen, [
+    ['auto', 'Map theme: auto (follows the system)', true, null, true],
+    ['light', 'Map theme: light', true, 'light', false],
+    ['dark', 'Map theme: dark', true, 'dark', true],
+    ['auto', 'Map theme: auto (follows the system)', true, null, true],
+  ]);
+  // Three different inline icons, no external assets.
+  const icons = new Set();
+  const b2 = load({ storage: memStorage(), createElement: fakeButton }).szThemeButton();
+  for (let i = 0; i < 3; i++) { icons.add(b2.innerHTML); b2.click(); }
+  assert.strictEqual(icons.size, 3);
+  for (const svg of icons) { assert.match(svg, /^<svg viewBox="0 0 24 24"/); assert.doesNotMatch(svg, /href|url\(/); }
+  // Opened with ?theme=dark: the button shows dark, and a tap takes over.
+  const u = load({ dark: false, search: '?theme=dark', storage: memStorage(), createElement: fakeButton });
+  const ub = u.szThemeButton();
+  assert.strictEqual(ub.attrs['data-mode'], 'dark');
+  u.initMapTheme(paintMap(u.makeStyle(CONFIG)), CONFIG);
+  ub.click();
+  assert.strictEqual(ub.attrs['data-mode'], 'auto');
+  assert.ok(!u.htmlClasses.has('sz-dark'));         // OS is light
+});
+
+await ok('switch: it sits in the Home group, and the layer panel clears both', () => {
+  const i = HTML.indexOf('function initHomeButton(');
+  const body = HTML.slice(i, HTML.indexOf('\n}\n', i));
+  assert.match(body, /div\.appendChild\(btn\);[\s\S]*div\.appendChild\(szThemeButton\(\)\)/);
+  // Zoom/compass 10-142, Home 152-196, switch 196-240 (44 px coarse buttons), +10.
+  assert.match(HTML, /#controls \{[^}]*top: calc\(250px \+ var\(--top-inset, 0px\)\)/);
+  assert.match(HTML, /\.sz-home-btn svg, \.sz-theme-btn svg \{[^}]*fill: #333/);
+  // Landscape phones: Home's group is a row (Home | switch), the panel row
+  // moves left of it, so the group never reaches the locate button.
+  const land = HTML.slice(HTML.indexOf('@media (max-height: 500px) {\n    #controls {'));
+  const rule = land.slice(0, land.indexOf('\n  }'));
+  assert.match(rule, /#controls \{ top: calc\(152px \+ var\(--top-inset, 0px\)\); right: 110px; flex-direction: row; \}/);
+  assert.match(rule, /\.sz-home-group \{ display: flex; flex-direction: row; \}/);
+  assert.match(body, /'maplibregl-ctrl maplibregl-ctrl-group sz-home-group'/);
+  assert.match(HTML, /html\.sz-dark \.sz-home-btn svg, html\.sz-dark \.sz-theme-btn svg \{ fill: #e8eaed; \}/);
+});
+
+await ok('switch: places.html takes the same choice (?theme= > saved > OS)', () => {
+  const P = fs.readFileSync(`${REPO}/resources/viewer/places.html`, 'utf8');
+  const a = P.indexOf('// Light/dark: the same choice as the map viewer');
+  assert.ok(a > 0, 'places.html has no theme script');
+  const src = P.slice(a, P.indexOf('</script>', a));
+  function run(search, storage, getterThrows) {
+    const attrs = {};
+    const window = {};
+    Object.defineProperty(window, 'localStorage', { get() { if (getterThrows) throw new Error('x'); return storage; } });
+    new Function('window', 'document', 'location', src)(window,
+      { documentElement: { setAttribute: (k, v) => { attrs[k] = v; } } }, { search });
+    return attrs['data-sz-theme'] || null;
+  }
+  assert.strictEqual(run('', memStorage({ 'streetzim.theme': 'dark' })), 'dark');
+  assert.strictEqual(run('', memStorage({ 'streetzim.theme': 'light' })), 'light');
+  assert.strictEqual(run('?q=x&theme=light', memStorage({ 'streetzim.theme': 'dark' })), 'light');
+  assert.strictEqual(run('', memStorage({ 'streetzim.theme': 'sepia' })), null);
+  assert.strictEqual(run('', memStorage({}, ['getItem'])), null);
+  assert.strictEqual(run('', null, true), null);
+  // The CSS: OS dark unless the reader chose light; chosen dark always.
+  const css = P.slice(P.indexOf('<style>'), P.indexOf('</style>'));
+  const vars = (sel) => (new RegExp(sel.replace(/[[\]()]/g, '\\$&') + ' \\{([^}]*)\\}').exec(css) || [])[1];
+  const media = vars(':root:not([data-sz-theme=light])'), chosen = vars(':root[data-sz-theme=dark]');
+  assert.ok(media && chosen, 'places.html dark rules missing');
+  assert.match(css, /@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-sz-theme=light\]\)/);
+  const bg = (t) => /--bg:\s*([^;]+);/.exec(t)[1];
+  assert.strictEqual(bg(media), bg(chosen));
+  assert.notStrictEqual(bg(media), /--bg:\s*([^;]+);/.exec(css)[1]);
 });
 
 // ========================================================================
