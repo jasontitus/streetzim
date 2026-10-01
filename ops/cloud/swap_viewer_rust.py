@@ -24,16 +24,27 @@ with every other key kept. This is the chip retrofit for shipped ZIMs:
 `repackage_zim.py --split-find-chips` does the same re-shard but loses the
 title index, so Kiwix search suggestions come back empty.
 
-Scope otherwise: no routing changes, no search-data rewrites, no terrain
+``--reshard-search`` re-splits hot search prefixes by character path,
+keeping the source's prefixes and its word rule. ``--rebuild-search``
+re-derives the whole search index from the source's records under the
+current word rule (marks continue a word; manifest ``word_rule`` 2): the
+retrofit for ZIMs whose names were split at Indic/Thai vowel signs
+(docs/search-prefix-locality.md#word-rule).
+
+Scope otherwise: no routing changes, no terrain
 refresh. Use `repackage_zim.py` for those (and accept that it loses Xapian
 on rust-built sources).
 
 Usage:
     python3 cloud/swap_viewer_rust.py SRC.zim DST.zim [--reshard-chips]
+        [--reshard-search | --rebuild-search [--allow-total-mismatch]]
+        [--tmp DIR]   (required, off the root fs, for the search options;
+                       default $TMPDIR)
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -145,9 +156,174 @@ def _is_chip_entry(path: str) -> bool:
 from cloud.viewer_slots import pad_to_slot as _pad_to_slot  # noqa: E402
 
 
+def _homes(name: str) -> tuple[str, str]:
+    """The prefixes a record's name was ALWAYS written under: its home.
+
+    ``current``: ``prefix_key(norm(name)[:2])``, what every writer since
+    6223071 (2026-09-03) keys the whole name by. ``legacy``: what the writers
+    before it computed, ``_prefix_key(name[:2])`` on the RAW name -- its body
+    is today's ``prefix_key`` (fold, then key), applied to the first two raw
+    characters. They differ when the raw name's 2nd character is a mark the
+    fold drops: decomposed Vietnamese "Ủy ban" ("u" + U+031B, raw key "u_",
+    folded "uy"), "Écouen" in NFD, a name opening with a Thai tone mark.
+    """
+    from cloud.search_shards import norm, prefix_key
+    nm = name or ""
+    return prefix_key(norm(nm)[:2]), prefix_key(nm[:2])
+
+
+def _source_records(src_bytes, manifest: dict, spool) -> int:
+    """Write every distinct source search record once per feature to
+    ``spool`` (JSON lines); returns the count.
+
+    The writer puts a record in every prefix one of its names reaches, and in
+    every leaf of a character-split prefix one of its paths reaches. A record
+    is taken only from its HOME prefix (``_homes``: the key of its whole
+    name's first two characters, by the current rule or by the one writers
+    used before 2026-09-03 -- a ZIM holds the record under whichever its
+    writer computed). Inside one leaf a record appears once per feature (two
+    identical features: twice), so its feature count is the most copies any
+    one home leaf holds; a record whose two homes differ is counted across
+    both through one global table, so it is never taken twice. A leaf the
+    manifest declares but the source cannot give is an error: skipping it
+    would drop its records silently.
+    """
+    groups: dict[str, list[str]] = {}
+    for name in manifest["chunks"]:
+        groups.setdefault(_base_prefix(name), []).append(name)
+    n = 0
+    # Records whose current and legacy homes differ (rare: 156 of 26.7 M on
+    # southeast-asia 2026-05-09), across every prefix.
+    best_two: dict[bytes, int] = {}
+    for prefix in sorted(groups):
+        # Keyed by a digest: a hot prefix holds millions of records.
+        best: dict[bytes, int] = {}
+        for leaf in sorted(groups[prefix]):
+            try:
+                blob = src_bytes(f"search-data/{leaf}.json")
+            except Exception as exc:
+                raise SystemExit(f"--rebuild-search: declared leaf {leaf!r} is "
+                                 f"unreadable ({exc}); its records would be lost")
+            here: dict[str, int] = {}
+            two: set[str] = set()
+            for rec in json.loads(blob):
+                cur, legacy = _homes(rec.get("n") or "")
+                if prefix != cur and prefix != legacy:
+                    continue
+                # Serialised as the writer's pass 1 does (ASCII escapes), so
+                # the planner sizes leaves exactly as a fresh build would.
+                line = json.dumps(rec, separators=(",", ":"))
+                here[line] = here.get(line, 0) + 1
+                if cur != legacy:
+                    two.add(line)
+            for line, k in here.items():
+                d = hashlib.blake2b(line.encode("utf-8"), digest_size=16).digest()
+                table = best_two if line in two else best
+                m = table.get(d, 0)
+                if k > m:
+                    spool.write((line + "\n") * (k - m))
+                    n += k - m
+                    table[d] = k
+            del here
+        del best
+    return n
+
+
+def _rebuild_search(c, src_bytes, manifest: dict, work: Path,
+                    allow_total_mismatch: bool = False) -> int:
+    """Re-derive search-data from the source's records with the current
+    writer: keys and leaf paths under ``WORD_RULE``, then the same emit pass
+    a build runs (zim_writer._search_emit_chunks, hot prefixes character-
+    split at SEARCH_HOT_BYTES). Every other source manifest key is kept."""
+    from cloud.search_shards import prefixes_for
+    from streetzim.zim_writer import _search_emit_chunks
+    spool_path = work / "search-records.jsonl"
+    with open(spool_path, "w", encoding="utf-8") as spool:
+        total = _source_records(src_bytes, manifest, spool)
+    want = manifest.get("total")
+    print(f"  search: {total:,} source record(s) recovered "
+          f"(source manifest total {want})", flush=True)
+    if total != want and not allow_total_mismatch:
+        # A record not recovered is a place nobody can find again. (A ZIM
+        # whose addresses were stripped by derive_zim, or one with records
+        # under a home no known writer used, needs the override -- and a
+        # look at why first.)
+        raise SystemExit(f"--rebuild-search: recovered {total:,} record(s) but the "
+                         f"source manifest says {want}; refusing to drop or invent "
+                         f"records (--allow-total-mismatch overrides)")
+    chunk_tmp = work / "search-rebuild"
+    chunk_tmp.mkdir()
+    counts: dict[str, int] = {}
+    fds: dict[str, object] = {}
+    with open(spool_path, encoding="utf-8") as spool:
+        for line in spool:
+            rec = json.loads(line)
+            keys = prefixes_for(rec.get("n") or "")
+            alt = rec.get("alt")
+            if isinstance(alt, list):
+                for a in alt:
+                    if isinstance(a, str):
+                        keys |= prefixes_for(a)
+            for k in sorted(keys):
+                fd = fds.get(k)
+                if fd is None:
+                    if len(fds) >= SEARCH_LEAF_FD_CAP:
+                        fds.pop(next(iter(fds))).close()
+                    fd = open(chunk_tmp / f"{k}.jsonl", "a", encoding="utf-8")
+                    fds[k] = fd
+                    counts.setdefault(k, 0)
+                else:
+                    fds[k] = fds.pop(k)
+                fd.write(line)
+                counts[k] += 1
+    for fd in fds.values():
+        fd.close()
+    spool_path.unlink()
+
+    def _map_item(path, title, mime, data, compress=True):
+        return _Item(path, mime, title=title or "", data=data, compress=compress)
+
+    extra = {k: v for k, v in manifest.items()
+             if k not in ("total", "chunks", "sub_chunks", "char_split", "word_rule")}
+    _search_emit_chunks(c, _map_item,
+                        split_hot_search_chunks_mb=SEARCH_HOT_BYTES // (1024 * 1024),
+                        chunk_tmp=str(chunk_tmp), chunk_counts=counts,
+                        total_features=total, manifest_extra=extra)
+    return total
+
+
+def _on_root_fs(path: str) -> bool:
+    return os.stat(path).st_dev == os.stat("/").st_dev
+
+
+def _spill_root(tmp_dir: str | None, search: bool) -> str | None:
+    """Where the spill directory goes: ``--tmp``, else $TMPDIR. A search
+    rewrite spools the whole index there (several GB on a continent), so it
+    must be named explicitly and must not be on the root filesystem -- the
+    build host's / is small (and /tmp is on it)."""
+    root = tmp_dir or os.environ.get("TMPDIR")
+    if not search:
+        return root
+    if not root:
+        raise SystemExit("--reshard-search/--rebuild-search spool the search index "
+                         "(GBs): pass --tmp DIR or set TMPDIR to a directory under "
+                         "/storage, never the default /tmp")
+    if not os.path.isdir(root):
+        raise SystemExit(f"--tmp/TMPDIR {root!r} is not a directory")
+    if _on_root_fs(root):
+        raise SystemExit(f"--tmp/TMPDIR {root!r} is on the root filesystem; point it "
+                         f"at /storage (the search spool is several GB)")
+    return root
+
+
 def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
-                     reshard_search: bool = False) -> int:
+                     reshard_search: bool = False,
+                     rebuild_search: bool = False,
+                     tmp_dir: str | None = None,
+                     allow_total_mismatch: bool = False) -> int:
     from libzim.reader import Archive
+
+    spill_root = _spill_root(tmp_dir, reshard_search or rebuild_search)
 
     src = Archive(src_path)
     src_total = src.all_entry_count
@@ -164,6 +340,20 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
     # and refuse before writing anything.
     search_manifest: dict | None = None
     search_manifest_title = "Search Manifest"
+    if reshard_search and rebuild_search:
+        raise SystemExit("--reshard-search and --rebuild-search are exclusive "
+                         "(--rebuild-search re-splits every prefix itself)")
+    if rebuild_search:
+        if not src.has_entry_by_path(SEARCH_MANIFEST):
+            raise SystemExit(f"--rebuild-search: {src_path} has no {SEARCH_MANIFEST}")
+        search_manifest = json.loads(_src_bytes(SEARCH_MANIFEST))
+        search_manifest_title = (src.get_entry_by_path(SEARCH_MANIFEST).title
+                                 or search_manifest_title)
+        if not isinstance(search_manifest, dict) or not search_manifest.get("chunks"):
+            raise SystemExit(f"--rebuild-search: {src_path} declares no search chunks")
+        from cloud.search_shards import WORD_RULE, word_rule_of
+        print(f"  will rebuild search-data: {len(search_manifest['chunks'])} source "
+              f"chunk(s), word rule {word_rule_of(search_manifest)} → {WORD_RULE}")
     if reshard_search:
         if not src.has_entry_by_path(SEARCH_MANIFEST):
             raise SystemExit(f"--reshard-search: {src_path} has no {SEARCH_MANIFEST}")
@@ -256,7 +446,8 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
     dropped_search_files = 0
     replaced_paths: set[str] = set()
 
-    with tempfile.TemporaryDirectory(prefix="swap_viewer_rust_") as spill_dir:
+    with tempfile.TemporaryDirectory(prefix="swap_viewer_rust_",
+                                     dir=spill_root) as spill_dir:
         spill_dir_path = Path(spill_dir)
 
         def _stage_large(path: str, data: bytes) -> tuple[bytes | None, str | None]:
@@ -354,7 +545,8 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                     dropped_chip_files += 1
                     continue
 
-                if reshard_search and path.startswith("search-data/") \
+                if (reshard_search or rebuild_search) \
+                        and path.startswith("search-data/") \
                         and path.endswith(".json"):
                     # Every search chunk and the manifest are rewritten below;
                     # carrying the old hash leaves too would ship both layouts.
@@ -417,10 +609,22 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                                  compress=False, namespace=None))
                 swapped += 1
 
+            if rebuild_search:
+                n_out = _rebuild_search(c, _src_bytes, search_manifest,
+                                        spill_dir_path,
+                                        allow_total_mismatch=allow_total_mismatch)
+                print(f"  search: dropped {dropped_search_files} old file(s), "
+                      f"rebuilt {n_out} record(s)", flush=True)
+
             if reshard_search:
                 from cloud.search_shards import (Aggregator, SHARD_TARGET_BYTES,
                                                  char_split_paths, leaf_for,
-                                                 tier_for)
+                                                 tier_for, word_rule_of)
+                # The prefixes are the source's, so the paths inside them must
+                # follow the rule the source was bucketed with: planning a
+                # rule-1 ZIM's prefixes with rule 2 strands every record whose
+                # rule-2 words no longer reach the prefix it sits in.
+                src_rule = word_rule_of(search_manifest)
                 from cloud.repackage_zim import _split_records_recursive
                 new_chunks: dict[str, int] = {}
                 new_sub: dict[str, list[str]] = {}
@@ -445,7 +649,7 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                     names = groups[prefix]
                     # Pass 1: size it without holding it. `av` on
                     # united-states is 2.93 GB of JSON.
-                    agg = Aggregator(prefix)
+                    agg = Aggregator(prefix, rule=src_rule)
                     total = 0
                     for rec in _src_records(names):
                         size = len(json.dumps(rec, separators=(",", ":"),
@@ -476,7 +680,8 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                     first_orphan = ""
                     for rec in _src_records(names):
                         lnames = list(leaf_for(prefix, rec,
-                                               planned_paths.get(tier_for(rec), ())))
+                                               planned_paths.get(tier_for(rec), ()),
+                                               rule=src_rule))
                         if not lnames:
                             orphans += 1
                             if not first_orphan:
@@ -706,10 +911,28 @@ def main() -> int:
                     help="Re-split hot search-data prefixes by character path "
                          "and record tier (cloud/search_shards.py), so a query "
                          "reads one leaf instead of every leaf.")
+    ap.add_argument("--rebuild-search", action="store_true",
+                    help="Re-derive the whole search index from the source's "
+                         "records under the current word rule (manifest "
+                         "word_rule 2: Indic/Thai vowel signs continue a word), "
+                         "re-bucketing every record and re-planning every hot "
+                         "prefix.")
+    ap.add_argument("--tmp", metavar="DIR", default=None,
+                    help="Spill directory (default $TMPDIR). Required, and not on "
+                         "the root filesystem, with --reshard-search or "
+                         "--rebuild-search: the search spool is several GB.")
+    ap.add_argument("--allow-total-mismatch", action="store_true",
+                    help="--rebuild-search: proceed when the records recovered "
+                         "differ from the source manifest's total (e.g. a ZIM "
+                         "whose addresses derive_zim stripped). Otherwise that "
+                         "is an error.")
     args = ap.parse_args()
     return swap_viewer_rust(args.src, args.dst,
                             reshard_chips=args.reshard_chips,
-                            reshard_search=args.reshard_search)
+                            reshard_search=args.reshard_search,
+                            rebuild_search=args.rebuild_search,
+                            tmp_dir=args.tmp,
+                            allow_total_mismatch=args.allow_total_mismatch)
 
 
 if __name__ == "__main__":

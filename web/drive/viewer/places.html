@@ -1554,6 +1554,35 @@ var SEARCH_SHARDS = (function () {
     return t.toLowerCase();
   }
 
+  // The word rule: how the writer split a folded name into the words it
+  // keyed and pathed (cloud/search_shards.py `words`), from the manifest's
+  // "word_rule"; absent means rule 1, which every older ZIM was written with.
+  //   1: a word is a run of letters and digits; any mark ends it, so
+  //      "कोलकाता" was indexed as "क" "लक" "त" -- kept exactly so those
+  //      ZIMs find what they hold.
+  //   2: marks (\p{M}: Indic vowel signs, Thai vowels) continue a word but
+  //      never start one. /[\p{L}\p{M}\p{N}]/u is the writer's
+  //      isalnum()-or-category-M with "_" excluded, code point for code point
+  //      (tests/search_word_rule_js.test.mjs).
+  // Returns the words of 2+ characters, the ones the writer indexed; rule 2
+  // counts code points as Python does.
+  function wordRule(manifest) {
+    return (manifest && manifest.word_rule === 2) ? 2 : 1;
+  }
+  function words(folded, manifest) {
+    var t = String(folded == null ? '' : folded);
+    if (wordRule(manifest) !== 2) {
+      return t.split(/[^\p{L}\p{N}]+/u).filter(function (w) { return w.length >= 2; });
+    }
+    var parts = t.split(/[^\p{L}\p{M}\p{N}]+/u);
+    var out = [];
+    for (var i = 0; i < parts.length; i++) {
+      var w = parts[i].replace(/^\p{M}+/u, '');
+      if (Array.from(w).length >= 2) out.push(w);
+    }
+    return out;
+  }
+
   function tokenFor(ch) {
     var code = ch.codePointAt(0);
     if (code >= 128) return 'u' + code.toString(16);
@@ -1628,6 +1657,8 @@ var SEARCH_SHARDS = (function () {
 
   return {
     fold: fold,
+    wordRule: wordRule,
+    words: words,
     tokenFor: tokenFor,
     pathTokens: pathTokens,
     pathsFor: pathsFor,
@@ -1717,9 +1748,8 @@ function prefixesFor(q) {
   const out = new Set();
   const folded = foldText(q).trim();
   if (folded.length >= 2) out.add(prefixKeyFor(folded.replace(/\s/g, '_')));
-  for (const word of folded.split(/[^\p{L}\p{N}]+/u)) {
-    if (word.length >= 2) out.add(prefixKeyFor(word));
-  }
+  const man = state.manifests && state.manifests.search;
+  for (const word of SEARCH_SHARDS.words(folded, man)) out.add(prefixKeyFor(word));
   return [...out];
 }
 
@@ -1733,7 +1763,7 @@ function searchLeavesFor(q, opts) {
   if (!man || !man.char_split) return null;
   const folded = foldText(q).trim();
   if (folded.length < 3) return null;      // 2 chars: whole prefix, as before
-  const words = folded.split(/[^\p{L}\p{N}]+/u).filter(w => w.length >= 2);
+  const words = SEARCH_SHARDS.words(folded, man);
   words.push(folded.replace(/\s/g, '_'));
   const seen = new Set();
   const out = [];

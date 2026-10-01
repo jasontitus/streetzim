@@ -68,7 +68,88 @@ LEAF_SEP = "~"
 # (476 k records on japan "10").
 TERMINAL = "_e"
 
-_word_re = re.compile(r"[^\W_]+", re.UNICODE)
+# --- Word rule: how a folded name splits into words ---------------------
+# Rule 1 (every ZIM written before 2026-10, manifest without "word_rule"):
+# a word is a run of alphanumerics, ``[^\W_]+``. Marks are not
+# alphanumeric, so a mark the fold keeps (canonical combining class 0:
+# Indic vowel signs, Thai vowels such as U+0E31 and U+0E34-0E37, Khmer and
+# Myanmar vowel signs) ENDED the word: "कोलकाता" became "क", "लक", "त" and
+# "พัทยา" became "พ", "ทยา". The 1-2 character fragments matched whole
+# prefix subtrees, and the name itself was under no key a reader of the
+# whole word would compute.
+#
+# Rule 2 (manifest "word_rule": 2): a word is a maximal run of characters
+# that are alphanumeric (str.isalnum) or a mark (category Mn, Mc, Me),
+# never "_". Marks CONTINUE a word but never START one: a mark at the start
+# of a run (after a space, or a whole name that begins with a stray vowel
+# sign) is skipped and the word begins at the first alphanumeric, so a run
+# of marks alone is no word. Latin, Cyrillic, Greek, CJK, Hangul and
+# pointed Arabic/Hebrew are unchanged: the fold has already removed every
+# mark of class != 0, and their remaining class-0 marks are rare. The
+# viewers mirror this with /[^\p{L}\p{M}\p{N}]+/u plus a leading-mark strip
+# (SEARCH_SHARDS.words), which is the same set of characters as
+# isalnum-or-mark-minus-"_" (tests/search_word_rule_js.test.mjs proves it per
+# code point). docs/search-prefix-locality.md#word-rule.
+WORD_RULE = 2          # what this writer records as manifest["word_rule"]
+WORD_RULES = (1, 2)
+
+
+def _mark_class() -> str:
+    """A regex character class body listing every mark (Mn/Mc/Me) in this
+    Python's Unicode database, as ranges."""
+    ranges: list[list[int]] = []
+    for c in range(0x110000):
+        if unicodedata.category(chr(c))[0] == "M":
+            if ranges and ranges[-1][1] == c - 1:
+                ranges[-1][1] = c
+            else:
+                ranges.append([c, c])
+    return "".join(f"\\U{a:08x}" if a == b else f"\\U{a:08x}-\\U{b:08x}"
+                   for a, b in ranges)
+
+
+_WORD_RES = {
+    1: re.compile(r"[^\W_]+", re.UNICODE),
+    # An alphanumeric, then alphanumerics or marks. (Marks and alphanumerics
+    # are disjoint sets, so this never splits a run the char-class view
+    # would keep whole.)
+    2: re.compile(r"[^\W_](?:[^\W_]|[" + _mark_class() + r"])*", re.UNICODE),
+}
+# Rule 1's pattern under its historical name (tests and tools import it).
+_word_re = _WORD_RES[1]
+
+
+def word_rule_of(manifest: dict[str, Any] | None) -> int:
+    """The word rule a search manifest was written with: its ``word_rule``,
+    or 1 when the key is absent (every ZIM written before rule 2)."""
+    r = (manifest or {}).get("word_rule", 1)
+    if r not in WORD_RULES:
+        raise ValueError(f"search manifest has unknown word_rule {r!r}")
+    return r
+
+
+def words(nn: str, rule: int = WORD_RULE) -> list[str]:
+    """The words of an already-folded (``norm``) text under ``rule``."""
+    return _WORD_RES[rule].findall(nn)
+
+
+def prefixes_for(name: str, rule: int = WORD_RULE) -> set[str]:
+    """Every 2-char chunk key a name is indexed under: the whole name's
+    first two characters, plus the key of each word of 2+ characters.
+
+    Keys come from the NORMALISED name (accent-folded, lowercased) so they
+    agree with what the readers compute from a normalised query. Splitting
+    the raw name let a combining accent (NFD "Écouen") cut the word so the
+    key was "e_" while every reader asked for "ec".
+    """
+    nn = norm(name)
+    # First-2-of-whole-name: "45 Broadway" -> "45".
+    keys = {prefix_key(nn[:2])}
+    # One key per word: "cathedral" finds "Washington National Cathedral".
+    for m in words(nn, rule):
+        if len(m) >= 2:
+            keys.add(prefix_key(m))
+    return keys
 
 
 def norm(s: str) -> str:
@@ -118,7 +199,8 @@ def token_for(ch: str) -> str:
     return _ascii_norm(ch) if ch.isascii() else "u" + format(ord(ch), "x")
 
 
-def paths_for(prefix: str, name: str, depth: int) -> set[Path]:
+def paths_for(prefix: str, name: str, depth: int,
+              rule: int = WORD_RULE) -> set[Path]:
     """Every character path ``name`` should be indexed under, within ``prefix``.
 
     A record reaches a prefix through any word whose ``prefix_key`` matches,
@@ -126,10 +208,11 @@ def paths_for(prefix: str, name: str, depth: int) -> set[Path]:
     yields one path — the tokens of its characters after the prefix, at most
     ``depth`` of them. A word that IS the prefix yields ``("_",)``.
     """
-    return _word_paths(prefix, name, depth) or {(TERMINAL,)}
+    return _word_paths(prefix, name, depth, rule) or {(TERMINAL,)}
 
 
-def record_paths(prefix: str, record: Record, depth: int) -> set[Path]:
+def record_paths(prefix: str, record: Record, depth: int,
+                 rule: int = WORD_RULE) -> set[Path]:
     """``paths_for`` over the record's name and its other names (``alt``,
     which administrative areas carry and are indexed under too)."""
     names = [record.get("n") or ""]
@@ -138,14 +221,15 @@ def record_paths(prefix: str, record: Record, depth: int) -> set[Path]:
         names += [a for a in alt if isinstance(a, str)]  # pyright: ignore[reportUnknownVariableType]
     paths: set[Path] = set()
     for nm in names:
-        paths |= _word_paths(prefix, nm, depth)
+        paths |= _word_paths(prefix, nm, depth, rule)
     return paths or {(TERMINAL,)}
 
 
-def _word_paths(prefix: str, name: str, depth: int) -> set[Path]:
+def _word_paths(prefix: str, name: str, depth: int,
+                rule: int = WORD_RULE) -> set[Path]:
     nn = norm(name)
     paths: set[Path] = set()
-    candidates: list[str] = [m.group(0) for m in _word_re.finditer(nn)]
+    candidates: list[str] = words(nn, rule)
     whole = nn.replace(" ", "_")
     if whole:
         candidates.append(whole)
@@ -169,15 +253,19 @@ class Aggregator:
     """Counts bytes per (tier, path) so leaves can be chosen without keeping
     records. Feed every record once; memory is O(distinct paths)."""
 
-    def __init__(self, prefix: str, max_depth: int | None = None) -> None:
+    def __init__(self, prefix: str, max_depth: int | None = None,
+                 rule: int = WORD_RULE) -> None:
         self.prefix = prefix
+        # The word rule the prefix's records were bucketed with: a retrofit
+        # keeps a source's prefixes, so it must keep the source's rule too.
+        self.rule = rule
         self.max_depth = max_depth or max(TIER_MAX_DEPTH.values())
         self.counts: dict[tuple[str, Path], list[int]] = {}
 
     def add(self, record: Record, size: int) -> None:
         tier = tier_for(record)
         depth = min(TIER_MAX_DEPTH.get(tier, 1), self.max_depth)
-        for path in record_paths(self.prefix, record, depth):
+        for path in record_paths(self.prefix, record, depth, self.rule):
             for d in range(1, len(path) + 1):
                 key = (tier, path[:d])
                 slot = self.counts.get(key)
@@ -218,13 +306,14 @@ def leaf_name(prefix: str, path: Path, tier: str) -> str:
 
 
 def leaf_for(prefix: str, record: Record,
-             planned_paths: Iterable[Path]) -> Iterator[str]:
+             planned_paths: Iterable[Path],
+             rule: int = WORD_RULE) -> Iterator[str]:
     """Leaf names a record belongs in, given the planned paths for its tier."""
     tier = tier_for(record)
     depth = TIER_MAX_DEPTH.get(tier, 1)
     planned = set(planned_paths)
     emitted: set[str] = set()
-    for path in record_paths(prefix, record, depth):
+    for path in record_paths(prefix, record, depth, rule):
         for d in range(len(path), 0, -1):
             cand = path[:d]
             if cand in planned:

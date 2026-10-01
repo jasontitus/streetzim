@@ -485,6 +485,35 @@ var SEARCH_SHARDS = (function () {
     return t.toLowerCase();
   }
 
+  // The word rule: how the writer split a folded name into the words it
+  // keyed and pathed (cloud/search_shards.py `words`), from the manifest's
+  // "word_rule"; absent means rule 1, which every older ZIM was written with.
+  //   1: a word is a run of letters and digits; any mark ends it, so
+  //      "कोलकाता" was indexed as "क" "लक" "त" -- kept exactly so those
+  //      ZIMs find what they hold.
+  //   2: marks (\p{M}: Indic vowel signs, Thai vowels) continue a word but
+  //      never start one. /[\p{L}\p{M}\p{N}]/u is the writer's
+  //      isalnum()-or-category-M with "_" excluded, code point for code point
+  //      (tests/search_word_rule_js.test.mjs).
+  // Returns the words of 2+ characters, the ones the writer indexed; rule 2
+  // counts code points as Python does.
+  function wordRule(manifest) {
+    return (manifest && manifest.word_rule === 2) ? 2 : 1;
+  }
+  function words(folded, manifest) {
+    var t = String(folded == null ? '' : folded);
+    if (wordRule(manifest) !== 2) {
+      return t.split(/[^\p{L}\p{N}]+/u).filter(function (w) { return w.length >= 2; });
+    }
+    var parts = t.split(/[^\p{L}\p{M}\p{N}]+/u);
+    var out = [];
+    for (var i = 0; i < parts.length; i++) {
+      var w = parts[i].replace(/^\p{M}+/u, '');
+      if (Array.from(w).length >= 2) out.push(w);
+    }
+    return out;
+  }
+
   function tokenFor(ch) {
     var code = ch.codePointAt(0);
     if (code >= 128) return 'u' + code.toString(16);
@@ -559,6 +588,8 @@ var SEARCH_SHARDS = (function () {
 
   return {
     fold: fold,
+    wordRule: wordRule,
+    words: words,
     tokenFor: tokenFor,
     pathTokens: pathTokens,
     pathsFor: pathsFor,
@@ -656,10 +687,11 @@ var SEARCH_SHARDS = (function () {
   // hit substring matches like "cathedral" → "Washington National Cathedral".
   function getPrefixes(query, opts) {
     var q = normalizeText(query);
-    // >= 2 chars, matching the writer (`_prefixes_for` skips shorter words)
-    // and places.html. Keeping 1-char words made "a coffee" expand the whole
-    // "a_" prefix for nothing.
-    var words = q.split(/[^\p{L}\p{N}]+/u).filter(function(w) { return w.length >= 2; });
+    // The words the writer keyed, split by the ZIM's word rule: >= 2 chars,
+    // as the writer (`prefixes_for` skips shorter words) and places.html.
+    // Keeping 1-char words made "a coffee" expand the whole "a_" prefix for
+    // nothing.
+    var words = SEARCH_SHARDS.words(q, manifest);
 
     function keyFor(word) {
       // Latin-leading words keep the 2-char ASCII-alnum prefix. Non-ASCII

@@ -225,13 +225,21 @@ the same OSM extract (added in 2026-09; older ZIMs have none).
 
 - `search-data/manifest.json`:
   ```json
-  {"total": 1397, "chunks": {"mo": 12, "u5927": 3},
+  {"total": 1397, "word_rule": 2, "chunks": {"mo": 12, "u5927": 3},
    "sub_chunks": {"de": ["de-0", "de-1"]},
    "char_split": {"ca": ["ca~r~c", "ca~s~p"]}}
   ```
   `chunks` maps a prefix to its record count. `sub_chunks` and `char_split`
-  appear only when big prefixes were split.
+  appear only when big prefixes were split. `word_rule` says how names were
+  cut into words for keys and paths; absent means 1 (every ZIM before
+  2026-10), 2 means marks continue a word
+  (docs/search-prefix-locality.md, "Word rule").
 - `search-data/{prefix}.json` is an array of records.
+- **Words**: `cloud/search_shards.py` `words(norm(name), rule)`. Rule 2: a
+  maximal run of alphanumerics and marks (`Mn`/`Mc`/`Me`), not `_`, never
+  starting with a mark; rule 1: a run of alphanumerics. A record is indexed
+  under its name's first two characters and each word of ≥ 2 characters
+  (`prefixes_for`), and under each of its `alt` names the same way.
 - **Prefix rule**: `cloud/search_shards.py` `prefix_key`. Normalize the
   word (NFKD, strip characters of canonical combining class ≠ 0 — not every
   `\p{M}` mark: Indic vowel signs stay — lower-case, spaces become `_`;

@@ -1979,19 +1979,13 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
     total_features = 0
     xapian_count = 0
 
-    # Normalize (lowercase + ASCII-fold) so search matches across
-    # accented / diacritic variants: "Café" ↔ "cafe", "São" ↔ "sao".
-    # One implementation, shared with the planner and mirrored by
-    # the viewer's keyFor / mcpzim's normalizePrefix.
-    from cloud.search_shards import norm as _norm, prefix_key as _prefix_key
-
-    # Word splitter: any run of non-alnum (unicode-aware) ends a word.
-    # Gives us each term in the name so "Washington National Cathedral"
-    # gets indexed under each of "wa", "na", "ca" (not just "wa").
-    # Without this, typing "cathedral" in a search box will miss it
-    # because the query prefix is "ca" but the entry lives under "wa".
-    import re as _re
-    _word_re = _re.compile(r"[^\W_]+", _re.UNICODE)
+    # Keys per name: the whole name's first two characters plus each word's
+    # (so "cathedral" finds "Washington National Cathedral"), accent-folded
+    # and split by the current word rule (marks continue a word). One
+    # implementation, shared with the planner and the retrofit, mirrored by
+    # the viewer's SEARCH_SHARDS.words / keyFor; the manifest records the
+    # rule as "word_rule" (docs/search-prefix-locality.md#word-rule).
+    from cloud.search_shards import prefixes_for as _prefixes_for
 
     # Open-file budget for the per-prefix chunk writers (see the
     # LRU eviction at the write site).
@@ -2005,26 +1999,6 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
         _chunk_fd_budget = max(64, _soft - 256)
     except Exception:
         _chunk_fd_budget = 512
-
-    def _prefixes_for(name):
-        """Set of 2-char prefix keys this name should be indexed under.
-
-        Keys are derived from the NORMALISED name (accent-folded,
-        lowercased) so they agree with what the readers compute
-        from a normalised query. Splitting the raw name let a
-        combining accent (NFD "Écouen") cut the word so the
-        key was "e_" while every reader asked for "ec".
-        """
-        keys = set()
-        nn = _norm(name)
-        # First-2-of-whole-name (keeps backwards-compat for callers
-        # that computed it the old way: "45 Broadway" → "45").
-        keys.add(_prefix_key(nn[:2]))
-        # Plus one key per word — this is what unlocks substring search.
-        for m in _word_re.findall(nn):
-            if len(m) >= 2:
-                keys.add(_prefix_key(m))
-        return keys
 
     # Per-type counts for streetzim-meta.json, plus a parallel set of
     # chunk files keyed by OSM top-level `type` (category-index).
@@ -2226,9 +2200,11 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
     return SearchBuckets(chunk_tmp=chunk_tmp, chunk_counts=chunk_counts, xapian_path=xapian_path, total_features=total_features, xapian_count=xapian_count, type_counts=type_counts, wiki_fields_added=wiki_fields_added, wiki_geo=wiki_geo, cat_chunk_counts=cat_chunk_counts, cat_dir=cat_dir, cat_shards=cat_shards, CATEGORY_SHARD_MIN_BYTES=CATEGORY_SHARD_MIN_BYTES)
 
 
-def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_tmp, chunk_counts, total_features):
+def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_tmp, chunk_counts, total_features, manifest_extra=None):
     """Search pass 2: emit search-data/<prefix>.json chunks (splitting hot
-    prefixes) and the search manifest."""
+    prefixes) and the search manifest. ``manifest_extra`` adds keys to the
+    manifest (a retrofit carries the source's other keys through); it
+    cannot override what this pass computed."""
     _emit_t0 = time.time()
 
     # Pass 2: read each chunk file, serialize, and emit. When
@@ -2428,8 +2404,16 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
 
     # Emit the manifest AFTER the emission loop so it reflects
     # every split decision.
-    manifest_dict: dict = {"total": total_features,
-                           "chunks": manifest_chunks}
+    from cloud.search_shards import WORD_RULE
+    # "word_rule": how names were split into words for keys and paths.
+    # Readers that find it absent use rule 1, so every older ZIM keeps
+    # working with a newer viewer.
+    manifest_dict: dict = dict(manifest_extra or {})
+    manifest_dict.update({"total": total_features,
+                          "word_rule": WORD_RULE,
+                          "chunks": manifest_chunks})
+    manifest_dict.pop("sub_chunks", None)
+    manifest_dict.pop("char_split", None)
     if manifest_sub_chunks:
         manifest_dict["sub_chunks"] = manifest_sub_chunks
     if manifest_char_split:
@@ -2884,11 +2868,15 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup,
         for prefix in sorted({_key(n) for n in [f["name"], *rec.get("alt", ())]}):
             chunks[prefix].append(rec)
 
+    from cloud.search_shards import WORD_RULE
     manifest = {k: len(v) for k, v in sorted(chunks.items())}
     total_features = len(search_features)   # a record under 2 keys counts once
     creator.add_item(MapItem(
         "search-data/manifest.json", "Search Manifest", "application/json",
-        json.dumps({"total": total_features, "chunks": manifest},
+        # word_rule as every writer records it. This legacy path keys by
+        # the whole name only, so no word split is involved either way.
+        json.dumps({"total": total_features, "word_rule": WORD_RULE,
+                    "chunks": manifest},
                    separators=(",", ":")).encode("utf-8"),
     ))
 
