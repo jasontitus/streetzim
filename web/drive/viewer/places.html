@@ -29,17 +29,38 @@
 })();
 // Light/dark: the same choice as the map viewer (135-map-theme.js), in the
 // same order -- ?theme= in the URL, then the reader's saved choice; with
-// neither, the CSS follows prefers-color-scheme. Storage may throw.
+// neither (Auto), the CSS follows prefers-color-scheme. Each means what the
+// reader SEES: under a host that inverts the page (Kiwix JS's dark mode,
+// invert(1) on the frame) the opposite colours are set, and Auto there is
+// the light set (inverted: dark), as in the viewer. Storage may throw.
+// Follows a change made in another tab ('storage' event).
 (function() {
-  var m = /[?&]theme=(dark|light)(?:&|$)/.exec(location.search || '');
-  var mode = m ? m[1] : null;
-  if (!mode) {
-    try {
-      var v = window.localStorage && window.localStorage.getItem('streetzim.theme');
-      if (v === 'light' || v === 'dark') mode = v;
-    } catch (e) {}
+  function inverted(el) {
+    try { return !!el && /invert\(\s*(1|100%)/.test(getComputedStyle(el).filter || ''); }
+    catch (e) { return false; }
   }
-  if (mode) document.documentElement.setAttribute('data-sz-theme', mode);
+  function apply() {
+    var m = /[?&]theme=(dark|light)(?:&|$)/.exec(location.search || '');
+    var mode = m ? m[1] : null;
+    if (!mode) {
+      try {
+        var v = window.localStorage && window.localStorage.getItem('streetzim.theme');
+        if (v === 'light' || v === 'dark') mode = v;
+      } catch (e) {}
+    }
+    var fe = null;
+    try { fe = window.frameElement; } catch (e) {}
+    var root = document.documentElement;
+    if (inverted(fe) || inverted(root)) mode = mode === 'light' ? 'dark' : 'light';
+    if (mode) root.setAttribute('data-sz-theme', mode);
+    else root.removeAttribute('data-sz-theme');
+  }
+  apply();
+  try {
+    window.addEventListener('storage', function(e) {
+      if (!e || e.key === 'streetzim.theme' || e.key === null) apply();
+    });
+  } catch (e) {}
 })();
 </script>
 <style>

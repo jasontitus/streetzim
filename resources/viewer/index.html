@@ -3448,13 +3448,24 @@ var _szThemeMode = szReadThemeMode(_szThemeStore());
 // What the button shows: the URL's theme while it rules, else the choice.
 function szThemeMode() { return _szUrlTheme() || _szThemeMode; }
 
+// Whether to build the DARK style. Decide what the reader should SEE, then
+// flip it when the host inverts the page (Kiwix JS's dark mode puts
+// invert(1) hue-rotate(180deg) on the frame): there the light style is what
+// looks dark. Light, Dark and ?theme= all mean what the reader sees. Auto
+// under an inverting host keeps its old look -- the host is in its dark
+// mode, so the reader sees dark (light style, inverted); else the OS scheme.
 function _szPrefersDark() {
+  var inverts = _szHostInvertsContent();
   var mode = szThemeMode();
-  if (mode !== 'auto') return mode === 'dark';
-  if (_szHostInvertsContent()) return false;
-  try {
-    return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  } catch (e) { return false; }
+  var want;
+  if (mode !== 'auto') want = mode === 'dark';
+  else if (inverts) want = true;
+  else {
+    try {
+      want = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    } catch (e) { want = false; }
+  }
+  return inverts ? !want : want;
 }
 
 // The page chrome follows the map: html.sz-dark switches the search box,
@@ -3488,14 +3499,33 @@ function _szThemeStyle(style, dark) {
 // (satellite, hillshade, wiki dots, routes, search and find pins).
 // Repaints the base layers from a fresh makeStyle(), then fires
 // 'streetzim.theme' so satellite mode can re-apply its overrides.
-var _szThemeRefresh = function() {};
+//
+// A tap (or scheme change) before the style has loaded: the chrome switches
+// at once, the map is repainted when its base layers exist ('styledata'),
+// and `current` -- the theme the map is painted in -- only changes once the
+// paint has happened, so nothing is lost and the next tap is not confused.
+var _szThemeRefresh = function() { _szApplyUiTheme(_szPrefersDark()); };
 function initMapTheme(map, config) {
   var current = _szPrefersDark();
+  var waiting = false;
+  function styleReady() {
+    try { return !!map.getLayer('background'); } catch (e) { return false; }
+  }
   function refresh() {
     var dark = _szPrefersDark();
-    if (dark === current) return;
-    current = dark;
     _szApplyUiTheme(dark);
+    if (dark === current) return;
+    if (!styleReady()) {
+      if (!waiting) {
+        waiting = true;
+        // 'styledata' can come before the layers exist; refresh() then
+        // simply waits again.
+        var again = function() { waiting = false; refresh(); };
+        map.once('styledata', again);
+      }
+      return;
+    }
+    current = dark;
     var style = makeStyle(config);
     style.layers.forEach(function(layer) {
       if (!layer.paint || !map.getLayer(layer.id)) return;
@@ -3508,6 +3538,15 @@ function initMapTheme(map, config) {
     map.triggerRepaint();
   }
   _szThemeRefresh = refresh;
+  // Another tab (or places.html) changed the choice: follow it here too.
+  try {
+    window.addEventListener('storage', function(e) {
+      if (e && e.key !== SZ_THEME_KEY && e.key !== null) return;
+      _szThemeMode = szReadThemeMode(_szThemeStore());
+      _szThemeButtons.forEach(_szThemeButtonShow);
+      refresh();
+    });
+  } catch (e) {}
   var mq = null;
   try { mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)'); } catch (e) {}
   if (!mq) return;
@@ -3546,8 +3585,10 @@ function _szThemeButtonShow(btn) {
   btn.setAttribute('aria-label', _SZ_THEME_LABEL[mode]);
   btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + _SZ_THEME_ICON[mode] + '</svg>';
 }
+var _szThemeButtons = [];
 function szThemeButton() {
   var btn = document.createElement('button');
+  _szThemeButtons.push(btn);
   btn.type = 'button';
   btn.className = 'sz-theme-btn';
   _szThemeButtonShow(btn);
