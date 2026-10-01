@@ -491,18 +491,24 @@ function initAbout(config) {
 // The compass ("reset north") is shown only while the map is rotated or
 // tilted. North-up and flat it does nothing when tapped, and readers took
 // the small triangle for a broken button. It comes back with a two-finger
-// rotate, 3D, or driving mode's heading-up view, where it is useful.
+// rotate, a tilt, or driving mode's heading-up view, where it is useful.
+// It appears as soon as the map turns, but hides only once the map stops:
+// hiding mid-gesture made the Home and theme buttons below it jump each
+// time a rotation crossed north, and pulled the compass out from under a
+// mouse dragging it (MapLibre rotates around the button's own rectangle).
 function initCompassVisibility(map) {
   var btn = map.getContainer().querySelector('.maplibregl-ctrl-compass');
   if (!btn) return;
-  function sync() {
+  function level() {
     var b = ((map.getBearing() % 360) + 360) % 360;        // 0..360
-    var level = Math.min(b, 360 - b) < 0.5 && map.getPitch() < 1;
-    btn.style.display = level ? 'none' : '';
+    return Math.min(b, 360 - b) < 0.5 && map.getPitch() < 1;
   }
-  map.on('rotate', sync);
-  map.on('pitch', sync);
-  map.on('load', sync);
-  sync();
+  function show() { if (!level()) btn.style.display = ''; }
+  function settle() { btn.style.display = level() ? 'none' : ''; }
+  map.on('rotate', show);
+  map.on('pitch', show);
+  map.on('moveend', settle);
+  map.on('load', settle);
+  settle();
 }
 // END view-home-about

@@ -1085,18 +1085,27 @@ await ok('the compass shows only while the map is rotated or tilted', () => {
     on: (t, f) => { (on[t] = on[t] || []).push(f); },
   };
   V.initCompassVisibility(map);
-  assert.strictEqual(btn.style.display, 'none', 'north-up and flat: hidden');
   const fire = (t) => (on[t] || []).forEach((f) => f());
+  assert.strictEqual(btn.style.display, 'none', 'north-up and flat: hidden');
   cam.bearing = 30; fire('rotate');
-  assert.strictEqual(btn.style.display, '', 'rotated: shown');
-  cam.bearing = -0.2; fire('rotate');
-  assert.strictEqual(btn.style.display, 'none', 'within half a degree of north: hidden');
-  cam.bearing = 359.8; fire('rotate');
-  assert.strictEqual(btn.style.display, 'none', '359.8 degrees is north too');
+  assert.strictEqual(btn.style.display, '', 'rotating: shown at once');
+  // Crossing north mid-gesture keeps it (no jump), until the map stops.
+  cam.bearing = 0.2; fire('rotate');
+  assert.strictEqual(btn.style.display, '', 'level mid-gesture: still shown');
+  cam.bearing = -10; fire('rotate');
+  cam.bearing = 359.8; fire('rotate'); fire('moveend');
+  assert.strictEqual(btn.style.display, 'none', 'stopped at north (359.8 deg): hidden');
   cam.pitch = 45; fire('pitch');
   assert.strictEqual(btn.style.display, '', 'tilted: shown');
-  cam.pitch = 0; fire('pitch');
+  fire('moveend');
+  assert.strictEqual(btn.style.display, '', 'stopped tilted: stays');
+  cam.pitch = 0; fire('pitch'); fire('moveend');
   assert.strictEqual(btn.style.display, 'none');
+  // A saved rotated view at load shows it.
+  const btn2 = { style: { display: '' } };
+  V.initCompassVisibility({ getContainer: () => ({ querySelector: () => btn2 }),
+    getBearing: () => 90, getPitch: () => 0, on() {} });
+  assert.strictEqual(btn2.style.display, '');
   // A control set without a compass: nothing to do, no error.
   V.initCompassVisibility({ getContainer: () => ({ querySelector: () => null }) });
 });
