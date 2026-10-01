@@ -218,6 +218,20 @@ _STREET_LATIN_MARKS = _regex.compile(r"(\p{Script=Latin})\p{M}+")
 _STREET_TOKENS = _regex.compile(r"[\p{L}\p{M}\p{N}]+")
 _STREET_ASCII_TOKENS = _re.compile(r"[a-z0-9]+")
 
+# Every writer of the search feed is json.dumps, which never escapes an
+# ASCII letter, so a record's "type":"addr"/"poi" is always literal; with
+# ensure_ascii (search_extract's default) a non-ASCII name is written as
+# \u0080-\uffff escapes. Only an escaped ASCII character (\u0000-\u007f,
+# from another writer) could hide the type, so only such lines need the
+# JSON parser to rule them out: non-ASCII regions keep the fast path.
+_ESCAPED_ASCII = _re.compile(r"\\u00[0-7]")
+
+
+def _may_be_type(line, quoted_type):
+    """False only when `line` cannot be a record of `quoted_type` ('"poi"')."""
+    return quoted_type in line or ("\\u" in line and _ESCAPED_ASCII.search(line) is not None)
+
+
 def _normalize_street(name):
     """Lowercase, strip punctuation, expand common US suffix abbreviations.
 
@@ -425,11 +439,11 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     osm_count = 0
     with open(search_jsonl_path, encoding="utf-8") as f:
         for line in f:
-            if '"addr"' not in line and "\\u" not in line:
+            if not _may_be_type(line, '"addr"'):
                 # Fast path: ~98% of lines in the world feed aren't
                 # addresses. Skipping the json.loads here saves minutes.
-                # Match the value without assuming compact JSON spacing;
-                # escaped keys/values need the JSON parser to identify them.
+                # Match the value without assuming compact JSON spacing
+                # (see _may_be_type for escapes).
                 continue
             try:
                 rec = json.loads(line)
@@ -732,7 +746,7 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
             # Fast pre-filter: skip lines that aren't POIs without
             # parsing JSON. Saves minutes on continent-scale where
             # most of the feed is addresses + streets, not POIs.
-            if '"poi"' not in line and "\\u" not in line:
+            if not _may_be_type(line, '"poi"'):
                 continue
             try:
                 rec = json.loads(line)
@@ -894,7 +908,7 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
     with open(search_jsonl_path, encoding="utf-8") as fin, \
          open(tmp_path, "w", encoding="utf-8") as out:
         for line in fin:
-            if '"poi"' not in line and "\\u" not in line:
+            if not _may_be_type(line, '"poi"'):
                 # Fast path: not a POI, copy verbatim.
                 out.write(line)
                 continue
