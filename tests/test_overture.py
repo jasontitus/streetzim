@@ -386,6 +386,22 @@ def test_normalize_street_preserves_scripts_and_latin_matching(name, expected):
     assert _normalize_street(expected) == expected
 
 
+@pytest.mark.parametrize(("name", "expected"), [
+    ("№5 St", "no5 street"),
+    ("℡ Plaza", "tel plaza"),
+    ("𝐌𝐚𝐢𝐧 St", "main street"),
+    ("Ⅻ Rue", "xii rue"),
+    # Unaffected: no compatibility capitals.
+    ("Straße", "straße"),
+    ("Łódź Ave", "łodz avenue"),
+    ("İstiklal Cd", "istiklal cd"),
+])
+def test_normalize_street_folds_compatibility_capitals_idempotently(name, expected):
+    from streetzim.addresses import _normalize_street
+    assert _normalize_street(name) == expected
+    assert _normalize_street(expected) == expected
+
+
 @pytest.mark.parametrize("escaped", [False, True])
 def test_address_conflation_accepts_spaced_and_escaped_json(
     duckdb_available, tmp_path, escaped
@@ -1147,3 +1163,69 @@ def test_streaming_extraction_writes_osm_key_and_overture_refines(
     assert after["Da Mario"]["subtype"] == "italian_restaurant"
     assert after["Chez Paul"]["subtype"] == "restaurant"
     assert "osm_key" not in after["Da Mario"]
+
+
+def test_type_prefilter_keeps_non_ascii_lines_on_the_fast_path(
+    duckdb_available, tmp_path, monkeypatch
+):
+    """search_extract writes the feed with ensure_ascii, so every non-ASCII
+    name arrives as \\u escapes. Such lines of other types must not go
+    through json.loads (a continent's worth in non-Latin regions), and the
+    merges must still find escaped addresses and POIs."""
+    from streetzim import addresses
+    street = {"name": "Straße 中央通り", "type": "street", "lat": 35.7, "lon": 139.75}
+    addr = {"name": "1 Straße", "type": "addr", "lat": 1.0, "lon": 2.0,
+            "street": "Straße", "housenumber": "1"}
+    poi = {"name": "コンビニ", "type": "poi", "subtype": "amenity",
+           "lat": 35.7, "lon": 139.75}
+    lines = [json.dumps(r, separators=(",", ":")) for r in (street, addr, poi)]
+    assert all("\\u" in line for line in lines)
+    jsonl = tmp_path / "feed.jsonl"
+    jsonl.write_text("".join(line + "\n" for line in lines))
+
+    parsed = []
+    real_loads = json.loads
+
+    def loads(s, *a, **kw):
+        parsed.append(s)
+        return real_loads(s, *a, **kw)
+
+    monkeypatch.setattr(addresses.json, "loads", loads)
+    places = tmp_path / "places.parquet"
+    _write_places_parquet(str(places), [{
+        "name": "コンビニ", "category": "convenience_store", "lat": 35.7, "lon": 139.75,
+        "websites": ["https://example.com/store"],
+    }])
+    result = merge_overture_places(str(places), str(jsonl))
+    assert (result["enriched"], result["added"]) == (1, 0)
+    addrs = tmp_path / "addr.parquet"
+    _write_parquet(str(addrs), [{
+        "number": "1", "street": "Straße", "lat": 1.0, "lon": 2.0,
+        "levels": [], "sources": [],
+    }])
+    assert merge_overture_addresses(str(addrs), str(jsonl))["added"] == 0
+    assert parsed, "the address and POI lines are parsed"
+    assert not any(s.strip() == lines[0] for s in parsed if isinstance(s, str))
+    out = jsonl.read_text().splitlines()
+    assert out[:2] == lines[:2], "lines that are not enriched keep their bytes"
+    assert real_loads(out[2])["ws"] == "https://example.com/store"
+
+
+@pytest.mark.parametrize("record", [
+    {"name": "x", "type": "addr"},
+    {"name": "中央", "type": "addr"},
+    {"name": "Café", "type": "poi"},
+    {"name": "\x01", "type": "poi"},
+])
+def test_type_prefilter_never_misses_a_record(record):
+    from streetzim.addresses import _may_be_type
+    wanted = f'"{record["type"]}"'
+    for ascii_only in (True, False):
+        for seps in ((",", ":"), (", ", ": ")):
+            line = json.dumps(record, ensure_ascii=ascii_only, separators=seps)
+            assert _may_be_type(line, wanted)
+            # Escaped ASCII (not written by json.dumps) still goes to the parser.
+            assert _may_be_type(line.replace('"type"', '"t\\u0079pe"').replace(
+                wanted, wanted.replace(wanted[1], "\\u%04x" % ord(wanted[1]), 1)), wanted)
+    other = json.dumps({"name": "Straße 中央 ガス", "type": "street"})
+    assert not _may_be_type(other, wanted)

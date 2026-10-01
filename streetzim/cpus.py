@@ -24,6 +24,10 @@ cpu.cfs_quota_us) is read when there is no v2 hierarchy. With no limits, as
 on a build host outside Docker, the default is every core, as before.
 --cpus sets it outright; a Zimfarm recipe should set it to its `cpu`.
 
+set_build_cpus() also exports the count as OSMIUM_POOL_THREADS, which sizes
+libosmium's worker pool in the osmium tool and pyosmium (otherwise sized
+from the machine's cores), unless the environment already sets it.
+
 Stdlib only.
 """
 from __future__ import annotations
@@ -40,14 +44,20 @@ import os
 GIB_PER_CPU = 2
 
 _requested: int | None = None
+_exported: str | None = None          # the OSMIUM_POOL_THREADS this module set
 
 
 def set_build_cpus(n: int | None) -> None:
-    """Use `n` cores (from --cpus); None goes back to detecting them."""
-    global _requested
+    """Use `n` cores (from --cpus); None goes back to detecting them. Also
+    sizes libosmium's pool for the processes this one starts."""
+    global _requested, _exported
     if n is not None and n < 1:
         raise ValueError(f"--cpus must be at least 1, not {n}")
     _requested = n
+    current = os.environ.get("OSMIUM_POOL_THREADS")
+    if current is None or current == _exported:       # not the user's own setting
+        _exported = str(build_cpus())
+        os.environ["OSMIUM_POOL_THREADS"] = _exported
 
 
 def build_cpus() -> int:
@@ -72,14 +82,7 @@ def detect(cgroup_root: str = "/sys/fs/cgroup",
     and the cgroup's CPU quota and (with memory_rule) memory limit."""
     n = _usable_cores()
     why = [f"{n} usable cores"]
-    # v2 when the root is a unified hierarchy (on a hybrid host it is a v1
-    # tmpfs, and the v2 files looked for below would simply be missing).
-    v2 = os.path.exists(os.path.join(cgroup_root, "cgroup.controllers"))
-    dirs = _cgroup_dirs(cgroup_root, proc_self_cgroup) if v2 else []
-    if dirs:
-        quota, mem = _cpu_quota(dirs), _memory_limit(dirs)
-    else:
-        quota, mem = _v1_limits(cgroup_root)
+    quota, mem = _limits(cgroup_root, proc_self_cgroup)
     if quota is not None and quota < n:
         n = quota
         why.append(f"CPU quota {quota}")
@@ -90,6 +93,23 @@ def detect(cgroup_root: str = "/sys/fs/cgroup",
             n = by_mem
             why.append(f"memory limit {gib} GiB at {GIB_PER_CPU} GiB per core")
     return max(1, n), ", ".join(why)
+
+
+def memory_limit(cgroup_root: str = "/sys/fs/cgroup",
+                 proc_self_cgroup: str = "/proc/self/cgroup") -> int | None:
+    """This process's cgroup memory limit in bytes; None when there is none."""
+    return _limits(cgroup_root, proc_self_cgroup)[1]
+
+
+def _limits(cgroup_root: str, proc_self_cgroup: str) -> tuple[int | None, int | None]:
+    """(CPU quota in cores, memory limit in bytes), from cgroup v2 or v1."""
+    # v2 when the root is a unified hierarchy (on a hybrid host it is a v1
+    # tmpfs, and the v2 files looked for below would simply be missing).
+    v2 = os.path.exists(os.path.join(cgroup_root, "cgroup.controllers"))
+    dirs = _cgroup_dirs(cgroup_root, proc_self_cgroup) if v2 else []
+    if dirs:
+        return _cpu_quota(dirs), _memory_limit(dirs)
+    return _v1_limits(cgroup_root)
 
 
 def _usable_cores() -> int:

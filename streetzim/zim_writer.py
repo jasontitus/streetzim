@@ -150,8 +150,9 @@ def kiwix_alt_titles(feat):
 
 
 def _add_redirect(creator, path, title, target, front=False):
-    """A ZIM redirect, on either writer: libzim's Creator takes hints,
-    cloud/manifest_writer.py's (the Rust packer) takes none."""
+    """A ZIM redirect, on either writer. Both libzim's Creator and
+    cloud/manifest_writer.py's take the FRONT_ARTICLE hint; the fallback
+    serves creators without a hints argument."""
     try:
         from libzim.writer import Hint
         creator.add_redirection(path, title, target, {Hint.FRONT_ARTICLE: front})
@@ -704,11 +705,14 @@ def _create_zim(
       ``"builder"`` — skip the HTML stubs; stream the search JSONL
         through the external ``xapianbuilder`` to produce glass DBs on
         disk, then add them at namespace 'X' with compress=False.
-        Requires ``zim_builder='manifest'`` because the libzim Creator
-        does not accept items in the X namespace via its public API.
-      ``"none"`` — skip Xapian entirely. Kiwix native search degrades
-        to title-prefix; the in-ZIM places.html (which reads the JSON
-        search-data chunks) is the only search UI.
+        Requires ``zim_builder='manifest'`` (or ``'rust'``) because the
+        libzim Creator does not accept items in the X namespace via its
+        public API.
+      ``"none"`` — skip Xapian entirely: no X/fulltext/xapian and no
+        X/title/xapian, so Kiwix has no full-text search and no Xapian
+        title suggestions (libzim falls back to title-prefix matches over
+        the front articles in the title listing). The in-ZIM places.html
+        (which reads the JSON search-data chunks) is the only full search UI.
 
     ``metadata`` / ``illustration``: openZIM metadata overrides and a 48x48
     PNG, from the --title/--description/... flags (see _add_metadata).
@@ -719,10 +723,13 @@ def _create_zim(
     from libzim.writer import Hint
     if zim_workers is not None and zim_workers < 1:
         raise ValueError("compression workers must be positive")
-    if zim_builder == "rust":
-        zim_builder = "manifest"  # compatibility with existing build wrappers
-    if zim_builder not in {"python", "manifest"}:
+    if zim_builder not in {"python", "manifest", "rust"}:
         raise ValueError(f"unknown ZIM builder: {zim_builder!r}")
+    # 'rust' writes the same manifest as 'manifest' but packs it with a built
+    # Rust streetzim-pack (ManifestCreator fails when there is none).
+    pack_backend = zim_builder
+    if zim_builder == "rust":
+        zim_builder = "manifest"
     if zim_builder == "manifest":
         from cloud.manifest_writer import ManifestCreator
         # The Python manifest adapter explicitly configures this level. libzim's
@@ -732,9 +739,10 @@ def _create_zim(
         # resolved value, not the name.
         _level = zstd_level
         Creator = lambda p: ManifestCreator(  # noqa: E731 — small adapter
-            p, verbose=True, compression_level=_level
+            p, verbose=True, compression_level=_level, builder=pack_backend
         )
-        print(f"  ZIM compression: zstd level {zstd_level} (Python manifest path)", flush=True)
+        print(f"  ZIM compression: zstd level {zstd_level} "
+              f"({'Rust' if pack_backend == 'rust' else 'Python'} manifest path)", flush=True)
         # Surface the compression level as a build metric so
         # before/after comparisons can attribute size deltas correctly.
         PHASE_TIMER.record_metric(
@@ -942,8 +950,9 @@ def create_zim(output_path, *args, **kwargs):
         os.replace(staged, target)
         return result
     finally:
-        # ManifestCreator preserves failed manifests and staged bodies for
-        # inspection. Do not erase the path named by its error message.
+        # ManifestCreator removes a failed attempt's stage (manifest, staged
+        # bodies, partial archive) unless STREETZIM_KEEP_PACK_STAGE=1; a stage
+        # still here was kept on request, so keep the folder its error names.
         # External inputs (e.g. Xapian scratch files) may already be gone.
         if any(p.is_dir() for p in work.glob("*.pack-stage-*")):
             print(f"    Manifest build diagnostics kept for inspection at: {work}")
@@ -1365,7 +1374,8 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
         # death spiral in libzim's queue.h. With zim_builder="manifest" the creator
         # is ManifestCreator, which appends a line to a file: there is no queue
         # to drain, so a slow batch means slow disk, and sleeping only made
-        # central-asia's tile phase slower. build-region-fast.sh uses rust, but
+        # central-asia's tile phase slower ("rust" arrives here as "manifest"
+        # too). build-region-fast.sh uses a manifest writer, but
         # --zim-builder defaults to "python" (libzim), which every build
         # without that flag takes (streetzim, Zimfarm, older ops wrappers),
         # so the guard must stay for them.

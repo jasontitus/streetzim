@@ -3,7 +3,14 @@
 The writer uses Python's sqlite3/lzma and python-zstandard. Directory entries,
 redirect traversal and pointer tables stay on disk; compression jobs and open
 cluster buckets are bounded. Archive layout follows ZIM 6.3. Reader/native
-compatibility is tested independently with libzim and openZIM zimcheck.
+compatibility is checked by the unit tests with python-libzim's reader (and
+openZIM zimcheck where it is installed), and in CI by a Monaco build with
+``--zim-builder manifest --xapian none`` that cloud/validate_zim.py checks with
+zimcheck required (``STREETZIM_REQUIRE_ZIMCHECK=1``).
+
+The packer writes no Xapian databases of its own: without pre-built indexes
+(``--xapian builder``) the archive has no ``X/title/xapian``, so Kiwix readers
+offer no title suggestions for it.
 """
 from __future__ import annotations
 
@@ -46,7 +53,11 @@ CHUNK = 4 << 20
 MAX_RECORD = 128 << 20
 MAX_BUCKETS = 64
 MAX_BLOBS = 4096
-DEFAULT_METADATA_MIME = "text/plain;charset=utf-8"
+# libzim writes metadata with exactly this MIME string (upper-case UTF-8).
+DEFAULT_METADATA_MIME = "text/plain;charset=UTF-8"
+# The packer's own statistics (JSON) are written to this path when it is set,
+# so the parent can read the child's peak RSS rather than a wait4() figure.
+STATS_FILE_ENV = "STREETZIM_PACK_STATS_FILE"
 LISTING_PATH = b"listing/titleOrdered/v1"
 TOKEN = r"[A-Za-z0-9!#$%&'*+.^_`|~\-]+"
 MIME_RE = re.compile(rf'{TOKEN}/{TOKEN}(?: *(?:; *{TOKEN} *= *(?:{TOKEN}|"(?:[^"\\]|\\.)*")))* *\Z')
@@ -508,7 +519,7 @@ class Writer:
             self.db.executescript("""
             CREATE TABLE entries(ns INTEGER,path BLOB,title BLOB,mime INTEGER,
                 cluster INTEGER,blob INTEGER,target BLOB,idx INTEGER,eligible INTEGER DEFAULT 0,
-                offset INTEGER,PRIMARY KEY(ns,path)) WITHOUT ROWID;
+                offset INTEGER,front INTEGER DEFAULT 0,PRIMARY KEY(ns,path)) WITHOUT ROWID;
             CREATE TABLE clusters(idx INTEGER PRIMARY KEY,offset INTEGER,size INTEGER);
             """)
             output.write(bytes(HEADER.size + MIME_RESERVE))
@@ -561,14 +572,14 @@ class Writer:
         return index
 
     def insert(self, ns: int, path: str, title: str, mime: int | None, cluster: int | None = None,
-               blob: int | None = None, target: str | None = None):
+               blob: int | None = None, target: str | None = None, front: bool = False):
         ns = _integer(ns, "namespace", 126, minimum=33)
         p = _text(path, "path", controls=True).encode("utf-8")
         t = _text(title, "title", controls=True).encode("utf-8") or p
         destination = None if target is None else _text(target, "redirect target", controls=True).encode("utf-8")
         try:
-            self.db.execute("INSERT INTO entries(ns,path,title,mime,cluster,blob,target) VALUES(?,?,?,?,?,?,?)",
-                            (ns, p, t, mime, cluster, blob, destination))
+            self.db.execute("INSERT INTO entries(ns,path,title,mime,cluster,blob,target,front) VALUES(?,?,?,?,?,?,?,?)",
+                            (ns, p, t, mime, cluster, blob, destination, int(front)))
         except sqlite3.IntegrityError as error:
             raise PackError(f"duplicate archive entry {chr(ns)}/{path}") from error
 
@@ -584,7 +595,8 @@ class Writer:
             value = ""
         return compression, value
 
-    def add(self, ns: int, path: str, title: str, mime: str, body: Body, compress: bool | None = None):
+    def add(self, ns: int, path: str, title: str, mime: str, body: Body, compress: bool | None = None,
+            front: bool = False):
         mime_index = self.intern(mime)
         if ns == ord("C"):
             self.article_mimes.setdefault(mime.split(";", 1)[0].strip(), None)
@@ -610,7 +622,7 @@ class Writer:
             self.db.execute("INSERT INTO clusters(idx) VALUES(?)", (bucket.index,))
             self.buckets[key] = bucket
         bucket = self.buckets[key]
-        self.insert(ns, path, title, mime_index, bucket.index, len(bucket.bodies))
+        self.insert(ns, path, title, mime_index, bucket.index, len(bucket.bodies), front=front)
         bucket.bodies.append(body)
         bucket.size += body.size
         self.bucket_bytes += body.size
@@ -671,11 +683,13 @@ class Writer:
             mime = _text(record.get("mime"), "mime")
             ns = record.get("namespace")
             ns = ord("C") if ns is None else _integer(ns, "namespace", 126, minimum=33)
-            _boolean(record, "front")
+            # libzim's FRONT_ARTICLE hint: an explicit flag wins; without one,
+            # libzim treats text/html items as front articles (getAmendedHints).
+            front = _boolean(record, "front") if "front" in record else mime.startswith("text/html")
             compress = record.get("compress")
             if compress is not None and type(compress) is not bool:
                 raise PackError("compress must be boolean or null")
-            self.add(ns, path, title, mime, _body(record, text_key="content"), compress)
+            self.add(ns, path, title, mime, _body(record, text_key="content"), compress, front=front)
             self.counts["items"] += 1
         elif kind == "metadata":
             name = _text(record.get("name"), "name", controls=True)
@@ -690,9 +704,10 @@ class Writer:
             self.add(ord("M"), name, name, "image/png", _body(record))
             self.counts["illustrations"] += 1
         elif kind == "redirect":
+            # As in libzim, a redirect is listed only when flagged front.
             self.insert(ord("C"), _text(record.get("path"), "path", controls=True),
                         _text(record.get("title", ""), "title", controls=True), None,
-                        target=record.get("target"))
+                        target=record.get("target"), front=_boolean(record, "front"))
             if record.get("target") is None:
                 raise PackError("redirect target must be a string")
             self.counts["redirects"] += 1
@@ -736,25 +751,26 @@ class Writer:
         for _index, target in self.db.execute("SELECT idx,target FROM entries WHERE target IS NOT NULL ORDER BY idx"):
             if not self.db.execute("SELECT 1 FROM entries WHERE ns=67 AND path=?", (target,)).fetchone():
                 raise PackError(f"redirect has no target: {target[:200]!r}")
-        html_ids = {index for index, mime in enumerate(self.mimes) if mime.split(";", 1)[0].strip().lower() == "text/html"}
-        for index, ns, mime in self.db.execute("SELECT idx,ns,mime FROM entries WHERE target IS NULL"):
-            self.db.execute("UPDATE entries SET eligible=? WHERE idx=?", (3 if ns == 67 and mime in html_ids else 2, index))
+        # Detect redirect cycles: 2 = resolved to an item, 1 = on the current chain.
+        self.db.execute("UPDATE entries SET eligible=2 WHERE target IS NULL")
         for index, in self.db.execute("SELECT idx FROM entries WHERE target IS NOT NULL ORDER BY idx"):
             current = index
             while True:
                 eligible, target = self.db.execute("SELECT eligible,target FROM entries WHERE idx=?", (current,)).fetchone()
-                if eligible in (2, 3):
+                if eligible == 2:
                     break
                 if eligible == 1:
                     raise PackError("redirect cycle")
                 self.db.execute("UPDATE entries SET eligible=1 WHERE idx=?", (current,))
                 current, = self.db.execute("SELECT idx FROM entries WHERE ns=67 AND path=?", (target,)).fetchone()
-            self.db.execute("UPDATE entries SET eligible=? WHERE eligible=1", (eligible,))
+            self.db.execute("UPDATE entries SET eligible=2 WHERE eligible=1")
         if generate_listing:
             original_index, = self.db.execute("SELECT idx FROM entries WHERE ns=88 AND path=?", (LISTING_PATH,)).fetchone()
             listing = self.stage / "title-listing.bin"
             with listing.open("wb") as stream:
-                for index, in self.db.execute("SELECT idx FROM entries WHERE ns=67 AND eligible=3 ORDER BY title,idx"):
+                # Front articles only (libzim's FRONT_ARTICLE hint), so
+                # application pages such as places.html stay unlisted.
+                for index, in self.db.execute("SELECT idx FROM entries WHERE ns=67 AND front=1 ORDER BY title,idx"):
                     stream.write(U32.pack(index))
             self.db.execute("DELETE FROM entries WHERE ns=88 AND path=?", (LISTING_PATH,))
             self.add(88, LISTING_PATH.decode(), LISTING_PATH.decode(), "application/octet-stream+zimlisting", _body({"file": str(listing)}))
@@ -859,8 +875,34 @@ def pack(manifest: str | Path, output: str | Path, *, threads: int | None = None
             records.close()
         os.replace(archive, destination)
     stats["wall_s"] = time.monotonic() - started
-    stats["peak_rss_bytes"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if sys.platform == "darwin" else 1024)
+    stats["peak_rss_bytes"] = peak_rss_bytes()
     return stats
+
+
+def peak_rss_bytes() -> int:
+    """This process's peak RSS. Linux: VmHWM from /proc/self/status, which
+    starts afresh at exec, so a packer run as a child reports its own peak
+    and not the parent's (getrusage/wait4 ru_maxrss can include the RSS the
+    child had before exec). Elsewhere, getrusage's ru_maxrss."""
+    try:
+        with open("/proc/self/status") as status:
+            for line in status:
+                if line.startswith("VmHWM:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if sys.platform == "darwin" else 1024)
+
+
+def _write_stats_file(stats: dict[str, Any]) -> None:
+    """Report to the parent through STREETZIM_PACK_STATS_FILE, when set."""
+    path = os.environ.get(STATS_FILE_ENV)
+    if not path:
+        return
+    try:
+        Path(path).write_text(json.dumps(stats, sort_keys=True))
+    except OSError as error:
+        print(f"streetzim-pack: could not write stats file: {error}", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -877,6 +919,8 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, cancelled)
     try:
         stats = pack(args.manifest, args.output, threads=args.threads)
+        # Run as a command, pack()'s peak_rss_bytes is the packer's own.
+        _write_stats_file(stats)
         if args.verbose:
             print("streetzim-pack (Python): " + json.dumps(stats, sort_keys=True), file=sys.stderr)
         return 0

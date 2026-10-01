@@ -19,6 +19,9 @@ GIB = 1 << 30
 @pytest.fixture(autouse=True)
 def _no_override(monkeypatch):
     monkeypatch.setattr(cpus, "_requested", None)
+    monkeypatch.setattr(cpus, "_exported", None)
+    monkeypatch.setenv("OSMIUM_POOL_THREADS", "")      # restored after the test
+    monkeypatch.delenv("OSMIUM_POOL_THREADS")
 
 
 def cgroup(tmp_path, rel, files):
@@ -208,10 +211,9 @@ def test_this_machine_detects_at_least_one_core():
 # Every parallel step of the builder sizes itself from build_cpus(). A bare
 # os.cpu_count() sees every core of the machine inside a container, which is
 # how tilemaker reached 7.9 GB on a small map; so does a pool given no size.
-# streetzim/satellite.py is left out on purpose: its threads wait on the
-# network and hold little memory.
+# (streetzim/satellite.py's network threads are several per core of the budget.)
 BUILDER = sorted({str(p.relative_to(ROOT)) for p in (ROOT / "streetzim").rglob("*.py")}
-                 - {"streetzim/satellite.py", "streetzim/cpus.py"}) + ["create_osm_zim.py"]
+                 - {"streetzim/cpus.py"}) + ["create_osm_zim.py"]
 MACHINE_SIZED = re.compile(
     r"cpu_count\s*\(|sched_getaffinity"
     r"|\b(?:Pool|ProcessPoolExecutor|ThreadPoolExecutor)\(\s*\)"
@@ -235,6 +237,40 @@ def test_the_guard_catches_each_machine_sized_form(text):
 
 def test_builder_files_are_found():
     assert "streetzim/zim_writer.py" in BUILDER and "streetzim/routing/build.py" in BUILDER
+    assert "streetzim/satellite.py" in BUILDER
+
+
+def test_osmium_pool_follows_the_build_count_unless_the_user_set_it(monkeypatch):
+    import os
+    monkeypatch.setattr(cpus, "detect", lambda memory_rule=True: (7, "detected"))
+    cpus.set_build_cpus(3)
+    assert os.environ["OSMIUM_POOL_THREADS"] == "3"
+    cpus.set_build_cpus(None)
+    assert os.environ["OSMIUM_POOL_THREADS"] == "7"
+    os.environ["OSMIUM_POOL_THREADS"] = "2"            # the user's own setting
+    cpus.set_build_cpus(5)
+    assert os.environ["OSMIUM_POOL_THREADS"] == "2"
+
+
+def test_memory_limit_reads_v2_and_v1(tmp_path):
+    root, proc = cgroup(tmp_path, "/a/b", {"a": {"memory.max": f"{8 * GIB}\n"},
+                                          "a/b": {"memory.max": "max\n"}})
+    assert cpus.memory_limit(root, proc) == 8 * GIB
+    root, proc = cgroup(tmp_path / "none", "/", {"": {"memory.max": "max\n"}})
+    assert cpus.memory_limit(root, proc) is None
+    v1_tree(tmp_path / "v1", mem=str(3 * GIB))
+    assert cpus.memory_limit(str(tmp_path / "v1"), str(tmp_path / "missing")) == 3 * GIB
+
+
+@pytest.mark.parametrize(("limit", "expected"), [
+    (None, "4G"), (64 * GIB, "4G"), (16 * GIB, "4G"),
+    (8 * GIB, f"{2 * GIB >> 10}K"), (6 * GIB, f"{(6 * GIB // 4) >> 10}K"),
+    (1 << 20, "1024K"),
+])
+def test_sort_buffer_is_a_quarter_of_the_memory_limit_at_most_4g(limit, expected, monkeypatch):
+    from streetzim import search_extract
+    monkeypatch.setattr(cpus, "memory_limit", lambda: limit)
+    assert search_extract.sort_buffer() == expected
 
 
 def test_tilemaker_gets_the_thread_count(tmp_path, monkeypatch):

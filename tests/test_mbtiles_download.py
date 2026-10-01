@@ -33,6 +33,7 @@ class Server:
         self.accept_ranges = True       # advertise ranges
         self.ranges = "honour"          # or "ignore" (200) or "wrong" (206 elsewhere)
         self.drop_after = None          # the next GET stops after this many bytes
+        self.fail_after_drop = 0        # this many GETs after that one answered 503
         self.head_ok = True
         self.gets: list[tuple[str | None, str | None]] = []
         o = self
@@ -63,6 +64,12 @@ class Server:
             def do_GET(self):
                 data = o.files[self.path]
                 rng = self.headers.get("Range")
+                if o.fail_after_drop and o.drop_after is None:
+                    o.fail_after_drop -= 1
+                    self.send_response(503)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 if self.path.endswith(".mbtiles"):
                     o.gets.append((rng, self.headers.get("If-Range")))
                 if rng and o.ranges != "ignore":
@@ -128,10 +135,12 @@ def paths(s, dl):
 
 
 def interrupted(s, dl, at=2_500_000):
-    """A first download cut short after `at` bytes; returns the .part size."""
-    s.drop_after = at
+    """A first download cut short after `at` bytes; returns the .part size.
+    (Where the cut reads as a short body, the immediate retry fails too.)"""
+    s.drop_after, s.fail_after_drop = at, 1
     with pytest.raises(Exception):  # noqa: B017 (requests or http.client, by install)
         fetch(s, dl)
+    s.fail_after_drop = 0
     return paths(s, dl)[1].stat().st_size
 
 
@@ -441,9 +450,10 @@ def test_main_cleans_owned_cut_on_failure_and_preserves_other_workspace(tmp_path
 def test_generic_fetch_never_promotes_a_short_body(srv, tmp_path):
     s = srv()
     dest = tmp_path / 'extract.pbf'
-    s.drop_after = 2048
+    s.drop_after, s.fail_after_drop = 2048, 1
     with pytest.raises(OSError):
         cli.fetch(s.url, dest)
+    s.fail_after_drop = 0
     assert not dest.exists()
     assert cli.fetch(s.url, dest).read_bytes() == A
 
@@ -545,3 +555,67 @@ def test_eviction_preserves_lock_inode_for_existing_waiters(ofm, tmp_path):
                 assert not acquired
         finally:
             fcntl.flock(waiter, fcntl.LOCK_UN)
+
+
+def test_short_body_with_content_length_is_resumed(monkeypatch, tmp_path):
+    # A body that ends cleanly before its Content-Length is an interrupted
+    # transfer like any other: the second attempt resumes from what arrived.
+    from contextlib import contextmanager
+    headers = {'ETag': '"a"', 'Content-Length': str(len(A)), 'Accept-Ranges': 'bytes'}
+    monkeypatch.setattr(download, 'head', lambda url, agent: headers)
+    seen = []
+
+    @contextmanager
+    def stream(url, request_headers):
+        seen.append(request_headers.get('Range'))
+        if len(seen) == 1:
+            yield 200, {'Content-Length': str(len(A))}, iter([A[:5000]])
+        else:
+            yield 206, {'Content-Range': f'bytes 5000-{len(A) - 1}/{len(A)}',
+                        'Content-Length': str(len(A) - 5000)}, iter([A[5000:]])
+
+    monkeypatch.setattr(download, '_stream', stream)
+    dest = tmp_path / 'tiles.mbtiles'
+    assert cli.fetch_resumable('https://example.org/tiles', dest,
+                               check_head=cli._check_mbtiles_head).read_bytes() == A
+    assert seen == [None, 'bytes=5000-']
+    assert not list(tmp_path.glob('*.part*'))
+
+
+def test_short_body_without_ranges_is_fetched_again(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+    monkeypatch.setattr(download, 'head',
+                        lambda url, agent: {'Content-Length': str(len(A))})
+    seen = []
+
+    @contextmanager
+    def stream(url, request_headers):
+        seen.append(request_headers.get('Range'))
+        body = A[:5000] if len(seen) == 1 else A
+        yield 200, {'Content-Length': str(len(A))}, iter([body])
+
+    monkeypatch.setattr(download, '_stream', stream)
+    dest = tmp_path / 'extract.pbf'
+    assert cli.fetch_resumable('https://example.org/x', dest).read_bytes() == A
+    assert seen == [None, None]
+
+
+def test_bad_cached_file_is_replaced_once(srv, tmp_path):
+    # A cached download that fails the format check (e.g. a pre-seeded
+    # HTML error page of the upstream size) used to fail every later build.
+    s = srv()
+    dest, part, _ = paths(s, tmp_path)
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(b"<html>" + b"x" * (len(A) - 6))
+    meta = dest.with_name(dest.name + ".source.json")
+    meta.write_text(json.dumps(cli._source_stamp(s.url)))
+    assert fetch(s, tmp_path).read_bytes() == A
+    assert s.gets == [(None, None)]
+    assert json.loads(meta.read_text()) == cli._source_stamp(s.url)
+    # When upstream is bad too, the build fails clearly and nothing is kept.
+    bad = srv(b"<html>" + b"x" * 5000, path="/u.mbtiles")
+    bad_dest = paths(bad, tmp_path)[0]
+    bad_dest.write_bytes(b"<html>" + b"y" * 5000)
+    with pytest.raises(ValueError, match="not an MBTiles"):
+        fetch(bad, tmp_path)
+    assert not bad_dest.exists() and len(bad.gets) == 1

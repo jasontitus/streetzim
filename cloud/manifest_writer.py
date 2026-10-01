@@ -91,10 +91,18 @@ def _encode_body_b64(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
 
-# Resolved once per process. Override with STREETZIM_PACK_BIN if the
-# binary lives somewhere unusual (CI runners, vendored release builds).
+# Where a built Rust streetzim-pack is looked for, after STREETZIM_PACK_BIN.
+def _rust_build_candidates() -> list[Path]:
+    repo = Path(__file__).resolve().parent.parent
+    return [repo / "rust" / "streetzim-pack" / "target" / build / "streetzim-pack"
+            for build in ("release", "debug")]
+
+
+# Override with STREETZIM_PACK_BIN if the binary lives somewhere unusual
+# (CI runners, vendored release builds).
 def resolve_pack_binary() -> str:
-    """Resolve an explicit/legacy executable; the default writer is Python."""
+    """Resolve a built Rust streetzim-pack: STREETZIM_PACK_BIN, else
+    rust/streetzim-pack/target/{release,debug}/streetzim-pack."""
     explicit = os.environ.get("STREETZIM_PACK_BIN")
     if explicit:
         candidate = Path(explicit).expanduser()
@@ -103,25 +111,36 @@ def resolve_pack_binary() -> str:
                 f"STREETZIM_PACK_BIN is not an executable file: {explicit!r}. "
                 "Build streetzim-pack and provide its executable path.")
         return str(candidate.resolve())
-    here = Path(__file__).resolve().parent
-    repo = here.parent  # streetzim/
-    for build in ("release", "debug"):
-        cand = repo / "rust" / "streetzim-pack" / "target" / build / "streetzim-pack"
+    candidates = _rust_build_candidates()
+    for cand in candidates:
         if cand.is_file() and os.access(cand, os.X_OK):
             return str(cand)
     raise RuntimeError(
-        "streetzim-pack binary not found. Build it with "
-        "`cd rust/streetzim-pack && cargo build --release` "
-        "or set STREETZIM_PACK_BIN to its absolute path."
+        "--zim-builder rust needs a built Rust streetzim-pack, and none was found "
+        f"(looked for STREETZIM_PACK_BIN, {', '.join(str(c) for c in candidates)}). "
+        "Build it with `cd rust/streetzim-pack && cargo build --release` "
+        "(see docs/zim-builder-rust.md), set STREETZIM_PACK_BIN to its path, "
+        "or use --zim-builder manifest for the Python packer."
     )
 
 
 _resolve_pack_binary = resolve_pack_binary  # compatibility for existing callers
 
 
-def resolve_pack_command() -> list[str]:
-    """Use this interpreter and installed package, unless explicitly overridden."""
-    if os.environ.get("STREETZIM_PACK_BIN"):
+PACK_BUILDERS = ("manifest", "rust")
+
+
+def resolve_pack_command(builder: str = "manifest") -> list[str]:
+    """The packer command for a ``--zim-builder`` choice.
+
+    ``manifest``: this interpreter's ``streetzim.pack`` (the Python packer),
+    unless STREETZIM_PACK_BIN names an executable override.
+    ``rust``: a built Rust streetzim-pack (resolve_pack_binary); raises
+    RuntimeError when there is none rather than running Python instead.
+    """
+    if builder not in PACK_BUILDERS:
+        raise ValueError(f"unknown packer backend: {builder!r}")
+    if builder == "rust" or os.environ.get("STREETZIM_PACK_BIN"):
         return [resolve_pack_binary()]
     from importlib.util import find_spec
     if find_spec("streetzim.pack") is None or find_spec("zstandard") is None:
@@ -130,6 +149,39 @@ def resolve_pack_command() -> list[str]:
 
 
 _MANIFEST_ZSTD_THREADS = 4
+
+# On an interrupted build the packer gets SIGTERM (the Python packer then
+# removes its scratch and exits) and SIGKILL only if it outlives this grace.
+_TERM_GRACE_S = 5.0
+
+# Set to 1 to keep a failed attempt's stage (manifest, staged bodies, partial
+# archive) for inspection. Otherwise a failed attempt removes it.
+KEEP_STAGE_ENV = "STREETZIM_KEEP_PACK_STAGE"
+
+
+def _keep_failed_stage_requested() -> bool:
+    return os.environ.get(KEEP_STAGE_ENV, "") == "1"
+
+
+def _proc_vm_hwm_kb(pid: int | str) -> int | None:
+    """VmHWM (kB) from /proc/<pid>/status; None where /proc is unavailable."""
+    try:
+        with open(f"/proc/{pid}/status") as fh:
+            for line in fh:
+                if line.startswith("VmHWM:"):
+                    return int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def _proc_cmdline(pid: int) -> list[str] | None:
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as fh:
+            raw = fh.read()
+    except OSError:
+        return None
+    return [part.decode("utf-8", "surrogateescape") for part in raw.split(b"\0")[:-1]]
 
 
 def _manifest_zstd_enabled() -> bool:
@@ -168,7 +220,11 @@ class ManifestCreator:
         max_in_flight_bytes: int | None = None,
         keep_stage: bool = False,
         verbose: bool = False,
+        builder: str = "manifest",
     ) -> None:
+        if builder not in PACK_BUILDERS:
+            raise ValueError(f"unknown packer backend: {builder!r}")
+        self._builder = builder
         self._output_path = str(output_path)
         # A unique stage contains the manifest and large in-memory bodies.
         # Concurrent attempts cannot truncate each other's recovery material.
@@ -213,6 +269,9 @@ class ManifestCreator:
             shutil.rmtree(self._stage_dir, ignore_errors=True)
             raise
         self._entered = False
+        # keep_stage keeps the stage after success as well; the environment
+        # flag keeps only a failed attempt's stage.
+        self._keep_failed_stage = keep_stage or _keep_failed_stage_requested()
         self._closed = False
         self._keep_stage = keep_stage
         self._verbose = verbose
@@ -281,9 +340,23 @@ class ManifestCreator:
             try:
                 self._mf.close()
             except BaseException:
-                print(f"Manifest flush also failed; recovery stage: {self._stage_dir}", file=sys.stderr)
+                print("Manifest flush also failed", file=sys.stderr)
+            self._discard_failed_stage()
             raise
         return self
+
+    def _discard_failed_stage(self) -> None:
+        """Remove a failed attempt's stage, unless asked to keep it."""
+        if self._keep_failed_stage:
+            print(f"  Pack stage kept for inspection: {self._stage_dir}", file=sys.stderr)
+        else:
+            shutil.rmtree(self._stage_dir, ignore_errors=True)
+
+    def _stage_note(self) -> str:
+        if self._keep_failed_stage:
+            return f"Manifest preserved at {self._manifest_path} for inspection."
+        return (f"The pack stage was removed; set {KEEP_STAGE_ENV}=1 to keep the "
+                "manifest of a failed attempt.")
 
     def __exit__(self, exc_type: type[BaseException] | None,
                  exc: BaseException | None, tb: TracebackType | None) -> bool:
@@ -294,14 +367,20 @@ class ManifestCreator:
             self._mf.close()
         except BaseException:
             if exc_type is None:
+                self._discard_failed_stage()
                 raise
             # A failed compressor flush must not replace the producer failure.
-            print(f"Manifest flush also failed; recovery stage: {self._stage_dir}", file=sys.stderr)
+            print("Manifest flush also failed", file=sys.stderr)
         if exc_type is not None:
-            # Bubble up the original error; leave the stage dir for
-            # post-mortem unless the caller asked us not to.
+            # Bubble up the original error. The stage is removed unless
+            # keep_stage or STREETZIM_KEEP_PACK_STAGE=1 asks to keep it.
+            self._discard_failed_stage()
             return False
-        self._run_packer()
+        try:
+            self._run_packer()
+        except BaseException:
+            self._discard_failed_stage()
+            raise
         if not self._keep_stage:
             shutil.rmtree(self._stage_dir, ignore_errors=True)
         return False
@@ -325,10 +404,16 @@ class ManifestCreator:
             }
         )
 
-    def add_redirection(self, path: str, title: str, target: str) -> None:
-        self._write_record(
-            {"kind": "redirect", "path": str(path), "title": str(title or ""), "target": str(target)}
-        )
+    def add_redirection(self, path: str, title: str, target: str,
+                        hints: dict[Any, Any] | None = None) -> None:
+        """libzim's signature: a redirect is a front article (listed in
+        listing/titleOrdered/v1) only with a true FRONT_ARTICLE hint."""
+        rec: dict[str, Any] = {"kind": "redirect", "path": str(path),
+                               "title": str(title or ""), "target": str(target)}
+        if any(getattr(key, "name", key) == "FRONT_ARTICLE" and value
+               for key, value in (hints or {}).items()):
+            rec["front"] = True
+        self._write_record(rec)
 
     def add_item(self, item: Any) -> None:
         rec = self._item_record(item)
@@ -373,7 +458,7 @@ class ManifestCreator:
         path = item._path  # noqa: SLF001 — duck-typed MapItem
         title = getattr(item, "_title", "") or ""
         mime = item._mimetype  # noqa: SLF001
-        is_front = bool(getattr(item, "_is_front", False))
+        is_front = getattr(item, "_is_front", None)
         compress = bool(getattr(item, "_compress", True))
         namespace = getattr(item, "_namespace", None)
 
@@ -383,8 +468,11 @@ class ManifestCreator:
             "title": str(title),
             "mime": str(mime),
         }
-        if is_front:
-            rec["front"] = True
+        # The FRONT_ARTICLE hint. Without a front field the packer applies
+        # libzim's default (text/html items are front articles), so an HTML
+        # application page such as places.html records an explicit false.
+        if is_front or (is_front is not None and str(mime).startswith("text/html")):
+            rec["front"] = bool(is_front)
         if compress is False:
             # Per-item override — the packer routes this item to its own
             # uncompressed cluster regardless of the build's default.
@@ -466,8 +554,10 @@ class ManifestCreator:
         self._mf.write("\n")
 
     def _run_packer(self) -> None:
-        command = resolve_pack_command()
+        command = (resolve_pack_command() if self._builder == "manifest"
+                   else resolve_pack_command(self._builder))
         candidate = self._stage_dir / "packed.zim"
+        stats_path = self._stage_dir / "pack-stats.json"
         cmd = command + [str(self._manifest_path), str(candidate)]
         if self._workers is not None:
             cmd.extend(["--threads", str(self._workers)])
@@ -477,32 +567,38 @@ class ManifestCreator:
             print(f"  streetzim-pack: {' '.join(cmd)}", flush=True)
         manifest_size = os.path.getsize(self._manifest_path)
         started = time.time()
+        _peak_kb = [0]
         try:
-            # Poll the packer's own VmHWM. This used to read
-            # getrusage(RUSAGE_CHILDREN).ru_maxrss, which is a high-water mark
-            # across EVERY child this process has reaped — and then took
-            # max(after, before), so it could only ever report the largest RSS
-            # of any build phase (osmium, xapianbuilder, ...) rather than the
-            # packer's. brazil logged "76.5 GB" that way on a run whose packer
-            # may have used a fraction of it. Read /proc/<pid>/status instead,
-            # which is the packer and nothing else.
-            _peak_kb = [0]
+            # Peak RSS is the packer's own. The Python packer reads its VmHWM
+            # from /proc/self/status as it finishes and writes it to
+            # STREETZIM_PACK_STATS_FILE; that figure is used when present.
+            # wait4()'s ru_maxrss is not: on Linux it carries the parent's RSS
+            # at fork, so a large builder inflated it. For an executable that
+            # writes no stats, /proc/<pid>/status is polled, ignoring samples
+            # taken before the child has exec'd the packer (its command line
+            # is still the parent's), whose VmHWM is the parent's as well.
             watch_stop = threading.Event()
 
             def _watch_hwm(pid: int, out: list[int]) -> None:
-                path = f"/proc/{pid}/status"
+                execed = False
                 while not watch_stop.is_set():
-                    try:
-                        with open(path) as fh:
-                            for line in fh:
-                                if line.startswith("VmHWM:"):
-                                    out[0] = max(out[0], int(line.split()[1]))
-                                    break
-                    except (OSError, ValueError):
-                        return          # process gone
+                    if not execed:
+                        current = _proc_cmdline(pid)
+                        if current is None:
+                            return          # process gone or no /proc
+                        # A shebang script's argv[0] becomes its interpreter,
+                        # so compare the arguments that follow it.
+                        execed = (len(current) >= len(cmd)
+                                  and current[len(current) - len(cmd) + 1:] == cmd[1:])
+                    if execed:
+                        value = _proc_vm_hwm_kb(pid)
+                        if value is None:
+                            return          # process gone
+                        out[0] = max(out[0], value)
                     watch_stop.wait(0.25)
 
             child_env = os.environ.copy()
+            child_env["STREETZIM_PACK_STATS_FILE"] = str(stats_path)
             if len(command) > 1:
                 # Absolute script invocations from another cwd need to resolve
                 # the same checkout/package as this parent. Keep the cwd so
@@ -516,29 +612,30 @@ class ManifestCreator:
                 _t = threading.Thread(target=_watch_hwm, args=(_proc.pid, _peak_kb),
                                       daemon=True)
                 _t.start()
-                if hasattr(os, "wait4"):
-                    _, status, usage = os.wait4(_proc.pid, 0)
-                    _rc = _proc.returncode = os.waitstatus_to_exitcode(status)
-                    rss_kb = int(usage.ru_maxrss / 1024) if sys.platform == "darwin" else int(usage.ru_maxrss)
-                    _peak_kb[0] = max(_peak_kb[0], rss_kb)
-                else:
-                    _rc = _proc.wait()
+                _rc = _proc.wait()
             except BaseException:
-                # subprocess.run() kills the child if the parent is interrupted;
-                # a bare Popen does not, so a KeyboardInterrupt here used to
-                # leave streetzim-pack running on its own. Keep run()'s contract.
-                _proc.kill()
-                _proc.wait()
+                # Interrupted (or the monitor failed): ask the packer to stop
+                # so it removes its scratch, then kill it after a short grace.
+                # A bare Popen would otherwise leave it running on its own.
+                _proc.terminate()
+                try:
+                    _proc.wait(timeout=_TERM_GRACE_S)
+                except subprocess.TimeoutExpired:
+                    _proc.kill()
+                    _proc.wait()
                 raise
             finally:
                 watch_stop.set()
                 if _t is not None and _t.ident is not None:
                     _t.join(timeout=1.0)
+            reported = self._reported_peak_kb(stats_path)
+            if reported is not None:
+                _peak_kb[0] = reported
             if _rc != 0:
                 raise subprocess.CalledProcessError(_rc, cmd)
             if not candidate.is_file() or candidate.stat().st_size == 0:
                 raise RuntimeError(f"streetzim-pack returned success without an archive. "
-                                   f"Manifest preserved at {self._manifest_path}")
+                                   f"{self._stage_note()}")
             os.replace(candidate, self._output_path)
             if _peak_kb[0]:
                 _peak = (f"{_peak_kb[0] / 1048576:.1f} GB" if _peak_kb[0] >= 1048576
@@ -547,21 +644,15 @@ class ManifestCreator:
                       + (f" (workers={_rayon})" if _rayon else " (automatic workers)"),
                       flush=True)
         except subprocess.CalledProcessError as e:
-            # `exc` is the __exit__ parameter and is not in scope here, so this
-            # branch raised NameError instead of the diagnostic — losing both
-            # the returncode and the manifest pointer in exactly the OOM case
-            # it exists to explain.
             if e.returncode == -9:
                 raise RuntimeError(
                     f"streetzim-pack was KILLED (SIGKILL), possibly by a memory "
                     f"limit or external termination. If memory was exhausted, "
                     f"lower --zim-workers or RAYON_NUM_THREADS "
-                    f"(currently {_rayon or 'all cores'}). Manifest preserved at "
-                    f"{self._manifest_path} for inspection."
+                    f"(currently {_rayon or 'all cores'}). {self._stage_note()}"
                 ) from e
             raise RuntimeError(
-                f"streetzim-pack failed (exit {e.returncode}). "
-                f"Manifest preserved at {self._manifest_path} for inspection."
+                f"streetzim-pack failed (exit {e.returncode}). {self._stage_note()}"
             ) from e
         elapsed = time.time() - started
         out_size = (os.path.getsize(self._output_path)
@@ -600,7 +691,8 @@ class ManifestCreator:
         if timer is not None:
             try:
                 timer.record_subphase(
-                    "zim-pack: streetzim-pack (override)" if len(command) == 1
+                    "zim-pack: streetzim-pack (Rust)" if self._builder == "rust"
+                    else "zim-pack: streetzim-pack (override)" if len(command) == 1
                     else "zim-pack: streetzim-pack (Python)",
                     elapsed,
                     note=f"manifest {manifest_size/1e6:.0f} MB"
@@ -621,6 +713,17 @@ class ManifestCreator:
                     timer.record_metric("zim-pack: process peak RSS", f"{_peak_kb[0] * 1024 / 1e6:.1f}", "MB")
             except Exception:
                 pass
+
+    @staticmethod
+    def _reported_peak_kb(stats_path: Path) -> int | None:
+        """The packer's own peak RSS (kB) from its stats file, if it wrote one."""
+        try:
+            value = json.loads(stats_path.read_text())["peak_rss_bytes"]
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        if type(value) is not int or value <= 0:
+            return None
+        return value // 1024
 
 
 def iter_records(manifest_path: str) -> Iterable[dict[str, Any]]:

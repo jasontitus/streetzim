@@ -758,7 +758,7 @@ def _finish_features_streaming(raw_path, output_dir, n_unique):
     # -S bounds sort's own buffer; -T keeps its spill next to the data
     # rather than on a small /tmp.
     subprocess.run(["sort", "-t", "\t", "-k1,1n", "-k2,2",
-                    "-S", os.environ.get("STREETZIM_SORT_MEM", "4G"),
+                    "-S", os.environ.get("STREETZIM_SORT_MEM") or sort_buffer(),
                     "-T", output_dir, "-o", sorted_path, keyed_path],
                    check=True, env=env)
     os.unlink(keyed_path)
@@ -778,6 +778,17 @@ def _finish_features_streaming(raw_path, output_dir, n_unique):
     size_mb = os.path.getsize(features_path) / (1024 * 1024)
     print(f"    Wrote {n_unique} features to disk ({size_mb:.0f} MB)", flush=True)
     return features_path
+
+
+def sort_buffer(limit: int | None = None) -> str:
+    """sort -S for the feature sort: 4 GiB, or a quarter of the cgroup
+    memory limit when that is less (4 GiB is half of an 8 GiB container).
+    STREETZIM_SORT_MEM overrides it."""
+    from streetzim.cpus import memory_limit
+    limit = memory_limit() if limit is None else limit
+    if limit is None or limit >= 16 << 30:
+        return "4G"
+    return f"{max(limit // 4, 1 << 20) >> 10}K"
 
 
 def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):

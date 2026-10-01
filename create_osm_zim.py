@@ -416,9 +416,13 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
         default="python",
         help=(
             "ZIM emit backend. 'python' (default) uses libzim/python-libzim "
-            "as before. 'manifest' runs the Python streetzim-pack writer; 'rust' is a legacy alias. "
+            "as before. 'manifest' runs the Python streetzim-pack writer, which "
             "supports per-item compress flags so routing-graph chunks land "
-            "in raw clusters even when tiles/HTML stay zstd."
+            "in raw clusters even when tiles/HTML stay zstd. 'rust' runs a built "
+            "Rust streetzim-pack on the same manifest (STREETZIM_PACK_BIN or "
+            "rust/streetzim-pack/target/{release,debug}) and fails if there is none. "
+            "'manifest' and 'rust' need --xapian builder or none; with none the "
+            "ZIM has no Xapian indexes, so Kiwix offers no title suggestions."
         ),
     )
     parser.add_argument("--area", help="Well-known area name (see list above)")
@@ -1779,23 +1783,25 @@ def main(argv=None):
     _cpus.set_build_cpus(args.cpus)
     if args.workers is not None and args.workers < 1:
         parser.error("--workers must be greater than zero")
-    if args.zim_builder == "rust":
-        print("  --zim-builder=rust now uses the Python manifest writer; prefer --zim-builder=manifest", flush=True)
-        args.zim_builder = "manifest"
-    if args.zim_builder == "manifest" and args.xapian == "libzim":
-        parser.error("--zim-builder=manifest requires --xapian=builder or --xapian=none; "
+    manifest_family = args.zim_builder in ("manifest", "rust")
+    if manifest_family and args.xapian == "libzim":
+        parser.error(f"--zim-builder={args.zim_builder} requires --xapian=builder or --xapian=none; "
                      "the manifest writer cannot run libzim's search indexer")
-    if args.xapian == "builder" and args.zim_builder != "manifest":
-        parser.error("--xapian=builder requires --zim-builder=manifest")
+    if args.xapian == "builder" and not manifest_family:
+        parser.error("--xapian=builder requires --zim-builder=manifest (or rust)")
     try:
         if args.zim_builder == "manifest":
             from cloud.manifest_writer import resolve_pack_command
             resolve_pack_command()
+        elif args.zim_builder == "rust":
+            # A missing Rust binary is an error, not a switch to Python.
+            from cloud.manifest_writer import resolve_pack_command
+            resolve_pack_command("rust")
         if args.xapian == "builder":
             _resolve_xapianbuilder_binary(args.xapianbuilder_bin)
     except (RuntimeError, OSError) as exc:
         parser.error(str(exc))
-    if args.zim_builder == "manifest" and args.cpus is not None and args.workers is None:
+    if manifest_family and args.cpus is not None and args.workers is None:
         args.workers = min(args.cpus, 20)
     stats, zim_illustration, zim_metadata = _openzim_options(args=args)
 

@@ -1,4 +1,5 @@
-"""Each routing run owns only its unique node-location scratch file."""
+"""Each routing run uses a unique node-location scratch file, removes it,
+and reclaims those older than six hours that killed runs left behind."""
 import os
 from pathlib import Path
 import time
@@ -8,16 +9,24 @@ import pytest
 
 
 @pytest.mark.parametrize("failure", [None, "index", "pass2"])
-def test_routing_preserves_old_foreign_index_and_cleans_own(tmp_path, monkeypatch, failure):
+def test_routing_reclaims_old_foreign_index_and_cleans_own(tmp_path, monkeypatch, failure):
     osmium = pytest.importorskip("osmium")
     from streetzim.routing.build import extract_routing_graph
 
     scratch = tmp_path / "scratch"
     scratch.mkdir()
+    # An old index may belong to a long build still running: unlinking it
+    # must not disturb that build, which already has it open.
     foreign = scratch / "streetzim_node_loc_another_active_build.bin"
     foreign.write_bytes(b"another build's index")
     old_time = time.time() - 7 * 3600
     os.utime(foreign, (old_time, old_time))
+    in_use = open(foreign, "r+b")
+    recent = scratch / "streetzim_node_loc_recent_build.bin"
+    recent.write_bytes(b"a recent build's index")
+    unrelated = scratch / "other_old_file.bin"
+    unrelated.write_bytes(b"not ours")
+    os.utime(unrelated, (old_time, old_time))
     monkeypatch.setenv("STREETZIM_NODE_LOC_DIR", str(scratch))
 
     pbf = tmp_path / "road.osm.pbf"
@@ -44,8 +53,13 @@ def test_routing_preserves_old_foreign_index_and_cleans_own(tmp_path, monkeypatc
         graph = load_from_file(out)
         assert graph.num_nodes == 2 and graph.num_edges == 2
         assert Path(out).read_bytes().startswith(b"SZRG")
-    assert foreign.read_bytes() == b"another build's index"
-    assert list(scratch.iterdir()) == [foreign], "only the run's own scratch may be removed"
+    assert not foreign.exists()
+    with in_use:
+        assert in_use.read() == b"another build's index"
+        in_use.write(b" still writable")
+        in_use.seek(0)
+        assert in_use.read().endswith(b"still writable")
+    assert sorted(scratch.iterdir()) == [unrelated, recent]
 
 
 def test_monaco_graph_matches_pre_review_reference(tmp_path, monkeypatch):
