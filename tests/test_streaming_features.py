@@ -7,6 +7,7 @@ still gets assigned, and the output is still ordered by type priority
 then name.
 """
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -145,3 +146,46 @@ def test_streaming_releases_executor_grid_before_external_sort(tmp_path, monkeyp
     raw = _write_raw(tmp_path, _feats())
     out = se._finish_features_streaming(raw, str(tmp_path), len(_feats()))
     assert len(Path(out).read_text().splitlines()) == len(_feats())
+
+
+def test_published_search_keeps_places_three_metres_apart(tmp_path):
+    """Known source positions expose coarser rounding without assumptions
+    about how many shops legitimately share a point in a real country."""
+    reader = pytest.importorskip("libzim.reader")
+    pytest.importorskip("libzim.writer")
+    feats = [
+        {"name": "Nearby Cafe North", "type": "poi", "subtype": "cafe",
+         "lat": 43.7301393, "lon": 7.4201123},
+        {"name": "Nearby Cafe South", "type": "poi", "subtype": "cafe",
+         "lat": 43.7301123, "lon": 7.4201123},
+    ]
+    source = tmp_path / "features.jsonl"
+    source.write_text("".join(json.dumps(f) + "\n" for f in feats), encoding="utf-8")
+    (tmp_path / "ml.js").write_text("//")
+    (tmp_path / "ml.css").write_text("/**/")
+    target = tmp_path / "nearby.zim"
+    coz.create_zim(
+        target, tiles={}, tile_metadata={}, fonts={},
+        maplibre_js_path=str(tmp_path / "ml.js"),
+        maplibre_css_path=str(tmp_path / "ml.css"),
+        viewer_html_path=str(ROOT / "resources/viewer/index.html"),
+        map_config={"name": "Nearby places"}, name="OSM - Nearby places",
+        bbox=(7.40, 43.72, 7.44, 43.76), search_features_path=str(source),
+        xapian_mode="none", zim_workers=1)
+    archive = reader.Archive(str(target))
+    records = json.loads(bytes(
+        archive.get_entry_by_path("search-data/ne.json").get_item().content))
+    assert len(records) == 2
+    by_name = {r["n"]: r for r in records}
+    assert set(by_name) == {f["name"] for f in feats}
+
+    # Local distance in metres, independent of the writer's precision knob.
+    metres_per_degree = math.pi * 6_371_000 / 180
+    for feat in feats:
+        record = by_name[feat["name"]]
+        displacement = metres_per_degree * math.hypot(
+            record["a"] - feat["lat"],
+            (record["o"] - feat["lon"]) * math.cos(math.radians(feat["lat"])))
+        assert displacement < 1, f"{feat['name']} pin moved {displacement:.2f} m"
+    separation = metres_per_degree * abs(records[0]["a"] - records[1]["a"])
+    assert 2 < separation < 4, f"three-metre neighbours now {separation:.2f} m apart"

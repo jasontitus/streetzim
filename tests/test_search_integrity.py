@@ -175,26 +175,6 @@ def test_coordinate_precision_is_metre_scale_not_coarser(sample_records):
         "too coarse to place a pin accurately")
 
 
-def test_rounding_did_not_collapse_distinct_places(sample_records):
-    """Rounding must not merge neighbouring places into one point.
-
-    Two cafes 3 m apart should stay two points. If a future change coarsens
-    the grid, distinct records start sharing coordinates and 'Nearby' and the
-    map pins degrade silently.
-    """
-    named = [r for r in sample_records if r.get("n")]
-    seen = {}
-    collisions = 0
-    for r in named:
-        key = (round(r["a"], 5), round(r["o"], 5))
-        if key in seen and seen[key] != r["n"]:
-            collisions += 1
-        seen.setdefault(key, r["n"])
-    # Genuine co-located POIs exist (shops in one mall), so allow a slice.
-    assert collisions / max(1, len(named)) < 0.05, (
-        f"{collisions}/{len(named)} differently-named places share a rounded point")
-
-
 def test_full_text_search_returns_hits(archive):
     """The Xapian index answers, and answers about THIS region."""
     search = pytest.importorskip("libzim.search")
@@ -216,16 +196,32 @@ def test_full_text_search_returns_hits(archive):
 def test_search_index_holds_no_viewer_chrome(archive):
     """UI text must not pollute results (the lawzim IndexData problem).
 
-    April 2026 builds indexed viewer chrome and carried a 29.5 MB index
-    against today's 15.5 MB. Current builds index a curated place list.
+    A business or Wikipedia article may legitimately mention these words.
+    The regression is an application page appearing as a result, regardless
+    of the number of matching content pages or its result rank.
     """
     search = pytest.importorskip("libzim.search")
     if not archive.has_fulltext_index:
         pytest.skip("no fulltext index in this ZIM")
     searcher = search.Searcher(archive)
     for phrase in ('"Food & Drink"', "maplibre", '"Data Sources"'):
-        n = searcher.search(search.Query().set_query(phrase)).getEstimatedMatches()
-        assert n == 0, f"UI phrase {phrase} matched {n} documents"
+        query = search.Query().set_query(phrase)
+        matches = searcher.search(query)
+        offset = 0
+        while True:
+            # Native results borrow their parent objects on some bindings.
+            # Page until exhausted; the estimated count may underestimate.
+            results = matches.getResults(offset, 100)
+            paths = list(results)
+            if not paths:
+                break
+            for path in paths:
+                entry = archive.get_entry_by_path(path)
+                target = entry.get_item()  # Resolve the complete redirect chain.
+                assert not {entry.path, target.path} & {"index.html", "places.html"}, (
+                    f"UI query {phrase} returned application page {target.path!r} "
+                    f"at offset {offset}")
+            offset += len(paths)
 
 
 def test_diacritics_fold():

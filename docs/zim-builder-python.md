@@ -98,6 +98,10 @@ separate logical peaks; `peak_pending_body_bytes` measures their simultaneous
 sum. These metrics exclude codec workspaces; `peak_rss_bytes` includes them.
 For standalone CLI runs RSS is measured in a fresh process; API calls inherit
 that process's lifetime RSS high-water mark.
+Parent build telemetry uses the child-specific `wait4` lifetime peak when
+available. On Linux a regular fork can include inherited parent RSS before
+`exec`. Use fresh-process benchmarks to separate that setup footprint; use
+process-tree and cgroup telemetry for the complete build.
 
 ```sh
 python tools/benchmark_zim_pack.py --python-packer --mib 128 \
