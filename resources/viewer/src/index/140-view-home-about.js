@@ -487,4 +487,22 @@ function initAbout(config) {
     }
   }, true);
 }
+
+// The compass ("reset north") is shown only while the map is rotated or
+// tilted. North-up and flat it does nothing when tapped, and readers took
+// the small triangle for a broken button. It comes back with a two-finger
+// rotate, 3D, or driving mode's heading-up view, where it is useful.
+function initCompassVisibility(map) {
+  var btn = map.getContainer().querySelector('.maplibregl-ctrl-compass');
+  if (!btn) return;
+  function sync() {
+    var b = ((map.getBearing() % 360) + 360) % 360;        // 0..360
+    var level = Math.min(b, 360 - b) < 0.5 && map.getPitch() < 1;
+    btn.style.display = level ? 'none' : '';
+  }
+  map.on('rotate', sync);
+  map.on('pitch', sync);
+  map.on('load', sync);
+  sync();
+}
 // END view-home-about

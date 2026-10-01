@@ -147,6 +147,7 @@ if (!window.__szUnsupported) fetchConfig(1)
     })();
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    initCompassVisibility(map);
     initHomeButton(map, config);
     initViewMemory(map, config);
     initAbout(config);

@@ -74,7 +74,7 @@ function loadView(env = {}) {
     VIEW_SRC + '\nreturn { SZ_VIEWER_VERSION, _szStorage, _szViewKey, _szHashSetsView,' +
     ' _szReadView, _szWriteView, _szOpeningCamera, _szMaxBounds, _szClearZoom, initViewMemory, initHomeButton,' +
     ' _szAboutText, _szMonth, initAbout, _szSatellite, _szSatelliteCreditHtml,' +
-    ' szLocaleUnit, szReadUnit, szWriteUnit, szUnit, szFormatDistance };');
+    ' szLocaleUnit, szReadUnit, szWriteUnit, szUnit, szFormatDistance, initCompassVisibility };');
   // Fake timers: `timers` holds the pending ones; runTimers() fires them.
   const timers = new Map();
   let next = 1;
@@ -1072,6 +1072,33 @@ await ok('the tag-to-title rule is the build\'s (cloud/wiki_articles._strip_lang
             'nds-nl:Foo', 'a:b', 'Bø', '12:x', 'Q1:x', 'Expo_Park/USC_station'];
   }
   assert.deepStrictEqual(tags.map(W._wikiTagTitle), want);
+});
+
+await ok('the compass shows only while the map is rotated or tilted', () => {
+  const V = loadView();
+  const btn = { style: { display: '' } };
+  const on = {};
+  const cam = { bearing: 0, pitch: 0 };
+  const map = {
+    getContainer: () => ({ querySelector: (q) => (q === '.maplibregl-ctrl-compass' ? btn : null) }),
+    getBearing: () => cam.bearing, getPitch: () => cam.pitch,
+    on: (t, f) => { (on[t] = on[t] || []).push(f); },
+  };
+  V.initCompassVisibility(map);
+  assert.strictEqual(btn.style.display, 'none', 'north-up and flat: hidden');
+  const fire = (t) => (on[t] || []).forEach((f) => f());
+  cam.bearing = 30; fire('rotate');
+  assert.strictEqual(btn.style.display, '', 'rotated: shown');
+  cam.bearing = -0.2; fire('rotate');
+  assert.strictEqual(btn.style.display, 'none', 'within half a degree of north: hidden');
+  cam.bearing = 359.8; fire('rotate');
+  assert.strictEqual(btn.style.display, 'none', '359.8 degrees is north too');
+  cam.pitch = 45; fire('pitch');
+  assert.strictEqual(btn.style.display, '', 'tilted: shown');
+  cam.pitch = 0; fire('pitch');
+  assert.strictEqual(btn.style.display, 'none');
+  // A control set without a compass: nothing to do, no error.
+  V.initCompassVisibility({ getContainer: () => ({ querySelector: () => null }) });
 });
 
 console.log(`\n${pass} passed`);
