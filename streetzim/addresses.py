@@ -246,8 +246,11 @@ def _normalize_street(name):
         return " ".join(_STREET_ABBREV.get(t, t) for t in tokens)
     # Strip Latin accents, keeping combining marks that distinguish names in
     # other scripts (Japanese dakuten, Cyrillic breve, Thai tone marks, etc.).
+    # Decompose before lowercasing: compatibility characters can decompose to
+    # capitals ("№" -> "No", "℡" -> "TEL", mathematical letters), which
+    # lowercasing first left uppercase, so a second pass gave another key.
     import unicodedata as _ud
-    folded = _STREET_LATIN_MARKS.sub(r"\1", _ud.normalize("NFKD", name.lower()))
+    folded = _STREET_LATIN_MARKS.sub(r"\1", _ud.normalize("NFKD", name).lower())
     folded = _ud.normalize("NFC", folded)
     # Keep letters/numbers in every script. An ASCII-only tokenizer erased
     # Chinese, Japanese and Cyrillic street/city/POI names, conflating distinct

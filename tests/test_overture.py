@@ -386,6 +386,22 @@ def test_normalize_street_preserves_scripts_and_latin_matching(name, expected):
     assert _normalize_street(expected) == expected
 
 
+@pytest.mark.parametrize(("name", "expected"), [
+    ("№5 St", "no5 street"),
+    ("℡ Plaza", "tel plaza"),
+    ("𝐌𝐚𝐢𝐧 St", "main street"),
+    ("Ⅻ Rue", "xii rue"),
+    # Unaffected: no compatibility capitals.
+    ("Straße", "straße"),
+    ("Łódź Ave", "łodz avenue"),
+    ("İstiklal Cd", "istiklal cd"),
+])
+def test_normalize_street_folds_compatibility_capitals_idempotently(name, expected):
+    from streetzim.addresses import _normalize_street
+    assert _normalize_street(name) == expected
+    assert _normalize_street(expected) == expected
+
+
 @pytest.mark.parametrize("escaped", [False, True])
 def test_address_conflation_accepts_spaced_and_escaped_json(
     duckdb_available, tmp_path, escaped
