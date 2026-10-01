@@ -183,14 +183,31 @@ def test_wait4_reports_exact_short_child_peak_without_previous_child_pollution(
 
     timer = Timer()
     monkeypatch.setattr(common, "PHASE_TIMER", timer)
+    real_wait4 = os.wait4
+    reaped = []
+
+    def capture_wait4(pid, options):
+        result = real_wait4(pid, options)
+        reaped.append(result)
+        return result
+
+    monkeypatch.setattr(os, "wait4", capture_wait4)
     with c:
         add_entry(c)
     assert output.read_bytes() == b"completed fixture"
     assert len(processes) == 1 and processes[0].returncode == 0
     _assert_child_reaped(processes[0])
     raw = json.loads(reference.read_text())["maxrss"]
-    expected = raw if sys.platform == "darwin" else raw * 1024
-    assert expected >= 64 << 20
+    (reaped_pid, _status, usage), = reaped
+    assert reaped_pid == processes[0].pid
+    factor = 1 if sys.platform == "darwin" else 1024
+    self_peak = raw * factor
+    expected = usage.ru_maxrss * factor
+    assert 64 << 20 <= self_peak <= expected < 192 << 20
+    # The reference is written before exit; final file I/O can add a few
+    # pages. Compare the reported metric exactly with the lifetime wait4
+    # peak, while retaining an independent child-reported sanity check.
+    assert expected - self_peak <= 1 << 20
     (metric,) = [row for row in timer.metrics if row[0] == "zim-pack: process peak RSS"]
     assert metric == ("zim-pack: process peak RSS", f"{expected / 1e6:.1f}", "MB")
 
