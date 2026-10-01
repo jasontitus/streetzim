@@ -1,0 +1,64 @@
+{
+  "platform": "darwin",
+  "python": "3.12.13",
+  "payload_bytes": 67108864,
+  "threads": 1,
+  "stream_items": 4,
+  "compression_level": 22,
+  "max_in_flight_bytes": 1048576,
+  "manifest_writer": "/Users/jasontitus/experiments/streetzim/cloud/manifest_writer.py",
+  "pack_binary": "/private/tmp/streetzim-pack-review-target/release/streetzim-pack",
+  "measurements": {
+    "serialize": [
+      {
+        "wall_s": 0.10154699999839067,
+        "cpu_s": 0.071977,
+        "peak_rss_bytes": 87621632,
+        "stage_bytes": 67109245
+      }
+    ],
+    "pack_raw": [
+      {
+        "wall_s": 0.9812512919306755,
+        "cpu_s": 0.803986,
+        "peak_rss_bytes": 275726336,
+        "output_bytes": 268501479
+      }
+    ],
+    "pack_zstd": [
+      {
+        "wall_s": 0.33100141608156264,
+        "cpu_s": 0.952242,
+        "peak_rss_bytes": 3232137216,
+        "output_bytes": 89671
+      }
+    ]
+  },
+  "medians": {
+    "serialize": {
+      "wall_s": 0.10154699999839067,
+      "cpu_s": 0.071977,
+      "peak_rss_bytes": 87621632,
+      "stage_bytes": 67109245
+    },
+    "pack_raw": {
+      "wall_s": 0.9812512919306755,
+      "cpu_s": 0.803986,
+      "peak_rss_bytes": 275726336,
+      "output_bytes": 268501479
+    },
+    "pack_zstd": {
+      "wall_s": 0.33100141608156264,
+      "cpu_s": 0.952242,
+      "peak_rss_bytes": 3232137216,
+      "output_bytes": 89671
+    }
+  },
+  "status": "rejected",
+  "baseline_commit": "d5c32b6",
+  "zimru_commit": "061afbc",
+  "build_profile": "release",
+  "measurement_method": "fresh process wait4; ru_maxrss is bytes on macOS; median of repetitions",
+  "limitations": "Compressible repeated-byte synthetic workload. Raw final verification maps output pages. Wall times are short and affected by host load and temporary-file fsync/copy costs. This is not a continent-build throughput estimate.",
+  "explanation": "Experimental raw+zstd dedicated streaming was rejected after 4x64MiB at zstd22 exceeded3.2GB despite1MiB budget. Final code dedicates streaming only to raw bodies; compressed bodies use original byte-budgeted regular pipeline."
+}

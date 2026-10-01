@@ -1,0 +1,90 @@
+{
+  "baseline_commit": "d5c32b6045604d19584f9d9280cedc33d7c8d01a",
+  "current_revision": "working tree",
+  "description": "Fixed Monaco PBF + MBTiles, warm verified viewer asset cache, libzim default compression and default workers, routing + spatial cells + Find chips. Interleaved before/after repetitions.",
+  "limitations": "Small-region smoke benchmark, not a continent-scale memory or throughput claim. macOS process-tree RSS double-counts shared pages; PSS unavailable. 50 ms memory samples can miss short spikes; OS per-child high-water also recorded. Disk excludes shared input/cache and measures only each output directory.",
+  "input_sha256": {
+    "monaco.mbtiles": "0dee839f3fb73049951e427a3a3649931462fc6018b3fa1dc4d481ac5a179e3d",
+    "monaco.osm.pbf": "194d229f6ad19071ffb6ee35db78727a04a1ea975f0a8350543c616fa3f409bf"
+  },
+  "measurements": {
+    "before": [
+      {
+        "wall_s": 3.186,
+        "cpu_s": 7.8811,
+        "peak_rss_bytes": 3267739648,
+        "peak_pss_bytes": null,
+        "peak_child_rss_bytes": 3189014528,
+        "peak_disk_bytes": 2932736,
+        "sampling_error_count": 0
+      },
+      {
+        "wall_s": 2.9825,
+        "cpu_s": 7.6454,
+        "peak_rss_bytes": 3255697408,
+        "peak_pss_bytes": null,
+        "peak_child_rss_bytes": 3188670464,
+        "peak_disk_bytes": 2932736,
+        "sampling_error_count": 0
+      },
+      {
+        "wall_s": 3.0469,
+        "cpu_s": 7.7045,
+        "peak_rss_bytes": 3249405952,
+        "peak_pss_bytes": null,
+        "peak_child_rss_bytes": 3187163136,
+        "peak_disk_bytes": 2928640,
+        "sampling_error_count": 0
+      }
+    ],
+    "after": [
+      {
+        "wall_s": 2.997,
+        "cpu_s": 7.8997,
+        "peak_rss_bytes": 3265855488,
+        "peak_pss_bytes": null,
+        "peak_child_rss_bytes": 3187589120,
+        "peak_disk_bytes": 2932736,
+        "sampling_error_count": 0
+      },
+      {
+        "wall_s": 3.0747,
+        "cpu_s": 8.0307,
+        "peak_rss_bytes": 3269148672,
+        "peak_pss_bytes": null,
+        "peak_child_rss_bytes": 3187982336,
+        "peak_disk_bytes": 2928640,
+        "sampling_error_count": 0
+      },
+      {
+        "wall_s": 3.0837,
+        "cpu_s": 8.0925,
+        "peak_rss_bytes": 3257434112,
+        "peak_pss_bytes": null,
+        "peak_child_rss_bytes": 3188277248,
+        "peak_disk_bytes": 2932736,
+        "sampling_error_count": 0
+      }
+    ]
+  },
+  "medians": {
+    "before": {
+      "wall_s": 3.0469,
+      "cpu_s": 7.7045,
+      "peak_rss_bytes": 3255697408,
+      "peak_pss_bytes": null,
+      "peak_child_rss_bytes": 3188670464,
+      "peak_disk_bytes": 2932736,
+      "sampling_error_count": 0
+    },
+    "after": {
+      "wall_s": 3.0747,
+      "cpu_s": 8.0307,
+      "peak_rss_bytes": 3265855488,
+      "peak_pss_bytes": null,
+      "peak_child_rss_bytes": 3187982336,
+      "peak_disk_bytes": 2932736,
+      "sampling_error_count": 0
+    }
+  }
+}

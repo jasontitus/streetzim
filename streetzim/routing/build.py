@@ -3,7 +3,6 @@ chunking (moved verbatim from create_osm_zim.py, which re-exports these
 names). The readers/writers of the formats live alongside in this package."""
 import os
 import subprocess
-import time
 
 from streetzim import area
 # The builder's flushing, phase-timing print (see streetzim/common.py).
@@ -589,23 +588,17 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
     # Unique per run: a fixed name let a second build on the same host
     # delete/rewrite the first build's 16-60 GB index mid-pass.
     import tempfile as _tempfile
-    # Reclaim scratch files an OOM-killed earlier run left behind (they
-    # are 16-60 GB each and no longer share a fixed name).
-    try:
-        import glob as _glob
-        for _stale in _glob.glob(os.path.join(NODE_LOC_DIR, "streetzim_node_loc_*.bin")):
-            if time.time() - os.path.getmtime(_stale) > 6 * 3600:
-                os.remove(_stale)
-                print(f"    removed stale node-location scratch {_stale}")
-    except OSError:
-        pass
+    # Another active continent build can use its index for much longer than
+    # six hours. Age alone does not establish that a scratch file is stale;
+    # each run must only remove the unique file that it created.
     _loc_fd, node_loc_path = _tempfile.mkstemp(
         dir=NODE_LOC_DIR, prefix="streetzim_node_loc_", suffix=".bin")
     os.close(_loc_fd)
-    loc_handler = osmium.NodeLocationsForWays(
-        osmium.index.create_map(f"sparse_file_array,{node_loc_path}"))
-    loc_handler.ignore_errors()
+    loc_handler = None
     try:
+        loc_handler = osmium.NodeLocationsForWays(
+            osmium.index.create_map(f"sparse_file_array,{node_loc_path}"))
+        loc_handler.ignore_errors()
         osmium.apply(source_pbf, loc_handler, p2)
     finally:
         # Drop loc_handler (and its libosmium index) BEFORE the post-Pass-2
@@ -687,7 +680,9 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
         adj_offsets.tofile(f)
         edges_arr.tofile(f)
         geom_offsets_np.tofile(f)
-        f.write(bytes(geom_blob))
+        # Binary files accept a buffer directly; bytes() would duplicate the
+        # entire geometry blob here (up to ~4 GB) during serialization.
+        f.write(geom_blob)
         name_offsets.tofile(f)
         for b in name_blobs:
             f.write(b)

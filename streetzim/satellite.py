@@ -30,6 +30,32 @@ def satellite_cache_dirs(source=satellite_sources.BUILDER_DEFAULT,
             os.path.join(root, f"{sat_format}_{tile_size}"))
 
 
+def _bounded_tile_results(pool, process_fn, coordinates, max_pending):
+    """Consume coordinates lazily, holding at most max_pending futures.
+
+    A continent has millions of tiles. Eagerly submitting them retains
+    their coordinate tuples and Future objects until the zoom finishes.
+    Refill only as results are consumed, including when a worker fails.
+    """
+    from concurrent.futures import FIRST_COMPLETED, wait
+    from itertools import islice
+
+    coordinates = iter(coordinates)
+    pending = set()
+    try:
+        pending.update(pool.submit(process_fn, *coords)
+                       for coords in islice(coordinates, max_pending))
+        while pending:
+            done, pending = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                yield future.result()
+            pending.update(pool.submit(process_fn, *coords)
+                           for coords in islice(coordinates, len(done)))
+    finally:
+        for future in pending:
+            future.cancel()
+
+
 def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
                               sat_format="webp", sat_quality=None, tile_size=256,
                               source=satellite_sources.BUILDER_DEFAULT):
@@ -62,19 +88,21 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
     import io
     import math
     import time
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import ThreadPoolExecutor
 
     from PIL import Image
 
     if sat_format == "avif":
-        # Pillow >= 10.0 has native AVIF support; older versions need pillow-avif-plugin
+        # Use the requested codec or fail before creating/downloading tiles.
         from PIL import features
         if not features.check("avif"):
             try:
                 import pillow_avif  # noqa: F401 — registers AVIF codec with Pillow
             except ImportError:
-                print("    Warning: AVIF not supported (need Pillow >= 10 or pillow-avif-plugin), falling back to webp")
-                sat_format = "webp"
+                raise RuntimeError(
+                    "AVIF satellite encoding is unavailable. Install Pillow with AVIF "
+                    "support or pillow-avif-plugin; with create_osm_zim.py you can "
+                    "select --satellite-format webp.") from None
 
     quality = sat_quality if sat_quality is not None else webp_quality
     ext = sat_format  # "webp" or "avif"
@@ -117,6 +145,16 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
             if os.path.isdir(d) and d != dest_dir:
                 _format_caches.append((d, os.path.basename(d).split("_")[0]))
 
+    def _decode_source_image(data):
+        # Image.open only parses the header. Loading inside the context
+        # detects truncated JPEGs now and returns pixels detached from the
+        # file, so encoding cannot fail later on a closed/corrupt source.
+        with Image.open(data) as image:
+            if image.size != (256, 256):
+                raise OSError(f"satellite source has unexpected size {image.size}")
+            image.load()
+            return image.copy()
+
     def _fetch_source_tile(z, x, y):
         """Get a single 256px tile, using source cache if available.
         Returns (PIL.Image or None, jpeg_bytes_len). Checks: JPEG source
@@ -127,19 +165,23 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
         cache_path = os.path.join(source_cache_dir, str(z), str(x), f"{y}.jpg")
         if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
             try:
-                return Image.open(cache_path), os.path.getsize(cache_path)
-            except Exception:
-                pass  # Corrupted cache file, try next
+                image = _decode_source_image(cache_path)
+                return image, os.path.getsize(cache_path)
+            except (OSError, ValueError):
+                # A bad source must be refetched, rather than fail later in
+                # _save_image while repeatedly masquerading as a cache hit.
+                try:
+                    os.unlink(cache_path)
+                except OSError:
+                    pass
 
         # Check existing format caches (transcode from WebP/AVIF rather than re-download)
         for cache_dir, cache_ext in _format_caches:
             cached = os.path.join(cache_dir, str(z), str(x), f"{y}.{cache_ext}")
             if os.path.exists(cached) and os.path.getsize(cached) > 0:
                 try:
-                    im = Image.open(cached)
-                    if im.size == (256, 256):
-                        return im, 0
-                except Exception:
+                    return _decode_source_image(cached), 0
+                except (OSError, ValueError):
                     pass
 
         # Download from network
@@ -149,7 +191,8 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
                 req = urllib.request.Request(url, headers={"User-Agent": "streetzim/1.0"})
                 with urllib.request.urlopen(req, timeout=30) as resp:
                     jpg_data = resp.read()
-                # Save to source cache
+                image = _decode_source_image(io.BytesIO(jpg_data))
+                # Save to source cache only after decoding the complete body.
                 os.makedirs(os.path.dirname(cache_path), exist_ok=True)
                 # Atomic: a killed write must not leave a truncated .jpg that
                 # every later build reuses (same rule as terrain and DEM).
@@ -162,7 +205,7 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
                 finally:
                     if os.path.exists(_tmp):
                         os.unlink(_tmp)
-                return Image.open(io.BytesIO(jpg_data)), len(jpg_data)
+                return image, len(jpg_data)
             except Exception as e:
                 if attempt < 3:
                     time.sleep(2 ** attempt)
@@ -204,7 +247,7 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
         os.makedirs(tile_dir, exist_ok=True)
         img, jpeg_size = _fetch_source_tile(z, x, y)
         if img is None:
-            return (False, 0, 0)
+            return (None, 0, 0)
         out_size = _save_image(img, tile_path)
         return (True, jpeg_size, out_size)
 
@@ -288,14 +331,14 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
             tile_count = (out_x_max - out_x_min + 1) * (out_y_max - out_y_min + 1)
             print(f"    z{z}: {tile_count} tiles ({out_x_max - out_x_min + 1}x{out_y_max - out_y_min + 1}) [512px, src z{src_z}]")
             process_fn = _process_tile_512
-            tile_coords = [(z, x, y) for x in range(out_x_min, out_x_max + 1)
-                           for y in range(out_y_min, out_y_max + 1)]
+            tile_coords = ((z, x, y) for x in range(out_x_min, out_x_max + 1)
+                           for y in range(out_y_min, out_y_max + 1))
         else:
             tile_count = (x_max - x_min + 1) * (y_max - y_min + 1)
             print(f"    z{z}: {tile_count} tiles ({x_max - x_min + 1}x{y_max - y_min + 1})")
             process_fn = _process_tile_256
-            tile_coords = [(z, x, y) for x in range(x_min, x_max + 1)
-                           for y in range(y_min, y_max + 1)]
+            tile_coords = ((z, x, y) for x in range(x_min, x_max + 1)
+                           for y in range(y_min, y_max + 1))
 
         # Small zoom levels: process sequentially
         if tile_count <= 10:
@@ -305,6 +348,8 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
                     total_downloaded += 1
                     total_bytes_jpeg += jpeg_bytes
                     total_bytes_out += out_bytes
+                elif downloaded is None:
+                    total_missing += 1
                 else:
                     total_skipped += 1
             continue
@@ -312,9 +357,8 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
         # Larger zoom levels: process in parallel
         completed = 0
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {pool.submit(process_fn, *t): t for t in tile_coords}
-            for future in as_completed(futures):
-                downloaded, jpeg_bytes, out_bytes = future.result()
+            for downloaded, jpeg_bytes, out_bytes in _bounded_tile_results(
+                    pool, process_fn, tile_coords, max_workers * 2):
                 if downloaded:
                     total_downloaded += 1
                     total_bytes_jpeg += jpeg_bytes
@@ -329,11 +373,11 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
 
     print(f"\r    Produced {total_downloaded} satellite tiles ({total_skipped} cached)")
     if total_missing:
-        # A tile with a missing quadrant is neither written nor cached, so
+        # A tile with a missing source is neither written nor cached, so
         # it is a hole in the imagery (re-fetched next run). Say so instead
         # of folding it into "cached".
         print(f"    WARNING: {total_missing} satellite tiles skipped — a source "
-              f"quadrant failed to download (holes in imagery)", flush=True)
+              f"tile failed to download (holes in imagery)", flush=True)
     if total_bytes_jpeg > 0:
         saved_mb = (total_bytes_jpeg - total_bytes_out) / (1024 * 1024)
         ratio = (1 - total_bytes_out / total_bytes_jpeg) * 100

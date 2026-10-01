@@ -42,16 +42,15 @@ def test_order_tiles_zoom_major_and_source_passthrough():
 
 def test_manifest_cluster_break_record(tmp_path, monkeypatch):
     monkeypatch.setenv("STREETZIM_MANIFEST_ZSTD", "0")
-    from cloud.manifest_writer import ManifestCreator
-    mc = ManifestCreator(str(tmp_path / "out.zim"))
-    mc._write_record(mc._config)
-    mc.cluster_break()
-    mc.cluster_break(2 * 1024 * 1024)
-    mc._mf.flush()
-    recs = [json.loads(l) for l in open(mc._manifest_path, encoding="utf-8") if l.strip()]
+    from cloud.manifest_writer import ManifestCreator, iter_records
+    monkeypatch.setattr(ManifestCreator, "_run_packer", lambda self: None)
+    mc = ManifestCreator(str(tmp_path / "out.zim"), keep_stage=True)
+    with mc:
+        mc.cluster_break()
+        mc.cluster_break(2 * 1024 * 1024)
+    recs = list(iter_records(str(mc._manifest_path)))
     assert recs[1] == {"kind": "cluster_break"}
     assert recs[2] == {"kind": "cluster_break", "cluster_size_target": 2097152}
-    mc._mf.close()
 
 
 def test_strip_address_records():

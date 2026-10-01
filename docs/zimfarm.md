@@ -574,6 +574,17 @@ Checked against openzim/zimfarm at `917d7bc`:
 1. **Docker image name.** The image is published today as
    `ghcr.io/jasontitus/streetzim` (linux/amd64; `dev` from main, `X.Y.Z`
    and `latest` from release tags; `.github/workflows/docker-publish.yml`).
+   Publication uses the exact image saved after CI's full-profile Docker
+   validation, checking its checksum, image ID, platform and tested commit.
+   Image artifacts are retained for 14 days; rerun all CI jobs if they expire.
+   Historical commits whose CI predates image export cannot be published
+   through this workflow simply by rerunning their old CI definition.
+   A failed-job rerun can reuse the latest successful Docker artifact from the
+   same run and commit. Keep release tags immutable: only the highest stable
+   Git tag gets `latest`, even if a higher tag's CI has not passed yet; older
+   releases still get their version tag. Publication is serialized with
+   GitHub's queued concurrency so an older CI rerun cannot evict a newer
+   pending publisher.
    Zimfarm pulls `ghcr.io/<name>` and only accepts
    names in `DockerImageName` (`backend/src/zimfarm_backend/common/enums.py`).
    StreetZim's image would have to be published under a name added there

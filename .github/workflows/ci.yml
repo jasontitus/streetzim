@@ -530,7 +530,12 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - name: Build the image
-        run: docker build -t streetzim .
+        run: |
+          version=dev
+          if [ "$GITHUB_REF_TYPE" = tag ]; then version="${GITHUB_REF_NAME#v}"; fi
+          docker build --platform linux/amd64 \
+            --label org.opencontainers.image.revision="$(git rev-parse HEAD)" \
+            --label org.opencontainers.image.version="$version" -t streetzim .
       - name: The image has tilemaker and osmium, and uses zimscraperlib
         run: |
           # The pinned font glyphs are baked in: re-checking them needs no network.
@@ -616,6 +621,24 @@ jobs:
             --file osm-monaco-docker.zim --routing
           PATH="$HOME/.local/zim-tools:$PATH" python cloud/validate_zim.py out/osm-monaco-docker.zim
           python tools/check_full_profile.py out/osm-monaco-docker.zim
+
+      - name: Export the validated image for publication
+        if: github.event_name == 'push' && github.repository == 'jasontitus/streetzim' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/streetzim-image"
+          docker image inspect streetzim --format '{{.Id}}' > "$RUNNER_TEMP/streetzim-image/image-id.txt"
+          docker image save streetzim | gzip -1 > "$RUNNER_TEMP/streetzim-image/streetzim-image.tar.gz"
+          cd "$RUNNER_TEMP/streetzim-image"
+          sha256sum streetzim-image.tar.gz image-id.txt > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: github.event_name == 'push' && github.repository == 'jasontitus/streetzim' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')
+        with:
+          name: streetzim-image-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/streetzim-image/
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
 
   live-full:
     # Weekly (and on demand): --profile full against the live sources, as a

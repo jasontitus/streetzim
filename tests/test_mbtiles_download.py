@@ -338,8 +338,8 @@ def test_a_held_lock_is_waited_for(srv, tmp_path):
     s = srv()
     dest, _, _ = paths(s, tmp_path)
     done = threading.Event()
-    with download._lock(dest):
-        with download._lock(dest, block=False) as got:
+    with download.file_lock(dest):
+        with download.file_lock(dest, block=False) as got:
             assert got is False
         t = threading.Thread(target=lambda: (fetch(s, tmp_path), done.set()))
         t.start()
@@ -413,22 +413,135 @@ def test_cut_removed_when_the_extract_download_fails(tmp_path, monkeypatch):
     assert not (tmp_path / "work").exists()
 
 
-def test_main_cleans_the_cut_on_failure_and_clears_a_stale_one(tmp_path, monkeypatch):
+def test_main_cleans_owned_cut_on_failure_and_preserves_other_workspace(tmp_path, monkeypatch):
     src = make_mbtiles(tmp_path / "p.mbtiles", [(0, 0, 0)])
-    stale = tmp_path / "tmp" / "mbtiles-cut" / "old-run.mbtiles.part"   # a killed run's
+    stale = tmp_path / "tmp" / "mbtiles-cut" / "old-run.mbtiles.part"   # may still be active
     stale.parent.mkdir(parents=True)
     stale.write_bytes(b"old")
     import create_osm_zim
     seen = []
 
     def builder_fails(argv):
-        seen.append(stale.exists())
+        cut = Path(argv[argv.index("--mbtiles") + 1])
+        seen.append((stale.exists(), cut))
+        assert cut.exists()
         raise SystemExit(143)                          # e.g. SIGTERM mid-build
     monkeypatch.setattr(create_osm_zim, "main", builder_fails)
     with pytest.raises(SystemExit):
         cli.main(["--name", "n", "--title", "t", "--description", "d",
-                  "--bbox", "7.4,43.72,7.44,43.76", "--no-routing",
+                  "--bbox", "7.4,43.72,7.44,43.76", "--no-routing", "--profile=basic",
                   "--mbtiles-url", src.as_uri(), "--tmp", str(tmp_path / "tmp"),
                   "--output", str(tmp_path / "out")])
-    assert seen == [False]
-    assert not (tmp_path / "tmp" / "mbtiles-cut").exists()
+    assert len(seen) == 1 and seen[0][0]
+    assert not seen[0][1].exists()
+    assert not seen[0][1].parent.exists()
+    assert stale.read_bytes() == b"old"
+
+
+def test_generic_fetch_never_promotes_a_short_body(srv, tmp_path):
+    s = srv()
+    dest = tmp_path / 'extract.pbf'
+    s.drop_after = 2048
+    with pytest.raises(OSError):
+        cli.fetch(s.url, dest)
+    assert not dest.exists()
+    assert cli.fetch(s.url, dest).read_bytes() == A
+
+
+def test_generic_fetch_serializes_parallel_transfers(srv, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    s = srv()
+    dest = tmp_path / 'extract.pbf'
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(cli.fetch, s.url, dest) for _ in range(2)]
+        assert [f.result().read_bytes() for f in futures] == [A, A]
+    assert s.gets == [(None, None)]
+    assert not dest.with_name(dest.name + '.part').exists()
+
+
+def test_matching_stamp_does_not_hide_truncated_cached_file(srv, tmp_path):
+    s = srv()
+    dest = fetch(s, tmp_path)
+    dest.write_bytes(A[:2048])
+    assert fetch(s, tmp_path).read_bytes() == A
+    assert len(s.gets) == 2
+
+
+def test_http_headers_are_case_insensitive(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+    headers = {'etag': '"a"', 'last-modified': 'today', 'content-length': str(len(A)),
+               'accept-ranges': 'bytes'}
+    monkeypatch.setattr(download, 'head', lambda url, agent: headers)
+    assert download.stamp_of(headers) == {'ETag': '"a"', 'Last-Modified': 'today',
+                                          'Content-Length': str(len(A))}
+    dest = tmp_path / 'tiles.mbtiles'
+    part = dest.with_name(dest.name + '.part')
+    part.write_bytes(A[:2000])
+    part.with_name(part.name + '.source.json').write_text(json.dumps(download.stamp_of(headers)))
+    seen = []
+
+    @contextmanager
+    def stream(url, request_headers):
+        seen.append(request_headers)
+        yield 206, {'content-range': f'bytes 2000-{len(A) - 1}/{len(A)}'}, iter([A[2000:]])
+
+    monkeypatch.setattr(download, '_stream', stream)
+    assert cli.fetch_resumable('https://example.org/tiles', dest).read_bytes() == A
+    assert seen[0]['Range'] == 'bytes=2000-'
+    assert seen[0]['If-Range'] == '"a"'
+
+
+def test_short_non_sqlite_response_is_rejected_before_promotion(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+    monkeypatch.setattr(download, 'head', lambda url, agent: {'Content-Length': '4'})
+
+    @contextmanager
+    def stream(url, request_headers):
+        yield 200, {}, iter([b'html'])
+
+    monkeypatch.setattr(download, '_stream', stream)
+    dest = tmp_path / 'tiles.mbtiles'
+    with pytest.raises(ValueError, match='not SQLite'):
+        cli.fetch_resumable('https://example.org/tiles', dest, check_head=cli._check_mbtiles_head)
+    assert not dest.exists()
+    assert not list(tmp_path.glob('*.part*'))
+
+
+def test_generic_fetch_refreshes_unstamped_same_size_input(srv, tmp_path):
+    s = srv(data=B)
+    dest = tmp_path / 'extract.pbf'
+    dest.write_bytes(A)
+    assert cli.fetch(s.url, dest).read_bytes() == B
+    assert s.gets == [(None, None)]
+
+
+def test_get_length_detects_short_body_when_head_has_no_length(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+    monkeypatch.setattr(download, 'head', lambda url, agent: {'ETag': '"a"'})
+
+    @contextmanager
+    def stream(url, request_headers):
+        yield 200, {'content-length': '10'}, iter([b'short'])
+
+    monkeypatch.setattr(download, '_stream', stream)
+    dest = tmp_path / 'extract.pbf'
+    with pytest.raises(OSError, match='GET body has 5 bytes'):
+        cli.fetch('https://example.org/extract', dest)
+    assert not dest.exists()
+
+
+def test_eviction_preserves_lock_inode_for_existing_waiters(ofm, tmp_path):
+    import fcntl
+    old = fetch(ofm, tmp_path)
+    lock = old.with_name(old.name + '.lock')
+    # An existing waiter can hold this inode open before eviction releases
+    # its own lock. Every later caller must contend on the same inode.
+    with open(lock, 'a') as waiter:
+        download._evict_other_versions(ofm.base + '/areas/monaco/v2/tiles.mbtiles',
+                                      old.with_name(old.name.replace('v1', 'v2')))
+        fcntl.flock(waiter, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            with download.file_lock(old, block=False) as acquired:
+                assert not acquired
+        finally:
+            fcntl.flock(waiter, fcntl.LOCK_UN)

@@ -4,7 +4,6 @@
  "streetzim/common.py | reportOperatorIssue | Operator \"-\" not supported for types \"float\" and \"float | None\"": 1,
  "streetzim/routing/build.py | reportAttributeAccessIssue | \"index\" is not a known attribute of module \"osmium\"": 1,
  "streetzim/routing/build.py | reportAttributeAccessIssue | Cannot assign to attribute \"endpoints\" for class \"_Pass1\"": 1,
- "streetzim/satellite.py | reportArgumentType | Argument of type \"((z: Unknown, x0: Unknown, y0: Unknown) -> (tuple[Literal[False], Literal[0], Literal[0]] | tuple[None, Literal[0], Literal[0]] | tuple[Literal[True], int, int])) | ((z: Unknown, x: Unknown, y: Unknown) -> (tuple[Literal[False], Literal[0], Literal[0]] | tuple[Literal[True], int, int]))\" cannot be assigned to parameter \"fn\" of type \"(**_P@submit) -> _T@submit\" in function \"submit\"": 1,
  "streetzim/search_extract.py | reportOptionalMemberAccess | \"get\" is not a known attribute of \"None\"": 1,
  "streetzim/search_extract.py | reportOptionalMemberAccess | \"items\" is not a known attribute of \"None\"": 2,
  "streetzim/search_extract.py | reportOptionalMemberAccess | \"keys\" is not a known attribute of \"None\"": 1,

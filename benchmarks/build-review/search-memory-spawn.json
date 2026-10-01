@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "measurement": "100,000 synthetic places, real spawn pool with 2 workers, no tracemalloc; parent RSS after completion only, not aggregate subprocess peak",
+  "output_sha256": "c4eed4999216a90c1e73057f46da63d06b88b219b3b67228cd59c5845dde3f45",
+  "before": {
+    "source_revision": "d5c32b6",
+    "rows": 100000,
+    "duration_seconds": 1.179095541127026,
+    "parent_rss_before_bytes": 22216704,
+    "parent_rss_after_bytes": 215105536,
+    "grid_still_live": true
+  },
+  "after": {
+    "source_revision": "working tree",
+    "rows": 100000,
+    "duration_seconds": 1.173096374841407,
+    "parent_rss_before_bytes": 22183936,
+    "parent_rss_after_bytes": 138969088,
+    "grid_still_live": false
+  },
+  "runner": "/tmp/streetzim-memory-review/real_process_grid.py"
+}

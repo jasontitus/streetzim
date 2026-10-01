@@ -10,6 +10,8 @@ We propose that openZIM adopt StreetZim as its maps scraper;
 StreetZim with openzim/maps and sets out what porting its features there
 would involve. [docs/openzim-review-response.md](docs/openzim-review-response.md)
 is our first, superseded response to the 2026-09 openZIM review.
+[The build review](docs/build-review.md) records memory and reliability fixes,
+adversarial checks, reproducible measurements and remaining scaling limits.
 
 ## 1. What is core and what is operations
 
@@ -48,11 +50,11 @@ ZIM.
   and `kiwix-serve` are the reference checker and reader. CI uses only these.
 
 **Optional accelerators.** Only the continent-scale production builds use
-them; see §3. `rust/streetzim-pack` (`--zim-builder rust`) and
-`--xapian builder` are faster replacements for libzim's writer and indexer.
-They depend on the author's `zimru` and `xapianbuilder` checkouts placed next
-to this repo. They make the same ZIM, faster. You can ignore them unless you
-are building continents.
+them; see §3. `streetzim/pack.py` (`--zim-builder manifest`, with `rust` as a legacy alias)
+provides the Python manifest writer. It uses the installed Python dependencies
+and requires no sibling zimru checkout. `--xapian builder` still uses the separate
+external xapianbuilder indexer. See [the packer guide](docs/zim-builder-python.md)
+for controls, memory limits and native validation.
 
 **Operations: the author's hosting.** Works only on the production host and
 with the author's accounts. It lives in [`ops/`](ops/README.md), with a
@@ -170,7 +172,7 @@ Rules that keep published ZIMs working:
 | `ZIMRU_ZIMCHECK` | optional: a faster drop-in `zimcheck` for very large ZIMs; the standard `zimcheck` is used otherwise |
 | `STREETZIM_NODE_LOC_DIR` | fast scratch volume for the routing node-location store (default `/data`, falling back to the output directory) |
 | `STREETZIM_PACK_BIN`, `XAPIANBUILDER_BIN` | optional accelerators only (see §1) |
-| `ZSTD_CLEVEL` | zstd level for `--zim-builder rust` only (default 22, which the production wrappers set); libzim ignores it and compresses at its fixed level 19 |
+| `ZSTD_CLEVEL` | zstd level for the manifest writer only (default 22, which the production wrappers set); libzim ignores it and compresses at its fixed level 19 |
 | `STREETZIM_MERGE_STREETS=0` | keep one search record per tile for streets instead of merging the pieces (docs/search-records.md). Merging is the default since merge #19, so regions built before it have more street records |
 | `STREETZIM_ALLOW_FONT_ERRORS=1` | ship even if some font ranges failed to download (e.g. during a CDN outage); by default the build stops after 5 attempts per range. A range whose bytes do not match its pinned sha256 always stops the build ([docs/viewer-supply-chain.md](docs/viewer-supply-chain.md)) |
 | `PYTHON` | interpreter the Node tests shell out to |

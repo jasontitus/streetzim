@@ -21,6 +21,7 @@ import builtins
 import functools
 import gzip
 import json
+import multiprocessing
 import os
 import sqlite3
 import time
@@ -445,7 +446,9 @@ def _process_tile_partition(args):
 
     Writes deduplicated features to a temp file (JSON lines) to avoid sending
     huge lists through multiprocessing IPC pipes."""
-    mbtiles_path, col_start, col_end, search_layers, output_file = args
+    mbtiles_path, col_start, col_end, search_layers, output_file = args[:5]
+    # The five-field worker argument remains accepted by older library callers.
+    search_zoom = args[5] if len(args) > 5 else 14
     import mapbox_vector_tile
     import sqlite3 as _sqlite3
 
@@ -453,8 +456,8 @@ def _process_tile_partition(args):
     cursor = conn.cursor()
     cursor.execute(
         "SELECT zoom_level, tile_column, tile_row, tile_data "
-        "FROM tiles WHERE zoom_level = 14 AND tile_column >= ? AND tile_column < ?",
-        (col_start, col_end),
+        "FROM tiles WHERE zoom_level = ? AND tile_column >= ? AND tile_column < ?",
+        (search_zoom, col_start, col_end),
     )
 
     seen = set()
@@ -703,40 +706,48 @@ def _finish_features_streaming(raw_path, output_dir, n_unique):
 
     t_ann = time.time()
     done_rows = 0
-    with open(raw_path, encoding="utf-8") as fin, \
-            open(keyed_path, "w", encoding="utf-8") as fout, \
-            ProcessPoolExecutor(max_workers=workers,
-                                initializer=_init_location_worker,
-                                initargs=(_place_grid,)) as pool:
-        inflight = deque()          # (batch, future) in submission order
-        batch = []
+    try:
+        with open(raw_path, encoding="utf-8") as fin, \
+                open(keyed_path, "w", encoding="utf-8") as fout, \
+                ProcessPoolExecutor(max_workers=workers,
+                                    mp_context=multiprocessing.get_context("spawn"),
+                                    initializer=_init_location_worker,
+                                    initargs=(_place_grid,)) as pool:
+            inflight = deque()          # (batch, future) in submission order
+            batch = []
 
-        def drain(all_of_them=False):
-            nonlocal done_rows, assigned
-            while inflight and (all_of_them or len(inflight) >= window or inflight[0][1].done()):
-                n_lines, fut = inflight.popleft()
-                text, n_assigned, counts = fut.result()
-                fout.write(text)
-                assigned += n_assigned
-                for k, v in counts.items():
-                    type_counts[k] = type_counts.get(k, 0) + v
-                done_rows += n_lines
-                if done_rows % (BATCH * 40) == 0:
-                    rate = done_rows / max(1e-9, time.time() - t_ann)
-                    print(f"      annotated {done_rows:,}/{n_unique:,} ({rate:,.0f}/s, "
-                          f"~{(n_unique - done_rows) / rate / 60:.0f} min left)", flush=True)
+            def drain(all_of_them=False):
+                nonlocal done_rows, assigned
+                while inflight and (all_of_them or len(inflight) >= window or inflight[0][1].done()):
+                    n_lines, fut = inflight.popleft()
+                    text, n_assigned, counts = fut.result()
+                    fout.write(text)
+                    assigned += n_assigned
+                    for k, v in counts.items():
+                        type_counts[k] = type_counts.get(k, 0) + v
+                    done_rows += n_lines
+                    if done_rows % (BATCH * 40) == 0:
+                        rate = done_rows / max(1e-9, time.time() - t_ann)
+                        print(f"      annotated {done_rows:,}/{n_unique:,} ({rate:,.0f}/s, "
+                              f"~{(n_unique - done_rows) / rate / 60:.0f} min left)", flush=True)
 
-        # The parent only moves text: raw lines out to the workers, keyed
-        # lines back to disk. All parsing and serialising happens in the pool.
-        for line in fin:
-            batch.append(line)
-            if len(batch) >= BATCH:
+            # The parent only moves text: raw lines out to the workers, keyed
+            # lines back to disk. All parsing and serialising happens in the pool.
+            for line in fin:
+                batch.append(line)
+                if len(batch) >= BATCH:
+                    inflight.append((len(batch), pool.submit(_annotate_lines_batch, batch, type_order)))
+                    batch = []
+                    drain()
+            if batch:
                 inflight.append((len(batch), pool.submit(_annotate_lines_batch, batch, type_order)))
-                batch = []
-                drain()
-        if batch:
-            inflight.append((len(batch), pool.submit(_annotate_lines_batch, batch, type_order)))
-        drain(all_of_them=True)
+            drain(all_of_them=True)
+    finally:
+        # The place grid can hold millions of dicts. It is only needed by
+        # annotation; do not retain it through sorting or later build phases.
+        _place_grid = None
+        # A shut-down executor still owns its initializer arguments.
+        pool = None
     print(f"    Assigned location to {assigned}/{n_unique} features "
           f"in {(time.time() - t_ann) / 60:.0f} min on {workers} workers", flush=True)
     os.unlink(raw_path)
@@ -804,12 +815,20 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
     if mbtiles_path:
         # Streaming mode: each worker reads its own partition from SQLite
         conn = sqlite3.connect(str(mbtiles_path))
-        total_z14 = conn.execute(
+        search_zoom = 14
+        total_tiles = conn.execute(
             "SELECT COUNT(*) FROM tiles WHERE zoom_level = 14"
         ).fetchone()[0]
-        if total_z14 == 0:
+        if total_tiles == 0:
+            search_zoom = conn.execute("SELECT MAX(zoom_level) FROM tiles").fetchone()[0]
+            if search_zoom is not None:
+                total_tiles = conn.execute(
+                    "SELECT COUNT(*) FROM tiles WHERE zoom_level = ?", (search_zoom,)
+                ).fetchone()[0]
+                print(f"    No z14 tiles found, using z{search_zoom}")
+        if not total_tiles:
             conn.close()
-            print("    No z14 tiles found in mbtiles")
+            print("    No tiles found in mbtiles")
             if output_dir:
                 features_path = os.path.join(output_dir, "search_features.jsonl")
                 open(features_path, "w").close()
@@ -819,113 +838,110 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
         # Balanced partitioning: query tile counts per column and split evenly
         print("    Querying tile distribution for balanced partitioning...")
         col_counts = conn.execute(
-            "SELECT tile_column, COUNT(*) FROM tiles WHERE zoom_level = 14 "
-            "GROUP BY tile_column ORDER BY tile_column"
+            "SELECT tile_column, COUNT(*) FROM tiles WHERE zoom_level = ? "
+            "GROUP BY tile_column ORDER BY tile_column", (search_zoom,)
         ).fetchall()
         conn.close()
 
-        import multiprocessing
         import tempfile
+        from contextlib import ExitStack
         num_workers = min(build_cpus(), len(col_counts))
         # Use 4x more partitions than workers for dynamic load balancing —
         # dense urban partitions take longer per tile, so small partitions let
         # idle workers pick up the next chunk instead of waiting on one straggler.
         num_partitions = min(num_workers * 4, len(col_counts))
-        print(f"    Processing {total_z14} z14 tiles across {len(col_counts)} columns "
+        print(f"    Processing {total_tiles} z{search_zoom} tiles across {len(col_counts)} columns "
               f"with {num_workers} workers, {num_partitions} partitions...")
 
         # Split columns into partitions with roughly equal tile counts
-        tiles_per_partition = total_z14 / num_partitions
+        tiles_per_partition = total_tiles / num_partitions
         partitions = []
-        tmp_dir = tempfile.mkdtemp(prefix="streetzim_search_")
-        current_start = col_counts[0][0]
-        current_count = 0
-        part_idx = 0
+        # Own worker scratch for the entire scan/dedup lifetime. The pool
+        # exits before cleanup, so failed workers cannot leave large files or
+        # continue writing into a removed directory.
+        with tempfile.TemporaryDirectory(prefix="streetzim_search_", dir=output_dir) as tmp_dir, \
+                ExitStack() as streams:
+            current_start = col_counts[0][0]
+            current_count = 0
+            part_idx = 0
 
-        for col, cnt in col_counts:
-            current_count += cnt
-            if current_count >= tiles_per_partition and part_idx < num_partitions - 1:
+            for col, cnt in col_counts:
+                current_count += cnt
+                if current_count >= tiles_per_partition and part_idx < num_partitions - 1:
+                    tmp_file = os.path.join(tmp_dir, f"features_{part_idx}.jsonl")
+                    partitions.append((mbtiles_path, current_start, col + 1, search_layers,
+                                       tmp_file, search_zoom))
+                    part_idx += 1
+                    current_start = col + 1
+                    current_count = 0
+
+            # Last partition gets the rest
+            if part_idx < num_partitions:
                 tmp_file = os.path.join(tmp_dir, f"features_{part_idx}.jsonl")
-                partitions.append((mbtiles_path, current_start, col + 1, search_layers, tmp_file))
-                part_idx += 1
-                current_start = col + 1
-                current_count = 0
+                last_col = col_counts[-1][0]
+                partitions.append((mbtiles_path, current_start, last_col + 1, search_layers,
+                                   tmp_file, search_zoom))
 
-        # Last partition gets the rest
-        if part_idx < num_partitions:
-            tmp_file = os.path.join(tmp_dir, f"features_{part_idx}.jsonl")
-            last_col = col_counts[-1][0]
-            partitions.append((mbtiles_path, current_start, last_col + 1, search_layers, tmp_file))
+            processed = 0
+            total_features = 0
+            ctx = multiprocessing.get_context("spawn")
+            with ctx.Pool(num_workers) as pool:
+                for _output_file, batch_count, batch_feats in pool.imap_unordered(
+                    _process_tile_partition, partitions
+                ):
+                    processed += batch_count
+                    total_features += batch_feats
+                    print(f"\r    Processed {processed}/{total_tiles} tiles, {total_features} features (pre-dedup)...", end="", flush=True)
 
-        processed = 0
-        total_features = 0
-        ctx = multiprocessing.get_context("spawn")
-        with ctx.Pool(num_workers) as pool:
-            for _output_file, batch_count, batch_feats in pool.imap_unordered(
-                _process_tile_partition, partitions
-            ):
-                processed += batch_count
-                total_features += batch_feats
-                print(f"\r    Processed {processed}/{total_z14} tiles, {total_features} features (pre-dedup)...", end="", flush=True)
+            print()
 
-        print()
-
-        # Stream features from temp JSONL files for cross-worker dedup
-        print(f"    Cross-worker deduplication from {len(partitions)} temp files...")
-        # Memory shape matters here: at planet scale this pass sees ~1.2e8
-        # features. Keeping the dedup keys as tuples of
-        # (str, str, float, float) AND accumulating every unique feature
-        # dict in a list drove this process to 106 GB RSS on a 125 GB host
-        # (2026-09-05, world tiles v3) — deep into swap, with the OOM
-        # killer one allocation away.
-        #
-        # Two changes keep it bounded:
-        #   * the dedup key becomes a 64-bit blake2b digest as a Python
-        #     int (~50 B in a set, versus several hundred for the tuple).
-        #     Expected collisions across 1.2e8 keys are ~4e-4, i.e. none
-        #     in practice, and a collision would drop one duplicate-
-        #     looking feature from a search index.
-        #   * when we are writing to disk anyway (output_dir set, which is
-        #     how every real caller runs), features stream straight to the
-        #     jsonl instead of piling up in a list.
-        import hashlib
-        stream_out = None
-        if output_dir:
-            raw_path = os.path.join(output_dir, "search_features.raw.jsonl")
-            stream_out = open(raw_path, "w")
-        features = []
-        seen_global = set()
-        n_unique = 0
-        for part_args in partitions:
-            tmp_file = part_args[4]
-            if not os.path.exists(tmp_file):
-                continue
-            with open(tmp_file) as f:
-                for line in f:
-                    feat = json.loads(line)
-                    dedup_key = int.from_bytes(hashlib.blake2b(
-                        ("%s\x00%s\x00%.4f\x00%.4f" % (
-                            feat["name"].lower(), feat["type"],
-                            feat["lat"], feat["lon"])).encode("utf-8"),
-                        digest_size=8).digest(), "big")
-                    if dedup_key not in seen_global:
-                        seen_global.add(dedup_key)
-                        n_unique += 1
-                        if stream_out is not None:
-                            stream_out.write(json.dumps(feat, separators=(",", ":")) + "\n")
-                        else:
-                            features.append(feat)
-            os.unlink(tmp_file)
-        del seen_global
-        if stream_out is not None:
-            stream_out.close()
-
-        # Clean up temp dir
-        try:
-            os.rmdir(tmp_dir)
-        except OSError:
-            pass
-
+            # Stream features from temp JSONL files for cross-worker dedup
+            print(f"    Cross-worker deduplication from {len(partitions)} temp files...")
+            # Memory shape matters here: at planet scale this pass sees ~1.2e8
+            # features. Keeping the dedup keys as tuples of
+            # (str, str, float, float) AND accumulating every unique feature
+            # dict in a list drove this process to 106 GB RSS on a 125 GB host
+            # (2026-09-05, world tiles v3) — deep into swap, with the OOM
+            # killer one allocation away.
+            #
+            # Two changes keep it bounded:
+            #   * the dedup key becomes a 64-bit blake2b digest as a Python
+            #     int (~50 B in a set, versus several hundred for the tuple).
+            #     Expected collisions across 1.2e8 keys are ~4e-4, i.e. none
+            #     in practice, and a collision would drop one duplicate-
+            #     looking feature from a search index.
+            #   * when we are writing to disk anyway (output_dir set, which is
+            #     how every real caller runs), features stream straight to the
+            #     jsonl instead of piling up in a list.
+            import hashlib
+            stream_out = None
+            if output_dir:
+                raw_path = os.path.join(output_dir, "search_features.raw.jsonl")
+                stream_out = streams.enter_context(open(raw_path, "w", encoding="utf-8"))
+            features = []
+            seen_global = set()
+            n_unique = 0
+            for part_args in partitions:
+                tmp_file = part_args[4]
+                if not os.path.exists(tmp_file):
+                    continue
+                with open(tmp_file) as f:
+                    for line in f:
+                        feat = json.loads(line)
+                        dedup_key = int.from_bytes(hashlib.blake2b(
+                            ("%s\x00%s\x00%.4f\x00%.4f" % (
+                                feat["name"].lower(), feat["type"],
+                                feat["lat"], feat["lon"])).encode("utf-8"),
+                            digest_size=8).digest(), "big")
+                        if dedup_key not in seen_global:
+                            seen_global.add(dedup_key)
+                            n_unique += 1
+                            if stream_out is not None:
+                                stream_out.write(json.dumps(feat, separators=(",", ":")) + "\n")
+                            else:
+                                features.append(feat)
+                os.unlink(tmp_file)
+            del seen_global
         print(f"    {n_unique} unique features after cross-worker dedup")
         if stream_out is not None:
             # Location context and the final sort both used to require every
@@ -940,7 +956,6 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
             print(f"    No z14 tiles found, using z{max_z}")
 
         features = []
-        import multiprocessing
         num_workers = build_cpus()
         total_tiles = len(z14_tiles)
         print(f"    Processing {total_tiles} z14 tiles with {num_workers} workers...")
@@ -1009,6 +1024,10 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
             assigned = 0
             with ProcessPoolExecutor(
                 max_workers=num_workers,
+                # Match the tile workers: Python 3.14's forkserver default
+                # needs a Unix socket, which Docker bind-mounted scratch
+                # directories (and long --tmp paths) may not support.
+                mp_context=multiprocessing.get_context("spawn"),
                 initializer=_init_location_worker,
                 initargs=(place_grid_dict,),
             ) as pool:
@@ -1022,12 +1041,15 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
             # For small sets, set the global directly and run in-process
             global _place_grid
             _place_grid = place_grid_dict
-            assigned = 0
-            locs = _assign_location_batch(features)
-            for j, loc in enumerate(locs):
-                if loc:
-                    features[j]["location"] = loc
-                    assigned += 1
+            try:
+                assigned = 0
+                locs = _assign_location_batch(features)
+                for j, loc in enumerate(locs):
+                    if loc:
+                        features[j]["location"] = loc
+                        assigned += 1
+            finally:
+                _place_grid = None
 
         print(f"    Assigned location to {assigned}/{len(features)} features")
 

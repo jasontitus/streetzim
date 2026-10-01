@@ -5,9 +5,11 @@ import gzip
 import html as html_mod
 import json
 import os
+import shutil
 import tempfile
 import time
 import urllib.parse
+from functools import wraps
 from pathlib import Path
 from typing import NamedTuple
 
@@ -23,6 +25,7 @@ from streetzim.common import (
     VIEWER_DIR,
     REPO_ROOT,
     _SEARCH_COORD_DP,
+    peak_rss_bytes,
 )
 from streetzim.routing.build import (
     chunk_graph_file,
@@ -399,18 +402,19 @@ def _resolve_xapianbuilder_binary(override: str | None = None) -> str:
 
     Raises FileNotFoundError if none found.
     """
-    candidates = []
-    if override:
-        candidates.append(override)
     env_path = os.environ.get("XAPIANBUILDER_BIN")
-    if env_path:
-        candidates.append(env_path)
+    explicit = override or env_path
+    if explicit:
+        candidate = Path(explicit).expanduser()
+        if not candidate.is_file() or not os.access(candidate, os.X_OK):
+            raise FileNotFoundError(f"xapianbuilder is not an executable file: {explicit!r}")
+        return str(candidate.resolve())
     repo_root = REPO_ROOT
-    candidates.append(str(repo_root.parent / "xapianbuilder" / "target" / "release" / "xapianbuilder"))
-    candidates.append(str(repo_root.parent / "xapianbuilder" / "target" / "debug" / "xapianbuilder"))
+    candidates = [repo_root.parent / "xapianbuilder" / "target" / build / "xapianbuilder"
+                  for build in ("release", "debug")]
     for c in candidates:
-        if c and os.path.isfile(c) and os.access(c, os.X_OK):
-            return c
+        if c.is_file() and os.access(c, os.X_OK):
+            return str(c.resolve())
     raise FileNotFoundError(
         "xapianbuilder binary not found. Build it with "
         "`cd ../xapianbuilder && cargo build --release` or pass "
@@ -487,6 +491,9 @@ def _streetzim_to_xapianbuilder_jsonl(src_jsonl: str, dst_jsonl: str,
     return n
 
 
+_XAPIAN_TERMINATE_TIMEOUT = 5.0
+
+
 def _build_xapian_via_xapianbuilder(streetzim_xapian_jsonl: str,
                                     workdir: str,
                                     *,
@@ -550,38 +557,73 @@ def _build_xapian_via_xapianbuilder(streetzim_xapian_jsonl: str,
 
     procs = []
     proc_starts: dict[str, float] = {}
-    for mode, out_path, missing in (
-        ("fulltext", ft_glass, not have_ft),
-        ("title",    ti_glass, not have_ti),
-    ):
-        if not missing:
-            continue
-        # Output file must NOT exist (xapianbuilder refuses to
-        # overwrite). Remove any prior partial.
-        try: os.unlink(out_path)
-        except FileNotFoundError: pass
-        cmd = [binary, mode,
-               "--input", xb_jsonl,
-               "--output", out_path,
-               "--language", language,
-               "--jobs", str(jobs),
-               "--quiet"]
-        print(f"      launching xapianbuilder {mode} → {os.path.basename(out_path)}", flush=True)
-        proc_starts[mode] = time.time()
-        procs.append((mode, subprocess.Popen(cmd)))
+    completed = False
+    try:
+        for mode, out_path, missing in (
+            ("fulltext", ft_glass, not have_ft),
+            ("title",    ti_glass, not have_ti),
+        ):
+            if not missing:
+                continue
+            # Output file must NOT exist (xapianbuilder refuses to
+            # overwrite). Remove any prior partial.
+            try: os.unlink(out_path)
+            except FileNotFoundError: pass
+            cmd = [binary, mode,
+                   "--input", xb_jsonl,
+                   "--output", out_path,
+                   "--language", language,
+                   "--jobs", str(jobs),
+                   "--quiet"]
+            print(f"      launching xapianbuilder {mode} → {os.path.basename(out_path)}", flush=True)
+            proc_starts[mode] = time.time()
+            procs.append((mode, subprocess.Popen(cmd)))
 
-    failures = []
-    proc_durs: dict[str, float] = {}
-    pair_t0 = time.time()
-    for mode, p in procs:
-        rc = p.wait()
-        proc_durs[mode] = time.time() - proc_starts[mode]
-        if rc != 0:
-            failures.append((mode, rc))
-    pair_wall = time.time() - pair_t0
-    if failures:
-        details = ", ".join(f"{m}: rc={rc}" for m, rc in failures)
-        raise RuntimeError(f"xapianbuilder failed ({details})")
+        failures = []
+        proc_durs: dict[str, float] = {}
+        pair_t0 = time.time()
+        for mode, p in procs:
+            rc = p.wait()
+            proc_durs[mode] = time.time() - proc_starts[mode]
+            if rc != 0:
+                failures.append((mode, rc))
+        pair_wall = time.time() - pair_t0
+        if failures:
+            details = ", ".join(f"{m}: rc={rc}" for m, rc in failures)
+            raise RuntimeError(f"xapianbuilder failed ({details})")
+        completed = True
+    finally:
+        # A failed second launch or an interrupted wait must not leave an
+        # indexer writing into scratch files that its caller is removing.
+        # Send TERM to both before waiting, then reap each and escalate any
+        # child that does not stop within the grace period.
+        running = [p for _, p in procs if p.poll() is None]
+        for process in running:
+            try:
+                process.terminate()
+            except ProcessLookupError:
+                pass
+        for process in running:
+            try:
+                process.wait(timeout=_XAPIAN_TERMINATE_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                process.wait()
+        if not completed:
+            # Resume accepts a nonempty glass file, so failed jobs must not
+            # leave partial databases behind. Reused databases were never
+            # launched and must survive a failed attempt at the other index.
+            for mode, _ in procs:
+                out_path = ft_glass if mode == "fulltext" else ti_glass
+                try:
+                    os.unlink(out_path)
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    print(f"      warning: could not remove failed {mode} index {out_path}: {exc}", flush=True)
 
     ft_size = os.path.getsize(ft_glass)
     ti_size = os.path.getsize(ti_glass)
@@ -604,7 +646,7 @@ def _build_xapian_via_xapianbuilder(streetzim_xapian_jsonl: str,
     return ft_glass, ti_glass
 
 
-def create_zim(
+def _create_zim(
     output_path,
     tiles,
     tile_metadata,
@@ -662,7 +704,7 @@ def create_zim(
       ``"builder"`` — skip the HTML stubs; stream the search JSONL
         through the external ``xapianbuilder`` to produce glass DBs on
         disk, then add them at namespace 'X' with compress=False.
-        Requires ``zim_builder='rust'`` because the libzim Creator
+        Requires ``zim_builder='manifest'`` because the libzim Creator
         does not accept items in the X namespace via its public API.
       ``"none"`` — skip Xapian entirely. Kiwix native search degrades
         to title-prefix; the in-ZIM places.html (which reads the JSON
@@ -673,44 +715,50 @@ def create_zim(
 
     ``kiwix_poi_pages``: give named POIs a Kiwix page too (KIWIX_PAGE_TYPES).
     """
-    from libzim.writer import Creator as LibzimCreator, Item, StringProvider, FileProvider
+    from libzim.writer import Creator as LibzimCreator, Item, StringProvider, FileProvider, IndexData
     from libzim.writer import Hint
-    # ZSTD compression level for the rust path (--zim-builder rust) only:
-    # libzim does not read ZSTD_CLEVEL and compresses at its own fixed
-    # level (19). The production wrappers set ZSTD_CLEVEL=22. Range is
-    # 1..22; 22 is "max" (slow but smallest).
-    zstd_level = int(os.environ.get("ZSTD_CLEVEL", "22"))
+    if zim_workers is not None and zim_workers < 1:
+        raise ValueError("compression workers must be positive")
     if zim_builder == "rust":
+        zim_builder = "manifest"  # compatibility with existing build wrappers
+    if zim_builder not in {"python", "manifest"}:
+        raise ValueError(f"unknown ZIM builder: {zim_builder!r}")
+    if zim_builder == "manifest":
         from cloud.manifest_writer import ManifestCreator
+        # The Python manifest adapter explicitly configures this level. libzim's
+        # effective default is not exposed through python-libzim's API.
+        zstd_level = int(os.environ.get("ZSTD_CLEVEL", "22"))
         # Capture once for the closure so the lambda captures the
         # resolved value, not the name.
         _level = zstd_level
         Creator = lambda p: ManifestCreator(  # noqa: E731 — small adapter
             p, verbose=True, compression_level=_level
         )
-        print(f"  ZIM compression: zstd level {zstd_level} (rust/zimru path)", flush=True)
+        print(f"  ZIM compression: zstd level {zstd_level} (Python manifest path)", flush=True)
         # Surface the compression level as a build metric so
         # before/after comparisons can attribute size deltas correctly.
         PHASE_TIMER.record_metric(
             "zim-pack: zstd level", str(zstd_level), "")
     else:
         Creator = LibzimCreator
-        # python-libzim's config_compression picks the algorithm, not a
-        # level, and libzim does not read ZSTD_CLEVEL: it compresses at its
-        # own default level.
-        print("  ZIM compression: zstd at libzim's default level (libzim path)", flush=True)
+        # ZSTD_CLEVEL configures the manifest adapter; libzim uses its own
+        # fixed compression default and does not read that environment flag.
+        compression_settings = "libzim default"
+        print(f"  ZIM compression: {compression_settings}", flush=True)
         PHASE_TIMER.record_metric(
-            "zim-pack: zstd level", "libzim default", "")
+            "zim-pack: compression settings", compression_settings, "")
 
-    if xapian_mode == "builder" and zim_builder != "rust":
+    if xapian_mode == "builder" and zim_builder != "manifest":
         # libzim's public Creator API doesn't accept items at the X
         # namespace — that's reserved for libzim's own auto-indexer.
-        # Pre-built Xapian DBs can only be injected via the rust path
-        # which exposes Item::in_namespace.
+        # Pre-built Xapian DBs can only be injected via the manifest writer.
         raise ValueError(
-            "--xapian=builder requires --zim-builder=rust; "
+            "--xapian=builder requires --zim-builder=manifest; "
             "libzim's Creator can't place items in the X namespace"
         )
+    if zim_builder == "manifest" and xapian_mode == "libzim":
+        raise ValueError("--zim-builder=manifest requires --xapian=builder or --xapian=none; "
+                         "the manifest writer cannot run libzim's search indexer")
 
     print(f"  Creating ZIM file: {output_path}")
     print(f"    Name: {name}")
@@ -720,7 +768,7 @@ def create_zim(
     class MapItem(Item):
         """A single item (file) in the ZIM archive.
 
-        ``namespace`` is captured for the rust/zimru emit path
+        ``namespace`` is captured for the manifest emit path
         (``cloud.manifest_writer.ManifestCreator``) which can place items
         into reserved namespaces such as ``'X'`` (Xapian indexes,
         compressed=False by Kiwix convention). The python-libzim path
@@ -738,6 +786,11 @@ def create_zim(
             self._is_front = is_front
             self._compress = compress
             self._namespace = namespace
+            # Keep application chrome out of Kiwix's full-text results. None
+            # selects libzim's normal HTML indexer for content pages; an
+            # empty IndexData explicitly excludes the two application pages.
+            self.get_indexdata = (IndexData
+                                  if path in {"index.html", "places.html"} else None)
             # Normalize content to bytes
             if isinstance(content, (str, Path)) and os.path.isfile(str(content)):
                 self._file_path = str(content)
@@ -773,11 +826,14 @@ def create_zim(
     # rely on the in-ZIM places.html (JSON search-data) for search.
     creator.config_indexing(xapian_mode == "libzim", "en")
     creator.config_clustersize(cluster_size)
-    # One compression thread per core, at most 20 (about 43 MB each; see
-    # streetzim/cpus.py for why the memory rule does not apply here).
+    # Cap Python's default worker count; callers can reduce it for hosts
+    # where compression contexts and the queue consume too much memory.
     num_workers = zim_workers or min(compression_cpus(), 20)
-    print(f"    ZIM compression workers: {num_workers} (tiles: {tile_count if tiles is None else len(tiles)})", flush=True)
-    creator.config_nbworkers(num_workers)
+    shown_workers = (os.environ.get("RAYON_NUM_THREADS", "automatic")
+                     if zim_builder == "manifest" and zim_workers is None else num_workers)
+    print(f"    ZIM compression workers: {shown_workers} (tiles: {tile_count if tiles is None else len(tiles)})", flush=True)
+    if zim_builder != "manifest" or zim_workers is not None:
+        creator.config_nbworkers(num_workers)
     creator.set_mainpath("index.html")
     has_wikidata = bool(wikidata_data)      # as map-config's hasWikidata
     if search_features and not isinstance(search_features, str):
@@ -867,6 +923,32 @@ def create_zim(
     print(f"    Finalized in {finalize_elapsed:.0f}s", flush=True)
     size_mb = os.path.getsize(output_path) / (1024 * 1024)
     print(f"    ZIM file created: {size_mb:.1f} MB")
+
+
+@wraps(_create_zim)
+def create_zim(output_path, *args, **kwargs):
+    """Publish a completed archive atomically, preserving any previous build.
+
+    Both writers may leave files behind on failure (libzim even finalizes
+    when the body raises). Keep all writer output in a private folder on
+    the destination filesystem until finalization has succeeded. A reader
+    sees the previous archive, or the complete replacement, at output_path.
+    """
+    target = Path(output_path).absolute()
+    work = Path(tempfile.mkdtemp(prefix=f".{target.name}.building-", dir=target.parent))
+    try:
+        staged = work / target.name
+        result = _create_zim(str(staged), *args, **kwargs)
+        os.replace(staged, target)
+        return result
+    finally:
+        # ManifestCreator preserves failed manifests and staged bodies for
+        # inspection. Do not erase the path named by its error message.
+        # External inputs (e.g. Xapian scratch files) may already be gone.
+        if any(p.is_dir() for p in work.glob("*.pack-stage-*")):
+            print(f"    Manifest build diagnostics kept for inspection at: {work}")
+        else:
+            shutil.rmtree(work, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1208,8 +1290,7 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
                             print(f"    File size: {os.path.getsize(str(output_path)) / 1e9:.2f} GB", flush=True)
                     except OSError:
                         print("    File not yet created", flush=True)
-                    import resource
-                    mem_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024**3)
+                    mem_gb = peak_rss_bytes() / (1024**3)
                     print(f"    RSS: {mem_gb:.1f} GB", flush=True)
                     print(f"    Threads: {threading.active_count()}", flush=True)
                     # Dump all thread stacks
@@ -1229,154 +1310,160 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
                 stall_seconds = 0
             last_count = current
 
-    watchdog_thread = threading.Thread(target=_watchdog, daemon=True)
+    watchdog_thread = threading.Thread(target=_watchdog, name="streetzim-tile-watchdog", daemon=True)
     watchdog_thread.start()
 
-    # Add vector tiles — decompress in parallel for speed
-    import time
-    import itertools
-    from concurrent.futures import ThreadPoolExecutor
+    tile_source = None
+    try:
+        # Add vector tiles — decompress in parallel for speed
+        import time
+        import itertools
+        from concurrent.futures import ThreadPoolExecutor
 
-    bad_gzip_tiles = []
+        bad_gzip_tiles = []
 
-    def decompress_tile(item):
-        z, x, y, data = item
-        if data[:2] == b"\x1f\x8b":  # gzip magic bytes
-            try:
-                data = gzip.decompress(data)
-            except Exception as exc:
-                # A corrupt tile used to be stored still-gzipped as
-                # application/x-protobuf; MapLibre silently dropped it.
-                bad_gzip_tiles.append((z, x, y, str(exc)))
-                data = b""
-        return z, x, y, data
+        def decompress_tile(item):
+            z, x, y, data = item
+            if data[:2] == b"\x1f\x8b":  # gzip magic bytes
+                try:
+                    data = gzip.decompress(data)
+                except Exception as exc:
+                    # A corrupt tile used to be stored still-gzipped as
+                    # application/x-protobuf; MapLibre silently dropped it.
+                    bad_gzip_tiles.append((z, x, y, str(exc)))
+                    data = b""
+            return z, x, y, data
 
-    # Stream tiles from mbtiles or use in-memory dict
-    if mbtiles_path:
-        # NOT tile_count: that is COUNT(*) over the whole shared world
-        # MBTiles (345 M tiles), which made the progress ETA useless.
-        total_tiles = estimate_tile_total(
-            mbtiles_path, bbox=bbox, max_zoom=max_zoom) or (tile_count or 0)
-        tile_source = iter_tiles_from_mbtiles(mbtiles_path, bbox=bbox, max_zoom=max_zoom)
-    else:
-        total_tiles = len(tiles)
-        tile_source = iter([(z, x, y, data) for (z, x, y), data in sorted(tiles.items())])
+        # Stream tiles from mbtiles or use in-memory dict
+        if mbtiles_path:
+            # NOT tile_count: that is COUNT(*) over the whole shared world
+            # MBTiles (345 M tiles), which made the progress ETA useless.
+            total_tiles = estimate_tile_total(
+                mbtiles_path, bbox=bbox, max_zoom=max_zoom) or (tile_count or 0)
+            tile_source = iter_tiles_from_mbtiles(mbtiles_path, bbox=bbox, max_zoom=max_zoom)
+        else:
+            total_tiles = len(tiles)
+            tile_source = iter([(z, x, y, data) for (z, x, y), data in sorted(tiles.items())])
 
-    print(f"    Adding {total_tiles} vector tiles...", flush=True)
-    tiles_added = 0
-    # Tilemaker emits a 0-byte PBF for every tile coord that has no
-    # features in its bbox (deep ocean / desert / pure-empty). Adding
-    # those wastes a libzim entry per tile (~50 B each) and floods
-    # zimcheck's "Empty article" report (3k–191k per region as of
-    # 2026-04-25). MapLibre treats 404 and "0-byte tile" the same —
-    # nothing to render — so we drop them at write time. Real-content
-    # near-empty tiles (e.g. 55-byte ocean-only with a water/ocean
-    # layer) ARE kept; they paint the right ocean color when MapLibre
-    # styles them.
-    tiles_skipped_empty = 0
-    tile_start = time.time()
-    batch_size = 1000
-    # Adaptive backpressure, ONLY for the libzim builder. With libzim,
-    # add_item() feeds its C++ queue directly, and per-item / per-batch
-    # sleeps let the compression workers drain — guarding the spin-lock
-    # death spiral in libzim's queue.h. With zim_builder="rust" the creator
-    # is ManifestCreator, which appends a line to a file: there is no queue
-    # to drain, so a slow batch means slow disk, and sleeping only made
-    # central-asia's tile phase slower. build-region-fast.sh uses rust, but
-    # --zim-builder defaults to "python" (libzim), which every build
-    # without that flag takes (the `streetzim` command, Zimfarm, the older
-    # ops wrappers), so the guard must stay for them.
-    _libzim_backpressure = (zim_builder != "rust")
-    backpressure_sleep = 0.0
-    # Identical tiles (open sea, tiles inside one landcover polygon) are
-    # stored once; tile_source yields in (z, x, y) order, so the first-seen
-    # target, and the ZIM, are the same on every build.
-    aliaser = TileAliaser(creator)
-    with ThreadPoolExecutor(max_workers=compression_cpus()) as pool:
-        while True:
-            batch = list(itertools.islice(tile_source, batch_size))
-            if not batch:
-                break
-            results = list(pool.map(decompress_tile, batch))
-            if bad_gzip_tiles:
-                # Abort now (the SystemExit below reports it) instead of
-                # spending hours adding the remaining tiles first.
-                break
+        print(f"    Adding {total_tiles} vector tiles...", flush=True)
+        tiles_added = 0
+        # Tilemaker emits a 0-byte PBF for every tile coord that has no
+        # features in its bbox (deep ocean / desert / pure-empty). Adding
+        # those wastes a libzim entry per tile (~50 B each) and floods
+        # zimcheck's "Empty article" report (3k–191k per region as of
+        # 2026-04-25). MapLibre treats 404 and "0-byte tile" the same —
+        # nothing to render — so we drop them at write time. Real-content
+        # near-empty tiles (e.g. 55-byte ocean-only with a water/ocean
+        # layer) ARE kept; they paint the right ocean color when MapLibre
+        # styles them.
+        tiles_skipped_empty = 0
+        tile_start = time.time()
+        batch_size = 1000
+        # Adaptive backpressure, ONLY for the libzim builder. With libzim,
+        # add_item() feeds its C++ queue directly, and per-item / per-batch
+        # sleeps let the compression workers drain — guarding the spin-lock
+        # death spiral in libzim's queue.h. With zim_builder="manifest" the creator
+        # is ManifestCreator, which appends a line to a file: there is no queue
+        # to drain, so a slow batch means slow disk, and sleeping only made
+        # central-asia's tile phase slower. build-region-fast.sh uses rust, but
+        # --zim-builder defaults to "python" (libzim), which every build
+        # without that flag takes (streetzim, Zimfarm, older ops wrappers),
+        # so the guard must stay for them.
+        _libzim_backpressure = (zim_builder != "manifest")
+        backpressure_sleep = 0.0
+        # Identical tiles (open sea, tiles inside one landcover polygon) are
+        # stored once; tile_source yields in (z, x, y) order, so the first-seen
+        # target, and the ZIM, are the same on every build.
+        aliaser = TileAliaser(creator)
+        with ThreadPoolExecutor(max_workers=compression_cpus()) as pool:
+            while True:
+                batch = list(itertools.islice(tile_source, batch_size))
+                if not batch:
+                    break
+                results = list(pool.map(decompress_tile, batch))
+                if bad_gzip_tiles:
+                    # Abort now (the SystemExit below reports it) instead of
+                    # spending hours adding the remaining tiles first.
+                    break
 
-            add_start = time.time()
-            for z, x, y, tile_data in results:
-                # See note above: 0-byte tiles are MVT placeholders for
-                # bbox cells with no features. Drop them — MapLibre
-                # rendering is unaffected, ZIM entries dedup, zimcheck
-                # "Empty article" count goes to 0.
-                if not tile_data:
-                    tiles_skipped_empty += 1
-                    continue
-                item_start = time.time() if _libzim_backpressure else 0.0
-                tile_path = f"tiles/{z}/{x}/{y}.pbf"
-                alias_of = aliaser.target_for(tile_path, tile_data)
-                if alias_of is not None:
-                    # Same bytes as an earlier tile: a second dirent on its
-                    # blob (see streetzim/tile_alias.py).
-                    aliaser.add_alias(tile_path, f"Tile {z}/{x}/{y}",
-                                      alias_of, len(tile_data))
-                else:
-                    creator.add_item(MapItem(
-                        tile_path, f"Tile {z}/{x}/{y}",
-                        "application/x-protobuf",
-                        tile_data,
-                    ))
-                tiles_added += 1
-                _watchdog_tile_count[0] = tiles_added
+                add_start = time.time()
+                for z, x, y, tile_data in results:
+                    # See note above: 0-byte tiles are MVT placeholders for
+                    # bbox cells with no features. Drop them — MapLibre
+                    # rendering is unaffected, ZIM entries dedup, zimcheck
+                    # "Empty article" count goes to 0.
+                    if not tile_data:
+                        tiles_skipped_empty += 1
+                        continue
+                    item_start = time.time() if _libzim_backpressure else 0.0
+                    tile_path = f"tiles/{z}/{x}/{y}.pbf"
+                    alias_of = aliaser.target_for(tile_path, tile_data)
+                    if alias_of is not None:
+                        # Same bytes as an earlier tile: a second dirent on its
+                        # blob (see streetzim/tile_alias.py).
+                        aliaser.add_alias(tile_path, f"Tile {z}/{x}/{y}",
+                                          alias_of, len(tile_data))
+                    else:
+                        creator.add_item(MapItem(
+                            tile_path, f"Tile {z}/{x}/{y}",
+                            "application/x-protobuf",
+                            tile_data,
+                        ))
+                    tiles_added += 1
+                    _watchdog_tile_count[0] = tiles_added
+                    if _libzim_backpressure:
+                        # A single add_item() over 100 ms means libzim's queue
+                        # is full — sleep so the workers can drain.
+                        item_elapsed = time.time() - item_start
+                        if item_elapsed > 0.1:
+                            time.sleep(min(item_elapsed * 2, 2.0))
+                add_time = time.time() - add_start
+
                 if _libzim_backpressure:
-                    # A single add_item() over 100 ms means libzim's queue
-                    # is full — sleep so the workers can drain.
-                    item_elapsed = time.time() - item_start
-                    if item_elapsed > 0.1:
-                        time.sleep(min(item_elapsed * 2, 2.0))
-            add_time = time.time() - add_start
-
-            if _libzim_backpressure:
-                batch_rate = batch_size / add_time if add_time > 0 else float("inf")
-                # No total_tiles clause: it used to be the world
-                # COUNT(*), i.e. always over any threshold, so gating on a
-                # now-region-sized total would quietly disarm this for
-                # small regions on the libzim writer.
-                if batch_rate < 5000:
-                    backpressure_sleep = min(backpressure_sleep + 0.05, 1.0)
-                    time.sleep(backpressure_sleep)
-                elif batch_rate > 15000:
-                    backpressure_sleep = max(backpressure_sleep - 0.01, 0.0)
+                    batch_rate = batch_size / add_time if add_time > 0 else float("inf")
+                    # No total_tiles clause: it used to be the world
+                    # COUNT(*), i.e. always over any threshold, so gating on a
+                    # now-region-sized total would quietly disarm this for
+                    # small regions on the libzim writer.
+                    if batch_rate < 5000:
+                        backpressure_sleep = min(backpressure_sleep + 0.05, 1.0)
+                        time.sleep(backpressure_sleep)
+                    elif batch_rate > 15000:
+                        backpressure_sleep = max(backpressure_sleep - 0.01, 0.0)
 
 
-            if tiles_added % 2000 == 0:
-                elapsed = time.time() - tile_start
-                rate = tiles_added / elapsed if elapsed > 0 else 0
-                remaining = (total_tiles - tiles_added) / rate if rate > 0 else 0
-                import resource
-                mem_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024**3)
-                print(f"\r    Added {tiles_added}/{total_tiles} tiles "
-                      f"({rate:.0f}/s, ~{remaining/60:.0f}m left, {mem_gb:.1f}GB RSS)...",
-                      end="", flush=True)
+                if tiles_added % 2000 == 0:
+                    elapsed = time.time() - tile_start
+                    rate = tiles_added / elapsed if elapsed > 0 else 0
+                    remaining = (total_tiles - tiles_added) / rate if rate > 0 else 0
+                    mem_gb = peak_rss_bytes() / (1024**3)
+                    print(f"\r    Added {tiles_added}/{total_tiles} tiles "
+                          f"({rate:.0f}/s, ~{remaining/60:.0f}m left, {mem_gb:.1f}GB RSS)...",
+                          end="", flush=True)
 
-    elapsed = time.time() - tile_start
-    rate_str = f"{tiles_added/elapsed:.0f}/s" if elapsed > 0 else "instant"
-    if bad_gzip_tiles:
-        _bad = ", ".join(f"{z}/{x}/{y}" for z, x, y, _ in bad_gzip_tiles[:5])
-        raise SystemExit(
-            f"{len(bad_gzip_tiles)} vector tile(s) failed gzip decompression "
-            f"({_bad}{'…' if len(bad_gzip_tiles) > 5 else ''}) — corrupt MBTiles; "
-            f"re-run tilemaker before packaging")
-    skip_str = (f" (skipped {tiles_skipped_empty} empty)"
-                if tiles_skipped_empty else "")
-    print(f"\r    Added {tiles_added} tiles in {elapsed:.0f}s ({rate_str}){skip_str}; "
-          f"{aliaser.summary()}                ", flush=True)
-    PHASE_TIMER.record_subphase(
-        "zim-pack: vector tiles", elapsed,
-        note=f"{tiles_added:,} tiles ({rate_str})"
-             + (f", skipped {tiles_skipped_empty} empty" if tiles_skipped_empty else "")
-             + (f", {aliaser.aliases:,} aliased" if aliaser.aliases else ""))
-    _watchdog_stop.set()  # stop watchdog after tiles
+        elapsed = time.time() - tile_start
+        rate_str = f"{tiles_added/elapsed:.0f}/s" if elapsed > 0 else "instant"
+        if bad_gzip_tiles:
+            _bad = ", ".join(f"{z}/{x}/{y}" for z, x, y, _ in bad_gzip_tiles[:5])
+            raise SystemExit(
+                f"{len(bad_gzip_tiles)} vector tile(s) failed gzip decompression "
+                f"({_bad}{'…' if len(bad_gzip_tiles) > 5 else ''}) — corrupt MBTiles; "
+                f"re-run tilemaker before packaging")
+        skip_str = (f" (skipped {tiles_skipped_empty} empty)"
+                    if tiles_skipped_empty else "")
+        print(f"\r    Added {tiles_added} tiles in {elapsed:.0f}s ({rate_str}){skip_str}; "
+              f"{aliaser.summary()}                ", flush=True)
+        PHASE_TIMER.record_subphase(
+            "zim-pack: vector tiles", elapsed,
+            note=f"{tiles_added:,} tiles ({rate_str})"
+                 + (f", skipped {tiles_skipped_empty} empty" if tiles_skipped_empty else "")
+                 + (f", {aliaser.aliases:,} aliased" if aliaser.aliases else ""))
+    finally:
+        _watchdog_stop.set()
+        watchdog_thread.join()
+        close_source = getattr(tile_source, "close", None)
+        if close_source is not None:
+            close_source()
 
 
 def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, satellite_format, terrain_dir, terrain_max_zoom, bbox, terrain_min_zoom=0):

@@ -6,6 +6,7 @@ stays at module level (pickled by module path)."""
 import itertools
 import os
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -515,8 +516,18 @@ class TerrainPlan:
 
     @property
     def key(self):
-        minlon, minlat, maxlon, maxlat = self.bbox
-        return f"{minlon:.1f}_{minlat:.1f}_{maxlon:.1f}_{maxlat:.1f}"
+        # Adjacent small regions often round to the same tenth of a degree.
+        # They must not share a completion marker or overwrite a VRT built
+        # from a different set of source cells. Python's float repr retains
+        # enough precision to distinguish the input coordinates.
+        return "_".join(str(v) for v in self.bbox)
+
+    @property
+    def vrt_key(self):
+        # A world-backed production plan has a halo of GLO-30 cells; a
+        # fresh plan covers complete regional tile squares instead.
+        layout = f"from{self.min_zoom}" if self.fresh else "world"
+        return f"{self.key}_{layout}"
 
     @property
     def marker_name(self):
@@ -608,16 +619,21 @@ def _download_dem(sources, fpath, stats):
             # complete + looks like a TIFF. Writing in place left a
             # truncated .tif (> 1000 bytes passes every size check) that
             # gdalbuildvrt then used.
-            tmp_path = fpath + ".part"
+            with tempfile.NamedTemporaryFile(prefix=os.path.basename(fpath) + ".part-",
+                                             dir=os.path.dirname(fpath), delete=False) as tmp:
+                tmp_path = tmp.name
             try:
                 with urllib.request.urlopen(req, timeout=float(os.environ.get(
                         "TERRAIN_HTTP_TIMEOUT_S", DEM_HTTP_TIMEOUT_S))) as resp:
+                    expected = resp.headers.get("Content-Length")
                     with open(tmp_path, "wb") as f:
                         while True:
                             chunk = resp.read(1024 * 1024)
                             if not chunk:
                                 break
                             f.write(chunk)
+                if expected is not None and os.path.getsize(tmp_path) != int(expected):
+                    raise OSError("incomplete DEM response (Content-Length mismatch)")
                 with open(tmp_path, "rb") as f:
                     magic = f.read(4)
                 # Classic TIFF or BigTIFF (download_dem.py accepts both).
@@ -778,6 +794,22 @@ def fetch_plan_dems(plan, dem_dir, stats=None):
 
 
 def _write_vrt(tif_paths, out_path, res=None, want_bbox=None):
+    """Publish a complete mosaic, including when another build is using it."""
+    with tempfile.NamedTemporaryFile(prefix=os.path.basename(out_path) + ".building-",
+                                     suffix=".vrt", dir=os.path.dirname(out_path),
+                                     delete=False) as f:
+        staged = f.name
+    try:
+        if _write_vrt_staged(tif_paths, staged, res=res, want_bbox=want_bbox) is None:
+            return None
+        os.replace(staged, out_path)
+        return out_path
+    finally:
+        if os.path.exists(staged):
+            os.unlink(staged)
+
+
+def _write_vrt_staged(tif_paths, out_path, res=None, want_bbox=None):
     """A mosaic VRT of `tif_paths` (gdalbuildvrt when installed, else the
     same XML written directly). `res`: the grid, in degrees; None keeps
     gdalbuildvrt's default (and 1 arc-second without it)."""
@@ -822,13 +854,13 @@ def plan_vrts(plan, dem_dir, stats=None):
         # Use a UNIQUE VRT path per bbox to avoid race conditions when two
         # builds run in parallel and overwrite each other's VRT.
         print("    Building VRT from DEM tiles...")
-        glo30_vrt = _write_vrt(glo30_paths, os.path.join(dem_dir, f"mosaic_{plan.key}.vrt"),
+        glo30_vrt = _write_vrt(glo30_paths, os.path.join(dem_dir, f"mosaic_{plan.vrt_key}.vrt"),
                                want_bbox=plan.bbox)
     if low_paths:
         print(f"    Building low-zoom VRT (z{plan.min_zoom}-z{LOWRES_MAX_ZOOM}, "
               f"full squares of the z{plan.low_zoom} tiles)...")
         low_vrt = _write_vrt(low_paths, os.path.join(
-            dem_dir, f"lowzoom_{plan.key}_z{plan.low_zoom}.vrt"), res=LOWRES_RES)
+            dem_dir, f"lowzoom_{plan.vrt_key}_z{plan.low_zoom}.vrt"), res=LOWRES_RES)
     return glo30_vrt, low_vrt
 
 

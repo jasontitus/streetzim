@@ -1,0 +1,143 @@
+{
+  "description": "Final implementation explicit libzim worker count sweep; same fixed Monaco inputs and warm cache as monaco-summary.json. Three fresh runs per setting, 50ms process-tree RSS samples. Small region, not continent-scale throughput. No PSS on macOS.",
+  "measurements": {
+    "1": [
+      {
+        "wall_s": 3.8819,
+        "cpu_s": 8.1243,
+        "peak_rss_bytes": 3271147520,
+        "peak_child_rss_bytes": 3189047296,
+        "peak_disk_bytes": 2928640,
+        "sampling_error_count": 0
+      },
+      {
+        "wall_s": 3.3448,
+        "cpu_s": 7.8735,
+        "peak_rss_bytes": 3273392128,
+        "peak_child_rss_bytes": 3188506624,
+        "peak_disk_bytes": 2932736,
+        "sampling_error_count": 0
+      },
+      {
+        "wall_s": 3.3165,
+        "cpu_s": 8.0304,
+        "peak_rss_bytes": 3269574656,
+        "peak_child_rss_bytes": 3187933184,
+        "peak_disk_bytes": 2928640,
+        "sampling_error_count": 0
+      }
+    ],
+    "2": [
+      {
+        "wall_s": 3.0772,
+        "cpu_s": 8.089,
+        "peak_rss_bytes": 3252649984,
+        "peak_child_rss_bytes": 3185377280,
+        "peak_disk_bytes": 2932736,
+        "sampling_error_count": 0
+      },
+      {
+        "wall_s": 3.0897,
+        "cpu_s": 7.9393,
+        "peak_rss_bytes": 3270639616,
+        "peak_child_rss_bytes": 3189964800,
+        "peak_disk_bytes": 2936832,
+        "sampling_error_count": 0
+      },
+      {
+        "wall_s": 3.3344,
+        "cpu_s": 8.2469,
+        "peak_rss_bytes": 3265675264,
+        "peak_child_rss_bytes": 3185704960,
+        "peak_disk_bytes": 2932736,
+        "sampling_error_count": 0
+      }
+    ],
+    "4": [
+      {
+        "wall_s": 3.1747,
+        "cpu_s": 7.9597,
+        "peak_rss_bytes": 3269378048,
+        "peak_child_rss_bytes": 3187359744,
+        "peak_disk_bytes": 2928640,
+        "sampling_error_count": 0
+      },
+      {
+        "wall_s": 3.1448,
+        "cpu_s": 8.059,
+        "peak_rss_bytes": 3269738496,
+        "peak_child_rss_bytes": 3188195328,
+        "peak_disk_bytes": 2928640,
+        "sampling_error_count": 0
+      },
+      {
+        "wall_s": 3.0414,
+        "cpu_s": 7.8946,
+        "peak_rss_bytes": 3272097792,
+        "peak_child_rss_bytes": 3190390784,
+        "peak_disk_bytes": 2928640,
+        "sampling_error_count": 0
+      }
+    ],
+    "8": [
+      {
+        "wall_s": 3.1275,
+        "cpu_s": 8.0311,
+        "peak_rss_bytes": 3269672960,
+        "peak_child_rss_bytes": 3186507776,
+        "peak_disk_bytes": 2928640,
+        "sampling_error_count": 0
+      },
+      {
+        "wall_s": 3.4992,
+        "cpu_s": 8.153,
+        "peak_rss_bytes": 3269722112,
+        "peak_child_rss_bytes": 3187310592,
+        "peak_disk_bytes": 2932736,
+        "sampling_error_count": 0
+      },
+      {
+        "wall_s": 3.112,
+        "cpu_s": 7.9945,
+        "peak_rss_bytes": 3258482688,
+        "peak_child_rss_bytes": 3187212288,
+        "peak_disk_bytes": 2928640,
+        "sampling_error_count": 0
+      }
+    ]
+  },
+  "medians": {
+    "1": {
+      "wall_s": 3.3448,
+      "cpu_s": 8.0304,
+      "peak_rss_bytes": 3271147520,
+      "peak_child_rss_bytes": 3188506624,
+      "peak_disk_bytes": 2928640,
+      "sampling_error_count": 0
+    },
+    "2": {
+      "wall_s": 3.0897,
+      "cpu_s": 8.089,
+      "peak_rss_bytes": 3265675264,
+      "peak_child_rss_bytes": 3185704960,
+      "peak_disk_bytes": 2932736,
+      "sampling_error_count": 0
+    },
+    "4": {
+      "wall_s": 3.1448,
+      "cpu_s": 7.9597,
+      "peak_rss_bytes": 3269738496,
+      "peak_child_rss_bytes": 3188195328,
+      "peak_disk_bytes": 2928640,
+      "sampling_error_count": 0
+    },
+    "8": {
+      "wall_s": 3.1275,
+      "cpu_s": 8.0311,
+      "peak_rss_bytes": 3269672960,
+      "peak_child_rss_bytes": 3187212288,
+      "peak_disk_bytes": 2928640,
+      "sampling_error_count": 0
+    }
+  }
+}

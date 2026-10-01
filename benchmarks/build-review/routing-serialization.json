@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "measurement": "synthetic geometry serialization; fresh process per variant; tracemalloc excludes preallocated geometry; not whole graph/build peak",
+  "python": "3.12.13 (main, Mar  3 2026, 12:39:30) [Clang 21.0.0 (clang-2100.0.123.102)]",
+  "platform": "darwin",
+  "samples": [
+    {
+      "variant": "copy",
+      "geometry_bytes": 67108864,
+      "written_bytes": 67108864,
+      "duration_seconds": 0.023148541804403067,
+      "serialization_python_peak_bytes": 67114254,
+      "serialization_python_retained_bytes": 849,
+      "process_peak_rss_bytes": 162594816,
+      "output_sha256": "3b6a07d0d404fab4e23b6d34bc6696a6a312dd92821332385e5af7c01c421351"
+    },
+    {
+      "variant": "direct",
+      "geometry_bytes": 67108864,
+      "written_bytes": 67108864,
+      "duration_seconds": 0.017629459034651518,
+      "serialization_python_peak_bytes": 5357,
+      "serialization_python_retained_bytes": 849,
+      "process_peak_rss_bytes": 93274112,
+      "output_sha256": "3b6a07d0d404fab4e23b6d34bc6696a6a312dd92821332385e5af7c01c421351"
+    }
+  ]
+}

@@ -149,8 +149,6 @@ def estimate_tile_total(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None)
     MBTiles COUNT(*) it already has. The bbox figure is an upper bound -- a sparse MBTiles holds
     fewer rows than the rectangle -- so the ETA errs long, never short.
     """
-    import mercantile
-
     # Same whole-world short-circuit the iterator applies before using bbox.
     if bbox:
         _minlon, _minlat, _maxlon, _maxlat = bbox
@@ -164,41 +162,9 @@ def estimate_tile_total(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None)
         zoom_min, zoom_max = 0, (14 if max_zoom is None else max_zoom)
 
     if bbox:
-        minlon, minlat, maxlon, maxlat = bbox
-        # Web Mercator cuts off near +-85.0511; mercantile.tile() raises
-        # outside it, and several regions (nordics reaches 71N, and a
-        # whole-world bbox that dodges the short-circuit reaches 90) would
-        # otherwise crash the build for the sake of a progress number.
-        lat_lo = max(minlat, -85.0)
-        lat_hi = min(maxlat, 85.0)
-        if lat_lo > lat_hi:
-            return 0
-        total = 0
-        parts = area.split(bbox)
-        for z in range(zoom_min, zoom_max + 1):
-            if len(parts) > 1:
-                # Across the antimeridian: the columns of both sides, once
-                # each (at z0 both sides are the one tile).
-                cols = _merge_ranges([(mercantile.tile(p[0], lat_hi, z).x,
-                                       mercantile.tile(p[2], lat_lo, z).x) for p in parts])
-                ny = (mercantile.tile(parts[0][0], lat_lo, z).y
-                      - mercantile.tile(parts[0][0], lat_hi, z).y + 1)
-                total += sum(c1 - c0 + 1 for c0, c1 in cols) * ny
-                continue
-            ul = mercantile.tile(minlon, lat_hi, z)
-            lr = mercantile.tile(maxlon, lat_lo, z)
-            nx = lr.x - ul.x + 1
-            ny = lr.y - ul.y + 1
-            if nx <= 0 or ny <= 0:
-                # Antimeridian-crossing bbox. Do NOT `continue`: z0 always
-                # yields nx=ny=1, so the function would return 1, and the
-                # caller's `estimate_tile_total(...) or tile_count` treats 1
-                # as a real answer -- total_tiles=1 then breaks the progress
-                # line and disarms the backpressure guard. Bail so the caller
-                # falls back to the MBTiles COUNT(*).
-                return 0
-            total += nx * ny
-        return total
+        return sum((c1 - c0 + 1) * (r1 - r0 + 1)
+                   for z in range(zoom_min, zoom_max + 1)
+                   for c0, c1, r0, r1 in _bbox_tile_ranges(bbox, z))
 
     # Whole-world path: the caller already has get_mbtiles_info()'s COUNT(*),
     # which for a world build IS the right denominator. Return 0 so it falls
@@ -219,6 +185,46 @@ def _merge_ranges(ranges):
     return out
 
 
+def _bbox_tile_ranges(bbox, zoom):
+    """Column and TMS-row rectangles selected by mercantile.tiles, without
+    enumerating their tiles. East/south edges use mercantile's epsilon so
+    bounds of one tile select that tile alone. Across 180, z0 appears once.
+    """
+    import mercantile
+
+    columns = []
+    min_row = max_row = 0
+    for west, south, east, north in area.split(area.normalize(bbox)):
+        west, south = max(-180.0, west), max(-85.051129, south)
+        east, north = min(180.0, east), min(85.051129, north)
+        ul = mercantile.tile(west, north, zoom)
+        lr = mercantile.tile(east - mercantile.LL_EPSILON,
+                             south + mercantile.LL_EPSILON, zoom)
+        if ul.x > lr.x or ul.y > lr.y:
+            continue
+        columns.append((ul.x, lr.x))
+        min_row, max_row = (1 << zoom) - 1 - lr.y, (1 << zoom) - 1 - ul.y
+    return [(lo, hi, min_row, max_row) for lo, hi in _merge_ranges(columns)]
+
+
+def _tile_scan_order(conn):
+    """Use the sequential scan only for a rowid-backed tiles table.
+
+    Normalized MBTiles exposes a view, and cuts may use WITHOUT ROWID:
+    neither has a physical rowid to order by. Older SQLite also lets view
+    rowids read as NULL, which would sort the entire joined tile payload.
+    """
+    kind = conn.execute("SELECT type FROM sqlite_master WHERE name = 'tiles'").fetchone()
+    if kind and kind[0] == "table":
+        try:
+            conn.execute("SELECT rowid FROM tiles LIMIT 0")
+        except sqlite3.OperationalError:
+            pass
+        else:
+            return "rowid"
+    return "zoom_level, tile_column, tile_row"
+
+
 def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None):
     """Yield (z, x, y, data) tuples from MBTiles, streaming from SQLite.
 
@@ -226,98 +232,60 @@ def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=N
     If max_zoom is specified (and zoom_level is not), yields tiles at zoom <= max_zoom.
     If bbox is specified as (minlon, minlat, maxlon, maxlat), only yields
     tiles that intersect the bounding box.
-    Yields in (z, x, y) sorted order for deterministic ZIM insertion.
+    Yields in (z, x, TMS row) sorted order on the regional path.
     """
-
     conn = sqlite3.connect(str(mbtiles_path))
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    # Whole-world bbox: drop the per-zoom column/row index lookups and use
-    # the rowid-sequential scan path instead. World bbox at z13 has 67M
-    # tiles; the index lookup forces a random heap fetch per tile_data BLOB
-    # against a 113 GB MBTiles, which is ~1500x slower than scanning the
-    # heap in rowid order (sqlite stores rows in zoom-major order from
-    # tilemaker's insert pattern, so z<=max_zoom rows are contiguous in
-    # the early part of the file).
-    if bbox:
-        _minlon, _minlat, _maxlon, _maxlat = bbox
-        if (_minlon <= -179.0 and _maxlon >= 179.0
-                and _minlat <= -84.0 and _maxlat >= 84.0):
-            bbox = None
+        # On whole-world inputs a sequential heap scan avoids random BLOB
+        # lookups. Keep this fast path for large tilemaker databases.
+        if bbox:
+            minlon, minlat, maxlon, maxlat = bbox
+            if (minlon <= -179.0 and maxlon >= 179.0
+                    and minlat <= -84.0 and maxlat >= 84.0):
+                bbox = None
 
-    if bbox:
-        import mercantile
-        minlon, minlat, maxlon, maxlat = bbox
-
-        # Query per zoom level with SQL-level column/row filtering
-        # This avoids reading 100+ GB of out-of-bbox tiles through Python
-        zoom_min = 0
-        if zoom_level is not None:
-            zoom_min = zoom_level
-            zoom_max = zoom_level
-        elif max_zoom is not None:
-            zoom_max = max_zoom
+        if bbox:
+            zoom_min = zoom_level if zoom_level is not None else 0
+            zoom_max = (zoom_level if zoom_level is not None
+                        else max_zoom if max_zoom is not None else 14)
+            for z in range(zoom_min, zoom_max + 1):
+                n = 1 << z
+                for min_col, max_col, min_tms_row, max_tms_row in _bbox_tile_ranges(bbox, z):
+                    cursor.execute(
+                        "SELECT zoom_level, tile_column, tile_row, tile_data "
+                        "FROM tiles WHERE zoom_level = ? "
+                        "AND tile_column >= ? AND tile_column <= ? "
+                        "AND tile_row >= ? AND tile_row <= ? "
+                        "ORDER BY tile_column, tile_row",
+                        (z, min_col, max_col, min_tms_row, max_tms_row),
+                    )
+                    for zz, x, tms_y, data in cursor:
+                        yield zz, x, n - 1 - tms_y, data
         else:
-            zoom_max = 14
-
-        # One box, or two across the antimeridian (streetzim/area.py).
-        parts = area.split((minlon, minlat, maxlon, maxlat))
-        for z in range(zoom_min, zoom_max + 1):
-            n = 1 << z
-            col_ranges = []
-            min_tms_row = max_tms_row = 0
-            for part in parts:
-                # Get tile column/row bounds for this zoom
-                tiles_in_bbox = list(mercantile.tiles(*part, zooms=z))
-                if not tiles_in_bbox:
-                    continue
-                min_col = min(t.x for t in tiles_in_bbox)
-                max_col = max(t.x for t in tiles_in_bbox)
-                # Convert XYZ y to TMS y for SQL filter
-                min_tms_row = min(n - 1 - t.y for t in tiles_in_bbox)
-                max_tms_row = max(n - 1 - t.y for t in tiles_in_bbox)
-                col_ranges.append((min_col, max_col))
-
-            # Columns ascending, each once: the two sides of the
-            # antimeridian are the two ends of the row (one tile at z0).
-            for min_col, max_col in _merge_ranges(col_ranges):
+            if zoom_level is not None:
                 cursor.execute(
                     "SELECT zoom_level, tile_column, tile_row, tile_data "
-                    "FROM tiles WHERE zoom_level = ? "
-                    "AND tile_column >= ? AND tile_column <= ? "
-                    "AND tile_row >= ? AND tile_row <= ? "
-                    "ORDER BY tile_column, tile_row",
-                    (z, min_col, max_col, min_tms_row, max_tms_row),
+                    "FROM tiles WHERE zoom_level = ? ORDER BY zoom_level, tile_column, tile_row",
+                    (zoom_level,),
                 )
-                for zz, x, tms_y, data in cursor:
-                    y = n - 1 - tms_y
-                    yield zz, x, y, data
-    else:
-        if zoom_level is not None:
-            cursor.execute(
-                "SELECT zoom_level, tile_column, tile_row, tile_data "
-                "FROM tiles WHERE zoom_level = ? ORDER BY zoom_level, tile_column, tile_row",
-                (zoom_level,),
-            )
-        elif max_zoom is not None:
-            # ORDER BY rowid drives a sequential heap scan rather than an
-            # index-driven query that does random rowid lookups for each
-            # tile_data BLOB. On a 113 GB world MBTiles backed by spinning
-            # disks the difference is ~30 min vs ~22 hr.
-            cursor.execute(
-                "SELECT zoom_level, tile_column, tile_row, tile_data "
-                "FROM tiles WHERE zoom_level <= ? ORDER BY rowid",
-                (max_zoom,),
-            )
-        else:
-            cursor.execute(
-                "SELECT zoom_level, tile_column, tile_row, tile_data "
-                "FROM tiles ORDER BY zoom_level, tile_column, tile_row"
-            )
-        for z, x, tms_y, data in cursor:
-            y = (1 << z) - 1 - tms_y
-            yield z, x, y, data
-    conn.close()
+            elif max_zoom is not None:
+                # Sequential reads matter on continent-sized tilemaker files.
+                cursor.execute(
+                    "SELECT zoom_level, tile_column, tile_row, tile_data "
+                    "FROM tiles WHERE zoom_level <= ? ORDER BY " + _tile_scan_order(conn),
+                    (max_zoom,),
+                )
+            else:
+                cursor.execute(
+                    "SELECT zoom_level, tile_column, tile_row, tile_data "
+                    "FROM tiles ORDER BY zoom_level, tile_column, tile_row"
+                )
+            for z, x, tms_y, data in cursor:
+                yield z, x, (1 << z) - 1 - tms_y, data
+    finally:
+        conn.close()
 
 
 def extract_tiles_from_mbtiles(mbtiles_path, max_zoom=None):

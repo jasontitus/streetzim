@@ -60,7 +60,7 @@ def test_a_world_dem_keeps_the_production_layout(tmp_path):
     assert not plan.fresh and plan.min_zoom == 0 and plan.low_cells == []
     # bbox + 1 degree of GLO-30, as before.
     assert sorted(plan.glo30_cells) == [(lat, lon) for lat in (42, 43, 44) for lon in (6, 7, 8)]
-    assert plan.marker_name == "COMPLETED_z12_7.4_43.7_7.4_43.8"
+    assert plan.marker_name == "COMPLETED_z12_7.4_43.72_7.44_43.76"
     assert plan.vrt_for_zoom(7, "regional.vrt", None) == str(world)
     assert plan.vrt_for_zoom(8, "regional.vrt", None) == "regional.vrt"
 
@@ -301,7 +301,7 @@ def test_the_audit_fails_an_interior_blank_tile_by_the_size_rule(tmp_path, fake_
     zero[..., 0], zero[..., 1], zero[..., 2] = 1, 134, 160      # 0 m everywhere
     Image.fromarray(zero).save(tile, "WEBP", lossless=True)
     assert os.path.getsize(tile) < 500
-    dem = rasterio.open(os.path.join(T.dem_sources_dir(), f"mosaic_{plan.key}.vrt"))
+    dem = rasterio.open(os.path.join(T.dem_sources_dir(), f"mosaic_{plan.vrt_key}.vrt"))
     assert T._blank_over_land(str(tile), t, dem)
     with pytest.raises(RuntimeError, match="over land"):
         T.audit_terrain(plan, str(dest))
@@ -322,7 +322,7 @@ def test_a_zeroed_tile_below_sea_level_is_caught(tmp_path, fake_dem):
     T.audit_terrain(plan, str(dest))
     _zero(tile, slice(128, None))                  # half: the size rule misses it
     assert not T._blank_over_land(str(tile), t, rasterio.open(
-        os.path.join(T.dem_sources_dir(), f"lowzoom_{plan.key}_z8.vrt")))
+        os.path.join(T.dem_sources_dir(), f"lowzoom_{plan.vrt_key}_z8.vrt")))
     with pytest.raises(RuntimeError, match="0 m over land"):
         T.audit_terrain(plan, str(dest))
 
@@ -420,6 +420,9 @@ def test_the_download_budget_stops_a_slow_build(tmp_path, fake_dem, monkeypatch)
 
 
 class _Resp(io.BytesIO):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.headers = {}
     def __enter__(self):
         return self
 

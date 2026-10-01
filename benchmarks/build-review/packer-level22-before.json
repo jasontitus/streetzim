@@ -1,0 +1,99 @@
+{
+  "platform": "darwin",
+  "python": "3.12.13",
+  "payload_bytes": 67108864,
+  "threads": 1,
+  "stream_items": 4,
+  "compression_level": 22,
+  "max_in_flight_bytes": 1048576,
+  "manifest_writer": "/private/tmp/streetzim-manifest-writer-baseline.py",
+  "pack_binary": "/private/tmp/streetzim-pack-review-target/release/streetzim-pack-baseline",
+  "measurements": {
+    "serialize": [
+      {
+        "wall_s": 0.43872141605243087,
+        "cpu_s": 0.4067,
+        "peak_rss_bytes": 356581376,
+        "stage_bytes": 89478696
+      },
+      {
+        "wall_s": 0.4471433327998966,
+        "cpu_s": 0.409749,
+        "peak_rss_bytes": 356417536,
+        "stage_bytes": 89478696
+      },
+      {
+        "wall_s": 0.4601527499035001,
+        "cpu_s": 0.419274,
+        "peak_rss_bytes": 356401152,
+        "stage_bytes": 89478696
+      }
+    ],
+    "pack_raw": [
+      {
+        "wall_s": 0.6953530840110034,
+        "cpu_s": 0.55889,
+        "peak_rss_bytes": 477102080,
+        "output_bytes": 268501479
+      },
+      {
+        "wall_s": 0.6187127500306815,
+        "cpu_s": 0.5476449999999999,
+        "peak_rss_bytes": 477102080,
+        "output_bytes": 268501479
+      },
+      {
+        "wall_s": 0.55948416586034,
+        "cpu_s": 0.549482,
+        "peak_rss_bytes": 477118464,
+        "output_bytes": 268501479
+      }
+    ],
+    "pack_zstd": [
+      {
+        "wall_s": 2.777516874950379,
+        "cpu_s": 2.771146,
+        "peak_rss_bytes": 947683328,
+        "output_bytes": 89671
+      },
+      {
+        "wall_s": 2.752773709129542,
+        "cpu_s": 2.75578,
+        "peak_rss_bytes": 947699712,
+        "output_bytes": 89671
+      },
+      {
+        "wall_s": 2.7602884171064943,
+        "cpu_s": 2.768201,
+        "peak_rss_bytes": 947699712,
+        "output_bytes": 89671
+      }
+    ]
+  },
+  "medians": {
+    "serialize": {
+      "wall_s": 0.4471433327998966,
+      "cpu_s": 0.409749,
+      "peak_rss_bytes": 356417536,
+      "stage_bytes": 89478696
+    },
+    "pack_raw": {
+      "wall_s": 0.6187127500306815,
+      "cpu_s": 0.549482,
+      "peak_rss_bytes": 477102080,
+      "output_bytes": 268501479
+    },
+    "pack_zstd": {
+      "wall_s": 2.7602884171064943,
+      "cpu_s": 2.768201,
+      "peak_rss_bytes": 947699712,
+      "output_bytes": 89671
+    }
+  },
+  "status": "baseline",
+  "baseline_commit": "d5c32b6",
+  "zimru_commit": "061afbc",
+  "build_profile": "release",
+  "measurement_method": "fresh process wait4; ru_maxrss is bytes on macOS; median of repetitions",
+  "limitations": "Compressible repeated-byte synthetic workload. Raw final verification maps output pages. Wall times are short and affected by host load and temporary-file fsync/copy costs. This is not a continent-build throughput estimate."
+}

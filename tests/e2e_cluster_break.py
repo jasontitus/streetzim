@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""End-to-end check of the builder's zoom clustering, run when both binaries
-exist (not a pytest test: needs a zimru checkout and cargo):
+"""End-to-end check of the manifest packer's zoom clustering:
 
   python3 tests/e2e_cluster_break.py
 
 Writes a manifest through ManifestCreator with three "zooms" of tiles and a
 cluster_break at every boundary plus a smaller target inside, packs it with
-streetzim-pack (built with --features cluster_break), and asserts with
+the default Python packer, and asserts with
 cloud/zimfmt that no cluster mixes zooms, that the target changed, and that
-the default target is back for what follows. Also runs zimru's zimcheck.
+the default target is back for what follows. Also runs an available zimcheck.
+STREETZIM_PACK_BIN can select a legacy Rust executable built with the
+cluster_break feature and the zimru flush patch (docs/zim-builder-rust.md).
 """
 from __future__ import annotations
 
@@ -48,9 +49,10 @@ def main() -> int:
     out = Path(tempfile.mkdtemp()) / "cb.zim"
     def tile_bytes():
         return os.urandom(3000) + b"x" * 5000        # ~8 KB, half incompressible, unique
-    with ManifestCreator(str(out), compression_level=3, verbose=False) as c:
-        c.config_clustersize(64 * 1024)                # build default: 64 KiB
-        c.set_mainpath("index.html")
+    creator = ManifestCreator(str(out), compression_level=3, verbose=False)
+    creator.config_clustersize(64 * 1024)              # build default: 64 KiB
+    creator.set_mainpath("index.html")
+    with creator as c:
         for k, v in (("Title", "cb"), ("Description", "cluster break e2e"), ("Language", "eng"),
                      ("Creator", "streetzim"), ("Publisher", "streetzim"), ("Date", "2026-09-21"),
                      ("Name", "cb_e2e")):

@@ -97,7 +97,10 @@ def _usable_cores() -> int:
     if count is not None:
         return count() or 1
     try:
-        return len(os.sched_getaffinity(0)) or 1
+        affinity = getattr(os, "sched_getaffinity", None)
+        if affinity is None:
+            return os.cpu_count() or 1
+        return len(affinity(0)) or 1
     except (AttributeError, OSError):
         return os.cpu_count() or 1
 

@@ -28,6 +28,14 @@ from streetzim import paths as _paths
 _builtin_print = print
 
 
+def peak_rss_bytes() -> int:
+    """Process high-water RSS, normalized across Linux (KiB) and macOS (bytes)."""
+    import resource
+    import sys
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return int(rss * (1 if sys.platform == "darwin" else 1024))
+
+
 class _PhaseTimer:
     """Tracks (start, end) wall-clock for each numbered phase the
     script announces, plus the overall build window. ``start(name)``

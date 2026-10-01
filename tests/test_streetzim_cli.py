@@ -141,7 +141,10 @@ def test_monaco_preset_frames_all_of_monaco_with_sea_around_it():
     assert e - w <= 0.1 and n - s <= 0.1                 # still a small CI build
 
 
-def test_terrain_follows_the_profile_and_its_flags(tmp_path, no_network):
+def test_terrain_follows_the_profile_and_its_flags(tmp_path, no_network, monkeypatch):
+    # This checks terrain flag translation; Overture downloads have their
+    # own profile tests and must not require live network access here.
+    monkeypatch.setattr(cli, "fetch_overture", lambda *args: {})
     def terrain(extra):
         args = cli.parse_args(REQ + ["--area", "monaco"] + extra)
         return builder_args(cli.plan(args, tmp_path)[0]).terrain
@@ -380,3 +383,168 @@ def test_bands_round_the_world_are_still_refused(tmp_path, monkeypatch):
     _fake_poly(monkeypatch, ring)
     with pytest.raises(ValueError, match="all the way round"):
         plan(["--include-poly", "https://example.org/ring.poly", "--pbf-url", "x"], tmp_path)
+
+
+def test_concurrent_builds_have_independent_cut_workspaces(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+
+    scratch = tmp_path / 'scratch'
+    legacy = scratch / 'mbtiles-cut'
+    legacy.mkdir(parents=True)
+    (legacy / 'area.mbtiles').write_bytes(b'another build')
+    ready = threading.Barrier(2, timeout=10)
+    workspaces = []
+
+    def build(args, dl, illustration, work, building, final):
+        workspaces.append(work)
+        cut = work / 'area.mbtiles'
+        contents = str(work).encode()
+        cut.write_bytes(contents)
+        ready.wait()
+        # Both invocations are active. Neither startup may clear the other.
+        assert cut.read_bytes() == contents
+        return 0
+
+    monkeypatch.setattr(cli, '_build', build)
+    argv = REQ + ['--area', 'monaco', '--profile', 'basic',
+                  '--output', str(tmp_path / 'out'), '--tmp', str(scratch)]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(cli.main, argv) for _ in range(2)]
+        assert [f.result() for f in futures] == [0, 0]
+    assert len(set(workspaces)) == 2
+    assert all(p.parent == scratch for p in workspaces)
+    assert all(not p.exists() for p in workspaces)
+    assert (legacy / 'area.mbtiles').read_bytes() == b'another build'
+
+
+@pytest.mark.parametrize('failure', [RuntimeError('build failed'), SystemExit(143)])
+@pytest.mark.parametrize('keep_flag', [None, '--debug', '--keep-temp'])
+def test_cut_workspace_cleanup_on_failure(tmp_path, monkeypatch, failure, keep_flag):
+    workspaces = []
+
+    def build(args, dl, illustration, work, building, final):
+        workspaces.append(work)
+        (work / 'area.mbtiles').write_bytes(b'partial')
+        raise failure
+
+    monkeypatch.setattr(cli, '_build', build)
+    argv = REQ + ['--area', 'monaco', '--profile', 'basic',
+                  '--output', str(tmp_path / 'out'), '--tmp', str(tmp_path / 'scratch')]
+    if keep_flag:
+        argv.append(keep_flag)
+    with pytest.raises(type(failure)):
+        cli.main(argv)
+    assert len(workspaces) == 1
+    if keep_flag:
+        assert (workspaces[0] / 'area.mbtiles').read_bytes() == b'partial'
+    else:
+        assert not workspaces[0].exists()
+
+
+def test_local_fetch_handles_escaped_urls_and_same_second_updates(tmp_path):
+    import os
+    src = tmp_path / 'source with spaces.pbf'
+    src.write_bytes(b'old')
+    dest = tmp_path / 'download.pbf'
+    assert cli.fetch(src.as_uri(), dest).read_bytes() == b'old'
+    before = src.stat()
+    src.write_bytes(b'new')
+    os.utime(src, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000))
+    assert cli.fetch(src.as_uri(), dest).read_bytes() == b'new'
+    # Interrupted metadata writes from an old run are recovered.
+    dest.with_name(dest.name + '.source.json').write_text('{broken')
+    assert cli.fetch(src.as_uri(), dest).read_bytes() == b'new'
+
+
+@pytest.mark.parametrize('overwrite', [False, True])
+def test_concurrent_same_output_uses_private_staging_and_respects_overwrite(
+        tmp_path, monkeypatch, overwrite):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    import create_osm_zim
+
+    ready = threading.Barrier(2, timeout=10)
+    stages = []
+    illustrations = []
+    monkeypatch.setattr(cli, 'plan', lambda *args, **kwargs: ([], {}))
+    from streetzim import zim_metadata
+    monkeypatch.setattr(zim_metadata, 'load_illustration', lambda url: url.encode())
+
+    def builder(argv):
+        path = Path(argv[argv.index('-o') + 1])
+        stages.append(path)
+        path.write_bytes(str(path).encode())
+        ready.wait()
+        # Each invocation's archive remains its own while both are active.
+        assert path.read_bytes() == str(path).encode()
+
+    original_build = cli._build
+
+    def build(args, dl, illustration, work, building, final):
+        illustrations.append(illustration)
+        assert illustration.parent == work
+        assert illustration.read_bytes() == args.illustration_url.encode()
+        return original_build(args, dl, illustration, work, building, final)
+
+    monkeypatch.setattr(cli, '_build', build)
+    monkeypatch.setattr(create_osm_zim, 'main', builder)
+    argv = REQ + ['--bbox=7.4,43.72,7.44,43.76', '--mbtiles', 'unused', '--no-routing',
+                  '--profile', 'basic', '--file-name', 'same',
+                  '--output', str(tmp_path / 'out'), '--tmp', str(tmp_path / 'scratch')]
+    if overwrite:
+        argv.append('--overwrite')
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(cli.main, argv + ['--illustration-url', str(i)]) for i in range(2)]
+        results = [f.result() for f in futures]
+    assert sorted(results) == ([0, 0] if overwrite else [0, 2])
+    assert len(set(stages)) == 2
+    assert len(set(illustrations)) == 2
+    final = tmp_path / 'out' / 'same.zim'
+    assert final.read_bytes() in {str(stage).encode() for stage in stages}
+    assert list(final.parent.iterdir()) == [final]
+
+
+def test_failed_overwrite_preserves_published_output_and_cleans_staging(tmp_path, monkeypatch):
+    import create_osm_zim
+    out = tmp_path / 'out'
+    out.mkdir()
+    final = out / 'same.zim'
+    final.write_bytes(b'published')
+    monkeypatch.setattr(cli, 'plan', lambda *args, **kwargs: ([], {}))
+
+    def fail(argv):
+        Path(argv[argv.index('-o') + 1]).write_bytes(b'partial')
+        raise RuntimeError('writer failed')
+
+    monkeypatch.setattr(create_osm_zim, 'main', fail)
+    with pytest.raises(RuntimeError, match='writer failed'):
+        cli.main(REQ + ['--bbox=7.4,43.72,7.44,43.76', '--mbtiles', 'unused', '--no-routing',
+                        '--profile', 'basic', '--file-name', 'same', '--overwrite',
+                        '--output', str(out), '--tmp', str(tmp_path / 'scratch')])
+    assert final.read_bytes() == b'published'
+    assert list(out.iterdir()) == [final]
+
+
+@pytest.mark.parametrize('workers', ['0', '-1'])
+def test_invalid_compression_workers_fail_before_download(tmp_path, no_network, capsys, workers):
+    with pytest.raises(SystemExit) as error:
+        cli.main(REQ + ['--area', 'monaco', '--zim-workers', workers,
+                        '--output', str(tmp_path / 'out'), '--tmp', str(tmp_path / 'scratch')])
+    assert error.value.code == 2
+    error_text = capsys.readouterr().err
+    assert '--zim-workers' in error_text and 'must be at least 1' in error_text
+    assert no_network == []
+
+
+def test_http_protocol_failure_is_reported_without_publishing_output(tmp_path, monkeypatch, capsys):
+    import http.client
+
+    def interrupted(url, dest):
+        raise http.client.IncompleteRead(b'partial', 10)
+
+    monkeypatch.setattr(cli, 'fetch', interrupted)
+    assert cli.main(REQ + ['--area', 'monaco', '--profile', 'basic',
+                          '--output', str(tmp_path / 'out'), '--tmp', str(tmp_path / 'scratch')]) == 2
+    assert 'IncompleteRead' in capsys.readouterr().err
+    assert list((tmp_path / 'out').iterdir()) == []

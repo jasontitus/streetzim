@@ -1,0 +1,97 @@
+{
+  "baseline_commit": "d5c32b6045604d19584f9d9280cedc33d7c8d01a",
+  "status": "working tree, uncommitted",
+  "suites": {
+    "macOS Python3.12": {
+      "passed": 1192,
+      "skipped": 303
+    },
+    "Linux Python3.12": {
+      "passed": 1184,
+      "skipped": 311
+    },
+    "Linux Python3.14": {
+      "passed": 1184,
+      "skipped": 311
+    }
+  },
+  "rust": {
+    "unit_tests_passed": 8,
+    "adapter_real_archive_tests_passed": 19,
+    "independent_adversarial_cases_passed": 12,
+    "clippy": "passed"
+  },
+  "xapian_lifecycle_tests_passed": 9,
+  "golden": {
+    "identical_entries": 1167,
+    "volatile_indexes": 2,
+    "unexpected_differences": 0
+  },
+  "native_validation": {
+    "python_monaco": "passed",
+    "rust_monaco": "passed",
+    "stock_zimcheck_version": "3.8.0",
+    "stock_zimcheck": "both archives passed"
+  },
+  "browser_smoke": {
+    "passed": 17,
+    "failed": 0
+  },
+  "node_suites_passed": 7,
+  "gates": {
+    "ruff_reviewed_source": "passed",
+    "pyright": "no new findings;17baseline",
+    "viewer_ESLint": "passed",
+    "generated_viewer": "passed",
+    "pinned_assets": "passed",
+    "offliner": "passed",
+    "core_ops_boundary_clean_snapshot": "passed"
+  },
+  "environment_notes": [
+    "macOS Homebrew GDAL and stock zimcheck have broken dylib dependencies; supported VRT fallback and isolated Linux/current stock tooling used",
+    "Root boundary gate encounters a pre-existing deleted file; Ruff finds unused math import in unrelated untracked script. User-owned files preserved; clean tracked overlay gates pass",
+    "Python3.14 suite exits0 after dependency shutdown diagnostics; large region/optional input tests skip without archives"
+  ],
+  "reviewed_source_sha256": {
+    "MAINTAINING.md": "728e836de436c16b1c470003c2d3a2453c5b71b243f1841fdcd1dd65c28be4b3",
+    "cloud/manifest_writer.py": "efa8f96116de5098816f010339b224a5875964adcb60b2bd0df7a177d528f40d",
+    "create_osm_zim.py": "7e6798e42ef64bcc8404583c77c2846787ff7b0a0719b8d78f2e571fa622106d",
+    "docs/build-review.md": "548d8b364a4a002595072b4f489f8ded41417e6dfcebdf07e95218f040bd173f",
+    "docs/zim-builder-rust.md": "b827789ac0861fa6e21d3813d8aa3241a62accc15b3a715c58b09a67b6a7eb19",
+    "pyright-baseline.json": "f141451df6f14568940ccd649f78be079296d76863d7c5e29095081ba99eb13e",
+    "rust/streetzim-pack/Cargo.lock": "caa094d9faf3a63e6f3aad5bcd753270274eabf174d933b78ffb7f10df9bd372",
+    "rust/streetzim-pack/src/main.rs": "c1cd8b5d5f755c531ee92c38db510f3072d3e48950a241c43d135cb1cd2cff4c",
+    "streetzim/addresses.py": "3bbd04072aac65ba5968507c29757f84a6e0058186baafbabc1edf8bec5c6191",
+    "streetzim/cli.py": "9162971c6ef5d3aa095392d5a1f425aa2f3631aa6719a735d4e02ba6207499b8",
+    "streetzim/common.py": "836fdc2b1b52bd428a3079d3ad068103c2b561297b3df5587be3d9c2eb4713ec",
+    "streetzim/download.py": "b73c0ece77c1e2056c4f8dabb5f186b4a6d7dc47a36e1d605f82da1d61a059ba",
+    "streetzim/routing/build.py": "1817bf343e50b3a91647918a3b7a5c8cd96a9114cc59930b07fccf37c182e901",
+    "streetzim/satellite.py": "ee2539e00ab3eb8b5837e4089ae5b68dbd835c95466757630d14c8b1d3804eee",
+    "streetzim/search_extract.py": "bc7460b8637a786ac37727ed479bf851260cdcf9537a69e4be1475119929b64b",
+    "streetzim/terrain.py": "4b55d5cbf6082588614b2c560174baed7062cc099487e69f0c1cb1d3d59858f6",
+    "streetzim/tiles.py": "86991f269046c294c32e3e255ee94ddb72c64fb177e56d53b7b6b5588f8c5b42",
+    "streetzim/zim_writer.py": "d6e184adade7a13f7e7ef10066b9b1b032b022d6602714ee0f3b77e018d7e6c7",
+    "tests/test_atomic_zim.py": "511c7415396324aec838e14391c6676cf95ea87ce08214755cb9b30237293650",
+    "tests/test_build_resource_cleanup.py": "e518879a6ae1d54388e8c94e2f126a4bf45a3a27dbd31f9a09be54b35ecda658",
+    "tests/test_kiwix_search_pages.py": "57a2182479dd002824c66623888c0828f362b934ee0e5ebc33aa273651b4e32f",
+    "tests/test_manifest_writer.py": "aa63dd8101a09ae7454c2190811cef02002984648dd888b8838f7903b8082395",
+    "tests/test_mbtiles_download.py": "870bdd55de6cfe4bbb72bf584e520d3c8e8a8695a7596619c5e0b31887d434f7",
+    "tests/test_measure_build.py": "cef5b89368e94c37a88a9015d208fb8e9c4a77bd8a5b4ea70724d5b3683da251",
+    "tests/test_overture.py": "981337fb33439f601c66d0fbb01e327a2f407081b04b185c7ee135718cee4420",
+    "tests/test_routing_scratch.py": "941f71114b2bd362da6923f8ae49d0a33cdbad57749239bed171dcf5a74ba376",
+    "tests/test_satellite_streaming.py": "56f09149ac549c3c3c7a85d9bdb4f28b4bed6b844d471e2c68f87a59f52eba4d",
+    "tests/test_search_extract.py": "e344449759f9bb0d88ff499b7b6f0f03861849da8eb0af95a78a9f6df5035a0e",
+    "tests/test_search_integrity.py": "f9452685b8641143d3d49f504321b4b7c1a1c36377606ee415811c5bcbb1bbe4",
+    "tests/test_streaming_features.py": "c70f709be84332c8044ca94441aabc37c3b2f6700cda2ce92a2beb5b4f553d4e",
+    "tests/test_streetzim_cli.py": "2ead400007b16dfe121f4e915fdf7d77fd03ae9fabdca3f8d0e7feedd195ed59",
+    "tests/test_terrain_plan.py": "c3b38c2c17cecea216e934c0952bf2b27ce395cf7a2252686b08a9605baaf928",
+    "tests/test_terrain_publication.py": "a394eddb46d56e98ce278df52091aeb58fe468fa5e4e6d848c7e0f3390a380bd",
+    "tests/test_tile_streaming.py": "63cae6a82ae5e21d1f3cd47e36cf1ca9a6fe3a771ffc9de3030c0bbf1dee3d3a",
+    "tests/test_xapian_process_cleanup.py": "eceb6b375f7722eb71e00cd0260bd23d923d1cab0d3c524798e817b5b651dc0b",
+    "tools/benchmark_routing_serialization.py": "6f3defc75948edbbf61421bdd3f5c6bc411dc7e4559d7fadc9f5ad8dc16d44f9",
+    "tools/benchmark_search_memory.py": "ef816bf592ee8237b703bcf19ed72b451bdc271b8ef5d399799302fa0274dd07",
+    "tools/benchmark_tile_pipeline.py": "52e3937347c821fd05a577e1d2994713d61023fde50d8cf28519835698d4bb86",
+    "tools/benchmark_zim_pack.py": "4c1d064ddc83c03231f71b19265c6316607ad1d3986cdd98b1ee5d8afe3e7fe4",
+    "tools/measure_build.py": "ebb2a92551c57662ec0a3dfa96d7ac7587fb817b657ca9cb1de8a999fb96ef2e"
+  }
+}

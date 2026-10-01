@@ -119,6 +119,26 @@ memory limit; in Docker with only a CPU share (as on Zimfarm) pass it, since
 a share hides no cores and each core costs memory
 ([docs/zimfarm.md](docs/zimfarm.md#cpus-and-memory---cpus)).
 
+For Docker to choose workers from RAM, set its memory limit and leave
+`--cpus` unset. For example, an 8 GiB Netherlands full build automatically
+uses at most 4 workers for tilemaker, search and terrain:
+
+```bash
+docker run --rm --memory 8g --memory-swap 8g \
+    -v "$PWD/out:/output" streetzim \
+    streetzim --name osm_en_netherlands --title Netherlands \
+    --description "Offline map of the Netherlands with search, routing and terrain" \
+    --include-poly https://download.geofabrik.de/europe/netherlands.poly \
+    --profile full --zim-workers 4 --output /output
+```
+
+`--memory-swap 8g` makes the combined RAM/swap limit equal to the RAM limit,
+so this example uses no swap. Compression has a separate, smaller memory
+cost; `--zim-workers 4` sets its worker count explicitly. `--cpus N` overrides
+the automatic worker budget. Fixed allocations, including the initial
+native PBF extraction, still consume RAM even with one worker; scaling
+workers does not guarantee every region fits the same container limit.
+
 Satellite imagery is off by default in `streetzim`. `--satellite` adds EOX's
 2016 mosaic (CC BY 4.0); the sharper 2021 mosaic is non-commercial and takes
 `--satellite-source s2cloudless-2021 --satellite-accept-noncommercial`, which
@@ -244,14 +264,15 @@ shipped in the ZIM as `fonts/NotoSans/OFL.txt`; pinned in
 > on-map attribution name the year it contains. Details:
 > [docs/zimfarm.md](docs/zimfarm.md#satellite-imagery).
 
-## Optional accelerators for very large builds
+## Optional writer and native search indexer
 
 The author's production host builds whole continents. It uses two optional
-speed-ups, both switched off by default:
+backends, both switched off by default:
 
-- `--zim-builder rust` swaps libzim's writer for a separate packer.
+- `--zim-builder manifest` uses the Python manifest packer with configurable
+  compression, streamed large bodies and raw Xapian/routing clusters.
 - `--xapian builder` uses an external indexer.
 
 Both produce ordinary ZIMs, the same as libzim's. Neither is needed for
-anything in this README. [docs/zim-builder-rust.md](docs/zim-builder-rust.md)
+anything in this README. [docs/zim-builder-python.md](docs/zim-builder-python.md)
 explains when they help.

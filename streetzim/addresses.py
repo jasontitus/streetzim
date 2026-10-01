@@ -3,9 +3,12 @@ Wikidata tag extraction (moved verbatim from create_osm_zim.py, which
 re-exports these names)."""
 import json
 import os
+import re as _re
 import shutil
 import subprocess
 import tempfile
+
+import regex as _regex
 
 from streetzim import area
 # The builder's flushing, phase-timing print (see streetzim/common.py).
@@ -211,6 +214,10 @@ _STREET_ABBREV: dict[str, str] = {
     "ne": "northeast", "nw": "northwest", "se": "southeast", "sw": "southwest",
 }
 
+_STREET_LATIN_MARKS = _regex.compile(r"(\p{Script=Latin})\p{M}+")
+_STREET_TOKENS = _regex.compile(r"[\p{L}\p{M}\p{N}]+")
+_STREET_ASCII_TOKENS = _re.compile(r"[a-z0-9]+")
+
 def _normalize_street(name):
     """Lowercase, strip punctuation, expand common US suffix abbreviations.
 
@@ -218,13 +225,20 @@ def _normalize_street(name):
     """
     if not name:
         return ""
-    import re as _re
-    # Replace punctuation with spaces; strip accents via NFKD+combining.
+    # Most address components are ASCII; skip Unicode decomposition and
+    # script matching for that common case.
+    if name.isascii():
+        tokens = _STREET_ASCII_TOKENS.findall(name.lower())
+        return " ".join(_STREET_ABBREV.get(t, t) for t in tokens)
+    # Strip Latin accents, keeping combining marks that distinguish names in
+    # other scripts (Japanese dakuten, Cyrillic breve, Thai tone marks, etc.).
     import unicodedata as _ud
-    folded = "".join(
-        c for c in _ud.normalize("NFKD", name.lower()) if not _ud.combining(c)
-    )
-    tokens: list[str] = _re.findall(r"[a-z0-9]+", folded)
+    folded = _STREET_LATIN_MARKS.sub(r"\1", _ud.normalize("NFKD", name.lower()))
+    folded = _ud.normalize("NFC", folded)
+    # Keep letters/numbers in every script. An ASCII-only tokenizer erased
+    # Chinese, Japanese and Cyrillic street/city/POI names, conflating distinct
+    # addresses with the same number and unrelated POIs in the same grid cell.
+    tokens: list[str] = _STREET_TOKENS.findall(folded)
     return " ".join(_STREET_ABBREV.get(t, t) for t in tokens)
 
 
@@ -411,9 +425,11 @@ def merge_overture_addresses(overture_parquet, search_jsonl_path, bbox=None):
     osm_count = 0
     with open(search_jsonl_path, encoding="utf-8") as f:
         for line in f:
-            if '"type":"addr"' not in line:
+            if '"addr"' not in line and "\\u" not in line:
                 # Fast path: ~98% of lines in the world feed aren't
                 # addresses. Skipping the json.loads here saves minutes.
+                # Match the value without assuming compact JSON spacing;
+                # escaped keys/values need the JSON parser to identify them.
                 continue
             try:
                 rec = json.loads(line)
@@ -716,7 +732,7 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
             # Fast pre-filter: skip lines that aren't POIs without
             # parsing JSON. Saves minutes on continent-scale where
             # most of the feed is addresses + streets, not POIs.
-            if '"type":"poi"' not in line:
+            if '"poi"' not in line and "\\u" not in line:
                 continue
             try:
                 rec = json.loads(line)
@@ -878,7 +894,7 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
     with open(search_jsonl_path, encoding="utf-8") as fin, \
          open(tmp_path, "w", encoding="utf-8") as out:
         for line in fin:
-            if '"type":"poi"' not in line:
+            if '"poi"' not in line and "\\u" not in line:
                 # Fast path: not a POI, copy verbatim.
                 out.write(line)
                 continue

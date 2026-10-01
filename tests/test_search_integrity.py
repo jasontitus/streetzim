@@ -200,9 +200,17 @@ def test_full_text_search_returns_hits(archive):
     search = pytest.importorskip("libzim.search")
     if not archive.has_fulltext_index:
         pytest.skip("no fulltext index in this ZIM")
+    # A small extract need not have a named park. Query a curated page
+    # actually present in this archive instead of assuming a region's data.
+    page_id = _first_id_at_or_after(archive, "search/")
+    if page_id >= archive.all_entry_count:
+        pytest.skip("no curated search pages in this ZIM")
+    page = archive._get_entry_by_id(page_id)
+    if not page.path.startswith("search/"):
+        pytest.skip("no curated search pages in this ZIM")
     searcher = search.Searcher(archive)
-    hits = searcher.search(search.Query().set_query("park")).getEstimatedMatches()
-    assert hits > 0, "'park' returned nothing; the fulltext index is not answering"
+    hits = searcher.search(search.Query().set_query(page.title)).getEstimatedMatches()
+    assert hits > 0, f"{page.title!r} returned nothing; the fulltext index is not answering"
 
 
 def test_search_index_holds_no_viewer_chrome(archive):

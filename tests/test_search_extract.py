@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 mvt = pytest.importorskip("mapbox_vector_tile")
 
 
-def _make_mbtiles(path: Path) -> None:
+def _make_mbtiles(path: Path, zoom: int = 14) -> None:
     # Tile 14/8529/5973 covers Monaco; MVT coordinates are 0..4096 in tile space.
     tile = mvt.encode([
         {"name": "poi", "features": [
@@ -48,16 +48,20 @@ def _make_mbtiles(path: Path) -> None:
     con.execute("CREATE TABLE metadata (name TEXT, value TEXT)")
     con.execute("CREATE TABLE tiles (zoom_level INT, tile_column INT, tile_row INT, tile_data BLOB)")
     con.executemany("INSERT INTO metadata VALUES (?, ?)",
-                    [("format", "pbf"), ("minzoom", "14"), ("maxzoom", "14")])
-    tms_row = (1 << 14) - 1 - 5973
-    con.execute("INSERT INTO tiles VALUES (14, 8529, ?, ?)", (tms_row, gzip.compress(tile)))
+                    [("format", "pbf"), ("minzoom", str(zoom)), ("maxzoom", str(zoom))])
+    divisor = 1 << (14 - zoom)
+    column, y = 8529 // divisor, 5973 // divisor
+    tms_row = (1 << zoom) - 1 - y
+    con.execute("INSERT INTO tiles VALUES (?, ?, ?, ?)",
+                (zoom, column, tms_row, gzip.compress(tile)))
     con.commit()
     con.close()
 
 
-def test_extracts_records_without_the_builder(tmp_path: Path):
+@pytest.mark.parametrize("zoom", [13, 14])
+def test_extracts_records_without_the_builder(tmp_path: Path, zoom: int):
     mbtiles = tmp_path / "fixture.mbtiles"
-    _make_mbtiles(mbtiles)
+    _make_mbtiles(mbtiles, zoom=zoom)
     out_dir = tmp_path / "out"
     out_dir.mkdir()
     script = tmp_path / "run.py"
@@ -87,12 +91,66 @@ def test_extracts_records_without_the_builder(tmp_path: Path):
     assert by_name["Avenue des Beaux-Arts"]["type"] == "street"
     assert by_name["Monte-Carlo"]["type"] == "place"
     import mercantile
-    b = mercantile.bounds(8529, 5973, 14)
+    divisor = 1 << (14 - zoom)
+    b = mercantile.bounds(8529 // divisor, 5973 // divisor, zoom)
     for r in recs:  # every point lands inside the tile it came from
         assert b.west <= r["lon"] <= b.east and b.south <= r["lat"] <= b.north, r
     # The POI sits at the tile centre (2000/4096 of the way across).
     cafe = by_name["Café de Paris"]
     assert abs(cafe["lon"] - (b.west + (b.east - b.west) * 2000 / 4096)) < 1e-4
+
+
+@pytest.mark.parametrize("output_to_disk", [False, True])
+def test_empty_mbtiles_produces_empty_search_feed(tmp_path, output_to_disk):
+    from streetzim.search_extract import extract_searchable_features
+    path = tmp_path / "empty.mbtiles"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE tiles (zoom_level INT, tile_column INT, tile_row INT, tile_data BLOB)")
+    result = extract_searchable_features(mbtiles_path=str(path),
+                                         output_dir=str(tmp_path) if output_to_disk else None)
+    if output_to_disk:
+        assert Path(result).read_bytes() == b""
+    else:
+        assert result == []
+
+
+def test_failed_worker_cleans_owned_search_partition_scratch(tmp_path, monkeypatch):
+    import multiprocessing
+    from streetzim.search_extract import extract_searchable_features
+
+    database = tmp_path / "fixture.mbtiles"
+    _make_mbtiles(database)
+    out = tmp_path / "out"
+    out.mkdir()
+    foreign = out / "streetzim_search_another_build"
+    foreign.mkdir()
+    (foreign / "partial.jsonl").write_text("belongs to another build")
+    worker_paths = []
+
+    class FailingPool:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def imap_unordered(self, fn, partitions):
+            for partition in partitions:
+                path = Path(partition[4])
+                worker_paths.append(path)
+                path.write_text("incomplete worker output")
+            raise RuntimeError("search worker failed")
+
+    class Context:
+        def Pool(self, *args):
+            return FailingPool()
+
+    monkeypatch.setattr(multiprocessing, "get_context", lambda *args: Context())
+    with pytest.raises(RuntimeError, match="search worker failed"):
+        extract_searchable_features(mbtiles_path=str(database), output_dir=str(out))
+    assert worker_paths and all(not path.parent.exists() for path in worker_paths)
+    assert (foreign / "partial.jsonl").read_text() == "belongs to another build"
+    assert list(out.iterdir()) == [foreign]
 
 
 def test_builder_reexports_the_same_functions():
@@ -101,6 +159,71 @@ def test_builder_reexports_the_same_functions():
     for name in ("extract_searchable_features", "build_location_index",
                  "_finish_features_streaming", "_process_tile_partition"):
         assert getattr(coz, name) is getattr(se, name)
+
+
+@pytest.mark.parametrize("mode", ["streaming", "in-memory"])
+def test_location_workers_support_scratch_without_unix_sockets(tmp_path, mode):
+    """Docker bind mounts and long temp paths cannot host forkserver sockets.
+
+    Exercise real location workers with a forkserver default and a scratch
+    path longer than AF_UNIX allows, as the Python 3.14 country build does.
+    The tile scan is inline to reach the >100,000-record location pass
+    without an expensive MVT fixture.
+    """
+    import multiprocessing
+    if "forkserver" not in multiprocessing.get_all_start_methods():
+        pytest.skip("forkserver is unavailable on this platform")
+    scratch = tmp_path / ("long-scratch-" + "x" * 100)
+    scratch.mkdir()
+    script = tmp_path / "location_workers.py"
+    script.write_text(textwrap.dedent(f"""
+        import json
+        import multiprocessing
+        import os
+        import sys
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        sys.path.insert(0, {str(ROOT)!r})
+        import streetzim.search_extract as se
+
+        class InlineTilePool:
+            def __init__(self, *args): pass
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def imap_unordered(self, fn, tiles, **kwargs):
+                yield [{{"name": "Testville", "type": "place", "subtype": "city",
+                         "lat": 0.0, "lon": 0.0}}] + [
+                    {{"name": f"Cafe {{i}}", "type": "poi", "subtype": "cafe",
+                     "lat": 0.001, "lon": 0.001}} for i in range(100_000)]
+
+        if __name__ == "__main__":
+            multiprocessing.set_start_method("forkserver", force=True)
+            tempfile.tempdir = {str(scratch)!r}
+            with patch.object(se, "build_cpus", return_value=2):
+                if {mode!r} == "streaming":
+                    raw = Path({str(tmp_path)!r}) / "raw.jsonl"
+                    rows = [{{"name": "Testville", "type": "place", "subtype": "city",
+                             "lat": 0.0, "lon": 0.0}},
+                            {{"name": "Cafe", "type": "poi", "subtype": "cafe",
+                             "lat": 0.001, "lon": 0.001}}]
+                    raw.write_text("".join(json.dumps(r) + "\\n" for r in rows))
+                    result = se._finish_features_streaming(str(raw), {str(tmp_path)!r}, 2)
+                    expected = 2
+                else:
+                    context = multiprocessing.get_context("spawn")
+                    with patch.object(context, "Pool", InlineTilePool):
+                        result = se.extract_searchable_features(
+                            tiles={{(14, 0, 0): b"unused"}}, output_dir={str(tmp_path)!r})
+                    expected = 100_001
+            rows = [json.loads(line) for line in Path(result).read_text().splitlines()]
+            assert len(rows) == expected
+            assert all(r.get("location") == "Testville" for r in rows if r["type"] == "poi")
+            assert se._place_grid is None
+    """))
+    result = subprocess.run([sys.executable, str(script)], capture_output=True,
+                            text=True, timeout=120)
+    assert result.returncode == 0, result.stderr[-4000:]
 
 
 @pytest.mark.parametrize(("props", "expected"), [
@@ -207,3 +330,39 @@ def test_search_record_keeps_the_raw_key_internally():
                   {"class": "shop", "subclass": "bakery"},
                   {"class": "amenity"}, {}):
         assert "osm_key" not in search_record("x", "poi", props, 0, 0), props
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_small_in_memory_extraction_releases_location_grid(monkeypatch, failure):
+    import multiprocessing
+    import streetzim.search_extract as se
+
+    class InlinePool:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def imap_unordered(self, fn, iterable, **kwargs):
+            return map(fn, iterable)
+
+    class Context:
+        def Pool(self, *args):
+            return InlinePool()
+
+    monkeypatch.setattr(multiprocessing, "get_context", lambda *args: Context())
+    tile = mvt.encode([{"name": "place", "features": [
+        {"geometry": "POINT(1000 3000)", "properties": {"name": "Monte-Carlo"}},
+    ]}])
+    if failure:
+        def fail(features):
+            assert se._place_grid
+            raise RuntimeError("location assignment failed")
+        monkeypatch.setattr(se, "_assign_location_batch", fail)
+        with pytest.raises(RuntimeError, match="location assignment failed"):
+            se.extract_searchable_features(tiles={(14, 8529, 5973): tile})
+    else:
+        rows = se.extract_searchable_features(tiles={(14, 8529, 5973): tile})
+        assert len(rows) == 1 and rows[0]["name"] == "Monte-Carlo"
+    assert se._place_grid is None

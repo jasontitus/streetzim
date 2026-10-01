@@ -28,3 +28,13 @@ patches
 rust/**/target
 *.egg-info/
 /build/
+# Generated country data and local development installs must not be sent
+# to BuildKit or copied into the runtime image on a subsequent rebuild.
+/out/
+/.venv/
+/venv*/
+/libzim-install/
+rust/**/target-*/
+/url_validation_cache.json
+/.pytest_cache/
+/.ruff_cache/

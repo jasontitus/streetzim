@@ -25,6 +25,7 @@ to allow incremental updates and efficient loading.
 
 import argparse
 import json
+import re
 import sqlite3
 import sys
 import time
@@ -42,6 +43,23 @@ DEFAULT_CACHE_DIR = cache_root() / "wikidata_cache"
 
 # Wikidata SPARQL endpoint
 WIKIDATA_SPARQL = "https://query.wikidata.org/sparql"
+# Match the single-item policy used by cloud.wikidata_titles. A semicolon
+# list from OSM is ambiguous and would otherwise poison the whole query.
+_QID_RE = re.compile(r"Q[1-9][0-9]{0,9}")
+
+
+def _validated_qids(qids):
+    valid, invalid = [], []
+    for qid in qids:
+        if isinstance(qid, str) and _QID_RE.fullmatch(qid):
+            valid.append(qid)
+        else:
+            invalid.append(qid)
+    if invalid:
+        examples = ", ".join(repr(qid)[:80] for qid in invalid[:3])
+        print(f"    Warning: ignoring {len(invalid)} malformed Wikidata IDs "
+              f"({examples}); not requested or cached")
+    return valid
 
 # Wikipedia REST API for extracts
 WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
@@ -397,8 +415,8 @@ def fetch_wikidata_batch(qids, batch_size=40, cache_dir=None, save_interval=1000
     progress is not lost if the process is killed.
     """
     results = {}
-    total = len(qids)
-    qid_list = list(qids)
+    qid_list = _validated_qids(qids)
+    total = len(qid_list)
     last_save = 0
 
     print(f"  Fetching Wikidata properties for {total} Q-IDs...")
@@ -790,6 +808,10 @@ def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=
     else:
         print("Error: must specify --pbf or --mbtiles")
         return None
+
+    # Validate even when extraction came from an older disk cache, and avoid
+    # mutating the cached/external feature map supplied by the extractor.
+    qid_features = {qid: qid_features[qid] for qid in _validated_qids(qid_features)}
 
     if not qid_features:
         print("  No wikidata-tagged features found")

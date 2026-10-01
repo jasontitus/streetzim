@@ -31,7 +31,6 @@ import argparse
 import contextlib
 import datetime
 import http.client
-import json
 import os
 import re
 import shutil
@@ -89,6 +88,8 @@ ZIMFARM: dict[str, dict[str, Any]] = {
     "stats_filename": {"pattern": r"^/output/task_progress\.json$"},
     "zim_workers": {"title": "ZIM workers", "min": 1},
     "cpus": {"title": "CPU cores", "min": 1},
+    "zim_builder": {"offliner": False},
+    "xapian": {"offliner": False},
     "max_zoom": {"min": 0, "max": 14},
     "satellite": {"title": "Satellite imagery"},
     "satellite_source": {"title": "Satellite source", "type": "string-enum",
@@ -250,6 +251,12 @@ def build_parser() -> argparse.ArgumentParser:
     feat.add_argument("--zim-workers", type=positive_int,
                       help="Compression threads for libzim. Default: --cpus, "
                            "else the usable cores within any CPU quota, at most 20")
+    feat.add_argument("--zim-builder", choices=["python", "manifest"], default="python",
+                      help="ZIM writer: python uses libzim (default); manifest uses "
+                           "the Python packer with custom compression and raw namespaces")
+    feat.add_argument("--xapian", choices=["libzim", "builder", "none"],
+                      help="Native search index: default libzim for the libzim writer, "
+                           "none for manifest; builder uses the external xapianbuilder")
     feat.add_argument("--cpus", type=positive_int,
                       help="CPU cores the build uses at once (tilemaker, "
                            "search, terrain, compression). Set it to the task's "
@@ -383,6 +390,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.zim_workers is not None and args.zim_workers < 1:
+            raise ValueError("--zim-workers must be greater than zero")
+        if args.zim_builder == "manifest" and args.xapian == "libzim":
+            raise ValueError("--zim-builder=manifest requires --xapian=builder or --xapian=none")
+        if args.xapian == "builder" and args.zim_builder != "manifest":
+            raise ValueError("--xapian=builder requires --zim-builder=manifest")
         return apply_profile(args, parser)
     except ValueError as e:
         parser.error(str(e))
@@ -694,47 +707,51 @@ def _source_stamp(url: str, head: dict[str, str] | None = None) -> dict[str, str
     """What identifies the current version of `url` (HEAD for http(s), size
     and mtime for file://); None when it can't be checked (offline)."""
     if url.startswith("file://"):
-        st = os.stat(url[len("file://"):])
-        return {"size": str(st.st_size), "mtime": str(int(st.st_mtime))}
+        from urllib.parse import urlsplit
+        st = os.stat(urllib.request.url2pathname(urlsplit(url).path))
+        return {"size": str(st.st_size), "mtime_ns": str(st.st_mtime_ns)}
     return download.stamp_of(head if head is not None else _head(url))
 
 
 def fetch_resumable(url: str, dest: Path, *,
-                    check_head: Callable[[bytes], None] | None = None) -> Path:
+                    check_head: Callable[[bytes], None] | None = None,
+                    trust_preseeded: bool = True) -> Path:
     """A large download into --dl: resumed, reused, checked and locked as
     streetzim/download.py describes."""
-    return download.fetch_resumable(url, dest, user_agent=USER_AGENT, check_head=check_head)
+    return download.fetch_resumable(url, dest, user_agent=USER_AGENT, check_head=check_head,
+                                   trust_preseeded=trust_preseeded)
 
 
 def fetch(url: str, dest: Path) -> Path:
-    """Download into --dl, reusing a previous download only while the source
-    is unchanged (same ETag/Last-Modified/size; for file://, size and mtime).
-    Geofabrik's -latest files change daily, so an old copy is refreshed."""
+    """Download into --dl with per-file locking and complete-body checks.
+
+    HTTP inputs use the resumable downloader, shared with MBTiles. Local
+    file URLs retain size/mtime reuse and are copied atomically under the
+    same lock so parallel builds cannot share an in-progress .part file.
+    """
+    if not url.startswith("file://"):
+        return fetch_resumable(url, dest, trust_preseeded=False)
     meta = dest.with_name(dest.name + ".source.json")
-    stamp = _source_stamp(url)
-    if dest.exists() and dest.stat().st_size > 0 and meta.exists():
-        old = json.loads(meta.read_text())
-        if stamp is None:
-            print(f"  Reusing {dest} (could not check {url} for updates)")
-            return dest
-        if old == stamp:
-            print(f"  Reusing {dest} (unchanged upstream)")
-            return dest
-    dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
-    print(f"  Downloading {url}")
-    from streetzim import scraperlib
-    if scraperlib.AVAILABLE and not url.startswith("file://"):
-        scraperlib.download(url, user_agent=USER_AGENT, dest=part)   # retries
-    else:
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=60) as r, open(part, "wb") as f:
-            shutil.copyfileobj(r, f, 1 << 20)
-    os.replace(part, dest)
-    if stamp is not None:
-        meta.write_text(json.dumps(stamp))
-    else:
-        meta.unlink(missing_ok=True)
+    with download.file_lock(dest):
+        stamp = _source_stamp(url)
+        if (dest.exists() and stamp is not None
+                and dest.stat().st_size == int(stamp["size"])
+                and download.read_download_metadata(meta) == stamp):
+            print(f"  Reusing {dest} (unchanged source)")
+            return dest
+        print(f"  Downloading {url}")
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=60) as r, open(part, "wb") as f:
+                shutil.copyfileobj(r, f, 1 << 20)
+            if (stamp is None or part.stat().st_size != int(stamp["size"])
+                    or _source_stamp(url) != stamp):
+                raise OSError(f"{url}: local source changed or was cut short during the copy")
+            os.replace(part, dest)
+            download.write_download_metadata(meta, stamp)
+        finally:
+            part.unlink(missing_ok=True)
     return dest
 
 
@@ -934,6 +951,10 @@ def _builder_argv(args: argparse.Namespace, bbox: str, pbf_url: str | None, dl: 
         argv += ["--workers", str(args.zim_workers)]
     if args.cpus is not None:
         argv += ["--cpus", str(args.cpus)]
+    if args.zim_builder == "manifest":
+        argv += ["--zim-builder", "manifest", "--xapian", args.xapian or "none"]
+    elif args.xapian is not None:
+        argv += ["--xapian", args.xapian]
     if args.default_view:
         lat, lon, zoom = parse_default_view(args.default_view)
         argv += [f"--map-center={lon},{lat}"]
@@ -1048,6 +1069,20 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(args, key):
             setattr(args, key, fill(getattr(args, key), args.name))
 
+    # The workspace belongs to this invocation, including its illustration
+    # and cut MBTiles. Other builds may share --tmp and --dl safely.
+    work = Path(tempfile.mkdtemp(prefix="streetzim-build-", dir=tmp))
+    previous = _exit_on_sigterm()
+    try:
+        return _run_build(args, dl, out_dir, work)
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGTERM, previous)
+        if not (args.debug or args.keep_temp):
+            shutil.rmtree(work, ignore_errors=True)
+
+
+def _run_build(args: argparse.Namespace, dl: Path, out_dir: Path, work: Path) -> int:
     # Everything that can be checked cheaply is checked before downloading.
     illustration: Path | None = None
     try:
@@ -1062,43 +1097,34 @@ def main(argv: list[str] | None = None) -> int:
         if args.bbox:
             parse_bbox_arg(args.bbox)
         if args.illustration_url:
-            illustration = tmp / "illustration-48.png"
+            illustration = work / "illustration-48.png"
             illustration.write_bytes(load_illustration(args.illustration_url))
     except (ValueError, OSError) as e:
         return _error(e)
     out_dir.mkdir(parents=True, exist_ok=True)
     if final.exists() and not args.overwrite:
         return _error(f"{final} exists (use --overwrite)")
-    # The build writes <final>.tmp. Check that name, not the final one: the
-    # check creates and deletes the file it is given.
-    building = final.with_name(final.name + ".tmp")
     try:
+        # Staging lives on the output filesystem for atomic publication, and
+        # its unique name prevents concurrent builds from deleting each
+        # other's archive (previously both used <final>.tmp).
+        with tempfile.NamedTemporaryFile(prefix=f".{final.name}.", suffix=".building",
+                                         dir=out_dir) as probe:
+            building = Path(probe.name)
         from streetzim import scraperlib
         if scraperlib.AVAILABLE:
             scraperlib.check_output(out_dir, building.name)
-        else:
-            with tempfile.NamedTemporaryFile(dir=out_dir):
-                pass
     except OSError as e:
         return _error(f"cannot write to {out_dir}: {e}")
-    if args.stats_filename:
-        # Before the downloads, which can take a while on big regions.
-        from streetzim.progress import StatsFile
-        StatsFile(Path(args.stats_filename).resolve()).write(0, 1)
-
-    # The MBTiles cut goes to a fixed folder under --tmp, cleared first (a
-    # killed run may have left one) and removed afterwards, also on failure
-    # or SIGTERM (Zimfarm stops a task with it), unless --debug.
-    work = tmp / "mbtiles-cut"
-    shutil.rmtree(work, ignore_errors=True)
-    previous = _exit_on_sigterm()
     try:
+        if args.stats_filename:
+            from streetzim.progress import StatsFile
+            StatsFile(Path(args.stats_filename).resolve()).write(0, 1)
         return _build(args, dl, illustration, work, building, final)
     finally:
-        if previous is not None:
-            signal.signal(signal.SIGTERM, previous)
         if not (args.debug or args.keep_temp):
-            shutil.rmtree(work, ignore_errors=True)
+            for staged in (building, building.with_name(building.name + ".tmp")):
+                staged.unlink(missing_ok=True)
 
 
 def _exit_on_sigterm() -> Any:
@@ -1117,7 +1143,7 @@ def _build(args: argparse.Namespace, dl: Path, illustration: Path | None, work: 
            building: Path, final: Path) -> int:
     try:
         build_args, _ = plan(args, dl, illustration=illustration, work=work)
-    except (ValueError, OSError, sqlite3.Error) as e:
+    except (ValueError, OSError, sqlite3.Error, http.client.HTTPException) as e:
         return _error(e)
 
     # Build next to the target and rename at the end, so a failed or
@@ -1139,7 +1165,17 @@ def _build(args: argparse.Namespace, dl: Path, illustration: Path | None, work: 
     finally:
         os.chdir(cwd)
     print(f"streetzim: {source_report.summary()}")
-    os.replace(building, final)
+    if args.overwrite:
+        os.replace(building, final)
+    else:
+        # The destination may have appeared while we were building. A hard
+        # link publishes a completed same-filesystem file atomically and
+        # refuses to replace another invocation's successful output.
+        try:
+            os.link(building, final)
+        except FileExistsError:
+            return _error(f"{final} exists (use --overwrite)")
+        building.unlink()
     print(f"streetzim: wrote {final}")
     return 0
 

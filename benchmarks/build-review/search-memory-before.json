@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "measurement": "synthetic parent retained heap; inline workers; tracemalloc enabled",
+  "source_revision": "d5c32b6",
+  "source_sha256": "d37841a17c628afcce657712f8eff4b328fcb92ace46221cb748910dc0d6025b",
+  "rows_requested": 100000,
+  "rows_written": 100000,
+  "output_sha256": "c4eed4999216a90c1e73057f46da63d06b88b219b3b67228cd59c5845dde3f45",
+  "duration_seconds": 4.929199334001169,
+  "python_retained_bytes": 76248990,
+  "python_peak_bytes": 128403650,
+  "parent_rss_before_bytes": 29032448,
+  "parent_rss_after_bytes": 308068352,
+  "grid_still_live": true
+}

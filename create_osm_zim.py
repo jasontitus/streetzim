@@ -412,11 +412,11 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
 
     parser.add_argument(
         "--zim-builder",
-        choices=["python", "rust"],
+        choices=["python", "manifest", "rust"],
         default="python",
         help=(
             "ZIM emit backend. 'python' (default) uses libzim/python-libzim "
-            "as before. 'rust' shells out to streetzim-pack (zimru-backed); "
+            "as before. 'manifest' runs the Python streetzim-pack writer; 'rust' is a legacy alias. "
             "supports per-item compress flags so routing-graph chunks land "
             "in raw clusters even when tiles/HTML stay zstd."
         ),
@@ -478,15 +478,15 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--terrain-dir", metavar="PATH", default=None,
                         help="Directory for terrain tile cache (default: terrain_cache/)")
     parser.add_argument("--workers", type=int, default=None,
-                        help="Number of ZIM compression workers (default: --cpus, else the "
-                             "usable cores within any CPU quota, at most 20)")
+                        help="Number of ZIM compression workers (default: --cpus, else "
+                             "usable cores within the CPU quota, at most 20 for libzim; "
+                             "RAYON_NUM_THREADS or automatic for the manifest writer)")
     parser.add_argument("--cpus", type=int, default=None, metavar="N",
                         help="CPU cores the build uses at once: tilemaker threads, "
                              "search and terrain processes, compression threads. "
-                             "Default: the usable cores, capped by the container's "
-                             "CPU quota and by its memory limit at "
-                             f"{_cpus.GIB_PER_CPU} GiB per core, rounded to whole "
-                             "GiB (streetzim/cpus.py)")
+                             "Default: usable cores, capped by the container's CPU "
+                             "quota and memory limit at "
+                             f"{_cpus.GIB_PER_CPU} GiB per core, rounded to whole GiB")
     parser.add_argument("--wikidata", action="store_true",
                         help="Include Wikidata info (population, description, etc.) for places/POIs")
     parser.add_argument("--wikidata-cache", metavar="PATH", default=None,
@@ -592,7 +592,7 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "(../xapianbuilder/target/release/xapianbuilder) "
                              "to produce the glass DBs on disk, then add "
                              "them to the ZIM at namespace 'X' with "
-                             "compress=false. Requires --zim-builder=rust "
+                             "compress=false. Requires --zim-builder=manifest "
                              "(libzim's Creator can't accept items at the "
                              "X namespace). Saves 2-6h on continent-scale "
                              "ZIMs and 13-15 GB on Europe. "
@@ -1670,16 +1670,14 @@ def _write_zim(
         search_features, terrain_dir, terrain_max_zoom, tile_metadata, tiles, tmpdir,
         total_tile_count, use_streaming, wiki_cross_refs, wikidata_data,
         zim_illustration, zim_metadata):
-    """Merge street pieces, then write the ZIM; remove a partial file on failure."""
+    """Merge street pieces, then atomically publish the completed ZIM."""
     if isinstance(search_features, str) and os.path.isfile(search_features):
         # After every filter and merge that rewrites the file (bbox cut of
         # a search cache, addresses, Overture), so a street is merged
         # from the pieces inside this region only.
         from streetzim.search_extract import merge_streets_in_file
         merge_streets_in_file(search_features)
-    _out_before = os.path.exists(output_path)
-    try:
-        create_zim(
+    create_zim(
         output_path=output_path,
         tiles=tiles,
         tile_metadata=tile_metadata,
@@ -1728,19 +1726,7 @@ def _write_zim(
         wiki_images_per_article=getattr(args, "wiki_images_per_article", 12),
         metadata=zim_metadata,
         illustration=zim_illustration,
-        )
-    except BaseException:
-        # libzim's Creator.__exit__ finalises on exception, so an
-        # aborted build (corrupt tile, OOM, Ctrl-C) used to leave a
-        # truncated-but-readable ZIM at the output path — exactly
-        # where the queue scripts look for a finished build.
-        if not _out_before and os.path.exists(output_path):
-            try:
-                os.unlink(output_path)
-                print(f"    removed partial output {output_path}", flush=True)
-            except OSError:
-                pass
-        raise
+    )
 
 
 def _print_summary(*, bbox, name, output_path, stats, total_tile_count):
@@ -1791,6 +1777,26 @@ def main(argv=None):
     if args.cpus is not None and args.cpus < 1:
         parser.error("--cpus must be at least 1")
     _cpus.set_build_cpus(args.cpus)
+    if args.workers is not None and args.workers < 1:
+        parser.error("--workers must be greater than zero")
+    if args.zim_builder == "rust":
+        print("  --zim-builder=rust now uses the Python manifest writer; prefer --zim-builder=manifest", flush=True)
+        args.zim_builder = "manifest"
+    if args.zim_builder == "manifest" and args.xapian == "libzim":
+        parser.error("--zim-builder=manifest requires --xapian=builder or --xapian=none; "
+                     "the manifest writer cannot run libzim's search indexer")
+    if args.xapian == "builder" and args.zim_builder != "manifest":
+        parser.error("--xapian=builder requires --zim-builder=manifest")
+    try:
+        if args.zim_builder == "manifest":
+            from cloud.manifest_writer import resolve_pack_command
+            resolve_pack_command()
+        if args.xapian == "builder":
+            _resolve_xapianbuilder_binary(args.xapianbuilder_bin)
+    except (RuntimeError, OSError) as exc:
+        parser.error(str(exc))
+    if args.zim_builder == "manifest" and args.cpus is not None and args.workers is None:
+        args.workers = min(args.cpus, 20)
     stats, zim_illustration, zim_metadata = _openzim_options(args=args)
 
     bbox_str, geofabrik_path, name, output_path, pbf_path = _resolve_area(

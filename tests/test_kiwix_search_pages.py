@@ -78,6 +78,9 @@ def test_kiwix_full_text_search_covers_the_page_types(tmp_path, source, poi_page
     hits = sorted(a.get_entry_by_path(p).title
                   for p in search.getResults(0, search.getEstimatedMatches()))
     assert hits == sorted(["Fontaine du Casino"] + pois)
+    for phrase in ('"Food & Drink"', "maplibre", '"Data Sources"'):
+        result = Searcher(a).search(Query().set_query(phrase))
+        assert result.getEstimatedMatches() == 0, phrase
     # Title suggestions (the Kiwix search bar) need the pages to be front
     # articles; libzim leaves everything else out of the title index.
     assert a.has_title_index

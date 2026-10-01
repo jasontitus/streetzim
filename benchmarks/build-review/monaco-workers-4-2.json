@@ -1,0 +1,243 @@
+{
+ "command": [
+  "/Users/jasontitus/experiments/streetzim/venv312/bin/python",
+  "/Users/jasontitus/experiments/streetzim/create_osm_zim.py",
+  "--mbtiles",
+  "/tmp/streetzim-review-golden/inputs/monaco.mbtiles",
+  "--pbf",
+  "/tmp/streetzim-review-golden/inputs/monaco.osm.pbf",
+  "--bbox",
+  "7.40,43.72,7.44,43.76",
+  "--name",
+  "Monaco",
+  "--routing",
+  "--spatial-chunk-scale",
+  "10",
+  "--split-find-chips",
+  "--workers",
+  "4",
+  "-o",
+  "monaco.zim"
+ ],
+ "exit_code": 0,
+ "platform": "darwin",
+ "wall_s": 3.1448,
+ "cpu_s": 8.059,
+ "cpus": 20,
+ "peak_pss_bytes": null,
+ "peak_rss_bytes": 3269738496,
+ "peak_child_rss_bytes": 3188195328,
+ "peak_disk_bytes": 2928640,
+ "peak_pss_gb": null,
+ "peak_rss_gb": 3.2697,
+ "peak_disk_gb": 0.0029,
+ "interval_s": 0.05,
+ "disk_interval_s": 0.5,
+ "watched": [
+  "/private/tmp/streetzim-review-golden/workers-4-1"
+ ],
+ "sample_columns": [
+  "elapsed_s",
+  "rss_bytes",
+  "pss_bytes",
+  "disk_bytes"
+ ],
+ "sample_count": 32,
+ "samples_dropped": 0,
+ "sampling_error_count": 0,
+ "sampling_errors": [],
+ "samples": [
+  [
+   0.0417,
+   1982464,
+   null,
+   0
+  ],
+  [
+   0.1397,
+   35897344,
+   null,
+   0
+  ],
+  [
+   0.2334,
+   49692672,
+   null,
+   0
+  ],
+  [
+   0.3318,
+   62226432,
+   null,
+   0
+  ],
+  [
+   0.4378,
+   188776448,
+   null,
+   0
+  ],
+  [
+   0.5637,
+   650182656,
+   null,
+   4096
+  ],
+  [
+   0.6671,
+   892305408,
+   null,
+   4096
+  ],
+  [
+   0.7606,
+   1014005760,
+   null,
+   4096
+  ],
+  [
+   0.8605,
+   82132992,
+   null,
+   4096
+  ],
+  [
+   0.956,
+   1087930368,
+   null,
+   4096
+  ],
+  [
+   1.0499,
+   2335653888,
+   null,
+   4096
+  ],
+  [
+   1.1689,
+   3269738496,
+   null,
+   4096
+  ],
+  [
+   1.2761,
+   137969664,
+   null,
+   4096
+  ],
+  [
+   1.3748,
+   178470912,
+   null,
+   4096
+  ],
+  [
+   1.4795,
+   1552023552,
+   null,
+   4096
+  ],
+  [
+   1.5726,
+   2800435200,
+   null,
+   4096
+  ],
+  [
+   1.6872,
+   2588852224,
+   null,
+   4096
+  ],
+  [
+   1.7812,
+   678789120,
+   null,
+   4096
+  ],
+  [
+   1.8834,
+   82460672,
+   null,
+   4096
+  ],
+  [
+   1.986,
+   481705984,
+   null,
+   4096
+  ],
+  [
+   2.0937,
+   1863663616,
+   null,
+   4096
+  ],
+  [
+   2.1868,
+   3113893888,
+   null,
+   4096
+  ],
+  [
+   2.2945,
+   1364672512,
+   null,
+   4096
+  ],
+  [
+   2.3878,
+   115441664,
+   null,
+   4096
+  ],
+  [
+   2.4864,
+   99254272,
+   null,
+   4096
+  ],
+  [
+   2.578,
+   196870144,
+   null,
+   4096
+  ],
+  [
+   2.6738,
+   202342400,
+   null,
+   4096
+  ],
+  [
+   2.7695,
+   288407552,
+   null,
+   4096
+  ],
+  [
+   2.868,
+   377061376,
+   null,
+   847872
+  ],
+  [
+   2.9566,
+   378716160,
+   null,
+   847872
+  ],
+  [
+   3.0496,
+   379437056,
+   null,
+   847872
+  ],
+  [
+   3.1402,
+   379469824,
+   null,
+   847872
+  ]
+ ]
+}

@@ -1,6 +1,5 @@
 """ManifestCreator — duck-compatible drop-in for libzim's Creator that
-writes a JSONL manifest and shells out to `streetzim-pack` (Rust binary
-backed by zimru) to emit the actual ZIM.
+writes a JSONL manifest and runs the Python `streetzim.pack` writer.
 
 The libzim API surface used by `streetzim/zim_writer.py` is small:
 
@@ -26,10 +25,10 @@ Body-encoding strategy:
     at consume time — at Japan-scale (3.2 M items) the previous
     per-body file-stage path spent ~320 s in `open()` syscalls alone.
   - On-disk path (`file`) is reserved for streaming-mode items
-    (>= 64 MiB; zimru's chunked-encode path keeps RSS bounded by
-    chunk size, not file size). Anything smaller goes inline.
+    (>= 64 MiB; avoids large base64 and JSON transport allocations).
+    Both raw and compressed file bodies stream through bounded chunks.
 
-Per-item compress is supported: zimru routes items into separate
+Per-item compress is supported: the packer routes items into separate
 clusters by effective compression, so a single ZIM can mix compressed
 and raw clusters (use case: streetzim's >500 MB routing chunks that
 need raw clusters for PWA fzstd compatibility while tiles/HTML stay
@@ -44,6 +43,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Iterable
@@ -75,10 +75,8 @@ _INLINE_TEXT_MIMES = frozenset({
 # above this fall back to file-stage even when the mime suggests text.
 _INLINE_TEXT_LIMIT = 256 * 1024
 
-# Bodies at or above this size are written through zimru's streaming
-# path (Item with `streaming: true` + `file` reference) rather than
-# base64-inlined. zimru's chunked encoder keeps peak RSS to one chunk
-# (~4 MiB) regardless of file size; base64-inlining a 1 GB routing
+# Bodies at or above this size use a file recipe rather than base64.
+# The Python packer streams raw and compressed bodies in bounded chunks. Base64-inlining a 1 GB routing
 # chunk would briefly hold ~1.4 GB of UTF-8 string + the source bytes
 # in Python's memory. 64 MiB is the same threshold add_item used
 # pre-base64 to switch on `streaming`, so the break-even point is
@@ -89,16 +87,22 @@ _STREAMING_THRESHOLD = 64 * 1024 * 1024
 def _encode_body_b64(data: bytes) -> str:
     """Encode binary body for inline JSONL transport. Pure ASCII out,
     so JSON needs no escape characters and the 1.33× inflation is
-    the only cost. Decode happens once on the Rust side per record."""
+    the only cost. Decode happens once in the packer per record."""
     return base64.b64encode(data).decode("ascii")
 
 
 # Resolved once per process. Override with STREETZIM_PACK_BIN if the
 # binary lives somewhere unusual (CI runners, vendored release builds).
-def _resolve_pack_binary() -> str:
+def resolve_pack_binary() -> str:
+    """Resolve an explicit/legacy executable; the default writer is Python."""
     explicit = os.environ.get("STREETZIM_PACK_BIN")
     if explicit:
-        return explicit
+        candidate = Path(explicit).expanduser()
+        if not candidate.is_file() or not os.access(candidate, os.X_OK):
+            raise RuntimeError(
+                f"STREETZIM_PACK_BIN is not an executable file: {explicit!r}. "
+                "Build streetzim-pack and provide its executable path.")
+        return str(candidate.resolve())
     here = Path(__file__).resolve().parent
     repo = here.parent  # streetzim/
     for build in ("release", "debug"):
@@ -110,6 +114,19 @@ def _resolve_pack_binary() -> str:
         "`cd rust/streetzim-pack && cargo build --release` "
         "or set STREETZIM_PACK_BIN to its absolute path."
     )
+
+
+_resolve_pack_binary = resolve_pack_binary  # compatibility for existing callers
+
+
+def resolve_pack_command() -> list[str]:
+    """Use this interpreter and installed package, unless explicitly overridden."""
+    if os.environ.get("STREETZIM_PACK_BIN"):
+        return [resolve_pack_binary()]
+    from importlib.util import find_spec
+    if find_spec("streetzim.pack") is None or find_spec("zstandard") is None:
+        raise RuntimeError("install streetzim and its zstandard dependency before packing")
+    return [sys.executable, "-m", "streetzim.pack"]
 
 
 _MANIFEST_ZSTD_THREADS = 4
@@ -153,12 +170,14 @@ class ManifestCreator:
         verbose: bool = False,
     ) -> None:
         self._output_path = str(output_path)
-        # Stage dir holds just the manifest.jsonl now — bodies are
-        # base64-inlined. Kept as a directory rather than a bare
-        # file so existing tooling/inspection scripts that look at
-        # `<output>.pack-stage/` continue to find the manifest.
-        self._stage_dir = Path(self._output_path + ".pack-stage")
-        self._stage_dir.mkdir(parents=True, exist_ok=True)
+        # A unique stage contains the manifest and large in-memory bodies.
+        # Concurrent attempts cannot truncate each other's recovery material.
+        output = Path(self._output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        self._stage_dir = Path(tempfile.mkdtemp(
+            prefix=output.name + ".pack-stage-", dir=output.parent))
+        self._staged_bodies = 0
+        self._workers: int | None = None
         # Write the manifest zstd-compressed when python-zstandard is present
         # (STREETZIM_MANIFEST_ZSTD=0 forces plain). Measured on brazil's 93 GB
         # manifest: zstd -3 shrinks the base64 tile section 1.87x and the JSON
@@ -172,15 +191,28 @@ class ManifestCreator:
         self._zstd = _manifest_zstd_enabled()
         self._manifest_path = self._stage_dir / (
             "manifest.jsonl.zst" if self._zstd else "manifest.jsonl")
-        if self._zstd:
-            import io
-            import zstandard
-            _raw = open(self._manifest_path, "wb")
-            _zw = zstandard.ZstdCompressor(
-                level=3, threads=_MANIFEST_ZSTD_THREADS).stream_writer(_raw, closefd=True)
-            self._mf = io.TextIOWrapper(_zw, encoding="utf-8", newline="\n")
-        else:
-            self._mf = self._manifest_path.open("w", encoding="utf-8")
+        try:
+            if self._zstd:
+                import io
+                import zstandard
+                _raw = self._manifest_path.open("wb")
+                try:
+                    _zw = zstandard.ZstdCompressor(
+                        level=3, threads=_MANIFEST_ZSTD_THREADS).stream_writer(_raw, closefd=True)
+                    try:
+                        self._mf = io.TextIOWrapper(_zw, encoding="utf-8", newline="\n")
+                    except BaseException:
+                        _raw.close()
+                        raise
+                except BaseException:
+                    _raw.close()
+                    raise
+            else:
+                self._mf = self._manifest_path.open("w", encoding="utf-8")
+        except BaseException:
+            shutil.rmtree(self._stage_dir, ignore_errors=True)
+            raise
+        self._entered = False
         self._closed = False
         self._keep_stage = keep_stage
         self._verbose = verbose
@@ -208,28 +240,49 @@ class ManifestCreator:
 
     # ---- libzim Creator config surface (mostly no-ops) ---------------
 
+    def _configurable(self) -> None:
+        if self._entered or self._closed:
+            raise RuntimeError("configure the manifest creator before entering it")
+
     def config_indexing(self, enabled: bool, lang: str) -> None:
-        # zimru does not yet implement xapian fulltext indexing.
-        # The flag is recorded for future use; for now the index is
-        # absent and the PWA falls back to its in-ZIM JSON search.
+        self._configurable()
+        if enabled:
+            raise ValueError(
+                "Manifest ZIM writer cannot run libzim's Xapian indexer; "
+                "choose --xapian=builder (external indexes) or "
+                "--xapian=none (in-viewer search only).")
         self._config["_indexing_requested"] = bool(enabled)
         self._config["_indexing_lang"] = lang
 
     def config_clustersize(self, bytes_size: int) -> None:
+        self._configurable()
         self._config["cluster_size_target"] = int(bytes_size)
 
     def config_nbworkers(self, n: int) -> None:
-        # zimru picks workers from rayon::current_num_threads(); the
-        # value is recorded for parity but ignored by the packer.
+        if n <= 0:
+            raise ValueError("compression workers must be positive")
+        self._configurable()
+        self._workers = int(n)
         self._config["_nbworkers_requested"] = int(n)
 
     def set_mainpath(self, path: str) -> None:
+        self._configurable()
         self._config["main_path"] = str(path)
 
     # ---- context manager: writes config + opens for items ------------
 
     def __enter__(self) -> ManifestCreator:
-        self._write_record(self._config)
+        self._configurable()
+        self._entered = True
+        try:
+            self._write_record(self._config)
+        except BaseException:
+            self._closed = True
+            try:
+                self._mf.close()
+            except BaseException:
+                print(f"Manifest flush also failed; recovery stage: {self._stage_dir}", file=sys.stderr)
+            raise
         return self
 
     def __exit__(self, exc_type: type[BaseException] | None,
@@ -237,7 +290,13 @@ class ManifestCreator:
         if self._closed:
             return False
         self._closed = True
-        self._mf.close()
+        try:
+            self._mf.close()
+        except BaseException:
+            if exc_type is None:
+                raise
+            # A failed compressor flush must not replace the producer failure.
+            print(f"Manifest flush also failed; recovery stage: {self._stage_dir}", file=sys.stderr)
         if exc_type is not None:
             # Bubble up the original error; leave the stage dir for
             # post-mortem unless the caller asked us not to.
@@ -284,12 +343,12 @@ class ManifestCreator:
         docs/zim-variants.md but not yet ported: nothing calls this on
         main) so a zoom never shares a
         cluster with its neighbours and cloud/derive_zim.py can drop or copy
-        it whole. streetzim-pack honours the flush only when built with the
-        ``cluster_break`` cargo feature (it needs zimru's flush); otherwise
-        it warns once, and the size target reaches the running streamer
-        only if zimru carries patches/zimru-flush-cluster.patch. A packer
-        older than this record rejects it (unknown kinds are an error), so
-        a builder that writes it must not be used with such a packer.
+        it whole. The Python packer flushes every active bucket and applies
+        the optional target to subsequent items. An explicit legacy Rust
+        executable honours the flush only with its ``cluster_break`` Cargo
+        feature and zimru's flush/target patch; otherwise it warns once.
+        Older packers reject this record, so producers need a compatible
+        executable override when selecting one.
         """
         rec: dict[str, Any] = {"kind": "cluster_break"}
         if cluster_size_target is not None:
@@ -327,14 +386,14 @@ class ManifestCreator:
         if is_front:
             rec["front"] = True
         if compress is False:
-            # Per-item override — zimru routes this item to its own
+            # Per-item override — the packer routes this item to its own
             # uncompressed cluster regardless of the build's default.
             rec["compress"] = False
         if namespace is not None:
             # Caller is placing the item into a non-default namespace
             # (typical: 'X' for Xapian indexes at X/fulltext/xapian and
-            # X/title/xapian). zimru's Item::in_namespace honours the
-            # raw byte; pass it through so the rust packer can route
+            # X/title/xapian). the manifest writer honors the
+            # namespace byte; pass it through so the packer can route
             # the entry to the right namespace dirent table.
             if isinstance(namespace, str):
                 if len(namespace) != 1:
@@ -350,9 +409,9 @@ class ManifestCreator:
             size = os.path.getsize(file_path)
             if size >= _STREAMING_THRESHOLD:
                 # Multi-MiB-to-multi-GB items (routing graph chunks,
-                # large PBF blobs) — let zimru read them in its own
-                # 4 MiB chunks at pack time so peak RSS stays bounded.
-                rec["file"] = str(file_path)
+                # large PBF blobs) — let the packer read them in its own
+                # 4 MiB chunks at pack time (raw bodies avoid whole-file buffering).
+                rec["file"] = str(Path(file_path).resolve())
                 rec["streaming"] = True
                 rec["size"] = size
             else:
@@ -370,6 +429,17 @@ class ManifestCreator:
                     f"add_item({path!r}): item has neither _file_path nor _data"
                 )
             data = bytes(data)
+            if len(data) >= _STREAMING_THRESHOLD:
+                # Existing in-memory content still belongs to the caller, but
+                # staging avoids two base64 copies plus a huge JSON string.
+                # Keep the body with its manifest for retries after a failure.
+                self._staged_bodies += 1
+                body_path = self._stage_dir / f"body-{self._staged_bodies:08d}.bin"
+                with body_path.open("wb") as body:
+                    body.write(data)
+                rec.update(file=str(body_path.resolve()), streaming=True,
+                           size=len(data))
+                return rec
             # Inline small text-ish items as a `content` string. UTF-8
             # round-trips through JSON without the 33 % base64 tax;
             # for HTML/JS/CSS/JSON that mostly lives in this branch
@@ -390,13 +460,18 @@ class ManifestCreator:
         return rec
 
     def _write_record(self, rec: dict[str, Any]) -> None:
+        if not self._entered or self._closed:
+            raise RuntimeError("add records inside the manifest creator context")
         self._mf.write(json.dumps(rec, ensure_ascii=False, separators=(",", ":")))
         self._mf.write("\n")
 
     def _run_packer(self) -> None:
-        binary = _resolve_pack_binary()
-        cmd = [binary, str(self._manifest_path), self._output_path]
-        _rayon = os.environ.get("RAYON_NUM_THREADS")
+        command = resolve_pack_command()
+        candidate = self._stage_dir / "packed.zim"
+        cmd = command + [str(self._manifest_path), str(candidate)]
+        if self._workers is not None:
+            cmd.extend(["--threads", str(self._workers)])
+        _rayon = str(self._workers) if self._workers is not None else os.environ.get("RAYON_NUM_THREADS")
         if self._verbose:
             cmd.append("--verbose")
             print(f"  streetzim-pack: {' '.join(cmd)}", flush=True)
@@ -412,10 +487,11 @@ class ManifestCreator:
             # may have used a fraction of it. Read /proc/<pid>/status instead,
             # which is the packer and nothing else.
             _peak_kb = [0]
+            watch_stop = threading.Event()
 
             def _watch_hwm(pid: int, out: list[int]) -> None:
                 path = f"/proc/{pid}/status"
-                while True:
+                while not watch_stop.is_set():
                     try:
                         with open(path) as fh:
                             for line in fh:
@@ -424,14 +500,29 @@ class ManifestCreator:
                                     break
                     except (OSError, ValueError):
                         return          # process gone
-                    time.sleep(0.25)
+                    watch_stop.wait(0.25)
 
-            _proc = subprocess.Popen(cmd)
-            _t = threading.Thread(target=_watch_hwm, args=(_proc.pid, _peak_kb),
-                                  daemon=True)
-            _t.start()
+            child_env = os.environ.copy()
+            if len(command) > 1:
+                # Absolute script invocations from another cwd need to resolve
+                # the same checkout/package as this parent. Keep the cwd so
+                # relative input paths retain their meaning.
+                package_root = str(Path(__file__).resolve().parent.parent)
+                prior = child_env.get("PYTHONPATH")
+                child_env["PYTHONPATH"] = package_root + (os.pathsep + prior if prior else "")
+            _proc = subprocess.Popen(cmd, env=child_env)
+            _t: threading.Thread | None = None
             try:
-                _rc = _proc.wait()
+                _t = threading.Thread(target=_watch_hwm, args=(_proc.pid, _peak_kb),
+                                      daemon=True)
+                _t.start()
+                if hasattr(os, "wait4"):
+                    _, status, usage = os.wait4(_proc.pid, 0)
+                    _rc = _proc.returncode = os.waitstatus_to_exitcode(status)
+                    rss_kb = int(usage.ru_maxrss / 1024) if sys.platform == "darwin" else int(usage.ru_maxrss)
+                    _peak_kb[0] = max(_peak_kb[0], rss_kb)
+                else:
+                    _rc = _proc.wait()
             except BaseException:
                 # subprocess.run() kills the child if the parent is interrupted;
                 # a bare Popen does not, so a KeyboardInterrupt here used to
@@ -439,14 +530,21 @@ class ManifestCreator:
                 _proc.kill()
                 _proc.wait()
                 raise
-            _t.join(timeout=1.0)
+            finally:
+                watch_stop.set()
+                if _t is not None and _t.ident is not None:
+                    _t.join(timeout=1.0)
             if _rc != 0:
                 raise subprocess.CalledProcessError(_rc, cmd)
+            if not candidate.is_file() or candidate.stat().st_size == 0:
+                raise RuntimeError(f"streetzim-pack returned success without an archive. "
+                                   f"Manifest preserved at {self._manifest_path}")
+            os.replace(candidate, self._output_path)
             if _peak_kb[0]:
                 _peak = (f"{_peak_kb[0] / 1048576:.1f} GB" if _peak_kb[0] >= 1048576
                          else f"{_peak_kb[0] / 1024:.0f} MB")
                 print(f"    streetzim-pack peak RSS {_peak}"
-                      + (f" (RAYON_NUM_THREADS={_rayon})" if _rayon else " (all cores)"),
+                      + (f" (workers={_rayon})" if _rayon else " (automatic workers)"),
                       flush=True)
         except subprocess.CalledProcessError as e:
             # `exc` is the __exit__ parameter and is not in scope here, so this
@@ -455,9 +553,9 @@ class ManifestCreator:
             # it exists to explain.
             if e.returncode == -9:
                 raise RuntimeError(
-                    f"streetzim-pack was KILLED (SIGKILL) — almost certainly the "
-                    f"OOM killer. Peak memory scales with rayon threads x "
-                    f"ZSTD_CLEVEL; re-run with a lower PACK_THREADS "
+                    f"streetzim-pack was KILLED (SIGKILL), possibly by a memory "
+                    f"limit or external termination. If memory was exhausted, "
+                    f"lower --zim-workers or RAYON_NUM_THREADS "
                     f"(currently {_rayon or 'all cores'}). Manifest preserved at "
                     f"{self._manifest_path} for inspection."
                 ) from e
@@ -474,10 +572,10 @@ class ManifestCreator:
                 f"{self._output_path} ({out_size/1e9:.2f} GB)",
                 flush=True,
             )
-        # Surface the rust-pack wall-clock as a sub-phase under whatever
+        # Surface the packer wall-clock as a sub-phase under whatever
         # top-level phase the caller is currently in (usually the
         # `[N/total] Creating ZIM file` phase). Keeps the optimization
-        # target — Python+libzim Creator vs. zimru/streetzim-pack — in
+        # target — libzim Creator vs. Python manifest packer — in
         # the build summary so before/after comparisons are concrete.
         #
         # Inter-module note: when create_osm_zim runs as __main__, its
@@ -490,7 +588,6 @@ class ManifestCreator:
         # PHASE_TIMER now lives in streetzim.common (one instance, whatever
         # imported the builder); the sys.modules walk stays as a fallback for
         # an older checkout on sys.path.
-        import sys
         timer = None
         try:
             from streetzim.common import PHASE_TIMER as timer
@@ -503,7 +600,8 @@ class ManifestCreator:
         if timer is not None:
             try:
                 timer.record_subphase(
-                    "zim-pack: streetzim-pack (zimru)",
+                    "zim-pack: streetzim-pack (override)" if len(command) == 1
+                    else "zim-pack: streetzim-pack (Python)",
                     elapsed,
                     note=f"manifest {manifest_size/1e6:.0f} MB"
                          f"{' (zstd)' if self._zstd else ''} → ZIM {out_size/1e9:.2f} GB",
@@ -519,33 +617,18 @@ class ManifestCreator:
                 timer.record_metric(
                     "zim-pack: output ZIM size", f"{out_size/1e6:.0f}", "MB",
                 )
+                if _peak_kb[0]:
+                    timer.record_metric("zim-pack: process peak RSS", f"{_peak_kb[0] * 1024 / 1e6:.1f}", "MB")
             except Exception:
                 pass
-
-
-def _open_manifest_text(manifest_path: str):
-    """Open a manifest for reading whether plain or zstd (detected by magic)."""
-    with open(manifest_path, "rb") as probe:
-        magic = probe.read(4)
-    if magic == b"\x28\xb5\x2f\xfd":
-        import io
-        import zstandard
-        raw = open(manifest_path, "rb")
-        return io.TextIOWrapper(
-            zstandard.ZstdDecompressor().stream_reader(raw, closefd=True),
-            encoding="utf-8")
-    return open(manifest_path, encoding="utf-8")
 
 
 def iter_records(manifest_path: str) -> Iterable[dict[str, Any]]:
     """Read a manifest back as an iterator of records — for tests and
     diff tools. Accepts plain or zstd-compressed manifests."""
-    with _open_manifest_text(manifest_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            yield json.loads(line)
+    from streetzim.pack import iter_manifest
+    for _, record in iter_manifest(Path(manifest_path)):
+        yield record
 
 
 if __name__ == "__main__":

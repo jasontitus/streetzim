@@ -1,0 +1,110 @@
+{
+  "addresses": 477,
+  "wiki": 359,
+  "measurements": [
+    {
+      "command": [
+        "osmium",
+        "extract",
+        "-b",
+        "7.4,43.72,7.44,43.76",
+        "/tmp/streetzim-review-golden/inputs/monaco.osm.pbf",
+        "-o",
+        "/var/folders/70/1wkd9s3s4bg0cf9283n2t9sh0000gn/T/streetzim_addr_8z0f17hg/region.osm.pbf",
+        "--overwrite"
+      ],
+      "wall_s": 0.30012849997729063,
+      "cpu_s": 0.36079799999999995,
+      "peak_rss_bytes": 3186311168,
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "osmium",
+        "tags-filter",
+        "/var/folders/70/1wkd9s3s4bg0cf9283n2t9sh0000gn/T/streetzim_addr_8z0f17hg/region.osm.pbf",
+        "addr:housenumber",
+        "-o",
+        "/var/folders/70/1wkd9s3s4bg0cf9283n2t9sh0000gn/T/streetzim_addr_8z0f17hg/addresses.osm.pbf",
+        "--overwrite"
+      ],
+      "wall_s": 0.08033520798198879,
+      "cpu_s": 0.099936,
+      "peak_rss_bytes": 647380992,
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "osmium",
+        "export",
+        "/var/folders/70/1wkd9s3s4bg0cf9283n2t9sh0000gn/T/streetzim_addr_8z0f17hg/addresses.osm.pbf",
+        "-f",
+        "geojsonseq",
+        "--geometry-types=point,polygon",
+        "-o",
+        "/var/folders/70/1wkd9s3s4bg0cf9283n2t9sh0000gn/T/streetzim_addr_8z0f17hg/addresses.geojsonseq",
+        "--overwrite"
+      ],
+      "wall_s": 0.012882290873676538,
+      "cpu_s": 0.011628,
+      "peak_rss_bytes": 5128192,
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "osmium",
+        "extract",
+        "-b",
+        "7.4,43.72,7.44,43.76",
+        "/tmp/streetzim-review-golden/inputs/monaco.osm.pbf",
+        "-o",
+        "/var/folders/70/1wkd9s3s4bg0cf9283n2t9sh0000gn/T/streetzim_wiki_7i0_okxf/region.osm.pbf",
+        "--overwrite"
+      ],
+      "wall_s": 0.320327291963622,
+      "cpu_s": 0.36853899999999995,
+      "peak_rss_bytes": 3184607232,
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "osmium",
+        "tags-filter",
+        "/var/folders/70/1wkd9s3s4bg0cf9283n2t9sh0000gn/T/streetzim_wiki_7i0_okxf/region.osm.pbf",
+        "wikipedia",
+        "wikidata",
+        "-o",
+        "/var/folders/70/1wkd9s3s4bg0cf9283n2t9sh0000gn/T/streetzim_wiki_7i0_okxf/wiki.osm.pbf",
+        "--overwrite"
+      ],
+      "wall_s": 0.15697333286516368,
+      "cpu_s": 0.18375799999999998,
+      "peak_rss_bytes": 1477705728,
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "osmium",
+        "export",
+        "/var/folders/70/1wkd9s3s4bg0cf9283n2t9sh0000gn/T/streetzim_wiki_7i0_okxf/wiki.osm.pbf",
+        "-f",
+        "geojsonseq",
+        "-o",
+        "/var/folders/70/1wkd9s3s4bg0cf9283n2t9sh0000gn/T/streetzim_wiki_7i0_okxf/wiki.geojsonseq",
+        "--overwrite"
+      ],
+      "wall_s": 0.025903332978487015,
+      "cpu_s": 0.026422,
+      "peak_rss_bytes": 11862016,
+      "exit_code": 0
+    }
+  ],
+  "method": "Fresh subprocess wait4 OS high-water RSS, bytes on macOS; one run per subcommand, diagnostic rather than throughput benchmark",
+  "platform": "darwin arm64",
+  "osmium_version": "1.19.1",
+  "libosmium_version": "2.23.1",
+  "input_sha256": "194d229f6ad19071ffb6ee35db78727a04a1ea975f0a8350543c616fa3f409bf",
+  "input_nodes": 68512,
+  "input_max_node_id": 14219141884,
+  "source_reference": "https://docs.osmcode.org/osmium/latest/osmium-extract.html#memory-usage"
+}

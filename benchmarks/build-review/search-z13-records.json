@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "measurement": "real z13 MBTiles fixture extraction; no tile materialization",
+  "baseline_ref": "d5c32b6",
+  "fixture": "tests/test_search_extract.py::_make_mbtiles(zoom=13)",
+  "records": {
+    "before": [],
+    "after": [
+      {
+        "name": "Monte-Carlo",
+        "type": "place",
+        "subtype": "suburb",
+        "lat": 43.7626020727127,
+        "lon": 7.39354133605957
+      },
+      {
+        "name": "Boulangerie",
+        "type": "poi",
+        "subtype": "shop",
+        "lat": 43.7626020727127,
+        "lon": 7.414999008178711,
+        "location": "Monte-Carlo"
+      },
+      {
+        "name": "Café de Paris",
+        "type": "poi",
+        "subtype": "cafe",
+        "lat": 43.754853078413554,
+        "lon": 7.404270172119141,
+        "location": "Monte-Carlo"
+      },
+      {
+        "name": "Pharmacie Centrale",
+        "type": "poi",
+        "subtype": "pharmacy",
+        "osm_key": "amenity",
+        "lat": 43.754853078413554,
+        "lon": 7.414999008178711,
+        "location": "Monte-Carlo"
+      },
+      {
+        "name": "Avenue des Beaux-Arts",
+        "type": "street",
+        "subtype": "tertiary",
+        "lat": 43.74012722445414,
+        "lon": 7.404270172119141,
+        "location": "Monte-Carlo"
+      }
+    ]
+  }
+}

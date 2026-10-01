@@ -44,11 +44,17 @@ def name_of_url(url: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", url.split("://", 1)[-1])
 
 
+def _header(headers: dict[str, str], name: str) -> str:
+    """HTTP field names are case-insensitive, including after dict conversion."""
+    wanted = name.lower()
+    return next((value for key, value in headers.items() if key.lower() == wanted), "")
+
+
 def head(url: str, user_agent: str) -> dict[str, str] | None:
     """The response headers for `url`: a HEAD request, or when the server
     refuses HEAD, a GET of its first byte (Content-Length then comes from
     Content-Range). None when it cannot be reached."""
-    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": user_agent})
+    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": user_agent, "Accept-Encoding": "identity"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return dict(r.headers.items())
@@ -56,11 +62,11 @@ def head(url: str, user_agent: str) -> dict[str, str] | None:
         pass                                   # HEAD refused (403, 405, ...)
     except OSError:
         return None
-    req = urllib.request.Request(url, headers={"User-Agent": user_agent, "Range": "bytes=0-0"})
+    req = urllib.request.Request(url, headers={"User-Agent": user_agent, "Accept-Encoding": "identity", "Range": "bytes=0-0"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             h = dict(r.headers.items())
-            m = re.match(r"bytes \d+-\d+/(\d+)$", h.get("Content-Range", ""))
+            m = re.match(r"bytes \d+-\d+/(\d+)$", _header(h, "Content-Range"))
             if r.status == 206 and m:
                 h["Content-Length"] = m.group(1)
                 h.setdefault("Accept-Ranges", "bytes")
@@ -75,7 +81,7 @@ def stamp_of(h: dict[str, str] | None) -> dict[str, str] | None:
     """The upstream version in the headers `h`."""
     if h is None:
         return None
-    return {k: h.get(k, "") for k in STAMP_KEYS}
+    return {k: _header(h, k) for k in STAMP_KEYS}
 
 
 class Progress:
@@ -132,7 +138,7 @@ def _download(url: str, part: Path, offset: int, total: int, validator: str,
     """Write `url` into `part` from byte `offset` (a Range request with
     If-Range when offset > 0). False when a resume was answered with a
     range that does not start at the offset (nothing written)."""
-    headers = {"User-Agent": user_agent}
+    headers = {"User-Agent": user_agent, "Accept-Encoding": "identity"}
     if offset:
         headers.update({"Range": f"bytes={offset}-", "If-Range": validator})
     with _stream(url, headers) as (status, h, blocks):
@@ -140,7 +146,7 @@ def _download(url: str, part: Path, offset: int, total: int, validator: str,
             print("    the server sent the whole file: starting over", flush=True)
             offset = 0
         elif offset and not (status == 206
-                             and h.get("Content-Range", "").startswith(f"bytes {offset}-")):
+                             and _header(h, "Content-Range").startswith(f"bytes {offset}-")):
             print(f"    unexpected answer to a resume ({status} "
                   f"{h.get('Content-Range', '')!r}): starting over", flush=True)
             return False
@@ -150,6 +156,10 @@ def _download(url: str, part: Path, offset: int, total: int, validator: str,
             sink = Progress(f, offset, total, check_head)
             for block in blocks:
                 sink.write(block)
+            response_length = _header(h, "Content-Length")
+            if response_length and sink.done - offset != int(response_length):
+                raise OSError(f"{url}: GET body has {sink.done - offset:,} bytes, "
+                              f"expected {response_length}")
     return True
 
 
@@ -169,7 +179,7 @@ def expected_sha256(url: str, user_agent: str) -> str | None:
     sums = ofm_sums_url(url)
     if sums is None:
         return None
-    req = urllib.request.Request(sums, headers={"User-Agent": user_agent})
+    req = urllib.request.Request(sums, headers={"User-Agent": user_agent, "Accept-Encoding": "identity"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             text = r.read(1 << 16).decode("utf-8", "replace")
@@ -213,7 +223,7 @@ def _evict_other_versions(url: str, dest: Path) -> None:
     for other in sorted(dest.parent.glob(prefix + "*" + suffix)):
         if other.name == dest.name or not other.name.endswith(suffix):
             continue
-        with _lock(other, block=False) as got:
+        with file_lock(other, block=False) as got:
             if not got:
                 print(f"  Keeping {other.name}: in use by another task", flush=True)
                 continue
@@ -224,11 +234,12 @@ def _evict_other_versions(url: str, dest: Path) -> None:
                 extra.unlink(missing_ok=True)
             print(f"  Removed older download {other.name} ({size / 1e9:,.1f} GB)",
                   flush=True)
-        other.with_name(other.name + ".lock").unlink(missing_ok=True)
+        # Keep the lock inode: a waiter may already have it open. Unlinking
+        # it lets a third task create a second lock for the same destination.
 
 
 @contextlib.contextmanager
-def _lock(dest: Path, *, block: bool = True) -> Generator[bool, None, None]:
+def file_lock(dest: Path, *, block: bool = True) -> Generator[bool, None, None]:
     """An exclusive lock on dest.lock; yields whether it was taken."""
     import fcntl
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -247,54 +258,71 @@ def _lock(dest: Path, *, block: bool = True) -> Generator[bool, None, None]:
             fcntl.flock(f, fcntl.LOCK_UN)
 
 
-def _read_json(path: Path) -> Any:
+def read_download_metadata(path: Path) -> Any:
     try:
         return json.loads(path.read_text())
     except (OSError, ValueError):
         return None
 
 
+def write_download_metadata(path: Path, value: Any) -> None:
+    """Atomically replace metadata; callers hold the destination file lock."""
+    part = path.with_name(path.name + ".tmp")
+    try:
+        part.write_text(json.dumps(value))
+        os.replace(part, path)
+    finally:
+        part.unlink(missing_ok=True)
+
+
 def fetch_resumable(url: str, dest: Path, *, user_agent: str,
-                    check_head: Callable[[bytes], None] | None = None) -> Path:
+                    check_head: Callable[[bytes], None] | None = None,
+                    trust_preseeded: bool = True) -> Path:
     """Download `url` to `dest` as the module docstring describes, and
     return it."""
-    with _lock(dest):
-        return _fetch_locked(url, dest, user_agent, check_head)
+    with file_lock(dest):
+        return _fetch_locked(url, dest, user_agent, check_head, trust_preseeded)
 
 
 def _fetch_locked(url: str, dest: Path, user_agent: str,
-                  check_head: Callable[[bytes], None] | None) -> Path:
+                  check_head: Callable[[bytes], None] | None,
+                  trust_preseeded: bool = True) -> Path:
     meta = dest.with_name(dest.name + ".source.json")
     part = dest.with_name(dest.name + ".part")
     part_meta = part.with_name(part.name + ".source.json")
     h = head(url, user_agent)
     stamp = stamp_of(h)
-    if dest.exists() and dest.stat().st_size > 0:
-        if stamp is None:
+    total = int(stamp["Content-Length"] or 0) if stamp is not None else 0
+    cached_size = dest.stat().st_size if dest.exists() else 0
+    if cached_size > 0 and (not total or cached_size == total):
+        if check_head is not None:
+            with open(dest, "rb") as f:
+                check_head(f.read(64))
+        if stamp is None and (trust_preseeded or read_download_metadata(meta) is not None):
             print(f"  Reusing {dest} (could not check {url} for updates)")
             return dest
-        if _read_json(meta) == stamp:
+        if stamp is not None and read_download_metadata(meta) == stamp:
             print(f"  Reusing {dest} (unchanged upstream)")
             return dest
-        if not meta.exists() and stamp["Content-Length"] == str(dest.stat().st_size):
+        if (trust_preseeded and stamp is not None and not meta.exists()
+                and stamp["Content-Length"] == str(dest.stat().st_size)):
             want = expected_sha256(url, user_agent)
             if want is None or sha256_of(dest) == want:
                 print(f"  Reusing {dest} (same size as upstream"
                       + (", same SHA-256)" if want else ")"))
-                meta.write_text(json.dumps(stamp))
+                write_download_metadata(meta, stamp)
                 return dest
             print(f"  {dest} is not the upstream file (SHA-256 differs): downloading")
     if h is None or stamp is None:
         raise OSError(f"cannot reach {url}")
-    total = int(stamp["Content-Length"] or 0)
     validator = stamp["ETag"] or stamp["Last-Modified"]
     offset = part.stat().st_size if part.exists() else 0
-    resumable = (h.get("Accept-Ranges", "").lower() == "bytes" and bool(validator)
-                 and _read_json(part_meta) == stamp and 0 < offset <= total)
+    resumable = (_header(h, "Accept-Ranges").lower() == "bytes" and bool(validator)
+                 and read_download_metadata(part_meta) == stamp and 0 < offset <= total)
     if not resumable:
         offset = 0
         part.unlink(missing_ok=True)
-    part_meta.write_text(json.dumps(stamp))
+    write_download_metadata(part_meta, stamp)
     for attempt in (1, 2):
         if offset and offset == total:
             print(f"  {part.name} is complete: not downloading it again")
@@ -321,6 +349,14 @@ def _fetch_locked(url: str, dest: Path, user_agent: str,
         if attempt == 2 or not offset:
             raise OSError(f"{url}: got {size:,} bytes, expected {total:,}")
         offset = 0                              # a resume that went wrong: start over
+    if check_head is not None:
+        try:
+            with open(part, "rb") as f:
+                check_head(f.read(64))
+        except ValueError:
+            part.unlink(missing_ok=True)
+            part_meta.unlink(missing_ok=True)
+            raise
     want = expected_sha256(url, user_agent)
     if want is not None:
         got = sha256_of(part)
@@ -330,7 +366,7 @@ def _fetch_locked(url: str, dest: Path, user_agent: str,
             raise OSError(f"{url}: SHA-256 {got} is not the published {want}")
         print("    SHA-256 matches the published checksum", flush=True)
     os.replace(part, dest)
-    meta.write_text(json.dumps(stamp))
+    write_download_metadata(meta, stamp)
     part_meta.unlink(missing_ok=True)
     _evict_other_versions(url, dest)
     return dest

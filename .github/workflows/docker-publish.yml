@@ -1,113 +1,110 @@
-# Publish the builder image to ghcr.io/jasontitus/streetzim (linux/amd64).
-#
-# Runs after CI passes on a push (its `docker` job builds and tests the
-# image with a full-feature Monaco build), for:
-#   - main           -> tags `dev` and `sha-<12 chars>`
-#   - a tag vX.Y.Z   -> tags `X.Y.Z` and `latest` (releases only, no rc);
-#                       the tag must match
-#                       streetzim/__about__.py, as for PyPI (publish.yml)
-# Only pushes to this repository publish: a pull request's CI run (a
-# fork's included) never does. The image is rebuilt here from the commit
-# CI tested, checked as CI checks it, then pushed with the workflow's own
-# GITHUB_TOKEN (no stored secret). Actions are pinned by commit (the
-# release in the comment).
-#
-# After the first publish, make the package public once: GitHub ->
-# Packages -> streetzim -> Package settings -> Change visibility.
-# Moving to openZIM later (docs/zimfarm.md, "What Zimfarm needs on its
-# side") means publishing the same image as ghcr.io/openzim/streetzim.
+# Publish exactly the linux/amd64 image that CI's Docker job built and validated.
+# main -> dev and sha-<12 chars>; stable release tags -> X.Y.Z. Only the highest
+# stable Git tag gets latest (a higher failing tag still blocks promotion).
+# Keep release tags immutable. Make the GHCR package public in Package settings.
 name: Publish Docker image
 
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [main, "v*"]
 
 permissions:
   contents: read
 
+# Mutable aliases share serialization. An older CI rerun must not evict
+# current main's pending publication before being skipped itself.
 concurrency:
-  group: docker-publish-${{ github.event.workflow_run.head_branch }}
-  cancel-in-progress: false
+  group: docker-publish
+  queue: max
 
 jobs:
-  publish:
+  select:
     if: >-
       github.repository == 'jasontitus/streetzim'
       && github.event.workflow_run.conclusion == 'success'
       && github.event.workflow_run.event == 'push'
       && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 10
     permissions:
       contents: read
-      packages: write
+      actions: read
+    outputs:
+      publish: ${{ steps.tags.outputs.publish }}
+      tags: ${{ steps.tags.outputs.tags }}
+      commit_sha: ${{ steps.tags.outputs.commit_sha }}
+      artifact_id: ${{ steps.artifact.outputs.artifact_id }}
     env:
-      IMAGE: ghcr.io/jasontitus/streetzim
       REF: ${{ github.event.workflow_run.head_branch }}
       SHA: ${{ github.event.workflow_run.head_sha }}
+      CI_RUN_ID: ${{ github.event.workflow_run.id }}
+      CI_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
     steps:
+      # Read policy from the workflow's default-branch commit, even when the
+      # tested release predates the helper. Tested metadata is literal data.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          path: policy
+          persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
-      - name: Tags for this commit
+          path: tested
+          persist-credentials: false
+      - name: Select allowed tags without executing tested source
         id: tags
-        run: |
-          if [ "$REF" = main ]; then
-            # Publish main only while it still points at the tested commit
-            # (a later push publishes itself), so `dev` never goes backwards.
-            git fetch -q origin main
-            if [ "$(git rev-parse origin/main)" != "$SHA" ]; then
-              echo "main has moved past $SHA; its own run publishes it"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0
-            fi
-            echo "tags=dev sha-${SHA:0:12}" >> "$GITHUB_OUTPUT"
-            echo "version=dev" >> "$GITHUB_OUTPUT"
-          else
-            if [ "$(git rev-parse --verify --quiet "refs/tags/$REF^{commit}")" != "$SHA" ]; then
-              # A branch whose name starts with "v", not a release tag.
-              echo "$REF is not a tag of $SHA: nothing to publish"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0
-            fi
-            version=$(python3 -c "import runpy; print(runpy.run_path('streetzim/__about__.py')['__version__'])")
-            if [ "$REF" != "v$version" ]; then
-              echo "::error::tag $REF does not match streetzim/__about__.py ($version)"; exit 1
-            fi
-            # Releases only: a pre-release (1.1.0rc1) must not become `latest`.
-            if ! [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "::error::$version is not X.Y.Z"; exit 1
-            fi
-            echo "tags=$version latest" >> "$GITHUB_OUTPUT"
-            echo "version=$version" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Build the image (linux/amd64)
-        if: steps.tags.outputs.skip != '1'
+        working-directory: tested
+        run: python3 ../policy/tools/docker_publish_tags.py --ref "$REF" --sha "$SHA" >> "$GITHUB_OUTPUT"
+      - name: Select the tested image artifact
+        id: artifact
+        if: steps.tags.outputs.publish == 'true'
         env:
-          VERSION: ${{ steps.tags.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          docker build --platform linux/amd64 \
-            --label org.opencontainers.image.revision="$SHA" \
-            --label org.opencontainers.image.version="$VERSION" \
-            -t streetzim .
-      - name: The image works (as CI's docker job checks it)
-        if: steps.tags.outputs.skip != '1'
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts" > "$RUNNER_TEMP/artifacts.json"
+          python3 policy/tools/docker_publish_tags.py --sha "$SHA" \
+            --artifact-list "$RUNNER_TEMP/artifacts.json" --run-id "$CI_RUN_ID" \
+            --run-attempt "$CI_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: select
+    if: needs.select.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/jasontitus/streetzim
+      SHA: ${{ needs.select.outputs.commit_sha }}
+      TAGS: ${{ needs.select.outputs.tags }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          artifact-ids: ${{ needs.select.outputs.artifact_id }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: image
+          merge-multiple: true
+      # Loading and inspecting does not run image code. This job never
+      # checks out or executes release source and never rebuilds the image.
+      - name: Verify and load the exact CI image
+        working-directory: image
         run: |
-          docker run --rm --network none streetzim python /app/tools/pin_viewer_assets.py --prefetch /app/viewer-assets
-          docker run --rm streetzim tilemaker --help > /dev/null
-          docker run --rm streetzim osmium --version
-          docker run --rm streetzim python -c "from streetzim import scraperlib; assert scraperlib.AVAILABLE, 'zimscraperlib missing'"
-          docker run --rm --network none streetzim python -c "import rasterio; print('GDAL', rasterio.__gdal_version__)"
-          docker run --rm streetzim streetzim --help > /dev/null
+          set -o pipefail
+          sha256sum --check SHA256SUMS
+          gzip -dc streetzim-image.tar.gz | docker load
+          test "$(docker image inspect streetzim --format '{{.Id}}')" = "$(cat image-id.txt)"
+          test "$(docker image inspect streetzim --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
+          test "$(docker image inspect streetzim --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$SHA"
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
-        if: steps.tags.outputs.skip != '1'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Push
-        if: steps.tags.outputs.skip != '1'
-        env:
-          TAGS: ${{ steps.tags.outputs.tags }}
+      - name: Push validated tags
         run: |
           for t in $TAGS; do
             docker tag streetzim "$IMAGE:$t"

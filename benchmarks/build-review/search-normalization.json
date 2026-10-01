@@ -1,0 +1,91 @@
+{
+  "schema": 1,
+  "measurement": "normalizer CPU microbenchmark; 5 trials; 10,000 loops over each named dataset",
+  "baseline_ref": "d5c32b6",
+  "latin_outputs_unchanged": true,
+  "datasets": {
+    "mixed_50_percent_latin": {
+      "input_names": [
+        "N. MAIN ST.",
+        "Ávé. des Écoles",
+        "1029 Ramona Street",
+        "Palo Alto",
+        "中央通り",
+        "人民路，上海市",
+        "ЛЕНИНА, МОСКВА",
+        "เมือง"
+      ],
+      "calls_per_run": 80000,
+      "before_seconds": [
+        0.1510584158822894,
+        0.1494940419215709,
+        0.1502584998961538,
+        0.15003112494014204,
+        0.1506859171204269
+      ],
+      "after_seconds": [
+        0.14434887492097914,
+        0.14405500004068017,
+        0.144529249984771,
+        0.14729566709138453,
+        0.14614375005476177
+      ],
+      "before_median_seconds": 0.1502584998961538,
+      "after_median_seconds": 0.144529249984771,
+      "before_outputs": [
+        "north main street",
+        "avenue des ecoles",
+        "1029 ramona street",
+        "palo alto",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "after_outputs": [
+        "north main street",
+        "avenue des ecoles",
+        "1029 ramona street",
+        "palo alto",
+        "中央通り",
+        "人民路 上海市",
+        "ленина москва",
+        "เมือง"
+      ]
+    },
+    "ascii": {
+      "input_names": [
+        "N. MAIN ST.",
+        "1029 Ramona Street",
+        "Palo Alto"
+      ],
+      "calls_per_run": 30000,
+      "before_seconds": [
+        0.060605583945289254,
+        0.05986920790746808,
+        0.061213749926537275,
+        0.059564166935160756,
+        0.059730291832238436
+      ],
+      "after_seconds": [
+        0.024729416938498616,
+        0.024875124916434288,
+        0.024995333049446344,
+        0.025028415955603123,
+        0.02495300001464784
+      ],
+      "before_median_seconds": 0.05986920790746808,
+      "after_median_seconds": 0.02495300001464784,
+      "before_outputs": [
+        "north main street",
+        "1029 ramona street",
+        "palo alto"
+      ],
+      "after_outputs": [
+        "north main street",
+        "1029 ramona street",
+        "palo alto"
+      ]
+    }
+  }
+}

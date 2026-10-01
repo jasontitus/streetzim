@@ -1,0 +1,265 @@
+{
+  "scope": "Actual Monaco bbox extraction and address/wiki tags-filter and filtered GeoJSON export subprocesses only, macOS arm64; OS wait4 RSS in bytes, three fresh processes per variant; no overall throughput claim",
+  "input_sha256": "194d229f6ad19071ffb6ee35db78727a04a1ea975f0a8350543c616fa3f409bf",
+  "extract_memory_documentation": "https://docs.osmcode.org/osmium/latest/osmium-extract.html#memory-usage",
+  "measurements": {
+    "bbox_extract_complete_ways": [
+      {
+        "wall_s": 0.3933723750524223,
+        "peak_rss_bytes": 3190554624,
+        "cpu_s": 0.37614
+      },
+      {
+        "wall_s": 0.3034557921346277,
+        "peak_rss_bytes": 3186589696,
+        "cpu_s": 0.36266999999999994
+      },
+      {
+        "wall_s": 0.3119017498102039,
+        "peak_rss_bytes": 3185983488,
+        "cpu_s": 0.37205599999999994
+      }
+    ],
+    "address_tags_filter": [
+      {
+        "wall_s": 0.08228891692124307,
+        "peak_rss_bytes": 646430720,
+        "cpu_s": 0.10164
+      },
+      {
+        "wall_s": 0.0818541671615094,
+        "peak_rss_bytes": 646627328,
+        "cpu_s": 0.100948
+      },
+      {
+        "wall_s": 0.0828740419819951,
+        "peak_rss_bytes": 647151616,
+        "cpu_s": 0.10105700000000001
+      }
+    ],
+    "address_export_flex_mem": [
+      {
+        "wall_s": 0.013468082994222641,
+        "peak_rss_bytes": 5111808,
+        "cpu_s": 0.011467999999999999,
+        "output_sha256": "a5e42a2c19839d28e0fe7c085f7f363ea8750f15706b372e232808b8ba6ef5da",
+        "output_bytes": 230074,
+        "output_rows": 579
+      },
+      {
+        "wall_s": 0.013629458844661713,
+        "peak_rss_bytes": 5292032,
+        "cpu_s": 0.012587,
+        "output_sha256": "a5e42a2c19839d28e0fe7c085f7f363ea8750f15706b372e232808b8ba6ef5da",
+        "output_bytes": 230074,
+        "output_rows": 579
+      },
+      {
+        "wall_s": 0.013317625038325787,
+        "peak_rss_bytes": 5193728,
+        "cpu_s": 0.011758,
+        "output_sha256": "a5e42a2c19839d28e0fe7c085f7f363ea8750f15706b372e232808b8ba6ef5da",
+        "output_bytes": 230074,
+        "output_rows": 579
+      }
+    ],
+    "address_export_sparse_file_array": [
+      {
+        "wall_s": 0.049036625074222684,
+        "peak_rss_bytes": 38600704,
+        "cpu_s": 0.024278,
+        "output_sha256": "a5e42a2c19839d28e0fe7c085f7f363ea8750f15706b372e232808b8ba6ef5da",
+        "output_bytes": 230074,
+        "output_rows": 579
+      },
+      {
+        "wall_s": 0.0467511669266969,
+        "peak_rss_bytes": 38715392,
+        "cpu_s": 0.023717000000000002,
+        "output_sha256": "a5e42a2c19839d28e0fe7c085f7f363ea8750f15706b372e232808b8ba6ef5da",
+        "output_bytes": 230074,
+        "output_rows": 579
+      },
+      {
+        "wall_s": 0.06501279189251363,
+        "peak_rss_bytes": 38699008,
+        "cpu_s": 0.025242,
+        "output_sha256": "a5e42a2c19839d28e0fe7c085f7f363ea8750f15706b372e232808b8ba6ef5da",
+        "output_bytes": 230074,
+        "output_rows": 579
+      }
+    ],
+    "wiki_tags_filter": [
+      {
+        "wall_s": 0.16157549992203712,
+        "peak_rss_bytes": 1476296704,
+        "cpu_s": 0.184591
+      },
+      {
+        "wall_s": 0.1556888329796493,
+        "peak_rss_bytes": 1477083136,
+        "cpu_s": 0.18184299999999998
+      },
+      {
+        "wall_s": 0.1584367910400033,
+        "peak_rss_bytes": 1476673536,
+        "cpu_s": 0.18695499999999998
+      }
+    ],
+    "wiki_export_flex_mem": [
+      {
+        "wall_s": 0.02729925001040101,
+        "peak_rss_bytes": 10502144,
+        "cpu_s": 0.026376999999999998,
+        "output_sha256": "4190e13b3eb8bf8525f181fce4a43ecd6f7e2eaa6d285df9a05cf6ad1e5e00bb",
+        "output_bytes": 777070,
+        "output_rows": 1819
+      },
+      {
+        "wall_s": 0.02621395792812109,
+        "peak_rss_bytes": 11173888,
+        "cpu_s": 0.026021,
+        "output_sha256": "4190e13b3eb8bf8525f181fce4a43ecd6f7e2eaa6d285df9a05cf6ad1e5e00bb",
+        "output_bytes": 777070,
+        "output_rows": 1819
+      },
+      {
+        "wall_s": 0.028768042102456093,
+        "peak_rss_bytes": 11010048,
+        "cpu_s": 0.027743999999999998,
+        "output_sha256": "4190e13b3eb8bf8525f181fce4a43ecd6f7e2eaa6d285df9a05cf6ad1e5e00bb",
+        "output_bytes": 777070,
+        "output_rows": 1819
+      }
+    ],
+    "wiki_export_sparse_file_array": [
+      {
+        "wall_s": 0.09813462500460446,
+        "peak_rss_bytes": 44859392,
+        "cpu_s": 0.06402,
+        "output_sha256": "4190e13b3eb8bf8525f181fce4a43ecd6f7e2eaa6d285df9a05cf6ad1e5e00bb",
+        "output_bytes": 777070,
+        "output_rows": 1819
+      },
+      {
+        "wall_s": 1.1173017090186477,
+        "peak_rss_bytes": 45678592,
+        "cpu_s": 0.427105,
+        "output_sha256": "4190e13b3eb8bf8525f181fce4a43ecd6f7e2eaa6d285df9a05cf6ad1e5e00bb",
+        "output_bytes": 777070,
+        "output_rows": 1819
+      },
+      {
+        "wall_s": 0.05723466700874269,
+        "peak_rss_bytes": 44646400,
+        "cpu_s": 0.038947999999999997,
+        "output_sha256": "4190e13b3eb8bf8525f181fce4a43ecd6f7e2eaa6d285df9a05cf6ad1e5e00bb",
+        "output_bytes": 777070,
+        "output_rows": 1819
+      }
+    ]
+  },
+  "medians": {
+    "bbox_extract_complete_ways": {
+      "wall_s": 0.3119017498102039,
+      "peak_rss_bytes": 3186589696,
+      "cpu_s": 0.37205599999999994
+    },
+    "address_tags_filter": {
+      "wall_s": 0.08228891692124307,
+      "peak_rss_bytes": 646627328,
+      "cpu_s": 0.10105700000000001
+    },
+    "address_export_flex_mem": {
+      "wall_s": 0.013468082994222641,
+      "peak_rss_bytes": 5193728,
+      "cpu_s": 0.011758
+    },
+    "address_export_sparse_file_array": {
+      "wall_s": 0.049036625074222684,
+      "peak_rss_bytes": 38699008,
+      "cpu_s": 0.024278
+    },
+    "wiki_tags_filter": {
+      "wall_s": 0.1584367910400033,
+      "peak_rss_bytes": 1476673536,
+      "cpu_s": 0.184591
+    },
+    "wiki_export_flex_mem": {
+      "wall_s": 0.02729925001040101,
+      "peak_rss_bytes": 11010048,
+      "cpu_s": 0.026376999999999998
+    },
+    "wiki_export_sparse_file_array": {
+      "wall_s": 0.09813462500460446,
+      "peak_rss_bytes": 44859392,
+      "cpu_s": 0.06402
+    }
+  },
+  "osmium_version": "osmium version 1.19.1\nlibosmium version 2.23.1\nSupported PBF compression types: none zlib lz4\n\nCopyright (C) 2013-2026  Jochen Topf <jochen@topf.org>\nLicense: GNU GENERAL PUBLIC LICENSE Version 3 <https://gnu.org/licenses/gpl.html>.\nThis is free software: you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.",
+  "max_input_node_id": 14219141884,
+  "bbox": [
+    7.4,
+    43.72,
+    7.44,
+    43.76
+  ],
+  "command_templates": {
+    "extract": [
+      "osmium",
+      "extract",
+      "-b",
+      "7.4,43.72,7.44,43.76",
+      "INPUT_MONACO_PBF",
+      "-o",
+      "PRIVATE_REGION_PBF",
+      "--overwrite"
+    ],
+    "address_filter": [
+      "osmium",
+      "tags-filter",
+      "PRIVATE_REGION_PBF",
+      "addr:housenumber",
+      "-o",
+      "PRIVATE_FILTERED_PBF",
+      "--overwrite"
+    ],
+    "wiki_filter": [
+      "osmium",
+      "tags-filter",
+      "PRIVATE_REGION_PBF",
+      "wikipedia",
+      "wikidata",
+      "-o",
+      "PRIVATE_FILTERED_PBF",
+      "--overwrite"
+    ],
+    "address_export": [
+      "osmium",
+      "export",
+      "PRIVATE_FILTERED_PBF",
+      "-f",
+      "geojsonseq",
+      "-i",
+      "INDEX_TYPE",
+      "-o",
+      "PRIVATE_GEOJSONSEQ",
+      "--overwrite",
+      "--geometry-types=point,polygon"
+    ],
+    "wiki_export": [
+      "osmium",
+      "export",
+      "PRIVATE_FILTERED_PBF",
+      "-f",
+      "geojsonseq",
+      "-i",
+      "INDEX_TYPE",
+      "-o",
+      "PRIVATE_GEOJSONSEQ",
+      "--overwrite"
+    ]
+  },
+  "interpretation": "Default complete_ways bbox extraction alone explains observed whole-build 3.19 GB child peak. Documented ID-indexed bitset cost depends on highest node IDs, rather than small input file size. File-backed sparse export was slower and used more RSS on this fixture, with identical GeoJSON bytes; no export/default-worker change made.",
+  "runner": "/tmp/streetzim-memory-review/osmium_export_probe.py"
+}

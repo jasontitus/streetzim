@@ -1,0 +1,287 @@
+{
+  "benchmark": "tile-pipeline",
+  "baseline": "d5c32b6",
+  "platform": "macOS-26.7-arm64-arm-64bit",
+  "python": "3.12.13 (main, Mar  3 2026, 12:39:30) [Clang 21.0.0 (clang-2100.0.123.102)]",
+  "samples": [
+    {
+      "variant": "baseline",
+      "repetition": 0,
+      "scenario": "tile-us",
+      "elapsed_s": 3.0492732089478523,
+      "peak_rss_bytes": 542097408,
+      "bbox": [
+        -125,
+        25,
+        -66,
+        49
+      ],
+      "zoom": 14,
+      "yielded_tiles": 0
+    },
+    {
+      "variant": "current",
+      "repetition": 0,
+      "scenario": "tile-us",
+      "elapsed_s": 0.0018705001566559076,
+      "peak_rss_bytes": 28311552,
+      "bbox": [
+        -125,
+        25,
+        -66,
+        49
+      ],
+      "zoom": 14,
+      "yielded_tiles": 0
+    },
+    {
+      "variant": "baseline",
+      "repetition": 1,
+      "scenario": "tile-us",
+      "elapsed_s": 3.0527321668341756,
+      "peak_rss_bytes": 540573696,
+      "bbox": [
+        -125,
+        25,
+        -66,
+        49
+      ],
+      "zoom": 14,
+      "yielded_tiles": 0
+    },
+    {
+      "variant": "current",
+      "repetition": 1,
+      "scenario": "tile-us",
+      "elapsed_s": 0.0012904161121696234,
+      "peak_rss_bytes": 28360704,
+      "bbox": [
+        -125,
+        25,
+        -66,
+        49
+      ],
+      "zoom": 14,
+      "yielded_tiles": 0
+    },
+    {
+      "variant": "baseline",
+      "repetition": 2,
+      "scenario": "tile-us",
+      "elapsed_s": 3.0404549159575254,
+      "peak_rss_bytes": 540655616,
+      "bbox": [
+        -125,
+        25,
+        -66,
+        49
+      ],
+      "zoom": 14,
+      "yielded_tiles": 0
+    },
+    {
+      "variant": "current",
+      "repetition": 2,
+      "scenario": "tile-us",
+      "elapsed_s": 0.0010882499627768993,
+      "peak_rss_bytes": 28311552,
+      "bbox": [
+        -125,
+        25,
+        -66,
+        49
+      ],
+      "zoom": 14,
+      "yielded_tiles": 0
+    },
+    {
+      "variant": "baseline",
+      "repetition": 0,
+      "scenario": "tile-california",
+      "elapsed_s": 0.1873965000268072,
+      "peak_rss_bytes": 67813376,
+      "bbox": [
+        -124.5,
+        32,
+        -114,
+        42
+      ],
+      "zoom": 14,
+      "yielded_tiles": 0
+    },
+    {
+      "variant": "current",
+      "repetition": 0,
+      "scenario": "tile-california",
+      "elapsed_s": 0.0023360829800367355,
+      "peak_rss_bytes": 28459008,
+      "bbox": [
+        -124.5,
+        32,
+        -114,
+        42
+      ],
+      "zoom": 14,
+      "yielded_tiles": 0
+    },
+    {
+      "variant": "baseline",
+      "repetition": 1,
+      "scenario": "tile-california",
+      "elapsed_s": 0.18925841711461544,
+      "peak_rss_bytes": 68108288,
+      "bbox": [
+        -124.5,
+        32,
+        -114,
+        42
+      ],
+      "zoom": 14,
+      "yielded_tiles": 0
+    },
+    {
+      "variant": "current",
+      "repetition": 1,
+      "scenario": "tile-california",
+      "elapsed_s": 0.0019217918161302805,
+      "peak_rss_bytes": 28327936,
+      "bbox": [
+        -124.5,
+        32,
+        -114,
+        42
+      ],
+      "zoom": 14,
+      "yielded_tiles": 0
+    },
+    {
+      "variant": "baseline",
+      "repetition": 2,
+      "scenario": "tile-california",
+      "elapsed_s": 0.18880650005303323,
+      "peak_rss_bytes": 68239360,
+      "bbox": [
+        -124.5,
+        32,
+        -114,
+        42
+      ],
+      "zoom": 14,
+      "yielded_tiles": 0
+    },
+    {
+      "variant": "current",
+      "repetition": 2,
+      "scenario": "tile-california",
+      "elapsed_s": 0.0008959579281508923,
+      "peak_rss_bytes": 28229632,
+      "bbox": [
+        -124.5,
+        32,
+        -114,
+        42
+      ],
+      "zoom": 14,
+      "yielded_tiles": 0
+    },
+    {
+      "variant": "baseline",
+      "repetition": 0,
+      "scenario": "satellite-cached",
+      "elapsed_s": 0.7560250000096858,
+      "peak_rss_bytes": 189284352,
+      "max_zoom": 11,
+      "synthetic_cached_tiles": 79053,
+      "workers": 4
+    },
+    {
+      "variant": "current",
+      "repetition": 0,
+      "scenario": "satellite-cached",
+      "elapsed_s": 0.8764410829171538,
+      "peak_rss_bytes": 31948800,
+      "max_zoom": 11,
+      "synthetic_cached_tiles": 79053,
+      "workers": 4
+    },
+    {
+      "variant": "baseline",
+      "repetition": 1,
+      "scenario": "satellite-cached",
+      "elapsed_s": 0.7342575420625508,
+      "peak_rss_bytes": 188727296,
+      "max_zoom": 11,
+      "synthetic_cached_tiles": 79053,
+      "workers": 4
+    },
+    {
+      "variant": "current",
+      "repetition": 1,
+      "scenario": "satellite-cached",
+      "elapsed_s": 0.8184481670614332,
+      "peak_rss_bytes": 32145408,
+      "max_zoom": 11,
+      "synthetic_cached_tiles": 79053,
+      "workers": 4
+    },
+    {
+      "variant": "baseline",
+      "repetition": 2,
+      "scenario": "satellite-cached",
+      "elapsed_s": 0.7408721661195159,
+      "peak_rss_bytes": 188596224,
+      "max_zoom": 11,
+      "synthetic_cached_tiles": 79053,
+      "workers": 4
+    },
+    {
+      "variant": "current",
+      "repetition": 2,
+      "scenario": "satellite-cached",
+      "elapsed_s": 0.9396475420799106,
+      "peak_rss_bytes": 31735808,
+      "max_zoom": 11,
+      "synthetic_cached_tiles": 79053,
+      "workers": 4
+    }
+  ],
+  "medians": [
+    {
+      "scenario": "tile-us",
+      "variant": "baseline",
+      "elapsed_s": 3.0492732089478523,
+      "peak_rss_bytes": 540655616
+    },
+    {
+      "scenario": "tile-us",
+      "variant": "current",
+      "elapsed_s": 0.0012904161121696234,
+      "peak_rss_bytes": 28311552
+    },
+    {
+      "scenario": "tile-california",
+      "variant": "baseline",
+      "elapsed_s": 0.18880650005303323,
+      "peak_rss_bytes": 68108288
+    },
+    {
+      "scenario": "tile-california",
+      "variant": "current",
+      "elapsed_s": 0.0019217918161302805,
+      "peak_rss_bytes": 28327936
+    },
+    {
+      "scenario": "satellite-cached",
+      "variant": "baseline",
+      "elapsed_s": 0.7408721661195159,
+      "peak_rss_bytes": 188727296
+    },
+    {
+      "scenario": "satellite-cached",
+      "variant": "current",
+      "elapsed_s": 0.8764410829171538,
+      "peak_rss_bytes": 31948800
+    }
+  ],
+  "scope": "bounds setup and synthetic cache-hit scheduling only"
+}

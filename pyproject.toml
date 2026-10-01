@@ -52,6 +52,7 @@ ops = ["internetarchive>=4.0"]
 
 [project.scripts]
 streetzim = "streetzim.cli:main"
+streetzim-pack = "streetzim.pack:main"
 
 [project.urls]
 Homepage = "https://github.com/jasontitus/streetzim"

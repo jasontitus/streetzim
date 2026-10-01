@@ -343,6 +343,68 @@ def test_merge_overture_keeps_far_cross_city_attr_match(
     assert added == 1
 
 
+@pytest.mark.parametrize(("osm_street", "osm_city", "new_street", "new_city"), [
+    ("人民路", "上海市", "中国路", "上海市"),
+    ("人民路", "上海市", "人民路", "北京市"),
+    ("中央通り", "東京", "大通り", "東京"),
+    ("Ленина", "Москва", "Мира", "Москва"),
+    ("ガス", "東京", "カス", "東京"),
+    ("Май", "Москва", "Маи", "Москва"),
+])
+def test_distinct_non_latin_addresses_survive_conflation(
+    duckdb_available, tmp_path, osm_street, osm_city, new_street, new_city
+):
+    parquet = tmp_path / "ov.parquet"
+    _write_parquet(str(parquet), [{
+        "number": "1", "street": new_street,
+        "lat": 31.3, "lon": 121.5,
+        "levels": ["region", new_city], "sources": [],
+    }])
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [{
+        "name": f"1 {osm_street}, {osm_city}", "type": "addr",
+        "lat": 31.23, "lon": 121.47,
+    }])
+    result = merge_overture_addresses(str(parquet), str(jsonl))
+    assert result["added"] == 1
+    assert len(jsonl.read_text().splitlines()) == 2
+
+
+@pytest.mark.parametrize(("name", "expected"), [
+    ("  ÁVÉ. des Écoles ", "avenue des ecoles"),
+    ("N. MAIN ST.", "north main street"),
+    ("人民路，上海市", "人民路 上海市"),
+    ("中央通り_東京", "中央通り 東京"),
+    ("ЛЕНИНА, МОСКВА", "ленина москва"),
+    ("ガス", "ガス"),
+    ("Май", "май"),
+    ("เมือง", "เมือง"),
+])
+def test_normalize_street_preserves_scripts_and_latin_matching(name, expected):
+    from streetzim.addresses import _normalize_street
+    assert _normalize_street(name) == expected
+    assert _normalize_street(expected) == expected
+
+
+@pytest.mark.parametrize("escaped", [False, True])
+def test_address_conflation_accepts_spaced_and_escaped_json(
+    duckdb_available, tmp_path, escaped
+):
+    parquet = tmp_path / "ov.parquet"
+    _write_parquet(str(parquet), [{
+        "number": "1", "street": "Main St", "lat": 1.0, "lon": 2.0,
+        "levels": [], "sources": [],
+    }])
+    jsonl = tmp_path / "feed.jsonl"
+    line = json.dumps({"name": "1 Main St", "type": "addr", "lat": 1.0, "lon": 2.0})
+    if escaped:
+        line = line.replace('"type"', '"t\\u0079pe"').replace('"addr"', '"a\\u0064dr"')
+    jsonl.write_text(line + "\n")
+    result = merge_overture_addresses(str(parquet), str(jsonl))
+    assert result["added"] == 0, "JSON serialization must not alter address identity"
+    assert jsonl.read_text() == line + "\n"
+
+
 def test_merge_overture_rejects_orphan_rows_missing_number_or_street(
     duckdb_available, tmp_path
 ):
@@ -473,6 +535,55 @@ def _write_places_parquet(path: str, rows: list[dict],
 # ---------------------------------------------------------------------------
 # merge_overture_places — POI enrichment + add-new.
 # ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(("osm_name", "enriched", "added"), [
+    ("薬局", 0, 1),
+    ("コンビニ", 1, 0),
+])
+def test_place_conflation_preserves_non_latin_name_identity(
+    duckdb_available, tmp_path, osm_name, enriched, added
+):
+    parquet = tmp_path / "ov.parquet"
+    _write_places_parquet(str(parquet), [{
+        "name": "コンビニ", "category": "convenience_store", "lat": 35.7, "lon": 139.75,
+        "websites": ["https://example.com/store"],
+    }])
+    jsonl = tmp_path / "feed.jsonl"
+    _write_jsonl(str(jsonl), [{
+        "name": osm_name, "type": "poi", "subtype": "amenity", "lat": 35.7, "lon": 139.75,
+    }])
+    result = merge_overture_places(str(parquet), str(jsonl))
+    assert (result["enriched"], result["added"]) == (enriched, added)
+    rows = [json.loads(line) for line in jsonl.read_text().splitlines()]
+    if added:
+        assert rows[0]["subtype"] == "amenity" and "ws" not in rows[0]
+        assert rows[1]["source"] == "overture"
+    else:
+        assert rows[0]["subtype"] == "convenience_store"
+        assert rows[0]["ws"] == "https://example.com/store"
+
+
+@pytest.mark.parametrize("escaped", [False, True])
+def test_place_enrichment_accepts_spaced_and_escaped_json(
+    duckdb_available, tmp_path, escaped
+):
+    parquet = tmp_path / "ov.parquet"
+    _write_places_parquet(str(parquet), [{
+        "name": "Local Cafe", "category": "cafe", "lat": 1.0, "lon": 2.0,
+        "websites": ["https://example.com/cafe"],
+    }])
+    jsonl = tmp_path / "feed.jsonl"
+    line = json.dumps({"name": "Local Cafe", "type": "poi", "subtype": "amenity",
+                       "lat": 1.0, "lon": 2.0})
+    if escaped:
+        line = line.replace('"type"', '"t\\u0079pe"').replace('"poi"', '"p\\u006fi"')
+    jsonl.write_text(line + "\n")
+    result = merge_overture_places(str(parquet), str(jsonl))
+    assert (result["enriched"], result["added"]) == (1, 0)
+    rows = [json.loads(line) for line in jsonl.read_text().splitlines()]
+    assert len(rows) == 1 and rows[0]["ws"] == "https://example.com/cafe"
+    assert rows[0]["subtype"] == "cafe"
+
 
 def test_merge_overture_places_enriches_existing_poi(
     duckdb_available, tmp_path

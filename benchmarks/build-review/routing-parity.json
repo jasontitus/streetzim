@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "measurement": "actual Monaco PBF graph extraction byte parity; same process, timing not a performance comparison",
+  "baseline_ref": "d5c32b6",
+  "fixture": "tests/fixtures/monaco-full/monaco.osm.pbf",
+  "samples": [
+    {
+      "variant": "before",
+      "graph_bytes": 474563,
+      "sha256": "50d8ddfba81d055780f6fd8dcadd205e0b81e89a10673e8c3010344772c8635a",
+      "duration_seconds": 0.25937620806507766
+    },
+    {
+      "variant": "after",
+      "graph_bytes": 474563,
+      "sha256": "50d8ddfba81d055780f6fd8dcadd205e0b81e89a10673e8c3010344772c8635a",
+      "duration_seconds": 0.1750777920242399
+    }
+  ]
+}
