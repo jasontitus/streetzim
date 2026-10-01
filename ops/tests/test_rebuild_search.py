@@ -240,7 +240,9 @@ def test_search_spill_dir_must_be_named_and_off_the_root_fs(tmp_path, monkeypatc
     with pytest.raises(SystemExit, match="not a directory"):
         svr._spill_root(str(tmp_path / "nope"), search=True)
     real = svr._on_root_fs
-    assert real("/") and not real("/storage") or not os.path.ismount("/storage")
+    assert real("/")
+    if os.path.ismount("/storage"):       # the build host
+        assert not real("/storage")
     # Same device as / -> refused; another device -> accepted.
     monkeypatch.setattr(svr, "_on_root_fs", lambda p: True)
     with pytest.raises(SystemExit, match="root filesystem"):
