@@ -266,15 +266,17 @@
   /* --- Unified control strip --- */
   #controls {
     /* Below the whole MapLibre top-right column: zoom/compass (y=10-142),
-       then the "Show the whole map" button (initHomeButton, y=152-196), then
-       10px. At 152px this panel sat on the Home button: a tap on Home hit
+       then the group of the "Show the whole map" button (initHomeButton,
+       y=152-196) and the light/dark switch under it (szThemeButton,
+       y=196-240), then 10px (206px before the switch was added). At 152px
+       this panel sat on the Home button: a tap on Home hit
        "Toggle satellite imagery" instead (overlap-check and the device
        matrix both caught it). On short screens this panel becomes a row
        beside Home instead (see the max-height rule below): a landscape
        phone has no vertical room left on the right edge. Adding a control
        to that column means re-running the overlap check in portrait AND
        landscape (CI runs it at seven sizes), not just moving this down. */
-    position: absolute; top: calc(206px + var(--top-inset, 0px)); right: 10px; z-index: 2;
+    position: absolute; top: calc(250px + var(--top-inset, 0px)); right: 10px; z-index: 2;
     display: flex; flex-direction: column;
     background: var(--panel-bg); border-radius: var(--radius);
     box-shadow: var(--panel-shadow);
@@ -299,13 +301,18 @@
   #controls button + button { border-top: 1px solid var(--border); }
   /* Landscape phones: the right edge holds zoom/compass (10-142), Home
      (152-196) and, from the bottom, locate and attribution, which on a
-     375-390 px tall screen start around y=290. A 132 px column below Home
-     reaches y=338 and covered both. So the panel turns into a row at Home's
-     height, just left of the MapLibre column (10 + 44 + 10 = 64 px), below
-     the search band (which ends ~105) and above the bottom controls. */
+     375-390 px tall screen start around y=290 (y=232 at 568x320). A 132 px
+     column below Home reaches y=338 and covered both. So the panel turns
+     into a row at Home's height, below the search band (which ends ~105)
+     and above the bottom controls. The light/dark switch would put Home's
+     group at 152-240, into the locate button at 568x320 (device matrix), so
+     here it goes beside Home instead: Home's group is a 89 px row (44 + 1 +
+     44) and the panel sits left of it (10 + 89 + 11 = 110 px). */
   @media (max-height: 500px) {
-    #controls { top: calc(152px + var(--top-inset, 0px)); right: 64px; flex-direction: row; }
+    #controls { top: calc(152px + var(--top-inset, 0px)); right: 110px; flex-direction: row; }
     #controls button + button { border-top: none; border-left: 1px solid var(--border); }
+    .sz-home-group { display: flex; flex-direction: row; }
+    .sz-home-group button + button { border-top: none; border-left: 1px solid #ddd; }
   }
   /* (CSS for #places-link removed alongside the Find link on
      2026-05-10 — see HTML comment in #controls.) */
@@ -1060,7 +1067,8 @@
   /* --- Dark UI chrome ---
      html.sz-dark is set by 135-map-theme.js from the same choice as the dark
      map (?theme=, a host that inverts the page, prefers-color-scheme, live
-     changes), so the panels can never disagree with the map. A class, not
+     changes, the theme button), so the panels can never disagree with the
+     map. A class, not
      @media, because ?theme=light must win over a dark OS and Kiwix JS's
      invert mode must get light. Light mode reads none of this: the --szd-*
      tokens are undefined there, so each var(--szd-..., <light value>) in the
@@ -1106,7 +1114,7 @@
      text on a dark panel it is too dark, so text uses a lighter blue. */
   html.sz-dark .pin-popup .pin-link,
   html.sz-dark #routing-panel.minimized #routing-minimize { color: #8ab4f8; }
-  html.sz-dark .sz-home-btn svg { fill: #e8eaed; }
+  html.sz-dark .sz-home-btn svg, html.sz-dark .sz-theme-btn svg { fill: #e8eaed; }
   /* Focus rings: the light ones (15-20% blue) vanish on a dark panel.
      #8ab4f8 is 7.9:1 on it (WCAG 2.2 wants 3:1 for focus indicators). */
   html.sz-dark #search-input:focus,
@@ -1115,6 +1123,7 @@
   html.sz-dark .maplibregl-ctrl-group { background: #23262d; }
   html.sz-dark .maplibregl-ctrl-group:not(:empty) { box-shadow: 0 0 0 2px rgba(255,255,255,0.10); }
   html.sz-dark .maplibregl-ctrl-group button + button { border-top-color: #3c414a; }
+  html.sz-dark .sz-home-group button + button { border-left-color: #3c414a; }
   html.sz-dark .maplibregl-ctrl button:not(:disabled):hover { background-color: rgba(255,255,255,0.08); }
   /* The icons are black SVGs; invert + hue-rotate keeps the geolocate blue blue. */
   html.sz-dark .maplibregl-ctrl button .maplibregl-ctrl-icon,
@@ -1164,7 +1173,7 @@
     html.sz-dark .maplibregl-ctrl.maplibregl-ctrl-attrib { background: #fff; color: #1a1a1a; }
     html.sz-dark .maplibregl-ctrl button .maplibregl-ctrl-icon,
     html.sz-dark .maplibregl-ctrl-attrib-button { filter: none; }
-    html.sz-dark .sz-home-btn svg { fill: #333; }
+    html.sz-dark .sz-home-btn svg, html.sz-dark .sz-theme-btn svg { fill: #333; }
   }
 </style>
 </head>
@@ -1516,11 +1525,12 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
      error shown when the map cannot start at all: a browser without Fetch /
      Promise / MapLibre, no WebGL, or a map-config.json that never loaded.
      The styles sit here rather than in 010 so this feature is one part.
-     The Home button and About panel follow the map theme through
+     The Home button, the light/dark switch under it (135) and the About
+     panel follow the map theme through
      html.sz-dark (010); the full-page error, which can appear before any
      of that code runs, follows the OS scheme directly. -->
 <style>
-  .sz-home-btn svg { display: block; margin: auto; width: 18px; height: 18px; fill: #333; }
+  .sz-home-btn svg, .sz-theme-btn svg { display: block; margin: auto; width: 18px; height: 18px; fill: #333; }
   #about-section { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
   #about-section #about-title { color: var(--text-primary); font-weight: 600; font-size: 14px; }
   #about-section #about-desc:empty { display: none; }
@@ -3334,10 +3344,13 @@ function makeStyle(config) {
 // tests/viewer_style_js.test.mjs fails if a light layer gains a colour
 // this table does not darken, or the table names a layer that is gone.
 //
-// Chosen by, in order: ?theme=dark|light in the URL; light when the host
-// already inverts the page (Kiwix JS's "invert" dark mode filters the
-// article frame, so a dark map would come out light); else
-// prefers-color-scheme, followed live when it changes.
+// Chosen by, in order: ?theme=dark|light in the URL (for that page load);
+// the reader's choice from the theme button (szThemeButton, under Home:
+// Auto -> Light -> Dark), kept in localStorage 'streetzim.theme'; then
+// Auto: light when the host already inverts the page (Kiwix JS's "invert"
+// dark mode filters the article frame, so a dark map would come out
+// light), else prefers-color-scheme, followed live when it changes.
+// places.html reads the same key for its own colours.
 // BEGIN map-theme
 var _SZ_DARK_HALO = 'rgba(0,0,0,0.75)';
 var _SZ_DARK = {
@@ -3399,13 +3412,60 @@ function _szHostInvertsContent() {
   return inverted(fe) || inverted(document.documentElement);
 }
 
-function _szPrefersDark() {
-  var forced = /[?&]theme=(dark|light)(?:&|$)/.exec(location.search || '');
-  if (forced) return forced[1] === 'dark';
-  if (_szHostInvertsContent()) return false;
+// The reader's choice. Storage can be missing or throw (Kiwix iOS's zim:
+// scheme, private windows, a sandboxed frame); anything unreadable or
+// unknown is Auto, and a failed write only loses the memory, not the switch.
+var SZ_THEME_KEY = 'streetzim.theme';
+var SZ_THEME_MODES = ['auto', 'light', 'dark'];
+function szReadThemeMode(storage) {
   try {
-    return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  } catch (e) { return false; }
+    var v = storage && storage.getItem(SZ_THEME_KEY);
+    if (v === 'light' || v === 'dark') return v;
+  } catch (e) {}
+  return 'auto';
+}
+function szWriteThemeMode(storage, mode) {
+  try {
+    if (!storage) return;
+    if (mode === 'light' || mode === 'dark') storage.setItem(SZ_THEME_KEY, mode);
+    else storage.removeItem(SZ_THEME_KEY);
+  } catch (e) {}
+}
+function szNextThemeMode(mode) {
+  return SZ_THEME_MODES[(SZ_THEME_MODES.indexOf(mode) + 1) % SZ_THEME_MODES.length];
+}
+function _szThemeStore() {
+  try { return window.localStorage || null; } catch (e) { return null; }
+}
+// 'dark' / 'light' from ?theme=, until the reader taps the theme button.
+var _szThemeUrlOff = false;
+function _szUrlTheme() {
+  if (_szThemeUrlOff) return null;
+  var m = /[?&]theme=(dark|light)(?:&|$)/.exec(location.search || '');
+  return m ? m[1] : null;
+}
+var _szThemeMode = szReadThemeMode(_szThemeStore());
+// What the button shows: the URL's theme while it rules, else the choice.
+function szThemeMode() { return _szUrlTheme() || _szThemeMode; }
+
+// Whether to build the DARK style. Decide what the reader should SEE, then
+// flip it when the host inverts the page (Kiwix JS's dark mode puts
+// invert(1) hue-rotate(180deg) on the frame): there the light style is what
+// looks dark. Light, Dark and ?theme= all mean what the reader sees. Auto
+// under an inverting host keeps its old look -- the host is in its dark
+// mode, so the reader sees dark (light style, inverted); else the OS scheme.
+function _szPrefersDark() {
+  var inverts = _szHostInvertsContent();
+  var mode = szThemeMode();
+  var want;
+  if (mode !== 'auto') want = mode === 'dark';
+  else if (inverts) want = true;
+  else {
+    try {
+      want = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    } catch (e) { want = false; }
+  }
+  return inverts ? !want : want;
 }
 
 // The page chrome follows the map: html.sz-dark switches the search box,
@@ -3433,21 +3493,39 @@ function _szThemeStyle(style, dark) {
   return style;
 }
 
-// Follow a live change of the OS/browser scheme (evening auto-dark) without
-// setStyle(), which would drop every runtime layer (satellite, hillshade,
-// routes, find pins). Repaints the base layers from a fresh makeStyle(),
-// then fires 'streetzim.theme' so satellite mode can re-apply its overrides.
+// Restyle the running map when the theme changes -- a live change of the
+// OS/browser scheme (evening auto-dark) in Auto, or a tap on the theme
+// button -- without setStyle(), which would drop every runtime layer
+// (satellite, hillshade, wiki dots, routes, search and find pins).
+// Repaints the base layers from a fresh makeStyle(), then fires
+// 'streetzim.theme' so satellite mode can re-apply its overrides.
+//
+// A tap (or scheme change) before the style has loaded: the chrome switches
+// at once, the map is repainted when its base layers exist ('styledata'),
+// and `current` -- the theme the map is painted in -- only changes once the
+// paint has happened, so nothing is lost and the next tap is not confused.
+var _szThemeRefresh = function() { _szApplyUiTheme(_szPrefersDark()); };
 function initMapTheme(map, config) {
-  if (/[?&]theme=(dark|light)(?:&|$)/.test(location.search || '')) return;
-  var mq = null;
-  try { mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)'); } catch (e) {}
-  if (!mq) return;
   var current = _szPrefersDark();
-  function onChange() {
+  var waiting = false;
+  function styleReady() {
+    try { return !!map.getLayer('background'); } catch (e) { return false; }
+  }
+  function refresh() {
     var dark = _szPrefersDark();
-    if (dark === current) return;
-    current = dark;
     _szApplyUiTheme(dark);
+    if (dark === current) return;
+    if (!styleReady()) {
+      if (!waiting) {
+        waiting = true;
+        // 'styledata' can come before the layers exist; refresh() then
+        // simply waits again.
+        var again = function() { waiting = false; refresh(); };
+        map.once('styledata', again);
+      }
+      return;
+    }
+    current = dark;
     var style = makeStyle(config);
     style.layers.forEach(function(layer) {
       if (!layer.paint || !map.getLayer(layer.id)) return;
@@ -3459,8 +3537,66 @@ function initMapTheme(map, config) {
     map.fire('streetzim.theme', { dark: dark });
     map.triggerRepaint();
   }
-  if (mq.addEventListener) mq.addEventListener('change', onChange);
-  else if (mq.addListener) mq.addListener(onChange);   // Safari < 14
+  _szThemeRefresh = refresh;
+  // Another tab (or places.html) changed the choice: follow it here too.
+  try {
+    window.addEventListener('storage', function(e) {
+      if (e && e.key !== SZ_THEME_KEY && e.key !== null) return;
+      _szThemeMode = szReadThemeMode(_szThemeStore());
+      _szThemeButtons.forEach(_szThemeButtonShow);
+      refresh();
+    });
+  } catch (e) {}
+  var mq = null;
+  try { mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)'); } catch (e) {}
+  if (!mq) return;
+  if (mq.addEventListener) mq.addEventListener('change', refresh);
+  else if (mq.addListener) mq.addListener(refresh);   // Safari < 14
+}
+
+// Choose a mode (the button). A tap ends the URL's ?theme= for this page:
+// the reader asked for something else.
+function szSetThemeMode(mode) {
+  _szThemeUrlOff = true;
+  _szThemeMode = (mode === 'light' || mode === 'dark') ? mode : 'auto';
+  szWriteThemeMode(_szThemeStore(), _szThemeMode);
+  _szThemeRefresh();
+}
+
+// The switch: one square in the Home button's group (initHomeButton, 140),
+// so it adds a button's height, not another group, to the top-right column.
+// The icon shows the current mode: half-filled circle (auto), sun, moon.
+var _SZ_THEME_ICON = {
+  auto: '<path fill-rule="evenodd" d="M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20zm0 2v16a8 8 0 1 1 0-16z"/>',
+  light: '<circle cx="12" cy="12" r="4.5"/>' + [0, 45, 90, 135, 180, 225, 270, 315].map(function(a) {
+    return '<rect x="11" y="1" width="2" height="3.5" rx="1" transform="rotate(' + a + ' 12 12)"/>';
+  }).join(''),
+  dark: '<path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1z"/>'
+};
+var _SZ_THEME_LABEL = {
+  auto: 'Map theme: auto (follows the system)',
+  light: 'Map theme: light',
+  dark: 'Map theme: dark'
+};
+function _szThemeButtonShow(btn) {
+  var mode = szThemeMode();
+  btn.setAttribute('data-mode', mode);
+  btn.title = _SZ_THEME_LABEL[mode];
+  btn.setAttribute('aria-label', _SZ_THEME_LABEL[mode]);
+  btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + _SZ_THEME_ICON[mode] + '</svg>';
+}
+var _szThemeButtons = [];
+function szThemeButton() {
+  var btn = document.createElement('button');
+  _szThemeButtons.push(btn);
+  btn.type = 'button';
+  btn.className = 'sz-theme-btn';
+  _szThemeButtonShow(btn);
+  btn.addEventListener('click', function() {
+    szSetThemeMode(szNextThemeMode(szThemeMode()));
+    _szThemeButtonShow(btn);
+  });
+  return btn;
 }
 // END map-theme
 // POI icons. Maki (CC0) glyphs, one SVG path each, drawn at runtime onto a
@@ -3747,6 +3883,7 @@ function initRtlText(map, config, lib) {
 //
 // Home returns to the opening view map-config.json ships (centre + zoom;
 // see docs/todo-opening-view.md for why that is not a fit to the bounds).
+// The light/dark switch (135) sits in Home's control group, below it.
 // tests/viewer_ui_js.test.mjs runs this block against stubbed globals.
 // BEGIN view-home-about
 
@@ -4058,7 +4195,7 @@ function initHomeButton(map, config) {
   var ctrl = {
     onAdd: function() {
       var div = document.createElement('div');
-      div.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+      div.className = 'maplibregl-ctrl maplibregl-ctrl-group sz-home-group';
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'sz-home-btn';
@@ -4072,6 +4209,9 @@ function initHomeButton(map, config) {
         map.easeTo({ center: config.center, zoom: config.zoom, bearing: 0, pitch: 0, duration: 800 });
       });
       div.appendChild(btn);
+      // The light/dark switch shares this group (135): one more square,
+      // no extra group margin in the top-right column.
+      if (typeof szThemeButton === 'function') div.appendChild(szThemeButton());
       return div;
     },
     onRemove: function() {}

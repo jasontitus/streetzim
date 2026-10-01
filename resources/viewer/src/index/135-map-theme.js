@@ -6,10 +6,13 @@
 // tests/viewer_style_js.test.mjs fails if a light layer gains a colour
 // this table does not darken, or the table names a layer that is gone.
 //
-// Chosen by, in order: ?theme=dark|light in the URL; light when the host
-// already inverts the page (Kiwix JS's "invert" dark mode filters the
-// article frame, so a dark map would come out light); else
-// prefers-color-scheme, followed live when it changes.
+// Chosen by, in order: ?theme=dark|light in the URL (for that page load);
+// the reader's choice from the theme button (szThemeButton, under Home:
+// Auto -> Light -> Dark), kept in localStorage 'streetzim.theme'; then
+// Auto: light when the host already inverts the page (Kiwix JS's "invert"
+// dark mode filters the article frame, so a dark map would come out
+// light), else prefers-color-scheme, followed live when it changes.
+// places.html reads the same key for its own colours.
 // BEGIN map-theme
 var _SZ_DARK_HALO = 'rgba(0,0,0,0.75)';
 var _SZ_DARK = {
@@ -71,13 +74,60 @@ function _szHostInvertsContent() {
   return inverted(fe) || inverted(document.documentElement);
 }
 
-function _szPrefersDark() {
-  var forced = /[?&]theme=(dark|light)(?:&|$)/.exec(location.search || '');
-  if (forced) return forced[1] === 'dark';
-  if (_szHostInvertsContent()) return false;
+// The reader's choice. Storage can be missing or throw (Kiwix iOS's zim:
+// scheme, private windows, a sandboxed frame); anything unreadable or
+// unknown is Auto, and a failed write only loses the memory, not the switch.
+var SZ_THEME_KEY = 'streetzim.theme';
+var SZ_THEME_MODES = ['auto', 'light', 'dark'];
+function szReadThemeMode(storage) {
   try {
-    return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  } catch (e) { return false; }
+    var v = storage && storage.getItem(SZ_THEME_KEY);
+    if (v === 'light' || v === 'dark') return v;
+  } catch (e) {}
+  return 'auto';
+}
+function szWriteThemeMode(storage, mode) {
+  try {
+    if (!storage) return;
+    if (mode === 'light' || mode === 'dark') storage.setItem(SZ_THEME_KEY, mode);
+    else storage.removeItem(SZ_THEME_KEY);
+  } catch (e) {}
+}
+function szNextThemeMode(mode) {
+  return SZ_THEME_MODES[(SZ_THEME_MODES.indexOf(mode) + 1) % SZ_THEME_MODES.length];
+}
+function _szThemeStore() {
+  try { return window.localStorage || null; } catch (e) { return null; }
+}
+// 'dark' / 'light' from ?theme=, until the reader taps the theme button.
+var _szThemeUrlOff = false;
+function _szUrlTheme() {
+  if (_szThemeUrlOff) return null;
+  var m = /[?&]theme=(dark|light)(?:&|$)/.exec(location.search || '');
+  return m ? m[1] : null;
+}
+var _szThemeMode = szReadThemeMode(_szThemeStore());
+// What the button shows: the URL's theme while it rules, else the choice.
+function szThemeMode() { return _szUrlTheme() || _szThemeMode; }
+
+// Whether to build the DARK style. Decide what the reader should SEE, then
+// flip it when the host inverts the page (Kiwix JS's dark mode puts
+// invert(1) hue-rotate(180deg) on the frame): there the light style is what
+// looks dark. Light, Dark and ?theme= all mean what the reader sees. Auto
+// under an inverting host keeps its old look -- the host is in its dark
+// mode, so the reader sees dark (light style, inverted); else the OS scheme.
+function _szPrefersDark() {
+  var inverts = _szHostInvertsContent();
+  var mode = szThemeMode();
+  var want;
+  if (mode !== 'auto') want = mode === 'dark';
+  else if (inverts) want = true;
+  else {
+    try {
+      want = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    } catch (e) { want = false; }
+  }
+  return inverts ? !want : want;
 }
 
 // The page chrome follows the map: html.sz-dark switches the search box,
@@ -105,21 +155,39 @@ function _szThemeStyle(style, dark) {
   return style;
 }
 
-// Follow a live change of the OS/browser scheme (evening auto-dark) without
-// setStyle(), which would drop every runtime layer (satellite, hillshade,
-// routes, find pins). Repaints the base layers from a fresh makeStyle(),
-// then fires 'streetzim.theme' so satellite mode can re-apply its overrides.
+// Restyle the running map when the theme changes -- a live change of the
+// OS/browser scheme (evening auto-dark) in Auto, or a tap on the theme
+// button -- without setStyle(), which would drop every runtime layer
+// (satellite, hillshade, wiki dots, routes, search and find pins).
+// Repaints the base layers from a fresh makeStyle(), then fires
+// 'streetzim.theme' so satellite mode can re-apply its overrides.
+//
+// A tap (or scheme change) before the style has loaded: the chrome switches
+// at once, the map is repainted when its base layers exist ('styledata'),
+// and `current` -- the theme the map is painted in -- only changes once the
+// paint has happened, so nothing is lost and the next tap is not confused.
+var _szThemeRefresh = function() { _szApplyUiTheme(_szPrefersDark()); };
 function initMapTheme(map, config) {
-  if (/[?&]theme=(dark|light)(?:&|$)/.test(location.search || '')) return;
-  var mq = null;
-  try { mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)'); } catch (e) {}
-  if (!mq) return;
   var current = _szPrefersDark();
-  function onChange() {
+  var waiting = false;
+  function styleReady() {
+    try { return !!map.getLayer('background'); } catch (e) { return false; }
+  }
+  function refresh() {
     var dark = _szPrefersDark();
-    if (dark === current) return;
-    current = dark;
     _szApplyUiTheme(dark);
+    if (dark === current) return;
+    if (!styleReady()) {
+      if (!waiting) {
+        waiting = true;
+        // 'styledata' can come before the layers exist; refresh() then
+        // simply waits again.
+        var again = function() { waiting = false; refresh(); };
+        map.once('styledata', again);
+      }
+      return;
+    }
+    current = dark;
     var style = makeStyle(config);
     style.layers.forEach(function(layer) {
       if (!layer.paint || !map.getLayer(layer.id)) return;
@@ -131,7 +199,65 @@ function initMapTheme(map, config) {
     map.fire('streetzim.theme', { dark: dark });
     map.triggerRepaint();
   }
-  if (mq.addEventListener) mq.addEventListener('change', onChange);
-  else if (mq.addListener) mq.addListener(onChange);   // Safari < 14
+  _szThemeRefresh = refresh;
+  // Another tab (or places.html) changed the choice: follow it here too.
+  try {
+    window.addEventListener('storage', function(e) {
+      if (e && e.key !== SZ_THEME_KEY && e.key !== null) return;
+      _szThemeMode = szReadThemeMode(_szThemeStore());
+      _szThemeButtons.forEach(_szThemeButtonShow);
+      refresh();
+    });
+  } catch (e) {}
+  var mq = null;
+  try { mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)'); } catch (e) {}
+  if (!mq) return;
+  if (mq.addEventListener) mq.addEventListener('change', refresh);
+  else if (mq.addListener) mq.addListener(refresh);   // Safari < 14
+}
+
+// Choose a mode (the button). A tap ends the URL's ?theme= for this page:
+// the reader asked for something else.
+function szSetThemeMode(mode) {
+  _szThemeUrlOff = true;
+  _szThemeMode = (mode === 'light' || mode === 'dark') ? mode : 'auto';
+  szWriteThemeMode(_szThemeStore(), _szThemeMode);
+  _szThemeRefresh();
+}
+
+// The switch: one square in the Home button's group (initHomeButton, 140),
+// so it adds a button's height, not another group, to the top-right column.
+// The icon shows the current mode: half-filled circle (auto), sun, moon.
+var _SZ_THEME_ICON = {
+  auto: '<path fill-rule="evenodd" d="M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20zm0 2v16a8 8 0 1 1 0-16z"/>',
+  light: '<circle cx="12" cy="12" r="4.5"/>' + [0, 45, 90, 135, 180, 225, 270, 315].map(function(a) {
+    return '<rect x="11" y="1" width="2" height="3.5" rx="1" transform="rotate(' + a + ' 12 12)"/>';
+  }).join(''),
+  dark: '<path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1z"/>'
+};
+var _SZ_THEME_LABEL = {
+  auto: 'Map theme: auto (follows the system)',
+  light: 'Map theme: light',
+  dark: 'Map theme: dark'
+};
+function _szThemeButtonShow(btn) {
+  var mode = szThemeMode();
+  btn.setAttribute('data-mode', mode);
+  btn.title = _SZ_THEME_LABEL[mode];
+  btn.setAttribute('aria-label', _SZ_THEME_LABEL[mode]);
+  btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + _SZ_THEME_ICON[mode] + '</svg>';
+}
+var _szThemeButtons = [];
+function szThemeButton() {
+  var btn = document.createElement('button');
+  _szThemeButtons.push(btn);
+  btn.type = 'button';
+  btn.className = 'sz-theme-btn';
+  _szThemeButtonShow(btn);
+  btn.addEventListener('click', function() {
+    szSetThemeMode(szNextThemeMode(szThemeMode()));
+    _szThemeButtonShow(btn);
+  });
+  return btn;
 }
 // END map-theme
