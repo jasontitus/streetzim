@@ -102,23 +102,27 @@ const NAMES = [
   'Йошкар-Ола', 'ﬁnca', '①番地', 'Ⅻ',
 ];
 
+// Both word rules (cloud/search_shards.py `words`): rule 2 is what the
+// writer records now ("word_rule": 2), rule 1 what every older ZIM holds.
 const PYN = py(`
-from cloud.search_shards import norm, prefix_key, paths_for, _word_re
+from cloud.search_shards import norm, prefix_key, paths_for, prefixes_for, WORD_RULES
 names = json.load(sys.stdin)
-out = []
-for n in names:
-    nn = norm(n)
-    # zim_writer.py _prefixes_for: the whole name's first two characters plus
-    # each word of two or more characters.
-    keys = {prefix_key(nn[:2])}
-    keys |= {prefix_key(m) for m in _word_re.findall(nn) if len(m) >= 2}
-    paths = {k: sorted(list(p) for p in paths_for(k, n, 3)) for k in keys}
-    out.append({'n': n, 'norm': nn, 'keys': sorted(keys), 'paths': paths})
+out = {}
+for rule in WORD_RULES:
+    out[rule] = []
+    for n in names:
+        nn = norm(n)
+        # The writer's keys: the whole name's first two characters plus each
+        # word of two or more characters.
+        keys = prefixes_for(n, rule)
+        paths = {k: sorted(list(p) for p in paths_for(k, n, 3, rule)) for k in keys}
+        out[rule].append({'n': n, 'norm': nn, 'keys': sorted(keys), 'paths': paths})
 print(json.dumps(out))
 `, NAMES);
+const MANIFEST = { 1: {}, 2: { word_rule: 2 } };
 
 ok('fold agrees with Python norm on real names in 20+ scripts', () => {
-  const bad = PYN.filter(r => fold(r.n) !== r.norm)
+  const bad = PYN[2].filter(r => fold(r.n) !== r.norm)
     .map(r => `${r.n}: js=${show(fold(r.n))} py=${show(r.norm)}`);
   assert.deepStrictEqual(bad, []);
 });
@@ -135,46 +139,47 @@ function jsKey(word) {                 // keyFor / prefixKeyFor
   };
   return an(word[0]) + (word.length > 1 ? (word.charCodeAt(1) >= 128 ? '_' : an(word[1])) : '_');
 }
-function jsWords(name) {
+function jsWords(name, rule) {
   const q = fold(name);
-  const words = q.split(/[^\p{L}\p{N}]+/u).filter(w => w.length >= 2);
-  return words.concat([q.replace(/\s/g, '_')]);
+  return S.words(q, MANIFEST[rule]).concat([q.replace(/\s/g, '_')]);
 }
 
-ok('the prefix keys the viewer asks for are the ones the writer indexed', () => {
-  const bad = [];
-  for (const r of PYN) {
-    const js = [...new Set(jsWords(r.n).map(jsKey))].sort();
-    if (js.join() !== r.keys.join()) bad.push(`${r.n}: js=${js} py=${r.keys}`);
-  }
-  assert.deepStrictEqual(bad, []);
-});
+for (const rule of [1, 2]) {
+  ok(`rule ${rule}: the prefix keys the viewer asks for are the ones the writer indexed`, () => {
+    const bad = [];
+    for (const r of PYN[rule]) {
+      const js = [...new Set(jsWords(r.n, rule).map(jsKey))].sort();
+      if (js.join() !== r.keys.join()) bad.push(`${r.n}: js=${js} py=${r.keys}`);
+    }
+    assert.deepStrictEqual(bad, []);
+  });
 
-ok('the leaf path the viewer targets is one the writer indexed the name under', () => {
-  const bad = [];
-  let n = 0;
-  for (const r of PYN) {
-    for (const w of jsWords(r.n)) {
-      const key = jsKey(w);
-      const toks = S.pathTokens(key, w).slice(0, 3);
-      if (toks.length < 3) toks.push(S.TERMINAL);
-      const have = (r.paths[key] || []).map(p => p.join('|'));
-      n++;
-      if (!have.includes(toks.join('|'))) {
-        bad.push(`${r.n} word ${show(w)} key ${key}: js=${toks.join('|')} py=${JSON.stringify(have)}`);
-      }
-      // ... and leavesFor, given a manifest splitting that prefix on exactly
-      // the writer's paths, selects it.
-      const manifest = { char_split: { [key]: have.map(p => p.split('|').join('~')) } };
-      const leaves = S.leavesFor(manifest, key, w, r.n, (x) => [x]);
-      if (leaves !== null && !leaves.some(l => l.startsWith(`${key}~${toks[0]}`))) {
-        bad.push(`${r.n}: leavesFor(${key}, ${w}) = ${JSON.stringify(leaves)}`);
+  ok(`rule ${rule}: the leaf path the viewer targets is one the writer indexed the name under`, () => {
+    const bad = [];
+    let n = 0;
+    for (const r of PYN[rule]) {
+      for (const w of jsWords(r.n, rule)) {
+        const key = jsKey(w);
+        const toks = S.pathTokens(key, w).slice(0, 3);
+        if (toks.length < 3) toks.push(S.TERMINAL);
+        const have = (r.paths[key] || []).map(p => p.join('|'));
+        n++;
+        if (!have.includes(toks.join('|'))) {
+          bad.push(`${r.n} word ${show(w)} key ${key}: js=${toks.join('|')} py=${JSON.stringify(have)}`);
+        }
+        // ... and leavesFor, given a manifest splitting that prefix on exactly
+        // the writer's paths, selects it.
+        const manifest = { char_split: { [key]: have.map(p => p.split('|').join('~')) } };
+        const leaves = S.leavesFor(manifest, key, w, r.n, (x) => [x]);
+        if (leaves !== null && !leaves.some(l => l.startsWith(`${key}~${toks[0]}`))) {
+          bad.push(`${r.n}: leavesFor(${key}, ${w}) = ${JSON.stringify(leaves)}`);
+        }
       }
     }
-  }
-  assert.ok(n > NAMES.length, `only ${n} words checked`);
-  assert.deepStrictEqual(bad, []);
-});
+    assert.ok(n > NAMES.length, `only ${n} words checked`);
+    assert.deepStrictEqual(bad, []);
+  });
+}
 
 ok('fold keeps what the writer keeps: Indic vowel signs, Thai vowels', () => {
   assert.strictEqual(fold('कोलकाता'), 'कोलकाता');
