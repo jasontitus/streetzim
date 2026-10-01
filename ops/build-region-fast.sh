@@ -10,14 +10,17 @@ if [ ! -L "$0" ] && _ops_real="$(readlink -f "$0" 2>/dev/null)"; then
 fi
 unset _ops_real _ops_old
 # Fast-path build wrapper: in-build spatial-cells + no LLM bundle +
-# zim-builder=rust. Eliminates the post-build repackage_zim.py step.
+# the manifest ZIM writer. Eliminates the post-build repackage_zim.py step.
 # Mirrors build-region.sh's CLI: <id> <bbox> <name>.
 #
 # Per the streetzim f38cfb4 commit (2026-05-08): California 1h55m → 1h27m
 # (-24%); Silicon Valley 31m → 27m (-12%). Europe-scale saves ~3-4h of
-# repackage. Requires:
-#   - rust/streetzim-pack/target/release/streetzim-pack
-#   - (optional, for --xapian=builder) ../xapianbuilder/target/release/xapianbuilder
+# repackage. Uses:
+#   - the Python manifest packer (--zim-builder=manifest), the packer these
+#     builds have run since 17c82fc; ZIM_BUILDER=rust selects a built Rust
+#     streetzim-pack instead, and the build fails if there is none
+#   - (optional, for --xapian=builder) xapianbuilder; without it the build
+#     uses libzim (--zim-builder=python --xapian=libzim)
 
 set -euo pipefail
 cd /storage/streetzim
@@ -165,20 +168,31 @@ if [ "${STAGE_MBTILES_NVME:-1}" = 1 ] && [ -f "$MBTILES" ] && mkdir -p "$NVME_SC
 fi
 
 
-# Pick xapian mode based on whether xapianbuilder is available.
-# `--xapian=builder` requires `--zim-builder=rust` per the create_osm_zim
-# constraint; without xapianbuilder, fall back to the default `libzim`
-# auto-indexer (slower, but the in-build pipeline still skips the
-# post-build repackage which is the bigger win).
-XAPIAN_FLAG="--xapian=libzim"
+# Pick the writer and xapian mode by whether xapianbuilder is available.
+# `--xapian=builder` needs a manifest writer (`--zim-builder=manifest`, or
+# `rust` for a built Rust packer: ZIM_BUILDER=rust), which cannot run libzim's
+# indexer. Without xapianbuilder, fall back to libzim with its auto-indexer
+# (`--zim-builder=python --xapian=libzim`): slower, but the ZIM keeps Kiwix
+# native search, and the in-build pipeline still skips the post-build
+# repackage, which is the bigger win. (`--xapian=libzim` with a manifest
+# writer is rejected by create_osm_zim.py.)
+ZIM_BUILDER="${ZIM_BUILDER:-manifest}"
+case "$ZIM_BUILDER" in
+    manifest|rust) ;;
+    *) echo "FATAL: ZIM_BUILDER must be manifest or rust, not '$ZIM_BUILDER'" >&2; exit 1 ;;
+esac
+WRITER_FLAGS="--zim-builder=python --xapian=libzim"
 for cand in /home/ot/experiments/xapianbuilder/target/release/xapianbuilder \
             /home/ot/experiments/xapianbuilder/target/debug/xapianbuilder; do
     if [ -x "$cand" ]; then
-        XAPIAN_FLAG="--xapian=builder --xapianbuilder-bin=$cand"
-        echo "  using xapianbuilder: $cand"
+        WRITER_FLAGS="--zim-builder=$ZIM_BUILDER --xapian=builder --xapianbuilder-bin=$cand"
+        echo "  using xapianbuilder: $cand (--zim-builder=$ZIM_BUILDER)"
         break
     fi
 done
+case "$WRITER_FLAGS" in
+    *--xapian=libzim*) echo "  no xapianbuilder: building with libzim (--zim-builder=python --xapian=libzim)" ;;
+esac
 
 SAT_ARGS=(--satellite --satellite-download-zoom 12)
 [ "$VAR_SAT" = no ] && SAT_ARGS=()
@@ -201,13 +215,13 @@ ARGS=(
     --split-find-chips
     --keep-temp
     --output "$OUT_FINAL"
-    # Fast-path flags (eliminate post-build repackage):
-    --zim-builder=rust
+    # Fast-path flags (eliminate post-build repackage). The writer and
+    # --xapian come from WRITER_FLAGS above.
     --no-llm-bundle
     --spatial-chunk-scale 10
 )
 # shellcheck disable=SC2206
-ARGS+=( $XAPIAN_FLAG )
+ARGS+=( $WRITER_FLAGS )
 # Terrain is always on here: without the world DEM the builder would
 # switch to its fresh-machine layout (streetzim/terrain.py). Refuse instead.
 if [ -f "$LOWZ" ]; then

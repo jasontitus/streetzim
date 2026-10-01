@@ -573,10 +573,13 @@ def test_line_limit_atomic(tmp_path, monkeypatch):
 def test_html_listing_exact_and_raw_x_namespace(tmp_path):
     rows = [
         {"kind": "config", "compression": "zstd", "main_path": "redirect"},
+        # No front flag: libzim's default, front only for a "text/html" prefix.
         _item("z", "Z", mime='TEXT/HTML; charset="utf-8"', title="é"),
+        _item("h", "H", mime="text/html; charset=utf-8", title="html"),
         _item("a", "A", mime="text/html", title="same", front=False),
         _item("b", "B", mime="text/plain", title="same", front=True),
         {"kind": "redirect", "path": "redirect", "target": "z", "title": "same"},
+        {"kind": "redirect", "path": "shown", "target": "a", "title": "zz", "front": True},
         _item("not.html", "R", mime="text/html", namespace=88, compress=True),
     ]
     _, a = archive(tmp_path, rows)
@@ -585,9 +588,44 @@ def test_html_listing_exact_and_raw_x_namespace(tmp_path):
         for e in a["entries"]
         if e["namespace"] == 88 and e["path"] == "listing/titleOrdered/v1"
     )
-    assert listing["listing"] == [(67, "a"), (67, "redirect"), (67, "z")]
+    assert listing["listing"] == [(67, "h"), (67, "b"), (67, "shown")]
     assert all(e["compression"] == 1 for e in a["entries"] if e["namespace"] == 88)
     assert a["main"] == (87, "mainPage")
+
+
+def test_adapter_lists_front_articles_only_not_places_html(tmp_path, monkeypatch):
+    """The FRONT_ARTICLE hint decides the title listing, as with libzim:
+    places.html (is_front=False) is not listed; a front redirect is."""
+    from libzim.reader import Archive
+    from libzim.writer import Hint
+
+    from cloud.manifest_writer import ManifestCreator
+
+    monkeypatch.delenv("STREETZIM_PACK_BIN", raising=False)
+    output = tmp_path / "out.zim"
+    creator = ManifestCreator(str(output), compression_level=1)
+    creator.config_nbworkers(1)
+    creator.set_mainpath("index.html")
+    with creator:
+        for path, title, front in (("index.html", "Map", True),
+                                   ("places.html", "Places", False),
+                                   ("search/monaco.html", "Monaco", True)):
+            creator.add_item(SimpleNamespace(
+                _path=path, _title=title, _mimetype="text/html",
+                _data=b"<html></html>", _file_path=None, _is_front=front))
+        creator.add_redirection("alias", "Monte Carlo", "search/monaco.html",
+                                {Hint.FRONT_ARTICLE: True})
+        creator.add_redirection("hidden", "Hidden", "index.html",
+                                {Hint.FRONT_ARTICLE: False})
+        creator.add_metadata("Title", "Monaco")
+    result = _inspect(output)
+    (listing,) = [e for e in result["entries"]
+                  if e["namespace"] == 88 and e["path"] == "listing/titleOrdered/v1"]
+    assert listing["listing"] == [(67, "index.html"), (67, "search/monaco.html"),
+                                  (67, "alias")]
+    assert Archive(str(output)).article_count == 3
+    (title,) = [e for e in result["entries"] if (e["namespace"], e["path"]) == (77, "Title")]
+    assert title["mime"] == "text/plain;charset=UTF-8"  # libzim's metadata MIME
 
 
 def test_control_validation_allows_format_unicode(tmp_path):
@@ -727,13 +765,14 @@ def test_many_zero_bodies_limited_by_blob_count(tmp_path, monkeypatch):
 
 
 def test_deep_redirect_chain_without_recursion(tmp_path):
-    # Listing eligibility exercises 10000 links without native get_item walks.
+    # Cycle detection walks 10000 links; all are front, so all are listed.
     records = [_item("end", "html", mime="text/html")]
     records.extend(
         {
             "kind": "redirect",
             "path": f"r{i:05d}",
             "target": ("end" if i == 9999 else f"r{i + 1:05d}"),
+            "front": True,
         }
         for i in range(10000)
     )
@@ -830,6 +869,7 @@ def test_default_manifest_command_works_outside_checkout(tmp_path, monkeypatch):
 def test_partial_failing_override_preserves_output_and_recovery(tmp_path, monkeypatch):
     from cloud import manifest_writer
 
+    monkeypatch.setenv("STREETZIM_KEEP_PACK_STAGE", "1")
     executable = tmp_path / "override"
     executable.write_text(
         f"#!{sys.executable}\n"
@@ -852,6 +892,7 @@ def test_partial_failing_override_preserves_output_and_recovery(tmp_path, monkey
 def test_adapter_publication_failure_preserves_candidate(tmp_path, monkeypatch):
     from cloud import manifest_writer
 
+    monkeypatch.setenv("STREETZIM_KEEP_PACK_STAGE", "1")
     monkeypatch.delenv("STREETZIM_PACK_BIN", raising=False)
     output = tmp_path / "out.zim"
     output.write_bytes(b"OLD")

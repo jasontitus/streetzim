@@ -11,6 +11,7 @@ from streetzim.common import (
     parse_bbox,
 )
 from streetzim import satellite_sources
+from streetzim.cpus import build_cpus
 
 
 def satellite_cache_dirs(source=satellite_sources.BUILDER_DEFAULT,
@@ -291,7 +292,9 @@ def download_satellite_tiles(bbox_str, dest_dir, max_zoom=14, webp_quality=65,
         out_size = _save_image(stitched, tile_path)
         return (True, total_jpeg, out_size)
 
-    max_workers = min(32, (os.cpu_count() or 4) * 4)
+    # The threads mostly wait on the network: several per core of the
+    # build's budget (not the machine's: a container sees every core).
+    max_workers = min(32, build_cpus() * 4)
 
     if tile_size == 512:
         print(f"    Mode: 512px tiles ({sat_format} q{quality})")

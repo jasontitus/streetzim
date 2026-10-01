@@ -50,8 +50,12 @@ ZIM.
   and `kiwix-serve` are the reference checker and reader. CI uses only these.
 
 **Optional accelerators.** Only the continent-scale production builds use
-them; see §3. `streetzim/pack.py` (`--zim-builder manifest`, with `rust` as a legacy alias)
-provides the Python manifest writer. It uses the installed Python dependencies
+them; see §3. `streetzim/pack.py` (`--zim-builder manifest`) provides the
+Python manifest writer; `--zim-builder rust` packs the same manifest with a
+built Rust `streetzim-pack` and fails when there is none
+([docs/zim-builder-rust.md](docs/zim-builder-rust.md)). With `--xapian none`
+these ZIMs have no Xapian title index, so Kiwix offers title-prefix
+suggestions only. It uses the installed Python dependencies
 and requires no sibling zimru checkout. `--xapian builder` still uses the separate
 external xapianbuilder indexer. See [the packer guide](docs/zim-builder-python.md)
 for controls, memory limits and native validation.
@@ -171,7 +175,8 @@ Rules that keep published ZIMs working:
 | `STREETZIM_SKIP_ZIMCHECK=1` | skip zimcheck in the validator |
 | `ZIMRU_ZIMCHECK` | optional: a faster drop-in `zimcheck` for very large ZIMs; the standard `zimcheck` is used otherwise |
 | `STREETZIM_NODE_LOC_DIR` | fast scratch volume for the routing node-location store (default `/data`, falling back to the output directory) |
-| `STREETZIM_PACK_BIN`, `XAPIANBUILDER_BIN` | optional accelerators only (see §1) |
+| `STREETZIM_PACK_BIN`, `XAPIANBUILDER_BIN` | optional accelerators only (see §1); `STREETZIM_PACK_BIN` is also where `--zim-builder rust` looks first for the Rust packer |
+| `STREETZIM_KEEP_PACK_STAGE=1` | keep a failed manifest-pack attempt's stage (manifest, staged bodies, partial archive) for inspection; by default it is removed |
 | `ZSTD_CLEVEL` | zstd level for the manifest writer only (default 22, which the production wrappers set); libzim ignores it and compresses at its fixed level 19 |
 | `STREETZIM_MERGE_STREETS=0` | keep one search record per tile for streets instead of merging the pieces (docs/search-records.md). Merging is the default since merge #19, so regions built before it have more street records |
 | `STREETZIM_ALLOW_FONT_ERRORS=1` | ship even if some font ranges failed to download (e.g. during a CDN outage); by default the build stops after 5 attempts per range. A range whose bytes do not match its pinned sha256 always stops the build ([docs/viewer-supply-chain.md](docs/viewer-supply-chain.md)) |

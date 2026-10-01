@@ -12,7 +12,9 @@
 #                the viewer served straight out of the ZIM, both by a minimal
 #                server and by Kiwix's own kiwix-serve. Everything here uses
 #                stock libzim (python-libzim, zim-tools, kiwix-tools); nothing
-#                needs the optional Rust packer. It also exercises the tools
+#                needs the optional Rust packer. It also builds Monaco with the
+#                Python manifest packer (--zim-builder manifest --xapian none)
+#                and validates that with zimcheck required. It also exercises the tools
 #                that rewrite published ZIMs (repackage, in-place viewer patch). Also runs weekly so
 #                upstream drift (Geofabrik, the pinned fonts on their CDN,
 #                tilemaker, libzim) shows up without a code change.
@@ -346,6 +348,20 @@ jobs:
         env:
           STREETZIM_REQUIRE_ZIMCHECK: "1"
         run: python cloud/validate_zim.py osm-monaco-ci.zim
+
+      # The Python manifest packer (streetzim/pack.py) on a real build, with
+      # no Xapian indexes (--xapian none): the same validator, with zimcheck
+      # required. Reuses this job's extract, tilemaker and zim-tools; the
+      # Monaco build takes well under a minute.
+      - name: Build Monaco with the manifest packer and validate it (zimcheck required)
+        env:
+          STREETZIM_REQUIRE_SHAPEFILES: "1"
+          STREETZIM_REQUIRE_ZIMCHECK: "1"
+        run: |
+          python create_osm_zim.py --area monaco --pbf monaco-latest.osm.pbf --routing \
+            --zim-builder manifest --xapian none -o osm-monaco-manifest.zim
+          python cloud/validate_zim.py osm-monaco-manifest.zim
+          rm osm-monaco-manifest.zim
 
       - name: Browser smoke test of the in-ZIM viewer
         run: |

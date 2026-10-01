@@ -2,7 +2,8 @@
   "schema": 1,
   "measurement": "normalizer CPU microbenchmark; 5 trials; 10,000 loops over each named dataset",
   "baseline_ref": "d5c32b6",
-  "latin_outputs_unchanged": true,
+  "latin_outputs_unchanged": false,
+  "latin_output_changes": "Accented Latin that decomposes (é, ó, ń, ẵ) folds as before. Latin letters with no decomposition were previously deleted and are now kept: Straße 'stra e' -> 'straße', Łódź 'odz' -> 'łodz', Ærø 'r' -> 'ærø', Øster 'ster' -> 'øster', Đà Nẵng 'a nang' -> 'đa nang'. The datasets below contain none of them.",
   "datasets": {
     "mixed_50_percent_latin": {
       "input_names": [

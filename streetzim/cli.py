@@ -40,7 +40,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
 
@@ -1048,6 +1048,224 @@ def _error(msg: object) -> int:
     return 2
 
 
+# What a build killed before its cleanup ran (OOM killer, SIGKILL) leaves
+# behind: next to the output, its staging archive, libzim's <staging>.tmp and
+# create_zim's private folder .<staging>.building-XXXXXXXX (the multi-GB
+# partial archive and pack stage); in --tmp, its workspace. Each build holds
+# an exclusive flock on <staging>.lock and <workspace>.lock while it runs,
+# and writes the kernel's boot_id into them; the kernel releases the lock
+# however the process ends. A later build removes an entry only when it can
+# take that lock itself and the lock file holds its own boot_id, which no
+# PID check or age can establish: two containers sharing --tmp or the output
+# folder see different PIDs, and a live build's workspace stops changing
+# early. The guarantee therefore covers builds on the same running kernel
+# (any containers of one host): there flock is authoritative. Another host,
+# or this one after a reboot, has a different boot_id, so a lock that flock
+# might not share across hosts (NFS local_lock, CIFS nobrl, FUSE) is never
+# trusted; nor is a lock file without a boot_id, or a sweeper without one.
+# The owner's PID being gone and STALE_AFTER without a change are kept as
+# further guards. A filesystem without working flock (ENOLCK on NFSv3
+# without lockd, EOPNOTSUPP/ENOSYS on FUSE or 9p) gets no lock file. An entry
+# without a lock file (also from builds before the locks) is never removed,
+# nor is one kept on purpose: --debug, --keep-temp or an archive that could
+# not be published (a <name>.keep marker), or a pack stage kept with
+# STREETZIM_KEEP_PACK_STAGE. A lock file whose owner never got as far as
+# creating an entry is removed under the same rules once STALE_AFTER old.
+STALE_AFTER = 6 * 3600
+_OWNER = r"\..+\.zim\.(?P<pid>\d{1,7})\.[a-z0-9_]{8}\.building"
+STAGING_NAME = re.compile(rf"^(?P<owner>{_OWNER})(?:\.tmp)?$")
+WRITER_NAME = re.compile(rf"^\.(?P<owner>{_OWNER})\.building-[a-z0-9_]{{8}}$")
+WORKSPACE_NAME = re.compile(r"^(?P<owner>streetzim-build-(?P<pid>\d{1,7})-[a-z0-9_]{8})$")
+KEEP_SUFFIX = ".keep"
+LOCK_SUFFIX = ".lock"
+BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id"
+
+
+def _boot_id() -> str | None:
+    """This kernel's boot ID (shared by every container on the host), or
+    None where there is none (macOS, or /proc not mounted)."""
+    try:
+        with open(BOOT_ID_PATH, encoding="ascii", errors="replace") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0 or pid == os.getpid():
+        return True                     # (kill(0) would signal our process group)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except (OSError, OverflowError):    # EPERM: it exists, owned by another user
+        return True
+    return True
+
+
+def _newest_mtime(path: Path) -> float:
+    """The latest modification time of `path` and, for a folder, of
+    everything in it (symbolic links are not followed)."""
+    newest = path.lstat().st_mtime
+    if path.is_dir() and not path.is_symlink():
+        for root, dirs, files in os.walk(path):
+            for name in dirs + files:
+                with contextlib.suppress(OSError):
+                    newest = max(newest, os.lstat(os.path.join(root, name)).st_mtime)
+    return newest
+
+
+def keep_marker(path: Path) -> Path:
+    """The marker that protects a staging archive (and its .tmp) or a
+    workspace from sweep_stale()."""
+    name = path.name.removesuffix(".tmp") if path.name.endswith(".building.tmp") else path.name
+    return path.with_name(name + KEEP_SUFFIX)
+
+
+def mark_kept(path: Path) -> None:
+    with contextlib.suppress(OSError):
+        keep_marker(path).touch()
+
+
+def owner_lock(path: Path) -> Path:
+    return path.with_name(path.name + LOCK_SUFFIX)
+
+
+@contextlib.contextmanager
+def hold_owner_lock(path: Path) -> Generator[None, None, None]:
+    """Hold the lock that tells sweep_stale() the build owning `path` (a
+    staging name or a workspace) is running, with this kernel's boot ID in
+    it. The file is removed at the end while still locked; a killed build
+    leaves it, unlocked. Without a lock file (it could not be created, or
+    the filesystem cannot lock) the entries are simply never swept."""
+    import fcntl
+    lock = owner_lock(path)
+    try:
+        fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+    except OSError:
+        yield
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    except OSError as e:                # ENOLCK, EOPNOTSUPP, ENOSYS, ...
+        with contextlib.suppress(OSError):
+            lock.unlink()
+        os.close(fd)
+        print(f"streetzim: no lock on {lock.parent} ({e.strerror or e}); "
+              "an interrupted build's files there will not be cleaned up", flush=True)
+        yield
+        return
+    try:
+        boot = _boot_id()
+        if boot is not None:
+            with contextlib.suppress(OSError):
+                os.write(fd, boot.encode("ascii", "replace"))
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            lock.unlink()
+        os.close(fd)
+
+
+@contextlib.contextmanager
+def _owner_gone(lock: Path) -> Generator[bool, None, None]:
+    """Whether the build that holds `lock` has ended: true while this
+    process holds that lock itself and the lock was taken on this running
+    kernel (same boot ID). False when there is no lock file."""
+    import fcntl
+    boot = _boot_id()
+    try:
+        fd = os.open(lock, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        yield False
+        return
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # A lock its owner removed (on finishing) is not that owner's.
+            gone = (os.path.samestat(os.fstat(fd), os.stat(lock, follow_symlinks=False))
+                    and boot is not None
+                    and os.read(fd, 256).decode("ascii", "replace").strip() == boot)
+        except OSError:
+            gone = False
+        yield gone
+    finally:
+        os.close(fd)
+
+
+def _kept_on_purpose(entry: Path, owner: Path) -> bool:
+    if keep_marker(entry).exists() or keep_marker(owner).exists():
+        return True
+    return entry.is_dir() and any(p.is_dir() for p in entry.glob("*.pack-stage-*"))
+
+
+def sweep_stale(folder: Path, kinds: list[tuple[re.Pattern[str], bool]], *,
+                now: float | None = None) -> list[Path]:
+    """Remove the entries of `folder` named by one of `kinds` (a pattern and
+    whether it names folders) whose owning build has ended, as the comment
+    above describes; returns what was removed."""
+    import time
+    now = time.time() if now is None else now
+    removed: list[Path] = []
+    try:
+        entries = sorted(folder.iterdir())
+    except OSError:
+        return removed
+    owners: dict[tuple[str, int], list[Path]] = {}
+    for entry in entries:
+        if entry.is_symlink():
+            continue
+        if entry.name.endswith(LOCK_SUFFIX) and entry.is_file():
+            # A lock file alone: its build was killed before it created an
+            # entry (or the entries are gone).
+            stem = entry.name.removesuffix(LOCK_SUFFIX)
+            for pattern, _ in kinds:
+                m = pattern.match(stem)
+                if m and m.group("owner") == stem:
+                    owners.setdefault((stem, int(m.group("pid"))), [])
+                    break
+            continue
+        for pattern, folders in kinds:
+            m = pattern.match(entry.name)
+            if m and entry.is_dir() == folders:
+                owners.setdefault((m.group("owner"), int(m.group("pid"))), []).append(entry)
+                break
+    for (owner, pid), items in owners.items():
+        lock = owner_lock(folder / owner)
+        if _pid_alive(pid):
+            continue
+        with _owner_gone(lock) as gone:
+            if not gone:
+                continue
+            for entry in items:
+                try:
+                    if (_kept_on_purpose(entry, folder / owner)
+                            or now - _newest_mtime(entry) < STALE_AFTER):
+                        continue
+                    if entry.is_dir():
+                        shutil.rmtree(entry)
+                    else:
+                        entry.unlink()
+                except OSError:
+                    continue
+                print(f"streetzim: removed {entry}, left by an interrupted build "
+                      f"(process {pid})", flush=True)
+                removed.append(entry)
+            if any(os.path.lexists(e) for e in items):
+                continue
+            try:
+                if not items and now - lock.lstat().st_mtime < STALE_AFTER:
+                    continue
+                lock.unlink()
+            except OSError:
+                continue
+            if not items:
+                print(f"streetzim: removed {lock}, left by an interrupted build "
+                      f"(process {pid})", flush=True)
+                removed.append(lock)
+    return removed
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     missing = missing_runtime_files()
@@ -1071,15 +1289,19 @@ def main(argv: list[str] | None = None) -> int:
 
     # The workspace belongs to this invocation, including its illustration
     # and cut MBTiles. Other builds may share --tmp and --dl safely.
-    work = Path(tempfile.mkdtemp(prefix="streetzim-build-", dir=tmp))
+    sweep_stale(tmp, [(WORKSPACE_NAME, True)])
+    work = Path(tempfile.mkdtemp(prefix=f"streetzim-build-{os.getpid()}-", dir=tmp))
     previous = _exit_on_sigterm()
-    try:
-        return _run_build(args, dl, out_dir, work)
-    finally:
-        if previous is not None:
-            signal.signal(signal.SIGTERM, previous)
-        if not (args.debug or args.keep_temp):
-            shutil.rmtree(work, ignore_errors=True)
+    with hold_owner_lock(work):
+        try:
+            return _run_build(args, dl, out_dir, work)
+        finally:
+            if previous is not None:
+                signal.signal(signal.SIGTERM, previous)
+            if args.debug or args.keep_temp:
+                mark_kept(work)
+            else:
+                shutil.rmtree(work, ignore_errors=True)
 
 
 def _run_build(args: argparse.Namespace, dl: Path, out_dir: Path, work: Path) -> int:
@@ -1102,13 +1324,17 @@ def _run_build(args: argparse.Namespace, dl: Path, out_dir: Path, work: Path) ->
     except (ValueError, OSError) as e:
         return _error(e)
     out_dir.mkdir(parents=True, exist_ok=True)
+    sweep_stale(out_dir, [(STAGING_NAME, False), (WRITER_NAME, True)])
     if final.exists() and not args.overwrite:
         return _error(f"{final} exists (use --overwrite)")
     try:
         # Staging lives on the output filesystem for atomic publication, and
         # its unique name prevents concurrent builds from deleting each
-        # other's archive (previously both used <final>.tmp).
-        with tempfile.NamedTemporaryFile(prefix=f".{final.name}.", suffix=".building",
+        # other's archive (previously both used <final>.tmp). Its lock (and
+        # PID) let sweep_stale() tell when an interrupted build's staging,
+        # and create_zim's folder named after it, are orphaned.
+        with tempfile.NamedTemporaryFile(prefix=f".{final.name}.{os.getpid()}.",
+                                         suffix=".building",
                                          dir=out_dir) as probe:
             building = Path(probe.name)
         from streetzim import scraperlib
@@ -1116,15 +1342,33 @@ def _run_build(args: argparse.Namespace, dl: Path, out_dir: Path, work: Path) ->
             scraperlib.check_output(out_dir, building.name)
     except OSError as e:
         return _error(f"cannot write to {out_dir}: {e}")
+    with hold_owner_lock(building):
+        return _build_staged(args, dl, illustration, work, building, final)
+
+
+def _build_staged(args: argparse.Namespace, dl: Path, illustration: Path | None,
+                  work: Path, building: Path, final: Path) -> int:
+    keep = False
     try:
         if args.stats_filename:
             from streetzim.progress import StatsFile
             StatsFile(Path(args.stats_filename).resolve()).write(0, 1)
         return _build(args, dl, illustration, work, building, final)
+    except _Unpublished as e:
+        # The archive is complete: never delete it because the last step
+        # failed. It is marked so that sweep_stale() leaves it too.
+        keep = True
+        mark_kept(building)
+        return _error(f"could not move the finished archive to {final} ({e.cause}); "
+                      f"it is at {building}")
     finally:
-        if not (args.debug or args.keep_temp):
-            for staged in (building, building.with_name(building.name + ".tmp")):
-                staged.unlink(missing_ok=True)
+        staged = (building, building.with_name(building.name + ".tmp"))
+        if args.debug or args.keep_temp:
+            if any(p.exists() for p in staged):
+                mark_kept(building)
+        elif not keep:
+            for p in staged:
+                p.unlink(missing_ok=True)
 
 
 def _exit_on_sigterm() -> Any:
@@ -1165,19 +1409,47 @@ def _build(args: argparse.Namespace, dl: Path, illustration: Path | None, work: 
     finally:
         os.chdir(cwd)
     print(f"streetzim: {source_report.summary()}")
-    if args.overwrite:
-        os.replace(building, final)
-    else:
-        # The destination may have appeared while we were building. A hard
-        # link publishes a completed same-filesystem file atomically and
-        # refuses to replace another invocation's successful output.
-        try:
-            os.link(building, final)
-        except FileExistsError:
-            return _error(f"{final} exists (use --overwrite)")
-        building.unlink()
+    try:
+        publish(building, final, overwrite=args.overwrite)
+    except FileExistsError:
+        return _error(f"{final} exists (use --overwrite)")
+    except OSError as e:
+        raise _Unpublished(e) from e
     print(f"streetzim: wrote {final}")
     return 0
+
+
+class _Unpublished(Exception):
+    """The archive was built but could not be moved into place."""
+
+    def __init__(self, cause: OSError) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+
+
+def publish(building: Path, final: Path, *, overwrite: bool) -> None:
+    """Move the finished archive `building` to `final` (same folder).
+    Without `overwrite`, raises FileExistsError when `final` appeared while
+    building; any other OSError leaves `building` where it is."""
+    if overwrite:
+        os.replace(building, final)
+        return
+    # A hard link publishes a completed same-filesystem file atomically and
+    # refuses to replace another invocation's successful output.
+    try:
+        os.link(building, final)
+    except FileExistsError:
+        raise
+    except OSError:
+        # Some filesystems have no hard links (EPERM on FAT/exFAT and some
+        # network or FUSE mounts, ENOTSUP, EMLINK). A rename cannot refuse
+        # an existing destination, so check for one just before.
+        if os.path.lexists(final):
+            raise FileExistsError(f"{final} exists") from None
+        os.replace(building, final)
+        return
+    with contextlib.suppress(OSError):  # published: the extra name is harmless
+        building.unlink()
 
 
 if __name__ == "__main__":

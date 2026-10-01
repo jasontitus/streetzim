@@ -118,7 +118,7 @@ def test_missing_accelerator_fails_before_build(monkeypatch, missing):
 
     monkeypatch.setattr(builder, "_openzim_options", started)
     monkeypatch.setattr(manifest_writer, "resolve_pack_command",
-                        absent if missing == "packer" else lambda: ["/valid/packer"])
+                        absent if missing == "packer" else lambda *args: ["/valid/packer"])
     monkeypatch.setattr(builder, "_resolve_xapianbuilder_binary", absent)
     with pytest.raises(SystemExit, match="2"):
         builder.main(["--area", "monaco", "--zim-builder", "rust", "--xapian", "builder"])

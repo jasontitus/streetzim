@@ -21,7 +21,7 @@ Binary and JSON format versions are unchanged.
 | Wikidata | Invalid Q-ID tags are filtered before batching, including old extraction caches. Two semicolon-separated tags in the Netherlands PBF caused entire SPARQL batches to fail, dropping 78 valid neighboring IDs. The ambiguous tags are skipped with a bounded warning; valid IDs can be retried on the next build. |
 | Docker packaging | Generated country outputs, local virtual environments, development Rust targets, test/lint caches and the operational URL validation cache are excluded from the build context. This prevents subsequent image builds from uploading country data and embedding hundreds of megabytes of unrelated cache. User files remain on the host. |
 | Image publication | The incoming publication workflow rebuilt the image after CI, let old releases overwrite `latest`, and allowed stale reruns to replace current main's pending publish. CI now exports its validated image; publication verifies its checksum, identity, architecture and commit. A shared queued publisher keeps pending runs, and read-only metadata checks approve only current main or matching stable tags. Version files are parsed as restricted literal data; the package-write job runs no release source or container code. |
-| Routing | Builds no longer remove another run's node store solely because it is six hours old. Failed store construction cleans only owned scratch. Geometry serialization writes its bytearray directly, removing a full-size copy. Monaco graph bytes remain identical. |
+| Routing | Node stores older than six hours are removed again at the start of a build (unlinking a store another build still has open is safe on Linux and macOS). Failed store construction cleans only owned scratch. Geometry serialization writes its bytearray directly, removing a full-size copy. Monaco graph bytes remain identical. |
 | Rust packaging | Large in-memory bodies are staged as files instead of base64/JSON copies. Raw bodies use the actual chunked API. Compressed bodies retain the established pipeline after an adversarial benchmark exposed excess concurrent encoder memory. Main-page selection follows the manifest config; front-article hints no longer replace it. Explicit workers reach Rayon, and unsupported indexer modes fail clearly. |
 | Usability and instrumentation | Invalid worker/indexer choices and unavailable accelerator executables fail before build work. Compression logs distinguish an explicit Rust level from libzim's unknown effective default. Tile watchdogs stop on failures. Interrupted external indexing terminates/reaps launched processes and removes their partial databases; reused databases survive. `measure_build.py` measures Linux RSS/PSS and macOS process-tree RSS, normalizes units, reports unavailable values/errors, bounds sample storage, limits disk scans and terminates descendants on cancellation. |
 
@@ -313,8 +313,9 @@ an upper bound for large production builds.
 ## Python replacement for the manifest packer (2026-09-30)
 
 The custom manifest packer now runs `streetzim.pack`, using Python SQLite,
-lzma and python-zstandard. `--zim-builder manifest` selects it; the advanced
-core command retains `rust` as an alias. Stock python-libzim remains the normal
+lzma and python-zstandard. `--zim-builder manifest` selects it. (The advanced
+core command's `--zim-builder rust` was at first an alias for it; it now runs a
+built Rust `streetzim-pack` and fails when there is none.) Stock python-libzim remains the normal
 Docker/CLI default, and the external xapianbuilder remains optional. No Cargo
 installation or sibling zimru checkout is needed to pack a manifest.
 
@@ -325,8 +326,10 @@ blob count and pending logical body bytes are bounded; one oversized item can
 progress alone. Default compression workers now follow container memory/CPU
 limits, while explicit worker choices remain overrides. Verbose JSON reports
 logical pending bytes separately from actual process peak RSS. Parent build
-metrics use the packer's own wait4 usage rather than cumulative child usage or
-a sampling-only estimate.
+metrics use the peak the packer reports for itself (its `VmHWM` on Linux)
+rather than cumulative child usage. (At first they used the child's `wait4`
+usage, which on Linux includes the parent's RSS from before `exec`; see
+[the packer guide](zim-builder-python.md#memory-and-instrumentation).)
 
 Independent adversarial review found and fixed signed Zstd-level compatibility,
 cluster target overflow, small-frame window sizing, truncated manifest frames,
@@ -337,6 +340,16 @@ run before atomic publication; native tests decode compressed payloads. The
 adapter preserves prior output and staged recovery inputs on failure, including
 partial executable overrides, missing output despite exit zero, interruption,
 codec failures and failed publication.
+
+**Not reproducible from this repository.** The figures in the rest of this
+section come from a review run whose evidence (frozen sources and binaries,
+benchmark drivers, reports, logs and archives) is under
+`out/python-packer-review-20260930/` on the reviewer's machine. That directory
+is not tracked here, the Rust executable needs a zimru revision that is not in
+the repository ([docs/zim-builder-rust.md](zim-builder-rust.md)), and the
+measurements were taken on macOS. Read them as a record of that run, not as
+results this checkout can regenerate; `tools/benchmark_zim_pack.py` is the
+driver for new measurements.
 
 The benchmark compares a frozen reviewed Rust executable (`86df102c…`, built
 from the preceding review fixes) with a frozen Python implementation (`cafd534d…`).
@@ -380,7 +393,9 @@ A fresh Monaco Docker build using the Python backend in an 8 GiB/no-swap contain
 selected four packer workers, generated a 2.89 MB ZIM, and passed official zimcheck,
 metadata/progress, routing/structure validation and all 17 Chrome viewer checks.
 Its whole-build process-tree peak remains about 3.25 GB PSS, dominated by the
-earlier native osmium phase; the packer itself used 193.8 MB RSS.
+earlier native osmium phase; the packer itself was logged at 193.8 MB RSS (a
+`wait4` figure from before the fix above, so possibly including the parent's
+pre-`exec` RSS).
 
 The full Linux Python 3.14 core suite passed 1,655 tests with 40 skips; operations
 tests passed 90 with one skip. Final scoped runs subsequently passed 266 cases on Linux and 214 on macOS,
@@ -392,7 +407,8 @@ and unrelated pre-existing dated archive search failures; native Linux checks
 provide the authoritative runtime result.
 
 Evidence, frozen sources, benchmark drivers, review reports, XML, Docker logs
-and the fresh archive are under `out/python-packer-review-20260930/`. The packer
+and the fresh archive were kept under `out/python-packer-review-20260930/`,
+outside version control (see the note above). The packer
 guide is `docs/zim-builder-python.md`. The Netherlands full libzim builds are
 reported separately below; these packer-only figures do not establish a
 Netherlands whole-build reduction from the Python rewrite.
