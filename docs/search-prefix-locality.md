@@ -140,7 +140,7 @@ manifest size per region, and the validator must fail a manifest over 4 MB.
 Every key and path above is computed from the **folded** name, and the viewer
 must fold exactly as the writer did or it asks for leaves the writer never
 wrote. The writer's fold is `cloud/search_shards.py` `norm` (used by
-`streetzim/zim_writer.py` `_prefixes_for` too): NFKD, drop every character
+`prefixes_for`, which `streetzim/zim_writer.py` calls): NFKD, drop every character
 whose **canonical combining class** is not 0 (`unicodedata.combining`), then
 lower-case. The viewers use `SEARCH_SHARDS.fold` (the search-shards block of
 `300-search.js` and `places.html`; `normalizeText` and `foldText` delegate to
@@ -168,6 +168,113 @@ never change once assigned); a newer Python fails until the table is
 regenerated with it. `tests/search_fold_js.test.mjs` compares the fold, the
 prefix keys and the leaf paths against the Python writer.
 
+### Word rule
+
+A name is indexed under the key of each of its **words** (plus its first two
+characters), and a hot prefix is split by the characters that follow the key
+in that word. So the reader must cut a query into words exactly where the
+writer cut the name. The manifest says how: `"word_rule"` in
+`search-data/manifest.json`, **absent = 1**.
+
+* **Rule 1** (every ZIM written before 2026-10): a word is a run of
+  alphanumerics, `[^\W_]+`. A mark is not alphanumeric, so a mark the fold
+  keeps — canonical combining class 0: Indic vowel signs (mostly `Mc`), Thai
+  vowels such as U+0E31 and U+0E34–0E37, Khmer, Myanmar, Lao, Sinhala and
+  Tibetan vowel signs — **ended the word**: कोलकाता → क, लक, त; เชียงใหม่ →
+  เช, ยงใหม; พัทยา → พ, ทยา. A 1–2 character fragment matches a whole
+  prefix subtree, and once the viewer folded like the writer it requested
+  exactly those fragments: on southeast-asia 2026-09-28, พัทยา read 70 leaves
+  (7.1 MB) and เชียงใหม่ 40 leaves (8.4 MB) per keystroke, 0.5–2 s on a phone.
+* **Rule 2** (`"word_rule": 2`, what every writer records now): a word is a
+  maximal run of characters that are alphanumeric (`str.isalnum`) **or a
+  mark** (category `Mn`, `Mc`, `Me`), never `_`. Marks continue a word but
+  **never start one**: a mark at the start of a run (after a space, or a name
+  that begins with a stray vowel sign) is skipped and the word begins at the
+  first alphanumeric, so a run of marks alone is no word. `cloud/search_shards.py`
+  `words(nn, rule)` and `prefixes_for(name, rule)` are the one implementation
+  the build (`streetzim/zim_writer.py` pass 1, the planner through
+  `record_paths`/`Aggregator`/`leaf_for`) and the retrofit use.
+
+The fold runs first and already drops every mark of class ≠ 0, so what rule 2
+keeps inside words is the class-0 marks. Latin, Cyrillic, Greek, CJK, Hangul,
+Georgian, Armenian, Ethiopic and pointed Arabic/Hebrew have none left after the
+fold, so their keys, paths and leaves are **byte-identical** under both rules —
+measured by running the writer's search passes (`_search_bucket`,
+`_search_emit_chunks`) at `8ece2cf` and with rule 2 over the real feature
+files of washington-dc, iceland, baltics, caucasus, egypt and hawaii: every
+`search-data/*.json` identical, the manifests identical but for `word_rule`.
+Switzerland differs in exactly 6 prefixes (`ue04`, `ue25`, `ue27`, `uba9`,
+`ubb3`, `ubb5`): its 2 Thai/Tamil names. Over all 5,935,467 southeast-asia
+feature names, the 68,383 whose keys or paths change all contain a class-0
+mark after the fold (Thai 49,863, Myanmar 14,131, Khmer 2,536, Bengali 873,
+Lao 950, a few Javanese/Balinese/Tibetan). Some Thai names never
+fragmented (กรุงเทพ: its only mark, sara u, has class 103 and is folded
+away); the ones with a class-0 vowel did. A name like "ที่10" did too, and
+put itself under the digit prefix `10` — those records leave `10` under
+rule 2, so ASCII digit prefixes of such a region change a little.
+
+**The viewer** (`SEARCH_SHARDS.wordRule(manifest)` / `SEARCH_SHARDS.words(folded,
+manifest)` in the search-shards block, used by `getPrefixes` in
+`300-search.js` and by `prefixesFor`/`searchLeavesFor` in `places.html`):
+rule 2 splits on `/[^\p{L}\p{M}\p{N}]+/u`, strips leading `\p{M}`, and keeps
+words of ≥ 2 **code points** (Python's `len`); anything but `word_rule === 2`
+is rule 1, the old split byte for byte (`/[^\p{L}\p{N}]+/u`, ≥ 2 UTF-16
+units). `[\p{L}\p{M}\p{N}]` is the same set as Python's isalnum-or-mark minus
+`_` on every code point assigned in both engines (Python's `\w` is exactly
+`isalnum` + `_`; `ª`, superscripts and other-script digits agree;
+`tests/search_word_rule_js.test.mjs` checks all 0x110000).
+Matching and scoring are unchanged: they compare folded substrings and
+whitespace-separated query words, not index words.
+
+Measured on southeast-asia 2026-09-28 (23,113,590 records), rebuilt with
+`--rebuild-search` (1 h 24 min, peak RSS 13.9 GB, during the pack): search
+leaves 113,576 → 108,781 and 11.59 → 10.94 GB uncompressed — the non-ASCII
+leaves 3.49 → 2.85 GB, the fragments' duplicates gone; ASCII leaves 8.100 →
+8.099 GB. Headless Chromium on kiwix-serve, the new viewer on both (patched
+over the old ZIM's), one query from an empty cache — leaves read / JSON
+bytes, top 15 results identical in every row:
+
+| query | rule 1 ZIM | rule 2 ZIM |
+|---|---|---|
+| พัทยา | 70 / 7.13 MB | 3 / 2.42 MB |
+| เชียงใหม่ | 40 / 8.43 MB | 3 / 2.87 MB |
+| วัดพระแก้ว | 6 / 2.71 MB | 3 / 0.92 MB |
+| กรุงเทพ (no class-0 mark) | 3 / 1.08 MB | 3 / 0.92 MB |
+| ภูเก็ต | 1 / 4.39 MB | 1 / 2.98 MB |
+| ရန်ကုန် / ភ្នំពេញ / ວຽງຈັນ | 1 / 0.76, 0.48, 0.47 MB | 1 / 0.84, 0.35, 0.27 MB |
+| Bangkok, Orchard Road (controls) | 3 / 6.01 MB, 34 / 48.2 MB | the same |
+
+Typed one character at a time, the whole word: พัทยา 115 leaves / 8.0 MB →
+3 / 2.4 MB; เชียงใหม่ 100 / 15.2 MB → 38 / 4.0 MB (the 38 are the two-character
+step, which reads its whole prefix under either rule).
+
+Compatibility:
+
+* **Old ZIM + new viewer**: no `word_rule` → rule 1 → the viewer asks for the
+  fragments the old writer indexed, exactly as before. Nothing to do.
+* **New ZIM + old viewer**: an old viewer always splits with rule 1, so on a
+  rule-2 ZIM a query such as พัทยา also asks for the fragment keys (`ue17`
+  for "ทยา"), which a rule-2 writer no longer fills with that name. It still
+  finds it: the viewer always adds the whole query as a word too, and for a
+  query that starts at a word of the name, that is the rule-2 word (or its
+  path runs past the planned depth) — measured, the old viewer on the
+  rebuilt southeast-asia: พัทยา 4 leaves with the same top results,
+  เชียงใหม่ 39 leaves / 9.0 MB (as slow as before, not wrong). The fragment
+  keys are wasted reads, not the only route. Every viewer copy in this repo
+  (`resources/viewer/index.html`, `places.html`, and the site-served PWA
+  copies in `web/drive/viewer/`) is updated in the same change, and a
+  retrofit swaps the new viewer into the ZIM it rewrites. Readers outside
+  the repo — mcpzim, the Swift `Geocoder.normalizePrefix` — must read
+  `word_rule` and split the same way to get the benefit.
+* **Which ZIMs benefit**: only regions with names in scripts that have
+  class-0 marks — Thai, Lao, Khmer, Myanmar (southeast-asia), Devanagari,
+  Bengali, Tamil, Telugu, Kannada, Malayalam, Gujarati, Gurmukhi, Odia,
+  Sinhala (indian-subcontinent, himalayas), Tibetan (china, himalayas),
+  Javanese and Balinese (southeast-asia) — and
+  small pockets elsewhere (switzerland holds a few Thai/Tamil names). They
+  need a rebuild, or `cloud/swap_viewer_rust.py --rebuild-search` (below). A
+  Latin/CJK region gains nothing and needs neither.
+
 ## Validation
 
 `cloud/validate_zim.py`:
@@ -194,10 +301,23 @@ JSONL line by line into per-leaf temp files instead, as the retrofit does.
 `cloud/swap_viewer_rust.py --reshard-search`, alongside `--reshard-chips`, so
 each region is rewritten once. Per hot prefix: stream its existing leaves,
 append each record to a temp JSONL per target leaf (LRU over open fds), emit,
-delete. `rec["n"]` is the string the writer consumed and `_norm`/`_word_re`
+delete. `rec["n"]` is the string the writer consumed and `norm`/`words`
 are pure, so the word set reconstructs exactly — but only words whose
-`_prefix_key` equals the prefix being re-split may be used, or records migrate
+`prefix_key` equals the prefix being re-split may be used, or records migrate
 between prefixes. Flatten the US/EU `sub_chunks` trees while re-splitting.
+It keeps the source's prefixes, so it plans paths with the **source's** word
+rule (`word_rule_of(manifest)`): planning a rule-1 ZIM's prefixes with rule 2
+would leave records that only a rule-1 fragment put in a prefix with no word
+there.
+
+`cloud/swap_viewer_rust.py --rebuild-search` changes the word rule: it
+recovers every record once per feature (from its **home** prefix — the key of
+its name's first two characters, which every writer used whatever the rule —
+taking, per record, the most copies any one home leaf holds), re-keys it with
+`prefixes_for` under the current rule, and runs the build's own emit pass
+(`_search_emit_chunks`, hot prefixes split at 10 MB). Every other source
+manifest key (`addresses_stripped`, …) is kept; `total` is the recovered
+record count.
 
 Budget the largest prefix (`av`, `de`): ~4-6 GB of temp space; re-serialising
 ~41 k hot leaves roughly doubles the chip-retrofit wall time.
