@@ -21,6 +21,7 @@
 //
 // Home returns to the opening view map-config.json ships (centre + zoom;
 // see docs/todo-opening-view.md for why that is not a fit to the bounds).
+// The light/dark switch (135) sits in Home's control group, below it.
 // tests/viewer_ui_js.test.mjs runs this block against stubbed globals.
 // BEGIN view-home-about
 
@@ -332,7 +333,7 @@ function initHomeButton(map, config) {
   var ctrl = {
     onAdd: function() {
       var div = document.createElement('div');
-      div.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+      div.className = 'maplibregl-ctrl maplibregl-ctrl-group sz-home-group';
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'sz-home-btn';
@@ -346,6 +347,9 @@ function initHomeButton(map, config) {
         map.easeTo({ center: config.center, zoom: config.zoom, bearing: 0, pitch: 0, duration: 800 });
       });
       div.appendChild(btn);
+      // The light/dark switch shares this group (135): one more square,
+      // no extra group margin in the top-right column.
+      if (typeof szThemeButton === 'function') div.appendChild(szThemeButton());
       return div;
     },
     onRemove: function() {}
