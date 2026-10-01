@@ -3,6 +3,7 @@ chunking (moved verbatim from create_osm_zim.py, which re-exports these
 names). The readers/writers of the formats live alongside in this package."""
 import os
 import subprocess
+import time
 
 from streetzim import area
 # The builder's flushing, phase-timing print (see streetzim/common.py).
@@ -588,9 +589,20 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
     # Unique per run: a fixed name let a second build on the same host
     # delete/rewrite the first build's 16-60 GB index mid-pass.
     import tempfile as _tempfile
-    # Another active continent build can use its index for much longer than
-    # six hours. Age alone does not establish that a scratch file is stale;
-    # each run must only remove the unique file that it created.
+    # Reclaim scratch files an OOM-killed earlier run left behind (they
+    # are 16-60 GB each and no longer share a fixed name). A file this old
+    # may still be in use by a long continent build, but that is harmless:
+    # libosmium opened it when the pass started, and on Linux/macOS an
+    # unlinked file stays readable and writable through open descriptors
+    # and mappings; its space is freed when that build closes it.
+    import glob as _glob
+    for _stale in _glob.glob(os.path.join(NODE_LOC_DIR, "streetzim_node_loc_*.bin")):
+        try:
+            if time.time() - os.path.getmtime(_stale) > 6 * 3600:
+                os.remove(_stale)
+                print(f"    removed stale node-location scratch {_stale}")
+        except OSError:
+            pass
     _loc_fd, node_loc_path = _tempfile.mkstemp(
         dir=NODE_LOC_DIR, prefix="streetzim_node_loc_", suffix=".bin")
     os.close(_loc_fd)

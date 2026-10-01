@@ -1048,6 +1048,88 @@ def _error(msg: object) -> int:
     return 2
 
 
+# What a build killed before its cleanup ran (OOM killer, SIGKILL) leaves
+# behind: its staging archive next to the output (and libzim's <staging>.tmp)
+# and its workspace in --tmp. Their names carry the owner's PID, and later
+# builds remove those whose owner is gone and that nothing has touched for
+# STALE_AFTER. The age also covers folders shared between machines or PID
+# namespaces, where a live owner's PID can look unused. Leftovers kept on
+# purpose (--debug, --keep-temp, an archive that could not be published)
+# have a <name>.keep marker and are never removed.
+STALE_AFTER = 6 * 3600
+STAGING_NAME = re.compile(r"^\..+\.zim\.(\d+)\.[a-z0-9_]{8}\.building(?:\.tmp)?$")
+WORKSPACE_NAME = re.compile(r"^streetzim-build-(\d+)-[a-z0-9_]{8}$")
+KEEP_SUFFIX = ".keep"
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0 or pid == os.getpid():
+        return True                     # (kill(0) would signal our process group)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:                     # EPERM: it exists, owned by another user
+        return True
+    return True
+
+
+def _newest_mtime(path: Path) -> float:
+    """The latest modification time of `path` and, for a folder, of
+    everything in it (symbolic links are not followed)."""
+    newest = path.lstat().st_mtime
+    if path.is_dir() and not path.is_symlink():
+        for root, dirs, files in os.walk(path):
+            for name in dirs + files:
+                with contextlib.suppress(OSError):
+                    newest = max(newest, os.lstat(os.path.join(root, name)).st_mtime)
+    return newest
+
+
+def keep_marker(path: Path) -> Path:
+    """The marker that protects a staging archive (and its .tmp) or a
+    workspace from sweep_stale()."""
+    name = path.name.removesuffix(".tmp") if path.name.endswith(".building.tmp") else path.name
+    return path.with_name(name + KEEP_SUFFIX)
+
+
+def mark_kept(path: Path) -> None:
+    with contextlib.suppress(OSError):
+        keep_marker(path).touch()
+
+
+def sweep_stale(folder: Path, pattern: re.Pattern[str], *, folders: bool,
+                now: float | None = None) -> list[Path]:
+    """Remove the entries of `folder` named by `pattern` (folders when
+    `folders`, else files) whose owning process is gone and that are older
+    than STALE_AFTER; returns what was removed."""
+    import time
+    now = time.time() if now is None else now
+    removed: list[Path] = []
+    try:
+        entries = sorted(folder.iterdir())
+    except OSError:
+        return removed
+    for entry in entries:
+        m = pattern.match(entry.name)
+        if not m or entry.is_symlink() or entry.is_dir() != folders:
+            continue
+        try:
+            if (_pid_alive(int(m.group(1))) or keep_marker(entry).exists()
+                    or now - _newest_mtime(entry) < STALE_AFTER):
+                continue
+            if folders:
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
+        except OSError:
+            continue
+        print(f"streetzim: removed {entry}, left by an interrupted build "
+              f"(process {m.group(1)})", flush=True)
+        removed.append(entry)
+    return removed
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     missing = missing_runtime_files()
@@ -1071,14 +1153,17 @@ def main(argv: list[str] | None = None) -> int:
 
     # The workspace belongs to this invocation, including its illustration
     # and cut MBTiles. Other builds may share --tmp and --dl safely.
-    work = Path(tempfile.mkdtemp(prefix="streetzim-build-", dir=tmp))
+    sweep_stale(tmp, WORKSPACE_NAME, folders=True)
+    work = Path(tempfile.mkdtemp(prefix=f"streetzim-build-{os.getpid()}-", dir=tmp))
     previous = _exit_on_sigterm()
     try:
         return _run_build(args, dl, out_dir, work)
     finally:
         if previous is not None:
             signal.signal(signal.SIGTERM, previous)
-        if not (args.debug or args.keep_temp):
+        if args.debug or args.keep_temp:
+            mark_kept(work)
+        else:
             shutil.rmtree(work, ignore_errors=True)
 
 
@@ -1102,13 +1187,16 @@ def _run_build(args: argparse.Namespace, dl: Path, out_dir: Path, work: Path) ->
     except (ValueError, OSError) as e:
         return _error(e)
     out_dir.mkdir(parents=True, exist_ok=True)
+    sweep_stale(out_dir, STAGING_NAME, folders=False)
     if final.exists() and not args.overwrite:
         return _error(f"{final} exists (use --overwrite)")
     try:
         # Staging lives on the output filesystem for atomic publication, and
         # its unique name prevents concurrent builds from deleting each
-        # other's archive (previously both used <final>.tmp).
-        with tempfile.NamedTemporaryFile(prefix=f".{final.name}.", suffix=".building",
+        # other's archive (previously both used <final>.tmp). The PID lets
+        # sweep_stale() tell when an interrupted build's staging is orphaned.
+        with tempfile.NamedTemporaryFile(prefix=f".{final.name}.{os.getpid()}.",
+                                         suffix=".building",
                                          dir=out_dir) as probe:
             building = Path(probe.name)
         from streetzim import scraperlib
@@ -1116,15 +1204,27 @@ def _run_build(args: argparse.Namespace, dl: Path, out_dir: Path, work: Path) ->
             scraperlib.check_output(out_dir, building.name)
     except OSError as e:
         return _error(f"cannot write to {out_dir}: {e}")
+    keep = False
     try:
         if args.stats_filename:
             from streetzim.progress import StatsFile
             StatsFile(Path(args.stats_filename).resolve()).write(0, 1)
         return _build(args, dl, illustration, work, building, final)
+    except _Unpublished as e:
+        # The archive is complete: never delete it because the last step
+        # failed. It is marked so that sweep_stale() leaves it too.
+        keep = True
+        mark_kept(building)
+        return _error(f"could not move the finished archive to {final} ({e.cause}); "
+                      f"it is at {building}")
     finally:
-        if not (args.debug or args.keep_temp):
-            for staged in (building, building.with_name(building.name + ".tmp")):
-                staged.unlink(missing_ok=True)
+        staged = (building, building.with_name(building.name + ".tmp"))
+        if args.debug or args.keep_temp:
+            if any(p.exists() for p in staged):
+                mark_kept(building)
+        elif not keep:
+            for p in staged:
+                p.unlink(missing_ok=True)
 
 
 def _exit_on_sigterm() -> Any:
@@ -1165,19 +1265,47 @@ def _build(args: argparse.Namespace, dl: Path, illustration: Path | None, work: 
     finally:
         os.chdir(cwd)
     print(f"streetzim: {source_report.summary()}")
-    if args.overwrite:
-        os.replace(building, final)
-    else:
-        # The destination may have appeared while we were building. A hard
-        # link publishes a completed same-filesystem file atomically and
-        # refuses to replace another invocation's successful output.
-        try:
-            os.link(building, final)
-        except FileExistsError:
-            return _error(f"{final} exists (use --overwrite)")
-        building.unlink()
+    try:
+        publish(building, final, overwrite=args.overwrite)
+    except FileExistsError:
+        return _error(f"{final} exists (use --overwrite)")
+    except OSError as e:
+        raise _Unpublished(e) from e
     print(f"streetzim: wrote {final}")
     return 0
+
+
+class _Unpublished(Exception):
+    """The archive was built but could not be moved into place."""
+
+    def __init__(self, cause: OSError) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+
+
+def publish(building: Path, final: Path, *, overwrite: bool) -> None:
+    """Move the finished archive `building` to `final` (same folder).
+    Without `overwrite`, raises FileExistsError when `final` appeared while
+    building; any other OSError leaves `building` where it is."""
+    if overwrite:
+        os.replace(building, final)
+        return
+    # A hard link publishes a completed same-filesystem file atomically and
+    # refuses to replace another invocation's successful output.
+    try:
+        os.link(building, final)
+    except FileExistsError:
+        raise
+    except OSError:
+        # Some filesystems have no hard links (EPERM on FAT/exFAT and some
+        # network or FUSE mounts, ENOTSUP, EMLINK). A rename cannot refuse
+        # an existing destination, so check for one just before.
+        if os.path.lexists(final):
+            raise FileExistsError(f"{final} exists") from None
+        os.replace(building, final)
+        return
+    with contextlib.suppress(OSError):  # published: the extra name is harmless
+        building.unlink()
 
 
 if __name__ == "__main__":
