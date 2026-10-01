@@ -3,8 +3,9 @@
 Reviewed the build pipeline after initially pulling `main` from `557f971` to
 `d5c32b6045604d19584f9d9280cedc33d7c8d01a`, then pulling/rebasing onto
 `3679aa1844b5494360c2e964e654550e629c4f83`, and again onto
-`4e115c05621cdc57650c779fd92c59c409db83dd`. The changes below are local
-and preserve the checkout's pre-existing deletions and untracked work.
+`4e115c05621cdc57650c779fd92c59c409db83dd`, and finally onto
+`359e723e879cc8b0bc2e81c9e953d19fde9e3ccf`. The review commits preserve
+the checkout's pre-existing deletions and untracked work.
 Binary and JSON format versions are unchanged.
 
 ## Fixes made
@@ -434,3 +435,51 @@ The 8 GiB archive is
 (SHA-256 `1ac7c5b853ac02f2e4f6536b750af6b18043d05406a0ee40bf1715c83ee7cb85`).
 Both output directories contain `memory-report.json`, `memory.png`, `memory.svg`,
 `validation.json` and the per-check logs. The supervisor state is now `completed`.
+
+## Final integration with current main
+
+The final code revision, `1e125ca745382d6bf2ab55bf10d0dc7765322731`, includes
+upstream administrative areas, Wikipedia redirects, search folding and ZIM
+derivation changes. The Python manifest packer now supports upstream
+`cluster_break` records, flushing every grouping bucket and applying the next
+cluster target without changing the original queue budget. Invalid targets and
+late configuration fail before publication; 26 new boundary cases cover the
+three codecs and four grouping strategies. Rust retains the same upstream
+feature. Three independent adversarial reviewers accepted the integration and
+the subsequent test corrections.
+
+A frozen Git archive of this revision passed 1,777 core tests in the Linux
+Python 3.14/libzim 3.13 QA image, with 78 skips. Repeating the 33 tests skipped
+for missing glyph assets or osmium in the full runtime image passed all 33.
+The previously collection-skipped PBF pre-cut module also passed its three
+tests there, bringing distinct passing core cases to 1,813 with 44 still deferred. Those
+remaining cases require Node in that image, country or other external fixtures,
+slow corpora, or optional Zimfarm tooling. All nine viewer JavaScript suites,
+viewer lint/assembly checks, 90 operations tests (one skip), Ruff, Unicode
+generation and the existing Pyright baseline gate passed separately. The core
+process exited successfully despite interpreter-shutdown messages in
+stderr; it reported no test failures or errors.
+
+The completed Netherlands archive passed 13 final search integrity checks,
+with two expected skips for missing diacritic/ligature fixtures. Tests now
+paginate native search results and follow complete redirect chains when
+checking for viewer pages. A native producer regression verifies two places
+three metres apart remain distinct and accurately located; deliberately
+rounding coordinates to four decimals fails this regression. Country-wide
+co-location counts are not a valid precision test because legitimate places
+can share coordinates. Child RSS tests also run in controlled fresh parents
+and account for inherited pre-exec RSS on Linux.
+
+The wheel built from the frozen revision passed installation outside the
+checkout, packaged-resource checks, both CLI entrypoints, default Python
+packing with a cluster boundary, checksum verification and native main-page
+readback. A separate multi-zoom boundary archive passed official openZIM
+`zimcheck --all`. The host's older libzim and broken Homebrew native-tool
+dependencies are not the validation environment for these Linux results.
+The full Netherlands builds above predate this final upstream integration;
+their validation does not represent a new full-country build of this revision.
+
+Frozen sources, image identities, passing and initial failed logs, XML results,
+the wheel and the small boundary archives are under
+`out/merge-main-20260930/`. No user-owned deletions, local build scripts,
+environments, caches or country artifacts are included in the review commits.
