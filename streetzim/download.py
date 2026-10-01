@@ -133,11 +133,18 @@ def _stream(url: str, headers: dict[str, str]
         yield int(r.status), dict(r.headers.items()), iter(lambda: r.read(BLOCK), b"")
 
 
+class IncompleteBody(OSError):
+    """A GET whose body ended before its Content-Length: what arrived is
+    kept in the .part, for the caller to resume or restart."""
+
+
 def _download(url: str, part: Path, offset: int, total: int, validator: str,
               user_agent: str, check_head: Callable[[bytes], None] | None) -> bool:
     """Write `url` into `part` from byte `offset` (a Range request with
     If-Range when offset > 0). False when a resume was answered with a
-    range that does not start at the offset (nothing written)."""
+    range that does not start at the offset (nothing written). Raises
+    IncompleteBody when the body is shorter or longer than its
+    Content-Length."""
     headers = {"User-Agent": user_agent, "Accept-Encoding": "identity"}
     if offset:
         headers.update({"Range": f"bytes={offset}-", "If-Range": validator})
@@ -158,7 +165,7 @@ def _download(url: str, part: Path, offset: int, total: int, validator: str,
                 sink.write(block)
             response_length = _header(h, "Content-Length")
             if response_length and sink.done - offset != int(response_length):
-                raise OSError(f"{url}: GET body has {sink.done - offset:,} bytes, "
+                raise IncompleteBody(f"{url}: GET body has {sink.done - offset:,} bytes, "
                               f"expected {response_length}")
     return True
 
@@ -294,10 +301,18 @@ def _fetch_locked(url: str, dest: Path, user_agent: str,
     stamp = stamp_of(h)
     total = int(stamp["Content-Length"] or 0) if stamp is not None else 0
     cached_size = dest.stat().st_size if dest.exists() else 0
-    if cached_size > 0 and (not total or cached_size == total):
-        if check_head is not None:
+    if cached_size > 0 and (not total or cached_size == total) and check_head is not None:
+        try:
             with open(dest, "rb") as f:
                 check_head(f.read(64))
+        except ValueError as e:
+            # A bad file in the cache would otherwise fail every later
+            # build: drop it (and its stamp) and download it again, once.
+            print(f"  {dest} is not usable ({e}): downloading it again", flush=True)
+            dest.unlink(missing_ok=True)
+            meta.unlink(missing_ok=True)
+            cached_size = 0
+    if cached_size > 0 and (not total or cached_size == total):
         if stamp is None and (trust_preseeded or read_download_metadata(meta) is not None):
             print(f"  Reusing {dest} (could not check {url} for updates)")
             return dest
@@ -317,8 +332,8 @@ def _fetch_locked(url: str, dest: Path, user_agent: str,
         raise OSError(f"cannot reach {url}")
     validator = stamp["ETag"] or stamp["Last-Modified"]
     offset = part.stat().st_size if part.exists() else 0
-    resumable = (_header(h, "Accept-Ranges").lower() == "bytes" and bool(validator)
-                 and read_download_metadata(part_meta) == stamp and 0 < offset <= total)
+    ranges = _header(h, "Accept-Ranges").lower() == "bytes" and bool(validator)
+    resumable = ranges and read_download_metadata(part_meta) == stamp and 0 < offset <= total
     if not resumable:
         offset = 0
         part.unlink(missing_ok=True)
@@ -343,6 +358,15 @@ def _fetch_locked(url: str, dest: Path, user_agent: str,
             part.unlink(missing_ok=True)
             part_meta.unlink(missing_ok=True)
             raise
+        except IncompleteBody as e:
+            if attempt == 2:
+                raise
+            # The body ended early: resume from what arrived when the server
+            # allows it (the .part keeps its stamp), else start over.
+            size = part.stat().st_size if part.exists() else 0
+            offset = size if ranges and 0 < size < total else 0
+            print(f"    {e}: " + ("resuming" if offset else "starting over"), flush=True)
+            continue
         size = part.stat().st_size if part.exists() else 0
         if wrote and (not total or size == total):
             break
