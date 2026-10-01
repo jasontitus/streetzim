@@ -121,7 +121,7 @@ def test_monitor_failure_reaps_launched_child(tmp_path, monkeypatch, phase):
                 process.wait()
 
 
-def _controlled_creator(tmp_path, monkeypatch, program):
+def _controlled_creator(tmp_path, monkeypatch, program, *, force_fork=False):
     script = tmp_path / "child.py"
     script.write_text(program)
     monkeypatch.setattr(
@@ -134,6 +134,8 @@ def _controlled_creator(tmp_path, monkeypatch, program):
     popen = mw.subprocess.Popen
 
     def capture(*args, **kwargs):
+        if force_fork:
+            kwargs["preexec_fn"] = lambda: None
         process = popen(*args, **kwargs)
         processes.append(process)
         return process
@@ -160,14 +162,36 @@ def _assert_child_reaped(process):
         os.waitpid(process.pid, os.WNOHANG)
 
 
-@pytest.mark.skipif(not hasattr(os, "wait4"), reason="POSIX wait4 probe")
-def test_wait4_reports_exact_short_child_peak_without_previous_child_pollution(
-    tmp_path, monkeypatch
-):
-    subprocess.run([sys.executable, "-c", "data=b'x'*(256<<20)"], check=True)
+def _wait4_memory_experiment(tmp_path, parent_mib):
+    # Run only in a fresh parent: Linux wait4 can include the RSS inherited
+    # before exec, so a full pytest process is not a controlled baseline.
+    heap = bytearray(parent_mib << 20)
+    for page in range(0, len(heap), 4096):
+        heap[page] = 1
+    force_fork = bool(parent_mib and sys.platform.startswith("linux"))
+    # A regular fork reproduces a late-suite parent's inherited RSS even on
+    # Python versions that otherwise select posix_spawn/vfork. This isolated
+    # parent has no application threads when it launches either child.
+    prior = subprocess.Popen(
+        [sys.executable, "-c", "data=bytearray(256<<20)"],
+        **({"preexec_fn": lambda: None} if force_fork else {}),
+    )
+    _, status, previous_usage = os.wait4(prior.pid, 0)
+    prior.returncode = os.waitstatus_to_exitcode(status)
+    assert prior.returncode == 0
+    _assert_child_reaped(prior)
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        return _assert_wait4_memory_experiment(
+            tmp_path, monkeypatch, previous_usage, force_fork
+        )
+
+
+def _assert_wait4_memory_experiment(tmp_path, monkeypatch, previous_usage, force_fork):
     reference = tmp_path / "reference.json"
     program = f"""import json,resource,sys\nfrom pathlib import Path\ndata=bytearray(64<<20)\nfor page in range(0,len(data),4096):data[page]=1\ndel data\nPath({str(reference)!r}).write_text(json.dumps(dict(maxrss=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)))\nPath(sys.argv[2]).write_bytes(b'completed fixture')\n"""
-    c, output, processes = _controlled_creator(tmp_path, monkeypatch, program)
+    c, output, processes = _controlled_creator(
+        tmp_path, monkeypatch, program, force_fork=force_fork
+    )
 
     class Timer:
         def __init__(self):
@@ -203,13 +227,41 @@ def test_wait4_reports_exact_short_child_peak_without_previous_child_pollution(
     factor = 1 if sys.platform == "darwin" else 1024
     self_peak = raw * factor
     expected = usage.ru_maxrss * factor
-    assert 64 << 20 <= self_peak <= expected < 192 << 20
-    # The reference is written before exit; final file I/O can add a few
-    # pages. Compare the reported metric exactly with the lifetime wait4
-    # peak, while retaining an independent child-reported sanity check.
-    assert expected - self_peak <= 1 << 20
+    previous_peak = previous_usage.ru_maxrss * factor
+    assert previous_peak >= 256 << 20
+    assert 64 << 20 <= self_peak <= expected < previous_peak
+    # Final I/O can increase the self-reference; regular Linux forks can
+    # also retain a larger pre-exec RSS. The exact oracle is this child's
+    # wait4 result, which must remain below the measured previous child.
+    if force_fork:
+        assert expected >= 192 << 20  # Reproduce the late-suite ceiling failure.
+    else:
+        assert expected - self_peak <= 1 << 20
     (metric,) = [row for row in timer.metrics if row[0] == "zim-pack: process peak RSS"]
     assert metric == ("zim-pack: process peak RSS", f"{expected / 1e6:.1f}", "MB")
+    return {"previous_peak": previous_peak, "self_peak": self_peak,
+            "wait4_peak": expected, "force_fork": force_fork}
+
+
+@pytest.mark.parametrize("parent_mib", [0, 192], ids=["fresh-parent", "fat-parent"])
+@pytest.mark.skipif(not hasattr(os, "wait4"), reason="POSIX wait4 probe")
+def test_wait4_reports_exact_short_child_peak_without_previous_child_pollution(
+    tmp_path, parent_mib
+):
+    repo = Path(mw.__file__).resolve().parent.parent
+    program = (
+        "import json,sys\nfrom pathlib import Path\n"
+        "from tests.test_manifest_writer_lifecycle import _wait4_memory_experiment\n"
+        "print(json.dumps(_wait4_memory_experiment(Path(sys.argv[1]),int(sys.argv[2]))))\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", program, str(tmp_path), str(parent_mib)],
+        cwd=repo, capture_output=True, text=True, timeout=20,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    report = json.loads(completed.stdout.splitlines()[-1])
+    assert report["wait4_peak"] < report["previous_peak"]
+    assert report["force_fork"] == bool(parent_mib and sys.platform.startswith("linux"))
 
 
 @pytest.mark.parametrize("exit_code", [7, -9])
