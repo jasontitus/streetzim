@@ -37,7 +37,9 @@ on rust-built sources).
 
 Usage:
     python3 cloud/swap_viewer_rust.py SRC.zim DST.zim [--reshard-chips]
-        [--reshard-search | --rebuild-search]
+        [--reshard-search | --rebuild-search [--allow-total-mismatch]]
+        [--tmp DIR]   (required, off the root fs, for the search options;
+                       default $TMPDIR)
 """
 from __future__ import annotations
 
@@ -154,52 +156,81 @@ def _is_chip_entry(path: str) -> bool:
 from cloud.viewer_slots import pad_to_slot as _pad_to_slot  # noqa: E402
 
 
+def _homes(name: str) -> tuple[str, str]:
+    """The prefixes a record's name was ALWAYS written under: its home.
+
+    ``current``: ``prefix_key(norm(name)[:2])``, what every writer since
+    6223071 (2026-09-03) keys the whole name by. ``legacy``: what the writers
+    before it computed, ``_prefix_key(name[:2])`` on the RAW name -- its body
+    is today's ``prefix_key`` (fold, then key), applied to the first two raw
+    characters. They differ when the raw name's 2nd character is a mark the
+    fold drops: decomposed Vietnamese "Ủy ban" ("u" + U+031B, raw key "u_",
+    folded "uy"), "Écouen" in NFD, a name opening with a Thai tone mark.
+    """
+    from cloud.search_shards import norm, prefix_key
+    nm = name or ""
+    return prefix_key(norm(nm)[:2]), prefix_key(nm[:2])
+
+
 def _source_records(src_bytes, manifest: dict, spool) -> int:
     """Write every distinct source search record once per feature to
     ``spool`` (JSON lines); returns the count.
 
     The writer puts a record in every prefix one of its names reaches, and in
-    every leaf of a character-split prefix one of its paths reaches. Its HOME
-    prefix -- the key of its name's first two characters -- is the one every
-    writer always used, whatever the word rule, so a record is taken only
-    from its home prefix's leaves. Inside one leaf a record appears once per
-    feature (two identical features: twice), so its feature count is the
-    most copies any one home leaf holds.
+    every leaf of a character-split prefix one of its paths reaches. A record
+    is taken only from its HOME prefix (``_homes``: the key of its whole
+    name's first two characters, by the current rule or by the one writers
+    used before 2026-09-03 -- a ZIM holds the record under whichever its
+    writer computed). Inside one leaf a record appears once per feature (two
+    identical features: twice), so its feature count is the most copies any
+    one home leaf holds; a record whose two homes differ is counted across
+    both through one global table, so it is never taken twice. A leaf the
+    manifest declares but the source cannot give is an error: skipping it
+    would drop its records silently.
     """
-    from cloud.search_shards import norm, prefix_key
     groups: dict[str, list[str]] = {}
     for name in manifest["chunks"]:
         groups.setdefault(_base_prefix(name), []).append(name)
     n = 0
+    # Records whose current and legacy homes differ (rare: 156 of 26.7 M on
+    # southeast-asia 2026-05-09), across every prefix.
+    best_two: dict[bytes, int] = {}
     for prefix in sorted(groups):
         # Keyed by a digest: a hot prefix holds millions of records.
         best: dict[bytes, int] = {}
         for leaf in sorted(groups[prefix]):
             try:
                 blob = src_bytes(f"search-data/{leaf}.json")
-            except Exception:
-                continue
+            except Exception as exc:
+                raise SystemExit(f"--rebuild-search: declared leaf {leaf!r} is "
+                                 f"unreadable ({exc}); its records would be lost")
             here: dict[str, int] = {}
+            two: set[str] = set()
             for rec in json.loads(blob):
-                if prefix_key(norm(rec.get("n") or "")[:2]) != prefix:
+                cur, legacy = _homes(rec.get("n") or "")
+                if prefix != cur and prefix != legacy:
                     continue
                 # Serialised as the writer's pass 1 does (ASCII escapes), so
                 # the planner sizes leaves exactly as a fresh build would.
                 line = json.dumps(rec, separators=(",", ":"))
                 here[line] = here.get(line, 0) + 1
+                if cur != legacy:
+                    two.add(line)
             for line, k in here.items():
                 d = hashlib.blake2b(line.encode("utf-8"), digest_size=16).digest()
-                m = best.get(d, 0)
+                table = best_two if line in two else best
+                m = table.get(d, 0)
                 if k > m:
                     spool.write((line + "\n") * (k - m))
                     n += k - m
-                    best[d] = k
+                    table[d] = k
             del here
         del best
     return n
 
 
-def _rebuild_search(c, src_bytes, manifest: dict, work: Path) -> int:
+def _rebuild_search(c, src_bytes, manifest: dict, work: Path,
+                    allow_total_mismatch: bool = False) -> int:
     """Re-derive search-data from the source's records with the current
     writer: keys and leaf paths under ``WORD_RULE``, then the same emit pass
     a build runs (zim_writer._search_emit_chunks, hot prefixes character-
@@ -212,6 +243,14 @@ def _rebuild_search(c, src_bytes, manifest: dict, work: Path) -> int:
     want = manifest.get("total")
     print(f"  search: {total:,} source record(s) recovered "
           f"(source manifest total {want})", flush=True)
+    if total != want and not allow_total_mismatch:
+        # A record not recovered is a place nobody can find again. (A ZIM
+        # whose addresses were stripped by derive_zim, or one with records
+        # under a home no known writer used, needs the override -- and a
+        # look at why first.)
+        raise SystemExit(f"--rebuild-search: recovered {total:,} record(s) but the "
+                         f"source manifest says {want}; refusing to drop or invent "
+                         f"records (--allow-total-mismatch overrides)")
     chunk_tmp = work / "search-rebuild"
     chunk_tmp.mkdir()
     counts: dict[str, int] = {}
@@ -253,10 +292,38 @@ def _rebuild_search(c, src_bytes, manifest: dict, work: Path) -> int:
     return total
 
 
+def _on_root_fs(path: str) -> bool:
+    return os.stat(path).st_dev == os.stat("/").st_dev
+
+
+def _spill_root(tmp_dir: str | None, search: bool) -> str | None:
+    """Where the spill directory goes: ``--tmp``, else $TMPDIR. A search
+    rewrite spools the whole index there (several GB on a continent), so it
+    must be named explicitly and must not be on the root filesystem -- the
+    build host's / is small (and /tmp is on it)."""
+    root = tmp_dir or os.environ.get("TMPDIR")
+    if not search:
+        return root
+    if not root:
+        raise SystemExit("--reshard-search/--rebuild-search spool the search index "
+                         "(GBs): pass --tmp DIR or set TMPDIR to a directory under "
+                         "/storage, never the default /tmp")
+    if not os.path.isdir(root):
+        raise SystemExit(f"--tmp/TMPDIR {root!r} is not a directory")
+    if _on_root_fs(root):
+        raise SystemExit(f"--tmp/TMPDIR {root!r} is on the root filesystem; point it "
+                         f"at /storage (the search spool is several GB)")
+    return root
+
+
 def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                      reshard_search: bool = False,
-                     rebuild_search: bool = False) -> int:
+                     rebuild_search: bool = False,
+                     tmp_dir: str | None = None,
+                     allow_total_mismatch: bool = False) -> int:
     from libzim.reader import Archive
+
+    spill_root = _spill_root(tmp_dir, reshard_search or rebuild_search)
 
     src = Archive(src_path)
     src_total = src.all_entry_count
@@ -379,7 +446,8 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
     dropped_search_files = 0
     replaced_paths: set[str] = set()
 
-    with tempfile.TemporaryDirectory(prefix="swap_viewer_rust_") as spill_dir:
+    with tempfile.TemporaryDirectory(prefix="swap_viewer_rust_",
+                                     dir=spill_root) as spill_dir:
         spill_dir_path = Path(spill_dir)
 
         def _stage_large(path: str, data: bytes) -> tuple[bytes | None, str | None]:
@@ -543,7 +611,8 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
 
             if rebuild_search:
                 n_out = _rebuild_search(c, _src_bytes, search_manifest,
-                                        spill_dir_path)
+                                        spill_dir_path,
+                                        allow_total_mismatch=allow_total_mismatch)
                 print(f"  search: dropped {dropped_search_files} old file(s), "
                       f"rebuilt {n_out} record(s)", flush=True)
 
@@ -848,11 +917,22 @@ def main() -> int:
                          "word_rule 2: Indic/Thai vowel signs continue a word), "
                          "re-bucketing every record and re-planning every hot "
                          "prefix.")
+    ap.add_argument("--tmp", metavar="DIR", default=None,
+                    help="Spill directory (default $TMPDIR). Required, and not on "
+                         "the root filesystem, with --reshard-search or "
+                         "--rebuild-search: the search spool is several GB.")
+    ap.add_argument("--allow-total-mismatch", action="store_true",
+                    help="--rebuild-search: proceed when the records recovered "
+                         "differ from the source manifest's total (e.g. a ZIM "
+                         "whose addresses derive_zim stripped). Otherwise that "
+                         "is an error.")
     args = ap.parse_args()
     return swap_viewer_rust(args.src, args.dst,
                             reshard_chips=args.reshard_chips,
                             reshard_search=args.reshard_search,
-                            rebuild_search=args.rebuild_search)
+                            rebuild_search=args.rebuild_search,
+                            tmp_dir=args.tmp,
+                            allow_total_mismatch=args.allow_total_mismatch)
 
 
 if __name__ == "__main__":

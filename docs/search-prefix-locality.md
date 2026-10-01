@@ -311,13 +311,32 @@ would leave records that only a rule-1 fragment put in a prefix with no word
 there.
 
 `cloud/swap_viewer_rust.py --rebuild-search` changes the word rule: it
-recovers every record once per feature (from its **home** prefix — the key of
-its name's first two characters, which every writer used whatever the rule —
-taking, per record, the most copies any one home leaf holds), re-keys it with
-`prefixes_for` under the current rule, and runs the build's own emit pass
-(`_search_emit_chunks`, hot prefixes split at 10 MB). Every other source
-manifest key (`addresses_stripped`, …) is kept; `total` is the recovered
-record count.
+recovers every record once per feature from its **home** prefix — the key of
+its whole name's first two characters — taking, per record, the most copies
+any one home leaf holds; it re-keys it with `prefixes_for` under the current
+rule and runs the build's own emit pass (`_search_emit_chunks`, hot prefixes
+split at 10 MB). Every other source manifest key (`addresses_stripped`, …)
+is kept.
+
+The home key has not always been computed the same way. Since `6223071`
+(2026-09-03) it is `prefix_key(norm(name)[:2])`; before, the writer took
+`_prefix_key(name[:2])` on the **raw** name (and split words on it). The two
+differ when the raw 2nd character is a mark the fold drops — decomposed
+Vietnamese "Ủy ban…" (`u_` raw, `uy` folded), NFD "Écouen" (`e_` / `ec`), a
+name opening with a Thai tone mark (`__` / `_p`). So a record is accepted in
+either home (`_homes`), and one whose two homes differ is counted through a
+single region-wide table so it is never taken twice. Taking only today's
+home lost 156 records of southeast-asia 2026-05-09 (26,732,128 of
+26,732,284). The rebuild now refuses when the recovered count differs from
+the source manifest's `total` (`--allow-total-mismatch` overrides, e.g. for
+a ZIM whose addresses `derive_zim --strip-addresses` removed), and when a
+leaf the manifest declares cannot be read.
+
+The spill directory holds the whole index while it is re-bucketed (several
+GB on a continent), so `--reshard-search` and `--rebuild-search` require
+`--tmp DIR` or `$TMPDIR`, and refuse a directory on the root filesystem;
+wrappers point it at `/storage` (`retrofit-chips-queue.sh` exports
+`TMPDIR=/storage/streetzim/tmp`). Nothing falls back to `/tmp`.
 
 Budget the largest prefix (`av`, `de`): ~4-6 GB of temp space; re-serialising
 ~41 k hot leaves roughly doubles the chip-retrofit wall time.
