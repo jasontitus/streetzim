@@ -455,10 +455,15 @@ Flag reference:
   cell payloads.
 - `--xapian builder` — produce Xapian fulltext + title indexes via
   the external `../xapianbuilder/` helper (parallel, seconds rather
-  than hours). Requires `--zim-builder=rust`. See
-  `docs/zim-builder-rust.md` § "Xapian on the rust path".
-- `--zim-builder rust` — emit via zimru / streetzim-pack. Required
-  for `--xapian=builder`. Per-cluster zstd `windowLog` is pinned to
+  than hours). Requires a manifest writer: `--zim-builder manifest`
+  (Python) or `--zim-builder rust`.
+- `--zim-builder rust` — emit via zimru / the Rust streetzim-pack. Today
+  this needs a built binary (`STREETZIM_PACK_BIN` or
+  `rust/streetzim-pack/target/{release,debug}/streetzim-pack`) and a zimru
+  revision that is not in the repository (`docs/zim-builder-rust.md`); without
+  the binary the build stops rather than switching packers. The production
+  wrapper (`build-region-fast.sh`) uses `--zim-builder manifest`, the Python
+  packer, unless run with `ZIM_BUILDER=rust`. Per-cluster zstd `windowLog` is pinned to
   `ceil(log2(cluster_size))` after zimru `64e76c7` — fzstd-friendly
   in browser. Don't ship continent-scale rust ZIMs against an older
   zimru checkout; see `docs/zim-packaging-gotchas.md` Gotcha #6.

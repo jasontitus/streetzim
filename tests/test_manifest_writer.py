@@ -71,7 +71,18 @@ def test_stages_are_unique_and_cleanup_after_success(tmp_path, staging):
     assert not second._stage_dir.exists()
 
 
+def test_failure_removes_stage_by_default(tmp_path, monkeypatch, staging):
+    monkeypatch.delenv("STREETZIM_KEEP_PACK_STAGE", raising=False)
+    monkeypatch.setattr(mw, "_STREAMING_THRESHOLD", 4)
+    creator = mw.ManifestCreator(str(tmp_path / "out.zim"))
+    with pytest.raises(ValueError, match="interrupted producer"), creator:
+        creator.add_item(item(b"large"))
+        raise ValueError("interrupted producer")
+    assert not creator._stage_dir.exists()
+
+
 def test_failure_preserves_manifest_and_large_body(tmp_path, monkeypatch, staging):
+    monkeypatch.setenv("STREETZIM_KEEP_PACK_STAGE", "1")
     monkeypatch.setattr(mw, "_STREAMING_THRESHOLD", 4)
     creator = mw.ManifestCreator(str(tmp_path / "out.zim"))
     with pytest.raises(ValueError, match="interrupted producer"), creator:
@@ -107,15 +118,22 @@ def test_only_requested_workers_are_passed(tmp_path, monkeypatch, workers):
     assert os.environ["RAYON_NUM_THREADS"] == "7"
 
 
-def test_packer_failure_does_not_remove_existing_output(tmp_path, monkeypatch):
+@pytest.mark.parametrize("keep", [False, True])
+def test_packer_failure_does_not_remove_existing_output(tmp_path, monkeypatch, keep):
     fake_packer(tmp_path, monkeypatch, exit_code=2)
+    if keep:
+        monkeypatch.setenv("STREETZIM_KEEP_PACK_STAGE", "1")
+    else:
+        monkeypatch.delenv("STREETZIM_KEEP_PACK_STAGE", raising=False)
     out = tmp_path / "out.zim"
     out.write_bytes(b"previous archive")
     creator = mw.ManifestCreator(str(out))
-    with pytest.raises(RuntimeError, match="exit 2"), creator:
+    message = "Manifest preserved at" if keep else "STREETZIM_KEEP_PACK_STAGE=1"
+    with pytest.raises(RuntimeError, match=f"exit 2.*{message}"), creator:
         creator.add_item(item(b"payload"))
     assert out.read_bytes() == b"previous archive"
-    assert creator._manifest_path.exists()
+    assert creator._manifest_path.exists() is keep
+    assert creator._stage_dir.exists() is keep
 
 
 def test_worker_count_must_be_positive(tmp_path, staging):
@@ -153,6 +171,46 @@ def test_explicit_executable_is_resolved_to_absolute_path(tmp_path, monkeypatch)
     monkeypatch.setenv("STREETZIM_PACK_BIN", "packer")
     assert mw.resolve_pack_binary() == str(path)
     assert mw._resolve_pack_binary() == str(path)
+
+
+def test_rust_builder_without_a_binary_fails_instead_of_running_python(
+        tmp_path, monkeypatch):
+    monkeypatch.delenv("STREETZIM_PACK_BIN", raising=False)
+    monkeypatch.setattr(mw, "_rust_build_candidates", lambda: [tmp_path / "absent"])
+    with pytest.raises(RuntimeError, match="--zim-builder rust needs a built Rust"):
+        mw.resolve_pack_command("rust")
+    # The Python packer remains the manifest backend.
+    assert mw.resolve_pack_command("manifest")[1:] == ["-m", "streetzim.pack"]
+
+
+def test_rust_builder_resolves_a_built_binary(tmp_path, monkeypatch):
+    built = tmp_path / "streetzim-pack"
+    built.write_text("#!/bin/sh\nexit 0\n")
+    built.chmod(0o755)
+    monkeypatch.delenv("STREETZIM_PACK_BIN", raising=False)
+    monkeypatch.setattr(mw, "_rust_build_candidates", lambda: [tmp_path / "absent", built])
+    assert mw.resolve_pack_command("rust") == [str(built)]
+    override = tmp_path / "override"
+    override.write_text("#!/bin/sh\nexit 0\n")
+    override.chmod(0o755)
+    monkeypatch.setenv("STREETZIM_PACK_BIN", str(override))
+    assert mw.resolve_pack_command("rust") == [str(override)]
+
+
+def test_rust_builder_reaches_the_creator_and_cli(tmp_path, monkeypatch):
+    import create_osm_zim as builder
+
+    monkeypatch.delenv("STREETZIM_PACK_BIN", raising=False)
+    monkeypatch.setattr(mw, "_rust_build_candidates", lambda: [tmp_path / "absent"])
+    monkeypatch.setattr(builder, "_openzim_options",
+                        lambda **kwargs: pytest.fail("reached the build"))
+    with pytest.raises(SystemExit, match="2"):
+        builder.main(["--area", "monaco", "--zim-builder", "rust", "--xapian", "none"])
+    creator = mw.ManifestCreator(str(tmp_path / "out.zim"), builder="rust")
+    monkeypatch.setenv("STREETZIM_MANIFEST_ZSTD", "0")
+    with pytest.raises(RuntimeError, match="needs a built Rust"), creator:
+        creator.add_item(item(b"payload"))
+    assert not (tmp_path / "out.zim").exists()
 
 
 @pytest.fixture

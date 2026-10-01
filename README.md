@@ -270,7 +270,11 @@ The author's production host builds whole continents. It uses two optional
 backends, both switched off by default:
 
 - `--zim-builder manifest` uses the Python manifest packer with configurable
-  compression, streamed large bodies and raw Xapian/routing clusters.
+  compression, streamed large bodies and raw Xapian/routing clusters. It
+  cannot run libzim's indexer: without `--xapian builder` (`--xapian none`,
+  the `streetzim` default for this backend) the ZIM has no Xapian indexes, so
+  Kiwix has no full-text search and no Xapian title suggestions (only prefix
+  matches on titles).
 - `--xapian builder` uses an external indexer.
 
 Both produce ordinary ZIMs, the same as libzim's. Neither is needed for
