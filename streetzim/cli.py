@@ -40,7 +40,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
 
@@ -1049,17 +1049,26 @@ def _error(msg: object) -> int:
 
 
 # What a build killed before its cleanup ran (OOM killer, SIGKILL) leaves
-# behind: its staging archive next to the output (and libzim's <staging>.tmp)
-# and its workspace in --tmp. Their names carry the owner's PID, and later
-# builds remove those whose owner is gone and that nothing has touched for
-# STALE_AFTER. The age also covers folders shared between machines or PID
-# namespaces, where a live owner's PID can look unused. Leftovers kept on
-# purpose (--debug, --keep-temp, an archive that could not be published)
-# have a <name>.keep marker and are never removed.
+# behind: next to the output, its staging archive, libzim's <staging>.tmp and
+# create_zim's private folder .<staging>.building-XXXXXXXX (the multi-GB
+# partial archive and pack stage); in --tmp, its workspace. Each build holds
+# an exclusive flock on <staging>.lock and <workspace>.lock while it runs;
+# the kernel releases it however the process ends. A later build removes an
+# entry only when it can take that lock itself, which no PID check or age
+# can establish: two containers sharing --tmp or the output folder see
+# different PIDs, and a live build's workspace stops changing early. The
+# owner's PID being gone and STALE_AFTER without a change are kept as further
+# guards. An entry without a lock file (from builds before the locks) is
+# never removed, nor is one kept on purpose: --debug, --keep-temp or an
+# archive that could not be published (a <name>.keep marker), or a pack
+# stage kept with STREETZIM_KEEP_PACK_STAGE.
 STALE_AFTER = 6 * 3600
-STAGING_NAME = re.compile(r"^\..+\.zim\.(\d+)\.[a-z0-9_]{8}\.building(?:\.tmp)?$")
-WORKSPACE_NAME = re.compile(r"^streetzim-build-(\d+)-[a-z0-9_]{8}$")
+_OWNER = r"\..+\.zim\.(?P<pid>\d{1,7})\.[a-z0-9_]{8}\.building"
+STAGING_NAME = re.compile(rf"^(?P<owner>{_OWNER})(?:\.tmp)?$")
+WRITER_NAME = re.compile(rf"^\.(?P<owner>{_OWNER})\.building-[a-z0-9_]{{8}}$")
+WORKSPACE_NAME = re.compile(r"^(?P<owner>streetzim-build-(?P<pid>\d{1,7})-[a-z0-9_]{8})$")
 KEEP_SUFFIX = ".keep"
+LOCK_SUFFIX = ".lock"
 
 
 def _pid_alive(pid: int) -> bool:
@@ -1069,7 +1078,7 @@ def _pid_alive(pid: int) -> bool:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    except OSError:                     # EPERM: it exists, owned by another user
+    except (OSError, OverflowError):    # EPERM: it exists, owned by another user
         return True
     return True
 
@@ -1098,11 +1107,65 @@ def mark_kept(path: Path) -> None:
         keep_marker(path).touch()
 
 
-def sweep_stale(folder: Path, pattern: re.Pattern[str], *, folders: bool,
+def owner_lock(path: Path) -> Path:
+    return path.with_name(path.name + LOCK_SUFFIX)
+
+
+@contextlib.contextmanager
+def hold_owner_lock(path: Path) -> Generator[None, None, None]:
+    """Hold the lock that tells sweep_stale() the build owning `path` (a
+    staging name or a workspace) is running. The file is removed at the end
+    while still locked; a killed build leaves it, unlocked. Without a lock
+    file (it could not be created) the entries are simply never swept."""
+    import fcntl
+    lock = owner_lock(path)
+    try:
+        fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError:
+        yield
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            lock.unlink()
+        os.close(fd)
+
+
+@contextlib.contextmanager
+def _owner_gone(lock: Path) -> Generator[bool, None, None]:
+    """Whether the build that holds `lock` has ended: true while this
+    process holds that lock itself. False when there is no lock file."""
+    import fcntl
+    try:
+        fd = os.open(lock, os.O_RDWR)
+    except OSError:
+        yield False
+        return
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # A lock its owner removed (on finishing) is not that owner's.
+            same = os.path.samestat(os.fstat(fd), os.stat(lock))
+        except OSError:
+            same = False
+        yield same
+    finally:
+        os.close(fd)
+
+
+def _kept_on_purpose(entry: Path, owner: Path) -> bool:
+    if keep_marker(entry).exists() or keep_marker(owner).exists():
+        return True
+    return entry.is_dir() and any(p.is_dir() for p in entry.glob("*.pack-stage-*"))
+
+
+def sweep_stale(folder: Path, kinds: list[tuple[re.Pattern[str], bool]], *,
                 now: float | None = None) -> list[Path]:
-    """Remove the entries of `folder` named by `pattern` (folders when
-    `folders`, else files) whose owning process is gone and that are older
-    than STALE_AFTER; returns what was removed."""
+    """Remove the entries of `folder` named by one of `kinds` (a pattern and
+    whether it names folders) whose owning build has ended, as the comment
+    above describes; returns what was removed."""
     import time
     now = time.time() if now is None else now
     removed: list[Path] = []
@@ -1110,23 +1173,37 @@ def sweep_stale(folder: Path, pattern: re.Pattern[str], *, folders: bool,
         entries = sorted(folder.iterdir())
     except OSError:
         return removed
+    owners: dict[tuple[str, int], list[Path]] = {}
     for entry in entries:
-        m = pattern.match(entry.name)
-        if not m or entry.is_symlink() or entry.is_dir() != folders:
+        for pattern, folders in kinds:
+            m = pattern.match(entry.name)
+            if m and not entry.is_symlink() and entry.is_dir() == folders:
+                owners.setdefault((m.group("owner"), int(m.group("pid"))), []).append(entry)
+                break
+    for (owner, pid), items in owners.items():
+        lock = owner_lock(folder / owner)
+        if _pid_alive(pid):
             continue
-        try:
-            if (_pid_alive(int(m.group(1))) or keep_marker(entry).exists()
-                    or now - _newest_mtime(entry) < STALE_AFTER):
+        with _owner_gone(lock) as gone:
+            if not gone:
                 continue
-            if folders:
-                shutil.rmtree(entry)
-            else:
-                entry.unlink()
-        except OSError:
-            continue
-        print(f"streetzim: removed {entry}, left by an interrupted build "
-              f"(process {m.group(1)})", flush=True)
-        removed.append(entry)
+            for entry in items:
+                try:
+                    if (_kept_on_purpose(entry, folder / owner)
+                            or now - _newest_mtime(entry) < STALE_AFTER):
+                        continue
+                    if entry.is_dir():
+                        shutil.rmtree(entry)
+                    else:
+                        entry.unlink()
+                except OSError:
+                    continue
+                print(f"streetzim: removed {entry}, left by an interrupted build "
+                      f"(process {pid})", flush=True)
+                removed.append(entry)
+            if not any(os.path.lexists(e) for e in items):
+                with contextlib.suppress(OSError):
+                    lock.unlink()
     return removed
 
 
@@ -1153,18 +1230,19 @@ def main(argv: list[str] | None = None) -> int:
 
     # The workspace belongs to this invocation, including its illustration
     # and cut MBTiles. Other builds may share --tmp and --dl safely.
-    sweep_stale(tmp, WORKSPACE_NAME, folders=True)
+    sweep_stale(tmp, [(WORKSPACE_NAME, True)])
     work = Path(tempfile.mkdtemp(prefix=f"streetzim-build-{os.getpid()}-", dir=tmp))
     previous = _exit_on_sigterm()
-    try:
-        return _run_build(args, dl, out_dir, work)
-    finally:
-        if previous is not None:
-            signal.signal(signal.SIGTERM, previous)
-        if args.debug or args.keep_temp:
-            mark_kept(work)
-        else:
-            shutil.rmtree(work, ignore_errors=True)
+    with hold_owner_lock(work):
+        try:
+            return _run_build(args, dl, out_dir, work)
+        finally:
+            if previous is not None:
+                signal.signal(signal.SIGTERM, previous)
+            if args.debug or args.keep_temp:
+                mark_kept(work)
+            else:
+                shutil.rmtree(work, ignore_errors=True)
 
 
 def _run_build(args: argparse.Namespace, dl: Path, out_dir: Path, work: Path) -> int:
@@ -1187,14 +1265,15 @@ def _run_build(args: argparse.Namespace, dl: Path, out_dir: Path, work: Path) ->
     except (ValueError, OSError) as e:
         return _error(e)
     out_dir.mkdir(parents=True, exist_ok=True)
-    sweep_stale(out_dir, STAGING_NAME, folders=False)
+    sweep_stale(out_dir, [(STAGING_NAME, False), (WRITER_NAME, True)])
     if final.exists() and not args.overwrite:
         return _error(f"{final} exists (use --overwrite)")
     try:
         # Staging lives on the output filesystem for atomic publication, and
         # its unique name prevents concurrent builds from deleting each
-        # other's archive (previously both used <final>.tmp). The PID lets
-        # sweep_stale() tell when an interrupted build's staging is orphaned.
+        # other's archive (previously both used <final>.tmp). Its lock (and
+        # PID) let sweep_stale() tell when an interrupted build's staging,
+        # and create_zim's folder named after it, are orphaned.
         with tempfile.NamedTemporaryFile(prefix=f".{final.name}.{os.getpid()}.",
                                          suffix=".building",
                                          dir=out_dir) as probe:
@@ -1204,6 +1283,12 @@ def _run_build(args: argparse.Namespace, dl: Path, out_dir: Path, work: Path) ->
             scraperlib.check_output(out_dir, building.name)
     except OSError as e:
         return _error(f"cannot write to {out_dir}: {e}")
+    with hold_owner_lock(building):
+        return _build_staged(args, dl, illustration, work, building, final)
+
+
+def _build_staged(args: argparse.Namespace, dl: Path, illustration: Path | None,
+                  work: Path, building: Path, final: Path) -> int:
     keep = False
     try:
         if args.stats_filename:
