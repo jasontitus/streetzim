@@ -24,6 +24,16 @@ REQ = ["--name", "osm_en_monaco", "--title", "Monaco", "--description", "Offline
 OLD = time.time() - cli.STALE_AFTER - 3600
 
 
+@pytest.fixture(autouse=True)
+def boot_id(tmp_path_factory, monkeypatch):
+    """A fixed kernel boot ID for this process (the real one where /proc
+    has none would make every sweep a no-op)."""
+    path = tmp_path_factory.mktemp("boot") / "boot_id"
+    path.write_text("boot-a\n")
+    monkeypatch.setattr(cli, "BOOT_ID_PATH", str(path))
+    return path
+
+
 @pytest.fixture
 def fake_builder(monkeypatch):
     import create_osm_zim
@@ -86,7 +96,7 @@ def test_failed_publication_keeps_the_finished_archive(tmp_path, monkeypatch, ca
     monkeypatch.undo()
     # Not even a later build's sweep removes it, once stale and orphaned.
     os.utime(stage, (OLD, OLD))
-    cli.owner_lock(stage).touch()
+    _unlocked(stage.parent, stage.name)
     assert cli.sweep_stale(stage.parent, STAGING_KINDS,
                            now=time.time() + 2 * cli.STALE_AFTER) == []
     assert stage.exists()
@@ -159,10 +169,19 @@ def _age(path: Path, when: float = OLD) -> Path:
     return path
 
 
-def _unlocked(folder: Path, owner: str) -> Path:
-    """The lock file a killed build leaves: present, nobody holding it."""
+def _old_file(path: Path) -> Path:
+    path.write_bytes(b"x")
+    return _age(path)
+
+
+def _unlocked(folder: Path, owner: str, boot: str | None = None,
+              when: float | None = None) -> Path:
+    """The lock file a killed build leaves: present, nobody holding it,
+    with this kernel's boot ID."""
     lock = cli.owner_lock(folder / owner)
-    lock.touch()
+    lock.write_text(boot if boot is not None else (cli._boot_id() or ""))
+    if when is not None:
+        os.utime(lock, (when, when))
     return lock
 
 
@@ -240,12 +259,13 @@ def test_a_huge_pid_does_not_break_startup(tmp_path):
     cli.sweep_stale(tmp_path, STAGING_KINDS, now=time.time() + 2 * cli.STALE_AFTER)
 
 
-def test_a_killed_build_leaves_an_unlocked_lock(tmp_path):
+def test_a_killed_build_leaves_an_unlocked_lock(tmp_path, boot_id):
     import signal
     work = tmp_path / "streetzim-build-1234-abcd_123"
     work.mkdir()
     code = (f"import sys, time; sys.path.insert(0, {str(ROOT)!r})\n"
             "from pathlib import Path\nfrom streetzim import cli\n"
+            f"cli.BOOT_ID_PATH = {str(boot_id)!r}\n"
             f"with cli.hold_owner_lock(Path({str(work)!r})):\n"
             "    print('locked', flush=True); time.sleep(60)\n")
     proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
@@ -257,6 +277,7 @@ def test_a_killed_build_leaves_an_unlocked_lock(tmp_path):
         proc.send_signal(signal.SIGKILL)
         proc.wait()
         proc.stdout.close()
+    assert cli.owner_lock(work).read_text() == "boot-a"
     with cli._owner_gone(cli.owner_lock(work)) as gone:
         assert gone
 
@@ -329,3 +350,80 @@ def test_main_sweeps_both_folders(tmp_path, fake_builder):
     assert list(out.iterdir()) == [out / "same.zim"]
     assert not any(cli.WORKSPACE_NAME.match(p.name) or p.suffix == ".lock"
                    for p in scratch.iterdir())
+
+
+def test_build_runs_where_flock_is_unsupported(tmp_path, monkeypatch, capsys, fake_builder):
+    # NFSv3 without lockd (ENOLCK), FUSE or 9p (EOPNOTSUPP/ENOSYS): the build
+    # goes on without locks, and nothing is swept.
+    import fcntl
+
+    def no_locks(fd, op):
+        raise OSError(errno.ENOLCK, "No locks available")
+
+    monkeypatch.setattr(fcntl, "flock", no_locks)
+    dead = _dead_pid()
+    out = tmp_path / "out"
+    out.mkdir()
+    owner = f".same.zim.{dead}.abcd_123.building"
+    stale = _old_file(out / owner)
+    _unlocked(out, owner)
+    assert _run(tmp_path) == 0
+    assert stale.exists() and cli.owner_lock(stale).exists()
+    assert sorted(p.name for p in out.iterdir()) == sorted(
+        [owner, owner + ".lock", "same.zim"])
+    assert not [p for p in (tmp_path / "scratch").iterdir() if p.suffix == ".lock"]
+    assert "no lock on" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("lock_boot, own_boot", [
+    ("boot-b", "boot-a\n"),       # another host, or before a reboot
+    ("", "boot-a\n"),             # an owner that had no boot ID
+    ("boot-a", None),             # a sweeper that has none
+])
+def test_sweep_needs_the_same_boot_id(tmp_path, boot_id, lock_boot, own_boot):
+    dead = _dead_pid()
+    owner = f".same.zim.{dead}.abcd_123.building"
+    entry = _old_file(tmp_path / owner)
+    _unlocked(tmp_path, owner, boot=lock_boot)
+    if own_boot is None:
+        boot_id.unlink()
+    else:
+        boot_id.write_text(own_boot)
+    assert cli.sweep_stale(tmp_path, STAGING_KINDS) == []
+    assert entry.exists()
+
+
+def test_a_symlinked_lock_is_not_trusted(tmp_path):
+    dead = _dead_pid()
+    owner = f"streetzim-build-{dead}-abcd_123"
+    work = tmp_path / owner
+    work.mkdir()
+    _age(work)
+    real = _unlocked(tmp_path, "elsewhere")
+    cli.owner_lock(work).symlink_to(real)
+    assert cli.sweep_stale(tmp_path, WORKSPACE_KINDS) == []
+    assert work.exists()
+
+
+def test_lone_lock_files_are_removed_under_the_same_rules(tmp_path):
+    import fcntl
+    dead = _dead_pid()
+    gone = _unlocked(tmp_path, f"streetzim-build-{dead}-abcd_123", when=OLD)
+    gone_staging = _unlocked(tmp_path, f".same.zim.{dead}.abcd_123.building", when=OLD)
+    kept = [
+        _unlocked(tmp_path, f"streetzim-build-{dead}-recent12"),              # fresh
+        _unlocked(tmp_path, f"streetzim-build-{dead}-otherbt1", "boot-b", OLD),
+        _unlocked(tmp_path, f"streetzim-build-{os.getppid()}-abcd_123", when=OLD),
+        _unlocked(tmp_path, f"streetzim-build-{dead}-held1234", when=OLD),
+        _unlocked(tmp_path, f".same.zim.{dead}.abcd_123.building.tmp", when=OLD),
+        _unlocked(tmp_path, "streetzim-build-abcd_123", when=OLD),           # no PID
+        _unlocked(tmp_path, "unrelated", when=OLD),
+    ]
+    held = open(kept[3])
+    fcntl.flock(held, fcntl.LOCK_EX)
+    try:
+        assert cli.sweep_stale(tmp_path, WORKSPACE_KINDS) == [gone]
+        assert cli.sweep_stale(tmp_path, STAGING_KINDS) == [gone_staging]
+    finally:
+        held.close()
+    assert all(p.exists() for p in kept)

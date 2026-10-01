@@ -1052,16 +1052,25 @@ def _error(msg: object) -> int:
 # behind: next to the output, its staging archive, libzim's <staging>.tmp and
 # create_zim's private folder .<staging>.building-XXXXXXXX (the multi-GB
 # partial archive and pack stage); in --tmp, its workspace. Each build holds
-# an exclusive flock on <staging>.lock and <workspace>.lock while it runs;
-# the kernel releases it however the process ends. A later build removes an
-# entry only when it can take that lock itself, which no PID check or age
-# can establish: two containers sharing --tmp or the output folder see
-# different PIDs, and a live build's workspace stops changing early. The
-# owner's PID being gone and STALE_AFTER without a change are kept as further
-# guards. An entry without a lock file (from builds before the locks) is
-# never removed, nor is one kept on purpose: --debug, --keep-temp or an
-# archive that could not be published (a <name>.keep marker), or a pack
-# stage kept with STREETZIM_KEEP_PACK_STAGE.
+# an exclusive flock on <staging>.lock and <workspace>.lock while it runs,
+# and writes the kernel's boot_id into them; the kernel releases the lock
+# however the process ends. A later build removes an entry only when it can
+# take that lock itself and the lock file holds its own boot_id, which no
+# PID check or age can establish: two containers sharing --tmp or the output
+# folder see different PIDs, and a live build's workspace stops changing
+# early. The guarantee therefore covers builds on the same running kernel
+# (any containers of one host): there flock is authoritative. Another host,
+# or this one after a reboot, has a different boot_id, so a lock that flock
+# might not share across hosts (NFS local_lock, CIFS nobrl, FUSE) is never
+# trusted; nor is a lock file without a boot_id, or a sweeper without one.
+# The owner's PID being gone and STALE_AFTER without a change are kept as
+# further guards. A filesystem without working flock (ENOLCK on NFSv3
+# without lockd, EOPNOTSUPP/ENOSYS on FUSE or 9p) gets no lock file. An entry
+# without a lock file (also from builds before the locks) is never removed,
+# nor is one kept on purpose: --debug, --keep-temp or an archive that could
+# not be published (a <name>.keep marker), or a pack stage kept with
+# STREETZIM_KEEP_PACK_STAGE. A lock file whose owner never got as far as
+# creating an entry is removed under the same rules once STALE_AFTER old.
 STALE_AFTER = 6 * 3600
 _OWNER = r"\..+\.zim\.(?P<pid>\d{1,7})\.[a-z0-9_]{8}\.building"
 STAGING_NAME = re.compile(rf"^(?P<owner>{_OWNER})(?:\.tmp)?$")
@@ -1069,6 +1078,17 @@ WRITER_NAME = re.compile(rf"^\.(?P<owner>{_OWNER})\.building-[a-z0-9_]{{8}}$")
 WORKSPACE_NAME = re.compile(r"^(?P<owner>streetzim-build-(?P<pid>\d{1,7})-[a-z0-9_]{8})$")
 KEEP_SUFFIX = ".keep"
 LOCK_SUFFIX = ".lock"
+BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id"
+
+
+def _boot_id() -> str | None:
+    """This kernel's boot ID (shared by every container on the host), or
+    None where there is none (macOS, or /proc not mounted)."""
+    try:
+        with open(BOOT_ID_PATH, encoding="ascii", errors="replace") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
 
 
 def _pid_alive(pid: int) -> bool:
@@ -1114,18 +1134,32 @@ def owner_lock(path: Path) -> Path:
 @contextlib.contextmanager
 def hold_owner_lock(path: Path) -> Generator[None, None, None]:
     """Hold the lock that tells sweep_stale() the build owning `path` (a
-    staging name or a workspace) is running. The file is removed at the end
-    while still locked; a killed build leaves it, unlocked. Without a lock
-    file (it could not be created) the entries are simply never swept."""
+    staging name or a workspace) is running, with this kernel's boot ID in
+    it. The file is removed at the end while still locked; a killed build
+    leaves it, unlocked. Without a lock file (it could not be created, or
+    the filesystem cannot lock) the entries are simply never swept."""
     import fcntl
     lock = owner_lock(path)
     try:
-        fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
+        fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o644)
     except OSError:
         yield
         return
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
+    except OSError as e:                # ENOLCK, EOPNOTSUPP, ENOSYS, ...
+        with contextlib.suppress(OSError):
+            lock.unlink()
+        os.close(fd)
+        print(f"streetzim: no lock on {lock.parent} ({e.strerror or e}); "
+              "an interrupted build's files there will not be cleaned up", flush=True)
+        yield
+        return
+    try:
+        boot = _boot_id()
+        if boot is not None:
+            with contextlib.suppress(OSError):
+                os.write(fd, boot.encode("ascii", "replace"))
         yield
     finally:
         with contextlib.suppress(OSError):
@@ -1136,10 +1170,12 @@ def hold_owner_lock(path: Path) -> Generator[None, None, None]:
 @contextlib.contextmanager
 def _owner_gone(lock: Path) -> Generator[bool, None, None]:
     """Whether the build that holds `lock` has ended: true while this
-    process holds that lock itself. False when there is no lock file."""
+    process holds that lock itself and the lock was taken on this running
+    kernel (same boot ID). False when there is no lock file."""
     import fcntl
+    boot = _boot_id()
     try:
-        fd = os.open(lock, os.O_RDWR)
+        fd = os.open(lock, os.O_RDONLY | os.O_NOFOLLOW)
     except OSError:
         yield False
         return
@@ -1147,10 +1183,12 @@ def _owner_gone(lock: Path) -> Generator[bool, None, None]:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             # A lock its owner removed (on finishing) is not that owner's.
-            same = os.path.samestat(os.fstat(fd), os.stat(lock))
+            gone = (os.path.samestat(os.fstat(fd), os.stat(lock, follow_symlinks=False))
+                    and boot is not None
+                    and os.read(fd, 256).decode("ascii", "replace").strip() == boot)
         except OSError:
-            same = False
-        yield same
+            gone = False
+        yield gone
     finally:
         os.close(fd)
 
@@ -1175,9 +1213,21 @@ def sweep_stale(folder: Path, kinds: list[tuple[re.Pattern[str], bool]], *,
         return removed
     owners: dict[tuple[str, int], list[Path]] = {}
     for entry in entries:
+        if entry.is_symlink():
+            continue
+        if entry.name.endswith(LOCK_SUFFIX) and entry.is_file():
+            # A lock file alone: its build was killed before it created an
+            # entry (or the entries are gone).
+            stem = entry.name.removesuffix(LOCK_SUFFIX)
+            for pattern, _ in kinds:
+                m = pattern.match(stem)
+                if m and m.group("owner") == stem:
+                    owners.setdefault((stem, int(m.group("pid"))), [])
+                    break
+            continue
         for pattern, folders in kinds:
             m = pattern.match(entry.name)
-            if m and not entry.is_symlink() and entry.is_dir() == folders:
+            if m and entry.is_dir() == folders:
                 owners.setdefault((m.group("owner"), int(m.group("pid"))), []).append(entry)
                 break
     for (owner, pid), items in owners.items():
@@ -1201,9 +1251,18 @@ def sweep_stale(folder: Path, kinds: list[tuple[re.Pattern[str], bool]], *,
                 print(f"streetzim: removed {entry}, left by an interrupted build "
                       f"(process {pid})", flush=True)
                 removed.append(entry)
-            if not any(os.path.lexists(e) for e in items):
-                with contextlib.suppress(OSError):
-                    lock.unlink()
+            if any(os.path.lexists(e) for e in items):
+                continue
+            try:
+                if not items and now - lock.lstat().st_mtime < STALE_AFTER:
+                    continue
+                lock.unlink()
+            except OSError:
+                continue
+            if not items:
+                print(f"streetzim: removed {lock}, left by an interrupted build "
+                      f"(process {pid})", flush=True)
+                removed.append(lock)
     return removed
 
 
