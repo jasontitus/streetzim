@@ -578,10 +578,9 @@ def _feature_of(rec: dict) -> dict:
     return feat
 
 
-def _has_path_prefix(src, prefix: str) -> bool:
-    """Whether the source has a content entry whose path starts with
-    ``prefix``: a binary search over the entries, which libzim keeps in path
-    order."""
+def _first_with_prefix(src, prefix: str) -> int:
+    """The id of the first content entry whose path is >= ``prefix``: a
+    binary search over the entries, which libzim keeps in path order."""
     lo, hi = 0, src.entry_count
     while lo < hi:
         mid = (lo + hi) // 2
@@ -589,12 +588,79 @@ def _has_path_prefix(src, prefix: str) -> bool:
             lo = mid + 1
         else:
             hi = mid
+    return lo
+
+
+def _has_path_prefix(src, prefix: str) -> bool:
+    """Whether the source has a content entry whose path starts with ``prefix``."""
+    lo = _first_with_prefix(src, prefix)
     return lo < src.entry_count and src._get_entry_by_id(lo).path.startswith(prefix)
+
+
+def _wiki_article_docs(src):
+    """xapianbuilder full-text documents for the source's bundled Wikipedia
+    articles (wiki-article/*, text/html): a --xapian=libzim build indexes
+    them (libzim's default HTML indexer; they are not front articles, so not
+    in the title index), a --xapian=builder one never did. Title: the
+    entry's; body: the article."""
+    i = _first_with_prefix(src, "wiki-article/")
+    while i < src.entry_count:
+        e = src._get_entry_by_id(i)
+        i += 1
+        if not e.path.startswith("wiki-article/"):
+            break
+        if e.is_redirect:
+            continue
+        item = e.get_item()
+        if not item.mimetype.startswith("text/html"):
+            continue
+        yield {"path": e.path, "title": e.title or e.path, "mimetype": "text/html",
+               "body": bytes(item.content).decode("utf-8", "replace"),
+               "language": "eng", "target_path": ""}
+
+
+def _geonames_credited(spool_path: Path) -> set[str]:
+    """The osm ids of the admin records in the spool (the source's) whose
+    Kiwix page gets the GeoNames credit. The build sets ``geonames`` on the
+    feature (admin_areas: a point or region from GeoNames) but not on the
+    record, and adding it to the record would change every fresh build's
+    search-data; so it is derived, erring towards crediting (an extra credit
+    line is harmless, a missing one is not): an area above level 4 that has
+    no box (the extract clipped it: its point may be GeoNames'), or whose
+    region (``l``) is not the name of a coarser admin record whose box holds
+    it whole (admin_areas._encloses, the test the extraction applies to a
+    parent; otherwise GeoNames or the country table named it).
+    Measured on himalayas: of 15,890 areas the build credits 1,187; this
+    credits all of them and 27 more."""
+    from streetzim.admin_areas import _encloses
+    recs = []
+    with open(spool_path, encoding="utf-8") as f:
+        for line in f:
+            if _record_type(line) == "admin":
+                recs.append(json.loads(line))
+    boxes: dict[str, list] = {}
+    for r in recs:
+        if r.get("bb"):
+            for nm in [r.get("n"), *(r.get("alt") or [])]:
+                if nm:
+                    boxes.setdefault(nm, []).append((r.get("al") or 0, r["bb"]))
+    out = set()
+    for r in recs:
+        if (r.get("al") or 0) <= 4 or not r.get("osm"):
+            continue
+        if not r.get("bb"):
+            out.add(r["osm"])
+            continue
+        held = any(al < r["al"] and _encloses(bb, r["bb"])
+                   for al, bb in boxes.get(r.get("l") or "", ()))
+        if not held:
+            out.add(r["osm"])
+    return out
 
 
 def _plan_xapian(spool_path: Path, admin_feats: list[dict], admin_first: int,
                  work: Path, has_path, xapianbuilder_bin: str | None,
-                 page_types) -> tuple[Path, int]:
+                 page_types, fulltext_extra=(), geonames=None) -> tuple[Path, int]:
     """Kiwix's own search for a --xapian=builder ZIM, whose title and
     full-text documents point at ``s/<n>`` paths nothing was ever written at
     (zim_writer._streetzim_to_xapianbuilder_jsonl). Every record of a Kiwix
@@ -604,8 +670,18 @@ def _plan_xapian(spool_path: Path, admin_feats: list[dict], admin_first: int,
     corpus is the one a --xapian=builder build feeds xapianbuilder
     (zim_writer.xapianbuilder_doc) with each document at its page, and the
     title index also gets every redirect title (add_alt_titles) at its
-    redirect. A page or redirect that would replace a source entry stops the
-    run. Both indexes are built here, before anything is written. Returns (the pages to write: JSON lines ``{"i", "f"}``, their count)."""
+    redirect; ``fulltext_extra`` (xapianbuilder documents: the bundled
+    Wikipedia articles, _wiki_article_docs) joins the full-text index only.
+    ``geonames``: the osm ids of the source's admin records whose page
+    carries the GeoNames credit (_geonames_credited). A page or redirect that
+    would replace a source entry stops the run. Both indexes are built here,
+    before anything is written.
+
+    The pages are numbered in spool order (records by home prefix), not in
+    the feature order of a fresh build, and from records (coordinates to
+    5 dp): the slugs differ from a --xapian=libzim build's, which nothing
+    links to (the viewer does not), the pages do not. Returns (the pages to
+    write: JSON lines ``{"i", "f"}``, their count)."""
     from streetzim.zim_writer import (_build_xapian_via_xapianbuilder, kiwix_alt_titles,
                                       search_page, xapianbuilder_doc)
     pages_path = work / "kiwix-pages.jsonl"
@@ -645,6 +721,8 @@ def _plan_xapian(spool_path: Path, admin_feats: list[dict], admin_first: int,
             if i >= admin_first and admin_feats:
                 break                     # the areas this run adds: below
             feat = _feature_of(json.loads(line))
+            if geonames and feat.get("osm") in geonames:
+                feat["geonames"] = True
             path = search_page(feat, i)[0]
             pages.write(json.dumps({"i": i, "f": feat}, ensure_ascii=False) + "\n")
             docs(feat, path, ft, ti)
@@ -655,8 +733,13 @@ def _plan_xapian(spool_path: Path, admin_feats: list[dict], admin_first: int,
                              f"added areas, expected {admin_first}")
         for path, _t, _h, _alts, feat in _admin_pages(admin_feats, admin_first):
             docs(feat, path, ft, ti)
+        n_extra = 0
+        for doc in fulltext_extra:
+            ft.write(json.dumps(doc, ensure_ascii=False) + "\n")
+            n_extra += 1
     print(f"  xapian: {n_pages + len(admin_feats):,} page document(s), "
-          f"{n_redirects:,} redirect title(s); building with xapianbuilder", flush=True)
+          f"{n_redirects:,} redirect title(s), {n_extra:,} Wikipedia article(s); "
+          f"building with xapianbuilder", flush=True)
     t0 = time.time()
     _build_xapian_via_xapianbuilder(
         "", str(work / "xapian"), language="eng", binary_override=xapianbuilder_bin,
@@ -891,7 +974,9 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
             assert search_spool is not None
             xapian_pages, n_rec_pages = _plan_xapian(
                 search_spool, admin_feats, admin_first if admin_feats else paged,
-                spill_dir_path, src.has_entry_by_path, xapianbuilder_bin, page_types)
+                spill_dir_path, src.has_entry_by_path, xapianbuilder_bin, page_types,
+                fulltext_extra=_wiki_article_docs(src),
+                geonames=_geonames_credited(search_spool) if have_admin else None)
 
         def _stage_large(path: str, data: bytes) -> tuple[bytes | None, str | None]:
             if len(data) < STREAMING_THRESHOLD:

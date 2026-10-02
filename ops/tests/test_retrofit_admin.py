@@ -99,8 +99,9 @@ def _write_source(path, records, *, extra_pages=(), total=None,
         for k, v in chunks.items():
             c.add_item(It(f"search-data/{k}.json", f"Search chunk {k}", "application/json",
                           json.dumps(v)))
-        for p, title in extra_pages:
-            c.add_item(It(p, title, "text/html", f"<html>{title}</html>", True))
+        for p, title, *body in extra_pages:
+            c.add_item(It(p, title, "text/html",
+                          body[0] if body else f"<html>{title}</html>", not body))
     return path
 
 
@@ -473,7 +474,9 @@ def test_rebuild_xapian_points_kiwix_search_at_pages_that_exist(
     from libzim.reader import Archive
     from streetzim import zim_writer as W
     xb = _xapianbuilder()
-    src = _write_source(tmp_path / "src.zim", SRC_RECORDS)
+    src = _write_source(tmp_path / "src.zim", SRC_RECORDS, extra_pages=[
+        ("wiki-article/Rara_Lake", "Rara Lake",
+         "<html><body><p>The deepest lake of the Himalayan zanzibarite.</p></body></html>")])
     dst = tmp_path / "out" / "dst.zim"
     dst.parent.mkdir()
     kw = {"add_admin_areas": osm} if admin else {}
@@ -507,6 +510,11 @@ def test_rebuild_xapian_points_kiwix_search_at_pages_that_exist(
             assert not p.startswith("s/")
         found[q] = ({_title(a, p)[0] for p in sugg}, {_title(a, p)[0] for p in full})
     assert "Lake Rara" in found["Lake Rara"][0] and "Lake Rara" in found["Rara"][1]
+    # The bundled Wikipedia articles are in the full text, as libzim indexes
+    # them, and not in the title index (not front articles).
+    sugg, full = _kiwix_hits(a, "zanzibarite")
+    assert full == ["wiki-article/Rara_Lake"] and sugg == []
+    assert not any(p.startswith("wiki-article/") for p in _kiwix_hits(a, "Rara Lake")[0])
     assert "Kathmandu" in found["Kathmandu"][0]
     assert not any("Cafe" in t for t in found["Kathmandu"][0] | found["Kathmandu"][1])
     if admin:
@@ -582,3 +590,78 @@ def test_the_extraction_runs_in_a_child_with_its_scratch_in_the_spill(
     feats = svr._extract_admin(osm, [-1, -1, 4.5, 4.5], work)
     assert {f["name"] for f in feats} == {"Testland", "Bagmati Province", "Kathmandu"}
     assert len(seen) == 1 and seen[0][0][0] == sys.executable and seen[0][1] == str(work)
+
+
+def test_a_redirect_path_that_exists_stops_the_plan(tmp_path, fake_xb):
+    svr = _svr()
+    from streetzim import zim_writer as W
+    feat = {"name": "Kathmandu", "type": "admin", "subtype": "district", "lat": 1.0,
+            "lon": 1.0, "location": "B", "admin_level": 6, "osm": "r3", "alt": ["Kantipur"]}
+    spool = tmp_path / "s.jsonl"
+    spool.write_text(json.dumps(W.search_record(feat), separators=(",", ":")) + "\n")
+    page = W.search_page(feat, 0)[0]
+    taken = {page[:-5] + "~0.html"}
+    with pytest.raises(SystemExit, match="~0.html"):
+        svr._plan_xapian(spool, [], 0, tmp_path, taken.__contains__, fake_xb,
+                         W.KIWIX_PAGE_TYPES)
+
+
+def test_the_geo_index_wins_over_the_title_cache(tmp_path):
+    svr = _svr()
+    geo = {"Bagmati_Province": [27.0, 85.0, "place", "Q2", ""]}
+    cache = tmp_path / "qid.json"
+    cache.write_text(json.dumps({"Q2": "Bagmati Pradesh (old title)"}))
+    blobs = {"wiki-geo-index.json": json.dumps(geo).encode()}
+    assert svr._qid_titles(blobs.__getitem__, blobs.__contains__, str(cache)) == {
+        "Q2": "Bagmati_Province"}
+
+
+def test_title_text_collapses_the_spaces_a_control_character_leaves():
+    from streetzim.zim_writer import _title_text
+    assert _title_text("a\t\tb") == "a b"
+    assert _title_text("a \n b") == "a b"
+    assert _title_text(" x\ny ") == "x y"
+    assert _title_text("plain  two") == "plain  two"      # no control character: as is
+
+
+def test_geonames_credit_of_the_sources_admin_records(tmp_path):
+    svr = _svr()
+    from streetzim import zim_writer as W
+    recs = [
+        {"n": "Nepal", "t": "admin", "al": 2, "a": 28, "o": 84, "l": "", "osm": "r1",
+         "bb": [80, 26, 88, 31]},
+        {"n": "Bagmati", "t": "admin", "al": 4, "a": 27.5, "o": 85.3, "l": "Nepal",
+         "osm": "r2", "bb": [84, 26.5, 86.5, 28.5]},
+        # Region from the polygons: no credit.
+        {"n": "Kathmandu", "t": "admin", "al": 6, "a": 27.7, "o": 85.3, "l": "Bagmati",
+         "osm": "r3", "bb": [85.1, 27.5, 85.6, 27.9]},
+        # Region named by GeoNames (no area of that name holds it): credit.
+        {"n": "Lalitpur", "t": "admin", "al": 6, "a": 27.6, "o": 85.3, "l": "Central",
+         "osm": "r4", "bb": [85.2, 27.4, 85.5, 27.7]},
+        # Clipped (no box): its point may be GeoNames'.
+        {"n": "Clip", "t": "admin", "al": 8, "a": 27.6, "o": 85.3, "l": "Bagmati",
+         "osm": "r5"},
+        # Named after an area that does not hold it.
+        {"n": "Far", "t": "admin", "al": 6, "a": 30.5, "o": 81, "l": "Bagmati",
+         "osm": "r6", "bb": [80.9, 30.4, 81.1, 30.6]},
+        {"n": "Cafe", "t": "poi", "a": 1, "o": 1, "osm": "r7"},
+    ]
+    spool = tmp_path / "s.jsonl"
+    spool.write_text("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in recs))
+    assert svr._geonames_credited(spool) == {"r4", "r5", "r6"}
+    # ... and a credited source record's rebuilt page carries the credit.
+    pages, n = svr._plan_xapian(spool, [], 0, tmp_path, lambda p: False,
+                                _fake_builder(tmp_path), W.KIWIX_PAGE_TYPES,
+                                geonames={"r4"})
+    rows = {json.loads(x)["f"]["name"]: json.loads(x) for x in pages.read_text().splitlines()}
+    html = W.search_page(rows["Lalitpur"]["f"], rows["Lalitpur"]["i"])[2]
+    assert W.GEONAMES_CREDIT in html
+    assert W.GEONAMES_CREDIT not in W.search_page(rows["Kathmandu"]["f"], 0)[2]
+
+
+def _fake_builder(tmp_path):
+    p = tmp_path / "fxb"
+    p.write_text(f"#!{sys.executable}\nimport sys\na = sys.argv\n"
+                 "open(a[a.index('--output') + 1], 'wb').write(b'x')\n")
+    p.chmod(0o755)
+    return str(p)

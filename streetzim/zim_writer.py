@@ -485,6 +485,9 @@ def _streetzim_to_xapianbuilder_jsonl(src_jsonl: str, dst_jsonl: str,
     xapianbuilder's MyHtmlParser populates value slot 2 with the
     lat/lon (kept on parity with libzim's path).
 
+    Titles have no control characters (kiwix_page_title, _title_text),
+    which before 2026-10-02 they could.
+
     Returns the number of records emitted. Streams line-by-line —
     constant memory regardless of corpus size.
     """

@@ -408,11 +408,25 @@ their `~<k>` redirects, and the source's two indexes are replaced by new
 ones from the build's own xapianbuilder (`_build_xapian_via_xapianbuilder`,
 the corpus `xapianbuilder_doc` writes for a builder build) whose documents
 are those pages; the title index also holds every redirect title at its
-redirect. Every result opens. Pages, redirects and both indexes are made
+redirect. The bundled Wikipedia articles (`wiki-article/*`) join the
+full-text index, as libzim's indexer takes them in a `--xapian=libzim`
+build (not the title index: they are not front articles); measured alone:
+himalayas 6,493 articles (40 MB) index in 3 s to 6 MB, china 24,620
+(124 MB) in 10 s to 22 MB. Every result opens. Pages, redirects and both indexes are made
 before the packer starts; an entry that would be replaced stops the run.
 A source that already has `search/` pages (a `--xapian=libzim` ZIM) is
 refused. Page titles lose control characters (`zim_writer._title_text`:
-"Tunda\nBhuj" -- both packers refuse them).
+"Tunda\nBhuj" -- both packers refuse them); that is the one change to what a
+builder build feeds xapianbuilder (13 himalayas records' titles).
+
+The pages are numbered in spool order (records by home prefix), not a fresh
+build's feature order, and built from records (coordinates to 5 dp): the
+slugs differ from a `--xapian=libzim` build's, which nothing links to. A
+source admin record's page gets the GeoNames credit by a rule
+(`_geonames_credited`, erring towards crediting: on himalayas it credits
+all 1,187 areas the build credits, and 27 more), as the record does not
+carry the feature's `geonames` flag (adding it would change fresh builds'
+search-data); the areas `--add-admin-areas` adds carry the flag itself.
 
 Measured 2026-10-02 on himalayas (Rust packer, `--rebuild-search
 --add-admin-areas --rebuild-xapian`, `--wikidata-title-cache`): 407,946
