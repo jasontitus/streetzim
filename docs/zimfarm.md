@@ -784,7 +784,7 @@ also pass the flag `cpus` equal to its `cpu`
 | | `full` | 2 | 6 GiB (Monaco measured 2.8 to 3.4 GB) | 4 GiB |
 | about 700 MB (Switzerland) | `basic` | 4 | 8 GiB (measured 4.6 GB) | 10 GiB (4 + 4.4 measured + extract) |
 | | `full` | 4 | 10 GiB (estimated) | 12 GiB (estimated: Overture parquets and article cache on top) |
-| about 1.6 GB (the Netherlands) | `basic` | 4 | 12 GiB (measured 10.8 GB with older code; see below the first table) | 20 GiB (4 + 11.0 measured + extract; less failed with ENOSPC) |
+| about 1.4 to 1.6 GB (the Netherlands: 1.40 GB from Geofabrik, 1.63 GB from openstreetmap.fr) | `basic` | 4 | 12 GiB (measured 10.8 GB with older code; see below the first table) | 20 GiB (4 + 11.0 measured + extract; less failed with ENOSPC) |
 | | `full` | 4 | 14 GiB (estimated) | 22 GiB (estimated) |
 
 - Memory in `full` grows with the Overture merge (DuckDB, and more search
@@ -866,6 +866,76 @@ Luxembourg `basic` in a container limited like a Zimfarm task
 Peak memory here is PSS sampled every 2 s (`tools/measure_build.py`), which
 can miss a spike of a few seconds. At this size the peak is the one
 remaining `osmium extract` (3.7 GB), a fixed cost of about 4 GB per build.
+
+#### tilemaker's store (`--tilemaker-store`)
+
+tilemaker keeps the extract's nodes, ways and relations in memory unless it
+is given a store folder, where it maps them to files instead (and deletes
+them when it exits). In memory, that is most of what grows with the region:
+the Netherlands' tiles took 4.0 GB, and China's 6.5 GB extract would take
+about 15 GB, too close to a 16 GiB task's limit with the rest of the build
+alongside. tilemaker alone (v3.0.0, 4 threads, a `--memory 16g` container on
+the 36-core machine; anonymous memory at its peak, sampled every second from
+the container's cgroup, and wall time; 2026-10-02). The extracts are
+Geofabrik's of 2026-09-30, smaller than the openstreetmap.fr ones in the
+first table above (the Netherlands: 1.40 GB against 1.63 GB):
+
+| region (extract) | memory store | disk store | store files at their largest |
+|---|---|---|---|
+| Luxembourg (48 MB) | 1.48 GB, 12 s | 0.46 GB, 12 s | |
+| Switzerland (547 MB) | 2.74 GB, 96 s | 0.67 GB, 90 s | |
+| the Netherlands (1.40 GB) | 4.02 GB, 194 s | 0.65 GB, 184 s (twice) | 2.5 GB |
+| China (6.48 GB cut, in a whole `full` build, 8 threads) | | 2.85 GB, 22.3 min | at least 14 GB (one sample, mid-run) |
+
+The disk store was no slower here (on a hard disk, with the machine's page
+cache free to help), and what it saves grows with the region. It costs
+disk while tilemaker runs: 1.8 times what tilemaker read for the
+Netherlands, at least 2.2 times for China. The files are sparse: tilemaker
+reports their full length ("Store size 66G" for China), far more than they
+take. The container's
+cgroup also counts the store's file pages it has touched (4.0 GB at the
+Netherlands' peak), but those are page cache, which the kernel writes back
+and drops under the limit rather than killing the task.
+
+`--tilemaker-store` (on Zimfarm `tilemaker_store`) is `auto` by default:
+the disk store when the file tilemaker reads (the extract cut to the area)
+is over 1 GiB, or when tilemaker's estimated memory in memory mode is over
+half the container's memory limit (`memory.max`); otherwise memory. The
+estimate is 0.5 GB, plus 0.25 GB per thread (the table above), plus 2.2
+times what it reads, which is within 15% of the three regions measured on
+their own (over, for the Netherlands). The other half of the limit is for
+the Python process that runs tilemaker, the page cache and the estimate's
+error. The builder decides just before tilemaker runs, after the cut, and
+logs the choice and why (`tilemaker store: ...`;
+`streetzim/tilemaker_store.py`).
+
+Disk is chosen only with 3 times what tilemaker reads free on the store's
+filesystem: running out is fatal and unhelpful, as tilemaker maps the
+files into memory and dies of SIGBUS on the first page it cannot write
+(the builder then says that the store ran out of disk). Without that much
+free, `auto` falls back to memory with a warning and `disk` fails before
+tilemaker starts. `memory` forces memory. The store is a folder in the
+build's workspace under `--tmp` (`streetzim-build-*/tilemaker-store`),
+removed when the build ends, even with `--debug`, as tilemaker leaves its
+files behind when it is killed. A killed build's whole workspace is removed
+by a later build on the same `--tmp`, on the same running kernel, once its
+lock is free and it has not changed for 6 hours, also when it is named for
+the later build's own PID (in a container every run may get the same one,
+1 when `streetzim` is the entrypoint).
+
+The tiles are the same either way, as far as tilemaker's tiles are ever the
+same: with 4 threads two runs of the same mode differ from each other. On
+Luxembourg, decoding every tile and comparing each layer's features by
+attributes and geometry (polygons unioned and normalized, so a ring's
+starting point or a merge's order does not count): every feature with its
+attributes is in both modes, and the points and lines (roads, POIs, places,
+house numbers, labels) are identical. What differs is the outline of some
+merged polygons at z14 (landcover, landuse, a few buildings and water), in
+147 of 2,081 tiles between memory and disk, against 140 between two memory
+runs. With 1 thread each mode is byte-for-byte repeatable, and memory
+against disk differs in 143 tiles, the same polygon layers: the store
+changes the order in which tilemaker assembles multipolygons, not what it
+reads.
 
 ### Terrain cost
 

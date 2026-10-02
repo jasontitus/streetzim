@@ -3,6 +3,8 @@ naming and the checks that must fail before any download."""
 from __future__ import annotations
 
 import datetime
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -548,3 +550,223 @@ def test_http_protocol_failure_is_reported_without_publishing_output(tmp_path, m
                           '--output', str(tmp_path / 'out'), '--tmp', str(tmp_path / 'scratch')]) == 2
     assert 'IncompleteRead' in capsys.readouterr().err
     assert list((tmp_path / 'out').iterdir()) == []
+
+
+# ------------------------------------------------- --tilemaker-store
+GIB = 1 << 30
+tms = pytest.importorskip("streetzim.tilemaker_store")
+
+
+@pytest.mark.parametrize("mode", ["auto", "disk", "memory"])
+def test_tilemaker_store_reaches_the_builder_in_the_workspace(tmp_path, no_network, mode):
+    work = tmp_path / "work"
+    argv, _ = cli.plan(cli.parse_args(REQ + ["--profile", "basic", "--area", "monaco",
+                                             "--tilemaker-store", mode]),
+                       tmp_path / "dl", work=work)
+    ns = builder_args(argv)
+    assert ns.tilemaker_store == mode                  # the builder decides, on the cut
+    assert ns.store == str(work / cli.TILEMAKER_STORE_DIR)
+    assert not (work / cli.TILEMAKER_STORE_DIR).exists()     # tilemaker's step makes it
+    argv, _ = cli.plan(cli.parse_args(REQ + ["--profile", "basic", "--area", "monaco"]),
+                       tmp_path / "dl")
+    ns = builder_args(argv)                            # no workspace: the builder's tmpdir
+    assert ns.tilemaker_store == "auto" and ns.store is None
+
+
+def test_tilemaker_store_is_not_passed_without_tilemaker(tmp_path, no_network, monkeypatch):
+    monkeypatch.setattr(cli, "mbtiles_source", lambda args, dl: (tmp_path / "t.mbtiles", None))
+    monkeypatch.setattr(cli, "prepare_mbtiles", lambda path, box, work: (path, None))
+    argv, _ = cli.plan(cli.parse_args(REQ + ["--profile", "basic", "--area", "monaco",
+                                             "--mbtiles", "x", "--tilemaker-store", "disk"]),
+                       tmp_path / "dl", work=tmp_path / "work")
+    ns = builder_args(argv)
+    assert ns.store is None and ns.tilemaker_store is None
+
+
+def test_tilemaker_store_auto_rules():
+    choose = tms.choose
+    # Explicit modes win whatever the size and limit.
+    assert choose("memory", 10 * GIB, 8, 4 * GIB)[0] is False
+    assert choose("disk", 1, 1, None)[0] is True
+    # auto: over 1 GiB to read goes to disk even without a memory limit...
+    assert choose("auto", GIB + 1, 4, None)[0] is True
+    assert choose("auto", GIB, 4, None)[0] is False
+    # ...less only when the estimate is over half the limit.
+    est = tms.memory_estimate(500_000_000, 4)
+    assert 2.5e9 < est < 2.7e9                        # 0.5 + 4 x 0.25 + 2.2 x 0.5 GB
+    assert choose("auto", 500_000_000, 4, int(2 * est) + 1)[0] is False
+    assert choose("auto", 500_000_000, 4, int(2 * est) - 1)[0] is True
+    assert choose("auto", 500_000_000, 4, 16 * GIB)[0] is False
+    assert choose("auto", 500_000_000, 4, 4 * GIB)[0] is True
+    # The measured regions at 4 threads: within 15% of the estimate.
+    for size, measured in ((47_583_019, 1.48e9), (547_273_092, 2.74e9),
+                           (1_403_823_266, 4.02e9)):
+        assert abs(tms.memory_estimate(size, 4) / measured - 1) < 0.15
+
+
+def _sparse(path, size):
+    with open(path, "wb") as f:
+        f.truncate(size)                               # no real bytes written
+    return str(path)
+
+
+def test_tilemaker_store_decide_checks_free_disk(tmp_path, monkeypatch, capsys):
+    pbf = _sparse(tmp_path / "area.osm.pbf", GIB + 1)
+    store = str(tmp_path / "work" / "tilemaker-store")     # parent missing too
+    monkeypatch.setattr(tms, "free_bytes", lambda p: 4 * GIB)
+    assert tms.decide("auto", pbf, store, 4, None) == store
+    assert "tilemaker store: disk" in capsys.readouterr().out
+    # Not 3 times the cut free: auto falls back to memory, disk fails.
+    monkeypatch.setattr(tms, "free_bytes", lambda p: 3 * GIB)
+    assert tms.decide("auto", pbf, store, 4, None) is None
+    assert "WARNING: tilemaker store: memory, not disk" in capsys.readouterr().out
+    with pytest.raises(tms.StoreError, match=r"--tilemaker-store disk: .* GB free"):
+        tms.decide("disk", pbf, store, 4, None)
+    # Memory needs no disk.
+    assert tms.decide("memory", pbf, store, 4, None) is None
+    # free_bytes reads the nearest folder that exists.
+    monkeypatch.undo()
+    assert tms.free_bytes(store) == shutil.disk_usage(tmp_path).free
+
+
+@pytest.fixture
+def builder_until_tiles(tmp_path, monkeypatch):
+    """create_osm_zim's tile step with a cut of a chosen size, recording the
+    store generate_tiles gets."""
+    import create_osm_zim as c
+    got = {}
+
+    def cut(src, bbox, out):
+        _sparse(out, got["cut_size"])
+    monkeypatch.setattr(c, "extract_bbox_from_pbf", cut)
+
+    def tiles(pbf, mbtiles, bbox=None, fast=False, store=None):
+        got["store"] = store
+        if store:
+            os.makedirs(store)
+    monkeypatch.setattr(c, "generate_tiles", tiles)
+    monkeypatch.setattr(c._cpus, "memory_limit", lambda: None)
+    monkeypatch.setattr(c, "build_cpus", lambda: 4)
+
+    def run(cut_size, *flags):
+        got["cut_size"] = cut_size
+        args = c.build_parser().parse_args(["--bbox", "7.4,43.72,7.44,43.76", *flags])
+        tmpdir = tmp_path / "osm_zim"
+        tmpdir.mkdir(exist_ok=True)
+        c._acquire_tiles(args=args, bbox_str="7.4,43.72,7.44,43.76", geofabrik_path=None,
+                         pbf_path=_sparse(tmp_path / "extract.osm.pbf", 5 * GIB),
+                         tmpdir=str(tmpdir), total_steps=9)
+        return got["store"], tmpdir
+    return run
+
+
+
+def test_create_osm_zim_decides_on_the_cut(builder_until_tiles, tmp_path, capsys):
+    # A 5 GiB extract cut to 10 MB: memory (the full size would say disk).
+    store, _ = builder_until_tiles(10_000_000, "--tilemaker-store", "auto")
+    assert store is None
+    assert "tilemaker reads 0.01 GB" in capsys.readouterr().out
+    # A cut over 1 GiB: disk, in the builder's tmpdir, removed after the tiles.
+    store, tmpdir = builder_until_tiles(GIB + 1, "--tilemaker-store", "auto")
+    assert store == str(tmpdir / "tilemaker-store")
+    assert not os.path.exists(store)
+    # A --store of the caller's is used and left to the caller.
+    mine = tmp_path / "mine"
+    store, _ = builder_until_tiles(GIB + 1, "--tilemaker-store", "disk", "--store", str(mine))
+    assert store == str(mine) and mine.is_dir()
+    # --store alone: always, as before --tilemaker-store.
+    alone = tmp_path / "alone"
+    store, _ = builder_until_tiles(10, "--store", str(alone))
+    assert store == str(alone)
+
+
+def test_create_osm_zim_forced_disk_without_space_fails(builder_until_tiles, monkeypatch):
+    monkeypatch.setattr(tms, "free_bytes", lambda p: GIB)
+    with pytest.raises(SystemExit, match=r"error: --tilemaker-store disk: 1\.1 GB free"):
+        builder_until_tiles(GIB + 1, "--tilemaker-store", "disk")
+
+
+@pytest.mark.parametrize("fails", [False, True])
+@pytest.mark.parametrize("keep_flag", [None, "--keep-temp"])
+def test_tilemaker_store_is_under_tmp_and_removed(tmp_path, no_network, monkeypatch,
+                                                  fails, keep_flag):
+    """The store sits in this build's workspace under --tmp, and is removed
+    after the build even when tilemaker left its files (killed) and even
+    with --keep-temp."""
+    import create_osm_zim
+    from streetzim.tiles import required_shapefiles
+    shp = tmp_path / "shp"
+    for rel in required_shapefiles():
+        (shp / rel).parent.mkdir(parents=True, exist_ok=True)
+        (shp / rel).write_bytes(b"")
+    seen = []
+
+    def builder(argv):
+        store = Path(argv[argv.index("--store") + 1])
+        seen.append(store)
+        store.mkdir(parents=True)
+        (store / "mmap_0.dat").write_bytes(b"left by a killed tilemaker")
+        if fails:
+            raise SystemExit(1)
+        Path(argv[argv.index("-o") + 1]).write_bytes(b"zim")
+    monkeypatch.setattr(create_osm_zim, "main", builder)
+    scratch = tmp_path / "scratch"
+    argv = REQ + ["--area", "monaco", "--profile", "basic", "--tilemaker-store", "disk",
+                  "--shapefiles", str(shp), "--file-name", "m",
+                  "--output", str(tmp_path / "out"), "--tmp", str(scratch),
+                  "--dl", str(tmp_path / "dl")]
+    if keep_flag:
+        argv.append(keep_flag)
+    if fails:
+        with pytest.raises(SystemExit):
+            cli.main(argv)
+    else:
+        assert cli.main(argv) == 0
+        assert (tmp_path / "out" / "m.zim").read_bytes() == b"zim"
+    assert len(seen) == 1
+    store = seen[0]
+    assert store.name == cli.TILEMAKER_STORE_DIR
+    assert store.parent.parent == scratch.resolve()
+    assert store.parent.name.startswith("streetzim-build-")
+    assert not store.exists()
+    assert store.parent.exists() == bool(keep_flag)
+
+
+def _tiles_with(monkeypatch, run):
+    from streetzim import tiles
+    monkeypatch.setattr(tiles.subprocess, "run", run)
+    monkeypatch.setattr(tiles.os.path, "getsize", lambda p: 0)
+    monkeypatch.setattr(tiles, "required_shapefiles", lambda: [])
+    return tiles
+
+
+def test_tiles_step_creates_the_store_and_passes_it(tmp_path, monkeypatch):
+    runs = []
+
+    def run(cmd, check):
+        store = Path(cmd[cmd.index("--store") + 1])
+        # tilemaker makes the leaf itself, but a missing parent aborts it.
+        assert store.is_dir()
+        runs.append(cmd)
+    tiles = _tiles_with(monkeypatch, run)
+    store = tmp_path / "work" / cli.TILEMAKER_STORE_DIR
+    tiles.generate_tiles("in.pbf", str(tmp_path / "t.mbtiles"),
+                         bbox="7.40,43.72,7.44,43.76", store=str(store))
+    assert len(runs) == 1
+
+
+@pytest.mark.parametrize("returncode, store, says", [
+    (-7, True, True), (-9, True, False), (1, True, False), (-7, False, False)])
+def test_sigbus_in_tilemaker_is_reported_as_a_full_disk(tmp_path, monkeypatch, capsys,
+                                                         returncode, store, says):
+    import subprocess
+
+    def run(cmd, check):
+        raise subprocess.CalledProcessError(returncode, cmd)
+    tiles = _tiles_with(monkeypatch, run)
+    where = str(tmp_path / "s") if store else None
+    with pytest.raises(subprocess.CalledProcessError):
+        tiles.generate_tiles("in.pbf", str(tmp_path / "t.mbtiles"),
+                             bbox="7.40,43.72,7.44,43.76", store=where)
+    out = capsys.readouterr().out
+    assert ("on-disk store ran out of disk in " + str(where) in out) == says

@@ -54,6 +54,7 @@ if str(REPO_ROOT) not in sys.path:     # also runnable as `python streetzim/cli.
 from streetzim import area, cpus, download  # noqa: E402  (after the path fix above)
 from streetzim.paths import RESOURCES_DIR, missing_runtime_files  # noqa: E402
 from streetzim import satellite_sources  # noqa: E402
+from streetzim import tilemaker_store  # noqa: E402
 GEOFABRIK_POLY = re.compile(r"^https?://download\.geofabrik\.de/(.+)\.poly$")
 USER_AGENT = "streetzim (https://github.com/jasontitus/streetzim)"
 
@@ -88,6 +89,7 @@ ZIMFARM: dict[str, dict[str, Any]] = {
     "stats_filename": {"pattern": r"^/output/task_progress\.json$"},
     "zim_workers": {"title": "ZIM workers", "min": 1},
     "cpus": {"title": "CPU cores", "min": 1},
+    "tilemaker_store": {"title": "tilemaker store"},
     "zim_builder": {"offliner": False},
     "xapian": {"offliner": False},
     "max_zoom": {"min": 0, "max": 14},
@@ -149,6 +151,22 @@ ZIMFARM.update({
     "overture_release": {"title": "Overture release",
                          "pattern": r"^(latest|[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+)$"},
 })
+
+
+# ------------------------------------------------------- tilemaker's store
+# create_osm_zim decides (streetzim/tilemaker_store.py) on the file tilemaker
+# reads, the extract cut to the area, which is known only after the cut.
+TILEMAKER_STORE_DIR = tilemaker_store.DIR_NAME   # in the build's workspace under --tmp
+
+
+def tilemaker_store_argv(args: argparse.Namespace, work: Path | None) -> list[str]:
+    """create_osm_zim's --tilemaker-store, and the store folder: in main()'s
+    workspace under --tmp (swept if the build is killed, removed by
+    _build()); without one, create_osm_zim's own temporary folder."""
+    argv = ["--tilemaker-store", args.tilemaker_store]
+    if work is not None:
+        argv += ["--store", str(work / TILEMAKER_STORE_DIR)]
+    return argv
 
 
 def version() -> str:
@@ -264,6 +282,18 @@ def build_parser() -> argparse.ArgumentParser:
                            "costs memory. Default: the usable cores, at most "
                            "the container's CPU quota and one per "
                            f"{cpus.GIB_PER_CPU} GiB of its memory limit")
+    feat.add_argument("--tilemaker-store", choices=tilemaker_store.MODES, default="auto",
+                      help="Where tilemaker keeps the extract's nodes and ways "
+                           "while it makes the tiles: memory, or disk (a folder "
+                           "in --tmp, 1.8 to 2.2 times the size of the extract "
+                           "cut to the area, removed afterwards; as fast in the "
+                           "measurements, and the Netherlands took 0.65 GB "
+                           "instead of 4.0). Default: auto, disk when the cut is "
+                           f"over {tilemaker_store.DISK_ABOVE_BYTES >> 30} GiB or "
+                           "tilemaker's estimated memory is over half the "
+                           "container's memory limit, unless --tmp has less than "
+                           f"{tilemaker_store.FREE_FACTOR:g} times the cut free "
+                           "(disk then fails)")
     feat.add_argument("--keep-temp", action="store_true", help=argparse.SUPPRESS)
     add_profile_arguments(p)
     add_satellite_flags(p)
@@ -904,6 +934,8 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
             tiles_argv.append(f"--tile-source-url={source[1]}")
     try:
         argv = _builder_argv(args, bbox, pbf_url, dl, illustration) + tiles_argv
+        if source is None and pbf_url:          # tilemaker makes the tiles
+            argv += tilemaker_store_argv(args, work)
     except BaseException:
         drop_cut(cut)                           # a failed extract download, or SIGTERM
         raise
@@ -1064,7 +1096,8 @@ def _error(msg: object) -> int:
 # might not share across hosts (NFS local_lock, CIFS nobrl, FUSE) is never
 # trusted; nor is a lock file without a boot_id, or a sweeper without one.
 # The owner's PID being gone and STALE_AFTER without a change are kept as
-# further guards. A filesystem without working flock (ENOLCK on NFSv3
+# further guards (our own PID does not count as alive: a container's builds
+# reuse PIDs, so a killed one's may be ours; the lock decides). A filesystem without working flock (ENOLCK on NFSv3
 # without lockd, EOPNOTSUPP/ENOSYS on FUSE or 9p) gets no lock file. An entry
 # without a lock file (also from builds before the locks) is never removed,
 # nor is one kept on purpose: --debug, --keep-temp or an archive that could
@@ -1092,7 +1125,15 @@ def _boot_id() -> str | None:
 
 
 def _pid_alive(pid: int) -> bool:
-    if pid <= 0 or pid == os.getpid():
+    """Whether a process `pid` may still be running: a guard on top of the
+    lock, never the reason to remove anything. Our own PID says nothing: a
+    killed build in a container ran as the same PID as this one (1 when
+    streetzim is the entrypoint, or e.g. 8 under docker-init), so an entry
+    named for it is left to the lock, which this process cannot take while
+    one of its own builds (another thread) holds it."""
+    if pid == os.getpid():
+        return False
+    if pid <= 0:
         return True                     # (kill(0) would signal our process group)
     try:
         os.kill(pid, 0)
@@ -1408,6 +1449,9 @@ def _build(args: argparse.Namespace, dl: Path, illustration: Path | None, work: 
         create_osm_zim.main(build_args)  # pyright: ignore[reportUnknownMemberType]
     finally:
         os.chdir(cwd)
+        # tilemaker deletes its store files when it exits, but not when it is
+        # killed; they take about twice the cut extract, so --keep-temp keeps none.
+        shutil.rmtree(work / TILEMAKER_STORE_DIR, ignore_errors=True)
     print(f"streetzim: {source_report.summary()}")
     try:
         publish(building, final, overwrite=args.overwrite)
