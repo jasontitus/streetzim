@@ -29,7 +29,8 @@ keeping the source's prefixes and its word rule. ``--rebuild-search``
 re-derives the whole search index from the source's records under the
 current word rule (marks continue a word; manifest ``word_rule`` 2): the
 retrofit for ZIMs whose names were split at Indic/Thai vowel signs
-(docs/search-prefix-locality.md#word-rule).
+(docs/search-prefix-locality.md#word-rule). Its records are recovered and
+counted against the manifest's ``total`` before anything is written.
 
 Scope otherwise: no routing changes, no terrain
 refresh. Use `repackage_zim.py` for those (and accept that it loses Xapian
@@ -38,8 +39,9 @@ on rust-built sources).
 Usage:
     python3 cloud/swap_viewer_rust.py SRC.zim DST.zim [--reshard-chips]
         [--reshard-search | --rebuild-search [--allow-total-mismatch]]
-        [--tmp DIR]   (required, off the root fs, for the search options;
-                       default $TMPDIR)
+        [--tmp DIR]   (required for the search options, default $TMPDIR; a
+                       --tmp directory, or any with a search option, must be
+                       off the root filesystem and not tmpfs)
 """
 from __future__ import annotations
 
@@ -229,21 +231,27 @@ def _source_records(src_bytes, manifest: dict, spool) -> int:
     return n
 
 
-def _rebuild_search(c, src_bytes, manifest: dict, work: Path,
-                    allow_total_mismatch: bool = False) -> int:
-    """Re-derive search-data from the source's records with the current
-    writer: keys and leaf paths under ``WORD_RULE``, then the same emit pass
-    a build runs (zim_writer._search_emit_chunks, hot prefixes character-
-    split at SEARCH_HOT_BYTES). Every other source manifest key is kept."""
-    from cloud.search_shards import prefixes_for
-    from streetzim.zim_writer import _search_emit_chunks
+def _recover_search(src_bytes, manifest: dict, work: Path,
+                    allow_total_mismatch: bool = False) -> tuple[Path, int]:
+    """Recover the source's search records into ``work``/search-records.jsonl
+    (``_source_records``) and check their count against the manifest's
+    ``total``; returns (spool path, count). Run before anything is written: a
+    short count or an unreadable leaf found after the entry walk used to abort
+    hours in and strand the packer's DST.pack-stage-* directory."""
     spool_path = work / "search-records.jsonl"
     with open(spool_path, "w", encoding="utf-8") as spool:
         total = _source_records(src_bytes, manifest, spool)
     want = manifest.get("total")
     print(f"  search: {total:,} source record(s) recovered "
           f"(source manifest total {want})", flush=True)
-    if total != want and not allow_total_mismatch:
+    if allow_total_mismatch:
+        return spool_path, total
+    if not isinstance(want, int) or isinstance(want, bool):
+        raise SystemExit(f"--rebuild-search: the source manifest has no integer 'total' "
+                         f"({want!r}), so the {total:,} record(s) recovered cannot be "
+                         f"checked against it (--allow-total-mismatch proceeds without "
+                         f"the check)")
+    if total != want:
         # A record not recovered is a place nobody can find again. (A ZIM
         # whose addresses were stripped by derive_zim, or one with records
         # under a home no known writer used, needs the override -- and a
@@ -251,12 +259,26 @@ def _rebuild_search(c, src_bytes, manifest: dict, work: Path,
         raise SystemExit(f"--rebuild-search: recovered {total:,} record(s) but the "
                          f"source manifest says {want}; refusing to drop or invent "
                          f"records (--allow-total-mismatch overrides)")
+    return spool_path, total
+
+
+def _rebuild_search(c, spool_path: Path, total: int, manifest: dict, work: Path) -> int:
+    """Re-derive search-data from the records in ``spool_path`` (from
+    ``_recover_search``, plus any added) with the current writer: keys and
+    leaf paths under ``WORD_RULE``, then the same emit pass a build runs
+    (zim_writer._search_emit_chunks, hot prefixes character-split at
+    SEARCH_HOT_BYTES). ``total``: the records in the spool. Every other
+    source manifest key is kept."""
+    from cloud.search_shards import prefixes_for
+    from streetzim.zim_writer import _search_emit_chunks
     chunk_tmp = work / "search-rebuild"
     chunk_tmp.mkdir()
     counts: dict[str, int] = {}
     fds: dict[str, object] = {}
+    n_spool = 0
     with open(spool_path, encoding="utf-8") as spool:
         for line in spool:
+            n_spool += 1
             rec = json.loads(line)
             keys = prefixes_for(rec.get("n") or "")
             alt = rec.get("alt")
@@ -279,6 +301,10 @@ def _rebuild_search(c, src_bytes, manifest: dict, work: Path,
     for fd in fds.values():
         fd.close()
     spool_path.unlink()
+    if n_spool != total:
+        # The manifest's total must say what the leaves hold.
+        raise SystemExit(f"--rebuild-search: the spool holds {n_spool:,} record(s), "
+                         f"expected {total:,}")
 
     def _map_item(path, title, mime, data, compress=True):
         return _Item(path, mime, title=title or "", data=data, compress=compress)
@@ -296,23 +322,59 @@ def _on_root_fs(path: str) -> bool:
     return os.stat(path).st_dev == os.stat("/").st_dev
 
 
+# Filesystems that live in memory: a spool of several GB there competes with
+# the build for RAM (and swap) instead of using disk.
+_MEMORY_FS = frozenset({"tmpfs", "ramfs"})
+
+
+def _fs_type(path: str, mounts: str = "/proc/mounts") -> str | None:
+    """The type of the filesystem holding ``path``: the /proc/mounts entry
+    with the longest mount point that contains it (None without /proc)."""
+    real = os.path.realpath(path)
+    best, kind = "", None
+    try:
+        with open(mounts, encoding="utf-8") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                # Spaces etc. in mount points are octal-escaped (\040).
+                mnt = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), parts[1])
+                inside = (real == mnt or mnt == "/"
+                          or real.startswith(mnt.rstrip("/") + "/"))
+                if inside and len(mnt) >= len(best):
+                    best, kind = mnt, parts[2]
+    except OSError:
+        return None
+    return kind
+
+
 def _spill_root(tmp_dir: str | None, search: bool) -> str | None:
-    """Where the spill directory goes: ``--tmp``, else $TMPDIR. A search
-    rewrite spools the whole index there (several GB on a continent), so it
-    must be named explicitly and must not be on the root filesystem -- the
-    build host's / is small (and /tmp is on it)."""
+    """Where the spill directory goes: ``--tmp``, else $TMPDIR, checked
+    before anything is read or written. Large entries (routing cells) are
+    staged there, and a search rewrite spools the whole index (several GB on
+    a continent), so with a search option it must be named explicitly, and
+    a directory named with ``--tmp`` (or any, for a search option) must not
+    be on the root filesystem -- the build host's / is small and /tmp is on
+    it -- nor in memory (tmpfs)."""
     root = tmp_dir or os.environ.get("TMPDIR")
-    if not search:
-        return root
     if not root:
-        raise SystemExit("--reshard-search/--rebuild-search spool the search index "
-                         "(GBs): pass --tmp DIR or set TMPDIR to a directory under "
-                         "/storage, never the default /tmp")
+        if search:
+            raise SystemExit("--reshard-search/--rebuild-search spool the search index "
+                             "(GBs): pass --tmp DIR or set TMPDIR to a directory under "
+                             "/storage, never the default /tmp")
+        return None
     if not os.path.isdir(root):
         raise SystemExit(f"--tmp/TMPDIR {root!r} is not a directory")
+    if not (search or tmp_dir):
+        return root
     if _on_root_fs(root):
         raise SystemExit(f"--tmp/TMPDIR {root!r} is on the root filesystem; point it "
-                         f"at /storage (the search spool is several GB)")
+                         f"at /storage (the spill is several GB)")
+    fs = _fs_type(root)
+    if fs in _MEMORY_FS:
+        raise SystemExit(f"--tmp/TMPDIR {root!r} is on {fs} (memory); point it at "
+                         f"/storage (the spill is several GB)")
     return root
 
 
@@ -434,8 +496,6 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
     print(f"  main path: {main_path!r}")
 
     started = time.time()
-    creator = ManifestCreator(dst_path, compression_level=22, verbose=True)
-    creator.set_mainpath(main_path)
     swapped = 0
     xapian = 0
     metadata_count = 0
@@ -449,6 +509,19 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
     with tempfile.TemporaryDirectory(prefix="swap_viewer_rust_",
                                      dir=spill_root) as spill_dir:
         spill_dir_path = Path(spill_dir)
+
+        # Search records first, into the spill and before the packer's stage
+        # exists: an unreadable leaf or a short count stops the run here, not
+        # hours into the walk.
+        search_spool: Path | None = None
+        search_total = 0
+        if rebuild_search:
+            search_spool, search_total = _recover_search(
+                _src_bytes, search_manifest, spill_dir_path,
+                allow_total_mismatch=allow_total_mismatch)
+
+        creator = ManifestCreator(dst_path, compression_level=22, verbose=True)
+        creator.set_mainpath(main_path)
 
         def _stage_large(path: str, data: bytes) -> tuple[bytes | None, str | None]:
             if len(data) < STREAMING_THRESHOLD:
@@ -610,9 +683,9 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                 swapped += 1
 
             if rebuild_search:
-                n_out = _rebuild_search(c, _src_bytes, search_manifest,
-                                        spill_dir_path,
-                                        allow_total_mismatch=allow_total_mismatch)
+                assert search_spool is not None
+                n_out = _rebuild_search(c, search_spool, search_total,
+                                        search_manifest, spill_dir_path)
                 print(f"  search: dropped {dropped_search_files} old file(s), "
                       f"rebuilt {n_out} record(s)", flush=True)
 
@@ -918,9 +991,10 @@ def main() -> int:
                          "re-bucketing every record and re-planning every hot "
                          "prefix.")
     ap.add_argument("--tmp", metavar="DIR", default=None,
-                    help="Spill directory (default $TMPDIR). Required, and not on "
-                         "the root filesystem, with --reshard-search or "
-                         "--rebuild-search: the search spool is several GB.")
+                    help="Spill directory (default $TMPDIR). Required with "
+                         "--reshard-search or --rebuild-search (the search spool is "
+                         "several GB). A --tmp directory, or any with a search "
+                         "option, must not be on the root filesystem or tmpfs.")
     ap.add_argument("--allow-total-mismatch", action="store_true",
                     help="--rebuild-search: proceed when the records recovered "
                          "differ from the source manifest's total (e.g. a ZIM "

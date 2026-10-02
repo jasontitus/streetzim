@@ -327,15 +327,23 @@ name opening with a Thai tone mark (`__` / `_p`). So a record is accepted in
 either home (`_homes`), and one whose two homes differ is counted through a
 single region-wide table so it is never taken twice. Taking only today's
 home lost 156 records of southeast-asia 2026-05-09 (26,732,128 of
-26,732,284). The rebuild now refuses when the recovered count differs from
-the source manifest's `total` (`--allow-total-mismatch` overrides, e.g. for
-a ZIM whose addresses `derive_zim --strip-addresses` removed), and when a
-leaf the manifest declares cannot be read.
+26,732,284). The rebuild refuses when the recovered count differs from
+the source manifest's `total`, or the manifest has no `total`
+(`--allow-total-mismatch` overrides, e.g. for a ZIM whose addresses
+`derive_zim --strip-addresses` removed), and when a leaf the manifest
+declares cannot be read. The records are recovered into the spill directory
+right after the source manifest is read, before the packer's stage
+(`DST.pack-stage-*`) exists, so these checks fail in minutes, not after the
+hours-long entry walk; the rebuild later reads that spool (and checks it
+still holds `total` records).
 
 The spill directory holds the whole index while it is re-bucketed (several
 GB on a continent), so `--reshard-search` and `--rebuild-search` require
-`--tmp DIR` or `$TMPDIR`, and refuse a directory on the root filesystem;
-wrappers point it at `/storage` (`retrofit-chips-queue.sh` exports
+`--tmp DIR` or `$TMPDIR`, and refuse a directory on the root filesystem or
+in memory (tmpfs/ramfs, from `/proc/mounts`). A directory named with `--tmp`
+is held to the same rule without a search option (large entries are staged
+there too). Everything is checked before the source is opened. Wrappers
+point it at `/storage` (`retrofit-chips-queue.sh` exports
 `TMPDIR=/storage/streetzim/tmp`). Nothing falls back to `/tmp`.
 
 Budget the largest prefix (`av`, `de`): ~4-6 GB of temp space; re-serialising
