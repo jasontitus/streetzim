@@ -1967,6 +1967,49 @@ def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_ch
                  + (f" + {routing_graph_chunk_mb} MB chunks" if routing_graph_chunk_mb else ""))
 
 
+def search_record(feat, wiki=None):
+    """The search record (docs/search-records.md) of search feature `feat`,
+    as search pass 1 writes it; `wiki`: its wiki cross-ref entry (for an
+    admin area, admin_wiki()), or None.
+
+    Canonical record shape consumed by mcpzim:
+      n, t (type), s (subtype), a (lat), o (lon), l (location)
+    Optional additions (safe to forward through their parser):
+      w  = wikipedia tag value(s)  (OSM format, e.g. "en:Lincoln_Memorial")
+      q  = wikidata Q-ID
+      Overture-places enrichment (set by merge_overture_places; empty on
+      non-POI rows): ws = website, p = phone, soc = socials, brand = brand
+      primary name, wd = brand Wikidata Q-ID, cat = normalized category,
+      source = "overture" for Pass-2 adds.
+      al, bb, alt, osm = an administrative area's (admin_record_fields).
+    Coordinates rounded to 5 dp (~1.1 m). They were emitted at full float64
+    repr -- 56.92662663189116, nanometre precision for a bus stop -- and that
+    is entropy zstd cannot remove. Measured on 207,848 real records: 1.72 MB
+    -> 1.54 MB compressed, ~10% off the search payload, which is ~10% of a
+    ZIM. Display and routing read the same field, so 1 m is the floor:
+    SEARCH_COORD_DP=7 restores ~1 cm if that ever bites. (Shared with
+    ops/cloud/swap_viewer_rust.py --add-admin-areas.)"""
+    rec = {"n": feat["name"], "t": feat.get("type", ""), "s": feat.get("subtype", ""),
+           "a": round(feat["lat"], _SEARCH_COORD_DP),
+           "o": round(feat["lon"], _SEARCH_COORD_DP),
+           "l": feat.get("location", "")}
+    for ov_key in ("ws", "p", "soc", "brand", "wd", "cat", "source"):
+        v = feat.get(ov_key)
+        if v:
+            rec[ov_key] = v
+    rec.update(admin_record_fields(feat))
+    if wiki:
+        if wiki.get("wikipedia"):
+            rec["w"] = wiki["wikipedia"]
+            # Provenance: "wd" = title backfilled from a wikidata Q-ID (see
+            # --resolve-wikidata-titles); absent = the OSM wikipedia= tag itself.
+            if wiki.get("wikipedia_src"):
+                rec["wsrc"] = wiki["wikipedia_src"]
+        if wiki.get("wikidata"):
+            rec["q"] = wiki["wikidata"]
+    return rec
+
+
 def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp, page_types=KIWIX_PAGE_TYPES):
     """Search pass 1: stream the search JSONL into per-prefix and per-category
     chunk files in `chunk_tmp`, plus the Xapian candidates file."""
@@ -2066,40 +2109,10 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                     if wiki:
                         wiki_fields_added += 1
 
-                # Canonical record shape consumed by mcpzim:
-                #   n, t (type), s (subtype), a (lat), o (lon), l (location)
-                # Optional additions (safe to forward through their parser):
-                #   w  = wikipedia tag value(s)  (OSM format, e.g. "en:Lincoln_Memorial")
-                #   q  = wikidata Q-ID
-                #   Overture-places enrichment (set by merge_overture_places;
-                #   empty on non-POI rows): ws = website, p = phone, soc = socials,
-                #   brand = brand primary name, wd = brand Wikidata Q-ID,
-                #   cat = normalized category, source = "overture" for Pass-2 adds.
-                # Coordinates rounded to 5 dp (~1.1 m). They were
-                # emitted at full float64 repr -- 56.92662663189116,
-                # nanometre precision for a bus stop -- and that is
-                # entropy zstd cannot remove. Measured on 207,848 real
-                # records: 1.72 MB -> 1.54 MB compressed, ~10% off the
-                # search payload, which is ~10% of a ZIM. Display and
-                # routing read the same field, so 1 m is the floor:
-                # SEARCH_COORD_DP=7 restores ~1 cm if that ever bites.
-                rec = {"n": feat["name"], "t": t, "s": feat.get("subtype", ""),
-                       "a": round(feat["lat"], _SEARCH_COORD_DP),
-                       "o": round(feat["lon"], _SEARCH_COORD_DP),
-                       "l": feat.get("location", "")}
-                for ov_key in ("ws", "p", "soc", "brand", "wd", "cat", "source"):
-                    v = feat.get(ov_key)
-                    if v:
-                        rec[ov_key] = v
-                rec.update(admin_record_fields(feat))
+                # The record shape and its rounding: search_record.
+                rec = search_record(feat, wiki)
                 if wiki:
                     if wiki.get("wikipedia"):
-                        rec["w"] = wiki["wikipedia"]
-                        # Provenance: "wd" = title backfilled from a
-                        # wikidata Q-ID (see --resolve-wikidata-titles);
-                        # absent = the OSM wikipedia= tag itself.
-                        if wiki.get("wikipedia_src"):
-                            rec["wsrc"] = wiki["wikipedia_src"]
                         # Geo-index: underscored title -> [lat, lon, type].
                         # Matches the bundled wiki-article/<Title> path so
                         # the viewer can list + pin nearby Wikipedia at any
@@ -2131,8 +2144,6 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                             wiki_geo[_gt] = [round(feat["lat"], 5),
                                              round(feat["lon"], 5), t,
                                              _gq, _gd]
-                    if wiki.get("wikidata"):
-                        rec["q"] = wiki["wikidata"]
                 entry = json.dumps(rec, separators=(",", ":")) + "\n"
 
                 # Write abbreviated entry to per-prefix chunk file(s).
