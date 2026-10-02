@@ -190,13 +190,16 @@ the same OSM extract (added in 2026-09; older ZIMs have none).
   then the other names, six at most; "names the type" is a whole-word test
   ("Georgetown" gets "Town of Georgetown"). Kiwix's title search wants every
   typed word in the title. A page whose region or point came from GeoNames
-  carries its credit. `--xapian=builder` builds get the page title and the
-  other names in the full text, not the redirects, and no page: their
-  documents point at `s/<n>`, which does not exist
-  (docs/search-prefix-locality.md, "Kiwix's own search"); neither does the Rust
-  packer's redirect record carry a front-article flag yet
-  (`rust/streetzim-pack`, TODO), so `--zim-builder=rust` builds suggest the
-  pages but not their other titles.
+  carries its credit. A `--xapian=builder` build writes the same pages and
+  redirects, and xapianbuilder indexes them as libzim would: the page in both
+  indexes, each redirect title in the title index at its redirect
+  (`zim_writer.XapianCorpus`). Before 2026-10-02 a builder build wrote no page
+  and its documents pointed at `s/<n>`, which does not exist
+  (docs/search-prefix-locality.md, "Kiwix's own search"). The Rust packer
+  ignores the front-article flag (zimru lists every HTML entry and redirect
+  itself), so a `--zim-builder=rust` ZIM's A-Z list and random article also
+  take `places.html` and the Wikipedia articles; its suggestions come from
+  the Xapian title index and are the same.
 - **Cost** (measured 2026-09-30, same flags with and without, no routing):
   D.C. about 19 areas, +40 KB ZIM (+0.2%), +6 KB search-data; Luxembourg
   about 360 areas, +232 KB (+0.4%), +81 KB search-data; build times within

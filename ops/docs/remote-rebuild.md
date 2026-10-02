@@ -455,8 +455,11 @@ Flag reference:
   cell payloads.
 - `--xapian builder` — produce Xapian fulltext + title indexes via
   the external `../xapianbuilder/` helper (parallel, seconds rather
-  than hours). Requires a manifest writer: `--zim-builder manifest`
-  (Python) or `--zim-builder rust`.
+  than hours), over the same `search/` pages a libzim build writes
+  (since 2026-10-02; earlier builder ZIMs index pages that do not
+  exist: `swap_viewer_rust.py --rebuild-search --rebuild-xapian`).
+  Requires a manifest writer: `--zim-builder manifest` (Python) or
+  `--zim-builder rust`.
 - `--zim-builder rust` — emit via zimru / the Rust streetzim-pack. Today
   this needs a built binary (`STREETZIM_PACK_BIN` or
   `rust/streetzim-pack/target/{release,debug}/streetzim-pack`) and a zimru

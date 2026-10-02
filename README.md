@@ -275,7 +275,8 @@ backends, both switched off by default:
   the `streetzim` default for this backend) the ZIM has no Xapian indexes, so
   Kiwix has no full-text search and no Xapian title suggestions (only prefix
   matches on titles).
-- `--xapian builder` uses an external indexer.
+- `--xapian builder` uses an external indexer (`xapianbuilder`) over the
+  same Kiwix search pages a libzim build writes.
 
 Both produce ordinary ZIMs, the same as libzim's. Neither is needed for
 anything in this README. [docs/zim-builder-python.md](docs/zim-builder-python.md)
