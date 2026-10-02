@@ -546,6 +546,32 @@ class XapianCorpus:
 _XAPIAN_TERMINATE_TIMEOUT = 5.0
 
 
+def _glass_stamp(glass_path: str) -> str:
+    return glass_path + ".input-sha256"
+
+
+def _glass_key(input_path: str, language: str) -> str:
+    """The hash of a xapianbuilder input file and its language."""
+    import hashlib
+    h = hashlib.sha256(f"{language}\0".encode())
+    with open(input_path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _glass_reusable(glass_path: str, key: str) -> bool:
+    """Whether `glass_path` exists, is nonempty and was built from the input
+    whose _glass_key is `key`."""
+    try:
+        if os.path.getsize(glass_path) <= 0:
+            return False
+        with open(_glass_stamp(glass_path)) as f:
+            return f.read().strip() == key
+    except OSError:
+        return False
+
+
 def _build_xapian_via_xapianbuilder(workdir: str,
                                     *,
                                     inputs: dict[str, str],
@@ -560,9 +586,12 @@ def _build_xapian_via_xapianbuilder(workdir: str,
     full-text input must not) and return ``(fulltext_glass_path,
     title_glass_path)`` in `workdir`.
 
-    Idempotent: if the output glass files already exist (e.g. resuming
-    a --keep-temp build that crashed at the libzim/zimru pack step),
-    this returns immediately without re-running xapianbuilder.
+    Idempotent: a mode's glass file already in `workdir` (resuming a
+    --keep-temp build that crashed at the pack step) is reused only when
+    the stamp beside it (``<glass>.input-sha256``) is the hash of this
+    run's input and language. A builder corpus changes between runs (the
+    numbering of same-name pages follows the feature order), so an index
+    built from another run's corpus would point at the wrong pages.
 
     The fulltext and title runs are independent processes, run in
     parallel; Python's memory stays constant.
@@ -574,10 +603,11 @@ def _build_xapian_via_xapianbuilder(workdir: str,
     ft_glass = os.path.join(workdir, "X-fulltext-xapian.glass")
     ti_glass = os.path.join(workdir, "X-title-xapian.glass")
 
-    # Recovery: skip the builder runs if both outputs already exist and
-    # look usable.
-    have_ft = os.path.isfile(ft_glass) and os.path.getsize(ft_glass) > 0
-    have_ti = os.path.isfile(ti_glass) and os.path.getsize(ti_glass) > 0
+    # Recovery: skip a builder run whose output exists and was built from
+    # this very input (_glass_stamp).
+    keys = {mode: _glass_key(inputs[mode], language) for mode in ("fulltext", "title")}
+    have_ft = _glass_reusable(ft_glass, keys["fulltext"])
+    have_ti = _glass_reusable(ti_glass, keys["title"])
     if have_ft and have_ti:
         print(f"      reusing existing Xapian glass DBs ({os.path.getsize(ft_glass)/1e6:.1f} MB ft, {os.path.getsize(ti_glass)/1e6:.1f} MB title)", flush=True)
         return ft_glass, ti_glass
@@ -594,8 +624,9 @@ def _build_xapian_via_xapianbuilder(workdir: str,
                 continue
             # Output file must NOT exist (xapianbuilder refuses to
             # overwrite). Remove any prior partial.
-            try: os.unlink(out_path)
-            except FileNotFoundError: pass
+            for stale in (out_path, _glass_stamp(out_path)):
+                try: os.unlink(stale)
+                except FileNotFoundError: pass
             cmd = [binary, mode,
                    "--input", inputs[mode],
                    "--output", out_path,
@@ -618,6 +649,10 @@ def _build_xapian_via_xapianbuilder(workdir: str,
         if failures:
             details = ", ".join(f"{m}: rc={rc}" for m, rc in failures)
             raise RuntimeError(f"xapianbuilder failed ({details})")
+        for mode, _ in procs:
+            out_path = ft_glass if mode == "fulltext" else ti_glass
+            with open(_glass_stamp(out_path), "w") as f:
+                f.write(keys[mode])
         completed = True
     finally:
         # A failed second launch or an interrupted wait must not leave an
