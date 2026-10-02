@@ -340,3 +340,81 @@ def test_kiwix_search_links_check(tmp_path, monkeypatch):
     assert status == "fail" and "'s/7'" in detail, detail
     checked, dead = V.kiwix_search_dead_links(a, ["x"])
     assert checked == 3 and dead == [("suggest", "x", "s/7")]
+
+
+def test_the_gate_fails_redirect_titles_that_lead_nowhere(tmp_path, monkeypatch):
+    """The pages are right but the redirect titles' documents point at a
+    path that is not there: cloud/validate_zim.py (validate(), as every
+    gate runs it) fails the ZIM, because it asks Kiwix for redirect titles
+    too, not only for page titles and common words."""
+    from cloud import validate_zim as V
+    xb = _xapianbuilder()
+
+    def page(self, feat, path):
+        doc = W.xapianbuilder_doc(feat, path, language=self.language)
+        self._put(self._ft, doc)
+        self._put(self._ti, doc)
+        self.pages += 1
+        for rpath, title in W.kiwix_alt_redirects(path, feat):
+            self._put(self._ti, {"path": rpath + "x", "title": title,
+                                 "mimetype": "text/html", "body": "",
+                                 "language": self.language, "target_path": path})
+            self.redirects += 1
+
+    monkeypatch.setattr(W.XapianCorpus, "page", page)
+    zim, _ = _build(tmp_path, monkeypatch, "m1", xapian_mode="builder",
+                    zim_builder="manifest", xb=xb)
+    monkeypatch.delenv("STREETZIM_KIWIX_SEARCH_WARN", raising=False)
+    res = {r.name: r for r in V.validate(str(zim))}["kiwix_search_links"]
+    assert (res.status, res.severity) == ("fail", "error"), res.detail
+    assert ".htmlx" in res.detail and "--rebuild-search --rebuild-xapian --tmp DIR" in res.detail
+    assert "STREETZIM_KIWIX_SEARCH_WARN=1" in res.detail
+    # The override makes it a warning, not a pass.
+    monkeypatch.setenv("STREETZIM_KIWIX_SEARCH_WARN", "1")
+    res = {r.name: r for r in V.validate(str(zim))}["kiwix_search_links"]
+    assert (res.status, res.severity) == ("fail", "warn")
+
+
+def test_queries_take_redirect_and_article_titles(tmp_path, monkeypatch):
+    from libzim.reader import Archive
+    from cloud import validate_zim as V
+    ref, _ = _build(tmp_path, monkeypatch, "libzim", xapian_mode="libzim",
+                    zim_builder="python")
+    a = Archive(str(ref))
+    monkeypatch.setattr(V, "_map_config", lambda arc: {})   # no region name
+    # pages=1: one page title; the redirect and article titles come anyway.
+    q = V.kiwix_search_queries(a, pages=1, redirects=2, articles=1)
+    reds = {t for p, (t, tgt, _) in _search_entries(a).items() if tgt}
+    assert len(reds & set(q)) == 2
+    assert "Monaco" in q          # the Wikipedia article wiki-article/Monaco
+    q = V.kiwix_search_queries(a, pages=1, redirects=0, articles=0)
+    assert not reds & set(q) and "Monaco" not in q
+
+
+def test_a_redirect_whose_target_does_not_open_is_dead(tmp_path, monkeypatch):
+    from libzim.reader import Archive
+    from cloud import validate_zim as V
+    ref, _ = _build(tmp_path, monkeypatch, "libzim", xapian_mode="libzim",
+                    zim_builder="python")
+    a = Archive(str(ref))
+    red = next(p for p, (_, tgt, _) in _search_entries(a).items() if tgt)
+    assert V._opens(a, red)
+
+    class Broken:
+        is_redirect = True
+
+        def get_redirect_entry(self):
+            raise RuntimeError("dangling")
+
+    real = a.get_entry_by_path
+
+    class Arc:
+        def has_entry_by_path(self, p):
+            return a.has_entry_by_path(p)
+
+        def get_entry_by_path(self, p):
+            return Broken() if p == red else real(p)
+
+    assert not V._opens(Arc(), red)
+    assert V._opens(Arc(), "index.html")
+    assert not V._opens(Arc(), "s/1")

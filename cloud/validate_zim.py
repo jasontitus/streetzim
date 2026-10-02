@@ -905,6 +905,13 @@ def _chk_fulltext(arc) -> tuple[str, str]:
 # --rebuild-xapian; re-gating one unmended (a viewer rollout), set
 # STREETZIM_KIWIX_SEARCH_WARN=1 to make this a warning.
 KIWIX_SEARCH_PROBES = ("park", "station", "street", "lake")
+# The mend, as the failure states it. Core code must not name the ops tool
+# (tools/check_boundary.py), so it names the retrofit's flags and the doc that
+# gives the command: ops/cloud/swap_viewer_rust.py SRC DST --rebuild-search
+# --rebuild-xapian --tmp DIR.
+KIWIX_SEARCH_MEND = ("rewrite it with the viewer-swap retrofit's --rebuild-search "
+                     "--rebuild-xapian --tmp DIR (the command: "
+                     "docs/search-prefix-locality.md, \"Kiwix's own search\")")
 
 
 def _first_with_prefix(arc, prefix: str) -> int:
@@ -920,29 +927,69 @@ def _first_with_prefix(arc, prefix: str) -> int:
     return lo
 
 
-def kiwix_search_queries(arc, *, pages: int = 8) -> list[str]:
-    """What to ask Kiwix's search: a few common words, the region's name and
-    the titles of up to ``pages`` Kiwix pages (search/*) spread over the
-    archive (redirect titles, an admin area's other names, included)."""
+def _spread(arc, prefix: str, end: str, n: int, want=lambda e: True,
+            window: int = 4000) -> list[str]:
+    """Titles of up to ``n`` entries with ``prefix`` (path order, up to
+    ``end``) that ``want`` accepts: one from each of ``n`` windows of at most
+    ``window`` entries spread over the range, so a country-size ZIM costs a
+    bounded scan."""
+    lo, hi = _first_with_prefix(arc, prefix), _first_with_prefix(arc, end)
+    out: list[str] = []
+    if hi <= lo or n <= 0:
+        return out
+    step = max(1, (hi - lo) // n)
+    for start in range(lo, hi, step):
+        for i in range(start, min(hi, start + min(step, window))):
+            e = arc._get_entry_by_id(i)  # pyright: ignore[reportPrivateUsage]
+            if e.title and want(e):
+                out.append(e.title)
+                break
+        if len(out) >= n:
+            break
+    return out
+
+
+def kiwix_search_queries(arc, *, pages: int = 8, redirects: int = 4,
+                         articles: int = 3) -> list[str]:
+    """What to ask Kiwix's search: a few common words, the region's name, the
+    titles of up to ``pages`` Kiwix pages (search/*) spread over the archive,
+    of up to ``redirects`` of their redirects (``~`` paths: an admin area's
+    other names and formal titles, title index only) and of up to
+    ``articles`` bundled Wikipedia articles (wiki-article/*, full text)."""
     queries = list(KIWIX_SEARCH_PROBES)
     name = str(_map_config(arc).get("name") or "").strip()
     if name:
         queries += [name, name.split()[0]]
-    lo, hi = _first_with_prefix(arc, "search/"), _first_with_prefix(arc, "search0")
-    if hi > lo:
-        step = max(1, (hi - lo) // pages)
-        for i in range(lo, hi, step):
-            t = arc._get_entry_by_id(i).title  # pyright: ignore[reportPrivateUsage]
-            if t:
-                queries.append(t)
+    queries += _spread(arc, "search/", "search0", pages)
+    queries += _spread(arc, "search/", "search0", redirects,
+                       want=lambda e: "~" in e.path)
+    queries += _spread(arc, "wiki-article/", "wiki-article0", articles,
+                       want=lambda e: not e.is_redirect)
     return list(dict.fromkeys(queries))
+
+
+def _opens(arc, path: str) -> bool:
+    """Whether ``path`` is an entry of the archive that resolves to content
+    (a redirect chain that ends at an item)."""
+    if not arc.has_entry_by_path(path):
+        return False
+    try:
+        e = arc.get_entry_by_path(path)
+        for _ in range(8):
+            if not e.is_redirect:
+                e.get_item()
+                return True
+            e = e.get_redirect_entry()
+    except Exception:
+        return False
+    return False
 
 
 def kiwix_search_dead_links(arc, queries=None, *, per_query: int = 20):
     """Ask Kiwix's title suggestions and full-text search (python-libzim:
     the library kiwix-serve and the apps use) ``queries`` and return
     ``(links checked, [(kind, query, path)] of the results that are not
-    entries of the archive)``."""
+    entries of the archive, or redirects that do not lead to one)``."""
     from libzim.search import Query, Searcher
     from libzim.suggestion import SuggestionSearcher
     if queries is None:
@@ -957,7 +1004,7 @@ def kiwix_search_dead_links(arc, queries=None, *, per_query: int = 20):
         for kind, run in kinds:
             for path in run().getResults(0, per_query):
                 checked += 1
-                if not arc.has_entry_by_path(path):
+                if not _opens(arc, path):
                     dead.append((kind, q, path))
     return checked, dead
 
@@ -970,9 +1017,11 @@ def _chk_kiwix_search_resolves(arc) -> tuple[str, str]:
     checked, dead = kiwix_search_dead_links(arc, queries)
     if dead:
         kind, q, path = dead[0]
-        return ("fail", f"{len(dead)} of {checked} Kiwix search results are not "
-                        f"in the ZIM (e.g. {kind} {q!r} -> {path!r}); a "
-                        "--xapian=builder ZIM without its pages?")
+        return ("fail", f"{len(dead)} of {checked} Kiwix search results do not "
+                        f"open (e.g. {kind} {q!r} -> {path!r}): a --xapian=builder "
+                        "ZIM built before 2026-10-02, without its pages? Mend it: "
+                        f"{KIWIX_SEARCH_MEND}; or set STREETZIM_KIWIX_SEARCH_WARN=1 "
+                        "to make this check a warning")
     if not checked:
         return ("skip", f"no Kiwix search results for {len(queries)} queries")
     return ("pass", f"{checked} results of {len(queries)} queries all open")

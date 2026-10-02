@@ -142,11 +142,11 @@ def main() -> int:
             for i in range(arc.entry_count)))
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from cloud.validate_zim import kiwix_search_dead_links
+    from cloud.validate_zim import KIWIX_SEARCH_MEND, kiwix_search_dead_links
     checked, dead = kiwix_search_dead_links(arc)
     if dead:
-        problems.append(f"{len(dead)} of {checked} Kiwix search results are not in "
-                        f"the ZIM, e.g. {dead[:3]}")
+        problems.append(f"{len(dead)} of {checked} Kiwix search results do not open, "
+                        f"e.g. {dead[:3]}; mend: {KIWIX_SEARCH_MEND}")
 
     for p in problems:
         print(f"FAIL: {p}")
