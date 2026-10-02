@@ -159,7 +159,6 @@ from streetzim.zim_writer import (  # noqa: F401
     search_detail_html,
     _split_big_search_chunk,
     _resolve_xapianbuilder_binary,
-    _streetzim_to_xapianbuilder_jsonl,
     _build_xapian_via_xapianbuilder,
     create_zim,
     _sub_bucket_for_name,
@@ -590,16 +589,16 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "stubs and let libzim's auto-indexer build the "
                              "Xapian DBs at finalize. The 2026-05 baseline "
                              "behaviour. "
-                             "'builder' — skip the HTML stubs entirely; "
-                             "stream the search-feature JSONL through the "
+                             "'builder' — write the same search pages and "
+                             "redirects, and index them with the "
                              "external `xapianbuilder` helper "
                              "(../xapianbuilder/target/release/xapianbuilder) "
-                             "to produce the glass DBs on disk, then add "
-                             "them to the ZIM at namespace 'X' with "
+                             "instead of libzim's indexer: the glass DBs go "
+                             "into the ZIM at namespace 'X' with "
                              "compress=false. Requires --zim-builder=manifest "
                              "(libzim's Creator can't accept items at the "
-                             "X namespace). Saves 2-6h on continent-scale "
-                             "ZIMs and 13-15 GB on Europe. "
+                             "X namespace). Saves 2-6h of indexing on "
+                             "continent-scale ZIMs. "
                              "'none' — skip Xapian entirely; users search "
                              "via the in-ZIM places.html (which uses the "
                              "JSON search-data chunks). Saves another "
