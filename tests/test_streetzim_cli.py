@@ -548,3 +548,145 @@ def test_http_protocol_failure_is_reported_without_publishing_output(tmp_path, m
                           '--output', str(tmp_path / 'out'), '--tmp', str(tmp_path / 'scratch')]) == 2
     assert 'IncompleteRead' in capsys.readouterr().err
     assert list((tmp_path / 'out').iterdir()) == []
+
+
+# ------------------------------------------------- --tilemaker-store
+GIB = 1 << 30
+
+
+@pytest.mark.parametrize("mode, store", [("disk", True), ("memory", False)])
+def test_tilemaker_store_reaches_the_builder_in_the_workspace(tmp_path, no_network, mode, store):
+    work = tmp_path / "work"
+    argv, _ = cli.plan(cli.parse_args(REQ + ["--profile", "basic", "--area", "monaco",
+                                             "--tilemaker-store", mode]),
+                       tmp_path / "dl", work=work)
+    ns = builder_args(argv)
+    assert ns.store == (str(work / cli.TILEMAKER_STORE_DIR) if store else None)
+    assert not (work / cli.TILEMAKER_STORE_DIR).exists()     # tilemaker's step makes it
+
+
+def test_tilemaker_store_is_not_passed_without_tilemaker(tmp_path, no_network, monkeypatch):
+    monkeypatch.setattr(cli, "mbtiles_source", lambda args, dl: (tmp_path / "t.mbtiles", None))
+    monkeypatch.setattr(cli, "prepare_mbtiles", lambda path, box, work: (path, None))
+    argv, _ = cli.plan(cli.parse_args(REQ + ["--profile", "basic", "--area", "monaco",
+                                             "--mbtiles", "x", "--tilemaker-store", "disk"]),
+                       tmp_path / "dl", work=tmp_path / "work")
+    assert builder_args(argv).store is None
+
+
+def test_tilemaker_store_auto_rules():
+    choose = cli.choose_tilemaker_store
+    # Explicit modes win whatever the size and limit.
+    assert choose("memory", 10 * GIB, 8, 4 * GIB)[0] is False
+    assert choose("disk", 1, 1, None)[0] is True
+    # auto: an extract over 1 GiB goes to disk even without a memory limit...
+    assert choose("auto", GIB + 1, 4, None)[0] is True
+    assert choose("auto", GIB, 4, None)[0] is False
+    # ...a smaller one only when the estimate is over half the limit.
+    est = cli.tilemaker_memory_estimate(500_000_000, 4)
+    assert 2.5e9 < est < 2.7e9                        # 0.5 + 4 x 0.25 + 2.2 x 0.5 GB
+    assert choose("auto", 500_000_000, 4, int(2 * est) + 1)[0] is False
+    assert choose("auto", 500_000_000, 4, int(2 * est) - 1)[0] is True
+    assert choose("auto", 500_000_000, 4, 16 * GIB)[0] is False
+    assert choose("auto", 500_000_000, 4, 4 * GIB)[0] is True
+    # The measured regions at 4 threads: within 15% of the estimate.
+    for size, measured in ((47_583_019, 1.48e9), (547_273_092, 2.74e9),
+                           (1_403_823_266, 4.02e9)):
+        assert abs(cli.tilemaker_memory_estimate(size, 4) / measured - 1) < 0.15
+
+
+def test_tilemaker_store_auto_reads_the_extract_and_limit(tmp_path, monkeypatch, capsys):
+    asked = []
+
+    def big_fetch(url, dest):
+        asked.append(url)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if url.endswith(".poly"):
+            dest.write_text(POLY)
+        elif not dest.exists():                        # the size plan() reads
+            with open(dest, "wb") as f:
+                f.truncate(GIB + 1)                    # sparse: no real 1 GiB written
+        return dest
+    monkeypatch.setattr(cli, "fetch", big_fetch)
+    monkeypatch.setattr(cli.cpus, "memory_limit", lambda: None)
+    work = tmp_path / "work"
+    argv, _ = cli.plan(cli.parse_args(REQ + ["--profile", "basic", "--area", "monaco"]),
+                       tmp_path / "dl", work=work)
+    assert builder_args(argv).store == str(work / cli.TILEMAKER_STORE_DIR)
+    assert "tilemaker store: disk (auto: the extract" in capsys.readouterr().out
+    # A small extract in a small container: the memory rule decides.
+    (tmp_path / "dl" / "osm" / "download.geofabrik.de_europe_monaco-latest.osm.pbf"
+     ).write_bytes(b"x" * 1000)
+    monkeypatch.setattr(cli.cpus, "memory_limit", lambda: GIB)     # 0.5 GiB < 1.5 GB est.
+    argv, _ = cli.plan(cli.parse_args(REQ + ["--profile", "basic", "--area", "monaco",
+                                             "--cpus", "4"]),
+                       tmp_path / "dl", work=work)
+    assert builder_args(argv).store == str(work / cli.TILEMAKER_STORE_DIR)
+    monkeypatch.setattr(cli.cpus, "memory_limit", lambda: 16 * GIB)
+    argv, _ = cli.plan(cli.parse_args(REQ + ["--profile", "basic", "--area", "monaco",
+                                             "--cpus", "4"]),
+                       tmp_path / "dl", work=work)
+    assert builder_args(argv).store is None
+
+
+@pytest.mark.parametrize("fails", [False, True])
+@pytest.mark.parametrize("keep_flag", [None, "--keep-temp"])
+def test_tilemaker_store_is_under_tmp_and_removed(tmp_path, no_network, monkeypatch,
+                                                  fails, keep_flag):
+    """The store sits in this build's workspace under --tmp, and is removed
+    after the build even when tilemaker left its files (killed) and even
+    with --keep-temp."""
+    import create_osm_zim
+    from streetzim.tiles import required_shapefiles
+    shp = tmp_path / "shp"
+    for rel in required_shapefiles():
+        (shp / rel).parent.mkdir(parents=True, exist_ok=True)
+        (shp / rel).write_bytes(b"")
+    seen = []
+
+    def builder(argv):
+        store = Path(argv[argv.index("--store") + 1])
+        seen.append(store)
+        store.mkdir(parents=True)
+        (store / "mmap_0.dat").write_bytes(b"left by a killed tilemaker")
+        if fails:
+            raise SystemExit(1)
+        Path(argv[argv.index("-o") + 1]).write_bytes(b"zim")
+    monkeypatch.setattr(create_osm_zim, "main", builder)
+    scratch = tmp_path / "scratch"
+    argv = REQ + ["--area", "monaco", "--profile", "basic", "--tilemaker-store", "disk",
+                  "--shapefiles", str(shp), "--file-name", "m",
+                  "--output", str(tmp_path / "out"), "--tmp", str(scratch),
+                  "--dl", str(tmp_path / "dl")]
+    if keep_flag:
+        argv.append(keep_flag)
+    if fails:
+        with pytest.raises(SystemExit):
+            cli.main(argv)
+    else:
+        assert cli.main(argv) == 0
+        assert (tmp_path / "out" / "m.zim").read_bytes() == b"zim"
+    assert len(seen) == 1
+    store = seen[0]
+    assert store.name == cli.TILEMAKER_STORE_DIR
+    assert store.parent.parent == scratch.resolve()
+    assert store.parent.name.startswith("streetzim-build-")
+    assert not store.exists()
+    assert store.parent.exists() == bool(keep_flag)
+
+
+def test_tiles_step_creates_the_store_and_passes_it(tmp_path, monkeypatch):
+    from streetzim import tiles
+    runs = []
+
+    def run(cmd, check):
+        store = Path(cmd[cmd.index("--store") + 1])
+        assert store.is_dir()                       # tilemaker needs the folder
+        runs.append(cmd)
+    monkeypatch.setattr(tiles.subprocess, "run", run)
+    monkeypatch.setattr(tiles.os.path, "getsize", lambda p: 0)
+    monkeypatch.setattr(tiles, "required_shapefiles", lambda: [])
+    store = tmp_path / "work" / cli.TILEMAKER_STORE_DIR
+    tiles.generate_tiles("in.pbf", str(tmp_path / "t.mbtiles"),
+                         bbox="7.40,43.72,7.44,43.76", store=str(store))
+    assert len(runs) == 1

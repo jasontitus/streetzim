@@ -93,6 +93,7 @@ def generate_tiles(pbf_path, mbtiles_path, bbox=None, fast=False, store=None):
             cmd.append("--fast")
             print("    Using --fast mode (trades RAM for speed)")
         if store:
+            os.makedirs(store, exist_ok=True)
             cmd.extend(["--store", str(store)])
             print(f"    Using on-disk store: {store}")
         subprocess.run(cmd, check=True)

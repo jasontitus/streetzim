@@ -88,6 +88,7 @@ ZIMFARM: dict[str, dict[str, Any]] = {
     "stats_filename": {"pattern": r"^/output/task_progress\.json$"},
     "zim_workers": {"title": "ZIM workers", "min": 1},
     "cpus": {"title": "CPU cores", "min": 1},
+    "tilemaker_store": {"title": "tilemaker store"},
     "zim_builder": {"offliner": False},
     "xapian": {"offliner": False},
     "max_zoom": {"min": 0, "max": 14},
@@ -149,6 +150,72 @@ ZIMFARM.update({
     "overture_release": {"title": "Overture release",
                          "pattern": r"^(latest|[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+)$"},
 })
+
+
+# ------------------------------------------------------- tilemaker's store
+# tilemaker keeps the extract's nodes, ways and relations in memory unless
+# given --store DIR, where it maps them to files instead (and deletes them
+# when it exits). Measured with tilemaker v3.0.0 at 4 threads in a 16g
+# container (anonymous memory peak, wall time; docs/zimfarm.md, "CPUs and
+# memory"): Luxembourg (48 MB extract) 1.48 GB in memory, 0.46 GB on disk,
+# 12 s both; Switzerland (547 MB) 2.74 / 0.67 GB, 96 / 90 s; the
+# Netherlands (1.40 GB) 4.02 / 0.65 GB, 194 / 184 s, with 2.5 GB of store
+# files at their largest. The disk store was no slower at any size, so the
+# only reason to keep memory is the disk it takes (about 1.8 times the
+# extract) on a small region, where the memory saved is small too.
+TILEMAKER_STORES = ("auto", "memory", "disk")
+TILEMAKER_STORE_DIR = "tilemaker-store"      # in the build's workspace under --tmp
+# auto: disk above this extract size (the Netherlands' 1.4 GB took 4 GB in
+# memory; China's 6.5 GB would take about 15 GB, near a 16 GiB task's limit)...
+STORE_DISK_ABOVE_BYTES = 1 << 30
+# ...or when the estimate below is over this share of the memory limit (the
+# rest is the Python process that runs tilemaker, the page cache of the
+# extract and the tiles being written, and the estimate's error). The
+# estimate fits the three regions above within 15% (over, for the
+# Netherlands): a fixed 0.5 GB, 0.25 GB per thread (docs/zimfarm.md) and
+# 2.2 bytes per byte of extract.
+STORE_LIMIT_SHARE = 0.5
+TM_FIXED_BYTES = 0.5e9
+TM_THREAD_BYTES = 0.25e9
+TM_EXTRACT_FACTOR = 2.2
+
+
+def tilemaker_memory_estimate(extract_bytes: int, threads: int) -> float:
+    """tilemaker's memory with its in-memory store, in bytes (an estimate)."""
+    return TM_FIXED_BYTES + TM_THREAD_BYTES * threads + TM_EXTRACT_FACTOR * extract_bytes
+
+
+def choose_tilemaker_store(mode: str, extract_bytes: int, threads: int,
+                           memory_limit: int | None) -> tuple[bool, str]:
+    """(use the disk store, why), for --tilemaker-store `mode`."""
+    if mode != "auto":
+        return mode == "disk", f"--tilemaker-store {mode}"
+    gb = extract_bytes / 1e9
+    if extract_bytes > STORE_DISK_ABOVE_BYTES:
+        return True, (f"auto: the extract ({gb:.2f} GB) is over "
+                      f"{STORE_DISK_ABOVE_BYTES >> 30} GiB")
+    est = tilemaker_memory_estimate(extract_bytes, threads)
+    if memory_limit is not None and est > STORE_LIMIT_SHARE * memory_limit:
+        return True, (f"auto: tilemaker would take about {est / 1e9:.1f} GB in memory "
+                      f"({threads} threads, {gb:.2f} GB extract), over "
+                      f"{STORE_LIMIT_SHARE:.0%} of the {memory_limit / 1e9:.1f} GB limit")
+    return False, (f"auto: the extract ({gb:.2f} GB) is small enough "
+                   f"(about {est / 1e9:.1f} GB in memory)")
+
+
+def tilemaker_store_argv(args: argparse.Namespace, pbf: Path,
+                         work: Path | None) -> list[str]:
+    """create_osm_zim's --store for this build, or nothing (memory). The
+    store is <work>/tilemaker-store; tiles.py creates it, _build() removes
+    it (main()'s workspace, under --tmp; a new temporary folder without)."""
+    threads = args.cpus or cpus.detect()[0]
+    disk, why = choose_tilemaker_store(args.tilemaker_store, pbf.stat().st_size, threads,
+                                       cpus.memory_limit())
+    print(f"  tilemaker store: {'disk' if disk else 'memory'} ({why})", flush=True)
+    if not disk:
+        return []
+    work = work or Path(tempfile.mkdtemp(prefix="streetzim-build-"))
+    return ["--store", str(work / TILEMAKER_STORE_DIR)]
 
 
 def version() -> str:
@@ -264,6 +331,16 @@ def build_parser() -> argparse.ArgumentParser:
                            "costs memory. Default: the usable cores, at most "
                            "the container's CPU quota and one per "
                            f"{cpus.GIB_PER_CPU} GiB of its memory limit")
+    feat.add_argument("--tilemaker-store", choices=TILEMAKER_STORES, default="auto",
+                      help="Where tilemaker keeps the extract's nodes and ways "
+                           "while it makes the tiles: memory, or disk (a folder "
+                           "in --tmp, about twice the extract's size, removed "
+                           "afterwards; as fast in the measurements, and the "
+                           "Netherlands took 0.65 GB instead of 4.0). Default: "
+                           "auto, disk for an extract over "
+                           f"{STORE_DISK_ABOVE_BYTES >> 30} GiB or when "
+                           "tilemaker's estimated memory is over half the "
+                           "container's memory limit")
     feat.add_argument("--keep-temp", action="store_true", help=argparse.SUPPRESS)
     add_profile_arguments(p)
     add_satellite_flags(p)
@@ -904,6 +981,8 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
             tiles_argv.append(f"--tile-source-url={source[1]}")
     try:
         argv = _builder_argv(args, bbox, pbf_url, dl, illustration) + tiles_argv
+        if source is None and pbf_url:          # tilemaker makes the tiles
+            argv += tilemaker_store_argv(args, dl / "osm" / _name_of_url(pbf_url), work)
     except BaseException:
         drop_cut(cut)                           # a failed extract download, or SIGTERM
         raise
@@ -1408,6 +1487,9 @@ def _build(args: argparse.Namespace, dl: Path, illustration: Path | None, work: 
         create_osm_zim.main(build_args)  # pyright: ignore[reportUnknownMemberType]
     finally:
         os.chdir(cwd)
+        # tilemaker deletes its store files when it exits, but not when it is
+        # killed; they take about 1.8 times the extract, so --keep-temp keeps none.
+        shutil.rmtree(work / TILEMAKER_STORE_DIR, ignore_errors=True)
     print(f"streetzim: {source_report.summary()}")
     try:
         publish(building, final, overwrite=args.overwrite)
