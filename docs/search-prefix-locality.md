@@ -414,6 +414,18 @@ A source that already has `search/` pages (a `--xapian=libzim` ZIM) is
 refused. Page titles lose control characters (`zim_writer._title_text`:
 "Tunda\nBhuj" -- both packers refuse them).
 
+Measured 2026-10-02 on himalayas (Rust packer, `--rebuild-search
+--add-admin-areas --rebuild-xapian`, `--wikidata-title-cache`): 407,946
+record pages + 15,890 area pages, 7,148 redirects; xapianbuilder 13 s
+(full text 41 MB, title 80 MB); 14 min wall; output 5.18 GB (+85 MB over the
+same retrofit without pages); process-tree peak 12.98 GB PSS (packer
+11.8 GB; Python ~0.35 GB while it packs, 0.7 GB with the extraction
+in-process); 67 areas got an English title offline (40 now have an article
+the ZIM bundles, 22 before). kiwix-serve: 103 of 103 suggestion and search
+links open (the source: 0 of 34). China has 2.29 M page-type records
+(5.6x): expect about +0.5 GB and a packer ~4 GB larger than a retrofit
+without pages.
+
 So the Kiwix A-Z list and random article are the pages, as in a
 `--xapian=libzim` ZIM; without `--rebuild-xapian` no page is written, as in
 a `--xapian=builder` one. (Fresh `--xapian=builder` builds still point at
