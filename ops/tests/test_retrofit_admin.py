@@ -188,9 +188,22 @@ def _all_records(a, manifest):
     return seen
 
 
+@pytest.fixture
+def fake_xb(tmp_path):
+    """A stand-in xapianbuilder (writes a placeholder database), for the
+    tests that check pages, not Kiwix's search; those use the real one."""
+    p = tmp_path / "fake-xapianbuilder"
+    p.write_text(f"#!{sys.executable}\n"
+                 "import sys\n"
+                 "a = sys.argv\n"
+                 "open(a[a.index('--output') + 1], 'wb').write(b'not a xapian db')\n")
+    p.chmod(0o755)
+    return str(p)
+
+
 @pytest.mark.parametrize("hot", [False, True])
 def test_admin_areas_are_added_searchable_with_pages(tmp_path, osm, no_rg, monkeypatch,
-                                                     capsys, hot):
+                                                     capsys, hot, fake_xb):
     """``hot``: prefix "ka" (Kathmandu) over the split threshold (lowered to
     1 MiB here), so the admin record lands in a character-split leaf."""
     svr = _svr()
@@ -204,7 +217,8 @@ def test_admin_areas_are_added_searchable_with_pages(tmp_path, osm, no_rg, monke
     src = _write_source(tmp_path / "src.zim", records)
     dst = tmp_path / "out" / "dst.zim"
     dst.parent.mkdir()
-    _run(svr, src, dst, tmp_path / "spill", monkeypatch, add_admin_areas=osm)
+    _run(svr, src, dst, tmp_path / "spill", monkeypatch, add_admin_areas=osm,
+         rebuild_xapian=True, xapianbuilder_bin=fake_xb)
     a = Archive(str(dst))
     m = json.loads(_read(a, "search-data/manifest.json"))
     admin = [r for r in _all_records(a, m) if r["t"] == "admin"]
@@ -258,12 +272,8 @@ def test_admin_areas_are_added_searchable_with_pages(tmp_path, osm, no_rg, monke
     front = _front_titles(a)
     assert {"Testland (country)", "Bagmati Province (region)", "Kathmandu (district)",
             "Kantipur", "बागमती प्रदेश"} <= front
-    # Kiwix's suggestions come from the Xapian title index when there is one,
-    # and that is the source's, copied: it does not know the new pages
-    # (docs/search-prefix-locality.md#retrofit).
-    from libzim.suggestion import SuggestionSearcher
-    assert a.has_title_index
-    assert SuggestionSearcher(a).suggest("Kantipur").getEstimatedMatches() == 0
+    # The records of a page type have their pages too (place, water: 0, 1).
+    assert {"Kathmandu", "Lake Rara"} <= front
     # Front articles are not the main page (a packer that took the last
     # front item for it opened Kathmandu's page instead of the map).
     main = a.main_entry
@@ -274,7 +284,8 @@ def test_admin_areas_are_added_searchable_with_pages(tmp_path, osm, no_rg, monke
     assert b"old viewer" not in _read(a, "index.html")
     assert not list(dst.parent.glob("*.pack-stage-*"))
 
-    # Run again on the output: the admin records are not added twice.
+    # Run again on the output: the admin records are not added twice (and,
+    # without --rebuild-xapian, no page is written).
     dst2 = tmp_path / "out" / "dst2.zim"
     _run(svr, dst, dst2, tmp_path / "spill2", monkeypatch, add_admin_areas=osm)
     assert "already has 3 administrative-area record(s)" in capsys.readouterr().out
@@ -285,19 +296,116 @@ def test_admin_areas_are_added_searchable_with_pages(tmp_path, osm, no_rg, monke
         sorted(r["n"] for r in _all_records(a, m) if r["t"] == "admin")
 
 
-def test_a_page_that_would_replace_a_source_entry_stops_before_writing(
-        tmp_path, osm, no_rg, monkeypatch):
+def test_without_rebuild_xapian_no_page_is_written(tmp_path, osm, no_rg, monkeypatch):
+    """Kiwix pages are the documents of Kiwix's own search: they come with
+    --rebuild-xapian (as a --xapian=builder build writes none), not alone."""
     svr = _svr()
-    # Testland is the first area: search/testland-2.html.
-    src = _write_source(tmp_path / "src.zim", SRC_RECORDS,
-                        extra_pages=[("search/testland-2.html", "Testland")])
+    from libzim.reader import Archive
+    src = _write_source(tmp_path / "src.zim", SRC_RECORDS)
+    dst = tmp_path / "dst.zim"
+    _run(svr, src, dst, tmp_path / "spill", monkeypatch, add_admin_areas=osm)
+    a = Archive(str(dst))
+    assert not any(a._get_entry_by_id(i).path.startswith("search/")
+                   for i in range(a.entry_count))
+    m = json.loads(_read(a, "search-data/manifest.json"))
+    assert m["total"] == len(SRC_RECORDS) + 3
 
-    def no_creator(*a, **k):
-        raise AssertionError("the packer was started")
-    monkeypatch.setattr(svr, "ManifestCreator", no_creator)
-    with pytest.raises(SystemExit, match="testland-2.html"):
+
+def test_kiwix_poi_pages_number_like_the_build(tmp_path, osm, no_rg, monkeypatch, fake_xb):
+    svr = _svr()
+    from libzim.reader import Archive
+    from streetzim import zim_writer as W
+    src = _write_source(tmp_path / "src.zim", SRC_RECORDS)
+    dst = tmp_path / "dst.zim"
+    _run(svr, src, dst, tmp_path / "spill", monkeypatch, add_admin_areas=osm,
+         rebuild_xapian=True, xapianbuilder_bin=fake_xb, kiwix_poi_pages=True)
+    a = Archive(str(dst))
+    front = _front_titles(a)
+    assert "Cafe Bagmati" in front
+    # place, poi, water before the areas: Testland is page 3.
+    testland = next(f for f in svr._extract_admin(osm, [-1, -1, 4.5, 4.5], tmp_path)
+                    if f["name"] == "Testland")
+    assert a.get_entry_by_path(W.search_page(testland, 3)[0]).title == "Testland (country)"
+
+
+def test_a_failure_before_with_removes_the_pack_stage(tmp_path, monkeypatch):
+    svr = _svr()
+
+    def boom(self, path):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(svr.ManifestCreator, "set_mainpath", boom)
+    with pytest.raises(RuntimeError, match="boom"):
+        svr._open_creator(str(tmp_path / "dst.zim"), "index.html")
+    assert not list(tmp_path.glob("dst.zim.pack-stage-*"))
+
+
+def test_record_type_reads_the_key_not_a_name():
+    svr = _svr()
+    for rec in [{"n": 'x"t":"admin', "t": "poi"}, {"n": "\\", "t": "place"},
+                {"n": "a", "t": "w\u00e4ter"}, {"n": "b", "s": "t", "t": ""},
+                {"n": "a", "cat": "z", "t": "poi"}]:
+        line = json.dumps(rec, separators=(",", ":"))
+        assert svr._record_type(line) == rec["t"], line
+
+
+def test_an_antimeridian_bbox_in_rfc7946_form(tmp_path, no_rg):
+    svr = _svr()
+    pytest.importorskip("osmium")
+    if not shutil.which("osmium"):
+        pytest.skip("osmium CLI not installed")
+    from tests.test_admin_areas import Osm, square
+    assert svr._parse_bbox("178,-1,-178,2") == [178.0, -1.0, 182.0, 2.0]
+    o = Osm()
+    o.way(1, square(179.0, 0.0, 179.5, 1.0))
+    o.rel(1, [("w", 1, "outer")], {"name": "East Isle", "admin_level": "6"})
+    o.way(2, square(-179.5, 0.0, -179.0, 1.0))
+    o.rel(2, [("w", 2, "outer")], {"name": "West Isle", "admin_level": "6"})
+    o.way(3, square(10.0, 0.0, 11.0, 1.0))
+    o.rel(3, [("w", 3, "outer")], {"name": "Far Isle", "admin_level": "6"})
+    pbf = o.write(tmp_path / "am.osm")
+    names = {f["name"] for f in svr._extract_admin(pbf, svr._parse_bbox("178,-1,-178,2"),
+                                                   tmp_path)}
+    assert names == {"East Isle", "West Isle"}
+
+
+def test_no_area_in_the_box_is_an_error(tmp_path, osm, no_rg, monkeypatch):
+    svr = _svr()
+    src = _write_source(tmp_path / "src.zim", SRC_RECORDS)
+    monkeypatch.setattr(svr, "ManifestCreator", lambda *a, **k: pytest.fail("packer started"))
+    with pytest.raises(SystemExit, match="no administrative area"):
         _run(svr, src, tmp_path / "dst.zim", tmp_path / "spill", monkeypatch,
-             add_admin_areas=osm)
+             add_admin_areas=osm, bbox="50,50,51,51")
+
+
+def test_wikidata_titles_offline_like_resolve_wikidata_titles(tmp_path):
+    svr = _svr()
+    geo = {"Bagmati_Province": [27.0, 85.0, "place", "Q2", ""]}
+    cache = tmp_path / "qid.json"
+    cache.write_text(json.dumps({"Q1": "Republic of Testland", "Q9": ""}))
+    blobs = {"wiki-geo-index.json": json.dumps(geo).encode()}
+    titles = svr._qid_titles(blobs.__getitem__, blobs.__contains__, str(cache))
+    assert titles == {"Q1": "Republic of Testland", "Q2": "Bagmati_Province"}
+    feats = [
+        {"name": "Testland", "type": "admin", "lat": 1, "lon": 1, "osm": "r1",
+         "wikidata": "Q1"},                                       # Q-ID only
+        {"name": "Bagmati Province", "type": "admin", "lat": 1, "lon": 1, "osm": "r2",
+         "wikidata": "Q2", "wikipedia": "ne:बागमती प्रदेश"},          # not English
+        {"name": "Kathmandu", "type": "admin", "lat": 1, "lon": 1, "osm": "r3",
+         "wikidata": "Q3", "wikipedia": "en:Kathmandu District"},  # English: kept
+        {"name": "Nowhere", "type": "admin", "lat": 1, "lon": 1, "osm": "r4",
+         "wikidata": "Q9"},                                       # no article
+    ]
+    spool = tmp_path / "s.jsonl"
+    spool.write_text("")
+    recs = [json.loads(x) for x in svr._plan_admin(feats, spool, titles)]
+    assert recs[0]["w"] == "en:Republic_of_Testland" and recs[0]["wsrc"] == "wd"
+    assert recs[1]["w"] == "en:Bagmati_Province" and recs[1]["wsrc"] == "wd"
+    assert recs[2]["w"] == "en:Kathmandu District" and "wsrc" not in recs[2]
+    assert "w" not in recs[3] and recs[3]["q"] == "Q9"
+    assert spool.read_text().count("\n") == 4
+    # Without a lookup: the relation's own tags.
+    recs = [json.loads(x) for x in svr._plan_admin(feats, spool, {})]
+    assert recs[1]["w"] == "ne:बागमती प्रदेश" and "w" not in recs[0]
 
 
 @pytest.mark.parametrize("fault", ["total", "leaf", "pbf"])
@@ -331,3 +439,146 @@ def test_add_admin_areas_needs_rebuild_search(tmp_path):
         svr.swap_viewer_rust("a.zim", "b.zim", add_admin_areas="x.pbf")
     with pytest.raises(SystemExit, match="W,S,E,N"):
         svr._parse_bbox("1,2,3")
+
+
+# ---- --rebuild-xapian ---------------------------------------------------------
+
+def _xapianbuilder():
+    from streetzim.zim_writer import _resolve_xapianbuilder_binary
+    try:
+        return _resolve_xapianbuilder_binary(None)
+    except FileNotFoundError:
+        pytest.skip("xapianbuilder not built (XAPIANBUILDER_BIN)")
+
+
+def _kiwix_hits(a, text):
+    """Paths Kiwix's title suggestions and full-text search return."""
+    from libzim.search import Query, Searcher
+    from libzim.suggestion import SuggestionSearcher
+    s = SuggestionSearcher(a).suggest(text)
+    sugg = list(s.getResults(0, 50))
+    f = Searcher(a).search(Query().set_query(text))
+    return sugg, list(f.getResults(0, 50))
+
+
+def _title(a, path):
+    e = a.get_entry_by_path(path)
+    return e.title, (e.get_redirect_entry().path if e.is_redirect else None)
+
+
+@pytest.mark.parametrize("admin", [True, False])
+def test_rebuild_xapian_points_kiwix_search_at_pages_that_exist(
+        tmp_path, osm, no_rg, monkeypatch, admin):
+    svr = _svr()
+    from libzim.reader import Archive
+    from streetzim import zim_writer as W
+    xb = _xapianbuilder()
+    src = _write_source(tmp_path / "src.zim", SRC_RECORDS)
+    dst = tmp_path / "out" / "dst.zim"
+    dst.parent.mkdir()
+    kw = {"add_admin_areas": osm} if admin else {}
+    _run(svr, src, dst, tmp_path / "spill", monkeypatch, rebuild_xapian=True,
+         xapianbuilder_bin=xb, **kw)
+    a = Archive(str(dst))
+    assert a.has_title_index and a.has_fulltext_index
+    # A page for each record of a page type (place, water; not the street or
+    # the cafe), as --xapian=libzim writes them, and none for the others.
+    titles = {}
+    for i in range(a.entry_count):
+        e = a._get_entry_by_id(i)
+        if e.path.startswith("search/") and not e.is_redirect:
+            titles[e.title] = e.path
+    want = {"Kathmandu", "Lake Rara"} | (
+        {"Testland (country)", "Bagmati Province (region)", "Kathmandu (district)"}
+        if admin else set())
+    assert set(titles) == want
+    page = _read(a, titles["Lake Rara"]).decode()
+    assert '<p class="kind">Lake</p>' in page and "map=14/1.0/1.0" in page
+    # Every suggestion and full-text hit is an entry of the archive (the
+    # builder's s/<n> documents had none), and the pages are found by name.
+    queries = ["Lake Rara", "Kathmandu", "Rara"]
+    if admin:
+        queries += ["Kantipur", "बागमती प्रदेश", "Bagmati Province", "Testland"]
+    found = {}
+    for q in queries:
+        sugg, full = _kiwix_hits(a, q)
+        for p in sugg + full:
+            assert a.has_entry_by_path(p), (q, p)
+            assert not p.startswith("s/")
+        found[q] = ({_title(a, p)[0] for p in sugg}, {_title(a, p)[0] for p in full})
+    assert "Lake Rara" in found["Lake Rara"][0] and "Lake Rara" in found["Rara"][1]
+    assert "Kathmandu" in found["Kathmandu"][0]
+    assert not any("Cafe" in t for t in found["Kathmandu"][0] | found["Kathmandu"][1])
+    if admin:
+        assert "Kathmandu (district)" in found["Kathmandu"][0]
+        # The other names: the redirect title, which leads to the page.
+        assert "Kantipur" in found["Kantipur"][0]
+        assert "Bagmati Province (region)" in found["बागमती प्रदेश"][1]
+        assert "बागमती प्रदेश" in found["बागमती प्रदेश"][0]
+        assert "Testland (country)" in found["Testland"][0]
+        kat = W.search_page(next(f for f in svr._extract_admin(osm, [-1, -1, 4.5, 4.5], tmp_path)
+                                 if f["name"] == "Kathmandu"), 2 + 1 + 1)
+        assert _title(a, kat[0])[0] == "Kathmandu (district)"
+    main = a.main_entry
+    assert (main.get_redirect_entry() if main.is_redirect else main).path == "index.html"
+
+
+def test_rebuild_xapian_refuses_a_zim_that_has_its_pages(tmp_path, monkeypatch, fake_xb):
+    svr = _svr()
+    xb = fake_xb
+    src = _write_source(tmp_path / "src.zim", SRC_RECORDS,
+                        extra_pages=[("search/kathmandu-0.html", "Kathmandu")])
+    monkeypatch.setattr(svr, "ManifestCreator", lambda *a, **k: pytest.fail("packer started"))
+    with pytest.raises(SystemExit, match="already has Kiwix search pages"):
+        _run(svr, src, tmp_path / "dst.zim", tmp_path / "spill", monkeypatch,
+             rebuild_xapian=True, xapianbuilder_bin=xb)
+
+
+def test_rebuild_xapian_needs_rebuild_search():
+    svr = _svr()
+    with pytest.raises(SystemExit, match="needs --rebuild-search"):
+        svr.swap_viewer_rust("a.zim", "b.zim", rebuild_xapian=True)
+
+
+def test_feature_of_inverts_search_record():
+    svr = _svr()
+    from streetzim import zim_writer as W
+    feat = {"name": "Kathmandu", "type": "admin", "subtype": "district", "lat": 27.70832,
+            "lon": 85.32058, "location": "Bagmati", "admin_level": 6, "osm": "r1",
+            "bbox": [85.1, 27.5, 85.5, 27.8], "alt": ["Kantipur"], "cat": "x", "brand": "B"}
+    assert svr._feature_of(W.search_record(feat)) == feat
+
+
+def test_a_control_character_in_a_name_is_not_in_its_page_title(tmp_path, monkeypatch, fake_xb):
+    """Both packers refuse a title with a control character; OSM has names
+    with a newline ("Tunda\\nBhuj (hot spring?!)", himalayas)."""
+    svr = _svr()
+    from libzim.reader import Archive
+    from streetzim import zim_writer as W
+    recs = SRC_RECORDS + [{"n": "Tunda\nBhuj", "t": "place", "s": "village", "a": 1.5,
+                           "o": 1.5, "l": "Testland", "alt": ["x\ty"]}]
+    src = _write_source(tmp_path / "src.zim", recs)
+    dst = tmp_path / "dst.zim"
+    _run(svr, src, dst, tmp_path / "spill", monkeypatch, rebuild_xapian=True,
+         xapianbuilder_bin=fake_xb)
+    assert "Tunda Bhuj" in _front_titles(Archive(str(dst)))
+    assert W.kiwix_alt_titles({"name": "A\nB", "type": "admin", "subtype": "town",
+                               "alt": ["C\tD"]}) == ["Town of A B", "C D"]
+
+
+def test_the_extraction_runs_in_a_child_with_its_scratch_in_the_spill(
+        tmp_path, osm, monkeypatch):
+    svr = _svr()
+    import subprocess
+    real = subprocess.run
+    seen = []
+
+    def run(cmd, **kw):
+        seen.append((cmd, (kw.get("env") or {}).get("TMPDIR")))
+        return real(cmd, **kw)
+    monkeypatch.setattr(subprocess, "run", run)
+    work = tmp_path / "work"
+    work.mkdir()
+    feats = svr._extract_admin(osm, [-1, -1, 4.5, 4.5], work)
+    assert {f["name"] for f in feats} == {"Testland", "Bagmati Province", "Kathmandu"}
+    assert len(seen) == 1 and seen[0][0][0] == sys.executable and seen[0][1] == str(work)

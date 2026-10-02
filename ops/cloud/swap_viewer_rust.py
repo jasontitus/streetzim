@@ -33,13 +33,17 @@ retrofit for ZIMs whose names were split at Indic/Thai vowel signs
 counted against the manifest's ``total`` before anything is written.
 ``--add-admin-areas PBF`` (with ``--rebuild-search``) adds the
 administrative areas the builder would have (streetzim/admin_areas.py, for the
-ZIM's map-config.json bounds or ``--bbox``): their search records, keyed as the
-writer keys them, and their Kiwix pages ``search/<slug>.html`` with the
-front-article redirects ``search/<slug>~<k>.html``. A source that already has
-admin records is left as it is (the option is skipped, with a message).
-Wikipedia: the relations' own tags only, no Wikimedia request. Kiwix's own
-search (the Xapian title and full-text indexes) is copied from the source, so
-it does not list the new pages (docs/search-prefix-locality.md#retrofit).
+ZIM's map-config.json bounds or ``--bbox``; extracted in a child process):
+their search records, keyed as the writer keys them, with English article
+titles from the source's wiki-geo-index or ``--wikidata-title-cache`` (no
+Wikimedia request). A source that already has admin records is left as it
+is (the option is skipped, with a message). ``--rebuild-xapian`` (with
+``--rebuild-search``) makes Kiwix's own search work in a --xapian=builder ZIM,
+whose title and full-text documents point at ``s/<n>`` paths that do not
+exist: it writes the Kiwix page ``search/<slug>-<i>.html`` of every record of
+a page type (and its other titles as redirects ``~<k>``), as --xapian=libzim
+does, and new indexes over them with xapianbuilder
+(docs/search-prefix-locality.md#retrofit).
 
 Scope otherwise: no routing changes, no terrain
 refresh. Use `repackage_zim.py` for those (and accept that it loses Xapian
@@ -48,7 +52,10 @@ on rust-built sources).
 Usage:
     python3 cloud/swap_viewer_rust.py SRC.zim DST.zim [--reshard-chips]
         [--reshard-search | --rebuild-search [--allow-total-mismatch]
-                            [--add-admin-areas REGION.osm.pbf [--bbox W,S,E,N]]]
+                            [--add-admin-areas REGION.osm.pbf [--bbox W,S,E,N]
+                             [--wikidata-title-cache JSON] [--allow-no-admin-areas]]
+                            [--rebuild-xapian [--xapianbuilder-bin PATH]
+                             [--kiwix-poi-pages]]]
         [--tmp DIR]   (required for the search options, default $TMPDIR; a
                        --tmp directory, or any with a search option, must be
                        off the root filesystem and not tmpfs)
@@ -390,8 +397,13 @@ def _spill_root(tmp_dir: str | None, search: bool) -> str | None:
 
 
 def _parse_bbox(text: str) -> list[float]:
+    """W,S,E,N as the build parses its --bbox (streetzim.common.parse_bbox):
+    a box across the antimeridian, written W > E as RFC 7946 does
+    (7.0,43.5,-170,44), comes back unwrapped (E past 180), the form
+    admin_areas' box tests take."""
+    from streetzim.common import parse_bbox
     try:
-        bb = [float(v) for v in str(text).split(",")]
+        bb = parse_bbox(str(text))
     except ValueError:
         bb = []
     if len(bb) != 4 or not (-90 <= bb[1] < bb[3] <= 90):
@@ -412,40 +424,66 @@ def _zim_bbox(src_bytes, has_path) -> list[float]:
     return _parse_bbox(",".join(str(v) for v in bounds))
 
 
+# The extraction, in a child: pyosmium's tables and the polygons take GBs
+# (4.2 GB on china) that a Python process keeps as its high-water mark, and
+# the packer then runs beside it.
+_ADMIN_CHILD = (
+    "import json, sys\n"
+    "sys.path.insert(0, sys.argv[1])\n"
+    "from streetzim.admin_areas import append_admin_areas\n"
+    "append_admin_areas(sys.argv[2], sys.argv[4], bbox=json.loads(sys.argv[3]))\n")
+
+
 def _extract_admin(pbf: str, bbox, work: Path) -> list[dict]:
     """The builder's own administrative-area extraction
     (streetzim/admin_areas.append_admin_areas: osmium, then pyosmium, with
     GeoNames from reverse_geocoder for areas the extract clips) for ``bbox``,
-    as search features. Its scratch goes under ``work`` (the spill), never
-    the default /tmp."""
-    from streetzim.admin_areas import append_admin_areas
+    as search features. It runs in a child Python that writes the features
+    to the spill and exits, so its memory is returned before the packer
+    starts; its scratch ($TMPDIR) is ``work``, never the default /tmp."""
+    import resource
+    import subprocess
     if not os.path.isfile(pbf):
         raise SystemExit(f"--add-admin-areas: {pbf!r} is not a file")
     if not shutil.which("osmium"):
         raise SystemExit("--add-admin-areas needs the osmium CLI (osmium-tool) on PATH")
     feats_path = work / "admin-features.jsonl"
     feats_path.write_text("", encoding="utf-8")
-    saved = tempfile.tempdir
-    tempfile.tempdir = str(work)
-    try:
-        append_admin_areas(pbf, str(feats_path), bbox=bbox)
-    finally:
-        tempfile.tempdir = saved
+    before = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+    rc = subprocess.run([sys.executable, "-c", _ADMIN_CHILD, str(REPO), pbf,
+                         json.dumps(list(bbox)), str(feats_path)],
+                        env=dict(os.environ, TMPDIR=str(work))).returncode
+    if rc != 0:
+        raise SystemExit(f"--add-admin-areas: the extraction failed (exit {rc}); "
+                         f"see above")
+    peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+    if peak > before:
+        print(f"  admin areas: extraction peak RSS {peak / 1048576:.2f} GB "
+              f"(a child, exited)", flush=True)
     with open(feats_path, encoding="utf-8") as f:
         feats = [json.loads(line) for line in f if line.strip()]
     feats_path.unlink()
     return feats
 
 
-def _spool_counts(spool_path: Path) -> tuple[int, int]:
+# A spool line is a record as json.dumps(separators=(",", ":")) writes it: a
+# quote inside a string is escaped, so the first unescaped `"t":"` is the key.
+_TYPE_RE = re.compile(r'"t":"((?:[^"\\]|\\.)*)"')
+
+
+def _record_type(line: str) -> str:
+    m = _TYPE_RE.search(line)
+    return json.loads(f'"{m.group(1)}"') if m else ""
+
+
+def _spool_counts(spool_path: Path, page_types) -> tuple[int, int]:
     """(admin records, records of a Kiwix page type) in a record spool."""
-    from streetzim.zim_writer import KIWIX_PAGE_TYPES
     admin = paged = 0
     with open(spool_path, encoding="utf-8") as f:
         for line in f:
-            t = json.loads(line).get("t")
+            t = _record_type(line)
             admin += t == "admin"
-            paged += t in KIWIX_PAGE_TYPES
+            paged += t in page_types
     return admin, paged
 
 
@@ -461,27 +499,172 @@ def _admin_pages(feats: list[dict], first: int):
         yield path, title, page_html, alts, feat
 
 
-def _plan_admin(feats: list[dict], spool_path: Path, has_path, first: int) -> list[str]:
+def _qid_titles(src_bytes, has_path, cache_path: str | None) -> dict[str, str]:
+    """Q-ID -> English title, offline: the source's own wiki-geo-index.json
+    (title -> [lat, lon, type, qid, desc]: every article the ZIM bundles), and
+    the build's --wikidata-title-cache JSON (``{qid: title}``, "" for none)
+    when given. Read only; nothing is asked of Wikidata."""
+    m: dict[str, str] = {}
+    if cache_path:
+        try:
+            with open(cache_path, encoding="utf-8") as f:
+                m.update({q: t for q, t in json.load(f).items() if t})
+        except (OSError, ValueError, AttributeError) as exc:
+            raise SystemExit(f"--wikidata-title-cache {cache_path!r}: {exc}")
+    if has_path("wiki-geo-index.json"):
+        try:
+            geo = json.loads(src_bytes("wiki-geo-index.json"))
+        except ValueError:
+            geo = {}
+        for title, v in geo.items():
+            if isinstance(v, list) and len(v) > 3 and isinstance(v[3], str) and v[3]:
+                m[v[3]] = title       # bundled: wins over the cache
+    return m
+
+
+def _plan_admin(feats: list[dict], spool_path: Path,
+                qid_titles: dict[str, str] | None = None) -> list[str]:
     """Append the admin areas' search records to the spool, keyed later
-    exactly as the writer keys them (zim_writer.search_record, with the
-    relation's own wikipedia/wikidata tags: admin_wiki without a resolved
-    lookup, so no Wikimedia request), and check that none of their pages or
-    redirects would replace a source entry (pages numbered from ``first``).
-    Returns the record lines."""
+    exactly as the writer keys them (zim_writer.search_record), with the wiki
+    keys the build gives them: the relation's own wikipedia/wikidata tags
+    (add_admin_wiki_refs, read back by admin_wiki), and, as
+    --resolve-wikidata-titles does, a Q-ID whose tag is missing or not
+    English made the English article (``w`` "en:…", ``wsrc`` "wd") -- from
+    ``qid_titles`` (_qid_titles), offline: no Wikimedia request. Returns the
+    record lines."""
+    from cloud.wikidata_titles import augment_wiki_cross_refs
+    from streetzim.admin_areas import add_admin_wiki_refs
     from streetzim.zim_writer import admin_wiki, search_record
-    seen: set[str] = set()
-    for path, _t, _h, alts, _f in _admin_pages(feats, first):
-        for p in (path, *alts):
-            if p in seen or has_path(p):
-                raise SystemExit(f"--add-admin-areas: page {p!r} already exists in the "
-                                 f"source (or twice in the plan); refusing to replace it")
-            seen.add(p)
-    lines = [json.dumps(search_record(f, admin_wiki(f, None)), separators=(",", ":"))
+    refs: dict = {}
+    add_admin_wiki_refs(refs, feats)
+    if qid_titles:
+        augment_wiki_cross_refs(refs, offline_map=qid_titles,
+                                log=lambda m: print(m, flush=True))
+    lines = [json.dumps(search_record(f, admin_wiki(f, refs)), separators=(",", ":"))
              for f in feats]
     with open(spool_path, "a", encoding="utf-8") as spool:
         for line in lines:
             spool.write(line + "\n")
     return lines
+
+
+def _open_creator(dst_path: str, main_path: str) -> ManifestCreator:
+    """The packer's creator, configured. It makes DST.pack-stage-* as it is
+    constructed, so a failure before ``with`` must remove that (its
+    __exit__ does, entered or not)."""
+    creator = ManifestCreator(dst_path, compression_level=22, verbose=True)
+    try:
+        creator.set_mainpath(main_path)
+    except BaseException:
+        creator.__exit__(*sys.exc_info())
+        raise
+    return creator
+
+
+def _feature_of(rec: dict) -> dict:
+    """The search feature a search record was written from (the inverse of
+    zim_writer.search_record, to 5 dp): what search_page and the Xapian
+    corpus read."""
+    feat = {"name": rec.get("n") or "", "type": rec.get("t") or "",
+            "subtype": rec.get("s") or "", "lat": rec.get("a", 0), "lon": rec.get("o", 0),
+            "location": rec.get("l") or ""}
+    for k in ("ws", "p", "soc", "brand", "wd", "cat", "source", "alt", "osm"):
+        if rec.get(k):
+            feat[k] = rec[k]
+    if rec.get("al") is not None:
+        feat["admin_level"] = rec["al"]
+    if rec.get("bb"):
+        feat["bbox"] = rec["bb"]
+    return feat
+
+
+def _has_path_prefix(src, prefix: str) -> bool:
+    """Whether the source has a content entry whose path starts with
+    ``prefix``: a binary search over the entries, which libzim keeps in path
+    order."""
+    lo, hi = 0, src.entry_count
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if src._get_entry_by_id(mid).path < prefix:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo < src.entry_count and src._get_entry_by_id(lo).path.startswith(prefix)
+
+
+def _plan_xapian(spool_path: Path, admin_feats: list[dict], admin_first: int,
+                 work: Path, has_path, xapianbuilder_bin: str | None,
+                 page_types) -> tuple[Path, int]:
+    """Kiwix's own search for a --xapian=builder ZIM, whose title and
+    full-text documents point at ``s/<n>`` paths nothing was ever written at
+    (zim_writer._streetzim_to_xapianbuilder_jsonl). Every record of a Kiwix
+    page type gets its page, as --xapian=libzim writes them
+    (search/<slug>-<i>.html, numbered in record order; the admin areas this
+    run adds come last, from ``admin_first``, written by the caller); the
+    corpus is the one a --xapian=builder build feeds xapianbuilder
+    (zim_writer.xapianbuilder_doc) with each document at its page, and the
+    title index also gets every redirect title (add_alt_titles) at its
+    redirect. A page or redirect that would replace a source entry stops the
+    run. Both indexes are built here, before anything is written. Returns (the pages to write: JSON lines ``{"i", "f"}``, their count)."""
+    from streetzim.zim_writer import (_build_xapian_via_xapianbuilder, kiwix_alt_titles,
+                                      search_page, xapianbuilder_doc)
+    pages_path = work / "kiwix-pages.jsonl"
+    ft_path = work / "xapian-fulltext.jsonl"
+    ti_path = work / "xapian-title.jsonl"
+    n_pages = n_redirects = 0
+    seen: set[str] = set()
+
+    def claim(p):
+        if p in seen or has_path(p):
+            raise SystemExit(f"--rebuild-xapian: {p!r} already exists in the source "
+                             f"(or twice in the plan); refusing to replace it")
+        seen.add(p)
+
+    def docs(feat, path, ft, ti):
+        nonlocal n_redirects
+        claim(path)
+        doc = json.dumps(xapianbuilder_doc(feat, path), ensure_ascii=False) + "\n"
+        ft.write(doc)
+        ti.write(doc)
+        for k, alt in enumerate(kiwix_alt_titles(feat)):
+            rpath = f"{path[:-len('.html')]}~{k}.html"
+            claim(rpath)
+            ti.write(json.dumps({"path": rpath, "title": alt, "mimetype": "text/html",
+                                 "body": "", "language": "eng", "target_path": path},
+                                ensure_ascii=False) + "\n")
+            n_redirects += 1
+
+    with open(spool_path, encoding="utf-8") as spool, \
+            open(pages_path, "w", encoding="utf-8") as pages, \
+            open(ft_path, "w", encoding="utf-8") as ft, \
+            open(ti_path, "w", encoding="utf-8") as ti:
+        i = 0
+        for line in spool:
+            if _record_type(line) not in page_types:
+                continue
+            if i >= admin_first and admin_feats:
+                break                     # the areas this run adds: below
+            feat = _feature_of(json.loads(line))
+            path = search_page(feat, i)[0]
+            pages.write(json.dumps({"i": i, "f": feat}, ensure_ascii=False) + "\n")
+            docs(feat, path, ft, ti)
+            i += 1
+        n_pages = i
+        if admin_feats and n_pages != admin_first:
+            raise SystemExit(f"--rebuild-xapian: {n_pages} page record(s) before the "
+                             f"added areas, expected {admin_first}")
+        for path, _t, _h, _alts, feat in _admin_pages(admin_feats, admin_first):
+            docs(feat, path, ft, ti)
+    print(f"  xapian: {n_pages + len(admin_feats):,} page document(s), "
+          f"{n_redirects:,} redirect title(s); building with xapianbuilder", flush=True)
+    t0 = time.time()
+    _build_xapian_via_xapianbuilder(
+        "", str(work / "xapian"), language="eng", binary_override=xapianbuilder_bin,
+        inputs={"fulltext": str(ft_path), "title": str(ti_path)})
+    ft_path.unlink()
+    ti_path.unlink()
+    print(f"  xapian: built in {time.time() - t0:.0f}s", flush=True)
+    return pages_path, n_pages
 
 
 def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
@@ -490,12 +673,34 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                      tmp_dir: str | None = None,
                      allow_total_mismatch: bool = False,
                      add_admin_areas: str | None = None,
-                     bbox: str | None = None) -> int:
+                     bbox: str | None = None,
+                     rebuild_xapian: bool = False,
+                     xapianbuilder_bin: str | None = None,
+                     kiwix_poi_pages: bool = False,
+                     wikidata_title_cache: str | None = None,
+                     allow_no_admin_areas: bool = False) -> int:
     from libzim.reader import Archive
 
     if add_admin_areas and not rebuild_search:
         raise SystemExit("--add-admin-areas needs --rebuild-search (the records "
                          "join the index it rebuilds)")
+    if rebuild_xapian and not rebuild_search:
+        raise SystemExit("--rebuild-xapian needs --rebuild-search (its documents are "
+                         "the records the rebuild recovers)")
+    if xapianbuilder_bin and not rebuild_xapian:
+        raise SystemExit("--xapianbuilder-bin is the indexer of --rebuild-xapian")
+    if rebuild_xapian:
+        from streetzim.zim_writer import _resolve_xapianbuilder_binary
+        try:
+            xapianbuilder_bin = _resolve_xapianbuilder_binary(xapianbuilder_bin)
+        except FileNotFoundError as exc:
+            raise SystemExit(f"--rebuild-xapian: {exc}")
+    if (wikidata_title_cache or allow_no_admin_areas) and not add_admin_areas:
+        raise SystemExit("--wikidata-title-cache and --allow-no-admin-areas go with "
+                         "--add-admin-areas")
+    if kiwix_poi_pages and not rebuild_xapian:
+        raise SystemExit("--kiwix-poi-pages goes with --rebuild-xapian (it numbers and "
+                         "writes the pages)")
     if bbox and not add_admin_areas:
         raise SystemExit("--bbox is the box of --add-admin-areas")
     admin_bbox = _parse_bbox(bbox) if bbox else None
@@ -636,9 +841,20 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
             search_spool, search_total = _recover_search(
                 _src_bytes, search_manifest, spill_dir_path,
                 allow_total_mismatch=allow_total_mismatch)
-        if add_admin_areas:
+        from streetzim.zim_writer import kiwix_page_types
+        # The record types a build gives Kiwix pages, numbered in this order
+        # (--kiwix-poi-pages adds POIs, as it does for create_osm_zim.py).
+        page_types = kiwix_page_types(kiwix_poi_pages)
+        have_admin = paged = 0
+        if add_admin_areas or rebuild_xapian:
             assert search_spool is not None
-            have_admin, paged = _spool_counts(search_spool)
+            have_admin, paged = _spool_counts(search_spool, page_types)
+            if rebuild_xapian and _has_path_prefix(src, "search/"):
+                # A --xapian=libzim ZIM (or one this tool already gave pages):
+                # it has its pages, and its indexes point at them.
+                raise SystemExit(f"--rebuild-xapian: {src_path} already has Kiwix "
+                                 f"search pages (search/...); nothing to rebuild")
+        if add_admin_areas:
             if have_admin:
                 print(f"  --add-admin-areas: SKIPPED -- the source already has "
                       f"{have_admin:,} administrative-area record(s) (t \"admin\"); "
@@ -648,21 +864,34 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                 print(f"  admin areas: {add_admin_areas} in box "
                       f"{','.join(f'{v:g}' for v in box)}", flush=True)
                 admin_feats = _extract_admin(add_admin_areas, box, spill_dir_path)
+                if not admin_feats and not allow_no_admin_areas:
+                    # A box that misses the extract (or one read wrong) would
+                    # otherwise ship a ZIM that only looks retrofitted.
+                    raise SystemExit("--add-admin-areas: no administrative area in the "
+                                     "box; check the PBF and the box "
+                                     "(--allow-no-admin-areas proceeds)")
                 # A fresh build numbers its pages in feature order and appends
                 # the admin areas last, after the other page-type records.
                 admin_first = paged
-                _plan_admin(admin_feats, search_spool, src.has_entry_by_path, admin_first)
+                _plan_admin(admin_feats, search_spool,
+                            _qid_titles(_src_bytes, src.has_entry_by_path,
+                                        wikidata_title_cache))
                 search_total += len(admin_feats)
                 levels: dict[int, int] = {}
                 for f in admin_feats:
                     levels[f.get("admin_level")] = levels.get(f.get("admin_level"), 0) + 1
                 print(f"  admin areas: {len(admin_feats):,} record(s) to add "
                       f"(by admin_level: {dict(sorted(levels.items()))}); "
-                      f"search total {search_total:,}; Kiwix pages "
-                      f"search/<slug>-{admin_first}.. onward", flush=True)
-
-        creator = ManifestCreator(dst_path, compression_level=22, verbose=True)
-        creator.set_mainpath(main_path)
+                      f"search total {search_total:,}"
+                      + (f"; Kiwix pages search/<slug>-{admin_first}.. onward"
+                         if rebuild_xapian else
+                         "; no Kiwix pages without --rebuild-xapian"), flush=True)
+        xapian_pages: Path | None = None
+        if rebuild_xapian:
+            assert search_spool is not None
+            xapian_pages, n_rec_pages = _plan_xapian(
+                search_spool, admin_feats, admin_first if admin_feats else paged,
+                spill_dir_path, src.has_entry_by_path, xapianbuilder_bin, page_types)
 
         def _stage_large(path: str, data: bytes) -> tuple[bytes | None, str | None]:
             if len(data) < STREAMING_THRESHOLD:
@@ -672,7 +901,7 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
             out.write_bytes(data)
             return None, str(out)
 
-        with creator as c:
+        with _open_creator(dst_path, main_path) as c:
             # Copy metadata entries verbatim (Title, Description, Date, Name,
             # Counter, Language, etc.). ManifestCreator distinguishes
             # metadata via add_metadata; iterating metadata_keys gives names
@@ -742,6 +971,9 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                 is_xapian = (path in ("fulltext/xapian", "title/xapian")
                              or mime.endswith("+xapian"))
                 if i >= src_visible and not is_xapian:
+                    continue
+                if rebuild_xapian and is_xapian:
+                    # Rebuilt below, its documents pointing at pages that exist.
                     continue
 
                 if reshard_chips and (path == CAT_MANIFEST or _is_chip_entry(path)):
@@ -829,7 +1061,7 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                                         search_manifest, spill_dir_path)
                 print(f"  search: dropped {dropped_search_files} old file(s), "
                       f"rebuilt {n_out} record(s)", flush=True)
-            if admin_feats:
+            if admin_feats and xapian_pages is not None:
                 from streetzim.zim_writer import add_alt_titles
                 n_redirects = 0
                 for path, title, page_html, _alts, feat in _admin_pages(admin_feats,
@@ -842,6 +1074,26 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                     n_redirects += add_alt_titles(c, path, feat)
                 print(f"  admin areas: wrote {len(admin_feats):,} Kiwix page(s) and "
                       f"{n_redirects:,} redirect(s)", flush=True)
+
+            if xapian_pages is not None:
+                from streetzim.zim_writer import add_alt_titles, search_page
+                n_written = n_redirects = 0
+                with open(xapian_pages, encoding="utf-8") as pf:
+                    for line in pf:
+                        row = json.loads(line)
+                        path, title, page_html = search_page(row["f"], row["i"])
+                        c.add_item(_Item(path, "text/html", title=title,
+                                         data=page_html.encode("utf-8"), is_front=True))
+                        n_redirects += add_alt_titles(c, path, row["f"])
+                        n_written += 1
+                for name in ("fulltext", "title"):
+                    glass = spill_dir_path / "xapian" / f"X-{name}-xapian.glass"
+                    c.add_item(_Item(f"{name}/xapian", "application/octet-stream+xapian",
+                                     file_path=str(glass), compress=False, namespace="X"))
+                    xapian += 1
+                print(f"  xapian: wrote {n_written:,} Kiwix page(s) and {n_redirects:,} "
+                      f"redirect(s) for the source's records, and new title and "
+                      f"full-text indexes", flush=True)
 
             if reshard_search:
                 from cloud.search_shards import (Aggregator, SHARD_TARGET_BYTES,
@@ -1119,7 +1371,8 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
     print(f"    illustrations: {illustration_count}")
     print(f"    redirects:     {redirects}")
     print(f"    viewer swaps:  {swapped}")
-    print(f"    X-namespace:   {xapian} (Xapian glass DBs preserved)")
+    print(f"    X-namespace:   {xapian} (Xapian glass DBs "
+          f"{'rebuilt' if rebuild_xapian else 'preserved'})")
     print(f"    passthrough:   {kept}")
     if os.path.isfile(dst_path):
         print(f"  output: {dst_path} "
@@ -1156,6 +1409,27 @@ def main() -> int:
                          "for the ZIM's box, with their Kiwix pages "
                          "(search/<slug>.html) and redirects. Skipped, with a "
                          "message, when the source already has admin records.")
+    ap.add_argument("--rebuild-xapian", action="store_true",
+                    help="--rebuild-search: replace Kiwix's own search (the Xapian "
+                         "title and full-text indexes of a --xapian=builder ZIM, whose "
+                         "documents point at s/<n> paths that do not exist): write the "
+                         "Kiwix page of every place, airport, park, peak, water and "
+                         "admin record (search/<slug>.html, as --xapian=libzim does) "
+                         "and index those pages with xapianbuilder.")
+    ap.add_argument("--xapianbuilder-bin", metavar="PATH", default=None,
+                    help="--rebuild-xapian: the xapianbuilder executable (default "
+                         "$XAPIANBUILDER_BIN, then ../xapianbuilder/target/...).")
+    ap.add_argument("--kiwix-poi-pages", action="store_true",
+                    help="--rebuild-xapian: POIs get Kiwix pages too, as "
+                         "create_osm_zim.py --kiwix-poi-pages gives them (use it "
+                         "when the source was built with it).")
+    ap.add_argument("--wikidata-title-cache", metavar="JSON", default=None,
+                    help="--add-admin-areas: the build's Q-ID -> English title cache "
+                         "(read only), besides the source's wiki-geo-index, for areas "
+                         "whose wikipedia tag is missing or not English.")
+    ap.add_argument("--allow-no-admin-areas", action="store_true",
+                    help="--add-admin-areas: write the ZIM even when no area is "
+                         "found in the box (otherwise an error).")
     ap.add_argument("--bbox", metavar="W,S,E,N", default=None,
                     help="--add-admin-areas: the box (default: the source's "
                          "map-config.json bounds, the box it was built for).")
@@ -1172,7 +1446,12 @@ def main() -> int:
                             tmp_dir=args.tmp,
                             allow_total_mismatch=args.allow_total_mismatch,
                             add_admin_areas=args.add_admin_areas,
-                            bbox=args.bbox)
+                            bbox=args.bbox,
+                            rebuild_xapian=args.rebuild_xapian,
+                            xapianbuilder_bin=args.xapianbuilder_bin,
+                            kiwix_poi_pages=args.kiwix_poi_pages,
+                            wikidata_title_cache=args.wikidata_title_cache,
+                            allow_no_admin_areas=args.allow_no_admin_areas)
 
 
 if __name__ == "__main__":

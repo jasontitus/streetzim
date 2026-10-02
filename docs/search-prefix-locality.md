@@ -354,38 +354,70 @@ build would add, without a rebuild:
 
 * **Extraction**: the builder's own `admin_areas.append_admin_areas` on the
   PBF, for the ZIM's box (`map-config.json` `bounds`, the box the build
-  passed it; `--bbox W,S,E,N` overrides). It needs the osmium CLI and
-  pyosmium; its scratch goes to the spill directory. GeoNames
+  passed it; `--bbox W,S,E,N` overrides, parsed as the build parses its
+  `--bbox`, so an RFC 7946 box across the antimeridian, W > E, works). It
+  needs the osmium CLI and pyosmium, and runs in a child Python that writes
+  the areas to the spill directory (its scratch too) and exits: its 4.2 GB on
+  china would otherwise stay the retrofit's high-water mark while the packer
+  runs. No area in the box is an error (`--allow-no-admin-areas`). GeoNames
   (`reverse_geocoder`'s bundled `rg_cities1000.csv`, offline; a builder
   dependency, in the image and the host venv) places areas the extract
   clips and names regions; without it those clipped areas are left out and
   a region falls back to the country.
 * **Records**: `zim_writer.search_record` (the writer's own record shape:
-  `al`, `bb`, `alt`, `osm`, with `w`/`q` from the relation's own
-  `wikipedia`/`wikidata` tags through `admin_wiki` without a resolved
-  lookup -- no Wikimedia request), serialised as the writer serialises,
+  `al`, `bb`, `alt`, `osm`, `w`/`q`), serialised as the writer serialises,
   appended to the recovered records and keyed with them under the current
   rule, by the name and every other name (as `_search_bucket` keys them).
-  `total` becomes recovered + added. A non-English tag stays as it is
-  (`ne:…`): the map's Wikipedia button appears only for an article the ZIM
-  bundles (`wiki-geo-index.json`, left untouched), and the Find list's 📖
-  links to the public site, as for every record.
-* **Kiwix pages**: `search/<slug>-<i>.html` (`zim_writer.search_page`, front
-  articles) and the redirects `search/<slug>-<i>~<k>.html` (`add_alt_titles`,
-  front articles), numbered after the source's records of a page type, as a
-  build appends the areas last. A page or redirect that would replace a
-  source entry stops the run before anything is written.
+  `total` becomes recovered + added. Wiki keys as a production build
+  (`--resolve-wikidata-titles`) gives them, offline: the relation's own
+  tags (`add_admin_wiki_refs`), then `augment_wiki_cross_refs` with a Q-ID
+  -> English title map from the source's `wiki-geo-index.json` (the
+  articles it bundles) and the build's `--wikidata-title-cache` JSON when
+  given, so a Q-ID-only or non-English tag becomes `w: "en:…"`, `wsrc:
+  "wd"`. No Wikimedia request. The map's Wikipedia button appears only for
+  an article the ZIM bundles (the geo-index, left untouched); the Find
+  list's 📖 links to the public site, as for every record.
+* **Kiwix pages** only with `--rebuild-xapian`, below: a `--xapian=builder`
+  build writes none, and a page is a document of Kiwix's own search.
 * **Already there**: a source with any `t: "admin"` record is left as it is
   (the option is skipped, with a message); nothing is added or replaced.
 * **Unchanged**: the Find chips and category index (no `category-index/
-  admin.json`, no `streetzim-meta.json` type count), the wiki geo-index, and
-  Kiwix's own search. The Xapian title and full-text indexes are copied
-  from the source, and libzim suggests from the title index whenever there
-  is one, so Kiwix's search bar does not list the new pages; the pages are
-  front articles in the title list and open by path. (In a
-  `--xapian=builder` ZIM -- all four retrofit targets -- those indexes'
-  documents point at `s/<n>` paths that have no entry, so Kiwix-native
-  results do not open either way.)
+  admin.json`, no `streetzim-meta.json` type count) and the wiki geo-index.
+
+### Kiwix's own search (`--rebuild-xapian`)
+
+A `--xapian=builder` ZIM -- all four retrofit targets, and every region the
+build wrappers build where xapianbuilder is installed
+(`build-region-fast.sh`) -- has Xapian title and full-text indexes whose
+documents point at `s/<n>`, and nothing was ever written there:
+`_streetzim_to_xapianbuilder_jsonl` named them so "until follow-up work
+adds a tiny redirect entry per record" (f38cfb4, 2026-05-08, which moved
+the build to xapianbuilder and stopped writing the pages), and that work
+never came. On himalayas 2026-09-27, kiwix-serve `/suggest?term=Nepal`
+returns `s/85122`, a 404. A `--xapian=libzim` build writes a front-article
+page `search/<slug>-<i>.html` for every record of a page type
+(`KIWIX_PAGE_TYPES`: place, airport, park, peak, water, admin; POIs too
+with `--kiwix-poi-pages`) and the admin areas' other titles as redirects,
+and libzim indexes those.
+
+`--rebuild-search --rebuild-xapian` makes the retrofitted ZIM that: every
+page-type record gets its page (`search_page` on the record read back as a
+feature, `_feature_of`; numbered in record order, the areas
+`--add-admin-areas` adds last, as a build appends them), the admin areas
+their `~<k>` redirects, and the source's two indexes are replaced by new
+ones from the build's own xapianbuilder (`_build_xapian_via_xapianbuilder`,
+the corpus `xapianbuilder_doc` writes for a builder build) whose documents
+are those pages; the title index also holds every redirect title at its
+redirect. Every result opens. Pages, redirects and both indexes are made
+before the packer starts; an entry that would be replaced stops the run.
+A source that already has `search/` pages (a `--xapian=libzim` ZIM) is
+refused. Page titles lose control characters (`zim_writer._title_text`:
+"Tunda\nBhuj" -- both packers refuse them).
+
+So the Kiwix A-Z list and random article are the pages, as in a
+`--xapian=libzim` ZIM; without `--rebuild-xapian` no page is written, as in
+a `--xapian=builder` one. (Fresh `--xapian=builder` builds still point at
+`s/<n>`: fixing the build means writing these pages there too.)
 
 Measured 2026-10-02 on himalayas 2026-09-27 (5.34 GB, rule 1, built with
 `--xapian=builder`), region PBF of 2026-09-05: 2,452,785 records recovered

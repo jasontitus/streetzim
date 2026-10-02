@@ -191,7 +191,9 @@ the same OSM extract (added in 2026-09; older ZIMs have none).
   ("Georgetown" gets "Town of Georgetown"). Kiwix's title search wants every
   typed word in the title. A page whose region or point came from GeoNames
   carries its credit. `--xapian=builder` builds get the page title and the
-  other names in the full text, not the redirects; neither does the Rust
+  other names in the full text, not the redirects, and no page: their
+  documents point at `s/<n>`, which does not exist
+  (docs/search-prefix-locality.md, "Kiwix's own search"); neither does the Rust
   packer's redirect record carry a front-article flag yet
   (`rust/streetzim-pack`, TODO), so `--zim-builder=rust` builds suggest the
   pages but not their other titles.
