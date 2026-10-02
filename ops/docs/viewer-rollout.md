@@ -117,6 +117,30 @@ preserves the UUID so it reads as an update.)
 It also refuses to start unless `2 × source size` is free — the re-pack holds
 source and destination side by side.
 
+## Pre-fix builder ZIMs fail the Kiwix search gate
+
+Since 2026-10-02 `cloud/validate_zim.py` fails, at error severity, a ZIM
+whose Kiwix title suggestions or full-text hits do not open
+(`kiwix_search_links`). Every `--xapian=builder` ZIM built from 2026-05-08 to
+2026-10-02 is one: its Xapian documents point at `s/<n>`, which was never
+written (docs/search-prefix-locality.md, "Kiwix's own search"). So a
+viewer-only rollout of such a region -- `rollout_viewer_patch.sh`'s in-place
+patch, or a plain `swap_viewer_rust.py` in `viewer-refresh-queue.sh`,
+`retrofit-chips-queue.sh` or `canada_viewer_repack.sh` -- can never pass its
+validate gate. Those scripts are unchanged and say so at the top; mend the
+region in the same swap instead:
+
+```
+cloud/swap_viewer_rust.py SRC DST --rebuild-search --rebuild-xapian --tmp DIR
+```
+
+(with the script's own flags, e.g. `--reshard-chips`; `--tmp` on /storage:
+the rebuild spills the search records and the Xapian corpus there). That is a
+full rewrite, not a patch: a new UUID and dated filename, as for Canada
+above, and about `2 x source` of free space. `STREETZIM_KIWIX_SEARCH_WARN=1`
+downgrades the check to a warning, for a deliberate re-gate of an unmended
+ZIM only.
+
 ## Listing lag
 
 `upload_validated.sh` exits **6** = "transferred, listing pending" when

@@ -387,6 +387,13 @@ build would add, without a rebuild:
 
 ### Kiwix's own search (`--rebuild-xapian`)
 
+To mend a published ZIM that `cloud/validate_zim.py` fails with
+`kiwix_search_links` (add the swap's other flags, e.g. `--reshard-chips`):
+
+```
+ops/cloud/swap_viewer_rust.py SRC DST --rebuild-search --rebuild-xapian --tmp DIR
+```
+
 A `--xapian=builder` ZIM built before 2026-10-02 -- all four retrofit
 targets, and every region the build wrappers built where xapianbuilder is
 installed (`build-region-fast.sh`) -- has Xapian title and full-text indexes
@@ -489,8 +496,17 @@ come from the same `xapianbuilder_doc`). Cost: [zimfarm.md](zimfarm.md#kiwixs-se
 (Luxembourg basic +2.7% size, about +3% time).
 `cloud/validate_zim.py` (`kiwix_search_links`) and
 `tools/check_openzim_output.py` now fail a ZIM whose Kiwix suggestions or
-full-text hits are not entries of it (`STREETZIM_KIWIX_SEARCH_WARN=1` makes
-it a warning, for re-gating a published builder ZIM not yet mended).
+full-text hits do not open (not an entry, or a redirect that leads to none).
+They ask for common words, the region's name and titles sampled from the
+pages, from their `~` redirects (title index only) and from the bundled
+Wikipedia articles (full text only), in bounded windows, so a country costs
+a few thousand entry reads. The failure names the mend
+(`ops/cloud/swap_viewer_rust.py SRC DST --rebuild-search --rebuild-xapian
+--tmp DIR`); `STREETZIM_KIWIX_SEARCH_WARN=1` makes it a warning, for
+re-gating a published builder ZIM not yet mended (ops/docs/viewer-rollout.md).
+A builder build no longer reuses a Xapian database left in its work dir
+unless the stamp beside it is the hash of this run's corpus: same-name pages
+can swap numbers between runs.
 
 Measured 2026-10-02 on himalayas 2026-09-27 (5.34 GB, rule 1, built with
 `--xapian=builder`), region PBF of 2026-09-05: 2,452,785 records recovered
