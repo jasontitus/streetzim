@@ -9,6 +9,18 @@ if [ ! -L "$0" ] && _ops_real="$(readlink -f "$0" 2>/dev/null)"; then
   esac
 fi
 unset _ops_real _ops_old
+# KIWIX SEARCH GATE (2026-10-02): cloud/validate_zim.py now fails, at error
+# severity, a ZIM whose Kiwix suggestions or full-text hits do not open
+# (kiwix_search_links). Every --xapian=builder ZIM built from 2026-05-08 to
+# 2026-10-02 is one: its Xapian documents point at s/<n>, which was never
+# written. An in-place viewer patch of such a ZIM can never pass this script's
+# validate gate; it needs a full rewrite that mends it:
+#   cloud/swap_viewer_rust.py SRC DST --rebuild-search --rebuild-xapian --tmp DIR
+# (plus whatever this script passes; docs/search-prefix-locality.md "Kiwix's
+# own search"). This script's behaviour is unchanged on purpose: it does not
+# add those flags (they rewrite the search data and take a big tmp dir).
+# STREETZIM_KIWIX_SEARCH_WARN=1 downgrades the check to a warning, only for a
+# deliberate re-gate of an unmended ZIM. ops/docs/viewer-rollout.md.
 # Roll the current resources/viewer into every live region, SMALLEST FIRST,
 # then re-upload. What this ships: the low-zoom lake layer (f78011a) and the
 # chip fallback distance fix (fb85341).

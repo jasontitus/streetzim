@@ -172,12 +172,17 @@ def _add_redirect(creator, path, title, target, front=False):
         creator.add_redirection(path, title, target)
 
 
+def kiwix_alt_redirects(page_path, feat):
+    """(path, title) of each redirect add_alt_titles writes to `page_path`."""
+    stem = page_path[:-len(".html")]
+    return [(f"{stem}~{k}.html", t) for k, t in enumerate(kiwix_alt_titles(feat))]
+
+
 def add_alt_titles(creator, page_path, feat):
     """The redirects for kiwix_alt_titles(feat) to `page_path`, as front
     articles so Kiwix suggests them. Returns how many were added."""
-    alts = kiwix_alt_titles(feat)
-    for k, title in enumerate(alts):
-        path = f"{page_path[:-len('.html')]}~{k}.html"
+    alts = kiwix_alt_redirects(page_path, feat)
+    for path, title in alts:
         _add_redirect(creator, path, title, page_path, front=True)
     return len(alts)
 
@@ -441,9 +446,10 @@ def xapianbuilder_doc(feat, path, *, language="eng", target_path=""):
     "body", "language", "target_path"}``) of search feature `feat` at
     `path`. Indexable body: the fields libzim's HTML-stub auto-indexer
     would have seen (name + location + type + subtype + category + brand,
-    and an admin area's other names), with a ``geo.position`` meta tag so
-    xapianbuilder's MyHtmlParser fills value slot 2 with the lat/lon (on
-    parity with libzim's path). Title: kiwix_page_title. ``target_path``
+    and an admin area's other names and formal titles, kiwix_alt_titles),
+    with a ``geo.position`` meta tag so xapianbuilder's MyHtmlParser fills
+    value slot 2 with the lat/lon (on parity with libzim's path). Title:
+    kiwix_page_title. ``target_path``
     (title index only): the page a redirect title points at."""
     import html as _html
     body_parts = [feat.get("name") or ""]
@@ -452,6 +458,9 @@ def xapianbuilder_doc(feat, path, *, language="eng", target_path=""):
         if v:
             body_parts.append(str(v))
     body_parts += [str(a) for a in feat.get("alt") or ()]
+    # An admin area's formal title ("Town of Moneghetti"): Kiwix's full text
+    # wants every typed word, "of" too.
+    body_parts += [t for t in kiwix_alt_titles(feat) if t not in body_parts]
     body_text = " ".join(body_parts)
     lat = feat.get("lat", 0)
     lon = feat.get("lon", 0)
@@ -470,122 +479,138 @@ def xapianbuilder_doc(feat, path, *, language="eng", target_path=""):
     }
 
 
-def _streetzim_to_xapianbuilder_jsonl(src_jsonl: str, dst_jsonl: str,
-                                      *, language: str = "eng") -> int:
-    """Stream-translate the streetzim search-feature JSONL written by
-    pass 1 (one feature record per line: ``{"name", "type", "lat",
-    "lon", "location", "cat", "subtype", "ws", "p", "soc", "brand",
-    "wd", ...}``) into the xapianbuilder input format
-    (``{"path", "title", "mimetype", "body", "language",
-    "target_path"}``).
+class XapianCorpus:
+    """The xapianbuilder inputs of a --xapian=builder build: what libzim's
+    indexer would take in a --xapian=libzim build of the same features.
 
-    Indexable body keeps the same fields libzim's HTML-stub auto-
-    indexer would have seen: name + location + type + subtype +
-    category + brand. ``geo.position`` meta tag is embedded so
-    xapianbuilder's MyHtmlParser populates value slot 2 with the
-    lat/lon (kept on parity with libzim's path).
+    ``page(feat, path)``: the Kiwix page at `path` (search_page) as a
+    document of both indexes (xapianbuilder_doc), and each of its redirects
+    (kiwix_alt_redirects; front articles, so libzim puts their titles in the
+    title index) as a title document at the redirect, ``target_path`` the
+    page. ``fulltext(path, title, html)``: another text/html entry libzim
+    would index (the bundled Wikipedia articles: not front articles, so in
+    the full text only).
 
-    Titles have no control characters (kiwix_page_title, _title_text),
-    which before 2026-10-02 they could.
-
-    Returns the number of records emitted. Streams line-by-line —
-    constant memory regardless of corpus size.
+    Before 2026-10-02 the build fed xapianbuilder documents named
+    ``s/<n>`` and wrote nothing there (f38cfb4, 2026-05-08): every
+    Kiwix suggestion and full-text hit of a builder ZIM was a dead link
+    (ops/cloud/swap_viewer_rust.py --rebuild-xapian mends published ones).
     """
-    n = 0
-    with open(src_jsonl, encoding="utf-8") as src, \
-         open(dst_jsonl, "w", encoding="utf-8") as dst:
-        for line in src:
-            line = line.strip()
-            if not line:
-                continue
+
+    def __init__(self, workdir, language="eng"):
+        os.makedirs(workdir, exist_ok=True)
+        self.language = language
+        self.paths = {"fulltext": os.path.join(workdir, "_xapian-fulltext.jsonl"),
+                      "title": os.path.join(workdir, "_xapian-title.jsonl")}
+        self._ft = open(self.paths["fulltext"], "w", encoding="utf-8")
+        self._ti = open(self.paths["title"], "w", encoding="utf-8")
+        self.pages = self.redirects = self.extra = 0
+
+    def _put(self, f, rec):
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+    def page(self, feat, path):
+        doc = xapianbuilder_doc(feat, path, language=self.language)
+        self._put(self._ft, doc)
+        self._put(self._ti, doc)
+        self.pages += 1
+        for rpath, title in kiwix_alt_redirects(path, feat):
+            self._put(self._ti, {"path": rpath, "title": title, "mimetype": "text/html",
+                                 "body": "", "language": self.language,
+                                 "target_path": path})
+            self.redirects += 1
+
+    def fulltext(self, path, title, content):
+        if isinstance(content, (bytes, bytearray)):
+            content = bytes(content).decode("utf-8", "replace")
+        self._put(self._ft, {"path": path, "title": title or path,
+                             "mimetype": "text/html", "body": content,
+                             "language": self.language, "target_path": ""})
+        self.extra += 1
+
+    def close(self):
+        """Close both inputs; returns ``{"fulltext": path, "title": path}``."""
+        self._ft.close()
+        self._ti.close()
+        return dict(self.paths)
+
+    def remove(self):
+        self.close()
+        for p in self.paths.values():
             try:
-                feat = json.loads(line)
-            except Exception:
-                continue
-            if not (feat.get("name") or ""):
-                continue
-            # Synthetic path: clicks in Kiwix's native search land
-            # here, and nothing is written there: a --xapian=builder ZIM
-            # has no search pages, so its Kiwix results do not open (since
-            # f38cfb4, 2026-05-08; ops/cloud/swap_viewer_rust.py
-            # --rebuild-xapian points them at pages it writes).
-            rec = xapianbuilder_doc(feat, f"s/{n}", language=language)
-            dst.write(json.dumps(rec, ensure_ascii=False) + "\n")
-            n += 1
-    return n
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
 
 
 _XAPIAN_TERMINATE_TIMEOUT = 5.0
 
 
-def _build_xapian_via_xapianbuilder(streetzim_xapian_jsonl: str,
-                                    workdir: str,
+def _glass_stamp(glass_path: str) -> str:
+    return glass_path + ".input-sha256"
+
+
+def _glass_key(input_path: str, language: str) -> str:
+    """The hash of a xapianbuilder input file and its language."""
+    import hashlib
+    h = hashlib.sha256(f"{language}\0".encode())
+    with open(input_path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _glass_reusable(glass_path: str, key: str) -> bool:
+    """Whether `glass_path` exists, is nonempty and was built from the input
+    whose _glass_key is `key`."""
+    try:
+        if os.path.getsize(glass_path) <= 0:
+            return False
+        with open(_glass_stamp(glass_path)) as f:
+            return f.read().strip() == key
+    except OSError:
+        return False
+
+
+def _build_xapian_via_xapianbuilder(workdir: str,
                                     *,
+                                    inputs: dict[str, str],
                                     language: str = "eng",
                                     binary_override: str | None = None,
                                     jobs: int = 0,
-                                    inputs: dict[str, str] | None = None,
                                     ) -> tuple[str, str]:
-    import time
-    import subprocess  # noqa: F401 — also used below; pre-import to make the
-                       # NameError surface here, before we run the helper
-    """Run xapianbuilder over the streetzim _xapian.jsonl corpus and
-    return ``(fulltext_glass_path, title_glass_path)``.
+    """Run xapianbuilder over its inputs, per mode (``{"fulltext": path,
+    "title": path}``, xapianbuilder JSONL: XapianCorpus writes them for a
+    build, ops/cloud/swap_viewer_rust.py --rebuild-xapian for a retrofit;
+    the title input may carry redirect titles, ``target_path``, that the
+    full-text input must not) and return ``(fulltext_glass_path,
+    title_glass_path)`` in `workdir`.
 
-    Idempotent: if the output glass files already exist (e.g. resuming
-    a --keep-temp build that crashed at the libzim/zimru pack step),
-    this returns immediately without re-running xapianbuilder.
+    Idempotent: a mode's glass file already in `workdir` (resuming a
+    --keep-temp build that crashed at the pack step) is reused only when
+    the stamp beside it (``<glass>.input-sha256``) is the hash of this
+    run's input and language. A builder corpus changes between runs (the
+    numbering of same-name pages follows the feature order), so an index
+    built from another run's corpus would point at the wrong pages.
 
-    Streams: the input JSONL is translated line-by-line into the
-    xapianbuilder format and piped via stdin to two parallel
-    subprocesses (one fulltext, one title). Constant Python memory.
-
-    ``inputs``: xapianbuilder JSONL already written, per mode
-    (``{"fulltext": path, "title": path}``); ``streetzim_xapian_jsonl`` is
-    then not read. The title input may carry redirect titles
-    (``target_path``) that the full-text input must not.
-
-    The fulltext and title runs are independent processes that share
-    the input JSONL but read it fresh each time — small cost relative
-    to the per-pass build, and keeps the streaming model trivial.
+    The fulltext and title runs are independent processes, run in
+    parallel; Python's memory stays constant.
     """
+    import time
+    import subprocess
     binary = _resolve_xapianbuilder_binary(binary_override)
     os.makedirs(workdir, exist_ok=True)
-    xb_jsonl = os.path.join(workdir, "_xapianbuilder.jsonl")
     ft_glass = os.path.join(workdir, "X-fulltext-xapian.glass")
     ti_glass = os.path.join(workdir, "X-title-xapian.glass")
 
-    # Recovery: skip the conversion + builder runs if both outputs
-    # already exist and look usable.
-    have_ft = os.path.isfile(ft_glass) and os.path.getsize(ft_glass) > 0
-    have_ti = os.path.isfile(ti_glass) and os.path.getsize(ti_glass) > 0
+    # Recovery: skip a builder run whose output exists and was built from
+    # this very input (_glass_stamp).
+    keys = {mode: _glass_key(inputs[mode], language) for mode in ("fulltext", "title")}
+    have_ft = _glass_reusable(ft_glass, keys["fulltext"])
+    have_ti = _glass_reusable(ti_glass, keys["title"])
     if have_ft and have_ti:
         print(f"      reusing existing Xapian glass DBs ({os.path.getsize(ft_glass)/1e6:.1f} MB ft, {os.path.getsize(ti_glass)/1e6:.1f} MB title)", flush=True)
         return ft_glass, ti_glass
-
-    # Convert streetzim JSONL → xapianbuilder JSONL on disk. We could
-    # pipe directly (no intermediate file), but writing it out gives
-    # a cheap recovery checkpoint AND lets fulltext + title both read
-    # from the same file in parallel without coordinating a single
-    # producer to two consumers.
-    if inputs is not None:
-        pass
-    elif not os.path.isfile(xb_jsonl) or os.path.getsize(xb_jsonl) == 0:
-        t0 = time.time()
-        n = _streetzim_to_xapianbuilder_jsonl(streetzim_xapian_jsonl,
-                                              xb_jsonl, language=language)
-        elapsed = time.time() - t0
-        size_mb = os.path.getsize(xb_jsonl) / 1e6
-        print(f"      converted {n} records → xapianbuilder JSONL "
-              f"({size_mb:.1f} MB in {elapsed:.0f}s)", flush=True)
-        PHASE_TIMER.record_subphase(
-            "xapian: jsonl convert", elapsed,
-            note=f"{n:,} recs, {size_mb:.0f} MB")
-        PHASE_TIMER.record_metric(
-            "xapian: input records", f"{n:,}", "")
-    else:
-        print(f"      reusing existing xapianbuilder JSONL "
-              f"({os.path.getsize(xb_jsonl)/1e6:.1f} MB)", flush=True)
 
     procs = []
     proc_starts: dict[str, float] = {}
@@ -599,10 +624,11 @@ def _build_xapian_via_xapianbuilder(streetzim_xapian_jsonl: str,
                 continue
             # Output file must NOT exist (xapianbuilder refuses to
             # overwrite). Remove any prior partial.
-            try: os.unlink(out_path)
-            except FileNotFoundError: pass
+            for stale in (out_path, _glass_stamp(out_path)):
+                try: os.unlink(stale)
+                except FileNotFoundError: pass
             cmd = [binary, mode,
-                   "--input", (inputs or {}).get(mode, xb_jsonl),
+                   "--input", inputs[mode],
                    "--output", out_path,
                    "--language", language,
                    "--jobs", str(jobs),
@@ -623,6 +649,10 @@ def _build_xapian_via_xapianbuilder(streetzim_xapian_jsonl: str,
         if failures:
             details = ", ".join(f"{m}: rc={rc}" for m, rc in failures)
             raise RuntimeError(f"xapianbuilder failed ({details})")
+        for mode, _ in procs:
+            out_path = ft_glass if mode == "fulltext" else ti_glass
+            with open(_glass_stamp(out_path), "w") as f:
+                f.write(keys[mode])
         completed = True
     finally:
         # A failed second launch or an interrupted wait must not leave an
@@ -733,12 +763,13 @@ def _create_zim(
     ``xapian_mode``:
       ``"libzim"`` — emit search/<slug>.html stubs and let libzim's
         auto-indexer build the Xapian DBs at finalize. Default.
-      ``"builder"`` — skip the HTML stubs; stream the search JSONL
-        through the external ``xapianbuilder`` to produce glass DBs on
-        disk, then add them at namespace 'X' with compress=False.
-        Requires ``zim_builder='manifest'`` (or ``'rust'``) because the
-        libzim Creator does not accept items in the X namespace via its
-        public API.
+      ``"builder"`` — the same search pages and redirects, indexed by the
+        external ``xapianbuilder`` instead (XapianCorpus: the pages, their
+        redirect titles, the bundled Wikipedia articles) into glass DBs
+        added at namespace 'X' with compress=False. Requires
+        ``zim_builder='manifest'`` (or ``'rust'``) because the libzim
+        Creator does not accept items in the X namespace via its public
+        API.
       ``"none"`` — skip Xapian entirely: no X/fulltext/xapian and no
         X/title/xapian, so Kiwix has no full-text search and no Xapian
         title suggestions (libzim falls back to title-prefix matches over
@@ -890,6 +921,11 @@ def _create_zim(
     # system temp dir whenever a build failed or used --xapian builder.
     with tempfile.TemporaryDirectory(prefix="streetzim_chunks_", dir=xapian_workdir,
                                      ignore_cleanup_errors=True) as chunk_tmp, creator:
+        # --xapian=builder: xapianbuilder's inputs, what libzim's indexer
+        # would take in a --xapian=libzim build (the Kiwix pages, their
+        # redirect titles, the bundled Wikipedia articles).
+        corpus = (XapianCorpus(os.path.join(chunk_tmp, "xapian-corpus"))
+                  if xapian_mode == "builder" else None)
         _add_viewer(creator, MapItem, maplibre_js_path=maplibre_js_path,
                     maplibre_css_path=maplibre_css_path,
                     viewer_html_path=viewer_html_path, map_config=map_config,
@@ -915,7 +951,8 @@ def _create_zim(
             wiki_articles_cache=wiki_articles_cache,
             wiki_articles_source=wiki_articles_source,
             wiki_images=wiki_images, wiki_image_max_kb=wiki_image_max_kb,
-            wiki_images_per_article=wiki_images_per_article)
+            wiki_images_per_article=wiki_images_per_article,
+            fulltext_doc=corpus.fulltext if corpus is not None else None)
         # map-config.json and the License metadata come after the articles
         # (libzim does not care about order), so both credit Wikipedia only
         # when at least one article was stored. wiki_cross_refs alone are
@@ -952,9 +989,12 @@ def _create_zim(
                     overture_sources=overture_sources,
                     overture_themes=overture_themes,
                     overture_release=overture_release, xapian_mode=xapian_mode,
-                    xapianbuilder_bin=xapianbuilder_bin,
-                    xapian_workdir=xapian_workdir, chunk_tmp=chunk_tmp,
+                    chunk_tmp=chunk_tmp, corpus=corpus,
                     page_types=kiwix_page_types(kiwix_poi_pages))
+        if corpus is not None:
+            _add_builder_xapian(creator, MapItem, corpus,
+                                workdir=xapian_workdir or chunk_tmp,
+                                xapianbuilder_bin=xapianbuilder_bin)
         print("    Finalizing ZIM (ZSTD compression + Xapian indexing)...", flush=True)
         finalize_start = time.time()
 
@@ -1019,12 +1059,12 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                 search_features, wikidata_data, wiki_cross_refs, _bundled_set,
                 split_hot_search_chunks_mb, split_find_chips, no_llm_bundle,
                 map_config, name, bbox, routing_graph_path, address_count,
-                overture_sources, overture_themes, xapian_mode,
-                xapianbuilder_bin, xapian_workdir, chunk_tmp,
-                overture_release=None, page_types=KIWIX_PAGE_TYPES):
+                overture_sources, overture_themes, xapian_mode, chunk_tmp,
+                overture_release=None, page_types=KIWIX_PAGE_TYPES, corpus=None):
     """Search data: JSON chunks, category index, chips, streetzim-meta.json,
-    overture-sources.json and the Kiwix full-text pages. The chunk files go
-    to `chunk_tmp`, which create_zim removes after the creator has closed."""
+    overture-sources.json and the Kiwix pages (with --xapian=builder, their
+    xapianbuilder documents go to `corpus`). The chunk files go to
+    `chunk_tmp`, which create_zim removes after the creator has closed."""
 
     # Build location index for search feature enrichment
     loc_lookup = None
@@ -1060,16 +1100,14 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                               overture_themes=overture_themes,
                               overture_release=overture_release)
         _search_xapian_pages(creator, MapItem, xapian_mode=xapian_mode,
-                             xapianbuilder_bin=xapianbuilder_bin,
-                             xapian_workdir=xapian_workdir,
-                             chunk_tmp=b.chunk_tmp, xapian_path=b.xapian_path,
+                             xapian_path=b.xapian_path,
                              total_features=b.total_features,
-                             xapian_count=b.xapian_count)
+                             xapian_count=b.xapian_count, corpus=corpus)
 
     elif search_features:
         _add_search_in_memory(creator, MapItem, search_features=search_features,
                               loc_lookup=loc_lookup, page_types=page_types,
-                              wiki_cross_refs=wiki_cross_refs)
+                              wiki_cross_refs=wiki_cross_refs, corpus=corpus)
 
 
 def _tile_credit(tile_metadata):
@@ -1762,9 +1800,15 @@ def _add_wikidata(creator, MapItem, *, tiles, mbtiles_path, bbox, wikidata_data,
     return wikidata_data
 
 
-def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_articles, wiki_articles_cache, wiki_articles_source, wiki_images, wiki_image_max_kb, wiki_images_per_article):
+def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_articles, wiki_articles_cache, wiki_articles_source, wiki_images, wiki_image_max_kb, wiki_images_per_article, fulltext_doc=None):
     """Bundled Wikipedia article pages. Returns the set of titles actually
-    stored (None when not bundling), which gates the wiki geo-index."""
+    stored (None when not bundling), which gates the wiki geo-index.
+    ``fulltext_doc(path, title, html)`` (--xapian=builder: XapianCorpus.
+    fulltext) gets each article page, which libzim's indexer would take."""
+    def _add(path, title, mt, content):
+        creator.add_item(MapItem(path, title, mt, content))
+        if fulltext_doc is not None and mt.startswith("text/html"):
+            fulltext_doc(path, title, content)
     # Bundle full Wikipedia article pages (option B) so offline clients
     # can open + narrate them — kiwix can't deep-link across ZIMs. Titles
     # come from the cross-ref index (`w` OSM tags + any backfilled from
@@ -1800,8 +1844,7 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
             _wa_t0 = time.time()
             _wa_stats = _bundle_wa(
                 _wa_titles,
-                lambda path, title, mt, content: creator.add_item(
-                    MapItem(path, title, mt, content)),
+                _add,
                 cache_dir=wiki_articles_cache,
                 offline_zim=wiki_articles_source,
                 images=wiki_images,
@@ -2798,71 +2841,69 @@ def _add_overture_credits(creator, MapItem, *, overture_sources, overture_themes
         print("    Added overture-sources.json (empty — no Overture themes in this build)")
 
 
-def _search_xapian_pages(creator, MapItem, *, xapian_mode, xapianbuilder_bin, xapian_workdir, chunk_tmp, xapian_path, total_features, xapian_count):
-    """Search pass 3: Kiwix full-text/title search, per --xapian mode."""
-    # Pass 3 (xapian_mode=libzim only): stream xapian file → HTML
-    # redirect pages. libzim's auto-indexer ingests the HTML
-    # bodies and produces X/fulltext/xapian + X/title/xapian at
-    # finalize. For xapian_mode=builder/none we skip this loop
-    # entirely and (for builder) inject pre-built glass DBs
-    # below.
-    if xapian_mode == "libzim":
-        print(f"    Adding {xapian_count} Xapian search pages (of {total_features} total)...", flush=True)
-        xapian_start = time.time()
-        i = 0
-        with open(xapian_path) as xf:
-            for line in xf:
-                feat = json.loads(line)
-                path, title, page_html = search_page(feat, i)
-                creator.add_item(MapItem(
-                    path,
-                    title,
-                    "text/html",
-                    page_html.encode("utf-8"),
-                    is_front=True,      # in the title index: Kiwix suggestions
-                ))
-                add_alt_titles(creator, path, feat)
+def _add_kiwix_pages(creator, MapItem, feats, *, count, total, corpus=None):
+    """Kiwix's own search: the i-th feature of `feats` (the records of a page
+    type, in feature order) gets its page search/<slug>-<i>.html (search_page;
+    a front article: Kiwix suggests it) and its redirects (add_alt_titles).
+    libzim indexes the pages (--xapian=libzim); `corpus` (XapianCorpus,
+    --xapian=builder) gets each page's xapianbuilder documents instead.
+    Returns how many pages were written."""
+    print(f"    Adding {count} Kiwix search pages (of {total} total)...", flush=True)
+    t0 = time.time()
+    i = 0
+    for i, feat in enumerate(feats, 1):
+        path, title, page_html = search_page(feat, i - 1)
+        creator.add_item(MapItem(path, title, "text/html", page_html.encode("utf-8"),
+                                 is_front=True))   # in the title index: Kiwix suggestions
+        add_alt_titles(creator, path, feat)
+        if corpus is not None:
+            corpus.page(feat, path)
+        if i % 2000 == 0:
+            rate = i / max(time.time() - t0, 1e-9)
+            remaining = (count - i) / rate if rate > 0 else 0
+            print(f"\r    Added {i}/{count} search pages ({rate:.0f}/s, ~{remaining/60:.0f}m left)...",
+                  end="", flush=True)
+    print(f"\r    Added {i} search pages in {time.time() - t0:.0f}s                ", flush=True)
+    return i
 
-                i += 1
-                if i % 2000 == 0:
-                    elapsed = time.time() - xapian_start
-                    rate = i / elapsed if elapsed > 0 else 0
-                    remaining = (xapian_count - i) / rate if rate > 0 else 0
-                    print(f"\r    Added {i}/{xapian_count} search pages ({rate:.0f}/s, ~{remaining/60:.0f}m left)...", end="", flush=True)
 
+def _add_builder_xapian(creator, MapItem, corpus, *, workdir, xapianbuilder_bin):
+    """--xapian=builder: build both Xapian databases from `corpus` with the
+    external xapianbuilder and add them at X/fulltext/xapian and
+    X/title/xapian, uncompressed (Kiwix convention: libzim's reader maps
+    them in place). Saves the ~2-6h libzim spends indexing on
+    continent-scale ZIMs."""
+    inputs = corpus.close()
+    print(f"    Building Xapian indexes via xapianbuilder ({corpus.pages} pages, "
+          f"{corpus.redirects} redirect titles, {corpus.extra} other documents)...",
+          flush=True)
+    PHASE_TIMER.record_metric("xapian: input records",
+                              f"{corpus.pages + corpus.redirects + corpus.extra:,}", "")
+    ft_glass, ti_glass = _build_xapian_via_xapianbuilder(
+        workdir, inputs=inputs, language=corpus.language,
+        binary_override=xapianbuilder_bin)
+    corpus.remove()
+    creator.add_item(MapItem("fulltext/xapian", "", "application/octet-stream+xapian",
+                             ft_glass, is_front=False, compress=False, namespace="X"))
+    creator.add_item(MapItem("title/xapian", "", "application/octet-stream+xapian",
+                             ti_glass, is_front=False, compress=False, namespace="X"))
+
+
+def _search_xapian_pages(creator, MapItem, *, xapian_mode, xapian_path, total_features,
+                         xapian_count, corpus=None):
+    """Search pass 3: Kiwix's own search, per --xapian mode. The pages are
+    the same in the libzim and builder modes (_add_kiwix_pages); libzim
+    indexes them as it finalizes, xapianbuilder (`corpus`, _create_zim calls
+    _add_builder_xapian) after the search passes."""
+    if xapian_mode in ("libzim", "builder"):
+        def feats():
+            with open(xapian_path) as xf:
+                for line in xf:
+                    yield json.loads(line)
+        _add_kiwix_pages(creator, MapItem, feats(), count=xapian_count,
+                         total=total_features,
+                         corpus=corpus if xapian_mode == "builder" else None)
         os.unlink(xapian_path)
-        print(f"\r    Added {i} search pages in {time.time() - xapian_start:.0f}s                ", flush=True)
-    elif xapian_mode == "builder":
-        # Build the Xapian DBs externally via the xapianbuilder
-        # helper, then add the glass DB files at namespace 'X'
-        # with compress=False. Saves the ~2-6h libzim spends
-        # ingesting search/*.html stubs on continent-scale ZIMs
-        # AND the 13-15 GB those stubs cost in the shipped ZIM.
-        print(f"    Building Xapian indexes via xapianbuilder "
-              f"({xapian_count} docs of {total_features} total)...", flush=True)
-        xapian_workdir_local = xapian_workdir or chunk_tmp
-        ft_glass, ti_glass = _build_xapian_via_xapianbuilder(
-            xapian_path, xapian_workdir_local,
-            language="eng", binary_override=xapianbuilder_bin,
-        )
-        # Xapian's X-namespace items must be uncompressed by
-        # Kiwix convention — libzim's reader detects them via
-        # the +xapian mimetype and the raw cluster layout.
-        creator.add_item(MapItem(
-            "fulltext/xapian", "",
-            "application/octet-stream+xapian",
-            ft_glass, is_front=False, compress=False,
-            namespace="X",
-        ))
-        creator.add_item(MapItem(
-            "title/xapian", "",
-            "application/octet-stream+xapian",
-            ti_glass, is_front=False, compress=False,
-            namespace="X",
-        ))
-        # The JSONL on disk stays — it's harmless to keep, and
-        # --keep-temp users may want to re-run xapianbuilder
-        # with different settings without redoing the bucketing.
     elif xapian_mode == "none":
         # No Xapian. Drop the JSONL — nothing reads it.
         try: os.unlink(xapian_path)
@@ -2873,8 +2914,11 @@ def _search_xapian_pages(creator, MapItem, *, xapian_mode, xapianbuilder_bin, xa
 
 
 def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup,
-                          page_types=KIWIX_PAGE_TYPES, wiki_cross_refs=None):
-    """Search for an in-memory feature list (small builds and tests)."""
+                          page_types=KIWIX_PAGE_TYPES, wiki_cross_refs=None,
+                          corpus=None):
+    """Search for an in-memory feature list (small builds and tests). Its
+    Kiwix pages are written in every --xapian mode; `corpus`
+    (--xapian=builder) gets their xapianbuilder documents."""
     print(f"    Adding {len(search_features)} search entries...")
 
     # Enrich with location if available
@@ -2934,24 +2978,5 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup,
     print(f"    Added {len(chunks)} search chunks ({total_features} features)")
 
     xapian_features = [f for f in search_features if f["type"] in page_types]
-    print(f"    Adding {len(xapian_features)} Xapian search pages (of {len(search_features)} total)...", flush=True)
-
-    xapian_start = time.time()
-    for i, feat in enumerate(xapian_features):
-        path, title, page_html = search_page(feat, i)
-        creator.add_item(MapItem(
-            path,
-            title,
-            "text/html",
-            page_html.encode("utf-8"),
-            is_front=True,      # in the title index: Kiwix suggestions
-        ))
-        add_alt_titles(creator, path, feat)
-
-        if (i + 1) % 2000 == 0:
-            elapsed = time.time() - xapian_start
-            rate = (i + 1) / elapsed if elapsed > 0 else 0
-            remaining = (len(xapian_features) - i - 1) / rate if rate > 0 else 0
-            print(f"\r    Added {i + 1}/{len(xapian_features)} search pages ({rate:.0f}/s, ~{remaining/60:.0f}m left)...", end="", flush=True)
-
-    print(f"\r    Added {len(xapian_features)} search pages in {time.time() - xapian_start:.0f}s                ", flush=True)
+    _add_kiwix_pages(creator, MapItem, xapian_features, count=len(xapian_features),
+                     total=len(search_features), corpus=corpus)

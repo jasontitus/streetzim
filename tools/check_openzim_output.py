@@ -15,7 +15,10 @@ in map-config.json, its licence in License, and the Flavour and tags that
 label it (a non-commercial source: "satellite-nc", "non-commercial", and a
 License that opens with the restriction). Terrain: tiles present when asked
 for (--terrain), and the licence credits the Copernicus DEM exactly when the
-ZIM has terrain.
+ZIM has terrain. Kiwix's own search: every sampled title suggestion and
+full-text hit is an entry of the ZIM (cloud/validate_zim.py
+kiwix_search_dead_links; a --xapian=builder build used to index pages it
+never wrote).
 """
 from __future__ import annotations
 
@@ -138,12 +141,20 @@ def main() -> int:
         any(arc._get_entry_by_id(i).path.startswith("terrain/")  # pyright: ignore[reportPrivateUsage]
             for i in range(arc.entry_count)))
 
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from cloud.validate_zim import KIWIX_SEARCH_MEND, kiwix_search_dead_links
+    checked, dead = kiwix_search_dead_links(arc)
+    if dead:
+        problems.append(f"{len(dead)} of {checked} Kiwix search results do not open, "
+                        f"e.g. {dead[:3]}; mend: {KIWIX_SEARCH_MEND}")
+
     for p in problems:
         print(f"FAIL: {p}")
     if not problems:
         print(f"ok: {zim.name}: metadata, illustration, progress "
               f"({stats['done']}/{stats['total']})" + (", routing" if a.routing else "")
-              + (", terrain" if a.terrain else ""))
+              + (", terrain" if a.terrain else "")
+              + f", Kiwix search ({checked} results open)")
     return 1 if problems else 0
 
 

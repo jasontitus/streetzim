@@ -106,6 +106,29 @@ leaves it off. Like every profile feature it is an on/off choice
 (`--kiwix-poi-pages=off`; an enum in offliner-definition.json), unset
 meaning "as the profile says".
 
+### Kiwix's search in each `--xapian` mode
+
+The pages above, and so Kiwix's title suggestions and full-text search, are
+the same with `--xapian libzim` (libzim's indexer, the default with the
+libzim writer) and `--xapian builder` (the external `xapianbuilder`, with
+the manifest writer; what StreetZim's own build host uses): both write
+`search/<slug>-<i>.html` for every record of a page type and the admin
+areas' redirects, and in builder mode xapianbuilder indexes those pages,
+their redirect titles and the bundled Wikipedia articles, as libzim would.
+`--xapian none` writes no page and no index. From 2026-05-08 to 2026-10-02
+a builder build wrote no page and indexed `s/<n>` paths that did not exist,
+so none of its Kiwix results opened; `cloud/validate_zim.py` and
+`tools/check_openzim_output.py` now fail such a ZIM, and
+`ops/cloud/swap_viewer_rust.py --rebuild-search --rebuild-xapian` mends the
+published ones ([search-prefix-locality.md](search-prefix-locality.md#kiwixs-own-search---rebuild-xapian)).
+Writing the pages costs a builder build what it costs a libzim one: measured
+on 2026-10-02, two builds each, Luxembourg `--profile basic` (8,166 pages,
+144 redirects): 52.8 -> 54.2 MB (+1.4 MB, +2.7%), 149 and 144 s -> 154 and
+147 s wall (218 and 214 s -> 222 and 218 s CPU; about +3%, the size of the
+spread between runs); a libzim build of the same: 54.4 MB, 145 s. Monaco
+`--profile full` (5,114 pages, POIs included): 4.64 -> 5.87 MB (+27%, the
+POI pages' cost above); libzim 5.97 MB.
+
 ## Profiles
 
 `--profile` picks the content; any feature flag given explicitly wins over
@@ -561,7 +584,7 @@ directly. "streetzim" below is `streetzim/cli.py` and
 | GPS, driving HUD, `#dest=` deep links | yes | yes | on | - | the viewer | yes |
 | Offline PWA (`/drive/`: install, service worker, streaming from archive.org) | the website's, not in the ZIM | no | - | - | - | not applicable: Kiwix ignores in-ZIM manifests (docs/in-zim-apps.md) |
 | Max-zoom variants (`cloud/region-variants.tsv`) | yes | `--max-zoom` | 14 | - | - | yes |
-| Rust packer, external Xapian builder | yes (speed only; same ZIM content) | no | - | - | local binaries | not needed |
+| Rust packer, external Xapian builder | yes (speed only; same ZIM content since 2026-10-02: before, a `--xapian=builder` ZIM's Kiwix results did not open, [above](#kiwixs-search-in-each---xapian-mode)) | no | - | - | local binaries | not needed |
 
 All gaps that can work on Zimfarm are closed except the dead-website filter,
 which has no public source. Satellite is opt-in by choice, outside both

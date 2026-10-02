@@ -17,7 +17,7 @@ def corpus(tmp_path, monkeypatch):
     source.write_text('{"name":"Test Place","type":"city","lat":1,"lon":2}\n')
     monkeypatch.setattr(writer, '_resolve_xapianbuilder_binary', lambda override: sys.executable)
     monkeypatch.setattr(writer, '_XAPIAN_TERMINATE_TIMEOUT', .1)
-    return source
+    return {'fulltext': str(source), 'title': str(source)}
 
 
 def sleeping_child(tmp_path, mode, real_popen, *, ignore_term=False, output_path=None):
@@ -74,7 +74,7 @@ def test_interrupted_wait_terminates_and_reaps_both_children(
     monkeypatch.setattr(subprocess, 'Popen', launch)
     try:
         with pytest.raises(type(failure)) as error:
-            writer._build_xapian_via_xapianbuilder(str(corpus), str(tmp_path / 'work'))
+            writer._build_xapian_via_xapianbuilder(inputs=corpus, workdir=str(tmp_path / 'work'))
         assert error.value is failure  # cleanup preserves the original interrupt
         assert len(children) == 2
         expected = -signal.SIGKILL if ignore_term else -signal.SIGTERM
@@ -106,7 +106,7 @@ def test_second_launch_failure_stops_already_running_indexer(tmp_path, monkeypat
     monkeypatch.setattr(subprocess, 'Popen', launch)
     try:
         with pytest.raises(OSError) as error:
-            writer._build_xapian_via_xapianbuilder(str(corpus), str(tmp_path / 'work'))
+            writer._build_xapian_via_xapianbuilder(inputs=corpus, workdir=str(tmp_path / 'work'))
         assert error.value is failure
         assert len(children) == 1 and children[0].returncode == -signal.SIGTERM
         assert not list((tmp_path / 'work').glob('*.glass'))
@@ -138,10 +138,10 @@ def test_normal_indexers_keep_outputs_and_failed_indexes_are_retryable(
     monkeypatch.setattr(subprocess, 'Popen', launch)
     if fulltext_rc:
         with pytest.raises(RuntimeError, match='fulltext: rc=7'):
-            writer._build_xapian_via_xapianbuilder(str(corpus), str(tmp_path / 'work'))
+            writer._build_xapian_via_xapianbuilder(inputs=corpus, workdir=str(tmp_path / 'work'))
         assert not list((tmp_path / 'work').glob('*.glass'))
     else:
-        fulltext, title = writer._build_xapian_via_xapianbuilder(str(corpus), str(tmp_path / 'work'))
+        fulltext, title = writer._build_xapian_via_xapianbuilder(inputs=corpus, workdir=str(tmp_path / 'work'))
         assert Path(fulltext).read_bytes() == b'fulltext'
         assert Path(title).read_bytes() == b'title'
     assert len(children) == 2
@@ -150,7 +150,7 @@ def test_normal_indexers_keep_outputs_and_failed_indexes_are_retryable(
         # A retry must actually rebuild both jobs instead of accepting the
         # nonempty output the failed indexer wrote before its nonzero exit.
         fulltext_rc = 0
-        fulltext, title = writer._build_xapian_via_xapianbuilder(str(corpus), str(tmp_path / 'work'))
+        fulltext, title = writer._build_xapian_via_xapianbuilder(inputs=corpus, workdir=str(tmp_path / 'work'))
         assert len(children) == 4
         assert Path(fulltext).read_bytes() == b'fulltext'
         assert Path(title).read_bytes() == b'title'
@@ -164,6 +164,9 @@ def test_failed_new_index_preserves_preexisting_reused_database(
     workdir.mkdir()
     cached = workdir / f'X-{cached_mode}-xapian.glass'
     cached.write_bytes(b'existing complete index')
+    # Built from this very input (the stamp beside it says so).
+    Path(writer._glass_stamp(str(cached))).write_text(
+        writer._glass_key(corpus[cached_mode], 'eng'))
     launched = []
 
     def launch(cmd):
@@ -175,8 +178,47 @@ def test_failed_new_index_preserves_preexisting_reused_database(
 
     monkeypatch.setattr(subprocess, 'Popen', launch)
     with pytest.raises(RuntimeError, match='rc=7'):
-        writer._build_xapian_via_xapianbuilder(str(corpus), str(workdir))
+        writer._build_xapian_via_xapianbuilder(inputs=corpus, workdir=str(workdir))
     missing_mode = 'title' if cached_mode == 'fulltext' else 'fulltext'
     assert launched == [missing_mode]
     assert cached.read_bytes() == b'existing complete index'
     assert not (workdir / f'X-{missing_mode}-xapian.glass').exists()
+
+
+@pytest.mark.parametrize('stamp', ['none', 'other input', 'same input'])
+def test_existing_glass_is_reused_only_when_built_from_this_input(
+        tmp_path, monkeypatch, corpus, stamp):
+    """A builder corpus changes between runs (same-name pages swap numbers),
+    so a glass file left in the work dir by another run must not be shipped:
+    it is reused only when its stamp is this input's hash."""
+    real_popen = subprocess.Popen
+    workdir = tmp_path / 'work'
+    workdir.mkdir()
+    for mode in ('fulltext', 'title'):
+        glass = workdir / f'X-{mode}-xapian.glass'
+        glass.write_bytes(b'old index')
+        if stamp != 'none':
+            other = tmp_path / 'other.jsonl'
+            other.write_text('{"path":"search/x-1.html"}\n')
+            src = corpus[mode] if stamp == 'same input' else str(other)
+            Path(writer._glass_stamp(str(glass))).write_text(writer._glass_key(src, 'eng'))
+    launched = []
+
+    def launch(cmd):
+        mode = cmd[1]
+        launched.append(mode)
+        path = cmd[cmd.index('--output') + 1]
+        return real_popen([sys.executable, '-c',
+                           f'from pathlib import Path; Path({path!r}).write_bytes(b"new")'])
+
+    monkeypatch.setattr(subprocess, 'Popen', launch)
+    fulltext, title = writer._build_xapian_via_xapianbuilder(inputs=corpus, workdir=str(workdir))
+    if stamp == 'same input':
+        assert launched == [] and Path(fulltext).read_bytes() == b'old index'
+    else:
+        assert launched == ['fulltext', 'title']
+        assert Path(fulltext).read_bytes() == Path(title).read_bytes() == b'new'
+        # ... and the new indexes carry their stamp: a retry reuses them.
+        launched.clear()
+        writer._build_xapian_via_xapianbuilder(inputs=corpus, workdir=str(workdir))
+        assert launched == []

@@ -378,7 +378,8 @@ build would add, without a rebuild:
   an article the ZIM bundles (the geo-index, left untouched); the Find
   list's 📖 links to the public site, as for every record.
 * **Kiwix pages** only with `--rebuild-xapian`, below: a `--xapian=builder`
-  build writes none, and a page is a document of Kiwix's own search.
+  build before 2026-10-02 wrote none, and a page is a document of Kiwix's own
+  search.
 * **Already there**: a source with any `t: "admin"` record is left as it is
   (the option is skipped, with a message); nothing is added or replaced.
 * **Unchanged**: the Find chips and category index (no `category-index/
@@ -386,15 +387,22 @@ build would add, without a rebuild:
 
 ### Kiwix's own search (`--rebuild-xapian`)
 
-A `--xapian=builder` ZIM -- all four retrofit targets, and every region the
-build wrappers build where xapianbuilder is installed
-(`build-region-fast.sh`) -- has Xapian title and full-text indexes whose
-documents point at `s/<n>`, and nothing was ever written there:
+To mend a published ZIM that `cloud/validate_zim.py` fails with
+`kiwix_search_links` (add the swap's other flags, e.g. `--reshard-chips`):
+
+```
+ops/cloud/swap_viewer_rust.py SRC DST --rebuild-search --rebuild-xapian --tmp DIR
+```
+
+A `--xapian=builder` ZIM built before 2026-10-02 -- all four retrofit
+targets, and every region the build wrappers built where xapianbuilder is
+installed (`build-region-fast.sh`) -- has Xapian title and full-text indexes
+whose documents point at `s/<n>`, and nothing was ever written there:
 `_streetzim_to_xapianbuilder_jsonl` named them so "until follow-up work
 adds a tiny redirect entry per record" (f38cfb4, 2026-05-08, which moved
 the build to xapianbuilder and stopped writing the pages), and that work
-never came. On himalayas 2026-09-27, kiwix-serve `/suggest?term=Nepal`
-returns `s/85122`, a 404. A `--xapian=libzim` build writes a front-article
+never came until 2026-10-02 (below, "The build"). On himalayas 2026-09-27,
+kiwix-serve `/suggest?term=Nepal` returns `s/85122`, a 404. A `--xapian=libzim` build writes a front-article
 page `search/<slug>-<i>.html` for every record of a page type
 (`KIWIX_PAGE_TYPES`: place, airport, park, peak, water, admin; POIs too
 with `--kiwix-poi-pages`) and the admin areas' other titles as redirects,
@@ -442,8 +450,63 @@ without pages.
 
 So the Kiwix A-Z list and random article are the pages, as in a
 `--xapian=libzim` ZIM; without `--rebuild-xapian` no page is written, as in
-a `--xapian=builder` one. (Fresh `--xapian=builder` builds still point at
-`s/<n>`: fixing the build means writing these pages there too.)
+a `--xapian=builder` one built before 2026-10-02. The retrofit stays the way
+to mend those already published; a fresh build needs none of it.
+
+#### The build (since 2026-10-02)
+
+A `--xapian=builder` build writes the pages itself, exactly as a
+`--xapian=libzim` build does: the same `_add_kiwix_pages` writes
+`search/<slug>-<i>.html` for every record of a page type (numbered in
+feature order, from the features themselves: full-precision coordinates)
+and the admin areas' `~<k>` redirects, in both modes. In builder mode
+`zim_writer.XapianCorpus` collects, as the pages are written, what libzim's
+indexer would take: each page as a document of both indexes
+(`xapianbuilder_doc`, at the page's path), each redirect title as a title
+document at its redirect (`target_path`: the page), and each bundled
+Wikipedia article (`wiki-article/*`) as a full-text document (from
+`_add_wiki_articles`, as `_wiki_article_docs` reads them for the retrofit).
+`_add_builder_xapian` then runs xapianbuilder over the two inputs and adds
+`X/fulltext/xapian` and `X/title/xapian` uncompressed, as before. Both
+paths (a search JSONL streamed from disk, or an in-memory feature list) and
+both packers (Python `streetzim.pack`, Rust `streetzim-pack`) carry them;
+the main page stays `index.html`.
+
+Compared with a `--xapian=libzim` build of the same Monaco extract
+(`--profile full`, offline fixture, 2026-10-02): the same 5,122 `search/`
+entries (5,114 pages, 8 redirects) with the same titles and redirect
+targets; 11 pages differ only in which of two or three same-name records
+(two "Croix-Rouge monégasque", three "Grimaldi Forum", ...) got which
+number, which also differs between two libzim builds (the order of
+same-name records in the search JSONL is not fixed); the same front
+articles (5,123: `index.html` and the `search/` entries; with the Rust
+packer also `places.html` and the 7 Wikipedia articles, as zimru lists
+every HTML entry). The full-text documents are the record text
+(`xapianbuilder_doc`: name, region, type, category, brand, other names), not
+the page's HTML, so full-text hit counts differ a little from libzim's
+(libzim also indexes "Directions to here" and the rest of the page).
+kiwix-serve 3.8.2 opens every `/suggest` and `/search` link of the builder
+ZIMs (Monaco, Python and Rust packer: 198 suggestions and 260 search links;
+Luxembourg: 80 and 237), as it does the libzim ones; a builder ZIM from before
+(Monaco, same inputs) opens none (60 suggestions, all `s/<n>` 404s; its
+`/search` answers 500). Every redirect title is suggested (Luxembourg 144 of
+144) and finds its page in the full text (the formal "<Type> of <Name>"
+titles are in the page's document since 2026-10-02; the retrofit's documents
+come from the same `xapianbuilder_doc`). Cost: [zimfarm.md](zimfarm.md#kiwixs-search-in-each---xapian-mode)
+(Luxembourg basic +2.7% size, about +3% time).
+`cloud/validate_zim.py` (`kiwix_search_links`) and
+`tools/check_openzim_output.py` now fail a ZIM whose Kiwix suggestions or
+full-text hits do not open (not an entry, or a redirect that leads to none).
+They ask for common words, the region's name and titles sampled from the
+pages, from their `~` redirects (title index only) and from the bundled
+Wikipedia articles (full text only), in bounded windows, so a country costs
+a few thousand entry reads. The failure names the mend
+(`ops/cloud/swap_viewer_rust.py SRC DST --rebuild-search --rebuild-xapian
+--tmp DIR`); `STREETZIM_KIWIX_SEARCH_WARN=1` makes it a warning, for
+re-gating a published builder ZIM not yet mended (ops/docs/viewer-rollout.md).
+A builder build no longer reuses a Xapian database left in its work dir
+unless the stamp beside it is the hash of this run's corpus: same-name pages
+can swap numbers between runs.
 
 Measured 2026-10-02 on himalayas 2026-09-27 (5.34 GB, rule 1, built with
 `--xapian=builder`), region PBF of 2026-09-05: 2,452,785 records recovered

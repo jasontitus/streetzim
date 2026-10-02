@@ -38,9 +38,9 @@ their search records, keyed as the writer keys them, with English article
 titles from the source's wiki-geo-index or ``--wikidata-title-cache`` (no
 Wikimedia request). A source that already has admin records is left as it
 is (the option is skipped, with a message). ``--rebuild-xapian`` (with
-``--rebuild-search``) makes Kiwix's own search work in a --xapian=builder ZIM,
-whose title and full-text documents point at ``s/<n>`` paths that do not
-exist: it writes the Kiwix page ``search/<slug>-<i>.html`` of every record of
+``--rebuild-search``) makes Kiwix's own search work in a --xapian=builder ZIM
+built before 2026-10-02 (a build now writes the pages itself), whose title
+and full-text documents point at ``s/<n>`` paths that do not exist: it writes the Kiwix page ``search/<slug>-<i>.html`` of every record of
 a page type (and its other titles as redirects ``~<k>``), as --xapian=libzim
 does, and new indexes over them with xapianbuilder
 (docs/search-prefix-locality.md#retrofit).
@@ -661,10 +661,10 @@ def _geonames_credited(spool_path: Path) -> set[str]:
 def _plan_xapian(spool_path: Path, admin_feats: list[dict], admin_first: int,
                  work: Path, has_path, xapianbuilder_bin: str | None,
                  page_types, fulltext_extra=(), geonames=None) -> tuple[Path, int]:
-    """Kiwix's own search for a --xapian=builder ZIM, whose title and
-    full-text documents point at ``s/<n>`` paths nothing was ever written at
-    (zim_writer._streetzim_to_xapianbuilder_jsonl). Every record of a Kiwix
-    page type gets its page, as --xapian=libzim writes them
+    """Kiwix's own search for a --xapian=builder ZIM built before
+    2026-10-02, whose title and full-text documents point at ``s/<n>`` paths
+    nothing was ever written at (a build now writes the pages itself:
+    zim_writer.XapianCorpus). Every record of a Kiwix page type gets its page, as --xapian=libzim writes them
     (search/<slug>-<i>.html, numbered in record order; the admin areas this
     run adds come last, from ``admin_first``, written by the caller); the
     corpus is the one a --xapian=builder build feeds xapianbuilder
@@ -742,7 +742,7 @@ def _plan_xapian(spool_path: Path, admin_feats: list[dict], admin_first: int,
           f"building with xapianbuilder", flush=True)
     t0 = time.time()
     _build_xapian_via_xapianbuilder(
-        "", str(work / "xapian"), language="eng", binary_override=xapianbuilder_bin,
+        str(work / "xapian"), language="eng", binary_override=xapianbuilder_bin,
         inputs={"fulltext": str(ft_path), "title": str(ti_path)})
     ft_path.unlink()
     ti_path.unlink()
@@ -1496,8 +1496,9 @@ def main() -> int:
                          "message, when the source already has admin records.")
     ap.add_argument("--rebuild-xapian", action="store_true",
                     help="--rebuild-search: replace Kiwix's own search (the Xapian "
-                         "title and full-text indexes of a --xapian=builder ZIM, whose "
-                         "documents point at s/<n> paths that do not exist): write the "
+                         "title and full-text indexes of a --xapian=builder ZIM built "
+                         "before 2026-10-02, whose documents point at s/<n> paths "
+                         "that do not exist): write the "
                          "Kiwix page of every place, airport, park, peak, water and "
                          "admin record (search/<slug>.html, as --xapian=libzim does) "
                          "and index those pages with xapianbuilder.")

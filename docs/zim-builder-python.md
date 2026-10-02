@@ -42,7 +42,10 @@ namespace item use raw clusters, including external Xapian databases.
 
 The stock libzim backend owns automatic native search indexing. The manifest
 backend supports `--xapian builder` (the existing external `xapianbuilder`
-executable), or `--xapian none` (the viewer's own search remains available).
+executable, over the same `search/` pages and redirects a libzim build writes,
+so Kiwix's results open; before 2026-10-02 it indexed pages that were never
+written, docs/search-prefix-locality.md "Kiwix's own search"), or
+`--xapian none` (the viewer's own search remains available).
 The public CLI defaults to `none` when `--zim-builder manifest` is selected;
 it rejects `--xapian libzim` for this backend.
 

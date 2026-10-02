@@ -18,6 +18,8 @@ Gates we enforce:
   - Illustration present (Kiwix library shows a placeholder otherwise)
   - Main entry resolves to a content entry (not a dangling redirect)
   - Xapian full-text index: if ``_ftindex:yes`` tag, run a real query
+  - Kiwix's own search opens what it finds: sampled title suggestions and
+    full-text hits are entries of the ZIM (kiwix_search_links)
 
   Content consistency (warn if missing, fail if declared-and-missing):
   - map-config.json declares ``hasSatellite`` → at least one satellite
@@ -893,6 +895,136 @@ def _chk_fulltext(arc) -> tuple[str, str]:
                 f"xapian returned 0 hits for every probe {totals} — "
                 "index is likely corrupt")
     return ("pass", f"hits {totals}")
+
+
+# Kiwix's own search must open what it finds. A --xapian=builder build from
+# f38cfb4 (2026-05-08) to 2026-10-02 indexed documents at s/<n> and wrote
+# nothing there: every suggestion and full-text hit was a dead link, and the
+# fulltext_xapian check above (it counts hits) passed. Published ZIMs of that
+# kind are mended by ops/cloud/swap_viewer_rust.py --rebuild-search
+# --rebuild-xapian; re-gating one unmended (a viewer rollout), set
+# STREETZIM_KIWIX_SEARCH_WARN=1 to make this a warning.
+KIWIX_SEARCH_PROBES = ("park", "station", "street", "lake")
+# The mend, as the failure states it. Core code must not name the ops tool
+# (tools/check_boundary.py), so it names the retrofit's flags and the doc that
+# gives the command: ops/cloud/swap_viewer_rust.py SRC DST --rebuild-search
+# --rebuild-xapian --tmp DIR.
+KIWIX_SEARCH_MEND = ("rewrite it with the viewer-swap retrofit's --rebuild-search "
+                     "--rebuild-xapian --tmp DIR (the command: "
+                     "docs/search-prefix-locality.md, \"Kiwix's own search\")")
+
+
+def _first_with_prefix(arc, prefix: str) -> int:
+    """The id of the first content entry whose path is >= ``prefix`` (the
+    entries are in path order)."""
+    lo, hi = 0, arc.entry_count
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if arc._get_entry_by_id(mid).path < prefix:  # pyright: ignore[reportPrivateUsage]
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+def _spread(arc, prefix: str, end: str, n: int, want=lambda e: True,
+            window: int = 4000) -> list[str]:
+    """Titles of up to ``n`` entries with ``prefix`` (path order, up to
+    ``end``) that ``want`` accepts: one from each of ``n`` windows of at most
+    ``window`` entries spread over the range, so a country-size ZIM costs a
+    bounded scan."""
+    lo, hi = _first_with_prefix(arc, prefix), _first_with_prefix(arc, end)
+    out: list[str] = []
+    if hi <= lo or n <= 0:
+        return out
+    step = max(1, (hi - lo) // n)
+    for start in range(lo, hi, step):
+        for i in range(start, min(hi, start + min(step, window))):
+            e = arc._get_entry_by_id(i)  # pyright: ignore[reportPrivateUsage]
+            if e.title and want(e):
+                out.append(e.title)
+                break
+        if len(out) >= n:
+            break
+    return out
+
+
+def kiwix_search_queries(arc, *, pages: int = 8, redirects: int = 4,
+                         articles: int = 3) -> list[str]:
+    """What to ask Kiwix's search: a few common words, the region's name, the
+    titles of up to ``pages`` Kiwix pages (search/*) spread over the archive,
+    of up to ``redirects`` of their redirects (``~`` paths: an admin area's
+    other names and formal titles, title index only) and of up to
+    ``articles`` bundled Wikipedia articles (wiki-article/*, full text)."""
+    queries = list(KIWIX_SEARCH_PROBES)
+    name = str(_map_config(arc).get("name") or "").strip()
+    if name:
+        queries += [name, name.split()[0]]
+    queries += _spread(arc, "search/", "search0", pages)
+    queries += _spread(arc, "search/", "search0", redirects,
+                       want=lambda e: "~" in e.path)
+    queries += _spread(arc, "wiki-article/", "wiki-article0", articles,
+                       want=lambda e: not e.is_redirect)
+    return list(dict.fromkeys(queries))
+
+
+def _opens(arc, path: str) -> bool:
+    """Whether ``path`` is an entry of the archive that resolves to content
+    (a redirect chain that ends at an item)."""
+    if not arc.has_entry_by_path(path):
+        return False
+    try:
+        e = arc.get_entry_by_path(path)
+        for _ in range(8):
+            if not e.is_redirect:
+                e.get_item()
+                return True
+            e = e.get_redirect_entry()
+    except Exception:
+        return False
+    return False
+
+
+def kiwix_search_dead_links(arc, queries=None, *, per_query: int = 20):
+    """Ask Kiwix's title suggestions and full-text search (python-libzim:
+    the library kiwix-serve and the apps use) ``queries`` and return
+    ``(links checked, [(kind, query, path)] of the results that are not
+    entries of the archive, or redirects that do not lead to one)``."""
+    from libzim.search import Query, Searcher
+    from libzim.suggestion import SuggestionSearcher
+    if queries is None:
+        queries = kiwix_search_queries(arc)
+    checked, dead = 0, []
+    sugg = SuggestionSearcher(arc)
+    full = Searcher(arc) if getattr(arc, "has_fulltext_index", False) else None
+    for q in queries:
+        kinds = [("suggest", lambda q=q: sugg.suggest(q))]
+        if full is not None:
+            kinds.append(("fulltext", lambda q=q: full.search(Query().set_query(q))))
+        for kind, run in kinds:
+            for path in run().getResults(0, per_query):
+                checked += 1
+                if not _opens(arc, path):
+                    dead.append((kind, q, path))
+    return checked, dead
+
+
+def _chk_kiwix_search_resolves(arc) -> tuple[str, str]:
+    if not (getattr(arc, "has_fulltext_index", False)
+            or getattr(arc, "has_title_index", False)):
+        return ("skip", "no Xapian index")
+    queries = kiwix_search_queries(arc)
+    checked, dead = kiwix_search_dead_links(arc, queries)
+    if dead:
+        kind, q, path = dead[0]
+        return ("fail", f"{len(dead)} of {checked} Kiwix search results do not "
+                        f"open (e.g. {kind} {q!r} -> {path!r}): a --xapian=builder "
+                        "ZIM built before 2026-10-02, without its pages? Mend it: "
+                        f"{KIWIX_SEARCH_MEND}; or set STREETZIM_KIWIX_SEARCH_WARN=1 "
+                        "to make this check a warning")
+    if not checked:
+        return ("skip", f"no Kiwix search results for {len(queries)} queries")
+    return ("pass", f"{checked} results of {len(queries)} queries all open")
 
 
 def _map_config(arc) -> dict:
@@ -2017,6 +2149,9 @@ def _populate_results(results, arc, zim_path, audit_tiles):
     results.append(_check("places_html", "error", _chk_places_html, arc))
     results.append(_check("viewer_assets", "error", _chk_viewer_assets, arc))
     results.append(_check("fulltext_xapian", "error", _chk_fulltext, arc))
+    results.append(_check("kiwix_search_links",
+                          "warn" if os.environ.get("STREETZIM_KIWIX_SEARCH_WARN") == "1"
+                          else "error", _chk_kiwix_search_resolves, arc))
     results.append(_check("map_config", "error", _chk_map_config, arc))
     cfg = _map_config(arc)
     results.append(_check("vector_tiles", "error", _chk_vector_tiles, arc))
