@@ -269,3 +269,74 @@ def test_kiwix_search_of_a_builder_zim_opens_every_result(tmp_path, monkeypatch,
     # Streets and (without --kiwix-poi-pages) POIs have no page.
     assert hits("Place du")[0] == set()
     assert "Casino" not in hits("casino")[1]
+    # The validator's check agrees (cloud/validate_zim.py kiwix_search_links).
+    from cloud import validate_zim as V
+    status, detail = V._chk_kiwix_search_resolves(a)
+    assert status == "pass", detail
+
+
+def test_the_validator_fails_a_builder_zim_whose_documents_have_no_page(
+        tmp_path, monkeypatch):
+    """The pre-2026-10-02 build (documents at s/<n>, nothing written there),
+    with the real xapianbuilder: cloud/validate_zim.py fails it."""
+    from libzim.reader import Archive
+    from cloud import validate_zim as V
+    xb = _xapianbuilder()
+    real = W.XapianCorpus.page
+    n = iter(range(10 ** 6))
+    monkeypatch.setattr(W.XapianCorpus, "page",
+                        lambda self, feat, path: real(self, feat, f"s/{next(n)}"))
+    zim, _ = _build(tmp_path, monkeypatch, "old", xapian_mode="builder",
+                    zim_builder="manifest", xb=xb)
+    a = Archive(str(zim))
+    status, detail = V._chk_kiwix_search_resolves(a)
+    assert status == "fail" and "'s/" in detail, detail
+    checked, dead = V.kiwix_search_dead_links(a, ["Monaco"])
+    assert dead and all(p.startswith("s/") for _, _, p in dead)
+
+
+class _Results:
+    def __init__(self, paths):
+        self.paths = paths
+
+    def getResults(self, start, n):  # noqa: N802 - libzim's name
+        return iter(self.paths[start:start + n])
+
+
+def test_kiwix_search_links_check(tmp_path, monkeypatch):
+    """kiwix_search_links on a libzim-mode ZIM (passes), and with Kiwix's
+    searchers answering a path the ZIM lacks (fails, naming it)."""
+    from libzim.reader import Archive
+    import libzim.search
+    import libzim.suggestion
+    from cloud import validate_zim as V
+    ref, _ = _build(tmp_path, monkeypatch, "libzim", xapian_mode="libzim",
+                    zim_builder="python")
+    a = Archive(str(ref))
+    q = V.kiwix_search_queries(a)
+    # Common words, the region's name, page and redirect titles.
+    assert {"park", "Monaco", "Fontaine du Casino", "Principauté de Monaco"} <= set(q)
+    status, detail = V._chk_kiwix_search_resolves(a)
+    assert status == "pass", detail
+    page = next(p for p in _search_entries(a))
+
+    class Sugg:
+        def __init__(self, arc):
+            pass
+
+        def suggest(self, text):
+            return _Results([page, "s/7"])
+
+    class Full:
+        def __init__(self, arc):
+            pass
+
+        def search(self, query):
+            return _Results([page])
+
+    monkeypatch.setattr(libzim.suggestion, "SuggestionSearcher", Sugg)
+    monkeypatch.setattr(libzim.search, "Searcher", Full)
+    status, detail = V._chk_kiwix_search_resolves(a)
+    assert status == "fail" and "'s/7'" in detail, detail
+    checked, dead = V.kiwix_search_dead_links(a, ["x"])
+    assert checked == 3 and dead == [("suggest", "x", "s/7")]

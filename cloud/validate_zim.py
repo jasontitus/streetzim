@@ -18,6 +18,8 @@ Gates we enforce:
   - Illustration present (Kiwix library shows a placeholder otherwise)
   - Main entry resolves to a content entry (not a dangling redirect)
   - Xapian full-text index: if ``_ftindex:yes`` tag, run a real query
+  - Kiwix's own search opens what it finds: sampled title suggestions and
+    full-text hits are entries of the ZIM (kiwix_search_links)
 
   Content consistency (warn if missing, fail if declared-and-missing):
   - map-config.json declares ``hasSatellite`` → at least one satellite
@@ -893,6 +895,87 @@ def _chk_fulltext(arc) -> tuple[str, str]:
                 f"xapian returned 0 hits for every probe {totals} — "
                 "index is likely corrupt")
     return ("pass", f"hits {totals}")
+
+
+# Kiwix's own search must open what it finds. A --xapian=builder build from
+# f38cfb4 (2026-05-08) to 2026-10-02 indexed documents at s/<n> and wrote
+# nothing there: every suggestion and full-text hit was a dead link, and the
+# fulltext_xapian check above (it counts hits) passed. Published ZIMs of that
+# kind are mended by ops/cloud/swap_viewer_rust.py --rebuild-search
+# --rebuild-xapian; re-gating one unmended (a viewer rollout), set
+# STREETZIM_KIWIX_SEARCH_WARN=1 to make this a warning.
+KIWIX_SEARCH_PROBES = ("park", "station", "street", "lake")
+
+
+def _first_with_prefix(arc, prefix: str) -> int:
+    """The id of the first content entry whose path is >= ``prefix`` (the
+    entries are in path order)."""
+    lo, hi = 0, arc.entry_count
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if arc._get_entry_by_id(mid).path < prefix:  # pyright: ignore[reportPrivateUsage]
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+def kiwix_search_queries(arc, *, pages: int = 8) -> list[str]:
+    """What to ask Kiwix's search: a few common words, the region's name and
+    the titles of up to ``pages`` Kiwix pages (search/*) spread over the
+    archive (redirect titles, an admin area's other names, included)."""
+    queries = list(KIWIX_SEARCH_PROBES)
+    name = str(_map_config(arc).get("name") or "").strip()
+    if name:
+        queries += [name, name.split()[0]]
+    lo, hi = _first_with_prefix(arc, "search/"), _first_with_prefix(arc, "search0")
+    if hi > lo:
+        step = max(1, (hi - lo) // pages)
+        for i in range(lo, hi, step):
+            t = arc._get_entry_by_id(i).title  # pyright: ignore[reportPrivateUsage]
+            if t:
+                queries.append(t)
+    return list(dict.fromkeys(queries))
+
+
+def kiwix_search_dead_links(arc, queries=None, *, per_query: int = 20):
+    """Ask Kiwix's title suggestions and full-text search (python-libzim:
+    the library kiwix-serve and the apps use) ``queries`` and return
+    ``(links checked, [(kind, query, path)] of the results that are not
+    entries of the archive)``."""
+    from libzim.search import Query, Searcher
+    from libzim.suggestion import SuggestionSearcher
+    if queries is None:
+        queries = kiwix_search_queries(arc)
+    checked, dead = 0, []
+    sugg = SuggestionSearcher(arc)
+    full = Searcher(arc) if getattr(arc, "has_fulltext_index", False) else None
+    for q in queries:
+        kinds = [("suggest", lambda q=q: sugg.suggest(q))]
+        if full is not None:
+            kinds.append(("fulltext", lambda q=q: full.search(Query().set_query(q))))
+        for kind, run in kinds:
+            for path in run().getResults(0, per_query):
+                checked += 1
+                if not arc.has_entry_by_path(path):
+                    dead.append((kind, q, path))
+    return checked, dead
+
+
+def _chk_kiwix_search_resolves(arc) -> tuple[str, str]:
+    if not (getattr(arc, "has_fulltext_index", False)
+            or getattr(arc, "has_title_index", False)):
+        return ("skip", "no Xapian index")
+    queries = kiwix_search_queries(arc)
+    checked, dead = kiwix_search_dead_links(arc, queries)
+    if dead:
+        kind, q, path = dead[0]
+        return ("fail", f"{len(dead)} of {checked} Kiwix search results are not "
+                        f"in the ZIM (e.g. {kind} {q!r} -> {path!r}); a "
+                        "--xapian=builder ZIM without its pages?")
+    if not checked:
+        return ("skip", f"no Kiwix search results for {len(queries)} queries")
+    return ("pass", f"{checked} results of {len(queries)} queries all open")
 
 
 def _map_config(arc) -> dict:
@@ -2017,6 +2100,9 @@ def _populate_results(results, arc, zim_path, audit_tiles):
     results.append(_check("places_html", "error", _chk_places_html, arc))
     results.append(_check("viewer_assets", "error", _chk_viewer_assets, arc))
     results.append(_check("fulltext_xapian", "error", _chk_fulltext, arc))
+    results.append(_check("kiwix_search_links",
+                          "warn" if os.environ.get("STREETZIM_KIWIX_SEARCH_WARN") == "1"
+                          else "error", _chk_kiwix_search_resolves, arc))
     results.append(_check("map_config", "error", _chk_map_config, arc))
     cfg = _map_config(arc)
     results.append(_check("vector_tiles", "error", _chk_vector_tiles, arc))
