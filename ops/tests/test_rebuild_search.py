@@ -95,7 +95,8 @@ def test_rebuild_search_rekeys_under_rule_2_and_keeps_manifest_keys(tmp_path):
     c = C()
     work = tmp_path / "w"
     work.mkdir()
-    n = svr._rebuild_search(c, lambda p: blobs[p], manifest, work)
+    spool, total = svr._recover_search(lambda p: blobs[p], manifest, work)
+    n = svr._rebuild_search(c, spool, total, manifest, work)
     assert n == len(recs)
     m = json.loads(c.items["search-data/manifest.json"])
     assert m["word_rule"] == 2 and m["addresses_stripped"] is True and m["total"] == 4
@@ -224,11 +225,12 @@ def test_rebuild_refuses_a_record_count_that_differs_from_the_manifest(tmp_path)
         work.mkdir()
         manifest = {"total": 2, "chunks": {"ca": 1}}
         if allow:
-            assert svr._rebuild_search(C(), blobs.__getitem__, manifest, work,
-                                       allow_total_mismatch=True) == 1
+            spool, total = svr._recover_search(blobs.__getitem__, manifest, work,
+                                               allow_total_mismatch=True)
+            assert svr._rebuild_search(C(), spool, total, manifest, work) == 1
         else:
             with pytest.raises(SystemExit, match="recovered 1"):
-                svr._rebuild_search(C(), blobs.__getitem__, manifest, work)
+                svr._recover_search(blobs.__getitem__, manifest, work)
 
 
 def test_search_spill_dir_must_be_named_and_off_the_root_fs(tmp_path, monkeypatch):
@@ -250,3 +252,66 @@ def test_search_spill_dir_must_be_named_and_off_the_root_fs(tmp_path, monkeypatc
     monkeypatch.setattr(svr, "_on_root_fs", lambda p: False)
     monkeypatch.setenv("TMPDIR", str(tmp_path))
     assert svr._spill_root(None, search=True) == str(tmp_path)
+
+
+# ---- checks before anything is written ----------------------------------------
+
+def test_a_manifest_without_total_is_refused_with_a_clear_message(tmp_path):
+    svr = _svr()
+    blobs = {"search-data/ca.json": json.dumps([{"n": "Cafe", "t": "poi"}]).encode()}
+    with pytest.raises(SystemExit, match="no integer 'total'"):
+        svr._recover_search(blobs.__getitem__, {"chunks": {"ca": 1}}, tmp_path)
+    spool, n = svr._recover_search(blobs.__getitem__, {"chunks": {"ca": 1}}, tmp_path,
+                                   allow_total_mismatch=True)
+    assert n == 1 and spool.read_text().count("\n") == 1
+
+
+def test_the_rebuild_checks_the_records_it_was_handed(tmp_path):
+    svr = _svr()
+    spool = tmp_path / "s.jsonl"
+    spool.write_text('{"n":"Cafe","t":"poi","a":1,"o":1}\n')
+
+    class C:
+        def add_item(self, it):
+            pass
+    with pytest.raises(SystemExit, match="holds 1 record"):
+        svr._rebuild_search(C(), spool, 2, {"chunks": {"ca": 1}}, tmp_path)
+
+
+def test_fs_type_takes_the_longest_mount(tmp_path):
+    svr = _svr()
+    mounts = tmp_path / "mounts"
+    mounts.write_text("/dev/sda1 / ext4 rw 0 0\n"
+                      "tmpfs /run/user tmpfs rw 0 0\n"
+                      "/dev/md0 /stor ext4 rw 0 0\n"
+                      "tmpfs /stor/ram\\040disk tmpfs rw 0 0\n")
+    assert svr._fs_type("/run/user/1000", str(mounts)) == "tmpfs"
+    assert svr._fs_type("/run", str(mounts)) == "ext4"
+    assert svr._fs_type("/stor/x", str(mounts)) == "ext4"
+    assert svr._fs_type("/storage", str(mounts)) == "ext4"      # not under /stor
+    assert svr._fs_type("/stor/ram disk/a", str(mounts)) == "tmpfs"
+    assert svr._fs_type("/x", str(tmp_path / "missing")) is None
+
+
+def test_the_spill_dir_is_checked_up_front(tmp_path, monkeypatch):
+    svr = _svr()
+    monkeypatch.delenv("TMPDIR", raising=False)
+    monkeypatch.setattr(svr, "_on_root_fs", lambda p: False)
+    monkeypatch.setattr(svr, "_fs_type", lambda p: "ext4")
+    assert svr._spill_root(str(tmp_path), search=True) == str(tmp_path)
+    # tmpfs is memory: refused for a search spool and for a named --tmp.
+    monkeypatch.setattr(svr, "_fs_type", lambda p: "tmpfs")
+    with pytest.raises(SystemExit, match="tmpfs"):
+        svr._spill_root(str(tmp_path), search=True)
+    with pytest.raises(SystemExit, match="tmpfs"):
+        svr._spill_root(str(tmp_path), search=False)
+    # --tmp is checked without a search option too.
+    monkeypatch.setattr(svr, "_fs_type", lambda p: "ext4")
+    with pytest.raises(SystemExit, match="not a directory"):
+        svr._spill_root(str(tmp_path / "nope"), search=False)
+    monkeypatch.setattr(svr, "_on_root_fs", lambda p: True)
+    with pytest.raises(SystemExit, match="root filesystem"):
+        svr._spill_root(str(tmp_path), search=False)
+    # $TMPDIR alone, without a search option, stays the caller's business.
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    assert svr._spill_root(None, search=False) == str(tmp_path)

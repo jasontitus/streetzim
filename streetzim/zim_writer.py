@@ -106,11 +106,23 @@ def _names_type(name, label):
         r"(?<!\w)" + re.escape(label.casefold()) + r"(?!\w)", name.casefold()) is not None
 
 
+def _title_text(text):
+    """A ZIM title without control characters (Unicode Cc: a newline or a
+    tab in an OSM name, "Tunda\\nBhuj"), which both packers refuse: each
+    becomes a space, and the spaces around it one."""
+    import unicodedata
+    if not any(unicodedata.category(c) == "Cc" for c in text):
+        return text
+    import re
+    out = "".join(" " if unicodedata.category(c) == "Cc" else c for c in text)
+    return re.sub(r" {2,}", " ", out).strip()
+
+
 def kiwix_page_title(feat):
     """A search page's title (what Kiwix suggests). An admin area's name
     gets its type when the name does not say it: "Alexandria (city)",
     but "Arlington County"."""
-    name = feat["name"]
+    name = _title_text(feat["name"])
     if feat.get("type") == "admin":
         label = (feat.get("subtype") or "").strip()
         if label and not _names_type(name, label):
@@ -134,12 +146,12 @@ def kiwix_alt_titles(feat):
     Alexandria" never found a page titled "Alexandria (city)"."""
     if feat.get("type") != "admin":
         return []
-    name = feat["name"]
+    name = _title_text(feat["name"])
     label = (feat.get("subtype") or "").strip()
     cands = []
     if label in FORMAL_OF_LABELS and not _names_type(name, label):
         cands.append(f"{label[:1].upper()}{label[1:]} of {name}")
-    cands += list(feat.get("alt") or [])
+    cands += [_title_text(a) for a in feat.get("alt") or []]
     seen = {name.casefold(), kiwix_page_title(feat).casefold()}
     out = []
     for c in cands:
@@ -424,6 +436,40 @@ def _resolve_xapianbuilder_binary(override: str | None = None) -> str:
     )
 
 
+def xapianbuilder_doc(feat, path, *, language="eng", target_path=""):
+    """The xapianbuilder input record (``{"path", "title", "mimetype",
+    "body", "language", "target_path"}``) of search feature `feat` at
+    `path`. Indexable body: the fields libzim's HTML-stub auto-indexer
+    would have seen (name + location + type + subtype + category + brand,
+    and an admin area's other names), with a ``geo.position`` meta tag so
+    xapianbuilder's MyHtmlParser fills value slot 2 with the lat/lon (on
+    parity with libzim's path). Title: kiwix_page_title. ``target_path``
+    (title index only): the page a redirect title points at."""
+    import html as _html
+    body_parts = [feat.get("name") or ""]
+    for k in ("location", "type", "subtype", "cat", "brand"):
+        v = feat.get(k)
+        if v:
+            body_parts.append(str(v))
+    body_parts += [str(a) for a in feat.get("alt") or ()]
+    body_text = " ".join(body_parts)
+    lat = feat.get("lat", 0)
+    lon = feat.get("lon", 0)
+    body_html = (
+        f'<html><head><meta name="geo.position" '
+        f'content="{lat};{lon}"></head><body>{_html.escape(body_text)}'
+        f'</body></html>'
+    )
+    return {
+        "path": path,
+        "title": kiwix_page_title(feat),
+        "mimetype": "text/html",
+        "body": body_html,
+        "language": language,
+        "target_path": target_path,
+    }
+
+
 def _streetzim_to_xapianbuilder_jsonl(src_jsonl: str, dst_jsonl: str,
                                       *, language: str = "eng") -> int:
     """Stream-translate the streetzim search-feature JSONL written by
@@ -439,6 +485,9 @@ def _streetzim_to_xapianbuilder_jsonl(src_jsonl: str, dst_jsonl: str,
     xapianbuilder's MyHtmlParser populates value slot 2 with the
     lat/lon (kept on parity with libzim's path).
 
+    Titles have no control characters (kiwix_page_title, _title_text),
+    which before 2026-10-02 they could.
+
     Returns the number of records emitted. Streams line-by-line —
     constant memory regardless of corpus size.
     """
@@ -453,40 +502,14 @@ def _streetzim_to_xapianbuilder_jsonl(src_jsonl: str, dst_jsonl: str,
                 feat = json.loads(line)
             except Exception:
                 continue
-            name = feat.get("name") or ""
-            if not name:
+            if not (feat.get("name") or ""):
                 continue
             # Synthetic path: clicks in Kiwix's native search land
-            # here. We don't emit a real entry at this path today —
-            # follow-up work will add a tiny redirect entry per record
-            # so clicks open the viewer's map at the feature's lat/lon.
-            slug_path = f"s/{n}"
-            body_parts = [name]
-            for k in ("location", "type", "subtype", "cat", "brand"):
-                v = feat.get(k)
-                if v:
-                    body_parts.append(str(v))
-            body_parts += [str(a) for a in feat.get("alt") or ()]
-            body_text = " ".join(body_parts)
-            lat = feat.get("lat", 0)
-            lon = feat.get("lon", 0)
-            # Wrap as minimal HTML so xapianbuilder's MyHtmlParser
-            # extracts geo.position into value slot 2 — keeps Kiwix
-            # geo features (e.g. nearby search) working.
-            import html as _html
-            body_html = (
-                f'<html><head><meta name="geo.position" '
-                f'content="{lat};{lon}"></head><body>{_html.escape(body_text)}'
-                f'</body></html>'
-            )
-            rec = {
-                "path": slug_path,
-                "title": kiwix_page_title(feat),
-                "mimetype": "text/html",
-                "body": body_html,
-                "language": language,
-                "target_path": "",
-            }
+            # here, and nothing is written there: a --xapian=builder ZIM
+            # has no search pages, so its Kiwix results do not open (since
+            # f38cfb4, 2026-05-08; ops/cloud/swap_viewer_rust.py
+            # --rebuild-xapian points them at pages it writes).
+            rec = xapianbuilder_doc(feat, f"s/{n}", language=language)
             dst.write(json.dumps(rec, ensure_ascii=False) + "\n")
             n += 1
     return n
@@ -501,6 +524,7 @@ def _build_xapian_via_xapianbuilder(streetzim_xapian_jsonl: str,
                                     language: str = "eng",
                                     binary_override: str | None = None,
                                     jobs: int = 0,
+                                    inputs: dict[str, str] | None = None,
                                     ) -> tuple[str, str]:
     import time
     import subprocess  # noqa: F401 — also used below; pre-import to make the
@@ -515,6 +539,11 @@ def _build_xapian_via_xapianbuilder(streetzim_xapian_jsonl: str,
     Streams: the input JSONL is translated line-by-line into the
     xapianbuilder format and piped via stdin to two parallel
     subprocesses (one fulltext, one title). Constant Python memory.
+
+    ``inputs``: xapianbuilder JSONL already written, per mode
+    (``{"fulltext": path, "title": path}``); ``streetzim_xapian_jsonl`` is
+    then not read. The title input may carry redirect titles
+    (``target_path``) that the full-text input must not.
 
     The fulltext and title runs are independent processes that share
     the input JSONL but read it fresh each time — small cost relative
@@ -539,7 +568,9 @@ def _build_xapian_via_xapianbuilder(streetzim_xapian_jsonl: str,
     # a cheap recovery checkpoint AND lets fulltext + title both read
     # from the same file in parallel without coordinating a single
     # producer to two consumers.
-    if not os.path.isfile(xb_jsonl) or os.path.getsize(xb_jsonl) == 0:
+    if inputs is not None:
+        pass
+    elif not os.path.isfile(xb_jsonl) or os.path.getsize(xb_jsonl) == 0:
         t0 = time.time()
         n = _streetzim_to_xapianbuilder_jsonl(streetzim_xapian_jsonl,
                                               xb_jsonl, language=language)
@@ -571,7 +602,7 @@ def _build_xapian_via_xapianbuilder(streetzim_xapian_jsonl: str,
             try: os.unlink(out_path)
             except FileNotFoundError: pass
             cmd = [binary, mode,
-                   "--input", xb_jsonl,
+                   "--input", (inputs or {}).get(mode, xb_jsonl),
                    "--output", out_path,
                    "--language", language,
                    "--jobs", str(jobs),
@@ -1967,6 +1998,49 @@ def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_ch
                  + (f" + {routing_graph_chunk_mb} MB chunks" if routing_graph_chunk_mb else ""))
 
 
+def search_record(feat, wiki=None):
+    """The search record (docs/search-records.md) of search feature `feat`,
+    as search pass 1 writes it; `wiki`: its wiki cross-ref entry (for an
+    admin area, admin_wiki()), or None.
+
+    Canonical record shape consumed by mcpzim:
+      n, t (type), s (subtype), a (lat), o (lon), l (location)
+    Optional additions (safe to forward through their parser):
+      w  = wikipedia tag value(s)  (OSM format, e.g. "en:Lincoln_Memorial")
+      q  = wikidata Q-ID
+      Overture-places enrichment (set by merge_overture_places; empty on
+      non-POI rows): ws = website, p = phone, soc = socials, brand = brand
+      primary name, wd = brand Wikidata Q-ID, cat = normalized category,
+      source = "overture" for Pass-2 adds.
+      al, bb, alt, osm = an administrative area's (admin_record_fields).
+    Coordinates rounded to 5 dp (~1.1 m). They were emitted at full float64
+    repr -- 56.92662663189116, nanometre precision for a bus stop -- and that
+    is entropy zstd cannot remove. Measured on 207,848 real records: 1.72 MB
+    -> 1.54 MB compressed, ~10% off the search payload, which is ~10% of a
+    ZIM. Display and routing read the same field, so 1 m is the floor:
+    SEARCH_COORD_DP=7 restores ~1 cm if that ever bites. (Shared with
+    ops/cloud/swap_viewer_rust.py --add-admin-areas.)"""
+    rec = {"n": feat["name"], "t": feat.get("type", ""), "s": feat.get("subtype", ""),
+           "a": round(feat["lat"], _SEARCH_COORD_DP),
+           "o": round(feat["lon"], _SEARCH_COORD_DP),
+           "l": feat.get("location", "")}
+    for ov_key in ("ws", "p", "soc", "brand", "wd", "cat", "source"):
+        v = feat.get(ov_key)
+        if v:
+            rec[ov_key] = v
+    rec.update(admin_record_fields(feat))
+    if wiki:
+        if wiki.get("wikipedia"):
+            rec["w"] = wiki["wikipedia"]
+            # Provenance: "wd" = title backfilled from a wikidata Q-ID (see
+            # --resolve-wikidata-titles); absent = the OSM wikipedia= tag itself.
+            if wiki.get("wikipedia_src"):
+                rec["wsrc"] = wiki["wikipedia_src"]
+        if wiki.get("wikidata"):
+            rec["q"] = wiki["wikidata"]
+    return rec
+
+
 def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp, page_types=KIWIX_PAGE_TYPES):
     """Search pass 1: stream the search JSONL into per-prefix and per-category
     chunk files in `chunk_tmp`, plus the Xapian candidates file."""
@@ -2066,40 +2140,10 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                     if wiki:
                         wiki_fields_added += 1
 
-                # Canonical record shape consumed by mcpzim:
-                #   n, t (type), s (subtype), a (lat), o (lon), l (location)
-                # Optional additions (safe to forward through their parser):
-                #   w  = wikipedia tag value(s)  (OSM format, e.g. "en:Lincoln_Memorial")
-                #   q  = wikidata Q-ID
-                #   Overture-places enrichment (set by merge_overture_places;
-                #   empty on non-POI rows): ws = website, p = phone, soc = socials,
-                #   brand = brand primary name, wd = brand Wikidata Q-ID,
-                #   cat = normalized category, source = "overture" for Pass-2 adds.
-                # Coordinates rounded to 5 dp (~1.1 m). They were
-                # emitted at full float64 repr -- 56.92662663189116,
-                # nanometre precision for a bus stop -- and that is
-                # entropy zstd cannot remove. Measured on 207,848 real
-                # records: 1.72 MB -> 1.54 MB compressed, ~10% off the
-                # search payload, which is ~10% of a ZIM. Display and
-                # routing read the same field, so 1 m is the floor:
-                # SEARCH_COORD_DP=7 restores ~1 cm if that ever bites.
-                rec = {"n": feat["name"], "t": t, "s": feat.get("subtype", ""),
-                       "a": round(feat["lat"], _SEARCH_COORD_DP),
-                       "o": round(feat["lon"], _SEARCH_COORD_DP),
-                       "l": feat.get("location", "")}
-                for ov_key in ("ws", "p", "soc", "brand", "wd", "cat", "source"):
-                    v = feat.get(ov_key)
-                    if v:
-                        rec[ov_key] = v
-                rec.update(admin_record_fields(feat))
+                # The record shape and its rounding: search_record.
+                rec = search_record(feat, wiki)
                 if wiki:
                     if wiki.get("wikipedia"):
-                        rec["w"] = wiki["wikipedia"]
-                        # Provenance: "wd" = title backfilled from a
-                        # wikidata Q-ID (see --resolve-wikidata-titles);
-                        # absent = the OSM wikipedia= tag itself.
-                        if wiki.get("wikipedia_src"):
-                            rec["wsrc"] = wiki["wikipedia_src"]
                         # Geo-index: underscored title -> [lat, lon, type].
                         # Matches the bundled wiki-article/<Title> path so
                         # the viewer can list + pin nearby Wikipedia at any
@@ -2131,8 +2175,6 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                             wiki_geo[_gt] = [round(feat["lat"], 5),
                                              round(feat["lon"], 5), t,
                                              _gq, _gd]
-                    if wiki.get("wikidata"):
-                        rec["q"] = wiki["wikidata"]
                 entry = json.dumps(rec, separators=(",", ":")) + "\n"
 
                 # Write abbreviated entry to per-prefix chunk file(s).

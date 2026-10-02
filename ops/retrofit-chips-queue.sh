@@ -45,6 +45,16 @@ DRY="${DRY:-0}"
 UPLOAD_LOCK=/storage/streetzim/.retrofit-upload.lock
 
 log(){ echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*" | tee -a "$LOG"; }
+# The packer's stage is mkdtemp'd beside the output as <out>.pack-stage-XXXXXXXX
+# (cloud/manifest_writer.py), so a literal "<out>.pack-stage" never matched and
+# a killed retrofit left GBs behind. Only the base is quoted: the glob is the
+# suffix alone, and only real directories are removed.
+stage_dirs_of(){ local d; for d in "$1".pack-stage-*; do [ -d "$d" ] && [ ! -L "$d" ] && echo "$d"; done; return 0; }
+rm_failed_output(){
+  local d
+  rm -rf -- "$1" "$1.tmp"
+  while IFS= read -r d; do [ -n "$d" ] && rm -rf -- "$d"; done < <(stage_dirs_of "$1")
+}
 row(){ printf "%s\t%s\t%s\t%s\t%s\n" "$1" "$2" "$3" "$4" "$(date -Iseconds)" >> "$TSV"; }
 [ "$DRY" = 1 ] || [ -f "$TSV" ] || printf "id\tstatus\tzim\tnote\tfinished\n" > "$TSV"
 
@@ -261,10 +271,12 @@ except Exception: print('err')" "$SRC")
   TODAY=$(date +%Y-%m-%d)
   OUT_BASE="osm-$ID-$TODAY.zim"
   for sfx in b c d e f; do
-    [ -e "$OUT_BASE" ] || [ -e "$OUT_BASE.tmp" ] || break
+    # A name with a stage dir is taken too (a run in flight, or one killed):
+    # rm_failed_output removes <name>.pack-stage-*, which must be ours alone.
+    [ -e "$OUT_BASE" ] || [ -e "$OUT_BASE.tmp" ] || [ -n "$(stage_dirs_of "$OUT_BASE")" ] || break
     OUT_BASE="osm-$ID-$TODAY$sfx.zim"
   done
-  if [ -e "$OUT_BASE" ]; then log "skip $ID: no free output name for $TODAY"; [ "$DRY" = 1 ] || row "$ID" skipped "$SRC" "name"; continue; fi
+  if [ -e "$OUT_BASE" ] || [ -e "$OUT_BASE.tmp" ] || [ -n "$(stage_dirs_of "$OUT_BASE")" ]; then log "skip $ID: no free output name for $TODAY"; [ "$DRY" = 1 ] || row "$ID" skipped "$SRC" "name"; continue; fi
   log "=== $ID: $SRC ($(du -h "$SRC" | cut -f1)) → $OUT_BASE  search='$SEARCH' route $RSRC → $RDST"
   if [ "$DRY" = 1 ]; then continue; fi
 
@@ -274,7 +286,7 @@ except Exception: print('err')" "$SRC")
   if ! nice -n 10 ionice -c2 -n7 "$PY" -u cloud/swap_viewer_rust.py "$SRC" "$OUT_BASE" \
        --reshard-chips --reshard-search > "$RLOG" 2>&1 \
      || [ ! -s "$OUT_BASE" ]; then
-    log "  RETROFIT FAILED — see $RLOG"; rm -rf "$OUT_BASE" "$OUT_BASE.tmp" "$OUT_BASE.pack-stage"; row "$ID" retrofit-failed "$SRC" "$(tail -1 "$RLOG" | cut -c1-120)"; continue
+    log "  RETROFIT FAILED — see $RLOG"; rm_failed_output "$OUT_BASE"; row "$ID" retrofit-failed "$SRC" "$(tail -1 "$RLOG" | cut -c1-120)"; continue
   fi
   grep -E "^  chip-|^  chips:|X-namespace" "$RLOG" | sed 's/^/    /' >> "$LOG"
   log "  retrofit done in $(( ($(date +%s) - T0) / 60 )) min ($(du -h "$OUT_BASE" | cut -f1))"
