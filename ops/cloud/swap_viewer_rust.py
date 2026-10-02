@@ -31,6 +31,15 @@ current word rule (marks continue a word; manifest ``word_rule`` 2): the
 retrofit for ZIMs whose names were split at Indic/Thai vowel signs
 (docs/search-prefix-locality.md#word-rule). Its records are recovered and
 counted against the manifest's ``total`` before anything is written.
+``--add-admin-areas PBF`` (with ``--rebuild-search``) adds the
+administrative areas the builder would have (streetzim/admin_areas.py, for the
+ZIM's map-config.json bounds or ``--bbox``): their search records, keyed as the
+writer keys them, and their Kiwix pages ``search/<slug>.html`` with the
+front-article redirects ``search/<slug>~<k>.html``. A source that already has
+admin records is left as it is (the option is skipped, with a message).
+Wikipedia: the relations' own tags only, no Wikimedia request. Kiwix's own
+search (the Xapian title and full-text indexes) is copied from the source, so
+it does not list the new pages (docs/search-prefix-locality.md#retrofit).
 
 Scope otherwise: no routing changes, no terrain
 refresh. Use `repackage_zim.py` for those (and accept that it loses Xapian
@@ -38,7 +47,8 @@ on rust-built sources).
 
 Usage:
     python3 cloud/swap_viewer_rust.py SRC.zim DST.zim [--reshard-chips]
-        [--reshard-search | --rebuild-search [--allow-total-mismatch]]
+        [--reshard-search | --rebuild-search [--allow-total-mismatch]
+                            [--add-admin-areas REGION.osm.pbf [--bbox W,S,E,N]]]
         [--tmp DIR]   (required for the search options, default $TMPDIR; a
                        --tmp directory, or any with a search option, must be
                        off the root filesystem and not tmpfs)
@@ -50,6 +60,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 import time
@@ -378,13 +389,116 @@ def _spill_root(tmp_dir: str | None, search: bool) -> str | None:
     return root
 
 
+def _parse_bbox(text: str) -> list[float]:
+    try:
+        bb = [float(v) for v in str(text).split(",")]
+    except ValueError:
+        bb = []
+    if len(bb) != 4 or not (-90 <= bb[1] < bb[3] <= 90):
+        raise SystemExit(f"--bbox {text!r}: want W,S,E,N in degrees")
+    return bb
+
+
+def _zim_bbox(src_bytes, has_path) -> list[float]:
+    """The box a ZIM was built for: map-config.json ``bounds`` (what the
+    builder passes the admin extraction as its build box)."""
+    if not has_path("map-config.json"):
+        raise SystemExit("--add-admin-areas: the source has no map-config.json; "
+                         "pass --bbox W,S,E,N")
+    bounds = json.loads(src_bytes("map-config.json")).get("bounds")
+    if not isinstance(bounds, list) or len(bounds) != 4:
+        raise SystemExit(f"--add-admin-areas: map-config.json has no usable bounds "
+                         f"({bounds!r}); pass --bbox W,S,E,N")
+    return _parse_bbox(",".join(str(v) for v in bounds))
+
+
+def _extract_admin(pbf: str, bbox, work: Path) -> list[dict]:
+    """The builder's own administrative-area extraction
+    (streetzim/admin_areas.append_admin_areas: osmium, then pyosmium, with
+    GeoNames from reverse_geocoder for areas the extract clips) for ``bbox``,
+    as search features. Its scratch goes under ``work`` (the spill), never
+    the default /tmp."""
+    from streetzim.admin_areas import append_admin_areas
+    if not os.path.isfile(pbf):
+        raise SystemExit(f"--add-admin-areas: {pbf!r} is not a file")
+    if not shutil.which("osmium"):
+        raise SystemExit("--add-admin-areas needs the osmium CLI (osmium-tool) on PATH")
+    feats_path = work / "admin-features.jsonl"
+    feats_path.write_text("", encoding="utf-8")
+    saved = tempfile.tempdir
+    tempfile.tempdir = str(work)
+    try:
+        append_admin_areas(pbf, str(feats_path), bbox=bbox)
+    finally:
+        tempfile.tempdir = saved
+    with open(feats_path, encoding="utf-8") as f:
+        feats = [json.loads(line) for line in f if line.strip()]
+    feats_path.unlink()
+    return feats
+
+
+def _spool_counts(spool_path: Path) -> tuple[int, int]:
+    """(admin records, records of a Kiwix page type) in a record spool."""
+    from streetzim.zim_writer import KIWIX_PAGE_TYPES
+    admin = paged = 0
+    with open(spool_path, encoding="utf-8") as f:
+        for line in f:
+            t = json.loads(line).get("t")
+            admin += t == "admin"
+            paged += t in KIWIX_PAGE_TYPES
+    return admin, paged
+
+
+def _admin_pages(feats: list[dict], first: int):
+    """(path, title, html, redirect paths, feature) of each admin area's
+    Kiwix page, numbered from ``first`` as zim_writer.search_page numbers
+    the i-th page of a build."""
+    from streetzim.zim_writer import kiwix_alt_titles, search_page
+    for k, feat in enumerate(feats):
+        path, title, page_html = search_page(feat, first + k)
+        alts = [f"{path[:-len('.html')]}~{j}.html"
+                for j in range(len(kiwix_alt_titles(feat)))]
+        yield path, title, page_html, alts, feat
+
+
+def _plan_admin(feats: list[dict], spool_path: Path, has_path, first: int) -> list[str]:
+    """Append the admin areas' search records to the spool, keyed later
+    exactly as the writer keys them (zim_writer.search_record, with the
+    relation's own wikipedia/wikidata tags: admin_wiki without a resolved
+    lookup, so no Wikimedia request), and check that none of their pages or
+    redirects would replace a source entry (pages numbered from ``first``).
+    Returns the record lines."""
+    from streetzim.zim_writer import admin_wiki, search_record
+    seen: set[str] = set()
+    for path, _t, _h, alts, _f in _admin_pages(feats, first):
+        for p in (path, *alts):
+            if p in seen or has_path(p):
+                raise SystemExit(f"--add-admin-areas: page {p!r} already exists in the "
+                                 f"source (or twice in the plan); refusing to replace it")
+            seen.add(p)
+    lines = [json.dumps(search_record(f, admin_wiki(f, None)), separators=(",", ":"))
+             for f in feats]
+    with open(spool_path, "a", encoding="utf-8") as spool:
+        for line in lines:
+            spool.write(line + "\n")
+    return lines
+
+
 def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                      reshard_search: bool = False,
                      rebuild_search: bool = False,
                      tmp_dir: str | None = None,
-                     allow_total_mismatch: bool = False) -> int:
+                     allow_total_mismatch: bool = False,
+                     add_admin_areas: str | None = None,
+                     bbox: str | None = None) -> int:
     from libzim.reader import Archive
 
+    if add_admin_areas and not rebuild_search:
+        raise SystemExit("--add-admin-areas needs --rebuild-search (the records "
+                         "join the index it rebuilds)")
+    if bbox and not add_admin_areas:
+        raise SystemExit("--bbox is the box of --add-admin-areas")
+    admin_bbox = _parse_bbox(bbox) if bbox else None
     spill_root = _spill_root(tmp_dir, reshard_search or rebuild_search)
 
     src = Archive(src_path)
@@ -505,20 +619,47 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
     dropped_chip_files = 0
     dropped_search_files = 0
     replaced_paths: set[str] = set()
+    admin_feats: list[dict] = []
+    admin_first = 0
 
     with tempfile.TemporaryDirectory(prefix="swap_viewer_rust_",
                                      dir=spill_root) as spill_dir:
         spill_dir_path = Path(spill_dir)
 
         # Search records first, into the spill and before the packer's stage
-        # exists: an unreadable leaf or a short count stops the run here, not
-        # hours into the walk.
+        # exists: an unreadable leaf, a short count, an extraction failure or
+        # a page that would collide stops the run here, not hours into the
+        # walk.
         search_spool: Path | None = None
         search_total = 0
         if rebuild_search:
             search_spool, search_total = _recover_search(
                 _src_bytes, search_manifest, spill_dir_path,
                 allow_total_mismatch=allow_total_mismatch)
+        if add_admin_areas:
+            assert search_spool is not None
+            have_admin, paged = _spool_counts(search_spool)
+            if have_admin:
+                print(f"  --add-admin-areas: SKIPPED -- the source already has "
+                      f"{have_admin:,} administrative-area record(s) (t \"admin\"); "
+                      f"they are kept as they are, none added or replaced", flush=True)
+            else:
+                box = admin_bbox or _zim_bbox(_src_bytes, src.has_entry_by_path)
+                print(f"  admin areas: {add_admin_areas} in box "
+                      f"{','.join(f'{v:g}' for v in box)}", flush=True)
+                admin_feats = _extract_admin(add_admin_areas, box, spill_dir_path)
+                # A fresh build numbers its pages in feature order and appends
+                # the admin areas last, after the other page-type records.
+                admin_first = paged
+                _plan_admin(admin_feats, search_spool, src.has_entry_by_path, admin_first)
+                search_total += len(admin_feats)
+                levels: dict[int, int] = {}
+                for f in admin_feats:
+                    levels[f.get("admin_level")] = levels.get(f.get("admin_level"), 0) + 1
+                print(f"  admin areas: {len(admin_feats):,} record(s) to add "
+                      f"(by admin_level: {dict(sorted(levels.items()))}); "
+                      f"search total {search_total:,}; Kiwix pages "
+                      f"search/<slug>-{admin_first}.. onward", flush=True)
 
         creator = ManifestCreator(dst_path, compression_level=22, verbose=True)
         creator.set_mainpath(main_path)
@@ -688,6 +829,19 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                                         search_manifest, spill_dir_path)
                 print(f"  search: dropped {dropped_search_files} old file(s), "
                       f"rebuilt {n_out} record(s)", flush=True)
+            if admin_feats:
+                from streetzim.zim_writer import add_alt_titles
+                n_redirects = 0
+                for path, title, page_html, _alts, feat in _admin_pages(admin_feats,
+                                                                        admin_first):
+                    # As zim_writer writes a search page: a front article
+                    # (Kiwix's title list), and its other titles as
+                    # front-article redirects.
+                    c.add_item(_Item(path, "text/html", title=title,
+                                     data=page_html.encode("utf-8"), is_front=True))
+                    n_redirects += add_alt_titles(c, path, feat)
+                print(f"  admin areas: wrote {len(admin_feats):,} Kiwix page(s) and "
+                      f"{n_redirects:,} redirect(s)", flush=True)
 
             if reshard_search:
                 from cloud.search_shards import (Aggregator, SHARD_TARGET_BYTES,
@@ -995,6 +1149,16 @@ def main() -> int:
                          "--reshard-search or --rebuild-search (the search spool is "
                          "several GB). A --tmp directory, or any with a search "
                          "option, must not be on the root filesystem or tmpfs.")
+    ap.add_argument("--add-admin-areas", metavar="PBF", default=None,
+                    help="--rebuild-search: add administrative-area search records "
+                         "(countries, states, districts...) extracted from this OSM "
+                         "extract by the builder's own code (streetzim/admin_areas.py) "
+                         "for the ZIM's box, with their Kiwix pages "
+                         "(search/<slug>.html) and redirects. Skipped, with a "
+                         "message, when the source already has admin records.")
+    ap.add_argument("--bbox", metavar="W,S,E,N", default=None,
+                    help="--add-admin-areas: the box (default: the source's "
+                         "map-config.json bounds, the box it was built for).")
     ap.add_argument("--allow-total-mismatch", action="store_true",
                     help="--rebuild-search: proceed when the records recovered "
                          "differ from the source manifest's total (e.g. a ZIM "
@@ -1006,7 +1170,9 @@ def main() -> int:
                             reshard_search=args.reshard_search,
                             rebuild_search=args.rebuild_search,
                             tmp_dir=args.tmp,
-                            allow_total_mismatch=args.allow_total_mismatch)
+                            allow_total_mismatch=args.allow_total_mismatch,
+                            add_admin_areas=args.add_admin_areas,
+                            bbox=args.bbox)
 
 
 if __name__ == "__main__":

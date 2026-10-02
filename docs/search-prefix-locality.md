@@ -346,6 +346,60 @@ there too). Everything is checked before the source is opened. Wrappers
 point it at `/storage` (`retrofit-chips-queue.sh` exports
 `TMPDIR=/storage/streetzim/tmp`). Nothing falls back to `/tmp`.
 
+### Administrative areas
+
+`--rebuild-search --add-admin-areas REGION.osm.pbf` gives a ZIM built before
+administrative-area search (docs/search-records.md, `admin`) the areas a
+build would add, without a rebuild:
+
+* **Extraction**: the builder's own `admin_areas.append_admin_areas` on the
+  PBF, for the ZIM's box (`map-config.json` `bounds`, the box the build
+  passed it; `--bbox W,S,E,N` overrides). It needs the osmium CLI and
+  pyosmium; its scratch goes to the spill directory. GeoNames
+  (`reverse_geocoder`'s bundled `rg_cities1000.csv`, offline; a builder
+  dependency, in the image and the host venv) places areas the extract
+  clips and names regions; without it those clipped areas are left out and
+  a region falls back to the country.
+* **Records**: `zim_writer.search_record` (the writer's own record shape:
+  `al`, `bb`, `alt`, `osm`, with `w`/`q` from the relation's own
+  `wikipedia`/`wikidata` tags through `admin_wiki` without a resolved
+  lookup -- no Wikimedia request), serialised as the writer serialises,
+  appended to the recovered records and keyed with them under the current
+  rule, by the name and every other name (as `_search_bucket` keys them).
+  `total` becomes recovered + added. A non-English tag stays as it is
+  (`ne:…`): the map's Wikipedia button appears only for an article the ZIM
+  bundles (`wiki-geo-index.json`, left untouched), and the Find list's 📖
+  links to the public site, as for every record.
+* **Kiwix pages**: `search/<slug>-<i>.html` (`zim_writer.search_page`, front
+  articles) and the redirects `search/<slug>-<i>~<k>.html` (`add_alt_titles`,
+  front articles), numbered after the source's records of a page type, as a
+  build appends the areas last. A page or redirect that would replace a
+  source entry stops the run before anything is written.
+* **Already there**: a source with any `t: "admin"` record is left as it is
+  (the option is skipped, with a message); nothing is added or replaced.
+* **Unchanged**: the Find chips and category index (no `category-index/
+  admin.json`, no `streetzim-meta.json` type count), the wiki geo-index, and
+  Kiwix's own search. The Xapian title and full-text indexes are copied
+  from the source, and libzim suggests from the title index whenever there
+  is one, so Kiwix's search bar does not list the new pages; the pages are
+  front articles in the title list and open by path. (In a
+  `--xapian=builder` ZIM -- all four retrofit targets -- those indexes'
+  documents point at `s/<n>` paths that have no entry, so Kiwix-native
+  results do not open either way.)
+
+Measured 2026-10-02 on himalayas 2026-09-27 (5.34 GB, rule 1, built with
+`--xapian=builder`), region PBF of 2026-09-05: 2,452,785 records recovered
+(= `total`), 15,890 areas added (16,224 relations read; levels 2: 2, 4: 40,
+5: 305, 6: 2,013, 7: 994, 8: 1,888, 9: 9,086, 10: 1,562), `total`
+2,468,675; 15,890 pages and 7,148 redirects; 13 min 55 s wall (recovery
+~1 min, extraction ~1.5 min, pack 2.5 min), peak RSS 11.1 GB (the Rust
+packer; Python 0.7 GB); output 5.09 GB. Country names in `location` come from
+admin_areas' short table, so Indian states read "IN".
+
+Use a packer built from this tree (`STREETZIM_PACK_BIN`): the
+`streetzim-pack` binary of 2026-09-14 took every front article for the main
+page, so the ZIM opened on the last area's page instead of the map.
+
 Budget the largest prefix (`av`, `de`): ~4-6 GB of temp space; re-serialising
 ~41 k hot leaves roughly doubles the chip-retrofit wall time.
 
