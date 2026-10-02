@@ -3,6 +3,8 @@ vendored MapLibre (moved verbatim from create_osm_zim.py, which re-exports
 these names)."""
 import json
 import os
+import shutil
+import signal
 import sqlite3
 import subprocess
 
@@ -96,7 +98,19 @@ def generate_tiles(pbf_path, mbtiles_path, bbox=None, fast=False, store=None):
             os.makedirs(store, exist_ok=True)
             cmd.extend(["--store", str(store)])
             print(f"    Using on-disk store: {store}")
-        subprocess.run(cmd, check=True)
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            # tilemaker maps its store files into memory: a full disk is a
+            # SIGBUS on a page it cannot write, not an error message.
+            if store and e.returncode == -signal.SIGBUS:
+                try:
+                    free = f"{shutil.disk_usage(store).free / 1e9:.1f} GB free"
+                except OSError:
+                    free = "free space unknown"
+                print(f"    ERROR: tilemaker died of SIGBUS: its on-disk store ran out "
+                      f"of disk in {store} ({free})", flush=True)
+            raise
 
     parts = area.split(parse_bbox(bbox)) if bbox else []
     if len(parts) < 2:

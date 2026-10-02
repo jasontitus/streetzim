@@ -170,7 +170,7 @@
       "type": "string-enum",
       "required": false,
       "title": "tilemaker store",
-      "description": "Where tilemaker keeps the extract's nodes and ways while it makes the tiles: memory, or disk (a folder in --tmp, about twice the extract's size, removed afterwards; as fast in the measurements, and the Netherlands took 0.65 GB instead of 4.0). Default: auto, disk for an extract over 1 GiB or when tilemaker's estimated memory is over half the container's memory limit",
+      "description": "Where tilemaker keeps the extract's nodes and ways while it makes the tiles: memory, or disk (a folder in --tmp, 1.8 to 2.2 times the size of the extract cut to the area, removed afterwards; as fast in the measurements, and the Netherlands took 0.65 GB instead of 4.0). Default: auto, disk when the cut is over 1 GiB or tilemaker's estimated memory is over half the container's memory limit, unless --tmp has less than 3 times the cut free (disk then fails)",
       "choices": [
         "auto",
         "memory",

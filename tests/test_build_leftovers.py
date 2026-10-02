@@ -219,7 +219,7 @@ def test_sweep_removes_only_stale_orphaned_staging(tmp_path, capsys):
         file(f".same.zim.{dead}.recent12.building", time.time()),     # fresh
         folder(f"..same.zim.{dead}.recent12.building.building-abcd_123", time.time()),
         file(f".same.zim.{alive}.abcd_123.building"),                 # owner alive
-        file(f".same.zim.{os.getpid()}.abcd_123.building"),           # this process
+        file(f".same.zim.{os.getpid()}.abcd_123.building"),           # ours, no lock
         file(f".same.zim.{dead}.marked12.building"),                  # kept on purpose
         file(f".same.zim.{dead}.marked12.building.tmp"),
         folder(f"..same.zim.{dead}.marked12.building.building-abcd_123"),
@@ -427,3 +427,27 @@ def test_lone_lock_files_are_removed_under_the_same_rules(tmp_path):
     finally:
         held.close()
     assert all(p.exists() for p in kept)
+
+
+@pytest.mark.parametrize("held", [False, True])
+def test_a_killed_build_with_our_own_pid_is_swept(tmp_path, monkeypatch, held):
+    """streetzim as a container's entrypoint is PID 1 in every run (or the
+    same PID under docker-init), so a killed run's workspace carries this
+    run's PID. The free lock decides; one this process holds (another
+    thread's build) is not taken."""
+    import fcntl
+    monkeypatch.setattr(cli.os, "getpid", lambda: 1)
+    ws = tmp_path / "streetzim-build-1-abcd_123"
+    (ws / "tilemaker-store").mkdir(parents=True)
+    (ws / "tilemaker-store" / "mmap_0.dat").write_bytes(b"x")
+    _age(ws)
+    lock = _unlocked(tmp_path, ws.name)
+    if held:
+        holder = open(lock, "a")
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        assert cli.sweep_stale(tmp_path, WORKSPACE_KINDS) == []
+        assert ws.exists()
+        holder.close()
+    else:
+        assert cli.sweep_stale(tmp_path, WORKSPACE_KINDS) == [ws]
+        assert not ws.exists() and not lock.exists()
