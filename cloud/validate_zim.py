@@ -52,6 +52,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -985,7 +986,8 @@ def _opens(arc, path: str) -> bool:
     return False
 
 
-def kiwix_search_dead_links(arc, queries=None, *, per_query: int = 20):
+def kiwix_search_dead_links(arc: Any, queries: list[str] | None = None, *,
+                            per_query: int = 20) -> tuple[int, list[tuple[str, str, str]]]:
     """Ask Kiwix's title suggestions and full-text search (python-libzim:
     the library kiwix-serve and the apps use) ``queries`` and return
     ``(links checked, [(kind, query, path)] of the results that are not
