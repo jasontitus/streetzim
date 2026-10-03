@@ -380,3 +380,98 @@ def test_validator_fails_a_prefix_in_both_keys():
     m["char_split"] = {"u5927": ["u5b66"]}
     status, detail = _chk_search_data_sizes(_fake(m))
     assert status == "fail" and "both" in detail
+
+
+def _status(m):
+    return _chk_search_data_sizes(_fake(m))
+
+
+def test_validator_fails_a_range_under_char_split():
+    # A viewer that predates ranges compares tokens by equality: "大丁"
+    # would find nothing.
+    m = _ranges_manifest()
+    m["char_split"] = m.pop("char_ranges")
+    status, detail = _status(m)
+    assert status == "fail" and "under char_split" in detail, detail
+
+
+@pytest.mark.parametrize("tok", ["r4E00.4e8b", "r0x4e00.4e8b", "r4_e00.4e8b",
+                                 "r4e00.4e8b ", "r4e00.", "r.4e8b"])
+def test_validator_fails_a_malformed_range(tok):
+    chunks = {f"u5927~{tok}~c": 5, "u5927~u5b66~c": 9}
+    m = {"total": 14, "chunks": chunks, "sub_chunks": {"u5927": sorted(chunks)},
+         "char_ranges": {"u5927": [tok, "u5b66", "r4f00.4f10"]}}
+    m["chunks"]["u5927~r4f00.4f10~c"] = 1
+    m["sub_chunks"]["u5927"] = sorted(m["chunks"])
+    status, detail = _status(m)
+    assert status == "fail" and "malformed range" in detail, (tok, detail)
+
+
+def test_validator_fails_lo_above_hi():
+    m = _ranges_manifest()
+    m["chunks"] = {"u5927~r4e8b.4e00~c": 5, "u5927~u5b66~c": 9}
+    m["sub_chunks"]["u5927"] = sorted(m["chunks"])
+    m["char_ranges"]["u5927"] = ["r4e8b.4e00", "u5b66"]
+    status, detail = _status(m)
+    assert status == "fail" and "lo > hi" in detail, detail
+
+
+def test_validator_fails_a_range_that_is_not_the_last_token():
+    chunks = {"u5927~r4e00.4e8b~x~c": 5, "u5927~r4f00.4f01~c": 1}
+    m = {"total": 6, "chunks": chunks, "sub_chunks": {"u5927": sorted(chunks)},
+         "char_ranges": {"u5927": ["r4e00.4e8b~x", "r4f00.4f01"]}}
+    status, detail = _status(m)
+    assert status == "fail" and "not the last token" in detail, detail
+
+
+def test_validator_fails_overlapping_ranges_in_one_tier():
+    chunks = {"u5927~r4e00.4e8b~c": 5, "u5927~r4e80.4e90~c": 3}
+    m = {"total": 8, "chunks": chunks, "sub_chunks": {"u5927": sorted(chunks)},
+         "char_ranges": {"u5927": ["r4e00.4e8b", "r4e80.4e90"]}}
+    status, detail = _status(m)
+    assert status == "fail" and "overlap" in detail, detail
+
+
+def test_overlapping_ranges_in_different_tiers_pass():
+    chunks = {"u5927~r4e00.4e8b~c": 5, "u5927~r4e80.4e90~p": 3}
+    m = {"total": 8, "chunks": chunks, "sub_chunks": {"u5927": sorted(chunks)},
+         "char_ranges": {"u5927": ["r4e00.4e8b", "r4e80.4e90"]}}
+    status, detail = _status(m)
+    assert status == "pass", detail
+
+
+def test_validator_fails_a_range_containing_a_sibling_leaf():
+    chunks = {"u5927~r4e00.4e8b~c": 5, "u5927~u4e01~c": 3}
+    m = {"total": 8, "chunks": chunks, "sub_chunks": {"u5927": sorted(chunks)},
+         "char_ranges": {"u5927": ["r4e00.4e8b", "u4e01"]}}
+    status, detail = _status(m)
+    assert status == "fail" and "contains sibling U+4E01" in detail, detail
+    # The same sibling in another tier is no conflict.
+    chunks = {"u5927~r4e00.4e8b~c": 5, "u5927~u4e01~p": 3}
+    m = {"total": 8, "chunks": chunks, "sub_chunks": {"u5927": sorted(chunks)},
+         "char_ranges": {"u5927": ["r4e00.4e8b", "u4e01"]}}
+    assert _status(m)[0] == "pass"
+
+
+def test_validator_fails_char_ranges_without_a_range():
+    chunks = {"u5927~u5b66~c": 9}
+    m = {"total": 9, "chunks": chunks, "sub_chunks": {"u5927": sorted(chunks)},
+         "char_ranges": {"u5927": ["u5b66"]}}
+    status, detail = _status(m)
+    assert status == "fail" and "with no range" in detail, detail
+
+
+@pytest.mark.parametrize("key", ["char_ranges", "char_split", "sub_chunks"])
+@pytest.mark.parametrize("bad", [["u5927"], {"u5927": "r4e00.4e8b"}, "x"])
+def test_validator_fails_cleanly_on_a_non_map(key, bad):
+    m = _ranges_manifest()
+    m[key] = bad
+    status, detail = _status(m)
+    assert status == "fail" and key in detail, detail
+
+
+def test_range_bounds_is_strict_like_the_viewer():
+    for tok in ("r4E00.4e8b", "r0x4e00.4e8b", "r4_e00.4e8b", "r 4e00.4e8b",
+                "r+4e00.4e8b", "r4e00.4e8b\n", "r4e00..4e8b"):
+        assert range_bounds(tok) is None, tok
+    assert range_bounds("r0.10ffff") == (0, 0x10FFFF)
