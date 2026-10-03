@@ -25,19 +25,28 @@ from typing import Any
 
 
 def _watch_parent(parent: int) -> None:
+    """Fork a watcher into this (new) process group: when `parent` is gone
+    it SIGKILLs the group, this process and the osmium it started with it.
+    A process, not a thread: pyosmium holds the GIL through a whole node
+    pass (18 s for a 165 MB extract, minutes for China), which would stall
+    a thread's check that long. The watcher leaves when this process does."""
     import os
-    import threading
     import time
-
-    def watch() -> None:
-        while os.getppid() == parent:
+    me = os.getpid()
+    if os.fork() != 0:
+        return
+    try:
+        while os.getppid() == me:
+            try:
+                os.kill(parent, 0)
+            except ProcessLookupError:
+                os.killpg(0, signal.SIGKILL)
             time.sleep(1)
-        os.killpg(0, signal.SIGKILL)
+    finally:
+        os._exit(0)
 
-    threading.Thread(target=watch, name="streetzim-watch-parent", daemon=True).start()
 
-
-def _child_main(conn: Any, tempdir: str | None, cpus_requested: int | None,
+def _child_main(conn: Any, parent: int, tempdir: str | None, cpus_requested: int | None,
                 fn: Callable[..., Any], args: tuple[Any, ...],
                 kwargs: dict[str, Any]) -> None:
     import os
@@ -51,12 +60,12 @@ def _child_main(conn: Any, tempdir: str | None, cpus_requested: int | None,
     # a terminal's Ctrl-C to the run_in_child caller, which stops it.
     os.setpgid(0, 0)
     # Out of the terminal's process group, the child no longer gets its
-    # SIGHUP, nor the SIGKILL of a `kill -9 -- -PGID`: if this process's
-    # parent dies without stopping it, the group kills itself. (A thread:
-    # it needs no signal handler, and pyosmium releases the GIL often
-    # enough for a one-second check. Terminal job control, Ctrl-Z and
+    # SIGHUP, nor the SIGKILL of a `kill -9 -- -PGID`: if the parent dies
+    # without stopping it, the group kills itself. `parent` comes from the
+    # parent, not getppid() here: a parent dead before this line would
+    # otherwise be read as its reaper. (Terminal job control, Ctrl-Z and
     # `stty tostop`, applies to the parent only.)
-    _watch_parent(os.getppid())
+    _watch_parent(parent)
     tempfile.tempdir = tempdir
     if cpus_requested is not None:
         cpus.set_build_cpus(cpus_requested)
@@ -128,6 +137,8 @@ def run_in_child(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     not leave them writing.
     A child that dies without an answer (the out-of-memory killer) raises
     RuntimeError naming the step and the signal."""
+    import os
+
     from streetzim import cpus
     name = getattr(fn, "__qualname__", repr(fn))
     sys.stdout.flush()
@@ -135,7 +146,8 @@ def run_in_child(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     ctx = multiprocessing.get_context("spawn")
     receive, send = ctx.Pipe(duplex=False)
     child = ctx.Process(target=_child_main, name=f"streetzim-{name}",
-                        args=(send, tempfile.tempdir, cpus._requested, fn, args, kwargs))
+                        args=(send, os.getpid(), tempfile.tempdir, cpus._requested,
+                              fn, args, kwargs))
     child.start()
     send.close()
     try:

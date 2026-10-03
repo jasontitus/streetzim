@@ -225,3 +225,33 @@ def test_stop_kills_a_child_that_has_no_group_yet():
     t = time.monotonic()
     _stop(child)
     assert time.monotonic() - t < 10 and child.exitcode == -signal.SIGKILL
+
+
+def _record_pid_then_hold_the_gil(path):
+    """A long C loop that never lets another thread run, as a pyosmium
+    node pass does."""
+    Path(path).write_text(f"{os.getpid()} {os.getpid()}")
+    sum(range(10 ** 12))
+
+
+def _run_hold_and_record(path):
+    run_in_child(_record_pid_then_hold_the_gil, path)
+
+
+def test_a_child_holding_the_gil_still_dies_with_its_parent(tmp_path):
+    import multiprocessing
+    pids = tmp_path / "pids"
+    parent = multiprocessing.get_context("spawn").Process(
+        target=_run_hold_and_record, args=(str(pids),))
+    parent.start()
+    child, _ = _wait_for(pids)
+    os.kill(parent.pid, signal.SIGKILL)
+    parent.join()
+    for _ in range(50):
+        if not _alive(int(child)):
+            break
+        time.sleep(0.1)
+    alive = _alive(int(child))
+    if alive:
+        os.kill(int(child), signal.SIGKILL)
+    assert not alive
