@@ -950,41 +950,66 @@ ends, and a location index of every node in the cut, a 13.9 GB file read at
 random through the 3 GB of page cache left. Everything before it had
 peaked at 7.3 GB.
 
-The builder now filters the extract to the highway ways and their nodes
-first (`osmium tags-filter`; China: 2.47 GB, 333 M nodes), keeps junction
-ids in a sorted array, spills way refs and the encoded geometries to
-scratch files beside the graph and deduplicates the geometries afterwards
-(by length and a 64-bit hash, every match confirmed byte for byte), and
-writes the edges a block at a time. The node-location index is in memory
-up to an estimated 1 GiB (three times 16 bytes per highway node, for the
-vector's growth) or a tenth of the memory limit (`memory.max`), else in a
-file (`STREETZIM_NODE_LOC_DIR`, default `/data` when writable, else the
-build's temporary folder); `STREETZIM_ROUTING_NODE_INDEX=memory|file`
-forces either, and the log says which and why (`Node locations ...`). The
-graph is byte-identical to the old builder's (Switzerland, the
-Netherlands, China, the Monaco fixture; random networks in
-`tests/test_routing_build_memory.py` against the old builder).
+For a large extract the builder now first filters it to the highway ways
+and their nodes (`osmium tags-filter`; China: 2.47 GB, 333 M nodes). The
+filter is a process of its own whose ID sets span the planet's node-ID
+range, so it costs 1.4 to 2.2 GB of anonymous memory whatever the extract's
+size (1.45 GB for Monaco's 1 MB fixture, 2.1 GB for Luxembourg, 2.2 GB for
+the Netherlands). A small extract is therefore read whole, with a file
+index of every node in it, as before: auto filters only when that index,
+estimated at 2.2 bytes per byte of PBF (China: 13.9 GB for 6.48 GB), would
+pass 3 GiB or a quarter of the memory limit (`memory.max`); so of the
+regions below only China is filtered (the Netherlands' 1.40 GB, an
+estimated 3.1 GB, measured 1.9 GB, is read whole).
+`STREETZIM_ROUTING_HIGHWAY_FILTER=on|off` forces either, and the log says
+which and why.
+
+Either way the builder keeps junction ids in a sorted array, spills way
+refs and the encoded geometries to scratch files beside the graph and
+deduplicates the geometries afterwards (by length and a 64-bit hash, every
+match confirmed byte for byte), and writes the edges a block at a time.
+With the filter, the node-location index is in memory up to an estimated
+1 GiB (three times 16 bytes per highway node, for the vector's growth) or
+a tenth of the memory limit, else in a file; without it, always in a file.
+The file goes in `STREETZIM_NODE_LOC_DIR` when that is a writable folder,
+else the build's temporary folder. Its default, `/data`, is not writable
+on the current build host (a root-owned folder on the root filesystem)
+and does not exist in the image, so both use the build's folder.
+`STREETZIM_ROUTING_NODE_INDEX=memory|file` forces either, and the log
+says which and why (`Node locations ...`). The graph is byte-identical to
+the old builder's (Monaco, Luxembourg, Switzerland, the Netherlands,
+China; random networks in `tests/test_routing_build_memory.py` against
+the old builder, with and without the filter).
 
 The routing step alone (`extract_routing_graph` on the cut extract,
-2026-10-03; peak anonymous memory of the process, then peak RSS, which
-also counts a file index's mapped pages; wall time on the shared 36-core
-machine):
+2026-10-03, on the shared 36-core machine). Peak memory is of the whole
+process tree, the osmium filter included, sampled every 50 ms: anonymous
+memory, then RSS, which also counts a file index's mapped pages (page
+cache, which the kernel can drop):
 
-| region (extract) | before | after |
-|---|---|---|
-| Switzerland (547 MB) | 1.87 GB / 2.53 GB, 174 s | 1.06 GB / 1.17 GB, 174 s |
-| the Netherlands (1.40 GB) | 2.11 GB / 3.97 GB, 255 s | 0.91 GB / 0.96 GB, 196 s |
-| China (6.48 GB cut), `--memory 16g` container | did not finish (thrashed in Pass 2) | 8.6 GB / 10.4 GB, 49 min |
-| China, outside a container (no limit) | 23.4 GB / 33.6 GB, 48 min | |
+| region (extract) | before | after (auto) | after, filter forced on |
+|---|---|---|---|
+| Monaco fixture (1.1 MB) | 0.04 / 0.06 GB, 0.8 s | 0.03 / 0.06 GB, 0.6 s | 1.46 / 1.48 GB, 1.2 s |
+| Luxembourg (47 MB) | 0.27 / 0.35 GB, 12 s | 0.19 / 0.27 GB, 15 s | 2.11 / 2.13 GB, 14 s |
+| Switzerland (547 MB) | 1.84 / 2.56 GB, 192 s | 1.13 / 1.67 GB, 234 s | 2.18 / 2.20 GB, 211 s |
+| the Netherlands (1.40 GB) | 2.04 / 3.99 GB, 291 s | 1.06 / 3.00 GB, 323 s | 2.22 / 2.25 GB, 254 s |
+| China (6.48 GB cut), `--memory 16g` container | did not finish (thrashed in Pass 2) | 8.6 / 10.4 GB, 49 min (filtered) | |
+| China, outside a container (no limit) | 23.4 / 33.6 GB, 48 min | | |
 
-China's run sat CPU-bound throughout (one core, about 104%, reads under
-1 MB/s in Pass 2, no memory pressure); the container's total memory reached
-its limit only with page cache (the highway extract, the 5.0 GB index file
-and the geometry spill), which the kernel dropped as needed. Its peak is
-after Pass 2, deduplicating 59.8 M geometry candidates and sorting 105 M
-edges, on top of the 2.5 GB of edge columns. Disk: the highway extract
-(0.38 times the cut for China), the index file (16 bytes per highway node)
-and the geometry spill (2.2 GB for China), all removed when the step ends.
+China's peak is the builder after Pass 2, deduplicating 59.8 M geometry
+candidates and sorting 105 M edges on top of 2.5 GB of edge columns; its
+filter ran first, alone, at about 2.4 GB (the container's anonymous
+memory, sampled every 10 s). The run sat CPU-bound throughout (one core,
+about 104%, reads under 1 MB/s in Pass 2, no memory pressure); the
+container's total memory reached its limit only with page cache (the
+highway extract, the 5.0 GB index file and the geometry spill), which the
+kernel dropped as needed. Wall times are on a shared machine, within
+about 20% run to run. Disk: the highway extract (0.38 times the cut for
+China), the index file (16 bytes per node indexed) and the geometry spill
+(2.2 GB for China), all removed when the step ends. If the build is
+killed instead, they stay in create_osm_zim's temporary folder
+(`osm_zim_*`), which `streetzim` keeps in its workspace under `--tmp`
+(`streetzim-build-*`), so a later build sweeps it with the workspace.
 
 ### Terrain cost
 
