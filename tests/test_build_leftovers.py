@@ -135,6 +135,30 @@ def test_staging_and_workspace_names_carry_the_pid(tmp_path, monkeypatch, fake_b
     assert not cli.owner_lock(stage).exists() and not cli.owner_lock(work).exists()
 
 
+def test_builder_temp_folder_is_inside_the_workspace(tmp_path, monkeypatch):
+    """create_osm_zim's mkdtemp folder lands in the build's workspace, so a
+    killed build's folder goes with the workspace sweep; --tmp itself gets
+    nothing new, and tempfile's default is restored afterwards."""
+    import tempfile
+    import create_osm_zim
+    monkeypatch.setattr(cli, "plan", lambda *args, **kwargs: ([], {}))
+    seen = []
+
+    def builder(argv):
+        seen.append(Path(tempfile.mkdtemp(prefix="osm_zim_")))
+        Path(argv[argv.index("-o") + 1]).write_bytes(b"finished archive")
+
+    monkeypatch.setattr(create_osm_zim, "main", builder)
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    assert _run(tmp_path) == 0
+    [made] = seen
+    assert cli.WORKSPACE_NAME.match(made.parent.name)
+    assert made.parent.parent == (tmp_path / "scratch").resolve()
+    # Removed with the workspace when the build ends.
+    assert not made.exists()
+    assert tempfile.tempdir == str((tmp_path / "scratch").resolve())
+
+
 def test_keep_temp_leftovers_are_marked(tmp_path, monkeypatch):
     import create_osm_zim
     monkeypatch.setattr(cli, "plan", lambda *args, **kwargs: ([], {}))
