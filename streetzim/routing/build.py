@@ -114,7 +114,11 @@ def dedup_geoms(lengths, hashes, seg_first, read, cap=None):
     dups = np.flatnonzero(rep != idx)
     bad = dups[lengths[dups] != lengths[rep[dups]]]
     same_len = dups[lengths[dups] == lengths[rep[dups]]]
-    mismatch = [int(k) for k in same_len.tolist() if read(k) != read(int(rep[k]))]
+    mismatch = []
+    for s in range(0, len(same_len), 1 << 20):
+        mismatch.extend(k for k, r in zip(same_len[s:s + (1 << 20)].tolist(),
+                                          rep[same_len[s:s + (1 << 20)]].tolist())
+                        if read(k) != read(r))
     if len(bad) or mismatch:
         colliding = np.unique(rep[np.concatenate(
             [bad, np.asarray(mismatch, dtype=np.int64)])])
@@ -232,9 +236,9 @@ def _highway_pbf(source_pbf, output_dir):
     return path
 
 
-def _node_index_dir(n_nodes, output_dir):
+def _node_index_dir(n_nodes, output_dir, mode=None):
     """Where the node-location index goes: None for memory, else the folder
-    for its file. Prints why."""
+    for its file. Prints why. `mode` overrides STREETZIM_ROUTING_NODE_INDEX."""
     from streetzim import cpus
     # A file index's folder: STREETZIM_NODE_LOC_DIR (default /data, the
     # build host's NVMe scratch) when writable, else the build's own.
@@ -256,7 +260,7 @@ def _node_index_dir(n_nodes, output_dir):
         except OSError:
             pass
     use_file, why = choose_node_index(
-        os.environ.get("STREETZIM_ROUTING_NODE_INDEX", "auto"),
+        mode or os.environ.get("STREETZIM_ROUTING_NODE_INDEX", "auto"),
         n_nodes, cpus.memory_limit())
     if not use_file:
         print(f"    Node locations in memory ({why})")
@@ -338,7 +342,8 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
     if hw_pbf:
         scratch.append(hw_pbf)
     try:
-        return _extract(hw_pbf or source_pbf, output_dir, bbox, scratch)
+        return _extract(hw_pbf or source_pbf, output_dir, bbox, scratch,
+                        highways_only=hw_pbf is not None)
     finally:
         for p in scratch:
             try:
@@ -347,9 +352,11 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
                 pass
 
 
-def _extract(source_pbf, output_dir, bbox, scratch):
+def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
     """extract_routing_graph from the highway extract on. Files it creates
-    go in `scratch`, which the caller removes."""
+    go in `scratch`, which the caller removes. Without highways_only the
+    location index holds every node of `source_pbf`, so it is a file (as it
+    always was before the filter), whatever the highway-node count says."""
     import math
     import array
     import mmap
@@ -440,8 +447,9 @@ def _extract(source_pbf, output_dir, bbox, scratch):
     # sorted; the duplicates in the sorted interior refs are the 2+ ones.
     print("    Pass 1: scanning highway ways for junction nodes...")
     interior = _Spill(output_dir, "interior")
+    scratch.append(interior.path)
     endpoints = _Spill(output_dir, "ends")
-    scratch.extend([interior.path, endpoints.path])
+    scratch.append(endpoints.path)
 
     class _Pass1(osmium.SimpleHandler):
         def __init__(self):
@@ -468,7 +476,12 @@ def _extract(source_pbf, output_dir, bbox, scratch):
                       end="", flush=True)
 
     p1 = _Pass1()
-    p1.apply_file(source_pbf)
+    try:
+        p1.apply_file(source_pbf)
+    except BaseException:
+        interior.remove()
+        endpoints.remove()
+        raise
     print(f"\r    Pass 1: scanned {p1.hw_count} highway ways "
           f"(of {p1.way_count} total)                    ")
 
@@ -500,7 +513,8 @@ def _extract(source_pbf, output_dir, bbox, scratch):
     del interior_junctions, endpoint_arr
     print(f"    Found {len(junction_arr)} junction nodes (graph vertices)")
 
-    loc_dir = _node_index_dir(n_highway_nodes, output_dir)
+    loc_dir = _node_index_dir(n_highway_nodes, output_dir,
+                              mode=None if highways_only else "file")
 
     # Across the antimeridian, OSM splits a road at ±180: one way ends on a
     # node at 180.0, the next starts on a different node at -180.0, same
@@ -821,9 +835,10 @@ def _extract(source_pbf, output_dir, bbox, scratch):
                       end="", flush=True)
 
     p2 = _Pass2()
-    index_spec, index_file = _node_index(loc_dir, scratch)
+    index_file = None
     loc_handler = None
     try:
+        index_spec, index_file = _node_index(loc_dir, scratch)
         loc_handler = osmium.NodeLocationsForWays(osmium.index.create_map(index_spec))
         loc_handler.ignore_errors()
         osmium.apply(source_pbf, loc_handler, p2)
@@ -868,7 +883,12 @@ def _extract(source_pbf, output_dir, bbox, scratch):
     num_geoms = len(kept_len)
     geom_offsets_np = np.zeros(num_geoms + 1, dtype='<u4')
     np.cumsum(kept_len, out=geom_offsets_np[1:])
-    geom_blob_len = int(kept_len.sum())
+    geom_blob_len = int(kept_len.sum(dtype=np.int64))
+    if geom_blob_len > 0xFFFFFFFF:
+        # Only one segment straddling GEOM_BLOB_CAP with over 64 KB of
+        # geometry could do this; the old builder failed here too.
+        raise OverflowError(f"geometry blob of {geom_blob_len} bytes does "
+                            f"not fit SZRG v4's u32 offsets")
     del kept_len, geom_len
     # Pad geom blob to 4-byte alignment (else the following Uint32Array view
     # of name_offsets lands at a non-aligned offset and the browser throws

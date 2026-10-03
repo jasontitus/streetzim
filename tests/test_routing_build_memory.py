@@ -142,7 +142,15 @@ def test_same_bytes_without_the_osmium_tool(scratch_env, monkeypatch):
     pbf = _network(tmp / "net.osm.pbf", 5)
     want = _build(_reference().extract_routing_graph, pbf, tmp / "ref")
     monkeypatch.setattr(build.shutil, "which", lambda name: None)
+    osmium = pytest.importorskip("osmium")
+    specs = []
+    real = osmium.index.create_map
+    monkeypatch.setattr(osmium.index, "create_map",
+                        lambda spec: specs.append(spec) or real(spec))
     assert _build(build.extract_routing_graph, pbf, tmp / "new") == want
+    # Unfiltered, the index holds every node of the extract: a file, as
+    # before the filter, however few the highway nodes.
+    assert [s.split(",")[0] for s in specs] == ["sparse_file_array"]
 
 
 def test_hash_collisions_are_resolved_by_bytes(scratch_env, monkeypatch):
