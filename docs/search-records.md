@@ -230,12 +230,19 @@ the same OSM extract (added in 2026-09; older ZIMs have none).
 
 - `search-data/manifest.json`:
   ```json
-  {"total": 1397, "word_rule": 2, "chunks": {"mo": 12, "u5927": 3},
-   "sub_chunks": {"de": ["de-0", "de-1"]},
-   "char_split": {"ca": ["ca~r~c", "ca~s~p"]}}
+  {"total": 1397, "word_rule": 2, "chunks": {"mo": 12, "ca~r~c": 3, …},
+   "sub_chunks": {"de": ["de-0", "de-1"], "ca": ["ca~r~c", "ca~s~p"], …},
+   "char_split": {"ca": ["r", "s"]},
+   "char_ranges": {"u5927": ["r4e00.4e8b", "u5b66", "u5b66~r4e00.4e10"]}}
   ```
-  `chunks` maps a prefix to its record count. `sub_chunks` and `char_split`
-  appear only when big prefixes were split. `word_rule` says how names were
+  `chunks` maps a leaf to its record count. `sub_chunks`, `char_split` and
+  `char_ranges` appear only when big prefixes were split: `sub_chunks`
+  lists every leaf of a split prefix, `char_split` / `char_ranges` its
+  character paths (leaf `prefix~path~tier`). A prefix is under
+  `char_ranges` when small sibling leaves share one whose last path token
+  is a code-point range `r<lo>.<hi>` (hex, inclusive); readers that do not
+  know ranges ignore that key and read the prefix through `sub_chunks`
+  (docs/search-prefix-locality.md, "Grouped siblings"). `word_rule` says how names were
   cut into words for keys and paths; absent means 1 (every ZIM before
   2026-10), 2 means marks continue a word
   (docs/search-prefix-locality.md, "Word rule").

@@ -90,7 +90,9 @@ Since 2026-09-16 hot prefixes are split by character path and tier
 instead (`ca~r~c`, with `-0…-f` hash children only where characters stop
 dividing), listed under `char_split` as well as `sub_chunks`; see
 [search-records.md](search-records.md#search-data). The client also scans
-for `<prefix>~*` keys.
+for `<prefix>~*` keys. Since 2026-10 a prefix whose small sibling leaves
+were grouped under a range token (`u5927~r4e00.4e8b~c`) is listed under
+`char_ranges` instead of `char_split`; `sub_chunks` still lists every leaf.
 
 **Helper.** `expandPrefix(prefix)` in `resources/viewer/places.html`
 resolves a prefix to its leaf chunk filenames covering all three

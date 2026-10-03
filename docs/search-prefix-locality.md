@@ -1,6 +1,6 @@
 # Search: give hot prefix chunks locality (proposal v4, 2026-09-16)
 
-> Design record. Implemented in `aab3334` (2026-09-16): `cloud/search_shards.py`, the viewer's `search-shards` blocks, `--reshard-search`. The current layout is in [search-records.md](search-records.md#search-data).
+> Design record. Implemented in `aab3334` (2026-09-16); small siblings grouped under range tokens since 2026-10 ([Grouped siblings](#grouped-siblings)): `cloud/search_shards.py`, the viewer's `search-shards` blocks, `--reshard-search`. The current layout is in [search-records.md](search-records.md#search-data).
 
 Status: design, revised after two adversarial reviews and four measurement
 passes over real ZIMs. Implement → retrofit in the same pass as the Find-chip
@@ -274,6 +274,119 @@ Compatibility:
   small pockets elsewhere (switzerland holds a few Thai/Tamil names). They
   need a rebuild, or `cloud/swap_viewer_rust.py --rebuild-search` (below). A
   Latin/CJK region gains nothing and needs neither.
+
+### Grouped siblings
+
+A split node used to give each child its own leaf. A Latin node has at most
+38 children (`a`–`z`, `0`–`9`, `_`, the terminal); a CJK node has thousands,
+most holding a handful of records. china 2026-09-20 rebuilt with word rule 2
+(`--rebuild-search`) shipped a 6.47 MB `search-data/manifest.json` with
+180,032 chunks for 28.3 M records, which `validate_zim` fails (cap 4 MB: the
+viewer downloads and parses it on every load). What filled it:
+
+* 168,745 of the chunks are leaves of just 267 hot prefixes; 98,301 hold
+  ≤ 5 records and 142,557 ≤ 50 (median 4). The 11,287 unsplit prefixes —
+  one per rare CJK first character — are the same as before and cost
+  ~0.15 MB: a tiny first character was never the problem, its tiny
+  *second* characters under a hot first character were.
+* Each leaf is named three times: its `chunks` key and count (3.03 MB),
+  in `sub_chunks` (2.47 MB) and its path in `char_split` (0.97 MB).
+* Not only CJK paths: 44 k of china's 71 k leaves under ASCII prefixes
+  have a CJK token (`1~u53f7~a`), and 22 k more are small pinyin leaves.
+  united-states (pure Latin, layout of 2026-09-20) already ships 4.73 MB
+  with 150 k leaves.
+
+**Rule** (`Aggregator.leaves`, `cloud/search_shards.py`): when a node is
+split — including the prefix itself, whose first-level children are the
+roots — its children that hold at most `GROUP_MEMBER_BYTES` (128 KiB) and
+are consecutive in code-point order share one leaf of at most
+`GROUP_BYTES` (256 KiB, never more than the split target). The leaf's last
+path token is a **range**, `r<lo>.<hi>`: the first and last member code
+points in hex, inclusive (`u5927~r4e00.4e8b~c`). A range never spans a
+sibling that has a leaf of its own (a bigger child, or one split further),
+the terminal `_e` is never grouped, and a group of one keeps its own path.
+ASCII tokens group by their character's code point (`_` is 0x5f). A range
+token cannot be any other token: those are one ASCII character, `_e` or
+`u<hex>`, none containing a `.`. Groups are per tier, like every leaf.
+
+**Manifest**: a prefix whose plan has a range is listed under
+`char_ranges` instead of `char_split` (same shape: the paths, sorted); a
+prefix is never under both (the validator fails that). `sub_chunks` stays
+the exact leaf union. A plan without a range stays in `char_split`,
+written exactly as before.
+
+**Readers** (`SEARCH_SHARDS` in both viewers): `splitPaths` takes a
+prefix's paths from `char_split`, else `char_ranges`; `pathsFor` compares a
+declared token with a typed one by equality or, for a range, by code point
+(`tokenMatches`), in both directions (typed longer or shorter than the
+path). Typing a character covered by no path is still "no records". The
+writer's side is `TierPlan.leaf_path` (bisect over each parent's ranges).
+
+**Compatibility**
+
+* Old ZIM, new viewer: no `char_ranges`, no range tokens — every path
+  compares by equality, as before.
+* New ZIM, old viewer: the old viewer knows only `char_split`, so a
+  grouped prefix looks unsplit-by-character to it and it reads every leaf
+  through `sub_chunks` — the pre-locality behaviour, slow on a hot prefix,
+  never wrong. That combination exists only for the site-served PWA viewer
+  until this change is deployed (`web/drive/viewer` is updated with it);
+  a ZIM carries its own viewer.
+* External readers (mcpzim, the Swift `Geocoder`) resolve a prefix through
+  `sub_chunks` / `chunks` and fetch every leaf of a split prefix; the leaf
+  union is unchanged, so they keep working. One that adds character
+  targeting must read `char_ranges` and match range tokens as above.
+* `--reshard-search` refuses a source that has `char_split` or
+  `char_ranges`; `--rebuild-search` re-plans either.
+
+**Latin regions**: a region with no prefix over the hot-split threshold
+(10 MB) writes byte-identical search data. A hot Latin prefix with small
+siblings changes — that is the point for united-states — e.g.
+washington-dc 2026-09-26, its records regenerated with cf46f4d and with
+this change: 1,043 of 1,105 search-data files identical, the other 62 the
+two hot prefixes `no` and `st` (111 → 62 leaves), manifest 11,333 →
+10,373 bytes, `char_split` → `char_ranges` for both. Grouping only
+non-ASCII tokens would have kept such regions identical but left china at
+~1.3 MB and united-states at 4.72 MB (simulation below).
+
+**Choosing GROUP_BYTES** (simulated from the shipped manifests, leaf
+sizes from record counts × measured bytes per record per tier):
+
+| grouping | china | southeast-asia | united-states | indian-sub. |
+|---|---|---|---|---|
+| none (shipped) | 6.47 MB | 3.78 MB | 4.73 MB | 0.65 MB |
+| non-ASCII only, 128/512 KiB | 1.31 | 1.36 | 4.72 | 0.64 |
+| all tokens, 64/256 KiB | 1.03 | 0.96 | 3.26 | 0.35 |
+| **all tokens, 128/256 KiB** | **0.89** | **0.83** | **3.07** | **0.31** |
+| all tokens, 128/512 KiB | 0.82 | 0.79 | 3.04 | 0.31 |
+
+The cost is per query: a typed character in a group reads the group,
+≤ 256 KiB per tier, where it read its own (often few-KB) leaf. 128/256 KiB
+keeps that bound while grouping more leaves than 64/256; 128/512 halves
+the remaining manifest gain for twice the per-query bound. Simulated on
+southeast-asia (20 Chinese, 20 Latin names): 325.0 → 326.6 MB in total,
+新加坡 0.08 → 0.55 MB and 金边 0.01 → 0.54 MB the largest rises, 1,147 → 370
+leaf requests ("Ho Chi Minh" 920 → 228 at the same 170 MB).
+
+**Measured on china** (`--rebuild-search --add-admin-areas --rebuild-xapian`
+from osm-china-2026-09-20.zim, the flags of the 2026-10 retrofit, `r3`)
+against the same retrofit without grouping (`r2`):
+
+| | r2 | r3 |
+|---|---|---|
+| search manifest | 6.47 MB, 180,032 chunks | **0.94 MB**, 30,591 chunks |
+| leaves of the 267 hot prefixes | 168,745 | 19,304 |
+| `validate_zim` search_data_sizes | fail (manifest > 4 MB) | pass |
+| viewer load to search ready (kiwix-serve, headless Chromium) | 1.96 s (manifest fetch 776 ms, parse 104 ms) | 1.29 s (164 ms, 8 ms) |
+
+Per query, from the real leaves (each viewer query, tiers c+p+s, JSON
+bytes): the 20 Chinese names read 36.6 → 38.9 MB in total (北京 1.11 →
+1.31, 大连 0.21 → 0.57, 天安门 0.03 → 0.65 MB; 广州, 重庆, 武汉, 长沙 and 7
+more unchanged), the 20 Latin names 241.5 → 241.8 MB; leaf requests
+494 → 225 ("Xi'an" 336 → 114, "Zhongshan Road" 73 → 26). In the browser
+(one query from an empty cache) 北京, 大连, 天安门, 西安, 中山公园, 鄂尔多斯,
+上海, Beijing, Dalian and Starbucks returned the same top 15 on both, with
+the leaf counts and bytes above.
 
 ## Validation
 
