@@ -9,9 +9,11 @@ geometry's bytes for dedup (about 85 bytes per geometry), Pass 1's Python
 set of way ends, and a node-location index of every node in the cut (14 GB
 on disk, random reads into a page cache the anonymous memory had squeezed
 to 3 GB). The builder now keeps:
-  - only the highway ways and their nodes (`osmium tags-filter`), so the
-    location index holds the highway nodes alone, in memory or in a file
-    by size (choose_node_index);
+  - for a large extract, only the highway ways and their nodes (`osmium
+    tags-filter`, choose_highway_filter), so the location index holds the
+    highway nodes alone, in memory or in a file by size (choose_node_index);
+    a small extract is read whole, with a file index, as before (the
+    filter's own ID sets cost 1.4-2.2 GB whatever the extract's size);
   - junction ids as a sorted int64 array, looked up with searchsorted;
   - each way's refs spilled to files in Pass 1, read back into one array;
   - geometries spilled to a file with a 64-bit hash and length each, and
@@ -50,6 +52,42 @@ NODE_INDEX_GROWTH = 3
 NODE_INDEX_FILE_ABOVE_BYTES = 1 << 30
 # ...or this share of the memory limit (cpus.memory_limit()).
 NODE_INDEX_LIMIT_SHARE = 0.1
+
+
+# The highway filter (osmium tags-filter) is a separate process whose ID
+# sets span the planet's node-ID range: 1.4 GB for Monaco's 1 MB extract,
+# 2.0 GB for Luxembourg's 47 MB, 2.2 GB for Alaska's 413 MB. Read whole,
+# the extract instead costs a file index of every node in it, about this
+# many bytes per byte of PBF (China: 13.9 GB for its 6.48 GB cut)...
+HIGHWAY_FILTER_MODES = ("auto", "on", "off")
+WHOLE_INDEX_PER_PBF_BYTE = 2.2
+# ...so auto filters once that index would pass this (the Netherlands'
+# 1.40 GB: an estimated 3.09 GB, measured 1.94 GB of mapped file, which is
+# page cache, against the filter's 2.2 GB of anonymous memory; read whole)...
+HIGHWAY_FILTER_ABOVE_BYTES = 3 << 30
+# ...or this share of the memory limit (cpus.memory_limit()).
+HIGHWAY_FILTER_LIMIT_SHARE = 0.25
+
+
+def choose_highway_filter(mode, pbf_bytes, memory_limit):
+    """(read only the highway ways and their nodes, why) for an extract of
+    `pbf_bytes`. `mode` is auto, on or off
+    (STREETZIM_ROUTING_HIGHWAY_FILTER)."""
+    if mode not in HIGHWAY_FILTER_MODES:
+        raise ValueError(f"STREETZIM_ROUTING_HIGHWAY_FILTER must be one of "
+                         f"{', '.join(HIGHWAY_FILTER_MODES)}, not {mode!r}")
+    if mode != "auto":
+        return mode == "on", f"STREETZIM_ROUTING_HIGHWAY_FILTER={mode}"
+    est = WHOLE_INDEX_PER_PBF_BYTE * pbf_bytes
+    gb = est / 1e9
+    if est > HIGHWAY_FILTER_ABOVE_BYTES:
+        return True, (f"auto: a whole-extract node index of about {gb:.1f} GB, "
+                      f"over {HIGHWAY_FILTER_ABOVE_BYTES >> 30} GiB")
+    if memory_limit is not None and est > HIGHWAY_FILTER_LIMIT_SHARE * memory_limit:
+        return True, (f"auto: a whole-extract node index of about {gb:.1f} GB, "
+                      f"over {HIGHWAY_FILTER_LIMIT_SHARE:.0%} of the "
+                      f"{memory_limit / 1e9:.1f} GB limit")
+    return False, f"auto: a whole-extract node index of about {gb:.1f} GB"
 
 
 def choose_node_index(mode, n_nodes, memory_limit):
@@ -216,9 +254,17 @@ class _Spill:
 
 def _highway_pbf(source_pbf, output_dir):
     """The highway ways of `source_pbf` and the nodes they use, in a file
-    of their own (osmium tags-filter), or None without the osmium tool. The
-    location index then holds the highway nodes alone: China's cut has 870
-    M nodes, a 14 GB index, its roads a fraction of that."""
+    of their own (osmium tags-filter), or None when choose_highway_filter
+    says the extract is small enough to read whole, or without the osmium
+    tool. The location index then holds the highway nodes alone: China's
+    cut has 870 M nodes, a 14 GB index, its roads 333 M of them."""
+    from streetzim import cpus
+    use, why = choose_highway_filter(
+        os.environ.get("STREETZIM_ROUTING_HIGHWAY_FILTER", "auto"),
+        os.path.getsize(source_pbf), cpus.memory_limit())
+    if not use:
+        print(f"    Reading the whole extract ({why})")
+        return None
     if shutil.which("osmium") is None:
         print("    osmium tool not found: reading the whole extract")
         return None
@@ -232,7 +278,7 @@ def _highway_pbf(source_pbf, output_dir):
         os.remove(path)
         raise
     print(f"    Highway ways and their nodes: "
-          f"{os.path.getsize(path) / (1024 * 1024):.1f} MB")
+          f"{os.path.getsize(path) / (1024 * 1024):.1f} MB ({why})")
     return path
 
 
@@ -240,8 +286,12 @@ def _node_index_dir(n_nodes, output_dir, mode=None):
     """Where the node-location index goes: None for memory, else the folder
     for its file. Prints why. `mode` overrides STREETZIM_ROUTING_NODE_INDEX."""
     from streetzim import cpus
-    # A file index's folder: STREETZIM_NODE_LOC_DIR (default /data, the
-    # build host's NVMe scratch) when writable, else the build's own.
+    # A file index's folder: STREETZIM_NODE_LOC_DIR when it is a writable
+    # folder, else the build's own temporary folder (output_dir). The
+    # default, /data, was chosen as a fast NVMe scratch volume (an earlier
+    # comment here); on the current build host it is a root-owned folder on
+    # the root filesystem, not writable by the build user, and in the
+    # Docker image it does not exist, so both use the build's folder.
     loc_dir = os.environ.get("STREETZIM_NODE_LOC_DIR", "/data")
     if not os.path.isdir(loc_dir) or not os.access(loc_dir, os.W_OK):
         loc_dir = output_dir

@@ -117,18 +117,25 @@ def _build(fn, pbf, out, **kw):
 
 @pytest.fixture
 def scratch_env(tmp_path, monkeypatch):
+    """Scratch in tmp_path, and the highway filter on: these extracts are
+    far too small for auto to filter them (the whole-file path has its own
+    test below)."""
     monkeypatch.setenv("STREETZIM_NODE_LOC_DIR", str(tmp_path))
+    monkeypatch.setenv("STREETZIM_ROUTING_HIGHWAY_FILTER", "on")
     return tmp_path
 
 
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 @pytest.mark.parametrize("index", ["memory", "file"])
-def test_graph_bytes_match_the_dict_builder(scratch_env, monkeypatch, seed, index):
+@pytest.mark.parametrize("highway_filter", ["on", "off"])
+def test_graph_bytes_match_the_dict_builder(scratch_env, monkeypatch, seed, index,
+                                            highway_filter):
     pytest.importorskip("osmium")
     tmp = scratch_env
     pbf = _network(tmp / "net.osm.pbf", seed)
     want = _build(_reference().extract_routing_graph, pbf, tmp / "ref")
     monkeypatch.setenv("STREETZIM_ROUTING_NODE_INDEX", index)
+    monkeypatch.setenv("STREETZIM_ROUTING_HIGHWAY_FILTER", highway_filter)
     assert _build(build.extract_routing_graph, pbf, tmp / "new") == want
     # The scratch the builder made is gone: refs, geometries, the highway
     # extract and the index file.
@@ -241,6 +248,55 @@ def test_file_index_is_a_file_in_the_scratch_dir(scratch_env, monkeypatch):
     assert Path(path).parent == tmp and Path(path).name.startswith("streetzim_node_loc_")
     assert not Path(path).exists()
     assert seen[1] == ("sparse_mem_array", "", None)
+
+
+@pytest.mark.parametrize("auto_filters", [False, True])
+def test_highway_filter_runs_only_when_auto_says(scratch_env, monkeypatch, auto_filters):
+    """auto reads a small extract whole, with a file index of every node,
+    as the old builder did (no osmium child, whose ID sets cost 1.4 GB
+    even for Monaco); a large one is filtered first. Same bytes either way."""
+    osmium = pytest.importorskip("osmium")
+    tmp = scratch_env
+    pbf = _network(tmp / "net.osm.pbf", 9)
+    want = _build(_reference().extract_routing_graph, pbf, tmp / "ref")
+    monkeypatch.setenv("STREETZIM_ROUTING_HIGHWAY_FILTER", "auto")
+    monkeypatch.delenv("STREETZIM_ROUTING_NODE_INDEX", raising=False)
+    if auto_filters:
+        monkeypatch.setattr(build, "HIGHWAY_FILTER_ABOVE_BYTES", 0)
+    runs = []
+    real_run = build.subprocess.run
+    monkeypatch.setattr(build.subprocess, "run",
+                        lambda cmd, **kw: runs.append(cmd[:2]) or real_run(cmd, **kw))
+    specs = []
+    real = osmium.index.create_map
+    monkeypatch.setattr(osmium.index, "create_map",
+                        lambda spec: specs.append(spec) or real(spec))
+    assert _build(build.extract_routing_graph, pbf, tmp / "new") == want
+    if auto_filters:
+        assert runs == [["osmium", "tags-filter"]]
+        assert [s.split(",")[0] for s in specs] == ["sparse_mem_array"]
+    else:
+        assert runs == []
+        assert [s.split(",")[0] for s in specs] == ["sparse_file_array"]
+
+
+def test_choose_highway_filter():
+    GB = 1 << 30
+    assert build.choose_highway_filter("on", 1, None)[0] is True
+    assert build.choose_highway_filter("off", 100 * GB, None)[0] is False
+    # Monaco, Luxembourg, Switzerland (547 MB: a 1.2 GB index), the
+    # Netherlands (1.40 GB: 3.09 GB, measured 1.94 GB): whole.
+    for size in (1_100_000, 47_000_000, 547_000_000, 1_403_823_266):
+        assert build.choose_highway_filter("auto", size, None)[0] is False
+        assert build.choose_highway_filter("auto", size, 16 * GB)[0] is False
+    # Just past 3 GiB of index, and China's cut (6.48 GB: 14 GB): filtered.
+    for size in (1_470_000_000, 6_484_677_252):
+        assert build.choose_highway_filter("auto", size, None)[0] is True
+    # Over a quarter of a small limit: 2.2 x 547 MB = 1.2 GB > 1 GiB.
+    assert build.choose_highway_filter("auto", 547_000_000, 4 * GB)[0] is True
+    assert build.choose_highway_filter("auto", 547_000_000, 6 * GB)[0] is False
+    with pytest.raises(ValueError):
+        build.choose_highway_filter("yes", 1, None)
 
 
 def test_no_highways_is_no_graph(scratch_env):
