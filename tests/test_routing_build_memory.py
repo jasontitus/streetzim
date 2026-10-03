@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import random
+import shutil
 import sys
 from pathlib import Path
 
@@ -113,6 +114,13 @@ def _build(fn, pbf, out, **kw):
     out.mkdir()
     g = fn(str(pbf), str(out), **kw)
     return _sha(g) if g else None
+
+
+# Tests that assert the highway filter ran need the osmium command-line
+# tool: without it the builder reads the whole extract (and so keeps a
+# file index of every node), which changes what they observe.
+needs_osmium_cli = pytest.mark.skipif(shutil.which("osmium") is None,
+                                      reason="osmium command-line tool not installed")
 
 
 @pytest.fixture
@@ -225,6 +233,7 @@ def test_antimeridian_join_matches(scratch_env, monkeypatch):
     assert not list(tmp.glob("streetzim_node_loc_*"))
 
 
+@needs_osmium_cli
 def test_file_index_is_a_file_in_the_scratch_dir(scratch_env, monkeypatch):
     osmium = pytest.importorskip("osmium")
     tmp = scratch_env
@@ -262,6 +271,8 @@ def test_highway_filter_runs_only_when_auto_says(scratch_env, monkeypatch, auto_
     monkeypatch.setenv("STREETZIM_ROUTING_HIGHWAY_FILTER", "auto")
     monkeypatch.delenv("STREETZIM_ROUTING_NODE_INDEX", raising=False)
     if auto_filters:
+        if shutil.which("osmium") is None:
+            pytest.skip("osmium command-line tool not installed")
         monkeypatch.setattr(build, "HIGHWAY_FILTER_ABOVE_BYTES", 0)
     runs = []
     real_run = build.subprocess.run
