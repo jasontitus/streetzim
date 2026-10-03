@@ -62,6 +62,14 @@ ok('a range token covers the code points between its bounds, inclusive', () => {
   assert.ok(!S.tokenMatches('u4e00', 'u4e01'));
 });
 
+ok('a range token is parsed exactly as the writer does (lowercase hex only)', () => {
+  for (const bad of ['r4E00.4e8b', 'r0x4e00.4e8b', 'r4_e00.4e8b', 'r 4e00.4e8b',
+                     'r+4e00.4e8b', 'r4e00..4e8b', 'r4e00.4e8b ']) {
+    assert.ok(!S.tokenMatches(bad, 'u4e00') && !S.tokenMatches(bad, 'u4'), bad);
+  }
+  assert.ok(S.tokenMatches('r0.10ffff', 'u10ffff'));
+});
+
 ok('pathsFor reads a range in both directions', () => {
   const declared = ['r4e00.4e8b', 'u5b66', 'u5b66~r4e00.4e10', 'u5b66~u4e11', '_e'];
   assert.deepStrictEqual(S.pathsFor(declared, ['u4e05']), ['r4e00.4e8b']);

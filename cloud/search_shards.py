@@ -244,15 +244,18 @@ def range_token(lo: int, hi: int) -> str:
     return f"{RANGE_PREFIX}{lo:x}{RANGE_SEP}{hi:x}"
 
 
+# Exactly what range_token writes: lowercase hex, no sign, "0x", "_" or
+# space (int(x, 16) would take all of those; the viewers' RANGE_RE is the
+# same pattern, so both sides agree on what is a range).
+RANGE_RE = re.compile(r"r([0-9a-f]+)\.([0-9a-f]+)")
+
+
 def range_bounds(tok: str) -> tuple[int, int] | None:
     """``(lo, hi)`` of a range token, or None when ``tok`` is not one."""
-    if len(tok) < 4 or not tok.startswith(RANGE_PREFIX) or RANGE_SEP not in tok:
+    m = RANGE_RE.fullmatch(tok)
+    if m is None:
         return None
-    lo, _, hi = tok[1:].partition(RANGE_SEP)
-    try:
-        return int(lo, 16), int(hi, 16)
-    except ValueError:
-        return None
+    return int(m.group(1), 16), int(m.group(2), 16)
 
 
 def token_matches(declared: str, typed: str) -> bool:

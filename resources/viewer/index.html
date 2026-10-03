@@ -7471,14 +7471,16 @@ var SEARCH_SHARDS = (function () {
   // a range 'r<lo>.<hi>' (hex code points) holding the typed token's code
   // point: small siblings share one leaf (cloud/search_shards.py
   // GROUP_BYTES), listed under the manifest's char_ranges.
+  // Exactly cloud/search_shards.py RANGE_RE (lowercase hex only, so
+  // parseInt never reads a prefix of a malformed bound).
+  var RANGE_RE = /^r([0-9a-f]+)\.([0-9a-f]+)$/;
   function tokenMatches(decl, typed) {
     if (decl === typed) return true;
-    if (decl.length < 4 || decl.charAt(0) !== 'r') return false;
-    var dot = decl.indexOf('.');
-    if (dot < 0) return false;
+    var m = RANGE_RE.exec(decl);
+    if (!m) return false;
     var c = tokenCp(typed);
     if (c === null) return false;
-    return parseInt(decl.slice(1, dot), 16) <= c && c <= parseInt(decl.slice(dot + 1), 16);
+    return parseInt(m[1], 16) <= c && c <= parseInt(m[2], 16);
   }
 
   // a, b: token arrays; a's tokens are declared ones when declaredFirst,

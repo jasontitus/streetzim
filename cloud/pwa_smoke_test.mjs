@@ -643,7 +643,7 @@ async function main() {
           try {
             const m = state.manifests && state.manifests.search;
             o.manifestOk = !!m;
-            o.charSplit = !!(m && m.char_split);
+            o.charSplit = !!(m && (m.char_split || m.char_ranges));
             o.chunkKeys = m && m.chunks ? Object.keys(m.chunks).length : 0;
             o.folded = foldText(city).trim();
             o.prefixes = prefixesFor(city);
