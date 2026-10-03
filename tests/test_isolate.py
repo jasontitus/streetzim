@@ -141,19 +141,27 @@ def test_the_child_itself_is_gone_when_run_in_child_returns(tmp_path):
     pids = tmp_path / "pids"
     _interrupt_after(2, _record_pids_then_wait, str(pids))
     child, grandchild = _wait_for(pids)
-    os.kill(int(grandchild), signal.SIGKILL)
-    assert not _alive(int(child))
+    time.sleep(0.5)
+    assert not _alive(int(child)) and not _alive(int(grandchild))
 
 
-def test_a_child_ignoring_sigterm_is_killed_after_the_grace(tmp_path, monkeypatch):
-    from streetzim import isolate
-    monkeypatch.setattr(isolate, "STOP_GRACE_S", 1)
+def test_a_child_ignoring_sigterm_is_killed_with_what_it_started(tmp_path):
     pids = tmp_path / "pids"
     took = _interrupt_after(2, _record_pids_then_wait, str(pids), True)
-    assert took < 6
+    assert took < 4
     child, grandchild = _wait_for(pids)
-    os.kill(int(grandchild), signal.SIGKILL)
-    assert not _alive(int(child))
+    time.sleep(0.5)
+    assert not _alive(int(child)) and not _alive(int(grandchild))
+
+
+def _terminate_self():
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+def test_a_child_killed_by_sigterm_says_so():
+    with pytest.raises(RuntimeError, match=r"_terminate_self, run in a child process, "
+                                           r"was killed by SIGTERM$"):
+        run_in_child(_terminate_self)
 
 
 def test_a_large_result_comes_back():

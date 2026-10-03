@@ -24,18 +24,19 @@ from collections.abc import Callable
 from typing import Any
 
 
-def _sigterm_exits(signum: int, frame: Any) -> None:
-    raise SystemExit(128 + signum)
-
-
 def _child_main(conn: Any, tempdir: str | None, cpus_requested: int | None,
                 fn: Callable[..., Any], args: tuple[Any, ...],
                 kwargs: dict[str, Any]) -> None:
+    import os
+
     from streetzim import cpus
-    # SIGTERM (run_in_child stopping this child) unwinds like the build's
-    # own: subprocess.run then kills the osmium it is waiting on, rather
-    # than leave it running, orphaned, in a work folder being deleted.
-    signal.signal(signal.SIGTERM, _sigterm_exits)
+    # A process group of its own, which run_in_child stops with one SIGKILL:
+    # the child and the osmium it started go together. Not SIGTERM turned
+    # into SystemExit: raised from a signal handler inside a pyosmium pass,
+    # that segfaults pyosmium (4.3.1), every time, and the crash reporter
+    # may write the core (gigabytes) to the root disk. The group also keeps
+    # a terminal's Ctrl-C to the run_in_child caller, which stops it.
+    os.setpgid(0, 0)
     tempfile.tempdir = tempdir
     if cpus_requested is not None:
         cpus.set_build_cpus(cpus_requested)
@@ -83,22 +84,18 @@ def _died(name: str, exitcode: int | None) -> RuntimeError:
     return RuntimeError(f"{name}, run in a child process, {how}")
 
 
-# Seconds a stopped child gets to unwind before SIGKILL.
-STOP_GRACE_S = 10
-
-
 def _stop(child: Any) -> None:
-    """SIGTERM, STOP_GRACE_S seconds to unwind (and kill its own children), then
-    SIGKILL; the kill happens even if this process is interrupted again
-    while it waits (a second SIGTERM to the build)."""
+    """SIGKILL the child's process group (the child and what it started),
+    then reap it. Nothing in the step needs to unwind: its scratch files
+    are in the build's work folder, which the build removes."""
+    import os
     try:
-        if child.is_alive():
-            child.terminate()
-            child.join(STOP_GRACE_S)
-    finally:
-        if child.is_alive():
-            child.kill()
-            child.join()
+        os.killpg(child.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        # Not yet its own group (stopped as it started): the child alone,
+        # which has started nothing yet.
+        child.kill()
+    child.join()
 
 
 def run_in_child(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -106,8 +103,9 @@ def run_in_child(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     and the arguments must pickle (a module-level function, plain data).
 
     If this process is interrupted (Ctrl-C, or SIGTERM, which the
-    `streetzim` command turns into SystemExit) while it waits, the child is
-    stopped too, so the build stops at once and does not leave it writing.
+    `streetzim` command turns into SystemExit) while it waits, the child and
+    everything it started are killed at once, so the build stops and does
+    not leave them writing.
     A child that dies without an answer (the out-of-memory killer) raises
     RuntimeError naming the step and the signal."""
     from streetzim import cpus
