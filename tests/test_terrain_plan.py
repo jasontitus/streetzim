@@ -195,6 +195,10 @@ def fake_dem(tmp_path, monkeypatch):
     monkeypatch.setattr(T, "_download_dem", download)
     monkeypatch.delenv("TERRAIN_BLANK_TOLERATE", raising=False)
     monkeypatch.delenv("TERRAIN_DOWNLOAD_BUDGET_S", raising=False)
+    # Set, then removed: monkeypatch restores it (unset) afterwards, so the
+    # GDAL_CACHEMAX generate_terrain_tiles sets does not outlive the test.
+    monkeypatch.setenv("GDAL_CACHEMAX", "0")
+    monkeypatch.delenv("GDAL_CACHEMAX")
     return calls, sea, fail, level
 
 
@@ -569,7 +573,6 @@ def test_no_tile_is_drawn_in_the_builds_own_process(tmp_path, fake_dem):
 
 
 def test_the_gdal_cache_is_capped_unless_the_operator_set_it(tmp_path, fake_dem, monkeypatch):
-    monkeypatch.delenv("GDAL_CACHEMAX", raising=False)
     _build(tmp_path)
     assert os.environ["GDAL_CACHEMAX"] == str(T.TERRAIN_GDAL_CACHE_MB)
     monkeypatch.setenv("GDAL_CACHEMAX", "1024")

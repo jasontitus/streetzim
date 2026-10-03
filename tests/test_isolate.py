@@ -4,8 +4,10 @@ exceptions coming back as they were."""
 from __future__ import annotations
 
 import os
+import signal
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -37,5 +39,44 @@ def test_runs_in_another_process_with_the_builds_setup(tmp_path, monkeypatch):
 
 
 def test_an_exception_comes_back_as_raised():
-    with pytest.raises(FileNotFoundError, match="no such extract"):
+    with pytest.raises(FileNotFoundError, match="no such extract") as e:
         run_in_child(_fail)
+    assert "in a child process" in str(e.value.__cause__)
+    assert "_fail" in str(e.value.__cause__)
+
+
+def _killed():
+    os.kill(os.getpid(), signal.SIGKILL)
+
+
+def _sleep_then_mark(path):
+    time.sleep(20)
+    Path(path).write_text("finished")
+
+
+def test_a_child_killed_by_the_oom_killer_says_so():
+    with pytest.raises(RuntimeError, match=r"_killed, run in a child process, was killed "
+                                           r"by SIGKILL \(SIGKILL: most often the out-of-memory"):
+        run_in_child(_killed)
+
+
+def test_an_interrupted_wait_stops_the_child_at_once(tmp_path):
+    """SIGTERM to a `streetzim` build becomes SystemExit while it waits: the
+    child must stop with it, not run on to the end of the step."""
+    mark = tmp_path / "mark"
+
+    def interrupt(signum, frame):
+        raise SystemExit(143)
+
+    old = signal.signal(signal.SIGALRM, interrupt)
+    signal.alarm(2)
+    t = time.monotonic()
+    try:
+        with pytest.raises(SystemExit):
+            run_in_child(_sleep_then_mark, str(mark))
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
+    assert time.monotonic() - t < 10
+    time.sleep(1)
+    assert not mark.exists()

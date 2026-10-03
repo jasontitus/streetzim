@@ -15,14 +15,17 @@ caller as they were raised.
 from __future__ import annotations
 
 import multiprocessing
+import signal
 import sys
 import tempfile
+import traceback
 from collections.abc import Callable
-from concurrent.futures import ProcessPoolExecutor
 from typing import Any
 
 
-def _child_init(tempdir: str | None, cpus_requested: int | None) -> None:
+def _child_main(conn: Any, tempdir: str | None, cpus_requested: int | None,
+                fn: Callable[..., Any], args: tuple[Any, ...],
+                kwargs: dict[str, Any]) -> None:
     from streetzim import cpus
     tempfile.tempdir = tempdir
     if cpus_requested is not None:
@@ -32,16 +35,75 @@ def _child_init(tempdir: str | None, cpus_requested: int | None) -> None:
             stream.reconfigure(line_buffering=True)  # type: ignore[union-attr]
         except (AttributeError, ValueError):
             pass
+    try:
+        result = fn(*args, **kwargs)
+    except BaseException as e:  # noqa: BLE001 -- every failure goes back to the caller
+        tb = traceback.format_exc()
+        try:
+            conn.send((False, e, tb))
+        except Exception:  # noqa: BLE001 -- an exception that does not pickle
+            conn.send((False, RuntimeError(tb), tb))
+        return
+    conn.send((True, result, None))
+
+
+class ChildTraceback(Exception):
+    """The child's traceback, as the cause of the exception it raised."""
+
+    def __str__(self) -> str:
+        return f"\n\nin a child process (streetzim.isolate):\n{self.args[0]}"
+
+
+def _died(name: str, exitcode: int | None) -> RuntimeError:
+    if exitcode is not None and exitcode < 0:
+        sig = -exitcode
+        try:
+            signame = signal.Signals(sig).name
+        except ValueError:
+            signame = f"signal {sig}"
+        hint = " (SIGKILL: most often the out-of-memory killer)" if sig == signal.SIGKILL else ""
+        how = f"was killed by {signame}{hint}"
+    else:
+        how = f"exited with code {exitcode} without a result"
+    return RuntimeError(f"{name}, run in a child process, {how}")
 
 
 def run_in_child(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     """fn(*args, **kwargs) in a spawned child process; its result. `fn`
-    and the arguments must pickle (a module-level function, plain data)."""
+    and the arguments must pickle (a module-level function, plain data).
+
+    If this process is interrupted (Ctrl-C, or SIGTERM, which the
+    `streetzim` command turns into SystemExit) while it waits, the child is
+    stopped too, so the build stops at once and does not leave it writing.
+    A child that dies without an answer (the out-of-memory killer) raises
+    RuntimeError naming the step and the signal."""
     from streetzim import cpus
+    name = getattr(fn, "__qualname__", repr(fn))
     sys.stdout.flush()
     sys.stderr.flush()
-    with ProcessPoolExecutor(
-            max_workers=1, mp_context=multiprocessing.get_context("spawn"),
-            initializer=_child_init,
-            initargs=(tempfile.tempdir, cpus._requested)) as pool:
-        return pool.submit(fn, *args, **kwargs).result()
+    ctx = multiprocessing.get_context("spawn")
+    receive, send = ctx.Pipe(duplex=False)
+    child = ctx.Process(target=_child_main, name=f"streetzim-{name}",
+                        args=(send, tempfile.tempdir, cpus._requested, fn, args, kwargs))
+    child.start()
+    send.close()
+    try:
+        try:
+            ok, value, tb = receive.recv()
+        except EOFError:
+            child.join()
+            raise _died(name, child.exitcode) from None
+        child.join()
+    except BaseException:
+        if child.is_alive():
+            child.terminate()
+            child.join(10)
+            if child.is_alive():
+                child.kill()
+                child.join()
+        raise
+    finally:
+        receive.close()
+    if ok:
+        return value
+    raise value from ChildTraceback(tb)
