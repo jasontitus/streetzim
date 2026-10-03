@@ -129,7 +129,10 @@ class Dirent:
             try:
                 return cls._parse_bytes(buf, 0)
             except _Short:
-                if off + n >= getattr(src, "size", len(src)) and n > len(buf):
+                # Not getattr(src, "size", len(src)): its default is evaluated
+                # first, and a Source (MmapSource) has no len().
+                size = src.size if hasattr(src, "size") else len(src)
+                if off + n >= size and n > len(buf):
                     raise ValueError(f"truncated dirent at {off}") from None
                 n *= 4
 
