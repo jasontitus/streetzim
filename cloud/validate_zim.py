@@ -1407,6 +1407,9 @@ def _chk_search_data_sizes(arc) -> tuple[str, str]:
     missing: list[str] = []
     sub_chunks = mani.get("sub_chunks") or {}
     char_split = mani.get("char_split") or {}
+    # Prefixes whose plan groups small siblings under a range token
+    # (cloud/search_shards.py GROUP_BYTES): the same invariants apply.
+    char_ranges = mani.get("char_ranges") or {}
     for prefix in chunks:
         try:
             e = arc.get_entry_by_path(f"search-data/{prefix}.json")
@@ -1456,7 +1459,9 @@ def _chk_search_data_sizes(arc) -> tuple[str, str]:
             out |= _expand(child, seen)
         return out
 
-    for prefix, paths in char_split.items():
+    # A reader takes char_split first and would never see the ranges.
+    in_both = sorted(set(char_split) & set(char_ranges))
+    for prefix, paths in [*char_split.items(), *char_ranges.items()]:
         declared = sub_chunks.get(prefix) or []
         leaves = {k for k in chunks
                   if k.startswith(prefix + "~") and k.split("~", 1)[0] == prefix}
@@ -1486,6 +1491,10 @@ def _chk_search_data_sizes(arc) -> tuple[str, str]:
         return ("fail",
                 f"{len(big_leaf)} name-query leaf/leaves ≥ "
                 f"{SEARCH_LEAF_FAIL_MB} MB: {tb}")
+    if in_both:
+        return ("fail",
+                f"{len(in_both)} prefix(es) in both char_split and "
+                f"char_ranges: {', '.join(in_both[:5])}")
     if bad_union:
         return ("fail",
                 f"sub_chunks must list exactly the leaves of each split "
@@ -1505,8 +1514,10 @@ def _chk_search_data_sizes(arc) -> tuple[str, str]:
                 f"{len(warned)} chunk(s) between {SEARCH_CHUNK_WARN_MB}–{SEARCH_CHUNK_FAIL_MB} MB: {tb}")
     detail = (f"{len(chunks)} chunks; biggest {biggest[1]!r}="
               f"{biggest[0]/1e6:.1f}MB; manifest {len(raw)/1e6:.1f}MB")
-    if char_split:
-        detail += f"; {len(char_split)} char-split prefix(es)"
+    if char_split or char_ranges:
+        detail += f"; {len(char_split) + len(char_ranges)} char-split prefix(es)"
+    if char_ranges:
+        detail += f" ({len(char_ranges)} with grouped siblings)"
     return ("pass", detail)
 
 

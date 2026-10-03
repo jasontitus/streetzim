@@ -2311,6 +2311,10 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
 
     chunks_added = 0
     manifest_char_split: dict[str, list[str]] = {}
+    # A prefix whose plan groups small siblings under a range token
+    # (cloud/search_shards.py GROUP_BYTES) is listed here instead, so a
+    # viewer that predates ranges reads it whole rather than wrongly.
+    manifest_char_ranges: dict[str, list[str]] = {}
 
     def _emit_whole_chunk(prefix, chunk_path):
         """Small prefix: one file, exactly as before."""
@@ -2340,7 +2344,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
         # build — `av` on united-states is 2.93 GB of JSON.
         from cloud.search_shards import (
             Aggregator, SHARD_TARGET_BYTES, char_split_paths,
-            leaf_for, tier_for)
+            leaf_for, plan_by_tier, split_key, tier_for)
         from cloud.search_shards import split_records_recursive as _split_records_recursive
         agg = Aggregator(prefix)
         total_chunk_bytes = 0
@@ -2360,9 +2364,7 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
         # prefix (docs/search-prefix-locality.md).
         target = min(hot_split_bytes, SHARD_TARGET_BYTES)
         planned = agg.leaves(target_bytes=target)
-        planned_paths: dict[str, set] = {}
-        for _tier, _path, _c, _b in planned:
-            planned_paths.setdefault(_tier, set()).add(_path)
+        planned_paths = plan_by_tier(planned)
 
         # Pass 2: stream records into one temp file per leaf, LRU over
         # open descriptors so a 1000-leaf prefix cannot exhaust them.
@@ -2482,7 +2484,8 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
         # every leaf: as slow as before, never wrong. New clients use
         # char_split to pick one.
         manifest_sub_chunks[prefix] = sub_prefix_list
-        manifest_char_split[prefix] = char_split_paths(planned)
+        (manifest_char_ranges if split_key(planned) == "char_ranges"
+         else manifest_char_split)[prefix] = char_split_paths(planned)
         chunks_added += 1
         if chunks_added % 100 == 0:
             print(f"\r    Added {chunks_added}/{len(chunk_counts)} search chunks...", end="", flush=True)
@@ -2499,10 +2502,13 @@ def _search_emit_chunks(creator, MapItem, *, split_hot_search_chunks_mb, chunk_t
                           "chunks": manifest_chunks})
     manifest_dict.pop("sub_chunks", None)
     manifest_dict.pop("char_split", None)
+    manifest_dict.pop("char_ranges", None)
     if manifest_sub_chunks:
         manifest_dict["sub_chunks"] = manifest_sub_chunks
     if manifest_char_split:
         manifest_dict["char_split"] = manifest_char_split
+    if manifest_char_ranges:
+        manifest_dict["char_ranges"] = manifest_char_ranges
     creator.add_item(MapItem(
         "search-data/manifest.json", "Search Manifest",
         "application/json",

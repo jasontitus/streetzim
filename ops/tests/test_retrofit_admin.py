@@ -228,7 +228,9 @@ def test_admin_areas_are_added_searchable_with_pages(tmp_path, osm, no_rg, monke
     # The count stays exact: the recovered records plus the ones added.
     assert m["total"] == len(records) + 3
     assert m["word_rule"] == 2 and m["keep_me"] == "yes"
-    assert bool(m.get("char_split", {}).get("ka")) == hot
+    # A plan that groups small siblings is filed under char_ranges.
+    split = {**m.get("char_split", {}), **m.get("char_ranges", {})}
+    assert bool(split.get("ka")) == hot
     # Every source record is still there, once per prefix it belongs in.
     for r in SRC_RECORDS:
         for k, leaves in _leaves(m, r).items():
