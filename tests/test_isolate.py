@@ -281,3 +281,12 @@ def test_a_child_dies_while_its_killed_parent_is_still_a_zombie(tmp_path):
                 pass
         parent.join()
     assert dead
+
+
+def test_proc_from_another_pid_namespace_is_not_trusted(monkeypatch):
+    from streetzim import isolate
+    assert isolate._proc_is_ours()
+    monkeypatch.setattr(os, "readlink", lambda path: "1")
+    assert not isolate._proc_is_ours()
+    # Falls back to kill -0: this process's parent is alive.
+    assert not isolate._parent_gone(os.getpid(), os.getppid(), use_proc=False)

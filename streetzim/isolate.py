@@ -35,9 +35,20 @@ def _parent_of(pid: int) -> int | None:
         return None
 
 
-def _parent_gone(me: int, parent: int) -> bool:
+def _proc_is_ours() -> bool:
+    """/proc shows this PID namespace's processes (not so under
+    `unshare --pid` without a new /proc mount, where the pids it lists are
+    another namespace's)."""
     import os
-    ppid = _parent_of(me)
+    try:
+        return os.readlink("/proc/self") == str(os.getpid())
+    except OSError:
+        return False
+
+
+def _parent_gone(me: int, parent: int, use_proc: bool = True) -> bool:
+    import os
+    ppid = _parent_of(me) if use_proc else None
     if ppid is not None:
         return ppid != parent
     try:  # no /proc: a signal probe (a zombie parent still answers)
@@ -61,8 +72,9 @@ def _watch_parent(parent: int) -> None:
     if os.fork() != 0:
         return
     try:
+        use_proc = _proc_is_ours()
         while os.getppid() == me:
-            if _parent_gone(me, parent):
+            if _parent_gone(me, parent, use_proc):
                 os.killpg(0, signal.SIGKILL)
             time.sleep(1)
     finally:
