@@ -186,3 +186,42 @@ def test_a_step_calling_sys_exit_fails_instead_of_ending_the_build():
 def test_an_exception_that_cannot_be_rebuilt_keeps_its_traceback():
     with pytest.raises(RuntimeError, match="_NeedsTwo: xy"):
         run_in_child(_raise_needs_two)
+
+
+def _run_and_record(path):
+    run_in_child(_record_pids_then_wait, path)
+
+
+def test_a_child_whose_parent_dies_kills_itself_and_what_it_started(tmp_path):
+    """The parent SIGKILLed (or hung up) without stopping its child: the
+    child and its osmium must not run on, orphaned."""
+    import multiprocessing
+    pids = tmp_path / "pids"
+    parent = multiprocessing.get_context("spawn").Process(
+        target=_run_and_record, args=(str(pids),))
+    parent.start()
+    child, grandchild = _wait_for(pids)
+    os.kill(parent.pid, signal.SIGKILL)
+    parent.join()
+    for _ in range(100):
+        if not _alive(int(child)) and not _alive(int(grandchild)):
+            break
+        time.sleep(0.1)
+    assert not _alive(int(child)) and not _alive(int(grandchild))
+
+
+def _sleep_long():
+    time.sleep(60)
+
+
+def test_stop_kills_a_child_that_has_no_group_yet():
+    """Interrupted before the child's setpgid: killpg finds no group, and
+    the child alone (which has started nothing) is killed."""
+    import multiprocessing
+
+    from streetzim.isolate import _stop
+    child = multiprocessing.get_context("spawn").Process(target=_sleep_long)
+    child.start()
+    t = time.monotonic()
+    _stop(child)
+    assert time.monotonic() - t < 10 and child.exitcode == -signal.SIGKILL

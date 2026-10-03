@@ -24,6 +24,19 @@ from collections.abc import Callable
 from typing import Any
 
 
+def _watch_parent(parent: int) -> None:
+    import os
+    import threading
+    import time
+
+    def watch() -> None:
+        while os.getppid() == parent:
+            time.sleep(1)
+        os.killpg(0, signal.SIGKILL)
+
+    threading.Thread(target=watch, name="streetzim-watch-parent", daemon=True).start()
+
+
 def _child_main(conn: Any, tempdir: str | None, cpus_requested: int | None,
                 fn: Callable[..., Any], args: tuple[Any, ...],
                 kwargs: dict[str, Any]) -> None:
@@ -37,6 +50,13 @@ def _child_main(conn: Any, tempdir: str | None, cpus_requested: int | None,
     # may write the core (gigabytes) to the root disk. The group also keeps
     # a terminal's Ctrl-C to the run_in_child caller, which stops it.
     os.setpgid(0, 0)
+    # Out of the terminal's process group, the child no longer gets its
+    # SIGHUP, nor the SIGKILL of a `kill -9 -- -PGID`: if this process's
+    # parent dies without stopping it, the group kills itself. (A thread:
+    # it needs no signal handler, and pyosmium releases the GIL often
+    # enough for a one-second check. Terminal job control, Ctrl-Z and
+    # `stty tostop`, applies to the parent only.)
+    _watch_parent(os.getppid())
     tempfile.tempdir = tempdir
     if cpus_requested is not None:
         cpus.set_build_cpus(cpus_requested)
