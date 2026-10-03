@@ -937,6 +937,55 @@ against disk differs in 143 tiles, the same polygon layers: the store
 changes the order in which tilemaker assembles multipolygons, not what it
 reads.
 
+#### The routing graph
+
+The routing step (`streetzim/routing/build.py`, `extract_routing_graph`)
+used to be what a large region could not fit. China's cut (6.48 GB, 870 M
+nodes, 26.1 M highway ways, 43.6 M junctions) in a `full` build in a
+`--memory 16g` container reached Pass 2 with 12.6 GB of anonymous memory
+and thrashed there for hours (CPU 8%, 464 GB read, 3.6 M of 26.1 M ways
+done): a Python dict of every junction id (about 4-5 GB), a dict of every
+geometry's bytes for the dedup (about 85 bytes each), Pass 1's set of way
+ends, and a location index of every node in the cut, a 13.9 GB file read at
+random through the 3 GB of page cache left. Everything before it had
+peaked at 7.3 GB.
+
+The builder now filters the extract to the highway ways and their nodes
+first (`osmium tags-filter`; China: 2.47 GB, 333 M nodes), keeps junction
+ids in a sorted array, spills way refs and the encoded geometries to
+scratch files beside the graph and deduplicates the geometries afterwards
+(by length and a 64-bit hash, every match confirmed byte for byte), and
+writes the edges a block at a time. The node-location index is in memory
+up to an estimated 1 GiB (three times 16 bytes per highway node, for the
+vector's growth) or a tenth of the memory limit (`memory.max`), else in a
+file (`STREETZIM_NODE_LOC_DIR`, default `/data` when writable, else the
+build's temporary folder); `STREETZIM_ROUTING_NODE_INDEX=memory|file`
+forces either, and the log says which and why (`Node locations ...`). The
+graph is byte-identical to the old builder's (Switzerland, the
+Netherlands, China, the Monaco fixture; random networks in
+`tests/test_routing_build_memory.py` against the old builder).
+
+The routing step alone (`extract_routing_graph` on the cut extract,
+2026-10-03; peak anonymous memory of the process, then peak RSS, which
+also counts a file index's mapped pages; wall time on the shared 36-core
+machine):
+
+| region (extract) | before | after |
+|---|---|---|
+| Switzerland (547 MB) | 1.87 GB / 2.53 GB, 174 s | 1.06 GB / 1.17 GB, 174 s |
+| the Netherlands (1.40 GB) | 2.11 GB / 3.97 GB, 255 s | 0.91 GB / 0.96 GB, 196 s |
+| China (6.48 GB cut), `--memory 16g` container | did not finish (thrashed in Pass 2) | 8.6 GB / 10.4 GB, 49 min |
+| China, outside a container (no limit) | 23.4 GB / 33.6 GB, 48 min | |
+
+China's run sat CPU-bound throughout (one core, about 104%, reads under
+1 MB/s in Pass 2, no memory pressure); the container's total memory reached
+its limit only with page cache (the highway extract, the 5.0 GB index file
+and the geometry spill), which the kernel dropped as needed. Its peak is
+after Pass 2, deduplicating 59.8 M geometry candidates and sorting 105 M
+edges, on top of the 2.5 GB of edge columns. Disk: the highway extract
+(0.38 times the cut for China), the index file (16 bytes per highway node)
+and the geometry spill (2.2 GB for China), all removed when the step ends.
+
 ### Terrain cost
 
 Terrain is on with `--profile full`, the default: hillshade and 3D are
