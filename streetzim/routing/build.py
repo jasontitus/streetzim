@@ -1,8 +1,30 @@
 """Routing-graph builder: OSM PBF -> SZRG graph, and fixed-size graph
 chunking (moved verbatim from create_osm_zim.py, which re-exports these
-names). The readers/writers of the formats live alongside in this package."""
+names). The readers/writers of the formats live alongside in this package.
+
+Memory (extract_routing_graph). China's cut (870 M nodes, 26 M highway
+ways, 43.6 M junctions) thrashed in a 16 GiB container in Pass 2: a dict
+of every junction id (about 100 bytes each, 4-5 GB), a dict of every
+geometry's bytes for dedup (about 85 bytes per geometry), Pass 1's Python
+set of way ends, and a node-location index of every node in the cut (14 GB
+on disk, random reads into a page cache the anonymous memory had squeezed
+to 3 GB). The builder now keeps:
+  - for a large extract, only the highway ways and their nodes (`osmium
+    tags-filter`, choose_highway_filter), so the location index holds the
+    highway nodes alone, in memory or in a file by size (choose_node_index);
+    a small extract is read whole, with a file index, as before (the
+    filter's own ID sets cost 1.4-2.2 GB whatever the extract's size);
+  - junction ids as a sorted int64 array, looked up with searchsorted;
+  - each way's refs spilled to files in Pass 1, read back into one array;
+  - geometries spilled to a file with a 64-bit hash and length each, and
+    deduplicated afterwards (dedup_geoms; bytes compared, so a hash
+    collision only costs time);
+  - edges written to the file in blocks, in from-node order.
+The output is byte-identical to the dict-based builder's."""
 import os
+import shutil
 import subprocess
+import tempfile
 import time
 
 from streetzim import area
@@ -11,8 +33,159 @@ from streetzim.common import (
     print,
 )
 
+# Geometry offsets are uint32 byte offsets into the blob, so the blob
+# stops growing near 2^32 (later edges get no geometry and render as
+# straight lines between their nodes). Leaves ~64 KB headroom.
+GEOM_BLOB_CAP = 0xFFFF0000
 
-def _antimeridian_twins(osmium, pbf, excluded):
+# The hash dedup_geoms groups geometry candidates by (a test swaps in a
+# weak one to force collisions, which the byte comparison must resolve).
+_geom_hash = hash
+
+# Node-location index (libosmium's sparse arrays: a sorted vector of
+# (id, location) pairs, 16 bytes per node). In memory it is a std::vector,
+# which doubles as it grows, so it can briefly take three times that.
+NODE_INDEX_MODES = ("auto", "memory", "file")
+NODE_INDEX_ENTRY_BYTES = 16
+NODE_INDEX_GROWTH = 3
+# auto: a file once the in-memory peak would pass this...
+NODE_INDEX_FILE_ABOVE_BYTES = 1 << 30
+# ...or this share of the memory limit (cpus.memory_limit()).
+NODE_INDEX_LIMIT_SHARE = 0.1
+
+
+# The highway filter (osmium tags-filter) is a separate process whose ID
+# sets span the planet's node-ID range: 1.4 GB for Monaco's 1 MB extract,
+# 2.0 GB for Luxembourg's 47 MB, 2.2 GB for Alaska's 413 MB. Read whole,
+# the extract instead costs a file index of every node in it, about this
+# many bytes per byte of PBF (China: 13.9 GB for its 6.48 GB cut)...
+HIGHWAY_FILTER_MODES = ("auto", "on", "off")
+WHOLE_INDEX_PER_PBF_BYTE = 2.2
+# ...so auto filters once that index would pass this (the Netherlands'
+# 1.40 GB: an estimated 3.09 GB, measured 1.94 GB of mapped file, which is
+# page cache, against the filter's 2.2 GB of anonymous memory; read whole)...
+HIGHWAY_FILTER_ABOVE_BYTES = 3 << 30
+# ...or this share of the memory limit (cpus.memory_limit()).
+HIGHWAY_FILTER_LIMIT_SHARE = 0.25
+
+
+def choose_highway_filter(mode, pbf_bytes, memory_limit):
+    """(read only the highway ways and their nodes, why) for an extract of
+    `pbf_bytes`. `mode` is auto, on or off
+    (STREETZIM_ROUTING_HIGHWAY_FILTER)."""
+    if mode not in HIGHWAY_FILTER_MODES:
+        raise ValueError(f"STREETZIM_ROUTING_HIGHWAY_FILTER must be one of "
+                         f"{', '.join(HIGHWAY_FILTER_MODES)}, not {mode!r}")
+    if mode != "auto":
+        return mode == "on", f"STREETZIM_ROUTING_HIGHWAY_FILTER={mode}"
+    est = WHOLE_INDEX_PER_PBF_BYTE * pbf_bytes
+    gb = est / 1e9
+    if est > HIGHWAY_FILTER_ABOVE_BYTES:
+        return True, (f"auto: a whole-extract node index of about {gb:.1f} GB, "
+                      f"over {HIGHWAY_FILTER_ABOVE_BYTES >> 30} GiB")
+    if memory_limit is not None and est > HIGHWAY_FILTER_LIMIT_SHARE * memory_limit:
+        return True, (f"auto: a whole-extract node index of about {gb:.1f} GB, "
+                      f"over {HIGHWAY_FILTER_LIMIT_SHARE:.0%} of the "
+                      f"{memory_limit / 1e9:.1f} GB limit")
+    return False, f"auto: a whole-extract node index of about {gb:.1f} GB"
+
+
+def choose_node_index(mode, n_nodes, memory_limit):
+    """(keep the node-location index in a file, why) for about `n_nodes`
+    highway nodes. `mode` is auto, memory or file
+    (STREETZIM_ROUTING_NODE_INDEX)."""
+    if mode not in NODE_INDEX_MODES:
+        raise ValueError(f"STREETZIM_ROUTING_NODE_INDEX must be one of "
+                         f"{', '.join(NODE_INDEX_MODES)}, not {mode!r}")
+    if mode != "auto":
+        return mode == "file", f"STREETZIM_ROUTING_NODE_INDEX={mode}"
+    peak = NODE_INDEX_GROWTH * NODE_INDEX_ENTRY_BYTES * n_nodes
+    gb = peak / 1e9
+    if peak > NODE_INDEX_FILE_ABOVE_BYTES:
+        return True, (f"auto: {n_nodes} highway nodes, up to {gb:.2f} GB in "
+                      f"memory, over {NODE_INDEX_FILE_ABOVE_BYTES >> 30} GiB")
+    if memory_limit is not None and peak > NODE_INDEX_LIMIT_SHARE * memory_limit:
+        return True, (f"auto: {n_nodes} highway nodes, up to {gb:.2f} GB in "
+                      f"memory, over {NODE_INDEX_LIMIT_SHARE:.0%} of the "
+                      f"{memory_limit / 1e9:.1f} GB limit")
+    return False, f"auto: {n_nodes} highway nodes, up to {gb:.2f} GB in memory"
+
+
+def dedup_geoms(lengths, hashes, seg_first, read, cap=None):
+    """Deduplicate the geometry candidates Pass 2 spilled, exactly as the
+    old in-pass dict did: a geometry's index is the order in which its
+    bytes first appeared; and once the kept blob reaches `cap` bytes at the
+    start of a road segment, that segment and every later one get none.
+
+    lengths, hashes, seg_first: per candidate, its byte length, a hash of
+    its bytes and whether it opens its road segment (a reverse geometry
+    after a forward one of the same segment does not). read(k) returns
+    candidate k's bytes; it is called only for candidates whose hash and
+    length match an earlier one's, to confirm the match.
+
+    Returns (geom_of, keep): geom_of[k] is candidate k's geometry index
+    (0xFFFFFFFF for none) and keep[k] whether its bytes go in the blob.
+    """
+    import numpy as np
+    if cap is None:
+        cap = GEOM_BLOB_CAP
+    lengths = np.asarray(lengths, dtype=np.int64)
+    m = len(lengths)
+    if m == 0:
+        return np.empty(0, dtype=np.uint32), np.empty(0, dtype=bool)
+    hashes = np.asarray(hashes, dtype=np.int64)
+    # rep[k] = the first candidate with k's hash (stable sort keeps index
+    # order within a hash).
+    order = np.argsort(hashes, kind="stable")
+    hs = hashes[order]
+    first = np.zeros(m, dtype=np.int64)        # sorted position of the group start
+    starts = np.flatnonzero(hs[1:] != hs[:-1]) + 1
+    del hs
+    first[starts] = starts
+    np.maximum.accumulate(first, out=first)
+    rep = np.empty(m, dtype=np.int64)
+    rep[order] = order[first]
+    del first, starts
+    # Confirm: same length and the same bytes. A group whose members do not
+    # all match its first (a hash collision) is resolved by its bytes.
+    idx = np.arange(m, dtype=np.int64)
+    dups = np.flatnonzero(rep != idx)
+    bad = dups[lengths[dups] != lengths[rep[dups]]]
+    same_len = dups[lengths[dups] == lengths[rep[dups]]]
+    mismatch = []
+    for s in range(0, len(same_len), 1 << 20):
+        mismatch.extend(k for k, r in zip(same_len[s:s + (1 << 20)].tolist(),
+                                          rep[same_len[s:s + (1 << 20)]].tolist())
+                        if read(k) != read(r))
+    if len(bad) or mismatch:
+        colliding = np.unique(rep[np.concatenate(
+            [bad, np.asarray(mismatch, dtype=np.int64)])])
+        groups = np.isin(rep, colliding)
+        members = np.flatnonzero(groups)
+        seen = {}
+        for k in members.tolist():           # index order
+            key = (int(rep[k]), read(k))
+            rep[k] = seen.setdefault(key, k)
+        del groups, members, seen
+    del order
+    unique = rep == idx
+    del idx
+    # The cap, checked where each segment starts against the blob so far.
+    ulen = np.where(unique, lengths, 0)
+    before = np.cumsum(ulen) - ulen
+    del ulen
+    over = np.flatnonzero(np.asarray(seg_first, dtype=bool) & (before >= cap))
+    cut = int(over[0]) if len(over) else m
+    del before, over
+    keep = unique
+    keep[cut:] = False
+    gi = np.cumsum(keep, dtype=np.int64) - 1
+    geom_of = np.full(m, 0xFFFFFFFF, dtype=np.uint32)
+    geom_of[:cut] = gi[rep[:cut]]
+    return geom_of, keep
+
+
+def _antimeridian_twins(osmium, pbf, excluded, idx="flex_mem"):
     """{ref: ref it joins} for highway way ends at longitude -180 that sit
     at the latitude of a highway way end at +180 (the same point, split in
     two by OSM at the antimeridian)."""
@@ -32,9 +205,133 @@ def _antimeridian_twins(osmium, pbf, excluded):
                     side = ends[1 if lon_e7 > 0 else -1]
                     side[lat_e7] = min(n.ref, side.get(lat_e7, n.ref))
 
-    _Ends().apply_file(pbf, locations=True)
+    _Ends().apply_file(pbf, locations=True, idx=idx)
     return {ref: ends[1][lat] for lat, ref in ends[-1].items()
             if lat in ends[1] and ends[1][lat] != ref}
+
+
+class _Spill:
+    """An int64 column appended in Python and kept in a file until read
+    back whole: no Python ints, no second copy at concatenation."""
+
+    def __init__(self, directory, name):
+        import array
+        fd, self.path = tempfile.mkstemp(dir=directory, prefix=f"routing-{name}-",
+                                         suffix=".bin")
+        self._f = os.fdopen(fd, "wb")
+        self._buf = array.array("q")
+        self.count = 0
+
+    def extend(self, values):
+        self._buf.extend(values)
+        if len(self._buf) >= 1 << 22:
+            self.flush()
+
+    def append(self, value):
+        self._buf.append(value)
+
+    def flush(self):
+        self.count += len(self._buf)
+        self._buf.tofile(self._f)
+        del self._buf[:]
+
+    def read(self):
+        import numpy as np
+        self.flush()
+        self._f.close()
+        arr = np.fromfile(self.path, dtype=np.int64)
+        self.remove()
+        return arr
+
+    def remove(self):
+        if not self._f.closed:
+            self._f.close()
+        try:
+            os.remove(self.path)
+        except OSError:
+            pass
+
+
+def _highway_pbf(source_pbf, output_dir):
+    """The highway ways of `source_pbf` and the nodes they use, in a file
+    of their own (osmium tags-filter), or None when choose_highway_filter
+    says the extract is small enough to read whole, or without the osmium
+    tool. The location index then holds the highway nodes alone: China's
+    cut has 870 M nodes, a 14 GB index, its roads 333 M of them."""
+    from streetzim import cpus
+    use, why = choose_highway_filter(
+        os.environ.get("STREETZIM_ROUTING_HIGHWAY_FILTER", "auto"),
+        os.path.getsize(source_pbf), cpus.memory_limit())
+    if not use:
+        print(f"    Reading the whole extract ({why})")
+        return None
+    if shutil.which("osmium") is None:
+        print("    osmium tool not found: reading the whole extract")
+        return None
+    fd, path = tempfile.mkstemp(dir=output_dir, prefix="routing-highways-",
+                                suffix=".osm.pbf")
+    os.close(fd)
+    try:
+        subprocess.run(["osmium", "tags-filter", source_pbf, "w/highway",
+                        "-o", path, "--overwrite"], check=True)
+    except BaseException:
+        os.remove(path)
+        raise
+    print(f"    Highway ways and their nodes: "
+          f"{os.path.getsize(path) / (1024 * 1024):.1f} MB ({why})")
+    return path
+
+
+def _node_index_dir(n_nodes, output_dir, mode=None):
+    """Where the node-location index goes: None for memory, else the folder
+    for its file. Prints why. `mode` overrides STREETZIM_ROUTING_NODE_INDEX."""
+    from streetzim import cpus
+    # A file index's folder: STREETZIM_NODE_LOC_DIR when it is a writable
+    # folder, else the build's own temporary folder (output_dir). The
+    # default, /data, was chosen as a fast NVMe scratch volume (an earlier
+    # comment here); on the current build host it is a root-owned folder on
+    # the root filesystem, not writable by the build user, and in the
+    # Docker image it does not exist, so both use the build's folder.
+    loc_dir = os.environ.get("STREETZIM_NODE_LOC_DIR", "/data")
+    if not os.path.isdir(loc_dir) or not os.access(loc_dir, os.W_OK):
+        loc_dir = output_dir
+    # Reclaim scratch files an OOM-killed earlier run left behind (they
+    # no longer share a fixed name), whichever index this run uses. A file
+    # this old may still be in use by a long continent build, but that is
+    # harmless: libosmium opened it when the pass started, and on
+    # Linux/macOS an unlinked file stays readable and writable through open
+    # descriptors and mappings.
+    import glob
+    for stale in glob.glob(os.path.join(loc_dir, "streetzim_node_loc_*.bin")):
+        try:
+            if time.time() - os.path.getmtime(stale) > 6 * 3600:
+                os.remove(stale)
+                print(f"    removed stale node-location scratch {stale}")
+        except OSError:
+            pass
+    use_file, why = choose_node_index(
+        mode or os.environ.get("STREETZIM_ROUTING_NODE_INDEX", "auto"),
+        n_nodes, cpus.memory_limit())
+    if not use_file:
+        print(f"    Node locations in memory ({why})")
+        return None
+    # sparse_file_array: sorted (id, lon, lat) triples in a file, mapped.
+    print(f"    Node locations in a file in {loc_dir} ({why})")
+    return loc_dir
+
+
+def _node_index(loc_dir, scratch):
+    """A libosmium index spec for one pass: in memory, or in a new file in
+    `loc_dir` (unique per run: a fixed name let a second build on the same
+    host delete/rewrite the first build's index mid-pass), added to
+    `scratch`."""
+    if loc_dir is None:
+        return "sparse_mem_array", None
+    fd, path = tempfile.mkstemp(dir=loc_dir, prefix="streetzim_node_loc_",
+                                suffix=".bin")
+    os.close(fd)
+    scratch.append(path)
+    return f"sparse_file_array,{path}", path
 
 
 def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
@@ -44,17 +341,14 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
       Pass 1 — collect highway-way node refs + endpoints to identify junctions
               (intersection/terminus nodes, the graph vertices).
       Pass 2 — re-scan ways, split each at junction nodes into edges, emit
-              edges incrementally into arrays + a geom varint blob.
-
-    The old implementation materialized all highway features in Python
-    objects (~5 KB/feature), peaking at ~67 GB RAM for Japan and would
-    need ~500 GB for Europe. Streaming + node-ref dedup + numpy/array.array
-    storage keeps peak RAM well under 100 GB for any continent-scale bbox.
+              edges incrementally into arrays + a spilled geometry file.
+    Both read only the highway ways and their nodes (_highway_pbf). Memory:
+    the module docstring.
 
     Args:
         pbf_path: Source OSM PBF file
-        output_dir: Where to write the bbox-filtered PBF (intermediate)
-                    and the final routing-graph.bin.
+        output_dir: Where to write the bbox-filtered PBF (intermediate),
+                    the scratch files and the final routing-graph.bin.
         bbox: Optional (minlon, minlat, maxlon, maxlat) to bbox-filter first.
               Critical for regional builds from a planet PBF.
         precut: pbf_path is already cut to bbox: skip the cut, keep bbox for
@@ -68,13 +362,8 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
 
     Returns the path of routing-graph.bin, or None if no highways were found.
     """
-    import math
-    import array
-    import numpy as np
-    import struct
-
     try:
-        import osmium
+        import osmium  # noqa: F401
     except ImportError as exc:
         raise RuntimeError("pyosmium is required for routing extraction "
                            "(pip install osmium)") from exc
@@ -97,6 +386,33 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
         size_mb = os.path.getsize(bbox_pbf) / (1024 * 1024)
         print(f"    Region PBF: {size_mb:.1f} MB")
         source_pbf = bbox_pbf
+
+    scratch = []
+    hw_pbf = _highway_pbf(source_pbf, output_dir)
+    if hw_pbf:
+        scratch.append(hw_pbf)
+    try:
+        return _extract(hw_pbf or source_pbf, output_dir, bbox, scratch,
+                        highways_only=hw_pbf is not None)
+    finally:
+        for p in scratch:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
+def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
+    """extract_routing_graph from the highway extract on. Files it creates
+    go in `scratch`, which the caller removes. Without highways_only the
+    location index holds every node of `source_pbf`, so it is a file (as it
+    always was before the filter), whatever the highway-node count says."""
+    import math
+    import array
+    import mmap
+    import numpy as np
+    import struct
+    import osmium
 
     # Highway classes excluded from routing (non-navigable)
     EXCLUDED = frozenset({
@@ -176,17 +492,18 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
     }
 
     # Pass 1: Walk every highway way, record node refs. Junctions = nodes
-    # appearing in 2+ ways OR at way endpoints. Store interior refs in a
-    # compact int64 array and endpoint refs in a set; after the pass, sort
-    # the array to find the 2+ duplicates.
+    # appearing in 2+ ways OR at way endpoints. Interior refs and endpoint
+    # refs are spilled to files (int64), read back after the pass and
+    # sorted; the duplicates in the sorted interior refs are the 2+ ones.
     print("    Pass 1: scanning highway ways for junction nodes...")
+    interior = _Spill(output_dir, "interior")
+    scratch.append(interior.path)
+    endpoints = _Spill(output_dir, "ends")
+    scratch.append(endpoints.path)
 
     class _Pass1(osmium.SimpleHandler):
         def __init__(self):
             super().__init__()
-            self.endpoints = set()
-            self.interior_chunks = []   # list of numpy int64 arrays
-            self._interior_buf = []
             self.way_count = 0
             self.hw_count = 0
 
@@ -198,60 +515,56 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
             refs = [n.ref for n in w.nodes]
             if len(refs) < 2:
                 return
-            self.endpoints.add(refs[0])
-            self.endpoints.add(refs[-1])
+            endpoints.append(refs[0])
+            endpoints.append(refs[-1])
             if len(refs) > 2:
-                self._interior_buf.extend(refs[1:-1])
+                interior.extend(refs[1:-1])
             self.hw_count += 1
             if self.hw_count % 200000 == 0:
-                # Flush Python list into numpy (release Python-int overhead)
-                if self._interior_buf:
-                    self.interior_chunks.append(
-                        np.fromiter(self._interior_buf, dtype=np.int64,
-                                    count=len(self._interior_buf)))
-                    self._interior_buf = []
+                endpoints.flush()
                 print(f"\r    Pass 1: {self.hw_count} highway ways...",
                       end="", flush=True)
 
-        def finalize(self):
-            if self._interior_buf:
-                self.interior_chunks.append(
-                    np.fromiter(self._interior_buf, dtype=np.int64,
-                                count=len(self._interior_buf)))
-                self._interior_buf = []
-
     p1 = _Pass1()
-    p1.apply_file(source_pbf)
-    p1.finalize()
+    try:
+        p1.apply_file(source_pbf)
+    except BaseException:
+        interior.remove()
+        endpoints.remove()
+        raise
     print(f"\r    Pass 1: scanned {p1.hw_count} highway ways "
           f"(of {p1.way_count} total)                    ")
 
     if p1.hw_count == 0:
+        interior.remove()
+        endpoints.remove()
         print("    Warning: no highway features found, skipping routing graph")
         # None means "no routing": the caller skips the routing phase.
         return None
 
-    # Find interior refs that appear in 2+ ways.
-    if p1.interior_chunks:
-        interior_arr = np.concatenate(p1.interior_chunks)
-        p1.interior_chunks = []  # free
-    else:
-        interior_arr = np.empty(0, dtype=np.int64)
+    # Interior refs that appear in 2+ ways: each one that equals its
+    # predecessor in the sorted array (np.unique collapses the repeats).
+    interior_arr = interior.read()
     interior_arr.sort()
-    # A ref is a "count>=2 junction" if it appears adjacent to an equal ref
-    # in the sorted array. Mark either side of each equal-pair.
     if len(interior_arr) > 1:
-        dup = interior_arr[:-1] == interior_arr[1:]
-        mask = np.concatenate([dup, [False]]) | np.concatenate([[False], dup])
-        interior_junctions = np.unique(interior_arr[mask])
+        dup = interior_arr[1:] == interior_arr[:-1]
+        interior_junctions = np.unique(interior_arr[1:][dup])
+        n_interior = len(interior_arr) - int(np.count_nonzero(dup))
+        del dup
     else:
-        interior_junctions = np.empty(0, dtype=np.int64)
+        interior_junctions = interior_arr.copy()[:0]
+        n_interior = len(interior_arr)
     del interior_arr
-    endpoint_arr = np.fromiter(p1.endpoints, dtype=np.int64, count=len(p1.endpoints))
+    endpoint_arr = np.unique(endpoints.read())
+    # At most this many distinct highway nodes (the ends may be interior
+    # elsewhere too): what the location index will hold.
+    n_highway_nodes = n_interior + len(endpoint_arr)
     junction_arr = np.unique(np.concatenate([interior_junctions, endpoint_arr]))
     del interior_junctions, endpoint_arr
-    p1.endpoints = None
     print(f"    Found {len(junction_arr)} junction nodes (graph vertices)")
+
+    loc_dir = _node_index_dir(n_highway_nodes, output_dir,
+                              mode=None if highways_only else "file")
 
     # Across the antimeridian, OSM splits a road at ±180: one way ends on a
     # node at 180.0, the next starts on a different node at -180.0, same
@@ -260,20 +573,26 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
     # every other graph is unchanged.
     stitched = {}
     if bbox and area.crosses(bbox):
-        stitched = _antimeridian_twins(osmium, source_pbf, EXCLUDED)
+        twins_spec, twins_file = _node_index(loc_dir, scratch)
+        try:
+            stitched = _antimeridian_twins(osmium, source_pbf, EXCLUDED,
+                                           idx=twins_spec)
+        finally:
+            if twins_file:
+                os.remove(twins_file)
         if stitched:
             junction_arr = junction_arr[~np.isin(junction_arr, list(stitched))]
             print(f"    Joined {len(stitched)} road(s) split at the antimeridian")
 
-    # Map junction ref -> graph index (0-based, sorted for determinism).
-    # Dict lookup is hot in Pass 2 — Python dict is ~25 M lookups/s which is
-    # fine for tens of millions of ways.
-    ref_to_idx = {int(r): i for i, r in enumerate(junction_arr)}
-    for twin, kept in stitched.items():
-        if kept in ref_to_idx:
-            ref_to_idx[twin] = ref_to_idx[kept]
+    # Junction ref -> graph index is its position in the sorted junction_arr
+    # (np.searchsorted per way; a dict of 43 M junctions took 4-5 GB). A
+    # twin joined at the antimeridian takes its partner's index.
     num_nodes = len(junction_arr)
-    del junction_arr
+    twin_idx = {}
+    for twin, kept in stitched.items():
+        k = int(np.searchsorted(junction_arr, kept))
+        if k < num_nodes and junction_arr[k] == kept:
+            twin_idx[twin] = k
 
     # Pass 2: stream ways again, this time with node locations. Split each
     # highway way at junctions and emit edges + geoms directly into arrays.
@@ -297,10 +616,9 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
             v >>= 7
         out.append(v & 0x7F)
 
-    def _encode_geom(lons_e7, lats_e7, out):
-        """Append a varint-encoded geom to `out`, return (start_byte, end_byte)."""
-        start = len(out)
-        out.extend(struct.pack('<ii', lons_e7[0], lats_e7[0]))
+    def _encode_geom(lons_e7, lats_e7):
+        """A geom's varint encoding (absolute first point, then deltas)."""
+        out = bytearray(struct.pack('<ii', lons_e7[0], lats_e7[0]))
         prev_lon = lons_e7[0]
         prev_lat = lats_e7[0]
         for k in range(1, len(lons_e7)):
@@ -318,7 +636,7 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
             _varint(_zigzag32(lats_e7[k] - prev_lat), out)
             prev_lon += dlon
             prev_lat = lats_e7[k]
-        return start, len(out)
+        return bytes(out)
 
     # Output buffers (using array.array for 4-byte primitives — much more
     # compact than Python lists of ints).
@@ -332,6 +650,8 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
     edges_from = array.array('I')
     edges_to = array.array('I')
     edges_dist_speed = array.array('I')
+    # Pass 2 stores the geometry CANDIDATE here; dedup_geoms maps it to the
+    # geometry index (0xFFFFFFFF = no geom either way).
     edges_geom = array.array('I')
     edges_name = array.array('I')
     # v4 class_access u32 per edge — see docs/driving-mode-road-class-warnings.md
@@ -344,30 +664,39 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
     # bits 9..31 stay reserved so future access/maneuver flags can slot in.
     edges_class_access = array.array('I')
 
-    # Geom offsets are stored as uint32 byte offsets into the blob — v2 format
-    # caps geom_blob at 2^32 bytes. For continent-scale extracts (Europe) the
-    # naive blob can exceed 4 GB. When we detect we're close to the limit, we
-    # stop growing the blob and fall back to geom_idx=-1 for subsequent edges
-    # (they'll render as straight line-segments between their endpoint nodes).
-    # That's a graceful degradation — routing still works, just with fewer
-    # intermediate polyline points for very large regions.
-    GEOM_BLOB_CAP = 0xFFFF0000  # leave ~64 KB headroom before 2^32
-
     # Node coordinates indexed by graph idx (populated lazily as we see them).
     node_coords = np.zeros((num_nodes, 2), dtype=np.int32)  # lat_e7, lon_e7
     # Explicit "seen" flags instead of using (0,0) as the unset sentinel —
     # a genuine node at Null Island is indistinguishable otherwise.
     node_has_coords = np.zeros(num_nodes, dtype=bool)
 
-    # Geom dedup: hash geom bytes → geom index. Geom blob accumulates.
-    geom_blob = bytearray()
-    # geom_offsets[k] = byte offset of geom k's start; geom_offsets[k+1] = end.
-    geom_offsets = array.array('I', [0])
-    geom_map = {}
+    # Geometry candidates: every edge's encoded interior points, appended to
+    # a scratch file; dedup_geoms picks the distinct ones afterwards (and
+    # applies GEOM_BLOB_CAP) from each one's length and hash.
+    fd, geom_path = tempfile.mkstemp(dir=output_dir, prefix="routing-geoms-",
+                                     suffix=".bin")
+    scratch.append(geom_path)
+    geom_file = os.fdopen(fd, "wb", buffering=8 << 20)
+    geom_len = array.array('I')
+    geom_hash = array.array('q')
+    geom_seg_first = array.array('B')
+    geom_bytes = [0]
+
+    # The F821 noqas here and in _Pass2: these are closure arrays that this
+    # function `del`s after the pass (to free them before the assembly);
+    # ruff flags them only for that.
+    def _candidate(blob, opens_segment):
+        geom_file.write(blob)
+        geom_len.append(len(blob))  # noqa: F821
+        geom_hash.append(_geom_hash(blob))  # noqa: F821
+        geom_seg_first.append(opens_segment)  # noqa: F821
+        geom_bytes[0] += len(blob)
+        return len(geom_len) - 1  # noqa: F821
 
     # Name table — deduped street-name strings.
     name_table = [""]
     name_map = {"": 0}
+    last_junction = num_nodes - 1
 
     class _Pass2(osmium.SimpleHandler):
         def __init__(self):
@@ -454,11 +783,24 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
                 name_table.append(label)
                 name_map[label] = name_idx
 
+            # Graph index of each ref, and whether it is a junction.
+            ref_arr = np.array(refs, dtype=np.int64)
+            pos = np.searchsorted(junction_arr, ref_arr)  # noqa: F821
+            np.minimum(pos, last_junction, out=pos)
+            is_junction = (junction_arr[pos] == ref_arr).tolist()  # noqa: F821
+            idx_of = pos.tolist()
+            if twin_idx:
+                for k, r in enumerate(refs):
+                    t = twin_idx.get(r)
+                    if t is not None:
+                        is_junction[k] = True
+                        idx_of[k] = t
+
             # Walk through refs, splitting at graph nodes (junctions).
             seg_start = 0
             n = len(refs)
             for i in range(1, n):
-                if i != n - 1 and refs[i] not in ref_to_idx:
+                if i != n - 1 and not is_junction[i]:
                     continue
                 # Segment refs[seg_start:i+1] is between two graph nodes.
                 a = seg_start
@@ -466,20 +808,22 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
                 if b - a < 1:
                     seg_start = i
                     continue
-                from_idx = ref_to_idx[refs[a]]
-                to_idx = ref_to_idx[refs[b]]
+                if not (is_junction[a] and is_junction[b]):
+                    raise KeyError(refs[b] if is_junction[a] else refs[a])
+                from_idx = idx_of[a]
+                to_idx = idx_of[b]
                 # Cache endpoint coordinates for EVERY junction we see,
                 # including a→a loops: an isolated closed way (parking-lot
                 # loop, park path loop) used to leave its only junction at
                 # the (0,0) sentinel — a phantom node at Null Island.
-                if not node_has_coords[from_idx]:
+                if not node_has_coords[from_idx]:  # noqa: F821
                     node_coords[from_idx, 0] = lats_e7[a]
                     node_coords[from_idx, 1] = lons_e7[a]
-                    node_has_coords[from_idx] = True
-                if not node_has_coords[to_idx]:
+                    node_has_coords[from_idx] = True  # noqa: F821
+                if not node_has_coords[to_idx]:  # noqa: F821
                     node_coords[to_idx, 0] = lats_e7[b]
                     node_coords[to_idx, 1] = lons_e7[b]
-                    node_has_coords[to_idx] = True
+                    node_has_coords[to_idx] = True  # noqa: F821
                 if from_idx != to_idx:
                     # Distance (haversine over all points in segment).
                     dist_m = 0.0
@@ -494,56 +838,30 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
                     dist_dm = int(round(dist_m * 10))
 
                     # Geom: interior points only (endpoints are node vertices).
-                    # Skip encoding when near the uint32 blob-size cap —
-                    # downstream typed arrays use 4-byte offsets and must fit.
                     # The forward geom is only needed when a forward edge is
                     # emitted (oneway=-1 ways used to encode and orphan it).
+                    # Reverse geom: a distinct encoding (deltas differ).
                     interior_len = b - a - 1
-                    near_cap = len(geom_blob) >= GEOM_BLOB_CAP
-                    fgi = -1
-                    rgi = -1
-                    if oneway != -1 and interior_len > 0 and not near_cap:
-                        i_lons = lons_e7[a + 1:b]
-                        i_lats = lats_e7[a + 1:b]
-                        fstart, fend = _encode_geom(i_lons, i_lats, geom_blob)
-                        key = bytes(geom_blob[fstart:fend])
-                        existing_gi = geom_map.get(key)
-                        if existing_gi is None:
-                            fgi = len(geom_offsets) - 1
-                            geom_offsets.append(fend)
-                            geom_map[key] = fgi
-                        else:
-                            # Undo append: we already had this geom, trim blob.
-                            del geom_blob[fstart:fend]
-                            fgi = existing_gi
-
-                    # Reverse geom (distinct encoding since deltas differ).
-                    if oneway != 1 and interior_len > 0 and not near_cap:
-                        r_lons = list(reversed(lons_e7[a + 1:b]))
-                        r_lats = list(reversed(lats_e7[a + 1:b]))
-                        rstart, rend = _encode_geom(r_lons, r_lats, geom_blob)
-                        rkey = bytes(geom_blob[rstart:rend])
-                        existing_rgi = geom_map.get(rkey)
-                        if existing_rgi is None:
-                            rgi = len(geom_offsets) - 1
-                            geom_offsets.append(rend)
-                            geom_map[rkey] = rgi
-                        else:
-                            del geom_blob[rstart:rend]
-                            rgi = existing_rgi
+                    fgi = 0xFFFFFFFF
+                    rgi = 0xFFFFFFFF
+                    if oneway != -1 and interior_len > 0:
+                        fgi = _candidate(_encode_geom(lons_e7[a + 1:b],
+                                                      lats_e7[a + 1:b]), 1)
+                    if oneway != 1 and interior_len > 0:
+                        rgi = _candidate(_encode_geom(
+                            list(reversed(lons_e7[a + 1:b])),
+                            list(reversed(lats_e7[a + 1:b]))),
+                            0 if oneway != -1 else 1)
 
                     # dist_dm truncates at 24 bits = 1677 km; real road edges
                     # don't come close, but clamp for safety.
                     dist_dm_packed = min(dist_dm, 0xFFFFFF)
                     dist_speed = ((speed & 0xFF) << 24) | dist_dm_packed
-                    # The F821 noqa below: these are closure arrays from
-                    # extract_routing_graph; ruff flags them only because the
-                    # function `del`s them after this pass.
                     if oneway != -1:
                         edges_from.append(from_idx)  # noqa: F821
                         edges_to.append(to_idx)  # noqa: F821
                         edges_dist_speed.append(dist_speed)  # noqa: F821
-                        edges_geom.append(0xFFFFFFFF if fgi < 0 else fgi)  # noqa: F821
+                        edges_geom.append(fgi)  # noqa: F821
                         edges_name.append(name_idx)  # noqa: F821
                         edges_class_access.append(class_access)  # noqa: F821
                         self.edge_count += 1
@@ -551,7 +869,7 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
                         edges_from.append(to_idx)  # noqa: F821
                         edges_to.append(from_idx)  # noqa: F821
                         edges_dist_speed.append(dist_speed)  # noqa: F821
-                        edges_geom.append(0xFFFFFFFF if rgi < 0 else rgi)  # noqa: F821
+                        edges_geom.append(rgi)  # noqa: F821
                         edges_name.append(name_idx)  # noqa: F821
                         edges_class_access.append(class_access)  # noqa: F821
                         self.edge_count += 1
@@ -562,114 +880,94 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
             if self.hw_count % 200000 == 0:
                 print(f"\r    Pass 2: {self.hw_count} ways, "
                       f"{self.edge_count} edges, "
-                      f"{len(geom_offsets) - 1} geoms, "
-                      f"{len(geom_blob) // (1024 * 1024)} MB geom blob...",
+                      f"{len(geom_len)} geometry candidates, "  # noqa: F821
+                      f"{geom_bytes[0] // (1024 * 1024)} MB...",
                       end="", flush=True)
 
     p2 = _Pass2()
-    # File-backed sparse node location store on a fast (NVMe) volume.
-    # We iterated through several map types:
-    #   - default sparse_mem_array — OOM'd US Pass 2 three runs in a row.
-    #   - dense_file_array on /storage HDD — OOM-safe but each node
-    #     lookup was a random HDD seek (US Pass 2 didn't finish 200k of
-    #     53M ways in 1.5 h).
-    #   - dense_mmap_array — anonymous mmap committed ~96 GB virtual for
-    #     planet-scale node ids, OOM-killed Europe Pass 2.
-    #   - sparse_mem_map — hash-based; OOM-killed Europe Pass 2 too
-    #     (~50 GB peak with libosmium overhead + Pass 1 state).
-    # sparse_file_array is sorted (id, lon, lat) triples on disk —
-    # ~16 GB for Europe's ~1B touched nodes, sequential writes during
-    # indexing, mostly cached lookups during way iteration. Putting it
-    # on /data (NVMe SSD, 370 GB free) makes random reads fast enough.
-    # /data is the project's reserved fast-scratch volume (separate from
-    # /storage HDD and the 79 GB / root); cleaned up at end of pass.
-    NODE_LOC_DIR = os.environ.get("STREETZIM_NODE_LOC_DIR", "/data")
-    if not os.path.isdir(NODE_LOC_DIR) or not os.access(NODE_LOC_DIR, os.W_OK):
-        NODE_LOC_DIR = output_dir
-    # Unique per run: a fixed name let a second build on the same host
-    # delete/rewrite the first build's 16-60 GB index mid-pass.
-    import tempfile as _tempfile
-    # Reclaim scratch files an OOM-killed earlier run left behind (they
-    # are 16-60 GB each and no longer share a fixed name). A file this old
-    # may still be in use by a long continent build, but that is harmless:
-    # libosmium opened it when the pass started, and on Linux/macOS an
-    # unlinked file stays readable and writable through open descriptors
-    # and mappings; its space is freed when that build closes it.
-    import glob as _glob
-    for _stale in _glob.glob(os.path.join(NODE_LOC_DIR, "streetzim_node_loc_*.bin")):
-        try:
-            if time.time() - os.path.getmtime(_stale) > 6 * 3600:
-                os.remove(_stale)
-                print(f"    removed stale node-location scratch {_stale}")
-        except OSError:
-            pass
-    _loc_fd, node_loc_path = _tempfile.mkstemp(
-        dir=NODE_LOC_DIR, prefix="streetzim_node_loc_", suffix=".bin")
-    os.close(_loc_fd)
+    index_file = None
     loc_handler = None
     try:
-        loc_handler = osmium.NodeLocationsForWays(
-            osmium.index.create_map(f"sparse_file_array,{node_loc_path}"))
+        index_spec, index_file = _node_index(loc_dir, scratch)
+        loc_handler = osmium.NodeLocationsForWays(osmium.index.create_map(index_spec))
         loc_handler.ignore_errors()
         osmium.apply(source_pbf, loc_handler, p2)
     finally:
         # Drop loc_handler (and its libosmium index) BEFORE the post-Pass-2
-        # numpy work, so the kernel can release the ~60 GB sparse_file_array
-        # mmap. Without this, the file pages squat in RssFile even after
-        # os.remove(), starving the argsort/fancy-indexing ops that follow
-        # of cache and forcing them to thrash through swap. Also runs on
-        # an exception so the multi-GB scratch file never outlives a
-        # failed pass.
+        # numpy work, so the kernel can release a file index's mapping:
+        # without this its pages squat in RssFile even after os.remove(),
+        # starving what follows of cache. Also runs on an exception so the
+        # scratch file never outlives a failed pass.
         del loc_handler
-        try:
-            os.remove(node_loc_path)
-        except OSError:
-            pass
+        geom_file.close()
+        if index_file:
+            try:
+                os.remove(index_file)
+            except OSError:
+                pass
+    del junction_arr, node_has_coords
     print(f"\r    Pass 2: {p2.hw_count} ways, {p2.edge_count} edges, "
-          f"{len(geom_offsets) - 1} geoms, "
-          f"{len(geom_blob) / (1024 * 1024):.1f} MB geom blob          ")
+          f"{len(geom_len)} geometry candidates, "
+          f"{geom_bytes[0] / (1024 * 1024):.1f} MB          ")
 
-    # Sort edges by from-node so adj_offsets is just a cumulative-count array.
-    num_edges = len(edges_from)
-    num_geoms = len(geom_offsets) - 1
-    num_names = len(name_table)
-
-    edges_from_np = np.frombuffer(edges_from, dtype=np.uint32)
-    sort_order = np.argsort(edges_from_np, kind='stable')
-    # Build final edges array in v4 layout (u32 stride = 5):
-    #   (target, dist_speed, geom_idx, name_idx, class_access)
-    # dist_speed  = (speed << 24) | dist_dm24
-    # geom_idx    full u32; 0xFFFFFFFF = "no geometry"
-    # class_access bit layout per docs/driving-mode-road-class-warnings.md
-    edges_arr = np.empty((num_edges, 5), dtype='<u4')
-    edges_arr[:, 0] = np.frombuffer(edges_to, dtype=np.uint32)[sort_order]
-    edges_arr[:, 1] = np.frombuffer(edges_dist_speed, dtype=np.uint32)[sort_order]
-    edges_arr[:, 2] = np.frombuffer(edges_geom, dtype=np.uint32)[sort_order]
-    edges_arr[:, 3] = np.frombuffer(edges_name, dtype=np.uint32)[sort_order]
-    edges_arr[:, 4] = np.frombuffer(edges_class_access, dtype=np.uint32)[sort_order]
-    edges_from_sorted = edges_from_np[sort_order]
-    del edges_from, edges_to, edges_dist_speed, edges_geom, edges_name, edges_class_access
-    del edges_from_np, sort_order
-
-    adj_offsets = np.zeros(num_nodes + 1, dtype='<u4')
-    # Cumulative count of edges by from-node.
-    if num_edges > 0:
-        np.add.at(adj_offsets, edges_from_sorted.astype(np.int64) + 1, 1)
-    np.cumsum(adj_offsets, out=adj_offsets)
-    del edges_from_sorted
-
-    # Nodes array in (lat_e7, lon_e7) layout. node_coords is already shaped (N, 2).
-    nodes_arr = node_coords.astype('<i4', copy=False)
-
-    # Geom offsets as numpy uint32; include the closing offset.
-    geom_offsets_np = np.frombuffer(geom_offsets, dtype=np.uint32).astype('<u4', copy=False)
-
+    # Distinct geometries, in first-seen order (what the dict did in-pass).
+    geom_offsets_all = np.zeros(len(geom_len) + 1, dtype=np.int64)
+    np.cumsum(np.frombuffer(geom_len, dtype=np.uint32), out=geom_offsets_all[1:])
+    # Candidate bytes are read only to confirm a hash match (an empty
+    # file cannot be mapped, and has no candidates to read).
+    with open(geom_path, "rb") as gf:
+        gm = (mmap.mmap(gf.fileno(), 0, access=mmap.ACCESS_READ)
+              if geom_bytes[0] else None)
+        try:
+            def _read(k):
+                assert gm is not None
+                return gm[geom_offsets_all[k]:geom_offsets_all[k + 1]]
+            geom_of, geom_keep = dedup_geoms(
+                np.frombuffer(geom_len, dtype=np.uint32), geom_hash,
+                geom_seg_first, _read, GEOM_BLOB_CAP)
+        finally:
+            if gm is not None:
+                gm.close()
+    del geom_hash, geom_seg_first
+    kept_len = np.frombuffer(geom_len, dtype=np.uint32)[geom_keep]
+    num_geoms = len(kept_len)
+    geom_offsets_np = np.zeros(num_geoms + 1, dtype='<u4')
+    np.cumsum(kept_len, out=geom_offsets_np[1:])
+    geom_blob_len = int(kept_len.sum(dtype=np.int64))
+    if geom_blob_len > 0xFFFFFFFF:
+        # Only one segment straddling GEOM_BLOB_CAP with over 64 KB of
+        # geometry could do this; the old builder failed here too.
+        raise OverflowError(f"geometry blob of {geom_blob_len} bytes does "
+                            f"not fit SZRG v4's u32 offsets")
+    del kept_len, geom_len
     # Pad geom blob to 4-byte alignment (else the following Uint32Array view
     # of name_offsets lands at a non-aligned offset and the browser throws
     # RangeError — cost us hours with Baltics; keep this).
-    while len(geom_blob) % 4 != 0:
-        geom_blob.append(0)
-    geom_bytes_total = len(geom_blob)
+    geom_pad = (-geom_blob_len) % 4
+    geom_bytes_total = geom_blob_len + geom_pad
+
+    num_edges = len(edges_from)
+    num_names = len(name_table)
+
+    # adj_offsets[i] = first edge of from-node i (edges are written sorted
+    # by from-node, stable).
+    edges_from_np = np.frombuffer(edges_from, dtype=np.uint32)
+    adj_offsets = np.zeros(num_nodes + 1, dtype='<u4')
+    if num_edges > 0:
+        adj_offsets[1:] = np.cumsum(np.bincount(edges_from_np,
+                                                minlength=num_nodes))
+    sort_order = np.argsort(edges_from_np, kind='stable')
+    del edges_from_np, edges_from
+    columns = [np.frombuffer(c, dtype=np.uint32) for c in
+               (edges_to, edges_dist_speed, edges_geom, edges_name,
+                edges_class_access)]
+    class_access_col = columns[4]
+    num_round = int(((class_access_col >> 8) & 1).sum())
+    num_link = int(np.isin((class_access_col & 0x1F), [2, 4, 6, 8, 10]).sum())
+    del class_access_col
+
+    # Nodes array in (lat_e7, lon_e7) layout. node_coords is already shaped (N, 2).
+    nodes_arr = node_coords.astype('<i4', copy=False)
 
     # Name table → UTF-8 blob + byte-offset index.
     name_blobs = [n.encode("utf-8") for n in name_table]
@@ -684,17 +982,45 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
     # Serialize: SZRG v4, everything in one routing-graph.bin
     # (docs/formats.md; docs/mcpzim-contract.md).
     output_path = os.path.join(output_dir, "routing-graph.bin")
+    block = 1 << 22
     with open(output_path, "wb") as f:
         f.write(b"SZRG")
         np.array([4, num_nodes, num_edges, num_geoms, geom_bytes_total,
                   num_names, names_bytes], dtype='<u4').tofile(f)
         nodes_arr.tofile(f)
         adj_offsets.tofile(f)
-        edges_arr.tofile(f)
+        # Edges in v4 layout (u32 stride = 5), in from-node order, a block
+        # at a time (a whole (E, 5) copy beside the columns took 20 bytes
+        # an edge more):
+        #   (target, dist_speed, geom_idx, name_idx, class_access)
+        # dist_speed  = (speed << 24) | dist_dm24
+        # geom_idx    full u32; 0xFFFFFFFF = "no geometry"
+        # class_access bit layout per docs/driving-mode-road-class-warnings.md
+        for s in range(0, num_edges, block):
+            sel = sort_order[s:s + block]
+            out = np.empty((len(sel), 5), dtype='<u4')
+            for c, col in enumerate(columns):
+                out[:, c] = col[sel]
+            g = out[:, 2]
+            has = g != 0xFFFFFFFF
+            g[has] = geom_of[g[has]]
+            out.tofile(f)
+        del sort_order, columns, edges_to, edges_dist_speed, edges_geom
+        del edges_name, edges_class_access
         geom_offsets_np.tofile(f)
-        # Binary files accept a buffer directly; bytes() would duplicate the
-        # entire geometry blob here (up to ~4 GB) during serialization.
-        f.write(geom_blob)
+        # The kept candidates' bytes, in order, streamed from the scratch
+        # file a block of candidates at a time.
+        with open(geom_path, "rb") as gf:
+            n_cand = len(geom_keep)
+            for s in range(0, n_cand, block):
+                e = min(s + block, n_cand)
+                lo, hi = int(geom_offsets_all[s]), int(geom_offsets_all[e])
+                gf.seek(lo)
+                chunk = np.frombuffer(gf.read(hi - lo), dtype=np.uint8)
+                mask = np.repeat(geom_keep[s:e],
+                                 np.diff(geom_offsets_all[s:e + 1]))
+                f.write(chunk[mask].tobytes())
+        f.write(b"\0" * geom_pad)
         name_offsets.tofile(f)
         for b in name_blobs:
             f.write(b)
@@ -702,9 +1028,6 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
     size_mb = os.path.getsize(output_path) / (1024 * 1024)
     # Class_access diagnostics — helps verify the writer populated flags
     # for regions that are expected to have lots of roundabouts or ramps.
-    class_access_col = edges_arr[:, 4]
-    num_round = int(((class_access_col >> 8) & 1).sum())
-    num_link = int(np.isin((class_access_col & 0x1F), [2, 4, 6, 8, 10]).sum())
     print(f"    Routing graph (v4 inline): {size_mb:.1f} MB "
           f"({num_nodes} nodes, {num_edges} edges, {num_geoms} geoms, "
           f"{geom_bytes_total / (1024*1024):.1f} MB geom blob, "

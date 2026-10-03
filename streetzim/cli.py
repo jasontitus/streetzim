@@ -1443,11 +1443,19 @@ def _build(args: argparse.Namespace, dl: Path, illustration: Path | None, work: 
         os.chdir(ensure_shapefiles(Path(args.shapefiles or (dl / "shapefiles")).resolve()))
     from streetzim import source_report
     source_report.reset()
+    # create_osm_zim's own temporary folder (osm_zim_*: the cut extract, the
+    # tiles, the search records, the routing step's scratch; tens of GB for
+    # a large region) goes in the workspace too, so that sweep_stale()
+    # removes it with the workspace when the build is killed. Directly in
+    # --tmp nothing ever removed it.
+    tempdir = tempfile.tempdir
+    tempfile.tempdir = str(work)
     try:
         import create_osm_zim
         # The builder module itself is not typed (pyright basic mode).
         create_osm_zim.main(build_args)  # pyright: ignore[reportUnknownMemberType]
     finally:
+        tempfile.tempdir = tempdir
         os.chdir(cwd)
         # tilemaker deletes its store files when it exits, but not when it is
         # killed; they take about twice the cut extract, so --keep-temp keeps none.
