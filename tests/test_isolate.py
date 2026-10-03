@@ -255,3 +255,29 @@ def test_a_child_holding_the_gil_still_dies_with_its_parent(tmp_path):
     if alive:
         os.kill(int(child), signal.SIGKILL)
     assert not alive
+
+
+def test_a_child_dies_while_its_killed_parent_is_still_a_zombie(tmp_path):
+    """The parent killed but not reaped (as when its caller is still
+    reading its output): kill -0 still finds it, the child must not."""
+    import multiprocessing
+    pids = tmp_path / "pids"
+    parent = multiprocessing.get_context("spawn").Process(
+        target=_run_and_record, args=(str(pids),))
+    parent.start()
+    child, grandchild = _wait_for(pids)
+    os.kill(parent.pid, signal.SIGKILL)
+    try:
+        for _ in range(50):           # not joined: the parent stays a zombie
+            if not _alive(int(child)) and not _alive(int(grandchild)):
+                break
+            time.sleep(0.1)
+        dead = not _alive(int(child)) and not _alive(int(grandchild))
+    finally:
+        for pid in (child, grandchild):
+            try:
+                os.kill(int(pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        parent.join()
+    assert dead

@@ -24,6 +24,31 @@ from collections.abc import Callable
 from typing import Any
 
 
+def _parent_of(pid: int) -> int | None:
+    """`pid`'s parent pid from /proc (Linux), None without /proc. It changes
+    when the parent exits, not when it is reaped, so a zombie parent (one
+    whose own parent is still reading its output) counts as gone."""
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as f:
+            return int(f.read().rsplit(b")", 1)[1].split()[1])
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _parent_gone(me: int, parent: int) -> bool:
+    import os
+    ppid = _parent_of(me)
+    if ppid is not None:
+        return ppid != parent
+    try:  # no /proc: a signal probe (a zombie parent still answers)
+        os.kill(parent, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:  # the pid is another user's now: reused
+        return True
+    return False
+
+
 def _watch_parent(parent: int) -> None:
     """Fork a watcher into this (new) process group: when `parent` is gone
     it SIGKILLs the group, this process and the osmium it started with it.
@@ -37,9 +62,7 @@ def _watch_parent(parent: int) -> None:
         return
     try:
         while os.getppid() == me:
-            try:
-                os.kill(parent, 0)
-            except ProcessLookupError:
+            if _parent_gone(me, parent):
                 os.killpg(0, signal.SIGKILL)
             time.sleep(1)
     finally:
