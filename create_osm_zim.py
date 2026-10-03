@@ -55,6 +55,7 @@ from pathlib import Path
 from cloud.viewer_slots import pad_to_slot as _pad_to_slot
 from streetzim import cpus as _cpus
 from streetzim.cpus import build_cpus
+from streetzim import tilemaker_store as _tm_store
 # Search-feature extraction lives in streetzim/search_extract.py so it can be
 # used without the builder (openzim/maps integration, cloud/ tools). Names
 # are re-exported here for existing callers.
@@ -447,7 +448,14 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--fast", action="store_true",
                         help="Trade RAM for speed in tilemaker (needs 32+ GB RAM)")
     parser.add_argument("--store", metavar="PATH",
-                        help="Path for tilemaker on-disk temp storage (reduces RAM usage)")
+                        help="Path for tilemaker on-disk temp storage (reduces RAM usage). "
+                             "Alone, always used; with --tilemaker-store, the folder "
+                             "that uses (default: in the temporary folder)")
+    parser.add_argument("--tilemaker-store", choices=_tm_store.MODES,
+                        help="tilemaker's store: memory, disk (--store, checked for "
+                             "free space) or auto (streetzim/tilemaker_store.py: disk "
+                             "for more than 1 GiB to read or a tight memory limit), "
+                             "decided on the file tilemaker reads")
     parser.add_argument("--mbtiles", metavar="PATH",
                         help="Skip tilemaker and use existing MBTiles file")
     parser.add_argument("--record-tile-source", action="store_true",
@@ -905,8 +913,21 @@ def _acquire_tiles(*, args, bbox_str, geofabrik_path, pbf_path, tmpdir, total_st
         print()
         print(f"[2/{total_steps}] Generating vector tiles...")
         mbtiles_path = os.path.join(tmpdir, "tiles.mbtiles")
-        generate_tiles(work_pbf, mbtiles_path, bbox=bbox_str,
-                       fast=args.fast, store=args.store)
+        store = args.store
+        mode = getattr(args, "tilemaker_store", None)
+        if mode:
+            store = store or os.path.join(tmpdir, _tm_store.DIR_NAME)
+            try:
+                store = _tm_store.decide(mode, work_pbf, store,
+                                         build_cpus(), _cpus.memory_limit())
+            except _tm_store.StoreError as e:
+                raise SystemExit(f"error: {e}") from e
+        try:
+            generate_tiles(work_pbf, mbtiles_path, bbox=bbox_str,
+                           fast=args.fast, store=store)
+        finally:
+            if store and not args.store:            # ours, in tmpdir: as large as the cut
+                shutil.rmtree(store, ignore_errors=True)
     return mbtiles_path, work_pbf, work_pbf_cut
 
 
