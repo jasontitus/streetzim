@@ -328,7 +328,8 @@ def _rebuild_search(c, spool_path: Path, total: int, manifest: dict, work: Path)
         return _Item(path, mime, title=title or "", data=data, compress=compress)
 
     extra = {k: v for k, v in manifest.items()
-             if k not in ("total", "chunks", "sub_chunks", "char_split", "word_rule")}
+             if k not in ("total", "chunks", "sub_chunks", "char_split",
+                          "char_ranges", "word_rule")}
     _search_emit_chunks(c, _map_item,
                         split_hot_search_chunks_mb=SEARCH_HOT_BYTES // (1024 * 1024),
                         chunk_tmp=str(chunk_tmp), chunk_counts=counts,
@@ -826,7 +827,7 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                                  or search_manifest_title)
         if not isinstance(search_manifest, dict) or not search_manifest.get("chunks"):
             raise SystemExit(f"--reshard-search: {src_path} declares no search chunks")
-        if search_manifest.get("char_split"):
+        if search_manifest.get("char_split") or search_manifest.get("char_ranges"):
             # Not idempotent: _base_prefix maps ca~r~c back to ca and a record
             # is yielded once per leaf it occupies, so a second pass would
             # duplicate every multi-leaf record (+0.7% measured).
@@ -1183,6 +1184,7 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
             if reshard_search:
                 from cloud.search_shards import (Aggregator, SHARD_TARGET_BYTES,
                                                  char_split_paths, leaf_for,
+                                                 plan_by_tier, split_key,
                                                  tier_for, word_rule_of)
                 # The prefixes are the source's, so the paths inside them must
                 # follow the rule the source was bucketed with: planning a
@@ -1193,6 +1195,7 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                 new_chunks: dict[str, int] = {}
                 new_sub: dict[str, list[str]] = {}
                 new_char: dict[str, list[str]] = {}
+                new_ranges: dict[str, list[str]] = {}
                 search_leaves_written = 0
                 target = min(SEARCH_HOT_BYTES, SHARD_TARGET_BYTES)
                 groups: dict[str, list[str]] = {}
@@ -1232,9 +1235,7 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                         search_leaves_written += 1
                         continue
                     planned = agg.leaves(target_bytes=target)
-                    planned_paths: dict[str, set] = {}
-                    for _t, _p, _c2, _b in planned:
-                        planned_paths.setdefault(_t, set()).add(_p)
+                    planned_paths = plan_by_tier(planned)
                     # Pass 2: bucket into per-leaf temp files, fd-capped.
                     pdir = spill_dir_path / f"search-{prefix}"
                     pdir.mkdir(parents=True, exist_ok=True)
@@ -1332,13 +1333,19 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                     # Old clients resolve sub_chunks and fetch every leaf: as
                     # slow as before, never wrong. Never ship an empty list.
                     new_sub[prefix] = leaf_names
-                    new_char[prefix] = char_split_paths(planned)
+                    # A plan with ranges goes under char_ranges, which
+                    # viewers that predate ranges ignore (they read the
+                    # prefix whole through sub_chunks).
+                    (new_ranges if split_key(planned) == "char_ranges"
+                     else new_char)[prefix] = char_split_paths(planned)
                     print(f"  search {prefix}: {len(names)} old leaf/leaves "
                           f"({total/1048576:.1f} MB) → {len(leaf_names)}", flush=True)
                 payload = dict(search_manifest)
                 payload["chunks"] = new_chunks
                 payload["sub_chunks"] = new_sub
                 payload["char_split"] = new_char
+                if new_ranges:
+                    payload["char_ranges"] = new_ranges
                 mblob = json.dumps(payload, separators=(",", ":")).encode("utf-8")
                 c.add_item(_Item(SEARCH_MANIFEST, "application/json",
                                  title=search_manifest_title, data=mblob))

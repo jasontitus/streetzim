@@ -46,9 +46,11 @@ Gates we enforce:
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import math
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -1385,6 +1387,82 @@ def _chk_tile_corners(arc) -> tuple[str, str]:
     return ("pass", f"z={max_z} corners: {results}")
 
 
+_RANGE_SHAPE = re.compile(r"r[0-9a-fA-FxX_ +-]*\.[0-9a-fA-FxX_ +-]*")
+
+
+def _search_range_problems(chunks: dict, char_split: dict,
+                           char_ranges: dict) -> list[str]:
+    """Grouped-sibling invariants (docs/search-prefix-locality.md#grouped-siblings):
+
+    * no range token under ``char_split`` -- a viewer that predates ranges
+      compares tokens by equality and would find nothing under it;
+    * under ``char_ranges`` a range token is exactly ``r<lo>.<hi>`` in
+      lowercase hex with lo <= hi, only as a path's last token, and every
+      prefix listed there has at least one;
+    * per parent path and tier (from the leaf names in ``chunks``), ranges
+      do not overlap and contain no sibling that has a leaf of its own -- a
+      typed character would read two leaves, or the wrong one.
+    """
+    from cloud.search_shards import LEAF_SEP, range_bounds, token_cp
+    out: list[str] = []
+
+    def looks_like_range(tok: str) -> bool:
+        return tok[:1] == "r" and len(tok) > 1 and (
+            range_bounds(tok) is not None or bool(_RANGE_SHAPE.fullmatch(tok)))
+
+    for prefix, paths in char_split.items():
+        for path in paths:
+            if any(looks_like_range(t) for t in path.split(LEAF_SEP)):
+                out.append(f"{prefix}~{path}: range under char_split")
+    for prefix, paths in char_ranges.items():
+        n_ranges = 0
+        for path in paths:
+            toks = path.split(LEAF_SEP)
+            for i, t in enumerate(toks):
+                if not looks_like_range(t):
+                    continue
+                b = range_bounds(t)
+                if b is None:
+                    out.append(f"{prefix}~{path}: malformed range {t!r}")
+                elif b[0] > b[1]:
+                    out.append(f"{prefix}~{path}: range lo > hi")
+                elif i != len(toks) - 1:
+                    out.append(f"{prefix}~{path}: range not the last token")
+                else:
+                    n_ranges += 1
+        if not n_ranges:
+            out.append(f"{prefix}: listed under char_ranges with no range")
+        # Leaves by (parent path, tier): the leaf name is prefix~path~tier,
+        # the tier possibly followed by -<hash> children.
+        groups: dict[tuple[tuple[str, ...], str], tuple[list, set]] = {}
+        for name in chunks:
+            parts = name.split(LEAF_SEP)
+            if parts[0] != prefix or len(parts) < 3:
+                continue
+            tier = parts[-1].split("-", 1)[0]
+            path = parts[1:-1]
+            ranges, singles = groups.setdefault((tuple(path[:-1]), tier), ([], set()))
+            b = range_bounds(path[-1])
+            if b is not None:
+                ranges.append((b[0], b[1], path[-1]))
+            else:
+                c = token_cp(path[-1])
+                if c is not None:
+                    singles.add(c)
+        for (parent, tier), (ranges, singles) in groups.items():
+            where = LEAF_SEP.join((prefix, *parent))
+            rs = sorted(set(ranges))
+            for (_lo1, hi1, t1), (lo2, _hi2, t2) in itertools.pairwise(rs):
+                if lo2 <= hi1:
+                    out.append(f"{where} tier {tier}: ranges {t1} and {t2} overlap")
+            for lo, hi, t in rs:
+                inside = sorted(c for c in singles if lo <= c <= hi)
+                if inside:
+                    out.append(f"{where} tier {tier}: range {t} contains "
+                               f"sibling U+{inside[0]:04X}")
+    return out
+
+
 def _chk_search_data_sizes(arc) -> tuple[str, str]:
     """Guard against the Japan ``__.json`` crash class. Two tiers:
 
@@ -1407,6 +1485,17 @@ def _chk_search_data_sizes(arc) -> tuple[str, str]:
     missing: list[str] = []
     sub_chunks = mani.get("sub_chunks") or {}
     char_split = mani.get("char_split") or {}
+    # Prefixes whose plan groups small siblings under a range token
+    # (cloud/search_shards.py GROUP_BYTES): the same invariants apply.
+    char_ranges = mani.get("char_ranges") or {}
+    for key, val in (("chunks", chunks), ("sub_chunks", sub_chunks),
+                     ("char_split", char_split), ("char_ranges", char_ranges)):
+        if not isinstance(val, dict) or not all(
+                isinstance(v, list) and all(isinstance(x, str) for x in v)
+                for v in (val.values() if key != "chunks" else ())):
+            return ("fail", f"search-data/manifest.json: {key} is not a map of "
+                            f"{'counts' if key == 'chunks' else 'lists of names'}")
+    bad_ranges = _search_range_problems(chunks, char_split, char_ranges)
     for prefix in chunks:
         try:
             e = arc.get_entry_by_path(f"search-data/{prefix}.json")
@@ -1456,7 +1545,9 @@ def _chk_search_data_sizes(arc) -> tuple[str, str]:
             out |= _expand(child, seen)
         return out
 
-    for prefix, paths in char_split.items():
+    # A reader takes char_split first and would never see the ranges.
+    in_both = sorted(set(char_split) & set(char_ranges))
+    for prefix, paths in [*char_split.items(), *char_ranges.items()]:
         declared = sub_chunks.get(prefix) or []
         leaves = {k for k in chunks
                   if k.startswith(prefix + "~") and k.split("~", 1)[0] == prefix}
@@ -1486,6 +1577,14 @@ def _chk_search_data_sizes(arc) -> tuple[str, str]:
         return ("fail",
                 f"{len(big_leaf)} name-query leaf/leaves ≥ "
                 f"{SEARCH_LEAF_FAIL_MB} MB: {tb}")
+    if bad_ranges:
+        return ("fail",
+                f"{len(bad_ranges)} malformed range path(s): "
+                f"{'; '.join(bad_ranges[:3])}{'…' if len(bad_ranges) > 3 else ''}")
+    if in_both:
+        return ("fail",
+                f"{len(in_both)} prefix(es) in both char_split and "
+                f"char_ranges: {', '.join(in_both[:5])}")
     if bad_union:
         return ("fail",
                 f"sub_chunks must list exactly the leaves of each split "
@@ -1505,8 +1604,10 @@ def _chk_search_data_sizes(arc) -> tuple[str, str]:
                 f"{len(warned)} chunk(s) between {SEARCH_CHUNK_WARN_MB}–{SEARCH_CHUNK_FAIL_MB} MB: {tb}")
     detail = (f"{len(chunks)} chunks; biggest {biggest[1]!r}="
               f"{biggest[0]/1e6:.1f}MB; manifest {len(raw)/1e6:.1f}MB")
-    if char_split:
-        detail += f"; {len(char_split)} char-split prefix(es)"
+    if char_split or char_ranges:
+        detail += f"; {len(char_split) + len(char_ranges)} char-split prefix(es)"
+    if char_ranges:
+        detail += f" ({len(char_ranges)} with grouped siblings)"
     return ("pass", detail)
 
 

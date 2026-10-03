@@ -540,7 +540,7 @@ mix types. So:
   empty leaf is a direct hit and a two-byte fetch;
 - every other leaf is filtered record by record on `t` (or legacy `type`)
   in `TIER_TYPES["a"]`;
-- `search-data/manifest.json` keeps `sub_chunks` and `char_split` as they
+- `search-data/manifest.json` keeps `sub_chunks`, `char_split` and `char_ranges` as they
   were, sets each touched chunk's count, and reduces `total` by the build's
   unique address count from `streetzim-meta.json` (chunk counts count leaf
   records, a record appears in every character path that reaches it, so

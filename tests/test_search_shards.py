@@ -33,11 +33,11 @@ def _size(rec):
     return len(json.dumps(rec, separators=(",", ":"), ensure_ascii=False))
 
 
-def _plan(records, prefix="ca", target=2048):
+def _plan(records, prefix="ca", target=2048, group_bytes=None):
     agg = Aggregator(prefix)
     for r in records:
         agg.add(r, _size(r))
-    leaves = agg.leaves(target_bytes=target)
+    leaves = agg.leaves(target_bytes=target, group_bytes=group_bytes)
     by_tier = {}
     for tier, path, _c, _b in leaves:
         by_tier.setdefault(tier, set()).add(path)
@@ -235,10 +235,14 @@ def test_aggregator_is_deterministic():
 def test_counts_match_what_was_fed():
     recs = [_rec("Caracas", "place"), _rec("Caracas Norte", "place"),
             _rec("Cali", "place")]
-    leaves, _ = _plan(recs)
+    # Per path, so grouping off (a range leaf sums its members:
+    # tests/test_search_ranges.py).
+    leaves, _ = _plan(recs, group_bytes=0)
     counts = {(t, p): c for t, p, c, _b in leaves}
     assert counts[("c", ("r",))] == 2
     assert counts[("c", ("l",))] == 1
+    leaves, _ = _plan(recs)
+    assert [(t, p, c) for t, p, c, _b in leaves] == [("c", ("r6c.72",), 3)]
 
 
 def test_leaf_for_picks_the_deepest_planned_path():

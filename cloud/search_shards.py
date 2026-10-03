@@ -30,6 +30,7 @@ never wrote.
 """
 from __future__ import annotations
 
+import bisect
 import json
 import re
 import unicodedata
@@ -92,6 +93,33 @@ TERMINAL = "_e"
 # code point). docs/search-prefix-locality.md#word-rule.
 WORD_RULE = 2          # what this writer records as manifest["word_rule"]
 WORD_RULES = (1, 2)
+
+# --- Grouped siblings: one leaf for many small children -----------------
+# A split node used to give every child its own leaf. A Latin node has at
+# most 38 children (a-z, 0-9, "_", the terminal); a CJK node has thousands,
+# and most hold a handful of records: china 2026-09-20 rebuilt with rule 2
+# shipped 180,032 leaves, 94 k of them with <= 5 records, and a 6.47 MB
+# manifest that every page load downloads and parses (validate_zim caps it at
+# 4 MB). So when a node is split, children of at most GROUP_MEMBER_BYTES that
+# are consecutive in code-point order share one leaf of at most GROUP_BYTES,
+# whose last path token is a RANGE: ``r<lo>.<hi>``, the first and last member
+# code points in hex (``u5927~r4e00.4e8b~c``). A typed token whose code point
+# is in [lo, hi] reads that leaf; the range never spans a sibling that has a
+# leaf of its own (a big child, or one split further), and the terminal
+# ``_e`` is never grouped. ASCII tokens group by their character's code point
+# (``_`` is 0x5f). A range token cannot be mistaken for another token: those
+# are one ASCII character, ``_e`` or ``u<hex>``, none with a ".".
+#
+# Readers that do not know ranges must not see them: a prefix whose plan has
+# one is listed under the manifest's ``char_ranges`` instead of
+# ``char_split`` (same shape). An older viewer finds no ``char_split`` entry
+# for it and reads every leaf through ``sub_chunks`` -- slow, never wrong. A
+# plan with no range stays in ``char_split``, byte for byte what the writer
+# wrote before. docs/search-prefix-locality.md#grouped-siblings.
+GROUP_BYTES = 256 * 1024
+GROUP_MEMBER_BYTES = GROUP_BYTES // 2
+RANGE_PREFIX = "r"
+RANGE_SEP = "."
 
 
 def _mark_class() -> str:
@@ -199,6 +227,52 @@ def token_for(ch: str) -> str:
     return _ascii_norm(ch) if ch.isascii() else "u" + format(ord(ch), "x")
 
 
+def token_cp(tok: str) -> int | None:
+    """The code point a (non-range) token stands for: ``u<hex>`` its hex, an
+    ASCII token its character; None for the terminal or anything else."""
+    if len(tok) == 1:
+        return ord(tok)
+    if tok.startswith("u"):
+        try:
+            return int(tok[1:], 16)
+        except ValueError:
+            return None
+    return None
+
+
+def range_token(lo: int, hi: int) -> str:
+    return f"{RANGE_PREFIX}{lo:x}{RANGE_SEP}{hi:x}"
+
+
+# Exactly what range_token writes: lowercase hex, no sign, "0x", "_" or
+# space (int(x, 16) would take all of those; the viewers' RANGE_RE is the
+# same pattern, so both sides agree on what is a range).
+RANGE_RE = re.compile(r"r([0-9a-f]+)\.([0-9a-f]+)")
+
+
+def range_bounds(tok: str) -> tuple[int, int] | None:
+    """``(lo, hi)`` of a range token, or None when ``tok`` is not one."""
+    m = RANGE_RE.fullmatch(tok)
+    if m is None:
+        return None
+    return int(m.group(1), 16), int(m.group(2), 16)
+
+
+def token_matches(declared: str, typed: str) -> bool:
+    """Whether a declared path token covers a typed (concrete) token."""
+    if declared == typed:
+        return True
+    b = range_bounds(declared)
+    if b is None:
+        return False
+    c = token_cp(typed)
+    return c is not None and b[0] <= c <= b[1]
+
+
+def has_ranges(paths: Iterable[Path]) -> bool:
+    return any(range_bounds(t) is not None for p in paths for t in p)
+
+
 def paths_for(prefix: str, name: str, depth: int,
               rule: int = WORD_RULE) -> set[Path]:
     """Every character path ``name`` should be indexed under, within ``prefix``.
@@ -275,10 +349,20 @@ class Aggregator:
                     slot[0] += 1
                     slot[1] += size
 
-    def leaves(self, target_bytes: int = SHARD_TARGET_BYTES
+    def leaves(self, target_bytes: int = SHARD_TARGET_BYTES,
+               group_bytes: int | None = None,
                ) -> list[tuple[str, Path, int, int]]:
         """``(tier, path, count, bytes)`` per leaf: a node becomes a leaf once
-        it fits ``target_bytes``, has no children, or hits its tier's cap."""
+        it fits ``target_bytes``, has no children, or hits its tier's cap.
+
+        The children of a split node (and the prefix's first level, which is
+        the prefix split) that hold at most ``group_bytes // 2`` and are
+        consecutive in code-point order share a leaf of at most
+        ``group_bytes`` whose last token is a range (see GROUP_BYTES). A
+        group of one keeps its own path. ``group_bytes=0``: no grouping, the
+        layout of every ZIM written before 2026-10. None: GROUP_BYTES."""
+        if group_bytes is None:
+            group_bytes = GROUP_BYTES
         children: dict[tuple[str, Path], list[Path]] = {}
         roots: dict[str, list[Path]] = {}
         for tier, path in self.counts:
@@ -289,7 +373,9 @@ class Aggregator:
         out: list[tuple[str, Path, int, int]] = []
         for tier in TIER_ORDER:
             cap = TIER_MAX_DEPTH.get(tier, 1)
-            stack = [(p, 1) for p in sorted(roots.get(tier, []), reverse=True)]
+            first = self._group(tier, sorted(roots.get(tier, [])),
+                                group_bytes, target_bytes, out)
+            stack = [(p, 1) for p in reversed(first)]
             while stack:
                 path, depth = stack.pop()
                 count, size = self.counts[(tier, path)]
@@ -297,8 +383,107 @@ class Aggregator:
                 if size <= target_bytes or depth >= cap or not kids:
                     out.append((tier, path, count, size))
                     continue
-                stack.extend((k, depth + 1) for k in sorted(kids, reverse=True))
+                rest = self._group(tier, sorted(kids), group_bytes, target_bytes,
+                                   out)
+                stack.extend((k, depth + 1) for k in reversed(rest))
         return out
+
+    def _group(self, tier: str, kids: list[Path], group_bytes: int,
+               target_bytes: int, out: list[tuple[str, Path, int, int]]
+               ) -> list[Path]:
+        """Append the range leaves for ``kids`` (siblings) to ``out`` and
+        return the kids that keep a path of their own. A group never
+        outgrows ``target_bytes`` either, and only a kid that fits it (so
+        would be a leaf anyway) joins one."""
+        if group_bytes <= 0 or len(kids) < 2:
+            return kids
+        group_bytes = min(group_bytes, target_bytes)
+        member_max = group_bytes // 2
+        by_cp = sorted((c, k) for k in kids
+                       if (c := token_cp(k[-1])) is not None)
+        grouped: set[Path] = set()
+        run: list[tuple[int, Path]] = []
+        run_bytes = 0
+
+        def flush() -> None:
+            nonlocal run, run_bytes
+            if len(run) >= 2:
+                lo, hi = run[0][0], run[-1][0]
+                parent = run[0][1][:-1]
+                count = sum(self.counts[(tier, k)][0] for _c, k in run)
+                size = sum(self.counts[(tier, k)][1] for _c, k in run)
+                out.append((tier, parent + (range_token(lo, hi),), count, size))
+                grouped.update(k for _c, k in run)
+            run = []
+            run_bytes = 0
+
+        for c, k in by_cp:
+            size = self.counts[(tier, k)][1]
+            if size > member_max:
+                # Has a leaf (or subtree) of its own: a range never spans it.
+                flush()
+                continue
+            if run_bytes + size > group_bytes:
+                flush()
+            run.append((c, k))
+            run_bytes += size
+        flush()
+        return [k for k in kids if k not in grouped]
+
+
+class TierPlan:
+    """One tier's planned paths, with its ranges indexed so a concrete path
+    finds its leaf without scanning. Build once per prefix and tier."""
+
+    def __init__(self, paths: Iterable[Path]) -> None:
+        self.paths: set[Path] = set()
+        self.ranges: dict[Path, list[tuple[int, int, str]]] = {}
+        for p in paths:
+            self.paths.add(p)
+            b = range_bounds(p[-1]) if p else None
+            if b is not None:
+                self.ranges.setdefault(p[:-1], []).append((b[0], b[1], p[-1]))
+        for v in self.ranges.values():
+            v.sort()
+
+    def __iter__(self) -> Iterator[Path]:
+        return iter(self.paths)
+
+    def __len__(self) -> int:
+        return len(self.paths)
+
+    def leaf_path(self, path: Path) -> Path | None:
+        """The planned path holding concrete ``path``: the deepest exact
+        prefix of it, or the range covering a token at that depth."""
+        for d in range(len(path), 0, -1):
+            cand = path[:d]
+            if cand in self.paths:
+                return cand
+            rs = self.ranges.get(path[:d - 1])
+            if rs:
+                c = token_cp(path[d - 1])
+                if c is not None:
+                    i = bisect.bisect_right(rs, (c, 0x110000, "")) - 1
+                    if i >= 0 and rs[i][0] <= c <= rs[i][1]:
+                        return path[:d - 1] + (rs[i][2],)
+        return None
+
+
+def plan_by_tier(planned: Iterable[tuple[str, Path, int, int]]
+                 ) -> dict[str, TierPlan]:
+    """``Aggregator.leaves`` output as one :class:`TierPlan` per tier."""
+    by: dict[str, list[Path]] = {}
+    for tier, path, _c, _b in planned:
+        by.setdefault(tier, []).append(path)
+    return {t: TierPlan(ps) for t, ps in by.items()}
+
+
+def split_key(planned: Iterable[tuple[str, Path, int, int]]) -> str:
+    """The manifest key a prefix's paths go under: ``char_ranges`` when its
+    plan has a range (readers that predate ranges must not see it),
+    ``char_split`` otherwise."""
+    return ("char_ranges" if has_ranges(p for _t, p, _c, _b in planned)
+            else "char_split")
 
 
 def leaf_name(prefix: str, path: Path, tier: str) -> str:
@@ -308,20 +493,20 @@ def leaf_name(prefix: str, path: Path, tier: str) -> str:
 def leaf_for(prefix: str, record: Record,
              planned_paths: Iterable[Path],
              rule: int = WORD_RULE) -> Iterator[str]:
-    """Leaf names a record belongs in, given the planned paths for its tier."""
+    """Leaf names a record belongs in, given the planned paths for its tier
+    (a :class:`TierPlan`, or any iterable of paths)."""
     tier = tier_for(record)
     depth = TIER_MAX_DEPTH.get(tier, 1)
-    planned = set(planned_paths)
+    plan = planned_paths if isinstance(planned_paths, TierPlan) \
+        else TierPlan(planned_paths)
     emitted: set[str] = set()
     for path in record_paths(prefix, record, depth, rule):
-        for d in range(len(path), 0, -1):
-            cand = path[:d]
-            if cand in planned:
-                name = leaf_name(prefix, cand, tier)
-                if name not in emitted:
-                    emitted.add(name)
-                    yield name
-                break
+        cand = plan.leaf_path(path)
+        if cand is not None:
+            name = leaf_name(prefix, cand, tier)
+            if name not in emitted:
+                emitted.add(name)
+                yield name
 
 
 def char_split_paths(leaves: Iterable[tuple[str, Path, int, int]]) -> list[str]:

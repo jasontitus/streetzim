@@ -1601,9 +1601,40 @@ var SEARCH_SHARDS = (function () {
     return out;
   }
 
-  function isPrefixOf(a, b) {          // a, b: token arrays
+  // The code point a typed token stands for ('u<hex>', or one ASCII
+  // character); null for the terminal.
+  function tokenCp(tok) {
+    if (tok.length === 1) return tok.charCodeAt(0);
+    if (tok.charAt(0) === 'u') {
+      var n = parseInt(tok.slice(1), 16);
+      return isNaN(n) ? null : n;
+    }
+    return null;
+  }
+
+  // A declared token covers a typed one when they are equal, or when it is
+  // a range 'r<lo>.<hi>' (hex code points) holding the typed token's code
+  // point: small siblings share one leaf (cloud/search_shards.py
+  // GROUP_BYTES), listed under the manifest's char_ranges.
+  // Exactly cloud/search_shards.py RANGE_RE (lowercase hex only, so
+  // parseInt never reads a prefix of a malformed bound).
+  var RANGE_RE = /^r([0-9a-f]+)\.([0-9a-f]+)$/;
+  function tokenMatches(decl, typed) {
+    if (decl === typed) return true;
+    var m = RANGE_RE.exec(decl);
+    if (!m) return false;
+    var c = tokenCp(typed);
+    if (c === null) return false;
+    return parseInt(m[1], 16) <= c && c <= parseInt(m[2], 16);
+  }
+
+  // a, b: token arrays; a's tokens are declared ones when declaredFirst,
+  // else b's are.
+  function isPrefixOf(a, b, declaredFirst) {
     if (a.length > b.length) return false;
-    for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (!(declaredFirst ? tokenMatches(a[i], b[i]) : tokenMatches(b[i], a[i]))) return false;
+    }
     return true;
   }
 
@@ -1615,7 +1646,7 @@ var SEARCH_SHARDS = (function () {
     var out = [];
     for (var i = 0; i < declared.length; i++) {
       var p = declared[i] ? declared[i].split(SEP) : [];
-      if (isPrefixOf(p, typed) || isPrefixOf(typed, p)) out.push(declared[i]);
+      if (isPrefixOf(p, typed, true) || isPrefixOf(typed, p, false)) out.push(declared[i]);
     }
     return out;
   }
@@ -1624,8 +1655,17 @@ var SEARCH_SHARDS = (function () {
   // when this ZIM has no character split for the prefix (caller keeps the
   // old whole-prefix behaviour), or [] when the typed characters exist in
   // no path at all — which means no records, not "fetch everything".
+  // The declared paths of a character-split prefix: char_split, or
+  // char_ranges when its plan groups siblings (an older viewer ignores that
+  // key and reads the prefix whole -- slow, never wrong).
+  function splitPaths(manifest, prefix) {
+    if (!manifest) return null;
+    return (manifest.char_split && manifest.char_split[prefix])
+      || (manifest.char_ranges && manifest.char_ranges[prefix]) || null;
+  }
+
   function leavesFor(manifest, prefix, word, query, resolve) {
-    var cs = manifest && manifest.char_split && manifest.char_split[prefix];
+    var cs = splitPaths(manifest, prefix);
     if (!cs || !cs.length) return null;
     var typed = pathTokens(prefix, word);
     if (!typed.length) return null;            // 1-2 chars: whole prefix
@@ -1662,6 +1702,8 @@ var SEARCH_SHARDS = (function () {
     tokenFor: tokenFor,
     pathTokens: pathTokens,
     pathsFor: pathsFor,
+    splitPaths: splitPaths,
+    tokenMatches: tokenMatches,
     leavesFor: leavesFor,
     TERMINAL: TERMINAL,
     _test: { isPrefixOf: isPrefixOf }
@@ -1760,7 +1802,7 @@ function prefixesFor(q) {
 // caller knows a thin result set is worth re-running unfiltered.
 function searchLeavesFor(q, opts) {
   const man = state.manifests && state.manifests.search;
-  if (!man || !man.char_split) return null;
+  if (!man || !(man.char_split || man.char_ranges)) return null;
   const folded = foldText(q).trim();
   if (folded.length < 3) return null;      // 2 chars: whole prefix, as before
   const words = SEARCH_SHARDS.words(folded, man);
