@@ -106,6 +106,7 @@ from streetzim.routing.build import (  # noqa: F401
     extract_routing_graph,
     chunk_graph_file,
 )
+from streetzim.isolate import run_in_child
 from streetzim.tiles import (  # noqa: F401
     download_osm_extract,
     extract_bbox_from_pbf,
@@ -1248,8 +1249,10 @@ def _build_routing(
             print("    (routing requires a PBF file — not available with --mbtiles only)")
         else:
             rt_bbox = parse_bbox(bbox_str) if bbox_str else None
-            routing_graph_path = extract_routing_graph(
-                rt_pbf, tmpdir, bbox=rt_bbox,
+            # In a child process: the memory it used goes back to the
+            # system afterwards (streetzim/isolate.py).
+            routing_graph_path = run_in_child(
+                extract_routing_graph, rt_pbf, tmpdir, bbox=rt_bbox,
                 precut=bool(work_pbf_cut and rt_pbf == work_pbf))
     return routing_graph_path
 
