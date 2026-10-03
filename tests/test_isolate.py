@@ -49,9 +49,49 @@ def _killed():
     os.kill(os.getpid(), signal.SIGKILL)
 
 
-def _sleep_then_mark(path):
-    time.sleep(20)
-    Path(path).write_text("finished")
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    # A zombie still answers kill -0: alive only if not reaped-pending.
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().split(") ")[1][0] != "Z"
+    except FileNotFoundError:
+        return False
+
+
+def _record_pids_then_wait(path, ignore_term=False):
+    """Write this pid and a grandchild's (an osmium stand-in), then wait."""
+    import subprocess
+    if ignore_term:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    proc = subprocess.Popen(["sleep", "60"])
+    Path(path).write_text(f"{os.getpid()} {proc.pid}")
+    proc.wait()
+
+
+def _run_wait_in_subprocess(path):
+    import subprocess
+    subprocess.run(["sh", "-c", f"echo $$ > {path}.gc; exec sleep 60"], check=True)
+
+
+def _big():
+    return b"x" * (20 << 20)
+
+
+def _exits():
+    sys.exit(0)
+
+
+class _NeedsTwo(Exception):
+    def __init__(self, a, b):
+        super().__init__(f"{a}{b}")
+
+
+def _raise_needs_two():
+    raise _NeedsTwo("x", "y")
 
 
 def test_a_child_killed_by_the_oom_killer_says_so():
@@ -60,23 +100,81 @@ def test_a_child_killed_by_the_oom_killer_says_so():
         run_in_child(_killed)
 
 
-def test_an_interrupted_wait_stops_the_child_at_once(tmp_path):
-    """SIGTERM to a `streetzim` build becomes SystemExit while it waits: the
-    child must stop with it, not run on to the end of the step."""
-    mark = tmp_path / "mark"
-
+def _interrupt_after(seconds, fn, *args):
+    """fn(*args) with SystemExit raised in this process after `seconds`,
+    as the `streetzim` command's SIGTERM handler does."""
     def interrupt(signum, frame):
         raise SystemExit(143)
 
     old = signal.signal(signal.SIGALRM, interrupt)
-    signal.alarm(2)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
     t = time.monotonic()
     try:
         with pytest.raises(SystemExit):
-            run_in_child(_sleep_then_mark, str(mark))
+            run_in_child(fn, *args)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old)
+    return time.monotonic() - t
+
+
+def _wait_for(path):
+    for _ in range(200):
+        if path.exists() and path.read_text().strip():
+            return path.read_text().split()
+        time.sleep(0.05)
+    raise AssertionError(f"{path} never written")
+
+
+def test_an_interrupted_wait_stops_the_child_and_what_it_started(tmp_path):
+    """SIGTERM to a `streetzim` build becomes SystemExit while it waits: the
+    child, and a subprocess.run it is waiting on (osmium), stop with it."""
+    gc = tmp_path / "pids.gc"
+    took = _interrupt_after(2, _run_wait_in_subprocess, str(tmp_path / "pids"))
+    assert took < 5
+    (grandchild,) = _wait_for(gc)
+    time.sleep(0.5)
+    assert not _alive(int(grandchild))
+
+
+def test_the_child_itself_is_gone_when_run_in_child_returns(tmp_path):
+    pids = tmp_path / "pids"
+    _interrupt_after(2, _record_pids_then_wait, str(pids))
+    child, grandchild = _wait_for(pids)
+    os.kill(int(grandchild), signal.SIGKILL)
+    assert not _alive(int(child))
+
+
+def test_a_child_ignoring_sigterm_is_killed_after_the_grace(tmp_path, monkeypatch):
+    from streetzim import isolate
+    monkeypatch.setattr(isolate, "STOP_GRACE_S", 1)
+    pids = tmp_path / "pids"
+    took = _interrupt_after(2, _record_pids_then_wait, str(pids), True)
+    assert took < 6
+    child, grandchild = _wait_for(pids)
+    os.kill(int(grandchild), signal.SIGKILL)
+    assert not _alive(int(child))
+
+
+def test_a_large_result_comes_back():
+    """More than a pipe holds: joining the child before reading would hang."""
+    def hung(signum, frame):
+        raise AssertionError("run_in_child hung on a large result")
+
+    old = signal.signal(signal.SIGALRM, hung)
+    signal.alarm(30)
+    try:
+        assert len(run_in_child(_big)) == 20 << 20
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, old)
-    assert time.monotonic() - t < 10
-    time.sleep(1)
-    assert not mark.exists()
+
+
+def test_a_step_calling_sys_exit_fails_instead_of_ending_the_build():
+    with pytest.raises(RuntimeError, match=r"_exits called sys.exit\(0\)"):
+        run_in_child(_exits)
+
+
+def test_an_exception_that_cannot_be_rebuilt_keeps_its_traceback():
+    with pytest.raises(RuntimeError, match="_NeedsTwo: xy"):
+        run_in_child(_raise_needs_two)

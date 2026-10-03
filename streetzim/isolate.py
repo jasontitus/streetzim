@@ -15,6 +15,7 @@ caller as they were raised.
 from __future__ import annotations
 
 import multiprocessing
+import pickle
 import signal
 import sys
 import tempfile
@@ -23,10 +24,18 @@ from collections.abc import Callable
 from typing import Any
 
 
+def _sigterm_exits(signum: int, frame: Any) -> None:
+    raise SystemExit(128 + signum)
+
+
 def _child_main(conn: Any, tempdir: str | None, cpus_requested: int | None,
                 fn: Callable[..., Any], args: tuple[Any, ...],
                 kwargs: dict[str, Any]) -> None:
     from streetzim import cpus
+    # SIGTERM (run_in_child stopping this child) unwinds like the build's
+    # own: subprocess.run then kills the osmium it is waiting on, rather
+    # than leave it running, orphaned, in a work folder being deleted.
+    signal.signal(signal.SIGTERM, _sigterm_exits)
     tempfile.tempdir = tempdir
     if cpus_requested is not None:
         cpus.set_build_cpus(cpus_requested)
@@ -39,9 +48,15 @@ def _child_main(conn: Any, tempdir: str | None, cpus_requested: int | None,
         result = fn(*args, **kwargs)
     except BaseException as e:  # noqa: BLE001 -- every failure goes back to the caller
         tb = traceback.format_exc()
+        if isinstance(e, SystemExit):
+            # Not the caller's exit: a step that called sys.exit failed.
+            e = RuntimeError(f"{getattr(fn, '__qualname__', fn)} called sys.exit({e.code!r})")
         try:
+            # Must come back whole: pickling alone passes an exception
+            # whose __init__ cannot be called with its args again.
+            pickle.loads(pickle.dumps(e))
             conn.send((False, e, tb))
-        except Exception:  # noqa: BLE001 -- an exception that does not pickle
+        except Exception:  # noqa: BLE001 -- an exception that does not travel
             conn.send((False, RuntimeError(tb), tb))
         return
     conn.send((True, result, None))
@@ -68,6 +83,24 @@ def _died(name: str, exitcode: int | None) -> RuntimeError:
     return RuntimeError(f"{name}, run in a child process, {how}")
 
 
+# Seconds a stopped child gets to unwind before SIGKILL.
+STOP_GRACE_S = 10
+
+
+def _stop(child: Any) -> None:
+    """SIGTERM, STOP_GRACE_S seconds to unwind (and kill its own children), then
+    SIGKILL; the kill happens even if this process is interrupted again
+    while it waits (a second SIGTERM to the build)."""
+    try:
+        if child.is_alive():
+            child.terminate()
+            child.join(STOP_GRACE_S)
+    finally:
+        if child.is_alive():
+            child.kill()
+            child.join()
+
+
 def run_in_child(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     """fn(*args, **kwargs) in a spawned child process; its result. `fn`
     and the arguments must pickle (a module-level function, plain data).
@@ -89,21 +122,20 @@ def run_in_child(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     send.close()
     try:
         try:
+            # Read before joining: a large result fills the pipe, and the
+            # child cannot exit until it is read.
             ok, value, tb = receive.recv()
         except EOFError:
             child.join()
             raise _died(name, child.exitcode) from None
         child.join()
     except BaseException:
-        if child.is_alive():
-            child.terminate()
-            child.join(10)
-            if child.is_alive():
-                child.kill()
-                child.join()
+        _stop(child)
         raise
     finally:
         receive.close()
+        if child.exitcode is not None:
+            child.close()
     if ok:
         return value
     raise value from ChildTraceback(tb)
