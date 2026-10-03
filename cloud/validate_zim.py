@@ -46,6 +46,7 @@ Gates we enforce:
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import math
 import os
@@ -1451,7 +1452,7 @@ def _search_range_problems(chunks: dict, char_split: dict,
         for (parent, tier), (ranges, singles) in groups.items():
             where = LEAF_SEP.join((prefix, *parent))
             rs = sorted(set(ranges))
-            for (lo1, hi1, t1), (lo2, _hi2, t2) in zip(rs, rs[1:]):
+            for (_lo1, hi1, t1), (lo2, _hi2, t2) in itertools.pairwise(rs):
                 if lo2 <= hi1:
                     out.append(f"{where} tier {tier}: ranges {t1} and {t2} overlap")
             for lo, hi, t in rs:
