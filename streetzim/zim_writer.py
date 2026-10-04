@@ -1872,6 +1872,61 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
     return _bundled_set
 
 
+def _spatial_cell_files(routing_graph_path, cell_scale, output_dir):
+    """build_spatial into output_dir: ({cell_id: path}, meta). The index is
+    written there too (graph-cells-index.bin), so its bytes are dropped."""
+    from streetzim.routing.reader import load_from_file
+    from streetzim.routing.spatial import build_spatial
+    _, cells, meta = build_spatial(load_from_file(routing_graph_path),
+                                   cell_scale=cell_scale, output_dir=output_dir)
+    return cells, meta
+
+
+SPATIAL_PREPARED = "prepared.json"
+
+
+def _graph_stamp(routing_graph_path, cell_scale):
+    st = os.stat(routing_graph_path)
+    return {"graph_size": st.st_size, "graph_mtime_ns": st.st_mtime_ns,
+            "cell_scale": int(cell_scale)}
+
+
+def prepare_spatial_cells(routing_graph_path, cell_scale):
+    """Build the spatial routing cells beside the graph now, for the ZIM
+    step to add later, with a record of what they were built from.
+
+    Called right after the routing step, while the build holds little:
+    build_spatial loads the whole graph (China's is 4.9 GB) plus ~1.5 GB of
+    working arrays, which on top of the ZIM writer's own memory took China
+    in a 16 GB container to 15.6 GB. (Run in a child, the ZIM writer's
+    memory would still be held beside it.)"""
+    outdir = Path(routing_graph_path).parent / "spatial"
+    outdir.mkdir(parents=True, exist_ok=True)
+    stamp = _graph_stamp(routing_graph_path, cell_scale)
+    cells, meta = _spatial_cell_files(routing_graph_path, cell_scale, outdir)
+    tmp = outdir / (SPATIAL_PREPARED + ".tmp")
+    tmp.write_text(json.dumps({**stamp, "cells": {str(k): v for k, v in cells.items()},
+                               "meta": meta}))
+    os.replace(tmp, outdir / SPATIAL_PREPARED)
+
+
+def _prepared_spatial_cells(routing_graph_path, cell_scale):
+    """(cells, meta) from prepare_spatial_cells for this very graph file
+    and scale, else None."""
+    rec = Path(routing_graph_path).parent / "spatial" / SPATIAL_PREPARED
+    try:
+        data = json.loads(rec.read_text())
+    except (OSError, ValueError):
+        return None
+    if any(data.get(k) != v for k, v in _graph_stamp(routing_graph_path, cell_scale).items()):
+        return None
+    cells = {int(k): v for k, v in data["cells"].items()}
+    if not (rec.parent / "graph-cells-index.bin").is_file() \
+            or not all(os.path.isfile(p) for p in cells.values()):
+        return None
+    return cells, data["meta"]
+
+
 def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_chunk_mb, spatial_chunk_scale):
     """The routing graph: SZRG v4 graph.bin (optionally chunked), or the
     spatial SZCI v3 + SZRC v2 cells with --spatial-chunk-scale."""
@@ -1908,20 +1963,25 @@ def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_ch
             _repo_root = REPO_ROOT
             if str(_repo_root) not in _sys.path:
                 _sys.path.insert(0, str(_repo_root))
-            from streetzim.routing.spatial import build_spatial
-            from streetzim.routing.reader import load_from_file
+            from streetzim.isolate import run_in_child
             _spatial_outdir = Path(routing_graph_path).parent / "spatial"
             _spatial_outdir.mkdir(parents=True, exist_ok=True)
             print(f"    Spatial-chunking routing graph "
                   f"(scale={spatial_chunk_scale}, "
                   f"src={size_mb:.1f} MB → {_spatial_outdir})...",
                   flush=True)
-            _sg = load_from_file(routing_graph_path)
-            _index_bytes, _cells_bytes, _spatial_meta = build_spatial(
-                _sg,
-                cell_scale=spatial_chunk_scale,
-                output_dir=_spatial_outdir,
-            )
+            # Normally built right after the routing step
+            # (prepare_spatial_cells), before this process held the ZIM's
+            # memory; otherwise now, in a child, which at least returns
+            # what build_spatial leaves allocated.
+            _prepared = _prepared_spatial_cells(routing_graph_path, spatial_chunk_scale)
+            if _prepared is not None:
+                _cells_bytes, _spatial_meta = _prepared
+                print("    (cells built after the routing step)", flush=True)
+            else:
+                _cells_bytes, _spatial_meta = run_in_child(
+                    _spatial_cell_files, routing_graph_path, spatial_chunk_scale,
+                    _spatial_outdir)
             # Index — eager-load by readers, must stay raw when ≥ 200 MB
             # (Kiwix Desktop / iOS WebView decompression watchdog
             # times out on big compressed clusters; see project
@@ -2541,14 +2601,17 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
     # linear scan. Same canonical record shape as search-data chunks.
     if cat_chunk_counts:
         cat_total_records = 0
-        records_by_cat: dict[str, list] = {}
+        # poi and park JSONL files kept on disk for the Find chips,
+        # which are split from them a chip at a time (not held as dicts:
+        # China's poi records took over 8 GB that way).
+        chip_sources: dict[str, str] = {}
         # The LLM bundle (addr/poi/street.json) is the heaviest
         # part of category-index — hundreds of MB to multi-GB on
         # continent regions. With `no_llm_bundle=True` (what
         # build-region-fast.sh passes) we skip writing them;
         # cloud/repackage_zim.py drops them from older ZIMs by
         # default. Chip emission still
-        # gets `records_by_cat` populated below so chip-*.json
+        # gets `chip_sources` populated below so chip-*.json
         # files are derivable. The category manifest also drops
         # the entries we skipped, so validators don't complain
         # about declared-but-missing categories.
@@ -2563,24 +2626,22 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
                 # list of dicts just to drop them was a
                 # tens-of-GB allocation for nothing. Count lines
                 # streaming and move on.
+                with open(cat_path, "rb") as cf:
+                    cat_total_records += sum(1 for _ in cf)
                 if split_find_chips and cat_slug in ("poi", "park"):
-                    entries = []
-                    with open(cat_path, encoding="utf-8") as cf:
-                        for cline in cf:
-                            entries.append(json.loads(cline))
-                    records_by_cat[cat_slug] = entries
-                    cat_total_records += len(entries)
+                    chip_sources[cat_slug] = cat_path
                 else:
-                    with open(cat_path, "rb") as cf:
-                        cat_total_records += sum(1 for _ in cf)
-                os.unlink(cat_path)
+                    os.unlink(cat_path)
                 _llm_skipped.append(cat_slug)
                 continue
             entries = []
             with open(cat_path, encoding="utf-8") as cf:
                 for cline in cf:
                     entries.append(json.loads(cline))
-            os.unlink(cat_path)
+            if split_find_chips and cat_slug in ("poi", "park"):
+                chip_sources[cat_slug] = cat_path
+            else:
+                os.unlink(cat_path)
             # ensure_ascii=False: \uXXXX escapes roughly doubled
             # CJK category/chip files (search-data already uses it).
             chunk_json = json.dumps(entries, separators=(",", ":"),
@@ -2627,8 +2688,7 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
                     chunk_json.encode("utf-8"),
                 ))
             cat_total_records += len(entries)
-            if split_find_chips and cat_slug in ("poi", "park"):
-                records_by_cat[cat_slug] = entries
+            del entries, chunk_json
         if _llm_skipped:
             print(f"    --no-llm-bundle: skipped category-index/{{{','.join(_llm_skipped)}}}.json", flush=True)
         # Validator's `places_categories` check picks the first
@@ -2646,10 +2706,12 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
             # same shape as a chip entry, so the viewer can fetch the
             # shard around the viewport instead of the whole file.
             manifest_payload["category_shards"] = cat_shards
-        if split_find_chips and records_by_cat:
-            from cloud.chip_rules import CHIP_RULES, split_records_by_chip
+        if split_find_chips and chip_sources:
+            from cloud.chip_rules import CHIP_RULES, read_jsonl, split_jsonl_by_chip
             from cloud.chip_shards import plan_chip
-            by_chip = split_records_by_chip(records_by_cat)
+            chip_paths = split_jsonl_by_chip(chip_sources, cat_dir)
+            for src in chip_sources.values():
+                os.unlink(src)
             chips_manifest: dict = {}
             # Chips over 2 MiB are cut into geographic shards
             # (cloud/chip_shards.py) so a phone fetches only the
@@ -2658,7 +2720,8 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
             # whole chip (east-coast-us Shops: 147 MB of JSON).
             n_chip_files = 0
             for chip in CHIP_RULES:
-                plan = plan_chip(by_chip.pop(chip.id, []))
+                plan = plan_chip(read_jsonl(chip_paths[chip.id]))
+                os.unlink(chip_paths[chip.id])
                 for path, title, blob in plan.files(chip.id, chip.label):
                     creator.add_item(MapItem(path, title, "application/json", blob))
                     n_chip_files += 1

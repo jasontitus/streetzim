@@ -195,6 +195,10 @@ def fake_dem(tmp_path, monkeypatch):
     monkeypatch.setattr(T, "_download_dem", download)
     monkeypatch.delenv("TERRAIN_BLANK_TOLERATE", raising=False)
     monkeypatch.delenv("TERRAIN_DOWNLOAD_BUDGET_S", raising=False)
+    # Set, then removed: monkeypatch restores it (unset) afterwards, so the
+    # GDAL_CACHEMAX generate_terrain_tiles sets does not outlive the test.
+    monkeypatch.setenv("GDAL_CACHEMAX", "0")
+    monkeypatch.delenv("GDAL_CACHEMAX")
     return calls, sea, fail, level
 
 
@@ -556,3 +560,21 @@ def test_map_config_says_where_terrain_starts(tmp_path, world):
         assert "terrainMinZoom" not in cfg     # production map-configs unchanged
     else:
         assert cfg["terrainMinZoom"] == 6
+
+
+def test_no_tile_is_drawn_in_the_builds_own_process(tmp_path, fake_dem):
+    """Even a zoom of one tile goes to a pool's process: at low zoom a tile
+    reads the whole area's DEM, and this process would keep that memory for
+    the rest of the build (China's z0-z4 left 3.7 GB, 2026-10-03)."""
+    T._DEM_HANDLES.clear()
+    dest, _ = _build(tmp_path)
+    assert (dest / "0").is_dir() or any(dest.iterdir())
+    assert T._DEM_HANDLES == {}
+
+
+def test_the_gdal_cache_is_capped_unless_the_operator_set_it(tmp_path, fake_dem, monkeypatch):
+    _build(tmp_path)
+    assert os.environ["GDAL_CACHEMAX"] == str(T.TERRAIN_GDAL_CACHE_MB)
+    monkeypatch.setenv("GDAL_CACHEMAX", "1024")
+    T.generate_terrain_tiles(BBOX, str(tmp_path / "again"), max_zoom=10)
+    assert os.environ["GDAL_CACHEMAX"] == "1024"

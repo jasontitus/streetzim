@@ -26,6 +26,21 @@ from streetzim.common import (
 # One open DEM handle per worker process, keyed by path (see _generate_one_terrain_tile).
 _DEM_HANDLES = {}
 
+# GDAL's block cache, in MB, for this process and the terrain workers it
+# spawns (they inherit the environment). GDAL's default is 5% of RAM, about
+# 0.8 GB in a 16 GB container and 6 GB on a 125 GB host, per process: China
+# in 16 GB (2026-10-03) had 8 workers and the build's own process each
+# holding it beside the rest, and was killed at z8. A tile reads a few
+# 1024-pixel DEM blocks (4 MB each), so 256 MB holds every block a run of
+# neighbouring tiles shares. GDAL_CACHEMAX in the environment wins.
+TERRAIN_GDAL_CACHE_MB = 256
+
+
+def _cap_gdal_cache():
+    """Set GDAL_CACHEMAX unless the operator did. GDAL reads it when it
+    first caches a block, so this is called before any DEM is read."""
+    os.environ.setdefault("GDAL_CACHEMAX", str(TERRAIN_GDAL_CACHE_MB))
+
 
 def _generate_one_terrain_tile(args):
     """Generate a single terrain-RGB tile. Module-level for multiprocessing.
@@ -885,6 +900,7 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
     """
     from streetzim import area
 
+    _cap_gdal_cache()
     if min_zoom is None:
         # From the whole area: the viewer's bounds are the whole area.
         min_zoom = terrain_min_zoom(parse_bbox(bbox_str), max_zoom, low_zoom_world_vrt)
@@ -1084,31 +1100,30 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
             print(f"      z{z}: {total_at_z} tiles ({cached_at_z} cached, {need} to generate)")
         z_count = 0
 
-        if total_at_z <= 10:
-            for args in tile_arg_gen(z):
-                _generate_one_terrain_tile(args)
+        # A zoom of a few tiles gets a pool of one, not this process: at
+        # z0-z4 each tile reads the whole area's DEM (China: 3.4 GB for its
+        # z0 tile, even with the cache capped), and this process keeps that
+        # memory for the rest of the build. A pool's process returns it.
+        workers = 1 if total_at_z <= 10 else num_workers
+        # Peek before spawning: with nothing to generate this would still
+        # start (and tear down) a 16-process spawn Pool for every zoom.
+        gen = tile_arg_gen(z)
+        first = next(gen, None)
+        if first is None:
+            z_cached = cached_at_z if cached_at_z is not None else total_at_z
+            cached += z_cached
+            print(f"      z{z}: 0 generated, {z_cached} cached          ", flush=True)
+            continue
+        gen = itertools.chain([first], gen)
+        ctx = multiprocessing.get_context("spawn")
+        with ctx.Pool(workers) as pool:
+            for _ in pool.imap_unordered(_generate_one_terrain_tile,
+                                          gen, chunksize=256):
                 z_count += 1
                 count += 1
-        else:
-            # Peek before spawning: with nothing to generate this would still
-            # start (and tear down) a 16-process spawn Pool for every zoom.
-            gen = tile_arg_gen(z)
-            first = next(gen, None)
-            if first is None:
-                z_cached = cached_at_z if cached_at_z is not None else total_at_z
-                cached += z_cached
-                print(f"      z{z}: 0 generated, {z_cached} cached          ", flush=True)
-                continue
-            gen = itertools.chain([first], gen)
-            ctx = multiprocessing.get_context("spawn")
-            with ctx.Pool(num_workers) as pool:
-                for _ in pool.imap_unordered(_generate_one_terrain_tile,
-                                              gen, chunksize=256):
-                    z_count += 1
-                    count += 1
-                    if z_count % 5000 == 0:
-                        print(f"\r      z{z}: {z_count}/{need or total_at_z} generated...",
-                              end="", flush=True)
+                if z_count % 5000 == 0:
+                    print(f"\r      z{z}: {z_count}/{need or total_at_z} generated...",
+                          end="", flush=True)
 
         z_cached = cached_at_z if cached_at_z is not None else max(total_at_z - z_count, 0)
         cached += z_cached
@@ -1239,6 +1254,7 @@ def audit_terrain(plan, dest_dir):
     gaps, still applies)."""
     import mercantile
     import rasterio
+    _cap_gdal_cache()
     minlon, minlat, maxlon, maxlat = plan.bbox
     glo30_vrt, low_vrt = plan_vrts(plan, dem_sources_dir())
     if not glo30_vrt and not low_vrt:

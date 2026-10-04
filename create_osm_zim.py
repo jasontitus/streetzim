@@ -106,6 +106,7 @@ from streetzim.routing.build import (  # noqa: F401
     extract_routing_graph,
     chunk_graph_file,
 )
+from streetzim.isolate import run_in_child
 from streetzim.tiles import (  # noqa: F401
     download_osm_extract,
     extract_bbox_from_pbf,
@@ -1248,9 +1249,18 @@ def _build_routing(
             print("    (routing requires a PBF file — not available with --mbtiles only)")
         else:
             rt_bbox = parse_bbox(bbox_str) if bbox_str else None
-            routing_graph_path = extract_routing_graph(
-                rt_pbf, tmpdir, bbox=rt_bbox,
+            # In a child process: the memory it used goes back to the
+            # system afterwards (streetzim/isolate.py).
+            routing_graph_path = run_in_child(
+                extract_routing_graph, rt_pbf, tmpdir, bbox=rt_bbox,
                 precut=bool(work_pbf_cut and rt_pbf == work_pbf))
+            scale = int(getattr(args, "spatial_chunk_scale", 0) or 0)
+            if routing_graph_path and scale > 0:
+                # The ZIM step's spatial cells, built now, while the
+                # build holds little (see prepare_spatial_cells).
+                from streetzim.zim_writer import prepare_spatial_cells
+                print(f"    Spatial routing cells (scale={scale})...", flush=True)
+                run_in_child(prepare_spatial_cells, routing_graph_path, scale)
     return routing_graph_path
 
 

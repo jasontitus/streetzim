@@ -38,6 +38,11 @@ def seen(monkeypatch, tmp_path):
     monkeypatch.setattr(c, "append_admin_areas",
                         lambda p, feats, bbox=None, wiki_refs=None:
                         calls.__setitem__("admin", p) or 0)
+    # In this process, so the stand-in below needn't pickle; recorded, so
+    # the tests see routing go through run_in_child.
+    monkeypatch.setattr(c, "run_in_child",
+                        lambda fn, *a, **k: calls.__setitem__("isolated", fn.__name__)
+                        or fn(*a, **k))
     monkeypatch.setattr(c, "extract_routing_graph",
                         lambda p, d, bbox=None, precut=False: calls.__setitem__("rt", (p, bbox, precut)))
     return calls
@@ -63,6 +68,7 @@ def test_own_cut_is_not_cut_again(seen, tmp_path):
     assert w == str(tmp_path / "area.osm.pbf")
     assert seen["addr"] == (w, True) and seen["wiki"] == (w, True)
     assert seen["rt"][0] == w and seen["rt"][2] is True and seen["rt"][1] is not None
+    assert "isolated" in seen  # routing ran through run_in_child
     # Administrative areas read the extract before the cut, so an area the
     # cut clips still has its whole polygon.
     assert seen["admin"] == "in.pbf"
