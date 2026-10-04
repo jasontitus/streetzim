@@ -30,9 +30,11 @@ list, so change them in the same commit (then run
 """
 from __future__ import annotations
 
+import json
+import os
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, BinaryIO
 
 # One search record (docs/search-records.md).
 Record = dict[str, Any]
@@ -159,7 +161,7 @@ def split_records_by_chip(records_by_cat: dict[str, list[Record]]) -> dict[str, 
         src = records_by_cat.get(chip.from_cat, [])
         if not src:
             continue
-        if chip.id == "parks" and not chip.subtypes and not chip.include_regex:
+        if _takes_whole_category(chip):
             # The "parks" chip is just the whole park category; avoid
             # re-filtering and keep the reference.
             out[chip.id] = list(src)
@@ -170,3 +172,50 @@ def split_records_by_chip(records_by_cat: dict[str, list[Record]]) -> dict[str, 
                 dst.append(r)
         out[chip.id] = dst
     return out
+
+
+def _takes_whole_category(chip: ChipRule) -> bool:
+    # The "parks" chip is the whole park category, unfiltered.
+    return chip.id == "parks" and not chip.subtypes and not chip.include_regex
+
+
+def split_jsonl_by_chip(sources: dict[str, str], out_dir: str) -> dict[str, str]:
+    """split_records_by_chip without holding the records: ``sources`` is
+    ``{cat_name: path}`` of category JSONL files (one record per line);
+    each chip's records are written, in source order and byte for byte,
+    to ``out_dir/chip-{id}.jsonl``. Returns ``{chip_id: path}`` for every
+    chip (an empty file when it has none).
+
+    China's poi category (millions of records) held as dicts for
+    split_records_by_chip took over 8 GB and killed its 16 GB build
+    (2026-10-04); a chip at a time is about one chip's records."""
+    by_cat: dict[str, list[ChipRule]] = {}
+    for chip in CHIP_RULES:
+        by_cat.setdefault(chip.from_cat, []).append(chip)
+    paths = {c.id: os.path.join(out_dir, f"chip-{c.id}.jsonl") for c in CHIP_RULES}
+    outs: dict[str, BinaryIO] = {}
+    try:
+        for chip_id, path in paths.items():
+            outs[chip_id] = open(path, "wb")  # noqa: SIM115 -- closed below
+        for cat, chips in by_cat.items():
+            src = sources.get(cat)
+            if not src:
+                continue
+            with open(src, "rb") as f:
+                for line in f:
+                    if not line.endswith(b"\n"):
+                        line += b"\n"
+                    rec = json.loads(line)
+                    for chip in chips:
+                        if _takes_whole_category(chip) or record_matches_chip(rec, chip):
+                            outs[chip.id].write(line)
+    finally:
+        for out in outs.values():
+            out.close()
+    return paths
+
+
+def read_jsonl(path: str) -> list[Record]:
+    """The records of a JSONL file, in order."""
+    with open(path, encoding="utf-8") as f:
+        return [json.loads(line) for line in f]

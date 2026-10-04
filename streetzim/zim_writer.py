@@ -2541,14 +2541,17 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
     # linear scan. Same canonical record shape as search-data chunks.
     if cat_chunk_counts:
         cat_total_records = 0
-        records_by_cat: dict[str, list] = {}
+        # poi and park JSONL files kept on disk for the Find chips,
+        # which are split from them a chip at a time (not held as dicts:
+        # China's poi records took over 8 GB that way).
+        chip_sources: dict[str, str] = {}
         # The LLM bundle (addr/poi/street.json) is the heaviest
         # part of category-index — hundreds of MB to multi-GB on
         # continent regions. With `no_llm_bundle=True` (what
         # build-region-fast.sh passes) we skip writing them;
         # cloud/repackage_zim.py drops them from older ZIMs by
         # default. Chip emission still
-        # gets `records_by_cat` populated below so chip-*.json
+        # gets `chip_sources` populated below so chip-*.json
         # files are derivable. The category manifest also drops
         # the entries we skipped, so validators don't complain
         # about declared-but-missing categories.
@@ -2563,24 +2566,22 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
                 # list of dicts just to drop them was a
                 # tens-of-GB allocation for nothing. Count lines
                 # streaming and move on.
+                with open(cat_path, "rb") as cf:
+                    cat_total_records += sum(1 for _ in cf)
                 if split_find_chips and cat_slug in ("poi", "park"):
-                    entries = []
-                    with open(cat_path, encoding="utf-8") as cf:
-                        for cline in cf:
-                            entries.append(json.loads(cline))
-                    records_by_cat[cat_slug] = entries
-                    cat_total_records += len(entries)
+                    chip_sources[cat_slug] = cat_path
                 else:
-                    with open(cat_path, "rb") as cf:
-                        cat_total_records += sum(1 for _ in cf)
-                os.unlink(cat_path)
+                    os.unlink(cat_path)
                 _llm_skipped.append(cat_slug)
                 continue
             entries = []
             with open(cat_path, encoding="utf-8") as cf:
                 for cline in cf:
                     entries.append(json.loads(cline))
-            os.unlink(cat_path)
+            if split_find_chips and cat_slug in ("poi", "park"):
+                chip_sources[cat_slug] = cat_path
+            else:
+                os.unlink(cat_path)
             # ensure_ascii=False: \uXXXX escapes roughly doubled
             # CJK category/chip files (search-data already uses it).
             chunk_json = json.dumps(entries, separators=(",", ":"),
@@ -2627,8 +2628,7 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
                     chunk_json.encode("utf-8"),
                 ))
             cat_total_records += len(entries)
-            if split_find_chips and cat_slug in ("poi", "park"):
-                records_by_cat[cat_slug] = entries
+            del entries, chunk_json
         if _llm_skipped:
             print(f"    --no-llm-bundle: skipped category-index/{{{','.join(_llm_skipped)}}}.json", flush=True)
         # Validator's `places_categories` check picks the first
@@ -2646,10 +2646,12 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
             # same shape as a chip entry, so the viewer can fetch the
             # shard around the viewport instead of the whole file.
             manifest_payload["category_shards"] = cat_shards
-        if split_find_chips and records_by_cat:
-            from cloud.chip_rules import CHIP_RULES, split_records_by_chip
+        if split_find_chips and chip_sources:
+            from cloud.chip_rules import CHIP_RULES, read_jsonl, split_jsonl_by_chip
             from cloud.chip_shards import plan_chip
-            by_chip = split_records_by_chip(records_by_cat)
+            chip_paths = split_jsonl_by_chip(chip_sources, cat_dir)
+            for src in chip_sources.values():
+                os.unlink(src)
             chips_manifest: dict = {}
             # Chips over 2 MiB are cut into geographic shards
             # (cloud/chip_shards.py) so a phone fetches only the
@@ -2658,7 +2660,8 @@ def _search_category_index(creator, MapItem, *, split_find_chips, no_llm_bundle,
             # whole chip (east-coast-us Shops: 147 MB of JSON).
             n_chip_files = 0
             for chip in CHIP_RULES:
-                plan = plan_chip(by_chip.pop(chip.id, []))
+                plan = plan_chip(read_jsonl(chip_paths[chip.id]))
+                os.unlink(chip_paths[chip.id])
                 for path, title, blob in plan.files(chip.id, chip.label):
                     creator.add_item(MapItem(path, title, "application/json", blob))
                     n_chip_files += 1
