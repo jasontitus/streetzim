@@ -92,7 +92,7 @@ def test_the_zim_gets_the_same_chip_files(cats, no_llm_bundle):
         rs = split_records_by_chip({"poi": recs["poi"], "park": recs["park"]})[chip.id]
         for path, _, blob in plan_chip(rs).files(chip.id, chip.label):
             want[path] = blob
-    got = {p: b for p, b in creator.items.items() if p in want}
+    got = {p: b for p, b in creator.items.items() if p.startswith("category-index/chip-")}
     assert got == want
     manifest = json.loads(creator.items["category-index/manifest.json"])
     assert manifest["total"] == sum(len(r) for r in recs.values())
@@ -126,3 +126,13 @@ def test_poi_records_are_not_all_held_at_once(tmp_path):
     finally:
         tracemalloc.stop()
     assert peak < size / 2, (peak, size)
+
+
+def test_a_last_line_without_a_newline_is_kept_whole(tmp_path):
+    (tmp_path / "poi.jsonl").write_bytes(
+        b'{"t":"poi","s":"fuel","n":"a"}\n{"t":"poi","s":"fuel","n":"b"}')
+    out = tmp_path / "chips"
+    out.mkdir()
+    paths = split_jsonl_by_chip({"poi": str(tmp_path / "poi.jsonl")}, str(out))
+    fuel = next(c.id for c in CHIP_RULES if "fuel" in c.subtypes)
+    assert [r["n"] for r in read_jsonl(paths[fuel])] == ["a", "b"]
