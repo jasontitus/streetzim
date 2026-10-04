@@ -1921,7 +1921,8 @@ def _prepared_spatial_cells(routing_graph_path, cell_scale):
     if any(data.get(k) != v for k, v in _graph_stamp(routing_graph_path, cell_scale).items()):
         return None
     cells = {int(k): v for k, v in data["cells"].items()}
-    if not all(os.path.isfile(p) for p in cells.values()):
+    if not (rec.parent / "graph-cells-index.bin").is_file() \
+            or not all(os.path.isfile(p) for p in cells.values()):
         return None
     return cells, data["meta"]
 

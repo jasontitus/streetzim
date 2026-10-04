@@ -119,3 +119,15 @@ def test_the_routing_step_prepares_the_cells(graph, tmp_path, monkeypatch):
     assert got == graph
     assert calls == ["extract_routing_graph", "prepare_spatial_cells"]
     assert zim_writer._prepared_spatial_cells(graph, SCALE) is not None
+
+
+@pytest.mark.parametrize("lost", ["graph-cells-index.bin", "a cell"])
+def test_prepared_cells_with_a_file_missing_are_rebuilt(graph, child_calls, lost):
+    zim_writer.prepare_spatial_cells(graph, SCALE)
+    spatial = Path(graph).parent / "spatial"
+    victim = (spatial / lost if lost.endswith(".bin")
+              else sorted(spatial.glob("graph-cell-*.bin"))[0])
+    victim.unlink()
+    assert zim_writer._prepared_spatial_cells(graph, SCALE) is None
+    assert _zim_items(graph) == _expected(graph)
+    assert child_calls == ["_spatial_cell_files"]
