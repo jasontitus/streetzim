@@ -1872,6 +1872,16 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
     return _bundled_set
 
 
+def _spatial_cell_files(routing_graph_path, cell_scale, output_dir):
+    """build_spatial into output_dir: ({cell_id: path}, meta). The index is
+    written there too (graph-cells-index.bin), so its bytes are dropped."""
+    from streetzim.routing.reader import load_from_file
+    from streetzim.routing.spatial import build_spatial
+    _, cells, meta = build_spatial(load_from_file(routing_graph_path),
+                                   cell_scale=cell_scale, output_dir=output_dir)
+    return cells, meta
+
+
 def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_chunk_mb, spatial_chunk_scale):
     """The routing graph: SZRG v4 graph.bin (optionally chunked), or the
     spatial SZCI v3 + SZRC v2 cells with --spatial-chunk-scale."""
@@ -1908,20 +1918,19 @@ def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_ch
             _repo_root = REPO_ROOT
             if str(_repo_root) not in _sys.path:
                 _sys.path.insert(0, str(_repo_root))
-            from streetzim.routing.spatial import build_spatial
-            from streetzim.routing.reader import load_from_file
+            from streetzim.isolate import run_in_child
             _spatial_outdir = Path(routing_graph_path).parent / "spatial"
             _spatial_outdir.mkdir(parents=True, exist_ok=True)
             print(f"    Spatial-chunking routing graph "
                   f"(scale={spatial_chunk_scale}, "
                   f"src={size_mb:.1f} MB → {_spatial_outdir})...",
                   flush=True)
-            _sg = load_from_file(routing_graph_path)
-            _index_bytes, _cells_bytes, _spatial_meta = build_spatial(
-                _sg,
-                cell_scale=spatial_chunk_scale,
-                output_dir=_spatial_outdir,
-            )
+            # In a child process: it loads the whole graph (China's is
+            # 4.9 GB) on top of everything this process already holds
+            # for the ZIM, which took China in 16 GB to 15.6 GB.
+            _cells_bytes, _spatial_meta = run_in_child(
+                _spatial_cell_files, routing_graph_path, spatial_chunk_scale,
+                _spatial_outdir)
             # Index — eager-load by readers, must stay raw when ≥ 200 MB
             # (Kiwix Desktop / iOS WebView decompression watchdog
             # times out on big compressed clusters; see project

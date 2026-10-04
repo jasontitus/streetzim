@@ -135,4 +135,5 @@ def test_a_last_line_without_a_newline_is_kept_whole(tmp_path):
     out.mkdir()
     paths = split_jsonl_by_chip({"poi": str(tmp_path / "poi.jsonl")}, str(out))
     fuel = next(c.id for c in CHIP_RULES if "fuel" in c.subtypes)
-    assert [r["n"] for r in read_jsonl(paths[fuel])] == ["a", "b"]
+    assert Path(paths[fuel]).read_bytes() == (
+        b'{"t":"poi","s":"fuel","n":"a"}\n{"t":"poi","s":"fuel","n":"b"}\n')
