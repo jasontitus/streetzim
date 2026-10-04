@@ -1882,6 +1882,50 @@ def _spatial_cell_files(routing_graph_path, cell_scale, output_dir):
     return cells, meta
 
 
+SPATIAL_PREPARED = "prepared.json"
+
+
+def _graph_stamp(routing_graph_path, cell_scale):
+    st = os.stat(routing_graph_path)
+    return {"graph_size": st.st_size, "graph_mtime_ns": st.st_mtime_ns,
+            "cell_scale": int(cell_scale)}
+
+
+def prepare_spatial_cells(routing_graph_path, cell_scale):
+    """Build the spatial routing cells beside the graph now, for the ZIM
+    step to add later, with a record of what they were built from.
+
+    Called right after the routing step, while the build holds little:
+    build_spatial loads the whole graph (China's is 4.9 GB) plus ~1.5 GB of
+    working arrays, which on top of the ZIM writer's own memory took China
+    in a 16 GB container to 15.6 GB. (Run in a child, the ZIM writer's
+    memory would still be held beside it.)"""
+    outdir = Path(routing_graph_path).parent / "spatial"
+    outdir.mkdir(parents=True, exist_ok=True)
+    stamp = _graph_stamp(routing_graph_path, cell_scale)
+    cells, meta = _spatial_cell_files(routing_graph_path, cell_scale, outdir)
+    tmp = outdir / (SPATIAL_PREPARED + ".tmp")
+    tmp.write_text(json.dumps({**stamp, "cells": {str(k): v for k, v in cells.items()},
+                               "meta": meta}))
+    os.replace(tmp, outdir / SPATIAL_PREPARED)
+
+
+def _prepared_spatial_cells(routing_graph_path, cell_scale):
+    """(cells, meta) from prepare_spatial_cells for this very graph file
+    and scale, else None."""
+    rec = Path(routing_graph_path).parent / "spatial" / SPATIAL_PREPARED
+    try:
+        data = json.loads(rec.read_text())
+    except (OSError, ValueError):
+        return None
+    if any(data.get(k) != v for k, v in _graph_stamp(routing_graph_path, cell_scale).items()):
+        return None
+    cells = {int(k): v for k, v in data["cells"].items()}
+    if not all(os.path.isfile(p) for p in cells.values()):
+        return None
+    return cells, data["meta"]
+
+
 def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_chunk_mb, spatial_chunk_scale):
     """The routing graph: SZRG v4 graph.bin (optionally chunked), or the
     spatial SZCI v3 + SZRC v2 cells with --spatial-chunk-scale."""
@@ -1925,12 +1969,18 @@ def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_ch
                   f"(scale={spatial_chunk_scale}, "
                   f"src={size_mb:.1f} MB → {_spatial_outdir})...",
                   flush=True)
-            # In a child process: it loads the whole graph (China's is
-            # 4.9 GB) on top of everything this process already holds
-            # for the ZIM, which took China in 16 GB to 15.6 GB.
-            _cells_bytes, _spatial_meta = run_in_child(
-                _spatial_cell_files, routing_graph_path, spatial_chunk_scale,
-                _spatial_outdir)
+            # Normally built right after the routing step
+            # (prepare_spatial_cells), before this process held the ZIM's
+            # memory; otherwise now, in a child, which at least returns
+            # what build_spatial leaves allocated.
+            _prepared = _prepared_spatial_cells(routing_graph_path, spatial_chunk_scale)
+            if _prepared is not None:
+                _cells_bytes, _spatial_meta = _prepared
+                print("    (cells built after the routing step)", flush=True)
+            else:
+                _cells_bytes, _spatial_meta = run_in_child(
+                    _spatial_cell_files, routing_graph_path, spatial_chunk_scale,
+                    _spatial_outdir)
             # Index — eager-load by readers, must stay raw when ≥ 200 MB
             # (Kiwix Desktop / iOS WebView decompression watchdog
             # times out on big compressed clusters; see project

@@ -1254,6 +1254,13 @@ def _build_routing(
             routing_graph_path = run_in_child(
                 extract_routing_graph, rt_pbf, tmpdir, bbox=rt_bbox,
                 precut=bool(work_pbf_cut and rt_pbf == work_pbf))
+            scale = int(getattr(args, "spatial_chunk_scale", 0) or 0)
+            if routing_graph_path and scale > 0:
+                # The ZIM step's spatial cells, built now, while the
+                # build holds little (see prepare_spatial_cells).
+                from streetzim.zim_writer import prepare_spatial_cells
+                print(f"    Spatial routing cells (scale={scale})...", flush=True)
+                run_in_child(prepare_spatial_cells, routing_graph_path, scale)
     return routing_graph_path
 
 
