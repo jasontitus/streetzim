@@ -9,6 +9,25 @@ turn-by-turn routing, terrain and place information — into a single .zim file
 that opens in any Kiwix reader. This primer explains what is in the file, how
 each feature works on the device, and how the file is built.
 
+## Being worked on
+
+Three improvements are in progress; the sections below describe the product as
+it ships today.
+
+- **Real walking and cycling routes.** Today the Walk and Bike modes show the car
+  route with a walking or cycling time. The new routing uses footpaths, steps,
+  pedestrian streets and cycle tracks, lets pedestrians walk against one-way
+  streets, follows bike rules (one-way exemptions, push-your-bike sections), and
+  keeps published files working.
+- **Search in every script.** Today only the Latin-script name of a place is
+  searchable. Names in their own script (北京, Москва, Αθήνα, 東京) will be
+  searchable too, including part of a Chinese or Japanese name, which has no
+  spaces between words.
+- **StreetZims in other languages.** Today every file is English. A build will be
+  able to choose a language: place names on the map and in search, Wikidata facts,
+  Wikipedia articles and summaries, and the file's metadata in that language, with
+  local names kept alongside.
+
 ## At a glance
 
 ```
