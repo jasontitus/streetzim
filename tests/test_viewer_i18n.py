@@ -220,10 +220,17 @@ _LIT = re.compile(r"'(?:\\.|[^'\\\n])*'|\"(?:\\.|[^\"\\\n])*\"|`(?:\\.|[^`\\])*`
 
 # A sink, then the extent of what flows into it: an assignment's right-hand
 # side (to the end of the statement) or a call's arguments.
-_ASSIGN = re.compile(r"\.(?:textContent|innerText|title|placeholder|innerHTML)\s*=(?!=)")
-_CALLS = re.compile(r"\b(?:setStatus|_showFindToast|showFatalError|createEl|_detailActionBtn|_detailFactRow"
-                    r"|makeChip|szFatalPage)\(|\bsetAttribute\(\s*'(?:aria-label|title|placeholder|alt)'"
-                    r"|\bfacts\.push\(|\badd\('(?:h1|p|li|button|summary)'")
+_SINK_PROPS = r"(?:textContent|innerText|title|placeholder|innerHTML|value)"
+_ASSIGN = re.compile(r"\." + _SINK_PROPS + r"\s*=(?!=)")
+_SINK_CALLS = (r"\b(?:setStatus|setRoutingStatus|_showFindToast|showFatalError|createEl|_detailActionBtn"
+               r"|_detailFactRow|makeChip|szFatalPage|createTextNode)\(|\bsetAttribute\(\s*'(?:aria-label|title"
+               r"|placeholder|alt)'|\bfacts\.push\(|\badd\('(?:h1|p|li|button|summary)'")
+_CALLS = re.compile(_SINK_CALLS)
+# Text parked in a variable or a lookup table first, then sunk:
+#   var label = 'Satellite'; … btn.textContent = label;
+#   var LABELS = { drive: 'Drive' }; … btn.textContent = LABELS[m];
+_VAR_LIT = re.compile(r"\b(?:var|let|const)\s+(\w+)\s*=\s*('(?:\\.|[^'\\\n])*'|\"(?:\\.|[^\"\\\n])*\")\s*[;,\n]")
+_VAR_OBJ = re.compile(r"\b(?:var|let|const)\s+(\w+)\s*=\s*\{([^{}]*)\}")
 
 # Deliberately English (debug output, technical detail, glyphs).
 ALLOW = (
@@ -283,9 +290,25 @@ def _strip_comments(src: str) -> str:
     return "\n".join(lines)
 
 
+def _sunk(src: str, name: str) -> int | None:
+    """Offset of a sink that takes variable `name` (or `name[…]`) directly."""
+    nm = re.escape(name)
+    m = (re.search(r"\." + _SINK_PROPS + r"\s*=(?!=)\s*(?:[^;\n]*[?:]\s*)?" + nm + r"\b", src)
+         or re.search(r"(?:" + _SINK_CALLS + r")\s*(?:[^;)\n]*,\s*)?" + nm + r"\b", src))
+    return m.start() if m else None
+
+
 def js_misses(src: str) -> list[str]:
     src = _strip_calls(_strip_comments(src))
     found = []
+    for rx in (_VAR_LIT, _VAR_OBJ):
+        for m in rx.finditer(src):
+            lits = [m.group(2)] if rx is _VAR_LIT else _LIT.findall(m.group(2))
+            texty = [lit for lit in lits if lit not in ALLOW and TEXTY.search(_text_of(lit))
+                     and not re.search(r"[:;]\s*[\w#(-]|^.(?:https?:|tel:|#|\.|/)", lit)]
+            if texty and _sunk(src, m.group(1)) is not None:
+                line = src.count("\n", 0, m.start()) + 1
+                found.append(f"line {line}: {m.group(1)} = {texty[0][:60]} (sunk later)")
     for rx, call in ((_ASSIGN, False), (_CALLS, True)):
         for m in rx.finditer(src):
             rhs = _extent(src, m.end(), call)
@@ -318,3 +341,12 @@ def test_js_lint_catches_a_bare_literal() -> None:
     assert js_misses("setStatus(`Loading ${x}…`, 'loading');") == ["line 1: `Loading ${x}…`"]
     assert js_misses("el.textContent = szT('a.b', 'Hello world', { n: 'two words' });") == []
     assert js_misses("el.style.cssText = 'color:red; font-size:12px';") == []
+    # The reviewer's mutations (2026-10-05): each must be caught.
+    assert js_misses("p.appendChild(document.createTextNode('Change map'));") == ["line 1: 'Change map'"]
+    assert js_misses("originInput.value = 'Current location';") == ["line 1: 'Current location'"]
+    assert js_misses("var lbl = 'Hello world';\nel.textContent = lbl;") == [
+        "line 1: lbl = 'Hello world' (sunk later)"]
+    assert js_misses("var L = { drive: 'Drive', walk: 'Walk' };\nb.textContent = L[m];") == [
+        "line 1: L = 'Drive' (sunk later)"]
+    assert js_misses("var key = 'streetzim.units';\nel.value = key;") == []
+    assert js_misses("input.value = '';") == []
