@@ -130,6 +130,9 @@ def scratch_env(tmp_path, monkeypatch):
     test below)."""
     monkeypatch.setenv("STREETZIM_NODE_LOC_DIR", str(tmp_path))
     monkeypatch.setenv("STREETZIM_ROUTING_HIGHWAY_FILTER", "on")
+    # The frozen reference predates walk/bike routing: compare today's graph
+    # (tests/test_routing_walkbike.py covers the walk/bike additions).
+    monkeypatch.setenv("STREETZIM_ROUTING_WALKBIKE", "0")
     return tmp_path
 
 

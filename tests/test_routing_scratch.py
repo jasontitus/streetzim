@@ -69,6 +69,7 @@ def test_monaco_graph_matches_pre_review_reference(tmp_path, monkeypatch):
 
     fixture = Path(__file__).parent / "fixtures/monaco-full/monaco.osm.pbf"
     monkeypatch.setenv("STREETZIM_NODE_LOC_DIR", str(tmp_path))
+    monkeypatch.setenv("STREETZIM_ROUTING_WALKBIKE", "0")  # predates walk/bike
     graph = extract_routing_graph(str(fixture), str(tmp_path))
     # Produced independently from d5c32b6 using this checked-in Monaco PBF.
     assert hashlib.sha256(Path(graph).read_bytes()).hexdigest() == (

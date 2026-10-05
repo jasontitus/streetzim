@@ -476,6 +476,105 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
             return acc in _ACCESS_DENY
         return hw in NO_MOTOR_HIGHWAY
 
+    # ---- walk / bike (class_access bits 5, 6, 10-18; docs/formats.md) ----
+    # STREETZIM_ROUTING_WALKBIKE=0 builds today's graph byte for byte: bits
+    # 5/6 as the literal foot=no / bicycle=no, no new bits, no records for
+    # travel against one-ways.
+    walkbike = os.environ.get("STREETZIM_ROUTING_WALKBIKE", "1") != "0"
+    _SIDEPATH_DENY = ("no", "use_sidepath")
+    # Classes neither walked nor cycled, whatever the access tags say
+    # beyond an explicit foot/bicycle=yes.
+    _NO_FOOT_BIKE = frozenset({"motorway", "motorway_link", "busway"})
+    # Classes whose one-way tag binds walkers too (OSM: oneway on a
+    # footway is for pedestrians).
+    _FOOT_CLASS = frozenset({"footway", "path", "pedestrian", "steps", "corridor"})
+    # Bikes are pushed here unless cycling is allowed explicitly.
+    _PUSH_CLASS = frozenset({"footway", "pedestrian", "corridor", "bridleway"})
+    _RIDE_OK = ("yes", "designated", "permissive")
+    _PAVED = frozenset({"paved", "asphalt", "concrete", "concrete:plates",
+                        "concrete:lanes", "paving_stones", "sett", "chipseal",
+                        "metal", "wood", "bricks"})
+    _FIRM = frozenset({"compacted", "fine_gravel", "gravel", "pebblestone",
+                       "unhewn_cobblestone", "cobblestone"})
+    _ROUGH = frozenset({"dirt", "ground", "grass", "sand", "mud", "earth",
+                        "unpaved", "rock", "woodchips", "grass_paver"})
+    _CYCLE_SIDES = ("cycleway", "cycleway:left", "cycleway:right", "cycleway:both")
+
+    def _foot_or_bike_value(tags, *keys):
+        for k in keys:
+            v = tags.get(k)
+            if v in _ACCESS_ALLOW or v in _SIDEPATH_DENY:
+                return v
+        return None
+
+    def _foot_denied(hw, tags):
+        """Walking is not allowed on this way (foot > access; motorways,
+        busways and motorroad=yes never)."""
+        v = _foot_or_bike_value(tags, "foot")
+        if v is not None:
+            return v in _SIDEPATH_DENY
+        if hw in _NO_FOOT_BIKE or tags.get("motorroad") == "yes":
+            return True
+        v = _foot_or_bike_value(tags, "access")
+        return v is not None and v in _SIDEPATH_DENY
+
+    def _bike_denied(hw, tags):
+        """Cycling (riding or pushing) is not allowed (bicycle > vehicle >
+        access; motorways, busways, motorroad=yes, and steps without a
+        bicycle ramp never)."""
+        v = _foot_or_bike_value(tags, "bicycle")
+        if v is not None:
+            return v in _SIDEPATH_DENY
+        if hw in _NO_FOOT_BIKE or tags.get("motorroad") == "yes":
+            return True
+        if hw == "steps" and tags.get("ramp:bicycle") != "yes":
+            return True
+        v = _foot_or_bike_value(tags, "vehicle", "access")
+        return v is not None and v in _SIDEPATH_DENY
+
+    def _walkbike_bits(hw, tags):
+        """Direction-independent walk/bike bits: 5, 6, 12-17."""
+        bits = 0
+        if _foot_denied(hw, tags):
+            bits |= 0x20                                   # bit 5
+        if _bike_denied(hw, tags):
+            bits |= 0x40                                   # bit 6
+        bv = tags.get("bicycle")
+        if bv == "dismount" or (hw in _PUSH_CLASS and bv not in _RIDE_OK):
+            bits |= 0x1000                                 # bit 12 push
+        sides = [tags.get(k) for k in _CYCLE_SIDES]
+        if any(v in ("lane", "shared_lane", "share_busway") for v in sides):
+            bits |= 0x2000                                 # bit 13 lane
+        if hw == "cycleway" or "track" in sides or bv == "designated":
+            bits |= 0x4000                                 # bit 14 infra
+        surf = tags.get("surface")
+        grade = tags.get("tracktype")
+        if surf in _PAVED:
+            bits |= 1 << 15
+        elif surf in _FIRM or grade in ("grade1", "grade2"):
+            bits |= 2 << 15
+        elif surf in _ROUGH or grade in ("grade3", "grade4", "grade5"):
+            bits |= 3 << 15                                # bits 15-16
+        if any(tags.get(k) in ("no", "none")
+               for k in ("sidewalk", "sidewalk:both")):
+            bits |= 0x20000                                # bit 17
+        return bits
+
+    def _bike_contraflow(tags):
+        """Cycling against the one-way is allowed."""
+        if tags.get("oneway:bicycle") == "no":
+            return True
+        if tags.get("cycleway") in ("opposite", "opposite_lane", "opposite_track"):
+            return True
+        return any(tags.get(k) in ("-1", "no")
+                   for k in ("cycleway:left:oneway", "cycleway:right:oneway"))
+
+    def _foot_bound_by_oneway(hw, tags):
+        """The way's one-way applies to walkers too."""
+        if tags.get("oneway:foot") == "no":
+            return False
+        return tags.get("oneway:foot") == "yes" or hw in _FOOT_CLASS
+
     # Road-class ordinal for the v4 routing-graph class_access u32
     # (bits 0..4). See docs/formats.md for the full bit layout. Unknown /
     # missing classes fall through to 0.
@@ -490,6 +589,10 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
         "track": 15, "path": 16, "footway": 17,
         "cycleway": 18, "pedestrian": 19, "steps": 20,
     }
+    if walkbike:
+        # No-motor classes that were 0 (they carry bit 9 in every graph).
+        CLASS_ORDINAL.update({"bridleway": 21, "corridor": 22, "busway": 23,
+                              "escape": 24})
 
     # Pass 1: Walk every highway way, record node refs. Junctions = nodes
     # appearing in 2+ ways OR at way endpoints. Interior refs and endpoint
@@ -747,8 +850,12 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
             # same class / access / roundabout state.
             class_ord = CLASS_ORDINAL.get(hw, 0) & 0x1F
             access_bits = 0
-            if w.tags.get("foot") == "no":    access_bits |= 0x20  # bit 5
-            if w.tags.get("bicycle") == "no": access_bits |= 0x40  # bit 6
+            if walkbike:
+                wb_bits = _walkbike_bits(hw, w.tags)
+                access_bits |= wb_bits
+            else:
+                if w.tags.get("foot") == "no":    access_bits |= 0x20  # bit 5
+                if w.tags.get("bicycle") == "no": access_bits |= 0x40  # bit 6
             # bit 7 = "this edge is a one-way". Reversed (-1) ways only emit
             # the reverse edge, which is just as much a one-way for the HUD.
             if oneway != 0:                   access_bits |= 0x80  # bit 7
@@ -769,6 +876,31 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
             if _way_no_motor_vehicle(hw, w.tags):
                 access_bits |= 0x200  # bit 9
             class_access = class_ord | access_bits
+            # Travel against this way's one-way, for walkers (unless the
+            # one-way binds them) and for cyclists with a contraflow
+            # exemption: a record a car never uses (speed 0, bits 9 + 10),
+            # sharing the other direction's geometry reversed (bit 11).
+            # Not on motorways. Bits 7/8 are left off so a walking HUD never
+            # announces a roundabout exit.
+            contra_ca = None
+            if (walkbike and oneway != 0
+                    and hw not in ("motorway", "motorway_link")):
+                foot_ok = (not (wb_bits & 0x20)
+                           and not _foot_bound_by_oneway(hw, w.tags))
+                bike_ok = not (wb_bits & 0x40) and _bike_contraflow(w.tags)
+                if foot_ok or bike_ok:
+                    contra_ca = (class_ord | (wb_bits & 0x3F060)
+                                 | 0x200 | 0x400 | 0x800)
+                    if not foot_ok:
+                        contra_ca |= 0x40000      # bit 18: not for walking
+                    if not bike_ok:
+                        contra_ca |= 0x1000       # bit 12: push the bike
+            # One-way footways bind walkers in the way's direction only;
+            # oneway:foot=yes on a two-way road forbids walking its reverse.
+            rev_foot_deny = (walkbike and oneway == 0
+                             and w.tags.get("oneway:foot") == "yes")
+            rev_bike_push = (walkbike and oneway == 0
+                             and w.tags.get("oneway:bicycle") == "yes")
 
             # Name label (same logic as before: prefer name, fall back to ref)
             name = (w.tags.get("name") or "").strip()
@@ -866,12 +998,30 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
                         edges_class_access.append(class_access)  # noqa: F821
                         self.edge_count += 1
                     if oneway != 1:
+                        rev_ca = class_access
+                        if rev_foot_deny:
+                            rev_ca |= 0x40000  # bit 18
+                        if rev_bike_push:
+                            rev_ca |= 0x1000   # bit 12
                         edges_from.append(to_idx)  # noqa: F821
                         edges_to.append(from_idx)  # noqa: F821
                         edges_dist_speed.append(dist_speed)  # noqa: F821
                         edges_geom.append(rgi)  # noqa: F821
                         edges_name.append(name_idx)  # noqa: F821
-                        edges_class_access.append(class_access)  # noqa: F821
+                        edges_class_access.append(rev_ca)  # noqa: F821
+                        self.edge_count += 1
+                    if contra_ca is not None:
+                        # Against the one-way: speed 0, the stored
+                        # direction's geometry, reversed when drawn.
+                        c_from, c_to, c_geom = ((to_idx, from_idx, fgi)
+                                                if oneway == 1
+                                                else (from_idx, to_idx, rgi))
+                        edges_from.append(c_from)  # noqa: F821
+                        edges_to.append(c_to)  # noqa: F821
+                        edges_dist_speed.append(dist_dm_packed)  # noqa: F821
+                        edges_geom.append(c_geom)  # noqa: F821
+                        edges_name.append(name_idx)  # noqa: F821
+                        edges_class_access.append(contra_ca)  # noqa: F821
                         self.edge_count += 1
 
                 seg_start = i
