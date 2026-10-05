@@ -102,11 +102,11 @@ def test_pipeline_uses_current_selection_without_reextracting(seeded, monkeypatc
 
     monkeypatch.setattr(wc, "extract_qids_from_pbf", extract)
     monkeypatch.setattr(wc, "extract_qids_from_mbtiles", extract)
-    result = c._build_wikidata(
+    result, selection = c._build_wikidata(
         args=argparse.Namespace(pbf=None, wikidata_no_extracts=True),
         include_wikidata=True, pbf_path="x" if source == "pbf" else None,
         mbtiles_path="tiles", work_pbf=None, total_steps=9, wikidata_cache_dir=path)
-    assert set(result) == {"Q110"}
+    assert set(result) == {"Q110"} == selection
     assert calls == [source]
 
 

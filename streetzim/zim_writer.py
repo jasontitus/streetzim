@@ -733,6 +733,7 @@ def _create_zim(
     bbox=None,
     wikidata_data=None,
     wikidata_cache=None,
+    wikidata_selection=None,
     routing_graph_path=None,
     routing_graph_chunk_mb=0,
     wiki_cross_refs=None,
@@ -946,7 +947,8 @@ def _create_zim(
                                       mbtiles_path=mbtiles_path, bbox=bbox,
                                       wikidata_data=wikidata_data,
                                       max_zoom=max_zoom,
-                                      wikidata_cache=wikidata_cache)
+                                      wikidata_cache=wikidata_cache,
+                                      wikidata_selection=wikidata_selection)
         _bundled_set = _add_wiki_articles(
             creator, MapItem, wiki_cross_refs=wiki_cross_refs,
             bundle_wiki_articles=bundle_wiki_articles,
@@ -1693,14 +1695,16 @@ def _add_font_glyphs(creator, MapItem, *, fonts):
 
 
 def _add_wikidata(creator, MapItem, *, tiles, mbtiles_path, bbox, wikidata_data, max_zoom,
-                  wikidata_cache=None):
+                  wikidata_cache=None, wikidata_selection=None):
     """Wikidata place info, filtered to the Q-IDs present in this build's tiles.
     Returns the (possibly filtered) wikidata_data, which the search phase uses.
 
-    `wikidata_data` holds the extract's own Q-IDs (wikidata_cache.build_cache
-    selects them); tiles are whole and reach past the extract's edge, so
-    with `wikidata_cache` (the cache folder) the tiles' other Q-IDs are read
-    from it too, as when the whole cache was loaded (D.C.: 27 of 1,825)."""
+    `wikidata_data` holds the extract's own Q-IDs (`wikidata_selection`,
+    from wikidata_cache.build_cache); tiles are whole and reach past the
+    extract's edge, so with `wikidata_cache` (the cache folder) the tiles'
+    other well-formed Q-IDs are read from it too, as when the whole cache
+    was loaded (D.C.: 27 of 1,825). Malformed tags ("Q1;Q2") and the
+    extract's own uncached Q-IDs are not past the edge: no extra read."""
     # Add Wikidata info — filter to Q-IDs present in the bbox tiles
     # Skip filtering for world bbox (all Q-IDs are relevant)
     if wikidata_data:
@@ -1747,7 +1751,9 @@ def _add_wikidata(creator, MapItem, *, tiles, mbtiles_path, bbox, wikidata_data,
                         qid = (feat.get("properties") or {}).get("wikidata", "")
                         if qid and qid.startswith("Q"):
                             bbox_qids.add(qid)
-            edge_qids = bbox_qids.difference(wikidata_data)
+            from wikidata_cache import _QID_RE
+            edge_qids = {q for q in bbox_qids if _QID_RE.fullmatch(q)}.difference(
+                wikidata_selection if wikidata_selection is not None else wikidata_data)
             if edge_qids and wikidata_cache:
                 # Read every tile Q-ID in one pass, not the edge ones
                 # appended: the cache's order, so the chunks are byte for

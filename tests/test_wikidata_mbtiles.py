@@ -68,11 +68,11 @@ def test_cached_tile_tags_survive_failed_name_lookup_through_writer(
         raise TransientError("fixture rate limit exhausted", stop=True)
 
     monkeypatch.setattr(wc, "_run_sparql", unavailable)
-    compact = builder._build_wikidata(
+    compact, selection = builder._build_wikidata(
         args=argparse.Namespace(pbf=None, wikidata_no_extracts=True),
         include_wikidata=True, mbtiles_path=mbtiles, pbf_path=None,
         total_steps=9, wikidata_cache_dir=cache_dir, work_pbf=None)
-    assert set(compact) == {"Q110", "Q111", "Q112"}
+    assert set(compact) == {"Q110", "Q111", "Q112"} == selection
     assert len(queries) == 1 and "Untagged city" in queries[0]
     assert "Tagged village" not in queries[0] and "Tagged line" not in queries[0]
 
@@ -222,3 +222,51 @@ def test_the_build_hands_the_zim_writer_its_wikidata_cache(monkeypatch, given):
     assert str(seen["wikidata_cache"]) == str(given or wc.DEFAULT_CACHE_DIR)
     builder._write_zim(wikidata_data=None, **common)
     assert seen["wikidata_cache"] is None
+
+
+def _edge_case(tmp_path, monkeypatch, places, cached, selection):
+    """_add_wikidata over one tile of `places` with the extract's
+    `selection` loaded from a cache of `cached`; also the qids each extra
+    cache read asked for, and the chunk files written."""
+    from streetzim.zim_writer import _add_wikidata
+    tiles = _mbtiles(tmp_path / "t.mbtiles", [(14, 0, 0, {"place": [
+        _feature({"name": q, "class": "town", "wikidata": q}) for q in places]})])
+    cache_dir = tmp_path / "cache"
+    wc.save_cache(cache_dir, {q: {"label": f"label {q}"} for q in cached})
+    selected = wc.load_cache_for_zim(cache_dir, qids=selection)
+    reads, real = [], wc.load_cache_for_zim
+
+    def recording(path, *, qids=None):
+        reads.append(qids)
+        return real(path, qids=qids)
+
+    monkeypatch.setattr(wc, "load_cache_for_zim", recording)
+    items = {}
+
+    class Creator:
+        def add_item(self, item):
+            items[item[0]] = item[3]
+
+    written = _add_wikidata(Creator(), lambda *args: args, tiles=tiles, mbtiles_path=None,
+                            bbox=(-180, 85, -179, 85.1), wikidata_data=selected, max_zoom=14,
+                            wikidata_cache=cache_dir, wikidata_selection=selection)
+    return written, reads, items
+
+
+def test_no_extra_cache_read_without_qids_past_the_edge(tmp_path, monkeypatch):
+    """A malformed tag and the extract's own uncached Q-ID are not past the
+    edge: China's PBF has both (5 and 159), and would pay a needless pass."""
+    written, reads, _ = _edge_case(
+        tmp_path, monkeypatch, places=["Q110", "Q111", "Q112;Q113"],
+        cached=["Q110", "Q999"], selection={"Q110", "Q111"})
+    assert set(written) == {"Q110"} and reads == []
+
+
+def test_the_extra_read_asks_only_for_the_tiles_qids_in_cache_order(tmp_path, monkeypatch):
+    written, reads, items = _edge_case(
+        tmp_path, monkeypatch, places=["Q110", "Q115"],
+        cached=["Q115", "Q999", "Q110"], selection={"Q110"})
+    assert set(written) == {"Q110", "Q115"}
+    assert reads == [{"Q110", "Q115"}]               # never the whole cache
+    order = list(wc.load_cache_for_zim(tmp_path / "cache", qids={"Q110", "Q115"}))
+    assert list(json.loads(items["wikidata/11.json"])) == order

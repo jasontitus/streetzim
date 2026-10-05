@@ -1204,6 +1204,7 @@ def _build_wikidata(
     """Wikidata place details for the Q-IDs in the extract."""
     # Build Wikidata cache if requested
     wikidata_data = None
+    wd_qids = None
     if include_wikidata:
         step_wd = 5
         print()
@@ -1231,7 +1232,9 @@ def _build_wikidata(
             print("    No Wikidata entries available")
         from streetzim.source_report import note
         note("Wikidata", f"{len(wikidata_data or {})} entries")
-    return wikidata_data
+    # The extract's own Q-IDs too: the ZIM step reads the tiles' others
+    # (past the extract's edge) from the cache (_add_wikidata).
+    return wikidata_data, wd_qids
 
 
 def _build_routing(
@@ -1709,7 +1712,7 @@ def _write_zim(
         routing_graph_path, satellite_dir, satellite_format, satellite_max_zoom,
         search_features, terrain_dir, terrain_max_zoom, tile_metadata, tiles, tmpdir,
         total_tile_count, use_streaming, wiki_cross_refs, wikidata_data,
-        zim_illustration, zim_metadata):
+        zim_illustration, zim_metadata, wikidata_selection=None):
     """Merge street pieces, then atomically publish the completed ZIM."""
     if isinstance(search_features, str) and os.path.isfile(search_features):
         # After every filter and merge that rewrites the file (bbox cut of
@@ -1743,6 +1746,7 @@ def _write_zim(
         wikidata_data=wikidata_data,
         # For the tiles' Q-IDs past the extract's edge (_add_wikidata).
         wikidata_cache=(args.wikidata_cache or _wikidata_default_cache()) if wikidata_data else None,
+        wikidata_selection=wikidata_selection,
         routing_graph_path=routing_graph_path,
         routing_graph_chunk_mb=int(getattr(args, 'chunk_graph_mb', 0) or 0),
         split_hot_search_chunks_mb=int(getattr(args, 'split_hot_search_chunks_mb', 0) or 0),
@@ -1896,7 +1900,7 @@ def main(argv=None):
             tiles=tiles, tmpdir=tmpdir, total_steps=total_steps,
             use_streaming=use_streaming, work_pbf=work_pbf, work_pbf_cut=work_pbf_cut)
 
-        wikidata_data = _build_wikidata(
+        wikidata_data, wikidata_selection = _build_wikidata(
             args=args, include_wikidata=include_wikidata, mbtiles_path=mbtiles_path,
             pbf_path=pbf_path, total_steps=total_steps,
             wikidata_cache_dir=wikidata_cache_dir, work_pbf=work_pbf)
@@ -1951,7 +1955,8 @@ def main(argv=None):
             terrain_max_zoom=terrain_max_zoom, tile_metadata=tile_metadata,
             tiles=tiles, tmpdir=tmpdir, total_tile_count=total_tile_count,
             use_streaming=use_streaming, wiki_cross_refs=wiki_cross_refs,
-            wikidata_data=wikidata_data, zim_illustration=zim_illustration,
+            wikidata_data=wikidata_data, wikidata_selection=wikidata_selection,
+            zim_illustration=zim_illustration,
             zim_metadata=zim_metadata)
 
         _print_summary(
