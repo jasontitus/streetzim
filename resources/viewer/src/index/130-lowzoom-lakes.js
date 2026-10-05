@@ -26,7 +26,29 @@ function _szLowzoomLakes() {
   return { type: 'FeatureCollection', features: feats };
 }
 
+// The language map labels are drawn in (map-config "language", from
+// create_osm_zim --language): OSM's name:<lang>, else the place's own name
+// (name_int / name:latin as StreetZim's tilemaker writes them). English
+// builds keep name:latin first. szLabelOf is the same rule for a feature's
+// properties (popups, the wiki list).
+var SZ_LANG = 'en';
+function szLabelField() {
+  if (SZ_LANG !== 'en') {
+    return ["coalesce", ["get", "name:" + SZ_LANG], ["get", "name_int"],
+            ["get", "name:latin"], ["get", "name"]];
+  }
+  return ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]];
+}
+function szLabelOf(p) {
+  p = p || {};
+  if (SZ_LANG !== 'en') {
+    return p['name:' + SZ_LANG] || p.name_int || p['name:latin'] || p.name || '';
+  }
+  return p['name:latin'] || p.name || '';
+}
+
 function makeStyle(config) {
+  SZ_LANG = (config && typeof config.language === 'string' && config.language) || 'en';
   // Use zimtile:// protocol for tiles and fonts — this adds retry logic
   // for Kiwix JS PWA where the ServiceWorker can drop requests under load
   var tileUrl = "zimtile://" + baseUrl + "tiles/{z}/{x}/{y}.pbf";
@@ -432,7 +454,7 @@ function makeStyle(config) {
         "minzoom": 12,
         "layout": {
           "symbol-placement": "line",
-          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
+          "text-field": szLabelField(),
           "text-font": ["OpenSansRegular"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 12, 10, 14, 13, 18, 22],
           "text-max-angle": 30,
@@ -451,7 +473,7 @@ function makeStyle(config) {
         "source": "openmaptiles",
         "source-layer": "water_name",
         "layout": {
-          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
+          "text-field": szLabelField(),
           "text-font": ["OpenSansItalic"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 10, 10, 14, 12, 18, 20]
         },
@@ -470,7 +492,7 @@ function makeStyle(config) {
         "filter": ["==", "class", "country"],
         "maxzoom": 6,
         "layout": {
-          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
+          "text-field": szLabelField(),
           "text-font": ["OpenSansBold"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 1, 10, 6, 16],
           "text-transform": "uppercase"
@@ -490,7 +512,7 @@ function makeStyle(config) {
         "minzoom": 4,
         "maxzoom": 8,
         "layout": {
-          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
+          "text-field": szLabelField(),
           "text-font": ["OpenSansBold"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 4, 9, 8, 14],
           "text-transform": "uppercase",
@@ -510,7 +532,7 @@ function makeStyle(config) {
         "filter": ["==", "class", "city"],
         "minzoom": 5,
         "layout": {
-          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
+          "text-field": szLabelField(),
           "text-font": ["OpenSansBold"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 5, 10, 14, 18, 18, 26]
         },
@@ -528,7 +550,7 @@ function makeStyle(config) {
         "filter": ["==", "class", "town"],
         "minzoom": 8,
         "layout": {
-          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
+          "text-field": szLabelField(),
           "text-font": ["OpenSansRegular"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 8, 10, 14, 16, 18, 24]
         },
@@ -546,7 +568,7 @@ function makeStyle(config) {
         "filter": ["==", "class", "village"],
         "minzoom": 10,
         "layout": {
-          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
+          "text-field": szLabelField(),
           "text-font": ["OpenSansRegular"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 10, 9, 14, 14, 18, 22]
         },
@@ -564,7 +586,7 @@ function makeStyle(config) {
         "filter": ["in", "class", "suburb", "quarter", "neighbourhood"],
         "minzoom": 12,
         "layout": {
-          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
+          "text-field": szLabelField(),
           "text-font": ["OpenSansRegular"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 12, 12, 18, 20],
           "text-transform": "uppercase",
@@ -591,7 +613,7 @@ function makeStyle(config) {
           ["any", ["has", "name"], ["has", "name:latin"], [">=", ["zoom"], 16]]
         ],
         "layout": {
-          "text-field": ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]],
+          "text-field": szLabelField(),
           "text-font": ["OpenSansRegular"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 14, 11, 18, 18],
           "icon-image": _szPoiIconExpr(),

@@ -114,6 +114,13 @@ def native_name(props, name):
     return nat
 
 
+def _languages():
+    """The name:xx languages a build keeps (create_osm_zim --language sets
+    STREETZIM_TILE_LANGUAGES); none for English builds."""
+    return [x for x in os.environ.get("STREETZIM_TILE_LANGUAGES", "").replace(" ", "").split(",")
+            if x]
+
+
 def search_record(name, feature_type, props, lat, lon):
     """The raw search-feature dict for one tile feature. When
     ``feature_subtype`` replaced a raw-key class by the subclass, the key
@@ -130,6 +137,10 @@ def search_record(name, feature_type, props, lat, lon):
     nat = native_name(props, name)
     if nat:
         rec["name_native"] = nat
+    names = {lang: props[f"name:{lang}"].strip() for lang in _languages()
+             if (props.get(f"name:{lang}") or "").strip()}
+    if names:
+        rec["names"] = names
     rec["lat"] = lat
     rec["lon"] = lon
     return rec
@@ -1125,6 +1136,45 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
         return features_path
 
     return features
+
+
+# --- Names in the build's language (create_osm_zim --language) ---------
+
+def localize_feature(feat, lang):
+    """Add the names a ``lang`` build shows: ``display_name`` (OSM's
+    name:lang, else the place's own name), ``display_native`` (its own
+    name when that differs) and ``display_latin`` (the English / Latin
+    name when it differs from both). ``name`` itself stays: dedup, street
+    merging and the Wikipedia cross-references key on it. The writer
+    emits records from the display fields (docs/search-records.md)."""
+    from cloud.search_shards import norm
+    name = feat.get("name") or ""
+    native = feat.get("name_native") or name
+    disp = ((feat.get("names") or {}).get(lang) or native).strip()
+    feat["display_name"] = disp
+    if norm(native) != norm(disp):
+        feat["display_native"] = native
+    if feat.get("name_native") and norm(name) not in (norm(disp), norm(native)):
+        feat["display_latin"] = name
+    return feat
+
+
+def localize_features_file(path, lang):
+    """localize_feature over a features JSONL, in place. English builds
+    (``lang`` "en") are left untouched."""
+    if lang == "en":
+        return 0
+    tmp = str(path) + ".lang"
+    n = 0
+    with open(path, encoding="utf-8") as fin, open(tmp, "w", encoding="utf-8") as fout:
+        for line in fin:
+            if not line.strip():
+                continue
+            fout.write(json.dumps(localize_feature(json.loads(line), lang),
+                                  ensure_ascii=False, separators=(",", ":")) + "\n")
+            n += 1
+    os.replace(tmp, path)
+    return n
 
 
 # --- Street merging (runs on the final search-features file, see

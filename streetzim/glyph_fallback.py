@@ -255,7 +255,17 @@ def _byte_pattern(blocks: Iterable[tuple[int, int]]) -> re.Pattern[bytes]:
 LABEL_KEYS = frozenset({"name", "name:latin", "name_int", "label"})
 
 
-def _tile_strings(tile: bytes, keys: frozenset[str] = LABEL_KEYS,
+def label_keys() -> frozenset[str]:
+    """LABEL_KEYS plus name:<language> for a build in another language
+    (create_osm_zim --language sets STREETZIM_TILE_LANGUAGES; the viewer's
+    szLabelField draws name:<language> first)."""
+    import os
+    langs = [x.strip() for x in os.environ.get("STREETZIM_TILE_LANGUAGES", "").split(",")
+             if x.strip()]
+    return LABEL_KEYS | {f"name:{x}" for x in langs}
+
+
+def _tile_strings(tile: bytes, keys: frozenset[str] | None = None,
                   match: re.Pattern[str] | None = None) -> Iterator[str]:
     """The non-ASCII string values of a Mapbox Vector Tile that some feature
     carries under one of ``keys`` (and, with ``match``, that it matches).
@@ -266,6 +276,8 @@ def _tile_strings(tile: bytes, keys: frozenset[str] = LABEL_KEYS,
     import importlib
     # mapbox-vector-tile (a builder dependency) ships the generated module
     pb2: Any = importlib.import_module("mapbox_vector_tile.Mapbox.vector_tile_pb2")
+    if keys is None:
+        keys = label_keys()
     parsed: Any = pb2.tile()
     try:
         parsed.ParseFromString(tile)
@@ -328,7 +340,7 @@ def scripts_in_tiles(tiles: Iterable[bytes],
     if not todo:
         return found
     # A displayed key is written in the layer's key table as field 3.
-    key_bytes = [b"\x1a" + _enc_varint(len(k.encode())) + k.encode() for k in LABEL_KEYS]
+    key_bytes = [b"\x1a" + _enc_varint(len(k.encode())) + k.encode() for k in label_keys()]
     for data in tiles:
         if not data:
             continue

@@ -192,6 +192,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Make a ZIM of an offline OpenStreetMap map with search, "
                     "category browsing and routing.")
     p.add_argument("--name", required=True, help="Name of the ZIM")
+    from streetzim.languages import ISO639_3
+    p.add_argument("--language", default="en", choices=list(ISO639_3), metavar="XX",
+                   help="Language of the map, ISO 639-1 (default en): labels, "
+                        "search names, Wikipedia and Wikidata in it where they "
+                        "exist. A --name with a language segment (osm_fr_...) "
+                        "must agree.")
     p.add_argument("--title", required=True,
                    help="Title of the ZIM (at most 30 characters)")
     p.add_argument("--description", required=True,
@@ -422,6 +428,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     try:
         if args.zim_workers is not None and args.zim_workers < 1:
             raise ValueError("--zim-workers must be greater than zero")
+        from streetzim import languages
+        args.language = languages.check(args.language)
+        seg = args.name.split("_")
+        if (len(seg) > 2 and seg[0] == "osm" and len(seg[1]) == 2 and seg[1].isalpha()
+                and seg[1] != args.language):
+            raise ValueError(f"--name {args.name} says language {seg[1]!r} "
+                             f"but --language is {args.language!r}")
         if args.zim_builder == "manifest" and args.xapian == "libzim":
             raise ValueError("--zim-builder=manifest requires --xapian=builder or --xapian=none")
         if args.xapian == "builder" and args.zim_builder != "manifest":
@@ -956,6 +969,7 @@ def _builder_argv(args: argparse.Namespace, bbox: str, pbf_url: str | None, dl: 
     # --flag=value throughout: a value may start with "-" (a western
     # longitude, a title), which argparse would otherwise read as a flag.
     argv = [f"--bbox={bbox}", f"--name={args.title}", f"--zim-name={args.name}",
+            f"--language={getattr(args, 'language', 'en') or 'en'}",
             f"--title={args.title}", f"--description={args.description}",
             f"--creator={args.creator}", f"--publisher={args.publisher}",
             f"--scraper=streetzim v{version()}", "--split-find-chips"]

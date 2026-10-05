@@ -1724,6 +1724,7 @@ function matchesName(rec, q) {
   if (foldText(rec.n).includes(ql) || foldText(rec.s).includes(ql)) return true;
   // The name in its own script (cloud/search_shards.record_names).
   if (typeof rec.nn === 'string' && rec.nn && foldText(rec.nn).includes(ql)) return true;
+  if (typeof rec.nl === 'string' && rec.nl && foldText(rec.nl).includes(ql)) return true;
   // An administrative area (t: 'admin') also answers to its other names
   // and to "<name> <type>" / "<type> of <name>" ("City of Alexandria"),
   // as in the map's search box (index.html, admin-search).
@@ -1733,7 +1734,7 @@ function matchesName(rec, q) {
   const words = ql.split(/\s+/).filter((w) => w);
   if (!words.some((w) => !CONNECTORS.has(w))) return false;
   const label = foldText(rec.s);
-  for (const nm of [rec.n, rec.nn].filter(Boolean).concat(Array.isArray(rec.alt) ? rec.alt : [])) {
+  for (const nm of [rec.n, rec.nn, rec.nl].filter(Boolean).concat(Array.isArray(rec.alt) ? rec.alt : [])) {
     const h = foldText(nm);
     if (!h) continue;
     const forms = label ? [h, h + ' ' + label, label + ' of ' + h] : [h];

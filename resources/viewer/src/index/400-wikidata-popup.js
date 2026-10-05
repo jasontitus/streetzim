@@ -298,7 +298,7 @@ function initWikidataPopups(map, config) {
 
   function named(f) {
     var p = f.properties || {};
-    return !!(p['name:latin'] || p.name);
+    return !!szLabelOf(p);
   }
   function tappedFeature(pt) {
     var queryOpts = {};
@@ -360,7 +360,7 @@ function initWikidataPopups(map, config) {
   });
 
   function wikiPopup(e, feat, qid, seq) {
-    var name = feat.properties['name:latin'] || feat.properties.name || feat.properties.label || qid;
+    var name = szLabelOf(feat.properties) || feat.properties.label || qid;
     fetchWdChunk(getWdPrefix(qid)).then(function(chunk) {
       if (seq !== tapSeq) return;
       var wd = (chunk && chunk[qid]) ? chunk[qid] : null;
@@ -380,7 +380,7 @@ function initWikidataPopups(map, config) {
   // in a ZIM without Overture carry none of those, so the lookup is skipped.
   function placeLabelPopup(e, feat, seq) {
     var props = feat.properties;
-    var name = props['name:latin'] || props.name;
+    var name = szLabelOf(props);
     var g = feat.geometry;
     var lat = e.lngLat.lat, lon = e.lngLat.lng;
     if (g && g.type === 'Point' && g.coordinates) {

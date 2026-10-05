@@ -191,3 +191,11 @@ ok('a record answers to its native-script name', () => {
   assert.ok(P.matchesName(PKU, '北京大学') && P.matchesName(BEIJING, '北京'));
   assert.ok(!P.matchesName({ n: 'Peking University', t: 'poi' }, '北京'));
 });
+
+// A build in another language: n is French, nl the English name.
+const TOUR = { n: 'Tour Eiffel', nl: 'Eiffel Tower', t: 'poi', s: 'attraction' };
+ok('a record answers to its English name in a build in another language', () => {
+  assert.ok(score(TOUR, 'Eiffel Tower') >= 0 && score(TOUR, 'Tour Eiffel') >= 0);
+  assert.ok(V._szFormsContain(TOUR, norm('tower'), norm));
+  assert.ok(P.matchesName(TOUR, 'Eiffel Tower'));
+});

@@ -288,12 +288,14 @@ def paths_for(prefix: str, name: str, depth: int,
 def record_names(record: Record) -> list[str]:
     """Every name a record is indexed and matched under: ``n``, the name in
     its own script ``nn`` (when it differs: "北京大学" beside "Peking
-    University"), and an administrative area's other names ``alt``. The
+    University"), the English / Latin name ``nl`` of a build in another
+    language, and an administrative area's other names ``alt``. The
     viewers' recordNames is the same list (docs/search-records.md)."""
     names = [record.get("n") or ""]
-    nn = record.get("nn")
-    if isinstance(nn, str) and nn:
-        names.append(nn)
+    for k in ("nn", "nl"):
+        v = record.get(k)
+        if isinstance(v, str) and v:
+            names.append(v)
     alt = record.get("alt")
     if isinstance(alt, list):
         names += [a for a in alt if isinstance(a, str)]  # pyright: ignore[reportUnknownVariableType]

@@ -441,6 +441,13 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Override initial map zoom (default = derived "
                              "from bbox extent).")
     parser.add_argument("--name", help="Name for the map (shown in Kiwix)")
+    parser.add_argument("--language", default="en", metavar="XX",
+                        help="Language of the map (ISO 639-1, default en): map "
+                             "labels, search names, Wikipedia articles and Wikidata "
+                             "descriptions in it where OSM / Wikipedia have them, the "
+                             "place's own name otherwise; the ZIM's Language "
+                             "metadata. Tiles must carry name:XX: tilemaker builds "
+                             "add it (streetzim/languages.py).")
     parser.add_argument("--output", "-o", help="Output ZIM file path")
     parser.add_argument("--keep-temp", action="store_true", help="Keep temporary files")
     parser.add_argument("--max-zoom", type=int, default=14, help="Maximum zoom level (default: 14)")
@@ -1663,6 +1670,11 @@ def _build_map_config(
         "maxZoom": args.max_zoom,
         "buildDate": _time.strftime("%Y/%m"),
     }
+    lang = getattr(args, "language", "en") or "en"
+    if lang != "en":
+        # The viewer labels the map in it (name:<language>, else the
+        # place's own name).
+        map_config["language"] = lang
     if bbox:
         map_config["bounds"] = bbox
     if satellite_dir and os.path.isdir(str(satellite_dir)):
@@ -1728,8 +1740,15 @@ def _write_zim(
         # After every filter and merge that rewrites the file (bbox cut of
         # a search cache, addresses, Overture), so a street is merged
         # from the pieces inside this region only.
-        from streetzim.search_extract import merge_streets_in_file
+        from streetzim.search_extract import localize_features_file, merge_streets_in_file
         merge_streets_in_file(search_features)
+        # Names in the build's language (display_* fields; English builds:
+        # untouched).
+        localize_features_file(search_features, getattr(args, "language", "en") or "en")
+    elif search_features and (getattr(args, "language", "en") or "en") != "en":
+        from streetzim.search_extract import localize_feature
+        for _f in search_features:
+            localize_feature(_f, args.language)
     create_zim(
         output_path=output_path,
         tiles=tiles,
@@ -1830,6 +1849,15 @@ def _print_summary(*, bbox, name, output_path, stats, total_tile_count):
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+    from streetzim import languages as _languages
+    try:
+        args.language = _languages.check(args.language)
+    except ValueError as e:
+        parser.error(str(e))
+    if args.language != "en":
+        # The tile profile writes name:<language> (and search extraction
+        # keeps it) when asked through this variable.
+        os.environ["STREETZIM_TILE_LANGUAGES"] = args.language
     if args.cpus is not None and args.cpus < 1:
         parser.error("--cpus must be at least 1")
     _cpus.set_build_cpus(args.cpus)

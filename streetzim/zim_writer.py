@@ -118,19 +118,29 @@ def _title_text(text):
     return re.sub(r" {2,}", " ", out).strip()
 
 
+def shown_names(feat):
+    """(n, nn, nl): the names a search record and page show. A build in
+    another language (search_extract.localize_feature) has display_*
+    fields; otherwise the name and its native-script form."""
+    if feat.get("display_name"):
+        return feat["display_name"], feat.get("display_native"), feat.get("display_latin")
+    return feat["name"], feat.get("name_native"), None
+
+
 def kiwix_page_title(feat):
     """A search page's title (what Kiwix suggests). An admin area's name
     gets its type when the name does not say it: "Alexandria (city)",
     but "Arlington County"."""
-    name = _title_text(feat["name"])
+    shown, native, _latin = shown_names(feat)
+    name = _title_text(shown)
     if feat.get("type") == "admin":
         label = (feat.get("subtype") or "").strip()
         if label and not _names_type(name, label):
             name = f"{name} ({label})"
     # The name in its own script too, so Kiwix's title search finds
     # "北京大学" as well as "Peking University" (one title, no redirect).
-    if feat.get("name_native"):
-        name = f"{name} · {_title_text(feat['name_native'])}"
+    if native:
+        name = f"{name} · {_title_text(native)}"
     return name
 
 
@@ -150,7 +160,7 @@ def kiwix_alt_titles(feat):
     Alexandria" never found a page titled "Alexandria (city)"."""
     if feat.get("type") != "admin":
         return []
-    name = _title_text(feat["name"])
+    name = _title_text(shown_names(feat)[0])
     label = (feat.get("subtype") or "").strip()
     cands = []
     if label in FORMAL_OF_LABELS and not _names_type(name, label):
@@ -198,7 +208,7 @@ def kiwix_page_hash(feat):
     the area's point."""
     lat, lon = feat["lat"], feat["lon"]
     if feat.get("type") == "admin":
-        label_q = urllib.parse.quote(feat["name"], safe="")
+        label_q = urllib.parse.quote(shown_names(feat)[0], safe="")
         bb = feat.get("bbox")
         if bb and len(bb) == 4:
             from streetzim.admin_areas import fit_zoom
@@ -241,7 +251,7 @@ def search_page(feat, i):
     enrich = {k: feat[k] for k in ("ws", "p", "soc", "brand", "wd")
               if feat.get(k)}
     page_html = search_detail_html(
-        feat["name"], label, feat["lat"], feat["lon"], kiwix_page_hash(feat),
+        shown_names(feat)[0], label, feat["lat"], feat["lon"], kiwix_page_hash(feat),
         enrich=enrich, also_known_as=also, title=kiwix_page_title(feat),
         record_type=feat.get("type"), credit=credit)
     return f"search/{slug}.html", kiwix_page_title(feat), page_html
@@ -456,9 +466,8 @@ def xapianbuilder_doc(feat, path, *, language="eng", target_path=""):
     kiwix_page_title. ``target_path``
     (title index only): the page a redirect title points at."""
     import html as _html
-    body_parts = [feat.get("name") or ""]
-    if feat.get("name_native"):
-        body_parts.append(feat["name_native"])
+    body_parts = [n for n in (feat.get("name") or "", *shown_names(feat)) if n]
+    body_parts = list(dict.fromkeys(body_parts))
     for k in ("location", "type", "subtype", "cat", "brand"):
         v = feat.get(k)
         if v:
@@ -902,7 +911,11 @@ def _create_zim(
     # the builder/none modes; in 'builder' mode we'll inject pre-built
     # glass DBs directly, in 'none' mode we ship without Xapian and
     # rely on the in-ZIM places.html (JSON search-data) for search.
-    creator.config_indexing(xapian_mode == "libzim", "en")
+    # The build's language (create_osm_zim --language): the full-text
+    # index's stemming and the ZIM Language metadata.
+    from streetzim.languages import iso639_3
+    _lang = (map_config or {}).get("language") or "en"
+    creator.config_indexing(xapian_mode == "libzim", _lang)
     creator.config_clustersize(cluster_size)
     # Cap Python's default worker count; callers can reduce it for hosts
     # where compression contexts and the queue consume too much memory.
@@ -932,7 +945,8 @@ def _create_zim(
         # --xapian=builder: xapianbuilder's inputs, what libzim's indexer
         # would take in a --xapian=libzim build (the Kiwix pages, their
         # redirect titles, the bundled Wikipedia articles).
-        corpus = (XapianCorpus(os.path.join(chunk_tmp, "xapian-corpus"))
+        corpus = (XapianCorpus(os.path.join(chunk_tmp, "xapian-corpus"),
+                               language=iso639_3(_lang))
                   if xapian_mode == "builder" else None)
         _add_viewer(creator, MapItem, maplibre_js_path=maplibre_js_path,
                     maplibre_css_path=maplibre_css_path,
@@ -974,6 +988,7 @@ def _create_zim(
                                             metadata=metadata))
         _add_metadata(creator, name=name, description=description,
                       overture_sources=overture_sources, xapian_mode=xapian_mode,
+                      language=iso639_3(_lang),
                       metadata=metadata, illustration=illustration,
                       has_satellite=bool(satellite_dir and os.path.isdir(satellite_dir)),
                       satellite_source=map_config.get("satelliteSource"),
@@ -1126,7 +1141,7 @@ def _tile_credit(tile_metadata):
 
 
 def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
-                  metadata=None, illustration=None, has_satellite=True,
+                  language="eng", metadata=None, illustration=None, has_satellite=True,
                   has_terrain=True, has_wiki=True, satellite_source=None,
                   tile_credit=None):
     """ZIM metadata (Name, Title, Tags, License, ...) and the 48x48 illustration.
@@ -1159,7 +1174,7 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
     creator.add_metadata("Description", md.get("Description", description))
     if md.get("LongDescription"):
         creator.add_metadata("LongDescription", md["LongDescription"])
-    creator.add_metadata("Language", "eng")
+    creator.add_metadata("Language", language)
     creator.add_metadata("Publisher", md.get("Publisher", "create_osm_zim"))
     creator.add_metadata("Creator", md.get("Creator", "OpenStreetMap contributors"))
     import time as _time
@@ -2171,12 +2186,15 @@ def search_record(feat, wiki=None):
     ZIM. Display and routing read the same field, so 1 m is the floor:
     SEARCH_COORD_DP=7 restores ~1 cm if that ever bites. (Shared with
     ops/cloud/swap_viewer_rust.py --add-admin-areas.)"""
-    rec = {"n": feat["name"], "t": feat.get("type", ""), "s": feat.get("subtype", ""),
+    shown, native, latin = shown_names(feat)
+    rec = {"n": shown, "t": feat.get("type", ""), "s": feat.get("subtype", ""),
            "a": round(feat["lat"], _SEARCH_COORD_DP),
            "o": round(feat["lon"], _SEARCH_COORD_DP),
            "l": feat.get("location", "")}
-    if feat.get("name_native"):
-        rec["nn"] = feat["name_native"]
+    if native:
+        rec["nn"] = native
+    if latin:
+        rec["nl"] = latin
     for ov_key in ("ws", "p", "soc", "brand", "wd", "cat", "source"):
         v = feat.get(ov_key)
         if v:
@@ -3059,9 +3077,11 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup,
     from collections import defaultdict
     chunks = defaultdict(list)
     for f in search_features:
-        rec = {"n": f["name"], "t": f["type"], "s": f.get("subtype", ""),
+        _shown, _native, _latin = shown_names(f)
+        rec = {"n": _shown, "t": f["type"], "s": f.get("subtype", ""),
                "a": f["lat"], "o": f["lon"], "l": f.get("location", ""),
-               **({"nn": f["name_native"]} if f.get("name_native") else {}),
+               **({"nn": _native} if _native else {}),
+               **({"nl": _latin} if _latin else {}),
                **admin_record_fields(f)}
         if f.get("type") == "admin":
             # The relation's own tags, as resolved (see _search_bucket).

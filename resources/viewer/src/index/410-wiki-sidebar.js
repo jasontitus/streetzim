@@ -338,7 +338,7 @@ function initWikiSidebar(map, config) {
       if (!qid || !qid.match(/^Q\d+$/) || seen[qid]) continue;
       seen[qid] = true;
 
-      var name = props['name:latin'] || props.name || props.label || '';
+      var name = szLabelOf(props) || props.label || '';
       if (!name) continue;
 
       var cls = props['class'] || '';

@@ -25,6 +25,7 @@ Optional keys (absent when empty):
 | key | meaning |
 |---|---|
 | `nn` | the name in its own script when `n` is another one: `"北京大学"` beside `n` `"Peking University"`. From the tiles' `name` (OpenFreeMap) or `name_int` (StreetZim's tilemaker, written when OSM's `name` differs from `name:latin`); only when it differs from `n` once folded and has 2+ characters |
+| `nl` | a build in another language (`--language`): the English / Latin name when it differs from `n` and `nn` (`n` is then OSM's `name:<language>`, else the place's own name) |
 | `w` | Wikipedia title from the OSM `wikipedia` tag, for example `en:Lincoln_Memorial` |
 | `wsrc` | `"wd"` when `w` was backfilled from the Wikidata Q-ID instead |
 | `q` | Wikidata Q-ID |
@@ -72,9 +73,18 @@ Extraction output and search caches are not merged. In Monaco this takes
 458 street records down to 319; every street name and every
 Wikipedia-linked street is kept.
 
+A build in another language (`create_osm_zim --language fr`) asks the
+tiles for `name:fr` (`STREETZIM_TILE_LANGUAGES`, read by the tilemaker
+profile) and extraction keeps it in `names`; just before the ZIM is
+written, `localize_features_file` adds `display_name` / `display_native` /
+`display_latin`, from which the record's `n`, `nn` and `nl` are written.
+The feature's own `name` stays, because dedup, street merging and the
+Wikipedia cross-references key on it. The map labels follow the same rule
+(map-config `language`, `szLabelField` in the viewer).
+
 Every name of a record is indexed and matched the same way
 (`record_names` in `cloud/search_shards.py`, `_szRecordNames` in the
-viewer): `n`, the native-script `nn`, and an admin area's `alt`. Kiwix
+viewer): `n`, the native-script `nn`, `nl`, and an admin area's `alt`. Kiwix
 pages are titled with both names ("Haidian · 海淀区"); libzim's title
 index matches CJK text by n-gram, so Kiwix also finds them by any part
 ("淀区"). The map viewer matches by word prefix: "北京" finds 北京大学,

@@ -52,6 +52,8 @@ var SZ_PLACE_SUB_BONUS = { city: 200, county: 80, region: 60, town: 30,
 function _szRecordNames(rec) {
   var names = [rec.n];
   if (typeof rec.nn === 'string' && rec.nn) names.push(rec.nn);
+  // A build in another language: the English / Latin name too.
+  if (typeof rec.nl === 'string' && rec.nl) names.push(rec.nl);
   return Array.isArray(rec.alt) ? names.concat(rec.alt) : names;
 }
 
@@ -61,6 +63,7 @@ function _szSearchForms(rec, norm) {
   if (rec.t !== 'admin') {
     var plain = [norm(String(rec.n || ''))];
     if (typeof rec.nn === 'string' && rec.nn) plain.push(norm(rec.nn));
+    if (typeof rec.nl === 'string' && rec.nl) plain.push(norm(rec.nl));
     return plain;
   }
   var names = _szRecordNames(rec);
@@ -99,8 +102,11 @@ function _szWordsScore(name, words, admin) {
 function _szFormsContain(rec, qNorm, norm) {
   if (!qNorm) return true;
   if (rec.t !== 'admin') {
-    if (norm(String(rec.n || '')).indexOf(qNorm) >= 0) return true;
-    return typeof rec.nn === 'string' && norm(rec.nn).indexOf(qNorm) >= 0;
+    var plainForms = _szSearchForms(rec, norm);
+    for (var pf = 0; pf < plainForms.length; pf++) {
+      if (plainForms[pf].indexOf(qNorm) >= 0) return true;
+    }
+    return false;
   }
   var words = qNorm.split(/\s+/).filter(function(w) { return w; });
   var forms = _szSearchForms(rec, norm);
@@ -1235,7 +1241,8 @@ var SEARCH_SHARDS = (function () {
         var r = recs[i];
         if (!r || typeof r.a !== 'number' || typeof r.o !== 'number') continue;
         if (normalizeText(r.n || '') !== want
-            && normalizeText(r.nn || '') !== want) continue;
+            && normalizeText(r.nn || '') !== want
+            && normalizeText(r.nl || '') !== want) continue;
         var d = _haversineMetersStrip(lat, lon, r.a, r.o);
         if (d < bestD) { bestD = d; best = r; }
       }

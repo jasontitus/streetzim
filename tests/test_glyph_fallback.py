@@ -148,6 +148,17 @@ def text_field_keys(src: str) -> set[str]:
     found = 0
     for m in re.finditer(r"""(["']?)text-field\1\s*[:,]""", src):
         found += 1
+        if src[m.end():m.end() + 40].lstrip().startswith("szLabelField()"):
+            # The viewer's label rule (130-lowzoom-lakes.js): its literal
+            # gets, plus name:<language> ("name:" + SZ_LANG).
+            body = src[src.index("function szLabelField()"):]
+            body = body[:body.index("\n}\n")]
+            assert '["get", "name:" + SZ_LANG]' in body
+            body = body.replace('["get", "name:" + SZ_LANG]', "")
+            keys |= {g[2] for g in re.findall(
+                r"""\[\s*(["'])get\1\s*,\s*(["'])(.*?)\2\s*[\],]""", body, re.S)}
+            keys.add("name:<language>")
+            continue
         expr = _js_value(src, m.end())
         gets = re.findall(r"""\[\s*(["'])get\1\s*,\s*(["'])(.*?)\2\s*[\],]""", expr, re.S)
         assert len(gets) == len(re.findall(r"""(["'])get\1""", expr)), \
@@ -172,7 +183,18 @@ def test_text_field_parser_sees_through_quotes_and_line_breaks():
 def test_label_keys_are_what_the_style_displays():
     src = (ROOT / "resources" / "viewer" / "index.html").read_text(encoding="utf-8")
     keys = text_field_keys(src)
-    assert keys and keys <= gf.LABEL_KEYS, keys - gf.LABEL_KEYS
+    assert keys and keys - {"name:<language>"} <= gf.LABEL_KEYS, keys - gf.LABEL_KEYS
+    # A build in another language scans name:<language> too.
+    import os
+    old = os.environ.get("STREETZIM_TILE_LANGUAGES")
+    os.environ["STREETZIM_TILE_LANGUAGES"] = "fr"
+    try:
+        assert gf.label_keys() == gf.LABEL_KEYS | {"name:fr"}
+    finally:
+        if old is None:
+            os.environ.pop("STREETZIM_TILE_LANGUAGES")
+        else:
+            os.environ["STREETZIM_TILE_LANGUAGES"] = old
 
 
 def test_corrupt_tiles_are_skipped_and_counted():

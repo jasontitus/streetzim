@@ -14,6 +14,15 @@ preferred_language_attribute = "name:latin"
 default_language_attribute = "name_int"
 -- Also write these languages if they differ - for example, { "de", "fr" }
 additional_languages = { }
+-- StreetZim: a build in another language (create_osm_zim --language xx)
+-- asks for its name:xx through STREETZIM_TILE_LANGUAGES ("fr", "fr,de").
+-- English builds leave it unset, so their tiles are unchanged.
+local _tile_langs = os.getenv("STREETZIM_TILE_LANGUAGES")
+if _tile_langs then
+	for lang in string.gmatch(_tile_langs, "[^,%s]+") do
+		if lang ~= preferred_language then table.insert(additional_languages, lang) end
+	end
+end
 --------
 
 -- Compatibility shims for tilemaker v2/v3 API differences
