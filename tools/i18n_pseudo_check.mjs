@@ -80,15 +80,15 @@ async function unbracketed(page, roots) {
       do { prev = s; s = s.replace(/\[[^[\]]*\]/g, ' '); } while (s !== prev);
       return s;
     };
+    const letters = (s) => /[A-Za-z]{2}/.test(s) && !unit.test(s.trim());
     const wordy = (t, mixed) => {
       const rest = leftover(t);
-      if (!/[A-Za-z]{2}/.test(rest)) return false;
-      if (mixed && rest !== t) {
-        // Data beside a translated label: every "·" part that has letters
-        // must hold a bracket, or be a part with no translated text at all.
-        return false;
-      }
-      return !unit.test(rest.trim());
+      if (!letters(rest)) return false;
+      if (!mixed || rest === t) return true;
+      // Data beside a translated label ("[restaurant] · Ville Haute"): judge
+      // each "·" part. A part with a bracket must be wholly bracketed
+      // ("Get [Directions]" fails); a part with none is data.
+      return t.split('\u00b7').some((part) => /\[/.test(part) && letters(leftover(part)));
     };
     for (const sel of roots) {
       for (const root of document.querySelectorAll(sel)) {

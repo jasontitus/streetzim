@@ -230,7 +230,7 @@ async function main() {
       const sEl = document.getElementById('routing-status');
       if (dEl) dEl.textContent = '';
       if (tEl) tEl.textContent = '';
-      if (sEl) sEl.textContent = '';
+      if (sEl) { sEl.textContent = ''; sEl.removeAttribute('data-state'); }  // no stale failure
       await new Promise(r => setTimeout(r, 300));
 
       window.streetzimRouting.open();

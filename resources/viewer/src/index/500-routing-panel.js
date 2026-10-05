@@ -31,10 +31,11 @@ function initRouting(map, config) {
   var statusEl = document.getElementById('routing-status');
   // The status line and what it means, as #routing-status[data-state], for
   // gates that must not read the (translated) text: loading, prompt,
-  // failed, no-route, done, or '' when empty.
+  // failed, no-route, done (a route was drawn; the text may be empty), or
+  // '' (nothing going on: cleared, or an input focused).
   function setRoutingStatus(text, state) {
     statusEl.textContent = text;
-    if (statusEl.setAttribute) statusEl.setAttribute('data-state', text ? (state || '') : '');
+    if (statusEl.setAttribute) statusEl.setAttribute('data-state', state || '');
   }
   var resultEl = document.getElementById('routing-result');
   var distEl = document.getElementById('route-distance');
@@ -257,6 +258,7 @@ function initRouting(map, config) {
     originInput.value = '';
     originInput._szHere = false;
     destInput.value = '';
+    setRoutingStatus('');   // and its data-state: a cleared panel is not "failed"
     originResultsEl.style.display = 'none';
     destResultsEl.style.display = 'none';
     resultEl.style.display = 'none';

@@ -43,7 +43,7 @@ function make(opts = {}) {
       destMarker = null, lastRoute = null, routeDrawn = false;
   var travelBtns = {}; var driveMode = { active: false, exit() {}, setRoute() {} };
   var __routeDebugLabel, __routeDebugPops;
-  function setRoutingStatus(t, st) { statusEl.textContent = t; statusEl.state = t ? (st || '') : ''; }
+  function setRoutingStatus(t, st) { statusEl.textContent = t; statusEl.state = st || ''; }
   function syncTravelButtons() {} function resetGoButtons() {} function setExpandHint() {}
   function stopRouteProgressIndicator() {} function startRouteProgressIndicator() {} function cancelInFlightRoute() {}
   function coordLabel(a, b) { return a + ',' + b; } function makeMarkerEl() { return {}; }
@@ -193,6 +193,19 @@ await ok('a failed route after a new start: markers where the ends now are', asy
   assert.strictEqual(a.state.status, 'Routing failed');
   assert.strictEqual(a.state.statusState, 'failed');
   assert.deepStrictEqual([a.state.destNode, a.state.dMarker], [20, [2, 2]]);
+});
+await ok('data-state: done after a clean route, reset by clear (no stale failure)', async () => {
+  const e = make(); const a = e.api;
+  a.setOriginFromLatLon(1, 1, 'O'); await snap(e, 'origin', 10);
+  a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20);
+  await route(e, null);
+  assert.strictEqual(a.state.statusState, 'no-route');
+  a.clearRoute();
+  assert.deepStrictEqual([a.state.status, a.state.statusState], ['', '']);
+  a.setOriginFromLatLon(1, 1, 'O'); await snap(e, 'origin', 10);
+  a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20);
+  await route(e, {});
+  assert.deepStrictEqual([a.state.status, a.state.statusState], ['', 'done']);
 });
 await ok('clear forgets moved ends', async () => {
   const e = await movedDest(); const a = e.api;

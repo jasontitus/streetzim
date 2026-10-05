@@ -221,7 +221,7 @@ _LIT = re.compile(r"'(?:\\.|[^'\\\n])*'|\"(?:\\.|[^\"\\\n])*\"|`(?:\\.|[^`\\])*`
 # A sink, then the extent of what flows into it: an assignment's right-hand
 # side (to the end of the statement) or a call's arguments.
 _SINK_PROPS = r"(?:textContent|innerText|title|placeholder|innerHTML|value)"
-_ASSIGN = re.compile(r"\." + _SINK_PROPS + r"\s*=(?!=)")
+_ASSIGN = re.compile(r"\." + _SINK_PROPS + r"\s*\+?=(?!=)")
 _SINK_CALLS = (r"\b(?:setStatus|setRoutingStatus|_showFindToast|showFatalError|createEl|_detailActionBtn"
                r"|_detailFactRow|makeChip|szFatalPage|createTextNode)\(|\bsetAttribute\(\s*'(?:aria-label|title"
                r"|placeholder|alt)'|\bfacts\.push\(|\badd\('(?:h1|p|li|button|summary)'")
@@ -293,7 +293,7 @@ def _strip_comments(src: str) -> str:
 def _sunk(src: str, name: str) -> int | None:
     """Offset of a sink that takes variable `name` (or `name[…]`) directly."""
     nm = re.escape(name)
-    m = (re.search(r"\." + _SINK_PROPS + r"\s*=(?!=)\s*(?:[^;\n]*[?:]\s*)?" + nm + r"\b", src)
+    m = (re.search(r"\." + _SINK_PROPS + r"\s*\+?=(?!=)\s*(?:[^;\n]*[?:]\s*)?" + nm + r"\b", src)
          or re.search(r"(?:" + _SINK_CALLS + r")\s*(?:[^;)\n]*,\s*)?" + nm + r"\b", src))
     return m.start() if m else None
 
@@ -350,3 +350,5 @@ def test_js_lint_catches_a_bare_literal() -> None:
         "line 1: L = 'Drive' (sunk later)"]
     assert js_misses("var key = 'streetzim.units';\nel.value = key;") == []
     assert js_misses("input.value = '';") == []
+    assert js_misses("el.innerHTML += '<b>Hello world</b>';") == ["line 1: '<b>Hello world</b>'"]
+    assert js_misses("el.textContent += ' more text';") == ["line 1: ' more text'"]
