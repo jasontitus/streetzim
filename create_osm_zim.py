@@ -1698,6 +1698,11 @@ def _overture_releases(args, overture_themes):
     return {t: overture_release(paths.get(t)) for t in (overture_themes or [])}
 
 
+def _wikidata_default_cache():
+    from wikidata_cache import DEFAULT_CACHE_DIR
+    return DEFAULT_CACHE_DIR
+
+
 def _write_zim(
         *, address_count, args, bbox_str, fonts, map_config, maplibre_css, maplibre_js,
         mbtiles_path, name, output_path, overture_sources, overture_themes,
@@ -1736,6 +1741,8 @@ def _write_zim(
         tile_count=total_tile_count if use_streaming else None,
         bbox=parse_bbox(bbox_str) if bbox_str else None,
         wikidata_data=wikidata_data,
+        # For the tiles' Q-IDs past the extract's edge (_add_wikidata).
+        wikidata_cache=(args.wikidata_cache or _wikidata_default_cache()) if wikidata_data else None,
         routing_graph_path=routing_graph_path,
         routing_graph_chunk_mb=int(getattr(args, 'chunk_graph_mb', 0) or 0),
         split_hot_search_chunks_mb=int(getattr(args, 'split_hot_search_chunks_mb', 0) or 0),

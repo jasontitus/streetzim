@@ -168,3 +168,57 @@ def test_selection_uses_available_detail_zoom(tmp_path, monkeypatch, zooms, expe
 
     monkeypatch.setattr(wc, "_run_sparql", forbidden)
     assert set(wc.extract_qids_from_mbtiles(mbtiles)) == ({expected} if expected else set())
+
+
+@pytest.mark.parametrize("give_cache", [True, False])
+def test_tile_qids_past_the_extracts_edge_come_from_the_cache(tmp_path, give_cache):
+    """Tiles are whole and reach past the extract's edge, so they carry
+    Q-IDs the extract's own selection lacks. Those are read from the cache
+    at the ZIM step, as when the whole cache was loaded (D.C.'s shipped ZIM:
+    27 of its 1,825 entries); Q-IDs in no tile still stay out."""
+    from streetzim.zim_writer import _add_wikidata
+    tiles = _mbtiles(tmp_path / "t.mbtiles", [(14, 0, 0, {
+        "place": [_feature({"name": "Inside", "class": "village", "wikidata": "Q110"}),
+                  _feature({"name": "Over the edge", "class": "town", "wikidata": "Q120"}),
+                  _feature({"name": "Never cached", "class": "town", "wikidata": "Q130"})],
+    })])
+    cache_dir = tmp_path / "cache"
+    wc.save_cache(cache_dir, {q: {"label": q} for q in ("Q110", "Q120", "Q999")})
+    selected = wc.load_cache_for_zim(cache_dir, qids={"Q110"})
+
+    class Creator:
+        def add_item(self, item):
+            pass
+
+    written = _add_wikidata(
+        Creator(), lambda *args: args, tiles=tiles, mbtiles_path=None,
+        bbox=(-180, 85, -179, 85.1), wikidata_data=selected, max_zoom=14,
+        wikidata_cache=cache_dir if give_cache else None)
+    assert set(written) == ({"Q110", "Q120"} if give_cache else {"Q110"})
+
+
+@pytest.mark.parametrize("given", [None, "/caches/wd"])
+def test_the_build_hands_the_zim_writer_its_wikidata_cache(monkeypatch, given):
+    import create_osm_zim as builder
+
+    class Args:
+        wikidata_cache = given
+
+        def __getattr__(self, name):          # every other option: off
+            return 0
+
+    seen = {}
+    monkeypatch.setattr(builder, "create_zim", lambda *a, **k: seen.update(k))
+    common = {
+        "address_count": 0, "args": Args(), "bbox_str": None, "fonts": None,
+        "map_config": {}, "maplibre_css": None, "maplibre_js": None, "mbtiles_path": None,
+        "name": "x", "output_path": "x.zim", "overture_sources": None,
+        "overture_themes": None, "routing_graph_path": None, "satellite_dir": None,
+        "satellite_format": "webp", "satellite_max_zoom": None, "search_features": None,
+        "terrain_dir": None, "terrain_max_zoom": None, "tile_metadata": {}, "tiles": {},
+        "tmpdir": ".", "total_tile_count": 0, "use_streaming": False,
+        "wiki_cross_refs": None, "zim_illustration": None, "zim_metadata": {}}
+    builder._write_zim(wikidata_data={"Q1": {}}, **common)
+    assert str(seen["wikidata_cache"]) == str(given or wc.DEFAULT_CACHE_DIR)
+    builder._write_zim(wikidata_data=None, **common)
+    assert seen["wikidata_cache"] is None
