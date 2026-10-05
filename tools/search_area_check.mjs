@@ -164,7 +164,13 @@ try {
     // Tap Food & Drink while the Gas camera flight is under way: wait for
     // the Gas results (their flight starts with them), then tap.
     await tap(p, 'fuel');
-    await p.waitForFunction(() => /Gas/.test((document.querySelector('#find-results-strip span') || {}).textContent || ''),
+    // The strip names its chip in data-chip (2026-10; the label is in the
+    // map's language); older viewers only in the English label.
+    await p.waitForFunction(() => {
+      const s = document.getElementById('find-results-strip');
+      if (s && s.dataset.chip) return s.dataset.chip === 'fuel';
+      return /Gas/.test((document.querySelector('#find-results-strip span') || {}).textContent || '');
+    },
       { timeout: 30000 });
     await tap(p, 'food');
     await settle(p);

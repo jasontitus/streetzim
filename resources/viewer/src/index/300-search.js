@@ -324,7 +324,7 @@ function _szPlacePopupDOM(lat, lon, name, enrich) {
     var cached = window.__streetzimLastLoc;
     var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
     if (fresh) {
-      window.streetzimRouting.setOrigin(cached.lat, cached.lon, 'Current location');
+      window.streetzimRouting.setOrigin(cached.lat, cached.lon, SZ_HERE);
     } else if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         function(pos) {
@@ -332,7 +332,7 @@ function _szPlacePopupDOM(lat, lon, name, enrich) {
             lat: pos.coords.latitude, lon: pos.coords.longitude, ts: Date.now()
           };
           window.streetzimRouting.setOrigin(
-            pos.coords.latitude, pos.coords.longitude, 'Current location');
+            pos.coords.latitude, pos.coords.longitude, SZ_HERE);
         },
         function() {},
         { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 });
@@ -373,9 +373,13 @@ function initSearch(map) {
     .then(function(data) {
       manifest = data;
       input.placeholder = 'Search ' + data.total.toLocaleString() + ' places...';
+      // State for the smoke gates, which must not read the (translatable)
+      // placeholder: ready / unavailable.
+      input.setAttribute('data-sz-search', 'ready');
     })
     .catch(function() {
       input.placeholder = 'Search unavailable';
+      input.setAttribute('data-sz-search', 'unavailable');
       input.disabled = true;
     });
 
@@ -1031,6 +1035,7 @@ var SEARCH_SHARDS = (function () {
       while (resultsEl.firstChild) resultsEl.removeChild(resultsEl.firstChild);
       var loadingRow = document.createElement('div');
       loadingRow.className = 'search-result';
+      loadingRow.setAttribute('data-sz-pending', '1');  // not a result (gates)
       loadingRow.style.pointerEvents = 'none';
       loadingRow.style.opacity = '0.7';
       loadingRow.textContent = 'Searching…';

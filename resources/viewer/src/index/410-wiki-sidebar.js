@@ -151,6 +151,9 @@ function initWikiSidebar(map, config) {
     setWikiMarkers(items);
     if (!items.length) {
       var empty = createEl('div', 'wiki-empty-state');
+      // data-wiki-empty: which empty state, for the smoke gates (the text
+      // is translatable): loading / none.
+      empty.setAttribute('data-wiki-empty', WIKI_GEO_INDEX ? 'none' : 'loading');
       if (!WIKI_GEO_INDEX) {
         // Don't claim the area is empty when we simply have not loaded the
         // index yet — that misreading is what made california look broken.
@@ -387,6 +390,7 @@ function initWikiSidebar(map, config) {
       countEl.textContent = '';
       listEl.textContent = '';
       var empty = createEl('div', 'wiki-empty-state');
+      empty.setAttribute('data-wiki-empty', 'none');
       empty.appendChild(createEl('div', 'wiki-empty-state-icon', '\uD83C\uDF0D'));
       empty.appendChild(createEl('div', 'wiki-empty-state-text', 'No Wikipedia entries visible at this zoom level. Try zooming in to discover places.'));
       listEl.appendChild(empty);
@@ -411,6 +415,7 @@ function initWikiSidebar(map, config) {
 
       if (enriched.length === 0) {
         var empty = createEl('div', 'wiki-empty-state');
+        empty.setAttribute('data-wiki-empty', 'none');
         empty.appendChild(createEl('div', 'wiki-empty-state-icon', '\uD83D\uDCD6'));
         empty.appendChild(createEl('div', 'wiki-empty-state-text', 'Features found but no Wikipedia data available for this area.'));
         listEl.appendChild(empty);

@@ -12,7 +12,7 @@
     // input plus "loading routing data…" status reads as "the click
     // did nothing." The retry below will then snap to the nearest
     // node and overwrite the marker once the graph is up.
-    var visible = label || coordLabel(lat, lon);
+    var visible = szIsHere(label) ? szHereLabel() : (label || coordLabel(lat, lon));
     if (which === 'origin') originInput.value = visible;
     else                    destInput.value   = visible;
     statusEl.textContent = 'Loading routing data…';
@@ -81,14 +81,14 @@
   async function setOriginFromLatLon(lat, lon, label) {
     // Race guard: a "Directions to here" click on a place-detail
     // popup fires getCurrentPosition, then on resolve calls back into
-    // this with label='Current location'. If the user has clicked
+    // this with label=SZ_HERE (500). If the user has clicked
     // into the origin field and started typing in the meantime, we'd
     // clobber their input AND auto-fire a route from current location
     // before they even finished picking their actual origin. Skip
-    // GPS auto-fills (the only callers that pass 'Current location')
+    // GPS auto-fills (the only callers that pass SZ_HERE)
     // when the input is being edited.
-    if (label === 'Current location'
-        && window.__streetzim_originBeingEdited) {
+    var here = szIsHere(label);
+    if (here && window.__streetzim_originBeingEdited) {
       return;
     }
     if (queueGraphPick('origin', lat, lon, label)) return;
@@ -111,7 +111,8 @@
     var oLon = snapped.lon;
     originCoordE7 = [Math.round(oLat * 1e7), Math.round(oLon * 1e7)];
     originSnap = { node: originNode, coordE7: originCoordE7 };
-    originInput.value = label || coordLabel(oLat, oLon);
+    originInput.value = here ? szHereLabel() : (label || coordLabel(oLat, oLon));
+    originInput._szHere = here;  // read by autoSelectOnFocus
     // Origin is now committed (typeahead pick, map click, GPS button,
     // or queued-pick replay). Clear the editing flag so future GPS
     // auto-fills aren't blocked indefinitely.
@@ -188,7 +189,8 @@
     if (driveMode.active) driveMode.exit();
     resetGoButtons();
     var o = originPick, d = destPick;
-    var oLabel = originInput.value, dLabel = destInput.value;
+    var oLabel = originInput._szHere && originInput.value === szHereLabel() ? SZ_HERE : originInput.value;
+    var dLabel = destInput.value;
     if (o) originNode = -1;
     if (d) destNode = -1;
     if (o || d) {
@@ -518,7 +520,8 @@
     // don't re-select on every click.
     input.addEventListener('focus', function() {
       setTimeout(function() {
-        if (input.value === 'Current location') {
+        if (input._szHere && input.value === szHereLabel()) {
+          input._szHere = false;
           input.value = '';
         } else if (document.activeElement === input) {
           try { input.select(); } catch (e) {}
@@ -575,7 +578,7 @@
     var cached = window.__streetzimLastLoc;
     var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
     if (fresh) {
-      setOriginFromLatLon(cached.lat, cached.lon, 'Current location');
+      setOriginFromLatLon(cached.lat, cached.lon, SZ_HERE);
       return;
     }
     if (!navigator.geolocation) {
@@ -588,7 +591,7 @@
         var lat = pos.coords.latitude;
         var lon = pos.coords.longitude;
         window.__streetzimLastLoc = { lat: lat, lon: lon, ts: Date.now() };
-        setOriginFromLatLon(lat, lon, 'Current location');
+        setOriginFromLatLon(lat, lon, SZ_HERE);
       },
       function(err) {
         statusEl.textContent = 'Location denied or unavailable';

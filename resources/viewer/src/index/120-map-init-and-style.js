@@ -565,7 +565,7 @@ if (!window.__szUnsupported) fetchConfig(1)
         }
         if (origMatch && routingApi && typeof routingApi.setOrigin === 'function') {
           var oLat = parseFloat(origMatch[1]), oLon = parseFloat(origMatch[2]);
-          routingApi.setOrigin(oLat, oLon, 'Current location');
+          routingApi.setOrigin(oLat, oLon, SZ_HERE);
           // Stash on the window so the next "Directions to here" popup
           // (or any in-session action) can reuse the fix without asking
           // the browser for a new one.

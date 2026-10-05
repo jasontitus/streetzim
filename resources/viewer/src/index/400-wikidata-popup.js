@@ -175,7 +175,7 @@ function initWikidataPopups(map, config) {
       var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
       if (fresh) {
         window.streetzimRouting.setOrigin(
-          cached.lat, cached.lon, 'Current location');
+          cached.lat, cached.lon, SZ_HERE);
       } else if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           function(pos) {
@@ -183,7 +183,7 @@ function initWikidataPopups(map, config) {
               lat: pos.coords.latitude, lon: pos.coords.longitude, ts: Date.now()
             };
             window.streetzimRouting.setOrigin(
-              pos.coords.latitude, pos.coords.longitude, 'Current location');
+              pos.coords.latitude, pos.coords.longitude, SZ_HERE);
           },
           function() {},
           { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 });

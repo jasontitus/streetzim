@@ -95,11 +95,15 @@ try {
   // sidebar said there were no Wikipedia places and never recovered. A fixed
   // viewer either shows the loading state or fills in.
   await sleep(6000);
+  // The empty states carry data-wiki-empty ("loading" / "none") since
+  // 2026-10, when their text became the map's language; the English
+  // patterns cover older viewers.
   const wiki = await page.evaluate(() => {
     const txt = (document.body.innerText || '');
+    const state = s => !!document.querySelector('[data-wiki-empty="' + s + '"]');
     return {
-      falseEmpty: /no wikipedia/i.test(txt),
-      loadingOrLoaded: /loading wikipedia/i.test(txt) ||
+      falseEmpty: state('none') || /no wikipedia/i.test(txt),
+      loadingOrLoaded: state('loading') || /loading wikipedia/i.test(txt) ||
         !!(window.WIKI_GEO_INDEX && Object.keys(window.WIKI_GEO_INDEX).length),
       indexSize: window.WIKI_GEO_INDEX ? Object.keys(window.WIKI_GEO_INDEX).length : -1,
     };
@@ -225,8 +229,11 @@ try {
       waitUntil: 'domcontentloaded', timeout: 60_000 });
     await sleep(3000);
     const clicked = await page.evaluate(() => {
-      const els = [...document.querySelectorAll('button,[data-chip],[data-chip-id],.chip')];
-      const t = els.find(e => /food|drink|restaurant/i.test(e.textContent || '') ||
+      // By chip id first: since 2026-10 the label is in the map's language.
+      const els = [...document.querySelectorAll('button,[data-chip],[data-chip-id],[data-cat],.chip')];
+      const t = els.find(e => /^(food|restaurants)$/.test(e.getAttribute('data-chip')
+                                                          || e.getAttribute('data-cat') || '')) ||
+                els.find(e => /food|drink|restaurant/i.test(e.textContent || '') ||
                               /food/i.test(e.getAttribute('data-chip') || ''));
       if (t) { t.click(); return (t.textContent || '').trim(); }
       return null;

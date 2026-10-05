@@ -412,32 +412,41 @@ async function main() {
     // Wait for the search manifest before typing. doSearch() returns silently
     // while the manifest is still loading, so on a 22 GB ZIM the keystrokes
     // could all land before it was ready and nothing ever rendered — the
-    // likely real cause of central-asia's 2026-09-11 timeout. The placeholder
-    // flips to "Search N places..." (or "Search unavailable") once it loads.
+    // likely real cause of central-asia's 2026-09-11 timeout. The input's
+    // data-sz-search flips to "ready" (or "unavailable") once it loads; the
+    // placeholder text is in the map's language, so it is only the fallback
+    // for viewers from before 2026-10 that set no attribute.
     await page.waitForFunction(() => {
       const i = document.getElementById('search-input');
-      const ph = (i && i.placeholder) || '';
+      if (!i) return false;
+      if (i.dataset.szSearch) return i.dataset.szSearch === 'ready' || i.dataset.szSearch === 'unavailable';
+      const ph = i.placeholder || '';
       return /^Search [\d,.\s\u00a0\u202f]+ places/.test(ph) || ph === 'Search unavailable';
     }, { timeout: 120_000 });
-    const ph = await page.evaluate(() => document.getElementById('search-input').placeholder);
-    if (ph === 'Search unavailable') throw new Error('search manifest failed to load');
+    const unavailable = await page.evaluate(() => {
+      const i = document.getElementById('search-input');
+      return i.dataset.szSearch ? i.dataset.szSearch === 'unavailable' : i.placeholder === 'Search unavailable';
+    });
+    if (unavailable) throw new Error('search manifest failed to load');
     await page.click('#search-input');
     await page.type('#search-input', SMOKE_SEARCH, { delay: 30 });
     // Require a REAL result row. This used to wait for any child of
     // #search-results, but the viewer renders a "Searching…" placeholder row
     // immediately and a "No results found" row on a miss — both are children —
     // so the check could not fail: korea-mongolia "passed" searching Palo Alto.
+    // The placeholder row carries data-sz-pending (its text is translated);
+    // the 'Searching…' comparison covers viewers from before 2026-10.
     await page.waitForFunction(() => {
       const r = document.getElementById('search-results');
       if (!r) return false;
       if (r.querySelector('.search-no-results')) return true;
       return Array.from(r.querySelectorAll('.search-result'))
-        .some(el => el.textContent.trim() !== 'Searching…');
+        .some(el => !el.hasAttribute('data-sz-pending') && el.textContent.trim() !== 'Searching…');
     }, { timeout: 60_000 });
     const res = await page.evaluate(() => {
       const r = document.getElementById('search-results');
       const rows = Array.from(r.querySelectorAll('.search-result'))
-        .filter(el => el.textContent.trim() !== 'Searching…');
+        .filter(el => !el.hasAttribute('data-sz-pending') && el.textContent.trim() !== 'Searching…');
       return { none: !!r.querySelector('.search-no-results'), n: rows.length,
                first: rows[0] ? rows[0].textContent.trim().slice(0, 60) : '' };
     });
@@ -518,10 +527,12 @@ async function main() {
     // built before it. Matching one label only would fail here on the other
     // — and every later step (Gas distance, directions, route) is nested
     // inside this branch, so a miss silently skips them all.
+    // Matched by chip id (data-cat): since 2026-10 the label is in the map's
+    // language. A viewer without the id falls back to the English label.
     let restaurants = null;
     for (const btn of chipButtons) {
-      const text = await page.evaluate(b => b.textContent, btn);
-      if (/food|restaurant/i.test(text)) { restaurants = btn; break; }
+      const [id, text] = await page.evaluate(b => [b.dataset.cat || '', b.textContent], btn);
+      if (id ? /^(food|restaurants)$/.test(id) : /food|restaurant/i.test(text)) { restaurants = btn; break; }
     }
     if (!restaurants) {
       fail('find chip exists', 'no chip labelled "Food & Drink" or "Restaurants"');
@@ -584,6 +595,14 @@ async function main() {
             const st = document.getElementById('status-text');
             const list = document.getElementById('results');
             if (!st) return false;
+            // data-state (2026-10) says what the translated text means;
+            // older viewers only have the English text.
+            const ds = st.dataset.state;
+            if (ds) {
+              if (ds === 'searching' || ds === 'loading') return false;
+              return ds === 'done' || ds === 'empty' || ds === 'error'
+                     || (list && list.children.length > 0);
+            }
             const t = st.textContent || '';
             if (/^\s*Searching/i.test(t)) return false;
             return /match|nearest|No |Couldn/i.test(t)
@@ -696,7 +715,9 @@ async function main() {
         try {
           await page.waitForFunction((typed) => {
             const inp = document.getElementById('near-input');
-            return inp && inp.value && inp.value !== typed && inp.value !== 'My location';
+            // data-sz-here marks the "My location" entry (translated text).
+            return inp && inp.value && inp.value !== typed
+                   && !inp.hasAttribute('data-sz-here') && inp.value !== 'My location';
           }, { timeout: 5_000 }, nearCity);
         } catch (e) { /* fall through with whatever label is set */ }
         const nearLabel = await page.$eval('#near-input', el => el.value);
@@ -711,8 +732,8 @@ async function main() {
         // a re-query with the new origin.
         let gasChip = null;
         for (const btn of chipButtons) {
-          const txt = await page.evaluate(b => b.textContent, btn);
-          if (/^\s*(gas|fuel)/i.test(txt.trim())) { gasChip = btn; break; }
+          const [id, txt] = await page.evaluate(b => [b.dataset.cat || '', b.textContent], btn);
+          if (id ? /^(fuel|gas)$/.test(id) : /^\s*(gas|fuel)/i.test(txt.trim())) { gasChip = btn; break; }
         }
         if (!gasChip) {
           fail('near chip exists', 'no Gas/Fuel chip on places.html');
@@ -724,27 +745,41 @@ async function main() {
             // "has children" alone reads the previous chip's rows.
             // Viewers before 2026-05 have #status, not #status-text, and
             // no state.resultsChipId (which names the chip on screen).
+            // The status text is in the map's language since 2026-10; its
+            // data-state says loading / error. Older viewers: English text.
             await page.waitForFunction(() => {
               const st = document.getElementById('status-text')
                          || document.getElementById('status');
+              if (!st) return false;
+              const ds = st.dataset.state;
+              const loading = ds ? ds === 'loading' || ds === 'searching'
+                                 : /^\s*Loading/i.test(st.textContent);
+              const failed = ds ? ds === 'error' : /couldn.t load/i.test(st.textContent);
               return typeof state !== 'undefined' && state.chip
                 && /gas|fuel/i.test(state.chip.id)
-                && st && !/^\s*Loading/i.test(st.textContent)
+                && !loading
                 && (state.resultsChipId === undefined
                     || state.resultsChipId === state.chip.id
-                    || /couldn.t load/i.test(st.textContent));
+                    || failed);
             }, { timeout: 30_000 });
             const gasStatus = await page.evaluate(() => {
               const st = document.getElementById('status-text')
                          || document.getElementById('status');
-              return st ? st.textContent.trim() : '';
+              if (!st) return { text: '', failed: false };
+              const text = st.textContent.trim();
+              return { text, failed: st.dataset.state ? st.dataset.state === 'error'
+                                                      : /couldn.t load/i.test(text) };
             });
-            if (/couldn.t load/i.test(gasStatus)) throw new Error(gasStatus);
+            if (gasStatus.failed) throw new Error(gasStatus.text);
             // Read first result's distance from .meta — format is
             // "<kind> · <dist> · <city>" e.g. "Gas · 1.2 km · Tokyo"
             // or "<kind> · 230 m · …".
             const firstMeta = await page.$eval(
               '#results li .meta', el => el.textContent);
+            // Since 2026-10 the row carries its distance in metres
+            // (data-dist-m): the text is in the map's language, and German
+            // "1,4 km" reads as 14 km to the English pattern below.
+            const distM = await page.$eval('#results li', el => el.dataset.distM || '');
             // The viewer prints the reader's units since 8da7cea: m/km for
             // most locales, ft/mi for en-US (headless Chrome's default). A
             // metric-only pattern read "383 ft" as no distance at all and
@@ -752,8 +787,8 @@ async function main() {
             // "mi" isn't taken as "m"; thousands separators are dropped.
             const m = firstMeta.match(/(\d[\d,]*(?:\.\d+)?)\s*(km|mi|ft|m)\b/);
             const KM_PER = { km: 1, m: 0.001, mi: 1.609344, ft: 0.0003048 };
-            const distKm = m
-              ? parseFloat(m[1].replace(/,/g, '')) * KM_PER[m[2]]
+            const distKm = distM !== '' && isFinite(+distM) ? +distM / 1000
+              : m ? parseFloat(m[1].replace(/,/g, '')) * KM_PER[m[2]]
               : null;
             // 50 km is generous — a city's nearest gas station is
             // typically <5 km, but small regions / rural areas may

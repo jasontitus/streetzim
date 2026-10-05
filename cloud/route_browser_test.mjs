@@ -217,7 +217,7 @@ async function main() {
       if (window.streetzimRouting && window.streetzimRouting.clear) {
         window.streetzimRouting.clear();
       } else {
-        const btn = Array.from(document.querySelectorAll('button'))
+        const btn = document.getElementById('routing-clear') || Array.from(document.querySelectorAll('button'))
           .find(b => /clear route/i.test(b.textContent || ''));
         if (btn) btn.click();
       }

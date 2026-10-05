@@ -327,9 +327,9 @@ function _detailDistanceLine(r) {
   var m = _haversineMetersStrip(o.lat, o.lon, r.a, r.o);
   var line = document.createElement('div');
   line.style.cssText = 'color:var(--szd-fg-2, #444); font-size:13px; margin:4px 0 0;';
-  var label = (o.label && o.label !== 'Current location')
-    ? o.label : 'current location';
-  line.textContent = _formatDistanceStrip(m) + ' from ' + label;
+  // o.here: the GPS fix (240). A stash from places.html names its origin.
+  var here = o.here || !o.label || o.label === 'Current location';
+  line.textContent = _formatDistanceStrip(m) + ' from ' + (here ? 'current location' : o.label);
   return line;
 }
 
@@ -355,7 +355,7 @@ function _detailOpenDirections(r) {
   var cached = window.__streetzimLastLoc;
   var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
   if (fresh && window.streetzimRouting.setOrigin) {
-    window.streetzimRouting.setOrigin(cached.lat, cached.lon, 'Current location');
+    window.streetzimRouting.setOrigin(cached.lat, cached.lon, SZ_HERE);
   } else if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(function(pos) {
       window.__streetzimLastLoc = {
@@ -363,7 +363,7 @@ function _detailOpenDirections(r) {
       };
       if (window.streetzimRouting.setOrigin) {
         window.streetzimRouting.setOrigin(
-          pos.coords.latitude, pos.coords.longitude, 'Current location');
+          pos.coords.latitude, pos.coords.longitude, SZ_HERE);
       }
     }, function() {}, { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 });
   }

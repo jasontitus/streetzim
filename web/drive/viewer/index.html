@@ -2557,7 +2557,7 @@ if (!window.__szUnsupported) fetchConfig(1)
         }
         if (origMatch && routingApi && typeof routingApi.setOrigin === 'function') {
           var oLat = parseFloat(origMatch[1]), oLon = parseFloat(origMatch[2]);
-          routingApi.setOrigin(oLat, oLon, 'Current location');
+          routingApi.setOrigin(oLat, oLon, SZ_HERE);
           // Stash on the window so the next "Directions to here" popup
           // (or any in-session action) can reuse the fix without asking
           // the browser for a new one.
@@ -4852,6 +4852,8 @@ function _renderFindResultsStrip(map, stash) {
   // is centered and drives the active-result update.
   var strip = document.createElement('div');
   strip.id = 'find-results-strip';
+  // Which chip, for the gates: the title is a translatable label.
+  if (stash.chipId) strip.setAttribute('data-chip', stash.chipId);
   strip.style.cssText = (
     'position:fixed; left:0; right:0; bottom:var(--bottom-inset, 0px); z-index:1500;'
     + 'background:var(--szd-surface-a, rgba(255,255,255,0.96)); border-top:1px solid var(--szd-line, #ccc);'
@@ -5466,9 +5468,9 @@ function _detailDistanceLine(r) {
   var m = _haversineMetersStrip(o.lat, o.lon, r.a, r.o);
   var line = document.createElement('div');
   line.style.cssText = 'color:var(--szd-fg-2, #444); font-size:13px; margin:4px 0 0;';
-  var label = (o.label && o.label !== 'Current location')
-    ? o.label : 'current location';
-  line.textContent = _formatDistanceStrip(m) + ' from ' + label;
+  // o.here: the GPS fix (240). A stash from places.html names its origin.
+  var here = o.here || !o.label || o.label === 'Current location';
+  line.textContent = _formatDistanceStrip(m) + ' from ' + (here ? 'current location' : o.label);
   return line;
 }
 
@@ -5494,7 +5496,7 @@ function _detailOpenDirections(r) {
   var cached = window.__streetzimLastLoc;
   var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
   if (fresh && window.streetzimRouting.setOrigin) {
-    window.streetzimRouting.setOrigin(cached.lat, cached.lon, 'Current location');
+    window.streetzimRouting.setOrigin(cached.lat, cached.lon, SZ_HERE);
   } else if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(function(pos) {
       window.__streetzimLastLoc = {
@@ -5502,7 +5504,7 @@ function _detailOpenDirections(r) {
       };
       if (window.streetzimRouting.setOrigin) {
         window.streetzimRouting.setOrigin(
-          pos.coords.latitude, pos.coords.longitude, 'Current location');
+          pos.coords.latitude, pos.coords.longitude, SZ_HERE);
       }
     }, function() {}, { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 });
   }
@@ -6551,7 +6553,7 @@ async function loadChipOnMap(map, chipDef, opts) {
   var origin = null;
   var loc = window.__streetzimLastLoc;
   if (loc && Date.now() - (loc.ts || 0) < 30 * 60 * 1000) {
-    origin = { lat: loc.lat, lon: loc.lon, label: 'Current location' };
+    origin = { lat: loc.lat, lon: loc.lon, label: szHereLabel(), here: true };
   }
   var stash = {
     label: chipDef.label + (expanded ? ' · expanded' : ''),
@@ -6737,7 +6739,7 @@ function _findResultCard(map, r, idx) {
       var cached = window.__streetzimLastLoc;
       var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
       if (fresh && window.streetzimRouting.setOrigin) {
-        window.streetzimRouting.setOrigin(cached.lat, cached.lon, 'Current location');
+        window.streetzimRouting.setOrigin(cached.lat, cached.lon, SZ_HERE);
       } else if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(function(pos) {
           window.__streetzimLastLoc = {
@@ -6745,7 +6747,7 @@ function _findResultCard(map, r, idx) {
           };
           if (window.streetzimRouting.setOrigin) {
             window.streetzimRouting.setOrigin(
-              pos.coords.latitude, pos.coords.longitude, 'Current location');
+              pos.coords.latitude, pos.coords.longitude, SZ_HERE);
           }
         }, function() {}, { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 });
       }
@@ -7298,7 +7300,7 @@ function _szPlacePopupDOM(lat, lon, name, enrich) {
     var cached = window.__streetzimLastLoc;
     var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
     if (fresh) {
-      window.streetzimRouting.setOrigin(cached.lat, cached.lon, 'Current location');
+      window.streetzimRouting.setOrigin(cached.lat, cached.lon, SZ_HERE);
     } else if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         function(pos) {
@@ -7306,7 +7308,7 @@ function _szPlacePopupDOM(lat, lon, name, enrich) {
             lat: pos.coords.latitude, lon: pos.coords.longitude, ts: Date.now()
           };
           window.streetzimRouting.setOrigin(
-            pos.coords.latitude, pos.coords.longitude, 'Current location');
+            pos.coords.latitude, pos.coords.longitude, SZ_HERE);
         },
         function() {},
         { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 });
@@ -7347,9 +7349,13 @@ function initSearch(map) {
     .then(function(data) {
       manifest = data;
       input.placeholder = 'Search ' + data.total.toLocaleString() + ' places...';
+      // State for the smoke gates, which must not read the (translatable)
+      // placeholder: ready / unavailable.
+      input.setAttribute('data-sz-search', 'ready');
     })
     .catch(function() {
       input.placeholder = 'Search unavailable';
+      input.setAttribute('data-sz-search', 'unavailable');
       input.disabled = true;
     });
 
@@ -8005,6 +8011,7 @@ var SEARCH_SHARDS = (function () {
       while (resultsEl.firstChild) resultsEl.removeChild(resultsEl.firstChild);
       var loadingRow = document.createElement('div');
       loadingRow.className = 'search-result';
+      loadingRow.setAttribute('data-sz-pending', '1');  // not a result (gates)
       loadingRow.style.pointerEvents = 'none';
       loadingRow.style.opacity = '0.7';
       loadingRow.textContent = 'Searching…';
@@ -8452,7 +8459,7 @@ function initWikidataPopups(map, config) {
       var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
       if (fresh) {
         window.streetzimRouting.setOrigin(
-          cached.lat, cached.lon, 'Current location');
+          cached.lat, cached.lon, SZ_HERE);
       } else if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           function(pos) {
@@ -8460,7 +8467,7 @@ function initWikidataPopups(map, config) {
               lat: pos.coords.latitude, lon: pos.coords.longitude, ts: Date.now()
             };
             window.streetzimRouting.setOrigin(
-              pos.coords.latitude, pos.coords.longitude, 'Current location');
+              pos.coords.latitude, pos.coords.longitude, SZ_HERE);
           },
           function() {},
           { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 });
@@ -8851,6 +8858,9 @@ function initWikiSidebar(map, config) {
     setWikiMarkers(items);
     if (!items.length) {
       var empty = createEl('div', 'wiki-empty-state');
+      // data-wiki-empty: which empty state, for the smoke gates (the text
+      // is translatable): loading / none.
+      empty.setAttribute('data-wiki-empty', WIKI_GEO_INDEX ? 'none' : 'loading');
       if (!WIKI_GEO_INDEX) {
         // Don't claim the area is empty when we simply have not loaded the
         // index yet — that misreading is what made california look broken.
@@ -9087,6 +9097,7 @@ function initWikiSidebar(map, config) {
       countEl.textContent = '';
       listEl.textContent = '';
       var empty = createEl('div', 'wiki-empty-state');
+      empty.setAttribute('data-wiki-empty', 'none');
       empty.appendChild(createEl('div', 'wiki-empty-state-icon', '\uD83C\uDF0D'));
       empty.appendChild(createEl('div', 'wiki-empty-state-text', 'No Wikipedia entries visible at this zoom level. Try zooming in to discover places.'));
       listEl.appendChild(empty);
@@ -9111,6 +9122,7 @@ function initWikiSidebar(map, config) {
 
       if (enriched.length === 0) {
         var empty = createEl('div', 'wiki-empty-state');
+        empty.setAttribute('data-wiki-empty', 'none');
         empty.appendChild(createEl('div', 'wiki-empty-state-icon', '\uD83D\uDCD6'));
         empty.appendChild(createEl('div', 'wiki-empty-state-text', 'Features found but no Wikipedia data available for this area.'));
         listEl.appendChild(empty);
@@ -9235,6 +9247,18 @@ function initWikiSidebar(map, config) {
     debounceTimer = setTimeout(updateSidebar, 400);
   });
 }
+
+// BEGIN sz-here
+// "Current location" as a routing end is a state, not a label: the end is
+// the device's GPS fix. Callers pass SZ_HERE as the label; the panel shows
+// szHereLabel() (the words, in the map's language once it is translated)
+// and remembers the state, so nothing compares displayed text. The English
+// 'Current location' from a caller that predates this (a host page, an
+// older bookmarklet) still means the same.
+var SZ_HERE = '\u2316here';
+function szIsHere(label) { return label === SZ_HERE || label === 'Current location'; }
+function szHereLabel() { return 'Current location'; }
+// END sz-here
 
 // --- Routing with A* pathfinding ---
 function initRouting(map, config) {
@@ -9471,6 +9495,7 @@ function initRouting(map, config) {
     originCoordE7 = null;
     destCoordE7 = null;
     originInput.value = '';
+    originInput._szHere = false;
     destInput.value = '';
     originResultsEl.style.display = 'none';
     destResultsEl.style.display = 'none';
@@ -11774,7 +11799,7 @@ function initRouting(map, config) {
     // input plus "loading routing data…" status reads as "the click
     // did nothing." The retry below will then snap to the nearest
     // node and overwrite the marker once the graph is up.
-    var visible = label || coordLabel(lat, lon);
+    var visible = szIsHere(label) ? szHereLabel() : (label || coordLabel(lat, lon));
     if (which === 'origin') originInput.value = visible;
     else                    destInput.value   = visible;
     statusEl.textContent = 'Loading routing data…';
@@ -11843,14 +11868,14 @@ function initRouting(map, config) {
   async function setOriginFromLatLon(lat, lon, label) {
     // Race guard: a "Directions to here" click on a place-detail
     // popup fires getCurrentPosition, then on resolve calls back into
-    // this with label='Current location'. If the user has clicked
+    // this with label=SZ_HERE (500). If the user has clicked
     // into the origin field and started typing in the meantime, we'd
     // clobber their input AND auto-fire a route from current location
     // before they even finished picking their actual origin. Skip
-    // GPS auto-fills (the only callers that pass 'Current location')
+    // GPS auto-fills (the only callers that pass SZ_HERE)
     // when the input is being edited.
-    if (label === 'Current location'
-        && window.__streetzim_originBeingEdited) {
+    var here = szIsHere(label);
+    if (here && window.__streetzim_originBeingEdited) {
       return;
     }
     if (queueGraphPick('origin', lat, lon, label)) return;
@@ -11873,7 +11898,8 @@ function initRouting(map, config) {
     var oLon = snapped.lon;
     originCoordE7 = [Math.round(oLat * 1e7), Math.round(oLon * 1e7)];
     originSnap = { node: originNode, coordE7: originCoordE7 };
-    originInput.value = label || coordLabel(oLat, oLon);
+    originInput.value = here ? szHereLabel() : (label || coordLabel(oLat, oLon));
+    originInput._szHere = here;  // read by autoSelectOnFocus
     // Origin is now committed (typeahead pick, map click, GPS button,
     // or queued-pick replay). Clear the editing flag so future GPS
     // auto-fills aren't blocked indefinitely.
@@ -11950,7 +11976,8 @@ function initRouting(map, config) {
     if (driveMode.active) driveMode.exit();
     resetGoButtons();
     var o = originPick, d = destPick;
-    var oLabel = originInput.value, dLabel = destInput.value;
+    var oLabel = originInput._szHere && originInput.value === szHereLabel() ? SZ_HERE : originInput.value;
+    var dLabel = destInput.value;
     if (o) originNode = -1;
     if (d) destNode = -1;
     if (o || d) {
@@ -12280,7 +12307,8 @@ function initRouting(map, config) {
     // don't re-select on every click.
     input.addEventListener('focus', function() {
       setTimeout(function() {
-        if (input.value === 'Current location') {
+        if (input._szHere && input.value === szHereLabel()) {
+          input._szHere = false;
           input.value = '';
         } else if (document.activeElement === input) {
           try { input.select(); } catch (e) {}
@@ -12337,7 +12365,7 @@ function initRouting(map, config) {
     var cached = window.__streetzimLastLoc;
     var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
     if (fresh) {
-      setOriginFromLatLon(cached.lat, cached.lon, 'Current location');
+      setOriginFromLatLon(cached.lat, cached.lon, SZ_HERE);
       return;
     }
     if (!navigator.geolocation) {
@@ -12350,7 +12378,7 @@ function initRouting(map, config) {
         var lat = pos.coords.latitude;
         var lon = pos.coords.longitude;
         window.__streetzimLastLoc = { lat: lat, lon: lon, ts: Date.now() };
-        setOriginFromLatLon(lat, lon, 'Current location');
+        setOriginFromLatLon(lat, lon, SZ_HERE);
       },
       function(err) {
         statusEl.textContent = 'Location denied or unavailable';
@@ -12773,7 +12801,7 @@ function initRouting(map, config) {
       // yield so the "Re-routing…" status paints before A* runs.
       setTimeout(function() {
         try {
-          setOriginFromLatLon(state.lastLat, state.lastLon, 'Current location');
+          setOriginFromLatLon(state.lastLat, state.lastLon, SZ_HERE);
         } finally {
           state.reroutePending = false;
           // setStatus('') will be called by the next onPosition if the new

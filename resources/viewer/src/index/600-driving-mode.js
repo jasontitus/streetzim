@@ -395,7 +395,7 @@
       // yield so the "Re-routing…" status paints before A* runs.
       setTimeout(function() {
         try {
-          setOriginFromLatLon(state.lastLat, state.lastLon, 'Current location');
+          setOriginFromLatLon(state.lastLat, state.lastLon, SZ_HERE);
         } finally {
           state.reroutePending = false;
           // setStatus('') will be called by the next onPosition if the new

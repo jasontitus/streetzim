@@ -1,3 +1,15 @@
+// BEGIN sz-here
+// "Current location" as a routing end is a state, not a label: the end is
+// the device's GPS fix. Callers pass SZ_HERE as the label; the panel shows
+// szHereLabel() (the words, in the map's language once it is translated)
+// and remembers the state, so nothing compares displayed text. The English
+// 'Current location' from a caller that predates this (a host page, an
+// older bookmarklet) still means the same.
+var SZ_HERE = '\u2316here';
+function szIsHere(label) { return label === SZ_HERE || label === 'Current location'; }
+function szHereLabel() { return 'Current location'; }
+// END sz-here
+
 // --- Routing with A* pathfinding ---
 function initRouting(map, config) {
   if (!config.hasRouting) return;
@@ -233,6 +245,7 @@ function initRouting(map, config) {
     originCoordE7 = null;
     destCoordE7 = null;
     originInput.value = '';
+    originInput._szHere = false;
     destInput.value = '';
     originResultsEl.style.display = 'none';
     destResultsEl.style.display = 'none';

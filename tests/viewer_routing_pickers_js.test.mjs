@@ -21,7 +21,10 @@ const CLEAR = (() => {
   }
   throw new Error('clearRoute not found');
 })();
+// SZ_HERE / szIsHere / szHereLabel: top level of 500, before initRouting.
+const HERE = PANEL.slice(PANEL.indexOf('// BEGIN sz-here'), PANEL.indexOf('// END sz-here'));
 assert(PICK.includes('function computeAndDrawRoute') && CLEAR.includes('destPick = null'));
+assert(HERE.includes('function szIsHere'));
 
 function make() {
   const el = () => ({ textContent: '', value: '', style: {}, addEventListener() {},
@@ -52,8 +55,10 @@ function make() {
     env.snaps.push({ which: which, lat: lat, lon: lon, res: res, rej: rej }); }); }
   function findRoute(o, d, travel, picks) { return new Promise(function(res, rej) {
     env.routes.push({ o: o, d: d, travel: travel, picks: picks, res: res, rej: rej }); }); }
+  ${HERE}
   ${PICK}
   ${CLEAR}
+  env.SZ_HERE = SZ_HERE;
   env.api = { setOriginFromLatLon, setDestFromLatLon, setTravelMode, clearRoute, win: window, originInput,
     get state() { return { originNode, destNode, originMoved, destMoved, status: statusEl.textContent,
       oIn: originInput.value, dIn: destInput.value, oMarker: originMarker && originMarker.ll,
@@ -61,6 +66,7 @@ function make() {
   new Function('env', 'el', body)(env, el);
   return env;
 }
+const SZ_HERE_OF = (e) => e.SZ_HERE;
 const settle = async () => { for (let k = 0; k < 5; k++) await new Promise(r => setTimeout(r, 15)); };
 async function snap(e, which, node, lat, lon) {
   const s = e.snaps.shift();
@@ -185,5 +191,31 @@ await ok('clear forgets moved ends', async () => {
   const e = await movedDest(); const a = e.api;
   a.clearRoute();
   assert.deepStrictEqual([a.state.originMoved, a.state.destMoved, a.state.destNode], [false, false, -1]);
+});
+await ok('a GPS start (SZ_HERE) shows the words and stays the GPS fix across a travel-mode change', async () => {
+  const e = make(); const a = e.api;
+  a.setOriginFromLatLon(1, 1, SZ_HERE_OF(e)); await snap(e, 'origin', 10);
+  assert.strictEqual(a.state.oIn, 'Current location');
+  assert.strictEqual(a.originInput._szHere, true);
+  a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20);
+  await route(e, {});
+  a.setTravelMode('walk');
+  await snap(e, 'origin', 10);
+  assert.strictEqual(a.state.oIn, 'Current location');
+  assert.strictEqual(a.originInput._szHere, true);   // still the device position
+});
+await ok('the GPS state is a flag, not the text: a place named like it is a place', async () => {
+  const e = make(); const a = e.api;
+  a.setOriginFromLatLon(1, 1, 'Main St'); await snap(e, 'origin', 10);
+  assert.strictEqual(a.originInput._szHere, false);
+  a.win.__streetzim_originBeingEdited = true;
+  a.setOriginFromLatLon(5, 5, SZ_HERE_OF(e));          // a GPS auto-fill while typing: skipped
+  assert.strictEqual(e.snaps.length, 0);
+  a.win.__streetzim_originBeingEdited = false;
+  a.setOriginFromLatLon(5, 5, 'Current location');     // the legacy English token still means GPS
+  await snap(e, 'origin', 50);
+  assert.strictEqual(a.originInput._szHere, true);
+  a.clearRoute();
+  assert.strictEqual(a.originInput._szHere, false);
 });
 console.log(`${pass} passed`);

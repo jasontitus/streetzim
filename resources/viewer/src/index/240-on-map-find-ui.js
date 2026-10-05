@@ -692,7 +692,7 @@ async function loadChipOnMap(map, chipDef, opts) {
   var origin = null;
   var loc = window.__streetzimLastLoc;
   if (loc && Date.now() - (loc.ts || 0) < 30 * 60 * 1000) {
-    origin = { lat: loc.lat, lon: loc.lon, label: 'Current location' };
+    origin = { lat: loc.lat, lon: loc.lon, label: szHereLabel(), here: true };
   }
   var stash = {
     label: chipDef.label + (expanded ? ' · expanded' : ''),
@@ -878,7 +878,7 @@ function _findResultCard(map, r, idx) {
       var cached = window.__streetzimLastLoc;
       var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
       if (fresh && window.streetzimRouting.setOrigin) {
-        window.streetzimRouting.setOrigin(cached.lat, cached.lon, 'Current location');
+        window.streetzimRouting.setOrigin(cached.lat, cached.lon, SZ_HERE);
       } else if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(function(pos) {
           window.__streetzimLastLoc = {
@@ -886,7 +886,7 @@ function _findResultCard(map, r, idx) {
           };
           if (window.streetzimRouting.setOrigin) {
             window.streetzimRouting.setOrigin(
-              pos.coords.latitude, pos.coords.longitude, 'Current location');
+              pos.coords.latitude, pos.coords.longitude, SZ_HERE);
           }
         }, function() {}, { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 });
       }

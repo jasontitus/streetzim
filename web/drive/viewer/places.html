@@ -282,7 +282,7 @@
 <div class="near">
   <label for="near-input">Search near</label>
   <div class="near-wrap">
-    <input id="near-input" type="search" value="My location"
+    <input id="near-input" type="search" value="My location" data-sz-here
            autocomplete="off" autocapitalize="none" spellcheck="false">
     <button id="near-clear" type="button" aria-label="Clear" title="Reset to my location">×</button>
     <div id="near-results" role="listbox" hidden></div>
@@ -920,7 +920,7 @@ function applyUrlParamsOnce() {
     state.manifests.search = s;
     state.manifests.cat = c; // may be null if the ZIM was built without it
   } catch (e) {
-    setStatus(`Couldn't load the search index: ${e.message}`);
+    setStatus(`Couldn't load the search index: ${e.message}`, 'error');
     return;
   }
   renderChips();
@@ -978,11 +978,11 @@ function applyUrlParamsOnce() {
       state.origin = { lat, lon };
       state.originMode = 'viewport';
       state.originLabel = `Near (${lat.toFixed(3)}, ${lon.toFixed(3)})`;
-      els.near.value = state.originLabel;
+      showNearPlace(state.originLabel);
       reverseGeocodeFromViewport(lat, lon).then(name => {
         if (name && state.originMode === 'viewport') {
           state.originLabel = name;
-          els.near.value = name;
+          showNearPlace(name);
         }
       }).catch(() => {});  // fallback stays as coord label
     }
@@ -1157,7 +1157,7 @@ let _querySeq = 0;
 async function runChipQuery(def) {
   if (maybeFetchOriginFirst()) return;
   const seq = ++_querySeq;
-  setStatus(`Loading ${def.label.toLowerCase()}…`);
+  setStatus(`Loading ${def.label.toLowerCase()}…`, 'loading');
   // Prefer the pre-filtered per-chip file if the ZIM was built with
   // --split-find-chips. Otherwise fall back to loading the full OMT-
   // bucket file + client-side filtering (legacy path; OOMs Chrome on
@@ -1211,7 +1211,7 @@ async function runChipQuery(def) {
     // origin rather than leave distances from the old one up.
     if (state.resultsChipId === def.id && state.lastRecords.length) {
       _resortCurrent();
-      setStatus(`Loading ${def.label.toLowerCase()}…`);
+      setStatus(`Loading ${def.label.toLowerCase()}…`, 'loading');
     }
     const res = await loadGeoChip(def, geoMeta, seq, null);
     if (res === null) return;            // superseded or failed (status set)
@@ -1259,10 +1259,10 @@ async function runChipQuery(def) {
       // The ZIM has no data behind this chip (an older build without the
       // category): an empty list and a plain sentence, not an error.
       applyResults([]);
-      setStatus(`No ${def.label.toLowerCase()} in this map`);
+      setStatus(`No ${def.label.toLowerCase()} in this map`, 'empty');
       return;
     }
-    setStatus(`Couldn't load ‘${def.label}’: ${e.message}`);
+    setStatus(`Couldn't load ‘${def.label}’: ${e.message}`, 'error');
     return;
   }
   if (seq !== _querySeq) return;  // superseded while loading
@@ -1328,12 +1328,12 @@ async function loadGeoChip(def, meta, seq, subtype) {
       fallbackToNearest: true,
     });
   } catch (e) {
-    if (seq === _querySeq) setStatus(`Couldn't load ‘${def.label}’: ${e.message}`);
+    if (seq === _querySeq) setStatus(`Couldn't load ‘${def.label}’: ${e.message}`, 'error');
     return null;
   }
   if (!res || seq !== _querySeq) return null;
   if (!res.records.length && res.failed) {
-    setStatus(`Couldn't load ‘${def.label}’.`);
+    setStatus(`Couldn't load ‘${def.label}’.`, 'error');
     return null;
   }
   res.point = point;
@@ -1357,7 +1357,7 @@ async function _subfilterChanged() {
     _resortCurrent();
     return;
   }
-  setStatus(`Loading ${_humanSubtype(state.subFilter).toLowerCase()}…`);
+  setStatus(`Loading ${_humanSubtype(state.subFilter).toLowerCase()}…`, 'loading');
   const res = await loadGeoChip(state.chip, meta, seq, state.subFilter);
   if (res === null || res === LEGACY_CHIP) return;
   state.geoSubRecords = res.records;
@@ -1416,7 +1416,7 @@ async function loadChipFile(chipId) {
 async function runNameQuery(q) {
   if (maybeFetchOriginFirst()) return;
   const seq = ++_querySeq;
-  setStatus(`Searching for “${q}”…`);
+  setStatus(`Searching for “${q}”…`, 'searching');
   const alive = () => seq === _querySeq;
 
   // Character-split ZIM: read the leaves holding what was typed, streamed
@@ -1903,7 +1903,7 @@ function stashResultsForMap(label) {
     // to an empty map.
     console.warn('stash failed:', e);
     setStatus(`Couldn't hand off to the map (${e.message}). `
-              + `Reduce the result set and try again.`);
+              + `Reduce the result set and try again.`, 'error');
     return false;
   }
 }
@@ -2083,7 +2083,7 @@ function _sortAndShow(records, histogramRecords) {
   if (state.originMode === 'none' && state.originNote) {
     countLine += ' — ' + state.originNote;
   }
-  setStatus(countLine);
+  setStatus(countLine, state.results.length ? 'done' : 'empty');
   // Show the sort row only when there's a meaningful number to sort.
   if (els.sortRow) {
     els.sortRow.hidden = state.results.length < 2;
@@ -2099,6 +2099,8 @@ function renderResults() {
   els.results.innerHTML = '';
   for (const r of state.results) {
     const li = document.createElement('li');
+    // Metres, for the smoke gate: the text is in the map's language.
+    if (r._dist != null) li.dataset.distM = String(Math.round(r._dist));
 
     const h = document.createElement('h3');
     h.textContent = r.n || '(unnamed)';
@@ -2258,6 +2260,19 @@ function formatDistance(m, unit) {
 state.originMode = 'gps';
 state.originLabel = 'My location';
 
+// The "Search near" box shows either a place or "My location" (the GPS
+// fix). Which one is a flag, data-sz-here, not the text: the text is in
+// the map's language.
+function myLocationLabel() { return 'My location'; }
+function showNearHere() {
+  els.near.value = myLocationLabel();
+  els.near.setAttribute('data-sz-here', '');
+}
+function showNearPlace(text) {
+  els.near.value = text;
+  els.near.removeAttribute('data-sz-here');
+}
+
 function requestGPS() {
   if (!navigator.geolocation) {
     state.origin = null;
@@ -2267,7 +2282,7 @@ function requestGPS() {
     rerunQuery();
     return;
   }
-  setStatus('Getting your location…');
+  setStatus('Getting your location…', 'locating');
   // Ownership: while the prompt is up the user may pick "Search near
   // <place>" or a deep link may install a viewport origin. Those set
   // originMode to 'custom' / 'viewport'; none of the callbacks below
@@ -2294,9 +2309,9 @@ function requestGPS() {
       if (!gpsStillWanted()) return;
       state.origin = { lat: pos.coords.latitude, lon: pos.coords.longitude };
       state.originMode = 'gps';
-      state.originLabel = 'My location';
+      state.originLabel = myLocationLabel();
       state.originNote = '';
-      els.near.value = 'My location';
+      showNearHere();
       rerunQuery();
     },
     err => {
@@ -2320,7 +2335,7 @@ function applyStatusNote() {
   if (state.originNote && state._statusBase && state.results.length) {
     // Rebuild from the stored base line — splitting the live text on
     // ' — ' also cut "(none in map area — showing all)" in half.
-    setStatus(state._statusBase + ' — ' + state.originNote);
+    setStatus(state._statusBase + ' — ' + state.originNote, 'done');
   }
 }
 
@@ -2396,7 +2411,10 @@ let _nearSeq = 0;
 
 async function onNearInput() {
   const q = els.near.value.trim();
-  if (q.length < 2 || q === 'My location') { hideNearResults(); return; }
+  // Still the untouched "My location" entry: nothing to look up.
+  const here = els.near.hasAttribute('data-sz-here') && els.near.value === myLocationLabel();
+  if (!here) els.near.removeAttribute('data-sz-here');
+  if (q.length < 2 || here) { hideNearResults(); return; }
   const seq = ++_nearSeq;
   const alive = () => seq === _nearSeq;
   const seen = new Map();
@@ -2500,7 +2518,7 @@ function pickNearResult(r) {
   state.origin = { lat: r.a, lon: r.o };
   state.originMode = 'custom';
   state.originLabel = r.n;
-  els.near.value = r.n;
+  showNearPlace(r.n);
   // When the user explicitly pins a near-origin, drop the
   // "Limit to map area" filter. The implicit viewport from
   // index.html is almost certainly stale relative to the user's
@@ -2520,8 +2538,8 @@ function pickNearResult(r) {
 function clearNearCustom() {
   state.origin = null;
   state.originMode = 'gps';
-  state.originLabel = 'My location';
-  els.near.value = 'My location';
+  state.originLabel = myLocationLabel();
+  showNearHere();
   hideNearResults();
   requestGPS();
 }
@@ -2653,7 +2671,12 @@ async function fetchJSON(url) {
 
 // ---------- helpers ----------
 
-function setStatus(text) { els.statusText.textContent = text; }
+// `kind` says what the (translatable) text means, as data-state, for the
+// smoke gates: loading / searching / locating / error / empty / done / info.
+function setStatus(text, kind) {
+  els.statusText.textContent = text;
+  els.statusText.dataset.state = kind || 'info';
+}
 
 function debounce(fn, ms) {
   let t = null;

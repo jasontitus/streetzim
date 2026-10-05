@@ -425,6 +425,8 @@ function _renderFindResultsStrip(map, stash) {
   // is centered and drives the active-result update.
   var strip = document.createElement('div');
   strip.id = 'find-results-strip';
+  // Which chip, for the gates: the title is a translatable label.
+  if (stash.chipId) strip.setAttribute('data-chip', stash.chipId);
   strip.style.cssText = (
     'position:fixed; left:0; right:0; bottom:var(--bottom-inset, 0px); z-index:1500;'
     + 'background:var(--szd-surface-a, rgba(255,255,255,0.96)); border-top:1px solid var(--szd-line, #ccc);'

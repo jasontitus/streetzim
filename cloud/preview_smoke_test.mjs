@@ -227,17 +227,25 @@ async function runScenario(browser, siteDir, name, zimParam, proxyBase, expectSo
     fail(name + ' viewer API ready', e.message);
   }
 
-  // The search placeholder flips to "Search N places..." once
-  // search-data/manifest.json has come through the SW — proof that ZIM
-  // content is being read off the streamed file, not the shell.
+  // The search input's data-sz-search flips to "ready" ("Search N
+  // places..." in the map's language) once search-data/manifest.json has
+  // come through the SW — proof that ZIM content is being read off the
+  // streamed file, not the shell. Viewers before 2026-10 set no attribute;
+  // for them the English placeholder is the signal.
   try {
     await page.waitForFunction(() => {
       const i = document.getElementById('search-input');
-      const ph = (i && i.placeholder) || '';
+      if (!i) return false;
+      if (i.dataset.szSearch) return i.dataset.szSearch === 'ready' || i.dataset.szSearch === 'unavailable';
+      const ph = i.placeholder || '';
       return /^Search [\d,.\s\u00a0\u202f]+ places/.test(ph) || ph === 'Search unavailable';
     }, { timeout: 90_000 });
-    const ph = await page.evaluate(() => document.getElementById('search-input').placeholder);
-    if (ph === 'Search unavailable') throw new Error('search manifest failed to load');
+    const [ph, unavailable] = await page.evaluate(() => {
+      const i = document.getElementById('search-input');
+      return [i.placeholder, i.dataset.szSearch ? i.dataset.szSearch === 'unavailable'
+                                                : i.placeholder === 'Search unavailable'];
+    });
+    if (unavailable) throw new Error('search manifest failed to load');
     pass(name + ' search index read from the streamed ZIM', ph + ' after ' + (Date.now() - t0) + ' ms');
   } catch (e) {
     fail(name + ' search index read from the streamed ZIM', e.message);
@@ -257,12 +265,12 @@ async function runScenario(browser, siteDir, name, zimParam, proxyBase, expectSo
         if (!r) return false;
         if (r.querySelector('.search-no-results')) return true;
         return Array.from(r.querySelectorAll('.search-result'))
-          .some((el) => el.textContent.trim() !== 'Searching…');
+          .some((el) => !el.hasAttribute('data-sz-pending') && el.textContent.trim() !== 'Searching…');
       }, { timeout: 120_000 });
       const res = await page.evaluate(() => {
         const r = document.getElementById('search-results');
         const rows = Array.from(r.querySelectorAll('.search-result'))
-          .filter((el) => el.textContent.trim() !== 'Searching…');
+          .filter((el) => !el.hasAttribute('data-sz-pending') && el.textContent.trim() !== 'Searching…');
         return { none: !!r.querySelector('.search-no-results'), n: rows.length,
                  first: rows[0] ? rows[0].textContent.trim().slice(0, 60) : '' };
       });
