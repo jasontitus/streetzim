@@ -54,6 +54,10 @@ def main():
     ap.add_argument("--registry", default=os.path.join(ROOT, "cloud", "regions.tsv"))
     ap.add_argument("--only", default="")
     a = ap.parse_args()
+    # Imported before the scan, so a broken path fails in a second, not
+    # after an 18 GB pass.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    from streetzim.search_extract import copy_schema
     only = set(x for x in a.only.split(",") if x) or None
     regions = load_regions(a.registry, only)
     if not regions:
@@ -98,8 +102,6 @@ def main():
             os.unlink(final)
         os.rename(part[rid], final)
         # The source's schema marker (native names, languages) holds for a cut.
-        sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
-        from streetzim.search_extract import copy_schema
         copy_schema(a.src, final)
         with open(final + ".bbox", "w") as fh:
             fh.write(BBOX_TEXT[rid] + "\n")

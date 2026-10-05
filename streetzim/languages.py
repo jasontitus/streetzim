@@ -39,6 +39,17 @@ def wiki_code(lang: str) -> str:
     return WIKI_CODE.get(lang, lang)
 
 
+# ISO 639-3 codes a Kiwix Wikipedia ZIM in the language may declare.
+ZIM_LANGUAGE_ALIASES = {"nb": {"nob", "nor"}, "ms": {"msa", "zsm"}, "fa": {"fas", "pes"}}
+
+
+def zim_matches(lang: str, zim_language: str) -> bool:
+    """Whether a ZIM's Language metadata ("fra", "eng,fra") includes
+    ``lang``."""
+    want = ZIM_LANGUAGE_ALIASES.get(lang, set()) | {iso639_3(lang)}
+    return bool(want & {x.strip() for x in zim_language.split(",") if x.strip()})
+
+
 def iso639_3(lang: str) -> str:
     try:
         return ISO639_3[lang]

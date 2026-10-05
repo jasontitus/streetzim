@@ -189,3 +189,28 @@ def test_wikidata_in_the_build_language(monkeypatch, tmp_path):
     assert ("scan", tmp_path) in queries                     # Q-ID scans stay shared
     assert wc.load_cache_for_zim(path)["Q90"]["d"] == "capitale"
     assert not wc.load_cache(tmp_path)                       # English cache untouched
+
+
+def test_language_guards(tmp_path):
+    from streetzim.languages import wiki_code, zim_matches
+    assert wiki_code("nb") == "no" and wiki_code("fr") == "fr"
+    assert zim_matches("fr", "fra") and zim_matches("fr", "eng,fra")
+    assert zim_matches("nb", "nor") and zim_matches("nb", "nob")
+    assert not zim_matches("fr", "eng")
+    p = tmp_path / "c.jsonl"
+    p.write_text("")
+    assert E.cache_language_error(p, "en") is None
+    assert "has none" in E.cache_language_error(p, "fr")          # no marker at all
+    E.mark_schema(p, languages=["fr"])
+    assert E.cache_language_error(p, "fr") is None
+    assert E.cache_language_error(p, "de")
+
+
+def test_contradictory_no_and_only_drop_that_mode():
+    from streetzim.routing import restrictions as tr
+    c = tr.Collector()
+    seq = {1: ([(10, 100), (11, 101)], 0), 2: ([(11, 101), (12, 102)], 0)}
+    c.raw = [({"car": "no", "bike": None}, [1], 101, [], [2]),
+             ({"car": "only", "bike": None}, [1], 101, [], [2])]
+    recs, dropped = tr.resolve(c, seq)
+    assert recs == [] and dropped["contradictory no_* and only_* on one path"] == 1

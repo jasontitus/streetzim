@@ -1537,7 +1537,7 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
   // taintOf: state -> steps since a virtual state (1..TAINT_HOPS), set
   // when its predecessor is; a state is expanded only once closed, so its
   // chain no longer changes and this equals walking it.
-  var TAINT_HOPS = 8;
+  var TAINT_HOPS = 16;
   var taintOf = new Map();
   function isVirtual(sid) { return sid >= numNodes && sid < ALT_BASE; }
   function tainted(sid) { return sid >= 0 && (isVirtual(sid) || taintOf.has(sid)); }
@@ -1635,8 +1635,10 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
       if (altTo < 0 || altTo === nodeOf(table.prev[cs])) continue;
     } else if (curSid >= numNodes) {
       // A closed plain state here dominates this virtual one.
+      // ... when it came the same way (the U-turn penalty depends on it).
       var plainSlot = table.find(current);
-      if (plainSlot >= 0 && table.closed[plainSlot]) continue;
+      if (plainSlot >= 0 && table.closed[plainSlot]
+          && mainBack(current) === nodeOf(table.prev[cs])) continue;
     }
     table.closed[cs] = 1;
     var curG = table.g[cs];
@@ -1746,7 +1748,7 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
       }
       if (m2 && m2.length) {
         var plainT = table.find(target);
-        if (plainT >= 0 && table.closed[plainT]) continue;   // dominated
+        if (plainT >= 0 && table.closed[plainT] && mainBack(target) === current) continue;   // dominated
         var ids = m2.map(function(m) { return m.cid + ':' + m.rec.id + ':' + m.pos; }).sort();
         var vk = target + '|' + ids.join(',');
         tSid = vKey.get(vk);

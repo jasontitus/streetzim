@@ -74,8 +74,9 @@ def find_route_spatial(
     restriction paths the route is part-way along. At a path's last via
     node a NO record bans its last step and an ONLY record allows only
     that step (when the mode may use it at all). A closed plain state at
-    a node dominates any later virtual state there (its moves are a
-    superset, its g no larger: same heuristic). Turning straight back
+    a node dominates a later virtual state there when it came from the
+    same neighbour (its moves are then a superset at the same U-turn
+    penalty, its g no larger: same heuristic). Turning straight back
     (u -> v -> u) costs U_TURN_PENALTY_S unless v has no other way on;
     the penalty steers the search and is not counted in the time.
     routing-worker.js implements the same rules.
@@ -137,9 +138,11 @@ def find_route_spatial(
 
     # A second arrival can only matter after a restriction forced a
     # detour: without one nearby, a shortest path never doubles back. So
-    # one is offered only when the best arrival's chain passes a virtual
-    # state within TAINT_HOPS steps (else +60 % pops on D.C. for nothing).
-    TAINT_HOPS = 8
+    # one is offered only when either arrival's chain passes a virtual state
+    # within TAINT_HOPS steps. D.C. (2,600 restrictions) drive pops: +2 %
+    # with no alts, +27 % at 16, +42 % at 32, +62 % unbounded; a turnaround
+    # farther than 16 junctions from the restriction costs the U-turn penalty.
+    TAINT_HOPS = 16
 
     def tainted(sid):
         for _ in range(TAINT_HOPS):
@@ -209,7 +212,8 @@ def find_route_spatial(
             closed[cur_sid] = 1
             match = ()
         else:
-            if cur_sid in vclosed or closed[current]:
+            if cur_sid in vclosed or (
+                    closed[current] and main_back(current) == node_of(vprev.get(cur_sid, -1))):
                 continue
             vclosed.add(cur_sid)
             match = vmatch[cur_sid - num_nodes]
@@ -249,6 +253,7 @@ def find_route_spatial(
             only = None          # the allowed turn is closed to this mode
         back = prev_of(cur_sid)
         back = node_of(back) if back >= 0 else -1
+        cur_tainted = bool(uturn) and tainted(cur_sid)
         other_exit = uturn and any(u[0] != back for u in usable)
 
         for (target, cost, time_s, dist_m, geom_local, name_idx, class_access) in usable:
@@ -270,8 +275,8 @@ def find_route_spatial(
                         m2 = m2 + [(tcid, ri, 1) for ri in roots
                                    if tcell.turns[ri][0] & mbit]
             if m2:
-                if closed[target]:
-                    continue     # dominated by the closed plain state
+                if closed[target] and main_back(target) == current:
+                    continue     # dominated: the closed plain state came the same way
                 key = (target, tuple(sorted(m2)))
                 t_sid = vkey.get(key)
                 if t_sid is None:
@@ -285,7 +290,7 @@ def find_route_spatial(
                 t_sid = target
                 new_g = current_g + cost + penalty
                 rec = (dist_m, geom_local, name_idx, class_access, time_s, penalty)
-                if uturn and (tainted(prev[target]) or tainted(cur_sid)):
+                if uturn and (cur_tainted or tainted(prev[target])):
                     mb = main_back(target)
                     if not closed[target] and new_g < gscore[target]:
                         # The arrival being replaced may become the alt.

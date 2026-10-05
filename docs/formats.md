@@ -112,8 +112,9 @@ via node in both directions. The routers also charge a U-turn (u → v → u)
 45 s by car and 20 s by bike unless it is the only way on; that penalty
 steers the search and is not part of the reported time. Because that
 penalty depends on where a node was reached from, the routers keep a
-second arrival per node (from another neighbour) near restrictions, so
-routes stay optimal (spatial_astar.find_route_spatial, routing-worker.js).
+second arrival per node (from another neighbour) within 16 junctions of a
+restriction, so routes stay optimal unless the nearest place to turn round
+is farther than that (spatial_astar.find_route_spatial, routing-worker.js).
 
 Limits: restrictions ship only in spatial-cell ZIMs (`--spatial-chunk-scale`,
 what production builds); a single-file `graph.bin` and a ZIM whose cells

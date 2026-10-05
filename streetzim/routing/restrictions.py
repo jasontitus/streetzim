@@ -284,6 +284,15 @@ def resolve(collector, way_seq) -> tuple[list, Counter]:
                 for p in ps:
                     records[(p, True)] &= ~bit
                 dropped["conflicting only_* at one junction"] += len(ps)
+    # A mode with both a ban and an only_* on the same path would be left
+    # no way on: contradictory relations, so that mode drops both.
+    for (p, only), modes in list(records.items()):
+        if only and (p, False) in records:
+            both = modes & records[(p, False)]
+            if both:
+                records[(p, True)] &= ~both
+                records[(p, False)] &= ~both
+                dropped["contradictory no_* and only_* on one path"] += 1
     out = [((ONLY if only else 0) | modes, list(p))
            for (p, only), modes in sorted(records.items()) if modes]
     return out, dropped

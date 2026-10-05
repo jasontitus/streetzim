@@ -394,3 +394,60 @@ def test_resolver_keeps_kinds_and_modes_apart():
     assert (tr.CAR, (10, 11, 13)) in got                    # way 9 unplaceable, 1 kept
     assert dropped["from/to pairs of a placed relation"] == 1
     assert dropped["conflicting only_* at one junction"] == 2
+
+
+@pytest.mark.parametrize("k", [4, 12, 15])
+def test_turning_round_far_from_the_restriction(tmp_path, k):
+    """A banned left S -> V -> W, a dead-end street of `k` junctions on from
+    V, and a long legal way round: the best route drives to the dead end
+    and back (a free U-turn there), not a penalised U-turn mid-street.
+    That needs the second arrivals (alt states) along the whole street, in
+    both routers (review of c710dc8: a cliff at 8 junctions)."""
+    import json
+    import shutil
+    import subprocess
+
+    from tests.szrg_reader import parse_szrg_bytes
+    from tests.test_routing_worker_modes import WORKER, _DRIVER
+    from tests.test_routing_worker_v3 import _pack_v4_graph_cls
+
+    nodes = [(399_998_000, -1_050_000_000), (400_000_000, -1_050_000_000),
+             (400_000_000, -1_050_002_000)]
+    edges, adj = [], {}
+
+    def add2(a, b, d, sp=50):
+        for u, v in ((a, b), (b, a)):
+            edges.append((u, v, d, sp, 0xFFFFFFFF, 0, 11))
+            adj.setdefault(u, {})[v] = (d / 10) / (sp / 3.6)
+    add2(0, 1, 1000)
+    add2(1, 2, 1000)
+    last = 1
+    for i in range(1, k + 1):
+        nodes.append((400_000_000 + 150 * i, -1_050_000_000))
+        add2(last, len(nodes) - 1, 100)
+        last = len(nodes) - 1
+    nodes.append((400_000_000 + 150 * k, -1_049_999_700))
+    add2(last, len(nodes) - 1, 100)                       # the dead end
+    nodes.append((399_998_000, -1_050_040_000))
+    ring = len(nodes) - 1
+    add2(0, ring, 50000, 30)
+    add2(ring, 2, 50000, 30)
+    recs = [(tr.CAR | tr.BIKE, [0, 1, 2])]
+    build_spatial(parse_szrg_bytes(_pack_v4_graph_cls(nodes, edges)), cell_scale=10,
+                  output_dir=tmp_path / "routing-data", restrictions=recs)
+    sg = _spatial_graph_from_dir(tmp_path / "routing-data")
+    sid = {sg.node_coords_e7(n): n for n in range(sg.num_nodes)}
+    s, t = sid[nodes[0]], sid[nodes[2]]
+    want = _oracle(adj, recs, 0, 2, tr.CAR, 45.0)
+    r = find_route_spatial(sg, s, t)
+    seq = r.node_sequence
+    mid_uturns = sum(1 for i in range(2, len(seq))
+                     if seq[i] == seq[i - 2] and len(sg.edges_of_node(seq[i - 1])) > 1)
+    assert mid_uturns == 0 and r.total_time_s == pytest.approx(want), (seq, want)
+    if shutil.which("node"):
+        p = [[nodes[0][0] / 1e7, nodes[0][1] / 1e7, nodes[2][0] / 1e7, nodes[2][1] / 1e7]]
+        out = subprocess.run(["node", "-e", _DRIVER, str(WORKER), str(tmp_path), json.dumps(p),
+                              json.dumps([{"travel": "drive"}])],
+                             check=True, capture_output=True, text=True)
+        js = json.loads(out.stdout.strip().splitlines()[-1])[0]
+        assert js["time"] == pytest.approx(want)

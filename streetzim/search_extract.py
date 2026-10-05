@@ -118,6 +118,17 @@ def schema_languages(features_path) -> list:
     return list(_schema(features_path).get("languages") or [])
 
 
+def cache_language_error(cache_path, lang):
+    """Why a build in ``lang`` cannot use this search cache, or None."""
+    if lang == "en" or lang in schema_languages(cache_path):
+        return None
+    return (f"--language {lang} needs search features with name:{lang}, and this "
+            f"search cache has none ({cache_path}.schema lists "
+            f"{schema_languages(cache_path) or 'no languages'}): every result would "
+            "be named in the place's own language. Build without --search-cache, or "
+            f"extract a cache with STREETZIM_TILE_LANGUAGES={lang}.")
+
+
 def copy_schema(src_path, dst_path):
     """Carry a features file's schema marker to a copy or cut of it."""
     import shutil

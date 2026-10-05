@@ -978,15 +978,10 @@ def _build_search(
             sys.exit(1)
         cache_size = os.path.getsize(search_cache_path) / (1024 * 1024)
         print(f"    Using cached search features: {search_cache_path} ({cache_size:.0f} MB)")
-        from streetzim.search_extract import SEARCH_SCHEMA, schema_languages, schema_of
-        _lang = getattr(args, "language", "en") or "en"
-        if _lang != "en" and _lang not in schema_languages(search_cache_path):
-            print(f"    Error: --language {_lang} needs search features with name:{_lang}, "
-                  f"and this search cache has none ({search_cache_path}.schema lists "
-                  f"{schema_languages(search_cache_path) or 'no languages'}): every result "
-                  "would be named in the place's own language. Build without "
-                  "--search-cache, or extract a cache with "
-                  f"STREETZIM_TILE_LANGUAGES={_lang}.", flush=True)
+        from streetzim.search_extract import SEARCH_SCHEMA, cache_language_error, schema_of
+        _err = cache_language_error(search_cache_path, getattr(args, "language", "en") or "en")
+        if _err:
+            print(f"    Error: {_err}", flush=True)
             sys.exit(1)
         if schema_of(search_cache_path) < SEARCH_SCHEMA:
             print("    WARNING: this search cache predates native-script names "
@@ -1896,10 +1891,10 @@ def main(argv=None):
     if _src and os.path.isfile(_src) and _src.endswith(".zim"):
         try:
             from libzim.reader import Archive as _Archive
-            _zl = bytes(_Archive(_src).get_metadata("Language")).decode().split(",")[0]
+            _zl = bytes(_Archive(_src).get_metadata("Language")).decode()
         except Exception:
             _zl = None
-        if _zl and _zl != _languages.iso639_3(args.language):
+        if _zl and not _languages.zim_matches(args.language, _zl):
             parser.error(f"--wiki-articles-source {_src} is a {_zl} Wikipedia; this build "
                          f"is --language {args.language} ({_languages.iso639_3(args.language)})")
     if args.cpus is not None and args.cpus < 1:
