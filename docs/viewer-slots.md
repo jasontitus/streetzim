@@ -53,8 +53,8 @@ Slots are right-sized per file rather than a flat 1 MB each:
 
 | file | slot | typical content | headroom |
 |---|---|---|---|
-| index.html | 1 MB | ~607 KB (2026-09-30: dark theme, inline POI icons, RTL text) | 1.7x |
-| places.html | 256 KB | ~101 KB | 2.5x |
+| index.html | 1 MB | ~698 KB (2026-10-05: + UI strings and the German table, ~39 KB; [i18n.md](i18n.md)) | 1.5x |
+| places.html | 256 KB | ~138 KB (2026-10-05: + UI strings and the German table, ~21 KB) | 1.9x |
 | routing-worker.js | 128 KB | ~68 KB | 1.9x |
 
 **1.4 MB uncompressed per ZIM** (a flat 1 MB each cost 3.1 MB). That is 0.06%
