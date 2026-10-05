@@ -9,21 +9,22 @@ turn-by-turn routing, terrain and place information — into a single .zim file
 that opens in any Kiwix reader. This primer explains what is in the file, how
 each feature works on the device, and how the file is built.
 
-## Being worked on
+## New in files built from October 2026
 
-Three improvements are in progress; the sections below describe the product as
-it ships today.
+Files built with the current code add three things; files published before
+keep their old behaviour until they are rebuilt.
 
-- **Real walking and cycling routes.** Today the Walk and Bike modes show the car
-  route with a walking or cycling time. The new routing uses footpaths, steps,
-  pedestrian streets and cycle tracks, lets pedestrians walk against one-way
-  streets, follows bike rules (one-way exemptions, push-your-bike sections), and
-  keeps published files working.
-- **Search in every script.** Today a place is searchable by one name: its English name when OpenStreetMap has one, otherwise its local name. So 北京 may not find Beijing, which is stored as "Beijing". Local-script names (北京, Москва, Αθήνα, 東京) will be searchable alongside the English ones, including part of a Chinese or Japanese name, which has no spaces between words.
-- **StreetZims in other languages.** Today every file is English. A build will be
-  able to choose a language: place names on the map and in search, Wikidata facts,
-  Wikipedia articles and summaries, and the file's metadata in that language, with
-  local names kept alongside.
+- **Real walking and cycling routes.** Directions ask Drive, Walk or Bike first
+  and plan for that mode: footpaths, steps, pedestrian streets and cycle tracks,
+  walking both ways along one-way streets, cyclists against a one-way only where
+  allowed (otherwise pushing), busy roads avoided by bike.
+- **Turn restrictions.** Car and bike routes obey OpenStreetMap's no-left-turn,
+  only-straight-on and similar rules.
+- **Search in every script.** A place is also found by its own name, not only its
+  English one: 北京大学 as well as Peking University.
+- **Files in other languages.** A build can choose a language: map labels, search
+  names, Wikipedia articles and Wikidata facts in that language where they exist,
+  with local names kept alongside. The app's own buttons are still English.
 
 ## At a glance
 
@@ -125,10 +126,10 @@ letters, so a search touches a few files, not the whole region.
 - Addresses come from OpenStreetMap plus Overture Maps (an open dataset of
   addresses and places), merged where OSM has none. Administrative areas
   (countries, regions, cities) are searchable with their alternate names.
-- Known gap, being worked on: each place is indexed under one name, its English name
-  when OpenStreetMap has one and otherwise its local name. So the local name of a place that
-  also has an English name is not searchable (北京 may not find Beijing). Map labels follow the
-  same rule. Indexing local names as well is in progress.
+- A place is indexed under its English name (or, in a file built in another
+  language, its name in that language) and also under its own local name, so
+  北京大学 and Peking University both find it. In the app's search box a local name is
+  found from its start ("北京" finds 北京大学); Kiwix's search also finds any part.
 
 **Kiwix's own search.** Kiwix's search bar and suggestions use the ZIM's title
 list and its Xapian full-text index, which only see pages. So the build writes a
@@ -158,8 +159,12 @@ search that runs in the background of the page. No routing server is involved.
 junctions. Each edge stores its length, a speed for its road class (motorway
 100 km/h, primary 60, residential 30, track 15, footway 5…), its road name, its
 shape for drawing, and flags: one-way, roundabout, no cars, no bikes, no
-pedestrians. Roads under construction, proposed or abandoned are left out;
-private and destination-only roads stay in.
+pedestrians, push-your-bike, cycle lane or track, surface, sidewalk. Walkers (and
+cyclists where allowed) get an extra record for travelling against a one-way
+street. OpenStreetMap turn restrictions are stored beside the cell they apply in.
+Roads under construction, proposed or abandoned are left out; private and
+destination-only roads stay in (by car as before; walking and cycling avoid them
+unless needed).
 
 **Split into map cells.** The graph is cut into cells of 0.1° latitude by 0.1°
 longitude (about 11 km by 8 km in Europe); each cell is its own small file with
@@ -175,20 +180,22 @@ junctions, so routes over 200 km are good but not guaranteed to be the shortest.
 "no route" quickly when the destination is in a small unreachable area such as an island
 without ferries.
 
-**Turn-by-turn.** Driving mode shows the next turn and its distance and the arrival time,
-follows GPS, and keeps the screen on. After 60 m off the route it shows "Off route" with a
-Re-route button. A turn is announced where the road name changes, or on entering or leaving
-a roundabout or a ramp. There is no voice guidance. Speeds come from the road's class, not
-from posted speed limits, and OpenStreetMap turn restrictions (no left turn and the like) are
-not applied.
+**Travel modes.** Directions ask Drive, Walk or Bike before planning. Walking
+assumes 5 km/h (slower on steps and rough paths) and avoids busy roads without
+sidewalks; cycling assumes 18 km/h on paved roads (less on gravel or dirt), prefers
+cycle lanes and tracks over busy roads, and pushes the bike where cycling is not
+allowed. Cars and bikes obey turn restrictions; a U-turn costs extra time so a
+route goes round the block rather than turning back. Walking and cycling routes are
+exact up to the same budgets as driving; they have no highway shortcut stage.
 
-**Limitation to know: walk and bike.** The Walk and Bike buttons change the time remaining during
-navigation (1.4 m/s walking, 4.5 m/s cycling) and the map view, but the route itself, and the
-time shown when it is planned, are for a car: it avoids footpaths and cycle tracks and
-follows one-way streets. Real walking and cycling routes are being worked on:
-footpaths, cycle tracks and pedestrian streets for walking and cycling,
-against-one-way walking, and bike-specific road rules; the graph already records
-the footpath and cycleway flags they need.
+**Turn-by-turn.** Navigation shows the next turn and its distance and the arrival time,
+follows GPS, and keeps the screen on. Off the route (60 m driving, 60 m cycling,
+50 m walking, for a few seconds) it shows "Off route" with a Re-route button. A turn is announced where the road name changes, or on entering or leaving
+a roundabout or a ramp. There is no voice guidance. Speeds come from the road's class, not
+from posted speed limits.
+
+**Older files.** Files built before October 2026 plan car routes only; their Walk
+and Bike buttons navigate the car route at a walking or cycling pace.
 
 ## Elevation and imagery
 
@@ -349,12 +356,14 @@ text plugin (BSD-2-Clause), StreetZim's code (MIT).
 
 **Limitations to weigh:**
 
-- Walking and cycling routes use the car route today; real walking and cycling
-  routing is being worked on (see [Offline routing](#offline-routing)).
-- English only: facts, articles and metadata (StreetZims in other languages are being worked
-  on).
-- Search finds a place by one name, English when OpenStreetMap has one, otherwise local;
-  searching by the local name as well is being worked on.
+- Walking and cycling routes, turn restrictions, local-name search and other
+  languages arrive with each file's next rebuild; published files keep the old
+  behaviour until then.
+- In a file built in another language, the app's own buttons and messages, and
+  the location labels beside search results, are still English.
+- In the app's search box a local name without spaces (Chinese, Japanese, Thai) is
+  found from its start, not by a word in its middle ("北京" finds 北京大学, "大学" does
+  not); Kiwix's own search finds either.
 - The app needs a Kiwix reader that runs JavaScript, and keeps its requests gentle
   for Kiwix's request handling.
 - Satellite imagery needs EOX's written confirmation before wide publication. Files made by
