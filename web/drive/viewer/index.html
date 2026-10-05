@@ -7691,6 +7691,10 @@ var originResultsEl = document.getElementById('routing-origin-results');
 var destResultsEl = document.getElementById('routing-dest-results');
 var gpsBtn = document.getElementById('routing-gps-btn');
 var statusEl = document.getElementById('routing-status');
+function setRoutingStatus(text, state) {
+statusEl.textContent = text;
+if (statusEl.setAttribute) statusEl.setAttribute('data-state', text ? (state || '') : '');
+}
 var resultEl = document.getElementById('routing-result');
 var distEl = document.getElementById('route-distance');
 var timeEl = document.getElementById('route-time');
@@ -7825,7 +7829,7 @@ clearRoute();
 }
 clearBtn.addEventListener('click', function() {
 clearRoute();
-statusEl.textContent = '';
+setRoutingStatus('');
 });
 function clearRoute() {
 routeSeq++;
@@ -8516,7 +8520,7 @@ var loadGraphInflight = null;
 function loadGraph() {
 if (graph) return;
 if (loadGraphInflight) return;
-statusEl.textContent = szT('routing.loading_data_dots', 'Loading routing data...');
+setRoutingStatus(szT('routing.loading_data_dots', 'Loading routing data...'), 'loading');
 loadGraphInflight = fetch(baseUrl + 'routing-data/graph-cells-index.bin')
 .then(function(r) {
 var absent = r.headers.get('X-Streetzim-Absent') === '1';
@@ -8548,7 +8552,7 @@ cellScale: idx.cellScale,
 indexBytes: o.buf.byteLength,
 numNodeShards: idx.numNodeShards,
 });
-statusEl.textContent = szT('routing.enter_both', 'Enter start and destination');
+setRoutingStatus(szT('routing.enter_both', 'Enter start and destination'), 'prompt');
 });
 })
 .catch(function(_spatialErr) {
@@ -8571,10 +8575,10 @@ numGeoms: graph.numGeoms,
 geom0Sample: g0 ? g0[0] : null,
 geomLastSample: gLast ? gLast[0] : null,
 });
-statusEl.textContent = szT('routing.enter_both', 'Enter start and destination');
+setRoutingStatus(szT('routing.enter_both', 'Enter start and destination'), 'prompt');
 })
 .catch(function(err) {
-statusEl.textContent = szT('routing.data_unavailable', 'Routing data unavailable');
+setRoutingStatus(szT('routing.data_unavailable', 'Routing data unavailable'), 'failed');
 console.error('Failed to load routing graph:',
 (err && err.message) || err);
 });
@@ -8771,7 +8775,10 @@ function startRouteProgressIndicator(crowKm) {
 if (__routeStatusTimer) clearInterval(__routeStatusTimer);
 __routeStatusStart = performance.now();
 var s = document.getElementById('routing-status');
-if (s) s.textContent = szT('routing.loading_map_data', 'Loading map data…');
+if (s) {
+s.textContent = szT('routing.loading_map_data', 'Loading map data…');
+s.setAttribute('data-state', 'loading');
+}
 var prog = document.getElementById('routing-progress');
 if (prog) {
 prog.classList.remove('determinate');
@@ -9543,9 +9550,12 @@ return el;
 function queueGraphPick(which, lat, lon, label) {
 if (graph) return false;
 var visible = szIsHere(label) ? szHereLabel() : (label || coordLabel(lat, lon));
-if (which === 'origin') originInput.value = visible;
+if (which === 'origin') {
+originInput.value = visible;
+originInput._szHere = szIsHere(label);  // as setOriginFromLatLon does
+}
 else                    destInput.value   = visible;
-statusEl.textContent = szT('routing.loading_data', 'Loading routing data…');
+setRoutingStatus(szT('routing.loading_data', 'Loading routing data…'), 'loading');
 loadGraph();
 var tries = 0;
 var retry = setInterval(function() {
@@ -9556,7 +9566,7 @@ if (which === 'origin') setOriginFromLatLon(lat, lon, label);
 else setDestFromLatLon(lat, lon, label);
 } else if (!loadGraphInflight || tries > 6000) {
 clearInterval(retry);
-statusEl.textContent = szT('routing.load_failed', 'Could not load routing data');
+setRoutingStatus(szT('routing.load_failed', 'Could not load routing data'), 'failed');
 }
 }, 100);
 return true;
@@ -9598,12 +9608,12 @@ if (queueGraphPick('origin', lat, lon, label)) return;
 originPick = { lat: lat, lon: lon };
 navPlanSeq++;
 var snapSeq = ++originSnapSeq;
-statusEl.textContent = snappingText();
+setRoutingStatus(snappingText(), 'loading');
 var snapped;
 try {
 snapped = await nearestNode(lat, lon, 'origin');
 } catch (err) {
-if (snapSeq === originSnapSeq) statusEl.textContent = szT('routing.no_nearby_road', 'Could not find a nearby road');
+if (snapSeq === originSnapSeq) setRoutingStatus(szT('routing.no_nearby_road', 'Could not find a nearby road'), 'failed');
 console.error('[streetzim] origin snap failed:', err);
 return;
 }
@@ -9624,7 +9634,7 @@ if (destNode !== -1) {
 unmoveDest();
 computeAndDrawRoute();
 } else {
-statusEl.textContent = szT('routing.enter_dest', 'Enter destination');
+setRoutingStatus(szT('routing.enter_dest', 'Enter destination'), 'prompt');
 }
 }
 async function setDestFromLatLon(lat, lon, label) {
@@ -9632,12 +9642,12 @@ if (queueGraphPick('dest', lat, lon, label)) return;
 destPick = { lat: lat, lon: lon };
 navPlanSeq++;
 var snapSeq = ++destSnapSeq;
-statusEl.textContent = snappingText();
+setRoutingStatus(snappingText(), 'loading');
 var snapped;
 try {
 snapped = await nearestNode(lat, lon, 'dest');
 } catch (err) {
-if (snapSeq === destSnapSeq) statusEl.textContent = szT('routing.no_nearby_road', 'Could not find a nearby road');
+if (snapSeq === destSnapSeq) setRoutingStatus(szT('routing.no_nearby_road', 'Could not find a nearby road'), 'failed');
 console.error('[streetzim] destination snap failed:', err);
 return;
 }
@@ -9656,7 +9666,7 @@ if (originNode !== -1) {
 unmoveOrigin();
 computeAndDrawRoute();
 } else {
-statusEl.textContent = szT('routing.enter_origin', 'Enter start location');
+setRoutingStatus(szT('routing.enter_origin', 'Enter start location'), 'prompt');
 }
 }
 var routeSeq = 0;
@@ -9727,7 +9737,7 @@ console.error('[streetzim] findRoute failed:', err);
 if (seq === routeSeq) {
 stopRouteProgressIndicator();
 placeEndMarkers();
-statusEl.textContent = szT('routing.failed', 'Routing failed');
+setRoutingStatus(szT('routing.failed', 'Routing failed'), 'failed');
 }
 return;
 }
@@ -9776,10 +9786,10 @@ lastRoute = augmentRouteForDriving(result);
 lastRoute.travel = routeTravel;
 try { window.__streetzim_lastRoute = lastRoute; } catch (e) {}
 if (driveMode.active) driveMode.setRoute(lastRoute);
-statusEl.textContent = originMoved && destMoved
+setRoutingStatus(originMoved && destMoved
 ? szT('routing.both_moved', 'Start and destination moved to the nearest reachable roads')
 : destMoved ? szT('routing.dest_moved', 'Destination moved to the nearest reachable road')
-: originMoved ? szT('routing.origin_moved', 'Start moved to the nearest reachable road') : '';
+: originMoved ? szT('routing.origin_moved', 'Start moved to the nearest reachable road') : '', 'done');
 if (!driveMode.active) {
 var shown = unwrapLngs(result.coords);
 var bounds = shown.reduce(function(b, c) { return b.extend(c); },
@@ -9802,9 +9812,9 @@ try { map.resize(); } catch (e) {}
 placeEndMarkers();
 removeRouteLine();
 setExpandHint();
-statusEl.textContent = routeTravel === 'walk' ? szT('routing.no_walking_route', 'No walking route found')
+setRoutingStatus(routeTravel === 'walk' ? szT('routing.no_walking_route', 'No walking route found')
 : routeTravel === 'bike' ? szT('routing.no_cycling_route', 'No cycling route found')
-: szT('routing.no_route', 'No route found');
+: szT('routing.no_route', 'No route found'), 'no-route');
 clearBtn.style.display = 'block';
 }
 }, 10);
@@ -9948,7 +9958,7 @@ if (typeof window.__streetzim_cancelInFlightRoute === 'function') {
 window.__streetzim_cancelInFlightRoute();
 }
 if (typeof statusEl !== 'undefined' && statusEl) {
-statusEl.textContent = '';
+setRoutingStatus('');
 }
 stopRouteProgressIndicator();
 }
@@ -9965,10 +9975,10 @@ setOriginFromLatLon(cached.lat, cached.lon, SZ_HERE);
 return;
 }
 if (!navigator.geolocation) {
-statusEl.textContent = szT('routing.no_geolocation', 'Geolocation not available');
+setRoutingStatus(szT('routing.no_geolocation', 'Geolocation not available'), 'failed');
 return;
 }
-statusEl.textContent = szT('drive.getting_location', 'Getting location…');
+setRoutingStatus(szT('drive.getting_location', 'Getting location…'), 'loading');
 navigator.geolocation.getCurrentPosition(
 function(pos) {
 var lat = pos.coords.latitude;
@@ -9977,7 +9987,7 @@ window.__streetzimLastLoc = { lat: lat, lon: lon, ts: Date.now() };
 setOriginFromLatLon(lat, lon, SZ_HERE);
 },
 function(err) {
-statusEl.textContent = szT('routing.location_denied', 'Location denied or unavailable');
+setRoutingStatus(szT('routing.location_denied', 'Location denied or unavailable'), 'failed');
 },
 { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
 );

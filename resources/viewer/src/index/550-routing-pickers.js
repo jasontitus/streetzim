@@ -13,9 +13,12 @@
     // did nothing." The retry below will then snap to the nearest
     // node and overwrite the marker once the graph is up.
     var visible = szIsHere(label) ? szHereLabel() : (label || coordLabel(lat, lon));
-    if (which === 'origin') originInput.value = visible;
+    if (which === 'origin') {
+      originInput.value = visible;
+      originInput._szHere = szIsHere(label);  // as setOriginFromLatLon does
+    }
     else                    destInput.value   = visible;
-    statusEl.textContent = szT('routing.loading_data', 'Loading routing data…');
+    setRoutingStatus(szT('routing.loading_data', 'Loading routing data…'), 'loading');
     loadGraph();
     var tries = 0;
     var retry = setInterval(function() {
@@ -31,7 +34,7 @@
         // index load over Kiwix on iOS, so the pick was dropped even
         // though the graph arrived a few seconds later.
         clearInterval(retry);
-        statusEl.textContent = szT('routing.load_failed', 'Could not load routing data');
+        setRoutingStatus(szT('routing.load_failed', 'Could not load routing data'), 'failed');
       }
     }, 100);
     return true;
@@ -96,12 +99,12 @@
     originPick = { lat: lat, lon: lon };
     navPlanSeq++;
     var snapSeq = ++originSnapSeq;
-    statusEl.textContent = snappingText();
+    setRoutingStatus(snappingText(), 'loading');
     var snapped;
     try {
       snapped = await nearestNode(lat, lon, 'origin');
     } catch (err) {
-      if (snapSeq === originSnapSeq) statusEl.textContent = szT('routing.no_nearby_road', 'Could not find a nearby road');
+      if (snapSeq === originSnapSeq) setRoutingStatus(szT('routing.no_nearby_road', 'Could not find a nearby road'), 'failed');
       console.error('[streetzim] origin snap failed:', err);
       return;
     }
@@ -125,7 +128,7 @@
       unmoveDest();
       computeAndDrawRoute();
     } else {
-      statusEl.textContent = szT('routing.enter_dest', 'Enter destination');
+      setRoutingStatus(szT('routing.enter_dest', 'Enter destination'), 'prompt');
     }
   }
 
@@ -134,12 +137,12 @@
     destPick = { lat: lat, lon: lon };
     navPlanSeq++;
     var snapSeq = ++destSnapSeq;
-    statusEl.textContent = snappingText();
+    setRoutingStatus(snappingText(), 'loading');
     var snapped;
     try {
       snapped = await nearestNode(lat, lon, 'dest');
     } catch (err) {
-      if (snapSeq === destSnapSeq) statusEl.textContent = szT('routing.no_nearby_road', 'Could not find a nearby road');
+      if (snapSeq === destSnapSeq) setRoutingStatus(szT('routing.no_nearby_road', 'Could not find a nearby road'), 'failed');
       console.error('[streetzim] destination snap failed:', err);
       return;
     }
@@ -158,7 +161,7 @@
       unmoveOrigin();
       computeAndDrawRoute();
     } else {
-      statusEl.textContent = szT('routing.enter_origin', 'Enter start location');
+      setRoutingStatus(szT('routing.enter_origin', 'Enter start location'), 'prompt');
     }
   }
 
@@ -250,7 +253,7 @@
         if (seq === routeSeq) {
           stopRouteProgressIndicator();
           placeEndMarkers();
-          statusEl.textContent = szT('routing.failed', 'Routing failed');
+          setRoutingStatus(szT('routing.failed', 'Routing failed'), 'failed');
         }
         return;
       }
@@ -317,10 +320,10 @@
         if (driveMode.active) driveMode.setRoute(lastRoute);
         // Say so when the router had to move an end (it was on a road cut
         // off from the rest, e.g. by the map's edge).
-        statusEl.textContent = originMoved && destMoved
+        setRoutingStatus(originMoved && destMoved
           ? szT('routing.both_moved', 'Start and destination moved to the nearest reachable roads')
           : destMoved ? szT('routing.dest_moved', 'Destination moved to the nearest reachable road')
-          : originMoved ? szT('routing.origin_moved', 'Start moved to the nearest reachable road') : '';
+          : originMoved ? szT('routing.origin_moved', 'Start moved to the nearest reachable road') : '', 'done');
         // In drive mode, the next GPS fix re-centers at the user's
         // location; fitBounds would yank the camera out to the whole
         // route and blow up the follow-cam.
@@ -351,9 +354,9 @@
         placeEndMarkers();
         removeRouteLine();
         setExpandHint();
-        statusEl.textContent = routeTravel === 'walk' ? szT('routing.no_walking_route', 'No walking route found')
-                             : routeTravel === 'bike' ? szT('routing.no_cycling_route', 'No cycling route found')
-                             : szT('routing.no_route', 'No route found');
+        setRoutingStatus(routeTravel === 'walk' ? szT('routing.no_walking_route', 'No walking route found')
+                         : routeTravel === 'bike' ? szT('routing.no_cycling_route', 'No cycling route found')
+                         : szT('routing.no_route', 'No route found'), 'no-route');
         clearBtn.style.display = 'block';
       }
     }, 10);
@@ -555,7 +558,7 @@
       window.__streetzim_cancelInFlightRoute();
     }
     if (typeof statusEl !== 'undefined' && statusEl) {
-      statusEl.textContent = '';
+      setRoutingStatus('');
     }
     stopRouteProgressIndicator();
   }
@@ -583,10 +586,10 @@
       return;
     }
     if (!navigator.geolocation) {
-      statusEl.textContent = szT('routing.no_geolocation', 'Geolocation not available');
+      setRoutingStatus(szT('routing.no_geolocation', 'Geolocation not available'), 'failed');
       return;
     }
-    statusEl.textContent = szT('drive.getting_location', 'Getting location…');
+    setRoutingStatus(szT('drive.getting_location', 'Getting location…'), 'loading');
     navigator.geolocation.getCurrentPosition(
       function(pos) {
         var lat = pos.coords.latitude;
@@ -595,7 +598,7 @@
         setOriginFromLatLon(lat, lon, SZ_HERE);
       },
       function(err) {
-        statusEl.textContent = szT('routing.location_denied', 'Location denied or unavailable');
+        setRoutingStatus(szT('routing.location_denied', 'Location denied or unavailable'), 'failed');
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );

@@ -29,13 +29,13 @@ const HERE = PANEL.slice(PANEL.indexOf('// BEGIN sz-here'), PANEL.indexOf('// EN
 assert(PICK.includes('function computeAndDrawRoute') && CLEAR.includes('destPick = null'));
 assert(HERE.includes('function szIsHere'));
 
-function make() {
+function make(opts = {}) {
   const el = () => ({ textContent: '', value: '', style: {}, addEventListener() {},
     classList: { add() {}, remove() {}, contains() { return false; } },
     getBoundingClientRect() { return { height: 10 }; } });
   const env = { snaps: [], routes: [] };
   const body = `
-  var window = {}; var graph = {}; var loadGraphInflight = false; function loadGraph() {}
+  var window = {}; var graph = ${opts.noGraph ? 'null' : '{}'}; var loadGraphInflight = false; function loadGraph() {}
   var statusEl = el(), originInput = el(), destInput = el(), resultEl = el(), clearBtn = el(), goRow = el(),
       panel = el(), distEl = el(), timeEl = el(), originResultsEl = el(), destResultsEl = el();
   var minBtn = null; var travelMode = 'drive'; var navPlanSeq = 0; var routingModes = ['drive', 'walk', 'bike'];
@@ -43,6 +43,7 @@ function make() {
       destMarker = null, lastRoute = null, routeDrawn = false;
   var travelBtns = {}; var driveMode = { active: false, exit() {}, setRoute() {} };
   var __routeDebugLabel, __routeDebugPops;
+  function setRoutingStatus(t, st) { statusEl.textContent = t; statusEl.state = t ? (st || '') : ''; }
   function syncTravelButtons() {} function resetGoButtons() {} function setExpandHint() {}
   function stopRouteProgressIndicator() {} function startRouteProgressIndicator() {} function cancelInFlightRoute() {}
   function coordLabel(a, b) { return a + ',' + b; } function makeMarkerEl() { return {}; }
@@ -64,6 +65,7 @@ function make() {
   env.SZ_HERE = SZ_HERE;
   env.api = { setOriginFromLatLon, setDestFromLatLon, setTravelMode, clearRoute, win: window, originInput,
     get state() { return { originNode, destNode, originMoved, destMoved, status: statusEl.textContent,
+      statusState: statusEl.state,
       oIn: originInput.value, dIn: destInput.value, oMarker: originMarker && originMarker.ll,
       dMarker: destMarker && destMarker.ll }; } };`;
   new Function('env', 'el', body)(env, el);
@@ -128,6 +130,7 @@ await ok('no route after a new start: marker back on the destination\'s snap', a
   a.setOriginFromLatLon(3, 3, 'O2'); await snap(e, 'origin', 30);
   await route(e, null);
   assert.strictEqual(a.state.status, 'No route found');
+  assert.strictEqual(a.state.statusState, 'no-route');   // what the gates read
   assert.deepStrictEqual([a.state.destNode, a.state.dMarker], [20, [2, 2]]);
 });
 await ok('a moved GPS start while the start field is being edited: a new destination still routes', async () => {
@@ -188,6 +191,7 @@ await ok('a failed route after a new start: markers where the ends now are', asy
   a.setOriginFromLatLon(3, 3, 'O2'); await snap(e, 'origin', 30);
   e.routes.shift().rej(new Error('boom')); await settle();
   assert.strictEqual(a.state.status, 'Routing failed');
+  assert.strictEqual(a.state.statusState, 'failed');
   assert.deepStrictEqual([a.state.destNode, a.state.dMarker], [20, [2, 2]]);
 });
 await ok('clear forgets moved ends', async () => {
@@ -236,6 +240,36 @@ await ok('in German the GPS start reads "Aktueller Standort" and is still the GP
     assert.strictEqual(a.state.oIn, 'Aktueller Standort');
   } finally {
     globalThis.SZ_I18N = null;
+  }
+});
+await ok('a GPS start picked while the graph loads is flagged too (queued pick)', async () => {
+  const e = make({ noGraph: true }); const a = e.api;
+  a.setOriginFromLatLon(1, 1, SZ_HERE_OF(e));
+  assert.strictEqual(a.state.oIn, 'Current location');
+  assert.strictEqual(a.originInput._szHere, true);
+  await new Promise((r) => setTimeout(r, 150));      // the retry gives up (no load in flight)
+});
+await ok('the failure states are translated (pseudo-locale brackets them)', async () => {
+  globalThis.SZ_I18N_PSEUDO = true;
+  try {
+    let e = make(); let a = e.api;
+    a.setOriginFromLatLon(1, 1, 'O'); await snap(e, 'origin', 10);
+    a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20);
+    await route(e, null);
+    assert.deepStrictEqual([a.state.status, a.state.statusState], ['[No route found]', 'no-route']);
+    e = make(); a = e.api;
+    a.setOriginFromLatLon(1, 1, 'O'); await snap(e, 'origin', 10);
+    a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20);
+    e.routes.shift().rej(new Error('boom')); await settle();
+    assert.deepStrictEqual([a.state.status, a.state.statusState], ['[Routing failed]', 'failed']);
+    e = make(); a = e.api;
+    a.setTravelMode('walk');
+    a.setOriginFromLatLon(1, 1, 'O'); await snap(e, 'origin', 10);
+    a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20);
+    await route(e, null);
+    assert.strictEqual(a.state.status, '[No walking route found]');
+  } finally {
+    globalThis.SZ_I18N_PSEUDO = false;
   }
 });
 console.log(`${pass} passed`);

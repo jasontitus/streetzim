@@ -172,7 +172,10 @@
     if (__routeStatusTimer) clearInterval(__routeStatusTimer);
     __routeStatusStart = performance.now();
     var s = document.getElementById('routing-status');
-    if (s) s.textContent = szT('routing.loading_map_data', 'Loading map data…');
+    if (s) {
+      s.textContent = szT('routing.loading_map_data', 'Loading map data…');
+      s.setAttribute('data-state', 'loading');
+    }
     var prog = document.getElementById('routing-progress');
     if (prog) {
       prog.classList.remove('determinate');

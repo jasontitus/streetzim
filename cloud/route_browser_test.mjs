@@ -197,8 +197,12 @@ async function main() {
     { timeout: 30_000 });
   // Then wait for the routing status to be something other than
   // "Loading routing data...".
+  // #routing-status[data-state] (2026-10) says what the translated text
+  // means; viewers before it only have the English.
   await page.waitForFunction(() => {
-    const s = (document.getElementById('routing-status') || {}).textContent || '';
+    const el = document.getElementById('routing-status');
+    if (el && el.hasAttribute('data-state')) return el.getAttribute('data-state') !== 'loading';
+    const s = (el || {}).textContent || '';
     return !/Loading routing data/i.test(s);
   }, { timeout: 60_000 });
   console.log('  viewer ready');
@@ -240,7 +244,9 @@ async function main() {
       while (Date.now() - start < timeoutMs) {
         const dist = (document.getElementById('route-distance') || {}).textContent || '';
         const time = (document.getElementById('route-time') || {}).textContent || '';
-        const status = (document.getElementById('routing-status') || {}).textContent || '';
+        const statusEl = document.getElementById('routing-status');
+        const status = (statusEl || {}).textContent || '';
+        const statusState = statusEl ? statusEl.getAttribute('data-state') || '' : '';
         if (status) lastStatus = status;
         // Heap snapshot — Chrome only.
         if (performance && performance.memory) {
@@ -263,7 +269,8 @@ async function main() {
         // try another phase next, so we must NOT treat it as final.
         // Final-failure markers come from the routing code's own
         // "no route found" / "Routing failed" status text.
-        if (/no route found|Routing failed/i.test(status)) {
+        if (statusState === 'no-route' || statusState === 'failed'
+            || (!statusState && /no route found|Routing failed/i.test(status))) {
           return { ok: false, distance: '', time: '', status: lastStatus,
                    peakHeapMB, peakCells,
                    elapsedMs: Date.now() - start };

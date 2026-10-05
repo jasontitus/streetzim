@@ -29,6 +29,13 @@ function initRouting(map, config) {
   var destResultsEl = document.getElementById('routing-dest-results');
   var gpsBtn = document.getElementById('routing-gps-btn');
   var statusEl = document.getElementById('routing-status');
+  // The status line and what it means, as #routing-status[data-state], for
+  // gates that must not read the (translated) text: loading, prompt,
+  // failed, no-route, done, or '' when empty.
+  function setRoutingStatus(text, state) {
+    statusEl.textContent = text;
+    if (statusEl.setAttribute) statusEl.setAttribute('data-state', text ? (state || '') : '');
+  }
   var resultEl = document.getElementById('routing-result');
   var distEl = document.getElementById('route-distance');
   var timeEl = document.getElementById('route-time');
@@ -222,7 +229,7 @@ function initRouting(map, config) {
 
   clearBtn.addEventListener('click', function() {
     clearRoute();
-    statusEl.textContent = '';
+    setRoutingStatus('');
   });
 
   function clearRoute() {

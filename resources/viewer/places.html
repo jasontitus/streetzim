@@ -241,8 +241,12 @@ function szPlaceType(kind) {
   header { position:sticky; top:0; z-index:10; background:var(--bg);
            border-bottom:1px solid var(--line);
            padding:var(--top-inset, 12px) 16px 12px; }
-  .titlebar { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
-  .titlebar h1 { margin:0; font-size:1.2rem; flex:1 1 auto; min-width:0;
+  /* The title never shrinks under its text: when a translation makes the
+     row too wide, the actions wrap to a second line instead of the title
+     turning into "Ort…" (an English row fits and is unchanged). */
+  .titlebar { display:flex; align-items:center; gap:10px; margin-bottom:10px;
+              flex-wrap:wrap; row-gap:6px; }
+  .titlebar h1 { margin:0; font-size:1.2rem; flex:1 0 auto; min-width:0;
                  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .titlebar a.back { color:var(--accent); text-decoration:none; font-weight:600;
                      font-size:0.95rem; flex:0 0 auto; }
@@ -488,9 +492,18 @@ const CAT  = HERE + 'category-index/';
 // in JS instead of HTML lets the same template work whether places
 // is served at `/drive/viewer/places/` (PWA) or `<zim-root>/places.html`
 // (Kiwix) — the two have different ../ semantics.
+// A link to the map viewer keeps a ?uilang= override (docs/i18n.md), so a
+// German check of an English ZIM stays German across the hand-off.
+function withUiLang(url) {
+  const m = /[?&]uilang=([A-Za-z]{2,3}(?:-[A-Za-z0-9]+)?)/.exec(location.search);
+  if (!m) return url;
+  const i = url.indexOf('#');
+  const base = i < 0 ? url : url.slice(0, i), frag = i < 0 ? '' : url.slice(i);
+  return base + (base.includes('?') ? '&' : '?') + 'uilang=' + m[1] + frag;
+}
 {
   const back = document.getElementById('back-link');
-  if (back) back.href = HERE + 'index.html';
+  if (back) back.href = withUiLang(HERE + 'index.html');
 }
 
 // Categories surfaced as chips. Each maps to either a single
@@ -1124,7 +1137,7 @@ const _mapConfigP = fetchJSON(HERE + 'map-config.json').catch(() => null);
                     || state.query
                     || szTn('places.n_places', state.results.length, { one: '{n} places', other: '{n} places' });
       if (stashResultsForMap(label)) {
-        window.location.href = HERE + 'index.html#find=results';
+        window.location.href = withUiLang(HERE + 'index.html#find=results');
       }
     });
   }
@@ -2061,9 +2074,11 @@ function stashResultsForMap(label) {
   try {
     const stash = {
       label: label || '',
+      // here: the GPS fix, so the map's place sheet says "from current
+      // location" in its own words rather than echoing our label.
       origin: state.origin
         ? { lat: state.origin.lat, lon: state.origin.lon,
-            label: state.originLabel } : null,
+            label: state.originLabel, here: state.originMode === 'gps' } : null,
       items: state.results.map(_pinShape),
     };
     sessionStorage.setItem(FIND_RESULTS_STASH_KEY,
@@ -2390,11 +2405,11 @@ function renderResults() {
     if (state.origin && state.originMode === 'gps') {
       href += '&origin=' + state.origin.lat + ',' + state.origin.lon;
     }
-    dirA.href = href;
+    dirA.href = withUiLang(href);
     ctas.appendChild(dirA);
     const mapA = document.createElement('a');
     mapA.textContent = szT('controls.map', 'Map');
-    mapA.href = mapHashFor(r, HERE);
+    mapA.href = withUiLang(mapHashFor(r, HERE));
     ctas.appendChild(mapA);
 
     li.appendChild(ctas);
