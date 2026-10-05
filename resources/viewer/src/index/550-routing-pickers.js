@@ -45,6 +45,10 @@
   // them again for the new mode, which may use different vertices.
   var originPick = null;
   var destPick = null;
+  // The router moved this end off the point picked (a road cut off from
+  // the rest): the marker sits on the new road until the end is picked again.
+  var originMoved = false;
+  var destMoved = false;
 
   function snappingText() {
     return travelMode === 'drive' ? 'Finding nearest road...' : 'Finding nearest path...';
@@ -78,6 +82,7 @@
     }
     if (snapSeq !== originSnapSeq) return;
     originNode = snapped.node;
+    originMoved = false;
     var oLat = snapped.lat;
     var oLon = snapped.lon;
     originCoordE7 = [Math.round(oLat * 1e7), Math.round(oLon * 1e7)];
@@ -112,6 +117,7 @@
     }
     if (snapSeq !== destSnapSeq) return;
     destNode = snapped.node;
+    destMoved = false;
     var dLat = snapped.lat;
     var dLon = snapped.lon;
     destCoordE7 = [Math.round(dLat * 1e7), Math.round(dLon * 1e7)];
@@ -246,11 +252,13 @@
         // really starts / ends.
         if (result.endMoved && typeof result.endMoved.lat === 'number') {
           destNode = result.endMoved.node;
+          destMoved = true;
           destCoordE7 = [Math.round(result.endMoved.lat * 1e7), Math.round(result.endMoved.lon * 1e7)];
           if (destMarker) destMarker.setLngLat([result.endMoved.lon, result.endMoved.lat]);
         }
         if (result.startMoved && typeof result.startMoved.lat === 'number') {
           originNode = result.startMoved.node;
+          originMoved = true;
           originCoordE7 = [Math.round(result.startMoved.lat * 1e7), Math.round(result.startMoved.lon * 1e7)];
           if (originMarker) originMarker.setLngLat([result.startMoved.lon, result.startMoved.lat]);
         }
@@ -276,9 +284,10 @@
         if (driveMode.active) driveMode.setRoute(lastRoute);
         // Say so when the router had to move an end (it was on a road cut
         // off from the rest, e.g. by the map's edge).
-        statusEl.textContent = result.endMoved
-          ? 'Destination moved to the nearest reachable road'
-          : result.startMoved ? 'Start moved to the nearest reachable road' : '';
+        statusEl.textContent = originMoved && destMoved
+          ? 'Start and destination moved to the nearest reachable roads'
+          : destMoved ? 'Destination moved to the nearest reachable road'
+          : originMoved ? 'Start moved to the nearest reachable road' : '';
         // In drive mode, the next GPS fix re-centers at the user's
         // location; fitBounds would yank the camera out to the whole
         // route and blow up the follow-cam.

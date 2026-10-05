@@ -258,10 +258,10 @@ def _run_opts(data_dir, pairs, configs):
     return json.loads(out.stdout.strip().splitlines()[-1])
 
 
-def _pocket_graph(tmp_path, pocket_gap):
+def _pocket_graph(tmp_path, pocket_gap, cls=11):
     """A 40-node two-way road (the network) and, `pocket_gap` east of its
     far end, a 40-node two-way stub joined to nothing (a road the extract
-    cut off)."""
+    cut off); road class `cls`."""
     from tests.szrg_reader import parse_szrg_bytes
     from tests.szrg_spatial import build_spatial
     from tests.test_routing_worker_v3 import _pack_v4_graph_cls
@@ -272,8 +272,8 @@ def _pocket_graph(tmp_path, pocket_gap):
     edges = []
     for base in (0, 40):
         for i in range(39):
-            edges += [(base + i, base + i + 1, 500, 30, 0xFFFFFFFF, 0, 11),
-                      (base + i + 1, base + i, 500, 30, 0xFFFFFFFF, 0, 11)]
+            edges += [(base + i, base + i + 1, 500, 30, 0xFFFFFFFF, 0, cls),
+                      (base + i + 1, base + i, 500, 30, 0xFFFFFFFF, 0, cls)]
     build_spatial(parse_szrg_bytes(_pack_v4_graph_cls(road + stub, edges)),
                   cell_scale=10, output_dir=tmp_path / "routing-data")
     return road, stub
@@ -344,3 +344,86 @@ def test_a_resnap_past_two_stubs(tmp_path):
     (r,) = _run_opts(tmp_path, [start + tap],
                      [{"travel": "drive", "options": {"destQuery": {"lat": tap[0], "lon": tap[1]}}}])
     assert r["time"] is not None and r["endMoved"]["lon"] == pytest.approx(road[-1][1] / 1e7)
+
+
+def _chain(edges, base, n):
+    for i in range(n - 1):
+        edges += [(base + i, base + i + 1, 500, 30, 0xFFFFFFFF, 0, 11),
+                  (base + i + 1, base + i, 500, 30, 0xFFFFFFFF, 0, 11)]
+
+
+def test_a_pocket_entered_from_the_neighbouring_cell_is_not_sealed(tmp_path):
+    """A road whose only way in is a one-way from the cell next door: the
+    entrance edge lives in that cell, which the destination's component
+    never touches. The pocket check must look there, or walking and
+    cycling (checked before any search) say "unreachable"."""
+    _node()
+    from tests.szrg_reader import parse_szrg_bytes
+    from tests.szrg_spatial import build_spatial
+    from tests.test_routing_worker_v3 import _pack_v4_graph_cls
+    lat = 400_500_000
+    road = [(lat, -1_049_001_000 - (59 - i) * 6_000) for i in range(60)]   # west of -104.9
+    pocket = [(lat, -1_048_999_000 + i * 6_000) for i in range(40)]         # east of it
+    edges = []
+    _chain(edges, 0, 60)
+    _chain(edges, 60, 40)
+    edges.append((59, 60, 23, 30, 0xFFFFFFFF, 0, 11))   # the one way in
+    build_spatial(parse_szrg_bytes(_pack_v4_graph_cls(road + pocket, edges)),
+                  cell_scale=10, output_dir=tmp_path / "routing-data")
+    pair = [road[0][0] / 1e7, road[0][1] / 1e7, pocket[20][0] / 1e7, pocket[20][1] / 1e7]
+    travels = ("walk", "bike", "drive")
+    for travel, r in zip(travels, _run_opts(tmp_path, [pair] * 3, [{"travel": t} for t in travels])):
+        assert r["time"] is not None, (travel, r["phases"])
+        assert not r.get("endMoved")
+
+
+def test_both_ends_in_pockets_on_a_small_network(tmp_path):
+    """Start and destination each on a cut-off stub (and another stub
+    beside the destination), with a network smaller than the pocket check's
+    limit: both ends move to the road together."""
+    _node()
+    from tests.szrg_reader import parse_szrg_bytes
+    from tests.szrg_spatial import build_spatial
+    from tests.test_routing_worker_v3 import _pack_v4_graph_cls
+    lat = 400_000_000
+    road = [(lat, -1_050_000_000 + i * 6_000) for i in range(40)]
+    stub_a = [(lat + 3_000, road[0][1] - 6_000 - (39 - i) * 6_000) for i in range(40)]
+    stub_b = [(lat + 3_000, road[-1][1] + 6_000 + i * 6_000) for i in range(40)]
+    # a second cut-off stub next to the destination, nearer it than the road
+    stub_c = [(lat + 5_500 + i * 600, road[-1][1] + 4_000) for i in range(40)]
+    edges = []
+    for base in (0, 40, 80, 120):
+        _chain(edges, base, 40)
+    build_spatial(parse_szrg_bytes(_pack_v4_graph_cls(road + stub_a + stub_b + stub_c, edges)),
+                  cell_scale=10, output_dir=tmp_path / "routing-data")
+    ta = [(stub_a[-1][0] + 2_000) / 1e7, (stub_a[-1][1] + 1_000) / 1e7]
+    tb = [(stub_b[0][0] + 2_000) / 1e7, (stub_b[0][1] - 1_000) / 1e7]
+    opts = {"originQuery": {"lat": ta[0], "lon": ta[1]}, "destQuery": {"lat": tb[0], "lon": tb[1]}}
+    for travel in ("drive", "walk"):
+        (r,) = _run_opts(tmp_path, [ta + tb], [{"travel": travel, "options": opts}])
+        assert r["time"] is not None, (travel, r["phases"])
+        assert r["startMoved"]["lon"] == pytest.approx(road[0][1] / 1e7)
+        assert r["endMoved"]["lon"] == pytest.approx(road[-1][1] / 1e7)
+
+
+def test_a_moved_end_does_not_run_two_pass(tmp_path):
+    """The retry after a re-snap must not fall back to the two-pass
+    highway search when it runs out of budget: it is a guess already, and
+    two-pass on a state-sized graph costs tens of seconds."""
+    _node()
+    road, stub = _pocket_graph(tmp_path, 6_000, cls=5)   # primary: a highway tier
+    tap = [(stub[0][0] + 2_000) / 1e7, (stub[0][1] - 1_000) / 1e7]
+    start = [road[0][0] / 1e7, road[0][1] / 1e7]
+    tiny = {"fullOptimal": 5, "fullWeighted": 5, "fullGreedy": 5}
+    (r,) = _run_opts(tmp_path, [start + tap], [{"travel": "drive", "options": {
+        "popLimits": tiny, "destQuery": {"lat": tap[0], "lon": tap[1]}}}])
+    labels = [p["label"] for p in r["phases"]]
+    # The first search finds the pocket sealed; the retry (the second full
+    # optimal) bails through weighted and greedy and stops there.
+    assert labels.count("A* full optimal") == 2, labels
+    assert not any("highway" in x for x in labels), labels
+    assert r["time"] is None
+    # (a car with no picked point and the same budget does run two-pass)
+    (plain,) = _run_opts(tmp_path, [start + [road[-1][0] / 1e7, road[-1][1] / 1e7]],
+                         [{"travel": "drive", "options": {"popLimits": tiny}}])
+    assert any("highway" in p["label"] for p in plain["phases"]), plain["phases"]
