@@ -19,10 +19,7 @@ it ships today.
   pedestrian streets and cycle tracks, lets pedestrians walk against one-way
   streets, follows bike rules (one-way exemptions, push-your-bike sections), and
   keeps published files working.
-- **Search in every script.** Today only the Latin-script name of a place is
-  searchable. Names in their own script (北京, Москва, Αθήνα, 東京) will be
-  searchable too, including part of a Chinese or Japanese name, which has no
-  spaces between words.
+- **Search in every script.** Today a place is searchable by one name: its English name when OpenStreetMap has one, otherwise its local name. So 北京 may not find Beijing, which is stored as "Beijing". Local-script names (北京, Москва, Αθήνα, 東京) will be searchable alongside the English ones, including part of a Chinese or Japanese name, which has no spaces between words.
 - **StreetZims in other languages.** Today every file is English. A build will be
   able to choose a language: place names on the map and in search, Wikidata facts,
   Wikipedia articles and summaries, and the file's metadata in that language, with
@@ -58,10 +55,13 @@ from opening the file to routing, works offline inside Kiwix.
 
 A StreetZim file is an ordinary ZIM whose main page is a map app. Everything the
 app needs — its code, the map, search, routing and place information — is stored
-as ZIM entries and read on the device; nothing is fetched from the internet.
+as ZIM entries and read on the device; it needs no internet connection. (A few links, such as
+Wikipedia in other languages, open online pages only if tapped.)
 
-Shares below are from the published China file (21.3 GB, 11.7 million entries),
-a production build that also carries satellite imagery.
+Shares below are from the published China file (21.3 GB, 11.7 million entries). It was made
+by StreetZim's own production pipeline, not by the openZIM `streetzim` command, and it carries
+satellite imagery; files from the command differ in details (for example their Find chips and
+metadata).
 
 | Part | Entries in the ZIM | Format | China: size, share |
 | --- | --- | --- | --- |
@@ -120,13 +120,15 @@ letters, so a search touches a few files, not the whole region.
 
 - Matching ignores accents and case: names are reduced to plain letters before
   indexing, the same way in the build and in the app.
-- Busy prefixes ("st", "ca") are split further so no file grows beyond about 10 MB.
+- Busy prefixes ("st", "ca") are split further, aiming at files of about 4 MB. A
+  one-letter query, or a query in Chinese or Japanese, reads more files than a typical one.
 - Addresses come from OpenStreetMap plus Overture Maps (an open dataset of
   addresses and places), merged where OSM has none. Administrative areas
   (countries, regions, cities) are searchable with their alternate names.
-- Known gap, being worked on: only the Latin-script name of a place is indexed, so
-  a search in Chinese characters finds only places whose alternate names include
-  them. Indexing each place's name in its own script is in progress.
+- Known gap, being worked on: each place is indexed under one name, its English name
+  when OpenStreetMap has one and otherwise its local name. So the local name of a place that
+  also has an English name is not searchable (北京 may not find Beijing). Map labels follow the
+  same rule. Indexing local names as well is in progress.
 
 **Kiwix's own search.** Kiwix's search bar and suggestions use the ZIM's title
 list and its Xapian full-text index, which only see pages. So the build writes a
@@ -136,9 +138,8 @@ area, and in the full profile for every named point of interest. Each page has
 point-of-interest page costs about 440 bytes in the file.
 
 **Find chips.** Under the search box is a row of category chips: Food & Drink,
-Bars, Hotels, Museums, Landmarks, Parks, Libraries, Health, Shops and Gas. A tap
-shows the 300 nearest matches as pins with a scrolling card list, sorted by
-distance from the user's GPS position (or from the map). The Find page
+Bars, Hotels, Museums, Landmarks, Parks, Libraries, Health, Shops and Gas. A tap shows the 300 matches nearest the map's centre as pins with a scrolling card list,
+with distances from the user's GPS position when it is known. The Find page
 (`places.html`) shows the same as a list with sorting and filters.
 
 - Each chip is decided at build time by fixed rules on the OpenStreetMap category
@@ -162,26 +163,28 @@ private and destination-only roads stay in.
 
 **Split into map cells.** The graph is cut into cells of 0.1° latitude by 0.1°
 longitude (about 11 km by 8 km in Europe); each cell is its own small file with
-its roads and their positions, plus one index file listing the cells. A route
-loads only the cells it passes through, keeping at most 64 MB of cells in memory
-and dropping them between legs; a long route peaks at about 500–600 MB of memory
-on the device.
+its roads and their positions, plus one index file listing the cells. A route loads the cells its search explores, plus a corridor along the straight line fetched
+in advance, and keeps 64–384 MB of cells in memory depending on the device (192 MB when the
+device does not say). One long Japanese route measured about 500–600 MB of memory in total.
 
 **The search.** The app uses A* (a standard shortest-path search guided by
-straight-line distance). It tries an exact search first (up to 200 km), then
-progressively faster approximate ones for longer trips, and finally a two-stage
-route: local roads at each end and only major roads (motorway, trunk, primary) in
-between. It answers "no route" quickly when the destination is on an unconnected
-island.
+straight-line distance). It tries an exact search first (up to 200 km straight-line distance), then progressively
+faster approximate ones, and finally a two-stage route: local roads at each end and only
+major roads (motorway, trunk, primary) in between. Each pass explores a fixed number of
+junctions, so routes over 200 km are good but not guaranteed to be the shortest. It answers
+"no route" quickly when the destination is in a small unreachable area such as an island
+without ferries.
 
-**Turn-by-turn.** Driving mode shows the next turn and its distance, the arrival
-time, follows GPS, detects leaving the route and re-routes, and keeps the screen
-on. Turns come from changes of road name or road type along the route. There is no
-voice guidance.
+**Turn-by-turn.** Driving mode shows the next turn and its distance and the arrival time,
+follows GPS, and keeps the screen on. After 60 m off the route it shows "Off route" with a
+Re-route button. A turn is announced where the road name changes, or on entering or leaving
+a roundabout or a ramp. There is no voice guidance. Speeds come from the road's class, not
+from posted speed limits, and OpenStreetMap turn restrictions (no left turn and the like) are
+not applied.
 
-**Limitation to know: walk and bike.** The Walk and Bike buttons change the
-travel-time estimate (1.4 m/s walking, 4.5 m/s cycling) and the map view, but the
-route itself is computed for a car: it avoids footpaths and cycle tracks and
+**Limitation to know: walk and bike.** The Walk and Bike buttons change the time remaining during
+navigation (1.4 m/s walking, 4.5 m/s cycling) and the map view, but the route itself, and the
+time shown when it is planned, are for a car: it avoids footpaths and cycle tracks and
 follows one-way streets. Real walking and cycling routes are being worked on:
 footpaths, cycle tracks and pedestrian streets for walking and cycling,
 against-one-way walking, and bike-specific road rules; the graph already records
@@ -207,7 +210,8 @@ terrain tiles: each 256-pixel tile stores the height of every pixel as a colour
 
 **Satellite imagery (optional).** EOX's Sentinel-2 cloudless mosaic, a cloud-free
 picture of the Earth assembled from European Sentinel-2 satellite images, as photo
-tiles up to zoom 14 (13 far from the equator). It is in no profile; a build must
+tiles up to zoom 14 (zoom 13 when the region's centre is at 45° latitude or more, unless the
+build sets the zoom). It is in no profile; a build must
 ask for it.
 
 - Licence: the 2016 mosaic is CC BY 4.0 and is the default; the newer 2021 mosaic
@@ -224,8 +228,8 @@ its Wikipedia article, all from the file.
   name, short description, population, area, elevation, country, capital, time
   zone, website and type, plus a three-sentence summary from English Wikipedia.
   Stored as small JSON files grouped by ID; about 5 MB for China.
-- **Wikipedia articles.** Full English articles for the places that link one (a
-  few hundred to about 11,600 per region; California is the largest so far). A
+- **Wikipedia articles.** Full English articles for the places that link one (from a
+  few hundred to tens of thousands per region; the China file has 24,620). A
   build can take them from a Kiwix Wikipedia ZIM given to it, with images, or fetch
   text-only versions from the Wikipedia API at Wikimedia's polite rate of 120 per
   minute. Articles whose OSM tag is in another language are matched to the English
@@ -256,14 +260,14 @@ EOX imagery if satellite is requested.
 4. **Build the search index**: read every named thing from the tiles, add
    addresses (OSM and Overture), administrative areas and Overture places, and
    write the search files and Find-chip categories.
-5. **Collect Wikidata facts** for every tagged place, and the Wikipedia articles.
+5. **Collect Wikidata facts** for every tagged place.
 6. **Build the routing graph** from the OSM roads, then split it into map cells.
 7. **Make terrain tiles** from Copernicus elevation (and satellite tiles, if
    requested); then check every terrain tile.
 8. **Check the bundled map library** (MapLibre) against its pinned version.
 9. **Write the ZIM** with libzim (openZIM's library): the app, tiles, search,
-   chips, routing, Wikipedia, the Kiwix search pages and the full-text index, with
-   standard metadata.
+   chips, routing, the Wikipedia articles (fetched in this step), the Kiwix search pages and the
+   full-text index, with standard metadata.
 
 **Profiles.** A recipe picks one of two, and can switch single features on or off:
 
@@ -272,19 +276,20 @@ EOX imagery if satellite is requested.
 | `full` (default) | yes | yes | yes | yes | yes |
 | `basic` | yes | no | no | no | no |
 
-Satellite is in neither profile and must be requested. The ZIM is named
-`osm_en_<area>`, flavour `maxi` (or `satellite`), tagged `maps;osm;offline`.
+Satellite is in neither profile and must be requested. By convention the recipe names the ZIM
+`osm_en_<area>` (the build takes the name it is given); flavour `maxi`, or `satellite` /
+`satellite-nc` with imagery; tagged `maps;osm;offline`.
 
-**Checks.** Every change to the code is tested automatically, including a full
-build of Monaco in Docker with no network, validated with openZIM's `zimcheck` and
-StreetZim's own checks (search, routing, chips, terrain). The build command itself
+**Checks.** Every change to the code is tested automatically, including a full-profile
+build of Monaco in Docker with no network (from pinned, cached inputs, terrain off), validated
+with openZIM's `zimcheck` and StreetZim's own checks; a build from live sources runs weekly. The build command itself
 does not run zimcheck.
 
 ## Cost to build
 
 A country builds in minutes to a couple of hours on 4 cores; China, among the
-largest regions, builds in about 12 hours inside a 16 GB container, the size
-Zimfarm offers. The `full` profile adds hours of waiting on Wikimedia's rate limits
+largest regions, has built in about 12 hours inside a 16 GB container, the size Zimfarm
+offers, with little memory to spare so far. The `full` profile adds hours of waiting on Wikimedia's rate limits
 for large regions.
 
 | Region | OSM extract | Profile, machine | Time | Peak memory | ZIM |
@@ -294,22 +299,22 @@ for large regions.
 | Netherlands | 1.6 GB | basic, 4 cores | 92 min | 10.8 GB (older code) | 1.2 GB |
 | China | 6.5 GB | full, 16 GB container | 11 h 38 min | 15.6 GB (16 GiB limit) | 22.8 GB |
 
-- **China in 16 GB.** The first complete build passed on 4 October 2026, after
-  changes that each removed a memory peak: routing extraction and its map-cell
+- **China in 16 GB.** The first complete build passed on 4 October 2026, peaking at
+  15.6 GB, about 0.4 GB under the limit, after changes that each removed a memory peak: routing extraction and its map-cell
   split run in separate short-lived processes, terrain workers cap their image
   cache, and the Find chips are built one at a time. Two further changes since,
   measured on China's data: the map-cell split reads the road graph from disk
   instead of copying it into memory (8.7 GB to 0.8 GB), and only the region's own
-  Wikidata facts are loaded (4.4 GB to 1.2 GB). A China run on that final code is
-  finishing now.
+  Wikidata facts are loaded (4.4 GB to 1.2 GB). A full China run on that final code, which should
+  leave a wide margin, has not finished yet.
 - **Europe** (a 42 GB extract, 6.5 times China) is building in a 16 GB container as
   the next test.
 - **Recommended recipe sizes** (Zimfarm): up to 60 MB extract, 2 cores and 6 GiB;
   around 700 MB, 4 cores and 8–10 GiB; around 1.5 GB, 4 cores and 12–14 GiB. The
   build sizes its own parallel work to one core per 2 GiB of memory, and switches
   tilemaker to its disk store for large extracts.
-- **Disk:** a few times the extract size while building (China peaked at 71 GB),
-  mostly temporary.
+- **Disk:** 6 to 11 times the extract size while building (Switzerland 6.5×, China
+  71 GB for a 6.5 GB extract), mostly temporary.
 - **Downloads per task:** the extract, about 900 MB of shapefiles, Overture for the
   region's box, and with terrain an elevation download of 0.4 to 5 times the
   extract size.
@@ -339,21 +344,31 @@ zimscraperlib's Creator; a side-by-side comparison with real Wikipedia articles.
 **Licences in every file**, listed in its License metadata from the layers present:
 OpenStreetMap (ODbL), OpenMapTiles schema (CC BY 4.0), Copernicus elevation,
 Wikidata (CC0), Wikipedia (CC BY-SA 4.0), Overture (per-source, credits in the
-file), satellite (CC BY 4.0, or marked non-commercial), fonts (Apache 2.0 / OFL),
-icons (CC0), StreetZim's code (MIT).
+file), satellite (CC BY 4.0, or marked non-commercial), fonts (Apache 2.0 / OFL), icons (CC0), MapLibre GL JS (BSD-3-Clause), the right-to-left
+text plugin (BSD-2-Clause), StreetZim's code (MIT).
 
 **Limitations to weigh:**
 
 - Walking and cycling routes use the car route today; real walking and cycling
   routing is being worked on (see [Offline routing](#offline-routing)).
-- English only: facts, articles and metadata.
-- Search indexes Latin-script names; native-script search works only through
-  alternate names today, and indexing names in their own script is being worked on.
+- English only: facts, articles and metadata (StreetZims in other languages are being worked
+  on).
+- Search finds a place by one name, English when OpenStreetMap has one, otherwise local;
+  searching by the local name as well is being worked on.
 - The app needs a Kiwix reader that runs JavaScript, and keeps its requests gentle
   for Kiwix's request handling.
-- Satellite imagery needs EOX's written confirmation before wide publication.
-- Very large regions need care on a 16 GB worker: China fits; Europe is being
-  tested.
+- Satellite imagery needs EOX's written confirmation before wide publication. Files made by
+  StreetZim's own production pipeline, such as the published China file, carry the
+  non-commercial 2021 imagery without being labelled non-commercial; the openZIM command labels
+  it, and those files need relabelling or rebuilding.
+- Updating the viewer inside an already-published file keeps the file's ID while its content
+  changes. Kiwix's library recognises files by that ID, and mirrors check files by checksum, so
+  openZIM would need a rule for it (for example a new ID with each viewer update).
+- Routing quality: speeds come from road class, not posted limits; turn restrictions are not
+  applied; routes over 200 km are not guaranteed shortest; re-routing is a button, not
+  automatic.
+- Very large regions need care on a 16 GB worker: China has fitted with 0.4 GB to spare, with
+  fixes since to widen that; Europe is being tested.
 
 ## Further reading
 
