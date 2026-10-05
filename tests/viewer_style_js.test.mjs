@@ -8,6 +8,9 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
+// The UI-string runtime (szT, szFixed, …) as globals, as index.html has it:
+// the code under test calls it (docs/i18n.md). Indirect eval: global scope.
+(0, eval)(fs.readFileSync(`${REPO}/resources/viewer/i18n/runtime.js`, 'utf8'));
 const HTML = fs.readFileSync(`${REPO}/resources/viewer/index.html`, 'utf8');
 const LUA = fs.readFileSync(`${REPO}/resources/tilemaker/process-openmaptiles.lua`, 'utf8');
 

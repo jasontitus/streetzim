@@ -113,8 +113,8 @@ function _findChipUnavailable(chipDef) {
     }
     _findChipsSetHidden(rail, btns, hide, none || rail.hidden);
   }
-  _showFindToast(none ? 'No category search in this map'
-                      : 'No ' + chipDef.label.toLowerCase() + ' in this map');
+  _showFindToast(none ? szT('find.no_category_search', 'No category search in this map')
+                      : szT('find.none_in_map', 'No {chip} in this map', { chip: szChipInSentence(chipDef.id, chipDef.label) }));
 }
 
 // Hide what the manifest says this ZIM cannot serve. A chip that is active
@@ -223,7 +223,7 @@ function initFindChips(map) {
       emoji.setAttribute('aria-hidden', 'true');
       emoji.textContent = c.emoji;
       var label = document.createElement('span');
-      label.textContent = c.label;
+      label.textContent = szChipLabel(c.id, c.label);
       btn.appendChild(emoji);
       btn.appendChild(label);
       // iOS cancels the click when a tap drifts (pointercancel), so the
@@ -240,9 +240,12 @@ function initFindChips(map) {
           // "Loading food & drink…" for ever, with only a console warning.
           console.warn('[streetzim] chip load failed:', err);
           var si = document.getElementById('search-input');
-          if (si && _chipOrigPlaceholder) si.placeholder = _chipOrigPlaceholder;
+          if (si && _chipOrigPlaceholder) {
+            si.placeholder = _chipOrigPlaceholder;
+            si.removeAttribute('data-sz-chip-loading');
+          }
           _findChipPaintActive(null);
-          _showFindToast('Couldn’t load ' + c.label.toLowerCase());
+          _showFindToast(szT('find.could_not_load', 'Couldn\u2019t load {chip}', { chip: szChipInSentence(c.id, c.label) }));
         });
       };
       btn._szAct = act;
@@ -466,15 +469,18 @@ async function loadChipOnMap(map, chipDef, opts) {
   // real one (not our own "Loading …"): the search manifest rewrites it
   // asynchronously ("Search N places…"), so capturing only once could
   // pin the boot-time text forever.
-  if (searchInput && !/^Loading /.test(searchInput.placeholder || '')) {
+  // Whether the placeholder is ours is a flag, not its (translated) text.
+  if (searchInput && !searchInput.hasAttribute('data-sz-chip-loading')) {
     _chipOrigPlaceholder = searchInput.placeholder || '';
   }
   if (searchInput) {
-    searchInput.placeholder = 'Loading ' + chipDef.label.toLowerCase() + '…';
+    searchInput.placeholder = szT('find.loading_chip', 'Loading {chip}…', { chip: szChipInSentence(chipDef.id, chipDef.label) });
+    searchInput.setAttribute('data-sz-chip-loading', '');
   }
   function restorePlaceholder() {
     if (searchInput && _chipOrigPlaceholder != null) {
       searchInput.placeholder = _chipOrigPlaceholder;
+      searchInput.removeAttribute('data-sz-chip-loading');
     }
   }
   var catManifest = await _findFetchCatManifest();
@@ -543,13 +549,13 @@ async function loadChipOnMap(map, chipDef, opts) {
     restorePlaceholder();
     if (!_merged.length) {
       _showFindToast(_mFailed
-        ? 'Couldn\u2019t load ' + chipDef.label.toLowerCase()
-        : 'No ' + chipDef.label.toLowerCase() + ' in this map');
+        ? szT('find.could_not_load', 'Couldn\u2019t load {chip}', { chip: szChipInSentence(chipDef.id, chipDef.label) })
+        : szT('find.none_in_map', 'No {chip} in this map', { chip: szChipInSentence(chipDef.id, chipDef.label) }));
       _findChipPaintActive(null);
       return;
     }
     if (_mPartial) {
-      _showFindToast('Showing the nearest \u2014 zoom in for more',
+      _showFindToast(szT('find.nearest_zoom_in', 'Showing the nearest \u2014 zoom in for more'),
                      { color: '#333', ms: 2600 });
     }
     data = _merged;
@@ -589,19 +595,19 @@ async function loadChipOnMap(map, chipDef, opts) {
       if (mySeq !== _chipLoadSeq) return;
       restorePlaceholder();
       _findChipPaintActive(null);
-      _showFindToast('Couldn\u2019t load ' + chipDef.label.toLowerCase());
+      _showFindToast(szT('find.could_not_load', 'Couldn\u2019t load {chip}', { chip: szChipInSentence(chipDef.id, chipDef.label) }));
       return;
     }
     if (!res || mySeq !== _chipLoadSeq) return;  // superseded while loading
     restorePlaceholder();
     if (!res.records.length) {
       if (res.failed) {
-        _showFindToast('Couldn’t load ' + chipDef.label.toLowerCase());
+        _showFindToast(szT('find.could_not_load', 'Couldn\u2019t load {chip}', { chip: szChipInSentence(chipDef.id, chipDef.label) }));
         if (!opts.requireInBounds) _findChipPaintActive(null);
       } else if (opts.requireInBounds) {
-        _showFindToast('No ' + chipDef.label.toLowerCase() + ' in this area');
+        _showFindToast(szT('find.none_in_area', 'No {chip} in this area', { chip: szChipInSentence(chipDef.id, chipDef.label) }));
       } else {
-        _showFindToast('No ' + chipDef.label.toLowerCase() + ' in this map');
+        _showFindToast(szT('find.none_in_map', 'No {chip} in this map', { chip: szChipInSentence(chipDef.id, chipDef.label) }));
         _findChipPaintActive(null);
       }
       return;
@@ -615,13 +621,13 @@ async function loadChipOnMap(map, chipDef, opts) {
       var _vis = items.filter(function(r) { return _findRecordVisible(map, _vrect, r); });
       if (_vis.length) items = _vis;
       else if (opts.requireInBounds) {
-        _showFindToast('No ' + chipDef.label.toLowerCase() + ' in this area');
+        _showFindToast(szT('find.none_in_area', 'No {chip} in this area', { chip: szChipInSentence(chipDef.id, chipDef.label) }));
         return;
       } else expanded = true;
     }
     if (res.partial) {
-      _showFindToast('Showing the nearest ' + items.length
-        + ' — zoom in for more', { color: '#333', ms: 2600 });
+      _showFindToast(szT('find.nearest_n_zoom_in', 'Showing the nearest {n} — zoom in for more', { n: items.length }),
+        { color: '#333', ms: 2600 });
     }
   } else {
   try {
@@ -634,15 +640,16 @@ async function loadChipOnMap(map, chipDef, opts) {
     if (mySeq !== _chipLoadSeq) return;  // a newer chip owns the UI now
     restorePlaceholder();
     _findChipPaintActive(null);
-    _showFindToast('Couldn\u2019t load ' + chipDef.label.toLowerCase());
+    _showFindToast(szT('find.could_not_load', 'Couldn\u2019t load {chip}', { chip: szChipInSentence(chipDef.id, chipDef.label) }));
     return;
   }
   if (mySeq !== _chipLoadSeq) return;  // superseded while loading
   restorePlaceholder();
   // An empty chip used to render an empty carousel with no word said.
   if (!Array.isArray(data) || !data.length) {
-    _showFindToast('No ' + chipDef.label.toLowerCase()
-      + (opts.requireInBounds ? ' in this area' : ' in this map'));
+    _showFindToast(opts.requireInBounds
+      ? szT('find.none_in_area', 'No {chip} in this area', { chip: szChipInSentence(chipDef.id, chipDef.label) })
+      : szT('find.none_in_map', 'No {chip} in this map', { chip: szChipInSentence(chipDef.id, chipDef.label) }));
     if (!opts.requireInBounds) _findChipPaintActive(null);
     return;
   }
@@ -662,7 +669,7 @@ async function loadChipOnMap(map, chipDef, opts) {
   //   - Search-this-area pill: user explicitly asked for "search
   //     here". Empty viewport → toast + keep existing carousel.
   if (filtered.length === 0 && opts.requireInBounds) {
-    _showFindToast('No ' + chipDef.label.toLowerCase() + ' in this area');
+    _showFindToast(szT('find.none_in_area', 'No {chip} in this area', { chip: szChipInSentence(chipDef.id, chipDef.label) }));
     return;
   }
   items = filtered.length ? filtered : data;
@@ -695,7 +702,7 @@ async function loadChipOnMap(map, chipDef, opts) {
     origin = { lat: loc.lat, lon: loc.lon, label: szHereLabel(), here: true };
   }
   var stash = {
-    label: chipDef.label + (expanded ? ' · expanded' : ''),
+    label: szChipLabel(chipDef.id, chipDef.label) + (expanded ? ' · ' + szT('find.expanded', 'expanded') : ''),
     origin: origin,
     items: items,
     // Tag the stash with the chip id so the render path (which
@@ -752,7 +759,7 @@ function _populateNearby(slot, map, r, selfIdx) {
     'font-size:11px; color:var(--szd-fg-3, #888); text-transform:uppercase;'
     + 'letter-spacing:0.04em; margin:0 0 6px;'
   );
-  head.textContent = 'Nearby (within ' + szFormatDistance(1500, szUnit()) + ')';
+  head.textContent = szT('place.nearby_within', 'Nearby (within {dist})', { dist: szFormatDistance(1500, szUnit()) });
   slot.appendChild(head);
   var list = document.createElement('div');
   list.style.cssText = (
@@ -788,7 +795,7 @@ function _nearbyRow(map, entry, isLast) {
     'font-weight:600; font-size:14px;'
     + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
   );
-  name.textContent = entry.item.n || '(unnamed)';
+  name.textContent = entry.item.n || szT('common.unnamed', '(unnamed)');
   col.appendChild(name);
   var meta = document.createElement('div');
   meta.style.cssText = (
@@ -797,7 +804,7 @@ function _nearbyRow(map, entry, isLast) {
   );
   var kind = entry.item.cat || entry.item.s || entry.item.t;
   var metaParts = [];
-  if (kind) metaParts.push(String(kind).replace(/_/g, ' '));
+  if (kind) metaParts.push(szPlaceType(kind));
   if (entry.item.brand) metaParts.push(entry.item.brand);
   meta.textContent = metaParts.join(' · ');
   col.appendChild(meta);
@@ -837,7 +844,7 @@ function _findResultCard(map, r, idx) {
     'font-weight:600; font-size:14px;'
     + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
   );
-  name.textContent = r.n || '(unnamed)';
+  name.textContent = r.n || szT('common.unnamed', '(unnamed)');
   card.appendChild(name);
 
   var sub = document.createElement('div');
@@ -847,7 +854,7 @@ function _findResultCard(map, r, idx) {
   );
   var subParts = [];
   var kind = r.cat || r.s || r.t;
-  if (kind) subParts.push(String(kind).replace(/_/g, ' '));
+  if (kind) subParts.push(szPlaceType(kind));
   if (_findResultsState.origin && r.a != null && r.o != null) {
     var dm = _haversineMetersStrip(
       _findResultsState.origin.lat, _findResultsState.origin.lon,
@@ -864,7 +871,7 @@ function _findResultCard(map, r, idx) {
   actions.style.cssText = 'margin-top:6px; display:flex; gap:6px;';
   var dir = document.createElement('a');
   dir.href = 'javascript:void(0)';
-  dir.textContent = 'Directions';
+  dir.textContent = szT('place.directions', 'Directions');
   dir.style.cssText = (
     'flex:1; text-align:center; padding:7px 8px; border-radius:8px;'
     + 'text-decoration:none; font-weight:600; font-size:12px;'

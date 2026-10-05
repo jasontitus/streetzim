@@ -65,10 +65,7 @@ function initWikidataPopups(map, config) {
   }
 
   function formatNumber(n) {
-    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
-    return n.toString();
+    return szCompactNum(n);
   }
 
   // Expose popup builder for use by wiki sidebar
@@ -87,18 +84,18 @@ function initWikidataPopups(map, config) {
 
     // Info grid
     var facts = [];
-    if (wd.p) facts.push(['Population', formatNumber(wd.p)]);
-    if (wd.a) facts.push(['Area', wd.a.toLocaleString() + ' km\u00B2']);
-    if (wd.e) facts.push(['Elevation', wd.e.toLocaleString() + ' m']);
-    if (wd.c) facts.push(['Country', wd.c]);
-    if (wd.cap) facts.push(['Capital', wd.cap]);
-    if (wd.tz) facts.push(['Timezone', wd.tz]);
+    if (wd.p) facts.push([szT('wd.population', 'Population'), formatNumber(wd.p)]);
+    if (wd.a) facts.push([szT('wd.area', 'Area'), szLocaleNum(wd.a) + ' km\u00B2']);
+    if (wd.e) facts.push([szT('wd.elevation', 'Elevation'), szLocaleNum(wd.e) + ' m']);
+    if (wd.c) facts.push([szT('wd.country', 'Country'), wd.c]);
+    if (wd.cap) facts.push([szT('wd.capital', 'Capital'), wd.cap]);
+    if (wd.tz) facts.push([szT('wd.timezone', 'Timezone'), wd.tz]);
 
     if (facts.length > 0) {
       h += '<table style="border-collapse:collapse;width:100%;margin-bottom:6px;">';
       facts.forEach(function(f) {
         h += '<tr><td style="color:var(--szd-fg-3, #888);font-size:11px;padding:1px 8px 1px 0;white-space:nowrap;">' +
-             f[0] + '</td><td style="font-size:12px;padding:1px 0;">' + escapeHtml(String(f[1])) + '</td></tr>';
+             escapeHtml(f[0]) + '</td><td style="font-size:12px;padding:1px 0;">' + escapeHtml(String(f[1])) + '</td></tr>';
       });
       h += '</table>';
     }
@@ -134,7 +131,7 @@ function initWikidataPopups(map, config) {
   function buildDirectionsButton(lat, lon, name) {
     var btn = document.createElement('button');
     btn.className = 'pin-directions';
-    btn.textContent = 'Directions to here';
+    btn.textContent = szT('popup.directions_to_here', 'Directions to here');
     btn.style.marginTop = '8px';
     btn.addEventListener('click', function(ev) {
       if (!window.streetzimRouting ||
@@ -212,7 +209,7 @@ function initWikidataPopups(map, config) {
     if (articlePath) {
       var ab = document.createElement('button');
       ab.className = 'wiki-article-btn';
-      ab.textContent = '📖 Read full article';
+      ab.textContent = szT('popup.read_article', '📖 Read full article');
       ab.style.cssText = 'display:block;width:100%;margin-top:8px;padding:7px 10px;border:0;border-radius:6px;background:#2a4a7a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;';
       ab.addEventListener('click', function(e) {
         e.stopPropagation();

@@ -13,13 +13,13 @@ function _szProximityLabel(miles, unit) {
   if (!(miles >= 0)) return '';
   if (unit === 'metric') {
     var km = miles * 1.609344;
-    if (km < 0.8) return 'nearby';
+    if (km < 0.8) return szT('search.nearby', 'nearby');
     if (km < 8) return Math.round(km) + ' km';
     if (km < 80) return Math.round(km / 5) * 5 + ' km';
     if (km < 800) return Math.round(km / 10) * 10 + ' km';
     return Math.round(km / 100) * 100 + ' km';
   }
-  if (miles < 0.5) return 'nearby';
+  if (miles < 0.5) return szT('search.nearby', 'nearby');
   if (miles < 5) return Math.round(miles) + ' mi';
   if (miles < 50) return Math.round(miles / 5) * 5 + ' mi';
   if (miles < 500) return Math.round(miles / 10) * 10 + ' mi';
@@ -238,7 +238,7 @@ function _szPlacePopupDOM(lat, lon, name, enrich) {
   if (cat) {
     var ct = document.createElement('div');
     ct.className = 'pin-cat';
-    ct.textContent = String(cat).replace(/_/g, ' ');
+    ct.textContent = szPlaceType(cat);
     box.appendChild(ct);
   }
   // Contact row — icon links for website, phone, socials.
@@ -288,7 +288,7 @@ function _szPlacePopupDOM(lat, lon, name, enrich) {
   // BOTH or only one popup-source gets the new behaviour.
   var btn = document.createElement('button');
   btn.className = 'pin-directions';
-  btn.textContent = 'Directions to here';
+  btn.textContent = szT('popup.directions_to_here', 'Directions to here');
   btn.addEventListener('click', function(ev) {
     // Close the parent popup before firing the route — otherwise it
     // sits on top of the drawn route asking the user to choose
@@ -372,13 +372,14 @@ function initSearch(map) {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       manifest = data;
-      input.placeholder = 'Search ' + data.total.toLocaleString() + ' places...';
+      input.placeholder = szTn('search.placeholder_count', data.total,
+        { one: 'Search {n} places...', other: 'Search {n} places...' }, { n: szLocaleNum(data.total) });
       // State for the smoke gates, which must not read the (translatable)
       // placeholder: ready / unavailable.
       input.setAttribute('data-sz-search', 'ready');
     })
     .catch(function() {
-      input.placeholder = 'Search unavailable';
+      input.placeholder = szT('search.unavailable', 'Search unavailable');
       input.setAttribute('data-sz-search', 'unavailable');
       input.disabled = true;
     });
@@ -981,7 +982,8 @@ var SEARCH_SHARDS = (function () {
     activeIdx = -1;
     lastSearchMatches = matches;
     if (matches.length === 0) {
-      resultsEl.innerHTML = '<div class="search-no-results">No results found</div>';
+      resultsEl.innerHTML = '<div class="search-no-results"></div>';
+      resultsEl.firstChild.textContent = szT('search.no_results', 'No results found');
       resultsEl.style.display = 'block';
       return;
     }
@@ -991,7 +993,7 @@ var SEARCH_SHARDS = (function () {
       // Display label: Overture's clean category (`cat`) when present,
       // otherwise fall back to the OMT subtype.
       var rawLabel = m.cat || m.s || m.t;
-      var label = rawLabel ? String(rawLabel).replace(/_/g, ' ') : '';
+      var label = rawLabel ? szPlaceType(rawLabel) : '';
       var loc = m.l ? ' &middot; ' + escapeHtml(m.l) : '';
       var distLabel = matches[j].dist ? ' &middot; ' + escapeHtml(matches[j].dist) : '';
       html += '<div class="search-result" data-idx="' + j +
@@ -1038,7 +1040,7 @@ var SEARCH_SHARDS = (function () {
       loadingRow.setAttribute('data-sz-pending', '1');  // not a result (gates)
       loadingRow.style.pointerEvents = 'none';
       loadingRow.style.opacity = '0.7';
-      loadingRow.textContent = 'Searching…';
+      loadingRow.textContent = szT('search.searching', 'Searching…');
       resultsEl.appendChild(loadingRow);
       resultsEl.style.display = 'block';
     }

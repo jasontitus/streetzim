@@ -15,7 +15,7 @@
     var visible = szIsHere(label) ? szHereLabel() : (label || coordLabel(lat, lon));
     if (which === 'origin') originInput.value = visible;
     else                    destInput.value   = visible;
-    statusEl.textContent = 'Loading routing data…';
+    statusEl.textContent = szT('routing.loading_data', 'Loading routing data…');
     loadGraph();
     var tries = 0;
     var retry = setInterval(function() {
@@ -31,7 +31,7 @@
         // index load over Kiwix on iOS, so the pick was dropped even
         // though the graph arrived a few seconds later.
         clearInterval(retry);
-        statusEl.textContent = 'Could not load routing data';
+        statusEl.textContent = szT('routing.load_failed', 'Could not load routing data');
       }
     }, 100);
     return true;
@@ -75,7 +75,8 @@
   }
 
   function snappingText() {
-    return travelMode === 'drive' ? 'Finding nearest road...' : 'Finding nearest path...';
+    return travelMode === 'drive' ? szT('routing.snapping_road', 'Finding nearest road...')
+                                  : szT('routing.snapping_path', 'Finding nearest path...');
   }
 
   async function setOriginFromLatLon(lat, lon, label) {
@@ -100,7 +101,7 @@
     try {
       snapped = await nearestNode(lat, lon, 'origin');
     } catch (err) {
-      if (snapSeq === originSnapSeq) statusEl.textContent = 'Could not find a nearby road';
+      if (snapSeq === originSnapSeq) statusEl.textContent = szT('routing.no_nearby_road', 'Could not find a nearby road');
       console.error('[streetzim] origin snap failed:', err);
       return;
     }
@@ -124,7 +125,7 @@
       unmoveDest();
       computeAndDrawRoute();
     } else {
-      statusEl.textContent = 'Enter destination';
+      statusEl.textContent = szT('routing.enter_dest', 'Enter destination');
     }
   }
 
@@ -138,7 +139,7 @@
     try {
       snapped = await nearestNode(lat, lon, 'dest');
     } catch (err) {
-      if (snapSeq === destSnapSeq) statusEl.textContent = 'Could not find a nearby road';
+      if (snapSeq === destSnapSeq) statusEl.textContent = szT('routing.no_nearby_road', 'Could not find a nearby road');
       console.error('[streetzim] destination snap failed:', err);
       return;
     }
@@ -157,7 +158,7 @@
       unmoveOrigin();
       computeAndDrawRoute();
     } else {
-      statusEl.textContent = 'Enter start location';
+      statusEl.textContent = szT('routing.enter_origin', 'Enter start location');
     }
   }
 
@@ -249,7 +250,7 @@
         if (seq === routeSeq) {
           stopRouteProgressIndicator();
           placeEndMarkers();
-          statusEl.textContent = 'Routing failed';
+          statusEl.textContent = szT('routing.failed', 'Routing failed');
         }
         return;
       }
@@ -317,9 +318,9 @@
         // Say so when the router had to move an end (it was on a road cut
         // off from the rest, e.g. by the map's edge).
         statusEl.textContent = originMoved && destMoved
-          ? 'Start and destination moved to the nearest reachable roads'
-          : destMoved ? 'Destination moved to the nearest reachable road'
-          : originMoved ? 'Start moved to the nearest reachable road' : '';
+          ? szT('routing.both_moved', 'Start and destination moved to the nearest reachable roads')
+          : destMoved ? szT('routing.dest_moved', 'Destination moved to the nearest reachable road')
+          : originMoved ? szT('routing.origin_moved', 'Start moved to the nearest reachable road') : '';
         // In drive mode, the next GPS fix re-centers at the user's
         // location; fitBounds would yank the camera out to the whole
         // route and blow up the follow-cam.
@@ -341,7 +342,7 @@
               && !panel.classList.contains('minimized')) {
             panel.classList.add('minimized');
             if (minBtn) {
-              minBtn.title = 'Unfold (show directions)';
+              minBtn.title = szT('routing.unfold_title', 'Unfold (show directions)');
             }
             try { map.resize(); } catch (e) {}
           }
@@ -350,9 +351,9 @@
         placeEndMarkers();
         removeRouteLine();
         setExpandHint();
-        statusEl.textContent = routeTravel === 'walk' ? 'No walking route found'
-                             : routeTravel === 'bike' ? 'No cycling route found'
-                             : 'No route found';
+        statusEl.textContent = routeTravel === 'walk' ? szT('routing.no_walking_route', 'No walking route found')
+                             : routeTravel === 'bike' ? szT('routing.no_cycling_route', 'No cycling route found')
+                             : szT('routing.no_route', 'No route found');
         clearBtn.style.display = 'block';
       }
     }, 10);
@@ -397,9 +398,9 @@
           // so ambiguous names like "Main St" reveal which city's they're in.
           var subParts = [];
           if (m.item.l) subParts.push(m.item.l);
-          var typeLabel = m.item.t === 'addr' ? 'address'
-                          : m.item.t === 'street' ? 'street'
-                          : m.item.t;
+          var typeLabel = m.item.t === 'addr' ? szT('routing.type_address', 'address')
+                          : m.item.t === 'street' ? szT('routing.type_street', 'street')
+                          : m.item.t ? szPlaceType(m.item.t) : m.item.t;
           if (typeLabel) subParts.push(typeLabel);
           if (subParts.length) {
             var sub = document.createElement('div');
@@ -450,7 +451,7 @@
       row.className = 'routing-result-row routing-result-loading';
       row.style.pointerEvents = 'none';
       row.style.opacity = '0.7';
-      row.textContent = 'Searching…';
+      row.textContent = szT('search.searching', 'Searching…');
       resultsEl.appendChild(row);
       resultsEl.style.display = 'block';
     }
@@ -582,10 +583,10 @@
       return;
     }
     if (!navigator.geolocation) {
-      statusEl.textContent = 'Geolocation not available';
+      statusEl.textContent = szT('routing.no_geolocation', 'Geolocation not available');
       return;
     }
-    statusEl.textContent = 'Getting location…';
+    statusEl.textContent = szT('drive.getting_location', 'Getting location…');
     navigator.geolocation.getCurrentPosition(
       function(pos) {
         var lat = pos.coords.latitude;
@@ -594,7 +595,7 @@
         setOriginFromLatLon(lat, lon, SZ_HERE);
       },
       function(err) {
-        statusEl.textContent = 'Location denied or unavailable';
+        statusEl.textContent = szT('routing.location_denied', 'Location denied or unavailable');
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );

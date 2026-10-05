@@ -129,7 +129,7 @@
       Object.keys(modeBtns).forEach(function(m) {
         if (m === newMode) {
           modeBtns[m].classList.add("active-mode");
-          modeBtns[m].textContent = "Exit";
+          modeBtns[m].textContent = szT('drive.exit_button', 'Exit');
         } else {
           modeBtns[m].classList.add("hidden-mode");
         }
@@ -419,7 +419,7 @@
               Object.keys(modeBtns).forEach(function(m) {
                 if (m === mode) {
                   modeBtns[m].classList.add("active-mode");
-                  modeBtns[m].textContent = "Exit";
+                  modeBtns[m].textContent = szT('drive.exit_button', 'Exit');
                 } else {
                   modeBtns[m].classList.add("hidden-mode");
                 }

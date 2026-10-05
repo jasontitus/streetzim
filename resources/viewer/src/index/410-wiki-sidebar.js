@@ -158,11 +158,11 @@ function initWikiSidebar(map, config) {
         // Don't claim the area is empty when we simply have not loaded the
         // index yet — that misreading is what made california look broken.
         empty.appendChild(createEl('div', 'wiki-empty-state-icon', '⏳'));
-        empty.appendChild(createEl('div', 'wiki-empty-state-text', 'Loading Wikipedia index…'));
+        empty.appendChild(createEl('div', 'wiki-empty-state-text', szT('wiki.loading_index', 'Loading Wikipedia index…')));
         countEl.textContent = '';
       } else {
         empty.appendChild(createEl('div', 'wiki-empty-state-icon', '🌍'));
-        empty.appendChild(createEl('div', 'wiki-empty-state-text', 'No Wikipedia places in view — pan or zoom to explore.'));
+        empty.appendChild(createEl('div', 'wiki-empty-state-text', szT('wiki.none_in_view', 'No Wikipedia places in view — pan or zoom to explore.')));
       }
       listEl.appendChild(empty);
       return;
@@ -177,7 +177,7 @@ function initWikiSidebar(map, config) {
       var div = createEl('div', 'wiki-item' + (desc ? '' : ' wiki-item-nodesc'));
       div.appendChild(createEl('div', 'wiki-item-name', it.name));
       var meta = createEl('div', 'wiki-item-meta');
-      meta.appendChild(createEl('span', 'wiki-item-type', (it.type || 'place').replace(/_/g, ' ')));
+      meta.appendChild(createEl('span', 'wiki-item-type', szPlaceType(it.type || 'place')));
       div.appendChild(meta);
       if (desc) div.appendChild(createEl('div', 'wiki-item-desc', desc));
       div.addEventListener('click', function() {
@@ -237,7 +237,7 @@ function initWikiSidebar(map, config) {
     wrap.style.cssText = 'padding:12px 16px;box-sizing:border-box;';
     listEl.appendChild(wrap);
 
-    var back = createEl('button', 'wiki-detail-back', '← Back to list');
+    var back = createEl('button', 'wiki-detail-back', szT('wiki.back_to_list', '← Back to list'));
     back.style.cssText = 'display:block;margin:0 0 12px;padding:6px 10px;border:0;border-radius:6px;background:var(--szd-btn2-bg, #eef2fa);color:var(--szd-btn2-fg, #2a4a7a);font-size:13px;font-weight:600;cursor:pointer;';
     back.addEventListener('click', function() { staleView = false; updateSidebar(); });
     wrap.appendChild(back);
@@ -265,14 +265,14 @@ function initWikiSidebar(map, config) {
 
     var ap = explicitTitle || _wikiArticlePath(qid, null);
     if (ap) {
-      var ab = createEl('button', 'wiki-article-btn', '📖 Read full article');
+      var ab = createEl('button', 'wiki-article-btn', szT('popup.read_article', '📖 Read full article'));
       ab.style.cssText = 'display:block;width:100%;margin-bottom:8px;padding:9px 10px;border:0;border-radius:6px;background:#2a4a7a;color:#fff;font-size:14px;font-weight:600;cursor:pointer;box-sizing:border-box;';
       ab.addEventListener('click', function() {
         openWikiArticle(ap);
       });
       wrap.appendChild(ab);
     } else {
-      var noa = createEl('div', 'wiki-detail-noarticle', 'No bundled article for this place.');
+      var noa = createEl('div', 'wiki-detail-noarticle', szT('wiki.no_article', 'No bundled article for this place.'));
       noa.style.cssText = 'font-size:12px;color:var(--szd-fg-3, #888);margin-bottom:8px;';
       wrap.appendChild(noa);
     }
@@ -392,7 +392,7 @@ function initWikiSidebar(map, config) {
       var empty = createEl('div', 'wiki-empty-state');
       empty.setAttribute('data-wiki-empty', 'none');
       empty.appendChild(createEl('div', 'wiki-empty-state-icon', '\uD83C\uDF0D'));
-      empty.appendChild(createEl('div', 'wiki-empty-state-text', 'No Wikipedia entries visible at this zoom level. Try zooming in to discover places.'));
+      empty.appendChild(createEl('div', 'wiki-empty-state-text', szT('wiki.none_at_zoom', 'No Wikipedia entries visible at this zoom level. Try zooming in to discover places.')));
       listEl.appendChild(empty);
       return;
     }
@@ -417,7 +417,7 @@ function initWikiSidebar(map, config) {
         var empty = createEl('div', 'wiki-empty-state');
         empty.setAttribute('data-wiki-empty', 'none');
         empty.appendChild(createEl('div', 'wiki-empty-state-icon', '\uD83D\uDCD6'));
-        empty.appendChild(createEl('div', 'wiki-empty-state-text', 'Features found but no Wikipedia data available for this area.'));
+        empty.appendChild(createEl('div', 'wiki-empty-state-text', szT('wiki.no_data', 'Features found but no Wikipedia data available for this area.')));
         listEl.appendChild(empty);
         return;
       }
@@ -436,11 +436,13 @@ function initWikiSidebar(map, config) {
         div.appendChild(createEl('div', 'wiki-item-name', item.name));
 
         var metaDiv = createEl('div', 'wiki-item-meta');
-        var typeText = item.cls ? item.cls.replace(/_/g, ' ') : item.layer.replace(/-/g, ' ');
+        var typeText = item.cls ? szPlaceType(item.cls) : item.layer.replace(/-/g, ' ');
         metaDiv.appendChild(createEl('span', 'wiki-item-type', typeText));
         if (wd.p) {
-          var pop = wd.p >= 1e6 ? (wd.p/1e6).toFixed(1)+'M' : wd.p >= 1e3 ? (wd.p/1e3).toFixed(0)+'K' : String(wd.p);
-          metaDiv.appendChild(createEl('span', 'wiki-item-pop', 'pop. ' + pop));
+          var pop = wd.p >= 1e6 ? szT('num.millions', '{n}M', { n: szFixed(wd.p / 1e6, 1) })
+                  : wd.p >= 1e3 ? szT('num.thousands', '{n}K', { n: szFixed(wd.p / 1e3, 0) })
+                  : (SZ_I18N ? szLocaleNum(wd.p) : String(wd.p));
+          metaDiv.appendChild(createEl('span', 'wiki-item-pop', szT('wiki.pop', 'pop. {n}', { n: pop })));
         }
         div.appendChild(metaDiv);
 

@@ -111,11 +111,11 @@
       var feet = meters * 3.28084;
       if (feet < 1000) return Math.round(feet / 10) * 10 + ' ft';
       var miles = meters / 1609.344;
-      if (miles < 10) return miles.toFixed(1) + ' mi';
+      if (miles < 10) return szFixed(miles, 1) + ' mi';
       return Math.round(miles) + ' mi';
     }
     if (meters < 1000) return Math.round(meters / 10) * 10 + ' m';
-    if (meters < 10000) return (meters / 1000).toFixed(1) + ' km';
+    if (meters < 10000) return szFixed(meters / 1000, 1) + ' km';
     return Math.round(meters / 1000) + ' km';
   }
 
@@ -125,7 +125,9 @@
     var h = d.getHours(), m = d.getMinutes();
     var suffix = '';
     try {
-      var fmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+      // The device's clock format in English (as before), the UI
+      // language's otherwise ("14:05", not "2:05 PM", in German).
+      var fmt = new Intl.DateTimeFormat(SZ_I18N ? SZ_UI_LANG : undefined, { hour: 'numeric', minute: '2-digit' });
       return fmt.format(d);
     } catch (e) {
       var mm = (m < 10 ? '0' : '') + m;
@@ -290,7 +292,7 @@
       var on = fullscreenActive();
       htmlEl.classList.toggle('drive-fullscreen-active', on);
       fullscreenBtn.textContent = on ? GLYPH_EXIT : GLYPH_ENTER;
-      fullscreenBtn.title = on ? 'Exit fullscreen' : 'Enter fullscreen';
+      fullscreenBtn.title = on ? szT('drive.fullscreen_exit', 'Exit fullscreen') : szT('drive.fullscreen_enter', 'Enter fullscreen');
     }
     // Keep the glyph in sync when the user exits via the ESC key / system
     // gesture rather than our button.
@@ -373,7 +375,7 @@
       if (rerouteBtn) {
         rerouteBtn.style.display = opts.showReroute ? 'inline-block' : 'none';
         rerouteBtn.disabled = !!state.reroutePending;
-        rerouteBtn.textContent = state.reroutePending ? 'Re-routing…' : 'Re-route';
+        rerouteBtn.textContent = state.reroutePending ? szT('drive.rerouting', 'Re-routing…') : szT('drive.reroute', 'Re-route');
       }
       statusEl.classList.add('visible');
     }
@@ -381,15 +383,15 @@
     rerouteBtn.addEventListener('click', function() {
       if (state.reroutePending) return;
       if (state.lastLat == null || state.lastLon == null) {
-        setStatus('Waiting for GPS fix…');
+        setStatus(szT('drive.waiting_gps', 'Waiting for GPS fix…'));
         return;
       }
       if (destNode === -1) {
-        setStatus('No destination set');
+        setStatus(szT('drive.no_destination', 'No destination set'));
         return;
       }
       state.reroutePending = true;
-      setStatus('Re-routing from current location…', { showReroute: true });
+      setStatus(szT('drive.rerouting_from_here', 'Re-routing from current location…'), { showReroute: true });
       // setOriginFromLatLon triggers computeAndDrawRoute, which updates
       // lastRoute + calls driveMode.setRoute on success. One tick of
       // yield so the "Re-routing…" status paints before A* runs.
@@ -488,17 +490,20 @@
             if (nm) { exitName = nm; break; }
           }
           streetEl.textContent = exitName
-            ? ('take roundabout onto ' + exitName)
-            : 'take roundabout';
+            ? szT('drive.roundabout_onto', 'take roundabout onto {road}', { road: exitName })
+            : szT('drive.roundabout', 'take roundabout');
           arrowEl.textContent = '↻';
         } else if (exitingRound) {
-          streetEl.textContent = name ? ('exit onto ' + name) : 'exit roundabout';
+          streetEl.textContent = name ? szT('drive.exit_onto', 'exit onto {road}', { road: name })
+                                      : szT('drive.exit_roundabout', 'exit roundabout');
           arrowEl.textContent = '↱';
         } else if (enteringLink) {
-          streetEl.textContent = name ? ('take ramp onto ' + name) : 'take ramp';
+          streetEl.textContent = name ? szT('drive.ramp_onto', 'take ramp onto {road}', { road: name })
+                                      : szT('drive.ramp', 'take ramp');
           arrowEl.textContent = '↗';
         } else {
-          streetEl.textContent = name ? ('onto ' + name) : 'next turn';
+          streetEl.textContent = name ? szT('drive.onto', 'onto {road}', { road: name })
+                                      : szT('drive.next_turn', 'next turn');
           // Tangent just after the turn → rotate arrow relative to current bearing
           var nextCi = Math.min(nextTurn.coordIdx + 1, state.route.coords.length - 1);
           var nextTangent = bearingDeg(
@@ -510,7 +515,8 @@
       } else {
         // No more turns — you're on the final leg
         distEl.textContent = formatDistanceLocalized(remaining, unit);
-        streetEl.textContent = remaining < 30 ? 'Arriving at destination' : 'Continue to destination';
+        streetEl.textContent = remaining < 30 ? szT('drive.arriving', 'Arriving at destination')
+                                              : szT('drive.continue', 'Continue to destination');
         arrowEl.textContent = remaining < 30 ? '◎' : '↑';
       }
 
@@ -523,7 +529,7 @@
       if (proj.offMeters > preset.offM) {
         if (!state.offRouteSince) state.offRouteSince = Date.now();
         if (Date.now() - state.offRouteSince > preset.offMs) {
-          setStatus('Off route (' + Math.round(proj.offMeters) + ' m)',
+          setStatus(szT('drive.off_route', 'Off route ({m} m)', { m: Math.round(proj.offMeters) }),
                     { showReroute: true });
         }
       } else {
@@ -568,7 +574,8 @@
     }
 
     function onPositionError(err) {
-      setStatus('Location unavailable: ' + (err && err.message ? err.message : 'error'));
+      setStatus(szT('drive.location_unavailable', 'Location unavailable: {error}',
+                    { error: err && err.message ? err.message : szT('drive.error', 'error') }));
     }
 
     var api = {
@@ -578,7 +585,7 @@
         if (state.active) return;
         if (!lastRoute) return;
         if (!navigator.geolocation) {
-          setStatus('Geolocation not supported in this browser');
+          setStatus(szT('drive.no_geolocation', 'Geolocation not supported in this browser'));
           return;
         }
         state.mode = MODE_PRESETS[mode] ? mode : 'drive';
@@ -609,7 +616,7 @@
         hudEl.classList.add('visible');
         hudEl.setAttribute('aria-hidden', 'false');
         distEl.textContent = '—';
-        streetEl.textContent = 'Getting location…';
+        streetEl.textContent = szT('drive.getting_location', 'Getting location…');
         arrowEl.textContent = '↑';
         remainEl.textContent = '—';
         etaEl.textContent = '—';
@@ -638,7 +645,7 @@
           // only the HUD was hidden, leaving the page with no UI and
           // no way back short of a reload.
           api.exit();
-          setStatus('Could not start location tracking');
+          setStatus(szT('drive.tracking_failed', 'Could not start location tracking'));
         }
       },
       exit: function() {
@@ -698,7 +705,7 @@
         Object.keys(modeBtns).forEach(function(m) {
           if (m === mode) {
             modeBtns[m].classList.add('active-mode');
-            modeBtns[m].textContent = 'Exit';
+            modeBtns[m].textContent = szT('drive.exit_button', 'Exit');
           } else {
             modeBtns[m].classList.add('hidden-mode');
           }

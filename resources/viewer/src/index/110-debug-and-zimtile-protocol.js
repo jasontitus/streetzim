@@ -25,15 +25,19 @@ function describeError(err) {
   if (err.code) parts.push('code=' + err.code);
   return parts.join(': ') || String(err);
 }
+function _szEscText(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 function showFatalError(title, err, url) {
   var info = document.getElementById('info');
   if (!info) return;
-  var html = '<h3>' + title + '</h3>';
+  var html = '<h3>' + _szEscText(title) + '</h3>';
   html += '<p style="white-space:normal;word-break:break-word;">' + describeError(err) + '</p>';
   if (url) html += '<p style="font-size:8px;opacity:0.7;word-break:break-all;">URL: ' + url + '</p>';
   html += '<p style="font-size:8px;opacity:0.7;">UA: ' + (navigator.userAgent || '?').substring(0, 80) + '</p>';
   html += '<p style="font-size:8px;opacity:0.7;">Base: ' + baseUrl + '</p>';
-  html += '<p style="font-size:9px;"><a href="#" id="debug-show" style="color:var(--szd-link, #2563eb);">Show debug log</a></p>';
+  html += '<p style="font-size:9px;"><a href="#" id="debug-show" style="color:var(--szd-link, #2563eb);">' +
+    _szEscText(szT('fatal.show_debug_log', 'Show debug log')) + '</a></p>';
   info.innerHTML = html;
   info.style.maxWidth = '420px';
   var link = document.getElementById('debug-show');

@@ -16,7 +16,7 @@
   function loadGraph() {
     if (graph) return;
     if (loadGraphInflight) return;
-    statusEl.textContent = 'Loading routing data...';
+    statusEl.textContent = szT('routing.loading_data_dots', 'Loading routing data...');
     // Try the spatial index first (tiny file, ~150 MB on Japan but only
     // ~10-100 KB on small regions). If it's not there, fall through to
     // the monolithic loader.
@@ -75,7 +75,7 @@
           });
           // Worker init was kicked off above in parallel with this
           // loadNodeShards — see comment at parseRoutingCellsIndex.
-          statusEl.textContent = 'Enter start and destination';
+          statusEl.textContent = szT('routing.enter_both', 'Enter start and destination');
         });
       })
       .catch(function(_spatialErr) {
@@ -103,10 +103,10 @@
               geom0Sample: g0 ? g0[0] : null,
               geomLastSample: gLast ? gLast[0] : null,
             });
-            statusEl.textContent = 'Enter start and destination';
+            statusEl.textContent = szT('routing.enter_both', 'Enter start and destination');
           })
           .catch(function(err) {
-            statusEl.textContent = 'Routing data unavailable';
+            statusEl.textContent = szT('routing.data_unavailable', 'Routing data unavailable');
             console.error('Failed to load routing graph:',
               (err && err.message) || err);
           });

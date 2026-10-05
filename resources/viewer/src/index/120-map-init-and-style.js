@@ -34,10 +34,34 @@ function fetchConfig(n) {
       throw err;
     });
 }
+// MapLibre's own control titles (zoom, compass, locate, attribution,
+// popup close) in the UI language; undefined keeps MapLibre's English.
+function _szMapLibreLocale() {
+  if (!SZ_I18N && !SZ_I18N_PSEUDO) return undefined;
+  return {
+    'AttributionControl.ToggleAttribution': szT('maplibre.toggle_attribution', 'Toggle attribution'),
+    'AttributionControl.MapFeedback': szT('maplibre.map_feedback', 'Map feedback'),
+    'FullscreenControl.Enter': szT('drive.fullscreen_enter', 'Enter fullscreen'),
+    'FullscreenControl.Exit': szT('drive.fullscreen_exit', 'Exit fullscreen'),
+    'GeolocateControl.FindMyLocation': szT('maplibre.find_my_location', 'Find my location'),
+    'GeolocateControl.LocationNotAvailable': szT('maplibre.location_not_available', 'Location not available'),
+    'NavigationControl.ResetBearing': szT('maplibre.reset_bearing', 'Drag to rotate map, click to reset north'),
+    'NavigationControl.ZoomIn': szT('maplibre.zoom_in', 'Zoom in'),
+    'NavigationControl.ZoomOut': szT('maplibre.zoom_out', 'Zoom out'),
+    'Map.Title': szT('controls.map', 'Map'),
+    'Marker.Title': szT('maplibre.marker', 'Map marker'),
+    'Popup.Close': szT('maplibre.close_popup', 'Close popup')
+  };
+}
+
 // 025-home-about-fatal.html has already replaced the page when the browser
 // lacks what the viewer needs (Fetch, Promise, MapLibre).
 if (!window.__szUnsupported) fetchConfig(1)
   .then(function(config) {
+    // The UI language: the map's (create_osm_zim --language), unless the
+    // URL asks for another (?uilang=de, ?uilang=qps). Translates the static
+    // markup now; everything rendered from here on asks szT (docs/i18n.md).
+    szUseLanguage(config && config.language, location.search);
     // Check WebGL support before initializing MapLibre
     try {
       var canvas = document.createElement('canvas');
@@ -45,10 +69,10 @@ if (!window.__szUnsupported) fetchConfig(1)
       if (!gl) throw new Error('WebGL not available');
     } catch (e) {
       szFatalPage({
-        title: 'This map needs WebGL',
-        lines: ['The map is drawn with WebGL, which this app or browser has turned off or does not support.'],
-        tips: ['Turn on hardware acceleration / WebGL in the browser or app settings, or update it.',
-               'Try another reader: a current Kiwix app, Kiwix JS, or a recent desktop browser.'],
+        title: szT('fatal.webgl_title', 'This map needs WebGL'),
+        lines: [szT('fatal.webgl_line', 'The map is drawn with WebGL, which this app or browser has turned off or does not support.')],
+        tips: [szT('fatal.webgl_tip_settings', 'Turn on hardware acceleration / WebGL in the browser or app settings, or update it.'),
+               szT('fatal.webgl_tip_reader', 'Try another reader: a current Kiwix app, Kiwix JS, or a recent desktop browser.')],
         details: describeError(e) + '\nUser agent: ' + (navigator.userAgent || '?')
       });
       return;
@@ -67,6 +91,7 @@ if (!window.__szUnsupported) fetchConfig(1)
     var openCam = _szOpeningCamera(config, location.hash, _szStorage());
     var map = new maplibregl.Map({
       container: 'map',
+      locale: _szMapLibreLocale(),
       style: makeStyle(config),
       center: openCam.center,
       zoom: openCam.zoom,
@@ -383,7 +408,7 @@ if (!window.__szUnsupported) fetchConfig(1)
       toggleBtn.addEventListener('click', function() {
         satelliteVisible = !satelliteVisible;
         toggleBtn.classList.toggle('active-control', satelliteVisible);
-        toggleBtn.textContent = satelliteVisible ? 'Map' : 'Satellite';
+        toggleBtn.textContent = satelliteVisible ? szT('controls.map', 'Map') : szT('controls.satellite', 'Satellite');
         if (satelliteVisible) { showSatellite(); } else { hideSatellite(); }
       });
     }
@@ -394,7 +419,8 @@ if (!window.__szUnsupported) fetchConfig(1)
       terrainToggle.style.display = 'block';
       var terrainMode = 0; // 0=off, 1=hillshade, 2=3D terrain
       var terrainSourceAdded = false;
-      var terrainLabels = ['3D', 'Hillshade', '3D Terrain'];
+      var terrainLabels = [szT('controls.terrain_3d', '3D'), szT('controls.hillshade', 'Hillshade'),
+                           szT('controls.terrain_3d_on', '3D Terrain')];
 
       function addTerrainSource() {
         if (terrainSourceAdded) return;
@@ -467,11 +493,11 @@ if (!window.__szUnsupported) fetchConfig(1)
 
     // Update info box with area name and build date
     if (config.name) {
-      document.title = config.name + ' — Offline Map';
+      document.title = szT('info.page_title', '{name} — Offline Map', { name: config.name });
       document.querySelector('#info h3').textContent = config.name;
     }
     if (config.buildDate) {
-      document.querySelector('#info p').textContent = 'Map data: ' + config.buildDate;
+      document.querySelector('#info p').textContent = szT('info.map_data', 'Map data: {date}', { date: config.buildDate });
     }
     // PWA only: a way back to the picker from an installed app, whose
     // standalone launch skips it (docs/mobile-browser-review.md §B5).
@@ -481,7 +507,7 @@ if (!window.__szUnsupported) fetchConfig(1)
         infoP.appendChild(document.createTextNode(' \u00b7 '));
         var changeLink = document.createElement('a');
         changeLink.href = '/drive/?picker=1';
-        changeLink.textContent = 'Change map';
+        changeLink.textContent = szT('info.change_map', 'Change map');
         changeLink.className = 'sz-change';
         infoP.appendChild(changeLink);
       }
@@ -614,8 +640,8 @@ if (!window.__szUnsupported) fetchConfig(1)
       var tsMeta = document.getElementById('attr-tiles-meta');
       if (tsSection && tsName && tsMeta) {
         tsName.textContent = ts.name;
-        tsMeta.textContent = [ts.version && 'version ' + ts.version,
-                              ts.osmDate && 'OSM data ' + ts.osmDate,
+        tsMeta.textContent = [ts.version && szT('about.tiles_version', 'version {v}', { v: ts.version }),
+                              ts.osmDate && szT('about.tiles_osm_date', 'OSM data {date}', { date: ts.osmDate }),
                               ts.homepage].filter(Boolean).join(' \u2014 ');
         tsSection.style.display = '';
       }
@@ -720,8 +746,8 @@ if (!window.__szUnsupported) fetchConfig(1)
       return;
     }
     if (isPwaPath && isConfig && err.upstream) {
-      showFatalError(status === 502 ? 'The map source no longer has this file'
-                                    : 'The map source is not answering', err, err._url);
+      showFatalError(status === 502 ? szT('fatal.source_gone', 'The map source no longer has this file')
+                                    : szT('fatal.source_silent', 'The map source is not answering'), err, err._url);
       var infoEl = document.getElementById('info');
       if (infoEl) {
         var retry = document.createElement('p');
@@ -732,7 +758,14 @@ if (!window.__szUnsupported) fetchConfig(1)
         // HTML, where a literal "/drive/?picker=1" is an internal link that
         // does not exist inside a ZIM. It failed validate on every swapped
         // ZIM (2026-09-18) even though the code is unreachable there.
-        retry.innerHTML = '<a href="#">Try again</a> &middot; <a>Change map</a>';
+        var again = document.createElement('a');
+        again.href = '#';
+        again.textContent = szT('fatal.try_again', 'Try again');
+        var change = document.createElement('a');
+        change.textContent = szT('info.change_map', 'Change map');
+        retry.appendChild(again);
+        retry.appendChild(document.createTextNode(' \u00b7 '));
+        retry.appendChild(change);
         retry.lastChild.setAttribute('href', '/drive/?picker=1');
         retry.firstChild.addEventListener('click', function(ev) { ev.preventDefault(); location.reload(); });
         infoEl.appendChild(retry);
@@ -743,19 +776,20 @@ if (!window.__szUnsupported) fetchConfig(1)
     // a full page. A failure after the map exists keeps the small #info
     // note, so a bug in one feature does not hide a working map.
     if (isConfig && !window.__szMap) {
+      // No map-config.json, so no language: this page is in English.
       szFatalPage({
-        title: 'This map could not be opened',
-        lines: ['Its settings file, map-config.json, could not be read' +
-                (status ? ' (the reader answered HTTP ' + status + ')' : '') + '.'],
-        tips: ['Try again: a reader that is still opening the file can miss the first requests.',
-               'If it keeps failing, the file may be incomplete: check its size, or download it again.',
-               'In Kiwix JS, use ServiceWorker mode, not JQuery mode.'],
+        title: szT('fatal.config_title', 'This map could not be opened'),
+        lines: [status ? szT('fatal.config_line_http', 'Its settings file, map-config.json, could not be read (the reader answered HTTP {status}).', { status: status })
+                       : szT('fatal.config_line', 'Its settings file, map-config.json, could not be read.')],
+        tips: [szT('fatal.config_tip_retry', 'Try again: a reader that is still opening the file can miss the first requests.'),
+               szT('fatal.config_tip_incomplete', 'If it keeps failing, the file may be incomplete: check its size, or download it again.'),
+               szT('fatal.tip_kiwix_js_mode', 'In Kiwix JS, use ServiceWorker mode, not JQuery mode.')],
         retry: true,
         details: describeError(err) + '\nURL: ' + err._url + '\nUser agent: ' +
                  (navigator.userAgent || '?') + '\n\n' + _debugLog.join('\n')
       });
       return;
     }
-    showFatalError('Error loading map', err, err && err._url);
+    showFatalError(szT('fatal.error_loading', 'Error loading map'), err, err && err._url);
   });
 

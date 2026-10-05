@@ -235,16 +235,16 @@ var _SZ_THEME_ICON = {
   }).join(''),
   dark: '<path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1z"/>'
 };
-var _SZ_THEME_LABEL = {
-  auto: 'Map theme: auto (follows the system)',
-  light: 'Map theme: light',
-  dark: 'Map theme: dark'
-};
+function _szThemeLabel(mode) {
+  return mode === 'light' ? szT('theme.light', 'Map theme: light')
+       : mode === 'dark' ? szT('theme.dark', 'Map theme: dark')
+       : szT('theme.auto', 'Map theme: auto (follows the system)');
+}
 function _szThemeButtonShow(btn) {
   var mode = szThemeMode();
   btn.setAttribute('data-mode', mode);
-  btn.title = _SZ_THEME_LABEL[mode];
-  btn.setAttribute('aria-label', _SZ_THEME_LABEL[mode]);
+  btn.title = _szThemeLabel(mode);
+  btn.setAttribute('aria-label', _szThemeLabel(mode));
   btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + _SZ_THEME_ICON[mode] + '</svg>';
 }
 var _szThemeButtons = [];

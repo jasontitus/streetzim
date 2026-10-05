@@ -172,7 +172,7 @@
     if (__routeStatusTimer) clearInterval(__routeStatusTimer);
     __routeStatusStart = performance.now();
     var s = document.getElementById('routing-status');
-    if (s) s.textContent = 'Loading map data…';
+    if (s) s.textContent = szT('routing.loading_map_data', 'Loading map data…');
     var prog = document.getElementById('routing-progress');
     if (prog) {
       prog.classList.remove('determinate');
@@ -195,8 +195,8 @@
       if (newPhase !== phase) {
         phase = newPhase;
         s.textContent = phase === 1
-          ? 'Finding fastest route…'
-          : 'Loading map data…';
+          ? szT('routing.finding_route', 'Finding fastest route…')
+          : szT('routing.loading_map_data', 'Loading map data…');
       }
     }, 250);
   }

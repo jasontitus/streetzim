@@ -16,7 +16,7 @@ function _showPlaceDetail(map, r, idx) {
   var panel = document.createElement('div');
   panel.id = 'place-detail';
   panel.setAttribute('role', 'dialog');
-  panel.setAttribute('aria-label', 'Place details');
+  panel.setAttribute('aria-label', szT('place.details_label', 'Place details'));
   panel.style.cssText = (
     'position:fixed; left:0; right:0; bottom:var(--bottom-inset, 0px); z-index:1701;'
     + 'max-height:calc(var(--app-height, 100vh) * 0.78); overflow-y:auto;'
@@ -43,11 +43,11 @@ function _showPlaceDetail(map, r, idx) {
   var title = document.createElement('h2');
   title.style.cssText = 'margin:0; flex:1 1 auto; font-size:20px;'
     + 'font-weight:700; line-height:1.2;';
-  title.textContent = r.n || '(unnamed)';
+  title.textContent = r.n || szT('common.unnamed', '(unnamed)');
   header.appendChild(title);
   var close = document.createElement('button');
   close.type = 'button';
-  close.title = 'Close';
+  close.title = szT('common.close', 'Close');
   close.textContent = '×';
   close.style.cssText = (
     'flex:0 0 auto; background:transparent; border:none;'
@@ -61,7 +61,7 @@ function _showPlaceDetail(map, r, idx) {
   // Subhead: category / brand / location
   var subParts = [];
   var kind = r.cat || r.s || r.t;
-  if (kind) subParts.push(String(kind).replace(/_/g, ' '));
+  if (kind) subParts.push(szPlaceType(kind));
   if (r.brand) subParts.push(r.brand);
   if (r.l) subParts.push(r.l);
   if (subParts.length) {
@@ -88,24 +88,24 @@ function _showPlaceDetail(map, r, idx) {
     'display:flex; gap:8px; margin:14px 0 12px; flex-wrap:wrap;'
   );
   actions.appendChild(_detailActionBtn(
-    'Directions', '🧭', /*primary*/true,
+    szT('place.directions', 'Directions'), '🧭', /*primary*/true,
     function() { _detailOpenDirections(r); }));
   if (r.p) {
     actions.appendChild(_detailActionBtn(
-      'Call', '📞', false,
+      szT('place.call', 'Call'), '📞', false,
       function() { window.location.href =
         'tel:' + String(r.p).replace(/\s+/g, ''); }));
   }
   if (r.ws) {
     actions.appendChild(_detailActionBtn(
-      'Website', '🌐', false,
+      szT('place.website', 'Website'), '🌐', false,
       function() { window.open(r.ws, '_blank', 'noopener'); }));
   }
   // Full bundled Wikipedia article (in-ZIM) when this place has one.
   var _detailArt = _wikiArticlePath(r.q, r.w);
   if (_detailArt) {
     actions.appendChild(_detailActionBtn(
-      'Wikipedia', '📖', false,
+      szT('place.wikipedia', 'Wikipedia'), '📖', false,
       function() { openWikiArticle(_detailArt); }));
   }
   panel.appendChild(actions);
@@ -118,22 +118,22 @@ function _showPlaceDetail(map, r, idx) {
     + 'display:flex; flex-direction:column; gap:6px; font-size:13px;'
   );
   if (r.p) {
-    info.appendChild(_detailFactRow('Phone',
+    info.appendChild(_detailFactRow(szT('place.phone', 'Phone'),
       String(r.p), 'tel:' + String(r.p).replace(/\s+/g, '')));
   }
   if (r.ws) {
-    info.appendChild(_detailFactRow('Website',
+    info.appendChild(_detailFactRow(szT('place.website', 'Website'),
       _detailHostname(r.ws), r.ws, '_blank'));
   }
   if (Array.isArray(r.soc) && r.soc.length) {
-    info.appendChild(_detailFactRow('Social',
-      r.soc.length + ' link' + (r.soc.length === 1 ? '' : 's'),
+    info.appendChild(_detailFactRow(szT('place.social', 'Social'),
+      szTn('place.links', r.soc.length, { one: '{n} link', other: '{n} links' }),
       r.soc[0], '_blank'));
   }
   // Coordinates (always available, useful for cross-app copy-paste)
   if (typeof r.a === 'number' && typeof r.o === 'number') {
     var coordRow = _detailFactRow(
-      'Coords',
+      szT('place.coords', 'Coords'),
       r.a.toFixed(5) + ', ' + r.o.toFixed(5),
       null);
     info.appendChild(coordRow);
@@ -292,10 +292,7 @@ function _detailTravelTimesLine(r) {
   // Walking 1.4 m/s (~5 km/h), driving 11 m/s (~40 km/h urban).
   // Round up so 0 doesn't display as "0 min" for non-zero distances.
   function fmtMin(sec) {
-    var min = Math.max(1, Math.round(sec / 60));
-    if (min < 60) return min + ' min';
-    var h = Math.floor(min / 60), rest = min % 60;
-    return rest === 0 ? h + ' hr' : h + ' hr ' + rest + ' min';
+    return szDuration(Math.max(1, Math.round(sec / 60)));
   }
   var walkMin = fmtMin(m / 1.4);
   var driveMin = fmtMin(m / 11);
@@ -308,9 +305,10 @@ function _detailTravelTimesLine(r) {
   // four hours across CA.
   var walkMinValue = m / 1.4 / 60;
   if (walkMinValue > 120) {
-    line.textContent = '≈ ' + driveMin + ' drive (straight-line)';
+    line.textContent = szT('place.eta_drive', '≈ {drive} drive (straight-line)', { drive: driveMin });
   } else {
-    line.textContent = '≈ ' + walkMin + ' walk · ' + driveMin + ' drive (straight-line)';
+    line.textContent = szT('place.eta_walk_drive', '≈ {walk} walk · {drive} drive (straight-line)',
+                           { walk: walkMin, drive: driveMin });
   }
   return line;
 }
@@ -329,7 +327,9 @@ function _detailDistanceLine(r) {
   line.style.cssText = 'color:var(--szd-fg-2, #444); font-size:13px; margin:4px 0 0;';
   // o.here: the GPS fix (240). A stash from places.html names its origin.
   var here = o.here || !o.label || o.label === 'Current location';
-  line.textContent = _formatDistanceStrip(m) + ' from ' + (here ? 'current location' : o.label);
+  line.textContent = here
+    ? szT('place.distance_from_here', '{dist} from current location', { dist: _formatDistanceStrip(m) })
+    : szT('place.distance_from', '{dist} from {place}', { dist: _formatDistanceStrip(m), place: o.label });
   return line;
 }
 
@@ -385,7 +385,7 @@ function _populateWikipediaExtract(slot, wd) {
       'font-size:11px; color:var(--szd-fg-3, #888); text-transform:uppercase;'
       + 'letter-spacing:0.04em; margin:0 0 4px;'
     );
-    head.textContent = 'About';
+    head.textContent = szT('place.about', 'About');
     slot.appendChild(head);
     var body = document.createElement('div');
     body.style.cssText = 'color:var(--szd-fg, #333); font-size:14px; line-height:1.5;';
@@ -394,10 +394,10 @@ function _populateWikipediaExtract(slot, wd) {
   }
   // Compact facts row
   var facts = [];
-  if (wd.p) facts.push(['Pop.', _detailFmtNumber(wd.p)]);
-  if (wd.a) facts.push(['Area', wd.a.toLocaleString() + ' km²']);
-  if (wd.e) facts.push(['Elev.', wd.e.toLocaleString() + ' m']);
-  if (wd.c) facts.push(['Country', wd.c]);
+  if (wd.p) facts.push([szT('place.fact_pop', 'Pop.'), _detailFmtNumber(wd.p)]);
+  if (wd.a) facts.push([szT('place.fact_area', 'Area'), szLocaleNum(wd.a) + ' km²']);
+  if (wd.e) facts.push([szT('place.fact_elev', 'Elev.'), szLocaleNum(wd.e) + ' m']);
+  if (wd.c) facts.push([szT('place.fact_country', 'Country'), wd.c]);
   if (facts.length) {
     var grid = document.createElement('div');
     grid.style.cssText = (
@@ -419,9 +419,6 @@ function _populateWikipediaExtract(slot, wd) {
 }
 
 function _detailFmtNumber(n) {
-  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
-  return String(n);
+  return szCompactNum(n);
 }
 

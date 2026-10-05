@@ -9,6 +9,9 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
+// The UI-string runtime (szT, szFixed, …) as globals, as index.html has it:
+// the code under test calls it (docs/i18n.md). Indirect eval: global scope.
+(0, eval)(fs.readFileSync(`${REPO}/resources/viewer/i18n/runtime.js`, 'utf8'));
 const HTML = fs.readFileSync(`${REPO}/resources/viewer/index.html`, 'utf8');
 
 let pass = 0;
@@ -432,7 +435,7 @@ await ok('units: one setting for every distance, locale default, kept across vis
   assert.match(HTML, /var scaleUnit = szReadUnit\(_szStorage\(\)\);/);
   assert.match(HTML, /szWriteUnit\(_szStorage\(\), scaleUnit\);/);
   assert.match(HTML, /function _formatDistanceStrip\(m\) \{\s*return szFormatDistance\(m, szUnit\(\)\);/);
-  assert.match(HTML, /'Nearby \(within ' \+ szFormatDistance\(1500, szUnit\(\)\) \+ '\)'/);
+  assert.match(HTML, /'Nearby \(within \{dist\}\)', \{ dist: szFormatDistance\(1500, szUnit\(\)\) \}/);
   assert.match(HTML, /function formatDistance\(meters\) \{\s*return szFormatDistance\(meters, szUnit\(\)\);/);
   assert.doesNotMatch(HTML, /1\.5 km/);
   // places.html reads the same key and prints the same strings.
@@ -698,8 +701,8 @@ await ok('chips: hidden chips and rail are really hidden, and taps always say so
   assert.match(HTML, /No category search in this map/);
   // Legacy-layout chip that loaded nothing, and a failed fetch, both toast.
   const legacy = slice("console.warn('[streetzim] chip fetch failed:'", 'var bounds = map.getBounds();');
-  assert.match(legacy, /_showFindToast\('Couldn\\u2019t load '/);
-  assert.match(legacy, /if \(!Array\.isArray\(data\) \|\| !data\.length\) \{\s*_showFindToast\('No '/);
+  assert.match(legacy, /_showFindToast\(szT\('find\.could_not_load', 'Couldn\\u2019t load \{chip\}'/);
+  assert.match(legacy, /if \(!Array\.isArray\(data\) \|\| !data\.length\) \{\s*_showFindToast\(opts\.requireInBounds\s*\? szT\('find\.none_in_area'/);
 });
 
 await ok('manifest: only 404 / 410 mean "no chip data"; the answer is cached', async () => {

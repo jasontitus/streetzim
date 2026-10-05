@@ -71,11 +71,11 @@ function szFatalPage(opts) {
     for (i = 0; i < opts.tips.length; i++) add('li', opts.tips[i], ul);
   }
   if (opts.retry) {
-    add('button', 'Try again').addEventListener('click', function() { location.reload(); });
+    add('button', szT('fatal.try_again', 'Try again')).addEventListener('click', function() { location.reload(); });
   }
   if (opts.details) {
     var det = add('details');
-    add('summary', 'Technical details', det);
+    add('summary', szT('fatal.technical_details', 'Technical details'), det);
     add('pre', opts.details, det);
   }
   (document.body || document.documentElement).appendChild(page);
@@ -95,16 +95,18 @@ function szFatalPage(opts) {
   if (typeof window.maplibregl === 'undefined') missing.push('MapLibre GL (maplibre-gl.js did not load or run)');
   if (!missing.length) return;
   window.__szUnsupported = missing;
+  // Shown before map-config.json is read, so always in English; the
+  // szT calls are for the day the language is known earlier.
   szFatalPage({
-    title: 'This reader cannot show the map',
+    title: szT('fatal.unsupported_title', 'This reader cannot show the map'),
     lines: [
-      'The offline map needs a web engine newer than the one this app or browser uses. It is missing: ' +
-        missing.join(', ') + '.'
+      szT('fatal.unsupported_line', 'The offline map needs a web engine newer than the one this app or browser uses. It is missing: {missing}.',
+          { missing: missing.join(', ') })
     ],
     tips: [
-      'Update your Kiwix app, or open this file in a current Kiwix (Android, iOS, macOS, Windows, Linux) or Kiwix JS.',
-      'In Kiwix JS, use ServiceWorker mode, not JQuery mode.',
-      'In a browser, use a recent Firefox, Chrome, Edge or Safari.'
+      szT('fatal.tip_update_kiwix', 'Update your Kiwix app, or open this file in a current Kiwix (Android, iOS, macOS, Windows, Linux) or Kiwix JS.'),
+      szT('fatal.tip_kiwix_js_mode', 'In Kiwix JS, use ServiceWorker mode, not JQuery mode.'),
+      szT('fatal.tip_browser', 'In a browser, use a recent Firefox, Chrome, Edge or Safari.')
     ],
     details: 'Missing: ' + missing.join(', ') + '\nUser agent: ' + (navigator.userAgent || '?') +
       '\nPage: ' + location.href

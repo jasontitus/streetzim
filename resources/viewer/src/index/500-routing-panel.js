@@ -7,7 +7,7 @@
 // older bookmarklet) still means the same.
 var SZ_HERE = '\u2316here';
 function szIsHere(label) { return label === SZ_HERE || label === 'Current location'; }
-function szHereLabel() { return 'Current location'; }
+function szHereLabel() { return szT('routing.current_location', 'Current location'); }
 // END sz-here
 
 // --- Routing with A* pathfinding ---
@@ -40,7 +40,8 @@ function initRouting(map, config) {
     walk:  document.getElementById('routing-walk'),
     bike:  document.getElementById('routing-bike')
   };
-  var MODE_LABELS = { drive: 'Drive', walk: 'Walk', bike: 'Bike' };
+  var MODE_LABELS = { drive: szT('routing.mode_drive', 'Drive'), walk: szT('routing.mode_walk', 'Walk'),
+                      bike: szT('routing.mode_bike', 'Bike') };
   // Per-mode presets — camera feels right for the modality. `speed`
   // (m/s: walk≈3.1 mph, bike≈10 mph) re-estimates the remaining time
   // only when the route was planned for another mode (older ZIMs plan
@@ -119,9 +120,10 @@ function initRouting(map, config) {
       modeBtns[m].removeAttribute('aria-label');
       if (multiModal) {
         if (m === travelMode) {
-          modeBtns[m].textContent = 'Start';
-          modeBtns[m].setAttribute('aria-label', 'Start ' + (m === 'walk' ? 'walking'
-            : m === 'bike' ? 'cycling' : 'driving') + ' navigation');
+          modeBtns[m].textContent = szT('routing.start', 'Start');
+          modeBtns[m].setAttribute('aria-label', m === 'walk' ? szT('routing.start_walking', 'Start walking navigation')
+            : m === 'bike' ? szT('routing.start_cycling', 'Start cycling navigation')
+            : szT('routing.start_driving', 'Start driving navigation'));
         } else {
           modeBtns[m].classList.add('hidden-mode');
         }
@@ -184,7 +186,8 @@ function initRouting(map, config) {
     if (e) { e.preventDefault(); e.stopPropagation(); }
     panel.classList.toggle('minimized');
     var folded = panel.classList.contains('minimized');
-    minBtn.title = folded ? 'Unfold (show directions)' : 'Fold down (show map)';
+    minBtn.title = folded ? szT('routing.unfold_title', 'Unfold (show directions)')
+                          : szT('routing.fold_title', 'Fold down (show map)');
     // Tell MapLibre the available canvas size changed so any fit
     // bounds / camera calc uses the new dims. Route line + markers
     // are NOT touched — they stay on the map through the fold cycle.

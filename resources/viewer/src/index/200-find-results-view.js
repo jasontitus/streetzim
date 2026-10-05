@@ -299,7 +299,7 @@ function _findResultPopup(map, r) {
     var wd = null;
     if (r.l) wd = { c: r.l };
     var lng = { lat: r.a, lng: r.o };
-    var dom = map._buildWikiPopupDOM(r.n || '(unnamed)', wd, lng,
+    var dom = map._buildWikiPopupDOM(r.n || szT('common.unnamed', '(unnamed)'), wd, lng,
                                      _wikiArticlePath(r.q, r.w));
     return new maplibregl.Popup({ offset: 28, closeButton: true,
                                   closeOnClick: false, maxWidth: '320px' })
@@ -307,7 +307,7 @@ function _findResultPopup(map, r) {
   }
   var box = document.createElement('div');
   box.style.cssText = 'font:14px/1.4 -apple-system,system-ui,sans-serif;';
-  box.textContent = r.n || '(unnamed)';
+  box.textContent = r.n || szT('common.unnamed', '(unnamed)');
   return new maplibregl.Popup({ offset: 28, closeButton: true,
                                 closeOnClick: false })
     .setDOMContent(box);
@@ -383,7 +383,7 @@ function _renderSubfilterRow(map, stash) {
   }
 
   if (current) {
-    row.appendChild(makeChip('All', null, null));
+    row.appendChild(makeChip(szT('find.all', 'All'), null, null));
   }
   for (var k = 0; k < subs.length; k++) {
     row.appendChild(makeChip(_humanSubtype(subs[k][0]), subs[k][0], subs[k][1]));
@@ -393,7 +393,7 @@ function _renderSubfilterRow(map, stash) {
 
 function _humanSubtype(s) {
   if (!s) return '';
-  return s.replace(/_/g, ' ').replace(/^./, function(c) {
+  return szPlaceType(s).replace(/^./, function(c) {
     return c.toUpperCase();
   });
 }
@@ -407,7 +407,7 @@ function _applySubFilter(map, sub) {
   // visible to the sub-row builder so the histogram is stable.
   var chip = _findResultsState.activeChip;
   var origin = _findResultsState.origin;
-  var label = _findResultsState.label || (chip ? chip.label : 'Results');
+  var label = _findResultsState.label || (chip ? szChipLabel(chip.id, chip.label) : szT('find.results', 'Results'));
   var stash = {
     label: label, origin: origin, items: all,
     chipId: chip ? chip.id : undefined,
@@ -449,11 +449,11 @@ function _renderFindResultsStrip(map, stash) {
     'flex:1 1 auto; min-width:0; overflow:hidden;'
     + 'text-overflow:ellipsis; white-space:nowrap;'
   );
-  title.textContent = (stash.label || 'Results') + ' · ' + stash.items.length;
+  title.textContent = (stash.label || szT('find.results', 'Results')) + ' · ' + stash.items.length;
   header.appendChild(title);
   var closeBtn = document.createElement('button');
   closeBtn.type = 'button';
-  closeBtn.title = 'Clear results';
+  closeBtn.title = szT('find.clear_results', 'Clear results');
   closeBtn.textContent = '×';
   closeBtn.style.cssText = (
     'flex:0 0 auto; background:transparent; border:none;'
@@ -562,7 +562,7 @@ function _showSearchAreaPill(map) {
   var btn = document.createElement('button');
   btn.id = 'find-search-area-btn';
   btn.type = 'button';
-  btn.textContent = 'Search this area';
+  btn.textContent = szT('find.search_this_area', 'Search this area');
   btn.style.cssText = (
     'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
     + 'z-index:1600; padding:9px 18px;'
@@ -650,7 +650,7 @@ function _searchAreaApply(map) {
       + 'font:600 13px/1.2 -apple-system,system-ui,sans-serif;'
       + 'box-shadow:0 4px 14px rgba(0,0,0,0.18); pointer-events:none;'
     );
-    btn.textContent = 'No results in this area';
+    btn.textContent = szT('find.no_results_in_area', 'No results in this area');
     document.body.appendChild(btn);
     setTimeout(function() {
       if (btn.parentNode) btn.parentNode.removeChild(btn);
@@ -661,11 +661,9 @@ function _searchAreaApply(map) {
   // session: stash a fresh stash with the filtered items and
   // re-enter the render path so all the wiring is consistent.
   var origin = _findResultsState.origin;
-  var label = (_findResultsState.strip
-    && _findResultsState.strip.querySelector('span'))
-    ? _findResultsState.strip.querySelector('span').textContent
-        .replace(/\s·\s\d+$/, '')
-    : 'Results';
+  // The strip's title without its count, which is what this read off the
+  // strip's text before it was translatable.
+  var label = _findResultsState.label || szT('find.results', 'Results');
   clearFindResults();
   try {
     sessionStorage.setItem(FIND_RESULTS_STASH_KEY, JSON.stringify({

@@ -598,12 +598,8 @@
   }
 
   function formatTime(seconds) {
-    if (seconds < 60) return Math.round(seconds) + ' sec';
-    var mins = Math.round(seconds / 60);
-    if (mins < 60) return mins + ' min';
-    var hrs = Math.floor(mins / 60);
-    var rem = mins % 60;
-    return hrs + ' hr ' + rem + ' min';
+    if (seconds < 60) return szT('time.sec', '{s} sec', { s: Math.round(seconds) });
+    return szDuration(Math.round(seconds / 60), true);
   }
 
   function renderRoads(roads) {
@@ -617,7 +613,7 @@
       row.className = 'road-row';
       var nameSpan = document.createElement('span');
       nameSpan.className = 'road-name' + (name ? '' : ' unnamed');
-      nameSpan.textContent = name || 'unnamed road';
+      nameSpan.textContent = name || szT('routing.unnamed_road', 'unnamed road');
       var distSpan = document.createElement('span');
       distSpan.className = 'road-dist';
       distSpan.textContent = formatDistance(r.distM);

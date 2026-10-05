@@ -10,7 +10,11 @@ that file, in file-name order. Nothing is added or changed in between.
     python tools/build_viewer.py --check    # fail if index.html != parts (CI)
 
 Edit the parts, not index.html, then rebuild, run
-scripts/sync-drive-viewer.sh, and commit all three. Parts are fragments: a
+scripts/sync-drive-viewer.sh, and commit all three.
+
+It first runs tools/build_i18n.py, which owns part 005-i18n.html, the
+SZ-I18N block in places.html and resources/viewer/i18n/en.json: the UI
+strings and their translations (docs/i18n.md). Parts are fragments: a
 part may open a function that a later part closes (initRouting spans
 500-610), so they are not meant to be valid JavaScript on their own.
 """
@@ -20,6 +24,9 @@ import argparse
 import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import build_i18n  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 PARTS = ROOT / "resources" / "viewer" / "src" / "index"
@@ -51,6 +58,8 @@ def main() -> int:
     ap.add_argument("--check", action="store_true",
                     help="exit 1 if index.html differs from the joined parts")
     args = ap.parse_args()
+    if build_i18n.main(["--check"] if args.check else []) != 0:
+        return 1
     data = build()
     if args.check:
         if TARGET.read_bytes() != data:

@@ -9,6 +9,9 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
+// The UI-string runtime (szT, szFixed, …) as globals, as index.html has it:
+// the code under test calls it (docs/i18n.md). Indirect eval: global scope.
+(0, eval)(fs.readFileSync(`${REPO}/resources/viewer/i18n/runtime.js`, 'utf8'));
 const PICK_SRC = fs.readFileSync(`${REPO}/resources/viewer/src/index/550-routing-pickers.js`, 'utf8');
 const PICK = PICK_SRC.slice(0, PICK_SRC.indexOf('  // Typeahead: wire each input'));
 const PANEL = fs.readFileSync(`${REPO}/resources/viewer/src/index/500-routing-panel.js`, 'utf8');
@@ -217,5 +220,22 @@ await ok('the GPS state is a flag, not the text: a place named like it is a plac
   assert.strictEqual(a.originInput._szHere, true);
   a.clearRoute();
   assert.strictEqual(a.originInput._szHere, false);
+});
+await ok('in German the GPS start reads "Aktueller Standort" and is still the GPS fix after a mode change', async () => {
+  globalThis.SZ_I18N = { 'routing.current_location': 'Aktueller Standort' };
+  try {
+    const e = make(); const a = e.api;
+    a.setOriginFromLatLon(1, 1, SZ_HERE_OF(e)); await snap(e, 'origin', 10);
+    assert.strictEqual(a.state.oIn, 'Aktueller Standort');
+    a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20);
+    await route(e, {});
+    a.setTravelMode('walk');
+    await snap(e, 'origin', 10);
+    // Re-planned from the flag: the German words are not the English token.
+    assert.strictEqual(a.originInput._szHere, true);
+    assert.strictEqual(a.state.oIn, 'Aktueller Standort');
+  } finally {
+    globalThis.SZ_I18N = null;
+  }
 });
 console.log(`${pass} passed`);

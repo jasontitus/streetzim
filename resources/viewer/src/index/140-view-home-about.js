@@ -80,10 +80,19 @@ function szFormatDistance(meters, unit) {
     var feet = meters * 3.28084;
     if (feet < 1000) return Math.round(feet) + ' ft';
     var miles = meters / 1609.344;
-    return (miles < 10 ? miles.toFixed(1) : Math.round(miles)) + ' mi';
+    return (miles < 10 ? szFixed(miles, 1) : Math.round(miles)) + ' mi';
   }
   if (meters < 1000) return Math.round(meters) + ' m';
-  return (meters / 1000).toFixed(meters < 10000 ? 1 : 0) + ' km';
+  return szFixed(meters / 1000, meters < 10000 ? 1 : 0) + ' km';
+}
+
+// A whole number of minutes as text: "25 min", "2 hr", "2 hr 5 min"
+// (always "2 hr 0 min" with showZero, the routing panel's form).
+function szDuration(min, showZero) {
+  if (min < 60) return szT('time.min', '{m} min', { m: min });
+  var h = Math.floor(min / 60), rest = min % 60;
+  if (rest === 0 && !showZero) return szT('time.hr', '{h} hr', { h: h });
+  return szT('time.hr_min', '{h} hr {m} min', { h: h, m: rest });
 }
 
 function _szViewKey(config) {
@@ -337,8 +346,8 @@ function initHomeButton(map, config) {
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'sz-home-btn';
-      btn.title = 'Show the whole map';
-      btn.setAttribute('aria-label', 'Show the whole map');
+      btn.title = szT('controls.home', 'Show the whole map');
+      btn.setAttribute('aria-label', szT('controls.home', 'Show the whole map'));
       btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' +
         '<path d="M12 3 2 12h3v8h6v-6h2v6h6v-8h3z"/></svg>';
       btn.addEventListener('click', function() {
@@ -357,14 +366,12 @@ function initHomeButton(map, config) {
   map.addControl(ctrl, 'top-right');
 }
 
-// "July 2026" from "2026-07-14" / "2026/07"; anything else as given.
+// "July 2026" ("Juli 2026") from "2026-07-14" / "2026/07"; anything else as given.
 function _szMonth(d) {
   var m = /^(\d{4})[-/](\d{1,2})/.exec(String(d || ''));
   if (!m) return d ? String(d) : '';
-  var names = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
-               'August', 'September', 'October', 'November', 'December'];
   var i = parseInt(m[2], 10) - 1;
-  return names[i] ? names[i] + ' ' + m[1] : String(d);
+  return i >= 0 && i < 12 ? szMonthYear(parseInt(m[1], 10), i) : String(d);
 }
 
 // Text for the About panel. Newer ZIMs carry title/description/
@@ -377,6 +384,7 @@ function _szMonth(d) {
 function _szSatellite(config) {
   if (!config || !config.hasSatellite) return null;
   if (!config.satelliteAttribution) {
+    // The credit EOX asks for, word for word: not translated.
     return { attribution: 'Sentinel-2 cloudless - https://s2maps.eu by EOX IT Services GmbH' +
              ' (Contains modified Copernicus Sentinel data 2021)',
              license: 'CC BY-NC-SA 4.0', licenseUrl: 'https://creativecommons.org/licenses/by-nc-sa/4.0/',
@@ -408,7 +416,7 @@ function _szSatelliteCreditHtml(config) {
   return '&copy; <a href="https://cloudless.eox.at" target="_blank" rel="noopener">EOxCloudless</a>' +
     (year ? ' ' + _szEsc(year) : '') +
     ' by <a href="https://eox.at" target="_blank" rel="noopener">EOX</a> &middot; ' + lic +
-    (sat.nonCommercial ? ' (non-commercial)' : '');
+    (sat.nonCommercial ? ' (' + _szEsc(szT('about.non_commercial_short', 'non-commercial')) + ')' : '');
 }
 
 function _szAboutText(config) {
@@ -416,21 +424,25 @@ function _szAboutText(config) {
   var meta = [];
   // buildDate is when the ZIM was built, not the OSM data's timestamp.
   var when = _szMonth(config.buildDate);
-  if (when || config.generator) {
-    meta.push('Built' + (when ? ' ' + when : '') + (config.generator ? ' with ' + config.generator : ''));
+  if (when && config.generator) {
+    meta.push(szT('about.built_when_with', 'Built {when} with {generator}', { when: when, generator: config.generator }));
+  } else if (when) {
+    meta.push(szT('about.built_when', 'Built {when}', { when: when }));
+  } else if (config.generator) {
+    meta.push(szT('about.built_with', 'Built with {generator}', { generator: config.generator }));
   }
-  meta.push('viewer: streetzim ' + SZ_VIEWER_VERSION);
+  meta.push(szT('about.viewer_version', 'viewer: streetzim {version}', { version: SZ_VIEWER_VERSION }));
   var sat = _szSatellite(config);
   return {
-    title: config.title || config.name || 'Offline OpenStreetMap',
+    title: config.title || config.name || szT('about.default_title', 'Offline OpenStreetMap'),
     desc: config.description || '',
     meta: meta.join(' · '),
     // A ZIM with non-commercial imagery says so first thing in About.
     notice: sat && sat.nonCommercial ?
-      'Restricted: the satellite imagery is licensed ' + sat.license +
-      ' and may be used for non-commercial purposes only; the rest of this map is openly licensed.' : '',
+      szT('about.sat_restricted', 'Restricted: the satellite imagery is licensed {license} and may be used for non-commercial purposes only; the rest of this map is openly licensed.',
+          { license: sat.license }) : '',
     satCredit: sat ? sat.attribution : '',
-    satLicense: sat ? sat.license + (sat.nonCommercial ? ', non-commercial use only' : '') +
+    satLicense: sat ? sat.license + (sat.nonCommercial ? ', ' + szT('about.non_commercial_only', 'non-commercial use only') : '') +
       (sat.licenseUrl ? ' \u2014 ' + sat.licenseUrl.replace(/^https?:\/\//, '') : '') : ''
   };
 }
