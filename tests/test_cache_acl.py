@@ -159,10 +159,12 @@ def test_acl_cannot_use_equal_group_other_chown_fallback(tmp_path, integrated, m
     monkeypatch.setattr(Path, "stat", foreign_group)
     monkeypatch.setattr(permissions.os, "chown", denied)
     with pytest.raises(PermissionError, match=r"(?s)it has an ACL.*same owner.*"
-                                              r"docs/zimfarm\.md"):
+                                              r"setfacl -b.*docs/zimfarm\.md") as raised:
         wc._write_cache_json(path, {"Q110": {"label": "Updated"}})
     assert (path.read_bytes(), _acl_snapshot(path)) == before
     assert not list(tmp_path.glob("*.tmp"))
+    # The group fixes (joining a group, chgrp) cannot give a file another owner.
+    assert "chgrp" not in str(raised.value) and "--group-add" not in str(raised.value)
 
 
 def test_darwin_acl_error_survives_cleanup(tmp_path, monkeypatch):

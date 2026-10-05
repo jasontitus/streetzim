@@ -428,3 +428,113 @@ def test_a_build_clears_dead_stages_before_it_starts(seeded, monkeypatch):
     monkeypatch.setattr(wc, "extract_qids_from_pbf", lambda *a, **k: {})
     wc.build_cache(pbf_path="x.pbf", cache_dir=path)
     assert not any(p.exists() for p in stages["dead"])
+
+
+def test_a_symlink_named_like_a_stage_is_removed_not_followed(seeded):
+    path, _ = seeded
+    target = path.parent / "not-the-cache"
+    target.mkdir()
+    (target / "keep").write_text("someone's file")
+    link = path / f".11.json.{'5' * 32}.tmp"
+    link.symlink_to(target, target_is_directory=True)
+    wc.clean_dead_stages(path)
+    assert not link.is_symlink() and (target / "keep").read_text() == "someone's file"
+
+
+@pytest.mark.parametrize("name", [
+    f".11.json.{'a' * 31}.tmp", f".11.jsonx.{'a' * 32}.tmp", f".abc.json.{'a' * 32}.tmp",
+    f".111.json.{'a' * 32}.tmp", f".11.json.{'A' * 32}.tmp", f".11.json.{'a' * 32}.tmp.bak",
+    f".11.json.{'a' * 32}.tmp.old.tmp"])
+def test_only_this_modules_stage_names_are_removed(seeded, name):
+    path, _ = seeded
+    (path / f".11.json.{'6' * 32}.tmp").write_text("{}")    # a real stage: triggers cleanup
+    near_miss = path / name
+    near_miss.write_text("not ours")
+    wc.clean_dead_stages(path)
+    assert near_miss.read_text() == "not ours"
+    assert not (path / f".11.json.{'6' * 32}.tmp").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="POSIX, non-root")
+def test_a_stage_that_cannot_be_removed_is_a_warning(seeded, capsys):
+    path, _ = seeded
+    stuck = path / f".11.json.{'7' * 32}.tmp"
+    stuck.mkdir()
+    (stuck / "contents").write_text("{}")
+    stuck.chmod(0o000)
+    other = path / f".manifest.json.{'8' * 32}.tmp"
+    other.write_text("{}")
+    try:
+        wc.clean_dead_stages(path)
+        wc.save_cache(path, {"Q110": {"label": "Updated"}})
+    finally:
+        stuck.chmod(0o700)
+    out = capsys.readouterr().out
+    assert "cannot remove" in out and not other.exists()
+    assert wc.load_cache(path)["Q110"]["label"] == "Updated"
+
+
+def test_build_start_does_not_wait_for_a_busy_lock(seeded):
+    import subprocess
+    import time
+    path, _ = seeded
+    stage = path / f".11.json.{'9' * 32}.tmp"
+    stage.write_text("{}")
+    wc._prepare_cache_lock(path)
+    holder = subprocess.Popen([sys.executable, "-c", (
+        "import fcntl, sys, time\n"
+        f"f = open({str(path / 'manifest.json.lock')!r}, 'a')\n"
+        "fcntl.flock(f, fcntl.LOCK_EX); print('held', flush=True); time.sleep(30)")],
+        stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        t = time.monotonic()
+        wc.clean_dead_stages(path)
+        assert time.monotonic() - t < 2
+        assert stage.exists()                    # left for the lock's holder
+    finally:
+        holder.kill()
+        holder.wait()
+
+
+def test_a_cache_it_cannot_lock_is_a_warning(seeded, monkeypatch, capsys):
+    path, _ = seeded
+    (path / f".11.json.{'b' * 32}.tmp").write_text("{}")
+
+    def read_only(*a):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(wc, "_prepare_cache_lock", read_only)
+    wc.clean_dead_stages(path)
+    assert "cannot take the cache's lock" in capsys.readouterr().out
+
+
+def test_a_bucket_it_must_add_to_but_cannot_read_stops_with_a_reason(seeded, capsys):
+    path, entries = seeded
+    (path / "11.json").write_text("{cut sho")
+    with pytest.raises(json.JSONDecodeError):
+        wc.save_cache(path, {"Q110": {"label": "Updated"}})
+    out = capsys.readouterr().out
+    assert "must add entries to" in out and "would drop the entries" in out
+    assert (path / "11.json").read_text() == "{cut sho"
+
+
+@pytest.mark.parametrize("bad", ["decode", "permission"])
+def test_the_unreadable_bucket_warning_suits_the_cause(seeded, monkeypatch, capsys, bad):
+    path, _ = seeded
+    original = wc.json.load
+
+    def failing(stream, *a, **k):
+        if Path(stream.name).name == "99.json":
+            if bad == "decode":
+                raise json.JSONDecodeError("cut short", "{", 1)
+            raise PermissionError(13, "Permission denied")
+        return original(stream, *a, **k)
+
+    monkeypatch.setattr(wc.json, "load", failing)
+    wc.load_cache(path)
+    out = capsys.readouterr().out
+    if bad == "decode":
+        assert "deleting it has its Q-IDs fetched again" in out
+    else:
+        assert "do not delete it" in out and "deleting it" not in out

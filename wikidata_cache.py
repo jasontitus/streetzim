@@ -682,9 +682,15 @@ def _cache_buckets(cache_dir, *, skip=(), strict=False):
         except (json.JSONDecodeError, OSError) as e:
             if strict:
                 raise
+            what = ("it is not valid JSON (cut short?): deleting it has its Q-IDs "
+                    "fetched again by the builds that use them"
+                    if isinstance(e, json.JSONDecodeError) else
+                    "check its owner and mode; it may be another user's valid "
+                    "bucket, so do not delete it for this")
             print(f"    Warning: cannot read Wikidata cache bucket {json_file} ({e}); "
-                  "its entries are left out here and the file is not changed. "
-                  "Delete it to have its Q-IDs fetched again by the builds that use them.")
+                  f"its entries are left out here and the file is not changed; {what}. "
+                  "A build that needs to add to this bucket stops rather than "
+                  "replace it.")
 
 
 def load_cache(cache_dir, *, qids=None):
@@ -777,8 +783,12 @@ def clean_dead_stages(cache_dir):
     from streetzim.download import file_lock
     try:
         _prepare_cache_lock(cache_dir)
-        with file_lock(cache_dir / "manifest.json"):
-            _remove_dead_stages(cache_dir)
+        # Never wait for this: a writer holding the lock cleans up itself
+        # when it saves, and a leftover this user cannot remove must not
+        # make every later build queue behind other writers.
+        with file_lock(cache_dir / "manifest.json", block=False) as locked:
+            if locked:
+                _remove_dead_stages(cache_dir)
     except OSError as e:
         print(f"    Warning: staging files left by stopped builds are in {cache_dir}, "
               f"and this build cannot take the cache's lock to remove them ({e})")
@@ -891,8 +901,18 @@ def _save_cache_locked(cache_dir, entries, qid_features):
         # Merge with existing bucket if present
         # New entries take priority over existing (overwrites stubs with enriched data)
         if bucket_path.exists():
-            with open(bucket_path) as f:
-                existing = json.load(f)
+            try:
+                with open(bucket_path) as f:
+                    existing = json.load(f)
+            except (OSError, json.JSONDecodeError) as e:
+                # Replacing it with only this build's entries would lose every
+                # other region's, so stop; say so before the raw error.
+                print(f"    ERROR: cannot read {bucket_path} ({e}), which this build "
+                      "must add entries to; replacing it would drop the entries of "
+                      "every other region in it, so the build stops here. Fix or "
+                      "remove the file (see the warning above), or use a cache of "
+                      "its own (--wikidata-cache).", flush=True)
+                raise
             # Merge: start with existing, then overlay new entries on top.
             # Prefer enriched entries to stubs. Read/decode failures propagate
             # before publication; unrelated regions are only in this bucket.

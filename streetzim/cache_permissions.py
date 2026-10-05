@@ -106,10 +106,19 @@ def prepare_private_stage_directory(path: Path) -> None:
     os.chmod(path, 0o700)
 
 
-_FIXES = ("Run the build as a user in that group (Docker: add --group-add <gid>, "
-          "as `--user uid:gid` alone gives no other groups), give the file a group "
-          "this user is in (chgrp), or point the build at a cache of its own "
-          "(--wikidata-cache, or --dl for the streetzim command).")
+def _group_fixes(gid: int) -> str:
+    return ("Run the build as a user in that group (Docker: add "
+            f"--group-add {gid}; `--user uid:gid` alone gives no other groups), "
+            "give the file a group this user is in (chgrp) or the same access for "
+            "the group as for everyone else (chmod), or point the build at a cache "
+            "of its own (--wikidata-cache, or --dl for the streetzim command).")
+
+
+def _acl_fixes(uid: int) -> str:
+    return (f"Run the build as UID {uid} (the file's owner) or with the privilege "
+            "to keep another user's ownership (root), remove the ACL if it is not "
+            "wanted (setfacl -b), or point the build at a cache of its own "
+            "(--wikidata-cache, or --dl for the streetzim command).")
 
 
 def _group(gid: int) -> str:
@@ -160,9 +169,8 @@ def preserve_cache_permissions(staging: Path, previous: Path) -> None:
                     f"ACL, which a replacement keeps only with the same owner (UID "
                     f"{original.st_uid}, GID {original.st_gid}), and this user cannot "
                     "give it that owner. Replacing it anyway would change who may read "
-                    f"or write it. {_FIXES} (See docs/zimfarm.md, 'Shared caches: "
-                    "ownership and permissions'.)",
-                    str(previous)) from error
+                    f"or write it. {_acl_fixes(original.st_uid)} (See docs/zimfarm.md, "
+                    "'Shared caches: ownership and permissions'.)") from error
             if stage.st_gid != original.st_gid:
                 try:
                     os.chown(staging, -1, original.st_gid)
@@ -178,9 +186,9 @@ def preserve_cache_permissions(staging: Path, previous: Path) -> None:
                             "everyone else's), and this user is not in that group, so "
                             "a replacement could not keep it; publishing one under "
                             "this user's group would change who may write it. "
-                            f"{_FIXES} (See docs/zimfarm.md, 'Shared caches: "
-                            "ownership and permissions'.)",
-                            str(previous)) from group_error
+                            f"{_group_fixes(original.st_gid)} (See docs/zimfarm.md, "
+                            "'Shared caches: ownership and permissions'.)"
+                        ) from group_error
     os.chmod(staging, mode)
     if sys.platform == "linux":
         if isinstance(acl, bytes):

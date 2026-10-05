@@ -98,8 +98,8 @@ def test_group_preservation_failure_keeps_published_json(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "stat", stat_with_different_group)
     monkeypatch.setattr(wc.os, "chown", cannot_change_group)
     # The error says why, and how to fix it.
-    with pytest.raises(PermissionError, match=r"(?s)is not in that group.*--group-add.*"
-                                              r"--wikidata-cache.*docs/zimfarm\.md"):
+    with pytest.raises(PermissionError, match=r"(?s)is not in that group.*--group-add \d+;.*"
+                                              r"chmod.*--wikidata-cache.*docs/zimfarm\.md"):
         wc._write_cache_json(path, {"Q111": {"label": "new"}})
     assert path.read_bytes() == before
     assert not list(tmp_path.glob(".*.tmp"))
