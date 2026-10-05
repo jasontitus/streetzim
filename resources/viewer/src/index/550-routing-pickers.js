@@ -213,7 +213,10 @@
       var result;
       try {
         result = await findRoute(originNode, destNode, routeTravel,
-                                 { origin: originPick, dest: destPick });
+                                 // An end the router already moved is on the network: it is not
+                                 // re-snapped again (each move would loosen the distance rule).
+                                 { origin: originMoved ? null : originPick,
+                                   dest: destMoved ? null : destPick });
       } catch (err) {
         console.error('[streetzim] findRoute failed:', err);
         if (seq === routeSeq) {

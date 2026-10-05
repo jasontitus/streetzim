@@ -386,13 +386,14 @@ def test_both_ends_in_pockets_on_a_small_network(tmp_path):
     from tests.szrg_spatial import build_spatial
     from tests.test_routing_worker_v3 import _pack_v4_graph_cls
     lat = 400_000_000
-    road = [(lat, -1_050_000_000 + i * 6_000) for i in range(40)]
+    road = [(lat, -1_050_000_000 + i * 6_000) for i in range(120)]   # the network: biggest
     stub_a = [(lat + 3_000, road[0][1] - 6_000 - (39 - i) * 6_000) for i in range(40)]
     stub_b = [(lat + 3_000, road[-1][1] + 6_000 + i * 6_000) for i in range(40)]
     # a second cut-off stub next to the destination, nearer it than the road
     stub_c = [(lat + 5_500 + i * 600, road[-1][1] + 4_000) for i in range(40)]
     edges = []
-    for base in (0, 40, 80, 120):
+    _chain(edges, 0, 120)
+    for base in (120, 160, 200):
         _chain(edges, base, 40)
     build_spatial(parse_szrg_bytes(_pack_v4_graph_cls(road + stub_a + stub_b + stub_c, edges)),
                   cell_scale=10, output_dir=tmp_path / "routing-data")
@@ -427,3 +428,29 @@ def test_a_moved_end_does_not_run_two_pass(tmp_path):
     (plain,) = _run_opts(tmp_path, [start + [road[-1][0] / 1e7, road[-1][1] / 1e7]],
                          [{"travel": "drive", "options": {"popLimits": tiny}}])
     assert any("highway" in p["label"] for p in plain["phases"]), plain["phases"]
+
+
+def test_a_start_on_a_road_of_its_own_is_not_moved(tmp_path):
+    """Start tapped on road M, destination on an island past the end of a
+    separate road C as big as M: a small network where every road looks
+    sealed. Moving both ends onto C would route between two points the
+    user did not pick; it stays no route."""
+    _node()
+    from tests.szrg_reader import parse_szrg_bytes
+    from tests.szrg_spatial import build_spatial
+    from tests.test_routing_worker_v3 import _pack_v4_graph_cls
+    lat = 400_000_000
+    m = [(lat, -1_050_000_000 + i * 6_000) for i in range(80)]
+    c = [(lat + 18_000, m[40][1] + i * 6_000) for i in range(80)]     # 200 m north of M
+    b = [(lat, c[-1][1] + 40_000 + i * 6_000) for i in range(20)]     # island past C's end
+    edges = []
+    for base, n in ((0, 80), (80, 80), (160, 20)):
+        _chain(edges, base, n)
+    build_spatial(parse_szrg_bytes(_pack_v4_graph_cls(m + c + b, edges)),
+                  cell_scale=10, output_dir=tmp_path / "routing-data")
+    o = [m[45][0] / 1e7, m[45][1] / 1e7]
+    d = [b[0][0] / 1e7, b[0][1] / 1e7]
+    opts = {"originQuery": {"lat": o[0], "lon": o[1]}, "destQuery": {"lat": d[0], "lon": d[1]}}
+    for travel in ("drive", "walk"):
+        (r,) = _run_opts(tmp_path, [o + d], [{"travel": travel, "options": opts}])
+        assert r["time"] is None and not r.get("startMoved"), (travel, r)

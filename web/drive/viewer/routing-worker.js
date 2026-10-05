@@ -2165,20 +2165,26 @@ async function findRoute(startNode, endNode, ctx) {
 
 // Both ends re-snapped outside the pockets: up to RESNAP_TRIES
 // candidates per end (each outside the components of the ones before it),
-// and the first pair whose start reaches its end ({start, end}), or null.
+// and the first pair that is joined by a component bigger than either
+// pocket ({start, end}), or null. Only a network small enough to map
+// whole (DEST_COMPONENT_LIMIT) qualifies: on a big one the one-end
+// re-snaps above have already tried, and a pair could not be proven
+// joined without a full search. "Bigger than either pocket" keeps a start
+// tapped on a road of its own from moving to another road of the same size.
 async function resnapBoth(opts, travel, startNode, endNode, destPocket, ctx) {
   var sp = await startPocket(startNode, endNode, travel);
   if (!sp) return null;
   var excluded = new Set(destPocket);
   sp.forEach(function(n) { excluded.add(n); });
+  var floor = Math.max(sp.size, destPocket.size);
   var starts = await resnapCandidates(opts.originQuery, 'origin', travel, excluded, startNode);
   var ends = await resnapCandidates(opts.destQuery, 'dest', travel, excluded, endNode);
   for (var a = 0; a < starts.length; a++) {
+    if (ctx && ctx.cancelled && ctx.cancelled()) return null;
+    var comp = await startPocket(starts[a].node, -1, travel);   // null: too big to map
+    if (!comp || comp.size <= floor) continue;
     for (var b = 0; b < ends.length; b++) {
-      if (ctx && ctx.cancelled && ctx.cancelled()) return null;
-      if (!(await startPocket(starts[a].node, ends[b].node, travel))) {
-        return { start: starts[a], end: ends[b] };
-      }
+      if (comp.has(ends[b].node)) return { start: starts[a], end: ends[b] };
     }
   }
   return null;
