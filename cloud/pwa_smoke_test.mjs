@@ -42,6 +42,9 @@ const ZIM_FILE = process.env.ZIM_FILE || '';
 const ZIM_URL = process.env.ZIM_URL ||
   'http://localhost:8765/osm-silicon-valley-2026-04-24.zim';
 const HEADFUL = process.env.HEADFUL === '1';
+// SMOKE_UILANG=qps (or de): run the whole gate on the viewer in another UI
+// language (?uilang=, docs/i18n.md) — the gate must not read UI text.
+const UILANG_Q = process.env.SMOKE_UILANG ? 'uilang=' + encodeURIComponent(process.env.SMOKE_UILANG) + '&' : '';
 const CHROME_PATH = process.env.CHROME_PATH ||
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
@@ -380,7 +383,7 @@ async function main() {
   // 2. Open viewer.
   currentStep = 'viewer';
   console.log('\n[viewer] navigate + wait for graph...');
-  await page.goto(SITE + '/drive/viewer/?bust=' + Date.now(),
+  await page.goto(SITE + '/drive/viewer/?' + UILANG_Q + 'bust=' + Date.now(),
     { waitUntil: 'domcontentloaded' });
   try {
     await page.waitForFunction(
@@ -490,7 +493,7 @@ async function main() {
     // #lat/#lon → places.html uses viewport-origin mode and skips
     // the GPS prompt that would deny in headless and bail
     // runChipQuery before any results render.
-    await page.goto(SITE + '/drive/viewer/places/?bust=' + Date.now() +
+    await page.goto(SITE + '/drive/viewer/places/?' + UILANG_Q + 'bust=' + Date.now() +
       '#lat=37.4419&lon=-122.143',
       { waitUntil: 'domcontentloaded' });
     await new Promise(r => setTimeout(r, 4000));

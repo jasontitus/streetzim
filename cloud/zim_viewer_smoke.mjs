@@ -22,6 +22,9 @@ const ORIGIN = process.env.ZIM_ORIGIN || 'http://localhost:8899';
 const SMOKE_SEARCH = process.env.SMOKE_SEARCH || 'Zurich';
 const EXPECT_FIXES = process.env.EXPECT_FIXES !== '0';
 const HEADFUL = process.env.HEADFUL === '1';
+// SMOKE_UILANG=qps (or de): the viewer in another UI language (?uilang=,
+// docs/i18n.md); every check must still pass.
+const UILANG_Q = process.env.SMOKE_UILANG ? '?uilang=' + encodeURIComponent(process.env.SMOKE_UILANG) : '';
 // A build made without --split-find-chips: expect no chips and no rail.
 const NO_CHIPS = process.env.SMOKE_NO_CHIPS === '1';
 const CHROME_PATH = process.env.CHROME_PATH ||
@@ -59,7 +62,7 @@ try {
   });
 
   // ---- 1. the viewer boots at all, from inside the archive ----------------
-  const resp = await page.goto(ORIGIN + '/index.html', {
+  const resp = await page.goto(ORIGIN + '/index.html' + UILANG_Q, {
     waitUntil: 'domcontentloaded', timeout: 60_000,
   });
   ok('index.html served from the ZIM', resp && resp.ok(),
@@ -225,7 +228,7 @@ try {
   // ---- 6. Find page works from inside the ZIM ----------------------------
   let findOk = false, findDetail = '';
   try {
-    await page.goto(ORIGIN + '/places.html', {
+    await page.goto(ORIGIN + '/places.html' + UILANG_Q, {
       waitUntil: 'domcontentloaded', timeout: 60_000 });
     await sleep(3000);
     const clicked = await page.evaluate(() => {

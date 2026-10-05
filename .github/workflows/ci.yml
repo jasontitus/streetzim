@@ -433,6 +433,22 @@ jobs:
             node tools/tap_label_check.mjs | tee tap-label.txt
           grep -q '^TAP LABEL OK' tap-label.txt
 
+      # The viewer in another UI language (docs/i18n.md). The pseudo-locale
+      # (?uilang=qps) brackets every translated string, so chrome text
+      # without brackets never went through szT; ?uilang=de must show the
+      # German table. Then the in-ZIM smoke again under the pseudo-locale:
+      # no gate may depend on English UI text. Uses the kiwix-serve started
+      # by the overlap-check step.
+      - name: Viewer UI in another language (pseudo-locale + German)
+        run: |
+          ZIM_ORIGIN=http://127.0.0.1:8902/content/osm-monaco-ci \
+            CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
+            node tools/i18n_pseudo_check.mjs | tee i18n-check.txt
+          grep -q '^I18N OK' i18n-check.txt
+          ZIM_ORIGIN=http://127.0.0.1:8902/content/osm-monaco-ci SMOKE_UILANG=qps \
+            CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
+            node cloud/zim_viewer_smoke.mjs
+
       - name: Rewrite tools on libzim (repackage, in-place viewer patch)
         env:
           STREETZIM_REQUIRE_ZIMCHECK: "1"
