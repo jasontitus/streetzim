@@ -12032,7 +12032,11 @@ function initRouting(map, config) {
         // the requested origin/destination.
         try { window.__streetzim_lastRoute = lastRoute; } catch (e) {}
         if (driveMode.active) driveMode.setRoute(lastRoute);
-        statusEl.textContent = '';
+        // Say so when the router had to move an end (it was on a road cut
+        // off from the rest, e.g. by the map's edge).
+        statusEl.textContent = result.endMoved
+          ? 'Destination moved to the nearest reachable road'
+          : result.startMoved ? 'Start moved to the nearest reachable road' : '';
         // In drive mode, the next GPS fix re-centers at the user's
         // location; fitBounds would yank the camera out to the whole
         // route and blow up the follow-cam.

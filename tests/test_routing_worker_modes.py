@@ -306,3 +306,41 @@ def test_a_far_away_island_stays_no_route(tmp_path):
     (r,) = _run_opts(tmp_path, [start + tap],
                      [{"travel": "drive", "options": {"destQuery": {"lat": tap[0], "lon": tap[1]}}}])
     assert r["time"] is None and not r["endMoved"]
+
+
+@pytest.mark.parametrize("gap, ok", [(35_000, True), (82_000, False)])
+def test_the_resnap_distance_rule(tmp_path, gap, ok):
+    """A tap on a cut-off stub whose nearest connected road is ~300 m away
+    is moved there; ~700 m away it is not (1.5 x d0 + 500 m, d0 ~ 0)."""
+    _node()
+    road, stub = _pocket_graph(tmp_path, gap)
+    tap = [stub[0][0] / 1e7, stub[0][1] / 1e7]
+    start = [road[0][0] / 1e7, road[0][1] / 1e7]
+    (r,) = _run_opts(tmp_path, [start + tap],
+                     [{"travel": "drive", "options": {"destQuery": {"lat": tap[0], "lon": tap[1]}}}])
+    assert (r["time"] is not None) == ok and bool(r["endMoved"]) == ok
+
+
+def test_a_resnap_past_two_stubs(tmp_path):
+    """Two cut-off stubs beside the tap and the network road just beyond:
+    the re-snap excludes each pocket it finds and reaches the road."""
+    _node()
+    from tests.szrg_reader import parse_szrg_bytes
+    from tests.szrg_spatial import build_spatial
+    from tests.test_routing_worker_v3 import _pack_v4_graph_cls
+    lat, lon0 = 400_000_000, -1_050_000_000
+    road = [(lat, lon0 + i * 6_000) for i in range(40)]
+    s1 = [(lat + 2_000 + i * 600, road[-1][1] + 3_000) for i in range(40)]
+    s2 = [(lat + 2_000 + i * 600, road[-1][1] + 4_500) for i in range(40)]
+    edges = []
+    for base in (0, 40, 80):
+        for i in range(39):
+            edges += [(base + i, base + i + 1, 500, 30, 0xFFFFFFFF, 0, 11),
+                      (base + i + 1, base + i, 500, 30, 0xFFFFFFFF, 0, 11)]
+    build_spatial(parse_szrg_bytes(_pack_v4_graph_cls(road + s1 + s2, edges)),
+                  cell_scale=10, output_dir=tmp_path / "routing-data")
+    tap = [(lat + 1_800) / 1e7, (road[-1][1] + 3_700) / 1e7]
+    start = [road[0][0] / 1e7, road[0][1] / 1e7]
+    (r,) = _run_opts(tmp_path, [start + tap],
+                     [{"travel": "drive", "options": {"destQuery": {"lat": tap[0], "lon": tap[1]}}}])
+    assert r["time"] is not None and r["endMoved"]["lon"] == pytest.approx(road[-1][1] / 1e7)

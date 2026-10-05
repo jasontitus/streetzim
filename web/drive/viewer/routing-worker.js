@@ -1490,7 +1490,22 @@ async function destComponentClosed(startNode, endNode, ctx) {
     }
   }
   if (seen.has(startNode)) return false;
-  // Step 2: any drivable edge from outside the pocket into it?
+  // Step 2: any drivable edge from outside the pocket into it? An edge
+  // lives in its SOURCE node's cell, so an entrance from across a cell
+  // boundary is in a neighbouring cell: scan those too.
+  var idx = graph._index;
+  if (idx.cellForCoords && idx.cellScale > 0) {
+    Array.from(cids).forEach(function(c) {
+      for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+          var la = idx.cellLatIdx[c] + dy, lo = idx.cellLonIdx[c] + dx;
+          var nid = idx.cellForCoords(Math.round((la + 0.5) * 1e7 / idx.cellScale),
+                                      Math.round((lo + 0.5) * 1e7 / idx.cellScale));
+          if (nid >= 0) cids.add(nid);
+        }
+      }
+    });
+  }
   var cidList = Array.from(cids);
   for (var ci = 0; ci < cidList.length; ci++) {
     var pcell = graph.cellIfResident(cidList[ci]);
@@ -2085,38 +2100,56 @@ async function findRoute(startNode, endNode, ctx) {
   var travel = travelMode(opts.travel);
   var movedEnd = null;
   if (opts.destQuery) {
-    if (!ctx.pocket) await destComponentClosed(startNode, endNode, ctx);
-    if (ctx.pocket) {
-      var altEnd = await resnapOutside(opts.destQuery, 'dest', travel, ctx.pocket, endNode);
-      ctx.pocket = null;
-      if (altEnd) {
-        debugStats(ctx, 'destination moved out of a closed pocket', 0);
-        r = await findRouteCore(startNode, altEnd.node, ctx);
-        if (r) { r.endMoved = altEnd; return r; }
-        endNode = altEnd.node;
-        movedEnd = altEnd;
-      }
+    // The destination's own pocket (not one a two-pass leg found).
+    var pocket = (ctx.pocket && ctx.pocket.has(endNode)) ? ctx.pocket : null;
+    if (!pocket && await destComponentClosed(startNode, endNode, ctx)) pocket = ctx.pocket;
+    var altEnd = pocket && await resnapPast(opts.destQuery, 'dest', travel, pocket, endNode,
+      function(n) { return destComponentClosed(startNode, n, ctx).then(function(c) {
+        return c ? ctx.pocket : null; }); });
+    if (altEnd) {
+      debugStats(ctx, 'destination moved out of a closed pocket', 0);
+      ctx.noTwoPass = true;
+      r = await findRouteCore(startNode, altEnd.node, ctx);
+      if (r) { r.endMoved = altEnd; return r; }
+      endNode = altEnd.node;
+      movedEnd = altEnd;
     }
   }
   if (opts.originQuery && !(ctx && ctx.cancelled && ctx.cancelled())) {
     var sp = await startPocket(startNode, endNode, travel);
-    if (sp) {
-      var altStart = await resnapOutside(opts.originQuery, 'origin', travel, sp, startNode);
-      if (altStart) {
-        debugStats(ctx, 'start moved out of a closed pocket', 0);
-        r = await findRouteCore(altStart.node, endNode, ctx);
-        if (r) {
-          r.startMoved = altStart;
-          if (movedEnd) r.endMoved = movedEnd;
-        }
+    var altStart = sp && await resnapPast(opts.originQuery, 'origin', travel, sp, startNode,
+      function(n) { return startPocket(n, endNode, travel); });
+    if (altStart) {
+      debugStats(ctx, 'start moved out of a closed pocket', 0);
+      ctx.noTwoPass = true;
+      r = await findRouteCore(altStart.node, endNode, ctx);
+      if (r) {
+        r.startMoved = altStart;
+        if (movedEnd) r.endMoved = movedEnd;
       }
     }
   }
   return r;
 }
 
+// resnapOutside repeatedly (RESNAP_TRIES): a re-snap that lands in
+// another sealed pocket (`pocketOf(node)` returns it, else null) excludes
+// that one too and tries again. A vertex outside every pocket found, or null.
+async function resnapPast(query, mode, travel, pocket, oldNode, pocketOf) {
+  var excluded = new Set(pocket);
+  for (var k = 0; k < RESNAP_TRIES; k++) {
+    var alt = await resnapOutside(query, mode, travel, excluded, oldNode);
+    if (!alt) return null;
+    var p2 = await pocketOf(alt.node);
+    if (!p2) return alt;
+    p2.forEach(function(n) { excluded.add(n); });
+  }
+  return null;
+}
+var RESNAP_TRIES = 3;
+
 async function findRouteCore(startNode, endNode, ctx) {
-  if (ctx) { ctx.pocket = null; ctx.unreachable = false; }
+  if (ctx) { ctx.pocket = null; ctx.unreachable = false; ctx.bailed = false; }
   if (!graph.isSpatial) {
     throw new Error('worker only handles spatial graphs');
   }
@@ -2159,7 +2192,7 @@ async function findRouteCore(startNode, endNode, ctx) {
   // when full A* ran out of budget — an exhausted open set means the
   // destination is genuinely unreachable and two-pass can't fix that.
   var cancelled = !!(ctx && ctx.cancelled && ctx.cancelled());
-  if (!routeResult && !cancelled && travel === 'drive'
+  if (!routeResult && !cancelled && travel === 'drive' && !(ctx && ctx.noTwoPass)
       && (override === 'two-pass' || (ctx && ctx.bailed))) {
     routeResult = await findRouteSpatialTwoPass(startNode, endNode, ctx);
   }
