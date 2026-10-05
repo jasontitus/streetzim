@@ -848,6 +848,7 @@ function parseRoutingCell(index, cid, buffer) {
   off += (geomCount + 1) * 4;
   var geomBlob = new Uint8Array(buffer, off, geomBytes);
   var geomBlobByteStart = off;
+  var turns = parseTurnTrailer(buffer, view, off + geomBytes);
 
   function localIdxFor(globalIdx) {
     if (version === 2) {
@@ -913,8 +914,44 @@ function parseRoutingCell(index, cid, buffer) {
     edges: edges,
     localIdxFor: localIdxFor,
     decodeGeomLocal: decodeGeomLocal,
+    turns: turns,
   };
 }
+
+// Turn restrictions held by a cell: the SZTR trailer after its geometry
+// blob (streetzim/routing/restrictions.py has the layout). Records are
+// node paths [u, v, ..., w] (global ids) whose v is in this cell.
+// Returns null when there is none, else {recs: [{flags, path, id}],
+// roots: Map("u,v" -> [rec])}. The trailer need not be 4-byte aligned,
+// so its arrays are copied out.
+function parseTurnTrailer(buffer, view, off) {
+  if (buffer.byteLength < off + 16) return null;
+  if (view.getUint32(off, false) !== 0x535A5452) return null;    // 'SZTR'
+  if (view.getUint32(off + 4, true) !== 1) return null;
+  var r = view.getUint32(off + 8, true), p = view.getUint32(off + 12, true);
+  var o = off + 16;
+  var offs = new Uint32Array(buffer.slice(o, o + (r + 1) * 4));
+  o += (r + 1) * 4;
+  var flags = new Uint8Array(buffer.slice(o, o + r));
+  o += r + ((4 - r % 4) % 4);
+  var pool = new Uint32Array(buffer.slice(o, o + p * 4));
+  var recs = [], roots = new Map();
+  for (var i = 0; i < r; i++) {
+    var path = Array.prototype.slice.call(pool, offs[i], offs[i + 1]);
+    var rec = { flags: flags[i], path: path, id: i };
+    recs.push(rec);
+    var key = path[0] + ',' + path[1];
+    var lst = roots.get(key);
+    if (lst) lst.push(rec); else roots.set(key, [rec]);
+  }
+  return { recs: recs, roots: roots };
+}
+
+// Turn-restriction flags (restrictions.py) and the U-turn penalty that
+// steers searches around a banned turn the long way rather than by
+// turning straight back (not counted in the reported time).
+var TURN_ONLY = 1, TURN_CAR = 2, TURN_BIKE = 4;
+var U_TURN_PENALTY_S = { drive: 45, bike: 20, walk: 0 };
 
 function SpatialGraph(index, maxResidentBytes) {
   this._index = index;
@@ -1459,6 +1496,20 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
 
   if (ctx) ctx.bailed = false;
 
+  // Turn restrictions (cars and bikes; spatial_astar.find_route_spatial
+  // is the reference). A search state is a node, or a virtual state:
+  // a node plus the restriction paths the route is part-way along,
+  // numbered from numNodes up (vNode / vMatch). options.turnRestrictions
+  // === false (or ?turns=off) ignores them.
+  var turnsOn = !(ctx && ctx.options && ctx.options.turnRestrictions === false);
+  var mbit = !turnsOn ? 0 : drive ? TURN_CAR : travel === 'bike' ? TURN_BIKE : 0;
+  var uturn = turnsOn ? U_TURN_PENALTY_S[travel] : 0;
+  var numNodes = graph._index.numNodes;
+  var vNode = [], vMatch = [], vKey = new Map();
+  var penOf = new Map();       // state -> U-turn penalty paid to reach it
+  function nodeOf(sid) { return sid < numNodes ? sid : vNode[sid - numNodes]; }
+  var goalSid = -1;
+
   var table = new NodeTable(1 << 14);
   var startSlot = table.insert(startNode);
   table.g[startSlot] = 0;
@@ -1486,7 +1537,8 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
   var found = false;
 
   while (open.n > 0) {
-    var current = open.pop();
+    var curSid = open.pop();
+    var current = nodeOf(curSid);
     pops++;
     if (pops - lastReportPops >= 2000) {
       debugStats(ctx, label, pops);
@@ -1517,9 +1569,14 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
       if (ctx) ctx.bailed = true;
       return null;
     }
-    if (current === endNode) { found = true; break; }
-    var cs = table.find(current);
+    if (current === endNode) { found = true; goalSid = curSid; break; }
+    var cs = table.find(curSid);
     if (table.closed[cs]) continue;
+    if (curSid >= numNodes) {
+      // A closed plain state here dominates this virtual one.
+      var plainSlot = table.find(current);
+      if (plainSlot >= 0 && table.closed[plainSlot]) continue;
+    }
     table.closed[cs] = 1;
     var curG = table.g[cs];
 
@@ -1533,6 +1590,43 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     var cellAdj = cell.cellAdj;
     var edges = cell.edges;
     var eEnd = cellAdj[local + 1];
+    // Restrictions in force here: bans / only from paths ending at this
+    // node, `cont` for paths that go on.
+    var bans = null, only = null, cont = null;
+    if (curSid >= numNodes) {
+      var match = vMatch[curSid - numNodes];
+      for (var mi = 0; mi < match.length; mi++) {
+        var mm = match[mi], mp = mm.rec.path;
+        if (mm.pos === mp.length - 2) {
+          var last = mp[mp.length - 1];
+          if (mm.rec.flags & TURN_ONLY) {
+            if (only === null) only = [last];
+            else only = only.filter(function(x) { return x === last; });
+          } else {
+            if (bans === null) bans = [];
+            bans.push(last);
+          }
+        } else {
+          if (cont === null) cont = new Map();
+          var nx = mp[mm.pos + 1];
+          var cl = cont.get(nx);
+          var ent = { rec: mm.rec, cid: mm.cid, pos: mm.pos + 1 };
+          if (cl) cl.push(ent); else cont.set(nx, [ent]);
+        }
+      }
+      // An only_* whose turn this mode cannot take does not apply.
+      if (only !== null) {
+        var onlyOk = false;
+        for (var oe = cellAdj[local]; oe < eEnd && !onlyOk; oe++) {
+          if (only.indexOf(edges[oe * 5]) >= 0
+              && edgeUsable(travel, edges[oe * 5 + 1], edges[oe * 5 + 4])) onlyOk = true;
+        }
+        if (!onlyOk) only = null;
+      }
+    }
+    var backSlotPrev = table.prev[cs];
+    var back = backSlotPrev >= 0 ? nodeOf(backSlotPrev) : -1;
+    var otherExit = -1;   // computed on first U-turn candidate
     for (var ei = cellAdj[local]; ei < eEnd; ei++) {
       var base = ei * 5;
       var classAccess = edges[base + 4];
@@ -1549,14 +1643,59 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
         if (edgeCost < 0) continue;
       }
       var target = edges[base];
-      var ts = table.find(target);
+      if (bans !== null && bans.indexOf(target) >= 0) continue;
+      if (only !== null && only.indexOf(target) < 0) continue;
+      var pen = 0;
+      if (uturn && target === back) {
+        if (otherExit < 0) {
+          otherExit = 0;
+          for (var xe = cellAdj[local]; xe < eEnd; xe++) {
+            if (edges[xe * 5] !== back
+                && edgeUsable(travel, edges[xe * 5 + 1], edges[xe * 5 + 4])) { otherExit = 1; break; }
+          }
+        }
+        if (otherExit) pen = uturn;
+      }
+      // The state reached: plain, or virtual when a restriction path
+      // goes on or starts with this step.
+      var tSid = target;
+      var m2 = cont !== null ? cont.get(target) : undefined;
+      if (mbit) {
+        var rcid = graph.cellForNode(target);
+        var rcell = (rcid === cid) ? cell : graph.cellIfResident(rcid);
+        if (rcell === null) rcell = await graph._ensureCell(rcid);
+        if (rcell.turns) {
+          var roots = rcell.turns.roots.get(current + ',' + target);
+          if (roots) {
+            for (var ri = 0; ri < roots.length; ri++) {
+              if (!(roots[ri].flags & mbit)) continue;
+              m2 = (m2 || []).concat([{ rec: roots[ri], cid: rcid, pos: 1 }]);
+            }
+          }
+        }
+      }
+      if (m2 && m2.length) {
+        var plainT = table.find(target);
+        if (plainT >= 0 && table.closed[plainT]) continue;   // dominated
+        var ids = m2.map(function(m) { return m.cid + ':' + m.rec.id + ':' + m.pos; }).sort();
+        var vk = target + '|' + ids.join(',');
+        tSid = vKey.get(vk);
+        if (tSid === undefined) {
+          tSid = numNodes + vNode.length;
+          vKey.set(vk, tSid);
+          vNode.push(target);
+          vMatch.push(m2);
+        }
+      }
+      var ts = table.find(tSid);
       if (ts >= 0 && table.closed[ts]) continue;
-      var newG = curG + edgeCost;
-      if (ts < 0) ts = table.insert(target);
+      var newG = curG + edgeCost + pen;
+      if (ts < 0) ts = table.insert(tSid);
       if (newG < table.g[ts]) {
         table.g[ts] = newG;
-        table.prev[ts] = current;
+        table.prev[ts] = curSid;
         table.prevEi[ts] = ei;
+        if (pen) penOf.set(tSid, pen); else if (penOf.size) penOf.delete(tSid);
         // Target coordinates for the heuristic. Same cell as the
         // source for the vast majority of edges; a neighbouring cell
         // is usually already resident (corridor prewarm) — only a
@@ -1573,13 +1712,13 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
             // The await may have grown/rehashed nothing (only this
             // loop inserts) but `ts` is still valid; re-read defensively
             // in case a future edit adds inserts across the await.
-            ts = table.find(target);
+            ts = table.find(tSid);
           }
           var tl = (target - tcell.baseNode) * 2;
           tLat = tcell.nodesScaled[tl] / 1e7;
           tLon = tcell.nodesScaled[tl + 1] / 1e7;
         }
-        open.push(newG + haversine(tLat, tLon, endLat, endLon) * hScale, target);
+        open.push(newG + haversine(tLat, tLon, endLat, endLon) * hScale, tSid);
       }
     }
   }
@@ -1589,7 +1728,7 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     bailed: false, visited: table.size, tableBytes: table.bytes(),
   });
 
-  var endSlot = table.find(endNode);
+  var endSlot = found ? table.find(goalSid) : -1;
   if (!found || endSlot < 0 || table.g[endSlot] === Infinity) return null;
 
   // Path reconstruction: walk predecessor links back to the start,
@@ -1603,11 +1742,14 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
   var segRev = [];   // per-edge {nameIdx, distM, flags}, end → start
   var pathRev = [];  // per-edge [[lon,lat], ...], end → start
   var n = endNode;
+  var sid = goalSid;
   var slot = endSlot;
-  while (n !== startNode) {
-    var sourceNode = table.prev[slot];
+  while (sid !== startNode) {
+    var sourceSid = table.prev[slot];
     var sourceEi = table.prevEi[slot];
-    if (sourceNode < 0 || sourceEi < 0) return null;  // corrupt link
+    if (sourceSid < 0 || sourceEi < 0) return null;  // corrupt link
+    if (drive && penOf.size) totalTime -= (penOf.get(sid) || 0);
+    var sourceNode = nodeOf(sourceSid);
     var scid = graph.cellForNode(sourceNode);
     var scell = await graph._ensureCell(scid);
     var sb = sourceEi * 5;
@@ -1641,7 +1783,8 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     pathRev.push(segment);
 
     n = sourceNode;
-    slot = table.find(n);
+    sid = sourceSid;
+    slot = table.find(sid);
     if (slot < 0) return null;
   }
 

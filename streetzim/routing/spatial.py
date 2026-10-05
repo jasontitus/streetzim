@@ -203,6 +203,7 @@ def _group_nodes(nodes_arr, cell_scale):
 
 def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
                   output_dir: str | Path | None = None,
+                  restrictions: list | None = None,
                   ) -> tuple[bytes, dict, dict]:
     """Split `g` into (SZCI index bytes, cells, meta).
 
@@ -218,6 +219,11 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
 
     Output is SZCI v3 + SZRC v2. Route semantics remain identical to the
     source graph after translating source IDs to cell-major IDs.
+
+    ``restrictions`` ([(flags, node path)] in source numbering,
+    streetzim.routing.restrictions) are renumbered and appended as an SZTR
+    trailer to the cell holding each path's first via node; a cell
+    without any gets no trailer (byte-identical to before).
     """
     if g.version not in (4, 5):
         raise ValueError(f"spatial writer needs SZRG v4 or v5, got v{g.version}")
@@ -245,6 +251,14 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
     order, old_to_new, cell_starts, cell_ends, cell_lat_arr, cell_lon_arr = \
         _group_nodes(nodes_arr, cell_scale)
     num_cells = len(cell_starts)
+
+    # Turn restrictions per cell (cell of path[1], in cell-major ids).
+    from streetzim.routing import restrictions as _tr
+    cell_turns: dict = {}
+    for flags, path in restrictions or ():
+        new = [int(old_to_new[n]) for n in path]
+        c = int(np.searchsorted(cell_starts, new[1], side="right")) - 1
+        cell_turns.setdefault(c, []).append((flags, new))
 
     # ---- Streaming output prep --------------------------------------------
     if output_dir is not None:
@@ -387,6 +401,8 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
                 for gs, ge in zip(geom_starts[start:start + _GEOM_CHUNK].tolist(),
                                   geom_ends[start:start + _GEOM_CHUNK].tolist()):
                     output.write(source_geoms[gs:ge])
+            if cid in cell_turns:
+                output.write(_tr.pack(sorted(cell_turns.pop(cid))))
             del source_geoms, section
             if isinstance(output, io.BytesIO):
                 cells_out[cid] = output.getvalue()
@@ -479,6 +495,19 @@ class SZRCCell:
     geom_offsets: np.ndarray        # uint32[geom_count+1]
     geom_blob: bytes                # varint polyline blob
     geom_count: int
+    # Turn restrictions held here: [(flags, path)], path[1] in this cell
+    # (streetzim.routing.restrictions). turn_roots: (path[0], path[1]) ->
+    # the records starting there, built on first use.
+    turns: list = field(default_factory=list)
+    _turn_roots: dict | None = None
+
+    def turn_roots(self) -> dict:
+        if self._turn_roots is None:
+            roots: dict = {}
+            for i, (_flags, path) in enumerate(self.turns):
+                roots.setdefault((path[0], path[1]), []).append(i)
+            self._turn_roots = roots
+        return self._turn_roots
 
     def local_idx_for(self, global_node_idx: int) -> int | None:
         """Return the cell-local index for a global node; None if absent."""
@@ -673,6 +702,8 @@ def parse_szrc(buf: bytes, *, base_node: int = 0) -> SZRCCell:
                                  count=geom_count + 1, offset=off)
     off += (geom_count + 1) * 4
     geom_blob = bytes(buf[off:off + geom_bytes])
+    from streetzim.routing.restrictions import unpack as _unpack_turns
+    turns = _unpack_turns(buf, off + geom_bytes)
     return SZRCCell(
         cell_id=cell_id,
         base_node=base_node,
@@ -684,6 +715,7 @@ def parse_szrc(buf: bytes, *, base_node: int = 0) -> SZRCCell:
         geom_offsets=geom_offsets,
         geom_blob=geom_blob,
         geom_count=geom_count,
+        turns=turns,
     )
 
 

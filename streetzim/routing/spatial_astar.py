@@ -60,17 +60,36 @@ def find_route_spatial(
     *,
     max_pops: int | None = None,
     travel_mode: str = "drive",
+    turn_restrictions: bool = True,
+    uturn_penalty_s: float | None = None,
 ) -> SpatialRoute | None:
     """Fastest route for ``travel_mode`` (streetzim.routing.modes).
 
     Walking and cycling minimise a cost that penalises busy roads, so
     ``total_time_s`` is the plain travel time summed along the chosen
     path, not the search cost. Driving is unchanged: cost is time.
+
+    Turn restrictions (streetzim.routing.restrictions; cars and bikes):
+    a search state is a node, or a *virtual* state — a node plus the
+    restriction paths the route is part-way along. At a path's last via
+    node a NO record bans its last step and an ONLY record allows only
+    that step (when the mode may use it at all). A closed plain state at
+    a node dominates any later virtual state there (its moves are a
+    superset, its g no larger: same heuristic). Turning straight back
+    (u -> v -> u) costs U_TURN_PENALTY_S unless v has no other way on;
+    the penalty steers the search and is not counted in the time.
+    routing-worker.js implements the same rules.
     """
+    from streetzim.routing.restrictions import U_TURN_PENALTY_S, ONLY, mode_bit
+
     if travel_mode not in MODES:
         raise ValueError(f"unknown travel mode {travel_mode!r}")
     drive = travel_mode == "drive"
     heur_mps = HEURISTIC_SPEED_MPS if drive else HEURISTIC_KPH[travel_mode] / 3.6
+    mbit = mode_bit(travel_mode) if turn_restrictions else 0
+    uturn = U_TURN_PENALTY_S[travel_mode] if turn_restrictions else 0.0
+    if uturn_penalty_s is not None and turn_restrictions:
+        uturn = uturn_penalty_s           # tests
     if start == end:
         return SpatialRoute(start, end, 0.0, 0.0, [start], [])
 
@@ -80,13 +99,29 @@ def find_route_spatial(
     end_lon = end_lon_e7 / 1e7
 
     INF = math.inf
+    # Plain states are node ids (arrays); virtual states are ids from
+    # num_nodes up (dicts), see vnode / vmatch.
     gscore = [INF] * num_nodes
     gscore[start] = 0.0
     prev = [-1] * num_nodes
-    # Per-node predecessor edge (we store the tuple so we can re-read
-    # dist/name/class without re-looking up the source cell later).
     prev_edge: list = [None] * num_nodes
     closed = bytearray(num_nodes)
+    vg: dict = {}
+    vprev: dict = {}
+    vprev_edge: dict = {}
+    vclosed: set = set()
+    vnode: list = []                  # virtual id - num_nodes -> node
+    vmatch: list = []                 # -> ((cell, record, pos), ...)
+    vkey: dict = {}
+
+    def node_of(sid):
+        return sid if sid < num_nodes else vnode[sid - num_nodes]
+
+    def g_of(sid):
+        return gscore[sid] if sid < num_nodes else vg.get(sid, INF)
+
+    def prev_of(sid):
+        return prev[sid] if sid < num_nodes else vprev.get(sid, -1)
 
     start_lat_e7, start_lon_e7 = g.node_coords_e7(start)
     start_lat = start_lat_e7 / 1e7
@@ -109,44 +144,116 @@ def find_route_spatial(
     _cos_end_lat = math.cos(_end_lat_rad)
     _r_earth_2 = R_EARTH * 2.0
 
+    def cell_turns(node):
+        """(cell id, cell) of `node` when its cell holds restrictions."""
+        cid = g._index.cell_for_node(node)
+        if cid is None:
+            return None, None
+        cell = g._ensure_cell(cid)
+        return (cid, cell) if cell.turns else (None, None)
+
     pops = 0
+    goal = -1
     while heap:
-        _, _, current = heappop(heap)
+        _, _, cur_sid = heappop(heap)
         pops += 1
         if max_pops is not None and pops > max_pops:
             return None
+        current = node_of(cur_sid)
         if current == end:
+            goal = cur_sid
             break
-        if closed[current]:
-            continue
-        closed[current] = 1
+        if cur_sid < num_nodes:
+            if closed[cur_sid]:
+                continue
+            closed[cur_sid] = 1
+            match = ()
+        else:
+            if cur_sid in vclosed or closed[current]:
+                continue
+            vclosed.add(cur_sid)
+            match = vmatch[cur_sid - num_nodes]
 
-        current_g = gscore[current]
-        for (target, speed_dist, geom_local, name_idx, class_access) in g.edges_of_node(current):
+        current_g = g_of(cur_sid)
+        edges = g.edges_of_node(current)
+
+        # Restrictions in force at this node.
+        bans = only = None
+        cont: dict = {}
+        if match:
+            for (cid, ri, pos) in match:
+                flags, path = g._ensure_cell(cid).turns[ri]
+                if pos == len(path) - 2:
+                    if flags & ONLY:
+                        only = {path[-1]} if only is None else only & {path[-1]}
+                    else:
+                        bans = {path[-1]} if bans is None else bans | {path[-1]}
+                else:
+                    cont.setdefault(path[pos + 1], []).append((cid, ri, pos + 1))
+        usable = []
+        for (target, speed_dist, geom_local, name_idx, class_access) in edges:
             if drive:
-                if is_no_motor(class_access):
-                    continue  # car profile: footways / steps / private (bit 9 or ordinal 16..20)
-                if closed[target]:
+                if is_no_motor(class_access) or (speed_dist >> 24) == 0:
                     continue
                 dist_m = (speed_dist & 0xFFFFFF) / 10.0
-                speed = speed_dist >> 24
-                if speed == 0:
-                    continue
-                cost = dist_m / (speed / 3.6)
+                cost = dist_m / ((speed_dist >> 24) / 3.6)
                 time_s = cost
             else:
-                if closed[target]:
-                    continue
                 ct = edge_cost(travel_mode, speed_dist, class_access)
                 if ct is None:
                     continue
                 cost, time_s = ct
                 dist_m = (speed_dist & 0xFFFFFF) / 10.0
-            new_g = current_g + cost
-            if new_g < gscore[target]:
-                gscore[target] = new_g
-                prev[target] = current
-                prev_edge[target] = (dist_m, geom_local, name_idx, class_access, time_s)
+            usable.append((target, cost, time_s, dist_m, geom_local, name_idx, class_access))
+        if only is not None and not any(u[0] in only for u in usable):
+            only = None          # the allowed turn is closed to this mode
+        back = prev_of(cur_sid)
+        back = node_of(back) if back >= 0 else -1
+        other_exit = uturn and any(u[0] != back for u in usable)
+
+        for (target, cost, time_s, dist_m, geom_local, name_idx, class_access) in usable:
+            if bans is not None and target in bans:
+                continue
+            if only is not None and target not in only:
+                continue
+            penalty = uturn if (target == back and other_exit) else 0.0
+            # The state reached: plain, or virtual if a restriction path
+            # continues or starts on this step.
+            m2 = cont.get(target, [])
+            if mbit:
+                tcid, tcell = cell_turns(target)
+                if tcell is not None:
+                    roots = tcell.turn_roots().get((current, target))
+                    if roots:
+                        m2 = m2 + [(tcid, ri, 1) for ri in roots
+                                   if tcell.turns[ri][0] & mbit]
+            if m2:
+                if closed[target]:
+                    continue     # dominated by the closed plain state
+                key = (target, tuple(sorted(m2)))
+                t_sid = vkey.get(key)
+                if t_sid is None:
+                    t_sid = num_nodes + len(vnode)
+                    vkey[key] = t_sid
+                    vnode.append(target)
+                    vmatch.append(key[1])
+                if t_sid in vclosed:
+                    continue
+            else:
+                t_sid = target
+                if closed[target]:
+                    continue
+            new_g = current_g + cost + penalty
+            if new_g < g_of(t_sid):
+                rec = (dist_m, geom_local, name_idx, class_access, time_s, penalty)
+                if t_sid < num_nodes:
+                    gscore[t_sid] = new_g
+                    prev[t_sid] = cur_sid
+                    prev_edge[t_sid] = rec
+                else:
+                    vg[t_sid] = new_g
+                    vprev[t_sid] = cur_sid
+                    vprev_edge[t_sid] = rec
                 t_lat_e7, t_lon_e7 = g.node_coords_e7(target)
                 t_lat = t_lat_e7 / 1e7
                 t_lon = t_lon_e7 / 1e7
@@ -158,31 +265,31 @@ def find_route_spatial(
                 h_m = _r_earth_2 * _atan2(_sqrt(a), _sqrt(1 - a))
                 h = h_m / heur_mps
                 counter += 1
-                heappush(heap, (new_g + h, counter, target))
+                heappush(heap, (new_g + h, counter, t_sid))
 
-    if gscore[end] == INF:
+    if goal < 0:
         return None
 
     # Reconstruct node sequence + accumulate dist.
     node_rev = [end]
     edge_rev: list = []
-    n = end
+    sid = goal
     total_dist = 0.0
-    while n != start:
-        pe = prev_edge[n]
+    while sid != start:
+        pe = prev_edge[sid] if sid < num_nodes else vprev_edge.get(sid)
         if pe is None:
             return None
         total_dist += pe[0]
         edge_rev.append(pe)
-        n = prev[n]
-        node_rev.append(n)
+        sid = prev_of(sid)
+        node_rev.append(node_of(sid))
 
     node_seq = list(reversed(node_rev))
     edge_seq = list(reversed(edge_rev))
 
     # Road coalesce — matches streetzim/routing/astar.find_route
     roads: list = []
-    for (dist_m, _geom_local, name_idx, class_access, _t) in edge_seq:
+    for (dist_m, _geom_local, name_idx, class_access, _t, _p) in edge_seq:
         ca = class_access
         is_round = (ca >> 8) & 1
         cls = ca & 0x1F
@@ -193,11 +300,12 @@ def find_route_spatial(
         else:
             roads.append((name_idx, flags, dist_m))
 
+    penalties = sum(pe[5] for pe in edge_seq)
     return SpatialRoute(
         start_node=start,
         end_node=end,
         total_dist_m=total_dist,
-        total_time_s=(gscore[end] if drive
+        total_time_s=((g_of(goal) - penalties) if drive
                       else math.fsum(pe[4] for pe in edge_seq)),
         node_sequence=node_seq,
         road_sequence=roads,

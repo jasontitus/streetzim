@@ -2,6 +2,10 @@
   // Returns a Promise — findRoute must ensure the SZGM geom companion is
   // available before reconstructing path coords for v5 split ZIMs. For
   // v4 inline the Promise resolves synchronously on its first tick.
+  // Main-thread fallback for when the routing worker is unavailable:
+  // cars only, and it does not apply turn restrictions (routing-worker.js
+  // does; this path exists for old ZIMs and broken workers).
+  //
   // Spatial-graph A*. Mirrors the monolithic findRoute() but fetches
   // edges / geoms per node via the SpatialGraph façade — cells load
   // asynchronously as the frontier crosses them. Return shape matches

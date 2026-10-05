@@ -10459,6 +10459,10 @@ function initRouting(map, config) {
   // Returns a Promise — findRoute must ensure the SZGM geom companion is
   // available before reconstructing path coords for v5 split ZIMs. For
   // v4 inline the Promise resolves synchronously on its first tick.
+  // Main-thread fallback for when the routing worker is unavailable:
+  // cars only, and it does not apply turn restrictions (routing-worker.js
+  // does; this path exists for old ZIMs and broken workers).
+  //
   // Spatial-graph A*. Mirrors the monolithic findRoute() but fetches
   // edges / geoms per node via the SpatialGraph façade — cells load
   // asynchronously as the frontier crosses them. Return shape matches
@@ -11257,6 +11261,17 @@ function initRouting(map, config) {
   }
   window.__streetzim_prewarmRoutingCells = prewarmRoutingCells;
 
+  // Route options for the worker. ?turns=off ignores turn restrictions
+  // (debugging a route the restrictions changed).
+  function routeOptions(override, travel) {
+    var o = { travel: travel };
+    if (override) o.route = override;
+    try {
+      if (new URLSearchParams(location.search).get('turns') === 'off') o.turnRestrictions = false;
+    } catch (e) {}
+    return o;
+  }
+
   function findRouteViaWorker(startNode, endNode, travel) {
     if (!__routingWorker) return Promise.reject(new Error('worker not ready'));
     // Only the newest route matters: an origin/dest change while a
@@ -11276,7 +11291,7 @@ function initRouting(map, config) {
       __routingWorker.postMessage({
         cmd: 'route', id: id,
         start: startNode, end: endNode,
-        options: override ? { route: override, travel: travel } : { travel: travel },
+        options: routeOptions(override, travel),
       });
     });
   }

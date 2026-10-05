@@ -499,6 +499,8 @@ def main():
     p.add_argument("--travel", default="drive", choices=["drive", "walk", "bike"],
                    help="Travel mode (streetzim/routing/modes.py). Walking and "
                         "cycling run plain A* only; two-pass is for driving.")
+    p.add_argument("--no-turns", action="store_true",
+                   help="Ignore turn restrictions (and the U-turn penalty).")
     args = p.parse_args()
     if args.travel != "drive":
         if args.mode == "hwy2":
@@ -533,7 +535,8 @@ def main():
         t0 = time.time()
         if mode == "astar":
             r = find_route_spatial(g, src_node, dst_node, max_pops=args.max_pops,
-                                   travel_mode=args.travel)
+                                   travel_mode=args.travel,
+                                   turn_restrictions=not args.no_turns)
         else:  # hwy2
             r = find_route_two_pass(
                 g, src_node, dst_node,

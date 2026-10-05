@@ -272,8 +272,11 @@ def _highway_pbf(source_pbf, output_dir):
                                 suffix=".osm.pbf")
     os.close(fd)
     try:
+        # Restriction relations come along (with their member ways and
+        # nodes) for the turn restrictions (streetzim/routing/restrictions.py).
         subprocess.run(["osmium", "tags-filter", source_pbf, "w/highway",
-                        "-o", path, "--overwrite"], check=True)
+                        "r/type=restriction", "-o", path, "--overwrite"],
+                       check=True)
     except BaseException:
         os.remove(path)
         raise
@@ -645,11 +648,20 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
     endpoints = _Spill(output_dir, "ends")
     scratch.append(endpoints.path)
 
+    # Turn restrictions (STREETZIM_ROUTING_TURNS=0 leaves them out).
+    from streetzim.routing import restrictions as _tr
+    turns = _tr.Collector() if os.environ.get(
+        "STREETZIM_ROUTING_TURNS", "1") != "0" else None
+
     class _Pass1(osmium.SimpleHandler):
         def __init__(self):
             super().__init__()
             self.way_count = 0
             self.hw_count = 0
+
+        if turns is not None:
+            def relation(self, r):
+                turns.relation(r)
 
         def way(self, w):
             self.way_count += 1
@@ -841,6 +853,10 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
     name_table = [""]
     name_map = {"": 0}
     last_junction = num_nodes - 1
+    # Junctions along each restriction member way, in way order, and its
+    # one-way direction: how restrictions find their graph nodes.
+    member_ways = turns.member_ways if turns is not None else ()
+    way_seq = {}
 
     class _Pass2(osmium.SimpleHandler):
         def __init__(self):
@@ -976,6 +992,11 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
                     if t is not None:
                         is_junction[k] = True
                         idx_of[k] = t
+
+            if w.id in member_ways:
+                last = len(refs) - 1
+                way_seq[w.id] = ([(idx_of[k], refs[k]) for k in range(len(refs))  # noqa: F821
+                                  if k == 0 or k == last or is_junction[k]], oneway)
 
             # Walk through refs, splitting at graph nodes (junctions).
             seg_start = 0
@@ -1224,6 +1245,18 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
         name_offsets.tofile(f)
         for b in name_blobs:
             f.write(b)
+
+    # Turn restrictions beside the graph (restrictions.py has the format).
+    side = _tr.sidecar_path(output_path)
+    side.unlink(missing_ok=True)
+    if turns is not None:
+        records, dropped = _tr.resolve(turns, way_seq)
+        if records:
+            side.write_bytes(_tr.pack(records))
+        why = ", ".join(f"{n} {k}" for k, n in dropped.most_common())
+        print(f"    Turn restrictions: {len(records)} kept"
+              + (f"; left out: {why}" if why else ""))
+    del way_seq
 
     size_mb = os.path.getsize(output_path) / (1024 * 1024)
     # Class_access diagnostics — helps verify the writer populated flags

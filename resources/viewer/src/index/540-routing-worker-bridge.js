@@ -222,6 +222,17 @@
   }
   window.__streetzim_prewarmRoutingCells = prewarmRoutingCells;
 
+  // Route options for the worker. ?turns=off ignores turn restrictions
+  // (debugging a route the restrictions changed).
+  function routeOptions(override, travel) {
+    var o = { travel: travel };
+    if (override) o.route = override;
+    try {
+      if (new URLSearchParams(location.search).get('turns') === 'off') o.turnRestrictions = false;
+    } catch (e) {}
+    return o;
+  }
+
   function findRouteViaWorker(startNode, endNode, travel) {
     if (!__routingWorker) return Promise.reject(new Error('worker not ready'));
     // Only the newest route matters: an origin/dest change while a
@@ -241,7 +252,7 @@
       __routingWorker.postMessage({
         cmd: 'route', id: id,
         start: startNode, end: endNode,
-        options: override ? { route: override, travel: travel } : { travel: travel },
+        options: routeOptions(override, travel),
       });
     });
   }

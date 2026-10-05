@@ -82,6 +82,35 @@ is in `streetzim/routing/modes.py`, mirrored by `edgeCostFor` in
 
 Speeds come from the `SPEED` table (`DEFAULT_SPEED` = 30 km/h).
 
+### Turn restrictions (SZTR)
+
+OSM `type=restriction` relations become node paths in graph numbering:
+`[u, v, w]` for a via node (arriving at `v` from `u`, turning to `w`),
+`[u, a, …, b, w]` for via ways. `streetzim/routing/restrictions.py`
+resolves them; the builder writes `routing-restrictions.bin` beside
+`routing-graph.bin`, and `build_spatial` renumbers the paths and appends
+each to the SZRC cell holding its first via node, after the geometry
+blob (cells without any are unchanged; older readers stop at the
+geometry blob). Layout, little-endian:
+
+| field | meaning |
+|---|---|
+| `"SZTR"`, u32 version (1), u32 R, u32 P | header |
+| u32 offsets[R + 1] | path r is pool[offsets[r] : offsets[r+1]] |
+| u8 flags[R], zero-padded to a multiple of 4 | bit 0 ONLY (else NO), bit 1 binds cars, bit 2 binds bikes |
+| u32 pool[P] | node ids |
+
+NO bans the path's last step; ONLY allows only it (ignored when the mode
+cannot use that step). Walkers are never bound. Cars read
+`restriction:motorcar` > `:motor_vehicle` > `:vehicle` > `restriction`,
+bikes `restriction:bicycle` > `:vehicle` > `restriction` (a plain `only_*`
+binds bikes only via `restriction:bicycle`); `except` lists exempt. Left
+out (counted in the build log): conditional restrictions, `*_on_red`,
+members missing from the extract, a from/to way that runs through the
+via node in both directions. The routers also charge a U-turn (u → v → u)
+45 s by car and 20 s by bike unless it is the only way on; that penalty
+steers the search and is not part of the reported time.
+
 ### Nodes and names
 
 - Nodes are junctions (used by 2+ ways, or a way endpoint), numbered by

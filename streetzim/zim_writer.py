@@ -1900,9 +1900,11 @@ def _spatial_cell_files(routing_graph_path, cell_scale, output_dir):
     """build_spatial into output_dir: ({cell_id: path}, meta). The index is
     written there too (graph-cells-index.bin), so its bytes are dropped."""
     from streetzim.routing.reader import load_from_file
+    from streetzim.routing.restrictions import read_sidecar
     from streetzim.routing.spatial import build_spatial
     _, cells, meta = build_spatial(load_from_file(routing_graph_path, mapped=True),
-                                   cell_scale=cell_scale, output_dir=output_dir)
+                                   cell_scale=cell_scale, output_dir=output_dir,
+                                   restrictions=read_sidecar(routing_graph_path))
     return cells, meta
 
 
@@ -1910,9 +1912,18 @@ SPATIAL_PREPARED = "prepared.json"
 
 
 def _graph_stamp(routing_graph_path, cell_scale):
+    """What the prepared cells were built from: the graph and its turn
+    restrictions sidecar (absent: size -1), so a rebuilt sidecar is never
+    paired with cells from the old one."""
+    from streetzim.routing.restrictions import sidecar_path
     st = os.stat(routing_graph_path)
+    try:
+        side = os.stat(sidecar_path(routing_graph_path))
+        side_stamp = [side.st_size, side.st_mtime_ns]
+    except FileNotFoundError:
+        side_stamp = [-1, 0]
     return {"graph_size": st.st_size, "graph_mtime_ns": st.st_mtime_ns,
-            "cell_scale": int(cell_scale)}
+            "cell_scale": int(cell_scale), "turns": side_stamp}
 
 
 def prepare_spatial_cells(routing_graph_path, cell_scale):
