@@ -22,7 +22,7 @@ MONACO = Path(__file__).parent / "fixtures/monaco-full/monaco.osm.pbf"
 FOOT_DENY, BIKE_DENY, ONEWAY, ROUNDABOUT, NO_MOTOR = 0x20, 0x40, 0x80, 0x100, 0x200
 CONTRA, GEOM_REV, PUSH, LANE, INFRA = 0x400, 0x800, 0x1000, 0x2000, 0x4000
 SIDEWALK_NO, FOOT_DIR_DENY = 0x20000, 0x40000
-SEPARATE, PRIVATE = 0x80000, 0x100000
+SEPARATE, PRIVATE, BIKE_PRIVATE = 0x80000, 0x100000, 0x200000
 
 
 def _build(tmp_path, pbf, name, walkbike, monkeypatch):
@@ -90,6 +90,8 @@ CASES = {
     "cycleway_gravel": {"highway": "cycleway", "surface": "gravel"},
     # Access.
     "private": {"highway": "residential", "access": "private"},
+    "private_foot_yes": {"highway": "service", "access": "private", "foot": "yes"},
+    "vehicle_private": {"highway": "residential", "vehicle": "private"},
     "path_vehicle_no": {"highway": "path", "vehicle": "no"},
     "footway_access_no": {"highway": "footway", "access": "no"},
     "use_sidepath": {"highway": "primary", "bicycle": "use_sidepath"},
@@ -246,7 +248,11 @@ def test_one_ways_that_do_not_bind_walkers(cases):
 
 def test_access_rules(cases):
     e = _real(cases("private")[0])[0][4]
-    assert e & PRIVATE and not e & (FOOT_DENY | BIKE_DENY)
+    assert e & PRIVATE and e & BIKE_PRIVATE and not e & (FOOT_DENY | BIKE_DENY)
+    e = _real(cases("private_foot_yes")[0])[0][4]
+    assert e & BIKE_PRIVATE and not e & PRIVATE
+    e = _real(cases("vehicle_private")[0])[0][4]
+    assert e & BIKE_PRIVATE and not e & PRIVATE
     assert _real(cases("path_vehicle_no")[0])[0][4] & BIKE_DENY
     assert not _real(cases("path_vehicle_no")[0])[0][4] & FOOT_DENY
     assert _real(cases("footway_access_no")[0])[0][4] & FOOT_DENY

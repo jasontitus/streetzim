@@ -49,7 +49,7 @@ def _run(data_dir, pairs, configs):
 def test_edge_costs_match_python_for_every_bit_combination():
     _node()
     bits = [0x20, 0x40, 0x600, 0x1000, 0x2000, 0x4000, 1 << 15, 2 << 15, 3 << 15,
-            0x20000, 0x40000, 0x80000, 0x100000]
+            0x20000, 0x40000, 0x80000, 0x100000, 0x200000]
     cases = []
     for ordv in range(25):
         for k in range(4):
@@ -168,3 +168,81 @@ def test_walking_against_a_one_way_draws_its_geometry_reversed(tmp_path):
     assert walk["path"] == drive["path"][::-1]
     assert [[round(x, 6) for x in c] for c in drive["path"]] == [list(p) for p in pts]
     assert walk["time"] == pytest.approx(walk["distance"] / (5 / 3.6))
+
+
+def test_worker_heuristic_speeds_match_python():
+    """An inadmissible JS heuristic would silently return worse routes."""
+    _node()
+    from streetzim.routing.modes import HEURISTIC_KPH
+    js = ("const fs=require('fs'),vm=require('vm');global.self={};"
+          "vm.runInThisContext(fs.readFileSync(process.argv[1],'utf8'));"
+          "console.log(JSON.stringify(TRAVEL_HEURISTIC_KMH));")
+    got = json.loads(subprocess.run(["node", "-e", js, str(WORKER)], check=True,
+                                    capture_output=True, text=True).stdout)
+    assert got == HEURISTIC_KPH
+
+
+@pytest.mark.parametrize("travel", ["walk", "bike"])
+def test_walk_bike_never_two_pass_and_fall_back_within_bounds(monaco, travel):
+    """?route=two-pass is ignored for walk / bike (the highway tier is for
+    cars); shrunken budgets push them through the weighted and greedy
+    passes, which stay within their weight of the optimum."""
+    _node()
+    tmp, _ = monaco
+    sg = _spatial_graph_from_dir(tmp / "routing-data")
+    pairs = [[43.7275, 7.4120, 43.7480, 7.4370], [43.7300, 7.4200, 43.7440, 7.4290]]
+    two = _run(tmp, pairs, [{"travel": travel, "options": {"route": "two-pass"}}] * 2)
+    chain = _run(tmp, pairs, [{"travel": travel,
+                               "options": {"popLimits": {"fullOptimal": 40, "fullWeighted": 40}}}] * 2)
+    for t, c in zip(two, chain):
+        ref = find_route_spatial(sg, t["start"], t["end"], travel_mode=travel)
+        assert ref is not None
+        assert t["time"] == pytest.approx(ref.total_time_s, rel=1e-9)
+        assert all("highway" not in p["label"] for p in t["phases"])
+        labels = [p["label"] for p in c["phases"]]
+        assert any("1.875" in lab and travel in lab for lab in labels), labels
+        # (time, not the penalised cost the search minimises, so no lower
+        # bound: a fallback may pick a faster but busier road)
+        assert c["time"] is not None and c["time"] <= ref.total_time_s * 1.875 * 1.5
+
+
+@pytest.mark.parametrize("travel", ["walk", "bike"])
+def test_walk_bike_bail_without_two_pass_and_greedy_is_greedy(monaco, travel):
+    _node()
+    tmp, _ = monaco
+    pair = [[43.7275, 7.4120, 43.7480, 7.4370]]
+    tiny = {"fullOptimal": 20, "fullWeighted": 20, "fullGreedy": 20}
+    (b,) = _run(tmp, pair, [{"travel": travel, "options": {"popLimits": tiny}}])
+    assert b["time"] is None
+    assert b["phases"] and all("highway" not in p["label"] for p in b["phases"]), b["phases"]
+    (opt,) = _run(tmp, pair, [{"travel": travel}])
+    (gr,) = _run(tmp, pair, [{"travel": travel,
+                              "options": {"popLimits": {"fullOptimal": 1, "fullWeighted": 1}}}])
+    greedy_pops = [p["pops"] for p in gr["phases"] if "1.875" in p["label"]]
+    assert greedy_pops and greedy_pops[0] < opt["phases"][0]["pops"], (greedy_pops, opt["phases"])
+
+
+def test_walk_bike_never_run_two_pass(tmp_path):
+    """All passes bailing would send a car to the two-pass highway
+    fallback; walking and cycling must stop there instead."""
+    _node()
+    from tests.szrg_reader import parse_szrg_bytes
+    from tests.szrg_spatial import build_spatial
+    from tests.test_routing_worker_v3 import _pack_v4_graph_cls
+
+    nodes = [(400_000_000, -1_050_000_000 + i * 6_000) for i in range(40)]
+    edges = []
+    for i in range(39):
+        cls = 5 if i >= 1 else 11                       # a primary from node 1 on
+        edges += [(i, i + 1, 500, 50, 0xFFFFFFFF, 0, cls),
+                  (i + 1, i, 500, 50, 0xFFFFFFFF, 0, cls)]
+    build_spatial(parse_szrg_bytes(_pack_v4_graph_cls(nodes, edges)),
+                  cell_scale=10, output_dir=tmp_path / "routing-data")
+    pair = [[40.0, -105.0, 40.0, -105.0 + 39 * 0.0006]]
+    tiny = {"fullOptimal": 5, "fullWeighted": 5, "fullGreedy": 5}
+    (car,) = _run(tmp_path, pair, [{"travel": "drive", "options": {"popLimits": tiny}}])
+    assert any("highway" in p["label"] for p in car["phases"]), car["phases"]
+    for travel in ("walk", "bike"):
+        (r,) = _run(tmp_path, pair, [{"travel": travel, "options": {"popLimits": tiny}}])
+        assert r["time"] is None
+        assert not any("highway" in p["label"] for p in r["phases"]), (travel, r["phases"])

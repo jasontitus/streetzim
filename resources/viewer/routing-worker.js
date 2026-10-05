@@ -91,6 +91,12 @@ var OPTIMAL_MAX_CROW_KM = 200;
 // ends the common island / cut-boundary case after the first pass).
 var GREEDY_WEIGHT_FULL = 1.875;
 var POP_LIMIT_FULL_GREEDY = 500000;
+// Walking and cycling have no two-pass fallback (it rides the highway
+// tier), so their last pass gets a larger budget: Silicon Valley bike
+// pairs of 40-55 km bailed every 500k pass (San Jose -> Pescadero, 101
+// km by bike, needs 500k-1M even optimal). Walking's tight 5 km/h
+// heuristic keeps it far below (a 30 km walk: ~250k pops).
+var POP_LIMIT_WB_GREEDY = 1000000;
 var POP_LIMIT_HW_OPTIMAL = 150000;
 var POP_LIMIT_HW_GREEDY = 300000;
 // Unreachable-destination short-circuit (see destComponentClosed):
@@ -473,7 +479,7 @@ function edgeCostWB(mode, speedDist, ca) {
   }
   // bike
   if ((ca & 0x40) || ord === 1 || ord === 2) return -1;
-  var priv = (ca & 0x100000) ? PRIVATE_PENALTY : 1.0;
+  var priv = (ca & 0x200000) ? PRIVATE_PENALTY : 1.0;
   if ((ca & 0x1000) || ord === 20) {
     t = distM / (BIKE_PUSH_KPH / 3.6);
     _wbTime = t;
@@ -1371,8 +1377,10 @@ async function findRouteSpatialFiltered(startNode, endNode, highwayOnly, ctx) {
   var limOptimal  = highwayOnly ? (lim.hwOptimal || POP_LIMIT_HW_OPTIMAL)
                                 : (lim.fullOptimal || POP_LIMIT_FULL_OPTIMAL);
   var limWeighted = lim.fullWeighted || POP_LIMIT_FULL_WEIGHTED;
+  var wbTravel = travelMode(ctx && ctx.options && ctx.options.travel) !== 'drive';
   var limGreedy   = highwayOnly ? (lim.hwGreedy || POP_LIMIT_HW_GREEDY)
-                                : (lim.fullGreedy || POP_LIMIT_FULL_GREEDY);
+                                : (lim.fullGreedy
+                                   || (wbTravel ? POP_LIMIT_WB_GREEDY : POP_LIMIT_FULL_GREEDY));
   if (!skipOptimal) {
     var optimal = await findRouteSpatialAStar(
       startNode, endNode, highwayOnly, /*greedy*/ 1.0, limOptimal, ctx);

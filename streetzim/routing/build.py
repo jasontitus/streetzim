@@ -545,7 +545,7 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
         return v is not None and v in _PRIVATE
 
     def _walkbike_bits(hw, tags):
-        """Direction-independent walk/bike bits: 5, 6, 12-17, 19, 20."""
+        """Direction-independent walk/bike bits: 5, 6, 12-17, 19-21."""
         bits = 0
         if _foot_denied(hw, tags):
             bits |= 0x20                                   # bit 5
@@ -578,12 +578,14 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
             bits |= 0x20000                                # bit 17
         elif sw == "separate":
             bits |= 0x80000                    # bit 19: sidewalk is its own way
-        # bit 20: private (or customers / delivery) for walkers or for
-        # cyclists — still usable, at a penalty, so a destination inside
-        # a gated estate stays reachable.
-        if (_private_for(tags, "foot", "access")
-                or _private_for(tags, "bicycle", "vehicle", "access")):
+        # bits 20 / 21: private (or customers / delivery) for walkers /
+        # for cyclists — still usable, at a penalty, so a destination
+        # inside a gated estate stays reachable. Separate bits: foot=yes
+        # on a private road must not slow walkers.
+        if _private_for(tags, "foot", "access"):
             bits |= 0x100000
+        if _private_for(tags, "bicycle", "vehicle", "access"):
+            bits |= 0x200000
         return bits
 
     def _bike_contraflow(tags, oneway):
@@ -953,7 +955,7 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
                     # both ways.
                     way_infra = 0x4000 if (hw == "cycleway" or w.tags.get(
                         "bicycle") == "designated") else 0
-                    contra_ca = (class_ord | (wb_bits & 0x1B9060)
+                    contra_ca = (class_ord | (wb_bits & 0x3B9060)
                                  | way_infra | (contra_lane or 0)
                                  | 0x200 | 0x400 | 0x800)
                     if not foot_ok:

@@ -9221,12 +9221,13 @@ function initRouting(map, config) {
   // (m/s: walk≈3.1 mph, bike≈10 mph) re-estimates the remaining time
   // only when the route was planned for another mode (older ZIMs plan
   // car routes only); a route planned for the mode uses its own pace.
-  // Off-route: walkers' GPS wanders and sidewalks sit metres off the
-  // centreline, so they get a wider, slower trigger.
+  // Off-route: a walker moves slowly, so the trigger waits longer before
+  // calling them off route (GPS on foot wanders; sidewalks sit metres off
+  // the centreline), and at walking pace 50 m is already far.
   var MODE_PRESETS = {
     drive: { pitch: 60, zoom: 17,   speed: null, offM: 60, offMs: 6000 },
-    walk:  { pitch: 45, zoom: 18,   speed: 1.4,  offM: 40, offMs: 12000 },
-    bike:  { pitch: 55, zoom: 17.5, speed: 4.5,  offM: 50, offMs: 8000 }
+    walk:  { pitch: 45, zoom: 18,   speed: 1.4,  offM: 50, offMs: 12000 },
+    bike:  { pitch: 55, zoom: 17.5, speed: 4.5,  offM: 60, offMs: 8000 }
   };
 
   // Travel mode, chosen before routing: the snap and the router both
@@ -9257,12 +9258,27 @@ function initRouting(map, config) {
       b.style.display = routingModes.indexOf(m) >= 0 ? '' : 'none';
       b.classList.toggle('on', m === travelMode);
       b.setAttribute('aria-checked', m === travelMode ? 'true' : 'false');
+      b.tabIndex = m === travelMode ? 0 : -1;
     });
   }
   if (travelRow) {
     travelRow.style.display = multiModal ? '' : 'none';
     syncTravelButtons();
+    // Radio-group keys: arrows move the choice (and focus) along the row.
+    travelRow.addEventListener('keydown', function(e) {
+      var step = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? 1
+               : (e.key === 'ArrowLeft' || e.key === 'ArrowUp') ? -1 : 0;
+      if (!step) return;
+      e.preventDefault();
+      var i = routingModes.indexOf(travelMode);
+      var next = routingModes[(i + step + routingModes.length) % routingModes.length];
+      setTravelMode(next);
+      if (travelBtns[next]) travelBtns[next].focus();
+    });
   }
+  // Bumped whenever a planned navigation start must not happen any more
+  // (route cleared, mode or endpoints changed): see switchDriveMode.
+  var navPlanSeq = 0;
 
   var expandHintEl = document.getElementById('routing-expand-hint');
   var EXPAND_HINT = expandHintEl ? expandHintEl.textContent : '';
@@ -9276,9 +9292,15 @@ function initRouting(map, config) {
       modeBtns[m].textContent = MODE_LABELS[m];
       // The route was planned for one mode: offer navigation in that
       // mode only.
+      modeBtns[m].removeAttribute('aria-label');
       if (multiModal) {
-        if (m === travelMode) modeBtns[m].textContent = 'Start';
-        else modeBtns[m].classList.add('hidden-mode');
+        if (m === travelMode) {
+          modeBtns[m].textContent = 'Start';
+          modeBtns[m].setAttribute('aria-label', 'Start ' + (m === 'walk' ? 'walking'
+            : m === 'bike' ? 'cycling' : 'driving') + ' navigation');
+        } else {
+          modeBtns[m].classList.add('hidden-mode');
+        }
       }
     });
   }
@@ -9381,6 +9403,11 @@ function initRouting(map, config) {
     // drawn after the user cleared, nor satisfy enterDriveMode's
     // lastRoute poll with the OLD endpoints.
     routeSeq++;
+    // Snaps still in flight must not bring the cleared route back, nor a
+    // planned navigation start fire on a later route.
+    originSnapSeq++;
+    destSnapSeq++;
+    navPlanSeq++;
     if (typeof cancelInFlightRoute === 'function') cancelInFlightRoute();
     stopRouteProgressIndicator();
     originNode = -1;
@@ -11742,6 +11769,7 @@ function initRouting(map, config) {
     }
     if (queueGraphPick('origin', lat, lon, label)) return;
     originPick = { lat: lat, lon: lon };
+    navPlanSeq++;
     var snapSeq = ++originSnapSeq;
     statusEl.textContent = snappingText();
     var snapped;
@@ -11775,6 +11803,7 @@ function initRouting(map, config) {
   async function setDestFromLatLon(lat, lon, label) {
     if (queueGraphPick('dest', lat, lon, label)) return;
     destPick = { lat: lat, lon: lon };
+    navPlanSeq++;
     var snapSeq = ++destSnapSeq;
     statusEl.textContent = snappingText();
     var snapped;
@@ -11816,10 +11845,15 @@ function initRouting(map, config) {
   // Switch the travel mode: snap both picked points again for the new
   // mode and route once both are in (whichever snap lands second
   // routes). Navigation in progress ends — its route was for the old mode.
-  function setTravelMode(m) {
+  // `remember` false: a host-driven change (enterDriveMode) that must not
+  // replace the user's own saved choice.
+  function setTravelMode(m, remember) {
     if (routingModes.indexOf(m) < 0 || m === travelMode) return false;
     travelMode = m;
-    try { localStorage.setItem('streetzim.travelMode', m); } catch (e) {}
+    navPlanSeq++;
+    if (remember !== false) {
+      try { localStorage.setItem('streetzim.travelMode', m); } catch (e) {}
+    }
     syncTravelButtons();
     if (driveMode.active) driveMode.exit();
     resetGoButtons();
@@ -12963,7 +12997,7 @@ function initRouting(map, config) {
     /// unsupported or unchanged mode.
     get travelMode() { return travelMode; },
     get travelModes() { return routingModes.slice(); },
-    setTravelMode: function(m) { return setTravelMode(m); },
+    setTravelMode: function(m) { return setTravelMode(m, false); },
     /// True while the routing panel is open: a map tap then picks a route
     /// point, so the place popups stay out of the way.
     get panelActive() { return !!active; },
@@ -13041,18 +13075,22 @@ function initRouting(map, config) {
       }
       if (!lastRoute) return false;
       // A ZIM that plans walk / bike routes re-plans for the new mode
-      // first, then starts navigation once that route lands.
+      // first, then starts navigation once that route lands — unless the
+      // plan is overtaken (clear, another mode, new endpoints: navPlanSeq).
+      // Returns true when planning started; navigation follows only if a
+      // route is found.
       if (multiModal && routingModes.indexOf(newMode) >= 0
           && (lastRoute.travel || 'drive') !== newMode) {
-        setTravelMode(newMode);
+        setTravelMode(newMode, false);
+        var plan = navPlanSeq;
         var polls = 0;
         var poll = setInterval(function() {
           polls++;
-          if (lastRoute && lastRoute.travel === newMode && travelMode === newMode) {
+          if (plan !== navPlanSeq || polls > 600) {
+            clearInterval(poll);
+          } else if (lastRoute && lastRoute.travel === newMode) {
             clearInterval(poll);
             window.streetzimRouting.switchDriveMode(newMode);
-          } else if (polls > 600 || travelMode !== newMode) {
-            clearInterval(poll);
           }
         }, 100);
         return true;
@@ -13337,7 +13375,7 @@ function initRouting(map, config) {
           clearRoute();
           // Plan the route for the navigation mode when the ZIM can.
           if (multiModal && routingModes.indexOf(mode) >= 0 && travelMode !== mode) {
-            setTravelMode(mode);
+            setTravelMode(mode, false);
           }
           try {
             setOriginFromLatLon(origLat, origLon, "Start");

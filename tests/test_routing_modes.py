@@ -19,7 +19,7 @@ FOOTWAY, CYCLEWAY, TRACK, PATH, STEPS = 17, 18, 15, 16, 20
 FOOT_DENY, BIKE_DENY, NO_MOTOR, CONTRA, GEOM_REV = 0x20, 0x40, 0x200, 0x400, 0x800
 PUSH, LANE, INFRA, SIDEWALK_NO, FOOT_DIR_DENY = 0x1000, 0x2000, 0x4000, 0x20000, 0x40000
 PAVED, FIRM, ROUGH = 1 << 15, 2 << 15, 3 << 15
-SEPARATE, PRIVATE = 0x80000, 0x100000
+SEPARATE, PRIVATE, BIKE_PRIVATE = 0x80000, 0x100000, 0x200000
 NONE = 0xFFFFFFFF
 KM = 10_000          # 1 km in decimetres
 
@@ -72,8 +72,10 @@ def test_bike_rules():
     assert edge_cost("bike", _sd(40), SECONDARY)[0] == pytest.approx(240.0)
     assert edge_cost("bike", _sd(50), PRIMARY | LANE) == (200.0, 200.0)
     assert edge_cost("bike", _sd(50), PRIMARY | INFRA) == (200.0, 200.0)
-    assert edge_cost("bike", _sd(30), RES | PRIVATE) == (600.0, 200.0)
-    assert edge_cost("bike", _sd(30), FOOTWAY | PUSH | PRIVATE)[0] == pytest.approx(4050.0)
+    assert edge_cost("bike", _sd(30), RES | BIKE_PRIVATE) == (600.0, 200.0)
+    assert edge_cost("bike", _sd(30), RES | PRIVATE) == (200.0, 200.0)
+    assert edge_cost("walk", _sd(30), RES | BIKE_PRIVATE) == (720.0, 720.0)
+    assert edge_cost("bike", _sd(30), FOOTWAY | PUSH | BIKE_PRIVATE)[0] == pytest.approx(4050.0)
 
 
 def test_unknown_mode():
@@ -86,7 +88,8 @@ def test_heuristic_is_admissible_for_every_bit_combination(mode):
     """No edge is faster than the straight-line speed A* assumes, and the
     search cost never undercuts the time."""
     bits = [FOOT_DENY, BIKE_DENY, NO_MOTOR | CONTRA, PUSH, LANE, INFRA,
-            SIDEWALK_NO, FOOT_DIR_DENY, PAVED, FIRM, ROUGH, SEPARATE, PRIVATE]
+            SIDEWALK_NO, FOOT_DIR_DENY, PAVED, FIRM, ROUGH, SEPARATE, PRIVATE,
+            BIKE_PRIVATE]
     floor = 1000 / (HEURISTIC_KPH[mode] / 3.6)
     for ordv in range(25):
         for k in range(len(bits) + 1):

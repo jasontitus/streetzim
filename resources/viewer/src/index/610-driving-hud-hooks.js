@@ -26,7 +26,7 @@
     /// unsupported or unchanged mode.
     get travelMode() { return travelMode; },
     get travelModes() { return routingModes.slice(); },
-    setTravelMode: function(m) { return setTravelMode(m); },
+    setTravelMode: function(m) { return setTravelMode(m, false); },
     /// True while the routing panel is open: a map tap then picks a route
     /// point, so the place popups stay out of the way.
     get panelActive() { return !!active; },
@@ -104,18 +104,22 @@
       }
       if (!lastRoute) return false;
       // A ZIM that plans walk / bike routes re-plans for the new mode
-      // first, then starts navigation once that route lands.
+      // first, then starts navigation once that route lands — unless the
+      // plan is overtaken (clear, another mode, new endpoints: navPlanSeq).
+      // Returns true when planning started; navigation follows only if a
+      // route is found.
       if (multiModal && routingModes.indexOf(newMode) >= 0
           && (lastRoute.travel || 'drive') !== newMode) {
-        setTravelMode(newMode);
+        setTravelMode(newMode, false);
+        var plan = navPlanSeq;
         var polls = 0;
         var poll = setInterval(function() {
           polls++;
-          if (lastRoute && lastRoute.travel === newMode && travelMode === newMode) {
+          if (plan !== navPlanSeq || polls > 600) {
+            clearInterval(poll);
+          } else if (lastRoute && lastRoute.travel === newMode) {
             clearInterval(poll);
             window.streetzimRouting.switchDriveMode(newMode);
-          } else if (polls > 600 || travelMode !== newMode) {
-            clearInterval(poll);
           }
         }, 100);
         return true;
@@ -400,7 +404,7 @@
           clearRoute();
           // Plan the route for the navigation mode when the ZIM can.
           if (multiModal && routingModes.indexOf(mode) >= 0 && travelMode !== mode) {
-            setTravelMode(mode);
+            setTravelMode(mode, false);
           }
           try {
             setOriginFromLatLon(origLat, origLon, "Start");

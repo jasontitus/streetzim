@@ -1,14 +1,14 @@
 """Travel modes: which edges each may use and what they cost.
 
 One table for the Python readers; resources/viewer/routing-worker.js
-(``edgeCostFor``) mirrors it exactly, and tests compare the two.
+(``edgeCostWB``) mirrors it exactly, and tests compare the two.
 
 Edge bits (class_access; docs/formats.md): 0-4 class ordinal, 5 no
 walking, 6 no cycling, 9 no cars, 10 a record against a one-way (speed
 0), 12 push the bike, 13 cycle lane, 14 cycle track, 15-16 surface (1
 paved, 2 firm, 3 rough), 17 no sidewalk, 18 no walking in this direction,
-19 the sidewalk is mapped as its own way, 20 private (or customers /
-delivery) for walkers or cyclists.
+19 the sidewalk is mapped as its own way, 20 / 21 private (or customers /
+delivery) for walkers / for cyclists.
 
 ``edge_cost`` returns (cost_s, time_s): the search minimises cost, the
 route shows time. Every multiplier is >= 1 and every speed is at most
@@ -80,7 +80,7 @@ def edge_cost(mode: str, speed_dist: int, ca: int) -> tuple[float, float] | None
     if mode == "bike":
         if ca & 0x40 or ordv in _MOTORWAY:
             return None
-        private = PRIVATE_PENALTY if ca & 0x100000 else 1.0
+        private = PRIVATE_PENALTY if ca & 0x200000 else 1.0
         if ca & 0x1000 or ordv == _STEPS:
             t = dist_m / (BIKE_PUSH_KPH / 3.6)
             return t * private * (BIKE_STEPS_PENALTY if ordv == _STEPS
@@ -106,7 +106,7 @@ def edge_cost(mode: str, speed_dist: int, ca: int) -> tuple[float, float] | None
     raise ValueError(f"unknown travel mode {mode!r}; one of {', '.join(MODES)}")
 
 
-_WALKBIKE_BITS = 0x1FFC00       # bits 10-20: only a walk/bike build sets them
+_WALKBIKE_BITS = 0x3FFC00       # bits 10-21: only a walk/bike build sets them
 
 
 def graph_travel_modes(graph_path) -> list[str]:

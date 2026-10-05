@@ -65,6 +65,7 @@
     }
     if (queueGraphPick('origin', lat, lon, label)) return;
     originPick = { lat: lat, lon: lon };
+    navPlanSeq++;
     var snapSeq = ++originSnapSeq;
     statusEl.textContent = snappingText();
     var snapped;
@@ -98,6 +99,7 @@
   async function setDestFromLatLon(lat, lon, label) {
     if (queueGraphPick('dest', lat, lon, label)) return;
     destPick = { lat: lat, lon: lon };
+    navPlanSeq++;
     var snapSeq = ++destSnapSeq;
     statusEl.textContent = snappingText();
     var snapped;
@@ -139,10 +141,15 @@
   // Switch the travel mode: snap both picked points again for the new
   // mode and route once both are in (whichever snap lands second
   // routes). Navigation in progress ends — its route was for the old mode.
-  function setTravelMode(m) {
+  // `remember` false: a host-driven change (enterDriveMode) that must not
+  // replace the user's own saved choice.
+  function setTravelMode(m, remember) {
     if (routingModes.indexOf(m) < 0 || m === travelMode) return false;
     travelMode = m;
-    try { localStorage.setItem('streetzim.travelMode', m); } catch (e) {}
+    navPlanSeq++;
+    if (remember !== false) {
+      try { localStorage.setItem('streetzim.travelMode', m); } catch (e) {}
+    }
     syncTravelButtons();
     if (driveMode.active) driveMode.exit();
     resetGoButtons();
