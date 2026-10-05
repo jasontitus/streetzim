@@ -158,7 +158,8 @@ def test_acl_cannot_use_equal_group_other_chown_fallback(tmp_path, integrated, m
 
     monkeypatch.setattr(Path, "stat", foreign_group)
     monkeypatch.setattr(permissions.os, "chown", denied)
-    with pytest.raises(PermissionError, match="ACL-protected cache"):
+    with pytest.raises(PermissionError, match=r"(?s)it has an ACL.*same owner.*"
+                                              r"docs/zimfarm\.md"):
         wc._write_cache_json(path, {"Q110": {"label": "Updated"}})
     assert (path.read_bytes(), _acl_snapshot(path)) == before
     assert not list(tmp_path.glob("*.tmp"))

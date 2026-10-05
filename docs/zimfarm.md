@@ -1169,6 +1169,58 @@ A fresh Zimfarm container downloads, besides the OSM extract:
   output folder). 17.8 MB for Monaco, 283 MB for Luxembourg; see
   [Terrain cost](#terrain-cost).
 
+### Shared caches: ownership and permissions
+
+A Zimfarm task's `--dl` is its own, so none of this applies there. It
+applies when several builds, or several users, share one cache: the
+production host's Wikidata cache (`wikidata_cache/`, or
+`--wikidata-cache`), or a persistent `--dl` reused between runs.
+
+How the Wikidata cache is written (`wikidata_cache.py`,
+`streetzim/cache_permissions.py`):
+- one writer at a time, under `manifest.json.lock`; a build that fetched
+  nothing new reads without the lock;
+- each bucket file (`NN.json`) and `manifest.json` is written to a
+  staging file beside it and renamed over the old one, so a reader never
+  sees half a file and a killed build leaves the old file whole;
+- the replacement keeps the old file's owner, group, mode and ACL, so
+  whoever could read or write it before still can.
+
+**When a build stops instead.** Keeping a file's group needs the
+building user to be in that group. If it is not, and the file's group
+access differs from everyone else's (for example mode `664` with group
+`staff`: the group may write, others may not), a replacement would hand
+the file to the builder's own group and change who may write it. The
+build stops with an error naming the file, its group and mode, and the
+builder's user and groups. Likewise a file with an ACL keeps it only
+with the same owner, which another user cannot give it. Fixes, any of:
+- run the build as a user in that group. In Docker, `--user uid:gid`
+  gives the process no other groups; add the cache's group with
+  `--group-add <gid>`;
+- give the cache files a group the builder is in (`chgrp`), or make the
+  group's access the same as everyone else's (`chmod`), when that is
+  what you want;
+- give the build a cache of its own (`--wikidata-cache DIR`, or `--dl`
+  for the `streetzim` command).
+
+With mode `644` (group and others alike) a different group changes
+nothing, so the file is replaced and only its group changes.
+
+**Other failures are warnings.** A bucket the build does not use that
+cannot be read (truncated, unreadable) is reported and left alone: only
+the manifest's totals count it, and nothing builds from those. A bucket
+the build does use must be readable, since merging into a file it
+cannot read would lose that file's entries.
+
+**What killed builds leave.** A build killed while publishing leaves a
+staging file (`.NN.json.<id>.tmp`, `.manifest.json.<id>.tmp`) or a
+private staging folder holding one. The next build that finds any takes
+the lock and removes them (staging only happens under the lock, so none
+is a live writer's), as does every save. A lock's own staging file
+(`.manifest.json.lock.<id>.tmp`) is made before the lock exists, so it
+is removed only once it is an hour old. A build that cannot take the
+lock (a read-only cache) leaves them and says so.
+
 ### Disk for a Zimfarm recipe
 
 `--shapefiles` and `--dl` are not offliner flags, so on Zimfarm the

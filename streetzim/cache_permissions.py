@@ -106,6 +106,27 @@ def prepare_private_stage_directory(path: Path) -> None:
     os.chmod(path, 0o700)
 
 
+_FIXES = ("Run the build as a user in that group (Docker: add --group-add <gid>, "
+          "as `--user uid:gid` alone gives no other groups), give the file a group "
+          "this user is in (chgrp), or point the build at a cache of its own "
+          "(--wikidata-cache, or --dl for the streetzim command).")
+
+
+def _group(gid: int) -> str:
+    try:
+        import grp
+        return f"{grp.getgrgid(gid).gr_name} (GID {gid})"
+    except (ImportError, KeyError):
+        return f"GID {gid}"
+
+
+def _who() -> str:
+    """This process's user and groups, for errors about sharing."""
+    groups = sorted(set(os.getgroups()) | {os.getegid()})
+    return (f"This build (UID {os.geteuid()}, groups "
+            f"{', '.join(_group(g) for g in groups)})")
+
+
 def preserve_cache_permissions(staging: Path, previous: Path) -> None:
     """Copy access metadata before publication, or leave the old file intact.
 
@@ -135,18 +156,31 @@ def preserve_cache_permissions(staging: Path, previous: Path) -> None:
             if acl:
                 raise PermissionError(
                     errno.EACCES,
-                    "Cannot atomically update an ACL-protected cache without retaining "
-                    f"UID {original.st_uid} and GID {original.st_gid}; use the same "
-                    "writer UID or a writer permitted to preserve ownership",
+                    f"{_who()} cannot update {previous} in the shared cache: it has an "
+                    f"ACL, which a replacement keeps only with the same owner (UID "
+                    f"{original.st_uid}, GID {original.st_gid}), and this user cannot "
+                    "give it that owner. Replacing it anyway would change who may read "
+                    f"or write it. {_FIXES} (See docs/zimfarm.md, 'Shared caches: "
+                    "ownership and permissions'.)",
                     str(previous)) from error
             if stage.st_gid != original.st_gid:
                 try:
                     os.chown(staging, -1, original.st_gid)
-                except PermissionError:
+                except PermissionError as group_error:
                     # Without an ACL these are actual group/other permissions.
                     # An ACL's st_mode group bits would be its mask instead.
                     if ((mode >> 3) & 0o7) != (mode & 0o7):
-                        raise
+                        raise PermissionError(
+                            errno.EACCES,
+                            f"{_who()} cannot update {previous} in the shared cache: "
+                            f"it is shared through group {_group(original.st_gid)} "
+                            f"(mode {mode:03o}: the group's access differs from "
+                            "everyone else's), and this user is not in that group, so "
+                            "a replacement could not keep it; publishing one under "
+                            "this user's group would change who may write it. "
+                            f"{_FIXES} (See docs/zimfarm.md, 'Shared caches: "
+                            "ownership and permissions'.)",
+                            str(previous)) from group_error
     os.chmod(staging, mode)
     if sys.platform == "linux":
         if isinstance(acl, bytes):

@@ -215,7 +215,10 @@ def test_cleanup_failure_preserves_primary_error_and_previous_cache(seeded, monk
 
 
 @pytest.mark.parametrize("fault", ["read", "decode"])
-def test_failed_global_recount_preserves_manifest_and_foreign_buckets(seeded, monkeypatch, fault):
+def test_an_unreadable_unrelated_bucket_warns_and_is_kept(seeded, monkeypatch, capsys, fault):
+    """The recount only feeds the manifest's totals, which no build reads:
+    a bucket this build does not touch that cannot be read is a warning,
+    left out of the totals and never rewritten."""
     path, entries = seeded
     before_manifest = (path / "manifest.json").read_bytes()
     before_foreign = (path / "99.json").read_bytes()
@@ -230,11 +233,11 @@ def test_failed_global_recount_preserves_manifest_and_foreign_buckets(seeded, mo
 
     with monkeypatch.context() as m:
         m.setattr(wc.json, "load", fail_recount)
-        with pytest.raises(type(exception)):
-            wc.save_cache(path, {"Q112": {"label": "New local fact"}})
-    # Bucket updates may have completed; an incomplete recount cannot claim
-    # a successful new global manifest or erase an untouched foreign bucket.
-    assert (path / "manifest.json").read_bytes() == before_manifest
+        wc.save_cache(path, {"Q112": {"label": "New local fact"}})
+    assert "cannot read Wikidata cache bucket" in capsys.readouterr().out
+    assert (path / "manifest.json").read_bytes() != before_manifest
+    assert json.loads((path / "manifest.json").read_text())["total_entries"] == (
+        len(entries) + 1 - 1)                       # Q99's bucket left out
     assert (path / "99.json").read_bytes() == before_foreign
     assert wc.load_cache(path) == {**entries, "Q112": {"label": "New local fact"}}
     assert not list(path.glob("*.tmp"))
@@ -244,10 +247,17 @@ def test_staging_collision_preserves_unowned_file_and_prior_cache(seeded, monkey
     path, entries = seeded
     token = wc.uuid.UUID(int=0)
     staging = path / f".11.json.{token.hex}.tmp"
-    staging.write_bytes(b"another invocation owns this staging file")
     before = {p.name: p.read_bytes() for p in path.glob("*.json")}
+
+    def colliding_uuid():
+        # Appears as the name is chosen, after any dead-stage cleanup: an
+        # exclusive create must not remove a file it did not make.
+        if not staging.exists():
+            staging.write_bytes(b"another invocation owns this staging file")
+        return token
+
     with monkeypatch.context() as m:
-        m.setattr(wc.uuid, "uuid4", lambda: token)
+        m.setattr(wc.uuid, "uuid4", colliding_uuid)
         with pytest.raises(FileExistsError):
             wc.save_cache(path, {"Q110": {"label": "Updated"}})
     assert staging.read_bytes() == b"another invocation owns this staging file"
@@ -367,3 +377,54 @@ def test_overlapping_shared_bucket_writers_preserve_both_regions(seeded, tmp_pat
     manifest = json.loads((path / "manifest.json").read_text())
     assert manifest["total_entries"] == len(entries) + 2 and manifest["buckets"] == 3
     assert not list(path.glob("*.tmp"))
+
+
+def _dead_stages(path):
+    """What writers killed mid-publication leave: a bucket's private stage
+    folder with its contents, a manifest stage file, and lock stage files,
+    one fresh (maybe a live writer's) and one old."""
+    import os
+    import time
+    stage_dir = path / f".11.json.{'1' * 32}.tmp"
+    stage_dir.mkdir()
+    (stage_dir / "contents").write_text("{}")
+    manifest_stage = path / f".manifest.json.{'2' * 32}.tmp"
+    manifest_stage.write_text("{}")
+    fresh_lock = path / f".manifest.json.lock.{'3' * 32}.tmp"
+    fresh_lock.write_text("")
+    old_lock = path / f".manifest.json.lock.{'4' * 32}.tmp"
+    old_lock.write_text("")
+    old = time.time() - 2 * wc._LOCK_STAGE_MAX_AGE_S
+    os.utime(old_lock, (old, old))
+    stranger = path / ".notes.tmp"
+    stranger.write_text("not the cache's")
+    return {"dead": [stage_dir, manifest_stage, old_lock], "kept": [fresh_lock, stranger]}
+
+
+@pytest.mark.parametrize("when", ["build start", "next save"])
+def test_stages_left_by_killed_writers_are_removed(seeded, capsys, when):
+    path, entries = seeded
+    stages = _dead_stages(path)
+    if when == "build start":
+        wc.clean_dead_stages(path)
+    else:
+        wc.save_cache(path, {"Q110": {"label": "Updated"}})
+    assert not any(p.exists() for p in stages["dead"])
+    assert all(p.exists() for p in stages["kept"])
+    assert "Removed 3 staging file(s)" in capsys.readouterr().out
+    assert wc.load_cache(path)["Q111"] == entries["Q111"]
+
+
+def test_build_start_does_not_lock_a_clean_cache(seeded, monkeypatch):
+    path, _ = seeded
+    monkeypatch.setattr(wc, "_prepare_cache_lock",
+                        lambda *a: (_ for _ in ()).throw(AssertionError("locked")))
+    wc.clean_dead_stages(path)
+
+
+def test_a_build_clears_dead_stages_before_it_starts(seeded, monkeypatch):
+    path, _ = seeded
+    stages = _dead_stages(path)
+    monkeypatch.setattr(wc, "extract_qids_from_pbf", lambda *a, **k: {})
+    wc.build_cache(pbf_path="x.pbf", cache_dir=path)
+    assert not any(p.exists() for p in stages["dead"])

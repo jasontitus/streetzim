@@ -682,7 +682,9 @@ def _cache_buckets(cache_dir, *, skip=(), strict=False):
         except (json.JSONDecodeError, OSError) as e:
             if strict:
                 raise
-            print(f"    Warning: failed to read {json_file}: {e}")
+            print(f"    Warning: cannot read Wikidata cache bucket {json_file} ({e}); "
+                  "its entries are left out here and the file is not changed. "
+                  "Delete it to have its Q-IDs fetched again by the builds that use them.")
 
 
 def load_cache(cache_dir, *, qids=None):
@@ -716,7 +718,70 @@ def save_cache(cache_dir, entries, qid_features=None):
     from streetzim.download import file_lock
     _prepare_cache_lock(cache_dir)
     with file_lock(cache_dir / "manifest.json"):
+        _remove_dead_stages(cache_dir)
         _save_cache_locked(cache_dir, entries, qid_features)
+
+
+# _write_cache_json's and _prepare_cache_lock's staging names.
+_STAGE_RE = re.compile(r"\.(?:[0-9]{1,2}|manifest)\.json(?:\.lock)?\.[0-9a-f]{32}\.tmp")
+# A lock's own staging file is made before the lock exists, so another
+# writer may be using a young one; older than this, its writer is gone.
+_LOCK_STAGE_MAX_AGE_S = 3600
+
+
+def _stages(cache_dir):
+    """Staging files and folders left in the cache by writers that died
+    (killed mid-publication; a normal exit removes its own)."""
+    for path in Path(cache_dir).glob(".*.tmp"):
+        if not _STAGE_RE.fullmatch(path.name):
+            continue                      # only names this module makes
+        if path.name.startswith(".manifest.json.lock."):
+            try:
+                if time.time() - path.lstat().st_mtime < _LOCK_STAGE_MAX_AGE_S:
+                    continue
+            except FileNotFoundError:
+                continue
+        yield path
+
+
+def _remove_dead_stages(cache_dir):
+    """Remove _stages(). Call with the cache's write lock held: cache files
+    are only staged under it, so none of these is a live writer's."""
+    removed = 0
+    for path in _stages(cache_dir):
+        try:
+            if path.is_dir() and not path.is_symlink():
+                for inner in path.iterdir():
+                    inner.unlink()
+                path.rmdir()
+            else:
+                path.unlink()
+            removed += 1
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            print(f"    Warning: cannot remove {path}, left by a stopped cache writer "
+                  f"({e}); its owner can delete it.")
+    if removed:
+        print(f"    Removed {removed} staging file(s) left in the Wikidata cache by "
+              "stopped builds")
+
+
+def clean_dead_stages(cache_dir):
+    """At the start of a build: if stopped writers left staging files, take
+    the write lock and remove them. A cache this build cannot lock (read-
+    only) is left as it is, with a warning."""
+    cache_dir = Path(cache_dir)
+    if not cache_dir.is_dir() or not any(_stages(cache_dir)):
+        return
+    from streetzim.download import file_lock
+    try:
+        _prepare_cache_lock(cache_dir)
+        with file_lock(cache_dir / "manifest.json"):
+            _remove_dead_stages(cache_dir)
+    except OSError as e:
+        print(f"    Warning: staging files left by stopped builds are in {cache_dir}, "
+              f"and this build cannot take the cache's lock to remove them ({e})")
 
 
 def _preserve_cache_permissions(staging, previous):
@@ -841,8 +906,11 @@ def _save_cache_locked(cache_dir, entries, qid_features):
         bucket_counts[bucket_path.name] = len(bucket_entries)
 
     # A regional update still describes the whole shared cache. Count the
-    # untouched buckets one at a time, without retaining their entries.
-    for name, bucket in _cache_buckets(cache_dir, skip=bucket_counts, strict=True):
+    # untouched buckets one at a time, without retaining their entries. Only
+    # the manifest's totals use this count (nothing reads them to build), so
+    # an unreadable bucket this build does not use is a warning, left out of
+    # the totals and never rewritten: its entries are not lost.
+    for name, bucket in _cache_buckets(cache_dir, skip=bucket_counts):
         bucket_counts[name] = len(bucket)
         del bucket
     manifest = {
@@ -908,6 +976,7 @@ def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=
     including an empty set, and is never inferred from a shared manifest.
     """
     cache_dir = Path(cache_dir or DEFAULT_CACHE_DIR)
+    clean_dead_stages(cache_dir)
 
     # Step 1: Extract Q-IDs from OSM data (cached by PBF identity)
     if pbf_path:
