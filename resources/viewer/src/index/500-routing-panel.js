@@ -228,6 +228,8 @@ function initRouting(map, config) {
     destPick = null;
     originMoved = false;
     destMoved = false;
+    originSnap = null;
+    destSnap = null;
     originCoordE7 = null;
     destCoordE7 = null;
     originInput.value = '';

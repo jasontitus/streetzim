@@ -47,8 +47,32 @@
   var destPick = null;
   // The router moved this end off the point picked (a road cut off from
   // the rest): the marker sits on the new road until the end is picked again.
+  // originSnap / destSnap keep the pick's own snap ({node, coordE7}): when
+  // the other end changes, a moved end goes back to it and the new route
+  // decides afresh whether to move it.
   var originMoved = false;
   var destMoved = false;
+  var originSnap = null;
+  var destSnap = null;
+  function unmoveDest() {
+    if (!destMoved || !destSnap) return;
+    destNode = destSnap.node;
+    destCoordE7 = destSnap.coordE7;
+    destMoved = false;
+  }
+  // Markers where the ends now are: an end put back on its own snap
+  // (unmove*) moves its marker back once the route is known (not before,
+  // so a route that moves it again does not make the marker jump).
+  function placeEndMarkers() {
+    if (destMarker && destCoordE7) destMarker.setLngLat([destCoordE7[1] / 1e7, destCoordE7[0] / 1e7]);
+    if (originMarker && originCoordE7) originMarker.setLngLat([originCoordE7[1] / 1e7, originCoordE7[0] / 1e7]);
+  }
+  function unmoveOrigin() {
+    if (!originMoved || !originSnap) return;
+    originNode = originSnap.node;
+    originCoordE7 = originSnap.coordE7;
+    originMoved = false;
+  }
 
   function snappingText() {
     return travelMode === 'drive' ? 'Finding nearest road...' : 'Finding nearest path...';
@@ -86,6 +110,7 @@
     var oLat = snapped.lat;
     var oLon = snapped.lon;
     originCoordE7 = [Math.round(oLat * 1e7), Math.round(oLon * 1e7)];
+    originSnap = { node: originNode, coordE7: originCoordE7 };
     originInput.value = label || coordLabel(oLat, oLon);
     // Origin is now committed (typeahead pick, map click, GPS button,
     // or queued-pick replay). Clear the editing flag so future GPS
@@ -94,11 +119,8 @@
     if (originMarker) originMarker.remove();
     originMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-origin'), anchor: 'center' })
       .setLngLat([oLon, oLat]).addTo(map);
-    if (destNode !== -1 && destMoved && destPick) {
-      // The destination was moved for the old start: snap it again from
-      // the point picked, so the new route decides afresh where it ends.
-      setDestFromLatLon(destPick.lat, destPick.lon, destInput.value);
-    } else if (destNode !== -1) {
+    if (destNode !== -1) {
+      unmoveDest();
       computeAndDrawRoute();
     } else {
       statusEl.textContent = 'Enter destination';
@@ -125,14 +147,13 @@
     var dLat = snapped.lat;
     var dLon = snapped.lon;
     destCoordE7 = [Math.round(dLat * 1e7), Math.round(dLon * 1e7)];
+    destSnap = { node: destNode, coordE7: destCoordE7 };
     destInput.value = label || coordLabel(dLat, dLon);
     if (destMarker) destMarker.remove();
     destMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-dest'), anchor: 'center' })
       .setLngLat([dLon, dLat]).addTo(map);
-    if (originNode !== -1 && originMoved && originPick) {
-      // The start was moved for the old destination: snap it again.
-      setOriginFromLatLon(originPick.lat, originPick.lon, originInput.value);
-    } else if (originNode !== -1) {
+    if (originNode !== -1) {
+      unmoveOrigin();
       computeAndDrawRoute();
     } else {
       statusEl.textContent = 'Enter start location';
@@ -261,14 +282,13 @@
           destNode = result.endMoved.node;
           destMoved = true;
           destCoordE7 = [Math.round(result.endMoved.lat * 1e7), Math.round(result.endMoved.lon * 1e7)];
-          if (destMarker) destMarker.setLngLat([result.endMoved.lon, result.endMoved.lat]);
         }
         if (result.startMoved && typeof result.startMoved.lat === 'number') {
           originNode = result.startMoved.node;
           originMoved = true;
           originCoordE7 = [Math.round(result.startMoved.lat * 1e7), Math.round(result.startMoved.lon * 1e7)];
-          if (originMarker) originMarker.setLngLat([result.startMoved.lon, result.startMoved.lat]);
         }
+        placeEndMarkers();
         drawRoute(unwrapLngs(result.coords));
         distEl.textContent = formatDistance(result.distance);
         timeEl.textContent = formatTime(result.time);
@@ -322,6 +342,7 @@
           }
         } catch (e) {}
       } else {
+        placeEndMarkers();
         removeRouteLine();
         setExpandHint();
         statusEl.textContent = routeTravel === 'walk' ? 'No walking route found'
