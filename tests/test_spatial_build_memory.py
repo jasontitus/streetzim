@@ -49,6 +49,8 @@ def test_exact_reference_bytes_across_blocks(tmp_path, monkeypatch, n, seed, sca
     want_index, want_cells, want_meta = reference(reader.parse_szrg_bytes(data), cell_scale=scale)
     # Many block transitions, both inside a cell and between cells.
     monkeypatch.setattr(spatial, "_NODE_BLOCK", 7)
+    # And many geometry batch boundaries inside a cell.
+    monkeypatch.setattr(spatial, "_GEOM_CHUNK", 3)
     path = tmp_path / "graph.bin"
     path.write_bytes(data)
     for mapped in (False, True):

@@ -158,3 +158,40 @@ def test_prepared_cells_with_a_file_missing_are_rebuilt(graph, child_calls, lost
     assert zim_writer._prepared_spatial_cells(graph, SCALE) is None
     assert _zim_items(graph) == _expected(graph)
     assert child_calls == ["_spatial_cell_files"]
+
+
+def test_a_killed_zim_step_rebuild_leaves_no_record_to_trust(graph, monkeypatch):
+    """A prepared set with a cell missing is rebuilt in place at the ZIM
+    step; if that rebuild dies partway, a retry must not take the old
+    record's word for the half-rewritten cells."""
+    zim_writer.prepare_spatial_cells(graph, SCALE)
+    spatial = Path(graph).parent / "spatial"
+    every_cell = sorted(spatial.glob("graph-cell-*.bin"))
+    every_cell[0].unlink()
+
+    def dies(fn, *a, **k):
+        for cell in every_cell:             # every cell recreated, cut short
+            cell.write_bytes(b"x")
+        raise RuntimeError("killed")
+
+    monkeypatch.setattr(isolate, "run_in_child", dies)
+    with pytest.raises(RuntimeError, match="killed"):
+        _zim_items(graph)
+    assert zim_writer._prepared_spatial_cells(graph, SCALE) is None
+
+
+def test_the_zim_writer_maps_the_graph(graph, monkeypatch):
+    """The memory saving: the graph is mapped (reclaimable page cache), not
+    read into private memory (China: 8.7 GB -> 0.8 GB at this step)."""
+    from streetzim.routing import reader
+    seen = []
+    real = reader.load_from_file
+
+    def recording(path, *a, **k):
+        seen.append(k.get("mapped", False))
+        return real(path, *a, **k)
+
+    monkeypatch.setattr(reader, "load_from_file", recording)
+    out = Path(graph).parent / "mapped-check"
+    zim_writer._spatial_cell_files(graph, SCALE, out)
+    assert seen == [True]

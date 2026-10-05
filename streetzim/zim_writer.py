@@ -1982,6 +1982,10 @@ def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_ch
                 _cells_bytes, _spatial_meta = _prepared
                 print("    (cells built after the routing step)", flush=True)
             else:
+                # Cells are rewritten in place: a record left from an
+                # earlier prepare must not vouch for a half-rewritten set
+                # if this is killed (as prepare_spatial_cells does too).
+                (_spatial_outdir / SPATIAL_PREPARED).unlink(missing_ok=True)
                 _cells_bytes, _spatial_meta = run_in_child(
                     _spatial_cell_files, routing_graph_path, spatial_chunk_scale,
                     _spatial_outdir)

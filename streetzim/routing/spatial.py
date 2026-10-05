@@ -95,6 +95,8 @@ SZRC_VERSION = SZRC_VERSION_CELL_COORDS
 
 DEFAULT_CELL_SCALE = 10  # 0.1° cells — ~11 km lat; lon varies by latitude
 _NODE_BLOCK = 1 << 20
+# Geometries copied per batch while a cell's geometry section is written.
+_GEOM_CHUNK = 16384
 
 # Cap any single ZIM entry well under the 200 MB validator threshold
 # (and even further under the libzim 4 GB blob limit). 5 M nodes × 8 B
@@ -374,9 +376,9 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
             source_geoms = memoryview(geom_blob)
             # Python ints avoid two NumPy scalar conversions per geometry;
             # bound the temporary lists even for a very dense/coarse cell.
-            for start in range(0, g_count, 16384):
-                for gs, ge in zip(geom_starts[start:start + 16384].tolist(),
-                                  geom_ends[start:start + 16384].tolist()):
+            for start in range(0, g_count, _GEOM_CHUNK):
+                for gs, ge in zip(geom_starts[start:start + _GEOM_CHUNK].tolist(),
+                                  geom_ends[start:start + _GEOM_CHUNK].tolist()):
                     output.write(source_geoms[gs:ge])
             del source_geoms, section
             if isinstance(output, io.BytesIO):
