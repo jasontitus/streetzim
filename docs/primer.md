@@ -11,15 +11,16 @@ each feature works on the device, and how the file is built.
 
 ## New in files built from October 2026
 
-Files built with the current code add three things; files published before
+Files built with the current code add four things; files published before
 keep their old behaviour until they are rebuilt.
 
-- **Real walking and cycling routes.** Directions ask Drive, Walk or Bike first
-  and plan for that mode: footpaths, steps, pedestrian streets and cycle tracks,
+- **Real walking and cycling routes.** Directions have a Drive / Walk / Bike
+  choice (it remembers the last one) and plan for that mode: footpaths, steps, pedestrian streets and cycle tracks,
   walking both ways along one-way streets, cyclists against a one-way only where
   allowed (otherwise pushing), busy roads avoided by bike.
-- **Turn restrictions.** Car and bike routes obey OpenStreetMap's no-left-turn,
-  only-straight-on and similar rules.
+- **Turn restrictions.** Car routes obey OpenStreetMap's no-left-turn,
+  only-straight-on and similar rules; bike routes obey the "no" rules, and the
+  "only" rules tagged for bicycles. Time-dependent rules are not applied yet.
 - **Search in every script.** A place is also found by its own name, not only its
   English one: 北京大学 as well as Peking University.
 - **Files in other languages.** A build can choose a language: map labels, search
@@ -72,7 +73,7 @@ metadata).
 | Routing | `routing-data/graph-cells-index.bin` + `graph-cell-NNNNN.bin` | Custom binary road graph, split into 0.1° map cells | 3.0 GB, 14% |
 | App search | `search-data/*.json` | JSON lists of places, streets and addresses, split by name prefix | 1.5 GB, 7% |
 | Kiwix search | `search/*.html` + the Xapian full-text index | One small HTML page per place (and per POI in the full profile) | 0.8 GB, 4% |
-| Wikipedia | `wiki-article/*`, `wiki-image/*` | Article HTML and images, English | 0.25 GB, 1% |
+| Wikipedia | `wiki-article/*`, `wiki-image/*` | Article HTML and images, in the file's language | 0.25 GB, 1% |
 | Find chips and categories | `category-index/*.json` | JSON, cut into geographic shards when large | 0.15 GB, 0.7% |
 | Place facts | `wikidata/*.json` | Wikidata facts (population, elevation…) | 5 MB |
 | The app itself | `index.html` (map), `places.html` (Find), `routing-worker.js`, MapLibre GL JS, fonts | HTML/JS, glyph files | about 4 MB |
@@ -129,7 +130,8 @@ letters, so a search touches a few files, not the whole region.
 - A place is indexed under its English name (or, in a file built in another
   language, its name in that language) and also under its own local name, so
   北京大学 and Peking University both find it. In the app's search box a local name is
-  found from its start ("北京" finds 北京大学); Kiwix's search also finds any part.
+  found from its start ("北京" finds 北京大学); Kiwix's search also finds any part of a
+  Chinese or Japanese name, for places that have a Kiwix page.
 
 **Kiwix's own search.** Kiwix's search bar and suggestions use the ZIM's title
 list and its Xapian full-text index, which only see pages. So the build writes a
@@ -163,8 +165,8 @@ pedestrians, push-your-bike, cycle lane or track, surface, sidewalk. Walkers (an
 cyclists where allowed) get an extra record for travelling against a one-way
 street. OpenStreetMap turn restrictions are stored beside the cell they apply in.
 Roads under construction, proposed or abandoned are left out; private and
-destination-only roads stay in (by car as before; walking and cycling avoid them
-unless needed).
+destination-only roads stay in. Walking and cycling count private roads as three
+times longer, so they use them only when the alternative is much longer.
 
 **Split into map cells.** The graph is cut into cells of 0.1° latitude by 0.1°
 longitude (about 11 km by 8 km in Europe); each cell is its own small file with
@@ -180,13 +182,16 @@ junctions, so routes over 200 km are good but not guaranteed to be the shortest.
 "no route" quickly when the destination is in a small unreachable area such as an island
 without ferries.
 
-**Travel modes.** Directions ask Drive, Walk or Bike before planning. Walking
+**Travel modes.** Directions have a Drive / Walk / Bike choice, shown in files
+that carry walking and cycling data. Walking
 assumes 5 km/h (slower on steps and rough paths) and avoids busy roads without
-sidewalks; cycling assumes 18 km/h on paved roads (less on gravel or dirt), prefers
+sidewalks (where OpenStreetMap says there is none); cycling assumes 18 km/h on paved roads (less on gravel or dirt), prefers
 cycle lanes and tracks over busy roads, and pushes the bike where cycling is not
-allowed. Cars and bikes obey turn restrictions; a U-turn costs extra time so a
-route goes round the block rather than turning back. Walking and cycling routes are
-exact up to the same budgets as driving; they have no highway shortcut stage.
+allowed. Cars and bikes obey turn restrictions; when choosing a route, a U-turn
+counts as 45 s (car) or 20 s (bike) extra, so a route goes round the block rather
+than turning back where it can (the time shown does not include it). Walking and
+cycling use the same search passes as driving, with a larger budget for the last
+one, and no highway shortcut stage. One-way footpaths and steps bind walkers too.
 
 **Turn-by-turn.** Navigation shows the next turn and its distance and the arrival time,
 follows GPS, and keeps the screen on. Off the route (60 m driving, 60 m cycling,
@@ -233,18 +238,20 @@ its Wikipedia article, all from the file.
 
 - **Wikidata facts.** For every place tagged with a Wikidata ID in OpenStreetMap:
   name, short description, population, area, elevation, country, capital, time
-  zone, website and type, plus a three-sentence summary from English Wikipedia.
+  zone, website and type, plus a three-sentence summary from Wikipedia (English,
+  or the file's language).
   Stored as small JSON files grouped by ID; about 5 MB for China.
-- **Wikipedia articles.** Full English articles for the places that link one (from a
+- **Wikipedia articles.** Full articles (English, or the file's language) for the places that link one (from a
   few hundred to tens of thousands per region; the China file has 24,620). A
   build can take them from a Kiwix Wikipedia ZIM given to it, with images, or fetch
   text-only versions from the Wikipedia API at Wikimedia's polite rate of 120 per
-  minute. Articles whose OSM tag is in another language are matched to the English
-  article through Wikidata.
+  minute. Articles whose OSM tag is in another language are matched to the article
+  in the file's language through Wikidata.
 - **Nearby Wikipedia.** An index of where each bundled article is lets the app
   list and pin nearby articles at any zoom.
-- **English only today.** Facts, summaries, articles and the ZIM's Language
-  metadata are English.
+- **Languages.** English by default; a file built in another language has its
+  facts, summaries, articles, place names and Language metadata in that language
+  where they exist (docs/languages.md).
 
 ## How a file is built
 
@@ -359,11 +366,13 @@ text plugin (BSD-2-Clause), StreetZim's code (MIT).
 - Walking and cycling routes, turn restrictions, local-name search and other
   languages arrive with each file's next rebuild; published files keep the old
   behaviour until then.
-- In a file built in another language, the app's own buttons and messages, and
-  the location labels beside search results, are still English.
+- In a file built in another language, the app's own buttons and messages, the
+  location labels beside search results, and administrative areas' names and
+  types are still English (or local).
 - In the app's search box a local name without spaces (Chinese, Japanese, Thai) is
   found from its start, not by a word in its middle ("北京" finds 北京大学, "大学" does
-  not); Kiwix's own search finds either.
+  not); Kiwix's own search finds either for Chinese and Japanese, for places that
+  have a Kiwix page.
 - The app needs a Kiwix reader that runs JavaScript, and keeps its requests gentle
   for Kiwix's request handling.
 - Satellite imagery needs EOX's written confirmation before wide publication. Files made by
@@ -373,9 +382,9 @@ text plugin (BSD-2-Clause), StreetZim's code (MIT).
 - Updating the viewer inside an already-published file keeps the file's ID while its content
   changes. Kiwix's library recognises files by that ID, and mirrors check files by checksum, so
   openZIM would need a rule for it (for example a new ID with each viewer update).
-- Routing quality: speeds come from road class, not posted limits; turn restrictions are not
-  applied; routes over 200 km are not guaranteed shortest; re-routing is a button, not
-  automatic.
+- Routing quality: speeds come from road class, not posted limits; time-dependent turn
+  restrictions and barriers (gates, bollards) are not applied; routes over 200 km are not
+  guaranteed shortest; re-routing is a button, not automatic.
 - Very large regions need care on a 16 GB worker: China has fitted with 0.4 GB to spare, with
   fixes since to widen that; Europe is being tested.
 
