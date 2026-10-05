@@ -155,15 +155,16 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
       <button id="routing-close" title="Close">&times;</button>
     </span>
   </h4>
-  <div id="routing-body">
   <!-- Travel mode, chosen before routing (500-routing-panel.js). Shown
        only when the ZIM's graph carries walking and cycling data
-       (map-config routingModes). -->
+       (map-config routingModes). Outside #routing-body so it stays on the
+       folded panel: switching mode never needs an unfold. -->
   <div id="routing-travel-row" role="radiogroup" aria-label="Travel mode" style="display:none">
     <button type="button" id="travel-drive" data-travel="drive" role="radio" aria-checked="true">Drive</button>
     <button type="button" id="travel-walk"  data-travel="walk"  role="radio" aria-checked="false">Walk</button>
     <button type="button" id="travel-bike"  data-travel="bike"  role="radio" aria-checked="false">Bike</button>
   </div>
+  <div id="routing-body">
   <div class="routing-field-group">
     <div class="routing-field-row">
       <div class="routing-dot origin"></div>

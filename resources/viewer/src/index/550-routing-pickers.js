@@ -155,6 +155,7 @@
       if (typeof cancelInFlightRoute === 'function') cancelInFlightRoute();
       stopRouteProgressIndicator();
       resultEl.style.display = 'none';
+      setExpandHint();
       goRow.classList.remove('visible');
       lastRoute = null;
       removeRouteLine();
@@ -235,6 +236,9 @@
         drawRoute(unwrapLngs(result.coords));
         distEl.textContent = formatDistance(result.distance);
         timeEl.textContent = formatTime(result.time);
+        // The folded header carries the summary, so comparing modes on
+        // a phone needs no unfold.
+        setExpandHint('— ' + formatTime(result.time) + ' · ' + formatDistance(result.distance));
         renderRoads(result.roads);
         resultEl.style.display = 'block';
         clearBtn.style.display = 'block';
@@ -278,6 +282,7 @@
         } catch (e) {}
       } else {
         removeRouteLine();
+        setExpandHint();
         statusEl.textContent = routeTravel === 'walk' ? 'No walking route found'
                              : routeTravel === 'bike' ? 'No cycling route found'
                              : 'No route found';

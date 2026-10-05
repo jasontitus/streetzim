@@ -664,6 +664,8 @@
        wrong one.
   */
   #routing-panel.minimized #routing-body { display: none; }
+  /* The travel picker stays on the folded panel, under the header. */
+  #routing-panel.minimized #routing-travel-row { margin: 6px 0 0; }
   #routing-panel.minimized h4 {
     margin: 0; cursor: pointer;
     padding: 6px 10px;
@@ -1348,15 +1350,16 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
       <button id="routing-close" title="Close">&times;</button>
     </span>
   </h4>
-  <div id="routing-body">
   <!-- Travel mode, chosen before routing (500-routing-panel.js). Shown
        only when the ZIM's graph carries walking and cycling data
-       (map-config routingModes). -->
+       (map-config routingModes). Outside #routing-body so it stays on the
+       folded panel: switching mode never needs an unfold. -->
   <div id="routing-travel-row" role="radiogroup" aria-label="Travel mode" style="display:none">
     <button type="button" id="travel-drive" data-travel="drive" role="radio" aria-checked="true">Drive</button>
     <button type="button" id="travel-walk"  data-travel="walk"  role="radio" aria-checked="false">Walk</button>
     <button type="button" id="travel-bike"  data-travel="bike"  role="radio" aria-checked="false">Bike</button>
   </div>
+  <div id="routing-body">
   <div class="routing-field-group">
     <div class="routing-field-row">
       <div class="routing-dot origin"></div>
@@ -9261,6 +9264,12 @@ function initRouting(map, config) {
     syncTravelButtons();
   }
 
+  var expandHintEl = document.getElementById('routing-expand-hint');
+  var EXPAND_HINT = expandHintEl ? expandHintEl.textContent : '';
+  function setExpandHint(text) {
+    if (expandHintEl) expandHintEl.textContent = text || EXPAND_HINT;
+  }
+
   function resetGoButtons() {
     Object.keys(modeBtns).forEach(function(m) {
       modeBtns[m].classList.remove('active-mode', 'hidden-mode');
@@ -9385,6 +9394,7 @@ function initRouting(map, config) {
     originResultsEl.style.display = 'none';
     destResultsEl.style.display = 'none';
     resultEl.style.display = 'none';
+    setExpandHint();
     clearBtn.style.display = 'none';
     goRow.classList.remove('visible');
     resetGoButtons();
@@ -11807,6 +11817,7 @@ function initRouting(map, config) {
       if (typeof cancelInFlightRoute === 'function') cancelInFlightRoute();
       stopRouteProgressIndicator();
       resultEl.style.display = 'none';
+      setExpandHint();
       goRow.classList.remove('visible');
       lastRoute = null;
       removeRouteLine();
@@ -11887,6 +11898,9 @@ function initRouting(map, config) {
         drawRoute(unwrapLngs(result.coords));
         distEl.textContent = formatDistance(result.distance);
         timeEl.textContent = formatTime(result.time);
+        // The folded header carries the summary, so comparing modes on
+        // a phone needs no unfold.
+        setExpandHint('— ' + formatTime(result.time) + ' · ' + formatDistance(result.distance));
         renderRoads(result.roads);
         resultEl.style.display = 'block';
         clearBtn.style.display = 'block';
@@ -11930,6 +11944,7 @@ function initRouting(map, config) {
         } catch (e) {}
       } else {
         removeRouteLine();
+        setExpandHint();
         statusEl.textContent = routeTravel === 'walk' ? 'No walking route found'
                              : routeTravel === 'bike' ? 'No cycling route found'
                              : 'No route found';

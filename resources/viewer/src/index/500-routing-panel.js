@@ -76,6 +76,12 @@ function initRouting(map, config) {
     syncTravelButtons();
   }
 
+  var expandHintEl = document.getElementById('routing-expand-hint');
+  var EXPAND_HINT = expandHintEl ? expandHintEl.textContent : '';
+  function setExpandHint(text) {
+    if (expandHintEl) expandHintEl.textContent = text || EXPAND_HINT;
+  }
+
   function resetGoButtons() {
     Object.keys(modeBtns).forEach(function(m) {
       modeBtns[m].classList.remove('active-mode', 'hidden-mode');
@@ -200,6 +206,7 @@ function initRouting(map, config) {
     originResultsEl.style.display = 'none';
     destResultsEl.style.display = 'none';
     resultEl.style.display = 'none';
+    setExpandHint();
     clearBtn.style.display = 'none';
     goRow.classList.remove('visible');
     resetGoButtons();
