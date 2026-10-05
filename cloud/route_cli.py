@@ -78,14 +78,16 @@ def parse_lat_lon(s: str) -> tuple[float, float]:
 
 
 def nearest_node(g: SpatialGraph, lat: float, lon: float,
-                 mode: str = "origin") -> tuple[int, float]:
+                 mode: str = "origin", *,
+                 travel_mode: str = "drive") -> tuple[int, float]:
     """Snap exactly like the viewer: SpatialGraph.nearest_node in
     streetzim/routing/spatial.py is the Python mirror of routing-worker.js
     snapNearestNode (cos(lat)-scaled planar ranking, no-motor vertices
     skipped, six-candidate shortlist with the 32-node forward-reach
     test, one-way sinks accepted for ``mode="dest"``). Returns the node
     and its haversine distance from the query in metres."""
-    node = g.nearest_node(int(round(lat * 1e7)), int(round(lon * 1e7)), mode)
+    node = g.nearest_node(int(round(lat * 1e7)), int(round(lon * 1e7)), mode,
+                          travel_mode=travel_mode)
     if node < 0:
         raise RuntimeError("no routing nodes")
     n_lat_e7, n_lon_e7 = g.node_coords_e7(node)
@@ -494,7 +496,14 @@ def main():
                         "graph at the endpoints so no segments are missing.")
     p.add_argument("--max-pops", type=int, default=None,
                    help="Bail if A* visits more than N nodes. Default: unlimited.")
+    p.add_argument("--travel", default="drive", choices=["drive", "walk", "bike"],
+                   help="Travel mode (streetzim/routing/modes.py). Walking and "
+                        "cycling run plain A* only; two-pass is for driving.")
     args = p.parse_args()
+    if args.travel != "drive":
+        if args.mode == "hwy2":
+            p.error("--mode hwy2 is driving only")
+        args.mode = "astar"
 
     print(f"Loading {args.zim}...")
     t0 = time.time()
@@ -505,8 +514,10 @@ def main():
     print("Resolving endpoints...")
     src_lat, src_lon = args.src
     dst_lat, dst_lon = args.dst
-    src_node, src_d = nearest_node(g, src_lat, src_lon, "origin")
-    dst_node, dst_d = nearest_node(g, dst_lat, dst_lon, "dest")
+    src_node, src_d = nearest_node(g, src_lat, src_lon, "origin",
+                                   travel_mode=args.travel)
+    dst_node, dst_d = nearest_node(g, dst_lat, dst_lon, "dest",
+                                   travel_mode=args.travel)
     print(f"  src node #{src_node}: {src_d:.0f} m from ({src_lat},{src_lon})")
     print(f"  dst node #{dst_node}: {dst_d:.0f} m from ({dst_lat},{dst_lon})")
     crow = haversine_m(src_lat, src_lon, dst_lat, dst_lon)
@@ -521,7 +532,8 @@ def main():
         print(f"\n=== mode: {mode} ===")
         t0 = time.time()
         if mode == "astar":
-            r = find_route_spatial(g, src_node, dst_node, max_pops=args.max_pops)
+            r = find_route_spatial(g, src_node, dst_node, max_pops=args.max_pops,
+                                   travel_mode=args.travel)
         else:  # hwy2
             r = find_route_two_pass(
                 g, src_node, dst_node,

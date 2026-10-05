@@ -61,6 +61,7 @@ from pathlib import Path
 import numpy as np
 
 from streetzim.routing.reader import SZRG
+from streetzim.routing.modes import edge_cost
 
 # class_access bit 9 (see docs/driving-mode-road-class-warnings.md). Kept
 # local rather than imported from szrg_astar to avoid a circular import.
@@ -72,6 +73,12 @@ def _is_no_motor(class_access: int) -> bool:
     if class_access & _NO_MOTOR_BIT:
         return True
     return _NO_MOTOR_ORD_MIN <= (class_access & 0x1F) <= _NO_MOTOR_ORD_MAX
+
+
+def _mode_ok(travel_mode: str, speed_dist: int, ca: int) -> bool:
+    if travel_mode == "drive":
+        return not _is_no_motor(ca) and (speed_dist >> 24) != 0
+    return edge_cost(travel_mode, speed_dist, ca) is not None
 
 
 # Snap shortlist (mirrors routing-worker.js SNAP_*): keep the N nearest
@@ -831,7 +838,7 @@ class SpatialGraph:
                 int(cell.nodes_scaled[local * 2 + 1]))
 
     def nearest_node(self, lat_e7: int, lon_e7: int, mode: str = "origin",
-                     *, raw: bool = False) -> int:
+                     *, raw: bool = False, travel_mode: str = "drive") -> int:
         """Find the nearest usable node while loading only plausible cells.
 
         ``raw=True`` returns the plain nearest vertex with no car-ok /
@@ -852,8 +859,16 @@ class SpatialGraph:
         Ties in distance keep scan order (nearer cell first, ascending
         local index within a cell) exactly like the JS shortlist insert,
         so both snappers pick the same vertex on equal distances.
+
+        ``travel_mode`` "walk" / "bike" keeps only vertices with an
+        out-edge the mode may use (streetzim.routing.modes.edge_cost),
+        counting records against a one-way. There is no edgeless case:
+        a graph built for walking and cycling gives every vertex they
+        can reach a way out (the record back along a one-way), so a
+        vertex without one is a motorway end or similar.
         """
         for_dest = (mode == "dest")
+        drive = travel_mode == "drive"
         scale = self._index.cell_scale
         cos_lat = max(0.05, math.cos(math.radians(lat_e7 / 1e7)))
         candidates: list[tuple[float, int]] = []
@@ -897,6 +912,22 @@ class SpatialGraph:
                     continue
                 # A speed-0 out-edge (walk/bike against a one-way) counts
                 # as absent: a one-way's end stays a sink.
+                if not drive:
+                    for ei in range(e_start, e_end):
+                        if edge_cost(travel_mode, int(edges[ei * 5 + 1]),
+                                     int(edges[ei * 5 + 4])) is not None:
+                            break
+                    else:
+                        continue
+                    k = bisect.bisect_right(best_d, dist)
+                    best_d.insert(k, dist)
+                    best_n.insert(k, cell.base_node + local)
+                    best_e.insert(k, False)
+                    if len(best_d) > SNAP_CANDIDATES:
+                        best_d.pop(); best_n.pop(); best_e.pop()
+                    if len(best_d) == SNAP_CANDIDATES:
+                        worst_kept = best_d[-1]
+                    continue
                 real = 0
                 car_ok = False
                 for ei in range(e_start, e_end):
@@ -928,13 +959,15 @@ class SpatialGraph:
         for dist, node, edgeless in zip(best_d, best_n, best_e):
             if math.sqrt(dist) > limit_r:
                 break
-            if self._reaches_at_least(node, SNAP_MIN_REACH):
+            if self._reaches_at_least(node, SNAP_MIN_REACH, travel_mode):
                 return node
-            if for_dest and edgeless and self._has_drivable_incoming_in_own_cell(node):
+            if for_dest and edgeless and self._has_drivable_incoming_in_own_cell(
+                    node, travel_mode):
                 return node
         return best_n[0]
 
-    def _has_drivable_incoming_in_own_cell(self, node: int) -> bool:
+    def _has_drivable_incoming_in_own_cell(self, node: int,
+                                           travel_mode: str = "drive") -> bool:
         """Mirrors routing-worker.js _hasDrivableIncomingInOwnCell: some
         edge in the node's own cell targets it and is drivable."""
         cid = self._index.cell_for_node(node)
@@ -945,13 +978,15 @@ class SpatialGraph:
         for ei in range(edges.shape[0] // 5):
             if int(edges[ei * 5]) != node:
                 continue
-            if _is_no_motor(int(edges[ei * 5 + 4])) or (int(edges[ei * 5 + 1]) >> 24) == 0:
+            if not _mode_ok(travel_mode, int(edges[ei * 5 + 1]), int(edges[ei * 5 + 4])):
                 continue
             return True
         return False
 
-    def _reaches_at_least(self, node: int, limit: int) -> bool:
-        """Bounded forward BFS over drivable edges (mirrors the worker)."""
+    def _reaches_at_least(self, node: int, limit: int,
+                          travel_mode: str = "drive") -> bool:
+        """Bounded forward BFS over edges usable by ``travel_mode``
+        (mirrors the worker)."""
         seen = {node}
         queue = [node]
         head = 0
@@ -961,7 +996,7 @@ class SpatialGraph:
             cur = queue[head]
             head += 1
             for (target, speed_dist, _gi, _ni, ca) in self.edges_of_node(cur):
-                if _is_no_motor(ca) or (speed_dist >> 24) == 0:
+                if not _mode_ok(travel_mode, speed_dist, ca):
                     continue
                 if target not in seen:
                     seen.add(target)

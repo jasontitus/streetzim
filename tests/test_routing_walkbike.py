@@ -78,6 +78,7 @@ CASES = {
     "foot_no_bike_contra": {"highway": "residential", "oneway": "yes", "foot": "no",
                             "cycleway": "opposite_lane"},
     "steps": {"highway": "steps"},
+    "steps_bike_no": {"highway": "steps", "bicycle": "no"},
     "steps_ramp": {"highway": "steps", "ramp:bicycle": "yes"},
     "footway": {"highway": "footway"},
     "footway_bike_yes": {"highway": "footway", "bicycle": "yes"},
@@ -166,8 +167,9 @@ def test_bike_contraflow_exemptions(cases):
 
 
 def test_steps_footways_and_motorroads(cases):
-    assert all(e[4] & BIKE_DENY for e in sum(cases("steps"), []))
+    assert all(e[4] & PUSH and not e[4] & BIKE_DENY for e in sum(cases("steps"), []))
     assert not any(e[4] & BIKE_DENY for e in sum(cases("steps_ramp"), []))
+    assert all(e[4] & BIKE_DENY for e in sum(cases("steps_bike_no"), []))
     assert all(e[4] & PUSH for e in sum(cases("footway"), []))
     assert not any(e[4] & PUSH for e in sum(cases("footway_bike_yes"), []))
     assert all(e[4] & FOOT_DENY and e[4] & BIKE_DENY for e in sum(cases("motorroad"), []))

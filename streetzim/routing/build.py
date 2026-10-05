@@ -489,7 +489,7 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
     # footway is for pedestrians).
     _FOOT_CLASS = frozenset({"footway", "path", "pedestrian", "steps", "corridor"})
     # Bikes are pushed here unless cycling is allowed explicitly.
-    _PUSH_CLASS = frozenset({"footway", "pedestrian", "corridor", "bridleway"})
+    _PUSH_CLASS = frozenset({"footway", "pedestrian", "corridor", "bridleway", "steps"})
     _RIDE_OK = ("yes", "designated", "permissive")
     _PAVED = frozenset({"paved", "asphalt", "concrete", "concrete:plates",
                         "concrete:lanes", "paving_stones", "sett", "chipseal",
@@ -520,14 +520,13 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
 
     def _bike_denied(hw, tags):
         """Cycling (riding or pushing) is not allowed (bicycle > vehicle >
-        access; motorways, busways, motorroad=yes, and steps without a
-        bicycle ramp never)."""
+        access; motorways, busways and motorroad=yes never). Steps are
+        allowed with the bike pushed (bit 12): a cyclist carries a bike
+        up a stair rather than have no route."""
         v = _foot_or_bike_value(tags, "bicycle")
         if v is not None:
             return v in _SIDEPATH_DENY
         if hw in _NO_FOOT_BIKE or tags.get("motorroad") == "yes":
-            return True
-        if hw == "steps" and tags.get("ramp:bicycle") != "yes":
             return True
         v = _foot_or_bike_value(tags, "vehicle", "access")
         return v is not None and v in _SIDEPATH_DENY

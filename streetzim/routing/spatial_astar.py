@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 from streetzim.routing.spatial import SpatialGraph
 from streetzim.routing.astar import R_EARTH, HEURISTIC_SPEED_MPS, haversine_m, is_no_motor
+from streetzim.routing.modes import HEURISTIC_KPH, MODES, edge_cost
 
 
 @dataclass
@@ -58,7 +59,18 @@ def find_route_spatial(
     end: int,
     *,
     max_pops: int | None = None,
+    travel_mode: str = "drive",
 ) -> SpatialRoute | None:
+    """Fastest route for ``travel_mode`` (streetzim.routing.modes).
+
+    Walking and cycling minimise a cost that penalises busy roads, so
+    ``total_time_s`` is the plain travel time summed along the chosen
+    path, not the search cost. Driving is unchanged: cost is time.
+    """
+    if travel_mode not in MODES:
+        raise ValueError(f"unknown travel mode {travel_mode!r}")
+    drive = travel_mode == "drive"
+    heur_mps = HEURISTIC_SPEED_MPS if drive else HEURISTIC_KPH[travel_mode] / 3.6
     if start == end:
         return SpatialRoute(start, end, 0.0, 0.0, [start], [])
 
@@ -79,7 +91,7 @@ def find_route_spatial(
     start_lat_e7, start_lon_e7 = g.node_coords_e7(start)
     start_lat = start_lat_e7 / 1e7
     start_lon = start_lon_e7 / 1e7
-    h0 = haversine_m(start_lat, start_lon, end_lat, end_lon) / HEURISTIC_SPEED_MPS
+    h0 = haversine_m(start_lat, start_lon, end_lat, end_lon) / heur_mps
 
     heap: list = []
     heappush = heapq.heappush
@@ -111,20 +123,30 @@ def find_route_spatial(
 
         current_g = gscore[current]
         for (target, speed_dist, geom_local, name_idx, class_access) in g.edges_of_node(current):
-            if is_no_motor(class_access):
-                continue  # car profile: footways / steps / private (bit 9 or ordinal 16..20)
-            if closed[target]:
-                continue
-            dist_m = (speed_dist & 0xFFFFFF) / 10.0
-            speed = speed_dist >> 24
-            if speed == 0:
-                continue
-            cost = dist_m / (speed / 3.6)
+            if drive:
+                if is_no_motor(class_access):
+                    continue  # car profile: footways / steps / private (bit 9 or ordinal 16..20)
+                if closed[target]:
+                    continue
+                dist_m = (speed_dist & 0xFFFFFF) / 10.0
+                speed = speed_dist >> 24
+                if speed == 0:
+                    continue
+                cost = dist_m / (speed / 3.6)
+                time_s = cost
+            else:
+                if closed[target]:
+                    continue
+                ct = edge_cost(travel_mode, speed_dist, class_access)
+                if ct is None:
+                    continue
+                cost, time_s = ct
+                dist_m = (speed_dist & 0xFFFFFF) / 10.0
             new_g = current_g + cost
             if new_g < gscore[target]:
                 gscore[target] = new_g
                 prev[target] = current
-                prev_edge[target] = (dist_m, geom_local, name_idx, class_access)
+                prev_edge[target] = (dist_m, geom_local, name_idx, class_access, time_s)
                 t_lat_e7, t_lon_e7 = g.node_coords_e7(target)
                 t_lat = t_lat_e7 / 1e7
                 t_lon = t_lon_e7 / 1e7
@@ -134,7 +156,7 @@ def find_route_spatial(
                 shdlon = _sin(dlon * 0.5)
                 a = shd * shd + _cos(_radians(t_lat)) * _cos_end_lat * shdlon * shdlon
                 h_m = _r_earth_2 * _atan2(_sqrt(a), _sqrt(1 - a))
-                h = h_m / HEURISTIC_SPEED_MPS
+                h = h_m / heur_mps
                 counter += 1
                 heappush(heap, (new_g + h, counter, target))
 
@@ -160,7 +182,7 @@ def find_route_spatial(
 
     # Road coalesce — matches streetzim/routing/astar.find_route
     roads: list = []
-    for (dist_m, _geom_local, name_idx, class_access) in edge_seq:
+    for (dist_m, _geom_local, name_idx, class_access, _t) in edge_seq:
         ca = class_access
         is_round = (ca >> 8) & 1
         cls = ca & 0x1F
@@ -175,7 +197,8 @@ def find_route_spatial(
         start_node=start,
         end_node=end,
         total_dist_m=total_dist,
-        total_time_s=gscore[end],
+        total_time_s=(gscore[end] if drive
+                      else math.fsum(pe[4] for pe in edge_seq)),
         node_sequence=node_seq,
         road_sequence=roads,
     )
