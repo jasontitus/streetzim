@@ -166,12 +166,23 @@ await ok('each page carries the German for exactly its own keys', () => {
   for (const file of ['index.html', 'places.html']) {
     const t = JSON.parse(pageTables(file).json);
     assert.deepStrictEqual(Object.keys(t), ['de'], file);
-    for (const [k, v] of Object.entries(t.de)) assert.deepStrictEqual(v, DE[k], file + ' ' + k);
+    for (const [k, v] of Object.entries(t.de)) {
+      if (k === 'type') {   // place types, nested (tools/build_i18n.py tables_for)
+        for (const [tk, tv] of Object.entries(v)) assert.strictEqual(tv, DE['type.' + tk], file + ' type.' + tk);
+        continue;
+      }
+      assert.deepStrictEqual(v, DE[k], file + ' ' + k);
+    }
   }
   const idx = JSON.parse(INDEX_TABLES).de, plc = JSON.parse(pageTables('places.html').json).de;
   assert.ok('drive.roundabout' in idx && !('drive.roundabout' in plc));
   assert.ok('places.title' in plc && !('places.title' in idx));
-  assert.ok('type.restaurant' in idx && 'type.restaurant' in plc);
+  assert.ok('restaurant' in idx.type && 'restaurant' in plc.type);
+  // A place type that is also an Object property does not leak through.
+  const { api } = load(INDEX_TABLES);
+  api.szSetUiLanguage('de', '');
+  assert.strictEqual(api.szPlaceType('constructor'), 'constructor');
+  assert.strictEqual(api.szPlaceType('__proto__'), '  proto  ');   // the raw key, underscores as spaces
   // Every English key is in some page's table.
   for (const k of Object.keys(EN)) assert.ok(k in idx || k in plc, 'not inlined anywhere: ' + k);
 });

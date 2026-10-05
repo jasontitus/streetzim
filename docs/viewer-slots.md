@@ -53,9 +53,19 @@ Slots are right-sized per file rather than a flat 1 MB each:
 
 | file | slot | typical content | headroom |
 |---|---|---|---|
-| index.html | 1 MB | ~698 KB (2026-10-05: + UI strings and the German table, ~39 KB; [i18n.md](i18n.md)) | 1.5x |
-| places.html | 256 KB | ~138 KB (2026-10-05: + UI strings and the German table, ~21 KB) | 1.9x |
+| index.html | 1 MB | ~489 KB (2026-10-06: built without comments, below; the German table is ~20 KB of it, [i18n.md](i18n.md)) | 2.1x |
+| places.html | 256 KB | ~138 KB (2026-10-05: + UI strings and the German table, ~11 KB) | 1.9x |
 | routing-worker.js | 128 KB | ~68 KB | 1.9x |
+
+**index.html is built without comments.** About a third of the viewer's
+source is comments, which every reader downloads and skips.
+`tools/build_viewer.py` writes index.html without whole-line comments,
+blank lines and indentation (`tools/viewer_compact.py`; the parts keep
+them, and part 000 is copied as is because gates read marker phrases out of
+its comments). `tools/lint_viewer.mjs` proves every inline script's token
+stream equals the parts', and `tests/test_viewer_compact.py` that CSS and
+HTML differ only in comments and whitespace. Before (2026-10-05, with the
+UI strings): 698 KB; after: 489 KB.
 
 **1.4 MB uncompressed per ZIM** (a flat 1 MB each cost 3.1 MB). That is 0.06%
 of switzerland and 0.002% of europe. The browser is served the padding too,

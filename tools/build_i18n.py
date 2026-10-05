@@ -313,8 +313,17 @@ def _json(obj: Any) -> str:
 
 
 def tables_for(keys: set[str], langs: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    return {lang: {k: v for k, v in table.items() if k in keys or is_dynamic(k)}
-            for lang, table in langs.items()}
+    """Each language's entries for `keys`, as inlined: the place types
+    ("type.<key>") nested under one "type" object, which saves repeating
+    the prefix ~260 times in a slot that is short of room."""
+    out: dict[str, dict[str, Any]] = {}
+    for lang, table in langs.items():
+        t: dict[str, Any] = {k: v for k, v in table.items() if k in keys}
+        types = {k[len("type."):]: v for k, v in table.items() if k.startswith("type.")}
+        if types:
+            t["type"] = types
+        out[lang] = t
+    return out
 
 
 def _runtime_for_page() -> str:

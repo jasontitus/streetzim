@@ -4,7 +4,10 @@
 The viewer ships as ONE index.html: published ZIMs have it in a fixed-size
 slot that cloud/patch_viewer_inplace.py overwrites, and a ZIM can never gain
 new files (docs/viewer-slots.md). So the parts are joined back into exactly
-that file, in file-name order. Nothing is added or changed in between.
+that file, in file-name order, without the comments and indentation of
+everything after part 000 (tools/viewer_compact.py says exactly what goes
+and why; the parts keep them). The slot is fixed: a third of the source is
+comments the browser only downloads.
 
     python tools/build_viewer.py            # rebuild index.html from the parts
     python tools/build_viewer.py --check    # fail if index.html != parts (CI)
@@ -14,9 +17,11 @@ scripts/sync-drive-viewer.sh, and commit all three.
 
 It first runs tools/build_i18n.py, which owns part 005-i18n.html, the
 SZ-I18N block in places.html and resources/viewer/i18n/en.json: the UI
-strings and their translations (docs/i18n.md). Parts are fragments: a
-part may open a function that a later part closes (initRouting spans
-500-610), so they are not meant to be valid JavaScript on their own.
+strings and their translations (docs/i18n.md).
+
+Parts are fragments: a part may open a function that a later part closes
+(initRouting spans 500-610), so they are not meant to be valid JavaScript
+on their own.
 """
 from __future__ import annotations
 
@@ -27,6 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_i18n  # noqa: E402
+import viewer_compact  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 PARTS = ROOT / "resources" / "viewer" / "src" / "index"
@@ -49,8 +55,14 @@ def parts() -> list[Path]:
     return found
 
 
+def joined() -> str:
+    """The parts as written (what tools/lint_viewer.mjs lints)."""
+    return "".join(p.read_text(encoding="utf-8") for p in parts())
+
+
 def build() -> bytes:
-    return b"".join(p.read_bytes() for p in parts())
+    return viewer_compact.compact_build(
+        [(p.name, p.read_text(encoding="utf-8")) for p in parts()]).encode("utf-8")
 
 
 def main() -> int:

@@ -1,6 +1,7 @@
 """resources/viewer/index.html must be exactly its parts joined
-(tools/build_viewer.py). The parts are what people edit; index.html is what
-ZIMs, the in-place patcher and the PWA ship."""
+(tools/build_viewer.py), without their comments (tools/viewer_compact.py,
+tests/test_viewer_compact.py). The parts are what people edit; index.html
+is what ZIMs, the in-place patcher and the PWA ship."""
 import subprocess
 import sys
 from pathlib import Path

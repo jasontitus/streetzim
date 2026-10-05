@@ -179,12 +179,14 @@ function szChipInSentence(id, label) {
 }
 
 // A place type (OSM/Overture key such as fast_food, the record's s / cat)
-// for display: the table's "type.<key>" when it has one, else the key with
-// spaces for underscores (all English ever showed).
+// for display: the table's "type.<key>" (inlined as type: { key: text })
+// when it has one, else the key with spaces for underscores (all English
+// ever showed).
 function szPlaceType(kind) {
   var k = String(kind == null ? '' : kind);
-  var s = SZ_I18N && typeof SZ_I18N['type.' + k] === 'string' ? SZ_I18N['type.' + k]
-        : k.replace(/_/g, ' ');
+  var types = SZ_I18N && SZ_I18N.type;
+  var s = types && Object.prototype.hasOwnProperty.call(types, k) && typeof types[k] === 'string'
+        ? types[k] : k.replace(/_/g, ' ');
   return SZ_I18N_PSEUDO ? '[' + s + ']' : s;
 }
 // END sz-i18n-runtime

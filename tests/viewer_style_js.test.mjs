@@ -11,7 +11,12 @@ const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 // The UI-string runtime (szT, szFixed, …) as globals, as index.html has it:
 // the code under test calls it (docs/i18n.md). Indirect eval: global scope.
 (0, eval)(fs.readFileSync(`${REPO}/resources/viewer/i18n/runtime.js`, 'utf8'));
-const HTML = fs.readFileSync(`${REPO}/resources/viewer/index.html`, 'utf8');
+// The parts joined, as written: resources/viewer/index.html is the same
+// code without comments (tools/viewer_compact.py; tools/lint_viewer.mjs
+// proves the token streams equal), and these tests find code by them.
+const PARTS_DIR = `${REPO}/resources/viewer/src/index`;
+const HTML = fs.readdirSync(PARTS_DIR).filter((n) => /^\d{3}-[\w-]+\.(html|js)$/.test(n)).sort()
+  .map((n) => fs.readFileSync(`${PARTS_DIR}/${n}`, 'utf8')).join('');
 const LUA = fs.readFileSync(`${REPO}/resources/tilemaker/process-openmaptiles.lua`, 'utf8');
 
 let pass = 0;
