@@ -1,0 +1,167 @@
+FFFFFFFFFF.                                                              [100%]
+=================================== FAILURES ===================================
+__ test_cached_tile_tags_survive_failed_name_lookup_through_writer[False-13] ___
+tests/test_wikidata_mbtiles.py:75: in test_cached_tile_tags_survive_failed_name_lookup_through_writer
+    assert set(compact) == {"Q110", "Q111", "Q112"}
+           ^^^^^^^^^^^^
+E   TypeError: 'NoneType' object is not iterable
+----------------------------- Captured stdout call -----------------------------
+    Saved 4 entries in 2 buckets to /private/var/folders/70/1wkd9s3s4bg0cf9283n2t9sh0000gn/T/pytest-of-jasontitus/pytest-29/test_cached_tile_tags_survive_0/cache/
+
+[19:15:32] [5/9] Building Wikidata info cache...
+  Note: MBTiles mode extracts feature names but not Q-IDs directly.
+  For best results, use --pbf mode which reads wikidata tags from OSM.
+  Scanning tiles for named features to look up in Wikidata...
+    No z14 tiles found
+  No wikidata-tagged features found
+    No Wikidata entries available
+__ test_cached_tile_tags_survive_failed_name_lookup_through_writer[False-14] ___
+tests/test_wikidata_mbtiles.py:75: in test_cached_tile_tags_survive_failed_name_lookup_through_writer
+    assert set(compact) == {"Q110", "Q111", "Q112"}
+           ^^^^^^^^^^^^
+E   TypeError: 'NoneType' object is not iterable
+----------------------------- Captured stdout call -----------------------------
+    Saved 4 entries in 2 buckets to /private/var/folders/70/1wkd9s3s4bg0cf9283n2t9sh0000gn/T/pytest-of-jasontitus/pytest-29/test_cached_tile_tags_survive_1/cache/
+
+[19:15:32] [5/9] Building Wikidata info cache...
+  Note: MBTiles mode extracts feature names but not Q-IDs directly.
+  For best results, use --pbf mode which reads wikidata tags from OSM.
+  Scanning tiles for named features to look up in Wikidata...
+    Found 1 named features to look up
+    Warning: SPARQL lookup failed for batch 0: fixture rate limit exhausted
+    Warning: not looking up the rest (the endpoint will not answer)
+    Resolved 0 Q-IDs from name lookups
+  No wikidata-tagged features found
+    No Wikidata entries available
+___ test_cached_tile_tags_survive_failed_name_lookup_through_writer[True-13] ___
+tests/test_wikidata_mbtiles.py:75: in test_cached_tile_tags_survive_failed_name_lookup_through_writer
+    assert set(compact) == {"Q110", "Q111", "Q112"}
+           ^^^^^^^^^^^^
+E   TypeError: 'NoneType' object is not iterable
+----------------------------- Captured stdout call -----------------------------
+    Saved 4 entries in 2 buckets to /private/var/folders/70/1wkd9s3s4bg0cf9283n2t9sh0000gn/T/pytest-of-jasontitus/pytest-29/test_cached_tile_tags_survive_2/cache/
+
+[19:15:32] [5/9] Building Wikidata info cache...
+  Note: MBTiles mode extracts feature names but not Q-IDs directly.
+  For best results, use --pbf mode which reads wikidata tags from OSM.
+  Scanning tiles for named features to look up in Wikidata...
+    No z14 tiles found
+  No wikidata-tagged features found
+    No Wikidata entries available
+___ test_cached_tile_tags_survive_failed_name_lookup_through_writer[True-14] ___
+tests/test_wikidata_mbtiles.py:75: in test_cached_tile_tags_survive_failed_name_lookup_through_writer
+    assert set(compact) == {"Q110", "Q111", "Q112"}
+           ^^^^^^^^^^^^
+E   TypeError: 'NoneType' object is not iterable
+----------------------------- Captured stdout call -----------------------------
+    Saved 4 entries in 2 buckets to /private/var/folders/70/1wkd9s3s4bg0cf9283n2t9sh0000gn/T/pytest-of-jasontitus/pytest-29/test_cached_tile_tags_survive_3/cache/
+
+[19:15:32] [5/9] Building Wikidata info cache...
+  Note: MBTiles mode extracts feature names but not Q-IDs directly.
+  For best results, use --pbf mode which reads wikidata tags from OSM.
+  Scanning tiles for named features to look up in Wikidata...
+    Found 1 named features to look up
+    Warning: SPARQL lookup failed for batch 0: fixture rate limit exhausted
+    Warning: not looking up the rest (the endpoint will not answer)
+    Resolved 0 Q-IDs from name lookups
+  No wikidata-tagged features found
+    No Wikidata entries available
+___________ test_malformed_direct_ids_are_not_selected_or_requested ____________
+tests/test_wikidata_mbtiles.py:109: in test_malformed_direct_ids_are_not_selected_or_requested
+    assert set(wc.extract_qids_from_mbtiles(mbtiles)) == {"Q110"}
+E   AssertionError: assert set() == {'Q110'}
+E     
+E     Extra items in the right set:
+E     'Q110'
+E     Use -v to get more diff
+----------------------------- Captured stdout call -----------------------------
+  Note: MBTiles mode extracts feature names but not Q-IDs directly.
+  For best results, use --pbf mode which reads wikidata tags from OSM.
+  Scanning tiles for named features to look up in Wikidata...
+    Found 0 named features to look up
+    Resolved 0 Q-IDs from name lookups
+_______________ test_direct_tags_take_priority_over_name_matches _______________
+tests/test_wikidata_mbtiles.py:130: in test_direct_tags_take_priority_over_name_matches
+    assert selected["Q110"]["name"] == "Tagged village"
+E   AssertionError: assert 'Ambiguous city' == 'Tagged village'
+E     
+E     - Tagged village
+E     + Ambiguous city
+----------------------------- Captured stdout call -----------------------------
+  Note: MBTiles mode extracts feature names but not Q-IDs directly.
+  For best results, use --pbf mode which reads wikidata tags from OSM.
+  Scanning tiles for named features to look up in Wikidata...
+    Found 2 named features to look up
+    Resolved 2 Q-IDs from name lookups
+____________ test_lower_zoom_uses_its_own_tms_rows_and_layer_extent ____________
+tests/test_wikidata_mbtiles.py:150: in test_lower_zoom_uses_its_own_tms_rows_and_layer_extent
+    assert len(looked_up) == 1 and looked_up[0]["name"] == "Untagged city"
+E   assert (0 == 1)
+E    +  where 0 = len([])
+----------------------------- Captured stdout call -----------------------------
+  Note: MBTiles mode extracts feature names but not Q-IDs directly.
+  For best results, use --pbf mode which reads wikidata tags from OSM.
+  Scanning tiles for named features to look up in Wikidata...
+    No z14 tiles found
+____________ test_selection_uses_available_detail_zoom[zooms0-Q13] _____________
+tests/test_wikidata_mbtiles.py:170: in test_selection_uses_available_detail_zoom
+    assert set(wc.extract_qids_from_mbtiles(mbtiles)) == ({expected} if expected else set())
+E   AssertionError: assert set() == {'Q13'}
+E     
+E     Extra items in the right set:
+E     'Q13'
+E     Use -v to get more diff
+----------------------------- Captured stdout call -----------------------------
+  Note: MBTiles mode extracts feature names but not Q-IDs directly.
+  For best results, use --pbf mode which reads wikidata tags from OSM.
+  Scanning tiles for named features to look up in Wikidata...
+    No z14 tiles found
+____________ test_selection_uses_available_detail_zoom[zooms1-Q14] _____________
+tests/test_wikidata_mbtiles.py:170: in test_selection_uses_available_detail_zoom
+    assert set(wc.extract_qids_from_mbtiles(mbtiles)) == ({expected} if expected else set())
+E   AssertionError: assert set() == {'Q14'}
+E     
+E     Extra items in the right set:
+E     'Q14'
+E     Use -v to get more diff
+----------------------------- Captured stdout call -----------------------------
+  Note: MBTiles mode extracts feature names but not Q-IDs directly.
+  For best results, use --pbf mode which reads wikidata tags from OSM.
+  Scanning tiles for named features to look up in Wikidata...
+    Found 0 named features to look up
+    Resolved 0 Q-IDs from name lookups
+____________ test_selection_uses_available_detail_zoom[zooms2-Q15] _____________
+tests/test_wikidata_mbtiles.py:170: in test_selection_uses_available_detail_zoom
+    assert set(wc.extract_qids_from_mbtiles(mbtiles)) == ({expected} if expected else set())
+E   AssertionError: assert set() == {'Q15'}
+E     
+E     Extra items in the right set:
+E     'Q15'
+E     Use -v to get more diff
+----------------------------- Captured stdout call -----------------------------
+  Note: MBTiles mode extracts feature names but not Q-IDs directly.
+  For best results, use --pbf mode which reads wikidata tags from OSM.
+  Scanning tiles for named features to look up in Wikidata...
+    No z14 tiles found
+=============================== warnings summary ===============================
+tests/test_wikidata_mbtiles.py::test_cached_tile_tags_survive_failed_name_lookup_through_writer[False-14]
+tests/test_wikidata_mbtiles.py::test_cached_tile_tags_survive_failed_name_lookup_through_writer[True-14]
+tests/test_wikidata_mbtiles.py::test_malformed_direct_ids_are_not_selected_or_requested
+tests/test_wikidata_mbtiles.py::test_direct_tags_take_priority_over_name_matches
+tests/test_wikidata_mbtiles.py::test_selection_uses_available_detail_zoom[zooms1-Q14]
+  /Users/jasontitus/experiments/streetzim/out/adversarial-review-20261004/cache/reviewed_wikidata_cache.py:268: DeprecationWarning: `decode` signature has changed, use `default_options` instead
+    decoded = mapbox_vector_tile.decode(tile_data, y_coord_down=True)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_wikidata_mbtiles.py::test_cached_tile_tags_survive_failed_name_lookup_through_writer[False-13]
+FAILED tests/test_wikidata_mbtiles.py::test_cached_tile_tags_survive_failed_name_lookup_through_writer[False-14]
+FAILED tests/test_wikidata_mbtiles.py::test_cached_tile_tags_survive_failed_name_lookup_through_writer[True-13]
+FAILED tests/test_wikidata_mbtiles.py::test_cached_tile_tags_survive_failed_name_lookup_through_writer[True-14]
+FAILED tests/test_wikidata_mbtiles.py::test_malformed_direct_ids_are_not_selected_or_requested
+FAILED tests/test_wikidata_mbtiles.py::test_direct_tags_take_priority_over_name_matches
+FAILED tests/test_wikidata_mbtiles.py::test_lower_zoom_uses_its_own_tms_rows_and_layer_extent
+FAILED tests/test_wikidata_mbtiles.py::test_selection_uses_available_detail_zoom[zooms0-Q13]
+FAILED tests/test_wikidata_mbtiles.py::test_selection_uses_available_detail_zoom[zooms1-Q14]
+FAILED tests/test_wikidata_mbtiles.py::test_selection_uses_available_detail_zoom[zooms2-Q15]
+10 failed, 1 passed, 5 warnings in 0.32s

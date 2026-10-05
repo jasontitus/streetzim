@@ -1,0 +1,16 @@
+.....sssssss..sss....................................................... [ 50%]
+.......................................................................  [100%]
+=============================== warnings summary ===============================
+tests/test_wikidata_mbtiles.py: 10 warnings
+  /Users/jasontitus/experiments/streetzim/wikidata_cache.py:255: DeprecationWarning: `decode` signature has changed, use `default_options` instead
+    decoded = mapbox_vector_tile.decode(tile_data, y_coord_down=True)
+
+tests/test_wikidata_mbtiles.py::test_cached_tile_tags_survive_failed_name_lookup_through_writer[False-13]
+tests/test_wikidata_mbtiles.py::test_cached_tile_tags_survive_failed_name_lookup_through_writer[False-14]
+tests/test_wikidata_mbtiles.py::test_cached_tile_tags_survive_failed_name_lookup_through_writer[True-13]
+tests/test_wikidata_mbtiles.py::test_cached_tile_tags_survive_failed_name_lookup_through_writer[True-14]
+  /Users/jasontitus/experiments/streetzim/streetzim/zim_writer.py:1734: DeprecationWarning: `decode` signature has changed, use `default_options` instead
+    decoded = _mvt.decode(tile_data, y_coord_down=True)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+133 passed, 10 skipped, 14 warnings in 8.05s

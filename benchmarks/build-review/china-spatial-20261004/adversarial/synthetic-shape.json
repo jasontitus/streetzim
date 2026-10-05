@@ -1,0 +1,16 @@
+{
+  "scope": "Small fixture proves generator shape, not a memory benchmark.",
+  "nodes": 1000,
+  "edges": 2400,
+  "cells": 100,
+  "nodes_per_cell_min": 10,
+  "nodes_per_cell_max": 10,
+  "source_outdegrees": [
+    2,
+    3
+  ],
+  "geometry_ids": 1000,
+  "distinct_geometry_payload_hashes": 1,
+  "geometry_ids_owned_by_multiple_cells": 0,
+  "large_fixture_inference": "The 43.6M-node fixture has exactly4360nodes per each of10000cells; every source has2or3outgoing edges; all encoded geometry payloads are identical but have per-node IDs and no cross-cell ID sharing."
+}

@@ -996,7 +996,18 @@ cache, which the kernel can drop):
 | China (6.48 GB cut), `--memory 16g` container | did not finish (thrashed in Pass 2) | 8.6 / 10.4 GB, 49 min (filtered) | |
 | China, outside a container (no limit) | 23.4 / 33.6 GB, 48 min | | |
 
-China's peak is the builder after Pass 2, deduplicating 59.8 M geometry
+These are isolated routing-stage measurements, not full-build limits. A
+2026-10-04 full China run at `29ec7da` with a production-seeded shared
+Wikidata cache peaked at **15.08 GB container anonymous memory** in spatial
+conversion. Loading all 3.34 million cached facts retained about 3.8 GB
+unnecessarily beside the routing child; China requested only 198,840 IDs.
+Cold-cache and shared-cache runs therefore were not memory-equivalent.
+The [October memory follow-up](build-review.md#china-memory-follow-up--2026-10-04)
+records regional fact selection, mapped spatial input, measured synthetic
+reductions and the remaining need for a full-country rerun. Its successful
+9 GiB spatial capacity test is not a measured full-China result.
+
+The isolated China routing-stage peak is after Pass 2, deduplicating 59.8 M geometry
 candidates and sorting 105 M edges on top of 2.5 GB of edge columns; its
 filter ran first, alone, at about 2.4 GB (the container's anonymous
 memory, sampled every 10 s). The run sat CPU-bound throughout (one core,

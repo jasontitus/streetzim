@@ -1,0 +1,23 @@
+{
+  "exit_code": 0,
+  "command": [
+    "docker",
+    "run",
+    "--rm",
+    "--network=none",
+    "-v",
+    "/Users/jasontitus/experiments/streetzim/out/spatial-memory-20261004/source-current:/app:ro",
+    "-v",
+    "/Users/jasontitus/experiments/streetzim/out/spatial-memory-20261004/golden:/data",
+    "--workdir",
+    "/app",
+    "--entrypoint",
+    "python",
+    "sha256:21008c4cdb1927a34d2392c4f35dfade0a4918be0249831d060a25aca96c32e0",
+    "tools/golden_diff.py",
+    "/data/before/monaco.zim",
+    "/data/after/monaco.zim",
+    "--control",
+    "/data/control/monaco.zim"
+  ]
+}

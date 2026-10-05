@@ -1,0 +1,19 @@
+ok: osm-monaco-memory.zim: metadata, illustration, progress (8/8), routing, Kiwix search (208 results open)
+ok: /output/osm-monaco-memory.zim has Overture, Wikidata and Wikipedia content, credited in License
+before /baseline/osm-monaco-memory.zim: 6,442 entries, uuid 53adae30-02e7-824c-eaf1-89ee8ac53731
+after  /output/osm-monaco-memory.zim: 6,442 entries, uuid 52707c45-9a2a-1df6-a5d3-b6f2ef65789a
+  identical      6,440
+  volatile           2
+  reordered          0
+  tiles-equal        0
+  moved              0
+  noise              0
+  changed            0
+  only-before        0
+  only-after         0
+
+volatile:
+  X/fulltext/xapian
+  X/title/xapian
+
+RESULT: no differences beyond the expected ones

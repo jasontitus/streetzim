@@ -1877,7 +1877,7 @@ def _spatial_cell_files(routing_graph_path, cell_scale, output_dir):
     written there too (graph-cells-index.bin), so its bytes are dropped."""
     from streetzim.routing.reader import load_from_file
     from streetzim.routing.spatial import build_spatial
-    _, cells, meta = build_spatial(load_from_file(routing_graph_path),
+    _, cells, meta = build_spatial(load_from_file(routing_graph_path, mapped=True),
                                    cell_scale=cell_scale, output_dir=output_dir)
     return cells, meta
 
@@ -1896,13 +1896,16 @@ def prepare_spatial_cells(routing_graph_path, cell_scale):
     step to add later, with a record of what they were built from.
 
     Called right after the routing step, while the build holds little:
-    build_spatial loads the whole graph (China's is 4.9 GB) plus ~1.5 GB of
-    working arrays, which on top of the ZIM writer's own memory took China
-    in a 16 GB container to 15.6 GB. (Run in a child, the ZIM writer's
-    memory would still be held beside it.)"""
+    The source graph is read-only mapped and node grouping uses compact
+    working arrays. Preparing here also avoids keeping the ZIM writer's
+    memory beside the conversion; historically that overlap took China
+    in a 16 GB container to 15.6 GB."""
     outdir = Path(routing_graph_path).parent / "spatial"
     outdir.mkdir(parents=True, exist_ok=True)
     stamp = _graph_stamp(routing_graph_path, cell_scale)
+    # Cells are overwritten in place. A failed retry must not leave the
+    # previous completion marker advertising partially rewritten files.
+    (outdir / SPATIAL_PREPARED).unlink(missing_ok=True)
     cells, meta = _spatial_cell_files(routing_graph_path, cell_scale, outdir)
     tmp = outdir / (SPATIAL_PREPARED + ".tmp")
     tmp.write_text(json.dumps({**stamp, "cells": {str(k): v for k, v in cells.items()},

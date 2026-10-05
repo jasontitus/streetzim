@@ -12,6 +12,7 @@ are identical; that's the invariant we verify.
 
 from __future__ import annotations
 
+import mmap
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
     from libzim.reader import Archive
 
 
-def _le_array(buf: bytes, code: str, count: int, offset: int) -> np.ndarray:
+def _le_array(buf: bytes | mmap.mmap, code: str, count: int, offset: int) -> np.ndarray:
     """np.frombuffer for the formats' little-endian integer arrays (``code``
     is "<i4" or "<u4"). One place for the call, because numpy's stubs type
     frombuffer's overloads differently from version to version."""
@@ -46,7 +47,7 @@ class SZRG:
     adj_offsets: np.ndarray         # uint32, shape (num_nodes+1,)
     edges: np.ndarray               # uint32, shape (num_edges*stride,)
     geom_offsets: np.ndarray        # uint32, shape (num_geoms+1,) — empty array if geoms not loaded
-    geom_blob: bytes
+    geom_blob: bytes | memoryview
     name_offsets: np.ndarray        # uint32, shape (num_names+1,)
     names_blob: bytes
     edge_stride: int
@@ -91,7 +92,7 @@ class SZRG:
             return ""
         return self.names_blob[start:end].decode("utf-8", errors="replace")
 
-    def attach_geoms(self, geoms_buf: bytes) -> None:
+    def attach_geoms(self, geoms_buf: bytes | mmap.mmap) -> None:
         """Attach the v5 SZGM companion blob so decoders see geom data."""
         g_offsets, g_blob, g_num_geoms = parse_szgm_bytes(geoms_buf)
         if g_num_geoms != self.num_geoms:
@@ -104,7 +105,7 @@ class SZRG:
         self.has_geoms = True
 
 
-def parse_szrg_bytes(buf: bytes) -> SZRG:
+def parse_szrg_bytes(buf: bytes | mmap.mmap) -> SZRG:
     if buf[:4] != b"SZRG":
         raise ValueError("Not a SZRG graph (bad magic)")
     version, num_nodes, num_edges, num_geoms, geom_bytes_total, num_names, names_bytes = \
@@ -134,7 +135,11 @@ def parse_szrg_bytes(buf: bytes) -> SZRG:
     else:
         geom_offsets = _le_array(buf, "<u4", count=num_geoms + 1, offset=off)
         off += (num_geoms + 1) * 4
-        geom_blob = bytes(buf[off:off + geom_bytes_total])
+        # A mapped graph must retain a view here: slicing mmap directly
+        # returns bytes and would copy the entire geometry section.
+        geom_blob = (memoryview(buf)[off:off + geom_bytes_total]
+                     if isinstance(buf, mmap.mmap)
+                     else bytes(buf[off:off + geom_bytes_total]))
         off += geom_bytes_total
 
     name_offsets = _le_array(buf, "<u4", count=num_names + 1, offset=off)
@@ -159,7 +164,7 @@ def parse_szrg_bytes(buf: bytes) -> SZRG:
     )
 
 
-def parse_szgm_bytes(buf: bytes) -> tuple[np.ndarray, bytes, int]:
+def parse_szgm_bytes(buf: bytes | mmap.mmap) -> tuple[np.ndarray, bytes | memoryview, int]:
     """Parse the SZGM (Streetzim Graph-Geoms) v5 companion blob.
 
     Returns (geom_offsets, geom_blob, num_geoms). Keep this parser in sync
@@ -173,7 +178,9 @@ def parse_szgm_bytes(buf: bytes) -> tuple[np.ndarray, bytes, int]:
     off = 16
     geom_offsets = _le_array(buf, "<u4", count=num_geoms + 1, offset=off)
     off += (num_geoms + 1) * 4
-    geom_blob = bytes(buf[off:off + geom_bytes_total])
+    geom_blob = (memoryview(buf)[off:off + geom_bytes_total]
+                 if isinstance(buf, mmap.mmap)
+                 else bytes(buf[off:off + geom_bytes_total]))
     return geom_offsets, geom_blob, num_geoms
 
 
@@ -301,24 +308,33 @@ def load_from_zim(zim_path: str | Path) -> SZRG:
     return g
 
 
-def load_from_file(path: str | Path, geoms_path: str | Path | None = None) -> SZRG:
+def _file_buffer(path: str | Path, mapped: bool) -> bytes | mmap.mmap:
+    with open(path, "rb") as fh:
+        return mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) if mapped else fh.read()
+
+
+def load_from_file(path: str | Path, geoms_path: str | Path | None = None,
+                   *, mapped: bool = False) -> SZRG:
     """Load SZRG from a raw file. Optionally attach a SZGM companion.
 
-    When ``geoms_path`` is None and the main file is v5, the caller gets back
-    a geom-less graph — fine for A* which doesn't read geoms, but no
-    geom_sequence field in the route fingerprint.
+    For v5, an omitted ``geoms_path`` is discovered beside the main file.
+    If no companion exists, the graph is geom-less — fine for A* which
+    doesn't read geoms, but no geom_sequence in the route fingerprint.
+
+    ``mapped=True`` keeps arrays and geometries as read-only file views.
+    The OS can reclaim those pages under memory pressure. The views own
+    the mappings, which close when their last reference is released; the
+    source files must remain unchanged while any views are alive. Names
+    remain bytes for the reader's UTF-8 decoding API.
     """
-    with open(path, "rb") as fh:
-        g = parse_szrg_bytes(fh.read())
+    g = parse_szrg_bytes(_file_buffer(path, mapped))
     if g.version == 5 and geoms_path is not None:
-        with open(geoms_path, "rb") as gh:
-            g.attach_geoms(gh.read())
+        g.attach_geoms(_file_buffer(geoms_path, mapped))
     elif g.version == 5:
         # Auto-discover companion beside the main file (common case: both
         # written by ``extract_routing_graph(split_graph=True)``).
         guess = Path(path).with_name(Path(path).stem.replace(
             "graph", "graph-geoms") + ".bin")
         if guess.is_file():
-            with open(guess, "rb") as gh:
-                g.attach_geoms(gh.read())
+            g.attach_geoms(_file_buffer(guess, mapped))
     return g

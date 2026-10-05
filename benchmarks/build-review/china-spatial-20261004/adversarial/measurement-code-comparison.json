@@ -1,0 +1,51 @@
+{
+  "historical_snapshot": "out/spatial-memory-20261004/source-final",
+  "checks": [
+    {
+      "file": "streetzim/routing/reader.py",
+      "function": "parse_szrg_bytes",
+      "unchanged_from_measured_loader_or_spatial_code": true
+    },
+    {
+      "file": "streetzim/routing/reader.py",
+      "function": "parse_szgm_bytes",
+      "unchanged_from_measured_loader_or_spatial_code": true
+    },
+    {
+      "file": "streetzim/routing/reader.py",
+      "function": "load_from_file",
+      "unchanged_from_measured_loader_or_spatial_code": true
+    },
+    {
+      "file": "streetzim/routing/reader.py",
+      "function": "_file_buffer",
+      "unchanged_from_measured_loader_or_spatial_code": true
+    },
+    {
+      "file": "streetzim/routing/spatial.py",
+      "function": "_group_nodes",
+      "unchanged_from_measured_loader_or_spatial_code": true
+    },
+    {
+      "file": "streetzim/routing/spatial.py",
+      "function": "build_spatial",
+      "unchanged_from_measured_loader_or_spatial_code": true
+    },
+    {
+      "file": "wikidata_cache.py",
+      "function": "_cache_buckets",
+      "unchanged_from_measured_loader_or_spatial_code": true
+    },
+    {
+      "file": "wikidata_cache.py",
+      "function": "load_cache",
+      "unchanged_from_measured_loader_or_spatial_code": true
+    },
+    {
+      "file": "wikidata_cache.py",
+      "function": "load_cache_for_zim",
+      "unchanged_from_measured_loader_or_spatial_code": true
+    }
+  ],
+  "interpretation": "Earlier measurements retain their original source hashes. Subsequent review fixes did not change these measured algorithms; no new large benchmark is claimed."
+}

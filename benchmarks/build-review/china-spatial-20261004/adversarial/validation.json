@@ -1,0 +1,79 @@
+{
+  "base": "29ec7da539a8611472420903f800d477a83ec610",
+  "source": "source.json",
+  "linux": {
+    "suite": {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "72",
+      "tests": "2299",
+      "time": "142.071",
+      "timestamp": "2026-10-05T02:42:44.654831+00:00",
+      "hostname": "188bd3c5d50f"
+    },
+    "passed": 2227,
+    "exit_code": 0,
+    "skips": {
+      "no built Rust streetzim-pack (STREETZIM_PACK_BIN)": 3,
+      "xapianbuilder not built (XAPIANBUILDER_BIN)": 3,
+      "pinned glyph ranges not in the cache and not downloadable: https://fonts.openmaptiles.org/Open%20Sans%20Regular/1536-1791.pbf: <urlopen error [Errno -3] Temporary failure in name resolution> (after 2 attempts)": 22,
+      "node not installed": 2,
+      "missing osm-washington-dc-2026-04-22.zim for end-to-end chunk test": 1,
+      "could not import 'zimfarm_backend.common.schemas.offliners.models': No module named 'zimfarm_backend'": 1,
+      "source ZIM not present: osm-baltics-2026-04-22.zim": 1,
+      "source ZIM not present: osm-colorado-2026-04-22.zim": 1,
+      "source ZIM not present: osm-hispaniola-2026-04-22.zim": 1,
+      "source ZIM not present: osm-japan-2026-04-22.zim": 2,
+      "source ZIM not present: osm-silicon-valley-2026-04-22.zim": 1,
+      "source ZIM not present: osm-washington-dc-2026-04-22.zim": 1,
+      "node is not installed": 8,
+      "no dated ZIM on this host": 9,
+      "no browser/node/page on this host": 1,
+      "slow: run with --runslow or STREETZIM_RUNSLOW=1": 14,
+      "osm-silicon-valley-2026-04-22.zim not present locally \u2014 nothing to control-test": 1
+    },
+    "image": "sha256:9175b7ef8292eb93dac957d942ed853f5be6d15294ac8326da4ce86266e93547",
+    "init": true,
+    "network": false,
+    "cpus": 4,
+    "memory_bytes": 8589934592,
+    "swap_bytes": 0
+  },
+  "native": {
+    "python": "3.12",
+    "platform": "Darwin",
+    "passed": 133,
+    "skipped": 10,
+    "skip_scope": "Linux root/real UID tests run in Linux suite"
+  },
+  "lint": "Ruff passes",
+  "typing": "No new Pyright findings; 16 existing baseline findings",
+  "monaco": {
+    "build_exit_code": 0,
+    "backend": "libzim in Docker",
+    "profile": "full",
+    "terrain": false,
+    "network": false,
+    "cached_mbtiles": true,
+    "content_identical_to_pre_review_archive": 6440,
+    "expected_xapian_differences": 2,
+    "other_differences": 0,
+    "metadata_routing_progress_kiwix_search": "passed (208 search results open)",
+    "full_profile_content": "passed",
+    "zimcheck": "Pass",
+    "wikidata_loaded": 207,
+    "wikidata_bundled": 96,
+    "wikipedia_articles": 7,
+    "artifact_sha256": "09ec10867b69cae738db93a605a1cd585da31de9f240940cb0b7db2014ed7e23"
+  },
+  "known_limits": [
+    "Full production China build below 10 GB has not been measured.",
+    "ACL-protected shared caches require a writer able to preserve file UID/GID. Unsupported different-UID ACL-only updates fail explicitly before that file is replaced.",
+    "Cache publication is per file, not a cache-wide transaction. Completed earlier bucket updates are not rolled back on later failure.",
+    "The strict global manifest recount increases shared-cache I/O.",
+    "The final Monaco fixture uses cached/offline sources and terrain off; it does not establish live Wikipedia completeness."
+  ],
+  "earlier_test_attempt": "First full run exposed test fixture isolation (globally redirected tempfile.tempdir); fixed by explicit /tmp. Later complete runs passed; logs retained locally.",
+  "unrelated_local_edits": "Pre-existing cloud-script deletions and operational/untracked files were left untouched."
+}

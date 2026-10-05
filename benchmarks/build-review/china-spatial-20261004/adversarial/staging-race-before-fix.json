@@ -1,0 +1,15 @@
+{
+  "source_sha256": "76d749621985998c7420a3ac9ec5571751fe09186c2799c969f42095de380e79",
+  "scope": "Controlled realLinuxUID1001 reader opens empty stage before helper; helper then sets0600 before dump.",
+  "initial": [
+    {
+      "original_readable": false,
+      "initial_stage_bytes": "",
+      "mode_before_helper": "0o644"
+    }
+  ],
+  "reader_after_completion": {
+    "retained_fd_read": "{\"Q110\":{\"label\":\"New private payload\"}}"
+  },
+  "published_mode": "0o600"
+}

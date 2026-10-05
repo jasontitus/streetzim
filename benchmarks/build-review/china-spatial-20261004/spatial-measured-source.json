@@ -1,0 +1,9 @@
+{
+  "base": "29ec7da539a8611472420903f800d477a83ec610",
+  "files": {
+    "streetzim/routing/reader.py": "73e66908d6238710da3271e9a6c676db8bb2802ddf31be8eec159b2f54d9a63f",
+    "streetzim/routing/spatial.py": "8dbf8be03ef74c929a3a6323c4a8a9a934fbbd6a9050a6a2fb5a51876417eca7",
+    "tests/fixtures/spatial_build_reference.py": "19c6bb1ce651efe195adce41911b6a0af8b06b5220ecbd7c801e3cdf9cc8b35d",
+    "tools/benchmark_spatial_memory.py": "f344d6518c58bc7593964cc7078d8acd72b62d196c76e140c321e8c127f6de07"
+  }
+}

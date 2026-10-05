@@ -1,0 +1,55 @@
+{
+  "scope": "Corrected helper realLinux50fact probe; workload constants reduced only for test.",
+  "nonempty_results_exit": 1,
+  "nonempty_results_preserved": true,
+  "empty_existing_results_exit": 0,
+  "empty_existing_results_summary": {
+    "fixture": {
+      "entries": 50,
+      "buckets": 3,
+      "selected": 3,
+      "selected_fraction": 0.06,
+      "json_bytes": 18938,
+      "fields": "all: qid,label,description120,instance_of; country1/3; population1/4; area1/10; Wikipedia title+URL3/10; extract500 2/10",
+      "bucket_selection": "global index modulo50 in[0,1,2], spread over all90prefix buckets",
+      "synthetic_limit": "Representative cache field shape only; frequencies and text lengths are explicit synthetic parameters, not measured China distribution."
+    },
+    "selected_compact_sha256": "a53ce1aec42f3ca569de75f854999d160571a06515781b3a49b8880ca13bb2ec",
+    "runs": 6,
+    "limits": {
+      "memory_bytes": 268435456,
+      "swap_bytes": 0,
+      "cpus": 0.5,
+      "cpu_max": "50000 100000",
+      "errors": {}
+    },
+    "provenance": {
+      "baseline_git": "29ec7da",
+      "sources": {
+        "wikidata_baseline_29ec7da.py": "3e9d81d63451bbf89ae9572d523917418ff03c2e62c007ce8ade64c4cd858fb3",
+        "wikidata_current_final.py": "07be6d06f29bb4ec74ea2aa37b57ec128f7affbbb9fc1ef285165bd09d566c78"
+      },
+      "operator_image_label": "operator-test-label",
+      "image_label_verified_by_helper": false,
+      "measurement": "Single fresh child per run; /proc/PID/smaps_rollup samplesRSS/PSS/anonymous at0.05s; exact wait4 peakRSS; worker wall/CPU excludes startup and hash validation."
+    },
+    "baseline": {
+      "median_load_wall_s": 0.004397041999709472,
+      "median_load_cpu_s": 0.0020435000000000036,
+      "median_load_peak_rss_bytes": 26857472,
+      "median_wait4_peak_rss_bytes": 26857472,
+      "median_sampled_peak_rss_bytes": 27332608,
+      "median_sampled_peak_pss_bytes": 17830912,
+      "median_sampled_peak_anonymous_bytes": 14979072
+    },
+    "current": {
+      "median_load_wall_s": 0.008222082999964186,
+      "median_load_cpu_s": 0.0020108309999999907,
+      "median_load_peak_rss_bytes": 27103232,
+      "median_wait4_peak_rss_bytes": 27103232,
+      "median_sampled_peak_rss_bytes": 27594752,
+      "median_sampled_peak_pss_bytes": 17943552,
+      "median_sampled_peak_anonymous_bytes": 15212544
+    }
+  }
+}

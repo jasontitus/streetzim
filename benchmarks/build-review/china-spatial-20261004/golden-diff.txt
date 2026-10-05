@@ -1,0 +1,18 @@
+before /data/before/monaco.zim: 1,190 entries, uuid f12ba8b1-790f-ea3a-fe6a-39fcc3a0aa15
+after  /data/after/monaco.zim: 1,190 entries, uuid 13d98add-520c-837d-6f61-81a1cfbc98b8
+control /data/control/monaco.zim: 1,190 entries
+  identical      1,188
+  volatile           2
+  reordered          0
+  tiles-equal        0
+  moved              0
+  noise              0
+  changed            0
+  only-before        0
+  only-after         0
+
+volatile:
+  X/fulltext/xapian
+  X/title/xapian
+
+RESULT: no differences beyond the expected ones

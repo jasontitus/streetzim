@@ -1,0 +1,60 @@
+{
+  "baseline": "29ec7da",
+  "scope": [
+    "streetzim/routing/reader.py",
+    "streetzim/routing/spatial.py",
+    "streetzim/zim_writer.py spatial integration",
+    "tests/test_spatial_build_memory.py",
+    "tests/fixtures/spatial_build_reference.py"
+  ],
+  "introduced_findings": [],
+  "conclusion": "No introduced defect demonstrated in the reviewed changes.",
+  "verification": {
+    "targeted_pytest": {
+      "passed": 89,
+      "skipped": 7,
+      "command": "venv312/bin/python -m pytest -q tests/test_spatial_build_memory.py tests/test_spatial_chunking.py tests/test_szrg_parser.py tests/test_szrg_v5_split.py tests/test_spatial_routing_in_child.py"
+    },
+    "fixture": "Frozen build_spatial function AST exactly matches git show 29ec7da:streetzim/routing/spatial.py.",
+    "parser_versions": "Mapped v2, v3, v4, v5 parsing, geometry/name bytes, A* fingerprints, borrowed array references, mapping reclamation all match the baseline.",
+    "grouping": "700 baseline differential cases over block sizes 1, 2, 7, 16, 257, 20 seeds, and cell scales 0, 1, 10, 2000, 11930464, UINT32_MAX, -1.",
+    "geometry": "Dense cells with 16383, 16384, 16385, 32771 unique geometries; empty and repeated geometries, odd byte offsets, reversed encounter order and NO_GEOM; in-memory and disk output match baseline.",
+    "byteorder": "Explicit little-endian and big-endian source array representations match baseline output. This is an input-array parity test, not a native big-endian host test.",
+    "large_offsets": "Sparse v5 companion file of 4294967308 bytes, geometry start 4294967264, streams the requested 16 bytes correctly; traced allocations peak 9717 bytes and both mappings release.",
+    "integration": "Actual spawned _spatial_cell_files fallback and prepare_spatial_cells / cached packaging paths pass for v4 and v5; fake Creator and Item objects capture emitted bytes, so libzim itself is not exercised.",
+    "memory": "Fresh process dense single-cell graph: 300000 nodes / 900000 edges, 37200061 input bytes. Output SHA256 equal: d44ca6d26e83cdfd7a68a63d14a921eb33b36711974261ac9760cb7485560f29. Peak RSS baseline 315015168 bytes, current 156368896 bytes. Darwin/Python 3.12/NumPy 2.4.3; no Linux cgroup conclusion implied."
+  },
+  "preexisting_findings": [
+    {
+      "severity": "P2 (pre-existing; not attributable to this diff)",
+      "location": "streetzim/zim_writer.py:1906 and :1924",
+      "trigger": "Prepare a graph successfully; retry preparing the same unchanged graph and scale; raise ENOSPC after truncating the first cell; then consult _prepared_spatial_cells.",
+      "observed": "Both HEAD29ec7da and current return a cached prepared result referencing a one-byte graph-cell-00000.bin. A later explicit successful prepare restores all expected bytes.",
+      "reason": "The old prepared.json survives while files are overwritten; cache validity checks only graph stamp and file existence.",
+      "possible_fix": "Invalidate the manifest before rebuilding, or build in a generation directory and publish the completed generation atomically.",
+      "targeted_test": "Prepare, fault-inject a write failure on the first cell during a same-source rebuild, then require _prepared_spatial_cells to return None (or the old complete generation), and verify a successful retry restores baseline bytes.",
+      "evidence": "publication_probe.py and publication-results.json"
+    }
+  ],
+  "limitations": [
+    "Source remained unchanged by this review.",
+    "No complete country-scale conversion was run by this reviewer.",
+    "The seven pytest skips are retained; direct hand-packed integration probes supplement the unavailable optional dependency path."
+  ],
+  "followup_fix": {
+    "status": "fixed on parent request",
+    "files": [
+      "streetzim/zim_writer.py",
+      "tests/test_spatial_routing_in_child.py"
+    ],
+    "change": "Unlink the previous prepared.json before _spatial_cell_files can overwrite cells. A failed preparation cannot be reused as complete; successful retry publishes its marker and exact expected cell bytes.",
+    "regression": "test_failed_reprepare_invalidates_cached_cells: prepare successfully, inject partial first-cell overwrite followed by ENOSPC during same-source rebuild, require cache miss, then successfully retry and verify exact packaged bytes.",
+    "test_environment": "Docker streetzim-spatial-qa:20261004 with --init --network none, read-only repository mount, native osmium/libzim, qa-tools pytest path.",
+    "results": "All 7 tests in tests/test_spatial_routing_in_child.py passed. The new regression fails when prepare_spatial_cells is replaced in-memory by its exact HEAD29ec7da AST source; failure is at the post-ENOSPC cache-miss assertion. git diff --check passed.",
+    "evidence": [
+      "retry-fix-tests.log",
+      "retry-baseline-red.log",
+      "baseline_prepare_plugin.py"
+    ]
+  }
+}

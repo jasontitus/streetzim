@@ -1,0 +1,67 @@
+{
+  "suite": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "72",
+    "tests": "2247",
+    "time": "125.972",
+    "timestamp": "2026-10-05T01:57:35.144723+00:00",
+    "hostname": "f36bd05bfe00"
+  },
+  "exit_code": 0,
+  "skips": {
+    "no built Rust streetzim-pack (STREETZIM_PACK_BIN)": 3,
+    "xapianbuilder not built (XAPIANBUILDER_BIN)": 3,
+    "pinned glyph ranges not in the cache and not downloadable: https://fonts.openmaptiles.org/Open%20Sans%20Regular/1536-1791.pbf: <urlopen error [Errno -3] Temporary failure in name resolution> (after 2 attempts)": 22,
+    "node not installed": 2,
+    "missing osm-washington-dc-2026-04-22.zim for end-to-end chunk test": 1,
+    "could not import 'zimfarm_backend.common.schemas.offliners.models': No module named 'zimfarm_backend'": 1,
+    "source ZIM not present: osm-baltics-2026-04-22.zim": 1,
+    "source ZIM not present: osm-colorado-2026-04-22.zim": 1,
+    "source ZIM not present: osm-hispaniola-2026-04-22.zim": 1,
+    "source ZIM not present: osm-japan-2026-04-22.zim": 2,
+    "source ZIM not present: osm-silicon-valley-2026-04-22.zim": 1,
+    "source ZIM not present: osm-washington-dc-2026-04-22.zim": 1,
+    "node is not installed": 8,
+    "no dated ZIM on this host": 9,
+    "no browser/node/page on this host": 1,
+    "slow: run with --runslow or STREETZIM_RUNSLOW=1": 14,
+    "osm-silicon-valley-2026-04-22.zim not present locally \u2014 nothing to control-test": 1
+  },
+  "test_image": "sha256:9175b7ef8292eb93dac957d942ed853f5be6d15294ac8326da4ce86266e93547",
+  "init": true,
+  "memory_bytes": 8589934592,
+  "cpus": 4,
+  "network": false,
+  "source": "source-final.json",
+  "initial_attempt": "Runtime-only container lacked git and default DuckDB cache; Python PID1 conflicted with an isolate test assumption. Final test image adds these test prerequisites and uses --init. Initial failures retained in out/spatial-memory-20261004/linux-core.log.",
+  "golden": {
+    "entries": 1190,
+    "identical": 1188,
+    "volatile_xapian": 2,
+    "changed": 0,
+    "only_before": 0,
+    "only_after": 0,
+    "zimcheck": "Pass"
+  },
+  "full_profile": {
+    "zimcheck": "Pass",
+    "openzim_output": "metadata, illustration, progress8/8, routing, Kiwix search208results open",
+    "profile_content": "Overture, Wikidata and Wikipedia present and credited",
+    "wikidata_entries": 207,
+    "wikipedia_articles": 7,
+    "terrain": false,
+    "network": false,
+    "tiles": "cached MBTiles",
+    "source": "source-current snapshot; later changes affect failed cache publication only and two spatial comments"
+  },
+  "input_sha256": {
+    "golden/inputs/monaco.osm.pbf": "194d229f6ad19071ffb6ee35db78727a04a1ea975f0a8350543c616fa3f409bf",
+    "golden/inputs/monaco.mbtiles": "589dab49d0fb97d2fd6d44a545d130c85430ce5e821986714d35826991db0c8a"
+  },
+  "artifact_sha256": {
+    "golden/after/monaco.zim": "0c39ee259fb845795079a93dde9d552d86e56c09585f80b6d5fea0be3516bd08",
+    "full-profile/output/osm-monaco-memory.zim": "f04d69481a686f4756ca3c401045e8f8cd1561facdee8caf538b97fcefdb29fa"
+  }
+}

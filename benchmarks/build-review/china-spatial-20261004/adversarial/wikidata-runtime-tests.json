@@ -1,0 +1,56 @@
+[
+  {
+    "scenario": "finite",
+    "limits": {
+      "memory_bytes": 2147483648,
+      "swap_bytes": 0,
+      "cpus": 2.0,
+      "cpu_max": "200000 100000",
+      "errors": {}
+    }
+  },
+  {
+    "scenario": "unlimited",
+    "limits": {
+      "memory_bytes": "max",
+      "swap_bytes": "max",
+      "cpus": null,
+      "cpu_max": "max 100000",
+      "errors": {}
+    }
+  },
+  {
+    "scenario": "missing",
+    "limits": {
+      "memory_bytes": null,
+      "swap_bytes": null,
+      "cpus": null,
+      "cpu_max": null,
+      "errors": {
+        "memory.max": "[Errno 2] No such file or directory: '/Users/jasontitus/experiments/streetzim/out/adversarial-review-20261004/evidence/cgroup-guard-3q37_s2x/missing/memory.max'",
+        "memory.swap.max": "[Errno 2] No such file or directory: '/Users/jasontitus/experiments/streetzim/out/adversarial-review-20261004/evidence/cgroup-guard-3q37_s2x/missing/memory.swap.max'",
+        "cpu.max": "[Errno 2] No such file or directory: '/Users/jasontitus/experiments/streetzim/out/adversarial-review-20261004/evidence/cgroup-guard-3q37_s2x/missing/cpu.max'"
+      }
+    }
+  },
+  {
+    "scenario": "malformed",
+    "limits": {
+      "memory_bytes": null,
+      "swap_bytes": null,
+      "cpus": null,
+      "cpu_max": null,
+      "errors": {
+        "memory.max": "invalid literal for int() with base 10: 'bad'",
+        "memory.swap.max": "invalid literal for int() with base 10: 'bad'",
+        "cpu.max": "CPU period must be positive"
+      }
+    }
+  },
+  {
+    "scenario": "native-non-Linux-CLI",
+    "platform": "darwin",
+    "exit_code": 2,
+    "stderr": "usage: benchmark.py [-h] [--repo REPO] [--evidence EVIDENCE] [--cache CACHE]\n                    [--results RESULTS] [--prepare]\n                    [--worker {baseline,current}] [--image-label IMAGE_LABEL]\nbenchmark.py: error: benchmark requires Linux /proc and Linux wait4 RSS units\n"
+  }
+]

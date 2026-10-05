@@ -1,0 +1,48 @@
+[
+  {
+    "setgid": false,
+    "writers": [
+      {
+        "uid": 1000,
+        "inode": 661230,
+        "mode": "0o660",
+        "group": 2000
+      },
+      {
+        "uid": 1001,
+        "inode": 661230,
+        "mode": "0o660",
+        "group": 2000
+      }
+    ],
+    "qids": [
+      "Q110",
+      "Q11000",
+      "Q11001"
+    ],
+    "stages_remaining": 0
+  },
+  {
+    "setgid": true,
+    "writers": [
+      {
+        "uid": 1000,
+        "inode": 661236,
+        "mode": "0o660",
+        "group": 2000
+      },
+      {
+        "uid": 1001,
+        "inode": 661236,
+        "mode": "0o660",
+        "group": 2000
+      }
+    ],
+    "qids": [
+      "Q110",
+      "Q11000",
+      "Q11001"
+    ],
+    "stages_remaining": 0
+  }
+]

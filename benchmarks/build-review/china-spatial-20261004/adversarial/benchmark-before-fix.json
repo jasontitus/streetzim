@@ -1,0 +1,24 @@
+[
+  {
+    "trigger": "--report aliases input",
+    "exit_code": 0,
+    "original_input_sha256": "aacb6c69537c1d70479c682c4ae9739faf911fff7bab51c0a4554923521b9b25",
+    "input_sha256_after": "7ad2fa3d27d24c91010fe254eaae3f2c4afe4e34b23e510226ff9feedeaae24c",
+    "input_magic_after": "{\n  ",
+    "report_magic": "{\n  ",
+    "claimed_output_sha256": "f3968dca0644f0b37bcca57fffd8455c94751a0409a1dc83edf62ed8e3395d7d",
+    "actual_output_sha256_after_report": "f3968dca0644f0b37bcca57fffd8455c94751a0409a1dc83edf62ed8e3395d7d",
+    "claimed_output_matches_actual": true
+  },
+  {
+    "trigger": "--report aliases cell",
+    "exit_code": 0,
+    "original_input_sha256": "aacb6c69537c1d70479c682c4ae9739faf911fff7bab51c0a4554923521b9b25",
+    "input_sha256_after": "aacb6c69537c1d70479c682c4ae9739faf911fff7bab51c0a4554923521b9b25",
+    "input_magic_after": "SZRG",
+    "report_magic": "{\n  ",
+    "claimed_output_sha256": "f3968dca0644f0b37bcca57fffd8455c94751a0409a1dc83edf62ed8e3395d7d",
+    "actual_output_sha256_after_report": "ffee76f32726aa2cdee62fbee574187e589ee21557d94b30da9cb9f0519c9b69",
+    "claimed_output_matches_actual": false
+  }
+]

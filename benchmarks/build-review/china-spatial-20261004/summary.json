@@ -1,0 +1,119 @@
+{
+  "baseline_commit": "29ec7da539a8611472420903f800d477a83ec610",
+  "image": "sha256:dfeddd2a65ccfcf6cd72665cae0e3e4a6497cf81248f512db14307e41aab1893",
+  "synthetic": true,
+  "big_graph": {
+    "nodes": 43600000,
+    "edges": 105000000,
+    "geometry_bytes": 2092800000,
+    "input_bytes": 4890400061,
+    "cells": 10000,
+    "parent_reservation_bytes": 1677721600
+  },
+  "large_runs": {
+    "china-size-reference-16g.json": {
+      "wall_s": 76.56771836899998,
+      "process_peak_rss_bytes": 11058225152,
+      "sampled_peaks_bytes": {
+        "VmRSS": 11004481536,
+        "RssAnon": 10985660416,
+        "RssFile": 19054592,
+        "Pss": 11004477440,
+        "cgroup_current": 17179336704,
+        "cgroup_peak": 17179869184,
+        "cgroup_anon": 10987757568,
+        "cgroup_file": 9780908032,
+        "cgroup_kernel": 170528768
+      },
+      "output_sha256": "c68e9f6a8250d3021f1f40de02c7773d40ddad71785471a4f094194b830cf82a",
+      "output_bytes": 4891000053,
+      "memory_limit": "17179869184",
+      "swap_limit": "0",
+      "cgroup_events": {
+        "low": "0",
+        "high": "0",
+        "max": "1302",
+        "oom": "0",
+        "oom_kill": "0",
+        "oom_group_kill": "0"
+      }
+    },
+    "china-size-current-16g.json": {
+      "wall_s": 63.92008598799998,
+      "process_peak_rss_bytes": 6967324672,
+      "sampled_peaks_bytes": {
+        "VmRSS": 6968606720,
+        "RssAnon": 2577551360,
+        "RssFile": 4909469696,
+        "Pss": 6968602624,
+        "cgroup_current": 12523233280,
+        "cgroup_peak": 12523257856,
+        "cgroup_anon": 2577551360,
+        "cgroup_file": 9780903936,
+        "cgroup_kernel": 171642880
+      },
+      "output_sha256": "c68e9f6a8250d3021f1f40de02c7773d40ddad71785471a4f094194b830cf82a",
+      "output_bytes": 4891000053,
+      "memory_limit": "17179869184",
+      "swap_limit": "0",
+      "cgroup_events": {
+        "low": "0",
+        "high": "0",
+        "max": "0",
+        "oom": "0",
+        "oom_kill": "0",
+        "oom_group_kill": "0"
+      }
+    },
+    "china-size-current.json": {
+      "wall_s": 71.61019303299997,
+      "process_peak_rss_bytes": 6967586816,
+      "sampled_peaks_bytes": {
+        "VmRSS": 6968754176,
+        "RssAnon": 2575671296,
+        "RssFile": 4909449216,
+        "Pss": 6968750080,
+        "cgroup_current": 9663250432,
+        "cgroup_peak": 9663676416,
+        "cgroup_anon": 2575671296,
+        "cgroup_file": 7828541440,
+        "cgroup_kernel": 134512640
+      },
+      "output_sha256": "c68e9f6a8250d3021f1f40de02c7773d40ddad71785471a4f094194b830cf82a",
+      "output_bytes": 4891000053,
+      "memory_limit": "9663676416",
+      "swap_limit": "0",
+      "cgroup_events": {
+        "low": "0",
+        "high": "0",
+        "max": "2034",
+        "oom": "0",
+        "oom_kill": "0",
+        "oom_group_kill": "0"
+      }
+    }
+  },
+  "small_medians": {
+    "reference": {
+      "wall_s": 7.993338628999936,
+      "process_peak_rss_bytes": 892489728,
+      "sampled_peak_anon_bytes": 754208768,
+      "output_sha256": "c9d119c449d8869ab46c5c49fe6b9436b88cda636a5a3c9791f90c28695362db"
+    },
+    "current": {
+      "wall_s": 6.8568287950000695,
+      "process_peak_rss_bytes": 522944512,
+      "sampled_peak_anon_bytes": 108146688,
+      "output_sha256": "c9d119c449d8869ab46c5c49fe6b9436b88cda636a5a3c9791f90c28695362db"
+    }
+  },
+  "limitations": [
+    "Synthetic graphs, not China topology or an end-to-end country build.",
+    "Large equal-limit comparison is one run each on a shared Docker Desktop arm64 host.",
+    "Anonymous/PSS/current-cgroup samples every0.1s can miss brief peaks; OS RSS and lifetime cgroup peaks are high-water marks.",
+    "Large runs copy to a private disk inode; lifetime cgroup peaks include preparation and potentially both source and private-copy page caches.",
+    "9GiB success establishes capacity for this spatial workload plus fixed synthetic parent reservation; cgroup max events represent reclaim, not OOM.",
+    "Small runs use shared bind-mounted input, so file-cache charges need not belong to the measured cgroup; do not compare their cgroup peaks.",
+    "Small final repeats2-4 all retained; current2 overlapped larger fixture generation and took11.42s versus6.82/6.86s. Preserved source modification chronology is in small-run-chronology.json."
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "platform": "Linux-6.12.76-linuxkit-aarch64-with-glibc2.41",
+  "python": "3.14.7 (main, Sep 19 2026, 01:05:36) [GCC 14.2.0]",
+  "cgroup": {
+    "memory.max": "2147483648",
+    "memory.swap.max": "0",
+    "cpu.max": "200000 100000"
+  }
+}

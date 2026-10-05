@@ -51,6 +51,7 @@ File formats (little-endian, u32 unless stated):
 from __future__ import annotations
 
 import bisect
+import io
 import math
 import os
 import struct
@@ -93,6 +94,7 @@ SZRC_VERSION_CELL_COORDS = 2
 SZRC_VERSION = SZRC_VERSION_CELL_COORDS
 
 DEFAULT_CELL_SCALE = 10  # 0.1° cells — ~11 km lat; lon varies by latitude
+_NODE_BLOCK = 1 << 20
 
 # Cap any single ZIM entry well under the 200 MB validator threshold
 # (and even further under the libzim 4 GB blob limit). 5 M nodes × 8 B
@@ -134,6 +136,62 @@ def cell_of(lat_e7: int, lon_e7: int, scale: int) -> tuple[int, int]:
     return (lat_e7 * scale) // 10_000_000, (lon_e7 * scale) // 10_000_000
 
 
+def _group_nodes(nodes_arr, cell_scale):
+    """Stable cell-major permutation and its inverse, both uint32.
+
+    Only the keys and sort permutation span every node during sorting.
+    Coordinate arithmetic, boundary detection and inverse assignment use
+    bounded blocks. In particular, np.unique(return_index=True) would sort
+    the already sorted keys again and allocate several full-size arrays.
+    """
+    n = len(nodes_arr) // 2
+    if n > 0xFFFFFFFF:
+        raise ValueError("SZCI node count exceeds uint32")
+    bias = 1 << 30
+    cell_key = np.empty(n, dtype=np.uint64)
+    for s in range(0, n, _NODE_BLOCK):
+        e = min(s + _NODE_BLOCK, n)
+        lat = nodes_arr[s * 2:e * 2:2].astype(np.int64)
+        lon = nodes_arr[s * 2 + 1:e * 2:2].astype(np.int64)
+        lat *= cell_scale
+        lon *= cell_scale
+        lat //= 10_000_000
+        lon //= 10_000_000
+        lat += bias
+        lon += bias
+        cell_key[s:e] = ((lat.astype(np.uint64) << 32)
+                         | (lon & 0xFFFFFFFF).astype(np.uint64))
+        del lat, lon
+    order = np.argsort(cell_key, kind="stable").astype(np.uint32)
+    start_parts, key_parts = [], []
+    previous = None
+    for s in range(0, n, _NODE_BLOCK):
+        e = min(s + _NODE_BLOCK, n)
+        keys = cell_key[order[s:e]]
+        changed = np.empty(e - s, dtype=bool)
+        changed[0] = previous is None or keys[0] != previous
+        changed[1:] = keys[1:] != keys[:-1]
+        offsets = np.flatnonzero(changed)
+        start_parts.append(offsets + s)
+        key_parts.append(keys[offsets])
+        previous = keys[-1]
+        del keys, changed, offsets
+    del cell_key
+    starts = (np.concatenate(start_parts) if start_parts
+              else np.empty(0, dtype=np.int64))
+    unique_keys = (np.concatenate(key_parts) if key_parts
+                   else np.empty(0, dtype=np.uint64))
+    del start_parts, key_parts
+    lat_cells = ((unique_keys >> 32).astype(np.int64) - bias).astype(np.int32)
+    lon_cells = ((unique_keys & 0xFFFFFFFF).astype(np.int64) - bias).astype(np.int32)
+    ends = np.concatenate((starts[1:], [n])) if len(starts) else starts.copy()
+    old_to_new = np.empty(n, dtype=np.uint32)
+    for s in range(0, n, _NODE_BLOCK):
+        e = min(s + _NODE_BLOCK, n)
+        old_to_new[order[s:e]] = np.arange(s, e, dtype=np.uint32)
+    return order, old_to_new, starts, ends, lat_cells, lon_cells
+
+
 def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
                   output_dir: str | Path | None = None,
                   ) -> tuple[bytes, dict, dict]:
@@ -141,9 +199,9 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
 
     With ``output_dir``: writes ``graph-cells-index.bin`` + per-cell
     ``graph-cell-{cid:05d}.bin`` files into the directory; the returned
-    cells dict is ``{cell_id: file_path_str}``. Memory-efficient for
-    continent-scale graphs (US: ~12 GB peak vs ~80 GB with the
-    in-memory return path).
+    cells dict is ``{cell_id: file_path_str}``. Use load_from_file(mapped=True)
+    to keep the source graph reclaimable. Grouping uses compact node arrays,
+    and cell sections go straight to disk without concatenating cell copies.
 
     Without ``output_dir``: returns cells as ``{cell_id: bytes}`` (legacy
     in-memory API used by tests). Suitable for graphs ≤ a few million
@@ -172,43 +230,12 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
     adj_arr = g.adj_offsets          # uint32 [num_nodes+1]
     edges_arr = g.edges              # uint32 [num_edges*stride]
     geom_offsets_arr = g.geom_offsets  # uint32
-    geom_blob = g.geom_blob          # bytes
+    geom_blob = g.geom_blob          # bytes or read-only mapped view
 
-    # ---- Pass 1: vectorized cell assignment + group-sort by cell ----------
-    # cell_of(lat, lon) = (lat*scale // 1e7, lon*scale // 1e7). Promote to
-    # int64 so lat_e7 (~9e8) × cell_scale doesn't overflow int32.
-    lats = nodes_arr[0::2].astype(np.int64, copy=False)
-    lons = nodes_arr[1::2].astype(np.int64, copy=False)
-    lat_cell_idx = (lats * cell_scale) // 10_000_000
-    lon_cell_idx = (lons * cell_scale) // 10_000_000
-    del lats, lons
-
-    # Pack (lat_cell, lon_cell) into a single uint64 sortable key. Bias
-    # both halves so negatives sort below positives in unsigned space.
-    BIAS = 1 << 30
-    cell_key = (((lat_cell_idx + BIAS).astype(np.uint64) << 32)
-                | ((lon_cell_idx + BIAS) & 0xFFFFFFFF).astype(np.uint64))
-    del lat_cell_idx, lon_cell_idx
-
-    # Stable sort so ties (same cell_key) preserve source-node-idx order.
-    # The sorted position is the SZCI v3 global node ID. Reindexing nodes
-    # cell-major makes every cell a contiguous range and removes the
-    # region-wide coordinate table from the read path.
-    order = np.argsort(cell_key, kind='stable')
-    old_to_new = np.empty(num_nodes, dtype=np.uint32)
-    old_to_new[order] = np.arange(num_nodes, dtype=np.uint32)
-    sorted_keys = cell_key[order]
-    unique_keys, cell_starts = np.unique(sorted_keys, return_index=True)
-    num_cells = int(len(unique_keys))
-    cell_starts = cell_starts.astype(np.int64, copy=False)
-    cell_ends = np.concatenate([cell_starts[1:],
-                                np.array([num_nodes], dtype=np.int64)])
-
-    # Decode (lat_cell, lon_cell) for the SZCI cell-metadata table.
-    cell_lat_arr = ((unique_keys >> 32).astype(np.int64) - BIAS).astype(np.int32)
-    cell_lon_arr = (((unique_keys & 0xFFFFFFFF).astype(np.int64) - BIAS)
-                    .astype(np.int32))
-    del cell_key, sorted_keys, unique_keys
+    # Stable ties retain source-node order, including across block boundaries.
+    order, old_to_new, cell_starts, cell_ends, cell_lat_arr, cell_lon_arr = \
+        _group_nodes(nodes_arr, cell_scale)
+    num_cells = len(cell_starts)
 
     # ---- Streaming output prep --------------------------------------------
     if output_dir is not None:
@@ -231,7 +258,7 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
         # Keep source IDs only while gathering source adjacency and coords.
         # Serialized edges are rewritten to cell-major SZCI v3 IDs.
         cell_nodes = order[s:e].astype(np.uint32, copy=False)
-        cell_coords = nodes_arr.reshape(-1, 2)[cell_nodes].copy()
+        cell_coords = nodes_arr.reshape(-1, 2)[cell_nodes]
         n_count = e - s
 
         # Per-node edge ranges + cumulative cell_adj.
@@ -256,7 +283,7 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
             del offsets_per_edge, cumul_per_edge, within_node_pos
 
             # One-shot fancy-index gather of all 5 columns (~e_count*5*4 B).
-            cell_edge_data = edges_view[edge_idx].copy()  # (e_count, stride)
+            cell_edge_data = edges_view[edge_idx]  # fancy indexing already copies
             del edge_idx
             cell_edge_data[:, 0] = old_to_new[cell_edge_data[:, 0]]
 
@@ -292,37 +319,39 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
                      inverse_of_encounter, pos_in_sorted, real_local,
                      local_geom_col)
 
-                # Per-cell geom blob: concat referenced byte ranges.
+                # Offsets only: write the referenced geometry ranges below,
+                # without a list of copied bytes and a joined geometry blob.
+                geom_starts = geom_offsets_arr[geoms_in_encounter_order]
+                geom_ends = geom_offsets_arr[geoms_in_encounter_order + 1]
+                if np.any(geom_ends < geom_starts) or int(geom_ends.max()) > len(geom_blob):
+                    raise ValueError("geometry offsets outside source blob")
+                lengths = geom_ends.astype(np.uint64) - geom_starts
+                cumulative = np.cumsum(lengths, dtype=np.uint64)
+                if int(cumulative[-1]) > 0xFFFFFFFF:
+                    raise OverflowError("cell geometry blob exceeds uint32")
                 local_geom_offsets = np.empty(g_count + 1, dtype=np.uint32)
                 local_geom_offsets[0] = 0
-                local_geom_parts: list[bytes] = []
-                running = 0
-                for gi in geoms_in_encounter_order.tolist():
-                    gs = int(geom_offsets_arr[gi])
-                    ge = int(geom_offsets_arr[gi + 1])
-                    chunk = bytes(geom_blob[gs:ge])
-                    local_geom_parts.append(chunk)
-                    running += len(chunk)
-                    local_geom_offsets[len(local_geom_parts)] = running
-                local_geom_buf = b"".join(local_geom_parts)
-                del local_geom_parts, geoms_in_encounter_order
+                local_geom_offsets[1:] = cumulative
+                del lengths, cumulative
             else:
                 g_count = 0
                 local_geom_offsets = np.array([0], dtype=np.uint32)
-                local_geom_buf = b""
+                geoms_in_encounter_order = np.empty(0, dtype=np.uint32)
+                geom_starts = geom_ends = np.empty(0, dtype=np.uint32)
             del real_geoms, no_geom_mask, geom_col
         else:
             cell_edge_data = np.empty((0, stride), dtype=np.uint32)
             g_count = 0
             local_geom_offsets = np.array([0], dtype=np.uint32)
-            local_geom_buf = b""
+            geoms_in_encounter_order = np.empty(0, dtype=np.uint32)
+            geom_starts = geom_ends = np.empty(0, dtype=np.uint32)
 
         cell_node_counts[cid] = n_count
         cell_edge_counts[cid] = e_count
         cell_geom_counts[cid] = g_count
 
-        # SZRC serialize — write directly to bytes; layout per file format
-        # spec at the top of this module.
+        # SZRC sections are contiguous buffers. Avoid body + cell_bytes,
+        # which kept two more whole-cell copies beside the gathered arrays.
         cell_header = SZRC_MAGIC + struct.pack(
             "<6I",
             SZRC_VERSION,
@@ -330,27 +359,34 @@ def build_spatial(g: SZRG, *, cell_scale: int = DEFAULT_CELL_SCALE,
             n_count,
             e_count,
             g_count,
-            len(local_geom_buf),
+            int(local_geom_offsets[-1]),
         )
-        body = (
-            cell_coords.reshape(-1).tobytes()
-            + cell_adj.tobytes()
-            + cell_edge_data.reshape(-1).tobytes()
-            + local_geom_offsets.tobytes()
-            + local_geom_buf
-        )
-        cell_bytes = cell_header + body
-
         if output_dir is not None:
             cell_path = output_dir / f"graph-cell-{cid:05d}.bin"
-            cell_path.write_bytes(cell_bytes)
-            cells_out[cid] = str(cell_path)
+            output = cell_path.open("wb")
         else:
-            cells_out[cid] = cell_bytes
+            output = io.BytesIO()
+        with output:
+            output.write(cell_header)
+            for section in (cell_coords, cell_adj, cell_edge_data, local_geom_offsets):
+                if section.size:
+                    output.write(section.data.cast("B"))
+            source_geoms = memoryview(geom_blob)
+            # Python ints avoid two NumPy scalar conversions per geometry;
+            # bound the temporary lists even for a very dense/coarse cell.
+            for start in range(0, g_count, 16384):
+                for gs, ge in zip(geom_starts[start:start + 16384].tolist(),
+                                  geom_ends[start:start + 16384].tolist()):
+                    output.write(source_geoms[gs:ge])
+            del source_geoms, section
+            if isinstance(output, io.BytesIO):
+                cells_out[cid] = output.getvalue()
+            else:
+                cells_out[cid] = str(cell_path)
 
         # Free per-cell buffers so peak doesn't accumulate across cells.
         del (cell_nodes, cell_coords, cell_adj, cell_edge_data, local_geom_offsets,
-             local_geom_buf, cell_header, body, cell_bytes,
+             geoms_in_encounter_order, geom_starts, geom_ends, cell_header,
              per_node_counts, node_e_starts, node_e_ends)
 
     # Free Pass 1 working arrays once cells are emitted.

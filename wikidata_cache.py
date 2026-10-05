@@ -25,14 +25,17 @@ to allow incremental updates and efficient loading.
 
 import argparse
 import json
+import os
 import re
 import sqlite3
 import sys
 import time
 import urllib.error
 import urllib.parse
+import uuid
 from collections import defaultdict
 from pathlib import Path
+from typing import Literal, overload
 
 from cloud.wikimedia_http import Pacer, TransientError, get_json, polite_pacer, user_agent
 from streetzim.paths import cache_root
@@ -215,113 +218,96 @@ def extract_qids_from_pbf(pbf_path, cache_dir=None):
 
 
 def extract_qids_from_mbtiles(mbtiles_path):
-    """Extract wikidata Q-IDs by scanning vector tiles for features with known names,
-    then matching against Wikidata by name + coordinates.
+    """Read tile Wikidata tags, with name/coordinate lookup for untagged features.
 
-    Note: Standard OpenMapTiles vector tiles don't include wikidata tags directly.
-    This is a fallback — PBF extraction is preferred.
-
-    Returns a dict mapping Q-ID -> {name, type, lat, lon}.
+    Direct IDs are independent of feature class, name, geometry and API
+    availability. Use the deepest available zoom up to 14 (or the lowest
+    available higher zoom), so lower-detail MBTiles retain cached facts too.
+    Returns Q-ID -> {name, type, optional lat/lon}.
     """
-    print("  Note: MBTiles mode extracts feature names but not Q-IDs directly.")
-    print("  For best results, use --pbf mode which reads wikidata tags from OSM.")
-    print("  Scanning tiles for named features to look up in Wikidata...")
-
     import gzip
+    import math
     import mapbox_vector_tile
+    from contextlib import closing
 
-    conn = sqlite3.connect(str(mbtiles_path))
-
-    # Get z14 tiles (highest detail)
-    rows = conn.execute(
-        "SELECT tile_column, tile_row, tile_data FROM tiles WHERE zoom_level = 14"
-    ).fetchall()
-    conn.close()
-
-    if not rows:
-        print("    No z14 tiles found")
-        return {}
-
-    # Layers with important named features
     search_layers = {
-        "place": "place",
-        "poi": "poi",
-        "park": "park",
-        "mountain_peak": "peak",
-        "aerodrome_label": "airport",
-        "water_name": "water",
+        "place": "place", "poi": "poi", "park": "park",
+        "mountain_peak": "peak", "aerodrome_label": "airport", "water_name": "water",
     }
-
-    # Extract named features with coordinates
-    features_by_name = {}
-    for col, row, data in rows:
-        tile_data = data
-        if data[:2] == b"\x1f\x8b":
+    qid_features, features_by_name = {}, {}
+    with closing(sqlite3.connect(str(mbtiles_path))) as conn:
+        zoom = conn.execute(
+            "SELECT MAX(zoom_level) FROM tiles WHERE zoom_level <= 14"
+        ).fetchone()[0]
+        if zoom is None:
+            zoom = conn.execute("SELECT MIN(zoom_level) FROM tiles").fetchone()[0]
+        if zoom is None:
+            print("    No vector tiles found")
+            return {}
+        print(f"  Scanning z{zoom} tiles for Wikidata tags and untagged named features...")
+        # Iterating the cursor bounds compressed-tile memory to one row.
+        rows = conn.execute(
+            "SELECT tile_column, tile_row, tile_data FROM tiles WHERE zoom_level = ?",
+            (zoom,))
+        for col, row, data in rows:
             try:
-                tile_data = gzip.decompress(data)
+                tile_data = gzip.decompress(data) if data[:2] == b"\x1f\x8b" else data
+                decoded = mapbox_vector_tile.decode(tile_data, y_coord_down=True)
             except Exception:
                 continue
-        try:
-            decoded = mapbox_vector_tile.decode(tile_data, y_coord_down=True)
-        except Exception:
-            continue
 
-        # TMS -> XYZ row conversion
-        y = (1 << 14) - 1 - row
-        for layer_name, feature_type in search_layers.items():
-            layer = decoded.get(layer_name)
-            if not layer:
-                continue
-            extent = layer.get("extent", 4096)
-            for feature in layer.get("features", []):
-                props = feature.get("properties", {})
-                name = props.get("name:latin") or props.get("name", "")
-                if not name or len(name) < 2:
-                    continue
-                place_class = props.get("class", "")
-                # Only look up significant features
-                if feature_type == "place" and place_class not in (
-                    "continent", "country", "state", "province", "city", "town"
-                ):
-                    continue
-
-                geom = feature.get("geometry", {})
-                coords = geom.get("coordinates")
-                if not coords:
-                    continue
-                geom_type = geom.get("type", "")
-                try:
-                    if geom_type == "Point":
-                        px, py = coords[0], coords[1]
-                    elif geom_type in ("Polygon", "MultiPolygon"):
-                        ring = coords[0] if geom_type == "Polygon" else coords[0][0]
-                        px = sum(c[0] for c in ring) / len(ring)
-                        py = sum(c[1] for c in ring) / len(ring)
-                    else:
+            n = 1 << zoom
+            y = n - 1 - row  # TMS -> XYZ
+            for layer_name, layer in decoded.items():
+                extent = layer.get("extent", 4096)
+                feature_type = search_layers.get(layer_name, layer_name)
+                for feature in layer.get("features", []):
+                    props = feature.get("properties") or {}
+                    name = props.get("name:latin") or props.get("name", "")
+                    qid = props.get("wikidata")
+                    direct = isinstance(qid, str) and _QID_RE.fullmatch(qid)
+                    info = {"name": name, "type": feature_type}
+                    geom = feature.get("geometry") or {}
+                    coords = geom.get("coordinates")
+                    point = None
+                    if coords:
+                        try:
+                            if geom.get("type") == "Point":
+                                point = coords[0], coords[1]
+                            elif geom.get("type") in ("Polygon", "MultiPolygon"):
+                                ring = coords[0] if geom["type"] == "Polygon" else coords[0][0]
+                                point = (sum(c[0] for c in ring) / len(ring),
+                                         sum(c[1] for c in ring) / len(ring))
+                        except (IndexError, ZeroDivisionError, TypeError):
+                            pass
+                    if point is not None:
+                        px, py = point
+                        info["lon"] = round((col + px / extent) / n * 360.0 - 180.0, 6)
+                        info["lat"] = round(math.degrees(math.atan(math.sinh(
+                            math.pi * (1 - 2 * (y + py / extent) / n)))), 6)
+                    if direct:
+                        old = qid_features.get(qid)
+                        if old is None or (not old.get("name") and name):
+                            qid_features[qid] = info
                         continue
-                except (IndexError, ZeroDivisionError):
-                    continue
+                    # Retain the existing name-lookup fallback for tiles that
+                    # do not carry IDs. Its heuristics must not filter tags.
+                    if layer_name not in search_layers or not name or len(name) < 2:
+                        continue
+                    place_class = props.get("class", "")
+                    if feature_type == "place" and place_class not in (
+                            "continent", "country", "state", "province", "city", "town"):
+                        continue
+                    if point is None:
+                        continue
+                    key = (name, feature_type, place_class)
+                    features_by_name.setdefault(key, {**info, "subtype": place_class})
 
-                import math
-                n = 1 << 14
-                lon = (col + px / extent) / n * 360.0 - 180.0
-                lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * (y + py / extent) / n)))
-                lat = math.degrees(lat_rad)
-
-                key = (name, feature_type, place_class)
-                if key not in features_by_name:
-                    features_by_name[key] = {
-                        "name": name,
-                        "type": feature_type,
-                        "subtype": place_class,
-                        "lat": round(lat, 6),
-                        "lon": round(lon, 6),
-                    }
-
-    print(f"    Found {len(features_by_name)} named features to look up")
-
-    # Batch query Wikidata by name + coordinates
-    qid_features = _lookup_qids_by_name(list(features_by_name.values()))
+    print(f"    Found {len(qid_features)} tagged Q-IDs and "
+          f"{len(features_by_name)} named features to look up")
+    if features_by_name:
+        for qid, info in _lookup_qids_by_name(list(features_by_name.values())).items():
+            qid_features.setdefault(qid, info)
     return qid_features
 
 
@@ -675,14 +661,15 @@ def fetch_wikipedia_extracts(wikidata_entries, batch_size=20, pacer=None):
     return pending
 
 
-def load_cache(cache_dir):
-    """Load existing cache from directory. Returns dict of Q-ID -> data."""
+def _cache_buckets(cache_dir, *, skip=(), strict=False):
+    """Yield one decoded cache bucket at a time, never the whole cache."""
     cache_dir = Path(cache_dir)
     if not cache_dir.exists():
-        return {}
+        return
 
-    entries = {}
     for json_file in sorted(cache_dir.glob("*.json")):
+        if json_file.name in skip:
+            continue
         if json_file.name == "manifest.json":
             continue
         if json_file.name.startswith("qids_"):
@@ -690,11 +677,29 @@ def load_cache(cache_dir):
         try:
             with open(json_file) as f:
                 bucket = json.load(f)
-            for qid, data in bucket.items():
-                entries[qid] = data
+            yield json_file.name, bucket
+            del bucket
         except (json.JSONDecodeError, OSError) as e:
+            if strict:
+                raise
             print(f"    Warning: failed to read {json_file}: {e}")
 
+
+def load_cache(cache_dir, *, qids=None):
+    """Load Q-ID -> data, optionally restricted to this extract's Q-IDs.
+
+    An empty selection loads nothing; None keeps the full-cache API.
+    Filtering happens bucket by bucket, before unrelated entries accumulate.
+    """
+    if qids is not None:
+        qids = set(qids)
+        if not qids:
+            return {}
+    entries = {}
+    for _name, bucket in _cache_buckets(cache_dir):
+        entries.update((qid, data) for qid, data in bucket.items()
+                       if qids is None or qid in qids)
+        del bucket
     return entries
 
 
@@ -702,12 +707,102 @@ def save_cache(cache_dir, entries, qid_features=None):
     """Save cache entries to directory, bucketed by Q-ID prefix.
 
     Each bucket file contains entries for Q-IDs sharing the same numeric prefix
-    (first 3 digits after 'Q'), keeping individual files small and updates incremental.
+    (first 2 digits after 'Q'), keeping individual files small and updates incremental.
+    Regional updates merge under the cache write lock and publish atomically:
+    an unreadable shared bucket must never be replaced by a partial selection.
     """
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
+    from streetzim.download import file_lock
+    _prepare_cache_lock(cache_dir)
+    with file_lock(cache_dir / "manifest.json"):
+        _save_cache_locked(cache_dir, entries, qid_features)
 
-    # Bucket by prefix (Q1234 -> bucket "1", Q12345 -> bucket "12", etc.)
+
+def _preserve_cache_permissions(staging, previous):
+    from streetzim.cache_permissions import preserve_cache_permissions
+    preserve_cache_permissions(staging, previous)
+
+
+def _discard_cache_stage(staging):
+    try:
+        staging.unlink(missing_ok=True)
+    except OSError:
+        # Leave an unremovable private stage; never mask the primary failure.
+        pass
+
+
+def _prepare_cache_lock(cache_dir):
+    """Publish a stable lock inode with the existing shared cache's access.
+
+    Fully set its group/mode before linking it into place, so a second UID
+    cannot race creation and open a temporarily inaccessible lock. Existing
+    lock inodes must never be replaced: other writers may already hold them.
+    """
+    manifest = cache_dir / "manifest.json"
+    lock = cache_dir / "manifest.json.lock"
+    if lock.exists():
+        return
+    staging = lock.with_name(f".{lock.name}.{uuid.uuid4().hex}.tmp")
+    stream = staging.open("x")
+    try:
+        with stream:
+            pass
+        _preserve_cache_permissions(staging, manifest)
+        try:
+            os.link(staging, lock)
+        except FileExistsError:
+            pass  # Another writer published first; use its stable inode.
+    finally:
+        _discard_cache_stage(staging)
+
+
+def _write_cache_json(path, value):
+    """Atomic JSON publication while the shared cache's write lock is held."""
+    staging = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    directory = None
+    if path.exists():
+        # An empty stage opened by another user before chmod stays readable
+        # through that FD afterwards. Keep existing-file replacements behind
+        # a private directory; clear inherited ACLs before creating any file.
+        directory = staging
+        directory.mkdir(mode=0o700)  # Exclusive: never clean up a collision.
+        staging = directory / "contents"
+        try:
+            from streetzim.cache_permissions import prepare_private_stage_directory
+            prepare_private_stage_directory(directory)
+            stream = staging.open("x", encoding="utf-8")
+        except BaseException:
+            _discard_cache_stage_directory(directory)
+            raise
+    else:
+        # A new cache file keeps its directory's normal inheritance/umask.
+        # Do not clean up a colliding path when exclusive creation fails.
+        stream = staging.open("x", encoding="utf-8")
+    try:
+        # Exclusive creation uses the normal cache-file permissions/umask.
+        # Set an existing file's access rules before writing any content:
+        # a private bucket must not become readable through its staging file.
+        with stream as f:
+            _preserve_cache_permissions(staging, path)
+            json.dump(value, f, separators=(",", ":"), ensure_ascii=False)
+        os.replace(staging, path)
+    finally:
+        _discard_cache_stage(staging)
+        if directory is not None:
+            _discard_cache_stage_directory(directory)
+
+
+def _discard_cache_stage_directory(directory):
+    try:
+        directory.rmdir()
+    except OSError:
+        pass  # As with stage-file cleanup, preserve the primary error.
+
+
+def _save_cache_locked(cache_dir, entries, qid_features):
+
+    # Bucket by prefix (Q1 -> bucket "1", Q12345 -> bucket "12", etc.)
     buckets = defaultdict(dict)
     for qid, data in entries.items():
         # Use first 2 digits of the numeric part as bucket key
@@ -725,36 +820,37 @@ def save_cache(cache_dir, entries, qid_features=None):
                 data["lon"] = osm["lon"]
         buckets[bucket_key][qid] = data
 
+    bucket_counts = {}
     for bucket_key, bucket_entries in buckets.items():
         bucket_path = cache_dir / f"{bucket_key}.json"
         # Merge with existing bucket if present
         # New entries take priority over existing (overwrites stubs with enriched data)
         if bucket_path.exists():
-            try:
-                with open(bucket_path) as f:
-                    existing = json.load(f)
-                # Merge: start with existing, then overlay new entries on top
-                # But prefer entries with more data (don't let stubs overwrite enriched)
-                for qid, new_data in bucket_entries.items():
-                    old_data = existing.get(qid)
-                    if old_data and old_data.get("label") and not new_data.get("label"):
-                        # Keep the enriched existing entry, don't overwrite with stub
-                        continue
-                    existing[qid] = new_data
-                bucket_entries = existing
-            except (json.JSONDecodeError, OSError):
-                pass
-        with open(bucket_path, "w") as f:
-            json.dump(bucket_entries, f, separators=(",", ":"), ensure_ascii=False)
+            with open(bucket_path) as f:
+                existing = json.load(f)
+            # Merge: start with existing, then overlay new entries on top.
+            # Prefer enriched entries to stubs. Read/decode failures propagate
+            # before publication; unrelated regions are only in this bucket.
+            for qid, new_data in bucket_entries.items():
+                old_data = existing.get(qid)
+                if old_data and old_data.get("label") and not new_data.get("label"):
+                    continue
+                existing[qid] = new_data
+            bucket_entries = existing
+        _write_cache_json(bucket_path, bucket_entries)
+        bucket_counts[bucket_path.name] = len(bucket_entries)
 
-    # Write manifest
+    # A regional update still describes the whole shared cache. Count the
+    # untouched buckets one at a time, without retaining their entries.
+    for name, bucket in _cache_buckets(cache_dir, skip=bucket_counts, strict=True):
+        bucket_counts[name] = len(bucket)
+        del bucket
     manifest = {
-        "total_entries": len(entries),
-        "buckets": len(buckets),
+        "total_entries": sum(bucket_counts.values()),
+        "buckets": len(bucket_counts),
         "updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
-    with open(cache_dir / "manifest.json", "w") as f:
-        json.dump(manifest, f, indent=2)
+    _write_cache_json(cache_dir / "manifest.json", manifest)
 
     print(f"    Saved {len(entries)} entries in {len(buckets)} buckets to {cache_dir}/")
 
@@ -793,10 +889,23 @@ def print_cache_stats(cache_dir):
         print(f"      {itype}: {count:,}")
 
 
-def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=False):
+@overload
+def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=False,
+                *, return_qids: Literal[False] = False) -> Path | None: ...
+
+
+@overload
+def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=False,
+                *, return_qids: Literal[True]) -> tuple[Path | None, set[str]]: ...
+
+
+def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=False,
+                *, return_qids: bool = False) -> Path | None | tuple[Path | None, set[str]]:
     """Main entry point: extract Q-IDs, fetch Wikidata, save cache.
 
-    Returns the cache directory path.
+    Returns the cache directory path, or (path, selected Q-IDs) when
+    return_qids=True. The selection is this call's validated extraction,
+    including an empty set, and is never inferred from a shared manifest.
     """
     cache_dir = Path(cache_dir or DEFAULT_CACHE_DIR)
 
@@ -807,18 +916,19 @@ def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=
         qid_features = extract_qids_from_mbtiles(mbtiles_path)
     else:
         print("Error: must specify --pbf or --mbtiles")
-        return None
+        return (None, set()) if return_qids else None
 
     # Validate even when extraction came from an older disk cache, and avoid
     # mutating the cached/external feature map supplied by the extractor.
     qid_features = {qid: qid_features[qid] for qid in _validated_qids(qid_features)}
+    result = (cache_dir, set(qid_features)) if return_qids else cache_dir
 
     if not qid_features:
         print("  No wikidata-tagged features found")
-        return cache_dir
+        return result
 
     # Step 2: Check what's already cached
-    existing = load_cache(cache_dir)
+    existing = load_cache(cache_dir, qids=qid_features)
     new_qids = [qid for qid in qid_features if qid not in existing]
     # Cached entries whose extract was never answered (a rate limit, a
     # stopped run): asked again, since a transient failure is never a miss.
@@ -828,7 +938,7 @@ def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=
 
     if not new_qids and not retry:
         print(f"  All {len(qid_features)} Q-IDs already cached")
-        return cache_dir
+        return result
 
     new_entries = {}
     if new_qids:
@@ -846,15 +956,16 @@ def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=
     all_entries = {**existing, **new_entries}
     save_cache(cache_dir, all_entries, qid_features)
 
-    return cache_dir
+    return result
 
 
-def load_cache_for_zim(cache_dir):
+def load_cache_for_zim(cache_dir, *, qids=None):
     """Load cache and format it for embedding in a ZIM file.
 
-    Returns a compact JSON string suitable for bundling.
+    Returns a compact Q-ID -> fields dict suitable for bundling. Pass the
+    extract's Q-IDs to avoid loading every region in a shared cache.
     """
-    entries = load_cache(cache_dir)
+    entries = load_cache(cache_dir, qids=qids)
     if not entries:
         return None
 

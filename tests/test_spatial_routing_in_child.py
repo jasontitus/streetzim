@@ -4,6 +4,7 @@ little), else in a child process at the ZIM step. Either way the ZIM gets
 exactly what build_spatial makes: the index and every cell."""
 from __future__ import annotations
 
+import errno
 import os
 import sys
 from pathlib import Path
@@ -98,6 +99,32 @@ def test_prepared_cells_for_another_graph_or_scale_are_not_used(graph, child_cal
     assert zim_writer._prepared_spatial_cells(graph, SCALE) is None
     assert _zim_items(graph) == _expected(graph)
     assert child_calls == ["_spatial_cell_files"]
+
+
+def test_failed_reprepare_invalidates_cached_cells(graph, monkeypatch, child_calls):
+    want = _expected(graph)
+    zim_writer.prepare_spatial_cells(graph, SCALE)
+    assert zim_writer._prepared_spatial_cells(graph, SCALE) is not None
+    assert _zim_items(graph) == want
+
+    def fail_after_partial_cell_write(routing_graph_path, cell_scale, output_dir):
+        (Path(output_dir) / "graph-cell-00000.bin").write_bytes(b"S")
+        raise OSError(errno.ENOSPC, "injected partial cell write")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(zim_writer, "_spatial_cell_files", fail_after_partial_cell_write)
+        with pytest.raises(OSError) as error:
+            zim_writer.prepare_spatial_cells(graph, SCALE)
+        assert error.value.errno == errno.ENOSPC
+
+    spatial = Path(graph).parent / "spatial"
+    assert (spatial / "graph-cell-00000.bin").read_bytes() == b"S"
+    assert zim_writer._prepared_spatial_cells(graph, SCALE) is None
+
+    zim_writer.prepare_spatial_cells(graph, SCALE)
+    assert zim_writer._prepared_spatial_cells(graph, SCALE) is not None
+    assert _zim_items(graph) == want
+    assert child_calls == []
 
 
 def test_the_routing_step_prepares_the_cells(graph, tmp_path, monkeypatch):

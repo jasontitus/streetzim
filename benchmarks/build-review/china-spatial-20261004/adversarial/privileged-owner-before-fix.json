@@ -1,0 +1,59 @@
+{
+  "source_sha256": "a1d6d0de0c4e51dc37d6a075116dc3e2cfe52448979a3cd74874052c6aec7554",
+  "results": [
+    {
+      "original_uid": 1000,
+      "original_gid": 1000,
+      "original_mode": "0o644",
+      "metadata_after_root_update": {
+        "11.json": {
+          "uid": 0,
+          "gid": 1000,
+          "mode": "0o644"
+        },
+        "manifest.json.lock": {
+          "uid": 0,
+          "gid": 1000,
+          "mode": "0o644"
+        },
+        "manifest.json": {
+          "uid": 0,
+          "gid": 1000,
+          "mode": "0o644"
+        }
+      },
+      "original_owner_next_update": {
+        "success": false,
+        "errno": 13,
+        "message": "[Errno 13] Permission denied: '/tmp/cache-owner-probe-_f42vt5p/cache/manifest.json.lock'"
+      }
+    },
+    {
+      "original_uid": 1000,
+      "original_gid": 1000,
+      "original_mode": "0o600",
+      "metadata_after_root_update": {
+        "11.json": {
+          "uid": 0,
+          "gid": 1000,
+          "mode": "0o600"
+        },
+        "manifest.json.lock": {
+          "uid": 0,
+          "gid": 1000,
+          "mode": "0o600"
+        },
+        "manifest.json": {
+          "uid": 0,
+          "gid": 1000,
+          "mode": "0o600"
+        }
+      },
+      "original_owner_next_update": {
+        "success": false,
+        "errno": 13,
+        "message": "[Errno 13] Permission denied: '/tmp/cache-owner-probe-sb84lg7s/cache/manifest.json.lock'"
+      }
+    }
+  ]
+}

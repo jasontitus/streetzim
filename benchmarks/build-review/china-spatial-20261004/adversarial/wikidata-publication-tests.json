@@ -1,0 +1,30 @@
+[
+  {
+    "probe": "exclusive publication",
+    "kind": "regular",
+    "passed": true
+  },
+  {
+    "probe": "exclusive publication",
+    "kind": "hardlink",
+    "passed": true
+  },
+  {
+    "probe": "exclusive publication",
+    "kind": "symlink",
+    "passed": true
+  },
+  {
+    "probe": "exclusive publication",
+    "kind": "dangling",
+    "passed": true
+  },
+  {
+    "probe": "preparation refuses existing generated evidence before creating cache",
+    "passed": true
+  },
+  {
+    "probe": "nonempty results rejected before launching workers",
+    "passed": true
+  }
+]

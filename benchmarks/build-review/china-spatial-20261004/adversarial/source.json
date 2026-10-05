@@ -1,0 +1,22 @@
+{
+  "base": "29ec7da539a8611472420903f800d477a83ec610",
+  "scope": "Final reviewed production changes, regression tests, benchmark tooling; historical measured hashes are unchanged in sibling reports.",
+  "files": {
+    "create_osm_zim.py": "a01fdbd6a8dfc21f9e72309b75463d8218ec23bd55c000045f9ecd7026caf4ce",
+    "wikidata_cache.py": "726b848ba40838281edcef08ab546b5831b257beee141b93bfc5fbaf9ddf8e06",
+    "streetzim/cache_permissions.py": "e8bd0867f7da9ff487a70cd44f3574780144c39fa006237af3619dc02afea4d3",
+    "streetzim/routing/reader.py": "87848dc15343e0c7d20f36a1b01308f5411ce2fb330e281a3f922eba2b5912dc",
+    "streetzim/routing/spatial.py": "11ed6dac5b9d19de55c178e93826452f24bb4689cba43ddf955730347fba4e94",
+    "streetzim/zim_writer.py": "499246180ed495e3a9d57355d5b2bf69569109cd063e4e2897f71ae422f9c82d",
+    "tests/test_cache_acl.py": "4450bd3f23b6d9bdd64b051d88f376b40b37f826554006a26f24e7635c08e2e9",
+    "tests/test_wikidata_cache_permissions.py": "ee11e67141f9105421169eab7a919903f2f6c0d984f63f17069ec99c82ba922c",
+    "tests/test_wikidata_cache_selection.py": "7aa52b57ed4364004ff48f27969e3a95abc7482c57e5cb2cb8660a12e1a3fee1",
+    "tests/test_wikidata_mbtiles.py": "302b7a2b4e2698487340eb375365ea51a852132a43c9f4bfa9f6bcadb1312318",
+    "tests/test_spatial_build_memory.py": "131171dd7b1243b7115b13328186942ca34b6e85ab3bb20d234cdc02cef0a15a",
+    "tests/test_spatial_routing_in_child.py": "8e85371aafff6c4a9eb39c618444e16f4b2f53c1e4d628ba7ea4736bc0487ffd",
+    "tests/fixtures/spatial_build_reference.py": "19c6bb1ce651efe195adce41911b6a0af8b06b5220ecbd7c801e3cdf9cc8b35d",
+    "tests/test_benchmark_spatial_memory.py": "72df81be35d9f74abe8aa9c63ec75c9ed00ec76e03303b2e5438c5a09617fd87",
+    "tools/benchmark_spatial_memory.py": "be2f8d20c03cab0d7535dbf3cf7a8998ebf475e6968b378dd8786237a3e300e3",
+    "benchmarks/build-review/china-spatial-20261004/wikidata/benchmark.py": "9c48de71f4ddab7520be8d51fa8bcd47e11493e80ac437f94edf4a32ef396b5d"
+  }
+}

@@ -499,3 +499,212 @@ Frozen sources, image identities, passing and initial failed logs, XML results,
 the wheel and the small boundary archives are under
 `out/merge-main-20260930/`. No user-owned deletions, local build scripts,
 environments, caches or country artifacts are included in the review commits.
+
+## China memory follow-up — 2026-10-04
+
+Pulled `main` to `29ec7da539a8611472420903f800d477a83ec610`. The production
+China run reported a 15.08 GB container **anonymous** peak in spatial routing,
+with a 16 GB container and a shared, seeded Wikidata cache. The operator's
+per-process samples attributed about 5.1 GB to the main process, including
+roughly 3.8 GB retained after loading all 3,342,271 cached facts, although
+China requested only 198,840 Q-IDs. This attribution uses timings and entry
+counts, not a heap profile. Earlier isolated routing measurements and a cold
+cache do not describe this full-build workload. Seeding does change memory
+in the old loader; assuming otherwise overstated cold-run memory.
+
+The fixes address both overlapping allocations:
+
+- `build_cache(return_qids=True)` returns this invocation's validated PBF or
+  MBTiles Q-ID selection, including an empty selection. Both cache population
+  and ZIM loading retain only those facts, decoding one shared bucket at a
+  time. Standalone callers keep the full-cache/default-return APIs. Regional
+  compact facts still remain until ZIM writing; the unrelated global facts do
+  not. A large individual bucket remains a transient memory cost.
+- Shared-cache updates merge under a cache-wide write lock, publish each
+  bucket atomically, preserve permissions, and fail before replacing an
+  unreadable bucket. A strict, bounded-memory global recount keeps manifest
+  counts accurate. This recount adds global-cache I/O on updates. Publication
+  is per file, not a transaction over all buckets: failure can leave completed
+  bucket updates with the preceding manifest. A private staging file or directory can
+  remain if its cleanup is denied; the original failure stays visible.
+- Spatial preparation maps SZRG input and v5 companion geometry read-only;
+  arrays and geometry slices retain the mapping without whole-file copies.
+  Names remain bytes for existing UTF-8 consumers. Sources must stay immutable
+  until all views are released; the OS reclaims mapped pages under pressure.
+- Node grouping computes keys and cell boundaries in bounded blocks, retains
+  uint32 permutations, and avoids sorting already-sorted keys again. The
+  writer streams array/geometry views into each cell instead of assembling
+  duplicate cell-sized buffers. Stable node order and SZCI/SZRC formats stay
+  unchanged.
+
+### Memory and performance evidence
+
+[Raw spatial samples and summary](../benchmarks/build-review/china-spatial-20261004/summary.json)
+include input dimensions, limits, source hashes, output digests and caveats.
+These are **synthetic stage benchmarks**, not the production China extract.
+All GB/MB below are decimal; Docker's `g` limits are GiB.
+
+The large fixture has 43.6 M nodes, 105 M edges, 2.09 GB of geometry and a
+4.89 GB graph split into 10,000 cells. Both variants touch and retain the
+same 1,600 MiB reservation to model parent memory. Fresh Linux Python 3.14
+containers used two CPUs, no swap or network, and the same pinned QA image.
+Nodes are distributed evenly (4,360 per cell), each source has two or three
+edges, and each node owns a geometry ID with identical payload bytes.
+Geometry IDs are not shared across cells. This measures whole-graph loading
+and grouping costs; it does not reproduce urban density, skewed adjacency,
+or cross-cell geometry replication in the China extract.
+At equal 16 GiB limits, one run per version measured:
+
+| Spatial conversion plus fixed reservation | `29ec7da` | Updated |
+| --- | ---: | ---: |
+| Sampled anonymous peak | 10.99 GB | 2.58 GB |
+| OS process peak RSS | 11.06 GB | 6.97 GB |
+| Load plus conversion time | 76.57 s | 63.92 s |
+| Output bytes | 4,891,000,053 | 4,891,000,053 |
+
+Every output byte hashed identically. An additional updated run succeeded
+at **9 GiB (9.66 GB), no swap**, with the same reservation: 2.58 GB anonymous,
+6.97 GB RSS and 71.61 s, with no OOM events. Container usage reached its
+limit through reclaimable file cache; this is not a 2.58 GB total-memory
+claim. `memory.events.max` recorded reclaim pressure, without OOM kills.
+
+The input is copied to a new disk inode inside the measured cgroup so its
+mapped pages are charged there. Copying can also charge the original input:
+the 16 GiB runs held about 9.78 GB of combined source/copy cache before
+conversion. Preparation snapshots and sampled conversion memory are retained;
+lifetime cgroup peaks include copying and must not be called private-memory
+peaks. The 9 GiB run demonstrates capacity despite that cache pressure.
+Sampling at 100 ms can miss brief anonymous peaks. This shared Docker Desktop
+host and single large pair do not establish a precise production speedup.
+
+Three smaller final pairs (4 M nodes / 9.6 M edges / 448 MB graph) had median
+RSS 892.49 → 522.94 MB, anonymous peak 754.21 → 108.15 MB, and time
+7.99 → 6.86 s. All six digests agreed. One updated run overlapped generation
+of the larger fixture and took 11.42 s; all repeats are retained. Those runs
+shared a bind-mounted input, so their
+cgroup file-cache charges are not a valid before/after comparison.
+
+The independent [Wikidata benchmark](../benchmarks/build-review/china-spatial-20261004/wikidata/summary.json)
+used 500,000 synthetic facts in 90 buckets (189 MB of JSON), selecting 6%
+spread across all buckets. Three fresh Linux processes per version agreed
+on every selected compact fact. Median loader peak RSS fell **601.31 →
+80.20 MB**, load time **2.05 → 1.18 s**, and load CPU **1.88 → 0.98 s**.
+Whole-process RSS, including later hash serialization, was 618.23 →
+115.38 MB; sampled anonymous peaks were 589.43 → 78.44 MB. These runs used
+2 GiB/no-swap/two-CPU containers and 50 ms samples. The fixture describes
+its field distributions explicitly; it is not measured China cache data.
+
+Reproduce the spatial capacity test with fresh output paths:
+
+```bash
+python tools/benchmark_spatial_memory.py generate --graph /data/graph.bin \
+  --nodes 43600000 --edges 105000000 --cells 10000
+# In a fresh --memory=9g --memory-swap=9g --cpus=2 container:
+python tools/benchmark_spatial_memory.py run --graph /data/graph.bin \
+  --output /data/current --report /data/current.json \
+  --copy-input --resident-mib 1600
+# For the equal-limit comparison use 16g for BOTH runs; add --reference
+# to the baseline invocation. Reference code is frozen in tests/fixtures.
+```
+
+`--copy-input` is for the standalone v4 fixture (it does not copy a v5
+companion); its temporary directory must be disk-backed, not tmpfs. Capture
+Docker exit/OOM state too: interrupted or failed conversions have no JSON
+report. Graph generation and output hashing are outside conversion timing.
+
+The production acceptance check remains a complete China openZIM/libzim
+build with the same seeded cache, measuring cgroup anonymous/file/total
+memory and process PSS separately at each phase. The active Finland build
+was not modified. Map tiles already reached 9.4 GB in that run, so spatial
+improvements alone cannot guarantee the whole build stays below 10 GB.
+The reported Wikidata-title maxlag shortfall is a separate data-quality issue.
+
+### Verification of the follow-up
+
+Three adversarial reviews covered mapped-view lifetime, stable grouping and
+geometry output, selected-QID wiring, shared-cache preservation/concurrency,
+and prepared-cell reuse by libzim. Findings about failed bucket reads,
+incomplete manifest recounts, publication permissions, staging ownership and
+cleanup masking the primary error were fixed and tested. Differential tests
+compare every cell/index byte to frozen `29ec7da` code, including negative
+coordinates, block boundaries, empty graphs, shared/missing geometries,
+Unicode names and mapped v5 companions. Failure tests cover malformed input,
+partial writes, ENOSPC/close errors, interrupted cache publication and
+simultaneous same-prefix cache writers.
+
+The initial Linux Python 3.14 run passed **2,175 tests, 72 skipped**, with zero
+failures/errors; [validation.json](../benchmarks/build-review/china-spatial-20261004/validation.json)
+records the image and every skip reason. Skips include optional Rust/Xapian,
+missing glyph/browser/Node fixtures, Zimfarm backend imports and real-country
+routing corpora. The cache-focused suite passed 127 tests on both native
+Python 3.12 and Linux 3.14. Ruff passed and Pyright reported no new findings
+(16 pre-existing baseline findings). The test container adds Git and the
+DuckDB test extension cache to the runtime image and uses `--init`; these
+fix test-environment failures without changing production code.
+
+Real Monaco builds used default libzim in Docker. The before/control/after
+comparison had 1,188 identical entries, two expected Xapian differences,
+zero changed/added/deleted content, and stock openZIM `zimcheck` passed.
+A separate `streetzim --profile full` build with cached MBTiles, the fixture
+PBF/Overture/Wikimedia caches and `--terrain=off` passed openZIM metadata,
+progress, routing, Kiwix search (208 results open), full-profile content and
+`zimcheck` validation. It loaded 207 regional facts, then bundled the 96 facts
+referenced by its tiles and seven cached articles;
+its offline fixture does not demonstrate live Wikipedia completeness or
+terrain generation. A separate native libzim prepared-cell roundtrip checked
+all eight routing payloads against baseline bytes. The production China
+extract and its full-build limit remain unverified by these tests.
+
+
+### Fresh adversarial pass requested after the memory changes
+
+Three fresh review passes challenged the production diff, its failure behavior,
+and the benchmark evidence. They found the following actionable defects:
+
+| Finding | Resolution |
+| --- | --- |
+| Regional MBTiles selection reused name-lookup heuristics, dropping already-cached tile Q-IDs for villages, unnamed features, custom layers, lower zooms, or failed API lookups. | Read valid tile tags independently of name/class/geometry filters, choose an available detail zoom, and keep name lookup as a fallback. Eleven real MVT/SQLite tests cover the builder and writer; ten fail against the reviewed pre-fix implementation. |
+| A new cache lock inherited the caller's umask, and atomic bucket replacement changed its group, denying access to a second authorized Unix user. Root maintenance could also take ownership from the original writer. | Publish a fully configured lock inode once, preserve ownership when permitted and shared mode/group before publication, and retain the existing lock inode during concurrent creation. Actual UID 1000/1001 tests cover setgid and ordinary directories and forced simultaneous lock creation. World-writable caches also work when the writer cannot join the old group. |
+| Atomic replacement could silently discard extended ACLs, changing who can read or write a shared cache. | Preserve access ACLs and their owner/group identity; fail before publication when that identity cannot be preserved. The compatibility limitation is explicit below. |
+| Tightening stage permissions before writing still allowed another user to open the empty stage first and retain a readable file descriptor. | Existing-file replacements are created inside an exclusive private directory whose inherited access ACL is cleared before any child file is created. Real-user probes check access at creation and before the first write. New cache files retain normal umask and directory inheritance. |
+| The spatial benchmark's report path could overwrite its source graph or an already-hashed cell; rerunning the Wikidata helper could overwrite prior evidence. | Reject colliding output paths and nonempty results, then publish with exclusive creation to protect paths created after preflight. |
+| The dated Wikidata helper printed prescribed resource limits/image identity and used Linux RSS units even when run on another host. | Require Linux, read actual cgroup limits, and mark an optional image label as operator-supplied and unverified. Historical measurements keep their independent runtime provenance and original source hashes. |
+| A failed spatial rebuild could leave its preceding completion marker pointing at partially overwritten cells (also reproducible in `29ec7da`). | Remove the marker before overwriting cells. An injected ENOSPC test now requires a cache miss and verifies that a successful retry restores exact bytes. |
+
+The independent spatial reviewer found no introduced format or routing defect.
+Checks included 700 grouping/scale comparisons, mapped v2–v5 graph lifetimes,
+geometry blocks around the 16,384 boundary, endian input arrays, a sparse v5
+companion larger than 4 GiB, and actual spawned preparation/cache-reuse paths.
+A separate dense single-cell fixture (300,000 nodes / 900,000 edges) produced
+identical bytes with native macOS peak RSS falling from 315.02 to 156.37 MB;
+this supplements the uniform large fixture and is not a cgroup measurement.
+
+Extended ACLs reference the file owner and group. An unprivileged writer
+whose UID differs from an ACL-protected file's owner may be unable to preserve
+that identity during atomic replacement. Such an update fails with an explicit
+error and leaves the existing file intact; it no longer silently drops the
+ACL. Run that cache as its owner with the shared group, or use a cache owned by
+the build user. Mode/group sharing and ordinary world-writable caches have
+separate real-user regression coverage. Publication is still per file, so an
+error on a later bucket or manifest does not roll back earlier completed files.
+The strict manifest recount also reads every untouched bucket: an isolated
+one-entry update beside 201.58 MB of cached JSON took about 0.29 s versus
+0.001 s for the old incomplete recount. This is an I/O tradeoff for accurate
+global counts, not a claimed performance improvement.
+
+Review artifacts, final source hashes and validation results are in
+[`adversarial/`](../benchmarks/build-review/china-spatial-20261004/adversarial/).
+The earlier large measurements remain historical evidence; this pass changes
+cache selection/publication, retry validity and benchmark safety/reporting,
+not the measured spatial algorithm or regional cache loader. Unrelated local
+cloud-script deletions and operational scratch files were left untouched.
+
+The final frozen snapshot passed **2,227 Linux tests, 72 skipped**, and
+**133 native macOS tests, 10 skipped** (the native skips exercise real Linux
+UIDs/ACLs in the Linux suite). Ruff passed; Pyright found no new issues beyond
+its 16 existing baseline findings. A fresh Docker/libzim Monaco full-profile
+build, with cached tiles and terrain off, passed metadata, routing, progress,
+Kiwix search, profile-content and stock openZIM `zimcheck` checks. All 6,440
+content entries match the pre-review archive; two expected Xapian entries
+differ. The archive contains 96 Wikidata facts and seven cached articles.
+These checks do not replace the pending full China production measurement.

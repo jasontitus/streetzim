@@ -1,0 +1,221 @@
+{
+  "version": "current",
+  "repeat": 2,
+  "command": [
+    "/usr/local/bin/python",
+    "/evidence/benchmark_linux_final.py",
+    "--repo",
+    "/review-repo",
+    "--evidence",
+    "/evidence",
+    "--cache",
+    "/evidence/cache",
+    "--results",
+    "/results",
+    "--worker",
+    "current"
+  ],
+  "exit_code": 0,
+  "process_wall_s": 1.564240251000001,
+  "process_cpu_s": 1.287819,
+  "wait4_peak_rss_bytes": 115384320,
+  "sample_interval_s": 0.05,
+  "samples": [
+    {
+      "elapsed_s": 0.0013136249999661231,
+      "rss": 1449984,
+      "pss": 637952,
+      "anonymous": 409600
+    },
+    {
+      "elapsed_s": 0.053261292000115645,
+      "rss": 22487040,
+      "pss": 14496768,
+      "anonymous": 12054528
+    },
+    {
+      "elapsed_s": 0.10383804200000668,
+      "rss": 28581888,
+      "pss": 19230720,
+      "anonymous": 16388096
+    },
+    {
+      "elapsed_s": 0.1547357090000787,
+      "rss": 42524672,
+      "pss": 32790528,
+      "anonymous": 30134272
+    },
+    {
+      "elapsed_s": 0.20547387500005243,
+      "rss": 44331008,
+      "pss": 35233792,
+      "anonymous": 31940608
+    },
+    {
+      "elapsed_s": 0.25644775000000664,
+      "rss": 45842432,
+      "pss": 36745216,
+      "anonymous": 33452032
+    },
+    {
+      "elapsed_s": 0.30760162499996113,
+      "rss": 47493120,
+      "pss": 38395904,
+      "anonymous": 35102720
+    },
+    {
+      "elapsed_s": 0.35901925000007395,
+      "rss": 45400064,
+      "pss": 36302848,
+      "anonymous": 33009664
+    },
+    {
+      "elapsed_s": 0.4099071670000285,
+      "rss": 51101696,
+      "pss": 42004480,
+      "anonymous": 38711296
+    },
+    {
+      "elapsed_s": 0.4606038750000607,
+      "rss": 52674560,
+      "pss": 43577344,
+      "anonymous": 40284160
+    },
+    {
+      "elapsed_s": 0.5114339589999872,
+      "rss": 51355648,
+      "pss": 42258432,
+      "anonymous": 38965248
+    },
+    {
+      "elapsed_s": 0.5621903750000001,
+      "rss": 54038528,
+      "pss": 44941312,
+      "anonymous": 41648128
+    },
+    {
+      "elapsed_s": 0.6147929170001589,
+      "rss": 58023936,
+      "pss": 48926720,
+      "anonymous": 45633536
+    },
+    {
+      "elapsed_s": 0.6685796260001098,
+      "rss": 60047360,
+      "pss": 50950144,
+      "anonymous": 47656960
+    },
+    {
+      "elapsed_s": 0.72546887600015,
+      "rss": 61894656,
+      "pss": 52797440,
+      "anonymous": 49504256
+    },
+    {
+      "elapsed_s": 0.7862987920000251,
+      "rss": 64135168,
+      "pss": 55037952,
+      "anonymous": 51744768
+    },
+    {
+      "elapsed_s": 0.847184666999965,
+      "rss": 66183168,
+      "pss": 57085952,
+      "anonymous": 53792768
+    },
+    {
+      "elapsed_s": 0.9024670420001257,
+      "rss": 68206592,
+      "pss": 59109376,
+      "anonymous": 55816192
+    },
+    {
+      "elapsed_s": 0.9541904170000635,
+      "rss": 69922816,
+      "pss": 60825600,
+      "anonymous": 57532416
+    },
+    {
+      "elapsed_s": 1.015074334000019,
+      "rss": 72646656,
+      "pss": 63549440,
+      "anonymous": 60256256
+    },
+    {
+      "elapsed_s": 1.0759491260000686,
+      "rss": 71995392,
+      "pss": 62898176,
+      "anonymous": 59604992
+    },
+    {
+      "elapsed_s": 1.1312037919999511,
+      "rss": 76193792,
+      "pss": 67096576,
+      "anonymous": 63803392
+    },
+    {
+      "elapsed_s": 1.1829503339999974,
+      "rss": 77918208,
+      "pss": 68820992,
+      "anonymous": 65527808
+    },
+    {
+      "elapsed_s": 1.2438946260001558,
+      "rss": 80060416,
+      "pss": 70963200,
+      "anonymous": 67670016
+    },
+    {
+      "elapsed_s": 1.3046584590001657,
+      "rss": 80928768,
+      "pss": 71782400,
+      "anonymous": 68472832
+    },
+    {
+      "elapsed_s": 1.365705293000019,
+      "rss": 96673792,
+      "pss": 87527424,
+      "anonymous": 84217856
+    },
+    {
+      "elapsed_s": 1.4267336679999971,
+      "rss": 83714048,
+      "pss": 74567680,
+      "anonymous": 71258112
+    },
+    {
+      "elapsed_s": 1.4796484180001244,
+      "rss": 83714048,
+      "pss": 74567680,
+      "anonymous": 71258112
+    },
+    {
+      "elapsed_s": 1.5319807089999813,
+      "rss": 83714048,
+      "pss": 74567680,
+      "anonymous": 71258112
+    }
+  ],
+  "sampling_errors": [],
+  "peak_sampled": {
+    "rss": 96673792,
+    "pss": 87527424,
+    "anonymous": 84217856
+  },
+  "worker": {
+    "version": "current",
+    "loaded": 30000,
+    "selected": 30000,
+    "selected_compact_sha256": "191bedda30c2b5dc1125d3070308c1463e539823528c2958d77be505935c8867",
+    "load_wall_s": 1.1882044579999729,
+    "load_cpu_s": 1.07844797,
+    "load_peak_rss_bytes": 80195584,
+    "post_load": {
+      "rss": 80928768,
+      "pss": 71782400,
+      "anonymous": 68472832
+    },
+    "platform": "Linux-6.12.76-linuxkit-aarch64-with-glibc2.41",
+    "python": "3.14.7 (main, Sep 19 2026, 01:05:36) [GCC 14.2.0]"
+  }
+}

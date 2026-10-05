@@ -1,0 +1,33 @@
+{
+  "scope": "Tiny realLinuxUID1001 denial before stage metadata; held-dirFD uses a controlled inherited-ACL grant.",
+  "wc_source_sha256": "726b848ba40838281edcef08ab546b5831b257beee141b93bfc5fbaf9ddf8e06",
+  "helper_source_sha256": "e8bd0867f7da9ff487a70cd44f3574780144c39fa006237af3619dc02afea4d3",
+  "results": [
+    {
+      "held_directory_fd": false,
+      "checks": [
+        {
+          "denied": true,
+          "errno": 13,
+          "file_mode_before_metadata": "0o644",
+          "directory_mode": "0o700"
+        }
+      ],
+      "publication_succeeded": true,
+      "stages_cleaned": true
+    },
+    {
+      "held_directory_fd": true,
+      "checks": [
+        {
+          "denied": true,
+          "errno": 13,
+          "file_mode_before_metadata": "0o644",
+          "directory_mode": "0o700"
+        }
+      ],
+      "publication_succeeded": true,
+      "stages_cleaned": true
+    }
+  ]
+}

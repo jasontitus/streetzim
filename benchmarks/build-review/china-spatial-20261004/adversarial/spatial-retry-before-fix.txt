@@ -1,0 +1,49 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+________________ test_failed_reprepare_invalidates_cached_cells ________________
+
+graph = '/tmp/pytest-of-root/pytest-0/test_failed_reprepare_invalida0/rt/routing-graph.bin'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0xffff682c1480>
+child_calls = []
+
+    def test_failed_reprepare_invalidates_cached_cells(graph, monkeypatch, child_calls):
+        want = _expected(graph)
+        zim_writer.prepare_spatial_cells(graph, SCALE)
+        assert zim_writer._prepared_spatial_cells(graph, SCALE) is not None
+        assert _zim_items(graph) == want
+    
+        def fail_after_partial_cell_write(routing_graph_path, cell_scale, output_dir):
+            (Path(output_dir) / "graph-cell-00000.bin").write_bytes(b"S")
+            raise OSError(errno.ENOSPC, "injected partial cell write")
+    
+        with monkeypatch.context() as patch:
+            patch.setattr(zim_writer, "_spatial_cell_files", fail_after_partial_cell_write)
+            with pytest.raises(OSError) as error:
+                zim_writer.prepare_spatial_cells(graph, SCALE)
+            assert error.value.errno == errno.ENOSPC
+    
+        spatial = Path(graph).parent / "spatial"
+        assert (spatial / "graph-cell-00000.bin").read_bytes() == b"S"
+>       assert zim_writer._prepared_spatial_cells(graph, SCALE) is None
+E       AssertionError: assert ({0: '/tmp/pytest-of-root/pytest-0/test_failed_reprepare_invalida0/rt/spatial/graph-cell-00000.bin', 1: '/tmp/pytest-o..., [87440, 14802], [87440, 14803], [87440, 14804], [87440, 14805], ...], 'total_bytes': 36106, 'cell_scale': 2000, ...}) is None
+E        +  where ({0: '/tmp/pytest-of-root/pytest-0/test_failed_reprepare_invalida0/rt/spatial/graph-cell-00000.bin', 1: '/tmp/pytest-o..., [87440, 14802], [87440, 14803], [87440, 14804], [87440, 14805], ...], 'total_bytes': 36106, 'cell_scale': 2000, ...}) = <function _prepared_spatial_cells at 0xffff9cb089e0>('/tmp/pytest-of-root/pytest-0/test_failed_reprepare_invalida0/rt/routing-graph.bin', 2000)
+E        +    where <function _prepared_spatial_cells at 0xffff9cb089e0> = zim_writer._prepared_spatial_cells
+
+tests/test_spatial_routing_in_child.py:122: AssertionError
+---------------------------- Captured stdout setup -----------------------------
+  Extracting routing graph from OSM data...
+    Reading the whole extract (auto: a whole-extract node index of about 0.0 GB)
+    Pass 1: scanning highway ways for junction nodes...
+    Pass 1: scanned 181 highway ways (of 260 total)                    
+    Found 297 junction nodes (graph vertices)
+    Node locations in a file in /tmp/pytest-of-root/pytest-0/test_failed_reprepare_invalida0/rt (STREETZIM_ROUTING_NODE_INDEX=file)
+    Pass 2: building edges + geometries...
+    Pass 2: 169 ways, 1158 edges, 74 geometry candidates, 0.0 MB          
+    Routing graph (v4 inline): 0.0 MB (297 nodes, 1158 edges, 48 geoms, 0.0 MB geom blob, 57 names, 1 KB name text, 62 roundabout + 0 link edges)
+----------------------------- Captured stdout call -----------------------------
+    Spatial-chunking routing graph (scale=2000, src=0.0 MB → /tmp/pytest-of-root/pytest-0/test_failed_reprepare_invalida0/rt/spatial)...
+    (cells built after the routing step)
+    Wrote spatial routing layout: 127 cells, 0 node shards, index 0.0 MB
+=========================== short test summary info ============================
+FAILED tests/test_spatial_routing_in_child.py::test_failed_reprepare_invalidates_cached_cells
+1 failed in 0.29s

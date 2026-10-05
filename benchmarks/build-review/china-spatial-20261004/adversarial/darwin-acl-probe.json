@@ -1,0 +1,22 @@
+{
+  "source_sha256": "90d69ccb734140fb05e967d5e1f8a289785aa8b33d48ab3a15fb956844e217df",
+  "source_acl": [
+    " 0: group:everyone deny execute",
+    " 1: group:staff allow read",
+    " 2: group:everyone inherited allow read"
+  ],
+  "initial_stage_acl": [
+    " 0: group:everyone allow read"
+  ],
+  "final_stage_acl": [
+    " 0: group:everyone deny execute",
+    " 1: group:staff allow read",
+    " 2: group:everyone inherited allow read"
+  ],
+  "same_acl": true,
+  "same_uid_gid": true,
+  "source_mode": "0o640",
+  "stage_mode": "0o640",
+  "source_contents": "original",
+  "stage_contents": "staging"
+}

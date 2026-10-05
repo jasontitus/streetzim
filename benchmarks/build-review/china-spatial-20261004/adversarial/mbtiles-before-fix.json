@@ -1,0 +1,146 @@
+[
+  {
+    "version": "baseline",
+    "zoom": 14,
+    "endpoint": "success",
+    "named_features_looked_up": [
+      "Big City"
+    ],
+    "builder_qids": [
+      "Q110",
+      "Q111"
+    ],
+    "written_qids": [
+      "Q110",
+      "Q111"
+    ],
+    "items": {
+      "wikidata/manifest.json": {
+        "total": 2,
+        "chunks": {
+          "11": 2
+        }
+      },
+      "wikidata/11.json": {
+        "Q110": {
+          "l": "Tiny Village",
+          "x": "Cached village fact"
+        },
+        "Q111": {
+          "l": "Big City",
+          "x": "Cached city fact"
+        }
+      }
+    }
+  },
+  {
+    "version": "current",
+    "zoom": 14,
+    "endpoint": "success",
+    "named_features_looked_up": [
+      "Big City"
+    ],
+    "builder_qids": [
+      "Q111"
+    ],
+    "written_qids": [
+      "Q111"
+    ],
+    "items": {
+      "wikidata/manifest.json": {
+        "total": 1,
+        "chunks": {
+          "11": 1
+        }
+      },
+      "wikidata/11.json": {
+        "Q111": {
+          "l": "Big City",
+          "x": "Cached city fact"
+        }
+      }
+    }
+  },
+  {
+    "version": "baseline",
+    "zoom": 13,
+    "endpoint": "success",
+    "named_features_looked_up": [],
+    "builder_qids": [
+      "Q110",
+      "Q111"
+    ],
+    "written_qids": [
+      "Q110",
+      "Q111"
+    ],
+    "items": {
+      "wikidata/manifest.json": {
+        "total": 2,
+        "chunks": {
+          "11": 2
+        }
+      },
+      "wikidata/11.json": {
+        "Q110": {
+          "l": "Tiny Village",
+          "x": "Cached village fact"
+        },
+        "Q111": {
+          "l": "Big City",
+          "x": "Cached city fact"
+        }
+      }
+    }
+  },
+  {
+    "version": "current",
+    "zoom": 13,
+    "endpoint": "success",
+    "named_features_looked_up": [],
+    "builder_qids": [],
+    "written_qids": [],
+    "items": {}
+  },
+  {
+    "version": "baseline",
+    "zoom": 14,
+    "endpoint": "transient",
+    "named_features_looked_up": [],
+    "builder_qids": [
+      "Q110",
+      "Q111"
+    ],
+    "written_qids": [
+      "Q110",
+      "Q111"
+    ],
+    "items": {
+      "wikidata/manifest.json": {
+        "total": 2,
+        "chunks": {
+          "11": 2
+        }
+      },
+      "wikidata/11.json": {
+        "Q110": {
+          "l": "Tiny Village",
+          "x": "Cached village fact"
+        },
+        "Q111": {
+          "l": "Big City",
+          "x": "Cached city fact"
+        }
+      }
+    }
+  },
+  {
+    "version": "current",
+    "zoom": 14,
+    "endpoint": "transient",
+    "named_features_looked_up": [],
+    "builder_qids": [],
+    "written_qids": [],
+    "items": {}
+  }
+]

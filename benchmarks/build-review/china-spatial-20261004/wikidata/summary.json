@@ -1,0 +1,46 @@
+{
+  "fixture": {
+    "entries": 500000,
+    "buckets": 90,
+    "selected": 30000,
+    "selected_fraction": 0.06,
+    "json_bytes": 189256208,
+    "fields": "all: qid,label,description120,instance_of; country1/3; population1/4; area1/10; Wikipedia title+URL3/10; extract500 2/10",
+    "bucket_selection": "global index modulo50 in[0,1,2], spread over all90prefix buckets",
+    "synthetic_limit": "Representative cache field shape only; frequencies and text lengths are explicit synthetic parameters, not measured China distribution."
+  },
+  "selected_compact_sha256": "191bedda30c2b5dc1125d3070308c1463e539823528c2958d77be505935c8867",
+  "runs": 6,
+  "limits": {
+    "memory_bytes": 2147483648,
+    "swap_bytes": 0,
+    "cpus": 2
+  },
+  "provenance": {
+    "baseline_git": "29ec7da",
+    "sources": {
+      "wikidata_baseline_29ec7da.py": "3e9d81d63451bbf89ae9572d523917418ff03c2e62c007ce8ade64c4cd858fb3",
+      "wikidata_current_final.py": "741bb0f552f0ef1e3cbbfca12b84ed1c75e8c4ce6c9fd8fa19d2106974ca0bfc"
+    },
+    "image_id": "sha256:dfeddd2a65ccfcf6cd72665cae0e3e4a6497cf81248f512db14307e41aab1893",
+    "measurement": "Single fresh child per run; /proc/PID/smaps_rollup samplesRSS/PSS/anonymous at0.05s; exact wait4 peakRSS; worker wall/CPU excludes startup and hash validation."
+  },
+  "baseline": {
+    "median_load_wall_s": 2.0547331259999737,
+    "median_load_cpu_s": 1.8833609059999998,
+    "median_load_peak_rss_bytes": 601313280,
+    "median_wait4_peak_rss_bytes": 618233856,
+    "median_sampled_peak_rss_bytes": 601853952,
+    "median_sampled_peak_pss_bytes": 592726016,
+    "median_sampled_peak_anonymous_bytes": 589434880
+  },
+  "current": {
+    "median_load_wall_s": 1.1788942089999637,
+    "median_load_cpu_s": 0.9765239710000001,
+    "median_load_peak_rss_bytes": 80195584,
+    "median_wait4_peak_rss_bytes": 115384320,
+    "median_sampled_peak_rss_bytes": 90873856,
+    "median_sampled_peak_pss_bytes": 81680384,
+    "median_sampled_peak_anonymous_bytes": 78438400
+  }
+}

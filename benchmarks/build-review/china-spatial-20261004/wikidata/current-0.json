@@ -1,0 +1,197 @@
+{
+  "version": "current",
+  "repeat": 0,
+  "command": [
+    "/usr/local/bin/python",
+    "/evidence/benchmark_linux_final.py",
+    "--repo",
+    "/review-repo",
+    "--evidence",
+    "/evidence",
+    "--cache",
+    "/evidence/cache",
+    "--results",
+    "/results",
+    "--worker",
+    "current"
+  ],
+  "exit_code": 0,
+  "process_wall_s": 1.3679665009999553,
+  "process_cpu_s": 1.138657,
+  "wait4_peak_rss_bytes": 115765248,
+  "sample_interval_s": 0.05,
+  "samples": [
+    {
+      "elapsed_s": 0.0007689579999805574,
+      "rss": 446464,
+      "pss": 158720,
+      "anonymous": 57344
+    },
+    {
+      "elapsed_s": 0.05717179199996281,
+      "rss": 25321472,
+      "pss": 16754688,
+      "anonymous": 13799424
+    },
+    {
+      "elapsed_s": 0.10939895799992883,
+      "rss": 42168320,
+      "pss": 33073152,
+      "anonymous": 29782016
+    },
+    {
+      "elapsed_s": 0.16540537499986385,
+      "rss": 40681472,
+      "pss": 31586304,
+      "anonymous": 28295168
+    },
+    {
+      "elapsed_s": 0.2259555000000546,
+      "rss": 46821376,
+      "pss": 37726208,
+      "anonymous": 34435072
+    },
+    {
+      "elapsed_s": 0.27853833399990435,
+      "rss": 49152000,
+      "pss": 40056832,
+      "anonymous": 36765696
+    },
+    {
+      "elapsed_s": 0.33910295900000165,
+      "rss": 48173056,
+      "pss": 39077888,
+      "anonymous": 35786752
+    },
+    {
+      "elapsed_s": 0.39438579199986634,
+      "rss": 53944320,
+      "pss": 44849152,
+      "anonymous": 41558016
+    },
+    {
+      "elapsed_s": 0.4540772499999548,
+      "rss": 57110528,
+      "pss": 48015360,
+      "anonymous": 44724224
+    },
+    {
+      "elapsed_s": 0.5099648339999021,
+      "rss": 55001088,
+      "pss": 45905920,
+      "anonymous": 42614784
+    },
+    {
+      "elapsed_s": 0.5654688750000787,
+      "rss": 58654720,
+      "pss": 49559552,
+      "anonymous": 46268416
+    },
+    {
+      "elapsed_s": 0.6218755840000085,
+      "rss": 61952000,
+      "pss": 52856832,
+      "anonymous": 49565696
+    },
+    {
+      "elapsed_s": 0.680941458999996,
+      "rss": 65318912,
+      "pss": 56223744,
+      "anonymous": 52932608
+    },
+    {
+      "elapsed_s": 0.738001666999935,
+      "rss": 67465216,
+      "pss": 58370048,
+      "anonymous": 55078912
+    },
+    {
+      "elapsed_s": 0.7987275000000409,
+      "rss": 69918720,
+      "pss": 60823552,
+      "anonymous": 57532416
+    },
+    {
+      "elapsed_s": 0.8501036669999849,
+      "rss": 72642560,
+      "pss": 63547392,
+      "anonymous": 60256256
+    },
+    {
+      "elapsed_s": 0.9046447919999991,
+      "rss": 74354688,
+      "pss": 65259520,
+      "anonymous": 61968384
+    },
+    {
+      "elapsed_s": 0.9562563760000558,
+      "rss": 76189696,
+      "pss": 67094528,
+      "anonymous": 63803392
+    },
+    {
+      "elapsed_s": 1.0145715839998957,
+      "rss": 78647296,
+      "pss": 69552128,
+      "anonymous": 66260992
+    },
+    {
+      "elapsed_s": 1.0753505420000238,
+      "rss": 76038144,
+      "pss": 66893824,
+      "anonymous": 63586304
+    },
+    {
+      "elapsed_s": 1.1361149169999862,
+      "rss": 88502272,
+      "pss": 79357952,
+      "anonymous": 76050432
+    },
+    {
+      "elapsed_s": 1.1957131669998944,
+      "rss": 83709952,
+      "pss": 74565632,
+      "anonymous": 71258112
+    },
+    {
+      "elapsed_s": 1.2478133340000568,
+      "rss": 83709952,
+      "pss": 74565632,
+      "anonymous": 71258112
+    },
+    {
+      "elapsed_s": 1.3041026260000308,
+      "rss": 83709952,
+      "pss": 74565632,
+      "anonymous": 71258112
+    },
+    {
+      "elapsed_s": 1.3588605840000128,
+      "rss": 74334208,
+      "pss": 65189888,
+      "anonymous": 61882368
+    }
+  ],
+  "sampling_errors": [],
+  "peak_sampled": {
+    "rss": 88502272,
+    "pss": 79357952,
+    "anonymous": 76050432
+  },
+  "worker": {
+    "version": "current",
+    "loaded": 30000,
+    "selected": 30000,
+    "selected_compact_sha256": "191bedda30c2b5dc1125d3070308c1463e539823528c2958d77be505935c8867",
+    "load_wall_s": 1.0217550840000058,
+    "load_cpu_s": 0.9590865839999999,
+    "load_peak_rss_bytes": 80609280,
+    "post_load": {
+      "rss": 80924672,
+      "pss": 71780352,
+      "anonymous": 68472832
+    },
+    "platform": "Linux-6.12.76-linuxkit-aarch64-with-glibc2.41",
+    "python": "3.14.7 (main, Sep 19 2026, 01:05:36) [GCC 14.2.0]"
+  }
+}

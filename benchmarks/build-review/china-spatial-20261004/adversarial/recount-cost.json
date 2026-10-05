@@ -1,0 +1,45 @@
+{
+  "corruption": [
+    {
+      "version": "baseline",
+      "ok": true,
+      "local_fact_persisted": true,
+      "foreign_corrupt_preserved": true
+    },
+    {
+      "version": "reviewed",
+      "ok": false,
+      "error_type": "JSONDecodeError",
+      "error": "Expecting value: line 1 column 9 (char 8)",
+      "local_fact_persisted": true,
+      "foreign_corrupt_preserved": true
+    }
+  ],
+  "performance": [
+    {
+      "version": "baseline",
+      "seconds": 0.0009161659982055426,
+      "json_reads": 1,
+      "json_bytes_read": 27
+    },
+    {
+      "version": "reviewed",
+      "seconds": 0.29059741600212874,
+      "json_reads": 17,
+      "json_bytes_read": 201582283
+    },
+    {
+      "version": "reviewed",
+      "seconds": 0.28459024999756366,
+      "json_reads": 17,
+      "json_bytes_read": 201582283
+    },
+    {
+      "version": "baseline",
+      "seconds": 0.0008551670034648851,
+      "json_reads": 1,
+      "json_bytes_read": 27
+    }
+  ],
+  "fixture_bytes": 201582283
+}

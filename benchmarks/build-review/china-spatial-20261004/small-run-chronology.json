@@ -1,0 +1,15 @@
+{
+  "source-current/streetzim/routing/spatial.py": {
+    "mtime_utc": "2026-10-05T01:34:19.888192+00:00",
+    "mtime_ns": 1791164059888191957
+  },
+  "4m-current-2.json": {
+    "mtime_utc": "2026-10-05T01:35:09.180130+00:00",
+    "mtime_ns": 1791164109180130516
+  },
+  "synthetic-china-size.bin": {
+    "mtime_utc": "2026-10-05T01:35:03.330721+00:00",
+    "mtime_ns": 1791164103330720670
+  },
+  "note": "Source snapshot was copied with shutil.copy2, preserving the vectorized writer modification time. Current2 wall11.42s finished after that source edit; large fixture generation overlapped the run. Current1 is an earlier implementation and is excluded."
+}

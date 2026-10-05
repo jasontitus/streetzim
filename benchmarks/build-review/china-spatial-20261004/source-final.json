@@ -1,0 +1,14 @@
+{
+  "base": "29ec7da539a8611472420903f800d477a83ec610",
+  "files": {
+    "create_osm_zim.py": "a01fdbd6a8dfc21f9e72309b75463d8218ec23bd55c000045f9ecd7026caf4ce",
+    "wikidata_cache.py": "741bb0f552f0ef1e3cbbfca12b84ed1c75e8c4ce6c9fd8fa19d2106974ca0bfc",
+    "streetzim/routing/reader.py": "87848dc15343e0c7d20f36a1b01308f5411ce2fb330e281a3f922eba2b5912dc",
+    "streetzim/routing/spatial.py": "11ed6dac5b9d19de55c178e93826452f24bb4689cba43ddf955730347fba4e94",
+    "streetzim/zim_writer.py": "3b1be45b8068cf77f34544e2e1fe7a4ec417bd05d609d7b26776d9a6aa8ec57f",
+    "tests/test_spatial_build_memory.py": "131171dd7b1243b7115b13328186942ca34b6e85ab3bb20d234cdc02cef0a15a",
+    "tests/fixtures/spatial_build_reference.py": "19c6bb1ce651efe195adce41911b6a0af8b06b5220ecbd7c801e3cdf9cc8b35d",
+    "tests/test_wikidata_cache_selection.py": "d468b70ab3fc0ad9e5db16e6f73185702845018715499aa1975d56fa2b647e24",
+    "tools/benchmark_spatial_memory.py": "f344d6518c58bc7593964cc7078d8acd72b62d196c76e140c321e8c127f6de07"
+  }
+}

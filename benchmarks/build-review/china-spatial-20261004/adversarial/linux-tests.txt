@@ -1,0 +1,70 @@
+........................................................................ [  3%]
+...................................................................ss.ss [  6%]
+s.s..................................................................... [  9%]
+........................................................................ [ 12%]
+........................................................................ [ 15%]
+........................................................................ [ 18%]
+...............sssssssssssssssssss..sss................................. [ 21%]
+........s...................................................s........... [ 25%]
+........................................................................ [ 28%]
+........................................................................ [ 31%]
+........s............................................................... [ 34%]
+........................................................................ [ 37%]
+........................................................................ [ 40%]
+........................................................................ [ 43%]
+...........................................................sssssss...... [ 46%]
+................................................................ssssssss [ 50%]
+........................................................................ [ 53%]
+........................................................................ [ 56%]
+........................................................................ [ 59%]
+........................................................................ [ 62%]
+..........................................................sssssssss..... [ 65%]
+........................................................................ [ 68%]
+........................................................................ [ 72%]
+..................................................................s..... [ 75%]
+...........................................................sssssss...... [ 78%]
+........................................................................ [ 81%]
+........................................................................ [ 84%]
+.....................................................s.................. [ 87%]
+...............................sssssss......s........................... [ 90%]
+........................................................................ [ 93%]
+........................................................................ [ 97%]
+...................................................................      [100%]
+=============================== warnings summary ===============================
+tests/test_generate_card_date.py::test_undated_legacy_file_falls_back_to_mtime
+  /app/web/generate.py:726: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    d = datetime.datetime.utcfromtimestamp(ts).date()
+
+tests/test_overture.py: 18 warnings
+  /app/streetzim/addresses.py:526: DeprecationWarning: fetch_record_batch() is deprecated, use to_arrow_reader() instead.
+    reader = con.execute(sql).fetch_record_batch(2048)
+
+tests/test_overture.py: 26 warnings
+  /app/streetzim/addresses.py:786: DeprecationWarning: fetch_record_batch() is deprecated, use to_arrow_reader() instead.
+    reader = con.execute(sql).fetch_record_batch(2048)
+
+tests/test_search_extract.py::test_in_memory_worker_uses_the_subclass_for_raw_keys
+tests/test_search_extract.py::test_small_in_memory_extraction_releases_location_grid[False]
+tests/test_search_extract.py::test_small_in_memory_extraction_releases_location_grid[True]
+tests/test_search_osm_key.py::test_in_memory_extraction_writes_osm_key
+  /app/streetzim/search_extract.py:548: DeprecationWarning: `decode` signature has changed, use `default_options` instead
+    decoded = mapbox_vector_tile.decode(tile_data, y_coord_down=True)
+
+tests/test_terrain_plan.py: 98 warnings
+  /venv/lib/python3.14/site-packages/rasterio/transform.py:178: PendingDeprecationWarning: Use `@` matmul instead of `*` mul operator for matrix multiplication
+    return Affine.translation(west, north) * Affine.scale(xsize, -ysize)
+
+tests/test_wikidata_mbtiles.py: 10 warnings
+  /app/wikidata_cache.py:255: DeprecationWarning: `decode` signature has changed, use `default_options` instead
+    decoded = mapbox_vector_tile.decode(tile_data, y_coord_down=True)
+
+tests/test_wikidata_mbtiles.py::test_cached_tile_tags_survive_failed_name_lookup_through_writer[False-13]
+tests/test_wikidata_mbtiles.py::test_cached_tile_tags_survive_failed_name_lookup_through_writer[False-14]
+tests/test_wikidata_mbtiles.py::test_cached_tile_tags_survive_failed_name_lookup_through_writer[True-13]
+tests/test_wikidata_mbtiles.py::test_cached_tile_tags_survive_failed_name_lookup_through_writer[True-14]
+tests/test_zim_metadata.py::test_license_names_satellite_terrain_and_wiki_when_present
+  /app/streetzim/zim_writer.py:1734: DeprecationWarning: `decode` signature has changed, use `default_options` instead
+    decoded = _mvt.decode(tile_data, y_coord_down=True)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+2227 passed, 72 skipped, 162 warnings in 142.10s (0:02:22)

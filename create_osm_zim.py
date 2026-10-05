@@ -1217,13 +1217,14 @@ def _build_wikidata(
         else:
             wd_mbtiles = None
 
-        wd_cache_path = wd_build_cache(
+        wd_cache_path, wd_qids = wd_build_cache(
             pbf_path=wd_pbf,
             mbtiles_path=wd_mbtiles,
             cache_dir=wikidata_cache_dir,
             skip_extracts=args.wikidata_no_extracts,
+            return_qids=True,
         )
-        wikidata_data = load_cache_for_zim(wd_cache_path)
+        wikidata_data = load_cache_for_zim(wd_cache_path, qids=wd_qids)
         if wikidata_data:
             print(f"    Loaded {len(wikidata_data)} Wikidata entries for ZIM")
         else:

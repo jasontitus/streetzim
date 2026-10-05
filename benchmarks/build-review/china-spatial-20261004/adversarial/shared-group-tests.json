@@ -1,0 +1,230 @@
+[
+  {
+    "scenario": "default_lock_umask",
+    "version": "baseline",
+    "initial_bucket_stat": {
+      "uid": 0,
+      "gid": 2000,
+      "mode": "0o660"
+    },
+    "writers": [
+      {
+        "uid": 1000,
+        "result": {
+          "ok": true
+        },
+        "bucket_stat": {
+          "uid": 0,
+          "gid": 2000,
+          "mode": "0o660"
+        }
+      },
+      {
+        "uid": 1001,
+        "result": {
+          "ok": true
+        },
+        "bucket_stat": {
+          "uid": 0,
+          "gid": 2000,
+          "mode": "0o660"
+        }
+      }
+    ],
+    "lock_stat": null
+  },
+  {
+    "scenario": "default_lock_umask",
+    "version": "reviewed",
+    "initial_bucket_stat": {
+      "uid": 0,
+      "gid": 2000,
+      "mode": "0o660"
+    },
+    "writers": [
+      {
+        "uid": 1000,
+        "result": {
+          "ok": true
+        },
+        "bucket_stat": {
+          "uid": 1000,
+          "gid": 2000,
+          "mode": "0o660"
+        }
+      },
+      {
+        "uid": 1001,
+        "result": {
+          "ok": false,
+          "error_type": "PermissionError",
+          "error": "[Errno 13] Permission denied: '/tmp/wikidata-permission-probe-ysbcg90l/reviewed-default_lock_umask/manifest.json.lock'"
+        },
+        "bucket_stat": {
+          "uid": 1000,
+          "gid": 2000,
+          "mode": "0o660"
+        }
+      }
+    ],
+    "lock_stat": {
+      "uid": 1000,
+      "gid": 2000,
+      "mode": "0o644"
+    }
+  },
+  {
+    "scenario": "default_lock_umask",
+    "version": "fixed",
+    "initial_bucket_stat": {
+      "uid": 0,
+      "gid": 2000,
+      "mode": "0o660"
+    },
+    "writers": [
+      {
+        "uid": 1000,
+        "result": {
+          "ok": true
+        },
+        "bucket_stat": {
+          "uid": 1000,
+          "gid": 2000,
+          "mode": "0o660"
+        }
+      },
+      {
+        "uid": 1001,
+        "result": {
+          "ok": true
+        },
+        "bucket_stat": {
+          "uid": 1001,
+          "gid": 2000,
+          "mode": "0o660"
+        }
+      }
+    ],
+    "lock_stat": {
+      "uid": 1000,
+      "gid": 2000,
+      "mode": "0o660"
+    }
+  },
+  {
+    "scenario": "replaced_bucket_group",
+    "version": "baseline",
+    "initial_bucket_stat": {
+      "uid": 0,
+      "gid": 2000,
+      "mode": "0o660"
+    },
+    "writers": [
+      {
+        "uid": 1000,
+        "result": {
+          "ok": true
+        },
+        "bucket_stat": {
+          "uid": 0,
+          "gid": 2000,
+          "mode": "0o660"
+        }
+      },
+      {
+        "uid": 1001,
+        "result": {
+          "ok": true
+        },
+        "bucket_stat": {
+          "uid": 0,
+          "gid": 2000,
+          "mode": "0o660"
+        }
+      }
+    ],
+    "lock_stat": {
+      "uid": 0,
+      "gid": 0,
+      "mode": "0o666"
+    }
+  },
+  {
+    "scenario": "replaced_bucket_group",
+    "version": "reviewed",
+    "initial_bucket_stat": {
+      "uid": 0,
+      "gid": 2000,
+      "mode": "0o660"
+    },
+    "writers": [
+      {
+        "uid": 1000,
+        "result": {
+          "ok": true
+        },
+        "bucket_stat": {
+          "uid": 1000,
+          "gid": 1000,
+          "mode": "0o660"
+        }
+      },
+      {
+        "uid": 1001,
+        "result": {
+          "ok": false,
+          "error_type": "PermissionError",
+          "error": "[Errno 13] Permission denied: '/tmp/wikidata-permission-probe-ysbcg90l/reviewed-replaced_bucket_group/11.json'"
+        },
+        "bucket_stat": {
+          "uid": 1000,
+          "gid": 1000,
+          "mode": "0o660"
+        }
+      }
+    ],
+    "lock_stat": {
+      "uid": 0,
+      "gid": 0,
+      "mode": "0o666"
+    }
+  },
+  {
+    "scenario": "replaced_bucket_group",
+    "version": "fixed",
+    "initial_bucket_stat": {
+      "uid": 0,
+      "gid": 2000,
+      "mode": "0o660"
+    },
+    "writers": [
+      {
+        "uid": 1000,
+        "result": {
+          "ok": true
+        },
+        "bucket_stat": {
+          "uid": 1000,
+          "gid": 2000,
+          "mode": "0o660"
+        }
+      },
+      {
+        "uid": 1001,
+        "result": {
+          "ok": true
+        },
+        "bucket_stat": {
+          "uid": 1001,
+          "gid": 2000,
+          "mode": "0o660"
+        }
+      }
+    ],
+    "lock_stat": {
+      "uid": 0,
+      "gid": 0,
+      "mode": "0o666"
+    }
+  }
+]

@@ -1,0 +1,8 @@
+{
+  "cache": "Independent review found and reproduced MBTiles selection and permission regressions. Author fixes tested with actual Linux users and native macOS ACLs; explicit non-owner ACL constraint documented.",
+  "spatial": "No introduced format or routing defect demonstrated. Existing partial-reprepare marker defect fixed and independently reproduced against baseline.",
+  "evidence": "Spatial report and Wikidata helper safeguards reviewed by root after independent author fixes. Original source/runtime provenance retained.",
+  "permissions_final_independent_review": "Accepted after actual Linux empty-file-FD and held-directory-FD probes. ACL/ownership exactness reviewed and exercised on Linux and macOS. No unresolved finding in assigned scope.",
+  "production_target": "Full China under 10 GB remains unverified; no active production run was changed.",
+  "changes": "Local only; not committed or pushed."
+}
