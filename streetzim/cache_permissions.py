@@ -16,8 +16,10 @@ import sys
 
 _LINUX_ACL = "system.posix_acl_access"
 _NO_ATTRIBUTE = {errno.ENODATA, errno.ENOTSUP}
-if hasattr(errno, "ENOATTR"):
-    _NO_ATTRIBUTE.add(errno.ENOATTR)
+# macOS's "no such attribute"; Linux uses ENODATA and has no ENOATTR.
+_ENOATTR = getattr(errno, "ENOATTR", None)
+if _ENOATTR is not None:
+    _NO_ATTRIBUTE.add(_ENOATTR)
 
 
 @lru_cache(maxsize=1)
