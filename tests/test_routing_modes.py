@@ -265,3 +265,19 @@ def test_monaco_walk_and_bike_routes(tmp_path, monkeypatch):
         if crow > 300 and "walk" in got and "drive" in got:
             assert got["walk"].total_time_s > got["drive"].total_time_s
     assert found["walk"] >= 58 and found["bike"] >= 58, found
+
+
+@pytest.mark.parametrize("walkbike", ["0", "1"])
+def test_map_config_routing_modes_follow_the_graph(tmp_path, monkeypatch, walkbike):
+    pytest.importorskip("osmium")
+    from pathlib import Path
+
+    from streetzim.routing.build import extract_routing_graph
+    from streetzim.routing.modes import graph_travel_modes
+
+    monkeypatch.setenv("STREETZIM_NODE_LOC_DIR", str(tmp_path))
+    monkeypatch.setenv("STREETZIM_ROUTING_WALKBIKE", walkbike)
+    pbf = Path(__file__).parent / "fixtures/monaco-full/monaco.osm.pbf"
+    path = extract_routing_graph(str(pbf), str(tmp_path))
+    want = ["drive"] if walkbike == "0" else ["drive", "walk", "bike"]
+    assert graph_travel_modes(path) == want

@@ -1685,6 +1685,10 @@ def _build_map_config(
     # article was actually stored.
     if routing_graph_path:
         map_config["hasRouting"] = True
+        # Which travel modes the graph carries (walk/bike need the
+        # STREETZIM_ROUTING_WALKBIKE data); the viewer offers only these.
+        from streetzim.routing.modes import graph_travel_modes
+        map_config["routingModes"] = graph_travel_modes(routing_graph_path)
     if overture_sources:
         # Surface the flag so the viewer's Sources panel can show the
         # Overture attribution section. The concrete dataset list is

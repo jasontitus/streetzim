@@ -104,3 +104,24 @@ def edge_cost(mode: str, speed_dist: int, ca: int) -> tuple[float, float] | None
                 mult = 1.2
         return t * mult * private, t
     raise ValueError(f"unknown travel mode {mode!r}; one of {', '.join(MODES)}")
+
+
+_WALKBIKE_BITS = 0x1FFC00       # bits 10-20: only a walk/bike build sets them
+
+
+def graph_travel_modes(graph_path) -> list[str]:
+    """The travel modes a built SZRG graph supports, for map-config
+    ``routingModes``. Graphs built with STREETZIM_ROUTING_WALKBIKE=0 (or
+    before it existed) carry no walk/bike data and route cars only. Every
+    footway carries the push bit (12), so the first block decides."""
+    from streetzim.routing.reader import load_from_file
+
+    g = load_from_file(graph_path, mapped=True)
+    if g.edge_stride < 5:
+        return ["drive"]
+    ca = g.edges[4::g.edge_stride]
+    block = 1 << 20
+    for s in range(0, len(ca), block):
+        if (ca[s:s + block] & _WALKBIKE_BITS).any():
+            return list(MODES)
+    return ["drive"]
