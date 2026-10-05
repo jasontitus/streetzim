@@ -204,7 +204,7 @@ def preserve_cache_permissions(staging: Path, previous: Path) -> None:
         _darwin_acl(previous, staging)
 
 
-def make_shared_dirs(directory: Path, root: Path) -> None:
+def make_shared_dirs(directory: Path | str, root: Path | str) -> None:
     """Create `directory` under the cache `root`, each new level with the
     root's group and mode (share_like); a level another build creates at
     the same moment is fine."""

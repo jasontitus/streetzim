@@ -1758,7 +1758,8 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
         }
       }
       var pslot = (tSid === target && uturn) ? table.find(target) : -1;
-      if (pslot >= 0 && table.prev[pslot] >= 0 && tainted(table.prev[pslot])) {
+      if (pslot >= 0 && table.prev[pslot] >= 0
+          && (tainted(table.prev[pslot]) || tainted(curSid))) {
         // A plain target: keep a second arrival (offerAlt) when this one
         // does not win, or when it replaces one from another neighbour.
         var newGp = curG + edgeCost + pen;

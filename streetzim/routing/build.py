@@ -662,8 +662,8 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
             self.hw_count = 0
 
         if turns is not None:
-            def relation(self, r):
-                turns.relation(r)
+            def relation(self, r, _turns=turns):
+                _turns.relation(r)
 
         def way(self, w):
             self.way_count += 1
