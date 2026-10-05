@@ -476,7 +476,7 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
             return acc in _ACCESS_DENY
         return hw in NO_MOTOR_HIGHWAY
 
-    # ---- walk / bike (class_access bits 5, 6, 10-18; docs/formats.md) ----
+    # ---- walk / bike (class_access bits 5, 6, 10-20; docs/formats.md) ----
     # STREETZIM_ROUTING_WALKBIKE=0 builds today's graph byte for byte: bits
     # 5/6 as the literal foot=no / bicycle=no, no new bits, no records for
     # travel against one-ways.
@@ -486,16 +486,22 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
     # beyond an explicit foot/bicycle=yes.
     _NO_FOOT_BIKE = frozenset({"motorway", "motorway_link", "busway"})
     # Classes whose one-way tag binds walkers too (OSM: oneway on a
-    # footway is for pedestrians).
-    _FOOT_CLASS = frozenset({"footway", "path", "pedestrian", "steps", "corridor"})
+    # footway is for pedestrians). Not pedestrian streets (the one-way
+    # is for deliveries) and not paths designated for bikes or tagged as
+    # MTB trails (it is for the cyclists) — see _foot_bound_by_oneway.
+    _FOOT_CLASS = frozenset({"footway", "path", "steps", "corridor"})
     # Bikes are pushed here unless cycling is allowed explicitly.
     _PUSH_CLASS = frozenset({"footway", "pedestrian", "corridor", "bridleway", "steps"})
     _RIDE_OK = ("yes", "designated", "permissive")
     _PAVED = frozenset({"paved", "asphalt", "concrete", "concrete:plates",
                         "concrete:lanes", "paving_stones", "sett", "chipseal",
-                        "metal", "wood", "bricks"})
+                        "metal", "wood", "bricks", "brick", "metal_grid",
+                        "cobblestone:flattened", "asphalt:lanes", "flagstone",
+                        "stone"})
     _FIRM = frozenset({"compacted", "fine_gravel", "gravel", "pebblestone",
-                       "unhewn_cobblestone", "cobblestone"})
+                       "unhewn_cobblestone", "cobblestone", "grit"})
+    _PRIVATE = ("private", "customers", "delivery")
+    _NO_SIDEWALK = ("no", "none")
     _ROUGH = frozenset({"dirt", "ground", "grass", "sand", "mud", "earth",
                         "unpaved", "rock", "woodchips", "grass_paver"})
     _CYCLE_SIDES = ("cycleway", "cycleway:left", "cycleway:right", "cycleway:both")
@@ -531,8 +537,12 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
         v = _foot_or_bike_value(tags, "vehicle", "access")
         return v is not None and v in _SIDEPATH_DENY
 
+    def _private_for(tags, *keys):
+        v = _foot_or_bike_value(tags, *keys)
+        return v is not None and v in _PRIVATE
+
     def _walkbike_bits(hw, tags):
-        """Direction-independent walk/bike bits: 5, 6, 12-17."""
+        """Direction-independent walk/bike bits: 5, 6, 12-17, 19, 20."""
         bits = 0
         if _foot_denied(hw, tags):
             bits |= 0x20                                   # bit 5
@@ -548,31 +558,63 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
             bits |= 0x4000                                 # bit 14 infra
         surf = tags.get("surface")
         grade = tags.get("tracktype")
-        if surf in _PAVED:
+        if surf in _PAVED or (surf is None and grade == "grade1"):
             bits |= 1 << 15
         elif surf in _FIRM or grade in ("grade1", "grade2"):
             bits |= 2 << 15
         elif surf in _ROUGH or grade in ("grade3", "grade4", "grade5"):
             bits |= 3 << 15                                # bits 15-16
-        if any(tags.get(k) in ("no", "none")
-               for k in ("sidewalk", "sidewalk:both")):
+        sw = tags.get("sidewalk:both") or tags.get("sidewalk")
+        if sw is None:
+            lr = (tags.get("sidewalk:left"), tags.get("sidewalk:right"))
+            if all(v in _NO_SIDEWALK for v in lr):
+                sw = "no"
+            elif all(v in _NO_SIDEWALK or v == "separate" for v in lr):
+                sw = "separate"
+        if sw in _NO_SIDEWALK:
             bits |= 0x20000                                # bit 17
+        elif sw == "separate":
+            bits |= 0x80000                    # bit 19: sidewalk is its own way
+        # bit 20: private (or customers / delivery) for walkers or for
+        # cyclists — still usable, at a penalty, so a destination inside
+        # a gated estate stays reachable.
+        if (_private_for(tags, "foot", "access")
+                or _private_for(tags, "bicycle", "vehicle", "access")):
+            bits |= 0x100000
         return bits
 
-    def _bike_contraflow(tags):
-        """Cycling against the one-way is allowed."""
+    def _bike_contraflow(tags, oneway):
+        """Cycling against the one-way is allowed: None if not, else the
+        lane / track bits (13, 14) of the contraflow facility."""
         if tags.get("oneway:bicycle") == "no":
-            return True
-        if tags.get("cycleway") in ("opposite", "opposite_lane", "opposite_track"):
-            return True
-        return any(tags.get(k) in ("-1", "no")
-                   for k in ("cycleway:left:oneway", "cycleway:right:oneway"))
+            return 0
+        for k in _CYCLE_SIDES:
+            v = tags.get(k)
+            if v == "opposite":
+                return 0
+            if v == "opposite_lane":
+                return 0x2000
+            if v == "opposite_track":
+                return 0x4000
+        # cycleway:<side>:oneway=-1 runs against the way's direction —
+        # against traffic only on an oneway=yes way.
+        against = ("no", "-1") if oneway == 1 else ("no",)
+        for side in ("left", "right", "both"):
+            if tags.get(f"cycleway:{side}:oneway") in against:
+                kind = tags.get(f"cycleway:{side}") or tags.get("cycleway")
+                return {"lane": 0x2000, "track": 0x4000}.get(kind, 0)
+        return None
 
     def _foot_bound_by_oneway(hw, tags):
         """The way's one-way applies to walkers too."""
         if tags.get("oneway:foot") == "no":
             return False
-        return tags.get("oneway:foot") == "yes" or hw in _FOOT_CLASS
+        if tags.get("oneway:foot") == "yes":
+            return True
+        if hw == "path" and (tags.get("bicycle") == "designated"
+                             or "mtb:scale" in tags):
+            return False
+        return hw in _FOOT_CLASS
 
     # Road-class ordinal for the v4 routing-graph class_access u32
     # (bits 0..4). See docs/formats.md for the full bit layout. Unknown /
@@ -886,9 +928,17 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
                     and hw not in ("motorway", "motorway_link")):
                 foot_ok = (not (wb_bits & 0x20)
                            and not _foot_bound_by_oneway(hw, w.tags))
-                bike_ok = not (wb_bits & 0x40) and _bike_contraflow(w.tags)
+                contra_lane = (None if wb_bits & 0x40
+                               else _bike_contraflow(w.tags, oneway))
+                bike_ok = contra_lane is not None
                 if foot_ok or bike_ok:
-                    contra_ca = (class_ord | (wb_bits & 0x3F060)
+                    # The with-flow lane / track is not on this side; a
+                    # cycleway or designated way is bike infrastructure
+                    # both ways.
+                    way_infra = 0x4000 if (hw == "cycleway" or w.tags.get(
+                        "bicycle") == "designated") else 0
+                    contra_ca = (class_ord | (wb_bits & 0x1B9060)
+                                 | way_infra | (contra_lane or 0)
                                  | 0x200 | 0x400 | 0x800)
                     if not foot_ok:
                         contra_ca |= 0x40000      # bit 18: not for walking
@@ -1112,7 +1162,8 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
                 edges_class_access)]
     class_access_col = columns[4]
     num_round = int(((class_access_col >> 8) & 1).sum())
-    num_link = int(np.isin((class_access_col & 0x1F), [2, 4, 6, 8, 10]).sum())
+    num_link = int((np.isin((class_access_col & 0x1F), [2, 4, 6, 8, 10])
+                    & ((class_access_col & 0x400) == 0)).sum())
     del class_access_col
 
     # Nodes array in (lat_e7, lon_e7) layout. node_coords is already shaped (N, 2).

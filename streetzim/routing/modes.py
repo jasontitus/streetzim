@@ -6,7 +6,9 @@ One table for the Python readers; resources/viewer/routing-worker.js
 Edge bits (class_access; docs/formats.md): 0-4 class ordinal, 5 no
 walking, 6 no cycling, 9 no cars, 10 a record against a one-way (speed
 0), 12 push the bike, 13 cycle lane, 14 cycle track, 15-16 surface (1
-paved, 2 firm, 3 rough), 17 no sidewalk, 18 no walking in this direction.
+paved, 2 firm, 3 rough), 17 no sidewalk, 18 no walking in this direction,
+19 the sidewalk is mapped as its own way, 20 private (or customers /
+delivery) for walkers or cyclists.
 
 ``edge_cost`` returns (cost_s, time_s): the search minimises cost, the
 route shows time. Every multiplier is >= 1 and every speed is at most
@@ -36,6 +38,9 @@ BIKE_TRACK_KPH = 12.0          # track / path of unknown surface
 BIKE_PUSH_KPH = 4.0
 BIKE_PUSH_PENALTY = 1.5
 BIKE_STEPS_PENALTY = 3.0        # carrying the bike
+WALK_SEPARATE_SIDEWALK = 1.2    # prefer the mapped sidewalk to the road
+PRIVATE_PENALTY = 3.0           # usable, e.g. to reach a gated estate
+_ROADS = range(1, 15)           # motorway .. service
 
 
 def is_no_motor(ca: int) -> bool:
@@ -67,13 +72,19 @@ def edge_cost(mode: str, speed_dist: int, ca: int) -> tuple[float, float] | None
             mult = 1.5
         if no_sidewalk and ordv in _TRUNK + _PRIMARY + _SECONDARY:
             mult *= 1.5
+        if ca & 0x80000 and ordv in _ROADS:
+            mult *= WALK_SEPARATE_SIDEWALK
+        if ca & 0x100000:
+            mult *= PRIVATE_PENALTY
         return t * mult, t
     if mode == "bike":
         if ca & 0x40 or ordv in _MOTORWAY:
             return None
+        private = PRIVATE_PENALTY if ca & 0x100000 else 1.0
         if ca & 0x1000 or ordv == _STEPS:
             t = dist_m / (BIKE_PUSH_KPH / 3.6)
-            return t * (BIKE_STEPS_PENALTY if ordv == _STEPS else BIKE_PUSH_PENALTY), t
+            return t * private * (BIKE_STEPS_PENALTY if ordv == _STEPS
+                                  else BIKE_PUSH_PENALTY), t
         if surface == 3:
             kph = BIKE_ROUGH_KPH
         elif surface == 2:
@@ -91,5 +102,5 @@ def edge_cost(mode: str, speed_dist: int, ca: int) -> tuple[float, float] | None
                 mult = 1.4
             elif ordv in _SECONDARY:
                 mult = 1.2
-        return t * mult, t
+        return t * mult * private, t
     raise ValueError(f"unknown travel mode {mode!r}; one of {', '.join(MODES)}")

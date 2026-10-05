@@ -56,13 +56,29 @@ disagrees.
 
 | bits | meaning |
 |---|---|
-| 0–4 | road class ordinal (`CLASS_ORDINAL`): motorway 1, motorway_link 2, trunk 3, trunk_link 4, primary 5, primary_link 6, secondary 7, secondary_link 8, tertiary 9, tertiary_link 10, residential 11, living_street 12, unclassified 13, service 14, track 15, path 16, footway 17, cycleway 18, pedestrian 19, steps 20; anything else 0 |
-| 5 | `foot=no` |
-| 6 | `bicycle=no` |
+| 0–4 | road class ordinal (`CLASS_ORDINAL`): motorway 1, motorway_link 2, trunk 3, trunk_link 4, primary 5, primary_link 6, secondary 7, secondary_link 8, tertiary 9, tertiary_link 10, residential 11, living_street 12, unclassified 13, service 14, track 15, path 16, footway 17, cycleway 18, pedestrian 19, steps 20, bridleway 21, corridor 22, busway 23, escape 24; anything else 0 |
+| 5 | no walking (`foot` > `access`; motorways, busways, `motorroad=yes`) |
+| 6 | no cycling (`bicycle` > `vehicle` > `access`; motorways, busways, `motorroad=yes`) |
 | 7 | one-way (set for both `oneway=yes` and `oneway=-1`, and implied for roundabouts and motorways) |
 | 8 | roundabout / circular / mini_roundabout |
 | 9 | no motor vehicles (OSM access hierarchy, or a class in `NO_MOTOR_HIGHWAY`); the car profile must skip these edges |
-| 10–31 | zero (reserved) |
+| 10 | a record for travel against a one-way (walkers, and cyclists with a contraflow exemption). Speed byte 0, bit 9 set, bits 7 and 8 never set. Cars never use it |
+| 11 | the edge's geometry is stored in the other direction: reverse it when drawing (set on every bit-10 record) |
+| 12 | cyclists push (footways, pedestrian streets, steps, `bicycle=dismount`, against a one-way without an exemption) |
+| 13 | cycle lane (`cycleway*=lane/shared_lane/share_busway`; `opposite_lane` on a bit-10 record) |
+| 14 | cycle track or cycle infrastructure (`highway=cycleway`, `cycleway*=track`, `bicycle=designated`) |
+| 15–16 | surface: 0 unknown, 1 paved, 2 firm (gravel, compacted, `tracktype=grade2`), 3 rough |
+| 17 | no sidewalk (`sidewalk`, `sidewalk:both`, or both sides no) |
+| 18 | no walking in this edge's direction (one-way footways, `oneway:foot=yes`) |
+| 19 | the sidewalk is mapped as its own way (`sidewalk=separate`) |
+| 20 | private, customers or delivery access for walkers or cyclists (usable at a penalty) |
+| 21–31 | zero (reserved) |
+
+Graphs built with `STREETZIM_ROUTING_WALKBIKE=0` have bits 10–20 clear, no
+bit-10 records and ordinals 21–24 as 0; bits 5 and 6 are then the literal
+`foot=no` / `bicycle=no`. What each travel mode may use and what it costs
+is in `streetzim/routing/modes.py`, mirrored by `edgeCostFor` in
+`resources/viewer/routing-worker.js`.
 
 Speeds come from the `SPEED` table (`DEFAULT_SPEED` = 30 km/h).
 

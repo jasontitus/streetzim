@@ -19,6 +19,7 @@ FOOTWAY, CYCLEWAY, TRACK, PATH, STEPS = 17, 18, 15, 16, 20
 FOOT_DENY, BIKE_DENY, NO_MOTOR, CONTRA, GEOM_REV = 0x20, 0x40, 0x200, 0x400, 0x800
 PUSH, LANE, INFRA, SIDEWALK_NO, FOOT_DIR_DENY = 0x1000, 0x2000, 0x4000, 0x20000, 0x40000
 PAVED, FIRM, ROUGH = 1 << 15, 2 << 15, 3 << 15
+SEPARATE, PRIVATE = 0x80000, 0x100000
 NONE = 0xFFFFFFFF
 KM = 10_000          # 1 km in decimetres
 
@@ -47,6 +48,9 @@ def test_walk_rules():
     assert edge_cost("walk", _sd(80), TRUNK | SIDEWALK_NO) == (1620.0, 720.0)
     assert edge_cost("walk", _sd(50), PRIMARY | SIDEWALK_NO) == (1080.0, 720.0)
     assert edge_cost("walk", _sd(30), RES | SIDEWALK_NO) == (720.0, 720.0)
+    assert edge_cost("walk", _sd(30), RES | SEPARATE)[0] == pytest.approx(864.0)
+    assert edge_cost("walk", _sd(5), FOOTWAY | SEPARATE) == (720.0, 720.0)
+    assert edge_cost("walk", _sd(30), RES | PRIVATE) == (2160.0, 720.0)
 
 
 def test_bike_rules():
@@ -68,6 +72,8 @@ def test_bike_rules():
     assert edge_cost("bike", _sd(40), SECONDARY)[0] == pytest.approx(240.0)
     assert edge_cost("bike", _sd(50), PRIMARY | LANE) == (200.0, 200.0)
     assert edge_cost("bike", _sd(50), PRIMARY | INFRA) == (200.0, 200.0)
+    assert edge_cost("bike", _sd(30), RES | PRIVATE) == (600.0, 200.0)
+    assert edge_cost("bike", _sd(30), FOOTWAY | PUSH | PRIVATE)[0] == pytest.approx(4050.0)
 
 
 def test_unknown_mode():
@@ -80,7 +86,7 @@ def test_heuristic_is_admissible_for_every_bit_combination(mode):
     """No edge is faster than the straight-line speed A* assumes, and the
     search cost never undercuts the time."""
     bits = [FOOT_DENY, BIKE_DENY, NO_MOTOR | CONTRA, PUSH, LANE, INFRA,
-            SIDEWALK_NO, FOOT_DIR_DENY, PAVED, FIRM, ROUGH]
+            SIDEWALK_NO, FOOT_DIR_DENY, PAVED, FIRM, ROUGH, SEPARATE, PRIVATE]
     floor = 1000 / (HEURISTIC_KPH[mode] / 3.6)
     for ordv in range(25):
         for k in range(len(bits) + 1):
@@ -243,7 +249,7 @@ def test_monaco_walk_and_bike_routes(tmp_path, monkeypatch):
             got[mode] = r
             seq = r.node_sequence
             time_s = 0.0
-            for u, v in zip(seq, seq[1:]):
+            for u, v in itertools.pairwise(seq):
                 costs = [edge_cost(mode, sd, ca)
                          for (t, sd, _gi, _ni, ca) in g.edges_of_node(u) if t == v]
                 ok = [c for c in costs if c is not None]
