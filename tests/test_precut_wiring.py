@@ -140,7 +140,7 @@ def test_main_passes_the_cut_flag_to_both_steps(monkeypatch, tmp_path, cut):
         got["routing"] = k["work_pbf_cut"]
         raise Stop
     monkeypatch.setattr(c, "_build_search", search)
-    monkeypatch.setattr(c, "_build_wikidata", lambda **k: None)
+    monkeypatch.setattr(c, "_build_wikidata", lambda **k: (None, None))
     monkeypatch.setattr(c, "_build_routing", routing)
     with pytest.raises(Stop):
         c.main(["--bbox", BOX, "--pbf", "in.pbf"])
