@@ -54,8 +54,13 @@ PARSE_API = "https://en.wikipedia.org/w/api.php"
 _LANG = "en"
 
 
+def _wiki_host() -> str:
+    from streetzim.languages import wiki_code
+    return f"{wiki_code(_LANG)}.wikipedia.org"
+
+
 def _parse_api() -> str:
-    return f"https://{_LANG}.wikipedia.org/w/api.php"
+    return f"https://{_wiki_host()}/w/api.php"
 # Next to wikidata_cache.py's: $STREETZIM_CACHE_DIR, else the checkout, else
 # a user cache dir when installed (streetzim/paths.py cache_root).
 DEFAULT_CACHE_DIR = cache_root() / "wiki_articles_cache"
@@ -110,11 +115,16 @@ _DISAMBIG_RE = re.compile(
     r'class="[^"]*\b(dmbox|disambiguation)\b|'
     r'<p\b[^>]*>\s*(?:<b>)?[^<]{0,120}(?:</b>)?\s*(?:most commonly )?(?:may |can |could )?'
     r'(?:also )?refers? to\b|'
-    r'\bmay refer to:', re.I)
+    r'\bmay refer to:|'
+    # Other editions' disambiguation banners (fr, de, es, it, nl, pt, pl).
+    r'Cette page d.homonymie|Begriffsklärungsseite|página de desambiguación|'
+    r'pagina di disambiguazione|doorverwijspagina|página de desambiguação|'
+    r'strona ujednoznaczniająca|id="disambigbox"', re.I)
 
 
 def _is_disambiguation(raw_html: str) -> bool:
-    """enwiki disambiguation pages ("Roma or ROMA may refer to:")."""
+    """Disambiguation pages ("Roma or ROMA may refer to:", and the other
+    editions' banners in _DISAMBIG_RE)."""
     head = raw_html[:20000]
     return bool(_DISAMBIG_RE.search(head))
 
@@ -194,7 +204,28 @@ def _remove_spans_by_class(html: str, class_tokens: set[str]) -> str:
     (Wikipedia's per-character IPA tree, the ext-phonos ⓘ button, inline
     geo coords). Token match so "geo" doesn't eat "geography". Mirrors
     mcpzim's ArticleSections.removeSpansByClass."""
-    tag = re.compile(r"<(/?)span\b([^>]*)>", re.I)
+    return _remove_by_class(html, "span", lambda toks: bool(toks & class_tokens))
+
+
+# Boilerplate containers, removed whole (nested <div>s included): matched
+# as substrings of the class attribute, as before, plus French Wikipedia's
+# banners (bandeau: disambiguation "homonymie", stub "ébauche", portal
+# footer), its "Géolocalisation sur la carte" geobox and edit links.
+BOILERPLATE_CLASSES = ("reflist", "navbox", "metadata", "mw-editsection",
+                       "noprint", "hatnote", "thumb", "mw-empty-elt",
+                       "bandeau-container", "bandeau-portail", "homonymie",
+                       "geobox", "references-small", "infobox")
+
+
+def _boilerplate(toks: set[str]) -> bool:
+    attr = " ".join(toks)
+    return any(c in attr for c in BOILERPLATE_CLASSES)
+
+
+def _remove_by_class(html: str, tagname: str, pred) -> str:
+    """Balanced removal of every `<tagname>` whose class tokens satisfy
+    `pred`, with its content (nested same-name tags included)."""
+    tag = re.compile(rf"<(/?){tagname}\b([^>]*)>", re.I)
     tags = list(tag.finditer(html))
     removals: list[tuple[int, int]] = []
     i = 0
@@ -205,7 +236,7 @@ def _remove_spans_by_class(html: str, class_tokens: set[str]) -> str:
             continue
         cls = re.search(r'class="([^"]*)"', m.group(2), re.I)
         toks = set(cls.group(1).lower().split()) if cls else set()
-        if not (toks & class_tokens):
+        if not pred(toks):
             i += 1
             continue
         depth, j = 1, i + 1
@@ -281,16 +312,15 @@ def clean_article_html(html: str, title: str, source_url: str,
     # these). The IPA/geo spans need the balanced remover above.
     h = _remove_spans_by_class(h, {"ipa", "rt-commentedtext", "ext-phonos",
                                     "geo", "coordinates"})
-    for tag in ("script", "style", "table", "figure", "nav", "aside",
+    # Tables nest (an infobox holds its location map's table): balanced.
+    h = _remove_by_class(h, "table", lambda toks: True)
+    for tag in ("script", "style", "figure", "nav", "aside",
                 "sup", "ol", "math", "audio", "video"):
         h = re.sub(rf"<{tag}\b[^>]*>.*?</{tag}>", " ", h, flags=re.S | re.I)
-    # Reference/nav/edit containers by class/role.
-    for cls in ("reflist", "navbox", "metadata", "mw-editsection",
-                "noprint", "hatnote", "thumb", "mw-empty-elt"):
-        h = re.sub(rf'<div\b[^>]*class="[^"]*{cls}[^"]*"[^>]*>.*?</div>',
-                  " ", h, flags=re.S | re.I)
-        h = re.sub(rf'<span\b[^>]*class="[^"]*{cls}[^"]*"[^>]*>.*?</span>',
-                  " ", h, flags=re.S | re.I)
+    # Reference/nav/edit/banner containers by class, balanced: a banner
+    # nests <div>s, and cutting at its first </div> left its text behind.
+    h = _remove_by_class(h, "div", _boilerplate)
+    h = _remove_by_class(h, "span", _boilerplate)
     # Unwrap links → keep their text.
     h = re.sub(r"</?a\b[^>]*>", "", h, flags=re.I)
     # Some articles contain ESCAPED markup as literal text — an editor typed
@@ -523,6 +553,8 @@ def _parse_request(title_us: str, ua: str,
     params = urllib.parse.urlencode({
         "action": "parse", "page": title_us.replace("_", " "),
         "prop": "text", "redirects": "1", "format": "json",
+        # zhwiki mixes scripts; ask for Simplified (OSM name:zh mostly is).
+        **({"variant": "zh-hans"} if _LANG == "zh" else {}),
         "disableeditsection": "1", "disablelimitreport": "1", "formatversion": "2",
     })
     try:
@@ -687,8 +719,11 @@ def bundle_wiki_articles(titles: Iterable[str],
     An offline source must be a Wikipedia ZIM in that language."""
     global _LANG
     if lang != "en":
-        kw["cache_dir"] = os.path.join(kw.get("cache_dir") or str(DEFAULT_CACHE_DIR),
-                                       "lang", lang)
+        root = kw.get("cache_dir") or str(DEFAULT_CACHE_DIR)
+        kw["cache_dir"] = os.path.join(root, "lang", lang)
+        if os.path.isdir(root):
+            from streetzim.cache_permissions import make_shared_dirs
+            make_shared_dirs(kw["cache_dir"], root)
     prev, _LANG = _LANG, lang
     try:
         return _bundle_wiki_articles(titles, add_item, **kw)
@@ -814,7 +849,7 @@ def _bundle_wiki_articles(
         article itself or the one it redirects to); returns its size."""
         nonlocal images_stored, image_bytes
         disp = article_us.replace("_", " ")
-        url = f"https://{_LANG}.wikipedia.org/wiki/" + urllib.parse.quote(article_us)
+        url = f"https://{_wiki_host()}/wiki/" + urllib.parse.quote(article_us)
         lead_html = gallery_html = ""
         # The page lives at wiki-article/<Title>; a title with N
         # slashes is N levels deeper, so the image link must climb

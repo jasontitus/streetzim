@@ -573,6 +573,14 @@ def _feature_of(rec: dict) -> dict:
         feat["admin_level"] = rec["al"]
     if rec.get("bb"):
         feat["bbox"] = rec["bb"]
+    # Other names (zim_writer.shown_names): written back as display fields,
+    # so the page title and body keep them ("Haidian · 海淀区").
+    if rec.get("nn") or rec.get("nl"):
+        feat["display_name"] = feat["name"]
+        if rec.get("nn"):
+            feat["display_native"] = rec["nn"]
+        if rec.get("nl"):
+            feat["display_latin"] = rec["nl"]
     return feat
 
 

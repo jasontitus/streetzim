@@ -88,17 +88,41 @@ def feature_subtype(props):
 SEARCH_SCHEMA = 2
 
 
-def mark_schema(features_path):
+def mark_schema(features_path, languages=None):
+    """Write <features_path>.schema: the schema, and the name:xx languages
+    the features carry in ``names`` (STREETZIM_TILE_LANGUAGES when the
+    extraction ran)."""
+    langs = sorted(_languages() if languages is None else languages)
     with open(str(features_path) + ".schema", "w") as f:
-        json.dump({"search_schema": SEARCH_SCHEMA}, f)
+        json.dump({"search_schema": SEARCH_SCHEMA, "languages": langs}, f)
+
+
+def _schema(features_path) -> dict:
+    try:
+        with open(str(features_path) + ".schema") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
 def schema_of(features_path) -> int:
     try:
-        with open(str(features_path) + ".schema") as f:
-            return int(json.load(f).get("search_schema", 1))
-    except (OSError, ValueError, AttributeError):
+        return int(_schema(features_path).get("search_schema", 1))
+    except (TypeError, ValueError):
         return 1
+
+
+def schema_languages(features_path) -> list:
+    """The name:xx languages a features file carries (none when unknown)."""
+    return list(_schema(features_path).get("languages") or [])
+
+
+def copy_schema(src_path, dst_path):
+    """Carry a features file's schema marker to a copy or cut of it."""
+    import shutil
+    if os.path.exists(str(src_path) + ".schema"):
+        shutil.copyfile(str(src_path) + ".schema", str(dst_path) + ".schema")
 
 
 def native_name(props, name):
@@ -109,7 +133,12 @@ def native_name(props, name):
     name once folded, or shorter than two characters."""
     from cloud.search_shards import norm
     nat = (props.get("name") or props.get("name_int") or "").strip()
-    if len(nat) < 2 or norm(nat) == norm(name):
+    # An OSM ";" list ("東九州自動車道;延岡道路"): its first name.
+    nat = nat.split(";")[0].strip()
+    a, b = norm(nat), norm(name)
+    # The same name, or one holding the other ("HOTEL ITAMI（ホテル伊丹）"):
+    # nothing a search would miss, and the result line would repeat it.
+    if len(nat) < 2 or a == b or (b and b in a) or (a and a in b):
         return None
     return nat
 

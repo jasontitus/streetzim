@@ -667,3 +667,16 @@ def _fake_builder(tmp_path):
                  "open(a[a.index('--output') + 1], 'wb').write(b'x')\n")
     p.chmod(0o755)
     return str(p)
+
+
+def test_feature_of_keeps_other_names_in_the_page_title():
+    svr = _svr()
+    from streetzim import zim_writer as W
+    feat = {"name": "Haidian", "name_native": "海淀区", "type": "place", "subtype": "suburb",
+            "lat": 39.96, "lon": 116.29, "location": ""}
+    back = svr._feature_of(W.search_record(feat))
+    assert W.kiwix_page_title(back) == W.kiwix_page_title(feat) == "Haidian · 海淀区"
+    fr = {"name": "Eiffel Tower", "display_name": "Tour Eiffel", "display_latin": "Eiffel Tower",
+          "type": "park", "subtype": "park", "lat": 48.85, "lon": 2.29, "location": ""}
+    back = svr._feature_of(W.search_record(fr))
+    assert W.shown_names(back) == ("Tour Eiffel", None, "Eiffel Tower")

@@ -2781,21 +2781,23 @@ function _szLowzoomLakes() {
 
 // The language map labels are drawn in (map-config "language", from
 // create_osm_zim --language): OSM's name:<lang>, else the place's own name
-// (name_int / name:latin as StreetZim's tilemaker writes them). English
+// (OpenFreeMap's name; name_int / name:latin as StreetZim's tilemaker
+// writes them, which writes no name) — the order search_extract's
+// localize_feature names records in, so tapped labels find them. English
 // builds keep name:latin first. szLabelOf is the same rule for a feature's
 // properties (popups, the wiki list).
 var SZ_LANG = 'en';
 function szLabelField() {
   if (SZ_LANG !== 'en') {
-    return ["coalesce", ["get", "name:" + SZ_LANG], ["get", "name_int"],
-            ["get", "name:latin"], ["get", "name"]];
+    return ["coalesce", ["get", "name:" + SZ_LANG], ["get", "name"],
+            ["get", "name_int"], ["get", "name:latin"]];
   }
   return ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]];
 }
 function szLabelOf(p) {
   p = p || {};
   if (SZ_LANG !== 'en') {
-    return p['name:' + SZ_LANG] || p.name_int || p['name:latin'] || p.name || '';
+    return p['name:' + SZ_LANG] || p.name || p.name_int || p['name:latin'] || '';
   }
   return p['name:latin'] || p.name || '';
 }

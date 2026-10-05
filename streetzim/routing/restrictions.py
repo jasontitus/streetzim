@@ -207,7 +207,7 @@ def resolve(collector, way_seq) -> tuple[list, Counter]:
             dropped["member way not in the graph"] += 1
             continue
         paths = []
-        ok = True
+        unplaced = 0       # from/to pairs this relation cannot place
         for fw in frm:
             for tw in to:
                 fseq, fow = way_seq[fw]
@@ -215,14 +215,14 @@ def resolve(collector, way_seq) -> tuple[list, Counter]:
                 if via_node is not None:
                     v = from_osm.get(via_node)
                     if v is None:
-                        ok = False
-                        break
+                        unplaced += 1
+                        continue
                     if fw == tw and fow == 0 and _arrive_from(fseq, 0, v) is None:
                         # no_u_turn on a two-way way through v: either side.
                         pos = [i for i, (n, _r) in enumerate(fseq) if n == v]
                         if len(pos) != 1 or not 0 < pos[0] < len(fseq) - 1:
-                            ok = False
-                            break
+                            unplaced += 1
+                            continue
                         i = pos[0]
                         for side in (fseq[i - 1][0], fseq[i + 1][0]):
                             paths.append([side, v, side])
@@ -232,8 +232,8 @@ def resolve(collector, way_seq) -> tuple[list, Counter]:
                     if u is None or w is None or (fw == tw and u != w):
                         # (the same way as from and to is a U-turn; on a
                         # one-way it would read as "straight on")
-                        ok = False
-                        break
+                        unplaced += 1
+                        continue
                     paths.append([u, v, w])
                 else:
                     # Via ways: the from-way meets the chain at one end.
@@ -250,39 +250,42 @@ def resolve(collector, way_seq) -> tuple[list, Counter]:
                             chain = c
                             break
                     if chain is None:
-                        ok = False
-                        break
+                        unplaced += 1
+                        continue
                     u = _arrive_from(fseq, fow, chain[0])
                     w = _leave_to(tseq, tow, chain[-1])
                     if u is None or w is None:
-                        ok = False
-                        break
+                        unplaced += 1
+                        continue
                     paths.append([u] + chain + [w])
-            if not ok:
-                break
-        if not ok or not paths:
+        if not paths:
             dropped["cannot place on the graph"] += 1
             continue
+        if unplaced:
+            dropped["from/to pairs of a placed relation"] += unplaced
         for p in paths:
             if len(set(p[1:-1])) != len(p) - 2:
                 dropped["via path revisits a node"] += 1
                 continue
             for f in flags_for:
-                key = tuple(p)
-                records[key] = records.get(key, 0) | f
-    # A path can be both NO and ONLY for one mode only through conflicting
-    # relations; ONLY records with the same prefix and different targets
-    # ban each other's targets: drop both.
-    only_by_prefix = {}
-    for p, f in records.items():
-        if f & ONLY:
-            only_by_prefix.setdefault(p[:-1], []).append(p)
-    out = []
-    for p, f in sorted(records.items()):
-        if f & ONLY and len(only_by_prefix[p[:-1]]) > 1:
-            dropped["conflicting only_* at one junction"] += 1
-            continue
-        out.append((f, list(p)))
+                # Kept apart by kind: a car ban and a bike only_* on one
+                # path must not merge into an only_* for cars.
+                key = (tuple(p), bool(f & ONLY))
+                records[key] = records.get(key, 0) | (f & (CAR | BIKE))
+    # ONLY records with the same prefix and different targets ban each
+    # other's targets: for each mode they share, that mode drops both.
+    for bit in (CAR, BIKE):
+        by_prefix = {}
+        for (p, only), modes in records.items():
+            if only and modes & bit:
+                by_prefix.setdefault(p[:-1], []).append(p)
+        for ps in by_prefix.values():
+            if len(ps) > 1:
+                for p in ps:
+                    records[(p, True)] &= ~bit
+                dropped["conflicting only_* at one junction"] += len(ps)
+    out = [((ONLY if only else 0) | modes, list(p))
+           for (p, only), modes in sorted(records.items()) if modes]
     return out, dropped
 
 

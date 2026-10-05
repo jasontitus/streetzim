@@ -204,6 +204,23 @@ def preserve_cache_permissions(staging: Path, previous: Path) -> None:
         _darwin_acl(previous, staging)
 
 
+def make_shared_dirs(directory: Path, root: Path) -> None:
+    """Create `directory` under the cache `root`, each new level with the
+    root's group and mode (share_like); a level another build creates at
+    the same moment is fine."""
+    directory, root = Path(directory), Path(root)
+    rel = directory.relative_to(root)
+    cur = root
+    for part in rel.parts:
+        cur = cur / part
+        if not cur.is_dir():
+            try:
+                cur.mkdir()
+            except FileExistsError:
+                continue
+            share_like(cur, root)
+
+
 def share_like(directory: Path, like: Path) -> None:
     """Give a new cache subdirectory the group and mode of the cache root it
     sits in (a per-language Wikidata cache under a shared root), so the

@@ -110,7 +110,17 @@ out (counted in the build log): conditional restrictions, `*_on_red`,
 members missing from the extract, a from/to way that runs through the
 via node in both directions. The routers also charge a U-turn (u → v → u)
 45 s by car and 20 s by bike unless it is the only way on; that penalty
-steers the search and is not part of the reported time.
+steers the search and is not part of the reported time. Because that
+penalty depends on where a node was reached from, the routers keep a
+second arrival per node (from another neighbour) near restrictions, so
+routes stay optimal (spatial_astar.find_route_spatial, routing-worker.js).
+
+Limits: restrictions ship only in spatial-cell ZIMs (`--spatial-chunk-scale`,
+what production builds); a single-file `graph.bin` and a ZIM whose cells
+`cloud/repackage_zim.py` rebuilds from it carry none. The two-pass fallback
+(long car routes after every full pass ran out of budget) starts its legs
+afresh, so a restriction across a leg join is not enforced. The main-thread
+fallback router ignores them.
 
 ### Nodes and names
 

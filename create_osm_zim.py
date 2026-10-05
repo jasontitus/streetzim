@@ -978,7 +978,16 @@ def _build_search(
             sys.exit(1)
         cache_size = os.path.getsize(search_cache_path) / (1024 * 1024)
         print(f"    Using cached search features: {search_cache_path} ({cache_size:.0f} MB)")
-        from streetzim.search_extract import SEARCH_SCHEMA, schema_of
+        from streetzim.search_extract import SEARCH_SCHEMA, schema_languages, schema_of
+        _lang = getattr(args, "language", "en") or "en"
+        if _lang != "en" and _lang not in schema_languages(search_cache_path):
+            print(f"    Error: --language {_lang} needs search features with name:{_lang}, "
+                  f"and this search cache has none ({search_cache_path}.schema lists "
+                  f"{schema_languages(search_cache_path) or 'no languages'}): every result "
+                  "would be named in the place's own language. Build without "
+                  "--search-cache, or extract a cache with "
+                  f"STREETZIM_TILE_LANGUAGES={_lang}.", flush=True)
+            sys.exit(1)
         if schema_of(search_cache_path) < SEARCH_SCHEMA:
             print("    WARNING: this search cache predates native-script names "
                   "(no <cache>.schema): places will not be found by their name "
@@ -1202,10 +1211,18 @@ def _finish_wiki_cross_refs(args, wiki_cross_refs, search_features, admin_refs=N
             _tcache = getattr(args, "wikidata_title_cache", None)
             if _tcache and _lang != "en":
                 _tcache = f"{_tcache}.{_lang}"     # titles are per Wikipedia
+            _tmap = getattr(args, "wikidata_title_map", None)
+            if _tmap and _lang != "en":
+                # A Q-ID -> title map is one Wikipedia's (English, as made
+                # by its tools); its titles are not <lang> Wikipedia's.
+                print(f"    Warning: --wikidata-title-map is ignored for --language {_lang}: "
+                      "its titles are English Wikipedia's; resolving via Wikidata instead",
+                      flush=True)
+                _tmap = None
             _t = augment_wiki_cross_refs(
                 wiki_cross_refs,
                 cache_path=_tcache,
-                offline_map=getattr(args, "wikidata_title_map", None),
+                offline_map=_tmap,
                 lang=_lang,
             ) or {}
             from streetzim.source_report import note
@@ -1872,6 +1889,19 @@ def main(argv=None):
         # The tile profile writes name:<language> (and search extraction
         # keeps it) when asked through this variable.
         os.environ["STREETZIM_TILE_LANGUAGES"] = args.language
+    else:
+        # Not inherited from a shell or an earlier build in this process.
+        os.environ.pop("STREETZIM_TILE_LANGUAGES", None)
+    _src = getattr(args, "wiki_articles_source", None)
+    if _src and os.path.isfile(_src) and _src.endswith(".zim"):
+        try:
+            from libzim.reader import Archive as _Archive
+            _zl = bytes(_Archive(_src).get_metadata("Language")).decode().split(",")[0]
+        except Exception:
+            _zl = None
+        if _zl and _zl != _languages.iso639_3(args.language):
+            parser.error(f"--wiki-articles-source {_src} is a {_zl} Wikipedia; this build "
+                         f"is --language {args.language} ({_languages.iso639_3(args.language)})")
     if args.cpus is not None and args.cpus < 1:
         parser.error("--cpus must be at least 1")
     _cpus.set_build_cpus(args.cpus)

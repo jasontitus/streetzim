@@ -941,16 +941,17 @@ function parseTurnTrailer(buffer, view, off) {
   var flags = new Uint8Array(buffer.slice(o, o + r));
   o += r + ((4 - r % 4) % 4);
   var pool = new Uint32Array(buffer.slice(o, o + p * 4));
-  var recs = [], roots = new Map();
+  // byVia: path[1] -> records; the router checks path[0] itself (a number
+  // key, no string per relaxed edge).
+  var recs = [], byVia = new Map();
   for (var i = 0; i < r; i++) {
     var path = Array.prototype.slice.call(pool, offs[i], offs[i + 1]);
     var rec = { flags: flags[i], path: path, id: i };
     recs.push(rec);
-    var key = path[0] + ',' + path[1];
-    var lst = roots.get(key);
-    if (lst) lst.push(rec); else roots.set(key, [rec]);
+    var lst = byVia.get(path[1]);
+    if (lst) lst.push(rec); else byVia.set(path[1], [rec]);
   }
-  return { recs: recs, roots: roots };
+  return { recs: recs, byVia: byVia };
 }
 
 // Turn-restriction flags (restrictions.py) and the U-turn penalty that
@@ -1507,7 +1508,13 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
   // Turn restrictions (cars and bikes; spatial_astar.find_route_spatial
   // is the reference). A search state is a node, or a virtual state:
   // a node plus the restriction paths the route is part-way along,
-  // numbered from numNodes up (vNode / vMatch). options.turnRestrictions
+  // numbered from numNodes up (vNode / vMatch); and second arrivals, ALT_BASE
+// + node: the U-turn penalty depends on where a node was reached from, so
+// a node keeps, beside its best arrival, its best arrival from another
+// neighbour while that is within one penalty of the best; expanded, it
+// only goes back toward the best arrival's neighbour (the one move the
+// best pays the penalty for). spatial_astar has the same rule.
+// options.turnRestrictions
   // === false (or ?turns=off) ignores them.
   var turnsOn = !(ctx && ctx.options && ctx.options.turnRestrictions === false);
   var mbit = !turnsOn ? 0 : drive ? TURN_CAR : travel === 'bike' ? TURN_BIKE : 0;
@@ -1515,7 +1522,49 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
   var numNodes = graph._index.numNodes;
   var vNode = [], vMatch = [], vKey = new Map();
   var penOf = new Map();       // state -> U-turn penalty paid to reach it
-  function nodeOf(sid) { return sid < numNodes ? sid : vNode[sid - numNodes]; }
+  var ALT_BASE = 0x40000000;
+  function nodeOf(sid) {
+    if (sid >= ALT_BASE) return sid - ALT_BASE;
+    return sid < numNodes ? sid : vNode[sid - numNodes];
+  }
+  function mainBack(node) {
+    var ms = table.find(node);
+    return (ms >= 0 && table.prev[ms] >= 0) ? nodeOf(table.prev[ms]) : -1;
+  }
+  // A second arrival can only matter after a restriction forced a detour:
+  // offered only when the best arrival's chain passes a virtual state
+  // within TAINT_HOPS steps (spatial_astar.tainted).
+  // taintOf: state -> steps since a virtual state (1..TAINT_HOPS), set
+  // when its predecessor is; a state is expanded only once closed, so its
+  // chain no longer changes and this equals walking it.
+  var TAINT_HOPS = 8;
+  var taintOf = new Map();
+  function isVirtual(sid) { return sid >= numNodes && sid < ALT_BASE; }
+  function tainted(sid) { return sid >= 0 && (isVirtual(sid) || taintOf.has(sid)); }
+  function setTaint(sid, from) {
+    var t = isVirtual(from) ? 1 : (taintOf.get(from) || 0) && taintOf.get(from) + 1;
+    if (t && t < TAINT_HOPS) taintOf.set(sid, t);
+    else if (taintOf.size) taintOf.delete(sid);
+  }
+  async function hOf(node) {
+    var c = await graph.nodeCoordsE7(node);
+    return haversine(c[0] / 1e7, c[1] / 1e7, endLat, endLon) * hScale;
+  }
+  // Offer a second arrival at `node` (see above); pushes it when kept.
+  async function offerAlt(node, g, prevSid, prevEi, pen, mb) {
+    var aid = ALT_BASE + node;
+    var as = table.find(aid);
+    if (as >= 0 && table.closed[as]) return;
+    if (as >= 0 && !(g < table.g[as]
+                     || (table.prev[as] >= 0 && nodeOf(table.prev[as]) === mb))) return;
+    if (as < 0) as = table.insert(aid);
+    table.g[as] = g;
+    table.prev[as] = prevSid;
+    table.prevEi[as] = prevEi;
+    setTaint(aid, prevSid);
+    if (pen) penOf.set(aid, pen); else if (penOf.size) penOf.delete(aid);
+    open.push(g + await hOf(node), aid);
+  }
   var goalSid = -1;
 
   var table = new NodeTable(1 << 14);
@@ -1580,7 +1629,11 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     if (current === endNode) { found = true; goalSid = curSid; break; }
     var cs = table.find(curSid);
     if (table.closed[cs]) continue;
-    if (curSid >= numNodes) {
+    var altTo = -1;
+    if (curSid >= ALT_BASE) {
+      altTo = mainBack(current);
+      if (altTo < 0 || altTo === nodeOf(table.prev[cs])) continue;
+    } else if (curSid >= numNodes) {
       // A closed plain state here dominates this virtual one.
       var plainSlot = table.find(current);
       if (plainSlot >= 0 && table.closed[plainSlot]) continue;
@@ -1601,7 +1654,7 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     // Restrictions in force here: bans / only from paths ending at this
     // node, `cont` for paths that go on.
     var bans = null, only = null, cont = null;
-    if (curSid >= numNodes) {
+    if (curSid >= numNodes && curSid < ALT_BASE) {
       var match = vMatch[curSid - numNodes];
       for (var mi = 0; mi < match.length; mi++) {
         var mm = match[mi], mp = mm.rec.path;
@@ -1627,7 +1680,8 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
         var onlyOk = false;
         for (var oe = cellAdj[local]; oe < eEnd && !onlyOk; oe++) {
           if (only.indexOf(edges[oe * 5]) >= 0
-              && edgeUsable(travel, edges[oe * 5 + 1], edges[oe * 5 + 4])) onlyOk = true;
+              && edgeUsable(travel, edges[oe * 5 + 1], edges[oe * 5 + 4])
+              && (!highwayOnly || isHighwayClass(edges[oe * 5 + 4]))) onlyOk = true;
         }
         if (!onlyOk) only = null;
       }
@@ -1651,6 +1705,7 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
         if (edgeCost < 0) continue;
       }
       var target = edges[base];
+      if (altTo >= 0 && target !== altTo) continue;
       if (bans !== null && bans.indexOf(target) >= 0) continue;
       if (only !== null && only.indexOf(target) < 0) continue;
       var pen = 0;
@@ -1659,7 +1714,8 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
           otherExit = 0;
           for (var xe = cellAdj[local]; xe < eEnd; xe++) {
             if (edges[xe * 5] !== back
-                && edgeUsable(travel, edges[xe * 5 + 1], edges[xe * 5 + 4])) { otherExit = 1; break; }
+                && edgeUsable(travel, edges[xe * 5 + 1], edges[xe * 5 + 4])
+                && (!highwayOnly || isHighwayClass(edges[xe * 5 + 4]))) { otherExit = 1; break; }
           }
         }
         if (otherExit) pen = uturn;
@@ -1669,14 +1725,20 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
       var tSid = target;
       var m2 = cont !== null ? cont.get(target) : undefined;
       if (mbit) {
-        var rcid = graph.cellForNode(target);
-        var rcell = (rcid === cid) ? cell : graph.cellIfResident(rcid);
-        if (rcell === null) rcell = await graph._ensureCell(rcid);
+        // Same cell as the source for most edges: no lookup then.
+        var rcid, rcell;
+        if (isV3 && target - cell.baseNode >= 0 && target - cell.baseNode < cell.nodeCount) {
+          rcid = cid; rcell = cell;
+        } else {
+          rcid = graph.cellForNode(target);
+          rcell = (rcid === cid) ? cell : graph.cellIfResident(rcid);
+          if (rcell === null) rcell = await graph._ensureCell(rcid);
+        }
         if (rcell.turns) {
-          var roots = rcell.turns.roots.get(current + ',' + target);
+          var roots = rcell.turns.byVia.get(target);
           if (roots) {
             for (var ri = 0; ri < roots.length; ri++) {
-              if (!(roots[ri].flags & mbit)) continue;
+              if (roots[ri].path[0] !== current || !(roots[ri].flags & mbit)) continue;
               m2 = (m2 || []).concat([{ rec: roots[ri], cid: rcid, pos: 1 }]);
             }
           }
@@ -1695,6 +1757,23 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
           vMatch.push(m2);
         }
       }
+      var pslot = (tSid === target && uturn) ? table.find(target) : -1;
+      if (pslot >= 0 && table.prev[pslot] >= 0 && tainted(table.prev[pslot])) {
+        // A plain target: keep a second arrival (offerAlt) when this one
+        // does not win, or when it replaces one from another neighbour.
+        var newGp = curG + edgeCost + pen;
+        var mb = (pslot >= 0 && table.prev[pslot] >= 0) ? nodeOf(table.prev[pslot]) : -1;
+        if (pslot >= 0 && (table.closed[pslot] || newGp >= table.g[pslot])) {
+          if (current !== mb && newGp < table.g[pslot] + uturn) {
+            await offerAlt(target, newGp, curSid, ei, pen, mb);
+          }
+          continue;
+        }
+        if (pslot >= 0 && table.g[pslot] < Infinity && mb !== current) {
+          await offerAlt(target, table.g[pslot], table.prev[pslot], table.prevEi[pslot],
+                         penOf.get(target) || 0, current);
+        }
+      }
       var ts = table.find(tSid);
       if (ts >= 0 && table.closed[ts]) continue;
       var newG = curG + edgeCost + pen;
@@ -1703,6 +1782,7 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
         table.g[ts] = newG;
         table.prev[ts] = curSid;
         table.prevEi[ts] = ei;
+        if (uturn) setTaint(tSid, curSid);
         if (pen) penOf.set(tSid, pen); else if (penOf.size) penOf.delete(tSid);
         // Target coordinates for the heuristic. Same cell as the
         // source for the vast majority of edges; a neighbouring cell

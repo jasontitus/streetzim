@@ -56,6 +56,7 @@ from cloud.wikimedia_http import (
     stop_error,
 )
 from cloud.wikimedia_http import user_agent as _user_agent
+from streetzim.languages import wiki_code
 
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 ENWIKI = "enwiki"
@@ -439,7 +440,7 @@ def augment_wiki_cross_refs(
     pending: dict[str, list] = {}
     for entry in wiki_cross_refs.values():
         tag = entry.get("wikipedia")
-        if tag and is_lang_title(tag, lang):
+        if tag and is_lang_title(tag, wiki_code(lang)):
             continue
         q = entry.get("wikidata")
         if q:
@@ -452,7 +453,8 @@ def augment_wiki_cross_refs(
         + "...")
     misses: set[str] = set()
     titles = resolve_qids(pending.keys(), cache_path=cache_path,
-                          offline_map=offline_map, misses=misses, site=f"{lang}wiki")
+                          offline_map=offline_map, misses=misses,
+                          site=f"{wiki_code(lang)}wiki")
 
     upgraded = non_en = no_en = 0
     for q, entries in pending.items():
@@ -463,7 +465,7 @@ def augment_wiki_cross_refs(
                 if orig:
                     entry["wikipedia_osm"] = orig
                     non_en += 1
-                entry["wikipedia"] = f"{lang}:" + title.replace(" ", "_")
+                entry["wikipedia"] = f"{wiki_code(lang)}:" + title.replace(" ", "_")
                 entry["wikipedia_src"] = "wd"
                 upgraded += 1
             elif orig and q in misses:

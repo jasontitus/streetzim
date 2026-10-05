@@ -66,6 +66,8 @@ def main():
     n = sum(1 for _ in open(path, "rb"))
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     shutil.move(path, args.out)
+    from streetzim.search_extract import copy_schema
+    copy_schema(path, args.out)
     shutil.rmtree(work, ignore_errors=True)
     print(f"wrote {args.out}: {n} features, "
           f"{os.path.getsize(args.out)/1e9:.1f} GB in {(time.time()-t0)/60:.0f} min",

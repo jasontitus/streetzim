@@ -113,3 +113,46 @@ def test_written_zim(tmp_path, source):
     # Kiwix pages (places, not POIs) are titled with both names.
     assert "Haidian · 海淀区" in _suggest(a, "Haidian")
     assert "Haidian · 海淀区" in _suggest(a, "海淀区")
+
+
+@pytest.mark.parametrize("props, want", [
+    # OpenFreeMap: name is the native name, name_int the Latin one.
+    ({"name:latin": "Tokyo Tower", "name": "東京タワー", "name_int": "Tokyo Tower"}, "東京タワー"),
+    ({"name:latin": "Higashi-Kyushu Expwy", "name_int": "東九州自動車道;延岡道路"}, "東九州自動車道"),
+    ({"name:latin": "Hotel Itami", "name_int": "HOTEL ITAMI（ホテル伊丹）"}, None),
+    ({"name:latin": "Unazuki Onsen (宇奈月)", "name_int": "宇奈月"}, None),
+])
+def test_native_name_rules(props, want):
+    assert E.native_name(props, props["name:latin"]) == want
+
+
+def test_record_names_include_the_latin_name():
+    assert S.record_names({"n": "Tour Eiffel", "nl": "Eiffel Tower"}) == ["Tour Eiffel", "Eiffel Tower"]
+    assert S.record_paths("ei", {"n": "Tour Eiffel", "nl": "Eiffel Tower", "t": "poi"}, 4)
+
+
+def test_a_language_build_refuses_a_cache_without_the_language(tmp_path, monkeypatch):
+    p = tmp_path / "c.jsonl"
+    p.write_text("")
+    E.mark_schema(p, languages=["de"])
+    assert E.schema_languages(p) == ["de"]
+    monkeypatch.setenv("STREETZIM_TILE_LANGUAGES", "fr")
+    E.mark_schema(p)
+    assert E.schema_languages(p) == ["fr"]
+    q = tmp_path / "d.jsonl"
+    E.copy_schema(p, q)
+    assert E.schema_languages(q) == ["fr"]
+
+
+def test_shared_cache_dirs(tmp_path):
+    import os
+    from streetzim.cache_permissions import make_shared_dirs
+    old = os.umask(0o022)
+    try:
+        os.chmod(tmp_path, 0o2775)
+        make_shared_dirs(tmp_path / "lang" / "fr", tmp_path)
+        make_shared_dirs(tmp_path / "lang" / "fr", tmp_path)          # again: fine
+        for d in (tmp_path / "lang", tmp_path / "lang" / "fr"):
+            assert d.stat().st_mode & 0o7777 == 0o2775
+    finally:
+        os.umask(old)

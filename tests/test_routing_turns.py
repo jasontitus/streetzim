@@ -304,7 +304,7 @@ def test_optimal_against_the_oracle(tmp_path, seed):
     # The node-keyed predecessor makes the U-turn penalty approximate;
     # allow a rare suboptimal route, never an illegal one (checked above
     # by the oracle bound) — and say how often.
-    assert worse <= 1, worse
+    assert worse == 0, worse
     assert changed >= 1, "no query exercised a restriction"
 
 
@@ -347,8 +347,11 @@ def test_worker_matches_python_with_restrictions(tmp_path, seed):
         if len(path) >= 3 and len(set(path[1:-1])) == len(path) - 2:
             recs.append(((tr.CAR | tr.BIKE) | (tr.ONLY if rng.random() < 0.25 else 0), path))
     g = parse_szrg_bytes(_pack_v4_graph_cls(nodes, edges))
-    build_spatial(g, cell_scale=10, output_dir=tmp_path / "routing-data", restrictions=recs)
+    # Cells of 0.001 degrees: a restriction's nodes and edges span cells,
+    # so the worker's lookup in the next node's cell is exercised.
+    build_spatial(g, cell_scale=1000, output_dir=tmp_path / "routing-data", restrictions=recs)
     sg = _spatial_graph_from_dir(tmp_path / "routing-data")
+    assert sg._index.num_cells > 20
     pairs = []
     for _ in range(20):
         a, b = nodes[rng.randrange(W * H)], nodes[rng.randrange(W * H)]
@@ -368,3 +371,26 @@ def test_worker_matches_python_with_restrictions(tmp_path, seed):
             assert r["distance"] == pytest.approx(ref.total_dist_m, rel=1e-9), (travel, r)
             differs += free.total_dist_m != ref.total_dist_m
         assert differs >= 1, travel
+
+
+def test_resolver_keeps_kinds_and_modes_apart():
+    """A car ban and a bike only_* on one path stay separate records; two
+    only_* at one junction drop only the modes they share; one pair of a
+    relation that cannot be placed does not drop the others."""
+    c = tr.Collector()
+    # ways: 1 = a->v (two-way), 2 = v->b, 3 = v->c, 9 = elsewhere
+    seq = {1: ([(10, 100), (11, 101)], 0), 2: ([(11, 101), (12, 102)], 0),
+           3: ([(11, 101), (13, 103)], 0), 9: ([(20, 200), (21, 201)], 0)}
+    c.raw = [({"car": "no", "bike": "only"}, [1], 101, [], [2]),
+             ({"car": "only", "bike": None}, [1], 101, [], [3]),
+             ({"car": "only", "bike": None}, [1], 101, [], [2]),
+             ({"car": "no", "bike": None}, [1, 9], 101, [], [3])]
+    recs, dropped = tr.resolve(c, seq)
+    got = {(f, tuple(p)) for f, p in recs}
+    # car only_ to 12 and to 13 conflict: cars drop both; the bike only_ stays.
+    assert (tr.ONLY | tr.BIKE, (10, 11, 12)) in got
+    assert not any(f & tr.ONLY and f & tr.CAR for f, _ in got)
+    assert (tr.CAR, (10, 11, 12)) in got                    # the car ban, unmerged
+    assert (tr.CAR, (10, 11, 13)) in got                    # way 9 unplaceable, 1 kept
+    assert dropped["from/to pairs of a placed relation"] == 1
+    assert dropped["conflicting only_* at one junction"] == 2

@@ -69,7 +69,8 @@ WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
 
 
 def wikipedia_api(lang="en"):
-    return f"https://{lang}.wikipedia.org/w/api.php"
+    from streetzim.languages import wiki_code
+    return f"https://{wiki_code(lang)}.wikipedia.org/w/api.php"
 
 
 def lang_cache_dir(cache_dir, lang="en"):
@@ -418,6 +419,8 @@ def fetch_wikidata_batch(qids, batch_size=40, cache_dir=None, save_interval=1000
     qid_list = _validated_qids(qids)
     total = len(qid_list)
     last_save = 0
+    from streetzim.languages import wiki_code
+    wiki_host = wiki_code(lang)
     # Labels and descriptions in the build's language first.
     label_langs = ",".join(dict.fromkeys([lang, "en", "fr", "de", "es"]))
 
@@ -449,7 +452,7 @@ def fetch_wikidata_batch(qids, batch_size=40, cache_dir=None, save_interval=1000
           OPTIONAL {{ ?item wdt:P31 ?instance . }}
           OPTIONAL {{
             ?sitelink schema:about ?item ;
-                      schema:isPartOf <https://{lang}.wikipedia.org/> .
+                      schema:isPartOf <https://{wiki_host}.wikipedia.org/> .
           }}
 
           SERVICE wikibase:label {{ bd:serviceParam wikibase:language "{label_langs}". }}
@@ -1015,10 +1018,9 @@ def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=
     root = Path(cache_dir or DEFAULT_CACHE_DIR)
     # Entries in the build's language (lang_cache_dir); Q-ID scans shared.
     cache_dir = lang_cache_dir(root, lang)
-    if cache_dir != root and not cache_dir.exists():
-        cache_dir.mkdir(parents=True)
-        from streetzim.cache_permissions import share_like
-        share_like(cache_dir, root)
+    if cache_dir != root:
+        from streetzim.cache_permissions import make_shared_dirs
+        make_shared_dirs(cache_dir, root)
     clean_dead_stages(cache_dir)
 
     # Step 1: Extract Q-IDs from OSM data (cached by PBF identity)

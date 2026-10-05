@@ -97,6 +97,10 @@ def main():
         if os.path.islink(final) or os.path.exists(final):
             os.unlink(final)
         os.rename(part[rid], final)
+        # The source's schema marker (native names, languages) holds for a cut.
+        sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+        from streetzim.search_extract import copy_schema
+        copy_schema(a.src, final)
         with open(final + ".bbox", "w") as fh:
             fh.write(BBOX_TEXT[rid] + "\n")
     print(f"\nDone in {time.time()-t0:.0f}s; {total:,} features scanned, {bad} unparseable", flush=True)

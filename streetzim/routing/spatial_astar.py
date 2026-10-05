@@ -114,14 +114,41 @@ def find_route_spatial(
     vmatch: list = []                 # -> ((cell, record, pos), ...)
     vkey: dict = {}
 
+    # Second arrivals ("alt" states, ids -(node + 2), kept in the v* dicts):
+    # the U-turn penalty depends on where a node was reached from, so a
+    # node keeps, beside its best arrival, its best arrival from another
+    # neighbour while that is within one penalty of the best. Expanded, an
+    # alt state only goes back toward the best arrival's neighbour (the one
+    # move the best would pay the penalty for; every other move is cheaper
+    # from the best). With both, the penalty is exact for plain states.
     def node_of(sid):
+        if sid < 0:
+            return -sid - 2
         return sid if sid < num_nodes else vnode[sid - num_nodes]
 
     def g_of(sid):
-        return gscore[sid] if sid < num_nodes else vg.get(sid, INF)
+        return gscore[sid] if 0 <= sid < num_nodes else vg.get(sid, INF)
 
     def prev_of(sid):
-        return prev[sid] if sid < num_nodes else vprev.get(sid, -1)
+        return prev[sid] if 0 <= sid < num_nodes else vprev.get(sid, -1)
+
+    def main_back(node):
+        return node_of(prev[node]) if prev[node] >= 0 else -1
+
+    # A second arrival can only matter after a restriction forced a
+    # detour: without one nearby, a shortest path never doubles back. So
+    # one is offered only when the best arrival's chain passes a virtual
+    # state within TAINT_HOPS steps (else +60 % pops on D.C. for nothing).
+    TAINT_HOPS = 8
+
+    def tainted(sid):
+        for _ in range(TAINT_HOPS):
+            if sid == -1:
+                return False
+            if sid >= num_nodes:
+                return True              # a virtual state
+            sid = vprev.get(sid, -1) if sid < 0 else prev[sid]
+        return False
 
     start_lat_e7, start_lon_e7 = g.node_coords_e7(start)
     start_lat = start_lat_e7 / 1e7
@@ -152,6 +179,10 @@ def find_route_spatial(
         cell = g._ensure_cell(cid)
         return (cid, cell) if cell.turns else (None, None)
 
+    def _h_of(node):
+        t_lat_e7, t_lon_e7 = g.node_coords_e7(node)
+        return haversine_m(t_lat_e7 / 1e7, t_lon_e7 / 1e7, end_lat, end_lon) / heur_mps
+
     pops = 0
     goal = -1
     while heap:
@@ -163,7 +194,16 @@ def find_route_spatial(
         if current == end:
             goal = cur_sid
             break
-        if cur_sid < num_nodes:
+        alt_to = -1
+        if cur_sid < 0:
+            if cur_sid in vclosed:
+                continue
+            alt_to = main_back(current)
+            if alt_to < 0 or node_of(vprev[cur_sid]) == alt_to:
+                continue     # no longer a different neighbour: nothing to add
+            vclosed.add(cur_sid)
+            match = ()
+        elif cur_sid < num_nodes:
             if closed[cur_sid]:
                 continue
             closed[cur_sid] = 1
@@ -212,6 +252,8 @@ def find_route_spatial(
         other_exit = uturn and any(u[0] != back for u in usable)
 
         for (target, cost, time_s, dist_m, geom_local, name_idx, class_access) in usable:
+            if alt_to >= 0 and target != alt_to:
+                continue
             if bans is not None and target in bans:
                 continue
             if only is not None and target not in only:
@@ -241,12 +283,38 @@ def find_route_spatial(
                     continue
             else:
                 t_sid = target
+                new_g = current_g + cost + penalty
+                rec = (dist_m, geom_local, name_idx, class_access, time_s, penalty)
+                if uturn and (tainted(prev[target]) or tainted(cur_sid)):
+                    mb = main_back(target)
+                    if not closed[target] and new_g < gscore[target]:
+                        # The arrival being replaced may become the alt.
+                        if gscore[target] < INF and mb != current:
+                            alt_sid = -(target + 2)
+                            if alt_sid not in vclosed:
+                                vg[alt_sid] = gscore[target]
+                                vprev[alt_sid] = prev[target]
+                                vprev_edge[alt_sid] = prev_edge[target]
+                                counter += 1
+                                heappush(heap, (gscore[target] + (_h_of(target)), counter, alt_sid))
+                    elif current != mb and new_g < gscore[target] + uturn:
+                        alt_sid = -(target + 2)
+                        old = vprev.get(alt_sid, -1)
+                        if alt_sid not in vclosed and (
+                                new_g < vg.get(alt_sid, INF)
+                                or (old >= 0 and node_of(old) == mb)):
+                            vg[alt_sid] = new_g
+                            vprev[alt_sid] = cur_sid
+                            vprev_edge[alt_sid] = rec
+                            counter += 1
+                            heappush(heap, (new_g + _h_of(target), counter, alt_sid))
+                        continue
                 if closed[target]:
                     continue
             new_g = current_g + cost + penalty
             if new_g < g_of(t_sid):
                 rec = (dist_m, geom_local, name_idx, class_access, time_s, penalty)
-                if t_sid < num_nodes:
+                if 0 <= t_sid < num_nodes:
                     gscore[t_sid] = new_g
                     prev[t_sid] = cur_sid
                     prev_edge[t_sid] = rec
@@ -276,7 +344,7 @@ def find_route_spatial(
     sid = goal
     total_dist = 0.0
     while sid != start:
-        pe = prev_edge[sid] if sid < num_nodes else vprev_edge.get(sid)
+        pe = prev_edge[sid] if 0 <= sid < num_nodes else vprev_edge.get(sid)
         if pe is None:
             return None
         total_dist += pe[0]

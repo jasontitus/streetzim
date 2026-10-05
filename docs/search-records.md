@@ -24,7 +24,7 @@ Optional keys (absent when empty):
 
 | key | meaning |
 |---|---|
-| `nn` | the name in its own script when `n` is another one: `"北京大学"` beside `n` `"Peking University"`. From the tiles' `name` (OpenFreeMap) or `name_int` (StreetZim's tilemaker, written when OSM's `name` differs from `name:latin`); only when it differs from `n` once folded and has 2+ characters |
+| `nn` | OSM's own `name` when `n` is another (usually English) name: `"北京大学"` beside `n` `"Peking University"`. From the tiles' `name` (OpenFreeMap) or `name_int` (StreetZim's tilemaker, written when OSM's `name` differs from `name:latin`); the first of a `;` list; left out when it has under 2 characters, equals `n` once folded, or one contains the other |
 | `nl` | a build in another language (`--language`): the English / Latin name when it differs from `n` and `nn` (`n` is then OSM's `name:<language>`, else the place's own name) |
 | `w` | Wikipedia title from the OSM `wikipedia` tag, for example `en:Lincoln_Memorial` |
 | `wsrc` | `"wd"` when `w` was backfilled from the Wikidata Q-ID instead |

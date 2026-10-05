@@ -25,6 +25,14 @@ is `streetzim/languages.py`. A `--name` with a language segment
   tags, not `name:fr`.
 - Right-to-left languages render their text correctly (MapLibre's RTL
   plugin) in a left-to-right layout.
-- A `--search-cache` or `--mbtiles` made without `name:fr` gives labels and
-  results in the places' own names (the build warns about a search cache
-  without the schema marker; tiles are not checked).
+- A `--search-cache` must have been extracted with `name:fr`: its
+  `<cache>.schema` lists the languages (`STREETZIM_TILE_LANGUAGES` at
+  extraction), and a build in a language the cache lacks stops with an
+  explanation. `derive-region-search.py` and `build_search_cache.py` carry
+  the marker to the caches they cut.
+- An `--mbtiles` made without `name:fr` labels the map in the places' own
+  names (tiles are not checked).
+- `--wikidata-title-map` (English titles) is ignored in another language;
+  a `--wiki-articles-source` ZIM must be a Wikipedia in the build's language.
+- `nb` uses Norwegian Wikipedia (`no`); Chinese articles are fetched in
+  Simplified script.

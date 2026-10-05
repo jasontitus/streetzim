@@ -30,6 +30,15 @@ ISO639_3 = {
 RTL = frozenset({"ar", "fa", "he", "ur"})
 
 
+# Wikipedia editions whose code is not the language's ISO 639-1 code.
+WIKI_CODE = {"nb": "no"}
+
+
+def wiki_code(lang: str) -> str:
+    """The Wikipedia edition of ``lang``: xx.wikipedia.org, site xxwiki."""
+    return WIKI_CODE.get(lang, lang)
+
+
 def iso639_3(lang: str) -> str:
     try:
         return ISO639_3[lang]
