@@ -19,7 +19,14 @@
     // feature-detect. Callers that need a given method should test
     // for it (`typeof window.streetzimRouting.foo === "function"`),
     // but the version helps diagnostics attribute "host vs ZIM" skew.
-    version: 5,
+    version: 6,
+    /// Travel mode routes are planned for: 'drive', 'walk' or 'bike'
+    /// (version 6). `travelModes` lists what this ZIM supports;
+    /// setTravelMode re-plans the current route and returns false for an
+    /// unsupported or unchanged mode.
+    get travelMode() { return travelMode; },
+    get travelModes() { return routingModes.slice(); },
+    setTravelMode: function(m) { return setTravelMode(m); },
     /// True while the routing panel is open: a map tap then picks a route
     /// point, so the place popups stay out of the way.
     get panelActive() { return !!active; },
@@ -96,6 +103,23 @@
         resetGoButtons();
       }
       if (!lastRoute) return false;
+      // A ZIM that plans walk / bike routes re-plans for the new mode
+      // first, then starts navigation once that route lands.
+      if (multiModal && routingModes.indexOf(newMode) >= 0
+          && (lastRoute.travel || 'drive') !== newMode) {
+        setTravelMode(newMode);
+        var polls = 0;
+        var poll = setInterval(function() {
+          polls++;
+          if (lastRoute && lastRoute.travel === newMode && travelMode === newMode) {
+            clearInterval(poll);
+            window.streetzimRouting.switchDriveMode(newMode);
+          } else if (polls > 600 || travelMode !== newMode) {
+            clearInterval(poll);
+          }
+        }, 100);
+        return true;
+      }
       driveMode.enter(newMode);
       window.streetzimRouting.__lastEnteredMode = newMode;
       Object.keys(modeBtns).forEach(function(m) {
@@ -374,6 +398,10 @@
           // snap could compute origin→old-dest and the poll below would
           // resolve on that before the new destination was routed.
           clearRoute();
+          // Plan the route for the navigation mode when the ZIM can.
+          if (multiModal && routingModes.indexOf(mode) >= 0 && travelMode !== mode) {
+            setTravelMode(mode);
+          }
           try {
             setOriginFromLatLon(origLat, origLon, "Start");
             setDestFromLatLon(destLat, destLon, "Destination");

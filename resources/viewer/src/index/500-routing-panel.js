@@ -29,19 +29,63 @@ function initRouting(map, config) {
     bike:  document.getElementById('routing-bike')
   };
   var MODE_LABELS = { drive: 'Drive', walk: 'Walk', bike: 'Bike' };
-  // Per-mode presets — camera feels right for the modality and the avg
-  // speed is used to re-estimate remaining-time since the routing graph
-  // is driver-speeds only. Speeds in m/s: walk≈3.1 mph, bike≈10 mph.
+  // Per-mode presets — camera feels right for the modality. `speed`
+  // (m/s: walk≈3.1 mph, bike≈10 mph) re-estimates the remaining time
+  // only when the route was planned for another mode (older ZIMs plan
+  // car routes only); a route planned for the mode uses its own pace.
+  // Off-route: walkers' GPS wanders and sidewalks sit metres off the
+  // centreline, so they get a wider, slower trigger.
   var MODE_PRESETS = {
-    drive: { pitch: 60, zoom: 17,   speed: null },  // null = use route's car-speed
-    walk:  { pitch: 45, zoom: 18,   speed: 1.4 },
-    bike:  { pitch: 55, zoom: 17.5, speed: 4.5 }
+    drive: { pitch: 60, zoom: 17,   speed: null, offM: 60, offMs: 6000 },
+    walk:  { pitch: 45, zoom: 18,   speed: 1.4,  offM: 40, offMs: 12000 },
+    bike:  { pitch: 55, zoom: 17.5, speed: 4.5,  offM: 50, offMs: 8000 }
   };
+
+  // Travel mode, chosen before routing: the snap and the router both
+  // use it (routing-worker.js edgeCostWB). Only the modes the ZIM's graph
+  // carries are offered (map-config routingModes); older ZIMs route cars
+  // only, keep the picker hidden, and their Walk / Bike buttons start
+  // navigation on the car route with a walking / cycling pace, as before.
+  var routingModes = ['drive'];
+  (config.routingModes || []).forEach(function(m) {
+    if ((m === 'walk' || m === 'bike') && routingModes.indexOf(m) < 0) routingModes.push(m);
+  });
+  var multiModal = routingModes.length > 1;
+  var travelMode = 'drive';
+  try {
+    var savedTravel = localStorage.getItem('streetzim.travelMode');
+    if (routingModes.indexOf(savedTravel) >= 0) travelMode = savedTravel;
+  } catch (e) {}
+  var travelRow = document.getElementById('routing-travel-row');
+  var travelBtns = {
+    drive: document.getElementById('travel-drive'),
+    walk:  document.getElementById('travel-walk'),
+    bike:  document.getElementById('travel-bike')
+  };
+  function syncTravelButtons() {
+    Object.keys(travelBtns).forEach(function(m) {
+      var b = travelBtns[m];
+      if (!b) return;
+      b.style.display = routingModes.indexOf(m) >= 0 ? '' : 'none';
+      b.classList.toggle('on', m === travelMode);
+      b.setAttribute('aria-checked', m === travelMode ? 'true' : 'false');
+    });
+  }
+  if (travelRow) {
+    travelRow.style.display = multiModal ? '' : 'none';
+    syncTravelButtons();
+  }
 
   function resetGoButtons() {
     Object.keys(modeBtns).forEach(function(m) {
       modeBtns[m].classList.remove('active-mode', 'hidden-mode');
       modeBtns[m].textContent = MODE_LABELS[m];
+      // The route was planned for one mode: offer navigation in that
+      // mode only.
+      if (multiModal) {
+        if (m === travelMode) modeBtns[m].textContent = 'Start';
+        else modeBtns[m].classList.add('hidden-mode');
+      }
     });
   }
 
@@ -147,6 +191,8 @@ function initRouting(map, config) {
     stopRouteProgressIndicator();
     originNode = -1;
     destNode = -1;
+    originPick = null;
+    destPick = null;
     originCoordE7 = null;
     destCoordE7 = null;
     originInput.value = '';

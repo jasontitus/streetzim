@@ -222,7 +222,7 @@
   }
   window.__streetzim_prewarmRoutingCells = prewarmRoutingCells;
 
-  function findRouteViaWorker(startNode, endNode) {
+  function findRouteViaWorker(startNode, endNode, travel) {
     if (!__routingWorker) return Promise.reject(new Error('worker not ready'));
     // Only the newest route matters: an origin/dest change while a
     // route is still computing used to leave the old search grinding
@@ -241,22 +241,24 @@
       __routingWorker.postMessage({
         cmd: 'route', id: id,
         start: startNode, end: endNode,
-        options: override ? { route: override } : {},
+        options: override ? { route: override, travel: travel } : { travel: travel },
       });
     });
   }
 
-  function snapViaWorker(lat, lon, mode) {
+  function snapViaWorker(lat, lon, mode, travel) {
     if (!__routingWorker) return Promise.reject(new Error('worker not ready'));
     var id = ++__routingWorkerSeq;
     return new Promise(function(resolve, reject) {
       __routingWorkerInflight.set(id, { resolve: resolve, reject: reject });
       __routingWorker.postMessage({ cmd: 'snap', id: id, lat: lat, lon: lon,
-                                    mode: mode === 'dest' ? 'dest' : 'origin' });
+                                    mode: mode === 'dest' ? 'dest' : 'origin',
+                                    travel: travel || 'drive' });
     });
   }
 
-  async function findRoute(startNode, endNode) {
+  async function findRoute(startNode, endNode, travel) {
+    travel = travel || 'drive';
     // Prefer the worker on spatial graphs. initRoutingWorker is
     // idempotent and returns a Promise<bool> resolving once init
     // completes (true → ready, false → failed, fall back). Awaiting
@@ -269,7 +271,7 @@
           var t0 = performance.now();
           console.warn('[streetzim] routing via worker (start=' + startNode
                        + ' end=' + endNode + ')');
-          var workerResult = await findRouteViaWorker(startNode, endNode);
+          var workerResult = await findRouteViaWorker(startNode, endNode, travel);
           // Cancellation: caller asked us to stop (likely via the
           // origin/dest focus hook). Don't fall back to main thread —
           // they're about to fire a new route. Return null so
@@ -291,6 +293,11 @@
       } else {
         console.warn('[streetzim] routing on main thread (worker not ready)');
       }
+    }
+    // The main-thread engine is the old-ZIM fallback and routes cars
+    // only: never show its car route as a walking or cycling one.
+    if (travel !== 'drive') {
+      throw new Error(travel + ' routing needs the routing worker');
     }
     return findRouteMainThread(startNode, endNode);
   }

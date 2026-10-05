@@ -7,11 +7,13 @@
 // Message protocol (main → worker):
 //   {cmd:'init',  baseUrl}                      → {type:'ready'} | {type:'init-error',error}
 //   {cmd:'route', id, start, end, options?}     → {type:'route-progress', id, label, pops}*
+//                                                 options.travel: 'drive' (default) |
+//                                                 'walk' | 'bike' — see edgeCostWB.
 //                                                 {type:'route-done', id, ok, result?, error?}
 //                                                 ok:true + result:null means the search
 //                                                 completed and found no route; ok:false
 //                                                 means the engine threw.
-//   {cmd:'snap',  id, lat, lon, mode?}          → {type:'snap-done', id, node?, error?}
+//   {cmd:'snap',  id, lat, lon, mode?, travel?} → {type:'snap-done', id, node?, error?}
 //                                                 mode 'origin' (default) | 'dest' —
 //                                                 see snapNearestNode.
 //   options.popLimits (route)                     test hook, see findRouteSpatialFiltered
@@ -328,7 +330,8 @@ function handleSnap(msg) {
     });
   }
   graph.snapNearestNode(Math.round(msg.lat * 1e7), Math.round(msg.lon * 1e7),
-                        msg.mode === 'dest' ? 'dest' : 'origin')
+                        msg.mode === 'dest' ? 'dest' : 'origin',
+                        travelMode(msg.travel))
     .then(function(result) {
       self.postMessage({
         type: 'snap-done', id: msg.id,
@@ -426,6 +429,76 @@ function isNoMotor(classAccess) {
   if (classAccess & NO_MOTOR_BIT) return true;
   var ord = classAccess & 0x1F;
   return ord >= NO_MOTOR_ORD_MIN && ord <= NO_MOTOR_ORD_MAX;
+}
+
+// --- Travel modes -----------------------------------------------------
+// Mirror of streetzim/routing/modes.py (tests compare the two edge by
+// edge): what walking and cycling may use and what it costs. Bits are
+// in docs/formats.md. The search minimises cost; the route reports
+// time, so edgeCostWB returns the cost and leaves the time in _wbTime.
+// Every speed is at most the mode's heuristic speed and every
+// multiplier is >= 1, so the straight-line heuristic stays admissible.
+var TRAVEL_HEURISTIC_KMH = { drive: HEURISTIC_SPEED_KMH, walk: 5, bike: 18 };
+var WALK_KPH = 5, WALK_STEPS_KPH = 2.5, WALK_ROUGH_KPH = 4.5;
+var BIKE_PAVED_KPH = 18, BIKE_FIRM_KPH = 14, BIKE_ROUGH_KPH = 8;
+var BIKE_TRACK_KPH = 12, BIKE_PUSH_KPH = 4;
+var BIKE_PUSH_PENALTY = 1.5, BIKE_STEPS_PENALTY = 3.0;
+var WALK_SEPARATE_SIDEWALK = 1.2, PRIVATE_PENALTY = 3.0;
+var GEOM_REVERSED_BIT = 0x800;
+var _wbTime = 0;
+
+function travelMode(t) {
+  return (t === 'walk' || t === 'bike') ? t : 'drive';
+}
+
+// Cost in seconds of a walk/bike edge, or -1 if the mode may not use
+// it; the plain travel time is left in _wbTime.
+function edgeCostWB(mode, speedDist, ca) {
+  var distM = (speedDist & 0xFFFFFF) / 10;
+  var ord = ca & 0x1F;
+  var surface = (ca >>> 15) & 3;
+  var t, mult;
+  if (mode === 'walk') {
+    if ((ca & 0x20) || (ca & 0x40000) || ord === 1 || ord === 2) return -1;
+    var kph = (ord === 20) ? WALK_STEPS_KPH
+            : (surface === 2 || surface === 3) ? WALK_ROUGH_KPH : WALK_KPH;
+    t = distM / (kph / 3.6);
+    mult = 1.0;
+    if (ord === 3 || ord === 4) mult = 1.5;
+    if ((ca & 0x20000) && ord >= 3 && ord <= 8) mult *= 1.5;
+    if ((ca & 0x80000) && ord >= 1 && ord <= 14) mult *= WALK_SEPARATE_SIDEWALK;
+    if (ca & 0x100000) mult *= PRIVATE_PENALTY;
+    _wbTime = t;
+    return t * mult;
+  }
+  // bike
+  if ((ca & 0x40) || ord === 1 || ord === 2) return -1;
+  var priv = (ca & 0x100000) ? PRIVATE_PENALTY : 1.0;
+  if ((ca & 0x1000) || ord === 20) {
+    t = distM / (BIKE_PUSH_KPH / 3.6);
+    _wbTime = t;
+    return t * priv * (ord === 20 ? BIKE_STEPS_PENALTY : BIKE_PUSH_PENALTY);
+  }
+  var bkph;
+  if (surface === 3) bkph = BIKE_ROUGH_KPH;
+  else if (surface === 2) bkph = BIKE_FIRM_KPH;
+  else if (surface === 0 && (ord === 15 || ord === 16)) bkph = BIKE_TRACK_KPH;
+  else bkph = BIKE_PAVED_KPH;
+  t = distM / (bkph / 3.6);
+  mult = 1.0;
+  if (!(ca & 0x6000)) {
+    if (ord === 3 || ord === 4) mult = 1.6;
+    else if (ord === 5 || ord === 6) mult = 1.4;
+    else if (ord === 7 || ord === 8) mult = 1.2;
+  }
+  _wbTime = t;
+  return t * mult * priv;
+}
+
+// May `travel` use this edge at all?
+function edgeUsable(travel, speedDist, ca) {
+  if (travel === 'drive') return !isNoMotor(ca) && (speedDist >>> 24) !== 0;
+  return edgeCostWB(travel, speedDist, ca) >= 0;
 }
 
 // --- Sparse visited-node state -------------------------------------
@@ -1050,8 +1123,15 @@ var SNAP_MAX_EXTRA_M = 1000;
 // though the router can reach it (Silicon Valley: 37 of 40 such sinks
 // were displaced 3–178 m). For 'dest' an edgeless vertex with a
 // drivable incoming edge in its own cell is accepted as well.
-SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7, mode) {
+//
+// `travel` 'walk' / 'bike' keeps only vertices with an out-edge the mode
+// may use (edgeCostWB), records against a one-way included; there is no
+// edgeless case — a walk/bike graph gives every vertex they can reach a
+// way out, so a vertex without one is a motorway end or similar.
+SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7, mode, travel) {
   var forDest = (mode === 'dest');
+  travel = travelMode(travel);
+  var drive = (travel === 'drive');
   var scale = this._index.cellScale;
   // Longitude degrees shrink with latitude — without this the snap
   // picks the nearest node in degree space, which at 60°N can be a
@@ -1095,12 +1175,21 @@ SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7, mode) {
       // one-way) counts as absent: a one-way's end stays a sink.
       var eStart = cellAdj[local], eEnd = cellAdj[local + 1];
       var real = 0, carOk = false;
-      for (var ei = eStart; ei < eEnd; ei++) {
-        if ((edges[ei * 5 + 1] >>> 24) === 0) continue;
-        real++;
-        if (!isNoMotor(edges[ei * 5 + 4])) { carOk = true; break; }
+      if (drive) {
+        for (var ei = eStart; ei < eEnd; ei++) {
+          if ((edges[ei * 5 + 1] >>> 24) === 0) continue;
+          real++;
+          if (!isNoMotor(edges[ei * 5 + 4])) { carOk = true; break; }
+        }
+        if (real === 0) carOk = true;
+      } else {
+        real = 1;
+        for (var wi = eStart; wi < eEnd; wi++) {
+          if (edgeCostWB(travel, edges[wi * 5 + 1], edges[wi * 5 + 4]) >= 0) {
+            carOk = true; break;
+          }
+        }
       }
-      if (real === 0) carOk = true;
       if (!carOk) continue;
       var k = best.length;
       while (k > 0 && best[k - 1].dist > dist) k--;
@@ -1117,9 +1206,9 @@ SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7, mode) {
   var pick = best[0];
   for (var c = 0; c < best.length; c++) {
     if (Math.sqrt(best[c].dist) > limitR) break;
-    if (await this._reachesAtLeast(best[c].node, SNAP_MIN_REACH)) { pick = best[c]; break; }
+    if (await this._reachesAtLeast(best[c].node, SNAP_MIN_REACH, travel)) { pick = best[c]; break; }
     if (forDest && best[c].edgeless
-        && await this._hasDrivableIncomingInOwnCell(best[c].node)) { pick = best[c]; break; }
+        && await this._hasDrivableIncomingInOwnCell(best[c].node, travel)) { pick = best[c]; break; }
   }
   return { node: pick.node, lat: pick.lat / 1e7, lon: pick.lon / 1e7 };
 };
@@ -1130,7 +1219,8 @@ SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7, mode) {
 // cell is missed and the vertex then falls back to the origin rule.
 // Deterministic (never depends on which other cells happen to be
 // resident) so the Python reference can mirror it exactly.
-SpatialGraph.prototype._hasDrivableIncomingInOwnCell = async function(node) {
+SpatialGraph.prototype._hasDrivableIncomingInOwnCell = async function(node, travel) {
+  travel = travelMode(travel);
   var cid = this.cellForNode(node);
   if (cid < 0) return false;
   var cell = this.cellIfResident(cid);
@@ -1138,18 +1228,19 @@ SpatialGraph.prototype._hasDrivableIncomingInOwnCell = async function(node) {
   var edges = cell.edges;
   for (var ei = 0, n = cell.edgeCount; ei < n; ei++) {
     if (edges[ei * 5] !== node) continue;
-    if (isNoMotor(edges[ei * 5 + 4])) continue;
-    if ((edges[ei * 5 + 1] >>> 24) === 0) continue;
+    if (!edgeUsable(travel, edges[ei * 5 + 1], edges[ei * 5 + 4])) continue;
     return true;
   }
   return false;
 };
 
-// Bounded forward BFS over drivable edges: true once `limit` distinct
+// Bounded forward BFS over edges `travel` may use (driving when
+// omitted): true once `limit` distinct
 // nodes are reachable from `node` (itself included). Cheap — a real road
 // vertex hits the limit within a few hops — and it only ever touches
 // the one or two cells around the snap point.
-SpatialGraph.prototype._reachesAtLeast = async function(node, limit) {
+SpatialGraph.prototype._reachesAtLeast = async function(node, limit, travel) {
+  travel = travelMode(travel);
   var seen = new Set([node]);
   var queue = [node];
   var head = 0;
@@ -1165,9 +1256,7 @@ SpatialGraph.prototype._reachesAtLeast = async function(node, limit) {
     var edges = cell.edges;
     var eEnd = cell.cellAdj[local + 1];
     for (var ei = cell.cellAdj[local]; ei < eEnd; ei++) {
-      var ca = edges[ei * 5 + 4];
-      if (isNoMotor(ca)) continue;
-      if ((edges[ei * 5 + 1] >>> 24) === 0) continue;
+      if (!edgeUsable(travel, edges[ei * 5 + 1], edges[ei * 5 + 4])) continue;
       var t = edges[ei * 5];
       if (!seen.has(t)) { seen.add(t); queue.push(t); if (seen.size >= limit) return true; }
     }
@@ -1304,6 +1393,7 @@ async function findRouteSpatialFiltered(startNode, endNode, highwayOnly, ctx) {
 // comes from a third cell — accepted, and the consequence is just the
 // old behaviour (full budget spent, "No route found").
 async function destComponentClosed(startNode, endNode, ctx) {
+  var travel = travelMode(ctx && ctx.options && ctx.options.travel);
   var seen = new Set([endNode]);
   var queue = [endNode];
   var head = 0;
@@ -1323,8 +1413,7 @@ async function destComponentClosed(startNode, endNode, ctx) {
     var edges = cell.edges;
     var eEnd = cell.cellAdj[local + 1];
     for (var ei = cell.cellAdj[local]; ei < eEnd; ei++) {
-      if (isNoMotor(edges[ei * 5 + 4])) continue;
-      if ((edges[ei * 5 + 1] >>> 24) === 0) continue;
+      if (!edgeUsable(travel, edges[ei * 5 + 1], edges[ei * 5 + 4])) continue;
       var t = edges[ei * 5];
       if (!seen.has(t)) {
         seen.add(t);
@@ -1347,8 +1436,7 @@ async function destComponentClosed(startNode, endNode, ctx) {
       var pEnd = pAdj[pl + 1];
       for (var pe = pAdj[pl]; pe < pEnd; pe++) {
         if (!seen.has(pEdges[pe * 5])) continue;
-        if (isNoMotor(pEdges[pe * 5 + 4])) continue;
-        if ((pEdges[pe * 5 + 1] >>> 24) === 0) continue;
+        if (!edgeUsable(travel, pEdges[pe * 5 + 1], pEdges[pe * 5 + 4])) continue;
         return false;  // entrance from outside: the pocket is enterable
       }
     }
@@ -1364,7 +1452,9 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
   var startCoords = await graph.nodeCoordsE7(startNode);
   var startLat = startCoords[0] / 1e7;
   var startLon = startCoords[1] / 1e7;
-  var hScale = GREEDY_WEIGHT / HEURISTIC_MPS;
+  var travel = travelMode(ctx && ctx.options && ctx.options.travel);
+  var drive = (travel === 'drive');
+  var hScale = GREEDY_WEIGHT / (drive ? HEURISTIC_MPS : TRAVEL_HEURISTIC_KMH[travel] / 3.6);
   var isV3 = graph._index.version === 3;
 
   if (ctx) ctx.bailed = false;
@@ -1378,7 +1468,8 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
 
   var pops = 0;
   var weightTag = (GREEDY_WEIGHT > 1.0) ? ' greedy×' + GREEDY_WEIGHT : ' optimal';
-  var label = (highwayOnly ? 'A* highway-only' : 'A* full') + weightTag;
+  var label = (highwayOnly ? 'A* highway-only' : 'A* full') + weightTag
+            + (drive ? '' : ' ' + travel);
   var phaseT0 = nowMs();
   // Per-route profile: phases must land in THIS route's record even if
   // a newer route has since replaced the global `_profile`.
@@ -1445,15 +1536,22 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     for (var ei = cellAdj[local]; ei < eEnd; ei++) {
       var base = ei * 5;
       var classAccess = edges[base + 4];
-      if (isNoMotor(classAccess)) continue;
-      if (highwayOnly && !isHighwayClass(classAccess)) continue;
       var speedDist = edges[base + 1];
-      var speed = speedDist >>> 24;
-      if (speed === 0) continue;
+      var edgeCost;
+      if (drive) {
+        if (isNoMotor(classAccess)) continue;
+        if (highwayOnly && !isHighwayClass(classAccess)) continue;
+        var speed = speedDist >>> 24;
+        if (speed === 0) continue;
+        edgeCost = ((speedDist & 0xFFFFFF) / 10) / (speed / 3.6);
+      } else {
+        edgeCost = edgeCostWB(travel, speedDist, classAccess);
+        if (edgeCost < 0) continue;
+      }
       var target = edges[base];
       var ts = table.find(target);
       if (ts >= 0 && table.closed[ts]) continue;
-      var newG = curG + ((speedDist & 0xFFFFFF) / 10) / (speed / 3.6);
+      var newG = curG + edgeCost;
       if (ts < 0) ts = table.insert(target);
       if (newG < table.g[ts]) {
         table.g[ts] = newG;
@@ -1498,7 +1596,9 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
   // re-reading each edge from its (cell-local) slot. Cells may have
   // been evicted mid-search, so this path is async again — it runs
   // once per route, over the route's own cells only.
-  var totalTime = table.g[endSlot];
+  // Driving: cost is time. Walking / cycling: the cost penalises busy
+  // roads, so add up each edge's plain time instead.
+  var totalTime = drive ? table.g[endSlot] : 0;
   var totalDist = 0;
   var segRev = [];   // per-edge {nameIdx, distM, flags}, end → start
   var pathRev = [];  // per-edge [[lon,lat], ...], end → start
@@ -1516,6 +1616,10 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     var nameIdx = scell.edges[sb + 3];
     var classAccess = scell.edges[sb + 4];
     var distM = (sSpeedDist & 0xFFFFFF) / 10;
+    if (!drive) {
+      edgeCostWB(travel, sSpeedDist, classAccess);
+      totalTime += _wbTime;
+    }
     var isRound = ((classAccess >>> 8) & 1) !== 0;
     var cls = classAccess & 0x1F;
     var isLink = (cls === 2 || cls === 4 || cls === 6 || cls === 8 || cls === 10);
@@ -1528,6 +1632,9 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     var segment = [[fromCoords[1] / 1e7, fromCoords[0] / 1e7]];
     if (geomLocal !== graph.NO_GEOM) {
       var pts = scell.decodeGeomLocal(geomLocal);
+      // Bit 11: the geometry is stored for the other direction (a walk/
+      // bike record against a one-way shares the one-way's geometry).
+      if (pts && (classAccess & GEOM_REVERSED_BIT)) pts = pts.slice().reverse();
       if (pts) for (var j = 0; j < pts.length; j++) segment.push(pts[j]);
     }
     segment.push([toCoords[1] / 1e7, toCoords[0] / 1e7]);
@@ -1678,6 +1785,9 @@ async function findRoute(startNode, endNode, ctx) {
   var crow = haversine(startLat, startLon, endLat, endLon);
   if (ctx && ctx.profile) ctx.profile.crowKm = crow / 1000;
   var override = ctx && ctx.options && ctx.options.route;
+  // Two-pass rides the highway tier: driving only.
+  var travel = travelMode(ctx && ctx.options && ctx.options.travel);
+  if (travel !== 'drive' && override === 'two-pass') override = null;
   var isLong = crow > 100000;
 
   if (isLong && override !== 'full') {
@@ -1705,7 +1815,7 @@ async function findRoute(startNode, endNode, ctx) {
   // when full A* ran out of budget — an exhausted open set means the
   // destination is genuinely unreachable and two-pass can't fix that.
   var cancelled = !!(ctx && ctx.cancelled && ctx.cancelled());
-  if (!routeResult && !cancelled
+  if (!routeResult && !cancelled && travel === 'drive'
       && (override === 'two-pass' || (ctx && ctx.bailed))) {
     routeResult = await findRouteSpatialTwoPass(startNode, endNode, ctx);
   }

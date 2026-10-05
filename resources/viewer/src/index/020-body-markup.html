@@ -156,6 +156,14 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
     </span>
   </h4>
   <div id="routing-body">
+  <!-- Travel mode, chosen before routing (500-routing-panel.js). Shown
+       only when the ZIM's graph carries walking and cycling data
+       (map-config routingModes). -->
+  <div id="routing-travel-row" role="radiogroup" aria-label="Travel mode" style="display:none">
+    <button type="button" id="travel-drive" data-travel="drive" role="radio" aria-checked="true">Drive</button>
+    <button type="button" id="travel-walk"  data-travel="walk"  role="radio" aria-checked="false">Walk</button>
+    <button type="button" id="travel-bike"  data-travel="bike"  role="radio" aria-checked="false">Bike</button>
+  </div>
   <div class="routing-field-group">
     <div class="routing-field-row">
       <div class="routing-dot origin"></div>

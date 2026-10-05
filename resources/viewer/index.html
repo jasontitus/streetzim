@@ -798,6 +798,19 @@
     font-size: 12px; color: var(--text-secondary);
   }
   #routing-clear:hover { background: var(--hover-bg); color: var(--text-primary); }
+  #routing-travel-row {
+    display: flex; gap: 2px; margin-bottom: 8px; padding: 2px;
+    background: rgba(0,0,0,0.05); border-radius: 8px;
+  }
+  #routing-travel-row button {
+    flex: 1; padding: 6px 4px; border: none; border-radius: 6px;
+    background: transparent; cursor: pointer; font-family: var(--ui-font);
+    font-size: 13px; font-weight: 500; color: var(--text-secondary); min-width: 0;
+  }
+  #routing-travel-row button.on {
+    background: var(--panel-bg); color: var(--accent); font-weight: 600;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  }
   #routing-go-row {
     display: none; margin-top: 8px; gap: 6px;
   }
@@ -1034,6 +1047,7 @@
     #controls button { min-height: 44px; padding: 12px 16px; font-size: 13px; }
     #find-chips .find-chip { min-height: 44px; padding: 0 14px; }
     #routing-go-row button { min-height: 44px; }
+    #routing-travel-row button { min-height: 40px; }
     .maplibregl-ctrl-group button { width: 44px; height: 44px; }
     #attr-btn { padding: 8px 12px; font-size: 12px; }
     /* Fingers scroll panels; a pinch on one must not zoom the page. */
@@ -1335,6 +1349,14 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
     </span>
   </h4>
   <div id="routing-body">
+  <!-- Travel mode, chosen before routing (500-routing-panel.js). Shown
+       only when the ZIM's graph carries walking and cycling data
+       (map-config routingModes). -->
+  <div id="routing-travel-row" role="radiogroup" aria-label="Travel mode" style="display:none">
+    <button type="button" id="travel-drive" data-travel="drive" role="radio" aria-checked="true">Drive</button>
+    <button type="button" id="travel-walk"  data-travel="walk"  role="radio" aria-checked="false">Walk</button>
+    <button type="button" id="travel-bike"  data-travel="bike"  role="radio" aria-checked="false">Bike</button>
+  </div>
   <div class="routing-field-group">
     <div class="routing-field-row">
       <div class="routing-dot origin"></div>
@@ -9192,19 +9214,63 @@ function initRouting(map, config) {
     bike:  document.getElementById('routing-bike')
   };
   var MODE_LABELS = { drive: 'Drive', walk: 'Walk', bike: 'Bike' };
-  // Per-mode presets — camera feels right for the modality and the avg
-  // speed is used to re-estimate remaining-time since the routing graph
-  // is driver-speeds only. Speeds in m/s: walk≈3.1 mph, bike≈10 mph.
+  // Per-mode presets — camera feels right for the modality. `speed`
+  // (m/s: walk≈3.1 mph, bike≈10 mph) re-estimates the remaining time
+  // only when the route was planned for another mode (older ZIMs plan
+  // car routes only); a route planned for the mode uses its own pace.
+  // Off-route: walkers' GPS wanders and sidewalks sit metres off the
+  // centreline, so they get a wider, slower trigger.
   var MODE_PRESETS = {
-    drive: { pitch: 60, zoom: 17,   speed: null },  // null = use route's car-speed
-    walk:  { pitch: 45, zoom: 18,   speed: 1.4 },
-    bike:  { pitch: 55, zoom: 17.5, speed: 4.5 }
+    drive: { pitch: 60, zoom: 17,   speed: null, offM: 60, offMs: 6000 },
+    walk:  { pitch: 45, zoom: 18,   speed: 1.4,  offM: 40, offMs: 12000 },
+    bike:  { pitch: 55, zoom: 17.5, speed: 4.5,  offM: 50, offMs: 8000 }
   };
+
+  // Travel mode, chosen before routing: the snap and the router both
+  // use it (routing-worker.js edgeCostWB). Only the modes the ZIM's graph
+  // carries are offered (map-config routingModes); older ZIMs route cars
+  // only, keep the picker hidden, and their Walk / Bike buttons start
+  // navigation on the car route with a walking / cycling pace, as before.
+  var routingModes = ['drive'];
+  (config.routingModes || []).forEach(function(m) {
+    if ((m === 'walk' || m === 'bike') && routingModes.indexOf(m) < 0) routingModes.push(m);
+  });
+  var multiModal = routingModes.length > 1;
+  var travelMode = 'drive';
+  try {
+    var savedTravel = localStorage.getItem('streetzim.travelMode');
+    if (routingModes.indexOf(savedTravel) >= 0) travelMode = savedTravel;
+  } catch (e) {}
+  var travelRow = document.getElementById('routing-travel-row');
+  var travelBtns = {
+    drive: document.getElementById('travel-drive'),
+    walk:  document.getElementById('travel-walk'),
+    bike:  document.getElementById('travel-bike')
+  };
+  function syncTravelButtons() {
+    Object.keys(travelBtns).forEach(function(m) {
+      var b = travelBtns[m];
+      if (!b) return;
+      b.style.display = routingModes.indexOf(m) >= 0 ? '' : 'none';
+      b.classList.toggle('on', m === travelMode);
+      b.setAttribute('aria-checked', m === travelMode ? 'true' : 'false');
+    });
+  }
+  if (travelRow) {
+    travelRow.style.display = multiModal ? '' : 'none';
+    syncTravelButtons();
+  }
 
   function resetGoButtons() {
     Object.keys(modeBtns).forEach(function(m) {
       modeBtns[m].classList.remove('active-mode', 'hidden-mode');
       modeBtns[m].textContent = MODE_LABELS[m];
+      // The route was planned for one mode: offer navigation in that
+      // mode only.
+      if (multiModal) {
+        if (m === travelMode) modeBtns[m].textContent = 'Start';
+        else modeBtns[m].classList.add('hidden-mode');
+      }
     });
   }
 
@@ -9310,6 +9376,8 @@ function initRouting(map, config) {
     stopRouteProgressIndicator();
     originNode = -1;
     destNode = -1;
+    originPick = null;
+    destPick = null;
     originCoordE7 = null;
     destCoordE7 = null;
     originInput.value = '';
@@ -10277,7 +10345,7 @@ function initRouting(map, config) {
     if (graph.isSpatial && graph._index.version === 3) {
       var workerReady = await initRoutingWorker();
       if (workerReady && __routingWorker) {
-        try { return await snapViaWorker(lat, lon, mode); }
+        try { return await snapViaWorker(lat, lon, mode, travelMode); }
         catch (err) {
           console.warn('[streetzim] worker snap failed, falling back:', err);
         }
@@ -11179,7 +11247,7 @@ function initRouting(map, config) {
   }
   window.__streetzim_prewarmRoutingCells = prewarmRoutingCells;
 
-  function findRouteViaWorker(startNode, endNode) {
+  function findRouteViaWorker(startNode, endNode, travel) {
     if (!__routingWorker) return Promise.reject(new Error('worker not ready'));
     // Only the newest route matters: an origin/dest change while a
     // route is still computing used to leave the old search grinding
@@ -11198,22 +11266,24 @@ function initRouting(map, config) {
       __routingWorker.postMessage({
         cmd: 'route', id: id,
         start: startNode, end: endNode,
-        options: override ? { route: override } : {},
+        options: override ? { route: override, travel: travel } : { travel: travel },
       });
     });
   }
 
-  function snapViaWorker(lat, lon, mode) {
+  function snapViaWorker(lat, lon, mode, travel) {
     if (!__routingWorker) return Promise.reject(new Error('worker not ready'));
     var id = ++__routingWorkerSeq;
     return new Promise(function(resolve, reject) {
       __routingWorkerInflight.set(id, { resolve: resolve, reject: reject });
       __routingWorker.postMessage({ cmd: 'snap', id: id, lat: lat, lon: lon,
-                                    mode: mode === 'dest' ? 'dest' : 'origin' });
+                                    mode: mode === 'dest' ? 'dest' : 'origin',
+                                    travel: travel || 'drive' });
     });
   }
 
-  async function findRoute(startNode, endNode) {
+  async function findRoute(startNode, endNode, travel) {
+    travel = travel || 'drive';
     // Prefer the worker on spatial graphs. initRoutingWorker is
     // idempotent and returns a Promise<bool> resolving once init
     // completes (true → ready, false → failed, fall back). Awaiting
@@ -11226,7 +11296,7 @@ function initRouting(map, config) {
           var t0 = performance.now();
           console.warn('[streetzim] routing via worker (start=' + startNode
                        + ' end=' + endNode + ')');
-          var workerResult = await findRouteViaWorker(startNode, endNode);
+          var workerResult = await findRouteViaWorker(startNode, endNode, travel);
           // Cancellation: caller asked us to stop (likely via the
           // origin/dest focus hook). Don't fall back to main thread —
           // they're about to fire a new route. Return null so
@@ -11248,6 +11318,11 @@ function initRouting(map, config) {
       } else {
         console.warn('[streetzim] routing on main thread (worker not ready)');
       }
+    }
+    // The main-thread engine is the old-ZIM fallback and routes cars
+    // only: never show its car route as a walking or cycling one.
+    if (travel !== 'drive') {
+      throw new Error(travel + ' routing needs the routing worker');
     }
     return findRouteMainThread(startNode, endNode);
   }
@@ -11618,6 +11693,14 @@ function initRouting(map, config) {
   // to show in the input; if omitted, a lat/lon coord label is used.
   var originSnapSeq = 0;
   var destSnapSeq = 0;
+  // The points as picked (before snapping): a travel-mode change snaps
+  // them again for the new mode, which may use different vertices.
+  var originPick = null;
+  var destPick = null;
+
+  function snappingText() {
+    return travelMode === 'drive' ? 'Finding nearest road...' : 'Finding nearest path...';
+  }
 
   async function setOriginFromLatLon(lat, lon, label) {
     // Race guard: a "Directions to here" click on a place-detail
@@ -11633,8 +11716,9 @@ function initRouting(map, config) {
       return;
     }
     if (queueGraphPick('origin', lat, lon, label)) return;
+    originPick = { lat: lat, lon: lon };
     var snapSeq = ++originSnapSeq;
-    statusEl.textContent = 'Finding nearest road...';
+    statusEl.textContent = snappingText();
     var snapped;
     try {
       snapped = await nearestNode(lat, lon, 'origin');
@@ -11665,8 +11749,9 @@ function initRouting(map, config) {
 
   async function setDestFromLatLon(lat, lon, label) {
     if (queueGraphPick('dest', lat, lon, label)) return;
+    destPick = { lat: lat, lon: lon };
     var snapSeq = ++destSnapSeq;
-    statusEl.textContent = 'Finding nearest road...';
+    statusEl.textContent = snappingText();
     var snapped;
     try {
       snapped = await nearestNode(lat, lon, 'dest');
@@ -11703,9 +11788,42 @@ function initRouting(map, config) {
     routeDrawn = false;
   }
 
+  // Switch the travel mode: snap both picked points again for the new
+  // mode and route once both are in (whichever snap lands second
+  // routes). Navigation in progress ends — its route was for the old mode.
+  function setTravelMode(m) {
+    if (routingModes.indexOf(m) < 0 || m === travelMode) return false;
+    travelMode = m;
+    try { localStorage.setItem('streetzim.travelMode', m); } catch (e) {}
+    syncTravelButtons();
+    if (driveMode.active) driveMode.exit();
+    resetGoButtons();
+    var o = originPick, d = destPick;
+    var oLabel = originInput.value, dLabel = destInput.value;
+    if (o) originNode = -1;
+    if (d) destNode = -1;
+    if (o || d) {
+      routeSeq++;                       // drop a route still computing
+      if (typeof cancelInFlightRoute === 'function') cancelInFlightRoute();
+      stopRouteProgressIndicator();
+      resultEl.style.display = 'none';
+      goRow.classList.remove('visible');
+      lastRoute = null;
+      removeRouteLine();
+    }
+    if (o) setOriginFromLatLon(o.lat, o.lon, oLabel);
+    if (d) setDestFromLatLon(d.lat, d.lon, dLabel);
+    return true;
+  }
+  Object.keys(travelBtns).forEach(function(m) {
+    if (!travelBtns[m]) return;
+    travelBtns[m].addEventListener('click', function() { setTravelMode(m); });
+  });
+
   function computeAndDrawRoute() {
     resultEl.style.display = 'none';
     var seq = ++routeSeq;
+    var routeTravel = travelMode;
     // Compute crow-fly distance to feed the ETA heuristic, then start
     // the spinner-and-elapsed-time indicator immediately. Ticks every
     // 100 ms whether or not the A* loop has yielded — closes the
@@ -11732,7 +11850,7 @@ function initRouting(map, config) {
       if (seq !== routeSeq) return;
       var result;
       try {
-        result = await findRoute(originNode, destNode);
+        result = await findRoute(originNode, destNode, routeTravel);
       } catch (err) {
         console.error('[streetzim] findRoute failed:', err);
         if (seq === routeSeq) {
@@ -11775,6 +11893,7 @@ function initRouting(map, config) {
         goRow.classList.add('visible');
         resetGoButtons();
         lastRoute = augmentRouteForDriving(result);
+        lastRoute.travel = routeTravel;
         // Expose for the smoke harness: the user's standing rule is
         // "highway-only for the sketch is fine but it still needs to
         // get me from where I start to where I am going." Smoke
@@ -11811,7 +11930,9 @@ function initRouting(map, config) {
         } catch (e) {}
       } else {
         removeRouteLine();
-        statusEl.textContent = 'No route found';
+        statusEl.textContent = routeTravel === 'walk' ? 'No walking route found'
+                             : routeTravel === 'bike' ? 'No cycling route found'
+                             : 'No route found';
         clearBtn.style.display = 'block';
       }
     }, 10);
@@ -12504,12 +12625,13 @@ function initRouting(map, config) {
       var proj = projectOnRoute(state.route, lat, lon);
       var totalDist = state.route.distance;
       var remaining = Math.max(0, totalDist - proj.distAlong);
-      // Remaining time. Drive mode uses the route's A*-computed time
-      // (car speeds). Walk/bike override with a flat avg speed since the
-      // routing graph only has car speeds.
+      // Remaining time at the route's own pace when it was planned for
+      // this mode; a car route walked or cycled (older ZIMs) uses the
+      // mode's flat pace instead.
       var preset = MODE_PRESETS[state.mode] || MODE_PRESETS.drive;
       var avgSpeed;
-      if (preset.speed != null) {
+      var plannedForMode = (state.route.travel || 'drive') === state.mode;
+      if (preset.speed != null && !plannedForMode) {
         avgSpeed = preset.speed;
       } else {
         avgSpeed = state.route.time > 0 ? state.route.distance / state.route.time : 0;
@@ -12594,10 +12716,11 @@ function initRouting(map, config) {
                              ' · ' + formatTime(remainingTime);
       etaEl.textContent = formatEtaClock(remainingTime);
 
-      // Off-route detection — more than 60 m off for >6 s
-      if (proj.offMeters > 60) {
+      // Off-route detection — more than offM metres off for offMs
+      // (60 m / 6 s driving; see MODE_PRESETS).
+      if (proj.offMeters > preset.offM) {
         if (!state.offRouteSince) state.offRouteSince = Date.now();
-        if (Date.now() - state.offRouteSince > 6000) {
+        if (Date.now() - state.offRouteSince > preset.offMs) {
           setStatus('Off route (' + Math.round(proj.offMeters) + ' m)',
                     { showReroute: true });
         }
@@ -12803,7 +12926,14 @@ function initRouting(map, config) {
     // feature-detect. Callers that need a given method should test
     // for it (`typeof window.streetzimRouting.foo === "function"`),
     // but the version helps diagnostics attribute "host vs ZIM" skew.
-    version: 5,
+    version: 6,
+    /// Travel mode routes are planned for: 'drive', 'walk' or 'bike'
+    /// (version 6). `travelModes` lists what this ZIM supports;
+    /// setTravelMode re-plans the current route and returns false for an
+    /// unsupported or unchanged mode.
+    get travelMode() { return travelMode; },
+    get travelModes() { return routingModes.slice(); },
+    setTravelMode: function(m) { return setTravelMode(m); },
     /// True while the routing panel is open: a map tap then picks a route
     /// point, so the place popups stay out of the way.
     get panelActive() { return !!active; },
@@ -12880,6 +13010,23 @@ function initRouting(map, config) {
         resetGoButtons();
       }
       if (!lastRoute) return false;
+      // A ZIM that plans walk / bike routes re-plans for the new mode
+      // first, then starts navigation once that route lands.
+      if (multiModal && routingModes.indexOf(newMode) >= 0
+          && (lastRoute.travel || 'drive') !== newMode) {
+        setTravelMode(newMode);
+        var polls = 0;
+        var poll = setInterval(function() {
+          polls++;
+          if (lastRoute && lastRoute.travel === newMode && travelMode === newMode) {
+            clearInterval(poll);
+            window.streetzimRouting.switchDriveMode(newMode);
+          } else if (polls > 600 || travelMode !== newMode) {
+            clearInterval(poll);
+          }
+        }, 100);
+        return true;
+      }
       driveMode.enter(newMode);
       window.streetzimRouting.__lastEnteredMode = newMode;
       Object.keys(modeBtns).forEach(function(m) {
@@ -13158,6 +13305,10 @@ function initRouting(map, config) {
           // snap could compute origin→old-dest and the poll below would
           // resolve on that before the new destination was routed.
           clearRoute();
+          // Plan the route for the navigation mode when the ZIM can.
+          if (multiModal && routingModes.indexOf(mode) >= 0 && travelMode !== mode) {
+            setTravelMode(mode);
+          }
           try {
             setOriginFromLatLon(origLat, origLon, "Start");
             setDestFromLatLon(destLat, destLon, "Destination");

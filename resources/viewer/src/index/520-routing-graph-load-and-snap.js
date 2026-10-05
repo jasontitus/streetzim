@@ -128,7 +128,7 @@
     if (graph.isSpatial && graph._index.version === 3) {
       var workerReady = await initRoutingWorker();
       if (workerReady && __routingWorker) {
-        try { return await snapViaWorker(lat, lon, mode); }
+        try { return await snapViaWorker(lat, lon, mode, travelMode); }
         catch (err) {
           console.warn('[streetzim] worker snap failed, falling back:', err);
         }

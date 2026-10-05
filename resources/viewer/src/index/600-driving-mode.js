@@ -427,12 +427,13 @@
       var proj = projectOnRoute(state.route, lat, lon);
       var totalDist = state.route.distance;
       var remaining = Math.max(0, totalDist - proj.distAlong);
-      // Remaining time. Drive mode uses the route's A*-computed time
-      // (car speeds). Walk/bike override with a flat avg speed since the
-      // routing graph only has car speeds.
+      // Remaining time at the route's own pace when it was planned for
+      // this mode; a car route walked or cycled (older ZIMs) uses the
+      // mode's flat pace instead.
       var preset = MODE_PRESETS[state.mode] || MODE_PRESETS.drive;
       var avgSpeed;
-      if (preset.speed != null) {
+      var plannedForMode = (state.route.travel || 'drive') === state.mode;
+      if (preset.speed != null && !plannedForMode) {
         avgSpeed = preset.speed;
       } else {
         avgSpeed = state.route.time > 0 ? state.route.distance / state.route.time : 0;
@@ -517,10 +518,11 @@
                              ' · ' + formatTime(remainingTime);
       etaEl.textContent = formatEtaClock(remainingTime);
 
-      // Off-route detection — more than 60 m off for >6 s
-      if (proj.offMeters > 60) {
+      // Off-route detection — more than offM metres off for offMs
+      // (60 m / 6 s driving; see MODE_PRESETS).
+      if (proj.offMeters > preset.offM) {
         if (!state.offRouteSince) state.offRouteSince = Date.now();
-        if (Date.now() - state.offRouteSince > 6000) {
+        if (Date.now() - state.offRouteSince > preset.offMs) {
           setStatus('Off route (' + Math.round(proj.offMeters) + ' m)',
                     { showReroute: true });
         }

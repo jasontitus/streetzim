@@ -41,6 +41,14 @@
   // to show in the input; if omitted, a lat/lon coord label is used.
   var originSnapSeq = 0;
   var destSnapSeq = 0;
+  // The points as picked (before snapping): a travel-mode change snaps
+  // them again for the new mode, which may use different vertices.
+  var originPick = null;
+  var destPick = null;
+
+  function snappingText() {
+    return travelMode === 'drive' ? 'Finding nearest road...' : 'Finding nearest path...';
+  }
 
   async function setOriginFromLatLon(lat, lon, label) {
     // Race guard: a "Directions to here" click on a place-detail
@@ -56,8 +64,9 @@
       return;
     }
     if (queueGraphPick('origin', lat, lon, label)) return;
+    originPick = { lat: lat, lon: lon };
     var snapSeq = ++originSnapSeq;
-    statusEl.textContent = 'Finding nearest road...';
+    statusEl.textContent = snappingText();
     var snapped;
     try {
       snapped = await nearestNode(lat, lon, 'origin');
@@ -88,8 +97,9 @@
 
   async function setDestFromLatLon(lat, lon, label) {
     if (queueGraphPick('dest', lat, lon, label)) return;
+    destPick = { lat: lat, lon: lon };
     var snapSeq = ++destSnapSeq;
-    statusEl.textContent = 'Finding nearest road...';
+    statusEl.textContent = snappingText();
     var snapped;
     try {
       snapped = await nearestNode(lat, lon, 'dest');
@@ -126,9 +136,42 @@
     routeDrawn = false;
   }
 
+  // Switch the travel mode: snap both picked points again for the new
+  // mode and route once both are in (whichever snap lands second
+  // routes). Navigation in progress ends — its route was for the old mode.
+  function setTravelMode(m) {
+    if (routingModes.indexOf(m) < 0 || m === travelMode) return false;
+    travelMode = m;
+    try { localStorage.setItem('streetzim.travelMode', m); } catch (e) {}
+    syncTravelButtons();
+    if (driveMode.active) driveMode.exit();
+    resetGoButtons();
+    var o = originPick, d = destPick;
+    var oLabel = originInput.value, dLabel = destInput.value;
+    if (o) originNode = -1;
+    if (d) destNode = -1;
+    if (o || d) {
+      routeSeq++;                       // drop a route still computing
+      if (typeof cancelInFlightRoute === 'function') cancelInFlightRoute();
+      stopRouteProgressIndicator();
+      resultEl.style.display = 'none';
+      goRow.classList.remove('visible');
+      lastRoute = null;
+      removeRouteLine();
+    }
+    if (o) setOriginFromLatLon(o.lat, o.lon, oLabel);
+    if (d) setDestFromLatLon(d.lat, d.lon, dLabel);
+    return true;
+  }
+  Object.keys(travelBtns).forEach(function(m) {
+    if (!travelBtns[m]) return;
+    travelBtns[m].addEventListener('click', function() { setTravelMode(m); });
+  });
+
   function computeAndDrawRoute() {
     resultEl.style.display = 'none';
     var seq = ++routeSeq;
+    var routeTravel = travelMode;
     // Compute crow-fly distance to feed the ETA heuristic, then start
     // the spinner-and-elapsed-time indicator immediately. Ticks every
     // 100 ms whether or not the A* loop has yielded — closes the
@@ -155,7 +198,7 @@
       if (seq !== routeSeq) return;
       var result;
       try {
-        result = await findRoute(originNode, destNode);
+        result = await findRoute(originNode, destNode, routeTravel);
       } catch (err) {
         console.error('[streetzim] findRoute failed:', err);
         if (seq === routeSeq) {
@@ -198,6 +241,7 @@
         goRow.classList.add('visible');
         resetGoButtons();
         lastRoute = augmentRouteForDriving(result);
+        lastRoute.travel = routeTravel;
         // Expose for the smoke harness: the user's standing rule is
         // "highway-only for the sketch is fine but it still needs to
         // get me from where I start to where I am going." Smoke
@@ -234,7 +278,9 @@
         } catch (e) {}
       } else {
         removeRouteLine();
-        statusEl.textContent = 'No route found';
+        statusEl.textContent = routeTravel === 'walk' ? 'No walking route found'
+                             : routeTravel === 'bike' ? 'No cycling route found'
+                             : 'No route found';
         clearBtn.style.display = 'block';
       }
     }, 10);
