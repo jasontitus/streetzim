@@ -224,8 +224,12 @@
 
   // Route options for the worker. ?turns=off ignores turn restrictions
   // (debugging a route the restrictions changed).
-  function routeOptions(override, travel) {
+  function routeOptions(override, travel, picks) {
     var o = { travel: travel };
+    // The points the user picked: an end snapped into a sealed pocket is
+    // snapped again from them (routing-worker.js findRoute).
+    if (picks && picks.origin) o.originQuery = picks.origin;
+    if (picks && picks.dest) o.destQuery = picks.dest;
     if (override) o.route = override;
     try {
       if (new URLSearchParams(location.search).get('turns') === 'off') o.turnRestrictions = false;
@@ -233,7 +237,7 @@
     return o;
   }
 
-  function findRouteViaWorker(startNode, endNode, travel) {
+  function findRouteViaWorker(startNode, endNode, travel, picks) {
     if (!__routingWorker) return Promise.reject(new Error('worker not ready'));
     // Only the newest route matters: an origin/dest change while a
     // route is still computing used to leave the old search grinding
@@ -252,7 +256,7 @@
       __routingWorker.postMessage({
         cmd: 'route', id: id,
         start: startNode, end: endNode,
-        options: routeOptions(override, travel),
+        options: routeOptions(override, travel, picks),
       });
     });
   }
@@ -268,7 +272,7 @@
     });
   }
 
-  async function findRoute(startNode, endNode, travel) {
+  async function findRoute(startNode, endNode, travel, picks) {
     travel = travel || 'drive';
     // Prefer the worker on spatial graphs. initRoutingWorker is
     // idempotent and returns a Promise<bool> resolving once init
@@ -282,7 +286,7 @@
           var t0 = performance.now();
           console.warn('[streetzim] routing via worker (start=' + startNode
                        + ' end=' + endNode + ')');
-          var workerResult = await findRouteViaWorker(startNode, endNode, travel);
+          var workerResult = await findRouteViaWorker(startNode, endNode, travel, picks);
           // Cancellation: caller asked us to stop (likely via the
           // origin/dest focus hook). Don't fall back to main thread —
           // they're about to fire a new route. Return null so

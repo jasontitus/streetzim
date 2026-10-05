@@ -246,3 +246,63 @@ def test_walk_bike_never_run_two_pass(tmp_path):
         (r,) = _run(tmp_path, pair, [{"travel": travel, "options": {"popLimits": tiny}}])
         assert r["time"] is None
         assert not any("highway" in p["label"] for p in r["phases"]), (travel, r["phases"])
+
+
+def _run_opts(data_dir, pairs, configs):
+    drv = _DRIVER.replace("coords: r ? r.coords.length : 0,",
+                          "coords: r ? r.coords.length : 0, endMoved: r ? r.endMoved : null,"
+                          " startMoved: r ? r.startMoved : null,")
+    out = subprocess.run(["node", "-e", drv, str(WORKER), str(data_dir),
+                          json.dumps(pairs), json.dumps(configs)],
+                         check=True, capture_output=True, text=True, timeout=300)
+    return json.loads(out.stdout.strip().splitlines()[-1])
+
+
+def _pocket_graph(tmp_path, pocket_gap):
+    """A 40-node two-way road (the network) and, `pocket_gap` east of its
+    far end, a 40-node two-way stub joined to nothing (a road the extract
+    cut off)."""
+    from tests.szrg_reader import parse_szrg_bytes
+    from tests.szrg_spatial import build_spatial
+    from tests.test_routing_worker_v3 import _pack_v4_graph_cls
+    lat = 400_000_000
+    road = [(lat, -1_050_000_000 + i * 6_000) for i in range(40)]
+    x0 = road[-1][1] + pocket_gap
+    stub = [(lat + 3_000, x0 + i * 6_000) for i in range(40)]
+    edges = []
+    for base in (0, 40):
+        for i in range(39):
+            edges += [(base + i, base + i + 1, 500, 30, 0xFFFFFFFF, 0, 11),
+                      (base + i + 1, base + i, 500, 30, 0xFFFFFFFF, 0, 11)]
+    build_spatial(parse_szrg_bytes(_pack_v4_graph_cls(road + stub, edges)),
+                  cell_scale=10, output_dir=tmp_path / "routing-data")
+    return road, stub
+
+
+def test_an_end_in_a_sealed_pocket_is_snapped_again(tmp_path):
+    """The tap is nearest a stub cut off from the network, and the network's
+    end is about as close: the route goes there and says so (endMoved /
+    startMoved). Without the picked points (older viewers) it is no route."""
+    _node()
+    road, stub = _pocket_graph(tmp_path, 6_000)
+    tap = [(stub[0][0] + 2_000) / 1e7, (stub[0][1] - 1_000) / 1e7]
+    start = [road[0][0] / 1e7, road[0][1] / 1e7]
+    plain, moved, back = _run_opts(tmp_path, [start + tap, start + tap, tap + start], [
+        {"travel": "drive"},
+        {"travel": "drive", "options": {"destQuery": {"lat": tap[0], "lon": tap[1]}}},
+        {"travel": "drive", "options": {"originQuery": {"lat": tap[0], "lon": tap[1]}}}])
+    assert plain["time"] is None
+    assert moved["time"] is not None and moved["endMoved"]["lat"] == pytest.approx(road[-1][0] / 1e7)
+    assert back["time"] is not None and back["startMoved"]["lon"] == pytest.approx(road[-1][1] / 1e7)
+
+
+def test_a_far_away_island_stays_no_route(tmp_path):
+    """A pocket 5 km from the network: tapping it must not route to the
+    mainland shore (the re-snap is only taken when about as close)."""
+    _node()
+    road, stub = _pocket_graph(tmp_path, 600_000)
+    tap = [stub[5][0] / 1e7, stub[5][1] / 1e7]
+    start = [road[0][0] / 1e7, road[0][1] / 1e7]
+    (r,) = _run_opts(tmp_path, [start + tap],
+                     [{"travel": "drive", "options": {"destQuery": {"lat": tap[0], "lon": tap[1]}}}])
+    assert r["time"] is None and not r["endMoved"]

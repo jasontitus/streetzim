@@ -11340,8 +11340,12 @@ function initRouting(map, config) {
 
   // Route options for the worker. ?turns=off ignores turn restrictions
   // (debugging a route the restrictions changed).
-  function routeOptions(override, travel) {
+  function routeOptions(override, travel, picks) {
     var o = { travel: travel };
+    // The points the user picked: an end snapped into a sealed pocket is
+    // snapped again from them (routing-worker.js findRoute).
+    if (picks && picks.origin) o.originQuery = picks.origin;
+    if (picks && picks.dest) o.destQuery = picks.dest;
     if (override) o.route = override;
     try {
       if (new URLSearchParams(location.search).get('turns') === 'off') o.turnRestrictions = false;
@@ -11349,7 +11353,7 @@ function initRouting(map, config) {
     return o;
   }
 
-  function findRouteViaWorker(startNode, endNode, travel) {
+  function findRouteViaWorker(startNode, endNode, travel, picks) {
     if (!__routingWorker) return Promise.reject(new Error('worker not ready'));
     // Only the newest route matters: an origin/dest change while a
     // route is still computing used to leave the old search grinding
@@ -11368,7 +11372,7 @@ function initRouting(map, config) {
       __routingWorker.postMessage({
         cmd: 'route', id: id,
         start: startNode, end: endNode,
-        options: routeOptions(override, travel),
+        options: routeOptions(override, travel, picks),
       });
     });
   }
@@ -11384,7 +11388,7 @@ function initRouting(map, config) {
     });
   }
 
-  async function findRoute(startNode, endNode, travel) {
+  async function findRoute(startNode, endNode, travel, picks) {
     travel = travel || 'drive';
     // Prefer the worker on spatial graphs. initRoutingWorker is
     // idempotent and returns a Promise<bool> resolving once init
@@ -11398,7 +11402,7 @@ function initRouting(map, config) {
           var t0 = performance.now();
           console.warn('[streetzim] routing via worker (start=' + startNode
                        + ' end=' + endNode + ')');
-          var workerResult = await findRouteViaWorker(startNode, endNode, travel);
+          var workerResult = await findRouteViaWorker(startNode, endNode, travel, picks);
           // Cancellation: caller asked us to stop (likely via the
           // origin/dest focus hook). Don't fall back to main thread —
           // they're about to fire a new route. Return null so
@@ -11960,7 +11964,8 @@ function initRouting(map, config) {
       if (seq !== routeSeq) return;
       var result;
       try {
-        result = await findRoute(originNode, destNode, routeTravel);
+        result = await findRoute(originNode, destNode, routeTravel,
+                                 { origin: originPick, dest: destPick });
       } catch (err) {
         console.error('[streetzim] findRoute failed:', err);
         if (seq === routeSeq) {
@@ -11994,6 +11999,19 @@ function initRouting(map, config) {
           mid: result.coords[Math.floor(result.coords.length / 2)],
           last: result.coords[result.coords.length - 1],
         });
+        // An end the router had to move out of a sealed pocket (a road
+        // stub cut off by the map's edge): put its marker where the route
+        // really starts / ends.
+        if (result.endMoved && typeof result.endMoved.lat === 'number') {
+          destNode = result.endMoved.node;
+          destCoordE7 = [Math.round(result.endMoved.lat * 1e7), Math.round(result.endMoved.lon * 1e7)];
+          if (destMarker) destMarker.setLngLat([result.endMoved.lon, result.endMoved.lat]);
+        }
+        if (result.startMoved && typeof result.startMoved.lat === 'number') {
+          originNode = result.startMoved.node;
+          originCoordE7 = [Math.round(result.startMoved.lat * 1e7), Math.round(result.startMoved.lon * 1e7)];
+          if (originMarker) originMarker.setLngLat([result.startMoved.lon, result.startMoved.lat]);
+        }
         drawRoute(unwrapLngs(result.coords));
         distEl.textContent = formatDistance(result.distance);
         timeEl.textContent = formatTime(result.time);

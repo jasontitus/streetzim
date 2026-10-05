@@ -100,8 +100,10 @@ var POP_LIMIT_WB_GREEDY = 1500000;
 // And room for the exact pass to finish: San Jose -> Pescadero by bike
 // (100 km) needs 677k pops; at the car's 500k it bailed into the weighted
 // and greedy passes (1.45M pops, 1.8 s, a route 2.5 % slower). With 1.2M
-// it is exact in 1.2 s. Worst case ~1.5M pops is ~140 MB of search state,
-// reached only on long rides (a 30 km ride: ~160k pops).
+// it is exact in 1.2 s. Worst case: a pass visiting over 1M states grows
+// the NodeTable to 4M slots (88 MB, 132 MB while growing) plus 24-48 MB of
+// heap, ~130-180 MB, reached only on long rides (a 30 km ride: ~160k pops).
+// A destination in a sealed pocket is caught before the first pass.
 var POP_LIMIT_WB_OPTIMAL = 1200000;
 var POP_LIMIT_WB_WEIGHTED = 1000000;
 var POP_LIMIT_HW_OPTIMAL = 150000;
@@ -1179,7 +1181,7 @@ var SNAP_MAX_EXTRA_M = 1000;
 // may use (edgeCostWB), records against a one-way included; there is no
 // edgeless case — a walk/bike graph gives every vertex they can reach a
 // way out, so a vertex without one is a motorway end or similar.
-SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7, mode, travel) {
+SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7, mode, travel, exclude) {
   var forDest = (mode === 'dest');
   travel = travelMode(travel);
   var drive = (travel === 'drive');
@@ -1217,6 +1219,7 @@ SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7, mode, trav
       var ndlon = (nlon - lonE7) * cosLat;
       var dist = ndlat * ndlat + ndlon * ndlon;
       if (dist >= worstKept) continue;
+      if (exclude && exclude.has(globalNode)) continue;
       // Skip nodes whose outgoing edges are ALL no-motor-vehicle (a
       // footpath vertex next to the road). A node with no outgoing
       // edges at all stays eligible — it's the end of a one-way and a
@@ -1391,6 +1394,15 @@ async function findRouteSpatialFiltered(startNode, endNode, highwayOnly, ctx) {
   var limGreedy   = highwayOnly ? (lim.hwGreedy || POP_LIMIT_HW_GREEDY)
                                 : (lim.fullGreedy
                                    || (wbTravel ? POP_LIMIT_WB_GREEDY : POP_LIMIT_FULL_GREEDY));
+  // Walking and cycling search large budgets (POP_LIMIT_WB_*): a
+  // destination in a sealed pocket would cost the whole first pass
+  // (1.2M pops) before the check below ran. Check first: it is a bounded
+  // BFS (DEST_COMPONENT_LIMIT nodes) around the destination.
+  if (wbTravel && !highwayOnly && await destComponentClosed(startNode, endNode, ctx)) {
+    if (ctx) { ctx.bailed = false; ctx.unreachable = true; }
+    debugStats(ctx, 'destination pocket closed — unreachable', 0);
+    return null;
+  }
   if (!skipOptimal) {
     var optimal = await findRouteSpatialAStar(
       startNode, endNode, highwayOnly, /*greedy*/ 1.0, limOptimal, ctx);
@@ -1496,8 +1508,52 @@ async function destComponentClosed(startNode, endNode, ctx) {
       }
     }
   }
+  if (ctx) ctx.pocket = seen;   // for findRoute's re-snap
   return true;
 }
+
+// The nodes a route from `startNode` can reach, when they are a small
+// sealed set (DEST_COMPONENT_LIMIT) without `endNode`: a start snapped
+// into a pocket (a road stub the extract cut off). Else null.
+async function startPocket(startNode, endNode, travel) {
+  var seen = new Set([startNode]);
+  var queue = [startNode];
+  var head = 0;
+  while (head < queue.length) {
+    if (seen.size >= DEST_COMPONENT_LIMIT) return null;
+    var cur = queue[head++];
+    if (cur === endNode) return null;
+    var cid = graph.cellForNode(cur);
+    if (cid < 0) continue;
+    var cell = graph.cellIfResident(cid);
+    if (cell === null) cell = await graph._ensureCell(cid);
+    var local = cell.localIdxFor(cur);
+    if (local < 0) continue;
+    var edges = cell.edges;
+    var eEnd = cell.cellAdj[local + 1];
+    for (var ei = cell.cellAdj[local]; ei < eEnd; ei++) {
+      if (!edgeUsable(travel, edges[ei * 5 + 1], edges[ei * 5 + 4])) continue;
+      var t = edges[ei * 5];
+      if (!seen.has(t)) { seen.add(t); queue.push(t); }
+    }
+  }
+  return seen.has(endNode) ? null : seen;
+}
+
+// Snap the query point again, outside `pocket`, when the new vertex is
+// about as close to it as the old one was (so a tap on a ferry-only
+// island stays "no route" instead of becoming a route to the mainland).
+async function resnapOutside(query, mode, travel, pocket, oldNode) {
+  if (!query || typeof query.lat !== 'number' || typeof query.lon !== 'number') return null;
+  var oc = await graph.nodeCoordsE7(oldNode);
+  var d0 = haversine(query.lat, query.lon, oc[0] / 1e7, oc[1] / 1e7);
+  var alt = await graph.snapNearestNode(Math.round(query.lat * 1e7), Math.round(query.lon * 1e7),
+                                        mode, travel, pocket);
+  if (!alt || pocket.has(alt.node)) return null;
+  var d1 = haversine(query.lat, query.lon, alt.lat, alt.lon);
+  return d1 <= d0 * 1.5 + RESNAP_EXTRA_M ? alt : null;
+}
+var RESNAP_EXTRA_M = 500;
 
 async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
                                       GREEDY_WEIGHT, POP_LIMIT, ctx) {
@@ -2015,7 +2071,52 @@ function concatenateLegs(legs) {
   return { coords: coords, distance: distance, time: time, roads: roads };
 }
 
+// A route; when there is none because an end was snapped into a sealed
+// pocket (a road stub the extract cut off: Silicon Valley's southern edge
+// near Pescadero gave a car destination 32 junctions joined to nothing),
+// that end is snapped again outside the pocket (options.originQuery /
+// destQuery: the points the user picked) and the route says where it now
+// starts or ends (startMoved / endMoved: {node, lat, lon}).
 async function findRoute(startNode, endNode, ctx) {
+  var r = await findRouteCore(startNode, endNode, ctx);
+  var opts = (ctx && ctx.options) || {};
+  if (r || (ctx && ctx.cancelled && ctx.cancelled())
+      || !(opts.destQuery || opts.originQuery)) return r;
+  var travel = travelMode(opts.travel);
+  var movedEnd = null;
+  if (opts.destQuery) {
+    if (!ctx.pocket) await destComponentClosed(startNode, endNode, ctx);
+    if (ctx.pocket) {
+      var altEnd = await resnapOutside(opts.destQuery, 'dest', travel, ctx.pocket, endNode);
+      ctx.pocket = null;
+      if (altEnd) {
+        debugStats(ctx, 'destination moved out of a closed pocket', 0);
+        r = await findRouteCore(startNode, altEnd.node, ctx);
+        if (r) { r.endMoved = altEnd; return r; }
+        endNode = altEnd.node;
+        movedEnd = altEnd;
+      }
+    }
+  }
+  if (opts.originQuery && !(ctx && ctx.cancelled && ctx.cancelled())) {
+    var sp = await startPocket(startNode, endNode, travel);
+    if (sp) {
+      var altStart = await resnapOutside(opts.originQuery, 'origin', travel, sp, startNode);
+      if (altStart) {
+        debugStats(ctx, 'start moved out of a closed pocket', 0);
+        r = await findRouteCore(altStart.node, endNode, ctx);
+        if (r) {
+          r.startMoved = altStart;
+          if (movedEnd) r.endMoved = movedEnd;
+        }
+      }
+    }
+  }
+  return r;
+}
+
+async function findRouteCore(startNode, endNode, ctx) {
+  if (ctx) { ctx.pocket = null; ctx.unreachable = false; }
   if (!graph.isSpatial) {
     throw new Error('worker only handles spatial graphs');
   }

@@ -451,3 +451,46 @@ def test_turning_round_far_from_the_restriction(tmp_path, k):
                              check=True, capture_output=True, text=True)
         js = json.loads(out.stdout.strip().splitlines()[-1])[0]
         assert js["time"] == pytest.approx(want)
+
+
+@pytest.mark.parametrize("seed", [90017, 90059])
+def test_fuzz_regressions(tmp_path, seed):
+    """Two random graphs where reverting the same-neighbour dominance rule
+    (90017) or the current state's taint (90059) gave routes up to 17 s
+    worse than the optimum (review of 53dac14), in both routers."""
+    import json
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    from tests.szrg_reader import parse_szrg_bytes
+    from tests.test_routing_worker_modes import WORKER, _DRIVER
+    from tests.test_routing_worker_v3 import _pack_v4_graph_cls
+
+    fx = json.loads((Path(__file__).parent / f"fixtures/turns/fuzz-{seed}.json").read_text())
+    nodes = [tuple(n) for n in fx["nodes"]]
+    edges = [tuple(e) for e in fx["edges"]]
+    recs = [(f, list(p)) for f, p in fx["recs"]]
+    adj = {}
+    for (u, v, d, sp, *_r) in edges:
+        adj.setdefault(u, {})[v] = (d / 10) / (sp / 3.6)
+    build_spatial(parse_szrg_bytes(_pack_v4_graph_cls(nodes, edges)), cell_scale=1000,
+                  output_dir=tmp_path / "routing-data", restrictions=recs)
+    sg = _spatial_graph_from_dir(tmp_path / "routing-data")
+    sid = {sg.node_coords_e7(n): n for n in range(sg.num_nodes)}
+    a, b = fx["pair"]
+    want = _oracle(adj, recs, a, b, tr.CAR, 45.0)
+    r = find_route_spatial(sg, sid[nodes[a]], sid[nodes[b]])
+    seq = r.node_sequence
+    cost = r.total_time_s + 45.0 * sum(
+        1 for i in range(2, len(seq))
+        if seq[i] == seq[i - 2] and len(sg.edges_of_node(seq[i - 1])) > 1)
+    assert cost == pytest.approx(want), (cost, want)
+    if shutil.which("node"):
+        p = [[nodes[a][0] / 1e7, nodes[a][1] / 1e7, nodes[b][0] / 1e7, nodes[b][1] / 1e7]]
+        out = subprocess.run(["node", "-e", _DRIVER, str(WORKER), str(tmp_path), json.dumps(p),
+                              json.dumps([{"travel": "drive", "modeA": "origin", "modeB": "origin"}])],
+                             check=True, capture_output=True, text=True)
+        js = json.loads(out.stdout.strip().splitlines()[-1])[0]
+        if (js["start"], js["end"]) == (sid[nodes[a]], sid[nodes[b]]):
+            assert js["time"] == pytest.approx(r.total_time_s)

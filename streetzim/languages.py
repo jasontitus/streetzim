@@ -40,7 +40,8 @@ def wiki_code(lang: str) -> str:
 
 
 # ISO 639-3 codes a Kiwix Wikipedia ZIM in the language may declare.
-ZIM_LANGUAGE_ALIASES = {"nb": {"nob", "nor"}, "ms": {"msa", "zsm"}, "fa": {"fas", "pes"}}
+ZIM_LANGUAGE_ALIASES = {"nb": {"nob", "nor"}, "no": {"nob", "nor"}, "ms": {"msa", "zsm"},
+                        "fa": {"fas", "pes"}, "zh": {"zho", "chi"}}
 
 
 def zim_matches(lang: str, zim_language: str) -> bool:

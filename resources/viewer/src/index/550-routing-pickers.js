@@ -206,7 +206,8 @@
       if (seq !== routeSeq) return;
       var result;
       try {
-        result = await findRoute(originNode, destNode, routeTravel);
+        result = await findRoute(originNode, destNode, routeTravel,
+                                 { origin: originPick, dest: destPick });
       } catch (err) {
         console.error('[streetzim] findRoute failed:', err);
         if (seq === routeSeq) {
@@ -240,6 +241,19 @@
           mid: result.coords[Math.floor(result.coords.length / 2)],
           last: result.coords[result.coords.length - 1],
         });
+        // An end the router had to move out of a sealed pocket (a road
+        // stub cut off by the map's edge): put its marker where the route
+        // really starts / ends.
+        if (result.endMoved && typeof result.endMoved.lat === 'number') {
+          destNode = result.endMoved.node;
+          destCoordE7 = [Math.round(result.endMoved.lat * 1e7), Math.round(result.endMoved.lon * 1e7)];
+          if (destMarker) destMarker.setLngLat([result.endMoved.lon, result.endMoved.lat]);
+        }
+        if (result.startMoved && typeof result.startMoved.lat === 'number') {
+          originNode = result.startMoved.node;
+          originCoordE7 = [Math.round(result.startMoved.lat * 1e7), Math.round(result.startMoved.lon * 1e7)];
+          if (originMarker) originMarker.setLngLat([result.startMoved.lon, result.startMoved.lat]);
+        }
         drawRoute(unwrapLngs(result.coords));
         distEl.textContent = formatDistance(result.distance);
         timeEl.textContent = formatTime(result.time);
