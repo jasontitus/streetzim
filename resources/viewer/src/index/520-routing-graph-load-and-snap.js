@@ -152,10 +152,13 @@
         var n = i / 2;
         if (adj) {
           var eS = adj[n], eE = adj[n + 1];
-          var carOk = (eS === eE);
+          var real = 0, carOk = false;
           for (var ei = eS; ei < eE; ei++) {
+            if (graph.edgeSpeed(ei) === 0) continue;  // walk/bike against a one-way
+            real++;
             if (!isNoMotor(graph.edgeClassAccess(ei))) { carOk = true; break; }
           }
+          if (real === 0) carOk = true;
           if (!carOk) continue;
         }
         bestDist = d;

@@ -720,16 +720,21 @@
         if (dist >= worstKept) continue;
         // Skip a node whose outgoing edges are all car-prohibited
         // (footpath vertex); edgeless sinks stay eligible.
+        // A speed-0 out-edge (walk/bike against a one-way) counts as
+        // absent: a one-way's end stays a sink.
         var eS = cell.cellAdj[local], eE = cell.cellAdj[local + 1];
-        var carOk = (eS === eE);
+        var real = 0, carOk = false;
         for (var ei = eS; ei < eE; ei++) {
+          if ((cell.edges[ei * 5 + 1] >>> 24) === 0) continue;
+          real++;
           if (!isNoMotor(cell.edges[ei * 5 + 4])) { carOk = true; break; }
         }
+        if (real === 0) carOk = true;
         if (!carOk) continue;
         var k = best.length;
         while (k > 0 && best[k - 1].dist > dist) k--;
         best.splice(k, 0, { dist: dist, node: cell.baseNode + local, lat: nlat, lon: nlon,
-                            edgeless: (eS === eE) });
+                            edgeless: (real === 0) });
         if (best.length > SNAP_CANDIDATES) best.pop();
         if (best.length === SNAP_CANDIDATES) worstKept = best[best.length - 1].dist;
       }

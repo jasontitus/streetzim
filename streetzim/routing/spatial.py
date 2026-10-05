@@ -895,11 +895,19 @@ class SpatialGraph:
                         best_d, best_n, best_e = [dist], [cell.base_node + local], [False]
                         worst_kept = dist
                     continue
-                car_ok = e_start == e_end
+                # A speed-0 out-edge (walk/bike against a one-way) counts
+                # as absent: a one-way's end stays a sink.
+                real = 0
+                car_ok = False
                 for ei in range(e_start, e_end):
+                    if int(edges[ei * 5 + 1]) >> 24 == 0:
+                        continue
+                    real += 1
                     if not _is_no_motor(int(edges[ei * 5 + 4])):
                         car_ok = True
                         break
+                if real == 0:
+                    car_ok = True
                 if not car_ok:
                     continue
                 # bisect_right on dist only == the JS "insert after equal
@@ -907,7 +915,7 @@ class SpatialGraph:
                 k = bisect.bisect_right(best_d, dist)
                 best_d.insert(k, dist)
                 best_n.insert(k, cell.base_node + local)
-                best_e.insert(k, e_start == e_end)
+                best_e.insert(k, real == 0)
                 if len(best_d) > SNAP_CANDIDATES:
                     best_d.pop(); best_n.pop(); best_e.pop()
                 if len(best_d) == SNAP_CANDIDATES:

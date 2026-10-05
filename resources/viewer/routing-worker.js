@@ -1091,16 +1091,21 @@ SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7, mode) {
       // edges at all stays eligible — it's the end of a one-way and a
       // perfectly good destination. Checked lazily, only when a node
       // would make the shortlist, so the scan's per-node cost stays tiny.
+      // A speed-0 out-edge (the walk/bike record for travel against a
+      // one-way) counts as absent: a one-way's end stays a sink.
       var eStart = cellAdj[local], eEnd = cellAdj[local + 1];
-      var carOk = (eStart === eEnd);
+      var real = 0, carOk = false;
       for (var ei = eStart; ei < eEnd; ei++) {
+        if ((edges[ei * 5 + 1] >>> 24) === 0) continue;
+        real++;
         if (!isNoMotor(edges[ei * 5 + 4])) { carOk = true; break; }
       }
+      if (real === 0) carOk = true;
       if (!carOk) continue;
       var k = best.length;
       while (k > 0 && best[k - 1].dist > dist) k--;
       best.splice(k, 0, { dist: dist, node: globalNode, lat: nlat, lon: nlon,
-                          edgeless: (eStart === eEnd) });
+                          edgeless: (real === 0) });
       if (best.length > SNAP_CANDIDATES) best.pop();
       if (best.length === SNAP_CANDIDATES) worstKept = best[best.length - 1].dist;
     }
@@ -1589,7 +1594,11 @@ async function findNearestHighwayNode(seedNode, maxPops) {
     var eStart = cell.cellAdj[local];
     var eEnd = cell.cellAdj[local + 1];
     for (var ei = eStart; ei < eEnd; ei++) {
-      if (isHighwayClass(edges[ei * 5 + 4])) return current;
+      // A highway edge a car can drive: not a no-motor or speed-0
+      // (against-one-way) record, or leg B could not leave the node.
+      var hca = edges[ei * 5 + 4];
+      if (isHighwayClass(hca) && !isNoMotor(hca)
+          && (edges[ei * 5 + 1] >>> 24) !== 0) return current;
     }
     for (var e2 = eStart; e2 < eEnd; e2++) {
       if (isNoMotor(edges[e2 * 5 + 4])) continue;

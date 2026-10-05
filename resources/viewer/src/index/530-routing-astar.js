@@ -279,7 +279,10 @@
       pops++;
       var edges = await graph.edgesOfNode(current);
       for (var k = 0; k < edges.length; k++) {
-        if (isHighwayClass(edges[k][4])) {
+        // A highway edge a car can drive (not no-motor, not a speed-0
+        // against-one-way record), or leg B could not leave the node.
+        if (isHighwayClass(edges[k][4]) && !isNoMotor(edges[k][4])
+            && (edges[k][1] >>> 24) !== 0) {
           return current;
         }
       }

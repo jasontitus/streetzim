@@ -119,8 +119,10 @@ def nearest_node_filtered(g: SpatialGraph, lat: float, lon: float,
     order = window[np.argsort(d[window])]
     for cand in order:
         cid = int(cand)
-        for (_t, _sd, _gi, _ni, ca) in g.edges_of_node(cid):
-            if (ca & CLASS_ORD_MASK) in HIGHWAY_TIER_ORDS:
+        for (_t, sd, _gi, _ni, ca) in g.edges_of_node(cid):
+            # Drivable: not no-motor, not a speed-0 against-one-way record.
+            if ((ca & CLASS_ORD_MASK) in HIGHWAY_TIER_ORDS and not is_no_motor(ca)
+                    and sd >> 24 != 0):
                 return cid, float(d[cid])
     raise RuntimeError("no highway-tier node within 50k nearest candidates")
 
@@ -243,8 +245,10 @@ def measure_path(g: SpatialGraph, node_sequence: list[int]) -> tuple[float, floa
     total_time = 0.0
     for i in range(len(node_sequence) - 1):
         u, v = node_sequence[i], node_sequence[i + 1]
-        for (t_node, speed_dist, _gi, _ni, _ca) in g.edges_of_node(u):
-            if t_node != v:
+        for (t_node, speed_dist, _gi, _ni, ca) in g.edges_of_node(u):
+            # The edge a car route takes: never a no-motor or speed-0
+            # (walk/bike against a one-way) record that shares u -> v.
+            if t_node != v or is_no_motor(ca) or speed_dist >> 24 == 0:
                 continue
             dist_m = (speed_dist & 0xFFFFFF) / 10.0
             speed = speed_dist >> 24
