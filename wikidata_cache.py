@@ -67,6 +67,19 @@ def _validated_qids(qids):
 # Wikipedia REST API for extracts
 WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
 
+
+def wikipedia_api(lang="en"):
+    return f"https://{lang}.wikipedia.org/w/api.php"
+
+
+def lang_cache_dir(cache_dir, lang="en"):
+    """Where a build in `lang` keeps its entries: the cache root for
+    English, else <root>/lang/<lang> (labels, descriptions, Wikipedia
+    sitelinks and extracts in that language). The Q-ID scans of the PBFs
+    stay shared at the root."""
+    root = Path(cache_dir or DEFAULT_CACHE_DIR)
+    return root if lang == "en" else root / "lang" / lang
+
 # Properties we fetch from Wikidata
 WIKIDATA_PROPERTIES = {
     "P1082": "population",
@@ -393,7 +406,8 @@ def _run_sparql(query, retries=3, pacer=None):
     return (data or {}).get("results", {}).get("bindings", [])
 
 
-def fetch_wikidata_batch(qids, batch_size=40, cache_dir=None, save_interval=10000):
+def fetch_wikidata_batch(qids, batch_size=40, cache_dir=None, save_interval=10000,
+                         lang="en"):
     """Fetch Wikidata properties for a list of Q-IDs using SPARQL.
 
     Returns a dict mapping Q-ID -> {label, description, population, area_km2, ...}.
@@ -404,6 +418,8 @@ def fetch_wikidata_batch(qids, batch_size=40, cache_dir=None, save_interval=1000
     qid_list = _validated_qids(qids)
     total = len(qid_list)
     last_save = 0
+    # Labels and descriptions in the build's language first.
+    label_langs = ",".join(dict.fromkeys([lang, "en", "fr", "de", "es"]))
 
     print(f"  Fetching Wikidata properties for {total} Q-IDs...")
     start_time = time.time()
@@ -433,10 +449,10 @@ def fetch_wikidata_batch(qids, batch_size=40, cache_dir=None, save_interval=1000
           OPTIONAL {{ ?item wdt:P31 ?instance . }}
           OPTIONAL {{
             ?sitelink schema:about ?item ;
-                      schema:isPartOf <https://en.wikipedia.org/> .
+                      schema:isPartOf <https://{lang}.wikipedia.org/> .
           }}
 
-          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,fr,de,es". }}
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "{label_langs}". }}
         }}
         """
 
@@ -551,7 +567,7 @@ def extract_pending(entry):
         and not entry.get(NO_EXTRACT)
 
 
-def fetch_wikipedia_extracts(wikidata_entries, batch_size=20, pacer=None):
+def fetch_wikipedia_extracts(wikidata_entries, batch_size=20, pacer=None, lang="en"):
     """Fetch short Wikipedia extracts for entries that have wikipedia_title.
 
     Modifies entries in-place, adding an 'extract' field, or NO_EXTRACT
@@ -595,7 +611,7 @@ def fetch_wikipedia_extracts(wikidata_entries, batch_size=20, pacer=None):
             "formatversion": "2",
         })
 
-        url = f"{WIKIPEDIA_API}?{params}"
+        url = f"{wikipedia_api(lang)}?{params}"
 
         try:
             try:
@@ -979,28 +995,35 @@ def print_cache_stats(cache_dir):
 
 @overload
 def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=False,
-                *, return_qids: Literal[False] = False) -> Path | None: ...
+                *, return_qids: Literal[False] = False, lang: str = "en") -> Path | None: ...
 
 
 @overload
 def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=False,
-                *, return_qids: Literal[True]) -> tuple[Path | None, set[str]]: ...
+                *, return_qids: Literal[True], lang: str = "en") -> tuple[Path | None, set[str]]: ...
 
 
 def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=False,
-                *, return_qids: bool = False) -> Path | None | tuple[Path | None, set[str]]:
+                *, return_qids: bool = False,
+                lang: str = "en") -> Path | None | tuple[Path | None, set[str]]:
     """Main entry point: extract Q-IDs, fetch Wikidata, save cache.
 
     Returns the cache directory path, or (path, selected Q-IDs) when
     return_qids=True. The selection is this call's validated extraction,
     including an empty set, and is never inferred from a shared manifest.
     """
-    cache_dir = Path(cache_dir or DEFAULT_CACHE_DIR)
+    root = Path(cache_dir or DEFAULT_CACHE_DIR)
+    # Entries in the build's language (lang_cache_dir); Q-ID scans shared.
+    cache_dir = lang_cache_dir(root, lang)
+    if cache_dir != root and not cache_dir.exists():
+        cache_dir.mkdir(parents=True)
+        from streetzim.cache_permissions import share_like
+        share_like(cache_dir, root)
     clean_dead_stages(cache_dir)
 
     # Step 1: Extract Q-IDs from OSM data (cached by PBF identity)
     if pbf_path:
-        qid_features = extract_qids_from_pbf(pbf_path, cache_dir=cache_dir)
+        qid_features = extract_qids_from_pbf(pbf_path, cache_dir=root)
     elif mbtiles_path:
         qid_features = extract_qids_from_mbtiles(mbtiles_path)
     else:
@@ -1033,13 +1056,13 @@ def build_cache(pbf_path=None, mbtiles_path=None, cache_dir=None, skip_extracts=
     if new_qids:
         print(f"  {len(new_qids)} new Q-IDs to fetch ({len(existing)} already cached)")
         # Step 3: Fetch Wikidata properties (with incremental saves)
-        new_entries = fetch_wikidata_batch(new_qids, cache_dir=cache_dir)
+        new_entries = fetch_wikidata_batch(new_qids, cache_dir=cache_dir, lang=lang)
     if retry:
         print(f"  {len(retry)} cached entries have no extract yet; asking again")
 
     # Step 4: Fetch Wikipedia extracts (new entries and the retries)
     if not skip_extracts:
-        fetch_wikipedia_extracts({**retry, **new_entries})
+        fetch_wikipedia_extracts({**retry, **new_entries}, lang=lang)
 
     # Step 5: Merge and save
     all_entries = {**existing, **new_entries}

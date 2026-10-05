@@ -102,7 +102,7 @@ class BatchError(Exception):
 
 def _api_batch(qids: list[str], *, api: str = WIKIDATA_API,
                user_agent: str | None = None, retries: int = 5,
-               pacer: Pacer | None = None) -> dict:
+               pacer: Pacer | None = None, site: str = ENWIKI) -> dict:
     """One ``wbgetentities`` call for <=50 Q-IDs; returns parsed JSON.
 
     Sends maxlag=5 (Wikimedia's advice for automated clients) and retries
@@ -119,7 +119,7 @@ def _api_batch(qids: list[str], *, api: str = WIKIDATA_API,
         "action": "wbgetentities",
         "ids": "|".join(qids),
         "props": "sitelinks",
-        "sitefilter": ENWIKI,
+        "sitefilter": site,
         "format": "json",
         "maxlag": "5",
     })
@@ -145,15 +145,17 @@ def _api_batch(qids: list[str], *, api: str = WIKIDATA_API,
 class _Resolver:
     """Answers for batches, halving a refused batch to isolate a bad id."""
 
-    def __init__(self, user_agent: str | None, pacer: Pacer) -> None:
+    def __init__(self, user_agent: str | None, pacer: Pacer, site: str = ENWIKI) -> None:
         self.user_agent = user_agent
         self.pacer = pacer
+        self.site = site
         self.alone_in_a_row = 0     # ids refused on their own since an answer
         self.written_off: list[str] = []
 
     def answers(self, batch: list[str]) -> dict[str, str]:
         try:
-            data = _api_batch(batch, user_agent=self.user_agent, pacer=self.pacer)
+            data = _api_batch(batch, user_agent=self.user_agent, pacer=self.pacer,
+                              site=self.site)
         except BatchError as exc:
             if len(batch) > 1:
                 half = len(batch) // 2
@@ -172,10 +174,10 @@ class _Resolver:
             self.written_off.append(batch[0])
             return {batch[0]: _REFUSED}
         self.alone_in_a_row = 0
-        return _titles_from_response(data, batch)
+        return _titles_from_response(data, batch, self.site)
 
 
-def _titles_from_response(data: dict, qids: list[str]) -> dict[str, str]:
+def _titles_from_response(data: dict, qids: list[str], site: str = ENWIKI) -> dict[str, str]:
     """{qid: title, or "" for a definitive no-enwiki-article}; a Q-ID the
     response does not mention is left out (unknown, not a miss)."""
     out: dict[str, str] = {}
@@ -188,7 +190,7 @@ def _titles_from_response(data: dict, qids: list[str]) -> dict[str, str]:
             out[q] = ""
             continue
         sitelinks = ent.get("sitelinks", {}) or {}
-        title = (sitelinks.get(ENWIKI) or {}).get("title")
+        title = (sitelinks.get(site) or {}).get("title")
         out[q] = title or ""
     return out
 
@@ -233,8 +235,11 @@ def resolve_qids(
     sleep: float = 0.1,
     progress: Callable[[int, int], None] | None = None,
     misses: set[str] | None = None,
+    site: str = ENWIKI,
 ) -> dict[str, str]:
-    """Return ``{qid: enwiki_title}`` for Q-IDs with an English sitelink.
+    """Return ``{qid: enwiki_title}`` for Q-IDs with an English sitelink
+    (``site`` another wiki, e.g. "frwiki": its titles; keep a cache_path
+    per site).
 
     Q-IDs with no enwiki article are simply absent from the result.
     misses: when given, filled with the Q-IDs Wikidata answered have NO
@@ -302,7 +307,7 @@ def resolve_qids(
     # answer, resolution stops (hammering a rate limit is rude) and returns
     # what it has, loudly; a refused batch is skipped, not cached.
     pacer = polite_pacer(sleep)
-    resolver = _Resolver(user_agent, pacer)
+    resolver = _Resolver(user_agent, pacer, site)
     failed_at = None
     for n, i in enumerate(range(0, len(todo), BATCH)):
         batch = todo[i:i + BATCH]
@@ -359,6 +364,17 @@ def resolve_qids(
 _LONG_LANG_RE = re.compile(r"simple|[a-z]{2,3}(?:-[a-z]{2,8})+")
 
 
+def is_lang_title(tag: str, lang: str = "en") -> bool:
+    """Whether an OSM ``wikipedia=`` value names an article in ``lang``:
+    ``<lang>:Title``; for English also a title without a language prefix
+    (is_english_title has the rule)."""
+    if lang == "en":
+        return is_english_title(tag)
+    ci = tag.find(":")
+    pre = tag[:ci]
+    return 2 <= ci <= 3 and pre.isalpha() and pre.lower() == lang
+
+
 def is_english_title(tag: str) -> bool:
     """Whether an OSM ``wikipedia=`` value names an English article:
     ``en:Title``, or a title without a language prefix.
@@ -386,8 +402,13 @@ def augment_wiki_cross_refs(
     cache_path: str | None = None,
     offline_map=None,
     log: Callable[[str], None] = print,
+    lang: str = "en",
 ) -> dict:
     """In-place: fill `wikipedia` from `wikidata` on cross-ref entries.
+
+    ``lang``: the build's language (create_osm_zim --language): titles
+    are resolved to, and kept from, that Wikipedia (``<lang>wiki``) the
+    way this describes English.
 
     ``wiki_cross_refs`` is the ``extract_wiki_tags_pbf`` lookup:
     ``{key: {"wikipedia"?: "en:...", "wikidata"?: "Q..."}}``. For every
@@ -418,7 +439,7 @@ def augment_wiki_cross_refs(
     pending: dict[str, list] = {}
     for entry in wiki_cross_refs.values():
         tag = entry.get("wikipedia")
-        if tag and is_english_title(tag):
+        if tag and is_lang_title(tag, lang):
             continue
         q = entry.get("wikidata")
         if q:
@@ -431,7 +452,7 @@ def augment_wiki_cross_refs(
         + "...")
     misses: set[str] = set()
     titles = resolve_qids(pending.keys(), cache_path=cache_path,
-                          offline_map=offline_map, misses=misses)
+                          offline_map=offline_map, misses=misses, site=f"{lang}wiki")
 
     upgraded = non_en = no_en = 0
     for q, entries in pending.items():
@@ -442,7 +463,7 @@ def augment_wiki_cross_refs(
                 if orig:
                     entry["wikipedia_osm"] = orig
                     non_en += 1
-                entry["wikipedia"] = "en:" + title.replace(" ", "_")
+                entry["wikipedia"] = f"{lang}:" + title.replace(" ", "_")
                 entry["wikipedia_src"] = "wd"
                 upgraded += 1
             elif orig and q in misses:

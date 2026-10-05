@@ -49,6 +49,13 @@ from cloud.wikimedia_http import user_agent as _user_agent
 from streetzim.paths import cache_root
 
 PARSE_API = "https://en.wikipedia.org/w/api.php"
+# The Wikipedia language of the bundle_wiki_articles call in progress
+# (create_osm_zim --language): its API, article links and page language.
+_LANG = "en"
+
+
+def _parse_api() -> str:
+    return f"https://{_LANG}.wikipedia.org/w/api.php"
 # Next to wikidata_cache.py's: $STREETZIM_CACHE_DIR, else the checkout, else
 # a user cache dir when installed (streetzim/paths.py cache_root).
 DEFAULT_CACHE_DIR = cache_root() / "wiki_articles_cache"
@@ -319,7 +326,7 @@ def clean_article_html(html: str, title: str, source_url: str,
     safe_title = (title.replace("&", "&amp;").replace("<", "&lt;")
                   .replace(">", "&gt;"))
     return (
-        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        f"<!DOCTYPE html><html lang=\"{_LANG}\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         "<link rel=\"icon\" href=\"data:,\">"
         f"<title>{safe_title}</title>"
@@ -519,7 +526,7 @@ def _parse_request(title_us: str, ua: str,
         "disableeditsection": "1", "disablelimitreport": "1", "formatversion": "2",
     })
     try:
-        data = get_json(f"{PARSE_API}?{params}", user_agent=ua, pacer=pacer)
+        data = get_json(f"{_parse_api()}?{params}", user_agent=ua, pacer=pacer)
     except urllib.error.HTTPError as e:
         code = api_error_code(e)
         if code in _DEFINITIVE_API_ERRORS:
@@ -618,7 +625,7 @@ def _query_redirects(titles_us: list[str], ua: str, pacer: Pacer | None = None
         "redirects": "1", "format": "json", "formatversion": "2",
     })
     try:
-        data = get_json(f"{PARSE_API}?{params}", user_agent=ua, pacer=pacer)
+        data = get_json(f"{_parse_api()}?{params}", user_agent=ua, pacer=pacer)
     except urllib.error.HTTPError as e:
         raise stop_error(e) from e
     if not isinstance(data, dict):
@@ -671,7 +678,25 @@ def _fetch_online(title_us: str, cache_dir: str | None, ua: str,
     return _fetch_network(title_us, cache_dir, ua, pacer)
 
 
-def bundle_wiki_articles(
+def bundle_wiki_articles(titles: Iterable[str],
+                         add_item: Callable[[str, str, str, bytes], None],
+                         *, lang: str = "en", **kw: Any) -> dict:
+    """_bundle_wiki_articles from ``lang`` Wikipedia (default English): its
+    API, its article links, pages marked with its language, and a cache of
+    its own (<cache_dir>/lang/<lang>, as titles collide across languages).
+    An offline source must be a Wikipedia ZIM in that language."""
+    global _LANG
+    if lang != "en":
+        kw["cache_dir"] = os.path.join(kw.get("cache_dir") or str(DEFAULT_CACHE_DIR),
+                                       "lang", lang)
+    prev, _LANG = _LANG, lang
+    try:
+        return _bundle_wiki_articles(titles, add_item, **kw)
+    finally:
+        _LANG = prev
+
+
+def _bundle_wiki_articles(
     titles: Iterable[str],
     add_item: Callable[[str, str, str, bytes], None],
     *,
@@ -789,7 +814,7 @@ def bundle_wiki_articles(
         article itself or the one it redirects to); returns its size."""
         nonlocal images_stored, image_bytes
         disp = article_us.replace("_", " ")
-        url = "https://en.wikipedia.org/wiki/" + urllib.parse.quote(article_us)
+        url = f"https://{_LANG}.wikipedia.org/wiki/" + urllib.parse.quote(article_us)
         lead_html = gallery_html = ""
         # The page lives at wiki-article/<Title>; a title with N
         # slashes is N levels deeper, so the image link must climb

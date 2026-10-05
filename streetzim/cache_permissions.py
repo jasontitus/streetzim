@@ -7,6 +7,7 @@ cache needs a common writer UID or an appropriately privileged writer.
 """
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import errno
 from functools import lru_cache
@@ -201,3 +202,16 @@ def preserve_cache_permissions(staging: Path, previous: Path) -> None:
                     raise
     else:
         _darwin_acl(previous, staging)
+
+
+def share_like(directory: Path, like: Path) -> None:
+    """Give a new cache subdirectory the group and mode of the cache root it
+    sits in (a per-language Wikidata cache under a shared root), so the
+    builds that share the root share it too. Best effort: a group this
+    user cannot set is left as created."""
+    st = like.stat()
+    with contextlib.suppress(PermissionError):
+        if directory.stat().st_gid != st.st_gid:
+            os.chown(directory, -1, st.st_gid)
+    with contextlib.suppress(PermissionError):
+        os.chmod(directory, st.st_mode & 0o7777)

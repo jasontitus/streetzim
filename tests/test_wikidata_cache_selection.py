@@ -72,7 +72,7 @@ def test_regional_update_and_retry_preserve_unrelated_cache_and_manifest(seeded,
     monkeypatch.setattr(wc, "fetch_wikidata_batch", fetch)
     retries = []
 
-    def extracts(data):
+    def extracts(data, **_kw):
         retries.append(set(data))
 
     monkeypatch.setattr(wc, "fetch_wikipedia_extracts", extracts)
@@ -122,7 +122,7 @@ def test_regional_build_merge_failure_preserves_shared_bucket(tmp_path, monkeypa
     def properties(*a, **k):
         pytest.fail("cached selected properties were fetched again")
 
-    def extracts(data):
+    def extracts(data, **_kw):
         assert set(data) == {"Q110"}
         data["Q110"]["extract"] = "Completed"
 

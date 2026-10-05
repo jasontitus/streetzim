@@ -1198,10 +1198,15 @@ def _finish_wiki_cross_refs(args, wiki_cross_refs, search_features, admin_refs=N
     if getattr(args, "resolve_wikidata_titles", False) and wiki_cross_refs:
         try:
             from cloud.wikidata_titles import augment_wiki_cross_refs
+            _lang = getattr(args, "language", "en") or "en"
+            _tcache = getattr(args, "wikidata_title_cache", None)
+            if _tcache and _lang != "en":
+                _tcache = f"{_tcache}.{_lang}"     # titles are per Wikipedia
             _t = augment_wiki_cross_refs(
                 wiki_cross_refs,
-                cache_path=getattr(args, "wikidata_title_cache", None),
+                cache_path=_tcache,
                 offline_map=getattr(args, "wikidata_title_map", None),
+                lang=_lang,
             ) or {}
             from streetzim.source_report import note
             note("Wikipedia titles", f"{_t.get('resolved', '?')}/"
@@ -1237,6 +1242,7 @@ def _build_wikidata(
             cache_dir=wikidata_cache_dir,
             skip_extracts=args.wikidata_no_extracts,
             return_qids=True,
+            lang=getattr(args, "language", "en") or "en",
         )
         wikidata_data = load_cache_for_zim(wd_cache_path, qids=wd_qids)
         if wikidata_data:
@@ -1723,6 +1729,14 @@ def _overture_releases(args, overture_themes):
     return {t: overture_release(paths.get(t)) for t in (overture_themes or [])}
 
 
+def _wd_lang_dir(args):
+    """The Wikidata cache directory a build reads entries from: the root,
+    or its per-language folder (wikidata_cache.lang_cache_dir)."""
+    from wikidata_cache import lang_cache_dir
+    return str(lang_cache_dir(args.wikidata_cache or _wikidata_default_cache(),
+                              getattr(args, "language", "en") or "en"))
+
+
 def _wikidata_default_cache():
     from wikidata_cache import DEFAULT_CACHE_DIR
     return DEFAULT_CACHE_DIR
@@ -1774,7 +1788,7 @@ def _write_zim(
         bbox=parse_bbox(bbox_str) if bbox_str else None,
         wikidata_data=wikidata_data,
         # For the tiles' Q-IDs past the extract's edge (_add_wikidata).
-        wikidata_cache=(args.wikidata_cache or _wikidata_default_cache()) if wikidata_data else None,
+        wikidata_cache=(_wd_lang_dir(args) if wikidata_data else None),
         wikidata_selection=wikidata_selection,
         routing_graph_path=routing_graph_path,
         routing_graph_chunk_mb=int(getattr(args, 'chunk_graph_mb', 0) or 0),

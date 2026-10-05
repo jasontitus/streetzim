@@ -970,7 +970,7 @@ def _create_zim(
                                       wikidata_cache=wikidata_cache,
                                       wikidata_selection=wikidata_selection)
         _bundled_set = _add_wiki_articles(
-            creator, MapItem, wiki_cross_refs=wiki_cross_refs,
+            creator, MapItem, wiki_cross_refs=wiki_cross_refs, lang=_lang,
             bundle_wiki_articles=bundle_wiki_articles,
             wiki_articles_cache=wiki_articles_cache,
             wiki_articles_source=wiki_articles_source,
@@ -1845,7 +1845,7 @@ def _add_wikidata(creator, MapItem, *, tiles, mbtiles_path, bbox, wikidata_data,
     return wikidata_data
 
 
-def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_articles, wiki_articles_cache, wiki_articles_source, wiki_images, wiki_image_max_kb, wiki_images_per_article, fulltext_doc=None):
+def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_articles, wiki_articles_cache, wiki_articles_source, wiki_images, wiki_image_max_kb, wiki_images_per_article, fulltext_doc=None, lang="en"):
     """Bundled Wikipedia article pages. Returns the set of titles actually
     stored (None when not bundling), which gates the wiki geo-index.
     ``fulltext_doc(path, title, html)`` (--xapian=builder: XapianCorpus.
@@ -1880,10 +1880,10 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
         # _underscore makes it). An English tag, OSM's or resolved, names
         # that article itself and stays.
         from cloud.wiki_articles import _underscore
-        from cloud.wikidata_titles import is_english_title
+        from cloud.wikidata_titles import is_lang_title
         _flagged = {_underscore(t) for t in _wa_redirect_only}
         _wa_titles = {t for t in _wa_titles
-                      if is_english_title(t) or _underscore(t) not in _flagged}
+                      if is_lang_title(t, lang) or _underscore(t) not in _flagged}
         if _wa_titles:
             from cloud.wiki_articles import bundle_wiki_articles as _bundle_wa
             _wa_t0 = time.time()
@@ -1898,6 +1898,7 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
                 redirect_only=_wa_redirect_only,
                 add_redirect=lambda path, title, target: _add_redirect(
                     creator, path, title, target),
+                lang=lang,
             )
             _bundled_set = _wa_stats.get("stored_titles") or set()
             PHASE_TIMER.record_subphase(
@@ -2871,7 +2872,9 @@ def _add_meta_json(creator, MapItem, *, map_config, name, bbox, wikidata_data, r
         meta["bbox"] = list(bbox)  # [minLon, minLat, maxLon, maxLat]
     if routing_stats:
         meta["routingGraph"] = routing_stats
-    meta["wikipediaLang"] = "en"  # we emit OSM-raw `<lang>:<Title>`; en is the dominant edition we reference
+    # The edition the build resolves and bundles titles from (create_osm_zim
+    # --language; records keep OSM's raw `<lang>:<Title>` otherwise).
+    meta["wikipediaLang"] = (map_config or {}).get("language") or "en"
     creator.add_item(MapItem(
         "streetzim-meta.json", "StreetZim Meta", "application/json",
         json.dumps(meta, separators=(",", ":"),

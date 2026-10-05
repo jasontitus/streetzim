@@ -1150,7 +1150,7 @@ def test_unanswered_extracts_are_asked_again_real_misses_are_not(monkeypatch, sl
     monkeypatch.setattr(wc, "extract_qids_from_pbf", lambda *a, **k: qids)
     fetched: list = []
 
-    def props(new_qids, cache_dir=None):
+    def props(new_qids, cache_dir=None, **_kw):
         fetched.append(list(new_qids))
         return {q: {"qid": q, "label": f"L{q}", "wikipedia_title": f"Place_{q[1:]}"}
                 for q in new_qids}

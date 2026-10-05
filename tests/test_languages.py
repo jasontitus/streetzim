@@ -119,3 +119,73 @@ def test_written_zim_in_french(tmp_path):
     assert any(r["n"] == "Palais impérial" for r in chunk("im"))      # by its English name
     assert any(r["n"] == "Palais impérial" for r in chunk("u7687"))   # and its own
     assert "Palais impérial · 皇居" in _suggest(a, "Palais")
+
+
+# ---- Wikipedia and Wikidata in the build's language ----------------------
+
+def test_lang_titles():
+    from cloud.wikidata_titles import is_lang_title
+    assert is_lang_title("fr:Tour Eiffel", "fr") and is_lang_title("FR:X", "fr")
+    assert not is_lang_title("en:Eiffel Tower", "fr")
+    assert not is_lang_title("Eiffel Tower", "fr")          # no prefix: English
+    assert is_lang_title("Eiffel Tower", "en") and is_lang_title("en:X", "en")
+
+
+def test_cross_refs_resolve_to_the_build_wikipedia(monkeypatch):
+    from cloud import wikidata_titles as T
+    asked = {}
+
+    def resolve(qids, **kw):
+        asked["site"] = kw["site"]
+        kw["misses"].add("Q2")
+        return {"Q1": "Tour Eiffel"}
+
+    monkeypatch.setattr(T, "resolve_qids", resolve)
+    refs = {"a": {"wikipedia": "en:Eiffel Tower", "wikidata": "Q1"},
+            "b": {"wikipedia": "fr:Louvre", "wikidata": "Q3"},
+            "c": {"wikipedia": "en:Nowhere", "wikidata": "Q2"}}
+    T.augment_wiki_cross_refs(refs, lang="fr", log=lambda *_: None)
+    assert asked["site"] == "frwiki"
+    assert refs["a"]["wikipedia"] == "fr:Tour_Eiffel" and refs["a"]["wikipedia_osm"] == "en:Eiffel Tower"
+    assert refs["b"] == {"wikipedia": "fr:Louvre", "wikidata": "Q3"}      # already French
+    assert refs["c"].get("wikipedia_no_en")                                # no French article
+
+
+def test_articles_come_from_the_build_wikipedia(monkeypatch, tmp_path):
+    from cloud import wiki_articles as A
+    urls = []
+
+    def get_json(url, **kw):
+        urls.append(url)
+        return {"parse": {"title": "Tour Eiffel", "text": "<p>La tour Eiffel est une tour.</p>"}}
+
+    monkeypatch.setattr(A, "get_json", get_json)
+    stored = {}
+    stats = A.bundle_wiki_articles(
+        ["fr:Tour_Eiffel"], lambda path, title, mt, data: stored.__setitem__(path, data),
+        cache_dir=str(tmp_path), lang="fr", sleep=0)
+    assert stats["bundled"] == 1 and urls and all(u.startswith("https://fr.wikipedia.org/") for u in urls)
+    page = next(v for k, v in stored.items() if k.startswith("wiki-article/")).decode()
+    assert '<html lang="fr">' in page and "https://fr.wikipedia.org/wiki/Tour_Eiffel" in page
+    assert (tmp_path / "lang" / "fr").is_dir() and A._LANG == "en"
+
+
+def test_wikidata_in_the_build_language(monkeypatch, tmp_path):
+    import wikidata_cache as wc
+    assert wc.lang_cache_dir(tmp_path, "en") == tmp_path
+    assert wc.lang_cache_dir(tmp_path, "fr") == tmp_path / "lang" / "fr"
+    queries = []
+    monkeypatch.setattr(wc, "_run_sparql", lambda q, **kw: queries.append(q) or [])
+    wc.fetch_wikidata_batch(["Q90"], lang="fr")
+    assert 'wikibase:language "fr,en,de,es"' in queries[0]
+    assert "<https://fr.wikipedia.org/>" in queries[0]
+    monkeypatch.setattr(wc, "extract_qids_from_pbf", lambda pbf, cache_dir=None: (
+        queries.append(("scan", cache_dir)) or {"Q90": {}}))
+    monkeypatch.setattr(wc, "fetch_wikidata_batch",
+                        lambda qids, **kw: {"Q90": {"label": "Paris", "description": "capitale"}})
+    monkeypatch.setattr(wc, "fetch_wikipedia_extracts", lambda e, **kw: 0)
+    path = wc.build_cache(pbf_path="x.pbf", cache_dir=tmp_path, lang="fr")
+    assert path == tmp_path / "lang" / "fr"
+    assert ("scan", tmp_path) in queries                     # Q-ID scans stay shared
+    assert wc.load_cache_for_zim(path)["Q90"]["d"] == "capitale"
+    assert not wc.load_cache(tmp_path)                       # English cache untouched
