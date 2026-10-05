@@ -445,6 +445,7 @@
   .search-result:last-child { border-bottom: none; }
   .search-result:hover, .search-result.active { background: var(--hover-bg); }
   .search-result-name { font-size: 13px; color: var(--text-primary); font-weight: 500; letter-spacing: -0.01em; }
+  .search-result-native { font-weight: 400; color: var(--text-secondary); margin-left: 4px; }
   /* No text-transform: capitalize here. It turned the distance into
      "1 Mi" and "Nearby" and recapitalised place names ("Ravin De ..."),
      while the category it was meant for never changed: the category
@@ -6995,12 +6996,24 @@ var SZ_TYPE_BONUS = { admin: 25, place: 20, airport: 15, peak: 10, park: 10, wat
 var SZ_PLACE_SUB_BONUS = { city: 200, county: 80, region: 60, town: 30,
                            suburb: 10, village: 8, neighbourhood: 4 };
 
-// The normalized texts a record answers to: its name; for an admin area
-// also each other name, "<name> <type>" and "<type> of <name>".
+// A record's names (cloud/search_shards.record_names): its name, its name
+// in its own script `nn` ("北京大学" beside "Peking University"), and an
+// admin area's other names.
+function _szRecordNames(rec) {
+  var names = [rec.n];
+  if (typeof rec.nn === 'string' && rec.nn) names.push(rec.nn);
+  return Array.isArray(rec.alt) ? names.concat(rec.alt) : names;
+}
+
+// The normalized texts a record answers to: its names; for an admin area
+// also "<name> <type>" and "<type> of <name>".
 function _szSearchForms(rec, norm) {
-  var n = norm(String(rec.n || ''));
-  if (rec.t !== 'admin') return [n];
-  var names = [rec.n].concat(Array.isArray(rec.alt) ? rec.alt : []);
+  if (rec.t !== 'admin') {
+    var plain = [norm(String(rec.n || ''))];
+    if (typeof rec.nn === 'string' && rec.nn) plain.push(norm(rec.nn));
+    return plain;
+  }
+  var names = _szRecordNames(rec);
   var label = rec.s ? norm(String(rec.s)) : '';
   var out = [];
   for (var i = 0; i < names.length; i++) {
@@ -7035,7 +7048,10 @@ function _szWordsScore(name, words, admin) {
 // rule on any of its forms, so the filter never drops what it would rank.
 function _szFormsContain(rec, qNorm, norm) {
   if (!qNorm) return true;
-  if (rec.t !== 'admin') return norm(String(rec.n || '')).indexOf(qNorm) >= 0;
+  if (rec.t !== 'admin') {
+    if (norm(String(rec.n || '')).indexOf(qNorm) >= 0) return true;
+    return typeof rec.nn === 'string' && norm(rec.nn).indexOf(qNorm) >= 0;
+  }
   var words = qNorm.split(/\s+/).filter(function(w) { return w; });
   var forms = _szSearchForms(rec, norm);
   for (var i = 0; i < forms.length; i++) if (_szWordsScore(forms[i], words, true) >= 0) return true;
@@ -7921,7 +7937,9 @@ var SEARCH_SHARDS = (function () {
       html += '<div class="search-result" data-idx="' + j +
         '" data-lat="' + m.a + '" data-lon="' + m.o + '" data-type="' + m.t +
         '" data-name="' + escapeHtml(m.n) + '">' +
-        '<span class="search-result-name">' + escapeHtml(m.n) + '</span>' +
+        '<span class="search-result-name">' + escapeHtml(m.n) +
+        (m.nn ? ' <span class="search-result-native">' + escapeHtml(m.nn) + '</span>' : '') +
+        '</span>' +
         '<span class="search-result-type">' + escapeHtml(label) + loc + distLabel + '</span></div>';
     }
     resultsEl.innerHTML = html;
@@ -8166,7 +8184,8 @@ var SEARCH_SHARDS = (function () {
       for (var i = 0; i < recs.length; i++) {
         var r = recs[i];
         if (!r || typeof r.a !== 'number' || typeof r.o !== 'number') continue;
-        if (normalizeText(r.n || '') !== want) continue;
+        if (normalizeText(r.n || '') !== want
+            && normalizeText(r.nn || '') !== want) continue;
         var d = _haversineMetersStrip(lat, lon, r.a, r.o);
         if (d < bestD) { bestD = d; best = r; }
       }

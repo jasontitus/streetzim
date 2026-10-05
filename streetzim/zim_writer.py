@@ -126,7 +126,11 @@ def kiwix_page_title(feat):
     if feat.get("type") == "admin":
         label = (feat.get("subtype") or "").strip()
         if label and not _names_type(name, label):
-            return f"{name} ({label})"
+            name = f"{name} ({label})"
+    # The name in its own script too, so Kiwix's title search finds
+    # "北京大学" as well as "Peking University" (one title, no redirect).
+    if feat.get("name_native"):
+        name = f"{name} · {_title_text(feat['name_native'])}"
     return name
 
 
@@ -453,6 +457,8 @@ def xapianbuilder_doc(feat, path, *, language="eng", target_path=""):
     (title index only): the page a redirect title points at."""
     import html as _html
     body_parts = [feat.get("name") or ""]
+    if feat.get("name_native"):
+        body_parts.append(feat["name_native"])
     for k in ("location", "type", "subtype", "cat", "brand"):
         v = feat.get(k)
         if v:
@@ -2169,6 +2175,8 @@ def search_record(feat, wiki=None):
            "a": round(feat["lat"], _SEARCH_COORD_DP),
            "o": round(feat["lon"], _SEARCH_COORD_DP),
            "l": feat.get("location", "")}
+    if feat.get("name_native"):
+        rec["nn"] = feat["name_native"]
     for ov_key in ("ws", "p", "soc", "brand", "wd", "cat", "source"):
         v = feat.get(ov_key)
         if v:
@@ -2205,6 +2213,7 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
     # the viewer's SEARCH_SHARDS.words / keyFor; the manifest records the
     # rule as "word_rule" (docs/search-prefix-locality.md#word-rule).
     from cloud.search_shards import prefixes_for as _prefixes_for
+    from cloud.search_shards import record_names as _record_names
 
     # Open-file budget for the per-prefix chunk writers (see the
     # LRU eviction at the write site).
@@ -2326,10 +2335,11 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                 # Index under each word's prefix — duplicates entries
                 # across 1–4 chunks (avg ~2×) but enables substring
                 # hits like "cathedral" → "Washington National Cathedral".
-                # An admin area is found by its other names too.
-                _keys = _prefixes_for(feat["name"])
-                for _alt in rec.get("alt", ()):
-                    _keys |= _prefixes_for(_alt)
+                # Found by its other names too: the native-script name,
+                # an admin area's alternatives (record_names).
+                _keys = set()
+                for _nm in _record_names(rec):
+                    _keys |= _prefixes_for(_nm)
                 for prefix in sorted(_keys):
                     if prefix not in chunk_fds:
                         if len(chunk_fds) >= _chunk_fd_budget:
@@ -3051,6 +3061,7 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup,
     for f in search_features:
         rec = {"n": f["name"], "t": f["type"], "s": f.get("subtype", ""),
                "a": f["lat"], "o": f["lon"], "l": f.get("location", ""),
+               **({"nn": f["name_native"]} if f.get("name_native") else {}),
                **admin_record_fields(f)}
         if f.get("type") == "admin":
             # The relation's own tags, as resolved (see _search_bucket).
@@ -3062,7 +3073,8 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup,
             if wiki.get("wikidata"):
                 rec["q"] = wiki["wikidata"]
         # Under its other names too, as _search_bucket does.
-        for prefix in sorted({_key(n) for n in [f["name"], *rec.get("alt", ())]}):
+        from cloud.search_shards import record_names as _rn
+        for prefix in sorted({_key(n) for n in _rn(rec)}):
             chunks[prefix].append(rec)
 
     from cloud.search_shards import WORD_RULE

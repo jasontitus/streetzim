@@ -24,6 +24,7 @@ Optional keys (absent when empty):
 
 | key | meaning |
 |---|---|
+| `nn` | the name in its own script when `n` is another one: `"北京大学"` beside `n` `"Peking University"`. From the tiles' `name` (OpenFreeMap) or `name_int` (StreetZim's tilemaker, written when OSM's `name` differs from `name:latin`); only when it differs from `n` once folded and has 2+ characters |
 | `w` | Wikipedia title from the OSM `wikipedia` tag, for example `en:Lincoln_Memorial` |
 | `wsrc` | `"wd"` when `w` was backfilled from the Wikidata Q-ID instead |
 | `q` | Wikidata Q-ID |
@@ -71,8 +72,17 @@ Extraction output and search caches are not merged. In Monaco this takes
 458 street records down to 319; every street name and every
 Wikipedia-linked street is kept.
 
-Known gap: only the Latin-script name is indexed (admin areas also carry
-and are indexed under their other names, `alt`).
+Every name of a record is indexed and matched the same way
+(`record_names` in `cloud/search_shards.py`, `_szRecordNames` in the
+viewer): `n`, the native-script `nn`, and an admin area's `alt`. Kiwix
+pages are titled with both names ("Haidian · 海淀区"); libzim's title
+index matches CJK text by n-gram, so Kiwix also finds them by any part
+("淀区"). The map viewer matches by word prefix: "北京" finds 北京大学,
+"大学" does not yet.
+
+Extraction writes `<features>.schema` (`{"search_schema": 2}`) beside its
+output. A `--search-cache` without it predates `nn`, and the build warns
+that native-script names will be missing.
 
 ## Administrative areas (`t: "admin"`)
 
@@ -251,7 +261,8 @@ the same OSM extract (added in 2026-09; older ZIMs have none).
   maximal run of alphanumerics and marks (`Mn`/`Mc`/`Me`), not `_`, never
   starting with a mark; rule 1: a run of alphanumerics. A record is indexed
   under its name's first two characters and each word of ≥ 2 characters
-  (`prefixes_for`), and under each of its `alt` names the same way.
+  (`prefixes_for`), and under each of its other names (`nn`, `alt`) the
+  same way.
 - **Prefix rule**: `cloud/search_shards.py` `prefix_key`. Normalize the
   word (NFKD, strip characters of canonical combining class ≠ 0 — not every
   `\p{M}` mark: Indic vowel signs stay — lower-case, spaces become `_`;

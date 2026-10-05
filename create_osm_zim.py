@@ -971,6 +971,12 @@ def _build_search(
             sys.exit(1)
         cache_size = os.path.getsize(search_cache_path) / (1024 * 1024)
         print(f"    Using cached search features: {search_cache_path} ({cache_size:.0f} MB)")
+        from streetzim.search_extract import SEARCH_SCHEMA, schema_of
+        if schema_of(search_cache_path) < SEARCH_SCHEMA:
+            print("    WARNING: this search cache predates native-script names "
+                  "(no <cache>.schema): places will not be found by their name "
+                  "in their own script (e.g. 北京大学 for Peking University). "
+                  "Re-extract the cache to fix.", flush=True)
         bbox = parse_bbox(bbox_str) if bbox_str else None
         if bbox:
             # Filter cached features to bbox

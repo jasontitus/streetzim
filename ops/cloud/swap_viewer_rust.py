@@ -287,7 +287,7 @@ def _rebuild_search(c, spool_path: Path, total: int, manifest: dict, work: Path)
     (zim_writer._search_emit_chunks, hot prefixes character-split at
     SEARCH_HOT_BYTES). ``total``: the records in the spool. Every other
     source manifest key is kept."""
-    from cloud.search_shards import prefixes_for
+    from cloud.search_shards import prefixes_for, record_names
     from streetzim.zim_writer import _search_emit_chunks
     chunk_tmp = work / "search-rebuild"
     chunk_tmp.mkdir()
@@ -298,12 +298,9 @@ def _rebuild_search(c, spool_path: Path, total: int, manifest: dict, work: Path)
         for line in spool:
             n_spool += 1
             rec = json.loads(line)
-            keys = prefixes_for(rec.get("n") or "")
-            alt = rec.get("alt")
-            if isinstance(alt, list):
-                for a in alt:
-                    if isinstance(a, str):
-                        keys |= prefixes_for(a)
+            keys = set()
+            for nm in record_names(rec):
+                keys |= prefixes_for(nm)
             for k in sorted(keys):
                 fd = fds.get(k)
                 if fd is None:

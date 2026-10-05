@@ -82,6 +82,38 @@ def feature_subtype(props):
     return cls or sub
 
 
+# Schema of the search-features JSONL: 2 = features may carry
+# ``name_native`` (the name in its own script). Recorded beside the file
+# (``<path>.schema``) so a --search-cache made before can be recognised.
+SEARCH_SCHEMA = 2
+
+
+def mark_schema(features_path):
+    with open(str(features_path) + ".schema", "w") as f:
+        json.dump({"search_schema": SEARCH_SCHEMA}, f)
+
+
+def schema_of(features_path) -> int:
+    try:
+        with open(str(features_path) + ".schema") as f:
+            return int(json.load(f).get("search_schema", 1))
+    except (OSError, ValueError, AttributeError):
+        return 1
+
+
+def native_name(props, name):
+    """The feature's name in its own script when the search name ``name``
+    is another one (an English name:latin): OpenFreeMap tiles carry it as
+    ``name``, StreetZim's tilemaker tiles as ``name_int`` (written only
+    when OSM's name differs from name:latin). None when it is the same
+    name once folded, or shorter than two characters."""
+    from cloud.search_shards import norm
+    nat = (props.get("name") or props.get("name_int") or "").strip()
+    if len(nat) < 2 or norm(nat) == norm(name):
+        return None
+    return nat
+
+
 def search_record(name, feature_type, props, lat, lon):
     """The raw search-feature dict for one tile feature. When
     ``feature_subtype`` replaced a raw-key class by the subclass, the key
@@ -95,6 +127,9 @@ def search_record(name, feature_type, props, lat, lon):
     cls = props.get("class", "")
     if cls and subtype != cls and cls in RAW_OSM_KEY_CLASSES:
         rec["osm_key"] = cls
+    nat = native_name(props, name)
+    if nat:
+        rec["name_native"] = nat
     rec["lat"] = lat
     rec["lon"] = lon
     return rec
@@ -777,6 +812,7 @@ def _finish_features_streaming(raw_path, output_dir, n_unique):
         print(f"      {t}: {c}")
     size_mb = os.path.getsize(features_path) / (1024 * 1024)
     print(f"    Wrote {n_unique} features to disk ({size_mb:.0f} MB)", flush=True)
+    mark_schema(features_path)
     return features_path
 
 
@@ -1085,6 +1121,7 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
         import gc; gc.collect()
         size_mb = os.path.getsize(features_path) / (1024 * 1024)
         print(f"    Wrote {count} features to disk ({size_mb:.0f} MB)")
+        mark_schema(features_path)
         return features_path
 
     return features

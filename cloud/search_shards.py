@@ -285,16 +285,26 @@ def paths_for(prefix: str, name: str, depth: int,
     return _word_paths(prefix, name, depth, rule) or {(TERMINAL,)}
 
 
-def record_paths(prefix: str, record: Record, depth: int,
-                 rule: int = WORD_RULE) -> set[Path]:
-    """``paths_for`` over the record's name and its other names (``alt``,
-    which administrative areas carry and are indexed under too)."""
+def record_names(record: Record) -> list[str]:
+    """Every name a record is indexed and matched under: ``n``, the name in
+    its own script ``nn`` (when it differs: "北京大学" beside "Peking
+    University"), and an administrative area's other names ``alt``. The
+    viewers' recordNames is the same list (docs/search-records.md)."""
     names = [record.get("n") or ""]
+    nn = record.get("nn")
+    if isinstance(nn, str) and nn:
+        names.append(nn)
     alt = record.get("alt")
     if isinstance(alt, list):
         names += [a for a in alt if isinstance(a, str)]  # pyright: ignore[reportUnknownVariableType]
+    return names
+
+
+def record_paths(prefix: str, record: Record, depth: int,
+                 rule: int = WORD_RULE) -> set[Path]:
+    """``paths_for`` over every name of the record (``record_names``)."""
     paths: set[Path] = set()
-    for nm in names:
+    for nm in record_names(record):
         paths |= _word_paths(prefix, nm, depth, rule)
     return paths or {(TERMINAL,)}
 

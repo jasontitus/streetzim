@@ -175,3 +175,19 @@ ok('an area wins over the place record at its point (same name and point)', () =
   assert.deepStrictEqual(Object.keys(keys), ['Monaco|43.73235|7.42768']);
   assert.deepStrictEqual(V._szAdminKeys([place]), {});
 });
+
+// Native-script names (`nn`, docs/search-records.md): matched like the name.
+const PKU = { n: 'Peking University', nn: '北京大学', t: 'poi', s: 'university' };
+const BEIJING = { n: 'Beijing', nn: '北京市', t: 'admin', s: 'city', al: 4 };
+
+ok('a record answers to its native-script name', () => {
+  assert.ok(score(PKU, '北京大学') >= 0 && score(PKU, '北京') >= 0);
+  assert.ok(score(PKU, 'Peking') >= 0);
+  assert.ok(score(PKU, '上海') < 0);
+  assert.ok(score(PKU, '北京大学') > score(PKU, '北京'));     // exact beats prefix
+  assert.ok(V._szFormsContain(PKU, norm('北京'), norm));
+  assert.ok(!V._szFormsContain({ n: 'Peking University', t: 'poi' }, norm('北京'), norm));
+  assert.ok(score(BEIJING, '北京市') >= 0 && V._szFormsContain(BEIJING, norm('北京'), norm));
+  assert.ok(P.matchesName(PKU, '北京大学') && P.matchesName(BEIJING, '北京'));
+  assert.ok(!P.matchesName({ n: 'Peking University', t: 'poi' }, '北京'));
+});
