@@ -94,7 +94,11 @@
     if (originMarker) originMarker.remove();
     originMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-origin'), anchor: 'center' })
       .setLngLat([oLon, oLat]).addTo(map);
-    if (destNode !== -1) {
+    if (destNode !== -1 && destMoved && destPick) {
+      // The destination was moved for the old start: snap it again from
+      // the point picked, so the new route decides afresh where it ends.
+      setDestFromLatLon(destPick.lat, destPick.lon, destInput.value);
+    } else if (destNode !== -1) {
       computeAndDrawRoute();
     } else {
       statusEl.textContent = 'Enter destination';
@@ -125,7 +129,10 @@
     if (destMarker) destMarker.remove();
     destMarker = new maplibregl.Marker({ element: makeMarkerEl('routing-marker-dest'), anchor: 'center' })
       .setLngLat([dLon, dLat]).addTo(map);
-    if (originNode !== -1) {
+    if (originNode !== -1 && originMoved && originPick) {
+      // The start was moved for the old destination: snap it again.
+      setOriginFromLatLon(originPick.lat, originPick.lon, originInput.value);
+    } else if (originNode !== -1) {
       computeAndDrawRoute();
     } else {
       statusEl.textContent = 'Enter start location';
@@ -213,10 +220,7 @@
       var result;
       try {
         result = await findRoute(originNode, destNode, routeTravel,
-                                 // An end the router already moved is on the network: it is not
-                                 // re-snapped again (each move would loosen the distance rule).
-                                 { origin: originMoved ? null : originPick,
-                                   dest: destMoved ? null : destPick });
+                                 { origin: originPick, dest: destPick });
       } catch (err) {
         console.error('[streetzim] findRoute failed:', err);
         if (seq === routeSeq) {

@@ -1569,14 +1569,8 @@ async function resnapOutside(query, mode, travel, pocket, oldNode) {
   if (!query || typeof query.lat !== 'number' || typeof query.lon !== 'number') return null;
   var oc = await graph.nodeCoordsE7(oldNode);
   var d0 = haversine(query.lat, query.lon, oc[0] / 1e7, oc[1] / 1e7);
-  var alt;
-  try {
-    alt = await graph.snapNearestNode(Math.round(query.lat * 1e7), Math.round(query.lon * 1e7),
-                                      mode, travel, pocket);
-  } catch (e) {
-    if (e && e.message === 'no routing nodes') return null;   // all nearby excluded
-    throw e;
-  }
+  var alt = await graph.snapNearestNode(Math.round(query.lat * 1e7), Math.round(query.lon * 1e7),
+                                        mode, travel, pocket);
   if (!alt || pocket.has(alt.node)) return null;
   var d1 = haversine(query.lat, query.lon, alt.lat, alt.lon);
   return d1 <= d0 * 1.5 + RESNAP_EXTRA_M ? alt : null;
@@ -2112,12 +2106,10 @@ async function findRoute(startNode, endNode, ctx) {
       || !(opts.destQuery || opts.originQuery)) return r;
   var travel = travelMode(opts.travel);
   var movedEnd = null;
-  var origStart = startNode, origEnd = endNode, destPocket = null;
   if (opts.destQuery) {
     // The destination's own pocket, found again: ctx.pocket may be one
     // a two-pass leg found. The cells are resident from the search.
     var pocket = await destComponentClosed(startNode, endNode, ctx) ? ctx.pocket : null;
-    destPocket = pocket;
     var altEnd = pocket && await resnapPast(opts.destQuery, 'dest', travel, pocket, endNode,
       function(n) { return destComponentClosed(startNode, n, ctx).then(function(c) {
         return c ? ctx.pocket : null; }); });
@@ -2141,66 +2133,10 @@ async function findRoute(startNode, endNode, ctx) {
       if (r) {
         r.startMoved = altStart;
         if (movedEnd) r.endMoved = movedEnd;
-        return r;
       }
     }
   }
-  // Both ends in pockets. On a network smaller than DEST_COMPONENT_LIMIT
-  // (a small island's map) every candidate above looks sealed when checked
-  // against the other end's original, pocketed vertex, so both re-snaps
-  // reject the mainland. Move both ends together instead, and accept the
-  // pair when the new start reaches the new end.
-  if (!r && opts.destQuery && opts.originQuery && destPocket
-      && !(ctx.cancelled && ctx.cancelled())) {
-    var pair = await resnapBoth(opts, travel, origStart, origEnd, destPocket, ctx);
-    if (pair) {
-      debugStats(ctx, 'start and destination moved out of closed pockets', 0);
-      ctx.noTwoPass = true;
-      r = await findRouteCore(pair.start.node, pair.end.node, ctx);
-      if (r) { r.startMoved = pair.start; r.endMoved = pair.end; }
-    }
-  }
   return r;
-}
-
-// Both ends re-snapped outside the pockets: up to RESNAP_TRIES
-// candidates per end (each outside the components of the ones before it),
-// and the first pair that is joined by a component bigger than either
-// pocket ({start, end}), or null. Only a network small enough to map
-// whole (DEST_COMPONENT_LIMIT) qualifies: on a big one the one-end
-// re-snaps above have already tried, and a pair could not be proven
-// joined without a full search. "Bigger than either pocket" keeps a start
-// tapped on a road of its own from moving to another road of the same size.
-async function resnapBoth(opts, travel, startNode, endNode, destPocket, ctx) {
-  var sp = await startPocket(startNode, endNode, travel);
-  if (!sp) return null;
-  var excluded = new Set(destPocket);
-  sp.forEach(function(n) { excluded.add(n); });
-  var floor = Math.max(sp.size, destPocket.size);
-  var starts = await resnapCandidates(opts.originQuery, 'origin', travel, excluded, startNode);
-  var ends = await resnapCandidates(opts.destQuery, 'dest', travel, excluded, endNode);
-  for (var a = 0; a < starts.length; a++) {
-    if (ctx && ctx.cancelled && ctx.cancelled()) return null;
-    var comp = await startPocket(starts[a].node, -1, travel);   // null: too big to map
-    if (!comp || comp.size <= floor) continue;
-    for (var b = 0; b < ends.length; b++) {
-      if (comp.has(ends[b].node)) return { start: starts[a], end: ends[b] };
-    }
-  }
-  return null;
-}
-async function resnapCandidates(query, mode, travel, excluded, oldNode) {
-  var out = [];
-  var ex = new Set(excluded);
-  for (var k = 0; k < RESNAP_TRIES; k++) {
-    var alt = await resnapOutside(query, mode, travel, ex, oldNode);
-    if (!alt) break;
-    out.push(alt);
-    var comp = await startPocket(alt.node, -1, travel);   // null: the network
-    if (!comp) break;
-    comp.forEach(function(n) { ex.add(n); });
-  }
-  return out;
 }
 
 // resnapOutside repeatedly (RESNAP_TRIES): a re-snap that lands in

@@ -377,36 +377,6 @@ def test_a_pocket_entered_from_the_neighbouring_cell_is_not_sealed(tmp_path):
         assert not r.get("endMoved")
 
 
-def test_both_ends_in_pockets_on_a_small_network(tmp_path):
-    """Start and destination each on a cut-off stub (and another stub
-    beside the destination), with a network smaller than the pocket check's
-    limit: both ends move to the road together."""
-    _node()
-    from tests.szrg_reader import parse_szrg_bytes
-    from tests.szrg_spatial import build_spatial
-    from tests.test_routing_worker_v3 import _pack_v4_graph_cls
-    lat = 400_000_000
-    road = [(lat, -1_050_000_000 + i * 6_000) for i in range(120)]   # the network: biggest
-    stub_a = [(lat + 3_000, road[0][1] - 6_000 - (39 - i) * 6_000) for i in range(40)]
-    stub_b = [(lat + 3_000, road[-1][1] + 6_000 + i * 6_000) for i in range(40)]
-    # a second cut-off stub next to the destination, nearer it than the road
-    stub_c = [(lat + 5_500 + i * 600, road[-1][1] + 4_000) for i in range(40)]
-    edges = []
-    _chain(edges, 0, 120)
-    for base in (120, 160, 200):
-        _chain(edges, base, 40)
-    build_spatial(parse_szrg_bytes(_pack_v4_graph_cls(road + stub_a + stub_b + stub_c, edges)),
-                  cell_scale=10, output_dir=tmp_path / "routing-data")
-    ta = [(stub_a[-1][0] + 2_000) / 1e7, (stub_a[-1][1] + 1_000) / 1e7]
-    tb = [(stub_b[0][0] + 2_000) / 1e7, (stub_b[0][1] - 1_000) / 1e7]
-    opts = {"originQuery": {"lat": ta[0], "lon": ta[1]}, "destQuery": {"lat": tb[0], "lon": tb[1]}}
-    for travel in ("drive", "walk"):
-        (r,) = _run_opts(tmp_path, [ta + tb], [{"travel": travel, "options": opts}])
-        assert r["time"] is not None, (travel, r["phases"])
-        assert r["startMoved"]["lon"] == pytest.approx(road[0][1] / 1e7)
-        assert r["endMoved"]["lon"] == pytest.approx(road[-1][1] / 1e7)
-
-
 def test_a_moved_end_does_not_run_two_pass(tmp_path):
     """The retry after a re-snap must not fall back to the two-pass
     highway search when it runs out of budget: it is a guess already, and
@@ -430,21 +400,21 @@ def test_a_moved_end_does_not_run_two_pass(tmp_path):
     assert any("highway" in p["label"] for p in plain["phases"]), plain["phases"]
 
 
-def test_a_start_on_a_road_of_its_own_is_not_moved(tmp_path):
+@pytest.mark.parametrize("c_len", [80, 81, 200])
+def test_a_start_on_a_road_of_its_own_is_not_moved(tmp_path, c_len):
     """Start tapped on road M, destination on an island past the end of a
-    separate road C as big as M: a small network where every road looks
-    sealed. Moving both ends onto C would route between two points the
-    user did not pick; it stays no route."""
+    separate road C: moving both ends onto C would route between two points
+    the user did not pick; it stays no route."""
     _node()
     from tests.szrg_reader import parse_szrg_bytes
     from tests.szrg_spatial import build_spatial
     from tests.test_routing_worker_v3 import _pack_v4_graph_cls
     lat = 400_000_000
     m = [(lat, -1_050_000_000 + i * 6_000) for i in range(80)]
-    c = [(lat + 18_000, m[40][1] + i * 6_000) for i in range(80)]     # 200 m north of M
+    c = [(lat + 18_000, m[40][1] + i * 6_000) for i in range(c_len)]  # 200 m north of M
     b = [(lat, c[-1][1] + 40_000 + i * 6_000) for i in range(20)]     # island past C's end
     edges = []
-    for base, n in ((0, 80), (80, 80), (160, 20)):
+    for base, n in ((0, 80), (80, c_len), (80 + c_len, 20)):
         _chain(edges, base, n)
     build_spatial(parse_szrg_bytes(_pack_v4_graph_cls(m + c + b, edges)),
                   cell_scale=10, output_dir=tmp_path / "routing-data")
