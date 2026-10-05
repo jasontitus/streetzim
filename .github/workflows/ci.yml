@@ -458,7 +458,7 @@ jobs:
           python -c "import sys; from libzim.reader import Archive; sys.exit(0 if Archive('osm-monaco-repack.zim').has_title_index else 'repackage lost the title index')"
           cp osm-monaco-ci.zim osm-monaco-patched.zim
           mkdir -p /tmp/viewer && cp resources/viewer/{index.html,places.html,routing-worker.js} /tmp/viewer/
-          sed -i 's/<title>/<title>ci-patch /' /tmp/viewer/index.html
+          sed -i 's/<title\([^>]*\)>/<title\1>ci-patch /' /tmp/viewer/index.html
           python cloud/patch_viewer_inplace.py osm-monaco-patched.zim --viewer-dir /tmp/viewer
           zimcheck -A osm-monaco-patched.zim
           python -c "import sys; from libzim.reader import Archive; a = Archive('osm-monaco-patched.zim'); b = bytes(a.get_entry_by_path('index.html').get_item().content); sys.exit(0 if a.check() and b'ci-patch' in b else 'in-place patch not applied or checksum wrong')"
