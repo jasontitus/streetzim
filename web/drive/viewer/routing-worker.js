@@ -96,7 +96,14 @@ var POP_LIMIT_FULL_GREEDY = 500000;
 // pairs of 40-55 km bailed every 500k pass (San Jose -> Pescadero, 101
 // km by bike, needs 500k-1M even optimal). Walking's tight 5 km/h
 // heuristic keeps it far below (a 30 km walk: ~250k pops).
-var POP_LIMIT_WB_GREEDY = 1000000;
+var POP_LIMIT_WB_GREEDY = 1500000;
+// And room for the exact pass to finish: San Jose -> Pescadero by bike
+// (100 km) needs 677k pops; at the car's 500k it bailed into the weighted
+// and greedy passes (1.45M pops, 1.8 s, a route 2.5 % slower). With 1.2M
+// it is exact in 1.2 s. Worst case ~1.5M pops is ~140 MB of search state,
+// reached only on long rides (a 30 km ride: ~160k pops).
+var POP_LIMIT_WB_OPTIMAL = 1200000;
+var POP_LIMIT_WB_WEIGHTED = 1000000;
 var POP_LIMIT_HW_OPTIMAL = 150000;
 var POP_LIMIT_HW_GREEDY = 300000;
 // Unreachable-destination short-circuit (see destComponentClosed):
@@ -1375,10 +1382,12 @@ async function findRouteSpatialFiltered(startNode, endNode, highwayOnly, ctx) {
   // hwOptimal, hwGreedy} shrinks the budgets so a unit-test-sized graph
   // can exercise the bail → weighted → greedy chain.
   var lim = (ctx && ctx.options && ctx.options.popLimits) || {};
-  var limOptimal  = highwayOnly ? (lim.hwOptimal || POP_LIMIT_HW_OPTIMAL)
-                                : (lim.fullOptimal || POP_LIMIT_FULL_OPTIMAL);
-  var limWeighted = lim.fullWeighted || POP_LIMIT_FULL_WEIGHTED;
   var wbTravel = travelMode(ctx && ctx.options && ctx.options.travel) !== 'drive';
+  var limOptimal  = highwayOnly ? (lim.hwOptimal || POP_LIMIT_HW_OPTIMAL)
+                                : (lim.fullOptimal
+                                   || (wbTravel ? POP_LIMIT_WB_OPTIMAL : POP_LIMIT_FULL_OPTIMAL));
+  var limWeighted = lim.fullWeighted
+                    || (wbTravel ? POP_LIMIT_WB_WEIGHTED : POP_LIMIT_FULL_WEIGHTED);
   var limGreedy   = highwayOnly ? (lim.hwGreedy || POP_LIMIT_HW_GREEDY)
                                 : (lim.fullGreedy
                                    || (wbTravel ? POP_LIMIT_WB_GREEDY : POP_LIMIT_FULL_GREEDY));
