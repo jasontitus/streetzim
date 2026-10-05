@@ -125,3 +125,63 @@ def test_route_cli_highway_seed_needs_a_drivable_highway_edge():
     g = _G(nodes, [_contra(0, 1, 500, TRUNK), (2, 1, 500, 60, NONE, 0, PRIMARY)])
     node, _ = nearest_node_filtered(g, nodes[0][0] / 1e7, nodes[0][1] / 1e7, highway_only=True)
     assert node == 2
+
+
+def _node_at(sg, coord):
+    """build_spatial renumbers nodes cell by cell: find one by position."""
+    for n in range(sg.num_nodes):
+        if tuple(sg.node_coords_e7(n)) == coord:
+            return n
+    raise AssertionError(f"no node at {coord}")
+
+
+@pytest.mark.parametrize("contraflow", [False, True])
+def test_a_reachable_one_way_end_stays_the_destination(tmp_path, contraflow):
+    """The one-way A0 -> ... -> A5 is entered from a 40-node two-way road
+    about 100 m south, so the snapper's reach rule applies: A5 can reach
+    nothing (a sink) and is kept only as an 'edgeless' destination that
+    can be driven into. Its walk/bike records must not stop it counting
+    as edgeless, or the destination jumps to the parallel road."""
+    _node_js()
+    lat, lon0, step = 400_000_000, -1_050_000_000, 6_000
+    one_way = [(lat, lon0 + i * step) for i in range(6)]
+    road = [(lat - 9_000, lon0 - 20 * step + i * step) for i in range(40)]
+    nodes = one_way + road
+    A, R = 0, 6
+    edges = [(A + i, A + i + 1, 500, 30, NONE, 0, RES) for i in range(5)]
+    for i in range(39):
+        edges += [(R + i, R + i + 1, 500, 50, NONE, 0, RES),
+                  (R + i + 1, R + i, 500, 50, NONE, 0, RES)]
+    edges.append((R + 20, A, 1000, 30, NONE, 0, RES))       # into the one-way
+    if contraflow:
+        edges = [_contra(A + i + 1, A + i, 500, RES) for i in range(5)] + edges
+    rd = _build(tmp_path, nodes, edges)
+    sg = _spatial_graph_from_dir(rd)
+    a5 = _node_at(sg, one_way[5])
+    q = (one_way[5][0] + 400, one_way[5][1])                # 4 m north of A5
+    assert sg.nearest_node(q[0], q[1], mode="dest") == a5
+    out = _run_worker(tmp_path, [[road[0][0] / 1e7, road[0][1] / 1e7,
+                                  q[0] / 1e7, q[1] / 1e7]],
+                      [{"modeA": "origin", "modeB": "dest"}])[0]
+    assert out["end"] == a5 and out["ok"] and out["time"] is not None
+
+
+def test_route_cli_highway_seed_skips_a_no_motor_highway_edge():
+    """A trunk tagged motor_vehicle=no (bit 9, real speed) cannot start the
+    highway leg either; the nearest drivable highway node is taken."""
+    from cloud.route_cli import nearest_node_filtered
+    nodes = _line(3)
+    g = _G(nodes, [(0, 1, 500, 80, NONE, 0, TRUNK | NO_MOTOR),
+                   (2, 1, 500, 60, NONE, 0, PRIMARY)])
+    node, _ = nearest_node_filtered(g, nodes[0][0] / 1e7, nodes[0][1] / 1e7, highway_only=True)
+    assert node == 2
+
+
+@pytest.mark.parametrize("record", ["no-motor", "speed-0"])
+def test_route_cli_measures_past_each_kind_of_non_car_edge(record):
+    from cloud.route_cli import measure_path
+    other = ((0, 1, 9_000, 5, NONE, 0, RES | NO_MOTOR) if record == "no-motor"
+             else (0, 1, 9_000, 0, NONE, 0, RES))
+    g = _G(_line(2), [other, (0, 1, 500, 30, NONE, 0, RES)])
+    dist, time = measure_path(g, [0, 1])
+    assert dist == 50.0 and abs(time - 50.0 / (30 / 3.6)) < 1e-9
