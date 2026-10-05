@@ -246,6 +246,7 @@
         console.error('[streetzim] findRoute failed:', err);
         if (seq === routeSeq) {
           stopRouteProgressIndicator();
+          placeEndMarkers();
           statusEl.textContent = 'Routing failed';
         }
         return;
@@ -255,7 +256,9 @@
       if (result && result._cancelled) {
         // Cancelled by the user (field focus) with no newer route yet:
         // leave the map as it was. Used to fall into the "No route
-        // found" branch and erase the drawn route.
+        // found" branch and erase the drawn route. The markers still go
+        // where the ends now are (an end put back on its own snap).
+        placeEndMarkers();
         return;
       }
       if (result) {

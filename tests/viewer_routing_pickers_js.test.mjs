@@ -163,6 +163,24 @@ await ok('a new destination pick is not "moved" unless its route moves it', asyn
   await route(e, {});
   assert.deepStrictEqual([a.state.status, a.state.destMoved, a.state.dMarker], ['', false, [5, 5]]);
 });
+await ok('a moved start goes back to its snap when a new destination is picked', async () => {
+  const e = make(); const a = e.api;
+  a.setOriginFromLatLon(1, 1, 'O'); await snap(e, 'origin', 10);
+  a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20);
+  await route(e, { startMoved: { node: 11, lat: 1.1, lon: 1.1 } });
+  assert.strictEqual(a.state.status, MOVED_O);
+  a.setDestFromLatLon(4, 4, 'D2'); await snap(e, 'dest', 40);
+  assert.deepStrictEqual([e.routes[0].o, e.routes[0].d], [10, 40]);
+  await route(e, {});
+  assert.deepStrictEqual([a.state.status, a.state.originMoved, a.state.oMarker], ['', false, [1, 1]]);
+});
+await ok('a failed route after a new start: markers where the ends now are', async () => {
+  const e = await movedDest(); const a = e.api;
+  a.setOriginFromLatLon(3, 3, 'O2'); await snap(e, 'origin', 30);
+  e.routes.shift().rej(new Error('boom')); await settle();
+  assert.strictEqual(a.state.status, 'Routing failed');
+  assert.deepStrictEqual([a.state.destNode, a.state.dMarker], [20, [2, 2]]);
+});
 await ok('clear forgets moved ends', async () => {
   const e = await movedDest(); const a = e.api;
   a.clearRoute();
