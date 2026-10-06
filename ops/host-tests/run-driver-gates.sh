@@ -23,11 +23,14 @@ checks = {
     "chip touch-act":  b"touch-action: pan-x;" in idx,
     "popup gap":       b"_szPopupGap" in idx,
     "no diag panel":   b"sz-chip-diag" not in idx and b"sz-safearea-diag" not in idx,
-    # Every shipped region carries a Wikipedia geo-index. The build-region.sh
-    # builds did not, and it took the browser gate -- after hours of building
-    # -- to notice. One lookup here catches it in a second.
-    "wiki geo-index":  a.has_entry_by_path("wiki-geo-index.json") and len(
-        bytes(a.get_entry_by_path("wiki-geo-index.json").get_item().content)) > 2,
+    # Every shipped region with Wikipedia articles carries a Wikipedia
+    # geo-index. The build-region.sh builds did not, and it took the browser
+    # gate -- after hours of building -- to notice. One lookup here catches it
+    # in a second. A build without articles says so (hasWikiArticles false).
+    "wiki geo-index":  __import__("json").loads(bytes(a.get_entry_by_path(
+        "map-config.json").get_item().content)).get("hasWikiArticles") is False
+        or (a.has_entry_by_path("wiki-geo-index.json") and len(
+        bytes(a.get_entry_by_path("wiki-geo-index.json").get_item().content)) > 2),
     # create_osm_zim.py pads the viewer into fixed uncompressed slots as of
     # 2026-09-21. Without them a region is born owing a full re-pack at the
     # next viewer change, so fail the build rather than discover it later.
