@@ -387,8 +387,12 @@ def add_profile_arguments(p: argparse.ArgumentParser) -> None:
                            "Downloaded for every task: a full English one is 50 to "
                            "120 GB. Default: none (the API, text only)")
     prof.add_argument("--wikipedia-images", choices=WIKIPEDIA_IMAGES, default="all",
-                      help="With --wikipedia-zim-url: the articles' images to store "
-                           "(lead: the first picture). Default: all")
+                      help="With --wikipedia-zim-url: which of each article's images "
+                           "to store. none: text only; lead: the first picture "
+                           "(the infobox or top image, about 10 KB an article); all: "
+                           "every picture up to 12 an article (about 35 KB an article: "
+                           "German Switzerland, 25,800 articles, stores 884 MB of "
+                           "images, a quarter of the ZIM). Default: all")
     prof.add_argument("--overture-release", default="latest",
                       help="Overture release, e.g. 2026-09-23.1. Default: latest "
                            "(the newest complete release)")

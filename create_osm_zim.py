@@ -677,7 +677,9 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "images (Kiwix maxi thumbnails, stored once at "
                              "wiki-image/<sha1>.<ext>). 'lead' = the infobox/first "
                              "picture only (~12 KB/article on California), 'all' = "
-                             "every non-icon image (~107 KB/article, median 3).")
+                             "every non-icon image up to --wiki-images-per-article "
+                             "(~107 KB/article on California, median 3; 884 MB, a "
+                             "quarter of the ZIM, on German Switzerland). Default: none.")
     parser.add_argument("--wiki-image-max-kb", type=int, default=128,
                         help="Skip any single bundled image larger than this.")
     parser.add_argument("--wiki-images-per-article", type=int, default=12,

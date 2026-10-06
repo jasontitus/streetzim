@@ -354,8 +354,12 @@ long-tail places a map links to. So **the default is the API**
 (`action=parse`, one request per article, cached in `--dl` for the task),
 which gives the article text but no images. `--wikipedia-zim-url` takes
 any of the ZIMs above (or a `file://` URL on a worker that has one) and
-then also bundles images (`--wikipedia-images`, default `all`, as
-production), for workers with the disk to spare.
+then also bundles images, for workers with the disk to spare.
+`--wikipedia-images` chooses which: `none` (text only), `lead` (the
+first picture, about 10 KB an article) or `all` (up to 12 an article,
+about 35 KB an article; the default, as production). On German
+Switzerland (25,800 articles) `all` is 884 MB of images, a quarter of
+the ZIM; `lead` would be about a quarter of that.
 
 The API is rate limited. `cloud/wikimedia_http.py` honours `Retry-After`
 within a wait budget and never caches a 429 as a missing article; an

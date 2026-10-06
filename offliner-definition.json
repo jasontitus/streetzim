@@ -309,7 +309,7 @@
       "type": "string-enum",
       "required": false,
       "title": "Wikipedia images",
-      "description": "With --wikipedia-zim-url: the articles' images to store (lead: the first picture). Default: all",
+      "description": "With --wikipedia-zim-url: which of each article's images to store. none: text only; lead: the first picture (the infobox or top image, about 10 KB an article); all: every picture up to 12 an article (about 35 KB an article: German Switzerland, 25,800 articles, stores 884 MB of images, a quarter of the ZIM). Default: all",
       "choices": [
         "none",
         "lead",
