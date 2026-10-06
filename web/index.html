@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>StreetZim — Offline Maps for Kiwix</title>
 <meta name="description" content="Free, fully offline OpenStreetMap maps for the Kiwix reader. Vector tiles, satellite imagery, 3D terrain, and Wikipedia info — works without an internet connection on iOS, Android, Mac, Windows, and Linux.">
+<link rel="alternate" hreflang="en" href="https://streetzim.web.app/">
+<link rel="alternate" hreflang="de" href="https://streetzim.web.app/de/">
 <!-- Firebase Analytics — only on the public marketing landing page.
      Removed from the /drive/ PWA so the maintainer's debugging
      sessions don't fire tracking events. -->
@@ -68,6 +70,21 @@
     padding: 40px 0 28px;
     border-bottom: 1px solid var(--border);
     background: linear-gradient(180deg, rgba(59,130,246,0.08) 0%, rgba(11,18,32,0) 100%);
+  }
+  /* Language picker: top right of the header, one link per page language. */
+  .lang-picker {
+    display: flex; justify-content: flex-end; gap: 4px;
+    margin: -16px 0 12px; font-size: 13px;
+  }
+  .lang-picker a {
+    padding: 3px 10px; border-radius: 999px;
+    color: var(--text-dim); text-decoration: none;
+    border: 1px solid transparent;
+  }
+  .lang-picker a:hover { color: var(--accent-hover); border-color: rgba(59,130,246,0.35); }
+  .lang-picker a[aria-current="page"] {
+    color: var(--accent-hover); background: rgba(59,130,246,0.12);
+    border-color: rgba(59,130,246,0.25);
   }
   h1 {
     font-size: 38px; font-weight: 700; letter-spacing: -0.02em;
@@ -400,6 +417,7 @@
 
 <header>
   <div class="container">
+    <nav class="lang-picker" aria-label="Language / Sprache"><a href="/" hreflang="en" lang="en" aria-current="page">English</a><a href="/de/" hreflang="de" lang="de">Deutsch</a></nav>
     <h1>Street<span class="accent">Zim</span></h1>
     <p class="tagline">Fully offline OpenStreetMap maps for the Kiwix reader. Vector tiles, satellite imagery, 3D terrain, and Wikipedia &mdash; no internet connection required.</p>
     <div class="badges">
@@ -425,7 +443,7 @@
       <span class="map-badge badge-satellite">Satellite</span> Sentinel-2 imagery,
       <span class="map-badge badge-wiki">Wikipedia links</span> Wikidata cross-refs.
     </p>
-    <p class="updated">Last updated: 2026-09-29 04:52 UTC · build <span id="build-stamp">…</span></p>
+    <p class="updated">Last updated: 2026-10-06 16:45 UTC · build <span id="build-stamp">…</span></p>
 <script>
 fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
   .then(function(r) { return r.ok ? r.text() : ''; })
@@ -509,14 +527,14 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">China</div>
-          <div class="map-card-size">19.3 GB</div>
+          <div class="map-card-size">19.8 GB</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <div class="map-card-date">Updated <time datetime="2026-10-03">3 Oct 2026</time></div>
         <p class="map-card-desc">China &mdash; Beijing, Shanghai, Guangzhou, Shenzhen, Chengdu, Chongqing, Xi&rsquo;an, Wuhan, Hangzhou, Hong Kong, and Macau, plus the Great Wall, the Yangtze, the Tibetan Plateau, and the Gobi.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-china/osm-china-2026-09-20.zim" data-track="download" data-region="china" data-title="China">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-china/osm-china-2026-09-20.zim" data-track="preview" data-region="china" data-title="China" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-china/osm-china-2026-10-03.zim" data-track="download" data-region="china" data-title="China">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-china/osm-china-2026-10-03.zim" data-track="preview" data-region="china" data-title="China" title="Look at this map in your browser, streamed from archive.org">Preview</a>
           <a class="btn btn-secondary" href="/torrents/china.torrent" data-track="torrent" data-region="china" data-title="China">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-china" data-track="details" data-region="china" data-title="China">Info</a>
         </div>
@@ -539,14 +557,14 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Indian Subcontinent</div>
-          <div class="map-card-size">12.2 GB</div>
+          <div class="map-card-size">12.3 GB</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <div class="map-card-date">Updated <time datetime="2026-10-02">2 Oct 2026</time></div>
         <p class="map-card-desc">India, Pakistan, Bangladesh, Sri Lanka, Nepal, Bhutan, and the Maldives.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-indian-subcontinent/osm-indian-subcontinent-2026-09-20.zim" data-track="download" data-region="indian-subcontinent" data-title="Indian Subcontinent">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-indian-subcontinent/osm-indian-subcontinent-2026-09-20.zim" data-track="preview" data-region="indian-subcontinent" data-title="Indian Subcontinent" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-indian-subcontinent/osm-indian-subcontinent-2026-10-02.zim" data-track="download" data-region="indian-subcontinent" data-title="Indian Subcontinent">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-indian-subcontinent/osm-indian-subcontinent-2026-10-02.zim" data-track="preview" data-region="indian-subcontinent" data-title="Indian Subcontinent" title="Look at this map in your browser, streamed from archive.org">Preview</a>
           <a class="btn btn-secondary" href="/torrents/indian-subcontinent.torrent" data-track="torrent" data-region="indian-subcontinent" data-title="Indian Subcontinent">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-indian-subcontinent" data-track="details" data-region="indian-subcontinent" data-title="Indian Subcontinent">Info</a>
         </div>
@@ -584,14 +602,14 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Southeast Asia</div>
-          <div class="map-card-size">9.8 GB</div>
+          <div class="map-card-size">9.6 GB</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <div class="map-card-date">Updated <time datetime="2026-10-02">2 Oct 2026</time></div>
         <p class="map-card-desc">Thailand, Vietnam, Myanmar, Cambodia, Laos, Malaysia, Singapore, Indonesia, the Philippines, Brunei, and Timor-Leste &mdash; Bangkok, Hanoi, Ho Chi Minh City, Yangon, Kuala Lumpur, Jakarta, Manila, Bali, Borneo, the Mekong Delta, and the South China Sea.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-southeast-asia/osm-southeast-asia-2026-09-20.zim" data-track="download" data-region="southeast-asia" data-title="Southeast Asia">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-southeast-asia/osm-southeast-asia-2026-09-20.zim" data-track="preview" data-region="southeast-asia" data-title="Southeast Asia" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-southeast-asia/osm-southeast-asia-2026-10-02.zim" data-track="download" data-region="southeast-asia" data-title="Southeast Asia">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-southeast-asia/osm-southeast-asia-2026-10-02.zim" data-track="preview" data-region="southeast-asia" data-title="Southeast Asia" title="Look at this map in your browser, streamed from archive.org">Preview</a>
           <a class="btn btn-secondary" href="/torrents/southeast-asia.torrent" data-track="torrent" data-region="southeast-asia" data-title="Southeast Asia">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-southeast-asia" data-track="details" data-region="southeast-asia" data-title="Southeast Asia">Info</a>
         </div>
@@ -772,14 +790,14 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Himalayas</div>
-          <div class="map-card-size">5.0 GB</div>
+          <div class="map-card-size">4.8 GB</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-27">27 Sep 2026</time></div>
+        <div class="map-card-date">Updated <time datetime="2026-10-02">2 Oct 2026</time></div>
         <p class="map-card-desc">The Himalayas, Karakoram, Hindu Kush, and Pamir &mdash; Nepal, Bhutan, Tibet, Sikkim, Ladakh, Kashmir, the Indus and Brahmaputra valleys. Kathmandu, Pokhara, Lhasa, Thimphu, Leh, Hunza, Everest, K2, Kanchenjunga, and Annapurna.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-himalayas/osm-himalayas-2026-09-27.zim" data-track="download" data-region="himalayas" data-title="Himalayas">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-himalayas/osm-himalayas-2026-09-27.zim" data-track="preview" data-region="himalayas" data-title="Himalayas" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-himalayas/osm-himalayas-2026-10-02.zim" data-track="download" data-region="himalayas" data-title="Himalayas">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-himalayas/osm-himalayas-2026-10-02.zim" data-track="preview" data-region="himalayas" data-title="Himalayas" title="Look at this map in your browser, streamed from archive.org">Preview</a>
           <a class="btn btn-secondary" href="/torrents/himalayas.torrent" data-track="torrent" data-region="himalayas" data-title="Himalayas">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-himalayas" data-track="details" data-region="himalayas" data-title="Himalayas">Info</a>
         </div>
@@ -1201,14 +1219,14 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">East Coast US</div>
-          <div class="map-card-size">10.5 GB</div>
+          <div class="map-card-size">10.4 GB</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-20">20 Sep 2026</time></div>
+        <div class="map-card-date">Updated <time datetime="2026-09-29">29 Sep 2026</time></div>
         <p class="map-card-desc">U.S. East Coast from Maine to Florida &mdash; New York, Boston, Philadelphia, Washington D.C., Atlanta, Miami, and the entire Eastern Seaboard.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-east-coast-us/osm-east-coast-us-2026-09-20.zim" data-track="download" data-region="east-coast-us" data-title="East Coast US">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-east-coast-us/osm-east-coast-us-2026-09-20.zim" data-track="preview" data-region="east-coast-us" data-title="East Coast US" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-east-coast-us/osm-east-coast-us-2026-09-29.zim" data-track="download" data-region="east-coast-us" data-title="East Coast US">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-east-coast-us/osm-east-coast-us-2026-09-29.zim" data-track="preview" data-region="east-coast-us" data-title="East Coast US" title="Look at this map in your browser, streamed from archive.org">Preview</a>
           <a class="btn btn-secondary" href="/torrents/east-coast-us.torrent" data-track="torrent" data-region="east-coast-us" data-title="East Coast US">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-east-coast-us" data-track="details" data-region="east-coast-us" data-title="East Coast US">Info</a>
         </div>
@@ -1397,15 +1415,14 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">Silicon Valley</div>
-          <div class="map-card-size">276 MB</div>
+          <div class="map-card-size">202 MB</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-09-26">26 Sep 2026</time></div>
+        <div class="map-card-date">Updated <time datetime="2026-10-05">5 Oct 2026</time></div>
         <p class="map-card-desc">San Francisco Bay Area &mdash; San Francisco, Oakland, Palo Alto, Mountain View, Stanford, Cupertino, San Jose, and the Peninsula.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/streetzim-silicon-valley/osm-silicon-valley-2026-09-26.zim" data-track="download" data-region="silicon-valley" data-title="Silicon Valley">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-silicon-valley/osm-silicon-valley-2026-09-26.zim" data-track="preview" data-region="silicon-valley" data-title="Silicon Valley" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/silicon-valley.torrent" data-track="torrent" data-region="silicon-valley" data-title="Silicon Valley">Torrent</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-silicon-valley/osm-silicon-valley-2026-10-05.zim" data-track="download" data-region="silicon-valley" data-title="Silicon Valley">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-silicon-valley/osm-silicon-valley-2026-10-05.zim" data-track="preview" data-region="silicon-valley" data-title="Silicon Valley" title="Look at this map in your browser, streamed from archive.org">Preview</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-silicon-valley" data-track="details" data-region="silicon-valley" data-title="Silicon Valley">Info</a>
         </div>
       </div>

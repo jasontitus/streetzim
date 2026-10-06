@@ -42,6 +42,130 @@ TIERS = [
 ]
 
 
+# Page languages: (code, name in that language, path under web/). A region
+# with "language" set is listed on that language's page only (default "en").
+# The German page is the English template with PAGE_TEXT's replacements, so
+# a template edit that drops one of their English strings stops the build
+# (rather than leaving English on the German page).
+LANGUAGES = [("en", "English", ""), ("de", "Deutsch", "de/")]
+SITE_URL = "https://streetzim.web.app/"
+
+TIER_LABELS = {
+    "de": {
+        "continent": "Kontinente & Großregionen",
+        "multi-country": "Mehrere Länder",
+        "country": "Einzelne Länder",
+        "us-region": "Vereinigte Staaten — Teilregionen",
+        "local": "Bundesstaaten, Städte & Inseln",
+    },
+}
+
+CARD_TEXT = {
+    "en": {"download": "Download", "preview": "Preview", "info": "Info",
+           "updated": "Updated", "building": "building",
+           "preview_title": "Look at this map in your browser, streamed from archive.org"},
+    "de": {"download": "Herunterladen", "preview": "Vorschau", "info": "Info",
+           "updated": "Stand", "building": "in Arbeit",
+           "preview_title": "Diese Karte im Browser ansehen, direkt von archive.org"},
+}
+
+BADGE_LABELS = {
+    "de": {"nav": "Routen & Navigation", "overture": "Ortsdetails",
+           "terrain": "3D-Gelände", "satellite": "Satellitenbilder", "wiki": "Wikipedia-Links"},
+}
+
+DE_MONTHS = ["Jan.", "Feb.", "März", "Apr.", "Mai", "Juni", "Juli", "Aug.",
+             "Sept.", "Okt.", "Nov.", "Dez."]
+
+# English template string -> German. Each must occur exactly once.
+PAGE_TEXT = {
+    "de": [
+        ('<html lang="en">', '<html lang="de">'),
+        ("<title>StreetZim — Offline Maps for Kiwix</title>",
+         "<title>StreetZim — Offline-Karten für Kiwix</title>"),
+        ('content="Free, fully offline OpenStreetMap maps for the Kiwix reader. Vector tiles, satellite imagery, 3D terrain, and Wikipedia info — works without an internet connection on iOS, Android, Mac, Windows, and Linux."',
+         'content="Kostenlose, vollständig offline nutzbare OpenStreetMap-Karten für Kiwix. Vektorkarten, Satellitenbilder, 3D-Gelände und Wikipedia — ohne Internetverbindung auf iOS, Android, Mac, Windows und Linux."'),
+        ("Fully offline OpenStreetMap maps for the Kiwix reader. Vector tiles, satellite imagery, 3D terrain, and Wikipedia &mdash; no internet connection required.",
+         "Vollständig offline nutzbare OpenStreetMap-Karten für Kiwix. Vektorkarten, Satellitenbilder, 3D-Gelände und Wikipedia &mdash; ganz ohne Internetverbindung."),
+        ('<span class="badge">Free &amp; Open Source</span>', '<span class="badge">Kostenlos &amp; Open Source</span>'),
+        ("<h2>Download a map</h2>", "<h2>Karte herunterladen</h2>"),
+        ('<p>Pick a region below, install <a href="https://kiwix.org" target="_blank" rel="noopener">Kiwix</a>, and open the .zim file. Hosted on the Internet Archive — each download includes a torrent.</p>',
+         '<p>Wählen Sie unten eine Region, installieren Sie <a href="https://kiwix.org" target="_blank" rel="noopener">Kiwix</a> und öffnen Sie die .zim-Datei. Die Karten liegen beim Internet Archive. Auf Deutsch gibt es bisher nur diese Karte; alle anderen Regionen finden Sie auf der <a href="/">englischen Seite</a>.</p>'),
+        ("Badges on each card show what's inside:", "Die Symbole bei jedem Eintrag zeigen, was enthalten ist:"),
+        ('<span class="map-badge badge-nav">Routing &amp; Directions</span> offline turn-by-turn,',
+         '<span class="map-badge badge-nav">Routen &amp; Navigation</span> Routen zu Fuß, mit dem Rad und dem Auto, offline,'),
+        ('<span class="map-badge badge-overture">Rich place info</span> websites, phones &amp; socials from Overture,',
+         '<span class="map-badge badge-overture">Ortsdetails</span> Websites und Telefonnummern aus Overture,'),
+        ('<span class="map-badge badge-terrain">3D Terrain</span> Copernicus elevation,',
+         '<span class="map-badge badge-terrain">3D-Gelände</span> Höhendaten von Copernicus,'),
+        ('<span class="map-badge badge-satellite">Satellite</span> Sentinel-2 imagery,',
+         '<span class="map-badge badge-satellite">Satellitenbilder</span> von Sentinel-2,'),
+        ('<span class="map-badge badge-wiki">Wikipedia links</span> Wikidata cross-refs.',
+         '<span class="map-badge badge-wiki">Wikipedia-Links</span> Artikel und Wikidata-Fakten.'),
+        ("Last updated: {{UPDATED}} · build", "Zuletzt aktualisiert: {{UPDATED}} · Build"),
+        ('placeholder="Filter maps — try “france”, “alps”, “coast”…"', 'placeholder="Karten filtern — z. B. „Alpen“, „Genf“…"'),
+        ('aria-label="Filter the list of maps"', 'aria-label="Kartenliste filtern"'),
+        ("(shown + ' of ' + total)", "(shown + ' von ' + total)"),
+        ("<h2>What is it?</h2>", "<h2>Was ist StreetZim?</h2>"),
+        ('<p class="lead">StreetZim packages OpenStreetMap data &mdash; entire countries or continents &mdash; into a single ZIM file you can open in <a href="https://kiwix.org" target="_blank" rel="noopener">Kiwix</a>. It works completely offline: no servers, no API calls, no internet required after the initial download.</p>',
+         '<p class="lead">StreetZim packt OpenStreetMap-Daten &mdash; ganze Länder oder Kontinente &mdash; in eine einzige ZIM-Datei, die Sie in <a href="https://kiwix.org" target="_blank" rel="noopener">Kiwix</a> öffnen. Alles funktioniert offline: keine Server, keine Online-Abfragen, nach dem Herunterladen kein Internet nötig.</p>'),
+        ("<p>Unlike traditional offline map apps that ship raster tiles, StreetZim uses <strong>vector tiles rendered client-side</strong> with MapLibre GL JS. The result: smooth pan, zoom, rotation, and even 3D terrain &mdash; all from a single file on your device.</p>",
+         "<p>Anders als Offline-Karten-Apps mit Rasterkacheln nutzt StreetZim <strong>Vektorkacheln, die direkt auf dem Gerät gezeichnet werden</strong> (MapLibre GL JS). Das Ergebnis: flüssiges Verschieben, Zoomen, Drehen und sogar 3D-Gelände &mdash; alles aus einer Datei auf Ihrem Gerät.</p>"),
+        ("<h4>Vector Maps</h4>", "<h4>Vektorkarten</h4>"),
+        ("<p>Smooth, sharp street-level maps with the OpenMapTiles schema, rendered live by MapLibre.</p>",
+         "<p>Scharfe Karten bis auf Straßenebene im OpenMapTiles-Schema, live gezeichnet von MapLibre.</p>"),
+        ("<h4>Satellite Imagery</h4>", "<h4>Satellitenbilder</h4>"),
+        ("<p>10-meter resolution Sentinel-2 cloudless imagery for the entire mapped region.</p>",
+         "<p>Wolkenfreie Sentinel-2-Bilder mit 10 Metern Auflösung für die ganze Region.</p>"),
+        ("<h4>3D Terrain</h4>", "<h4>3D-Gelände</h4>"),
+        ("<p>Hillshade and 3D elevation from the Copernicus GLO-30 global DEM.</p>",
+         "<p>Schummerung und 3D-Höhen aus dem Copernicus-Höhenmodell GLO-30.</p>"),
+        ("<p>Tap any city, mountain, or landmark for its Wikipedia article and key facts.</p>",
+         "<p>Tippen Sie auf eine Stadt, einen Berg oder eine Sehenswürdigkeit, um den Wikipedia-Artikel und die wichtigsten Fakten zu sehen.</p>"),
+        ("<h4>Full-Text Search</h4>", "<h4>Volltextsuche</h4>"),
+        ("<p>Search across millions of place names, streets, parks, peaks, airports, and POIs.</p>",
+         "<p>Suche in Millionen von Ortsnamen, Straßen, Parks, Gipfeln, Flughäfen und Sehenswürdigkeiten.</p>"),
+        ("<h4>Truly Offline</h4>", "<h4>Wirklich offline</h4>"),
+        ("<p>Just one .zim file. No accounts, no telemetry, no network. Open and go.</p>",
+         "<p>Nur eine .zim-Datei. Kein Konto, kein Tracking, kein Netz. Öffnen und loslegen.</p>"),
+        ("<h2>How to Use</h2>", "<h2>So geht&rsquo;s</h2>"),
+        ("<h4>Install Kiwix</h4>", "<h4>Kiwix installieren</h4>"),
+        ('<p>Free reader for iOS, Android, Mac, Windows, and Linux. Get it at <a href="https://kiwix.org" target="_blank" rel="noopener">kiwix.org</a>.</p>',
+         '<p>Kostenloser Reader für iOS, Android, Mac, Windows und Linux, erhältlich auf <a href="https://kiwix.org" target="_blank" rel="noopener">kiwix.org</a>.</p>'),
+        ("<h4>Download a map</h4>", "<h4>Karte herunterladen</h4>"),
+        ("<p>Pick a region above and download the .zim file (or grab the torrent for faster speeds).</p>",
+         "<p>Wählen Sie oben eine Region und laden Sie die .zim-Datei herunter.</p>"),
+        ("<h4>Open in Kiwix</h4>", "<h4>In Kiwix öffnen</h4>"),
+        ("<p>Open the .zim file in the Kiwix app. That&rsquo;s it &mdash; the map runs entirely offline.</p>",
+         "<p>Öffnen Sie die .zim-Datei in der Kiwix-App. Das war&rsquo;s &mdash; die Karte läuft komplett offline.</p>"),
+        ("<h2>Data Sources &amp; Licenses</h2>", "<h2>Datenquellen &amp; Lizenzen</h2>"),
+        ("<p>StreetZim is built entirely from open data. Each map ZIM bundles content from these sources:</p>",
+         "<p>StreetZim besteht ausschließlich aus offenen Daten. Jede Karte enthält Inhalte aus diesen Quellen:</p>"),
+        ("<li><strong>Map data:</strong> &copy; OpenStreetMap contributors, available under the",
+         "<li><strong>Kartendaten:</strong> &copy; OpenStreetMap-Mitwirkende, verfügbar unter der"),
+        ("<li><strong>Tile schema:</strong>", "<li><strong>Kachelschema:</strong>"),
+        ("<li><strong>Satellite imagery:</strong>", "<li><strong>Satellitenbilder:</strong>"),
+        ("non-commercial use only.</li>", "nur für nichtkommerzielle Nutzung.</li>"),
+        ("<li><strong>Elevation:</strong> Copernicus GLO-30 DEM &mdash; &copy; DLR / Airbus, provided under the COPERNICUS programme by the European Union and ESA.</li>",
+         "<li><strong>Höhendaten:</strong> Copernicus GLO-30 DEM &mdash; &copy; DLR / Airbus, bereitgestellt im COPERNICUS-Programm von Europäischer Union und ESA.</li>"),
+        ('<li><strong>Place info:</strong> <a href="https://www.wikidata.org/" target="_blank" rel="noopener">Wikidata</a> (CC0) and <a href="https://en.wikipedia.org/" target="_blank" rel="noopener">Wikipedia</a> (CC BY-SA 3.0).</li>',
+         '<li><strong>Ortsinformationen:</strong> <a href="https://www.wikidata.org/" target="_blank" rel="noopener">Wikidata</a> (CC0) und <a href="https://de.wikipedia.org/" target="_blank" rel="noopener">Wikipedia</a> (CC BY-SA).</li>'),
+        ("<li><strong>Tool code:</strong>", "<li><strong>Programmcode:</strong>"),
+        ("<h2>Open Source Projects</h2>", "<h2>Open-Source-Projekte</h2>"),
+        ("<p>StreetZim relies on the Kiwix reader apps to open .zim files. Each client is open source and developed on GitHub:</p>",
+         "<p>StreetZim nutzt die Kiwix-Apps zum Öffnen der .zim-Dateien. Alle sind Open Source und werden auf GitHub entwickelt:</p>"),
+        ("StreetZim is an open source project. Source on", "StreetZim ist ein Open-Source-Projekt. Quellcode auf"),
+        (". Maps hosted on the", ". Karten gehostet beim"),
+        ('title="Kiwix on the App Store"', 'title="Kiwix im App Store"'),
+        ('title="Kiwix on Google Play"', 'title="Kiwix bei Google Play"'),
+        ('title="Kiwix on the Mac App Store"', 'title="Kiwix im Mac App Store"'),
+        ("Kiwix for iOS &amp; macOS", "Kiwix für iOS &amp; macOS"),
+        ("Kiwix for Android", "Kiwix für Android"),
+        ("Kiwix PWA (Windows &amp; Linux)", "Kiwix-PWA (Windows &amp; Linux)"),
+        ("&mdash; MIT License.", "&mdash; MIT-Lizenz."),
+    ],
+}
+
 REGIONS = [
     # ── Continents & continent-scale regions ─────────────────────────
     {
@@ -248,6 +372,14 @@ REGIONS = [
         "title": "Switzerland & the Alps",
         "zim_file": "osm-switzerland.zim",
         "description": "Switzerland and the surrounding Alps &mdash; Z\u00fcrich, Geneva, Bern, Basel, Lausanne, Lucerne, Lugano, St. Moritz, Zermatt and the Matterhorn, Interlaken and the Jungfrau, plus Chamonix and Mont Blanc, Aosta, Lake Como, Liechtenstein, Lake Constance and western Tirol.",
+    },
+    {
+        "id": "switzerland-de",
+        "tier": "country",
+        "language": "de",
+        "title": "Schweiz und die Alpen",
+        "zim_file": "osm-switzerland-de.zim",
+        "description": "Die Schweiz und die umliegenden Alpen auf Deutsch &mdash; Zürich, Genf, Bern, Basel, Lausanne, Luzern, Lugano, St. Moritz, Zermatt und das Matterhorn, Interlaken und die Jungfrau, Chamonix und der Mont Blanc, Aosta, der Comer See, Liechtenstein, der Bodensee und Westtirol. Mit deutschen Ortsnamen, deutscher Wikipedia und deutscher Bedienoberfläche.",
     },
     {
         "id": "switzerland-light",
@@ -614,7 +746,7 @@ FEATURE_BADGES = [
 ]
 
 
-def render_feature_badges(item_meta):
+def render_feature_badges(item_meta, lang="en"):
     """Return an HTML fragment listing the features an item advertises.
 
     `item_meta` is the top-level `metadata` block of an archive.org
@@ -627,6 +759,7 @@ def render_feature_badges(item_meta):
         return ""
     pills = []
     for key, label, css in FEATURE_BADGES:
+        label = BADGE_LABELS.get(lang, {}).get(css, label)
         val = str(item_meta.get(key, "")).lower()
         if val == "yes":
             pills.append(
@@ -751,7 +884,7 @@ def preview_proxy_url(path=PREVIEW_CONFIG_PATH):
 
 
 def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
-                     build_date=None, preview=False):
+                     build_date=None, preview=False, lang="en"):
     """Render a map card with active download/torrent/details buttons.
 
     `torrent_ok=False` drops the Torrent button: the committed .torrent
@@ -762,6 +895,7 @@ def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
     `preview=True` adds a Preview button that opens the ZIM in the /drive/
     viewer streamed off archive.org (see preview_proxy_url).
     """
+    tx = CARD_TEXT[lang]
     item_id = f"streetzim-{region['id']}"
     zim_file = region["zim_file"]
     zim_file_attr = escape(urllib.parse.quote(zim_file), quote=True)
@@ -774,16 +908,19 @@ def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
         f'\n          <a class="btn btn-secondary" '
         f'href="/drive/?zim={escape(preview_target, quote=True)}" '
         f'data-track="preview" data-region="{region["id"]}" data-title="{title_attr}" '
-        f'title="Look at this map in your browser, streamed from archive.org">Preview</a>'
+        f'title="{escape(tx["preview_title"], quote=True)}">{tx["preview"]}</a>'
         if preview else ""
     )
-    badges_html = render_feature_badges(item_meta)
+    badges_html = render_feature_badges(item_meta, lang)
     # Without this the only way to tell a refreshed ZIM from the one you
     # already downloaded was to fetch it and look inside.
     date_html = ""
     if build_date:
         iso, human = build_date
-        date_html = (f'\n        <div class="map-card-date">Updated '
+        if lang == "de":
+            d = datetime.date.fromisoformat(iso)
+            human = f"{d.day}. {DE_MONTHS[d.month - 1]} {d.year}"
+        date_html = (f'\n        <div class="map-card-date">{tx["updated"]} '
                      f'<time datetime="{iso}">{escape(human)}</time></div>')
     torrent_html = (
         f'\n          <a class="btn btn-secondary" href="/torrents/{region["id"]}.torrent" '
@@ -797,18 +934,18 @@ def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
         </div>{date_html}
         <p class="map-card-desc">{region["description"]}</p>{badges_html}
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/{item_id}/{zim_file_attr}" data-track="download" data-region="{region["id"]}" data-title="{title_attr}">Download</a>{preview_html}{torrent_html}
-          <a class="btn btn-secondary" href="https://archive.org/details/{item_id}" data-track="details" data-region="{region["id"]}" data-title="{title_attr}">Info</a>
+          <a class="btn btn-primary" href="https://archive.org/download/{item_id}/{zim_file_attr}" data-track="download" data-region="{region["id"]}" data-title="{title_attr}">{tx["download"]}</a>{preview_html}{torrent_html}
+          <a class="btn btn-secondary" href="https://archive.org/details/{item_id}" data-track="details" data-region="{region["id"]}" data-title="{title_attr}">{tx["info"]}</a>
         </div>
       </div>"""
 
 
-def render_upcoming_card(region):
+def render_upcoming_card(region, lang="en"):
     """Render a dimmed card for regions that haven't been uploaded yet."""
     return f"""      <div class="map-card upcoming">
         <div class="map-card-head">
           <div class="map-card-title">{escape(region["title"])}</div>
-          <div class="map-card-size">building</div>
+          <div class="map-card-size">{CARD_TEXT[lang]["building"]}</div>
         </div>
         <p class="map-card-desc">{region["description"]}</p>
       </div>"""
@@ -880,10 +1017,33 @@ def build_page():
         print(f"note: in regions.tsv but not yet on the site (not shipped "
               f"yet, fine): {unshipped}")
 
+    for lang, _name, sub in LANGUAGES:
+        _write_page(archive_items, lang, sub)
+
+
+def render_lang_picker(lang):
+    """The language links at the top of each page (the current one marked)."""
+    links = []
+    for code, name, sub in LANGUAGES:
+        cur = ' aria-current="page"' if code == lang else ""
+        links.append(f'<a href="/{sub}" hreflang="{code}" lang="{code}"{cur}>{escape(name)}</a>')
+    return ('    <nav class="lang-picker" aria-label="Language / Sprache">'
+            + "".join(links) + "</nav>")
+
+
+def render_hreflang():
+    """<link rel=alternate hreflang> for every page language."""
+    return "\n".join(f'<link rel="alternate" hreflang="{code}" href="{SITE_URL}{sub}">'
+                     for code, _name, sub in LANGUAGES)
+
+
+def _write_page(archive_items, lang, sub):
+    """Render and write the page for one language (web/<sub>index.html)."""
     # Group regions by tier, preserving in-list order within each tier.
     by_tier: dict[str, list] = {tid: [] for tid, _ in TIERS}
     for region in REGIONS:
-        by_tier[region["tier"]].append(region)
+        if region.get("language", "en") == lang:
+            by_tier[region["tier"]].append(region)
     # Alphabetical within each tier. Previously this was hand-maintained
     # list order, so a new entry landed wherever it was pasted and finding
     # a country meant reading the whole section.
@@ -916,7 +1076,7 @@ def build_page():
         regions_in_tier = by_tier.get(tier_id) or []
         if not regions_in_tier:
             continue
-        flat_iter.append(("__header__", tier_label))
+        flat_iter.append(("__header__", TIER_LABELS.get(lang, {}).get(tier_id, tier_label)))
         for r in regions_in_tier:
             flat_iter.append(("region", r))
 
@@ -994,7 +1154,7 @@ def build_page():
                 # never exists on a dated item — the 2026-05-10
                 # California incident.
                 print(f"  {region['id']}: no .zim in item listing yet, treating as upcoming")
-                cards.append(render_upcoming_card(region))
+                cards.append(render_upcoming_card(region, lang))
                 upcoming_count += 1
                 continue
             # Override the static zim_file with what's actually on Archive.org
@@ -1009,7 +1169,7 @@ def build_page():
                 # being processed — treat as upcoming so the page doesn't
                 # show "0 MB" until the upload finalizes.
                 print(f"  {region['id']}: file not yet finalized, treating as upcoming")
-                cards.append(render_upcoming_card(region))
+                cards.append(render_upcoming_card(region, lang))
                 upcoming_count += 1
                 continue
             # The Torrent button must point at the same file as the
@@ -1024,17 +1184,18 @@ def build_page():
                       f"live ZIM is {zim_filename!r} — omitting Torrent button "
                       f"(regenerate with cloud/generate_all_torrents.py)")
             cards.append(render_live_card(
-                region, human_size(zim_size),
+                region, (human_size(zim_size).replace(".", ",") if lang == "de"
+                         else human_size(zim_size)),
                 item_meta=(details or {}).get("metadata") if details else None,
                 torrent_ok=torrent_ok,
                 build_date=zim_build_date(zim_filename, zim_file_meta),
-                preview=preview))
+                preview=preview, lang=lang))
             live_count += 1
         else:
-            cards.append(render_upcoming_card(region))
+            cards.append(render_upcoming_card(region, lang))
             upcoming_count += 1
 
-    print(f"Rendered {live_count} live, {upcoming_count} upcoming")
+    print(f"[{lang}] Rendered {live_count} live, {upcoming_count} upcoming")
 
     # An empty-but-200 search response (archive.org index hiccup) would
     # otherwise render every card as "upcoming" and --deploy would wipe
@@ -1066,17 +1227,26 @@ def build_page():
     with open(TEMPLATE_PATH, encoding="utf-8") as f:
         template = f.read()
 
+    for en_text, local_text in PAGE_TEXT.get(lang, []):
+        if template.count(en_text) != 1:
+            raise ValueError(f"[{lang}] the template has {template.count(en_text)} "
+                             f"copies of {en_text[:60]!r}, not 1: update PAGE_TEXT")
+        template = template.replace(en_text, local_text)
     updated = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     html = template.replace("{{MAPS}}", "\n".join(cards))
+    html = html.replace("{{LANG_PICKER}}", render_lang_picker(lang))
+    html = html.replace("{{HREFLANG}}", render_hreflang())
     html = html.replace("{{UPDATED}}", updated)
     check_filter_css(html)
 
     # Explicit UTF-8: the template and region descriptions carry
     # non-cp1252 characters (Lāna, İzmir, Þingvellir), so the locale
     # default raised UnicodeEncodeError on Windows / C-locale hosts.
-    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+    out_path = os.path.join(SCRIPT_DIR, sub, "index.html")
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"Wrote {OUTPUT_PATH}")
+    print(f"Wrote {out_path}")
 
 
 def deploy():

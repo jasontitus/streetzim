@@ -43,7 +43,12 @@ SLOT = {"index.html": 1048576, "places.html": 262144, "routing-worker.js": 13107
 
 def main():
     out_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(REPO, "rollout-viewer.tsv")
-    site = open(os.path.join(REPO, "web", "index.html"), encoding="utf-8").read()
+    # Every language's page (web/index.html, web/de/index.html, ...): a
+    # region in another language is listed on its page only.
+    import glob
+    site = "".join(open(p, encoding="utf-8").read() for p in
+                   [os.path.join(REPO, "web", "index.html")]
+                   + sorted(glob.glob(os.path.join(REPO, "web", "*", "index.html"))))
     live = sorted(set(re.findall(
         r"archive\.org/download/streetzim-([^/]+)/(osm-[^\"]+?\.zim)", site)))
 
