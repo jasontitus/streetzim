@@ -55,7 +55,9 @@ function initWikiSidebar(map, config) {
     if (WIKI_GEO_INDEX || wikiIndexTries >= 12) return;
     setTimeout(loadWikiGeoIndex, Math.min(15000, 1000 * wikiIndexTries));
   }
-  loadWikiGeoIndex();
+  // A ZIM built without Wikipedia articles says so (hasWikiArticles false)
+  // and has no geo-index to ask for; one from before the flag is asked.
+  if (config.hasWikiArticles !== false) loadWikiGeoIndex();
 
   function geoPriority(type) {
     if (type === 'place') return 80;             // settlements (cities/towns)

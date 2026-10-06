@@ -112,8 +112,12 @@ try {
     };
   });
   // A ZIM built without --wikidata has no geo-index to load.
+  // The geo-index comes with bundled articles: a ZIM without them says
+  // hasWikiArticles false (one from before the flag is still expected to
+  // have it when it has Wikidata).
   const hasWikidata = await page.evaluate(() =>
-    fetch('map-config.json').then(r => r.json()).then(c => !!c.hasWikidata)
+    fetch('map-config.json').then(r => r.json())
+      .then(c => !!c.hasWikidata && c.hasWikiArticles !== false)
       .catch(() => true));
   if (EXPECT_FIXES) {
     ok('no false "no Wikipedia places" state', !wiki.falseEmpty,
@@ -122,7 +126,7 @@ try {
       ok('wiki geo-index loaded or loading', wiki.loadingOrLoaded,
          'index size=' + wiki.indexSize);
     } else {
-      console.log('skip  wiki geo-index (map-config.json: hasWikidata is false)');
+      console.log('skip  wiki geo-index (map-config.json: no Wikidata or no Wikipedia articles)');
     }
   } else {
     console.log('note  (control) wiki falseEmpty=' + wiki.falseEmpty +

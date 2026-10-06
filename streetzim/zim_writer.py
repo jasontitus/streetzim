@@ -1347,18 +1347,18 @@ def _about_fields(*, name, description, metadata=None):
 
 
 def _add_map_config(creator, MapItem, *, map_config, has_wiki_articles, about=None):
-    """map-config.json, with hasWikiArticles only when articles were stored
-    (the viewer's credits list Wikipedia on it) and the About fields."""
+    """map-config.json, with hasWikiArticles (true when articles were stored:
+    the viewer's credits list Wikipedia on it; false when none were, so the
+    viewer does not ask for a wiki-geo-index.json the ZIM lacks — a ZIM
+    from before the flag has neither and is asked as before) and the About
+    fields."""
     map_config = dict(map_config)
     for k, v in (about or {}).items():
         if v:
             map_config.setdefault(k, v)
     # _add_viewer wrote the file (or stopped the build).
     map_config["rtlTextPlugin"] = RTL_TEXT_PLUGIN_ENTRY
-    if has_wiki_articles:
-        map_config["hasWikiArticles"] = True
-    else:
-        map_config.pop("hasWikiArticles", None)
+    map_config["hasWikiArticles"] = bool(has_wiki_articles)
     config_json = json.dumps(map_config, indent=2)
     creator.add_item(MapItem(
         "map-config.json", "Map Config", "application/json",

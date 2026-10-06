@@ -176,7 +176,8 @@ def test_wikipedia_credited_only_when_articles_are_stored(tmp_path, monkeypatch,
     md = _build(tmp_path, wiki_cross_refs={("X", 43.7, 7.4): {"wikipedia": "en:X"}},
                 bundle_wiki_articles=True)
     assert ("Wikipedia" in md["License"].decode()) == bool(stored)
-    assert md["map-config"].get("hasWikiArticles", False) == bool(stored)
+    # Explicit both ways: false tells the viewer not to ask for a geo-index.
+    assert md["map-config"]["hasWikiArticles"] is bool(stored)
 
 
 def test_license_names_satellite_terrain_and_wiki_when_present(tmp_path):

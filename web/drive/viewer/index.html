@@ -7293,7 +7293,7 @@ function retryWikiGeoIndex() {
 if (WIKI_GEO_INDEX || wikiIndexTries >= 12) return;
 setTimeout(loadWikiGeoIndex, Math.min(15000, 1000 * wikiIndexTries));
 }
-loadWikiGeoIndex();
+if (config.hasWikiArticles !== false) loadWikiGeoIndex();
 function geoPriority(type) {
 if (type === 'place') return 80;             // settlements (cities/towns)
 if (type === 'water' || type === 'peak') return 55;
