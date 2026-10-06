@@ -83,7 +83,7 @@ def test_each_language_lists_only_its_regions_and_has_the_picker(tmp_path, monke
     en = (tmp_path / "index.html").read_text(encoding="utf-8")
     de = (tmp_path / "de" / "index.html").read_text(encoding="utf-8")
     german_ids = {r["id"] for r in gen.REGIONS if r.get("language") == "de"}
-    assert german_ids == {"switzerland-de"}
+    assert german_ids == {"switzerland-de", "switzerland-de-ultralight"}
     assert 'data-region="switzerland-de"' in de and 'data-region="switzerland-de"' not in en
     assert 'data-region="switzerland"' in en and 'data-region="switzerland"' not in de
     for page, cur in ((en, "en"), (de, "de")):

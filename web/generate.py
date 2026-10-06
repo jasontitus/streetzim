@@ -382,6 +382,14 @@ REGIONS = [
         "description": "Die Schweiz und die umliegenden Alpen auf Deutsch &mdash; Zürich, Genf, Bern, Basel, Lausanne, Luzern, Lugano, St. Moritz, Zermatt und das Matterhorn, Interlaken und die Jungfrau, Chamonix und der Mont Blanc, Aosta, der Comer See, Liechtenstein, der Bodensee und Westtirol. Mit deutschen Ortsnamen, deutscher Wikipedia und deutscher Bedienoberfläche.",
     },
     {
+        "id": "switzerland-de-ultralight",
+        "tier": "country",
+        "language": "de",
+        "title": "Schweiz und die Alpen (Ultralight)",
+        "zim_file": "osm-switzerland-de-ultralight.zim",
+        "description": "Die kleine Ausgabe der deutschen Schweiz-Karte: dieselben Orte, Straßen, Wege und Routen zu Fuß, mit dem Rad und dem Auto, mit deutschen Ortsnamen und deutscher Bedienoberfläche &mdash; aber ohne Satellitenbilder und ohne Wikipedia-Artikel, und die Karte reicht bis Zoomstufe 13 statt 14. Rund halb so groß.",
+    },
+    {
         "id": "switzerland-light",
         "tier": "country",
         "title": "Switzerland & the Alps (Light)",
