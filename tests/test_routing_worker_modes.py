@@ -420,7 +420,102 @@ def test_a_start_on_a_road_of_its_own_is_not_moved(tmp_path, c_len):
                   cell_scale=10, output_dir=tmp_path / "routing-data")
     o = [m[45][0] / 1e7, m[45][1] / 1e7]
     d = [b[0][0] / 1e7, b[0][1] / 1e7]
+    # The island is under SNAP_MIN_REACH: the wide snap pass must not hop
+    # to road C (~340 m, past SNAP_WIDE_EXTRA_M) — Python and the worker alike.
+    sg = _spatial_graph_from_dir(tmp_path / "routing-data")
+    island = {n for n in range(sg.num_nodes) if sg.node_coords_e7(n) in set(b)}
+    for travel in ("drive", "walk"):
+        assert sg.nearest_node(b[0][0], b[0][1], "dest", travel_mode=travel) in island
     opts = {"originQuery": {"lat": o[0], "lon": o[1]}, "destQuery": {"lat": d[0], "lon": d[1]}}
     for travel in ("drive", "walk"):
         (r,) = _run_opts(tmp_path, [o + d], [{"travel": travel, "options": opts}])
         assert r["time"] is None and not r.get("startMoved"), (travel, r)
+
+
+def _fragment_graph(tmp_path, *, frag_rows=5, frag_cols=5, extra_nodes=(), extra_edges=()):
+    """A frag_rows x frag_cols grid (~3-4 m apart) of two-node fragments
+    joined to nothing (a big station's platform and escalator pieces) at
+    (40.0, -105.0), a 41-node two-way road ~60 m north, then extra nodes
+    (indices from 41 + 2 * rows * cols) and edges."""
+    from tests.szrg_reader import parse_szrg_bytes
+    from tests.szrg_spatial import build_spatial
+    from tests.test_routing_worker_v3 import _pack_v4_graph_cls
+    lat, lon = 400_000_000, -1_050_000_000
+    road = [(lat + 5_400, lon - 30_000 + i * 1_500) for i in range(41)]
+    frags = []
+    for r in range(frag_rows):
+        for c in range(frag_cols):
+            y, x = lat + r * 300, lon + c * 400
+            frags += [(y, x), (y + 80, x + 60)]
+    edges = []
+    _chain(edges, 0, len(road))
+    for f in range(len(frags) // 2):
+        a = len(road) + 2 * f
+        edges += [(a, a + 1, 15, 30, 0xFFFFFFFF, 0, 11), (a + 1, a, 15, 30, 0xFFFFFFFF, 0, 11)]
+    nodes = road + frags + list(extra_nodes)
+    build_spatial(parse_szrg_bytes(_pack_v4_graph_cls(nodes, edges + list(extra_edges))),
+                  cell_scale=10, output_dir=tmp_path / "routing-data")
+    return nodes, set(road)
+
+
+@pytest.mark.parametrize("travel", ["walk", "drive"])
+def test_a_tap_among_many_fragments_snaps_to_the_network(tmp_path, travel):
+    """A big station: far more than SNAP_CANDIDATES of the vertices nearest
+    the tap are two-node fragments (40 of them: under the wide pass's 48,
+    over a narrower one).
+    Both snappers look further and pick the road (~60 m past the nearest
+    fragment), and the route exists. The tap is ~100 m south of the
+    fragments, so the wide pass's 150 m must count from the nearest vertex,
+    not from the tap (the road is ~160 m from the tap)."""
+    _node()
+    from streetzim.routing.spatial import SNAP_CANDIDATES_WIDE
+    nodes, road = _fragment_graph(tmp_path, frag_rows=4, frag_cols=5)
+    assert 30 < sum(1 for n in nodes if n not in road) < SNAP_CANDIDATES_WIDE
+    sg = _spatial_graph_from_dir(tmp_path / "routing-data")
+    tap_lat, tap_lon = 400_000_000 - 9_000, -1_050_000_000 + 1_000
+    py = sg.nearest_node(tap_lat, tap_lon, "origin", travel_mode=travel)
+    assert sg.node_coords_e7(py) in road
+    far = [nodes[40][0] / 1e7, nodes[40][1] / 1e7]
+    (r,) = _run_opts(tmp_path, [[tap_lat / 1e7, tap_lon / 1e7] + far], [{"travel": travel}])
+    assert r["start"] == py
+    assert r["time"] is not None
+
+
+def test_the_wide_snap_pass_accepts_a_one_way_sink_for_a_destination(tmp_path):
+    """The destination rule (an edgeless vertex a drivable edge enters, in
+    its own cell) holds in the wide pass too: past the fragments, the end
+    of a one-way spur (~20 m) wins over the road (~60 m)."""
+    _node()
+    lat, lon = 400_000_000, -1_050_000_000
+    a = 41 + 2 * 9                                    # first extra node (3 x 3 grid)
+    spur = [(lat + 1_800, lon + 2_000), (lat + 1_800, lon + 3_000)]
+    nodes, road = _fragment_graph(
+        tmp_path, frag_rows=3, frag_cols=3, extra_nodes=spur,
+        extra_edges=[(20, a, 400, 30, 0xFFFFFFFF, 0, 11),        # road -> spur, one way
+                     (a, a + 1, 100, 30, 0xFFFFFFFF, 0, 11)])
+    sg = _spatial_graph_from_dir(tmp_path / "routing-data")
+    sink = next(n for n in range(sg.num_nodes) if sg.node_coords_e7(n) == spur[1])
+    assert sg.nearest_node(lat, lon, "dest", travel_mode="drive") == sink
+    start = [nodes[0][0] / 1e7, nodes[0][1] / 1e7]
+    (r,) = _run_opts(tmp_path, [start + [lat / 1e7, lon / 1e7]], [{"travel": "drive"}])
+    assert r["end"] == sink and r["time"] is not None
+
+
+def test_a_resnap_past_fragments_keeps_out_of_the_pocket(tmp_path):
+    """The re-snap (destQuery) excludes the destination's sealed pocket; the
+    vertices nearest it outside the pocket are fragments, so the wide pass
+    runs — and must keep excluding the pocket, or it lands back in it and
+    the move is dropped ("no route")."""
+    _node()
+    lat, lon = 400_000_000, -1_050_000_000
+    base = 41 + 2 * 25                                 # first extra node (5 x 5 grid)
+    pocket = [(lat - 1_500, lon - 20_000 + i * 1_000) for i in range(40)]   # a cut-off road
+    extra = []
+    _chain(extra, base, len(pocket))
+    nodes, road = _fragment_graph(tmp_path, extra_nodes=pocket, extra_edges=extra)
+    tap = [(lat - 1_500) / 1e7, (lon - 1_000) / 1e7]                       # on the pocket
+    start = [nodes[0][0] / 1e7, nodes[0][1] / 1e7]
+    (r,) = _run_opts(tmp_path, [start + tap], [{"travel": "drive", "options": {
+        "destQuery": {"lat": tap[0], "lon": tap[1]}}}])
+    assert r["time"] is not None and r["endMoved"], r
+    assert (round(r["endMoved"]["lat"] * 1e7), round(r["endMoved"]["lon"] * 1e7)) in road

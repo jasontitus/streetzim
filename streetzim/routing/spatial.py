@@ -86,6 +86,8 @@ def _mode_ok(travel_mode: str, speed_dist: int, ca: int) -> bool:
 # reaches SNAP_MIN_REACH nodes, as long as it is at most SNAP_MAX_EXTRA_M
 # further from the query than the nearest.
 SNAP_CANDIDATES = 6
+SNAP_CANDIDATES_WIDE = 48   # second pass, when none of the first reaches
+SNAP_WIDE_EXTRA_M = 150     # ...and only this far past the nearest (not an island hop)
 SNAP_MIN_REACH = 32
 SNAP_MAX_EXTRA_M = 1000
 
@@ -918,85 +920,114 @@ class SpatialGraph:
             dlon *= cos_lat
             candidates.append((dlat * dlat + dlon * dlon, cid))
         candidates.sort()
-        best_d: list[float] = []   # distances ascending (bisect key)
-        best_n: list[int] = []     # parallel global node ids
-        best_e: list[bool] = []    # parallel "edgeless" flags
-        worst_kept = math.inf
-        for lower_bound, cid in candidates:
-            if lower_bound > worst_kept:
-                break
-            cell = self._ensure_cell(cid)
-            adj = cell.cell_adj
-            edges = cell.edges
-            for local in range(cell.node_count):
-                dlat = int(cell.nodes_scaled[local * 2]) - lat_e7
-                dlon = (int(cell.nodes_scaled[local * 2 + 1]) - lon_e7) * cos_lat
-                dist = dlat * dlat + dlon * dlon
-                if dist >= worst_kept:
-                    continue
-                e_start = int(adj[local])
-                e_end = int(adj[local + 1])
-                if raw:
-                    # Plain nearest: keep a one-entry shortlist, no filters.
-                    if not best_d or dist < best_d[0]:
-                        best_d, best_n, best_e = [dist], [cell.base_node + local], [False]
-                        worst_kept = dist
-                    continue
-                # A speed-0 out-edge (walk/bike against a one-way) counts
-                # as absent: a one-way's end stays a sink.
-                if not drive:
-                    for ei in range(e_start, e_end):
-                        if edge_cost(travel_mode, int(edges[ei * 5 + 1]),
-                                     int(edges[ei * 5 + 4])) is not None:
-                            break
-                    else:
+        def shortlist(width: int, bound: float = math.inf) -> tuple[list[float], list[int], list[bool]]:
+            # The `width` nearest usable vertices, ascending (ties: scan order).
+            best_d: list[float] = []   # distances ascending (bisect key)
+            best_n: list[int] = []     # parallel global node ids
+            best_e: list[bool] = []    # parallel "edgeless" flags
+            worst_kept = bound
+            for lower_bound, cid in candidates:
+                if lower_bound > worst_kept:
+                    break
+                cell = self._ensure_cell(cid)
+                adj = cell.cell_adj
+                edges = cell.edges
+                for local in range(cell.node_count):
+                    dlat = int(cell.nodes_scaled[local * 2]) - lat_e7
+                    dlon = (int(cell.nodes_scaled[local * 2 + 1]) - lon_e7) * cos_lat
+                    dist = dlat * dlat + dlon * dlon
+                    if dist >= worst_kept:
                         continue
+                    e_start = int(adj[local])
+                    e_end = int(adj[local + 1])
+                    if raw:
+                        # Plain nearest: keep a one-entry shortlist, no filters.
+                        if not best_d or dist < best_d[0]:
+                            best_d, best_n, best_e = [dist], [cell.base_node + local], [False]
+                            worst_kept = dist
+                        continue
+                    # A speed-0 out-edge (walk/bike against a one-way) counts
+                    # as absent: a one-way's end stays a sink.
+                    if not drive:
+                        for ei in range(e_start, e_end):
+                            if edge_cost(travel_mode, int(edges[ei * 5 + 1]),
+                                         int(edges[ei * 5 + 4])) is not None:
+                                break
+                        else:
+                            continue
+                        k = bisect.bisect_right(best_d, dist)
+                        best_d.insert(k, dist)
+                        best_n.insert(k, cell.base_node + local)
+                        best_e.insert(k, False)
+                        if len(best_d) > width:
+                            best_d.pop(); best_n.pop(); best_e.pop()
+                        if len(best_d) == width:
+                            worst_kept = best_d[-1]
+                        continue
+                    real = 0
+                    car_ok = False
+                    for ei in range(e_start, e_end):
+                        if int(edges[ei * 5 + 1]) >> 24 == 0:
+                            continue
+                        real += 1
+                        if not _is_no_motor(int(edges[ei * 5 + 4])):
+                            car_ok = True
+                            break
+                    if real == 0:
+                        car_ok = True
+                    if not car_ok:
+                        continue
+                    # bisect_right on dist only == the JS "insert after equal
+                    # distances" loop: scan order decides ties.
                     k = bisect.bisect_right(best_d, dist)
                     best_d.insert(k, dist)
                     best_n.insert(k, cell.base_node + local)
-                    best_e.insert(k, False)
-                    if len(best_d) > SNAP_CANDIDATES:
+                    best_e.insert(k, real == 0)
+                    if len(best_d) > width:
                         best_d.pop(); best_n.pop(); best_e.pop()
-                    if len(best_d) == SNAP_CANDIDATES:
+                    if len(best_d) == width:
                         worst_kept = best_d[-1]
-                    continue
-                real = 0
-                car_ok = False
-                for ei in range(e_start, e_end):
-                    if int(edges[ei * 5 + 1]) >> 24 == 0:
-                        continue
-                    real += 1
-                    if not _is_no_motor(int(edges[ei * 5 + 4])):
-                        car_ok = True
-                        break
-                if real == 0:
-                    car_ok = True
-                if not car_ok:
-                    continue
-                # bisect_right on dist only == the JS "insert after equal
-                # distances" loop: scan order decides ties.
-                k = bisect.bisect_right(best_d, dist)
-                best_d.insert(k, dist)
-                best_n.insert(k, cell.base_node + local)
-                best_e.insert(k, real == 0)
-                if len(best_d) > SNAP_CANDIDATES:
-                    best_d.pop(); best_n.pop(); best_e.pop()
-                if len(best_d) == SNAP_CANDIDATES:
-                    worst_kept = best_d[-1]
-        if not best_d:
-            return -1
-        if raw:
-            return best_n[0]
-        limit_r = math.sqrt(best_d[0]) + SNAP_MAX_EXTRA_M * 90
-        for dist, node, edgeless in zip(best_d, best_n, best_e):
-            if math.sqrt(dist) > limit_r:
-                break
-            if self._reaches_at_least(node, SNAP_MIN_REACH, travel_mode):
-                return node
-            if for_dest and edgeless and self._has_drivable_incoming_in_own_cell(
-                    node, travel_mode):
-                return node
-        return best_n[0]
+            return best_d, best_n, best_e
+
+        # The nearest SNAP_CANDIDATES first; only when none of them reaches
+        # the network, the nearest SNAP_CANDIDATES_WIDE (a big station:
+        # Zurich HB's dozen nearest walk vertices are all two-node platform
+        # and escalator fragments), and then only SNAP_WIDE_EXTRA_M past the
+        # nearest: a tap on a small island stays there (the re-snap decides
+        # about islands). The fallback stays the nearest vertex.
+        fallback = -1
+        prev: list[float] | None = None
+        for k, extra_m in ((SNAP_CANDIDATES, SNAP_MAX_EXTRA_M),
+                           (SNAP_CANDIDATES_WIDE, SNAP_WIDE_EXTRA_M)):
+            # The wide pass (as the worker): pass 1's candidates are its
+            # first ones and all failed, so start after them, and scan only
+            # inside its distance limit.
+            start = 0
+            if prev is not None:
+                lim2 = math.sqrt(prev[0]) + extra_m * 90
+                if len(prev) < SNAP_CANDIDATES or math.sqrt(prev[-1]) > lim2:
+                    break
+                best_d, best_n, best_e = shortlist(k, lim2 * lim2 * (1 + 1e-9) + 1)
+                start = len(prev)
+            else:
+                best_d, best_n, best_e = shortlist(k)
+            prev = best_d
+            if not best_d:
+                return -1
+            if raw:
+                return best_n[0]
+            if fallback < 0:
+                fallback = best_n[0]
+            limit_r = math.sqrt(best_d[0]) + extra_m * 90
+            for dist, node, edgeless in zip(best_d[start:], best_n[start:], best_e[start:]):
+                if math.sqrt(dist) > limit_r:
+                    break
+                if self._reaches_at_least(node, SNAP_MIN_REACH, travel_mode):
+                    return node
+                if for_dest and edgeless and self._has_drivable_incoming_in_own_cell(
+                        node, travel_mode):
+                    return node
+        return fallback
 
     def _has_drivable_incoming_in_own_cell(self, node: int,
                                            travel_mode: str = "drive") -> bool:

@@ -1164,6 +1164,8 @@ SpatialGraph.prototype.nodeCoordsE7 = function(globalNodeIdx) {
 // further away, so a legitimate one-way dead end right under the tap
 // still wins over a road a kilometre off.
 var SNAP_CANDIDATES = 6;
+var SNAP_CANDIDATES_WIDE = 48;  // second pass, when none of the first reaches
+var SNAP_WIDE_EXTRA_M = 150;     // ...and only this far past the nearest (not an island hop)
 var SNAP_MIN_REACH = 32;
 var SNAP_MAX_EXTRA_M = 1000;
 
@@ -1204,67 +1206,99 @@ SpatialGraph.prototype.snapNearestNode = async function(latE7, lonE7, mode, trav
     candidates.push([dlat * dlat + dlon * dlon, cid]);
   }
   candidates.sort(function(a, b) { return a[0] - b[0]; });
-  // best[] holds up to SNAP_CANDIDATES {dist, node, lat, lon}, ascending.
-  var best = [];
-  var worstKept = Infinity;  // dist of best[SNAP_CANDIDATES-1] once full
-  for (var i = 0; i < candidates.length && candidates[i][0] <= worstKept; i++) {
-    var cell = await this._ensureCell(candidates[i][1]);
-    var v2 = !!cell.nodesScaled;
-    var cellAdj = cell.cellAdj, edges = cell.edges;
-    for (var local = 0; local < cell.nodeCount; local++) {
-      var globalNode = v2 ? cell.baseNode + local : cell.cellNodesGlobal[local];
-      var nlat = v2 ? cell.nodesScaled[local * 2] : this._index.nodeLatE7(globalNode);
-      var nlon = v2 ? cell.nodesScaled[local * 2 + 1] : this._index.nodeLonE7(globalNode);
-      var ndlat = nlat - latE7;
-      var ndlon = (nlon - lonE7) * cosLat;
-      var dist = ndlat * ndlat + ndlon * ndlon;
-      if (dist >= worstKept) continue;
-      if (exclude && exclude.has(globalNode)) continue;
-      // Skip nodes whose outgoing edges are ALL no-motor-vehicle (a
-      // footpath vertex next to the road). A node with no outgoing
-      // edges at all stays eligible — it's the end of a one-way and a
-      // perfectly good destination. Checked lazily, only when a node
-      // would make the shortlist, so the scan's per-node cost stays tiny.
-      // A speed-0 out-edge (the walk/bike record for travel against a
-      // one-way) counts as absent: a one-way's end stays a sink.
-      var eStart = cellAdj[local], eEnd = cellAdj[local + 1];
-      var real = 0, carOk = false;
-      if (drive) {
-        for (var ei = eStart; ei < eEnd; ei++) {
-          if ((edges[ei * 5 + 1] >>> 24) === 0) continue;
-          real++;
-          if (!isNoMotor(edges[ei * 5 + 4])) { carOk = true; break; }
-        }
-        if (real === 0) carOk = true;
-      } else {
-        real = 1;
-        for (var wi = eStart; wi < eEnd; wi++) {
-          if (edgeCostWB(travel, edges[wi * 5 + 1], edges[wi * 5 + 4]) >= 0) {
-            carOk = true; break;
+  var self = this;
+  // The `width` nearest usable vertices, ascending (ties: scan order).
+  async function shortlist(width, bound) {
+    // best[] holds up to width {dist, node, lat, lon}, ascending.
+    var best = [];
+    var worstKept = bound || Infinity;  // dist of best[width-1] once full
+    for (var i = 0; i < candidates.length && candidates[i][0] <= worstKept; i++) {
+      var cell = await self._ensureCell(candidates[i][1]);
+      var v2 = !!cell.nodesScaled;
+      var cellAdj = cell.cellAdj, edges = cell.edges;
+      for (var local = 0; local < cell.nodeCount; local++) {
+        var globalNode = v2 ? cell.baseNode + local : cell.cellNodesGlobal[local];
+        var nlat = v2 ? cell.nodesScaled[local * 2] : self._index.nodeLatE7(globalNode);
+        var nlon = v2 ? cell.nodesScaled[local * 2 + 1] : self._index.nodeLonE7(globalNode);
+        var ndlat = nlat - latE7;
+        var ndlon = (nlon - lonE7) * cosLat;
+        var dist = ndlat * ndlat + ndlon * ndlon;
+        if (dist >= worstKept) continue;
+        if (exclude && exclude.has(globalNode)) continue;
+        // Skip nodes whose outgoing edges are ALL no-motor-vehicle (a
+        // footpath vertex next to the road). A node with no outgoing
+        // edges at all stays eligible — it's the end of a one-way and a
+        // perfectly good destination. Checked lazily, only when a node
+        // would make the shortlist, so the scan's per-node cost stays tiny.
+        // A speed-0 out-edge (the walk/bike record for travel against a
+        // one-way) counts as absent: a one-way's end stays a sink.
+        var eStart = cellAdj[local], eEnd = cellAdj[local + 1];
+        var real = 0, carOk = false;
+        if (drive) {
+          for (var ei = eStart; ei < eEnd; ei++) {
+            if ((edges[ei * 5 + 1] >>> 24) === 0) continue;
+            real++;
+            if (!isNoMotor(edges[ei * 5 + 4])) { carOk = true; break; }
+          }
+          if (real === 0) carOk = true;
+        } else {
+          real = 1;
+          for (var wi = eStart; wi < eEnd; wi++) {
+            if (edgeCostWB(travel, edges[wi * 5 + 1], edges[wi * 5 + 4]) >= 0) {
+              carOk = true; break;
+            }
           }
         }
+        if (!carOk) continue;
+        var k = best.length;
+        while (k > 0 && best[k - 1].dist > dist) k--;
+        best.splice(k, 0, { dist: dist, node: globalNode, lat: nlat, lon: nlon,
+                            edgeless: (real === 0) });
+        if (best.length > width) best.pop();
+        if (best.length === width) worstKept = best[best.length - 1].dist;
       }
-      if (!carOk) continue;
-      var k = best.length;
-      while (k > 0 && best[k - 1].dist > dist) k--;
-      best.splice(k, 0, { dist: dist, node: globalNode, lat: nlat, lon: nlon,
-                          edgeless: (real === 0) });
-      if (best.length > SNAP_CANDIDATES) best.pop();
-      if (best.length === SNAP_CANDIDATES) worstKept = best[best.length - 1].dist;
+    }
+    return best;
+  }
+  // The nearest SNAP_CANDIDATES first; only when none of them reaches the
+  // network, the nearest SNAP_CANDIDATES_WIDE (a big station: Zurich HB's
+  // dozen nearest walk vertices are all two-node platform and escalator
+  // fragments), and then only SNAP_WIDE_EXTRA_M past the nearest: a tap on
+  // a small island stays there (the re-snap decides about islands). The
+  // fallback stays the nearest vertex.
+  var fallback = null;
+  var passes = [[SNAP_CANDIDATES, SNAP_MAX_EXTRA_M], [SNAP_CANDIDATES_WIDE, SNAP_WIDE_EXTRA_M]];
+  var prev = null;
+  for (var w = 0; w < passes.length; w++) {
+    // The wide pass: pass 1's candidates are its first ones (same order)
+    // and all failed, so start after them; and scan only vertices inside
+    // its distance limit (nothing past it can be picked).
+    var start = 0, best;
+    if (prev) {
+      var lim2 = Math.sqrt(prev[0].dist) + passes[w][1] * 90;
+      if (prev.length < SNAP_CANDIDATES || Math.sqrt(prev[prev.length - 1].dist) > lim2) break;
+      best = await shortlist(passes[w][0], lim2 * lim2 * (1 + 1e-9) + 1);
+      start = prev.length;
+    } else {
+      best = await shortlist(passes[w][0]);
+    }
+    prev = best;
+    if (best.length === 0) throw new Error('no routing nodes');
+    if (fallback === null) fallback = best[0];
+    // 1 m ≈ 90 e7-units of latitude (and of cos-scaled longitude).
+    var limitR = Math.sqrt(best[0].dist) + passes[w][1] * 90;
+    for (var c = start; c < best.length; c++) {
+      if (Math.sqrt(best[c].dist) > limitR) break;
+      if (await this._reachesAtLeast(best[c].node, SNAP_MIN_REACH, travel)) {
+        return { node: best[c].node, lat: best[c].lat / 1e7, lon: best[c].lon / 1e7 };
+      }
+      if (forDest && best[c].edgeless
+          && await this._hasDrivableIncomingInOwnCell(best[c].node, travel)) {
+        return { node: best[c].node, lat: best[c].lat / 1e7, lon: best[c].lon / 1e7 };
+      }
     }
   }
-  if (best.length === 0) throw new Error('no routing nodes');
-  // 1 m ≈ 90 e7-units of latitude (and of cos-scaled longitude).
-  var extra = SNAP_MAX_EXTRA_M * 90;
-  var limitR = Math.sqrt(best[0].dist) + extra;
-  var pick = best[0];
-  for (var c = 0; c < best.length; c++) {
-    if (Math.sqrt(best[c].dist) > limitR) break;
-    if (await this._reachesAtLeast(best[c].node, SNAP_MIN_REACH, travel)) { pick = best[c]; break; }
-    if (forDest && best[c].edgeless
-        && await this._hasDrivableIncomingInOwnCell(best[c].node, travel)) { pick = best[c]; break; }
-  }
-  return { node: pick.node, lat: pick.lat / 1e7, lon: pick.lon / 1e7 };
+  return { node: fallback.node, lat: fallback.lat / 1e7, lon: fallback.lon / 1e7 };
 };
 
 // True when some edge in `node`'s own cell targets it and is drivable.

@@ -120,7 +120,12 @@ leave:
   first from which a bounded forward BFS reaches 32 nodes, provided
   it is no more than 1 km further away than the nearest. A
   four-node private-drive fragment or a footpath vertex right next
-  to the road no longer wins the snap.
+  to the road no longer wins the snap. When none of the six does, it
+  looks again at the 48 nearest, no more than 150 m further than the
+  nearest: at a big station (Zürich HB) the dozen vertices nearest a
+  tap are all two-node platform and escalator pieces joined to
+  nothing, and a walk from there was "No route found". The shorter
+  reach keeps a tap on a small island where it is.
 * the bridge tells the snapper which endpoint it is resolving
   (`mode: 'origin' | 'dest'`). The forward-reach test is the right
   question for an origin (can the car leave?) but the wrong one for
