@@ -156,3 +156,12 @@ def test_shared_cache_dirs(tmp_path):
             assert d.stat().st_mode & 0o7777 == 0o2775
     finally:
         os.umask(old)
+
+
+def test_shared_cache_dirs_fresh_root(tmp_path):
+    """The first non-English build into a fresh --dl: the cache root
+    (<dl>/cache/wikidata_cache) does not exist yet."""
+    from streetzim.cache_permissions import make_shared_dirs
+    root = tmp_path / "cache" / "wikidata_cache"
+    make_shared_dirs(root / "lang" / "de", root)
+    assert (root / "lang" / "de").is_dir()

@@ -207,9 +207,11 @@ def preserve_cache_permissions(staging: Path, previous: Path) -> None:
 def make_shared_dirs(directory: Path | str, root: Path | str) -> None:
     """Create `directory` under the cache `root`, each new level with the
     root's group and mode (share_like); a level another build creates at
-    the same moment is fine."""
+    the same moment is fine. A root that does not exist yet (the first
+    build into a fresh --dl) is created as the build creates any folder."""
     directory, root = Path(directory), Path(root)
     rel = directory.relative_to(root)
+    root.mkdir(parents=True, exist_ok=True)
     cur = root
     for part in rel.parts:
         cur = cur / part
