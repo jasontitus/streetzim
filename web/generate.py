@@ -387,7 +387,7 @@ REGIONS = [
         "language": "de",
         "title": "Schweiz und die Alpen (Ultralight)",
         "zim_file": "osm-switzerland-de-ultralight.zim",
-        "description": "Die kleine Ausgabe der deutschen Schweiz-Karte: dieselben Orte, Straßen, Wege und Routen zu Fuß, mit dem Rad und dem Auto, mit deutschen Ortsnamen und deutscher Bedienoberfläche &mdash; aber ohne Satellitenbilder und ohne Wikipedia-Artikel, und die Karte reicht bis Zoomstufe 13 statt 14. Rund halb so groß.",
+        "description": "Die kleine Ausgabe der deutschen Schweiz-Karte: dieselben Orte, Straßen, Wege und Routen zu Fuß, mit dem Rad und dem Auto, mit deutschen Ortsnamen und deutscher Bedienoberfläche &mdash; aber ohne Satellitenbilder, ohne Wikipedia-Artikel und ohne die Kiwix-eigene Volltextsuche (die Suche in der Karte findet weiterhin alle Orte und Adressen), und die Karte reicht bis Zoomstufe 13 statt 14. Rund ein Drittel so groß.",
     },
     {
         "id": "switzerland-light",
