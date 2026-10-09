@@ -170,8 +170,11 @@ def prune(item: str, keep: int, dry_run: bool) -> Tuple[int, int]:
             continue
         # `ia delete <item> <file>` — requires `ia configure` auth with
         # write access. We tolerate individual failures so one bad file
-        # doesn't abort the whole cleanup run.
-        r = ia(["delete", item, v["name"]])
+        # doesn't abort the whole cleanup run. No backup: by default
+        # archive.org keeps a deleted file under history/files/ for good, so
+        # every prune left a full copy behind (2.1 TB of them, removed by
+        # hand 2026-10-09). --no-backup only drops ia's own header; send 0.
+        r = ia(["delete", "--no-backup", "-H", "x-archive-keep-old-version:0", item, v["name"]])
         if r.returncode != 0:
             print(f"    FAILED: {r.stderr.strip()}", file=sys.stderr)
     return keep, len(victims)
