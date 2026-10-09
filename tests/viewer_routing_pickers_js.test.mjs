@@ -57,7 +57,8 @@ function make(opts = {}) {
   var travelBtns = {}; var driveMode = { active: false, exit() {}, setRoute() {} };
   var __routeDebugLabel, __routeDebugPops;
   function setRoutingStatus(t, st) { statusEl.textContent = t; statusEl.state = st || ''; }
-  function syncTravelButtons() {} function resetGoButtons() {} function setExpandHint() {}
+  var expandHint = '';
+  function syncTravelButtons() {} function resetGoButtons() {} function setExpandHint(t) { expandHint = t || ''; }
   function stopRouteProgressIndicator() {} function startRouteProgressIndicator() {} function cancelInFlightRoute() {}
   function coordLabel(a, b) { return a + ',' + b; } function makeMarkerEl() { return {}; }
   function haversine(a, b, c, d) { return ${opts.realDistance ? 'env.hav(a, b, c, d)' : '1000'}; }
@@ -80,7 +81,8 @@ function make(opts = {}) {
   env.SZ_HERE = SZ_HERE;
   env.api = { setOriginFromLatLon, setDestFromLatLon, setTravelMode, clearRoute, win: window, originInput,
     get state() { return { originNode, destNode, originMoved, destMoved, status: statusEl.textContent,
-      statusState: statusEl.state, minimized: panelClasses.has('minimized'),
+      statusState: statusEl.state, minimized: panelClasses.has('minimized'), hint: expandHint,
+      fold() { panelClasses.add('minimized'); },
       oIn: originInput.value, dIn: destInput.value, oMarker: originMarker && originMarker.ll,
       dMarker: destMarker && destMarker.ll }; } };`;
   new Function('env', 'el', body)(env, el);
@@ -341,14 +343,30 @@ await ok('a destination 3 km from its pick gets the note', async () => {
   assert.ok(hav(2, 2, 2, 2.027) > 2900 && hav(2, 2, 2, 2.027) < 3100);
   assert.strictEqual(st.status, `The route ends ${km(hav(2, 2, 2, 2.027))} from the destination`);
 });
-await ok('a far-end note keeps the panel unfolded (folded, the status line is hidden)', async () => {
-  for (const [dSnap, folded] of [[[2, 2.1], false], [[2, 2.001], true]]) {
+await ok('folded (a phone), the header carries the far-end note in short', async () => {
+  // The panel folds over the route whatever the note; the folded header
+  // is what shows, so the note goes there too. Folded before (an earlier
+  // route, or the reader) or folded now: the same.
+  for (const before of [false, true]) {
     const e = make({ realDistance: true, vh: 100, panelH: 80 }); const a = e.api;
+    if (before) a.state.fold();
     a.setOriginFromLatLon(1, 1, 'O'); await snap(e, 'origin', 10, 1, 1);
-    a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20, ...dSnap);
+    a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20, 2, 2.1);
     await route(e, {});
-    assert.strictEqual(a.state.minimized, folded, JSON.stringify(dSnap));
+    assert.strictEqual(a.state.minimized, true);
+    assert.ok(a.state.hint.endsWith(` · ends ${km(hav(2, 2, 2, 2.1))} away`), a.state.hint);
   }
+  const e = make({ realDistance: true }); const a = e.api;     // near ends: no note
+  a.setOriginFromLatLon(1, 1, 'O'); await snap(e, 'origin', 10, 1, 1);
+  a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20, 2, 2.001);
+  await route(e, {});
+  assert.ok(!a.state.hint.includes('away'), a.state.hint);
+});
+await ok('the short note names the start, or both ends', async () => {
+  let st = await farRoute([1.05, 1], [2, 2]);
+  assert.ok(st.hint.endsWith(` · starts ${km(hav(1, 1, 1.05, 1))} away`), st.hint);
+  st = await farRoute([1.05, 1], [2, 2.1]);
+  assert.ok(st.hint.endsWith(` · starts ${km(hav(1, 1, 1.05, 1))}, ends ${km(hav(2, 2, 2, 2.1))} away`), st.hint);
 });
 await ok('a route that lands while a newer pick snaps is described by its own picks', async () => {
   const e = make({ realDistance: true }); const a = e.api;

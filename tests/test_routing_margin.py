@@ -287,6 +287,14 @@ def test_the_main_network_stays_open_however_small_the_region(tmp_path, monkeypa
     closed_nodes = {int(v) for v in np.unique(src[before[:, 4] != after[:, 4]])}
     assert not closed_nodes & {ix[k] for k in GRID}
     assert {ix["f1"], ix["s"]} <= closed_nodes
+    # The main network is the largest component, not the one with the most
+    # nodes inside: here the exclave m1-m4 has four inside, the grid one.
+    g2 = _build(tmp_path, monkeypatch, "g2")
+    src, before = _edges(g2)
+    close_cut_off_roads(str(g2), box(7.445, 43.70, 7.485, 43.725))
+    _, after = _edges(g2)
+    closed_nodes = {int(v) for v in np.unique(src[before[:, 4] != after[:, 4]])}
+    assert not closed_nodes & {ix[k] for k in GRID}
 
 
 def test_nothing_past_the_border_leaves_the_file_as_it_was(tmp_path, monkeypatch):

@@ -220,21 +220,35 @@
   // nearest road can be kilometres away (past a clipped map's border, tens
   // of km), and the marker alone does not say how far it is.
   var ROUTE_END_FAR_M = 2000;
-  // `picks`: the points picked when this route was asked for (a newer pick
-  // may be snapping while it lands).
-  function routeEndsNote(picks) {
+  // How far (m) the route's start and end are from the points picked when
+  // it was asked for (`picks`: a newer pick may be snapping while it
+  // lands); 0 for an end nearer than ROUTE_END_FAR_M.
+  function routeEnds(picks) {
     function off(pick, e7) {
       if (!pick || !e7) return 0;
       var m = haversine(pick.lat, pick.lon, e7[0] / 1e7, e7[1] / 1e7);
       return m >= ROUTE_END_FAR_M ? m : 0;
     }
-    var o = off(picks.origin, originCoordE7), d = off(picks.dest, destCoordE7);
+    return { o: off(picks.origin, originCoordE7), d: off(picks.dest, destCoordE7) };
+  }
+  // The status line's note about far ends ('' for none), and its short form
+  // for the folded panel's header (phones fold the panel over a route).
+  function routeEndsNote(ends, short) {
+    var o = ends.o, d = ends.d;
     if (o && d) {
-      return szT('routing.far_both', 'The route starts {start} from the start point and ends {end} from the destination',
-                 { start: formatDistance(o), end: formatDistance(d) });
+      return short ? szT('routing.far_both_short', 'starts {start}, ends {end} away',
+                         { start: formatDistance(o), end: formatDistance(d) })
+        : szT('routing.far_both', 'The route starts {start} from the start point and ends {end} from the destination',
+              { start: formatDistance(o), end: formatDistance(d) });
     }
-    if (d) return szT('routing.far_dest', 'The route ends {dist} from the destination', { dist: formatDistance(d) });
-    if (o) return szT('routing.far_origin', 'The route starts {dist} from the start point', { dist: formatDistance(o) });
+    if (d) {
+      return short ? szT('routing.far_dest_short', 'ends {dist} away', { dist: formatDistance(d) })
+        : szT('routing.far_dest', 'The route ends {dist} from the destination', { dist: formatDistance(d) });
+    }
+    if (o) {
+      return short ? szT('routing.far_origin_short', 'starts {dist} away', { dist: formatDistance(o) })
+        : szT('routing.far_origin', 'The route starts {dist} from the start point', { dist: formatDistance(o) });
+    }
     return '';
   }
 
@@ -324,8 +338,11 @@
         distEl.textContent = formatDistance(result.distance);
         timeEl.textContent = formatTime(result.time);
         // The folded header carries the summary, so comparing modes on
-        // a phone needs no unfold.
-        setExpandHint('— ' + formatTime(result.time) + ' · ' + formatDistance(result.distance));
+        // a phone needs no unfold, and a far end's note in short.
+        var ends = routeEnds(picks);
+        var endsShort = routeEndsNote(ends, true);
+        setExpandHint('— ' + formatTime(result.time) + ' · ' + formatDistance(result.distance)
+                      + (endsShort ? ' · ' + endsShort : ''));
         renderRoads(result.roads);
         resultEl.style.display = 'block';
         clearBtn.style.display = 'block';
@@ -343,8 +360,7 @@
         // Say so when an end is far from its pick (the note gives the
         // distance) or the router had to move it (it was on a road cut off
         // from the rest, e.g. by the map's edge).
-        var endsNote = routeEndsNote(picks);
-        setRoutingStatus(endsNote || (originMoved && destMoved
+        setRoutingStatus(routeEndsNote(ends, false) || (originMoved && destMoved
           ? szT('routing.both_moved', 'Start and destination moved to the nearest reachable roads')
           : destMoved ? szT('routing.dest_moved', 'Destination moved to the nearest reachable road')
           : originMoved ? szT('routing.origin_moved', 'Start moved to the nearest reachable road') : ''), 'done');
@@ -365,8 +381,7 @@
         try {
           var panelH = panel.getBoundingClientRect().height;
           var vh = window.innerHeight || document.documentElement.clientHeight;
-          // Not with a far-end note: folded, the status line is hidden.
-          if (vh > 0 && panelH / vh > 0.5 && !endsNote
+          if (vh > 0 && panelH / vh > 0.5
               && !panel.classList.contains('minimized')) {
             panel.classList.add('minimized');
             if (minBtn) {

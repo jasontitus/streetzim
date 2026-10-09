@@ -11,6 +11,7 @@ changes (osmium still gets the box).
 from __future__ import annotations
 
 import json
+import os
 import random
 import sys
 from pathlib import Path
@@ -396,7 +397,33 @@ def test_the_writer_keeps_tiles_by_the_outline_and_redirects_context(poly_file, 
                                  zim_builder="manifest", max_zoom=14)
     p = lambda t: f"tiles/{t.z}/{t.x}/{t.y}.pbf"
     assert set(cr.items) == {p(inside10), p(outside10), p(inside11)}
+    # The Rust packer's creator has no aliases: a redirect.
     assert cr.redirects == {f"ctx/10/{outside10.x}/{outside10.y}.pbf": p(outside10)}
+
+    class AliasingCreator(Creator):
+        def __init__(self):
+            super().__init__()
+            self.aliases = {}
+
+        def add_alias(self, path, title, target, hints=None):
+            self.aliases[path] = target
+    ac = AliasingCreator()
+    zim_writer._add_vector_tiles(ac, Item, output_path=tmp_path / "m.zim", tiles=None,
+                                 mbtiles_path="tiles", tile_count=len(tiles), bbox=None,
+                                 zim_builder="python", max_zoom=14)
+    # libzim's creator: an alias, which readers serve as an ordinary item.
+    assert ac.aliases == {f"ctx/10/{outside10.x}/{outside10.y}.pbf": p(outside10)}
+    assert ac.redirects == {}
+    # A clip-zoom tile that is itself an alias (the same bytes as an earlier
+    # tile): its context alias points at the item, not at the alias.
+    dup = [(10, inside10.x, inside10.y, b"sea"), (10, outside10.x, outside10.y, b"sea")]
+    monkeypatch.setattr(zim_writer, "iter_tiles_from_mbtiles", lambda *a, **kw: iter(dup))
+    ac = AliasingCreator()
+    zim_writer._add_vector_tiles(ac, Item, output_path=tmp_path / "m.zim", tiles=None,
+                                 mbtiles_path="tiles", tile_count=2, bbox=None,
+                                 zim_builder="python", max_zoom=14)
+    assert ac.aliases == {p(outside10): p(inside10),
+                          f"ctx/10/{outside10.x}/{outside10.y}.pbf": p(inside10)}
 
 
 def test_the_search_step_drops_records_outside_the_outline(poly_file, tmp_path):
@@ -448,3 +475,116 @@ def test_the_terrain_gate_skips_what_the_clip_dropped(poly_file):
         z, keeps = ctc.clip_filter(Arc(mc))
         assert z == 10
         assert keeps(inside.x, inside.y, 11) and not keeps(outside.x, outside.y, 11)
+
+
+def test_rings_nest_even_odd_as_osmium_reads_them():
+    # A lake (4-6) in an island (3-7) in a lake (2-8) in land (0-10).
+    sq = lambda a, b: [(a, a), (b, a), (b, b), (a, b), (a, a)]
+    g = clip.parse_poly(_poly_text(("1", sq(0, 10)), ("!2", sq(2, 8)), ("3", sq(3, 7)), ("!4", sq(4, 6))))
+    assert [g.contains(Point(v, v)) for v in (1, 2.5, 3.5, 5)] == [True, False, True, False]
+
+
+def test_a_clip_touching_the_box_edge_writes_a_poly(tmp_path):
+    # Part of the outline only touches the box's edge: the cut leaves a line
+    # beside the polygon, which write_poly (rings only) could not write.
+    p = tmp_path / "touch.poly"
+    p.write_text(_poly_text(("1", [(1, 1), (5, 1), (5, 5), (1, 5), (1, 1)]),
+                            ("2", [(10, 0), (12, 0), (12, 2), (10, 2), (10, 0)])))
+    c = clip.Clip.from_poly_file(str(p), buffer=0, bbox=(0.0, 0.0, 10.0, 10.0))
+    assert c.geom.geom_type == "Polygon"
+    c.write_poly(str(tmp_path / "out.poly"))
+    assert clip.parse_poly((tmp_path / "out.poly").read_text()).equals(c.geom)
+
+
+def _margin_km(grown, geom, lon_range):
+    """The smallest distance (km) from the buffered outline's boundary, in
+    lon_range, to `geom`: each sample measured in its own local plane."""
+    import math
+    import shapely
+    pts = shapely.segmentize(grown.exterior, 0.02).coords
+    out = []
+    for lon, lat in pts:
+        if not lon_range[0] <= lon <= lon_range[1]:
+            continue
+        k = math.cos(math.radians(lat)) * 111.32
+        local = shapely.transform(geom, lambda c, lon=lon, lat=lat, k=k: (c - (lon, lat)) * (k, 111.32))
+        out.append(local.distance(Point(0, 0)))
+    return min(out)
+
+
+def test_the_buffer_holds_far_from_the_middle_meridian():
+    # A wide outline at 60N with a diagonal edge 35-40 deg from its middle
+    # meridian (Canada's Alaska panhandle): one projection for the whole
+    # outline sheared that margin to about 7 km of the asked 10.
+    g = clip.parse_poly(_poly_text(("1", [(-140, 58), (-130, 62), (-60, 62), (-60, 55), (-140, 55), (-140, 58)])))
+    grown = clip.buffer_km(g, 10)
+    assert _margin_km(grown, g, (-141, -129)) > 9.5
+
+
+def test_the_terrain_gate_counts_the_clip_zoom_and_the_outline_edge():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ctc", ROOT / "cloud" / "check_terrain_coverage.py")
+    ctc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ctc)
+    gone = (10, lambda x, y, z: False)              # the clip kept nothing past z10
+    assert not ctc.clip_skips(gone, 0, 0, 10)       # the clip zoom is always in the ZIM
+    assert ctc.clip_skips(gone, 0, 0, 11)
+    assert not ctc.clip_skips(None, 0, 0, 11)
+    # A tile that meets clipArea only within CLIP_EDGE_DEG of its edge is not
+    # counted: the simplified area may run past the outline the writer used.
+    import mercantile
+    t = mercantile.tile(30.0, 30.0, 12)
+    w, s_, e, n = ctc.tile_bounds(t.x, t.y, 12)
+    area = {"type": "Polygon", "coordinates": [[[e - 0.005, s_], [e + 1, s_], [e + 1, n], [e - 0.005, n], [e - 0.005, s_]]]}
+
+    class Arc:
+        def get_entry_by_path(self, p):
+            data = json.dumps({"clipMinZoom": 10, "clipArea": area}).encode()
+            return type("E", (), {"get_item": lambda s: type("I", (), {"content": data})()})()
+    clipf = ctc.clip_filter(Arc())
+    assert ctc.clip_skips(clipf, t.x, t.y, 12)
+    assert not ctc.clip_skips(clipf, t.x + 1, t.y, 12)
+
+
+def test_the_search_step_drops_records_outside_on_the_pbf_path(poly_file, tmp_path, monkeypatch):
+    # The path every real build takes (a PBF beside the search records).
+    import create_osm_zim
+    monkeypatch.setattr(create_osm_zim, "extract_wiki_tags_pbf", lambda *a, **kw: {})
+    recs = [{"name": "Tanta", "type": "place", "lat": 30.79, "lon": 31.3},
+            {"name": "Suez", "type": "place", "lat": 29.97, "lon": 32.55}]
+    cache = tmp_path / "cache.jsonl"
+    cache.write_text("".join(json.dumps(r) + "\n" for r in recs))
+    pbf = tmp_path / "region.osm.pbf"
+    pbf.write_bytes(b"")
+    args = create_osm_zim.build_parser().parse_args(
+        ["--search-cache", str(cache), "--skip-address-extract", "--pbf", str(pbf)])
+    clip.set_active(clip.Clip.from_poly_file(str(poly_file), buffer=0))
+    out = create_osm_zim._build_search(
+        args=args, bbox_str="28,29,34,32.5", mbtiles_path=None, pbf_path=str(pbf), tiles=None,
+        tmpdir=str(tmp_path), total_steps=6, use_streaming=False, work_pbf=None,
+        work_pbf_cut=False)
+    path = next(v for v in out if isinstance(v, str) and v.endswith(".jsonl"))
+    assert [json.loads(ln)["name"] for ln in open(path)] == ["Tanta"]
+
+
+def test_a_build_starts_and_ends_with_no_clip(poly_file, tmp_path, monkeypatch):
+    # A clip from the shell (STREETZIM_CLIP_POLY) or an earlier build in this
+    # process must not reach a build without --clip-poly, nor outlive one.
+    import create_osm_zim
+    monkeypatch.setenv(area.CLIP_POLY_ENV, str(poly_file))
+    seen = []
+
+    def stop(**kw):
+        seen.append((clip.active(), area.osmium_extract_args(BBOX, str(tmp_path))))
+        raise RuntimeError("stop")
+    monkeypatch.setattr(create_osm_zim, "_acquire_tiles", stop)
+    with pytest.raises(RuntimeError, match="stop"):
+        create_osm_zim.main(["--bbox", "28,29,34,32.5", "--name", "T", "--mbtiles", str(tmp_path / "t.mbtiles"),
+                             "--output", str(tmp_path / "t.zim")])
+    assert seen == [(None, ["-b", "28.0,29.0,34.0,32.5"])]
+    # A build with --clip-poly that fails part-way leaves no clip behind.
+    with pytest.raises(RuntimeError, match="stop"):
+        create_osm_zim.main(["--bbox", "28,29,34,32.5", "--name", "T", "--mbtiles", str(tmp_path / "t.mbtiles"),
+                             "--clip-poly", str(poly_file), "--output", str(tmp_path / "t.zim")])
+    assert seen[1][0] is not None and seen[1][1][0] == "-p"
+    assert clip.active() is None and area.CLIP_POLY_ENV not in os.environ

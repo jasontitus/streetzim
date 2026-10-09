@@ -1522,9 +1522,18 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
                         ))
                     if clip is not None and z == clip.min_zoom and clip.needs_context(x, y):
                         # The viewer's context past the outline (130:
-                        # openmaptiles-ctx reads ctx/).
-                        _add_redirect(creator, f"ctx/{z}/{x}/{y}.pbf",
-                                      f"Context tile {z}/{x}/{y}", tile_path)
+                        # openmaptiles-ctx reads ctx/). An alias where the
+                        # writer has them: readers serve it as an ordinary
+                        # item (docs/tile-aliases.md). The Rust packer's
+                        # manifest has redirects only; kiwix-serve answers
+                        # those with a 302.
+                        ctx_path, ctx_title = f"ctx/{z}/{x}/{y}.pbf", f"Context tile {z}/{x}/{y}"
+                        target = alias_of or tile_path
+                        if aliaser.enabled:
+                            from libzim.writer import Hint
+                            creator.add_alias(ctx_path, ctx_title, target, {Hint.FRONT_ARTICLE: False})
+                        else:
+                            _add_redirect(creator, ctx_path, ctx_title, target)
                         context_tiles += 1
                     tiles_added += 1
                     _watchdog_tile_count[0] = tiles_added
@@ -1569,7 +1578,7 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
         skip_str = ((f" (skipped {tiles_skipped_empty} empty)"
                      if tiles_skipped_empty else "")
                     + (f" (clipped {tiles_clipped} outside the outline,"
-                       f" {context_tiles} context redirects)"
+                       f" {context_tiles} context entries)"
                        if clip is not None else ""))
         print(f"\r    Added {tiles_added} tiles in {elapsed:.0f}s ({rate_str}){skip_str}; "
               f"{aliaser.summary()}                ", flush=True)

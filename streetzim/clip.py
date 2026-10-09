@@ -33,17 +33,16 @@ KM_PER_DEG = 111.32
 
 
 def parse_poly(text: str):
-    """The (Multi)Polygon of an Osmosis .poly file. Outer rings are joined
-    and '!' rings cut out of them; an outer ring that lies inside a hole (an
-    island in a lake) is put back, whatever the order in the file. A ring is
-    made valid first, so a self-crossing one keeps both lobes. An outline
-    at the antimeridian is refused: one whose rings reach +-180 (Geofabrik
-    splits them there) or jump across it."""
+    """The (Multi)Polygon of an Osmosis .poly file, read as osmium reads it:
+    even-odd over all rings, so a '!' ring is a hole, an island in it is
+    land again and a lake in that island water, whatever the order in the
+    file. A ring is made valid first, so a self-crossing one keeps both
+    lobes. An outline at the antimeridian is refused: one whose rings reach
+    +-180 (Geofabrik splits them there) or jump across it."""
     import shapely
     from shapely.geometry import Polygon
-    from shapely.ops import unary_union
 
-    outers, holes = [], []
+    geom = Polygon()
     lines = [ln.strip() for ln in text.splitlines()]
     i = 1                                   # line 0 is the file's name
     while i < len(lines):
@@ -68,15 +67,8 @@ def parse_poly(text: str):
         if any(abs(a[0] - b[0]) > 180.0 for a, b in zip(ring, ring[1:] + ring[:1])):
             raise ValueError(f"ring {name!r} jumps across the antimeridian: "
                              "an outline there is not supported")
-        part = _polygonal(shapely.make_valid(Polygon(ring)))
-        (holes if name.startswith("!") else outers).append(part)
-    geom = unary_union(outers) if outers else Polygon()
-    if holes:
-        cut = unary_union(holes)
-        islands = [o for o in outers if cut.contains(o)]
-        geom = geom.difference(cut)
-        if islands:
-            geom = geom.union(unary_union(islands))
+        geom = _polygonal(geom.symmetric_difference(
+            _polygonal(shapely.make_valid(Polygon(ring)))))
     if geom.is_empty:
         raise ValueError("the .poly file encloses no area")
     return geom
@@ -92,18 +84,38 @@ def _polygonal(geom):
     return unary_union(parts) if parts else Polygon()
 
 
+BUFFER_STRIP_DEG = 6.0
+
+
 def buffer_km(geom, km: float):
     """`geom` widened by about `km` kilometres, within the globe. The buffer
-    is taken in a sinusoidal projection about the outline's middle meridian,
-    which scales each point's longitude by the cosine of its own latitude:
-    a single cosine for the whole outline made Norway's margin 12 km at its
-    southern end and 8 km at its northern one."""
+    is taken in a sinusoidal projection, which scales each point's
+    longitude by the cosine of its own latitude (a single cosine for the
+    whole outline made Norway's margin 12 km at its southern end and 8 km
+    at its northern one), strip by strip of BUFFER_STRIP_DEG of longitude,
+    each about its own middle meridian: far from it the projection shears
+    (one projection for Canada gave 7 km of 10 at the Alaska panhandle;
+    6-degree strips and 8-segment arcs keep it above 9.5)."""
     if km <= 0:
         return geom
+    from shapely.geometry import box
+    from shapely.ops import unary_union
+    west, _, east, _ = geom.bounds
+    parts = []
+    x = west
+    while x < east:
+        x1 = min(x + BUFFER_STRIP_DEG, east)
+        piece = _polygonal(geom.intersection(box(x, -90.0, x1, 90.0)))
+        if not piece.is_empty:
+            parts.append(_buffer_sinusoidal(piece, km, (x + x1) / 2))
+        x = x1
+    return _polygonal(unary_union(parts).intersection(box(-180.0, -90.0, 180.0, 90.0)))
+
+
+def _buffer_sinusoidal(geom, km: float, lon0: float):
+    """`geom` buffered by `km` in a sinusoidal projection about `lon0`."""
     import numpy as np
     import shapely
-    from shapely.geometry import box
-    lon0 = (geom.bounds[0] + geom.bounds[2]) / 2
 
     def scale(c, inverse):
         k = np.maximum(np.cos(np.radians(c[:, 1])), 0.05)
@@ -113,9 +125,8 @@ def buffer_km(geom, km: float):
     # Densified both ways (0.05 deg), so a long edge follows its latitudes'
     # cosines instead of one straight line between its ends.
     flat = shapely.transform(shapely.segmentize(geom, 0.05), lambda c: scale(c, False))
-    grown = shapely.segmentize(flat.buffer(km / KM_PER_DEG, quad_segs=4), 0.05)
-    grown = shapely.transform(grown, lambda c: scale(c, True))
-    return grown.intersection(box(-180.0, -90.0, 180.0, 90.0))
+    grown = shapely.segmentize(flat.buffer(km / KM_PER_DEG, quad_segs=8), 0.05)
+    return shapely.transform(grown, lambda c: scale(c, True))
 
 
 def tile_box(z: int, x: int, y: int) -> tuple[float, float, float, float]:
@@ -162,7 +173,9 @@ class Clip:
         grown = buffer_km(geom, buffer)
         if bbox is not None:
             from shapely.geometry import box
-            grown = grown.intersection(box(bbox[0], bbox[1], bbox[2], bbox[3]))
+            # Polygons only: an outline touching the box's edge leaves
+            # lines and points in the intersection (write_poly has rings).
+            grown = _polygonal(grown.intersection(box(bbox[0], bbox[1], bbox[2], bbox[3])))
             if grown.is_empty:
                 raise ValueError(f"{path}: the outline does not meet the box {tuple(bbox)}")
         return cls(grown, min_zoom, border=geom)

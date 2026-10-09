@@ -85,6 +85,12 @@ def clip_filter(arc):
     return int(mc["clipMinZoom"]), lambda x, y, z: area.intersects(box(*tile_bounds(x, y, z)))
 
 
+def clip_skips(clip, x, y, z):
+    """Whether the gate leaves tile z/x/y out: the clip (clip_filter) dropped
+    it. Tiles up to the clip zoom are all in a clipped ZIM."""
+    return clip is not None and z > clip[0] and not clip[1](x, y, z)
+
+
 def tile_center(x, y, z):
     n = 2 ** z
     lon = (x + 0.5) / n * 360 - 180
@@ -164,7 +170,7 @@ def main():
         x1, y1 = deg2tile(s, e, z)
         for x in tile_columns(w, s, e, n, z):
             for y in range(min(y0, y1), max(y0, y1) + 1):
-                if clip is not None and z > clip[0] and not clip[1](x, y, z):
+                if clip_skips(clip, x, y, z):
                     outside_clip += 1
                     continue
                 lat, lon = tile_center(x, y, z)

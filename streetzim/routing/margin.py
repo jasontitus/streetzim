@@ -12,8 +12,9 @@ clipped Iran build: "No route found" after minutes in the viewer).
 
 A node loses car access on its outgoing edges (class_access bit 9, which
 walking and cycling ignore) when all of these hold:
-  - it lies outside the border: nothing inside changes, so no route
-    between two points inside does either (an exclave's roads included);
+  - it lies outside the border: no road inside loses car access, an
+    exclave's included (a route between two parts of an exclave that
+    only meet through the neighbour's closed roads is lost);
   - the main network (the largest strongly connected component of the
     drive graph) cannot reach it: a road you can drive to stays a
     destination, a one-way leaving the country included;
@@ -22,6 +23,14 @@ walking and cycling ignore) when all of these hold:
     margin stays open. (The main network, the largest component, is
     reached, so it stays open however small the region.)
 The car snap then passes those nodes over. Nodes, edges and geometry stay.
+No route from the main network changes: every node it reaches stays open.
+
+Left as they were: pieces of the neighbour's network that the border
+outline takes in (Geofabrik's outlines run up to a few km past the real
+border; in Iran 2,244 such nodes). They are inside, so they stay open,
+and a destination there can still fail as before. Telling them apart from
+an exclave's streets (Melilla's, Point Roberts') takes more than the
+outline: the cure is a snap that wants a destination the start can reach.
 
 One case is left to the viewer: a node past the border with no car edge
 of its own (the end of a one-way) whose only way in was closed still
