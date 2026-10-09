@@ -31,17 +31,18 @@ def download_osm_extract(geofabrik_path, dest):
     download_file(url, dest, f"OSM extract ({geofabrik_path})")
 
 
-def extract_bbox_from_pbf(pbf_path, bbox, output_path):
+def extract_bbox_from_pbf(pbf_path, bbox, output_path, clip=True):
     """Extract a bounding box from a PBF file using osmium.
 
     A box across the antimeridian is cut as two boxes, one each side
-    (streetzim/area.py)."""
+    (streetzim/area.py). With `clip` False, an active --clip-poly does not
+    apply: the whole box is cut."""
     print(f"  Extracting bbox {bbox} from PBF...")
     workdir = os.path.dirname(os.path.abspath(str(output_path)))
     cmd = [
         "osmium", "extract",
         *area.osmium_extract_args(parse_bbox(bbox), workdir, bbox_arg=bbox,
-                                  flag="--bbox"),
+                                  flag="--bbox", clip=clip),
         "--strategy", "complete_ways",
         "--overwrite",
         "-o", str(output_path),

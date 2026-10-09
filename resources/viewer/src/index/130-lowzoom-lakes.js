@@ -70,6 +70,13 @@ function _szAddClipMask(style, config) {
     ctx.minzoom = z;
     ctx.maxzoom = z;
     delete ctx.attribution;          // the base source already credits it
+    // The builder redirects ctx/z/x/y to the clip-zoom tiles that reach past
+    // the outline (map-config "clipContext"): inside, where clip-inside
+    // hides the copies anyway, the overzoomed tiles are a quick 404 rather
+    // than a fetch and parse at every zoom. Early trial builds: tiles/.
+    if (config.clipContext === 'ctx') {
+      ctx.tiles = base.tiles.map(function(u) { return u.replace('tiles/{z}/', 'ctx/{z}/'); });
+    }
     style.sources['openmaptiles-ctx'] = ctx;
     style.sources['clip-area'] = { "type": "geojson", "data": config.clipArea };
     var copies = [];
@@ -78,15 +85,16 @@ function _szAddClipMask(style, config) {
       var c = JSON.parse(JSON.stringify(l));
       c.id = _SZ_CLIP_CTX + l.id;
       c.source = 'openmaptiles-ctx';
-      // From clipMinZoom only: below it both sources hold the same tiles.
-      c.minzoom = Math.max(l.minzoom || 0, z);
+      // Past clipMinZoom only: up to the next zoom the base source still
+      // has its clip-zoom tiles everywhere, and both would draw.
+      c.minzoom = Math.max(l.minzoom || 0, z + 1);
       copies.push(c);
     });
     copies.push({
       "id": "clip-inside",
       "type": "fill",
       "source": "clip-area",
-      "minzoom": z,
+      "minzoom": z + 1,
       "paint": { "fill-color": "#f8f4f0" }
     });
     // Right after the background, under every base layer.
@@ -117,6 +125,15 @@ function szClipContextIds(config) {
   return makeStyle(config).layers.filter(function(l) {
     return l.id.indexOf(_SZ_CLIP_CTX) === 0 || l.id === 'clip-inside';
   }).map(function(l) { return l.id; });
+}
+// Every layer satellite mode hides (120): the base fills, and a clip's.
+function szSatelliteHiddenIds(config) {
+  return [
+    'landcover-grass', 'landcover-wood', 'landcover-farmland',
+    'landuse-residential', 'landuse-commercial', 'landuse-park',
+    'water', 'water-lowzoom', 'waterway', 'building', 'building-outline',
+    'boundary-country', 'boundary-state', 'background'
+  ].concat(szClipContextIds(config));
 }
 
 function makeStyle(config) {

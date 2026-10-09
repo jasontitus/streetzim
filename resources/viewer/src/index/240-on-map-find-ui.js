@@ -360,7 +360,10 @@ function _hillshadeBeforeId(map) {
   var layers = (map.getStyle() && map.getStyle().layers) || [];
   for (var i = 0; i < layers.length; i++) {
     var l = layers[i];
-    if (l.type !== 'background' && l.type !== 'raster' && l.type !== 'hillshade') {
+    // Not under a --clip-poly build's context copies or the opaque fill
+    // over them (130): the relief would be hidden inside the country.
+    if (l.type !== 'background' && l.type !== 'raster' && l.type !== 'hillshade'
+        && l.id.indexOf(_SZ_CLIP_CTX) !== 0 && l.id !== 'clip-inside') {
       return l.id;
     }
   }

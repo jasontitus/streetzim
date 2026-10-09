@@ -13,6 +13,11 @@ the DEM VRT at the tile center. If it's land (elevation above a sea
 threshold) the terrain tile must be non-trivial (> MIN_BYTES). Blank
 land tiles => FAIL (exit 3) with a sample list.
 
+A ZIM built with --clip-poly has no tiles past its clip zoom outside the
+outline (map-config.json clipMinZoom, clipArea): those are not counted.
+The outline in map-config is simplified (by 0.005 deg), so tiles within
+CLIP_EDGE_DEG of its edge are not counted either.
+
 Usage:
   check_terrain_coverage.py ZIM "minlon,minlat,maxlon,maxlat" \
       [--zooms 10-12] [--min-bytes 200] [--sea-level 2] \
@@ -41,6 +46,43 @@ def tile_columns(w, s, e, n, z):
         xe = deg2tile(s, e - 360 if e > 180 else e, z)[0]
         return sorted(set(range(x0, 2 ** z)) | set(range(0, xe + 1)))
     return range(min(x0, x1), max(x0, x1) + 1)
+
+
+CLIP_EDGE_DEG = 0.01
+
+
+def tile_bounds(x, y, z):
+    """(west, south, east, north) of tile z/x/y."""
+    n = 2 ** z
+    north = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * y / n))))
+    south = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * (y + 1) / n))))
+    return x / n * 360 - 180, south, (x + 1) / n * 360 - 180, north
+
+
+def clip_filter(arc):
+    """(clip zoom, keeps(x, y, z)) for a --clip-poly ZIM, else None. keeps
+    is False for a tile the clip dropped: past the clip zoom and clear of the
+    outline (clipArea; or, in early trial builds, inside clipMask)."""
+    import json
+    try:
+        mc = json.loads(bytes(arc.get_entry_by_path("map-config.json").get_item().content))
+    except Exception:  # noqa: BLE001 — no map-config: not a clipped build
+        return None
+    if mc.get("clipMinZoom") is None or not (mc.get("clipArea") or mc.get("clipMask")):
+        return None
+    import shapely
+    from shapely.geometry import Polygon, box, shape
+    from shapely.ops import unary_union
+    if mc.get("clipArea"):
+        area = shape(mc["clipArea"])
+    else:
+        # The mask is the widened box minus the outline: its holes.
+        mask = shape(mc["clipMask"])
+        polys = getattr(mask, "geoms", [mask])
+        area = unary_union([Polygon(r) for p in polys for r in p.interiors])
+    area = area.buffer(-CLIP_EDGE_DEG)
+    shapely.prepare(area)
+    return int(mc["clipMinZoom"]), lambda x, y, z: area.intersects(box(*tile_bounds(x, y, z)))
 
 
 def tile_center(x, y, z):
@@ -114,13 +156,17 @@ def main():
             return float(v[0, 0]) if v.size else -32768.0
         return -32768.0
 
-    land = blank_land = missing_land = ocean = flat_land = 0
+    land = blank_land = missing_land = ocean = flat_land = outside_clip = 0
     offenders = []
+    clip = clip_filter(arc)
     for z in range(z0, z1 + 1):
         x0, y0 = deg2tile(n, w, z)
         x1, y1 = deg2tile(s, e, z)
         for x in tile_columns(w, s, e, n, z):
             for y in range(min(y0, y1), max(y0, y1) + 1):
+                if clip is not None and z > clip[0] and not clip[1](x, y, z):
+                    outside_clip += 1
+                    continue
                 lat, lon = tile_center(x, y, z)
                 if elev(lat, lon) <= a.sea_level:
                     ocean += 1
@@ -153,7 +199,8 @@ def main():
     bad = blank_land + missing_land
     print(f"terrain coverage {a.zim} z{a.zooms}: land={land} ocean={ocean} "
           f"blank-land={blank_land} missing-land={missing_land} "
-          f"flat-but-real={flat_land}")
+          f"flat-but-real={flat_land}"
+          + (f" outside-clip={outside_clip}" if clip is not None else ""))
     if bad:
         print(f"[FAIL] {bad} land tiles with no terrain:")
         for o in offenders:

@@ -251,12 +251,7 @@ if (!window.__szUnsupported) fetchConfig(1)
       var satelliteAdded = false;
 
       // Layers to hide when satellite is active
-      var hiddenInSatellite = [
-        'landcover-grass', 'landcover-wood', 'landcover-farmland',
-        'landuse-residential', 'landuse-commercial', 'landuse-park',
-        'water', 'water-lowzoom', 'waterway', 'building', 'building-outline',
-        'boundary-country', 'boundary-state', 'background'
-      ].concat(szClipContextIds(config));
+      var hiddenInSatellite = szSatelliteHiddenIds(config);
 
       function addSatelliteLayer() {
         if (satelliteAdded) return;

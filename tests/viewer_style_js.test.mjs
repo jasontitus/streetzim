@@ -65,7 +65,7 @@ function load(env = {}) {
   const logs = [];
   const fn = new Function('window', 'document', 'location', 'getComputedStyle',
     'baseUrl', 'dbg', 'describeError', 'Path2D', 'fetch',
-    SRC + '\nreturn { makeStyle, _SZ_DARK, _szDarkFor, szClipContextIds, _SZ_MAKI, _SZ_POI_ICON, _SZ_POI_GROUP,' +
+    SRC + '\nreturn { makeStyle, _SZ_DARK, _szDarkFor, szClipContextIds, szSatelliteHiddenIds, _SZ_MAKI, _SZ_POI_ICON, _SZ_POI_GROUP,' +
     ' _szPoiIconExpr, _szPrefersDark, _szThemeStyle, initMapTheme, initPoiIcons,' +
     ' _szRenderPoiIcon, initRtlText, SZ_THEME_KEY, szReadThemeMode, szWriteThemeMode,' +
     ' szNextThemeMode, szThemeMode, szSetThemeMode, szThemeButton };');
@@ -213,7 +213,45 @@ await ok('theme: every colour in the light style has a dark value (no light patc
   assert.deepStrictEqual(missing, []);
 });
 
-await ok('clip: context copies under the map, from clipMinZoom; mask and outline on top; none without a clip', () => {
+await ok('clip: the dark theme colours each context copy as its layer', () => {
+  const st = load({ dark: true }).makeStyle(CONFIG);
+  const byId = layerMap(st);
+  const ctx = st.layers.filter(l => l.id.startsWith('ctx-'));
+  assert.ok(ctx.length > 10);
+  for (const c of ctx) assert.deepStrictEqual(c.paint, byId[c.id.slice(4)].paint, c.id);
+  assert.notDeepStrictEqual(byId['clip-inside'].paint, layerMap(load().makeStyle(CONFIG))['clip-inside'].paint);
+});
+
+await ok('clip: satellite mode hides the context copies and clip-inside with the base fills', () => {
+  const { szSatelliteHiddenIds, szClipContextIds } = load();
+  const plain = szSatelliteHiddenIds(NO_CLIP);
+  assert.ok(plain.includes('background') && plain.includes('water') && !plain.some(id => /^(ctx-|clip-)/.test(id)));
+  assert.deepStrictEqual(szSatelliteHiddenIds(CONFIG), plain.concat(szClipContextIds(CONFIG)));
+  assert.ok(szSatelliteHiddenIds(CONFIG).includes('clip-inside'));
+  // 120 hides exactly this list.
+  assert.ok(HTML.includes('var hiddenInSatellite = szSatelliteHiddenIds(config);'));
+});
+
+await ok('clip: hillshade goes above the context copies and clip-inside, under the base layers', () => {
+  // 240's _hillshadeBeforeId, cut out of the page; it reads _SZ_CLIP_CTX (130).
+  const at = HTML.indexOf('function _hillshadeBeforeId(map)');
+  let depth = 0, end = -1;
+  for (let i = HTML.indexOf('{', at); i < HTML.length; i++) {
+    if (HTML[i] === '{') depth++;
+    else if (HTML[i] === '}' && --depth === 0) { end = i + 1; break; }
+  }
+  assert.ok(at >= 0 && end > at);
+  const before = new Function('_SZ_CLIP_CTX', HTML.slice(at, end) + '\nreturn _hillshadeBeforeId;')('ctx-');
+  const st = load().makeStyle(CONFIG);
+  const map = { getStyle: () => st };
+  const firstBase = st.layers.find(l => l.type !== 'background' && !/^(ctx-|clip-)/.test(l.id));
+  assert.strictEqual(before(map), firstBase.id);
+  assert.ok(st.layers.findIndex(l => l.id === 'clip-inside') < st.layers.findIndex(l => l.id === firstBase.id));
+  const plain = load().makeStyle(NO_CLIP);
+  assert.strictEqual(before({ getStyle: () => plain }), plain.layers.find(l => l.type !== 'background').id);
+});
+
+await ok('clip: context copies under the map, past clipMinZoom; mask and outline on top; none without a clip', () => {
   const { makeStyle, szClipContextIds } = load();
   const st = makeStyle(CONFIG);
   const ids = st.layers.map(l => l.id);
@@ -224,17 +262,22 @@ await ok('clip: context copies under the map, from clipMinZoom; mask and outline
   assert.deepStrictEqual(copies.map(l => l.id), base.map(l => 'ctx-' + l.id));
   for (const [c, l] of copies.map((c, i) => [c, base[i]])) {
     assert.strictEqual(c.source, 'openmaptiles-ctx');
-    assert.strictEqual(c.minzoom, Math.max(l.minzoom || 0, 10));
+    assert.strictEqual(c.minzoom, Math.max(l.minzoom || 0, 11));   // z10: the base tiles are everywhere
     assert.deepStrictEqual(c.filter, l.filter);
     assert.deepStrictEqual(c.paint, l.paint);
   }
   assert.strictEqual(ids[1 + base.length], 'clip-inside');
+  assert.strictEqual(st.layers[1 + base.length].minzoom, 11);
   assert.ok(!ids.some(id => id.startsWith('ctx-') && st.layers[ids.indexOf(id)].type === 'symbol'));
   assert.deepStrictEqual(ids.slice(-2), ['clip-mask', 'clip-outline']);
   const ctx = st.sources['openmaptiles-ctx'];
   assert.strictEqual(ctx.minzoom, 10);
   assert.strictEqual(ctx.maxzoom, 10);
-  assert.deepStrictEqual(ctx.tiles, st.sources.openmaptiles.tiles);
+  assert.deepStrictEqual(ctx.tiles, st.sources.openmaptiles.tiles);   // an early trial build: no clipContext
+  const withCtx = makeStyle({ ...CONFIG, clipContext: 'ctx' });
+  assert.deepStrictEqual(withCtx.sources['openmaptiles-ctx'].tiles,
+    withCtx.sources.openmaptiles.tiles.map(u => u.replace('/tiles/{z}/', '/ctx/{z}/')));
+  assert.ok(withCtx.sources['openmaptiles-ctx'].tiles[0].includes('/ctx/{z}/{x}/{y}.pbf'));
   assert.deepStrictEqual(szClipContextIds(CONFIG), ids.filter(id => id.startsWith('ctx-') || id === 'clip-inside'));
   // A build without --clip-poly: no clip source, layer or id at all.
   const plain = makeStyle(NO_CLIP);

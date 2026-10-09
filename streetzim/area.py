@@ -108,7 +108,7 @@ def poly_text(b: Sequence[float], name: str = "area") -> str:
 
 
 def osmium_extract_args(b: Sequence[float], workdir: str, bbox_arg: str | None = None,
-                        flag: str = "-b") -> list[str]:
+                        flag: str = "-b", clip: bool = True) -> list[str]:
     """The area arguments for `osmium extract`.
 
     A box that does not cross gives [flag, bbox_arg] exactly as the caller
@@ -116,9 +116,10 @@ def osmium_extract_args(b: Sequence[float], workdir: str, bbox_arg: str | None =
     crosses gives a .poly with a ring on each side of the antimeridian,
     written into `workdir`: osmium takes no box past 180.
 
-    With a clip active (streetzim.clip.set_active), every cut is to the
-    clip's outline instead (it lies inside the box)."""
-    clip_poly = CLIP_POLY_PATH or os.environ.get(CLIP_POLY_ENV)
+    With a clip active (streetzim.clip.set_active), a cut is to the clip's
+    outline instead (cut to the box), unless `clip` is False: tilemaker's
+    input keeps the whole box, for the map's low-zoom context."""
+    clip_poly = (CLIP_POLY_PATH or os.environ.get(CLIP_POLY_ENV)) if clip else None
     if clip_poly:
         return ["-p", clip_poly]
     if not crosses(b):

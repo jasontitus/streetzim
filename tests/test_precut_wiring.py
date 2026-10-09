@@ -26,7 +26,7 @@ def _args(**kw):
 def seen(monkeypatch, tmp_path):
     calls = {}
     monkeypatch.setattr(c, "extract_bbox_from_pbf",
-                        lambda src, b, out: (calls.setdefault("cut", []).append((src, b)),
+                        lambda src, b, out, clip=True: (calls.setdefault("cut", []).append((src, b)),
                                              Path(out).write_bytes(b""))[0])
     monkeypatch.setattr(c, "generate_tiles", lambda *a, **k: None)
     monkeypatch.setattr(c, "download_osm_extract",

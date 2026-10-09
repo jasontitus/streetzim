@@ -220,13 +220,15 @@
   // nearest road can be kilometres away (past a clipped map's border, tens
   // of km), and the marker alone does not say how far it is.
   var ROUTE_END_FAR_M = 2000;
-  function routeEndsNote() {
+  // `picks`: the points picked when this route was asked for (a newer pick
+  // may be snapping while it lands).
+  function routeEndsNote(picks) {
     function off(pick, e7) {
       if (!pick || !e7) return 0;
       var m = haversine(pick.lat, pick.lon, e7[0] / 1e7, e7[1] / 1e7);
       return m >= ROUTE_END_FAR_M ? m : 0;
     }
-    var o = off(originPick, originCoordE7), d = off(destPick, destCoordE7);
+    var o = off(picks.origin, originCoordE7), d = off(picks.dest, destCoordE7);
     if (o && d) {
       return szT('routing.far_both', 'The route starts {start} from the start point and ends {end} from the destination',
                  { start: formatDistance(o), end: formatDistance(d) });
@@ -240,6 +242,7 @@
     resultEl.style.display = 'none';
     var seq = ++routeSeq;
     var routeTravel = travelMode;
+    var picks = { origin: originPick, dest: destPick };
     // Compute crow-fly distance to feed the ETA heuristic, then start
     // the spinner-and-elapsed-time indicator immediately. Ticks every
     // 100 ms whether or not the A* loop has yielded — closes the
@@ -266,8 +269,7 @@
       if (seq !== routeSeq) return;
       var result;
       try {
-        result = await findRoute(originNode, destNode, routeTravel,
-                                 { origin: originPick, dest: destPick });
+        result = await findRoute(originNode, destNode, routeTravel, picks);
       } catch (err) {
         console.error('[streetzim] findRoute failed:', err);
         if (seq === routeSeq) {
@@ -341,7 +343,8 @@
         // Say so when an end is far from its pick (the note gives the
         // distance) or the router had to move it (it was on a road cut off
         // from the rest, e.g. by the map's edge).
-        setRoutingStatus(routeEndsNote() || (originMoved && destMoved
+        var endsNote = routeEndsNote(picks);
+        setRoutingStatus(endsNote || (originMoved && destMoved
           ? szT('routing.both_moved', 'Start and destination moved to the nearest reachable roads')
           : destMoved ? szT('routing.dest_moved', 'Destination moved to the nearest reachable road')
           : originMoved ? szT('routing.origin_moved', 'Start moved to the nearest reachable road') : ''), 'done');
@@ -362,7 +365,8 @@
         try {
           var panelH = panel.getBoundingClientRect().height;
           var vh = window.innerHeight || document.documentElement.clientHeight;
-          if (vh > 0 && panelH / vh > 0.5
+          // Not with a far-end note: folded, the status line is hidden.
+          if (vh > 0 && panelH / vh > 0.5 && !endsNote
               && !panel.classList.contains('minimized')) {
             panel.classList.add('minimized');
             if (minBtn) {

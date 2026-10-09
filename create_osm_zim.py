@@ -920,14 +920,17 @@ def _acquire_tiles(*, args, bbox_str, geofabrik_path, pbf_path, tmpdir, total_st
             download_osm_extract(geofabrik_path, source_pbf)
 
         # Step 2: Extract bbox if needed
+        # With --clip-poly the cut is still the whole box: it is
+        # tilemaker's input, and the map's low-zoom context covers the box.
+        # The later steps then cut to the outline themselves (not "cut").
         if bbox_str and not args.area:
             work_pbf = os.path.join(tmpdir, "area.osm.pbf")
-            extract_bbox_from_pbf(source_pbf, bbox_str, work_pbf)
-            work_pbf_cut = True
+            extract_bbox_from_pbf(source_pbf, bbox_str, work_pbf, clip=False)
+            work_pbf_cut = _clip.active() is None
         elif bbox_str and args.area and geofabrik_path != KNOWN_AREAS.get(args.area.lower().replace(" ", "-"), {}).get("geofabrik"):
             work_pbf = os.path.join(tmpdir, "area.osm.pbf")
-            extract_bbox_from_pbf(source_pbf, bbox_str, work_pbf)
-            work_pbf_cut = True
+            extract_bbox_from_pbf(source_pbf, bbox_str, work_pbf, clip=False)
+            work_pbf_cut = _clip.active() is None
         else:
             work_pbf = source_pbf
 
@@ -1337,6 +1340,16 @@ def _build_routing(
             routing_graph_path = run_in_child(
                 extract_routing_graph, rt_pbf, tmpdir, bbox=rt_bbox,
                 precut=bool(work_pbf_cut and rt_pbf == work_pbf))
+            active_clip = _clip.active()
+            if routing_graph_path and active_clip is not None and active_clip.border is not None:
+                # The road pieces the clip cut off, closed to cars
+                # (streetzim/routing/margin.py); in a child of its own,
+                # after the extraction's has given its memory back.
+                from streetzim.routing.margin import close_cut_off_roads
+                closed_nodes, closed_edges = run_in_child(
+                    close_cut_off_roads, routing_graph_path, active_clip.border)
+                print(f"    Clip: closed {closed_edges} edges at {closed_nodes} "
+                      f"cut-off road nodes to cars")
             scale = int(getattr(args, "spatial_chunk_scale", 0) or 0)
             if routing_graph_path and scale > 0:
                 # The ZIM step's spatial cells, built now, while the
@@ -1749,6 +1762,7 @@ def _build_map_config(
             map_config["clipMask"] = active_clip.mask_geojson(bbox)
             map_config["clipArea"] = active_clip.area_geojson()
             map_config["clipMinZoom"] = active_clip.min_zoom
+            map_config["clipContext"] = "ctx"      # ctx/z/x/y redirects (zim_writer)
     if satellite_dir and os.path.isdir(str(satellite_dir)):
         map_config["hasSatellite"] = True
         map_config["satelliteMaxZoom"] = satellite_max_zoom
@@ -1926,6 +1940,22 @@ def _print_summary(*, bbox, name, output_path, stats, total_tile_count):
     print("=" * 60)
 
 
+def _activate_clip(args, bbox_str, parser):
+    """The build's clip from --clip-poly: the outline widened by
+    --clip-buffer-km and cut to the box. A clip needs a box that does not
+    cross the antimeridian."""
+    if not bbox_str:
+        parser.error("--clip-poly needs --bbox")
+    bbox = parse_bbox(bbox_str)
+    if not (-180.0 <= bbox[0] < bbox[2] <= 180.0):
+        parser.error("--clip-poly: a box across the antimeridian is not supported")
+    try:
+        return _clip.Clip.from_poly_file(args.clip_poly, buffer=args.clip_buffer_km,
+                                         min_zoom=args.clip_min_zoom, bbox=bbox)
+    except (OSError, ValueError) as e:
+        parser.error(f"--clip-poly: {e}")
+
+
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -2017,10 +2047,12 @@ def main(argv=None):
 
     # Create temp directory
     tmpdir = tempfile.mkdtemp(prefix="osm_zim_")
+    # No clip from an earlier build in this process or from the shell
+    # (STREETZIM_CLIP_POLY): only --clip-poly sets one.
+    _clip.set_active(None)
     try:
         if args.clip_poly:
-            _c = _clip.Clip.from_poly_file(args.clip_poly, buffer=args.clip_buffer_km,
-                                           min_zoom=args.clip_min_zoom)
+            _c = _activate_clip(args, bbox_str, parser)
             _clip.set_active(_c, workdir=tmpdir)
             print(f"  Clipping to {args.clip_poly} (+{args.clip_buffer_km:g} km) "
                   f"from z{args.clip_min_zoom + 1}", flush=True)
@@ -2101,6 +2133,7 @@ def main(argv=None):
             total_tile_count=total_tile_count)
 
     finally:
+        _clip.set_active(None)
         if stats:
             stats.detach()
         if not args.keep_temp:

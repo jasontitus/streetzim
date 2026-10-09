@@ -1,16 +1,17 @@
-"""--clip-poly: the road pieces a clip cuts off, closed to cars
-(streetzim/routing/margin.py).
+"""--clip-poly: the road pieces a clip cuts off past the border, closed to
+cars (streetzim/routing/margin.py).
 
-What must hold: a node whose drive component is neither the main network
-nor mostly inside the border (a cut stub, what the cut left of the
-neighbour's roads, even the part of it inside the outline) loses car access
-on its outgoing edges, so the car snap passes it over and a destination
-there routes to a road that leads in; the main network (however small the
-region) and every component mostly inside (islands, exclaves) stay open,
-so their routes are exactly what they were; walking and cycling are
-untouched; only class_access bit 9 changes; and the routing build does
-this when (and only when) a clip with an outline is active, in a spawned
-child too.
+What must hold: a node past the border that the main network cannot reach,
+and whose drive component is neither the main network nor mostly inside
+the border (a cut stub, what the cut left of the neighbour's roads), loses
+car access on its outgoing edges, so the car snap passes it over and a
+destination there routes to a road that leads in. Nothing inside the
+border changes (an exclave joined to a bigger neighbour town included);
+a road the main network reaches stays (a one-way spur leading away); a
+component mostly inside stays; routes are exactly what they were wherever
+they still exist; walking and cycling are untouched; only class_access
+bit 9 changes; and the build closes them (in a child of its own) when, and
+only when, a clip is active.
 """
 from __future__ import annotations
 
@@ -59,10 +60,20 @@ NODES = {
     # eastern border, joined to nothing else. Mostly inside: stays open.
     "e1": (7.49, 43.785), "e2": (7.495, 43.79), "e3": (7.505, 43.79),
     # The neighbour's piece: a two-way triangle, one node inside the
-    # outline, two past it, joined to nothing else. Mostly outside: closed.
+    # outline, two past it, joined to nothing else. Mostly outside: n2, n3
+    # close; n1 is inside and stays.
     "n1": (7.405, 43.705), "n2": (7.39, 43.705), "n3": (7.395, 43.71),
+    # Exactly half inside, joined to nothing: not "mostly", so h2 closes.
+    "h1": (7.495, 43.705), "h2": (7.505, 43.705),
+    # An exclave (a square inside) joined two-way to a bigger neighbour
+    # town past the border, both cut off from the main network: the town
+    # closes, the exclave's own roads stay.
+    "m1": (7.47, 43.705), "m2": (7.48, 43.705), "m3": (7.48, 43.715), "m4": (7.47, 43.715),
+    "t1": (7.47, 43.695), "t2": (7.48, 43.695), "t3": (7.49, 43.695),
+    "t4": (7.49, 43.69), "t5": (7.48, 43.69), "t6": (7.47, 43.69),
 }
-CUT = ("s", "f1", "f2", "k", "n1", "n2", "n3")     # the nodes that lose car access
+# The nodes that lose car access.
+CUT = ("s", "f1", "f2", "n2", "n3", "h2", "t1", "t2", "t3", "t4", "t5", "t6")
 
 
 def _ways():
@@ -87,6 +98,10 @@ def _ways():
         (["g05", "f1"], {"highway": "footway"}),  # walkers reach the fragment; cars cannot
         (["e1", "e2"], {}), (["e2", "e3"], {}), (["e3", "e1"], {}),
         (["n1", "n2"], {}), (["n2", "n3"], {}), (["n3", "n1"], {}),
+        (["h1", "h2"], {}),
+        (["m1", "m2"], {}), (["m2", "m3"], {}), (["m3", "m4"], {}), (["m4", "m1"], {}),
+        (["t1", "t2"], {}), (["t2", "t3"], {}), (["t3", "t4"], {}), (["t4", "t5"], {}),
+        (["t5", "t6"], {}), (["t6", "t1"], {}), (["m1", "t1"], {}), (["m2", "t2"], {}),
     ]
     return ways
 
@@ -170,14 +185,14 @@ def test_only_cut_off_margin_nodes_lose_car_access(graphs):
     assert ((before[:, 4] ^ after[:, 4]) & ~np.uint32(0x200) == 0).all()  # only bit 9
     assert (after[changed, 4] & 0x200).all()
     closed_nodes = {int(v) for v in np.unique(src[changed])}
-    # s: a way out, none in. f1, f2: joined to nothing. k: reachable, but
-    # no way back (its road leads away; k2 has no edge to close). n1-n3:
-    # the neighbour's piece, n1 inside the outline included.
+    # s: a way out, none in. f1, f2: joined to nothing. n2, n3: the
+    # neighbour's piece. h2: half inside is not mostly. t1-t6: the town.
     assert closed_nodes == {ix[k] for k in CUT}
     assert (n_nodes, n_edges) == (len(CUT), int(changed.sum()))
-    # The crossing, the out-and-back loop, the exclave (e3 past the
-    # border) and the spur's way in (c1 -> k) stay open.
-    for a in ("c1", "c2", "x", "e1", "e2", "e3"):
+    # The crossing, the out-and-back loop, the exclave e1-e3 (e3 past the
+    # border), the spur k the main network reaches, and everything inside
+    # (n1, h1, the exclave m1-m4) stay open.
+    for a in ("c1", "c2", "x", "e1", "e2", "e3", "k", "n1", "h1", "m1", "m2", "m3", "m4"):
         assert ix[a] not in closed_nodes
 
 
@@ -206,7 +221,8 @@ def test_routes_between_nodes_inside_are_unchanged(graphs, tmp_path):
             assert ra is not None and rb is not None
             assert ra.node_sequence == rb.node_sequence
             assert ra.total_dist_m == rb.total_dist_m
-    for p, q in [("e1", "e3"), ("e3", "e2")]:                 # in the exclave
+    # In the exclaves, and to the end of the spur leading away.
+    for p, q in [("e1", "e3"), ("e3", "e2"), ("m1", "m3"), ("m3", "m2"), ("g33", "k2")]:
         ra = find_route_spatial(a, _sid(a, p), _sid(a, q))
         rb = find_route_spatial(b, _sid(b, p), _sid(b, q))
         assert ra is not None and ra.node_sequence == rb.node_sequence
@@ -297,38 +313,33 @@ def _poly(tmp_path):
     return p
 
 
-def test_the_routing_build_closes_the_margin_only_with_a_clip(tmp_path, monkeypatch):
+def _routing_step(tmp_path, name, pbf):
+    """create_osm_zim's routing step, as a build runs it (spawned children)."""
+    from types import SimpleNamespace
+    import create_osm_zim
+    out = tmp_path / name
+    out.mkdir()
+    return Path(create_osm_zim._build_routing(
+        args=SimpleNamespace(pbf=None, spatial_chunk_scale=0), bbox_str="7.3,43.6,7.6,43.85",
+        include_routing=True, include_wikidata=False, pbf_path=None, tmpdir=str(out),
+        total_steps=6, work_pbf=str(pbf), work_pbf_cut=True))
+
+
+def test_the_build_closes_cut_off_roads_only_with_a_clip(tmp_path, monkeypatch):
     plain = _build(tmp_path, monkeypatch, "plain")
+    pbf = tmp_path / "net.osm.pbf"
+    unclipped = _routing_step(tmp_path, "unclipped", pbf)
+    assert unclipped.read_bytes() == plain.read_bytes()
     c = clip.Clip.from_poly_file(str(_poly(tmp_path)), buffer=10)
     assert c.border is not None and c.border.equals(BORDER)
-    clip.set_active(c)          # in this process: the clip itself, no .poly in the environment
+    clip.set_active(c)
     try:
-        clipped = _build(tmp_path, monkeypatch, "clipped")
+        clipped = _routing_step(tmp_path, "clipped", pbf)
     finally:
         clip.set_active(None)
-    assert clip.active_border() is None
     src, a = _edges(plain)
     _, b = _edges(clipped)
     assert a.shape == b.shape and not (a[:, :4] != b[:, :4]).any()
     ix = _index(plain)
     changed = {int(v) for v in np.unique(src[a[:, 4] != b[:, 4]])}
     assert changed == {ix[k] for k in CUT}
-
-
-def test_a_spawned_child_sees_the_outline(tmp_path):
-    # Routing runs in a spawned child (streetzim/isolate.py): it must find
-    # the unbuffered outline through the environment set_active fills.
-    from streetzim.isolate import run_in_child
-    c = clip.Clip.from_poly_file(str(_poly(tmp_path)), buffer=10)
-    clip.set_active(c, workdir=str(tmp_path))
-    try:
-        wkt = run_in_child(_border_wkt)
-    finally:
-        clip.set_active(None)
-    assert shapely.from_wkt(wkt).equals(BORDER)
-    assert run_in_child(_border_wkt) is None
-
-
-def _border_wkt():
-    b = clip.active_border()
-    return None if b is None else b.wkt

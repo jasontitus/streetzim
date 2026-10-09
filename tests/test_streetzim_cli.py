@@ -636,7 +636,7 @@ def builder_until_tiles(tmp_path, monkeypatch):
     import create_osm_zim as c
     got = {}
 
-    def cut(src, bbox, out):
+    def cut(src, bbox, out, clip=True):
         _sparse(out, got["cut_size"])
     monkeypatch.setattr(c, "extract_bbox_from_pbf", cut)
 

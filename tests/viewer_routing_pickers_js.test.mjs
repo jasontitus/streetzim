@@ -44,9 +44,13 @@ function make(opts = {}) {
     getBoundingClientRect() { return { height: 10 }; } });
   const env = { snaps: [], routes: [], hav };
   const body = `
-  var window = {}; var graph = ${opts.noGraph ? 'null' : '{}'}; var loadGraphInflight = false; function loadGraph() {}
+  var window = { innerHeight: ${opts.vh || 0} }; var graph = ${opts.noGraph ? 'null' : '{}'}; var loadGraphInflight = false; function loadGraph() {}
   var statusEl = el(), originInput = el(), destInput = el(), resultEl = el(), clearBtn = el(), goRow = el(),
       panel = el(), distEl = el(), timeEl = el(), originResultsEl = el(), destResultsEl = el();
+  var panelClasses = new Set();
+  panel.classList = { add(c) { panelClasses.add(c); }, remove(c) { panelClasses.delete(c); },
+                      contains(c) { return panelClasses.has(c); } };
+  panel.getBoundingClientRect = function() { return { height: ${opts.panelH || 10} }; };
   var minBtn = null; var travelMode = 'drive'; var navPlanSeq = 0; var routingModes = ['drive', 'walk', 'bike'];
   var originNode = -1, destNode = -1, originCoordE7 = null, destCoordE7 = null, originMarker = null,
       destMarker = null, lastRoute = null, routeDrawn = false;
@@ -76,7 +80,7 @@ function make(opts = {}) {
   env.SZ_HERE = SZ_HERE;
   env.api = { setOriginFromLatLon, setDestFromLatLon, setTravelMode, clearRoute, win: window, originInput,
     get state() { return { originNode, destNode, originMoved, destMoved, status: statusEl.textContent,
-      statusState: statusEl.state,
+      statusState: statusEl.state, minimized: panelClasses.has('minimized'),
       oIn: originInput.value, dIn: destInput.value, oMarker: originMarker && originMarker.ll,
       dMarker: destMarker && destMarker.ll }; } };`;
   new Function('env', 'el', body)(env, el);
@@ -331,5 +335,27 @@ await ok('a destination the router moved far: the note gives the final distance'
 await ok('a destination the router moved a little: the moved note, not a distance', async () => {
   const st = await farRoute([1, 1], [2, 2], { endMoved: { node: 21, lat: 2.005, lon: 2 } });
   assert.strictEqual(st.status, MOVED_D);
+});
+await ok('a destination 3 km from its pick gets the note', async () => {
+  const st = await farRoute([1, 1], [2, 2.027]);          // about 3.0 km
+  assert.ok(hav(2, 2, 2, 2.027) > 2900 && hav(2, 2, 2, 2.027) < 3100);
+  assert.strictEqual(st.status, `The route ends ${km(hav(2, 2, 2, 2.027))} from the destination`);
+});
+await ok('a far-end note keeps the panel unfolded (folded, the status line is hidden)', async () => {
+  for (const [dSnap, folded] of [[[2, 2.1], false], [[2, 2.001], true]]) {
+    const e = make({ realDistance: true, vh: 100, panelH: 80 }); const a = e.api;
+    a.setOriginFromLatLon(1, 1, 'O'); await snap(e, 'origin', 10, 1, 1);
+    a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20, ...dSnap);
+    await route(e, {});
+    assert.strictEqual(a.state.minimized, folded, JSON.stringify(dSnap));
+  }
+});
+await ok('a route that lands while a newer pick snaps is described by its own picks', async () => {
+  const e = make({ realDistance: true }); const a = e.api;
+  a.setOriginFromLatLon(1, 1, 'O'); await snap(e, 'origin', 10, 1, 1);
+  a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20, 2, 2);
+  a.setDestFromLatLon(3, 3, 'D2');                          // its snap is still pending
+  await route(e, {});                                       // the route to D lands first
+  assert.strictEqual(a.state.status, '');
 });
 console.log(`${pass} passed`);

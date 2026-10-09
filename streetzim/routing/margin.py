@@ -1,30 +1,35 @@
-"""Close the road pieces a clip cuts off to cars (--clip-poly).
+"""Close to cars the road pieces a clip cuts off past the border (--clip-poly).
 
 A clipped build keeps the roads within ``--clip-buffer-km`` of the region's
 border (streetzim.clip), and the cut at the margin's edge leaves pieces of
-road the region's network cannot reach: the far end of a road that only
-leads back in, a stretch of the neighbour's network whose link to a border
-crossing is gone. The routers snap a destination to the nearest car road
-whose forward search reaches SNAP_MIN_REACH nodes; a node with a way out
-and no way in passes that test, and the search then runs through the whole
-graph before it gives up (Ahvaz to Basra in the clipped Iran build: "No
-route found" after ten minutes in the viewer).
+road past the border that the region's network cannot reach: the far end
+of a road that only leads back in, a stretch of the neighbour's network
+whose link to a border crossing is gone. The routers snap a destination to
+the nearest car road whose forward search reaches SNAP_MIN_REACH nodes; a
+node with a way out and no way in passes that test, and the search then
+runs through the whole graph before it gives up (Ahvaz to Basra in the
+clipped Iran build: "No route found" after minutes in the viewer).
 
-The unit is a strongly connected component of the drive graph: a network
-in which every node can reach every other. A component keeps car access
-when it is the main network (the largest) or when most of its nodes lie
-inside the border: islands, exclaves, the one-way stubs and parking loops
-inside the region. Every other component (what the cut left of the
-neighbour's roads, including the bits of them that the border outline
-takes in) loses car access on its outgoing edges: class_access bit 9,
-which walking and cycling ignore. The car snap then passes those nodes
-over. Nodes, edges and geometry stay. A route between two nodes of a kept
-component uses only nodes of that component, so every such route (the main
-network's, an island's) is exactly what it was.
+A node loses car access on its outgoing edges (class_access bit 9, which
+walking and cycling ignore) when all of these hold:
+  - it lies outside the border: nothing inside changes, so no route
+    between two points inside does either (an exclave's roads included);
+  - the main network (the largest strongly connected component of the
+    drive graph) cannot reach it: a road you can drive to stays a
+    destination, a one-way leaving the country included;
+  - its own strongly connected component does not lie mostly (more than
+    half) inside the border: an island's or an exclave's crossing into the
+    margin stays open. (The main network, the largest component, is
+    reached, so it stays open however small the region.)
+The car snap then passes those nodes over. Nodes, edges and geometry stay.
 
-In the clipped Iran build, the components touching the inside were Iran's
-islands (Qeshm, Kish, Kharg: all inside) and pieces of Iraq, Azerbaijan and
-Turkey with 4-23% of their nodes inside Geofabrik's outline.
+One case is left to the viewer: a node past the border with no car edge
+of its own (the end of a one-way) whose only way in was closed still
+counts as a snap candidate, because the snappers treat a node with no car
+edge as a one-way's end, and with nothing better within reach the snap
+falls back to it. The viewer's route worker then finds it sealed
+(destComponentClosed) and snaps again outside it (resnapPast).
+cloud/route_cli.py has no such re-snap and reports no route there.
 """
 from __future__ import annotations
 
@@ -36,14 +41,13 @@ _HEADER = 32        # b"SZRG" + 7 u32 (docs/formats.md, SZRG v4)
 
 
 def close_cut_off_roads(graph_path, border) -> tuple[int, int]:
-    """Close to cars, in place, the outgoing edges of every node of the SZRG
-    v4 graph at `graph_path` whose drive component is neither the largest
-    nor mostly inside `border` (a shapely geometry, lon/lat). Returns
-    (nodes closed, edges closed)."""
+    """Close to cars, in place, the outgoing edges of the cut-off nodes (see
+    the module docstring) of the SZRG v4 graph at `graph_path`; `border` is
+    a shapely geometry in lon/lat. Returns (nodes closed, edges closed)."""
     import numpy as np
     import shapely
     from scipy.sparse import csr_matrix
-    from scipy.sparse.csgraph import connected_components
+    from scipy.sparse.csgraph import breadth_first_order, connected_components
 
     with open(graph_path, "rb") as f:
         head = f.read(_HEADER)
@@ -71,19 +75,34 @@ def close_cut_off_roads(graph_path, border) -> tuple[int, int]:
         drive = (((np.asarray(edges[:, 1]) >> 24) != 0)
                  & ((ca & NO_MOTOR_BIT) == 0)
                  & ~((ordv >= NO_MOTOR_ORD_MIN) & (ordv <= NO_MOTOR_ORD_MAX)))
-        src = np.repeat(np.arange(n, dtype=np.int64), np.diff(adj))
-        dst = np.asarray(edges[:, 0]).astype(np.int64)
-        graph = csr_matrix((np.ones(int(drive.sum()), dtype=bool),
-                            (src[drive], dst[drive])), shape=(n, n))
+        del ordv
+        # The drive graph as CSR straight from the file's adjacency: edges
+        # are stored in from-node order, so node i's drive edges are the
+        # drive ones in adj[i]:adj[i+1].
+        before = np.zeros(e + 1, dtype=np.int64)
+        np.cumsum(drive, out=before[1:])
+        small = max(n, e) < 2 ** 31
+        idx = np.int32 if small else np.int64
+        indptr = before[adj].astype(idx)
+        del before
+        indices = np.asarray(edges[:, 0])[drive].astype(idx)
+        graph = csr_matrix((np.ones(indices.size, dtype=bool), indices, indptr),
+                           shape=(n, n))
+        del indices
         _, label = connected_components(graph, directed=True, connection="strong")
-        del graph, dst
         size = np.bincount(label)
+        main = int(np.argmax(size))
         kept = np.bincount(label, weights=inside) * 2 > size    # mostly inside
-        kept[np.argmax(size)] = True        # the main network, however small the region
-        close = drive & ~kept[label][src]
+        reached = np.zeros(n, dtype=bool)
+        reached[breadth_first_order(graph, int(np.flatnonzero(label == main)[0]),
+                                    directed=True, return_predecessors=False)] = True
+        del graph
+        cut = ~inside & ~reached & ~kept[label]
+        del label, reached
+        close = drive & np.repeat(cut, np.diff(adj))
         if close.any():
             edges[close, 4] = ca[close] | NO_MOTOR_BIT
             edges.flush()
-        return int(np.unique(src[close]).size), int(close.sum())
+        return int(np.count_nonzero(cut & (np.diff(indptr) > 0))), int(close.sum())
     finally:
         del edges

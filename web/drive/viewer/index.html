@@ -1926,12 +1926,7 @@ var toggleBtn = document.getElementById('layer-toggle');
 toggleBtn.style.display = 'block';
 var satelliteVisible = false;
 var satelliteAdded = false;
-var hiddenInSatellite = [
-'landcover-grass', 'landcover-wood', 'landcover-farmland',
-'landuse-residential', 'landuse-commercial', 'landuse-park',
-'water', 'water-lowzoom', 'waterway', 'building', 'building-outline',
-'boundary-country', 'boundary-state', 'background'
-].concat(szClipContextIds(config));
+var hiddenInSatellite = szSatelliteHiddenIds(config);
 function addSatelliteLayer() {
 if (satelliteAdded) return;
 var satExt = config.satelliteFormat || 'webp';
@@ -2360,6 +2355,9 @@ Object.keys(base).forEach(function(k) { ctx[k] = base[k]; });
 ctx.minzoom = z;
 ctx.maxzoom = z;
 delete ctx.attribution;          // the base source already credits it
+if (config.clipContext === 'ctx') {
+ctx.tiles = base.tiles.map(function(u) { return u.replace('tiles/{z}/', 'ctx/{z}/'); });
+}
 style.sources['openmaptiles-ctx'] = ctx;
 style.sources['clip-area'] = { "type": "geojson", "data": config.clipArea };
 var copies = [];
@@ -2368,14 +2366,14 @@ if (l.source !== 'openmaptiles' || (l.type !== 'fill' && l.type !== 'line')) ret
 var c = JSON.parse(JSON.stringify(l));
 c.id = _SZ_CLIP_CTX + l.id;
 c.source = 'openmaptiles-ctx';
-c.minzoom = Math.max(l.minzoom || 0, z);
+c.minzoom = Math.max(l.minzoom || 0, z + 1);
 copies.push(c);
 });
 copies.push({
 "id": "clip-inside",
 "type": "fill",
 "source": "clip-area",
-"minzoom": z,
+"minzoom": z + 1,
 "paint": { "fill-color": "#f8f4f0" }
 });
 var at = style.layers.length && style.layers[0].id === 'background' ? 1 : 0;
@@ -2403,6 +2401,14 @@ if (!config || !config.clipMask || !config.clipArea) return [];
 return makeStyle(config).layers.filter(function(l) {
 return l.id.indexOf(_SZ_CLIP_CTX) === 0 || l.id === 'clip-inside';
 }).map(function(l) { return l.id; });
+}
+function szSatelliteHiddenIds(config) {
+return [
+'landcover-grass', 'landcover-wood', 'landcover-farmland',
+'landuse-residential', 'landuse-commercial', 'landuse-park',
+'water', 'water-lowzoom', 'waterway', 'building', 'building-outline',
+'boundary-country', 'boundary-state', 'background'
+].concat(szClipContextIds(config));
 }
 function makeStyle(config) {
 SZ_LANG = (config && typeof config.language === 'string' && config.language) || 'en';
@@ -5393,7 +5399,8 @@ function _hillshadeBeforeId(map) {
 var layers = (map.getStyle() && map.getStyle().layers) || [];
 for (var i = 0; i < layers.length; i++) {
 var l = layers[i];
-if (l.type !== 'background' && l.type !== 'raster' && l.type !== 'hillshade') {
+if (l.type !== 'background' && l.type !== 'raster' && l.type !== 'hillshade'
+&& l.id.indexOf(_SZ_CLIP_CTX) !== 0 && l.id !== 'clip-inside') {
 return l.id;
 }
 }
@@ -9776,13 +9783,13 @@ if (!travelBtns[m]) return;
 travelBtns[m].addEventListener('click', function() { setTravelMode(m); });
 });
 var ROUTE_END_FAR_M = 2000;
-function routeEndsNote() {
+function routeEndsNote(picks) {
 function off(pick, e7) {
 if (!pick || !e7) return 0;
 var m = haversine(pick.lat, pick.lon, e7[0] / 1e7, e7[1] / 1e7);
 return m >= ROUTE_END_FAR_M ? m : 0;
 }
-var o = off(originPick, originCoordE7), d = off(destPick, destCoordE7);
+var o = off(picks.origin, originCoordE7), d = off(picks.dest, destCoordE7);
 if (o && d) {
 return szT('routing.far_both', 'The route starts {start} from the start point and ends {end} from the destination',
 { start: formatDistance(o), end: formatDistance(d) });
@@ -9795,6 +9802,7 @@ function computeAndDrawRoute() {
 resultEl.style.display = 'none';
 var seq = ++routeSeq;
 var routeTravel = travelMode;
+var picks = { origin: originPick, dest: destPick };
 var crowKm = 0;
 if (graph && originNode >= 0 && destNode >= 0) {
 var oLatE7 = originCoordE7[0];
@@ -9811,8 +9819,7 @@ setTimeout(async function() {
 if (seq !== routeSeq) return;
 var result;
 try {
-result = await findRoute(originNode, destNode, routeTravel,
-{ origin: originPick, dest: destPick });
+result = await findRoute(originNode, destNode, routeTravel, picks);
 } catch (err) {
 console.error('[streetzim] findRoute failed:', err);
 if (seq === routeSeq) {
@@ -9867,7 +9874,8 @@ lastRoute = augmentRouteForDriving(result);
 lastRoute.travel = routeTravel;
 try { window.__streetzim_lastRoute = lastRoute; } catch (e) {}
 if (driveMode.active) driveMode.setRoute(lastRoute);
-setRoutingStatus(routeEndsNote() || (originMoved && destMoved
+var endsNote = routeEndsNote(picks);
+setRoutingStatus(endsNote || (originMoved && destMoved
 ? szT('routing.both_moved', 'Start and destination moved to the nearest reachable roads')
 : destMoved ? szT('routing.dest_moved', 'Destination moved to the nearest reachable road')
 : originMoved ? szT('routing.origin_moved', 'Start moved to the nearest reachable road') : ''), 'done');
@@ -9880,7 +9888,7 @@ map.fitBounds(bounds, { padding: 60, duration: 1000 });
 try {
 var panelH = panel.getBoundingClientRect().height;
 var vh = window.innerHeight || document.documentElement.clientHeight;
-if (vh > 0 && panelH / vh > 0.5
+if (vh > 0 && panelH / vh > 0.5 && !endsNote
 && !panel.classList.contains('minimized')) {
 panel.classList.add('minimized');
 if (minBtn) {

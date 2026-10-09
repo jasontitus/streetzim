@@ -1463,6 +1463,7 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
         # --clip-poly: past its min zoom, only tiles that touch the outline.
         clip = _clip.active()
         tiles_clipped = 0
+        context_tiles = 0
         tile_start = time.time()
         batch_size = 1000
         # Adaptive backpressure, ONLY for the libzim builder. With libzim,
@@ -1519,6 +1520,12 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
                             "application/x-protobuf",
                             tile_data,
                         ))
+                    if clip is not None and z == clip.min_zoom and clip.needs_context(x, y):
+                        # The viewer's context past the outline (130:
+                        # openmaptiles-ctx reads ctx/).
+                        _add_redirect(creator, f"ctx/{z}/{x}/{y}.pbf",
+                                      f"Context tile {z}/{x}/{y}", tile_path)
+                        context_tiles += 1
                     tiles_added += 1
                     _watchdog_tile_count[0] = tiles_added
                     if _libzim_backpressure:
@@ -1561,8 +1568,9 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
                 f"re-run tilemaker before packaging")
         skip_str = ((f" (skipped {tiles_skipped_empty} empty)"
                      if tiles_skipped_empty else "")
-                    + (f" (clipped {tiles_clipped} outside the outline)"
-                       if tiles_clipped else ""))
+                    + (f" (clipped {tiles_clipped} outside the outline,"
+                       f" {context_tiles} context redirects)"
+                       if clip is not None else ""))
         print(f"\r    Added {tiles_added} tiles in {elapsed:.0f}s ({rate_str}){skip_str}; "
               f"{aliaser.summary()}                ", flush=True)
         PHASE_TIMER.record_subphase(

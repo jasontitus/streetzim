@@ -17,8 +17,8 @@ The outline must not cross the antimeridian (longitudes in [-180, 180]).
 One clip is active per build, set by create_osm_zim.py (set_active) and read
 where tiles and records are written (active); streetzim.area reads its .poly
 path for every `osmium extract`, from the environment in a spawned child.
-The routing build reads the unbuffered outline the same way (active_border):
-streetzim.routing.margin closes the margin's cut-off roads to cars.
+After the routing graph is built, streetzim.routing.margin closes the road
+pieces the cut left past the border (Clip.border) to cars.
 """
 from __future__ import annotations
 
@@ -30,11 +30,16 @@ from typing import Any
 from streetzim import area as _area
 
 KM_PER_DEG = 111.32
-BORDER_ENV = "STREETZIM_CLIP_BORDER"     # the unbuffered outline's .poly, for a spawned child
 
 
 def parse_poly(text: str):
-    """The (Multi)Polygon of an Osmosis .poly file; '!' rings are holes."""
+    """The (Multi)Polygon of an Osmosis .poly file. Outer rings are joined
+    and '!' rings cut out of them; an outer ring that lies inside a hole (an
+    island in a lake) is put back, whatever the order in the file. A ring is
+    made valid first, so a self-crossing one keeps both lobes. An outline
+    at the antimeridian is refused: one whose rings reach +-180 (Geofabrik
+    splits them there) or jump across it."""
+    import shapely
     from shapely.geometry import Polygon
     from shapely.ops import unary_union
 
@@ -57,30 +62,60 @@ def parse_poly(text: str):
         i += 1                              # past the ring's END
         if len(ring) < 3:
             raise ValueError(f"ring {name!r} has fewer than 3 points")
-        if any(not -180.0 <= x <= 180.0 for x, _ in ring):
-            raise ValueError(f"ring {name!r} leaves [-180, 180]: an outline across "
-                             "the antimeridian is not supported")
-        (holes if name.startswith("!") else outers).append(Polygon(ring).buffer(0))
-    if not outers:
-        raise ValueError("no outer ring in .poly file")
-    geom = unary_union(outers)
+        if any(not -180.0 < x < 180.0 or not -90.0 <= y <= 90.0 for x, y in ring):
+            raise ValueError(f"ring {name!r} reaches the antimeridian or leaves the "
+                             "globe: an outline there is not supported")
+        if any(abs(a[0] - b[0]) > 180.0 for a, b in zip(ring, ring[1:] + ring[:1])):
+            raise ValueError(f"ring {name!r} jumps across the antimeridian: "
+                             "an outline there is not supported")
+        part = _polygonal(shapely.make_valid(Polygon(ring)))
+        (holes if name.startswith("!") else outers).append(part)
+    geom = unary_union(outers) if outers else Polygon()
     if holes:
-        geom = geom.difference(unary_union(holes))
+        cut = unary_union(holes)
+        islands = [o for o in outers if cut.contains(o)]
+        geom = geom.difference(cut)
+        if islands:
+            geom = geom.union(unary_union(islands))
+    if geom.is_empty:
+        raise ValueError("the .poly file encloses no area")
     return geom
 
 
+def _polygonal(geom):
+    """The polygons of `geom` (make_valid can add stray lines and points)."""
+    from shapely.geometry import MultiPolygon, Polygon
+    from shapely.ops import unary_union
+    if isinstance(geom, (Polygon, MultiPolygon)):
+        return geom
+    parts = [g for g in getattr(geom, "geoms", ()) if isinstance(g, (Polygon, MultiPolygon))]
+    return unary_union(parts) if parts else Polygon()
+
+
 def buffer_km(geom, km: float):
-    """`geom` widened by about `km` kilometres. Longitudes are scaled by the
-    cosine of the outline's middle latitude first, which is close enough for
-    a margin of a few km on a country."""
+    """`geom` widened by about `km` kilometres, within the globe. The buffer
+    is taken in a sinusoidal projection about the outline's middle meridian,
+    which scales each point's longitude by the cosine of its own latitude:
+    a single cosine for the whole outline made Norway's margin 12 km at its
+    southern end and 8 km at its northern one."""
     if km <= 0:
         return geom
-    from shapely import affinity
-    lat = (geom.bounds[1] + geom.bounds[3]) / 2
-    k = max(math.cos(math.radians(lat)), 0.05)
-    flat = affinity.scale(geom, xfact=k, yfact=1.0, origin=(0, 0))
-    return affinity.scale(flat.buffer(km / KM_PER_DEG, quad_segs=4),
-                          xfact=1 / k, yfact=1.0, origin=(0, 0))
+    import numpy as np
+    import shapely
+    from shapely.geometry import box
+    lon0 = (geom.bounds[0] + geom.bounds[2]) / 2
+
+    def scale(c, inverse):
+        k = np.maximum(np.cos(np.radians(c[:, 1])), 0.05)
+        x = c[:, 0] / k + lon0 if inverse else (c[:, 0] - lon0) * k
+        return np.column_stack((x, c[:, 1]))
+
+    # Densified both ways (0.05 deg), so a long edge follows its latitudes'
+    # cosines instead of one straight line between its ends.
+    flat = shapely.transform(shapely.segmentize(geom, 0.05), lambda c: scale(c, False))
+    grown = shapely.segmentize(flat.buffer(km / KM_PER_DEG, quad_segs=4), 0.05)
+    grown = shapely.transform(grown, lambda c: scale(c, True))
+    return grown.intersection(box(-180.0, -90.0, 180.0, 90.0))
 
 
 def tile_box(z: int, x: int, y: int) -> tuple[float, float, float, float]:
@@ -92,6 +127,9 @@ def tile_box(z: int, x: int, y: int) -> tuple[float, float, float, float]:
 
 
 OUTSIDE, PARTIAL, INSIDE = 0, 1, 2
+# How far inside the outline a clip-zoom tile must lie to need no context
+# copy: the viewer's clipArea is the outline simplified by 0.005 deg.
+CONTEXT_EDGE_DEG = 0.01
 
 
 class Clip:
@@ -105,17 +143,29 @@ class Clip:
         self.min_zoom = min_zoom
         self.border = border
         shapely.prepare(self.geom)
-        # (z, x, y) -> OUTSIDE/PARTIAL/INSIDE for tiles above the deepest
-        # zoom: a child of an OUTSIDE or INSIDE tile is the same, so only
-        # tiles along the outline are ever tested.
+        # (z, x, y) -> OUTSIDE/PARTIAL/INSIDE for the tiles tested against
+        # the outline: those whose parent is PARTIAL. A child of an OUTSIDE
+        # or INSIDE tile is the same and is not stored, so the memo grows
+        # with the outline's length, not the box's area.
         self._state: dict[tuple[int, int, int], int] = {}
         self.poly_path: str | None = None
+        self._inner = None
 
     @classmethod
-    def from_poly_file(cls, path: str, *, buffer: float = 10.0, min_zoom: int = 10):
+    def from_poly_file(cls, path: str, *, buffer: float = 10.0, min_zoom: int = 10,
+                       bbox: Sequence[float] | None = None):
+        """The outline in `path`, widened by `buffer` km and, with `bbox`
+        (west, south, east, north), cut to the build's box: nothing past
+        the box is cut out of the PBF, routed or masked."""
         with open(path, encoding="utf-8") as f:
             geom = parse_poly(f.read())
-        return cls(buffer_km(geom, buffer), min_zoom, border=geom)
+        grown = buffer_km(geom, buffer)
+        if bbox is not None:
+            from shapely.geometry import box
+            grown = grown.intersection(box(bbox[0], bbox[1], bbox[2], bbox[3]))
+            if grown.is_empty:
+                raise ValueError(f"{path}: the outline does not meet the box {tuple(bbox)}")
+        return cls(grown, min_zoom, border=geom)
 
     def _tile_state(self, z: int, x: int, y: int) -> int:
         if z <= self.min_zoom:
@@ -130,14 +180,25 @@ class Clip:
             b = box(*tile_box(z, x, y))
             st = (INSIDE if self.geom.contains(b)
                   else PARTIAL if self.geom.intersects(b) else OUTSIDE)
-        if z < 14:
-            self._state[key] = st
+            if z < 14:
+                self._state[key] = st
         return st
 
     def keeps_tile(self, z: int, x: int, y: int) -> bool:
         """Whether tile z/x/y belongs in the ZIM: every tile up to min_zoom,
         and past it the tiles that touch the outline."""
         return z <= self.min_zoom or self._tile_state(z, x, y) != OUTSIDE
+
+    def needs_context(self, x: int, y: int) -> bool:
+        """Whether clip-zoom tile x/y reaches past the outline, so the viewer
+        may show it overzoomed there (ctx/ redirects, map-config
+        "clipContext"); a tile well inside never shows through clip-inside."""
+        import shapely
+        from shapely.geometry import box
+        if self._inner is None:
+            self._inner = self.geom.buffer(-CONTEXT_EDGE_DEG)
+            shapely.prepare(self._inner)
+        return not self._inner.contains(box(*tile_box(self.min_zoom, x, y)))
 
     def contains(self, lon: float, lat: float) -> bool:
         import shapely
@@ -207,27 +268,11 @@ def set_active(clip: Clip | None, workdir: str | None = None) -> None:
     _ACTIVE = clip
     _area.CLIP_POLY_PATH = None
     os.environ.pop(_area.CLIP_POLY_ENV, None)
-    os.environ.pop(BORDER_ENV, None)
     if clip is not None and workdir:
         _area.CLIP_POLY_PATH = clip.write_poly(os.path.join(workdir, "clip.poly"))
         os.environ[_area.CLIP_POLY_ENV] = _area.CLIP_POLY_PATH
-        if clip.border is not None:
-            os.environ[BORDER_ENV] = _write_poly(clip.border,
-                                                 os.path.join(workdir, "clip-border.poly"))
 
 
 def active() -> Clip | None:
     return _ACTIVE
 
-
-def active_border():
-    """The active clip's outline before the buffer, or None: from the clip
-    in this process, else (a spawned child) from the .poly that set_active
-    named in the environment."""
-    if _ACTIVE is not None:
-        return _ACTIVE.border
-    path = os.environ.get(BORDER_ENV)
-    if not path:
-        return None
-    with open(path, encoding="utf-8") as f:
-        return parse_poly(f.read())
