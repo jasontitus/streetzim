@@ -916,6 +916,15 @@ def repackage(src_path: str, dst_path: str,
                 if size >= 200 * 1024 * 1024:
                     compress = False
                     raw_clusters += 1
+            # A --clip-poly build's context entries (ctx/z/x/y.pbf, written
+            # by zim_writer as aliases of tiles/z/x/y.pbf where libzim has
+            # them) read as ordinary items, and are too big for the alias
+            # table: a redirect to their tile, as the Rust packer writes them.
+            ctx_target = "tiles/" + path[len("ctx/"):] if path.startswith("ctx/") else None
+            if ctx_target and src.has_entry_by_path(ctx_target):
+                c.add_redirection(path, title or path, ctx_target, {Hint.FRONT_ARTICLE: False})
+                kept += 1
+                continue
             # Keep identical tiles stored once. An alias in the source reads
             # as an ordinary item (the reader API does not say which entries
             # share a blob), so re-find them by content. One table per

@@ -33,10 +33,11 @@ KM_PER_DEG = 111.32
 
 
 def parse_poly(text: str):
-    """The (Multi)Polygon of an Osmosis .poly file, read as osmium reads it:
-    even-odd over all rings, so a '!' ring is a hole, an island in it is
-    land again and a lake in that island water, whatever the order in the
-    file. A ring is made valid first, so a self-crossing one keeps both
+    """The (Multi)Polygon of an Osmosis .poly file, even-odd over all rings
+    as osmium reads a well-formed one: a '!' ring is a hole, an island in it
+    is land again and a lake in that island water, whatever the order in the
+    file. (A malformed file can differ: osmium ignores a '!' ring before any
+    outer one, or the part of a hole past the outer rings' envelope.) A ring is made valid first, so a self-crossing one keeps both
     lobes. An outline at the antimeridian is refused: one whose rings reach
     +-180 (Geofabrik splits them there) or jump across it."""
     import shapely

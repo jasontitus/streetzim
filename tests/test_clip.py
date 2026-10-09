@@ -497,8 +497,8 @@ def test_a_clip_touching_the_box_edge_writes_a_poly(tmp_path):
 
 
 def _margin_km(grown, geom, lon_range):
-    """The smallest distance (km) from the buffered outline's boundary, in
-    lon_range, to `geom`: each sample measured in its own local plane."""
+    """(smallest, largest) distance in km from the buffered outline's
+    boundary, in lon_range, to `geom`: each sample in its own local plane."""
     import math
     import shapely
     pts = shapely.segmentize(grown.exterior, 0.02).coords
@@ -509,7 +509,7 @@ def _margin_km(grown, geom, lon_range):
         k = math.cos(math.radians(lat)) * 111.32
         local = shapely.transform(geom, lambda c, lon=lon, lat=lat, k=k: (c - (lon, lat)) * (k, 111.32))
         out.append(local.distance(Point(0, 0)))
-    return min(out)
+    return min(out), max(out)
 
 
 def test_the_buffer_holds_far_from_the_middle_meridian():
@@ -518,7 +518,8 @@ def test_the_buffer_holds_far_from_the_middle_meridian():
     # outline sheared that margin to about 7 km of the asked 10.
     g = clip.parse_poly(_poly_text(("1", [(-140, 58), (-130, 62), (-60, 62), (-60, 55), (-140, 55), (-140, 58)])))
     grown = clip.buffer_km(g, 10)
-    assert _margin_km(grown, g, (-141, -129)) > 9.5
+    lo, hi = _margin_km(grown, g, (-180, 180))
+    assert 9.7 < lo and hi < 10.35, (lo, hi)        # 12-degree strips: 9.54 to 10.45
 
 
 def test_the_terrain_gate_counts_the_clip_zoom_and_the_outline_edge():
@@ -588,3 +589,40 @@ def test_a_build_starts_and_ends_with_no_clip(poly_file, tmp_path, monkeypatch):
                              "--clip-poly", str(poly_file), "--output", str(tmp_path / "t.zim")])
     assert seen[1][0] is not None and seen[1][1][0] == "-p"
     assert clip.active() is None and area.CLIP_POLY_ENV not in os.environ
+
+
+def test_repackage_keeps_context_entries_one_tile_each(tmp_path):
+    # A libzim build writes ctx/ as aliases, which read back as items; a
+    # repack must not store each as a full copy of its z10 tile.
+    pytest.importorskip("libzim")
+    from libzim.reader import Archive
+    from libzim.writer import Creator, Hint, Item, StringProvider
+    from cloud.repackage_zim import repackage
+
+    class It(Item):
+        def __init__(self, path, data, mime="application/x-protobuf"):
+            super().__init__()
+            self.a = (path, data, mime)
+
+        def get_path(self): return self.a[0]
+        def get_title(self): return ""
+        def get_mimetype(self): return self.a[2]
+        def get_contentprovider(self): return StringProvider(self.a[1])
+        def get_hints(self): return {Hint.FRONT_ARTICLE: False}
+    tile = bytes(range(256)) * 16                    # far past the alias table's size cap
+    src = tmp_path / "src.zim"
+    with Creator(str(src)) as c:
+        for k, v in {"Title": "t", "Description": "d", "Language": "eng", "Creator": "c",
+                     "Publisher": "p", "Date": "2026-10-09", "Name": "n"}.items():
+            c.add_metadata(k, v)
+        c.add_item(It("index.html", b"<html></html>", "text/html"))
+        c.add_item(It("tiles/10/5/6.pbf", tile))
+        c.add_alias("ctx/10/5/6.pbf", "", "tiles/10/5/6.pbf", {Hint.FRONT_ARTICLE: False})
+        c.set_mainpath("index.html")
+    assert not Archive(str(src)).get_entry_by_path("ctx/10/5/6.pbf").is_redirect
+    dst = tmp_path / "dst.zim"
+    repackage(str(src), str(dst), swap_viewer=False)
+    arc = Archive(str(dst))
+    ctx = arc.get_entry_by_path("ctx/10/5/6.pbf")
+    assert ctx.is_redirect and ctx.get_redirect_entry().path == "tiles/10/5/6.pbf"
+    assert bytes(ctx.get_item().content) == tile
