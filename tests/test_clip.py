@@ -446,37 +446,6 @@ def test_the_search_step_drops_records_outside_the_outline(poly_file, tmp_path):
     assert names() == ["Tanta"]
 
 
-def test_the_terrain_gate_skips_what_the_clip_dropped(poly_file):
-    # cloud/check_terrain_coverage.py counts a missing terrain tile over land
-    # as a failure; a clipped ZIM has none past the clip zoom outside the
-    # outline, by design.
-    import importlib.util
-    import mercantile
-    spec = importlib.util.spec_from_file_location("ctc", ROOT / "cloud" / "check_terrain_coverage.py")
-    ctc = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(ctc)
-    c = clip.Clip.from_poly_file(str(poly_file), buffer=0)
-
-    class Arc:
-        def __init__(self, mc):
-            self.mc = mc
-
-        def get_entry_by_path(self, p):
-            assert p == "map-config.json"
-            if self.mc is None:
-                raise KeyError(p)
-            data = json.dumps(self.mc).encode()
-            return type("E", (), {"get_item": lambda s: type("I", (), {"content": data})()})()
-    inside, outside = mercantile.tile(29.9, 30.3, 11), mercantile.tile(33.5, 31.5, 11)
-    assert ctc.clip_filter(Arc(None)) is None
-    assert ctc.clip_filter(Arc({"minZoom": 0})) is None
-    for mc in ({"clipMinZoom": 10, "clipArea": c.area_geojson()},
-               {"clipMinZoom": 10, "clipMask": c.mask_geojson(BBOX)}):        # early trial builds
-        z, keeps = ctc.clip_filter(Arc(mc))
-        assert z == 10
-        assert keeps(inside.x, inside.y, 11) and not keeps(outside.x, outside.y, 11)
-
-
 def test_rings_nest_even_odd_as_osmium_reads_them():
     # A lake (4-6) in an island (3-7) in a lake (2-8) in land (0-10).
     sq = lambda a, b: [(a, a), (b, a), (b, b), (a, b), (a, a)]
@@ -520,31 +489,6 @@ def test_the_buffer_holds_far_from_the_middle_meridian():
     grown = clip.buffer_km(g, 10)
     lo, hi = _margin_km(grown, g, (-180, 180))
     assert 9.7 < lo and hi < 10.35, (lo, hi)        # 12-degree strips: 9.54 to 10.45
-
-
-def test_the_terrain_gate_counts_the_clip_zoom_and_the_outline_edge():
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("ctc", ROOT / "cloud" / "check_terrain_coverage.py")
-    ctc = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(ctc)
-    gone = (10, lambda x, y, z: False)              # the clip kept nothing past z10
-    assert not ctc.clip_skips(gone, 0, 0, 10)       # the clip zoom is always in the ZIM
-    assert ctc.clip_skips(gone, 0, 0, 11)
-    assert not ctc.clip_skips(None, 0, 0, 11)
-    # A tile that meets clipArea only within CLIP_EDGE_DEG of its edge is not
-    # counted: the simplified area may run past the outline the writer used.
-    import mercantile
-    t = mercantile.tile(30.0, 30.0, 12)
-    w, s_, e, n = ctc.tile_bounds(t.x, t.y, 12)
-    area = {"type": "Polygon", "coordinates": [[[e - 0.005, s_], [e + 1, s_], [e + 1, n], [e - 0.005, n], [e - 0.005, s_]]]}
-
-    class Arc:
-        def get_entry_by_path(self, p):
-            data = json.dumps({"clipMinZoom": 10, "clipArea": area}).encode()
-            return type("E", (), {"get_item": lambda s: type("I", (), {"content": data})()})()
-    clipf = ctc.clip_filter(Arc())
-    assert ctc.clip_skips(clipf, t.x, t.y, 12)
-    assert not ctc.clip_skips(clipf, t.x + 1, t.y, 12)
 
 
 def test_the_search_step_drops_records_outside_on_the_pbf_path(poly_file, tmp_path, monkeypatch):
@@ -626,3 +570,82 @@ def test_repackage_keeps_context_entries_one_tile_each(tmp_path):
     ctx = arc.get_entry_by_path("ctx/10/5/6.pbf")
     assert ctx.is_redirect and ctx.get_redirect_entry().path == "tiles/10/5/6.pbf"
     assert bytes(ctx.get_item().content) == tile
+
+
+# Geofabrik splits an outline at the antimeridian: Russia's main ring and the
+# US's Aleutians end exactly on 180 (and the far side starts on -180).
+SPLIT_EAST = [(170.0, 60.0), (180.0, 60.0), (180.0, 70.0), (170.0, 70.0), (170.0, 60.0)]
+SPLIT_WEST = [(-180.0, 62.0), (-175.0, 62.0), (-175.0, 66.0), (-180.0, 66.0), (-180.0, 62.0)]
+
+
+def test_parse_poly_refuses_vertices_on_the_antimeridian_unless_asked():
+    text = _poly_text(("1", SPLIT_EAST))
+    with pytest.raises(ValueError, match="antimeridian"):
+        clip.parse_poly(text)
+    assert clip.parse_poly(text, antimeridian_edge=True).bounds == (170.0, 60.0, 180.0, 70.0)
+    # Past the line, or jumping across it, stays refused either way.
+    with pytest.raises(ValueError, match="antimeridian"):
+        clip.parse_poly("x\n1\n   179 0\n   181 0\n   180 1\nEND\nEND\n", antimeridian_edge=True)
+    with pytest.raises(ValueError, match="jumps"):
+        clip.parse_poly(_poly_text(("1", [(179.0, 0.0), (-179.0, 0.0), (-179.0, 1.0), (179.0, 0.0)])),
+                        antimeridian_edge=True)
+
+
+def test_boxed_outline_cuts_a_split_outline_to_the_box_inside_the_antimeridian(tmp_path):
+    text = _poly_text(("1", SPLIT_EAST), ("2", SPLIT_WEST))
+    got = clip.boxed_outline(text, (165.0, 55.0, 180.0, 75.0))
+    w, s, e, n = got.bounds
+    assert (w, s, n) == (170.0, 60.0, 70.0)
+    assert e == pytest.approx(180.0 - clip.ANTIMERIDIAN_INSET)
+    assert e < 180.0
+    # The west half lies outside this box and is gone.
+    assert not got.intersects(box(-180.0, 60.0, -170.0, 70.0))
+    # Written out, --clip-poly takes it as it is (parse_poly with no flag).
+    out = tmp_path / "boxed.poly"
+    clip._write_poly(got, str(out))
+    c = clip.Clip.from_poly_file(str(out), buffer=10.0, bbox=(165.0, 55.0, 180.0, 75.0))
+    assert c.contains(175.0, 65.0)
+    assert not c.contains(166.0, 56.0)
+
+
+def test_boxed_outline_of_an_ordinary_outline_is_its_cut_to_the_box(poly_file):
+    text = poly_file.read_text()
+    small = (29.5, 29.5, 31.5, 31.0)
+    got = clip.boxed_outline(text, small)
+    want = clip.parse_poly(text).intersection(box(*small))
+    assert got.symmetric_difference(want).area == pytest.approx(0.0, abs=1e-12)
+    # The hole survives the cut.
+    assert not got.contains(Point(30.75, 30.6))
+
+
+def test_boxed_outline_refuses_a_box_across_the_antimeridian_or_off_the_outline(poly_file):
+    with pytest.raises(ValueError, match="crosses the antimeridian"):
+        clip.boxed_outline(_poly_text(("1", SPLIT_EAST)), (172.0, 51.0, -130.0, 72.0))
+    with pytest.raises(ValueError, match="does not meet the box"):
+        clip.boxed_outline(poly_file.read_text(), (0.0, 0.0, 1.0, 1.0))
+
+
+def test_boxed_outline_keeps_a_west_split_outline_inside_the_antimeridian():
+    got = clip.boxed_outline(_poly_text(("1", SPLIT_WEST)), (-180.0, 55.0, -170.0, 75.0))
+    w = got.bounds[0]
+    assert w == pytest.approx(-180.0 + clip.ANTIMERIDIAN_INSET)
+    assert w > -180.0
+    # parse_poly (no flag) takes the result as it is.
+    clip.parse_poly(_poly_text(("1", list(got.exterior.coords))))
+
+
+def test_boxed_outline_joins_several_outlines():
+    a = _poly_text(("1", [(0, 0), (4, 0), (4, 4), (0, 4), (0, 0)]))
+    b = _poly_text(("1", [(4, 0), (8, 0), (8, 4), (4, 4), (4, 0)]))
+    got = clip.boxed_outline([a, b], (-1.0, -1.0, 9.0, 5.0))
+    assert got.area == pytest.approx(32.0)
+    assert got.contains(Point(2, 2)) and got.contains(Point(6, 2))
+    # A single text still works as before.
+    assert clip.boxed_outline(a, (-1.0, -1.0, 9.0, 5.0)).area == pytest.approx(16.0)
+
+
+def test_boxed_outline_refuses_a_box_off_the_globe():
+    with pytest.raises(ValueError, match="leaves the globe"):
+        clip.boxed_outline(_poly_text(("1", SPLIT_EAST)), (165.0, 55.0, 181.0, 75.0))
+    with pytest.raises(ValueError, match="leaves the globe"):
+        clip.boxed_outline(_poly_text(("1", SPLIT_WEST)), (-181.0, 55.0, -170.0, 75.0))

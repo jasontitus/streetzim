@@ -32,14 +32,16 @@ from streetzim import area as _area
 KM_PER_DEG = 111.32
 
 
-def parse_poly(text: str):
+def parse_poly(text: str, *, antimeridian_edge: bool = False):
     """The (Multi)Polygon of an Osmosis .poly file, even-odd over all rings
     as osmium reads a well-formed one: a '!' ring is a hole, an island in it
     is land again and a lake in that island water, whatever the order in the
     file. (A malformed file can differ: osmium ignores a '!' ring before any
     outer one, or the part of a hole past the outer rings' envelope.) A ring is made valid first, so a self-crossing one keeps both
     lobes. An outline at the antimeridian is refused: one whose rings reach
-    +-180 (Geofabrik splits them there) or jump across it."""
+    +-180 (Geofabrik splits them there) or jump across it. With
+    `antimeridian_edge`, vertices ON +-180 are accepted (for boxed_outline,
+    which cuts them off); a ring past it or jumping across it still is not."""
     import shapely
     from shapely.geometry import Polygon
 
@@ -62,7 +64,9 @@ def parse_poly(text: str):
         i += 1                              # past the ring's END
         if len(ring) < 3:
             raise ValueError(f"ring {name!r} has fewer than 3 points")
-        if any(not -180.0 < x < 180.0 or not -90.0 <= y <= 90.0 for x, y in ring):
+        lo, hi = (-180.0, 180.0)
+        if any(not (lo <= x <= hi if antimeridian_edge else lo < x < hi)
+               or not -90.0 <= y <= 90.0 for x, y in ring):
             raise ValueError(f"ring {name!r} reaches the antimeridian or leaves the "
                              "globe: an outline there is not supported")
         if any(abs(a[0] - b[0]) > 180.0 for a, b in zip(ring, ring[1:] + ring[:1])):
@@ -74,6 +78,39 @@ def parse_poly(text: str):
         raise ValueError("the .poly file encloses no area")
     return geom
 
+
+# How far inside +-180 boxed_outline keeps an outline: parse_poly refuses
+# vertices on the antimeridian itself.
+ANTIMERIDIAN_INSET = 1e-4
+
+
+def boxed_outline(texts: str | Sequence[str], bbox: Sequence[float]):
+    """The outline in `texts` (one Osmosis .poly, or several, joined) cut to
+    a build's box (west, south, east, north), for --clip-poly.
+
+    Several outlines make one region from Geofabrik's pieces (Europe plus
+    Armenia and Azerbaijan, which Geofabrik files under Asia). Geofabrik's
+    outlines for Russia and the United States (the Aleutians) are split at
+    the antimeridian, so parse_poly refuses them as they come; a build box
+    never crosses it (from_poly_file refuses that), so cutting to the box,
+    kept ANTIMERIDIAN_INSET inside +-180, gives an outline parse_poly
+    accepts. Cutting first costs nothing: from_poly_file cuts the widened
+    outline to the same box anyway."""
+    from shapely.geometry import box
+    from shapely.ops import unary_union
+    w, s, e, n = (float(v) for v in bbox)
+    if w > e:
+        raise ValueError(f"box {tuple(bbox)} crosses the antimeridian: not supported")
+    if w < -180.0 or e > 180.0:
+        raise ValueError(f"box {tuple(bbox)} leaves the globe")
+    if isinstance(texts, str):
+        texts = [texts]
+    geom = _polygonal(unary_union([parse_poly(t, antimeridian_edge=True) for t in texts]))
+    cut = _polygonal(geom.intersection(box(max(w, -180.0 + ANTIMERIDIAN_INSET), s,
+                                           min(e, 180.0 - ANTIMERIDIAN_INSET), n)))
+    if cut.is_empty:
+        raise ValueError(f"the outline does not meet the box {tuple(bbox)}")
+    return cut
 
 def _polygonal(geom):
     """The polygons of `geom` (make_valid can add stray lines and points)."""

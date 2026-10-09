@@ -255,6 +255,13 @@ if [ -f "$URL_CACHE" ]; then
     echo "  url cache: $URL_CACHE ($(du -h "$URL_CACHE" | cut -f1)) policy=drop-record"
 fi
 
+# Border clip (ops/region-clip.sh): a region cloud/region-outlines.tsv lists
+# is cut to its outline widened by 10 km instead of its box, with zoom 0-10
+# kept over the whole box as greyed context. CLIP=0 builds by the box.
+. /storage/streetzim/ops/region-clip.sh
+region_clip_args "$ID" "$SRC_ID" "$BBOX" || exit 1
+ARGS+=( "${CLIP_ARGS[@]}" )
+
 # streetzim-pack compresses clusters with one zstd context per rayon
 # thread. At ZSTD_CLEVEL=22 (windowLog 27) each context is hundreds of MB,
 # so on this 36-core host a large region's pack peaked around 40 GB and

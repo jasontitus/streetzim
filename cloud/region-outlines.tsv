@@ -1,0 +1,13 @@
+# Border outlines for build-region-fast.sh (--clip-poly), one per region id.
+# A region listed here is built cut to its outline, widened by 10 km, instead
+# of its registry bbox (cloud/regions.tsv); zoom 0-10 still covers the whole
+# box as greyed context. ops/region-outline.py fetches the outline and cuts it
+# to the box; unlisted regions build by the box as before.
+# Columns (tab-separated): id	Geofabrik path(s), joined with "+" (download.geofabrik.de/<path>.poly)
+# Variants (cloud/region-variants.tsv) use their parent's row. Europe adds Armenia and
+# Azerbaijan, which Geofabrik files under Asia (the site lists them in Europe).
+united-states	north-america/us
+canada	north-america/canada
+russia	russia
+africa	africa
+europe	europe+asia/armenia+asia/azerbaijan
