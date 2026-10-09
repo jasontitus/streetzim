@@ -216,6 +216,26 @@
     travelBtns[m].addEventListener('click', function() { setTravelMode(m); });
   });
 
+  // A route that starts or ends this far from the point picked says so: the
+  // nearest road can be kilometres away (past a clipped map's border, tens
+  // of km), and the marker alone does not say how far it is.
+  var ROUTE_END_FAR_M = 2000;
+  function routeEndsNote() {
+    function off(pick, e7) {
+      if (!pick || !e7) return 0;
+      var m = haversine(pick.lat, pick.lon, e7[0] / 1e7, e7[1] / 1e7);
+      return m >= ROUTE_END_FAR_M ? m : 0;
+    }
+    var o = off(originPick, originCoordE7), d = off(destPick, destCoordE7);
+    if (o && d) {
+      return szT('routing.far_both', 'The route starts {start} from the start point and ends {end} from the destination',
+                 { start: formatDistance(o), end: formatDistance(d) });
+    }
+    if (d) return szT('routing.far_dest', 'The route ends {dist} from the destination', { dist: formatDistance(d) });
+    if (o) return szT('routing.far_origin', 'The route starts {dist} from the start point', { dist: formatDistance(o) });
+    return '';
+  }
+
   function computeAndDrawRoute() {
     resultEl.style.display = 'none';
     var seq = ++routeSeq;
@@ -318,12 +338,13 @@
         // the requested origin/destination.
         try { window.__streetzim_lastRoute = lastRoute; } catch (e) {}
         if (driveMode.active) driveMode.setRoute(lastRoute);
-        // Say so when the router had to move an end (it was on a road cut
-        // off from the rest, e.g. by the map's edge).
-        setRoutingStatus(originMoved && destMoved
+        // Say so when an end is far from its pick (the note gives the
+        // distance) or the router had to move it (it was on a road cut off
+        // from the rest, e.g. by the map's edge).
+        setRoutingStatus(routeEndsNote() || (originMoved && destMoved
           ? szT('routing.both_moved', 'Start and destination moved to the nearest reachable roads')
           : destMoved ? szT('routing.dest_moved', 'Destination moved to the nearest reachable road')
-          : originMoved ? szT('routing.origin_moved', 'Start moved to the nearest reachable road') : '', 'done');
+          : originMoved ? szT('routing.origin_moved', 'Start moved to the nearest reachable road') : ''), 'done');
         // In drive mode, the next GPS fix re-centers at the user's
         // location; fitBounds would yank the camera out to the whole
         // route and blow up the follow-cam.

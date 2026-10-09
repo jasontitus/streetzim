@@ -49,6 +49,76 @@ function szLabelOf(p) {
   return p['name:latin'] || p.name || '';
 }
 
+// --clip-poly builds (streetzim/clip.py) carry "clipMask" (the box minus the
+// region's outline) and "clipArea" (the outline). Past the outline the ZIM
+// has tiles only up to clipMinZoom, which alone would leave the map blank
+// there from clipMinZoom + 1 (openzim/maps#90). So the base fills and lines
+// are drawn a second time, first, from a copy of the source capped at
+// clipMinZoom, which MapLibre overzooms: past the outline the reader sees
+// the context map at any zoom. "clip-inside" (the outline, in the background
+// colour) hides that copy wherever the full map is. No labels are copied:
+// symbol collision is global, so hidden copies would still push real labels
+// off the map. Then the outside is greyed and the outline drawn, last.
+var _SZ_CLIP_CTX = 'ctx-';
+function _szAddClipMask(style, config) {
+  if (!config || !config.clipMask) return;
+  var z = typeof config.clipMinZoom === 'number' ? config.clipMinZoom : 10;
+  if (config.clipArea) {
+    var base = style.sources.openmaptiles;
+    var ctx = {};
+    Object.keys(base).forEach(function(k) { ctx[k] = base[k]; });
+    ctx.minzoom = z;
+    ctx.maxzoom = z;
+    delete ctx.attribution;          // the base source already credits it
+    style.sources['openmaptiles-ctx'] = ctx;
+    style.sources['clip-area'] = { "type": "geojson", "data": config.clipArea };
+    var copies = [];
+    style.layers.forEach(function(l) {
+      if (l.source !== 'openmaptiles' || (l.type !== 'fill' && l.type !== 'line')) return;
+      var c = JSON.parse(JSON.stringify(l));
+      c.id = _SZ_CLIP_CTX + l.id;
+      c.source = 'openmaptiles-ctx';
+      // From clipMinZoom only: below it both sources hold the same tiles.
+      c.minzoom = Math.max(l.minzoom || 0, z);
+      copies.push(c);
+    });
+    copies.push({
+      "id": "clip-inside",
+      "type": "fill",
+      "source": "clip-area",
+      "minzoom": z,
+      "paint": { "fill-color": "#f8f4f0" }
+    });
+    // Right after the background, under every base layer.
+    var at = style.layers.length && style.layers[0].id === 'background' ? 1 : 0;
+    Array.prototype.splice.apply(style.layers, [at, 0].concat(copies));
+  }
+  style.sources['clip-mask'] = { "type": "geojson", "data": config.clipMask };
+  style.layers.push({
+    "id": "clip-mask",
+    "type": "fill",
+    "source": "clip-mask",
+    "paint": {
+      "fill-color": "#8f8f8f",
+      "fill-opacity": ["interpolate", ["linear"], ["zoom"], z, 0.3, z + 2, 0.5]
+    }
+  });
+  style.layers.push({
+    "id": "clip-outline",
+    "type": "line",
+    "source": "clip-mask",
+    "paint": { "line-color": "#6f6f6f", "line-width": 1.2, "line-dasharray": [3, 2] }
+  });
+}
+// The layers satellite mode must hide with the base fills (120): the context
+// copies and the fill that covers them.
+function szClipContextIds(config) {
+  if (!config || !config.clipMask || !config.clipArea) return [];
+  return makeStyle(config).layers.filter(function(l) {
+    return l.id.indexOf(_SZ_CLIP_CTX) === 0 || l.id === 'clip-inside';
+  }).map(function(l) { return l.id; });
+}
+
 function makeStyle(config) {
   SZ_LANG = (config && typeof config.language === 'string' && config.language) || 'en';
   // Use zimtile:// protocol for tiles and fonts — this adds retry logic
@@ -69,7 +139,7 @@ function makeStyle(config) {
     sourceConfig.bounds = config.bounds[2] > 180
       ? [-180, config.bounds[1], 180, config.bounds[3]] : config.bounds;
   }
-  return _szThemeStyle({
+  var style = {
     "version": 8,
     "name": "OSM Offline",
     "sources": {
@@ -631,6 +701,8 @@ function makeStyle(config) {
         }
       }
     ]
-  }, _szPrefersDark());
+  };
+  _szAddClipMask(style, config);
+  return _szThemeStyle(style, _szPrefersDark());
 }
 

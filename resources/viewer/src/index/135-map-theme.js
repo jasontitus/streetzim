@@ -61,8 +61,15 @@ var _SZ_DARK = {
   'place-suburb': { 'text-color': ['case', ['has', 'wikidata'], '#a7bde0', '#b8b8b8'],
                     'text-halo-color': _SZ_DARK_HALO },
   'poi-label': { 'text-color': ['case', ['has', 'wikidata'], '#a7bde0', '#bdbdbd'],
-                 'text-halo-color': _SZ_DARK_HALO }
+                 'text-halo-color': _SZ_DARK_HALO },
+  'clip-mask': { 'fill-color': '#0b0c0e' },
+  'clip-outline': { 'line-color': '#8a8a8a' },
+  'clip-inside': { 'fill-color': '#1b1e23' }
 };
+// A --clip-poly context copy (130: ctx-<id>) is darkened as its layer is.
+function _szDarkFor(id) {
+  return _SZ_DARK[id] || (id.indexOf('ctx-') === 0 ? _SZ_DARK[id.slice(4)] : undefined);
+}
 
 function _szHostInvertsContent() {
   function inverted(el) {
@@ -146,7 +153,7 @@ _szApplyUiTheme(_szPrefersDark());
 function _szThemeStyle(style, dark) {
   if (!dark) return style;
   style.layers.forEach(function(layer) {
-    var o = _SZ_DARK[layer.id];
+    var o = _szDarkFor(layer.id);
     if (!o) return;
     layer.paint = layer.paint || {};
     Object.keys(o).forEach(function(k) { layer.paint[k] = o[k]; });

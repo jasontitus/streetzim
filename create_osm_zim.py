@@ -102,6 +102,7 @@ from streetzim.common import (  # noqa: F401
     _re_phase,
 )
 from streetzim import area as _area
+from streetzim import clip as _clip
 from streetzim.routing.build import (  # noqa: F401
     extract_routing_graph,
     chunk_graph_file,
@@ -431,6 +432,17 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--pbf", help="Path to local OSM PBF file")
     parser.add_argument("--bbox", help="Bounding box: minlon,minlat,maxlon,maxlat "
                         "(minlon > maxlon for an area across the antimeridian)")
+    parser.add_argument("--clip-poly", metavar="FILE",
+                        help="Osmosis .poly outline of the region (e.g. Geofabrik's). "
+                             "Past --clip-min-zoom, tiles, satellite and terrain, "
+                             "search records and the PBF cuts keep only what "
+                             "touches it; the viewer greys out the rest of the "
+                             "box. See streetzim/clip.py")
+    parser.add_argument("--clip-buffer-km", type=float, default=10.0, metavar="KM",
+                        help="Widen --clip-poly by this much (default 10)")
+    parser.add_argument("--clip-min-zoom", type=int, default=10, metavar="Z",
+                        help="Keep every tile up to this zoom over the whole box, "
+                             "as context (default 10)")
     parser.add_argument("--map-center", metavar="LON,LAT",
                         help="Override initial map center. Default = bbox "
                              "centroid, which lands in empty water for "
@@ -1153,6 +1165,7 @@ def _build_search(
                          "areas' points from GeoNames, CC BY 4.0)")
                 except Exception as _e:
                     print(f"    Warning: administrative-area extraction failed: {_e}")
+            _clip_search_features(search_features)
             # Same PBF feeds the wiki-tag lookup so the chunker can enrich
             # POI records with wikipedia/wikidata for offline cross-ref.
             try:
@@ -1163,7 +1176,40 @@ def _build_search(
                 wiki_cross_refs = None
             wiki_cross_refs = _finish_wiki_cross_refs(args, wiki_cross_refs,
                                                       search_features, admin_refs)
+        else:
+            _clip_search_features(search_features)
     return address_count, overture_sources, overture_themes, search_features, wiki_cross_refs
+
+
+def _clip_search_features(path):
+    """With --clip-poly, drop the search records outside the outline, from
+    every source (tiles, OSM and Overture addresses, Overture places,
+    administrative areas). Rewrites `path` in place."""
+    clip = _clip.active()
+    if clip is None:
+        return
+    import shapely
+    import numpy as np
+    tmp = path + ".clip"
+    total = kept = 0
+    with open(path, "rb") as fin, open(tmp, "wb") as fout:
+        while True:
+            lines = fin.readlines(64 << 20)
+            if not lines:
+                break
+            pts = [json.loads(ln) for ln in lines]
+            lon = np.array([p.get("lon", np.nan) for p in pts], dtype=float)
+            lat = np.array([p.get("lat", np.nan) for p in pts], dtype=float)
+            # A record without a point is kept: there is nothing to clip by.
+            inside = shapely.contains_xy(clip.geom, lon, lat) | np.isnan(lon) | np.isnan(lat)
+            for ln, keep in zip(lines, inside):
+                if keep:
+                    fout.write(ln)
+            total += len(lines)
+            kept += int(inside.sum())
+    os.replace(tmp, path)
+    print(f"    Clipped search records to the outline: kept {kept:,} of {total:,}",
+          flush=True)
 
 
 def _finish_wiki_cross_refs(args, wiki_cross_refs, search_features, admin_refs=None):
@@ -1697,6 +1743,12 @@ def _build_map_config(
         map_config["language"] = lang
     if bbox:
         map_config["bounds"] = bbox
+        active_clip = _clip.active()
+        if active_clip is not None:
+            # What the viewer greys out (resources/viewer: the clip mask).
+            map_config["clipMask"] = active_clip.mask_geojson(bbox)
+            map_config["clipArea"] = active_clip.area_geojson()
+            map_config["clipMinZoom"] = active_clip.min_zoom
     if satellite_dir and os.path.isdir(str(satellite_dir)):
         map_config["hasSatellite"] = True
         map_config["satelliteMaxZoom"] = satellite_max_zoom
@@ -1966,6 +2018,12 @@ def main(argv=None):
     # Create temp directory
     tmpdir = tempfile.mkdtemp(prefix="osm_zim_")
     try:
+        if args.clip_poly:
+            _c = _clip.Clip.from_poly_file(args.clip_poly, buffer=args.clip_buffer_km,
+                                           min_zoom=args.clip_min_zoom)
+            _clip.set_active(_c, workdir=tmpdir)
+            print(f"  Clipping to {args.clip_poly} (+{args.clip_buffer_km:g} km) "
+                  f"from z{args.clip_min_zoom + 1}", flush=True)
         mbtiles_path, work_pbf, work_pbf_cut = _acquire_tiles(
             args=args, bbox_str=bbox_str, geofabrik_path=geofabrik_path,
             pbf_path=pbf_path, tmpdir=tmpdir, total_steps=total_steps)

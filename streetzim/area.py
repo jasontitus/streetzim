@@ -25,6 +25,12 @@ from collections.abc import Sequence
 
 BBox = tuple[float, float, float, float]
 
+# The .poly of the build's clip (streetzim/clip.py), or None. Also in the
+# environment, for the steps that run in a spawned child (routing:
+# streetzim/isolate.py), which do not see this module's state.
+CLIP_POLY_PATH: str | None = None
+CLIP_POLY_ENV = "STREETZIM_CLIP_POLY"
+
 
 def normalize(b: Sequence[float]) -> BBox:
     """The unwrapped form of a box: -180 <= west < 180, west < east <= west + 360.
@@ -108,7 +114,13 @@ def osmium_extract_args(b: Sequence[float], workdir: str, bbox_arg: str | None =
     A box that does not cross gives [flag, bbox_arg] exactly as the caller
     always passed it (bbox_arg defaults to "w,s,e,n" of the floats). One that
     crosses gives a .poly with a ring on each side of the antimeridian,
-    written into `workdir`: osmium takes no box past 180."""
+    written into `workdir`: osmium takes no box past 180.
+
+    With a clip active (streetzim.clip.set_active), every cut is to the
+    clip's outline instead (it lies inside the box)."""
+    clip_poly = CLIP_POLY_PATH or os.environ.get(CLIP_POLY_ENV)
+    if clip_poly:
+        return ["-p", clip_poly]
     if not crosses(b):
         return [flag, bbox_arg if bbox_arg is not None else
                 f"{b[0]},{b[1]},{b[2]},{b[3]}"]

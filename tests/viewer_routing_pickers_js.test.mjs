@@ -29,11 +29,20 @@ const HERE = PANEL.slice(PANEL.indexOf('// BEGIN sz-here'), PANEL.indexOf('// EN
 assert(PICK.includes('function computeAndDrawRoute') && CLEAR.includes('destPick = null'));
 assert(HERE.includes('function szIsHere'));
 
+// Great-circle metres, as the viewer's haversine (520-routing-graph-load-and-snap.js).
+function hav(lat1, lon1, lat2, lon2) {
+  const R = 6371000, r = Math.PI / 180;
+  const a = Math.sin((lat2 - lat1) * r / 2) ** 2
+          + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin((lon2 - lon1) * r / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+const km = (m) => (m / 1000).toFixed(1) + ' km';
+
 function make(opts = {}) {
   const el = () => ({ textContent: '', value: '', style: {}, addEventListener() {},
     classList: { add() {}, remove() {}, contains() { return false; } },
     getBoundingClientRect() { return { height: 10 }; } });
-  const env = { snaps: [], routes: [] };
+  const env = { snaps: [], routes: [], hav };
   const body = `
   var window = {}; var graph = ${opts.noGraph ? 'null' : '{}'}; var loadGraphInflight = false; function loadGraph() {}
   var statusEl = el(), originInput = el(), destInput = el(), resultEl = el(), clearBtn = el(), goRow = el(),
@@ -47,8 +56,10 @@ function make(opts = {}) {
   function syncTravelButtons() {} function resetGoButtons() {} function setExpandHint() {}
   function stopRouteProgressIndicator() {} function startRouteProgressIndicator() {} function cancelInFlightRoute() {}
   function coordLabel(a, b) { return a + ',' + b; } function makeMarkerEl() { return {}; }
-  function haversine() { return 1000; } function unwrapLngs(c) { return c; } function drawRoute() {}
-  function formatDistance() { return ''; } function formatTime() { return ''; } function renderRoads() {}
+  function haversine(a, b, c, d) { return ${opts.realDistance ? 'env.hav(a, b, c, d)' : '1000'}; }
+  function unwrapLngs(c) { return c; } function drawRoute() {}
+  function formatDistance(m) { return ${opts.realDistance ? "(m / 1000).toFixed(1) + ' km'" : "''"}; }
+  function formatTime() { return ''; } function renderRoads() {}
   function augmentRouteForDriving(r) { return Object.assign({}, r); }
   var maplibregl = { Marker: function() { var m = { ll: null, setLngLat(x) { m.ll = x; return m; },
                        addTo() { return m; }, remove() {} }; return m; },
@@ -284,5 +295,41 @@ await ok('the failure states are translated (pseudo-locale brackets them)', asyn
   } finally {
     globalThis.SZ_I18N_PSEUDO = false;
   }
+});
+// Far ends (routeEndsNote): an end 2 km or more from the point picked says how far.
+async function farRoute(oSnap, dSnap, extra) {
+  const e = make({ realDistance: true }); const a = e.api;
+  a.setOriginFromLatLon(1, 1, 'O'); await snap(e, 'origin', 10, ...oSnap);
+  a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20, ...dSnap);
+  await route(e, extra || {});
+  return a.state;
+}
+await ok('a destination far from every road: the note gives the distance', async () => {
+  const st = await farRoute([1, 1], [2, 2.1]);
+  assert.strictEqual(st.status, `The route ends ${km(hav(2, 2, 2, 2.1))} from the destination`);
+  assert.strictEqual(st.statusState, 'done');
+});
+await ok('a start far from its pick: the note says the start', async () => {
+  const st = await farRoute([1.05, 1], [2, 2]);
+  assert.strictEqual(st.status, `The route starts ${km(hav(1, 1, 1.05, 1))} from the start point`);
+});
+await ok('both ends far: one note with both distances, in order', async () => {
+  const st = await farRoute([1.05, 1], [2, 2.1]);
+  assert.strictEqual(st.status, `The route starts ${km(hav(1, 1, 1.05, 1))} from the start point`
+    + ` and ends ${km(hav(2, 2, 2, 2.1))} from the destination`);
+});
+await ok('ends under 2 km from their picks: no note', async () => {
+  const st = await farRoute([1.012, 1], [2, 2.017]);        // about 1.3 and 1.9 km
+  assert.ok(hav(2, 2, 2, 2.017) > 1800 && hav(2, 2, 2, 2.017) < 2000);
+  assert.strictEqual(st.status, '');
+});
+await ok('a destination the router moved far: the note gives the final distance', async () => {
+  const st = await farRoute([1, 1], [2, 2.001], { endMoved: { node: 21, lat: 2.1, lon: 2.1 } });
+  assert.strictEqual(st.status, `The route ends ${km(hav(2, 2, 2.1, 2.1))} from the destination`);
+  assert.strictEqual(st.destMoved, true);
+});
+await ok('a destination the router moved a little: the moved note, not a distance', async () => {
+  const st = await farRoute([1, 1], [2, 2], { endMoved: { node: 21, lat: 2.005, lon: 2 } });
+  assert.strictEqual(st.status, MOVED_D);
 });
 console.log(`${pass} passed`);

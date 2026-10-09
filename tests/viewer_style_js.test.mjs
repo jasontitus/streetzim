@@ -65,7 +65,7 @@ function load(env = {}) {
   const logs = [];
   const fn = new Function('window', 'document', 'location', 'getComputedStyle',
     'baseUrl', 'dbg', 'describeError', 'Path2D', 'fetch',
-    SRC + '\nreturn { makeStyle, _SZ_DARK, _SZ_MAKI, _SZ_POI_ICON, _SZ_POI_GROUP,' +
+    SRC + '\nreturn { makeStyle, _SZ_DARK, _szDarkFor, szClipContextIds, _SZ_MAKI, _SZ_POI_ICON, _SZ_POI_GROUP,' +
     ' _szPoiIconExpr, _szPrefersDark, _szThemeStyle, initMapTheme, initPoiIcons,' +
     ' _szRenderPoiIcon, initRtlText, SZ_THEME_KEY, szReadThemeMode, szWriteThemeMode,' +
     ' szNextThemeMode, szThemeMode, szSetThemeMode, szThemeButton };');
@@ -73,7 +73,11 @@ function load(env = {}) {
     (...x) => logs.push(x), (e) => String(e && e.message || e), env.Path2D, env.fetch);
   return { ...api, window, mq, listeners, winListeners, logs, htmlClasses: classes };
 }
-const CONFIG = { minZoom: 0, maxZoom: 14 };
+// With a clip mask (--clip-poly builds), so its layers are in every check.
+const CLIP_AREA = { type: 'Polygon', coordinates: [[[0.2, 0.2], [0.8, 0.2], [0.8, 0.8], [0.2, 0.2]]] };
+const CONFIG = { minZoom: 0, maxZoom: 14, clipMinZoom: 10, clipArea: CLIP_AREA,
+                 clipMask: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] } };
+const NO_CLIP = { minZoom: 0, maxZoom: 14 };
 
 // localStorage stand-in; `fail` names methods that throw (quota, Kiwix iOS).
 function memStorage(init = {}, fail = []) {
@@ -198,14 +202,46 @@ await ok('theme: ?theme= forces either way; an inverting host (Kiwix JS) gets li
 });
 
 await ok('theme: every colour in the light style has a dark value (no light patch left behind)', () => {
-  const { makeStyle, _SZ_DARK } = load();
+  const { makeStyle, _szDarkFor } = load();
   const missing = [];
   for (const l of makeStyle(CONFIG).layers) {
     for (const k of Object.keys(l.paint || {})) {
-      if (/-color$/.test(k) && !(_SZ_DARK[l.id] && k in _SZ_DARK[l.id])) missing.push(`${l.id}.${k}`);
+      const d = _szDarkFor(l.id);        // a clip context copy (ctx-<id>) as its layer
+      if (/-color$/.test(k) && !(d && k in d)) missing.push(`${l.id}.${k}`);
     }
   }
   assert.deepStrictEqual(missing, []);
+});
+
+await ok('clip: context copies under the map, from clipMinZoom; mask and outline on top; none without a clip', () => {
+  const { makeStyle, szClipContextIds } = load();
+  const st = makeStyle(CONFIG);
+  const ids = st.layers.map(l => l.id);
+  const base = st.layers.filter(l => l.source === 'openmaptiles' && (l.type === 'fill' || l.type === 'line'));
+  assert.ok(base.length > 10);
+  // Right after the background: every base fill/line copied, in order, then clip-inside.
+  const copies = st.layers.slice(1, 1 + base.length);
+  assert.deepStrictEqual(copies.map(l => l.id), base.map(l => 'ctx-' + l.id));
+  for (const [c, l] of copies.map((c, i) => [c, base[i]])) {
+    assert.strictEqual(c.source, 'openmaptiles-ctx');
+    assert.strictEqual(c.minzoom, Math.max(l.minzoom || 0, 10));
+    assert.deepStrictEqual(c.filter, l.filter);
+    assert.deepStrictEqual(c.paint, l.paint);
+  }
+  assert.strictEqual(ids[1 + base.length], 'clip-inside');
+  assert.ok(!ids.some(id => id.startsWith('ctx-') && st.layers[ids.indexOf(id)].type === 'symbol'));
+  assert.deepStrictEqual(ids.slice(-2), ['clip-mask', 'clip-outline']);
+  const ctx = st.sources['openmaptiles-ctx'];
+  assert.strictEqual(ctx.minzoom, 10);
+  assert.strictEqual(ctx.maxzoom, 10);
+  assert.deepStrictEqual(ctx.tiles, st.sources.openmaptiles.tiles);
+  assert.deepStrictEqual(szClipContextIds(CONFIG), ids.filter(id => id.startsWith('ctx-') || id === 'clip-inside'));
+  // A build without --clip-poly: no clip source, layer or id at all.
+  const plain = makeStyle(NO_CLIP);
+  assert.ok(!plain.layers.some(l => /^(ctx-|clip-)/.test(l.id)));
+  assert.deepStrictEqual(Object.keys(plain.sources).filter(k => /clip|ctx/.test(k)), []);
+  assert.deepStrictEqual(szClipContextIds(NO_CLIP), []);
+  assert.deepStrictEqual(plain.layers.map(l => l.id), ids.filter(id => !/^(ctx-|clip-)/.test(id)));
 });
 
 await ok('theme: the dark table names only layers and properties the light style has', () => {

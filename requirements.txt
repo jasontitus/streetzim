@@ -16,3 +16,5 @@ reverse_geocoder>=1.5    # GeoNames-backed (lat,lon) → city/admin1 for POI loc
 duckdb==1.5.6         # pinned: the image bakes its extensions for this exact version
 pyarrow>=14.0         # for DuckDB Arrow-batch streaming in `merge_overture_addresses`
 zstandard>=0.22       # zstd-compressed pack manifest (~3.5x smaller); absent -> plain
+shapely>=2.0          # --clip-poly outlines (contains_xy, prepare: 2.0+)
+scipy>=1.10           # --clip-poly: strong components of the road graph (reverse_geocoder needs it anyway)

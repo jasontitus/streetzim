@@ -256,7 +256,7 @@ if (!window.__szUnsupported) fetchConfig(1)
         'landuse-residential', 'landuse-commercial', 'landuse-park',
         'water', 'water-lowzoom', 'waterway', 'building', 'building-outline',
         'boundary-country', 'boundary-state', 'background'
-      ];
+      ].concat(szClipContextIds(config));
 
       function addSatelliteLayer() {
         if (satelliteAdded) return;

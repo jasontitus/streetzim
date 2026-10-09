@@ -16,6 +16,7 @@ from typing import NamedTuple
 from cloud.viewer_slots import pad_to_slot as _pad_to_slot
 from streetzim.search_extract import build_location_index
 from streetzim import area as _area
+from streetzim import clip as _clip
 from streetzim.cpus import compression_cpus
 # The builder's flushing, phase-timing print (see streetzim/common.py).
 from streetzim.common import (
@@ -1459,6 +1460,9 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
         # layer) ARE kept; they paint the right ocean color when MapLibre
         # styles them.
         tiles_skipped_empty = 0
+        # --clip-poly: past its min zoom, only tiles that touch the outline.
+        clip = _clip.active()
+        tiles_clipped = 0
         tile_start = time.time()
         batch_size = 1000
         # Adaptive backpressure, ONLY for the libzim builder. With libzim,
@@ -1497,6 +1501,9 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
                     # "Empty article" count goes to 0.
                     if not tile_data:
                         tiles_skipped_empty += 1
+                        continue
+                    if clip is not None and not clip.keeps_tile(z, x, y):
+                        tiles_clipped += 1
                         continue
                     item_start = time.time() if _libzim_backpressure else 0.0
                     tile_path = f"tiles/{z}/{x}/{y}.pbf"
@@ -1552,14 +1559,17 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
                 f"{len(bad_gzip_tiles)} vector tile(s) failed gzip decompression "
                 f"({_bad}{'…' if len(bad_gzip_tiles) > 5 else ''}) — corrupt MBTiles; "
                 f"re-run tilemaker before packaging")
-        skip_str = (f" (skipped {tiles_skipped_empty} empty)"
-                    if tiles_skipped_empty else "")
+        skip_str = ((f" (skipped {tiles_skipped_empty} empty)"
+                     if tiles_skipped_empty else "")
+                    + (f" (clipped {tiles_clipped} outside the outline)"
+                       if tiles_clipped else ""))
         print(f"\r    Added {tiles_added} tiles in {elapsed:.0f}s ({rate_str}){skip_str}; "
               f"{aliaser.summary()}                ", flush=True)
         PHASE_TIMER.record_subphase(
             "zim-pack: vector tiles", elapsed,
             note=f"{tiles_added:,} tiles ({rate_str})"
                  + (f", skipped {tiles_skipped_empty} empty" if tiles_skipped_empty else "")
+                 + (f", clipped {tiles_clipped}" if tiles_clipped else "")
                  + (f", {aliaser.aliases:,} aliased" if aliaser.aliases else ""))
     finally:
         _watchdog_stop.set()
@@ -1592,6 +1602,8 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
         suffix = f".{ext}"
         strip_len = len(suffix)
         aliaser = TileAliaser(creator)
+        clip = _clip.active()
+        clipped = 0
         for z in range(min_zoom, max_zoom + 1):
             z_dir = os.path.join(source_dir, str(z))
             if not os.path.isdir(z_dir):
@@ -1615,6 +1627,9 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
                         continue
                     if bbox and not _tile_in_bbox(z, x, y, bbox):
                         skipped += 1
+                        continue
+                    if clip is not None and not clip.keeps_tile(z, x, y):
+                        clipped += 1
                         continue
                     fpath = os.path.join(x_dir, fname)
                     # A zero-byte cache file is a download that wrote
@@ -1659,6 +1674,7 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
         print(f"\r    Added {count} {label.lower()} tiles in {elapsed:.0f}s ({rate:.0f}/s); "
               f"{aliaser.summary()}" +
               (f" (skipped {skipped} outside bbox)" if skipped else "") +
+              (f" (clipped {clipped} outside the outline)" if clipped else "") +
               (f" (dropped {empty} zero-byte cache files)" if empty else "") +
               (f" (skipped {unreadable} unreadable files)" if unreadable else ""),
               flush=True)
@@ -1666,6 +1682,7 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
             f"zim-pack: {label.lower()} tiles", elapsed,
             note=f"{count:,} tiles ({rate:.0f}/s)"
                  + (f", skipped {skipped} outside bbox" if skipped else "")
+                 + (f", clipped {clipped}" if clipped else "")
                  # Dropped files are invisible to the validator's coverage
                  # check (it can only count entries that exist), so record
                  # them where the build summary keeps them.
@@ -1755,7 +1772,10 @@ def _add_wikidata(creator, MapItem, *, tiles, mbtiles_path, bbox, wikidata_data,
             print("    Scanning tiles for Wikidata Q-IDs in bbox...")
             import mapbox_vector_tile as _mvt
             bbox_qids = set()
+            _qclip = _clip.active()
             for _z, _x, _y, data in _tile_src:
+                if _qclip is not None and not _qclip.keeps_tile(_z, _x, _y):
+                    continue
                 tile_data = data
                 if data[:2] == b"\x1f\x8b":
                     try:

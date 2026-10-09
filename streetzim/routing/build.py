@@ -27,11 +27,12 @@ import subprocess
 import tempfile
 import time
 
-from streetzim import area
+from streetzim import area, clip
 # The builder's flushing, phase-timing print (see streetzim/common.py).
 from streetzim.common import (
     print,
 )
+from streetzim.routing import margin
 
 # Geometry offsets are uint32 byte offsets into the blob, so the blob
 # stops growing near 2^32 (later edges get no geometry and render as
@@ -395,14 +396,19 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
     if hw_pbf:
         scratch.append(hw_pbf)
     try:
-        return _extract(hw_pbf or source_pbf, output_dir, bbox, scratch,
-                        highways_only=hw_pbf is not None)
+        graph = _extract(hw_pbf or source_pbf, output_dir, bbox, scratch,
+                         highways_only=hw_pbf is not None)
     finally:
         for p in scratch:
             try:
                 os.remove(p)
             except OSError:
                 pass
+    border = clip.active_border()
+    if graph and border is not None:
+        nodes, edges = margin.close_cut_off_roads(graph, border)
+        print(f"    Clip: closed {edges} edges at {nodes} cut-off road nodes to cars")
+    return graph
 
 
 def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
