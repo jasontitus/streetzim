@@ -74,10 +74,11 @@ and El Paso, the Argentina box holds all of Chile. With `--include-poly`
 the build is cut to the polygon, widened by 10 km so border towns and
 crossings stay (create_osm_zim's `--clip-poly`, `streetzim/clip.py`):
 - map tiles from zoom 11 up, terrain, satellite imagery, search records,
-  addresses and the routing graph keep only what touches it. tilemaker
-  still reads the whole box (so the download does not shrink), and zoom
-  0-10 stays over the whole box: past the polygon the viewer shows it
-  overzoomed under a grey mask, not blank land;
+  addresses and the routing graph keep only what touches it. Zoom 0-10
+  of the map, terrain and satellite imagery stays over the whole box (so
+  tilemaker still reads the box's extract, and the extract downloaded is
+  the same): past the polygon the viewer shows it overzoomed under a grey
+  mask, not blank land;
 - road pieces the cut leaves past the border are closed to cars, so a route
   toward a place outside ends at the border (the viewer says how far short
   it stopped);
@@ -85,8 +86,9 @@ crossings stay (create_osm_zim's `--clip-poly`, `streetzim/clip.py`):
   near the border, so its OSM data barely shrinks (Liechtenstein, basic:
   6.00 MB either way); terrain, satellite imagery and Overture data, which
   are fetched for the box, do. From a larger extract (`--pbf-url` of a
-  continent, as StreetZim's own builds use) the OSM data shrinks too:
-  Egypt went from 1.43 GB to 1.13 GB.
+  continent, as StreetZim's own builds use) the OSM data shrinks too: the
+  whole Egypt ZIM (StreetZim's production full build) went from 1.43 GB
+  to 1.13 GB.
 
 A polygon the clip cannot read fails the build before the extract is
 downloaded; `--no-clip` builds its whole box, as before.

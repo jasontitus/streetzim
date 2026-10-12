@@ -241,9 +241,10 @@ def test_a_box_across_the_antimeridian_keeps_its_box(tmp_path, monkeypatch, caps
 def test_a_polygon_split_at_the_antimeridian_is_cut_inside_it(tmp_path, monkeypatch):
     pytest.importorskip("shapely")
     from shapely.geometry import Point
-    # Geofabrik-style: the main part ends on +180, and a far part starts on
-    # -180 (Russia's Chukotka, the US's Aleutians). The box built does not
-    # cross; the builder refuses a vertex on ±180, so the clip is cut inside.
+    # Geofabrik-style rings split at ±180: the main part ends on +180 and a
+    # far part starts on -180, too far to share its box. (Geofabrik's Russia
+    # and US parts are close enough to share one, which crosses: no clip.)
+    # The builder refuses a vertex on ±180, so the clip is cut inside it.
     _fake_poly(monkeypatch, _poly((170.0, 50.0, 180.0, 60.0), (-180.0, 10.0, -178.0, 12.0)))
     argv, info = plan(["--include-poly", "https://example.org/p.poly", "--pbf-url", "x"],
                       tmp_path)
@@ -251,6 +252,52 @@ def test_a_polygon_split_at_the_antimeridian_is_cut_inside_it(tmp_path, monkeypa
     geom = _clip_of(argv)
     assert geom.contains(Point(175.0, 55.0)) and geom.contains(Point(179.99, 55.0))
     assert geom.bounds[0] >= 170.0 and geom.bounds[2] < 180.0
+
+
+SQUARE = "p\n1\n7.40 43.72\n7.44 43.72\n7.44 43.76\n7.40 43.76\nEND\nEND\n"
+SQUARE_BOX = "7.400000,43.720000,7.440000,43.760000"
+
+
+def test_builds_writing_one_clip_at_once_do_not_share_a_part_file(tmp_path, monkeypatch):
+    pytest.importorskip("shapely")
+    from streetzim import clip
+    # (In containers both builds are PID 1: a PID in the name would collide.)
+    real, started, nested = clip._write_poly, [], []
+
+    def write(geom, path):
+        real(geom, path)
+        if not started:                                    # a second build, mid-write
+            started.append(path)
+            nested.append(cli.border_clip([SQUARE], SQUARE_BOX, tmp_path))
+    monkeypatch.setattr(clip, "_write_poly", write)
+    out = cli.border_clip([SQUARE], SQUARE_BOX, tmp_path)
+    assert out == nested[0] and clip.parse_poly(out.read_text()).area > 0
+
+
+def test_the_clip_is_written_like_any_file_and_leaves_no_part(tmp_path):
+    pytest.importorskip("shapely")
+    # A umask that tells the umask's mode (0640) from a fixed 0644 or 0600.
+    old = os.umask(0o027)
+    try:
+        out = cli.border_clip([SQUARE], SQUARE_BOX, tmp_path)
+    finally:
+        os.umask(old)
+    assert out.stat().st_mode & 0o777 == 0o640
+    assert [p.name for p in out.parent.iterdir()] == [out.name]
+
+
+@pytest.mark.parametrize("exc", [OSError, KeyboardInterrupt, SystemExit])
+def test_a_failed_clip_write_leaves_nothing(tmp_path, monkeypatch, exc):
+    pytest.importorskip("shapely")
+    from streetzim import clip
+
+    def bad(geom, path):
+        Path(path).write_text("partial")
+        raise exc()
+    monkeypatch.setattr(clip, "_write_poly", bad)
+    with pytest.raises(exc):
+        cli.border_clip([SQUARE], SQUARE_BOX, tmp_path)
+    assert list((tmp_path / "poly").iterdir()) == []
 
 
 def test_include_poly_with_ready_made_tiles_is_cut_too(tmp_path, no_network):

@@ -1014,17 +1014,16 @@ def border_clip(outlines: list[str], bbox: str, dl: Path, *,
     key = hashlib.sha256("\0".join(outlines + [bbox]).encode()).hexdigest()[:16]
     out = dl / "poly" / f"clip-{key}.poly"
     out.parent.mkdir(parents=True, exist_ok=True)
-    # A private name: builds sharing --dl (and, in containers, a PID) may
-    # write the same clip at once; each replaces it with the same bytes.
-    fd, part = tempfile.mkstemp(dir=out.parent, prefix=out.name + ".", suffix=".part")
-    os.close(fd)
-    os.chmod(part, 0o644)               # mkstemp's 0600, as a download would not be
+    # A random name, not the PID: builds sharing --dl (in containers, all
+    # PID 1) may write the same clip at once; each replaces it with the same
+    # bytes. Written with open(), so its mode follows the umask.
+    part = out.with_name(f"{out.name}.{os.urandom(8).hex()}.part")
     try:
-        clip._write_poly(geom, part)  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType]
+        clip._write_poly(geom, str(part))  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType]
         os.replace(part, out)
     except BaseException:
         with contextlib.suppress(OSError):
-            os.unlink(part)
+            part.unlink()
         raise
     print(f"  Border clip: the build is cut to the --include-poly polygon "
           f"(--no-clip keeps its box): {out}", flush=True)
