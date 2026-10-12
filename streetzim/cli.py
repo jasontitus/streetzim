@@ -920,6 +920,7 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
     has_tiles = bool(args.mbtiles or args.mbtiles_url)
     geofabrik: str | None = None
     outlines: list[str] = []            # --include-poly's files, for the clip
+    across = False                      # --include-poly's box crosses ±180
     if args.area:
         key = args.area.lower().replace(" ", "-")
         if key not in KNOWN_AREAS:
@@ -939,7 +940,9 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
                   f"building {box} and leaving out {len(left_out)} part(s): "
                   + "; ".join(",".join(f"{v:.2f}" for v in b) for b in left_out)
                   + ". Build those with --bbox.", flush=True)
-        bbox = ",".join(f"{v:.6f}" for v in check_bbox(box, "--include-poly"))
+        nb = check_bbox(box, "--include-poly")
+        across = nb[2] > 180            # unwrapped east (before rounding)
+        bbox = ",".join(f"{v:.6f}" for v in nb)
         m = GEOFABRIK_POLY.match(urls[0])
         if len(urls) == 1 and m:
             geofabrik = m.group(1)
@@ -954,7 +957,8 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
                          "(or --mbtiles / --mbtiles-url, which build without routing)")
     if not pbf_url and args.routing:
         raise ValueError("--routing needs an OSM extract: give --pbf-url, or --no-routing")
-    clip_poly = border_clip(outlines, bbox, dl) if outlines and args.clip else None
+    clip_poly = (border_clip(outlines, bbox, dl, across=across)
+                 if outlines and args.clip else None)
 
     # The MBTiles before the extract: a bad one fails before that download.
     tiles_argv: list[str] = []
@@ -983,18 +987,22 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
                   "clip_poly": str(clip_poly) if clip_poly else None}
 
 
-def border_clip(outlines: list[str], bbox: str, dl: Path) -> Path | None:
-    """--include-poly's polygon (its files joined) cut to the build's box,
-    as the .poly create_osm_zim's --clip-poly reads: in `dl`/poly, named
-    after the polygon and the box. None for a box across the antimeridian,
-    which a clip does not support: the build keeps its box, and a warning
-    says so. A polygon the clip cannot read fails before any extract
-    download (--no-clip builds the box)."""
+def border_clip(outlines: list[str], bbox: str, dl: Path, *,
+                across: bool = False) -> Path | None:
+    """--include-poly's polygon (its files joined) cut to the build's box
+    `bbox` (as the builder gets it), as the .poly create_osm_zim's
+    --clip-poly reads: in `dl`/poly, named after the polygon and the box.
+    The cut matters beyond the parts the box leaves out: Geofabrik splits
+    outlines at ±180 and the builder refuses a vertex there.
+    None when the box crosses the antimeridian (`across`), which a clip
+    does not support: the build keeps its box, and a warning says so. A
+    polygon the clip cannot read fails before any extract download
+    (--no-clip builds the box)."""
     import hashlib
 
     from streetzim import clip
     box = [float(v) for v in bbox.split(",")]
-    if box[2] > 180:                    # check_bbox's unwrapped east
+    if across:
         print("  WARNING: --include-poly: a box across the antimeridian cannot be "
               "cut to its polygon; building the whole box", flush=True)
         return None
@@ -1006,9 +1014,18 @@ def border_clip(outlines: list[str], bbox: str, dl: Path) -> Path | None:
     key = hashlib.sha256("\0".join(outlines + [bbox]).encode()).hexdigest()[:16]
     out = dl / "poly" / f"clip-{key}.poly"
     out.parent.mkdir(parents=True, exist_ok=True)
-    part = out.with_name(f"{out.name}.part.{os.getpid()}")
-    clip._write_poly(geom, str(part))  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType]
-    os.replace(part, out)
+    # A private name: builds sharing --dl (and, in containers, a PID) may
+    # write the same clip at once; each replaces it with the same bytes.
+    fd, part = tempfile.mkstemp(dir=out.parent, prefix=out.name + ".", suffix=".part")
+    os.close(fd)
+    os.chmod(part, 0o644)               # mkstemp's 0600, as a download would not be
+    try:
+        clip._write_poly(geom, part)  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType]
+        os.replace(part, out)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(part)
+        raise
     print(f"  Border clip: the build is cut to the --include-poly polygon "
           f"(--no-clip keeps its box): {out}", flush=True)
     return out

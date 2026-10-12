@@ -165,14 +165,16 @@ def test_geofabrik_poly_selects_its_extract(tmp_path, no_network):
 
 
 def _clip_of(argv):
-    """The outline create_osm_zim is given (--clip-poly), as it loads it:
-    widened by nothing and cut to the build's box. None without one."""
+    """The outline create_osm_zim is given (--clip-poly), as written: not
+    cut again, so the CLI's own cut is what is checked. The builder must
+    load it with its box, as _activate_clip does. None without one."""
     ns = builder_args(argv)
     if ns.clip_poly is None:
         return None
     from create_osm_zim import parse_bbox
-    from streetzim.clip import Clip
-    return Clip.from_poly_file(ns.clip_poly, buffer=0, bbox=parse_bbox(ns.bbox)).geom
+    from streetzim.clip import Clip, parse_poly
+    Clip.from_poly_file(ns.clip_poly, bbox=parse_bbox(ns.bbox))
+    return parse_poly(Path(ns.clip_poly).read_text())
 
 
 def test_include_poly_cuts_the_build_to_the_polygon(tmp_path, no_network):
@@ -227,6 +229,37 @@ def test_a_box_across_the_antimeridian_keeps_its_box(tmp_path, monkeypatch, caps
     assert info["bbox"] == "172.840000,-23.120000,183.470000,-11.240000"
     assert builder_args(argv).clip_poly is None and info["clip_poly"] is None
     assert "across the antimeridian" in capsys.readouterr().out
+    # Past 180 by less than the box's rounding: still across (the rounded
+    # box ends at 180.000000, but the polygon does not).
+    _fake_poly(monkeypatch, _poly((170.0, 50.0, 180.0000001, 60.0)))
+    argv, info = plan(["--include-poly", "https://example.org/p.poly", "--pbf-url", "x"],
+                      tmp_path / "rounded")
+    assert info["clip_poly"] is None
+    assert "across the antimeridian" in capsys.readouterr().out
+
+
+def test_a_polygon_split_at_the_antimeridian_is_cut_inside_it(tmp_path, monkeypatch):
+    pytest.importorskip("shapely")
+    from shapely.geometry import Point
+    # Geofabrik-style: the main part ends on +180, and a far part starts on
+    # -180 (Russia's Chukotka, the US's Aleutians). The box built does not
+    # cross; the builder refuses a vertex on ±180, so the clip is cut inside.
+    _fake_poly(monkeypatch, _poly((170.0, 50.0, 180.0, 60.0), (-180.0, 10.0, -178.0, 12.0)))
+    argv, info = plan(["--include-poly", "https://example.org/p.poly", "--pbf-url", "x"],
+                      tmp_path)
+    assert info["bbox"] == "170.000000,50.000000,180.000000,60.000000"
+    geom = _clip_of(argv)
+    assert geom.contains(Point(175.0, 55.0)) and geom.contains(Point(179.99, 55.0))
+    assert geom.bounds[0] >= 170.0 and geom.bounds[2] < 180.0
+
+
+def test_include_poly_with_ready_made_tiles_is_cut_too(tmp_path, no_network):
+    from tests.mbtiles_fixture import make_mbtiles
+    t = make_mbtiles(tmp_path / "t.mbtiles", [(0, 0, 0)])
+    argv, info = plan(["--include-poly", "https://download.geofabrik.de/europe/monaco.poly",
+                       "--mbtiles", str(t)], tmp_path)
+    assert "--mbtiles" in argv and info["clip_poly"] == builder_args(argv).clip_poly
+    assert info["clip_poly"]
 
 
 def test_a_polygon_the_clip_cannot_read_fails_before_the_extract(tmp_path, monkeypatch):
