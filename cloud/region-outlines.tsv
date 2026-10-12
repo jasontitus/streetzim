@@ -11,3 +11,24 @@ canada	north-america/canada
 russia	russia
 africa	africa
 europe	europe+asia/armenia+asia/azerbaijan
+egypt	africa/egypt
+# European regions (2026-10-12). Each row names the countries in the site's
+# description (web/generate.py); the box cuts them, so a big neighbour that
+# the description includes in part (Ukraine's "western Russian frontier")
+# is listed whole. Unlisted on purpose: switzerland ("and the surrounding
+# Alps"), caucasus ("with the southern Russian Caucasus and eastern Turkey").
+iceland	europe/iceland
+baltics	europe/estonia+europe/latvia+europe/lithuania
+greece	europe/greece
+carpathians	europe/romania+europe/hungary+europe/bulgaria
+benelux	europe/netherlands+europe/belgium+europe/luxembourg
+balkans	europe/slovenia+europe/croatia+europe/bosnia-herzegovina+europe/serbia+europe/montenegro+europe/albania+europe/macedonia+europe/kosovo
+poland	europe/poland
+ukraine	europe/ukraine+europe/moldova+russia
+austria-czech	europe/austria+europe/czech-republic+europe/slovakia
+britain-ireland	europe/great-britain+europe/ireland-and-northern-ireland+europe/isle-of-man
+iberia	europe/spain+europe/portugal+europe/andorra
+italy	europe/italy
+nordics	europe/norway+europe/sweden+europe/finland+europe/denmark
+germany	europe/germany
+france	europe/france
