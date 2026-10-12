@@ -31,6 +31,7 @@ END
 3
    7.50   43.70
    7.51   43.71
+   7.50   43.71
 END
 END
 """
@@ -161,6 +162,90 @@ def test_geofabrik_poly_selects_its_extract(tmp_path, no_network):
                       tmp_path)
     assert info["pbf_url"].endswith("/europe/monaco-latest.osm.pbf")
     assert info["bbox"] == "7.400000,43.700000,7.510000,43.760000"
+
+
+def _clip_of(argv):
+    """The outline create_osm_zim is given (--clip-poly), as it loads it:
+    widened by nothing and cut to the build's box. None without one."""
+    ns = builder_args(argv)
+    if ns.clip_poly is None:
+        return None
+    from create_osm_zim import parse_bbox
+    from streetzim.clip import Clip
+    return Clip.from_poly_file(ns.clip_poly, buffer=0, bbox=parse_bbox(ns.bbox)).geom
+
+
+def test_include_poly_cuts_the_build_to_the_polygon(tmp_path, no_network):
+    pytest.importorskip("shapely")
+    from shapely.geometry import Point
+    from streetzim.clip import parse_poly
+    url = "https://download.geofabrik.de/europe/monaco.poly"
+    argv, info = plan(["--include-poly", url], tmp_path)
+    geom = _clip_of(argv)
+    assert info["clip_poly"] == builder_args(argv).clip_poly
+    assert geom.symmetric_difference(parse_poly(POLY)).area < 1e-12   # the polygon itself
+    assert geom.contains(Point(7.43, 43.75))
+    assert not geom.contains(Point(7.415, 43.735))                     # its hole
+    assert not geom.contains(Point(7.47, 43.73))                       # in the box, not the polygon
+    # --no-clip: the polygon's box, as before.
+    argv, info = plan(["--include-poly", url, "--no-clip"], tmp_path / "box")
+    assert builder_args(argv).clip_poly is None and info["clip_poly"] is None
+    assert info["bbox"] == "7.400000,43.700000,7.510000,43.760000"
+
+
+def test_area_and_bbox_builds_keep_their_box(tmp_path, no_network):
+    for i, argv in enumerate((["--area", "monaco"], ["--area", "monaco", "--clip"],
+                              ["--bbox", "7.4,43.72,7.44,43.76", "--pbf-url", "x"])):
+        a, info = plan(argv, tmp_path / str(i))
+        assert builder_args(a).clip_poly is None and info["clip_poly"] is None
+
+
+def test_several_polys_make_one_clip_cut_to_the_box_built(tmp_path, monkeypatch, capsys):
+    pytest.importorskip("shapely")
+    from shapely.geometry import Point, box
+    # Switzerland and Liechtenstein, say: two files, one area. The second has
+    # a far part, which the box built leaves out, and so does the clip.
+    polys = {"a.poly": _poly((5.0, 45.0, 10.0, 48.0)),
+             "b.poly": _poly((9.9, 47.0, 10.4, 47.3), (60.0, 10.0, 61.0, 11.0))}
+    monkeypatch.setattr(cli, "fetch", lambda url, dest: (
+        dest.parent.mkdir(parents=True, exist_ok=True),
+        dest.write_text(polys.get(url.rsplit("/", 1)[1], "pbf")), dest)[2])
+    argv, info = plan(["--include-poly", "https://example.org/a.poly,https://example.org/b.poly",
+                       "--pbf-url", "https://example.org/x.pbf"], tmp_path)
+    assert info["bbox"] == "5.000000,45.000000,10.400000,48.000000"
+    assert "leaving out 1 part(s)" in capsys.readouterr().out
+    geom = _clip_of(argv)
+    assert geom.contains(Point(7.0, 46.0)) and geom.contains(Point(10.2, 47.1))
+    assert not geom.contains(Point(10.2, 46.0))       # in the box, in neither polygon
+    assert not geom.intersects(box(60.0, 10.0, 61.0, 11.0))
+
+
+def test_a_box_across_the_antimeridian_keeps_its_box(tmp_path, monkeypatch, capsys):
+    _fake_poly(monkeypatch, FIJI_LIKE)
+    argv, info = plan(["--include-poly", "https://example.org/fiji.poly", "--pbf-url", "x"],
+                      tmp_path)
+    assert info["bbox"] == "172.840000,-23.120000,183.470000,-11.240000"
+    assert builder_args(argv).clip_poly is None and info["clip_poly"] is None
+    assert "across the antimeridian" in capsys.readouterr().out
+
+
+def test_a_polygon_the_clip_cannot_read_fails_before_the_extract(tmp_path, monkeypatch):
+    pytest.importorskip("shapely")
+    # Two points: a box for the area, but no outline to cut to.
+    asked = []
+
+    def fake_fetch(url, dest):
+        asked.append(url)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text("p\n1\n7.40 43.72\n7.44 43.76\nEND\nEND\n")
+        return dest
+    monkeypatch.setattr(cli, "fetch", fake_fetch)
+    with pytest.raises(ValueError, match="--no-clip"):
+        plan(["--include-poly", "https://download.geofabrik.de/europe/monaco.poly"], tmp_path)
+    assert asked == ["https://download.geofabrik.de/europe/monaco.poly"]
+    argv, info = plan(["--include-poly", "https://download.geofabrik.de/europe/monaco.poly",
+                       "--no-clip"], tmp_path / "box")
+    assert info["clip_poly"] is None and info["bbox"] == "7.400000,43.720000,7.440000,43.760000"
 
 
 def _ring(minlon, minlat, maxlon, maxlat):

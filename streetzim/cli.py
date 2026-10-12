@@ -15,6 +15,10 @@ directly; both paths produce the same ZIM for the same inputs.
 --profile picks the feature set (full, the default, or basic; see PROFILES
 and docs/zimfarm.md); a feature flag given explicitly overrides it.
 
+With --include-poly the build is cut to the polygon itself (create_osm_zim's
+--clip-poly; --no-clip cuts to its box as before); --area and --bbox builds
+are cut to their box.
+
     streetzim --name osm_en_monaco --title Monaco \\
         --description "Offline map of Monaco with search and routing" \\
         --area monaco --output /output
@@ -75,6 +79,10 @@ ZIMFARM: dict[str, dict[str, Any]] = {
     "illustration_url": {"title": "Illustration URL", "type": "url"},
     "area": {"title": "Preset area", "type": "string-enum", "choices": "KNOWN_AREAS"},
     "include_poly": {"title": "Include poly"},
+    "no_clip": {"title": "No border clip",
+                "description": "With Include poly, keep everything in the polygon's "
+                               "box instead of cutting the map, search and routing "
+                               "to the polygon itself"},
     "bbox": {"title": "Bounding box",
              "pattern": r"^-?[0-9.]+,-?[0-9.]+,-?[0-9.]+,-?[0-9.]+$"},
     "pbf_url": {"title": "OSM extract URL", "type": "url"},
@@ -232,9 +240,19 @@ def build_parser() -> argparse.ArgumentParser:
     src.add_argument("--area", help="A preset area from create_osm_zim.py's "
                                     "KNOWN_AREAS, e.g. monaco")
     src.add_argument("--include-poly",
-                     help="URL of a .poly file bounding the area. A Geofabrik "
+                     help="URL of a .poly file bounding the area (several, "
+                          "comma-separated, make one area). A Geofabrik "
                           "URL also selects its OSM extract; otherwise give "
-                          "--pbf-url")
+                          "--pbf-url. The build is cut to the polygon itself, "
+                          "unless --no-clip")
+    src.add_argument("--clip", action=argparse.BooleanOptionalAction, default=True,
+                     help="With --include-poly, cut the build to the polygon "
+                          "itself (widened by 10 km): map detail past zoom 10, "
+                          "search records and routing stop at it, and the map "
+                          "past it shows only zoom 0-10, greyed. --no-clip "
+                          "keeps everything in the polygon's box. Not across "
+                          "the antimeridian (that box is kept, with a warning). "
+                          "--area and --bbox builds keep their box. Default: on")
     src.add_argument("--bbox", help="minlon,minlat,maxlon,maxlat. For an area across "
                                     "the antimeridian, minlon > maxlon (Fiji: "
                                     "172.8,-23.2,-176.5,-11.2)")
@@ -901,6 +919,7 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
         raise ValueError("give --mbtiles or --mbtiles-url, not both")
     has_tiles = bool(args.mbtiles or args.mbtiles_url)
     geofabrik: str | None = None
+    outlines: list[str] = []            # --include-poly's files, for the clip
     if args.area:
         key = args.area.lower().replace(" ", "-")
         if key not in KNOWN_AREAS:
@@ -912,7 +931,8 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
         urls = [u.strip() for u in args.include_poly.split(",") if u.strip()]
         rings: list[tuple[BBox, float]] = []
         for u in urls:
-            rings += _poly_rings(fetch(u, dl / "poly" / _name_of_url(u)).read_text())
+            outlines.append(fetch(u, dl / "poly" / _name_of_url(u)).read_text())
+            rings += _poly_rings(outlines[-1])
         box, left_out = area_bbox(rings)
         if left_out:
             print(f"  WARNING: --include-poly has parts too far apart for one box; "
@@ -934,6 +954,7 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
                          "(or --mbtiles / --mbtiles-url, which build without routing)")
     if not pbf_url and args.routing:
         raise ValueError("--routing needs an OSM extract: give --pbf-url, or --no-routing")
+    clip_poly = border_clip(outlines, bbox, dl) if outlines and args.clip else None
 
     # The MBTiles before the extract: a bad one fails before that download.
     tiles_argv: list[str] = []
@@ -953,10 +974,44 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
         argv = _builder_argv(args, bbox, pbf_url, dl, illustration) + tiles_argv
         if source is None and pbf_url:          # tilemaker makes the tiles
             argv += tilemaker_store_argv(args, work)
+        if clip_poly:
+            argv += ["--clip-poly", str(clip_poly)]
     except BaseException:
         drop_cut(cut)                           # a failed extract download, or SIGTERM
         raise
-    return argv, {"bbox": bbox, "pbf_url": pbf_url, "mbtiles_cut": cut}
+    return argv, {"bbox": bbox, "pbf_url": pbf_url, "mbtiles_cut": cut,
+                  "clip_poly": str(clip_poly) if clip_poly else None}
+
+
+def border_clip(outlines: list[str], bbox: str, dl: Path) -> Path | None:
+    """--include-poly's polygon (its files joined) cut to the build's box,
+    as the .poly create_osm_zim's --clip-poly reads: in `dl`/poly, named
+    after the polygon and the box. None for a box across the antimeridian,
+    which a clip does not support: the build keeps its box, and a warning
+    says so. A polygon the clip cannot read fails before any extract
+    download (--no-clip builds the box)."""
+    import hashlib
+
+    from streetzim import clip
+    box = [float(v) for v in bbox.split(",")]
+    if box[2] > 180:                    # check_bbox's unwrapped east
+        print("  WARNING: --include-poly: a box across the antimeridian cannot be "
+              "cut to its polygon; building the whole box", flush=True)
+        return None
+    try:
+        geom = clip.boxed_outline(outlines, box)
+    except ValueError as e:
+        raise ValueError(f"--include-poly: cannot cut the build to the polygon ({e}); "
+                         "--no-clip builds its whole box") from e
+    key = hashlib.sha256("\0".join(outlines + [bbox]).encode()).hexdigest()[:16]
+    out = dl / "poly" / f"clip-{key}.poly"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    part = out.with_name(f"{out.name}.part.{os.getpid()}")
+    clip._write_poly(geom, str(part))  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType]
+    os.replace(part, out)
+    print(f"  Border clip: the build is cut to the --include-poly polygon "
+          f"(--no-clip keeps its box): {out}", flush=True)
+    return out
 
 
 def drop_cut(cut: str | None) -> None:

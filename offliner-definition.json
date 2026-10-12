@@ -173,7 +173,13 @@
       "type": "string",
       "required": false,
       "title": "Include poly",
-      "description": "URL of a .poly file bounding the area. A Geofabrik URL also selects its OSM extract; otherwise give --pbf-url"
+      "description": "URL of a .poly file bounding the area (several, comma-separated, make one area). A Geofabrik URL also selects its OSM extract; otherwise give --pbf-url. The build is cut to the polygon itself, unless --no-clip"
+    },
+    "no_clip": {
+      "type": "boolean",
+      "required": false,
+      "title": "No border clip",
+      "description": "With Include poly, keep everything in the polygon's box instead of cutting the map, search and routing to the polygon itself"
     },
     "bbox": {
       "type": "string",

@@ -38,10 +38,14 @@ turns off everything below that says "full".
 | Satellite imagery | **off**; opt-in | `--satellite`: EOX Sentinel-2 cloudless 2016, **CC BY 4.0**. The 2021 mosaic, **CC BY-NC-SA 4.0 (non-commercial)**, only with `--satellite-source s2cloudless-2021 --satellite-accept-noncommercial`, as a variant labelled restricted ([below](#satellite-imagery)) |
 
 The area is exactly one of `--area` (a preset), `--include-poly` (a `.poly`
-URL; a Geofabrik one also selects its extract) or `--bbox`. Areas are
-bounding boxes: the extract and the tiles are cut to the box, not the
-polygon. So:
-- an area across the antimeridian (Fiji, Chukotka, Kiribati) is supported.
+URL, or several comma-separated for one area; a Geofabrik one also selects
+its extract) or `--bbox`. An `--include-poly` build is cut to the polygon
+itself ([border clip](#border-clip---include-poly---no-clip)); `--area` and
+`--bbox` builds, and `--include-poly` with `--no-clip`, are cut to their
+box. The box is found the same way either way. So:
+- an area across the antimeridian (Fiji, Chukotka, Kiribati) is supported,
+  as a box: the border clip is not (the build keeps its box, and the log
+  says so).
   A polygon whose parts sit either side of ±180° (rings split there, as
   Geofabrik's are, or one ring drawn across it) becomes one box across the
   antimeridian, never a band around the world. With `--bbox`, write such a
@@ -57,10 +61,30 @@ polygon. So:
   they are less than 1° apart or their shared box is at most 3 times their
   own boxes: Spain keeps the Balearics and the Canaries, but the
   Netherlands leaves out its Caribbean islands and Portugal the Azores and
-  Madeira. Build those separately with `--bbox`;
+  Madeira (the border clip leaves them out too). Build those separately
+  with `--bbox`;
 - a single ring that spans open sea (Norway's includes Svalbard and
   Jan Mayen) gives a large, mostly empty box; prefer a smaller polygon or
   `--bbox`.
+
+### Border clip (`--include-poly`, `--no-clip`)
+
+A box holds a lot that is not the area: the Mexico box reaches San Diego
+and El Paso, the Argentina box holds all of Chile. With `--include-poly`
+the build is cut to the polygon, widened by 10 km so border towns and
+crossings stay (create_osm_zim's `--clip-poly`, `streetzim/clip.py`):
+- map tiles from zoom 11 up, terrain, satellite imagery, search records and
+  the OSM extract keep only what touches it. Zoom 0-10 stays over the whole
+  box: past the polygon the viewer shows it overzoomed under a grey mask,
+  not blank land;
+- road pieces the cut leaves past the border are closed to cars, so a route
+  toward a place outside ends at the border (the viewer says how far short
+  it stopped);
+- what it saves, on StreetZim's own builds (box, then clip): Egypt 1.43 GB to
+  1.13 GB, Russia 28.1 GB to 21 GB, the United States 39.2 GB to 33 GB.
+
+A polygon the clip cannot read fails the build before the extract is
+downloaded; `--no-clip` builds its whole box, as before.
 
 `License` metadata and the viewer's credits list only the sources a ZIM
 actually contains.
