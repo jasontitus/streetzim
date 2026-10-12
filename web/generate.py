@@ -390,6 +390,14 @@ REGIONS = [
         "description": "Die kleine Ausgabe der deutschen Schweiz-Karte: dieselben Orte, Straßen, Wege und Routen zu Fuß, mit dem Rad und dem Auto, mit deutschen Ortsnamen und deutscher Bedienoberfläche &mdash; aber ohne Satellitenbilder, ohne Wikipedia-Artikel und ohne die Kiwix-eigene Volltextsuche (die Suche in der Karte findet weiterhin alle Orte und Adressen), und die Karte reicht bis Zoomstufe 13 statt 14. Rund ein Drittel so groß.",
     },
     {
+        "id": "switzerland-border-de-ultralight",
+        "tier": "country",
+        "language": "de",
+        "title": "Schweiz und Liechtenstein (Ultralight)",
+        "zim_file": "osm-switzerland-border-de-ultralight.zim",
+        "description": "Nur die Schweiz und Liechtenstein: Orte, Adressen, Straßen, Wege und Routen zu Fuß, mit dem Rad und dem Auto enden 10&nbsp;km hinter der Landesgrenze, darüber hinaus zeigt die Karte nur noch eine grobe, grau abgedeckte Übersicht. Sonst wie &bdquo;Schweiz und die Alpen (Ultralight)&ldquo;: deutsche Ortsnamen und deutsche Bedienoberfläche, keine Satellitenbilder, keine Wikipedia-Artikel und keine Kiwix-eigene Volltextsuche (die Suche in der Karte findet alle Orte und Adressen), und die Karte reicht bis Zoomstufe 13. Rund halb so groß.",
+    },
+    {
         "id": "switzerland-light",
         "tier": "country",
         "title": "Switzerland & the Alps (Light)",
