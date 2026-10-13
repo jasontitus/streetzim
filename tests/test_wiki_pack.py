@@ -147,7 +147,13 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         {"n": "Missing", "t": "poi", "s": "", "a": 10.6, "o": 20.6, "l": "", "q": "Q10"},
         {"n": "Bad", "t": "poi", "s": "", "a": 10.6, "o": 20.6, "l": "", "q": "Q01"},
         {"n": "No q", "t": "poi", "s": "", "a": 10.6, "o": 20.6, "l": ""},
+        {"n": "Search Only", "t": "poi", "s": "", "a": 10.8, "o": 20.8, "l": "", "q": "Q78"},
     ]
+    # The base's own geo-index ([lat, lon, type, qid, desc]; an older row
+    # has no Q-ID): it places the POIs the category files do not hold.
+    base_geo = {"AC/DC_Place": [10.1, 20.1, "poi", "Q9", "a square"],
+                "Gamma": [10.25, 20.25, "poi", "Q30", ""],
+                "Missing": [10.6, 20.6, "poi", "Q10", ""], "Old_Row": [10.6, 20.6, "poi"]}
     wikidata = {"Q2": {"l": "Beta Peak", "i": "mountain", "e": 3000},
                 "Q5": {"l": "New Name", "i": "village", "p": 300},
                 "Q6": {"l": "Disambig"}, "Q7": {"l": "Unplaced", "i": "monument"},
@@ -166,6 +172,13 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         c.add_item(_Item("search-data/manifest.json", "", "application/json",
                          json.dumps({"total": 8, "chunks": {"al": 2, "ga": 6}})))
         c.add_item(_Item("wikidata/10.json", "", "application/json", json.dumps(wikidata)))
+        c.add_item(_Item("wiki-geo-index.json", "", "application/json", json.dumps(base_geo)))
+        c.add_item(_Item("category-index/place.json", "", "application/json",
+                         json.dumps([records[0]])))
+        c.add_item(_Item("category-index/water-g000.json", "", "application/json",
+                         json.dumps([records[2]])))
+        c.add_item(_Item("category-index/chip-food-g000.json", "", "application/json",
+                         json.dumps([{**records[4], "q": "Q77"}])))   # a chip: not read
         c.add_item(_Item("wikidata/manifest.json", "", "application/json", json.dumps({"total": 6})))
 
     cache = d / "cache"
@@ -498,6 +511,21 @@ def test_relative_links_and_excerpts() -> None:
     assert wiki_pack.guess_type({"i": "human settlement", "p": 10}) == "place"
     assert wiki_pack.guess_type({"i": "mountain"}) == "peak"
     assert wiki_pack.guess_type({"i": "church building"}) == "poi"
+
+
+def test_read_base_light_and_full(world: dict[str, Any], tmp_path: Path) -> None:
+    light = wiki_pack.read_base(world["base"], tmp_path, log=lambda m: None)
+    assert light.placed_from == "category files + geo-index"
+    assert light.places["Q1"] == (10.0, 20.0, "place")       # place.json
+    assert light.places["Q3"] == (10.2, 20.2, "water")       # a water shard
+    assert light.places["Q9"] == (10.1, 20.1, "poi")         # the base's geo-index
+    assert "Q77" not in light.qids and "Q78" not in light.qids
+    full = wiki_pack.read_base(world["base"], tmp_path, log=lambda m: None, full_scan=True)
+    assert full.placed_from == "search records" and full.places["Q78"] == (10.8, 20.8, "poi")
+    assert "Q77" not in full.qids
+    # A cached full scan serves later light reads too.
+    again = wiki_pack.read_base(world["base"], tmp_path, log=lambda m: None)
+    assert again.placed_from == "search records" and "Q78" in again.places
 
 
 REAL_BASE = Path("/storage/streetzim/sz-tests/cli-clip-e2e")

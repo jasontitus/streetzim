@@ -124,6 +124,7 @@ class Base:
     illustration: bytes | None
     places: dict[str, tuple[float, float, str]] = field(default_factory=dict)
     kinds: dict[str, str] = field(default_factory=dict)   # Q-ID -> guessed type
+    placed_from: str = ""
 
     @property
     def qids(self) -> list[str]:
@@ -183,11 +184,23 @@ def path_range(archive: Any, prefix: str) -> range:
     return range(first(prefix), first(prefix + "\U0010ffff"))
 
 
+# The base's category files that hold records of these types (water-g000.json
+# when the base cut a big one into geographic shards); not the POI chips.
+_CATEGORY_RE = re.compile(r"category-index/(place|peak|water|park|airport)(?:-g[0-9a-f]+)?\.json")
+
+
 def read_base(path: str | os.PathLike[str], cache_dir: Path | None = None,
-              log: Callable[[str], None] = log_stderr) -> Base:
-    """The base's identity, bounds, illustration and Q-IDs. Scanning the
-    search records takes minutes on a big region (California: 7.8 GB of
-    JSON), so the Q-IDs are cached by the base's UUID."""
+              log: Callable[[str], None] = log_stderr, *, full_scan: bool = False) -> Base:
+    """The base's identity, bounds, illustration and Q-IDs, with the place
+    of every Q-ID a record of the base has.
+
+    Places come from the base's category files (places, peaks, water,
+    parks, airports: tens of MB) and its own wiki-geo-index (every Q-ID
+    with an article in the base's language, POIs and streets included).
+    `full_scan` reads every search record instead: all of them, at the
+    cost of the whole search index (California: 7.8 GB, read at idle I/O
+    priority on a busy disk, hours). Either is cached by the base's UUID;
+    a cached full scan serves both."""
     from libzim.reader import Archive
     a = Archive(Path(path))
     uuid = str(a.uuid)
@@ -196,20 +209,82 @@ def read_base(path: str | os.PathLike[str], cache_dir: Path | None = None,
     bounds = (float(b[0]), float(b[1]), float(b[2]), float(b[3])) if b and len(b) == 4 else None
     try:
         illustration = bytes(a.get_metadata("Illustration_48x48@1"))
-    except RuntimeError:
-        illustration = None
-    except KeyError:
+    except (KeyError, RuntimeError):
         illustration = None
     base = Base(str(path), uuid, str(cfg.get("name") or Path(path).stem), bounds, illustration)
-    cached = cache_dir / "bases" / f"{uuid}.json.gz" if cache_dir else None
-    if cached is not None and cached.exists():
-        with gzip.open(cached, "rt", encoding="utf-8") as f:
-            got = json.load(f)
-        base.places = {q: (v[0], v[1], v[2]) for q, v in got["places"].items()}
-        base.kinds = got["kinds"]
-        log(f"  base: {len(base.places)} placed + {len(base.kinds)} other Q-IDs "
-            f"(cached, {cached.name})")
-        return base
+    full = cache_dir / "bases" / f"{uuid}.json.gz" if cache_dir else None
+    light = cache_dir / "bases" / f"{uuid}.light.json.gz" if cache_dir else None
+    for cached, how in ((full, "search records"), (None if full_scan else light,
+                                                    "category files + geo-index")):
+        if cached is not None and cached.exists():
+            with gzip.open(cached, "rt", encoding="utf-8") as f:
+                got = json.load(f)
+            base.places = {q: (v[0], v[1], v[2]) for q, v in got["places"].items()}
+            base.kinds = got["kinds"]
+            base.placed_from = how
+            log(f"  base: {len(base.places)} placed + {len(base.kinds)} other Q-IDs "
+                f"(from its {how}; cached, {cached.name})")
+            return base
+    t0 = time.time()
+    rank: dict[str, int] = {}
+    files = records = 0
+
+    def take(r: Any) -> None:
+        nonlocal records
+        records += 1
+        q = r.get("q") if isinstance(r, dict) else None
+        if not q or not _QID_RE.fullmatch(q):
+            return
+        t = str(r.get("t") or "")
+        rk = TYPE_RANK.get(t, len(TYPE_RANK))
+        if q not in rank or rk < rank[q]:
+            try:
+                base.places[q] = (round(float(r["a"]), 5), round(float(r["o"]), 5), t)
+            except (KeyError, TypeError, ValueError):
+                return
+            rank[q] = rk
+
+    if full_scan:
+        ids = [*path_range(a, "search-data/"), *path_range(a, "wikidata/")]
+    else:
+        ids = [*path_range(a, "category-index/"), *path_range(a, "wikidata/")]
+    for i in ids:
+        e = a._get_entry_by_id(i)
+        p = e.path
+        if p.startswith("wikidata/") and p != "wikidata/manifest.json":
+            data = json.loads(bytes(e.get_item().content))
+            for q, wd in data.items():
+                if _QID_RE.fullmatch(q) and isinstance(wd, dict):
+                    base.kinds.setdefault(q, guess_type(wd))
+        elif (p.startswith("search-data/") and p.endswith(".json")) or _CATEGORY_RE.fullmatch(p):
+            data = json.loads(bytes(e.get_item().content))
+            if not isinstance(data, list):      # search-data/manifest.json
+                continue
+            files += 1
+            for r in data:
+                take(r)
+    if not full_scan:
+        # The base's own geo-index: [lat, lon, type, qid, desc] rows (older
+        # bases: no Q-ID), for the Q-IDs the category files do not place.
+        geo = json.loads(_content(a, "wiki-geo-index.json") or b"{}")
+        for row in geo.values() if isinstance(geo, dict) else ():
+            if isinstance(row, list) and len(row) >= 4 and isinstance(row[3], str):
+                take({"q": row[3], "a": row[0], "o": row[1], "t": row[2]})
+    for q in base.places:
+        base.kinds.pop(q, None)
+    base.placed_from = "search records" if full_scan else "category files + geo-index"
+    log(f"  base: {files} {'search chunks' if full_scan else 'category files'} and its "
+        f"geo-index, {records:,} records: {len(base.places)} placed Q-IDs + "
+        f"{len(base.kinds)} more in wikidata/ ({time.time() - t0:.0f}s)")
+    cached = full if full_scan else light
+    if cached is not None:
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cached.with_name(cached.name + ".tmp")
+        with gzip.open(tmp, "wt", encoding="utf-8") as f:
+            json.dump({"base": os.path.basename(str(path)), "places": base.places,
+                       "kinds": base.kinds}, f)
+        os.replace(tmp, cached)
+    return base
     t0 = time.time()
     rank: dict[str, int] = {}
     chunks = records = 0
@@ -1011,7 +1086,7 @@ def build_pack(base_path: str | os.PathLike[str], *, lang: str, source: str | os
                images: str = "all", image_max_kb: int = 128, images_per_article: int = 12,
                text: bool = True, fetch: Fetcher | None = None, offline: bool = False,
                limit: int | None = None, jobs: int = 8, workers: int = 4,
-               date: str | None = None, warm: bool = True,
+               date: str | None = None, warm: bool = True, full_base_scan: bool = False,
                log: Callable[[str], None] = log_stderr) -> PackResult:
     """Build the xx Wikipedia pack of `region` onto the base at `base_path`.
     `jobs` processes read and clean the articles (the source ZIM is read at
@@ -1038,8 +1113,8 @@ def build_pack(base_path: str | os.PathLike[str], *, lang: str, source: str | os
         f"source {os.path.basename(str(source))}")
     if warm:
         src.warm(log)
-    base = read_base(base_path, cache_dir, log)
-    stats: dict[str, Any] = {"region": region, "lang": lang, "base": os.path.basename(str(base_path)),
+    base = read_base(base_path, cache_dir, log, full_scan=full_base_scan)
+    stats: dict[str, Any] = {"base_placed_from": base.placed_from, "region": region, "lang": lang, "base": os.path.basename(str(base_path)),
                              "source": os.path.basename(str(source)), "base_qids": len(base.qids),
                              "base_placed": len(base.places), "images_mode": images}
     t_titles = time.time()
@@ -1337,6 +1412,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--images-per-article", type=int, default=12)
     p.add_argument("--no-wikidata-text", action="store_true",
                    help="leave out wikidata-text.json")
+    p.add_argument("--full-base-scan", action="store_true",
+                   help="place Q-IDs by every search record of the base, not only its "
+                        "category files and geo-index (slow on a big base)")
     p.add_argument("--offline", action="store_true",
                    help="no network: dumps and Wikidata text from the cache only")
     p.add_argument("--limit", type=int, default=None, help="at most N articles (testing)")
@@ -1367,7 +1445,8 @@ def main(argv: list[str] | None = None) -> int:
                      cache_dir=cache, images=args.images, image_max_kb=args.image_max_kb,
                      images_per_article=args.images_per_article,
                      text=not args.no_wikidata_text, offline=args.offline, limit=args.limit,
-                     jobs=args.jobs, workers=args.workers)
+                     jobs=args.jobs, workers=args.workers,
+                     full_base_scan=args.full_base_scan)
     res.stats["check"] = check_pack(res.path, lang, args.zimcheck or find_zimcheck())
     if args.stats:
         Path(args.stats).write_text(json.dumps(res.stats, ensure_ascii=False, indent=1))
