@@ -22,6 +22,16 @@ An adversarial review, run against the measurements, found three parts of the de
    - Kiwix place pages are titled "native · English", as `kiwix_page_title` does.
    - Each base is gated on its v1 listing holding its front pages. Without a title index, libzim only does exact, accent-sensitive prefix matches, and a base with an empty v1 suggests nothing.
 
+**Whom the map is for (the user, 2026-10-13):** "the map a Thai person would want if they were going to the USA". The map language is the *traveller's* language, and that sets five things:
+
+1. **The interface** is in the traveller's language. This needs a UI table per language: machine-translated for the prototype and marked as such.
+2. **Labels are bilingual, not replaced.** The local name comes first, because it is what the signs say. The traveller's name goes underneath, smaller, where OSM has one that differs. MapLibre `format` makes this a two-line label.
+3. **Search finds both:** local names as today, plus the traveller's-language names where they exist (`ln`, brought forward from "deferred").
+4. **Wikipedia follows the traveller's order:** the traveller's language first, then English, then the region's own languages. The Wiki panel and popups follow that order.
+5. **Short descriptions** come from Wikidata labels and descriptions in the traveller's language (the lang-text pack, brought forward). Wikidata covers far more places than that language's Wikipedia does.
+
+The prototype's showcase entry is "California → ไทย": a Thai visitor's California, standing in for the whole US, whose base is 35 GB.
+
 **Other review points adopted:**
 - **Viewer.** Multi-language Wikipedia means:
   - a Q-ID-based article lookup;
@@ -38,10 +48,9 @@ An adversarial review, run against the measurements, found three parts of the de
 
 **Deferred past the prototype:**
 - the free-form planner
-- lang-text packs
-- `ln` search
-- UI tables beyond German
 - the full 70-region matrix
+
+Brought forward for the traveller (see above): lang-text packs, `ln` search, bilingual labels, and UI tables for the prototype's languages.
 
 Multilingual tiles are built for the prototype regions anyway, since that is cheap.
 
