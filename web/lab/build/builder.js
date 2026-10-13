@@ -4,8 +4,12 @@
 //
 // Analytics: GA4 (the site's Firebase project) gets packs_start, packs_end,
 // build_start, build_progress (25/50/75%), build_end and build_probe, so we
-// learn what download speeds visitors really get. Nothing is sent on localhost, from an
-// automated browser, with ?notrack, or with localStorage.sz_dev set.
+// learn what download speeds visitors really get: region, language, sizes,
+// speeds and timings, never file names. GA is loaded only when the first
+// report is sent (a build or a speed test). Nothing is sent when the visitor
+// ticks "Don't send speed reports" (remembered: localStorage.sz_no_reports),
+// on localhost, from an automated browser, with ?notrack, or with
+// localStorage.sz_dev set.
 (function () {
   'use strict';
   const q = new URLSearchParams(location.search);
@@ -13,14 +17,14 @@
   const PROBE_BYTES = 8 * 1048576;
 
   // ------------------------------------------------------------ analytics
-  let logEvent = null;
   const devSession = (() => {
     try { if (localStorage.getItem('sz_dev')) return true; } catch (e) { /* no storage */ }
     return navigator.webdriver || q.has('notrack') || /^(localhost|127\.|\[::1\])/.test(location.hostname);
   })();
+  const optedOut = () => { try { return !!localStorage.getItem('sz_no_reports'); } catch (e) { return false; } };
   const env = /--/.test(location.hostname) ? 'preview' : 'live';
-  if (!devSession) {
-    Promise.all([
+  let analytics = null;                // Promise<logEvent | null>, made on the first report
+  const loadAnalytics = () => Promise.all([
       import('https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js'),
       import('https://www.gstatic.com/firebasejs/11.0.2/firebase-analytics.js'),
     ]).then(([app, an]) => {
@@ -33,11 +37,20 @@
         appId: '1:1056177608946:web:c6abf5a817f346b317986b',
         measurementId: 'G-S46FWQ9EGY',
       }));
-      logEvent = (name, params) => { try { an.logEvent(a, name, Object.assign({ env }, params)); } catch (e) { /* ignore */ } };
-    }).catch(() => {});
-  }
-  const track = (name, params) => { if (logEvent) logEvent(name, params); };
-  $('trackNote').textContent = devSession ? 'Speed reports: off for this session.' : 'This page reports build speeds (no personal data) so we can tell how fast building is for visitors.';
+      return (name, params) => { try { an.logEvent(a, name, Object.assign({ env }, params)); } catch (e) { /* ignore */ } };
+    }).catch(() => null);
+  const track = (name, params) => {
+    if (devSession || optedOut()) return;
+    if (!analytics) analytics = loadAnalytics();
+    analytics.then((log) => { if (log && !optedOut()) log(name, params); });
+  };
+  $('trackNote').textContent = 'Speed reports: when you build or test your speed, this page sends Google Analytics the region, the language, file sizes, download speeds and timings, never file names or anything from your files. Google Analytics also records the page address and your browser type, and sets a cookie with a random ID.';
+  $('noReports').checked = devSession || optedOut();
+  $('noReports').disabled = devSession;
+  if (devSession) $('noReportsLabel').append(' (off for this session)');
+  $('noReports').onchange = () => {
+    try { if ($('noReports').checked) localStorage.setItem('sz_no_reports', '1'); else localStorage.removeItem('sz_no_reports'); } catch (e) { /* no storage */ }
+  };
 
   // ------------------------------------------------------------ state
   let index = null, region = null, entry = null, baseFile = null, running = null;
@@ -47,7 +60,27 @@
     else if (hiddenSince !== null) { hiddenMs += performance.now() - hiddenSince; hiddenSince = null; }
   });
 
+  // #status changes several times a second; screen readers get #milestone,
+  // a live region that changes only at milestones.
   const announce = (msg) => { $('milestone').textContent = msg; };
+  let statusAt = 0;
+  const setStatus = (text, force) => {
+    const now = performance.now();
+    if (!force && now - statusAt < 1000) return;
+    statusAt = now; $('status').textContent = text;
+  };
+
+  // While packs download or a build runs: keep the screen on where the
+  // browser allows it, and warn before the tab is closed.
+  let wakeLock = null;
+  const busy = () => !!running || !!packAbort;
+  async function holdScreen() {
+    if (!('wakeLock' in navigator) || document.visibilityState !== 'visible' || (wakeLock && !wakeLock.released)) return;
+    try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { /* refused, e.g. battery saver */ }
+  }
+  function releaseScreen() { if (wakeLock && !busy()) { wakeLock.release().catch(() => {}); wakeLock = null; } }
+  document.addEventListener('visibilitychange', () => { if (busy() && document.visibilityState === 'visible') holdScreen(); });
+  window.addEventListener('beforeunload', (e) => { if (busy()) { e.preventDefault(); e.returnValue = ''; } });
   const fmtMB = (b) => (b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(0) + ' MB');
   const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
 
@@ -100,7 +133,10 @@
         : `${p.label}: ${p.articles.toLocaleString()} articles, ${fmtMB(p.bytes)} to download`;
       ul.append(li);
     }
-    $('total').textContent = `The new file: ${fmtMB(entry.size)}. To download now: ${fmtMB(entry.download_bytes)}.`;
+    const nothingNew = entry.packs.every((p) => p.in_base);
+    $('total').textContent = nothingNew
+      ? `Nothing to download: the new file is the same map with its map language set to ${langName(entry.lang, entry.label)} (${fmtMB(entry.size)}).`
+      : `The new file: the map in ${langName(entry.lang, entry.label)}, ${fmtMB(entry.size)}. To download now: ${fmtMB(entry.download_bytes)}.`;
     recipeFor(entry).catch((e) => { $('notice').textContent = `Could not load the recipe for ${entry.label} (${e.message || e}). Try again later.`; });
     checkBase();
   }
@@ -294,19 +330,23 @@
     const ids = Object.keys(rec.packs);
     const keep = new Set(ids.map((id) => packKey(rec.packs[id])));
     for (const k of [...packBytes.keys()]) if (!keep.has(k)) packBytes.delete(k);   // only this language's packs stay in memory
-    const ac = packAbort = new AbortController();
     const t0 = performance.now();
     net = newNet();
     const todo = ids.filter((id) => !packBytes.has(packKey(rec.packs[id])));
     const evBase = { region: region.id, lang: entry.lang, packs: ids.join(','), download_mb: Math.round(todo.reduce((t, id) => t + rec.packs[id].size, 0) / 1e6) };
-    if (todo.length) track('packs_start', evBase);
+    const ac = packAbort = new AbortController();
+    if (todo.length) {
+      track('packs_start', evBase);
+      holdScreen();
+      announce(`Downloading ${todo.map(packName).join(', ')}.`);
+    }
     try {
       for (const id of todo) {
         const p = rec.packs[id], name = packName(id);
         let shown = 0;
         const bytes = await downloadPack(p, ac.signal, (got, note) => {
           const now = performance.now();
-          if (!note && now - shown < 250 && got < p.size) return;
+          if (!note && now - shown < 1000 && got < p.size) return;
           shown = now;
           out.textContent = `Downloading ${name}: ${(got / 1e6).toFixed(0)} of ${fmtMB(p.size)}` + (note ? ` — ${note}` : '');
         }).catch((e) => { e.pack = name; throw e; });
@@ -314,20 +354,23 @@
       }
     } catch (e) {
       if (seq !== packSeq || e.name === 'AbortError') return;
+      packAbort = null; releaseScreen();
       out.className = 'bad';
       out.textContent = /HTTP 40[34]|HTTP 410/.test(e.message)
         ? `${e.pack} isn't available right now (${e.message}). Nothing was saved. Try again later.`
         : `Could not download ${e.pack || 'the language pack'}: ${e.message}. Nothing was saved. Try again.`;
+      announce(out.textContent);
       $('packRetry').hidden = false;
       track('packs_end', Object.assign({}, evBase, netParams(), { outcome: /damaged/.test(e.message) ? 'hash_mismatch' : 'error', secs: Math.round((performance.now() - t0) / 1000) }));
       return;
     }
     if (seq !== packSeq) return;
-    packAbort = null;
+    packAbort = null; releaseScreen();
     if (todo.length) track('packs_end', Object.assign({}, evBase, netParams(), { outcome: 'ok', secs: Math.round((performance.now() - t0) / 1000) }));
     packsOk = true;
     out.className = 'ok';
     out.textContent = ids.length ? `✓ ${ids.map(packName).join(', ')} downloaded and checked (${fmtMB(ids.reduce((t, id) => t + rec.packs[id].size, 0))})` : '';
+    if (todo.length) announce(out.textContent.replace(/^✓ /, '') + '. Ready to build.');
     checkReady();
   }
   $('packRetry').onclick = () => ensurePacks();
@@ -505,8 +548,10 @@
       sinkInfo = await prepareSink(fileName, recipe.size);
     } catch (e) {
       running = null; checkReady();
-      $('status').textContent = recipe ? 'Not started: ' + (e.message || e)
-        : `Not started: could not load the recipe for ${entry.label} (${e.message || e}). Try again later.`;
+      setStatus(!recipe ? `Not started: could not load the recipe for ${entry.label} (${e.message || e}). Try again later.`
+        : e.name === 'AbortError' ? 'Not started: no place to save the file was chosen.'
+        : 'Not started: ' + (e.message || e), true);
+      announce($('status').textContent);
       return;
     }
     const packs = Object.keys(recipe.packs).join(',');
@@ -521,17 +566,21 @@
     const worker = new Worker('assembler-worker.js');
     running = { worker, base, t0, sent: new Set() };
     checkReady();
-    $('status').textContent = 'Starting…';
+    holdScreen();
+    $('save').hidden = true; $('after').hidden = true;
+    setStatus('Starting…', true);
+    announce('Building the file. Keep this tab open.');
     const result = await new Promise((resolve) => {
       worker.onmessage = (e) => {
         if (e.data.type === 'progress') {
           const { written, size, ms, closing } = e.data;
           $('prog').value = written / size;
-          $('status').textContent = closing && sinkInfo.sink === 'sw' ? `All ${fmtMB(size)} built and checked; your browser is saving the rest — keep this tab open`
-            : `${fmtMB(written)} of ${fmtMB(size)} — keep this tab open`;
+          setStatus(closing && sinkInfo.sink === 'sw' ? `All ${fmtMB(size)} built and checked; your browser is saving the rest — keep this tab open`
+            : `${fmtMB(written)} of ${fmtMB(size)} — keep this tab open`, closing);
           for (const p of [25, 50, 75]) {
             if (written / size * 100 >= p && !running.sent.has(p)) {
               running.sent.add(p);
+              announce(`Building: ${p}% done.`);
               track('build_progress', Object.assign({}, base, { pct: p, elapsed_s: Math.round(ms / 1000) }));
             }
           }
@@ -549,15 +598,21 @@
       outcome: result.outcome, secs: Math.round((performance.now() - t0) / 1000), mbps_total: result.mbps_total,
       local_mbps: result.net && result.net.local_mbps, hidden_s: Math.round(hiddenMs / 1000), hash_ok: result.ok ? 1 : 0 }));
     running = null;
+    releaseScreen();
     checkReady();
     if (result.ok) {
-      $('status').textContent = (sinkInfo.sink === 'sw' ? 'Done and verified. Your browser has the whole file and is finishing the download; look in your downloads.'
-        : 'Done and verified.') + ` ${fmtMB(result.size)} in ${Math.round(result.ms / 1000)} s. MD5 (as md5sum prints it): ${result.file_md5}`;
+      const tail = ` ${fmtMB(result.size)} in ${Math.round(result.ms / 1000)} s. MD5 (as md5sum prints it): ${result.file_md5}`;
       if (sinkInfo.sink === 'opfs') {
         opfsState(fileName, 'ready');
-        $('status').textContent = `Done and verified; one more step: save it. ${fmtMB(result.size)} in ${Math.round(result.ms / 1000)} s. MD5 (as md5sum prints it): ${result.file_md5}`;
+        setStatus('Done and verified; one more step: save it.' + tail, true);
+        announce('Done and verified. One more step: save the file.');
         await offerSave(fileName, false);
-      } else $('after').hidden = false;      // saved (or, streamed, being saved by the browser)
+      } else {                         // saved (or, streamed, being saved by the browser)
+        setStatus((sinkInfo.sink === 'sw' ? 'Done and verified. Your browser has the whole file and is finishing the download; look in your downloads.'
+          : 'Done and verified. The file is saved.') + tail, true);
+        announce($('status').textContent.replace(/ MD5.*$/, ''));
+        $('after').hidden = false;
+      }
     } else {
       if (sinkInfo.sink === 'opfs') opfsState(fileName, null);
       // The worker discarded what it wrote; File System Access leaves the
@@ -565,9 +620,10 @@
       if (sinkInfo.sink === 'fsa') {
         try { const f = await sinkInfo.handle.getFile(); if (f.size === 0 && sinkInfo.handle.remove) await sinkInfo.handle.remove(); } catch (e) { /* keep it */ }
       }
-      $('status').textContent = result.outcome === 'download_stopped'
+      setStatus(result.outcome === 'download_stopped'
         ? 'Stopped. The download stopped — try again (Chrome or Edge on a desktop works best).'
-        : 'Stopped: ' + result.error;
+        : 'Stopped: ' + result.error, true);
+      announce($('status').textContent);
     }
   };
 
@@ -587,7 +643,7 @@
       const start = Math.floor(Math.random() * Math.max(1, (p.size - PROBE_BYTES) / 65536)) * 65536;
       const t = performance.now();
       try {
-        const r = await fetch(p.url, { headers: { Range: `bytes=${start}-${start + PROBE_BYTES - 1}` }, cache: 'no-store' });
+        const r = await fetch(p.url, { headers: { Range: `bytes=${start}-${start + PROBE_BYTES - 1}` }, cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined });
         const ttfb = performance.now() - t;
         const n = (await r.arrayBuffer()).byteLength;
         out.push({ ttfb: Math.round(ttfb), mbps: +(n / 1e6 / ((performance.now() - t) / 1000)).toFixed(2), status: r.status });
