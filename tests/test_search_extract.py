@@ -366,3 +366,85 @@ def test_small_in_memory_extraction_releases_location_grid(monkeypatch, failure)
         rows = se.extract_searchable_features(tiles={(14, 8529, 5973): tile})
         assert len(rows) == 1 and rows[0]["name"] == "Monte-Carlo"
     assert se._place_grid is None
+
+
+# ---- MultiPoints: one result per point ----------------------------------------
+# tilemaker 3.1 and later (the image's 3.2, the world tiles') merge points with
+# identical attributes into one MultiPoint: four "Bureau Identification"
+# offices in a tile are one feature, and used to become one result at their
+# average, between the four.
+
+def _multipoint_tile(layer="poi", cls="amenity"):
+    return mvt.encode([{"name": layer, "features": [
+        {"geometry": "MULTIPOINT(500 500, 3500 500, 500 3500, 3500 3500)",
+         "properties": {"name": "Bureau Identification", "class": cls}}]}])
+
+
+@pytest.mark.parametrize("layer, cls", [("poi", "amenity"), ("place", "village")])
+def test_each_point_of_a_multipoint_is_a_result(layer, cls):
+    from streetzim.search_extract import _process_tile_for_search, tile_to_lnglat
+    tile = gzip.compress(_multipoint_tile(layer, cls))
+    recs = _process_tile_for_search((14, 8529, 5973, tile, {layer: layer}))
+    assert [r["name"] for r in recs] == ["Bureau Identification"] * 4
+    # mvt.encode flips y (y_coord_down=False); the worker reads y down.
+    corners = {(round(lat, 6), round(lon, 6)) for lon, lat in
+               (tile_to_lnglat(14, 8529, 5973, x, 4096 - y, 4096)
+                for x in (500, 3500) for y in (500, 3500))}
+    assert {(r["lat"], r["lon"]) for r in recs} == corners
+
+
+def test_the_partition_worker_keeps_each_point_too(tmp_path):
+    from streetzim.search_extract import _process_tile_partition
+    path = tmp_path / "t.mbtiles"
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE tiles (zoom_level INT, tile_column INT, tile_row INT, tile_data BLOB)")
+    con.execute("INSERT INTO tiles VALUES (14, 8529, ?, ?)",
+                ((1 << 14) - 1 - 5973, gzip.compress(_multipoint_tile())))
+    con.commit()
+    con.close()
+    out = tmp_path / "out.jsonl"
+    _, _, n = _process_tile_partition((str(path), 8529, 8530, {"poi": "poi"}, str(out), 14))
+    recs = [json.loads(ln) for ln in out.read_text().splitlines()]
+    assert n == 4 and len({(r["lat"], r["lon"]) for r in recs}) == 4
+
+
+@pytest.mark.parametrize("geom, coords, points", [
+    ("Point", [5, 6], [(5, 6)]),
+    ("MultiPoint", [[1, 2], [3, 4]], [(1, 2), (3, 4)]),
+    ("LineString", [[0, 0], [2, 2], [4, 4]], [(2, 2)]),
+    ("MultiLineString", [[[0, 0], [1, 1]], [[5, 5], [6, 6], [7, 7]]], [(6, 6)]),
+    ("Polygon", [[[0, 0], [4, 0], [4, 4], [0, 4]]], [(2, 2)]),
+    ("MultiPolygon", [[[[0, 0], [2, 0], [2, 2], [0, 2]]]], [(1, 1)]),
+    ("MultiPoint", [[1], [3, 4]], []),
+    ("GeometryCollection", [[1, 2]], []),
+])
+def test_feature_points(geom, coords, points):
+    from streetzim.search_extract import feature_points
+    assert feature_points(geom, coords) == points
+
+
+def test_the_location_fallback_keeps_each_city_of_a_multipoint(tmp_path, monkeypatch):
+    """Without reverse_geocoder, results are labelled with the nearest place
+    of the tiles' place layer, which skipped MultiPoints: a town sharing its
+    name and rank with another in the same tile was not a candidate at all."""
+    from streetzim import search_extract as E
+    monkeypatch.setitem(sys.modules, "reverse_geocoder", None)
+    tile = mvt.encode([{"name": "place", "features": [
+        {"geometry": "MULTIPOINT(500 500, 3500 3500)",
+         "properties": {"name:latin": "Springfield", "class": "city"}},
+        {"geometry": "POINT(2600 2600)",
+         "properties": {"name:latin": "Shelbyville", "class": "city"}}]}])
+    path = tmp_path / "t.mbtiles"
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE tiles (zoom_level INT, tile_column INT, tile_row INT, tile_data BLOB)")
+    con.execute("INSERT INTO tiles VALUES (8, 133, ?, ?)", ((1 << 8) - 1 - 93, gzip.compress(tile)))
+    con.commit()
+    con.close()
+    lookup = E.build_location_index(str(path))
+    assert lookup is not None
+
+    def at(x, y):                   # near a point as written (mvt.encode flips y)
+        lon, lat = E.tile_to_lnglat(8, 133, 93, x, 4096 - y, 4096)
+        return lookup(lat, lon)
+    assert "Springfield" in at(3400, 3400) and "Springfield" in at(600, 600)
+    assert "Shelbyville" in at(2600, 2600)

@@ -17,11 +17,12 @@ noticed them.
 | April 2026 | Offline routing and Drive mode; Overture addresses and places; the Find page; archive.org, the streetzim.web.app catalog and the /drive PWA; the first published regions; a validator and a browser smoke test |
 | March 2026 | Vector maps in a ZIM; offline search; 3D terrain; satellite imagery; Wikidata popups |
 
-## October 2026 (to 10-13)
+## October 2026 (to 10-14)
 
 **Highlights:** walking and cycling routing with turn restrictions; StreetZim in other languages (German first: per-language builds, a translated viewer, a German site page and three German Switzerland ZIMs); border clip, cutting builds to a country's outline; search for Indic, Thai and native-script names, and far smaller CJK search manifests; builds that fit a 16 GB container.
 
 ### Maps & tiles
+- **The Docker image builds tilemaker 3.2.0** (was 3.0.0), the version that made the world tiles every published ZIM uses, so a Docker or Zimfarm build of a region now gets the same kind of tiles: a large polygon's label (an island, a glacier) is no longer copied into every tile under it, points with the same name and kind in a tile become one MultiPoint (search still makes one result per point), and cities and peaks are thinned at low zoom. Names written as several values (`name:zh=洛杉矶;洛杉磯`) keep the first, and `name:zh` prefers OSM's `name:zh-Hans` (2026-10-14; 275236c, a937153)
 - **Trails in Light and Ultralight maps:** builds capped at zoom 13 copy each z13 tile's z14 footways, cycleways, bridleways, paths, steps and pedestrian ways, with their names, into the z13 tile, so the map draws trails again (routing already used them). Switzerland: 1.7 M paths in 11,000 tiles; the German border-cut Ultralight grows 3.7%. `--no-fold-paths` (Zimfarm "No paths at zoom 13") leaves them out (2026-10-13; faf7151, 8ff6a0d, 98fa004)
 - **Border clip.** A build can be cut to a region's outline (a `.poly`, widened by `--clip-buffer-km`, default 10 km) instead of its bounding box: map tiles above `--clip-min-zoom`, satellite and terrain tiles, search records, every osmium extract and the Wikidata scan stop at it, and road pieces left past the border are closed to cars, so a route never snaps onto a road it cannot reach (the viewer says when a route starts or ends 2 km or more from the picked point). Outside the border the viewer shows zoom-10 context under a grey mask, and the terrain-coverage gate no longer counts clipped-away tiles as missing land. Outlines across the antimeridian are refused (2026-10-09; b93edf4, f6177af, b9b5680)
 

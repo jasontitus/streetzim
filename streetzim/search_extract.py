@@ -196,6 +196,32 @@ def search_record(name, feature_type, props, lat, lon):
     return rec
 
 
+def feature_points(geom_type, coords):
+    """Where a tile feature's search results go, in tile coordinates: one per
+    point of a MultiPoint (tilemaker 3.1 and later merge identical points
+    into one, e.g. four offices of the same name in a tile), the middle of a
+    line (of the longest part), a polygon's first ring's average. Empty for
+    anything else or for broken geometry."""
+    try:
+        if geom_type == "Point":
+            return [(coords[0], coords[1])]
+        if geom_type == "MultiPoint":
+            return [(c[0], c[1]) for c in coords]
+        if geom_type == "LineString":
+            mid = coords[len(coords) // 2]
+            return [(mid[0], mid[1])]
+        if geom_type == "MultiLineString":
+            longest = max(coords, key=len)
+            mid = longest[len(longest) // 2]
+            return [(mid[0], mid[1])]
+        if geom_type in ("Polygon", "MultiPolygon"):
+            ring = coords[0] if geom_type == "Polygon" else coords[0][0]
+            return [(sum(c[0] for c in ring) / len(ring), sum(c[1] for c in ring) / len(ring))]
+    except (IndexError, ZeroDivisionError, TypeError, ValueError):
+        pass
+    return []
+
+
 def build_location_index(mbtiles_path):
     """Build a spatial index that maps (lat, lon) to "City, State".
 
@@ -306,18 +332,14 @@ def build_location_index(mbtiles_path):
                 if not coords:
                     continue
                 gtype = geom.get("type", "")
-                try:
-                    if gtype == "Point":
-                        px, py = coords[0], coords[1]
-                    else:
-                        continue
-                except (IndexError, TypeError):
+                if gtype not in ("Point", "MultiPoint"):
                     continue
-                n = 2.0 ** z
-                lon = (col + px / extent) / n * 360.0 - 180.0
-                lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * (y + py / extent) / n)))
-                lat = math.degrees(lat_rad)
-                places.append((lat, lon, name, cls))
+                for px, py in feature_points(gtype, coords):
+                    n = 2.0 ** z
+                    lon = (col + px / extent) / n * 360.0 - 180.0
+                    lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * (y + py / extent) / n)))
+                    lat = math.degrees(lat_rad)
+                    places.append((lat, lon, name, cls))
     conn.close()
 
     if not places:
@@ -590,37 +612,16 @@ def _process_tile_partition(args):
                 coords = geom.get("coordinates")
                 if not coords:
                     continue
-                geom_type = geom.get("type", "")
-                try:
-                    if geom_type == "Point":
-                        px, py = coords[0], coords[1]
-                    elif geom_type == "MultiPoint":
-                        px = sum(c[0] for c in coords) / len(coords)
-                        py = sum(c[1] for c in coords) / len(coords)
-                    elif geom_type == "LineString":
-                        mid = coords[len(coords) // 2]
-                        px, py = mid[0], mid[1]
-                    elif geom_type == "MultiLineString":
-                        longest = max(coords, key=len)
-                        mid = longest[len(longest) // 2]
-                        px, py = mid[0], mid[1]
-                    elif geom_type in ("Polygon", "MultiPolygon"):
-                        ring = coords[0] if geom_type == "Polygon" else coords[0][0]
-                        px = sum(c[0] for c in ring) / len(ring)
-                        py = sum(c[1] for c in ring) / len(ring)
-                    else:
+                for px, py in feature_points(geom.get("type", ""), coords):
+                    lon, lat = tile_to_lnglat(z, x, y, px, py, extent)
+                    dedup_key = (name.lower(), feature_type, round(lat, 4), round(lon, 4))
+                    if dedup_key in seen:
                         continue
-                except (IndexError, ZeroDivisionError, TypeError):
-                    continue
-                lon, lat = tile_to_lnglat(z, x, y, px, py, extent)
-                dedup_key = (name.lower(), feature_type, round(lat, 4), round(lon, 4))
-                if dedup_key in seen:
-                    continue
-                seen.add(dedup_key)
-                json.dump(search_record(name, feature_type, props, lat, lon),
-                          out_f, separators=(",", ":"))
-                out_f.write("\n")
-                feat_count += 1
+                    seen.add(dedup_key)
+                    json.dump(search_record(name, feature_type, props, lat, lon),
+                              out_f, separators=(",", ":"))
+                    out_f.write("\n")
+                    feat_count += 1
         count += 1
 
     out_f.close()
@@ -664,32 +665,10 @@ def _process_tile_for_search(args):
             if not coords:
                 continue
 
-            geom_type = geom.get("type", "")
-            try:
-                if geom_type == "Point":
-                    px, py = coords[0], coords[1]
-                elif geom_type == "MultiPoint":
-                    px = sum(c[0] for c in coords) / len(coords)
-                    py = sum(c[1] for c in coords) / len(coords)
-                elif geom_type == "LineString":
-                    mid = coords[len(coords) // 2]
-                    px, py = mid[0], mid[1]
-                elif geom_type == "MultiLineString":
-                    longest = max(coords, key=len)
-                    mid = longest[len(longest) // 2]
-                    px, py = mid[0], mid[1]
-                elif geom_type in ("Polygon", "MultiPolygon"):
-                    ring = coords[0] if geom_type == "Polygon" else coords[0][0]
-                    px = sum(c[0] for c in ring) / len(ring)
-                    py = sum(c[1] for c in ring) / len(ring)
-                else:
-                    continue
-            except (IndexError, ZeroDivisionError, TypeError):
-                continue
-
-            lon, lat = tile_to_lnglat(z, x, y, px, py, extent)
-            results.append(search_record(name, feature_type, props,
-                                         round(lat, 6), round(lon, 6)))
+            for px, py in feature_points(geom.get("type", ""), coords):
+                lon, lat = tile_to_lnglat(z, x, y, px, py, extent)
+                results.append(search_record(name, feature_type, props,
+                                             round(lat, 6), round(lon, 6)))
 
     return results
 

@@ -17,7 +17,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 PROFILE = ROOT / "resources" / "tilemaker" / "process-openmaptiles.lua"
-lua51 = pytest.importorskip("lupa.lua51")
+lua51 = pytest.importorskip(
+    "lupa.lua51", reason="lupa is not installed (requirements-dev.txt), so the tile "
+    "profile's Lua cannot run here: pip install 'lupa>=2.0'")
 
 
 @pytest.fixture
