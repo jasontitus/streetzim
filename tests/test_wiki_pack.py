@@ -561,6 +561,14 @@ def test_relative_links_and_excerpts() -> None:
     assert wiki_pack.guess_type({"i": "human settlement", "p": 10}) == "place"
     assert wiki_pack.guess_type({"i": "mountain"}) == "peak"
     assert wiki_pack.guess_type({"i": "church building"}) == "poi"
+    assert wiki_pack.guess_type({"i": "Natura 2000 site", "d": "mountain in Elassona municipality",
+                                 "e": 2918}) == "peak"
+    assert wiki_pack.guess_type({"d": "beach in Crete, Greece"}) == "poi"
+    assert wiki_pack.excerpt("<h1>x</h1><p>Thessalonique (en grec moderne : Θεσσαλονίκη "
+                             "(Thessaloníki), /θe.sa.lo.ˈni.ci/) est la deuxième ville de Grèce. "
+                             "Elle est grande.</p>") == "Thessalonique est la deuxième ville de Grèce."
+    assert wiki_pack.excerpt("<h1>x</h1><p>东京（日语：東京）是日本的首都，人口众多。</p>") == \
+        "东京是日本的首都，人口众多。"
 
 
 def test_read_base_light_and_full(world: dict[str, Any], tmp_path: Path) -> None:
@@ -577,6 +585,17 @@ def test_read_base_light_and_full(world: dict[str, Any], tmp_path: Path) -> None
     # A cached full scan serves later light reads too.
     again = wiki_pack.read_base(world["base"], tmp_path, log=lambda m: None)
     assert again.placed_from == "search records" and "Q78" in again.places
+    # A cache from an older guess_type keeps its places and guesses again.
+    import gzip
+    cached = next((tmp_path / "bases").glob("*[0-9a-f].json.gz"))
+    with gzip.open(cached, "rt") as f:
+        old = json.load(f)
+    old["kinds"] = dict.fromkeys(old["kinds"], "street")
+    old.pop("kinds_version")
+    with gzip.open(cached, "wt") as f:
+        json.dump(old, f)
+    redo = wiki_pack.read_base(world["base"], tmp_path, log=lambda m: None)
+    assert redo.kinds == full.kinds and redo.places == full.places
 
 
 REAL_BASE = Path("/storage/streetzim/sz-tests/cli-clip-e2e")

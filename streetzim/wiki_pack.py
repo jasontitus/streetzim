@@ -137,26 +137,37 @@ class Base:
         return s <= lat <= n and (w <= lon <= e if w <= e else (lon >= w or lon <= e))
 
 
+_KIND_WORDS = (
+    ("peak", ("mountain", "peak", "hill", "volcano", "summit")),
+    ("water", ("lake", "river", "bay", "sea", "strait", "reservoir", "lagoon", "gulf", "stream",
+               "spring", "waterfall", "cove")),
+    ("park", ("park", "protected area", "nature reserve", "wilderness", "national forest",
+              "wildlife refuge")),
+    ("airport", ("airport",)),
+    ("place", ("settlement", "village", "town", "city", "municipal", "community", "neighborhood",
+               "neighbourhood", "island", "census-designated", "suburb", "hamlet", "quarter",
+               "district", "county", "region", "mahalle")),
+)
+
+
+def _kind_of(text: str) -> str | None:
+    t = text.lower()
+    for kind, words in _KIND_WORDS:
+        if any(w in t for w in words):
+            return kind
+    return None
+
+
 def guess_type(wd: dict[str, Any]) -> str:
     """A search-record type for a Q-ID the base has no record of, from its
-    Wikidata chunk entry (``i`` the instance-of label, ``p`` population)."""
-    i = str(wd.get("i") or "").lower()
-    if any(w in i for w in ("mountain", "peak", "hill", "volcano", "summit")):
-        return "peak"
-    if any(w in i for w in ("lake", "river", "bay", "sea", "strait", "reservoir",
-                            "lagoon", "gulf", "stream", "spring", "waterfall", "cove")):
-        return "water"
-    if any(w in i for w in ("park", "protected area", "nature reserve", "wilderness",
-                            "national forest", "wildlife refuge")):
-        return "park"
-    if "airport" in i:
-        return "airport"
-    if wd.get("p") or any(w in i for w in (
-            "settlement", "village", "town", "city", "municipal", "community",
-            "neighborhood", "neighbourhood", "island", "census-designated", "suburb",
-            "hamlet", "quarter", "district", "county", "region", "mahalle")):
-        return "place"
-    return "poi"
+    Wikidata chunk entry: ``i`` (instance of), else the head of ``d``, the
+    description ("mountain in Elassona municipality" for an item whose
+    instance is "Natura 2000 site"), else ``p`` (a population: a place)."""
+    head = re.split(r" (?:in|of|on|near|at) ", str(wd.get("d") or ""), maxsplit=1)[0]
+    kind = _kind_of(str(wd.get("i") or "")) or _kind_of(head)
+    if kind:
+        return kind
+    return "place" if wd.get("p") else "poi"
 
 
 def _content(archive: Any, path: str) -> bytes | None:
@@ -221,8 +232,12 @@ def read_base(path: str | os.PathLike[str], cache_dir: Path | None = None,
             with gzip.open(cached, "rt", encoding="utf-8") as f:
                 got = json.load(f)
             base.places = {q: (v[0], v[1], v[2]) for q, v in got["places"].items()}
-            base.kinds = got["kinds"]
             base.placed_from = how
+            if got.get("kinds_version") == KINDS_VERSION:
+                base.kinds = got["kinds"]
+            else:       # guess_type changed: the kinds again, from the wikidata chunks
+                base.kinds = _wikidata_kinds(a, base.places)
+                _save_base(cached, path, base)
             log(f"  base: {len(base.places)} placed + {len(base.kinds)} other Q-IDs "
                 f"(from its {how}; cached, {cached.name})")
             return base
@@ -279,13 +294,34 @@ def read_base(path: str | os.PathLike[str], cache_dir: Path | None = None,
         f"{len(base.kinds)} more in wikidata/ ({time.time() - t0:.0f}s)")
     cached = full if full_scan else light
     if cached is not None:
-        cached.parent.mkdir(parents=True, exist_ok=True)
-        tmp = cached.with_name(cached.name + ".tmp")
-        with gzip.open(tmp, "wt", encoding="utf-8") as f:
-            json.dump({"base": os.path.basename(str(path)), "places": base.places,
-                       "kinds": base.kinds}, f)
-        os.replace(tmp, cached)
+        _save_base(cached, path, base)
     return base
+
+
+# Bumped when guess_type changes, so cached bases guess their kinds again.
+KINDS_VERSION = 2
+
+
+def _wikidata_kinds(a: Any, places: dict[str, tuple[float, float, str]]) -> dict[str, str]:
+    """{Q-ID: guessed type} for the base's wikidata/ entries it has no record of."""
+    kinds: dict[str, str] = {}
+    for i in path_range(a, "wikidata/"):
+        e = a._get_entry_by_id(i)
+        if e.path == "wikidata/manifest.json":
+            continue
+        for q, wd in json.loads(bytes(e.get_item().content)).items():
+            if _QID_RE.fullmatch(q) and isinstance(wd, dict) and q not in places:
+                kinds.setdefault(q, guess_type(wd))
+    return kinds
+
+
+def _save_base(cached: Path, path: str | os.PathLike[str], base: Base) -> None:
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cached.with_name(cached.name + ".tmp")
+    with gzip.open(tmp, "wt", encoding="utf-8") as f:
+        json.dump({"base": os.path.basename(str(path)), "places": base.places,
+                   "kinds": base.kinds, "kinds_version": KINDS_VERSION}, f)
+    os.replace(tmp, cached)
 
 
 # ---- Q-ID -> title, from xx Wikipedia's dumps ------------------------------
@@ -696,6 +732,14 @@ def excerpt(page_html: str, limit: int = DESC_MAX) -> str:
     if not m:
         return ""
     text = " ".join(_html.unescape(re.sub(r"<[^>]+>", "", m.group(1))).split())
+    # Parentheticals (other names, pronunciations, dates) go: "Thessalonique
+    # (en grec moderne : Θεσσαλονίκη, /θe.sa.../) est ..." -> "Thessalonique est ...".
+    while True:
+        shorter = re.sub(r"\s*[(（][^()（）]*[)）]", "", text)
+        if shorter == text:
+            break
+        text = shorter
+    text = re.sub(r"\s+([,.;:])", r"\1", text).strip()
     for s in _SENTENCE_END_RE.finditer(text):
         if s.end() >= (10 if s.group() in "。！？।" else 40):
             if s.end() <= limit:
