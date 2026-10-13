@@ -21,8 +21,8 @@
   progress { width: 100%; height: 14px; }
   .dim { color: var(--dim); font-size: .9rem; }
   a { color: var(--accent); }
-  #baseCheck.bad { color: #ef4444; }
-  #baseCheck.ok { color: #22c55e; font-weight: 600; }
+  .bad { color: #ef4444; }
+  .ok { color: #22c55e; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -47,6 +47,8 @@
     <p class="dim">Wikipedia in the new file:</p>
     <ul id="packs"></ul>
     <p id="total" class="dim"></p>
+    <p id="packStatus" role="status" aria-live="polite"></p>
+    <button id="packRetry" class="secondary" hidden>Try again</button>
   </section>
 
   <section>

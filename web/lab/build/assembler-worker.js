@@ -2,17 +2,17 @@
 // in a dedicated worker. Plain JS (ES2020), no build step.
 //
 // A recipe lists the merged ZIM's bytes in order: ranges of the base ZIM
-// (the visitor's own copy, a File), ranges of Wikipedia packs (fetched
-// through the site's range proxy), and small generated pieces (inline,
-// base64). Every byte is checked before it is written: base and pack bytes
+// (the visitor's own copy, a File), ranges of Wikipedia packs (downloaded
+// and checked by the page before the build starts, passed in as bytes), and
+// small generated pieces (inline, base64). Every byte is checked before it is written: base and pack bytes
 // against the recipe's SHA-256 of each 16 MiB chunk of their file, inline
 // pieces against their own SHA-256. The ZIM's MD5 is computed as the bytes
 // go out, appended as its last 16 bytes, and compared with the recipe's; so
 // is the MD5 of the whole file (recipe file_md5, what md5sum prints).
 //
-// In:  {cmd:'run', recipe, recipeUrl, baseFile, sink, handle?, port?,
-//       inflight?, maxRetries?}
-// Out: {type:'progress', written, size, ms, net}  {type:'done', result}
+// In:  {cmd:'run', recipe, baseFile, packs: {id: Uint8Array}, sink, handle?,
+//       port?, fileName}
+// Out: {type:'progress', written, size, ms}  {type:'done', result}
 /* global hashwasm */
 importScripts('vendor/md5.umd.min.js');
 
@@ -104,32 +104,8 @@ function fileReader(file, net) {
   };
 }
 
-function httpReader(url, size, net, maxRetries) {
-  return async (a, b) => {
-    let last;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      if (attempt) { net.retries++; await sleep(Math.min(8000, 300 * 2 ** (attempt - 1))); }
-      try {
-        const t0 = performance.now();
-        const r = await fetch(url, { headers: { Range: `bytes=${a}-${b - 1}` }, cache: 'no-store' });
-        const ttfb = performance.now() - t0;
-        if (r.status !== 206) throw new Error(`HTTP ${r.status}`);
-        const cr = r.headers.get('Content-Range');
-        const m = cr && /^bytes (\d+)-(\d+)\/(\d+|\*)$/.exec(cr);
-        if (cr && (!m || +m[1] !== a || +m[2] !== b - 1 || (m[3] !== '*' && +m[3] !== size))) throw new Error(`Content-Range ${cr}`);
-        const u8 = new Uint8Array(await r.arrayBuffer());
-        const ms = performance.now() - t0;
-        net.requests++; net.bytes += u8.length; net.ms += ms; net.ttfb.push(Math.round(ttfb));
-        net.mbps.push(+(u8.length / 1e6 / (ms / 1000)).toFixed(2));
-        if (u8.length !== b - a) throw new Error(`short body ${u8.length}`);
-        return u8;
-      } catch (e) {
-        last = e; net.errors++;
-        if (/network|reset|fetch/i.test(String(e && e.message))) net.resets++;
-      }
-    }
-    throw new Error(`fetch failed after ${maxRetries + 1} tries: ${last && last.message}`);
-  };
+function memoryReader(u8) {          // a pack the page has downloaded and checked
+  return async (a, b) => u8.subarray(a, b);
 }
 
 // ---------------------------------------------------------------- run
@@ -140,10 +116,13 @@ async function run(o) {
   if (o.baseFile.size !== recipe.base.size) {
     return { ok: false, outcome: 'wrong_base', error: `This is not the expected base file: it has ${o.baseFile.size} bytes, the recipe needs ${recipe.base.file} (${recipe.base.size} bytes).` };
   }
-  const net = { requests: 0, bytes: 0, ms: 0, ttfb: [], mbps: [], retries: 0, errors: 0, resets: 0, local_bytes: 0, local_ms: 0 };
-  const maxRetries = o.maxRetries ?? 6;
+  const net = { local_bytes: 0, local_ms: 0 };
   const sources = { base: new Source('base file', recipe.base, fileReader(o.baseFile, net), net) };
-  for (const [id, p] of Object.entries(recipe.packs)) sources['pack:' + id] = new Source(`${id} pack`, p, httpReader(p.url, p.size, net, maxRetries), net);
+  for (const [id, p] of Object.entries(recipe.packs)) {
+    const bytes = o.packs && o.packs[id];
+    if (!bytes || bytes.length !== p.size) throw new Error(`the ${id} pack was not downloaded`);
+    sources['pack:' + id] = new Source(`${id} pack`, p, memoryReader(bytes), net);
+  }
 
   const last = recipe.segments[recipe.segments.length - 1];
   if (!last || last.src !== 'md5' || recipe.segments.filter((x) => x.src === 'md5').length !== 1) throw new Error('the recipe must end with the checksum');
@@ -193,8 +172,7 @@ async function run(o) {
     }
   };
 
-  // Prefetch: keep up to `inflight` network chunks (and 2 local) ahead.
-  const inflight = o.inflight || 4;
+  // Prefetch: read up to 2 chunks ahead.
   const ahead = [];
   let prevKey = null;
   for (let i = 0; i < steps.length; i++) {
@@ -206,11 +184,9 @@ async function run(o) {
   let nextAhead = 0;
   const prefetch = (i) => {
     while (nextAhead < ahead.length && ahead[nextAhead] < i) nextAhead++;
-    let netN = 0, locN = 0;
-    for (let j = nextAhead; j < ahead.length && (netN < inflight || locN < 2); j++) {
+    for (let j = nextAhead; j < ahead.length && j < nextAhead + 2; j++) {
       const s = steps[ahead[j]];
-      if (s.src === 'base') { if (locN < 2) { sources.base.get(s.k).catch(() => {}); locN++; } }
-      else if (netN < inflight) { sources[s.src].get(s.k).catch(() => {}); netN++; }
+      sources[s.src].get(s.k).catch(() => {});
     }
   };
 
@@ -251,7 +227,7 @@ async function run(o) {
       await sink.write(data);
       written += n;
       const now = performance.now();
-      if (now - lastProg > 300) { lastProg = now; postMessage({ type: 'progress', written, size: recipe.size, ms: now - t0, net: summary(net) }); }
+      if (now - lastProg > 300) { lastProg = now; postMessage({ type: 'progress', written, size: recipe.size, ms: now - t0 }); }
     }
     await sink.close();
   } catch (e) {
@@ -263,13 +239,8 @@ async function run(o) {
            mbps_total: +(written / 1e6 / (ms / 1000)).toFixed(1), net: summary(net) };
 }
 
-function pct(a, p) { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; }
 function summary(net) {
-  return { requests: net.requests, mb: +(net.bytes / 1e6).toFixed(1),
-           mbps_avg: net.ms ? +(net.bytes / 1e6 / (net.ms / 1000)).toFixed(2) : null,
-           mbps_p10: pct(net.mbps, 0.1), ttfb_p50: pct(net.ttfb, 0.5),
-           retries: net.retries, errors: net.errors, resets: net.resets,
-           local_mb: +(net.local_bytes / 1e6).toFixed(1),
+  return { local_mb: +(net.local_bytes / 1e6).toFixed(1),
            local_mbps: net.local_ms ? +(net.local_bytes / 1e6 / (net.local_ms / 1000)).toFixed(1) : null };
 }
 

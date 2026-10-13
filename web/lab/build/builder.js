@@ -2,9 +2,9 @@
 // open your copy of the region's map file, and the page adds Wikipedia in the
 // chosen languages and saves a new ZIM. assembler-worker.js does the work.
 //
-// Analytics: GA4 (the site's Firebase project) gets build_start,
-// build_progress (25/50/75%), build_end and build_probe, so we learn what
-// download speeds visitors really get. Nothing is sent on localhost, from an
+// Analytics: GA4 (the site's Firebase project) gets packs_start, packs_end,
+// build_start, build_progress (25/50/75%), build_end and build_probe, so we
+// learn what download speeds visitors really get. Nothing is sent on localhost, from an
 // automated browser, with ?notrack, or with localStorage.sz_dev set.
 (function () {
   'use strict';
@@ -155,10 +155,192 @@
     if (verdict === true) { baseOk = true; out.className = 'ok'; out.textContent = '✓ right file'; }
     else { out.className = 'bad'; out.textContent = verdict; }
     checkReady();
+    ensurePacks();
+  }
+
+  // ------------------------------------------------------------ packs
+  // All of the language's packs (each at most ~31 MB) are downloaded,
+  // checked against the recipe's SHA-256 of each 16 MiB chunk and kept in
+  // memory as soon as the language and a right map file are chosen. Build is
+  // enabled only after that, so a missing or damaged pack stops the visitor
+  // before any save target is opened or any byte is written.
+  const STALL_MS = 30000;              // no byte for this long: abort and retry
+  const PART = 4 * 1048576;            // range request size
+  const PARALLEL = 4;                  // range requests in flight
+  const TRIES = 5;                     // per range, with backoff 1, 2, 4, 8 s
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const langName = (() => {
+    let dn = null;
+    try { dn = new Intl.DisplayNames(['en'], { type: 'language' }); } catch (e) { /* old browser */ }
+    return (code, fallback) => { try { const n = dn && dn.of(code); if (n && n !== code) return n; } catch (e) { /* unknown code */ } return fallback || code; };
+  })();
+  const packName = (id) => {
+    const m = entry && entry.packs.find((p) => p.lang === id);
+    return langName(id, m ? m.label.replace(/ Wikipedia$/, '') : id) + ' Wikipedia';
+  };
+  const newNet = () => ({ requests: 0, bytes: 0, ms: 0, ttfb: [], mbps: [], retries: 0, errors: 0, resets: 0, hash_retries: 0 });
+  let net = newNet();
+  let packsOk = false, packSeq = 0, packAbort = null;
+  const packBytes = new Map();         // url|size|hashes -> verified Uint8Array
+  const packKey = (p) => [p.url, p.size, p.sha256.join(',')].join('|');
+
+  class FetchError extends Error {
+    constructor(msg, permanent) { super(msg); this.permanent = !!permanent; }
+  }
+  // One range request. Aborted when no byte has arrived for STALL_MS (while
+  // waiting for the answer, too); onBytes(n) is called as bytes arrive.
+  async function fetchRange(url, a, b, size, signal, onBytes) {
+    const ac = new AbortController();
+    const outer = () => ac.abort();
+    if (signal.aborted) throw new DOMException('aborted', 'AbortError');
+    signal.addEventListener('abort', outer, { once: true });
+    let timer = null, stalled = false;
+    const arm = () => { clearTimeout(timer); timer = setTimeout(() => { stalled = true; ac.abort(); }, STALL_MS); };
+    const t0 = performance.now();
+    arm();
+    try {
+      const r = await fetch(url, { headers: { Range: `bytes=${a}-${b - 1}` }, cache: 'no-store', signal: ac.signal });
+      const ttfb = performance.now() - t0;
+      if (r.status !== 206) {
+        const permanent = r.status >= 400 && r.status < 500 && r.status !== 408 && r.status !== 429;
+        throw new FetchError(r.status === 200 ? 'the server ignored the range request' : `HTTP ${r.status}`, permanent);
+      }
+      const cr = r.headers.get('Content-Range');
+      const m = cr && /^bytes (\d+)-(\d+)\/(\d+|\*)$/.exec(cr);
+      if (cr && (!m || +m[1] !== a || +m[2] !== b - 1 || (m[3] !== '*' && +m[3] !== size))) throw new FetchError(`unexpected Content-Range ${cr}`);
+      const buf = new Uint8Array(b - a);
+      const reader = r.body.getReader();
+      let n = 0;
+      for (;;) {
+        arm();
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (n + value.length > buf.length) throw new FetchError('the server sent too many bytes');
+        buf.set(value, n); n += value.length; onBytes(value.length);
+      }
+      if (n !== b - a) throw new FetchError(`the server sent ${n} of ${b - a} bytes`);
+      const ms = performance.now() - t0;
+      net.requests++; net.bytes += n; net.ms += ms; net.ttfb.push(Math.round(ttfb));
+      net.mbps.push(+(n / 1e6 / (ms / 1000)).toFixed(2));
+      return buf;
+    } catch (e) {
+      if (signal.aborted) throw new DOMException('aborted', 'AbortError');
+      if (stalled) throw new FetchError(`no data for ${STALL_MS / 1000} s`);
+      if (e instanceof FetchError) throw e;
+      net.resets++;
+      throw new FetchError('the connection failed (' + (e.message || e) + ')');
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', outer);
+    }
+  }
+  // A range, retried with backoff; onRetry(attempt, error) before each retry.
+  async function fetchRetrying(url, a, b, size, signal, onBytes, onRetry) {
+    let last;
+    for (let attempt = 0; attempt < TRIES; attempt++) {
+      if (attempt) { net.retries++; onRetry(attempt, last); await sleep(1000 * 2 ** (attempt - 1)); }
+      let got = 0;
+      try { return await fetchRange(url, a, b, size, signal, (n) => { got += n; onBytes(n); }); }
+      catch (e) {
+        onBytes(-got);                 // this attempt's bytes do not count
+        if (e.name === 'AbortError') throw e;
+        net.errors++; last = e;
+        if (e.permanent) throw e;
+      }
+    }
+    throw new FetchError(`${last.message}, ${TRIES} tries`);
+  }
+  // One pack, chunk by chunk; each chunk's SHA-256 must match the recipe. A
+  // chunk that does not match is downloaded once more before giving up.
+  async function downloadPack(p, signal, onProgress) {
+    const out = new Uint8Array(p.size);
+    let got = 0;
+    const bump = (n) => { got += n; onProgress(got, null); };
+    for (let k = 0; k < p.sha256.length; k++) {
+      const a0 = k * p.chunk, b0 = Math.min(a0 + p.chunk, p.size);
+      for (let pass = 0; ; pass++) {
+        const parts = [];
+        for (let a = a0; a < b0; a += PART) parts.push([a, Math.min(a + PART, b0)]);
+        let next = 0, before = got;
+        const lane = async () => {
+          while (next < parts.length) {
+            const [a, b] = parts[next++];
+            out.set(await fetchRetrying(p.url, a, b, p.size, signal, bump, (i, e) => onProgress(got, `${e.message}; trying again (${i + 1} of ${TRIES})`)), a);
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(PARALLEL, parts.length) }, lane));
+        const sum = hex(await crypto.subtle.digest('SHA-256', out.subarray(a0, b0)));
+        if (sum === p.sha256[k]) break;
+        if (pass >= 1) throw new FetchError('it arrived damaged twice (it does not match its checksum)', true);
+        net.hash_retries++;
+        got = before; onProgress(got, 'a piece arrived damaged; downloading it again');
+      }
+    }
+    return out;
+  }
+  async function ensurePacks() {
+    const seq = ++packSeq;
+    if (packAbort) packAbort.abort();
+    packAbort = null; packsOk = false;
+    const out = $('packStatus');
+    out.className = ''; out.textContent = '';
+    $('packRetry').hidden = true;
+    checkReady();
+    if (!baseOk || !entry) return;
+    let rec;
+    try { rec = await recipeFor(entry); } catch (e) { return; }   // #notice says why
+    if (seq !== packSeq) return;
+    const ids = Object.keys(rec.packs);
+    const keep = new Set(ids.map((id) => packKey(rec.packs[id])));
+    for (const k of [...packBytes.keys()]) if (!keep.has(k)) packBytes.delete(k);   // only this language's packs stay in memory
+    const ac = packAbort = new AbortController();
+    const t0 = performance.now();
+    net = newNet();
+    const todo = ids.filter((id) => !packBytes.has(packKey(rec.packs[id])));
+    const evBase = { region: region.id, lang: entry.lang, packs: ids.join(','), download_mb: Math.round(todo.reduce((t, id) => t + rec.packs[id].size, 0) / 1e6) };
+    if (todo.length) track('packs_start', evBase);
+    try {
+      for (const id of todo) {
+        const p = rec.packs[id], name = packName(id);
+        let shown = 0;
+        const bytes = await downloadPack(p, ac.signal, (got, note) => {
+          const now = performance.now();
+          if (!note && now - shown < 250 && got < p.size) return;
+          shown = now;
+          out.textContent = `Downloading ${name}: ${(got / 1e6).toFixed(0)} of ${fmtMB(p.size)}` + (note ? ` — ${note}` : '');
+        }).catch((e) => { e.pack = name; throw e; });
+        packBytes.set(packKey(p), bytes);
+      }
+    } catch (e) {
+      if (seq !== packSeq || e.name === 'AbortError') return;
+      out.className = 'bad';
+      out.textContent = /HTTP 40[34]|HTTP 410/.test(e.message)
+        ? `${e.pack} isn't available right now (${e.message}). Nothing was saved. Try again later.`
+        : `Could not download ${e.pack || 'the language pack'}: ${e.message}. Nothing was saved. Try again.`;
+      $('packRetry').hidden = false;
+      track('packs_end', Object.assign({}, evBase, netParams(), { outcome: /damaged/.test(e.message) ? 'hash_mismatch' : 'error', secs: Math.round((performance.now() - t0) / 1000) }));
+      return;
+    }
+    if (seq !== packSeq) return;
+    packAbort = null;
+    if (todo.length) track('packs_end', Object.assign({}, evBase, netParams(), { outcome: 'ok', secs: Math.round((performance.now() - t0) / 1000) }));
+    packsOk = true;
+    out.className = 'ok';
+    out.textContent = ids.length ? `✓ ${ids.map(packName).join(', ')} downloaded and checked (${fmtMB(ids.reduce((t, id) => t + rec.packs[id].size, 0))})` : '';
+    checkReady();
+  }
+  $('packRetry').onclick = () => ensurePacks();
+
+  function pct(a, p) { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; }
+  function netParams() {
+    return { net_mb: +(net.bytes / 1e6).toFixed(1), net_mbps_avg: net.ms ? +(net.bytes / 1e6 / (net.ms / 1000)).toFixed(2) : null,
+             net_mbps_p10: pct(net.mbps, 0.1), ttfb_ms_p50: pct(net.ttfb, 0.5), retries: net.retries, resets: net.resets,
+             hash_retries: net.hash_retries, requests: net.requests };
   }
 
   function checkReady() {
-    $('go').disabled = !(baseOk && region && entry) || !!running;
+    $('go').disabled = !(baseOk && packsOk && region && entry) || !!running;
+    for (const id of ['region', 'lang', 'baseFile']) $(id).disabled = !!running;
   }
 
   // The recipe of the chosen language; fetched once per language.
@@ -234,43 +416,40 @@
       return;
     }
     const packs = Object.keys(recipe.packs).join(',');
+    const bytes = {};
+    for (const id of Object.keys(recipe.packs)) bytes[id] = packBytes.get(packKey(recipe.packs[id]));
     const t0 = performance.now();
     hiddenMs = 0; hiddenSince = document.visibilityState === 'hidden' ? performance.now() : null;
     const base = { region: region.id, lang: entry.lang, packs, size_mb: Math.round(recipe.size / 1e6),
                    download_mb: Math.round(entry.download_bytes / 1e6), sink: sinkInfo.sink };
     track('build_start', base);
     const worker = new Worker('assembler-worker.js');
-    running = { worker, base, t0, sent: new Set(), net: null };
+    running = { worker, base, t0, sent: new Set() };
     checkReady();
     $('status').textContent = 'Starting…';
     const result = await new Promise((resolve) => {
       worker.onmessage = (e) => {
         if (e.data.type === 'progress') {
-          const { written, size, ms, net } = e.data;
-          running.net = net;
+          const { written, size, ms } = e.data;
           $('prog').value = written / size;
-          $('status').textContent = `${fmtMB(written)} of ${fmtMB(size)}` +
-            (net.mbps_avg ? `, downloading at ${net.mbps_avg} MB/s` : '') + ' — keep this tab open';
+          $('status').textContent = `${fmtMB(written)} of ${fmtMB(size)} — keep this tab open`;
           for (const p of [25, 50, 75]) {
             if (written / size * 100 >= p && !running.sent.has(p)) {
               running.sent.add(p);
-              track('build_progress', Object.assign({}, base, { pct: p, elapsed_s: Math.round(ms / 1000), net_mbps_avg: net.mbps_avg }));
+              track('build_progress', Object.assign({}, base, { pct: p, elapsed_s: Math.round(ms / 1000) }));
             }
           }
         } else if (e.data.type === 'done') resolve(e.data.result);
       };
       worker.onerror = (e) => resolve({ ok: false, outcome: 'error', error: 'worker: ' + e.message });
-      worker.postMessage({ cmd: 'run', recipe, baseFile, sink: sinkInfo.sink, handle: sinkInfo.handle,
-                           port: sinkInfo.port, fileName, inflight: +(q.get('inflight') || 4) }, sinkInfo.transfer);
+      worker.postMessage({ cmd: 'run', recipe, baseFile, packs: bytes, sink: sinkInfo.sink, handle: sinkInfo.handle,
+                           port: sinkInfo.port, fileName }, sinkInfo.transfer);
     });
     worker.terminate();
     if (hiddenSince !== null) { hiddenMs += performance.now() - hiddenSince; hiddenSince = performance.now(); }
-    const net = result.net || {};
-    track('build_end', Object.assign({}, base, {
+    track('build_end', Object.assign({}, base, netParams(), {
       outcome: result.outcome, secs: Math.round((performance.now() - t0) / 1000), mbps_total: result.mbps_total,
-      net_mbps_avg: net.mbps_avg, net_mbps_p10: net.mbps_p10, ttfb_ms_p50: net.ttfb_p50,
-      retries: net.retries, resets: net.resets, hidden_s: Math.round(hiddenMs / 1000),
-      hash_ok: result.ok ? 1 : 0, requests: net.requests }));
+      local_mbps: result.net && result.net.local_mbps, hidden_s: Math.round(hiddenMs / 1000), hash_ok: result.ok ? 1 : 0 }));
     running = null;
     checkReady();
     if (result.ok) {
@@ -289,11 +468,9 @@
   };
 
   window.addEventListener('pagehide', () => {
-    if (!running) return;
-    const net = running.net || {};
-    track('build_end', Object.assign({}, running.base, { outcome: 'abandoned',
-      secs: Math.round((performance.now() - running.t0) / 1000), net_mbps_avg: net.mbps_avg,
-      net_mbps_p10: net.mbps_p10, retries: net.retries, resets: net.resets }));
+    if (!running || !running.base) return;
+    track('build_end', Object.assign({}, running.base, netParams(), { outcome: 'abandoned',
+      secs: Math.round((performance.now() - running.t0) / 1000) }));
   });
 
   // ------------------------------------------------------------ speed test
