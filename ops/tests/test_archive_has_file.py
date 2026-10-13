@@ -36,6 +36,9 @@ def test_the_rule():
     assert not A.has_file({"files": "x"}, "a.zim", MD5)
     assert not A.has_file(meta, "a.zim", "not-an-md5")
     assert not A.has_file([], "a.zim", MD5)
+    # a backup copy archive.org keeps under history/ is not the file
+    hist = {"files": [{"name": "history/files/a.zim.~1~", "md5": MD5}]}
+    assert not A.has_file(hist, "a.zim", MD5)
 
 
 @pytest.mark.parametrize("stdin, rc", [
