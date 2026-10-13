@@ -49,20 +49,29 @@
 
   const fmtMB = (b) => (b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(0) + ' MB');
 
+  async function getJSON(url) {
+    let r;
+    try { r = await fetch(url, { cache: 'no-cache' }); } catch (e) { throw new Error('no connection (' + (e.message || e) + ')'); }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    try { return await r.json(); } catch (e) { throw new Error('the file is damaged'); }
+  }
+
   async function load() {
-    const r = await fetch('recipes/index.json', { cache: 'no-cache' });
-    index = await r.json();
+    index = await getJSON('recipes/index.json');
     const sel = $('region');
     sel.innerHTML = '';
     for (const reg of index.regions) sel.add(new Option(reg.title, reg.id));
     const want = q.get('region');
-    if (want) sel.value = want;
-    sel.onchange = pickRegion;
+    if (want && !index.regions.some((r) => r.id === want)) {
+      $('notice').textContent = `No such region: “${want}”. Pick one from the list.`;
+    } else if (want) sel.value = want;
+    sel.onchange = () => { $('notice').textContent = ''; pickRegion(); };
     pickRegion();
   }
 
   function pickRegion() {
     region = index.regions.find((r) => r.id === $('region').value);
+    if (!region) { $('notice').textContent = 'No such region. Pick one from the list.'; return; }
     const b = region.base;
     $('baseInfo').innerHTML = '';
     const a = document.createElement('a');
@@ -106,15 +115,35 @@
     $('go').disabled = !(baseFile && region && entry && baseFile.size === region.base.size) || !!running;
   }
 
+  // The recipe of the chosen language; fetched once per language.
+  const recipes = new Map();
+  function recipeFor(e) {
+    if (!recipes.has(e.recipe)) {
+      const p = getJSON(e.recipe);
+      p.catch(() => recipes.delete(e.recipe));     // a later try fetches it again
+      recipes.set(e.recipe, p);
+    }
+    return recipes.get(e.recipe);
+  }
+
   // ------------------------------------------------------------ sinks
+  const within = (p, ms) => Promise.race([p, new Promise((r, j) => setTimeout(() => j(new Error('timed out')), ms))]);
+
+  // The service worker that streams downloads, or null when it cannot be had
+  // (no support, a failed registration, private modes): then OPFS is used.
   async function swController() {
     if (!('serviceWorker' in navigator)) return null;
-    await navigator.serviceWorker.register('sw.js', { scope: './' });
-    await navigator.serviceWorker.ready;
-    if (!navigator.serviceWorker.controller) {
-      await new Promise((r) => { navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }); setTimeout(r, 3000); });
+    try {
+      await within(navigator.serviceWorker.register('sw.js', { scope: './' }), 10000);
+      await within(navigator.serviceWorker.ready, 10000);
+      if (!navigator.serviceWorker.controller) {
+        await new Promise((r) => { navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }); setTimeout(r, 3000); });
+      }
+      return navigator.serviceWorker.controller;
+    } catch (e) {
+      console.warn('service worker unavailable, saving through browser storage instead:', e);
+      return null;
     }
-    return navigator.serviceWorker.controller;
   }
 
   async function prepareSink(fileName, size) {
@@ -128,8 +157,10 @@
       const id = Math.random().toString(36).slice(2);
       const ok = new Promise((r) => { ch.port1.onmessage = (e) => { if (e.data.type === 'registered') r(); }; });
       ctl.postMessage({ type: 'register', id, filename: fileName, size }, [ch.port2]);
-      await ok;
+      let registered = true;
+      await within(ok, 5000).catch(() => { registered = false; });
       ch.port1.onmessage = null;
+      if (!registered) return { sink: 'opfs', transfer: [] };
       const ifr = document.createElement('iframe');
       ifr.style.display = 'none'; ifr.src = '__dl/' + encodeURIComponent(id);
       document.body.append(ifr);
@@ -140,11 +171,22 @@
 
   // ------------------------------------------------------------ build
   $('go').onclick = async () => {
-    const recipe = await (await fetch(entry.recipe, { cache: 'no-cache' })).json();
-    const fileName = `${recipe.file_name || recipe.name}.zim`;
-    let sinkInfo;
-    try { sinkInfo = await prepareSink(fileName, recipe.size); }
-    catch (e) { $('status').textContent = 'Not started: ' + (e.message || e); return; }
+    // One build at a time: claim the slot before the first await, so a double
+    // click cannot start a second worker or a second save dialog.
+    if (running || $('go').disabled) return;
+    running = { starting: true };
+    $('go').disabled = true;
+    let recipe, fileName, sinkInfo;
+    try {
+      recipe = await recipeFor(entry);
+      fileName = `${recipe.file_name || recipe.name}.zim`;
+      sinkInfo = await prepareSink(fileName, recipe.size);
+    } catch (e) {
+      running = null; checkReady();
+      $('status').textContent = recipe ? 'Not started: ' + (e.message || e)
+        : `Not started: could not load the recipe for ${entry.label} (${e.message || e}). Try again later.`;
+      return;
+    }
     const packs = Object.keys(recipe.packs).join(',');
     const t0 = performance.now();
     hiddenMs = 0; hiddenSince = document.visibilityState === 'hidden' ? performance.now() : null;
