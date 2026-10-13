@@ -41,14 +41,29 @@ function _szLowzoomLakes() {
 // under it, smaller, the name in the map language when the tile has one
 // that differs. SZ_LANG is the local labels' language, SZ_LANG2 the map
 // language when that is another one, else ''.
+//
+// A map-config may name the region's own languages ("regionLanguages",
+// e.g. ["el"]; SZ_REGION). A bilingual label then puts the map language's
+// name first and the native name under it: OSM's name in its own script
+// (_szNativeLabelField), what the signs say, not the base's label (an
+// English base's name:latin, "Athina"). A German map shows "Athen" over
+// "Αθήνα"; a Greek map, whose name:el is the native name, just "Αθήνα".
+// Without regionLanguages, or on a map in its base's language, labels are
+// as above.
 var SZ_LANG = 'en';
 var SZ_LANG2 = '';
+var SZ_REGION = false;
 function _szLocalLabelField() {
   if (SZ_LANG !== 'en') {
     return ["coalesce", ["get", "name:" + SZ_LANG], ["get", "name"],
             ["get", "name_int"], ["get", "name:latin"]];
   }
   return ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]];
+}
+// The native name: OpenFreeMap's name; in StreetZim's tiles name_int, the
+// OSM name where it differs from the English one, else name:latin.
+function _szNativeLabelField() {
+  return ["coalesce", ["get", "name"], ["get", "name_int"], ["get", "name:latin"]];
 }
 // Point labels (places, POIs, water, peaks, parks, airports). Labels
 // along a line (roads) take szLineLabelField: two lines there would double
@@ -57,6 +72,14 @@ function szLabelField() {
   var local = _szLocalLabelField();
   if (!SZ_LANG2) return local;
   var key = "name:" + SZ_LANG2;
+  if (SZ_REGION) {
+    var nat = _szNativeLabelField();
+    var natText = nat.concat([""]);
+    return ["case",
+      ["all", ["has", key], ["!=", natText, ""], ["!=", ["get", key], natText]],
+      ["format", ["get", key], {}, "\n", {}, nat, { "font-scale": 0.8 }],
+      ["coalesce", ["get", key]].concat(nat.slice(1))];
+  }
   var localText = local.concat([""]);
   return ["case",
     ["all", ["has", key], ["!=", localText, ""], ["!=", ["get", key], localText]],
@@ -72,6 +95,13 @@ function szLabelLanguages(config) {
   var base = (config && typeof config.baseLanguage === 'string' && config.baseLanguage) || lang;
   return [base, base !== lang ? lang : ''];
 }
+// Does the map-config name the region's languages? A non-empty array of
+// language codes; anything else is no.
+function szRegionLanguages(config) {
+  var r = config && config.regionLanguages;
+  if (!Array.isArray(r)) return [];
+  return r.filter(function(l) { return typeof l === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(l); });
+}
 function szLabelOf(p) {
   p = p || {};
   if (SZ_LANG !== 'en') {
@@ -80,9 +110,16 @@ function szLabelOf(p) {
   return p['name:latin'] || p.name || '';
 }
 // The same name to show (popups, the Wiki list), bilingual like the labels:
-// "local · visitor's" when the map's language has a name that differs.
+// "local · visitor's" when the map's language has a name that differs;
+// with regionLanguages "visitor's · native", in the labels' order.
 // szLabelOf stays the local name, which search records are named by.
 function szDisplayLabelOf(p) {
+  if (SZ_REGION && SZ_LANG2 && p) {
+    var mine = p['name:' + SZ_LANG2];
+    var nat = p.name || p.name_int || p['name:latin'] || '';
+    if (!mine || typeof mine !== 'string') return nat || szLabelOf(p);
+    return !nat || nat === mine ? mine : mine + ' \u00B7 ' + nat;
+  }
   var local = szLabelOf(p);
   var other = SZ_LANG2 && p && p['name:' + SZ_LANG2];
   if (!other || typeof other !== 'string') return local;
@@ -181,6 +218,7 @@ function makeStyle(config) {
   var _szLangs = szLabelLanguages(config);
   SZ_LANG = _szLangs[0];
   SZ_LANG2 = _szLangs[1];
+  SZ_REGION = szRegionLanguages(config).length > 0;
   // Use zimtile:// protocol for tiles and fonts — this adds retry logic
   // for Kiwix JS PWA where the ServiceWorker can drop requests under load
   var tileUrl = "zimtile://" + baseUrl + "tiles/{z}/{x}/{y}.pbf";

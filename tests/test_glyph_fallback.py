@@ -154,15 +154,19 @@ def text_field_keys(src: str) -> set[str]:
             # label's literal gets (_szLocalLabelField), plus
             # name:<language> ("name:" + SZ_LANG) and, on a merged map shown
             # in another language than its base's, that language's name
-            # under it (["get", key], key = "name:" + SZ_LANG2).
+            # (["get", key], key = "name:" + SZ_LANG2) with the local or,
+            # given regionLanguages, the native name (_szNativeLabelField).
             def body_of(fn: str) -> str:
                 body = src[src.index(f"function {fn}()"):]
                 return body[:body.index("\n}\n")]
             local, outer = body_of("_szLocalLabelField"), body_of("szLabelField")
+            native = body_of("_szNativeLabelField")
             assert body_of("szLineLabelField").split("{", 1)[1].strip() == "return _szLocalLabelField();"
             assert '["get", "name:" + SZ_LANG]' in local
             assert 'var key = "name:" + SZ_LANG2;' in outer
-            body = local.replace('["get", "name:" + SZ_LANG]', "") + outer.replace('["get", key]', "")
+            assert "_szNativeLabelField()" in outer
+            body = (local.replace('["get", "name:" + SZ_LANG]', "") + outer.replace('["get", key]', "")
+                    + native)
             assert "get" not in outer.replace('["get", key]', ""), "szLabelField reads another key"
             keys |= {g[2] for g in re.findall(
                 r"""\[\s*(["'])get\1\s*,\s*(["'])(.*?)\2\s*[\],]""", body, re.S)}

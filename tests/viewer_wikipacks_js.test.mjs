@@ -878,8 +878,8 @@ await ok('the Wiki panel wires in the order, rows and markers', () => {
 // ---------------------------------------------------------------------
 // Bilingual labels (130-lowzoom-lakes.js).
 const LBL = new Function(slice('var SZ_LANG = ', 'function makeStyle') +
-  '\nreturn { set: (a, b) => { SZ_LANG = a; SZ_LANG2 = b || ""; }, field: szLabelField, line: szLineLabelField,' +
-  ' langs: szLabelLanguages, of: szLabelOf, shown: szDisplayLabelOf };')();
+  '\nreturn { set: (a, b, r) => { SZ_LANG = a; SZ_LANG2 = b || ""; SZ_REGION = !!r; }, field: szLabelField,' +
+  ' line: szLineLabelField, langs: szLabelLanguages, region: szRegionLanguages, of: szLabelOf, shown: szDisplayLabelOf };')();
 
 // Enough of MapLibre's expression language to evaluate a label: get, has,
 // coalesce, case, all, ==, != and format (a formatted value is returned as
@@ -1016,6 +1016,91 @@ await ok('a merged map in another language: point labels bilingual, road labels 
   // Back to a one-language map: the globals are reset by the next style.
   const again = labelLayers(makeStyle({ ...BASE_CFG, language: 'en' }));
   for (const l of again) assert.deepStrictEqual(l.layout['text-field'], TODAY_EN);
+});
+
+// Region languages (map-config regionLanguages): the native name, in its own
+// script, is the bilingual label's local line, under the map language's.
+// Tiles as StreetZim's tilemaker writes them for an English base: name:latin
+// (English where OSM has it), name_int (the OSM name when it differs), the
+// map language's name:xx; and OpenFreeMap's, which carry name.
+const ATHENS = { 'name:latin': 'Athens', name_int: 'Αθήνα', 'name:de': 'Athen', 'name:el': 'Αθήνα' };
+const ATHENS_OFM = { name: 'Αθήνα', 'name:latin': 'Athina', 'name:de': 'Athen', 'name:el': 'Αθήνα' };
+const PLAKA = { 'name:latin': 'Πλάκα' };                   // no English name: name:latin is the OSM name
+const ZURICH = { 'name:latin': 'Zurich', name_int: 'Zürich', 'name:de': 'Zürich' };
+
+await ok('region languages: a German map shows "Athen" over "Αθήνα"; a Greek map just "Αθήνα"', () => {
+  LBL.set('en', 'de', true);
+  for (const athens of [ATHENS, ATHENS_OFM]) {
+    const r = evalExpr(LBL.field(), athens);
+    assert.deepStrictEqual(r, [['Athen', {}], ['\n', {}], ['Αθήνα', { 'font-scale': 0.8 }]]);
+    assert.strictEqual(LBL.shown(athens), 'Athen · Αθήνα');
+  }
+  // No German name: the native one alone; the same name: one line.
+  assert.strictEqual(evalExpr(LBL.field(), PLAKA), 'Πλάκα');
+  assert.strictEqual(LBL.shown(PLAKA), 'Πλάκα');
+  assert.strictEqual(evalExpr(LBL.field(), ZURICH), 'Zürich');
+  assert.strictEqual(LBL.shown(ZURICH), 'Zürich');
+  assert.strictEqual(evalExpr(LBL.field(), {}), null);
+  // A Greek map of the same English base: name:el is the native name.
+  LBL.set('en', 'el', true);
+  assert.strictEqual(evalExpr(LBL.field(), ATHENS), 'Αθήνα');
+  assert.strictEqual(evalExpr(LBL.field(), PLAKA), 'Πλάκα');
+  assert.strictEqual(LBL.shown(ATHENS), 'Αθήνα');
+  // Without regionLanguages the same Greek map is as before: the base's
+  // local name first (name:latin), the Greek under it.
+  LBL.set('en', 'el', false);
+  assert.strictEqual(text(evalExpr(LBL.field(), ATHENS)), 'Athens\nΑθήνα');
+  assert.strictEqual(LBL.shown(ATHENS), 'Athens · Αθήνα');
+  LBL.set('en', 'de', false);
+  assert.strictEqual(text(evalExpr(LBL.field(), ATHENS)), 'Athens\nAthen');
+  // A map in its base's language: one line, regionLanguages or not; road
+  // labels stay the local label; search lookups keep the local name.
+  for (const r of [false, true]) {
+    LBL.set('en', '', r);
+    assert.deepStrictEqual(LBL.field(), TODAY_EN);
+    assert.strictEqual(LBL.shown(ATHENS), 'Athens');
+    LBL.set('el', '', r);
+    assert.strictEqual(evalExpr(LBL.field(), ATHENS_OFM), 'Αθήνα');
+    LBL.set('en', 'de', r);
+    assert.deepStrictEqual(LBL.line(), TODAY_EN);
+    assert.strictEqual(LBL.of(ATHENS), 'Athens');
+  }
+  LBL.set('en');
+});
+
+await ok('regionLanguages: a list of language codes; anything else counts as none', () => {
+  assert.deepStrictEqual(LBL.region({ regionLanguages: ['el'] }), ['el']);
+  assert.deepStrictEqual(LBL.region({ regionLanguages: ['de', 'fr', 'it', 'rm'] }), ['de', 'fr', 'it', 'rm']);
+  assert.deepStrictEqual(LBL.region({ regionLanguages: ['zh-Hant', 7, '', 'x y', null] }), ['zh-Hant']);
+  for (const c of [{}, null, { regionLanguages: 'el' }, { regionLanguages: [] }, { regionLanguages: {} }]) {
+    assert.deepStrictEqual(LBL.region(c), [], JSON.stringify(c));
+  }
+});
+
+await ok('the style: regionLanguages changes only a map in another language than its base', () => {
+  const makeStyle = makeStyleFn();
+  // Absent, or a map in its base's language: byte for byte as without.
+  for (const lang of [undefined, 'en', 'de', 'el']) {
+    const cfg = lang ? { ...BASE_CFG, language: lang } : BASE_CFG;
+    const plain = JSON.stringify(makeStyle(cfg));
+    for (const region of [['el'], ['de', 'fr'], [], 'el']) {
+      assert.strictEqual(JSON.stringify(makeStyle({ ...cfg, regionLanguages: region })), plain, `${lang} ${region}`);
+    }
+  }
+  const merged = { ...BASE_CFG, language: 'de', baseLanguage: 'en' };
+  const plainMerged = JSON.stringify(makeStyle(merged));
+  assert.strictEqual(JSON.stringify(makeStyle({ ...merged, regionLanguages: [] })), plainMerged);
+  // Present on a German map of an English base: German first, native under.
+  const st = makeStyle({ ...merged, regionLanguages: ['el'] });
+  const NATIVE = ['coalesce', ['get', 'name'], ['get', 'name_int'], ['get', 'name:latin']];
+  for (const l of labelLayers(st)) {
+    const tf = l.layout['text-field'];
+    if (l.layout['symbol-placement'] === 'line') { assert.deepStrictEqual(tf, TODAY_EN, l.id); continue; }
+    assert.deepStrictEqual(tf[2], ['format', ['get', 'name:de'], {}, '\n', {}, NATIVE, { 'font-scale': 0.8 }], l.id);
+    assert.deepStrictEqual(tf[3], ['coalesce', ['get', 'name:de'], ['get', 'name'], ['get', 'name_int'], ['get', 'name:latin']], l.id);
+  }
+  // The next style without it is the plain merged one again (globals reset).
+  assert.strictEqual(JSON.stringify(makeStyle(merged)), plainMerged);
 });
 
 console.log(`\n${pass} passed`);

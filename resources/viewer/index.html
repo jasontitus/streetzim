@@ -2810,6 +2810,7 @@ return { type: 'FeatureCollection', features: feats };
 }
 var SZ_LANG = 'en';
 var SZ_LANG2 = '';
+var SZ_REGION = false;
 function _szLocalLabelField() {
 if (SZ_LANG !== 'en') {
 return ["coalesce", ["get", "name:" + SZ_LANG], ["get", "name"],
@@ -2817,10 +2818,21 @@ return ["coalesce", ["get", "name:" + SZ_LANG], ["get", "name"],
 }
 return ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]];
 }
+function _szNativeLabelField() {
+return ["coalesce", ["get", "name"], ["get", "name_int"], ["get", "name:latin"]];
+}
 function szLabelField() {
 var local = _szLocalLabelField();
 if (!SZ_LANG2) return local;
 var key = "name:" + SZ_LANG2;
+if (SZ_REGION) {
+var nat = _szNativeLabelField();
+var natText = nat.concat([""]);
+return ["case",
+["all", ["has", key], ["!=", natText, ""], ["!=", ["get", key], natText]],
+["format", ["get", key], {}, "\n", {}, nat, { "font-scale": 0.8 }],
+["coalesce", ["get", key]].concat(nat.slice(1))];
+}
 var localText = local.concat([""]);
 return ["case",
 ["all", ["has", key], ["!=", localText, ""], ["!=", ["get", key], localText]],
@@ -2835,6 +2847,11 @@ var lang = (config && typeof config.language === 'string' && config.language) ||
 var base = (config && typeof config.baseLanguage === 'string' && config.baseLanguage) || lang;
 return [base, base !== lang ? lang : ''];
 }
+function szRegionLanguages(config) {
+var r = config && config.regionLanguages;
+if (!Array.isArray(r)) return [];
+return r.filter(function(l) { return typeof l === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(l); });
+}
 function szLabelOf(p) {
 p = p || {};
 if (SZ_LANG !== 'en') {
@@ -2843,6 +2860,12 @@ return p['name:' + SZ_LANG] || p.name || p.name_int || p['name:latin'] || '';
 return p['name:latin'] || p.name || '';
 }
 function szDisplayLabelOf(p) {
+if (SZ_REGION && SZ_LANG2 && p) {
+var mine = p['name:' + SZ_LANG2];
+var nat = p.name || p.name_int || p['name:latin'] || '';
+if (!mine || typeof mine !== 'string') return nat || szLabelOf(p);
+return !nat || nat === mine ? mine : mine + ' \u00B7 ' + nat;
+}
 var local = szLabelOf(p);
 var other = SZ_LANG2 && p && p['name:' + SZ_LANG2];
 if (!other || typeof other !== 'string') return local;
@@ -2919,6 +2942,7 @@ function makeStyle(config) {
 var _szLangs = szLabelLanguages(config);
 SZ_LANG = _szLangs[0];
 SZ_LANG2 = _szLangs[1];
+SZ_REGION = szRegionLanguages(config).length > 0;
 var tileUrl = "zimtile://" + baseUrl + "tiles/{z}/{x}/{y}.pbf";
 var glyphUrl = "zimtile://" + baseUrl + "fonts/{fontstack}/{range}.pbf";
 var sourceConfig = {
