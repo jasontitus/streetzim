@@ -1,0 +1,54 @@
+{
+ "base_lang": "en",
+ "city": {
+  "qid": "Q65",
+  "lon": -118.2437,
+  "lat": 34.0522,
+  "zoom": 7
+ },
+ "search": {
+  "native": {
+   "q": "Sacramento",
+   "expect": "Sacramento"
+  },
+  "english": {
+   "q": "Los Angeles",
+   "expect": "Los Angeles"
+  },
+  "map_lang": {
+   "th": {
+    "q": "ลอสแอนเจลิส",
+    "expect": "ลอสแอนเจลิส"
+   },
+   "zh": {
+    "q": "洛杉矶",
+    "expect": "洛杉矶"
+   },
+   "ja": {
+    "q": "ロサンゼルス",
+    "expect": "ロサンゼルス"
+   },
+   "ko": {
+    "q": "로스앤젤레스",
+    "expect": "로스앤젤레스"
+   },
+   "es": {
+    "q": "Los Ángeles",
+    "expect": "Los Ángeles"
+   },
+   "fr": {
+    "q": "Los Angeles",
+    "expect": "Los Angeles"
+   },
+   "de": {
+    "q": "Los Angeles",
+    "expect": "Los Angeles"
+   }
+  }
+ },
+ "route": {
+  "src": "38.5816,-121.4944",
+  "dst": "38.5556,-121.4689"
+ },
+ "named_qids": "Q18013,Q65"
+}
