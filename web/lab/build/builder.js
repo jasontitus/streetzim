@@ -205,6 +205,7 @@
   const PART = 4 * 1048576;            // range request size
   const PARALLEL = 4;                  // range requests in flight
   const TRIES = 5;                     // per range, with backoff 1, 2, 4, 8 s
+  const SLOW_AFTER_MS = 20000, SLOW_BPS = 50e3, SLOW_TRIES = 3;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const langName = (() => {
     let dn = null;
@@ -215,7 +216,7 @@
     const m = entry && entry.packs.find((p) => p.lang === id);
     return langName(id, m ? m.label.replace(/ Wikipedia$/, '') : id) + ' Wikipedia';
   };
-  const newNet = () => ({ requests: 0, bytes: 0, ms: 0, ttfb: [], mbps: [], retries: 0, errors: 0, resets: 0, hash_retries: 0 });
+  const newNet = () => ({ requests: 0, bytes: 0, ms: 0, ttfb: [], mbps: [], retries: 0, slow_retries: 0, errors: 0, resets: 0, hash_retries: 0 });
   let net = newNet();
   let packsOk = false, packSeq = 0, packAbort = null;
   const packBytes = new Map();         // url|size|hashes -> verified Uint8Array
@@ -224,14 +225,17 @@
   class FetchError extends Error {
     constructor(msg, permanent) { super(msg); this.permanent = !!permanent; }
   }
-  // One range request. Aborted when no byte has arrived for STALL_MS (while
-  // waiting for the answer, too); onBytes(n) is called as bytes arrive.
-  async function fetchRange(url, a, b, size, signal, onBytes) {
+  // One range request, its bytes handed to onChunk as they arrive. Aborted
+  // when no byte has arrived for STALL_MS (while waiting for the answer,
+  // too); with crawlCheck, also when it has run SLOW_AFTER_MS at under
+  // SLOW_BPS (the proxy's upstream sometimes trickles one request while the
+  // next one is fast).
+  async function fetchRange(url, a, b, size, signal, onChunk, crawlCheck) {
     const ac = new AbortController();
     const outer = () => ac.abort();
     if (signal.aborted) throw new DOMException('aborted', 'AbortError');
     signal.addEventListener('abort', outer, { once: true });
-    let timer = null, stalled = false;
+    let timer = null, stalled = false, n = 0;
     const arm = () => { clearTimeout(timer); timer = setTimeout(() => { stalled = true; ac.abort(); }, STALL_MS); };
     const t0 = performance.now();
     arm();
@@ -245,21 +249,23 @@
       const cr = r.headers.get('Content-Range');
       const m = cr && /^bytes (\d+)-(\d+)\/(\d+|\*)$/.exec(cr);
       if (cr && (!m || +m[1] !== a || +m[2] !== b - 1 || (m[3] !== '*' && +m[3] !== size))) throw new FetchError(`unexpected Content-Range ${cr}`);
-      const buf = new Uint8Array(b - a);
       const reader = r.body.getReader();
-      let n = 0;
       for (;;) {
         arm();
         const { done, value } = await reader.read();
         if (done) break;
-        if (n + value.length > buf.length) throw new FetchError('the server sent too many bytes');
-        buf.set(value, n); n += value.length; onBytes(value.length);
+        if (n + value.length > b - a) throw new FetchError('the server sent too many bytes');
+        onChunk(value); n += value.length;
+        const ms = performance.now() - t0;
+        if (crawlCheck && n < b - a && ms > SLOW_AFTER_MS && n / (ms / 1000) < SLOW_BPS) {
+          reader.cancel().catch(() => {});
+          const e = new FetchError(`only ${Math.round(n / (ms / 1000) / 1e3)} KB/s`); e.slow = true; throw e;
+        }
       }
       if (n !== b - a) throw new FetchError(`the server sent ${n} of ${b - a} bytes`);
       const ms = performance.now() - t0;
-      net.requests++; net.bytes += n; net.ms += ms; net.ttfb.push(Math.round(ttfb));
+      net.requests++; net.ttfb.push(Math.round(ttfb));
       net.mbps.push(+(n / 1e6 / (ms / 1000)).toFixed(2));
-      return buf;
     } catch (e) {
       if (signal.aborted) throw new DOMException('aborted', 'AbortError');
       if (stalled) throw new FetchError(`no data for ${STALL_MS / 1000} s`);
@@ -267,25 +273,31 @@
       net.resets++;
       throw new FetchError('the connection failed (' + (e.message || e) + ')');
     } finally {
+      net.bytes += n; net.ms += performance.now() - t0;
       clearTimeout(timer);
       signal.removeEventListener('abort', outer);
     }
   }
-  // A range, retried with backoff; onRetry(attempt, error) before each retry.
-  async function fetchRetrying(url, a, b, size, signal, onBytes, onRetry) {
-    let last;
-    for (let attempt = 0; attempt < TRIES; attempt++) {
-      if (attempt) { net.retries++; onRetry(attempt, last); await sleep(1000 * 2 ** (attempt - 1)); }
-      let got = 0;
-      try { return await fetchRange(url, a, b, size, signal, (n) => { got += n; onBytes(n); }); }
-      catch (e) {
-        onBytes(-got);                 // this attempt's bytes do not count
-        if (e.name === 'AbortError') throw e;
-        net.errors++; last = e;
-        if (e.permanent) throw e;
+  // Fills out[a, b) from the same bytes of url. After a failure it resumes
+  // from the first missing byte: at once for a crawling request (up to
+  // SLOW_TRIES times), else after a backoff of 1, 2, 4, 8 s (TRIES requests
+  // in all). onRetry(note) explains each retry.
+  async function fetchRetrying(url, out, a, b, size, signal, onBytes, onRetry) {
+    let pos = a, failures = 0, slow = 0;
+    for (;;) {
+      try {
+        await fetchRange(url, pos, b, size, signal, (chunk) => { out.set(chunk, pos); pos += chunk.length; onBytes(chunk.length); }, slow < SLOW_TRIES);
+        return;
+      } catch (e) {
+        if (e.name === 'AbortError' || e.permanent) throw e;
+        net.errors++;
+        if (e.slow) { slow++; net.slow_retries++; onRetry(`${e.message}; asking again`); continue; }
+        if (++failures >= TRIES) throw new FetchError(`${e.message}, ${TRIES} tries`);
+        net.retries++;
+        onRetry(`${e.message}; trying again (${failures + 1} of ${TRIES})`);
+        await sleep(1000 * 2 ** (failures - 1));
       }
     }
-    throw new FetchError(`${last.message}, ${TRIES} tries`);
   }
   // One pack, chunk by chunk; each chunk's SHA-256 must match the recipe. A
   // chunk that does not match is downloaded once more before giving up.
@@ -302,7 +314,7 @@
         const lane = async () => {
           while (next < parts.length) {
             const [a, b] = parts[next++];
-            out.set(await fetchRetrying(p.url, a, b, p.size, signal, bump, (i, e) => onProgress(got, `${e.message}; trying again (${i + 1} of ${TRIES})`)), a);
+            await fetchRetrying(p.url, out, a, b, p.size, signal, bump, (note) => onProgress(got, note));
           }
         };
         await Promise.all(Array.from({ length: Math.min(PARALLEL, parts.length) }, lane));
@@ -379,7 +391,7 @@
   function netParams() {
     return { net_mb: +(net.bytes / 1e6).toFixed(1), net_mbps_avg: net.ms ? +(net.bytes / 1e6 / (net.ms / 1000)).toFixed(2) : null,
              net_mbps_p10: pct(net.mbps, 0.1), ttfb_ms_p50: pct(net.ttfb, 0.5), retries: net.retries, resets: net.resets,
-             hash_retries: net.hash_retries, requests: net.requests };
+             slow_retries: net.slow_retries, hash_retries: net.hash_retries, requests: net.requests };
   }
 
   function checkReady() {
