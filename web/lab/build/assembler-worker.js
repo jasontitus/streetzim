@@ -98,9 +98,10 @@ class OpfsSink {                     // browser-private storage (folder lab-buil
     this.h = await this.fh.createSyncAccessHandle(); this.pos = 0;
   }
   async write(u8) { let n = 0; while (n < u8.length) n += this.h.write(u8.subarray(n), { at: this.pos + n }); this.pos += u8.length; }
-  async close() { this.h.flush(); this.h.close(); }
+  // flush() and close() return promises in older Safari (15.2-16.x); await them.
+  async close() { await this.h.flush(); await this.h.close(); }
   async abort() {
-    try { this.h.close(); } catch (e) { /* closed */ }
+    try { await this.h.close(); } catch (e) { /* closed */ }
     await (await this.dir()).removeEntry(this.name).catch(() => {});
   }
 }
