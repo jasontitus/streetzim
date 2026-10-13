@@ -45,7 +45,7 @@ if str(SCRIPT_DIR) not in sys.path:
 # the source manifest had already been skipped, leaving the output
 # ZIM without ANY category-index/manifest.json.
 from cloud.chip_rules import CHIP_RULES, record_matches_chip  # noqa: E402
-from cloud.viewer_slots import pad_to_slot as _pad_to_slot  # noqa: E402
+from cloud.viewer_slots import check_viewer_fits, pad_to_slot as _pad_to_slot  # noqa: E402
 from streetzim.tile_alias import TileAliaser, max_alias_bytes  # noqa: E402
 from streetzim import viewer_assets  # noqa: E402
 from cloud.chip_shards import (  # noqa: E402
@@ -1370,6 +1370,10 @@ def main() -> int:
                    help="Override map-config.json 'zoom' to pair with "
                         "--map-center.")
     args = p.parse_args()
+    if not args.no_swap_viewer:
+        # Before the source is opened: a viewer past its slot fails in
+        # seconds (cloud/viewer_slots.py).
+        check_viewer_fits(VIEWER_DIR)
     if args.split_graph:
         raise SystemExit("--split-graph (SZRG v5) was retired; use "
                          "--spatial-chunk-scale N. See docs/formats.md.")

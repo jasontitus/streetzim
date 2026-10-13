@@ -52,7 +52,7 @@ from pathlib import Path
 # Single source of truth for the layout is cloud/viewer_slots.py, shared
 # with cloud/swap_viewer_rust.py -- they previously built the header
 # independently, which would have drifted.
-from cloud.viewer_slots import pad_to_slot as _pad_to_slot
+from cloud.viewer_slots import check_viewer_fits, pad_to_slot as _pad_to_slot
 from streetzim import cpus as _cpus
 from streetzim.cpus import build_cpus
 from streetzim import tilemaker_store as _tm_store
@@ -1975,6 +1975,9 @@ def _activate_clip(args, bbox_str, parser):
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+    # A viewer that has outgrown its slot fails now, not after the data
+    # phases (cloud/viewer_slots.py).
+    check_viewer_fits(VIEWER_DIR)
     from streetzim import languages as _languages
     try:
         args.language = _languages.check(args.language)

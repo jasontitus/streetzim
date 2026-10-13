@@ -61,6 +61,17 @@ The UI tables have used up most of the headroom: the next one needs a smaller
 encoding of the tables or larger slots, which a published ZIM only gets from a
 full re-pack ([i18n.md](i18n.md#adding-a-language)).
 
+Three guards keep a viewer from outgrowing its slots:
+
+- `tests/test_viewer_slot_fit.py` (CI): each of the three files leaves at
+  least 16 KB of its slot free (one more UI table adds ~12 KB to
+  places.html), so a change fails review before it fails a build.
+- `check_viewer_fits` (`cloud/viewer_slots.py`) runs first in
+  `create_osm_zim.py` and in `cloud/repackage_zim.py` (when it swaps the
+  viewer): an overflow stops the run in seconds, not after the data phases.
+- `pad_to_slot` refuses an overflow when it packs, the last line of
+  defence; it never truncates.
+
 **index.html is built without comments.** About a third of the viewer's
 source is comments, which every reader downloads and skips.
 `tools/build_viewer.py` writes index.html without whole-line comments,

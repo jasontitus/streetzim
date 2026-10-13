@@ -13,6 +13,8 @@ byte zero, and it records the slot length so the patcher never infers it.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 SLOT_MAGIC = b"SZVSLOT1"
 NAME_WIDTH = 24
 LEN_WIDTH = 12
@@ -41,6 +43,38 @@ def slot_header(name: str, slot_len: int) -> bytes:
 def slot_needle(name: str) -> bytes:
     """What the patcher scans for."""
     return SLOT_MAGIC + b":" + name.encode().ljust(NAME_WIDTH, b" ") + b":"
+
+
+def slot_free(name: str, size: int, slot_len: int | None = None) -> int:
+    """Bytes left in `name`'s slot for content of `size` bytes once the
+    marker is in; negative when it would not fit."""
+    slot_len = slot_len or SLOT_SIZES[name]
+    _, closer = comment_delims(name)
+    return slot_len - size - len(slot_header(name, slot_len)) - len(closer)
+
+
+def check_viewer_fits(viewer_dir: Path | str) -> None:
+    """Fail at once when a viewer file would overflow its slot.
+
+    create_osm_zim.py and cloud/repackage_zim.py call this first, so a viewer
+    grown past its slot (every UI table adds to index.html and places.html)
+    stops a build in seconds rather than at the packing step, hours of data
+    phases later. pad_to_slot keeps its own check as the last line of
+    defence."""
+    over: list[str] = []
+    for name in VIEWER_FILES:
+        p = Path(viewer_dir) / name
+        if not p.exists():
+            continue
+        size = p.stat().st_size
+        free = slot_free(name, size)
+        if free < 0:
+            over.append(f"{name} is {size} B, {-free} B over its {SLOT_SIZES[name]} B slot")
+    if over:
+        raise SystemExit(
+            "viewer slot overflow: " + "; ".join(over) + ". Shrink the viewer, or raise "
+            "SLOT_SIZES in cloud/viewer_slots.py and re-pack every region (a full viewer "
+            "swap); do NOT truncate.")
 
 
 def pad_to_slot(name: str, data: bytes, slot_len: int | None = None) -> bytes:
