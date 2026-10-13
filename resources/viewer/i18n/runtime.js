@@ -155,6 +155,17 @@ function szUseLanguage(lang, search) {
 }
 
 // "1.2K" / "3.4M" / "1.1B" (Wikidata population and the like).
+// A name as the pages show it: the part before its first ";". OSM puts
+// variants in one value ("Hang Ah Alley;Pagoda Alley", "洛杉矶;洛杉磯"); the
+// map's labels (130, _szFirstName), popups, search rows, Find cards, the
+// place sheet and the Find page show the first. A value that starts with
+// ";" is kept whole. Lookups and search matching keep the record's value.
+function szFirstName(s) {
+  if (typeof s !== 'string') return s;
+  var i = s.indexOf(';');
+  return i > 0 ? s.slice(0, i) : s;
+}
+
 // Japanese, Korean and Chinese count large numbers in ten thousands (万 / 億,
 // 만 / 억, 万 / 亿), which num.* (thousands, millions) cannot say. Their
 // tables set "_compact": "intl": 10,000 and up then go through Intl's

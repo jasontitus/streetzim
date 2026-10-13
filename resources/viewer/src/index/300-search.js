@@ -215,6 +215,7 @@ var _searchPinOpenHandler = null;
 // pins and by labels tapped on the map (initWikidataPopups).
 function _szPlacePopupDOM(lat, lon, name, enrich) {
   enrich = enrich || {};
+  name = szFirstName(name);   // shown cut at a ";" (130)
   var box = document.createElement('div');
   box.className = 'pin-popup';
   if (name) {
@@ -999,8 +1000,10 @@ var SEARCH_SHARDS = (function () {
       html += '<div class="search-result" data-idx="' + j +
         '" data-lat="' + m.a + '" data-lon="' + m.o + '" data-type="' + m.t +
         '" data-name="' + escapeHtml(m.n) + '">' +
-        '<span class="search-result-name">' + escapeHtml(m.n) +
-        (m.nn ? ' <span class="search-result-native">' + escapeHtml(m.nn) + '</span>' : '') +
+        // Names shown cut at a ";" (130, szFirstName); data-name keeps
+        // the record's value for the lookups.
+        '<span class="search-result-name">' + escapeHtml(szFirstName(m.n)) +
+        (m.nn ? ' <span class="search-result-native">' + escapeHtml(szFirstName(m.nn)) + '</span>' : '') +
         '</span>' +
         '<span class="search-result-type">' + escapeHtml(label) + loc + distLabel + '</span></div>';
     }

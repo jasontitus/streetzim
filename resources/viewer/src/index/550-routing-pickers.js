@@ -413,7 +413,7 @@
       resultsEl.style.display = 'none';
       var lat = m.item.a;
       var lon = m.item.o;
-      var label = m.item.n;
+      var label = szFirstName(m.item.n);
       if (target === 'origin') setOriginFromLatLon(lat, lon, label);
       else setDestFromLatLon(lat, lon, label);
       inputEl.blur();
@@ -434,7 +434,7 @@
 
           var nameSpan = document.createElement('div');
           nameSpan.className = 'routing-result-name';
-          nameSpan.textContent = m.item.n;
+          nameSpan.textContent = szFirstName(m.item.n);
           textCol.appendChild(nameSpan);
 
           // Secondary line: location (e.g. "Sacramento, California") + type,

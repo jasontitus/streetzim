@@ -335,6 +335,18 @@ await ok('a near boundary with old tables before it: still one request (as befor
   sameBlobs(await blobsOf(c.m.r, 0, 2), PY_BLOBS);
 });
 
+await ok('a boundary exactly CLUSTER_WHOLE_READ away: still one whole read; one byte more: bounded', async () => {
+  const span0 = await (async () => { const c = await loadCost([PY_FRAME], { gap: 0 }); return c.m.B - c.m.A; })();
+  let c = await loadCost([PY_FRAME], { gap: WHOLE_READ - span0 });
+  assert.strictEqual(c.m.B - c.m.A, WHOLE_READ);
+  assert.deepStrictEqual([c.requests, c.bytes], [1, WHOLE_READ]);
+  sameBlobs(await blobsOf(c.m.r, 0, 2), PY_BLOBS);
+  c = await loadCost([PY_FRAME], { gap: WHOLE_READ - span0 + 1 });
+  assert.strictEqual(c.m.B - c.m.A, WHOLE_READ + 1);
+  assert.deepStrictEqual([c.requests, c.bytes], [1, FIRST_READ]);
+  sameBlobs(await blobsOf(c.m.r, 0, 2), PY_BLOBS);
+});
+
 await ok('a far boundary: the first read is bounded, and a long frame is read on in one more', async () => {
   const gap = WHOLE_READ + 2 * MiB;
   let c = await loadCost([PY_FRAME], { gap });

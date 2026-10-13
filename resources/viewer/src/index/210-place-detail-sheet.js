@@ -43,7 +43,8 @@ function _showPlaceDetail(map, r, idx) {
   var title = document.createElement('h2');
   title.style.cssText = 'margin:0; flex:1 1 auto; font-size:20px;'
     + 'font-weight:700; line-height:1.2;';
-  title.textContent = r.n || szT('common.unnamed', '(unnamed)');
+  // Shown cut at a ";" (130, szFirstName); records keep the value.
+  title.textContent = szFirstName(r.n) || szT('common.unnamed', '(unnamed)');
   header.appendChild(title);
   var close = document.createElement('button');
   close.type = 'button';
@@ -356,7 +357,7 @@ function _detailOpenDirections(r) {
     window.__streetzim_prewarmRoutingCells([{ lat: r.a, lon: r.o }]);
   }
   window.streetzimRouting.open();
-  window.streetzimRouting.setDest(r.a, r.o, r.n || '');
+  window.streetzimRouting.setDest(r.a, r.o, szFirstName(r.n) || '');
   var cached = window.__streetzimLastLoc;
   var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
   if (fresh && window.streetzimRouting.setOrigin) {

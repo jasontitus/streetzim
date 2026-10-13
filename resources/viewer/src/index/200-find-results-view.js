@@ -299,7 +299,7 @@ function _findResultPopup(map, r) {
     var wd = null;
     if (r.l) wd = { c: r.l };
     var lng = { lat: r.a, lng: r.o };
-    var dom = map._buildWikiPopupDOM(r.n || szT('common.unnamed', '(unnamed)'), wd, lng,
+    var dom = map._buildWikiPopupDOM(szFirstName(r.n) || szT('common.unnamed', '(unnamed)'), wd, lng,
                                      _wikiArticleLinks(r.q, r.w));
     return new maplibregl.Popup({ offset: 28, closeButton: true,
                                   closeOnClick: false, maxWidth: '320px' })
@@ -307,7 +307,7 @@ function _findResultPopup(map, r) {
   }
   var box = document.createElement('div');
   box.style.cssText = 'font:14px/1.4 -apple-system,system-ui,sans-serif;';
-  box.textContent = r.n || szT('common.unnamed', '(unnamed)');
+  box.textContent = szFirstName(r.n) || szT('common.unnamed', '(unnamed)');
   return new maplibregl.Popup({ offset: 28, closeButton: true,
                                 closeOnClick: false })
     .setDOMContent(box);

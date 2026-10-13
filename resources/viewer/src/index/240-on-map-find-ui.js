@@ -798,7 +798,7 @@ function _nearbyRow(map, entry, isLast) {
     'font-weight:600; font-size:14px;'
     + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
   );
-  name.textContent = entry.item.n || szT('common.unnamed', '(unnamed)');
+  name.textContent = szFirstName(entry.item.n) || szT('common.unnamed', '(unnamed)');
   col.appendChild(name);
   var meta = document.createElement('div');
   meta.style.cssText = (
@@ -847,7 +847,7 @@ function _findResultCard(map, r, idx) {
     'font-weight:600; font-size:14px;'
     + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
   );
-  name.textContent = r.n || szT('common.unnamed', '(unnamed)');
+  name.textContent = szFirstName(r.n) || szT('common.unnamed', '(unnamed)');
   card.appendChild(name);
 
   var sub = document.createElement('div');
@@ -884,7 +884,7 @@ function _findResultCard(map, r, idx) {
     e.stopPropagation();
     if (window.streetzimRouting && window.streetzimRouting.open) {
       window.streetzimRouting.open();
-      window.streetzimRouting.setDest(r.a, r.o, r.n || '');
+      window.streetzimRouting.setDest(r.a, r.o, szFirstName(r.n) || '');
       var cached = window.__streetzimLastLoc;
       var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
       if (fresh && window.streetzimRouting.setOrigin) {

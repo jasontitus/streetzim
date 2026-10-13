@@ -76,11 +76,6 @@ function _szFirstName(e) {
   return ["let", "sz_name", ["to-string", e],
     ["case", [">", ["index-of", ";", v], 0], ["slice", v, 0, ["index-of", ";", v]], v]];
 }
-function _szFirstNameOf(s) {
-  if (typeof s !== 'string') return s;
-  var i = s.indexOf(';');
-  return i > 0 ? s.slice(0, i) : s;
-}
 // Point labels (places, POIs, water, peaks, parks, airports). Labels
 // along a line (roads) take szLineLabelField: two lines there would double
 // their height and their collisions.
@@ -132,13 +127,13 @@ function szLabelOf(p) {
 // szLabelOf stays the local name, which search records are named by.
 function szDisplayLabelOf(p) {
   if (SZ_REGION && SZ_LANG2 && p) {
-    var mine = _szFirstNameOf(p['name:' + SZ_LANG2]);
-    var nat = _szFirstNameOf(p.name || p.name_int || p['name:latin'] || '');
-    if (!mine || typeof mine !== 'string') return nat || _szFirstNameOf(szLabelOf(p));
+    var mine = szFirstName(p['name:' + SZ_LANG2]);
+    var nat = szFirstName(p.name || p.name_int || p['name:latin'] || '');
+    if (!mine || typeof mine !== 'string') return nat || szFirstName(szLabelOf(p));
     return !nat || nat === mine ? mine : mine + ' \u00B7 ' + nat;
   }
-  var local = _szFirstNameOf(szLabelOf(p));
-  var other = SZ_LANG2 && p && _szFirstNameOf(p['name:' + SZ_LANG2]);
+  var local = szFirstName(szLabelOf(p));
+  var other = SZ_LANG2 && p && szFirstName(p['name:' + SZ_LANG2]);
   if (!other || typeof other !== 'string') return local;
   if (!local) return other;
   return other === local ? local : local + ' \u00B7 ' + other;

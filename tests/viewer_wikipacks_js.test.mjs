@@ -661,7 +661,7 @@ const SIDEBAR_SRC = slice('// --- Wiki sidebar: show Wikipedia entries', '// BEG
 function panelDocument() {
   function el(tag) {
     const e = {
-      tag, children: [], style: {}, attrs: {}, className: '', title: '', on: {}, _text: '',
+      tag, children: [], style: {}, attrs: {}, dataset: {}, className: '', title: '', on: {}, _text: '',
       classList: { set: new Set(), add(c) { this.set.add(c); }, remove(c) { this.set.delete(c); } },
       get textContent() { return e._text; },
       set textContent(v) { e._text = v; e.children = []; },
@@ -836,6 +836,7 @@ function sheetFor(config, idx, record) {
   const panel = body.children.find((c) => c.attrs.role === 'dialog');
   const all = (e) => [e].concat((e.children || []).flatMap(all));
   return {
+    title: all(panel).find((e) => e.tag === 'h2').text(),
     buttons: all(panel).filter((e) => e.tag === 'button').map((b) => b.text()).filter((t) => t !== '×'),
     also: (all(panel).find((e) => e.className === 'wiki-also') || null),
   };
@@ -864,6 +865,74 @@ await ok('the place sheet: "Wikipedia (English)" for another language\'s article
       assert.deepStrictEqual(sheetFor(cfg, {}, r).buttons, ['🧭Directions', '📖Wikipedia'], JSON.stringify(cfg));
       assert.strictEqual(sheetFor(cfg, {}, r).also, null);
     }
+  }
+});
+
+// Names with several values ("Hang Ah Alley;Pagoda Alley"): every view
+// shows the first (runtime szFirstName); lookups keep the record's value.
+const fnSrc = (start) => {
+  const a = HTML.indexOf(start);
+  assert.ok(a >= 0, start);
+  return HTML.slice(a, HTML.indexOf('\nfunction ', a + 10)) + '\n';
+};
+const MULTI = { n: 'Hang Ah Alley;Pagoda Alley', a: 37.7944, o: -122.4069, t: 'poi', s: 'street', q: 'Q1', l: 'San Francisco' };
+
+await ok('names with several values: the first in the sheet, Find cards, nearby rows, popups', () => {
+  assert.strictEqual(szFirstName('Hang Ah Alley;Pagoda Alley'), 'Hang Ah Alley');
+  assert.strictEqual(szFirstName('Oakland Amtrak;Oakland, CA - Jack London Square (OKJ)'), 'Oakland Amtrak');
+  assert.strictEqual(szFirstName(';x'), ';x');
+  assert.strictEqual(szFirstName('Zug'), 'Zug');
+  assert.strictEqual(szFirstName(undefined), undefined);
+  assert.strictEqual(szFirstName(''), '');
+  // The place sheet.
+  assert.strictEqual(sheetFor({ hasWikiArticles: true }, {}, MULTI).title, 'Hang Ah Alley');
+  // Find cards, the sheet's nearby rows, a Find marker's popup (200, 240).
+  const document = panelDocument();
+  let popupDom = null, wikiName = null;
+  class Popup { constructor() {} setDOMContent(d) { popupDom = d; return this; } }
+  const F = new Function('document', 'window', 'maplibregl', '_formatDistanceStrip', '_haversineMetersStrip',
+    '_setActiveResult', '_showPlaceDetail', '_wikiArticleLinks', '_findResultsState',
+    fnSrc('function _nearbyRow(') + fnSrc('function _findResultCard(') + fnSrc('function _findResultPopup(') +
+    fnSrc('function _szPlacePopupDOM(') +
+    '\nreturn { _nearbyRow, _findResultCard, _findResultPopup, _szPlacePopupDOM };')(
+    document, {}, { Popup }, () => '1 km', () => 1000, () => {}, () => {}, () => [], { origin: null });
+  const texts = (e) => [e.text ? e.text() : e.textContent].concat((e.children || []).flatMap(texts));
+  const card = F._findResultCard({}, MULTI, 0);
+  assert.ok(texts(card).includes('Hang Ah Alley'), JSON.stringify(texts(card)));
+  assert.ok(!texts(card).some((t) => String(t).includes('Pagoda')), JSON.stringify(texts(card)));
+  const row = F._nearbyRow({}, { item: MULTI, dist: 120, idx: 0 }, false);
+  assert.ok(texts(row).includes('Hang Ah Alley') && !texts(row).some((t) => String(t).includes('Pagoda')), JSON.stringify(texts(row)));
+  F._findResultPopup({}, MULTI);
+  assert.strictEqual(popupDom.textContent, 'Hang Ah Alley');
+  F._findResultPopup({ _buildWikiPopupDOM: (n) => { wikiName = n; return {}; } }, MULTI);
+  assert.strictEqual(wikiName, 'Hang Ah Alley');
+  const pin = F._szPlacePopupDOM(37.79, -122.40, MULTI.n, {});
+  assert.strictEqual(pin.children.find((c) => c.className === 'pin-name').text(), 'Hang Ah Alley');
+  // Unnamed stays unnamed.
+  F._findResultPopup({}, { a: 1, o: 2 });
+  assert.strictEqual(popupDom.textContent, '(unnamed)');
+});
+
+await ok('names with several values: search rows and the Find page show the first, lookups keep it all', () => {
+  const search = fs.readFileSync(`${PARTS_DIR}/300-search.js`, 'utf8');
+  assert.match(search, /'" data-name="' \+ escapeHtml\(m\.n\) \+ '">'/);                 // the lookup's value
+  assert.match(search, /'<span class="search-result-name">' \+ escapeHtml\(szFirstName\(m\.n\)\)/);
+  assert.match(search, /escapeHtml\(szFirstName\(m\.nn\)\)/);
+  assert.match(search, /function _szPlacePopupDOM\(lat, lon, name, enrich\) \{\s*enrich = enrich \|\| \{\};\s*name = szFirstName\(name\);/);
+  const pickers = fs.readFileSync(`${PARTS_DIR}/550-routing-pickers.js`, 'utf8');
+  assert.match(pickers, /var label = szFirstName\(m\.item\.n\);/);
+  assert.match(pickers, /nameSpan\.textContent = szFirstName\(m\.item\.n\);/);
+  const sheet = fs.readFileSync(`${PARTS_DIR}/210-place-detail-sheet.js`, 'utf8');
+  assert.match(sheet, /setDest\(r\.a, r\.o, szFirstName\(r\.n\) \|\| ''\)/);
+  const places = fs.readFileSync(`${REPO}/resources/viewer/places.html`, 'utf8');
+  assert.match(places, /h\.textContent = szFirstName\(r\.n\) \|\| szT\('common\.unnamed'/);
+  assert.match(places, /nameEl\.textContent = szFirstName\(c\.n\) \|\| szT\('common\.unnamed'/);
+  assert.match(places, /state\.originLabel = szFirstName\(r\.n\);\s*showNearPlace\(szFirstName\(r\.n\)\);/);
+  // The Map link carries the record's name to the viewer, which cuts it there.
+  assert.match(places, /'&label=' \+ encodeURIComponent\(r\.n \|\| ''\)/);
+  // Both pages carry the helper (it is in the shared runtime).
+  for (const page of ['index.html', 'places.html']) {
+    assert.match(fs.readFileSync(`${REPO}/resources/viewer/${page}`, 'utf8'), /function szFirstName\(s\)/, page);
   }
 });
 

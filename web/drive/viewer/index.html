@@ -247,6 +247,12 @@ function szUseLanguage(lang, search) {
   return SZ_UI_LANG;
 }
 
+function szFirstName(s) {
+  if (typeof s !== 'string') return s;
+  var i = s.indexOf(';');
+  return i > 0 ? s.slice(0, i) : s;
+}
+
 function szCompactIntl(n) {
   if (!SZ_I18N || SZ_I18N._compact !== 'intl') return '';
   if (n >= 1e4) {
@@ -2838,11 +2844,6 @@ var v = ["var", "sz_name"];
 return ["let", "sz_name", ["to-string", e],
 ["case", [">", ["index-of", ";", v], 0], ["slice", v, 0, ["index-of", ";", v]], v]];
 }
-function _szFirstNameOf(s) {
-if (typeof s !== 'string') return s;
-var i = s.indexOf(';');
-return i > 0 ? s.slice(0, i) : s;
-}
 function szLabelField() {
 var local = _szLocalLabelField();
 if (!SZ_LANG2) return _szFirstName(local);
@@ -2884,13 +2885,13 @@ return p['name:latin'] || p.name || '';
 }
 function szDisplayLabelOf(p) {
 if (SZ_REGION && SZ_LANG2 && p) {
-var mine = _szFirstNameOf(p['name:' + SZ_LANG2]);
-var nat = _szFirstNameOf(p.name || p.name_int || p['name:latin'] || '');
-if (!mine || typeof mine !== 'string') return nat || _szFirstNameOf(szLabelOf(p));
+var mine = szFirstName(p['name:' + SZ_LANG2]);
+var nat = szFirstName(p.name || p.name_int || p['name:latin'] || '');
+if (!mine || typeof mine !== 'string') return nat || szFirstName(szLabelOf(p));
 return !nat || nat === mine ? mine : mine + ' \u00B7 ' + nat;
 }
-var local = _szFirstNameOf(szLabelOf(p));
-var other = SZ_LANG2 && p && _szFirstNameOf(p['name:' + SZ_LANG2]);
+var local = szFirstName(szLabelOf(p));
+var other = SZ_LANG2 && p && szFirstName(p['name:' + SZ_LANG2]);
 if (!other || typeof other !== 'string') return local;
 if (!local) return other;
 return other === local ? local : local + ' \u00B7 ' + other;
@@ -4696,7 +4697,7 @@ if (typeof map._buildWikiPopupDOM === 'function') {
 var wd = null;
 if (r.l) wd = { c: r.l };
 var lng = { lat: r.a, lng: r.o };
-var dom = map._buildWikiPopupDOM(r.n || szT('common.unnamed', '(unnamed)'), wd, lng,
+var dom = map._buildWikiPopupDOM(szFirstName(r.n) || szT('common.unnamed', '(unnamed)'), wd, lng,
 _wikiArticleLinks(r.q, r.w));
 return new maplibregl.Popup({ offset: 28, closeButton: true,
 closeOnClick: false, maxWidth: '320px' })
@@ -4704,7 +4705,7 @@ closeOnClick: false, maxWidth: '320px' })
 }
 var box = document.createElement('div');
 box.style.cssText = 'font:14px/1.4 -apple-system,system-ui,sans-serif;';
-box.textContent = r.n || szT('common.unnamed', '(unnamed)');
+box.textContent = szFirstName(r.n) || szT('common.unnamed', '(unnamed)');
 return new maplibregl.Popup({ offset: 28, closeButton: true,
 closeOnClick: false })
 .setDOMContent(box);
@@ -5055,7 +5056,7 @@ header.style.cssText = 'display:flex; align-items:flex-start; gap:10px;';
 var title = document.createElement('h2');
 title.style.cssText = 'margin:0; flex:1 1 auto; font-size:20px;'
 + 'font-weight:700; line-height:1.2;';
-title.textContent = r.n || szT('common.unnamed', '(unnamed)');
+title.textContent = szFirstName(r.n) || szT('common.unnamed', '(unnamed)');
 header.appendChild(title);
 var close = document.createElement('button');
 close.type = 'button';
@@ -5306,7 +5307,7 @@ if (typeof window.__streetzim_prewarmRoutingCells === 'function'
 window.__streetzim_prewarmRoutingCells([{ lat: r.a, lon: r.o }]);
 }
 window.streetzimRouting.open();
-window.streetzimRouting.setDest(r.a, r.o, r.n || '');
+window.streetzimRouting.setDest(r.a, r.o, szFirstName(r.n) || '');
 var cached = window.__streetzimLastLoc;
 var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
 if (fresh && window.streetzimRouting.setOrigin) {
@@ -6278,7 +6279,7 @@ name.style.cssText = (
 'font-weight:600; font-size:14px;'
 + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
 );
-name.textContent = entry.item.n || szT('common.unnamed', '(unnamed)');
+name.textContent = szFirstName(entry.item.n) || szT('common.unnamed', '(unnamed)');
 col.appendChild(name);
 var meta = document.createElement('div');
 meta.style.cssText = (
@@ -6320,7 +6321,7 @@ name.style.cssText = (
 'font-weight:600; font-size:14px;'
 + 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
 );
-name.textContent = r.n || szT('common.unnamed', '(unnamed)');
+name.textContent = szFirstName(r.n) || szT('common.unnamed', '(unnamed)');
 card.appendChild(name);
 var sub = document.createElement('div');
 sub.style.cssText = (
@@ -6353,7 +6354,7 @@ dir.addEventListener('click', function(e) {
 e.stopPropagation();
 if (window.streetzimRouting && window.streetzimRouting.open) {
 window.streetzimRouting.open();
-window.streetzimRouting.setDest(r.a, r.o, r.n || '');
+window.streetzimRouting.setDest(r.a, r.o, szFirstName(r.n) || '');
 var cached = window.__streetzimLastLoc;
 var fresh = cached && (Date.now() - cached.ts) < 10 * 60 * 1000;
 if (fresh && window.streetzimRouting.setOrigin) {
@@ -6743,6 +6744,7 @@ return searchMarker;
 var _searchPinOpenHandler = null;
 function _szPlacePopupDOM(lat, lon, name, enrich) {
 enrich = enrich || {};
+name = szFirstName(name);   // shown cut at a ";" (130)
 var box = document.createElement('div');
 box.className = 'pin-popup';
 if (name) {
@@ -7352,8 +7354,8 @@ var distLabel = matches[j].dist ? ' &middot; ' + escapeHtml(matches[j].dist) : '
 html += '<div class="search-result" data-idx="' + j +
 '" data-lat="' + m.a + '" data-lon="' + m.o + '" data-type="' + m.t +
 '" data-name="' + escapeHtml(m.n) + '">' +
-'<span class="search-result-name">' + escapeHtml(m.n) +
-(m.nn ? ' <span class="search-result-native">' + escapeHtml(m.nn) + '</span>' : '') +
+'<span class="search-result-name">' + escapeHtml(szFirstName(m.n)) +
+(m.nn ? ' <span class="search-result-native">' + escapeHtml(szFirstName(m.nn)) + '</span>' : '') +
 '</span>' +
 '<span class="search-result-type">' + escapeHtml(label) + loc + distLabel + '</span></div>';
 }
@@ -10517,7 +10519,7 @@ function pickMatch(m) {
 resultsEl.style.display = 'none';
 var lat = m.item.a;
 var lon = m.item.o;
-var label = m.item.n;
+var label = szFirstName(m.item.n);
 if (target === 'origin') setOriginFromLatLon(lat, lon, label);
 else setDestFromLatLon(lat, lon, label);
 inputEl.blur();
@@ -10535,7 +10537,7 @@ var textCol = document.createElement('div');
 textCol.className = 'routing-result-text';
 var nameSpan = document.createElement('div');
 nameSpan.className = 'routing-result-name';
-nameSpan.textContent = m.item.n;
+nameSpan.textContent = szFirstName(m.item.n);
 textCol.appendChild(nameSpan);
 var subParts = [];
 if (m.item.l) subParts.push(m.item.l);

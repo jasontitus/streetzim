@@ -120,6 +120,12 @@ function szUseLanguage(lang, search) {
   return SZ_UI_LANG;
 }
 
+function szFirstName(s) {
+  if (typeof s !== 'string') return s;
+  var i = s.indexOf(';');
+  return i > 0 ? s.slice(0, i) : s;
+}
+
 function szCompactIntl(n) {
   if (!SZ_I18N || SZ_I18N._compact !== 'intl') return '';
   if (n >= 1e4) {
