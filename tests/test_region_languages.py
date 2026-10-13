@@ -42,7 +42,8 @@ def test_every_row_is_a_clean_language_list():
 
 @pytest.mark.parametrize("rid, first", [("greece", "el"), ("japan", "ja"), ("iran", "fa"),
                                         ("united-states", "en"), ("switzerland", "de"),
-                                        ("benelux", "nl"), ("hispaniola", "es")])
+                                        ("benelux", "nl"), ("hispaniola", "ht"),
+                                        ("central-asia", "zh")])
 def test_known_regions(rid, first):
     assert dict(_rows(TABLE))[rid].split(",")[0] == first
 

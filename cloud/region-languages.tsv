@@ -2,19 +2,24 @@
 # tests/test_region_languages.py checks that every registry row has one).
 # Columns (tab-separated):
 #   id	languages
-# languages = the region's own languages, most used first, comma-separated
-# ISO 639 codes (ISO 639-1 where there is one): what its signs and OSM's
-# `name` tags are written in. A multi-country region lists its countries'
-# official languages, largest first. A language-ready build
-# (STREETZIM_ML_TILES=1, docs/language-ready.md) records the row in
-# map-config.json as regionLanguages; nothing else reads it yet.
+# languages = the languages of the region, comma-separated ISO 639 codes
+# (ISO 639-1 where there is one), largest first. Largest means the most
+# speakers, first and second language together, living in what the region's
+# ZIM covers: its outline where cloud/region-outlines.tsv clips it, else its
+# whole box, neighbours included (central-asia's box reaches Beijing and
+# Delhi, so zh and hi lead it). Counts are rough (census and Ethnologue
+# orders of magnitude). The list holds every national or official language
+# of a country in the region, and other languages with millions of speakers
+# there. A language-ready build (STREETZIM_ML_TILES=1,
+# docs/language-ready.md) records the row in map-config.json as
+# regionLanguages; the viewer reads it for label order.
 silicon-valley	en
 washington-dc	en
 hawaii	en,haw
 chicago-metro	en
 nyc-metro	en
 greater-la	en
-hispaniola	es,fr,ht
+hispaniola	ht,es,fr
 colorado	en
 florida	en
 carolinas	en
@@ -33,30 +38,30 @@ argentina	es
 mexico	es
 brazil	pt
 baltics	lt,lv,et
-caucasus	ka,hy,az,ru,tr
-himalayas	ne,hi,zh,bo,dz,ur
+caucasus	az,ru,tr,ka,hy,ku
+himalayas	hi,ur,pa,ne,bn,zh,bo,dz
 central-america-caribbean	es,en,fr,ht
 pacific-islands	en,tpi,fr,fj,bi,ho
 west-africa	en,fr,pt
 southern-africa	en,pt,af,zu
-east-africa	sw,en,am,so,rw,rn,fr
+east-africa	sw,am,om,en,so,rw,rn,fr
 korea-mongolia	ko,mn
-west-asia	ar,fa,tr,he,ps,ur,el
-central-asia	kk,uz,ru,ky,tg,tk,fa,ps
+west-asia	ar,fa,tr,ku,az,he,ps,el,ur
+central-asia	zh,hi,ur,fa,bn,ar,uz,ps,ru,ne,kk,az,tg,ky,tk,ka,hy,mn,ku
 central-us	en
 west-coast-us	en
 midwest-us	en
 east-coast-us	en
-southeast-asia	id,vi,th,tl,my,ms,km,lo
+southeast-asia	zh,id,vi,tl,th,en,my,ms,km,lo,tet,pt
 australia-nz	en,mi
 canada	en,fr
-indian-subcontinent	hi,en,bn,ur,ta,te,mr,ne,si
+indian-subcontinent	hi,bn,ur,en,mr,te,ta,ne,si
 china	zh
 africa	ar,fr,en,pt,sw,am
 south-america	es,pt,en,nl,fr
 russia	ru
 united-states	en
-europe	ru,de,tr,fr,en,it,es,pl,uk,ro,nl,el,cs,hu,sv,pt,be,bg,sr,az,da,fi,sk,no,hr,ka,hy,sq,lt,sl,mk,bs,lv,et,ga,is,lb,mt
+europe	ru,de,tr,fr,en,it,es,pl,uk,ro,nl,el,hu,cs,sv,pt,ca,be,bg,sr,az,da,fi,sk,no,hr,ka,hy,sq,lt,sl,mk,bs,lv,et,ga,is,lb,mt,rm
 france	fr
 germany	de
 britain-ireland	en,cy,ga,gd,gv
@@ -73,8 +78,8 @@ switzerland	de,fr,it,rm
 switzerland-nosat	de,fr,it,rm
 switzerland-nosat-z13	de,fr,it,rm
 switzerland-light	de,fr,it,rm
-north-africa	ar,fr
+north-africa	ar,fr,zgh,es,it,mt
 central-africa	fr,pt,en,sw,ln,ar,es
-horn-of-africa	am,so,sw,en,ti,ar,fr
+horn-of-africa	am,om,so,sw,en,ti,ar,fr
 east-polynesia	fr,ty,en
 africa-light	ar,fr,en,pt,sw,am
